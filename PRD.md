@@ -22,7 +22,7 @@ Vocabulary (ELK's): a **short hierarchical edge** crosses one boundary; a **long
 
 ## 2. Non-goals
 
-- **No runtime.** No event dispatch, no semantics, no notion of a triggering event (§7). Holds for live highlighting too (§13): the host computes what is active.
+- **No runtime.** No event dispatch, no semantics, no notion of a triggering event (§7.1). Holds for live highlighting too (§13): the host computes what is active.
 - **No semantic validation.** Reachability, determinism, ambiguity: out. Structural integrity only (§10).
 - **No SCXML in core.** Not a source of truth, not required for interop. It ships as a *plugin* (§8.2), the worked example of the extension boundary.
 - **No appearance.** scav owns geometry and the `DrawList` vocabulary; what things look like is the application's (§3).
@@ -48,7 +48,7 @@ Vocabulary (ELK's): a **short hierarchical edge** crosses one boundary; a **long
 
 **What the application owns:** how it organizes its builder, what else it draws, and the imperative render function that turns a `DrawList` into ImGui calls, SVG text, a PDF stream, or anything else.
 
-Pipeline. Everything below layout is a pure function of its inputs.
+Pipeline. Layout and everything after it is a deterministic function of its inputs.
 
 ```
 app: measure content -> space requests    (uses scav text metrics)
@@ -77,7 +77,7 @@ Applications, each supplying (or reusing) a builder and a backend:
 
 | App | Is |
 |---|---|
-| `scav` | CLI: `render`, `layout`, `fmt`, `gen`, `check` |
+| `scav` | CLI: `render`, `layout`, `fmt`, `gen`, `check`, `mv` |
 | `scavview` | ImGui viewer [P7]. Embeds Lua so users can script appearance without rebuilding it (§8.3) |
 | *yours* | e.g. an enemy-AI editor: links core+layout+draw, writes a builder that also draws threat radii, writes its own ImGui backend. No scav change required |
 
@@ -162,7 +162,7 @@ The bar for a discouraged construct is that a reader can still follow control fl
 
 **`scav_byte` is `unsigned char`, not `uint8_t`.** Only `char`, `unsigned char`, and `std::byte` may alias an object representation. `std::uint8_t` is usually a typedef for `unsigned char` but is not required to be; byte inspection through it is UB if it isn't. `char8_t` is also not a byte type. Not `std::byte`: no arithmetic operators, and the C ABI needs `unsigned char` anyway. Used for the string pool, blob columns, file buffers, font buffers, and every byte-level ABI surface.
 
-**Runtime polymorphism has exactly two permitted sites:** the internal router vtable (§11.5, a POD struct of function pointers, never crossing the C ABI) and editor commands. Everywhere else: static selection, separate binaries, or link-time choice.
+**Runtime polymorphism has exactly one permitted site:** the internal router vtable (§11.5, a POD struct of function pointers, never crossing the C ABI). The P9 editor may add a second if the command-buffer mechanism wins over arena snapshots (§17). Everywhere else: static selection, separate binaries, or link-time choice.
 
 ### 4.1 Data structure discipline
 
@@ -200,7 +200,7 @@ Intrusive access instead:
 
 Because all layout arithmetic is integer, inlining cannot change results: the `testable` build must produce byte-identical output to release. It is a row in the determinism matrix. Divergence means UB, and the divergence is the bug report.
 
-Required test classes: **unit** (every internal function, doctest) · **functional** (full pipeline over the corpus) · **golden** (canonical serialization, structural hash, coordinate hash, SVG, ABI JSON) · **property** (round-trip identity, all refs resolve, zero box overlap, zero edge-through-box, surrogate cost ranks like exact cost) · **determinism** (§6) · **sanitizer** (UBSan signed-overflow+shift, ASan, TSan, MSan) · **fuzz** (deserializer and reference resolver — untrusted input) · **binding** (drive the C ABI from Python/ctypes in CI) · **baseline** (§11.12) · **regression** (every fixed bug leaves a test).
+Required test classes: **unit** (every internal function, doctest) · **functional** (full pipeline over the corpus) · **golden** (canonical serialization, structural hash, coordinate hash, **`DrawList`** — the primary surface, §12 — plus a thin SVG serializer check, ABI JSON) · **property** (round-trip identity, all refs resolve, zero box overlap, zero edge-through-box, surrogate cost ranks like exact cost) · **determinism** (§6) · **sanitizer** (UBSan signed-overflow+shift, ASan, TSan, MSan) · **fuzz** (deserializer and reference resolver — untrusted input) · **binding** (drive the C ABI from Python/ctypes in CI) · **baseline** (§11.12) · **regression** (every fixed bug leaves a test).
 
 Measure branch coverage; an untested file fails the build. No percentage target.
 
@@ -218,7 +218,7 @@ Odd and prime thread counts are mandatory — they expose reduction-shape bugs p
 
 **Rules:**
 
-- **Integer only in `measure` and `layout`.** Float appears only in the renderer's geometry, and never in emitted text (§12).
+- **Integer only in the metrics helper and `layout`.** The space tables are `int32_t` by construction. Float appears only in a backend's geometry, and never in emitted text (§12.1).
 - Shard count is a **pure documented function of the model**. Never `hardware_concurrency()`, never tunable. Shards are work items; worker count never affects results.
 - Randomness is **stateless and position-addressed**: `rnd(seed, phase, item_index, step)` via the splitmix64 finalizer. **Never** a per-shard stream and **never** keyed on shard index — that would couple output to the decomposition.
 - Synthesized ids derive from a **global stable key**, never from shard ranges. Per synthesized kind: port = `(compound_state, side, transition, crossing_depth)`; split segment = `(transition, segment_ordinal)`; label dummy = `(transition, rank)`; routing-graph node = rank under a total sort on `(x, y, plane, kind)`.
@@ -253,9 +253,9 @@ C++20's P0907 fixed two's-complement *representation* but kept signed overflow U
 
 **Scope of this section: anything that can reach layout geometry or rendered output.** A structure that only ferries data inside one call — never iterated, never hashed into output, never consulted by layout — is outside it. `std::unordered_map` is the right choice for such a case: flat, fast, and deterministic *by usage*, because a key lookup has no order and the hash value never escapes as a bucket index.
 
-Enforce that structurally rather than by review: wrap it in a `lookup_map<K,V>` that exposes `find`/`at`/`insert` and **no `begin()`/`end()`**. Then "never iterated" is a compile error rather than a convention — the same trick as `sol_state_guard` making unsynchronized access impossible instead of forbidden.
+Enforce that structurally rather than by review: wrap it in a `lookup_map<K,V>` that exposes `find`/`at`/`insert` and **no `begin()`/`end()`**. Then "never iterated" is a compile error rather than a convention — making the wrong thing a compile error rather than a review comment.
 
-**Golden hash:** cold-start `polish`, no prior layout, `w_st = 0`. Split into a **structural hash** (ranks, orders, port assignments, bend sequences) and a **coordinate hash**, so a translation-only change is a reviewable diff instead of a global reflow. `quick` is deterministic over the pair `(model, prior_layout)`; both are hashed inputs. Font identity and version, profile id, packer choice, and router name and version are all hashed inputs.
+**Golden hash:** cold-start `polish`, no prior layout, `w_st = 0`. Split into a **structural hash** (ranks, orders, port assignments, bend sequences) and a **coordinate hash**, so a translation-only change is a reviewable diff instead of a global reflow. `quick` is deterministic over the pair `(model, prior_layout)`; both are hashed inputs. Hashed inputs: font identity and version, profile id, packer choice, router name and version, **and the space-request columns** — layout is a pure function of those, so goldens are reproducible only against a stated measurement policy. The corpus goldens use the reference builder's.
 
 ## 7. Data model
 
@@ -331,11 +331,21 @@ struct Project {
 };
 ```
 
-**Id stability is append-only with tombstones plus a generation counter.** `StateId` is both ordinal and array index, so compaction would invalidate every prior layout, every overlay attachment, and the `w_st` stability term — turning it into a churn *maximizer*. Deletion tombstones (`gen = 0`); ids are never reused; **all columns tombstone in lockstep**. Compaction is an explicit operation and an output change, versioned like a weight change.
+**Id stability is append-only with tombstones plus a generation counter.** `StateId` is both ordinal and array index, so compaction would invalidate every prior layout, every app-side column keyed by `StateId`, and the `w_st` stability term — turning it into a churn *maximizer*. Deletion tombstones (`gen = 0`); ids are never reused; **all columns tombstone in lockstep**. Compaction is an explicit operation and an output change, versioned like a weight change.
 
-**Derived, never authored, never serialized:** name→id and path→id indices; state→in/out edges; containment depth; LCA table; per-transition boundary-crossing count, long-hierarchical flag, and submachine-crossing flag; each submachine's initial state; and **the geometry columns layout writes** (§11).
+**Three column classes, not two.** Conflating the last two is a licensed determinism break, so they are named separately:
 
-The authored/derived split is what lets layout write into the model without endangering round-trip stability: canonical output and the format hash cover authored columns only. A layer may write derived columns; nothing but the builder API and the editor may write authored ones.
+| Class | Serialized | Hashed | Container | Written by |
+|---|---|---|---|---|
+| **authored** | yes | format hash | columnar POD | builder API, editor |
+| **derived-persistent** — the geometry columns layout writes | **no** | **layout hash**, by explicit allowlist (§11.7a) | **columnar POD; tombstones in lockstep** | layout only |
+| **derived-scratch** — name→id and path→id indices, state→in/out edges, containment depth, LCA table, per-transition crossing counts and flags, each submachine's initial state | no | no | §4.1 convenience; `lookup_map` where lookup-only | anyone, rebuilt freely |
+
+Only **derived-scratch** gets §4.1's container latitude. Geometry is hashed and read across frames, so it is columnar POD like authored data — putting route polylines in a `lookup_map` and iterating it for the coordinate hash is exactly the §6 failure that would otherwise be permitted here.
+
+`ColumnDesc` carries a `derived` flag (§8). The serializer skips derived columns, and they are **exempt from the round-trip-unknown-columns rule** — otherwise geometry survives a save as an unversioned `PriorLayout`, bypassing §11.11's invalidation and silently making a `quick` result authoritative.
+
+**Derived column names live outside `Chart.strings`.** Registering `scav.geom.box` must not intern into the authored pool: §7's canonicalizer re-interns that pool before hashing, so an interned descriptor name would make every authored `StrRef` offset — and the format hash — depend on whether layout had run.
 
 These are transient scratch, so their container choice is a convenience decision per §4.1 — `lookup_map` where lookup-only, a sorted vector where order matters. They are rebuilt rather than persisted, so nothing about them reaches serialization or the layout hash.
 
@@ -373,10 +383,11 @@ enum class EntityKind : uint32_t { state, submachine, transition, chart };
 enum class ValueKind  : uint32_t { u32, i32, u64, i64, strref, span, blob };
 
 struct ColumnDesc {
-  StrRef     name;         // "libhsm.events", "scxml.onentry"
-  EntityKind entity;
-  ValueKind  kind;
-  uint32_t   elem_size, elem_align;
+  char const* name;        // "libhsm.events", "scxml.onentry", "scav.geom.box"
+  EntityKind  entity;
+  ValueKind   kind;
+  uint32_t    elem_size, elem_align;
+  bool        derived;     // §7: skipped by the serializer, exempt from round-trip-unknown
 };
 struct Column { ColumnDesc desc; std::vector<scav_byte> bytes; };  // count * elem_size
 ```
@@ -388,7 +399,7 @@ Type-erased byte arrays with a stride, indexed by entity ordinal. C ABI is `scav
 1. Store it, indexed by entity ordinal; keep it index-aligned under mutation and tombstoning.
 2. **Round-trip it losslessly, including unknown columns** — otherwise an older build silently strips a colleague's data on save. `ValueKind` has a declared wire encoding; `blob` is length-prefixed, little-endian.
 3. **Pass it through unread.** `layout` never reads extension data.
-4. Let it contribute visible content (§8.1).
+4. Let it contribute **space requests** (§8.1) and a builder function the app may call (§8.2).
 5. Expose `ColumnDesc` so an editor can present unknown columns generically.
 
 Columns are canonically ordered by name bytes, never by registration order. Attributes reserve the `scav:` namespace for core-meaningful keys; unprefixed keys belong to the user. Values are strings on disk with typed accessors; `--strict-attrs` checks a known-key registry, since a typo is otherwise silent forever.
@@ -406,7 +417,7 @@ The contract is derived from one question: **what geometric problem can only lay
 | size a box so its interior fits both app content and packed submachines | submachine sizes come from layout |
 | slide a rect along a route to its best fit | the route does not exist until layout routes it |
 
-So there are two tables of plain integers, no variant and no enum:
+So there are **three tables** of plain integers — one per box, two per path — with no variant and no enum:
 
 ```cpp
 // per state / submachine — a column, parallel to the entity
@@ -426,7 +437,28 @@ struct PathBox {          // 0..N per transition; layout slides these along the 
 };
 ```
 
-Layout returns, as columns: the box; the resolved `content_before` and `content_after` rects; route polylines; and a `Placed` array parallel to `PathBox`. **The app draws its title, badges, and compartments wherever it likes inside `content_before`. Layout never learns what a title is.**
+**Domain, validated at `scav_layout_run` entry in every build** — not "in release builds", or Debug and Release disagree about which inputs are legal:
+
+```
+0 <= min_w, h_before, h_after <= kCoordMax      // §11.2
+0 <= PathBox.w, PathBox.h     <= kCoordMax
+0 <= PathClear.src, .dst
+PathBox.order unique per subject
+```
+
+Reject with a diagnostic, never clamp. Unbounded `int32_t` overflows §11.4's box formula into signed UB — which §6 notes optimizers exploit, so Debug and Release diverge rather than both being wrong — and a negative `h_before` inverts a box, breaking the half-open-rect invariant and every orientation predicate.
+
+**Space requests must be a pure integer function of `(model, profile, scav metrics)`.** The app is now inside the determinism-critical path, and nothing otherwise forbids `min_w = int32_t(title.w * 1.15f)`, which differs under FMA contraction across x86, ARM, and wasm. A digest of the three tables is therefore a hashed input (§6): a non-conforming app fails the existing golden instead of silently drawing a different diagram.
+
+**`PathBox.order` is unique per transition and part of the placement key** — `(transition, order, strip, slide_offset)` (§11.9). Without it two boxes on one transition fall back to array position, which is the app's insertion order.
+
+**Outputs.** Layout writes the geometry columns enumerated in §11.7a, plus a `Placed` array parallel to `PathBox`:
+
+```cpp
+struct Placed { int32_t x, y, w, h; };   // root-absolute; w/h may exceed the request
+```
+
+**The app draws its title, badges, and compartments wherever it likes inside `content_before`. Layout never learns what a title is.**
 
 ```cpp
 // before layout — the app measures and sums; composition is app-side
@@ -541,7 +573,7 @@ Semantic lint is out of scope. Identifier-sanitization collision checks belong t
 
 ## 11. Layout
 
-Isolated static library, imperative entry, POD out, never mutates the model.
+Isolated static library, imperative entry, POD in. Writes **derived** geometry columns only and never authored data (§7).
 
 Scale target: **2k states, 5k transitions, depth 16.**
 
@@ -612,7 +644,14 @@ Sizes bottom-up; port positions and hints top-down; fixed pass count.
 
 Submachine size composition (Castelló et al., JGAA 6(3), 2002): **width = Σ over layers of (max width in layer); height = max over layers of (Σ heights in layer)**.
 
-Composite state box: `w = max(header_w, packed_subs_w) + 2*pad`, `h = header_h + packed_subs_h + 2*pad`. Pseudostates are a fixed small size class.
+Composite state box, from the requesting entity's `BoxSpace` (§8.1):
+
+```
+w = max(min_w, packed_subs_w) + 2*pad
+h = h_before + packed_subs_h + h_after + 2*pad
+```
+
+`pad` is a profile field (§11.15). A state with no space request uses an all-zero `BoxSpace`, so its box is `max(pseudostate_min, packed_subs)` — see §11.15 for the pseudostate size constants, which are profile fields rather than hardcoded, since a fork bar's length must scale with its arity.
 
 **Sibling submachines are packed here, not in phase 1** — packing requires the siblings already sized. **LR-rectpacking** (Domrös et al., IVAPP 2021): greedy width approximation → placement → compaction → whitespace elimination, `O(n log n)`. Take the LR variant; plain rectpacking's one-oversized-child special case was deleted by its own authors as unmaintainable and aspect-ratio-blind.
 
@@ -626,7 +665,7 @@ Not top-down layout: its central size-approximation problem is unsolved by its o
 
 ### 11.5 Phase 3 — routing
 
-Axis-aligned is a **hard constraint**. States, submachine rectangles, and notes are obstacles, so Tier-0 edge-through-box is unrepresentable rather than penalized.
+Axis-aligned is a **hard constraint**. States, submachine rectangles, and placed boxes are obstacles, so Tier-0 edge-through-box is unrepresentable rather than penalized.
 
 Routing graph is an **orthogonal visibility graph** or a **channel-representative graph** (Hegemann & Wolff, GD 2023, arXiv:2309.01671). At per-submachine scale (n≈20–50) both are cheap: **choose on quality and implementation simplicity, not asymptotics.** Published full-OVG scaling failures (~30 min at 4,330 obstacles) apply only to the degenerate flat chart — one submachine holding 2k states, which is legal input. Keep a sparse graph available for that path.
 
@@ -654,7 +693,7 @@ struct Cost {                 // compared lexicographically, in this order
 };
 ```
 
-**Tier 0 — forbidden, not priced.** Edge through a state box, submachine box, or note; box-box overlap. Structurally impossible via the obstacle set. The predicate survives as a net for three cases: the straight-line **surrogate** during search; **degenerate enclosure** (a state with no free channel — inflate spacing by a fixed integer increment, capped, then diagnostic); and a marked violation with a stable code if retries exhaust. Never a silent overlap.
+**Tier 0 — forbidden, not priced.** Edge through a state box, submachine box, or placed box; box-box overlap. Structurally impossible via the obstacle set. The predicate survives as a net for three cases: the straight-line **surrogate** during search; **degenerate enclosure** (a state with no free channel — inflate spacing by a fixed integer increment, capped, then diagnostic); and a marked violation with a stable code if retries exhaust. Never a silent overlap.
 
 **Tier 2 —** every weight is an integer with a documented ceiling, and the sum's bound is proven against §11.2:
 
@@ -682,6 +721,26 @@ At depth 16 a literal polyline crossing 15 boundaries is unreadable. The hatch i
 
 Precedent when needed: **UML 2.5.1 §15.2.4** ActivityEdge connector supplies the exact contract — "purely notational", "does not affect the underlying model", exactly-one matching pair. **SDL / ITU-T Z.100** §2.6.7, §2.6.8.2.2 standardizes it inside a state-machine language with a textual dual. Also BPMN 2.0 Link Events, Simulink Goto/From, KiCad/Altium net labels, Castelló et al.'s GOTO nodes. UML deliberately gives state *transitions* no such notation, so this fills a real notational gap. A scav connector must be semantically inert.
 
+### 11.7a Geometry columns — the layout output contract
+
+Enumerated normatively, because this list *is* the layout output ABI (§16 deleted the bespoke result type in favour of columns) and every builder consumes all of it. All are `derived`, all root-absolute grid units, all `derived-persistent` per §7.
+
+| Column | Parallel to | Holds |
+|---|---|---|
+| `scav.geom.state` | `StateId` | box rect |
+| `scav.geom.state_before` | `StateId` | `content_before` rect |
+| `scav.geom.state_after` | `StateId` | `content_after` rect |
+| `scav.geom.sub` | `SubmachineId` | submachine rect — needed for dividers and titles |
+| `scav.geom.route` | `TransId` | `Span` into `scav.geom.point` |
+| `scav.geom.point` | point ordinal | `{int32 x, y}` |
+| `scav.geom.port` | `TransId` | src and dst port coordinate + side |
+| `scav.geom.chart` | chart | root bounding box |
+| `scav.geom.gen` | chart | generation counter (§13) — **not hashed, not serialized** |
+
+`EntityKind` gains `point` so the point array is a real column rather than a side array outside the column rules; its entity count is the column length. `Placed` stays an out-param because `PathBox` is 0..N per transition and cannot be a dense per-entity column.
+
+**Hashing is by explicit allowlist, not by enumerating `Chart.columns`** — otherwise app and plugin columns perturb scav's own goldens, and the same corpus hashed through `scav` and through `scavview` would differ. The **structural hash** covers ranks, orders, port sides, and bend sequences *as direction-turn tokens*; the **coordinate hash** covers the rects and point coordinates. Turn tokens rather than points is what makes a pure translation move the coordinate hash and not the structural one, which is the whole point of the split.
+
 ### 11.8 Transitions between concurrent submachines
 
 Supported; arbitrary topologies must be. **Drawn as a direct arrow**, not routed up through the parent — the semantics are parent-mediated (exit to just below the owning ancestor state, re-enter the source submachine at its default initial configuration, enter the target along the path from the LCA) but **the geometry does not follow the execution path.**
@@ -696,7 +755,7 @@ A direct arrow wants its two submachines **adjacent**; a third submachine betwee
 
 ### 11.9 Text metrics and labels
 
-**Measurement is the application's; the metrics are scav's.** An app sizes its own content and fills the space tables (§8.1), but it must use scav's metrics helper so that the builder, the backend, and layout cannot disagree about how wide a string is. One implementation, every consumer.
+**Measurement is the application's; the metrics are scav's.** An app sizes its own content and fills the space tables (§8.1), but it must use **one** metrics implementation shared by its measurement pass, its builder, and its backend — scav's by default — so those three cannot disagree about how wide a string is. Substituting a shaping engine (§11.9.2) means substituting it for all three.
 
 Three coordinate spaces, two conversions, each in one place:
 
@@ -716,7 +775,7 @@ Font size is a profile parameter, and integer rounding is nonlinear, so changing
 
 **Wrap width is always an input, never an output.** The forbidden circularity is height→width→placement→height, which would need a per-box shape function and a fixpoint. An app may wrap to any width it chooses — it is measuring, so it decides — but layout never re-wraps. Rationale for author-controlled breaks in the format (§15): identifier text must break at semantic boundaries rather than a pixel column, and fixed line counts keep layout stable under font-size change.
 
-**Labels routinely dominate transition length. That is a constraint, not a pathology.** `min_len(e) = max(geometric_min, sum of the transition's `PathBox` extents)`, a hard sizing input. `w_len` charges **excess only** (§11.6) — charging raw length makes the optimizer fight an unwinnable constraint and cram everything else. Rank separation grows via label dummy nodes (§11.3).
+**Labels routinely dominate transition length. That is a constraint, not a pathology.** ``min_len(e) = max(geometric_min, sum of the transition's PathBox widths along the route)``, a hard sizing input. `w_len` charges **excess only** (§11.6) — charging raw length makes the optimizer fight an unwinnable constraint and cram everything else. Rank separation grows via label dummy nodes (§11.3).
 
 **Placing a `PathBox`** is Kakoulis & Tollis strip matching: slice into strips sized to the tallest box, slide candidates until they touch their route, keep those overlapping nothing. Candidate order is `(transition, strip, slide_offset)`; matching components process in ascending minimum candidate key. Edge label placement is NP-hard, so this is a heuristic. On failure, trigger a bounded rip-up-and-reroute of that one edge (§11.5).
 
@@ -730,7 +789,7 @@ Three traps: the **`numberOfHMetrics` tail rule** (the last record's advance app
 
 #### 11.9.2 RTL and complex scripts — not v1, not blocked
 
-Arabic advance widths are not the sum of per-codepoint `hmtx` values (mandatory cursive joining via `GSUB`, ligatures collapsing codepoints). The would-be show-stopper — measurement as a callback inside layout — is already avoided: `measure` is a separate POD-producing pass, so the fix is to **replace that one pass** with a shaping engine (`hamza`, MIT; or HarfBuzz, "Old MIT" — both deterministic). Do not undo that split.
+Arabic advance widths are not the sum of per-codepoint `hmtx` values (mandatory cursive joining via `GSUB`, ligatures collapsing codepoints). The would-be show-stopper — measurement as a callback inside layout — is already avoided: the metrics helper is a separate POD-producing entry point, so the fix is to **swap that helper** for a shaping engine (`hamza`, MIT; or HarfBuzz, "Old MIT" — both deterministic). Do not undo that split.
 
 Watch four things: `textLength` must become conditional (`lengthAdjust="spacing"` breaks cursive joining, so RTL leans on `--embed-font`); ignoring kerning degrades from a few percent to absurdly wide; byte-wise collation means codepoint-order sort; bidi (UAX #9) belongs in `measure` and `render` only — the pool stores logical order, which is correct.
 
@@ -771,6 +830,24 @@ The likeliest failure is producing layouts that score well on `Cost` and that re
 
 **A side-by-side harness ships at P2**: the same chart through `dot -Tsvg`, elkjs, and scav. Blind scored review of the corpus at the P3 and P4 gates. Exit criterion is **"no worse than the incumbent on the transcribed corpus"** — not "visually reasonable."
 
+### 11.15 The profile
+
+A versioned, hashed artifact (§6), so it needs a field list rather than thirteen scattered references. All integers.
+
+| Group | Fields |
+|---|---|
+| geometry | `pad`, `grid_subdiv` (16), `emphasis_margin` |
+| type | `font_size_grid`, `line_height_k_num`/`_k_den` (`k_den >= 1`) |
+| pseudostate sizes | per-`StateKind` min extent; the fork/join entry is a *per-arity* length, since a bar is not a fixed small box |
+| packing | `dar_num`/`dar_den` (each in `[1, 2^10]`), `trybox`, SM tiebreak order, hysteresis threshold |
+| cost | the nine Tier-2 weights, each with a ceiling that keeps `Σ Tier-2` inside §11.2's budget |
+| search | portfolio `K`, sweep count, congestion iterations, rip-up cap, spacing-inflation cap and increment |
+| id | `profile_id`, `profile_version` |
+
+Profile load **validates every bound and rejects out of range**. Two consequences the earlier draft asserted without supplying: weight ceilings exist so the Tier-2 sum has a proven bound, and `dar_num` is bounded so `total_area * dar_num` cannot overflow before `isqrt`.
+
+Named profiles ship as data: `compact`, `readable`. There is no `print` profile — fit-to-page would need the top-down layout §11.4 rejects.
+
 ### 11.13 Rejected
 
 **Topology-shape-metrics.** Requires planarity (statecharts are routinely non-planar; planarization is NP-complete and the literature's practical ceiling is "a few hundred vertices"); compound nesting is not in the model and the bolt-on rests on c-planarity, open from 1995 until a JACM 2022 result; the pipeline chains three NP-hard problems with documented quality failure (excess bends, area blowup); HOLA explicitly replaces it and CoDaFlow rejected it for compound-plus-ports diagrams specifically. Keep only compaction by topological numbering (§11.2).
@@ -783,7 +860,7 @@ The likeliest failure is producing layouts that score well on `Cost` and that re
 
 ### 11.14 Transition kind — internal, external, local
 
-`TransKind` is a **first-class layout and rendering input**, not passthrough metadata. Implementations attach materially different runtime semantics to it — under libhsm, `internal` means the source state is neither exited nor re-entered, `external` means it is exited and re-entered — so a renderer that draws them identically produces a diagram that is wrong about behavior. scav does not interpret the semantics; it must preserve and depict the distinction.
+`TransKind` is a **first-class layout and rendering input**, not passthrough metadata. Implementations attach materially different runtime semantics to it — under libhsm, `internal` means the source state is neither exited nor re-entered, `external` means it is exited and re-entered — so a renderer that draws them identically produces a diagram that is wrong about behavior. scav does not interpret the semantics; it preserves the distinction and gives layout the one fact that follows from it.
 
 **The layout-relevant rule, stated without semantics: `kind` decides whether the arrow crosses the source state's border.**
 
@@ -797,11 +874,10 @@ The likeliest failure is producing layouts that score well on `Cost` and that re
 
 Consequences:
 
-- **Phase 0 (§11.1) suppresses the source-boundary split** for `internal` and `local`. One fewer segment, one fewer port. The derived boundary-crossing count (§7) must reflect this, or `w_len`'s depth weight and `w_seg` miscount.
+- **Phase 0 (§11.1) suppresses the source-boundary split** for `internal` and `local`. One fewer segment, one fewer port. The derived boundary-crossing count (§7) must reflect this, or `w_len`'s depth weight miscounts.
 - **Tier 0 (§11.6) carve-out:** an edge may occupy the interior of a state whose border it does not cross, and **only** that state. Every other state and submachine rectangle remains an obstacle.
-- **A state with internal self-transitions reserves an interior band**, sized by their count and label footprint, requested by the app as `h_before`/`h_after` interior space (§8.1). The band must not collide with the header (simple states) or the packed submachine area (composite states), so it is a distinct term in the box-size composition of §11.4.
-- **Internal self-loops are a fixed glyph placed in that band**, not a routing problem. The router is not involved; there is no free-space search and no nudging.
-- **Rendering must visually distinguish the three kinds** (§12), and the distinction is part of the golden-image comparison.
+- **Internal self-loops are the app's, end to end.** The app sums the band it needs into `h_before`/`h_after` and its builder draws the glyphs inside the returned `content_before`/`content_after` rect. There is no route, so `PathBox`/`PathClear`/`min_len` do not apply and the router is not involved. Layout sees only two integers.
+- **The reference builder distinguishes the three kinds**, pinned in the `drawlist/` golden. scav cannot mandate what a custom builder draws (§2, §3) — but a builder that draws them alike produces a diagram that is wrong about behavior.
 
 ## 12. `DrawList` and rendering
 
@@ -856,7 +932,7 @@ Three rules that do belong to scav:
 
 For a running target pushing events over a socket or UART: the app opens the socket, buffers asynchronously on its own thread, decodes with its plugin, and each frame folds the event window into the colors it passes to its builder.
 
-**scav defines no event vocabulary.** There is no `kind == "entered"` or `"took"` — runtime semantics are exactly what scav does not model, and the real space is far larger than any schema scav could guess: entered-via-history, guard-evaluated-false, choice-resolved, region-forked, deferred-event-consumed. Every dialect differs and the meaning lives in the plugin.
+**scav defines no event vocabulary.** There is no `kind == "entered"` or `"took"` — runtime semantics are exactly what scav does not model, and the real space is far larger than any schema scav could guess: entered-via-history, guard-evaluated-false, choice-resolved, submachine-forked, deferred-event-consumed. Every dialect differs and the meaning lives in the plugin.
 
 Immediate-mode makes the result testable: appearance is a pure function of `(events, now)`, so feeding a recorded log with a fixed `now` reproduces a frame exactly. That property is why a retained decay was rejected.
 
@@ -903,15 +979,16 @@ Key entry points:
 ```c
 scav_result scav_layout_run(scav_chart*, const scav_spaces*,
                             const scav_hint_table*, const scav_prior_layout*,
-                            const scav_layout_opts*, scav_placed* out_placed);
+                            const scav_layout_opts*,
+                            scav_placed* out_placed, uint32_t cap, uint32_t* out_count);
 // geometry lands in derived columns, read with the ordinary column accessor:
 scav_result scav_column_data(const scav_chart*, scav_column_id,
                              const scav_byte** out, uint32_t* stride);
-scav_result scav_measure_text(const scav_metrics*, const char*, uint32_t len,
+scav_result scav_measure_text(const scav_metrics*, const scav_byte* utf8_nfc, uint32_t len,
                               int32_t font_size_grid, scav_extent* out);
 scav_result scav_image_register(scav_ctx*, const char* id, const scav_byte*, uint32_t len,
                                 int32_t w, int32_t h, const char* mime);
-scav_result scav_router_by_name(const char*, scav_router_id* out);
+scav_result scav_router_by_name(const scav_byte* name, uint32_t len, scav_router_id* out);
 ```
 
 **There is no bespoke layout-result type.** An earlier draft specified a `scav_layout_pod` with per-edge spans into a points array — a variable-length-within-variable-length structure that was awkward to describe and worse to bind. Writing geometry into derived columns removes it: edge polylines are a `Span` into a points column, which is *already* the model's idiom, so layout output stops being a parallel structure and becomes more of the same one.
@@ -929,7 +1006,7 @@ Estimates below are production LOC; multiply by 1.5–2 for the mandated test cl
 **P0 — core.** Columnar aggregates, tombstoned ids, extension columns, string pool with two-pass interning, NFC normalization, path addressing and cross-document resolution, includes with cycle detection, structural validation, JSON read/write with canonical printer, append-only builder API, ABI JSON extraction, doctest harness. Plus the **synthetic chart generator** and **2–3 hand-transcribed real charts** — synthetic graphs have uniform branching and no accidental structure, so tuning on them alone is a trap. Determinism discipline (§6) is in force from the first commit; it cannot be retrofitted.
 *Exit:* round-trip a depth-16 / 2k-state chart byte-identically, including unknown extension columns; ABI driven from Python.
 
-**P1 — metrics, space requests, layout skeleton.** Font metrics helper, the two space tables, Phase 0 splitting, derived classification, trivial placement, straight-line routes, geometry columns. Validate the coordinate extent estimate (§11.2).
+**P1 — metrics, space requests, layout skeleton.** Font metrics helper, the space tables, Phase 0 splitting, derived classification, trivial placement, straight-line routes, geometry columns. Validate the coordinate extent estimate (§11.2).
 *Exit:* geometry columns populated for every chart, no overflow at depth 16.
 
 **P2 — `DrawList`, reference builder, SVG backend, baseline harness.** The `DrawList` type, a builder covering standard appearance, the SVG backend with integer body and single `viewBox`, `textLength`, per-element classes, golden harness, and the `dot`/elkjs/scav side-by-side (§11.12).
