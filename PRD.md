@@ -394,7 +394,9 @@ Fork/join is the case that most tempts scav into having an opinion, so the bound
 
 Different projects answer these differently and will collide. scav answers none of them. **It must nonetheless be able to draw every one of these topologies**, which it can, because all of them are a pseudostate plus transitions.
 
-**The bar is not in the model, and layout does nothing fork-specific.** A fork/join pseudostate is a small box like any other pseudostate. Layout places it and routes N edges. **The builder synthesizes the bar after layout**, spanning the origins of the routes it can now see — so bar length scales with arity without anyone needing to know the arity before layout runs, and the circularity that a spanning bar would otherwise create never appears. Bar thickness, cap style, and whether to draw a bar at all are appearance decisions (§3.0).
+**The bar is a fixed-size box, and layout does nothing fork-specific.** A fork/join pseudostate is an ordinary small box — wide and thin — from the profile's per-`StateKind` min extent (§11.15). Layout places it and routes N edges out of it; the builder draws a filled rect. That is what PlantUML does, and it is enough: the bar is the **same size for two branches as for five**, with the routes simply fanning out, including sideways.
+
+So nothing scales with arity and there is no post-layout synthesis step. An earlier draft had the builder spanning the bar across the route origins it could see after layout — unnecessary, and it invented a coupling that the fixed-bar convention does not have. Bar orientation is likewise not scav's: an app wanting a vertical bar requests a tall narrow `BoxSpace`, which the existing mechanism already covers.
 
 **Validation is structural only** (§10): in/out degree per kind. No check that branches land in distinct submachines, no reachability, no concurrency reasoning — those are dialect rules and belong to a plugin.
 
@@ -882,7 +884,7 @@ A versioned, hashed artifact (§6), so it needs a field list rather than thirtee
 |---|---|
 | geometry | `pad`, `grid_subdiv` (16), `emphasis_margin` |
 | type | `font_size_grid`, `line_height_k_num`/`_k_den` (`k_den >= 1`) |
-| pseudostate sizes | per-`StateKind` min extent. `fork`/`join` are small boxes like the rest — the bar is synthesized post-layout by the builder (§7.2), so nothing here scales with arity |
+| pseudostate sizes | per-`StateKind` min extent. `fork`/`join` are wide-and-thin boxes; nothing scales with arity (§7.2) |
 | packing | `dar_num`/`dar_den` (each in `[1, 2^10]`), `trybox`, SM tiebreak order, hysteresis threshold |
 | cost | the nine Tier-2 weights, each with a ceiling that keeps `Σ Tier-2` inside §11.2's budget |
 | search | portfolio `K`, sweep count, congestion iterations, rip-up cap, spacing-inflation cap and increment |
