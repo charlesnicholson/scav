@@ -380,6 +380,24 @@ There is no event entity, no event table, no trigger. A transition carries an op
 
 Event lists, guard expressions, executable content, and source spans are **extension data** (§8). This also removes any question of event-vocabulary unification across documents.
 
+### 7.2 Fork, join, and semantic neutrality
+
+Fork/join is the case that most tempts scav into having an opinion, so the boundary is worth stating explicitly.
+
+**What the model holds:** a pseudostate of kind `fork` or `join`, and ordinary transitions. Nothing else. Arity is *derived* by counting incident edges; there is no grouping record, because the pseudostate is the grouping.
+
+**What scav does not decide.** The genuinely ambiguous questions are all dialect-specific and all out of scope:
+
+- If one branch takes an out-of-machine transition that exits a submachine still holding active forked states, do the siblings deactivate?
+- Or does any active state keep its submachine active — in which case running the submachine's exit handler is wrong?
+- Does a branch targeting a *substate* of the still-active fork's own submachine differ from one leaving it?
+
+Different projects answer these differently and will collide. scav answers none of them. **It must nonetheless be able to draw every one of these topologies**, which it can, because all of them are a pseudostate plus transitions.
+
+**The bar is not in the model, and layout does nothing fork-specific.** A fork/join pseudostate is a small box like any other pseudostate. Layout places it and routes N edges. **The builder synthesizes the bar after layout**, spanning the origins of the routes it can now see — so bar length scales with arity without anyone needing to know the arity before layout runs, and the circularity that a spanning bar would otherwise create never appears. Bar thickness, cap style, and whether to draw a bar at all are appearance decisions (§3.0).
+
+**Validation is structural only** (§10): in/out degree per kind. No check that branches land in distinct submachines, no reachability, no concurrency reasoning — those are dialect rules and belong to a plugin.
+
 ## 8. Extensibility
 
 **Why extension data lives *in* the model rather than in app-side tables.** With the application owning appearance (§3), it would be reasonable to ask why scav carries extension columns at all — the app could keep its own arrays keyed by `StateId`. Two reasons it should not, and the second is the important one:
@@ -592,7 +610,7 @@ Mandatory, in core, structural only — `layout` reads ordinals and crashes on g
 - unresolvable cross-document paths, checked at the **resolution phase** — before flattening (§9), since afterwards every reference is local
 - `Include.alias` uniqueness, and alias-vs-top-level-name collision
 - authored names must not contain the path metacharacters `/ : @ $` (§9)
-- more than one `initial` per submachine; `fork`/`join` arity (N transitions off the pseudostate; the grouping is derived from it)
+- more than one `initial` per submachine; degree per pseudostate kind — `fork` is 1-in/N-out, `join` is N-in/1-out, `choice`/`junction` are N-in/N-out. Structural only: no semantic checks (§7.2)
 - coordinate-domain violations on input (§11.2)
 
 Semantic lint is out of scope. Identifier-sanitization collision checks belong to the codegen backend, not core.
@@ -728,7 +746,7 @@ w_b    * bends                                      -- highest in tier
 w_par  * shared_corridor_overlap
 w_x    * crossings
 w_len  * Σ (excess_length * depth_weight)            -- excess over min_len(e), §11.9
-w_adj  * nonadjacent_sub_pairs_joined_by_edge     -- §11.8
+w_adj  * nonadjacent_sub_pairs_joined_by_edge     -- §11.8; excludes fork/join fan-out
 w_lbl  * label_overlaps
 w_ar   * |w_actual*dar_den - h_actual*dar_num|       -- integer aspect deviation
 w_st   * displacement_from_prior_layout
@@ -775,7 +793,7 @@ General principle: **scav draws topology, not execution paths.** Applies equally
 
 Phase 0 still splits at both submachine borders; the middle segment crosses only the separator, routed in the parent's frame by the LCA-owning submachine (§11.5).
 
-A direct arrow wants its two submachines **adjacent**; a third submachine between them means an edge crossing an unrelated submachine rectangle, which is Tier 0. `w_adj` prices non-adjacency and "reorder sibling submachines" is already a local-search move — no new algorithm. This lets a submachine-crossing transition override source order (§14), which is correct: adjacency for a real edge beats reading order for a rare one.
+A direct arrow wants its two submachines **adjacent**; a third submachine between them means an edge crossing an unrelated submachine rectangle, which is Tier 0. `w_adj` prices non-adjacency and "reorder sibling submachines" is already a local-search move — no new algorithm. **Edges incident to a fork or join are excluded from `w_adj`**: adjacency is pairwise, so a fan-out above two cannot achieve it under a linear packing, and pricing an unsatisfiable constraint distorts everything else — the same reason `w_len` charges excess only (§11.9). This lets a submachine-crossing transition override source order (§14), which is correct: adjacency for a real edge beats reading order for a rare one.
 
 **[OPEN]** whether to depict the implicit source-submachine reset (a ghost arc to its initial state). Drawing direct hides both the exit and the reset; no competitor depicts either.
 
@@ -864,7 +882,7 @@ A versioned, hashed artifact (§6), so it needs a field list rather than thirtee
 |---|---|
 | geometry | `pad`, `grid_subdiv` (16), `emphasis_margin` |
 | type | `font_size_grid`, `line_height_k_num`/`_k_den` (`k_den >= 1`) |
-| pseudostate sizes | per-`StateKind` min extent; the fork/join entry is a *per-arity* length, since a bar is not a fixed small box |
+| pseudostate sizes | per-`StateKind` min extent. `fork`/`join` are small boxes like the rest — the bar is synthesized post-layout by the builder (§7.2), so nothing here scales with arity |
 | packing | `dar_num`/`dar_den` (each in `[1, 2^10]`), `trybox`, SM tiebreak order, hysteresis threshold |
 | cost | the nine Tier-2 weights, each with a ceiling that keeps `Σ Tier-2` inside §11.2's budget |
 | search | portfolio `K`, sweep count, congestion iterations, rip-up cap, spacing-inflation cap and increment |
