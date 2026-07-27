@@ -48,6 +48,25 @@ Vocabulary (ELK's): a **short hierarchical edge** crosses one boundary; a **long
 
 **What the application owns:** how it organizes its builder, what else it draws, and the imperative render function that turns a `DrawList` into ImGui calls, SVG text, a PDF stream, or anything else.
 
+### 3.0 The test for adding anything
+
+Before adding a vocabulary, an enum, or a set of named values, ask:
+
+> **Is this describing the format, or describing the reference implementation?**
+
+If the latter, it is documentation of that implementation — not a contract. Put it in the implementation's docs and let callers pass their own values.
+
+The failure mode is consistent enough to be worth recording, because it recurred four times during this document's design. Each time scav enumerated a vocabulary for a decision the application was better placed to make, justified by a convenience that turned out to be one line of app code:
+
+| Proposed | Became |
+|---|---|
+| named appearance slots with composition axes | two integer tables (§8.1) |
+| priority ordering of contributions | the app sums before calling |
+| `decay_ms` retained in scav | the app recomputes per frame (§13) |
+| reserved depth bands | the caller passes depth (§12) |
+
+A second, related test: **a helper is a function the application calls; a framework is a function that calls the application** (§8.1.1).
+
 Pipeline. Layout and everything after it is a deterministic function of its inputs.
 
 ```
