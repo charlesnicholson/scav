@@ -264,13 +264,13 @@ Enforce that structurally rather than by review: wrap it in a `lookup_map<K,V>` 
 **Terminology: `state` and `submachine`.** A composite state contains one or more submachines; more than one makes it concurrent. Not "region" — that is UML/ELK vocabulary, and libhsm already says submachine (`*_MACHINE_ID`, `<Parent>_submachine`). Applies to the ERD, the C ABI, diagnostics, and the text format.
 
 ```cpp
-struct DocId    { uint32_t v; };   // index into Project.docs
+struct DocId    { uint32_t v; };   // include-instance provenance, not addressing (§9)
 struct StateId  { uint32_t v; };
 struct SubmachineId { uint32_t v; };
 struct TransId  { uint32_t v; };
 struct StrRef   { uint32_t off, len; };            // into StringPool
 struct Span     { uint32_t off, len; };            // into a side array
-struct StateRef { DocId doc; StateId state; };     // uniform; local refs use own doc
+// After resolution the chart is flat, so endpoints are plain StateIds (§9).
 
 constexpr uint32_t kInvalid = 0xFFFF'FFFFu;        // per-id sentinel
 
@@ -298,7 +298,7 @@ struct Submachine {
   uint32_t  gen;
 };
 struct Transition {
-  StateRef  src, dst;
+  StateId   src, dst;
   TransKind kind;
   StrRef    label;         // opaque; see §7.1
   Span      attrs;
@@ -325,8 +325,10 @@ struct Chart {
   StrRef                   name;
   SubmachineId                 root_submachine;
 };
+// Pre-resolution only. Resolution flattens these into one Chart (§9); nothing
+// downstream of resolution ever sees a Project.
 struct Project {
-  std::vector<Chart> docs;
+  std::vector<Chart>  docs;
   std::vector<StrRef> doc_paths;
 };
 ```
@@ -552,9 +554,12 @@ On:main/Idle         submachine name, when named
 ```
 
 - **Pseudostates get synthetic stable names** for addressing: `$initial`, `$final`, `$choice.0`, `$history`. Ordinal-suffixed for uniqueness within a submachine, and exempt from §10's duplicate-name check on authored names.
-- State names namespace across a document boundary, always. `StateRef` carries `DocId`.
+- **Resolution flattens.** An included chart's root submachine is spliced into the including state's submachine list, and the result is **one flat `Chart`**. Layout, measurement, and rendering never see documents — by the time layout runs there is one containment tree, so there is no cross-document LCA, no splice at layout time, and no project-level entry point. This is the whole reason the earlier `Project`-of-independent-charts shape is gone.
+- **Provenance survives as a column.** `scav.doc` is a derived-persistent column (§7) recording the **include instance** each entity came from — instance, not path, so including one document twice yields two distinguishable sets. A renderer that wants to tint sub-document submachines differently reads it; layout ignores it.
+- After flattening, ids are local to the flattened chart, so a transition endpoint is a plain `StateId`. `DocId` is provenance, not addressing.
+- Names namespace across a boundary by taking the alias as a path prefix: `wifi/On/Ready`. Duplicate top-level names in two documents therefore cannot collide.
 - Includes may pin `content_hash`. Include cycles are a hard error.
-- An included chart's layout is re-solved in its new context. Relative hints travel; absolute pins do not.
+- Relative hints travel with an included chart; **absolute pins do not** — a pin is authored against a document's own frame and is meaningless in a host frame.
 - Resolution is a linear scan per path level (document order forbids sorting `state_ids` by name) or via the derived sorted index.
 - Paths break on rename; `scav mv` rewrites references project-wide. **[OPEN]** durable per-element GUIDs.
 
@@ -562,10 +567,12 @@ On:main/Idle         submachine name, when named
 
 Mandatory, in core, structural only — `layout` reads ordinals and crashes on garbage:
 
-- dangling `StateRef`/`SubmachineId`/`ColumnId`; `kInvalid` where a value is required; tombstoned targets
+- dangling `StateId`/`SubmachineId`/`ColumnId`; `kInvalid` where a value is required; tombstoned targets
 - duplicate authored names within a submachine
 - include cycles, unresolvable include paths
-- unresolvable cross-document paths, checked at the **resolution phase** after all includes load
+- unresolvable cross-document paths, checked at the **resolution phase** — before flattening (§9), since afterwards every reference is local
+- `Include.alias` uniqueness, and alias-vs-top-level-name collision
+- authored names must not contain the path metacharacters `/ : @ $` (§9)
 - more than one `initial` per submachine; `fork`/`join` arity (N transitions off the pseudostate; the grouping is derived from it)
 - coordinate-domain violations on input (§11.2)
 
@@ -579,12 +586,12 @@ Scale target: **2k states, 5k transitions, depth 16.**
 
 ```
 phase0_split(model)                              -> SplitGraph
-phase1_order(SplitGraph, Spaces, Hints, Prior?)  -> SubmachineOrders
+phase1_order(SplitGraph, Spaces, Prior?)          -> SubmachineOrders
 phase2_size(SubmachineOrders, Spaces, Prior?)    -> SizedLayout
 phase3_route(SizedLayout, Router)                -> geometry columns + Placed[]
 ```
 
-Every stage is POD in, POD out, so any stage is testable with hand-written inputs and no font present. Layout consumes **extents and constraints**, never content — it is font-blind and appearance-blind by construction. `HintTable` is `{subject, kind, operand, priority}` integers (§14), so layout never touches a string or resolves a path.
+Every stage is POD in, POD out, so any stage is testable with hand-written inputs and no font present. Layout consumes **extents and constraints**, never content — it is font-blind and appearance-blind by construction. Hint columns are integers (§14), so layout never touches a string or resolves a path.
 
 Output goes into **derived geometry columns on the model** plus a `Placed[]` array parallel to `PathBox`. Derived columns are never serialized and never authored (§7), so "layout writes the model" does not compromise round-trip stability.
 
@@ -883,7 +890,40 @@ Consequences:
 
 **`DrawList` is the render IR and the one drawing contract.** A builder produces it from model columns; a backend consumes it. Neither knows about the other, and neither is required to be scav's.
 
-Primitives, in box-local or absolute grid coordinates: rect, rounded rect, line, polyline, integer-control-point path, text (font ref + size), circle, arc, image ref, clip. Ordered — index is z-order.
+```cpp
+enum class PrimKind : uint32_t {
+  rect, rrect, line, polyline, path, text, circle, arc, image, clip_push, clip_pop
+};
+
+struct Style {                   // interned; primitives index a style table
+  uint32_t stroke_rgba, fill_rgba;
+  int32_t  stroke_w;             // grid units
+  uint16_t dash;                 // index into a fixed dash table; 0 = solid
+  uint16_t font_size_grid;
+};
+
+struct Prim {
+  PrimKind kind;
+  uint32_t style;                // -> styles[]
+  ElemRef  origin;               // back-reference to the defining model entity
+  Span     points;               // -> points[]; meaning per kind
+  StrRef   payload;              // text, or an image id; empty otherwise
+  int32_t  a, b;                 // kind-specific scalars: corner radius, angles
+};
+
+struct DrawList {
+  std::vector<Prim>  prims;      // index IS z-order
+  std::vector<Style> styles;
+  std::vector<Point> points;     // absolute grid units
+  StringPool         text;
+};
+```
+
+**Identity is a back-reference to the model, not a class string.** `Prim.origin` is an `ElemRef` — the same `{kind, ordinal}` shape space requests use — with a `none` kind for primitives belonging to no entity (a legend, a canvas background). A backend that wants CSS classes *synthesizes* them: `class="scav-state-1234"` is the SVG backend's projection of `origin`, not something the IR carries. String classes would have been an SVG concept leaking into an IR that also feeds ImGui, and would have added interning to a hot path.
+
+**Style is a separate table, and that is what makes §13 cheap.** Live recoloring mutates `styles[]` and leaves `prims[]`, `points[]`, and `text` untouched — so an app caches the geometry-derived part across frames and swaps only the style table, which is exactly what §13 asks for. Fat per-primitive style would have forced a full rebuild every frame.
+
+**Coordinates are absolute grid units, one frame, no per-primitive frame tag.** Box-local was an artifact of scripts that did not know where they would land; a builder reads geometry columns and knows.
 
 ```
 builder:  (model columns, incl. geometry) -> DrawList     // app's; scav ships a reference one
@@ -894,7 +934,7 @@ backend:  DrawList -> ImGui calls | SVG text | PDF | ...  // app's; scav ships S
 
 Two properties worth keeping:
 
-**Golden-test the `DrawList`, not the SVG.** It is canonical POD with no formatting degrees of freedom, a strictly better comparison surface than serialized text. SVG emission then gets a thin serializer test rather than carrying the whole rendering contract.
+**Golden-test the `DrawList`, not the SVG.** It is canonical POD with no formatting degrees of freedom, a strictly better comparison surface than serialized text. Canonical form: `styles[]` sorted by field bytes and deduplicated, `prims[]` in z-order, `points[]` in prim order. SVG emission then gets a thin serializer test rather than carrying the whole rendering contract.
 
 **One metrics implementation** (§11.9) shared by builder and backend, with a golden test asserting they agree for every box. Otherwise text overflows and the diagram lies about its own contents.
 
@@ -940,7 +980,9 @@ If an app embeds a script host (§8.3), the natural split is transport and decod
 
 ## 14. Layout hints
 
-`scav:`-namespaced attributes (§8), resolved to an integer `HintTable` before layout (§11). No new mechanism, and `layout` never sees a string or a path.
+**Hints are columns, like geometry.** There is no separate `HintTable` input: layout reads hint columns the way it reads space and model columns. The only distinction that matters is the one §7 already draws — **authored hints persist and serialize; app-computed hints are derived and get overwritten.** That falls out of the column classes rather than needing a mechanism.
+
+Which also gives absolute pins a home, and they previously had none: a pin is an **authored** column, so it round-trips. `scav:pin` alongside `scav:right-of` and the rest, all resolved from `scav:` attributes at load (§8) into integer columns so layout never sees a string or a path.
 
 **Source order is the primary hint and costs no syntax.** LR-rectpacking is order-preserving, so model order maps to reading order. Consequently **document order must survive parse → model → layout, and the canonical printer must never reorder states or submachines.** Attributes may be sorted; structure may not. (This is the opposite of `puml2c`, which sorts states alphabetically — that sort belongs in the codegen backend.) `w_adj` (§11.8) may override source order for submachine-crossing transitions.
 
@@ -978,7 +1020,7 @@ Key entry points:
 
 ```c
 scav_result scav_layout_run(scav_chart*, const scav_spaces*,
-                            const scav_hint_table*, const scav_prior_layout*,
+                            const scav_prior_layout*,
                             const scav_layout_opts*,
                             scav_placed* out_placed, uint32_t cap, uint32_t* out_count);
 // geometry lands in derived columns, read with the ordinary column accessor:
