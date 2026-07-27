@@ -510,7 +510,7 @@ Shipped in `libscavdraw`, all pure functions over PODs, all optional:
 - **interior subdivision** — `scav_stack_v(rect, items, n, out_rects)`, `scav_row_h(...)`, `scav_align(rect, w, h, align, out)`. Turns "I have a rect and three things" into positions. This is where the old band taxonomy went: from a contract into a convenience.
 - **text layout in a rect** — line breaking at author-supplied breaks, baseline positioning, ellipsis.
 - **shape emission** — `DrawList` helpers for rounded boxes, arrowheads, dashed submachine dividers, orthogonal polylines with rounded corners.
-- **the reference builder** — the standard appearance, as **per-element-kind emitters** (`emit_state`, `emit_route`, `emit_label`, …) plus a convenience function calling them in order. Per-kind emitters plus `depth` (§12) mean an app interleaves its own content without forking anything: call the emitters it wants, skip the rest, append its own primitives at whatever depth.
+- **the reference builder** — the standard appearance, as **per-element-kind emitters** (`emit_state`, `emit_route`, `emit_label`, …), each taking the depth to draw at, plus a convenience wrapper calling them in an order it documents. Per-kind emitters plus caller-supplied `depth` (§12) mean an app interleaves its own content without forking anything: call the emitters it wants, skip the rest, append its own primitives wherever it likes.
 
 Nothing in scav's pipeline invokes any of these. An app that uses all of them looks like the old framework and gets the same result; an app that uses none of them is not fighting anything.
 
@@ -926,16 +926,7 @@ struct DrawList {
 
 A backend consumes depth however suits it: **stable-order by `(depth, emission_index)`** for painter's algorithm, or write it as z in an orthographic projection and let the depth buffer sort. `(depth, emission_index)` is a total order, so §6's comparator rule is satisfied without relying on sort stability. Honest caveat: depth-as-z only works for opaque content — a blended GPU backend still sorts back-to-front, using the same integer.
 
-**Reserved depth bands** for the reference builder, so an app can say "behind boxes" without reading its source:
-
-| Band | Content |
-|---|---|
-| 1000 | submachine fills and dividers |
-| 2000 | state boxes |
-| 3000 | routes |
-| 4000 | labels, badges, glyphs |
-
-Gaps are the app's. Nothing enforces the bands; they are documented constants.
+**scav reserves no depth bands and assigns no depth semantics.** Emitters take depth as a parameter — `emit_state(dl, chart, depth)` — so the caller owns the numbering. Reserved bands would have been scav deciding an ordering the app should own, and they are meaningless to an app that writes its own builder. The convenience wrapper picks *some* defaults, documented as that one function's choice rather than as a namespace: if you need to interleave, call the emitters and pass your own numbers.
 
 **Clipping is a per-primitive index, not a `clip_push`/`clip_pop` pair.** Stateful scope primitives cannot survive a depth sort — sorting separates a pair from the primitives it was scoping. So a `Prim` names its clip rect directly, which also lets a GPU backend batch by scissor rather than replaying a stack.
 
