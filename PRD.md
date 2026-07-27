@@ -510,7 +510,7 @@ Shipped in `libscavdraw`, all pure functions over PODs, all optional:
 - **interior subdivision** — `scav_stack_v(rect, items, n, out_rects)`, `scav_row_h(...)`, `scav_align(rect, w, h, align, out)`. Turns "I have a rect and three things" into positions. This is where the old band taxonomy went: from a contract into a convenience.
 - **text layout in a rect** — line breaking at author-supplied breaks, baseline positioning, ellipsis.
 - **shape emission** — `DrawList` helpers for rounded boxes, arrowheads, dashed submachine dividers, orthogonal polylines with rounded corners.
-- **the reference builder** — the whole standard appearance, composed from the above. Read it, call it, fork it, or ignore it.
+- **the reference builder** — the standard appearance, as **per-element-kind emitters** (`emit_state`, `emit_route`, `emit_label`, …) plus a convenience function calling them in order. Per-kind emitters plus `depth` (§12) mean an app interleaves its own content without forking anything: call the emitters it wants, skip the rest, append its own primitives at whatever depth.
 
 Nothing in scav's pipeline invokes any of these. An app that uses all of them looks like the old framework and gets the same result; an app that uses none of them is not fighting anything.
 
@@ -892,7 +892,7 @@ Consequences:
 
 ```cpp
 enum class PrimKind : uint32_t {
-  rect, rrect, line, polyline, path, text, circle, arc, image, clip_push, clip_pop
+  rect, rrect, line, polyline, path, text, circle, arc, image
 };
 
 struct Style {                   // interned; primitives index a style table
@@ -904,7 +904,9 @@ struct Style {                   // interned; primitives index a style table
 
 struct Prim {
   PrimKind kind;
+  int32_t  depth;                // draw order; see below
   uint32_t style;                // -> styles[]
+  uint32_t clip;                 // -> clips[]; kInvalid = unclipped
   ElemRef  origin;               // back-reference to the defining model entity
   Span     points;               // -> points[]; meaning per kind
   StrRef   payload;              // text, or an image id; empty otherwise
@@ -912,12 +914,30 @@ struct Prim {
 };
 
 struct DrawList {
-  std::vector<Prim>  prims;      // index IS z-order
+  std::vector<Prim>  prims;
   std::vector<Style> styles;
   std::vector<Point> points;     // absolute grid units
+  std::vector<Rect>  clips;
   StringPool         text;
 };
 ```
+
+**Draw order is an explicit `depth`, not array position** — and that is what makes `DrawList`s **composable by concatenation**. An app appends the reference builder's output to its own and depth resolves the interleaving: threat radii behind state boxes, a timeline in front, no splice operation and no forking the builder to get content into the middle of its stack. Array position was the single thing that made the reference builder a fork trap.
+
+A backend consumes depth however suits it: **stable-order by `(depth, emission_index)`** for painter's algorithm, or write it as z in an orthographic projection and let the depth buffer sort. `(depth, emission_index)` is a total order, so §6's comparator rule is satisfied without relying on sort stability. Honest caveat: depth-as-z only works for opaque content — a blended GPU backend still sorts back-to-front, using the same integer.
+
+**Reserved depth bands** for the reference builder, so an app can say "behind boxes" without reading its source:
+
+| Band | Content |
+|---|---|
+| 1000 | submachine fills and dividers |
+| 2000 | state boxes |
+| 3000 | routes |
+| 4000 | labels, badges, glyphs |
+
+Gaps are the app's. Nothing enforces the bands; they are documented constants.
+
+**Clipping is a per-primitive index, not a `clip_push`/`clip_pop` pair.** Stateful scope primitives cannot survive a depth sort — sorting separates a pair from the primitives it was scoping. So a `Prim` names its clip rect directly, which also lets a GPU backend batch by scissor rather than replaying a stack.
 
 **Identity is a back-reference to the model, not a class string.** `Prim.origin` is an `ElemRef` — the same `{kind, ordinal}` shape space requests use — with a `none` kind for primitives belonging to no entity (a legend, a canvas background). A backend that wants CSS classes *synthesizes* them: `class="scav-state-1234"` is the SVG backend's projection of `origin`, not something the IR carries. String classes would have been an SVG concept leaking into an IR that also feeds ImGui, and would have added interning to a hot path.
 
@@ -934,7 +954,7 @@ backend:  DrawList -> ImGui calls | SVG text | PDF | ...  // app's; scav ships S
 
 Two properties worth keeping:
 
-**Golden-test the `DrawList`, not the SVG.** It is canonical POD with no formatting degrees of freedom, a strictly better comparison surface than serialized text. Canonical form: `styles[]` sorted by field bytes and deduplicated, `prims[]` in z-order, `points[]` in prim order. SVG emission then gets a thin serializer test rather than carrying the whole rendering contract.
+**Golden-test the `DrawList`, not the SVG.** It is canonical POD with no formatting degrees of freedom, a strictly better comparison surface than serialized text. Canonical form is **sorted by `(depth, emission_index)`**, with `styles[]` and `clips[]` deduplicated and sorted by field bytes. Sorting the golden means it compares *what gets drawn*, so two builders that produce the same picture by different emission orders compare equal. SVG emission then gets a thin serializer test rather than carrying the whole rendering contract.
 
 **One metrics implementation** (§11.9) shared by builder and backend, with a golden test asserting they agree for every box. Otherwise text overflows and the diagram lies about its own contents.
 
