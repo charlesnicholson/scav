@@ -539,6 +539,12 @@ for (StateId st : chart.state_ids()) {
 - **Unprotected decoration is free.** The builder runs after layout and reads the box, so a badge drawn at `box.x + box.w - 6, box.y - 6` follows the box automatically. Layout is not moving two things in lockstep; the builder derives one from the other. Nothing stored, nothing grouped.
 - **Protected decoration is reserved, then drawn inset.** Reserve W×H, draw the state outline at (W−12)×(H−12), place badges in the margin. Visually overhanging, structurally inside, correct as an obstacle, no new primitive.
 
+That also settles **non-rectangular shapes** — an entry/exit-point tab protruding past the border, a folder tab, any concave rectilinear outline. Layout consumes only rects: packing is defined on rectangles, non-overlap is a rect test, the routing graph is built from rectangular obstacles, and ports are per-side. Supporting concave outlines would mean a polygon visibility graph, non-rectangular packing, and polygon overlap tests — three algorithms changed for tighter clearance near tabs.
+
+**So the occupied region is the composite's AABB**, which reserve-and-inset already expresses. An asymmetric tab is the app reserving the extra width and placing the visual rect off-centre inside the box it gets back; layout hands out a rect and the app decides what sits where in it.
+
+One honest artifact: avoidance is *conservative* (routes keep clear of AABB corners that are actually empty) and termination is *approximate* — a route may land on an AABB edge beside a tab rather than on the tab. The app draws a short stub to bridge it, or accepts it. Revisit only if that proves annoying in practice; it is not worth a polygon router up front.
+
 So scav has **no composite shapes and no attachment offsets.** The same trick covers the emphasis margin §13 no longer holds as a profile field: an app stroking 8 units wide reserves 8 units and draws inside them.
 
 **What is deliberately absent.** No `overlay` — content that reserves no space is not layout's business, the app just draws it. No priority or composition order — two extensions both wanting interior space are summed by the app before it calls layout. No alignment — the app knows the rect. Every one of those was in an earlier slots-shaped draft and none of them was solving a layout problem.
