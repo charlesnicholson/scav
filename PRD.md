@@ -87,7 +87,7 @@ Platforms: native (macOS/Linux/Windows) and `wasm32-wasi` for core, layout, draw
 
 | Library | Holds | Links |
 |---|---|---|
-| **`libscavcore`** | model, columns, string pool, builder, validation, text/JSON read+write, canonical printer, includes, resolution | — |
+| **`libscavcore`** | model, columns, string pool, builder, validation, `.scav` parse + canonical print, JSON dump, includes, resolution | — |
 | **`libscavlayout`** | space requests, phases 0–3, routers, cost, threading shim | `libscavcore` |
 | **`libscavdraw`** | the `DrawList` type, text metrics, optional helpers (§8.1.1), the reference builder | `libscavcore` |
 | **`libscavsvg`** | reference backend: `DrawList` -> SVG | `libscavdraw` |
@@ -111,7 +111,7 @@ Mirrors the house style in `~/src/envy` — `cmake/deps/` with SHA-pinned `Fetch
 ```
 include/scav/          public C ABI headers, one per library
 src/core/model/        columnar aggregates, ids, string pool, builder, validation
-src/core/format/       reader, canonical printer, includes, resolution
+src/core/format/       .scav lexer, parser, canonical printer, JSON dump, includes, resolution
 src/layout/            space requests, phases 0-3, routers, cost, thread shim
 src/draw/              DrawList type, text metrics, helpers, reference builder
 src/svg/               reference backend
@@ -1053,25 +1053,95 @@ Which also gives absolute pins a home, and they previously had none: a pin is an
 
 Deliberately not designed further until the engine runs on the real corpus. Known needed: relative position across a containment boundary; sibling submachine stacking direction. Structural requirements that must hold now: hints live inline next to their subject; priority is source order; over-constrained sets emit a stable diagnostic and **drop the lowest-priority hint**, never failing the render; Tier 1 dominates Tier 2.
 
-## 15. Serialization
+## 15. The `.scav` format
 
-**[OPEN]**, deferred by design — the layout engine does not depend on it. P0 ships a JSON encoding of §7 with a canonical printer.
+**Decided, and it is the first thing built** (P0). A terse block-structured DSL, LL(1), whitespace-insensitive.
 
-| | Pro | Con |
-|---|---|---|
-| JSON (P0) | trivial to parse, permissive libs, universal | verbose; **no multi-line strings** |
-| XML | native namespaces; closing tags help git diffs | ~3× tokens; hand-authoring worse than the `.puml` being replaced |
-| Terse DSL | best authoring, fewest tokens | parser + **comment-preserving printer**, 4,000–8,000 LOC |
+```ebnf
+document   := chart
+chart      := 'chart' ident [ string ] block
+block      := '{' [ item ( ',' item )* [ ',' ] ] '}'
+item       := include | state | submachine | trans | attr
+include    := 'include' string 'as' ident [ 'hash' string ]
+state      := 'state' ident [ 'kind' state_kind ] [ string ] [ block ]
+submachine := 'submachine' [ ident ] [ string ] block
+trans      := 'trans' [ trans_kind ] endpoint '->' endpoint [ string ] [ block ]
+attr       := '@' key [ '=' value ] | '@' ident datablock
+datablock  := '{' [ entry ( ',' entry )* [ ',' ] ] '}'
+entry      := ident [ '=' value ]
+value      := string | '[' [ string ( ',' string )* [ ',' ] ] ']'
+endpoint   := '*' | path
+path       := ident ( '/' ident )*
+key        := ident [ ':' ident ]
+ident      := [A-Za-z_][A-Za-z0-9_]*
+state_kind := 'normal'|'choice'|'junction'|'fork'|'join'|'history'|'deephistory'
+trans_kind := 'external'|'internal'|'local'
+```
 
-A program that returns the graph (Lua etc.) is rejected as the on-disk format: not diffable, no GUI round-trip, content-addressing requires executing it, executing a colleague's chart is arbitrary code execution in CI, `pairs()` order is unspecified, and a program can fail to terminate. The generative use case is served by the C ABI plus bindings.
+```
+chart vac "robot vacuum" {
+  include "wifi.scav" as wifi hash "blake3:9f2c1a7e",
 
-Requirements regardless of choice:
-- **Canonical printer**: a given model always emits byte-identical text. This, not the format, is what makes diffs and merges sane.
-- **Real multi-line string literals** — labels carry semantically meaningful author breaks (§11.9), so the file should show them. JSON fails this, which is why it is a placeholder rather than the answer.
-- Text normalized on read (§6). Extension columns round-trip losslessly including unknown ones (§8).
-- Persisted `PriorLayout` is optional, versioned, and a cache (§11.11).
+  state Off "powered down",
+  state Booting,
+  state PreConfig kind choice,
 
-File extension `.scav` regardless of encoding.
+  trans * -> Off,
+  trans Off -> Booting "POWER_ON",
+
+  state On {
+    @doc = "Enter: publishes EVT_POWERED_ON",
+    @libhsm { submachine_handler, legacy = "false" },
+
+    submachine main {
+      state Idle { @libhsm:handler = "false" },
+      state Ready,
+      trans * -> Idle,
+      trans internal Ready -> Ready "BUMP_RETRY",
+      trans Ready -> wifi/On/Connected "handoff",
+    },
+    submachine strays "sweeps while main drives" {
+      state Idle,
+      trans * -> Idle,
+    },
+  },
+}
+```
+
+**Design rules, each fixing a defect found by writing examples:**
+
+- **Every statement is keyword-led** (`include` `state` `submachine` `trans` `@`), so dispatch is one token. Identifier-led transitions were tried and rejected: they read fine but broke the symmetry that makes the grammar skimmable.
+- **`,` separates every list, statements included.** Juxtaposed statements parse but are illegible on one line — the same defect as unseparated variadic values, one level up.
+- **`=` anchors a key to its value, `[...]` delimits lists.** Variadic values without delimiters are LL(1) and unreadable.
+- **Positional string is the label**, since nearly every transition has one; everything else goes in the block.
+- **`*` is the initial or terminal pseudostate**, by position — source or target. PlantUML's convention, and it frees two reserved words. Bare, not `[*]`, keeping `[` exclusively for lists.
+- **`kind` leads a transition** because §11.14 makes it behaviourally load-bearing, so it should be as visible in source as in the drawing.
+- **Newlines carry nothing.** The lexer is whitespace-insensitive outside strings; the whole file is legal on one line. Line breaking is the canonical printer's decision, which is what makes byte-identical output achievable.
+
+Reserved: `chart` `include` `state` `submachine` `trans` `kind` `external` `internal` `local`. Everything else is contextual, so a state may be named `choice`, `history`, `as`, or `hash`.
+
+**Strings.** `"..."` takes `\\ \" \n \t \uXXXX`. `"""..."""` is raw with no escapes — which is its purpose, and why it cannot contain `"""`. Indentation is stripped to the closing delimiter's column; a line indented *less* than the closing delimiter is an error, not silently clamped.
+
+**Canonical form.** A model always emits byte-identical text. Six rules, because each is a place the format can say the same thing twice:
+
+| | Canonical |
+|---|---|
+| repeated key vs list | list form whenever count > 1 |
+| `@k` vs `@k = "true"` | flag form iff the value is exactly `"true"` |
+| `@ns:k` vs `@ns { k }` | block form iff ≥2 keys share the namespace |
+| trailing comma | present iff the printer broke the block across lines |
+| attribute order | sorted by key bytes; within one repeated key, insertion order |
+| line breaking | by a column budget — **a versioned profile field** (§11.15), since it is part of the output contract |
+
+**Structure is never reordered.** Attributes may be sorted; states and submachines may not, because document order is the primary layout hint (§14). Comments are preserved with position — leading, trailing, own-line — which is the expensive half of the printer.
+
+Also required: text normalized on read (§6); extension columns round-trip losslessly including unknown ones (§8); `PriorLayout` optional, versioned, and a cache (§11.11).
+
+**Cost.** Lexer ~400 LOC including `"""` handling and comment capture, parser ~500, comment-preserving printer 3,000–5,000. The printer is the expensive half and a simpler grammar barely helps it.
+
+**JSON survives as an output-only projection** (`scav dump --json`) for programmatic consumers. Mechanical over columnar data, and not a format — it cannot hold multi-line strings, which §11.9's author-controlled label breaks require.
+
+A program that returns the graph (Lua etc.) was rejected as the on-disk format: not diffable, no GUI round-trip, content-addressing requires executing it, running a colleague's chart is arbitrary code execution in CI, `pairs()` order is unspecified, and a program can fail to terminate. The generative case is served by the C ABI plus bindings.
 
 ## 16. C ABI
 
@@ -1110,7 +1180,7 @@ Editor commands do not cross the C boundary as objects; that layer's API is opco
 
 Estimates below are production LOC; multiply by 1.5–2 for the mandated test classes.
 
-**P0 — core.** Columnar aggregates, tombstoned ids, extension columns, string pool with two-pass interning, NFC normalization, path addressing and cross-document resolution, includes with cycle detection, structural validation, JSON read/write with canonical printer, append-only builder API, ABI JSON extraction, doctest harness. Plus the **synthetic chart generator** and **2–3 hand-transcribed real charts** — synthetic graphs have uniform branching and no accidental structure, so tuning on them alone is a trap. Determinism discipline (§6) is in force from the first commit; it cannot be retrofitted.
+**P0 — core.** Columnar aggregates, tombstoned ids, extension columns, string pool with two-pass interning, NFC normalization, path addressing and cross-document resolution, includes with cycle detection, structural validation, the `.scav` lexer, parser, and comment-preserving canonical printer (§15), append-only builder API, ABI JSON extraction, doctest harness. Plus the **synthetic chart generator** and **2–3 hand-transcribed real charts** — synthetic graphs have uniform branching and no accidental structure, so tuning on them alone is a trap. Determinism discipline (§6) is in force from the first commit; it cannot be retrofitted.
 *Exit:* round-trip a depth-16 / 2k-state chart byte-identically, including unknown extension columns; ABI driven from Python.
 
 **P1 — metrics, space requests, layout skeleton.** Font metrics helper, the space tables, Phase 0 splitting, derived classification, trivial placement, straight-line routes, geometry columns. Validate the coordinate extent estimate (§11.2).
@@ -1189,7 +1259,7 @@ Do not vendor: `libnest2d` (LGPL-3.0), OGDF, Graphviz's `textspan_lut.c` (EPL-2.
 
 ## 19. Open questions
 
-**Decisions owed:** §15 format verdict · §11.8 whether to depict the implicit submachine reset · §9 durable per-element GUIDs · §17 P9 undo/redo mechanism · whether `quick` needs `satisfyVPSC` promoted into P6.
+**Decisions owed:** §11.8 whether to depict the implicit submachine reset · §9 durable per-element GUIDs · §17 P9 undo/redo mechanism · whether `quick` needs `satisfyVPSC` promoted into P6.
 
 **Unverified claims, flagged not smoothed:**
 - No diagram-routing work found doing history-based negotiated congestion with rip-up-and-reroute. Unconfirmed absence, **not** novelty.
