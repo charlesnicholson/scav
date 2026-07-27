@@ -534,6 +534,13 @@ for (StateId st : chart.state_ids()) {
 
 **`h_before`/`h_after` is stacking order relative to the submachine area**, not a band taxonomy. Layout needs it to compute a box height; it is two integers, not five names.
 
+**The reserved box and the drawn box need not be the same rect**, which resolves border-attached decoration without any composite-shape concept:
+
+- **Unprotected decoration is free.** The builder runs after layout and reads the box, so a badge drawn at `box.x + box.w - 6, box.y - 6` follows the box automatically. Layout is not moving two things in lockstep; the builder derives one from the other. Nothing stored, nothing grouped.
+- **Protected decoration is reserved, then drawn inset.** Reserve W×H, draw the state outline at (W−12)×(H−12), place badges in the margin. Visually overhanging, structurally inside, correct as an obstacle, no new primitive.
+
+So scav has **no composite shapes and no attachment offsets.** The same trick covers the emphasis margin §13 no longer holds as a profile field: an app stroking 8 units wide reserves 8 units and draws inside them.
+
 **What is deliberately absent.** No `overlay` — content that reserves no space is not layout's business, the app just draws it. No priority or composition order — two extensions both wanting interior space are summed by the app before it calls layout. No alignment — the app knows the rect. Every one of those was in an earlier slots-shaped draft and none of them was solving a layout problem.
 
 Detached placement (a note positioned near an element with a leader line, non-overlapping) is a real third layout problem and is **deferred**: nothing in the corpus needs it, libhsm's notes convert to attributes, and §11.7's connector glyphs are already out of v1. Add it when something demands it.
@@ -761,9 +768,11 @@ Area is deliberately last: minimizing it directly produces crammed blobs with sn
 
 Two cost functions: a cheap **surrogate** for search (bends from port sides plus Manhattan distance, crossings from straight-line segments) and the exact one for scoring. A test asserts they agree on *ranking*; a misranking surrogate optimizes the wrong thing silently. Crossings are counted by **inversion counting** in the layered formulation, `O(|E| log|V|)` — the general straight-line formulation is `O(n^{4/3})` or worse and is not affordable inside search.
 
-### 11.7 Long-edge escape hatch — designed, not built
+### 11.7 Long-edge escape hatch — a builder concern
 
-At depth 16 a literal polyline crossing 15 boundaries is unreadable. The hatch is paired **off-page connector glyphs** with matching tags, selected per transition by `scav:render=connector|routed`. Not v1; the model must not preclude it.
+At depth 16 a literal polyline crossing 15 boundaries is unreadable. The hatch is paired **off-page connector glyphs** with matching tags.
+
+**This is a builder concern, not a layout feature**, which is why nothing needs building for it. The app requests no `PathBox` and no route for that transition, reserves a little space at each end, and draws a tagged stub pair. Layout never learns the transition is drawn differently — it has one fewer route to compute. So the model and the space tables already permit it, and `scav:render=connector` is an ordinary authored attribute the builder reads, not a layout input.
 
 Precedent when needed: **UML 2.5.1 §15.2.4** ActivityEdge connector supplies the exact contract — "purely notational", "does not affect the underlying model", exactly-one matching pair. **SDL / ITU-T Z.100** §2.6.7, §2.6.8.2.2 standardizes it inside a state-machine language with a textual dual. Also BPMN 2.0 Link Events, Simulink Goto/From, KiCad/Altium net labels, Castelló et al.'s GOTO nodes. UML deliberately gives state *transitions* no such notation, so this fills a real notational gap. A scav connector must be semantically inert.
 
