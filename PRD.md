@@ -903,7 +903,7 @@ The likeliest failure is producing layouts that score well on `Cost` and that re
 
 **LP nudging fallback.** "Integral if coefficients are integral" is false — that needs total unimodularity, unestablished here — and simplex pivoting under degeneracy is tolerance-driven float. Deterministic degradation instead: widen the channel by a fixed integer increment and re-seat, capped, then diagnostic.
 
-**PRISM, GTREE, FORBID** — Delaunay plus iterative solvers, or stochastic gradient descent. **EditLens randomized nudging** — admits residual overlaps and is randomized; permitted only via the counter-based RNG (§6), never as a determinism carve-out for `quick`.
+**PRISM, GTREE, FORBID** — Delaunay plus iterative solvers, or stochastic gradient descent. **EditLens randomized nudging** — admits residual overlaps and is randomized; permitted only via the position-addressed RNG (§6), never as a determinism carve-out.
 
 ### 11.14 Transition kind — internal, external, local
 
@@ -924,7 +924,7 @@ Consequences:
 - **Phase 0 (§11.1) suppresses the source-boundary split** for `internal` and `local`. One fewer segment, one fewer port. The derived boundary-crossing count (§7) must reflect this, or `w_len`'s depth weight miscounts.
 - **Tier 0 (§11.6) carve-out:** an edge may occupy the interior of a state whose border it does not cross, and **only** that state. Every other state and submachine rectangle remains an obstacle.
 - **Internal self-loops are the app's, end to end.** The app sums the band it needs into `h_before`/`h_after` and its builder draws the glyphs inside the returned `content_before`/`content_after` rect. There is no route, so `PathBox`/`PathClear`/`min_len` do not apply and the router is not involved. Layout sees only two integers.
-- **The reference builder distinguishes the three kinds**, pinned in the `drawlist/` golden. scav cannot mandate what a custom builder draws (§2, §3) — but a builder that draws them alike produces a diagram that is wrong about behavior.
+- **The reference builder distinguishes the three kinds**, pinned in the `drawlist/` golden. scav cannot mandate what a custom builder draws (§2, §3).
 
 ### 11.15 The profile
 
@@ -1017,7 +1017,7 @@ Headless `scav render` is the first user-visible deliverable (P2), so this one s
 
 **Emit the body in integer grid units with the entire scale in one integer `viewBox`.** Float-to-decimal conversion is not portable (MSVC UCRT, glibc, musl, and Apple libc disagree on the last digit) and `-ffp-contract=fast` is the default, so `grid * scale` differs by 1 ULP between Debug and Release. **No float is printed, ever.**
 
-Renderer-vs-metrics agreement, in order: one bundled font, named with a fallback · `textLength` with `lengthAdjust="spacing"` from our own advance sum, turning overflow into slightly loose spacing (Graphviz emits none, which is why its SVG overflows under substitution) · `font-kerning: none` per §11.9.1 · explicit padding, never sizing to exactly the text width · `--embed-font` base64ing a subsetted TTF into `<defs><style>@font-face`, the only exact agreement that keeps text selectable. **Never convert text to paths** — needs the outline stack we avoid, discards selection and accessibility.
+Renderer-vs-metrics agreement, in order: one bundled font, named with a fallback · `textLength` with `lengthAdjust="spacing"` from our own advance sum, turning overflow into slightly loose spacing (Graphviz emits none, which is why its SVG overflows under substitution) · `font-kerning: none` per §11.9.1 · explicit padding, never sizing to exactly the text width · `--embed-font` base64ing the bundled TTF whole into `<defs><style>@font-face`, the only exact agreement that keeps text selectable — whole, not subsetted, because a subsetter is the expensive part of the PDF backend and v1 does not have one. **Never convert text to paths** — needs the outline stack we avoid, discards selection and accessibility.
 
 Emit a stable `class` per element (`scav-state scav-id-1234`) so external CSS can restyle a static SVG.
 
@@ -1027,7 +1027,7 @@ PDF is out of v1: xref tables, content streams, and a real TTF subsetter, ~1,500
 
 Static layout, dynamic appearance: a viewer highlighting active states and recently-taken transitions at frame rate over a layout that never moves.
 
-**This needs almost nothing from scav, which is the point.** Geometry is in model columns and does not change; the app rebuilds its `DrawList` each frame, or caches the geometry-derived part (§12's style table) and varies only style. No overlay channel, no command vocabulary, no scav-side animation state.
+**This needs almost nothing from scav, which is the point.** Geometry is in model columns and does not change, so the app rebuilds its `DrawList` each frame, or caches `prims`/`points`/`text` and mutates only `styles[]` (§12). No overlay channel, no command vocabulary, no scav-side animation state.
 
 Two rules that are scav's:
 
