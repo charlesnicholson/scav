@@ -121,7 +121,7 @@ docs/
 
 `apps/` is separate from `src/` because an application is a *consumer* — that keeps the CLI and viewer from quietly becoming privileged layers.
 
-**Unit tests are adjacent** and compile library sources with `-DSCAV_TESTING`, which is how `SCAV_INTERNAL` (§5) drops `static`. Each library builds twice, shipping and testable; both are matrix rows and must agree byte-for-byte.
+**Unit tests are adjacent** and compile library sources with `-DSCAV_TESTING`, which is how `SCAV_INTERNAL` (§5) drops `static`. Each library builds twice, shipping and testable; both are matrix rows (§6).
 
 **Goldens are layered by stage**: `layout/` (structural + coordinate hashes), `drawlist/` (the canonical render IR, §12, the primary surface), `svg/` (thin serializer check). A layout change moves the first two; an SVG-writer change moves only the third. `svg/` alone → serializer bug; all three → review starts at `layout/`.
 
@@ -498,11 +498,13 @@ struct PathBox {          // 0..N per transition; layout slides these along the 
 **Domain, validated at `scav_layout_run` entry in every build** — Debug and Release must agree on which inputs are legal:
 
 ```
-0 <= min_w, h_before, h_after <= kCoordMax      // §11.2
-0 <= PathBox.w, PathBox.h     <= kCoordMax
-0 <= PathClear.src, .dst
+0 <= min_w, h_before, h_after <= kCoordMax / 4    // §11.2
+0 <= PathBox.w, PathBox.h     <= kCoordMax / 4
+0 <= PathClear.src, .dst      <= kCoordMax / 4
 PathBox.order unique per subject
 ```
+
+A quarter of the domain, not all of it: §11.4's box formula *adds* to a request (`h_before + packed_subs_h + h_after + 2*pad`), so admitting `kCoordMax` per field would let a legal input produce an illegal box. The composed box is bounds-checked as well; the input bound exists so the failure is attributed to the request that caused it.
 
 Reject with a diagnostic, never clamp. Unbounded `int32_t` overflows §11.4's box formula into signed UB, which optimizers exploit, so Debug and Release diverge rather than both being wrong; a negative `h_before` inverts a box and breaks every orientation predicate.
 
