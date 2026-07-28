@@ -389,7 +389,7 @@ Only **derived-scratch** gets §4.1's container latitude. Geometry is hashed and
 
 `ColumnDesc` carries a `derived` flag (§8). The serializer skips derived columns and they are **exempt from round-trip-unknown**, or a stale geometry snapshot survives a save and gets trusted instead of recomputed.
 
-**Derived column names live outside `Chart.strings`.** Interning `scav.geom.state` into the authored pool would make every authored `StrRef` offset — and the format hash — depend on whether layout had run.
+**Column names live in their own pool, not `Chart.strings`.** Interning `scav.geom.state` into the authored pool would make every authored `StrRef` offset — and the format hash — depend on whether layout had run. Registration takes a `char const*` and interns it there; no pointer is stored in a row, so a `ColumnDesc` is hashable and serializable like any other record.
 
 Serialization is mechanical (write each vector). Iteration order is array order is document order.
 
@@ -445,12 +445,12 @@ enum class ValueKind  : uint32_t { u32, i32, u64, i64, strref, span, blob };
 struct AttrKeyId { uint32_t v; };   // interned attribute key, `ns:key` or bare
 struct ColumnId  { uint32_t v; };   // index into Chart::columns
 
-struct ColumnDesc {
-  char const* name;        // "libhsm.events", "scxml.onentry", "scav.geom.state"
-  ElemKind    entity;         // never `point`/`path_box`/`none` in a ColumnDesc
-  ValueKind   kind;
-  uint32_t    elem_size, elem_align;
-  bool        derived;     // §7: skipped by the serializer, exempt from round-trip-unknown
+struct ColumnDesc {        // 28 bytes, no padding
+  StrRef    name;          // "libhsm.events", "scav.geom.state"; own pool, not Chart::strings (§7)
+  ElemKind  entity;        // never `point`/`path_box`/`none` in a ColumnDesc
+  ValueKind kind;
+  uint32_t  elem_size, elem_align;
+  uint32_t  flags;         // bit 0 = derived: skipped by the serializer, exempt from round-trip-unknown
 };
 struct Column { ColumnDesc desc; std::vector<scav_byte> bytes; };  // count * elem_size
 ```
