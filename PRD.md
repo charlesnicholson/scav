@@ -613,14 +613,14 @@ Format-independent. A **state path** is submachine-qualified and `/`-separated:
 On/Ready/Online      unambiguous
 On:1/Idle            submachine ordinal, when a state has >1 submachine
 On:main/Idle         submachine name, when named
-@WifiSub/On/Ready    cross-document, via include alias
+wifi/On/Ready        cross-document, via include alias
 ```
 
-- **Pseudostates get synthetic stable names** for addressing: `$initial`, `$final`, `$choice.0`, `$history`. Ordinal-suffixed for uniqueness within a submachine, and exempt from §10's duplicate-name check on authored names.
+- **Unnamed pseudostates get synthetic stable names** for addressing: `$initial`, `$final`, `$history`, ordinal-suffixed for uniqueness within a submachine, and exempt from §10's duplicate-name check. These are an API and diagnostic spelling only — the grammar's `ident` admits no `$`, and the format reaches them via `*` (§15). A pseudostate an author needs to name is named, like `PreConfig kind choice`.
 - **Resolution links; it does not flatten** (§7). An `Include` names the `host` state whose submachine list gains the included document's root; containment crosses documents because `State.submachines` holds global ids. Layout sees one containment tree with no transformation having occurred — hence no cross-document LCA, no splice pass, no project handle.
 - **Provenance is a field, not a computed column.** `DocId` on each row records the **include instance** — instance rather than path, so including one document twice yields two distinguishable sets. A renderer tinting sub-document submachines reads it; layout ignores it.
 - Transition endpoints are plain `StateId`s, because ids were global from the start.
-- Names namespace across a boundary by taking the alias as a path prefix: `wifi/On/Ready`. Duplicate top-level names in two documents therefore cannot collide.
+- **An include alias is a bare path prefix**, not a sigil — hence §10's alias-vs-top-level-name collision check, which is what keeps the prefix unambiguous. Duplicate top-level names in two documents therefore cannot collide.
 - Includes may pin `content_hash`. Include cycles are a hard error.
 - Relative hints travel with an included chart; **absolute pins do not** — a pin is authored against a document's own frame and is meaningless in a host frame.
 - Resolution is a linear scan per path level (document order forbids sorting `state_ids` by name) or via the derived sorted index.
@@ -636,7 +636,7 @@ Mandatory, in core, structural only — `layout` reads ordinals and crashes on g
 - unresolvable cross-document paths, checked at the **resolution phase** (§9)
 - a `Statement.src` span outside its document's `text` span
 - `Include.alias` uniqueness, and alias-vs-top-level-name collision
-- authored names must not contain the path metacharacters `/ : @ $` (§9)
+- authored names must not contain the path metacharacters `/ : $`, nor `@` (the format's attribute sigil, §15)
 - more than one `initial` per submachine; degree per pseudostate kind — `fork` is 1-in/N-out, `join` is N-in/1-out, `choice`/`junction` are N-in/N-out. Structural only: no semantic checks (§7.2)
 - coordinate-domain violations on input (§11.2)
 
