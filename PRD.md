@@ -956,9 +956,9 @@ enum class PrimKind : uint32_t {
 struct Style {                   // interned; primitives index a style table
   uint32_t stroke_rgba, fill_rgba;
   int32_t  stroke_w;             // grid units
-  uint16_t dash;                 // 0 = solid; app-defined otherwise
+  uint32_t dash;                 // 0 = solid; app-defined otherwise
   int32_t  font_size_grid;       // same width as the ABI (§11.9)
-};
+};                               // 20 bytes, no padding — see below
 
 struct Prim {
   PrimKind kind;
@@ -1005,7 +1005,7 @@ backend:  DrawList -> ImGui calls | SVG text | PDF | ...  // app's; scav ships S
 
 Two properties worth keeping:
 
-**Golden-test the `DrawList`, not the SVG.** It is canonical POD with no formatting degrees of freedom, a strictly better comparison surface than serialized text. Canonical form is **sorted by `(depth, emission_index)`**, with `styles[]` and `clips[]` deduplicated and sorted by field bytes. Sorting the golden means it compares *what gets drawn*, so two builders that produce the same picture by different emission orders compare equal. SVG emission then gets a thin serializer test rather than carrying the whole rendering contract.
+**Golden-test the `DrawList`, not the SVG.** It is canonical POD with no formatting degrees of freedom, a strictly better comparison surface than serialized text. Canonical form is **sorted by `(depth, emission_index)`**, with `styles[]` and `clips[]` deduplicated and sorted by field bytes — which is why every field of `Style` is 4 bytes wide: §6 forbids byte-comparing a struct with padding, whose contents are unspecified. Sorting the golden means it compares *what gets drawn*, so two builders that produce the same picture by different emission orders compare equal. SVG emission then gets a thin serializer test rather than carrying the whole rendering contract.
 
 **One metrics implementation** (§11.9) shared by builder and backend, with a golden test asserting they agree for every box. Otherwise text overflows and the diagram lies about its own contents.
 
