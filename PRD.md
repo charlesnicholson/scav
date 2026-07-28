@@ -78,12 +78,13 @@ Platforms: native (macOS/Linux/Windows) and **`wasm32-wasi`** for core, layout, 
 | **`libscavlayout`** | space requests, phases 0–3, routers, cost, threading shim | `libscavcore` |
 | **`libscavdraw`** | the `DrawList` type, text metrics, optional helpers (§8.1.1), the reference builder | `libscavcore` |
 | **`libscavsvg`** | reference backend: `DrawList` -> SVG | `libscavdraw` |
+| **`libscavimgui`** | reference backend: `DrawList` -> ImGui draw calls | `libscavdraw` + ImGui |
 
 Applications, each supplying (or reusing) a builder and a backend:
 
 | App | Is |
 |---|---|
-| `scav` | CLI: `render`, `layout`, `fmt`, `gen`, `check` |
+| `scav` | CLI: `render` (chart -> SVG), `layout` (dump geometry columns), `fmt` (canonical print), `gen` (synthetic charts), `check` (validate), `dump --json` |
 | `scavview` | ImGui viewer [P7]. Embeds Lua so users can script appearance without rebuilding it (§8.3) |
 | *yours* | e.g. an enemy-AI editor: links core+layout+draw, writes a builder that also draws threat radii, writes its own ImGui backend. No scav change required |
 
@@ -101,7 +102,8 @@ src/core/model/        columnar aggregates, ids, string pool, builder, validatio
 src/core/format/       .scav lexer, parser, canonical printer, JSON dump, includes, resolution
 src/layout/            space requests, phases 0-3, routers, cost, thread shim
 src/draw/              DrawList type, text metrics, helpers, reference builder
-src/svg/               reference backend
+src/svg/               reference SVG backend
+src/imgui/             reference ImGui backend
 apps/cli/              the scav executable
 apps/view/             ImGui viewer + its Lua host [P7]
 plugins/libhsm/        importer, codegen, builder contribution
@@ -221,7 +223,7 @@ Measure branch coverage; an untested file fails the build. No percentage target.
 ```
 {macOS, Linux, Windows} x {clang, gcc, MSVC} x {libstdc++, libc++, MSVC STL}
   x {Debug, Release, testable} x {1,2,3,5,8,13,16} threads
-  + {wasm32-wasi, wasm32-emscripten} vs native
+  + wasm32-wasi vs native
 ```
 
 Odd and prime thread counts are mandatory — they expose reduction-shape bugs powers of two hide. Tier it: a small blocking subset per PR, full grid nightly and advisory, or a trickle of one-cell failures halts velocity.
@@ -229,7 +231,7 @@ Odd and prime thread counts are mandatory — they expose reduction-shape bugs p
 **Rules:**
 
 - **Integer only in the metrics helper and `layout`.** The space tables are `int32_t` by construction. Float appears only in a backend's geometry, and never in emitted text (§12.1).
-- Shard count is a **pure documented function of the model**. Never `hardware_concurrency()`, never tunable. Shards are work items; worker count never affects results.
+- Shard count is `clamp(bit_ceil(entity_count / 64), 1, 256)` — a pure function of the model, never `hardware_concurrency()`, never tunable. Shards are work items; worker count never affects results, and the null backend runs the same shards inline in index order.
 - Randomness is **stateless and position-addressed**: `rnd(seed, phase, item_index, step)` via the splitmix64 finalizer. **Never** a per-shard stream and **never** keyed on shard index — that would couple output to the decomposition.
 - Synthesized ids derive from a **global stable key**, never from shard ranges. Per synthesized kind: port = `(compound_state, side, transition, crossing_depth)`; split segment = `(transition, segment_ordinal)`; label dummy = `(transition, rank)`; routing-graph node = rank under a total sort on `(x, y, plane, kind)`.
 - Reductions merge in **index order**. Combine operators must be associative; commutativity is not required. `+`/`min`/`max`/`xor` qualify. List append is associative but not commutative — respect order. Saturating add and "first best wins" qualify as neither and are banned as reductions.
@@ -289,89 +291,85 @@ struct SubmachineId { uint32_t v; };
 struct TransId  { uint32_t v; };
 struct StrRef   { uint32_t off, len; };            // into StringPool
 struct Span     { uint32_t off, len; };            // into a side array
-// After resolution the chart is flat, so endpoints are plain StateIds (§9).
+// Ids are global from the start, so endpoints are plain StateIds (§9).
 
 constexpr uint32_t kInvalid = 0xFFFF'FFFFu;        // per-id sentinel
 
-enum class StateKind : uint32_t {
-  normal, initial, final, choice, junction, fork, join,
-  history_shallow, history_deep
+enum class StateKind : uint32_t {   // names match the DSL's state_kind (§15)
+  normal, initial, final, choice, junction, fork, join, history, deephistory
 };
+// `initial` and `final` are reachable only via `*` in the format (§15), never `kind`.
 // Load-bearing for layout and rendering, not passthrough metadata. See §11.14.
 enum class TransKind : uint32_t { external, internal, local };
 
 struct State {
-  StrRef    name;          // empty for pseudostates; see §9
+  StrRef        name;        // empty for pseudostates; see §9
   SubmachineId  parent;
-  StateKind kind;
-  Span      submachines;       // -> submachine_ids
-  Span      attrs;
-  uint32_t  gen;           // generation; 0 = tombstone
+  StateKind     kind;
+  Span          submachines; // -> submachine_ids
+  Span          attrs;
+  DocId         doc;         // provenance (§9)
+  uint32_t      gen;         // 0 = tombstone
 };
 struct Submachine {
-  StateId   owner;         // kInvalid for the root submachine
-  uint32_t  ordinal;
-  StrRef    name;
-  Span      children;      // -> state_ids, in document order
-  Span      attrs;
-  uint32_t  gen;
+  StateId       owner;       // kInvalid for a document root
+  uint32_t      ordinal;
+  StrRef        name;
+  Span          children;    // -> state_ids, document order
+  Span          attrs;
+  DocId         doc;
+  uint32_t      gen;
 };
 struct Transition {
-  StateId   src, dst;
-  TransKind kind;
-  StrRef    label;         // opaque; see §7.1
-  Span      attrs;
-  uint32_t  gen;
+  StateId       src, dst;
+  TransKind     kind;
+  StrRef        label;       // opaque; see §7.1
+  Span          attrs;
+  DocId         doc;
+  uint32_t      gen;
 };
-struct Include {
-  StrRef   alias, path;
-  uint64_t content_hash;   // 0 = unpinned
-  DocId    target;
+struct Include  { StrRef path, alias; uint64_t hash; DocId target; StateId host; };
+struct Attr     { AttrKeyId key; StrRef value; };
+
+struct Document {            // one per loaded document
+  StrRef   path, alias;
+  uint64_t content_hash;
+  Span     text;             // -> src_bytes
+  Span     statements;       // -> stmts, authored source order
+  Span     includes;         // -> includes
 };
-struct Attr { AttrKeyId key; StrRef value; };
+struct Statement {           // one per authored construct
+  ElemKind kind;
+  uint32_t ordinal;          // the entity it declares
+  Span     src;              // -> src_bytes; valid iff unmutated since load
+  Span     comments;         // trivia: leading, trailing, own-line
+};
+
+struct StringPool { std::vector<scav_byte> bytes; std::vector<uint32_t> offsets; };
 
 struct Chart {
-  std::vector<State>       states;        // indexed by StateId
-  std::vector<Submachine>      submachines;
+  std::vector<Document>    documents;
+  std::vector<Statement>   stmts;
+  std::vector<scav_byte>   src_bytes;    // normalized source (§6); never canonicalized
+  std::vector<State>       states;       // indexed by StateId
+  std::vector<Submachine>  submachines;
   std::vector<Transition>  transitions;
   std::vector<Include>     includes;
   std::vector<Attr>        attrs;
-  Span                     chart_attrs;
-  std::vector<StateId>     state_ids;     // Span targets
-  std::vector<SubmachineId>    submachine_ids;
-  std::vector<Column>      columns;       // §8
-  StringPool               strings;       // scav_byte pool + offsets
+  std::vector<Column>      columns;      // §8
+  std::vector<StateId>     state_ids;    // Span targets
+  std::vector<SubmachineId> submachine_ids;
+  StringPool               strings;      // interned names; canonically re-sorted
   StrRef                   name;
-  SubmachineId                 root_submachine;
+  SubmachineId             root_submachine;
+  Span                     chart_attrs;
 };
-// There is no Project type. Documents are rows in one model (above), not
-// separate charts to be merged.
+// No Project type. Documents are rows in one model, not charts to be merged.
 ```
 
-**Documents, statements, and source text are columns too.**
+**All documents share the same arrays**, each row tagged with its `DocId` — so no flattening step and no second model shape (§9).
 
-```cpp
-struct Document {
-  StrRef   path, alias;
-  uint64_t content_hash;
-  Span     text;         // -> src_bytes[], verbatim authored bytes
-  Span     statements;    // -> stmts[], authored source order
-  Span     includes;      // -> includes[]
-};
-
-struct Statement {        // one per authored construct, in source order
-  ElemKind kind;
-  uint32_t ordinal;       // the entity it declares
-  Span     src;           // -> src_bytes[]; valid iff not mutated since load
-  Span     comments;      // trivia: leading, trailing, own-line
-};
-
-struct Include { StrRef path, alias; uint64_t hash; DocId target; StateId host; };
-```
-
-Every `State`, `Submachine`, and `Transition` row carries a `DocId`, and **all documents share the same arrays** — so no flattening step and no second model shape (§9).
-
-`src_bytes` is a **separate pool from `strings`**: one is interned and canonically re-sorted before hashing, the other is verbatim and never touched.
+`src_bytes` is a **separate pool from `strings`**: one is interned and canonically re-sorted before hashing, the other is never touched after load. "Verbatim" means post-normalization — §6 normalizes at parse (LF, no BOM, NFC), and `Statement.src` offsets index the **normalized** bytes, so reported columns are stable across platforms.
 
 **Load-established, not serialized, not hashed.** Writing a document *produces* text; the format hash covers canonical output, not the possibly-non-canonical bytes loaded. `DocId` is implied by which file an entity is written into.
 
@@ -434,7 +432,7 @@ Bar orientation is also not scav's: an app wanting a vertical bar requests a tal
 1. **No sidecar context to thread.** The model is self-contained, so every entry point takes one thing rather than a `void* user_ctx`.
 2. **Column lifetimes are locked together, which is what makes indices safe.** An index has a validity domain — the array it indexes. Co-locating app and core columns makes that domain atomic: a span either way cannot dangle. Split it and indices are as dangerous as pointers with none of the tooling.
 
-Corollary: **tombstoning applies uniformly.** An app keeping data outside must mirror §7's lockstep discipline itself, and getting it wrong means stale rows silently misattributed after a delete. This is also why §4.1's rule is about long-lived heap nodes rather than container choice — indices are safe *because* lifetimes are locked, not because they are integers.
+Corollary: an app keeping data outside must mirror §7's lockstep tombstoning itself, or stale rows are silently misattributed after a delete. This is also why §4.1's rule is about long-lived heap nodes rather than container choice — indices are safe *because* lifetimes are locked, not because they are integers.
 
 Two axes. Both round-trip losslessly, including data this build does not understand.
 
@@ -445,7 +443,8 @@ Two axes. Both round-trip losslessly, including data this build does not underst
 | Use for | data most entities have (event lists, guard code, `onentry` bodies, provenance) | rare or one-off annotations |
 
 ```cpp
-enum class EntityKind : uint32_t { state, submachine, transition, chart };
+enum class ElemKind : uint32_t { state, submachine, transition, chart, point, path_box, none };
+struct ElemRef { ElemKind kind; uint32_t ordinal; };   // used by DrawList and diagnostics
 enum class ValueKind  : uint32_t { u32, i32, u64, i64, strref, span, blob };
 
 struct ColumnDesc {
@@ -463,7 +462,7 @@ Type-erased byte arrays with a stride, indexed by entity ordinal. C ABI is `scav
 **What core owes an extension:**
 
 1. Store it, indexed by entity ordinal; keep it index-aligned under mutation and tombstoning.
-2. **Round-trip it losslessly, including unknown columns** — otherwise an older build silently strips a colleague's data on save. `ValueKind` has a declared wire encoding; `blob` is length-prefixed, little-endian.
+2. **Round-trip it losslessly, including unknown columns** — otherwise an older build silently strips a colleague's data on save. Wire encoding: all scalars **little-endian**, `strref`/`span` as two `u32`, `blob` as `u32` length then bytes, `elem_align` ignored on the wire. A column block is `{name, entity, kind, elem_size, count}` then `count * elem_size` bytes — enough to round-trip a column whose meaning is unknown.
 3. **Pass it through unread.** `layout` never reads extension data.
 4. Let it contribute **space requests** (§8.1) and a builder function the app may call (§8.2).
 5. Expose `ColumnDesc` so an editor can present unknown columns generically.
@@ -520,31 +519,37 @@ struct Placed { int32_t x, y, w, h; };   // root-absolute; w/h may exceed the re
 **The app draws its title, badges, and compartments wherever it likes inside `content_before`. Layout never learns what a title is.**
 
 ```cpp
-// before layout — the app measures and sums; composition is app-side
-for (StateId st : chart.state_ids()) {
-  auto const title = scav_measure_text(metrics, chart.name(st), font_size_grid);
-  auto const badge = libhsm.wants_badge(st) ? extent{14, 14} : extent{0, 0};
-  auto const body  = scxml.onentry_extent(st, metrics);     // 0 if absent
-  box_space[st] = { .min_w    = max(title.w + badge.w + 8, body.w + 8),
+// before layout — the app measures and sums; composition is app-side.
+// Free functions on POD, per §4: rows are data, behaviour is not on the row.
+for (uint32_t i = 0; i < chart.states.size(); ++i) {
+  StateId const st = state_id(chart, i);
+  if (!alive(chart.states[i])) { continue; }                  // tombstone (§7)
+  Extent const title = measure_text(metrics, str(chart, chart.states[i].name), font_size_grid);
+  Extent const badge = libhsm_wants_badge(st) ? Extent{14, 14} : Extent{0, 0};
+  Extent const body  = scxml_onentry_extent(st, metrics);      // {0,0} if absent
+  spaces.box[i] = { .min_w    = max(title.w + badge.w + 8, body.w + 8),
                     .h_before = max(title.h, badge.h) + 4 + body.h,
                     .h_after  = 0 };
 }
 
-for (TransId t : chart.transition_ids()) {
-  auto const text = join(libhsm.events(t), ", ");
-  auto const ext  = scav_measure_text(metrics, text, font_size_grid);
-  path_box.add({ t, ext.w + 4, ext.h + 2, 0 });
-  path_clear[t] = { 0, 8 };                                  // arrowhead room
-  label_text[t] = text;                                      // app's side table
+for (uint32_t i = 0; i < chart.transitions.size(); ++i) {
+  TransId const t = trans_id(chart, i);
+  std::string const text = join(libhsm_events(t), ", ");
+  Extent const ext = measure_text(metrics, text, font_size_grid);
+  spaces.path_box.push_back({ t, ext.w + 4, ext.h + 2, 0 });
+  spaces.path_clear[i] = { 0, 8 };                            // arrowhead room
+  app.label_text[i] = text;                                   // app's side table
 }
 
 scav_layout_run(chart, spaces, opts);   // writes geometry columns + placed[]
 
 // after layout — the app subdivides its own interior, however it likes
-for (StateId st : chart.state_ids()) {
-  auto const r = content_before[st];
-  dl.text(r.x + 4, r.y + baseline, chart.name(st));
-  if (libhsm.wants_badge(st)) dl.disc(r.x + r.w - 11, r.y + 3, 7, "H");
+for (uint32_t i = 0; i < chart.states.size(); ++i) {
+  Rect const r = content_before(chart, i);
+  push_text(dl, depth, r.x + 4, r.y + baseline, str(chart, chart.states[i].name));
+  if (libhsm_wants_badge(state_id(chart, i))) {
+    push_circle(dl, depth, r.x + r.w - 11, r.y + 3, 7);       // PrimKind::circle
+  }
 }
 ```
 
@@ -580,7 +585,7 @@ A plugin may: register extension columns; import or export its own format; valid
 
 **Shipped:**
 
-- **`scav-libhsm`** — first-party. Event-list columns, handler and legacy attributes, `.puml` import (§17), the codegen backend that replaces `puml2c`, and a builder contribution for event labels and handler badges.
+- **`scav-libhsm`** — first-party: event-list columns, handler and legacy attributes, and a builder contribution for event labels and handler badges. Its `.puml` importer and `puml2c`-replacing codegen backend are out of scope for this document (§17) but must stay possible.
 - **`scav-scxml`** — reference example. Columns for executable content, import and export, and a builder contribution showing `cond` as label text and `onentry`/`onexit` as a compartment.
 
 The two together are the acceptance test for the design: if libhsm needs a scav change that SCXML does not, the boundary is wrong.
@@ -612,7 +617,7 @@ On:main/Idle         submachine name, when named
 ```
 
 - **Pseudostates get synthetic stable names** for addressing: `$initial`, `$final`, `$choice.0`, `$history`. Ordinal-suffixed for uniqueness within a submachine, and exempt from §10's duplicate-name check on authored names.
-- **Resolution links; it does not flatten.** Every document's entities already live in the same arrays with a `DocId` (§7), so there is nothing to splice. An `Include` names the `host` state whose submachine list gains the included document's root, and containment then crosses documents because `State.submachines` holds global ids. Layout sees one containment tree without a transformation having occurred — hence no cross-document LCA, no splice pass, and no project handle.
+- **Resolution links; it does not flatten** (§7). An `Include` names the `host` state whose submachine list gains the included document's root; containment crosses documents because `State.submachines` holds global ids. Layout sees one containment tree with no transformation having occurred — hence no cross-document LCA, no splice pass, no project handle.
 - **Provenance is a field, not a computed column.** `DocId` on each row records the **include instance** — instance rather than path, so including one document twice yields two distinguishable sets. A renderer tinting sub-document submachines reads it; layout ignores it.
 - Transition endpoints are plain `StateId`s, because ids were global from the start.
 - Names namespace across a boundary by taking the alias as a path prefix: `wifi/On/Ready`. Duplicate top-level names in two documents therefore cannot collide.
@@ -650,7 +655,7 @@ phase2_size(SubmachineOrders, Spaces)            -> SizedLayout
 phase3_route(SizedLayout, Router)                -> geometry columns + Placed[]
 ```
 
-Every stage is POD in, POD out, so any stage is testable with hand-written inputs and no font present. Layout consumes **extents and constraints**, never content — it is font-blind and appearance-blind by construction. Hint columns are integers (§14), so layout never touches a string or resolves a path.
+Every stage is POD in, POD out, so any stage is testable with hand-written inputs and no font present. Hint columns are integers (§14), so layout never touches a string or resolves a path — §3.1's font-blindness is structural, not a convention.
 
 Output goes into **derived geometry columns on the model** plus a `Placed[]` array parallel to `PathBox`. Derived columns are never serialized and never authored (§7), so "layout writes the model" does not compromise round-trip stability.
 
@@ -691,7 +696,7 @@ Rules:
 - **Intersection *tests* are degree 2** — four `orient2d` calls, never constructing the point. Compare signs; **never multiply two determinants** (degree 4).
 - Constructed points snap to grid with a documented rounding rule.
 - **Widen before multiplying.** `int32 * int32` computes in 32 bits then widens. Wrap it: `cross(ax,ay,bx,by) -> int64`.
-- Validate the domain at the API boundary in release builds, and after every retry inflation.
+- Validate the domain at every API boundary in **every** build (§8.1), and after each retry inflation.
 - Output is **root-absolute**, applied as one final `O(n)` transform over submachine-local internals (ELK's LCA-relative coordinates are a documented trap).
 
 Extent estimate: 2k states ≈ 8,000 x 3,200 pt = 128,000 x 51,200 units, ~4x headroom. **Validate at P1**; if real charts exceed it, reduce the grid to 1/8 pt rather than widening the domain.
@@ -717,7 +722,7 @@ w = max(min_w, packed_subs_w) + 2*pad
 h = h_before + packed_subs_h + h_after + 2*pad
 ```
 
-`pad` is a profile field (§11.15). A state with no space request uses an all-zero `BoxSpace`, so its box is `max(pseudostate_min, packed_subs)` — see §11.15 for the pseudostate size constants, which are profile fields rather than hardcoded, since a fork bar's length must scale with its arity.
+`pad` is a profile field (§11.15). A state with no space request uses an all-zero `BoxSpace`, so its box is `max(pseudostate_min, packed_subs)` — pseudostate min extents are profile fields (§11.15), not hardcoded.
 
 **Sibling submachines are packed here, not in phase 1** — packing requires the siblings already sized. **LR-rectpacking** (Domrös et al., IVAPP 2021): greedy width approximation → placement → compaction → whitespace elimination, `O(n log n)`. Take the LR variant; plain rectpacking's one-oversized-child special case was deleted by its own authors as unmaintainable and aspect-ratio-blind.
 
@@ -888,24 +893,6 @@ The likeliest failure is producing layouts that score well on `Cost` and that re
 
 **A side-by-side harness ships at P2**: the same chart through `dot -Tsvg`, elkjs, and scav. Blind scored review of the corpus at the P3 and P4 gates. Exit criterion is **"no worse than the incumbent on the transcribed corpus"** — not "visually reasonable."
 
-### 11.15 The profile
-
-A versioned, hashed artifact (§6), so it needs a field list rather than thirteen scattered references. All integers.
-
-| Group | Fields |
-|---|---|
-| geometry | `pad`, `grid_subdiv` (16) |
-| type | `font_size_grid`, `line_height_k_num`/`_k_den` (`k_den >= 1`) |
-| pseudostate sizes | per-`StateKind` min extent. `fork`/`join` are wide-and-thin boxes; nothing scales with arity (§7.2) |
-| packing | `dar_num`/`dar_den` (each in `[1, 2^10]`), `trybox`, SM tiebreak order |
-| cost | the nine Tier-2 weights, each with a ceiling that keeps `Σ Tier-2` inside §11.2's budget |
-| search | portfolio `K`, sweep count, congestion iterations, rip-up cap, spacing-inflation cap and increment |
-| id | `profile_id`, `profile_version` |
-
-Profile load **validates every bound and rejects out of range** — weight ceilings give the Tier-2 sum a proven bound, and bounded `dar_num` stops `total_area * dar_num` overflowing before `isqrt`.
-
-Named profiles ship as data: `compact`, `readable`. There is no `print` profile — fit-to-page would need the top-down layout §11.4 rejects.
-
 ### 11.13 Rejected
 
 **Topology-shape-metrics.** Needs planarity — statecharts are non-planar, planarization is NP-complete, and the literature's ceiling is "a few hundred vertices". Compound nesting isn't in the model; the bolt-on rests on c-planarity, open 1995–2022. Three chained NP-hard problems with documented excess bends and area blowup. HOLA replaces it; CoDaFlow rejected it for compound-plus-ports specifically. Keep only compaction by topological numbering (§11.2).
@@ -937,6 +924,24 @@ Consequences:
 - **Internal self-loops are the app's, end to end.** The app sums the band it needs into `h_before`/`h_after` and its builder draws the glyphs inside the returned `content_before`/`content_after` rect. There is no route, so `PathBox`/`PathClear`/`min_len` do not apply and the router is not involved. Layout sees only two integers.
 - **The reference builder distinguishes the three kinds**, pinned in the `drawlist/` golden. scav cannot mandate what a custom builder draws (§2, §3) — but a builder that draws them alike produces a diagram that is wrong about behavior.
 
+### 11.15 The profile
+
+A versioned, hashed artifact (§6), so it needs a field list rather than thirteen scattered references. All integers.
+
+| Group | Fields |
+|---|---|
+| geometry | `pad`, `grid_subdiv` (16) |
+| type | `font_size_grid`, `line_height_k_num`/`_k_den` (`k_den >= 1`) |
+| pseudostate sizes | per-`StateKind` min extent. `fork`/`join` are wide-and-thin boxes; nothing scales with arity (§7.2) |
+| packing | `dar_num`/`dar_den` (each in `[1, 2^10]`), `trybox`, SM tiebreak order |
+| cost | the eight Tier-2 weights, each with a ceiling keeping `Σ Tier-2` inside §11.2's budget |
+| search | portfolio `K`, sweep count, congestion iterations, rip-up cap, spacing-inflation cap and increment |
+| id | `profile_id`, `profile_version` |
+
+Profile load **validates every bound and rejects out of range** — weight ceilings give the Tier-2 sum a proven bound, and bounded `dar_num` stops `total_area * dar_num` overflowing before `isqrt`.
+
+Named profiles ship as data: `compact`, `readable`. There is no `print` profile — fit-to-page would need the top-down layout §11.4 rejects.
+
 ## 12. `DrawList` and rendering
 
 **`DrawList` is the render IR and the one drawing contract.** A builder produces it from model columns; a backend consumes it. Neither knows about the other, and neither is required to be scav's.
@@ -949,8 +954,8 @@ enum class PrimKind : uint32_t {
 struct Style {                   // interned; primitives index a style table
   uint32_t stroke_rgba, fill_rgba;
   int32_t  stroke_w;             // grid units
-  uint16_t dash;                 // index into a fixed dash table; 0 = solid
-  uint16_t font_size_grid;
+  uint16_t dash;                 // 0 = solid; app-defined otherwise
+  int32_t  font_size_grid;       // same width as the ABI (§11.9)
 };
 
 struct Prim {
@@ -972,6 +977,8 @@ struct DrawList {
   StringPool         text;
 };
 ```
+
+`points` and the scalars are fixed per kind, so a backend switches once and never guesses: `rect`/`rrect` 2 points (corners, `a` = radius) · `line` 2 · `polyline`/`path` N >= 2 (`path` closes, `polyline` does not) · `text` 1 (baseline origin, `payload` = the string) · `circle` 1 + `a` = radius · `arc` 1 + `a`/`b` = start/sweep in 1/64 degree · `image` 2 + `payload` = registered id. Any other count is invalid, and the `DrawList` validator rejects it.
 
 **Draw order is an explicit `depth`, not array position**, which makes `DrawList`s **composable by concatenation**: an app appends the reference builder's output to its own and depth resolves interleaving — no splice, no forking the builder to reach the middle of its stack.
 
@@ -1000,7 +1007,7 @@ Two properties worth keeping:
 
 **One metrics implementation** (§11.9) shared by builder and backend, with a golden test asserting they agree for every box. Otherwise text overflows and the diagram lies about its own contents.
 
-**Images: the app registers, the `DrawList` references.** `scav_image_register(ctx, id, bytes, len, w, h, mime)`. Raster only — arbitrary SVG fragments would be unimplementable in an ImGui backend and would break the one-IR property; vector content is primitives. Dimensions come from registration, not decoding, so no backend needs a decoder to *size* an image and the SVG backend needs none at all (base64 the bytes with their MIME type). Bytes hash into the SVG golden.
+**Images: the app registers, the `DrawList` references.** `scav_image_register(images, id, bytes, len, w, h, mime)`. Raster only — arbitrary SVG fragments would be unimplementable in an ImGui backend and would break the one-IR property; vector content is primitives. Dimensions come from registration, not decoding, so no backend needs a decoder to *size* an image and the SVG backend needs none at all (base64 the bytes with their MIME type). Bytes hash into the SVG golden.
 
 ### 12.1 The reference SVG backend
 
@@ -1026,7 +1033,7 @@ Two rules that are scav's:
 
 **Geometry columns carry a generation counter**, so a builder cannot run against a partially-updated model. Cheap, but it must exist. Stroke clearance is not a scav concern — an app reserves it via `BoxSpace` and draws inset (§8.1).
 
-**scav models no time, activity, or recency (§2).** The active configuration is a *set* — one leaf per active submachine plus ancestors — computed by the application. Immediate-mode: the app recomputes appearance from `(events, now)` every frame and scav retains nothing. A retained fade would put animation policy and mutable per-element state in scav, which is not its business.
+**scav models no time, activity, or recency (§2).** The active configuration is a *set* — one leaf per active submachine plus ancestors — computed by the application. Immediate-mode: the app recomputes appearance from `(events, now)` every frame and scav retains nothing. A retained fade would put animation policy and mutable per-element state in scav.
 
 ### 13.1 Debugger glue is the application's
 
@@ -1034,7 +1041,7 @@ For a running target pushing events over a socket or UART: the app opens the soc
 
 **scav defines no event vocabulary.** There is no `kind == "entered"` or `"took"` — runtime semantics are exactly what scav does not model, and the real space is far larger than any schema scav could guess: entered-via-history, guard-evaluated-false, choice-resolved, submachine-forked, deferred-event-consumed. Every dialect differs and the meaning lives in the plugin.
 
-Immediate-mode makes the result testable: appearance is a pure function of `(events, now)`, so feeding a recorded log with a fixed `now` reproduces a frame exactly. That property is why a retained decay was rejected.
+Testability is why: appearance is a pure function of `(events, now)`, so a recorded log with a fixed `now` reproduces a frame exactly.
 
 If an app embeds a script host (§8.3), the natural split is transport and decode native, event-to-appearance scripted — with **trace scripts in a separate interpreter state from appearance scripts**, since trace input is wall-clock-dependent and must be structurally unable to contaminate anything feeding a hashed layout.
 
@@ -1144,9 +1151,27 @@ A program that returns the graph (Lua etc.) is not the on-disk format: not diffa
 
 Flat `extern "C"`, opaque handles, POD structs, out-params, error enums, `scav_abi_version()`.
 
+```c
+typedef int32_t  scav_result;                // 0 = ok; negative = error enum
+typedef uint32_t scav_column_id;
+typedef uint32_t scav_router_id;
+typedef struct { uint32_t off, len; } scav_span;   // StrRef and Span both
+typedef struct { int32_t w, h; } scav_extent;
+typedef struct { int32_t x, y; } scav_point;
+typedef struct { int32_t x, y, w, h; } scav_rect;  // and scav_placed
+```
+
+**Handles: four, each with a create and a destroy.** `scav_chart` (the model), `scav_load` (a multi-document load session, §16.2), `scav_metrics` (font tables), `scav_images` (the raster registry a backend reads). Destroy is idempotent on `NULL`; a `scav_chart` outlives every `scav_span` handed out from it, and nothing else owns model memory. `scav_metrics_create(const scav_byte* ttf, uint32_t len, scav_metrics** out)` — the bundled font is embedded, so `NULL` selects it. `scav_metrics` is immutable after create, so it is shared across threads without locking; the other three are single-threaded-per-instance, and any number of instances may be used concurrently. There is no library-global state and no init call.
+
+**The profile reaches layout inside `scav_layout_opts`**, as a `scav_profile` POD by value plus the `scav_router_id` — not a handle, not a file path, so its bytes hash into the golden (§6) directly. `scav_profile_named(const char*, scav_profile* out)` fills it from a shipped profile; `scav_profile_validate` is called by `scav_layout_run` regardless (§11.15).
+
+**Column access** needs three calls, not one: `scav_column_find(chart, name, scav_column_id* out)`, `scav_column_data(chart, id, const scav_byte** out, uint32_t* stride)`, `scav_column_count(chart, id, uint32_t* out)`. A builder cannot walk a column without the row count.
+
+**Out-param protocol**, uniform: pass `cap = 0` with a non-null `out_count` to query the required count, then call again with a buffer. `cap` too small returns `SCAV_E_CAPACITY` and writes the required count; it never truncates silently. Allocation is via one injected allocator, set per handle at create.
+
 **ABI type rule:** every type crossing the boundary is either an opaque handle or a fixed-layout POD whose only variable-length members are `{uint32 off, len}` spans into separately-exposed flat arrays. **No `std::` type ever crosses** — `struct Chart` is C++-internal and reaches the ABI only as `scav_chart*`. Padding is pinned; single-field id structs must not be flattened to ints by the binding generator (golden ABI case).
 
-Owed and currently unspecified: memory ownership and a destroy call per handle, allocator injection, thread-safety per call, string access (`scav_str(h, StrRef, const scav_byte** out, uint32_t* len)` — the pool is not NUL-terminated), and the full error enum.
+Strings come out as spans, never `char*`: `scav_str(const scav_chart*, scav_span, const scav_byte** out, uint32_t* len)` — the pool is not NUL-terminated. The error enum is owed; every other ABI obligation is settled above.
 
 Key entry points:
 
@@ -1159,7 +1184,7 @@ scav_result scav_column_data(const scav_chart*, scav_column_id,
                              const scav_byte** out, uint32_t* stride);
 scav_result scav_measure_text(const scav_metrics*, const scav_byte* utf8_nfc, uint32_t len,
                               int32_t font_size_grid, scav_extent* out);
-scav_result scav_image_register(scav_ctx*, const char* id, const scav_byte*, uint32_t len,
+scav_result scav_image_register(scav_images*, const char* id, const scav_byte*, uint32_t len,
                                 int32_t w, int32_t h, const char* mime);
 scav_result scav_router_by_name(const scav_byte* name, uint32_t len, scav_router_id* out);
 ```
@@ -1204,7 +1229,7 @@ struct scav_pending { const char* path; uint32_t len; uint64_t expect_hash; scav
 
 `add` the root, read `pending`, resolve each however you like, `add` each, repeat until empty, `finish`. The app owns fetch policy, caching, and parallelism; cycles and unresolvable paths are core's errors; `content_hash` is verified inside `add`, where the bytes and the expectation are both in hand; and `name` makes diagnostics say `wifi.scav:12` rather than `<buffer>:12`.
 
-This works identically over a filesystem, HTTP, a zip, or memory, and it keeps a resolver callback out of a library whose no-callback property is what makes §16.1 work.
+Works identically over a filesystem, HTTP, a zip, or memory, and preserves §16.1's no-callback property.
 
 **Nothing is hidden.** `scav_parse` on a byte span is always available and never bypassed; `scav_read_file` and `scav_load_file` are conveniences that compose it, skippable in full. Same layering as the reference builder (§8.1.1): the functions that convert text into the columnar model are primitives, and the batteries sit on top.
 
@@ -1240,7 +1265,7 @@ Estimates below are production LOC; multiply by 1.5–2 for the mandated test cl
 **P2 — `DrawList`, reference builder, SVG backend, baseline harness.** The `DrawList` type, a builder covering standard appearance, the SVG backend with integer body and single `viewBox`, `textLength`, per-element classes, golden harness, and the `dot`/elkjs/scav side-by-side (§11.12).
 *Exit:* `scav render` produces a readable diagram; baseline harness runs.
 
-**P3 — real layout.** Layered rank, median or sifting ordering, Brandes & Köpf coordinates, bottom-up size fixpoint with hysteresis, LR-rectpacking with `box` fallback.
+**P3 — real layout.** Layered rank, median or sifting ordering, Brandes & Köpf coordinates, bottom-up sizing (fixed pass count, no hysteresis), LR-rectpacking with `box` fallback.
 *Exit:* better than P1 on the Tier-2 vector **and no worse than the incumbent** on blind review.
 
 **P4 — orthogonal routing.** Router behind the vtable, channel-representative graph, separated OVG, A* with bend state, obstacles including submachines and placed boxes, LCA-owned separator channels, combinatorial nudging with integer offsets, `PathBox` strip placement, bench harness over ≥2 routers.
