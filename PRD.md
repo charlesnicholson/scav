@@ -256,7 +256,7 @@ Odd and prime thread counts are mandatory — they expose reduction-shape bugs p
 - **Vendored stable merge sort** for any sort whose result reaches output. `std::sort` is permitted only in tests.
 - All rectangles are **half-open**: `[x0,x1) x [y0,y1)`.
 - Fixed iteration counts. Every retry loop states its cap, its integer increment schedule, its subject order, and its terminal diagnostic.
-- Diagnostics are collected per shard, concatenated in shard order, then sorted by `(code, subject_kind, subject_index)`. They are part of the golden artifact.
+- Diagnostics are collected per shard, concatenated in shard order, then sorted by `(code, subject_kind, subject_index)`. They are part of the golden artifact. **A diagnostic carries nothing but that triple** — source file, line, column, and the offending text are all derivable by walking to the statement's `src` span (§7), so no layer has to thread positions through its call stack.
 - **Text is normalized at parse**: LF-only, BOM stripped, NFC. Ship `.gitattributes` with `*.scav -text`. Without this, `core.autocrlf` on Windows and NFD on macOS change the string pool — same commit, different hash. NFC needs a table: it is a **P0** dependency.
 - Threading via a shim over pthreads / Win32 / emscripten-pthreads / **null (inline)**. Not C11 `<threads.h>`. The null backend makes WASI and the matrix work.
 
@@ -289,6 +289,15 @@ Enforce that structurally rather than by review: wrap it in a `lookup_map<K,V>` 
 ## 7. Data model
 
 **Not object-oriented. Flat arrays of POD aggregates linked by ordinal.** Column boundaries follow natural groupings, not individual fields.
+
+**The point is end-to-end traceability, and that is the real payoff of columnar storage** — ahead of serialization mechanics, determinism, or cache behaviour. The model is the single place to look. Any function anywhere in the pipeline can walk from a rendered primitive back to the source bytes that produced it, by following columns:
+
+```
+Prim.origin  ->  entity  ->  DocId + Statement  ->  source span  ->  the authored text
+     (§12)                        (below)              (below)
+```
+
+No context object, no side table, no query to another layer, no callback to ask. That is why the source documents themselves live in columns rather than being consumed and discarded at parse time.
 
 **Terminology: `state` and `submachine`.** A composite state contains one or more submachines; more than one makes it concurrent. Not "region" — that is UML/ELK vocabulary, and libhsm already says submachine (`*_MACHINE_ID`, `<Parent>_submachine`). Applies to the ERD, the C ABI, diagnostics, and the text format.
 
@@ -354,13 +363,40 @@ struct Chart {
   StrRef                   name;
   SubmachineId                 root_submachine;
 };
-// Pre-resolution only. Resolution flattens these into one Chart (§9); nothing
-// downstream of resolution ever sees a Project.
-struct Project {
-  std::vector<Chart>  docs;
-  std::vector<StrRef> doc_paths;
-};
+// There is no Project type. Documents are rows in one model (above), not
+// separate charts to be merged.
 ```
+
+**Documents, statements, and source text are columns too.**
+
+```cpp
+struct Document {
+  StrRef   path, alias;
+  uint64_t content_hash;
+  Span     text;         // -> src_bytes[], verbatim authored bytes
+  Span     statements;    // -> stmts[], authored source order
+  Span     includes;      // -> includes[]
+};
+
+struct Statement {        // one per authored construct, in source order
+  ElemKind kind;
+  uint32_t ordinal;       // the entity it declares
+  Span     src;           // -> src_bytes[]; valid iff not mutated since load
+  Span     comments;      // trivia: leading, trailing, own-line
+};
+
+struct Include { StrRef path, alias; uint64_t hash; DocId target; StateId host; };
+```
+
+Every `State`, `Submachine`, and `Transition` row carries a `DocId`. **Entities from every document live in the same arrays**, so there is no flattening step and no second model shape — the documents were never separate objects, only a partition of one model (§9).
+
+`src_bytes` is a **separate pool from `strings`**: the string pool is interned, deduplicated, and canonically re-sorted before hashing, while source text is verbatim and must never be touched.
+
+**Load-established, not serialized, not hashed.** Writing a document *produces* text, so storing the text it was read from is not serialization. The format hash covers canonical printed output, not the possibly-non-canonical bytes that were loaded. `DocId` is likewise implied by which file an entity is written into.
+
+**A `Statement.src` span is valid iff that statement has not been mutated since load.** An editor mutating a statement clears its span, so source mapping degrades gracefully — unmodified statements map to source, modified ones stop mapping until the next canonical print refreshes the pool.
+
+**A model is one document network rooted at one document.** Two unrelated charts belong in two models; nothing structurally prevents intermingling them, and the result would be meaningless.
 
 **Id stability is append-only with tombstones plus a generation counter.** `StateId` is both ordinal and array index, so compaction would invalidate every prior layout, every app-side column keyed by `StateId`, and the `w_st` stability term — turning it into a churn *maximizer*. Deletion tombstones (`gen = 0`); ids are never reused; **all columns tombstone in lockstep**. Compaction is an explicit operation and an output change, versioned like a weight change.
 
@@ -616,9 +652,9 @@ On:main/Idle         submachine name, when named
 ```
 
 - **Pseudostates get synthetic stable names** for addressing: `$initial`, `$final`, `$choice.0`, `$history`. Ordinal-suffixed for uniqueness within a submachine, and exempt from §10's duplicate-name check on authored names.
-- **Resolution flattens.** An included chart's root submachine is spliced into the including state's submachine list, and the result is **one flat `Chart`**. Layout, measurement, and rendering never see documents — by the time layout runs there is one containment tree, so there is no cross-document LCA, no splice at layout time, and no project-level entry point. This is the whole reason the earlier `Project`-of-independent-charts shape is gone.
-- **Provenance survives as a column.** `scav.doc` is a derived-persistent column (§7) recording the **include instance** each entity came from — instance, not path, so including one document twice yields two distinguishable sets. A renderer that wants to tint sub-document submachines differently reads it; layout ignores it.
-- After flattening, ids are local to the flattened chart, so a transition endpoint is a plain `StateId`. `DocId` is provenance, not addressing.
+- **Resolution links; it does not flatten.** Every document's entities already live in the same arrays with a `DocId` (§7), so there is nothing to splice. An `Include` names the `host` state whose submachine list gains the included document's root, and containment then crosses documents because `State.submachines` holds global ids. Layout sees one containment tree without a transformation having occurred — hence no cross-document LCA, no splice pass, and no project handle.
+- **Provenance is a field, not a computed column.** `DocId` on each row records the **include instance** — instance rather than path, so including one document twice yields two distinguishable sets. A renderer tinting sub-document submachines reads it; layout ignores it.
+- Transition endpoints are plain `StateId`s, because ids were global from the start.
 - Names namespace across a boundary by taking the alias as a path prefix: `wifi/On/Ready`. Duplicate top-level names in two documents therefore cannot collide.
 - Includes may pin `content_hash`. Include cycles are a hard error.
 - Relative hints travel with an included chart; **absolute pins do not** — a pin is authored against a document's own frame and is meaningless in a host frame.
@@ -632,7 +668,8 @@ Mandatory, in core, structural only — `layout` reads ordinals and crashes on g
 - dangling `StateId`/`SubmachineId`/`ColumnId`; `kInvalid` where a value is required; tombstoned targets
 - duplicate authored names within a submachine
 - include cycles, unresolvable include paths
-- unresolvable cross-document paths, checked at the **resolution phase** — before flattening (§9), since afterwards every reference is local
+- unresolvable cross-document paths, checked at the **resolution phase** (§9)
+- a `Statement.src` span outside its document's `text` span
 - `Include.alias` uniqueness, and alias-vs-top-level-name collision
 - authored names must not contain the path metacharacters `/ : @ $` (§9)
 - more than one `initial` per submachine; degree per pseudostate kind — `fork` is 1-in/N-out, `join` is N-in/1-out, `choice`/`junction` are N-in/N-out. Structural only: no semantic checks (§7.2)
@@ -1135,7 +1172,9 @@ Reserved: `chart` `include` `state` `submachine` `trans` `kind` `external` `inte
 | attribute order | sorted by key bytes; within one repeated key, insertion order |
 | line breaking | by a column budget — **a versioned profile field** (§11.15), since it is part of the output contract |
 
-**Structure is never reordered.** Attributes may be sorted; states and submachines may not, because document order is the primary layout hint (§14). Comments are preserved with position — leading, trailing, own-line — which is the expensive half of the printer.
+**Structure is never reordered.** Attributes may be sorted; states and submachines may not, because document order is the primary layout hint (§14). Comments are preserved with position — leading, trailing, own-line — which is the expensive half of the printer, and they live on `Statement.comments` (§7) rather than in a side structure.
+
+**One printer, and it always reconstructs.** The stored source bytes (§7) are *not* a printing shortcut. Emitting untouched statements verbatim would preserve their original formatting, and two semantically identical models read from differently-formatted files would then print differently — which breaks canonicity, and canonicity is what the format hash and the merge story rest on. So printing always reconstructs from the model, gofmt-style, and a repo is expected to be canonical (`scav fmt` in a pre-commit hook). Source bytes exist for **diagnostics and source mapping**, not for output.
 
 Also required: text normalized on read (§6); extension columns round-trip losslessly including unknown ones (§8).
 
@@ -1195,7 +1234,25 @@ Editor commands do not cross the C boundary as objects; that layer's API is opco
 
 **Core performs no file I/O.** It parses from a byte span; the application supplies bytes. This is required for the browser and for bindings, and it is good hygiene regardless.
 
-Include resolution is therefore **iterative and data-driven, not a callback**: parse a document, get back the list of include paths it could not resolve, fetch them however you like, hand them back, repeat until closed. That works identically over a filesystem, HTTP, a zip, or memory — and it avoids putting a resolver callback into a library whose no-callback property is what makes §16.1 work.
+Include resolution is therefore **iterative and data-driven, not a callback** — a load session accumulating documents and reporting what it still needs:
+
+```c
+scav_result scav_load_begin(scav_load** out);
+scav_result scav_load_add(scav_load*, const scav_byte*, uint32_t len, const char* name);
+scav_result scav_load_pending(const scav_load*, const scav_pending** out, uint32_t* n);
+scav_result scav_load_finish(scav_load*, scav_chart** out);
+void        scav_load_destroy(scav_load*);
+
+struct scav_pending { const char* path; uint32_t len; uint64_t expect_hash; scav_doc_id from; };
+```
+
+`add` the root, read `pending`, resolve each however you like, `add` each, repeat until empty, `finish`. The app owns fetch policy, caching, and parallelism; cycles and unresolvable paths are core's errors; `content_hash` is verified inside `add`, where the bytes and the expectation are both in hand; and `name` makes diagnostics say `wifi.scav:12` rather than `<buffer>:12`.
+
+This works identically over a filesystem, HTTP, a zip, or memory, and it keeps a resolver callback out of a library whose no-callback property is what makes §16.1 work.
+
+**Nothing is hidden.** `scav_parse` on a byte span is always available and never bypassed; `scav_read_file` and `scav_load_file` are conveniences that compose it, skippable in full. Same layering as the reference builder (§8.1.1): the functions that convert text into the columnar model are primitives, and the batteries sit on top.
+
+**Streaming sources were considered and rejected.** A `.scav` file is kilobytes, so the problem streaming solves — large payloads, memory-constrained parsing — does not arise, and bytes are a simpler composition point than a stream type. Revisit only if incremental parse becomes an editor-responsiveness requirement.
 
 ### 16.3 The path to a browser viewer
 
