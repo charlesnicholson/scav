@@ -221,10 +221,13 @@ Measure branch coverage; an untested file fails the build. No percentage target.
 **Byte-identical layout output across the full matrix.** Canonical matrix, defined once and referenced everywhere:
 
 ```
-{macOS, Linux, Windows} x {clang, gcc, MSVC} x {libstdc++, libc++, MSVC STL}
+{ macOS/clang/libc++, Linux/clang/libc++, Linux/clang/libstdc++,
+  Linux/gcc/libstdc++, Windows/MSVC/MSVC STL, Windows/clang/MSVC STL }
   x {Debug, Release, testable} x {1,2,3,5,8,13,16} threads
-  + wasm32-wasi vs native
+  + wasm32-wasi single-threaded
 ```
+
+Six realizable platform triples, not a 27-cell cross product — most combinations of that product do not exist.
 
 Odd and prime thread counts are mandatory — they expose reduction-shape bugs powers of two hide. Tier it: a small blocking subset per PR, full grid nightly and advisory, or a trickle of one-cell failures halts velocity.
 
@@ -239,7 +242,7 @@ Odd and prime thread counts are mandatory — they expose reduction-shape bugs p
 - **Vendored stable merge sort** for any sort whose result reaches output. `std::sort` is permitted only in tests.
 - All rectangles are **half-open**: `[x0,x1) x [y0,y1)`.
 - Fixed iteration counts. Every retry loop states its cap, its integer increment schedule, its subject order, and its terminal diagnostic.
-- Diagnostics are collected per shard, concatenated in shard order, then sorted by `(code, subject_kind, subject_index)`. They are part of the golden artifact. **A diagnostic carries nothing but that triple** — source file, line, column, and the offending text are all derivable by walking to the statement's `src` span (§7), so no layer has to thread positions through its call stack.
+- Diagnostics are collected per shard, concatenated in shard order, then sorted by `(code, subject_kind, subject_index)`. They are part of the golden artifact. **A diagnostic carries nothing but that triple** — file, line, column, and the offending text are derived by walking to the statement's `src` span (§7), so no layer threads positions through its call stack. On a model mutated since load that span is cleared, and a diagnostic degrades to the triple alone; goldens run on unmutated models, so the artifact is unaffected.
 - **Text is normalized at parse**: LF-only, BOM stripped, NFC. Ship `.gitattributes` with `*.scav -text`. Without this, `core.autocrlf` on Windows and NFD on macOS change the string pool — same commit, different hash. NFC needs a table: it is a **P0** dependency.
 - Threading via a shim over pthreads / Win32 / **null (inline)**. Not C11 `<threads.h>`. The null backend makes WASI and the matrix work.
 
@@ -247,7 +250,7 @@ Odd and prime thread counts are mandatory — they expose reduction-shape bugs p
 
 | | Why |
 |---|---|
-| `int`, `long`, `unsigned`, `short`, plain `char` | `long` is 32-bit on MSVC (LLP64); plain `char` signedness differs x86 vs ARM, corrupting id hashing |
+| `int`, `long`, `unsigned`, `short`, plain `char` | `long` is 32-bit on MSVC (LLP64); plain `char` signedness differs x86 vs ARM, corrupting id hashing. `const char*` is permitted at the C ABI for NUL-terminated *input* names only, never stored in a record and never hashed |
 | `size_t` in value computation | 32-bit on wasm32; unsigned wrap is *defined*, so it silently gives a different correct answer per platform |
 | `std::hash` | Permitted to differ **between runs of the same binary** |
 | **Iterating** `unordered_map`/`_set` where order can reach output | Iteration order varies across all three standard libraries. Key lookup is fine and fast — see below |
@@ -289,6 +292,9 @@ struct SubmachineId { uint32_t v; };
 struct TransId  { uint32_t v; };
 struct StrRef   { uint32_t off, len; };            // into StringPool
 struct Span     { uint32_t off, len; };            // into a side array
+struct Point    { int32_t x, y; };                 // grid units (§11.2)
+struct Extent   { int32_t w, h; };
+struct Rect     { int32_t x, y, w, h; };           // half-open (§6)
 // Ids are global from the start, so endpoints are plain StateIds (§9).
 
 constexpr uint32_t kInvalid = 0xFFFF'FFFFu;        // per-id sentinel
@@ -422,7 +428,7 @@ Fork/join is the case that most tempts scav into having an opinion, so the bound
 
 Different projects answer these differently and will collide. scav answers none of them. **It must nonetheless be able to draw every one of these topologies**, which it can, because all of them are a pseudostate plus transitions.
 
-**The bar is a fixed-size box, and layout does nothing fork-specific.** A fork/join pseudostate is an ordinary small box — wide and thin — from the profile's per-`StateKind` min extent (§11.15). Layout places it and routes N edges out of it; the builder draws a filled rect. That is what PlantUML does, and it is enough: the bar is the **same size for two branches as for five**, with the routes simply fanning out, including sideways.
+**The bar is a fixed-size box.** Layout's only fork-specific behaviour is negative: it takes the bar's extent from the profile like any other pseudostate, and `w_adj` excludes fork edges because adjacency above arity 2 is unsatisfiable (§11.8) — no fan-out algorithm, no arity scaling. A fork/join pseudostate is an ordinary small box — wide and thin — from the profile's per-`StateKind` min extent (§11.15). Layout places it and routes N edges out of it; the builder draws a filled rect. That is what PlantUML does, and it is enough: the bar is the **same size for two branches as for five**, with the routes simply fanning out, including sideways.
 
 Bar orientation is also not scav's: an app wanting a vertical bar requests a tall narrow `BoxSpace`.
 
@@ -627,7 +633,7 @@ wifi/On/Ready        cross-document, via include alias
 ```
 
 - **Unnamed pseudostates get synthetic stable names** for addressing: `$initial`, `$final`, `$history`, ordinal-suffixed for uniqueness within a submachine, and exempt from §10's duplicate-name check. These are an API and diagnostic spelling only — the grammar's `ident` admits no `$`, and the format reaches them via `*` (§15). A pseudostate an author needs to name is named, like `PreConfig kind choice`.
-- **Resolution links; it does not flatten** (§7). An `Include` names the `host` state whose submachine list gains the included document's root; containment crosses documents because `State.submachines` holds global ids. Layout sees one containment tree with no transformation having occurred — hence no cross-document LCA, no splice pass, no project handle.
+- **Resolution links; it does not flatten** (§7). An `Include` names the `host` state whose submachine list gains the included document's root, or `kInvalid` for a chart-level include, which hosts it on the root submachine; containment crosses documents because `State.submachines` holds global ids. Layout sees one containment tree with no transformation having occurred — hence no cross-document LCA, no splice pass, no project handle.
 - **Provenance is a field, not a computed column.** `DocId` on each row records the **include instance** — instance rather than path, so including one document twice yields two distinguishable sets. A renderer tinting sub-document submachines reads it; layout ignores it.
 - Transition endpoints are plain `StateId`s, because ids were global from the start.
 - **An include alias is a bare path prefix**, not a sigil — hence §10's alias-vs-top-level-name collision check, which is what keeps the prefix unambiguous. Duplicate top-level names in two documents therefore cannot collide.
@@ -647,8 +653,8 @@ Mandatory, in core, structural only — `layout` reads ordinals and crashes on g
 - a `Statement.src` span outside its document's `text` span
 - `Include.alias` uniqueness, and alias-vs-top-level-name collision
 - authored names must not contain the path metacharacters `/ : $`, nor `@` (the format's attribute sigil, §15)
-- more than one `initial` per submachine; degree per pseudostate kind — `fork` is 1-in/N-out, `join` is N-in/1-out, `choice`/`junction` are N-in/N-out. Structural only: no semantic checks (§7.2)
-- coordinate-domain violations on input (§11.2)
+- more than one `initial` per submachine. **No degree checks per pseudostate kind** — "a fork has one incoming edge" is a dialect rule, and §7.2 requires every topology to be drawable
+- authored `scav:pin` coordinates outside §11.2's domain — the only authored geometry there is
 
 Semantic lint is out of scope. Identifier-sanitization collision checks belong to the codegen backend, not core.
 
@@ -807,7 +813,7 @@ Precedent: **UML 2.5.1 §15.2.4** ActivityEdge connector — "purely notational"
 
 ### 11.7a Geometry columns — the layout output contract
 
-This list *is* the layout output ABI — there is no bespoke result type (§16) — and every builder consumes all of it. All are `derived`, all root-absolute grid units, all `derived-persistent` per §7.
+This list *is* the layout output ABI — there is no bespoke result type (§16) — and every builder consumes all of it. All are `derived-persistent` per §7 and all `pod`-typed (§8) except `scav.geom.route` (`span`) and `scav.geom.gen` (`u32`). Coordinates are root-absolute grid units.
 
 | Column | Parallel to | Holds |
 |---|---|---|
@@ -820,7 +826,7 @@ This list *is* the layout output ABI — there is no bespoke result type (§16) 
 | `scav.geom.port` | `TransId` | `Span` into `scav.geom.portslot` |
 | `scav.geom.portslot` | port ordinal | `{int32 x, y; uint32 side, boundary_depth}` |
 | `scav.geom.chart` | chart | root bounding box |
-| `scav.geom.gen` | chart | generation counter (§13) — **not hashed, not serialized** |
+| `scav.geom.gen` | chart | generation counter (§13) — `u32`, **not hashed, not serialized** |
 
 `ElemKind::point` exists so the point and port-slot arrays are real columns rather than side arrays outside the column rules; entity count is the column length. A transition splits into one port per boundary it crosses (§11.1), not two — a depth-16 edge has up to 15, and the structural hash covers all their sides, so one row per transition cannot hold them.
 
@@ -993,15 +999,15 @@ struct DrawList {
 
 `points` and the scalars are fixed per kind, so a backend switches once and never guesses: `rect`/`rrect` 2 points (corners, `a` = radius) · `line` 2 · `polyline`/`path` N >= 2 (`path` closes, `polyline` does not) · `text` 1 (baseline origin, `payload` = the string) · `circle` 1 + `a` = radius · `arc` 1 + `a`/`b` = start/sweep in 1/64 degree · `image` 2 + `payload` = registered id. Any other count is invalid, and the `DrawList` validator rejects it.
 
-**Draw order is an explicit `depth`, not array position**, which makes `DrawList`s **composable by concatenation**: an app appends the reference builder's output to its own and depth resolves interleaving — no splice, no forking the builder to reach the middle of its stack.
+**Draw order is an explicit `depth`, not array position**, which makes `DrawList`s **appendable**: an app appends the reference builder's output to its own and depth resolves interleaving — no splice, no forking the builder to reach the middle of its stack. Append is not raw concatenation, because `style`, `clip`, `points`, and `payload` are indices into per-list arrays; `scav_drawlist_append` rebases all four, which is the whole reason it is a shipped function rather than a documented `insert()` call.
 
-A backend either **stable-orders by `(depth, emission_index)`** for painter's algorithm or writes depth as z under orthographic projection. That key is a total order, so §6's comparator rule holds without relying on sort stability. Depth-as-z covers opaque content only; a blended backend still sorts, using the same integer.
+A backend either **orders by `(depth, emission_index)`** for painter's algorithm or writes depth as z under orthographic projection. That key is a total order, so §6's comparator rule holds without relying on sort stability. Depth-as-z covers opaque content only; a blended backend still sorts, using the same integer.
 
 **scav reserves no depth bands and assigns no depth semantics.** Emitters take depth as a parameter — `emit_state(dl, chart, depth)` — so the caller owns the numbering. Reserved bands would have been scav deciding an ordering the app should own, and they are meaningless to an app that writes its own builder. The convenience wrapper picks *some* defaults, documented as that one function's choice rather than as a namespace: if you need to interleave, call the emitters and pass your own numbers.
 
 **Clipping is a per-primitive index, not a `clip_push`/`clip_pop` pair.** Stateful scope primitives cannot survive a depth sort — sorting separates a pair from the primitives it was scoping. So a `Prim` names its clip rect directly, which also lets a GPU backend batch by scissor rather than replaying a stack.
 
-**Identity is a back-reference, not a class string.** `Prim.origin` is an `ElemRef`, with a `none` kind for primitives belonging to no entity. A backend wanting CSS classes *synthesizes* them — `class="scav-state-1234"` is the SVG backend's projection, not IR content. String classes would leak an SVG concept into an IR that also feeds ImGui, and add interning to a hot path.
+**Identity is a back-reference, not a class string.** `Prim.origin` is an `ElemRef`, with a `none` kind for primitives belonging to no entity. A backend wanting CSS classes *synthesizes* them — `class="scav-state scav-id-1234"` (§12.1) is the SVG backend's projection, not IR content. String classes would leak an SVG concept into an IR that also feeds ImGui, and add interning to a hot path.
 
 **Style is a separate table, which is what makes §13 cheap.** Live recoloring mutates `styles[]` and leaves `prims`, `points`, and `text` cached. Fat per-primitive style forces a full rebuild every frame.
 
@@ -1016,7 +1022,7 @@ backend:  DrawList -> ImGui calls | SVG text | PDF | ...  // app's; scav ships S
 
 Two properties worth keeping:
 
-**Golden-test the `DrawList`, not the SVG.** It is canonical POD with no formatting degrees of freedom, a strictly better comparison surface than serialized text. Canonical form is **sorted by `(depth, emission_index)`**, with `styles[]` and `clips[]` deduplicated and sorted by field bytes — which is why every field of `Style` is 4 bytes wide: §6 forbids byte-comparing a struct with padding, whose contents are unspecified. Sorting the golden means it compares *what gets drawn*, so two builders that produce the same picture by different emission orders compare equal. SVG emission then gets a thin serializer test rather than carrying the whole rendering contract.
+**Golden-test the `DrawList`, not the SVG.** It is canonical POD with no formatting degrees of freedom, a strictly better comparison surface than serialized text. What the `drawlist/` golden pins is the *reference* builder's output — a regression test on shipped code, not a claim on what any builder must draw (§2). Canonical form sorts by **`(depth, prim_bytes)`** — content, not emission order — with `styles[]` and `clips[]` deduplicated and sorted by field bytes, and `style`/`clip` indices rewritten to the deduplicated tables. Every field of `Style` and `Prim` is therefore 4 bytes wide: §6 forbids byte-comparing a struct with padding, whose contents are unspecified. Sorting on content is what makes two builders that draw the same picture in different orders compare equal; an `emission_index` tiebreak would not. Sorting the golden means it compares *what gets drawn*, so two builders that produce the same picture by different emission orders compare equal. SVG emission then gets a thin serializer test rather than carrying the whole rendering contract.
 
 **One metrics implementation** (§11.9) shared by builder and backend, with a golden test asserting they agree for every box. Otherwise text overflows and the diagram lies about its own contents.
 
@@ -1030,7 +1036,7 @@ Headless `scav render` is the first user-visible deliverable (P2), so this one s
 
 Renderer-vs-metrics agreement, in order: one bundled font, named with a fallback · `textLength` with `lengthAdjust="spacing"` from our own advance sum, turning overflow into slightly loose spacing (Graphviz emits none, which is why its SVG overflows under substitution) · `font-kerning: none` per §11.9.1 · explicit padding, never sizing to exactly the text width · `--embed-font` base64ing the bundled TTF whole into `<defs><style>@font-face`, the only exact agreement that keeps text selectable — whole, not subsetted, because a subsetter is the expensive part of the PDF backend and v1 does not have one. **Never convert text to paths** — needs the outline stack we avoid, discards selection and accessibility.
 
-Emit a stable `class` per element (`scav-state scav-id-1234`) so external CSS can restyle a static SVG.
+Emit a stable `class` per element, synthesized from `Prim.origin`: `scav-state scav-id-1234`. External CSS can then restyle a static SVG.
 
 PDF is out of v1: xref tables, content streams, and a real TTF subsetter, ~1,500–3,000 LOC, most of it duplicating `--embed-font`. SVG→PDF via any converter covers it.
 
@@ -1132,6 +1138,7 @@ chart eg91 "EG91 modem driver" {
 **Design rules**, each fixing a defect found by writing examples:
 
 - **Keyword-led statements** (`include` `state` `submachine` `trans` `@`) — dispatch is one token. Identifier-led transitions parse but break skimmability.
+- **States directly inside a block belong to an implicit submachine, ordinal 0, unnamed.** `chart` and every `state` block get one; `submachine` is only written when there is a second, or when it needs a name or label. Without this, the common single-region state would need a wrapper line, and the printer would have to decide whether to emit one — so the implicit form is also the canonical one, and printing an explicit sole unnamed submachine is not canonical.
 - **`,` separates every list, statements included** — juxtaposed statements are illegible on one line.
 - **`=` anchors key to value, `[...]` delimits lists** — variadic values without delimiters are LL(1) and unreadable.
 - **Positional string is the label**; everything else goes in the block.
@@ -1162,7 +1169,7 @@ Also required: text normalized on read (§6); extension columns round-trip lossl
 
 **Cost.** Lexer ~400 LOC including `"""` handling and comment capture, parser ~500, comment-preserving printer 3,000–5,000. The printer is the expensive half and a simpler grammar barely helps it.
 
-**JSON survives as an output-only projection** (`scav dump --json`) for programmatic consumers. Mechanical over columnar data, and not a format — it cannot hold multi-line strings, which §11.9's author-controlled label breaks require.
+**JSON survives as an output-only projection** (`scav dump --json`) for programmatic consumers. Mechanical over columnar data, and not a format: it has no comments, so §15's trivia cannot round-trip, and it has no canonical form, so two encoders disagree on byte output.
 
 A program that returns the graph (Lua etc.) is not the on-disk format: not diffable, no round-trip, reading it requires executing it, and a program can fail to terminate. The generative case is the C ABI plus bindings.
 
@@ -1247,7 +1254,12 @@ scav_result scav_load_finish(scav_load*, scav_chart** out);
 void        scav_load_destroy(scav_load*);
 
 typedef uint32_t scav_doc_id;              // the ABI spelling of DocId (§7)
-struct scav_pending { const char* path; uint32_t len; uint64_t expect_hash; scav_doc_id from; };
+struct scav_pending {                      // 20 bytes, no padding
+  scav_span   path;                        // into the load session's own byte pool
+  scav_span   expect_hash;                 // authored `algo:digest` text, empty if unpinned
+  scav_doc_id from;
+};
+scav_result scav_load_bytes(const scav_load*, scav_span, const scav_byte** out, uint32_t* len);
 ```
 
 `add` the root, read `pending`, resolve each however you like, `add` each, repeat until empty, `finish`. The app owns fetch policy, caching, and parallelism; cycles and unresolvable paths are core's errors; `content_hash` is verified inside `add`, where the bytes and the expectation are both in hand; and `name` makes diagnostics say `wifi.scav:12` rather than `<buffer>:12`.
@@ -1277,7 +1289,7 @@ One nuance: a JS emitter is a second implementation the goldens do not cover. So
 
 ## 17. Phases
 
-Estimates below are production LOC; multiply by 1.5–2 for the mandated test classes.
+Where a phase states production LOC, multiply by 1.5–2 for the mandated test classes.
 
 **P0 — core.** Columnar aggregates, tombstoned ids, extension columns, string pool with two-pass interning, NFC normalization, path addressing and cross-document resolution, includes with cycle detection, structural validation, the `.scav` lexer, parser, and comment-preserving canonical printer (§15), append-only builder API, ABI JSON extraction, **handle lifecycle — create/destroy per handle, allocator injection, thread-safety per call (§16.1 blocks on it)**, byte-span parsing with iterative include resolution (§16.2), doctest harness. Plus the **synthetic chart generator** and **2–3 hand-transcribed real charts** — synthetic graphs have uniform branching and no accidental structure, so tuning on them alone is a trap. Determinism discipline (§6) is in force from the first commit; it cannot be retrofitted.
 *Exit:* round-trip a depth-16 / 2k-state chart byte-identically, including unknown extension columns; ABI driven from Python.
@@ -1295,10 +1307,10 @@ Estimates below are production LOC; multiply by 1.5–2 for the mandated test cl
 *Exit:* zero edges through boxes; blind review no worse than incumbent.
 
 **P5 — determinism infrastructure.** Thread shim, model-derived sharding, counter-based RNG, index-ordered reduction, tiered matrix, sanitizer configs, scheduling-delay injector.
-*Exit:* one structural hash and one coordinate hash across the blocking matrix; full grid green nightly.
+*Exit:* one structural hash and one coordinate hash across the blocking matrix; full grid green nightly. The `wasm32-wasi` row lands with P8 — until then the matrix is the six native triples, and §6's discipline is what makes adding the row a build change rather than a redesign.
 
 **P6 — search and calibration.** Portfolio, local search, surrogate with ranking test, weight calibration, versioned profiles.
-*Exit:* full-layout latency at 2k states measured and published (§11.11's bet); a one-state edit produces a visually small diagram change on the corpus.
+*Exit:* full-layout latency at 2k states measured and published (§11.11's bet); on the corpus, a one-state edit produces a visually small diagram change **in the common case** — §11.11's honest limit means a cascade is a hint's job, not a gate failure.
 
 **P7 — `scavview`.** `libscavimgui`, pan, zoom, linear-scan hit test, hover/select, live highlighting (§13), relayout on request, and the Lua host (§8.3) with its sandbox and determinism obligations. Metrics-parity golden against the builder.
 *Exit:* navigate 2k states smoothly; drive highlighting from an external process with no relayout.
@@ -1337,6 +1349,7 @@ scav is MIT or Apache-2.0. Verified from LICENSE bytes; GitHub's detected field 
 | Adaptagrams (libavoid, libcola, libvpsc, …) | LGPL-2.1-or-later, uniformly | dynamic link only, or buy Monash's commercial license |
 | OGDF | GPL-2.0/3.0 | **blocker** — its exception is outbound-only |
 | Graphviz ≥14.1.4 | EPL-2.0, no Secondary License | cleanest, but `dot` is weak on compound graphs |
+| the bundled TTF | **[OPEN]** — must be OFL-1.1 or public domain | a layout-hash input, so it is redistributed inside the library (§16.1) |
 
 **Read the permissive reimplementations, not Adaptagrams** — Dwyer released the same algorithms twice:
 
