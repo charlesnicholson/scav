@@ -85,7 +85,7 @@ Applications, each supplying (or reusing) a builder and a backend:
 | App | Is |
 |---|---|
 | `scav` | CLI: `render` (chart -> SVG), `layout` (dump geometry columns), `fmt` (canonical print), `gen` (synthetic charts), `check` (validate), `dump --json` |
-| `scavview` | ImGui viewer [P7]. Embeds Lua so users can script appearance without rebuilding it (§8.3) |
+| `scavview` | ImGui viewer [P10]. Embeds Lua so users can script appearance without rebuilding it (§8.3) |
 | *yours* | e.g. an enemy-AI editor: links core+layout+draw, writes a builder that also draws threat radii, writes its own ImGui backend. No scav change required |
 
 `libscavdraw` depends on `libscavcore` but **not** on `libscavlayout`: a builder reads geometry columns, and does not care who wrote them. Enforced in CI, along with the rule that no library links anything above it.
@@ -105,7 +105,7 @@ src/draw/              DrawList type, text metrics, helpers, reference builder
 src/svg/               reference SVG backend
 src/imgui/             reference ImGui backend
 apps/cli/              the scav executable
-apps/view/             ImGui viewer + its Lua host [P7]
+apps/view/             ImGui viewer + its Lua host [P10]
 plugins/libhsm/        columns, attributes, builder contribution (importer + codegen: §17)
 plugins/scxml/         reference example: importer, exporter, builder contribution
 assets/font/           the bundled TTF — a layout-hash input, so versioned here
@@ -169,7 +169,7 @@ The bar for a discouraged construct is that a reader can still follow control fl
 
 **`scav_byte` is `unsigned char`, not `uint8_t`.** Only `char`, `unsigned char`, and `std::byte` may alias an object representation; `uint8_t` need not be one of them, so byte inspection through it is UB where it isn't. Not `std::byte` either: no arithmetic operators, and the C ABI needs `unsigned char`.
 
-**Runtime polymorphism has exactly one permitted site:** the internal router vtable (§11.5, a POD struct of function pointers, never crossing the C ABI). The P9 editor may add a second if the command-buffer mechanism wins over arena snapshots (§17). Everywhere else: static selection, separate binaries, or link-time choice.
+**Runtime polymorphism has exactly one permitted site:** the internal router vtable (§11.5, a POD struct of function pointers, never crossing the C ABI). The P12 editor may add a second if the command-buffer mechanism wins over arena snapshots (§17). Everywhere else: static selection, separate binaries, or link-time choice.
 
 ### 4.1 Data structure discipline
 
@@ -209,7 +209,9 @@ Testability comes from pure functions, not seams. **Mocks and interface seams ar
 
 All layout arithmetic is integer, so inlining cannot change results: the `testable` build must be byte-identical to release, and is a row in the matrix. Divergence means UB.
 
-Required test classes: **unit** (every internal function, doctest) · **functional** (full pipeline over the corpus) · **golden** (canonical serialization, structural hash, coordinate hash, **`DrawList`** — the primary surface, §12 — plus a thin SVG serializer check, ABI JSON) · **property** (round-trip identity, all refs resolve, zero box overlap, zero edge-through-box, surrogate cost ranks like exact cost) · **determinism** (§6) · **sanitizer** (UBSan signed-overflow+shift, ASan, TSan, MSan) · **fuzz** (deserializer and reference resolver — untrusted input) · **binding** (drive the C ABI from Python/ctypes in CI) · **baseline** (§11.12) · **regression** (every fixed bug leaves a test).
+Required test classes: **unit** (every internal function, doctest) · **functional** (full pipeline over the corpus) · **golden** (canonical serialization, structural hash, coordinate hash, **`DrawList`** — the primary surface, §12 — plus a thin SVG serializer check, ABI JSON) · **property** (round-trip identity, all refs resolve, zero box overlap, zero edge-through-box, surrogate cost ranks like exact cost) · **determinism** (§6) · **sanitizer** (UBSan signed-overflow+shift, ASan, TSan, MSan) · **fuzz** (deserializer and reference resolver — untrusted input) · **binding** (drive the C ABI from Python/ctypes in CI) · **baseline** (§11.12) · **performance** (see below) · **regression** (every fixed bug leaves a test).
+
+**Performance tests assert floors, not times.** Inputs are generated **in RAM** — a disk-backed benchmark measures the filesystem. Each asserts a throughput floor and a peak-memory-to-input ratio, per stage, on a named machine. Their job is catching accidental `O(n²)`, not tracking milliseconds, so they are **not** matrix rows and **not** goldens (§6): timing is not reproducible and must never gate a determinism claim.
 
 Measure branch coverage; an untested file fails the build. No percentage target.
 
@@ -702,7 +704,7 @@ Rules:
 - Validate the domain at `scav_layout_run` entry in **every** build (§8.1), and after each retry inflation.
 - Output is **root-absolute**, applied as one final `O(n)` transform over submachine-local internals (ELK's LCA-relative coordinates are a documented trap).
 
-Extent estimate: 2k states ≈ 8,000 x 3,200 pt = 128,000 x 51,200 units, ~4x headroom. **Validate at P1**; if real charts exceed it, reduce the grid to 1/8 pt rather than widening the domain.
+Extent estimate: 2k states ≈ 8,000 x 3,200 pt = 128,000 x 51,200 units, ~4x headroom. **Validate at P4**; if real charts exceed it, reduce the grid to 1/8 pt rather than widening the domain.
 
 Coordinate assignment uses two linear integer primitives, not a solver: **Brandes & Köpf** for cross-axis coordinates (GD 2001 — **read the erratum, arXiv:2008.01252**), and optimal topological numbering for compaction. On an integer grid with integer gaps and an acyclic constraint graph, non-overlap plus separation *is* longest-path.
 
@@ -895,7 +897,7 @@ That removes `w_st`, `PriorLayout` and its version key, per-session hysteresis, 
 
 The likeliest failure is producing layouts that score well on `Cost` and that readers find worse than the PlantUML output they already have. Nothing in a cost vector detects this.
 
-**A side-by-side harness ships at P2**: the same chart through `dot -Tsvg`, elkjs, and scav. Blind scored review of the corpus at the P3 and P4 gates. Exit criterion is **"no worse than the incumbent on the transcribed corpus"** — not "visually reasonable."
+**A side-by-side harness ships at P5**: the same chart through `dot -Tsvg`, elkjs, and scav. Blind scored review of the corpus at the P6 and P7 gates. Exit criterion is **"no worse than the incumbent on the transcribed corpus"** — not "visually reasonable."
 
 ### 11.13 Rejected
 
@@ -1015,7 +1017,7 @@ Two properties worth keeping:
 
 ### 12.1 The reference SVG backend
 
-Headless `scav render` is the first user-visible deliverable (P2), so this one ships.
+Headless `scav render` is the first user-visible deliverable (P5), so this one ships.
 
 **Emit the body in integer grid units with the entire scale in one integer `viewBox`.** Float-to-decimal conversion is not portable (MSVC UCRT, glibc, musl, and Apple libc disagree on the last digit) and `-ffp-contract=fast` is the default, so `grid * scale` differs by 1 ULP between Debug and Release. **No float is printed, ever.**
 
@@ -1238,7 +1240,7 @@ Editor commands do not cross the C boundary as objects; that layer's API is opco
 - **Prebuilt binaries**: macOS arm64/x86_64, Linux x86_64/aarch64 (manylinux), Windows x64, plus wasm. No compiler required to `pip install`.
 - **Self-contained**, because there are no runtime dependencies. The bundled font is **embedded in the library**, not loaded from a path — it is a layout-hash input and must travel with the code.
 
-**One hazard:** Python makes §8.1's integer purity easy to violate (`/` yields float), so setters reject non-integers and range-check, and space-computation helpers live in the shared library. Handle lifecycle was the other, and §16 now specifies it; it remains a **P0** deliverable because a binding cannot be written without it.
+**One hazard:** Python makes §8.1's integer purity easy to violate (`/` yields float), so setters reject non-integers and range-check, and space-computation helpers live in the shared library. Handle lifecycle was the other, and §16 now specifies it; it remains a **P3** deliverable because a binding cannot be written without it.
 
 ### 16.2 No file I/O in core
 
@@ -1290,36 +1292,49 @@ One nuance: a JS emitter is a second implementation the goldens do not cover. So
 
 Where a phase states production LOC, multiply by 1.5–2 for the mandated test classes.
 
-**P0 — core.** Columnar aggregates, tombstoned ids, extension columns, string pool with two-pass interning, NFC normalization, path addressing and cross-document resolution, includes with cycle detection, structural validation, the `.scav` lexer, parser, and comment-preserving canonical printer (§15), append-only builder API, ABI JSON extraction, **handle lifecycle — create/destroy per handle, allocator injection, thread-safety per call (§16.1 blocks on it)**, byte-span parsing with iterative include resolution (§16.2), doctest harness. Plus the **synthetic chart generator** and **2–3 hand-transcribed real charts** — synthetic graphs have uniform branching and no accidental structure, so tuning on them alone is a trap. Determinism discipline (§6) is in force from the first commit; it cannot be retrofitted.
-*Exit:* round-trip a depth-16 / 2k-state chart byte-identically, including unknown extension columns; ABI driven from Python.
+**P0 — the language, the lexer, and the parser.** Validate the format before anything depends on it. Recursive-descent parser over §15's grammar, one document, byte span in. Produces the **front-end slice of the model only** — `src_bytes`, `Document`, `Statement`, trivia, and the string pool with two-pass interning — because a statement stream is all a parser owes (§7). No entity arrays, no includes, no resolution. NFC normalization (§6) lands here since it happens at parse. Plus the **in-RAM synthetic document generator** and **2–3 hand-transcribed real charts** — synthetic input has uniform branching and no accidental structure, so validating on it alone is a trap.
 
-**P1 — metrics, space requests, layout skeleton.** Font metrics helper, the space tables, Phase 0 splitting, derived classification, trivial placement, straight-line routes, geometry columns. Validate the coordinate extent estimate (§11.2).
+**Recursive descent needs an explicit depth cap** with a diagnostic, not a stack overflow: nesting depth is attacker-controlled and 16 is the *design* target, not a limit the grammar enforces.
+
+**Performance is a P0 test class, not a later concern.** Generate documents in RAM — never on disk, which measures the wrong thing — and assert a throughput floor plus peak-memory-to-input ratio for lex and parse separately. The point is catching accidental `O(n²)`: string-pool growth, per-statement rescans, long comment runs, wide sibling lists. Timing is machine-dependent, so these are floors on a named machine and **not** part of §6's matrix or any golden.
+*Exit:* every corpus file parses; every diagnostic locates to a `Statement.src` span; fuzz clean on the lexer and parser; a hostile depth-10,000 document is rejected rather than crashing; throughput floors met at 100 MB in RAM.
+
+**P1 — model spine.** Entity arrays, ids as ordinals with tombstones, spans, extension columns and `ColumnDesc`, append-only builder API, structural validation (§10). Lowering from statements to entities. Determinism discipline (§6) is in force from the first commit; it cannot be retrofitted.
+*Exit:* build, validate, and walk a depth-16 / 2k-state chart from code with no text involved; then the same chart via P0's parser, structurally identical.
+
+**P2 — the loader.** The iterative load session (§16.2): pending list, app-supplied bytes, alias-state synthesis (§9), cross-document path resolution, cycle detection. Separate system from the parser — no file I/O, no callbacks. `Include.target` and `DocId` are the loader's; the parser fills `path` and `alias` and stops.
+*Exit:* one 3-document network resolved **three ways** — from memory, through the CLI over a filesystem, and from Python/ctypes faking a network fetch — yielding the same chart and the same hash.
+
+**P3 — printer and ABI.** Comment-preserving canonical printer and the seven canonical rules (§15), `scav fmt`, JSON dump; **handle lifecycle — create/destroy per handle, allocator injection, thread-safety per call (§16.1 blocks on it)**, ABI JSON extraction and its golden.
+*Exit:* round-trip a depth-16 / 2k-state chart byte-identically, including unknown extension columns; `fmt` idempotent on the corpus; ABI driven from Python.
+
+**P4 — metrics, space requests, layout skeleton.** Font metrics helper, the space tables, Phase 0 splitting, derived classification, trivial placement, straight-line routes, geometry columns. Validate the coordinate extent estimate (§11.2).
 *Exit:* geometry columns populated for every chart, no overflow at depth 16.
 
-**P2 — `DrawList`, reference builder, SVG backend, baseline harness.** The `DrawList` type, a builder covering standard appearance, the SVG backend with integer body and single `viewBox`, `textLength`, per-element classes, golden harness, and the `dot`/elkjs/scav side-by-side (§11.12).
+**P5 — `DrawList`, reference builder, SVG backend, baseline harness.** The `DrawList` type, a builder covering standard appearance, the SVG backend with integer body and single `viewBox`, `textLength`, per-element classes, golden harness, and the `dot`/elkjs/scav side-by-side (§11.12).
 *Exit:* `scav render` produces a readable diagram; baseline harness runs.
 
-**P3 — real layout.** Layered rank, median or sifting ordering, Brandes & Köpf coordinates, bottom-up sizing (fixed pass count, no hysteresis), LR-rectpacking with `box` fallback.
-*Exit:* better than P1 on the Tier-2 vector **and no worse than the incumbent** on blind review.
+**P6 — real layout.** Layered rank, median or sifting ordering, Brandes & Köpf coordinates, bottom-up sizing (fixed pass count, no hysteresis), LR-rectpacking with `box` fallback.
+*Exit:* better than P4 on the Tier-2 vector **and no worse than the incumbent** on blind review.
 
-**P4 — orthogonal routing.** Router behind the vtable, channel-representative graph, separated OVG, A* with bend state, obstacles including submachines and placed boxes, LCA-owned separator channels, combinatorial nudging with integer offsets, `PathBox` strip placement, bench harness over ≥2 routers.
+**P7 — orthogonal routing.** Router behind the vtable, channel-representative graph, separated OVG, A* with bend state, obstacles including submachines and placed boxes, LCA-owned separator channels, combinatorial nudging with integer offsets, `PathBox` strip placement, bench harness over ≥2 routers.
 *Exit:* zero edges through boxes; blind review no worse than incumbent.
 
-**P5 — determinism infrastructure.** Thread shim, model-derived sharding, counter-based RNG, index-ordered reduction, tiered matrix, sanitizer configs, scheduling-delay injector.
-*Exit:* one structural hash and one coordinate hash across the blocking matrix; full grid green nightly. The `wasm32-wasi` row lands with P8 — until then the matrix is the six native triples, and §6's discipline is what makes adding the row a build change rather than a redesign.
+**P8 — determinism infrastructure.** Thread shim, model-derived sharding, counter-based RNG, index-ordered reduction, tiered matrix, sanitizer configs, scheduling-delay injector.
+*Exit:* one structural hash and one coordinate hash across the blocking matrix; full grid green nightly. The `wasm32-wasi` row lands with P11 — until then the matrix is the six native triples, and §6's discipline is what makes adding the row a build change rather than a redesign.
 
-**P6 — search and calibration.** Portfolio, local search, surrogate with ranking test, weight calibration, versioned profiles.
+**P9 — search and calibration.** Portfolio, local search, surrogate with ranking test, weight calibration, versioned profiles.
 *Exit:* full-layout latency at 2k states measured and published (§11.11's bet); on the corpus, a one-state edit produces a visually small diagram change **in the common case** — §11.11's honest limit means a cascade is a hint's job, not a gate failure.
 
-**P7 — `scavview`.** `libscavimgui`, pan, zoom, linear-scan hit test, hover/select, live highlighting (§13), relayout on request, and the Lua host (§8.3) with its sandbox and determinism obligations. Metrics-parity golden against the builder.
+**P10 — `scavview`.** `libscavimgui`, pan, zoom, linear-scan hit test, hover/select, live highlighting (§13), relayout on request, and the Lua host (§8.3) with its sandbox and determinism obligations. Metrics-parity golden against the builder.
 *Exit:* navigate 2k states smoothly; drive highlighting from an external process with no relayout.
 
-**P8 — browser.** Core, layout, draw, and SVG to `wasm32-wasi`, single-threaded on the null shim. A JS host reads the `DrawList` and renders it, or calls the wasm SVG backend.
+**P11 — browser.** Core, layout, draw, and SVG to `wasm32-wasi`, single-threaded on the null shim. A JS host reads the `DrawList` and renders it, or calls the wasm SVG backend.
 *Exit:* same chart in a browser, hashes identical to native.
 
-**P9 — editor.** In-place mutation, undo/redo. **[OPEN]** arena snapshot vs command buffer with inverse.
+**P12 — editor.** In-place mutation, undo/redo. **[OPEN]** arena snapshot vs command buffer with inverse.
 
-**Plugin work is not a phase.** Column registration and the builder API land in P0; space requests need P1; builder contributions need P2. `scav-scxml` should be built incrementally alongside, because it is the acceptance test for the extension boundary (§8.2) — deferring it means discovering the boundary is wrong after everything is built against it.
+**Plugin work is not a phase.** Column registration and the builder API land in P1; space requests need P4; builder contributions need P5. `scav-scxml` should be built incrementally alongside, because it is the acceptance test for the extension boundary (§8.2) — deferring it means discovering the boundary is wrong after everything is built against it.
 
 **Out of scope for this document, but must not be precluded:** `.puml` importer; libhsm codegen backend; PDF; layout hints beyond the minimum.
 
