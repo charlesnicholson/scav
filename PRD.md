@@ -25,7 +25,7 @@ Vocabulary (ELK's): a **short hierarchical edge** crosses one boundary; a **long
 - **No SCXML in core.** Not a source of truth, not required for interop. It ships as a *plugin* (§8.2), the worked example of the extension boundary.
 - **No appearance.** scav owns geometry and the `DrawList` vocabulary; what things look like is the application's (§3).
 - **No interpreter in core.** Scripting is an application concern (§8.3).
-- **No PDF in v1.** SVG only.
+- **No PDF in v1** (§12.1). SVG only.
 - **No off-page connector glyphs in v1.** Designed for, not built (§11.7).
 
 ## 3. Architecture
@@ -125,7 +125,7 @@ docs/
 
 **Goldens are layered by stage**: `layout/` (structural + coordinate hashes), `drawlist/` (the canonical render IR, §12, the primary surface), `svg/` (thin serializer check). A layout change moves the first two; an SVG-writer change moves only the third. `svg/` alone → serializer bug; all three → review starts at `layout/`.
 
-Third-party, all permissive and SHA-pinned, none vendored by copy: **doctest** (MIT), **ImGui** (MIT, native viewer only), **stb_image** (MIT/public domain, native viewer only), **lua** + **sol2** (viewer only — see §8.3). Plus the bundled TTF, which is a layout-hash input and gets a row in §18. The toolchain itself is provisioned by envy (§4.2), not by CMake.
+Third-party, all permissive and SHA-pinned, none vendored by copy: **doctest** (MIT), **ImGui** (MIT, native viewer only), **stb_image** (MIT/public domain, native viewer only), **lua** + **sol2** (viewer only — see §8.3). Plus the bundled TTF, which is a layout-hash input (§18). The toolchain itself is provisioned by envy (§4.2), not by CMake.
 
 ## 4. Language rules
 
@@ -156,7 +156,6 @@ The bar for a discouraged construct is that a reader can still follow control fl
   ```
   C's `qsort` shape pays an indirect call per comparison and blocks inlining entirely. Sorting is in the hot path — intra-rank ordering, packing, label matching, canonical output — and comparators here are mandatory total orders (§6), so this is where the cost lands. Same pattern for sweeps taking a predicate and for `argmin(Cost, index)` reductions.
 
-  This is also how the "static selection over runtime dispatch" rule is *honored* rather than merely asserted: a template parameter has no dispatch to be nondeterministic, and the total-order requirement is checkable at the instantiation site. The router vtable (§11.5) is the one place runtime selection is genuinely required — comparing routers within a single process — and it pays the indirection knowingly. Everywhere else, a template.
 - **`const` by default, initialized by an IIFE when the value needs computing.** `auto` is the right tool here and its use is encouraged, not merely tolerated:
   ```cpp
   auto const rank_count = [&] {
@@ -168,7 +167,7 @@ The bar for a discouraged construct is that a reader can still follow control fl
   Preferring this over a mutable local declared early and assigned later is a real gain in a codebase this size.
 - Explicit loops with named indices; early returns; flat control flow; functions short enough to read in one screen.
 
-**`scav_byte` is `unsigned char`, not `uint8_t`.** Only `char`, `unsigned char`, and `std::byte` may alias an object representation. `std::uint8_t` is usually a typedef for `unsigned char` but is not required to be; byte inspection through it is UB if it isn't. `char8_t` is also not a byte type. Not `std::byte`: no arithmetic operators, and the C ABI needs `unsigned char` anyway. Used for the string pool, blob columns, file buffers, font buffers, and every byte-level ABI surface.
+**`scav_byte` is `unsigned char`, not `uint8_t`.** Only `char`, `unsigned char`, and `std::byte` may alias an object representation; `uint8_t` need not be one of them, so byte inspection through it is UB where it isn't. Not `std::byte` either: no arithmetic operators, and the C ABI needs `unsigned char`.
 
 **Runtime polymorphism has exactly one permitted site:** the internal router vtable (§11.5, a POD struct of function pointers, never crossing the C ABI). The P9 editor may add a second if the command-buffer mechanism wins over arena snapshots (§17). Everywhere else: static selection, separate binaries, or link-time choice.
 
@@ -190,11 +189,9 @@ What this rules out is not hash maps but a **graph of long-lived heap nodes poin
 
 **CMake + Ninja.** GN is excellent for first-party code in a private ecosystem and hostile to sharing: no `install()`, no export/config packages, no `find_package`. CMake is clunky and is the lingua franca, and scav is a library meant to be consumed — including by a wheel that needs a shared object with proper install rules (§16.1). That, plus presets expressing §6's matrix directly, is the whole argument.
 
-Two GN arguments that do **not** apply here, recorded so they are not re-raised: its faster configuration is a function of dependency-tree size, and scav's third-party is doctest, ImGui, `stb_image`, and a font; and its missing wasm story shrank to one modest toolchain once emscripten left v1 (§16.3).
-
 **Toolchain provisioned by [envy](https://github.com/charlesnicholson/envy), and this is a correctness argument.** §6 claims bit-identical output across `{clang, gcc, MSVC} × {libstdc++, libc++, MSVC STL}` — vacuous if `clang` is whatever is on `PATH`. envy pins exact compiler builds by fingerprint, which turns the matrix from a hope into a reproducible fact. It also already packages ninja, python, and clang-tools.
 
-Two documented paths, one authoritative: **envy for CI and for any determinism claim; a system toolchain is fine for local hacking.** envy is not a hard prerequisite for building, because making a pre-release single-maintainer tool mandatory for a first contribution is a bad trade.
+**envy for CI and for any determinism claim; a system toolchain is fine for local hacking.** Not a hard build prerequisite.
 
 ## 5. Testing
 
@@ -420,13 +417,7 @@ Fork/join is the case that most tempts scav into having an opinion, so the bound
 
 **What the model holds:** a pseudostate of kind `fork` or `join`, and ordinary transitions. Nothing else. Arity is *derived* by counting incident edges; there is no grouping record, because the pseudostate is the grouping.
 
-**What scav does not decide.** The genuinely ambiguous questions are all dialect-specific and all out of scope:
-
-- If one branch takes an out-of-machine transition that exits a submachine still holding active forked states, do the siblings deactivate?
-- Or does any active state keep its submachine active — in which case running the submachine's exit handler is wrong?
-- Does a branch targeting a *substate* of the still-active fork's own submachine differ from one leaving it?
-
-Different projects answer these differently and will collide. scav answers none of them. **It must nonetheless be able to draw every one of these topologies**, which it can, because all of them are a pseudostate plus transitions.
+**What scav does not decide.** Exit, reset, and sibling-deactivation semantics under partial fork deactivation are dialect-specific, projects answer them incompatibly, and scav answers none of them. **It must nonetheless draw every one of those topologies**, which it does, because all of them are a pseudostate plus transitions.
 
 **The bar is a fixed-size box.** Layout's only fork-specific behaviour is negative: it takes the bar's extent from the profile like any other pseudostate, and `w_adj` excludes fork edges because adjacency above arity 2 is unsatisfiable (§11.8) — no fan-out algorithm, no arity scaling. A fork/join pseudostate is an ordinary small box — wide and thin — from the profile's per-`StateKind` min extent (§11.15). Layout places it and routes N edges out of it; the builder draws a filled rect. That is what PlantUML does, and it is enough: the bar is the **same size for two branches as for five**, with the routes simply fanning out, including sideways.
 
@@ -521,8 +512,6 @@ Reject with a diagnostic, never clamp. Unbounded `int32_t` overflows §11.4's bo
 
 **Space requests must be a pure integer function of `(model, profile, scav metrics)`.** The app is inside the determinism-critical path, and nothing otherwise forbids `min_w = int32_t(w * 1.15f)`, which differs under FMA contraction. A digest of the three tables is a hashed input (§6), so a non-conforming app fails the golden instead of silently drawing something else.
 
-**`PathBox.order` is unique per transition and part of the placement key** `(transition, order, strip, slide_offset)` (§11.9); otherwise two boxes fall back to the app's insertion order.
-
 **Outputs.** Layout writes the geometry columns enumerated in §11.7a, plus a `Placed` array parallel to `PathBox`:
 
 ```cpp
@@ -612,14 +601,12 @@ The two together are the acceptance test for the design: if libhsm needs a scav 
 
 The application owns the builder, so scripting is something an *application* embeds if it wants scriptable appearance. `libscavcore`, `libscavlayout`, and `libscavdraw` carry no interpreter, no sandbox, no shims, and no sol2.
 
-**`scavview` embeds Lua**, because a viewer is exactly where drop-in-a-`.lua`-file appearance earns its keep. That host owns the machinery core no longer carries:
+**`scavview` embeds Lua**, because a viewer is where drop-in-a-`.lua`-file appearance earns its keep. Any application embedding a script host inherits these obligations; they are recorded because they were expensively derived, not because core needs them:
 
-- **Stock Lua 5.4**, pinned `luai_makeseed`, bound through **sol2** confined to one translation unit.
-- **Sandbox**: open only `base`, `string`, `math`, `table`; nil out `load`/`dofile`/`loadfile`/`rawget`/`rawset`; load user chunks with `mode="t"` only, since Lua's bytecode loader is not hardened against hostile input.
-- **Determinism**: remove `pairs`/`next` (order unspecified, and 5.4 randomizes string-hash seeds), `math.random`, `collectgarbage`, and the libm transcendentals; shim `string.format`/`tostring` to reject float conversions, `%p`, and any float argument.
-- **Hot states**: preload and precompile at init, one persistent state, userdata proxies rather than per-call tables, content-hash caching.
-
-Any application embedding a script host inherits those obligations. They are recorded here because they were expensively derived, not because core needs them.
+- **Stock Lua 5.4**, pinned `luai_makeseed`, **sol2** confined to one translation unit.
+- **Sandbox**: open only `base`, `string`, `math`, `table`; nil out `load`/`dofile`/`loadfile`/`rawget`/`rawset`; `mode="t"` chunks only — the bytecode loader is not hardened against hostile input.
+- **Determinism**: remove `pairs`/`next` (5.4 randomizes string-hash seeds), `math.random`, `collectgarbage`, the libm transcendentals; shim `string.format`/`tostring` to reject floats and `%p`.
+- **Hot states**: precompile at init, one persistent state, userdata proxies over per-call tables, content-hash caching.
 
 ## 9. Addressing
 
@@ -673,7 +660,7 @@ phase3_route(SizedLayout, Router)                -> geometry columns + Placed[]
 
 The four intermediates are internal POD: `Spaces` is the three §8.1 tables; `SplitGraph` is segments, ports, and the containment tree; `SubmachineOrders` adds rank and in-rank position per node; `SizedLayout` adds box extents and port coordinates. None crosses the ABI (§16) — only geometry columns and `Placed[]` do — so they are free to change without an ABI break.
 
-Every stage is POD in, POD out, so any stage is testable with hand-written inputs and no font present. Hint columns are integers (§14), so layout never touches a string or resolves a path — §3.1's font-blindness is structural, not a convention.
+Every stage is POD in, POD out, so any stage is testable with hand-written inputs and no font present. Hint columns are integers (§14), so layout never touches a string or resolves a path — §3's font-blindness is structural, not a convention.
 
 Geometry columns are derived: never serialized, never authored (§7), so "layout writes the model" does not compromise round-trip stability.
 
@@ -708,13 +695,13 @@ Bit budget, degree-driven (`bk + log2(terms)` for a degree-*k* polynomial over *
 | intersection-point numerator | 3 | 61 | int64, 2 bits spare |
 | degree 4 (`incircle`) | 4 | 81 | int128 required — avoid |
 
-`int64` holds **63** magnitude bits, not 64; the previous domain overflowed this table's own worst row. No Tier-2 term sums pairwise overlap area — box overlap is Tier 0 (§11.6), so it is a predicate, not a sum.
+`int64` holds **63** magnitude bits, not 64; the previous domain overflowed this table's own worst row.
 
 Rules:
 - **Intersection *tests* are degree 2** — four `orient2d` calls, never constructing the point. Compare signs; **never multiply two determinants** (degree 4).
 - Constructed points snap to grid with a documented rounding rule.
 - **Widen before multiplying.** `int32 * int32` computes in 32 bits then widens. Wrap it: `cross(ax,ay,bx,by) -> int64`.
-- Validate the domain at every API boundary in **every** build (§8.1), and after each retry inflation.
+- Validate the domain at `scav_layout_run` entry in **every** build (§8.1), and after each retry inflation.
 - Output is **root-absolute**, applied as one final `O(n)` transform over submachine-local internals (ELK's LCA-relative coordinates are a documented trap).
 
 Extent estimate: 2k states ≈ 8,000 x 3,200 pt = 128,000 x 51,200 units, ~4x headroom. **Validate at P1**; if real charts exceed it, reduce the grid to 1/8 pt rather than widening the domain.
@@ -768,7 +755,7 @@ Congestion is **history-based** (PathFinder, McMurchie & Ebeling, FPGA'95; Trito
 
 **Router is swappable** behind a POD vtable — internal only. Contract: pure w.r.t. `(input, ud)`, reentrant, no global state, allocates only from a caller-supplied arena, called concurrently from workers, must not unwind. Router name and version are hashed inputs. The C ABI exposes routers **by name** (`scav_router_by_name`, `scav_router_list`); function pointers never cross it.
 
-`scav_route_input`: submachine box, obstacle rects, port assignments, prior routes. `scav_route_output`: integer polylines plus per-edge metrics (bends, length, boundary crossings, crossing span) so routers are A/B'd automatically.
+`RouteInput`: submachine box, obstacle rects, port assignments. `RouteOutput`: integer polylines plus per-edge metrics (bends, length, boundary crossings, crossing span) so routers are A/B'd automatically. Internal POD — no `scav_` prefix, because neither crosses the ABI.
 
 ### 11.6 Cost
 
@@ -784,7 +771,7 @@ struct Cost {                 // compared lexicographically, in this order
 
 **Tier 0 — forbidden, not priced.** Edge through a state box, submachine box, or placed box; box-box overlap. Structurally impossible via the obstacle set. The predicate survives as a net for three cases: the straight-line **surrogate** during search; **degenerate enclosure** (a state with no free channel — inflate spacing by a fixed integer increment, capped, then diagnostic); and a marked violation with a stable code if retries exhaust. Never a silent overlap.
 
-**Tier 2 —** every weight is an integer with a documented ceiling, and the sum's bound is proven against §11.2:
+**Tier 2 —** every weight is an integer with a documented ceiling. The largest term is `w_area * bounding_box_area`; area is at most `(2*kCoordMax)^2 ≈ 2^40`, so with weights capped at `2^10` the sum stays under `2^53` — inside `int64` with room, and the ceiling exists to keep that true rather than to tune anything:
 
 ```
 w_b    * bends                                      -- highest in tier
@@ -809,7 +796,7 @@ At depth 16 a literal polyline crossing 15 boundaries is unreadable. The hatch i
 
 **This is a builder concern, not a layout feature**, which is why nothing needs building for it. The app requests no `PathBox` and no route for that transition, reserves a little space at each end, and draws a tagged stub pair. Layout never learns the transition is drawn differently — it has one fewer route to compute. So the model and the space tables already permit it, and `scav:render=connector` is an ordinary authored attribute the builder reads, not a layout input.
 
-Precedent: **UML 2.5.1 §15.2.4** ActivityEdge connector — "purely notational", "does not affect the underlying model", exactly-one matching pair. **SDL / ITU-T Z.100** §2.6.7 standardizes it inside a state-machine language with a textual dual. Also BPMN Link Events, Simulink Goto/From, KiCad net labels. UML gives state *transitions* no such notation, so this fills a real gap. A connector must be semantically inert.
+Precedent: **UML 2.5.1 §15.2.4** ActivityEdge connector — "purely notational", exactly-one matching pair — and **SDL / ITU-T Z.100** §2.6.7, which standardizes it inside a state-machine language with a textual dual. UML gives state *transitions* no such notation, so this fills a real gap. A connector must be semantically inert.
 
 ### 11.7a Geometry columns — the layout output contract
 
@@ -916,7 +903,7 @@ The likeliest failure is producing layouts that score well on `Cost` and that re
 
 **Topology-shape-metrics.** Needs planarity — statecharts are non-planar, planarization is NP-complete, and the literature's ceiling is "a few hundred vertices". Compound nesting isn't in the model; the bolt-on rests on c-planarity, open 1995–2022. Three chained NP-hard problems with documented excess bends and area blowup. HOLA replaces it; CoDaFlow rejected it for compound-plus-ports specifically. Keep only compaction by topological numbering (§11.2).
 
-**VPSC.** Coordinates are generated, not adjusted, so separation is longest-path: linear, exact, integral, ~100 lines. VPSC buys only minimum-displacement-from-prior, and §11.11 leaves no prior. If ever needed: `satisfyVPSC` not `solveVPSC`; apply the GD 2006 **Correction** (the published version can return **infeasible** solutions); fix the total order; reformulate in integers, since solve-continuous-then-round preserves feasibility but not identity.
+**VPSC.** Coordinates are generated, not adjusted, so separation is longest-path: linear, exact, integral, ~100 lines. VPSC buys only minimum-displacement-from-prior, and §11.11 leaves no prior. If ever revisited, note the GD 2006 **Correction** — the published algorithm can return **infeasible** solutions.
 
 **LP nudging fallback.** "Integral if coefficients are integral" is false — that needs total unimodularity, unestablished here — and simplex pivoting under degeneracy is tolerance-driven float. Deterministic degradation instead: widen the channel by a fixed integer increment and re-seat, capped, then diagnostic.
 
@@ -957,7 +944,7 @@ A versioned, hashed artifact (§6), so it needs a field list rather than thirtee
 | search | portfolio `K`, sweep count, congestion iterations, rip-up cap, spacing-inflation cap and increment |
 | id | `profile_id`, `profile_version` |
 
-Profile load **validates every bound and rejects out of range** — weight ceilings give the Tier-2 sum a proven bound, and bounded `dar_num` stops `total_area * dar_num` overflowing before `isqrt`.
+Profile load **validates every bound and rejects out of range** — weight ceilings give the Tier-2 sum a proven bound, and bounded `dar_num` keeps `total_area * dar_num` under `2^50` before `isqrt`.
 
 Named profiles ship as data: `compact`, `readable`. There is no `print` profile — fit-to-page would need the top-down layout §11.4 rejects.
 
@@ -1024,7 +1011,7 @@ Two properties worth keeping:
 
 **Golden-test the `DrawList`, not the SVG.** It is canonical POD with no formatting degrees of freedom, a strictly better comparison surface than serialized text. What the `drawlist/` golden pins is the *reference* builder's output — a regression test on shipped code, not a claim on what any builder must draw (§2). Canonical form sorts by **`(depth, prim_bytes)`** — content, not emission order — with `styles[]` and `clips[]` deduplicated and sorted by field bytes, and `style`/`clip` indices rewritten to the deduplicated tables. Every field of `Style` and `Prim` is therefore 4 bytes wide: §6 forbids byte-comparing a struct with padding, whose contents are unspecified. Sorting on content is what makes two builders that draw the same picture in different orders compare equal; an `emission_index` tiebreak would not. Sorting the golden means it compares *what gets drawn*, so two builders that produce the same picture by different emission orders compare equal. SVG emission then gets a thin serializer test rather than carrying the whole rendering contract.
 
-**One metrics implementation** (§11.9) shared by builder and backend, with a golden test asserting they agree for every box. Otherwise text overflows and the diagram lies about its own contents.
+**One metrics implementation** (§11.9), with a golden test asserting builder and backend agree for every box.
 
 **Images: the app registers, the `DrawList` references.** `scav_image_register(images, id, bytes, len, w, h, mime)`. Raster only — arbitrary SVG fragments would be unimplementable in an ImGui backend and would break the one-IR property; vector content is primitives. Dimensions come from registration, not decoding, so no backend needs a decoder to *size* an image and the SVG backend needs none at all (base64 the bytes with their MIME type). Bytes hash into the SVG golden.
 
@@ -1268,7 +1255,7 @@ Works identically over a filesystem, HTTP, a zip, or memory, and preserves §16.
 
 **Nothing is hidden.** `scav_parse` on a byte span is always available and never bypassed. `scav_read_file` and `scav_load_file` compose it and are skippable in full — they ship in the CLI's own support code, not in `libscavcore`, which is what makes "core does no file I/O" a linkable fact rather than a convention. Same layering as the reference builder (§8.1.1): the functions that convert text into the columnar model are primitives, and the batteries sit on top.
 
-**Streaming sources were considered and rejected.** A `.scav` file is kilobytes, so the problem streaming solves — large payloads, memory-constrained parsing — does not arise, and bytes are a simpler composition point than a stream type. Revisit only if incremental parse becomes an editor-responsiveness requirement.
+No stream type: a `.scav` file is kilobytes, so bytes are the simpler composition point. Revisit only if incremental parse becomes an editor-responsiveness requirement.
 
 ### 16.3 The path to a browser viewer
 
