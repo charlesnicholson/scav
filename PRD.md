@@ -117,6 +117,7 @@ cmake/deps/*.cmake     one file per third-party dep
 cmake/Dependencies.cmake   SHA pins
 tools/                 abi extraction (libclang), corpus tooling
 docs/
+out/                   gitignored: all build output + the envy cache (§4.2)
 ```
 
 `apps/` is separate from `src/` because an application is a *consumer* — that keeps the CLI and viewer from quietly becoming privileged layers.
@@ -190,6 +191,23 @@ What this rules out is not hash maps but a **graph of long-lived heap nodes poin
 **CMake + Ninja.** GN is excellent for first-party code in a private ecosystem and hostile to sharing: no `install()`, no export/config packages, no `find_package`. CMake is clunky and is the lingua franca, and scav is a library meant to be consumed — including by a wheel that needs a shared object with proper install rules (§16.1). That, plus presets expressing §6's matrix directly, is the whole argument.
 
 **Toolchain provisioned by [envy](https://github.com/charlesnicholson/envy) — for *our* CI, not for users.** §6's evidence is only as good as the compilers that produced it, and "clang" meaning whatever is on `PATH` makes a matrix row unreproducible; envy pins exact builds by fingerprint. It also packages ninja, python, and clang-tools.
+
+**Everything scav generates lives under `out/`, and nothing outside the source tree.** One gitignored directory, so a clean checkout plus `rm -rf out` is a factory reset and no build step writes to `$HOME`:
+
+```
+out/.envy/            envy's package cache — the project default (see below)
+out/rel/  out/dbg/    per-configuration build trees, named for the CMake preset
+out/test/             functional-test scratch, golden diffs, perf reports
+```
+
+**The envy cache defaults into the build root**, declared in the manifest. `envy.lua` sits at the repo root and is envy's root marker, so a relative path is relative to it:
+
+```lua
+-- @envy cache-posix "out/.envy"
+-- @envy cache-win   "out\.envy"
+```
+
+Precedence is `ENVY_CACHE_ROOT` > manifest directive > platform default, so **project-local is the default and a shared global cache is one env var away** — which is what CI wants, where a cache warm across jobs is the point. Cost of the default: one toolchain copy per checkout, the right trade against a machine-global directory a second checkout can invalidate.
 
 **Not a build prerequisite, and deliberately so.** §6's claim is about the C++ abstract machine, so any conforming C++20 toolchain is supported and `scav selftest` is how a user confirms theirs agrees. Requiring envy to build would contradict that. Standard CMake: `find_package`, no vendored toolchain assumptions, no compiler-specific flags in the exported targets.
 
