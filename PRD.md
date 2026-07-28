@@ -570,7 +570,7 @@ It also settles **non-rectangular shapes** — protruding tabs, concave outlines
 
 scav ships **utilities the app may call**, never machinery that calls the app (§3.0). In `libscavdraw`, all pure functions over PODs, all optional:
 
-- **interior subdivision** — `scav_stack_v(rect, items, n, out_rects)`, `scav_row_h(...)`, `scav_align(rect, w, h, align, out)`. Turns "I have a rect and three things" into positions. This is where the old band taxonomy went: from a contract into a convenience.
+- **interior subdivision** — `scav_stack_v(rect, items, n, out_rects)`, `scav_row_h(...)`, `scav_align(rect, w, h, scav_anchor, out)` where `scav_anchor` is the nine-cell enum. Turns "I have a rect and three things" into positions — a convenience, not a contract.
 - **text layout in a rect** — line breaking at author-supplied breaks, baseline positioning, ellipsis.
 - **shape emission** — `DrawList` helpers for rounded boxes, arrowheads, dashed submachine dividers, orthogonal polylines with rounded corners.
 - **the reference builder** — the standard appearance, as **per-element-kind emitters** (`emit_state`, `emit_route`, `emit_label`, …), each taking the depth to draw at, plus a convenience wrapper calling them in an order it documents. Per-kind emitters plus caller-supplied `depth` (§12) mean an app interleaves its own content without forking anything: call the emitters it wants, skip the rest, append its own primitives wherever it likes.
@@ -594,7 +594,7 @@ The two together are the acceptance test for the design: if libhsm needs a scav 
 
 ### 8.3 Scripting is an application concern
 
-Earlier drafts put a Lua interpreter, a sandbox, and per-element `measure`/`draw` callbacks in scav core. That is gone. With the application owning the builder, scripting is something an *application* embeds if it wants scriptable appearance — so `libscavcore`, `libscavlayout`, and `libscavdraw` need no interpreter, no sandbox, no shims, and no sol2.
+The application owns the builder, so scripting is something an *application* embeds if it wants scriptable appearance. `libscavcore`, `libscavlayout`, and `libscavdraw` carry no interpreter, no sandbox, no shims, and no sol2.
 
 **`scavview` embeds Lua**, because a viewer is exactly where drop-in-a-`.lua`-file appearance earns its keep. That host owns the machinery core no longer carries:
 
@@ -855,7 +855,7 @@ Font size is a profile field and integer rounding is nonlinear, so changing it f
 
 #### 11.9.1 Font metrics
 
-Minimum tables: `head` (`units_per_em`, offset 18), `hhea` (`numberOfHMetrics`, offset 34), `hmtx`, `cmap` (format 4, plus 12), `maxp` (bounds-checking). Advances never come from `glyf`/`CFF`. Bundle exactly one static font; `FontSet` exists for the extension path, not for substitution.
+Minimum tables: `head` (`units_per_em`, offset 18), `hhea` (`numberOfHMetrics`, offset 34), `hmtx`, `cmap` (format 4, plus 12), `maxp` (bounds-checking). Advances never come from `glyf`/`CFF`. Bundle exactly one static font. The extension path is `scav_metrics_create` with your own TTF bytes (§16), not runtime substitution — the font is a layout-hash input, so swapping it is an output change.
 
 Three traps: the **`numberOfHMetrics` tail rule** (the last record's advance applies to all remaining glyphs — breaks monospaced fonts specifically, which is what we bundle); vertical metrics disagreeing with themselves (see above); per-glyph rounding.
 
@@ -1212,13 +1212,13 @@ Editor commands do not cross the C boundary as objects; that layer's API is opco
 
 **No extension point is a callback** — everything is data in, data out. So a binding is pure marshalling, with no host-language function invoked from a worker thread across an `-fno-exceptions` boundary. That is what makes bindings tractable.
 
-**One redistributable shared library** — `libscav` = core + layout + draw + svg. The four static libraries are a build-time decomposition; the distribution unit is one shared object. The batteries are everything except the interactive viewer, so the reference builder and SVG backend must be reachable through the C ABI rather than being C++-only conveniences.
+**One redistributable shared library** — `libscav` = core + layout + draw + svg. The static libraries are a build-time decomposition; the distribution unit is one shared object. `libscavimgui` stays out of it: it needs an ImGui context, which only the host application has. The batteries are everything except the interactive viewer, so the reference builder and SVG backend must be reachable through the C ABI rather than being C++-only conveniences.
 
 - **Generated, not hand-written.** libclang → ABI JSON (§16) → generated low-level layer, plus a thin hand-written idiomatic wrapper per language. The generated half never drifts.
 - **Prebuilt binaries**: macOS arm64/x86_64, Linux x86_64/aarch64 (manylinux), Windows x64, plus wasm. No compiler required to `pip install`.
 - **Self-contained**, because there are no runtime dependencies. The bundled font is **embedded in the library**, not loaded from a path — it is a layout-hash input and must travel with the code.
 
-**Two hazards.** Handle lifecycle is a **P0 blocker**, not an item owed: a binding needs a destroy call per handle. And Python makes §8.1's integer purity easy to violate (`/` yields float), so setters reject non-integers and range-check, and space-computation helpers live in the shared library.
+**One hazard:** Python makes §8.1's integer purity easy to violate (`/` yields float), so setters reject non-integers and range-check, and space-computation helpers live in the shared library. Handle lifecycle was the other, and §16 now specifies it; it remains a **P0** deliverable because a binding cannot be written without it.
 
 ### 16.2 No file I/O in core
 
@@ -1233,6 +1233,7 @@ scav_result scav_load_pending(const scav_load*, const scav_pending** out, uint32
 scav_result scav_load_finish(scav_load*, scav_chart** out);
 void        scav_load_destroy(scav_load*);
 
+typedef uint32_t scav_doc_id;              // the ABI spelling of DocId (§7)
 struct scav_pending { const char* path; uint32_t len; uint64_t expect_hash; scav_doc_id from; };
 ```
 
@@ -1240,7 +1241,7 @@ struct scav_pending { const char* path; uint32_t len; uint64_t expect_hash; scav
 
 Works identically over a filesystem, HTTP, a zip, or memory, and preserves §16.1's no-callback property.
 
-**Nothing is hidden.** `scav_parse` on a byte span is always available and never bypassed; `scav_read_file` and `scav_load_file` are conveniences that compose it, skippable in full. Same layering as the reference builder (§8.1.1): the functions that convert text into the columnar model are primitives, and the batteries sit on top.
+**Nothing is hidden.** `scav_parse` on a byte span is always available and never bypassed. `scav_read_file` and `scav_load_file` compose it and are skippable in full — they ship in the CLI's own support code, not in `libscavcore`, which is what makes "core does no file I/O" a linkable fact rather than a convention. Same layering as the reference builder (§8.1.1): the functions that convert text into the columnar model are primitives, and the batteries sit on top.
 
 **Streaming sources were considered and rejected.** A `.scav` file is kilobytes, so the problem streaming solves — large payloads, memory-constrained parsing — does not arise, and bytes are a simpler composition point than a stream type. Revisit only if incremental parse becomes an editor-responsiveness requirement.
 
