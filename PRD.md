@@ -625,7 +625,8 @@ wifi/On/Ready        cross-document, via include alias
 - **Provenance is a field, not a computed column.** `DocId` on each row records the **include instance** — instance rather than path, so including one document twice yields two distinguishable sets. A renderer tinting sub-document submachines reads it; layout ignores it.
 - Transition endpoints are plain `StateId`s, because ids were global from the start.
 - **An include alias is a bare path prefix**, not a sigil, because it is a state name. Alias uniqueness is therefore §10's ordinary duplicate-name check rather than a second rule, and duplicate top-level names in two documents cannot collide.
-- Includes may pin `content_hash`. Include cycles are a hard error.
+- Includes may pin a content hash. **The pin is a property of the document, not of an instantiation** — two includes of the same path must state the same hash or state none, and disagreement is a hard error (§10). Canonical form prints the pin on every include of that path. Include cycles are a hard error.
+- **Instantiating one document twice means two include statements**, two aliases, and two disjoint sets of rows distinguished by `DocId`. Renaming that file then patches one path string per instantiation. Accepted: a **global include section with a reference sigil was considered and rejected** — a sigil names a document, but an endpoint must name an instance, so the two coincide only at N=1 and above it the section needs instance names anyway. It would also still require a statement at the host to say where the subdocument attaches, and it would mark a cross-document distinction the model does not have, since an alias is an ordinary state.
 - Relative hints travel with an included chart; **absolute pins do not** — a pin is authored against a document's own frame and is meaningless in a host frame.
 - Resolution is a linear scan per path level (document order forbids sorting `state_ids` by name) or via the derived sorted index.
 - Paths break on rename. Renaming is a **semantic editor** operation — the editor holds the document network and rewrites every reference — not a CLI verb. **[OPEN]** whether elements also need durable GUIDs, which paths cannot supply across branches: two branches renaming the same state differently is unreconcilable when identity *is* the name.
@@ -640,6 +641,7 @@ Mandatory, in core, structural only — `layout` reads ordinals and crashes on g
 - unresolvable cross-document paths, checked at the **resolution phase** (§9)
 - a `Statement.src` span outside its document's `text` span
 - an alias colliding with a sibling state name — the same duplicate-name check, since an alias is a state (§9)
+- two includes of one path pinning different hashes (§9)
 - authored names must not contain the path metacharacters `/ : $`, nor `@` (the format's attribute sigil, §15)
 - more than one `initial` per submachine. **No degree checks per pseudostate kind** — "a fork has one incoming edge" is a dialect rule, and §7.2 requires every topology to be drawable
 - authored `scav:pin` coordinates outside §11.2's domain — the only authored geometry there is
