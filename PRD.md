@@ -84,7 +84,7 @@ Applications, each supplying (or reusing) a builder and a backend:
 
 | App | Is |
 |---|---|
-| `scav` | CLI: `render` (chart -> SVG), `layout` (dump geometry columns), `fmt` (canonical print), `gen` (synthetic charts), `check` (validate), `dump --json`, `selftest` (verify §6's hashes on this toolchain) |
+| `scav` | the CLI — see §3.2 |
 | `scavview` | ImGui viewer [P10]. Embeds Lua so users can script appearance without rebuilding it (§8.3) |
 | *yours* | e.g. an enemy-AI editor: links core+layout+draw, writes a builder that also draws threat radii, writes its own ImGui backend. No scav change required |
 
@@ -92,7 +92,24 @@ Applications, each supplying (or reusing) a builder and a backend:
 
 Internally each library is built from per-subsystem CMake `OBJECT` libraries with their own usage requirements, so subsystem boundaries stay declared and lintable inside one shipped artifact.
 
-### 3.2 Repository layout
+### 3.2 The CLI
+
+**Its reason to exist is that core does no file I/O (§16.2).** Something has to be the reference host that drives the load session over a real filesystem — walk the pending list, read bytes, resolve includes, report a cycle with real paths — and P2's exit gate requires exactly that. Without it the load protocol is only ever exercised by tests holding byte buffers, which is where include-resolution bugs live.
+
+**Primary user is a build system, not a person.** Nobody types these in a loop; CI does.
+
+| Verb | For |
+|---|---|
+| `render` | chart -> SVG. Docs pipelines, PR preview images. The gap that motivated scav: nothing renders `.puml` today |
+| `fmt` | canonical print, `--check` to gate. §15's canonicity is a property of *running the printer*, not of the format — no verb, no pre-commit hook, and the format hash and merge story both degrade |
+| `check` | structural validation (§10) as a PR gate |
+| `deps` | the document network as a `make`/`ninja` depfile. Chart A includes B; without this, editing B either leaves A's diagram stale or forces a full re-render. `gcc -M`, and the need follows from includes existing |
+| `dump` | `--json` for non-C++ consumers and `jq`; `--layout` runs layout first and includes the geometry columns |
+| `selftest` | recompute §6's hashes on this toolchain and diff against the goldens |
+
+**No `gen`.** Synthetic chart generation is test tooling (PB, P0) and lives in the harness; shipping it as a verb would imply a user need nobody has. Same reasoning retired a separate `layout` verb — dumping geometry is `dump --layout`, not a second command.
+
+### 3.3 Repository layout
 
 Mirrors `~/src/envy`: SHA-pinned deps under `cmake/deps/`, unit tests adjacent to sources, Python functional tests, sanitizer suppressions, presets.
 
@@ -1196,7 +1213,7 @@ Also required: text normalized on read (§6); extension columns round-trip lossl
 
 **Cost.** Lexer ~400 LOC including `"""` handling and comment capture, parser ~500, comment-preserving printer 3,000–5,000. The printer is the expensive half and a simpler grammar barely helps it.
 
-**JSON survives as an output-only projection** (`scav dump --json`) for programmatic consumers. Mechanical over columnar data, and not a format: it has no comments, so §15's trivia cannot round-trip, and it has no canonical form, so two encoders disagree on byte output.
+**JSON survives as an output-only projection** (`scav dump --json`, §3.2) for programmatic consumers. Mechanical over columnar data, and not a format: it has no comments, so §15's trivia cannot round-trip, and it has no canonical form, so two encoders disagree on byte output.
 
 A program that returns the graph (Lua etc.) is not the on-disk format: not diffable, no round-trip, reading it requires executing it, and a program can fail to terminate. The generative case is the C ABI plus bindings.
 
@@ -1340,7 +1357,7 @@ Where a phase states production LOC, multiply by 1.5–2 for the mandated test c
 
 *Exit:* green on all six triples × three configs; each sanitizer green on every platform supporting it; `build.sh` works on a machine with no scav-specific setup; the consumer project links an installed scav; the deliberately-failing test fails.
 
-**P0 — the language, the lexer, and the parser.** Validate the format before anything depends on it. Recursive-descent parser over §15's grammar, one document, byte span in. Produces the **front-end slice of the model only** — `src_bytes`, `Document`, `Statement`, trivia, and the string pool with two-pass interning — because a statement stream is all a parser owes (§7). No entity arrays, no includes, no resolution. NFC normalization (§6) lands here since it happens at parse. Plus the **in-RAM synthetic document generator** and **2–3 hand-transcribed real charts** — synthetic input has uniform branching and no accidental structure, so validating on it alone is a trap.
+**P0 — the language, the lexer, and the parser.** Validate the format before anything depends on it. Recursive-descent parser over §15's grammar, one document, byte span in. Produces the **front-end slice of the model only** — `src_bytes`, `Document`, `Statement`, trivia, and the string pool with two-pass interning — because a statement stream is all a parser owes (§7). No entity arrays, no includes, no resolution. NFC normalization (§6) lands here since it happens at parse. Plus the **in-RAM synthetic document generator** (harness-only, §3.2) and **2–3 hand-transcribed real charts** — synthetic input has uniform branching and no accidental structure, so validating on it alone is a trap.
 
 **Recursive descent needs an explicit depth cap** with a diagnostic, not a stack overflow: nesting depth is attacker-controlled and 16 is the *design* target, not a limit the grammar enforces.
 
@@ -1353,7 +1370,7 @@ Where a phase states production LOC, multiply by 1.5–2 for the mandated test c
 **P2 — the loader.** The iterative load session (§16.2): pending list, app-supplied bytes, alias-state synthesis (§9), cross-document path resolution, cycle detection. Separate system from the parser — no file I/O, no callbacks. `Include.target` and `DocId` are the loader's; the parser fills `path` and `alias` and stops.
 *Exit:* one 3-document network resolved **three ways** — from memory, through the CLI over a filesystem, and from Python/ctypes faking a network fetch — yielding the same chart and the same hash.
 
-**P3 — printer and ABI.** Comment-preserving canonical printer and the seven canonical rules (§15), `scav fmt`, JSON dump; **handle lifecycle — create/destroy per handle, allocator injection, thread-safety per call (§16.1 blocks on it)**, ABI JSON extraction and its golden.
+**P3 — printer and ABI.** Comment-preserving canonical printer and the seven canonical rules (§15), `scav fmt --check`, `scav deps`, `scav dump`; **handle lifecycle — create/destroy per handle, allocator injection, thread-safety per call (§16.1 blocks on it)**, ABI JSON extraction and its golden.
 *Exit:* round-trip a depth-16 / 2k-state chart byte-identically, including unknown extension columns; `fmt` idempotent on the corpus; ABI driven from Python.
 
 **P4 — metrics, space requests, layout skeleton.** Font metrics helper, the space tables, Phase 0 splitting, derived classification, trivial placement, straight-line routes, geometry columns. Validate the coordinate extent estimate (§11.2).
