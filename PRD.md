@@ -93,7 +93,7 @@ Internally each library is built from per-subsystem CMake `OBJECT` libraries wit
 
 ### 3.2 Repository layout
 
-Mirrors the house style in `~/src/envy` — `cmake/deps/` with SHA-pinned `FetchContent`, unit tests adjacent to sources, Python functional tests, sanitizer suppressions, presets.
+Mirrors `~/src/envy`: SHA-pinned deps under `cmake/deps/`, unit tests adjacent to sources, Python functional tests, sanitizer suppressions, presets.
 
 ```
 include/scav/          public C ABI headers, one per library
@@ -117,11 +117,11 @@ tools/                 abi extraction (libclang), corpus tooling
 docs/
 ```
 
-Note `apps/` is separate from `src/`: an application is a consumer of scav, and keeping the tree honest about that is what stops the CLI or the viewer from quietly becoming a privileged layer.
+`apps/` is separate from `src/` because an application is a *consumer* — that keeps the CLI and viewer from quietly becoming privileged layers.
 
-**Unit tests are adjacent** (`src/layout/rank_tests.cpp`) and compile the library's sources directly with `-DSCAV_TESTING`, which is how `SCAV_INTERNAL` (§5) drops `static` and lets a test link an internal function. Each library is therefore built twice, shipping and testable; both appear in the determinism matrix and must agree byte-for-byte.
+**Unit tests are adjacent** and compile library sources with `-DSCAV_TESTING`, which is how `SCAV_INTERNAL` (§5) drops `static`. Each library builds twice, shipping and testable; both are matrix rows and must agree byte-for-byte.
 
-**Goldens are layered by the stage they pin**, cheapest and most stable first: `layout/` holds structural and coordinate hashes, `drawlist/` holds the canonical POD render IR (§12 — the primary surface), `svg/` holds a thin serializer check. A layout change moves `layout/` and `drawlist/`; an SVG-writer change moves only `svg/`. If a change moves `svg/` alone it is a serializer bug; if it moves all three, review starts at `layout/`.
+**Goldens are layered by stage**: `layout/` (structural + coordinate hashes), `drawlist/` (the canonical render IR, §12, the primary surface), `svg/` (thin serializer check). A layout change moves the first two; an SVG-writer change moves only the third. `svg/` alone → serializer bug; all three → review starts at `layout/`.
 
 Third-party, all permissive and SHA-pinned, none vendored by copy: **doctest** (MIT), **ImGui** (MIT, native viewer only), **stb_image** (MIT/public domain, native viewer only), **lua** + **sol2** (viewer only — see §8.3). Plus the bundled TTF, which is a layout-hash input and gets a row in §18. The toolchain itself is provisioned by envy (§4.2), not by CMake.
 
@@ -224,7 +224,7 @@ Measure branch coverage; an untested file fails the build. No percentage target.
   + {wasm32-wasi, wasm32-emscripten} vs native
 ```
 
-Odd and prime thread counts are mandatory — they expose reduction-shape bugs powers of two hide. Tier the matrix: a small blocking subset per PR, the full grid nightly and advisory, or a trickle of one-cell failures will halt velocity.
+Odd and prime thread counts are mandatory — they expose reduction-shape bugs powers of two hide. Tier it: a small blocking subset per PR, full grid nightly and advisory, or a trickle of one-cell failures halts velocity.
 
 **Rules:**
 
@@ -836,15 +836,15 @@ Three coordinate spaces, two conversions, each in one place:
 w_grid = ceil_div(sum(advance_funits) * font_size_grid, units_per_em)
 ```
 
-Accumulate as `int64`, divide **exactly once**, **`ceil` never round-to-nearest** — an under-sized box is a diagram that lies. `font_size_grid` is an **integer**; the C ABI accepts `int32_t` sixteenths of a point, so no float crosses the boundary. Box height is `ceil_div(font_size_grid * k_num, k_den)`, **not** font vertical metrics (`hhea`, `OS/2.sTypo*`, and `usWin*` disagree by 10–20% within one font).
+Accumulate as `int64`, divide **exactly once**, **`ceil` never round-to-nearest** — an under-sized box is a diagram that lies. `font_size_grid` is an integer; the ABI takes `int32_t` sixteenths of a point, so no float crosses. Box height is `ceil_div(font_size_grid * k_num, k_den)`, **not** font vertical metrics — `hhea`, `OS/2.sTypo*`, and `usWin*` disagree by 10–20% within one font.
 
-Font size is a profile parameter, and integer rounding is nonlinear, so changing it forces relayout. Em-relative units were rejected: they require *everything* including padding and glyphs to be em-relative and still do not scale exactly.
+Font size is a profile field and integer rounding is nonlinear, so changing it forces relayout. Em-relative units rejected: they require *everything* including padding and glyphs to be em-relative and still do not scale exactly.
 
-**Wrap width is always an input, never an output.** The forbidden circularity is height→width→placement→height, which would need a per-box shape function and a fixpoint. An app may wrap to any width it chooses — it is measuring, so it decides — but layout never re-wraps. Rationale for author-controlled breaks in the format (§15): identifier text must break at semantic boundaries rather than a pixel column, and fixed line counts keep layout stable under font-size change.
+**Wrap width is always an input, never an output.** The forbidden circularity is height→width→placement→height, needing a per-box shape function and a fixpoint. An app wraps to any width it likes — it is measuring, so it decides — and layout never re-wraps. Author-controlled breaks (§15) because identifier text must break at semantic boundaries, not a pixel column, and fixed line counts keep layout stable under font-size change.
 
-**Labels routinely dominate transition length. That is a constraint, not a pathology.** ``min_len(e) = max(geometric_min, sum of the transition's PathBox widths along the route)``, a hard sizing input. `w_len` charges **excess only** (§11.6) — charging raw length makes the optimizer fight an unwinnable constraint and cram everything else. Rank separation grows via label dummy nodes (§11.3).
+**Labels routinely dominate transition length: a constraint, not a pathology.** ``min_len(e) = max(geometric_min, Σ PathBox widths along the route)``, a hard sizing input. `w_len` charges **excess only** (§11.6) — charging raw length makes the optimizer fight an unwinnable constraint and cram everything else. Rank separation grows via label dummy nodes (§11.3).
 
-**Placing a `PathBox`** is Kakoulis & Tollis strip matching: slice into strips sized to the tallest box, slide candidates until they touch their route, keep those overlapping nothing. Candidate order is `(transition, strip, slide_offset)`; matching components process in ascending minimum candidate key. Edge label placement is NP-hard, so this is a heuristic. On failure, trigger a bounded rip-up-and-reroute of that one edge (§11.5).
+**Placing a `PathBox`** is Kakoulis & Tollis strip matching: slice into strips sized to the tallest box, slide candidates until they touch their route, keep those overlapping nothing. Candidate order `(transition, order, strip, slide_offset)`; components process in ascending minimum key. NP-hard, so heuristic. On failure, bounded rip-up-and-reroute of that one edge (§11.5).
 
 #### 11.9.1 Font metrics
 
@@ -894,7 +894,7 @@ A versioned, hashed artifact (§6), so it needs a field list rather than thirtee
 
 | Group | Fields |
 |---|---|
-| geometry | `pad`, `grid_subdiv` (16), `emphasis_margin` |
+| geometry | `pad`, `grid_subdiv` (16) |
 | type | `font_size_grid`, `line_height_k_num`/`_k_den` (`k_den >= 1`) |
 | pseudostate sizes | per-`StateKind` min extent. `fork`/`join` are wide-and-thin boxes; nothing scales with arity (§7.2) |
 | packing | `dar_num`/`dar_den` (each in `[1, 2^10]`), `trybox`, SM tiebreak order |
@@ -1018,15 +1018,13 @@ PDF is out of v1: xref tables, content streams, and a real TTF subsetter, ~1,500
 
 Static layout, dynamic appearance: a viewer highlighting active states and recently-taken transitions at frame rate over a layout that never moves.
 
-**This needs almost nothing from scav, which is the point.** Geometry lives in model columns and does not change; the application rebuilds its `DrawList` each frame with whatever colors it likes, or caches the geometry-derived part and varies only style. There is no overlay channel, no command vocabulary, and no scav-side animation state.
+**This needs almost nothing from scav, which is the point.** Geometry is in model columns and does not change; the app rebuilds its `DrawList` each frame, or caches the geometry-derived part (§12's style table) and varies only style. No overlay channel, no command vocabulary, no scav-side animation state.
 
-Three rules that do belong to scav:
+Two rules that are scav's:
 
-**Appearance changes must not change metrics.** Recolor freely; do not change font, weight, size, or content, because that resizes boxes and forces relayout. If bold-for-active is wanted, measure at bold *always*.
+**Appearance must not change metrics.** Recolor freely; changing font, weight, size, or content resizes boxes and forces relayout. If bold-for-active is wanted, measure at bold *always*.
 
-**Reserve an emphasis margin** — a profile field, ~16–32 grid units — so a thickened stroke draws outward without colliding. A "few grid units" is 0.2 pt and invisible.
-
-**Geometry columns carry a generation counter.** A builder must not run against a partially-updated model during incremental relayout, or frames tear. Cheap, but it has to exist.
+**Geometry columns carry a generation counter**, so a builder cannot run against a partially-updated model. Cheap, but it must exist. Stroke clearance is not a scav concern — an app reserves it via `BoxSpace` and draws inset (§8.1).
 
 **scav models no time, activity, or recency (§2).** The active configuration is a *set* — one leaf per active submachine plus ancestors — computed by the application. Immediate-mode: the app recomputes appearance from `(events, now)` every frame and scav retains nothing. A retained fade would put animation policy and mutable per-element state in scav, which is not its business.
 
@@ -1214,7 +1212,7 @@ This works identically over a filesystem, HTTP, a zip, or memory, and it keeps a
 
 ### 16.3 The path to a browser viewer
 
-Not a v1 deliverable. What matters is that nothing precludes it, and that claim is checkable rather than asserted — four conditions, all already required for other reasons:
+Not a v1 deliverable; what matters is that nothing precludes it. Four conditions, all already required for other reasons:
 
 | Condition | Status |
 |---|---|
@@ -1223,11 +1221,11 @@ Not a v1 deliverable. What matters is that nothing precludes it, and that claim 
 | the font is embedded bytes, not a path | **§16.1** |
 | the viewer's platform layer is swappable | ImGui's own concern; it ships SDL and GLFW emscripten backends |
 
-The scav-specific part of a viewer is only `DrawList` → draw calls, which is platform-agnostic. So a browser viewer is an emscripten build of the *viewer*, not a change to anything below it.
+The scav-specific part of a viewer is only `DrawList` → draw calls, so a browser viewer is an emscripten build of the *viewer*, not a change below it.
 
-**And it may not be the right web front end anyway.** A web app can run core+layout+draw in wasm and render the `DrawList` in JavaScript to SVG DOM or Canvas — which beats ImGui-in-canvas on text selection, copy, accessibility, browser zoom, printing, and bundle size. Two backends is the intended shape under §3, not duplicated effort.
+**It may not be the right web front end anyway.** A web app can run core+layout+draw in wasm and render the `DrawList` in JS to SVG DOM or Canvas — beating ImGui-in-canvas on text selection, copy, accessibility, zoom, printing, and bundle size. Two backends is §3's intended shape.
 
-One nuance: if a browser renders via JS, the goldens stop covering that path, because a JS emitter is a second implementation. So the wasm build exports the `DrawList` **and** the C++ SVG backend — interactive rendering is JS, static SVG comes from the code CI pins.
+One nuance: a JS emitter is a second implementation the goldens do not cover. So the wasm build exports the `DrawList` **and** the C++ SVG backend — interactive rendering is JS, static SVG comes from the code CI pins.
 
 ## 17. Phases
 
@@ -1292,7 +1290,7 @@ scav is MIT or Apache-2.0. Verified from LICENSE bytes; GitHub's detected field 
 | OGDF | GPL-2.0/3.0 | **blocker** — its exception is outbound-only |
 | Graphviz ≥14.1.4 | EPL-2.0, no Secondary License | cleanest, but `dot` is weak on compound graphs |
 
-**Read the permissive reimplementations, not Adaptagrams.** Dwyer released the same algorithms twice:
+**Read the permissive reimplementations, not Adaptagrams** — Dwyer released the same algorithms twice:
 
 | What | Where | License | Size |
 |---|---|---|---|
@@ -1306,9 +1304,9 @@ scav is MIT or Apache-2.0. Verified from LICENSE bytes; GitHub's detected field 
 
 `stb_rect_pack.h` is MIT/public-domain but **skyline packing is not order-preserving**, so it cannot serve §11.4 — do not reach for it.
 
-Two verified negatives, and they are the justification for building this: there is **no maintained permissively-licensed native C/C++ orthogonal connector router**, and **nothing permissive in C++ does compound/nested layout**.
+Two verified negatives, which justify building this: **no maintained permissively-licensed native C/C++ orthogonal router exists**, and **nothing permissive in C++ does compound layout**.
 
-Do not vendor: `libnest2d` (LGPL-3.0), OGDF, Graphviz's `textspan_lut.c` (EPL-2.0 — read the approach, not the table).
+Never vendor: `libnest2d` (LGPL-3.0), OGDF (GPL), Graphviz's `textspan_lut.c` (EPL-2.0 — read the approach, not the table).
 
 ## 19. Open questions
 
