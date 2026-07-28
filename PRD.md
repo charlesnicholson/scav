@@ -391,9 +391,7 @@ Only **derived-scratch** gets §4.1's container latitude. Geometry is hashed and
 
 `ColumnDesc` carries a `derived` flag (§8). The serializer skips derived columns and they are **exempt from round-trip-unknown**, or a stale geometry snapshot survives a save and gets trusted instead of recomputed.
 
-**Derived column names live outside `Chart.strings`.** Interning `scav.geom.box` into the authored pool would make every authored `StrRef` offset — and the format hash — depend on whether layout had run.
-
-These are transient scratch, so their container choice is a convenience decision per §4.1 — `lookup_map` where lookup-only, a sorted vector where order matters. They are rebuilt rather than persisted, so nothing about them reaches serialization or the layout hash.
+**Derived column names live outside `Chart.strings`.** Interning `scav.geom.state` into the authored pool would make every authored `StrRef` offset — and the format hash — depend on whether layout had run.
 
 Serialization is mechanical (write each vector). Iteration order is array order is document order.
 
@@ -450,7 +448,7 @@ struct AttrKeyId { uint32_t v; };   // interned attribute key, `ns:key` or bare
 struct ColumnId  { uint32_t v; };   // index into Chart::columns
 
 struct ColumnDesc {
-  char const* name;        // "libhsm.events", "scxml.onentry", "scav.geom.box"
+  char const* name;        // "libhsm.events", "scxml.onentry", "scav.geom.state"
   ElemKind    entity;         // never `point`/`path_box`/`none` in a ColumnDesc
   ValueKind   kind;
   uint32_t    elem_size, elem_align;
