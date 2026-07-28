@@ -84,7 +84,7 @@ Applications, each supplying (or reusing) a builder and a backend:
 
 | App | Is |
 |---|---|
-| `scav` | CLI: `render` (chart -> SVG), `layout` (dump geometry columns), `fmt` (canonical print), `gen` (synthetic charts), `check` (validate), `dump --json` |
+| `scav` | CLI: `render` (chart -> SVG), `layout` (dump geometry columns), `fmt` (canonical print), `gen` (synthetic charts), `check` (validate), `dump --json`, `selftest` (verify §6's hashes on this toolchain) |
 | `scavview` | ImGui viewer [P10]. Embeds Lua so users can script appearance without rebuilding it (§8.3) |
 | *yours* | e.g. an enemy-AI editor: links core+layout+draw, writes a builder that also draws threat radii, writes its own ImGui backend. No scav change required |
 
@@ -189,9 +189,9 @@ What this rules out is not hash maps but a **graph of long-lived heap nodes poin
 
 **CMake + Ninja.** GN is excellent for first-party code in a private ecosystem and hostile to sharing: no `install()`, no export/config packages, no `find_package`. CMake is clunky and is the lingua franca, and scav is a library meant to be consumed — including by a wheel that needs a shared object with proper install rules (§16.1). That, plus presets expressing §6's matrix directly, is the whole argument.
 
-**Toolchain provisioned by [envy](https://github.com/charlesnicholson/envy), and this is a correctness argument.** §6 claims bit-identical output across `{clang, gcc, MSVC} × {libstdc++, libc++, MSVC STL}` — vacuous if `clang` is whatever is on `PATH`. envy pins exact compiler builds by fingerprint, which turns the matrix from a hope into a reproducible fact. It also already packages ninja, python, and clang-tools.
+**Toolchain provisioned by [envy](https://github.com/charlesnicholson/envy) — for *our* CI, not for users.** §6's evidence is only as good as the compilers that produced it, and "clang" meaning whatever is on `PATH` makes a matrix row unreproducible; envy pins exact builds by fingerprint. It also packages ninja, python, and clang-tools.
 
-**envy for CI and for any determinism claim; a system toolchain is fine for local hacking.** Not a hard build prerequisite.
+**Not a build prerequisite, and deliberately so.** §6's claim is about the C++ abstract machine, so any conforming C++20 toolchain is supported and `scav selftest` is how a user confirms theirs agrees. Requiring envy to build would contradict that. Standard CMake: `find_package`, no vendored toolchain assumptions, no compiler-specific flags in the exported targets.
 
 ## 5. Testing
 
@@ -217,7 +217,11 @@ Measure branch coverage; an untested file fails the build. No percentage target.
 
 ## 6. Determinism contract
 
-**Byte-identical layout output across the full matrix.** Canonical matrix, defined once and referenced everywhere:
+**Layout output is a function of the C++ abstract machine, not of any implementation.** That is the claim, stated stronger than a test matrix: *any* conforming C++20 toolchain must produce the same bytes, because the code depends on nothing an implementation is free to choose. **Users bring their own compilers** — the six triples below are *evidence* for the property, not its definition, and a seventh toolchain is expected to agree without anyone having tried it.
+
+Two obligations follow. **No implementation-defined or unspecified behaviour may reach output** — the banned list below is that rule enumerated, and it is closed rather than advisory. And **`scav selftest`** recomputes the structural and coordinate hashes on the corpus and diffs them against the committed goldens, so a user on an untested compiler verifies the claim in one command instead of trusting it. A failure is a scav bug until proven otherwise.
+
+**Canonical matrix**, defined once and referenced everywhere:
 
 ```
 { macOS/clang/libc++, Linux/clang/libc++, Linux/clang/libstdc++,
@@ -226,7 +230,7 @@ Measure branch coverage; an untested file fails the build. No percentage target.
   + wasm32-wasi single-threaded
 ```
 
-Six realizable platform triples, not a 27-cell cross product — most combinations of that product do not exist.
+Six realizable platform triples, not a 27-cell cross product — most combinations of that product do not exist. They are chosen to span the axes that historically diverge: three standard libraries, three vendors' codegen, LP64 vs LLP64 vs ILP32, and x86_64 vs arm64 vs wasm32.
 
 Odd and prime thread counts are mandatory — they expose reduction-shape bugs powers of two hide. Tier it: a small blocking subset per PR, full grid nightly and advisory, or a trickle of one-cell failures halts velocity.
 
@@ -262,8 +266,17 @@ Odd and prime thread counts are mandatory — they expose reduction-shape bugs p
 | `memcmp`/`memcpy`-hashing a struct | Reads padding, whose values are unspecified |
 | Locale-aware compare, `setlocale` | Environment-dependent. Byte-wise only — Hebrew/Arabic therefore sort in codepoint order, a permanent accepted trade |
 | `directory_iterator` order | Unspecified. Sort collected paths byte-wise |
+| **Bitfields** | Allocation order, straddling, and padding are all implementation-defined. Use explicit masks on a fixed-width integer |
+| **`__int128`, `__builtin_*`, `#pragma pack`, attributes outside `[[...]]`** | Not standard C++, so they defeat the whole claim. §11.2's budget exists to keep degree-4 arithmetic — and therefore `int128` — off the table |
+| Shifting by `>= ` the operand width, or left-shifting a negative | UB. Shift counts are asserted in range; `<bit>` covers the rest |
+| Narrowing without an explicit range check | Implementation-defined before C++20 and easy to get wrong after. One `narrow<T>()` helper, checked in every build |
+| `enum` without an explicit underlying type | The type is otherwise the implementation's choice, which changes struct layout and wire size |
 
 C++20's P0907 fixed two's-complement *representation* but kept signed overflow UB, and optimizers exploit it. Do not use `-fwrapv` — MSVC has no equivalent, so it would introduce a platform semantic difference. Prove no overflow (§11.2), net it with UBSan.
+
+**Flags are belt-and-braces, never semantics.** `-fno-exceptions`, `-fno-rtti`, and their absence must all produce the same bytes: the code never throws and never asks a type its identity, so a compiler lacking those switches is still a supported compiler. Same for optimization level — with no UB, `-O0` and `-O3` cannot disagree, which is why the `testable` build is a matrix row rather than a trusted equivalence.
+
+**`libscavlayout` uses a documented standard-library subset** — `<cstdint>`, `<bit>`, `<limits>`, `<vector>`, `<array>`, `<utility>`, `<type_traits>`, `<cstring>` — and nothing else. Every sort, hash, and container with iteration order that reaches output is scav's own (above). The subset is enforced by an include-check in CI, so "bring your own compiler" does not quietly mean "bring your own conforming `<algorithm>`".
 
 **Scope of this section: anything that can reach layout geometry or rendered output.** A structure that only ferries data inside one call is outside it, and `std::unordered_map` is the right choice there — deterministic *by usage*, because a key lookup has no order and the hash value never escapes as a bucket index. Enforce that structurally: `lookup_map<K,V>` exposes `find`/`at`/`insert` and **no `begin()`/`end()`**, so "never iterated" is a compile error rather than a review comment.
 
@@ -1320,7 +1333,7 @@ Where a phase states production LOC, multiply by 1.5–2 for the mandated test c
 **P7 — orthogonal routing.** Router behind the vtable, channel-representative graph, separated OVG, A* with bend state, obstacles including submachines and placed boxes, LCA-owned separator channels, combinatorial nudging with integer offsets, `PathBox` strip placement, bench harness over ≥2 routers.
 *Exit:* zero edges through boxes; blind review no worse than incumbent.
 
-**P8 — determinism infrastructure.** Thread shim, model-derived sharding, counter-based RNG, index-ordered reduction, tiered matrix, sanitizer configs, scheduling-delay injector.
+**P8 — determinism infrastructure.** Thread shim, model-derived sharding, counter-based RNG, index-ordered reduction, tiered matrix, sanitizer configs, scheduling-delay injector, the standard-library-subset include check (§6), and **`scav selftest`** — the command that makes §6's compiler-independence claim checkable by a user rather than only by our CI.
 *Exit:* one structural hash and one coordinate hash across the blocking matrix; full grid green nightly. The `wasm32-wasi` row lands with P11 — until then the matrix is the six native triples, and §6's discipline is what makes adding the row a build change rather than a redesign.
 
 **P9 — search and calibration.** Portfolio, local search, surrogate with ranking test, weight calibration, versioned profiles.
