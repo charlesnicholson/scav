@@ -106,7 +106,7 @@ src/svg/               reference SVG backend
 src/imgui/             reference ImGui backend
 apps/cli/              the scav executable
 apps/view/             ImGui viewer + its Lua host [P7]
-plugins/libhsm/        importer, codegen, builder contribution
+plugins/libhsm/        columns, attributes, builder contribution (importer + codegen: §17)
 plugins/scxml/         reference example: importer, exporter, builder contribution
 assets/font/           the bundled TTF — a layout-hash input, so versioned here
 abi/scav_abi.json      committed golden ABI description (§16)
@@ -446,10 +446,12 @@ Two axes. Both round-trip losslessly, including data this build does not underst
 enum class ElemKind : uint32_t { state, submachine, transition, chart, point, path_box, none };
 struct ElemRef { ElemKind kind; uint32_t ordinal; };   // used by DrawList and diagnostics
 enum class ValueKind  : uint32_t { u32, i32, u64, i64, strref, span, blob };
+struct AttrKeyId { uint32_t v; };   // interned attribute key, `ns:key` or bare
+struct ColumnId  { uint32_t v; };   // index into Chart::columns
 
 struct ColumnDesc {
   char const* name;        // "libhsm.events", "scxml.onentry", "scav.geom.box"
-  EntityKind  entity;
+  ElemKind    entity;         // never `point`/`path_box`/`none` in a ColumnDesc
   ValueKind   kind;
   uint32_t    elem_size, elem_align;
   bool        derived;     // §7: skipped by the serializer, exempt from round-trip-unknown
@@ -457,7 +459,7 @@ struct ColumnDesc {
 struct Column { ColumnDesc desc; std::vector<scav_byte> bytes; };  // count * elem_size
 ```
 
-Type-erased byte arrays with a stride, indexed by entity ordinal. C ABI is `scav_column_data(chart, col, &ptr, &stride)`; the host casts.
+Type-erased byte arrays with a stride, indexed by entity ordinal. C ABI is the three-call accessor in §16; the host casts.
 
 **What core owes an extension:**
 
@@ -655,6 +657,8 @@ phase2_size(SubmachineOrders, Spaces)            -> SizedLayout
 phase3_route(SizedLayout, Router)                -> geometry columns + Placed[]
 ```
 
+The four intermediates are internal POD: `Spaces` is the three §8.1 tables; `SplitGraph` is segments, ports, and the containment tree; `SubmachineOrders` adds rank and in-rank position per node; `SizedLayout` adds box extents and port coordinates. None crosses the ABI (§16) — only geometry columns and `Placed[]` do — so they are free to change without an ABI break.
+
 Every stage is POD in, POD out, so any stage is testable with hand-written inputs and no font present. Hint columns are integers (§14), so layout never touches a string or resolves a path — §3.1's font-blindness is structural, not a convention.
 
 Output goes into **derived geometry columns on the model** plus a `Placed[]` array parallel to `PathBox`. Derived columns are never serialized and never authored (§7), so "layout writes the model" does not compromise round-trip stability.
@@ -809,7 +813,7 @@ Enumerated normatively, because this list *is* the layout output ABI (§16 delet
 | `scav.geom.chart` | chart | root bounding box |
 | `scav.geom.gen` | chart | generation counter (§13) — **not hashed, not serialized** |
 
-`EntityKind` gains `point` so the point array is a real column rather than a side array outside the column rules; its entity count is the column length. `Placed` stays an out-param because `PathBox` is 0..N per transition and cannot be a dense per-entity column.
+`ElemKind::point` exists so the point array is a real column rather than a side array outside the column rules; its entity count is the column length. `Placed` stays an out-param because `PathBox` is 0..N per transition and cannot be a dense per-entity column.
 
 **Hashing is by explicit allowlist, not by enumerating `Chart.columns`** — otherwise app and plugin columns perturb scav's own goldens, and the same corpus hashed through `scav` and through `scavview` would differ. The **structural hash** covers ranks, orders, port sides, and bend sequences *as direction-turn tokens*; the **coordinate hash** covers the rects and point coordinates. Turn tokens rather than points is what makes a pure translation move the coordinate hash and not the structural one, which is the whole point of the split.
 
@@ -1158,7 +1162,8 @@ typedef uint32_t scav_router_id;
 typedef struct { uint32_t off, len; } scav_span;   // StrRef and Span both
 typedef struct { int32_t w, h; } scav_extent;
 typedef struct { int32_t x, y; } scav_point;
-typedef struct { int32_t x, y, w, h; } scav_rect;  // and scav_placed
+typedef struct { int32_t x, y, w, h; } scav_rect;   // also the Placed type (§8.1)
+typedef scav_rect scav_placed;
 ```
 
 **Handles: four, each with a create and a destroy.** `scav_chart` (the model), `scav_load` (a multi-document load session, §16.2), `scav_metrics` (font tables), `scav_images` (the raster registry a backend reads). Destroy is idempotent on `NULL`; a `scav_chart` outlives every `scav_span` handed out from it, and nothing else owns model memory. `scav_metrics_create(const scav_byte* ttf, uint32_t len, scav_metrics** out)` — the bundled font is embedded, so `NULL` selects it. `scav_metrics` is immutable after create, so it is shared across threads without locking; the other three are single-threaded-per-instance, and any number of instances may be used concurrently. There is no library-global state and no init call.
@@ -1188,6 +1193,8 @@ scav_result scav_image_register(scav_images*, const char* id, const scav_byte*, 
                                 int32_t w, int32_t h, const char* mime);
 scav_result scav_router_by_name(const scav_byte* name, uint32_t len, scav_router_id* out);
 ```
+
+`scav_spaces` is the three §8.1 tables as parallel base pointers plus counts, so an app fills its own arrays and passes them; `scav_layout_opts` is `{scav_profile, scav_router_id, uint32_t threads}`, where `threads` affects scheduling only (§6).
 
 **No bespoke layout-result type.** Geometry is columns (§11.7a); edge polylines are a `Span` into a points column, already the model's idiom. `Placed[]` stays an out-param only because `PathBox` is 0..N per transition and cannot be a dense per-entity column.
 
@@ -1277,7 +1284,7 @@ Estimates below are production LOC; multiply by 1.5–2 for the mandated test cl
 **P6 — search and calibration.** Portfolio, local search, surrogate with ranking test, weight calibration, versioned profiles.
 *Exit:* full-layout latency at 2k states measured and published (§11.11's bet); a one-state edit produces a visually small diagram change on the corpus.
 
-**P7 — `scavview`.** ImGui backend, pan, zoom, linear-scan hit test, hover/select, live highlighting (§13), relayout on request, and the Lua host (§8.3) with its sandbox and determinism obligations. Metrics-parity golden against the builder.
+**P7 — `scavview`.** `libscavimgui`, pan, zoom, linear-scan hit test, hover/select, live highlighting (§13), relayout on request, and the Lua host (§8.3) with its sandbox and determinism obligations. Metrics-parity golden against the builder.
 *Exit:* navigate 2k states smoothly; drive highlighting from an external process with no relayout.
 
 **P8 — browser.** Core, layout, draw, and SVG to `wasm32-wasi`, single-threaded on the null shim. A JS host reads the `DrawList` and renders it, or calls the wasm SVG backend.
