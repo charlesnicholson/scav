@@ -81,7 +81,7 @@ app: render DrawList                      (may use scav's SVG or ImGui backend)
 
 `layout` is font-blind and appearance-blind: it consumes extents and constraints, never content. It writes **derived** columns only and never touches authored data (§7).
 
-Platforms: native (macOS/Linux/Windows) and `wasm32-wasi` for core, layout, draw, and the SVG backend. The ImGui backend also targets `wasm32-emscripten` + WebGL. Emscripten is not WASI.
+Platforms: native (macOS/Linux/Windows) and **`wasm32-wasi`** for core, layout, draw, and the SVG backend. The ImGui viewer is **native first**, with a documented path to the browser (§16.3) rather than a second wasm target in v1.
 
 ### 3.1 Libraries and applications
 
@@ -136,7 +136,7 @@ Note `apps/` is separate from `src/`: an application is a consumer of scav, and 
 
 **Goldens are layered by the stage they pin**, cheapest and most stable first: `layout/` holds structural and coordinate hashes, `drawlist/` holds the canonical POD render IR (§12 — the primary surface), `svg/` holds a thin serializer check. A layout change moves `layout/` and `drawlist/`; an SVG-writer change moves only `svg/`. If a change moves `svg/` alone it is a serializer bug; if it moves all three, review starts at `layout/`.
 
-Third-party, all permissive and SHA-pinned, none vendored by copy: **doctest** (MIT), **ImGui** (MIT, viewer only), **stb_image** (MIT/public domain, viewer only), **lua** + **sol2** (viewer only — see §8.3).
+Third-party, all permissive and SHA-pinned, none vendored by copy: **doctest** (MIT), **ImGui** (MIT, native viewer only), **stb_image** (MIT/public domain, native viewer only), **lua** + **sol2** (viewer only — see §8.3). Plus the bundled TTF, which is a layout-hash input and gets a row in §18. The toolchain itself is provisioned by envy (§4.2), not by CMake.
 
 ## 4. Language rules
 
@@ -154,7 +154,7 @@ C++20, flat `extern "C"` API per layer.
 | Invariant | **No pointer or reference between records.** Records link by ordinal. Algorithms may hold pointers while working |
 | Unavailable | RTTI, exceptions, modules, coroutines, `std::format`, `<iostream>`, `<regex>`, virtual inheritance. Enforced by build flags or by portability — not a style question |
 | Discouraged | `<ranges>` and view pipelines · clever `<algorithm>` compositions · stateful classes · work in constructors · operator overloading beyond id comparison · SFINAE, CRTP, type-list computation · `auto` where the type isn't locally obvious. Usable with a comment saying why; the default answer is the plain loop |
-| Build | CMake + Ninja. MSVC / clang / gcc |
+| Build | CMake + Ninja, toolchain pinned by envy — see §4.2 |
 
 The bar for a discouraged construct is that a reader can still follow control flow from the source. That's what rules them out by default, and it's also what makes exceptions legitimate when the construct genuinely reads better.
 
@@ -200,6 +200,16 @@ If no to all four, convenience wins. If yes to any, it is core model and columna
 Two constraints survive on scratch, both from §6 and both structurally enforceable: **never iterate an unordered container where the order can reach output**, and **never let a hash value escape**. Use `lookup_map` (§6) so the first is a compile error.
 
 What this rules out is not hash maps — it is a **graph of long-lived heap nodes pointing at each other**, which is the actual thing that makes a model unserializable, unhashable, and untestable.
+
+### 4.2 Build system
+
+**CMake + Ninja.** GN is excellent for first-party code in a private ecosystem and hostile to sharing: no `install()`, no export/config packages, no `find_package`. CMake is clunky and is the lingua franca, and scav is a library meant to be consumed — including by a wheel that needs a shared object with proper install rules (§16.1). That, plus presets expressing §6's matrix directly, is the whole argument.
+
+Two counter-arguments do **not** apply and are recorded so they are not re-raised: GN's much faster configuration is a function of dependency-tree size, and scav's third-party is doctest, ImGui, `stb_image`, and a font — configuration will be seconds. And GN's missing wasm story shrank to one modest toolchain once emscripten left v1 (§16.3), so it is no longer a reason either.
+
+**Toolchain provisioned by [envy](https://github.com/charlesnicholson/envy), and this is a correctness argument.** §6 claims bit-identical output across `{clang, gcc, MSVC} × {libstdc++, libc++, MSVC STL}` — vacuous if `clang` is whatever is on `PATH`. envy pins exact compiler builds by fingerprint, which turns the matrix from a hope into a reproducible fact. It also already packages ninja, python, and clang-tools.
+
+Two documented paths, one authoritative: **envy for CI and for any determinism claim; a system toolchain is fine for local hacking.** envy is not a hard prerequisite for building, because making a pre-release single-maintainer tool mandatory for a first contribution is a bad trade.
 
 ## 5. Testing
 
@@ -1167,11 +1177,48 @@ scav_result scav_router_by_name(const scav_byte* name, uint32_t len, scav_router
 
 Editor commands do not cross the C boundary as objects; that layer's API is opcodes. (Note `virtual Command Inverse()` returning an abstract base by value does not compile — the editor's inverse is a command buffer append.)
 
+### 16.1 Distribution and bindings
+
+**Extending scav means writing an application** (§3), so bindings must cover the whole pipeline — model, format, metrics, space tables, layout, geometry columns, `DrawList`, SVG — not a plugin corner.
+
+**The pivot already did the hard part: there are no callbacks anywhere.** Every extension point is data in, data out. Under the earlier design a Python binding would have meant Python functions invoked from layout worker threads across an `-fno-exceptions` boundary. Now a binding is pure marshalling, which is why this is tractable at all.
+
+**One redistributable shared library** — `libscav` = core + layout + draw + svg. The four static libraries are a build-time decomposition; the distribution unit is one shared object. The batteries are everything except the interactive viewer, so the reference builder and SVG backend must be reachable through the C ABI rather than being C++-only conveniences.
+
+- **Generated, not hand-written.** libclang → ABI JSON (§16) → generated low-level layer, plus a thin hand-written idiomatic wrapper per language. The generated half never drifts.
+- **Prebuilt binaries**: macOS arm64/x86_64, Linux x86_64/aarch64 (manylinux), Windows x64, plus wasm. No compiler required to `pip install`.
+- **Self-contained**, because there are no runtime dependencies. The bundled font is **embedded in the library**, not loaded from a path — it is a layout-hash input and must travel with the code.
+
+**Two hazards.** §16's unspecified memory ownership is a **hard blocker, not an item owed** — a binding cannot exist without a destroy call per handle, so this lands in P0. And Python makes §8.1's integer-purity rule easy to violate (`/` yields float, ints are arbitrary-precision), so setters range-check and reject non-integers, and the space-computation helpers live in the shared library so the common path never does arithmetic in the host language.
+
+### 16.2 No file I/O in core
+
+**Core performs no file I/O.** It parses from a byte span; the application supplies bytes. This is required for the browser and for bindings, and it is good hygiene regardless.
+
+Include resolution is therefore **iterative and data-driven, not a callback**: parse a document, get back the list of include paths it could not resolve, fetch them however you like, hand them back, repeat until closed. That works identically over a filesystem, HTTP, a zip, or memory — and it avoids putting a resolver callback into a library whose no-callback property is what makes §16.1 work.
+
+### 16.3 The path to a browser viewer
+
+Not a v1 deliverable. What matters is that nothing precludes it, and that claim is checkable rather than asserted — four conditions, all already required for other reasons:
+
+| Condition | Status |
+|---|---|
+| single-threaded execution produces byte-identical output | **already required** (§6's null shim backend, in the matrix) |
+| core does no file I/O | **§16.2** |
+| the font is embedded bytes, not a path | **§16.1** |
+| the viewer's platform layer is swappable | ImGui's own concern; it ships SDL and GLFW emscripten backends |
+
+The scav-specific part of a viewer is only `DrawList` → draw calls, which is platform-agnostic. So a browser viewer is an emscripten build of the *viewer*, not a change to anything below it.
+
+**And it may not be the right web front end anyway.** A web app can run core+layout+draw in wasm and render the `DrawList` in JavaScript to SVG DOM or Canvas — which beats ImGui-in-canvas on text selection, copy, accessibility, browser zoom, printing, and bundle size. Two backends is the intended shape under §3, not duplicated effort.
+
+One nuance: if a browser renders via JS, the goldens stop covering that path, because a JS emitter is a second implementation. So the wasm build exports the `DrawList` **and** the C++ SVG backend — interactive rendering is JS, static SVG comes from the code CI pins.
+
 ## 17. Phases
 
 Estimates below are production LOC; multiply by 1.5–2 for the mandated test classes.
 
-**P0 — core.** Columnar aggregates, tombstoned ids, extension columns, string pool with two-pass interning, NFC normalization, path addressing and cross-document resolution, includes with cycle detection, structural validation, the `.scav` lexer, parser, and comment-preserving canonical printer (§15), append-only builder API, ABI JSON extraction, doctest harness. Plus the **synthetic chart generator** and **2–3 hand-transcribed real charts** — synthetic graphs have uniform branching and no accidental structure, so tuning on them alone is a trap. Determinism discipline (§6) is in force from the first commit; it cannot be retrofitted.
+**P0 — core.** Columnar aggregates, tombstoned ids, extension columns, string pool with two-pass interning, NFC normalization, path addressing and cross-document resolution, includes with cycle detection, structural validation, the `.scav` lexer, parser, and comment-preserving canonical printer (§15), append-only builder API, ABI JSON extraction, **handle lifecycle — create/destroy per handle, allocator injection, thread-safety per call (§16.1 blocks on it)**, byte-span parsing with iterative include resolution (§16.2), doctest harness. Plus the **synthetic chart generator** and **2–3 hand-transcribed real charts** — synthetic graphs have uniform branching and no accidental structure, so tuning on them alone is a trap. Determinism discipline (§6) is in force from the first commit; it cannot be retrofitted.
 *Exit:* round-trip a depth-16 / 2k-state chart byte-identically, including unknown extension columns; ABI driven from Python.
 
 **P1 — metrics, space requests, layout skeleton.** Font metrics helper, the space tables, Phase 0 splitting, derived classification, trivial placement, straight-line routes, geometry columns. Validate the coordinate extent estimate (§11.2).
@@ -1195,7 +1242,7 @@ Estimates below are production LOC; multiply by 1.5–2 for the mandated test cl
 **P7 — `scavview`.** ImGui backend, pan, zoom, linear-scan hit test, hover/select, live highlighting (§13), relayout on request, and the Lua host (§8.3) with its sandbox and determinism obligations. Metrics-parity golden against the builder.
 *Exit:* navigate 2k states smoothly; drive highlighting from an external process with no relayout.
 
-**P8 — browser.** Core, layout, draw, and SVG to `wasm32-wasi`; `scavview` to `wasm32-emscripten` + WebGL.
+**P8 — browser.** Core, layout, draw, and SVG to `wasm32-wasi`, single-threaded on the null shim. A JS host reads the `DrawList` and renders it, or calls the wasm SVG backend.
 *Exit:* same chart in a browser, hashes identical to native.
 
 **P9 — editor.** In-place mutation, undo/redo. **[OPEN]** arena snapshot vs command buffer with inverse.
