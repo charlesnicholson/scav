@@ -331,16 +331,11 @@ struct Transition {
   DocId         doc;
   uint32_t      gen;
 };
-struct Include  {
-  StrRef  path, alias, hash;  // hash is the authored `algo:digest` text, so it round-trips
-  DocId   target;
-  StateId host;              // the alias state this include synthesizes; never kInvalid
-};
+struct Include  { StrRef path, alias; DocId target; StateId host; };  // host: the synthesized alias state
 struct Attr     { AttrKeyId key; StrRef value; };
 
 struct Document {            // one per loaded document
   StrRef   path, alias;
-  uint64_t content_hash;
   Span     text;             // -> src_bytes
   Span     statements;       // -> stmts, authored source order
   Span     includes;         // -> includes
@@ -625,8 +620,9 @@ wifi/On/Ready        cross-document, via include alias
 - **Provenance is a field, not a computed column.** `DocId` on each row records the **include instance** — instance rather than path, so including one document twice yields two distinguishable sets. A renderer tinting sub-document submachines reads it; layout ignores it.
 - Transition endpoints are plain `StateId`s, because ids were global from the start.
 - **An include alias is a bare path prefix**, not a sigil, because it is a state name. Alias uniqueness is therefore §10's ordinary duplicate-name check rather than a second rule, and duplicate top-level names in two documents cannot collide.
-- Includes may pin a content hash. **The pin is a property of the document, not of an instantiation** — two includes of the same path must state the same hash or state none, and disagreement is a hard error (§10). Canonical form prints the pin on every include of that path. Include cycles are a hard error.
-- **Instantiating one document twice means two include statements**, two aliases, and two disjoint sets of rows distinguished by `DocId`. Renaming that file then patches one path string per instantiation. Accepted: a **global include section with a reference sigil was considered and rejected** — a sigil names a document, but an endpoint must name an instance, so the two coincide only at N=1 and above it the section needs instance names anyway. It would also still require a statement at the host to say where the subdocument attaches, and it would mark a cross-document distinction the model does not have, since an alias is an ordinary state.
+- **No integrity attestation.** An include names a path, not a digest: a `.scav` document network is source code under the same version control as the code it describes, so pinning content hashes would duplicate what the VCS already guarantees while adding a second thing to keep current. Fetching a document over a network is the app's policy (§16.2) and so is verifying it.
+- Include cycles are a hard error.
+- **Instantiating one document twice means two include statements**, two aliases, and two disjoint sets of rows distinguished by `DocId`. Renaming that file then patches one path string per instantiation. Accepted: a **global include section with a reference sigil was considered and rejected** — a sigil names a document, but an endpoint must name an instance, so the two coincide only at one instantiation and above it the section needs instance names anyway. It would also still require a statement at the host to say where the subdocument attaches, and it would mark a cross-document distinction the model does not have, since an alias is an ordinary state.
 - Relative hints travel with an included chart; **absolute pins do not** — a pin is authored against a document's own frame and is meaningless in a host frame.
 - Resolution is a linear scan per path level (document order forbids sorting `state_ids` by name) or via the derived sorted index.
 - Paths break on rename. Renaming is a **semantic editor** operation — the editor holds the document network and rewrites every reference — not a CLI verb. **[OPEN]** whether elements also need durable GUIDs, which paths cannot supply across branches: two branches renaming the same state differently is unreconcilable when identity *is* the name.
@@ -641,7 +637,6 @@ Mandatory, in core, structural only — `layout` reads ordinals and crashes on g
 - unresolvable cross-document paths, checked at the **resolution phase** (§9)
 - a `Statement.src` span outside its document's `text` span
 - an alias colliding with a sibling state name — the same duplicate-name check, since an alias is a state (§9)
-- two includes of one path pinning different hashes (§9)
 - authored names must not contain the path metacharacters `/ : $`, nor `@` (the format's attribute sigil, §15)
 - more than one `initial` per submachine. **No degree checks per pseudostate kind** — "a fork has one incoming edge" is a dialect rule, and §7.2 requires every topology to be drawable
 - authored `scav:pin` coordinates outside §11.2's domain — the only authored geometry there is
@@ -1073,7 +1068,7 @@ document   := chart
 chart      := 'chart' ident [ string ] block
 block      := '{' [ item ( ',' item )* [ ',' ] ] '}'
 item       := include | state | submachine | trans | attr
-include    := 'include' string 'as' ident [ 'hash' string ]
+include    := 'include' string 'as' ident
 state      := ('state'|'s') ident [ state_kind ] [ string ] [ block ]
 submachine := ('submachine'|'m') [ ident ] [ string ] block
 trans      := ('trans'|'t') [ trans_kind ] endpoint '->' endpoint [ string ] [ block ]
@@ -1097,7 +1092,7 @@ comment    := '//' <to end of line>          -- trivia; lexed, not parsed
 
 ```
 chart vac "robot vacuum" {
-  include "wifi.scav" as wifi hash "blake3:9f2c1a7e",
+  include "wifi.scav" as wifi,
 
   state Off "powered down",
   state Booting,
@@ -1140,7 +1135,7 @@ chart vac "robot vacuum" {
   ```
 - **Newlines carry nothing** — whitespace-insensitive outside strings, whole file legal on one line. Line breaking is the printer's, which is what makes byte-identical output achievable.
 
-Reserved: `chart` `include` `state` `submachine` `trans` `external` `internal` `local`. Everything else is contextual, so a state may be named `choice`, `history`, `as`, `hash`, `kind`, `s`, `m`, or `t`.
+Reserved: `chart` `include` `state` `submachine` `trans` `external` `internal` `local`. Everything else is contextual, so a state may be named `choice`, `history`, `as`, `kind`, `s`, `m`, or `t`.
 
 **Strings.** `"..."` takes `\\ \" \n \t \uXXXX`. `"""..."""` is raw with no escapes — which is its purpose, and why it cannot contain `"""`. Indentation is stripped to the closing delimiter's column; a line indented *less* than the closing delimiter is an error, not silently clamped.
 
@@ -1259,15 +1254,14 @@ scav_result scav_load_finish(scav_load*, scav_chart** out);
 void        scav_load_destroy(scav_load*);
 
 typedef uint32_t scav_doc_id;              // the ABI spelling of DocId (§7)
-struct scav_pending {                      // 20 bytes, no padding
+struct scav_pending {                      // 12 bytes, no padding
   scav_span   path;                        // into the load session's own byte pool
-  scav_span   expect_hash;                 // authored `algo:digest` text, empty if unpinned
   scav_doc_id from;
 };
 scav_result scav_load_bytes(const scav_load*, scav_span, const scav_byte** out, uint32_t* len);
 ```
 
-`add` the root, read `pending`, resolve each however you like, `add` each, repeat until empty, `finish`. The app owns fetch policy, caching, and parallelism; cycles and unresolvable paths are core's errors; `content_hash` is verified inside `add`, where the bytes and the expectation are both in hand; and `name` makes diagnostics say `wifi.scav:12` rather than `<buffer>:12`.
+`add` the root, read `pending`, resolve each however you like, `add` each, repeat until empty, `finish`. The app owns fetch policy, caching, and parallelism; cycles and unresolvable paths are core's errors; and `name` makes diagnostics say `wifi.scav:12` rather than `<buffer>:12`.
 
 Works identically over a filesystem, HTTP, a zip, or memory, and preserves §16.1's no-callback property.
 
