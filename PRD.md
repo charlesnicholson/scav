@@ -659,7 +659,7 @@ The four intermediates are internal POD: `Spaces` is the three §8.1 tables; `Sp
 
 Every stage is POD in, POD out, so any stage is testable with hand-written inputs and no font present. Hint columns are integers (§14), so layout never touches a string or resolves a path — §3.1's font-blindness is structural, not a convention.
 
-Output goes into **derived geometry columns on the model** plus a `Placed[]` array parallel to `PathBox`. Derived columns are never serialized and never authored (§7), so "layout writes the model" does not compromise round-trip stability.
+Geometry columns are derived: never serialized, never authored (§7), so "layout writes the model" does not compromise round-trip stability.
 
 ### 11.1 Phase 0 — decompose
 
@@ -811,7 +811,7 @@ This list *is* the layout output ABI — there is no bespoke result type (§16) 
 | `scav.geom.chart` | chart | root bounding box |
 | `scav.geom.gen` | chart | generation counter (§13) — **not hashed, not serialized** |
 
-`ElemKind::point` exists so the point array is a real column rather than a side array outside the column rules; its entity count is the column length. `Placed` stays an out-param because `PathBox` is 0..N per transition and cannot be a dense per-entity column.
+`ElemKind::point` exists so the point array is a real column rather than a side array outside the column rules; its entity count is the column length.
 
 **Hashing is by explicit allowlist, not by enumerating `Chart.columns`** — otherwise app and plugin columns perturb scav's own goldens, and the same corpus hashed through `scav` and through `scavview` would differ. The **structural hash** covers ranks, orders, port sides, and bend sequences *as direction-turn tokens*; the **coordinate hash** covers the rects and point coordinates. Turn tokens rather than points is what makes a pure translation move the coordinate hash and not the structural one, which is the whole point of the split.
 
