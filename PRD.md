@@ -113,10 +113,14 @@ abi/scav_abi.json      committed golden ABI description (§16)
 test_data/charts/      corpus: synthetic fixtures + hand-transcribed real charts
 test_data/golden/      drawlist/, svg/, layout/ — see below
 functional_tests/      Python, drives the CLI and the C ABI via ctypes
-cmake/deps/*.cmake     one file per third-party dep
+cmake/deps/*.cmake     one file per third-party dep envy does not package
 cmake/Dependencies.cmake   SHA pins
 tools/                 abi extraction (libclang), corpus tooling
 docs/
+envy.lua               toolchain + package manifest, and envy's root marker
+build.sh  build.bat    one command, clean checkout to green tests
+CMakePresets.json      one preset per §6 matrix cell
+.github/workflows/     the matrix, on bare runners
 out/                   gitignored: all build output + the envy cache (§4.2)
 ```
 
@@ -126,7 +130,7 @@ out/                   gitignored: all build output + the envy cache (§4.2)
 
 **Goldens are layered by stage**: `layout/` (structural + coordinate hashes), `drawlist/` (the canonical render IR, §12, the primary surface), `svg/` (thin serializer check). A layout change moves the first two; an SVG-writer change moves only the third. `svg/` alone → serializer bug; all three → review starts at `layout/`.
 
-Third-party, all permissive and SHA-pinned, none vendored by copy: **doctest** (MIT), **ImGui** (MIT, native viewer only), **stb_image** (MIT/public domain, native viewer only), **lua** + **sol2** (viewer only — see §8.3). Plus the bundled TTF, which is a layout-hash input (§18). The toolchain itself is provisioned by envy (§4.2), not by CMake.
+Third-party, all permissive, none vendored by copy: **doctest** (MIT), **ImGui** (MIT, native viewer only), **stb_image** (MIT/public domain, native viewer only), **lua** + **sol2** (viewer only — see §8.3). Plus the bundled TTF, which is a layout-hash input (§18). **envy provisions both the toolchain and the packages** (§4.2); `cmake/deps/` covers only what envy does not, SHA-pinned.
 
 ## 4. Language rules
 
@@ -227,7 +231,7 @@ Testability comes from pure functions, not seams. **Mocks and interface seams ar
 
 All layout arithmetic is integer, so inlining cannot change results: the `testable` build must be byte-identical to release, and is a row in the matrix. Divergence means UB.
 
-Required test classes: **unit** (every internal function, doctest) · **functional** (full pipeline over the corpus) · **golden** (canonical serialization, structural hash, coordinate hash, **`DrawList`** — the primary surface, §12 — plus a thin SVG serializer check, ABI JSON) · **property** (round-trip identity, all refs resolve, zero box overlap, zero edge-through-box, surrogate cost ranks like exact cost) · **determinism** (§6) · **sanitizer** (UBSan signed-overflow+shift, ASan, TSan, MSan) · **fuzz** (deserializer and reference resolver — untrusted input) · **binding** (drive the C ABI from Python/ctypes in CI) · **baseline** (§11.12) · **performance** (see below) · **regression** (every fixed bug leaves a test).
+Required test classes: **unit** (every internal function, doctest) · **functional** (full pipeline over the corpus) · **golden** (canonical serialization, structural hash, coordinate hash, **`DrawList`** — the primary surface, §12 — plus a thin SVG serializer check, ABI JSON) · **property** (round-trip identity, all refs resolve, zero box overlap, zero edge-through-box, surrogate cost ranks like exact cost) · **determinism** (§6) · **sanitizer** (UBSan signed-overflow+shift, ASan, TSan, and MSan on Linux/clang, which is the only place an instrumented `libc++` exists — see PB) · **fuzz** (deserializer and reference resolver — untrusted input) · **binding** (drive the C ABI from Python/ctypes in CI) · **baseline** (§11.12) · **performance** (see below) · **regression** (every fixed bug leaves a test).
 
 **Performance tests assert floors, not times.** Inputs are generated **in RAM** — a disk-backed benchmark measures the filesystem. Each asserts a throughput floor and a peak-memory-to-input ratio, per stage, on a named machine. Their job is catching accidental `O(n²)`, not tracking milliseconds, so they are **not** matrix rows and **not** goldens (§6): timing is not reproducible and must never gate a determinism claim.
 
@@ -1322,6 +1326,19 @@ One nuance: a JS emitter is a second implementation the goldens do not cover. So
 ## 17. Phases
 
 Where a phase states production LOC, multiply by 1.5–2 for the mandated test classes.
+
+**PB — bootstrap.** No scav code, which is why it is lettered rather than numbered: it builds the harness every later phase is measured on. Doing it first means P0's exit gate is a CI result rather than a claim.
+
+- **envy provisions everything**: compilers, cmake, ninja, doctest, clang-format, clang-tidy. Cache at `out/.envy` (§4.2). CI runs on a **bare** runner with nothing preinstalled but a system compiler, because that is the only way provisioning is actually tested — and CI overrides `ENVY_CACHE_ROOT` to a shared path so the cache stays warm across jobs.
+- **A toy static library and a doctest executable**, nothing more: `libscavtoy` with one function, one unit test, one golden, one deliberately-failing test held behind a flag to prove failures are actually reported.
+- **`build.sh` / `build.bat`**: one command from a clean checkout to a green test run. No arguments required, no environment to set up, no README steps.
+- **`CMakePresets.json` expresses §6's matrix directly** — that was the argument for CMake over GN, so it gets exercised here rather than asserted. Three configs per triple: `Debug`, `Release`, `testable` (`-DSCAV_TESTING`, §5).
+- **Sanitizers as a mutually-exclusive enum**, not booleans: `SCAV_SANITIZER=NONE|ASAN|UBSAN|TSAN|MSAN`. ASan and TSan cannot coexist, so a boolean pair invites an unbuildable combination. **MSan needs an instrumented `libc++`** and is therefore Linux/clang only — build it in PB or MSan silently reports false positives from uninstrumented standard-library code for the life of the project.
+- **Warnings are errors**, with the per-compiler set pinned in one place. Cheap now, a week of cleanup later.
+- **`install()` + an export config package, verified by a separate consumer project** doing `find_package(scav)` against the installed tree. §4.2 rejected GN specifically because sharing is awful; leaving this untested makes that a preference rather than a finding.
+- **Native six only** — the `wasm32-wasi` row lands with P11 (§6).
+
+*Exit:* green on all six triples × three configs; each sanitizer green on every platform supporting it; `build.sh` works on a machine with no scav-specific setup; the consumer project links an installed scav; the deliberately-failing test fails.
 
 **P0 — the language, the lexer, and the parser.** Validate the format before anything depends on it. Recursive-descent parser over §15's grammar, one document, byte span in. Produces the **front-end slice of the model only** — `src_bytes`, `Document`, `Statement`, trivia, and the string pool with two-pass interning — because a statement stream is all a parser owes (§7). No entity arrays, no includes, no resolution. NFC normalization (§6) lands here since it happens at parse. Plus the **in-RAM synthetic document generator** and **2–3 hand-transcribed real charts** — synthetic input has uniform branching and no accidental structure, so validating on it alone is a trap.
 
