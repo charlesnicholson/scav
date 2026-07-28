@@ -797,7 +797,7 @@ Precedent: **UML 2.5.1 §15.2.4** ActivityEdge connector — "purely notational"
 
 ### 11.7a Geometry columns — the layout output contract
 
-Enumerated normatively, because this list *is* the layout output ABI (§16 deleted the bespoke result type in favour of columns) and every builder consumes all of it. All are `derived`, all root-absolute grid units, all `derived-persistent` per §7.
+This list *is* the layout output ABI — there is no bespoke result type (§16) — and every builder consumes all of it. All are `derived`, all root-absolute grid units, all `derived-persistent` per §7.
 
 | Column | Parallel to | Holds |
 |---|---|---|
