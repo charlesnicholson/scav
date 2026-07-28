@@ -436,7 +436,7 @@ Two axes. Both round-trip losslessly, including data this build does not underst
 |---|---|---|
 | Shape | dense, one value per entity | sparse dict per entity |
 | Typed | yes, registered descriptor | no, strings |
-| Use for | data most entities have (event lists, guard code, `onentry` bodies, provenance) | rare or one-off annotations |
+| Use for | data most entities have (event lists, guard code, `onentry` bodies) | rare or one-off annotations |
 
 ```cpp
 enum class ElemKind : uint32_t { state, submachine, transition, chart, point, path_box, none };
