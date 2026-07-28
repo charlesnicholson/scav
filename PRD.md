@@ -355,6 +355,7 @@ struct Chart {
   std::vector<Include>     includes;
   std::vector<Attr>        attrs;
   std::vector<Column>      columns;      // §8
+  StringPool               column_names; // separate pool — see below
   std::vector<StateId>     state_ids;    // Span targets
   std::vector<SubmachineId> submachine_ids;
   StringPool               strings;      // interned names; canonically re-sorted
