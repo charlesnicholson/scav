@@ -331,10 +331,10 @@ struct Transition {
   DocId         doc;
   uint32_t      gen;
 };
-struct Include  {           // host == kInvalid means the including document's root submachine
+struct Include  {
   StrRef  path, alias, hash;  // hash is the authored `algo:digest` text, so it round-trips
   DocId   target;
-  StateId host;
+  StateId host;              // the alias state this include synthesizes; never kInvalid
 };
 struct Attr     { AttrKeyId key; StrRef value; };
 
@@ -620,10 +620,11 @@ wifi/On/Ready        cross-document, via include alias
 ```
 
 - **Unnamed pseudostates get synthetic stable names** for addressing: `$initial`, `$final`, `$history`, ordinal-suffixed for uniqueness within a submachine, and exempt from §10's duplicate-name check. These are an API and diagnostic spelling only — the grammar's `ident` admits no `$`, and the format reaches them via `*` (§15). A pseudostate an author needs to name is named, like `PreConfig kind choice`.
-- **Resolution links; it does not flatten** (§7). An `Include` names the `host` state whose submachine list gains the included document's root, or `kInvalid` for a chart-level include, which hosts it on the root submachine; containment crosses documents because `State.submachines` holds global ids. Layout sees one containment tree with no transformation having occurred — hence no cross-document LCA, no splice pass, no project handle.
+- **An include synthesizes one state, named for its alias**, in the submachine where the `include` statement appears; that state's `submachines` span gains the included document's root submachine. A submachine's children are states, so this is the only shape that type-checks — an included root is a submachine and has nowhere else to attach. It also makes `wifi/Up/Connected` an ordinary path: `wifi` *is* a state.
+- **Resolution links; it does not flatten** (§7). Containment crosses documents because `State.submachines` holds global ids, so layout sees one containment tree with no transformation having occurred — no cross-document LCA, no splice pass, no project handle.
 - **Provenance is a field, not a computed column.** `DocId` on each row records the **include instance** — instance rather than path, so including one document twice yields two distinguishable sets. A renderer tinting sub-document submachines reads it; layout ignores it.
 - Transition endpoints are plain `StateId`s, because ids were global from the start.
-- **An include alias is a bare path prefix**, not a sigil — hence §10's alias-vs-top-level-name collision check, which is what keeps the prefix unambiguous. Duplicate top-level names in two documents therefore cannot collide.
+- **An include alias is a bare path prefix**, not a sigil, because it is a state name. Alias uniqueness is therefore §10's ordinary duplicate-name check rather than a second rule, and duplicate top-level names in two documents cannot collide.
 - Includes may pin `content_hash`. Include cycles are a hard error.
 - Relative hints travel with an included chart; **absolute pins do not** — a pin is authored against a document's own frame and is meaningless in a host frame.
 - Resolution is a linear scan per path level (document order forbids sorting `state_ids` by name) or via the derived sorted index.
@@ -638,7 +639,7 @@ Mandatory, in core, structural only — `layout` reads ordinals and crashes on g
 - include cycles, unresolvable include paths
 - unresolvable cross-document paths, checked at the **resolution phase** (§9)
 - a `Statement.src` span outside its document's `text` span
-- `Include.alias` uniqueness, and alias-vs-top-level-name collision
+- an alias colliding with a sibling state name — the same duplicate-name check, since an alias is a state (§9)
 - authored names must not contain the path metacharacters `/ : $`, nor `@` (the format's attribute sigil, §15)
 - more than one `initial` per submachine. **No degree checks per pseudostate kind** — "a fork has one incoming edge" is a dialect rule, and §7.2 requires every topology to be drawable
 - authored `scav:pin` coordinates outside §11.2's domain — the only authored geometry there is
