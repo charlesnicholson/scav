@@ -96,7 +96,7 @@ Applications, each supplying (or reusing) a builder and a backend:
 
 | App | Is |
 |---|---|
-| `scav` | CLI: `render`, `layout`, `fmt`, `gen`, `check`, `mv` |
+| `scav` | CLI: `render`, `layout`, `fmt`, `gen`, `check` |
 | `scavview` | ImGui viewer [P7]. Embeds Lua so users can script appearance without rebuilding it (§8.3) |
 | *yours* | e.g. an enemy-AI editor: links core+layout+draw, writes a builder that also draws threat radii, writes its own ImGui backend. No scav change required |
 
@@ -274,7 +274,7 @@ C++20's P0907 fixed two's-complement *representation* but kept signed overflow U
 
 Enforce that structurally rather than by review: wrap it in a `lookup_map<K,V>` that exposes `find`/`at`/`insert` and **no `begin()`/`end()`**. Then "never iterated" is a compile error rather than a convention — making the wrong thing a compile error rather than a review comment.
 
-**Golden hash:** cold-start `polish`, no prior layout, `w_st = 0`. Split into a **structural hash** (ranks, orders, port assignments, bend sequences) and a **coordinate hash**, so a translation-only change is a reviewable diff instead of a global reflow. `quick` is deterministic over the pair `(model, prior_layout)`; both are hashed inputs. Hashed inputs: font identity and version, profile id, packer choice, router name and version, **and the space-request columns** — layout is a pure function of those, so goldens are reproducible only against a stated measurement policy. The corpus goldens use the reference builder's.
+**Golden hash.** Layout is a pure function of `(model, spaces, profile)` (§11.11), so there is nothing to qualify. Split into a **structural hash** (ranks, orders, port assignments, bend sequences) and a **coordinate hash**, so a translation-only change is a reviewable diff instead of a global reflow. Hashed inputs: font identity and version, profile id, packer choice, router name and version, **and the space-request columns** — layout is a pure function of those, so goldens are reproducible only against a stated measurement policy. The corpus goldens use the reference builder's.
 
 ## 7. Data model
 
@@ -613,7 +613,7 @@ On:main/Idle         submachine name, when named
 - Includes may pin `content_hash`. Include cycles are a hard error.
 - Relative hints travel with an included chart; **absolute pins do not** — a pin is authored against a document's own frame and is meaningless in a host frame.
 - Resolution is a linear scan per path level (document order forbids sorting `state_ids` by name) or via the derived sorted index.
-- Paths break on rename; `scav mv` rewrites references project-wide. **[OPEN]** durable per-element GUIDs.
+- Paths break on rename. Renaming is a **semantic editor** operation — the editor holds the document network and rewrites every reference — not a CLI verb. **[OPEN]** whether elements also need durable GUIDs, which paths cannot supply across branches: two branches renaming the same state differently is unreconcilable when identity *is* the name.
 
 ## 10. Validation
 
@@ -638,8 +638,8 @@ Scale target: **2k states, 5k transitions, depth 16.**
 
 ```
 phase0_split(model)                              -> SplitGraph
-phase1_order(SplitGraph, Spaces, Prior?)          -> SubmachineOrders
-phase2_size(SubmachineOrders, Spaces, Prior?)    -> SizedLayout
+phase1_order(SplitGraph, Spaces)                 -> SubmachineOrders
+phase2_size(SubmachineOrders, Spaces)            -> SizedLayout
 phase3_route(SizedLayout, Router)                -> geometry columns + Placed[]
 ```
 
@@ -716,9 +716,9 @@ h = h_before + packed_subs_h + h_after + 2*pad
 
 Order-preserving and gap-avoiding are one constraint: restricting placement to four positions relative to the predecessor (directly right; right on the current row level; next subrow; next row) is exactly what makes local whitespace elimination always possible.
 
-Width approximation is `target_w = isqrt(floor_div(total_area * dar_num, dar_den))` with that exact operation order, `isqrt` = floor. `DAR` is an integer pair. On same-height submachines the older `box` packer wins; the `trybox` decision is **sticky in `quick`** and re-evaluated only in `polish`, because a 1-unit change can otherwise flip the packer and reflow every sibling.
+Width approximation is `target_w = isqrt(floor_div(total_area * dar_num, dar_den))` with that exact operation order, `isqrt` = floor. `DAR` is an integer pair. On same-height submachines the older `box` packer wins; `trybox` is evaluated once per layout, deterministically. A 1-unit change can flip the packer and reflow siblings; that is a boundary condition for hints (§14), not grounds for remembering the previous choice.
 
-**Bottom-up sizing has no natural locality** — a leaf growing one unit resizes every ancestor to the root, and the top-down pass then re-pushes ports into clean subtrees. Bound it with **integer hysteresis**: re-pack a parent only when a child's size delta exceeds a profile threshold, grow-only within a session.
+**Bottom-up sizing has no natural locality** — a leaf growing one unit resizes every ancestor to the root, and the top-down pass then re-pushes ports into clean subtrees. That cascade is inherent to bottom-up sizing and is simply paid: one pass up, one pass down, fixed count. An earlier draft bounded it with per-session hysteresis, which was hidden state serving an incremental path that no longer exists (§11.11).
 
 Not top-down layout: its central size-approximation problem is unsolved by its own authors, it introduces per-level scale factors that break port-split segment continuity, and it is mutually exclusive with cross-hierarchy edges in ELK. Cost: bottom-up sizing at depth is a readability problem on fixed media (a depth-9 SCChart lays out to 0.322 pt max font on A4). Acceptable because output is a zoomable canvas.
 
@@ -764,7 +764,6 @@ w_len  * Σ (excess_length * depth_weight)            -- excess over min_len(e),
 w_adj  * nonadjacent_sub_pairs_joined_by_edge     -- §11.8; excludes fork/join fan-out
 w_lbl  * label_overlaps
 w_ar   * |w_actual*dar_den - h_actual*dar_num|       -- integer aspect deviation
-w_st   * displacement_from_prior_layout
 w_area * bounding_box_area                           -- lowest
 ```
 
@@ -864,26 +863,19 @@ Local search from a structured seed with **restricted uphill moves** — "simula
 - **Local search**: bounded moves — swap adjacent in rank, move node across ranks, flip port side, reorder sibling submachines, rotate subtree. **Best-improvement per sweep**, moves enumerated in `(move_kind, subject_index, parameter)` order, tie-break `(delta, move_kind, subject_index)`, fixed sweep count from the profile. Parallelism evaluates deltas; **acceptance is a serial index-ordered pass**.
 - **Delta-evaluate.** Never re-score a submachine after a bounded move.
 
-### 11.11 Modes and incrementality
+### 11.11 One algorithm, stable by construction
 
-- `quick` — warm-start from prior layout, re-solve dirty submachines, target set empirically at P6. Not asserted: at the cheapest published routing rate (0.4 ms/route) a 16 ms budget buys ~40 routes.
-- `polish` — full portfolio, all shards. On save and in CI. Defines the golden hash.
+**There is no `quick` mode and no `polish` mode.** Layout runs one algorithm, always, and is a pure function of `(model, spaces, profile)`. No warm start, no prior layout, no incremental dirty-region path, no persisted cache.
 
-**Stability needs a mechanism, not only a price.** `w_st` is a Tier-2 term and cannot by itself control an outcome. In `quick`, **pin clean submachines' relative order and port sides and permit translation only**; `w_st` arbitrates the remainder. VPSC would supply true minimum-displacement but is deferred (§11.13); if `quick` proves inadequate without it, promote `satisfyVPSC` into P6.
+That deletes a large amount of machinery an earlier draft carried, and with it a class of defects: a layout that depends on edit history, hysteresis high-water marks and a sticky packer choice living as hidden per-session state, a `PriorLayout` needing its own version key and invalidation rule, and a golden hash that had to be qualified as "cold-start, `w_st = 0`" to mean anything.
 
-**Honest dirty closure**, replacing any claim of general submachine independence:
+**Stability is a property of the algorithms, not a cost term.** A small model change must produce a small diagram change because each stage is order-preserving and deterministic — LR-rectpacking preserves input order by construction (§11.4), ranking and ordering are deterministic with total-order tie-breaks (§6), and document order drives reading order (§14). Pricing displacement against a previous run was solving by penalty what the algorithm should give for free, and it required keeping the previous run around.
 
-```
-dirty_order   = changed submachines ∪ port-owning submachines on both endpoint chains up to the LCA
-dirty_size    = ancestors until hysteresis absorbs the delta
-dirty_pack    = parents of any resized submachine
-dirty_routing = submachines whose obstacle set or port coordinates changed ∪ parents of moved submachines
-coordinates   = re-emitted globally (root-absolute), O(n)
-```
+So `w_st` is gone from the cost function, and VPSC — whose only remaining justification was minimum-displacement-from-prior — is rejected outright rather than deferred (§11.13).
 
-Ordering is submachine-local; sizing and packing are incremental at `O(depth × siblings)`; coordinates always re-emit. The **structural hash** is what stays stable under a translation.
+**Honest limit.** Stability-by-construction is not a guarantee. A one-node change can flip a crossing-minimisation decision and cascade, and no ordering discipline prevents that in general. Those are the boundary conditions **hints** exist for (§14): when the engine makes a defensible choice the author dislikes, the author pins it rather than the engine remembering what it did last time.
 
-`quick` results are a **cache, never authoritative**: a persisted `PriorLayout` block is versioned by `{profile id, font identity, packer choice}` with an explicit invalidation rule, and a sequence of `quick` edits makes the layout a function of edit history. Golden hashes are `polish` from cold only.
+**This is a bet on speed**, and it should be measured rather than assumed: full layout must be fast enough at 2k states that no second mode is wanted. If it is not, the answer is to make layout faster — not to reintroduce a mode, which trades a performance problem for a correctness one.
 
 ### 11.12 Quality baseline
 
@@ -900,7 +892,7 @@ A versioned, hashed artifact (§6), so it needs a field list rather than thirtee
 | geometry | `pad`, `grid_subdiv` (16), `emphasis_margin` |
 | type | `font_size_grid`, `line_height_k_num`/`_k_den` (`k_den >= 1`) |
 | pseudostate sizes | per-`StateKind` min extent. `fork`/`join` are wide-and-thin boxes; nothing scales with arity (§7.2) |
-| packing | `dar_num`/`dar_den` (each in `[1, 2^10]`), `trybox`, SM tiebreak order, hysteresis threshold |
+| packing | `dar_num`/`dar_den` (each in `[1, 2^10]`), `trybox`, SM tiebreak order |
 | cost | the nine Tier-2 weights, each with a ceiling that keeps `Σ Tier-2` inside §11.2's budget |
 | search | portfolio `K`, sweep count, congestion iterations, rip-up cap, spacing-inflation cap and increment |
 | id | `profile_id`, `profile_version` |
@@ -913,7 +905,7 @@ Named profiles ship as data: `compact`, `readable`. There is no `print` profile 
 
 **Topology-shape-metrics.** Requires planarity (statecharts are routinely non-planar; planarization is NP-complete and the literature's practical ceiling is "a few hundred vertices"); compound nesting is not in the model and the bolt-on rests on c-planarity, open from 1995 until a JACM 2022 result; the pipeline chains three NP-hard problems with documented quality failure (excess bends, area blowup); HOLA explicitly replaces it and CoDaFlow rejected it for compound-plus-ports diagrams specifically. Keep only compaction by topological numbering (§11.2).
 
-**VPSC for initial layout.** Coordinates are generated, not adjusted, so separation is longest-path: linear, exact, integral, ~100 lines of solver logic. VPSC buys only minimum-displacement-from-prior, wanted eventually (§11.11). If implemented: `satisfyVPSC` not `solveVPSC` (drops the exponential worst case, the cycling risk, the tolerance fudge); apply the GD 2006 **Correction** — the published version can return **infeasible** solutions; fix the total order deterministically. It must be reformulated in integers or fixed-point: "solve continuous then round" preserves feasibility but **not identity** — 1 ULP lands differently at `.5`.
+**VPSC — rejected outright, not deferred.** Coordinates are generated, not adjusted, so separation is longest-path: linear, exact, integral, ~100 lines. VPSC buys only minimum-displacement-from-a-prior-position, and with no warm start and no `w_st` (§11.11) there is no prior position to stay near — removing modes removed its last justification. Recorded in case that changes: `satisfyVPSC` not `solveVPSC` (drops the exponential worst case, the cycling risk, the tolerance fudge); apply the GD 2006 **Correction**, since the published version can return **infeasible** solutions; fix the total order deterministically; and reformulate in integers, because "solve continuous then round" preserves feasibility but **not identity** — 1 ULP lands differently at `.5`.
 
 **LP nudging fallback.** "Integral if coefficients are integral" is false — that needs total unimodularity, unestablished here — and simplex pivoting under degeneracy is tolerance-driven float. Deterministic degradation instead: widen the channel by a fixed integer increment and re-seat, capped, then diagnostic.
 
@@ -1135,7 +1127,7 @@ Reserved: `chart` `include` `state` `submachine` `trans` `kind` `external` `inte
 
 **Structure is never reordered.** Attributes may be sorted; states and submachines may not, because document order is the primary layout hint (§14). Comments are preserved with position — leading, trailing, own-line — which is the expensive half of the printer.
 
-Also required: text normalized on read (§6); extension columns round-trip losslessly including unknown ones (§8); `PriorLayout` optional, versioned, and a cache (§11.11).
+Also required: text normalized on read (§6); extension columns round-trip losslessly including unknown ones (§8).
 
 **Cost.** Lexer ~400 LOC including `"""` handling and comment capture, parser ~500, comment-preserving printer 3,000–5,000. The printer is the expensive half and a simpler grammar barely helps it.
 
@@ -1155,7 +1147,6 @@ Key entry points:
 
 ```c
 scav_result scav_layout_run(scav_chart*, const scav_spaces*,
-                            const scav_prior_layout*,
                             const scav_layout_opts*,
                             scav_placed* out_placed, uint32_t cap, uint32_t* out_count);
 // geometry lands in derived columns, read with the ordinary column accessor:
@@ -1198,8 +1189,8 @@ Estimates below are production LOC; multiply by 1.5–2 for the mandated test cl
 **P5 — determinism infrastructure.** Thread shim, model-derived sharding, counter-based RNG, index-ordered reduction, tiered matrix, sanitizer configs, scheduling-delay injector.
 *Exit:* one structural hash and one coordinate hash across the blocking matrix; full grid green nightly.
 
-**P6 — search, incrementality, calibration.** Portfolio, local search, surrogate with ranking test, `quick`/`polish`, pinned-clean-submachine stability, dirty closure per §11.11, weight calibration, versioned profiles.
-*Exit:* measured `quick` latency published; `polish` beats `quick` on cost without visible rearrangement.
+**P6 — search and calibration.** Portfolio, local search, surrogate with ranking test, weight calibration, versioned profiles.
+*Exit:* full-layout latency at 2k states measured and published (§11.11's bet); a one-state edit produces a visually small diagram change on the corpus.
 
 **P7 — `scavview`.** ImGui backend, pan, zoom, linear-scan hit test, hover/select, live highlighting (§13), relayout on request, and the Lua host (§8.3) with its sandbox and determinism obligations. Metrics-parity golden against the builder.
 *Exit:* navigate 2k states smoothly; drive highlighting from an external process with no relayout.
@@ -1259,7 +1250,7 @@ Do not vendor: `libnest2d` (LGPL-3.0), OGDF, Graphviz's `textspan_lut.c` (EPL-2.
 
 ## 19. Open questions
 
-**Decisions owed:** §11.8 whether to depict the implicit submachine reset · §9 durable per-element GUIDs · §17 P9 undo/redo mechanism · whether `quick` needs `satisfyVPSC` promoted into P6.
+**Decisions owed:** §11.8 whether to depict the implicit submachine reset · §9 durable per-element GUIDs for cross-branch rename identity · §17 P9 undo/redo mechanism.
 
 **Unverified claims, flagged not smoothed:**
 - No diagram-routing work found doing history-based negotiated congestion with rip-up-and-reroute. Unconfirmed absence, **not** novelty.
