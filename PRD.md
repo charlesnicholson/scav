@@ -8,17 +8,15 @@ Statechart authoring, layout, rendering. Normative. Terse by intent: read by age
 
 ## 1. Purpose
 
-Harel statecharts have no adequate tooling. Verified gap:
+Harel statecharts have no adequate tooling. Verified:
 
-- ELK's default `SEPARATE_CHILDREN` **silently drops** edges that skip a containment level (`ElkGraphImporter.importFlatGraph`: an `if` with no `else`). No route, no warning.
-- Its only fix, `INCLUDE_CHILDREN`, is called "generally a little bit buggy" by its maintainer (eclipse-elk#891, open since 2022), and collapses the whole subtree into one layout run — losing per-subtree `direction` (elkjs#26 WONTFIX) and `aspectRatio` (elk#773).
-- ELK's `topdownLayout` **throws** if combined with `INCLUDE_CHILDREN`: top-down submachine packing and correct cross-hierarchy edges are mutually exclusive today.
-- Mermaid documents the limitation instead of solving it. itemis CREATE deleted its auto-layout. Stately declares layout an explicit non-goal.
-- Across ~20 surveyed tools, **none publishes a statechart layout algorithm.**
+- ELK's default `SEPARATE_CHILDREN` **silently drops** edges that skip a containment level — `ElkGraphImporter.importFlatGraph` has an `if` with no `else`. No route, no warning.
+- Its only fix, `INCLUDE_CHILDREN`, is "generally a little bit buggy" per its maintainer (eclipse-elk#891, open since 2022) and collapses the subtree into one layout run, losing per-subtree `direction` (elkjs#26 WONTFIX) and `aspectRatio` (elk#773). `topdownLayout` **throws** if combined with it, so top-down packing and correct cross-hierarchy edges are mutually exclusive.
+- Mermaid documents the limitation. itemis CREATE deleted its auto-layout. Stately declares layout a non-goal. Across ~20 tools surveyed, **none publishes a statechart layout algorithm.**
 
 Vocabulary (ELK's): a **short hierarchical edge** crosses one boundary; a **long hierarchical edge** crosses more.
 
-**scav's bet:** Phase-0 port splitting (§11.1) keeps submachines independently *orderable* while long hierarchical edges stay correct, giving per-submachine parallelism and bounded incremental relayout. Prior art has one or the other.
+**scav's bet:** Phase-0 port splitting (§11.1) keeps submachines independently *orderable* while long hierarchical edges stay correct. Prior art has one or the other.
 
 ## 2. Non-goals
 
@@ -48,24 +46,13 @@ Vocabulary (ELK's): a **short hierarchical edge** crosses one boundary; a **long
 
 **What the application owns:** how it organizes its builder, what else it draws, and the imperative render function that turns a `DrawList` into ImGui calls, SVG text, a PDF stream, or anything else.
 
-### 3.0 The test for adding anything
+### 3.0 Two tests for adding anything
 
-Before adding a vocabulary, an enum, or a set of named values, ask:
+> **Is this describing the format, or the reference implementation?** If the latter it is that implementation's documentation, not a contract — let callers pass their own values.
+>
+> **A helper is a function the application calls. A framework is a function that calls the application.**
 
-> **Is this describing the format, or describing the reference implementation?**
-
-If the latter, it is documentation of that implementation — not a contract. Put it in the implementation's docs and let callers pass their own values.
-
-The failure mode is consistent enough to be worth recording, because it recurred four times during this document's design. Each time scav enumerated a vocabulary for a decision the application was better placed to make, justified by a convenience that turned out to be one line of app code:
-
-| Proposed | Became |
-|---|---|
-| named appearance slots with composition axes | two integer tables (§8.1) |
-| priority ordering of contributions | the app sums before calling |
-| `decay_ms` retained in scav | the app recomputes per frame (§13) |
-| reserved depth bands | the caller passes depth (§12) |
-
-A second, related test: **a helper is a function the application calls; a framework is a function that calls the application** (§8.1.1).
+Rejected by these tests, so do not re-propose: named appearance slots with composition axes; priority ordering of contributions; retained `decay_ms`; reserved depth bands. Each enumerated a vocabulary for a decision the app makes better, and each collapsed to one line of app code.
 
 Pipeline. Layout and everything after it is a deterministic function of its inputs.
 
@@ -185,27 +172,23 @@ The bar for a discouraged construct is that a reader can still follow control fl
 
 ### 4.1 Data structure discipline
 
-**The rule is about the kind of data, not the layer it lives in.**
-
-**The core data model is columnar POD aggregates, cross-indexed by ordinal** (§7). Non-negotiable, because that data is serialized, round-tripped byte-identically, hashed, addressed by path, and outlives every call. No pointers between records, no hash maps, no nodes.
-
-**Transient scratch is whatever is convenient and clear.** `std::unordered_map` for a lookup table, a priority queue for A*, a visibility graph, a sweep structure, union-find — all fine. This is not an exception grudgingly granted to `layout`; it is the normal treatment of data that is built, used, and discarded inside one call.
-
-The test is not "which layer am I in" but:
+**About the kind of data, not the layer.** One test:
 
 > Does this outlive the call, get serialized, get hashed into output, or get addressed by path?
 
-If no to all four, convenience wins. If yes to any, it is core model and columnar.
+**Yes to any** → core model: columnar POD aggregates cross-indexed by ordinal (§7). No pointers between records, no hash maps, no nodes.
 
-Two constraints survive on scratch, both from §6 and both structurally enforceable: **never iterate an unordered container where the order can reach output**, and **never let a hash value escape**. Use `lookup_map` (§6) so the first is a compile error.
+**No to all** → transient scratch, whatever is convenient: `unordered_map`, priority queues, visibility graphs, sweep structures, union-find. Not an exception grudgingly granted to `layout` — the normal treatment of data built and discarded inside one call.
 
-What this rules out is not hash maps — it is a **graph of long-lived heap nodes pointing at each other**, which is the actual thing that makes a model unserializable, unhashable, and untestable.
+Two constraints survive on scratch (§6), both structurally enforceable: **never iterate an unordered container where order reaches output**, and **never let a hash value escape**. `lookup_map` makes the first a compile error.
+
+What this rules out is not hash maps but a **graph of long-lived heap nodes pointing at each other** — the thing that makes a model unserializable, unhashable, and untestable.
 
 ### 4.2 Build system
 
 **CMake + Ninja.** GN is excellent for first-party code in a private ecosystem and hostile to sharing: no `install()`, no export/config packages, no `find_package`. CMake is clunky and is the lingua franca, and scav is a library meant to be consumed — including by a wheel that needs a shared object with proper install rules (§16.1). That, plus presets expressing §6's matrix directly, is the whole argument.
 
-Two counter-arguments do **not** apply and are recorded so they are not re-raised: GN's much faster configuration is a function of dependency-tree size, and scav's third-party is doctest, ImGui, `stb_image`, and a font — configuration will be seconds. And GN's missing wasm story shrank to one modest toolchain once emscripten left v1 (§16.3), so it is no longer a reason either.
+Two GN arguments that do **not** apply here, recorded so they are not re-raised: its faster configuration is a function of dependency-tree size, and scav's third-party is doctest, ImGui, `stb_image`, and a font; and its missing wasm story shrank to one modest toolchain once emscripten left v1 (§16.3).
 
 **Toolchain provisioned by [envy](https://github.com/charlesnicholson/envy), and this is a correctness argument.** §6 claims bit-identical output across `{clang, gcc, MSVC} × {libstdc++, libc++, MSVC STL}` — vacuous if `clang` is whatever is on `PATH`. envy pins exact compiler builds by fingerprint, which turns the matrix from a hope into a reproducible fact. It also already packages ninja, python, and clang-tools.
 
@@ -215,9 +198,7 @@ Two documented paths, one authoritative: **envy for CI and for any determinism c
 
 **All code exhaustively tested, unit and functional. A phase is not done until its tests are.**
 
-Testability comes from pure functions, not from seams. **Mocks and OOP interface seams are rejected**: they cost an indirection and make control flow unreadable without running it.
-
-Intrusive access instead:
+Testability comes from pure functions, not seams. **Mocks and interface seams are rejected** — they cost an indirection and make control flow unreadable without running it. Intrusive access instead:
 
 ```cpp
 #ifdef SCAV_TESTING
@@ -227,7 +208,7 @@ Intrusive access instead:
 #endif
 ```
 
-Because all layout arithmetic is integer, inlining cannot change results: the `testable` build must produce byte-identical output to release. It is a row in the determinism matrix. Divergence means UB, and the divergence is the bug report.
+All layout arithmetic is integer, so inlining cannot change results: the `testable` build must be byte-identical to release, and is a row in the matrix. Divergence means UB.
 
 Required test classes: **unit** (every internal function, doctest) · **functional** (full pipeline over the corpus) · **golden** (canonical serialization, structural hash, coordinate hash, **`DrawList`** — the primary surface, §12 — plus a thin SVG serializer check, ABI JSON) · **property** (round-trip identity, all refs resolve, zero box overlap, zero edge-through-box, surrogate cost ranks like exact cost) · **determinism** (§6) · **sanitizer** (UBSan signed-overflow+shift, ASan, TSan, MSan) · **fuzz** (deserializer and reference resolver — untrusted input) · **binding** (drive the C ABI from Python/ctypes in CI) · **baseline** (§11.12) · **regression** (every fixed bug leaves a test).
 
@@ -297,9 +278,9 @@ Prim.origin  ->  entity  ->  DocId + Statement  ->  source span  ->  the authore
      (§12)                        (below)              (below)
 ```
 
-No context object, no side table, no query to another layer, no callback to ask. That is why the source documents themselves live in columns rather than being consumed and discarded at parse time.
+No context object, no side table, no callback. That is why source documents live in columns rather than being discarded at parse time.
 
-**Terminology: `state` and `submachine`.** A composite state contains one or more submachines; more than one makes it concurrent. Not "region" — that is UML/ELK vocabulary, and libhsm already says submachine (`*_MACHINE_ID`, `<Parent>_submachine`). Applies to the ERD, the C ABI, diagnostics, and the text format.
+**Terminology: `state` and `submachine`**, never "region". A composite state holds one or more submachines; more than one makes it concurrent. Applies to the ERD, ABI, diagnostics, and format.
 
 ```cpp
 struct DocId    { uint32_t v; };   // include-instance provenance, not addressing (§9)
@@ -388,17 +369,17 @@ struct Statement {        // one per authored construct, in source order
 struct Include { StrRef path, alias; uint64_t hash; DocId target; StateId host; };
 ```
 
-Every `State`, `Submachine`, and `Transition` row carries a `DocId`. **Entities from every document live in the same arrays**, so there is no flattening step and no second model shape — the documents were never separate objects, only a partition of one model (§9).
+Every `State`, `Submachine`, and `Transition` row carries a `DocId`, and **all documents share the same arrays** — so no flattening step and no second model shape (§9).
 
-`src_bytes` is a **separate pool from `strings`**: the string pool is interned, deduplicated, and canonically re-sorted before hashing, while source text is verbatim and must never be touched.
+`src_bytes` is a **separate pool from `strings`**: one is interned and canonically re-sorted before hashing, the other is verbatim and never touched.
 
-**Load-established, not serialized, not hashed.** Writing a document *produces* text, so storing the text it was read from is not serialization. The format hash covers canonical printed output, not the possibly-non-canonical bytes that were loaded. `DocId` is likewise implied by which file an entity is written into.
+**Load-established, not serialized, not hashed.** Writing a document *produces* text; the format hash covers canonical output, not the possibly-non-canonical bytes loaded. `DocId` is implied by which file an entity is written into.
 
-**A `Statement.src` span is valid iff that statement has not been mutated since load.** An editor mutating a statement clears its span, so source mapping degrades gracefully — unmodified statements map to source, modified ones stop mapping until the next canonical print refreshes the pool.
+**`Statement.src` is valid iff the statement is unmutated since load.** Mutation clears it, so source mapping degrades gracefully rather than lying.
 
-**A model is one document network rooted at one document.** Two unrelated charts belong in two models; nothing structurally prevents intermingling them, and the result would be meaningless.
+**A model is one document network rooted at one document.** Unrelated charts go in separate models; nothing structurally prevents intermingling, and the result is meaningless.
 
-**Id stability is append-only with tombstones plus a generation counter.** `StateId` is both ordinal and array index, so compaction would invalidate every prior layout, every app-side column keyed by `StateId`, and the `w_st` stability term — turning it into a churn *maximizer*. Deletion tombstones (`gen = 0`); ids are never reused; **all columns tombstone in lockstep**. Compaction is an explicit operation and an output change, versioned like a weight change.
+**Ids are append-only with tombstones.** `StateId` is ordinal *and* array index, so compaction invalidates every app-side column keyed by it. Deletion tombstones (`gen = 0`), ids never reused, **all columns tombstone in lockstep**. Compaction is explicit and an output change.
 
 **Three column classes, not two.** Conflating the last two is a licensed determinism break, so they are named separately:
 
@@ -408,17 +389,17 @@ Every `State`, `Submachine`, and `Transition` row carries a `DocId`. **Entities 
 | **derived-persistent** — the geometry columns layout writes | **no** | **layout hash**, by explicit allowlist (§11.7a) | **columnar POD; tombstones in lockstep** | layout only |
 | **derived-scratch** — name→id and path→id indices, state→in/out edges, containment depth, LCA table, per-transition crossing counts and flags, each submachine's initial state | no | no | §4.1 convenience; `lookup_map` where lookup-only | anyone, rebuilt freely |
 
-Only **derived-scratch** gets §4.1's container latitude. Geometry is hashed and read across frames, so it is columnar POD like authored data — putting route polylines in a `lookup_map` and iterating it for the coordinate hash is exactly the §6 failure that would otherwise be permitted here.
+Only **derived-scratch** gets §4.1's container latitude. Geometry is hashed and read across frames, so it is columnar POD — a route polyline in a `lookup_map`, iterated for the coordinate hash, is the §6 failure this split exists to forbid.
 
-`ColumnDesc` carries a `derived` flag (§8). The serializer skips derived columns, and they are **exempt from the round-trip-unknown-columns rule** — otherwise geometry survives a save as an unversioned `PriorLayout`, bypassing §11.11's invalidation and silently making a `quick` result authoritative.
+`ColumnDesc` carries a `derived` flag (§8). The serializer skips derived columns and they are **exempt from round-trip-unknown**, or a stale geometry snapshot survives a save and gets trusted instead of recomputed.
 
-**Derived column names live outside `Chart.strings`.** Registering `scav.geom.box` must not intern into the authored pool: §7's canonicalizer re-interns that pool before hashing, so an interned descriptor name would make every authored `StrRef` offset — and the format hash — depend on whether layout had run.
+**Derived column names live outside `Chart.strings`.** Interning `scav.geom.box` into the authored pool would make every authored `StrRef` offset — and the format hash — depend on whether layout had run.
 
 These are transient scratch, so their container choice is a convenience decision per §4.1 — `lookup_map` where lookup-only, a sorted vector where order matters. They are rebuilt rather than persisted, so nothing about them reaches serialization or the layout hash.
 
 Serialization is mechanical (write each vector). Iteration order is array order is document order.
 
-**Canonical ordering is by name or key *bytes*, never by id or interning order.** `AttrKeyId`, `StrRef`, and column ids are assigned in first-encounter order, so two semantically identical models built by different producers would otherwise emit different bytes and fail round-trip. Re-intern into a sorted pool before serializing or hashing. `StrRef` and `AttrKeyId` are never comparison or tie-break keys.
+**Canonical ordering is by name or key *bytes*, never by id or interning order** — those are first-encounter, so two producers building the same model would emit different bytes. Re-intern into a sorted pool before serializing or hashing. `StrRef` and `AttrKeyId` are never comparison or tie-break keys.
 
 ### 7.1 No events in the core
 
@@ -442,20 +423,18 @@ Different projects answer these differently and will collide. scav answers none 
 
 **The bar is a fixed-size box, and layout does nothing fork-specific.** A fork/join pseudostate is an ordinary small box — wide and thin — from the profile's per-`StateKind` min extent (§11.15). Layout places it and routes N edges out of it; the builder draws a filled rect. That is what PlantUML does, and it is enough: the bar is the **same size for two branches as for five**, with the routes simply fanning out, including sideways.
 
-So nothing scales with arity and there is no post-layout synthesis step. An earlier draft had the builder spanning the bar across the route origins it could see after layout — unnecessary, and it invented a coupling that the fixed-bar convention does not have. Bar orientation is likewise not scav's: an app wanting a vertical bar requests a tall narrow `BoxSpace`, which the existing mechanism already covers.
+Bar orientation is also not scav's: an app wanting a vertical bar requests a tall narrow `BoxSpace`.
 
 **Validation is structural only** (§10): in/out degree per kind. No check that branches land in distinct submachines, no reachability, no concurrency reasoning — those are dialect rules and belong to a plugin.
 
 ## 8. Extensibility
 
-**Why extension data lives *in* the model rather than in app-side tables.** With the application owning appearance (§3), it would be reasonable to ask why scav carries extension columns at all — the app could keep its own arrays keyed by `StateId`. Two reasons it should not, and the second is the important one:
+**Why extension data lives *in* the model, not in app-side tables.** Two reasons:
 
-1. **No sidecar context to thread.** The model is self-contained, so every scav entry point takes one thing. The alternative is a `void* user_ctx` on every call, or correlation the app must redo at each boundary.
-2. **Column lifetimes are locked together, which is what makes indices safe.** An index is not a pointer, but it still has a validity domain: the array it indexes. Co-locating app columns with core columns makes that domain uniform and atomic — a span from an app column into a core column, or the reverse, cannot dangle, because neither can outlive the other. Split the domain and indices become as dangerous as pointers, with none of the tooling.
+1. **No sidecar context to thread.** The model is self-contained, so every entry point takes one thing rather than a `void* user_ctx`.
+2. **Column lifetimes are locked together, which is what makes indices safe.** An index has a validity domain — the array it indexes. Co-locating app and core columns makes that domain atomic: a span either way cannot dangle. Split it and indices are as dangerous as pointers with none of the tooling.
 
-That second reason has a corollary worth stating: **tombstoning and the generation counter apply uniformly.** §7's append-only ids with tombstones require all columns to tombstone in lockstep; an app keeping data outside would have to mirror that discipline itself, and getting it wrong means stale rows silently misattributed after a delete. Likewise the geometry generation counter (§13) is one invalidation signal rather than two.
-
-This is also the concrete reason §4.1's rule is about *long-lived heap nodes* rather than about container choice: indices are safe **because** lifetimes are locked, not because they are integers.
+Corollary: **tombstoning applies uniformly.** An app keeping data outside must mirror §7's lockstep discipline itself, and getting it wrong means stale rows silently misattributed after a delete. This is also why §4.1's rule is about long-lived heap nodes rather than container choice — indices are safe *because* lifetimes are locked, not because they are integers.
 
 Two axes. Both round-trip losslessly, including data this build does not understand.
 
@@ -495,16 +474,9 @@ libhsm absorbs cleanly: `libhsm:handler`, `libhsm:legacy`, `libhsm:submachine_ha
 
 ### 8.1 Space requests — the only way content affects layout
 
-Content that a box must make room for has to be known **before** layout runs. That ordering is physics, so it needs a contract — and it is the only contract on the drawing side.
+Content a box must make room for has to be known **before** layout runs, so it needs a contract — the only one on the drawing side.
 
-The contract is derived from one question: **what geometric problem can only layout solve?** There are two, and neither involves appearance:
-
-| Problem | Why only layout |
-|---|---|
-| size a box so its interior fits both app content and packed submachines | submachine sizes come from layout |
-| slide a rect along a route to its best fit | the route does not exist until layout routes it |
-
-So there are **three tables** of plain integers — one per box, two per path — with no variant and no enum:
+Derived from one question: **what geometric problem can only layout solve?** Two, neither involving appearance — size a box whose interior must fit app content *and* packed submachines (submachine sizes come from layout), and slide a rect along a route (the route does not exist yet). Hence three tables of plain integers, no variant, no enum:
 
 ```cpp
 // per state / submachine — a column, parallel to the entity
@@ -524,7 +496,7 @@ struct PathBox {          // 0..N per transition; layout slides these along the 
 };
 ```
 
-**Domain, validated at `scav_layout_run` entry in every build** — not "in release builds", or Debug and Release disagree about which inputs are legal:
+**Domain, validated at `scav_layout_run` entry in every build** — Debug and Release must agree on which inputs are legal:
 
 ```
 0 <= min_w, h_before, h_after <= kCoordMax      // §11.2
@@ -533,11 +505,11 @@ struct PathBox {          // 0..N per transition; layout slides these along the 
 PathBox.order unique per subject
 ```
 
-Reject with a diagnostic, never clamp. Unbounded `int32_t` overflows §11.4's box formula into signed UB — which §6 notes optimizers exploit, so Debug and Release diverge rather than both being wrong — and a negative `h_before` inverts a box, breaking the half-open-rect invariant and every orientation predicate.
+Reject with a diagnostic, never clamp. Unbounded `int32_t` overflows §11.4's box formula into signed UB, which optimizers exploit, so Debug and Release diverge rather than both being wrong; a negative `h_before` inverts a box and breaks every orientation predicate.
 
-**Space requests must be a pure integer function of `(model, profile, scav metrics)`.** The app is now inside the determinism-critical path, and nothing otherwise forbids `min_w = int32_t(title.w * 1.15f)`, which differs under FMA contraction across x86, ARM, and wasm. A digest of the three tables is therefore a hashed input (§6): a non-conforming app fails the existing golden instead of silently drawing a different diagram.
+**Space requests must be a pure integer function of `(model, profile, scav metrics)`.** The app is inside the determinism-critical path, and nothing otherwise forbids `min_w = int32_t(w * 1.15f)`, which differs under FMA contraction. A digest of the three tables is a hashed input (§6), so a non-conforming app fails the golden instead of silently drawing something else.
 
-**`PathBox.order` is unique per transition and part of the placement key** — `(transition, order, strip, slide_offset)` (§11.9). Without it two boxes on one transition fall back to array position, which is the app's insertion order.
+**`PathBox.order` is unique per transition and part of the placement key** `(transition, order, strip, slide_offset)` (§11.9); otherwise two boxes fall back to the app's insertion order.
 
 **Outputs.** Layout writes the geometry columns enumerated in §11.7a, plus a `Placed` array parallel to `PathBox`:
 
@@ -576,34 +548,22 @@ for (StateId st : chart.state_ids()) {
 }
 ```
 
-**`PathBox` is a slide constraint, not a label.** N rects with a degree of freedom along a curve layout is about to compute — the one placement an app genuinely cannot do itself.
+**`PathBox` is a slide constraint, not a label** — the one placement an app cannot do itself, since the route does not exist yet. **`h_before`/`h_after` is stacking order relative to the submachine area**, not a band taxonomy: two integers, not five names. **`Placed` may exceed the request**, so read back actual geometry; alignment inside it is the app's.
 
-**`h_before`/`h_after` is stacking order relative to the submachine area**, not a band taxonomy. Layout needs it to compute a box height; it is two integers, not five names.
+**The reserved box and the drawn box need not be the same rect.** That resolves border-attached decoration with **no composite shapes and no attachment offsets**:
 
-**The reserved box and the drawn box need not be the same rect**, which resolves border-attached decoration without any composite-shape concept:
+- **Unprotected decoration is free** — the builder reads the box after layout, so a badge at `box.x + box.w - 6` follows it. Derivation, not lockstep movement.
+- **Protected decoration is reserved then drawn inset** — reserve W×H, draw the outline at (W−12)×(H−12), badges in the margin. Visually overhanging, structurally inside, obstacle-correct. Same trick covers stroke width.
 
-- **Unprotected decoration is free.** The builder runs after layout and reads the box, so a badge drawn at `box.x + box.w - 6, box.y - 6` follows the box automatically. Layout is not moving two things in lockstep; the builder derives one from the other. Nothing stored, nothing grouped.
-- **Protected decoration is reserved, then drawn inset.** Reserve W×H, draw the state outline at (W−12)×(H−12), place badges in the margin. Visually overhanging, structurally inside, correct as an obstacle, no new primitive.
+It also settles **non-rectangular shapes** — protruding tabs, concave outlines. **Layout consumes only rects**: packing is defined on rectangles, non-overlap is a rect test, the routing graph is built from rectangular obstacles, ports are per-side. So the occupied region is the composite's **AABB**, which reserve-and-inset expresses; an asymmetric tab is extra reserved width with the visual rect off-centre. Accepted artifact: avoidance is conservative and termination approximate, since a route may land on an AABB edge beside a tab. Bridge with a stub; not worth a polygon router.
 
-That also settles **non-rectangular shapes** — an entry/exit-point tab protruding past the border, a folder tab, any concave rectilinear outline. Layout consumes only rects: packing is defined on rectangles, non-overlap is a rect test, the routing graph is built from rectangular obstacles, and ports are per-side. Supporting concave outlines would mean a polygon visibility graph, non-rectangular packing, and polygon overlap tests — three algorithms changed for tighter clearance near tabs.
+**Deliberately absent**, none of which was solving a layout problem: `overlay` (content reserving no space is not layout's business), priority or composition order (the app sums before calling), alignment (the app knows the rect).
 
-**So the occupied region is the composite's AABB**, which reserve-and-inset already expresses. An asymmetric tab is the app reserving the extra width and placing the visual rect off-centre inside the box it gets back; layout hands out a rect and the app decides what sits where in it.
-
-One honest artifact: avoidance is *conservative* (routes keep clear of AABB corners that are actually empty) and termination is *approximate* — a route may land on an AABB edge beside a tab rather than on the tab. The app draws a short stub to bridge it, or accepts it. Revisit only if that proves annoying in practice; it is not worth a polygon router up front.
-
-So scav has **no composite shapes and no attachment offsets.** The same trick covers the emphasis margin §13 no longer holds as a profile field: an app stroking 8 units wide reserves 8 units and draws inside them.
-
-**What is deliberately absent.** No `overlay` — content that reserves no space is not layout's business, the app just draws it. No priority or composition order — two extensions both wanting interior space are summed by the app before it calls layout. No alignment — the app knows the rect. Every one of those was in an earlier slots-shaped draft and none of them was solving a layout problem.
-
-Detached placement (a note positioned near an element with a leader line, non-overlapping) is a real third layout problem and is **deferred**: nothing in the corpus needs it, libhsm's notes convert to attributes, and §11.7's connector glyphs are already out of v1. Add it when something demands it.
+**Detached placement** — a note near an element with a leader, non-overlapping — is a real third layout problem, **deferred**: nothing in the corpus needs it, libhsm notes convert to attributes, connector glyphs are out of v1 (§11.7).
 
 ### 8.1.1 Optional helper layers
 
-scav ships **utilities the app may call**, never machinery that calls the app. That distinction is the whole difference between a toolkit and a framework, and it is the test for whether a helper belongs:
-
-> A helper is a function the application calls. A framework is a function that calls the application.
-
-Shipped in `libscavdraw`, all pure functions over PODs, all optional:
+scav ships **utilities the app may call**, never machinery that calls the app (§3.0). In `libscavdraw`, all pure functions over PODs, all optional:
 
 - **interior subdivision** — `scav_stack_v(rect, items, n, out_rects)`, `scav_row_h(...)`, `scav_align(rect, w, h, align, out)`. Turns "I have a rect and three things" into positions. This is where the old band taxonomy went: from a contract into a convenience.
 - **text layout in a rect** — line breaking at author-supplied breaks, baseline positioning, ellipsis.
@@ -765,7 +725,7 @@ Order-preserving and gap-avoiding are one constraint: restricting placement to f
 
 Width approximation is `target_w = isqrt(floor_div(total_area * dar_num, dar_den))` with that exact operation order, `isqrt` = floor. `DAR` is an integer pair. On same-height submachines the older `box` packer wins; `trybox` is evaluated once per layout, deterministically. A 1-unit change can flip the packer and reflow siblings; that is a boundary condition for hints (§14), not grounds for remembering the previous choice.
 
-**Bottom-up sizing has no natural locality** — a leaf growing one unit resizes every ancestor to the root, and the top-down pass then re-pushes ports into clean subtrees. That cascade is inherent to bottom-up sizing and is simply paid: one pass up, one pass down, fixed count. An earlier draft bounded it with per-session hysteresis, which was hidden state serving an incremental path that no longer exists (§11.11).
+**Bottom-up sizing has no locality** — a leaf growing one unit resizes every ancestor to the root. Inherent, and simply paid: one pass up, one pass down, fixed count. No hysteresis; that would be hidden state (§11.11).
 
 Not top-down layout: its central size-approximation problem is unsolved by its own authors, it introduces per-level scale factors that break port-split segment continuity, and it is mutually exclusive with cross-hierarchy edges in ELK. Cost: bottom-up sizing at depth is a readability problem on fixed media (a depth-9 SCChart lays out to 0.322 pt max font on A4). Acceptable because output is a zoomable canvas.
 
@@ -826,7 +786,7 @@ At depth 16 a literal polyline crossing 15 boundaries is unreadable. The hatch i
 
 **This is a builder concern, not a layout feature**, which is why nothing needs building for it. The app requests no `PathBox` and no route for that transition, reserves a little space at each end, and draws a tagged stub pair. Layout never learns the transition is drawn differently — it has one fewer route to compute. So the model and the space tables already permit it, and `scav:render=connector` is an ordinary authored attribute the builder reads, not a layout input.
 
-Precedent when needed: **UML 2.5.1 §15.2.4** ActivityEdge connector supplies the exact contract — "purely notational", "does not affect the underlying model", exactly-one matching pair. **SDL / ITU-T Z.100** §2.6.7, §2.6.8.2.2 standardizes it inside a state-machine language with a textual dual. Also BPMN 2.0 Link Events, Simulink Goto/From, KiCad/Altium net labels, Castelló et al.'s GOTO nodes. UML deliberately gives state *transitions* no such notation, so this fills a real notational gap. A scav connector must be semantically inert.
+Precedent: **UML 2.5.1 §15.2.4** ActivityEdge connector — "purely notational", "does not affect the underlying model", exactly-one matching pair. **SDL / ITU-T Z.100** §2.6.7 standardizes it inside a state-machine language with a textual dual. Also BPMN Link Events, Simulink Goto/From, KiCad net labels. UML gives state *transitions* no such notation, so this fills a real gap. A connector must be semantically inert.
 
 ### 11.7a Geometry columns — the layout output contract
 
@@ -914,11 +874,9 @@ Local search from a structured seed with **restricted uphill moves** — "simula
 
 **There is no `quick` mode and no `polish` mode.** Layout runs one algorithm, always, and is a pure function of `(model, spaces, profile)`. No warm start, no prior layout, no incremental dirty-region path, no persisted cache.
 
-That deletes a large amount of machinery an earlier draft carried, and with it a class of defects: a layout that depends on edit history, hysteresis high-water marks and a sticky packer choice living as hidden per-session state, a `PriorLayout` needing its own version key and invalidation rule, and a golden hash that had to be qualified as "cold-start, `w_st = 0`" to mean anything.
+**Stability is a property of the algorithms, not a cost term.** A small model change yields a small diagram change because each stage is order-preserving and deterministic — LR-rectpacking preserves input order (§11.4), ranking and ordering have total-order tie-breaks (§6), document order drives reading order (§14).
 
-**Stability is a property of the algorithms, not a cost term.** A small model change must produce a small diagram change because each stage is order-preserving and deterministic — LR-rectpacking preserves input order by construction (§11.4), ranking and ordering are deterministic with total-order tie-breaks (§6), and document order drives reading order (§14). Pricing displacement against a previous run was solving by penalty what the algorithm should give for free, and it required keeping the previous run around.
-
-So `w_st` is gone from the cost function, and VPSC — whose only remaining justification was minimum-displacement-from-prior — is rejected outright rather than deferred (§11.13).
+That removes `w_st`, `PriorLayout` and its version key, per-session hysteresis, the sticky packer bit, dirty-region tracking, and VPSC (§11.13) — plus a class of defects: layout depending on edit history, and a golden hash needing a "cold-start" qualifier to mean anything.
 
 **Honest limit.** Stability-by-construction is not a guarantee. A one-node change can flip a crossing-minimisation decision and cascade, and no ordering discipline prevents that in general. Those are the boundary conditions **hints** exist for (§14): when the engine makes a defensible choice the author dislikes, the author pins it rather than the engine remembering what it did last time.
 
@@ -944,15 +902,15 @@ A versioned, hashed artifact (§6), so it needs a field list rather than thirtee
 | search | portfolio `K`, sweep count, congestion iterations, rip-up cap, spacing-inflation cap and increment |
 | id | `profile_id`, `profile_version` |
 
-Profile load **validates every bound and rejects out of range**. Two consequences the earlier draft asserted without supplying: weight ceilings exist so the Tier-2 sum has a proven bound, and `dar_num` is bounded so `total_area * dar_num` cannot overflow before `isqrt`.
+Profile load **validates every bound and rejects out of range** — weight ceilings give the Tier-2 sum a proven bound, and bounded `dar_num` stops `total_area * dar_num` overflowing before `isqrt`.
 
 Named profiles ship as data: `compact`, `readable`. There is no `print` profile — fit-to-page would need the top-down layout §11.4 rejects.
 
 ### 11.13 Rejected
 
-**Topology-shape-metrics.** Requires planarity (statecharts are routinely non-planar; planarization is NP-complete and the literature's practical ceiling is "a few hundred vertices"); compound nesting is not in the model and the bolt-on rests on c-planarity, open from 1995 until a JACM 2022 result; the pipeline chains three NP-hard problems with documented quality failure (excess bends, area blowup); HOLA explicitly replaces it and CoDaFlow rejected it for compound-plus-ports diagrams specifically. Keep only compaction by topological numbering (§11.2).
+**Topology-shape-metrics.** Needs planarity — statecharts are non-planar, planarization is NP-complete, and the literature's ceiling is "a few hundred vertices". Compound nesting isn't in the model; the bolt-on rests on c-planarity, open 1995–2022. Three chained NP-hard problems with documented excess bends and area blowup. HOLA replaces it; CoDaFlow rejected it for compound-plus-ports specifically. Keep only compaction by topological numbering (§11.2).
 
-**VPSC — rejected outright, not deferred.** Coordinates are generated, not adjusted, so separation is longest-path: linear, exact, integral, ~100 lines. VPSC buys only minimum-displacement-from-a-prior-position, and with no warm start and no `w_st` (§11.11) there is no prior position to stay near — removing modes removed its last justification. Recorded in case that changes: `satisfyVPSC` not `solveVPSC` (drops the exponential worst case, the cycling risk, the tolerance fudge); apply the GD 2006 **Correction**, since the published version can return **infeasible** solutions; fix the total order deterministically; and reformulate in integers, because "solve continuous then round" preserves feasibility but **not identity** — 1 ULP lands differently at `.5`.
+**VPSC.** Coordinates are generated, not adjusted, so separation is longest-path: linear, exact, integral, ~100 lines. VPSC buys only minimum-displacement-from-prior, and §11.11 leaves no prior. If ever needed: `satisfyVPSC` not `solveVPSC`; apply the GD 2006 **Correction** (the published version can return **infeasible** solutions); fix the total order; reformulate in integers, since solve-continuous-then-round preserves feasibility but not identity.
 
 **LP nudging fallback.** "Integral if coefficients are integral" is false — that needs total unimodularity, unestablished here — and simplex pivoting under degeneracy is tolerance-driven float. Deterministic degradation instead: widen the channel by a fixed integer increment and re-seat, capped, then diagnostic.
 
@@ -1015,19 +973,19 @@ struct DrawList {
 };
 ```
 
-**Draw order is an explicit `depth`, not array position** — and that is what makes `DrawList`s **composable by concatenation**. An app appends the reference builder's output to its own and depth resolves the interleaving: threat radii behind state boxes, a timeline in front, no splice operation and no forking the builder to get content into the middle of its stack. Array position was the single thing that made the reference builder a fork trap.
+**Draw order is an explicit `depth`, not array position**, which makes `DrawList`s **composable by concatenation**: an app appends the reference builder's output to its own and depth resolves interleaving — no splice, no forking the builder to reach the middle of its stack.
 
-A backend consumes depth however suits it: **stable-order by `(depth, emission_index)`** for painter's algorithm, or write it as z in an orthographic projection and let the depth buffer sort. `(depth, emission_index)` is a total order, so §6's comparator rule is satisfied without relying on sort stability. Honest caveat: depth-as-z only works for opaque content — a blended GPU backend still sorts back-to-front, using the same integer.
+A backend either **stable-orders by `(depth, emission_index)`** for painter's algorithm or writes depth as z under orthographic projection. That key is a total order, so §6's comparator rule holds without relying on sort stability. Depth-as-z covers opaque content only; a blended backend still sorts, using the same integer.
 
 **scav reserves no depth bands and assigns no depth semantics.** Emitters take depth as a parameter — `emit_state(dl, chart, depth)` — so the caller owns the numbering. Reserved bands would have been scav deciding an ordering the app should own, and they are meaningless to an app that writes its own builder. The convenience wrapper picks *some* defaults, documented as that one function's choice rather than as a namespace: if you need to interleave, call the emitters and pass your own numbers.
 
 **Clipping is a per-primitive index, not a `clip_push`/`clip_pop` pair.** Stateful scope primitives cannot survive a depth sort — sorting separates a pair from the primitives it was scoping. So a `Prim` names its clip rect directly, which also lets a GPU backend batch by scissor rather than replaying a stack.
 
-**Identity is a back-reference to the model, not a class string.** `Prim.origin` is an `ElemRef` — the same `{kind, ordinal}` shape space requests use — with a `none` kind for primitives belonging to no entity (a legend, a canvas background). A backend that wants CSS classes *synthesizes* them: `class="scav-state-1234"` is the SVG backend's projection of `origin`, not something the IR carries. String classes would have been an SVG concept leaking into an IR that also feeds ImGui, and would have added interning to a hot path.
+**Identity is a back-reference, not a class string.** `Prim.origin` is an `ElemRef`, with a `none` kind for primitives belonging to no entity. A backend wanting CSS classes *synthesizes* them — `class="scav-state-1234"` is the SVG backend's projection, not IR content. String classes would leak an SVG concept into an IR that also feeds ImGui, and add interning to a hot path.
 
-**Style is a separate table, and that is what makes §13 cheap.** Live recoloring mutates `styles[]` and leaves `prims[]`, `points[]`, and `text` untouched — so an app caches the geometry-derived part across frames and swaps only the style table, which is exactly what §13 asks for. Fat per-primitive style would have forced a full rebuild every frame.
+**Style is a separate table, which is what makes §13 cheap.** Live recoloring mutates `styles[]` and leaves `prims`, `points`, and `text` cached. Fat per-primitive style forces a full rebuild every frame.
 
-**Coordinates are absolute grid units, one frame, no per-primitive frame tag.** Box-local was an artifact of scripts that did not know where they would land; a builder reads geometry columns and knows.
+**Coordinates are absolute grid units**, one frame, no per-primitive frame tag — a builder reads geometry columns and knows where things are.
 
 ```
 builder:  (model columns, incl. geometry) -> DrawList     // app's; scav ships a reference one
@@ -1050,7 +1008,7 @@ Headless `scav render` is the first user-visible deliverable (P2), so this one s
 
 **Emit the body in integer grid units with the entire scale in one integer `viewBox`.** Float-to-decimal conversion is not portable (MSVC UCRT, glibc, musl, and Apple libc disagree on the last digit) and `-ffp-contract=fast` is the default, so `grid * scale` differs by 1 ULP between Debug and Release. **No float is printed, ever.**
 
-Renderer-vs-metrics agreement, layered: bundle exactly one font and name it plus a fallback; emit `textLength` with `lengthAdjust="spacing"` from our own advance sum, which converts "text overflows its box" into "text is slightly loosely spaced" — Graphviz emits none, which is why its SVG overflows under substitution; emit `font-kerning: none` matching §11.9.1; use explicit padding rather than sizing to exactly the text width; offer `--embed-font` to base64 a subsetted TTF into `<defs><style>@font-face`, the only way to get exact agreement while keeping text selectable. **Never convert text to paths** — it needs the whole outline stack we avoid and discards selection and accessibility.
+Renderer-vs-metrics agreement, in order: one bundled font, named with a fallback · `textLength` with `lengthAdjust="spacing"` from our own advance sum, turning overflow into slightly loose spacing (Graphviz emits none, which is why its SVG overflows under substitution) · `font-kerning: none` per §11.9.1 · explicit padding, never sizing to exactly the text width · `--embed-font` base64ing a subsetted TTF into `<defs><style>@font-face`, the only exact agreement that keeps text selectable. **Never convert text to paths** — needs the outline stack we avoid, discards selection and accessibility.
 
 Emit a stable `class` per element (`scav-state scav-id-1234`) so external CSS can restyle a static SVG.
 
@@ -1147,15 +1105,15 @@ chart vac "robot vacuum" {
 }
 ```
 
-**Design rules, each fixing a defect found by writing examples:**
+**Design rules**, each fixing a defect found by writing examples:
 
-- **Every statement is keyword-led** (`include` `state` `submachine` `trans` `@`), so dispatch is one token. Identifier-led transitions were tried and rejected: they read fine but broke the symmetry that makes the grammar skimmable.
-- **`,` separates every list, statements included.** Juxtaposed statements parse but are illegible on one line — the same defect as unseparated variadic values, one level up.
-- **`=` anchors a key to its value, `[...]` delimits lists.** Variadic values without delimiters are LL(1) and unreadable.
-- **Positional string is the label**, since nearly every transition has one; everything else goes in the block.
-- **`*` is the initial or terminal pseudostate**, by position — source or target. PlantUML's convention, and it frees two reserved words. Bare, not `[*]`, keeping `[` exclusively for lists.
-- **`kind` leads a transition** because §11.14 makes it behaviourally load-bearing, so it should be as visible in source as in the drawing.
-- **Newlines carry nothing.** The lexer is whitespace-insensitive outside strings; the whole file is legal on one line. Line breaking is the canonical printer's decision, which is what makes byte-identical output achievable.
+- **Keyword-led statements** (`include` `state` `submachine` `trans` `@`) — dispatch is one token. Identifier-led transitions parse but break skimmability.
+- **`,` separates every list, statements included** — juxtaposed statements are illegible on one line.
+- **`=` anchors key to value, `[...]` delimits lists** — variadic values without delimiters are LL(1) and unreadable.
+- **Positional string is the label**; everything else goes in the block.
+- **`*` is initial or terminal by position** (source or target). Bare, not `[*]`, keeping `[` for lists.
+- **`kind` leads a transition**, because §11.14 makes it behaviourally load-bearing.
+- **Newlines carry nothing** — whitespace-insensitive outside strings, whole file legal on one line. Line breaking is the printer's, which is what makes byte-identical output achievable.
 
 Reserved: `chart` `include` `state` `submachine` `trans` `kind` `external` `internal` `local`. Everything else is contextual, so a state may be named `choice`, `history`, `as`, or `hash`.
 
@@ -1172,9 +1130,9 @@ Reserved: `chart` `include` `state` `submachine` `trans` `kind` `external` `inte
 | attribute order | sorted by key bytes; within one repeated key, insertion order |
 | line breaking | by a column budget — **a versioned profile field** (§11.15), since it is part of the output contract |
 
-**Structure is never reordered.** Attributes may be sorted; states and submachines may not, because document order is the primary layout hint (§14). Comments are preserved with position — leading, trailing, own-line — which is the expensive half of the printer, and they live on `Statement.comments` (§7) rather than in a side structure.
+**Structure is never reordered.** Attributes may be sorted; states and submachines may not — document order is the primary layout hint (§14). Comments carry position (leading, trailing, own-line) on `Statement.comments` (§7), and are the expensive half of the printer.
 
-**One printer, and it always reconstructs.** The stored source bytes (§7) are *not* a printing shortcut. Emitting untouched statements verbatim would preserve their original formatting, and two semantically identical models read from differently-formatted files would then print differently — which breaks canonicity, and canonicity is what the format hash and the merge story rest on. So printing always reconstructs from the model, gofmt-style, and a repo is expected to be canonical (`scav fmt` in a pre-commit hook). Source bytes exist for **diagnostics and source mapping**, not for output.
+**One printer, always reconstructing.** Stored source bytes (§7) are **not** a printing shortcut: emitting untouched statements verbatim preserves their formatting, so two semantically identical models from differently-formatted files print differently — breaking the canonicity the format hash and merges rest on. Print reconstructs, gofmt-style; a repo is expected canonical (`scav fmt` pre-commit). Source bytes are for diagnostics and source mapping.
 
 Also required: text normalized on read (§6); extension columns round-trip losslessly including unknown ones (§8).
 
@@ -1182,7 +1140,7 @@ Also required: text normalized on read (§6); extension columns round-trip lossl
 
 **JSON survives as an output-only projection** (`scav dump --json`) for programmatic consumers. Mechanical over columnar data, and not a format — it cannot hold multi-line strings, which §11.9's author-controlled label breaks require.
 
-A program that returns the graph (Lua etc.) was rejected as the on-disk format: not diffable, no GUI round-trip, content-addressing requires executing it, running a colleague's chart is arbitrary code execution in CI, `pairs()` order is unspecified, and a program can fail to terminate. The generative case is served by the C ABI plus bindings.
+A program that returns the graph (Lua etc.) is not the on-disk format: not diffable, no round-trip, reading it requires executing it, and a program can fail to terminate. The generative case is the C ABI plus bindings.
 
 ## 16. C ABI
 
@@ -1208,7 +1166,7 @@ scav_result scav_image_register(scav_ctx*, const char* id, const scav_byte*, uin
 scav_result scav_router_by_name(const scav_byte* name, uint32_t len, scav_router_id* out);
 ```
 
-**There is no bespoke layout-result type.** An earlier draft specified a `scav_layout_pod` with per-edge spans into a points array — a variable-length-within-variable-length structure that was awkward to describe and worse to bind. Writing geometry into derived columns removes it: edge polylines are a `Span` into a points column, which is *already* the model's idiom, so layout output stops being a parallel structure and becomes more of the same one.
+**No bespoke layout-result type.** Geometry is columns (§11.7a); edge polylines are a `Span` into a points column, already the model's idiom. `Placed[]` stays an out-param only because `PathBox` is 0..N per transition and cannot be a dense per-entity column.
 
 **Routers are exposed by name only.** Function pointers cannot cross: `void* ud` is undescribable in the ABI JSON, routers run on worker threads, and `-fno-exceptions` makes a binding-language exception crossing back UB.
 
@@ -1220,7 +1178,7 @@ Editor commands do not cross the C boundary as objects; that layer's API is opco
 
 **Extending scav means writing an application** (§3), so bindings must cover the whole pipeline — model, format, metrics, space tables, layout, geometry columns, `DrawList`, SVG — not a plugin corner.
 
-**The pivot already did the hard part: there are no callbacks anywhere.** Every extension point is data in, data out. Under the earlier design a Python binding would have meant Python functions invoked from layout worker threads across an `-fno-exceptions` boundary. Now a binding is pure marshalling, which is why this is tractable at all.
+**No extension point is a callback** — everything is data in, data out. So a binding is pure marshalling, with no host-language function invoked from a worker thread across an `-fno-exceptions` boundary. That is what makes bindings tractable.
 
 **One redistributable shared library** — `libscav` = core + layout + draw + svg. The four static libraries are a build-time decomposition; the distribution unit is one shared object. The batteries are everything except the interactive viewer, so the reference builder and SVG backend must be reachable through the C ABI rather than being C++-only conveniences.
 
@@ -1228,7 +1186,7 @@ Editor commands do not cross the C boundary as objects; that layer's API is opco
 - **Prebuilt binaries**: macOS arm64/x86_64, Linux x86_64/aarch64 (manylinux), Windows x64, plus wasm. No compiler required to `pip install`.
 - **Self-contained**, because there are no runtime dependencies. The bundled font is **embedded in the library**, not loaded from a path — it is a layout-hash input and must travel with the code.
 
-**Two hazards.** §16's unspecified memory ownership is a **hard blocker, not an item owed** — a binding cannot exist without a destroy call per handle, so this lands in P0. And Python makes §8.1's integer-purity rule easy to violate (`/` yields float, ints are arbitrary-precision), so setters range-check and reject non-integers, and the space-computation helpers live in the shared library so the common path never does arithmetic in the host language.
+**Two hazards.** Handle lifecycle is a **P0 blocker**, not an item owed: a binding needs a destroy call per handle. And Python makes §8.1's integer purity easy to violate (`/` yields float), so setters reject non-integers and range-check, and space-computation helpers live in the shared library.
 
 ### 16.2 No file I/O in core
 
