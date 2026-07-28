@@ -234,7 +234,7 @@ Odd and prime thread counts are mandatory — they expose reduction-shape bugs p
 - Shard count is `clamp(bit_ceil(entity_count / 64), 1, 256)` — a pure function of the model, never `hardware_concurrency()`, never tunable. Shards are work items; worker count never affects results, and the null backend runs the same shards inline in index order.
 - Randomness is **stateless and position-addressed**: `rnd(seed, phase, item_index, step)` via the splitmix64 finalizer. **Never** a per-shard stream and **never** keyed on shard index — that would couple output to the decomposition.
 - Synthesized ids derive from a **global stable key**, never from shard ranges. Per synthesized kind: port = `(compound_state, side, transition, crossing_depth)`; split segment = `(transition, segment_ordinal)`; label dummy = `(transition, rank)`; routing-graph node = rank under a total sort on `(x, y, plane, kind)`.
-- Reductions merge in **index order**. Combine operators must be associative; commutativity is not required. `+`/`min`/`max`/`xor` qualify. List append is associative but not commutative — respect order. Saturating add and "first best wins" qualify as neither and are banned as reductions.
+- Reductions merge in **index order**. Combine operators must be **associative**; commutativity is not required. `+`/`min`/`max`/`xor` qualify outright. List append and `argmin(value, index)` are associative but not commutative — legal, and index order is what makes them well-defined, which is why §11.10 reduces a portfolio that way. **Saturating add is banned**: it is not associative, so a shard split changes the answer.
 - Every comparator is a **total order** ending in a stable input-derived key. Ties are forks.
 - **Vendored stable merge sort** for any sort whose result reaches output. `std::sort` is permitted only in tests.
 - All rectangles are **half-open**: `[x0,x1) x [y0,y1)`.
@@ -302,6 +302,7 @@ enum class TransKind : uint32_t { external, internal, local };
 
 struct State {
   StrRef        name;        // empty for pseudostates; see §9
+  StrRef        label;       // the positional string (§15); opaque, may be empty
   SubmachineId  parent;
   StateKind     kind;
   Span          submachines; // -> submachine_ids
@@ -313,6 +314,7 @@ struct Submachine {
   StateId       owner;       // kInvalid for a document root
   uint32_t      ordinal;
   StrRef        name;
+  StrRef        label;
   Span          children;    // -> state_ids, document order
   Span          attrs;
   DocId         doc;
@@ -326,7 +328,11 @@ struct Transition {
   DocId         doc;
   uint32_t      gen;
 };
-struct Include  { StrRef path, alias; uint64_t hash; DocId target; StateId host; };
+struct Include  {           // host == kInvalid means the including document's root submachine
+  StrRef  path, alias, hash;  // hash is the authored `algo:digest` text, so it round-trips
+  DocId   target;
+  StateId host;
+};
 struct Attr     { AttrKeyId key; StrRef value; };
 
 struct Document {            // one per loaded document
@@ -343,7 +349,7 @@ struct Statement {           // one per authored construct
   Span     comments;         // trivia: leading, trailing, own-line
 };
 
-struct StringPool { std::vector<scav_byte> bytes; std::vector<uint32_t> offsets; };
+struct StringPool { std::vector<scav_byte> bytes; };   // StrRef carries off+len
 
 struct Chart {
   std::vector<Document>    documents;
@@ -359,7 +365,7 @@ struct Chart {
   std::vector<StateId>     state_ids;    // Span targets
   std::vector<SubmachineId> submachine_ids;
   StringPool               strings;      // interned names; canonically re-sorted
-  StrRef                   name;
+  StrRef                   name, label;
   SubmachineId             root_submachine;
   Span                     chart_attrs;
 };
@@ -442,13 +448,13 @@ Two axes. Both round-trip losslessly, including data this build does not underst
 ```cpp
 enum class ElemKind : uint32_t { state, submachine, transition, chart, point, path_box, none };
 struct ElemRef { ElemKind kind; uint32_t ordinal; };   // used by DrawList and diagnostics
-enum class ValueKind  : uint32_t { u32, i32, u64, i64, strref, span, blob };
+enum class ValueKind  : uint32_t { u32, i32, u64, i64, strref, span, blob, pod };
 struct AttrKeyId { uint32_t v; };   // interned attribute key, `ns:key` or bare
 struct ColumnId  { uint32_t v; };   // index into Chart::columns
 
 struct ColumnDesc {        // 28 bytes, no padding
   StrRef    name;          // "libhsm.events", "scav.geom.state"; own pool, not Chart::strings (§7)
-  ElemKind  entity;        // never `point`/`path_box`/`none` in a ColumnDesc
+  ElemKind  entity;        // `none` and `path_box` never appear here
   ValueKind kind;
   uint32_t  elem_size, elem_align;
   uint32_t  flags;         // bit 0 = derived: skipped by the serializer, exempt from round-trip-unknown
@@ -461,7 +467,7 @@ Type-erased byte arrays with a stride, indexed by entity ordinal. C ABI is the t
 **What core owes an extension:**
 
 1. Store it, indexed by entity ordinal; keep it index-aligned under mutation and tombstoning.
-2. **Round-trip it losslessly, including unknown columns** — otherwise an older build silently strips a colleague's data on save. Wire encoding: all scalars **little-endian**, `strref`/`span` as two `u32`, `blob` as `u32` length then bytes, `elem_align` ignored on the wire. A column block is `{name, entity, kind, elem_size, count}` then `count * elem_size` bytes — enough to round-trip a column whose meaning is unknown.
+2. **Round-trip it losslessly, including unknown columns** — otherwise an older build silently strips a colleague's data on save. Wire encoding: all scalars **little-endian**, `strref`/`span` as two `u32`, `blob` as `u32` length then bytes, `elem_align` ignored on the wire. `pod` is `elem_size` opaque bytes whose interior the serializer does not interpret — the escape hatch a struct-valued column needs, and what every geometry column uses (§11.7a), which is sound because those columns are `derived` and never written to the wire at all. A column block is `{name, entity, kind, elem_size, count}` then `count * elem_size` bytes — enough to round-trip a column whose meaning is unknown.
 3. **Pass it through unread.** `layout` never reads extension data.
 4. Let it contribute **space requests** (§8.1) and a builder function the app may call (§8.2).
 5. Expose `ColumnDesc` so an editor can present unknown columns generically.
@@ -477,7 +483,7 @@ Content a box must make room for has to be known **before** layout runs, so it n
 Derived from one question: **what geometric problem can only layout solve?** Two, neither involving appearance — size a box whose interior must fit app content *and* packed submachines (submachine sizes come from layout), and slide a rect along a route (the route does not exist yet). Hence three tables of plain integers, no variant, no enum:
 
 ```cpp
-// per state / submachine — a column, parallel to the entity
+// two columns, one parallel to states and one to submachines
 struct BoxSpace {
   int32_t min_w;      // interior at least this wide
   int32_t h_before;   // interior height reserved before the submachine area
@@ -523,33 +529,36 @@ struct Placed { int32_t x, y, w, h; };   // root-absolute; w/h may exceed the re
 // before layout — the app measures and sums; composition is app-side.
 // Free functions on POD, per §4: rows are data, behaviour is not on the row.
 for (uint32_t i = 0; i < chart.states.size(); ++i) {
-  StateId const st = state_id(chart, i);
-  if (!alive(chart.states[i])) { continue; }                  // tombstone (§7)
-  Extent const title = measure_text(metrics, str(chart, chart.states[i].name), font_size_grid);
-  Extent const badge = libhsm_wants_badge(st) ? Extent{14, 14} : Extent{0, 0};
-  Extent const body  = scxml_onentry_extent(st, metrics);      // {0,0} if absent
-  spaces.box[i] = { .min_w    = max(title.w + badge.w + 8, body.w + 8),
-                    .h_before = max(title.h, badge.h) + 4 + body.h,
-                    .h_after  = 0 };
+  if (!alive(chart.states[i])) { continue; }                    // tombstone (§7)
+  Extent const title = measure_text(m, str(chart, chart.states[i].name), fs);
+  Extent const badge = libhsm_wants_badge(chart, i) ? Extent{14, 14} : Extent{0, 0};
+  Extent const body  = scxml_onentry_extent(chart, i, m);       // {0,0} if absent
+  app.box_state[i] = { .min_w    = imax(title.w + badge.w + 8, body.w + 8),
+                       .h_before = imax(title.h, badge.h) + 4 + body.h,
+                       .h_after  = 0 };
 }
 
 for (uint32_t i = 0; i < chart.transitions.size(); ++i) {
-  TransId const t = trans_id(chart, i);
-  std::string const text = join(libhsm_events(t), ", ");
-  Extent const ext = measure_text(metrics, text, font_size_grid);
-  spaces.path_box.push_back({ t, ext.w + 4, ext.h + 2, 0 });
-  spaces.path_clear[i] = { 0, 8 };                            // arrowhead room
-  app.label_text[i] = text;                                   // app's side table
+  app.label_text[i] = join_events(chart, i);                    // app's side table
+  Extent const ext  = measure_text(m, app.label_text[i], fs);
+  app.path_box.push_back({ trans_id(chart, i), ext.w + 4, ext.h + 2, 0 });
+  app.path_clear[i] = { 0, 8 };                                 // arrowhead room
 }
 
-scav_layout_run(chart, spaces, opts);   // writes geometry columns + placed[]
+scav_spaces const spaces = as_spaces(app);       // base pointers + counts
+uint32_t n_placed = 0;
+if (scav_layout_run(chart, &spaces, &opts,
+                    app.placed.data(), app.placed.size(), &n_placed) != 0) {
+  return diagnose(chart);                        // never ignore the result (§16)
+}
 
 // after layout — the app subdivides its own interior, however it likes
 for (uint32_t i = 0; i < chart.states.size(); ++i) {
-  Rect const r = content_before(chart, i);
-  push_text(dl, depth, r.x + 4, r.y + baseline, str(chart, chart.states[i].name));
-  if (libhsm_wants_badge(state_id(chart, i))) {
-    push_circle(dl, depth, r.x + r.w - 11, r.y + 3, 7);       // PrimKind::circle
+  Rect const r = geom_state_before(chart, i);
+  push_text(dl, depth, style_title, r.x + 4, r.y + ascent(m, fs),
+            str(chart, chart.states[i].name));
+  if (libhsm_wants_badge(chart, i)) {
+    push_circle(dl, depth, style_badge, r.x + r.w - 11, r.y + 3, 7);
   }
 }
 ```
@@ -672,7 +681,7 @@ Port order is a solver output. Ties break on the port's stable key (§6), never 
 
 ### 11.2 Coordinates
 
-Integer only, grid units of **1/16 point**.
+Integer only, grid units of **1/16 point** — a compile-time constant, not a profile field, because §11.9's ABI takes sixteenths of a point directly.
 
 ```cpp
 inline constexpr std::int32_t kCoordMax = (INT32_C(1) << 19) - 1;   //  524'287
@@ -721,11 +730,11 @@ Submachine size composition (Castelló et al., JGAA 6(3), 2002): **width = Σ ov
 Composite state box, from the requesting entity's `BoxSpace` (§8.1):
 
 ```
-w = max(min_w, packed_subs_w) + 2*pad
-h = h_before + packed_subs_h + h_after + 2*pad
+w = max(min_w, packed_subs_w, kind_min_w) + 2*pad
+h = max(h_before + packed_subs_h + h_after, kind_min_h) + 2*pad
 ```
 
-`pad` is a profile field (§11.15). A state with no space request uses an all-zero `BoxSpace`, so its box is `max(pseudostate_min, packed_subs)` — pseudostate min extents are profile fields (§11.15), not hardcoded.
+`pad` and the per-`StateKind` `kind_min_w`/`kind_min_h` are profile fields (§11.15), never hardcoded. A state with no space request passes an all-zero `BoxSpace`, so `kind_min_*` is what gives a fork bar its wide-and-thin extent (§7.2) — without that term the formula would size it `2*pad` square.
 
 **Sibling submachines are packed here, not in phase 1** — packing requires the siblings already sized. **LR-rectpacking** (Domrös et al., IVAPP 2021): greedy width approximation → placement → compaction → whitespace elimination, `O(n log n)`. Take the LR variant; plain rectpacking's one-oversized-child special case was deleted by its own authors as unmaintainable and aspect-ratio-blind.
 
@@ -775,7 +784,7 @@ struct Cost {                 // compared lexicographically, in this order
 w_b    * bends                                      -- highest in tier
 w_par  * shared_corridor_overlap
 w_x    * crossings
-w_len  * Σ (excess_length * depth_weight)            -- excess over min_len(e), §11.9
+w_len  * Σ (excess_length * (1 + crossings_of(e)))   -- excess over min_len(e), §11.9
 w_adj  * nonadjacent_sub_pairs_joined_by_edge     -- §11.8; excludes fork/join fan-out
 w_lbl  * label_overlaps
 w_ar   * |w_actual*dar_den - h_actual*dar_num|       -- integer aspect deviation
@@ -808,13 +817,14 @@ This list *is* the layout output ABI — there is no bespoke result type (§16) 
 | `scav.geom.sub` | `SubmachineId` | submachine rect — needed for dividers and titles |
 | `scav.geom.route` | `TransId` | `Span` into `scav.geom.point` |
 | `scav.geom.point` | point ordinal | `{int32 x, y}` |
-| `scav.geom.port` | `TransId` | src and dst port coordinate + side |
+| `scav.geom.port` | `TransId` | `Span` into `scav.geom.portslot` |
+| `scav.geom.portslot` | port ordinal | `{int32 x, y; uint32 side, boundary_depth}` |
 | `scav.geom.chart` | chart | root bounding box |
 | `scav.geom.gen` | chart | generation counter (§13) — **not hashed, not serialized** |
 
-`ElemKind::point` exists so the point array is a real column rather than a side array outside the column rules; its entity count is the column length.
+`ElemKind::point` exists so the point and port-slot arrays are real columns rather than side arrays outside the column rules; entity count is the column length. A transition splits into one port per boundary it crosses (§11.1), not two — a depth-16 edge has up to 15, and the structural hash covers all their sides, so one row per transition cannot hold them.
 
-**Hashing is by explicit allowlist, not by enumerating `Chart.columns`** — otherwise app and plugin columns perturb scav's own goldens, and the same corpus hashed through `scav` and through `scavview` would differ. The **structural hash** covers ranks, orders, port sides, and bend sequences *as direction-turn tokens*; the **coordinate hash** covers the rects and point coordinates. Turn tokens rather than points is what makes a pure translation move the coordinate hash and not the structural one, which is the whole point of the split.
+**Hashing is by explicit allowlist, not by enumerating `Chart.columns`** — otherwise app and plugin columns perturb scav's own goldens, and the same corpus hashed through `scav` and through `scavview` would differ. The **structural hash** covers ranks, orders, port sides, and bend sequences *as direction-turn tokens*; the **coordinate hash** covers the rects and every point and port coordinate. Turn tokens rather than points is what makes a pure translation move the coordinate hash and not the structural one, which is the whole point of the split.
 
 ### 11.8 Transitions between concurrent submachines
 
@@ -922,7 +932,7 @@ The likeliest failure is producing layouts that score well on `Cost` and that re
 
 Consequences:
 
-- **Phase 0 (§11.1) suppresses the source-boundary split** for `internal` and `local`. One fewer segment, one fewer port. The derived boundary-crossing count (§7) must reflect this, or `w_len`'s depth weight miscounts.
+- **Phase 0 (§11.1) suppresses the source-boundary split** for `internal` and `local`. One fewer segment, one fewer port. The derived boundary-crossing count (§7) must reflect this, or `w_len`'s per-crossing multiplier (§11.6) miscounts.
 - **Tier 0 (§11.6) carve-out:** an edge may occupy the interior of a state whose border it does not cross, and **only** that state. Every other state and submachine rectangle remains an obstacle.
 - **Internal self-loops are the app's, end to end.** The app sums the band it needs into `h_before`/`h_after` and its builder draws the glyphs inside the returned `content_before`/`content_after` rect. There is no route, so `PathBox`/`PathClear`/`min_len` do not apply and the router is not involved. Layout sees only two integers.
 - **The reference builder distinguishes the three kinds**, pinned in the `drawlist/` golden. scav cannot mandate what a custom builder draws (§2, §3).
@@ -933,7 +943,7 @@ A versioned, hashed artifact (§6), so it needs a field list rather than thirtee
 
 | Group | Fields |
 |---|---|
-| geometry | `pad`, `grid_subdiv` (16) |
+| geometry | `pad` |
 | type | `font_size_grid`, `line_height_k_num`/`_k_den` (`k_den >= 1`) |
 | pseudostate sizes | per-`StateKind` min extent. `fork`/`join` are wide-and-thin boxes; nothing scales with arity (§7.2) |
 | packing | `dar_num`/`dar_den` (each in `[1, 2^10]`), `trybox`, SM tiebreak order |
@@ -1076,9 +1086,11 @@ datablock  := '{' [ entry ( ',' entry )* [ ',' ] ] '}'
 entry      := ident [ '=' value ]
 value      := string | '[' [ string ( ',' string )* [ ',' ] ] ']'
 endpoint   := '*' | path
-path       := ident ( '/' ident )*
+path       := seg ( '/' seg )*
+seg        := ident [ ':' ( ident | digit+ ) ]   -- submachine qualifier, §9
 key        := ident [ ':' ident ]
 ident      := [A-Za-z_][A-Za-z0-9_]*
+digit      := [0-9]
 string     := '"' char* '"' | '"""' rawchar* '"""'
 state_kind := 'normal'|'choice'|'junction'|'fork'|'join'|'history'|'deephistory'
 trans_kind := 'external'|'internal'|'local'
