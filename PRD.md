@@ -241,7 +241,7 @@ Odd and prime thread counts are mandatory — they expose reduction-shape bugs p
 - Fixed iteration counts. Every retry loop states its cap, its integer increment schedule, its subject order, and its terminal diagnostic.
 - Diagnostics are collected per shard, concatenated in shard order, then sorted by `(code, subject_kind, subject_index)`. They are part of the golden artifact. **A diagnostic carries nothing but that triple** — source file, line, column, and the offending text are all derivable by walking to the statement's `src` span (§7), so no layer has to thread positions through its call stack.
 - **Text is normalized at parse**: LF-only, BOM stripped, NFC. Ship `.gitattributes` with `*.scav -text`. Without this, `core.autocrlf` on Windows and NFD on macOS change the string pool — same commit, different hash. NFC needs a table: it is a **P0** dependency.
-- Threading via a shim over pthreads / Win32 / emscripten-pthreads / **null (inline)**. Not C11 `<threads.h>`. The null backend makes WASI and the matrix work.
+- Threading via a shim over pthreads / Win32 / **null (inline)**. Not C11 `<threads.h>`. The null backend makes WASI and the matrix work.
 
 **Banned constructs.** Unlike §4's discouraged list, these are correctness bans with no escape hatch — each is a documented cross-platform divergence, not a readability preference:
 
@@ -1080,9 +1080,13 @@ endpoint   := '*' | path
 path       := ident ( '/' ident )*
 key        := ident [ ':' ident ]
 ident      := [A-Za-z_][A-Za-z0-9_]*
+string     := '"' char* '"' | '"""' rawchar* '"""'
 state_kind := 'normal'|'choice'|'junction'|'fork'|'join'|'history'|'deephistory'
 trans_kind := 'external'|'internal'|'local'
+comment    := '//' <to end of line>          -- trivia; lexed, not parsed
 ```
+
+`//` to end of line is the only comment form — no block comments, so there is no nesting rule and no unterminated-comment failure mode, and the printer's position classification (leading / trailing / own-line) stays a line-relative question.
 
 ```
 chart eg91 "EG91 modem driver" {
