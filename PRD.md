@@ -263,11 +263,9 @@ Odd and prime thread counts are mandatory — they expose reduction-shape bugs p
 
 C++20's P0907 fixed two's-complement *representation* but kept signed overflow UB, and optimizers exploit it. Do not use `-fwrapv` — MSVC has no equivalent, so it would introduce a platform semantic difference. Prove no overflow (§11.2), net it with UBSan.
 
-**Scope of this section: anything that can reach layout geometry or rendered output.** A structure that only ferries data inside one call — never iterated, never hashed into output, never consulted by layout — is outside it. `std::unordered_map` is the right choice for such a case: flat, fast, and deterministic *by usage*, because a key lookup has no order and the hash value never escapes as a bucket index.
+**Scope of this section: anything that can reach layout geometry or rendered output.** A structure that only ferries data inside one call is outside it, and `std::unordered_map` is the right choice there — deterministic *by usage*, because a key lookup has no order and the hash value never escapes as a bucket index. Enforce that structurally: `lookup_map<K,V>` exposes `find`/`at`/`insert` and **no `begin()`/`end()`**, so "never iterated" is a compile error rather than a review comment.
 
-Enforce that structurally rather than by review: wrap it in a `lookup_map<K,V>` that exposes `find`/`at`/`insert` and **no `begin()`/`end()`**. Then "never iterated" is a compile error rather than a convention — making the wrong thing a compile error rather than a review comment.
-
-**Golden hash.** Layout is a pure function of `(model, spaces, profile)` (§11.11), so there is nothing to qualify. Split into a **structural hash** (ranks, orders, port assignments, bend sequences) and a **coordinate hash**, so a translation-only change is a reviewable diff instead of a global reflow. Hashed inputs: font identity and version, profile id, packer choice, router name and version, **and the space-request columns** — layout is a pure function of those, so goldens are reproducible only against a stated measurement policy. The corpus goldens use the reference builder's.
+**Golden hash.** Split into a **structural hash** (ranks, orders, port assignments, bend sequences) and a **coordinate hash**, so a translation-only change is a reviewable diff instead of a global reflow. Hashed inputs: font identity and version, profile id, packer choice, router name and version, **and the space-request columns** — a golden is reproducible only against a stated measurement policy, and the corpus goldens use the reference builder's.
 
 ## 7. Data model
 
