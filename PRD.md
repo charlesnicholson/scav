@@ -518,7 +518,7 @@ Reject with a diagnostic, never clamp. Unbounded `int32_t` overflows §11.4's bo
 struct Placed { int32_t x, y, w, h; };   // root-absolute; w/h may exceed the request
 ```
 
-**The app draws its title, badges, and compartments wherever it likes inside `content_before`. Layout never learns what a title is.**
+**The app draws its title, badges, and compartments wherever it likes inside the `scav.geom.state_before` rect** (§11.7a) — the space its own `h_before` reserved. Layout never learns what a title is.
 
 ```cpp
 // before layout — the app measures and sums; composition is app-side.
@@ -805,8 +805,8 @@ This list *is* the layout output ABI — there is no bespoke result type (§16) 
 | Column | Parallel to | Holds |
 |---|---|---|
 | `scav.geom.state` | `StateId` | box rect |
-| `scav.geom.state_before` | `StateId` | `content_before` rect |
-| `scav.geom.state_after` | `StateId` | `content_after` rect |
+| `scav.geom.state_before` | `StateId` | the rect `h_before` reserved (§8.1) |
+| `scav.geom.state_after` | `StateId` | the rect `h_after` reserved |
 | `scav.geom.sub` | `SubmachineId` | submachine rect — needed for dividers and titles |
 | `scav.geom.route` | `TransId` | `Span` into `scav.geom.point` |
 | `scav.geom.point` | point ordinal | `{int32 x, y}` |
@@ -927,7 +927,7 @@ Consequences:
 
 - **Phase 0 (§11.1) suppresses the source-boundary split** for `internal` and `local`. One fewer segment, one fewer port. The derived boundary-crossing count (§7) must reflect this, or `w_len`'s per-crossing multiplier (§11.6) miscounts.
 - **Tier 0 (§11.6) carve-out:** an edge may occupy the interior of a state whose border it does not cross, and **only** that state. Every other state and submachine rectangle remains an obstacle.
-- **Internal self-loops are the app's, end to end.** The app sums the band it needs into `h_before`/`h_after` and its builder draws the glyphs inside the returned `content_before`/`content_after` rect. There is no route, so `PathBox`/`PathClear`/`min_len` do not apply and the router is not involved. Layout sees only two integers.
+- **Internal self-loops are the app's, end to end.** The app sums the band it needs into `h_before`/`h_after` and its builder draws the glyphs inside the returned `scav.geom.state_before`/`_after` rect. There is no route, so `PathBox`/`PathClear`/`min_len` do not apply and the router is not involved. Layout sees only two integers.
 - **The reference builder distinguishes the three kinds**, pinned in the `drawlist/` golden. scav cannot mandate what a custom builder draws (§2, §3).
 
 ### 11.15 The profile
@@ -1175,7 +1175,7 @@ typedef struct { int32_t x, y, w, h; } scav_rect;   // also the Placed type (§8
 typedef scav_rect scav_placed;
 ```
 
-**Handles: four, each with a create and a destroy.** `scav_chart` (the model), `scav_load` (a multi-document load session, §16.2), `scav_metrics` (font tables), `scav_images` (the raster registry a backend reads). Destroy is idempotent on `NULL`; a `scav_chart` outlives every `scav_span` handed out from it, and nothing else owns model memory. `scav_metrics_create(const scav_byte* ttf, uint32_t len, scav_metrics** out)` — the bundled font is embedded, so `NULL` selects it. `scav_metrics` is immutable after create, so it is shared across threads without locking; the other three are single-threaded-per-instance, and any number of instances may be used concurrently. There is no library-global state and no init call.
+**Handles: five, each with a create and a destroy.** `scav_chart` (the model), `scav_load` (a multi-document load session, §16.2), `scav_metrics` (font tables), `scav_images` (the raster registry a backend reads), and `scav_drawlist` — which exists because `DrawList` is five `std::` containers (§12) and §16.1 requires the reference builder and SVG backend to be reachable from a binding. Its arrays are read out with the same span accessors as a column. Destroy is idempotent on `NULL`; a `scav_chart` outlives every `scav_span` handed out from it, and nothing else owns model memory. `scav_metrics_create(const scav_byte* ttf, uint32_t len, scav_metrics** out)` — the bundled font is embedded, so `NULL` selects it. `scav_metrics` is immutable after create, so it is shared across threads without locking; the other three are single-threaded-per-instance, and any number of instances may be used concurrently. There is no library-global state and no init call.
 
 **The profile reaches layout inside `scav_layout_opts`**, as a `scav_profile` POD by value plus the `scav_router_id` — not a handle, not a file path, so its bytes hash into the golden (§6) directly. `scav_profile_named(const char*, scav_profile* out)` fills it from a shipped profile; `scav_profile_validate` is called by `scav_layout_run` regardless (§11.15).
 
@@ -1203,7 +1203,17 @@ scav_result scav_image_register(scav_images*, const char* id, const scav_byte*, 
 scav_result scav_router_by_name(const scav_byte* name, uint32_t len, scav_router_id* out);
 ```
 
-`scav_spaces` is the three §8.1 tables as parallel base pointers plus counts, so an app fills its own arrays and passes them; `scav_layout_opts` is `{scav_profile, scav_router_id, uint32_t threads}`, where `threads` affects scheduling only (§6).
+```c
+typedef struct {                    // the app owns every array; scav only reads
+  const scav_box_space*  box_state;   uint32_t n_box_state;    // parallel to states
+  const scav_box_space*  box_sub;     uint32_t n_box_sub;      // parallel to submachines
+  const scav_path_clear* path_clear;  uint32_t n_path_clear;   // parallel to transitions
+  const scav_path_box*   path_box;    uint32_t n_path_box;     // 0..N per transition
+} scav_spaces;
+typedef struct { scav_profile profile; scav_router_id router; uint32_t threads; } scav_layout_opts;
+```
+
+`threads` affects scheduling only (§6). `scav_profile` is the §11.15 field list as a flat POD of `int32_t`.
 
 **No bespoke layout-result type.** Geometry is columns (§11.7a); edge polylines are a `Span` into a points column, already the model's idiom. `Placed[]` stays an out-param only because `PathBox` is 0..N per transition and cannot be a dense per-entity column.
 
