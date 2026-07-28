@@ -1071,9 +1071,9 @@ chart      := 'chart' ident [ string ] block
 block      := '{' [ item ( ',' item )* [ ',' ] ] '}'
 item       := include | state | submachine | trans | attr
 include    := 'include' string 'as' ident [ 'hash' string ]
-state      := 'state' ident [ 'kind' state_kind ] [ string ] [ block ]
-submachine := 'submachine' [ ident ] [ string ] block
-trans      := 'trans' [ trans_kind ] endpoint '->' endpoint [ string ] [ block ]
+state      := ('state'|'s') ident [ state_kind ] [ string ] [ block ]
+submachine := ('submachine'|'m') [ ident ] [ string ] block
+trans      := ('trans'|'t') [ trans_kind ] endpoint '->' endpoint [ string ] [ block ]
 attr       := '@' key [ '=' value ] | '@' ident datablock
 datablock  := '{' [ entry ( ',' entry )* [ ',' ] ] '}'
 entry      := ident [ '=' value ]
@@ -1098,7 +1098,7 @@ chart eg91 "EG91 modem driver" {
 
   state Off "modem powered down",
   state Booting,
-  state PreConfig kind choice,
+  state PreConfig choice,
 
   trans * -> Off,
   trans Off -> Booting "EG91_POWER_ON",
@@ -1130,17 +1130,22 @@ chart eg91 "EG91 modem driver" {
 - **`=` anchors key to value, `[...]` delimits lists** — variadic values without delimiters are LL(1) and unreadable.
 - **Positional string is the label**; everything else goes in the block.
 - **`*` is initial or terminal by position** (source or target). Bare, not `[*]`, keeping `[` for lists.
-- **`kind` leads a transition**, because §11.14 makes it behaviourally load-bearing.
+- **A kind is a bare word in both `state` and `trans`.** `state PreConfig choice`, not `state PreConfig kind choice` — the name slot is mandatory and first, so a bare ident after it can only be a kind, and the two statements then spell the same concept the same way. This is also why `kind` is not a reserved word.
+- **`s`, `m`, `t` are one-letter aliases for `state`, `submachine`, `trans`** — authoring convenience, for typing and for packing a dense chart while drafting. They are recognized only in statement-leading position, so they are *not* reserved and `state s` is a normal state named `s`. **Canonical form always emits the long spelling** (below), so an alias survives until the next `scav fmt` and never appears in a committed file. No alias for `chart` or `include`: once and rarely per document. Drafting a region on one line stays legible:
+  ```
+  m main { s Idle, s Ready, t * -> Idle, t internal Ready -> Ready "AT_ERR", }
+  ```
 - **Newlines carry nothing** — whitespace-insensitive outside strings, whole file legal on one line. Line breaking is the printer's, which is what makes byte-identical output achievable.
 
-Reserved: `chart` `include` `state` `submachine` `trans` `kind` `external` `internal` `local`. Everything else is contextual, so a state may be named `choice`, `history`, `as`, or `hash`.
+Reserved: `chart` `include` `state` `submachine` `trans` `external` `internal` `local`. Everything else is contextual, so a state may be named `choice`, `history`, `as`, `hash`, `kind`, `s`, `m`, or `t`.
 
 **Strings.** `"..."` takes `\\ \" \n \t \uXXXX`. `"""..."""` is raw with no escapes — which is its purpose, and why it cannot contain `"""`. Indentation is stripped to the closing delimiter's column; a line indented *less* than the closing delimiter is an error, not silently clamped.
 
-**Canonical form.** A model always emits byte-identical text. Six rules, because each is a place the format can say the same thing twice:
+**Canonical form.** A model always emits byte-identical text. Seven rules, because each is a place the format can say the same thing twice:
 
 | | Canonical |
 |---|---|
+| keyword spelling | long form always — `s`/`m`/`t` normalize to `state`/`submachine`/`trans` |
 | repeated key vs list | list form whenever count > 1 |
 | `@k` vs `@k = "true"` | flag form iff the value is exactly `"true"` |
 | `@ns:k` vs `@ns { k }` | block form iff ≥2 keys share the namespace |
@@ -1213,7 +1218,7 @@ typedef struct {                    // the app owns every array; scav only reads
 typedef struct { scav_profile profile; scav_router_id router; uint32_t threads; } scav_layout_opts;
 ```
 
-`threads` affects scheduling only (§6). `scav_profile` is the §11.15 field list as a flat POD of `int32_t`.
+`scav_box_space`, `scav_path_clear`, and `scav_path_box` are the ABI spellings of §8.1's structs, field-for-field. `threads` affects scheduling only (§6). `scav_profile` is the §11.15 field list as a flat POD of `int32_t`.
 
 **No bespoke layout-result type.** Geometry is columns (§11.7a); edge polylines are a `Span` into a points column, already the model's idiom. `Placed[]` stays an out-param only because `PathBox` is 0..N per transition and cannot be a dense per-entity column.
 
@@ -1332,7 +1337,7 @@ Where a phase states production LOC, multiply by 1.5–2 for the mandated test c
 | event lists, `note on X`, handler markers, legacy mode | extension columns and attributes, §8 |
 | direction hints (`-u-`, `-d-`) | `scav:` layout hints, §14 |
 
-**No core field needs adding**, and specifically **no display-name-vs-identifier split is required.** libhsm's `state on_idle as "Idle"` exists to dodge C identifier collisions between same-named states in different submachines; scav addresses by path (`On:main/Idle` vs `On:strays/Idle`), so the collision does not arise. Codegen identifier uniqueness is a `libhsm:ident` attribute owned by that backend. Do not add a second name field to `State` speculatively.
+**No display-name-vs-identifier split is required.** libhsm's `state on_idle as "Idle"` exists to dodge C identifier collisions between same-named states in different submachines; scav addresses by path (`On:main/Idle` vs `On:strays/Idle`), so the collision does not arise. A `.puml` state description lands in `State.label` (§7), which is a *description*, not a second identifier — do not add one. Codegen identifier uniqueness is a `libhsm:ident` attribute owned by that backend.
 
 When written, the importer should be Python against `fi.hsm`'s existing lexer rather than a C++ PlantUML parser — throwaway code, runs once per chart, and `fi.hsm` already encodes the accepted grammar subset including the non-obvious rules (column-0-only comments, `note on X : handler`, legacy mode).
 
