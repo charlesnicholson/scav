@@ -365,7 +365,7 @@ struct State {
   Span          submachines; // -> submachine_ids
   Span          attrs;
   DocId         doc;         // provenance (§9)
-  uint32_t      gen;         // 0 = tombstone
+  uint32_t      live;        // 0 = tombstone; see §7.3
 };
 struct Submachine {
   StateId       owner;       // kInvalid for a document root
@@ -375,7 +375,7 @@ struct Submachine {
   Span          children;    // -> state_ids, document order
   Span          attrs;
   DocId         doc;
-  uint32_t      gen;
+  uint32_t      live;
 };
 struct Transition {
   StateId       src, dst;
@@ -383,7 +383,7 @@ struct Transition {
   StrRef        label;       // opaque; see §7.1
   Span          attrs;
   DocId         doc;
-  uint32_t      gen;
+  uint32_t      live;
 };
 struct Include  { StrRef path, alias; DocId target; StateId host; };  // host: the synthesized alias state
 struct Attr     { AttrKeyId key; StrRef value; };
@@ -434,7 +434,7 @@ struct Chart {
 
 **A model is one document network rooted at one document.** Unrelated charts go in separate models; nothing structurally prevents intermingling, and the result is meaningless.
 
-**Ids are append-only with tombstones.** `StateId` is ordinal *and* array index, so compaction invalidates every app-side column keyed by it. Deletion tombstones (`gen = 0`), ids never reused, **all columns tombstone in lockstep**. Compaction is explicit and an output change.
+**Ids are append-only with tombstones.** `StateId` is ordinal *and* array index, so compaction invalidates every app-side column keyed by it. Deletion tombstones (`live = 0`), ids never reused, **all columns tombstone in lockstep**. Compaction is explicit and an output change. Named `live` rather than `gen` because it is a liveness flag and nothing more: ids are never reused, so there is no generation to validate, and compaction renumbers wholesale so a counter would not help there either. `scav.geom.gen` (§13) is an unrelated chart-level counter — different concept, and it does not share the word.
 
 **Three column classes, not two.** Conflating the last two is a licensed determinism break, so they are named separately:
 
@@ -473,6 +473,29 @@ Fork/join is the case that most tempts scav into having an opinion, so the bound
 Bar orientation is also not scav's: an app wanting a vertical bar requests a tall narrow `BoxSpace`.
 
 **Validation is structural only** (§10): in/out degree per kind. No check that branches land in distinct submachines, no reachability, no concurrency reasoning — those are dialect rules and belong to a plugin.
+
+### 7.3 Relationships between columns
+
+Columns are never all 1:1, so "index into the other array" is only one of five patterns. Every relationship in the model is one of these, and **no new mechanism is needed for any of them**:
+
+| Kind | Mechanism | Example |
+|---|---|---|
+| 1:1 | parallel arrays, index directly | `scav.geom.state` ↔ `StateId` |
+| N:1 | the target's id in the child row | `Transition.src`, `PathBox.subject`, `State.doc` |
+| 1:N, ordered | a `Span` into a shared id array | `Submachine.children` -> `state_ids` |
+| **M:N** | **a junction row that is itself an entity** | `Transition` between states |
+| the inverse of any of the above | derived-scratch, rebuilt on demand | state -> in/out edges |
+
+**M:N is never stored as such.** "A state has N transitions and a transition has two states" is M:N-via-junction-row, and the junction row already exists as a first-class entity — `Transition` *is* the join table. The state->transitions direction is not stored at all: it is a derived-scratch inversion (§7), a counting sort over `transitions`. Rejected alternatives, so they are not re-proposed:
+
+- **Hashed GUIDs as cross-references.** 16 bytes against 4, and a hash lookup on every dereference in layout's hot path instead of an array index — plus §6 forbids a hash value escaping. §19's open question about durable GUIDs is about *cross-branch rename identity*, a version-control problem, not in-model referencing. Do not conflate them.
+- **Per-column tombstones.** Strictly worse: it makes "`states[i]` alive but its geometry dead" representable, so every reader checks N flags instead of one. Liveness belongs to the **entity**, and columns parallel to that entity inherit it. That is what lockstep buys.
+
+**Walking a span must check liveness.** A tombstoned state keeps its slot in its parent's `children` span, so a span walk yields dead ids and every consumer skips `live == 0` — the same rule as a full array scan, and it applies to the more common access pattern. Compacting the span instead would invalidate every other span into that array.
+
+**Spans require contiguity, so they are rebuilt rather than patched.** Appending a child to any submachine but the last shifts the shared id array. Invisible while the builder is append-only (P1) and squarely a P12 problem. The answer is `O(n)` rebuild, not a chunked or linked span: `state_ids` at the 2k-state target is ~8KB, so a full rebuild per edit is microseconds, and an indirection that survives mutation would cost every read forever to save that.
+
+**Derived span targets carry no liveness at all.** `scav.geom.point` and `scav.geom.portslot` are parallel to nothing that has a `live` field; layout rebuilds them wholesale, so there is no tombstone to check and no lockstep to maintain. Tombstones exist only for authored entities.
 
 ## 8. Extensibility
 
@@ -573,7 +596,7 @@ struct Placed { int32_t x, y, w, h; };   // root-absolute; w/h may exceed the re
 // before layout — the app measures and sums; composition is app-side.
 // Free functions on POD, per §4: rows are data, behaviour is not on the row.
 for (uint32_t i = 0; i < chart.states.size(); ++i) {
-  if (!alive(chart.states[i])) { continue; }                    // tombstone (§7)
+  if (!chart.states[i].live) { continue; }                       // tombstone (§7.3)
   Extent const title = measure_text(m, str(chart, chart.states[i].name), fs);
   Extent const badge = libhsm_wants_badge(chart, i) ? Extent{14, 14} : Extent{0, 0};
   Extent const body  = scxml_onentry_extent(chart, i, m);       // {0,0} if absent
