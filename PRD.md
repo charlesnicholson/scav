@@ -328,8 +328,9 @@ C++20's P0907 fixed two's-complement *representation* but kept signed overflow U
 **The point is end-to-end traceability, and that is the real payoff of columnar storage** — ahead of serialization mechanics, determinism, or cache behaviour. The model is the single place to look. Any function anywhere in the pipeline can walk from a rendered primitive back to the source bytes that produced it, by following columns:
 
 ```
-Prim.origin  ->  entity  ->  DocId + Statement  ->  source span  ->  the authored text
-     (§12)                        (below)              (below)
+Prim.origin  ->  entity  ->  StmtId  ->  Statement.src  ->  the authored bytes
+     (§12)                                    |
+                 entity  ->  InstId  ->  Include  ->  which instantiation, and its host
 ```
 
 No context object, no side table, no callback. That is why source documents live in columns rather than being discarded at parse time.
@@ -337,7 +338,9 @@ No context object, no side table, no callback. That is why source documents live
 **Terminology: `state` and `submachine`**, never "region". A composite state holds one or more submachines; more than one makes it concurrent. Applies to the ERD, ABI, diagnostics, and format.
 
 ```cpp
-struct DocId    { uint32_t v; };   // include-instance provenance, not addressing (§9)
+struct DocId    { uint32_t v; };   // a parsed file
+struct InstId   { uint32_t v; };   // an include instantiation = index into `includes`
+struct StmtId   { uint32_t v; };   // an authored statement
 struct StateId  { uint32_t v; };
 struct SubmachineId { uint32_t v; };
 struct TransId  { uint32_t v; };
@@ -364,7 +367,8 @@ struct State {
   StateKind     kind;
   Span          submachines; // -> submachine_ids
   Span          attrs;
-  DocId         doc;         // provenance (§9)
+  StmtId        stmt;        // the statement that declared it (§9)
+  InstId        inst;        // kInvalid in the root document
   uint32_t      live;        // 0 = tombstone; see §7.3
 };
 struct Submachine {
@@ -374,7 +378,8 @@ struct Submachine {
   StrRef        label;
   Span          children;    // -> state_ids, document order
   Span          attrs;
-  DocId         doc;
+  StmtId        stmt;
+  InstId        inst;
   uint32_t      live;
 };
 struct Transition {
@@ -382,21 +387,26 @@ struct Transition {
   TransKind     kind;
   StrRef        label;       // opaque; see §7.1
   Span          attrs;
-  DocId         doc;
+  StmtId        stmt;
+  InstId        inst;
   uint32_t      live;
 };
-struct Include  { StrRef path, alias; DocId target; StateId host; };  // host: the synthesized alias state
+struct Include  {            // one row per instantiation; its ordinal is the InstId
+  StrRef  alias;
+  DocId   target;            // the file it instantiates
+  StateId host;              // the alias state it synthesizes; never kInvalid
+  StmtId  stmt;
+};
 struct Attr     { AttrKeyId key; StrRef value; };
 
-struct Document {            // one per loaded document
-  StrRef   path, alias;
+struct Document {            // one per distinct *file*, parsed once (P0)
+  StrRef   path;
   Span     text;             // -> src_bytes
   Span     statements;       // -> stmts, authored source order
-  Span     includes;         // -> includes
 };
-struct Statement {           // one per authored construct
+struct Statement {           // one per authored construct, shared by every instantiation
   ElemKind kind;
-  uint32_t ordinal;          // the entity it declares
+  DocId    doc;
   Span     src;              // -> src_bytes; valid iff unmutated since load
   Span     comments;         // trivia: leading, trailing, own-line
 };
@@ -424,11 +434,11 @@ struct Chart {
 // No Project type. Documents are rows in one model, not charts to be merged.
 ```
 
-**All documents share the same arrays**, each row tagged with its `DocId` — so no flattening step and no second model shape (§9).
+**All documents share the same arrays**, each entity tagged with the statement that declared it and the instantiation it belongs to — so no flattening step and no second model shape (§9).
 
 `src_bytes` is a **separate pool from `strings`**: one is interned and canonically re-sorted before hashing, the other is never touched after load. "Verbatim" means post-normalization — §6 normalizes at parse (LF, no BOM, NFC), and `Statement.src` offsets index the **normalized** bytes, so reported columns are stable across platforms.
 
-**Load-established, not serialized, not hashed.** Writing a document *produces* text; the format hash covers canonical output, not the possibly-non-canonical bytes loaded. `DocId` is implied by which file an entity is written into.
+**Load-established, not serialized, not hashed.** Writing a document *produces* text; the format hash covers canonical output, not the possibly-non-canonical bytes loaded. Provenance is implied by which file an entity is written into.
 
 **`Statement.src` is valid iff the statement is unmutated since load.** Mutation clears it, so source mapping degrades gracefully rather than lying.
 
@@ -483,10 +493,10 @@ Columns are never all 1:1, so "index into the other array" is only one of five p
 | 1:1 | parallel arrays, index directly | `scav.geom.state` ↔ `StateId` |
 | N:1 | the target's id in the child row | `Transition.src`, `PathBox.subject`, `State.doc` |
 | 1:N, ordered | a `Span` into a shared id array | `Submachine.children` -> `state_ids` |
-| **M:N** | **a junction row that is itself an entity** | `Transition` between states |
+| **M:N** | **a junction row that is itself an entity** | `Transition` between states; an entity between its `Statement` and its `Include` (§9) |
 | the inverse of any of the above | derived-scratch, rebuilt on demand | state -> in/out edges |
 
-**M:N is never stored as such.** "A state has N transitions and a transition has two states" is M:N-via-junction-row, and the junction row already exists as a first-class entity — `Transition` *is* the join table. The state->transitions direction is not stored at all: it is a derived-scratch inversion (§7), a counting sort over `transitions`. Rejected alternatives, so they are not re-proposed:
+**M:N is never stored as such.** "A state has N transitions and a transition has two states" is M:N-via-junction-row, and the junction row already exists as a first-class entity — `Transition` *is* the join table. Document provenance is the second instance of the pattern and reads the same way: statements and include instantiations are M:N, and the entity row is the junction that carries one key from each side (§9). The state->transitions direction is not stored at all: it is a derived-scratch inversion (§7), a counting sort over `transitions`. Rejected alternatives, so they are not re-proposed:
 
 - **Hashed GUIDs as cross-references.** 16 bytes against 4, and a hash lookup on every dereference in layout's hot path instead of an array index — plus §6 forbids a hash value escaping. §19's open question about durable GUIDs is about *cross-branch rename identity*, a version-control problem, not in-model referencing. Do not conflate them.
 - **Per-column tombstones.** Strictly worse: it makes "`states[i]` alive but its geometry dead" representable, so every reader checks N flags instead of one. Liveness belongs to the **entity**, and columns parallel to that entity inherit it. That is what lockstep buys.
@@ -694,12 +704,13 @@ wifi/On/Ready        cross-document, via include alias
 - **Unnamed pseudostates get synthetic stable names** for addressing: `$initial`, `$final`, `$history`, ordinal-suffixed for uniqueness within a submachine, and exempt from §10's duplicate-name check. These are an API and diagnostic spelling only — the grammar's `ident` admits no `$`, and the format reaches them via `*` (§15). A pseudostate an author needs to name is named, like `PreConfig kind choice`.
 - **An include synthesizes one state, named for its alias**, in the submachine where the `include` statement appears; that state's `submachines` span gains the included document's root submachine. A submachine's children are states, so this is the only shape that type-checks — an included root is a submachine and has nowhere else to attach. It also makes `wifi/Up/Connected` an ordinary path: `wifi` *is* a state.
 - **Resolution links; it does not flatten** (§7). Containment crosses documents because `State.submachines` holds global ids, so layout sees one containment tree with no transformation having occurred — no cross-document LCA, no splice pass, no project handle.
-- **Provenance is a field, not a computed column.** `DocId` on each row records the **include instance** — instance rather than path, so including one document twice yields two distinguishable sets. A renderer tinting sub-document submachines reads it; layout ignores it.
+- **Provenance is two fields, not a computed column, because it is M:N** (§7.3). One statement declares N entities when its file is included N times; one instantiation contains the entities of N statements. So the entity row is the junction and carries both keys: `StmtId` says which authored construct produced it, `InstId` says which instantiation it belongs to. A renderer tinting sub-document submachines reads `inst`; a diagnostic or an editor reads `stmt`; layout ignores both.
+- **Statements are per file, entities are per instantiation.** The parser produces `Document` and `Statement` rows once per distinct file (P0); the loader instantiates entities per include (P2). Including a file twice therefore duplicates entities — which is correct, they lay out separately — but never duplicates source bytes or statements.
 - Transition endpoints are plain `StateId`s, because ids were global from the start.
 - **An include alias is a bare path prefix**, not a sigil, because it is a state name. Alias uniqueness is therefore §10's ordinary duplicate-name check rather than a second rule, and duplicate top-level names in two documents cannot collide.
 - **No integrity attestation.** An include names a path, not a digest: a `.scav` document network is source code under the same version control as the code it describes, so pinning content hashes would duplicate what the VCS already guarantees while adding a second thing to keep current. Fetching a document over a network is the app's policy (§16.2) and so is verifying it.
 - Include cycles are a hard error.
-- **Instantiating one document twice means two include statements**, two aliases, and two disjoint sets of rows distinguished by `DocId`. Renaming that file then patches one path string per instantiation. Accepted: a **global include section with a reference sigil was considered and rejected** — a sigil names a document, but an endpoint must name an instance, so the two coincide only at one instantiation and above it the section needs instance names anyway. It would also still require a statement at the host to say where the subdocument attaches, and it would mark a cross-document distinction the model does not have, since an alias is an ordinary state.
+- **Instantiating one document twice means two include statements**, two aliases, and two disjoint sets of entity rows distinguished by `InstId`. Renaming that file then patches one path string per instantiation. Accepted: a **global include section with a reference sigil was considered and rejected** — a sigil names a document, but an endpoint must name an instance, so the two coincide only at one instantiation and above it the section needs instance names anyway. It would also still require a statement at the host to say where the subdocument attaches, and it would mark a cross-document distinction the model does not have, since an alias is an ordinary state.
 - Relative hints travel with an included chart; **absolute pins do not** — a pin is authored against a document's own frame and is meaningless in a host frame.
 - Resolution is a linear scan per path level (document order forbids sorting `state_ids` by name) or via the derived sorted index.
 - Paths break on rename. Renaming is a **semantic editor** operation — the editor holds the document network and rewrites every reference — not a CLI verb. **[OPEN]** whether elements also need durable GUIDs, which paths cannot supply across branches: two branches renaming the same state differently is unreconcilable when identity *is* the name.
@@ -1330,10 +1341,12 @@ scav_result scav_load_pending(const scav_load*, const scav_pending** out, uint32
 scav_result scav_load_finish(scav_load*, scav_chart** out);
 void        scav_load_destroy(scav_load*);
 
-typedef uint32_t scav_doc_id;              // the ABI spelling of DocId (§7)
+typedef uint32_t scav_doc_id;              // ABI spellings of DocId / InstId / StmtId (§7)
+typedef uint32_t scav_inst_id;
+typedef uint32_t scav_stmt_id;
 struct scav_pending {                      // 12 bytes, no padding
   scav_span   path;                        // into the load session's own byte pool
-  scav_doc_id from;
+  scav_inst_id from;                       // the instantiation that requested it
 };
 scav_result scav_load_bytes(const scav_load*, scav_span, const scav_byte** out, uint32_t* len);
 ```
@@ -1390,7 +1403,7 @@ Where a phase states production LOC, multiply by 1.5–2 for the mandated test c
 **P1 — model spine.** Entity arrays, ids as ordinals with tombstones, spans, extension columns and `ColumnDesc`, append-only builder API, structural validation (§10). Lowering from statements to entities. Determinism discipline (§6) is in force from the first commit; it cannot be retrofitted.
 *Exit:* build, validate, and walk a depth-16 / 2k-state chart from code with no text involved; then the same chart via P0's parser, structurally identical.
 
-**P2 — the loader.** The iterative load session (§16.2): pending list, app-supplied bytes, alias-state synthesis (§9), cross-document path resolution, cycle detection. Separate system from the parser — no file I/O, no callbacks. `Include.target` and `DocId` are the loader's; the parser fills `path` and `alias` and stops.
+**P2 — the loader.** The iterative load session (§16.2): pending list, app-supplied bytes, alias-state synthesis (§9), cross-document path resolution, cycle detection. Separate system from the parser — no file I/O, no callbacks. `Include.target`, `InstId`, and every entity row are the loader's; the parser produces `Document`, `Statement`, and `src_bytes` and stops (§7.3).
 *Exit:* one 3-document network resolved **three ways** — from memory, through the CLI over a filesystem, and from Python/ctypes faking a network fetch — yielding the same chart and the same hash.
 
 **P3 — printer and ABI.** Comment-preserving canonical printer and the seven canonical rules (§15), `scav fmt --check`, `scav deps`, `scav dump`; **handle lifecycle — create/destroy per handle, allocator injection, thread-safety per call (§16.1 blocks on it)**, ABI JSON extraction and its golden.
