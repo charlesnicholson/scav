@@ -94,9 +94,9 @@ Internally each library is built from per-subsystem CMake `OBJECT` libraries wit
 
 ### 3.2 The CLI
 
-**Its reason to exist is that core does no file I/O (§16.2).** Something has to be the reference host that drives the load session over a real filesystem — walk the pending list, read bytes, resolve includes, report a cycle with real paths — and P2's exit gate requires exactly that. Without it the load protocol is only ever exercised by tests holding byte buffers, which is where include-resolution bugs live.
+**Primary user is a build system, not a person.** Nobody types these in a loop; CI does — `render` in a docs pipeline, `fmt --check` and `check` as PR gates, `deps` so a stale diagram is impossible. That is the utility; the rest is that having a binary is nearly free once the library exists.
 
-**Primary user is a build system, not a person.** Nobody types these in a loop; CI does.
+It is also the end-to-end exercise of the load path over a real filesystem — pending list, real paths in diagnostics, a cycle reported against files rather than buffers — which is one of the three transports P2's exit gate requires (§16.2).
 
 | Verb | For |
 |---|---|
@@ -1328,9 +1328,11 @@ Editor commands do not cross the C boundary as objects; that layer's API is opco
 
 **One hazard:** Python makes §8.1's integer purity easy to violate (`/` yields float), so setters reject non-integers and range-check, and space-computation helpers live in the shared library. Handle lifecycle was the other, and §16 now specifies it; it remains a **P3** deliverable because a binding cannot be written without it.
 
-### 16.2 No file I/O in core
+### 16.2 Loading and parsing are separate systems
 
-**Core performs no file I/O.** It parses from a byte span; the application supplies bytes. This is required for the browser and for bindings, and it is good hygiene regardless.
+**Parsing takes a byte span. Acquiring those bytes is a different system.** Core may ship a helper that does both — and it does — but **no API forces a caller through a filesystem**, and no entry point that needs bytes will only accept a path. That is the invariant, not an abstinence from `fopen`: a browser host, a binding, a zip reader, and an editor holding unsaved buffers must all be first-class, and fusing the two systems is what would demote them.
+
+The two are separable in both directions. Parse bytes you got anywhere; drive the load session without parsing anything yet.
 
 Include resolution is therefore **iterative and data-driven, not a callback** — a load session accumulating documents and reporting what it still needs:
 
@@ -1340,6 +1342,10 @@ scav_result scav_load_add(scav_load*, const scav_byte*, uint32_t len, const char
 scav_result scav_load_pending(const scav_load*, const scav_pending** out, uint32_t* n);
 scav_result scav_load_finish(scav_load*, scav_chart** out);
 void        scav_load_destroy(scav_load*);
+
+// batteries, in core, written against the calls above and skippable in full:
+scav_result scav_read_file(const char* path, const scav_byte** out, uint32_t* len);
+scav_result scav_load_file(const char* path, scav_chart** out);
 
 typedef uint32_t scav_doc_id;              // ABI spellings of DocId / InstId / StmtId (§7)
 typedef uint32_t scav_inst_id;
@@ -1355,7 +1361,7 @@ scav_result scav_load_bytes(const scav_load*, scav_span, const scav_byte** out, 
 
 Works identically over a filesystem, HTTP, a zip, or memory, and preserves §16.1's no-callback property.
 
-**Nothing is hidden.** `scav_parse` on a byte span is always available and never bypassed. `scav_read_file` and `scav_load_file` compose it and are skippable in full — they ship in the CLI's own support code, not in `libscavcore`, which is what makes "core does no file I/O" a linkable fact rather than a convention. Same layering as the reference builder (§8.1.1): the functions that convert text into the columnar model are primitives, and the batteries sit on top.
+**Nothing is hidden, and nothing is mandatory.** `scav_parse` on a byte span and the session calls above are the primitives, always available and never bypassed internally. `scav_read_file` and `scav_load_file` ship in core, compose those primitives, and are skippable in full — `scav_load_file("root.scav", &chart)` is the one-liner most callers want, and it is implemented in terms of the API it wraps, with no private path. Same layering as the reference builder (§8.1.1): primitives below, batteries on top, and the batteries buy nothing you could not have written yourself. They use `<cstdio>`, since §4 rules out `<iostream>`.
 
 No stream type: a `.scav` file is kilobytes, so bytes are the simpler composition point. Revisit only if incremental parse becomes an editor-responsiveness requirement.
 
@@ -1366,7 +1372,7 @@ Not a v1 deliverable; what matters is that nothing precludes it. Four conditions
 | Condition | Status |
 |---|---|
 | single-threaded execution produces byte-identical output | **already required** (§6's null shim backend, in the matrix) |
-| core does no file I/O | **§16.2** |
+| every entry point accepts bytes, so nothing needs a filesystem | **§16.2** |
 | the font is embedded bytes, not a path | **§16.1** |
 | the viewer's platform layer is swappable | ImGui's own concern; it ships SDL and GLFW emscripten backends |
 
@@ -1403,7 +1409,7 @@ Where a phase states production LOC, multiply by 1.5–2 for the mandated test c
 **P1 — model spine.** Entity arrays, ids as ordinals with tombstones, spans, extension columns and `ColumnDesc`, append-only builder API, structural validation (§10). Lowering from statements to entities. Determinism discipline (§6) is in force from the first commit; it cannot be retrofitted.
 *Exit:* build, validate, and walk a depth-16 / 2k-state chart from code with no text involved; then the same chart via P0's parser, structurally identical.
 
-**P2 — the loader.** The iterative load session (§16.2): pending list, app-supplied bytes, alias-state synthesis (§9), cross-document path resolution, cycle detection. Separate system from the parser — no file I/O, no callbacks. `Include.target`, `InstId`, and every entity row are the loader's; the parser produces `Document`, `Statement`, and `src_bytes` and stops (§7.3).
+**P2 — the loader.** The iterative load session (§16.2): pending list, app-supplied bytes, alias-state synthesis (§9), cross-document path resolution, cycle detection. Separate system from the parser, and no callbacks (§16.2). Includes `scav_read_file`/`scav_load_file`, the composing helpers — written against the same public primitives, so they demonstrate the layering rather than shortcutting it. `Include.target`, `InstId`, and every entity row are the loader's; the parser produces `Document`, `Statement`, and `src_bytes` and stops (§7.3).
 *Exit:* one 3-document network resolved **three ways** — from memory, through the CLI over a filesystem, and from Python/ctypes faking a network fetch — yielding the same chart and the same hash.
 
 **P3 — printer and ABI.** Comment-preserving canonical printer and the seven canonical rules (§15), `scav fmt --check`, `scav deps`, `scav dump`; **handle lifecycle — create/destroy per handle, allocator injection, thread-safety per call (§16.1 blocks on it)**, ABI JSON extraction and its golden.
