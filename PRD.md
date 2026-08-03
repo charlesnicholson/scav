@@ -163,7 +163,9 @@ C++20, flat `extern "C"` API per layer.
 | Templates | **Function templates parameterized on a functor are encouraged** — see below. Generic containers of `T` are not needed (`std::vector` covers it), and type-level computation is discouraged. Concepts: none |
 | Containers | `std::vector`, `std::array`. Heap fine |
 | Invariant | **No pointer or reference between records.** Records link by ordinal. Algorithms may hold pointers while working |
-| Unavailable | RTTI, exceptions, modules, coroutines, `std::format`, `<iostream>`, `<regex>`, virtual inheritance. Enforced by build flags or by portability — not a style question |
+| Unavailable | RTTI, exceptions, modules, coroutines, `<regex>`, virtual inheritance. Enforced by build flags or by portability — not a style question |
+| `std::format` | Permitted, and preferred over stream formatting: default specifiers are locale-independent by design, and float conversion goes through shortest-round-trip rather than libm. Two conditions — format strings must be **literals**, since a `consteval`-checked literal turns a bad one into a compile error while `vformat` on a runtime string throws `format_error` into `-fno-exceptions`; and never `{:L}`, which opts back into the locale |
+| Streams | `<sstream>` for building strings is fine. What a **library** must not do is touch the global objects — `cout`, `cerr`, `cin` — because a library reports by returning data (§6's diagnostic triple), and because including `<iostream>` instantiates them with static constructors in every consumer. Apps and the CLI use them freely |
 | Discouraged | `<ranges>` and view pipelines · clever `<algorithm>` compositions · stateful classes · work in constructors · operator overloading beyond id comparison · SFINAE, CRTP, type-list computation · `auto` where the type isn't locally obvious. Usable with a comment saying why; the default answer is the plain loop |
 | Build | CMake + Ninja, toolchain pinned by envy — see §4.2 |
 
@@ -303,7 +305,7 @@ Odd and prime thread counts are mandatory — they expose reduction-shape bugs p
 | `<cmath>` in the core | libm differs across glibc/musl/Apple/UCRT. Integer helpers only: `isqrt` (floor), `ilog2 = bit_width(x)-1`, ratio compare by cross-multiplication |
 | Side effects in function arguments | Argument evaluation order is unspecified |
 | `memcmp`/`memcpy`-hashing a struct | Reads padding, whose values are unspecified |
-| Locale-aware compare, `setlocale` | Environment-dependent. Byte-wise only — Hebrew/Arabic therefore sort in codepoint order, a permanent accepted trade |
+| Locale-aware compare, `setlocale`, and locale-sensitive stream formatting | Environment-dependent: the same `<<` on the same integer differs under a non-classic locale, so a stream whose bytes reach output is `imbue`d with `std::locale::classic()` at construction or is not used for numbers at all. Collation is byte-wise only — Hebrew/Arabic therefore sort in codepoint order, a permanent accepted trade |
 | `directory_iterator` order | Unspecified. Sort collected paths byte-wise |
 | **Bitfields** | Allocation order, straddling, and padding are all implementation-defined. Use explicit masks on a fixed-width integer |
 | **`__int128`, `__builtin_*`, `#pragma pack`, attributes outside `[[...]]`** | Not standard C++, so they defeat the whole claim. §11.2's budget exists to keep degree-4 arithmetic — and therefore `int128` — off the table |
@@ -1361,7 +1363,7 @@ scav_result scav_load_bytes(const scav_load*, scav_span, const scav_byte** out, 
 
 Works identically over a filesystem, HTTP, a zip, or memory, and preserves §16.1's no-callback property.
 
-**Nothing is hidden, and nothing is mandatory.** `scav_parse` on a byte span and the session calls above are the primitives, always available and never bypassed internally. `scav_read_file` and `scav_load_file` ship in core, compose those primitives, and are skippable in full — `scav_load_file("root.scav", &chart)` is the one-liner most callers want, and it is implemented in terms of the API it wraps, with no private path. Same layering as the reference builder (§8.1.1): primitives below, batteries on top, and the batteries buy nothing you could not have written yourself. They use `<cstdio>`, since §4 rules out `<iostream>`.
+**Nothing is hidden, and nothing is mandatory.** `scav_parse` on a byte span and the session calls above are the primitives, always available and never bypassed internally. `scav_read_file` and `scav_load_file` ship in core, compose those primitives, and are skippable in full — `scav_load_file("root.scav", &chart)` is the one-liner most callers want, and it is implemented in terms of the API it wraps, with no private path. Same layering as the reference builder (§8.1.1): primitives below, batteries on top, and the batteries buy nothing you could not have written yourself. They use `<cstdio>` rather than an `ifstream`, to keep the global stream objects out of every consumer's static-init (§4) — a preference, not a portability constraint.
 
 No stream type: a `.scav` file is kilobytes, so bytes are the simpler composition point. Revisit only if incremental parse becomes an editor-responsiveness requirement.
 
