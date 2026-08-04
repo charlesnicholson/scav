@@ -66,13 +66,21 @@ function(scav_sanitizers_init)
   # argument is itself a warning.
   if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
     set(flags /Zi /Oy-)
+    target_link_options(scav_sanitizer INTERFACE /INCREMENTAL:NO)
     if(san STREQUAL "ASAN")
       list(APPEND flags /fsanitize=address)
+      if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        # cl embeds a defaultlib directive in the objects; clang-cl does not, so
+        # the runtime has to be named at link or every __asan_* is undefined.
+        target_link_options(scav_sanitizer INTERFACE /fsanitize=address)
+      endif()
     elseif(san STREQUAL "UBSAN")
-      list(APPEND flags -fsanitize=undefined -fno-sanitize-recover=all)
+      # Trap rather than diagnose: the diagnosing runtime is built against one CRT
+      # and mismatches ours at link. A trap needs no runtime, and a test that dies
+      # on undefined behaviour is what the row is for.
+      list(APPEND flags -fsanitize=undefined -fsanitize-trap=undefined)
     endif()
     target_compile_options(scav_sanitizer INTERFACE ${flags})
-    target_link_options(scav_sanitizer INTERFACE /INCREMENTAL:NO)
     return()
   endif()
 

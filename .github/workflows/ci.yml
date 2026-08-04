@@ -41,8 +41,8 @@ jobs:
           apt-get install -y --no-install-recommends \
             ca-certificates curl git \
             $(case "${{ matrix.triple }}" in
-                linux-clang-libcxx)    echo clang libc++-dev libc++abi-dev ;;
-                linux-clang-libstdcxx) echo clang g++ ;;
+                linux-clang-libcxx)    echo clang libc++-dev libc++abi-dev libclang-rt-dev ;;
+                linux-clang-libstdcxx) echo clang g++ libclang-rt-dev ;;
                 linux-gcc-libstdcxx)   echo g++ ;;
               esac)
 
@@ -128,8 +128,8 @@ jobs:
           apt-get install -y --no-install-recommends \
             ca-certificates curl git \
             $(case "${{ matrix.triple }}" in
-                linux-clang-libcxx)    echo clang libc++-dev libc++abi-dev ;;
-                linux-clang-libstdcxx) echo clang g++ ;;
+                linux-clang-libcxx)    echo clang libc++-dev libc++abi-dev libclang-rt-dev ;;
+                linux-clang-libstdcxx) echo clang g++ libclang-rt-dev ;;
                 linux-gcc-libstdcxx)   echo g++ ;;
               esac)
 
@@ -155,7 +155,7 @@ jobs:
           set -eux
           apt-get update
           apt-get install -y --no-install-recommends \
-            ca-certificates curl git clang libc++-dev libc++abi-dev
+            ca-certificates curl git clang libc++-dev libc++abi-dev libclang-rt-dev
 
       - uses: actions/checkout@v4
 
@@ -227,7 +227,7 @@ jobs:
           set -eux
           apt-get update
           apt-get install -y --no-install-recommends \
-            ca-certificates curl git clang libc++-dev libc++abi-dev llvm
+            ca-certificates curl git clang libc++-dev libc++abi-dev libclang-rt-dev llvm
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
         with:
@@ -251,7 +251,7 @@ jobs:
           set -eux
           apt-get update
           apt-get install -y --no-install-recommends \
-            ca-certificates curl git clang libc++-dev libc++abi-dev
+            ca-certificates curl git clang libc++-dev libc++abi-dev libclang-rt-dev
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
         with:

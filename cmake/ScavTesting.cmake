@@ -38,24 +38,25 @@ endfunction()
 # One environment for every test, so a developer's run and CI's run suppress the
 # same findings and fail on the same conditions.
 function(scav_set_test_environment test_name)
+  # Bare filenames: these strings are colon-separated, so `D:/a/scav` would split
+  # at the drive letter. Every test runs from the source directory already.
   set(env "")
-  set(supp "${PROJECT_SOURCE_DIR}")
 
   if(SCAV_SANITIZER STREQUAL "ASAN")
     set(opts "abort_on_error=1:strict_string_checks=1:detect_stack_use_after_return=1")
-    string(APPEND opts ":suppressions=${supp}/asan.supp")
+    string(APPEND opts ":suppressions=asan.supp")
     # LeakSanitizer is a Linux-only companion to ASan in the pinned toolchains.
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
       string(APPEND opts ":detect_leaks=1")
-      list(APPEND env "LSAN_OPTIONS=suppressions=${supp}/lsan.supp")
+      list(APPEND env "LSAN_OPTIONS=suppressions=lsan.supp")
     endif()
     list(APPEND env "ASAN_OPTIONS=${opts}")
   elseif(SCAV_SANITIZER STREQUAL "UBSAN")
     list(APPEND env
-      "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1:suppressions=${supp}/ubsan.supp")
+      "UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1:suppressions=ubsan.supp")
   elseif(SCAV_SANITIZER STREQUAL "TSAN")
     list(APPEND env
-      "TSAN_OPTIONS=halt_on_error=1:second_deadlock_stack=1:suppressions=${supp}/tsan.supp")
+      "TSAN_OPTIONS=halt_on_error=1:second_deadlock_stack=1:suppressions=tsan.supp")
   elseif(SCAV_SANITIZER STREQUAL "MSAN")
     list(APPEND env "MSAN_OPTIONS=halt_on_error=1:poison_in_dtor=1")
   endif()
