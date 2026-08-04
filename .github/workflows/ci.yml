@@ -1,0 +1,270 @@
+# The Linux rows run in a bare container so provisioning is actually tested: a
+# build using a hosted runner's cmake would look identical to one using envy's.
+
+name: ci
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Outside the checkout: neither source nor build output, and a directory inside
+  # the tree would be untracked in every job.
+  ENVY_CACHE_ROOT: ${{ runner.temp }}/envy-cache
+  SCAV_REQUIRE_ENVY: "1"
+
+jobs:
+  # The matrix: every triple x every configuration.
+
+  linux:
+    name: ${{ matrix.triple }} / ${{ matrix.config }}
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        triple: [linux-clang-libcxx, linux-clang-libstdcxx, linux-gcc-libstdcxx]
+        config: [debug, release, testable]
+    steps:
+      - name: Install a bare toolchain and nothing else
+        # No cmake, no ninja, no python: installing them here would make this job
+        # prove nothing.
+        run: |
+          set -eux
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git xz-utils \
+            $(case "${{ matrix.triple }}" in
+                linux-clang-libcxx)    echo clang libc++-dev libc++abi-dev ;;
+                linux-clang-libstdcxx) echo clang g++ ;;
+                linux-gcc-libstdcxx)   echo g++ ;;
+              esac)
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.ENVY_CACHE_ROOT }}
+          key: envy-linux-${{ hashFiles('envy.lua') }}
+          restore-keys: envy-linux-
+
+      - run: ./build.sh --preset ${{ matrix.triple }}-${{ matrix.config }}
+
+  macos:
+    name: macos-clang-libcxx / ${{ matrix.config }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [debug, release, testable]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.ENVY_CACHE_ROOT }}
+          key: envy-macos-${{ hashFiles('envy.lua') }}
+          restore-keys: envy-macos-
+
+      # Deliberately no setup-python and no brew install: the image has all three,
+      # and using them would fail the provisioning test, which is what it is for.
+      - run: ./build.sh --preset macos-clang-libcxx-${{ matrix.config }}
+
+  windows:
+    name: ${{ matrix.triple }} / ${{ matrix.config }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        triple: [windows-msvc, windows-clang]
+        config: [debug, release, testable]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.ENVY_CACHE_ROOT }}
+          key: envy-windows-${{ hashFiles('envy.lua') }}
+          restore-keys: envy-windows-
+
+      # Puts cl.exe and the MSVC STL on the environment, which both Windows
+      # toolchains need. A system compiler, not a build tool.
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - run: .\build.bat --preset ${{ matrix.triple }}-${{ matrix.config }}
+        shell: cmd
+
+  # Sanitizers. Which one exists where is a toolchain fact, enumerated once by the
+  # preset generator and checked by its test.
+
+  linux-sanitizers:
+    name: ${{ matrix.triple }} / ${{ matrix.sanitizer }}
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { triple: linux-clang-libcxx, sanitizer: asan }
+          - { triple: linux-clang-libcxx, sanitizer: ubsan }
+          - { triple: linux-clang-libcxx, sanitizer: tsan }
+          - { triple: linux-clang-libstdcxx, sanitizer: asan }
+          - { triple: linux-clang-libstdcxx, sanitizer: ubsan }
+          - { triple: linux-clang-libstdcxx, sanitizer: tsan }
+          - { triple: linux-gcc-libstdcxx, sanitizer: asan }
+          - { triple: linux-gcc-libstdcxx, sanitizer: ubsan }
+          - { triple: linux-gcc-libstdcxx, sanitizer: tsan }
+    steps:
+      - name: Install a bare toolchain and nothing else
+        run: |
+          set -eux
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git xz-utils \
+            $(case "${{ matrix.triple }}" in
+                linux-clang-libcxx)    echo clang libc++-dev libc++abi-dev ;;
+                linux-clang-libstdcxx) echo clang g++ ;;
+                linux-gcc-libstdcxx)   echo g++ ;;
+              esac)
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.ENVY_CACHE_ROOT }}
+          key: envy-linux-${{ hashFiles('envy.lua') }}
+          restore-keys: envy-linux-
+
+      - run: ./build.sh --preset ${{ matrix.triple }}-${{ matrix.sanitizer }}
+
+  linux-msan:
+    # Its own job: the only row that has to build a standard library first, because
+    # MSan against an uninstrumented one reports false positives forever.
+    name: linux-clang-libcxx / msan
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04
+    steps:
+      - name: Install a bare toolchain and nothing else
+        run: |
+          set -eux
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git xz-utils clang libc++-dev libc++abi-dev
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.ENVY_CACHE_ROOT }}
+          key: envy-linux-${{ hashFiles('envy.lua') }}
+          restore-keys: envy-linux-
+
+      # Keyed on the script, which is where the version and hash are pinned. A miss
+      # costs one build; a stale hit costs a phantom finding, which is worse.
+      - uses: actions/cache@v4
+        with:
+          path: out/msan-libcxx/prefix
+          key: msan-libcxx-${{ hashFiles('tools/msan_libcxx.py') }}
+
+      - run: ./build.sh --preset linux-clang-libcxx-msan
+
+  macos-sanitizers:
+    name: macos-clang-libcxx / ${{ matrix.sanitizer }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [asan, ubsan, tsan]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.ENVY_CACHE_ROOT }}
+          key: envy-macos-${{ hashFiles('envy.lua') }}
+          restore-keys: envy-macos-
+      - run: ./build.sh --preset macos-clang-libcxx-${{ matrix.sanitizer }}
+
+  windows-sanitizers:
+    name: ${{ matrix.triple }} / ${{ matrix.sanitizer }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # MSVC has AddressSanitizer and no UBSan; neither Windows toolchain
+          # has a ThreadSanitizer.
+          - { triple: windows-msvc, sanitizer: asan }
+          - { triple: windows-clang, sanitizer: asan }
+          - { triple: windows-clang, sanitizer: ubsan }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.ENVY_CACHE_ROOT }}
+          key: envy-windows-${{ hashFiles('envy.lua') }}
+          restore-keys: envy-windows-
+      - uses: ilammy/msvc-dev-cmd@v1
+      - run: .\build.bat --preset ${{ matrix.triple }}-${{ matrix.sanitizer }}
+        shell: cmd
+
+  # Branch coverage, and the gate that an untested file fails the build.
+
+  coverage:
+    name: coverage gate
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04
+    steps:
+      - name: Install a bare toolchain and nothing else
+        run: |
+          set -eux
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git xz-utils clang libc++-dev libc++abi-dev
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.ENVY_CACHE_ROOT }}
+          key: envy-linux-${{ hashFiles('envy.lua') }}
+          restore-keys: envy-linux-
+      - run: ./build.sh --coverage --preset linux-clang-libcxx-coverage
+
+  # One job, one platform: the pinned clang-format produces the same bytes
+  # everywhere, and its package costs a whole LLVM release download.
+
+  lint:
+    name: clang-format and clang-tidy
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04
+    env:
+      SCAV_CLANG_TOOLS: "1"
+    steps:
+      - name: Install a bare toolchain and nothing else
+        run: |
+          set -eux
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git xz-utils clang libc++-dev libc++abi-dev
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.ENVY_CACHE_ROOT }}
+          key: envy-lint-${{ hashFiles('envy.lua', 'envy/scav.clang-tools.lua') }}
+          restore-keys: envy-lint-
+
+      - run: ./bin/envy sync
+
+      - name: clang-format --check
+        run: "$(./bin/envy product python3) tools/format.py --check"
+
+      # Runs as part of compilation, so a finding fails the build with a file and
+      # line rather than in a separate report.
+      - name: clang-tidy
+        run: >
+          ./build.sh --preset linux-clang-libcxx-debug --no-test
+          -- -DSCAV_CLANG_TIDY=ON

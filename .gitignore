@@ -1,69 +1,19 @@
-# Prerequisites
-*.d
+# Everything scav generates and nothing else, so `rm -rf out` is a factory reset
+# and no build step writes to $HOME.
+/out/
 
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
+# envy deploys a product shim per tool here; only the bootstrap scripts are ours.
+/bin/*
+!/bin/envy
+!/bin/envy.bat
 
-# Precompiled Headers
-*.gch
-*.pch
+# Rewritten by envy on every invocation, and names a per-machine cache path.
+/.luarc.json
 
-# Linker files
-*.ilk
+# The tests and tools import each other, so bytecode lands next to the sources.
+__pycache__/
+*.py[cod]
 
-# Debugger Files
-*.pdb
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-*.so.*
-
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
-
-# Executables
-*.exe
-*.out
-*.app
-
-# Build directories
-build/
-Build/
-build-*/
-
-# CMake generated files
-CMakeFiles/
-CMakeCache.txt
-cmake_install.cmake
-Makefile
-install_manifest.txt
-compile_commands.json
-
-# Temporary files
-*.tmp
-*.log
-*.bak
+.DS_Store
 *.swp
-
-# vcpkg
-vcpkg_installed/
-
-# debug information files
-*.dwo
-
-# test output & cache
-Testing/
 .cache/

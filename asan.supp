@@ -1,0 +1,6 @@
+# AddressSanitizer suppressions, empty on purpose: an entry is a permanently
+# accepted finding, so each needs a comment naming the third-party code it covers.
+
+# A suppression for scav's own code is a bug being hidden.
+
+# Format: `interceptor_via_fun:`, `interceptor_via_lib:` or `odr_violation:`.
