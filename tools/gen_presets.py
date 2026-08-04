@@ -5,9 +5,9 @@ More JSON than anyone should hand-edit, and the format permits no comments, so t
 matrix lives here and the committed file is generated from it.
 
 Usage:
-    python3 tools/gen_presets.py            # write CMakePresets.json
-    python3 tools/gen_presets.py --stdout   # print, write nothing
-    python3 tools/gen_presets.py --check    # exit non-zero if the file is stale
+    $(./bin/envy product python3) tools/gen_presets.py            # write CMakePresets.json
+    $(./bin/envy product python3) tools/gen_presets.py --stdout   # print, write nothing
+    $(./bin/envy product python3) tools/gen_presets.py --check    # exit non-zero if the file is stale
 """
 
 import argparse

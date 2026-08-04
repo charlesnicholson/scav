@@ -2,8 +2,8 @@
 """Run the pinned clang-format over scav's C++ sources, refusing to fall back to
 whatever is on PATH: its output changes between releases.
 
-    python3 tools/format.py            # rewrite files in place
-    python3 tools/format.py --check    # exit non-zero on any diff
+    $(./bin/envy product python3) tools/format.py            # rewrite files in place
+    $(./bin/envy product python3) tools/format.py --check    # exit non-zero on any diff
 """
 
 import argparse
@@ -73,7 +73,7 @@ def main() -> int:
     if unformatted:
         print("clang-format would change:", file=sys.stderr)
         print(*(f"  {f}" for f in unformatted), sep="\n", file=sys.stderr)
-        print("\nRun `python3 tools/format.py`.", file=sys.stderr)
+        print("\nRun `$(./bin/envy product python3) tools/format.py`.", file=sys.stderr)
         return 1
 
     print(f"{len(files)} file(s) already formatted")
