@@ -1,5 +1,8 @@
 # The Linux rows run in a bare container so provisioning is actually tested: a
 # build using a hosted runner's cmake would look identical to one using envy's.
+#
+# The package cache is the manifest's own out/.envy, which actions/cache carries
+# between jobs -- warmth comes from the cache key, not from relocating the root.
 
 name: ci
 
@@ -14,9 +17,6 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Outside the checkout: neither source nor build output, and a directory inside
-  # the tree would be untracked in every job.
-  ENVY_CACHE_ROOT: ${{ runner.temp }}/envy-cache
   SCAV_REQUIRE_ENVY: "1"
 
 jobs:
@@ -50,7 +50,7 @@ jobs:
 
       - uses: actions/cache@v4
         with:
-          path: ${{ env.ENVY_CACHE_ROOT }}
+          path: out/.envy
           key: envy-linux-${{ hashFiles('envy.lua') }}
           restore-keys: envy-linux-
 
@@ -68,7 +68,7 @@ jobs:
 
       - uses: actions/cache@v4
         with:
-          path: ${{ env.ENVY_CACHE_ROOT }}
+          path: out/.envy
           key: envy-macos-${{ hashFiles('envy.lua') }}
           restore-keys: envy-macos-
 
@@ -89,7 +89,7 @@ jobs:
 
       - uses: actions/cache@v4
         with:
-          path: ${{ env.ENVY_CACHE_ROOT }}
+          path: out/.envy
           key: envy-windows-${{ hashFiles('envy.lua') }}
           restore-keys: envy-windows-
 
@@ -137,7 +137,7 @@ jobs:
 
       - uses: actions/cache@v4
         with:
-          path: ${{ env.ENVY_CACHE_ROOT }}
+          path: out/.envy
           key: envy-linux-${{ hashFiles('envy.lua') }}
           restore-keys: envy-linux-
 
@@ -161,7 +161,7 @@ jobs:
 
       - uses: actions/cache@v4
         with:
-          path: ${{ env.ENVY_CACHE_ROOT }}
+          path: out/.envy
           key: envy-linux-${{ hashFiles('envy.lua') }}
           restore-keys: envy-linux-
 
@@ -185,7 +185,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
         with:
-          path: ${{ env.ENVY_CACHE_ROOT }}
+          path: out/.envy
           key: envy-macos-${{ hashFiles('envy.lua') }}
           restore-keys: envy-macos-
       - run: ./build.sh --preset macos-clang-libcxx-${{ matrix.sanitizer }}
@@ -206,7 +206,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
         with:
-          path: ${{ env.ENVY_CACHE_ROOT }}
+          path: out/.envy
           key: envy-windows-${{ hashFiles('envy.lua') }}
           restore-keys: envy-windows-
       - uses: ilammy/msvc-dev-cmd@v1
@@ -229,7 +229,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
         with:
-          path: ${{ env.ENVY_CACHE_ROOT }}
+          path: out/.envy
           key: envy-linux-${{ hashFiles('envy.lua') }}
           restore-keys: envy-linux-
       - run: ./build.sh --coverage --preset linux-clang-libcxx-coverage
@@ -253,7 +253,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
         with:
-          path: ${{ env.ENVY_CACHE_ROOT }}
+          path: out/.envy
           key: envy-lint-${{ hashFiles('envy.lua', 'envy/scav.clang-tools.lua') }}
           restore-keys: envy-lint-
 
