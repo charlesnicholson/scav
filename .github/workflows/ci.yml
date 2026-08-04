@@ -270,3 +270,35 @@ jobs:
         run: >
           ./build.sh --preset linux-clang-libcxx-debug --no-test
           -- -DSCAV_CLANG_TIDY=ON
+
+  # The one check branch protection names. Jobs come and go; this does not, so
+  # adding or retiring a row is a workflow edit rather than a repository settings
+  # change -- and an old commit rebuilt years from now still reports against a
+  # name that exists.
+  #
+  # `if: always()` with an explicit result check, because a job that merely
+  # `needs:` a failed job is *skipped*, and a skipped required check does not
+  # block a merge.
+
+  all-checks-pass:
+    name: all checks pass
+    if: always()
+    needs:
+      - linux
+      - macos
+      - windows
+      - linux-sanitizers
+      - linux-msan
+      - macos-sanitizers
+      - windows-sanitizers
+      - coverage
+      - lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report
+        run: echo '${{ toJSON(needs) }}'
+      - name: Fail unless every job succeeded
+        if: contains(needs.*.result, 'failure')
+          || contains(needs.*.result, 'cancelled')
+          || contains(needs.*.result, 'skipped')
+        run: exit 1
