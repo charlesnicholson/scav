@@ -5,6 +5,24 @@ find_package(Python3 3.14 COMPONENTS Interpreter REQUIRED)
 
 # Handed to the Python side as data rather than rediscovered there: a test that
 # guesses the compiler is testing its guess.
+#
+# Forward slashes throughout: a Windows path drops raw into the JSON, where every
+# backslash is an escape and `D:\a` is a parse error.
+foreach(pair
+  "SOURCE_DIR;${PROJECT_SOURCE_DIR}"
+  "BINARY_DIR;${PROJECT_BINARY_DIR}"
+  "CMAKE;${CMAKE_COMMAND}"
+  "CTEST;${CMAKE_CTEST_COMMAND}"
+  "MAKE_PROGRAM;${CMAKE_MAKE_PROGRAM}"
+  "CXX_COMPILER;${CMAKE_CXX_COMPILER}"
+  "DOCTEST_DIR;${SCAV_DOCTEST_INCLUDE_DIR}"
+  "PYTHON;${Python3_EXECUTABLE}"
+)
+  list(GET pair 0 name)
+  list(GET pair 1 value)
+  file(TO_CMAKE_PATH "${value}" SCAV_FT_${name})
+endforeach()
+
 set(SCAV_FT_CONFIG "${CMAKE_CURRENT_BINARY_DIR}/scav_build_config.json")
 configure_file(scav_build_config.json.in "${SCAV_FT_CONFIG}" @ONLY)
 

@@ -35,6 +35,10 @@ bootstraps itself, then provisions cmake, ninja, doctest, and python 3.14 into
 **Everything generated lives under `out/`.** Build trees, the envy package cache,
 test scratch. `rm -rf out` is a factory reset, and nothing writes to `$HOME`.
 
+**Nothing comes from the system but the compiler.** cmake, ninja, doctest and
+python are envy's; scav never reaches for a system python, and CI's Linux rows
+install a compiler, curl and git into an otherwise empty container.
+
 ## Building without envy
 
 envy pins the toolchain for *scav's* CI. It is deliberately not a build
@@ -61,7 +65,7 @@ cmake --build build && ctest --test-dir build
 | `src/<subsystem>/` | sources with their unit tests adjacent |
 | `test_data/golden/` | committed goldens, layered by stage |
 | `functional_tests/` | Python 3.14, standard library only |
-| `tools/` | build driver, preset generator, coverage gate, MSan libc++ builder |
+| `tools/` | build driver, preset generator, coverage gate, MSan libc++ builder. Run them with `$(./bin/envy product python3)` |
 | `out/` | gitignored: all build output plus the envy cache |
 
 ## What the harness enforces

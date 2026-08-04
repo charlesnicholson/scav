@@ -2,23 +2,19 @@
 """Build a libc++ instrumented with MemorySanitizer, without which MSan reports
 false positives that look exactly like real findings until someone switches it off.
 
-    python3 tools/msan_libcxx.py            # build, print the prefix
-    python3 tools/msan_libcxx.py --prefix   # print the prefix, build nothing
+    $(./bin/envy product python3) tools/msan_libcxx.py            # build, print the prefix
+    $(./bin/envy product python3) tools/msan_libcxx.py --prefix   # print the prefix, build nothing
 
 The printed prefix is what -DSCAV_MSAN_LIBCXX_DIR wants:
 
-    ./build.sh --sanitizer msan -- -DSCAV_MSAN_LIBCXX_DIR=$(python3 tools/msan_libcxx.py)
+    ./build.sh --sanitizer msan          # builds it and passes the prefix for you
 """
 
 import argparse
-import hashlib
-import lzma
 import platform
 import shutil
 import subprocess
 import sys
-import tarfile
-import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -29,10 +25,10 @@ MARKER = PREFIX / "include/c++/v1/vector"
 
 # Pinned and hash-verified: this is a compilation input, so an unpinned one makes
 # the MSan row depend on whatever upstream published that morning.
-VERSION: str = "21.1.8"
+VERSION = "21.1.8"
 TARBALL = f"llvm-project-{VERSION}.src.tar.xz"
 URL = f"https://github.com/llvm/llvm-project/releases/download/llvmorg-{VERSION}/{TARBALL}"
-SHA256: str = "4633a23617fa31a3ea51242586ea7fb1da7140e426bd62fc164261fe036aa142"
+SHA256 = "4633a23617fa31a3ea51242586ea7fb1da7140e426bd62fc164261fe036aa142"
 
 CMAKE_FLAGS: list[str] = [
     "-DCMAKE_BUILD_TYPE=Release",
@@ -53,32 +49,30 @@ CMAKE_FLAGS: list[str] = [
 ]
 
 
-def envy_product(name: str) -> str:
-    """Ask envy, so this uses the same cmake and ninja as the build."""
-    return subprocess.run([str(ENVY), "product", name], cwd=REPO_ROOT, check=True,
-                          stdout=subprocess.PIPE, text=True).stdout.strip()
-
-
 def run(*cmd: str | Path) -> None:
     argv = [str(c) for c in cmd]
     print(f"+ {' '.join(argv)}", file=sys.stderr, flush=True)
     subprocess.run(argv, check=True)
 
 
+def envy(*args: str | Path) -> str:
+    """Downloading, hashing and unpacking go through envy's pinned libcurl, TLS and
+    libarchive rather than whatever the interpreter and the machine happen to have."""
+    return subprocess.run([str(ENVY), *(str(a) for a in args)], cwd=REPO_ROOT,
+                          check=True, stdout=subprocess.PIPE, text=True).stdout.strip()
+
+
 def sha256_of(path: Path) -> str:
-    with open(path, "rb") as handle:
-        return hashlib.file_digest(handle, "sha256").hexdigest()
+    return envy("hash", path).split()[0]
 
 
 def download() -> Path:
     WORK_DIR.mkdir(parents=True, exist_ok=True)
-    if (archive := WORK_DIR / TARBALL).exists() and sha256_of(archive) == SHA256:
+    archive = WORK_DIR / TARBALL
+    if archive.is_file() and sha256_of(archive) == SHA256:
         return archive
 
-    print(f"downloading {URL}", file=sys.stderr, flush=True)
-    with urllib.request.urlopen(URL) as response, open(archive, "wb") as out:
-        shutil.copyfileobj(response, out)
-
+    envy("fetch", URL, archive)
     if (actual := sha256_of(archive)) != SHA256:
         archive.unlink()
         raise SystemExit(f"{TARBALL} sha256 {actual}, expected {SHA256}")
@@ -86,31 +80,28 @@ def download() -> Path:
 
 
 def extract(archive: Path) -> Path:
-    source = WORK_DIR / f"llvm-project-{VERSION}.src"
-    if (runtimes := source / "runtimes").joinpath("CMakeLists.txt").is_file():
-        return runtimes
-
-    print(f"extracting {archive.name}", file=sys.stderr, flush=True)
-    with lzma.open(archive) as decompressed, tarfile.open(fileobj=decompressed,
-                                                          mode="r|") as tar:
-        # Refuses absolute paths and escaping symlinks. The archive is hash-verified
-        # already, but the check is free.
-        tar.extractall(path=WORK_DIR, filter="data")
+    runtimes = WORK_DIR / f"llvm-project-{VERSION}.src/runtimes"
     if not (runtimes / "CMakeLists.txt").is_file():
-        raise SystemExit(f"{archive.name} did not contain {source.name}/runtimes")
+        envy("extract", archive, WORK_DIR)
+    if not (runtimes / "CMakeLists.txt").is_file():
+        raise SystemExit(f"{TARBALL} did not contain {runtimes.parent.name}/runtimes")
     return runtimes
 
 
 def build(runtimes: Path) -> None:
-    cmake, build_dir = envy_product("cmake"), WORK_DIR / "build"
-    if not (clang := shutil.which("clang")) or not (clangxx := shutil.which("clang++")):
+    cmake, build_dir = envy("product", "cmake"), WORK_DIR / "build"
+    clang, clangxx = shutil.which("clang"), shutil.which("clang++")
+    if not clang or not clangxx:
         raise SystemExit(
             "clang and clang++ must be on PATH: MSan's instrumented libc++ has to "
             "be built by the same compiler that will consume it."
         )
     run(cmake, "-S", runtimes, "-B", build_dir, "-G", "Ninja",
-        f"-DCMAKE_MAKE_PROGRAM={envy_product('ninja')}",
+        f"-DCMAKE_MAKE_PROGRAM={envy('product', 'ninja')}",
         f"-DCMAKE_C_COMPILER={clang}", f"-DCMAKE_CXX_COMPILER={clangxx}",
+        # LLVM's runtimes build wants a Python of its own, and a bare runner has
+        # none. Hand it the provisioned one rather than installing a second.
+        f"-DPython3_EXECUTABLE={envy('product', 'python3')}",
         f"-DCMAKE_INSTALL_PREFIX={PREFIX}", *CMAKE_FLAGS)
     run(cmake, "--build", build_dir)
     run(cmake, "--install", build_dir)

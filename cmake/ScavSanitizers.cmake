@@ -60,10 +60,18 @@ function(scav_sanitizers_init)
 
   scav_sanitizer_check("${san}")
 
-  if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
-    # MSVC's only sanitizer; it needs debug info to symbolize and is incompatible
-    # with incremental linking.
-    target_compile_options(scav_sanitizer INTERFACE /fsanitize=address /Zi)
+  # Both Windows toolchains take the MSVC driver's spellings: /Zi for the debug
+  # info a report needs to symbolize, /Oy- for the frame pointers, and no
+  # incremental linking. The GNU spellings below are ignored there, and an ignored
+  # argument is itself a warning.
+  if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    set(flags /Zi /Oy-)
+    if(san STREQUAL "ASAN")
+      list(APPEND flags /fsanitize=address)
+    elseif(san STREQUAL "UBSAN")
+      list(APPEND flags -fsanitize=undefined -fno-sanitize-recover=all)
+    endif()
+    target_compile_options(scav_sanitizer INTERFACE ${flags})
     target_link_options(scav_sanitizer INTERFACE /INCREMENTAL:NO)
     return()
   endif()

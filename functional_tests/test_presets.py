@@ -52,7 +52,7 @@ class TestPresets(unittest.TestCase):
 
     def test_committed_json_is_not_stale(self) -> None:
         self.assertEqual(gen_presets.render(), self.text,
-                         f"{self.path} is stale; run tools/gen_presets.py")
+                         f"{self.path} is stale; regenerate it with tools/gen_presets.py")
 
     def test_every_matrix_cell_has_a_configure_preset(self) -> None:
         for triple in TRIPLES:

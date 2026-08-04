@@ -48,6 +48,9 @@ option(SCAV_BUILD_TESTS "Build the unit tests" ${scav_tests_default})
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+# Modules are unavailable, so scanning for them buys nothing and makes
+# clang-scan-deps a build prerequisite.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 

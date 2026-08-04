@@ -39,7 +39,7 @@ jobs:
           set -eux
           apt-get update
           apt-get install -y --no-install-recommends \
-            ca-certificates curl git xz-utils \
+            ca-certificates curl git \
             $(case "${{ matrix.triple }}" in
                 linux-clang-libcxx)    echo clang libc++-dev libc++abi-dev ;;
                 linux-clang-libstdcxx) echo clang g++ ;;
@@ -126,7 +126,7 @@ jobs:
           set -eux
           apt-get update
           apt-get install -y --no-install-recommends \
-            ca-certificates curl git xz-utils \
+            ca-certificates curl git \
             $(case "${{ matrix.triple }}" in
                 linux-clang-libcxx)    echo clang libc++-dev libc++abi-dev ;;
                 linux-clang-libstdcxx) echo clang g++ ;;
@@ -155,7 +155,7 @@ jobs:
           set -eux
           apt-get update
           apt-get install -y --no-install-recommends \
-            ca-certificates curl git xz-utils clang libc++-dev libc++abi-dev
+            ca-certificates curl git clang libc++-dev libc++abi-dev
 
       - uses: actions/checkout@v4
 
@@ -221,11 +221,13 @@ jobs:
     container: ubuntu:24.04
     steps:
       - name: Install a bare toolchain and nothing else
+        # llvm is the compiler's own tooling: llvm-cov must match the
+        # profile format the compiler emits, so it is not a third dependency.
         run: |
           set -eux
           apt-get update
           apt-get install -y --no-install-recommends \
-            ca-certificates curl git xz-utils clang libc++-dev libc++abi-dev
+            ca-certificates curl git clang libc++-dev libc++abi-dev llvm
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
         with:
@@ -249,7 +251,7 @@ jobs:
           set -eux
           apt-get update
           apt-get install -y --no-install-recommends \
-            ca-certificates curl git xz-utils clang libc++-dev libc++abi-dev
+            ca-certificates curl git clang libc++-dev libc++abi-dev
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
         with:

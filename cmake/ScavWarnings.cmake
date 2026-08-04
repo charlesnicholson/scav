@@ -87,18 +87,23 @@ function(scav_warnings_init)
   add_library(scav_warnings INTERFACE)
 
   if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
-    target_compile_options(scav_warnings INTERFACE ${SCAV_WARNINGS_MSVC})
-    if(SCAV_WARNINGS_AS_ERRORS)
-      target_compile_options(scav_warnings INTERFACE /WX)
-    endif()
-    # MSVC's headers do not survive the GNU-like list, so clang-cl gets only the
-    # clang extras that are header-clean.
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+      # clang-cl is conforming without the /Zc: switches and ignores MSVC's
+      # numeric warning ids, and an ignored argument is itself a warning. MSVC's
+      # headers do not survive the GNU-like list, so it gets the clang extras
+      # that are header-clean and nothing more.
       target_compile_options(scav_warnings INTERFACE
+        /W4
+        /utf-8
         -Wshift-sign-overflow
         -Wtautological-compare
         -Wthread-safety
       )
+    else()
+      target_compile_options(scav_warnings INTERFACE ${SCAV_WARNINGS_MSVC})
+    endif()
+    if(SCAV_WARNINGS_AS_ERRORS)
+      target_compile_options(scav_warnings INTERFACE /WX)
     endif()
   else()
     target_compile_options(scav_warnings INTERFACE ${SCAV_WARNINGS_GNU_LIKE})
