@@ -5,6 +5,10 @@ cmake_minimum_required(VERSION 3.28)
 
 project(scav_consumer LANGUAGES CXX)
 
+# This project uses no modules, so do not make clang-scan-deps a prerequisite of
+# building it. Nothing to do with scav; any C++20 project wants this.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+
 find_package(scav REQUIRED)
 
 add_executable(consumer main.cpp)
