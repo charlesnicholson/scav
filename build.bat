@@ -1,0 +1,14 @@
+@echo off
+setlocal
+cd /d "%~dp0"
+
+call bin\envy.bat sync || exit /b 1
+
+for /f "usebackq delims=" %%P in (`bin\envy.bat product python3`) do set "SCAV_PYTHON=%%P"
+if not defined SCAV_PYTHON (
+  echo error: `envy product python3` printed nothing 1>&2
+  exit /b 1
+)
+
+"%SCAV_PYTHON%" tools\build.py --no-sync %*
+exit /b %ERRORLEVEL%

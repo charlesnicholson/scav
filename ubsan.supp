@@ -1,0 +1,4 @@
+# UndefinedBehaviorSanitizer suppressions, empty on purpose and most likely to stay
+# so: overflow is proved absent, and UBSan is the net rather than the proof.
+
+# Format: `<check>:<function or file substring>`.

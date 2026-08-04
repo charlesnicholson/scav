@@ -1,0 +1,15 @@
+# Chart text is normalized at parse. Without this, core.autocrlf on Windows
+# rewrites the corpus on checkout and the golden hashes diverge per platform.
+*.scav -text
+
+# Anything git may rewrite on the way to the working tree cannot be a golden.
+test_data/golden/** -text
+
+# A layout-hash input, so it must round-trip untouched.
+assets/font/** binary
+
+# Executed by their platform's shell verbatim.
+bin/envy eol=lf
+bin/envy.bat eol=crlf
+*.sh eol=lf
+*.bat eol=crlf
