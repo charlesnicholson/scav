@@ -1,0 +1,277 @@
+# The Linux rows run in a curated container rather than a hosted runner image. It
+# carries a compiler and little else; scav still takes cmake, ninja, doctest and
+# python from envy and ignores the image's own, which func.provisioning enforces.
+#
+# The package cache is the manifest's own out/.envy, which actions/cache carries
+# between jobs -- warmth comes from the cache key, not from relocating the root.
+
+name: ci
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SCAV_REQUIRE_ENVY: "1"
+
+jobs:
+  # The matrix: every triple x every configuration.
+
+  linux:
+    name: ${{ matrix.triple }} / ${{ matrix.config }}
+    runs-on: ubuntu-latest
+    container: ghcr.io/charlesnicholson/docker-image:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        triple: [linux-clang-libcxx, linux-clang-libstdcxx, linux-gcc-libstdcxx]
+        config: [debug, release, testable]
+    steps:
+      - name: Install what the image lacks
+        if: matrix.triple == 'linux-clang-libcxx'
+        run: |
+          set -eux
+          apt-get update
+          apt-get install -y --no-install-recommends libc++-dev libc++abi-dev
+
+      - uses: actions/checkout@v4
+
+      # No restore-keys: a bundle is cached under its identity, so a manifest that
+      # moves the pinned ref would keep resolving the old specs from a prefix hit.
+      - uses: actions/cache@v4
+        with:
+          path: out/.envy
+          key: envy-linux-${{ hashFiles('envy.lua') }}
+
+      - run: ./build.sh --preset ${{ matrix.triple }}-${{ matrix.config }}
+
+  macos:
+    name: macos-clang-libcxx / ${{ matrix.config }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        config: [debug, release, testable]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: out/.envy
+          key: envy-macos-${{ hashFiles('envy.lua') }}
+
+      # Deliberately no setup-python and no brew install: the image has all three,
+      # and using them would fail the provisioning test, which is what it is for.
+      - run: ./build.sh --preset macos-clang-libcxx-${{ matrix.config }}
+
+  windows:
+    name: ${{ matrix.triple }} / ${{ matrix.config }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        triple: [windows-msvc, windows-clang]
+        config: [debug, release, testable]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: out/.envy
+          key: envy-windows-${{ hashFiles('envy.lua') }}
+
+      # Puts cl.exe and the MSVC STL on the environment, which both Windows
+      # toolchains need. A system compiler, not a build tool.
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - run: .\build.bat --preset ${{ matrix.triple }}-${{ matrix.config }}
+        shell: cmd
+
+  # Sanitizers. Which one exists where is a toolchain fact, enumerated once by the
+  # preset generator and checked by its test.
+
+  linux-sanitizers:
+    name: ${{ matrix.triple }} / ${{ matrix.sanitizer }}
+    runs-on: ubuntu-latest
+    container: ghcr.io/charlesnicholson/docker-image:latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { triple: linux-clang-libcxx, sanitizer: asan }
+          - { triple: linux-clang-libcxx, sanitizer: ubsan }
+          - { triple: linux-clang-libcxx, sanitizer: tsan }
+          - { triple: linux-clang-libstdcxx, sanitizer: asan }
+          - { triple: linux-clang-libstdcxx, sanitizer: ubsan }
+          - { triple: linux-clang-libstdcxx, sanitizer: tsan }
+          - { triple: linux-gcc-libstdcxx, sanitizer: asan }
+          - { triple: linux-gcc-libstdcxx, sanitizer: ubsan }
+          - { triple: linux-gcc-libstdcxx, sanitizer: tsan }
+    steps:
+      - name: Install what the image lacks
+        if: matrix.triple == 'linux-clang-libcxx'
+        run: |
+          set -eux
+          apt-get update
+          apt-get install -y --no-install-recommends libc++-dev libc++abi-dev
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: out/.envy
+          key: envy-linux-${{ hashFiles('envy.lua') }}
+
+      - run: ./build.sh --preset ${{ matrix.triple }}-${{ matrix.sanitizer }}
+
+  linux-msan:
+    # Its own job: the only row that has to build a standard library first, because
+    # MSan against an uninstrumented one reports false positives forever.
+    name: linux-clang-libcxx / msan
+    runs-on: ubuntu-latest
+    container: ghcr.io/charlesnicholson/docker-image:latest
+    steps:
+      - name: Install what the image lacks
+        run: |
+          set -eux
+          apt-get update
+          apt-get install -y --no-install-recommends libc++-dev libc++abi-dev
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: out/.envy
+          key: envy-linux-${{ hashFiles('envy.lua') }}
+
+      # Keyed on the script, which is where the version and hash are pinned. A miss
+      # costs one build; a stale hit costs a phantom finding, which is worse.
+      - uses: actions/cache@v4
+        with:
+          path: out/msan-libcxx/prefix
+          key: msan-libcxx-${{ hashFiles('tools/msan_libcxx.py') }}
+
+      - run: ./build.sh --preset linux-clang-libcxx-msan
+
+  macos-sanitizers:
+    name: macos-clang-libcxx / ${{ matrix.sanitizer }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sanitizer: [asan, ubsan, tsan]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: out/.envy
+          key: envy-macos-${{ hashFiles('envy.lua') }}
+      - run: ./build.sh --preset macos-clang-libcxx-${{ matrix.sanitizer }}
+
+  windows-sanitizers:
+    name: ${{ matrix.triple }} / ${{ matrix.sanitizer }}
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # MSVC has AddressSanitizer and no UBSan; clang-cl has UBSan and an
+          # ASan whose runtime never reaches the link line; neither Windows
+          # toolchain has a ThreadSanitizer.
+          - { triple: windows-msvc, sanitizer: asan }
+          - { triple: windows-clang, sanitizer: ubsan }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: out/.envy
+          key: envy-windows-${{ hashFiles('envy.lua') }}
+      - uses: ilammy/msvc-dev-cmd@v1
+      - run: .\build.bat --preset ${{ matrix.triple }}-${{ matrix.sanitizer }}
+        shell: cmd
+
+  # Branch coverage, and the gate that an untested file fails the build.
+
+  coverage:
+    name: coverage gate
+    runs-on: ubuntu-latest
+    container: ghcr.io/charlesnicholson/docker-image:latest
+    steps:
+      - name: Install what the image lacks
+        run: |
+          set -eux
+          apt-get update
+          apt-get install -y --no-install-recommends libc++-dev libc++abi-dev llvm
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: out/.envy
+          key: envy-linux-${{ hashFiles('envy.lua') }}
+      - run: ./build.sh --coverage --preset linux-clang-libcxx-coverage
+
+  # One job, one platform: clang-format's output moves between releases, so the
+  # gate wants one version, and the image is what pins it.
+
+  lint:
+    name: clang-format and clang-tidy
+    runs-on: ubuntu-latest
+    container: ghcr.io/charlesnicholson/docker-image:latest
+    steps:
+      - name: Install what the image lacks
+        run: |
+          set -eux
+          apt-get update
+          apt-get install -y --no-install-recommends clang-format clang-tidy libc++-dev libc++abi-dev
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: out/.envy
+          key: envy-lint-${{ hashFiles('envy.lua') }}
+
+      - name: clang-format --check
+        run: "$(./bin/envy product python3) tools/format.py --check"
+
+      # Runs as part of compilation, so a finding fails the build with a file and
+      # line rather than in a separate report.
+      - name: clang-tidy
+        run: >
+          ./build.sh --preset linux-clang-libcxx-debug --no-test
+          -- -DSCAV_CLANG_TIDY=ON
+
+  # The one check branch protection names. Jobs come and go; this does not, so
+  # adding or retiring a row is a workflow edit rather than a repository settings
+  # change -- and an old commit rebuilt years from now still reports against a
+  # name that exists.
+  #
+  # `if: always()` with an explicit result check, because a job that merely
+  # `needs:` a failed job is *skipped*, and a skipped required check does not
+  # block a merge.
+
+  all-checks-pass:
+    name: all checks pass
+    if: always()
+    needs:
+      - linux
+      - macos
+      - windows
+      - linux-sanitizers
+      - linux-msan
+      - macos-sanitizers
+      - windows-sanitizers
+      - coverage
+      - lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report
+        run: echo '${{ toJSON(needs) }}'
+      - name: Fail unless every job succeeded
+        if: contains(needs.*.result, 'failure')
+          || contains(needs.*.result, 'cancelled')
+          || contains(needs.*.result, 'skipped')
+        run: exit 1

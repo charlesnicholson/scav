@@ -1,0 +1,4 @@
+CompileFlags:
+  # The build driver keeps out/compile_commands.json pointed at the tree you last
+  # built.
+  CompilationDatabase: out

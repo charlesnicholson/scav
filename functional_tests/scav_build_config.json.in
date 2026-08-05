@@ -1,0 +1,19 @@
+{
+  "repo_root": "@SCAV_FT_SOURCE_DIR@",
+  "build_dir": "@SCAV_FT_BINARY_DIR@",
+  "scratch_dir": "@SCAV_FT_BINARY_DIR@/test",
+  "cmake": "@SCAV_FT_CMAKE@",
+  "ctest": "@SCAV_FT_CTEST@",
+  "generator": "@CMAKE_GENERATOR@",
+  "make_program": "@SCAV_FT_MAKE_PROGRAM@",
+  "build_type": "@CMAKE_BUILD_TYPE@",
+  "cxx_compiler": "@SCAV_FT_CXX_COMPILER@",
+  "doctest_include_dir": "@SCAV_FT_DOCTEST_DIR@",
+  "python": "@SCAV_FT_PYTHON@",
+  "cxx_flags": "@CMAKE_CXX_FLAGS@",
+  "exe_linker_flags": "@CMAKE_EXE_LINKER_FLAGS@",
+  "sanitizer": "@SCAV_SANITIZER@",
+  "coverage": "@SCAV_COVERAGE@",
+  "testing_define": "@SCAV_TESTING@",
+  "version": "@PROJECT_VERSION@"
+}
