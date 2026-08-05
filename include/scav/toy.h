@@ -4,16 +4,14 @@
 // Bootstrap scaffolding, deliberately nothing more: one library with one function,
 // so the harness is proven before any scav code is measured against it.
 
+#include "scav/types.h"
+
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// uint8_t need not alias an object representation; std::byte cannot do arithmetic.
-// NOLINTNEXTLINE(modernize-use-using)
-typedef unsigned char scav_byte;
 
 // FNV-1a, deliberately *not* scav's hash: a real one would invite treating this
 // golden as a determinism artifact.

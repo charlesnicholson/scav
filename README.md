@@ -3,11 +3,29 @@
 Statechart authoring, layout, rendering. [PRD.md](PRD.md) is the normative design
 document; everything below describes what is built.
 
-**Status: bootstrap.** There is no scav code yet. This tree is the harness every
-later phase is measured on, so the first real phase's exit gate is a CI result
-rather than a claim. What ships today is `libscavtoy`: one static library, one
-function, one golden, and one deliberately-failing test to prove failures are
+**Status: P0 — the language, the lexer, and the parser.** `libscavcore` reads a
+`.scav` document from a byte span and produces the front-end slice of the model:
+normalized `src_bytes`, `Document`, `Statement`, trivia, and a two-pass-interned
+string pool (§7). No entity arrays, no includes, no resolution — those are P1 and
+P2. `libscavtoy` stays behind as the harness's own proof that failures get
 reported.
+
+Three properties of the front end are worth knowing before reading it:
+
+- **Lexing and parsing are separate passes over a materialized token vector**, not
+  a pull loop. `lex()` returns every token at once; the parser walks the array by
+  index. That is what makes the two separately timeable and separately fuzzable,
+  which P0's exit gate asks for, and it costs about 2× the input in transient
+  memory — measured, not assumed, by `perf: peak memory is a bounded multiple of
+  the input`.
+- **The descent is an explicit `std::vector` of frames, not the call stack.**
+  Nesting depth is attacker-controlled, so a call-recursive parser answers a
+  hostile document with a stack overflow. Here the depth cap is an ordinary
+  comparison and the answer is a diagnostic. Same reason the trivia-attachment
+  walk and the synthetic generator are iterative.
+- **Nothing takes a path.** Parsing takes bytes; acquiring bytes is a different
+  system (§16.2). There is no file I/O anywhere in core yet, and the unit tests
+  carry their charts as inline literals rather than as fixtures on disk.
 
 ## Build
 
@@ -65,8 +83,29 @@ cmake --build build && ctest --test-dir build
 | `src/<subsystem>/` | sources with their unit tests adjacent |
 | `test_data/golden/` | committed goldens, layered by stage |
 | `functional_tests/` | Python 3.14, standard library only |
-| `tools/` | build driver, preset generator, coverage gate, MSan libc++ builder. Run them with `$(./bin/envy product python3)` |
+| `tools/` | build driver, preset generator, coverage gate, MSan libc++ builder, Unicode table generator. Run them with `$(./bin/envy product python3)` |
 | `out/` | gitignored: all build output plus the envy cache |
+
+## The Unicode tables
+
+Text is normalized on read — BOM stripped, line endings folded to LF, UTF-8
+validated, NFC applied (§6) — because `core.autocrlf` on Windows and NFD on macOS
+otherwise put different bytes in the string pool from the same commit, and the
+format hash follows the pool.
+
+NFC needs a table. `src/core/lang/unicode_nfc_tables.inc` is generated from the
+UCD and committed, so a build needs neither the network nor Python. The
+conformance vectors beside it are Unicode's own `NormalizationTest.txt`, thinned
+where it repeats itself. Regenerate only when the pinned Unicode version moves —
+**it is a determinism input**, so bumping it can change the string pool for a
+document containing characters assigned after the current version:
+
+```
+$(./bin/envy product python3) tools/gen_unicode_tables.py --download
+```
+
+Hangul is algorithmic in both directions and has no table entry at all, which is
+why the tests walk all 11,172 syllables rather than trusting a lookup.
 
 ## What the harness enforces
 

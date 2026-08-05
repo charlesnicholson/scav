@@ -116,7 +116,7 @@ Mirrors `~/src/envy`: SHA-pinned deps under `cmake/deps/`, unit tests adjacent t
 ```
 include/scav/          public C ABI headers, one per library
 src/core/model/        columnar aggregates, ids, string pool, builder, validation
-src/core/format/       .scav lexer, parser, canonical printer, JSON dump, includes, resolution
+src/core/lang/         .scav lexer, parser, canonical printer, JSON dump, includes, resolution
 src/layout/            space requests, phases 0-3, routers, cost, thread shim
 src/draw/              DrawList type, text metrics, helpers, reference builder
 src/svg/               reference SVG backend
