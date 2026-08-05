@@ -48,11 +48,12 @@ jobs:
 
       - uses: actions/checkout@v4
 
+      # No restore-keys: a bundle is cached under its identity, so a manifest that
+      # moves the pinned ref would keep resolving the old specs from a prefix hit.
       - uses: actions/cache@v4
         with:
           path: out/.envy
           key: envy-linux-${{ hashFiles('envy.lua') }}
-          restore-keys: envy-linux-
 
       - run: ./build.sh --preset ${{ matrix.triple }}-${{ matrix.config }}
 
@@ -70,7 +71,6 @@ jobs:
         with:
           path: out/.envy
           key: envy-macos-${{ hashFiles('envy.lua') }}
-          restore-keys: envy-macos-
 
       # Deliberately no setup-python and no brew install: the image has all three,
       # and using them would fail the provisioning test, which is what it is for.
@@ -91,7 +91,6 @@ jobs:
         with:
           path: out/.envy
           key: envy-windows-${{ hashFiles('envy.lua') }}
-          restore-keys: envy-windows-
 
       # Puts cl.exe and the MSVC STL on the environment, which both Windows
       # toolchains need. A system compiler, not a build tool.
@@ -139,7 +138,6 @@ jobs:
         with:
           path: out/.envy
           key: envy-linux-${{ hashFiles('envy.lua') }}
-          restore-keys: envy-linux-
 
       - run: ./build.sh --preset ${{ matrix.triple }}-${{ matrix.sanitizer }}
 
@@ -163,7 +161,6 @@ jobs:
         with:
           path: out/.envy
           key: envy-linux-${{ hashFiles('envy.lua') }}
-          restore-keys: envy-linux-
 
       # Keyed on the script, which is where the version and hash are pinned. A miss
       # costs one build; a stale hit costs a phantom finding, which is worse.
@@ -187,7 +184,6 @@ jobs:
         with:
           path: out/.envy
           key: envy-macos-${{ hashFiles('envy.lua') }}
-          restore-keys: envy-macos-
       - run: ./build.sh --preset macos-clang-libcxx-${{ matrix.sanitizer }}
 
   windows-sanitizers:
@@ -208,7 +204,6 @@ jobs:
         with:
           path: out/.envy
           key: envy-windows-${{ hashFiles('envy.lua') }}
-          restore-keys: envy-windows-
       - uses: ilammy/msvc-dev-cmd@v1
       - run: .\build.bat --preset ${{ matrix.triple }}-${{ matrix.sanitizer }}
         shell: cmd
@@ -233,7 +228,6 @@ jobs:
         with:
           path: out/.envy
           key: envy-linux-${{ hashFiles('envy.lua') }}
-          restore-keys: envy-linux-
       - run: ./build.sh --coverage --preset linux-clang-libcxx-coverage
 
   # One job, one platform: the pinned clang-format produces the same bytes
@@ -257,7 +251,6 @@ jobs:
         with:
           path: out/.envy
           key: envy-lint-${{ hashFiles('envy.lua', 'envy/scav.clang-tools.lua') }}
-          restore-keys: envy-lint-
 
       - run: ./bin/envy sync
 
