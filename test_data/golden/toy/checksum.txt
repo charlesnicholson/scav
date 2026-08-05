@@ -1,0 +1,8 @@
+empty	cbf29ce484222325
+nul	af63bd4c8601b7df
+a	af63dc4c8601ec8c
+foobar	85944171f73967e8
+scav	f75ced18b5176da0
+all-bytes-ascending	4242dc5249c33625
+all-bytes-descending	02a06ff442d86525
+high-bit-run	84cc4da0e20ecde5

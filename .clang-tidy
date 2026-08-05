@@ -1,0 +1,57 @@
+# Every check is on because a language or determinism rule names it; the disabled
+# ones are off because a rule contradicts them.
+Checks: >
+  -*,
+  bugprone-*,
+  cert-*,
+  clang-analyzer-*,
+  cppcoreguidelines-init-variables,
+  cppcoreguidelines-narrowing-conversions,
+  cppcoreguidelines-slicing,
+  google-runtime-int,
+  misc-*,
+  modernize-*,
+  performance-*,
+  portability-*,
+  readability-*,
+  -bugprone-easily-swappable-parameters,
+  -misc-const-correctness,
+  -misc-include-cleaner,
+  -misc-non-private-member-variables-in-classes,
+  -misc-no-recursion,
+  -modernize-use-trailing-return-type,
+  -readability-function-cognitive-complexity,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -readability-math-missing-parentheses
+
+# google-runtime-int is load-bearing: `long` is 32-bit on MSVC and plain `char`
+# signedness differs between x86 and ARM, so both are banned outright.
+
+# misc-const-correctness false-positives on a loop accumulator, and magic-numbers
+# fires on tables and hash constants that are numbers by nature.
+
+WarningsAsErrors: '*'
+HeaderFilterRegex: '(include/scav|src)/.*'
+FormatStyle: file
+
+CheckOptions:
+  readability-identifier-naming.StructCase: CamelCase
+  readability-identifier-naming.ClassCase: CamelCase
+  readability-identifier-naming.EnumCase: CamelCase
+  readability-identifier-naming.EnumConstantCase: CamelCase
+  readability-identifier-naming.FunctionCase: lower_case
+  readability-identifier-naming.VariableCase: lower_case
+  readability-identifier-naming.ParameterCase: lower_case
+  readability-identifier-naming.MemberCase: lower_case
+  readability-identifier-naming.NamespaceCase: lower_case
+  readability-identifier-naming.MacroDefinitionCase: UPPER_CASE
+  readability-identifier-naming.GlobalConstantCase: UPPER_CASE
+  readability-identifier-naming.StaticConstantCase: UPPER_CASE
+  # A compile-time constant reads as one; a `const` local computed by an IIFE is an
+  # ordinary variable and stays lower_case.
+  readability-identifier-naming.ConstexprVariableCase: UPPER_CASE
+  readability-identifier-naming.MacroDefinitionIgnoredRegex: '(DOCTEST|SCAV)_.*'
+  # A `char const*` is permitted at the C ABI for NUL-terminated input names, so
+  # pointer arithmetic on one is not a smell here.
+  cppcoreguidelines-pro-bounds-pointer-arithmetic.WarnOnly: 'true'

@@ -1,0 +1,4 @@
+# LeakSanitizer suppressions, used alongside ASan on Linux. Empty on purpose: a
+# leak in scav's own code is a bug, not a suppression.
+
+# Format: `leak:<function or library substring>`.

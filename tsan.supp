@@ -1,0 +1,4 @@
+# ThreadSanitizer suppressions, empty on purpose: scav's output is a pure function
+# of its input, so a data race here is a determinism bug.
+
+# Format: `race:`, `deadlock:` or `called_from_lib:`.

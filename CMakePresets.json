@@ -1,0 +1,1072 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 28,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "description": "CMake + Ninja, and everything scav generates lands under out/, one gitignored directory. Build trees are named for the preset that made them, so a factory reset is `rm -rf out`.",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/${presetName}",
+      "installDir": "${sourceDir}/out/${presetName}/install",
+      "cacheVariables": {
+        "SCAV_WARNINGS_AS_ERRORS": "ON"
+      }
+    },
+    {
+      "name": "cfg-debug",
+      "hidden": true,
+      "inherits": "base",
+      "description": "Matrix configuration 1 of 3.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "cfg-release",
+      "hidden": true,
+      "inherits": "base",
+      "description": "Matrix configuration 2 of 3.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "cfg-testable",
+      "hidden": true,
+      "inherits": "base",
+      "description": "Matrix configuration 3 of 3. Release plus SCAV_TESTING, so the shipping libraries compile with SCAV_INTERNAL at external linkage. All layout arithmetic is integer, so this must produce byte-identical output to release; divergence means undefined behaviour somewhere.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "SCAV_TESTING": "ON"
+      }
+    },
+    {
+      "name": "cfg-sanitize",
+      "hidden": true,
+      "inherits": "base",
+      "description": "Not a matrix configuration. Sanitizers are their own test class and are timing-independent, so they run at -O2 -g rather than adding a fourth configuration to the matrix.",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+      }
+    },
+    {
+      "name": "t-macos-clang-libcxx",
+      "hidden": true,
+      "description": "Platform triple: macOS / clang / libc++. Realizable triples only, chosen to span the axes that historically diverge: three standard libraries, three vendors' codegen, LP64 vs LLP64, and x86_64 vs arm64.",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "clang++"
+      }
+    },
+    {
+      "name": "t-linux-clang-libcxx",
+      "hidden": true,
+      "description": "Platform triple: Linux / clang / libc++. Realizable triples only, chosen to span the axes that historically diverge: three standard libraries, three vendors' codegen, LP64 vs LLP64, and x86_64 vs arm64.",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_CXX_FLAGS": "-stdlib=libc++",
+        "CMAKE_EXE_LINKER_FLAGS": "-stdlib=libc++"
+      }
+    },
+    {
+      "name": "t-linux-clang-libstdcxx",
+      "hidden": true,
+      "description": "Platform triple: Linux / clang / libstdc++. Realizable triples only, chosen to span the axes that historically diverge: three standard libraries, three vendors' codegen, LP64 vs LLP64, and x86_64 vs arm64.",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_CXX_FLAGS": "-stdlib=libstdc++",
+        "CMAKE_EXE_LINKER_FLAGS": "-stdlib=libstdc++"
+      }
+    },
+    {
+      "name": "t-linux-gcc-libstdcxx",
+      "hidden": true,
+      "description": "Platform triple: Linux / gcc / libstdc++. Realizable triples only, chosen to span the axes that historically diverge: three standard libraries, three vendors' codegen, LP64 vs LLP64, and x86_64 vs arm64.",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "g++"
+      }
+    },
+    {
+      "name": "t-windows-msvc",
+      "hidden": true,
+      "description": "Platform triple: Windows / MSVC / MSVC STL. Realizable triples only, chosen to span the axes that historically diverge: three standard libraries, three vendors' codegen, LP64 vs LLP64, and x86_64 vs arm64.",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "cl"
+      }
+    },
+    {
+      "name": "t-windows-clang",
+      "hidden": true,
+      "description": "Platform triple: Windows / clang / MSVC STL. Realizable triples only, chosen to span the axes that historically diverge: three standard libraries, three vendors' codegen, LP64 vs LLP64, and x86_64 vs arm64.",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_COMPILER": "clang-cl"
+      }
+    },
+    {
+      "name": "macos-clang-libcxx-debug",
+      "displayName": "macOS / clang / libc++ -- debug",
+      "inherits": [
+        "t-macos-clang-libcxx",
+        "cfg-debug"
+      ]
+    },
+    {
+      "name": "macos-clang-libcxx-release",
+      "displayName": "macOS / clang / libc++ -- release",
+      "inherits": [
+        "t-macos-clang-libcxx",
+        "cfg-release"
+      ]
+    },
+    {
+      "name": "macos-clang-libcxx-testable",
+      "displayName": "macOS / clang / libc++ -- testable",
+      "inherits": [
+        "t-macos-clang-libcxx",
+        "cfg-testable"
+      ]
+    },
+    {
+      "name": "linux-clang-libcxx-debug",
+      "displayName": "Linux / clang / libc++ -- debug",
+      "inherits": [
+        "t-linux-clang-libcxx",
+        "cfg-debug"
+      ]
+    },
+    {
+      "name": "linux-clang-libcxx-release",
+      "displayName": "Linux / clang / libc++ -- release",
+      "inherits": [
+        "t-linux-clang-libcxx",
+        "cfg-release"
+      ]
+    },
+    {
+      "name": "linux-clang-libcxx-testable",
+      "displayName": "Linux / clang / libc++ -- testable",
+      "inherits": [
+        "t-linux-clang-libcxx",
+        "cfg-testable"
+      ]
+    },
+    {
+      "name": "linux-clang-libstdcxx-debug",
+      "displayName": "Linux / clang / libstdc++ -- debug",
+      "inherits": [
+        "t-linux-clang-libstdcxx",
+        "cfg-debug"
+      ]
+    },
+    {
+      "name": "linux-clang-libstdcxx-release",
+      "displayName": "Linux / clang / libstdc++ -- release",
+      "inherits": [
+        "t-linux-clang-libstdcxx",
+        "cfg-release"
+      ]
+    },
+    {
+      "name": "linux-clang-libstdcxx-testable",
+      "displayName": "Linux / clang / libstdc++ -- testable",
+      "inherits": [
+        "t-linux-clang-libstdcxx",
+        "cfg-testable"
+      ]
+    },
+    {
+      "name": "linux-gcc-libstdcxx-debug",
+      "displayName": "Linux / gcc / libstdc++ -- debug",
+      "inherits": [
+        "t-linux-gcc-libstdcxx",
+        "cfg-debug"
+      ]
+    },
+    {
+      "name": "linux-gcc-libstdcxx-release",
+      "displayName": "Linux / gcc / libstdc++ -- release",
+      "inherits": [
+        "t-linux-gcc-libstdcxx",
+        "cfg-release"
+      ]
+    },
+    {
+      "name": "linux-gcc-libstdcxx-testable",
+      "displayName": "Linux / gcc / libstdc++ -- testable",
+      "inherits": [
+        "t-linux-gcc-libstdcxx",
+        "cfg-testable"
+      ]
+    },
+    {
+      "name": "windows-msvc-debug",
+      "displayName": "Windows / MSVC / MSVC STL -- debug",
+      "inherits": [
+        "t-windows-msvc",
+        "cfg-debug"
+      ]
+    },
+    {
+      "name": "windows-msvc-release",
+      "displayName": "Windows / MSVC / MSVC STL -- release",
+      "inherits": [
+        "t-windows-msvc",
+        "cfg-release"
+      ]
+    },
+    {
+      "name": "windows-msvc-testable",
+      "displayName": "Windows / MSVC / MSVC STL -- testable",
+      "inherits": [
+        "t-windows-msvc",
+        "cfg-testable"
+      ]
+    },
+    {
+      "name": "windows-clang-debug",
+      "displayName": "Windows / clang / MSVC STL -- debug",
+      "inherits": [
+        "t-windows-clang",
+        "cfg-debug"
+      ]
+    },
+    {
+      "name": "windows-clang-release",
+      "displayName": "Windows / clang / MSVC STL -- release",
+      "inherits": [
+        "t-windows-clang",
+        "cfg-release"
+      ]
+    },
+    {
+      "name": "windows-clang-testable",
+      "displayName": "Windows / clang / MSVC STL -- testable",
+      "inherits": [
+        "t-windows-clang",
+        "cfg-testable"
+      ]
+    },
+    {
+      "name": "macos-clang-libcxx-asan",
+      "displayName": "macOS / clang / libc++ -- ASAN",
+      "inherits": [
+        "t-macos-clang-libcxx",
+        "cfg-sanitize"
+      ],
+      "cacheVariables": {
+        "SCAV_SANITIZER": "ASAN"
+      }
+    },
+    {
+      "name": "linux-clang-libcxx-asan",
+      "displayName": "Linux / clang / libc++ -- ASAN",
+      "inherits": [
+        "t-linux-clang-libcxx",
+        "cfg-sanitize"
+      ],
+      "cacheVariables": {
+        "SCAV_SANITIZER": "ASAN"
+      }
+    },
+    {
+      "name": "linux-clang-libstdcxx-asan",
+      "displayName": "Linux / clang / libstdc++ -- ASAN",
+      "inherits": [
+        "t-linux-clang-libstdcxx",
+        "cfg-sanitize"
+      ],
+      "cacheVariables": {
+        "SCAV_SANITIZER": "ASAN"
+      }
+    },
+    {
+      "name": "linux-gcc-libstdcxx-asan",
+      "displayName": "Linux / gcc / libstdc++ -- ASAN",
+      "inherits": [
+        "t-linux-gcc-libstdcxx",
+        "cfg-sanitize"
+      ],
+      "cacheVariables": {
+        "SCAV_SANITIZER": "ASAN"
+      }
+    },
+    {
+      "name": "windows-msvc-asan",
+      "displayName": "Windows / MSVC / MSVC STL -- ASAN",
+      "inherits": [
+        "t-windows-msvc",
+        "cfg-sanitize"
+      ],
+      "cacheVariables": {
+        "SCAV_SANITIZER": "ASAN"
+      }
+    },
+    {
+      "name": "macos-clang-libcxx-ubsan",
+      "displayName": "macOS / clang / libc++ -- UBSAN",
+      "inherits": [
+        "t-macos-clang-libcxx",
+        "cfg-sanitize"
+      ],
+      "cacheVariables": {
+        "SCAV_SANITIZER": "UBSAN"
+      }
+    },
+    {
+      "name": "linux-clang-libcxx-ubsan",
+      "displayName": "Linux / clang / libc++ -- UBSAN",
+      "inherits": [
+        "t-linux-clang-libcxx",
+        "cfg-sanitize"
+      ],
+      "cacheVariables": {
+        "SCAV_SANITIZER": "UBSAN"
+      }
+    },
+    {
+      "name": "linux-clang-libstdcxx-ubsan",
+      "displayName": "Linux / clang / libstdc++ -- UBSAN",
+      "inherits": [
+        "t-linux-clang-libstdcxx",
+        "cfg-sanitize"
+      ],
+      "cacheVariables": {
+        "SCAV_SANITIZER": "UBSAN"
+      }
+    },
+    {
+      "name": "linux-gcc-libstdcxx-ubsan",
+      "displayName": "Linux / gcc / libstdc++ -- UBSAN",
+      "inherits": [
+        "t-linux-gcc-libstdcxx",
+        "cfg-sanitize"
+      ],
+      "cacheVariables": {
+        "SCAV_SANITIZER": "UBSAN"
+      }
+    },
+    {
+      "name": "windows-clang-ubsan",
+      "displayName": "Windows / clang / MSVC STL -- UBSAN",
+      "inherits": [
+        "t-windows-clang",
+        "cfg-sanitize"
+      ],
+      "cacheVariables": {
+        "SCAV_SANITIZER": "UBSAN"
+      }
+    },
+    {
+      "name": "macos-clang-libcxx-tsan",
+      "displayName": "macOS / clang / libc++ -- TSAN",
+      "inherits": [
+        "t-macos-clang-libcxx",
+        "cfg-sanitize"
+      ],
+      "cacheVariables": {
+        "SCAV_SANITIZER": "TSAN"
+      }
+    },
+    {
+      "name": "linux-clang-libcxx-tsan",
+      "displayName": "Linux / clang / libc++ -- TSAN",
+      "inherits": [
+        "t-linux-clang-libcxx",
+        "cfg-sanitize"
+      ],
+      "cacheVariables": {
+        "SCAV_SANITIZER": "TSAN"
+      }
+    },
+    {
+      "name": "linux-clang-libstdcxx-tsan",
+      "displayName": "Linux / clang / libstdc++ -- TSAN",
+      "inherits": [
+        "t-linux-clang-libstdcxx",
+        "cfg-sanitize"
+      ],
+      "cacheVariables": {
+        "SCAV_SANITIZER": "TSAN"
+      }
+    },
+    {
+      "name": "linux-gcc-libstdcxx-tsan",
+      "displayName": "Linux / gcc / libstdc++ -- TSAN",
+      "inherits": [
+        "t-linux-gcc-libstdcxx",
+        "cfg-sanitize"
+      ],
+      "cacheVariables": {
+        "SCAV_SANITIZER": "TSAN"
+      }
+    },
+    {
+      "name": "linux-clang-libcxx-msan",
+      "displayName": "Linux / clang / libc++ -- MSAN",
+      "inherits": [
+        "t-linux-clang-libcxx",
+        "cfg-sanitize"
+      ],
+      "cacheVariables": {
+        "SCAV_SANITIZER": "MSAN",
+        "CMAKE_CXX_FLAGS": "",
+        "CMAKE_EXE_LINKER_FLAGS": ""
+      }
+    },
+    {
+      "name": "macos-clang-libcxx-coverage",
+      "displayName": "macOS / clang / libc++ -- branch coverage",
+      "inherits": [
+        "t-macos-clang-libcxx",
+        "cfg-debug"
+      ],
+      "cacheVariables": {
+        "SCAV_COVERAGE": "ON"
+      }
+    },
+    {
+      "name": "linux-clang-libcxx-coverage",
+      "displayName": "Linux / clang / libc++ -- branch coverage",
+      "inherits": [
+        "t-linux-clang-libcxx",
+        "cfg-debug"
+      ],
+      "cacheVariables": {
+        "SCAV_COVERAGE": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "macos-clang-libcxx-debug",
+      "configurePreset": "macos-clang-libcxx-debug",
+      "jobs": 0
+    },
+    {
+      "name": "macos-clang-libcxx-release",
+      "configurePreset": "macos-clang-libcxx-release",
+      "jobs": 0
+    },
+    {
+      "name": "macos-clang-libcxx-testable",
+      "configurePreset": "macos-clang-libcxx-testable",
+      "jobs": 0
+    },
+    {
+      "name": "linux-clang-libcxx-debug",
+      "configurePreset": "linux-clang-libcxx-debug",
+      "jobs": 0
+    },
+    {
+      "name": "linux-clang-libcxx-release",
+      "configurePreset": "linux-clang-libcxx-release",
+      "jobs": 0
+    },
+    {
+      "name": "linux-clang-libcxx-testable",
+      "configurePreset": "linux-clang-libcxx-testable",
+      "jobs": 0
+    },
+    {
+      "name": "linux-clang-libstdcxx-debug",
+      "configurePreset": "linux-clang-libstdcxx-debug",
+      "jobs": 0
+    },
+    {
+      "name": "linux-clang-libstdcxx-release",
+      "configurePreset": "linux-clang-libstdcxx-release",
+      "jobs": 0
+    },
+    {
+      "name": "linux-clang-libstdcxx-testable",
+      "configurePreset": "linux-clang-libstdcxx-testable",
+      "jobs": 0
+    },
+    {
+      "name": "linux-gcc-libstdcxx-debug",
+      "configurePreset": "linux-gcc-libstdcxx-debug",
+      "jobs": 0
+    },
+    {
+      "name": "linux-gcc-libstdcxx-release",
+      "configurePreset": "linux-gcc-libstdcxx-release",
+      "jobs": 0
+    },
+    {
+      "name": "linux-gcc-libstdcxx-testable",
+      "configurePreset": "linux-gcc-libstdcxx-testable",
+      "jobs": 0
+    },
+    {
+      "name": "windows-msvc-debug",
+      "configurePreset": "windows-msvc-debug",
+      "jobs": 0
+    },
+    {
+      "name": "windows-msvc-release",
+      "configurePreset": "windows-msvc-release",
+      "jobs": 0
+    },
+    {
+      "name": "windows-msvc-testable",
+      "configurePreset": "windows-msvc-testable",
+      "jobs": 0
+    },
+    {
+      "name": "windows-clang-debug",
+      "configurePreset": "windows-clang-debug",
+      "jobs": 0
+    },
+    {
+      "name": "windows-clang-release",
+      "configurePreset": "windows-clang-release",
+      "jobs": 0
+    },
+    {
+      "name": "windows-clang-testable",
+      "configurePreset": "windows-clang-testable",
+      "jobs": 0
+    },
+    {
+      "name": "macos-clang-libcxx-asan",
+      "configurePreset": "macos-clang-libcxx-asan",
+      "jobs": 0
+    },
+    {
+      "name": "linux-clang-libcxx-asan",
+      "configurePreset": "linux-clang-libcxx-asan",
+      "jobs": 0
+    },
+    {
+      "name": "linux-clang-libstdcxx-asan",
+      "configurePreset": "linux-clang-libstdcxx-asan",
+      "jobs": 0
+    },
+    {
+      "name": "linux-gcc-libstdcxx-asan",
+      "configurePreset": "linux-gcc-libstdcxx-asan",
+      "jobs": 0
+    },
+    {
+      "name": "windows-msvc-asan",
+      "configurePreset": "windows-msvc-asan",
+      "jobs": 0
+    },
+    {
+      "name": "macos-clang-libcxx-ubsan",
+      "configurePreset": "macos-clang-libcxx-ubsan",
+      "jobs": 0
+    },
+    {
+      "name": "linux-clang-libcxx-ubsan",
+      "configurePreset": "linux-clang-libcxx-ubsan",
+      "jobs": 0
+    },
+    {
+      "name": "linux-clang-libstdcxx-ubsan",
+      "configurePreset": "linux-clang-libstdcxx-ubsan",
+      "jobs": 0
+    },
+    {
+      "name": "linux-gcc-libstdcxx-ubsan",
+      "configurePreset": "linux-gcc-libstdcxx-ubsan",
+      "jobs": 0
+    },
+    {
+      "name": "windows-clang-ubsan",
+      "configurePreset": "windows-clang-ubsan",
+      "jobs": 0
+    },
+    {
+      "name": "macos-clang-libcxx-tsan",
+      "configurePreset": "macos-clang-libcxx-tsan",
+      "jobs": 0
+    },
+    {
+      "name": "linux-clang-libcxx-tsan",
+      "configurePreset": "linux-clang-libcxx-tsan",
+      "jobs": 0
+    },
+    {
+      "name": "linux-clang-libstdcxx-tsan",
+      "configurePreset": "linux-clang-libstdcxx-tsan",
+      "jobs": 0
+    },
+    {
+      "name": "linux-gcc-libstdcxx-tsan",
+      "configurePreset": "linux-gcc-libstdcxx-tsan",
+      "jobs": 0
+    },
+    {
+      "name": "linux-clang-libcxx-msan",
+      "configurePreset": "linux-clang-libcxx-msan",
+      "jobs": 0
+    },
+    {
+      "name": "macos-clang-libcxx-coverage",
+      "configurePreset": "macos-clang-libcxx-coverage",
+      "jobs": 0
+    },
+    {
+      "name": "linux-clang-libcxx-coverage",
+      "configurePreset": "linux-clang-libcxx-coverage",
+      "jobs": 0
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "macos-clang-libcxx-debug",
+      "configurePreset": "macos-clang-libcxx-debug",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "macos-clang-libcxx-release",
+      "configurePreset": "macos-clang-libcxx-release",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "macos-clang-libcxx-testable",
+      "configurePreset": "macos-clang-libcxx-testable",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "linux-clang-libcxx-debug",
+      "configurePreset": "linux-clang-libcxx-debug",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "linux-clang-libcxx-release",
+      "configurePreset": "linux-clang-libcxx-release",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "linux-clang-libcxx-testable",
+      "configurePreset": "linux-clang-libcxx-testable",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "linux-clang-libstdcxx-debug",
+      "configurePreset": "linux-clang-libstdcxx-debug",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "linux-clang-libstdcxx-release",
+      "configurePreset": "linux-clang-libstdcxx-release",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "linux-clang-libstdcxx-testable",
+      "configurePreset": "linux-clang-libstdcxx-testable",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "linux-gcc-libstdcxx-debug",
+      "configurePreset": "linux-gcc-libstdcxx-debug",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "linux-gcc-libstdcxx-release",
+      "configurePreset": "linux-gcc-libstdcxx-release",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "linux-gcc-libstdcxx-testable",
+      "configurePreset": "linux-gcc-libstdcxx-testable",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "windows-msvc-debug",
+      "configurePreset": "windows-msvc-debug",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "windows-msvc-release",
+      "configurePreset": "windows-msvc-release",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "windows-msvc-testable",
+      "configurePreset": "windows-msvc-testable",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "windows-clang-debug",
+      "configurePreset": "windows-clang-debug",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "windows-clang-release",
+      "configurePreset": "windows-clang-release",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "windows-clang-testable",
+      "configurePreset": "windows-clang-testable",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "macos-clang-libcxx-asan",
+      "configurePreset": "macos-clang-libcxx-asan",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "linux-clang-libcxx-asan",
+      "configurePreset": "linux-clang-libcxx-asan",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "linux-clang-libstdcxx-asan",
+      "configurePreset": "linux-clang-libstdcxx-asan",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "linux-gcc-libstdcxx-asan",
+      "configurePreset": "linux-gcc-libstdcxx-asan",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "windows-msvc-asan",
+      "configurePreset": "windows-msvc-asan",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "macos-clang-libcxx-ubsan",
+      "configurePreset": "macos-clang-libcxx-ubsan",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "linux-clang-libcxx-ubsan",
+      "configurePreset": "linux-clang-libcxx-ubsan",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "linux-clang-libstdcxx-ubsan",
+      "configurePreset": "linux-clang-libstdcxx-ubsan",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "linux-gcc-libstdcxx-ubsan",
+      "configurePreset": "linux-gcc-libstdcxx-ubsan",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "windows-clang-ubsan",
+      "configurePreset": "windows-clang-ubsan",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "macos-clang-libcxx-tsan",
+      "configurePreset": "macos-clang-libcxx-tsan",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "linux-clang-libcxx-tsan",
+      "configurePreset": "linux-clang-libcxx-tsan",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "linux-clang-libstdcxx-tsan",
+      "configurePreset": "linux-clang-libstdcxx-tsan",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "linux-gcc-libstdcxx-tsan",
+      "configurePreset": "linux-gcc-libstdcxx-tsan",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "linux-clang-libcxx-msan",
+      "configurePreset": "linux-clang-libcxx-msan",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "macos-clang-libcxx-coverage",
+      "configurePreset": "macos-clang-libcxx-coverage",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "linux-clang-libcxx-coverage",
+      "configurePreset": "linux-clang-libcxx-coverage",
+      "output": {
+        "outputOnFailure": true,
+        "shortProgress": true
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    }
+  ]
+}
