@@ -442,7 +442,9 @@
         "cfg-sanitize"
       ],
       "cacheVariables": {
-        "SCAV_SANITIZER": "MSAN"
+        "SCAV_SANITIZER": "MSAN",
+        "CMAKE_CXX_FLAGS": "",
+        "CMAKE_EXE_LINKER_FLAGS": ""
       }
     },
     {

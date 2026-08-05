@@ -91,6 +91,12 @@ TRIPLE_DESCRIPTION_SUFFIX: str = (
 )
 
 
+def sanitizer_flags(san: str) -> Cache:
+    """MSan takes its standard library from the instrumented prefix, so the triple's
+    -stdlib= is both redundant and, under -Werror, an unused-argument error."""
+    return {"CMAKE_CXX_FLAGS": "", "CMAKE_EXE_LINKER_FLAGS": ""} if san == "msan" else {}
+
+
 def build_document() -> Preset:
     # Earlier entries in `inherits` win, so a triple's compiler choice takes
     # precedence over anything a configuration base sets.
@@ -113,7 +119,7 @@ def build_document() -> Preset:
           for t in TRIPLES for c in CONFIGS),
         *({"name": f"{t}-{san}", "displayName": f"{DESC[t]} -- {san.upper()}",
            "inherits": [f"t-{t}", "cfg-sanitize"],
-           "cacheVariables": {"SCAV_SANITIZER": san.upper()}}
+           "cacheVariables": {"SCAV_SANITIZER": san.upper(), **sanitizer_flags(san)}}
           for san, triples in SANITIZERS.items() for t in triples),
         *({"name": f"{t}-coverage", "displayName": f"{DESC[t]} -- branch coverage",
            "inherits": [f"t-{t}", "cfg-debug"],
