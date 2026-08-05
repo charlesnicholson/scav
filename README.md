@@ -102,14 +102,12 @@ document is a rule that gets discovered late:
 
 ## Formatting and clang-tidy
 
-**Linux only, and gated.** LLVM ships no tools-only archive, so provisioning
-`clang-format` means downloading its entire release — too much for every
-developer's machine, and its macOS builds are not published for every release. CI
-runs both on one Linux row, where the pinned binaries produce the same bytes they
-would anywhere:
+Both ship with the clang toolchain, so they come from wherever your compiler does.
+CI runs them on one Linux row against the version its container image pins —
+clang-format's output moves between releases, so a single version has to be the
+gate:
 
 ```
-SCAV_CLANG_TOOLS=1 ./bin/envy sync
 $(./bin/envy product python3) tools/format.py           # rewrite
 $(./bin/envy product python3) tools/format.py --check   # CI's gate
 ./build.sh -- -DSCAV_CLANG_TIDY=ON

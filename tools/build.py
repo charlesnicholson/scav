@@ -40,13 +40,9 @@ def run(*cmd: str | Path) -> None:
 
 
 def envy_product(name: str) -> Path:
-    """envy narrates to stderr and prints the path to stdout. The linter package is
-    gated, so the query has to unlock it or be told it does not exist."""
-    env = dict(os.environ)
-    if name.startswith("clang-"):
-        env["SCAV_CLANG_TOOLS"] = "1"
+    """envy narrates to stderr and prints the path to stdout."""
     out = subprocess.run(
-        [str(ENVY), "product", name], cwd=REPO_ROOT, check=True, env=env,
+        [str(ENVY), "product", name], cwd=REPO_ROOT, check=True,
         stdout=subprocess.PIPE, text=True,
     ).stdout.strip()
     if not out:
@@ -144,13 +140,6 @@ def main() -> int:
             cwd=REPO_ROOT, check=True, stdout=subprocess.PIPE, text=True,
         ).stdout.strip()
         extra.append(f"-DSCAV_MSAN_LIBCXX_DIR={libcxx}")
-
-    # Otherwise find_program picks up whatever version the machine has, and the
-    # check set moves between releases.
-    if any("SCAV_CLANG_TIDY=ON" in a for a in extra) and not any(
-        "SCAV_CLANG_TIDY_EXE" in a for a in extra
-    ):
-        extra.append(f"-DSCAV_CLANG_TIDY_EXE={envy_product('clang-tidy')}")
 
     run(cmake, "--preset", preset, f"-DCMAKE_MAKE_PROGRAM={ninja}",
         f"-DSCAV_DOCTEST_DIR={doctest}", f"-DPython3_EXECUTABLE={python}", *extra)
