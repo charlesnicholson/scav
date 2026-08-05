@@ -36,8 +36,8 @@ bootstraps itself, then provisions cmake, ninja, doctest, and python 3.14 into
 test scratch. `rm -rf out` is a factory reset, and nothing writes to `$HOME`.
 
 **Nothing comes from the system but the compiler.** cmake, ninja, doctest and
-python are envy's; scav never reaches for a system python, and CI's Linux rows
-install a compiler, curl and git into an otherwise empty container.
+python are envy's — CI's Linux container ships its own copies and scav ignores
+them, which `func.provisioning` enforces.
 
 ## Building without envy
 
@@ -102,8 +102,11 @@ document is a rule that gets discovered late:
 
 ## Formatting and clang-tidy
 
-Gated, because LLVM ships no tools-only archive and getting `clang-format` means
-downloading its entire release once — see the note in `envy.lua`:
+**Linux only, and gated.** LLVM ships no tools-only archive, so provisioning
+`clang-format` means downloading its entire release — too much for every
+developer's machine, and its macOS builds are not published for every release. CI
+runs both on one Linux row, where the pinned binaries produce the same bytes they
+would anywhere:
 
 ```
 SCAV_CLANG_TOOLS=1 ./bin/envy sync

@@ -1,8 +1,10 @@
 -- clang-format and clang-tidy, pinned: their output moves between releases, so an
 -- unpinned formatter turns a review into a diff about whitespace nobody wrote.
 
--- LLVM publishes no tools-only archive, so this downloads a whole release to
--- install two binaries. The cached package is small; the download is not.
+-- Linux only, and CI is the only place that wants it. LLVM publishes no tools-only
+-- archive, so this downloads a whole release to install two binaries -- too big to
+-- put on every developer's machine, and its macOS builds are not published for
+-- every release anyway.
 
 -- @envy schema "1"
 
@@ -11,50 +13,30 @@ EXPORTABLE = true
 
 OPTIONS = { version = { required = true, choices = { "21.1.8" } } }
 
--- Upstream's artifact naming is not consistent between platforms, and macOS
--- x86_64 is absent entirely, so that host gets a diagnostic rather than a 404.
+-- LLVM's Linux archives are published for every release. Its macOS ones are not --
+-- 21.1.0 has none at all, x86_64 stopped at 19.1.7, and the naming has changed
+-- twice -- which is why formatting and linting are a Linux job.
 local function platform_key()
-  if envy.PLATFORM == "darwin" then
-    assert(envy.ARCH == "arm64",
-      "LLVM publishes no macOS x86_64 release archive; clang-format and " ..
-      "clang-tidy are unavailable on this host")
-    return "macOS-ARM64"
-  elseif envy.PLATFORM == "linux" then
-    return (envy.ARCH == "x86_64") and "Linux-X64" or "Linux-ARM64"
-  elseif envy.PLATFORM == "windows" then
-    return (envy.ARCH == "x86_64") and "x86_64-pc-windows-msvc"
-        or "aarch64-pc-windows-msvc"
-  end
-  error("unsupported platform: " .. envy.PLATFORM)
-end
-
-local function archive_name(version, key)
-  if envy.PLATFORM == "windows" then
-    return "clang+llvm-" .. version .. "-" .. key .. ".tar.xz"
-  end
-  return "LLVM-" .. version .. "-" .. key .. ".tar.xz"
+  assert(envy.PLATFORM == "linux",
+    "clang-format and clang-tidy are provisioned on Linux only; formatting and " ..
+    "linting are gated in CI rather than on every developer's machine")
+  return (envy.ARCH == "x86_64") and "Linux-X64" or "Linux-ARM64"
 end
 
 -- Hashes come from the release assets' own `digest` field on the GitHub releases
 -- API, not recomputed locally.
 local SHA256 = {
   ["21.1.8"] = {
-    ["macOS-ARM64"] =
-    "b95bdd32a33a81ee4d40363aaeb26728a26783fcef26a4d80f65457433ea4669",
     ["Linux-X64"] =
     "b3b7f2801d15d50736acea3c73982994d025b01c2f035b91ae3b49d1b575732b",
     ["Linux-ARM64"] =
     "65ce0b329514e5643407db2d02a5bd34bf33d159055dafa82825c8385bd01993",
-    ["x86_64-pc-windows-msvc"] =
-    "749d22f565fcd5718dbed06512572d0e5353b502c03fe1f7f17ee8b8aca21a47",
-    ["aarch64-pc-windows-msvc"] =
-    "f214b1226d8de005b5f691dd29d9dfea2b49e22d0de445429916173dbb626f7f",
   },
 }
 
 FETCH = function(tmp_dir, opts)
   local key = platform_key()
-  local name = archive_name(opts.version, key)
+  local name = "LLVM-" .. opts.version .. "-" .. key .. ".tar.xz"
   local hash = SHA256[opts.version] and SHA256[opts.version][key]
   assert(hash, "no sha256 recorded for " .. opts.version .. " on " .. key)
   return {

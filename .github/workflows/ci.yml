@@ -1,5 +1,6 @@
-# The Linux rows run in a bare container so provisioning is actually tested: a
-# build using a hosted runner's cmake would look identical to one using envy's.
+# The Linux rows run in a curated container rather than a hosted runner image. It
+# carries a compiler and little else; scav still takes cmake, ninja, doctest and
+# python from envy and ignores the image's own, which func.provisioning enforces.
 #
 # The package cache is the manifest's own out/.envy, which actions/cache carries
 # between jobs -- warmth comes from the cache key, not from relocating the root.
@@ -25,26 +26,19 @@ jobs:
   linux:
     name: ${{ matrix.triple }} / ${{ matrix.config }}
     runs-on: ubuntu-latest
-    container: ubuntu:24.04
+    container: ghcr.io/charlesnicholson/docker-image:latest
     strategy:
       fail-fast: false
       matrix:
         triple: [linux-clang-libcxx, linux-clang-libstdcxx, linux-gcc-libstdcxx]
         config: [debug, release, testable]
     steps:
-      - name: Install a bare toolchain and nothing else
-        # No cmake, no ninja, no python: installing them here would make this job
-        # prove nothing.
+      - name: Install what the image lacks
+        if: matrix.triple == 'linux-clang-libcxx'
         run: |
           set -eux
           apt-get update
-          apt-get install -y --no-install-recommends \
-            ca-certificates curl git \
-            $(case "${{ matrix.triple }}" in
-                linux-clang-libcxx)    echo clang libc++-dev libc++abi-dev libclang-rt-dev ;;
-                linux-clang-libstdcxx) echo clang g++ libclang-rt-dev ;;
-                linux-gcc-libstdcxx)   echo g++ ;;
-              esac)
+          apt-get install -y --no-install-recommends libc++-dev libc++abi-dev
 
       - uses: actions/checkout@v4
 
@@ -105,7 +99,7 @@ jobs:
   linux-sanitizers:
     name: ${{ matrix.triple }} / ${{ matrix.sanitizer }}
     runs-on: ubuntu-latest
-    container: ubuntu:24.04
+    container: ghcr.io/charlesnicholson/docker-image:latest
     strategy:
       fail-fast: false
       matrix:
@@ -120,17 +114,12 @@ jobs:
           - { triple: linux-gcc-libstdcxx, sanitizer: ubsan }
           - { triple: linux-gcc-libstdcxx, sanitizer: tsan }
     steps:
-      - name: Install a bare toolchain and nothing else
+      - name: Install what the image lacks
+        if: matrix.triple == 'linux-clang-libcxx'
         run: |
           set -eux
           apt-get update
-          apt-get install -y --no-install-recommends \
-            ca-certificates curl git \
-            $(case "${{ matrix.triple }}" in
-                linux-clang-libcxx)    echo clang libc++-dev libc++abi-dev libclang-rt-dev ;;
-                linux-clang-libstdcxx) echo clang g++ libclang-rt-dev ;;
-                linux-gcc-libstdcxx)   echo g++ ;;
-              esac)
+          apt-get install -y --no-install-recommends libc++-dev libc++abi-dev
 
       - uses: actions/checkout@v4
 
@@ -146,14 +135,13 @@ jobs:
     # MSan against an uninstrumented one reports false positives forever.
     name: linux-clang-libcxx / msan
     runs-on: ubuntu-latest
-    container: ubuntu:24.04
+    container: ghcr.io/charlesnicholson/docker-image:latest
     steps:
-      - name: Install a bare toolchain and nothing else
+      - name: Install what the image lacks
         run: |
           set -eux
           apt-get update
-          apt-get install -y --no-install-recommends \
-            ca-certificates curl git clang libc++-dev libc++abi-dev libclang-rt-dev
+          apt-get install -y --no-install-recommends libc++-dev libc++abi-dev
 
       - uses: actions/checkout@v4
 
@@ -213,16 +201,13 @@ jobs:
   coverage:
     name: coverage gate
     runs-on: ubuntu-latest
-    container: ubuntu:24.04
+    container: ghcr.io/charlesnicholson/docker-image:latest
     steps:
-      - name: Install a bare toolchain and nothing else
-        # llvm is the compiler's own tooling: llvm-cov must match the
-        # profile format the compiler emits, so it is not a third dependency.
+      - name: Install what the image lacks
         run: |
           set -eux
           apt-get update
-          apt-get install -y --no-install-recommends \
-            ca-certificates curl git clang libc++-dev libc++abi-dev libclang-rt-dev llvm
+          apt-get install -y --no-install-recommends libc++-dev libc++abi-dev llvm
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
         with:
@@ -236,16 +221,15 @@ jobs:
   lint:
     name: clang-format and clang-tidy
     runs-on: ubuntu-latest
-    container: ubuntu:24.04
+    container: ghcr.io/charlesnicholson/docker-image:latest
     env:
       SCAV_CLANG_TOOLS: "1"
     steps:
-      - name: Install a bare toolchain and nothing else
+      - name: Install what the image lacks
         run: |
           set -eux
           apt-get update
-          apt-get install -y --no-install-recommends \
-            ca-certificates curl git clang libc++-dev libc++abi-dev libclang-rt-dev
+          apt-get install -y --no-install-recommends libc++-dev libc++abi-dev
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
         with:

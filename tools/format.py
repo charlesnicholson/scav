@@ -2,6 +2,9 @@
 """Run the pinned clang-format over scav's C++ sources, refusing to fall back to
 whatever is on PATH: its output changes between releases.
 
+Provisioned on Linux only -- LLVM ships no tools-only archive, so this costs a whole
+release download, and CI is the only place that needs it.
+
     $(./bin/envy product python3) tools/format.py            # rewrite files in place
     $(./bin/envy product python3) tools/format.py --check    # exit non-zero on any diff
 """
@@ -35,9 +38,10 @@ def clang_format() -> str:
     path = result.stdout.strip()
     if result.returncode or not Path(path or ".").is_file():
         raise SystemExit(
-            "clang-format is not provisioned. It is gated because getting it means "
-            "downloading LLVM's whole release archive:\n\n"
-            "    SCAV_CLANG_TOOLS=1 ./bin/envy sync\n"
+            "clang-format is not provisioned. It is Linux-only and gated, because "
+            "getting it means downloading LLVM's whole release archive:\n\n"
+            "    SCAV_CLANG_TOOLS=1 ./bin/envy sync\n\n"
+            "Elsewhere, formatting is CI's gate."
         )
     return path
 

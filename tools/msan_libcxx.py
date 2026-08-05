@@ -28,10 +28,10 @@ MARKER = PREFIX / "include/c++/v1/vector"
 #
 # The major version tracks the clang that builds and then consumes this libc++.
 # Three majors of daylight between them is a build failure, not a warning.
-VERSION = "18.1.8"
+VERSION = "21.1.8"
 TARBALL = f"llvm-project-{VERSION}.src.tar.xz"
 URL = f"https://github.com/llvm/llvm-project/releases/download/llvmorg-{VERSION}/{TARBALL}"
-SHA256 = "0b58557a6d32ceee97c8d533a59b9212d87e0fc4d2833924eb6c611247db2f2a"
+SHA256 = "4633a23617fa31a3ea51242586ea7fb1da7140e426bd62fc164261fe036aa142"
 
 CMAKE_FLAGS: list[str] = [
     "-DCMAKE_BUILD_TYPE=Release",
