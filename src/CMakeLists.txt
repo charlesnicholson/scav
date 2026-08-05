@@ -1,4 +1,5 @@
-# One directory per subsystem. The bootstrap has exactly one, and it is scaffolding
-# to be deleted once the real subsystems exist.
+# One directory per subsystem. `toy` is bootstrap scaffolding: it is what proves
+# the harness reports failures, so it outlives the phase that introduced it.
 
+add_subdirectory(core)
 add_subdirectory(toy)

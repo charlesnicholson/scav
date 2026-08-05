@@ -1,0 +1,43 @@
+scav_static_library(scavcore
+  lang/diagnostic.cpp
+  lang/lexer.cpp
+  lang/normalize.cpp
+  lang/parse_tree.cpp
+  lang/parser.cpp
+  lang/unicode_nfc.cpp
+  model/string_pool.cpp
+)
+scav_install_library(scavcore core)
+
+if(SCAV_BUILD_TESTS)
+  # synth.cpp is harness-only and is deliberately not in the library: PRD 3.2
+  # rejects a `gen` verb, so the synthetic generator has no shipping home.
+  scav_tests(scav_core_tests
+    lang/corpus_tests.cpp
+    lang/fuzz_tests.cpp
+    lang/lexer_tests.cpp
+    lang/normalize_tests.cpp
+    lang/parser_tests.cpp
+    lang/perf_tests.cpp
+    lang/synth.cpp
+    lang/unicode_nfc_tests.cpp
+    model/model_tests.cpp
+  )
+  target_link_libraries(scav_core_tests PRIVATE scavcore_testable)
+
+  # Performance tests assert floors, not times (PRD 5), so they are not a matrix
+  # row and not a golden. Under a sanitizer, coverage instrumentation or -O0 the
+  # numbers describe the instrumentation rather than the code, so those configs
+  # run a smaller input for correctness and skip the floor entirely.
+  set(scav_perf_light OFF)
+  if(NOT SCAV_SANITIZER STREQUAL "NONE" OR SCAV_COVERAGE)
+    set(scav_perf_light ON)
+  endif()
+  # $<CONFIG:Debug> as well, because CMAKE_BUILD_TYPE is empty on the
+  # multi-config generators.
+  set(scav_light "$<OR:$<BOOL:${scav_perf_light}>,$<CONFIG:Debug>>")
+  target_compile_definitions(scav_core_tests PRIVATE
+    "SCAV_PERF_INPUT_BYTES=$<IF:${scav_light},4194304,104857600>"
+    "SCAV_PERF_ASSERT_FLOOR=$<IF:${scav_light},0,1>"
+  )
+endif()
