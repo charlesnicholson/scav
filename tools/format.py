@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
-"""Run the pinned clang-format over scav's C++ sources, refusing to fall back to
-whatever is on PATH: its output changes between releases.
+"""Run clang-format over scav's C++ sources.
 
-Provisioned on Linux only -- LLVM ships no tools-only archive, so this costs a whole
-release download, and CI is the only place that needs it.
+clang-format ships with the compiler, so CI gets a version pinned by its container
+image. Its output moves between releases, which is why the gate runs on one row
+rather than on every developer's differently-versioned copy.
 
     $(./bin/envy product python3) tools/format.py            # rewrite files in place
     $(./bin/envy product python3) tools/format.py --check    # exit non-zero on any diff
 """
 
 import argparse
-import os
-import platform
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -24,26 +23,12 @@ SOURCE_SUFFIXES: tuple[str, ...] = (".h", ".cpp")
 
 
 def clang_format() -> str:
-    script = REPO_ROOT / ("bin/envy.bat" if platform.system() == "Windows" else "bin/envy")
-    # The package is gated, so the query has to unlock it or be told the package
-    # does not exist.
-    result = subprocess.run(
-        [str(script), "product", "clang-format"],
-        cwd=REPO_ROOT,
-        env=dict(os.environ, SCAV_CLANG_TOOLS="1"),
-        stdout=subprocess.PIPE,
-        text=True,
-        check=False,
+    if found := shutil.which("clang-format"):
+        return found
+    raise SystemExit(
+        "clang-format is not on PATH. It ships with the clang toolchain; install "
+        "that, or leave formatting to CI, which runs it from a pinned image."
     )
-    path = result.stdout.strip()
-    if result.returncode or not Path(path or ".").is_file():
-        raise SystemExit(
-            "clang-format is not provisioned. It is Linux-only and gated, because "
-            "getting it means downloading LLVM's whole release archive:\n\n"
-            "    SCAV_CLANG_TOOLS=1 ./bin/envy sync\n\n"
-            "Elsewhere, formatting is CI's gate."
-        )
-    return path
 
 
 def sources() -> list[Path]:

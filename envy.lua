@@ -27,12 +27,3 @@ PACKAGES = {
     options = { version = "3.14.6", release = "20260623",
                 provide_python = true, provide_python3 = true } },
 }
-
--- Gated: LLVM ships no tools-only archive, so two binaries cost a whole release
--- download. Opt in with `SCAV_CLANG_TOOLS=1 ./bin/envy sync`.
-if os.getenv("SCAV_CLANG_TOOLS") then
-  envy.extend(PACKAGES, {
-    { spec = "scav.clang-tools@r0", source = "./envy/scav.clang-tools.lua",
-      options = { version = "21.1.8" } },
-  })
-end

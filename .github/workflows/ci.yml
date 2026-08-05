@@ -215,28 +215,24 @@ jobs:
           key: envy-linux-${{ hashFiles('envy.lua') }}
       - run: ./build.sh --coverage --preset linux-clang-libcxx-coverage
 
-  # One job, one platform: the pinned clang-format produces the same bytes
-  # everywhere, and its package costs a whole LLVM release download.
+  # One job, one platform: clang-format's output moves between releases, so the
+  # gate wants one version, and the image is what pins it.
 
   lint:
     name: clang-format and clang-tidy
     runs-on: ubuntu-latest
     container: ghcr.io/charlesnicholson/docker-image:latest
-    env:
-      SCAV_CLANG_TOOLS: "1"
     steps:
       - name: Install what the image lacks
         run: |
           set -eux
           apt-get update
-          apt-get install -y --no-install-recommends libc++-dev libc++abi-dev
+          apt-get install -y --no-install-recommends clang-format clang-tidy libc++-dev libc++abi-dev
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
         with:
           path: out/.envy
-          key: envy-lint-${{ hashFiles('envy.lua', 'envy/scav.clang-tools.lua') }}
-
-      - run: ./bin/envy sync
+          key: envy-lint-${{ hashFiles('envy.lua') }}
 
       - name: clang-format --check
         run: "$(./bin/envy product python3) tools/format.py --check"
