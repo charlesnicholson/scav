@@ -75,7 +75,7 @@ set(SCAV_WARNINGS_MSVC
   /w14547  # operator before comma has no effect
   /w14549  # operator before comma has no effect; did you mean operator?
   /w14555  # expression has no effect
-  /w14619  # #pragma warning: there is no warning number
+  /wd4619  # #pragma warning: there is no warning number
   /w14640  # thread-unsafe static member initialization
   /w14826  # conversion is sign-extended, may cause unexpected behaviour
   /w14905  # wide string literal cast to LPSTR
