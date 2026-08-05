@@ -10,9 +10,9 @@
 
 BUNDLES = {
   ["envy"] = {
-    identity = "envy.package-specs@r1",
+    identity = "envy.package-specs@r2",
     source = "https://github.com/envy-package-manager/package-specs.git",
-    ref = "9bdb0a11cefa3e83418cff37dc68ea755c07a237",
+    ref = "4abc43074b424400f7d518ef925f8ab8d4624060",
   },
 }
 
@@ -23,8 +23,9 @@ PACKAGES = {
 
   { spec = "envy.doctest-cpp@r0", bundle = "envy", options = { version = "2.5.3" } },
 
-  { spec = "scav.python@r0", source = "./envy/scav.python.lua",
-    options = { version = "3.14.6", release = "20260728" } },
+  { spec = "envy.python@r1", bundle = "envy",
+    options = { version = "3.14.6", release = "20260623",
+                provide_python = true, provide_python3 = true } },
 }
 
 -- Gated: LLVM ships no tools-only archive, so two binaries cost a whole release
