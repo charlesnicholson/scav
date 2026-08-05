@@ -25,10 +25,13 @@ MARKER = PREFIX / "include/c++/v1/vector"
 
 # Pinned and hash-verified: this is a compilation input, so an unpinned one makes
 # the MSan row depend on whatever upstream published that morning.
-VERSION = "21.1.8"
+#
+# The major version tracks the clang that builds and then consumes this libc++.
+# Three majors of daylight between them is a build failure, not a warning.
+VERSION = "18.1.8"
 TARBALL = f"llvm-project-{VERSION}.src.tar.xz"
 URL = f"https://github.com/llvm/llvm-project/releases/download/llvmorg-{VERSION}/{TARBALL}"
-SHA256 = "4633a23617fa31a3ea51242586ea7fb1da7140e426bd62fc164261fe036aa142"
+SHA256 = "0b58557a6d32ceee97c8d533a59b9212d87e0fc4d2833924eb6c611247db2f2a"
 
 CMAKE_FLAGS: list[str] = [
     "-DCMAKE_BUILD_TYPE=Release",
@@ -52,7 +55,13 @@ CMAKE_FLAGS: list[str] = [
 def run(*cmd: str | Path) -> None:
     argv = [str(c) for c in cmd]
     print(f"+ {' '.join(argv)}", file=sys.stderr, flush=True)
-    subprocess.run(argv, check=True)
+    # Captured and replayed rather than inherited: a build this long interleaves
+    # badly in a CI log, and a failure has to arrive next to its command.
+    result = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True)
+    if result.returncode:
+        print(result.stdout, file=sys.stderr, flush=True)
+        raise SystemExit(f"{argv[0]} failed with exit status {result.returncode}")
 
 
 def envy(*args: str | Path) -> str:

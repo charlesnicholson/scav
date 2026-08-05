@@ -47,9 +47,10 @@ DESC: dict[str, str] = {t: desc for t, (_, desc, _) in TRIPLES.items()}
 CONFIGS: list[str] = ["debug", "release", "testable"]
 
 # Availability is a property of the toolchains, not a preference: MSVC has no
-# UBSan, neither Windows toolchain has TSan, and only clang/Linux can do MSan.
+# UBSan, clang-cl's ASan runtime is added by a driver CMake does not use to link,
+# neither Windows toolchain has TSan, and only clang/Linux can do MSan.
 SANITIZERS: dict[str, list[str]] = {
-    "asan": list(TRIPLES),
+    "asan": [t for t in TRIPLES if t != "windows-clang"],
     "ubsan": [t for t in TRIPLES if t != "windows-msvc"],
     "tsan": [t for t in TRIPLES if not t.startswith("windows")],
     "msan": ["linux-clang-libcxx"],
