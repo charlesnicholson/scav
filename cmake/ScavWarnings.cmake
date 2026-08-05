@@ -75,7 +75,10 @@ set(SCAV_WARNINGS_MSVC
   /w14547  # operator before comma has no effect
   /w14549  # operator before comma has no effect; did you mean operator?
   /w14555  # expression has no effect
-  /w14619  # #pragma warning: there is no warning number
+  # Disabled, not promoted: third-party headers suppress warning ids that only
+  # exist in newer toolsets, and C4619 makes each one an error under /WX on an
+  # older MSVC that is otherwise fine. This is MSVC's -Wno-unknown-warning-option.
+  /wd4619  # #pragma warning: there is no warning number
   /w14640  # thread-unsafe static member initialization
   /w14826  # conversion is sign-extended, may cause unexpected behaviour
   /w14905  # wide string literal cast to LPSTR
