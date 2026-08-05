@@ -197,10 +197,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # MSVC has AddressSanitizer and no UBSan; neither Windows toolchain
-          # has a ThreadSanitizer.
+          # MSVC has AddressSanitizer and no UBSan; clang-cl has UBSan and an
+          # ASan whose runtime never reaches the link line; neither Windows
+          # toolchain has a ThreadSanitizer.
           - { triple: windows-msvc, sanitizer: asan }
-          - { triple: windows-clang, sanitizer: asan }
           - { triple: windows-clang, sanitizer: ubsan }
     steps:
       - uses: actions/checkout@v4

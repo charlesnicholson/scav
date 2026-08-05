@@ -44,7 +44,11 @@ function(scav_set_test_environment test_name)
 
   if(SCAV_SANITIZER STREQUAL "ASAN")
     set(opts "abort_on_error=1:strict_string_checks=1:detect_stack_use_after_return=1")
-    string(APPEND opts ":suppressions=asan.supp")
+    # MSVC's AddressSanitizer accepts a fixed set of suppression kinds and rejects
+    # anything else in the file, comments included. Nothing to suppress there.
+    if(NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+      string(APPEND opts ":suppressions=asan.supp")
+    endif()
     # LeakSanitizer is a Linux-only companion to ASan in the pinned toolchains.
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
       string(APPEND opts ":detect_leaks=1")

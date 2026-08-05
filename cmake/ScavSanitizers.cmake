@@ -17,6 +17,14 @@ function(scav_sanitizer_check name)
       "clang triple for the UBSan row.")
   endif()
 
+  if(name STREQUAL "ASAN" AND msvc_frontend AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    message(FATAL_ERROR
+      "SCAV_SANITIZER=ASAN: clang-cl's runtime is added by the compiler driver, "
+      "and CMake links MSVC-like targets with the linker directly, so every "
+      "__asan_* ends up undefined. Windows AddressSanitizer is the windows-msvc "
+      "row, which uses the same runtime.")
+  endif()
+
   if(name STREQUAL "TSAN" AND (WIN32 OR msvc_frontend))
     message(FATAL_ERROR
       "SCAV_SANITIZER=TSAN: no ThreadSanitizer exists for either Windows "
@@ -69,11 +77,6 @@ function(scav_sanitizers_init)
     target_link_options(scav_sanitizer INTERFACE /INCREMENTAL:NO)
     if(san STREQUAL "ASAN")
       list(APPEND flags /fsanitize=address)
-      if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-        # cl embeds a defaultlib directive in the objects; clang-cl does not, so
-        # the runtime has to be named at link or every __asan_* is undefined.
-        target_link_options(scav_sanitizer INTERFACE /fsanitize=address)
-      endif()
     elseif(san STREQUAL "UBSAN")
       # Trap rather than diagnose: the diagnosing runtime is built against one CRT
       # and mismatches ours at link. A trap needs no runtime, and a test that dies

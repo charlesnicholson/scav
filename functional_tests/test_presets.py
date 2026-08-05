@@ -27,7 +27,7 @@ TRIPLES: dict[str, str] = {
 CONFIGS: tuple[str, ...] = ("debug", "release", "testable")
 SANITIZERS: dict[str, set[str]] = {
     # Availability is a toolchain fact, not a preference.
-    "asan": set(TRIPLES),
+    "asan": set(TRIPLES) - {"windows-clang"},
     "ubsan": set(TRIPLES) - {"windows-msvc"},
     "tsan": {t for t in TRIPLES if not t.startswith("windows")},
     "msan": {"linux-clang-libcxx"},
