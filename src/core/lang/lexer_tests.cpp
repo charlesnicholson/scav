@@ -1,10 +1,6 @@
-// Tokens, trivia, and string-literal decoding. The lexer is tested through its
-// own entry point rather than through the parser: PRD 17 asks for the two to be
-// separable, and a token stream that is only ever observed through a parse is
-// not.
-//
-// Source under test is written as a C++ raw literal, so a `.scav` string keeps
-// its own quotes and reads the way an author would type it.
+// Tokens, trivia and string-literal decoding, through the lexer's own entry
+// point -- a stream only observed through a parse is not separable from it.
+// Source under test is a raw literal, so a `.scav` string keeps its quotes.
 
 #include "core/test_support.h"
 #include "scav/scav_core.h"
@@ -232,9 +228,8 @@ TEST_CASE("lex: a slash that is not doubled is a path separator") {
 }
 
 TEST_CASE("lex: only // starts a comment, so there is no unterminated-comment case") {
-  // No block comments means no nesting rule and no unterminated-comment failure
-  // mode (PRD 15). `/*` is not special: every character of it is an ordinary
-  // token, so the lexer is happy and the grammar is what rejects it.
+  // No block comments, so no nesting rule and no unterminated-comment failure.
+  // `/*` is two ordinary tokens: the lexer is happy, the grammar rejects it.
   Lexed const r{ lex_text("/* not a comment */") };
   CHECK(r.ok);
   CHECK(r.diags.empty());
@@ -333,9 +328,8 @@ TEST_CASE("decode: an unknown escape is rejected rather than passed through") {
 }
 
 TEST_CASE("decode: a span ending mid-escape is rejected rather than read past") {
-  // The lexer cannot produce this -- a trailing backslash makes the string
-  // unterminated -- but lex_decode_string_literal takes an arbitrary span, so the
-  // guard is what keeps a hand-built one from reading past its end.
+  // The lexer cannot produce this, but the decoder takes an arbitrary span, so
+  // the guard is what keeps a hand-built one from reading past its end.
   std::string_view const bytes{ R"("ab\")" };
   std::vector<scav_byte> out;
   std::vector<Diagnostic> diags;
@@ -427,7 +421,7 @@ TEST_CASE("decode: a raw string keeps a trailing blank content line") {
   CHECK(d.text == "one\n");
 }
 
-TEST_CASE("is_reserved_word: exactly the eight words PRD 15 lists") {
+TEST_CASE("is_reserved_word: exactly the eight words the design lists") {
   for (char const *word : { "chart",
                             "include",
                             "state",
@@ -474,9 +468,8 @@ TEST_CASE("lex_footprint: grows with the token count and never with nothing") {
 }
 
 TEST_CASE("lex: the whole stream is materialized, not pulled") {
-  // The design commitment, asserted rather than assumed: every token exists
-  // before the parser sees any of them, which is what lets the two be timed and
-  // fuzzed apart.
+  // Asserted rather than assumed: every token exists before the parser sees any,
+  // which is what lets the two be timed and fuzzed apart.
   Lexed const r{ lex_text("chart c { state A, }") };
   CHECK(r.result.tokens.size() == 8);
   CHECK(sizeof(Token) == 12);

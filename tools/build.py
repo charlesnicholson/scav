@@ -4,14 +4,14 @@
 envy is scav's own CI convenience, not a build prerequisite, so this only ever hands
 CMake paths it discovered; the CMake tree itself asks envy for nothing.
 
-    ./build.sh                          host default preset, build, test
-    ./build.sh --preset linux-gcc-libstdcxx-release
-    ./build.sh --sanitizer asan         host default triple, ASan preset
-    ./build.sh --coverage               host default triple, coverage gate
-    ./build.sh --list                   list the presets this host can run
-    ./build.sh --clean                  delete the build tree first
-    ./build.sh --no-test                configure and build only
-    ./build.sh -- -DSCAV_CLANG_TIDY=ON  pass anything else to `cmake --preset`
+./build.sh                          host default preset, build, test
+./build.sh --preset linux-gcc-libstdcxx-release
+./build.sh --sanitizer asan         host default triple, ASan preset
+./build.sh --coverage               host default triple, coverage gate
+./build.sh --list                   list the presets this host can run
+./build.sh --clean                  delete the build tree first
+./build.sh --no-test                configure and build only
+./build.sh -- -DSCAV_CLANG_TIDY=ON  pass anything else to `cmake --preset`
 """
 
 import argparse

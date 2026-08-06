@@ -18,9 +18,8 @@ constexpr uint32_t CODEPOINT_MAX{ 0x10FFFF };
 
 bool is_continuation(scav_byte b) { return (b & 0xC0U) == 0x80U; }
 
-// Fills `cp` from the `n` continuation bytes after `at`. `err` is
-// Utf8Truncated when the input ran out and Utf8InvalidByte when a byte that is
-// not a continuation appeared, because those are different authoring mistakes.
+// Fills `cp` from the `n` continuation bytes after `at`. Truncated and
+// InvalidByte are distinguished because they are different mistakes.
 bool take_continuations(scav_byte const *bytes,
                         size_t len,
                         size_t at,
@@ -88,9 +87,8 @@ bool source_text_utf8_decode(scav_byte const *bytes,
 
   if (!take_continuations(bytes, len, at, trail, cp, err)) { return false; }
 
-  // Checked after decoding rather than by a per-lead-byte range table: one rule
-  // per failure mode is easier to read than five overlapping ones, and the
-  // diagnostic says which rule was broken.
+  // Checked after decoding rather than by a lead-byte range table: one rule per
+  // failure mode reads better, and the diagnostic says which one broke.
   if (cp < lowest) {
     err = DiagCode::Utf8Overlong;
     return false;
@@ -190,9 +188,8 @@ bool source_text_normalize(scav_byte const *bytes,
                            std::vector<Diagnostic> &diags) {
   out.clear();
 
-  // size_t stops here. Every offset downstream lands in a Span, which is
-  // {uint32 off, len} at the ABI, so a document that cannot be addressed by one
-  // is rejected rather than silently truncated into a different document.
+  // size_t stops here: every offset downstream lands in a {uint32 off, len}
+  // span, so an unaddressable document is rejected rather than truncated.
   uint32_t checked_len{ 0 };
   if (!narrow(len, checked_len)) {
     diags.push_back({ .code = DiagCode::DocumentTooLarge, .doc = doc, .src = {} });

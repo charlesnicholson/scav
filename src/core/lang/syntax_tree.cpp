@@ -43,8 +43,7 @@ char const *syntax_trans_kind_name(TransKind kind) {
 
 bool syntax_state_kind_from_name(std::string_view text, StateKind &out) {
   // `initial` and `final` are absent on purpose: the format reaches them only
-  // through `*` in an endpoint (PRD 7), so accepting them here would add a
-  // second spelling for a state the author cannot otherwise write.
+  // through `*`, so accepting them here would add a second spelling.
   if (text == "normal") {
     out = StateKind::Normal;
     return true;

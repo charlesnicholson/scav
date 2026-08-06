@@ -30,10 +30,8 @@ void indent(std::string &out, uint32_t depth) {
   for (uint32_t i = 0; i < (2U * depth); ++i) { out.push_back(' '); }
 }
 
-// What remains to be emitted for one open block. The generator is iterative for
-// the same reason the parser is: `depth` reaches 16 by design and a test drives
-// it to 10,000, and a recursive generator would fall over before the code under
-// test had a chance to.
+// What remains to be emitted for one open block. Iterative like the parser: a
+// test drives depth to 10,000, and a recursive generator would fall over first.
 struct Frame {
   uint32_t depth;
   uint32_t submachine;  // next submachine to open, once the block body is done
@@ -124,9 +122,7 @@ void emit_leaves(Gen &g, uint32_t depth) {
 }
 
 // One top-level composite state and everything under it. Nesting continues in
-// submachine 0 only, so a subtree is linear in `depth` rather than exponential
-// in it -- the size target is reached by adding subtrees, which keeps the
-// relationship between spec and byte count obvious.
+// submachine 0 only, so a subtree is linear in `depth`, not exponential.
 void emit_subtree(Gen &g) {
   std::vector<Frame> stack;
   uint32_t const root_id{ g.next_id++ };

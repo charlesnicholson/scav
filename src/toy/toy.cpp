@@ -13,9 +13,8 @@ constexpr uint64_t PRIME{ 0x100000001b3ULL };
 
 SCAV_INTERNAL_BEGIN
 
-// One FNV-1a step: mix in a byte, multiply by the prime. Declared before it is
-// defined because under SCAV_TESTING it has external linkage, and a definition
-// with no prior declaration is what -Wmissing-declarations is for.
+// One FNV-1a step. Declared before defined: under SCAV_TESTING it has external
+// linkage, and -Wmissing-declarations wants the prototype.
 uint64_t scav_toy_fold(uint64_t acc, scav_byte b);
 
 uint64_t scav_toy_fold(uint64_t acc, scav_byte b) {

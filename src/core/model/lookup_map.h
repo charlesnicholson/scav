@@ -1,17 +1,9 @@
 #ifndef SCAV_CORE_MODEL_LOOKUP_MAP_H_INCLUDED
 #define SCAV_CORE_MODEL_LOOKUP_MAP_H_INCLUDED
 
-// PRD 6: iteration order of unordered_map varies across all three standard
-// libraries, so "never iterated where order reaches output" has to be a compile
-// error rather than a review comment. This exposes find / contains / at / insert
-// and deliberately no begin() or end().
-//
-// Key lookup itself is deterministic by usage -- a hash value never escapes as a
-// bucket index -- which is why the container underneath is still the right one.
-//
-// The type is a class with methods, which PRD 4 rules out for model data. It is
-// not model data: nothing here outlives the call that built it, gets serialized,
-// or gets hashed (PRD 4.1's test).
+// unordered_map's iteration order differs across standard libraries, so "never
+// iterated" is a compile error here rather than a review comment: no begin() or
+// end(). Lookup itself is fine -- a hash value never escapes as a bucket index.
 
 #include <cstddef>
 #include <functional>
@@ -22,10 +14,8 @@
 
 namespace scav {
 
-// A transparent hash and equality for string keys, so probing with a
-// string_view over bytes already in hand does not allocate a std::string per
-// lookup. Interning runs once per token, so that allocation is the difference
-// between linear and merely-linear-with-a-malloc.
+// Transparent, so probing with a string_view over bytes already in hand does not
+// allocate a std::string per lookup. Interning runs once per token.
 struct StringViewHash {
   using is_transparent = void;
   size_t operator()(std::string_view s) const { return std::hash<std::string_view>{}(s); }

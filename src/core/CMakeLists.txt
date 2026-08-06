@@ -10,13 +10,9 @@ scav_static_library(scavcore
 )
 scav_install_library(scavcore core)
 
-# The NFC tables are generated from the Unicode UCD by a script that lives with
-# the code it generates, because nothing outside this library has a use for it.
-#
-# Deliberately NOT in ALL, and deliberately not a dependency of unicode_nfc.cpp:
-# the generated .inc files are committed, so an ordinary build needs neither the
-# network nor Python, and the Unicode version they encode is a determinism input
-# (PRD 6) rather than something a build is free to move underneath you.
+# The generator lives with the code it generates. Not in ALL and not a dependency
+# of unicode_nfc.cpp: the .inc files are committed, so a build needs neither the
+# network nor Python, and the Unicode version is not a build's to move.
 find_package(Python3 3.14 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
   add_custom_target(scav_core_unicode_tables
@@ -30,8 +26,7 @@ if(Python3_Interpreter_FOUND)
 endif()
 
 if(SCAV_BUILD_TESTS)
-  # synth.cpp is harness-only and is deliberately not in the library: PRD 3.2
-  # rejects a `gen` verb, so the synthetic generator has no shipping home.
+  # synth_document.cpp is harness-only: scav ships no chart generator.
   scav_tests(scav_core_tests
     lang/corpus_tests.cpp
     lang/fuzz_tests.cpp
@@ -45,10 +40,9 @@ if(SCAV_BUILD_TESTS)
   )
   target_link_libraries(scav_core_tests PRIVATE scavcore_testable)
 
-  # Performance tests assert floors, not times (PRD 5), so they are not a matrix
-  # row and not a golden. Under a sanitizer, coverage instrumentation or -O0 the
-  # numbers describe the instrumentation rather than the code, so those configs
-  # run a smaller input for correctness and skip the floor entirely.
+  # Performance tests assert floors, not times. Under instrumentation the numbers
+  # describe the instrumentation, so those configs shrink the input and skip the
+  # floor.
   set(scav_perf_light OFF)
   if(NOT SCAV_SANITIZER STREQUAL "NONE" OR SCAV_COVERAGE)
     set(scav_perf_light ON)

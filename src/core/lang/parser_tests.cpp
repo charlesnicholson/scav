@@ -1,9 +1,6 @@
-// The grammar of PRD 15, statement by statement, plus the statement tree, the
-// trivia attachment, the depth cap and every diagnostic the parser can emit.
-//
-// Charts are inline raw literals. A parser test that opens a file is testing
-// the filesystem as well, and PRD 16.2's whole point is that nothing here needs
-// one.
+// The grammar statement by statement, plus the statement tree, trivia
+// attachment, the depth cap and every diagnostic. Charts are inline raw
+// literals: a parser test that opens a file is testing the filesystem too.
 
 #include "core/lang/synth_document.h"
 #include "core/test_support.h"
@@ -205,7 +202,7 @@ TEST_CASE("parse: every state kind the format spells") {
 }
 
 TEST_CASE("parse: initial and final are not spellable as kinds") {
-  // They are reachable only through `*` in an endpoint (PRD 7), so accepting
+  // They are reachable only through `*` in an endpoint, so accepting
   // the words here would be a second spelling of a state nobody can write.
   CHECK(first_code(parse("chart c { state A initial, }").diags) ==
         DiagCode::UnknownStateKind);
@@ -404,7 +401,7 @@ chart c {
 }
 
 TEST_CASE("parse: a flag stays distinct from an explicit true") {
-  // Which spelling is canonical is the printer's rule (PRD 15). Folding here
+  // Which spelling is canonical is the printer's rule. Folding here
   // would decide it early and irreversibly.
   Parsed const r{ parse(R"(chart c { @a, @b = "true", })") };
   REQUIRE(r.ok);

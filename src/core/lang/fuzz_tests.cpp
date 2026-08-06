@@ -1,14 +1,6 @@
-// In-process fuzzing of the lexer and the parser, which PRD 5 lists as a
-// required test class for anything reading untrusted input.
-//
-// Not libFuzzer: a coverage-guided run belongs in a separate long-running job,
-// and one that only exists there is one nobody runs before pushing. This is a
-// deterministic mutation sweep over a seed corpus, so it is reproducible on
-// every platform in the matrix, and the sanitizer rows turn it into the memory
-// check a fuzzer would be doing anyway.
-//
-// The bar is not "finds bugs" but "cannot crash and cannot lie": no read out of
-// bounds, no hang, and every diagnostic still points inside the document.
+// A deterministic mutation sweep, not libFuzzer: a coverage-guided run only in a
+// long-running job is one nobody runs before pushing. The bar is "cannot crash
+// and cannot lie" -- every diagnostic still points inside the document.
 
 #include "core/lang/synth_document.h"
 #include "core/test_support.h"
@@ -27,8 +19,7 @@ namespace {
 using namespace scav;
 using namespace scav::test;
 
-// splitmix64's finalizer, position-addressed rather than stateful (PRD 6). The
-// same seed produces the same corpus on every platform, so a failure here is
+// splitmix64's finalizer, position-addressed rather than stateful: a failure is
 // reproducible from the seed alone.
 uint64_t rnd(uint64_t seed, uint64_t index) {
   uint64_t x{ seed + (index * 0x9E37'79B9'7F4A'7C15ULL) };

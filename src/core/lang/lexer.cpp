@@ -59,9 +59,8 @@ TokKind punctuation_kind(scav_byte b) {
   }
 }
 
-// Scans a `"..."` lexeme and returns its length including both quotes, or 0 on
-// failure with `err` set. Escape *validity* is the decoder's; all this has to
-// know is that a backslash keeps the next byte from closing the string.
+// Length including both quotes, or 0 with `err` set. Escape *validity* is the
+// decoder's; all this knows is that a backslash defers the closing quote.
 uint32_t scan_quoted(scav_byte const *bytes, uint32_t len, uint32_t at, DiagCode &err) {
   uint32_t i{ at + 1 };
   while (i < len) {
@@ -90,9 +89,8 @@ uint32_t scan_raw(scav_byte const *bytes, uint32_t len, uint32_t at, DiagCode &e
   return 0;
 }
 
-// Appends `line`, minus `strip` leading whitespace characters. A line made only
-// of whitespace is clamped to empty rather than rejected: the under-indentation
-// rule is about content, and every editor trims blank lines.
+// Appends `line` minus `strip` leading whitespace. A whitespace-only line is
+// clamped to empty, not rejected: the under-indentation rule is about content.
 bool emit_raw_line(scav_byte const *bytes,
                    uint32_t off,
                    uint32_t len,
@@ -130,8 +128,8 @@ bool decode_raw(scav_byte const *bytes,
     return true;
   }
 
-  // "Indentation is stripped to the closing delimiter's column" (PRD 15), taken
-  // literally: the column is whatever precedes the closing """ on its line.
+  // Stripped to the closing delimiter's column, taken literally: the column is
+  // whatever precedes the closing """ on its line.
   uint32_t const strip{ end - (last_newline + 1) };
 
   // Collect line bounds first, so the two ends can be trimmed by index instead
@@ -282,9 +280,8 @@ bool lex_decode_string_literal(scav_byte const *bytes,
     return false;
   }
 
-  // The source was NFC-folded on read, but \u escapes decode after that, so a
-  // literal can still name a decomposed sequence. Folding here keeps two
-  // spellings of one string from interning as two.
+  // The source was folded on read, but \u decodes after that -- so fold again,
+  // or two spellings of one string intern as two.
   if (!source_text_is_nfc(out.data(), narrow_clamp<uint32_t>(out.size()))) {
     std::vector<scav_byte> composed;
     source_text_to_nfc(out.data(), narrow_clamp<uint32_t>(out.size()), composed);
@@ -301,9 +298,8 @@ bool lex_source(scav_byte const *bytes,
   out.tokens.clear();
   out.comments.clear();
 
-  // A token's off/len is uint32, so the buffer has to be addressable by one.
-  // The caller normalized first, which already checked this -- but lex_source is
-  // a public entry point and may be called on bytes from anywhere.
+  // A token's off/len is uint32. The usual caller normalized first and already
+  // checked this, but lex_source is public and takes bytes from anywhere.
   uint32_t len{ 0 };
   if (!narrow(byte_count, len)) {
     diags.push_back({ .code = DiagCode::DocumentTooLarge, .doc = doc, .src = {} });
@@ -327,9 +323,8 @@ bool lex_source(scav_byte const *bytes,
       code_on_line = false;
       if (open_comment != INVALID) {
         ++newlines_after;
-        // The first newline ends the comment's own line; a second one is a
-        // blank line, which is what separates a floating comment from a
-        // statement's leading block.
+        // The first newline ends the comment's line; a second is a blank line,
+        // which is what detaches a floating comment from the statement below.
         if (newlines_after >= 2) {
           out.comments[open_comment].blank_after = 1;
           open_comment = INVALID;
@@ -380,9 +375,8 @@ bool lex_source(scav_byte const *bytes,
                                 : scan_quoted(bytes, len, at, err) };
       if (width == 0) {
         diags.push_back({ .code = err, .doc = doc, .src = make_span(at, 1) });
-        // No recovery that is not a guess about where the string ended. Stop,
-        // but fall through so the stream still gets its End sentinel: a caller
-        // may still want to parse what came before.
+        // No recovery that is not a guess. Stop, but fall through so the
+        // stream still gets its End sentinel.
         ok = false;
         break;
       }
