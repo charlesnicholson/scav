@@ -82,7 +82,8 @@ function(scav_test_environment out_var stamp_name)
 endfunction()
 
 # Delete the stamp, run, touch the stamp -- so a crashed run never leaves behind
-# a stamp a later build would trust.
+# a stamp a later build would trust. The run goes through ScavRunTest.cmake, so
+# a passing test prints nothing and a failing one prints everything.
 function(scav_stamped_test stamp_name)
   cmake_parse_arguments(arg "" "COMMENT" "DEPENDS;COMMAND;TARGETS;ENV" ${ARGN})
 
@@ -90,16 +91,27 @@ function(scav_stamped_test stamp_name)
   scav_test_environment(env "${stamp_name}")
   list(APPEND env ${arg_ENV})
 
+  # `cmake -P` takes no list argument, so the argv is joined for the runner to
+  # split. `|` cannot appear in a path or a doctest filter here.
+  set(argv "${CMAKE_COMMAND}|-E|env")
+  foreach(pair IN LISTS env)
+    string(APPEND argv "|${pair}")
+  endforeach()
+  foreach(word IN LISTS arg_COMMAND)
+    string(APPEND argv "|${word}")
+  endforeach()
+
   add_custom_command(
     OUTPUT "${stamp}"
     COMMAND "${CMAKE_COMMAND}" -E rm -f "${stamp}"
-    COMMAND "${CMAKE_COMMAND}" -E env ${env} ${arg_COMMAND}
+    COMMAND "${CMAKE_COMMAND}"
+            "-DSCAV_CMD=${argv}"
+            "-DSCAV_LABEL=${arg_COMMENT}"
+            -P "${PROJECT_SOURCE_DIR}/cmake/ScavRunTest.cmake"
     COMMAND "${CMAKE_COMMAND}" -E touch "${stamp}"
-    DEPENDS ${arg_DEPENDS}
+    DEPENDS ${arg_DEPENDS} "${PROJECT_SOURCE_DIR}/cmake/ScavRunTest.cmake"
     WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
     COMMENT "${arg_COMMENT}"
-    # The console pool: test output reaches the terminal in order, rather than
-    # being buffered and interleaved with compile lines.
     USES_TERMINAL
     VERBATIM
   )
