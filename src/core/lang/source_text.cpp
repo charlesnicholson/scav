@@ -1,10 +1,9 @@
-#include "scav/scav_source_text.h"
+#include "scav/scav_core.h"
 
 #include "core/lang/unicode_nfc.h"
-#include "scav/scav_diagnostics.h"
-#include "scav/scav_ids.h"
 #include "scav/scav_types.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 #include <vector>
@@ -23,8 +22,8 @@ bool is_continuation(scav_byte b) { return (b & 0xC0U) == 0x80U; }
 // Utf8Truncated when the input ran out and Utf8InvalidByte when a byte that is
 // not a continuation appeared, because those are different authoring mistakes.
 bool take_continuations(scav_byte const *bytes,
-                        uint32_t len,
-                        uint32_t at,
+                        size_t len,
+                        size_t at,
                         uint32_t n,
                         uint32_t &cp,
                         DiagCode &err) {
@@ -45,8 +44,8 @@ bool take_continuations(scav_byte const *bytes,
 }  // namespace
 
 bool source_text_utf8_decode(scav_byte const *bytes,
-                             uint32_t len,
-                             uint32_t at,
+                             size_t len,
+                             size_t at,
                              uint32_t &cp,
                              uint32_t &width,
                              DiagCode &err) {
@@ -127,15 +126,15 @@ void source_text_utf8_encode(uint32_t cp, std::vector<scav_byte> &out) {
   }
 }
 
-bool source_text_is_ascii(scav_byte const *bytes, uint32_t len) {
-  for (uint32_t i = 0; i < len; ++i) {
+bool source_text_is_ascii(scav_byte const *bytes, size_t len) {
+  for (size_t i = 0; i < len; ++i) {
     if (bytes[i] >= 0x80U) { return false; }
   }
   return true;
 }
 
-bool source_text_is_nfc(scav_byte const *bytes, uint32_t len) {
-  uint32_t at{ 0 };
+bool source_text_is_nfc(scav_byte const *bytes, size_t len) {
+  size_t at{ 0 };
   while (at < len) {
     if (bytes[at] < 0x80U) {  // ASCII is NFC by construction, and is the hot path
       ++at;
@@ -151,14 +150,12 @@ bool source_text_is_nfc(scav_byte const *bytes, uint32_t len) {
   return true;
 }
 
-bool source_text_to_nfc(scav_byte const *bytes,
-                        uint32_t len,
-                        std::vector<scav_byte> &out) {
+bool source_text_to_nfc(scav_byte const *bytes, size_t len, std::vector<scav_byte> &out) {
   out.clear();
 
   std::vector<uint32_t> codepoints;
   codepoints.reserve(len);
-  uint32_t at{ 0 };
+  size_t at{ 0 };
   while (at < len) {
     uint32_t cp{ 0 };
     uint32_t width{ 0 };
@@ -187,27 +184,37 @@ bool source_text_to_nfc(scav_byte const *bytes,
 }
 
 bool source_text_normalize(scav_byte const *bytes,
-                           uint32_t len,
+                           size_t len,
                            DocId doc,
                            std::vector<scav_byte> &out,
                            std::vector<Diagnostic> &diags) {
   out.clear();
 
+  // size_t stops here. Every offset downstream lands in a Span, which is
+  // {uint32 off, len} at the ABI, so a document that cannot be addressed by one
+  // is rejected rather than silently truncated into a different document.
+  uint32_t checked_len{ 0 };
+  if (!narrow(len, checked_len)) {
+    diags.push_back({ .code = DiagCode::DocumentTooLarge, .doc = doc, .src = {} });
+    return false;
+  }
+
   // A UTF-8 BOM is a byte-order mark for an encoding that has no byte order, so
   // it is signature-only and is dropped rather than kept as U+FEFF.
   uint32_t at{ 0 };
-  if ((len >= 3) && (bytes[0] == 0xEFU) && (bytes[1] == 0xBBU) && (bytes[2] == 0xBFU)) {
+  if ((checked_len >= 3) && (bytes[0] == 0xEFU) && (bytes[1] == 0xBBU) &&
+      (bytes[2] == 0xBFU)) {
     at = 3;
   }
 
   // Validate and fold line endings in one pass. Spans on anything reported here
   // index the raw input, because `out` is what is being built.
-  out.reserve(len - at);
-  while (at < len) {
+  out.reserve(checked_len - at);
+  while (at < checked_len) {
     scav_byte const b{ bytes[at] };
     if (b == '\r') {
       out.push_back('\n');
-      at += ((at + 1 < len) && (bytes[at + 1] == '\n')) ? 2 : 1;
+      at += ((at + 1 < checked_len) && (bytes[at + 1] == '\n')) ? 2 : 1;
       continue;
     }
     if (b < 0x80U) {
@@ -219,7 +226,7 @@ bool source_text_normalize(scav_byte const *bytes,
     uint32_t cp{ 0 };
     uint32_t width{ 0 };
     DiagCode err{ DiagCode::Ok };
-    if (!source_text_utf8_decode(bytes, len, at, cp, width, err)) {
+    if (!source_text_utf8_decode(bytes, checked_len, at, cp, width, err)) {
       diags.push_back({ .code = err, .doc = doc, .src = make_span(at, 1) });
       out.clear();
       return false;
@@ -228,9 +235,9 @@ bool source_text_normalize(scav_byte const *bytes,
     at += width;
   }
 
-  if (!source_text_is_nfc(out.data(), static_cast<uint32_t>(out.size()))) {
+  if (!source_text_is_nfc(out.data(), out.size())) {
     std::vector<scav_byte> composed;
-    source_text_to_nfc(out.data(), static_cast<uint32_t>(out.size()), composed);
+    source_text_to_nfc(out.data(), out.size(), composed);
     out.swap(composed);
   }
   return true;

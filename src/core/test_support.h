@@ -8,13 +8,7 @@
 // test_data. A parser test that has to open a file is testing the filesystem
 // too, and the whole point of PRD 16.2 is that nothing here needs one.
 
-#include "scav/scav_diagnostics.h"
-#include "scav/scav_ids.h"
-#include "scav/scav_lexer.h"
-#include "scav/scav_parser.h"
-#include "scav/scav_source_text.h"
-#include "scav/scav_string_pool.h"
-#include "scav/scav_syntax_tree.h"
+#include "scav/scav_core.h"
 #include "scav/scav_types.h"
 
 #include <cstdint>

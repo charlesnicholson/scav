@@ -7,13 +7,7 @@
 // one, or names a type only a private header declares, fails to compile here and
 // nowhere else.
 
-#include <scav/scav_diagnostics.h>
-#include <scav/scav_ids.h>
-#include <scav/scav_lexer.h>
-#include <scav/scav_parser.h>
-#include <scav/scav_source_text.h>
-#include <scav/scav_string_pool.h>
-#include <scav/scav_syntax_tree.h>
+#include <scav/scav_core.h>
 #include <scav/scav_toy.h>
 #include <scav/scav_types.h>
 

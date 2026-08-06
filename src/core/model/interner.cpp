@@ -2,10 +2,10 @@
 
 #include "core/model/bytes_view.h"
 #include "core/model/sort.h"
-#include "scav/scav_ids.h"
-#include "scav/scav_string_pool.h"
+#include "scav/scav_core.h"
 #include "scav/scav_types.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -13,7 +13,7 @@
 
 namespace scav {
 
-StrRef intern_bytes(Interner &in, scav_byte const *bytes, uint32_t len) {
+StrRef intern_bytes(Interner &in, scav_byte const *bytes, size_t len) {
   if (len == 0) { return {}; }
 
   std::string_view const probe{ bytes_view(bytes, len) };
@@ -21,17 +21,18 @@ StrRef intern_bytes(Interner &in, scav_byte const *bytes, uint32_t len) {
     return in.unique[*found];
   }
 
-  StrRef const ref{ str_ref(static_cast<uint32_t>(in.staging.size()), len) };
+  // The pool is bounded by the document, which the parser already checked fits
+  // a span, so both of these round-trip by construction.
+  StrRef const ref{ str_ref(narrow_clamp<uint32_t>(in.staging.size()),
+                            narrow_clamp<uint32_t>(len)) };
   in.staging.insert(in.staging.end(), bytes, bytes + len);
-  in.index.insert(std::string{ probe }, static_cast<uint32_t>(in.unique.size()));
+  in.index.insert(std::string{ probe }, narrow_clamp<uint32_t>(in.unique.size()));
   in.unique.push_back(ref);
   return ref;
 }
 
 StrRef intern_bytes(Interner &in, std::string_view text) {
-  return intern_bytes(in,
-                      reinterpret_cast<scav_byte const *>(text.data()),
-                      static_cast<uint32_t>(text.size()));
+  return intern_bytes(in, reinterpret_cast<scav_byte const *>(text.data()), text.size());
 }
 
 void intern_finalize(Interner const &in, StringPool &pool, StringRemap &out) {
@@ -39,7 +40,7 @@ void intern_finalize(Interner const &in, StringPool &pool, StringRemap &out) {
   out.staging.clear();
   out.finalized.clear();
 
-  uint32_t const n{ static_cast<uint32_t>(in.unique.size()) };
+  uint32_t const n{ narrow_clamp<uint32_t>(in.unique.size()) };
   if (n == 0) { return; }
 
   std::vector<uint32_t> order(n);
@@ -65,7 +66,7 @@ void intern_finalize(Interner const &in, StringPool &pool, StringRemap &out) {
     uint32_t const which{ order[i] };
     StrRef const ref{ unique[which] };
     out.staging[which] = ref.off;
-    out.finalized[which] = static_cast<uint32_t>(pool.bytes.size());
+    out.finalized[which] = narrow_clamp<uint32_t>(pool.bytes.size());
     pool.bytes.insert(pool.bytes.end(), staged + ref.off, staged + ref.off + ref.len);
   }
 }
@@ -75,7 +76,7 @@ StrRef intern_remap(StringRemap const &r, StrRef ref) {
 
   // `staging` ascends with the index, because interning appends.
   uint32_t lo{ 0 };
-  uint32_t hi{ static_cast<uint32_t>(r.staging.size()) };
+  uint32_t hi{ narrow_clamp<uint32_t>(r.staging.size()) };
   while (lo < hi) {
     uint32_t const mid{ lo + ((hi - lo) / 2) };
     if (r.staging[mid] < ref.off) {

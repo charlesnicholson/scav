@@ -1,17 +1,18 @@
-#include "scav/scav_diagnostics.h"
+#include "scav/scav_core.h"
 
 #include "scav/scav_types.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
 namespace scav {
 
-LineCol diag_line_col(scav_byte const *bytes, uint32_t len, uint32_t offset) {
-  uint32_t const stop{ (offset < len) ? offset : len };
+LineCol diag_line_col(scav_byte const *bytes, size_t len, size_t offset) {
+  size_t const stop{ (offset < len) ? offset : len };
   uint32_t line{ 1 };
   uint32_t column{ 1 };
-  for (uint32_t i = 0; i < stop; ++i) {
+  for (size_t i = 0; i < stop; ++i) {
     if (bytes[i] == '\n') {
       ++line;
       column = 1;
@@ -27,6 +28,8 @@ char const *diag_message(DiagCode code) {
   switch (code) {
     case DiagCode::Ok: return "ok";
 
+    case DiagCode::DocumentTooLarge:
+      return "document is larger than 4 GiB, which a span cannot address";
     case DiagCode::Utf8Truncated: return "truncated UTF-8 sequence";
     case DiagCode::Utf8InvalidByte: return "byte cannot start a UTF-8 sequence";
     case DiagCode::Utf8Overlong: return "overlong UTF-8 encoding";

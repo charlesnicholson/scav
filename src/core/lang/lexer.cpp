@@ -1,10 +1,8 @@
-#include "scav/scav_lexer.h"
+#include "scav/scav_core.h"
 
-#include "scav/scav_diagnostics.h"
-#include "scav/scav_ids.h"
-#include "scav/scav_source_text.h"
 #include "scav/scav_types.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 #include <vector>
@@ -152,7 +150,7 @@ bool decode_raw(scav_byte const *bytes,
   // content, which is the shape every multi-line literal is written in.
   if (lines[0].len == 0) { first = 1; }
 
-  uint32_t stop{ static_cast<uint32_t>(lines.size()) };
+  uint32_t stop{ narrow_clamp<uint32_t>(lines.size()) };
   if (stop > first) {
     Span const tail{ lines[stop - 1] };
     bool all_space{ true };
@@ -287,21 +285,31 @@ bool lex_decode_string_literal(scav_byte const *bytes,
   // The source was NFC-folded on read, but \u escapes decode after that, so a
   // literal can still name a decomposed sequence. Folding here keeps two
   // spellings of one string from interning as two.
-  if (!source_text_is_nfc(out.data(), static_cast<uint32_t>(out.size()))) {
+  if (!source_text_is_nfc(out.data(), narrow_clamp<uint32_t>(out.size()))) {
     std::vector<scav_byte> composed;
-    source_text_to_nfc(out.data(), static_cast<uint32_t>(out.size()), composed);
+    source_text_to_nfc(out.data(), narrow_clamp<uint32_t>(out.size()), composed);
     out.swap(composed);
   }
   return true;
 }
 
 bool lex_source(scav_byte const *bytes,
-                uint32_t len,
+                size_t byte_count,
                 DocId doc,
                 LexResult &out,
                 std::vector<Diagnostic> &diags) {
   out.tokens.clear();
   out.comments.clear();
+
+  // A token's off/len is uint32, so the buffer has to be addressable by one.
+  // The caller normalized first, which already checked this -- but lex_source is
+  // a public entry point and may be called on bytes from anywhere.
+  uint32_t len{ 0 };
+  if (!narrow(byte_count, len)) {
+    diags.push_back({ .code = DiagCode::DocumentTooLarge, .doc = doc, .src = {} });
+    return false;
+  }
+
   out.tokens.reserve((len / BYTES_PER_TOKEN_ESTIMATE) + 1);
 
   bool ok{ true };
@@ -337,7 +345,7 @@ bool lex_source(scav_byte const *bytes,
     if ((b == '/') && (at + 1 < len) && (bytes[at + 1] == '/')) {
       uint32_t stop{ at };
       while ((stop < len) && (bytes[stop] != '\n')) { ++stop; }
-      open_comment = static_cast<uint32_t>(out.comments.size());
+      open_comment = narrow_clamp<uint32_t>(out.comments.size());
       newlines_after = 0;
       out.comments.push_back({ .src = make_span(at, stop - at),
                                .code_before = code_on_line ? 1U : 0U,

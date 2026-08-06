@@ -14,7 +14,6 @@
 // or gets hashed (PRD 4.1's test).
 
 #include <cstddef>
-#include <cstdint>
 #include <functional>
 #include <string>
 #include <string_view>
@@ -68,10 +67,10 @@ class LookupMap {
     return map.emplace(std::move(key), std::move(value)).second;
   }
 
-  [[nodiscard]] uint32_t size() const { return static_cast<uint32_t>(map.size()); }
+  [[nodiscard]] size_t size() const { return map.size(); }
   [[nodiscard]] bool empty() const { return map.empty(); }
   void clear() { map.clear(); }
-  void reserve(uint32_t n) { map.reserve(n); }
+  void reserve(size_t n) { map.reserve(n); }
 
  private:
   std::unordered_map<K, V, Hash, Eq> map;

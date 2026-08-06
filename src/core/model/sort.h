@@ -10,7 +10,7 @@
 // pointer, so the comparison inlines. qsort's shape pays an indirect call per
 // comparison and blocks inlining entirely.
 
-#include <cstdint>
+#include <cstddef>
 #include <utility>
 #include <vector>
 
@@ -21,20 +21,20 @@ namespace scav {
 // total order in practice.
 template <typename T, typename Less>
 void stable_sort_by(std::vector<T> &v, Less less) {
-  uint32_t const n{ static_cast<uint32_t>(v.size()) };
+  size_t const n{ v.size() };
   if (n < 2) { return; }
 
   std::vector<T> scratch(v.size());
   T *src{ v.data() };
   T *dst{ scratch.data() };
 
-  for (uint32_t width = 1; width < n; width *= 2) {
-    for (uint32_t lo = 0; lo < n; lo += 2 * width) {
-      uint32_t const mid{ (lo + width < n) ? (lo + width) : n };
-      uint32_t const hi{ (lo + (2 * width) < n) ? (lo + (2 * width)) : n };
-      uint32_t a{ lo };
-      uint32_t b{ mid };
-      for (uint32_t out = lo; out < hi; ++out) {
+  for (size_t width = 1; width < n; width *= 2) {
+    for (size_t lo = 0; lo < n; lo += 2 * width) {
+      size_t const mid{ (lo + width < n) ? (lo + width) : n };
+      size_t const hi{ (lo + (2 * width) < n) ? (lo + (2 * width)) : n };
+      size_t a{ lo };
+      size_t b{ mid };
+      for (size_t out = lo; out < hi; ++out) {
         // `less(src[b], src[a])` rather than `!less(src[a], src[b])`: taking the
         // left run whenever the two compare equal is what makes this stable.
         bool const take_right{ (a >= mid) || ((b < hi) && less(src[b], src[a])) };
@@ -46,7 +46,7 @@ void stable_sort_by(std::vector<T> &v, Less less) {
 
   // An odd number of passes leaves the result in the scratch buffer.
   if (src != v.data()) {
-    for (uint32_t i = 0; i < n; ++i) { v[i] = std::move(src[i]); }
+    for (size_t i = 0; i < n; ++i) { v[i] = std::move(src[i]); }
   }
 }
 

@@ -101,17 +101,16 @@ class TestPresets(unittest.TestCase):
         self.assertEqual(release["CMAKE_BUILD_TYPE"], testable["CMAKE_BUILD_TYPE"])
         self.assertEqual("ON", testable["SCAV_TESTING"])
 
-    def test_every_configure_preset_has_a_build_and_test_preset(self) -> None:
-        for section in ("buildPresets", "testPresets"):
-            with self.subTest(section=section):
-                self.assertEqual(self.names(), self.names(section))
+    def test_every_configure_preset_has_a_build_preset(self) -> None:
+        self.assertEqual(self.names(), self.names("buildPresets"))
 
-    def test_test_presets_fail_when_they_run_nothing(self) -> None:
-        # A preset that discovers zero tests and exits zero is the failure mode
-        # this whole harness exists to rule out.
-        for preset in self.doc["testPresets"]:
-            with self.subTest(preset=preset["name"]):
-                self.assertEqual("error", preset["execution"]["noTestsAction"])
+    def test_there_are_no_test_presets(self) -> None:
+        """Tests are build steps, so a build preset already runs them.
+
+        A testPresets section would mean a second command that has to be
+        remembered, and the failure mode of forgetting it is a green build with
+        untested code -- which is the thing this harness exists to rule out."""
+        self.assertNotIn("testPresets", self.doc)
 
     def test_all_build_output_stays_under_out(self) -> None:
         # Everything scav generates lives under out/, so `rm -rf out` is a

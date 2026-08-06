@@ -115,7 +115,7 @@ Mirrors `~/src/envy`: SHA-pinned deps under `cmake/deps/`, unit tests adjacent t
 
 ```
 include/scav/          the cross-library vocabulary: POD spellings, no functions
-src/<lib>/include/scav/  that library's public API, one `scav_*.h` per subject
+src/<lib>/include/scav/  that library's public API: one `scav_<lib>.h`, no more
 src/core/model/        columnar aggregates, ids, string pool, builder, validation
 src/core/lang/         .scav lexer, parser, canonical printer, JSON dump, includes, resolution
 src/layout/            space requests, phases 0-3, routers, cost, thread shim
@@ -133,7 +133,7 @@ test_data/golden/      drawlist/, svg/, layout/ — see below
 functional_tests/      Python, drives the CLI and the C ABI via ctypes
 cmake/deps/*.cmake     one file per third-party dep envy does not package
 cmake/Dependencies.cmake   SHA pins
-tools/                 abi extraction (libclang), corpus tooling
+tools/                 project-wide tooling only; a script one library uses lives with that library
 docs/
 envy.lua               toolchain + package manifest, and envy's root marker
 build.sh  build.bat    one command, clean checkout to green tests
@@ -146,7 +146,7 @@ out/                   gitignored: all build output + the envy cache (§4.2)
 
 **Unit tests are adjacent** and compile library sources with `-DSCAV_TESTING`, which is how `SCAV_INTERNAL` (§5) drops `static`. Each library builds twice, shipping and testable; both are matrix rows (§6).
 
-**Public and private are a directory, not a convention.** A library's API is `src/<lib>/include/scav/scav_*.h` and that directory is its only `PUBLIC` include path; everything else under `src/<lib>/` — private headers, sources, tests — needs `-Isrc`, which is `PRIVATE` to the library and its own tests. A consumer therefore *cannot* name a private header, in the build tree or in an installed one, and `func.install_consumer` compiles every public header of every library with nothing on its include path but the install prefix. Two rules keep the surface navigable: **one header per subject, named for it**, and **every function prefixed with its header's stem** — `parse_document` in `scav_parser.h`, `lex_source` in `scav_lexer.h`, `source_text_normalize` in `scav_source_text.h`. A reader who has a symbol knows the header; a reader who has a header knows the symbols.
+**Public and private are a directory, not a convention.** A library's API is `src/<lib>/include/scav/scav_*.h` and that directory is its only `PUBLIC` include path; everything else under `src/<lib>/` — private headers, sources, tests — needs `-Isrc`, which is `PRIVATE` to the library and its own tests. A consumer therefore *cannot* name a private header, in the build tree or in an installed one, and `func.install_consumer` compiles every public header of every library with nothing on its include path but the install prefix. **One public header per library** — `scav/scav_core.h` is all of `libscavcore` — so a reader never has to work out which of several headers a symbol lives in. Within it, **every function carries the prefix of its section** (`parse_`, `lex_`, `source_text_`, `diag_`, `syntax_`, `string_`), which makes the section list a table of contents and a symbol self-locating. Splitting a library's API across headers is the thing this rule exists to prevent: it trades one decision the author makes once for a decision every caller makes repeatedly.
 
 The `scav_` prefix on a *filename* is for the consumer's include path, where `scav/scav_parser.h` sits among other projects' headers. It is deliberately **not** carried onto C++ identifiers: `namespace scav` already supplies it, and §16 reserves `scav_lower_snake` for ABI-shaped types, so a `std::`-holding type named `scav_parsed_document` would advertise a guarantee it cannot keep.
 
@@ -1398,6 +1398,7 @@ Where a phase states production LOC, multiply by 1.5–2 for the mandated test c
 - **envy provisions everything**: compilers, cmake, ninja, doctest, clang-format, clang-tidy. Cache at `out/.envy` (§4.2). CI runs on a **bare** runner with nothing preinstalled but a system compiler, because that is the only way provisioning is actually tested — and CI overrides `ENVY_CACHE_ROOT` to a shared path so the cache stays warm across jobs.
 - **A toy static library and a doctest executable**, nothing more: `libscavtoy` with one function, one unit test, one golden, one deliberately-failing test held behind a flag to prove failures are actually reported.
 - **`build.sh` / `build.bat`**: one command from a clean checkout to a green test run. No arguments required, no environment to set up, no README steps.
+- **Tests are build steps, not a second command.** Every test is an `add_custom_command` whose output is a stamp file, wired into `ALL`: building *is* testing, a green build cannot hide a red test, and a second build back to back is a no-op because every stamp is newer than its inputs. CTest is deliberately absent — it has no notion of a test being up to date, so it re-runs the whole suite on every invocation and "build, then test" can never be incremental. ctest's `noTestsAction=error` has a configure-time equivalent that fires earlier and cannot be skipped by forgetting a command.
 - **`CMakePresets.json` expresses §6's matrix directly** — that was the argument for CMake over GN, so it gets exercised here rather than asserted. Three configs per triple: `Debug`, `Release`, `testable` (`-DSCAV_TESTING`, §5).
 - **Sanitizers as a mutually-exclusive enum**, not booleans: `SCAV_SANITIZER=NONE|ASAN|UBSAN|TSAN|MSAN`. ASan and TSan cannot coexist, so a boolean pair invites an unbuildable combination. **MSan needs an instrumented `libc++`** and is therefore Linux/clang only — build it in PB or MSan silently reports false positives from uninstrumented standard-library code for the life of the project.
 - **Warnings are errors**, with the per-compiler set pinned in one place. Cheap now, a week of cleanup later.

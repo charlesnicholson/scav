@@ -12,12 +12,7 @@
 
 #include "core/lang/synth_document.h"
 #include "core/test_support.h"
-#include "scav/scav_diagnostics.h"
-#include "scav/scav_ids.h"
-#include "scav/scav_lexer.h"
-#include "scav/scav_parser.h"
-#include "scav/scav_source_text.h"
-#include "scav/scav_syntax_tree.h"
+#include "scav/scav_core.h"
 #include "scav/scav_types.h"
 
 #include "doctest.h"

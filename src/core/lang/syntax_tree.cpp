@@ -1,6 +1,4 @@
-#include "scav/scav_syntax_tree.h"
-
-#include "scav/scav_ids.h"
+#include "scav/scav_core.h"
 
 #include <cstdint>
 #include <string_view>

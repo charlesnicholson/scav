@@ -4,8 +4,7 @@
 #include "core/model/interner.h"
 #include "core/model/lookup_map.h"
 #include "core/model/sort.h"
-#include "scav/scav_ids.h"
-#include "scav/scav_string_pool.h"
+#include "scav/scav_core.h"
 #include "scav/scav_types.h"
 
 #include "doctest.h"
@@ -113,6 +112,42 @@ TEST_CASE("lookup_map: a mutable find writes through") {
   CHECK(m.insert(1U, 10U));
   *m.find(1U) = 11U;
   CHECK(*m.find(1U) == 11U);
+}
+
+TEST_CASE("narrow: round-trips what fits and refuses what does not") {
+  // PRD 6 bans narrowing without a range check and names one helper for it.
+  // This is the boundary between the caller's size_t and the model's uint32.
+  uint32_t out{ 0xDEAD };
+  CHECK(narrow<uint32_t>(size_t{ 0 }, out));
+  CHECK(out == 0);
+  CHECK(narrow<uint32_t>(size_t{ 0xFFFFFFFF }, out));
+  CHECK(out == 0xFFFFFFFFU);
+
+  if constexpr (sizeof(size_t) > 4) {
+    out = 0xDEAD;
+    CHECK_FALSE(narrow<uint32_t>(size_t{ 0x100000000ULL }, out));
+    // Left alone on refusal, so a caller that ignores the bool gets its own
+    // value back rather than a truncated one.
+    CHECK(out == 0xDEAD);
+    CHECK_FALSE(narrow<uint32_t>(SIZE_MAX, out));
+  }
+
+  uint8_t small{ 0 };
+  CHECK(narrow<uint8_t>(255U, small));
+  CHECK(small == 255);
+  CHECK_FALSE(narrow<uint8_t>(256U, small));
+  CHECK(small == 255);
+}
+
+TEST_CASE("narrow_clamp: clamps rather than wrapping") {
+  // A short read is a bug you can find; a wrapped one is a 4-gigabyte read.
+  CHECK(narrow_clamp<uint32_t>(size_t{ 7 }) == 7U);
+  CHECK(narrow_clamp<uint32_t>(size_t{ 0xFFFFFFFF }) == 0xFFFFFFFFU);
+  if constexpr (sizeof(size_t) > 4) {
+    CHECK(narrow_clamp<uint32_t>(size_t{ 0x100000000ULL }) == 0xFFFFFFFFU);
+    CHECK(narrow_clamp<uint32_t>(SIZE_MAX) == 0xFFFFFFFFU);
+  }
+  CHECK(narrow_clamp<uint8_t>(300U) == 255U);
 }
 
 TEST_CASE("sort: empty and single-element inputs are untouched") {

@@ -7,12 +7,7 @@
 
 #include "core/lang/synth_document.h"
 #include "core/test_support.h"
-#include "scav/scav_diagnostics.h"
-#include "scav/scav_ids.h"
-#include "scav/scav_lexer.h"
-#include "scav/scav_parser.h"
-#include "scav/scav_string_pool.h"
-#include "scav/scav_syntax_tree.h"
+#include "scav/scav_core.h"
 #include "scav/scav_types.h"
 
 #include "doctest.h"
@@ -120,6 +115,31 @@ TEST_CASE("parse: the smallest legal chart") {
   CHECK(r.pd.stmt_children[0].len == 0);
   CHECK(r.pd.doc.statements == make_span(0, 1));
   CHECK(str(r.pd, r.pd.doc.path) == "test.scav");
+}
+
+TEST_CASE("parse: a document too large for a span is rejected at every entry") {
+  if constexpr (sizeof(size_t) > 4) {
+    ParsedDocument pd;
+    std::vector<Diagnostic> diags;
+    CHECK_FALSE(
+        parse_document(nullptr, SIZE_MAX, "big.scav", parse_default_options(), pd, diags));
+    CHECK(first_code(diags) == DiagCode::DocumentTooLarge);
+
+    // parse_tokens takes the same check, because it is reachable without going
+    // through parse_document.
+    LexResult lexed;
+    lexed.tokens.push_back({ .off = 0, .len = 0, .kind = TokKind::End });
+    std::vector<Diagnostic> token_diags;
+    CHECK_FALSE(parse_tokens(nullptr,
+                             SIZE_MAX,
+                             lexed,
+                             DocId{ 0 },
+                             "big.scav",
+                             parse_default_options(),
+                             pd,
+                             token_diags));
+    CHECK(first_code(token_diags) == DiagCode::DocumentTooLarge);
+  }
 }
 
 TEST_CASE("parse: a chart takes an optional label") {

@@ -1,14 +1,9 @@
-#include "scav/scav_parser.h"
+#include "scav/scav_core.h"
 
 #include "core/model/interner.h"
-#include "scav/scav_diagnostics.h"
-#include "scav/scav_ids.h"
-#include "scav/scav_lexer.h"
-#include "scav/scav_source_text.h"
-#include "scav/scav_string_pool.h"
-#include "scav/scav_syntax_tree.h"
 #include "scav/scav_types.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 #include <vector>
@@ -124,7 +119,7 @@ bool take_string(Parser &p, StrRef &out) {
                                  *p.diags)) {
     return false;
   }
-  out = intern_bytes(p.interner, p.strbuf.data(), static_cast<uint32_t>(p.strbuf.size()));
+  out = intern_bytes(p.interner, p.strbuf.data(), narrow_clamp<uint32_t>(p.strbuf.size()));
   advance(p);
   return true;
 }
@@ -154,7 +149,7 @@ bool take_number(Parser &p, uint32_t &out) {
 }
 
 uint32_t begin_stmt(Parser &p, ElemKind kind, uint32_t payload) {
-  uint32_t const id{ static_cast<uint32_t>(p.pd->stmts.size()) };
+  uint32_t const id{ narrow_clamp<uint32_t>(p.pd->stmts.size()) };
   p.pd->stmts.push_back(
       { .kind = kind, .doc = p.doc, .src = make_span(peek(p).off, 0), .comments = {} });
   p.pd->stmt_payload.push_back(payload);
@@ -180,7 +175,7 @@ bool parse_endpoint(Parser &p, Endpoint &out) {
     return false;
   }
 
-  uint32_t const begin{ static_cast<uint32_t>(p.pd->path_segs.size()) };
+  uint32_t const begin{ narrow_clamp<uint32_t>(p.pd->path_segs.size()) };
   while (true) {
     PathSeg seg{ .name = {}, .qualifier = {}, .ordinal = INVALID };
     if (!take_name(p, seg.name)) { return false; }
@@ -196,13 +191,13 @@ bool parse_endpoint(Parser &p, Endpoint &out) {
     if (!at_kind(p, TokKind::Slash)) { break; }
     advance(p);
   }
-  out.segs = make_span(begin, static_cast<uint32_t>(p.pd->path_segs.size()) - begin);
+  out.segs = make_span(begin, narrow_clamp<uint32_t>(p.pd->path_segs.size()) - begin);
   return true;
 }
 
 // value := string | '[' [string (',' string)* [',']] ']'
 bool parse_value(Parser &p, Span &out, AttrValueKind &kind) {
-  uint32_t const begin{ static_cast<uint32_t>(p.pd->attr_values.size()) };
+  uint32_t const begin{ narrow_clamp<uint32_t>(p.pd->attr_values.size()) };
   if (at_kind(p, TokKind::String)) {
     StrRef value{};
     if (!take_string(p, value)) { return false; }
@@ -225,7 +220,7 @@ bool parse_value(Parser &p, Span &out, AttrValueKind &kind) {
     advance(p);  // trailing comma is legal, so the loop re-tests for ']'
   }
   if (!expect(p, TokKind::RBracket, DiagCode::ExpectedToken)) { return false; }
-  out = make_span(begin, static_cast<uint32_t>(p.pd->attr_values.size()) - begin);
+  out = make_span(begin, narrow_clamp<uint32_t>(p.pd->attr_values.size()) - begin);
   kind = AttrValueKind::List;
   return true;
 }
@@ -244,7 +239,7 @@ bool parse_attr_entry(Parser &p) {
 
 // attr := '@' key ['=' value] | '@' ident datablock ; key := ident [':' ident]
 bool parse_attr(Parser &p, uint32_t &out_stmt) {
-  uint32_t const payload{ static_cast<uint32_t>(p.pd->attrs.size()) };
+  uint32_t const payload{ narrow_clamp<uint32_t>(p.pd->attrs.size()) };
   out_stmt = begin_stmt(p, ElemKind::Attr, payload);
   advance(p);  // '@'
 
@@ -252,7 +247,7 @@ bool parse_attr(Parser &p, uint32_t &out_stmt) {
   if (!take_name(p, first)) { return false; }
 
   AttrStmt stmt{ .ns = {}, .entries = {} };
-  uint32_t const entries_begin{ static_cast<uint32_t>(p.pd->attr_entries.size()) };
+  uint32_t const entries_begin{ narrow_clamp<uint32_t>(p.pd->attr_entries.size()) };
 
   if (at_kind(p, TokKind::LBrace)) {
     // The block spelling: n keys under one namespace. Parsed inline rather than
@@ -282,14 +277,14 @@ bool parse_attr(Parser &p, uint32_t &out_stmt) {
 
   stmt.entries =
       make_span(entries_begin,
-                static_cast<uint32_t>(p.pd->attr_entries.size()) - entries_begin);
+                narrow_clamp<uint32_t>(p.pd->attr_entries.size()) - entries_begin);
   p.pd->attrs.push_back(stmt);
   return true;
 }
 
 // include := 'include' string 'as' ident
 bool parse_include(Parser &p, uint32_t &out_stmt) {
-  uint32_t const payload{ static_cast<uint32_t>(p.pd->includes.size()) };
+  uint32_t const payload{ narrow_clamp<uint32_t>(p.pd->includes.size()) };
   out_stmt = begin_stmt(p, ElemKind::Include, payload);
   advance(p);  // 'include'
 
@@ -308,7 +303,7 @@ bool parse_include(Parser &p, uint32_t &out_stmt) {
 
 // state := ('state'|'s') ident [state_kind] [string] [block]
 bool parse_state(Parser &p, uint32_t &out_stmt, bool &opens_block) {
-  uint32_t const payload{ static_cast<uint32_t>(p.pd->states.size()) };
+  uint32_t const payload{ narrow_clamp<uint32_t>(p.pd->states.size()) };
   out_stmt = begin_stmt(p, ElemKind::State, payload);
   advance(p);  // 'state' or 's'
 
@@ -336,7 +331,7 @@ bool parse_state(Parser &p, uint32_t &out_stmt, bool &opens_block) {
 
 // submachine := ('submachine'|'m') [ident] [string] block
 bool parse_submachine(Parser &p, uint32_t &out_stmt, bool &opens_block) {
-  uint32_t const payload{ static_cast<uint32_t>(p.pd->submachines.size()) };
+  uint32_t const payload{ narrow_clamp<uint32_t>(p.pd->submachines.size()) };
   out_stmt = begin_stmt(p, ElemKind::Submachine, payload);
   advance(p);  // 'submachine' or 'm'
 
@@ -357,7 +352,7 @@ bool parse_submachine(Parser &p, uint32_t &out_stmt, bool &opens_block) {
 
 // trans := ('trans'|'t') [trans_kind] endpoint '->' endpoint [string] [block]
 bool parse_trans(Parser &p, uint32_t &out_stmt, bool &opens_block) {
-  uint32_t const payload{ static_cast<uint32_t>(p.pd->transitions.size()) };
+  uint32_t const payload{ narrow_clamp<uint32_t>(p.pd->transitions.size()) };
   out_stmt = begin_stmt(p, ElemKind::Trans, payload);
   advance(p);  // 'trans' or 't'
 
@@ -429,7 +424,7 @@ bool parse_chart_header(Parser &p) {
   }
   advance(p);
   p.frames.push_back({ .owner = stmt,
-                       .scratch_begin = static_cast<uint32_t>(p.scratch.size()),
+                       .scratch_begin = narrow_clamp<uint32_t>(p.scratch.size()),
                        .slot = Slot::Item });
   return true;
 }
@@ -440,8 +435,8 @@ void close_frame(Parser &p) {
   Frame const frame{ p.frames.back() };
   p.frames.pop_back();
 
-  uint32_t const count{ static_cast<uint32_t>(p.scratch.size()) - frame.scratch_begin };
-  Span const children{ make_span(static_cast<uint32_t>(p.pd->stmt_ids.size()), count) };
+  uint32_t const count{ narrow_clamp<uint32_t>(p.scratch.size()) - frame.scratch_begin };
+  Span const children{ make_span(narrow_clamp<uint32_t>(p.pd->stmt_ids.size()), count) };
   for (uint32_t i = frame.scratch_begin; i < p.scratch.size(); ++i) {
     p.pd->stmt_ids.push_back(p.scratch[i]);
   }
@@ -495,7 +490,7 @@ bool run(Parser &p) {
       }
       advance(p);  // '{'
       p.frames.push_back({ .owner = stmt,
-                           .scratch_begin = static_cast<uint32_t>(p.scratch.size()),
+                           .scratch_begin = narrow_clamp<uint32_t>(p.scratch.size()),
                            .slot = Slot::Item });
       continue;
     }
@@ -531,7 +526,7 @@ struct WalkFrame {
 // Iterative for the same reason the parser is -- the tree is as deep as the
 // document, and the document is untrusted.
 void attach_comments(ParsedDocument &pd, std::vector<LexComment> const &lexed) {
-  uint32_t const n{ static_cast<uint32_t>(lexed.size()) };
+  uint32_t const n{ narrow_clamp<uint32_t>(lexed.size()) };
   pd.comments.clear();
   if (n == 0) { return; }
 
@@ -591,7 +586,7 @@ void attach_comments(ParsedDocument &pd, std::vector<LexComment> const &lexed) {
 
   // Counting sort by owner, so each statement's comments are one contiguous
   // span and source order survives inside it.
-  uint32_t const stmt_count{ static_cast<uint32_t>(pd.stmts.size()) };
+  uint32_t const stmt_count{ narrow_clamp<uint32_t>(pd.stmts.size()) };
   std::vector<uint32_t> counts(stmt_count + 1, 0);
   for (uint32_t i = 0; i < n; ++i) { ++counts[owner[i] + 1]; }
   for (uint32_t i = 0; i < stmt_count; ++i) { counts[i + 1] += counts[i]; }
@@ -643,7 +638,7 @@ void remap_strings(ParsedDocument &pd, StringRemap const &r) {
 ParseOptions parse_default_options() { return { .max_depth = DEFAULT_MAX_DEPTH }; }
 
 bool parse_tokens(scav_byte const *bytes,
-                  uint32_t len,
+                  size_t byte_count,
                   LexResult const &lexed,
                   DocId doc,
                   std::string_view name,
@@ -652,6 +647,14 @@ bool parse_tokens(scav_byte const *bytes,
                   std::vector<Diagnostic> &diags) {
   out = {};
   out.id = doc;
+
+  // Statement.src is a Span, so the document has to be addressable by one.
+  uint32_t len{ 0 };
+  if (!narrow(byte_count, len)) {
+    diags.push_back({ .code = DiagCode::DocumentTooLarge, .doc = doc, .src = {} });
+    return false;
+  }
+
   out.src_bytes.assign(bytes, bytes + len);
   out.doc.text = make_span(0, len);
 
@@ -666,7 +669,7 @@ bool parse_tokens(scav_byte const *bytes,
   Parser p{ .bytes = out.src_bytes.data(),
             .len = len,
             .tokens = lexed.tokens.data(),
-            .token_count = static_cast<uint32_t>(lexed.tokens.size()),
+            .token_count = narrow_clamp<uint32_t>(lexed.tokens.size()),
             .doc = doc,
             .max_depth = (opts.max_depth == 0) ? DEFAULT_MAX_DEPTH : opts.max_depth,
             .pd = &out,
@@ -680,7 +683,7 @@ bool parse_tokens(scav_byte const *bytes,
   out.doc.path = intern_bytes(p.interner, name);
 
   bool const ok{ run(p) };
-  out.doc.statements = make_span(0, static_cast<uint32_t>(out.stmts.size()));
+  out.doc.statements = make_span(0, narrow_clamp<uint32_t>(out.stmts.size()));
   if (ok) { attach_comments(out, lexed.comments); }
 
   // The pool is finalized either way: a caller inspecting a partial parse should
@@ -692,7 +695,7 @@ bool parse_tokens(scav_byte const *bytes,
 }
 
 bool parse_document(scav_byte const *bytes,
-                    uint32_t len,
+                    size_t len,
                     std::string_view name,
                     ParseOptions const &opts,
                     ParsedDocument &out,
@@ -703,7 +706,9 @@ bool parse_document(scav_byte const *bytes,
   std::vector<scav_byte> normalized;
   if (!source_text_normalize(bytes, len, doc, normalized, diags)) { return false; }
 
-  uint32_t const norm_len{ static_cast<uint32_t>(normalized.size()) };
+  // source_text_normalize already rejected anything a Span cannot address, so
+  // this cannot overflow.
+  uint32_t const norm_len{ narrow_clamp<uint32_t>(normalized.size()) };
   LexResult lexed;
   if (!lex_source(normalized.data(), norm_len, doc, lexed, diags)) {
     // Parse anyway when the lexer recovered: one run should report the syntax

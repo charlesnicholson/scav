@@ -61,7 +61,7 @@ class TestInstallAndConsume(unittest.TestCase):
     def test_install_tree_matches_the_config_package(self) -> None:
         for rel in ("include/scav/scav_types.h",
                     "include/scav/scav_toy.h",
-                    "include/scav/scav_parser.h",
+                    "include/scav/scav_core.h",
                     "lib/cmake/scav/scav-config.cmake",
                     "lib/cmake/scav/scav-config-version.cmake",
                     "lib/cmake/scav/scav-targets.cmake"):
@@ -83,6 +83,19 @@ class TestInstallAndConsume(unittest.TestCase):
                          Path(p).name.startswith("scav_"))]
         self.assertEqual([], stray, "non-public headers escaped into the install tree")
         self.assertTrue(installed, "no headers installed at all")
+
+    def test_one_public_header_per_library(self) -> None:
+        """PRD 3.3: one public header per library, plus the shared vocabulary.
+
+        A reader should never have to work out which of several headers a symbol
+        lives in. Growing this list is a design decision, so it is spelled out
+        rather than counted."""
+        self.assertEqual(
+            ["include/scav/scav_core.h",
+             "include/scav/scav_toy.h",
+             "include/scav/scav_types.h"],
+            sorted(p.relative_to(self.prefix).as_posix()
+                   for p in self.prefix.rglob("*.h")))
 
     def test_install_tree_omits_what_is_not_shipped(self) -> None:
         # An installed internal header would let a consumer define SCAV_TESTING and
