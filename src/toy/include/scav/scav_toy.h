@@ -4,7 +4,7 @@
 // Bootstrap scaffolding, deliberately nothing more: one library with one function,
 // so the harness is proven before any scav code is measured against it.
 
-#include "scav/types.h"
+#include "scav/scav_types.h"
 
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdint.h>

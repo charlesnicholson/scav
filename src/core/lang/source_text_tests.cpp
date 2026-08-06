@@ -1,10 +1,10 @@
 // BOM stripping, line-ending folding, UTF-8 validation and the NFC pass over
 // bytes, plus the line/column derivation every diagnostic goes through.
 
-#include "core/lang/diagnostic.h"
-#include "core/lang/normalize.h"
-#include "core/model/ids.h"
-#include "scav/types.h"
+#include "scav/scav_diagnostics.h"
+#include "scav/scav_ids.h"
+#include "scav/scav_source_text.h"
+#include "scav/scav_types.h"
 
 #include "doctest.h"
 
@@ -32,14 +32,14 @@ struct Normalized {
 Normalized normalize(std::string_view input) {
   std::vector<scav_byte> out;
   Normalized r;
-  r.ok = normalize_source(raw(input), size32(input), DocId{ 0 }, out, r.diags);
+  r.ok = source_text_normalize(raw(input), size32(input), DocId{ 0 }, out, r.diags);
   r.text.assign(reinterpret_cast<char const *>(out.data()), out.size());
   return r;
 }
 
 std::string encode(uint32_t cp) {
   std::vector<scav_byte> out;
-  utf8_encode(cp, out);
+  source_text_utf8_encode(cp, out);
   return { reinterpret_cast<char const *>(out.data()), out.size() };
 }
 
@@ -47,12 +47,12 @@ DiagCode decode_error(std::string_view bytes) {
   uint32_t cp{ 0 };
   uint32_t width{ 0 };
   DiagCode err{ DiagCode::Ok };
-  utf8_decode(raw(bytes), size32(bytes), 0, cp, width, err);
+  source_text_utf8_decode(raw(bytes), size32(bytes), 0, cp, width, err);
   return err;
 }
 
 LineCol pos_of(std::string_view text, uint32_t offset) {
-  return line_col(raw(text), size32(text), offset);
+  return diag_line_col(raw(text), size32(text), offset);
 }
 
 }  // namespace
@@ -129,7 +129,9 @@ TEST_CASE("utf8: decode round-trips every non-surrogate codepoint") {
     uint32_t decoded{ 0 };
     uint32_t width{ 0 };
     DiagCode err{ DiagCode::Ok };
-    bool const ok{ utf8_decode(raw(bytes), size32(bytes), 0, decoded, width, err) };
+    bool const ok{
+      source_text_utf8_decode(raw(bytes), size32(bytes), 0, decoded, width, err)
+    };
     if (!ok || (decoded != cp) || (width != bytes.size())) {
       FAIL("U+" << cp << " did not round-trip");
     }
@@ -159,7 +161,7 @@ TEST_CASE("utf8: decoding past the end reports truncation rather than reading") 
   uint32_t cp{ 0 };
   uint32_t width{ 0 };
   DiagCode err{ DiagCode::Ok };
-  CHECK_FALSE(utf8_decode(nullptr, 0, 0, cp, width, err));
+  CHECK_FALSE(source_text_utf8_decode(nullptr, 0, 0, cp, width, err));
   CHECK(err == DiagCode::Utf8Truncated);
 }
 
@@ -168,7 +170,7 @@ TEST_CASE("utf8: a failed decode still advances by one byte") {
   uint32_t width{ 0 };
   DiagCode err{ DiagCode::Ok };
   std::string_view const bad{ "\x80\x41" };
-  CHECK_FALSE(utf8_decode(raw(bad), size32(bad), 0, cp, width, err));
+  CHECK_FALSE(source_text_utf8_decode(raw(bad), size32(bad), 0, cp, width, err));
   CHECK(width == 1);
 }
 
@@ -214,7 +216,7 @@ TEST_CASE("normalize: zero-width joiners and format characters survive intact") 
   Normalized const r{ normalize(family) };
   CHECK(r.ok);
   CHECK(r.text == family);
-  CHECK(is_nfc(raw(family), size32(family)));
+  CHECK(source_text_is_nfc(raw(family), size32(family)));
 
   CHECK(normalize("a\xe2\x80\x8d"
                   "b")
@@ -260,35 +262,35 @@ TEST_CASE("normalize: a combining mark still composes across a joiner boundary")
 }
 
 TEST_CASE("is_nfc: byte-scans ASCII and only decodes what it must") {
-  CHECK(is_nfc(raw("plain ascii"), 11));
-  CHECK(is_nfc(nullptr, 0));
-  CHECK(is_nfc(raw("caf\xc3\xa9"), 5));
-  CHECK_FALSE(is_nfc(raw("cafe\xcc\x81"), 6));
+  CHECK(source_text_is_nfc(raw("plain ascii"), 11));
+  CHECK(source_text_is_nfc(nullptr, 0));
+  CHECK(source_text_is_nfc(raw("caf\xc3\xa9"), 5));
+  CHECK_FALSE(source_text_is_nfc(raw("cafe\xcc\x81"), 6));
   // Invalid UTF-8 is reported as not-NFC rather than crashing; the caller
   // validated before it got here.
-  CHECK_FALSE(is_nfc(raw("\xc3"), 1));
+  CHECK_FALSE(source_text_is_nfc(raw("\xc3"), 1));
 }
 
 TEST_CASE("is_ascii: exact at the boundary") {
-  CHECK(is_ascii(raw("\x7f"), 1));
-  CHECK_FALSE(is_ascii(raw("\x80"), 1));
-  CHECK(is_ascii(nullptr, 0));
+  CHECK(source_text_is_ascii(raw("\x7f"), 1));
+  CHECK_FALSE(source_text_is_ascii(raw("\x80"), 1));
+  CHECK(source_text_is_ascii(nullptr, 0));
 }
 
 TEST_CASE("nfc_bytes: reports whether it changed anything") {
   std::vector<scav_byte> out;
-  CHECK_FALSE(nfc_bytes(raw("abc"), 3, out));
+  CHECK_FALSE(source_text_to_nfc(raw("abc"), 3, out));
   CHECK(std::string(reinterpret_cast<char const *>(out.data()), out.size()) == "abc");
-  CHECK(nfc_bytes(raw("e\xcc\x81"), 3, out));
+  CHECK(source_text_to_nfc(raw("e\xcc\x81"), 3, out));
   CHECK(std::string(reinterpret_cast<char const *>(out.data()), out.size()) == "\xc3\xa9");
 }
 
 TEST_CASE("nfc_bytes: invalid UTF-8 is passed through rather than dropped") {
-  // normalize_source validates first, so this cannot fire on a real document.
-  // It fires on a fuzz case that calls nfc_bytes directly, and losing bytes
+  // source_text_normalize validates first, so this cannot fire on a real document.
+  // It fires on a fuzz case that calls source_text_to_nfc directly, and losing bytes
   // silently is worse than carrying them.
   std::vector<scav_byte> out;
-  CHECK_FALSE(nfc_bytes(raw("\xc3"), 1, out));
+  CHECK_FALSE(source_text_to_nfc(raw("\xc3"), 1, out));
   CHECK(out.size() == 1);
   CHECK(out[0] == 0xC3);
 }
@@ -324,22 +326,23 @@ TEST_CASE("diag_text: every code has a distinct description") {
   // A switch that falls through to the default is a code someone forgot.
   std::vector<std::string> seen;
   for (uint32_t i = 0; i <= static_cast<uint32_t>(DiagCode::DepthLimitExceeded); ++i) {
-    std::string const text{ diag_text(static_cast<DiagCode>(i)) };
+    std::string const text{ diag_message(static_cast<DiagCode>(i)) };
     CHECK(text != "unknown diagnostic");
     for (std::string const &other : seen) { CHECK(text != other); }
     seen.push_back(text);
   }
-  CHECK(std::string{ diag_text(static_cast<DiagCode>(9999)) } == "unknown diagnostic");
+  CHECK(std::string{ diag_message(static_cast<DiagCode>(9999)) } == "unknown diagnostic");
 }
 
 TEST_CASE("has_errors: only a non-Ok code counts") {
-  CHECK_FALSE(has_errors({}));
-  CHECK_FALSE(has_errors({ { .code = DiagCode::Ok, .doc = DocId{ 0 }, .src = {} } }));
-  CHECK(has_errors({ { .code = DiagCode::ExpectedChart, .doc = DocId{ 0 }, .src = {} } }));
+  CHECK_FALSE(diag_has_errors({}));
+  CHECK_FALSE(diag_has_errors({ { .code = DiagCode::Ok, .doc = DocId{ 0 }, .src = {} } }));
+  CHECK(diag_has_errors(
+      { { .code = DiagCode::ExpectedChart, .doc = DocId{ 0 }, .src = {} } }));
 }
 
 TEST_CASE("text_view: a zero-length span is empty and reads no bytes") {
   std::vector<scav_byte> const bytes{ 'a', 'b', 'c' };
-  CHECK(text_view(bytes, make_span(0, 0)).empty());
-  CHECK(text_view(bytes, make_span(1, 2)) == "bc");
+  CHECK(source_text_view(bytes, make_span(0, 0)).empty());
+  CHECK(source_text_view(bytes, make_span(1, 2)) == "bc");
 }

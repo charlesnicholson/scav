@@ -1,6 +1,9 @@
-#ifndef SCAV_CORE_LANG_PARSE_TREE_H_INCLUDED
-#define SCAV_CORE_LANG_PARSE_TREE_H_INCLUDED
+#ifndef SCAV_SYNTAX_TREE_H_INCLUDED
+#define SCAV_SYNTAX_TREE_H_INCLUDED
 
+// Functions here are named `syntax_*`, after the header; the POD rows keep
+// the names PRD 7 gives them.
+//
 // The front-end slice of PRD 7: src_bytes, Document, Statement, trivia and the
 // string pool. No entity arrays, no includes, no resolution -- a statement
 // stream is all a parser owes, and lowering it is P1's.
@@ -12,9 +15,9 @@
 // avoid. It also means P1 lowers from parsed values rather than re-lexing a src
 // span.
 
-#include "core/model/ids.h"
-#include "core/model/string_pool.h"
-#include "scav/types.h"
+#include "scav/scav_ids.h"
+#include "scav/scav_string_pool.h"
+#include "scav/scav_types.h"
 
 #include <cstdint>
 #include <string_view>
@@ -145,19 +148,19 @@ struct ParsedDocument {
   StringPool strings;  // byte-sorted, two-pass interned
 };
 
-char const *elem_kind_name(ElemKind kind);
-char const *state_kind_name(StateKind kind);
-char const *trans_kind_name(TransKind kind);
+char const *syntax_elem_kind_name(ElemKind kind);
+char const *syntax_state_kind_name(StateKind kind);
+char const *syntax_trans_kind_name(TransKind kind);
 
 // The DSL spelling of a state kind, or false when the word names none. `initial`
 // and `final` are rejected: the format reaches them through `*`.
-bool state_kind_from_name(std::string_view text, StateKind &out);
-bool trans_kind_from_name(std::string_view text, TransKind &out);
+bool syntax_state_kind_from_name(std::string_view text, StateKind &out);
+bool syntax_trans_kind_from_name(std::string_view text, TransKind &out);
 
 // The chart statement, which is always the first row. INVALID when the parse
 // produced nothing.
-uint32_t root_statement(ParsedDocument const &pd);
+uint32_t syntax_root_statement(ParsedDocument const &pd);
 
 }  // namespace scav
 
-#endif  // SCAV_CORE_LANG_PARSE_TREE_H_INCLUDED
+#endif  // SCAV_SYNTAX_TREE_H_INCLUDED

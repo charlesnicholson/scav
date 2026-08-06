@@ -114,7 +114,8 @@ It is also the end-to-end exercise of the load path over a real filesystem — p
 Mirrors `~/src/envy`: SHA-pinned deps under `cmake/deps/`, unit tests adjacent to sources, Python functional tests, sanitizer suppressions, presets.
 
 ```
-include/scav/          public C ABI headers, one per library
+include/scav/          the cross-library vocabulary: POD spellings, no functions
+src/<lib>/include/scav/  that library's public API, one `scav_*.h` per subject
 src/core/model/        columnar aggregates, ids, string pool, builder, validation
 src/core/lang/         .scav lexer, parser, canonical printer, JSON dump, includes, resolution
 src/layout/            space requests, phases 0-3, routers, cost, thread shim
@@ -144,6 +145,10 @@ out/                   gitignored: all build output + the envy cache (§4.2)
 `apps/` is separate from `src/` because an application is a *consumer* — that keeps the CLI and viewer from quietly becoming privileged layers.
 
 **Unit tests are adjacent** and compile library sources with `-DSCAV_TESTING`, which is how `SCAV_INTERNAL` (§5) drops `static`. Each library builds twice, shipping and testable; both are matrix rows (§6).
+
+**Public and private are a directory, not a convention.** A library's API is `src/<lib>/include/scav/scav_*.h` and that directory is its only `PUBLIC` include path; everything else under `src/<lib>/` — private headers, sources, tests — needs `-Isrc`, which is `PRIVATE` to the library and its own tests. A consumer therefore *cannot* name a private header, in the build tree or in an installed one, and `func.install_consumer` compiles every public header of every library with nothing on its include path but the install prefix. Two rules keep the surface navigable: **one header per subject, named for it**, and **every function prefixed with its header's stem** — `parse_document` in `scav_parser.h`, `lex_source` in `scav_lexer.h`, `source_text_normalize` in `scav_source_text.h`. A reader who has a symbol knows the header; a reader who has a header knows the symbols.
+
+The `scav_` prefix on a *filename* is for the consumer's include path, where `scav/scav_parser.h` sits among other projects' headers. It is deliberately **not** carried onto C++ identifiers: `namespace scav` already supplies it, and §16 reserves `scav_lower_snake` for ABI-shaped types, so a `std::`-holding type named `scav_parsed_document` would advertise a guarantee it cannot keep.
 
 **Goldens are layered by stage**: `layout/` (structural + coordinate hashes), `drawlist/` (the canonical render IR, §12, the primary surface), `svg/` (thin serializer check). A layout change moves the first two; an SVG-writer change moves only the third. `svg/` alone → serializer bug; all three → review starts at `layout/`.
 

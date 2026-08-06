@@ -1,7 +1,7 @@
 #include "core/lang/unicode_nfc.h"
 
-#include "core/model/ids.h"
-#include "scav/types.h"
+#include "scav/scav_ids.h"
+#include "scav/scav_types.h"
 
 #include <array>
 #include <cstdint>

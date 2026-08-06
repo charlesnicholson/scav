@@ -8,14 +8,14 @@
 // test_data. A parser test that has to open a file is testing the filesystem
 // too, and the whole point of PRD 16.2 is that nothing here needs one.
 
-#include "core/lang/diagnostic.h"
-#include "core/lang/lexer.h"
-#include "core/lang/normalize.h"
-#include "core/lang/parse_tree.h"
-#include "core/lang/parser.h"
-#include "core/model/ids.h"
-#include "core/model/string_pool.h"
-#include "scav/types.h"
+#include "scav/scav_diagnostics.h"
+#include "scav/scav_ids.h"
+#include "scav/scav_lexer.h"
+#include "scav/scav_parser.h"
+#include "scav/scav_source_text.h"
+#include "scav/scav_string_pool.h"
+#include "scav/scav_syntax_tree.h"
+#include "scav/scav_types.h"
 
 #include <cstdint>
 #include <string>
@@ -43,7 +43,7 @@ inline Parsed parse(std::string_view text, std::string_view name = "test.scav") 
   r.ok = parse_document(raw(text),
                         size32(text),
                         name,
-                        default_parse_options(),
+                        parse_default_options(),
                         r.pd,
                         r.diags);
   return r;
@@ -69,16 +69,19 @@ inline Lexed lex_text(std::string_view text) {
   Lexed r;
   std::vector<Diagnostic> norm;
   DocId const doc{ 0 };
-  r.ok = normalize_source(raw(text), size32(text), doc, r.bytes, norm);
+  r.ok = source_text_normalize(raw(text), size32(text), doc, r.bytes, norm);
   r.diags = norm;
   if (!r.ok) { return r; }
-  r.ok =
-      lex(r.bytes.data(), static_cast<uint32_t>(r.bytes.size()), doc, r.result, r.diags);
+  r.ok = lex_source(r.bytes.data(),
+                    static_cast<uint32_t>(r.bytes.size()),
+                    doc,
+                    r.result,
+                    r.diags);
   return r;
 }
 
 inline std::string_view str(ParsedDocument const &pd, StrRef ref) {
-  return view(pd.strings, ref);
+  return string_pool_view(pd.strings, ref);
 }
 
 inline std::string_view src(ParsedDocument const &pd, Span span) {

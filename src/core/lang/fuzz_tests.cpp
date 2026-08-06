@@ -10,15 +10,15 @@
 // The bar is not "finds bugs" but "cannot crash and cannot lie": no read out of
 // bounds, no hang, and every diagnostic still points inside the document.
 
-#include "core/lang/diagnostic.h"
-#include "core/lang/lexer.h"
-#include "core/lang/normalize.h"
-#include "core/lang/parse_tree.h"
-#include "core/lang/parser.h"
-#include "core/lang/synth.h"
-#include "core/model/ids.h"
+#include "core/lang/synth_document.h"
 #include "core/test_support.h"
-#include "scav/types.h"
+#include "scav/scav_diagnostics.h"
+#include "scav/scav_ids.h"
+#include "scav/scav_lexer.h"
+#include "scav/scav_parser.h"
+#include "scav/scav_source_text.h"
+#include "scav/scav_syntax_tree.h"
+#include "scav/scav_types.h"
 
 #include "doctest.h"
 
@@ -118,14 +118,14 @@ TEST_CASE("fuzz: the lexer survives arbitrary bytes") {
     std::string const input{ mutate(seeds[i % seeds.size()], SEED + i) };
     std::vector<scav_byte> normalized;
     std::vector<Diagnostic> diags;
-    if (!normalize_source(raw(input), size32(input), DocId{ 0 }, normalized, diags)) {
+    if (!source_text_normalize(raw(input), size32(input), DocId{ 0 }, normalized, diags)) {
       check_diagnostics(diags, size32(input));
       continue;
     }
 
     uint32_t const len{ static_cast<uint32_t>(normalized.size()) };
     LexResult lexed;
-    lex(normalized.data(), len, DocId{ 0 }, lexed, diags);
+    lex_source(normalized.data(), len, DocId{ 0 }, lexed, diags);
     check_diagnostics(diags, len);
 
     // The End sentinel is what lets lookahead skip its bounds check, so it is
@@ -175,7 +175,7 @@ TEST_CASE("fuzz: a partially parsed document still has consistent spans") {
   CHECK(parse(full).ok);
 
   // And a prefix of the *generated* corpus, which nests far deeper.
-  SynthSpec spec{ synth_default() };
+  SynthSpec spec{ synth_default_spec() };
   spec.depth = 6;
   spec.min_roots = 1;
   SynthStats stats{};

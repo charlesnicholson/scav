@@ -1,12 +1,13 @@
-#include "core/lang/parser.h"
+#include "scav/scav_parser.h"
 
-#include "core/lang/diagnostic.h"
-#include "core/lang/lexer.h"
-#include "core/lang/normalize.h"
-#include "core/lang/parse_tree.h"
-#include "core/model/ids.h"
-#include "core/model/string_pool.h"
-#include "scav/types.h"
+#include "core/model/interner.h"
+#include "scav/scav_diagnostics.h"
+#include "scav/scav_ids.h"
+#include "scav/scav_lexer.h"
+#include "scav/scav_source_text.h"
+#include "scav/scav_string_pool.h"
+#include "scav/scav_syntax_tree.h"
+#include "scav/scav_types.h"
 
 #include <cstdint>
 #include <string_view>
@@ -89,7 +90,7 @@ bool expect(Parser &p, TokKind kind, DiagCode code) {
 }
 
 StrRef intern_token(Parser &p, Token const &t) {
-  return intern(p.interner, p.bytes + t.off, t.len);
+  return intern_bytes(p.interner, p.bytes + t.off, t.len);
 }
 
 // An identifier in a name position. Reserved words are rejected here rather
@@ -101,7 +102,7 @@ bool take_name(Parser &p, StrRef &out) {
     return false;
   }
   Token const &t{ peek(p) };
-  if (is_reserved_word(tok_text(p, t))) {
+  if (lex_is_reserved_word(tok_text(p, t))) {
     error_at(p, DiagCode::ReservedWordAsName, t);
     return false;
   }
@@ -116,14 +117,14 @@ bool take_string(Parser &p, StrRef &out) {
     return false;
   }
   Token const &t{ peek(p) };
-  if (!decode_string_literal(p.bytes,
-                             make_span(t.off, t.len),
-                             p.doc,
-                             p.strbuf,
-                             *p.diags)) {
+  if (!lex_decode_string_literal(p.bytes,
+                                 make_span(t.off, t.len),
+                                 p.doc,
+                                 p.strbuf,
+                                 *p.diags)) {
     return false;
   }
-  out = intern(p.interner, p.strbuf.data(), static_cast<uint32_t>(p.strbuf.size()));
+  out = intern_bytes(p.interner, p.strbuf.data(), static_cast<uint32_t>(p.strbuf.size()));
   advance(p);
   return true;
 }
@@ -317,9 +318,9 @@ bool parse_state(Parser &p, uint32_t &out_stmt, bool &opens_block) {
   // be a kind -- which is why `kind` is not a reserved word (PRD 15). A reserved
   // word is the exception: it cannot be a kind, so it is the next statement with
   // its comma missing, and saying so beats "unknown state kind: state".
-  if (at_kind(p, TokKind::Ident) && !is_reserved_word(tok_text(p, peek(p)))) {
+  if (at_kind(p, TokKind::Ident) && !lex_is_reserved_word(tok_text(p, peek(p)))) {
     Token const &t{ peek(p) };
-    if (!state_kind_from_name(tok_text(p, t), stmt.kind)) {
+    if (!syntax_state_kind_from_name(tok_text(p, t), stmt.kind)) {
       error_at(p, DiagCode::UnknownStateKind, t);
       return false;
     }
@@ -369,7 +370,7 @@ bool parse_trans(Parser &p, uint32_t &out_stmt, bool &opens_block) {
   // one of them and a state name otherwise -- no lookahead needed.
   if (at_kind(p, TokKind::Ident)) {
     TransKind kind{ TransKind::External };
-    if (trans_kind_from_name(tok_text(p, peek(p)), kind)) {
+    if (syntax_trans_kind_from_name(tok_text(p, peek(p)), kind)) {
       stmt.kind = kind;
       advance(p);
     }
@@ -535,7 +536,7 @@ void attach_comments(ParsedDocument &pd, std::vector<LexComment> const &lexed) {
   if (n == 0) { return; }
 
   std::vector<uint32_t> owner(n, 0);
-  uint32_t const root{ root_statement(pd) };
+  uint32_t const root{ syntax_root_statement(pd) };
   if (root == INVALID) { return; }
 
   uint32_t next{ 0 };
@@ -610,36 +611,36 @@ void attach_comments(ParsedDocument &pd, std::vector<LexComment> const &lexed) {
 // One place that has to know where all of them are -- which is the price of
 // interning in one forward pass and sorting afterwards.
 void remap_strings(ParsedDocument &pd, StringRemap const &r) {
-  pd.doc.path = remap(r, pd.doc.path);
+  pd.doc.path = intern_remap(r, pd.doc.path);
   for (ChartStmt &s : pd.charts) {
-    s.name = remap(r, s.name);
-    s.label = remap(r, s.label);
+    s.name = intern_remap(r, s.name);
+    s.label = intern_remap(r, s.label);
   }
   for (IncludeStmt &s : pd.includes) {
-    s.path = remap(r, s.path);
-    s.alias = remap(r, s.alias);
+    s.path = intern_remap(r, s.path);
+    s.alias = intern_remap(r, s.alias);
   }
   for (StateStmt &s : pd.states) {
-    s.name = remap(r, s.name);
-    s.label = remap(r, s.label);
+    s.name = intern_remap(r, s.name);
+    s.label = intern_remap(r, s.label);
   }
   for (SubmachineStmt &s : pd.submachines) {
-    s.name = remap(r, s.name);
-    s.label = remap(r, s.label);
+    s.name = intern_remap(r, s.name);
+    s.label = intern_remap(r, s.label);
   }
-  for (TransStmt &s : pd.transitions) { s.label = remap(r, s.label); }
-  for (AttrStmt &s : pd.attrs) { s.ns = remap(r, s.ns); }
-  for (AttrEntry &e : pd.attr_entries) { e.key = remap(r, e.key); }
-  for (StrRef &v : pd.attr_values) { v = remap(r, v); }
+  for (TransStmt &s : pd.transitions) { s.label = intern_remap(r, s.label); }
+  for (AttrStmt &s : pd.attrs) { s.ns = intern_remap(r, s.ns); }
+  for (AttrEntry &e : pd.attr_entries) { e.key = intern_remap(r, e.key); }
+  for (StrRef &v : pd.attr_values) { v = intern_remap(r, v); }
   for (PathSeg &s : pd.path_segs) {
-    s.name = remap(r, s.name);
-    s.qualifier = remap(r, s.qualifier);
+    s.name = intern_remap(r, s.name);
+    s.qualifier = intern_remap(r, s.qualifier);
   }
 }
 
 }  // namespace
 
-ParseOptions default_parse_options() { return { .max_depth = DEFAULT_MAX_DEPTH }; }
+ParseOptions parse_default_options() { return { .max_depth = DEFAULT_MAX_DEPTH }; }
 
 bool parse_tokens(scav_byte const *bytes,
                   uint32_t len,
@@ -676,7 +677,7 @@ bool parse_tokens(scav_byte const *bytes,
             .scratch = {},
             .frames = {},
             .strbuf = {} };
-  out.doc.path = intern(p.interner, name);
+  out.doc.path = intern_bytes(p.interner, name);
 
   bool const ok{ run(p) };
   out.doc.statements = make_span(0, static_cast<uint32_t>(out.stmts.size()));
@@ -685,7 +686,7 @@ bool parse_tokens(scav_byte const *bytes,
   // The pool is finalized either way: a caller inspecting a partial parse should
   // read the same StrRefs a complete one produces.
   StringRemap r;
-  finalize(p.interner, out.strings, r);
+  intern_finalize(p.interner, out.strings, r);
   remap_strings(out, r);
   return ok;
 }
@@ -700,11 +701,11 @@ bool parse_document(scav_byte const *bytes,
   DocId const doc{ 0 };
 
   std::vector<scav_byte> normalized;
-  if (!normalize_source(bytes, len, doc, normalized, diags)) { return false; }
+  if (!source_text_normalize(bytes, len, doc, normalized, diags)) { return false; }
 
   uint32_t const norm_len{ static_cast<uint32_t>(normalized.size()) };
   LexResult lexed;
-  if (!lex(normalized.data(), norm_len, doc, lexed, diags)) {
+  if (!lex_source(normalized.data(), norm_len, doc, lexed, diags)) {
     // Parse anyway when the lexer recovered: one run should report the syntax
     // error too rather than making the author fix stray bytes first.
     if (lexed.tokens.empty()) { return false; }

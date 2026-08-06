@@ -1,11 +1,12 @@
 // Ids, the no-iteration lookup map, the vendored stable sort, and two-pass
 // interning. Compiled against scavcore_testable.
 
-#include "core/model/ids.h"
+#include "core/model/interner.h"
 #include "core/model/lookup_map.h"
 #include "core/model/sort.h"
-#include "core/model/string_pool.h"
-#include "scav/types.h"
+#include "scav/scav_ids.h"
+#include "scav/scav_string_pool.h"
+#include "scav/scav_types.h"
 
 #include "doctest.h"
 
@@ -22,7 +23,7 @@ std::vector<std::string> pool_strings(StringPool const &pool,
                                       std::vector<StrRef> const &refs) {
   std::vector<std::string> out;
   out.reserve(refs.size());
-  for (StrRef const r : refs) { out.emplace_back(view(pool, r)); }
+  for (StrRef const r : refs) { out.emplace_back(string_pool_view(pool, r)); }
   return out;
 }
 
@@ -38,13 +39,13 @@ Interned intern_all(std::vector<std::string_view> const &inputs) {
   Interner in;
   std::vector<StrRef> staged;
   staged.reserve(inputs.size());
-  for (std::string_view const s : inputs) { staged.push_back(intern(in, s)); }
+  for (std::string_view const s : inputs) { staged.push_back(intern_bytes(in, s)); }
 
   Interned out;
   StringRemap r;
-  finalize(in, out.pool, r);
+  intern_finalize(in, out.pool, r);
   out.refs.reserve(staged.size());
-  for (StrRef const s : staged) { out.refs.push_back(remap(r, s)); }
+  for (StrRef const s : staged) { out.refs.push_back(intern_remap(r, s)); }
   out.bytes.assign(reinterpret_cast<char const *>(out.pool.bytes.data()),
                    out.pool.bytes.size());
   return out;
@@ -187,10 +188,10 @@ TEST_CASE("sort: an already-sorted and a reversed input both land sorted") {
 
 TEST_CASE("compare_bytes: unsigned, byte-wise, shorter prefix first") {
   auto const cmp = [](std::string_view a, std::string_view b) {
-    return compare_bytes(reinterpret_cast<scav_byte const *>(a.data()),
-                         static_cast<uint32_t>(a.size()),
-                         reinterpret_cast<scav_byte const *>(b.data()),
-                         static_cast<uint32_t>(b.size()));
+    return string_compare_bytes(reinterpret_cast<scav_byte const *>(a.data()),
+                                static_cast<uint32_t>(a.size()),
+                                reinterpret_cast<scav_byte const *>(b.data()),
+                                static_cast<uint32_t>(b.size()));
   };
   CHECK(cmp("a", "a") == 0);
   CHECK(cmp("a", "b") < 0);
@@ -207,32 +208,32 @@ TEST_CASE("compare_bytes: unsigned, byte-wise, shorter prefix first") {
 
 TEST_CASE("intern: the empty string is a zero ref and never enters the pool") {
   Interner in;
-  CHECK(intern(in, std::string_view{}) == str_ref(0, 0));
+  CHECK(intern_bytes(in, std::string_view{}) == str_ref(0, 0));
   CHECK(in.staging.empty());
   CHECK(in.unique.empty());
 
   Interned const r{ intern_all({ "" }) };
   CHECK(r.pool.bytes.empty());
   CHECK(r.refs[0] == str_ref(0, 0));
-  CHECK(view(r.pool, r.refs[0]).empty());
+  CHECK(string_pool_view(r.pool, r.refs[0]).empty());
 }
 
 TEST_CASE("intern: the same bytes return the same staging ref") {
   Interner in;
-  StrRef const a{ intern(in, "hello") };
-  StrRef const b{ intern(in, "hello") };
+  StrRef const a{ intern_bytes(in, "hello") };
+  StrRef const b{ intern_bytes(in, "hello") };
   CHECK(a == b);
   CHECK(in.unique.size() == 1);
   CHECK(in.staging.size() == 5);
-  CHECK(staged_view(in, a) == "hello");
-  CHECK(staged_view(in, str_ref(0, 0)).empty());
+  CHECK(intern_staged_view(in, a) == "hello");
+  CHECK(intern_staged_view(in, str_ref(0, 0)).empty());
 }
 
 TEST_CASE("intern: an embedded NUL is an ordinary byte") {
   Interner in;
   std::string const with_nul{ std::string("a\0b", 3) };
-  StrRef const a{ intern(in, with_nul) };
-  StrRef const b{ intern(in, "ab") };
+  StrRef const a{ intern_bytes(in, with_nul) };
+  StrRef const b{ intern_bytes(in, "ab") };
   CHECK(a != b);
   CHECK(a.len == 3);
   CHECK(in.unique.size() == 2);
@@ -286,10 +287,10 @@ TEST_CASE("intern: finalizing an empty interner yields an empty pool") {
   Interner in;
   StringPool pool;
   StringRemap r;
-  finalize(in, pool, r);
+  intern_finalize(in, pool, r);
   CHECK(pool.bytes.empty());
   CHECK(r.staging.empty());
-  CHECK(remap(r, str_ref(0, 0)) == str_ref(0, 0));
+  CHECK(intern_remap(r, str_ref(0, 0)) == str_ref(0, 0));
 }
 
 TEST_CASE("intern: remapping a ref from another interner degrades to empty") {
@@ -297,11 +298,11 @@ TEST_CASE("intern: remapping a ref from another interner degrades to empty") {
   // string is at least visibly wrong.
   Interned const r{ intern_all({ "alpha" }) };
   Interner other;
-  intern(other, "beta");
+  intern_bytes(other, "beta");
   StringPool other_pool;
   StringRemap other_remap;
-  finalize(other, other_pool, other_remap);
-  CHECK(remap(other_remap, str_ref(999, 4)) == str_ref(0, 0));
+  intern_finalize(other, other_pool, other_remap);
+  CHECK(intern_remap(other_remap, str_ref(999, 4)) == str_ref(0, 0));
 }
 
 TEST_CASE("intern: a large distinct set round-trips through the remap") {
@@ -317,7 +318,7 @@ TEST_CASE("intern: a large distinct set round-trips through the remap") {
 
   Interned const r{ intern_all(inputs) };
   for (uint32_t i = 0; i < owned.size(); ++i) {
-    CHECK(view(r.pool, r.refs[i]) == owned[i]);
+    CHECK(string_pool_view(r.pool, r.refs[i]) == owned[i]);
   }
 
   // Sorted and deduped, so the pool is exactly the concatenation in byte order.

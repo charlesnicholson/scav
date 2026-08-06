@@ -2,7 +2,7 @@
 // algorithm can get wrong independently of the table.
 
 #include "core/lang/unicode_nfc.h"
-#include "scav/types.h"
+#include "scav/scav_types.h"
 
 #include "doctest.h"
 

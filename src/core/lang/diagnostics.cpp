@@ -1,13 +1,13 @@
-#include "core/lang/diagnostic.h"
+#include "scav/scav_diagnostics.h"
 
-#include "scav/types.h"
+#include "scav/scav_types.h"
 
 #include <cstdint>
 #include <vector>
 
 namespace scav {
 
-LineCol line_col(scav_byte const *bytes, uint32_t len, uint32_t offset) {
+LineCol diag_line_col(scav_byte const *bytes, uint32_t len, uint32_t offset) {
   uint32_t const stop{ (offset < len) ? offset : len };
   uint32_t line{ 1 };
   uint32_t column{ 1 };
@@ -23,7 +23,7 @@ LineCol line_col(scav_byte const *bytes, uint32_t len, uint32_t offset) {
   return { .line = line, .column = column };
 }
 
-char const *diag_text(DiagCode code) {
+char const *diag_message(DiagCode code) {
   switch (code) {
     case DiagCode::Ok: return "ok";
 
@@ -67,7 +67,7 @@ char const *diag_text(DiagCode code) {
   return "unknown diagnostic";
 }
 
-bool has_errors(std::vector<Diagnostic> const &diags) {
+bool diag_has_errors(std::vector<Diagnostic> const &diags) {
   for (Diagnostic const &d : diags) {
     if (d.code != DiagCode::Ok) { return true; }
   }

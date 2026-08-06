@@ -1,10 +1,11 @@
 scav_static_library(scavcore
-  lang/diagnostic.cpp
+  lang/diagnostics.cpp
   lang/lexer.cpp
-  lang/normalize.cpp
-  lang/parse_tree.cpp
+  lang/source_text.cpp
+  lang/syntax_tree.cpp
   lang/parser.cpp
   lang/unicode_nfc.cpp
+  model/interner.cpp
   model/string_pool.cpp
 )
 scav_install_library(scavcore core)
@@ -16,10 +17,10 @@ if(SCAV_BUILD_TESTS)
     lang/corpus_tests.cpp
     lang/fuzz_tests.cpp
     lang/lexer_tests.cpp
-    lang/normalize_tests.cpp
+    lang/source_text_tests.cpp
     lang/parser_tests.cpp
     lang/perf_tests.cpp
-    lang/synth.cpp
+    lang/synth_document.cpp
     lang/unicode_nfc_tests.cpp
     model/model_tests.cpp
   )

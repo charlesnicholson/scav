@@ -6,11 +6,11 @@
 // Source under test is written as a C++ raw literal, so a `.scav` string keeps
 // its own quotes and reads the way an author would type it.
 
-#include "core/lang/diagnostic.h"
-#include "core/lang/lexer.h"
-#include "core/model/ids.h"
 #include "core/test_support.h"
-#include "scav/types.h"
+#include "scav/scav_diagnostics.h"
+#include "scav/scav_ids.h"
+#include "scav/scav_lexer.h"
+#include "scav/scav_types.h"
 
 #include "doctest.h"
 
@@ -79,11 +79,11 @@ Decoded decode(std::string_view literal) {
   }
   Token const &t{ r.result.tokens[0] };
   std::vector<scav_byte> out;
-  d.ok = decode_string_literal(r.bytes.data(),
-                               make_span(t.off, t.len),
-                               DocId{ 0 },
-                               out,
-                               d.diags);
+  d.ok = lex_decode_string_literal(r.bytes.data(),
+                                   make_span(t.off, t.len),
+                                   DocId{ 0 },
+                                   out,
+                                   d.diags);
   d.text.assign(reinterpret_cast<char const *>(out.data()), out.size());
   return d;
 }
@@ -324,16 +324,16 @@ TEST_CASE("decode: an unknown escape is rejected rather than passed through") {
 
 TEST_CASE("decode: a span ending mid-escape is rejected rather than read past") {
   // The lexer cannot produce this -- a trailing backslash makes the string
-  // unterminated -- but decode_string_literal takes an arbitrary span, so the
+  // unterminated -- but lex_decode_string_literal takes an arbitrary span, so the
   // guard is what keeps a hand-built one from reading past its end.
   std::string_view const bytes{ R"("ab\")" };
   std::vector<scav_byte> out;
   std::vector<Diagnostic> diags;
-  CHECK_FALSE(decode_string_literal(raw(bytes),
-                                    make_span(0, size32(bytes)),
-                                    DocId{ 0 },
-                                    out,
-                                    diags));
+  CHECK_FALSE(lex_decode_string_literal(raw(bytes),
+                                        make_span(0, size32(bytes)),
+                                        DocId{ 0 },
+                                        out,
+                                        diags));
   CHECK(first_code(diags) == DiagCode::TruncatedEscape);
   CHECK(out.empty());
 }
@@ -426,7 +426,7 @@ TEST_CASE("is_reserved_word: exactly the eight words PRD 15 lists") {
                             "external",
                             "internal",
                             "local" }) {
-    CHECK(is_reserved_word(word));
+    CHECK(lex_is_reserved_word(word));
   }
   for (char const *word : { "choice",
                             "history",
@@ -445,15 +445,15 @@ TEST_CASE("is_reserved_word: exactly the eight words PRD 15 lists") {
                             "Chart",
                             "STATE",
                             "" }) {
-    CHECK_FALSE(is_reserved_word(word));
+    CHECK_FALSE(lex_is_reserved_word(word));
   }
 }
 
 TEST_CASE("tok_kind_name: every kind is named") {
   for (uint32_t i = 0; i <= static_cast<uint32_t>(TokKind::Arrow); ++i) {
-    CHECK(std::string{ tok_kind_name(static_cast<TokKind>(i)) } != "token");
+    CHECK(std::string{ lex_token_kind_name(static_cast<TokKind>(i)) } != "token");
   }
-  CHECK(std::string{ tok_kind_name(static_cast<TokKind>(999)) } == "token");
+  CHECK(std::string{ lex_token_kind_name(static_cast<TokKind>(999)) } == "token");
 }
 
 TEST_CASE("lex_footprint: grows with the token count and never with nothing") {
