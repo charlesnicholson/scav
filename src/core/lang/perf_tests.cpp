@@ -102,9 +102,6 @@ TEST_CASE("perf: lex and parse a large document in RAM") {
   SynthStats stats{};
   std::string const text{ generate(INPUT_BYTES, stats) };
   uint64_t const bytes{ text.size() };
-  MESSAGE("input: " << (bytes / (1024ULL * 1024ULL)) << " MiB, " << stats.states
-                    << " states, " << stats.transitions << " transitions");
-
   std::vector<scav_byte> const source{ normalized(text) };
   LexTiming const lexing{ time_lex(source) };
 
@@ -121,12 +118,10 @@ TEST_CASE("perf: lex and parse a large document in RAM") {
 
   uint64_t const lex_rate{ throughput_mb_per_s(bytes, lexing.micros) };
   uint64_t const parse_rate{ throughput_mb_per_s(bytes, parse_micros) };
-  MESSAGE("lex_source: " << lex_rate << " MiB/s over " << lexing.tokens << " tokens");
-  MESSAGE("parse: " << parse_rate << " MiB/s");
-
   if (ASSERT_FLOOR) {
-    CHECK(lex_rate >= LEX_FLOOR_MB_PER_S);
-    CHECK(parse_rate >= PARSE_FLOOR_MB_PER_S);
+    CHECK_MESSAGE(lex_rate >= LEX_FLOOR_MB_PER_S,
+                  "lex " << lex_rate << " MiB/s over " << lexing.tokens << " tokens");
+    CHECK_MESSAGE(parse_rate >= PARSE_FLOOR_MB_PER_S, "parse " << parse_rate << " MiB/s");
   }
 }
 
@@ -158,14 +153,13 @@ TEST_CASE("perf: peak memory is a bounded multiple of the input") {
                        diags));
   uint64_t const parse_bytes{ parse_footprint(pd) };
 
-  MESSAGE("token stream: " << ((lex_bytes * 100) / bytes) << "% of input");
-  MESSAGE("parsed document: " << ((parse_bytes * 100) / bytes) << "% of input");
-
   // The token vector is 12 bytes per token against roughly six bytes of source
   // each, so about 2x. Four is the ceiling this asserts.
-  CHECK(lex_bytes < bytes * 4);
+  CHECK_MESSAGE(lex_bytes < bytes * 4,
+                "token stream " << ((lex_bytes * 100) / bytes) << "% of input");
   // The document holds src_bytes at 1x plus one row per statement, so under 3x.
-  CHECK(parse_bytes < bytes * 4);
+  CHECK_MESSAGE(parse_bytes < bytes * 4,
+                "document " << ((parse_bytes * 100) / bytes) << "% of input");
   // Both are freed independently: the parse does not need the tokens afterwards.
   CHECK(parse_bytes > bytes);
 }
@@ -191,8 +185,10 @@ TEST_CASE("perf: lexing is linear in the input") {
   uint64_t const large_us{ time_lex(large_bytes).micros };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
-  MESSAGE("lex_source grew " << growth << "x for " << ratio << "x the bytes");
-  if (ASSERT_FLOOR) { CHECK(growth < ratio * SCALING_SLACK); }
+  if (ASSERT_FLOOR) {
+    CHECK_MESSAGE(growth < ratio * SCALING_SLACK,
+                  "grew " << growth << "x for " << ratio << "x the bytes");
+  }
 }
 
 TEST_CASE("perf: parsing is linear in the input") {
@@ -227,8 +223,10 @@ TEST_CASE("perf: parsing is linear in the input") {
   uint64_t const large_us{ time_parse(large_bytes, large_lexed, footprint) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
-  MESSAGE("parse grew " << growth << "x for " << ratio << "x the bytes");
-  if (ASSERT_FLOOR) { CHECK(growth < ratio * SCALING_SLACK); }
+  if (ASSERT_FLOOR) {
+    CHECK_MESSAGE(growth < ratio * SCALING_SLACK,
+                  "grew " << growth << "x for " << ratio << "x the bytes");
+  }
 }
 
 TEST_CASE("perf: a wide sibling list does not degrade") {
@@ -260,8 +258,10 @@ TEST_CASE("perf: a wide sibling list does not degrade") {
   uint64_t const large_us{ micros_since(start) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
-  MESSAGE("wide block grew " << growth << "x for " << ratio << "x the bytes");
-  if (ASSERT_FLOOR) { CHECK(growth < ratio * SCALING_SLACK); }
+  if (ASSERT_FLOOR) {
+    CHECK_MESSAGE(growth < ratio * SCALING_SLACK,
+                  "grew " << growth << "x for " << ratio << "x the bytes");
+  }
 }
 
 TEST_CASE("perf: a long comment run does not degrade") {
@@ -300,8 +300,10 @@ TEST_CASE("perf: a long comment run does not degrade") {
   CHECK(large_parsed.pd.comments.size() == 16000);
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
-  MESSAGE("comment run grew " << growth << "x for " << ratio << "x the bytes");
-  if (ASSERT_FLOOR) { CHECK(growth < ratio * SCALING_SLACK); }
+  if (ASSERT_FLOOR) {
+    CHECK_MESSAGE(growth < ratio * SCALING_SLACK,
+                  "grew " << growth << "x for " << ratio << "x the bytes");
+  }
 }
 
 TEST_CASE("perf: string-pool growth does not degrade with distinct names") {
@@ -336,8 +338,10 @@ TEST_CASE("perf: string-pool growth does not degrade with distinct names") {
 
   // n log n, not n, so the slack has to cover the log term as well.
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
-  MESSAGE("distinct names grew " << growth << "x for " << ratio << "x the bytes");
-  if (ASSERT_FLOOR) { CHECK(growth < ratio * SCALING_SLACK * 2.0); }
+  if (ASSERT_FLOOR) {
+    CHECK_MESSAGE(growth < ratio * SCALING_SLACK * 2.0,
+                  "grew " << growth << "x for " << ratio << "x the bytes");
+  }
 }
 
 TEST_CASE("perf: deep nesting does not degrade") {
@@ -358,8 +362,10 @@ TEST_CASE("perf: deep nesting does not degrade") {
   uint64_t const large_us{ micros_since(start) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
-  MESSAGE("depth grew " << growth << "x for " << ratio << "x the bytes");
-  if (ASSERT_FLOOR) { CHECK(growth < ratio * SCALING_SLACK); }
+  if (ASSERT_FLOOR) {
+    CHECK_MESSAGE(growth < ratio * SCALING_SLACK,
+                  "grew " << growth << "x for " << ratio << "x the bytes");
+  }
 }
 
 TEST_CASE("perf: the generated document is what it claims to be") {

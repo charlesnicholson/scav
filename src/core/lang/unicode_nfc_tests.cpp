@@ -212,5 +212,4 @@ TEST_CASE("nfc: idempotent on the conformance suite") {
   // Every codepoint in the table belongs to some case; a mismatch means the
   // generator and the reader disagree about the encoding.
   CHECK(at == static_cast<uint32_t>(NFC_VECTOR_DATA.size()));
-  MESSAGE("conformance cases checked: " << NFC_VECTOR_COUNT);
 }
