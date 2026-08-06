@@ -1,6 +1,6 @@
 #include "core/lang/unicode_nfc.h"
 
-#include "scav/scav_ids.h"
+#include "scav/scav_core.h"
 #include "scav/scav_types.h"
 
 #include <array>
@@ -112,11 +112,11 @@ void append_decomposition(uint32_t cp, std::vector<uint32_t> &out) {
 // ordering algorithm is: only adjacent out-of-order pairs may swap, and equal
 // combining classes must keep their input order.
 void canonical_order(std::vector<uint32_t> &v) {
-  uint32_t const n{ static_cast<uint32_t>(v.size()) };
-  for (uint32_t i = 1; i < n; ++i) {
+  size_t const n{ v.size() };
+  for (size_t i = 1; i < n; ++i) {
     uint32_t const cc{ nfc_combining_class(v[i]) };
     if (cc == 0) { continue; }
-    uint32_t j{ i };
+    size_t j{ i };
     while ((j > 0) && (nfc_combining_class(v[j - 1]) > cc)) {
       uint32_t const tmp{ v[j - 1] };
       v[j - 1] = v[j];
@@ -177,12 +177,13 @@ bool nfc_normalize(std::vector<uint32_t> const &in, std::vector<uint32_t> &out) 
   // combining mark composes with it only when nothing between them blocks it,
   // which is what `last_class` tracks.
   out.reserve(decomposed.size());
-  uint32_t starter{ INVALID };
+  size_t starter{ 0 };
+  bool have_starter{ false };
   uint32_t last_class{ 0 };
   for (uint32_t const cp : decomposed) {
     uint32_t const cc{ nfc_combining_class(cp) };
-    bool const blocked{ (starter != INVALID) && (last_class != 0) && (last_class >= cc) };
-    if ((starter != INVALID) && !blocked) {
+    bool const blocked{ have_starter && (last_class != 0) && (last_class >= cc) };
+    if (have_starter && !blocked) {
       if (uint32_t const composed{ compose_pair(out[starter], cp) }; composed != 0) {
         out[starter] = composed;
         // last_class is deliberately not updated: the combining mark was
@@ -190,7 +191,10 @@ bool nfc_normalize(std::vector<uint32_t> const &in, std::vector<uint32_t> &out) 
         continue;
       }
     }
-    if (cc == 0) { starter = static_cast<uint32_t>(out.size()); }
+    if (cc == 0) {
+      starter = out.size();
+      have_starter = true;
+    }
     last_class = cc;
     out.push_back(cp);
   }

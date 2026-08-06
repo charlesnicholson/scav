@@ -6,12 +6,12 @@
 
 #include "scav/scav_types.h"
 
-#include <cstdint>
+#include <cstddef>
 #include <string_view>
 
 namespace scav {
 
-inline std::string_view bytes_view(scav_byte const *bytes, uint32_t len) {
+inline std::string_view bytes_view(scav_byte const *bytes, size_t len) {
   return { reinterpret_cast<char const *>(bytes), len };
 }
 

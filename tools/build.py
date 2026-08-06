@@ -104,7 +104,8 @@ def main() -> int:
     parser.add_argument("--list", action="store_true", help="list this host's presets")
     parser.add_argument("--clean", action="store_true", help="delete the build tree first")
     parser.add_argument("--no-sync", action="store_true", help="skip `envy sync`")
-    parser.add_argument("--no-test", action="store_true", help="configure and build only")
+    parser.add_argument("--no-test", action="store_true",
+                        help="build without running the tests")
     parser.add_argument("cmake_args", nargs=argparse.REMAINDER,
                         help="everything after `--` is passed to `cmake --preset`")
     args = parser.parse_args()
@@ -121,8 +122,8 @@ def main() -> int:
     if not args.no_sync:
         run(ENVY, "sync")
 
-    cmake, ctest, ninja, doctest, python = [
-        envy_product(p) for p in ("cmake", "ctest", "ninja", "doctest_cpp_dir", "python3")
+    cmake, ninja, doctest, python = [
+        envy_product(p) for p in ("cmake", "ninja", "doctest_cpp_dir", "python3")
     ]
 
     build_dir = REPO_ROOT / "out" / preset
@@ -131,6 +132,8 @@ def main() -> int:
         rmtree(build_dir)
 
     extra = [a for a in args.cmake_args if a != "--"]
+    if args.no_test:
+        extra.append("-DSCAV_RUN_TESTS=OFF")
 
     # MSan without an instrumented libc++ reports false positives forever, and one
     # command has to cover that rather than documenting a step.
@@ -144,12 +147,10 @@ def main() -> int:
     run(cmake, "--preset", preset, f"-DCMAKE_MAKE_PROGRAM={ninja}",
         f"-DSCAV_DOCTEST_DIR={doctest}", f"-DPython3_EXECUTABLE={python}", *extra)
     link_compile_commands(build_dir)
+    # Tests are build steps, so this one command builds and verifies. A second
+    # run is a no-op: every test stamp is newer than its inputs.
     run(cmake, "--build", "--preset", preset)
 
-    if args.no_test:
-        return 0
-
-    run(ctest, "--preset", preset)
     if args.coverage:
         run(python, REPO_ROOT / "tools/coverage.py", "--build", build_dir)
 

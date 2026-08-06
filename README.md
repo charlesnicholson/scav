@@ -37,6 +37,14 @@ build.bat           # Windows
 One command from a clean checkout to a green test run — no arguments, no
 environment to set up, no steps below this line that you need to read first.
 
+**Building is testing.** Every test, unit and functional, is a build step whose
+output is a stamp file, so `cmake --build` cannot report success with a failing
+test and there is no second command to forget. It is also incremental: a second
+build back to back is `ninja: no work to do` in zero seconds, and editing
+`ci.yml` re-runs only the test that reads it. That is why there is no CTest here
+— ctest re-runs everything every invocation, so "build, then test" can never be
+incremental.
+
 The first run takes a few minutes: [envy](https://github.com/envy-package-manager/envy)
 bootstraps itself, then provisions cmake, ninja, doctest, and python 3.14 into
 `out/.envy`. After that it is a cache hit.
@@ -45,6 +53,7 @@ bootstraps itself, then provisions cmake, ninja, doctest, and python 3.14 into
 ./build.sh --config debug            # matrix config: debug | release | testable
 ./build.sh --sanitizer asan          # asan | ubsan | tsan | msan
 ./build.sh --coverage                # coverage, then the untested-file gate
+./build.sh --no-test                 # build without running the tests
 ./build.sh --list                    # the presets this host can run
 ./build.sh --clean                   # delete the build tree first
 ./build.sh -- -DSCAV_CLANG_TIDY=ON   # anything after `--` goes to cmake
@@ -66,10 +75,14 @@ envy would contradict that:
 
 ```
 cmake -S . -B build -DSCAV_DOCTEST_DIR=/path/to/doctest -DCMAKE_BUILD_TYPE=Release
-cmake --build build && ctest --test-dir build
+cmake --build build
 ```
 
-`-DSCAV_BUILD_TESTS=OFF` drops the doctest requirement entirely.
+That one command builds and tests, because the tests are build steps. There is no
+second command and no ctest.
+
+`-DSCAV_BUILD_TESTS=OFF` drops the doctest requirement entirely;
+`-DSCAV_RUN_TESTS=OFF` keeps the test executables but takes them out of `ALL`.
 
 ## Layout
 
@@ -84,7 +97,7 @@ cmake --build build && ctest --test-dir build
 | `src/<lib>/<subsystem>/` | private headers, sources, and their unit tests, adjacent |
 | `test_data/golden/` | committed goldens, layered by stage |
 | `functional_tests/` | Python 3.14, standard library only |
-| `tools/` | build driver, preset generator, coverage gate, MSan libc++ builder, Unicode table generator. Run them with `$(./bin/envy product python3)` |
+| `tools/` | *project-wide* tooling only: build driver, preset generator, coverage gate, MSan libc++ builder. Run them with `$(./bin/envy product python3)`. A script used by one library lives with that library |
 | `out/` | gitignored: all build output plus the envy cache |
 
 ## Finding things
@@ -96,23 +109,32 @@ private header, in the build tree or an installed one. `func.install_consumer`
 compiles every public header against nothing but the install prefix, which is
 what catches a public header that quietly includes a private one.
 
-Two rules make the surface navigable. One header per subject, named for it. Every
-function prefixed with its header's stem — so a symbol tells you its header, and
-a header tells you its symbols:
+**One public header per library**, so there is never a question of which to
+include. There are three in the whole project, and a core user includes one:
 
-| header | prefix | holds |
-|---|---|---|
-| `scav_ids.h` | — | `DocId`, `StmtId`, `StrRef`, `Span`, `INVALID` |
-| `scav_diagnostics.h` | `diag_` | `DiagCode`, `Diagnostic`, line/column derivation |
-| `scav_source_text.h` | `source_text_` | read-time normalization: BOM, LF, UTF-8, NFC |
-| `scav_lexer.h` | `lex_` | tokens, trivia, string-literal decoding |
-| `scav_syntax_tree.h` | `syntax_` | `ParsedDocument` and the statement rows |
-| `scav_parser.h` | `parse_` | `parse_document`, `parse_tokens`, options |
-| `scav_string_pool.h` | `string_` | reading a finalized pool |
+| header | is |
+|---|---|
+| `scav/scav_core.h` | all of `libscavcore` |
+| `scav/scav_toy.h` | all of `libscavtoy` |
+| `scav/scav_types.h` | the cross-library POD vocabulary; pulled in by the others |
+
+Inside `scav_core.h`, every function carries the prefix of its section, so a
+symbol names its neighbourhood and the sections are the table of contents:
+
+| prefix | section |
+|---|---|
+| — | ids, spans, `INVALID` |
+| `narrow*` | the one checked narrowing helper (§6) |
+| `diag_` | diagnostic codes, line/column from a span |
+| `string_` | reading a finalized string pool |
+| `source_text_` | normalization on read: BOM, LF, UTF-8, NFC |
+| `lex_` | tokens, trivia, string-literal decoding |
+| `syntax_` | the statement rows and their spellings |
+| `parse_` | the entry points most callers want |
 
 Private, and deliberately unreachable from outside: `model/interner.h` (building a
 pool is a parse-time concern), `model/lookup_map.h`, `model/sort.h`,
-`lang/unicode_nfc.h`, `lang/synth_document.h`.
+`model/bytes_view.h`, `lang/unicode_nfc.h`, `lang/synth_document.h`.
 
 ## The Unicode tables
 
@@ -129,8 +151,13 @@ where it repeats itself. Regenerate only when the pinned Unicode version moves �
 document containing characters assigned after the current version:
 
 ```
-$(./bin/envy product python3) tools/gen_unicode_tables.py --download
+cmake --build out/<preset> --target scav_core_unicode_tables
 ```
+
+The generator lives at `src/core/lang/gen_unicode_tables.py`, beside the code it
+generates and beside its own output, because nothing outside `libscavcore` has a
+use for it. Only project-wide tooling lives in `tools/`. Every path in it is
+script-relative, so it also runs directly from anywhere.
 
 Hangul is algorithmic in both directions and has no table entry at all, which is
 why the tests walk all 11,172 syllables rather than trusting a lookup.
@@ -150,8 +177,13 @@ document is a rule that gets discovered late:
 - **Library layering** is checked at configure time: a library may link a strictly
   lower tier and nothing else, so `libscavdraw` linking `libscavlayout` fails to
   configure rather than fails review.
-- **A subsystem with no tests fails to configure.** A phase is not done until its
-  tests are.
+- **A subsystem with no tests fails to configure**, and so does a build that
+  declares no test executable at all. A phase is not done until its tests are.
+- **Tests run as part of the build**, each behind a stamp file in
+  `out/<preset>/stamp/`. A failing test deletes its stamp and fails the build, so
+  the next build retries it rather than trusting a stale pass. `rm -rf
+  out/<preset>/stamp` re-runs the suite without recompiling anything, and
+  `--target run.<name>` runs exactly one.
 - **An untested file fails the build**, via `tools/coverage.py`. Not a percentage
   target — numbers are not what this gates on.
 - **Each library builds twice**, shipping and testable. Unit tests link the

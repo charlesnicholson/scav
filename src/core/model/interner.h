@@ -16,10 +16,10 @@
 // they all are.
 
 #include "core/model/lookup_map.h"
-#include "scav/scav_ids.h"
-#include "scav/scav_string_pool.h"
+#include "scav/scav_core.h"
 #include "scav/scav_types.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 #include <vector>
@@ -35,7 +35,7 @@ struct Interner {
 // The empty string is StrRef{0, 0} and never enters the pool: a zero length
 // already says everything, and reserving an offset for it would make the pool
 // depend on whether anything empty was ever interned.
-StrRef intern_bytes(Interner &in, scav_byte const *bytes, uint32_t len);
+StrRef intern_bytes(Interner &in, scav_byte const *bytes, size_t len);
 StrRef intern_bytes(Interner &in, std::string_view text);
 
 // Maps a staging offset to its offset in the finalized pool. Parallel arrays

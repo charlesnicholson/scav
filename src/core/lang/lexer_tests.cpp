@@ -7,9 +7,7 @@
 // its own quotes and reads the way an author would type it.
 
 #include "core/test_support.h"
-#include "scav/scav_diagnostics.h"
-#include "scav/scav_ids.h"
-#include "scav/scav_lexer.h"
+#include "scav/scav_core.h"
 #include "scav/scav_types.h"
 
 #include "doctest.h"
@@ -93,6 +91,18 @@ Decoded decode(std::string_view literal) {
 TEST_CASE("lex: an empty input is one End token") {
   CHECK(kinds("") == std::vector<TokKind>{ TokKind::End });
   CHECK(kinds("   \n\t  \n") == std::vector<TokKind>{ TokKind::End });
+}
+
+TEST_CASE("lex: a buffer too large for a token span is rejected") {
+  // A Token's off/len is uint32. lex_source is a public entry point, so it
+  // checks even though its usual caller normalized first.
+  if constexpr (sizeof(size_t) > 4) {
+    LexResult out;
+    std::vector<Diagnostic> diags;
+    CHECK_FALSE(lex_source(nullptr, SIZE_MAX, DocId{ 0 }, out, diags));
+    CHECK(first_code(diags) == DiagCode::DocumentTooLarge);
+    CHECK(out.tokens.empty());
+  }
 }
 
 TEST_CASE("lex: every punctuation token") {

@@ -10,6 +10,25 @@ scav_static_library(scavcore
 )
 scav_install_library(scavcore core)
 
+# The NFC tables are generated from the Unicode UCD by a script that lives with
+# the code it generates, because nothing outside this library has a use for it.
+#
+# Deliberately NOT in ALL, and deliberately not a dependency of unicode_nfc.cpp:
+# the generated .inc files are committed, so an ordinary build needs neither the
+# network nor Python, and the Unicode version they encode is a determinism input
+# (PRD 6) rather than something a build is free to move underneath you.
+find_package(Python3 3.14 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+  add_custom_target(scav_core_unicode_tables
+    COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/lang/gen_unicode_tables.py" --download
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/lang"
+    COMMENT "regenerating the Unicode NFC tables from the UCD"
+    USES_TERMINAL
+    VERBATIM
+  )
+endif()
+
 if(SCAV_BUILD_TESTS)
   # synth.cpp is harness-only and is deliberately not in the library: PRD 3.2
   # rejects a `gen` verb, so the synthetic generator has no shipping home.

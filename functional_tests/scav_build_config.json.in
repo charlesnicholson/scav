@@ -3,7 +3,6 @@
   "build_dir": "@SCAV_FT_BINARY_DIR@",
   "scratch_dir": "@SCAV_FT_BINARY_DIR@/test",
   "cmake": "@SCAV_FT_CMAKE@",
-  "ctest": "@SCAV_FT_CTEST@",
   "generator": "@CMAKE_GENERATOR@",
   "make_program": "@SCAV_FT_MAKE_PROGRAM@",
   "build_type": "@CMAKE_BUILD_TYPE@",

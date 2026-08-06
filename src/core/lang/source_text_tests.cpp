@@ -1,9 +1,7 @@
 // BOM stripping, line-ending folding, UTF-8 validation and the NFC pass over
 // bytes, plus the line/column derivation every diagnostic goes through.
 
-#include "scav/scav_diagnostics.h"
-#include "scav/scav_ids.h"
-#include "scav/scav_source_text.h"
+#include "scav/scav_core.h"
 #include "scav/scav_types.h"
 
 #include "doctest.h"
@@ -62,6 +60,20 @@ TEST_CASE("normalize: an empty input is valid and empty") {
   CHECK(r.ok);
   CHECK(r.text.empty());
   CHECK(r.diags.empty());
+}
+
+TEST_CASE("normalize: a document too large for a span is rejected, not truncated") {
+  // Every offset downstream lands in a Span, which is {uint32 off, len} at the
+  // ABI. The check runs before the pointer is touched, which is why nullptr is
+  // safe here and why the failure is a diagnostic rather than a short read.
+  if constexpr (sizeof(size_t) > 4) {
+    std::vector<scav_byte> out;
+    std::vector<Diagnostic> diags;
+    CHECK_FALSE(source_text_normalize(nullptr, SIZE_MAX, DocId{ 0 }, out, diags));
+    CHECK(diags.size() == 1);
+    CHECK(diags[0].code == DiagCode::DocumentTooLarge);
+    CHECK(out.empty());
+  }
 }
 
 TEST_CASE("normalize: ASCII passes through unchanged") {

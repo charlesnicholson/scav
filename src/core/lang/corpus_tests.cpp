@@ -9,10 +9,7 @@
 // because parsing takes bytes and acquiring bytes is a different system.
 
 #include "core/test_support.h"
-#include "scav/scav_diagnostics.h"
-#include "scav/scav_ids.h"
-#include "scav/scav_parser.h"
-#include "scav/scav_syntax_tree.h"
+#include "scav/scav_core.h"
 
 #include "doctest.h"
 

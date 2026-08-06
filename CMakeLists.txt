@@ -43,6 +43,11 @@ else()
 endif()
 option(SCAV_BUILD_TESTS "Build the unit tests" ${scav_tests_default})
 
+# Tests are build steps (cmake/ScavTesting.cmake), so building *is* testing and a
+# green build cannot hide a red test. Turning this off keeps the executables and
+# drops them from ALL, leaving `--target run.<name>` for one-at-a-time runs.
+option(SCAV_RUN_TESTS "Run the tests as part of the build" ON)
+
 # Language baseline
 
 set(CMAKE_CXX_STANDARD 20)
@@ -101,12 +106,6 @@ if(SCAV_CLANG_TIDY)
 endif()
 
 # The libraries
-
-# Before add_subdirectory(src), which registers tests: add_test() needs testing
-# enabled in an enclosing scope first.
-if(SCAV_BUILD_TESTS)
-  enable_testing()
-endif()
 
 add_subdirectory(src)
 
