@@ -63,9 +63,8 @@ TEST_CASE("normalize: an empty input is valid and empty") {
 }
 
 TEST_CASE("normalize: a document too large for a span is rejected, not truncated") {
-  // Every offset downstream lands in a Span, which is {uint32 off, len} at the
-  // ABI. The check runs before the pointer is touched, which is why nullptr is
-  // safe here and why the failure is a diagnostic rather than a short read.
+  // The check runs before the pointer is touched, which is why nullptr is safe
+  // here and why the failure is a diagnostic rather than a short read.
   if constexpr (sizeof(size_t) > 4) {
     std::vector<scav_byte> out;
     std::vector<Diagnostic> diags;
@@ -218,9 +217,8 @@ TEST_CASE("normalize: BOM, CRLF and NFC compose in one pass") {
 }
 
 TEST_CASE("normalize: zero-width joiners and format characters survive intact") {
-  // NFC is canonical decomposition plus canonical composition and nothing else,
-  // so it never removes a default-ignorable. A ZWJ emoji sequence has to come
-  // out byte-identical or the label an author wrote is not the label stored.
+  // NFC is decomposition plus composition and nothing else, so it never removes
+  // a default-ignorable: a ZWJ sequence must come out byte-identical.
   std::string_view const family{
     "\xf0\x9f\x91\xa8\xe2\x80\x8d\xf0\x9f\x91\xa9"
     "\xe2\x80\x8d\xf0\x9f\x91\xa7"
@@ -249,16 +247,14 @@ TEST_CASE("normalize: zero-width joiners and format characters survive intact") 
 }
 
 TEST_CASE("normalize: unassigned, noncharacter and bidi codepoints pass through") {
-  // Valid UTF-8 that Unicode does not reserve the right to renormalize. Passing
-  // them through is the conservative answer; rejecting any of them would be a
-  // policy this layer does not own.
+  // Valid UTF-8 that Unicode will not renormalize. Rejecting any of it would be
+  // a policy this layer does not own.
   CHECK(normalize("\xef\xbf\xbe").text == "\xef\xbf\xbe");          // U+FFFE noncharacter
   CHECK(normalize("\xef\xb7\x90").text == "\xef\xb7\x90");          // U+FDD0 noncharacter
   CHECK(normalize("\xf3\xb0\x80\x80").text == "\xf3\xb0\x80\x80");  // U+F0000 private use
 
-  // U+202E right-to-left override, built rather than written: clang-tidy flags
-  // a literal one, which is the correct reaction to seeing it in source and is
-  // exactly why a *label* carrying it is worth a validation rule later.
+  // U+202E, built rather than written: clang-tidy flags a literal one, which is
+  // the right reaction and is why a label carrying it deserves a rule later.
   std::string const rtl{ encode(0x202E) };
   CHECK(normalize(rtl).text == rtl);
 }
@@ -298,9 +294,8 @@ TEST_CASE("nfc_bytes: reports whether it changed anything") {
 }
 
 TEST_CASE("nfc_bytes: invalid UTF-8 is passed through rather than dropped") {
-  // source_text_normalize validates first, so this cannot fire on a real document.
-  // It fires on a fuzz case that calls source_text_to_nfc directly, and losing bytes
-  // silently is worse than carrying them.
+  // Normalization validates first, so this fires only on a fuzz case calling in
+  // directly -- and losing bytes silently is worse than carrying them.
   std::vector<scav_byte> out;
   CHECK_FALSE(source_text_to_nfc(raw("\xc3"), 1, out));
   CHECK(out.size() == 1);

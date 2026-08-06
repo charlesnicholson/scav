@@ -1,19 +1,6 @@
-// Performance is a P0 test class, not a later concern (PRD 17).
-//
-// These assert floors, never times. Their job is catching an accidental O(n^2)
-// -- string-pool growth, a per-statement rescan, a long comment run, a wide
-// sibling list -- so the load-bearing assertion is the *scaling* one, which is
-// machine-independent. The absolute throughput floor is deliberately far below
-// what any machine in the matrix does, because a floor that flakes gets
-// deleted.
-//
-// Not a matrix row and not a golden (PRD 5): timing is not reproducible and
-// must never gate a determinism claim. Inputs are generated in RAM, because a
-// disk-backed benchmark measures the filesystem.
-//
-// Under a sanitizer, coverage instrumentation or -O0 the numbers describe the
-// instrumentation, so those builds run a smaller input and skip the floor
-// entirely. src/core/CMakeLists.txt decides which.
+// Floors, never times: the job is catching an accidental O(n^2), so the
+// load-bearing assertion is the machine-independent *scaling* one. Inputs are
+// built in RAM, and instrumented builds shrink them and skip the floor.
 
 #include "core/lang/synth_document.h"
 #include "core/test_support.h"
@@ -35,15 +22,13 @@ using namespace scav::test;
 constexpr uint64_t INPUT_BYTES{ SCAV_PERF_INPUT_BYTES };
 constexpr bool ASSERT_FLOOR{ SCAV_PERF_ASSERT_FLOOR != 0 };
 
-// Roughly an order of magnitude under a 2020-era laptop, which is the point: a
-// regression that halves throughput is not what this catches, and a quadratic
-// one blows through it by orders of magnitude.
+// An order of magnitude under a 2020-era laptop: a halved throughput is not what
+// this catches, and a quadratic one blows through it regardless.
 constexpr uint64_t LEX_FLOOR_MB_PER_S{ 20 };
 constexpr uint64_t PARSE_FLOOR_MB_PER_S{ 10 };
 
-// Four times the input for four times the work is linear. Three times that is
-// enough slack for cache effects and a noisy CI box, and still nowhere near the
-// 16x a quadratic term would cost.
+// 4x input for 4x work is linear; 3x slack covers cache effects and a noisy box,
+// and is still nowhere near the 16x a quadratic term costs.
 constexpr double SCALING_SLACK{ 3.0 };
 
 uint64_t micros_since(std::chrono::steady_clock::time_point start) {
@@ -356,9 +341,8 @@ TEST_CASE("perf: string-pool growth does not degrade with distinct names") {
 }
 
 TEST_CASE("perf: deep nesting does not degrade") {
-  // The frame stack is a vector, so pushing is amortized constant -- but
-  // materializing each block's children into the shared id array is where a
-  // per-close copy of everything would show up.
+  // Pushing a frame is amortized constant; materializing each block's children
+  // into the shared id array is where a per-close copy would show up.
   std::string const small{ synth_deep_document(60) };
   std::string const large{ synth_deep_document(240) };
   double const ratio{ static_cast<double>(large.size()) /

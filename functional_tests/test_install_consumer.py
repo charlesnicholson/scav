@@ -85,7 +85,7 @@ class TestInstallAndConsume(unittest.TestCase):
         self.assertTrue(installed, "no headers installed at all")
 
     def test_one_public_header_per_library(self) -> None:
-        """PRD 3.3: one public header per library, plus the shared vocabulary.
+        """one public header per library, plus the shared vocabulary.
 
         A reader should never have to work out which of several headers a symbol
         lives in. Growing this list is a design decision, so it is spelled out

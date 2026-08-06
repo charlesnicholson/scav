@@ -13,9 +13,8 @@ namespace {
 
 #include "core/lang/unicode_nfc_tables.inc"  // NOLINT(bugprone-suspicious-include)
 
-// Hangul composition and decomposition, Unicode 3.12. Table-free by
-// construction, which is why the generator drops the 11,172 syllables it would
-// otherwise emit.
+// Hangul, Unicode 3.12. Table-free, which is why the generator drops the
+// 11,172 syllables it would otherwise emit.
 constexpr uint32_t HANGUL_S_BASE{ 0xAC00 };
 constexpr uint32_t HANGUL_L_BASE{ 0x1100 };
 constexpr uint32_t HANGUL_V_BASE{ 0x1161 };
@@ -108,9 +107,8 @@ void append_decomposition(uint32_t cp, std::vector<uint32_t> &out) {
   for (uint32_t i = 0; i < len; ++i) { out.push_back(DECOMP_DATA[off + i]); }
 }
 
-// Insertion sort over each run of non-starters, which is what the canonical
-// ordering algorithm is: only adjacent out-of-order pairs may swap, and equal
-// combining classes must keep their input order.
+// Insertion sort over each run of non-starters -- which is what canonical
+// ordering is: adjacent swaps only, equal combining classes keep their order.
 void canonical_order(std::vector<uint32_t> &v) {
   size_t const n{ v.size() };
   for (size_t i = 1; i < n; ++i) {
@@ -173,9 +171,8 @@ bool nfc_normalize(std::vector<uint32_t> const &in, std::vector<uint32_t> &out) 
   for (uint32_t const cp : in) { append_decomposition(cp, decomposed); }
   canonical_order(decomposed);
 
-  // Unicode 3.11 canonical composition. `starter` indexes into `out`; a
-  // combining mark composes with it only when nothing between them blocks it,
-  // which is what `last_class` tracks.
+  // Unicode 3.11 canonical composition. A mark composes with `starter` only when
+  // nothing between them blocks it, which is what `last_class` tracks.
   out.reserve(decomposed.size());
   size_t starter{ 0 };
   bool have_starter{ false };

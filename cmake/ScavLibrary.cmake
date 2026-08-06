@@ -21,12 +21,10 @@ function(scav_settings target)
     $<BUILD_INTERFACE:scav_sanitizer>
     $<BUILD_INTERFACE:scav_coverage>
   )
-  # PRIVATE, and this is the whole public/private boundary: a library's own
-  # sources and its unit tests reach `src/<lib>/...` private headers, and nothing
-  # that merely links the library can. A client sees only the include roots below.
+  # The whole public/private boundary: a library's own sources and tests reach
+  # `src/<lib>/...`, and nothing that merely links it can.
   target_include_directories(${target} PRIVATE "${PROJECT_SOURCE_DIR}/src")
-  # The cross-library vocabulary -- POD spellings and nothing else. A library's
-  # own API lives in `src/<lib>/include`, added by scav_static_library.
+  # The cross-library vocabulary. A library's own API is added below.
   target_include_directories(${target} PUBLIC
     "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
@@ -44,10 +42,8 @@ function(scav_static_library name)
     message(FATAL_ERROR "scav_static_library(${name}): no sources")
   endif()
 
-  # `src/<lib>/include/scav/scav_*.h` is the library's API and the only thing a
-  # consumer can reach. Everything beside it under `src/<lib>/` is private by
-  # construction, because reaching it needs the -I that only this library and its
-  # own tests get.
+  # The library's API, and the only thing a consumer can reach: everything else
+  # under `src/<lib>/` needs an -I that only this library and its tests get.
   set(public_include "${CMAKE_CURRENT_SOURCE_DIR}/include")
   if(NOT IS_DIRECTORY "${public_include}")
     message(FATAL_ERROR
@@ -94,8 +90,7 @@ function(scav_install_library target exported)
   install(TARGETS ${target} EXPORT scavTargets
     ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
   )
-  # Only include/, so a private header cannot reach an installed tree by
-  # accident -- the same boundary the build tree has, enforced the same way.
+  # Only include/, so the install tree has the same boundary the build tree does.
   install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/scav"
     DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
     FILES_MATCHING PATTERN "*.h"

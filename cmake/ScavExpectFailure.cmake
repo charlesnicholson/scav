@@ -1,13 +1,8 @@
-# Runs one doctest case that is written to fail, and succeeds only if it did.
+# Runs one doctest case written to fail, and succeeds only if it did -- which a
+# custom command cannot express, since a build step succeeds by exiting zero.
 #
-# Invoked with `cmake -DSCAV_EXE=... -DSCAV_FILTER=... -P`. It exists because a
-# build step reports success by exiting zero, and this one has to report success
-# by exiting non-zero -- there is no way to say that in a custom command.
-#
-# The failing case's own output is captured rather than printed: it is expected,
-# and a build log full of a deliberate failure trains people to ignore the real
-# ones. It is echoed only when the case unexpectedly passes, which is the case
-# someone actually has to read.
+# Its output is captured, not printed: a build log full of a deliberate failure
+# trains people to ignore the real ones. Echoed only on an unexpected pass.
 
 if(NOT DEFINED SCAV_EXE OR NOT DEFINED SCAV_FILTER)
   message(FATAL_ERROR "ScavExpectFailure.cmake needs -DSCAV_EXE and -DSCAV_FILTER")

@@ -1,19 +1,9 @@
 #ifndef SCAV_CORE_MODEL_INTERNER_H_INCLUDED
 #define SCAV_CORE_MODEL_INTERNER_H_INCLUDED
 
-// Two-pass interning (PRD 7). Private: a client reads a finalized StringPool,
-// and only the parser builds one.
-//
-// Pass one dedupes into a staging pool in first-encounter order, which is the
-// only order a single forward parse can produce. Pass two re-emits the bytes
-// sorted byte-wise and hands back a remap, because canonical ordering is by name
-// bytes and never by interning order: two producers building the same model from
-// differently-ordered sources must emit the same pool, or the format hash is a
-// function of who typed what first.
-//
-// The remap is a separate step rather than a fixup inside the pool because the
-// StrRefs live in the caller's payload arrays, and only the caller knows where
-// they all are.
+// Two-pass interning: pass one dedupes in encounter order, pass two re-emits
+// sorted by bytes so two producers of the same model emit the same pool. The
+// remap is separate because the StrRefs live in the caller's arrays.
 
 #include "core/model/lookup_map.h"
 #include "scav/scav_core.h"
@@ -32,22 +22,19 @@ struct Interner {
   StringLookupMap<uint32_t> index;  // bytes -> position in `unique`
 };
 
-// The empty string is StrRef{0, 0} and never enters the pool: a zero length
-// already says everything, and reserving an offset for it would make the pool
-// depend on whether anything empty was ever interned.
+// The empty string is StrRef{0, 0} and never enters the pool, so the pool does
+// not depend on whether anything empty was interned.
 StrRef intern_bytes(Interner &in, scav_byte const *bytes, size_t len);
 StrRef intern_bytes(Interner &in, std::string_view text);
 
-// Maps a staging offset to its offset in the finalized pool. Parallel arrays
-// rather than a map: `staging` ascends, so this is a binary search and the
-// lookup never allocates.
+// Staging offset -> finalized offset. Parallel arrays, not a map: `staging`
+// ascends, so the lookup is a binary search and never allocates.
 struct StringRemap {
   std::vector<uint32_t> staging;
   std::vector<uint32_t> finalized;
 };
 
-// Consumes nothing -- `in` stays valid, so a caller may finalize and still hold
-// staging refs while it walks them through intern_remap.
+// `in` stays valid, so a caller may finalize and still walk its staging refs.
 void intern_finalize(Interner const &in, StringPool &pool, StringRemap &out);
 
 // A zero-length ref maps to itself; anything else must have been interned.

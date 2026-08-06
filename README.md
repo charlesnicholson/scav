@@ -6,7 +6,7 @@ document; everything below describes what is built.
 **Status: P0 — the language, the lexer, and the parser.** `libscavcore` reads a
 `.scav` document from a byte span and produces the front-end slice of the model:
 normalized `src_bytes`, `Document`, `Statement`, trivia, and a two-pass-interned
-string pool (§7). No entity arrays, no includes, no resolution — those are P1 and
+string pool. No entity arrays, no includes, no resolution — those are P1 and
 P2. `libscavtoy` stays behind as the harness's own proof that failures get
 reported.
 
@@ -24,7 +24,7 @@ Three properties of the front end are worth knowing before reading it:
   comparison and the answer is a diagnostic. Same reason the trivia-attachment
   walk and the synthetic generator are iterative.
 - **Nothing takes a path.** Parsing takes bytes; acquiring bytes is a different
-  system (§16.2). There is no file I/O anywhere in core yet, and the unit tests
+  system. There is no file I/O anywhere in core yet, and the unit tests
   carry their charts as inline literals rather than as fixtures on disk.
 
 ## Build
@@ -124,7 +124,7 @@ symbol names its neighbourhood and the sections are the table of contents:
 | prefix | section |
 |---|---|
 | — | ids, spans, `INVALID` |
-| `narrow*` | the one checked narrowing helper (§6) |
+| `narrow*` | the one checked narrowing helper |
 | `diag_` | diagnostic codes, line/column from a span |
 | `string_` | reading a finalized string pool |
 | `source_text_` | normalization on read: BOM, LF, UTF-8, NFC |
@@ -139,7 +139,7 @@ pool is a parse-time concern), `model/lookup_map.h`, `model/sort.h`,
 ## The Unicode tables
 
 Text is normalized on read — BOM stripped, line endings folded to LF, UTF-8
-validated, NFC applied (§6) — because `core.autocrlf` on Windows and NFD on macOS
+validated, NFC applied — because `core.autocrlf` on Windows and NFD on macOS
 otherwise put different bytes in the string pool from the same commit, and the
 format hash follows the pool.
 

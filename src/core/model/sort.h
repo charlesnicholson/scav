@@ -1,14 +1,9 @@
 #ifndef SCAV_CORE_MODEL_SORT_H_INCLUDED
 #define SCAV_CORE_MODEL_SORT_H_INCLUDED
 
-// PRD 6: any sort whose result reaches output is scav's own, because std::sort
-// is unstable and its tie-breaking differs between standard libraries. This is
-// the vendored stable merge sort -- bottom-up, so it needs no recursion and no
-// stack of its own beyond one scratch buffer.
-//
-// PRD 4's preferred idiom: parameterized on a functor rather than on a function
-// pointer, so the comparison inlines. qsort's shape pays an indirect call per
-// comparison and blocks inlining entirely.
+// Any sort whose result reaches output is ours: std::sort is unstable and its
+// tie-breaking differs between standard libraries. Bottom-up merge, so no
+// recursion; functor rather than function pointer, so the comparison inlines.
 
 #include <cstddef>
 #include <utility>
@@ -16,9 +11,8 @@
 
 namespace scav {
 
-// `less(a, b)` must be a strict weak ordering. Equal elements keep their input
-// order, which is what makes a comparator that ends in an input-derived key a
-// total order in practice.
+// `less` must be a strict weak ordering. Equal elements keep their input order,
+// which is what makes a comparator ending in an input-derived key a total one.
 template <typename T, typename Less>
 void stable_sort_by(std::vector<T> &v, Less less) {
   size_t const n{ v.size() };

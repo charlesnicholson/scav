@@ -29,8 +29,7 @@ struct Frame {
   Slot slot;
 };
 
-// State threaded through the parse. A struct of members rather than a class
-// with methods (PRD 4): the free functions below take it by reference, so
+// State threaded through the parse. A plain struct, taken by reference, so
 // control flow stays readable from the source.
 struct Parser {
   scav_byte const *bytes;
@@ -88,9 +87,8 @@ StrRef intern_token(Parser &p, Token const &t) {
   return intern_bytes(p.interner, p.bytes + t.off, t.len);
 }
 
-// An identifier in a name position. Reserved words are rejected here rather
-// than by the lexer, because `s`, `m` and `t` are keywords only in
-// statement-leading position and everything else is contextual (PRD 15).
+// An identifier in a name position. Reserved words are rejected here, not in the
+// lexer: `s`, `m` and `t` are keywords only in statement-leading position.
 bool take_name(Parser &p, StrRef &out) {
   if (!at_kind(p, TokKind::Ident)) {
     error_at(p, DiagCode::ExpectedIdentifier, peek(p));
@@ -250,9 +248,8 @@ bool parse_attr(Parser &p, uint32_t &out_stmt) {
   uint32_t const entries_begin{ narrow_clamp<uint32_t>(p.pd->attr_entries.size()) };
 
   if (at_kind(p, TokKind::LBrace)) {
-    // The block spelling: n keys under one namespace. Parsed inline rather than
-    // through the frame stack, because a datablock holds entries and cannot
-    // nest -- the frame stack is for blocks of statements.
+    // n keys under one namespace. Parsed inline, not through the frame stack:
+    // a datablock holds entries and cannot nest.
     stmt.ns = first;
     advance(p);
     while (!at_kind(p, TokKind::RBrace)) {
@@ -309,10 +306,9 @@ bool parse_state(Parser &p, uint32_t &out_stmt, bool &opens_block) {
 
   StateStmt stmt{ .name = {}, .label = {}, .kind = StateKind::Normal, .has_block = 0 };
   if (!take_name(p, stmt.name)) { return false; }
-  // The name slot is mandatory and first, so a bare identifier after it can only
-  // be a kind -- which is why `kind` is not a reserved word (PRD 15). A reserved
-  // word is the exception: it cannot be a kind, so it is the next statement with
-  // its comma missing, and saying so beats "unknown state kind: state".
+  // The name slot is first and mandatory, so a bare identifier after it can only
+  // be a kind -- unless it is reserved, in which case it is the next statement
+  // with its comma missing, and saying so beats "unknown state kind: state".
   if (at_kind(p, TokKind::Ident) && !lex_is_reserved_word(tok_text(p, peek(p)))) {
     Token const &t{ peek(p) };
     if (!syntax_state_kind_from_name(tok_text(p, t), stmt.kind)) {
@@ -518,13 +514,9 @@ struct WalkFrame {
   uint32_t last_child;  // the sibling a trailing comment attaches to
 };
 
-// Attaches every comment to a statement, positionally, after the tree is built.
-// Doing it during the parse does not work: a block statement's leading trivia
-// and its trailing trivia are separated in source order by all of its
-// children's, so the owner is only knowable once the spans are closed.
-//
-// Iterative for the same reason the parser is -- the tree is as deep as the
-// document, and the document is untrusted.
+// Positional, and after the tree is built: a block statement's leading and
+// trailing trivia are separated in source order by all of its children's, so the
+// owner is only knowable once the spans close. Iterative, like the parser.
 void attach_comments(ParsedDocument &pd, std::vector<LexComment> const &lexed) {
   uint32_t const n{ narrow_clamp<uint32_t>(lexed.size()) };
   pd.comments.clear();
@@ -535,9 +527,8 @@ void attach_comments(ParsedDocument &pd, std::vector<LexComment> const &lexed) {
   if (root == INVALID) { return; }
 
   uint32_t next{ 0 };
-  // Anything before the chart keyword itself. The child loop below only sees
-  // comments inside a statement's span, and the root has no parent to have
-  // claimed the ones in front of it.
+  // Anything before the chart keyword: the loop below only sees comments inside
+  // a span, and the root has no parent to have claimed these.
   while ((next < n) && (lexed[next].src.off < pd.stmts[root].src.off)) {
     owner[next] = root;
     ++next;
@@ -602,9 +593,8 @@ void attach_comments(ParsedDocument &pd, std::vector<LexComment> const &lexed) {
   }
 }
 
-// Rewrites every StrRef from a staging offset to its offset in the sorted pool.
-// One place that has to know where all of them are -- which is the price of
-// interning in one forward pass and sorting afterwards.
+// Staging offsets -> sorted-pool offsets. One place has to know where every
+// StrRef is: the price of interning forward and sorting afterwards.
 void remap_strings(ParsedDocument &pd, StringRemap const &r) {
   pd.doc.path = intern_remap(r, pd.doc.path);
   for (ChartStmt &s : pd.charts) {

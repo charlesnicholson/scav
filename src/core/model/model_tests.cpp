@@ -115,7 +115,7 @@ TEST_CASE("lookup_map: a mutable find writes through") {
 }
 
 TEST_CASE("narrow: round-trips what fits and refuses what does not") {
-  // PRD 6 bans narrowing without a range check and names one helper for it.
+  // we ban narrowing without a range check and names one helper for it.
   // This is the boundary between the caller's size_t and the model's uint32.
   uint32_t out{ 0xDEAD };
   CHECK(narrow<uint32_t>(size_t{ 0 }, out));
@@ -282,9 +282,8 @@ TEST_CASE("intern: the finalized pool is sorted by bytes, not by encounter order
 }
 
 TEST_CASE("intern: two encounter orders produce byte-identical pools") {
-  // This is the whole reason interning is two-pass. Canonical ordering is by
-  // name bytes, so two producers building the same model must emit the same
-  // pool no matter who typed what first.
+  // The whole reason interning is two-pass: two producers building the same
+  // model must emit the same pool, whoever typed what first.
   Interned const forward{ intern_all({ "delta", "alpha", "charlie", "bravo" }) };
   Interned const backward{ intern_all({ "bravo", "charlie", "alpha", "delta" }) };
   CHECK(forward.bytes == backward.bytes);

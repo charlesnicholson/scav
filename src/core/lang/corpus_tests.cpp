@@ -1,12 +1,6 @@
-// Hand-transcribed charts. Synthetic input has uniform branching and no
-// accidental structure, so validating on it alone is a trap (PRD 17) -- these
-// are the other half of P0's corpus.
-//
-// Each is a real state machine written the way someone would actually write it:
-// mixed aliases and long spellings, comments where a reader wants them,
-// concurrent submachines, cross-document endpoints, attributes from a plugin
-// namespace. They live as inline literals rather than as files under test_data
-// because parsing takes bytes and acquiring bytes is a different system.
+// Hand-transcribed charts: real state machines written the way someone would
+// write them. Synthetic input has uniform branching and no accidental
+// structure, so validating on it alone is a trap.
 
 #include "core/test_support.h"
 #include "scav/scav_core.h"
@@ -23,7 +17,7 @@ namespace {
 using namespace scav;
 using namespace scav::test;
 
-// PRD 15's own worked example, transcribed verbatim including its comment-free
+// the design's own worked example, transcribed verbatim including its comment-free
 // shape, so the document the format is specified by is a document that parses.
 constexpr std::string_view EG91{ R"(
 chart eg91 "EG91 modem driver" {
@@ -185,7 +179,7 @@ TEST_CASE("corpus: every statement's span lands inside the document") {
       CHECK_MESSAGE(s.src.len > 0, c.name);
       CHECK_MESSAGE(static_cast<size_t>(s.src.off) + s.src.len <= len, c.name);
     }
-    // PRD 10 will check this structurally in P1; asserting it here means the
+    // the design will check this structurally in P1; asserting it here means the
     // parser never hands over a span the validator would reject.
     CHECK(r.pd.doc.text == make_span(0, len));
   }
@@ -256,7 +250,7 @@ TEST_CASE("corpus: every StrRef points inside the finalized pool") {
   }
 }
 
-TEST_CASE("corpus: eg91 is the chart PRD 15 specifies") {
+TEST_CASE("corpus: eg91 is the chart the design specifies") {
   Parsed const r{ parse(EG91, "eg91.scav") };
   REQUIRE(r.ok);
   CHECK(str(r.pd, r.pd.charts[0].name) == "eg91");
@@ -269,7 +263,7 @@ TEST_CASE("corpus: eg91 is the chart PRD 15 specifies") {
   CHECK(count_of(r.pd, ElemKind::Attr) == 3);
 
   // The cross-document endpoint is an ordinary path, because an include alias
-  // is an ordinary state name (PRD 9).
+  // is an ordinary state name.
   bool found_handoff{ false };
   for (uint32_t const stmt : stmts_of(r.pd, ElemKind::Trans)) {
     if (str(r.pd, trans_at(r.pd, stmt).label) != "handoff") { continue; }
@@ -317,7 +311,7 @@ TEST_CASE("corpus: tcp keeps its long hierarchical edges as written") {
 
 TEST_CASE("corpus: tcp's duplicate names in different submachines are distinct rows") {
   // `Open` exists in both halves. Addressing is by path, so there is no
-  // display-name-versus-identifier split to invent (PRD 17).
+  // display-name-versus-identifier split to invent.
   Parsed const r{ parse(TCP) };
   REQUIRE(r.ok);
   uint32_t opens{ 0 };
@@ -377,15 +371,13 @@ TEST_CASE("corpus: ota's list attribute keeps its order") {
 }
 
 TEST_CASE("corpus: reformatting a chart onto one line changes nothing but the spans") {
-  // Newlines carry nothing (PRD 15), which is what makes byte-identical output
+  // Newlines carry nothing, which is what makes byte-identical output
   // the printer's job rather than the format's.
   for (Chart const &c : corpus()) {
     Parsed const spread{ parse(c.text) };
     REQUIRE(spread.ok);
 
-    // Strip comments and collapse runs of whitespace outside strings. Crude on
-    // purpose: a general reformatter is P3's, and this only has to be
-    // whitespace-equivalent.
+    // Crude on purpose -- it only has to be whitespace-equivalent.
     std::string flat;
     bool in_string{ false };
     for (uint32_t i = 0; i < c.text.size(); ++i) {
@@ -415,7 +407,7 @@ TEST_CASE("corpus: reformatting a chart onto one line changes nothing but the sp
 }
 
 TEST_CASE("corpus: parsing the same bytes twice yields identical structure") {
-  // Determinism discipline is in force from the first commit (PRD 17), and a
+  // Determinism discipline is in force from the first commit, and a
   // parser that depends on nothing but its input is where that starts.
   for (Chart const &c : corpus()) {
     Parsed const first{ parse(c.text) };

@@ -1,12 +1,9 @@
 #ifndef SCAV_CORE_TEST_SUPPORT_H_INCLUDED
 #define SCAV_CORE_TEST_SUPPORT_H_INCLUDED
 
-// Shared by the core unit tests. Header-only and test-only: it is not in the
-// library's source list, so the coverage gate does not count it as production.
-//
-// Charts under test are inline multi-line literals rather than files in
-// test_data. A parser test that has to open a file is testing the filesystem
-// too, and the whole point of PRD 16.2 is that nothing here needs one.
+// Shared by the core unit tests. Header-only and test-only, so the coverage gate
+// does not count it as production. Charts are inline literals: a parser test that
+// opens a file is testing the filesystem too.
 
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"

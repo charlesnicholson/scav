@@ -48,8 +48,7 @@ void intern_finalize(Interner const &in, StringPool &pool, StringRemap &out) {
 
   scav_byte const *const staged{ in.staging.data() };
   std::vector<StrRef> const &unique{ in.unique };
-  // Every entry is distinct, so byte order alone is already a total order and no
-  // input-derived tie-break is needed. Stable anyway, per PRD 6.
+  // Entries are distinct, so byte order is already total and needs no tie-break.
   stable_sort_by(order, [staged, &unique](uint32_t a, uint32_t b) {
     return string_compare_bytes(staged + unique[a].off,
                                 unique[a].len,
@@ -85,9 +84,8 @@ StrRef intern_remap(StringRemap const &r, StrRef ref) {
       hi = mid;
     }
   }
-  // An unknown offset means the caller mixed refs from two interners, which is a
-  // programming error rather than input the format can produce. Degrading to the
-  // empty string keeps it from silently reading another string's bytes.
+  // An unknown offset means refs from two interners got mixed -- a programming
+  // error. Degrading to empty beats reading another string's bytes.
   if ((lo >= r.staging.size()) || (r.staging[lo] != ref.off)) { return {}; }
   return str_ref(r.finalized[lo], ref.len);
 }

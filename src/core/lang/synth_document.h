@@ -1,17 +1,8 @@
 #ifndef SCAV_CORE_LANG_SYNTH_DOCUMENT_H_INCLUDED
 #define SCAV_CORE_LANG_SYNTH_DOCUMENT_H_INCLUDED
 
-// The in-RAM synthetic document generator (PRD 17, P0). Harness-only, and
-// deliberately not part of libscavcore: PRD 3.2 retired a `gen` verb because
-// shipping one would imply a user need nobody has.
-//
-// In RAM and never on disk. A disk-backed benchmark measures the filesystem
-// (PRD 5), and at the 100 MB size the exit gate names, writing the file would
-// dominate everything it was supposed to measure.
-//
-// Synthetic input has uniform branching and no accidental structure, so it is a
-// trap on its own -- the hand-transcribed charts in corpus_tests.cpp are the
-// other half of P0's corpus.
+// Synthetic documents, in RAM -- a disk-backed benchmark measures the filesystem.
+// Harness-only, and a trap alone: corpus_tests.cpp has the hand-written half.
 
 #include <cstdint>
 #include <string>
@@ -40,8 +31,8 @@ struct SynthStats {
   uint32_t statements;  // the chart included
 };
 
-// Depth 16 and a handful of siblings: the scale target of PRD 11, small enough
-// to read when a test fails.
+// Depth 16 and a handful of siblings: the scale target, small enough to read
+// when a test fails.
 SynthSpec synth_default_spec();
 
 std::string synth_document(SynthSpec const &spec, SynthStats &stats);

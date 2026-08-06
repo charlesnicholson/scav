@@ -11,7 +11,7 @@ or directly, which needs no arguments because every path is script-relative:
     src/core/lang/gen_unicode_tables.py --download
     src/core/lang/gen_unicode_tables.py --ucd-dir /path/to/ucd
 
-Text is normalized at parse (PRD 6), so NFC is a P0 dependency and it needs a
+Text is normalized at parse, so NFC is a P0 dependency and it needs a
 table. The output is committed, so an ordinary build needs neither the network
 nor Python -- run this only when the pinned Unicode version moves, and remember
 that the version is a determinism input.
