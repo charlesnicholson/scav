@@ -1,6 +1,8 @@
-#ifndef SCAV_CORE_MODEL_IDS_H_INCLUDED
-#define SCAV_CORE_MODEL_IDS_H_INCLUDED
+#ifndef SCAV_IDS_H_INCLUDED
+#define SCAV_IDS_H_INCLUDED
 
+// Types only. Every other public header is built out of these.
+//
 // Strong id types and the two span shapes every column indexes through. P0 owns
 // only the front-end slice of PRD 7 -- documents, statements and the string
 // pool -- so the entity ids land with the model spine in P1.
@@ -51,4 +53,4 @@ constexpr Span make_span(uint32_t off, uint32_t len) { return { .off = off, .len
 
 }  // namespace scav
 
-#endif  // SCAV_CORE_MODEL_IDS_H_INCLUDED
+#endif  // SCAV_IDS_H_INCLUDED

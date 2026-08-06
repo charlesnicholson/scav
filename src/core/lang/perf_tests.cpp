@@ -15,15 +15,15 @@
 // instrumentation, so those builds run a smaller input and skip the floor
 // entirely. src/core/CMakeLists.txt decides which.
 
-#include "core/lang/diagnostic.h"
-#include "core/lang/lexer.h"
-#include "core/lang/normalize.h"
-#include "core/lang/parse_tree.h"
-#include "core/lang/parser.h"
-#include "core/lang/synth.h"
-#include "core/model/ids.h"
+#include "core/lang/synth_document.h"
 #include "core/test_support.h"
-#include "scav/types.h"
+#include "scav/scav_diagnostics.h"
+#include "scav/scav_ids.h"
+#include "scav/scav_lexer.h"
+#include "scav/scav_parser.h"
+#include "scav/scav_source_text.h"
+#include "scav/scav_syntax_tree.h"
+#include "scav/scav_types.h"
 
 #include "doctest.h"
 
@@ -63,7 +63,7 @@ uint64_t throughput_mb_per_s(uint64_t bytes, uint64_t micros) {
 }
 
 std::string generate(uint64_t target_bytes, SynthStats &stats) {
-  SynthSpec spec{ synth_default() };
+  SynthSpec spec{ synth_default_spec() };
   spec.depth = 16;
   spec.min_bytes = target_bytes;
   return synth_document(spec, stats);
@@ -80,7 +80,7 @@ LexTiming time_lex(std::vector<scav_byte> const &bytes) {
   std::vector<Diagnostic> diags;
   auto const start{ std::chrono::steady_clock::now() };
   bool const ok{
-    lex(bytes.data(), static_cast<uint32_t>(bytes.size()), DocId{ 0 }, lexed, diags)
+    lex_source(bytes.data(), static_cast<uint32_t>(bytes.size()), DocId{ 0 }, lexed, diags)
   };
   LexTiming const t{ .micros = micros_since(start),
                      .tokens = lexed.tokens.size(),
@@ -100,7 +100,7 @@ uint64_t time_parse(std::vector<scav_byte> const &bytes,
                               lexed,
                               DocId{ 0 },
                               "perf.scav",
-                              default_parse_options(),
+                              parse_default_options(),
                               pd,
                               diags) };
   uint64_t const micros{ micros_since(start) };
@@ -112,7 +112,7 @@ uint64_t time_parse(std::vector<scav_byte> const &bytes,
 std::vector<scav_byte> normalized(std::string const &text) {
   std::vector<scav_byte> out;
   std::vector<Diagnostic> diags;
-  REQUIRE(normalize_source(raw(text), size32(text), DocId{ 0 }, out, diags));
+  REQUIRE(source_text_normalize(raw(text), size32(text), DocId{ 0 }, out, diags));
   return out;
 }
 
@@ -130,15 +130,18 @@ TEST_CASE("perf: lex and parse a large document in RAM") {
 
   LexResult lexed;
   std::vector<Diagnostic> diags;
-  REQUIRE(
-      lex(source.data(), static_cast<uint32_t>(source.size()), DocId{ 0 }, lexed, diags));
+  REQUIRE(lex_source(source.data(),
+                     static_cast<uint32_t>(source.size()),
+                     DocId{ 0 },
+                     lexed,
+                     diags));
 
   uint64_t parse_bytes{ 0 };
   uint64_t const parse_micros{ time_parse(source, lexed, parse_bytes) };
 
   uint64_t const lex_rate{ throughput_mb_per_s(bytes, lexing.micros) };
   uint64_t const parse_rate{ throughput_mb_per_s(bytes, parse_micros) };
-  MESSAGE("lex: " << lex_rate << " MiB/s over " << lexing.tokens << " tokens");
+  MESSAGE("lex_source: " << lex_rate << " MiB/s over " << lexing.tokens << " tokens");
   MESSAGE("parse: " << parse_rate << " MiB/s");
 
   if (ASSERT_FLOOR) {
@@ -157,8 +160,11 @@ TEST_CASE("perf: peak memory is a bounded multiple of the input") {
 
   LexResult lexed;
   std::vector<Diagnostic> diags;
-  REQUIRE(
-      lex(source.data(), static_cast<uint32_t>(source.size()), DocId{ 0 }, lexed, diags));
+  REQUIRE(lex_source(source.data(),
+                     static_cast<uint32_t>(source.size()),
+                     DocId{ 0 },
+                     lexed,
+                     diags));
   uint64_t const lex_bytes{ lex_footprint(lexed) };
 
   ParsedDocument pd;
@@ -167,7 +173,7 @@ TEST_CASE("perf: peak memory is a bounded multiple of the input") {
                        lexed,
                        DocId{ 0 },
                        "perf.scav",
-                       default_parse_options(),
+                       parse_default_options(),
                        pd,
                        diags));
   uint64_t const parse_bytes{ parse_footprint(pd) };
@@ -205,7 +211,7 @@ TEST_CASE("perf: lexing is linear in the input") {
   uint64_t const large_us{ time_lex(large_bytes).micros };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
-  MESSAGE("lex grew " << growth << "x for " << ratio << "x the bytes");
+  MESSAGE("lex_source grew " << growth << "x for " << ratio << "x the bytes");
   if (ASSERT_FLOOR) { CHECK(growth < ratio * SCALING_SLACK); }
 }
 
@@ -223,16 +229,16 @@ TEST_CASE("perf: parsing is linear in the input") {
   LexResult small_lexed;
   LexResult large_lexed;
   std::vector<Diagnostic> diags;
-  REQUIRE(lex(small_bytes.data(),
-              static_cast<uint32_t>(small_bytes.size()),
-              DocId{ 0 },
-              small_lexed,
-              diags));
-  REQUIRE(lex(large_bytes.data(),
-              static_cast<uint32_t>(large_bytes.size()),
-              DocId{ 0 },
-              large_lexed,
-              diags));
+  REQUIRE(lex_source(small_bytes.data(),
+                     static_cast<uint32_t>(small_bytes.size()),
+                     DocId{ 0 },
+                     small_lexed,
+                     diags));
+  REQUIRE(lex_source(large_bytes.data(),
+                     static_cast<uint32_t>(large_bytes.size()),
+                     DocId{ 0 },
+                     large_lexed,
+                     diags));
 
   uint64_t footprint{ 0 };
   time_parse(small_bytes, small_lexed, footprint);
@@ -382,7 +388,7 @@ TEST_CASE("perf: the generated document is what it claims to be") {
   SynthStats stats{};
   std::string const text{ generate(INPUT_BYTES / 16, stats) };
   Parsed const r{ parse(text) };
-  REQUIRE_MESSAGE(r.ok, diag_text(first_code(r.diags)));
+  REQUIRE_MESSAGE(r.ok, diag_message(first_code(r.diags)));
   CHECK(r.pd.stmts.size() == stats.statements);
   CHECK(r.pd.comments.size() == stats.comments);
   CHECK(stmts_of(r.pd, ElemKind::State).size() == stats.states);

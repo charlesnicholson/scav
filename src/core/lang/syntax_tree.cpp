@@ -1,13 +1,13 @@
-#include "core/lang/parse_tree.h"
+#include "scav/scav_syntax_tree.h"
 
-#include "core/model/ids.h"
+#include "scav/scav_ids.h"
 
 #include <cstdint>
 #include <string_view>
 
 namespace scav {
 
-char const *elem_kind_name(ElemKind kind) {
+char const *syntax_elem_kind_name(ElemKind kind) {
   switch (kind) {
     case ElemKind::Chart: return "chart";
     case ElemKind::Include: return "include";
@@ -19,7 +19,7 @@ char const *elem_kind_name(ElemKind kind) {
   return "unknown";
 }
 
-char const *state_kind_name(StateKind kind) {
+char const *syntax_state_kind_name(StateKind kind) {
   switch (kind) {
     case StateKind::Normal: return "normal";
     case StateKind::Initial: return "initial";
@@ -34,7 +34,7 @@ char const *state_kind_name(StateKind kind) {
   return "unknown";
 }
 
-char const *trans_kind_name(TransKind kind) {
+char const *syntax_trans_kind_name(TransKind kind) {
   switch (kind) {
     case TransKind::External: return "external";
     case TransKind::Internal: return "internal";
@@ -43,7 +43,7 @@ char const *trans_kind_name(TransKind kind) {
   return "unknown";
 }
 
-bool state_kind_from_name(std::string_view text, StateKind &out) {
+bool syntax_state_kind_from_name(std::string_view text, StateKind &out) {
   // `initial` and `final` are absent on purpose: the format reaches them only
   // through `*` in an endpoint (PRD 7), so accepting them here would add a
   // second spelling for a state the author cannot otherwise write.
@@ -78,7 +78,7 @@ bool state_kind_from_name(std::string_view text, StateKind &out) {
   return false;
 }
 
-bool trans_kind_from_name(std::string_view text, TransKind &out) {
+bool syntax_trans_kind_from_name(std::string_view text, TransKind &out) {
   if (text == "external") {
     out = TransKind::External;
     return true;
@@ -94,7 +94,7 @@ bool trans_kind_from_name(std::string_view text, TransKind &out) {
   return false;
 }
 
-uint32_t root_statement(ParsedDocument const &pd) {
+uint32_t syntax_root_statement(ParsedDocument const &pd) {
   // The chart statement is created first, so it is always row zero.
   return pd.stmts.empty() ? INVALID : 0U;
 }

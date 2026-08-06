@@ -1,6 +1,8 @@
-#ifndef SCAV_CORE_LANG_PARSER_H_INCLUDED
-#define SCAV_CORE_LANG_PARSER_H_INCLUDED
+#ifndef SCAV_PARSER_H_INCLUDED
+#define SCAV_PARSER_H_INCLUDED
 
+// Everything here is named `parse_*`, after the header.
+//
 // LL(1) descent over PRD 15's grammar, with the descent held in an explicit
 // std::vector of frames rather than in the call stack.
 //
@@ -11,11 +13,11 @@
 // With the frames on the heap the cap is an ordinary comparison and the answer
 // is DiagCode::DepthLimitExceeded.
 
-#include "core/lang/diagnostic.h"
-#include "core/lang/lexer.h"
-#include "core/lang/parse_tree.h"
-#include "core/model/ids.h"
-#include "scav/types.h"
+#include "scav/scav_diagnostics.h"
+#include "scav/scav_ids.h"
+#include "scav/scav_lexer.h"
+#include "scav/scav_syntax_tree.h"
+#include "scav/scav_types.h"
 
 #include <cstdint>
 #include <string_view>
@@ -33,7 +35,7 @@ struct ParseOptions {
   uint32_t max_depth;
 };
 
-ParseOptions default_parse_options();
+ParseOptions parse_default_options();
 
 // Bytes must already be normalized. `name` is the document's path, and exists
 // so a diagnostic can say `wifi.scav:12` rather than `<buffer>:12`.
@@ -61,4 +63,4 @@ uint64_t parse_footprint(ParsedDocument const &pd);
 
 }  // namespace scav
 
-#endif  // SCAV_CORE_LANG_PARSER_H_INCLUDED
+#endif  // SCAV_PARSER_H_INCLUDED

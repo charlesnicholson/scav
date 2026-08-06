@@ -1,4 +1,4 @@
-#include "scav/toy.h"
+#include "scav/scav_toy.h"
 #include "scav_internal.h"
 
 #include <cstdint>

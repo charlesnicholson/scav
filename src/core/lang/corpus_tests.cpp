@@ -8,11 +8,11 @@
 // namespace. They live as inline literals rather than as files under test_data
 // because parsing takes bytes and acquiring bytes is a different system.
 
-#include "core/lang/diagnostic.h"
-#include "core/lang/parse_tree.h"
-#include "core/lang/parser.h"
-#include "core/model/ids.h"
 #include "core/test_support.h"
+#include "scav/scav_diagnostics.h"
+#include "scav/scav_ids.h"
+#include "scav/scav_parser.h"
+#include "scav/scav_syntax_tree.h"
 
 #include "doctest.h"
 
@@ -174,7 +174,7 @@ TEST_CASE("corpus: every chart parses with no diagnostics") {
   // P0's exit gate, stated as a test rather than as a claim.
   for (Chart const &c : corpus()) {
     Parsed const r{ parse(c.text, std::string{ c.name } + ".scav") };
-    CHECK_MESSAGE(r.ok, c.name << ": " << diag_text(first_code(r.diags)));
+    CHECK_MESSAGE(r.ok, c.name << ": " << diag_message(first_code(r.diags)));
     CHECK_MESSAGE(r.diags.empty(), c.name);
   }
 }
@@ -407,7 +407,7 @@ TEST_CASE("corpus: reformatting a chart onto one line changes nothing but the sp
 
     Parsed const collapsed{ parse(flat) };
     REQUIRE_MESSAGE(collapsed.ok,
-                    c.name << ": " << diag_text(first_code(collapsed.diags)));
+                    c.name << ": " << diag_message(first_code(collapsed.diags)));
     CHECK_MESSAGE(collapsed.pd.stmts.size() == spread.pd.stmts.size(), c.name);
     CHECK_MESSAGE(collapsed.pd.strings.bytes == spread.pd.strings.bytes, c.name);
     for (uint32_t i = 0; i < spread.pd.stmts.size(); ++i) {

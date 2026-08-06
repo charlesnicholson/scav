@@ -126,6 +126,9 @@ file(WRITE "${PROJECT_BINARY_DIR}/scav_sources.txt" "${scav_production_sources_t
 
 include(CMakePackageConfigHelpers)
 
+# The cross-library vocabulary only. A library's own API is installed by
+# scav_install_library from its src/<lib>/include, which is also the only place
+# a consumer can reach in the build tree.
 install(DIRECTORY include/scav
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
   FILES_MATCHING PATTERN "*.h"

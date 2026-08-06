@@ -1,5 +1,5 @@
-#ifndef SCAV_CORE_LANG_SYNTH_H_INCLUDED
-#define SCAV_CORE_LANG_SYNTH_H_INCLUDED
+#ifndef SCAV_CORE_LANG_SYNTH_DOCUMENT_H_INCLUDED
+#define SCAV_CORE_LANG_SYNTH_DOCUMENT_H_INCLUDED
 
 // The in-RAM synthetic document generator (PRD 17, P0). Harness-only, and
 // deliberately not part of libscavcore: PRD 3.2 retired a `gen` verb because
@@ -42,7 +42,7 @@ struct SynthStats {
 
 // Depth 16 and a handful of siblings: the scale target of PRD 11, small enough
 // to read when a test fails.
-SynthSpec synth_default();
+SynthSpec synth_default_spec();
 
 std::string synth_document(SynthSpec const &spec, SynthStats &stats);
 
@@ -53,4 +53,4 @@ std::string synth_deep_document(uint32_t depth);
 
 }  // namespace scav
 
-#endif  // SCAV_CORE_LANG_SYNTH_H_INCLUDED
+#endif  // SCAV_CORE_LANG_SYNTH_DOCUMENT_H_INCLUDED

@@ -1,7 +1,8 @@
-#ifndef SCAV_CORE_MODEL_STRING_POOL_H_INCLUDED
-#define SCAV_CORE_MODEL_STRING_POOL_H_INCLUDED
+#ifndef SCAV_CORE_MODEL_INTERNER_H_INCLUDED
+#define SCAV_CORE_MODEL_INTERNER_H_INCLUDED
 
-// Two-pass interning (PRD 7).
+// Two-pass interning (PRD 7). Private: a client reads a finalized StringPool,
+// and only the parser builds one.
 //
 // Pass one dedupes into a staging pool in first-encounter order, which is the
 // only order a single forward parse can produce. Pass two re-emits the bytes
@@ -14,19 +15,16 @@
 // StrRefs live in the caller's payload arrays, and only the caller knows where
 // they all are.
 
-#include "core/model/ids.h"
 #include "core/model/lookup_map.h"
-#include "scav/types.h"
+#include "scav/scav_ids.h"
+#include "scav/scav_string_pool.h"
+#include "scav/scav_types.h"
 
 #include <cstdint>
 #include <string_view>
 #include <vector>
 
 namespace scav {
-
-struct StringPool {
-  std::vector<scav_byte> bytes;
-};
 
 struct Interner {
   std::vector<scav_byte> staging;
@@ -37,8 +35,8 @@ struct Interner {
 // The empty string is StrRef{0, 0} and never enters the pool: a zero length
 // already says everything, and reserving an offset for it would make the pool
 // depend on whether anything empty was ever interned.
-StrRef intern(Interner &in, scav_byte const *bytes, uint32_t len);
-StrRef intern(Interner &in, std::string_view text);
+StrRef intern_bytes(Interner &in, scav_byte const *bytes, uint32_t len);
+StrRef intern_bytes(Interner &in, std::string_view text);
 
 // Maps a staging offset to its offset in the finalized pool. Parallel arrays
 // rather than a map: `staging` ascends, so this is a binary search and the
@@ -49,19 +47,14 @@ struct StringRemap {
 };
 
 // Consumes nothing -- `in` stays valid, so a caller may finalize and still hold
-// staging refs while it walks them through `remap`.
-void finalize(Interner const &in, StringPool &pool, StringRemap &out);
+// staging refs while it walks them through intern_remap.
+void intern_finalize(Interner const &in, StringPool &pool, StringRemap &out);
 
 // A zero-length ref maps to itself; anything else must have been interned.
-StrRef remap(StringRemap const &r, StrRef ref);
+StrRef intern_remap(StringRemap const &r, StrRef ref);
 
-std::string_view view(StringPool const &pool, StrRef ref);
-std::string_view staged_view(Interner const &in, StrRef ref);
-
-// Byte-wise, unsigned, shorter-prefix-first. PRD 6: collation is byte-wise only,
-// so Hebrew and Arabic sort in codepoint order and that is an accepted trade.
-int compare_bytes(scav_byte const *a, uint32_t alen, scav_byte const *b, uint32_t blen);
+std::string_view intern_staged_view(Interner const &in, StrRef ref);
 
 }  // namespace scav
 
-#endif  // SCAV_CORE_MODEL_STRING_POOL_H_INCLUDED
+#endif  // SCAV_CORE_MODEL_INTERNER_H_INCLUDED

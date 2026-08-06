@@ -5,15 +5,15 @@
 // the filesystem as well, and PRD 16.2's whole point is that nothing here needs
 // one.
 
-#include "core/lang/diagnostic.h"
-#include "core/lang/lexer.h"
-#include "core/lang/parse_tree.h"
-#include "core/lang/parser.h"
-#include "core/lang/synth.h"
-#include "core/model/ids.h"
-#include "core/model/string_pool.h"
+#include "core/lang/synth_document.h"
 #include "core/test_support.h"
-#include "scav/types.h"
+#include "scav/scav_diagnostics.h"
+#include "scav/scav_ids.h"
+#include "scav/scav_lexer.h"
+#include "scav/scav_parser.h"
+#include "scav/scav_string_pool.h"
+#include "scav/scav_syntax_tree.h"
+#include "scav/scav_types.h"
 
 #include "doctest.h"
 
@@ -41,7 +41,7 @@ std::vector<uint32_t> children_of(ParsedDocument const &pd, uint32_t stmt) {
 // to assert shape without asserting row numbers.
 std::vector<std::string> shape(ParsedDocument const &pd) {
   std::vector<std::string> out;
-  std::vector<uint32_t> stack{ root_statement(pd) };
+  std::vector<uint32_t> stack{ syntax_root_statement(pd) };
   std::vector<uint32_t> order;
   while (!stack.empty()) {
     uint32_t const stmt{ stack.back() };
@@ -57,7 +57,7 @@ std::vector<std::string> shape(ParsedDocument const &pd) {
   }
   out.reserve(order.size());
   for (uint32_t const stmt : order) {
-    std::string line{ elem_kind_name(pd.stmts[stmt].kind) };
+    std::string line{ syntax_elem_kind_name(pd.stmts[stmt].kind) };
     switch (pd.stmts[stmt].kind) {
       case ElemKind::Chart:
         line += ":";
@@ -571,9 +571,9 @@ TEST_CASE("parse: every diagnostic locates to a span inside the document") {
       CHECK(d.doc == DocId{ 0 });
       CHECK(d.src.off <= r.pd.src_bytes.size());
       CHECK(static_cast<size_t>(d.src.off) + d.src.len <= r.pd.src_bytes.size());
-      LineCol const at{ line_col(r.pd.src_bytes.data(),
-                                 static_cast<uint32_t>(r.pd.src_bytes.size()),
-                                 d.src.off) };
+      LineCol const at{ diag_line_col(r.pd.src_bytes.data(),
+                                      static_cast<uint32_t>(r.pd.src_bytes.size()),
+                                      d.src.off) };
       CHECK(at.line >= 1);
       CHECK(at.column >= 1);
     }
@@ -734,14 +734,14 @@ TEST_CASE("parse: a document with no comments has no trivia array") {
 }
 
 TEST_CASE("parse: nesting to the depth-16 design target") {
-  SynthSpec spec{ synth_default() };
+  SynthSpec spec{ synth_default_spec() };
   spec.depth = 16;
   spec.min_roots = 1;
   SynthStats stats{};
   std::string const text{ synth_document(spec, stats) };
 
   Parsed const r{ parse(text) };
-  REQUIRE_MESSAGE(r.ok, diag_text(first_code(r.diags)));
+  REQUIRE_MESSAGE(r.ok, diag_message(first_code(r.diags)));
   CHECK(stmts_of(r.pd, ElemKind::State).size() == stats.states);
   CHECK(stmts_of(r.pd, ElemKind::Submachine).size() == stats.submachines);
   CHECK(stmts_of(r.pd, ElemKind::Trans).size() == stats.transitions);
@@ -803,7 +803,7 @@ TEST_CASE("parse: parse_tokens rejects a token stream with no End sentinel") {
                            empty,
                            DocId{ 0 },
                            "x.scav",
-                           default_parse_options(),
+                           parse_default_options(),
                            pd,
                            diags));
   CHECK(first_code(diags) == DiagCode::ExpectedChart);
@@ -824,38 +824,39 @@ chart c {
 
 TEST_CASE("parse_tree: every enum has a name and every kind word round-trips") {
   for (uint32_t i = 0; i <= static_cast<uint32_t>(ElemKind::Attr); ++i) {
-    CHECK(std::string{ elem_kind_name(static_cast<ElemKind>(i)) } != "unknown");
+    CHECK(std::string{ syntax_elem_kind_name(static_cast<ElemKind>(i)) } != "unknown");
   }
   for (uint32_t i = 0; i <= static_cast<uint32_t>(StateKind::DeepHistory); ++i) {
     StateKind const kind{ static_cast<StateKind>(i) };
-    char const *const name{ state_kind_name(kind) };
+    char const *const name{ syntax_state_kind_name(kind) };
     CHECK(std::string{ name } != "unknown");
     StateKind parsed{ StateKind::Normal };
     // initial and final have names but are not spellable, which is the one
     // asymmetry here and it is deliberate.
     bool const spellable{ (kind != StateKind::Initial) && (kind != StateKind::Final) };
-    CHECK(state_kind_from_name(name, parsed) == spellable);
+    CHECK(syntax_state_kind_from_name(name, parsed) == spellable);
     if (spellable) { CHECK(parsed == kind); }
   }
   for (uint32_t i = 0; i <= static_cast<uint32_t>(TransKind::Local); ++i) {
     TransKind const kind{ static_cast<TransKind>(i) };
     TransKind parsed{ TransKind::External };
-    CHECK(trans_kind_from_name(trans_kind_name(kind), parsed));
+    CHECK(syntax_trans_kind_from_name(syntax_trans_kind_name(kind), parsed));
     CHECK(parsed == kind);
   }
-  CHECK(std::string{ elem_kind_name(static_cast<ElemKind>(99)) } == "unknown");
-  CHECK(std::string{ state_kind_name(static_cast<StateKind>(99)) } == "unknown");
-  CHECK(std::string{ trans_kind_name(static_cast<TransKind>(99)) } == "unknown");
+  CHECK(std::string{ syntax_elem_kind_name(static_cast<ElemKind>(99)) } == "unknown");
+  CHECK(std::string{ syntax_state_kind_name(static_cast<StateKind>(99)) } == "unknown");
+  CHECK(std::string{ syntax_trans_kind_name(static_cast<TransKind>(99)) } == "unknown");
 
   StateKind ignored_state{ StateKind::Normal };
   TransKind ignored_trans{ TransKind::External };
-  CHECK_FALSE(state_kind_from_name("nope", ignored_state));
-  CHECK_FALSE(trans_kind_from_name("nope", ignored_trans));
+  CHECK_FALSE(syntax_state_kind_from_name("nope", ignored_state));
+  CHECK_FALSE(syntax_trans_kind_from_name("nope", ignored_trans));
 }
 
-TEST_CASE("parse_tree: root_statement is the chart, or INVALID when nothing parsed") {
+TEST_CASE(
+    "parse_tree: syntax_root_statement is the chart, or INVALID when nothing parsed") {
   Parsed const r{ parse("chart c {}") };
-  CHECK(root_statement(r.pd) == 0);
+  CHECK(syntax_root_statement(r.pd) == 0);
   ParsedDocument const empty{};
-  CHECK(root_statement(empty) == INVALID);
+  CHECK(syntax_root_statement(empty) == INVALID);
 }

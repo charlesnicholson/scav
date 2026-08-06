@@ -1,7 +1,7 @@
 // Compiled against the library's testable variant, where the internal helper below
 // has external linkage.
 
-#include "scav/toy.h"
+#include "scav/scav_toy.h"
 
 #include "doctest.h"
 

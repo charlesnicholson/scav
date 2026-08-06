@@ -1,4 +1,4 @@
-#include "core/lang/synth.h"
+#include "core/lang/synth_document.h"
 
 #include <array>
 #include <cstdint>
@@ -197,7 +197,7 @@ void emit_subtree(Gen &g) {
 
 }  // namespace
 
-SynthSpec synth_default() {
+SynthSpec synth_default_spec() {
   return { .depth = 16,
            .states_per_block = 4,
            .submachines_per_state = 2,

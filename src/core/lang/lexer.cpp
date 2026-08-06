@@ -1,9 +1,9 @@
-#include "core/lang/lexer.h"
+#include "scav/scav_lexer.h"
 
-#include "core/lang/diagnostic.h"
-#include "core/lang/normalize.h"
-#include "core/model/ids.h"
-#include "scav/types.h"
+#include "scav/scav_diagnostics.h"
+#include "scav/scav_ids.h"
+#include "scav/scav_source_text.h"
+#include "scav/scav_types.h"
 
 #include <cstdint>
 #include <string_view>
@@ -116,12 +116,12 @@ bool emit_raw_line(scav_byte const *bytes,
 }
 
 bool decode_raw(scav_byte const *bytes,
-                Span lex,
+                Span lexeme,
                 DocId doc,
                 std::vector<scav_byte> &out,
                 std::vector<Diagnostic> &diags) {
-  uint32_t const begin{ lex.off + RAW_DELIM_LEN };
-  uint32_t const end{ (lex.off + lex.len) - RAW_DELIM_LEN };
+  uint32_t const begin{ lexeme.off + RAW_DELIM_LEN };
+  uint32_t const end{ (lexeme.off + lexeme.len) - RAW_DELIM_LEN };
 
   uint32_t last_newline{ INVALID };
   for (uint32_t i = begin; i < end; ++i) {
@@ -176,12 +176,12 @@ bool decode_raw(scav_byte const *bytes,
 }
 
 bool decode_quoted(scav_byte const *bytes,
-                   Span lex,
+                   Span lexeme,
                    DocId doc,
                    std::vector<scav_byte> &out,
                    std::vector<Diagnostic> &diags) {
-  uint32_t const end{ (lex.off + lex.len) - 1 };  // the closing quote
-  uint32_t i{ lex.off + 1 };
+  uint32_t const end{ (lexeme.off + lexeme.len) - 1 };  // the closing quote
+  uint32_t i{ lexeme.off + 1 };
   while (i < end) {
     if (bytes[i] != '\\') {
       out.push_back(bytes[i]);
@@ -227,7 +227,7 @@ bool decode_quoted(scav_byte const *bytes,
             { .code = DiagCode::EscapedSurrogate, .doc = doc, .src = make_span(i, 6) });
         return false;
       }
-      utf8_encode(cp, out);
+      source_text_utf8_encode(cp, out);
       i += 6;
       continue;
     } else {
@@ -242,7 +242,7 @@ bool decode_quoted(scav_byte const *bytes,
 
 }  // namespace
 
-char const *tok_kind_name(TokKind kind) {
+char const *lex_token_kind_name(TokKind kind) {
   switch (kind) {
     case TokKind::End: return "end of input";
     case TokKind::Ident: return "identifier";
@@ -263,22 +263,22 @@ char const *tok_kind_name(TokKind kind) {
   return "token";
 }
 
-bool is_reserved_word(std::string_view text) {
+bool lex_is_reserved_word(std::string_view text) {
   return (text == "chart") || (text == "include") || (text == "state") ||
          (text == "submachine") || (text == "trans") || (text == "external") ||
          (text == "internal") || (text == "local");
 }
 
-bool decode_string_literal(scav_byte const *bytes,
-                           Span lex,
-                           DocId doc,
-                           std::vector<scav_byte> &out,
-                           std::vector<Diagnostic> &diags) {
+bool lex_decode_string_literal(scav_byte const *bytes,
+                               Span lexeme,
+                               DocId doc,
+                               std::vector<scav_byte> &out,
+                               std::vector<Diagnostic> &diags) {
   out.clear();
-  bool const raw{ (lex.len >= (2 * RAW_DELIM_LEN)) &&
-                  is_raw_delim_at(bytes, lex.off + lex.len, lex.off) };
-  bool const ok{ raw ? decode_raw(bytes, lex, doc, out, diags)
-                     : decode_quoted(bytes, lex, doc, out, diags) };
+  bool const raw{ (lexeme.len >= (2 * RAW_DELIM_LEN)) &&
+                  is_raw_delim_at(bytes, lexeme.off + lexeme.len, lexeme.off) };
+  bool const ok{ raw ? decode_raw(bytes, lexeme, doc, out, diags)
+                     : decode_quoted(bytes, lexeme, doc, out, diags) };
   if (!ok) {
     out.clear();
     return false;
@@ -287,19 +287,19 @@ bool decode_string_literal(scav_byte const *bytes,
   // The source was NFC-folded on read, but \u escapes decode after that, so a
   // literal can still name a decomposed sequence. Folding here keeps two
   // spellings of one string from interning as two.
-  if (!is_nfc(out.data(), static_cast<uint32_t>(out.size()))) {
+  if (!source_text_is_nfc(out.data(), static_cast<uint32_t>(out.size()))) {
     std::vector<scav_byte> composed;
-    nfc_bytes(out.data(), static_cast<uint32_t>(out.size()), composed);
+    source_text_to_nfc(out.data(), static_cast<uint32_t>(out.size()), composed);
     out.swap(composed);
   }
   return true;
 }
 
-bool lex(scav_byte const *bytes,
-         uint32_t len,
-         DocId doc,
-         LexResult &out,
-         std::vector<Diagnostic> &diags) {
+bool lex_source(scav_byte const *bytes,
+                uint32_t len,
+                DocId doc,
+                LexResult &out,
+                std::vector<Diagnostic> &diags) {
   out.tokens.clear();
   out.comments.clear();
   out.tokens.reserve((len / BYTES_PER_TOKEN_ESTIMATE) + 1);

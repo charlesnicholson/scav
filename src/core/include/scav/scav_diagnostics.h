@@ -1,6 +1,8 @@
-#ifndef SCAV_CORE_LANG_DIAGNOSTIC_H_INCLUDED
-#define SCAV_CORE_LANG_DIAGNOSTIC_H_INCLUDED
+#ifndef SCAV_DIAGNOSTICS_H_INCLUDED
+#define SCAV_DIAGNOSTICS_H_INCLUDED
 
+// Everything here is named `diag_*`, after the header.
+//
 // A front-end diagnostic is a code plus a source span, and nothing else.
 //
 // PRD 6 says a *model* diagnostic carries only (code, subject_kind,
@@ -14,8 +16,8 @@
 // never printed costs nothing, and no layer has to thread one through its call
 // stack.
 
-#include "core/model/ids.h"
-#include "scav/types.h"
+#include "scav/scav_ids.h"
+#include "scav/scav_types.h"
 
 #include <cstdint>
 #include <vector>
@@ -81,14 +83,14 @@ struct LineCol {
   uint32_t line, column;
 };
 
-LineCol line_col(scav_byte const *bytes, uint32_t len, uint32_t offset);
+LineCol diag_line_col(scav_byte const *bytes, uint32_t len, uint32_t offset);
 
 // A short, stable, locale-free description. Not a formatted message: rendering
 // one is the application's, and PRD 4 keeps stream globals out of a library.
-char const *diag_text(DiagCode code);
+char const *diag_message(DiagCode code);
 
-bool has_errors(std::vector<Diagnostic> const &diags);
+bool diag_has_errors(std::vector<Diagnostic> const &diags);
 
 }  // namespace scav
 
-#endif  // SCAV_CORE_LANG_DIAGNOSTIC_H_INCLUDED
+#endif  // SCAV_DIAGNOSTICS_H_INCLUDED
