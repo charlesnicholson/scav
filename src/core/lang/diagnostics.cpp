@@ -36,6 +36,8 @@ char const *diag_message(DiagCode code) {
     case DiagCode::Utf8Surrogate: return "UTF-8 encoded a surrogate codepoint";
     case DiagCode::Utf8OutOfRange: return "codepoint above U+10FFFF";
 
+    case DiagCode::BlockCommentUnsupported:
+      return "block comments are not supported; use // to the end of the line";
     case DiagCode::UnexpectedCharacter: return "unexpected character";
     case DiagCode::UnterminatedString: return "unterminated string";
     case DiagCode::UnterminatedRawString: return "unterminated raw string";
