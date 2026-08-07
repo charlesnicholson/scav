@@ -102,18 +102,18 @@ TEST_CASE("lex: a buffer too large for a token span is rejected") {
 }
 
 TEST_CASE("lex: every punctuation token") {
-  CHECK(kinds("{}[],=@:/*->") == std::vector<TokKind>{ TokKind::LBrace,
-                                                       TokKind::RBrace,
-                                                       TokKind::LBracket,
-                                                       TokKind::RBracket,
-                                                       TokKind::Comma,
-                                                       TokKind::Equals,
-                                                       TokKind::At,
-                                                       TokKind::Colon,
-                                                       TokKind::Slash,
-                                                       TokKind::Star,
-                                                       TokKind::Arrow,
-                                                       TokKind::End });
+  CHECK(kinds("{}[],=@: / * ->") == std::vector<TokKind>{ TokKind::LBrace,
+                                                          TokKind::RBrace,
+                                                          TokKind::LBracket,
+                                                          TokKind::RBracket,
+                                                          TokKind::Comma,
+                                                          TokKind::Equals,
+                                                          TokKind::At,
+                                                          TokKind::Colon,
+                                                          TokKind::Slash,
+                                                          TokKind::Star,
+                                                          TokKind::Arrow,
+                                                          TokKind::End });
 }
 
 TEST_CASE("lex: identifiers, numbers and strings") {
@@ -227,20 +227,65 @@ TEST_CASE("lex: a slash that is not doubled is a path separator") {
   CHECK(kinds("a//b") == std::vector<TokKind>{ TokKind::Ident, TokKind::End });
 }
 
-TEST_CASE("lex: only // starts a comment, so there is no unterminated-comment case") {
-  // No block comments, so no nesting rule and no unterminated-comment failure.
-  // `/*` is two ordinary tokens: the lexer is happy, the grammar rejects it.
+TEST_CASE("lex: a block comment is rejected by name") {
+  // `/*` is not a comment form, but it is the single most likely thing someone
+  // types expecting one, so it gets a diagnostic rather than two stray tokens.
   Lexed const r{ lex_text("/* not a comment */") };
-  CHECK(r.ok);
-  CHECK(r.diags.empty());
-  CHECK(r.result.comments.empty());
-  CHECK(kinds("/*x*/") == std::vector<TokKind>{ TokKind::Slash,
-                                                TokKind::Star,
-                                                TokKind::Ident,
-                                                TokKind::Star,
-                                                TokKind::Slash,
-                                                TokKind::End });
-  CHECK_FALSE(parse("chart c { /* nope */ }").ok);
+  CHECK_FALSE(r.ok);
+  REQUIRE(r.diags.size() == 1);
+  CHECK(r.diags[0].code == DiagCode::BlockCommentUnsupported);
+  CHECK(r.diags[0].src == make_span(0, 2));  // the caret sits on the `/*`
+  CHECK(r.result.comments.empty());          // and it is not recorded as trivia
+}
+
+TEST_CASE("lex: a block comment is skipped, so its body is not lexed as tokens") {
+  // One diagnostic beats a cascade of nonsense from the text inside it.
+  Lexed const r{ lex_text("state A, /* } , @ ! */ state B,") };
+  CHECK_FALSE(r.ok);
+  CHECK(r.diags.size() == 1);
+  CHECK(kinds("state A, /* } , @ ! */ state B,") == std::vector<TokKind>{ TokKind::Ident,
+                                                                          TokKind::Ident,
+                                                                          TokKind::Comma,
+                                                                          TokKind::Ident,
+                                                                          TokKind::Ident,
+                                                                          TokKind::Comma,
+                                                                          TokKind::End });
+}
+
+TEST_CASE("lex: an unterminated block comment reports once and stops") {
+  Lexed const r{ lex_text("state A, /* never closed") };
+  CHECK_FALSE(r.ok);
+  REQUIRE(r.diags.size() == 1);
+  CHECK(r.diags[0].code == DiagCode::BlockCommentUnsupported);
+  CHECK(r.result.tokens.back().kind == TokKind::End);
+}
+
+TEST_CASE("lex: a nested block comment still reports exactly once") {
+  // No nesting rule to get wrong, because there is no nesting: the scan stops at
+  // the first `*/`, and what follows is ordinary source.
+  Lexed const r{ lex_text("/* a /* b */") };
+  CHECK_FALSE(r.ok);
+  CHECK(r.diags.size() == 1);
+}
+
+TEST_CASE("lex: the block-comment check does not shadow the real comment form") {
+  // `//*` is a line comment whose text happens to start with `*`.
+  Lexed const star{ lex_text("//* still a line comment\nstate A,") };
+  CHECK(star.ok);
+  CHECK(star.diags.empty());
+  CHECK(star.result.comments.size() == 1);
+
+  // `*/` alone is two ordinary tokens; only `/*` is special.
+  Lexed const close{ lex_text("*/") };
+  CHECK(close.ok);
+  CHECK(kinds("*/") ==
+        std::vector<TokKind>{ TokKind::Star, TokKind::Slash, TokKind::End });
+
+  // And inside a string it is text, which is what a label needs.
+  Lexed const in_string{ lex_text(R"("/* verbatim */")") };
+  CHECK(in_string.ok);
+  CHECK(in_string.diags.empty());
+  CHECK(decode(R"("/* verbatim */")").text == "/* verbatim */");
 }
 
 TEST_CASE("lex: a quoted string keeps its delimiters in the token span") {

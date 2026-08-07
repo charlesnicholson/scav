@@ -349,6 +349,22 @@ bool lex_source(scav_byte const *bytes,
       continue;
     }
 
+    // After the line-comment check, so `//*` is still a line comment. Skipping to
+    // the close means one diagnostic rather than a cascade from lexing the body
+    // as tokens -- recovery only, since `ok` is already false.
+    if ((b == '/') && (at + 1 < len) && (bytes[at + 1] == '*')) {
+      diags.push_back({ .code = DiagCode::BlockCommentUnsupported,
+                        .doc = doc,
+                        .src = make_span(at, 2) });
+      ok = false;
+      uint32_t stop{ at + 2 };
+      while ((stop + 1 < len) && ((bytes[stop] != '*') || (bytes[stop + 1] != '/'))) {
+        ++stop;
+      }
+      at = (stop + 1 < len) ? (stop + 2) : len;
+      continue;
+    }
+
     // Any real token ends whatever comment run preceded it, which is what makes
     // that run the token's leading trivia rather than a floating block.
     open_comment = INVALID;

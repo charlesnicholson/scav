@@ -437,6 +437,16 @@ TEST_CASE("parse: a missing separator is its own diagnostic") {
   CHECK(first_code(r.diags) == DiagCode::ExpectedSeparator);
 }
 
+TEST_CASE("parse: a block comment says so rather than blaming the statement") {
+  // The lexer skips the body and reports once, so the author is told what is
+  // actually wrong instead of that `/` cannot start a statement.
+  Parsed const r{ parse("chart c {\n  /* not supported */\n  state A,\n}") };
+  CHECK_FALSE(r.ok);
+  CHECK(first_code(r.diags) == DiagCode::BlockCommentUnsupported);
+  // The rest still parses, so any other error in the file shows up in one run.
+  CHECK(stmts_of(r.pd, ElemKind::State).size() == 1);
+}
+
 TEST_CASE("parse: an unknown statement keyword is rejected") {
   CHECK(first_code(parse("chart c { region R {}, }").diags) == DiagCode::ExpectedItem);
   CHECK(first_code(parse("chart c { 12, }").diags) == DiagCode::ExpectedItem);

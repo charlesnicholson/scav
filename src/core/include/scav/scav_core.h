@@ -103,6 +103,7 @@ enum class DiagCode : uint32_t {
   Utf8OutOfRange,
 
   // Lexing.
+  BlockCommentUnsupported,
   UnexpectedCharacter,
   UnterminatedString,
   UnterminatedRawString,
