@@ -176,8 +176,11 @@ TEST_CASE("nfc: normalizing an already-normalized string reports no change") {
 TEST_CASE("nfc: idempotent on the conformance suite") {
   uint32_t at{ 0 };
   for (uint32_t i = 0; i < NFC_VECTOR_LENS.size(); ++i) {
-    uint32_t const src_len{ static_cast<uint32_t>(NFC_VECTOR_LENS[i] >> 8U) };
-    uint32_t const exp_len{ static_cast<uint32_t>(NFC_VECTOR_LENS[i] & 0xFFU) };
+    // Widened once, so the shift and mask are uint32_t throughout and neither a
+    // cast nor an int promotion is left for a compiler to object to.
+    uint32_t const packed{ NFC_VECTOR_LENS[i] };
+    uint32_t const src_len{ packed >> 8U };
+    uint32_t const exp_len{ packed & 0xFFU };
 
     std::vector<uint32_t> source;
     source.reserve(src_len);
