@@ -307,45 +307,6 @@ TEST_CASE("perf: a long comment run does not degrade") {
   }
 }
 
-TEST_CASE("perf: string-pool growth does not degrade with distinct names") {
-  // Every name unique, so interning misses on every lookup and pays a full hash
-  // insert per name -- the worst case for the dedup map.
-  auto const distinct = [](uint32_t count) {
-    std::string out{ "chart c {" };
-    for (uint32_t i = 0; i < count; ++i) {
-      // Scrambled so the names arrive in nothing like byte order, which is what
-      // clusters hash buckets if the hash is weak.
-      out += "state N";
-      out += std::to_string((i * 2654435761U) % 1000000007U);
-      out += ",";
-    }
-    out += "}";
-    return out;
-  };
-
-  std::string const small{ distinct(4000) };
-  std::string const large{ distinct(16000) };
-  double const ratio{ static_cast<double>(large.size()) /
-                      static_cast<double>(small.size()) };
-
-  parse(small);
-  parse(large);
-  auto start{ std::chrono::steady_clock::now() };
-  REQUIRE(parse(small).ok);
-  uint64_t const small_us{ micros_since(start) };
-  start = std::chrono::steady_clock::now();
-  REQUIRE(parse(large).ok);
-  uint64_t const large_us{ micros_since(start) };
-
-  // Linear now that nothing sorts, but the slack stays doubled: a rehash lands on
-  // whichever run crosses the load factor.
-  double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
-  if (ASSERT_FLOOR) {
-    CHECK_MESSAGE(growth < ratio * SCALING_SLACK * 2.0,
-                  "grew " << growth << "x for " << ratio << "x the bytes");
-  }
-}
-
 TEST_CASE("perf: deep nesting does not degrade") {
   // Pushing a frame is amortized constant; materializing each block's children
   // into the shared id array is where a per-close copy would show up.

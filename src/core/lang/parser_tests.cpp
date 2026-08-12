@@ -608,11 +608,11 @@ TEST_CASE("parse: every diagnostic locates to a span inside the document") {
   }
 }
 
-TEST_CASE("parse: strings land in the pool in first-encounter order") {
+TEST_CASE("parse: strings land in the pool in the order they are met") {
   Parsed const r{ parse(R"(chart zeta { state Mid, state Alpha, state Omega, })") };
   REQUIRE(r.ok);
-  // The document name is interned first, then the chart, then each state as the
-  // parser reaches it. Nothing sorts: no reader depends on the byte layout.
+  // Document name first, then the chart, then each state as the parser reaches
+  // it. Nothing sorts and nothing dedups, so the pool is the names concatenated.
   std::string const pool{ reinterpret_cast<char const *>(r.pd.strings.bytes.data()),
                           r.pd.strings.bytes.size() };
   CHECK(pool == "test.scavzetaMidAlphaOmega");
@@ -620,25 +620,31 @@ TEST_CASE("parse: strings land in the pool in first-encounter order") {
   CHECK(str(r.pd, state_at(r.pd, stmts_of(r.pd, ElemKind::State)[1]).name) == "Alpha");
 }
 
-TEST_CASE("parse: reordering the source reorders the pool") {
-  // Stated so the limit is on the record: the pool is *not* canonical, so it is
-  // not something to hash. Whoever needs a producer-independent order sorts then.
-  Parsed const a{ parse("chart c { state Alpha, state Beta, }", "d.scav") };
-  Parsed const b{ parse("chart c { state Beta, state Alpha, }", "d.scav") };
-  REQUIRE(a.ok);
-  REQUIRE(b.ok);
-  CHECK(a.pd.strings.bytes != b.pd.strings.bytes);
-  // What does hold: the same bytes always give the same pool.
-  Parsed const again{ parse("chart c { state Alpha, state Beta, }", "d.scav") };
-  CHECK(again.pd.strings.bytes == a.pd.strings.bytes);
-}
-
-TEST_CASE("parse: a repeated name is interned once") {
+TEST_CASE("parse: a repeated name gets its own bytes and its own ref") {
+  // No dedup, so StrRef equality is not name equality. Anything asking whether
+  // two names match compares the views -- which is what a duplicate-name check
+  // will do, since names are scoped per submachine and a global pool cannot
+  // answer that question anyway.
   Parsed const r{ parse("chart c { state Idle, state Idle, state Idle, }") };
   REQUIRE(r.ok);
   std::vector<uint32_t> const states{ stmts_of(r.pd, ElemKind::State) };
-  CHECK(state_at(r.pd, states[0]).name == state_at(r.pd, states[1]).name);
-  CHECK(state_at(r.pd, states[1]).name == state_at(r.pd, states[2]).name);
+  StrRef const a{ state_at(r.pd, states[0]).name };
+  StrRef const b{ state_at(r.pd, states[1]).name };
+  CHECK(a != b);
+  CHECK(str(r.pd, a) == "Idle");
+  CHECK(str(r.pd, a) == str(r.pd, b));
+}
+
+TEST_CASE("parse: the pool is a function of the bytes") {
+  // Same input, same pool: the one property worth relying on. Reordering the
+  // source reorders the pool, so it is not a thing to hash across documents.
+  Parsed const a{ parse("chart c { state Alpha, state Beta, }", "d.scav") };
+  Parsed const b{ parse("chart c { state Beta, state Alpha, }", "d.scav") };
+  Parsed const again{ parse("chart c { state Alpha, state Beta, }", "d.scav") };
+  REQUIRE(a.ok);
+  REQUIRE(b.ok);
+  CHECK(again.pd.strings.bytes == a.pd.strings.bytes);
+  CHECK(a.pd.strings.bytes != b.pd.strings.bytes);
 }
 
 TEST_CASE("parse: an identifier is ASCII, so a non-ASCII name is a lexical error") {

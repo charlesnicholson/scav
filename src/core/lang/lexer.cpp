@@ -292,7 +292,7 @@ bool lex_decode_string_literal(scav_byte const *bytes,
   }
 
   // The source was folded on read, but \u decodes after that -- so fold again,
-  // or two spellings of one string intern as two.
+  // or two spellings of one string compare unequal.
   if (!source_text_is_nfc(out.data(), narrow_clamp<uint32_t>(out.size()))) {
     std::vector<scav_byte> composed;
     source_text_to_nfc(out.data(), narrow_clamp<uint32_t>(out.size()), composed);
