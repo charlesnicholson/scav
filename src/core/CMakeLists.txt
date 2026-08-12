@@ -8,6 +8,7 @@ scav_static_library(scavcore
   model/builder.cpp
   model/chart.cpp
   model/columns.cpp
+  model/validate.cpp
 )
 scav_install_library(scavcore core)
 
@@ -42,6 +43,7 @@ if(SCAV_BUILD_TESTS)
     model/builder_tests.cpp
     model/chart_tests.cpp
     model/columns_tests.cpp
+    model/validate_tests.cpp
     scav_core_tests.cpp
     sort_tests.cpp
   )

@@ -37,9 +37,10 @@ TEST_CASE("sort: sizes that stress the merge boundaries") {
   // odd tails, exact powers of two, and one size past each.
   for (uint32_t const n : { 0U, 1U, 2U, 3U, 7U, 8U, 9U, 64U, 65U, 1000U }) {
     std::vector<uint32_t> v;
+    v.reserve(n);
     for (uint32_t i = 0; i < n; ++i) { v.push_back(static_cast<uint32_t>(rnd(1, i))); }
     std::vector<uint32_t> expect{ v };
-    std::sort(expect.begin(), expect.end());
+    std::ranges::sort(expect);
     stable_sort_by(v, [](uint32_t a, uint32_t b) { return a < b; });
     CHECK_MESSAGE(v == expect, "n = " << n);
   }
@@ -49,6 +50,9 @@ TEST_CASE("sort: already sorted, reversed, and all-equal inputs") {
   std::vector<uint32_t> sorted;
   std::vector<uint32_t> reversed;
   std::vector<uint32_t> equal;
+  sorted.reserve(100);
+  reversed.reserve(100);
+  equal.reserve(100);
   for (uint32_t i = 0; i < 100; ++i) {
     sorted.push_back(i);
     reversed.push_back(99 - i);
@@ -67,11 +71,12 @@ TEST_CASE("sort: already sorted, reversed, and all-equal inputs") {
 TEST_CASE("sort: equal keys keep insertion order") {
   // Few distinct keys and many rows, so every merge sees ties.
   std::vector<Row> rows;
+  rows.reserve(512);
   for (uint32_t i = 0; i < 512; ++i) {
     rows.push_back({ static_cast<uint32_t>(rnd(2, i) % 5U), i });
   }
   std::vector<Row> oracle{ rows };
-  std::stable_sort(oracle.begin(), oracle.end(), by_key);
+  std::ranges::stable_sort(oracle, by_key);
   stable_sort_by(rows, by_key);
   REQUIRE(rows.size() == oracle.size());
   for (uint32_t i = 0; i < rows.size(); ++i) {

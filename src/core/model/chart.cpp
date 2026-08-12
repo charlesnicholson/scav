@@ -146,6 +146,7 @@ void chart_path_of(Chart const &c, StateId id, std::string &out) {
   // terminates; the guard turns a hand-corrupted model into a truncated path
   // rather than a hang.
   std::vector<StateId> chain;
+  chain.reserve(17);  // the depth-16 design target plus the leaf; deeper is legal
   StateId cur{ id };
   for (size_t guard = 0; guard <= c.states.size(); ++guard) {
     chain.push_back(cur);

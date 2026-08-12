@@ -66,6 +66,29 @@ constexpr bool operator!=(AttrKeyId a, AttrKeyId b) { return a.v != b.v; }
 constexpr bool operator==(ColumnId a, ColumnId b) { return a.v == b.v; }
 constexpr bool operator!=(ColumnId a, ColumnId b) { return a.v != b.v; }
 
+// What an entity *is*, for columns, diagnostics, and DrawList origins. Not
+// StmtKind, which enumerates what a line of source is: `Include` and `Attr`
+// exist only as statements, `Point` and `PathBox` only as entities.
+enum class ElemKind : uint32_t {
+  State,
+  Submachine,
+  Transition,
+  Chart,
+  Point,
+  PathBox,
+  None,
+};
+
+struct ElemRef {
+  ElemKind kind;
+  uint32_t ordinal;
+};
+
+constexpr bool operator==(ElemRef a, ElemRef b) {
+  return (a.kind == b.kind) && (a.ordinal == b.ordinal);
+}
+constexpr bool operator!=(ElemRef a, ElemRef b) { return !(a == b); }
+
 // Into StringPool::bytes.
 struct StrRef {
   uint32_t off, len;
@@ -164,10 +187,27 @@ enum class DiagCode : uint32_t {
   NumberOutOfRange,
   TrailingContent,
   DepthLimitExceeded,
+
+  // Validation (§10). Subjects are entities, so these carry an ElemRef and
+  // derive file/line/column by walking to the statement's src span on demand.
+  DanglingRef,
+  MissingRequiredId,
+  TombstonedTarget,
+  DuplicateName,
+  MultipleInitial,
+  NameHasMetacharacter,
+  StatementSpanOutOfRange,
+  ColumnCountMismatch,
 };
 
+// Pre-model diagnostics -- normalization, lexing, parsing -- have no entity to
+// name, so `subject` defaults to None and the raw span is the payload. Model
+// diagnostics carry the (code, subject kind, subject ordinal) triple and
+// nothing else; position is derived from the subject's statement when one
+// exists.
 struct Diagnostic {
   DiagCode code;
+  ElemRef subject{ .kind = ElemKind::None, .ordinal = INVALID };
   DocId doc;
   Span src;
 };
@@ -502,29 +542,6 @@ uint64_t parse_footprint(ParsedDocument const &pd);
 // the whole liveness protocol. Attrs carry no `live` of their own: liveness
 // belongs to the entity, and rows reached through an entity's span inherit it.
 
-// What an entity *is*, for columns, diagnostics, and DrawList origins. Not
-// StmtKind, which enumerates what a line of source is: `Include` and `Attr`
-// exist only as statements, `Point` and `PathBox` only as entities.
-enum class ElemKind : uint32_t {
-  State,
-  Submachine,
-  Transition,
-  Chart,
-  Point,
-  PathBox,
-  None,
-};
-
-struct ElemRef {
-  ElemKind kind;
-  uint32_t ordinal;
-};
-
-constexpr bool operator==(ElemRef a, ElemRef b) {
-  return (a.kind == b.kind) && (a.ordinal == b.ordinal);
-}
-constexpr bool operator!=(ElemRef a, ElemRef b) { return !(a == b); }
-
 struct State {
   StrRef name;   // empty for pseudostates synthesized from `*`
   StrRef label;  // the positional string; opaque, may be empty
@@ -756,6 +773,20 @@ scav_byte const *column_data(Chart const &c, ColumnId id);
 
 // Rows, not bytes: bytes.size() / elem_size.
 uint32_t column_count(Chart const &c, ColumnId id);
+
+// Validation ================================================================
+
+// Mandatory and structural only: dangling ids, required ids absent, live rows
+// referencing tombstoned ones, duplicate authored names per submachine, path
+// metacharacters in names, more than one initial per submachine, statement
+// spans outside their document, column counts out of lockstep. Semantic lint
+// is a plugin's business, and degree checks per pseudostate kind are dialect
+// rules -- every topology must stay drawable (§7.2).
+//
+// Walks live rows; a tombstoned row is checked only as a target. Appends its
+// findings to `diags` sorted by (code, subject kind, subject ordinal) -- the
+// §6 artifact order -- and returns false when it reported anything.
+bool validate_chart(Chart const &c, std::vector<Diagnostic> &diags);
 
 }  // namespace scav
 

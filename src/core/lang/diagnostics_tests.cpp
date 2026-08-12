@@ -26,7 +26,7 @@ LineCol at(std::string_view text, size_t offset) {
 TEST_CASE("diag: every code has its own message") {
   // Exhaustive, so adding a code without a message fails here rather than
   // shipping "unknown diagnostic" to a user.
-  for (uint32_t i = 0; i <= static_cast<uint32_t>(DiagCode::DepthLimitExceeded); ++i) {
+  for (uint32_t i = 0; i <= static_cast<uint32_t>(DiagCode::ColumnCountMismatch); ++i) {
     std::string const message{ diag_message(static_cast<DiagCode>(i)) };
     CHECK(message != "unknown diagnostic");
     CHECK_FALSE(message.empty());
