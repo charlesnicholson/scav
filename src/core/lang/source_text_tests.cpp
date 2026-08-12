@@ -107,6 +107,68 @@ TEST_CASE("normalize: a two-byte prefix of a BOM is an incomplete sequence") {
   CHECK(r.diags[0].code == DiagCode::Utf8Truncated);
 }
 
+TEST_CASE("normalize: a character that only starts like a BOM is content") {
+  // U+FEE0 encodes as EF BB A0, so the signature check has to read all three
+  // bytes. Matching on the first two would eat a real character.
+  std::string const looks_like{ encode(0xFEE0) };
+  REQUIRE(looks_like.size() == 3);
+  CHECK(looks_like[0] == '\xef');
+  CHECK(looks_like[1] == '\xbb');
+  Normalized const r{ normalize(looks_like + "chart a {}") };
+  CHECK(r.ok);
+  CHECK(r.text == looks_like + "chart a {}");
+}
+
+// Plain bytes are copied a run at a time rather than one at a time, so the
+// boundaries of a run are where an off-by-one would live. Each case below puts a
+// CR or a multi-byte character at a different place relative to the run.
+
+TEST_CASE("normalize: a long run of plain bytes is copied whole") {
+  std::string const long_run(10000, 'a');
+  Normalized const r{ normalize(long_run) };
+  CHECK(r.ok);
+  CHECK(r.text == long_run);
+}
+
+TEST_CASE("normalize: a run ends at a CR and resumes after it") {
+  std::string const head(5000, 'a');
+  std::string const tail(5000, 'b');
+  CHECK(normalize(head + "\r\n" + tail).text == head + "\n" + tail);
+  CHECK(normalize(head + "\r" + tail).text == head + "\n" + tail);
+  // A run ending on the last byte, and a CR that ends the document.
+  CHECK(normalize(head).text == head);
+  CHECK(normalize(head + "\r").text == head + "\n");
+}
+
+TEST_CASE("normalize: a run ends at a multi-byte character and resumes after it") {
+  std::string const head(5000, 'a');
+  std::string const tail(5000, 'b');
+  std::string const eacute{ encode(0x00E9) };
+  Normalized const r{ normalize(head + eacute + tail) };
+  CHECK(r.ok);
+  CHECK(r.text == head + eacute + tail);
+}
+
+TEST_CASE("normalize: a CR or a multi-byte character can open the document") {
+  // Nothing precedes them, so the run is empty and the single-byte path has to
+  // make progress on its own or the loop never advances.
+  CHECK(normalize("\r\nabc").text == "\nabc");
+  CHECK(normalize("\rabc").text == "\nabc");
+  std::string const eacute{ encode(0x00E9) };
+  Normalized const r{ normalize(eacute + "abc") };
+  CHECK(r.ok);
+  CHECK(r.text == eacute + "abc");
+}
+
+TEST_CASE("normalize: an invalid sequence after a long run leaves nothing behind") {
+  // The run is already copied when the decode fails, so `out` has to be cleared:
+  // a truncated document that parses is worse than one that is refused.
+  Normalized const r{ normalize(std::string(10000, 'a') + "\xc3") };
+  CHECK_FALSE(r.ok);
+  CHECK(r.text.empty());
+  CHECK(r.diags[0].code == DiagCode::Utf8Truncated);
+}
+
 TEST_CASE("normalize: CRLF, lone CR and mixed endings all fold to LF") {
   CHECK(normalize("a\r\nb").text == "a\nb");
   CHECK(normalize("a\rb").text == "a\nb");

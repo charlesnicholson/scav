@@ -208,15 +208,21 @@ bool source_text_normalize(scav_byte const *bytes,
   // index the raw input, because `out` is what is being built.
   out.reserve(checked_len - at);
   while (at < checked_len) {
-    scav_byte const b{ bytes[at] };
-    if (b == '\r') {
-      out.push_back('\n');
-      at += ((at + 1 < checked_len) && (bytes[at + 1] == '\n')) ? 2 : 1;
+    // Bytes that are neither CR nor the start of a multi-byte sequence pass
+    // through untouched, so they are copied as a run rather than one at a time --
+    // on an ASCII document with LF endings that is the entire file in one memcpy.
+    // A byte at a time cost more than the rest of a parse put together.
+    uint32_t run{ at };
+    while ((run < checked_len) && (bytes[run] < 0x80U) && (bytes[run] != '\r')) { ++run; }
+    if (run != at) {
+      out.insert(out.end(), bytes + at, bytes + run);
+      at = run;
       continue;
     }
-    if (b < 0x80U) {
-      out.push_back(b);
-      ++at;
+
+    if (bytes[at] == '\r') {
+      out.push_back('\n');
+      at += ((at + 1 < checked_len) && (bytes[at + 1] == '\n')) ? 2 : 1;
       continue;
     }
 
