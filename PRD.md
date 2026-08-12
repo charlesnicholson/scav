@@ -291,7 +291,7 @@ Odd and prime thread counts are mandatory — they expose reduction-shape bugs p
 - **Vendored stable merge sort** for any sort whose result reaches output. `std::sort` is permitted only in tests.
 - All rectangles are **half-open**: `[x0,x1) x [y0,y1)`.
 - Fixed iteration counts. Every retry loop states its cap, its integer increment schedule, its subject order, and its terminal diagnostic.
-- Diagnostics are collected per shard, concatenated in shard order, then sorted by `(code, subject_kind, subject_index)`. They are part of the golden artifact. **A diagnostic carries nothing but that triple** — file, line, column, and the offending text are derived by walking to the statement's `src` span (§7), so no layer threads positions through its call stack. On a model mutated since load that span is cleared, and a diagnostic degrades to the triple alone; goldens run on unmutated models, so the artifact is unaffected.
+- Diagnostics are collected per shard, concatenated in shard order, then sorted by `(code, subject_kind, subject_index)`. They are part of the golden artifact. **A diagnostic carries nothing but that triple** — file, line, column, and the offending text are derived by walking to the statement's `src` span (§7), so no layer threads positions through its call stack. Diagnostics that precede the model — normalization, lexing, parsing — have no entity to name, so they carry `subject_kind = None` plus a raw source span directly: no statement exists yet to walk to. On a model mutated since load that span is cleared, and a diagnostic degrades to the triple alone; goldens run on unmutated models, so the artifact is unaffected.
 - **Text is normalized at parse**: LF-only, BOM stripped, NFC. Ship `.gitattributes` with `*.scav -text`. Without this, `core.autocrlf` on Windows and NFD on macOS change the name and label *bytes* — same commit, different canonical print, and different text metrics, so different space requests and different coordinates. NFC needs a table: it is a **P0** dependency.
 - Threading via a shim over pthreads / Win32 / **null (inline)**. Not C11 `<threads.h>`. The null backend makes WASI and the matrix work.
 
@@ -358,14 +358,14 @@ struct Extent   { int32_t w, h; };
 struct Rect     { int32_t x, y, w, h; };           // half-open (§6)
 // Ids are global from the start, so endpoints are plain StateIds (§9).
 
-constexpr uint32_t kInvalid = 0xFFFF'FFFFu;        // per-id sentinel
+constexpr uint32_t INVALID = 0xFFFF'FFFFu;        // per-id sentinel
 
-enum class StateKind : uint32_t {   // names match the DSL's state_kind (§15)
-  normal, initial, final, choice, junction, fork, join, history, deephistory
+enum class StateKind : uint32_t {   // names match the DSL's state_kind (§15), CamelCased
+  Normal, Initial, Final, Choice, Junction, Fork, Join, History, DeepHistory
 };
 // `initial` and `final` are reachable only via `*` in the format (§15), never `kind`.
 // Load-bearing for layout and rendering, not passthrough metadata. See §11.14.
-enum class TransKind : uint32_t { external, internal, local };
+enum class TransKind : uint32_t { External, Internal, Local };
 
 struct State {
   StrRef        name;        // empty for pseudostates; see §9
@@ -375,11 +375,11 @@ struct State {
   Span          submachines; // -> submachine_ids
   Span          attrs;
   StmtId        stmt;        // the statement that declared it (§9)
-  InstId        inst;        // kInvalid in the root document
+  InstId        inst;        // INVALID in the root document
   uint32_t      live;        // 0 = tombstone; see §7.3
 };
 struct Submachine {
-  StateId       owner;       // kInvalid for a document root
+  StateId       owner;       // INVALID for a document root
   uint32_t      ordinal;
   StrRef        name;
   StrRef        label;
@@ -401,7 +401,7 @@ struct Transition {
 struct Include  {            // one row per instantiation; its ordinal is the InstId
   StrRef  alias;
   DocId   target;            // the file it instantiates
-  StateId host;              // the alias state it synthesizes; never kInvalid
+  StateId host;              // the alias state it synthesizes; never INVALID
   StmtId  stmt;
 };
 struct Attr     { AttrKeyId key; StrRef value; };
@@ -411,24 +411,34 @@ struct Document {            // one per distinct *file*, parsed once (P0)
   Span     text;             // -> src_bytes
   Span     statements;       // -> stmts, authored source order
 };
+// Not §8's ElemKind, which enumerates entities: `Include` and `Attr` exist only
+// as statements, `Point` and `PathBox` only as entities. Two enums, two jobs.
+enum class StmtKind : uint32_t { Chart, Include, State, Submachine, Trans, Attr };
+
 struct Statement {           // one per authored construct, shared by every instantiation
-  ElemKind kind;
+  StmtKind kind;
   DocId    doc;
   Span     src;              // -> src_bytes; valid iff unmutated since load
-  Span     comments;         // trivia: leading, trailing, own-line
+  Span     comments;         // -> Chart.comments, grouped by owner
 };
+
+enum class CommentPos : uint32_t { Leading, Trailing, OwnLine };
+struct Trivia   { Span src; CommentPos pos; };     // -> src_bytes; includes the "//"
 
 struct StringPool { std::vector<scav_byte> bytes; };   // StrRef carries off+len
 
 struct Chart {
   std::vector<Document>    documents;
   std::vector<Statement>   stmts;
+  std::vector<Trivia>      comments;     // Statement.comments spans into this
   std::vector<scav_byte>   src_bytes;    // normalized source (§6); never canonicalized
   std::vector<State>       states;       // indexed by StateId
   std::vector<Submachine>  submachines;
   std::vector<Transition>  transitions;
   std::vector<Include>     includes;
   std::vector<Attr>        attrs;
+  std::vector<StrRef>      attr_key_names; // indexed by AttrKeyId.v; -> attr_keys
+  StringPool               attr_keys;    // interned key bytes — see below
   std::vector<Column>      columns;      // §8
   StringPool               column_names; // separate pool — see below
   std::vector<StateId>     state_ids;    // Span targets
@@ -473,7 +483,7 @@ Serialization is mechanical (write each vector). Iteration order is array order 
 
 **The pool's byte layout is not canonical, and does not need to be.** No hash reads it. The format hash covers *printed* text (§15), which carries every name as text and no offset at all; the layout hash reads integer columns and never touches a string (§11); §6's hashed inputs are font, profile, packer, router, and the integer space-request tables. So nothing in any output is a function of where a string sits in the pool, and re-interning into a sorted pool before serializing would buy nothing — the last sentence above already says no ordering may depend on a `StrRef`'s value.
 
-Names are therefore appended as met, and **not deduplicated**: `StrRef` equality is span equality and says nothing about the text, so anything comparing two names compares the views. `AttrKeyId` is the opposite case and *is* genuinely interned, because it is an identity — equal keys must give equal ids, which is the whole point of having an id instead of a string.
+Names are therefore appended as met, and **not deduplicated**: `StrRef` equality is span equality and says nothing about the text, so anything comparing two names compares the views. `AttrKeyId` is the opposite case and *is* genuinely interned, because it is an identity — equal keys must give equal ids, which is the whole point of having an id instead of a string. Interning requires deduplication and `strings` is defined not to deduplicate, so key bytes live in their own `attr_keys` pool, with `AttrKeyId` indexing `attr_key_names`; a namespaced key interns composed (`@ns { a }` interns `ns:a`), so one spelling has one id however it was written. The sorted intern index is derived-scratch like any other lookup.
 
 ### 7.1 No events in the core
 
@@ -536,7 +546,7 @@ Two axes. Both round-trip losslessly, including data this build does not underst
 | Use for | data most entities have (event lists, guard code, `onentry` bodies) | rare or one-off annotations |
 
 ```cpp
-enum class ElemKind : uint32_t { state, submachine, transition, chart, point, path_box, none };
+enum class ElemKind : uint32_t { State, Submachine, Transition, Chart, Point, PathBox, None };
 struct ElemRef { ElemKind kind; uint32_t ordinal; };   // used by DrawList and diagnostics
 enum class ValueKind  : uint32_t { u32, i32, u64, i64, strref, span, blob, pod };
 struct AttrKeyId { uint32_t v; };   // interned attribute key, `ns:key` or bare
@@ -544,7 +554,7 @@ struct ColumnId  { uint32_t v; };   // index into Chart::columns
 
 struct ColumnDesc {        // 28 bytes, no padding
   StrRef    name;          // "libhsm.events", "scav.geom.state"; own pool, not Chart::strings (§7)
-  ElemKind  entity;        // `none` and `path_box` never appear here
+  ElemKind  entity;        // `None` and `PathBox` never appear here
   ValueKind kind;
   uint32_t  elem_size, elem_align;
   uint32_t  flags;         // bit 0 = derived: skipped by the serializer, exempt from round-trip-unknown
@@ -593,13 +603,13 @@ struct PathBox {          // 0..N per transition; layout slides these along the 
 **Domain, validated at `scav_layout_run` entry in every build** — Debug and Release must agree on which inputs are legal:
 
 ```
-0 <= min_w, h_before, h_after <= kCoordMax / 4    // §11.2
-0 <= PathBox.w, PathBox.h     <= kCoordMax / 4
-0 <= PathClear.src, .dst      <= kCoordMax / 4
+0 <= min_w, h_before, h_after <= COORD_MAX / 4    // §11.2
+0 <= PathBox.w, PathBox.h     <= COORD_MAX / 4
+0 <= PathClear.src, .dst      <= COORD_MAX / 4
 PathBox.order unique per subject
 ```
 
-A quarter of the domain, not all of it: §11.4's box formula *adds* to a request (`h_before + packed_subs_h + h_after + 2*pad`), so admitting `kCoordMax` per field would let a legal input produce an illegal box. The composed box is bounds-checked as well; the input bound exists so the failure is attributed to the request that caused it.
+A quarter of the domain, not all of it: §11.4's box formula *adds* to a request (`h_before + packed_subs_h + h_after + 2*pad`), so admitting `COORD_MAX` per field would let a legal input produce an illegal box. The composed box is bounds-checked as well; the input bound exists so the failure is attributed to the request that caused it.
 
 Reject with a diagnostic, never clamp. Unbounded `int32_t` overflows §11.4's box formula into signed UB, which optimizers exploit, so Debug and Release diverge rather than both being wrong; a negative `h_before` inverts a box and breaks every orientation predicate.
 
@@ -713,7 +723,9 @@ wifi/On/Ready        cross-document, via include alias
 ```
 
 - **Unnamed pseudostates get synthetic stable names** for addressing: `$initial`, `$final`, `$history`, ordinal-suffixed for uniqueness within a submachine, and exempt from §10's duplicate-name check. These are an API and diagnostic spelling only — the grammar's `ident` admits no `$`, and the format reaches them via `*` (§15). A pseudostate an author needs to name is named, like `PreConfig kind choice`.
-- **An include synthesizes one state, named for its alias**, in the submachine where the `include` statement appears; that state's `submachines` span gains the included document's root submachine. A submachine's children are states, so this is the only shape that type-checks — an included root is a submachine and has nowhere else to attach. It also makes `wifi/Up/Connected` an ordinary path: `wifi` *is* a state.
+- **Each `*` endpoint synthesizes its own pseudostate** — `initial` as a source, `final` as a target — owned by the submachine the statement lexically appears in, carrying that transition's `stmt`. One per statement, never merged per submachine: two authored `trans * -> X, trans * -> Y` are two initial arrows, which is what makes §10's more-than-one-`initial` check a reachable check rather than dead code. `trans * -> *` is rejected.
+- **A path's first segment resolves innermost-outward**: from the submachine the statement appears in, outward through each enclosing submachine to the chart root, taking the nearest match; every segment after the first descends strictly. That is what the worked example already assumes — inside `submachine main`, `trans * -> Idle` names main's own `Idle`, while `trans Ready -> wifi/On/Connected` starts at a chart-root alias two levels up. Lexical scoping, because it is the rule every reader already knows.
+- **An include synthesizes one state, named for its alias**, in the submachine where the `include` statement appears; that state's `submachines` span gains the included document's root submachine. A submachine's children are states, so this is the only shape that type-checks — an included root is a submachine and has nowhere else to attach. It also makes `wifi/Up/Connected` an ordinary path: `wifi` *is* a state. The host state is lowering's (P1, so §10's alias-collision check can run without a loader); filling `Include.target` and attaching the included root is resolution's (P2), and until then a path descending past an alias diagnoses as unresolvable.
 - **Resolution links; it does not flatten** (§7). Containment crosses documents because `State.submachines` holds global ids, so layout sees one containment tree with no transformation having occurred — no cross-document LCA, no splice pass, no project handle.
 - **Provenance is two fields, not a computed column, because it is M:N** (§7.3). One statement declares N entities when its file is included N times; one instantiation contains the entities of N statements. So the entity row is the junction and carries both keys: `StmtId` says which authored construct produced it, `InstId` says which instantiation it belongs to. A renderer tinting sub-document submachines reads `inst`; a diagnostic or an editor reads `stmt`; layout ignores both.
 - **Statements are per file, entities are per instantiation.** The parser produces `Document` and `Statement` rows once per distinct file (P0); the loader instantiates entities per include (P2). Including a file twice therefore duplicates entities — which is correct, they lay out separately — but never duplicates source bytes or statements.
@@ -732,7 +744,7 @@ wifi/On/Ready        cross-document, via include alias
 
 Mandatory, in core, structural only — `layout` reads ordinals and crashes on garbage:
 
-- dangling `StateId`/`SubmachineId`/`ColumnId`; `kInvalid` where a value is required; tombstoned targets
+- dangling `StateId`/`SubmachineId`/`ColumnId`; `INVALID` where a value is required; tombstoned targets
 - duplicate authored names within a submachine
 - include cycles, unresolvable include paths
 - unresolvable cross-document paths, checked at the **resolution phase** (§9)
@@ -740,7 +752,7 @@ Mandatory, in core, structural only — `layout` reads ordinals and crashes on g
 - an alias colliding with a sibling state name — the same duplicate-name check, since an alias is a state (§9)
 - authored names must not contain the path metacharacters `/ : $`, nor `@` (the format's attribute sigil, §15)
 - more than one `initial` per submachine. **No degree checks per pseudostate kind** — "a fork has one incoming edge" is a dialect rule, and §7.2 requires every topology to be drawable
-- authored `scav:pin` coordinates outside §11.2's domain — the only authored geometry there is
+- authored `scav:pin` coordinates outside §11.2's domain — the only authored geometry there is. Lands with the hint columns (§14, P4); no earlier phase produces the column it checks
 
 Semantic lint is out of scope. Identifier-sanitization collision checks belong to the codegen backend, not core.
 
@@ -776,8 +788,8 @@ Port order is a solver output. Ties break on the port's stable key (§6), never 
 Integer only, grid units of **1/16 point** — a compile-time constant, not a profile field, because §11.9's ABI takes sixteenths of a point directly.
 
 ```cpp
-inline constexpr std::int32_t kCoordMax = (INT32_C(1) << 19) - 1;   //  524'287
-inline constexpr std::int32_t kCoordMin = -kCoordMax;               // symmetric
+inline constexpr std::int32_t COORD_MAX = (INT32_C(1) << 19) - 1;   //  524'287
+inline constexpr std::int32_t COORD_MIN = -COORD_MAX;               // symmetric
 using Coord = std::int32_t;   using Wide = std::int64_t;
 ```
 
@@ -870,7 +882,7 @@ struct Cost {                 // compared lexicographically, in this order
 
 **Tier 0 — forbidden, not priced.** Edge through a state box, submachine box, or placed box; box-box overlap. Structurally impossible via the obstacle set. The predicate survives as a net for three cases: the straight-line **surrogate** during search; **degenerate enclosure** (a state with no free channel — inflate spacing by a fixed integer increment, capped, then diagnostic); and a marked violation with a stable code if retries exhaust. Never a silent overlap.
 
-**Tier 2 —** every weight is an integer with a documented ceiling. The largest term is `w_area * bounding_box_area`; area is at most `(2*kCoordMax)^2 ≈ 2^40`, so with weights capped at `2^10` the sum stays under `2^53` — inside `int64` with room, and the ceiling exists to keep that true rather than to tune anything:
+**Tier 2 —** every weight is an integer with a documented ceiling. The largest term is `w_area * bounding_box_area`; area is at most `(2*COORD_MAX)^2 ≈ 2^40`, so with weights capped at `2^10` the sum stays under `2^53` — inside `int64` with room, and the ceiling exists to keep that true rather than to tune anything:
 
 ```
 w_b    * bends                                      -- highest in tier
@@ -914,7 +926,7 @@ This list *is* the layout output ABI — there is no bespoke result type (§16) 
 | `scav.geom.chart` | chart | root bounding box |
 | `scav.geom.gen` | chart | generation counter (§13) — `u32`, **not hashed, not serialized** |
 
-`ElemKind::point` exists so the point and port-slot arrays are real columns rather than side arrays outside the column rules; entity count is the column length. A transition splits into one port per boundary it crosses (§11.1), not two — a depth-16 edge has up to 15, and the structural hash covers all their sides, so one row per transition cannot hold them.
+`ElemKind::Point` exists so the point and port-slot arrays are real columns rather than side arrays outside the column rules; entity count is the column length. A transition splits into one port per boundary it crosses (§11.1), not two — a depth-16 edge has up to 15, and the structural hash covers all their sides, so one row per transition cannot hold them.
 
 **Hashing is by explicit allowlist, not by enumerating `Chart.columns`** — otherwise app and plugin columns perturb scav's own goldens, and the same corpus hashed through `scav` and through `scavview` would differ. The **structural hash** covers ranks, orders, port sides, and bend sequences *as direction-turn tokens*; the **coordinate hash** covers the rects and every point and port coordinate. Turn tokens rather than points is what makes a pure translation move the coordinate hash and not the structural one, which is the whole point of the split.
 
@@ -1067,7 +1079,7 @@ struct Prim {
   PrimKind kind;
   int32_t  depth;                // draw order; see below
   uint32_t style;                // -> styles[]
-  uint32_t clip;                 // -> clips[]; kInvalid = unclipped
+  uint32_t clip;                 // -> clips[]; INVALID = unclipped
   ElemRef  origin;               // back-reference to the defining model entity
   Span     points;               // -> points[]; meaning per kind
   StrRef   payload;              // text, or an image id; empty otherwise
@@ -1420,10 +1432,10 @@ Where a phase states production LOC, multiply by 1.5–2 for the mandated test c
 **Performance is a P0 test class, not a later concern.** Generate documents in RAM — never on disk, which measures the wrong thing — and assert a throughput floor plus peak-memory-to-input ratio for lex and parse separately. The point is catching accidental `O(n²)`: string-pool growth, per-statement rescans, long comment runs, wide sibling lists. Timing is machine-dependent, so these are floors on a named machine and **not** part of §6's matrix or any golden.
 *Exit:* every corpus file parses; every diagnostic locates to a `Statement.src` span; fuzz clean on the lexer and parser; a hostile depth-10,000 document is rejected rather than crashing; throughput floors met at 100 MB in RAM.
 
-**P1 — model spine.** Entity arrays, ids as ordinals with tombstones, spans, extension columns and `ColumnDesc`, append-only builder API, structural validation (§10). Lowering from statements to entities. Determinism discipline (§6) is in force from the first commit; it cannot be retrofitted.
+**P1 — model spine.** Entity arrays, ids as ordinals with tombstones, spans, extension columns and `ColumnDesc`, append-only builder API, structural validation (§10). Lowering from statements to entities — an `include` statement included, which lowers to its `Include` row and its alias host state with `target` left unresolved, because the host is an ordinary state (§9) and §10's alias-collision check cannot run without it. Determinism discipline (§6) is in force from the first commit; it cannot be retrofitted.
 *Exit:* build, validate, and walk a depth-16 / 2k-state chart from code with no text involved; then the same chart via P0's parser, structurally identical.
 
-**P2 — the loader.** The iterative load session (§16.2): pending list, app-supplied bytes, alias-state synthesis (§9), cross-document path resolution, cycle detection. Separate system from the parser, and no callbacks (§16.2). Includes `scav_read_file`/`scav_load_file`, the composing helpers — written against the same public primitives, so they demonstrate the layering rather than shortcutting it. `Include.target`, `InstId`, and every entity row are the loader's; the parser produces `Document`, `Statement`, and `src_bytes` and stops (§7.3).
+**P2 — the loader.** The iterative load session (§16.2): pending list, app-supplied bytes, alias resolution (§9 — the host state exists from P1's lowering; P2 fills `Include.target` and attaches the included root submachine), cross-document path resolution, cycle detection. Separate system from the parser, and no callbacks (§16.2). Includes `scav_read_file`/`scav_load_file`, the composing helpers — written against the same public primitives, so they demonstrate the layering rather than shortcutting it. `Include.target`, `InstId`, and every entity row are the loader's; the parser produces `Document`, `Statement`, and `src_bytes` and stops (§7.3).
 *Exit:* one 3-document network resolved **three ways** — from memory, through the CLI over a filesystem, and from Python/ctypes faking a network fetch — yielding the same chart and the same hash.
 
 **P3 — printer and ABI.** Comment-preserving canonical printer and the seven canonical rules (§15), `scav fmt --check`, `scav deps`, `scav dump`; **handle lifecycle — create/destroy per handle, allocator injection, thread-safety per call (§16.1 blocks on it)**, ABI JSON extraction and its golden.
@@ -1514,4 +1526,4 @@ Never vendor: `libnest2d` (LGPL-3.0), OGDF (GPL), Graphviz's `textspan_lut.c` (E
 - No published integer or combinatorial reformulation of VPSC.
 - `textLength` support is patchy in non-browser SVG consumers (Inkscape, librsvg, resvg). Test before relying on it.
 - Total pairwise rectangle overlap area has no published complexity bound; the `O(n log n)` sweep is our derivation. Union area at `O(n log n)` is published and optimal. Moot while Tier 0 forbids overlap.
-- The coordinate extent estimate (§11.2) is derived, not measured. P1 validates it.
+- The coordinate extent estimate (§11.2) is derived, not measured. P4 validates it (§11.2, §17).
