@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace scav {
@@ -593,36 +594,6 @@ void attach_comments(ParsedDocument &pd, std::vector<LexComment> const &lexed) {
   }
 }
 
-// Staging offsets -> sorted-pool offsets. One place has to know where every
-// StrRef is: the price of interning forward and sorting afterwards.
-void remap_strings(ParsedDocument &pd, StringRemap const &r) {
-  pd.doc.path = intern_remap(r, pd.doc.path);
-  for (ChartStmt &s : pd.charts) {
-    s.name = intern_remap(r, s.name);
-    s.label = intern_remap(r, s.label);
-  }
-  for (IncludeStmt &s : pd.includes) {
-    s.path = intern_remap(r, s.path);
-    s.alias = intern_remap(r, s.alias);
-  }
-  for (StateStmt &s : pd.states) {
-    s.name = intern_remap(r, s.name);
-    s.label = intern_remap(r, s.label);
-  }
-  for (SubmachineStmt &s : pd.submachines) {
-    s.name = intern_remap(r, s.name);
-    s.label = intern_remap(r, s.label);
-  }
-  for (TransStmt &s : pd.transitions) { s.label = intern_remap(r, s.label); }
-  for (AttrStmt &s : pd.attrs) { s.ns = intern_remap(r, s.ns); }
-  for (AttrEntry &e : pd.attr_entries) { e.key = intern_remap(r, e.key); }
-  for (StrRef &v : pd.attr_values) { v = intern_remap(r, v); }
-  for (PathSeg &s : pd.path_segs) {
-    s.name = intern_remap(r, s.name);
-    s.qualifier = intern_remap(r, s.qualifier);
-  }
-}
-
 }  // namespace
 
 ParseOptions parse_default_options() { return { .max_depth = DEFAULT_MAX_DEPTH }; }
@@ -676,11 +647,9 @@ bool parse_tokens(scav_byte const *bytes,
   out.doc.statements = make_span(0, narrow_clamp<uint32_t>(out.stmts.size()));
   if (ok) { attach_comments(out, lexed.comments); }
 
-  // The pool is finalized either way: a caller inspecting a partial parse should
-  // read the same StrRefs a complete one produces.
-  StringRemap r;
-  intern_finalize(p.interner, out.strings, r);
-  remap_strings(out, r);
+  // Moved either way: a caller inspecting a partial parse should read the same
+  // StrRefs a complete one produces.
+  out.strings = std::move(p.interner.pool);
   return ok;
 }
 

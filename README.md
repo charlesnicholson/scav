@@ -5,8 +5,8 @@ document; everything below describes what is built.
 
 **Status: P0 — the language, the lexer, and the parser.** `libscavcore` reads a
 `.scav` document from a byte span and produces the front-end slice of the model:
-normalized `src_bytes`, `Document`, `Statement`, trivia, and a two-pass-interned
-string pool. No entity arrays, no includes, no resolution — those are P1 and
+normalized `src_bytes`, `Document`, `Statement`, trivia, and an interned string
+pool. No entity arrays, no includes, no resolution — those are P1 and
 P2. `libscavtoy` stays behind as the harness's own proof that failures get
 reported.
 
@@ -133,8 +133,7 @@ symbol names its neighbourhood and the sections are the table of contents:
 | `parse_` | the entry points most callers want |
 
 Private, and deliberately unreachable from outside: `model/interner.h` (building a
-pool is a parse-time concern), `model/lookup_map.h`, `model/sort.h`,
-`model/bytes_view.h`, `lang/unicode_nfc.h`, `lang/synth_document.h`.
+pool is a parse-time concern), `model/lookup_map.h`, `model/bytes_view.h`, `lang/unicode_nfc.h`, `lang/synth_document.h`.
 
 ## The Unicode tables
 
