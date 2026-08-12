@@ -292,7 +292,7 @@ Odd and prime thread counts are mandatory — they expose reduction-shape bugs p
 - All rectangles are **half-open**: `[x0,x1) x [y0,y1)`.
 - Fixed iteration counts. Every retry loop states its cap, its integer increment schedule, its subject order, and its terminal diagnostic.
 - Diagnostics are collected per shard, concatenated in shard order, then sorted by `(code, subject_kind, subject_index)`. They are part of the golden artifact. **A diagnostic carries nothing but that triple** — file, line, column, and the offending text are derived by walking to the statement's `src` span (§7), so no layer threads positions through its call stack. On a model mutated since load that span is cleared, and a diagnostic degrades to the triple alone; goldens run on unmutated models, so the artifact is unaffected.
-- **Text is normalized at parse**: LF-only, BOM stripped, NFC. Ship `.gitattributes` with `*.scav -text`. Without this, `core.autocrlf` on Windows and NFD on macOS change the string pool — same commit, different hash. NFC needs a table: it is a **P0** dependency.
+- **Text is normalized at parse**: LF-only, BOM stripped, NFC. Ship `.gitattributes` with `*.scav -text`. Without this, `core.autocrlf` on Windows and NFD on macOS change the name and label *bytes* — same commit, different canonical print, and different text metrics, so different space requests and different coordinates. NFC needs a table: it is a **P0** dependency.
 - Threading via a shim over pthreads / Win32 / **null (inline)**. Not C11 `<threads.h>`. The null backend makes WASI and the matrix work.
 
 **Banned constructs.** Unlike §4's discouraged list, these are correctness bans with no escape hatch — each is a documented cross-platform divergence, not a readability preference:
@@ -300,7 +300,7 @@ Odd and prime thread counts are mandatory — they expose reduction-shape bugs p
 | | Why |
 |---|---|
 | `int`, `long`, `unsigned`, `short`, plain `char` | `long` is 32-bit on MSVC (LLP64); plain `char` signedness differs x86 vs ARM, corrupting id hashing. `const char*` is permitted at the C ABI for NUL-terminated *input* names only, never stored in a record and never hashed |
-| `size_t` in value computation | 32-bit on wasm32; unsigned wrap is *defined*, so it silently gives a different correct answer per platform |
+| `size_t` in value computation | 32-bit on wasm32; unsigned wrap is *defined*, so it silently gives a different correct answer per platform. A `size_t` **length or count parameter** at an API boundary is correct and expected — that is what the type is for. Narrow it with `narrow<T>()` on entry and compute in the fixed-width type |
 | `std::hash` | Permitted to differ **between runs of the same binary** |
 | **Iterating** `unordered_map`/`_set` where order can reach output | Iteration order varies across all three standard libraries. Key lookup is fine and fast — see below |
 | Pointer-keyed containers | Address order; ASLR randomizes run to run |
@@ -433,7 +433,7 @@ struct Chart {
   StringPool               column_names; // separate pool — see below
   std::vector<StateId>     state_ids;    // Span targets
   std::vector<SubmachineId> submachine_ids;
-  StringPool               strings;      // interned names; canonically re-sorted
+  StringPool               strings;      // authored names and labels; append order
   StrRef                   name, label;
   SubmachineId             root_submachine;
   Span                     chart_attrs;
@@ -443,7 +443,7 @@ struct Chart {
 
 **All documents share the same arrays**, each entity tagged with the statement that declared it and the instantiation it belongs to — so no flattening step and no second model shape (§9).
 
-`src_bytes` is a **separate pool from `strings`**: one is interned and canonically re-sorted before hashing, the other is never touched after load. "Verbatim" means post-normalization — §6 normalizes at parse (LF, no BOM, NFC), and `Statement.src` offsets index the **normalized** bytes, so reported columns are stable across platforms.
+`src_bytes` is a **separate pool from `strings`**, and neither can be derived from the other. A decoded string literal is not a span of any file — `"a\u0041b"` is nine authored bytes and three decoded ones — and neither is a `Document::path`, which the caller supplies. So `strings` is not an index into the source, it is storage. Going the other way, `src_bytes` is verbatim and never rewritten, so it cannot absorb decoded text without invalidating every `Statement.src`. "Verbatim" means post-normalization — §6 normalizes at parse (LF, no BOM, NFC), and `Statement.src` offsets index the **normalized** bytes, so reported columns are stable across platforms.
 
 **Load-established, not serialized, not hashed.** Writing a document *produces* text; the format hash covers canonical output, not the possibly-non-canonical bytes loaded. Provenance is implied by which file an entity is written into.
 
@@ -465,11 +465,15 @@ Only **derived-scratch** gets §4.1's container latitude. Geometry is hashed and
 
 `ColumnDesc` carries a `derived` flag (§8). The serializer skips derived columns and they are **exempt from round-trip-unknown**, or a stale geometry snapshot survives a save and gets trusted instead of recomputed.
 
-**Column names live in their own pool, not `Chart.strings`.** Interning `scav.geom.state` into the authored pool would make every authored `StrRef` offset — and the format hash — depend on whether layout had run. Registration takes a `char const*` and interns it there; no pointer is stored in a row, so a `ColumnDesc` is hashable and serializable like any other record.
+**Column names live in their own pool, not `Chart.strings`.** A registered name is not authored text, and `scav.geom.state` names a **derived** column the serializer skips (§8) — so keeping the two apart is what stops saving a laid-out chart from leaking a derived column's name into the authored pool. Registration takes a `char const*` and interns it there; no pointer is stored in a row, so a `ColumnDesc` is hashable and serializable like any other record.
 
 Serialization is mechanical (write each vector). Iteration order is array order is document order.
 
-**Canonical ordering is by name or key *bytes*, never by id or interning order** — those are first-encounter, so two producers building the same model would emit different bytes. Re-intern into a sorted pool before serializing or hashing. `StrRef` and `AttrKeyId` are never comparison or tie-break keys.
+**Canonical ordering is by name or key *bytes*, never by id or interning order** — those are first-encounter, so two producers building the same model would emit different bytes. `StrRef` and `AttrKeyId` are never comparison or tie-break keys: a comparator dereferences to the bytes, which is exactly what §15's attribute order does.
+
+**The pool's byte layout is not canonical, and does not need to be.** No hash reads it. The format hash covers *printed* text (§15), which carries every name as text and no offset at all; the layout hash reads integer columns and never touches a string (§11); §6's hashed inputs are font, profile, packer, router, and the integer space-request tables. So nothing in any output is a function of where a string sits in the pool, and re-interning into a sorted pool before serializing would buy nothing — the last sentence above already says no ordering may depend on a `StrRef`'s value.
+
+Names are therefore appended as met, and **not deduplicated**: `StrRef` equality is span equality and says nothing about the text, so anything comparing two names compares the views. `AttrKeyId` is the opposite case and *is* genuinely interned, because it is an identity — equal keys must give equal ids, which is the whole point of having an id instead of a string.
 
 ### 7.1 No events in the core
 
@@ -1407,7 +1411,7 @@ Where a phase states production LOC, multiply by 1.5–2 for the mandated test c
 
 *Exit:* green on all six triples × three configs; each sanitizer green on every platform supporting it; `build.sh` works on a machine with no scav-specific setup; the consumer project links an installed scav; the deliberately-failing test fails.
 
-**P0 — the language, the lexer, and the parser.** Validate the format before anything depends on it. Recursive-descent parser over §15's grammar, one document, byte span in. Produces the **front-end slice of the model only** — `src_bytes`, `Document`, `Statement`, trivia, and the string pool with two-pass interning — because a statement stream is all a parser owes (§7). No entity arrays, no includes, no resolution. NFC normalization (§6) lands here since it happens at parse. Plus the **in-RAM synthetic document generator** (harness-only, §3.2) and **2–3 hand-transcribed real charts** — synthetic input has uniform branching and no accidental structure, so validating on it alone is a trap.
+**P0 — the language, the lexer, and the parser.** Validate the format before anything depends on it. Recursive-descent parser over §15's grammar, one document, byte span in. Produces the **front-end slice of the model only** — `src_bytes`, `Document`, `Statement`, trivia, and the string pool — because a statement stream is all a parser owes (§7). No entity arrays, no includes, no resolution. NFC normalization (§6) lands here since it happens at parse. Plus the **in-RAM synthetic document generator** (harness-only, §3.2) and **2–3 hand-transcribed real charts** — synthetic input has uniform branching and no accidental structure, so validating on it alone is a trap.
 
 **Recursive descent needs an explicit depth cap** with a diagnostic, not a stack overflow: nesting depth is attacker-controlled and 16 is the *design* target, not a limit the grammar enforces.
 
