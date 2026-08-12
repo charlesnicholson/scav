@@ -23,7 +23,7 @@ Inputs (all from the same UCD release):
 
 Outputs, written next to this script:
     unicode_nfc_tables.inc         production tables
-    unicode_nfc_vectors.inc        test-only conformance vectors
+    unicode_nfc_test_vectors.inc   test-only conformance vectors
 """
 
 from __future__ import annotations
@@ -327,7 +327,7 @@ def main() -> int:
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     tables = args.out_dir / "unicode_nfc_tables.inc"
-    vectors = args.out_dir / "unicode_nfc_vectors.inc"
+    vectors = args.out_dir / "unicode_nfc_test_vectors.inc"
     tables.write_text(build_tables(ccc, decomp, qc_not_yes, excluded),
                       encoding="utf-8", newline="\n")
     vectors.write_text(build_vectors(ucd["NormalizationTest.txt"]),

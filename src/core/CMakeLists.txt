@@ -2,10 +2,9 @@ scav_static_library(scavcore
   lang/diagnostics.cpp
   lang/lexer.cpp
   lang/source_text.cpp
-  lang/syntax_tree.cpp
+  lang/syntax.cpp
   lang/parser.cpp
   lang/unicode_nfc.cpp
-  model/string_pool.cpp
 )
 scav_install_library(scavcore core)
 
@@ -28,14 +27,16 @@ if(SCAV_BUILD_TESTS)
   # synth_document.cpp is harness-only: scav ships no chart generator.
   scav_tests(scav_core_tests
     lang/corpus_tests.cpp
+    lang/diagnostics_tests.cpp
     lang/fuzz_tests.cpp
     lang/lexer_tests.cpp
     lang/source_text_tests.cpp
+    lang/syntax_tests.cpp
     lang/parser_tests.cpp
     lang/perf_tests.cpp
     lang/synth_document.cpp
     lang/unicode_nfc_tests.cpp
-    model/model_tests.cpp
+    scav_core_tests.cpp
   )
   target_link_libraries(scav_core_tests PRIVATE scavcore_testable)
 

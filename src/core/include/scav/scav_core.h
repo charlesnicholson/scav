@@ -166,8 +166,14 @@ struct StringPool {
   std::vector<scav_byte> bytes;
 };
 
-// A zero-length ref reads as the empty string without touching `pool`.
-std::string_view string_pool_view(StringPool const &pool, StrRef ref);
+// A zero-length ref reads as the empty string without touching `pool`. Inline
+// because it is the whole of reading a pool: one bounds-free span over bytes the
+// caller already owns. `char` may alias any object representation, which is what
+// the cast relies on; the other direction would not be safe.
+inline std::string_view string_pool_view(StringPool const &pool, StrRef ref) {
+  if (ref.len == 0) { return {}; }
+  return { reinterpret_cast<char const *>(pool.bytes.data() + ref.off), ref.len };
+}
 
 // Source text ===============================================================
 
