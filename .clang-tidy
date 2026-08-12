@@ -20,16 +20,25 @@ Checks: >
   -misc-non-private-member-variables-in-classes,
   -misc-no-recursion,
   -modernize-use-trailing-return-type,
+  -performance-enum-size,
   -readability-function-cognitive-complexity,
   -readability-identifier-length,
   -readability-magic-numbers,
-  -readability-math-missing-parentheses
+  -readability-math-missing-parentheses,
+  -readability-use-anyofallof
 
 # google-runtime-int is load-bearing: `long` is 32-bit on MSVC and plain `char`
 # signedness differs between x86 and ARM, so both are banned outright.
 
 # misc-const-correctness false-positives on a loop accumulator, and magic-numbers
 # fires on tables and hash constants that are numbers by nature.
+
+# performance-enum-size wants the narrowest underlying type it can find, which
+# contradicts PRD 7: the model's enums are uint32_t fields in POD rows whose
+# layout is pinned for the C ABI, and narrowing them would move every offset.
+
+# readability-use-anyofallof rewrites plain loops into <ranges> view pipelines,
+# which PRD 4 discourages by name -- the default answer there is the plain loop.
 
 WarningsAsErrors: '*'
 HeaderFilterRegex: '(include/scav|src)/.*'

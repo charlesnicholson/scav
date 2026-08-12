@@ -1,5 +1,9 @@
-# Mocks and interface seams are rejected, so a unit test is an ordinary translation
-# unit compiled against the testable archive, reaching internals via SCAV_INTERNAL.
+# Tests are build steps: each is a custom command whose output is a stamp, wired
+# into ALL. Building verifies, and a second build is a no-op. That last part is
+# why there is no CTest -- ctest re-runs everything every invocation.
+#
+# No mocks and no seams: a unit test is a translation unit compiled against the
+# testable archive, reaching internals through SCAV_INTERNAL.
 
 include_guard(GLOBAL)
 
@@ -33,11 +37,15 @@ function(scav_testing_init)
   target_compile_definitions(scav_doctest INTERFACE
     DOCTEST_CONFIG_NO_EXCEPTIONS_BUT_WITH_ALL_ASSERTS
   )
+
+  # `rm -rf out/<preset>/stamp` re-runs the suite without rebuilding anything.
+  file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/stamp")
+  set(SCAV_STAMP_DIR "${PROJECT_BINARY_DIR}/stamp" PARENT_SCOPE)
 endfunction()
 
-# One environment for every test, so a developer's run and CI's run suppress the
-# same findings and fail on the same conditions.
-function(scav_set_test_environment test_name)
+# One environment for every test, so a local run and CI's suppress the same
+# findings. Yields `NAME=value` pairs for `cmake -E env`.
+function(scav_test_environment out_var stamp_name)
   # Bare filenames: these strings are colon-separated, so `D:/a/scav` would split
   # at the drive letter. Every test runs from the source directory already.
   set(env "")
@@ -67,17 +75,59 @@ function(scav_set_test_environment test_name)
 
   if(SCAV_COVERAGE)
     list(APPEND env
-      "LLVM_PROFILE_FILE=${PROJECT_BINARY_DIR}/coverage/${test_name}-%p.profraw")
+      "LLVM_PROFILE_FILE=${PROJECT_BINARY_DIR}/coverage/${stamp_name}-%p.profraw")
   endif()
 
-  if(env)
-    set_tests_properties(${test_name} PROPERTIES ENVIRONMENT "${env}")
+  set(${out_var} "${env}" PARENT_SCOPE)
+endfunction()
+
+# Delete the stamp, run, touch the stamp -- so a crashed run never leaves behind
+# a stamp a later build would trust. The run goes through ScavRunTest.cmake, so
+# a passing test prints nothing and a failing one prints everything.
+function(scav_stamped_test stamp_name)
+  cmake_parse_arguments(arg "" "COMMENT" "DEPENDS;COMMAND;TARGETS;ENV" ${ARGN})
+
+  set(stamp "${SCAV_STAMP_DIR}/${stamp_name}.passed")
+  scav_test_environment(env "${stamp_name}")
+  list(APPEND env ${arg_ENV})
+
+  # `cmake -P` takes no list argument, so the argv is joined for the runner to
+  # split. `|` cannot appear in a path or a doctest filter here.
+  set(argv "${CMAKE_COMMAND}|-E|env")
+  foreach(pair IN LISTS env)
+    string(APPEND argv "|${pair}")
+  endforeach()
+  foreach(word IN LISTS arg_COMMAND)
+    string(APPEND argv "|${word}")
+  endforeach()
+
+  add_custom_command(
+    OUTPUT "${stamp}"
+    COMMAND "${CMAKE_COMMAND}" -E rm -f "${stamp}"
+    COMMAND "${CMAKE_COMMAND}"
+            "-DSCAV_CMD=${argv}"
+            "-DSCAV_LABEL=${arg_COMMENT}"
+            -P "${PROJECT_SOURCE_DIR}/cmake/ScavRunTest.cmake"
+    COMMAND "${CMAKE_COMMAND}" -E touch "${stamp}"
+    DEPENDS ${arg_DEPENDS} "${PROJECT_SOURCE_DIR}/cmake/ScavRunTest.cmake"
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+    COMMENT "${arg_COMMENT}"
+    USES_TERMINAL
+    VERBATIM
+  )
+
+  # Out of ALL when SCAV_RUN_TESTS is off; `--target run.<name>` still works.
+  set(all_arg "ALL")
+  if(NOT SCAV_RUN_TESTS)
+    set(all_arg "")
+  endif()
+  add_custom_target(run.${stamp_name} ${all_arg} DEPENDS "${stamp}")
+  if(arg_TARGETS)
+    add_dependencies(run.${stamp_name} ${arg_TARGETS})
   endif()
 endfunction()
 
-# scav_tests(<name> <source>...)
-#
-# A doctest executable registered with ctest as unit.<name>. Link whatever it tests
+# A doctest executable that runs as part of the build. Link what it tests
 # yourself -- usually a library's _testable archive.
 function(scav_tests name)
   add_executable(${name} ${ARGN} "${PROJECT_SOURCE_DIR}/src/doctest_main.cpp")
@@ -89,37 +139,42 @@ function(scav_tests name)
     "SCAV_TEST_OUT_DIR=\"${PROJECT_BINARY_DIR}/test\""
   )
 
-  add_test(NAME unit.${name} COMMAND ${name} --order-by=name)
-  set_tests_properties(unit.${name} PROPERTIES
-    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+  scav_stamped_test(${name}
+    COMMAND "$<TARGET_FILE:${name}>" --order-by=name
+    DEPENDS "$<TARGET_FILE:${name}>"
+    TARGETS ${name}
+    COMMENT "unit ${name}"
   )
-  scav_set_test_environment(unit.${name})
   set_property(GLOBAL APPEND PROPERTY SCAV_TEST_EXECUTABLES ${name})
 endfunction()
 
-# scav_expect_test_failure(<name> <doctest case filter>)
-#
-# A harness that silently passes everything looks identical to a working one, so a
-# case is written to fail and this asserts that the failure is reported.
+# A harness that silently passes everything looks like a working one, so one case
+# is written to fail. Inverting needs a script: a build step succeeds by exiting
+# zero, and this has to succeed by exiting non-zero.
 function(scav_expect_test_failure name filter)
-  set(test "meta.${name}_reports_failures")
-  add_test(NAME ${test} COMMAND ${name} --no-skip "--test-case=${filter}")
-  set_tests_properties(${test} PROPERTIES
-    WILL_FAIL TRUE
-    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+  scav_stamped_test(${name}_reports_failures
+    COMMAND "${CMAKE_COMMAND}"
+            "-DSCAV_EXE=$<TARGET_FILE:${name}>"
+            "-DSCAV_FILTER=${filter}"
+            -P "${PROJECT_SOURCE_DIR}/cmake/ScavExpectFailure.cmake"
+    DEPENDS "$<TARGET_FILE:${name}>"
+            "${PROJECT_SOURCE_DIR}/cmake/ScavExpectFailure.cmake"
+    TARGETS ${name}
+    COMMENT "meta ${name} reports failures"
   )
-  # Also environment-set, because an instrumented binary with no LLVM_PROFILE_FILE
-  # drops a default.profraw into its working directory, which is the source tree.
-  scav_set_test_environment(${test})
 endfunction()
 
-# scav_check_tests()
-#
-# Every library is exercised by some test executable. A phase is not done until its
-# tests are, and an untested file fails the build.
+# Every library is exercised by some test executable.
 function(scav_check_tests)
   get_property(libraries GLOBAL PROPERTY SCAV_LIBRARIES)
   get_property(executables GLOBAL PROPERTY SCAV_TEST_EXECUTABLES)
+
+  # ctest's noTestsAction=error, as a configure-time check that fires earlier.
+  if(NOT executables)
+    message(FATAL_ERROR
+      "SCAV_BUILD_TESTS is on but no test executable was declared. A build that "
+      "verifies nothing reports the same green as one that verifies everything.")
+  endif()
 
   set(tested "")
   foreach(executable IN LISTS executables)

@@ -21,7 +21,10 @@ function(scav_settings target)
     $<BUILD_INTERFACE:scav_sanitizer>
     $<BUILD_INTERFACE:scav_coverage>
   )
+  # The whole public/private boundary: a library's own sources and tests reach
+  # `src/<lib>/...`, and nothing that merely links it can.
   target_include_directories(${target} PRIVATE "${PROJECT_SOURCE_DIR}/src")
+  # The cross-library vocabulary. A library's own API is added below.
   target_include_directories(${target} PUBLIC
     "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
@@ -39,9 +42,22 @@ function(scav_static_library name)
     message(FATAL_ERROR "scav_static_library(${name}): no sources")
   endif()
 
+  # The library's API, and the only thing a consumer can reach: everything else
+  # under `src/<lib>/` needs an -I that only this library and its tests get.
+  set(public_include "${CMAKE_CURRENT_SOURCE_DIR}/include")
+  if(NOT IS_DIRECTORY "${public_include}")
+    message(FATAL_ERROR
+      "scav_static_library(${name}): no ${public_include}. Every library declares "
+      "its API in include/scav/, or it has no way to be consumed.")
+  endif()
+
   foreach(target ${name} ${name}_testable)
     add_library(${target} STATIC ${ARGN})
     scav_settings(${target})
+    target_include_directories(${target} PUBLIC
+      "$<BUILD_INTERFACE:${public_include}>"
+      "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+    )
   endforeach()
 
   target_compile_definitions(${name}_testable PUBLIC SCAV_TESTING)
@@ -73,6 +89,11 @@ function(scav_install_library target exported)
   set_target_properties(${target} PROPERTIES EXPORT_NAME ${exported})
   install(TARGETS ${target} EXPORT scavTargets
     ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+  )
+  # Only include/, so the install tree has the same boundary the build tree does.
+  install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/scav"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    FILES_MATCHING PATTERN "*.h"
   )
 endfunction()
 

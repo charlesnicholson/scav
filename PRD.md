@@ -114,9 +114,10 @@ It is also the end-to-end exercise of the load path over a real filesystem — p
 Mirrors `~/src/envy`: SHA-pinned deps under `cmake/deps/`, unit tests adjacent to sources, Python functional tests, sanitizer suppressions, presets.
 
 ```
-include/scav/          public C ABI headers, one per library
+include/scav/          the cross-library vocabulary: POD spellings, no functions
+src/<lib>/include/scav/  that library's public API: one `scav_<lib>.h`, no more
 src/core/model/        columnar aggregates, ids, string pool, builder, validation
-src/core/format/       .scav lexer, parser, canonical printer, JSON dump, includes, resolution
+src/core/lang/         .scav lexer, parser, canonical printer, JSON dump, includes, resolution
 src/layout/            space requests, phases 0-3, routers, cost, thread shim
 src/draw/              DrawList type, text metrics, helpers, reference builder
 src/svg/               reference SVG backend
@@ -132,7 +133,7 @@ test_data/golden/      drawlist/, svg/, layout/ — see below
 functional_tests/      Python, drives the CLI and the C ABI via ctypes
 cmake/deps/*.cmake     one file per third-party dep envy does not package
 cmake/Dependencies.cmake   SHA pins
-tools/                 abi extraction (libclang), corpus tooling
+tools/                 project-wide tooling only; a script one library uses lives with that library
 docs/
 envy.lua               toolchain + package manifest, and envy's root marker
 build.sh  build.bat    one command, clean checkout to green tests
@@ -144,6 +145,10 @@ out/                   gitignored: all build output + the envy cache (§4.2)
 `apps/` is separate from `src/` because an application is a *consumer* — that keeps the CLI and viewer from quietly becoming privileged layers.
 
 **Unit tests are adjacent** and compile library sources with `-DSCAV_TESTING`, which is how `SCAV_INTERNAL` (§5) drops `static`. Each library builds twice, shipping and testable; both are matrix rows (§6).
+
+**Public and private are a directory, not a convention.** A library's API is `src/<lib>/include/scav/scav_*.h` and that directory is its only `PUBLIC` include path; everything else under `src/<lib>/` — private headers, sources, tests — needs `-Isrc`, which is `PRIVATE` to the library and its own tests. A consumer therefore *cannot* name a private header, in the build tree or in an installed one, and `func.install_consumer` compiles every public header of every library with nothing on its include path but the install prefix. **One public header per library** — `scav/scav_core.h` is all of `libscavcore` — so a reader never has to work out which of several headers a symbol lives in. Within it, **every function carries the prefix of its section** (`parse_`, `lex_`, `source_text_`, `diag_`, `syntax_`, `string_`), which makes the section list a table of contents and a symbol self-locating. Splitting a library's API across headers is the thing this rule exists to prevent: it trades one decision the author makes once for a decision every caller makes repeatedly.
+
+The `scav_` prefix on a *filename* is for the consumer's include path, where `scav/scav_parser.h` sits among other projects' headers. It is deliberately **not** carried onto C++ identifiers: `namespace scav` already supplies it, and §16 reserves `scav_lower_snake` for ABI-shaped types, so a `std::`-holding type named `scav_parsed_document` would advertise a guarantee it cannot keep.
 
 **Goldens are layered by stage**: `layout/` (structural + coordinate hashes), `drawlist/` (the canonical render IR, §12, the primary surface), `svg/` (thin serializer check). A layout change moves the first two; an SVG-writer change moves only the third. `svg/` alone → serializer bug; all three → review starts at `layout/`.
 
@@ -287,7 +292,7 @@ Odd and prime thread counts are mandatory — they expose reduction-shape bugs p
 - All rectangles are **half-open**: `[x0,x1) x [y0,y1)`.
 - Fixed iteration counts. Every retry loop states its cap, its integer increment schedule, its subject order, and its terminal diagnostic.
 - Diagnostics are collected per shard, concatenated in shard order, then sorted by `(code, subject_kind, subject_index)`. They are part of the golden artifact. **A diagnostic carries nothing but that triple** — file, line, column, and the offending text are derived by walking to the statement's `src` span (§7), so no layer threads positions through its call stack. On a model mutated since load that span is cleared, and a diagnostic degrades to the triple alone; goldens run on unmutated models, so the artifact is unaffected.
-- **Text is normalized at parse**: LF-only, BOM stripped, NFC. Ship `.gitattributes` with `*.scav -text`. Without this, `core.autocrlf` on Windows and NFD on macOS change the string pool — same commit, different hash. NFC needs a table: it is a **P0** dependency.
+- **Text is normalized at parse**: LF-only, BOM stripped, NFC. Ship `.gitattributes` with `*.scav -text`. Without this, `core.autocrlf` on Windows and NFD on macOS change the name and label *bytes* — same commit, different canonical print, and different text metrics, so different space requests and different coordinates. NFC needs a table: it is a **P0** dependency.
 - Threading via a shim over pthreads / Win32 / **null (inline)**. Not C11 `<threads.h>`. The null backend makes WASI and the matrix work.
 
 **Banned constructs.** Unlike §4's discouraged list, these are correctness bans with no escape hatch — each is a documented cross-platform divergence, not a readability preference:
@@ -295,7 +300,7 @@ Odd and prime thread counts are mandatory — they expose reduction-shape bugs p
 | | Why |
 |---|---|
 | `int`, `long`, `unsigned`, `short`, plain `char` | `long` is 32-bit on MSVC (LLP64); plain `char` signedness differs x86 vs ARM, corrupting id hashing. `const char*` is permitted at the C ABI for NUL-terminated *input* names only, never stored in a record and never hashed |
-| `size_t` in value computation | 32-bit on wasm32; unsigned wrap is *defined*, so it silently gives a different correct answer per platform |
+| `size_t` in value computation | 32-bit on wasm32; unsigned wrap is *defined*, so it silently gives a different correct answer per platform. A `size_t` **length or count parameter** at an API boundary is correct and expected — that is what the type is for. Narrow it with `narrow<T>()` on entry and compute in the fixed-width type |
 | `std::hash` | Permitted to differ **between runs of the same binary** |
 | **Iterating** `unordered_map`/`_set` where order can reach output | Iteration order varies across all three standard libraries. Key lookup is fine and fast — see below |
 | Pointer-keyed containers | Address order; ASLR randomizes run to run |
@@ -428,7 +433,7 @@ struct Chart {
   StringPool               column_names; // separate pool — see below
   std::vector<StateId>     state_ids;    // Span targets
   std::vector<SubmachineId> submachine_ids;
-  StringPool               strings;      // interned names; canonically re-sorted
+  StringPool               strings;      // authored names and labels; append order
   StrRef                   name, label;
   SubmachineId             root_submachine;
   Span                     chart_attrs;
@@ -438,7 +443,7 @@ struct Chart {
 
 **All documents share the same arrays**, each entity tagged with the statement that declared it and the instantiation it belongs to — so no flattening step and no second model shape (§9).
 
-`src_bytes` is a **separate pool from `strings`**: one is interned and canonically re-sorted before hashing, the other is never touched after load. "Verbatim" means post-normalization — §6 normalizes at parse (LF, no BOM, NFC), and `Statement.src` offsets index the **normalized** bytes, so reported columns are stable across platforms.
+`src_bytes` is a **separate pool from `strings`**, and neither can be derived from the other. A decoded string literal is not a span of any file — `"a\u0041b"` is nine authored bytes and three decoded ones — and neither is a `Document::path`, which the caller supplies. So `strings` is not an index into the source, it is storage. Going the other way, `src_bytes` is verbatim and never rewritten, so it cannot absorb decoded text without invalidating every `Statement.src`. "Verbatim" means post-normalization — §6 normalizes at parse (LF, no BOM, NFC), and `Statement.src` offsets index the **normalized** bytes, so reported columns are stable across platforms.
 
 **Load-established, not serialized, not hashed.** Writing a document *produces* text; the format hash covers canonical output, not the possibly-non-canonical bytes loaded. Provenance is implied by which file an entity is written into.
 
@@ -460,11 +465,15 @@ Only **derived-scratch** gets §4.1's container latitude. Geometry is hashed and
 
 `ColumnDesc` carries a `derived` flag (§8). The serializer skips derived columns and they are **exempt from round-trip-unknown**, or a stale geometry snapshot survives a save and gets trusted instead of recomputed.
 
-**Column names live in their own pool, not `Chart.strings`.** Interning `scav.geom.state` into the authored pool would make every authored `StrRef` offset — and the format hash — depend on whether layout had run. Registration takes a `char const*` and interns it there; no pointer is stored in a row, so a `ColumnDesc` is hashable and serializable like any other record.
+**Column names live in their own pool, not `Chart.strings`.** A registered name is not authored text, and `scav.geom.state` names a **derived** column the serializer skips (§8) — so keeping the two apart is what stops saving a laid-out chart from leaking a derived column's name into the authored pool. Registration takes a `char const*` and interns it there; no pointer is stored in a row, so a `ColumnDesc` is hashable and serializable like any other record.
 
 Serialization is mechanical (write each vector). Iteration order is array order is document order.
 
-**Canonical ordering is by name or key *bytes*, never by id or interning order** — those are first-encounter, so two producers building the same model would emit different bytes. Re-intern into a sorted pool before serializing or hashing. `StrRef` and `AttrKeyId` are never comparison or tie-break keys.
+**Canonical ordering is by name or key *bytes*, never by id or interning order** — those are first-encounter, so two producers building the same model would emit different bytes. `StrRef` and `AttrKeyId` are never comparison or tie-break keys: a comparator dereferences to the bytes, which is exactly what §15's attribute order does.
+
+**The pool's byte layout is not canonical, and does not need to be.** No hash reads it. The format hash covers *printed* text (§15), which carries every name as text and no offset at all; the layout hash reads integer columns and never touches a string (§11); §6's hashed inputs are font, profile, packer, router, and the integer space-request tables. So nothing in any output is a function of where a string sits in the pool, and re-interning into a sorted pool before serializing would buy nothing — the last sentence above already says no ordering may depend on a `StrRef`'s value.
+
+Names are therefore appended as met, and **not deduplicated**: `StrRef` equality is span equality and says nothing about the text, so anything comparing two names compares the views. `AttrKeyId` is the opposite case and *is* genuinely interned, because it is an identity — equal keys must give equal ids, which is the whole point of having an id instead of a string.
 
 ### 7.1 No events in the core
 
@@ -712,6 +721,8 @@ wifi/On/Ready        cross-document, via include alias
 - **An include alias is a bare path prefix**, not a sigil, because it is a state name. Alias uniqueness is therefore §10's ordinary duplicate-name check rather than a second rule, and duplicate top-level names in two documents cannot collide.
 - **No integrity attestation.** An include names a path, not a digest: a `.scav` document network is source code under the same version control as the code it describes, so pinning content hashes would duplicate what the VCS already guarantees while adding a second thing to keep current. Fetching a document over a network is the app's policy (§16.2) and so is verifying it.
 - Include cycles are a hard error.
+- **A document's `DocId` is a function of the include graph, never of arrival order.** The id is fixed by the *first* include statement naming that path, ordered by `(requesting DocId, statement ordinal)` — a breadth-first walk from the root. This is §6's shard rule applied to loading: the work items are enumerated deterministically and completion order is irrelevant. It has to be stated, because §16.2 hands the app the `pending` list and invites it to resolve the batch however it likes, including in parallel — and §7's iteration order is array order is document order, which §14 then requires to survive all the way to layout. Numbering documents as they arrive would make a parallel fetch reorder `documents`, and with it reading order and the diagram. Parallel *fetch* breaks determinism on its own under an arrival-order rule; no threaded parser is needed to get there.
+- **Loading is therefore parallelizable without core threading any of it.** Parsing is pure over one document's bytes and there is no library-global state (§16), so N documents parse independently; the load session stays single-threaded-per-instance and assigns ids by the rule above. Whether the app fetches serially, on a pool, or on a wasm host with no threads at all, the model is byte-identical. Splitting `scav_load_add` into a parse that the app may run off-thread and an `attach` that takes the result is a two-function addition, deliberately **not** made yet: 200 documents of a few KB parse in about 4 ms serially, which one `open` per file dominates.
 - **Instantiating one document twice means two include statements**, two aliases, and two disjoint sets of entity rows distinguished by `InstId`. Renaming that file then patches one path string per instantiation. Accepted: a **global include section with a reference sigil was considered and rejected** — a sigil names a document, but an endpoint must name an instance, so the two coincide only at one instantiation and above it the section needs instance names anyway. It would also still require a statement at the host to say where the subdocument attaches, and it would mark a cross-document distinction the model does not have, since an alias is an ordinary state.
 - Relative hints travel with an included chart; **absolute pins do not** — a pin is authored against a document's own frame and is meaningless in a host frame.
 - Resolution is a linear scan per path level (document order forbids sorting `state_ids` by name) or via the derived sorted index.
@@ -1359,7 +1370,7 @@ struct scav_pending {                      // 12 bytes, no padding
 scav_result scav_load_bytes(const scav_load*, scav_span, const scav_byte** out, uint32_t* len);
 ```
 
-`add` the root, read `pending`, resolve each however you like, `add` each, repeat until empty, `finish`. The app owns fetch policy, caching, and parallelism; cycles and unresolvable paths are core's errors; and `name` makes diagnostics say `wifi.scav:12` rather than `<buffer>:12`.
+`add` the root, read `pending`, resolve each however you like, `add` each, repeat until empty, `finish`. The app owns fetch policy, caching, and parallelism; cycles and unresolvable paths are core's errors; and `name` makes diagnostics say `wifi.scav:12` rather than `<buffer>:12`. Resolving a `pending` batch concurrently is expected, which is exactly why §9 fixes `DocId` from the include graph rather than from the order documents come back.
 
 Works identically over a filesystem, HTTP, a zip, or memory, and preserves §16.1's no-callback property.
 
@@ -1393,6 +1404,7 @@ Where a phase states production LOC, multiply by 1.5–2 for the mandated test c
 - **envy provisions everything**: compilers, cmake, ninja, doctest, clang-format, clang-tidy. Cache at `out/.envy` (§4.2). CI runs on a **bare** runner with nothing preinstalled but a system compiler, because that is the only way provisioning is actually tested — and CI overrides `ENVY_CACHE_ROOT` to a shared path so the cache stays warm across jobs.
 - **A toy static library and a doctest executable**, nothing more: `libscavtoy` with one function, one unit test, one golden, one deliberately-failing test held behind a flag to prove failures are actually reported.
 - **`build.sh` / `build.bat`**: one command from a clean checkout to a green test run. No arguments required, no environment to set up, no README steps.
+- **Tests are build steps, not a second command.** Every test is an `add_custom_command` whose output is a stamp file, wired into `ALL`: building *is* testing, a green build cannot hide a red test, and a second build back to back is a no-op because every stamp is newer than its inputs. CTest is deliberately absent — it has no notion of a test being up to date, so it re-runs the whole suite on every invocation and "build, then test" can never be incremental. ctest's `noTestsAction=error` has a configure-time equivalent that fires earlier and cannot be skipped by forgetting a command.
 - **`CMakePresets.json` expresses §6's matrix directly** — that was the argument for CMake over GN, so it gets exercised here rather than asserted. Three configs per triple: `Debug`, `Release`, `testable` (`-DSCAV_TESTING`, §5).
 - **Sanitizers as a mutually-exclusive enum**, not booleans: `SCAV_SANITIZER=NONE|ASAN|UBSAN|TSAN|MSAN`. ASan and TSan cannot coexist, so a boolean pair invites an unbuildable combination. **MSan needs an instrumented `libc++`** and is therefore Linux/clang only — build it in PB or MSan silently reports false positives from uninstrumented standard-library code for the life of the project.
 - **Warnings are errors**, with the per-compiler set pinned in one place. Cheap now, a week of cleanup later.
@@ -1401,7 +1413,7 @@ Where a phase states production LOC, multiply by 1.5–2 for the mandated test c
 
 *Exit:* green on all six triples × three configs; each sanitizer green on every platform supporting it; `build.sh` works on a machine with no scav-specific setup; the consumer project links an installed scav; the deliberately-failing test fails.
 
-**P0 — the language, the lexer, and the parser.** Validate the format before anything depends on it. Recursive-descent parser over §15's grammar, one document, byte span in. Produces the **front-end slice of the model only** — `src_bytes`, `Document`, `Statement`, trivia, and the string pool with two-pass interning — because a statement stream is all a parser owes (§7). No entity arrays, no includes, no resolution. NFC normalization (§6) lands here since it happens at parse. Plus the **in-RAM synthetic document generator** (harness-only, §3.2) and **2–3 hand-transcribed real charts** — synthetic input has uniform branching and no accidental structure, so validating on it alone is a trap.
+**P0 — the language, the lexer, and the parser.** Validate the format before anything depends on it. Recursive-descent parser over §15's grammar, one document, byte span in. Produces the **front-end slice of the model only** — `src_bytes`, `Document`, `Statement`, trivia, and the string pool — because a statement stream is all a parser owes (§7). No entity arrays, no includes, no resolution. NFC normalization (§6) lands here since it happens at parse. Plus the **in-RAM synthetic document generator** (harness-only, §3.2) and **2–3 hand-transcribed real charts** — synthetic input has uniform branching and no accidental structure, so validating on it alone is a trap.
 
 **Recursive descent needs an explicit depth cap** with a diagnostic, not a stack overflow: nesting depth is attacker-controlled and 16 is the *design* target, not a limit the grammar enforces.
 

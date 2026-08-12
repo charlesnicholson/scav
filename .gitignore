@@ -2,6 +2,11 @@
 # and no build step writes to $HOME.
 /out/
 
+# CTest's scratch, which it drops in whatever directory it was invoked from.
+# Nothing should invoke it from here -- the build tree is the place -- but a
+# stray `ctest` in the source root should not be committable.
+/Testing/
+
 # envy deploys a product shim per tool here; only the bootstrap scripts are ours.
 /bin/*
 !/bin/envy

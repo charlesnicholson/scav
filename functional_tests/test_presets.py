@@ -4,6 +4,7 @@ cell. A generator that quietly stopped emitting a triple would look green."""
 
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from typing import Any
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parent / "tools")]
 
+import build  # noqa: E402
 import gen_presets  # noqa: E402
 import scavtest  # noqa: E402
 
@@ -23,6 +25,14 @@ TRIPLES: dict[str, str] = {
     "linux-gcc-libstdcxx": "Linux",
     "windows-msvc": "Windows",
     "windows-clang": "Windows",
+}
+COMPILERS: dict[str, str] = {
+    "macos-clang-libcxx": "clang++",
+    "linux-clang-libcxx": "clang++",
+    "linux-clang-libstdcxx": "clang++",
+    "linux-gcc-libstdcxx": "g++",
+    "windows-msvc": "cl",
+    "windows-clang": "clang-cl",
 }
 CONFIGS: tuple[str, ...] = ("debug", "release", "testable")
 SANITIZERS: dict[str, set[str]] = {
@@ -75,6 +85,31 @@ class TestPresets(unittest.TestCase):
                 self.assertEqual({"type": "equals", "lhs": "${hostSystemName}",
                                   "rhs": host}, base["condition"])
 
+    def test_every_preset_resolves_to_exactly_one_compiler(self) -> None:
+        # A bare name is only half a pin, so build.py resolves it against PATH and
+        # passes the absolute path, which is what actually makes a row reproducible
+        # and a toolchain swap visible. If a preset stopped reaching a compiler
+        # through its `inherits` chain that would silently stop happening, and the
+        # row would go back to meaning whatever is first on PATH.
+        for name in sorted(self.names()):
+            with self.subTest(preset=name):
+                triple = next(t for t in TRIPLES if name.startswith(f"{t}-"))
+                self.assertEqual(COMPILERS[triple], build.preset_compiler(name))
+
+    def test_a_tree_reports_the_compiler_it_was_configured_with(self) -> None:
+        # Read back from the cache and compared, because CMake answers a changed
+        # compiler by resetting the cache -- which drops the -D arguments and then
+        # fails reporting a missing doctest, blaming the wrong thing entirely.
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp)
+            self.assertIsNone(build.cached_compiler(tree), "no cache is not an answer")
+            (tree / "CMakeCache.txt").write_text(
+                "// a comment\n"
+                "CMAKE_BUILD_TYPE:STRING=Debug\n"
+                "CMAKE_CXX_COMPILER:STRING=/usr/bin/clang++\n",
+                encoding="utf-8")
+            self.assertEqual("/usr/bin/clang++", build.cached_compiler(tree))
+
     def test_sanitizers_cover_every_platform_that_supports_them(self) -> None:
         for san, triples in SANITIZERS.items():
             with self.subTest(sanitizer=san):
@@ -101,17 +136,16 @@ class TestPresets(unittest.TestCase):
         self.assertEqual(release["CMAKE_BUILD_TYPE"], testable["CMAKE_BUILD_TYPE"])
         self.assertEqual("ON", testable["SCAV_TESTING"])
 
-    def test_every_configure_preset_has_a_build_and_test_preset(self) -> None:
-        for section in ("buildPresets", "testPresets"):
-            with self.subTest(section=section):
-                self.assertEqual(self.names(), self.names(section))
+    def test_every_configure_preset_has_a_build_preset(self) -> None:
+        self.assertEqual(self.names(), self.names("buildPresets"))
 
-    def test_test_presets_fail_when_they_run_nothing(self) -> None:
-        # A preset that discovers zero tests and exits zero is the failure mode
-        # this whole harness exists to rule out.
-        for preset in self.doc["testPresets"]:
-            with self.subTest(preset=preset["name"]):
-                self.assertEqual("error", preset["execution"]["noTestsAction"])
+    def test_there_are_no_test_presets(self) -> None:
+        """Tests are build steps, so a build preset already runs them.
+
+        A testPresets section would mean a second command that has to be
+        remembered, and the failure mode of forgetting it is a green build with
+        untested code -- which is the thing this harness exists to rule out."""
+        self.assertNotIn("testPresets", self.doc)
 
     def test_all_build_output_stays_under_out(self) -> None:
         # Everything scav generates lives under out/, so `rm -rf out` is a

@@ -1,13 +1,14 @@
 // Compiled against the library's testable variant, where the internal helper below
 // has external linkage.
 
-#include "scav/toy.h"
+#include "scav/scav_toy.h"
 
 #include "doctest.h"
 
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <ostream>
 #include <string>
 #include <string_view>
 #include <vector>

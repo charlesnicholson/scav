@@ -13,7 +13,7 @@ import scavtest  # noqa: E402
 
 # The build-config keys naming a tool envy is expected to have provisioned.
 PROVISIONED: tuple[str, ...] = (
-    "cmake", "ctest", "make_program", "doctest_include_dir", "python",
+    "cmake", "make_program", "doctest_include_dir", "python",
 )
 
 

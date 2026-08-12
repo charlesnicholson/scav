@@ -43,6 +43,17 @@ else()
 endif()
 option(SCAV_BUILD_TESTS "Build the unit tests" ${scav_tests_default})
 
+# Tests are build steps (cmake/ScavTesting.cmake), so building *is* testing and a
+# green build cannot hide a red test. Turning this off keeps the executables and
+# drops them from ALL, leaving `--target run.<name>` for one-at-a-time runs.
+option(SCAV_RUN_TESTS "Run the tests as part of the build" ON)
+
+# Off because the determinism matrix runs on shared CI runners, where a stalled box
+# reports a regression that is not there. The performance tests always run and their
+# memory bounds always assert -- those are counted, not timed. This adds the wall
+# clock ones, which mean something only on a machine you can name.
+option(SCAV_PERF_FLOORS "Assert the performance timing floors" OFF)
+
 # Language baseline
 
 set(CMAKE_CXX_STANDARD 20)
@@ -102,12 +113,6 @@ endif()
 
 # The libraries
 
-# Before add_subdirectory(src), which registers tests: add_test() needs testing
-# enabled in an enclosing scope first.
-if(SCAV_BUILD_TESTS)
-  enable_testing()
-endif()
-
 add_subdirectory(src)
 
 scav_check_layering()
@@ -126,6 +131,9 @@ file(WRITE "${PROJECT_BINARY_DIR}/scav_sources.txt" "${scav_production_sources_t
 
 include(CMakePackageConfigHelpers)
 
+# The cross-library vocabulary only. A library's own API is installed by
+# scav_install_library from its src/<lib>/include, which is also the only place
+# a consumer can reach in the build tree.
 install(DIRECTORY include/scav
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
   FILES_MATCHING PATTERN "*.h"

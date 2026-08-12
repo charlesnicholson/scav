@@ -33,8 +33,9 @@ class Config(dict[str, str]):
 def load_config() -> Config:
     if not (path := os.environ.get("SCAV_BUILD_CONFIG")):
         raise RuntimeError(
-            "SCAV_BUILD_CONFIG is unset. These tests are driven by ctest, which "
-            "sets it; run them with `ctest --preset <preset>`."
+            "SCAV_BUILD_CONFIG is unset. These tests run as build steps, which "
+            "set it; run them with `./build.sh`, or one at a time with "
+            "`cmake --build <dir> --target run.func.<name>`."
         )
     return Config(json.loads(Path(path).read_text(encoding="utf-8")))
 

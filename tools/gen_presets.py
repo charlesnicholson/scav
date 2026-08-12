@@ -132,15 +132,11 @@ def build_document() -> Preset:
         "version": 6,
         "cmakeMinimumRequired": {"major": 3, "minor": 28, "patch": 0},
         "configurePresets": configure,
+        # No testPresets: tests are build steps (cmake/ScavTesting.cmake), so the
+        # build preset runs them. ctest's noTestsAction=error has a configure-time
+        # equivalent in scav_check_tests(), which fires earlier and cannot be
+        # skipped by forgetting a second command.
         "buildPresets": [{"name": n, "configurePreset": n, "jobs": 0} for n in concrete],
-        # noTestsAction=error: a preset that runs zero tests is a broken preset, and
-        # reports success otherwise.
-        "testPresets": [
-            {"name": n, "configurePreset": n,
-             "output": {"outputOnFailure": True, "shortProgress": True},
-             "execution": {"noTestsAction": "error", "stopOnFailure": False}}
-            for n in concrete
-        ],
     }
 
 

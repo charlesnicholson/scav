@@ -86,12 +86,15 @@ jobs:
           path: out/.envy
           key: envy-windows-${{ hashFiles('envy.lua') }}
 
-      # Puts cl.exe and the MSVC STL on the environment, which both Windows
-      # toolchains need. A system compiler, not a build tool.
-      - uses: ilammy/msvc-dev-cmd@v1
-
-      - run: .\build.bat --preset ${{ matrix.triple }}-${{ matrix.config }}
-        shell: cmd
+      # Dev shell and build in one step: it only changes its own process, so
+      # splitting them would mean forwarding the environment. Both ship with VS.
+      - shell: powershell
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -property installationPath
+          if (-not $vsPath) { throw "vswhere found no Visual Studio installation" }
+          & "$vsPath\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64
+          & "$env:GITHUB_WORKSPACE\build.bat" --preset ${{ matrix.triple }}-${{ matrix.config }}
 
   # Sanitizers. Which one exists where is a toolchain fact, enumerated once by the
   # preset generator and checked by its test.
@@ -192,9 +195,15 @@ jobs:
         with:
           path: out/.envy
           key: envy-windows-${{ hashFiles('envy.lua') }}
-      - uses: ilammy/msvc-dev-cmd@v1
-      - run: .\build.bat --preset ${{ matrix.triple }}-${{ matrix.sanitizer }}
-        shell: cmd
+      # Dev shell and build in one step: it only changes its own process, so
+      # splitting them would mean forwarding the environment. Both ship with VS.
+      - shell: powershell
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -property installationPath
+          if (-not $vsPath) { throw "vswhere found no Visual Studio installation" }
+          & "$vsPath\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64
+          & "$env:GITHUB_WORKSPACE\build.bat" --preset ${{ matrix.triple }}-${{ matrix.sanitizer }}
 
   # Branch coverage, and the gate that an untested file fails the build.
 

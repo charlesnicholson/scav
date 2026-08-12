@@ -1,5 +1,10 @@
 # Python, standard library only: a functional test that needs `pip install` is one
 # more thing between a clean checkout and a green run.
+#
+# These are stamped build steps like the unit tests, so `cmake --build` runs them
+# and a second build skips them. Each one declares the files it actually reads,
+# which is what makes the skip correct rather than merely fast: edit ci.yml and
+# only func.ci_anchor re-runs.
 
 find_package(Python3 3.14 COMPONENTS Interpreter REQUIRED)
 
@@ -12,7 +17,6 @@ foreach(pair
   "SOURCE_DIR;${PROJECT_SOURCE_DIR}"
   "BINARY_DIR;${PROJECT_BINARY_DIR}"
   "CMAKE;${CMAKE_COMMAND}"
-  "CTEST;${CMAKE_CTEST_COMMAND}"
   "MAKE_PROGRAM;${CMAKE_MAKE_PROGRAM}"
   "CXX_COMPILER;${CMAKE_CXX_COMPILER}"
   "DOCTEST_DIR;${SCAV_DOCTEST_INCLUDE_DIR}"
@@ -26,19 +30,44 @@ endforeach()
 set(SCAV_FT_CONFIG "${CMAKE_CURRENT_BINARY_DIR}/scav_build_config.json")
 configure_file(scav_build_config.json.in "${SCAV_FT_CONFIG}" @ONLY)
 
+# scav_add_functional_test(<name> [DEPENDS <files>] [TARGETS <targets>])
 function(scav_add_functional_test name)
-  add_test(NAME func.${name}
+  cmake_parse_arguments(arg "" "" "DEPENDS;TARGETS" ${ARGN})
+  scav_stamped_test(func.${name}
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/test_${name}.py" -v
-  )
-  # ENVIRONMENT adds rather than replaces, so a test can still read variables set
-  # on the invocation.
-  set_tests_properties(func.${name} PROPERTIES
-    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
-    ENVIRONMENT "SCAV_BUILD_CONFIG=${SCAV_FT_CONFIG}"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/test_${name}.py"
+            "${CMAKE_CURRENT_SOURCE_DIR}/scavtest.py"
+            "${SCAV_FT_CONFIG}"
+            ${arg_DEPENDS}
+    TARGETS ${arg_TARGETS}
+    # The one thing the Python side cannot derive for itself.
+    ENV "SCAV_BUILD_CONFIG=${SCAV_FT_CONFIG}"
+    COMMENT "functional ${name}"
   )
 endfunction()
 
-scav_add_functional_test(install_consumer)
-scav_add_functional_test(presets)
-scav_add_functional_test(provisioning)
-scav_add_functional_test(ci_anchor)
+# install_consumer installs the whole project and configures a separate CMake
+# project against it, so it has to run after every archive and header exists.
+get_property(scav_all_libraries GLOBAL PROPERTY SCAV_LIBRARIES)
+get_property(scav_all_test_exes GLOBAL PROPERTY SCAV_TEST_EXECUTABLES)
+set(scav_installed_files "")
+foreach(library IN LISTS scav_all_libraries)
+  list(APPEND scav_installed_files "$<TARGET_FILE:${library}>")
+endforeach()
+
+scav_add_functional_test(install_consumer
+  DEPENDS ${scav_installed_files}
+          "${CMAKE_CURRENT_SOURCE_DIR}/consumer/CMakeLists.txt"
+          "${CMAKE_CURRENT_SOURCE_DIR}/consumer/main.cpp"
+  TARGETS ${scav_all_libraries} ${scav_all_test_exes}
+)
+scav_add_functional_test(presets
+  DEPENDS "${PROJECT_SOURCE_DIR}/CMakePresets.json"
+          "${PROJECT_SOURCE_DIR}/tools/gen_presets.py"
+)
+scav_add_functional_test(provisioning
+  DEPENDS "${PROJECT_SOURCE_DIR}/envy.lua"
+)
+scav_add_functional_test(ci_anchor
+  DEPENDS "${PROJECT_SOURCE_DIR}/.github/workflows/ci.yml"
+)
