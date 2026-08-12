@@ -25,6 +25,7 @@ constexpr bool ASSERT_FLOOR{ SCAV_PERF_ASSERT_FLOOR != 0 };
 
 // An order of magnitude under a 2020-era laptop: a halved throughput is not what
 // this catches, and a quadratic one blows through it regardless.
+constexpr uint64_t NORMALIZE_FLOOR_MB_PER_S{ 20 };
 constexpr uint64_t LEX_FLOOR_MB_PER_S{ 20 };
 constexpr uint64_t PARSE_FLOOR_MB_PER_S{ 10 };
 
@@ -115,6 +116,16 @@ std::vector<scav_byte> normalized(std::string const &text) {
   return out;
 }
 
+uint64_t time_normalize(std::string const &text) {
+  std::vector<scav_byte> out;
+  std::vector<Diagnostic> diags;
+  auto const start{ std::chrono::steady_clock::now() };
+  bool const ok{ source_text_normalize(raw(text), size32(text), DocId{ 0 }, out, diags) };
+  uint64_t const micros{ micros_since(start) };
+  REQUIRE(ok);
+  return micros;
+}
+
 }  // namespace
 
 TEST_CASE("perf: lex and parse a large document in RAM") {
@@ -135,12 +146,24 @@ TEST_CASE("perf: lex and parse a large document in RAM") {
   uint64_t parse_bytes{ 0 };
   uint64_t const parse_micros{ time_parse(source, lexed, parse_bytes) };
 
+  uint64_t const norm_micros{ time_normalize(text) };
+  uint64_t const norm_rate{ throughput_mb_per_s(bytes, norm_micros) };
   uint64_t const lex_rate{ throughput_mb_per_s(bytes, lexing.micros) };
   uint64_t const parse_rate{ throughput_mb_per_s(bytes, parse_micros) };
   if (ASSERT_FLOOR) {
+    CHECK_MESSAGE(norm_rate >= NORMALIZE_FLOOR_MB_PER_S,
+                  "normalize " << norm_rate << " MiB/s");
     CHECK_MESSAGE(lex_rate >= LEX_FLOOR_MB_PER_S,
                   "lex " << lex_rate << " MiB/s over " << lexing.tokens << " tokens");
     CHECK_MESSAGE(parse_rate >= PARSE_FLOOR_MB_PER_S, "parse " << parse_rate << " MiB/s");
+
+    // A ratio between two phases on one box, so it survives a slow machine where
+    // an absolute floor set low enough to be safe catches nothing. Normalizing is
+    // validate-and-copy and lexing is strictly more work per byte, so normalize
+    // being the slower of the two means it went back to copying a byte at a time
+    // -- which cost more than the rest of the parse combined when it did.
+    CHECK_MESSAGE(norm_rate >= lex_rate,
+                  "normalize " << norm_rate << " MiB/s is slower than lex " << lex_rate);
   }
 }
 
