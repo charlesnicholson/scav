@@ -5,7 +5,6 @@ scav_static_library(scavcore
   lang/syntax_tree.cpp
   lang/parser.cpp
   lang/unicode_nfc.cpp
-  model/interner.cpp
   model/string_pool.cpp
 )
 scav_install_library(scavcore core)

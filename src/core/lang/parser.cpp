@@ -1,6 +1,5 @@
 #include "scav/scav_core.h"
 
-#include "core/model/interner.h"
 #include "scav/scav_types.h"
 
 #include <cstddef>
@@ -41,7 +40,6 @@ struct Parser {
   uint32_t max_depth;
   ParsedDocument *pd;
   std::vector<Diagnostic> *diags;
-  Interner interner;
   uint32_t pos;
   uint32_t last_end;  // end offset of the most recently consumed token
   std::vector<StmtId> scratch;
@@ -84,8 +82,24 @@ bool expect(Parser &p, TokKind kind, DiagCode code) {
   return true;
 }
 
-StrRef intern_token(Parser &p, Token const &t) {
-  return intern_bytes(p.interner, p.bytes + t.off, t.len);
+// Straight into the document's pool, in the order the parser meets them. No
+// dedup: a repeated name costs its own bytes, and nothing asks whether two
+// StrRefs are the same string.
+StrRef pool_append(Parser &p, scav_byte const *bytes, size_t len) {
+  if (len == 0) { return {}; }
+  std::vector<scav_byte> &pool{ p.pd->strings.bytes };
+  StrRef const ref{ str_ref(narrow_clamp<uint32_t>(pool.size()),
+                            narrow_clamp<uint32_t>(len)) };
+  pool.insert(pool.end(), bytes, bytes + len);
+  return ref;
+}
+
+StrRef pool_append(Parser &p, std::string_view text) {
+  return pool_append(p, reinterpret_cast<scav_byte const *>(text.data()), text.size());
+}
+
+StrRef pool_token(Parser &p, Token const &t) {
+  return pool_append(p, p.bytes + t.off, t.len);
 }
 
 // An identifier in a name position. Reserved words are rejected here, not in the
@@ -100,7 +114,7 @@ bool take_name(Parser &p, StrRef &out) {
     error_at(p, DiagCode::ReservedWordAsName, t);
     return false;
   }
-  out = intern_token(p, t);
+  out = pool_token(p, t);
   advance(p);
   return true;
 }
@@ -118,7 +132,7 @@ bool take_string(Parser &p, StrRef &out) {
                                  *p.diags)) {
     return false;
   }
-  out = intern_bytes(p.interner, p.strbuf.data(), narrow_clamp<uint32_t>(p.strbuf.size()));
+  out = pool_append(p, p.strbuf.data(), p.strbuf.size());
   advance(p);
   return true;
 }
@@ -635,21 +649,16 @@ bool parse_tokens(scav_byte const *bytes,
             .max_depth = (opts.max_depth == 0) ? DEFAULT_MAX_DEPTH : opts.max_depth,
             .pd = &out,
             .diags = &diags,
-            .interner = {},
             .pos = 0,
             .last_end = 0,
             .scratch = {},
             .frames = {},
             .strbuf = {} };
-  out.doc.path = intern_bytes(p.interner, name);
+  out.doc.path = pool_append(p, name);
 
   bool const ok{ run(p) };
   out.doc.statements = make_span(0, narrow_clamp<uint32_t>(out.stmts.size()));
   if (ok) { attach_comments(out, lexed.comments); }
-
-  // Moved either way: a caller inspecting a partial parse should read the same
-  // StrRefs a complete one produces.
-  out.strings = std::move(p.interner.pool);
   return ok;
 }
 

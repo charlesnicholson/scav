@@ -5,9 +5,8 @@ document; everything below describes what is built.
 
 **Status: P0 — the language, the lexer, and the parser.** `libscavcore` reads a
 `.scav` document from a byte span and produces the front-end slice of the model:
-normalized `src_bytes`, `Document`, `Statement`, trivia, and an interned string
-pool. No entity arrays, no includes, no resolution — those are P1 and
-P2. `libscavtoy` stays behind as the harness's own proof that failures get
+normalized `src_bytes`, `Document`, `Statement`, trivia, and a string pool. No
+entity arrays, no includes, no resolution — those are P1 and P2. `libscavtoy` stays behind as the harness's own proof that failures get
 reported.
 
 Three properties of the front end are worth knowing before reading it:
@@ -126,21 +125,21 @@ symbol names its neighbourhood and the sections are the table of contents:
 | — | ids, spans, `INVALID` |
 | `narrow*` | the one checked narrowing helper |
 | `diag_` | diagnostic codes, line/column from a span |
-| `string_` | reading a finalized string pool |
+| `string_` | reading a string pool |
 | `source_text_` | normalization on read: BOM, LF, UTF-8, NFC |
 | `lex_` | tokens, trivia, string-literal decoding |
 | `syntax_` | the statement rows and their spellings |
 | `parse_` | the entry points most callers want |
 
-Private, and deliberately unreachable from outside: `model/interner.h` (building a
-pool is a parse-time concern), `model/lookup_map.h`, `model/bytes_view.h`, `lang/unicode_nfc.h`, `lang/synth_document.h`.
+Private, and deliberately unreachable from outside: `model/bytes_view.h`,
+`lang/unicode_nfc.h`, `lang/synth_document.h`.
 
 ## The Unicode tables
 
 Text is normalized on read — BOM stripped, line endings folded to LF, UTF-8
 validated, NFC applied — because `core.autocrlf` on Windows and NFD on macOS
-otherwise put different bytes in the string pool from the same commit, and the
-format hash follows the pool.
+otherwise put different bytes in the string pool from the same commit — and those
+bytes are the labels that get measured, laid out, and rendered.
 
 NFC needs a table. `src/core/lang/unicode_nfc_tables.inc` is generated from the
 UCD and committed, so a build needs neither the network nor Python. The

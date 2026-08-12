@@ -158,6 +158,9 @@ bool diag_has_errors(std::vector<Diagnostic> const &diags);
 
 // A StrRef is an offset and length into StringPool::bytes. Not NUL-terminated:
 // strings come out as spans. Building a pool is private -- a client only reads.
+//
+// The pool is not deduplicated, so two equal strings can hold two StrRefs.
+// Compare the views, not the refs.
 
 struct StringPool {
   std::vector<scav_byte> bytes;
@@ -395,7 +398,7 @@ struct ParsedDocument {
   std::vector<StrRef> attr_values;
   std::vector<PathSeg> path_segs;
 
-  StringPool strings;  // byte-sorted, two-pass interned
+  StringPool strings;  // append-order, not deduplicated
 };
 
 char const *syntax_elem_kind_name(ElemKind kind);
