@@ -17,8 +17,8 @@ using namespace scav::test;
 }  // namespace
 
 TEST_CASE("syntax: every enum has a name and every kind word round-trips") {
-  for (uint32_t i = 0; i <= static_cast<uint32_t>(ElemKind::Attr); ++i) {
-    CHECK(std::string{ syntax_elem_kind_name(static_cast<ElemKind>(i)) } != "unknown");
+  for (uint32_t i = 0; i <= static_cast<uint32_t>(StmtKind::Attr); ++i) {
+    CHECK(std::string{ syntax_stmt_kind_name(static_cast<StmtKind>(i)) } != "unknown");
   }
   for (uint32_t i = 0; i <= static_cast<uint32_t>(StateKind::DeepHistory); ++i) {
     StateKind const kind{ static_cast<StateKind>(i) };
@@ -37,7 +37,7 @@ TEST_CASE("syntax: every enum has a name and every kind word round-trips") {
     CHECK(syntax_trans_kind_from_name(syntax_trans_kind_name(kind), parsed));
     CHECK(parsed == kind);
   }
-  CHECK(std::string{ syntax_elem_kind_name(static_cast<ElemKind>(99)) } == "unknown");
+  CHECK(std::string{ syntax_stmt_kind_name(static_cast<StmtKind>(99)) } == "unknown");
   CHECK(std::string{ syntax_state_kind_name(static_cast<StateKind>(99)) } == "unknown");
   CHECK(std::string{ syntax_trans_kind_name(static_cast<TransKind>(99)) } == "unknown");
 

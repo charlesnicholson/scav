@@ -95,7 +95,7 @@ inline bool has_code(std::vector<Diagnostic> const &diags, DiagCode code) {
 }
 
 // Statement rows of one kind, in document order.
-inline std::vector<uint32_t> stmts_of(ParsedDocument const &pd, ElemKind kind) {
+inline std::vector<uint32_t> stmts_of(ParsedDocument const &pd, StmtKind kind) {
   std::vector<uint32_t> out;
   for (uint32_t i = 0; i < pd.stmts.size(); ++i) {
     if (pd.stmts[i].kind == kind) { out.push_back(i); }
@@ -121,6 +121,22 @@ inline AttrStmt const &attr_at(ParsedDocument const &pd, uint32_t stmt) {
 
 inline IncludeStmt const &include_at(ParsedDocument const &pd, uint32_t stmt) {
   return pd.includes[pd.stmt_payload[stmt]];
+}
+
+// Model refs, spelled short so an assertion reads like its claim.
+inline ElemRef ref(StateId id) { return { .kind = ElemKind::State, .ordinal = id.v }; }
+inline ElemRef ref(SubmachineId id) {
+  return { .kind = ElemKind::Submachine, .ordinal = id.v };
+}
+inline ElemRef ref(TransId id) {
+  return { .kind = ElemKind::Transition, .ordinal = id.v };
+}
+inline ElemRef chart_ref() { return { .kind = ElemKind::Chart, .ordinal = 0 }; }
+
+inline std::string path(Chart const &c, StateId id) {
+  std::string out;
+  chart_path_of(c, id, out);
+  return out;
 }
 
 // A path spelled back out, so an endpoint assertion reads like the source did.

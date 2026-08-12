@@ -5,6 +5,9 @@ scav_static_library(scavcore
   lang/syntax.cpp
   lang/parser.cpp
   lang/unicode_nfc.cpp
+  model/builder.cpp
+  model/chart.cpp
+  model/columns.cpp
 )
 scav_install_library(scavcore core)
 
@@ -36,7 +39,11 @@ if(SCAV_BUILD_TESTS)
     lang/perf_tests.cpp
     lang/synth_document.cpp
     lang/unicode_nfc_tests.cpp
+    model/builder_tests.cpp
+    model/chart_tests.cpp
+    model/columns_tests.cpp
     scav_core_tests.cpp
+    sort_tests.cpp
   )
   target_link_libraries(scav_core_tests PRIVATE scavcore_testable)
 

@@ -5,14 +5,14 @@
 
 namespace scav {
 
-char const *syntax_elem_kind_name(ElemKind kind) {
+char const *syntax_stmt_kind_name(StmtKind kind) {
   switch (kind) {
-    case ElemKind::Chart: return "chart";
-    case ElemKind::Include: return "include";
-    case ElemKind::State: return "state";
-    case ElemKind::Submachine: return "submachine";
-    case ElemKind::Trans: return "trans";
-    case ElemKind::Attr: return "attr";
+    case StmtKind::Chart: return "chart";
+    case StmtKind::Include: return "include";
+    case StmtKind::State: return "state";
+    case StmtKind::Submachine: return "submachine";
+    case StmtKind::Trans: return "trans";
+    case StmtKind::Attr: return "attr";
   }
   return "unknown";
 }
