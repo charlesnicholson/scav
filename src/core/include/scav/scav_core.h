@@ -166,10 +166,6 @@ struct StringPool {
 // A zero-length ref reads as the empty string without touching `pool`.
 std::string_view string_pool_view(StringPool const &pool, StrRef ref);
 
-// Byte-wise, unsigned, shorter-prefix-first -- the order the pool is finalized
-// in, so anything comparing names has to agree with it.
-int string_compare_bytes(scav_byte const *a, size_t alen, scav_byte const *b, size_t blen);
-
 // Source text ===============================================================
 
 // BOM stripped, line endings to LF, UTF-8 validated, NFC applied -- otherwise

@@ -1,9 +1,8 @@
-// Ids, the no-iteration lookup map, the vendored stable sort, and two-pass
-// interning. Compiled against scavcore_testable.
+// Ids, the no-iteration lookup map, and interning. Compiled against
+// scavcore_testable.
 
 #include "core/model/interner.h"
 #include "core/model/lookup_map.h"
-#include "core/model/sort.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 
@@ -13,6 +12,7 @@
 #include <ostream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -27,8 +27,8 @@ std::vector<std::string> pool_strings(StringPool const &pool,
   return out;
 }
 
-// Interns each input, finalizes, and returns the pool bytes as one string plus
-// the remapped refs. The whole of two-pass interning in one call.
+// Interns each input and hands back the pool, the refs, and the pool bytes as one
+// string to compare against.
 struct Interned {
   StringPool pool;
   std::vector<StrRef> refs;
@@ -37,15 +37,10 @@ struct Interned {
 
 Interned intern_all(std::vector<std::string_view> const &inputs) {
   Interner in;
-  std::vector<StrRef> staged;
-  staged.reserve(inputs.size());
-  for (std::string_view const s : inputs) { staged.push_back(intern_bytes(in, s)); }
-
   Interned out;
-  StringRemap r;
-  intern_finalize(in, out.pool, r);
-  out.refs.reserve(staged.size());
-  for (StrRef const s : staged) { out.refs.push_back(intern_remap(r, s)); }
+  out.refs.reserve(inputs.size());
+  for (std::string_view const s : inputs) { out.refs.push_back(intern_bytes(in, s)); }
+  out.pool = std::move(in.pool);
   out.bytes.assign(reinterpret_cast<char const *>(out.pool.bytes.data()),
                    out.pool.bytes.size());
   return out;
@@ -151,101 +146,10 @@ TEST_CASE("narrow_clamp: clamps rather than wrapping") {
   CHECK(narrow_clamp<uint8_t>(300U) == 255U);
 }
 
-TEST_CASE("sort: empty and single-element inputs are untouched") {
-  std::vector<uint32_t> empty;
-  stable_sort_by(empty, [](uint32_t a, uint32_t b) { return a < b; });
-  CHECK(empty.empty());
-
-  std::vector<uint32_t> one{ 5 };
-  stable_sort_by(one, [](uint32_t a, uint32_t b) { return a < b; });
-  CHECK(one == std::vector<uint32_t>{ 5 });
-}
-
-TEST_CASE("sort: orders by the functor") {
-  std::vector<uint32_t> v{ 9, 3, 7, 1, 8, 2, 6, 4, 5, 0 };
-  stable_sort_by(v, [](uint32_t a, uint32_t b) { return a < b; });
-  CHECK(v == std::vector<uint32_t>{ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 });
-
-  stable_sort_by(v, [](uint32_t a, uint32_t b) { return a > b; });
-  CHECK(v == std::vector<uint32_t>{ 9, 8, 7, 6, 5, 4, 3, 2, 1, 0 });
-}
-
-TEST_CASE("sort: equal keys keep their input order") {
-  // Every element compares equal on the key, so a stable sort is the identity
-  // and an unstable one is free to shuffle. That is the whole property.
-  struct Item {
-    uint32_t key, tag;
-  };
-  std::vector<Item> v;
-  v.reserve(64);
-  for (uint32_t i = 0; i < 64; ++i) { v.push_back({ .key = i % 4U, .tag = i }); }
-  stable_sort_by(v, [](Item a, Item b) { return a.key < b.key; });
-
-  for (uint32_t bucket = 0; bucket < 4; ++bucket) {
-    uint32_t previous{ 0 };
-    bool first{ true };
-    for (Item const &it : v) {
-      if (it.key != bucket) { continue; }
-      if (!first) { CHECK(it.tag > previous); }
-      previous = it.tag;
-      first = false;
-    }
-  }
-}
-
-TEST_CASE("sort: every length up to 33 sorts, including the odd merge passes") {
-  // Bottom-up merging leaves the result in the scratch buffer after an odd
-  // number of passes, so lengths on both sides of each power of two matter.
-  for (uint32_t n = 0; n <= 33; ++n) {
-    std::vector<uint32_t> v;
-    v.reserve(n);
-    for (uint32_t i = 0; i < n; ++i) { v.push_back((n - i) * 7U % 101U); }
-    std::vector<uint32_t> expected{ v };
-    stable_sort_by(v, [](uint32_t a, uint32_t b) { return a < b; });
-    for (uint32_t i = 1; i < n; ++i) { CHECK(v[i - 1] <= v[i]); }
-    CHECK(v.size() == expected.size());
-  }
-}
-
-TEST_CASE("sort: an already-sorted and a reversed input both land sorted") {
-  std::vector<uint32_t> ascending;
-  std::vector<uint32_t> descending;
-  ascending.reserve(100);
-  descending.reserve(100);
-  for (uint32_t i = 0; i < 100; ++i) {
-    ascending.push_back(i);
-    descending.push_back(99 - i);
-  }
-  auto const less = [](uint32_t a, uint32_t b) { return a < b; };
-  stable_sort_by(ascending, less);
-  stable_sort_by(descending, less);
-  CHECK(ascending == descending);
-}
-
-TEST_CASE("compare_bytes: unsigned, byte-wise, shorter prefix first") {
-  auto const cmp = [](std::string_view a, std::string_view b) {
-    return string_compare_bytes(reinterpret_cast<scav_byte const *>(a.data()),
-                                static_cast<uint32_t>(a.size()),
-                                reinterpret_cast<scav_byte const *>(b.data()),
-                                static_cast<uint32_t>(b.size()));
-  };
-  CHECK(cmp("a", "a") == 0);
-  CHECK(cmp("a", "b") < 0);
-  CHECK(cmp("b", "a") > 0);
-  CHECK(cmp("ab", "abc") < 0);
-  CHECK(cmp("abc", "ab") > 0);
-  CHECK(cmp("", "a") < 0);
-  CHECK(cmp("", "") == 0);
-  // 0x80 is negative as a signed char, which is exactly the bug the unsigned
-  // comparison exists to avoid.
-  CHECK(cmp("\x7f", "\x80") < 0);
-  CHECK(cmp("\xff", "\x01") > 0);
-}
-
 TEST_CASE("intern: the empty string is a zero ref and never enters the pool") {
   Interner in;
   CHECK(intern_bytes(in, std::string_view{}) == str_ref(0, 0));
-  CHECK(in.staging.empty());
+  CHECK(in.pool.bytes.empty());
   CHECK(in.unique.empty());
 
   Interned const r{ intern_all({ "" }) };
@@ -254,15 +158,16 @@ TEST_CASE("intern: the empty string is a zero ref and never enters the pool") {
   CHECK(string_pool_view(r.pool, r.refs[0]).empty());
 }
 
-TEST_CASE("intern: the same bytes return the same staging ref") {
+TEST_CASE("intern: the same bytes return the same ref") {
+  // The property worth having: StrRef equality is string equality, so comparing
+  // two names is comparing two pairs of uint32.
   Interner in;
   StrRef const a{ intern_bytes(in, "hello") };
   StrRef const b{ intern_bytes(in, "hello") };
   CHECK(a == b);
   CHECK(in.unique.size() == 1);
-  CHECK(in.staging.size() == 5);
-  CHECK(intern_staged_view(in, a) == "hello");
-  CHECK(intern_staged_view(in, str_ref(0, 0)).empty());
+  CHECK(in.pool.bytes.size() == 5);
+  CHECK(string_pool_view(in.pool, a) == "hello");
 }
 
 TEST_CASE("intern: an embedded NUL is an ordinary byte") {
@@ -275,29 +180,16 @@ TEST_CASE("intern: an embedded NUL is an ordinary byte") {
   CHECK(in.unique.size() == 2);
 }
 
-TEST_CASE("intern: the finalized pool is sorted by bytes, not by encounter order") {
+TEST_CASE("intern: the pool is first-encounter order") {
+  // Not sorted. Nothing depends on the pool's byte layout, so nothing pays to
+  // canonicalize it; whoever needs a canonical order can sort at that point.
   Interned const r{ intern_all({ "zebra", "apple", "mango" }) };
-  CHECK(r.bytes == "applemangozebra");
+  CHECK(r.bytes == "zebraapplemango");
   CHECK(pool_strings(r.pool, r.refs) ==
         std::vector<std::string>{ "zebra", "apple", "mango" });
 }
 
-TEST_CASE("intern: two encounter orders produce byte-identical pools") {
-  // The whole reason interning is two-pass: two producers building the same
-  // model must emit the same pool, whoever typed what first.
-  Interned const forward{ intern_all({ "delta", "alpha", "charlie", "bravo" }) };
-  Interned const backward{ intern_all({ "bravo", "charlie", "alpha", "delta" }) };
-  CHECK(forward.bytes == backward.bytes);
-  CHECK(forward.bytes == "alphabravocharliedelta");
-
-  // And each ref still names the string it was interned from.
-  CHECK(pool_strings(forward.pool, forward.refs) ==
-        std::vector<std::string>{ "delta", "alpha", "charlie", "bravo" });
-  CHECK(pool_strings(backward.pool, backward.refs) ==
-        std::vector<std::string>{ "bravo", "charlie", "alpha", "delta" });
-}
-
-TEST_CASE("intern: duplicates are stored once") {
+TEST_CASE("intern: duplicates are stored once, wherever they recur") {
   Interned const r{ intern_all({ "one", "two", "one", "two", "one" }) };
   CHECK(r.bytes == "onetwo");
   CHECK(r.refs[0] == r.refs[2]);
@@ -305,47 +197,26 @@ TEST_CASE("intern: duplicates are stored once") {
   CHECK(r.refs[1] == r.refs[3]);
 }
 
-TEST_CASE("intern: a prefix sorts before the string that extends it") {
+TEST_CASE("intern: a string that is a prefix of another is still its own entry") {
+  // No suffix sharing: `ab` does not alias the first two bytes of `abc`. Spans
+  // would allow it, and deliberately nothing tries.
   Interned const r{ intern_all({ "abc", "ab", "abcd", "a" }) };
-  CHECK(r.bytes == "aababcabcd");
+  CHECK(r.bytes == "abcababcda");
   CHECK(pool_strings(r.pool, r.refs) ==
         std::vector<std::string>{ "abc", "ab", "abcd", "a" });
 }
 
-TEST_CASE("intern: high bytes sort above ASCII") {
+TEST_CASE("intern: high bytes are ordinary bytes") {
   Interned const r{ intern_all({ "\xc3\xa9", "z", "A" }) };
   CHECK(pool_strings(r.pool, r.refs) == std::vector<std::string>{ "\xc3\xa9", "z", "A" });
-  CHECK(r.bytes == "Az\xc3\xa9");
+  CHECK(r.bytes == "\xc3\xa9zA");
 }
 
-TEST_CASE("intern: finalizing an empty interner yields an empty pool") {
-  Interner in;
-  StringPool pool;
-  StringRemap r;
-  intern_finalize(in, pool, r);
-  CHECK(pool.bytes.empty());
-  CHECK(r.staging.empty());
-  CHECK(intern_remap(r, str_ref(0, 0)) == str_ref(0, 0));
-}
-
-TEST_CASE("intern: remapping a ref from another interner degrades to empty") {
-  // Reading another string's bytes would be a silent wrong answer; the empty
-  // string is at least visibly wrong.
-  Interned const r{ intern_all({ "alpha" }) };
-  Interner other;
-  intern_bytes(other, "beta");
-  StringPool other_pool;
-  StringRemap other_remap;
-  intern_finalize(other, other_pool, other_remap);
-  CHECK(intern_remap(other_remap, str_ref(999, 4)) == str_ref(0, 0));
-}
-
-TEST_CASE("intern: a large distinct set round-trips through the remap") {
+TEST_CASE("intern: a large distinct set round-trips") {
   std::vector<std::string> owned;
   std::vector<std::string_view> inputs;
   owned.reserve(500);
   for (uint32_t i = 0; i < 500; ++i) {
-    // Interleaved so first-encounter order is nothing like byte order.
     owned.push_back("name_" + std::to_string((i * 337U) % 500U));
   }
   inputs.reserve(owned.size());
@@ -356,10 +227,8 @@ TEST_CASE("intern: a large distinct set round-trips through the remap") {
     CHECK(string_pool_view(r.pool, r.refs[i]) == owned[i]);
   }
 
-  // Sorted and deduped, so the pool is exactly the concatenation in byte order.
-  std::vector<std::string> sorted{ owned };
-  stable_sort_by(sorted, [](std::string const &a, std::string const &b) { return a < b; });
+  // Distinct and deduped, so the pool is the inputs concatenated in order.
   std::string expected;
-  for (std::string const &s : sorted) { expected += s; }
+  for (std::string const &s : owned) { expected += s; }
   CHECK(r.bytes == expected);
 }

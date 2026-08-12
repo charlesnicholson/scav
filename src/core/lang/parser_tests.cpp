@@ -608,24 +608,29 @@ TEST_CASE("parse: every diagnostic locates to a span inside the document") {
   }
 }
 
-TEST_CASE("parse: strings are interned into a byte-sorted pool") {
+TEST_CASE("parse: strings land in the pool in first-encounter order") {
   Parsed const r{ parse(R"(chart zeta { state Mid, state Alpha, state Omega, })") };
   REQUIRE(r.ok);
-  // Sorted by bytes, so the pool is a function of the content and not of the
-  // order the parser met it in.
+  // The document name is interned first, then the chart, then each state as the
+  // parser reaches it. Nothing sorts: no reader depends on the byte layout.
   std::string const pool{ reinterpret_cast<char const *>(r.pd.strings.bytes.data()),
                           r.pd.strings.bytes.size() };
-  CHECK(pool == "AlphaMidOmegatest.scavzeta");
+  CHECK(pool == "test.scavzetaMidAlphaOmega");
   CHECK(str(r.pd, r.pd.charts[0].name) == "zeta");
   CHECK(str(r.pd, state_at(r.pd, stmts_of(r.pd, ElemKind::State)[1]).name) == "Alpha");
 }
 
-TEST_CASE("parse: two documents differing only in order share a pool") {
+TEST_CASE("parse: reordering the source reorders the pool") {
+  // Stated so the limit is on the record: the pool is *not* canonical, so it is
+  // not something to hash. Whoever needs a producer-independent order sorts then.
   Parsed const a{ parse("chart c { state Alpha, state Beta, }", "d.scav") };
   Parsed const b{ parse("chart c { state Beta, state Alpha, }", "d.scav") };
   REQUIRE(a.ok);
   REQUIRE(b.ok);
-  CHECK(a.pd.strings.bytes == b.pd.strings.bytes);
+  CHECK(a.pd.strings.bytes != b.pd.strings.bytes);
+  // What does hold: the same bytes always give the same pool.
+  Parsed const again{ parse("chart c { state Alpha, state Beta, }", "d.scav") };
+  CHECK(again.pd.strings.bytes == a.pd.strings.bytes);
 }
 
 TEST_CASE("parse: a repeated name is interned once") {

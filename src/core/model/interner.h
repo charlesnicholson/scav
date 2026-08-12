@@ -1,9 +1,13 @@
 #ifndef SCAV_CORE_MODEL_INTERNER_H_INCLUDED
 #define SCAV_CORE_MODEL_INTERNER_H_INCLUDED
 
-// Two-pass interning: pass one dedupes in encounter order, pass two re-emits
-// sorted by bytes so two producers of the same model emit the same pool. The
-// remap is separate because the StrRefs live in the caller's arrays.
+// Builds a StringPool while parsing: identical bytes are stored once, and the
+// StrRef a caller gets back is final -- it indexes the pool that ends up in the
+// document. Private, because only the parser builds one and a client only reads.
+//
+// Dedup is all this does. It buys StrRef equality meaning string equality, which
+// is worth the twenty lines; ordering the pool canonically is not here, because
+// nothing yet depends on the pool's byte layout.
 
 #include "core/model/lookup_map.h"
 #include "scav/scav_core.h"
@@ -17,8 +21,8 @@
 namespace scav {
 
 struct Interner {
-  std::vector<scav_byte> staging;
-  std::vector<StrRef> unique;       // staging spans; offsets ascend with the index
+  StringPool pool;
+  std::vector<StrRef> unique;       // pool spans, in first-encounter order
   StringLookupMap<uint32_t> index;  // bytes -> position in `unique`
 };
 
@@ -26,21 +30,6 @@ struct Interner {
 // not depend on whether anything empty was interned.
 StrRef intern_bytes(Interner &in, scav_byte const *bytes, size_t len);
 StrRef intern_bytes(Interner &in, std::string_view text);
-
-// Staging offset -> finalized offset. Parallel arrays, not a map: `staging`
-// ascends, so the lookup is a binary search and never allocates.
-struct StringRemap {
-  std::vector<uint32_t> staging;
-  std::vector<uint32_t> finalized;
-};
-
-// `in` stays valid, so a caller may finalize and still walk its staging refs.
-void intern_finalize(Interner const &in, StringPool &pool, StringRemap &out);
-
-// A zero-length ref maps to itself; anything else must have been interned.
-StrRef intern_remap(StringRemap const &r, StrRef ref);
-
-std::string_view intern_staged_view(Interner const &in, StrRef ref);
 
 }  // namespace scav
 
