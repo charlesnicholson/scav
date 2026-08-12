@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cstdint>
+#include <ostream>
 #include <string>
 #include <vector>
 
@@ -174,7 +175,7 @@ TEST_CASE("nfc: normalizing an already-normalized string reports no change") {
 
 TEST_CASE("nfc: idempotent on the conformance suite") {
   uint32_t at{ 0 };
-  for (uint32_t i = 0; i < NFC_VECTOR_COUNT; ++i) {
+  for (uint32_t i = 0; i < NFC_VECTOR_LENS.size(); ++i) {
     uint32_t const src_len{ static_cast<uint32_t>(NFC_VECTOR_LENS[i] >> 8U) };
     uint32_t const exp_len{ static_cast<uint32_t>(NFC_VECTOR_LENS[i] & 0xFFU) };
 

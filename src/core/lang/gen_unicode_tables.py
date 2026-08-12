@@ -186,14 +186,12 @@ def build_tables(ccc: dict[int, int],
                           [f"0x{lo:X}" for lo, _ in ranges], 8))
     out.append(emit_array("NFC_UNSAFE_HI", "uint32_t",
                           [f"0x{hi:X}" for _, hi in ranges], 8))
-    out.append(f"constexpr uint32_t NFC_UNSAFE_RANGE_COUNT{{ {len(ranges)}U }};\n\n")
 
     out.append("// Canonical combining class, for codepoints where it is non-zero.\n")
     out.append(emit_array("CCC_KEYS", "uint32_t",
                           [f"0x{cp:X}" for cp in ccc_keys], 8))
     out.append(emit_array("CCC_VALUES", "scav_byte",
                           [str(ccc[cp]) for cp in ccc_keys], 16))
-    out.append(f"constexpr uint32_t CCC_COUNT{{ {len(ccc_keys)}U }};\n\n")
 
     out.append("// Fully-expanded canonical decompositions, flattened.\n")
     out.append(emit_array("DECOMP_KEYS", "uint32_t",
@@ -204,14 +202,12 @@ def build_tables(ccc: dict[int, int],
                           [str(n) for _, n in offsets], 16))
     out.append(emit_array("DECOMP_DATA", "uint32_t",
                           [f"0x{cp:X}" for cp in flat], 8))
-    out.append(f"constexpr uint32_t DECOMP_COUNT{{ {len(decomp_keys)}U }};\n\n")
 
     out.append("// Primary composites, keyed by (starter << 32) | combining.\n")
     out.append(emit_array("COMPOSE_KEYS", "uint64_t",
                           [f"0x{(a << 32) | b:X}ULL" for a, b, _ in pairs], 4))
     out.append(emit_array("COMPOSE_VALUES", "uint32_t",
                           [f"0x{c:X}" for _, _, c in pairs], 8))
-    out.append(f"constexpr uint32_t COMPOSE_COUNT{{ {len(pairs)}U }};\n")
     return "".join(out)
 
 
@@ -310,7 +306,6 @@ def build_vectors(text: str) -> str:
     out.append("// Packed (source length << 8) | expected length, in order.\n")
     out.append(emit_array("NFC_VECTOR_LENS", "uint16_t",
                           [f"0x{(a << 8) | b:04X}" for a, b in lens], 12))
-    out.append(f"constexpr uint32_t NFC_VECTOR_COUNT{{ {len(lens)}U }};\n")
     return "".join(out)
 
 

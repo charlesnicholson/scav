@@ -29,14 +29,17 @@ bool is_hangul_syllable(uint32_t cp) {
   return (cp >= HANGUL_S_BASE) && (cp < HANGUL_S_BASE + HANGUL_S_COUNT);
 }
 
-// Every table below is sorted by key, so every lookup is a binary search. The
-// hot path never reaches one: ASCII short-circuits above the call.
+// Every table is sorted by key, so every lookup is a binary search. The hot path
+// never reaches one: ASCII short-circuits above the call.
+//
+// The bound comes from the array's own type rather than a second argument. A
+// passed-in count can disagree with the array, and two instantiations that never
+// mention N have identical bodies -- which GCC folds, and then attributes one
+// table's bounds to another's subscript.
 template <size_t N>
-uint32_t lower_bound_u32(std::array<uint32_t, N> const &keys,
-                         uint32_t count,
-                         uint32_t key) {
+uint32_t lower_bound_u32(std::array<uint32_t, N> const &keys, uint32_t key) {
   uint32_t lo{ 0 };
-  uint32_t hi{ count };
+  uint32_t hi{ narrow_clamp<uint32_t>(N) };
   while (lo < hi) {
     uint32_t const mid{ lo + ((hi - lo) / 2) };
     if (keys[mid] < key) {
@@ -49,11 +52,9 @@ uint32_t lower_bound_u32(std::array<uint32_t, N> const &keys,
 }
 
 template <size_t N>
-uint32_t lower_bound_u64(std::array<uint64_t, N> const &keys,
-                         uint32_t count,
-                         uint64_t key) {
+uint32_t lower_bound_u64(std::array<uint64_t, N> const &keys, uint64_t key) {
   uint32_t lo{ 0 };
-  uint32_t hi{ count };
+  uint32_t hi{ narrow_clamp<uint32_t>(N) };
   while (lo < hi) {
     uint32_t const mid{ lo + ((hi - lo) / 2) };
     if (keys[mid] < key) {
@@ -79,8 +80,8 @@ uint32_t compose_pair(uint32_t starter, uint32_t combining) {
   }
 
   uint64_t const key{ (static_cast<uint64_t>(starter) << 32U) | combining };
-  uint32_t const at{ lower_bound_u64(COMPOSE_KEYS, COMPOSE_COUNT, key) };
-  if ((at >= COMPOSE_COUNT) || (COMPOSE_KEYS[at] != key)) { return 0; }
+  uint32_t const at{ lower_bound_u64(COMPOSE_KEYS, key) };
+  if ((at >= COMPOSE_KEYS.size()) || (COMPOSE_KEYS[at] != key)) { return 0; }
   return COMPOSE_VALUES[at];
 }
 
@@ -95,8 +96,8 @@ void append_decomposition(uint32_t cp, std::vector<uint32_t> &out) {
     return;
   }
 
-  uint32_t const at{ lower_bound_u32(DECOMP_KEYS, DECOMP_COUNT, cp) };
-  if ((at >= DECOMP_COUNT) || (DECOMP_KEYS[at] != cp)) {
+  uint32_t const at{ lower_bound_u32(DECOMP_KEYS, cp) };
+  if ((at >= DECOMP_KEYS.size()) || (DECOMP_KEYS[at] != cp)) {
     out.push_back(cp);
     return;
   }
@@ -131,7 +132,7 @@ bool nfc_needs_work(uint32_t cp) {
   // Ranges ascend and do not overlap, so the last one starting at or below `cp`
   // is the only candidate.
   uint32_t lo{ 0 };
-  uint32_t hi{ NFC_UNSAFE_RANGE_COUNT };
+  uint32_t hi{ narrow_clamp<uint32_t>(NFC_UNSAFE_LO.size()) };
   while (lo < hi) {
     uint32_t const mid{ lo + ((hi - lo) / 2) };
     if (NFC_UNSAFE_LO[mid] <= cp) {
@@ -146,8 +147,8 @@ bool nfc_needs_work(uint32_t cp) {
 
 uint32_t nfc_combining_class(uint32_t cp) {
   if (cp < 0x300) { return 0; }
-  uint32_t const at{ lower_bound_u32(CCC_KEYS, CCC_COUNT, cp) };
-  if ((at >= CCC_COUNT) || (CCC_KEYS[at] != cp)) { return 0; }
+  uint32_t const at{ lower_bound_u32(CCC_KEYS, cp) };
+  if ((at >= CCC_KEYS.size()) || (CCC_KEYS[at] != cp)) { return 0; }
   return CCC_VALUES[at];
 }
 
