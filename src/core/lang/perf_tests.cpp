@@ -308,13 +308,13 @@ TEST_CASE("perf: a long comment run does not degrade") {
 }
 
 TEST_CASE("perf: string-pool growth does not degrade with distinct names") {
-  // Every name unique, so interning never hits its fast path and the finalizing
-  // sort runs on the full set.
+  // Every name unique, so interning misses on every lookup and pays a full hash
+  // insert per name -- the worst case for the dedup map.
   auto const distinct = [](uint32_t count) {
     std::string out{ "chart c {" };
     for (uint32_t i = 0; i < count; ++i) {
-      // Prefixed so byte order is nothing like encounter order, which is what
-      // the sort has to cope with.
+      // Scrambled so the names arrive in nothing like byte order, which is what
+      // clusters hash buckets if the hash is weak.
       out += "state N";
       out += std::to_string((i * 2654435761U) % 1000000007U);
       out += ",";
@@ -337,7 +337,8 @@ TEST_CASE("perf: string-pool growth does not degrade with distinct names") {
   REQUIRE(parse(large).ok);
   uint64_t const large_us{ micros_since(start) };
 
-  // n log n, not n, so the slack has to cover the log term as well.
+  // Linear now that nothing sorts, but the slack stays doubled: a rehash lands on
+  // whichever run crosses the load factor.
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_FLOOR) {
     CHECK_MESSAGE(growth < ratio * SCALING_SLACK * 2.0,
