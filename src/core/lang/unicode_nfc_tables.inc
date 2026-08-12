@@ -82,8 +82,6 @@ constexpr std::array<uint32_t, 289> NFC_UNSAFE_HI{
   0x1E08F, 0x1E136, 0x1E2AE, 0x1E2EF, 0x1E4EF, 0x1E5EF, 0x1E8D6, 0x1E94A,
   0x2FA1D,
 };
-constexpr uint32_t NFC_UNSAFE_RANGE_COUNT{ 289U };
-
 // Canonical combining class, for codepoints where it is non-zero.
 constexpr std::array<uint32_t, 934> CCC_KEYS{
   0x300, 0x301, 0x302, 0x303, 0x304, 0x305, 0x306, 0x307,
@@ -265,8 +263,6 @@ constexpr std::array<scav_byte, 934> CCC_VALUES{
   230, 230, 232, 232, 220, 230, 230, 220, 220, 220, 220, 220, 220, 220, 220, 230,
   230, 230, 230, 230, 230, 7,
 };
-constexpr uint32_t CCC_COUNT{ 934U };
-
 // Fully-expanded canonical decompositions, flattened.
 constexpr std::array<uint32_t, 2081> DECOMP_KEYS{
   0xC0, 0xC1, 0xC2, 0xC3, 0xC4, 0xC5, 0xC7, 0xC8,
@@ -1274,8 +1270,6 @@ constexpr std::array<uint32_t, 3450> DECOMP_DATA{
   0x2A291, 0x9EBB, 0x4D56, 0x9EF9, 0x9EFE, 0x9F05, 0x9F0F, 0x9F16,
   0x9F3B, 0x2A600,
 };
-constexpr uint32_t DECOMP_COUNT{ 2081U };
-
 // Primary composites, keyed by (starter << 32) | combining.
 constexpr std::array<uint64_t, 961> COMPOSE_KEYS{
   0x3C00000338ULL, 0x3D00000338ULL, 0x3E00000338ULL, 0x4100000300ULL,
@@ -1643,4 +1637,3 @@ constexpr std::array<uint32_t, 961> COMPOSE_VALUES{
   0x16125, 0x16122, 0x16126, 0x16128, 0x16127, 0x16124, 0x16D69, 0x16D68,
   0x16D6A,
 };
-constexpr uint32_t COMPOSE_COUNT{ 961U };

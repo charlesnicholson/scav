@@ -20,7 +20,7 @@ enum class Slot : uint32_t { Item, Separator };
 // that grew and shrank still holds what it grew to.
 template <typename T>
 uint64_t bytes_of(std::vector<T> const &v) {
-  return static_cast<uint64_t>(v.capacity()) * sizeof(T);
+  return uint64_t{ v.capacity() } * sizeof(T);
 }
 
 struct Frame {

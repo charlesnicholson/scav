@@ -9,6 +9,7 @@
 #include "scav/scav_types.h"
 
 #include <cstdint>
+#include <ostream>
 #include <string>
 #include <string_view>
 #include <vector>

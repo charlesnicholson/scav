@@ -36,10 +36,21 @@ bool is_raw_delim_at(scav_byte const *bytes, uint32_t len, uint32_t at) {
          (bytes[at + 2] == '"');
 }
 
+// Every operand is uint32_t: a `scav_byte` promotes to int, so mixing in a char
+// literal converts back to unsigned and GCC's -Warith-conversion is right to say
+// so.
+constexpr uint32_t DIGIT_ZERO{ '0' };
+constexpr uint32_t DIGIT_NINE{ '9' };
+constexpr uint32_t LOWER_A{ 'a' };
+constexpr uint32_t LOWER_F{ 'f' };
+constexpr uint32_t UPPER_A{ 'A' };
+constexpr uint32_t UPPER_F{ 'F' };
+
 uint32_t hex_value(scav_byte b) {
-  if ((b >= '0') && (b <= '9')) { return b - '0'; }
-  if ((b >= 'a') && (b <= 'f')) { return 10U + (b - 'a'); }
-  if ((b >= 'A') && (b <= 'F')) { return 10U + (b - 'A'); }
+  uint32_t const c{ b };
+  if ((c >= DIGIT_ZERO) && (c <= DIGIT_NINE)) { return c - DIGIT_ZERO; }
+  if ((c >= LOWER_A) && (c <= LOWER_F)) { return (c - LOWER_A) + 10U; }
+  if ((c >= UPPER_A) && (c <= UPPER_F)) { return (c - UPPER_A) + 10U; }
   return INVALID;
 }
 
@@ -436,8 +447,8 @@ bool lex_source(scav_byte const *bytes,
 }
 
 uint64_t lex_footprint(LexResult const &result) {
-  return (static_cast<uint64_t>(result.tokens.capacity()) * sizeof(Token)) +
-         (static_cast<uint64_t>(result.comments.capacity()) * sizeof(LexComment));
+  return (uint64_t{ result.tokens.capacity() } * sizeof(Token)) +
+         (uint64_t{ result.comments.capacity() } * sizeof(LexComment));
 }
 
 }  // namespace scav
