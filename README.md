@@ -3,11 +3,17 @@
 Statechart authoring, layout, rendering. [PRD.md](PRD.md) is the normative design
 document; everything below describes what is built.
 
-**Status: P0 — the language, the lexer, and the parser.** `libscavcore` reads a
-`.scav` document from a byte span and produces the front-end slice of the model:
-normalized `src_bytes`, `Document`, `Statement`, trivia, and a string pool. No
-entity arrays, no includes, no resolution — those are P1 and P2. `libscavtoy` stays behind as the harness's own proof that failures get
-reported.
+**Status: P1 — the model spine.** `libscavcore` now carries the model itself:
+flat entity arrays (`State`, `Submachine`, `Transition`, `Include`, `Attr`)
+linked by ordinal ids with tombstones, extension columns kept in lockstep with
+their entity, an append-only builder API, structural validation, and lowering
+from P0's statement stream into entities — with `resolve_path` carrying the
+PRD's addressing rules (lexical first segment, strict descent, `$kind`
+spellings for unnamed pseudostates). P1's exit gate is a test: a depth-16 /
+2k-state chart built from code and the same chart parsed from text are
+structurally identical. Cross-document resolution — filling `Include.target`
+and attaching included submachines — is P2, the loader. `libscavtoy` stays
+behind as the harness's own proof that failures get reported.
 
 Three properties of the front end are worth knowing before reading it:
 

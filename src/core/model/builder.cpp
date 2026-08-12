@@ -36,9 +36,15 @@ bool state_live(Chart const &c, StateId id) {
 void insert_child(Chart &c, Span &span, StateId value) {
   if (span.len == 0) { span.off = size32(c.state_ids.size()); }
   uint32_t const pos{ span.off + span.len };
+  bool const at_tail{ pos == c.state_ids.size() };
   c.state_ids.insert(c.state_ids.begin() + pos, value);
-  for (Submachine &m : c.submachines) {
-    if ((m.children.len != 0) && (m.children.off >= pos)) { m.children.off += 1; }
+  // A tail append shifts nothing, and it is also the common case -- building
+  // in document order is all tail appends -- so the fix-up walk is skipped
+  // rather than run to discover there is nothing to do.
+  if (!at_tail) {
+    for (Submachine &m : c.submachines) {
+      if ((m.children.len != 0) && (m.children.off >= pos)) { m.children.off += 1; }
+    }
   }
   span.len += 1;
 }
@@ -46,9 +52,14 @@ void insert_child(Chart &c, Span &span, StateId value) {
 void insert_submachine(Chart &c, Span &span, SubmachineId value) {
   if (span.len == 0) { span.off = size32(c.submachine_ids.size()); }
   uint32_t const pos{ span.off + span.len };
+  bool const at_tail{ pos == c.submachine_ids.size() };
   c.submachine_ids.insert(c.submachine_ids.begin() + pos, value);
-  for (State &s : c.states) {
-    if ((s.submachines.len != 0) && (s.submachines.off >= pos)) { s.submachines.off += 1; }
+  if (!at_tail) {
+    for (State &s : c.states) {
+      if ((s.submachines.len != 0) && (s.submachines.off >= pos)) {
+        s.submachines.off += 1;
+      }
+    }
   }
   span.len += 1;
 }
@@ -58,17 +69,20 @@ void insert_submachine(Chart &c, Span &span, SubmachineId value) {
 uint32_t insert_attr(Chart &c, Span &span, Attr row) {
   if (span.len == 0) { span.off = size32(c.attrs.size()); }
   uint32_t const pos{ span.off + span.len };
+  bool const at_tail{ pos == c.attrs.size() };
   c.attrs.insert(c.attrs.begin() + pos, row);
-  for (State &s : c.states) {
-    if ((s.attrs.len != 0) && (s.attrs.off >= pos)) { s.attrs.off += 1; }
+  if (!at_tail) {
+    for (State &s : c.states) {
+      if ((s.attrs.len != 0) && (s.attrs.off >= pos)) { s.attrs.off += 1; }
+    }
+    for (Submachine &m : c.submachines) {
+      if ((m.attrs.len != 0) && (m.attrs.off >= pos)) { m.attrs.off += 1; }
+    }
+    for (Transition &t : c.transitions) {
+      if ((t.attrs.len != 0) && (t.attrs.off >= pos)) { t.attrs.off += 1; }
+    }
+    if ((c.chart_attrs.len != 0) && (c.chart_attrs.off >= pos)) { c.chart_attrs.off += 1; }
   }
-  for (Submachine &m : c.submachines) {
-    if ((m.attrs.len != 0) && (m.attrs.off >= pos)) { m.attrs.off += 1; }
-  }
-  for (Transition &t : c.transitions) {
-    if ((t.attrs.len != 0) && (t.attrs.off >= pos)) { t.attrs.off += 1; }
-  }
-  if ((c.chart_attrs.len != 0) && (c.chart_attrs.off >= pos)) { c.chart_attrs.off += 1; }
   span.len += 1;
   return pos;
 }
@@ -99,6 +113,13 @@ AttrKeyId attr_key_intern(Chart &c, std::string_view key) {
 }
 
 }  // namespace
+
+StateId model_append_state_row(Chart &c, State const &row) {
+  StateId const id{ size32(c.states.size()) };
+  c.states.push_back(row);
+  columns_append_entity_row(c, ElemKind::State);
+  return id;
+}
 
 SubmachineId build_chart(Chart &c, std::string_view name, std::string_view label) {
   // One root per chart. A second call would orphan everything under the first,

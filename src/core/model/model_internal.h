@@ -24,6 +24,12 @@ void columns_append_entity_row(Chart &c, ElemKind entity);
 // an address prints and parses through the same bytes.
 void model_state_segment(Chart const &c, StateId id, std::string &out);
 
+// Appends the row and grows its columns, and nothing else: the caller owes the
+// parent's children span. build_state's per-call span insert is O(shift), so a
+// bulk producer -- lowering's wildcard pass -- appends rows through this and
+// rebuilds the spans once, which is §7.3's rebuild rule applied at scale.
+StateId model_append_state_row(Chart &c, State const &row);
+
 // A pre-split path segment, so lowering can resolve straight from PathSeg rows
 // without printing text it would immediately re-parse.
 struct ResolveSeg {

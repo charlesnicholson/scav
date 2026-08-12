@@ -45,7 +45,10 @@ if(SCAV_BUILD_TESTS)
     model/builder_tests.cpp
     model/chart_tests.cpp
     model/columns_tests.cpp
+    model/exit_gate_tests.cpp
     model/lower_tests.cpp
+    model/model_fuzz_tests.cpp
+    model/model_perf_tests.cpp
     model/resolve_tests.cpp
     model/validate_tests.cpp
     scav_core_tests.cpp

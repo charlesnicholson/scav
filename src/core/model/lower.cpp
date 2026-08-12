@@ -8,6 +8,7 @@
 #include "core/model/model_internal.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
+#include "scav_sort.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -253,54 +254,138 @@ DiagCode diag_for(ResolveStatus status) {
   return DiagCode::EndpointUnresolved;
 }
 
-// The transition pass. Paths first, wildcards second: a failed path skips the
-// whole statement, and synthesizing the wildcard first would leave an orphan
-// pseudostate behind the skip.
+// A transition statement after endpoint resolution: what to create, or
+// nothing when a diagnostic already said why not.
+struct PlannedTrans {
+  uint32_t row;
+  SubmachineId scope;
+  StateId src, dst;  // INVALID where a wildcard will synthesize
+  bool src_wild, dst_wild;
+  bool ok;
+};
+
+// A wildcard's synthesized pseudostate, held until the one span rebuild.
+struct WildChild {
+  SubmachineId scope;
+  StateId state;
+  uint32_t order;  // creation order, the stable tail of the rebuild sort
+};
+
+// Splices the synthesized pseudostates into their scopes' children spans in
+// one O(n) rebuild of state_ids -- §7.3's rebuild rule. Per-statement
+// build_state would shift the shared array once per wildcard, which is
+// quadratic over a document with one initial arrow per submachine.
+void attach_wildcards(Chart &c, std::vector<WildChild> &wild) {
+  if (wild.empty()) { return; }
+  stable_sort_by(wild, [](WildChild const &a, WildChild const &b) {
+    if (a.scope.v != b.scope.v) { return a.scope.v < b.scope.v; }
+    return a.order < b.order;
+  });
+  std::vector<StateId> rebuilt;
+  rebuilt.reserve(c.state_ids.size() + wild.size());
+  size_t next{ 0 };
+  for (uint32_t i = 0; i < c.submachines.size(); ++i) {
+    Submachine &m{ c.submachines[i] };
+    uint32_t const off{ narrow_clamp<uint32_t>(rebuilt.size()) };
+    for (uint32_t k = 0; k < m.children.len; ++k) {
+      rebuilt.push_back(c.state_ids[m.children.off + k]);
+    }
+    while ((next < wild.size()) && (wild[next].scope.v == i)) {
+      rebuilt.push_back(wild[next].state);
+      ++next;
+    }
+    m.children = make_span(off, narrow_clamp<uint32_t>(rebuilt.size()) - off);
+  }
+  c.state_ids = std::move(rebuilt);
+}
+
+// The transition pass, in phases. Resolve every path first -- a failed path
+// skips its whole statement, and synthesizing a wildcard first would leave an
+// orphan pseudostate behind the skip. Then synthesize the wildcards in
+// statement order, attach them in one rebuild, and only then create the
+// transition rows, which are plain tail appends.
 void lower_transitions(Lowerer &lo, std::vector<PendingTrans> const &pending) {
+  std::vector<PlannedTrans> planned;
+  planned.reserve(pending.size());
   for (PendingTrans const &pt : pending) {
     TransStmt const &ts{ lo.pd->transitions[lo.pd->stmt_payload[pt.row]] };
-
-    if ((ts.src.wildcard != 0) && (ts.dst.wildcard != 0)) {
+    PlannedTrans plan{ .row = pt.row,
+                       .scope = pt.scope,
+                       .src = { INVALID },
+                       .dst = { INVALID },
+                       .src_wild = ts.src.wildcard != 0,
+                       .dst_wild = ts.dst.wildcard != 0,
+                       .ok = true };
+    if (plan.src_wild && plan.dst_wild) {
       report(lo, DiagCode::WildcardBothEndpoints, pt.row);
-      continue;
+      plan.ok = false;
     }
-
-    StateId src{ INVALID };
-    StateId dst{ INVALID };
-    bool failed{ false };
-    if (ts.src.wildcard == 0) {
-      ResolveStatus const status{ resolve_endpoint(lo, pt.scope, ts.src, src) };
+    if (plan.ok && !plan.src_wild) {
+      ResolveStatus const status{ resolve_endpoint(lo, pt.scope, ts.src, plan.src) };
       if (status != ResolveStatus::Ok) {
         report(lo, diag_for(status), pt.row);
-        failed = true;
+        plan.ok = false;
       }
     }
-    if (!failed && (ts.dst.wildcard == 0)) {
-      ResolveStatus const status{ resolve_endpoint(lo, pt.scope, ts.dst, dst) };
+    if (plan.ok && !plan.dst_wild) {
+      ResolveStatus const status{ resolve_endpoint(lo, pt.scope, ts.dst, plan.dst) };
       if (status != ResolveStatus::Ok) {
         report(lo, diag_for(status), pt.row);
-        failed = true;
+        plan.ok = false;
       }
     }
-    if (failed) { continue; }
+    planned.push_back(plan);
+  }
 
-    // Each `*` synthesizes its own pseudostate in the statement's lexical
-    // submachine (§9) -- one per statement, so two `trans * -> X` are two
-    // initial arrows and §10's multiple-initial check has something to see.
-    if (ts.src.wildcard != 0) {
-      src = build_state(*lo.c, pt.scope, {}, StateKind::Initial, {});
-      lo.c->states[src.v].stmt = global_stmt(lo, pt.row);
+  // Each `*` synthesizes its own pseudostate in the statement's lexical
+  // submachine (§9) -- one per statement, so two `trans * -> X` are two
+  // initial arrows and §10's multiple-initial check has something to see.
+  std::vector<WildChild> wild;
+  for (PlannedTrans &plan : planned) {
+    if (!plan.ok) { continue; }
+    if (plan.src_wild) {
+      plan.src = model_append_state_row(*lo.c,
+                                        { .name = {},
+                                          .label = {},
+                                          .parent = plan.scope,
+                                          .kind = StateKind::Initial,
+                                          .submachines = {},
+                                          .attrs = {},
+                                          .stmt = global_stmt(lo, plan.row),
+                                          .inst = { INVALID },
+                                          .live = 1 });
+      wild.push_back({ .scope = plan.scope,
+                       .state = plan.src,
+                       .order = narrow_clamp<uint32_t>(wild.size()) });
     }
-    if (ts.dst.wildcard != 0) {
-      dst = build_state(*lo.c, pt.scope, {}, StateKind::Final, {});
-      lo.c->states[dst.v].stmt = global_stmt(lo, pt.row);
+    if (plan.dst_wild) {
+      plan.dst = model_append_state_row(*lo.c,
+                                        { .name = {},
+                                          .label = {},
+                                          .parent = plan.scope,
+                                          .kind = StateKind::Final,
+                                          .submachines = {},
+                                          .attrs = {},
+                                          .stmt = global_stmt(lo, plan.row),
+                                          .inst = { INVALID },
+                                          .live = 1 });
+      wild.push_back({ .scope = plan.scope,
+                       .state = plan.dst,
+                       .order = narrow_clamp<uint32_t>(wild.size()) });
     }
+  }
+  attach_wildcards(*lo.c, wild);
 
-    TransId const id{ build_trans(*lo.c, src, dst, ts.kind, pd_str(lo, ts.label)) };
-    lo.c->transitions[id.v].stmt = global_stmt(lo, pt.row);
+  for (PlannedTrans const &plan : planned) {
+    if (!plan.ok) { continue; }
+    TransStmt const &ts{ lo.pd->transitions[lo.pd->stmt_payload[plan.row]] };
+    TransId const id{
+      build_trans(*lo.c, plan.src, plan.dst, ts.kind, pd_str(lo, ts.label))
+    };
+    lo.c->transitions[id.v].stmt = global_stmt(lo, plan.row);
 
     // A trans block holds attrs and nothing else.
-    Span const kids{ lo.pd->stmt_children[pt.row] };
+    Span const kids{ lo.pd->stmt_children[plan.row] };
     for (uint32_t i = 0; i < kids.len; ++i) {
       uint32_t const child{ lo.pd->stmt_ids[kids.off + i].v };
       if (lo.pd->stmts[child].kind == StmtKind::Attr) {
