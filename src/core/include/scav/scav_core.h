@@ -188,6 +188,14 @@ enum class DiagCode : uint32_t {
   TrailingContent,
   DepthLimitExceeded,
 
+  // Lowering: statements to entities (§9, §15). These carry the offending
+  // statement's span, since the entity they would name was never created.
+  MisplacedStatement,
+  WildcardBothEndpoints,
+  EndpointUnresolved,
+  BadSubmachineQualifier,
+  EndpointCrossesInclude,
+
   // Validation (§10). Subjects are entities, so these carry an ElemRef and
   // derive file/line/column by walking to the statement's src span on demand.
   DanglingRef,
@@ -773,6 +781,40 @@ scav_byte const *column_data(Chart const &c, ColumnId id);
 
 // Rows, not bytes: bytes.size() / elem_size.
 uint32_t column_count(Chart const &c, ColumnId id);
+
+// Resolution ================================================================
+
+// Why a path failed, so lowering can say which rule broke rather than only
+// that one did.
+enum class ResolveStatus : uint32_t { Ok, NotFound, BadQualifier, CrossesInclude };
+
+// Resolves a §9 state path against `scope`, the submachine the reference
+// appears in -- pass Chart::root_submachine for an absolute lookup. The first
+// segment resolves innermost-outward through the enclosing submachines,
+// nearest match winning; every later segment descends strictly. A `:name` or
+// `:ordinal` qualifier picks which submachine to descend into and is required
+// exactly when the state has more than one; on the last segment there is
+// nothing to descend into, so a qualifier there is an error. Synthetic `$kind`
+// spellings address unnamed pseudostates. Descending past an unresolved
+// include alias is CrossesInclude until the loader (P2) attaches the target.
+ResolveStatus resolve_path(Chart const &c,
+                           SubmachineId scope,
+                           std::string_view path,
+                           StateId &out);
+
+// Lowering ==================================================================
+
+// Statements to entities (§17 P1). Appends pd's document, statements, trivia,
+// and normalized bytes to the chart -- rebased into the shared pools -- then
+// creates the entity rows the statements describe: implicit submachines for
+// states directly in a block (§15), one synthesized pseudostate per `*`
+// endpoint (§9), an Include row plus alias host state per include, endpoint
+// paths resolved lexically (§9). The parser accepts any item in any block by
+// design; placement rules are lowering's, and a misplaced statement is
+// diagnosed and skipped, never half-applied. P1 lowers one root document into
+// an empty chart; cross-document resolution is the loader's (P2). Returns
+// false when it reported anything.
+bool lower_document(Chart &c, ParsedDocument const &pd, std::vector<Diagnostic> &diags);
 
 // Validation ================================================================
 

@@ -7,6 +7,10 @@
 
 #include "scav/scav_core.h"
 
+#include <cstdint>
+#include <string>
+#include <string_view>
+
 namespace scav {
 
 // Appends one zero-filled row to every column registered for `entity`. The
@@ -14,6 +18,25 @@ namespace scav {
 // index-aligned with their entity array -- the lockstep half of what the core
 // owes an extension.
 void columns_append_entity_row(Chart &c, ElemKind entity);
+
+// One path segment for `id`: its authored name, or the `$kind` synthetic
+// spelling with a stable ordinal. Shared by chart_path_of and the resolver so
+// an address prints and parses through the same bytes.
+void model_state_segment(Chart const &c, StateId id, std::string &out);
+
+// A pre-split path segment, so lowering can resolve straight from PathSeg rows
+// without printing text it would immediately re-parse.
+struct ResolveSeg {
+  std::string_view name;
+  std::string_view qualifier;  // empty when absent or numeric
+  uint32_t ordinal;            // INVALID when absent or named
+};
+
+ResolveStatus resolve_segments(Chart const &c,
+                               SubmachineId scope,
+                               ResolveSeg const *segs,
+                               uint32_t count,
+                               StateId &out);
 
 }  // namespace scav
 

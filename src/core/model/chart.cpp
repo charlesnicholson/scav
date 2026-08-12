@@ -1,6 +1,7 @@
 // Reads over the model, and the string-pool append everything else builds on.
 // Nothing here mutates a chart.
 
+#include "core/model/model_internal.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 
@@ -35,10 +36,12 @@ uint32_t synthetic_ordinal(Chart const &c, StateId id) {
   return n;
 }
 
+}  // namespace
+
 // One path segment: the authored name, or `$<kind>` with an ordinal suffix
 // past the first. The grammar's ident admits neither `$` nor a leading digit,
 // so a synthetic name can never collide with an authored one.
-void append_segment(Chart const &c, StateId id, std::string &out) {
+void model_state_segment(Chart const &c, StateId id, std::string &out) {
   State const &s{ c.states[id.v] };
   if (s.name.len != 0) {
     out += chart_string(c, s.name);
@@ -49,8 +52,6 @@ void append_segment(Chart const &c, StateId id, std::string &out) {
   uint32_t const ordinal{ synthetic_ordinal(c, id) };
   if (ordinal != 0) { out += std::to_string(ordinal); }
 }
-
-}  // namespace
 
 StrRef string_pool_add(StringPool &pool, std::string_view text) {
   if (text.empty()) { return {}; }
@@ -159,7 +160,7 @@ void chart_path_of(Chart const &c, StateId id, std::string &out) {
 
   for (size_t i = chain.size(); i-- > 0;) {
     StateId const step{ chain[i] };
-    append_segment(c, step, out);
+    model_state_segment(c, step, out);
     if (i == 0) { continue; }
     // The qualifier names which of `step`'s submachines the next segment
     // descends into, and only ambiguity earns one: `On:main/Idle` when On has
