@@ -16,7 +16,7 @@ namespace {
 
 using namespace scav;
 
-#include "core/lang/unicode_nfc_vectors.inc"  // NOLINT(bugprone-suspicious-include)
+#include "core/lang/unicode_nfc_test_vectors.inc"  // NOLINT(bugprone-suspicious-include)
 
 std::vector<uint32_t> cps(std::vector<uint32_t> const &v) { return v; }
 
