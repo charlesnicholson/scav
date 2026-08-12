@@ -48,6 +48,12 @@ option(SCAV_BUILD_TESTS "Build the unit tests" ${scav_tests_default})
 # drops them from ALL, leaving `--target run.<name>` for one-at-a-time runs.
 option(SCAV_RUN_TESTS "Run the tests as part of the build" ON)
 
+# Off because the determinism matrix runs on shared CI runners, where a stalled box
+# reports a regression that is not there. The performance tests always run and their
+# memory bounds always assert -- those are counted, not timed. This adds the wall
+# clock ones, which mean something only on a machine you can name.
+option(SCAV_PERF_FLOORS "Assert the performance timing floors" OFF)
+
 # Language baseline
 
 set(CMAKE_CXX_STANDARD 20)

@@ -131,8 +131,8 @@ symbol names its neighbourhood and the sections are the table of contents:
 | `syntax_` | the statement rows and their spellings |
 | `parse_` | the entry points most callers want |
 
-Private, and deliberately unreachable from outside: `model/bytes_view.h`,
-`lang/unicode_nfc.h`, `lang/synth_document.h`.
+Private, and deliberately unreachable from outside: `lang/unicode_nfc.h` and
+`lang/synth_document.h`.
 
 ## The Unicode tables
 
@@ -184,6 +184,11 @@ document is a rule that gets discovered late:
   `--target run.<name>` runs exactly one.
 - **An untested file fails the build**, via `tools/coverage.py`. Not a percentage
   target — numbers are not what this gates on.
+- **Performance is measured, but the clock does not gate.** The perf tests always
+  run, and the bounds they assert by default are counted rather than timed — peak
+  memory as a multiple of the input. The throughput and scaling floors need
+  `-DSCAV_PERF_FLOORS=ON`, because CI runs on shared runners where a stalled box
+  reports a regression that is not there.
 - **Each library builds twice**, shipping and testable. Unit tests link the
   testable variant and reach internal functions through `SCAV_INTERNAL`; mocks and
   interface seams are rejected.
