@@ -20,7 +20,7 @@ import os
 import platform
 import subprocess
 from pathlib import Path
-from shutil import rmtree
+from shutil import rmtree, which
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 ENVY = REPO_ROOT / ("bin/envy.bat" if platform.system() == "Windows" else "bin/envy")
@@ -72,6 +72,31 @@ def resolve_preset(args: argparse.Namespace) -> str:
     available = available_presets()
     return next((f"{t}-{suffix}" for t in host_triples() if f"{t}-{suffix}" in available),
                 f"{host_triples()[0]}-{suffix}")
+
+
+def preset_compiler(preset: str) -> str | None:
+    """The compiler a preset names, following `inherits`; earlier entries win."""
+    doc = json.loads((REPO_ROOT / "CMakePresets.json").read_text(encoding="utf-8"))
+    by_name = {p["name"]: p for p in doc["configurePresets"]}
+
+    def walk(name: str) -> str | None:
+        if (node := by_name.get(name)) is None:
+            return None
+        if found := node.get("cacheVariables", {}).get("CMAKE_CXX_COMPILER"):
+            return found
+        return next((f for p in node.get("inherits", []) if (f := walk(p))), None)
+
+    return walk(preset)
+
+
+def cached_compiler(build_dir: Path) -> str | None:
+    """What the existing tree was configured with, if there is one."""
+    if not (cache := build_dir / "CMakeCache.txt").exists():
+        return None
+    for line in cache.read_text(encoding="utf-8", errors="replace").splitlines():
+        if line.startswith("CMAKE_CXX_COMPILER:") and "=" in line:
+            return line.split("=", 1)[1].strip()
+    return None
 
 
 def link_compile_commands(build_dir: Path) -> None:
@@ -127,11 +152,30 @@ def main() -> int:
     ]
 
     build_dir = REPO_ROOT / "out" / preset
+
+    # The presets name a compiler unqualified -- `clang++`, not a path -- because
+    # CMakePresets.json is committed and every matrix host keeps its compilers
+    # somewhere different. Resolving it here pins the choice into the cache and
+    # prints it, so putting a second toolchain on PATH is a visible decision rather
+    # than a silent swap of what the sanitizer rows are built with.
+    resolved = which(c) if (c := preset_compiler(preset)) else None
+    resolved = Path(resolved).as_posix() if resolved else None
+
     if args.clean and build_dir.exists():
         print(f"+ rm -rf {build_dir}", flush=True)
         rmtree(build_dir)
+    elif resolved and (was := cached_compiler(build_dir)) and was != resolved:
+        # CMake answers a changed compiler by resetting the cache, and the -D
+        # arguments below do not survive that internal re-run -- so configure fails
+        # reporting a missing doctest and blames the wrong thing entirely. Cleaning
+        # is the same work CMake was going to do, minus the misleading error.
+        print(f"+ rm -rf {build_dir}\n    compiler changed: {was} -> {resolved}",
+              flush=True)
+        rmtree(build_dir)
 
     extra = [a for a in args.cmake_args if a != "--"]
+    if resolved:
+        extra.append(f"-DCMAKE_CXX_COMPILER={resolved}")
     if args.no_test:
         extra.append("-DSCAV_RUN_TESTS=OFF")
 
