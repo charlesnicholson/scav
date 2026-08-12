@@ -39,6 +39,24 @@ uint64_t micros_since(std::chrono::steady_clock::time_point start) {
   return (us == 0) ? 1U : us;  // a zero denominator says nothing useful
 }
 
+// The scaling inputs run in hundreds of microseconds, so one scheduling hiccup in
+// the denominator moves the ratio further than a real regression would. Noise only
+// ever adds time, so the fastest of several runs is the estimate; a quadratic term
+// is still quadratic in every one of them.
+constexpr uint32_t SCALING_RUNS{ 5 };
+
+template <typename Once>
+uint64_t fastest_micros(Once &&once) {
+  uint64_t best{ UINT64_MAX };
+  for (uint32_t i = 0; i < SCALING_RUNS; ++i) {
+    auto const start{ std::chrono::steady_clock::now() };
+    once();
+    uint64_t const us{ micros_since(start) };
+    best = (us < best) ? us : best;
+  }
+  return best;
+}
+
 uint64_t throughput_mb_per_s(uint64_t bytes, uint64_t micros) {
   return (bytes * 1'000'000ULL) / (micros * 1024ULL * 1024ULL);
 }
@@ -182,8 +200,8 @@ TEST_CASE("perf: lexing is linear in the input") {
   // faults the second one does not.
   time_lex(small_bytes);
   time_lex(large_bytes);
-  uint64_t const small_us{ time_lex(small_bytes).micros };
-  uint64_t const large_us{ time_lex(large_bytes).micros };
+  uint64_t const small_us{ fastest_micros([&] { time_lex(small_bytes); }) };
+  uint64_t const large_us{ fastest_micros([&] { time_lex(large_bytes); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_FLOOR) {
@@ -249,14 +267,10 @@ TEST_CASE("perf: a wide sibling list does not degrade") {
   double const ratio{ static_cast<double>(large.size()) /
                       static_cast<double>(small.size()) };
 
-  parse(small);
-  parse(large);
-  auto start{ std::chrono::steady_clock::now() };
   REQUIRE(parse(small).ok);
-  uint64_t const small_us{ micros_since(start) };
-  start = std::chrono::steady_clock::now();
   REQUIRE(parse(large).ok);
-  uint64_t const large_us{ micros_since(start) };
+  uint64_t const small_us{ fastest_micros([&] { parse(small); }) };
+  uint64_t const large_us{ fastest_micros([&] { parse(large); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_FLOOR) {
@@ -286,14 +300,10 @@ TEST_CASE("perf: a long comment run does not degrade") {
   double const ratio{ static_cast<double>(large.size()) /
                       static_cast<double>(small.size()) };
 
-  parse(small);
-  parse(large);
-  auto start{ std::chrono::steady_clock::now() };
   Parsed const small_parsed{ parse(small) };
-  uint64_t const small_us{ micros_since(start) };
-  start = std::chrono::steady_clock::now();
   Parsed const large_parsed{ parse(large) };
-  uint64_t const large_us{ micros_since(start) };
+  uint64_t const small_us{ fastest_micros([&] { parse(small); }) };
+  uint64_t const large_us{ fastest_micros([&] { parse(large); }) };
 
   REQUIRE(small_parsed.ok);
   REQUIRE(large_parsed.ok);
@@ -315,14 +325,10 @@ TEST_CASE("perf: deep nesting does not degrade") {
   double const ratio{ static_cast<double>(large.size()) /
                       static_cast<double>(small.size()) };
 
-  CHECK(parse_deep(small, 300).ok);
-  CHECK(parse_deep(large, 300).ok);
-  auto start{ std::chrono::steady_clock::now() };
   REQUIRE(parse_deep(small, 300).ok);
-  uint64_t const small_us{ micros_since(start) };
-  start = std::chrono::steady_clock::now();
   REQUIRE(parse_deep(large, 300).ok);
-  uint64_t const large_us{ micros_since(start) };
+  uint64_t const small_us{ fastest_micros([&] { parse_deep(small, 300); }) };
+  uint64_t const large_us{ fastest_micros([&] { parse_deep(large, 300); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_FLOOR) {

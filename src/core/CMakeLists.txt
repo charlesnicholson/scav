@@ -50,8 +50,11 @@ if(SCAV_BUILD_TESTS)
   # $<CONFIG:Debug> as well, because CMAKE_BUILD_TYPE is empty on the
   # multi-config generators.
   set(scav_light "$<OR:$<BOOL:${scav_perf_light}>,$<CONFIG:Debug>>")
+  # Instrumentation makes a timing describe the instrumentation, so a light config
+  # never asserts one even when floors are asked for.
+  set(scav_floors "$<AND:$<BOOL:${SCAV_PERF_FLOORS}>,$<NOT:${scav_light}>>")
   target_compile_definitions(scav_core_tests PRIVATE
     "SCAV_PERF_INPUT_BYTES=$<IF:${scav_light},4194304,104857600>"
-    "SCAV_PERF_ASSERT_FLOOR=$<IF:${scav_light},0,1>"
+    "SCAV_PERF_ASSERT_FLOOR=$<IF:${scav_floors},1,0>"
   )
 endif()
