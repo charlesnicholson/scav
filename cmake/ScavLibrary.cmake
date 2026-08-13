@@ -2,7 +2,6 @@ include_guard(GLOBAL)
 
 # What each library may link. Notably draw may not link layout: a builder reads
 # geometry columns and does not care who wrote them.
-set(SCAV_LIBRARY_DEPS_toy "")
 set(SCAV_LIBRARY_DEPS_core "")
 set(SCAV_LIBRARY_DEPS_layout core)
 set(SCAV_LIBRARY_DEPS_draw core)

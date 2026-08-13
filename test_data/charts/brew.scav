@@ -1,0 +1,39 @@
+// Espresso machine: written to touch every element the model holds -- nested
+// states, concurrency, pseudostates from `*`, a choice, internal transitions,
+// and all three attribute spellings. `scav dump` prints this; the golden under
+// test_data/golden/dump/ pins the output byte for byte.
+chart brew "espresso machine" {
+  @doc = "counter-top espresso robot",
+  @power { mains, watts = "1200" },
+
+  state Off,
+  state Standby "warm and idle",
+  state SelfCheck choice,
+
+  trans * -> Off,
+  trans Off -> SelfCheck "power switch",
+  trans SelfCheck -> Standby "ok",
+  trans SelfCheck -> Off "fault",
+
+  state Brewing {
+    @doc = "both submachines run while a shot pulls",
+
+    submachine water "boiler and pump" {
+      state Heating { @tune = "pid" },
+      state Pumping,
+      trans * -> Heating,
+      trans Heating -> Pumping "at temperature",
+      trans internal Pumping -> Pumping "pressure adjust",
+    },
+    submachine grinder {
+      state Grinding,
+      state Dosing,
+      trans * -> Grinding,
+      trans Grinding -> Dosing "ground",
+    },
+  },
+
+  trans Standby -> Brewing "brew button",
+  trans Brewing -> Standby "shot done",
+  trans Standby -> * "descale overdue",
+}

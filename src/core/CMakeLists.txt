@@ -55,6 +55,9 @@ if(SCAV_BUILD_TESTS)
     sort_tests.cpp
   )
   target_link_libraries(scav_core_tests PRIVATE scavcore_testable)
+  # The deliberately-failing case (PB): a harness that reports nothing looks
+  # identical to one where everything passes.
+  scav_expect_test_failure(scav_core_tests "*deliberate failure*")
 
   # Performance tests assert floors, not times. Under instrumentation the numbers
   # describe the instrumentation, so those configs shrink the input and skip the

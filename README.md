@@ -12,8 +12,10 @@ PRD's addressing rules (lexical first segment, strict descent, `$kind`
 spellings for unnamed pseudostates). P1's exit gate is a test: a depth-16 /
 2k-state chart built from code and the same chart parsed from text are
 structurally identical. Cross-document resolution — filling `Include.target`
-and attaching included submachines — is P2, the loader. `libscavtoy` stays
-behind as the harness's own proof that failures get reported.
+and attaching included submachines — is P2, the loader. The `scav` executable
+(`apps/cli`) carries the first verb, `dump`: load a chart from a file and print
+the model — the entity rows, not the syntax — each element line ending with the
+source file and line its declaration started on.
 
 Three properties of the front end are worth knowing before reading it:
 
@@ -115,12 +117,11 @@ compiles every public header against nothing but the install prefix, which is
 what catches a public header that quietly includes a private one.
 
 **One public header per library**, so there is never a question of which to
-include. There are three in the whole project, and a core user includes one:
+include. There are two in the whole project, and a core user includes one:
 
 | header | is |
 |---|---|
 | `scav/scav_core.h` | all of `libscavcore` |
-| `scav/scav_toy.h` | all of `libscavtoy` |
 | `scav/scav_types.h` | the cross-library POD vocabulary; pulled in by the others |
 
 Inside `scav_core.h`, every function carries the prefix of its section, so a
@@ -198,9 +199,9 @@ document is a rule that gets discovered late:
 - **Each library builds twice**, shipping and testable. Unit tests link the
   testable variant and reach internal functions through `SCAV_INTERNAL`; mocks and
   interface seams are rejected.
-- **Failures are actually reported.** `meta.toy_reports_failures` runs the
-  deliberately-failing case and expects a non-zero exit. A harness that reports
-  nothing looks identical to one where everything passes.
+- **Failures are actually reported.** `scav_core_tests_reports_failures` runs
+  the deliberately-failing case and expects a non-zero exit. A harness that
+  reports nothing looks identical to one where everything passes.
 - **An installed scav is consumable.** `func.install_consumer` installs to a
   prefix and configures a separate project against it with nothing but
   `CMAKE_PREFIX_PATH`.

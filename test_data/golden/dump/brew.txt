@@ -1,0 +1,33 @@
+chart brew "espresso machine" (test_data/charts/brew.scav:5)
+  @doc = "counter-top espresso robot"
+  @power:mains = "true"
+  @power:watts = "1200"
+  submachine :0 (test_data/charts/brew.scav:5)
+    state Off (test_data/charts/brew.scav:9)
+    state Standby "warm and idle" (test_data/charts/brew.scav:10)
+    state SelfCheck choice (test_data/charts/brew.scav:11)
+    state Brewing (test_data/charts/brew.scav:18)
+      @doc = "both submachines run while a shot pulls"
+      submachine water "boiler and pump" (test_data/charts/brew.scav:21)
+        state Heating (test_data/charts/brew.scav:22)
+          @tune = "pid"
+        state Pumping (test_data/charts/brew.scav:23)
+        state $initial (test_data/charts/brew.scav:24)
+        trans Brewing:water/$initial -> Brewing:water/Heating (test_data/charts/brew.scav:24)
+        trans Brewing:water/Heating -> Brewing:water/Pumping "at temperature" (test_data/charts/brew.scav:25)
+        trans Brewing:water/Pumping -> Brewing:water/Pumping internal "pressure adjust" (test_data/charts/brew.scav:26)
+      submachine grinder (test_data/charts/brew.scav:28)
+        state Grinding (test_data/charts/brew.scav:29)
+        state Dosing (test_data/charts/brew.scav:30)
+        state $initial (test_data/charts/brew.scav:31)
+        trans Brewing:grinder/$initial -> Brewing:grinder/Grinding (test_data/charts/brew.scav:31)
+        trans Brewing:grinder/Grinding -> Brewing:grinder/Dosing "ground" (test_data/charts/brew.scav:32)
+    state $initial (test_data/charts/brew.scav:13)
+    state $final (test_data/charts/brew.scav:38)
+    trans $initial -> Off (test_data/charts/brew.scav:13)
+    trans Off -> SelfCheck "power switch" (test_data/charts/brew.scav:14)
+    trans SelfCheck -> Standby "ok" (test_data/charts/brew.scav:15)
+    trans SelfCheck -> Off "fault" (test_data/charts/brew.scav:16)
+    trans Standby -> Brewing "brew button" (test_data/charts/brew.scav:36)
+    trans Brewing -> Standby "shot done" (test_data/charts/brew.scav:37)
+    trans Standby -> $final "descale overdue" (test_data/charts/brew.scav:38)
