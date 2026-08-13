@@ -138,8 +138,9 @@ symbol names its neighbourhood and the sections are the table of contents:
 | `syntax_` | the statement rows and their spellings |
 | `parse_` | the entry points most callers want |
 
-Private, and deliberately unreachable from outside: `lang/unicode_nfc.h` and
-`lang/synth_document.h`.
+Private, and deliberately unreachable from outside: `lang/unicode_nfc.h`.
+Test-only code carries `test` in its name: `test_support.h`, `test_corpus.h`,
+`lang/test_synth_document.{h,cpp}`.
 
 ## The Unicode tables
 

@@ -30,7 +30,6 @@ if(Python3_Interpreter_FOUND)
 endif()
 
 if(SCAV_BUILD_TESTS)
-  # synth_document.cpp is harness-only: scav ships no chart generator.
   scav_tests(scav_core_tests
     lang/corpus_tests.cpp
     lang/diagnostics_tests.cpp
@@ -40,15 +39,15 @@ if(SCAV_BUILD_TESTS)
     lang/syntax_tests.cpp
     lang/parser_tests.cpp
     lang/perf_tests.cpp
-    lang/synth_document.cpp
+    lang/test_synth_document.cpp
     lang/unicode_nfc_tests.cpp
     model/builder_tests.cpp
     model/chart_tests.cpp
     model/columns_tests.cpp
     model/exit_gate_tests.cpp
     model/lower_tests.cpp
-    model/model_fuzz_tests.cpp
-    model/model_perf_tests.cpp
+    model/fuzz_tests.cpp
+    model/perf_tests.cpp
     model/resolve_tests.cpp
     model/validate_tests.cpp
     scav_core_tests.cpp

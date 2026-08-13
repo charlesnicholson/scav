@@ -1,4 +1,4 @@
-#include "core/lang/synth_document.h"
+#include "core/lang/test_synth_document.h"
 
 #include <array>
 #include <cstdint>

@@ -1,5 +1,5 @@
-#ifndef SCAV_CORE_CORPUS_CHARTS_H_INCLUDED
-#define SCAV_CORE_CORPUS_CHARTS_H_INCLUDED
+#ifndef SCAV_CORE_TEST_CORPUS_H_INCLUDED
+#define SCAV_CORE_TEST_CORPUS_H_INCLUDED
 
 // The hand-transcribed corpus (P0): real state machines written the way
 // someone would write them. Shared by the parser's corpus tests and the model
@@ -151,4 +151,4 @@ inline std::vector<CorpusChart> corpus() {
 
 }  // namespace scav::test
 
-#endif  // SCAV_CORE_CORPUS_CHARTS_H_INCLUDED
+#endif  // SCAV_CORE_TEST_CORPUS_H_INCLUDED

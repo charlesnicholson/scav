@@ -2,7 +2,7 @@
 // load-bearing assertion is the machine-independent *scaling* one. Inputs are
 // built in RAM, and instrumented builds shrink them and skip the floor.
 
-#include "core/lang/synth_document.h"
+#include "core/lang/test_synth_document.h"
 #include "core/test_support.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"

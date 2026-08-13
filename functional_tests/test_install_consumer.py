@@ -99,8 +99,8 @@ class TestInstallAndConsume(unittest.TestCase):
         # An installed internal header would let a consumer define SCAV_TESTING and
         # link against symbols the shipping archive does not export.
         leaked = [p for pattern in ("*_internal.h", "*testable*", "*_tests.*",
-                                    "test_support.h", "lookup_map.h", "sort.h",
-                                    "interner.h", "synth_document.h")
+                                    "test_*.h", "lookup_map.h", "sort.h",
+                                    "interner.h", "*synth_document*")
                   for p in self.prefix.rglob(pattern)]
         self.assertEqual([], leaked, "unshipped artifacts escaped into the install tree")
 

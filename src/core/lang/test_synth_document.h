@@ -1,5 +1,5 @@
-#ifndef SCAV_CORE_LANG_SYNTH_DOCUMENT_H_INCLUDED
-#define SCAV_CORE_LANG_SYNTH_DOCUMENT_H_INCLUDED
+#ifndef SCAV_CORE_LANG_TEST_SYNTH_DOCUMENT_H_INCLUDED
+#define SCAV_CORE_LANG_TEST_SYNTH_DOCUMENT_H_INCLUDED
 
 // Synthetic documents, in RAM -- a disk-backed benchmark measures the filesystem.
 // Harness-only, and a trap alone: corpus_tests.cpp has the hand-written half.
@@ -44,4 +44,4 @@ std::string synth_deep_document(uint32_t depth);
 
 }  // namespace scav
 
-#endif  // SCAV_CORE_LANG_SYNTH_DOCUMENT_H_INCLUDED
+#endif  // SCAV_CORE_LANG_TEST_SYNTH_DOCUMENT_H_INCLUDED
