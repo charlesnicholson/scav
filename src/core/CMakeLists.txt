@@ -71,8 +71,12 @@ if(SCAV_BUILD_TESTS)
   # Instrumentation makes a timing describe the instrumentation, so a light config
   # never asserts one even when floors are asked for.
   set(scav_floors "$<AND:$<BOOL:${SCAV_PERF_FLOORS}>,$<NOT:${scav_light}>>")
+  # Input sizes follow what the run can prove. The 100 MB corpus exists for the
+  # timing floors, which only assert on a named machine (SCAV_PERF_FLOORS); a
+  # run without them keeps the scaling and memory assertions, and 8 MB is ample
+  # to expose a quadratic to those while keeping the suite seconds long.
   target_compile_definitions(scav_core_tests PRIVATE
-    "SCAV_PERF_INPUT_BYTES=$<IF:${scav_light},4194304,104857600>"
+    "SCAV_PERF_INPUT_BYTES=$<IF:${scav_light},4194304,$<IF:${scav_floors},104857600,8388608>>"
     "SCAV_PERF_ASSERT_FLOOR=$<IF:${scav_floors},1,0>"
   )
 endif()

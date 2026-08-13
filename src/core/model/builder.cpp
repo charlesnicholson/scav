@@ -121,6 +121,13 @@ StateId model_append_state_row(Chart &c, State const &row) {
   return id;
 }
 
+SubmachineId model_append_submachine_row(Chart &c, Submachine const &row) {
+  SubmachineId const id{ size32(c.submachines.size()) };
+  c.submachines.push_back(row);
+  columns_append_entity_row(c, ElemKind::Submachine);
+  return id;
+}
+
 SubmachineId build_chart(Chart &c, std::string_view name, std::string_view label) {
   // One root per chart. A second call would orphan everything under the first,
   // so it is a refused call rather than a replaced root.

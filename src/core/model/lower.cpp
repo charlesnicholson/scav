@@ -148,15 +148,31 @@ std::vector<PendingTrans> lower_entities(Lowerer &lo, uint32_t root_row) {
           break;
         }
         StateStmt const &s{ lo.pd->states[lo.pd->stmt_payload[row]] };
-        StateId const id{
-          build_state(*lo.c, ctx.sub, pd_str(lo, s.name), s.kind, pd_str(lo, s.label))
-        };
-        lo.c->states[id.v].stmt = global_stmt(lo, row);
+        StateId const id{ model_append_state_row(
+            *lo.c,
+            { .name = string_pool_add(lo.c->strings, pd_str(lo, s.name)),
+              .label = string_pool_add(lo.c->strings, pd_str(lo, s.label)),
+              .parent = ctx.sub,
+              .kind = s.kind,
+              .submachines = {},
+              .attrs = {},
+              .stmt = global_stmt(lo, row),
+              .inst = { INVALID },
+              .live = 1 }) };
         if (lo.pd->stmt_children[row].len != 0) {
           SubmachineId implicit{ INVALID };
           if (needs_implicit_submachine(*lo.pd, row)) {
-            implicit = build_submachine(*lo.c, id, {}, {});
-            lo.c->submachines[implicit.v].stmt = global_stmt(lo, row);
+            implicit = model_append_submachine_row(
+                *lo.c,
+                { .owner = id,
+                  .ordinal = 0,  // assigned for real by the containment rebuild
+                  .name = {},
+                  .label = {},
+                  .children = {},
+                  .attrs = {},
+                  .stmt = global_stmt(lo, row),
+                  .inst = { INVALID },
+                  .live = 1 });
           }
           stack.push_back(
               { .children = lo.pd->stmt_children[row],
@@ -178,10 +194,17 @@ std::vector<PendingTrans> lower_entities(Lowerer &lo, uint32_t root_row) {
           break;
         }
         SubmachineStmt const &m{ lo.pd->submachines[lo.pd->stmt_payload[row]] };
-        SubmachineId const id{
-          build_submachine(*lo.c, ctx.state, pd_str(lo, m.name), pd_str(lo, m.label))
-        };
-        lo.c->submachines[id.v].stmt = global_stmt(lo, row);
+        SubmachineId const id{ model_append_submachine_row(
+            *lo.c,
+            { .owner = ctx.state,
+              .ordinal = 0,  // assigned for real by the containment rebuild
+              .name = string_pool_add(lo.c->strings, pd_str(lo, m.name)),
+              .label = string_pool_add(lo.c->strings, pd_str(lo, m.label)),
+              .children = {},
+              .attrs = {},
+              .stmt = global_stmt(lo, row),
+              .inst = { INVALID },
+              .live = 1 }) };
         stack.push_back(
             { .children = lo.pd->stmt_children[row],
               .next = 0,
@@ -197,9 +220,24 @@ std::vector<PendingTrans> lower_entities(Lowerer &lo, uint32_t root_row) {
           break;
         }
         IncludeStmt const &inc{ lo.pd->includes[lo.pd->stmt_payload[row]] };
-        InstId const id{ build_include(*lo.c, ctx.sub, pd_str(lo, inc.alias)) };
-        lo.c->includes[id.v].stmt = global_stmt(lo, row);
-        lo.c->states[lo.c->includes[id.v].host.v].stmt = global_stmt(lo, row);
+        // The alias host is an ordinary state (§9); the row keeps the same raw
+        // append as every other state in this pass.
+        StateId const host{ model_append_state_row(
+            *lo.c,
+            { .name = string_pool_add(lo.c->strings, pd_str(lo, inc.alias)),
+              .label = {},
+              .parent = ctx.sub,
+              .kind = StateKind::Normal,
+              .submachines = {},
+              .attrs = {},
+              .stmt = global_stmt(lo, row),
+              .inst = { INVALID },
+              .live = 1 }) };
+        lo.c->includes.push_back(
+            { .alias = string_pool_add(lo.c->strings, pd_str(lo, inc.alias)),
+              .target = { INVALID },  // the loader's to fill (P2)
+              .host = host,
+              .stmt = global_stmt(lo, row) });
         break;
       }
 
@@ -222,6 +260,60 @@ std::vector<PendingTrans> lower_entities(Lowerer &lo, uint32_t root_row) {
     }
   }
   return pending;
+}
+
+// Builds every containment span in one pass over the rows: pass 1 appends
+// rows raw, because the builder's per-call span insert pays O(shift) plus a
+// fix-up sweep, and a document with two submachines per composite turns that
+// quadratic. This is §7.3's rebuild rule applied at scale -- the same shape as
+// attach_wildcards, run once between the passes. Creation order is document
+// order, so a stable sort by owner groups each container's children in the
+// order they were written.
+void finalize_containment(Chart &c) {
+  struct Edge {
+    uint32_t parent;
+    uint32_t child;
+  };
+
+  std::vector<Edge> state_edges;
+  state_edges.reserve(c.states.size());
+  for (uint32_t i = 0; i < c.states.size(); ++i) {
+    state_edges.push_back({ .parent = c.states[i].parent.v, .child = i });
+  }
+  stable_sort_by(state_edges, [](Edge const &a, Edge const &b) {
+    if (a.parent != b.parent) { return a.parent < b.parent; }
+    return a.child < b.child;
+  });
+  c.state_ids.clear();
+  c.state_ids.reserve(state_edges.size());
+  for (Submachine &m : c.submachines) { m.children = {}; }
+  for (Edge const &e : state_edges) {
+    Span &span{ c.submachines[e.parent].children };
+    if (span.len == 0) { span.off = narrow_clamp<uint32_t>(c.state_ids.size()); }
+    span.len += 1;
+    c.state_ids.push_back({ e.child });
+  }
+
+  std::vector<Edge> sub_edges;
+  sub_edges.reserve(c.submachines.size());
+  for (uint32_t i = 0; i < c.submachines.size(); ++i) {
+    if (c.submachines[i].owner.v == INVALID) { continue; }  // a document root
+    sub_edges.push_back({ .parent = c.submachines[i].owner.v, .child = i });
+  }
+  stable_sort_by(sub_edges, [](Edge const &a, Edge const &b) {
+    if (a.parent != b.parent) { return a.parent < b.parent; }
+    return a.child < b.child;
+  });
+  c.submachine_ids.clear();
+  c.submachine_ids.reserve(sub_edges.size());
+  for (State &s : c.states) { s.submachines = {}; }
+  for (Edge const &e : sub_edges) {
+    Span &span{ c.states[e.parent].submachines };
+    if (span.len == 0) { span.off = narrow_clamp<uint32_t>(c.submachine_ids.size()); }
+    c.submachines[e.child].ordinal = span.len;
+    span.len += 1;
+    c.submachine_ids.push_back({ e.child });
+  }
 }
 
 // An endpoint that is a path. Wildcards never reach here.
@@ -438,6 +530,7 @@ bool lower_document(Chart &c, ParsedDocument const &pd, std::vector<Diagnostic> 
               .stmt_base = stmt_base,
               .clean = true };
   std::vector<PendingTrans> const pending{ lower_entities(lo, root_row) };
+  finalize_containment(c);
   lower_transitions(lo, pending);
   return lo.clean;
 }
