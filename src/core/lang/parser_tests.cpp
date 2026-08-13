@@ -227,7 +227,7 @@ TEST_CASE("parse: submachines, named, labelled and anonymous") {
 chart c {
   state On {
     submachine main { state Idle, },
-    submachine strays "sweeps while main drives" { state Idle, },
+    submachine aux "sweeps while main drives" { state Idle, },
     submachine { state Solo, },
     submachine "just a label" { state Other, },
   },
@@ -238,7 +238,7 @@ chart c {
   REQUIRE(subs.size() == 4);
   CHECK(str(r.pd, submachine_at(r.pd, subs[0]).name) == "main");
   CHECK(str(r.pd, submachine_at(r.pd, subs[0]).label).empty());
-  CHECK(str(r.pd, submachine_at(r.pd, subs[1]).name) == "strays");
+  CHECK(str(r.pd, submachine_at(r.pd, subs[1]).name) == "aux");
   CHECK(str(r.pd, submachine_at(r.pd, subs[1]).label) == "sweeps while main drives");
   CHECK(str(r.pd, submachine_at(r.pd, subs[2]).name).empty());
   CHECK(str(r.pd, submachine_at(r.pd, subs[3]).name).empty());
@@ -281,7 +281,7 @@ TEST_CASE("parse: transition paths, qualified by name and by ordinal") {
 chart c {
   trans On/Ready/Online -> Off,
   trans On:1/Idle -> On:main/Ready,
-  trans wifi/On/Connected -> A,
+  trans dock/On/Seated -> A,
   trans A:0 -> B:99,
 }
 )") };
@@ -290,7 +290,7 @@ chart c {
   CHECK(path_text(r.pd, trans_at(r.pd, ts[0]).src) == "On/Ready/Online");
   CHECK(path_text(r.pd, trans_at(r.pd, ts[1]).src) == "On:1/Idle");
   CHECK(path_text(r.pd, trans_at(r.pd, ts[1]).dst) == "On:main/Ready");
-  CHECK(path_text(r.pd, trans_at(r.pd, ts[2]).src) == "wifi/On/Connected");
+  CHECK(path_text(r.pd, trans_at(r.pd, ts[2]).src) == "dock/On/Seated");
   CHECK(path_text(r.pd, trans_at(r.pd, ts[3]).src) == "A:0");
   CHECK(path_text(r.pd, trans_at(r.pd, ts[3]).dst) == "B:99");
 
@@ -356,8 +356,8 @@ TEST_CASE("parse: attributes in all three spellings") {
 chart c {
   @flag,
   @doc = "some text",
-  @libhsm:handler = "false",
-  @libhsm { submachine_handler, legacy = "false" },
+  @nav:retry = "false",
+  @nav { uses_lidar, follow_walls = "false" },
   @tags = ["a", "b", "c"],
   @empty_list = [],
 }
@@ -378,15 +378,15 @@ chart c {
         "some text");
 
   AttrStmt const &ns{ attr_at(r.pd, attrs[2]) };
-  CHECK(str(r.pd, ns.ns) == "libhsm");
-  CHECK(str(r.pd, r.pd.attr_entries[ns.entries.off].key) == "handler");
+  CHECK(str(r.pd, ns.ns) == "nav");
+  CHECK(str(r.pd, r.pd.attr_entries[ns.entries.off].key) == "retry");
 
   AttrStmt const &block{ attr_at(r.pd, attrs[3]) };
-  CHECK(str(r.pd, block.ns) == "libhsm");
+  CHECK(str(r.pd, block.ns) == "nav");
   REQUIRE(block.entries.len == 2);
-  CHECK(str(r.pd, r.pd.attr_entries[block.entries.off].key) == "submachine_handler");
+  CHECK(str(r.pd, r.pd.attr_entries[block.entries.off].key) == "uses_lidar");
   CHECK(r.pd.attr_entries[block.entries.off].kind == AttrValueKind::Flag);
-  CHECK(str(r.pd, r.pd.attr_entries[block.entries.off + 1].key) == "legacy");
+  CHECK(str(r.pd, r.pd.attr_entries[block.entries.off + 1].key) == "follow_walls");
   CHECK(r.pd.attr_entries[block.entries.off + 1].kind == AttrValueKind::Scalar);
 
   AttrStmt const &tags{ attr_at(r.pd, attrs[4]) };
@@ -551,7 +551,7 @@ chart c {
       state Ready,
       trans * -> Idle,
     },
-    submachine strays {
+    submachine aux {
       state Junk,
     },
   },
@@ -567,7 +567,7 @@ chart c {
                                                  "state:Idle",
                                                  "state:Ready",
                                                  "trans:*->Idle",
-                                                 "submachine:strays",
+                                                 "submachine:aux",
                                                  "state:Junk",
                                                  "state:Last" });
 }

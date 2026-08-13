@@ -120,7 +120,7 @@ TEST_CASE("corpus: vac is the chart the design specifies") {
   CHECK(str(r.pd, r.pd.charts[0].name) == "vac");
   CHECK(str(r.pd, r.pd.charts[0].label) == "robot vacuum");
   CHECK(count_of(r.pd, StmtKind::Include) == 1);
-  // Off, Booting, PreConfig, On, main/Idle, main/Ready, strays/Idle.
+  // Off, Booting, PreConfig, On, main/Idle, main/Ready, aux/Idle.
   CHECK(count_of(r.pd, StmtKind::State) == 7);
   CHECK(count_of(r.pd, StmtKind::Submachine) == 2);
   CHECK(count_of(r.pd, StmtKind::Trans) == 6);
@@ -128,13 +128,13 @@ TEST_CASE("corpus: vac is the chart the design specifies") {
 
   // The cross-document endpoint is an ordinary path, because an include alias
   // is an ordinary state name.
-  bool found_handoff{ false };
+  bool found_battery_low{ false };
   for (uint32_t const stmt : stmts_of(r.pd, StmtKind::Trans)) {
-    if (str(r.pd, trans_at(r.pd, stmt).label) != "handoff") { continue; }
-    found_handoff = true;
-    CHECK(path_text(r.pd, trans_at(r.pd, stmt).dst) == "wifi/On/Connected");
+    if (str(r.pd, trans_at(r.pd, stmt).label) != "battery low") { continue; }
+    found_battery_low = true;
+    CHECK(path_text(r.pd, trans_at(r.pd, stmt).dst) == "dock/On/Seated");
   }
-  CHECK(found_handoff);
+  CHECK(found_battery_low);
 }
 
 TEST_CASE("corpus: vac's two submachines make On concurrent") {

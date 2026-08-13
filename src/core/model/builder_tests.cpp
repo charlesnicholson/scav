@@ -114,16 +114,16 @@ TEST_CASE("build: submachines attach to their owner in order") {
   SubmachineId const root{ build_chart(c, "c", {}) };
   StateId const on{ build_state(c, root, "On", StateKind::Normal, {}) };
   SubmachineId const main_sm{ build_submachine(c, on, "main", {}) };
-  SubmachineId const strays{ build_submachine(c, on, "strays", "sweeps while main drives") };
+  SubmachineId const aux{ build_submachine(c, on, "aux", "sweeps while main drives") };
   REQUIRE(main_sm.v == 1);  // 0 is the root
-  REQUIRE(strays.v == 2);
+  REQUIRE(aux.v == 2);
   CHECK(c.submachines[main_sm.v].owner == on);
   CHECK(c.submachines[main_sm.v].ordinal == 0);
-  CHECK(c.submachines[strays.v].ordinal == 1);
+  CHECK(c.submachines[aux.v].ordinal == 1);
   Span const subs{ c.states[on.v].submachines };
   REQUIRE(subs.len == 2);
   CHECK(c.submachine_ids[subs.off] == main_sm);
-  CHECK(c.submachine_ids[subs.off + 1] == strays);
+  CHECK(c.submachine_ids[subs.off + 1] == aux);
   CHECK(build_submachine(c, StateId{ 42 }, "bad", {}).v == INVALID);
   check_refs_resolve(c);
 }

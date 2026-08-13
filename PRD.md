@@ -724,7 +724,7 @@ wifi/On/Ready        cross-document, via include alias
 
 - **Unnamed pseudostates get synthetic stable names** for addressing: `$initial`, `$final`, `$history`, ordinal-suffixed for uniqueness within a submachine, and exempt from §10's duplicate-name check. These are an API and diagnostic spelling only — the grammar's `ident` admits no `$`, and the format reaches them via `*` (§15). A pseudostate an author needs to name is named, like `PreConfig kind choice`.
 - **Each `*` endpoint synthesizes its own pseudostate** — `initial` as a source, `final` as a target — owned by the submachine the statement lexically appears in, carrying that transition's `stmt`. One per statement, never merged per submachine: two authored `trans * -> X, trans * -> Y` are two initial arrows, which is what makes §10's more-than-one-`initial` check a reachable check rather than dead code. `trans * -> *` is rejected.
-- **A path's first segment resolves innermost-outward**: from the submachine the statement appears in, outward through each enclosing submachine to the chart root, taking the nearest match; every segment after the first descends strictly. That is what the worked example already assumes — inside `submachine main`, `trans * -> Idle` names main's own `Idle`, while `trans Ready -> wifi/On/Connected` starts at a chart-root alias two levels up. Lexical scoping, because it is the rule every reader already knows.
+- **A path's first segment resolves innermost-outward**: from the submachine the statement appears in, outward through each enclosing submachine to the chart root, taking the nearest match; every segment after the first descends strictly. That is what the worked example already assumes — inside `submachine main`, `trans * -> Idle` names main's own `Idle`, while `trans Ready -> dock/On/Seated` starts at a chart-root alias two levels up. Lexical scoping, because it is the rule every reader already knows.
 - **An include synthesizes one state, named for its alias**, in the submachine where the `include` statement appears; that state's `submachines` span gains the included document's root submachine. A submachine's children are states, so this is the only shape that type-checks — an included root is a submachine and has nowhere else to attach. It also makes `wifi/Up/Connected` an ordinary path: `wifi` *is* a state. The host state is lowering's (P1, so §10's alias-collision check can run without a loader); filling `Include.target` and attaching the included root is resolution's (P2), and until then a path descending past an alias diagnoses as unresolvable.
 - **Resolution links; it does not flatten** (§7). Containment crosses documents because `State.submachines` holds global ids, so layout sees one containment tree with no transformation having occurred — no cross-document LCA, no splice pass, no project handle.
 - **Provenance is two fields, not a computed column, because it is M:N** (§7.3). One statement declares N entities when its file is included N times; one instantiation contains the entities of N statements. So the entity row is the junction and carries both keys: `StmtId` says which authored construct produced it, `InstId` says which instantiation it belongs to. A renderer tinting sub-document submachines reads `inst`; a diagnostic or an editor reads `stmt`; layout ignores both.
@@ -1205,7 +1205,7 @@ comment    := '//' <to end of line>          -- trivia; lexed, not parsed
 
 ```
 chart vac "robot vacuum" {
-  include "wifi.scav" as wifi,
+  include "dock.scav" as dock,
 
   state Off "powered down",
   state Booting,
@@ -1216,16 +1216,16 @@ chart vac "robot vacuum" {
 
   state On {
     @doc = "Enter: publishes EVT_POWERED_ON",
-    @libhsm { submachine_handler, legacy = "false" },
+    @nav { uses_lidar, follow_walls = "false" },
 
     submachine main {
-      state Idle { @libhsm:handler = "false" },
+      state Idle { @nav:retry = "false" },
       state Ready,
       trans * -> Idle,
       trans internal Ready -> Ready "BUMP_RETRY",
-      trans Ready -> wifi/On/Connected "handoff",
+      trans Ready -> dock/On/Seated "battery low",
     },
-    submachine strays "sweeps while main drives" {
+    submachine aux "sweeps while main drives" {
       state Idle,
       trans * -> Idle,
     },
@@ -1482,7 +1482,7 @@ Where a phase states production LOC, multiply by 1.5–2 for the mandated test c
 | event lists, `note on X`, handler markers, legacy mode | extension columns and attributes, §8 |
 | direction hints (`-u-`, `-d-`) | `scav:` layout hints, §14 |
 
-**No display-name-vs-identifier split is required.** libhsm's `state on_idle as "Idle"` exists to dodge C identifier collisions between same-named states in different submachines; scav addresses by path (`On:main/Idle` vs `On:strays/Idle`), so the collision does not arise. A `.puml` state description lands in `State.label` (§7), which is a *description*, not a second identifier — do not add one. Codegen identifier uniqueness is a `libhsm:ident` attribute owned by that backend.
+**No display-name-vs-identifier split is required.** libhsm's `state on_idle as "Idle"` exists to dodge C identifier collisions between same-named states in different submachines; scav addresses by path (`On:main/Idle` vs `On:aux/Idle`), so the collision does not arise. A `.puml` state description lands in `State.label` (§7), which is a *description*, not a second identifier — do not add one. Codegen identifier uniqueness is a `libhsm:ident` attribute owned by that backend.
 
 When written, the importer should be Python against `fi.hsm`'s existing lexer rather than a C++ PlantUML parser — throwaway code, runs once per chart, and `fi.hsm` already encodes the accepted grammar subset including the non-obvious rules (column-0-only comments, `note on X : handler`, legacy mode).
 

@@ -126,29 +126,28 @@ TEST_CASE("lower: ota -- aliases, fork/join, a raw label, and a final state") {
 TEST_CASE("lower: vac -- an include lowers to its host; crossing it diagnoses") {
   Lowered r{ lower(VAC, "vac.scav") };
   REQUIRE(r.parsed);
-  // `trans Ready -> wifi/On/Connected` descends past the unresolved alias:
-  // P1's honest answer until the loader (P2) attaches wifi.scav.
+  // `trans Ready -> dock/On/Seated` descends past the unresolved alias:
+  // P1's honest answer until the loader (P2) attaches dock.scav.
   CHECK_FALSE(r.clean);
   REQUIRE(r.diags.size() == 1);
   CHECK(r.diags[0].code == DiagCode::EndpointCrossesInclude);
   // The diagnostic's span quotes the offending statement.
   std::string_view const quoted{ src_text(r.c, r.diags[0].src) };
-  CHECK(quoted.find("wifi/On/Connected") != std::string_view::npos);
+  CHECK(quoted.find("dock/On/Seated") != std::string_view::npos);
 
-  // 7 authored + the wifi host + 3 initials; root/main/strays submachines.
+  // 7 authored + the dock host + 3 initials; root/main/aux submachines.
   CHECK(live_count_states(r.c) == 11);
   CHECK(r.c.submachines.size() == 3);
   CHECK(r.c.transitions.size() == 5);  // 6 authored, 1 skipped
   REQUIRE(r.c.includes.size() == 1);
   CHECK(r.c.includes[0].target.v == INVALID);
-  CHECK(chart_string(r.c, r.c.includes[0].alias) == "wifi");
-  CHECK(path(r.c, r.c.includes[0].host) == "wifi");
+  CHECK(chart_string(r.c, r.c.includes[0].alias) == "dock");
+  CHECK(path(r.c, r.c.includes[0].host) == "dock");
   CHECK(validates(r.c));
 
   StateId idle{ INVALID };
   CHECK(resolve_path(r.c, r.c.root_submachine, "On:main/Idle", idle) == ResolveStatus::Ok);
-  CHECK(resolve_path(r.c, r.c.root_submachine, "On:strays/Idle", idle) ==
-        ResolveStatus::Ok);
+  CHECK(resolve_path(r.c, r.c.root_submachine, "On:aux/Idle", idle) == ResolveStatus::Ok);
 }
 
 TEST_CASE("lower: every entity's stmt walks back to the text that declared it") {

@@ -18,13 +18,13 @@ namespace {
 using namespace scav;
 using namespace scav::test;
 
-// VAC's shape: Off and On at the root, On:main{Idle, Ready}, On:strays{Idle},
-// plus an unresolved include alias `wifi`.
+// The corpus vac chart's shape: Off and On at the root, On:main{Idle, Ready},
+// On:aux{Idle}, plus an unresolved include alias `dock`.
 struct Rig {
   Chart c;
-  SubmachineId root{ INVALID }, main_sm{ INVALID }, strays{ INVALID };
+  SubmachineId root{ INVALID }, main_sm{ INVALID }, aux{ INVALID };
   StateId off{ INVALID }, on{ INVALID }, idle{ INVALID }, ready{ INVALID };
-  StateId strays_idle{ INVALID }, wifi{ INVALID };
+  StateId aux_idle{ INVALID }, dock{ INVALID };
 };
 
 Rig rig() {
@@ -33,11 +33,11 @@ Rig rig() {
   r.off = build_state(r.c, r.root, "Off", StateKind::Normal, {});
   r.on = build_state(r.c, r.root, "On", StateKind::Normal, {});
   r.main_sm = build_submachine(r.c, r.on, "main", {});
-  r.strays = build_submachine(r.c, r.on, "strays", {});
+  r.aux = build_submachine(r.c, r.on, "aux", {});
   r.idle = build_state(r.c, r.main_sm, "Idle", StateKind::Normal, {});
   r.ready = build_state(r.c, r.main_sm, "Ready", StateKind::Normal, {});
-  r.strays_idle = build_state(r.c, r.strays, "Idle", StateKind::Normal, {});
-  r.wifi = r.c.includes[build_include(r.c, r.root, "wifi").v].host;
+  r.aux_idle = build_state(r.c, r.aux, "Idle", StateKind::Normal, {});
+  r.dock = r.c.includes[build_include(r.c, r.root, "dock").v].host;
   return r;
 }
 
@@ -54,13 +54,13 @@ TEST_CASE("resolve: absolute paths from the root") {
   CHECK(out == r.off);
   CHECK(at(r, r.root, "On:main/Idle", out) == ResolveStatus::Ok);
   CHECK(out == r.idle);
-  CHECK(at(r, r.root, "On:strays/Idle", out) == ResolveStatus::Ok);
-  CHECK(out == r.strays_idle);
+  CHECK(at(r, r.root, "On:aux/Idle", out) == ResolveStatus::Ok);
+  CHECK(out == r.aux_idle);
   // Ordinal spelling reaches the same rows.
   CHECK(at(r, r.root, "On:0/Ready", out) == ResolveStatus::Ok);
   CHECK(out == r.ready);
   CHECK(at(r, r.root, "On:1/Idle", out) == ResolveStatus::Ok);
-  CHECK(out == r.strays_idle);
+  CHECK(out == r.aux_idle);
 }
 
 TEST_CASE("resolve: the first segment climbs, later segments only descend") {
@@ -72,8 +72,8 @@ TEST_CASE("resolve: the first segment climbs, later segments only descend") {
   // Off is not in main; the climb finds it at the root.
   CHECK(at(r, r.main_sm, "Off", out) == ResolveStatus::Ok);
   CHECK(out == r.off);
-  // strays' Idle is a sibling submachine's child: never on the climb path.
-  CHECK(at(r, r.strays, "Ready", out) == ResolveStatus::NotFound);
+  // aux' Idle is a sibling submachine's child: never on the climb path.
+  CHECK(at(r, r.aux, "Ready", out) == ResolveStatus::NotFound);
   // Descent is strict: On/Off would need Off inside On.
   CHECK(at(r, r.root, "On:main/Off", out) == ResolveStatus::NotFound);
 }
@@ -100,20 +100,20 @@ TEST_CASE("resolve: qualifiers are required exactly when ambiguous") {
 TEST_CASE("resolve: descending into an unresolved include crosses it") {
   Rig const r{ rig() };
   StateId out{ INVALID };
-  CHECK(at(r, r.root, "wifi", out) == ResolveStatus::Ok);  // the host is a state
-  CHECK(out == r.wifi);
-  CHECK(at(r, r.root, "wifi/Up", out) == ResolveStatus::CrossesInclude);
-  CHECK(at(r, r.root, "wifi:main/Up", out) == ResolveStatus::CrossesInclude);
+  CHECK(at(r, r.root, "dock", out) == ResolveStatus::Ok);  // the host is a state
+  CHECK(out == r.dock);
+  CHECK(at(r, r.root, "dock/Up", out) == ResolveStatus::CrossesInclude);
+  CHECK(at(r, r.root, "dock:main/Up", out) == ResolveStatus::CrossesInclude);
 }
 
 TEST_CASE("resolve: an attached include is an ordinary descent") {
   Rig r{ rig() };
   // What P2 will do: fill target and give the host the included root.
   r.c.includes[0].target = DocId{ 0 };
-  SubmachineId const wifi_root{ build_submachine(r.c, r.wifi, {}, {}) };
-  StateId const up{ build_state(r.c, wifi_root, "Up", StateKind::Normal, {}) };
+  SubmachineId const dock_root{ build_submachine(r.c, r.dock, {}, {}) };
+  StateId const up{ build_state(r.c, dock_root, "Up", StateKind::Normal, {}) };
   StateId out{ INVALID };
-  CHECK(at(r, r.root, "wifi/Up", out) == ResolveStatus::Ok);
+  CHECK(at(r, r.root, "dock/Up", out) == ResolveStatus::Ok);
   CHECK(out == up);
 }
 

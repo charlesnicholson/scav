@@ -109,11 +109,11 @@ TEST_CASE("path: a second submachine forces qualifiers, by name when named") {
   SubmachineId const root{ build_chart(c, "c", {}) };
   StateId const on{ build_state(c, root, "On", StateKind::Normal, {}) };
   SubmachineId const main_sm{ build_submachine(c, on, "main", {}) };
-  SubmachineId const strays{ build_submachine(c, on, "strays", {}) };
+  SubmachineId const aux{ build_submachine(c, on, "aux", {}) };
   StateId const idle{ build_state(c, main_sm, "Idle", StateKind::Normal, {}) };
-  StateId const s_idle{ build_state(c, strays, "Idle", StateKind::Normal, {}) };
+  StateId const s_idle{ build_state(c, aux, "Idle", StateKind::Normal, {}) };
   CHECK(path(c, idle) == "On:main/Idle");
-  CHECK(path(c, s_idle) == "On:strays/Idle");
+  CHECK(path(c, s_idle) == "On:aux/Idle");
 }
 
 TEST_CASE("path: an unnamed submachine qualifies by ordinal") {
@@ -133,8 +133,8 @@ TEST_CASE("path: qualifiers apply per level, not per chart") {
   SubmachineId const root{ build_chart(c, "c", {}) };
   StateId const on{ build_state(c, root, "On", StateKind::Normal, {}) };
   SubmachineId const main_sm{ build_submachine(c, on, "main", {}) };
-  SubmachineId const strays{ build_submachine(c, on, "strays", {}) };
-  (void)strays;
+  SubmachineId const aux{ build_submachine(c, on, "aux", {}) };
+  (void)aux;
   StateId const ready{ build_state(c, main_sm, "Ready", StateKind::Normal, {}) };
   SubmachineId const inner{ build_submachine(c, ready, {}, {}) };
   StateId const leaf{ build_state(c, inner, "Leaf", StateKind::Normal, {}) };

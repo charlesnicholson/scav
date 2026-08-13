@@ -15,7 +15,7 @@ namespace scav::test {
 // shape, so the document the format is specified by is a document that parses.
 constexpr std::string_view VAC{ R"(
 chart vac "robot vacuum" {
-  include "wifi.scav" as wifi,
+  include "dock.scav" as dock,
 
   state Off "powered down",
   state Booting,
@@ -26,16 +26,16 @@ chart vac "robot vacuum" {
 
   state On {
     @doc = "Enter: publishes EVT_POWERED_ON",
-    @libhsm { submachine_handler, legacy = "false" },
+    @nav { uses_lidar, follow_walls = "false" },
 
     submachine main {
-      state Idle { @libhsm:handler = "false" },
+      state Idle { @nav:retry = "false" },
       state Ready,
       trans * -> Idle,
       trans internal Ready -> Ready "BUMP_RETRY",
-      trans Ready -> wifi/On/Connected "handoff",
+      trans Ready -> dock/On/Seated "battery low",
     },
-    submachine strays "sweeps while main drives" {
+    submachine aux "sweeps while main drives" {
       state Idle,
       trans * -> Idle,
     },
