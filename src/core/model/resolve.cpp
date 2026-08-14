@@ -106,16 +106,18 @@ ResolveStatus resolve_segments(Chart const &c,
 
   // First segment: innermost-outward. The guard turns a corrupted parent
   // chain into a miss rather than a hang; builder-made chains cannot cycle.
-  StateId found{ INVALID };
-  SubmachineId sm{ scope };
-  for (size_t guard = 0; guard <= c.submachines.size(); ++guard) {
-    found = find_in_submachine(c, sm, segs[0].name);
-    if (found.v != INVALID) { break; }
-    StateId const owner{ c.submachines[sm.v].owner };
-    if ((owner.v == INVALID) || (owner.v >= c.states.size())) { break; }
-    sm = c.states[owner.v].parent;
-    if (sm.v >= c.submachines.size()) { break; }
-  }
+  StateId const found{ [&] {
+    SubmachineId sm{ scope };
+    for (size_t guard = 0; guard <= c.submachines.size(); ++guard) {
+      StateId const hit{ find_in_submachine(c, sm, segs[0].name) };
+      if (hit.v != INVALID) { return hit; }
+      StateId const owner{ c.submachines[sm.v].owner };
+      if ((owner.v == INVALID) || (owner.v >= c.states.size())) { break; }
+      sm = c.states[owner.v].parent;
+      if (sm.v >= c.submachines.size()) { break; }
+    }
+    return StateId{ INVALID };
+  }() };
   if (found.v == INVALID) { return ResolveStatus::NotFound; }
 
   StateId cur{ found };
@@ -153,8 +155,7 @@ ResolveStatus resolve_path(Chart const &c,
     if (seg_text.empty()) { return ResolveStatus::NotFound; }
 
     ResolveSeg seg{ .name = seg_text, .qualifier = {}, .ordinal = INVALID };
-    size_t const colon{ seg_text.find(':') };
-    if (colon != std::string_view::npos) {
+    if (size_t const colon{ seg_text.find(':') }; colon != std::string_view::npos) {
       seg.name = seg_text.substr(0, colon);
       std::string_view const qual{ seg_text.substr(colon + 1) };
       if (seg.name.empty() || qual.empty()) { return ResolveStatus::NotFound; }

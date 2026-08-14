@@ -289,23 +289,28 @@ TEST_CASE(
   REQUIRE_MESSAGE(validate_chart(built, diags),
                   diag_message(diags.empty() ? DiagCode::Ok : diags[0].code));
 
-  uint32_t live{ 0 };
-  for (State const &s : built.states) {
-    if (s.live != 0) { ++live; }
-  }
+  uint32_t const live{ [&] {
+    uint32_t n{ 0 };
+    for (State const &s : built.states) {
+      if (s.live != 0) { ++n; }
+    }
+    return n;
+  }() };
   CHECK(live >= 2000);
 
   // Walk: the deepest leaf's address is 17 segments -- 16 composites down
   // plus the leaf -- and resolves back to the row that printed it. Composites
   // at side levels hold two submachines, so their segments carry the `:0`
   // qualifier chart_path_of prints for an unnamed implicit submachine.
-  std::string deep_path{ "T0" };
-  if (level_has_side(0)) { deep_path += ":0"; }
-  for (uint32_t level = 1; level < GATE.depth; ++level) {
-    deep_path += "/S" + std::to_string(level);
-    if (level_has_side(level)) { deep_path += ":0"; }
-  }
-  deep_path += "/A0";
+  std::string const deep_path{ [&] {
+    std::string p{ "T0" };
+    if (level_has_side(0)) { p += ":0"; }
+    for (uint32_t level = 1; level < GATE.depth; ++level) {
+      p += "/S" + std::to_string(level);
+      if (level_has_side(level)) { p += ":0"; }
+    }
+    return p + "/A0";
+  }() };
   StateId deep{ INVALID };
   REQUIRE(resolve_path(built, built.root_submachine, deep_path, deep) ==
           ResolveStatus::Ok);

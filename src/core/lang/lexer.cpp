@@ -371,13 +371,14 @@ bool lex_source(scav_byte const *bytes,
     }
 
     if ((b == '/') && (at + 1 < len) && (bytes[at + 1] == '/')) {
-      // memchr rather than a byte loop: a comment run is the one place the
-      // lexer walks prose, and libc scans it a cache line at a time.
-      void const *const nl{ std::memchr(bytes + at, '\n', len - at) };
-      uint32_t const stop{ (nl == nullptr)
-                               ? len
-                               : narrow_clamp<uint32_t>(static_cast<size_t>(
-                                     static_cast<scav_byte const *>(nl) - bytes)) };
+      uint32_t const stop{ [&] {
+        // memchr rather than a byte loop: a comment run is the one place the
+        // lexer walks prose, and libc scans it a cache line at a time.
+        void const *const nl{ std::memchr(bytes + at, '\n', len - at) };
+        if (nl == nullptr) { return len; }
+        return narrow_clamp<uint32_t>(
+            static_cast<size_t>(static_cast<scav_byte const *>(nl) - bytes));
+      }() };
       open_comment = narrow_clamp<uint32_t>(out.comments.size());
       newlines_after = 0;
       out.comments.push_back({ .src = make_span(at, stop - at),

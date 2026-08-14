@@ -22,10 +22,7 @@ using namespace scav;
 bool read_file(char const *path, std::vector<scav_byte> &out) {
   std::ifstream in(path, std::ios::binary);
   if (!in.good()) { return false; }
-  std::vector<char> raw{ std::istreambuf_iterator<char>(in),
-                         std::istreambuf_iterator<char>() };
-  out.assign(reinterpret_cast<scav_byte const *>(raw.data()),
-             reinterpret_cast<scav_byte const *>(raw.data()) + raw.size());
+  out.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
   return true;
 }
 
@@ -113,12 +110,15 @@ void append_model(std::string &out, Chart const &c) {
   out += '\n';
   append_attrs(out, c, { .kind = ElemKind::Chart, .ordinal = 0 }, 1);
 
-  std::vector<std::vector<uint32_t>> trans_by_sub(c.submachines.size());
-  for (uint32_t i = 0; i < c.transitions.size(); ++i) {
-    Transition const &t{ c.transitions[i] };
-    if (t.live == 0) { continue; }
-    trans_by_sub[c.states[t.src.v].parent.v].push_back(i);
-  }
+  auto const trans_by_sub{ [&] {
+    std::vector<std::vector<uint32_t>> by_sub(c.submachines.size());
+    for (uint32_t i = 0; i < c.transitions.size(); ++i) {
+      Transition const &t{ c.transitions[i] };
+      if (t.live == 0) { continue; }
+      by_sub[c.states[t.src.v].parent.v].push_back(i);
+    }
+    return by_sub;
+  }() };
 
   enum class What : uint32_t { Sub, State, Trans };
   struct Frame {
@@ -329,8 +329,10 @@ int dump(char const *path) {
 
   Chart c;
   std::vector<Diagnostic> diags;
-  bool clean{ lower_document(c, pd, diags) };
-  clean = validate_chart(c, diags) && clean;
+  bool const clean{ [&] {
+    bool const lowered{ lower_document(c, pd, diags) };
+    return validate_chart(c, diags) && lowered;
+  }() };
   for (Diagnostic const &d : diags) { append_chart_diag(err, path, c, d); }
   write_stream(err, stderr);
 

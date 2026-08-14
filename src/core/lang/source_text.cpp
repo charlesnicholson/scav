@@ -198,8 +198,11 @@ bool source_text_to_nfc(scav_byte const *bytes, size_t len, std::vector<scav_byt
   size_t at{ 0 };
   bool changed{ false };
   while (at < len) {
-    size_t run{ at };
-    while ((run < len) && (bytes[run] < 0x80U)) { ++run; }
+    size_t const run{ [&] {
+      size_t r{ at };
+      while ((r < len) && (bytes[r] < 0x80U)) { ++r; }
+      return r;
+    }() };
     if (run == len) {
       out.insert(out.end(), bytes + at, bytes + run);
       break;
@@ -208,8 +211,11 @@ bool source_text_to_nfc(scav_byte const *bytes, size_t len, std::vector<scav_byt
     size_t const seg{ (run > at) ? (run - 1) : at };  // the held-back starter
     out.insert(out.end(), bytes + at, bytes + seg);
 
-    size_t seg_end{ run };
-    while ((seg_end < len) && (bytes[seg_end] >= 0x80U)) { ++seg_end; }
+    size_t const seg_end{ [&] {
+      size_t r{ run };
+      while ((r < len) && (bytes[r] >= 0x80U)) { ++r; }
+      return r;
+    }() };
     changed = nfc_segment(bytes, seg, seg_end, out) || changed;
     at = seg_end;
   }
@@ -248,8 +254,11 @@ bool source_text_normalize(scav_byte const *bytes,
     // through untouched, so they are copied as a run rather than one at a time --
     // on an ASCII document with LF endings that is the entire file in one memcpy.
     // A byte at a time cost more than the rest of a parse put together.
-    uint32_t run{ at };
-    while ((run < checked_len) && (bytes[run] < 0x80U) && (bytes[run] != '\r')) { ++run; }
+    uint32_t const run{ [&] {
+      uint32_t r{ at };
+      while ((r < checked_len) && (bytes[r] < 0x80U) && (bytes[r] != '\r')) { ++r; }
+      return r;
+    }() };
     if (run != at) {
       out.insert(out.end(), bytes + at, bytes + run);
       at = run;

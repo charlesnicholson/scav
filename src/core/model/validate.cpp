@@ -264,11 +264,8 @@ void check_statements(Validator &v) {
     Document const &doc{ c.documents[d] };
     if (!span_in(doc.text, c.src_bytes.size()) ||
         !span_in(doc.statements, c.stmts.size())) {
-      Diagnostic diag{ .code = DiagCode::DanglingRef,
-                       .subject = none,
-                       .doc = { d },
-                       .src = {} };
-      v.found.push_back(diag);
+      v.found.push_back(
+          { .code = DiagCode::DanglingRef, .subject = none, .doc = { d }, .src = {} });
       continue;
     }
     for (uint32_t k = 0; k < doc.statements.len; ++k) {
@@ -277,18 +274,16 @@ void check_statements(Validator &v) {
       uint64_t const hi{ lo + stmt.src.len };
       if ((lo < doc.text.off) ||
           (hi > (static_cast<uint64_t>(doc.text.off) + doc.text.len))) {
-        Diagnostic diag{ .code = DiagCode::StatementSpanOutOfRange,
-                         .subject = none,
-                         .doc = { d },
-                         .src = stmt.src };
-        v.found.push_back(diag);
+        v.found.push_back({ .code = DiagCode::StatementSpanOutOfRange,
+                            .subject = none,
+                            .doc = { d },
+                            .src = stmt.src });
       }
       if (!span_in(stmt.comments, c.comments.size())) {
-        Diagnostic diag{ .code = DiagCode::DanglingRef,
-                         .subject = none,
-                         .doc = { d },
-                         .src = stmt.src };
-        v.found.push_back(diag);
+        v.found.push_back({ .code = DiagCode::DanglingRef,
+                            .subject = none,
+                            .doc = { d },
+                            .src = stmt.src });
       }
     }
   }
