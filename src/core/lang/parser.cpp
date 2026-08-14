@@ -633,6 +633,16 @@ bool parse_tokens(scav_byte const *bytes,
   out.src_bytes.assign(bytes, bytes + len);
   out.doc.text = make_span(0, len);
 
+  // A statement is a keyword plus a couple of tokens, so tokens/4 lands close
+  // enough to spare the statement arrays their doubling copies. An
+  // underestimate just means one late growth; the memory floor reads capacity,
+  // so guessing high would be the costly direction.
+  uint32_t const stmt_estimate{ narrow_clamp<uint32_t>(lexed.tokens.size() / 4) };
+  out.stmts.reserve(stmt_estimate);
+  out.stmt_payload.reserve(stmt_estimate);
+  out.stmt_children.reserve(stmt_estimate);
+  out.stmt_ids.reserve(stmt_estimate);
+
   // The stream always ends with an End sentinel, which is what lets lookahead
   // skip its bounds check. An empty one is a caller error, not input.
   if (lexed.tokens.empty()) {

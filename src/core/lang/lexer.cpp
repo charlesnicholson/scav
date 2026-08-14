@@ -2,8 +2,10 @@
 
 #include "scav/scav_types.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <string_view>
 #include <vector>
 
@@ -17,19 +19,36 @@ constexpr uint32_t BYTES_PER_TOKEN_ESTIMATE{ 6 };
 
 constexpr uint32_t RAW_DELIM_LEN{ 3 };
 
-bool is_ident_start(scav_byte b) {
-  return ((b >= 'A') && (b <= 'Z')) || ((b >= 'a') && (b <= 'z')) || (b == '_');
-}
+// One class table instead of chained range compares: the identifier run is the
+// hottest loop in the lexer, and one load-and-mask per byte beats four
+// branches. 256 entries, so a scav_byte indexes it with no range check.
+constexpr uint8_t CLS_IDENT_START{ 1U << 0U };
+constexpr uint8_t CLS_IDENT_CONTINUE{ 1U << 1U };
+constexpr uint8_t CLS_DIGIT{ 1U << 2U };
+constexpr uint8_t CLS_SPACE{ 1U << 3U };
 
-bool is_digit(scav_byte b) { return (b >= '0') && (b <= '9'); }
+constexpr std::array<uint8_t, 256> CHAR_CLASS{ [] {
+  std::array<uint8_t, 256> t{};
+  for (uint32_t b = 'A'; b <= 'Z'; ++b) { t[b] = CLS_IDENT_START | CLS_IDENT_CONTINUE; }
+  for (uint32_t b = 'a'; b <= 'z'; ++b) { t[b] = CLS_IDENT_START | CLS_IDENT_CONTINUE; }
+  t['_'] = CLS_IDENT_START | CLS_IDENT_CONTINUE;
+  for (uint32_t b = '0'; b <= '9'; ++b) { t[b] = CLS_DIGIT | CLS_IDENT_CONTINUE; }
+  // The lexer never sees a CR: normalization folded every line ending to LF
+  // before it ran.
+  t[' '] = CLS_SPACE;
+  t['\t'] = CLS_SPACE;
+  t['\v'] = CLS_SPACE;
+  t['\f'] = CLS_SPACE;
+  return t;
+}() };
 
-bool is_ident_continue(scav_byte b) { return is_ident_start(b) || is_digit(b); }
+bool is_ident_start(scav_byte b) { return (CHAR_CLASS[b] & CLS_IDENT_START) != 0; }
 
-// The lexer never sees a CR: normalization folded every line ending to LF
-// before it ran.
-bool is_space(scav_byte b) {
-  return (b == ' ') || (b == '\t') || (b == '\v') || (b == '\f');
-}
+bool is_digit(scav_byte b) { return (CHAR_CLASS[b] & CLS_DIGIT) != 0; }
+
+bool is_ident_continue(scav_byte b) { return (CHAR_CLASS[b] & CLS_IDENT_CONTINUE) != 0; }
+
+bool is_space(scav_byte b) { return (CHAR_CLASS[b] & CLS_SPACE) != 0; }
 
 bool is_raw_delim_at(scav_byte const *bytes, uint32_t len, uint32_t at) {
   return (at + RAW_DELIM_LEN <= len) && (bytes[at] == '"') && (bytes[at + 1] == '"') &&
@@ -344,13 +363,21 @@ bool lex_source(scav_byte const *bytes,
       continue;
     }
     if (is_space(b)) {
-      ++at;
+      // As a run: indentation is a third of a formatted document's bytes, and
+      // one byte per trip through the dispatch chain above priced each space
+      // like a token.
+      do { ++at; } while ((at < len) && is_space(bytes[at]));
       continue;
     }
 
     if ((b == '/') && (at + 1 < len) && (bytes[at + 1] == '/')) {
-      uint32_t stop{ at };
-      while ((stop < len) && (bytes[stop] != '\n')) { ++stop; }
+      // memchr rather than a byte loop: a comment run is the one place the
+      // lexer walks prose, and libc scans it a cache line at a time.
+      void const *const nl{ std::memchr(bytes + at, '\n', len - at) };
+      uint32_t const stop{ (nl == nullptr)
+                               ? len
+                               : narrow_clamp<uint32_t>(static_cast<size_t>(
+                                     static_cast<scav_byte const *>(nl) - bytes)) };
       open_comment = narrow_clamp<uint32_t>(out.comments.size());
       newlines_after = 0;
       out.comments.push_back({ .src = make_span(at, stop - at),

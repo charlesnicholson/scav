@@ -505,7 +505,18 @@ bool lower_document(Chart &c, ParsedDocument const &pd, std::vector<Diagnostic> 
   uint32_t const stmt_base{ narrow_clamp<uint32_t>(c.stmts.size()) };
   DocId const doc{ narrow_clamp<uint32_t>(c.documents.size()) };
 
+  // Exact reserves, so three million rows arrive without a doubling copy. The
+  // entity arrays get their known floor -- wildcards land past it and grow
+  // normally. Guessing high is the costly direction: the memory floor reads
+  // capacity.
   c.src_bytes.insert(c.src_bytes.end(), pd.src_bytes.begin(), pd.src_bytes.end());
+  c.comments.reserve(c.comments.size() + pd.comments.size());
+  c.stmts.reserve(c.stmts.size() + pd.stmts.size());
+  c.strings.bytes.reserve(pd.strings.bytes.size());
+  c.states.reserve(pd.states.size() + pd.includes.size());
+  c.submachines.reserve(pd.submachines.size() + 1);
+  c.transitions.reserve(pd.transitions.size());
+  c.attrs.reserve(pd.attr_entries.size());
   for (Trivia const &t : pd.comments) {
     c.comments.push_back(
         { .src = make_span(t.src.off + src_base, t.src.len), .pos = t.pos });

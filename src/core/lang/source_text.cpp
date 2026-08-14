@@ -135,7 +135,9 @@ bool source_text_is_nfc(scav_byte const *bytes, size_t len) {
   size_t at{ 0 };
   while (at < len) {
     if (bytes[at] < 0x80U) {  // ASCII is NFC by construction, and is the hot path
-      ++at;
+      do {  // as a run, so a mostly-ASCII document costs one compare per byte
+        ++at;
+      } while ((at < len) && (bytes[at] < 0x80U));
       continue;
     }
     uint32_t cp{ 0 };
@@ -148,17 +150,22 @@ bool source_text_is_nfc(scav_byte const *bytes, size_t len) {
   return true;
 }
 
-bool source_text_to_nfc(scav_byte const *bytes, size_t len, std::vector<scav_byte> &out) {
-  out.clear();
+// The slow lane of source_text_to_nfc: decode [at, stop) to codepoints,
+// normalize, and re-encode into `out`. Returns whether normalization changed
+// anything.
+namespace {
 
+bool nfc_segment(scav_byte const *bytes,
+                 size_t at,
+                 size_t stop,
+                 std::vector<scav_byte> &out) {
   std::vector<uint32_t> codepoints;
-  codepoints.reserve(len);
-  size_t at{ 0 };
-  while (at < len) {
+  codepoints.reserve(stop - at);
+  while (at < stop) {
     uint32_t cp{ 0 };
     uint32_t width{ 0 };
     DiagCode err{ DiagCode::Ok };
-    if (!source_text_utf8_decode(bytes, len, at, cp, width, err)) {
+    if (!source_text_utf8_decode(bytes, stop, at, cp, width, err)) {
       // The caller validated already, so this cannot fire on a real document.
       // Copying the byte through keeps a fuzz case from losing data silently.
       out.push_back(bytes[at]);
@@ -171,14 +178,42 @@ bool source_text_to_nfc(scav_byte const *bytes, size_t len, std::vector<scav_byt
 
   std::vector<uint32_t> normalized;
   bool const changed{ nfc_normalize(codepoints, normalized) };
-  if (!changed) {
-    out.assign(bytes, bytes + len);
-    return false;
-  }
-
-  out.reserve(len);
   for (uint32_t const cp : normalized) { source_text_utf8_encode(cp, out); }
-  return true;
+  return changed;
+}
+
+}  // namespace
+
+bool source_text_to_nfc(scav_byte const *bytes, size_t len, std::vector<scav_byte> &out) {
+  out.clear();
+  out.reserve(len);
+
+  // ASCII runs pass through verbatim; only the segments around non-ASCII
+  // bytes take the decode-normalize-encode lane. The boundaries are sound
+  // because every ASCII character is a starter and never the second half of a
+  // composition: the last ASCII character *before* a cluster may compose with
+  // a combining mark that follows it, so it rides along into the slow lane,
+  // while the first ASCII character *after* a cluster cannot interact with
+  // anything before it and is where the fast lane resumes.
+  size_t at{ 0 };
+  bool changed{ false };
+  while (at < len) {
+    size_t run{ at };
+    while ((run < len) && (bytes[run] < 0x80U)) { ++run; }
+    if (run == len) {
+      out.insert(out.end(), bytes + at, bytes + run);
+      break;
+    }
+
+    size_t const seg{ (run > at) ? (run - 1) : at };  // the held-back starter
+    out.insert(out.end(), bytes + at, bytes + seg);
+
+    size_t seg_end{ run };
+    while ((seg_end < len) && (bytes[seg_end] >= 0x80U)) { ++seg_end; }
+    changed = nfc_segment(bytes, seg, seg_end, out) || changed;
+    at = seg_end;
+  }
+  return changed;
 }
 
 bool source_text_normalize(scav_byte const *bytes,
@@ -207,6 +242,7 @@ bool source_text_normalize(scav_byte const *bytes,
   // Validate and fold line endings in one pass. Spans on anything reported here
   // index the raw input, because `out` is what is being built.
   out.reserve(checked_len - at);
+  bool multibyte{ false };
   while (at < checked_len) {
     // Bytes that are neither CR nor the start of a multi-byte sequence pass
     // through untouched, so they are copied as a run rather than one at a time --
@@ -234,11 +270,15 @@ bool source_text_normalize(scav_byte const *bytes,
       out.clear();
       return false;
     }
+    multibyte = true;
     out.insert(out.end(), bytes + at, bytes + at + width);
     at += width;
   }
 
-  if (!source_text_is_nfc(out.data(), out.size())) {
+  // ASCII is NFC by construction, and the loop above already looked at every
+  // byte -- so a document it copied as pure runs skips the NFC pass instead of
+  // paying a second full scan to learn nothing.
+  if (multibyte && !source_text_is_nfc(out.data(), out.size())) {
     std::vector<scav_byte> composed;
     source_text_to_nfc(out.data(), out.size(), composed);
     out.swap(composed);
