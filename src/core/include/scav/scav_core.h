@@ -26,45 +26,40 @@ constexpr uint32_t INVALID{ 0xFFFF'FFFFU };
 
 struct DocId {
   uint32_t v;
+  constexpr bool operator==(DocId const &) const = default;
 };
 struct StmtId {
   uint32_t v;
+  constexpr bool operator==(StmtId const &) const = default;
 };
 struct InstId {  // an include instantiation = index into Chart::includes
   uint32_t v;
+  constexpr bool operator==(InstId const &) const = default;
 };
 struct StateId {
   uint32_t v;
+  constexpr bool operator==(StateId const &) const = default;
 };
 struct SubmachineId {
   uint32_t v;
+  constexpr bool operator==(SubmachineId const &) const = default;
 };
 struct TransId {
   uint32_t v;
+  constexpr bool operator==(TransId const &) const = default;
 };
 struct AttrKeyId {  // interned attribute key, `ns:key` or bare
   uint32_t v;
+  constexpr bool operator==(AttrKeyId const &) const = default;
 };
 struct ColumnId {  // index into Chart::columns
   uint32_t v;
+  constexpr bool operator==(ColumnId const &) const = default;
 };
 
-constexpr bool operator==(DocId a, DocId b) { return a.v == b.v; }
-constexpr bool operator!=(DocId a, DocId b) { return a.v != b.v; }
-constexpr bool operator==(StmtId a, StmtId b) { return a.v == b.v; }
-constexpr bool operator!=(StmtId a, StmtId b) { return a.v != b.v; }
-constexpr bool operator==(InstId a, InstId b) { return a.v == b.v; }
-constexpr bool operator!=(InstId a, InstId b) { return a.v != b.v; }
-constexpr bool operator==(StateId a, StateId b) { return a.v == b.v; }
-constexpr bool operator!=(StateId a, StateId b) { return a.v != b.v; }
-constexpr bool operator==(SubmachineId a, SubmachineId b) { return a.v == b.v; }
-constexpr bool operator!=(SubmachineId a, SubmachineId b) { return a.v != b.v; }
-constexpr bool operator==(TransId a, TransId b) { return a.v == b.v; }
-constexpr bool operator!=(TransId a, TransId b) { return a.v != b.v; }
-constexpr bool operator==(AttrKeyId a, AttrKeyId b) { return a.v == b.v; }
-constexpr bool operator!=(AttrKeyId a, AttrKeyId b) { return a.v != b.v; }
-constexpr bool operator==(ColumnId a, ColumnId b) { return a.v == b.v; }
-constexpr bool operator!=(ColumnId a, ColumnId b) { return a.v != b.v; }
+// Equality is defaulted in-struct (C++20): != is rewritten from ==, and the
+// full spaceship would hand an id an ordering nobody asked for -- sorts that
+// mean to order by ordinal say `.v` (§6's stable-key rule).
 
 // What an entity *is*, for columns, diagnostics, and DrawList origins. Not
 // StmtKind, which enumerates what a line of source is: `Include` and `Attr`
@@ -82,29 +77,21 @@ enum class ElemKind : uint32_t {
 struct ElemRef {
   ElemKind kind;
   uint32_t ordinal;
+  constexpr bool operator==(ElemRef const &) const = default;
 };
 
-constexpr bool operator==(ElemRef a, ElemRef b) {
-  return (a.kind == b.kind) && (a.ordinal == b.ordinal);
-}
-constexpr bool operator!=(ElemRef a, ElemRef b) { return !(a == b); }
-
-// Into StringPool::bytes.
+// Into StringPool::bytes. Two equal refs are the same span; equal *text* is a
+// view comparison, because the pool never deduplicates.
 struct StrRef {
   uint32_t off, len;
+  constexpr bool operator==(StrRef const &) const = default;
 };
 
 // Into a side array.
 struct Span {
   uint32_t off, len;
+  constexpr bool operator==(Span const &) const = default;
 };
-
-constexpr bool operator==(StrRef a, StrRef b) {
-  return (a.off == b.off) && (a.len == b.len);
-}
-constexpr bool operator!=(StrRef a, StrRef b) { return !(a == b); }
-constexpr bool operator==(Span a, Span b) { return (a.off == b.off) && (a.len == b.len); }
-constexpr bool operator!=(Span a, Span b) { return !(a == b); }
 
 // Named constructors: these are built constantly, and a designated-initializer
 // list at every site reads worse. An empty span is `{}`.
