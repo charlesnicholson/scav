@@ -8,7 +8,6 @@
 // nowhere else.
 
 #include <scav/scav_core.h>
-#include <scav/scav_toy.h>
 #include <scav/scav_types.h>
 
 #include <cstdint>
@@ -19,24 +18,64 @@
 
 namespace {
 
-int check_toy() {
-  char const *const text{ "scav" };
-  auto const *const bytes{ reinterpret_cast<scav_byte const *>(text) };
-  auto const len{ static_cast<uint32_t>(std::strlen(text)) };
+// Parse, lower, validate, resolve: the whole P1 pipeline through the installed
+// public header, so every section of the API is proven linkable and none of it
+// needs a private header to use.
+int check_model() {
+  std::string_view const chart_text{ R"(chart consumer "from an installed scav" {
+  state Idle,
+  state Running { @mode = "fast" },
+  trans * -> Idle,
+  trans Idle -> Running "go",
+})" };
 
-  // Pinned, so a consumer that links but computes something else fails rather
-  // than passing silently.
-  constexpr uint64_t EXPECTED{ 0xf75ced18b5176da0ULL };
-
-  uint64_t const actual{ scav_toy_checksum(bytes, len) };
-  if (actual != EXPECTED) {
-    std::fprintf(stderr,
-                 "scav_toy_checksum(\"scav\") = %016llx, expected %016llx\n",
-                 static_cast<unsigned long long>(actual),
-                 static_cast<unsigned long long>(EXPECTED));
+  scav::ParsedDocument doc;
+  std::vector<scav::Diagnostic> diags;
+  bool const parsed{ scav::parse_document(
+      reinterpret_cast<scav_byte const *>(chart_text.data()),
+      static_cast<uint32_t>(chart_text.size()),
+      "consumer.scav",
+      scav::parse_default_options(),
+      doc,
+      diags) };
+  if (!parsed) {
+    scav::DiagCode const code{ diags.empty() ? scav::DiagCode::Ok : diags[0].code };
+    std::fprintf(stderr, "parse failed: %s\n", scav::diag_message(code));
     return 1;
   }
-  std::printf("consumer toy ok: %016llx\n", static_cast<unsigned long long>(actual));
+
+  scav::Chart chart;
+  if (!scav::lower_document(chart, doc, diags)) {
+    std::fprintf(stderr, "lowering reported a diagnostic\n");
+    return 1;
+  }
+  if (!scav::validate_chart(chart, diags)) {
+    std::fprintf(stderr, "validation reported a diagnostic\n");
+    return 1;
+  }
+
+  // Two authored states plus the `*`'s initial pseudostate.
+  if (chart.states.size() != 3) {
+    std::fprintf(stderr, "expected 3 states, got %zu\n", chart.states.size());
+    return 1;
+  }
+  scav::StateId running{ scav::INVALID };
+  if (scav::resolve_path(chart, chart.root_submachine, "Running", running) !=
+      scav::ResolveStatus::Ok) {
+    std::fprintf(stderr, "resolve_path failed to find Running\n");
+    return 1;
+  }
+  uint32_t const attr{ chart_attr_find(
+      chart,
+      { .kind = scav::ElemKind::State, .ordinal = running.v },
+      "mode") };
+  if (attr == scav::INVALID ||
+      scav::chart_string(chart, chart.attrs[attr].value) != "fast") {
+    std::fprintf(stderr, "the attribute did not survive lowering\n");
+    return 1;
+  }
+
+  std::printf("consumer model ok: %zu states\n", static_cast<size_t>(chart.states.size()));
   return 0;
 }
 
@@ -78,6 +117,6 @@ int check_core() {
 }  // namespace
 
 int main() {
-  if (int const rc = check_toy(); rc != 0) { return rc; }
-  return check_core();
+  if (int const rc = check_core(); rc != 0) { return rc; }
+  return check_model();
 }

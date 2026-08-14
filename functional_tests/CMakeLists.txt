@@ -61,6 +61,12 @@ scav_add_functional_test(install_consumer
           "${CMAKE_CURRENT_SOURCE_DIR}/consumer/main.cpp"
   TARGETS ${scav_all_libraries} ${scav_all_test_exes}
 )
+scav_add_functional_test(dump
+  DEPENDS "${PROJECT_SOURCE_DIR}/test_data/charts/brew.scav"
+          "${PROJECT_SOURCE_DIR}/test_data/golden/dump/brew.txt"
+          "$<TARGET_FILE:scav>"
+  TARGETS scav
+)
 scav_add_functional_test(presets
   DEPENDS "${PROJECT_SOURCE_DIR}/CMakePresets.json"
           "${PROJECT_SOURCE_DIR}/tools/gen_presets.py"

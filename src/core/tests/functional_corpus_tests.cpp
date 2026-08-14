@@ -2,7 +2,8 @@
 // write them. Synthetic input has uniform branching and no accidental
 // structure, so validating on it alone is a trap.
 
-#include "core/test_support.h"
+#include "core/tests/test_charts.h"
+#include "core/tests/test_support.h"
 #include "scav/scav_core.h"
 
 #include "doctest.h"
@@ -18,145 +19,16 @@ namespace {
 using namespace scav;
 using namespace scav::test;
 
-// the design's own worked example, transcribed verbatim including its comment-free
-// shape, so the document the format is specified by is a document that parses.
-constexpr std::string_view VAC{ R"(
-chart vac "robot vacuum" {
-  include "wifi.scav" as wifi,
-
-  state Off "powered down",
-  state Booting,
-  state PreConfig choice,
-
-  trans * -> Off,
-  trans Off -> Booting "POWER_ON",
-
-  state On {
-    @doc = "Enter: publishes EVT_POWERED_ON",
-    @libhsm { submachine_handler, legacy = "false" },
-
-    submachine main {
-      state Idle { @libhsm:handler = "false" },
-      state Ready,
-      trans * -> Idle,
-      trans internal Ready -> Ready "BUMP_RETRY",
-      trans Ready -> wifi/On/Connected "handoff",
-    },
-    submachine strays "sweeps while main drives" {
-      state Idle,
-      trans * -> Idle,
-    },
-  },
-}
-)" };
-
-// A TCP connection. Real-world shape: many peer states, a couple of
-// pseudostates, one deep-history resume, and transitions that skip levels.
-constexpr std::string_view TCP{ R"(
-// RFC 793 connection states, as a chart rather than as a table.
-chart tcp "TCP connection" {
-  @doc = "Passive and active opens share the established substate.",
-
-  state Closed,
-  state Listen,
-  state SynSent,
-  state SynReceived,
-
-  trans * -> Closed,
-  trans Closed -> Listen "passive open",
-  trans Closed -> SynSent "active open",
-  trans Listen -> SynReceived "recv SYN",
-  trans SynSent -> SynReceived "recv SYN",
-
-  state Established "data may flow both ways" {
-    // Both halves close independently, which is why this is concurrent.
-    submachine inbound {
-      state Open,
-      state HalfClosed,
-      trans * -> Open,
-      trans Open -> HalfClosed "recv FIN",
-    },
-    submachine outbound {
-      state Open,
-      state FinSent,
-      trans * -> Open,
-      trans Open -> FinSent "send FIN", // no more data from us
-    },
-  },
-
-  trans SynReceived -> Established "recv ACK",
-  trans SynSent -> Established "recv SYN+ACK",
-
-  state Closing choice,
-  state TimeWait,
-
-  // A transition out of a nested state to a top-level one: the long
-  // hierarchical edge the whole project exists for.
-  trans Established:inbound/HalfClosed -> Closing,
-  trans Established:outbound/FinSent -> Closing,
-  trans Closing -> TimeWait "both halves closed",
-  trans TimeWait -> Closed "2MSL elapsed",
-}
-)" };
-
-// Firmware over-the-air update. Written in the terse aliases a person drafting
-// reaches for, with a fork/join pair and a raw-string label.
-constexpr std::string_view OTA{ R"(
-chart ota "firmware OTA" {
-  @vendor:component = "bootloader",
-  @tags = ["firmware", "safety-critical"],
-
-  s Idle,
-  t * -> Idle,
-
-  s Downloading {
-    @doc = """
-      Chunks arrive out of order and are written straight to the
-      inactive slot. The manifest is verified only once every chunk
-      has landed.
-      """,
-    m main {
-      s Fetching,
-      s Writing,
-      t * -> Fetching,
-      t Fetching -> Writing "chunk ready",
-      t internal Writing -> Writing "flash busy",
-      t Writing -> Fetching "chunk written",
-    },
-  },
-
-  s Verify fork,
-  s CheckSignature,
-  s CheckVersion,
-  s Verified join,
-  s Failed,
-
-  t Idle -> Downloading "update offered",
-  t Downloading -> Verify "all chunks received",
-  t Verify -> CheckSignature,
-  t Verify -> CheckVersion,
-  t CheckSignature -> Verified,
-  t CheckVersion -> Verified,
-  t Verified -> Idle "swap slots and reboot",
-
-  // Anything can fail at any time, and failure is terminal for this attempt.
-  t CheckSignature -> Failed "bad signature",
-  t CheckVersion -> Failed "downgrade refused",
-  t Downloading -> Failed "timeout",
-  t Failed -> *,
-}
-)" };
-
-struct Chart {
+struct CorpusChart {
   char const *name;
   std::string_view text;
 };
 
-std::vector<Chart> corpus() {
+std::vector<CorpusChart> corpus() {
   return { { "vac", VAC }, { "tcp", TCP }, { "ota", OTA } };
 }
 
-uint32_t count_of(ParsedDocument const &pd, ElemKind kind) {
+uint32_t count_of(ParsedDocument const &pd, StmtKind kind) {
   return static_cast<uint32_t>(stmts_of(pd, kind).size());
 }
 
@@ -164,7 +36,7 @@ uint32_t count_of(ParsedDocument const &pd, ElemKind kind) {
 
 TEST_CASE("corpus: every chart parses with no diagnostics") {
   // P0's exit gate, stated as a test rather than as a claim.
-  for (Chart const &c : corpus()) {
+  for (CorpusChart const &c : corpus()) {
     Parsed const r{ parse(c.text, std::string{ c.name } + ".scav") };
     CHECK_MESSAGE(r.ok, c.name << ": " << diag_message(first_code(r.diags)));
     CHECK_MESSAGE(r.diags.empty(), c.name);
@@ -172,7 +44,7 @@ TEST_CASE("corpus: every chart parses with no diagnostics") {
 }
 
 TEST_CASE("corpus: every statement's span lands inside the document") {
-  for (Chart const &c : corpus()) {
+  for (CorpusChart const &c : corpus()) {
     Parsed const r{ parse(c.text) };
     REQUIRE(r.ok);
     uint32_t const len{ static_cast<uint32_t>(r.pd.src_bytes.size()) };
@@ -187,7 +59,7 @@ TEST_CASE("corpus: every statement's span lands inside the document") {
 }
 
 TEST_CASE("corpus: every span index is in range for the array it names") {
-  for (Chart const &c : corpus()) {
+  for (CorpusChart const &c : corpus()) {
     Parsed const r{ parse(c.text) };
     REQUIRE(r.ok);
     for (uint32_t i = 0; i < r.pd.stmts.size(); ++i) {
@@ -215,7 +87,7 @@ TEST_CASE("corpus: every span index is in range for the array it names") {
 }
 
 TEST_CASE("corpus: every StrRef points inside the finalized pool") {
-  for (Chart const &c : corpus()) {
+  for (CorpusChart const &c : corpus()) {
     Parsed const r{ parse(c.text) };
     REQUIRE(r.ok);
     size_t const n{ r.pd.strings.bytes.size() };
@@ -256,29 +128,29 @@ TEST_CASE("corpus: vac is the chart the design specifies") {
   REQUIRE(r.ok);
   CHECK(str(r.pd, r.pd.charts[0].name) == "vac");
   CHECK(str(r.pd, r.pd.charts[0].label) == "robot vacuum");
-  CHECK(count_of(r.pd, ElemKind::Include) == 1);
-  // Off, Booting, PreConfig, On, main/Idle, main/Ready, strays/Idle.
-  CHECK(count_of(r.pd, ElemKind::State) == 7);
-  CHECK(count_of(r.pd, ElemKind::Submachine) == 2);
-  CHECK(count_of(r.pd, ElemKind::Trans) == 6);
-  CHECK(count_of(r.pd, ElemKind::Attr) == 3);
+  CHECK(count_of(r.pd, StmtKind::Include) == 1);
+  // Off, Booting, PreConfig, On, main/Idle, main/Ready, aux/Idle.
+  CHECK(count_of(r.pd, StmtKind::State) == 7);
+  CHECK(count_of(r.pd, StmtKind::Submachine) == 2);
+  CHECK(count_of(r.pd, StmtKind::Trans) == 6);
+  CHECK(count_of(r.pd, StmtKind::Attr) == 3);
 
   // The cross-document endpoint is an ordinary path, because an include alias
   // is an ordinary state name.
-  bool found_handoff{ false };
-  for (uint32_t const stmt : stmts_of(r.pd, ElemKind::Trans)) {
-    if (str(r.pd, trans_at(r.pd, stmt).label) != "handoff") { continue; }
-    found_handoff = true;
-    CHECK(path_text(r.pd, trans_at(r.pd, stmt).dst) == "wifi/On/Connected");
+  bool found_battery_low{ false };
+  for (uint32_t const stmt : stmts_of(r.pd, StmtKind::Trans)) {
+    if (str(r.pd, trans_at(r.pd, stmt).label) != "battery low") { continue; }
+    found_battery_low = true;
+    CHECK(path_text(r.pd, trans_at(r.pd, stmt).dst) == "dock/On/Seated");
   }
-  CHECK(found_handoff);
+  CHECK(found_battery_low);
 }
 
 TEST_CASE("corpus: vac's two submachines make On concurrent") {
   Parsed const r{ parse(VAC) };
   REQUIRE(r.ok);
   uint32_t on{ INVALID };
-  for (uint32_t const stmt : stmts_of(r.pd, ElemKind::State)) {
+  for (uint32_t const stmt : stmts_of(r.pd, StmtKind::State)) {
     if (str(r.pd, state_at(r.pd, stmt).name) == "On") { on = stmt; }
   }
   REQUIRE(on != INVALID);
@@ -286,7 +158,7 @@ TEST_CASE("corpus: vac's two submachines make On concurrent") {
   uint32_t submachines{ 0 };
   Span const kids{ r.pd.stmt_children[on] };
   for (uint32_t i = 0; i < kids.len; ++i) {
-    if (r.pd.stmts[r.pd.stmt_ids[kids.off + i].v].kind == ElemKind::Submachine) {
+    if (r.pd.stmts[r.pd.stmt_ids[kids.off + i].v].kind == StmtKind::Submachine) {
       ++submachines;
     }
   }
@@ -297,7 +169,7 @@ TEST_CASE("corpus: tcp keeps its long hierarchical edges as written") {
   Parsed const r{ parse(TCP, "tcp.scav") };
   REQUIRE(r.ok);
   std::vector<std::string> paths;
-  for (uint32_t const stmt : stmts_of(r.pd, ElemKind::Trans)) {
+  for (uint32_t const stmt : stmts_of(r.pd, StmtKind::Trans)) {
     paths.push_back(path_text(r.pd, trans_at(r.pd, stmt).src));
   }
   bool found_inbound{ false };
@@ -316,7 +188,7 @@ TEST_CASE("corpus: tcp's duplicate names in different submachines are distinct r
   Parsed const r{ parse(TCP) };
   REQUIRE(r.ok);
   uint32_t opens{ 0 };
-  for (uint32_t const stmt : stmts_of(r.pd, ElemKind::State)) {
+  for (uint32_t const stmt : stmts_of(r.pd, StmtKind::State)) {
     if (str(r.pd, state_at(r.pd, stmt).name) == "Open") { ++opens; }
   }
   CHECK(opens == 2);
@@ -325,11 +197,11 @@ TEST_CASE("corpus: tcp's duplicate names in different submachines are distinct r
 TEST_CASE("corpus: ota's aliases produce the same rows the long spelling would") {
   Parsed const r{ parse(OTA, "ota.scav") };
   REQUIRE(r.ok);
-  CHECK(count_of(r.pd, ElemKind::Submachine) == 1);
-  CHECK(count_of(r.pd, ElemKind::State) == 9);
+  CHECK(count_of(r.pd, StmtKind::Submachine) == 1);
+  CHECK(count_of(r.pd, StmtKind::State) == 9);
 
   std::vector<StateKind> kinds;
-  for (uint32_t const stmt : stmts_of(r.pd, ElemKind::State)) {
+  for (uint32_t const stmt : stmts_of(r.pd, StmtKind::State)) {
     kinds.push_back(state_at(r.pd, stmt).kind);
   }
   bool has_fork{ false };
@@ -346,7 +218,7 @@ TEST_CASE("corpus: ota's raw-string label is dedented to its closing delimiter")
   Parsed const r{ parse(OTA) };
   REQUIRE(r.ok);
   std::string doc;
-  for (uint32_t const stmt : stmts_of(r.pd, ElemKind::Attr)) {
+  for (uint32_t const stmt : stmts_of(r.pd, StmtKind::Attr)) {
     AttrStmt const &a{ attr_at(r.pd, stmt) };
     AttrEntry const &e{ r.pd.attr_entries[a.entries.off] };
     if (str(r.pd, e.key) != "doc") { continue; }
@@ -361,7 +233,7 @@ TEST_CASE("corpus: ota's raw-string label is dedented to its closing delimiter")
 TEST_CASE("corpus: ota's list attribute keeps its order") {
   Parsed const r{ parse(OTA) };
   REQUIRE(r.ok);
-  for (uint32_t const stmt : stmts_of(r.pd, ElemKind::Attr)) {
+  for (uint32_t const stmt : stmts_of(r.pd, StmtKind::Attr)) {
     AttrStmt const &a{ attr_at(r.pd, stmt) };
     AttrEntry const &e{ r.pd.attr_entries[a.entries.off] };
     if (str(r.pd, e.key) != "tags") { continue; }
@@ -374,7 +246,7 @@ TEST_CASE("corpus: ota's list attribute keeps its order") {
 TEST_CASE("corpus: reformatting a chart onto one line changes nothing but the spans") {
   // Newlines carry nothing, which is what makes byte-identical output
   // the printer's job rather than the format's.
-  for (Chart const &c : corpus()) {
+  for (CorpusChart const &c : corpus()) {
     Parsed const spread{ parse(c.text) };
     REQUIRE(spread.ok);
 
@@ -410,7 +282,7 @@ TEST_CASE("corpus: reformatting a chart onto one line changes nothing but the sp
 TEST_CASE("corpus: parsing the same bytes twice yields identical structure") {
   // Determinism discipline is in force from the first commit, and a
   // parser that depends on nothing but its input is where that starts.
-  for (Chart const &c : corpus()) {
+  for (CorpusChart const &c : corpus()) {
     Parsed const first{ parse(c.text) };
     Parsed const second{ parse(c.text) };
     REQUIRE(first.ok);

@@ -60,14 +60,13 @@ class TestInstallAndConsume(unittest.TestCase):
 
     def test_install_tree_matches_the_config_package(self) -> None:
         for rel in ("include/scav/scav_types.h",
-                    "include/scav/scav_toy.h",
                     "include/scav/scav_core.h",
                     "lib/cmake/scav/scav-config.cmake",
                     "lib/cmake/scav/scav-config-version.cmake",
                     "lib/cmake/scav/scav-targets.cmake"):
             with self.subTest(path=rel):
                 self.assertTrue((self.prefix / rel).is_file(), f"{rel} not installed")
-        self.assertTrue(list((self.prefix / "lib").glob("*scavtoy*")), "no archive")
+        self.assertTrue(list((self.prefix / "lib").glob("*scavcore*")), "no archive")
 
     def test_every_installed_header_is_a_public_one(self) -> None:
         """The public/private split is a directory layout, so it is only real if
@@ -92,7 +91,6 @@ class TestInstallAndConsume(unittest.TestCase):
         rather than counted."""
         self.assertEqual(
             ["include/scav/scav_core.h",
-             "include/scav/scav_toy.h",
              "include/scav/scav_types.h"],
             sorted(p.relative_to(self.prefix).as_posix()
                    for p in self.prefix.rglob("*.h")))
@@ -101,8 +99,8 @@ class TestInstallAndConsume(unittest.TestCase):
         # An installed internal header would let a consumer define SCAV_TESTING and
         # link against symbols the shipping archive does not export.
         leaked = [p for pattern in ("*_internal.h", "*testable*", "*_tests.*",
-                                    "test_support.h", "lookup_map.h", "sort.h",
-                                    "interner.h", "synth_document.h")
+                                    "test_*.h", "lookup_map.h", "sort.h",
+                                    "interner.h", "*synth_document*")
                   for p in self.prefix.rglob(pattern)]
         self.assertEqual([], leaked, "unshipped artifacts escaped into the install tree")
 
@@ -121,10 +119,10 @@ class TestInstallAndConsume(unittest.TestCase):
 
         result = scavtest.run([exe])
         self.assertEqual(0, result.returncode, "the installed scav computed the wrong value")
-        self.assertIn("consumer toy ok", result.stdout)
-        # Core too: the consumer parses a chart through the installed public
-        # headers, which is what proves none of them needs a private one.
         self.assertIn("consumer core ok", result.stdout)
+        # The model half too: lower, validate, and resolve through the installed
+        # public headers, which is what proves none of them needs a private one.
+        self.assertIn("consumer model ok", result.stdout)
 
     def test_version_compatibility_is_same_minor(self) -> None:
         # The C ABI is additive within a minor version, so a newer minor must be

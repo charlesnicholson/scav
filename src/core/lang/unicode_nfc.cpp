@@ -113,10 +113,10 @@ void append_decomposition(uint32_t cp, std::vector<uint32_t> &out) {
 void canonical_order(std::vector<uint32_t> &v) {
   size_t const n{ v.size() };
   for (size_t i = 1; i < n; ++i) {
-    uint32_t const cc{ nfc_combining_class(v[i]) };
+    uint32_t const cc{ unicode_nfc_combining_class(v[i]) };
     if (cc == 0) { continue; }
     size_t j{ i };
-    while ((j > 0) && (nfc_combining_class(v[j - 1]) > cc)) {
+    while ((j > 0) && (unicode_nfc_combining_class(v[j - 1]) > cc)) {
       uint32_t const tmp{ v[j - 1] };
       v[j - 1] = v[j];
       v[j] = tmp;
@@ -127,7 +127,7 @@ void canonical_order(std::vector<uint32_t> &v) {
 
 }  // namespace
 
-bool nfc_needs_work(uint32_t cp) {
+bool unicode_nfc_needs_work(uint32_t cp) {
   if (cp < 0x300) { return false; }  // the first unsafe codepoint is U+0300
   // Ranges ascend and do not overlap, so the last one starting at or below `cp`
   // is the only candidate.
@@ -145,19 +145,19 @@ bool nfc_needs_work(uint32_t cp) {
   return cp <= NFC_UNSAFE_HI[lo - 1];
 }
 
-uint32_t nfc_combining_class(uint32_t cp) {
+uint32_t unicode_nfc_combining_class(uint32_t cp) {
   if (cp < 0x300) { return 0; }
   uint32_t const at{ lower_bound_u32(CCC_KEYS, cp) };
   if ((at >= CCC_KEYS.size()) || (CCC_KEYS[at] != cp)) { return 0; }
   return CCC_VALUES[at];
 }
 
-bool nfc_normalize(std::vector<uint32_t> const &in, std::vector<uint32_t> &out) {
+bool unicode_nfc_normalize(std::vector<uint32_t> const &in, std::vector<uint32_t> &out) {
   out.clear();
 
   bool any_unsafe{ false };
   for (uint32_t const cp : in) {
-    if (nfc_needs_work(cp)) {
+    if (unicode_nfc_needs_work(cp)) {
       any_unsafe = true;
       break;
     }
@@ -179,7 +179,7 @@ bool nfc_normalize(std::vector<uint32_t> const &in, std::vector<uint32_t> &out) 
   bool have_starter{ false };
   uint32_t last_class{ 0 };
   for (uint32_t const cp : decomposed) {
-    uint32_t const cc{ nfc_combining_class(cp) };
+    uint32_t const cc{ unicode_nfc_combining_class(cp) };
     bool const blocked{ have_starter && (last_class != 0) && (last_class >= cc) };
     if (have_starter && !blocked) {
       if (uint32_t const composed{ compose_pair(out[starter], cp) }; composed != 0) {

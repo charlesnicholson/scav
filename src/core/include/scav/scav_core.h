@@ -1,7 +1,8 @@
 #ifndef SCAV_CORE_H_INCLUDED
 #define SCAV_CORE_H_INCLUDED
 
-// libscavcore's whole public API: call parse_document() and walk ParsedDocument.
+// libscavcore's whole public API: parse a document with parse_document(), or
+// build a Chart with the build_ functions, and walk the arrays either way.
 // Each function carries the prefix of its section, and nothing here takes a path.
 
 #include "scav/scav_types.h"
@@ -9,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <vector>
@@ -17,39 +19,79 @@ namespace scav {
 
 // Ids and spans =============================================================
 
-// Ids, and the two span shapes every column indexes through. Entity ids arrive
-// with the model spine.
+// Ids, and the two span shapes every column indexes through. An id is an
+// ordinal *and* an array index; tombstoning keeps that true under deletion.
 
 constexpr uint32_t INVALID{ 0xFFFF'FFFFU };
 
 struct DocId {
   uint32_t v;
+  constexpr bool operator==(DocId const &) const = default;
 };
 struct StmtId {
   uint32_t v;
+  constexpr bool operator==(StmtId const &) const = default;
+};
+struct InstId {  // an include instantiation = index into Chart::includes
+  uint32_t v;
+  constexpr bool operator==(InstId const &) const = default;
+};
+struct StateId {
+  uint32_t v;
+  constexpr bool operator==(StateId const &) const = default;
+};
+struct SubmachineId {
+  uint32_t v;
+  constexpr bool operator==(SubmachineId const &) const = default;
+};
+struct TransId {
+  uint32_t v;
+  constexpr bool operator==(TransId const &) const = default;
+};
+struct AttrKeyId {  // interned attribute key, `ns:key` or bare
+  uint32_t v;
+  constexpr bool operator==(AttrKeyId const &) const = default;
+};
+struct ColumnId {  // index into Chart::columns
+  uint32_t v;
+  constexpr bool operator==(ColumnId const &) const = default;
 };
 
-constexpr bool operator==(DocId a, DocId b) { return a.v == b.v; }
-constexpr bool operator!=(DocId a, DocId b) { return a.v != b.v; }
-constexpr bool operator==(StmtId a, StmtId b) { return a.v == b.v; }
-constexpr bool operator!=(StmtId a, StmtId b) { return a.v != b.v; }
+// Equality is defaulted in-struct (C++20): != is rewritten from ==, and the
+// full spaceship would hand an id an ordering nobody asked for -- sorts that
+// mean to order by ordinal say `.v` (§6's stable-key rule).
 
-// Into StringPool::bytes.
+// What an entity *is*, for columns, diagnostics, and DrawList origins. Not
+// StmtKind, which enumerates what a line of source is: `Include` and `Attr`
+// exist only as statements, `Point` and `PathBox` only as entities.
+enum class ElemKind : uint32_t {
+  State,
+  Submachine,
+  Transition,
+  Chart,
+  Point,
+  PathBox,
+  None,
+};
+
+struct ElemRef {
+  ElemKind kind;
+  uint32_t ordinal;
+  constexpr bool operator==(ElemRef const &) const = default;
+};
+
+// Into StringPool::bytes. Two equal refs are the same span; equal *text* is a
+// view comparison, because the pool never deduplicates.
 struct StrRef {
   uint32_t off, len;
+  constexpr bool operator==(StrRef const &) const = default;
 };
 
 // Into a side array.
 struct Span {
   uint32_t off, len;
+  constexpr bool operator==(Span const &) const = default;
 };
-
-constexpr bool operator==(StrRef a, StrRef b) {
-  return (a.off == b.off) && (a.len == b.len);
-}
-constexpr bool operator!=(StrRef a, StrRef b) { return !(a == b); }
-constexpr bool operator==(Span a, Span b) { return (a.off == b.off) && (a.len == b.len); }
-constexpr bool operator!=(Span a, Span b) { return !(a == b); }
 
 // Named constructors: these are built constantly, and a designated-initializer
 // list at every site reads worse. An empty span is `{}`.
@@ -132,10 +174,35 @@ enum class DiagCode : uint32_t {
   NumberOutOfRange,
   TrailingContent,
   DepthLimitExceeded,
+
+  // Lowering: statements to entities (§9, §15). These carry the offending
+  // statement's span, since the entity they would name was never created.
+  MisplacedStatement,
+  WildcardBothEndpoints,
+  EndpointUnresolved,
+  BadSubmachineQualifier,
+  EndpointCrossesInclude,
+
+  // Validation (§10). Subjects are entities, so these carry an ElemRef and
+  // derive file/line/column by walking to the statement's src span on demand.
+  DanglingRef,
+  MissingRequiredId,
+  TombstonedTarget,
+  DuplicateName,
+  MultipleInitial,
+  NameHasMetacharacter,
+  StatementSpanOutOfRange,
+  ColumnCountMismatch,
 };
 
+// Pre-model diagnostics -- normalization, lexing, parsing -- have no entity to
+// name, so `subject` defaults to None and the raw span is the payload. Model
+// diagnostics carry the (code, subject kind, subject ordinal) triple and
+// nothing else; position is derived from the subject's statement when one
+// exists.
 struct Diagnostic {
   DiagCode code;
+  ElemRef subject{ .kind = ElemKind::None, .ordinal = INVALID };
   DocId doc;
   Span src;
 };
@@ -157,7 +224,7 @@ bool diag_has_errors(std::vector<Diagnostic> const &diags);
 // String pool ===============================================================
 
 // A StrRef is an offset and length into StringPool::bytes. Not NUL-terminated:
-// strings come out as spans. Building a pool is private -- a client only reads.
+// strings come out as spans.
 //
 // The pool is not deduplicated, so two equal strings can hold two StrRefs.
 // Compare the views, not the refs.
@@ -174,6 +241,10 @@ inline std::string_view string_pool_view(StringPool const &pool, StrRef ref) {
   if (ref.len == 0) { return {}; }
   return { reinterpret_cast<char const *>(pool.bytes.data() + ref.off), ref.len };
 }
+
+// Appends as met, never deduplicates (see above). The empty string is the empty
+// ref, so it costs no pool growth and every empty field looks the same.
+StrRef string_pool_add(StringPool &pool, std::string_view text);
 
 // Source text ===============================================================
 
@@ -288,7 +359,7 @@ uint64_t lex_footprint(LexResult const &result);
 // it -- `stmt_payload` indexes the array its `kind` names, `stmt_children` its
 // block.
 
-enum class ElemKind : uint32_t { Chart, Include, State, Submachine, Trans, Attr };
+enum class StmtKind : uint32_t { Chart, Include, State, Submachine, Trans, Attr };
 
 // `Initial` and `Final` are reachable only through `*` in an endpoint, so no
 // spelling of the format produces them in this slot.
@@ -321,7 +392,7 @@ struct Document {
 };
 
 struct Statement {
-  ElemKind kind;
+  StmtKind kind;
   DocId doc;
   Span src;       // -> src_bytes; the whole construct, block included
   Span comments;  // -> comments, grouped by owner
@@ -407,7 +478,7 @@ struct ParsedDocument {
   StringPool strings;  // append-order, not deduplicated
 };
 
-char const *syntax_elem_kind_name(ElemKind kind);
+char const *syntax_stmt_kind_name(StmtKind kind);
 char const *syntax_state_kind_name(StateKind kind);
 char const *syntax_trans_kind_name(TransKind kind);
 
@@ -457,6 +528,294 @@ bool parse_document(scav_byte const *bytes,
 
 // Bytes held, for the performance tests' memory-ratio assertion.
 uint64_t parse_footprint(ParsedDocument const &pd);
+
+// Model =====================================================================
+
+// Flat arrays of POD aggregates linked by ordinal; no pointer or reference
+// between records. An id is an array index, deletion is a tombstone
+// (`live = 0`), ids are never reused, and every walk skips dead rows -- that is
+// the whole liveness protocol. Attrs carry no `live` of their own: liveness
+// belongs to the entity, and rows reached through an entity's span inherit it.
+
+struct State {
+  StrRef name;   // empty for pseudostates synthesized from `*`
+  StrRef label;  // the positional string; opaque, may be empty
+  SubmachineId parent;
+  StateKind kind;
+  Span submachines;  // -> submachine_ids
+  Span attrs;        // -> attrs
+  StmtId stmt;       // the statement that declared it; INVALID when code-built
+  InstId inst;       // INVALID in the root document
+  uint32_t live;     // 0 = tombstone
+};
+
+struct Submachine {
+  StateId owner;     // INVALID for a document root
+  uint32_t ordinal;  // position among the owner's submachines, fixed at build
+  StrRef name;
+  StrRef label;
+  Span children;  // -> state_ids, document order
+  Span attrs;     // -> attrs
+  StmtId stmt;
+  InstId inst;
+  uint32_t live;
+};
+
+struct Transition {
+  StateId src, dst;
+  TransKind kind;
+  StrRef label;  // opaque; there is no event entity in the core
+  Span attrs;    // -> attrs
+  StmtId stmt;
+  InstId inst;
+  uint32_t live;
+};
+
+// One row per instantiation; its ordinal is the InstId. `target` stays INVALID
+// until the loader (P2) resolves the path to a document; the alias host state
+// exists from the moment the include does, because an alias is a state.
+struct Include {
+  StrRef alias;
+  DocId target;
+  StateId host;  // the alias state it synthesizes; never INVALID
+  StmtId stmt;
+};
+
+struct Attr {
+  AttrKeyId key;
+  StrRef value;
+};
+
+// Columns: type-erased byte arrays with a stride, indexed by entity ordinal.
+// How extension data lives *in* the model rather than in app-side tables.
+
+enum class ValueKind : uint32_t { U32, I32, U64, I64, StrRef, Span, Blob, Pod };
+
+// ColumnDesc.flags bit 0: a derived column is skipped by the serializer and
+// exempt from round-trip-unknown, or a stale geometry snapshot would survive a
+// save and get trusted instead of recomputed.
+constexpr uint32_t COLUMN_DERIVED{ 1U };
+
+struct ColumnDesc {  // 28 bytes, no padding
+  StrRef name;       // "libhsm.events"; -> Chart::column_names, not Chart::strings
+  ElemKind entity;   // `None` and `PathBox` never appear here
+  ValueKind kind;
+  uint32_t elem_size, elem_align;
+  uint32_t flags;
+};
+
+struct Column {
+  ColumnDesc desc;
+  std::vector<scav_byte> bytes;  // count * elem_size
+};
+
+// One document network rooted at one document. All documents share these
+// arrays, each entity tagged with the statement that declared it and the
+// instantiation it belongs to -- no flattening step and no second model shape.
+struct Chart {
+  std::vector<Document> documents;
+  std::vector<Statement> stmts;
+  std::vector<Trivia> comments;      // Statement.comments spans into this
+  std::vector<scav_byte> src_bytes;  // normalized source; never canonicalized
+
+  std::vector<State> states;            // indexed by StateId
+  std::vector<Submachine> submachines;  // indexed by SubmachineId
+  std::vector<Transition> transitions;  // indexed by TransId
+  std::vector<Include> includes;        // indexed by InstId
+  std::vector<Attr> attrs;
+
+  // Attribute keys are genuinely interned -- equal keys give equal ids, which
+  // is the point of an id -- so their bytes live apart from the never-
+  // deduplicated `strings`. AttrKeyId indexes attr_key_names.
+  std::vector<StrRef> attr_key_names;
+  StringPool attr_keys;
+
+  std::vector<Column> columns;  // indexed by ColumnId
+  StringPool column_names;      // a registered name is not authored text
+
+  std::vector<StateId> state_ids;  // Span targets
+  std::vector<SubmachineId> submachine_ids;
+
+  StringPool strings;  // authored names and labels; append order
+
+  // Braced so `Chart c;` is a usable empty chart: the vectors above initialize
+  // themselves, and a POD tail left indeterminate would make every walk UB.
+  StrRef name{}, label{};
+  SubmachineId root_submachine{ INVALID };
+  Span chart_attrs{};  // -> attrs
+};
+
+// Chart queries =============================================================
+
+// Reads over the model. Everything here checks liveness where a walk could
+// yield a dead row; nothing here allocates except chart_path_of, which builds
+// a string.
+
+inline std::string_view chart_string(Chart const &c, StrRef ref) {
+  return string_pool_view(c.strings, ref);
+}
+
+// The key's canonical spelling, `ns:key` or bare. Empty for an id never handed
+// out by this chart.
+std::string_view chart_attr_key(Chart const &c, AttrKeyId key);
+
+// The interned id for `key`, or INVALID when this chart never met it.
+AttrKeyId chart_attr_key_find(Chart const &c, std::string_view key);
+
+// Rows of the entity array `kind` names. Chart is one entity; Point and
+// PathBox have no entity array yet, so their count is the column's business.
+uint32_t chart_entity_count(Chart const &c, ElemKind kind);
+
+// In range and of an entity kind that has rows. INVALID ordinals fail.
+bool chart_ref_valid(Chart const &c, ElemRef ref);
+
+// False for a tombstoned row, and for any ref chart_ref_valid rejects. The
+// chart entity is always live.
+bool chart_live(Chart const &c, ElemRef ref);
+
+// The subject's attrs span. Empty for a ref without attrs (Point, PathBox,
+// None, out of range).
+Span chart_attrs_of(Chart const &c, ElemRef ref);
+
+// Index into Chart::attrs of the subject's first attr with `key`, or INVALID.
+// A list-valued attr is N rows under one key: walk the span for the rest.
+uint32_t chart_attr_find(Chart const &c, ElemRef subject, std::string_view key);
+
+// The submachine-qualified `/`-separated path: `On:main/Idle`. Unnamed
+// pseudostates spell as `$<kind>`, ordinal-suffixed past the first, so every
+// live state has an address. Appends to `out` without clearing it.
+void chart_path_of(Chart const &c, StateId id, std::string &out);
+
+// Bytes held, for the performance tests' memory-ratio assertion. Capacity, not
+// size: the peak is what matters.
+uint64_t chart_footprint(Chart const &c);
+
+// Builder ===================================================================
+
+// Append-only: rows are never removed, reordered, or compacted, so an id handed
+// out stays valid for the life of the chart. Appending where a span is not at
+// the tail of its shared array rebuilds that array in O(n) -- microseconds at
+// the scale target, and cheaper than an indirection every read would pay
+// forever.
+//
+// A bad call -- an id out of range, a tombstoned parent, a second build_chart --
+// appends nothing and returns the INVALID id. The builder will not manufacture
+// a structurally bad model from a bad argument; validation (§10) is for models,
+// not for calls.
+
+// Names the chart, creates the root submachine, and returns it. The chart must
+// be empty. Everything else hangs off the returned id.
+SubmachineId build_chart(Chart &c, std::string_view name, std::string_view label);
+
+StateId build_state(Chart &c,
+                    SubmachineId parent,
+                    std::string_view name,
+                    StateKind kind,
+                    std::string_view label);
+
+SubmachineId build_submachine(Chart &c,
+                              StateId owner,
+                              std::string_view name,
+                              std::string_view label);
+
+TransId build_trans(Chart &c,
+                    StateId src,
+                    StateId dst,
+                    TransKind kind,
+                    std::string_view label);
+
+// Appends one Attr row to the subject and returns its index into Chart::attrs,
+// interning `key` if this chart never met it. A repeated key appends another
+// row -- that is how a list value is stored. Note the returned index is the one
+// place the append-only rule bends: a later build_attr for a *different*
+// subject can shift attr rows to keep spans contiguous, so hold the subject and
+// re-find rather than holding the index across builds.
+uint32_t build_attr(Chart &c,
+                    ElemRef subject,
+                    std::string_view key,
+                    std::string_view value);
+
+// Synthesizes the alias host state in `parent` and appends the Include row
+// naming it. The authored path is source text, not model data, so it is not
+// taken here; the loader (P2) fills `target`.
+InstId build_include(Chart &c, SubmachineId parent, std::string_view alias);
+
+// Columns ===================================================================
+
+// What the core owes an extension: store it indexed by entity ordinal, keep it
+// index-aligned under append and tombstoning, round-trip it losslessly, pass it
+// through unread.
+
+// Appends a column sized to the entity's current count, zero-filled, and
+// returns its id. The name is interned into Chart::column_names. Rejected with
+// INVALID: an entity of None or PathBox, a zero elem_size, an alignment that is
+// zero or does not divide elem_size, and a name already registered -- a column
+// is an identity, so re-registration is a caller bug, not an upsert.
+ColumnId column_register(Chart &c,
+                         std::string_view name,
+                         ElemKind entity,
+                         ValueKind kind,
+                         uint32_t elem_size,
+                         uint32_t elem_align,
+                         uint32_t flags);
+
+// INVALID when no column has that name. Linear scan by bytes: registration
+// order is not canonical, and a chart holds few columns.
+ColumnId column_find(Chart const &c, std::string_view name);
+
+scav_byte *column_data(Chart &c, ColumnId id);
+scav_byte const *column_data(Chart const &c, ColumnId id);
+
+// Rows, not bytes: bytes.size() / elem_size.
+uint32_t column_count(Chart const &c, ColumnId id);
+
+// Resolution ================================================================
+
+// Why a path failed, so lowering can say which rule broke rather than only
+// that one did.
+enum class ResolveStatus : uint32_t { Ok, NotFound, BadQualifier, CrossesInclude };
+
+// Resolves a §9 state path against `scope`, the submachine the reference
+// appears in -- pass Chart::root_submachine for an absolute lookup. The first
+// segment resolves innermost-outward through the enclosing submachines,
+// nearest match winning; every later segment descends strictly. A `:name` or
+// `:ordinal` qualifier picks which submachine to descend into and is required
+// exactly when the state has more than one; on the last segment there is
+// nothing to descend into, so a qualifier there is an error. Synthetic `$kind`
+// spellings address unnamed pseudostates. Descending past an unresolved
+// include alias is CrossesInclude until the loader (P2) attaches the target.
+ResolveStatus resolve_path(Chart const &c,
+                           SubmachineId scope,
+                           std::string_view path,
+                           StateId &out);
+
+// Lowering ==================================================================
+
+// Statements to entities (§17 P1). Appends pd's document, statements, trivia,
+// and normalized bytes to the chart -- rebased into the shared pools -- then
+// creates the entity rows the statements describe: implicit submachines for
+// states directly in a block (§15), one synthesized pseudostate per `*`
+// endpoint (§9), an Include row plus alias host state per include, endpoint
+// paths resolved lexically (§9). The parser accepts any item in any block by
+// design; placement rules are lowering's, and a misplaced statement is
+// diagnosed and skipped, never half-applied. P1 lowers one root document into
+// an empty chart; cross-document resolution is the loader's (P2). Returns
+// false when it reported anything.
+bool lower_document(Chart &c, ParsedDocument const &pd, std::vector<Diagnostic> &diags);
+
+// Validation ================================================================
+
+// Mandatory and structural only: dangling ids, required ids absent, live rows
+// referencing tombstoned ones, duplicate authored names per submachine, path
+// metacharacters in names, more than one initial per submachine, statement
+// spans outside their document, column counts out of lockstep. Semantic lint
+// is a plugin's business, and degree checks per pseudostate kind are dialect
+// rules -- every topology must stay drawable (§7.2).
+//
+// Walks live rows; a tombstoned row is checked only as a target. Appends its
+// findings to `diags` sorted by (code, subject kind, subject ordinal) -- the
+// §6 artifact order -- and returns false when it reported anything.
+bool validate_chart(Chart const &c, std::vector<Diagnostic> &diags);
 
 }  // namespace scav
 

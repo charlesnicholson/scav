@@ -115,6 +115,9 @@ endif()
 
 add_subdirectory(src)
 
+# The applications: consumers of the libraries, never privileged layers.
+add_subdirectory(apps)
+
 scav_check_layering()
 if(SCAV_BUILD_TESTS)
   scav_check_tests()

@@ -112,3 +112,10 @@ TEST_CASE("string_pool: equal strings get their own bytes") {
   CHECK(string_pool_view(pool, a) == string_pool_view(pool, b));
   CHECK(pool.bytes.size() == 8);
 }
+
+// Fails on purpose, and is skipped unless run by name. A harness that reports
+// nothing looks exactly like one where everything passes; the build runs this
+// case expecting a non-zero exit, which is what tells them apart (PB).
+TEST_CASE("core: deliberate failure" * doctest::skip()) {
+  CHECK_MESSAGE(INVALID == 0, "this failure is intentional");
+}

@@ -2,8 +2,8 @@
 // attachment, the depth cap and every diagnostic. Charts are inline raw
 // literals: a parser test that opens a file is testing the filesystem too.
 
-#include "core/lang/synth_document.h"
-#include "core/test_support.h"
+#include "core/tests/test_support.h"
+#include "core/tests/test_synth.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 
@@ -50,31 +50,31 @@ std::vector<std::string> shape(ParsedDocument const &pd) {
   }
   out.reserve(order.size());
   for (uint32_t const stmt : order) {
-    std::string line{ syntax_elem_kind_name(pd.stmts[stmt].kind) };
+    std::string line{ syntax_stmt_kind_name(pd.stmts[stmt].kind) };
     switch (pd.stmts[stmt].kind) {
-      case ElemKind::Chart:
+      case StmtKind::Chart:
         line += ":";
         line += str(pd, pd.charts[pd.stmt_payload[stmt]].name);
         break;
-      case ElemKind::State:
+      case StmtKind::State:
         line += ":";
         line += str(pd, state_at(pd, stmt).name);
         break;
-      case ElemKind::Submachine:
+      case StmtKind::Submachine:
         line += ":";
         line += str(pd, submachine_at(pd, stmt).name);
         break;
-      case ElemKind::Trans:
+      case StmtKind::Trans:
         line += ":";
         line += path_text(pd, trans_at(pd, stmt).src);
         line += "->";
         line += path_text(pd, trans_at(pd, stmt).dst);
         break;
-      case ElemKind::Attr:
+      case StmtKind::Attr:
         line += ":";
         line += str(pd, pd.attr_entries[attr_at(pd, stmt).entries.off].key);
         break;
-      case ElemKind::Include:
+      case StmtKind::Include:
         line += ":";
         line += str(pd, include_at(pd, stmt).alias);
         break;
@@ -107,7 +107,7 @@ TEST_CASE("parse: the smallest legal chart") {
   REQUIRE(r.ok);
   CHECK(r.diags.empty());
   REQUIRE(r.pd.stmts.size() == 1);
-  CHECK(r.pd.stmts[0].kind == ElemKind::Chart);
+  CHECK(r.pd.stmts[0].kind == StmtKind::Chart);
   CHECK(str(r.pd, r.pd.charts[0].name) == "c");
   CHECK(str(r.pd, r.pd.charts[0].label).empty());
   CHECK(r.pd.stmt_children[0].len == 0);
@@ -176,7 +176,7 @@ chart c {
 }
 )") };
   REQUIRE(r.ok);
-  std::vector<uint32_t> const states{ stmts_of(r.pd, ElemKind::State) };
+  std::vector<uint32_t> const states{ stmts_of(r.pd, StmtKind::State) };
   REQUIRE(states.size() == 4);
   CHECK(str(r.pd, state_at(r.pd, states[0]).name) == "Off");
   CHECK(str(r.pd, state_at(r.pd, states[0]).label) == "powered down");
@@ -198,7 +198,7 @@ TEST_CASE("parse: every state kind the format spells") {
            { "deephistory", StateKind::DeepHistory } }) {
     Parsed const r{ parse("chart c { state A " + word + ", }") };
     REQUIRE_MESSAGE(r.ok, word);
-    CHECK(state_at(r.pd, stmts_of(r.pd, ElemKind::State)[0]).kind == kind);
+    CHECK(state_at(r.pd, stmts_of(r.pd, StmtKind::State)[0]).kind == kind);
   }
 }
 
@@ -218,8 +218,8 @@ TEST_CASE("parse: a state block distinguishes absent from empty") {
   Parsed const empty{ parse("chart c { state A {}, }") };
   REQUIRE(bare.ok);
   REQUIRE(empty.ok);
-  CHECK(state_at(bare.pd, stmts_of(bare.pd, ElemKind::State)[0]).has_block == 0);
-  CHECK(state_at(empty.pd, stmts_of(empty.pd, ElemKind::State)[0]).has_block == 1);
+  CHECK(state_at(bare.pd, stmts_of(bare.pd, StmtKind::State)[0]).has_block == 0);
+  CHECK(state_at(empty.pd, stmts_of(empty.pd, StmtKind::State)[0]).has_block == 1);
 }
 
 TEST_CASE("parse: submachines, named, labelled and anonymous") {
@@ -227,18 +227,18 @@ TEST_CASE("parse: submachines, named, labelled and anonymous") {
 chart c {
   state On {
     submachine main { state Idle, },
-    submachine strays "sweeps while main drives" { state Idle, },
+    submachine aux "sweeps while main drives" { state Idle, },
     submachine { state Solo, },
     submachine "just a label" { state Other, },
   },
 }
 )") };
   REQUIRE(r.ok);
-  std::vector<uint32_t> const subs{ stmts_of(r.pd, ElemKind::Submachine) };
+  std::vector<uint32_t> const subs{ stmts_of(r.pd, StmtKind::Submachine) };
   REQUIRE(subs.size() == 4);
   CHECK(str(r.pd, submachine_at(r.pd, subs[0]).name) == "main");
   CHECK(str(r.pd, submachine_at(r.pd, subs[0]).label).empty());
-  CHECK(str(r.pd, submachine_at(r.pd, subs[1]).name) == "strays");
+  CHECK(str(r.pd, submachine_at(r.pd, subs[1]).name) == "aux");
   CHECK(str(r.pd, submachine_at(r.pd, subs[1]).label) == "sweeps while main drives");
   CHECK(str(r.pd, submachine_at(r.pd, subs[2]).name).empty());
   CHECK(str(r.pd, submachine_at(r.pd, subs[3]).name).empty());
@@ -263,7 +263,7 @@ chart c {
 }
 )") };
   REQUIRE(r.ok);
-  std::vector<uint32_t> const ts{ stmts_of(r.pd, ElemKind::Trans) };
+  std::vector<uint32_t> const ts{ stmts_of(r.pd, StmtKind::Trans) };
   REQUIRE(ts.size() == 6);
   CHECK(trans_at(r.pd, ts[0]).src.wildcard == 1);
   CHECK(path_text(r.pd, trans_at(r.pd, ts[0]).dst) == "Off");
@@ -281,16 +281,16 @@ TEST_CASE("parse: transition paths, qualified by name and by ordinal") {
 chart c {
   trans On/Ready/Online -> Off,
   trans On:1/Idle -> On:main/Ready,
-  trans wifi/On/Connected -> A,
+  trans dock/On/Seated -> A,
   trans A:0 -> B:99,
 }
 )") };
   REQUIRE(r.ok);
-  std::vector<uint32_t> const ts{ stmts_of(r.pd, ElemKind::Trans) };
+  std::vector<uint32_t> const ts{ stmts_of(r.pd, StmtKind::Trans) };
   CHECK(path_text(r.pd, trans_at(r.pd, ts[0]).src) == "On/Ready/Online");
   CHECK(path_text(r.pd, trans_at(r.pd, ts[1]).src) == "On:1/Idle");
   CHECK(path_text(r.pd, trans_at(r.pd, ts[1]).dst) == "On:main/Ready");
-  CHECK(path_text(r.pd, trans_at(r.pd, ts[2]).src) == "wifi/On/Connected");
+  CHECK(path_text(r.pd, trans_at(r.pd, ts[2]).src) == "dock/On/Seated");
   CHECK(path_text(r.pd, trans_at(r.pd, ts[3]).src) == "A:0");
   CHECK(path_text(r.pd, trans_at(r.pd, ts[3]).dst) == "B:99");
 
@@ -317,7 +317,7 @@ chart c {
 }
 )") };
   REQUIRE(r.ok);
-  std::vector<uint32_t> const ts{ stmts_of(r.pd, ElemKind::Trans) };
+  std::vector<uint32_t> const ts{ stmts_of(r.pd, StmtKind::Trans) };
   CHECK(trans_at(r.pd, ts[0]).has_block == 1);
   CHECK(children_of(r.pd, ts[0]).size() == 1);
   CHECK(trans_at(r.pd, ts[1]).has_block == 0);
@@ -336,7 +336,7 @@ TEST_CASE("parse: a malformed transition names what was missing") {
 TEST_CASE("parse: includes") {
   Parsed const r{ parse(R"(chart c { include "wifi.scav" as wifi, })") };
   REQUIRE(r.ok);
-  std::vector<uint32_t> const incs{ stmts_of(r.pd, ElemKind::Include) };
+  std::vector<uint32_t> const incs{ stmts_of(r.pd, StmtKind::Include) };
   REQUIRE(incs.size() == 1);
   CHECK(str(r.pd, include_at(r.pd, incs[0]).path) == "wifi.scav");
   CHECK(str(r.pd, include_at(r.pd, incs[0]).alias) == "wifi");
@@ -356,14 +356,14 @@ TEST_CASE("parse: attributes in all three spellings") {
 chart c {
   @flag,
   @doc = "some text",
-  @libhsm:handler = "false",
-  @libhsm { submachine_handler, legacy = "false" },
+  @nav:retry = "false",
+  @nav { uses_lidar, follow_walls = "false" },
   @tags = ["a", "b", "c"],
   @empty_list = [],
 }
 )") };
   REQUIRE(r.ok);
-  std::vector<uint32_t> const attrs{ stmts_of(r.pd, ElemKind::Attr) };
+  std::vector<uint32_t> const attrs{ stmts_of(r.pd, StmtKind::Attr) };
   REQUIRE(attrs.size() == 6);
 
   AttrStmt const &flag{ attr_at(r.pd, attrs[0]) };
@@ -378,15 +378,15 @@ chart c {
         "some text");
 
   AttrStmt const &ns{ attr_at(r.pd, attrs[2]) };
-  CHECK(str(r.pd, ns.ns) == "libhsm");
-  CHECK(str(r.pd, r.pd.attr_entries[ns.entries.off].key) == "handler");
+  CHECK(str(r.pd, ns.ns) == "nav");
+  CHECK(str(r.pd, r.pd.attr_entries[ns.entries.off].key) == "retry");
 
   AttrStmt const &block{ attr_at(r.pd, attrs[3]) };
-  CHECK(str(r.pd, block.ns) == "libhsm");
+  CHECK(str(r.pd, block.ns) == "nav");
   REQUIRE(block.entries.len == 2);
-  CHECK(str(r.pd, r.pd.attr_entries[block.entries.off].key) == "submachine_handler");
+  CHECK(str(r.pd, r.pd.attr_entries[block.entries.off].key) == "uses_lidar");
   CHECK(r.pd.attr_entries[block.entries.off].kind == AttrValueKind::Flag);
-  CHECK(str(r.pd, r.pd.attr_entries[block.entries.off + 1].key) == "legacy");
+  CHECK(str(r.pd, r.pd.attr_entries[block.entries.off + 1].key) == "follow_walls");
   CHECK(r.pd.attr_entries[block.entries.off + 1].kind == AttrValueKind::Scalar);
 
   AttrStmt const &tags{ attr_at(r.pd, attrs[4]) };
@@ -406,7 +406,7 @@ TEST_CASE("parse: a flag stays distinct from an explicit true") {
   // would decide it early and irreversibly.
   Parsed const r{ parse(R"(chart c { @a, @b = "true", })") };
   REQUIRE(r.ok);
-  std::vector<uint32_t> const attrs{ stmts_of(r.pd, ElemKind::Attr) };
+  std::vector<uint32_t> const attrs{ stmts_of(r.pd, StmtKind::Attr) };
   CHECK(r.pd.attr_entries[attr_at(r.pd, attrs[0]).entries.off].kind ==
         AttrValueKind::Flag);
   CHECK(r.pd.attr_entries[attr_at(r.pd, attrs[1]).entries.off].kind ==
@@ -445,7 +445,7 @@ TEST_CASE("parse: a block comment says so rather than blaming the statement") {
   CHECK_FALSE(r.ok);
   CHECK(first_code(r.diags) == DiagCode::BlockCommentUnsupported);
   // The rest still parses, so any other error in the file shows up in one run.
-  CHECK(stmts_of(r.pd, ElemKind::State).size() == 1);
+  CHECK(stmts_of(r.pd, StmtKind::State).size() == 1);
 }
 
 TEST_CASE("parse: an unknown statement keyword is rejected") {
@@ -466,9 +466,9 @@ TEST_CASE("parse: s, m and t are aliases only in statement-leading position") {
         R"(chart c { m main { s Idle, s Ready, t * -> Idle, t internal Ready -> Ready "RETRY", }, })")
   };
   REQUIRE(whole.ok);
-  CHECK(stmts_of(whole.pd, ElemKind::Submachine).size() == 1);
-  CHECK(stmts_of(whole.pd, ElemKind::State).size() == 2);
-  CHECK(stmts_of(whole.pd, ElemKind::Trans).size() == 2);
+  CHECK(stmts_of(whole.pd, StmtKind::Submachine).size() == 1);
+  CHECK(stmts_of(whole.pd, StmtKind::State).size() == 2);
+  CHECK(stmts_of(whole.pd, StmtKind::Trans).size() == 2);
 }
 
 TEST_CASE("parse: an alias and the long spelling produce identical trees") {
@@ -498,7 +498,7 @@ TEST_CASE("parse: a state may be named after any contextual word") {
                             "final" }) {
     Parsed const r{ parse(std::string{ "chart c { state " } + name + ", }") };
     REQUIRE_MESSAGE(r.ok, name);
-    CHECK(str(r.pd, state_at(r.pd, stmts_of(r.pd, ElemKind::State)[0]).name) == name);
+    CHECK(str(r.pd, state_at(r.pd, stmts_of(r.pd, StmtKind::State)[0]).name) == name);
   }
 }
 
@@ -551,7 +551,7 @@ chart c {
       state Ready,
       trans * -> Idle,
     },
-    submachine strays {
+    submachine aux {
       state Junk,
     },
   },
@@ -567,7 +567,7 @@ chart c {
                                                  "state:Idle",
                                                  "state:Ready",
                                                  "trans:*->Idle",
-                                                 "submachine:strays",
+                                                 "submachine:aux",
                                                  "state:Junk",
                                                  "state:Last" });
 }
@@ -577,7 +577,7 @@ TEST_CASE("parse: a statement span covers the whole construct, block included") 
   REQUIRE(r.ok);
   CHECK(src(r.pd, r.pd.stmts[0].src) == "chart c { state On { state Idle, }, }");
 
-  std::vector<uint32_t> const states{ stmts_of(r.pd, ElemKind::State) };
+  std::vector<uint32_t> const states{ stmts_of(r.pd, StmtKind::State) };
   CHECK(src(r.pd, r.pd.stmts[states[0]].src) == "state On { state Idle, }");
   CHECK(src(r.pd, r.pd.stmts[states[1]].src) == "state Idle");
 }
@@ -617,7 +617,7 @@ TEST_CASE("parse: strings land in the pool in the order they are met") {
                           r.pd.strings.bytes.size() };
   CHECK(pool == "test.scavzetaMidAlphaOmega");
   CHECK(str(r.pd, r.pd.charts[0].name) == "zeta");
-  CHECK(str(r.pd, state_at(r.pd, stmts_of(r.pd, ElemKind::State)[1]).name) == "Alpha");
+  CHECK(str(r.pd, state_at(r.pd, stmts_of(r.pd, StmtKind::State)[1]).name) == "Alpha");
 }
 
 TEST_CASE("parse: a repeated name gets its own bytes and its own ref") {
@@ -627,7 +627,7 @@ TEST_CASE("parse: a repeated name gets its own bytes and its own ref") {
   // answer that question anyway.
   Parsed const r{ parse("chart c { state Idle, state Idle, state Idle, }") };
   REQUIRE(r.ok);
-  std::vector<uint32_t> const states{ stmts_of(r.pd, ElemKind::State) };
+  std::vector<uint32_t> const states{ stmts_of(r.pd, StmtKind::State) };
   StrRef const a{ state_at(r.pd, states[0]).name };
   StrRef const b{ state_at(r.pd, states[1]).name };
   CHECK(a != b);
@@ -664,7 +664,7 @@ TEST_CASE("parse: src_bytes holds the normalized document, not the raw one") {
                           r.pd.src_bytes.size() };
   CHECK(text == "chart c {\n  state Cafe \"Caf\xc3\xa9\",\n}\n");
   CHECK(r.pd.doc.text == make_span(0, static_cast<uint32_t>(text.size())));
-  CHECK(str(r.pd, state_at(r.pd, stmts_of(r.pd, ElemKind::State)[0]).label) ==
+  CHECK(str(r.pd, state_at(r.pd, stmts_of(r.pd, StmtKind::State)[0]).label) ==
         "Caf\xc3\xa9");
 }
 
@@ -689,7 +689,7 @@ chart c {
 }
 )") };
   REQUIRE(r.ok);
-  std::vector<uint32_t> const states{ stmts_of(r.pd, ElemKind::State) };
+  std::vector<uint32_t> const states{ stmts_of(r.pd, StmtKind::State) };
   CHECK(comments_of(r.pd, 0) == std::vector<std::string>{ "leading // about the chart" });
   CHECK(comments_of(r.pd, states[0]) ==
         std::vector<std::string>{ "leading // about Idle", "trailing // after Idle" });
@@ -710,7 +710,7 @@ chart c {
 }
 )") };
   REQUIRE(r.ok);
-  uint32_t const on{ stmts_of(r.pd, ElemKind::State)[0] };
+  uint32_t const on{ stmts_of(r.pd, StmtKind::State)[0] };
   REQUIRE(comments_of(r.pd, on).size() == 1);
   // Whether it sits before the statement or inside its block is derivable from
   // the offsets, so CommentPos does not need a fourth value.
@@ -727,7 +727,7 @@ chart c {
 }
 )") };
   REQUIRE(r.ok);
-  uint32_t const on{ stmts_of(r.pd, ElemKind::State)[0] };
+  uint32_t const on{ stmts_of(r.pd, StmtKind::State)[0] };
   CHECK(comments_of(r.pd, on) ==
         std::vector<std::string>{ "trailing // after the whole composite" });
 }
@@ -781,10 +781,10 @@ TEST_CASE("parse: nesting to the depth-16 design target") {
 
   Parsed const r{ parse(text) };
   REQUIRE_MESSAGE(r.ok, diag_message(first_code(r.diags)));
-  CHECK(stmts_of(r.pd, ElemKind::State).size() == stats.states);
-  CHECK(stmts_of(r.pd, ElemKind::Submachine).size() == stats.submachines);
-  CHECK(stmts_of(r.pd, ElemKind::Trans).size() == stats.transitions);
-  CHECK(stmts_of(r.pd, ElemKind::Attr).size() == stats.attrs);
+  CHECK(stmts_of(r.pd, StmtKind::State).size() == stats.states);
+  CHECK(stmts_of(r.pd, StmtKind::Submachine).size() == stats.submachines);
+  CHECK(stmts_of(r.pd, StmtKind::Trans).size() == stats.transitions);
+  CHECK(stmts_of(r.pd, StmtKind::Attr).size() == stats.attrs);
   CHECK(r.pd.stmts.size() == stats.statements);
   CHECK(r.pd.comments.size() == stats.comments);
 }

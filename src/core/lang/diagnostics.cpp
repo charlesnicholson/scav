@@ -68,6 +68,26 @@ char const *diag_message(DiagCode code) {
     case DiagCode::NumberOutOfRange: return "number does not fit in 32 bits";
     case DiagCode::TrailingContent: return "content after the end of the chart";
     case DiagCode::DepthLimitExceeded: return "nesting is deeper than the limit";
+
+    case DiagCode::MisplacedStatement: return "statement is not permitted in this block";
+    case DiagCode::WildcardBothEndpoints: return "a transition cannot run from '*' to '*'";
+    case DiagCode::EndpointUnresolved: return "endpoint path names no state";
+    case DiagCode::BadSubmachineQualifier:
+      return "submachine qualifier names no submachine, or qualifies nothing";
+    case DiagCode::EndpointCrossesInclude:
+      return "endpoint path descends into an unresolved include";
+
+    case DiagCode::DanglingRef: return "reference to a row that does not exist";
+    case DiagCode::MissingRequiredId: return "required reference is absent";
+    case DiagCode::TombstonedTarget: return "reference to a deleted row";
+    case DiagCode::DuplicateName: return "duplicate name within a submachine";
+    case DiagCode::MultipleInitial: return "more than one initial state in a submachine";
+    case DiagCode::NameHasMetacharacter:
+      return "name contains a path metacharacter: / : $ @";
+    case DiagCode::StatementSpanOutOfRange:
+      return "statement span lands outside its document";
+    case DiagCode::ColumnCountMismatch:
+      return "column row count does not match its entity array";
   }
   return "unknown diagnostic";
 }

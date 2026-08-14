@@ -2,8 +2,8 @@
 // load-bearing assertion is the machine-independent *scaling* one. Inputs are
 // built in RAM, and instrumented builds shrink them and skip the floor.
 
-#include "core/lang/synth_document.h"
-#include "core/test_support.h"
+#include "core/tests/test_support.h"
+#include "core/tests/test_synth.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 
@@ -368,8 +368,8 @@ TEST_CASE("perf: the generated document is what it claims to be") {
   REQUIRE_MESSAGE(r.ok, diag_message(first_code(r.diags)));
   CHECK(r.pd.stmts.size() == stats.statements);
   CHECK(r.pd.comments.size() == stats.comments);
-  CHECK(stmts_of(r.pd, ElemKind::State).size() == stats.states);
-  CHECK(stmts_of(r.pd, ElemKind::Submachine).size() == stats.submachines);
-  CHECK(stmts_of(r.pd, ElemKind::Trans).size() == stats.transitions);
-  CHECK(stmts_of(r.pd, ElemKind::Attr).size() == stats.attrs);
+  CHECK(stmts_of(r.pd, StmtKind::State).size() == stats.states);
+  CHECK(stmts_of(r.pd, StmtKind::Submachine).size() == stats.submachines);
+  CHECK(stmts_of(r.pd, StmtKind::Trans).size() == stats.transitions);
+  CHECK(stmts_of(r.pd, StmtKind::Attr).size() == stats.attrs);
 }

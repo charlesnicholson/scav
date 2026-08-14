@@ -161,7 +161,7 @@ bool take_number(Parser &p, uint32_t &out) {
   return true;
 }
 
-uint32_t begin_stmt(Parser &p, ElemKind kind, uint32_t payload) {
+uint32_t begin_stmt(Parser &p, StmtKind kind, uint32_t payload) {
   uint32_t const id{ narrow_clamp<uint32_t>(p.pd->stmts.size()) };
   p.pd->stmts.push_back(
       { .kind = kind, .doc = p.doc, .src = make_span(peek(p).off, 0), .comments = {} });
@@ -253,7 +253,7 @@ bool parse_attr_entry(Parser &p) {
 // attr := '@' key ['=' value] | '@' ident datablock ; key := ident [':' ident]
 bool parse_attr(Parser &p, uint32_t &out_stmt) {
   uint32_t const payload{ narrow_clamp<uint32_t>(p.pd->attrs.size()) };
-  out_stmt = begin_stmt(p, ElemKind::Attr, payload);
+  out_stmt = begin_stmt(p, StmtKind::Attr, payload);
   advance(p);  // '@'
 
   StrRef first{};
@@ -297,7 +297,7 @@ bool parse_attr(Parser &p, uint32_t &out_stmt) {
 // include := 'include' string 'as' ident
 bool parse_include(Parser &p, uint32_t &out_stmt) {
   uint32_t const payload{ narrow_clamp<uint32_t>(p.pd->includes.size()) };
-  out_stmt = begin_stmt(p, ElemKind::Include, payload);
+  out_stmt = begin_stmt(p, StmtKind::Include, payload);
   advance(p);  // 'include'
 
   IncludeStmt stmt{ .path = {}, .alias = {} };
@@ -316,7 +316,7 @@ bool parse_include(Parser &p, uint32_t &out_stmt) {
 // state := ('state'|'s') ident [state_kind] [string] [block]
 bool parse_state(Parser &p, uint32_t &out_stmt, bool &opens_block) {
   uint32_t const payload{ narrow_clamp<uint32_t>(p.pd->states.size()) };
-  out_stmt = begin_stmt(p, ElemKind::State, payload);
+  out_stmt = begin_stmt(p, StmtKind::State, payload);
   advance(p);  // 'state' or 's'
 
   StateStmt stmt{ .name = {}, .label = {}, .kind = StateKind::Normal, .has_block = 0 };
@@ -343,7 +343,7 @@ bool parse_state(Parser &p, uint32_t &out_stmt, bool &opens_block) {
 // submachine := ('submachine'|'m') [ident] [string] block
 bool parse_submachine(Parser &p, uint32_t &out_stmt, bool &opens_block) {
   uint32_t const payload{ narrow_clamp<uint32_t>(p.pd->submachines.size()) };
-  out_stmt = begin_stmt(p, ElemKind::Submachine, payload);
+  out_stmt = begin_stmt(p, StmtKind::Submachine, payload);
   advance(p);  // 'submachine' or 'm'
 
   SubmachineStmt stmt{ .name = {}, .label = {} };
@@ -364,7 +364,7 @@ bool parse_submachine(Parser &p, uint32_t &out_stmt, bool &opens_block) {
 // trans := ('trans'|'t') [trans_kind] endpoint '->' endpoint [string] [block]
 bool parse_trans(Parser &p, uint32_t &out_stmt, bool &opens_block) {
   uint32_t const payload{ narrow_clamp<uint32_t>(p.pd->transitions.size()) };
-  out_stmt = begin_stmt(p, ElemKind::Trans, payload);
+  out_stmt = begin_stmt(p, StmtKind::Trans, payload);
   advance(p);  // 'trans' or 't'
 
   TransStmt stmt{ .src = {},
@@ -421,7 +421,7 @@ bool parse_chart_header(Parser &p) {
     error_at(p, DiagCode::ExpectedChart, peek(p));
     return false;
   }
-  uint32_t const stmt{ begin_stmt(p, ElemKind::Chart, 0) };
+  uint32_t const stmt{ begin_stmt(p, StmtKind::Chart, 0) };
   advance(p);
 
   ChartStmt chart{ .name = {}, .label = {} };
@@ -632,6 +632,16 @@ bool parse_tokens(scav_byte const *bytes,
 
   out.src_bytes.assign(bytes, bytes + len);
   out.doc.text = make_span(0, len);
+
+  // A statement is a keyword plus a couple of tokens, so tokens/4 lands close
+  // enough to spare the statement arrays their doubling copies. An
+  // underestimate just means one late growth; the memory floor reads capacity,
+  // so guessing high would be the costly direction.
+  uint32_t const stmt_estimate{ narrow_clamp<uint32_t>(lexed.tokens.size() / 4) };
+  out.stmts.reserve(stmt_estimate);
+  out.stmt_payload.reserve(stmt_estimate);
+  out.stmt_children.reserve(stmt_estimate);
+  out.stmt_ids.reserve(stmt_estimate);
 
   // The stream always ends with an End sentinel, which is what lets lookahead
   // skip its bounds check. An empty one is a caller error, not input.

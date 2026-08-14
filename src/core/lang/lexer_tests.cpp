@@ -2,7 +2,7 @@
 // point -- a stream only observed through a parse is not separable from it.
 // Source under test is a raw literal, so a `.scav` string keeps its quotes.
 
-#include "core/test_support.h"
+#include "core/tests/test_support.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 
