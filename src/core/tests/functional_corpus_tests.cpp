@@ -2,8 +2,8 @@
 // write them. Synthetic input has uniform branching and no accidental
 // structure, so validating on it alone is a trap.
 
-#include "core/test_corpus.h"
-#include "core/test_support.h"
+#include "core/tests/test_charts.h"
+#include "core/tests/test_support.h"
 #include "scav/scav_core.h"
 
 #include "doctest.h"

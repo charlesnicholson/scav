@@ -1,7 +1,7 @@
 // Extension columns: registration, lockstep growth under entity appends, and
 // the rejections that keep a column an identity.
 
-#include "core/test_support.h"
+#include "core/tests/test_support.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 

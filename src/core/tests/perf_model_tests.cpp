@@ -2,8 +2,8 @@
 // accidental O(n^2) -- a span rebuild per wildcard, a per-append fix-up walk
 // -- so the load-bearing assertion is the machine-independent scaling one.
 
-#include "core/lang/test_synth_document.h"
-#include "core/test_support.h"
+#include "core/tests/test_support.h"
+#include "core/tests/test_synth_document.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 

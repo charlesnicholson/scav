@@ -118,6 +118,8 @@ include/scav/          the cross-library vocabulary: POD spellings, no functions
 src/<lib>/include/scav/  that library's public API: one `scav_<lib>.h`, no more
 src/core/model/        columnar aggregates, ids, string pool, builder, validation
 src/core/lang/         .scav lexer, parser, canonical printer, JSON dump, includes, resolution
+src/<lib>/tests/       suite-level test classes (functional_*, fuzz_*, perf_*) + shared fixtures;
+                       unit tests stay adjacent to their subject as <foo>_tests.cpp
 src/layout/            space requests, phases 0-3, routers, cost, thread shim
 src/draw/              DrawList type, text metrics, helpers, reference builder
 src/svg/               reference SVG backend

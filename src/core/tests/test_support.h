@@ -1,5 +1,5 @@
-#ifndef SCAV_CORE_TEST_SUPPORT_H_INCLUDED
-#define SCAV_CORE_TEST_SUPPORT_H_INCLUDED
+#ifndef SCAV_CORE_TESTS_TEST_SUPPORT_H_INCLUDED
+#define SCAV_CORE_TESTS_TEST_SUPPORT_H_INCLUDED
 
 // Shared by the core unit tests. Header-only and test-only, so the coverage gate
 // does not count it as production. Charts are inline literals: a parser test that
@@ -160,4 +160,4 @@ inline std::string path_text(ParsedDocument const &pd, Endpoint const &e) {
 
 }  // namespace scav::test
 
-#endif  // SCAV_CORE_TEST_SUPPORT_H_INCLUDED
+#endif  // SCAV_CORE_TESTS_TEST_SUPPORT_H_INCLUDED

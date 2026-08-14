@@ -1,7 +1,7 @@
 // The public text-path resolver: §9's spellings against a code-built chart,
 // so resolution is tested without the parser in the loop.
 
-#include "core/test_support.h"
+#include "core/tests/test_support.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 

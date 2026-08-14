@@ -2,7 +2,7 @@
 // stays silent on a well-built chart. Violations are direct row pokes -- the
 // builder refuses to construct them, which is the point of having both.
 
-#include "core/test_support.h"
+#include "core/tests/test_support.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 

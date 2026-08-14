@@ -137,10 +137,20 @@ symbol names its neighbourhood and the sections are the table of contents:
 | `lex_` | tokens, trivia, string-literal decoding |
 | `syntax_` | the statement rows and their spellings |
 | `parse_` | the entry points most callers want |
+| `chart_` | reading the model: refs, liveness, attrs, addressing |
+| `build_` | the append-only builder |
+| `column_` | extension-column registration and access |
+| `resolve_` | state paths to ids |
+| `lower_` | statements to entities |
+| `validate_` | the structural checks |
 
 Private, and deliberately unreachable from outside: `lang/unicode_nfc.h`.
-Test-only code carries `test` in its name: `test_support.h`, `test_corpus.h`,
-`lang/test_synth_document.{h,cpp}`.
+
+**Test code follows one rule.** `foo_tests.cpp` beside `foo.cpp` (or `foo.h`)
+is that file's unit tests, strictly paired — nothing else may use the suffix.
+Everything suite-level lives in `src/core/tests/`, named by its class
+(`functional_*`, `fuzz_*`, `perf_*`), beside the shared fixtures they drive
+(`test_support.h`, `test_charts.h`, `test_synth_document.{h,cpp}`).
 
 ## The Unicode tables
 

@@ -2,8 +2,8 @@
 // misplaced statements, wildcards synthesize their pseudostates, and every
 // entity walks back to the statement that declared it.
 
-#include "core/test_corpus.h"
-#include "core/test_support.h"
+#include "core/tests/test_charts.h"
+#include "core/tests/test_support.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 

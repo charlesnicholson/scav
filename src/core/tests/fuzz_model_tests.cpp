@@ -3,7 +3,7 @@
 // diagnostic pointing outside the document, a subject naming a row that does
 // not exist, or an address that does not round-trip on a clean chart.
 
-#include "core/test_support.h"
+#include "core/tests/test_support.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 

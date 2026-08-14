@@ -3,7 +3,7 @@
 
 #include "scav/scav_core.h"
 
-#include "core/test_support.h"
+#include "core/tests/test_support.h"
 
 #include "doctest.h"
 

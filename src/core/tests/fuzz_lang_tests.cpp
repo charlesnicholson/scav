@@ -2,8 +2,8 @@
 // long-running job is one nobody runs before pushing. The bar is "cannot crash
 // and cannot lie" -- every diagnostic still points inside the document.
 
-#include "core/lang/test_synth_document.h"
-#include "core/test_support.h"
+#include "core/tests/test_support.h"
+#include "core/tests/test_synth_document.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 

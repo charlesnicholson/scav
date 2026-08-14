@@ -2,7 +2,7 @@
 // contiguous under out-of-order appends, and a bad call refuses rather than
 // building garbage.
 
-#include "core/test_support.h"
+#include "core/tests/test_support.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 

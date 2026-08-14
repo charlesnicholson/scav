@@ -2,8 +2,8 @@
 // attachment, the depth cap and every diagnostic. Charts are inline raw
 // literals: a parser test that opens a file is testing the filesystem too.
 
-#include "core/lang/test_synth_document.h"
-#include "core/test_support.h"
+#include "core/tests/test_support.h"
+#include "core/tests/test_synth_document.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 

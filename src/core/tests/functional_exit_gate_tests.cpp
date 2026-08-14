@@ -8,7 +8,7 @@
 // kinds, dereferenced names, span sequences -- and excludes provenance, which
 // is exactly the part that legitimately differs between the two paths.
 
-#include "core/test_support.h"
+#include "core/tests/test_support.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 

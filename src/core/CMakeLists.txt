@@ -30,28 +30,31 @@ if(Python3_Interpreter_FOUND)
 endif()
 
 if(SCAV_BUILD_TESTS)
+  # Unit tests pair with their subject -- foo_tests.cpp beside foo.cpp (or
+  # foo.h). Everything suite-level lives in tests/, named by its class:
+  # functional_*, fuzz_*, perf_*, beside the shared fixtures they drive.
   scav_tests(scav_core_tests
-    lang/corpus_tests.cpp
     lang/diagnostics_tests.cpp
-    lang/fuzz_tests.cpp
     lang/lexer_tests.cpp
+    lang/parser_tests.cpp
     lang/source_text_tests.cpp
     lang/syntax_tests.cpp
-    lang/parser_tests.cpp
-    lang/perf_tests.cpp
-    lang/test_synth_document.cpp
     lang/unicode_nfc_tests.cpp
     model/builder_tests.cpp
     model/chart_tests.cpp
     model/columns_tests.cpp
-    model/exit_gate_tests.cpp
     model/lower_tests.cpp
-    model/fuzz_tests.cpp
-    model/perf_tests.cpp
     model/resolve_tests.cpp
     model/validate_tests.cpp
+    tests/functional_corpus_tests.cpp
+    tests/functional_exit_gate_tests.cpp
+    tests/fuzz_lang_tests.cpp
+    tests/fuzz_model_tests.cpp
+    tests/perf_lang_tests.cpp
+    tests/perf_model_tests.cpp
+    tests/test_synth_document.cpp
     scav_core_tests.cpp
-    sort_tests.cpp
+    ../scav_sort_tests.cpp
   )
   target_link_libraries(scav_core_tests PRIVATE scavcore_testable)
   # The deliberately-failing case (PB): a harness that reports nothing looks
