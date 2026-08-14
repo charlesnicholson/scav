@@ -2,7 +2,7 @@
 // check, or a byte comparison -- semantics belong to plugins, and layout is
 // entitled to crash on a model that was never validated.
 
-#include "scav_sort.h"
+#include "scav_stable_sort.h"
 
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
@@ -216,7 +216,7 @@ void check_duplicate_names(Validator &v) {
       if ((s.live == 0) || (s.name.len == 0)) { continue; }
       named.push_back({ .name = string_pool_view(c.strings, s.name), .ordinal = id.v });
     }
-    stable_sort_by(named, [](Named const &a, Named const &b) {
+    scav_stable_sort(named, [](Named const &a, Named const &b) {
       if (a.name != b.name) { return a.name < b.name; }
       return a.ordinal < b.ordinal;
     });
@@ -325,7 +325,7 @@ bool validate_chart(Chart const &c, std::vector<Diagnostic> &diags) {
   // The §6 artifact order. The comparator is a total order over the triple;
   // equal triples are one finding repeated, and stability keeps their
   // walk-order, which is array order.
-  stable_sort_by(v.found, [](Diagnostic const &a, Diagnostic const &b) {
+  scav_stable_sort(v.found, [](Diagnostic const &a, Diagnostic const &b) {
     if (a.code != b.code) {
       return static_cast<uint32_t>(a.code) < static_cast<uint32_t>(b.code);
     }

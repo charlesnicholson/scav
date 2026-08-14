@@ -85,7 +85,7 @@ uint32_t column_count(Chart const &c, ColumnId id) {
   return narrow_clamp<uint32_t>(col.bytes.size() / col.desc.elem_size);
 }
 
-void columns_append_entity_row(Chart &c, ElemKind entity) {
+void model_append_column_rows(Chart &c, ElemKind entity) {
   for (Column &col : c.columns) {
     if (col.desc.entity == entity) {
       col.bytes.insert(col.bytes.end(), col.desc.elem_size, 0);

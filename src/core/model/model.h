@@ -17,7 +17,7 @@ namespace scav {
 // builder calls this on every entity append, which is what keeps columns
 // index-aligned with their entity array -- the lockstep half of what the core
 // owes an extension.
-void columns_append_entity_row(Chart &c, ElemKind entity);
+void model_append_column_rows(Chart &c, ElemKind entity);
 
 // One path segment for `id`: its authored name, or the `$kind` synthetic
 // spelling with a stable ordinal. Shared by chart_path_of and the resolver so
@@ -39,11 +39,11 @@ struct ResolveSeg {
   uint32_t ordinal;            // INVALID when absent or named
 };
 
-ResolveStatus resolve_segments(Chart const &c,
-                               SubmachineId scope,
-                               ResolveSeg const *segs,
-                               uint32_t count,
-                               StateId &out);
+ResolveStatus model_resolve_segments(Chart const &c,
+                                     SubmachineId scope,
+                                     ResolveSeg const *segs,
+                                     uint32_t count,
+                                     StateId &out);
 
 }  // namespace scav
 

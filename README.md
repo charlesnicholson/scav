@@ -150,7 +150,13 @@ Private, and deliberately unreachable from outside: `lang/unicode_nfc.h`.
 is that file's unit tests, strictly paired — nothing else may use the suffix.
 Everything suite-level lives in `src/core/tests/`, named by its class
 (`functional_*`, `fuzz_*`, `perf_*`), beside the shared fixtures they drive
-(`test_support.h`, `test_charts.h`, `test_synth_document.{h,cpp}`).
+(`test_support.h`, `test_charts.h`, `test_synth.{h,cpp}`).
+
+**A private header's functions carry the header's stem** — `model.h` declares
+`model_*`, `unicode_nfc.h` declares `unicode_nfc_*`, `scav_stable_sort.h`
+declares `scav_stable_sort` — so a call site names its header without a grep.
+(Test fixture headers count their stem after the `test_` marker:
+`test_synth.h` declares `synth_*`.)
 
 ## The Unicode tables
 

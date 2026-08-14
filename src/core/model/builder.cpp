@@ -117,14 +117,14 @@ AttrKeyId attr_key_intern(Chart &c, std::string_view key) {
 StateId model_append_state_row(Chart &c, State const &row) {
   StateId const id{ size32(c.states.size()) };
   c.states.push_back(row);
-  columns_append_entity_row(c, ElemKind::State);
+  model_append_column_rows(c, ElemKind::State);
   return id;
 }
 
 SubmachineId model_append_submachine_row(Chart &c, Submachine const &row) {
   SubmachineId const id{ size32(c.submachines.size()) };
   c.submachines.push_back(row);
-  columns_append_entity_row(c, ElemKind::Submachine);
+  model_append_column_rows(c, ElemKind::Submachine);
   return id;
 }
 
@@ -145,7 +145,7 @@ SubmachineId build_chart(Chart &c, std::string_view name, std::string_view label
                             .inst = { INVALID },
                             .live = 1 });
   c.root_submachine = id;
-  columns_append_entity_row(c, ElemKind::Submachine);
+  model_append_column_rows(c, ElemKind::Submachine);
   return id;
 }
 
@@ -166,7 +166,7 @@ StateId build_state(Chart &c,
                        .inst = { INVALID },
                        .live = 1 });
   insert_child(c, c.submachines[parent.v].children, id);
-  columns_append_entity_row(c, ElemKind::State);
+  model_append_column_rows(c, ElemKind::State);
   return id;
 }
 
@@ -189,7 +189,7 @@ SubmachineId build_submachine(Chart &c,
                             .inst = { INVALID },
                             .live = 1 });
   insert_submachine(c, c.states[owner.v].submachines, id);
-  columns_append_entity_row(c, ElemKind::Submachine);
+  model_append_column_rows(c, ElemKind::Submachine);
   return id;
 }
 
@@ -208,7 +208,7 @@ TransId build_trans(Chart &c,
                             .stmt = { INVALID },
                             .inst = { INVALID },
                             .live = 1 });
-  columns_append_entity_row(c, ElemKind::Transition);
+  model_append_column_rows(c, ElemKind::Transition);
   return id;
 }
 

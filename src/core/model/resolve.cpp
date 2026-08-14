@@ -95,11 +95,11 @@ ResolveStatus select_submachine(Chart const &c,
 
 }  // namespace
 
-ResolveStatus resolve_segments(Chart const &c,
-                               SubmachineId scope,
-                               ResolveSeg const *segs,
-                               uint32_t count,
-                               StateId &out) {
+ResolveStatus model_resolve_segments(Chart const &c,
+                                     SubmachineId scope,
+                                     ResolveSeg const *segs,
+                                     uint32_t count,
+                                     StateId &out) {
   if ((count == 0) || (scope.v >= c.submachines.size())) {
     return ResolveStatus::NotFound;
   }
@@ -180,7 +180,11 @@ ResolveStatus resolve_path(Chart const &c,
     start = slash + 1;
   }
 
-  return resolve_segments(c, scope, segs.data(), narrow_clamp<uint32_t>(segs.size()), out);
+  return model_resolve_segments(c,
+                                scope,
+                                segs.data(),
+                                narrow_clamp<uint32_t>(segs.size()),
+                                out);
 }
 
 }  // namespace scav

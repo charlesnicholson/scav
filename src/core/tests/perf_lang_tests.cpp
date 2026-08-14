@@ -3,7 +3,7 @@
 // built in RAM, and instrumented builds shrink them and skip the floor.
 
 #include "core/tests/test_support.h"
-#include "core/tests/test_synth_document.h"
+#include "core/tests/test_synth.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 

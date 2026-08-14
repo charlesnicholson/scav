@@ -12,12 +12,12 @@ namespace scav {
 
 // True when `cp` has a non-zero combining class or NFC_QC says it may move.
 // Text of codepoints this rejects is already NFC.
-bool nfc_needs_work(uint32_t cp);
+bool unicode_nfc_needs_work(uint32_t cp);
 
-uint32_t nfc_combining_class(uint32_t cp);
+uint32_t unicode_nfc_combining_class(uint32_t cp);
 
 // `out` is cleared first. Returns true when the result differs from `in`.
-bool nfc_normalize(std::vector<uint32_t> const &in, std::vector<uint32_t> &out);
+bool unicode_nfc_normalize(std::vector<uint32_t> const &in, std::vector<uint32_t> &out);
 
 }  // namespace scav
 

@@ -19,6 +19,15 @@ namespace {
 using namespace scav;
 using namespace scav::test;
 
+struct CorpusChart {
+  char const *name;
+  std::string_view text;
+};
+
+std::vector<CorpusChart> corpus() {
+  return { { "vac", VAC }, { "tcp", TCP }, { "ota", OTA } };
+}
+
 uint32_t count_of(ParsedDocument const &pd, StmtKind kind) {
   return static_cast<uint32_t>(stmts_of(pd, kind).size());
 }

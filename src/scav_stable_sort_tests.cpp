@@ -1,7 +1,7 @@
 // The vendored stable sort. std::sort and std::stable_sort are permitted in
 // tests, which is exactly where they earn their keep: as the oracle.
 
-#include "scav_sort.h"
+#include "scav_stable_sort.h"
 
 #include "doctest.h"
 
@@ -13,7 +13,7 @@
 
 namespace {
 
-using scav::stable_sort_by;
+using scav::scav_stable_sort;
 
 // splitmix64's finalizer, position-addressed: reproducible from the seed alone.
 uint64_t rnd(uint64_t seed, uint64_t index) {
@@ -41,7 +41,7 @@ TEST_CASE("sort: sizes that stress the merge boundaries") {
     for (uint32_t i = 0; i < n; ++i) { v.push_back(static_cast<uint32_t>(rnd(1, i))); }
     std::vector<uint32_t> expect{ v };
     std::ranges::sort(expect);
-    stable_sort_by(v, [](uint32_t a, uint32_t b) { return a < b; });
+    scav_stable_sort(v, [](uint32_t a, uint32_t b) { return a < b; });
     CHECK_MESSAGE(v == expect, "n = " << n);
   }
 }
@@ -60,9 +60,9 @@ TEST_CASE("sort: already sorted, reversed, and all-equal inputs") {
   }
   std::vector<uint32_t> const expect{ sorted };
   auto const less{ [](uint32_t a, uint32_t b) { return a < b; } };
-  stable_sort_by(sorted, less);
-  stable_sort_by(reversed, less);
-  stable_sort_by(equal, less);
+  scav_stable_sort(sorted, less);
+  scav_stable_sort(reversed, less);
+  scav_stable_sort(equal, less);
   CHECK(sorted == expect);
   CHECK(reversed == expect);
   CHECK(equal == std::vector<uint32_t>(100, 7));
@@ -77,7 +77,7 @@ TEST_CASE("sort: equal keys keep insertion order") {
   }
   std::vector<Row> oracle{ rows };
   std::ranges::stable_sort(oracle, by_key);
-  stable_sort_by(rows, by_key);
+  scav_stable_sort(rows, by_key);
   REQUIRE(rows.size() == oracle.size());
   for (uint32_t i = 0; i < rows.size(); ++i) {
     CHECK(rows[i].key == oracle[i].key);
@@ -93,7 +93,7 @@ TEST_CASE("sort: the comparator inlines as a functor, not a function pointer") {
   // Compile-shape test: a capturing lambda works, which qsort's shape forbids.
   uint32_t comparisons{ 0 };
   std::vector<uint32_t> v{ 3, 1, 2 };
-  stable_sort_by(v, [&comparisons](uint32_t a, uint32_t b) {
+  scav_stable_sort(v, [&comparisons](uint32_t a, uint32_t b) {
     ++comparisons;
     return a < b;
   });

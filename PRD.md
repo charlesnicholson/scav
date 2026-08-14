@@ -183,7 +183,7 @@ The bar for a discouraged construct is that a reader can still follow control fl
 - **Snap-together function templates over function-pointer indirection.** The useful template work here is not containers of `T` — it's algorithms parameterized on a functor, monomorphized so the functor **inlines**:
   ```cpp
   template <typename T, typename Less>
-  void stable_sort_by(std::vector<T>& v, Less less);   // less() inlines
+  void scav_stable_sort(std::vector<T>& v, Less less);  // less() inlines
   ```
   C's `qsort` shape pays an indirect call per comparison and blocks inlining entirely. Sorting is in the hot path — intra-rank ordering, packing, label matching, canonical output — and comparators here are mandatory total orders (§6), so this is where the cost lands. Same pattern for sweeps taking a predicate and for `argmin(Cost, index)` reductions.
 

@@ -1,5 +1,5 @@
-#ifndef SCAV_SORT_H_INCLUDED
-#define SCAV_SORT_H_INCLUDED
+#ifndef SCAV_STABLE_SORT_H_INCLUDED
+#define SCAV_STABLE_SORT_H_INCLUDED
 
 // The vendored stable sort for any sort whose result reaches output (PRD 6).
 // With a comparator that is a total order the sorted result is unique, so the
@@ -17,7 +17,7 @@
 namespace scav {
 
 template <typename T, typename Less>
-void stable_sort_by(std::vector<T> &v, Less less) {
+void scav_stable_sort(std::vector<T> &v, Less less) {
   size_t const n{ v.size() };
   if (n < 2) { return; }
 
@@ -57,4 +57,4 @@ void stable_sort_by(std::vector<T> &v, Less less) {
 
 }  // namespace scav
 
-#endif  // SCAV_SORT_H_INCLUDED
+#endif  // SCAV_STABLE_SORT_H_INCLUDED

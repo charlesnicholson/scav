@@ -52,9 +52,9 @@ if(SCAV_BUILD_TESTS)
     tests/fuzz_model_tests.cpp
     tests/perf_lang_tests.cpp
     tests/perf_model_tests.cpp
-    tests/test_synth_document.cpp
+    tests/test_synth.cpp
     scav_core_tests.cpp
-    ../scav_sort_tests.cpp
+    ../scav_stable_sort_tests.cpp
   )
   target_link_libraries(scav_core_tests PRIVATE scavcore_testable)
   # The deliberately-failing case (PB): a harness that reports nothing looks

@@ -8,7 +8,7 @@
 #include "core/model/model.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
-#include "scav_sort.h"
+#include "scav_stable_sort.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -280,7 +280,7 @@ void finalize_containment(Chart &c) {
   for (uint32_t i = 0; i < c.states.size(); ++i) {
     state_edges.push_back({ .parent = c.states[i].parent.v, .child = i });
   }
-  stable_sort_by(state_edges, [](Edge const &a, Edge const &b) {
+  scav_stable_sort(state_edges, [](Edge const &a, Edge const &b) {
     if (a.parent != b.parent) { return a.parent < b.parent; }
     return a.child < b.child;
   });
@@ -300,7 +300,7 @@ void finalize_containment(Chart &c) {
     if (c.submachines[i].owner.v == INVALID) { continue; }  // a document root
     sub_edges.push_back({ .parent = c.submachines[i].owner.v, .child = i });
   }
-  stable_sort_by(sub_edges, [](Edge const &a, Edge const &b) {
+  scav_stable_sort(sub_edges, [](Edge const &a, Edge const &b) {
     if (a.parent != b.parent) { return a.parent < b.parent; }
     return a.child < b.child;
   });
@@ -329,11 +329,11 @@ ResolveStatus resolve_endpoint(Lowerer const &lo,
                      .qualifier = pd_str(lo, ps.qualifier),
                      .ordinal = ps.ordinal });
   }
-  return resolve_segments(*lo.c,
-                          scope,
-                          segs.data(),
-                          narrow_clamp<uint32_t>(segs.size()),
-                          out);
+  return model_resolve_segments(*lo.c,
+                                scope,
+                                segs.data(),
+                                narrow_clamp<uint32_t>(segs.size()),
+                                out);
 }
 
 DiagCode diag_for(ResolveStatus status) {
@@ -369,7 +369,7 @@ struct WildChild {
 // quadratic over a document with one initial arrow per submachine.
 void attach_wildcards(Chart &c, std::vector<WildChild> &wild) {
   if (wild.empty()) { return; }
-  stable_sort_by(wild, [](WildChild const &a, WildChild const &b) {
+  scav_stable_sort(wild, [](WildChild const &a, WildChild const &b) {
     if (a.scope.v != b.scope.v) { return a.scope.v < b.scope.v; }
     return a.order < b.order;
   });

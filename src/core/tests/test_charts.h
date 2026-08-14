@@ -7,7 +7,6 @@
 // measured against identical bytes. Header-only and test-only.
 
 #include <string_view>
-#include <vector>
 
 namespace scav::test {
 
@@ -139,15 +138,6 @@ chart ota "firmware OTA" {
   t Failed -> *,
 }
 )" };
-
-struct CorpusChart {
-  char const *name;
-  std::string_view text;
-};
-
-inline std::vector<CorpusChart> corpus() {
-  return { { "vac", VAC }, { "tcp", TCP }, { "ota", OTA } };
-}
 
 }  // namespace scav::test
 

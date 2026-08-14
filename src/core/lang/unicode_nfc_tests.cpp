@@ -22,7 +22,7 @@ std::vector<uint32_t> cps(std::vector<uint32_t> const &v) { return v; }
 
 std::vector<uint32_t> nfc(std::vector<uint32_t> const &in) {
   std::vector<uint32_t> out;
-  nfc_normalize(in, out);
+  unicode_nfc_normalize(in, out);
   return out;
 }
 
@@ -47,36 +47,36 @@ std::string describe(std::vector<uint32_t> const &v) {
 }  // namespace
 
 TEST_CASE("nfc: ASCII needs no work and normalizes to itself") {
-  for (uint32_t cp = 0; cp < 0x80; ++cp) { CHECK_FALSE(nfc_needs_work(cp)); }
+  for (uint32_t cp = 0; cp < 0x80; ++cp) { CHECK_FALSE(unicode_nfc_needs_work(cp)); }
   std::vector<uint32_t> ascii;
   for (uint32_t cp = 1; cp < 0x80; ++cp) { ascii.push_back(cp); }
   std::vector<uint32_t> out;
-  CHECK_FALSE(nfc_normalize(ascii, out));
+  CHECK_FALSE(unicode_nfc_normalize(ascii, out));
   CHECK(out == ascii);
 }
 
 TEST_CASE("nfc: an empty sequence is already normalized") {
   std::vector<uint32_t> const empty;
   std::vector<uint32_t> out{ 1, 2, 3 };
-  CHECK_FALSE(nfc_normalize(empty, out));
+  CHECK_FALSE(unicode_nfc_normalize(empty, out));
   CHECK(out.empty());
 }
 
 TEST_CASE("nfc: combining classes match the UCD") {
-  CHECK(nfc_combining_class('a') == 0);
-  CHECK(nfc_combining_class(0x0301) == 230);  // combining acute
-  CHECK(nfc_combining_class(0x0327) == 202);  // combining cedilla
-  CHECK(nfc_combining_class(0x0334) == 1);    // combining tilde overlay
-  CHECK(nfc_combining_class(0x00E9) == 0);    // precomposed e-acute is a starter
-  CHECK(nfc_combining_class(0x10FFFF) == 0);
+  CHECK(unicode_nfc_combining_class('a') == 0);
+  CHECK(unicode_nfc_combining_class(0x0301) == 230);  // combining acute
+  CHECK(unicode_nfc_combining_class(0x0327) == 202);  // combining cedilla
+  CHECK(unicode_nfc_combining_class(0x0334) == 1);    // combining tilde overlay
+  CHECK(unicode_nfc_combining_class(0x00E9) == 0);    // precomposed e-acute is a starter
+  CHECK(unicode_nfc_combining_class(0x10FFFF) == 0);
 }
 
 TEST_CASE("nfc: quick check flags exactly what may move") {
-  CHECK(nfc_needs_work(0x0301));  // a combining mark reorders
-  CHECK(nfc_needs_work(0x0340));  // NFC_QC=No, a singleton decomposition
-  CHECK_FALSE(nfc_needs_work(0x00E9));
-  CHECK_FALSE(nfc_needs_work(0x0041));
-  CHECK_FALSE(nfc_needs_work(0x10FFFF));
+  CHECK(unicode_nfc_needs_work(0x0301));  // a combining mark reorders
+  CHECK(unicode_nfc_needs_work(0x0340));  // NFC_QC=No, a singleton decomposition
+  CHECK_FALSE(unicode_nfc_needs_work(0x00E9));
+  CHECK_FALSE(unicode_nfc_needs_work(0x0041));
+  CHECK_FALSE(unicode_nfc_needs_work(0x10FFFF));
 }
 
 TEST_CASE("nfc: composes a base and a combining mark") {
@@ -162,15 +162,15 @@ TEST_CASE("nfc: every Hangul syllable round-trips through its jamo") {
 
 TEST_CASE("nfc: normalizing an already-normalized string reports no change") {
   std::vector<uint32_t> out;
-  CHECK_FALSE(nfc_normalize({ 'a', 'b', 'c' }, out));
-  CHECK(nfc_normalize({ 'e', 0x0301 }, out));
+  CHECK_FALSE(unicode_nfc_normalize({ 'a', 'b', 'c' }, out));
+  CHECK(unicode_nfc_normalize({ 'e', 0x0301 }, out));
   CHECK(out == cps({ 0x00E9 }));
   // A precomposed character followed by a lower-class mark is *not* already
   // NFC: it decomposes, reorders, and recomposes around the other mark.
-  CHECK(nfc_normalize({ 0x00E9, 0x0328 }, out));
+  CHECK(unicode_nfc_normalize({ 0x00E9, 0x0328 }, out));
   CHECK(out == cps({ 0x0119, 0x0301 }));
   // One that really is unchanged, down the same slow path.
-  CHECK_FALSE(nfc_normalize({ 0x00E9, 0x0301 }, out));
+  CHECK_FALSE(unicode_nfc_normalize({ 0x00E9, 0x0301 }, out));
 }
 
 TEST_CASE("nfc: idempotent on the conformance suite") {
@@ -199,7 +199,7 @@ TEST_CASE("nfc: idempotent on the conformance suite") {
     }
 
     std::vector<uint32_t> produced;
-    nfc_normalize(source, produced);
+    unicode_nfc_normalize(source, produced);
     if (produced != expected) {
       FAIL("case " << i << ": NFC(" << describe(source) << ") = " << describe(produced)
                    << ", want " << describe(expected));
@@ -208,7 +208,7 @@ TEST_CASE("nfc: idempotent on the conformance suite") {
     // NFC is idempotent, which the suite does not state as a row but which any
     // composition bug breaks.
     std::vector<uint32_t> again;
-    nfc_normalize(produced, again);
+    unicode_nfc_normalize(produced, again);
     if (again != expected) {
       FAIL("case " << i << " is not idempotent: " << describe(again));
     }

@@ -144,7 +144,7 @@ bool source_text_is_nfc(scav_byte const *bytes, size_t len) {
     uint32_t width{ 0 };
     DiagCode err{ DiagCode::Ok };
     if (!source_text_utf8_decode(bytes, len, at, cp, width, err)) { return false; }
-    if (nfc_needs_work(cp)) { return false; }
+    if (unicode_nfc_needs_work(cp)) { return false; }
     at += width;
   }
   return true;
@@ -177,7 +177,7 @@ bool nfc_segment(scav_byte const *bytes,
   }
 
   std::vector<uint32_t> normalized;
-  bool const changed{ nfc_normalize(codepoints, normalized) };
+  bool const changed{ unicode_nfc_normalize(codepoints, normalized) };
   for (uint32_t const cp : normalized) { source_text_utf8_encode(cp, out); }
   return changed;
 }
