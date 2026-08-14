@@ -2,7 +2,7 @@
 // ordinal. The core stores them, keeps them index-aligned, and passes them
 // through unread -- what it owes an extension, and nothing more.
 
-#include "core/model/model_internal.h"
+#include "core/model/model.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 

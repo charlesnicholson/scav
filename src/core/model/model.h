@@ -1,9 +1,9 @@
-#ifndef SCAV_CORE_MODEL_INTERNAL_H_INCLUDED
-#define SCAV_CORE_MODEL_INTERNAL_H_INCLUDED
+#ifndef SCAV_CORE_MODEL_MODEL_H_INCLUDED
+#define SCAV_CORE_MODEL_MODEL_H_INCLUDED
 
-// Cross-TU internals of the model spine. Private header: consumers get the
-// public API in scav/scav_core.h, and nothing here survives to the install
-// tree.
+// Cross-TU internals of the model spine. Private by location, not by name:
+// nothing outside src/ can reach this path, and nothing here survives to the
+// install tree.
 
 #include "scav/scav_core.h"
 
@@ -47,4 +47,4 @@ ResolveStatus resolve_segments(Chart const &c,
 
 }  // namespace scav
 
-#endif  // SCAV_CORE_MODEL_INTERNAL_H_INCLUDED
+#endif  // SCAV_CORE_MODEL_MODEL_H_INCLUDED

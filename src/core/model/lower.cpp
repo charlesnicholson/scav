@@ -5,7 +5,7 @@
 // reference. The walk is an explicit stack for the same reason the parser's
 // is: nesting depth is attacker-controlled.
 
-#include "core/model/model_internal.h"
+#include "core/model/model.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 #include "scav_sort.h"

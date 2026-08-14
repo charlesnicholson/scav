@@ -2,7 +2,7 @@
 // submachine outward, nearest match winning -- and every later segment
 // descends strictly. Resolution links; it never flattens.
 
-#include "core/model/model_internal.h"
+#include "core/model/model.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 

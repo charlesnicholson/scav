@@ -5,7 +5,7 @@
 // ~8KB, so a rebuild per edit is microseconds, and an indirection that
 // survives mutation would cost every read forever to save it.
 
-#include "core/model/model_internal.h"
+#include "core/model/model.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 
