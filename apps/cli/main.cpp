@@ -242,7 +242,7 @@ void append_diag_line(std::string &out,
                       LineCol const *lc,
                       DiagCode code) {
   out += path;
-  if (lc != nullptr) {
+  if (lc) {
     out += ':';
     append_u32(out, lc->line);
     out += ':';

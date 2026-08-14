@@ -375,9 +375,9 @@ bool lex_source(scav_byte const *bytes,
         // memchr rather than a byte loop: a comment run is the one place the
         // lexer walks prose, and libc scans it a cache line at a time.
         void const *const nl{ std::memchr(bytes + at, '\n', len - at) };
-        if (nl == nullptr) { return len; }
-        return narrow_clamp<uint32_t>(
-            static_cast<size_t>(static_cast<scav_byte const *>(nl) - bytes));
+        return nl ? narrow_clamp<uint32_t>(
+                        static_cast<size_t>(static_cast<scav_byte const *>(nl) - bytes))
+                  : len;
       }() };
       open_comment = narrow_clamp<uint32_t>(out.comments.size());
       newlines_after = 0;

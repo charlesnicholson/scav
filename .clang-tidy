@@ -45,6 +45,9 @@ HeaderFilterRegex: '(include/scav|src)/.*'
 FormatStyle: file
 
 CheckOptions:
+  # A pointer in boolean position can only be asking "not null", so the
+  # explicit `!= nullptr` adds words without adding meaning.
+  readability-implicit-bool-conversion.AllowPointerConditions: 'true'
   readability-identifier-naming.StructCase: CamelCase
   readability-identifier-naming.ClassCase: CamelCase
   readability-identifier-naming.EnumCase: CamelCase

@@ -218,7 +218,7 @@ uint32_t build_attr(Chart &c,
                     std::string_view value) {
   if (key.empty()) { return INVALID; }
   Span *const span{ attrs_span_of(c, subject) };
-  if (span == nullptr) { return INVALID; }
+  if (!span) { return INVALID; }
   Attr const row{ .key = attr_key_intern(c, key),
                   .value = string_pool_add(c.strings, value) };
   return insert_attr(c, *span, row);
