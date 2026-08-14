@@ -58,7 +58,7 @@ ColumnId column_register(Chart &c,
   uint64_t const count{ chart_entity_count(c, entity) };
   c.columns.push_back(
       { .desc = desc,
-        .bytes = std::vector<scav_byte>(static_cast<size_t>(count * elem_size), 0) });
+        .bytes = std::vector<scav_byte>(narrow_clamp<size_t>(count * elem_size), 0) });
   return id;
 }
 

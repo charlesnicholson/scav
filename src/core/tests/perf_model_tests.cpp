@@ -129,9 +129,9 @@ TEST_CASE(
   CHECK_MESSAGE(footprint < bytes * 8,
                 "chart " << ((footprint * 100) / bytes) << "% of input");
 
+  uint64_t const lower_rate{ throughput_mb_per_s(bytes, lower_us) };
+  uint64_t const validate_rate{ throughput_mb_per_s(bytes, validate_us) };
   if (ASSERT_FLOOR) {
-    uint64_t const lower_rate{ throughput_mb_per_s(bytes, lower_us) };
-    uint64_t const validate_rate{ throughput_mb_per_s(bytes, validate_us) };
     CHECK_MESSAGE(lower_rate >= LOWER_FLOOR_MB_PER_S, "lower " << lower_rate << " MiB/s");
     CHECK_MESSAGE(validate_rate >= VALIDATE_FLOOR_MB_PER_S,
                   "validate " << validate_rate << " MiB/s");
