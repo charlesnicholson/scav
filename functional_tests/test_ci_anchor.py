@@ -14,9 +14,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import scavtest  # noqa: E402
 
 ANCHOR = "all-checks-pass"
-# Two spaces then a name then a colon, under `jobs:`. No YAML parser in the
-# standard library, and a functional test that needs `pip install` is one more
-# thing between a clean checkout and a green run.
+# Two spaces then a name then a colon, under `jobs:`. Matched by hand, since
+# the standard library carries no YAML parser.
 JOB = re.compile(r"^  ([a-z][a-z0-9-]*):$")
 NEEDS_ITEM = re.compile(r"^      - ([a-z][a-z0-9-]*)$")
 

@@ -1,6 +1,5 @@
 // The grammar statement by statement, plus the statement tree, trivia
-// attachment, the depth cap and every diagnostic. Charts are inline raw
-// literals: a parser test that opens a file is testing the filesystem too.
+// attachment, the depth cap and every diagnostic. Charts are inline literals.
 
 #include "core/tests/test_support.h"
 #include "core/tests/test_synth.h"
@@ -583,7 +582,7 @@ TEST_CASE("parse: a statement span covers the whole construct, block included") 
 }
 
 TEST_CASE("parse: every diagnostic locates to a span inside the document") {
-  // P0's exit gate. A diagnostic nobody can point at is not a diagnostic.
+  // A diagnostic nobody can point at is not a diagnostic.
   for (std::string_view const text : { "chart c { state A state B }",
                                        "chart c { region R {}, }",
                                        "chart c { trans A B, }",
@@ -621,10 +620,8 @@ TEST_CASE("parse: strings land in the pool in the order they are met") {
 }
 
 TEST_CASE("parse: a repeated name gets its own bytes and its own ref") {
-  // No dedup, so StrRef equality is not name equality. Anything asking whether
-  // two names match compares the views -- which is what a duplicate-name check
-  // will do, since names are scoped per submachine and a global pool cannot
-  // answer that question anyway.
+  // The pool keeps duplicates, so StrRef equality is not name equality and a
+  // comparison goes through the views.
   Parsed const r{ parse("chart c { state Idle, state Idle, state Idle, }") };
   REQUIRE(r.ok);
   std::vector<uint32_t> const states{ stmts_of(r.pd, StmtKind::State) };

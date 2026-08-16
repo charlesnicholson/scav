@@ -1,0 +1,23 @@
+// A middle document: included once by mill.scav, and itself including both
+// axis.scav and estop.scav. An endpoint reaching `tool/arm/...` from the root
+// therefore descends through two include boundaries.
+chart toolchanger "carousel tool changer" {
+  include "axis.scav" as arm,
+  include "estop.scav" as stop,
+
+  state Parked,
+  state Rotating,
+  state Gripping,
+  state Releasing,
+
+  trans * -> Parked,
+  trans Parked -> Rotating "select pocket",
+  trans Rotating -> Gripping "pocket aligned",
+  trans Gripping -> Releasing "tool seated",
+  trans Releasing -> Parked "clear",
+  // Into the included axis, including one path that needs a submachine
+  // qualifier to pick between its two concurrent submachines.
+  trans Rotating -> arm/Homing "rehome the arm",
+  trans Gripping -> arm/Moving:travel/Cruising "extend",
+  trans Releasing -> stop/Clear "reset",
+}

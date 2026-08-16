@@ -20,6 +20,11 @@ include(CMakeDependentOption)
 # integer, so this must produce byte-identical output to release.
 option(SCAV_TESTING "Define SCAV_TESTING for the shipping libraries too" OFF)
 
+# Measured at 20% off a full load at the 2k-state target, and -O2 and -O3 tie
+# once it is on. Off by default because a toolchain without it is still a
+# supported toolchain; the optimized presets turn it on.
+option(SCAV_LTO "Link-time optimization" OFF)
+
 option(SCAV_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
 option(SCAV_CLANG_TIDY "Run clang-tidy as part of compilation" OFF)
 option(SCAV_COVERAGE "Instrument for branch coverage" OFF)
@@ -35,6 +40,16 @@ set(SCAV_MSAN_LIBCXX_DIR "" CACHE PATH "Prefix of a libc++ built with MSan")
 # Set by the build driver from what envy provisioned; a consumer without envy
 # points it at their own copy or turns tests off.
 set(SCAV_DOCTEST_DIR "" CACHE PATH "Directory containing doctest.h")
+
+if(SCAV_LTO)
+  include(CheckIPOSupported)
+  check_ipo_supported(RESULT scav_ipo_ok OUTPUT scav_ipo_why LANGUAGES CXX)
+  if(scav_ipo_ok)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+  else()
+    message(WARNING "SCAV_LTO is on and this toolchain cannot: ${scav_ipo_why}")
+  endif()
+endif()
 
 if(PROJECT_IS_TOP_LEVEL)
   set(scav_tests_default ON)

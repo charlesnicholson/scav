@@ -29,13 +29,8 @@ bool is_hangul_syllable(uint32_t cp) {
   return (cp >= HANGUL_S_BASE) && (cp < HANGUL_S_BASE + HANGUL_S_COUNT);
 }
 
-// Every table is sorted by key, so every lookup is a binary search. The hot path
-// never reaches one: ASCII short-circuits above the call.
-//
-// The bound comes from the array's own type rather than a second argument. A
-// passed-in count can disagree with the array, and two instantiations that never
-// mention N have identical bodies -- which GCC folds, and then attributes one
-// table's bounds to another's subscript.
+// Every table is sorted by key, so a lookup is a binary search. The bound comes
+// from the array's own type, since identical bodies fold together.
 template <size_t N>
 uint32_t lower_bound_u32(std::array<uint32_t, N> const &keys, uint32_t key) {
   uint32_t lo{ 0 };
@@ -184,8 +179,8 @@ bool unicode_nfc_normalize(std::vector<uint32_t> const &in, std::vector<uint32_t
     if (have_starter && !blocked) {
       if (uint32_t const composed{ compose_pair(out[starter], cp) }; composed != 0) {
         out[starter] = composed;
-        // last_class is deliberately not updated: the combining mark was
-        // absorbed, so it never becomes the blocker for the next one.
+        // last_class is not updated: the mark was absorbed, so it never
+        // becomes the blocker for the next one.
         continue;
       }
     }

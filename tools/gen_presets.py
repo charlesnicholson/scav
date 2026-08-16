@@ -62,13 +62,15 @@ COVERAGE: list[str] = ["macos-clang-libcxx", "linux-clang-libcxx"]
 # name -> build type, extra cache, description
 CONFIG_BASES: dict[str, tuple[str, Cache, str]] = {
     "cfg-debug": ("Debug", {}, "Matrix configuration 1 of 3."),
-    "cfg-release": ("Release", {}, "Matrix configuration 2 of 3."),
+    "cfg-release": ("Release", {"SCAV_LTO": "ON"}, "Matrix configuration 2 of 3."),
     "cfg-testable": (
-        "Release", {"SCAV_TESTING": "ON"},
+        "Release", {"SCAV_TESTING": "ON", "SCAV_LTO": "ON"},
         "Matrix configuration 3 of 3. Release plus SCAV_TESTING, so the shipping "
         "libraries compile with SCAV_INTERNAL at external linkage. All layout "
         "arithmetic is integer, so this must produce byte-identical output to "
-        "release; divergence means undefined behaviour somewhere.",
+        "release; divergence means undefined behaviour somewhere. It carries "
+        "release's LTO for the same reason: the define is meant to be the only "
+        "difference between the two rows.",
     ),
     "cfg-sanitize": (
         "RelWithDebInfo", {},

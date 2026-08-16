@@ -1,18 +1,47 @@
+# Three subsystems, and the boundary between the first two is PRD 16.2's
+# section title: loading and parsing are separate systems. `lang` is bytes to
+# statements and knows nothing about entities; `model` is the entity arrays and
+# everything over them; `load` composes the two into a document network.
 scav_static_library(scavcore
-  lang/diagnostics.cpp
+  # A src/-root primitive: it belongs to no library, and core is the one that
+  # compiles it because core is currently its only consumer. Layout links core,
+  # so the coordinate hash reaches it without a second copy.
+  ../scav_xxhash.cpp
+  # Core-wide, owned by no subsystem: every layer below produces diagnostics,
+  # and c_api.cpp is the C projection of the whole public header.
+  c_api.cpp
+  diagnostics.cpp
   lang/lexer.cpp
   lang/source_text.cpp
   lang/syntax.cpp
   lang/parser.cpp
   lang/unicode_nfc.cpp
+  load/load.cpp
+  load/load_file.cpp
+  load/path.cpp
   model/builder.cpp
   model/chart.cpp
   model/columns.cpp
+  model/hash.cpp
   model/lower.cpp
   model/resolve.cpp
   model/validate.cpp
 )
 scav_install_library(scavcore core)
+
+# The redistributable. One shared object is the distribution unit; the static
+# archives are a build-time decomposition. Layout, draw and svg join it as they
+# land, each contributing its own c_api.cpp.
+add_library(scav_shared SHARED c_api.cpp)
+scav_settings(scav_shared)
+target_link_libraries(scav_shared PRIVATE scavcore)
+target_include_directories(scav_shared PUBLIC
+  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>")
+set_target_properties(scav_shared PROPERTIES
+  OUTPUT_NAME scav
+  # MSVC exports nothing without either a .def file or this.
+  WINDOWS_EXPORT_ALL_SYMBOLS TRUE
+)
 
 # The generator lives with the code it generates. Not in ALL and not a dependency
 # of unicode_nfc.cpp: the .inc files are committed, so a build needs neither the
@@ -34,27 +63,36 @@ if(SCAV_BUILD_TESTS)
   # foo.h). Everything suite-level lives in tests/, named by its class:
   # functional_*, fuzz_*, perf_*, beside the shared fixtures they drive.
   scav_tests(scav_core_tests
-    lang/diagnostics_tests.cpp
+    c_api_tests.cpp
+    diagnostics_tests.cpp
     lang/lexer_tests.cpp
     lang/parser_tests.cpp
     lang/source_text_tests.cpp
     lang/syntax_tests.cpp
     lang/unicode_nfc_tests.cpp
+    load/load_tests.cpp
+    load/path_tests.cpp
     model/builder_tests.cpp
     model/chart_tests.cpp
     model/columns_tests.cpp
+    model/hash_tests.cpp
     model/lower_tests.cpp
     model/resolve_tests.cpp
     model/validate_tests.cpp
     tests/functional_corpus_tests.cpp
     tests/functional_exit_gate_tests.cpp
     tests/fuzz_lang_tests.cpp
+    tests/fuzz_load_tests.cpp
     tests/fuzz_model_tests.cpp
     tests/perf_lang_tests.cpp
+    tests/perf_load_tests.cpp
     tests/perf_model_tests.cpp
     tests/test_synth.cpp
     scav_core_tests.cpp
+    # The src/-root primitives PRD 6 mandates in place of the standard
+    # library's: they belong to no subsystem, so their tests sit beside them.
     ../scav_stable_sort_tests.cpp
+    ../scav_xxhash_tests.cpp
   )
   target_link_libraries(scav_core_tests PRIVATE scavcore_testable)
   # The deliberately-failing case (PB): a harness that reports nothing looks

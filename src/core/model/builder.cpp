@@ -1,9 +1,5 @@
-// The append-only builder. Rows are never removed or reordered; the one moving
-// part is the shared arrays spans index (state_ids, submachine_ids, attrs),
-// which are rebuilt in O(n) when an append lands inside them rather than at
-// the tail. That trade is deliberate: state_ids at the 2k-state target is
-// ~8KB, so a rebuild per edit is microseconds, and an indirection that
-// survives mutation would cost every read forever to save it.
+// The append-only builder. An append inside a shared array -- state_ids,
+// submachine_ids, attrs -- shifts it and fixes every span into it.
 
 #include "core/model/model.h"
 #include "scav/scav_core.h"
@@ -28,19 +24,15 @@ bool state_live(Chart const &c, StateId id) {
   return (id.v < c.states.size()) && (c.states[id.v].live != 0);
 }
 
-// Grows `span` by one, inserting `value` at its end and keeping every other
-// span into the same array valid. Spans are disjoint and empty spans carry no
-// meaningful offset, so the fix-up is one rule: a non-empty span starting at
-// or past the insertion point shifts right. The target span never matches --
-// its own offset is always before the insertion point by construction.
+// Grows `span` by one and fixes every other span into the same array. One rule
+// covers it: a non-empty span starting at or past the insertion point shifts.
 void insert_child(Chart &c, Span &span, StateId value) {
   if (span.len == 0) { span.off = size32(c.state_ids.size()); }
   uint32_t const pos{ span.off + span.len };
   bool const at_tail{ pos == c.state_ids.size() };
   c.state_ids.insert(c.state_ids.begin() + pos, value);
-  // A tail append shifts nothing, and it is also the common case -- building
-  // in document order is all tail appends -- so the fix-up walk is skipped
-  // rather than run to discover there is nothing to do.
+  // A tail append shifts nothing, so the fix-up walk is skipped rather than run
+  // to discover it has nothing to do.
   if (!at_tail) {
     for (Submachine &m : c.submachines) {
       if ((m.children.len != 0) && (m.children.off >= pos)) { m.children.off += 1; }
@@ -88,8 +80,7 @@ uint32_t insert_attr(Chart &c, Span &span, Attr row) {
 }
 
 // The span insert_attr grows, or null for a subject that cannot carry attrs.
-// The pointer never outlives the call: rows are addressed by ordinal, and this
-// is the "algorithms may hold pointers while working" case, not a stored one.
+// Never outlives the call.
 Span *attrs_span_of(Chart &c, ElemRef ref) {
   if (!chart_live(c, ref)) { return nullptr; }
   switch (ref.kind) {
@@ -129,8 +120,8 @@ SubmachineId model_append_submachine_row(Chart &c, Submachine const &row) {
 }
 
 SubmachineId build_chart(Chart &c, std::string_view name, std::string_view label) {
-  // One root per chart. A second call would orphan everything under the first,
-  // so it is a refused call rather than a replaced root.
+  // One root per chart: a second call would orphan everything under the
+  // first.
   if (!c.submachines.empty()) { return { INVALID }; }
   c.name = string_pool_add(c.strings, name);
   c.label = string_pool_add(c.strings, label);
@@ -176,8 +167,8 @@ SubmachineId build_submachine(Chart &c,
                               std::string_view label) {
   if (!state_live(c, owner)) { return { INVALID }; }
   SubmachineId const id{ size32(c.submachines.size()) };
-  // Ordinal is the position among the owner's submachines, fixed at build:
-  // `On:1` must keep meaning the same submachine after later appends.
+  // Fixed at build, so `On:1` keeps meaning the same submachine after later
+  // appends.
   uint32_t const ordinal{ c.states[owner.v].submachines.len };
   c.submachines.push_back({ .owner = owner,
                             .ordinal = ordinal,
@@ -220,19 +211,26 @@ uint32_t build_attr(Chart &c,
   Span *const span{ attrs_span_of(c, subject) };
   if (!span) { return INVALID; }
   Attr const row{ .key = attr_key_intern(c, key),
-                  .value = string_pool_add(c.strings, value) };
+                  .value = string_pool_add(c.strings, value),
+                  .stmt = { INVALID } };
   return insert_attr(c, *span, row);
 }
 
-InstId build_include(Chart &c, SubmachineId parent, std::string_view alias) {
-  // An alias is a state, so it takes a state's rules: a nameless include has
-  // no address and no reason to exist.
-  if (alias.empty()) { return { INVALID }; }
+InstId build_include(Chart &c,
+                     SubmachineId parent,
+                     std::string_view alias,
+                     std::string_view path) {
+  // An alias is a state, so it takes a state's rules: a nameless one has no
+  // address. A pathless one names no document.
+  if (alias.empty() || path.empty()) { return { INVALID }; }
   StateId const host{ build_state(c, parent, alias, StateKind::Normal, {}) };
   if (host.v == INVALID) { return { INVALID }; }
   InstId const id{ size32(c.includes.size()) };
-  c.includes.push_back({ .alias = string_pool_add(c.strings, alias),
-                         .target = { INVALID },  // the loader's to fill (P2)
+  // The host state already interned these bytes and the pool does not
+  // deduplicate, so the row reuses that ref.
+  c.includes.push_back({ .alias = c.states[host.v].name,
+                         .path = string_pool_add(c.strings, path),
+                         .target = { INVALID },  // the load session's to fill
                          .host = host,
                          .stmt = { INVALID } });
   return id;

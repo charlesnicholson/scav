@@ -1,10 +1,8 @@
 #ifndef SCAV_CORE_TESTS_TEST_CHARTS_H_INCLUDED
 #define SCAV_CORE_TESTS_TEST_CHARTS_H_INCLUDED
 
-// The hand-transcribed corpus (P0): real state machines written the way
-// someone would write them. Shared by the parser's corpus tests and the model
-// tests that lower the same charts, so both halves of the pipeline are
-// measured against identical bytes. Header-only and test-only.
+// The hand-transcribed corpus, shared by the parser's corpus tests and the
+// model tests that lower the same charts. Header-only and test-only.
 
 #include <string_view>
 

@@ -1,7 +1,5 @@
-// The deterministic mutation sweep, aimed past the parser: whatever survives
-// parsing must lower and validate without crashing or lying. "Lying" means a
-// diagnostic pointing outside the document, a subject naming a row that does
-// not exist, or an address that does not round-trip on a clean chart.
+// A deterministic sweep past the parser. Whatever survives lowers and validates
+// with located diagnostics, real subjects, and round-tripping addresses.
 
 #include "core/tests/test_support.h"
 #include "scav/scav_core.h"
@@ -111,9 +109,8 @@ TEST_CASE("fuzz: whatever parses also lowers, validates, and addresses") {
     bool const clean{ validate_chart(c, validate_diags) };
     check_validate_diags(c, validate_diags);
 
-    // Every live state prints an address, and on a clean chart the address
-    // resolves back to the row that printed it. Duplicate names make the
-    // text ambiguous, which is exactly what validation just rejected.
+    // Every live state prints an address, and on a chart validation accepted
+    // that address resolves back to the row that printed it.
     for (uint32_t s = 0; s < c.states.size(); ++s) {
       if (c.states[s].live == 0) { continue; }
       std::string const address{ path(c, StateId{ s }) };

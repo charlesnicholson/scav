@@ -1,6 +1,5 @@
-// Structural validation (§10). Everything here is a bounds check, a liveness
-// check, or a byte comparison -- semantics belong to plugins, and layout is
-// entitled to crash on a model that was never validated.
+// Structural validation. Every check here is a bounds check, a liveness check,
+// or a byte comparison.
 
 #include "scav_stable_sort.h"
 
@@ -29,8 +28,8 @@ bool span_in(Span s, size_t array_len) {
   return (static_cast<uint64_t>(s.off) + s.len) <= array_len;
 }
 
-// `/ : $` are path metacharacters and `@` is the format's attribute sigil; a
-// name holding one could never be addressed or reprinted.
+// `/ : $` are path metacharacters and `@` is the attribute sigil. A name
+// holding one could be neither addressed nor reprinted.
 bool name_has_metachar(std::string_view name) {
   for (char const ch : name) {
     if ((ch == '/') || (ch == ':') || (ch == '$') || (ch == '@')) { return true; }
@@ -38,8 +37,8 @@ bool name_has_metachar(std::string_view name) {
   return false;
 }
 
-// The three reference shapes, factored so every caller reports the same way:
-// required-and-missing, out of range, and pointing at a tombstone.
+// The three ways a reference can be wrong: required and missing, out of range,
+// and pointing at a tombstone.
 
 void check_state_ref(Validator &v, ElemRef subject, StateId id, bool required) {
   if (id.v == INVALID) {
@@ -65,8 +64,8 @@ void check_submachine_ref(Validator &v, ElemRef subject, SubmachineId id, bool r
   if (v.c->submachines[id.v].live == 0) { report(v, DiagCode::TombstonedTarget, subject); }
 }
 
-// stmt and inst are provenance: absent is normal (code-built rows), but a
-// present ordinal must land in its array.
+// Absent provenance is normal -- a code-built row has none -- but a present
+// ordinal must land in its array.
 void check_provenance(Validator &v, ElemRef subject, StmtId stmt, InstId inst) {
   if ((stmt.v != INVALID) && (stmt.v >= v.c->stmts.size())) {
     report(v, DiagCode::DanglingRef, subject);
@@ -76,15 +75,17 @@ void check_provenance(Validator &v, ElemRef subject, StmtId stmt, InstId inst) {
   }
 }
 
-// An attrs span must land in the array, and every row it yields must name an
-// interned key. One report per broken span, not per row past the end.
+// An attrs span must land in the array and every row it yields must name an
+// interned key. One report per broken span, not one per bad row.
 void check_attrs(Validator &v, ElemRef subject, Span attrs) {
   if (!span_in(attrs, v.c->attrs.size())) {
     report(v, DiagCode::DanglingRef, subject);
     return;
   }
   for (uint32_t i = 0; i < attrs.len; ++i) {
-    if (v.c->attrs[attrs.off + i].key.v >= v.c->attr_key_names.size()) {
+    Attr const &a{ v.c->attrs[attrs.off + i] };
+    if ((a.key.v >= v.c->attr_key_names.size()) ||
+        ((a.stmt.v != INVALID) && (a.stmt.v >= v.c->stmts.size()))) {
       report(v, DiagCode::DanglingRef, subject);
       return;
     }
@@ -109,8 +110,8 @@ void check_states(Validator &v) {
       report(v, DiagCode::DanglingRef, subject);
     } else {
       for (uint32_t k = 0; k < s.submachines.len; ++k) {
-        // A tombstoned submachine keeps its slot in the span by design
-        // (§7.3), so membership is bounds-checked only.
+        // A tombstoned submachine keeps its slot in the span, so membership
+        // is bounds-checked only.
         if (c.submachine_ids[s.submachines.off + k].v >= c.submachines.size()) {
           report(v, DiagCode::DanglingRef, subject);
           break;
@@ -162,21 +163,22 @@ void check_includes(Validator &v) {
   Chart const &c{ *v.c };
   for (uint32_t i = 0; i < c.includes.size(); ++i) {
     Include const &inc{ c.includes[i] };
-    // The subject is the host state -- an include has no ElemKind because it
-    // is not drawable; its host is where a reader will look.
+    // An include has no ElemKind of its own, so every finding here names its
+    // host state.
     ElemRef const subject{ .kind = ElemKind::State, .ordinal = inc.host.v };
-    if (inc.alias.len == 0) {
-      report(v,
-             DiagCode::MissingRequiredId,
-             ElemRef{ .kind = ElemKind::State, .ordinal = INVALID });
+    if ((inc.alias.len == 0) || (inc.path.len == 0)) {
+      report(v, DiagCode::MissingRequiredId, subject);
     }
-    check_state_ref(v,
-                    ElemRef{ .kind = ElemKind::State, .ordinal = inc.host.v },
-                    inc.host,
-                    true);
-    // Unresolved is P1-normal; a resolved target must land in documents.
-    if ((inc.target.v != INVALID) && (inc.target.v >= c.documents.size())) {
-      report(v, DiagCode::DanglingRef, subject);
+    check_state_ref(v, subject, inc.host, true);
+    // An unresolved target is normal. A resolved one must land in documents,
+    // and its host must hold the submachine the attachment created.
+    if (inc.target.v != INVALID) {
+      if (inc.target.v >= c.documents.size()) {
+        report(v, DiagCode::DanglingRef, subject);
+      } else if ((inc.host.v < c.states.size()) &&
+                 (c.states[inc.host.v].submachines.len == 0)) {
+        report(v, DiagCode::MissingRequiredId, subject);
+      }
     }
     if ((inc.stmt.v != INVALID) && (inc.stmt.v >= c.stmts.size())) {
       report(v, DiagCode::DanglingRef, subject);
@@ -189,15 +191,12 @@ void check_chart_row(Validator &v) {
   ElemRef const subject{ .kind = ElemKind::Chart, .ordinal = 0 };
   check_name(v, subject, c.name);
   check_attrs(v, subject, c.chart_attrs);
-  // A chart with any structure needs its root; an empty Chart{} is still a
-  // model with no valid root, and saying so beats special-casing empty.
+  // An empty Chart{} fails this too: it has no valid root.
   check_submachine_ref(v, subject, c.root_submachine, true);
 }
 
-// Duplicate authored names within one submachine (§10). An alias host is an
-// ordinary state, so alias collisions fall out of the same walk. Sorted by
-// name bytes with the ordinal as the stable tail (§6), so the report order is
-// input-derived, not scan-order.
+// Duplicate authored names within one submachine, alias hosts included. Sorted
+// by name bytes with the ordinal as the stable tail, so report order is fixed.
 void check_duplicate_names(Validator &v) {
   Chart const &c{ *v.c };
   struct Named {
@@ -230,8 +229,8 @@ void check_duplicate_names(Validator &v) {
   }
 }
 
-// More than one initial per submachine (§10). Each wildcard source synthesizes
-// its own pseudostate (§9), which is what makes this reachable.
+// More than one initial per submachine. Reachable because each wildcard source
+// synthesizes its own pseudostate rather than sharing one.
 void check_multiple_initial(Validator &v) {
   Chart const &c{ *v.c };
   for (uint32_t i = 0; i < c.submachines.size(); ++i) {
@@ -254,8 +253,7 @@ void check_multiple_initial(Validator &v) {
   }
 }
 
-// Statement spans against their documents (§10): every statement's src must
-// land inside its document's text. Populated by lowering; vacuous on a
+// Every statement's src must land inside its own document's text. Vacuous on a
 // code-built chart, which owns no statements.
 void check_statements(Validator &v) {
   Chart const &c{ *v.c };
@@ -289,16 +287,15 @@ void check_statements(Validator &v) {
   }
 }
 
-// Columns must cover their entity array exactly -- the lockstep the builder
-// maintains and hand-poking can break. The subject ordinal is the ColumnId;
-// columns have no ElemKind because they are not drawable entities.
+// Columns must cover their entity array exactly. The subject ordinal is the
+// ColumnId; columns have no ElemKind of their own.
 void check_columns(Validator &v) {
   Chart const &c{ *v.c };
   for (uint32_t i = 0; i < c.columns.size(); ++i) {
     ColumnDesc const &desc{ c.columns[i].desc };
     if ((desc.entity == ElemKind::Point) || (desc.entity == ElemKind::PathBox) ||
         (desc.entity == ElemKind::None)) {
-      continue;  // a point column's length is its own business (§11.7a)
+      continue;  // a point column's length is its own
     }
     if (column_count(c, ColumnId{ i }) != chart_entity_count(c, desc.entity)) {
       report(v,
@@ -322,9 +319,8 @@ bool validate_chart(Chart const &c, std::vector<Diagnostic> &diags) {
   check_statements(v);
   check_columns(v);
 
-  // The §6 artifact order. The comparator is a total order over the triple;
-  // equal triples are one finding repeated, and stability keeps their
-  // walk-order, which is array order.
+  // A total order over the triple. Equal triples are one finding repeated, and
+  // stability keeps them in walk order.
   scav_stable_sort(v.found, [](Diagnostic const &a, Diagnostic const &b) {
     if (a.code != b.code) {
       return static_cast<uint32_t>(a.code) < static_cast<uint32_t>(b.code);

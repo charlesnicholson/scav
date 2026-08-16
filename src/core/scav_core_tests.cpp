@@ -113,9 +113,8 @@ TEST_CASE("string_pool: equal strings get their own bytes") {
   CHECK(pool.bytes.size() == 8);
 }
 
-// Fails on purpose, and is skipped unless run by name. A harness that reports
-// nothing looks exactly like one where everything passes; the build runs this
-// case expecting a non-zero exit, which is what tells them apart (PB).
+// Fails on purpose, skipped unless run by name. The build runs it expecting a
+// non-zero exit, which is how a silent harness is told from a passing one.
 TEST_CASE("core: deliberate failure" * doctest::skip()) {
   CHECK_MESSAGE(INVALID == 0, "this failure is intentional");
 }

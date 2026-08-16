@@ -1,4 +1,4 @@
-// The public text-path resolver: §9's spellings against a code-built chart,
+// The public text-path resolver, against a code-built chart,
 // so resolution is tested without the parser in the loop.
 
 #include "core/tests/test_support.h"
@@ -37,7 +37,7 @@ Rig rig() {
   r.idle = build_state(r.c, r.main_sm, "Idle", StateKind::Normal, {});
   r.ready = build_state(r.c, r.main_sm, "Ready", StateKind::Normal, {});
   r.aux_idle = build_state(r.c, r.aux, "Idle", StateKind::Normal, {});
-  r.dock = r.c.includes[build_include(r.c, r.root, "dock").v].host;
+  r.dock = r.c.includes[build_include(r.c, r.root, "dock", "dock.scav").v].host;
   return r;
 }
 
@@ -108,7 +108,7 @@ TEST_CASE("resolve: descending into an unresolved include crosses it") {
 
 TEST_CASE("resolve: an attached include is an ordinary descent") {
   Rig r{ rig() };
-  // What P2 will do: fill target and give the host the included root.
+  // What a load session does: fill target and give the host the included root.
   r.c.includes[0].target = DocId{ 0 };
   SubmachineId const dock_root{ build_submachine(r.c, r.dock, {}, {}) };
   StateId const up{ build_state(r.c, dock_root, "Up", StateKind::Normal, {}) };

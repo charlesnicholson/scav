@@ -1,9 +1,8 @@
 #ifndef SCAV_CORE_H_INCLUDED
 #define SCAV_CORE_H_INCLUDED
 
-// libscavcore's whole public API: parse a document with parse_document(), or
-// build a Chart with the build_ functions, and walk the arrays either way.
-// Each function carries the prefix of its section, and nothing here takes a path.
+// libscavcore's public API: parse a document, assemble a network, or build a
+// Chart directly, then walk the arrays.
 
 #include "scav/scav_types.h"
 
@@ -19,8 +18,8 @@ namespace scav {
 
 // Ids and spans =============================================================
 
-// Ids, and the two span shapes every column indexes through. An id is an
-// ordinal *and* an array index; tombstoning keeps that true under deletion.
+// An id is an ordinal *and* an array index into the entity array it names.
+// Deletion tombstones rather than compacting, so that stays true.
 
 constexpr uint32_t INVALID{ 0xFFFF'FFFFU };
 
@@ -57,13 +56,11 @@ struct ColumnId {  // index into Chart::columns
   constexpr bool operator==(ColumnId const &) const = default;
 };
 
-// Equality is defaulted in-struct (C++20): != is rewritten from ==, and the
-// full spaceship would hand an id an ordering nobody asked for -- sorts that
-// mean to order by ordinal say `.v` (§6's stable-key rule).
+// Ids compare for equality only. A sort that means to order by ordinal says
+// `.v`.
 
-// What an entity *is*, for columns, diagnostics, and DrawList origins. Not
-// StmtKind, which enumerates what a line of source is: `Include` and `Attr`
-// exist only as statements, `Point` and `PathBox` only as entities.
+// What an entity is. StmtKind is the parallel enum over what a line of source
+// is.
 enum class ElemKind : uint32_t {
   State,
   Submachine,
@@ -93,19 +90,16 @@ struct Span {
   constexpr bool operator==(Span const &) const = default;
 };
 
-// Named constructors: these are built constantly, and a designated-initializer
-// list at every site reads worse. An empty span is `{}`.
+// An empty span is `{}`.
 constexpr StrRef str_ref(uint32_t off, uint32_t len) { return { .off = off, .len = len }; }
 constexpr Span make_span(uint32_t off, uint32_t len) { return { .off = off, .len = len }; }
 
 // Narrowing =================================================================
 
-// Callers measure buffers with size_t; the model indexes with uint32_t, because
-// spans are {uint32 off, len} and size_t is 32 bits on wasm32, 64 elsewhere.
-// size_t stops here: entry points take one, check it, and hand uint32_t inward.
+// size_t stops at the API boundary: an entry point takes one, narrows it, and
+// hands uint32_t inward.
 
-// True when `value` round-trips into T. Returns a bool rather than asserting, so
-// an over-large document becomes a diagnostic instead of a crash.
+// True when `value` round-trips into T, leaving `out` written only then.
 template <typename T, typename U>
 bool narrow(U value, T &out) {
   static_assert(std::is_unsigned_v<T> && std::is_unsigned_v<U>,
@@ -115,8 +109,8 @@ bool narrow(U value, T &out) {
   return true;
 }
 
-// Where the bound is already known to hold. Still checked -- it clamps rather
-// than wrapping, so a mistake is a short read and not a 4-gigabyte one.
+// For a bound already known to hold. Clamps rather than wrapping, so a mistake
+// is a short read and not a 4-gigabyte one.
 template <typename T, typename U>
 T narrow_clamp(U value) {
   static_assert(std::is_unsigned_v<T> && std::is_unsigned_v<U>, "unsigned only");
@@ -126,18 +120,16 @@ T narrow_clamp(U value) {
 
 // Diagnostics ===============================================================
 
-// A code plus a source span. A syntax error is reported before any statement
-// exists, so the span is the payload; line and column are derived on demand.
+// A code plus either a source span or an entity, depending on which existed
+// when it fired. Line and column are derived on demand.
 
 enum class DiagCode : uint32_t {
   Ok,
 
-  // Spans are {uint32 off, len}, so 4 GiB is the ceiling. Saying so beats
-  // truncating into a document that parses differently.
   DocumentTooLarge,
 
-  // Normalization -- spans index the *raw* input, since the normalized buffer
-  // does not exist yet when these fire.
+  // Normalization. Spans index the *raw* input: the normalized buffer does not
+  // exist yet when these fire.
   Utf8Truncated,
   Utf8InvalidByte,
   Utf8Overlong,
@@ -175,16 +167,26 @@ enum class DiagCode : uint32_t {
   TrailingContent,
   DepthLimitExceeded,
 
-  // Lowering: statements to entities (§9, §15). These carry the offending
-  // statement's span, since the entity they would name was never created.
+  // Loading. The span indexes the bytes handed to load_add, and a session
+  // reporting one of these produces no chart.
+  IncludePathInvalid,
+  IncludePathUnresolved,
+  IncludeCycle,
+  IncludeExpansionTooLarge,
+  DocumentNotRequested,
+  DocumentAlreadyLoaded,
+  LoadSessionEmpty,
+
+  // Lowering. These carry the offending statement's span; the entity they
+  // would have named was never created.
   MisplacedStatement,
   WildcardBothEndpoints,
   EndpointUnresolved,
   BadSubmachineQualifier,
   EndpointCrossesInclude,
 
-  // Validation (§10). Subjects are entities, so these carry an ElemRef and
-  // derive file/line/column by walking to the statement's src span on demand.
+  // Validation. These carry an ElemRef; file, line and column come from
+  // walking to that entity's statement.
   DanglingRef,
   MissingRequiredId,
   TombstonedTarget,
@@ -195,11 +197,8 @@ enum class DiagCode : uint32_t {
   ColumnCountMismatch,
 };
 
-// Pre-model diagnostics -- normalization, lexing, parsing -- have no entity to
-// name, so `subject` defaults to None and the raw span is the payload. Model
-// diagnostics carry the (code, subject kind, subject ordinal) triple and
-// nothing else; position is derived from the subject's statement when one
-// exists.
+// A producer running before entities exist fills `src`; one running after fills
+// `subject`, and the reader walks to that subject's statement for a position.
 struct Diagnostic {
   DiagCode code;
   ElemRef subject{ .kind = ElemKind::None, .ordinal = INVALID };
@@ -215,42 +214,35 @@ struct LineCol {
 
 LineCol diag_line_col(scav_byte const *bytes, size_t len, size_t offset);
 
-// A short, locale-free description. Rendering a formatted message is the
-// application's job; a library does not touch the stream globals.
+// A short, locale-free description. Formatting a message is the caller's.
 char const *diag_message(DiagCode code);
 
 bool diag_has_errors(std::vector<Diagnostic> const &diags);
 
 // String pool ===============================================================
 
-// A StrRef is an offset and length into StringPool::bytes. Not NUL-terminated:
-// strings come out as spans.
-//
-// The pool is not deduplicated, so two equal strings can hold two StrRefs.
-// Compare the views, not the refs.
+// An offset and length into StringPool::bytes, not NUL-terminated. The pool
+// keeps duplicates, so equal text can hold two refs: compare the views.
 
 struct StringPool {
   std::vector<scav_byte> bytes;
 };
 
-// A zero-length ref reads as the empty string without touching `pool`. Inline
-// because it is the whole of reading a pool: one bounds-free span over bytes the
-// caller already owns. `char` may alias any object representation, which is what
-// the cast relies on; the other direction would not be safe.
+// A zero-length ref reads as the empty string without touching `pool`. The cast
+// is legal because `char` may alias any object representation.
 inline std::string_view string_pool_view(StringPool const &pool, StrRef ref) {
   if (ref.len == 0) { return {}; }
   return { reinterpret_cast<char const *>(pool.bytes.data() + ref.off), ref.len };
 }
 
-// Appends as met, never deduplicates (see above). The empty string is the empty
-// ref, so it costs no pool growth and every empty field looks the same.
+// Appends as met, never deduplicates. The empty string returns the empty ref
+// and grows the pool by nothing.
 StrRef string_pool_add(StringPool &pool, std::string_view text);
 
 // Source text ===============================================================
 
-// BOM stripped, line endings to LF, UTF-8 validated, NFC applied -- otherwise
-// autocrlf and NFD put different bytes in the pool from the same commit. Offsets
-// downstream index the normalized bytes; UTF-8 errors predate that buffer.
+// BOM stripped, line endings folded to LF, UTF-8 validated, NFC applied.
+// Offsets downstream index these bytes; a UTF-8 error indexes the raw input.
 
 // Returns false and leaves `out` empty when the input is not valid UTF-8.
 // `out` is cleared first either way.
@@ -260,8 +252,8 @@ bool source_text_normalize(scav_byte const *bytes,
                            std::vector<scav_byte> &out,
                            std::vector<Diagnostic> &diags);
 
-// Exposed for the string-literal decoder, which needs these on decoded escapes
-// rather than on a whole document.
+// Codepoint at a time, for callers working on decoded escapes rather than on a
+// whole document.
 bool source_text_utf8_decode(scav_byte const *bytes,
                              size_t len,
                              size_t at,
@@ -277,20 +269,21 @@ bool source_text_is_nfc(scav_byte const *bytes, size_t len);
 // something.
 bool source_text_to_nfc(scav_byte const *bytes, size_t len, std::vector<scav_byte> &out);
 
-// Exposed for the raw-string decoder, which works on already-normalized bytes.
+// Assumes already-normalized bytes.
 bool source_text_is_ascii(scav_byte const *bytes, size_t len);
 
 std::string_view source_text_view(std::vector<scav_byte> const &bytes, Span span);
 
 // Lexer =====================================================================
 
-// Bytes in, one flat token vector out -- not a pull lexer, so lexing and parsing
-// can be timed and fuzzed apart. The vector is scratch, freed after the parse.
+// Bytes in, one flat token vector out. The vector is scratch, freed after the
+// parse.
 
-// No keyword kinds: `s`, `m` and `t` are keywords only in statement-leading
-// position, so a lexer that decided would have to know where it was.
+// No keyword kinds. `s`, `m` and `t` are keywords only in statement-leading
+// position, which the lexer cannot see from where it stands.
 enum class TokKind : uint32_t {
   End,  // one sentinel, always last, so lookahead needs no bounds check
+
   Ident,
   Number,
   String,
@@ -313,8 +306,8 @@ struct Token {
   TokKind kind;
 };
 
-// Comments are lexed and never parsed, so they travel beside the token stream.
-// The two flags are exactly what position classification needs.
+// Comments travel beside the token stream rather than in it. The two flags are
+// what the printer needs to classify a comment's position.
 struct LexComment {
   Span src;              // includes the "//", excludes the newline
   uint32_t code_before;  // non-whitespace earlier on the same line
@@ -326,8 +319,8 @@ struct LexResult {
   std::vector<LexComment> comments;
 };
 
-// Skips an unexpected character so one run reports all of them; stops at
-// anything else. Returns false when it reported anything.
+// Skips an unexpected character and keeps going, so one run reports all of
+// them; stops at anything else. Returns false when it reported anything.
 bool lex_source(scav_byte const *bytes,
                 size_t byte_count,
                 DocId doc,
@@ -337,31 +330,28 @@ bool lex_source(scav_byte const *bytes,
 char const *lex_token_kind_name(TokKind kind);
 
 // Reserved in every position. `choice`, `history`, `as`, `kind`, `s`, `m` and
-// `t` are absent on purpose -- they are contextual, so a state may be named one.
+// `t` are absent: they are contextual, so a state may be named one.
 bool lex_is_reserved_word(std::string_view text);
 
-// Lexeme includes its delimiters. Applies escapes, dedents a raw string to its
-// closing column, and NFC-folds -- a \u escape can decode to a decomposed form.
+// `lexeme` includes its delimiters. Applies escapes, dedents a raw string to
+// its closing column, and NFC-folds, since a \u escape can decompose.
 bool lex_decode_string_literal(scav_byte const *bytes,
                                Span lexeme,
                                DocId doc,
                                std::vector<scav_byte> &out,
                                std::vector<Diagnostic> &diags);
 
-// Bytes held, for the performance tests' memory-ratio assertion. Capacity, not
-// size: the peak is what matters.
+// Bytes held, summing capacity rather than size.
 uint64_t lex_footprint(LexResult const &result);
 
 // Syntax tree ===============================================================
 
-// The front end's whole output. No entity arrays and no resolution: a statement
-// stream is all a parser owes. What a statement *said* lives in columns beside
-// it -- `stmt_payload` indexes the array its `kind` names, `stmt_children` its
-// block.
+// The front end's whole output. `stmt_payload` indexes the array a statement's
+// `kind` names; `stmt_children` indexes its block.
 
 enum class StmtKind : uint32_t { Chart, Include, State, Submachine, Trans, Attr };
 
-// `Initial` and `Final` are reachable only through `*` in an endpoint, so no
+// `Initial` and `Final` are reachable only through `*` in an endpoint; no
 // spelling of the format produces them in this slot.
 enum class StateKind : uint32_t {
   Normal,
@@ -377,12 +367,11 @@ enum class StateKind : uint32_t {
 
 enum class TransKind : uint32_t { External, Internal, Local };
 
-// `Flag` is `@k` with nothing after it, kept distinct from `@k = "true"`: which
-// spelling is canonical is the printer's call, not the parser's.
+// `Flag` is `@k` with nothing after it, kept distinct from `@k = "true"`.
 enum class AttrValueKind : uint32_t { Flag, Scalar, List };
 
-// Leading and own-line both precede the owner; the difference is a blank line.
-// Inside-the-block versus before-it is derivable from the offsets.
+// Leading and own-line both precede the owner; the difference is a blank line
+// between them. Inside-the-block versus before-it follows from the offsets.
 enum class CommentPos : uint32_t { Leading, Trailing, OwnLine };
 
 struct Document {
@@ -403,8 +392,8 @@ struct Trivia {
   CommentPos pos;
 };
 
-// `On:main` and `On:1` -- a submachine qualifier by name or ordinal. Both absent
-// is the unqualified case.
+// `On:main` and `On:1`: a submachine qualifier by name or by ordinal. Both
+// absent is the unqualified case.
 struct PathSeg {
   StrRef name;
   StrRef qualifier;
@@ -447,8 +436,8 @@ struct AttrEntry {
   AttrValueKind kind;
 };
 
-// One row for `@k`, `@ns:k` and `@ns { a, b }` alike: the block spelling is n
-// entries under one namespace, the others are one.
+// One row for `@k`, `@ns:k` and `@ns { a, b }` alike. The block spelling is n
+// entries under one namespace; the others are one.
 struct AttrStmt {
   StrRef ns;
   Span entries;  // -> attr_entries
@@ -482,8 +471,8 @@ char const *syntax_stmt_kind_name(StmtKind kind);
 char const *syntax_state_kind_name(StateKind kind);
 char const *syntax_trans_kind_name(TransKind kind);
 
-// False when the word names no kind. `initial` and `final` are rejected: the
-// format reaches them through `*`.
+// False when the word names no kind. `initial` and `final` are rejected; the
+// format reaches those through `*`.
 bool syntax_state_kind_from_name(std::string_view text, StateKind &out);
 bool syntax_trans_kind_from_name(std::string_view text, TransKind &out);
 
@@ -492,12 +481,11 @@ uint32_t syntax_root_statement(ParsedDocument const &pd);
 
 // Parser ====================================================================
 
-// LL(1) descent, with the frames in a heap vector rather than the call stack:
-// nesting depth is attacker-controlled, and a stack overflow is a crash where a
-// depth cap is a diagnostic.
+// LL(1) descent with the frames in a heap vector rather than the call stack, so
+// a hostile nesting depth is a diagnostic instead of a stack overflow.
 
-// Depth 16 is the design target. The format spends two block levels per state
-// level plus one for the chart, so a legal depth-16 chart nests 33 deep.
+// Block levels, not state levels: the format spends two blocks per state level
+// plus one for the chart, so a depth-16 chart nests 33 deep.
 constexpr uint32_t DEFAULT_MAX_DEPTH{ 256 };
 
 struct ParseOptions {
@@ -506,8 +494,7 @@ struct ParseOptions {
 
 ParseOptions parse_default_options();
 
-// Bytes must already be normalized. `name` lets a diagnostic say `wifi.scav:12`
-// rather than `<buffer>:12`.
+// Bytes must already be normalized. `name` is what a diagnostic quotes.
 bool parse_tokens(scav_byte const *bytes,
                   size_t byte_count,
                   LexResult const &lexed,
@@ -517,8 +504,7 @@ bool parse_tokens(scav_byte const *bytes,
                   ParsedDocument &out,
                   std::vector<Diagnostic> &diags);
 
-// normalize -> lex -> parse, over bytes from anywhere. No overload takes a path:
-// acquiring bytes is a different system.
+// normalize -> lex -> parse, over bytes from anywhere.
 bool parse_document(scav_byte const *bytes,
                     size_t len,
                     std::string_view name,
@@ -526,16 +512,13 @@ bool parse_document(scav_byte const *bytes,
                     ParsedDocument &out,
                     std::vector<Diagnostic> &diags);
 
-// Bytes held, for the performance tests' memory-ratio assertion.
+// Bytes held, summing capacity rather than size.
 uint64_t parse_footprint(ParsedDocument const &pd);
 
 // Model =====================================================================
 
-// Flat arrays of POD aggregates linked by ordinal; no pointer or reference
-// between records. An id is an array index, deletion is a tombstone
-// (`live = 0`), ids are never reused, and every walk skips dead rows -- that is
-// the whole liveness protocol. Attrs carry no `live` of their own: liveness
-// belongs to the entity, and rows reached through an entity's span inherit it.
+// Flat POD arrays linked by ordinal. An id is an array index, deletion sets
+// `live = 0`, and rows reached through an entity's span inherit its liveness.
 
 struct State {
   StrRef name;   // empty for pseudostates synthesized from `*`
@@ -571,29 +554,31 @@ struct Transition {
   uint32_t live;
 };
 
-// One row per instantiation; its ordinal is the InstId. `target` stays INVALID
-// until the loader (P2) resolves the path to a document; the alias host state
-// exists from the moment the include does, because an alias is a state.
+// One row per instantiation, its ordinal the InstId. `path` is the authored
+// string verbatim; a load session fills `target`.
 struct Include {
   StrRef alias;
+  StrRef path;
   DocId target;
   StateId host;  // the alias state it synthesizes; never INVALID
   StmtId stmt;
 };
 
+// `stmt` is the attr's own statement, not its subject's: `state On { @doc }` is
+// two authored statements, and a reader pointed at the state cannot find the
+// attribute.
 struct Attr {
   AttrKeyId key;
   StrRef value;
+  StmtId stmt;
 };
 
-// Columns: type-erased byte arrays with a stride, indexed by entity ordinal.
-// How extension data lives *in* the model rather than in app-side tables.
+// Type-erased byte arrays with a stride, indexed by entity ordinal.
 
 enum class ValueKind : uint32_t { U32, I32, U64, I64, StrRef, Span, Blob, Pod };
 
-// ColumnDesc.flags bit 0: a derived column is skipped by the serializer and
-// exempt from round-trip-unknown, or a stale geometry snapshot would survive a
-// save and get trusted instead of recomputed.
+// ColumnDesc.flags bit 0. A derived column is skipped by the serializer and
+// exempt from round-trip-unknown.
 constexpr uint32_t COLUMN_DERIVED{ 1U };
 
 struct ColumnDesc {  // 28 bytes, no padding
@@ -609,9 +594,8 @@ struct Column {
   std::vector<scav_byte> bytes;  // count * elem_size
 };
 
-// One document network rooted at one document. All documents share these
-// arrays, each entity tagged with the statement that declared it and the
-// instantiation it belongs to -- no flattening step and no second model shape.
+// One document network. All documents share these arrays, each entity carrying
+// its declaring statement and its instantiation.
 struct Chart {
   std::vector<Document> documents;
   std::vector<Statement> stmts;
@@ -624,9 +608,8 @@ struct Chart {
   std::vector<Include> includes;        // indexed by InstId
   std::vector<Attr> attrs;
 
-  // Attribute keys are genuinely interned -- equal keys give equal ids, which
-  // is the point of an id -- so their bytes live apart from the never-
-  // deduplicated `strings`. AttrKeyId indexes attr_key_names.
+  // Interned, so equal keys give equal ids. Deduplicated here, which is why
+  // the bytes live apart from `strings`. AttrKeyId indexes attr_key_names.
   std::vector<StrRef> attr_key_names;
   StringPool attr_keys;
 
@@ -638,8 +621,8 @@ struct Chart {
 
   StringPool strings;  // authored names and labels; append order
 
-  // Braced so `Chart c;` is a usable empty chart: the vectors above initialize
-  // themselves, and a POD tail left indeterminate would make every walk UB.
+  // Braced so `Chart c;` is a usable empty chart. The vectors above initialize
+  // themselves; this tail would otherwise be indeterminate.
   StrRef name{}, label{};
   SubmachineId root_submachine{ INVALID };
   Span chart_attrs{};  // -> attrs
@@ -647,9 +630,8 @@ struct Chart {
 
 // Chart queries =============================================================
 
-// Reads over the model. Everything here checks liveness where a walk could
-// yield a dead row; nothing here allocates except chart_path_of, which builds
-// a string.
+// Reads over the model. Each checks liveness where a walk could yield a dead
+// row, and none allocates except chart_path_of.
 
 inline std::string_view chart_string(Chart const &c, StrRef ref) {
   return string_pool_view(c.strings, ref);
@@ -662,8 +644,8 @@ std::string_view chart_attr_key(Chart const &c, AttrKeyId key);
 // The interned id for `key`, or INVALID when this chart never met it.
 AttrKeyId chart_attr_key_find(Chart const &c, std::string_view key);
 
-// Rows of the entity array `kind` names. Chart is one entity; Point and
-// PathBox have no entity array yet, so their count is the column's business.
+// Rows of the entity array `kind` names. Chart counts as one; Point and
+// PathBox have no entity array, so they count zero.
 uint32_t chart_entity_count(Chart const &c, ElemKind kind);
 
 // In range and of an entity kind that has rows. INVALID ordinals fail.
@@ -678,30 +660,20 @@ bool chart_live(Chart const &c, ElemRef ref);
 Span chart_attrs_of(Chart const &c, ElemRef ref);
 
 // Index into Chart::attrs of the subject's first attr with `key`, or INVALID.
-// A list-valued attr is N rows under one key: walk the span for the rest.
+// A list-valued attr is N rows under one key; walk the span for the rest.
 uint32_t chart_attr_find(Chart const &c, ElemRef subject, std::string_view key);
 
-// The submachine-qualified `/`-separated path: `On:main/Idle`. Unnamed
-// pseudostates spell as `$<kind>`, ordinal-suffixed past the first, so every
-// live state has an address. Appends to `out` without clearing it.
+// The submachine-qualified path, `On:main/Idle`; an unnamed pseudostate spells
+// as `$<kind>`, ordinal-suffixed past the first. Appends to `out`.
 void chart_path_of(Chart const &c, StateId id, std::string &out);
 
-// Bytes held, for the performance tests' memory-ratio assertion. Capacity, not
-// size: the peak is what matters.
+// Bytes held, summing capacity rather than size.
 uint64_t chart_footprint(Chart const &c);
 
 // Builder ===================================================================
 
-// Append-only: rows are never removed, reordered, or compacted, so an id handed
-// out stays valid for the life of the chart. Appending where a span is not at
-// the tail of its shared array rebuilds that array in O(n) -- microseconds at
-// the scale target, and cheaper than an indirection every read would pay
-// forever.
-//
-// A bad call -- an id out of range, a tombstoned parent, a second build_chart --
-// appends nothing and returns the INVALID id. The builder will not manufacture
-// a structurally bad model from a bad argument; validation (§10) is for models,
-// not for calls.
+// Append-only, so an id stays valid for the life of the chart. A bad call
+// appends nothing and returns INVALID.
 
 // Names the chart, creates the root submachine, and returns it. The chart must
 // be empty. Everything else hangs off the returned id.
@@ -724,33 +696,28 @@ TransId build_trans(Chart &c,
                     TransKind kind,
                     std::string_view label);
 
-// Appends one Attr row to the subject and returns its index into Chart::attrs,
-// interning `key` if this chart never met it. A repeated key appends another
-// row -- that is how a list value is stored. Note the returned index is the one
-// place the append-only rule bends: a later build_attr for a *different*
-// subject can shift attr rows to keep spans contiguous, so hold the subject and
-// re-find rather than holding the index across builds.
+// Appends one Attr row and returns its index, interning `key`; a repeated key
+// appends another row. A later build_attr elsewhere shifts that index, so a
+// caller stamping `stmt` does it before the next call.
 uint32_t build_attr(Chart &c,
                     ElemRef subject,
                     std::string_view key,
                     std::string_view value);
 
 // Synthesizes the alias host state in `parent` and appends the Include row
-// naming it. The authored path is source text, not model data, so it is not
-// taken here; the loader (P2) fills `target`.
-InstId build_include(Chart &c, SubmachineId parent, std::string_view alias);
+// naming it. `path` is stored verbatim; a load session fills `target`.
+InstId build_include(Chart &c,
+                     SubmachineId parent,
+                     std::string_view alias,
+                     std::string_view path);
 
 // Columns ===================================================================
 
-// What the core owes an extension: store it indexed by entity ordinal, keep it
-// index-aligned under append and tombstoning, round-trip it losslessly, pass it
-// through unread.
+// Extension data, stored indexed by entity ordinal and kept index-aligned
+// under append and tombstoning.
 
-// Appends a column sized to the entity's current count, zero-filled, and
-// returns its id. The name is interned into Chart::column_names. Rejected with
-// INVALID: an entity of None or PathBox, a zero elem_size, an alignment that is
-// zero or does not divide elem_size, and a name already registered -- a column
-// is an identity, so re-registration is a caller bug, not an upsert.
+// Appends a zero-filled column sized to the entity's current count. INVALID for
+// a duplicate name, an entity of None or PathBox, or a bad size or alignment.
 ColumnId column_register(Chart &c,
                          std::string_view name,
                          ElemKind entity,
@@ -759,8 +726,8 @@ ColumnId column_register(Chart &c,
                          uint32_t elem_align,
                          uint32_t flags);
 
-// INVALID when no column has that name. Linear scan by bytes: registration
-// order is not canonical, and a chart holds few columns.
+// INVALID when no column has that name. Linear scan over the registered
+// names.
 ColumnId column_find(Chart const &c, std::string_view name);
 
 scav_byte *column_data(Chart &c, ColumnId id);
@@ -771,19 +738,11 @@ uint32_t column_count(Chart const &c, ColumnId id);
 
 // Resolution ================================================================
 
-// Why a path failed, so lowering can say which rule broke rather than only
-// that one did.
+// Which rule a failed path broke, not merely that one did.
 enum class ResolveStatus : uint32_t { Ok, NotFound, BadQualifier, CrossesInclude };
 
-// Resolves a §9 state path against `scope`, the submachine the reference
-// appears in -- pass Chart::root_submachine for an absolute lookup. The first
-// segment resolves innermost-outward through the enclosing submachines,
-// nearest match winning; every later segment descends strictly. A `:name` or
-// `:ordinal` qualifier picks which submachine to descend into and is required
-// exactly when the state has more than one; on the last segment there is
-// nothing to descend into, so a qualifier there is an error. Synthetic `$kind`
-// spellings address unnamed pseudostates. Descending past an unresolved
-// include alias is CrossesInclude until the loader (P2) attaches the target.
+// Resolves a state path against `scope`: the first segment innermost-outward
+// within its own document, later ones descending strictly.
 ResolveStatus resolve_path(Chart const &c,
                            SubmachineId scope,
                            std::string_view path,
@@ -791,30 +750,112 @@ ResolveStatus resolve_path(Chart const &c,
 
 // Lowering ==================================================================
 
-// Statements to entities (§17 P1). Appends pd's document, statements, trivia,
-// and normalized bytes to the chart -- rebased into the shared pools -- then
-// creates the entity rows the statements describe: implicit submachines for
-// states directly in a block (§15), one synthesized pseudostate per `*`
-// endpoint (§9), an Include row plus alias host state per include, endpoint
-// paths resolved lexically (§9). The parser accepts any item in any block by
-// design; placement rules are lowering's, and a misplaced statement is
-// diagnosed and skipped, never half-applied. P1 lowers one root document into
-// an empty chart; cross-document resolution is the loader's (P2). Returns
-// false when it reported anything.
+// One document into an empty chart: rebases pd's front-end slice, creates its
+// entity rows, leaves every include unresolved. False if it reported anything.
 bool lower_document(Chart &c, ParsedDocument const &pd, std::vector<Diagnostic> &diags);
+
+// Document paths ============================================================
+
+// A document name is a key, resolved by byte-wise segment folding. Names are
+// `/`-separated on every transport.
+
+// Resolves `ref` against `base`, assigning `out`. A relative ref joins `base`'s
+// directory and folds `.` and `..`; an absolute or scheme-carrying one does not.
+bool path_resolve(std::string_view base, std::string_view ref, std::string &out);
+
+// Load session ==============================================================
+
+// Add the root, read `pending`, resolve and add each, repeat until empty,
+// finish. Parsed once per distinct name, instantiated once per include.
+
+struct Pending {
+  Span path;          // -> the session's path pool; read with load_pending_path
+  DocId from;         // the document whose include statement claimed this one
+  uint32_t stmt_row;  // that statement's row in `from`'s parsed document
+};
+
+// A DocId is fixed by the first include statement naming that path, ordered by
+// (requesting DocId, statement ordinal). Arrival order does not enter into it.
+struct LoadDoc {
+  StrRef name;        // the resolved key, into LoadSession::paths
+  uint32_t arrived;   // 0 until load_add supplied its bytes
+  Span edges;         // -> LoadSession::edges, this document's includes
+  DocId from;         // who claimed it; INVALID for the root
+  uint32_t stmt_row;  // the claiming include statement's row in `from`
+};
+
+// One include statement, discovered. The junction between the document graph
+// the session walks and the instantiation tree finish builds.
+struct IncludeEdge {
+  DocId from;
+  DocId to;
+  uint32_t stmt_row;  // the include statement's row in `from`'s document
+};
+
+// Parsed documents are held until finish, which instantiates from their
+// statement payloads.
+struct LoadSession {
+  StringPool paths;                    // resolved keys, and Pending spans into it
+  std::vector<LoadDoc> docs;           // indexed by DocId, claim order
+  std::vector<ParsedDocument> parsed;  // parallel to docs; empty until arrived
+  std::vector<IncludeEdge> edges;
+  std::vector<Pending> pending;   // refreshed by load_pending
+  std::vector<Diagnostic> diags;  // document-local; see DiagCode above
+  uint32_t poisoned{ 0 };         // a failed add; finish can only report
+};
+
+// Normalizes, lexes and parses `bytes`, claiming a DocId per path its includes
+// name. The first call is the root; a later one must name a pending path.
+bool load_add(LoadSession &s, scav_byte const *bytes, size_t len, std::string_view name);
+
+// What the session still needs, in DocId order. The returned view is
+// invalidated by the next load_add. Empty means finish.
+std::vector<Pending> const &load_pending(LoadSession &s);
+
+inline std::string_view load_pending_path(LoadSession const &s, Pending const &p) {
+  return string_pool_view(s.paths, str_ref(p.path.off, p.path.len));
+}
+
+// The resolved key `doc` was claimed under. Empty for an unknown DocId.
+std::string_view load_document_name(LoadSession const &s, DocId doc);
+
+// The normalized bytes parsed for `doc`, which a document-local diagnostic's
+// span indexes. False for a document still pending.
+bool load_document_bytes(LoadSession const &s,
+                         DocId doc,
+                         scav_byte const **out,
+                         uint32_t *len);
+
+// Builds a complete network into an empty `out`, spending the session. Whether
+// `out` gained documents says which pool the diagnostics index.
+bool load_finish(LoadSession &s, Chart &out, std::vector<Diagnostic> &diags);
+
+// The filesystem transport, composed from the calls above.
+
+// Reads `path` whole. Returns false when it cannot be opened or read.
+bool read_file(char const *path, std::vector<scav_byte> &out);
+
+// The load loop with `read_file` in the fetch slot. `session` outlives the call
+// for load_document_bytes; `failed_path` names a document it could not read.
+bool load_file(char const *path,
+               LoadSession &session,
+               Chart &out,
+               std::vector<Diagnostic> &diags,
+               std::string &failed_path);
+
+// Structural hash ===========================================================
+
+// The canonical serialization of a chart's entity arrays and authored text,
+// field by field in array order with every string length-prefixed.
+void chart_digest_bytes(Chart const &c, std::vector<scav_byte> &out);
+
+// xxHash32 over the above.
+uint32_t chart_structural_hash(Chart const &c);
 
 // Validation ================================================================
 
-// Mandatory and structural only: dangling ids, required ids absent, live rows
-// referencing tombstoned ones, duplicate authored names per submachine, path
-// metacharacters in names, more than one initial per submachine, statement
-// spans outside their document, column counts out of lockstep. Semantic lint
-// is a plugin's business, and degree checks per pseudostate kind are dialect
-// rules -- every topology must stay drawable (§7.2).
-//
-// Walks live rows; a tombstoned row is checked only as a target. Appends its
-// findings to `diags` sorted by (code, subject kind, subject ordinal) -- the
-// §6 artifact order -- and returns false when it reported anything.
+// Structural checks over the live rows, a tombstoned one only as a target.
+// Appends findings sorted by (code, subject kind, subject ordinal).
 bool validate_chart(Chart const &c, std::vector<Diagnostic> &diags);
 
 }  // namespace scav

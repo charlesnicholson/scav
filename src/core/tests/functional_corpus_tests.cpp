@@ -1,6 +1,5 @@
-// Hand-transcribed charts: real state machines written the way someone would
-// write them. Synthetic input has uniform branching and no accidental
-// structure, so validating on it alone is a trap.
+// Hand-transcribed charts, written the way someone would write them, where
+// synthetic input has uniform branching and no accidental structure.
 
 #include "core/tests/test_charts.h"
 #include "core/tests/test_support.h"
@@ -35,7 +34,6 @@ uint32_t count_of(ParsedDocument const &pd, StmtKind kind) {
 }  // namespace
 
 TEST_CASE("corpus: every chart parses with no diagnostics") {
-  // P0's exit gate, stated as a test rather than as a claim.
   for (CorpusChart const &c : corpus()) {
     Parsed const r{ parse(c.text, std::string{ c.name } + ".scav") };
     CHECK_MESSAGE(r.ok, c.name << ": " << diag_message(first_code(r.diags)));
@@ -52,8 +50,8 @@ TEST_CASE("corpus: every statement's span lands inside the document") {
       CHECK_MESSAGE(s.src.len > 0, c.name);
       CHECK_MESSAGE(static_cast<size_t>(s.src.off) + s.src.len <= len, c.name);
     }
-    // the design will check this structurally in P1; asserting it here means the
-    // parser never hands over a span the validator would reject.
+    // Asserted here as well as in validation, so the parser never hands over a
+    // span the validator would reject.
     CHECK(r.pd.doc.text == make_span(0, len));
   }
 }

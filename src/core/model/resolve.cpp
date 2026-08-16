@@ -1,6 +1,5 @@
-// Path resolution (§9). The first segment is lexically scoped -- innermost
-// submachine outward, nearest match winning -- and every later segment
-// descends strictly. Resolution links; it never flattens.
+// The first segment is lexically scoped -- innermost submachine outward,
+// nearest match winning -- and every later segment descends strictly.
 
 #include "core/model/model.h"
 #include "scav/scav_core.h"
@@ -16,10 +15,8 @@ namespace scav {
 
 namespace {
 
-// The live child of `m` named `name`, or INVALID. A `$` spelling addresses an
-// unnamed pseudostate by building each unnamed candidate's synthetic segment
-// through the same helper chart_path_of prints with, so an address always
-// parses back to the state that printed it.
+// The live child of `m` named `name`, or INVALID. A `$` spelling matches each
+// unnamed candidate's segment through the helper chart_path_of prints with.
 StateId find_in_submachine(Chart const &c, SubmachineId m, std::string_view name) {
   Span const kids{ c.submachines[m.v].children };
   bool const synthetic{ !name.empty() && (name[0] == '$') };
@@ -41,9 +38,8 @@ StateId find_in_submachine(Chart const &c, SubmachineId m, std::string_view name
   return { INVALID };
 }
 
-// An unresolved alias host: the state an include synthesized whose target the
-// loader has not yet attached. Descending into one is CrossesInclude, not
-// NotFound -- the state exists, its interior is in another file.
+// A state an include synthesized whose target is not attached; descending into
+// one gives CrossesInclude, since its interior is in another file.
 bool is_unresolved_alias(Chart const &c, StateId id) {
   for (Include const &inc : c.includes) {
     if ((inc.host == id) && (inc.target.v == INVALID)) { return true; }
@@ -51,9 +47,8 @@ bool is_unresolved_alias(Chart const &c, StateId id) {
   return false;
 }
 
-// Picks which of `state`'s submachines the next segment descends into. The
-// qualifier is required exactly when the state has more than one live
-// submachine, and must name one when present.
+// Picks which of `state`'s submachines the next segment descends into. A
+// qualifier is required exactly when more than one is live.
 ResolveStatus select_submachine(Chart const &c,
                                 StateId state,
                                 ResolveSeg const &seg,
@@ -104,8 +99,8 @@ ResolveStatus model_resolve_segments(Chart const &c,
     return ResolveStatus::NotFound;
   }
 
-  // First segment: innermost-outward. The guard turns a corrupted parent
-  // chain into a miss rather than a hang; builder-made chains cannot cycle.
+  // Innermost-outward, stopping at the alias-host edge, where a submachine and
+  // its owner carry different InstIds. The guard bounds a corrupted chain.
   StateId const found{ [&] {
     SubmachineId sm{ scope };
     for (size_t guard = 0; guard <= c.submachines.size(); ++guard) {
@@ -113,6 +108,7 @@ ResolveStatus model_resolve_segments(Chart const &c,
       if (hit.v != INVALID) { return hit; }
       StateId const owner{ c.submachines[sm.v].owner };
       if ((owner.v == INVALID) || (owner.v >= c.states.size())) { break; }
+      if (c.submachines[sm.v].inst != c.states[owner.v].inst) { break; }
       sm = c.states[owner.v].parent;
       if (sm.v >= c.submachines.size()) { break; }
     }
@@ -129,8 +125,8 @@ ResolveStatus model_resolve_segments(Chart const &c,
     if (cur.v == INVALID) { return ResolveStatus::NotFound; }
   }
 
-  // The last segment names a state; there is nothing left to descend into, so
-  // a qualifier there selects nothing and saying so beats ignoring it.
+  // The last segment names a state, so there is nothing left for a qualifier
+  // to select.
   ResolveSeg const &last{ segs[count - 1] };
   if (!last.qualifier.empty() || (last.ordinal != INVALID)) {
     return ResolveStatus::BadQualifier;
@@ -143,9 +139,8 @@ ResolveStatus resolve_path(Chart const &c,
                            SubmachineId scope,
                            std::string_view path,
                            StateId &out) {
-  // Split on '/', then each segment on one ':'. All-digit qualifiers are
-  // ordinals; anything else is a submachine name. This is the API spelling of
-  // §9, not the format's grammar -- `$initial` is legal here and never there.
+  // Split on '/', then each segment on one ':'. An all-digit qualifier is an
+  // ordinal, anything else a submachine name; `$initial` is accepted here.
   std::vector<ResolveSeg> segs;
   size_t start{ 0 };
   while (start <= path.size()) {

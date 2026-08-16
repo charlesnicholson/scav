@@ -1,6 +1,5 @@
-// Floors, never times: the job is catching an accidental O(n^2), so the
-// load-bearing assertion is the machine-independent *scaling* one. Inputs are
-// built in RAM, and instrumented builds shrink them and skip the floor.
+// Floors, never times, to catch an accidental O(n^2); the scaling assertion is
+// the machine-independent one. Instrumented builds shrink the input.
 
 #include "core/tests/test_support.h"
 #include "core/tests/test_synth.h"
@@ -40,10 +39,8 @@ uint64_t micros_since(std::chrono::steady_clock::time_point start) {
   return (us == 0) ? 1U : us;  // a zero denominator says nothing useful
 }
 
-// The scaling inputs run in hundreds of microseconds, so one scheduling hiccup in
-// the denominator moves the ratio further than a real regression would. Noise only
-// ever adds time, so the fastest of several runs is the estimate; a quadratic term
-// is still quadratic in every one of them.
+// The scaling inputs run in hundreds of microseconds. Noise only adds time, so
+// the fastest of several runs is the estimate.
 constexpr uint32_t SCALING_RUNS{ 5 };
 
 template <typename Once>
@@ -157,11 +154,8 @@ TEST_CASE("perf: lex and parse a large document in RAM") {
                   "lex " << lex_rate << " MiB/s over " << lexing.tokens << " tokens");
     CHECK_MESSAGE(parse_rate >= PARSE_FLOOR_MB_PER_S, "parse " << parse_rate << " MiB/s");
 
-    // A ratio between two phases on one box, so it survives a slow machine where
-    // an absolute floor set low enough to be safe catches nothing. Normalizing is
-    // validate-and-copy and lexing is strictly more work per byte, so normalize
-    // being the slower of the two means it went back to copying a byte at a time
-    // -- which cost more than the rest of the parse combined when it did.
+    // A ratio between two phases on one box. Lexing is more work per byte, so a
+    // slower normalize means it went back to copying one byte at a time.
     CHECK_MESSAGE(norm_rate >= lex_rate,
                   "normalize " << norm_rate << " MiB/s is slower than lex " << lex_rate);
   }

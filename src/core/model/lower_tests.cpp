@@ -1,6 +1,5 @@
-// Lowering: the corpus charts become entity arrays, placement rules fire on
-// misplaced statements, wildcards synthesize their pseudostates, and every
-// entity walks back to the statement that declared it.
+// Corpus charts become entity arrays, placement rules fire, wildcards
+// synthesize, and every entity walks back to its declaring statement.
 
 #include "core/tests/test_charts.h"
 #include "core/tests/test_support.h"
@@ -69,9 +68,8 @@ TEST_CASE("lower: tcp -- every entity, resolved in-document") {
   REQUIRE(r.parsed);
   CHECK(r.clean);
   CHECK(r.diags.empty());
-  // 11 authored states + 3 `*` sources ($initial each in root, inbound,
-  // outbound). Submachines: the root, inbound, outbound -- Established's block
-  // holds only explicit submachines, so it earns no implicit one.
+  // 11 authored states plus a `$initial` each in root, inbound and outbound.
+  // Established's block holds only explicit submachines, so it gains none.
   CHECK(live_count_states(r.c) == 14);
   CHECK(r.c.submachines.size() == 3);
   CHECK(r.c.transitions.size() == 15);
@@ -126,8 +124,8 @@ TEST_CASE("lower: ota -- aliases, fork/join, a raw label, and a final state") {
 TEST_CASE("lower: vac -- an include lowers to its host; crossing it diagnoses") {
   Lowered r{ lower(VAC, "vac.scav") };
   REQUIRE(r.parsed);
-  // `trans Ready -> dock/On/Seated` descends past the unresolved alias:
-  // P1's honest answer until the loader (P2) attaches dock.scav.
+  // `trans Ready -> dock/On/Seated` descends past an include that lowering
+  // alone leaves unresolved.
   CHECK_FALSE(r.clean);
   REQUIRE(r.diags.size() == 1);
   CHECK(r.diags[0].code == DiagCode::EndpointCrossesInclude);

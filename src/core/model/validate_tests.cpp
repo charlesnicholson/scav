@@ -1,6 +1,5 @@
-// Structural validation: every §10 check fires on a crafted violation and
-// stays silent on a well-built chart. Violations are direct row pokes -- the
-// builder refuses to construct them, which is the point of having both.
+// Every check fires on a crafted violation and stays silent on a well-built
+// chart. Violations are direct row pokes; the builder refuses to make them.
 
 #include "core/tests/test_support.h"
 #include "scav/scav_core.h"
@@ -121,7 +120,7 @@ TEST_CASE("validate: duplicate names within one submachine, aliases included") {
     CHECK(diags[0].subject == ref(dup));
   }
   SUBCASE("an alias host collides like any state") {
-    InstId const inc{ build_include(r.c, r.root, "A") };
+    InstId const inc{ build_include(r.c, r.root, "A", "a.scav") };
     std::vector<Diagnostic> const diags{ run(r.c) };
     REQUIRE(diags.size() == 1);
     CHECK(diags[0].code == DiagCode::DuplicateName);
@@ -223,9 +222,8 @@ TEST_CASE("validate: column counts must match their entity array") {
 
 TEST_CASE("validate: findings arrive in (code, subject kind, ordinal) order") {
   Built r{ built() };
-  // Three violations whose discovery order differs from the artifact order:
-  // a metachar name (late code, low ordinal walks first), a dangling parent
-  // (early code), and a tombstoned target (middle code).
+  // Three violations whose discovery order differs from the sorted order: a
+  // metachar name, a dangling parent, and a tombstoned target.
   r.c.states[r.a.v].parent = SubmachineId{ 50 };  // DanglingRef
   r.c.states[r.b.v].live = 0;                     // t -> TombstonedTarget
   StateId const bad{ build_state(r.c, r.root, "x$y", StateKind::Normal, {}) };
@@ -251,7 +249,7 @@ TEST_CASE("validate: appends to the caller's vector without clearing it") {
 }
 
 TEST_CASE("validate: pre-model diagnostics default to a None subject") {
-  // The NSDMI is what lets every P0 producer stay untouched: a designated
+  // The NSDMI is what lets a producer leave the subject out entirely: a designated
   // initializer that skips .subject gets None + INVALID, not zeroes.
   Diagnostic const d{ .code = DiagCode::ExpectedChart, .doc = { 0 }, .src = {} };
   CHECK(d.subject.kind == ElemKind::None);

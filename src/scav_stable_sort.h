@@ -1,15 +1,8 @@
 #ifndef SCAV_STABLE_SORT_H_INCLUDED
 #define SCAV_STABLE_SORT_H_INCLUDED
 
-// The vendored stable sort for any sort whose result reaches output (PRD 6).
-// With a comparator that is a total order the sorted result is unique, so the
-// point of vendoring is not the result -- it is that "stable" never silently
-// becomes "whatever std::sort does" in a refactor, and that layout's standard-
-// library subset (no <algorithm>) has a sort at all. std::sort is permitted
-// only in tests, where it cross-checks this one.
-//
-// Bottom-up merge, one scratch buffer, no recursion, no allocation fallback.
-// Comparators inline (PRD 4): qsort's shape pays an indirect call per compare.
+// scav's own stable sort, for any sort whose result reaches output. Bottom-up
+// merge over one scratch buffer, templated so the comparator inlines.
 
 #include <cstddef>
 #include <vector>

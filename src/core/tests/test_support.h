@@ -1,9 +1,8 @@
 #ifndef SCAV_CORE_TESTS_TEST_SUPPORT_H_INCLUDED
 #define SCAV_CORE_TESTS_TEST_SUPPORT_H_INCLUDED
 
-// Shared by the core unit tests. Header-only and test-only, so the coverage gate
-// does not count it as production. Charts are inline literals: a parser test that
-// opens a file is testing the filesystem too.
+// Shared by the core unit tests, header-only and test-only. Charts are inline
+// literals, so nothing here reaches a filesystem.
 
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"

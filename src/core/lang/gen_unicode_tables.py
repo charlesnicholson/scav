@@ -11,7 +11,7 @@ or directly, which needs no arguments because every path is script-relative:
     src/core/lang/gen_unicode_tables.py --download
     src/core/lang/gen_unicode_tables.py --ucd-dir /path/to/ucd
 
-Text is normalized at parse, so NFC is a P0 dependency and it needs a
+Text is normalized at parse, so NFC needs a
 table. The output is committed, so an ordinary build needs neither the network
 nor Python -- run this only when the pinned Unicode version moves, and remember
 that the version is a determinism input.
@@ -153,9 +153,8 @@ def build_tables(ccc: dict[int, int],
                  decomp: dict[int, list[int]],
                  qc_not_yes: set[int],
                  excluded: set[int]) -> str:
-    # Quick check: text is already NFC when no codepoint needs reordering
-    # (ccc != 0) and none can compose or decompose (NFC_QC != Yes). Hangul
-    # syllables are NFC_QC=Yes and are left alone, matching the standard.
+    # Already NFC when no codepoint reorders (ccc != 0) and none composes or
+    # decomposes (NFC_QC != Yes). Hangul is NFC_QC=Yes and passes through.
     unsafe = set(qc_not_yes) | set(ccc)
     ranges = to_ranges(unsafe)
 
@@ -169,9 +168,8 @@ def build_tables(ccc: dict[int, int],
         offsets.append((len(flat), len(seq)))
         flat.extend(seq)
 
-    # Primary composites come from the two-codepoint canonical mappings that are
-    # not composition-excluded. Singletons and non-starter-led mappings are
-    # already inside Full_Composition_Exclusion, so no second filter is needed.
+    # Primary composites are the two-codepoint canonical mappings outside
+    # Full_Composition_Exclusion, which already covers the other exclusions.
     pairs: list[tuple[int, int, int]] = []
     for cp in decomp_keys:
         seq = decomp[cp]
@@ -211,18 +209,11 @@ def build_tables(ccc: dict[int, int],
     return "".join(out)
 
 
-# Part 1 is one row per character with a canonical mapping, and it is 85% of the
-# suite. Because the tables are generated from the same UnicodeData.txt, those
-# rows re-derive the table more than they exercise the algorithm, so Part 1 is
-# thinned to a fixed stride plus every Hangul row -- Hangul is algorithmic rather
-# than table-driven, so no table entry backs it and it has to be checked. Its
-# kept rows also carry only the two composing checks. Every other part is kept
-# whole with all five: those are the reordering, exclusion, PRI-29 and
-# chained-composite cases the code gets wrong on its own.
+# Part 1 shares UnicodeData.txt with the tables, so it thins to a fixed stride
+# plus every Hangul row. Other parts stay whole.
 PART1_STRIDE = 6
-# The 11,172 precomposed Hangul syllables are all in Part 1 and are the single
-# biggest block in the suite. They are uniform by construction, so a coprime
-# stride walks every L / V / T position without carrying all of them.
+# The 11,172 precomposed Hangul syllables are uniform by construction, so a
+# coprime stride walks every L / V / T position without carrying all of them.
 PART1_HANGUL_STRIDE = 41
 HANGUL_RANGES = ((0x1100, 0x11FF), (0xA960, 0xA97F), (0xAC00, 0xD7FF))
 

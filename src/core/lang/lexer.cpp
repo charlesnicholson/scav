@@ -19,9 +19,8 @@ constexpr uint32_t BYTES_PER_TOKEN_ESTIMATE{ 6 };
 
 constexpr uint32_t RAW_DELIM_LEN{ 3 };
 
-// One class table instead of chained range compares: the identifier run is the
-// hottest loop in the lexer, and one load-and-mask per byte beats four
-// branches. 256 entries, so a scav_byte indexes it with no range check.
+// One class table rather than chained range compares, so the identifier run
+// costs a load and a mask per byte. 256 entries, indexed by a scav_byte.
 constexpr uint8_t CLS_IDENT_START{ 1U << 0U };
 constexpr uint8_t CLS_IDENT_CONTINUE{ 1U << 1U };
 constexpr uint8_t CLS_DIGIT{ 1U << 2U };
@@ -55,9 +54,8 @@ bool is_raw_delim_at(scav_byte const *bytes, uint32_t len, uint32_t at) {
          (bytes[at + 2] == '"');
 }
 
-// Every operand is uint32_t: a `scav_byte` promotes to int, so mixing in a char
-// literal converts back to unsigned and GCC's -Warith-conversion is right to say
-// so.
+// Every operand is uint32_t, since a `scav_byte` promotes to int and mixing in
+// a char literal converts back.
 constexpr uint32_t DIGIT_ZERO{ '0' };
 constexpr uint32_t DIGIT_NINE{ '9' };
 constexpr uint32_t LOWER_A{ 'a' };
@@ -290,9 +288,17 @@ char const *lex_token_kind_name(TokKind kind) {
 }
 
 bool lex_is_reserved_word(std::string_view text) {
-  return (text == "chart") || (text == "include") || (text == "state") ||
-         (text == "submachine") || (text == "trans") || (text == "external") ||
-         (text == "internal") || (text == "local");
+  // Length first: every identifier in a chart reaches this, and the reserved
+  // words occupy four lengths, so most callers answer without a comparison.
+  switch (text.size()) {
+    case 5:
+      return (text == "chart") || (text == "state") || (text == "trans") ||
+             (text == "local");
+    case 7: return text == "include";
+    case 8: return (text == "external") || (text == "internal");
+    case 10: return text == "submachine";
+    default: return false;
+  }
 }
 
 bool lex_decode_string_literal(scav_byte const *bytes,
@@ -363,9 +369,7 @@ bool lex_source(scav_byte const *bytes,
       continue;
     }
     if (is_space(b)) {
-      // As a run: indentation is a third of a formatted document's bytes, and
-      // one byte per trip through the dispatch chain above priced each space
-      // like a token.
+      // As a run: indentation is a third of a formatted document's bytes.
       do { ++at; } while ((at < len) && is_space(bytes[at]));
       continue;
     }
@@ -388,9 +392,8 @@ bool lex_source(scav_byte const *bytes,
       continue;
     }
 
-    // After the line-comment check, so `//*` is still a line comment. Skipping to
-    // the close means one diagnostic rather than a cascade from lexing the body
-    // as tokens -- recovery only, since `ok` is already false.
+    // After the line-comment check, so `//*` stays one. Skipping to the close
+    // gives one diagnostic rather than a cascade from the body's tokens.
     if ((b == '/') && (at + 1 < len) && (bytes[at + 1] == '*')) {
       diags.push_back({ .code = DiagCode::BlockCommentUnsupported,
                         .doc = doc,

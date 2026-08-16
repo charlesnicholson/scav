@@ -1,5 +1,5 @@
 // The read side of the model: refs, liveness, attr lookup, and addressing.
-// chart_path_of carries the §9 spellings, so most of this file is paths.
+// chart_path_of produces the addressing spellings, so most of this is paths.
 
 #include "core/tests/test_support.h"
 #include "scav/scav_core.h"
