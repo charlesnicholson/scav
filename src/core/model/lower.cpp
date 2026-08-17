@@ -256,7 +256,7 @@ void lower_entities(Lowerer &lo,
         lo.c->includes.push_back(
             { .alias = alias,
               .path = string_pool_add(lo.c->strings, pd_str(lo, inc.path)),
-              .target = { INVALID },  // the session's to fill; see PendingInc
+              .target = { INVALID },  // the loader's to fill; see PendingInc
               .host = host,
               .stmt = global_stmt(lo, row) });
         incs.push_back({ .row = row, .doc = lo.doc, .inst = id });
@@ -422,13 +422,9 @@ bool model_instantiate(Chart &c,
 }
 
 void model_finalize_containment(Chart &c) {
-  // A counting pass, not a sort. Sorting by (parent, child) would be sorting
-  // by parent alone, since the child index already ascends -- so bucketing by
-  // parent lands each container's children in creation order, which is
-  // document order, in one pass and with no comparator.
-  //
-  // `children.len` doubles as the fill cursor: it starts at zero against a
-  // fixed offset and ends at the count.
+  // A counting pass: the child index already ascends, so bucketing by parent
+  // lands each container's children in creation order. `children.len` is the
+  // fill cursor, starting at zero and ending at the count.
   std::vector<uint32_t> start(c.submachines.size() + 1, 0);
   for (State const &s : c.states) {
     // A parentless state reaches here only from a hand-built chart; skipping

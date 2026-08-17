@@ -346,7 +346,7 @@ TEST_CASE(
   std::string const dock{ read_corpus("dock.scav") };
   std::string const led{ read_corpus("led.scav") };
 
-  LoadSession memory;
+  Loader memory;
   REQUIRE(load_add(memory, raw(vac), vac.size(), "buf:///vac.scav"));
 
   for (uint32_t rounds = 0; rounds < 8; ++rounds) {
@@ -373,7 +373,7 @@ TEST_CASE(
   // Transport two: the filesystem battery, `fopen` in the fetch slot, written
   // against the very same primitives.
   std::string const root_path{ std::string{ SCAV_TEST_DATA_DIR } + "/charts/vac.scav" };
-  LoadSession files;
+  Loader files;
   Chart from_files;
   std::vector<Diagnostic> file_diags;
   std::string failed;

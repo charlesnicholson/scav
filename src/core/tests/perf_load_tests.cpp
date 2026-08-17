@@ -1,4 +1,4 @@
-// Load-session floors, never times, over documents generated in RAM. Catches a
+// Load-loader floors, never times, over documents generated in RAM. Catches a
 // per-document scan going quadratic in discovery, resolution or the rebuild.
 
 #include "core/tests/test_support.h"
@@ -116,18 +116,18 @@ struct Outcome {
 };
 
 Outcome run_once(std::vector<Doc> const &corpus) {
-  LoadSession session;
+  Loader loader;
   Chart chart;
   std::vector<Diagnostic> diags;
 
   bool alive{
-    load_add(session, raw(corpus[0].text), corpus[0].text.size(), corpus[0].name)
+    load_add(loader, raw(corpus[0].text), corpus[0].text.size(), corpus[0].name)
   };
   std::vector<std::string> wanted;
   while (alive) {
     wanted.clear();
-    for (Pending const &p : load_pending(session)) {
-      wanted.emplace_back(load_pending_path(session, p));
+    for (Pending const &p : load_pending(loader)) {
+      wanted.emplace_back(load_pending_path(loader, p));
     }
     if (wanted.empty()) { break; }
     for (std::string const &want : wanted) {
@@ -136,12 +136,12 @@ Outcome run_once(std::vector<Doc> const &corpus) {
         if (d.name == want) { body = d.text; }
       }
       REQUIRE_FALSE(body.empty());
-      alive = load_add(session, raw(body), body.size(), want);
+      alive = load_add(loader, raw(body), body.size(), want);
       if (!alive) { break; }
     }
   }
 
-  bool const ok{ load_finish(session, chart, diags) };
+  bool const ok{ load_finish(loader, chart, diags) };
   return { .states = static_cast<uint32_t>(chart.states.size()),
            .documents = static_cast<uint32_t>(chart.documents.size()),
            .includes = static_cast<uint32_t>(chart.includes.size()),
@@ -206,27 +206,27 @@ TEST_CASE("perf: the digest is linear in the model") {
   std::vector<Doc> const large{ chain(200, 20) };
 
   auto const hash_of = [](std::vector<Doc> const &corpus) {
-    LoadSession session;
+    Loader loader;
     Chart chart;
     std::vector<Diagnostic> diags;
     std::ignore =
-        load_add(session, raw(corpus[0].text), corpus[0].text.size(), corpus[0].name);
+        load_add(loader, raw(corpus[0].text), corpus[0].text.size(), corpus[0].name);
     std::vector<std::string> wanted;
     for (;;) {
       wanted.clear();
-      for (Pending const &p : load_pending(session)) {
-        wanted.emplace_back(load_pending_path(session, p));
+      for (Pending const &p : load_pending(loader)) {
+        wanted.emplace_back(load_pending_path(loader, p));
       }
       if (wanted.empty()) { break; }
       for (std::string const &want : wanted) {
         for (Doc const &d : corpus) {
           if (d.name == want) {
-            std::ignore = load_add(session, raw(d.text), d.text.size(), want);
+            std::ignore = load_add(loader, raw(d.text), d.text.size(), want);
           }
         }
       }
     }
-    REQUIRE(load_finish(session, chart, diags));
+    REQUIRE(load_finish(loader, chart, diags));
     return chart;
   };
 

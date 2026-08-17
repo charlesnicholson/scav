@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The load session driven from Python over ctypes, faking a network fetch, and
+"""The loader driven from Python over ctypes, faking a network fetch, and
 compared against the same network loaded by the CLI off disk. Same chart, same
 hash.
 
@@ -86,7 +86,7 @@ def bind(lib: ctypes.CDLL) -> None:
     lib.scav_chart_digest.argtypes = [ctypes.c_void_p, byte_p, u32, p(u32)]
 
 
-class Session:
+class Loader:
     """A thin RAII wrapper, so a failing assertion cannot leak a handle."""
 
     def __init__(self, lib: ctypes.CDLL) -> None:
@@ -106,7 +106,7 @@ class Session:
         out = []
         for i in range(count.value):
             row = rows[i]
-            # A span into the session's own pool; not NUL-terminated, so it is
+            # A span into the loader's own pool; not NUL-terminated, so it is
             # read by offset and length like every other string here.
             span = row.path_off | (row.path_len << 32)
             data = ctypes.POINTER(ctypes.c_ubyte)()
@@ -205,19 +205,19 @@ class TestLoadOverCtypes(unittest.TestCase):
             raise AssertionError(f"nothing serves {url}")
         return self.corpus[name]
 
-    def load_network(self, origin: str, reverse: bool = False) -> Session:
-        session = Session(self.lib)
+    def load_network(self, origin: str, reverse: bool = False) -> Loader:
+        loader = Loader(self.lib)
         root = origin + ROOT
-        self.assertEqual(SCAV_OK, session.add(self.fetch(root), root))
+        self.assertEqual(SCAV_OK, loader.add(self.fetch(root), root))
         for _ in range(32):
-            wanted = [p[0] for p in session.pending()]
+            wanted = [p[0] for p in loader.pending()]
             if not wanted:
                 break
             if reverse:
                 wanted.reverse()
             for url in wanted:
-                self.assertEqual(SCAV_OK, session.add(self.fetch(url), url))
-        return session
+                self.assertEqual(SCAV_OK, loader.add(self.fetch(url), url))
+        return loader
 
     def cli_hash(self, chart: Path) -> str:
         exe = self.cfg.build_dir / "bin" / ("scav.exe" if sys.platform == "win32" else "scav")
@@ -233,31 +233,31 @@ class TestLoadOverCtypes(unittest.TestCase):
         self.assertNotEqual(0, self.lib.scav_abi_version())
 
     def test_a_network_loads_over_a_faked_fetch(self) -> None:
-        session = self.load_network(ORIGIN)
+        loader = self.load_network(ORIGIN)
         try:
-            self.assertEqual(SCAV_OK, session.finish())
-            counts = session.counts()
+            self.assertEqual(SCAV_OK, loader.finish())
+            counts = loader.counts()
             # Three files, parsed once each; four include statements across the
             # network, so four instantiations.
             self.assertEqual(3, counts["documents"])
             self.assertEqual(3, counts["includes"])
             self.assertGreater(counts["states"], 10)
         finally:
-            session.close()
+            loader.close()
 
     def test_pending_reports_resolved_urls_not_authored_text(self) -> None:
-        session = Session(self.lib)
+        loader = Loader(self.lib)
         try:
             root = ORIGIN + ROOT
-            self.assertEqual(SCAV_OK, session.add(self.fetch(root), root))
-            paths = [p[0] for p in session.pending()]
+            self.assertEqual(SCAV_OK, loader.add(self.fetch(root), root))
+            paths = [p[0] for p in loader.pending()]
             # `dock.scav` and `./led.scav` as authored; resolved against the
             # root's origin, and the `./` folded away.
             self.assertIn(ORIGIN + "dock.scav", paths)
             self.assertIn(ORIGIN + "led.scav", paths)
-            self.assertTrue(all(p[1] == 0 for p in session.pending()))
+            self.assertTrue(all(p[1] == 0 for p in loader.pending()))
         finally:
-            session.close()
+            loader.close()
 
     def test_all_three_transports_agree_on_the_hash(self) -> None:
         """The filesystem run went through `fopen` in the CLI; the ctypes run
@@ -265,12 +265,12 @@ class TestLoadOverCtypes(unittest.TestCase):
         with a URL. Same network, same model, same digits."""
         from_files = self.cli_hash(CHART_DIR / ROOT)
 
-        session = self.load_network(ORIGIN)
+        loader = self.load_network(ORIGIN)
         try:
-            self.assertEqual(SCAV_OK, session.finish())
-            from_network = f"{session.structural_hash():08x}"
+            self.assertEqual(SCAV_OK, loader.finish())
+            from_network = f"{loader.structural_hash():08x}"
         finally:
-            session.close()
+            loader.close()
 
         self.assertEqual(from_files, from_network)
 
@@ -302,51 +302,51 @@ class TestLoadOverCtypes(unittest.TestCase):
             second.close()
 
     def test_the_digest_honours_the_out_param_protocol(self) -> None:
-        session = self.load_network(ORIGIN)
+        loader = self.load_network(ORIGIN)
         try:
-            self.assertEqual(SCAV_OK, session.finish())
+            self.assertEqual(SCAV_OK, loader.finish())
             needed = ctypes.c_uint32(0)
             self.assertEqual(SCAV_OK, self.lib.scav_chart_digest(
-                session.chart, None, 0, ctypes.byref(needed)))
+                loader.chart, None, 0, ctypes.byref(needed)))
             self.assertGreater(needed.value, 0)
             # Too small returns the required count and writes nothing.
             small = (ctypes.c_ubyte * 4)()
             got = ctypes.c_uint32(0)
             self.assertEqual(SCAV_E_CAPACITY, self.lib.scav_chart_digest(
-                session.chart,
+                loader.chart,
                 ctypes.cast(small, ctypes.POINTER(ctypes.c_ubyte)),
                 4, ctypes.byref(got)))
             self.assertEqual(needed.value, got.value)
-            self.assertEqual(needed.value, len(session.digest()))
+            self.assertEqual(needed.value, len(loader.digest()))
         finally:
-            session.close()
+            loader.close()
 
     def test_a_cycle_is_reported_rather_than_followed(self) -> None:
-        session = Session(self.lib)
+        loader = Loader(self.lib)
         try:
-            self.assertEqual(SCAV_OK, session.add(
+            self.assertEqual(SCAV_OK, loader.add(
                 b'chart a { include "b.scav" as b, state A, }', "mem:///a.scav"))
-            wanted = [p[0] for p in session.pending()]
+            wanted = [p[0] for p in loader.pending()]
             self.assertEqual(["mem:///b.scav"], wanted)
-            self.assertEqual(SCAV_OK, session.add(
+            self.assertEqual(SCAV_OK, loader.add(
                 b'chart b { state B, include "a.scav" as a, }', "mem:///b.scav"))
-            self.assertEqual(SCAV_E_LOAD, session.finish())
-            self.assertFalse(session.chart)
-            self.assertIn("include cycle", session.diagnostics())
+            self.assertEqual(SCAV_E_LOAD, loader.finish())
+            self.assertFalse(loader.chart)
+            self.assertIn("include cycle", loader.diagnostics())
         finally:
-            session.close()
+            loader.close()
 
     def test_a_document_that_never_arrives_is_reported(self) -> None:
-        session = Session(self.lib)
+        loader = Loader(self.lib)
         try:
-            self.assertEqual(SCAV_OK, session.add(
+            self.assertEqual(SCAV_OK, loader.add(
                 b'chart a { include "gone.scav" as g, state A, }', "mem:///a.scav"))
-            self.assertEqual(SCAV_E_LOAD, session.finish())
-            self.assertFalse(session.chart)
-            self.assertIn("include path was never supplied to the load session",
-                          session.diagnostics())
+            self.assertEqual(SCAV_E_LOAD, loader.finish())
+            self.assertFalse(loader.chart)
+            self.assertIn("include path was never supplied to the loader",
+                          loader.diagnostics())
         finally:
-            session.close()
+            loader.close()
 
 
 if __name__ == "__main__":

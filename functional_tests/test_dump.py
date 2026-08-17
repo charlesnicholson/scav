@@ -3,7 +3,7 @@
 element line carrying the file and line its declaration started on. The output
 is a golden: byte-compared, so it stays deterministic across platforms.
 
-This is the load session over a real filesystem -- real paths in diagnostics,
+This is the loader over a real filesystem -- real paths in diagnostics,
 and a cycle reported against files rather than buffers."""
 
 import os
@@ -200,7 +200,7 @@ class TestDump(unittest.TestCase):
         self.assertEqual(2, result.returncode)
         self.assertEqual("", result.stdout)
         # The included file, not the root: parse_document does not know which
-        # document it holds, so the session stamps the DocId.
+        # document it holds, so the loader stamps the DocId.
         self.assertIn("broken_leaf.scav:1:", result.stderr.replace("\\", "/"))
 
     def test_a_parse_error_prints_no_model(self) -> None:

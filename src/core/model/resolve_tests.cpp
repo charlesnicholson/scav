@@ -108,7 +108,7 @@ TEST_CASE("resolve: descending into an unresolved include crosses it") {
 
 TEST_CASE("resolve: an attached include is an ordinary descent") {
   Rig r{ rig() };
-  // What a load session does: fill target and give the host the included root.
+  // What a loader does: fill target and give the host the included root.
   r.c.includes[0].target = DocId{ 0 };
   SubmachineId const dock_root{ build_submachine(r.c, r.dock, {}, {}) };
   StateId const up{ build_state(r.c, dock_root, "Up", StateKind::Normal, {}) };

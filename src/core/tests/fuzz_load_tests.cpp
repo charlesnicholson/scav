@@ -1,4 +1,4 @@
-// A deterministic sweep over malformed networks. The session terminates, every
+// A deterministic sweep over malformed networks. The loader terminates, every
 // diagnostic lands inside its document, and any chart returned is resolved.
 
 #include "core/tests/test_support.h"
@@ -32,9 +32,9 @@ struct Doc {
   std::string text;
 };
 
-// Every session diagnostic is document-local: it names a document the session
+// Every loader diagnostic is document-local: it names a document the loader
 // holds, and its span lands inside that document's bytes.
-void check_session_diags(LoadSession const &s, std::vector<Diagnostic> const &diags) {
+void check_loader_diags(Loader const &s, std::vector<Diagnostic> const &diags) {
   for (Diagnostic const &d : diags) {
     CHECK(d.code != DiagCode::Ok);
     if (d.src.len == 0) { continue; }  // a finding with no statement to point at
@@ -58,7 +58,7 @@ void check_chart_diags(Chart const &c, std::vector<Diagnostic> const &diags) {
 // Drives one network to completion. `order` permutes each pending batch, so a
 // run covers arrival orders the application is entitled to produce.
 struct Run {
-  LoadSession session;
+  Loader loader;
   Chart chart;
   std::vector<Diagnostic> diags;
   bool ok;
@@ -67,22 +67,22 @@ struct Run {
 Run drive(std::vector<Doc> const &corpus, uint64_t order) {
   Run run;
   if (corpus.empty()) {
-    run.ok = load_finish(run.session, run.chart, run.diags);
+    run.ok = load_finish(run.loader, run.chart, run.diags);
     return run;
   }
-  if (!load_add(run.session, raw(corpus[0].text), corpus[0].text.size(), corpus[0].name)) {
-    run.ok = load_finish(run.session, run.chart, run.diags);
+  if (!load_add(run.loader, raw(corpus[0].text), corpus[0].text.size(), corpus[0].name)) {
+    run.ok = load_finish(run.loader, run.chart, run.diags);
     return run;
   }
 
   std::vector<std::string> wanted;
-  // A cap rather than a while(true), so a session that never drains pending
+  // A cap rather than a while(true), so a loader that never drains pending
   // fails. One round per level, clearing the deepest chain built below.
   constexpr uint32_t MAX_ROUNDS{ 1024 };
   for (uint32_t round = 0; round < MAX_ROUNDS; ++round) {
     wanted.clear();
-    for (Pending const &p : load_pending(run.session)) {
-      wanted.emplace_back(load_pending_path(run.session, p));
+    for (Pending const &p : load_pending(run.loader)) {
+      wanted.emplace_back(load_pending_path(run.loader, p));
     }
     if (wanted.empty()) { break; }
 
@@ -105,14 +105,14 @@ Run drive(std::vector<Doc> const &corpus, uint64_t order) {
       }
       if (body.empty()) { continue; }
       advanced = true;
-      if (!load_add(run.session, raw(body), body.size(), want)) {
-        run.ok = load_finish(run.session, run.chart, run.diags);
+      if (!load_add(run.loader, raw(body), body.size(), want)) {
+        run.ok = load_finish(run.loader, run.chart, run.diags);
         return run;
       }
     }
     if (!advanced) { break; }
   }
-  run.ok = load_finish(run.session, run.chart, run.diags);
+  run.ok = load_finish(run.loader, run.chart, run.diags);
   return run;
 }
 
@@ -153,7 +153,7 @@ std::string synth_doc(std::string_view chart_name, uint64_t key) {
 
 }  // namespace
 
-TEST_CASE("fuzz: any network the session accepts is complete, or it built nothing") {
+TEST_CASE("fuzz: any network the loader accepts is complete, or it built nothing") {
   constexpr uint64_t SEED{ 0x5CA1'AB1E'0000'0202ULL };
   for (uint32_t i = 0; i < 600; ++i) {
     uint64_t const key{ SEED + i };
@@ -180,7 +180,7 @@ TEST_CASE("fuzz: any network the session accepts is complete, or it built nothin
       CHECK_FALSE(run.diags.empty());
       CHECK(run.chart.states.empty());
       CHECK(run.chart.includes.empty());
-      check_session_diags(run.session, run.diags);
+      check_loader_diags(run.loader, run.diags);
       continue;
     }
 

@@ -167,7 +167,7 @@ enum class DiagCode : uint32_t {
   TrailingContent,
   DepthLimitExceeded,
 
-  // Loading. The span indexes the bytes handed to load_add, and a session
+  // Loading. The span indexes the bytes handed to load_add, and a loader
   // reporting one of these produces no chart.
   IncludePathInvalid,
   IncludePathUnresolved,
@@ -175,7 +175,7 @@ enum class DiagCode : uint32_t {
   IncludeExpansionTooLarge,
   DocumentNotRequested,
   DocumentAlreadyLoaded,
-  LoadSessionEmpty,
+  LoaderEmpty,
 
   // Lowering. These carry the offending statement's span; the entity they
   // would have named was never created.
@@ -449,7 +449,7 @@ struct ParsedDocument {
   std::vector<scav_byte> src_bytes;  // normalized; never canonicalized
 
   std::vector<Statement> stmts;
-  std::vector<uint32_t> stmt_payload;  // parallel to stmts; row in the kind's array
+  std::vector<uint32_t> stmt_payload;  // parallel to stmts; row in the kind'loader array
   std::vector<Span> stmt_children;     // parallel to stmts; -> stmt_ids
   std::vector<StmtId> stmt_ids;
   std::vector<Trivia> comments;
@@ -534,7 +534,7 @@ struct State {
 
 struct Submachine {
   StateId owner;     // INVALID for a document root
-  uint32_t ordinal;  // position among the owner's submachines, fixed at build
+  uint32_t ordinal;  // position among the owner'loader submachines, fixed at build
   StrRef name;
   StrRef label;
   Span children;  // -> state_ids, document order
@@ -555,7 +555,7 @@ struct Transition {
 };
 
 // One row per instantiation, its ordinal the InstId. `path` is the authored
-// string verbatim; a load session fills `target`.
+// string verbatim; a loader fills `target`.
 struct Include {
   StrRef alias;
   StrRef path;
@@ -565,8 +565,7 @@ struct Include {
 };
 
 // `stmt` is the attr's own statement, not its subject's: `state On { @doc }` is
-// two authored statements, and a reader pointed at the state cannot find the
-// attribute.
+// two authored statements.
 struct Attr {
   AttrKeyId key;
   StrRef value;
@@ -697,15 +696,14 @@ TransId build_trans(Chart &c,
                     std::string_view label);
 
 // Appends one Attr row and returns its index, interning `key`; a repeated key
-// appends another row. A later build_attr elsewhere shifts that index, so a
-// caller stamping `stmt` does it before the next call.
+// appends another. A later build_attr elsewhere shifts that index.
 uint32_t build_attr(Chart &c,
                     ElemRef subject,
                     std::string_view key,
                     std::string_view value);
 
 // Synthesizes the alias host state in `parent` and appends the Include row
-// naming it. `path` is stored verbatim; a load session fills `target`.
+// naming it. `path` is stored verbatim; a loader fills `target`.
 InstId build_include(Chart &c,
                      SubmachineId parent,
                      std::string_view alias,
@@ -763,38 +761,38 @@ bool lower_document(Chart &c, ParsedDocument const &pd, std::vector<Diagnostic> 
 // directory and folds `.` and `..`; an absolute or scheme-carrying one does not.
 bool path_resolve(std::string_view base, std::string_view ref, std::string &out);
 
-// Load session ==============================================================
+// Loader ==============================================================
 
 // Add the root, read `pending`, resolve and add each, repeat until empty,
 // finish. Parsed once per distinct name, instantiated once per include.
 
 struct Pending {
-  Span path;          // -> the session's path pool; read with load_pending_path
+  Span path;          // -> the loader'loader path pool; read with load_pending_path
   DocId from;         // the document whose include statement claimed this one
-  uint32_t stmt_row;  // that statement's row in `from`'s parsed document
+  uint32_t stmt_row;  // that statement'loader row in `from`'loader parsed document
 };
 
 // A DocId is fixed by the first include statement naming that path, ordered by
 // (requesting DocId, statement ordinal). Arrival order does not enter into it.
 struct LoadDoc {
-  StrRef name;        // the resolved key, into LoadSession::paths
+  StrRef name;        // the resolved key, into Loader::paths
   uint32_t arrived;   // 0 until load_add supplied its bytes
-  Span edges;         // -> LoadSession::edges, this document's includes
+  Span edges;         // -> Loader::edges, this document'loader includes
   DocId from;         // who claimed it; INVALID for the root
-  uint32_t stmt_row;  // the claiming include statement's row in `from`
+  uint32_t stmt_row;  // the claiming include statement'loader row in `from`
 };
 
 // One include statement, discovered. The junction between the document graph
-// the session walks and the instantiation tree finish builds.
+// the loader walks and the instantiation tree finish builds.
 struct IncludeEdge {
   DocId from;
   DocId to;
-  uint32_t stmt_row;  // the include statement's row in `from`'s document
+  uint32_t stmt_row;  // the include statement'loader row in `from`'loader document
 };
 
 // Parsed documents are held until finish, which instantiates from their
 // statement payloads.
-struct LoadSession {
+struct Loader {
   StringPool paths;                    // resolved keys, and Pending spans into it
   std::vector<LoadDoc> docs;           // indexed by DocId, claim order
   std::vector<ParsedDocument> parsed;  // parallel to docs; empty until arrived
@@ -806,39 +804,39 @@ struct LoadSession {
 
 // Normalizes, lexes and parses `bytes`, claiming a DocId per path its includes
 // name. The first call is the root; a later one must name a pending path.
-bool load_add(LoadSession &s, scav_byte const *bytes, size_t len, std::string_view name);
+bool load_add(Loader &loader, scav_byte const *bytes, size_t len, std::string_view name);
 
-// What the session still needs, in DocId order. The returned view is
+// What the loader still needs, in DocId order. The returned view is
 // invalidated by the next load_add. Empty means finish.
-std::vector<Pending> const &load_pending(LoadSession &s);
+std::vector<Pending> const &load_pending(Loader &loader);
 
-inline std::string_view load_pending_path(LoadSession const &s, Pending const &p) {
-  return string_pool_view(s.paths, str_ref(p.path.off, p.path.len));
+inline std::string_view load_pending_path(Loader const &loader, Pending const &p) {
+  return string_pool_view(loader.paths, str_ref(p.path.off, p.path.len));
 }
 
 // The resolved key `doc` was claimed under. Empty for an unknown DocId.
-std::string_view load_document_name(LoadSession const &s, DocId doc);
+std::string_view load_document_name(Loader const &loader, DocId doc);
 
 // The normalized bytes parsed for `doc`, which a document-local diagnostic's
 // span indexes. False for a document still pending.
-bool load_document_bytes(LoadSession const &s,
+bool load_document_bytes(Loader const &loader,
                          DocId doc,
                          scav_byte const **out,
                          uint32_t *len);
 
-// Builds a complete network into an empty `out`, spending the session. Whether
+// Builds a complete network into an empty `out`, spending the loader. Whether
 // `out` gained documents says which pool the diagnostics index.
-bool load_finish(LoadSession &s, Chart &out, std::vector<Diagnostic> &diags);
+bool load_finish(Loader &loader, Chart &out, std::vector<Diagnostic> &diags);
 
 // The filesystem transport, composed from the calls above.
 
 // Reads `path` whole. Returns false when it cannot be opened or read.
 bool read_file(char const *path, std::vector<scav_byte> &out);
 
-// The load loop with `read_file` in the fetch slot. `session` outlives the call
+// The load loop with `read_file` in the fetch slot. `loader` outlives the call
 // for load_document_bytes; `failed_path` names a document it could not read.
 bool load_file(char const *path,
-               LoadSession &session,
+               Loader &loader,
                Chart &out,
                std::vector<Diagnostic> &diags,
                std::string &failed_path);

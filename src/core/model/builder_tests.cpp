@@ -257,7 +257,7 @@ TEST_CASE("build: an include synthesizes its alias host state") {
   Include const &row{ c.includes[inc.v] };
   CHECK(chart_string(c, row.alias) == "wifi");
   CHECK(chart_string(c, row.path) == "net/wifi.scav");
-  CHECK(row.target.v == INVALID);  // the load session's to fill
+  CHECK(row.target.v == INVALID);  // the loader's to fill
   CHECK(row.stmt.v == INVALID);
   REQUIRE(row.host.v < c.states.size());
   State const &host{ c.states[row.host.v] };

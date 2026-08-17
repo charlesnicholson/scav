@@ -25,14 +25,14 @@ int check_abi() {
   };
   std::string_view const leaf{ R"(chart leaf { state L, })" };
 
-  scav_load *session{ nullptr };
-  if (scav_load_begin(&session) != SCAV_OK) {
+  scav_load *loader{ nullptr };
+  if (scav_load_begin(&loader) != SCAV_OK) {
     std::fprintf(stderr, "scav_load_begin failed\n");
     return 1;
   }
 
   auto const add = [&](std::string_view text, char const *name) {
-    return scav_load_add(session,
+    return scav_load_add(loader,
                          reinterpret_cast<scav_byte const *>(text.data()),
                          static_cast<uint32_t>(text.size()),
                          name);
@@ -46,7 +46,7 @@ int check_abi() {
 
   scav_pending const *pending{ nullptr };
   uint32_t count{ 0 };
-  if ((rc == 0) && (scav_load_pending(session, &pending, &count) != SCAV_OK)) {
+  if ((rc == 0) && (scav_load_pending(loader, &pending, &count) != SCAV_OK)) {
     std::fprintf(stderr, "scav_load_pending failed\n");
     rc = 1;
   }
@@ -60,7 +60,7 @@ int check_abi() {
   }
 
   scav_chart *chart{ nullptr };
-  if ((rc == 0) && (scav_load_finish(session, &chart) != SCAV_OK)) {
+  if ((rc == 0) && (scav_load_finish(loader, &chart) != SCAV_OK)) {
     std::fprintf(stderr, "scav_load_finish failed\n");
     rc = 1;
   }
@@ -87,7 +87,7 @@ int check_abi() {
   }
 
   scav_chart_destroy(chart);
-  scav_load_destroy(session);
+  scav_load_destroy(loader);
   return rc;
 }
 

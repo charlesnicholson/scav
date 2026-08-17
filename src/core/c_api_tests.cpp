@@ -17,8 +17,8 @@ std::string_view span_text(scav_byte const *bytes, uint32_t len) {
   return { reinterpret_cast<char const *>(bytes), len };
 }
 
-scav_result add(scav_load *session, std::string_view text, char const *name) {
-  return scav_load_add(session,
+scav_result add(scav_load *loader, std::string_view text, char const *name) {
+  return scav_load_add(loader,
                        reinterpret_cast<scav_byte const *>(text.data()),
                        static_cast<uint32_t>(text.size()),
                        name);
@@ -30,7 +30,7 @@ struct Doc {
 };
 
 // The corpus the ABI tests share: a diamond with a repeat, the same shape the
-// C++ session tests use.
+// C++ loader tests use.
 std::vector<Doc> diamond() {
   return {
     { "root.scav",
@@ -54,15 +54,15 @@ std::vector<Doc> diamond() {
 // Drives one network to completion through the ABI alone. Returns the chart or
 // null, exactly as a binding would see it.
 scav_chart *drive(std::vector<Doc> const &corpus, scav_load **keep) {
-  scav_load *session{ nullptr };
-  REQUIRE(scav_load_begin(&session) == SCAV_OK);
-  *keep = session;
-  if (add(session, corpus[0].text, corpus[0].name) != SCAV_OK) { return nullptr; }
+  scav_load *loader{ nullptr };
+  REQUIRE(scav_load_begin(&loader) == SCAV_OK);
+  *keep = loader;
+  if (add(loader, corpus[0].text, corpus[0].name) != SCAV_OK) { return nullptr; }
 
   for (uint32_t round = 0; round < 64; ++round) {
     scav_pending const *pending{ nullptr };
     uint32_t count{ 0 };
-    REQUIRE(scav_load_pending(session, &pending, &count) == SCAV_OK);
+    REQUIRE(scav_load_pending(loader, &pending, &count) == SCAV_OK);
     if (count == 0) { break; }
 
     // Copied out before the first add, which invalidates the view.
@@ -70,18 +70,18 @@ scav_chart *drive(std::vector<Doc> const &corpus, scav_load **keep) {
     for (uint32_t i = 0; i < count; ++i) {
       scav_byte const *bytes{ nullptr };
       uint32_t len{ 0 };
-      REQUIRE(scav_load_path(session, pending[i].path, &bytes, &len) == SCAV_OK);
+      REQUIRE(scav_load_path(loader, pending[i].path, &bytes, &len) == SCAV_OK);
       wanted.emplace_back(span_text(bytes, len));
     }
     for (std::string const &want : wanted) {
       for (Doc const &d : corpus) {
-        if (want == d.name) { std::ignore = add(session, d.text, d.name); }
+        if (want == d.name) { std::ignore = add(loader, d.text, d.name); }
       }
     }
   }
 
   scav_chart *chart{ nullptr };
-  std::ignore = scav_load_finish(session, &chart);
+  std::ignore = scav_load_finish(loader, &chart);
   return chart;
 }
 
@@ -109,25 +109,24 @@ TEST_CASE("abi: destroy is idempotent on null") {
 }
 
 TEST_CASE("abi: a null pointer with a non-zero length is refused") {
-  scav_load *session{ nullptr };
-  REQUIRE(scav_load_begin(&session) == SCAV_OK);
-  CHECK(scav_load_add(session, nullptr, 7, "x.scav") == SCAV_E_INVALID_ARG);
-  scav_load_destroy(session);
+  scav_load *loader{ nullptr };
+  REQUIRE(scav_load_begin(&loader) == SCAV_OK);
+  CHECK(scav_load_add(loader, nullptr, 7, "x.scav") == SCAV_E_INVALID_ARG);
+  scav_load_destroy(loader);
 }
 
 TEST_CASE("abi: a single-document load produces a chart with counts and a hash") {
-  scav_load *session{ nullptr };
-  REQUIRE(scav_load_begin(&session) == SCAV_OK);
-  REQUIRE(add(session, "chart c { state A, state B, trans A -> B, }", "c.scav") ==
-          SCAV_OK);
+  scav_load *loader{ nullptr };
+  REQUIRE(scav_load_begin(&loader) == SCAV_OK);
+  REQUIRE(add(loader, "chart c { state A, state B, trans A -> B, }", "c.scav") == SCAV_OK);
 
   scav_pending const *pending{ nullptr };
   uint32_t count{ 1 };
-  REQUIRE(scav_load_pending(session, &pending, &count) == SCAV_OK);
+  REQUIRE(scav_load_pending(loader, &pending, &count) == SCAV_OK);
   CHECK(count == 0);
 
   scav_chart *chart{ nullptr };
-  REQUIRE(scav_load_finish(session, &chart) == SCAV_OK);
+  REQUIRE(scav_load_finish(loader, &chart) == SCAV_OK);
   REQUIRE(chart != nullptr);
 
   uint32_t docs{ 0 };
@@ -146,12 +145,12 @@ TEST_CASE("abi: a single-document load produces a chart with counts and a hash")
   CHECK(hash != 0);
 
   scav_chart_destroy(chart);
-  scav_load_destroy(session);
+  scav_load_destroy(loader);
 }
 
 TEST_CASE("abi: a three-document network resolves through the C surface alone") {
-  scav_load *session{ nullptr };
-  scav_chart *chart{ drive(diamond(), &session) };
+  scav_load *loader{ nullptr };
+  scav_chart *chart{ drive(diamond(), &loader) };
   REQUIRE(chart != nullptr);
 
   uint32_t docs{ 0 };
@@ -165,33 +164,33 @@ TEST_CASE("abi: a three-document network resolves through the C surface alone") 
   CHECK(states > 5);
 
   scav_chart_destroy(chart);
-  scav_load_destroy(session);
+  scav_load_destroy(loader);
 }
 
-TEST_CASE("abi: pending names what the session still needs, resolved") {
-  scav_load *session{ nullptr };
-  REQUIRE(scav_load_begin(&session) == SCAV_OK);
-  REQUIRE(add(session,
+TEST_CASE("abi: pending names what the loader still needs, resolved") {
+  scav_load *loader{ nullptr };
+  REQUIRE(scav_load_begin(&loader) == SCAV_OK);
+  REQUIRE(add(loader,
               R"(chart a { include "sub/b.scav" as b, state A, })",
               "top/a.scav") == SCAV_OK);
 
   scav_pending const *pending{ nullptr };
   uint32_t count{ 0 };
-  REQUIRE(scav_load_pending(session, &pending, &count) == SCAV_OK);
+  REQUIRE(scav_load_pending(loader, &pending, &count) == SCAV_OK);
   REQUIRE(count == 1);
   CHECK(pending[0].from == 0);
 
   scav_byte const *bytes{ nullptr };
   uint32_t len{ 0 };
-  REQUIRE(scav_load_path(session, pending[0].path, &bytes, &len) == SCAV_OK);
+  REQUIRE(scav_load_path(loader, pending[0].path, &bytes, &len) == SCAV_OK);
   CHECK(span_text(bytes, len) == "top/sub/b.scav");
 
-  scav_load_destroy(session);
+  scav_load_destroy(loader);
 }
 
 TEST_CASE("abi: the digest honours the query-then-fill out-param protocol") {
-  scav_load *session{ nullptr };
-  scav_chart *chart{ drive(diamond(), &session) };
+  scav_load *loader{ nullptr };
+  scav_chart *chart{ drive(diamond(), &loader) };
   REQUIRE(chart != nullptr);
 
   uint32_t needed{ 0 };
@@ -215,7 +214,7 @@ TEST_CASE("abi: the digest honours the query-then-fill out-param protocol") {
   CHECK(std::memcmp(exact.data(), roomy.data(), needed) == 0);
 
   scav_chart_destroy(chart);
-  scav_load_destroy(session);
+  scav_load_destroy(loader);
 }
 
 TEST_CASE("abi: a cycle is refused with no chart and a legible diagnostic") {
@@ -223,12 +222,12 @@ TEST_CASE("abi: a cycle is refused with no chart and a legible diagnostic") {
     { "a.scav", R"(chart a { include "b.scav" as b, state A, })" },
     { "b.scav", R"(chart b { state B, include "a.scav" as a, })" },
   };
-  scav_load *session{ nullptr };
-  scav_chart *chart{ drive(cyclic, &session) };
+  scav_load *loader{ nullptr };
+  scav_chart *chart{ drive(cyclic, &loader) };
   CHECK(chart == nullptr);
 
   uint32_t count{ 0 };
-  REQUIRE(scav_load_diag_count(session, &count) == SCAV_OK);
+  REQUIRE(scav_load_diag_count(loader, &count) == SCAV_OK);
   REQUIRE(count != 0);
 
   bool saw_cycle{ false };
@@ -237,45 +236,45 @@ TEST_CASE("abi: a cycle is refused with no chart and a legible diagnostic") {
     uint32_t doc{ 0 };
     uint32_t off{ 0 };
     uint32_t len{ 0 };
-    REQUIRE(scav_load_diag(session, i, &code, &doc, &off, &len) == SCAV_OK);
+    REQUIRE(scav_load_diag(loader, i, &code, &doc, &off, &len) == SCAV_OK);
     std::string_view const message{ scav_diag_message(code) };
     CHECK_FALSE(message.empty());
     if (message == "include cycle") {
       saw_cycle = true;
       scav_byte const *name{ nullptr };
       uint32_t name_len{ 0 };
-      REQUIRE(scav_load_document_name(session, doc, &name, &name_len) == SCAV_OK);
+      REQUIRE(scav_load_document_name(loader, doc, &name, &name_len) == SCAV_OK);
       CHECK(span_text(name, name_len) == "b.scav");
     }
   }
   CHECK(saw_cycle);
-  scav_load_destroy(session);
+  scav_load_destroy(loader);
 }
 
 TEST_CASE("abi: finishing twice is a state error, not a second chart") {
-  scav_load *session{ nullptr };
-  REQUIRE(scav_load_begin(&session) == SCAV_OK);
-  REQUIRE(add(session, "chart c { state A, }", "c.scav") == SCAV_OK);
+  scav_load *loader{ nullptr };
+  REQUIRE(scav_load_begin(&loader) == SCAV_OK);
+  REQUIRE(add(loader, "chart c { state A, }", "c.scav") == SCAV_OK);
 
   scav_chart *first{ nullptr };
-  REQUIRE(scav_load_finish(session, &first) == SCAV_OK);
+  REQUIRE(scav_load_finish(loader, &first) == SCAV_OK);
   REQUIRE(first != nullptr);
 
   scav_chart *second{ nullptr };
-  CHECK(scav_load_finish(session, &second) == SCAV_E_STATE);
+  CHECK(scav_load_finish(loader, &second) == SCAV_E_STATE);
   CHECK(second == nullptr);
-  CHECK(add(session, "chart d { state A, }", "d.scav") == SCAV_E_STATE);
+  CHECK(add(loader, "chart d { state A, }", "d.scav") == SCAV_E_STATE);
 
   scav_chart_destroy(first);
-  scav_load_destroy(session);
+  scav_load_destroy(loader);
 }
 
-TEST_CASE("abi: two sessions in one process do not share state") {
+TEST_CASE("abi: two loaders in one process do not share state") {
   // No library-global state and no init call, asserted rather than assumed.
-  scav_load *first_session{ nullptr };
-  scav_load *second_session{ nullptr };
-  scav_chart *a{ drive(diamond(), &first_session) };
-  scav_chart *b{ drive(diamond(), &second_session) };
+  scav_load *first_loader{ nullptr };
+  scav_load *second_loader{ nullptr };
+  scav_chart *a{ drive(diamond(), &first_loader) };
+  scav_chart *b{ drive(diamond(), &second_loader) };
   REQUIRE(a != nullptr);
   REQUIRE(b != nullptr);
 
@@ -285,13 +284,13 @@ TEST_CASE("abi: two sessions in one process do not share state") {
   REQUIRE(scav_chart_structural_hash(b, &hb) == SCAV_OK);
   CHECK(ha == hb);
 
-  // And a chart outlives the session that produced it.
-  scav_load_destroy(first_session);
+  // And a chart outlives the loader that produced it.
+  scav_load_destroy(first_loader);
   uint32_t after{ 0 };
   REQUIRE(scav_chart_structural_hash(a, &after) == SCAV_OK);
   CHECK(after == ha);
 
   scav_chart_destroy(a);
   scav_chart_destroy(b);
-  scav_load_destroy(second_session);
+  scav_load_destroy(second_loader);
 }

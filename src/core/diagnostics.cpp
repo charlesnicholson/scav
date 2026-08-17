@@ -74,15 +74,15 @@ char const *diag_message(DiagCode code) {
 
     case DiagCode::IncludePathInvalid: return "path names no document";
     case DiagCode::IncludePathUnresolved:
-      return "include path was never supplied to the load session";
+      return "include path was never supplied to the loader";
     case DiagCode::IncludeCycle: return "include cycle";
     case DiagCode::IncludeExpansionTooLarge:
       return "the include graph expands to more instantiations than the limit";
     case DiagCode::DocumentNotRequested:
-      return "document was not on the load session's pending list";
+      return "document was not on the loader's pending list";
     case DiagCode::DocumentAlreadyLoaded: return "document was already added";
-    case DiagCode::LoadSessionEmpty:
-      return "load session has no root document, or the chart is not empty";
+    case DiagCode::LoaderEmpty:
+      return "loader has no root document, or the chart is not empty";
 
     case DiagCode::MisplacedStatement: return "statement is not permitted in this block";
     case DiagCode::WildcardBothEndpoints: return "a transition cannot run from '*' to '*'";

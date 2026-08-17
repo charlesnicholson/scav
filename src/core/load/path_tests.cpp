@@ -135,7 +135,7 @@ TEST_CASE("path: a rejected ref clears out rather than leaving it stale") {
 }
 
 TEST_CASE("path: resolving a resolved key against itself is a fixed point") {
-  // What the session relies on when a document's own includes resolve against
+  // What the loader relies on when a document's own includes resolve against
   // the key it was claimed under.
   std::string const key{ resolved("a/b/vac.scav", "../c/dock.scav") };
   CHECK(key == "a/c/dock.scav");

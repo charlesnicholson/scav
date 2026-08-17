@@ -39,7 +39,7 @@ ResolveStatus model_resolve_segments(Chart const &c,
                                      uint32_t count,
                                      StateId &out);
 
-// Lowering's four steps. lower_document runs them once each; a load session
+// Lowering's four steps. lower_document runs them once each; a loader
 // runs 1 per file, 2 per instantiation, and 3 and 4 once per network.
 
 // 1. The front-end slice of `pd`, rebased into the chart's shared pools.

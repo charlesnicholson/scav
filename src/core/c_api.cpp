@@ -25,8 +25,8 @@ scav_pending to_abi(scav::Pending const &p) {
 // Complete here and opaque everywhere else, so no C++ member can reach a
 // caller's translation unit.
 struct scav_load {
-  scav::LoadSession session;
-  std::vector<scav::Diagnostic> diags;  // the session's, plus finish's
+  scav::Loader loader;
+  std::vector<scav::Diagnostic> diags;  // the loader's, plus finish's
   std::vector<scav_pending> pending;
   uint32_t finished;
 };
@@ -39,10 +39,10 @@ struct scav_chart {
 
 namespace {
 
-// Whichever diagnostic vector is current: the session's before finish, the
+// Whichever diagnostic vector is current: the loader's before finish, the
 // handle's after. Outside extern "C", which forbids returning a std:: type.
-std::vector<scav::Diagnostic> const &diags_of(scav_load const *session) {
-  return (session->finished != 0) ? session->diags : session->session.diags;
+std::vector<scav::Diagnostic> const &diags_of(scav_load const *loader) {
+  return (loader->finished != 0) ? loader->diags : loader->loader.diags;
 }
 
 }  // namespace
@@ -53,44 +53,44 @@ uint32_t scav_abi_version(void) { return 2; }
 
 scav_result scav_load_begin(scav_load **out) {
   if (out == nullptr) { return SCAV_E_INVALID_ARG; }
-  *out = new scav_load{ .session = {}, .diags = {}, .pending = {}, .finished = 0 };
+  *out = new scav_load{ .loader = {}, .diags = {}, .pending = {}, .finished = 0 };
   return SCAV_OK;
 }
 
-scav_result scav_load_add(scav_load *session,
+scav_result scav_load_add(scav_load *loader,
                           scav_byte const *bytes,
                           uint32_t len,
                           char const *name) {
-  if ((session == nullptr) || (name == nullptr)) { return SCAV_E_INVALID_ARG; }
+  if ((loader == nullptr) || (name == nullptr)) { return SCAV_E_INVALID_ARG; }
   if ((bytes == nullptr) && (len != 0)) { return SCAV_E_INVALID_ARG; }
-  if (session->finished != 0) { return SCAV_E_STATE; }
-  return scav::load_add(session->session, bytes, len, name) ? SCAV_OK : SCAV_E_LOAD;
+  if (loader->finished != 0) { return SCAV_E_STATE; }
+  return scav::load_add(loader->loader, bytes, len, name) ? SCAV_OK : SCAV_E_LOAD;
 }
 
-scav_result scav_load_pending(scav_load *session,
+scav_result scav_load_pending(scav_load *loader,
                               scav_pending const **out,
                               uint32_t *out_count) {
-  if ((session == nullptr) || (out == nullptr) || (out_count == nullptr)) {
+  if ((loader == nullptr) || (out == nullptr) || (out_count == nullptr)) {
     return SCAV_E_INVALID_ARG;
   }
-  if (session->finished != 0) { return SCAV_E_STATE; }
-  session->pending.clear();
-  for (scav::Pending const &p : scav::load_pending(session->session)) {
-    session->pending.push_back(to_abi(p));
+  if (loader->finished != 0) { return SCAV_E_STATE; }
+  loader->pending.clear();
+  for (scav::Pending const &p : scav::load_pending(loader->loader)) {
+    loader->pending.push_back(to_abi(p));
   }
-  *out = session->pending.data();
-  *out_count = static_cast<uint32_t>(session->pending.size());
+  *out = loader->pending.data();
+  *out_count = static_cast<uint32_t>(loader->pending.size());
   return SCAV_OK;
 }
 
-scav_result scav_load_path(scav_load const *session,
+scav_result scav_load_path(scav_load const *loader,
                            scav_span path,
                            scav_byte const **out,
                            uint32_t *out_len) {
-  if ((session == nullptr) || (out == nullptr) || (out_len == nullptr)) {
+  if ((loader == nullptr) || (out == nullptr) || (out_len == nullptr)) {
     return SCAV_E_INVALID_ARG;
   }
-  std::vector<scav_byte> const &pool{ session->session.paths.bytes };
+  std::vector<scav_byte> const &pool{ loader->loader.paths.bytes };
   if ((static_cast<uint64_t>(path.off) + path.len) > pool.size()) {
     return SCAV_E_INVALID_ARG;
   }
@@ -99,14 +99,14 @@ scav_result scav_load_path(scav_load const *session,
   return SCAV_OK;
 }
 
-scav_result scav_load_finish(scav_load *session, scav_chart **out) {
-  if ((session == nullptr) || (out == nullptr)) { return SCAV_E_INVALID_ARG; }
-  if (session->finished != 0) { return SCAV_E_STATE; }
-  session->finished = 1;
+scav_result scav_load_finish(scav_load *loader, scav_chart **out) {
+  if ((loader == nullptr) || (out == nullptr)) { return SCAV_E_INVALID_ARG; }
+  if (loader->finished != 0) { return SCAV_E_STATE; }
+  loader->finished = 1;
   *out = nullptr;
 
   scav_chart *const built{ new scav_chart{ .chart = {} } };
-  bool const ok{ scav::load_finish(session->session, built->chart, session->diags) };
+  bool const ok{ scav::load_finish(loader->loader, built->chart, loader->diags) };
   if (built->chart.documents.empty()) {
     // Nothing was built. An empty chart would read as an empty network rather
     // than a failed one.
@@ -117,27 +117,27 @@ scav_result scav_load_finish(scav_load *session, scav_chart **out) {
   return ok ? SCAV_OK : SCAV_E_LOAD;
 }
 
-void scav_load_destroy(scav_load *session) { delete session; }
+void scav_load_destroy(scav_load *loader) { delete loader; }
 
 void scav_chart_destroy(scav_chart *chart) { delete chart; }
 
-scav_result scav_load_diag_count(scav_load const *session, uint32_t *out_count) {
-  if ((session == nullptr) || (out_count == nullptr)) { return SCAV_E_INVALID_ARG; }
-  *out_count = static_cast<uint32_t>(diags_of(session).size());
+scav_result scav_load_diag_count(scav_load const *loader, uint32_t *out_count) {
+  if ((loader == nullptr) || (out_count == nullptr)) { return SCAV_E_INVALID_ARG; }
+  *out_count = static_cast<uint32_t>(diags_of(loader).size());
   return SCAV_OK;
 }
 
-scav_result scav_load_diag(scav_load const *session,
+scav_result scav_load_diag(scav_load const *loader,
                            uint32_t index,
                            uint32_t *out_code,
                            uint32_t *out_doc,
                            uint32_t *out_off,
                            uint32_t *out_len) {
-  if ((session == nullptr) || (out_code == nullptr) || (out_doc == nullptr) ||
+  if ((loader == nullptr) || (out_code == nullptr) || (out_doc == nullptr) ||
       (out_off == nullptr) || (out_len == nullptr)) {
     return SCAV_E_INVALID_ARG;
   }
-  std::vector<scav::Diagnostic> const &from{ diags_of(session) };
+  std::vector<scav::Diagnostic> const &from{ diags_of(loader) };
   if (index >= from.size()) { return SCAV_E_INVALID_ARG; }
   scav::Diagnostic const &d{ from[index] };
   *out_code = static_cast<uint32_t>(d.code);
@@ -151,14 +151,14 @@ char const *scav_diag_message(uint32_t code) {
   return scav::diag_message(static_cast<scav::DiagCode>(code));
 }
 
-scav_result scav_load_document_name(scav_load const *session,
+scav_result scav_load_document_name(scav_load const *loader,
                                     uint32_t doc,
                                     scav_byte const **out,
                                     uint32_t *out_len) {
-  if ((session == nullptr) || (out == nullptr) || (out_len == nullptr)) {
+  if ((loader == nullptr) || (out == nullptr) || (out_len == nullptr)) {
     return SCAV_E_INVALID_ARG;
   }
-  std::string_view const name{ scav::load_document_name(session->session, { doc }) };
+  std::string_view const name{ scav::load_document_name(loader->loader, { doc }) };
   if (name.empty()) { return SCAV_E_INVALID_ARG; }
   *out = reinterpret_cast<scav_byte const *>(name.data());
   *out_len = static_cast<uint32_t>(name.size());

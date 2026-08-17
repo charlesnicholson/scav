@@ -76,7 +76,7 @@ scav_add_functional_test(dump
           "$<TARGET_FILE:scav>"
   TARGETS scav
 )
-# P2's exit gate: the load session driven from Python over ctypes, faking a
+# P2's exit gate: the loader driven from Python over ctypes, faking a
 # network fetch. Needs the shared library, not an archive.
 scav_add_functional_test(load
   DEPENDS "${PROJECT_SOURCE_DIR}/test_data/charts/vac.scav"

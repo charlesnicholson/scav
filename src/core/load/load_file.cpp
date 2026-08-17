@@ -1,4 +1,4 @@
-// The filesystem transport: the session primitives with `fopen` in the fetch
+// The filesystem transport: the loader primitives with `fopen` in the fetch
 // slot. Reads in chunks, which works on a pipe and avoids `ftell`'s `long`.
 
 #include "scav/scav_core.h"
@@ -35,7 +35,7 @@ bool read_file(char const *path, std::vector<scav_byte> &out) {
 }
 
 bool load_file(char const *path,
-               LoadSession &session,
+               Loader &loader,
                Chart &out,
                std::vector<Diagnostic> &diags,
                std::string &failed_path) {
@@ -46,8 +46,8 @@ bool load_file(char const *path,
     failed_path.assign((path == nullptr) ? "" : path);
     return false;
   }
-  if (!load_add(session, bytes.data(), bytes.size(), path)) {
-    return load_finish(session, out, diags);
+  if (!load_add(loader, bytes.data(), bytes.size(), path)) {
+    return load_finish(loader, out, diags);
   }
 
   // The pending view dies on the next add, so each round copies out first.
@@ -55,8 +55,8 @@ bool load_file(char const *path,
   std::vector<std::string> wanted;
   for (;;) {
     wanted.clear();
-    for (Pending const &p : load_pending(session)) {
-      wanted.emplace_back(load_pending_path(session, p));
+    for (Pending const &p : load_pending(loader)) {
+      wanted.emplace_back(load_pending_path(loader, p));
     }
     if (wanted.empty()) { break; }
 
@@ -65,12 +65,12 @@ bool load_file(char const *path,
         failed_path = want;
         return false;
       }
-      if (!load_add(session, bytes.data(), bytes.size(), want)) {
-        return load_finish(session, out, diags);
+      if (!load_add(loader, bytes.data(), bytes.size(), want)) {
+        return load_finish(loader, out, diags);
       }
     }
   }
-  return load_finish(session, out, diags);
+  return load_finish(loader, out, diags);
 }
 
 }  // namespace scav

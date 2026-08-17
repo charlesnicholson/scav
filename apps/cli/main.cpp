@@ -233,7 +233,7 @@ void write_stream(std::string const &text, std::FILE *to) {
 }
 
 // Diagnostics print as file:line:col against whichever byte pool produced them:
-// the session's buffers, or the chart's via a span or a subject's statement.
+// the loader's buffers, or the chart's via a span or a subject's statement.
 void append_diag_line(std::string &out,
                       char const *path,
                       LineCol const *lc,
@@ -251,16 +251,16 @@ void append_diag_line(std::string &out,
 }
 
 // A finding from before any chart existed -- a parse error, a cycle, a missing
-// document. Its span indexes the bytes the session still holds.
-void append_session_diag(std::string &out,
-                         char const *path,
-                         LoadSession const &session,
-                         Diagnostic const &d) {
-  std::string_view const name{ load_document_name(session, d.doc) };
+// document. Its span indexes the bytes the loader still holds.
+void append_loader_diag(std::string &out,
+                        char const *path,
+                        Loader const &loader,
+                        Diagnostic const &d) {
+  std::string_view const name{ load_document_name(loader, d.doc) };
   std::string const where{ name.empty() ? std::string{ path } : std::string{ name } };
   scav_byte const *bytes{ nullptr };
   uint32_t len{ 0 };
-  if ((d.src.len != 0) && load_document_bytes(session, d.doc, &bytes, &len) &&
+  if ((d.src.len != 0) && load_document_bytes(loader, d.doc, &bytes, &len) &&
       ((static_cast<size_t>(d.src.off) + d.src.len) <= len)) {
     LineCol const lc{ diag_line_col(bytes, len, d.src.off) };
     append_diag_line(out, where.c_str(), &lc, d.code);
@@ -322,11 +322,11 @@ void append_hash(std::string &out, uint32_t value) {
 
 int dump(char const *path, bool hash_only) {
   std::string err;
-  LoadSession session;
+  Loader loader;
   Chart c;
   std::vector<Diagnostic> diags;
   std::string failed;
-  bool loaded{ load_file(path, session, c, diags, failed) };
+  bool loaded{ load_file(path, loader, c, diags, failed) };
 
   if (!failed.empty()) {
     err += "scav: cannot read '";
@@ -337,9 +337,9 @@ int dump(char const *path, bool hash_only) {
   }
 
   // A load that never reached a chart leaves nothing to print, and its
-  // findings index the session's buffers rather than a chart's.
+  // findings index the loader's buffers rather than a chart's.
   if (c.documents.empty()) {
-    for (Diagnostic const &d : diags) { append_session_diag(err, path, session, d); }
+    for (Diagnostic const &d : diags) { append_loader_diag(err, path, loader, d); }
     write_stream(err, stderr);
     return 2;
   }

@@ -230,7 +230,7 @@ InstId build_include(Chart &c,
   // deduplicate, so the row reuses that ref.
   c.includes.push_back({ .alias = c.states[host.v].name,
                          .path = string_pool_add(c.strings, path),
-                         .target = { INVALID },  // the load session's to fill
+                         .target = { INVALID },  // the loader's to fill
                          .host = host,
                          .stmt = { INVALID } });
   return id;

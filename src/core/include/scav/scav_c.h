@@ -47,34 +47,34 @@ typedef struct {
 /* Add the root, read pending, resolve each however you like, add each, repeat
  * until empty, finish. */
 scav_result scav_load_begin(scav_load **out);
-scav_result scav_load_add(scav_load *session,
+scav_result scav_load_add(scav_load *loader,
                           scav_byte const *bytes,
                           uint32_t len,
                           char const *name);
 
 /* The view is invalidated by the next scav_load_add. */
-scav_result scav_load_pending(scav_load *session,
+scav_result scav_load_pending(scav_load *loader,
                               scav_pending const **out,
                               uint32_t *out_count);
 
-/* A pending path's bytes, from the session's own pool. Not NUL-terminated. */
-scav_result scav_load_path(scav_load const *session,
+/* A pending path's bytes, from the loader's own pool. Not NUL-terminated. */
+scav_result scav_load_path(scav_load const *loader,
                            scav_span path,
                            scav_byte const **out,
                            uint32_t *out_len);
 
 /* SCAV_E_LOAD when the load reported anything. `out` is still written when a
  * chart was built, and left NULL when the network could not be assembled. */
-scav_result scav_load_finish(scav_load *session, scav_chart **out);
+scav_result scav_load_finish(scav_load *loader, scav_chart **out);
 
-void scav_load_destroy(scav_load *session);
+void scav_load_destroy(scav_load *loader);
 void scav_chart_destroy(scav_chart *chart);
 
-/* Diagnostics stay on the session, since a cycle or a missing document leaves
+/* Diagnostics stay on the loader, since a cycle or a missing document leaves
  * no chart to hang them on. Render a code with scav_diag_message; derive a
  * position from (doc, off, len) against the bytes supplied for that doc. */
-scav_result scav_load_diag_count(scav_load const *session, uint32_t *out_count);
-scav_result scav_load_diag(scav_load const *session,
+scav_result scav_load_diag_count(scav_load const *loader, uint32_t *out_count);
+scav_result scav_load_diag(scav_load const *loader,
                            uint32_t index,
                            uint32_t *out_code,
                            uint32_t *out_doc,
@@ -85,7 +85,7 @@ scav_result scav_load_diag(scav_load const *session,
 char const *scav_diag_message(uint32_t code);
 
 /* The resolved key a document was claimed under. Not NUL-terminated. */
-scav_result scav_load_document_name(scav_load const *session,
+scav_result scav_load_document_name(scav_load const *loader,
                                     uint32_t doc,
                                     scav_byte const **out,
                                     uint32_t *out_len);

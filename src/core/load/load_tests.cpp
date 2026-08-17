@@ -1,4 +1,4 @@
-// The load session, driven the way an application drives it: add the root, read
+// The loader, driven the way an application drives it: add the root, read
 // pending, add each, repeat, finish. Nothing here touches a filesystem.
 
 #include "core/tests/test_support.h"
@@ -24,7 +24,7 @@ struct Doc {
 };
 
 struct Loaded {
-  LoadSession session;
+  Loader loader;
   Chart chart;
   std::vector<Diagnostic> diags;
   std::vector<std::string> fetched;  // arrival order, for the ordering tests
@@ -46,16 +46,16 @@ Loaded load_network(std::vector<Doc> const &corpus,
   Loaded out;
   std::string_view const root_text{ body_of(corpus, root) };
   out.fetched.emplace_back(root);
-  if (!load_add(out.session, raw(root_text), root_text.size(), root)) {
-    out.ok = load_finish(out.session, out.chart, out.diags);
+  if (!load_add(out.loader, raw(root_text), root_text.size(), root)) {
+    out.ok = load_finish(out.loader, out.chart, out.diags);
     return out;
   }
 
   std::vector<std::string> wanted;
   for (;;) {
     wanted.clear();
-    for (Pending const &p : load_pending(out.session)) {
-      wanted.emplace_back(load_pending_path(out.session, p));
+    for (Pending const &p : load_pending(out.loader)) {
+      wanted.emplace_back(load_pending_path(out.loader, p));
     }
     if (wanted.empty()) { break; }
     if (reverse) {
@@ -69,14 +69,14 @@ Loaded load_network(std::vector<Doc> const &corpus,
       if (text.empty()) { continue; }  // a document the corpus does not have
       out.fetched.push_back(want);
       advanced = true;
-      if (!load_add(out.session, raw(text), text.size(), want)) {
-        out.ok = load_finish(out.session, out.chart, out.diags);
+      if (!load_add(out.loader, raw(text), text.size(), want)) {
+        out.ok = load_finish(out.loader, out.chart, out.diags);
         return out;
       }
     }
     if (!advanced) { break; }  // nothing left that can be supplied
   }
-  out.ok = load_finish(out.session, out.chart, out.diags);
+  out.ok = load_finish(out.loader, out.chart, out.diags);
   return out;
 }
 
@@ -131,7 +131,7 @@ TEST_CASE("load: one document with no includes matches lower_document") {
   REQUIRE(p.ok);
   REQUIRE(lower_document(direct, p.pd, diags));
 
-  // The session is the same three steps with N == 1, so it had better agree.
+  // The loader is the same three steps with N == 1, so it had better agree.
   CHECK(chart_structural_hash(r.chart) == chart_structural_hash(direct));
 }
 
@@ -199,7 +199,7 @@ TEST_CASE("load: DocId comes from the include graph, never from arrival order") 
 }
 
 TEST_CASE("load: pending names the path, the requester, and its statement") {
-  LoadSession s;
+  Loader s;
   constexpr std::string_view ROOT{ R"(chart a { include "sub/b.scav" as b, state A, })" };
   REQUIRE(load_add(s, raw(ROOT), ROOT.size(), "top/a.scav"));
 
@@ -213,7 +213,7 @@ TEST_CASE("load: pending names the path, the requester, and its statement") {
 }
 
 TEST_CASE("load: pending empties as documents arrive") {
-  LoadSession s;
+  Loader s;
   constexpr std::string_view ROOT{ R"(chart a { include "b.scav" as b, state A, })" };
   constexpr std::string_view SUB{ R"(chart b { state B, })" };
   REQUIRE(load_add(s, raw(ROOT), ROOT.size(), "a.scav"));
@@ -355,10 +355,10 @@ TEST_CASE("load: an include cycle is refused and names the closing statement") {
 
   for (Diagnostic const &d : r.diags) {
     if (d.code != DiagCode::IncludeCycle) { continue; }
-    CHECK(load_document_name(r.session, d.doc) == "b.scav");
+    CHECK(load_document_name(r.loader, d.doc) == "b.scav");
     scav_byte const *bytes{ nullptr };
     uint32_t len{ 0 };
-    REQUIRE(load_document_bytes(r.session, d.doc, &bytes, &len));
+    REQUIRE(load_document_bytes(r.loader, d.doc, &bytes, &len));
     CHECK((static_cast<size_t>(d.src.off) + d.src.len) <= len);
   }
 }
@@ -388,7 +388,7 @@ TEST_CASE("load: a diamond is not a cycle") {
 }
 
 TEST_CASE("load: finishing with a document still pending is refused") {
-  LoadSession s;
+  Loader s;
   constexpr std::string_view ROOT{ R"(chart a { include "b.scav" as b, state A, })" };
   REQUIRE(load_add(s, raw(ROOT), ROOT.size(), "a.scav"));
 
@@ -403,7 +403,7 @@ TEST_CASE("load: finishing with a document still pending is refused") {
 }
 
 TEST_CASE("load: an include path that names no document is refused at add") {
-  LoadSession s;
+  Loader s;
   constexpr std::string_view ROOT{ R"(chart a { include "sub/" as b, state A, })" };
   CHECK_FALSE(load_add(s, raw(ROOT), ROOT.size(), "a.scav"));
   CHECK(has_code(s.diags, DiagCode::IncludePathInvalid));
@@ -416,7 +416,7 @@ TEST_CASE("load: an include path that names no document is refused at add") {
 }
 
 TEST_CASE("load: an unrequested document is refused") {
-  LoadSession s;
+  Loader s;
   constexpr std::string_view ROOT{ R"(chart a { state A, })" };
   constexpr std::string_view OTHER{ R"(chart z { state Z, })" };
   REQUIRE(load_add(s, raw(ROOT), ROOT.size(), "a.scav"));
@@ -425,7 +425,7 @@ TEST_CASE("load: an unrequested document is refused") {
 }
 
 TEST_CASE("load: adding one document twice is refused") {
-  LoadSession s;
+  Loader s;
   constexpr std::string_view ROOT{ R"(chart a { include "b.scav" as b, })" };
   constexpr std::string_view SUB{ R"(chart b { state B, })" };
   REQUIRE(load_add(s, raw(ROOT), ROOT.size(), "a.scav"));
@@ -434,16 +434,16 @@ TEST_CASE("load: adding one document twice is refused") {
   CHECK(has_code(s.diags, DiagCode::DocumentAlreadyLoaded));
 }
 
-TEST_CASE("load: a session with no root finishes with nothing") {
-  LoadSession s;
+TEST_CASE("load: a loader with no root finishes with nothing") {
+  Loader s;
   Chart c;
   std::vector<Diagnostic> diags;
   CHECK_FALSE(load_finish(s, c, diags));
-  CHECK(has_code(diags, DiagCode::LoadSessionEmpty));
+  CHECK(has_code(diags, DiagCode::LoaderEmpty));
 }
 
 TEST_CASE("load: finishing into a chart that already holds a model is refused") {
-  LoadSession s;
+  Loader s;
   constexpr std::string_view ROOT{ R"(chart a { state A, })" };
   REQUIRE(load_add(s, raw(ROOT), ROOT.size(), "a.scav"));
 
@@ -451,7 +451,7 @@ TEST_CASE("load: finishing into a chart that already holds a model is refused") 
   std::ignore = build_chart(c, "already", {});
   std::vector<Diagnostic> diags;
   CHECK_FALSE(load_finish(s, c, diags));
-  CHECK(has_code(diags, DiagCode::LoadSessionEmpty));
+  CHECK(has_code(diags, DiagCode::LoaderEmpty));
 }
 
 TEST_CASE("load: a parse error in an included document names that document") {
@@ -460,15 +460,15 @@ TEST_CASE("load: a parse error in an included document names that document") {
                          "a.scav") };
   CHECK_FALSE(r.ok);
   CHECK(r.chart.documents.empty());
-  // parse_document holds one document and is not told which; the session is
+  // parse_document holds one document and is not told which; the loader is
   // the layer that knows, so it stamps the DocId.
   REQUIRE_FALSE(r.diags.empty());
   CHECK(r.diags[0].doc == DocId{ 1 });
-  CHECK(load_document_name(r.session, r.diags[0].doc) == "b.scav");
+  CHECK(load_document_name(r.loader, r.diags[0].doc) == "b.scav");
   // And the bytes survive the failure, so the finding can be located.
   scav_byte const *bytes{ nullptr };
   uint32_t len{ 0 };
-  CHECK(load_document_bytes(r.session, r.diags[0].doc, &bytes, &len));
+  CHECK(load_document_bytes(r.loader, r.diags[0].doc, &bytes, &len));
   CHECK(len != 0);
 }
 
@@ -505,8 +505,8 @@ TEST_CASE("load: an included document sees its own scope, not the host's") {
   CHECK(has_code(r.diags, DiagCode::EndpointUnresolved));
 }
 
-TEST_CASE("load: the session is reusable state, not a one-shot object") {
-  // Two independent sessions in one process: no library-global state.
+TEST_CASE("load: the loader is reusable state, not a one-shot object") {
+  // Two independent loaders in one process: no library-global state.
   Loaded a{ load_network(diamond(), "root.scav") };
   Loaded b{ load_network(diamond(), "root.scav") };
   REQUIRE(a.ok);
