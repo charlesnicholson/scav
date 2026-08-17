@@ -1,6 +1,7 @@
 // The loader, driven the way an application drives it: add the root, read
 // pending, add each, repeat, finish. Nothing here touches a filesystem.
 
+#include "core/core_internal.h"
 #include "core/tests/test_support.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"

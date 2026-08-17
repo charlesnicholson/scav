@@ -1,6 +1,7 @@
 // A deterministic sweep past the parser. Whatever survives lowers and validates
 // with located diagnostics, real subjects, and round-tripping addresses.
 
+#include "core/core_internal.h"
 #include "core/tests/test_support.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"

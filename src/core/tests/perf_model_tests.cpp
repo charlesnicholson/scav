@@ -1,6 +1,7 @@
 // Lowering and validation floors, never times, to catch an accidental O(n^2):
 // a span rebuild per wildcard, or a fix-up walk per append.
 
+#include "core/core_internal.h"
 #include "core/tests/test_support.h"
 #include "core/tests/test_synth.h"
 #include "scav/scav_core.h"

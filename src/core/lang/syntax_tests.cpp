@@ -1,6 +1,7 @@
 // syntax.cpp: the spellings of the statement enums, and the one convention about
 // where the chart statement sits. Compiled against scavcore_testable.
 
+#include "core/core_internal.h"
 #include "scav/scav_core.h"
 
 #include "core/tests/test_support.h"

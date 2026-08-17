@@ -1,6 +1,7 @@
 // The structural digest, from both sides: which differences move it and which
 // leave it alone.
 
+#include "core/core_internal.h"
 #include "core/tests/test_support.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"

@@ -1,17 +1,15 @@
 #ifndef SCAV_CORE_H_INCLUDED
 #define SCAV_CORE_H_INCLUDED
 
-// libscavcore's public API: parse a document, assemble a network, or build a
-// Chart directly, then walk the arrays.
+// libscavcore's public API. A Chart is the product: load a document network or
+// build one directly, query it, validate it, hash it.
 
 #include "scav/scav_types.h"
 
 #include <cstddef>
 #include <cstdint>
-#include <limits>
 #include <string>
 #include <string_view>
-#include <type_traits>
 #include <vector>
 
 namespace scav {
@@ -93,30 +91,6 @@ struct Span {
 // An empty span is `{}`.
 constexpr StrRef str_ref(uint32_t off, uint32_t len) { return { .off = off, .len = len }; }
 constexpr Span make_span(uint32_t off, uint32_t len) { return { .off = off, .len = len }; }
-
-// Narrowing =================================================================
-
-// size_t stops at the API boundary: an entry point takes one, narrows it, and
-// hands uint32_t inward.
-
-// True when `value` round-trips into T, leaving `out` written only then.
-template <typename T, typename U>
-bool narrow(U value, T &out) {
-  static_assert(std::is_unsigned_v<T> && std::is_unsigned_v<U>,
-                "scav narrows unsigned to unsigned; a signed length is a bug upstream");
-  if (value > static_cast<U>(std::numeric_limits<T>::max())) { return false; }
-  out = static_cast<T>(value);
-  return true;
-}
-
-// For a bound already known to hold. Clamps rather than wrapping, so a mistake
-// is a short read and not a 4-gigabyte one.
-template <typename T, typename U>
-T narrow_clamp(U value) {
-  static_assert(std::is_unsigned_v<T> && std::is_unsigned_v<U>, "unsigned only");
-  constexpr U LIMIT{ static_cast<U>(std::numeric_limits<T>::max()) };
-  return static_cast<T>((value > LIMIT) ? LIMIT : value);
-}
 
 // Diagnostics ===============================================================
 
@@ -235,119 +209,10 @@ inline std::string_view string_pool_view(StringPool const &pool, StrRef ref) {
   return { reinterpret_cast<char const *>(pool.bytes.data() + ref.off), ref.len };
 }
 
-// Appends as met, never deduplicates. The empty string returns the empty ref
-// and grows the pool by nothing.
-StrRef string_pool_add(StringPool &pool, std::string_view text);
+// Statements ================================================================
 
-// Source text ===============================================================
-
-// BOM stripped, line endings folded to LF, UTF-8 validated, NFC applied.
-// Offsets downstream index these bytes; a UTF-8 error indexes the raw input.
-
-// Returns false and leaves `out` empty when the input is not valid UTF-8.
-// `out` is cleared first either way.
-bool source_text_normalize(scav_byte const *bytes,
-                           size_t len,
-                           DocId doc,
-                           std::vector<scav_byte> &out,
-                           std::vector<Diagnostic> &diags);
-
-// Codepoint at a time, for callers working on decoded escapes rather than on a
-// whole document.
-bool source_text_utf8_decode(scav_byte const *bytes,
-                             size_t len,
-                             size_t at,
-                             uint32_t &cp,
-                             uint32_t &width,
-                             DiagCode &err);
-void source_text_utf8_encode(uint32_t cp, std::vector<scav_byte> &out);
-
-// True when no codepoint could move under NFC. Byte-scans the ASCII run.
-bool source_text_is_nfc(scav_byte const *bytes, size_t len);
-
-// Assumes valid UTF-8; `out` is cleared first. Returns true when it changed
-// something.
-bool source_text_to_nfc(scav_byte const *bytes, size_t len, std::vector<scav_byte> &out);
-
-// Assumes already-normalized bytes.
-bool source_text_is_ascii(scav_byte const *bytes, size_t len);
-
-std::string_view source_text_view(std::vector<scav_byte> const &bytes, Span span);
-
-// Lexer =====================================================================
-
-// Bytes in, one flat token vector out. The vector is scratch, freed after the
-// parse.
-
-// No keyword kinds. `s`, `m` and `t` are keywords only in statement-leading
-// position, which the lexer cannot see from where it stands.
-enum class TokKind : uint32_t {
-  End,  // one sentinel, always last, so lookahead needs no bounds check
-
-  Ident,
-  Number,
-  String,
-  LBrace,
-  RBrace,
-  LBracket,
-  RBracket,
-  Comma,
-  Equals,
-  At,
-  Colon,
-  Slash,
-  Star,
-  Arrow,
-};
-
-// 12 bytes, no padding.
-struct Token {
-  uint32_t off, len;
-  TokKind kind;
-};
-
-// Comments travel beside the token stream rather than in it. The two flags are
-// what the printer needs to classify a comment's position.
-struct LexComment {
-  Span src;              // includes the "//", excludes the newline
-  uint32_t code_before;  // non-whitespace earlier on the same line
-  uint32_t blank_after;  // a blank line, or the end of input, follows
-};
-
-struct LexResult {
-  std::vector<Token> tokens;
-  std::vector<LexComment> comments;
-};
-
-// Skips an unexpected character and keeps going, so one run reports all of
-// them; stops at anything else. Returns false when it reported anything.
-bool lex_source(scav_byte const *bytes,
-                size_t byte_count,
-                DocId doc,
-                LexResult &out,
-                std::vector<Diagnostic> &diags);
-
-char const *lex_token_kind_name(TokKind kind);
-
-// Reserved in every position. `choice`, `history`, `as`, `kind`, `s`, `m` and
-// `t` are absent: they are contextual, so a state may be named one.
-bool lex_is_reserved_word(std::string_view text);
-
-// `lexeme` includes its delimiters. Applies escapes, dedents a raw string to
-// its closing column, and NFC-folds, since a \u escape can decompose.
-bool lex_decode_string_literal(scav_byte const *bytes,
-                               Span lexeme,
-                               DocId doc,
-                               std::vector<scav_byte> &out,
-                               std::vector<Diagnostic> &diags);
-
-// Bytes held, summing capacity rather than size.
-uint64_t lex_footprint(LexResult const &result);
-
-// Syntax tree ===============================================================
-
-// The front end's whole output. `stmt_payload` indexes the array a statement's
-// `kind` names; `stmt_children` indexes its block.
+// Authored source, kept beside the entities it produced. A Chart and a
+// ParsedDocument both index these rows.
 
 enum class StmtKind : uint32_t { Chart, Include, State, Submachine, Trans, Attr };
 
@@ -366,9 +231,6 @@ enum class StateKind : uint32_t {
 };
 
 enum class TransKind : uint32_t { External, Internal, Local };
-
-// `Flag` is `@k` with nothing after it, kept distinct from `@k = "true"`.
-enum class AttrValueKind : uint32_t { Flag, Scalar, List };
 
 // Leading and own-line both precede the owner; the difference is a blank line
 // between them. Inside-the-block versus before-it follows from the offsets.
@@ -392,81 +254,6 @@ struct Trivia {
   CommentPos pos;
 };
 
-// `On:main` and `On:1`: a submachine qualifier by name or by ordinal. Both
-// absent is the unqualified case.
-struct PathSeg {
-  StrRef name;
-  StrRef qualifier;
-  uint32_t ordinal;  // INVALID when the qualifier is a name or absent
-};
-
-struct Endpoint {
-  uint32_t wildcard;  // `*`: initial or final by position, so segs is empty
-  Span segs;          // -> path_segs
-};
-
-struct ChartStmt {
-  StrRef name, label;
-};
-
-struct IncludeStmt {
-  StrRef path, alias;
-};
-
-struct StateStmt {
-  StrRef name, label;
-  StateKind kind;
-  uint32_t has_block;  // `state Foo` and `state Foo {}` are different source
-};
-
-struct SubmachineStmt {
-  StrRef name, label;  // both may be empty; the block is mandatory
-};
-
-struct TransStmt {
-  Endpoint src, dst;
-  StrRef label;
-  TransKind kind;
-  uint32_t has_block;
-};
-
-struct AttrEntry {
-  StrRef key;
-  Span values;  // -> attr_values; empty for Flag, one for Scalar, n for List
-  AttrValueKind kind;
-};
-
-// One row for `@k`, `@ns:k` and `@ns { a, b }` alike. The block spelling is n
-// entries under one namespace; the others are one.
-struct AttrStmt {
-  StrRef ns;
-  Span entries;  // -> attr_entries
-};
-
-struct ParsedDocument {
-  DocId id;
-  Document doc;
-  std::vector<scav_byte> src_bytes;  // normalized; never canonicalized
-
-  std::vector<Statement> stmts;
-  std::vector<uint32_t> stmt_payload;  // parallel to stmts; row in the kind'loader array
-  std::vector<Span> stmt_children;     // parallel to stmts; -> stmt_ids
-  std::vector<StmtId> stmt_ids;
-  std::vector<Trivia> comments;
-
-  std::vector<ChartStmt> charts;
-  std::vector<IncludeStmt> includes;
-  std::vector<StateStmt> states;
-  std::vector<SubmachineStmt> submachines;
-  std::vector<TransStmt> transitions;
-  std::vector<AttrStmt> attrs;
-  std::vector<AttrEntry> attr_entries;
-  std::vector<StrRef> attr_values;
-  std::vector<PathSeg> path_segs;
-
-  StringPool strings;  // append-order, not deduplicated
-};
-
 char const *syntax_stmt_kind_name(StmtKind kind);
 char const *syntax_state_kind_name(StateKind kind);
 char const *syntax_trans_kind_name(TransKind kind);
@@ -475,45 +262,6 @@ char const *syntax_trans_kind_name(TransKind kind);
 // format reaches those through `*`.
 bool syntax_state_kind_from_name(std::string_view text, StateKind &out);
 bool syntax_trans_kind_from_name(std::string_view text, TransKind &out);
-
-// The chart statement, always row zero. INVALID when nothing parsed.
-uint32_t syntax_root_statement(ParsedDocument const &pd);
-
-// Parser ====================================================================
-
-// LL(1) descent with the frames in a heap vector rather than the call stack, so
-// a hostile nesting depth is a diagnostic instead of a stack overflow.
-
-// Block levels, not state levels: the format spends two blocks per state level
-// plus one for the chart, so a depth-16 chart nests 33 deep.
-constexpr uint32_t DEFAULT_MAX_DEPTH{ 256 };
-
-struct ParseOptions {
-  uint32_t max_depth;
-};
-
-ParseOptions parse_default_options();
-
-// Bytes must already be normalized. `name` is what a diagnostic quotes.
-bool parse_tokens(scav_byte const *bytes,
-                  size_t byte_count,
-                  LexResult const &lexed,
-                  DocId doc,
-                  std::string_view name,
-                  ParseOptions const &opts,
-                  ParsedDocument &out,
-                  std::vector<Diagnostic> &diags);
-
-// normalize -> lex -> parse, over bytes from anywhere.
-bool parse_document(scav_byte const *bytes,
-                    size_t len,
-                    std::string_view name,
-                    ParseOptions const &opts,
-                    ParsedDocument &out,
-                    std::vector<Diagnostic> &diags);
-
-// Bytes held, summing capacity rather than size.
-uint64_t parse_footprint(ParsedDocument const &pd);
 
 // Model =====================================================================
 
@@ -534,7 +282,7 @@ struct State {
 
 struct Submachine {
   StateId owner;     // INVALID for a document root
-  uint32_t ordinal;  // position among the owner'loader submachines, fixed at build
+  uint32_t ordinal;  // position among the owner's submachines, fixed at build
   StrRef name;
   StrRef label;
   Span children;  // -> state_ids, document order
@@ -666,8 +414,32 @@ uint32_t chart_attr_find(Chart const &c, ElemRef subject, std::string_view key);
 // as `$<kind>`, ordinal-suffixed past the first. Appends to `out`.
 void chart_path_of(Chart const &c, StateId id, std::string &out);
 
-// Bytes held, summing capacity rather than size.
-uint64_t chart_footprint(Chart const &c);
+// Resolution ================================================================
+
+// Which rule a failed path broke, not merely that one did.
+enum class ResolveStatus : uint32_t { Ok, NotFound, BadQualifier, CrossesInclude };
+
+// Resolves a state path against `scope`: the first segment innermost-outward
+// within its own document, later ones descending strictly.
+ResolveStatus resolve_path(Chart const &c,
+                           SubmachineId scope,
+                           std::string_view path,
+                           StateId &out);
+
+// Validation ================================================================
+
+// Structural checks over the live rows, a tombstoned one only as a target.
+// Appends findings sorted by (code, subject kind, subject ordinal).
+bool validate_chart(Chart const &c, std::vector<Diagnostic> &diags);
+
+// Structural hash ===========================================================
+
+// The canonical serialization of a chart's entity arrays and authored text,
+// field by field in array order with every string length-prefixed.
+void chart_digest_bytes(Chart const &c, std::vector<scav_byte> &out);
+
+// xxHash32 over the above.
+uint32_t chart_structural_hash(Chart const &c);
 
 // Builder ===================================================================
 
@@ -734,23 +506,107 @@ scav_byte const *column_data(Chart const &c, ColumnId id);
 // Rows, not bytes: bytes.size() / elem_size.
 uint32_t column_count(Chart const &c, ColumnId id);
 
-// Resolution ================================================================
+// Syntax tree ===============================================================
 
-// Which rule a failed path broke, not merely that one did.
-enum class ResolveStatus : uint32_t { Ok, NotFound, BadQualifier, CrossesInclude };
+// One document, parsed. `stmt_payload` indexes the array a statement's `kind`
+// names; `stmt_children` indexes its block.
 
-// Resolves a state path against `scope`: the first segment innermost-outward
-// within its own document, later ones descending strictly.
-ResolveStatus resolve_path(Chart const &c,
-                           SubmachineId scope,
-                           std::string_view path,
-                           StateId &out);
+// `Flag` is `@k` with nothing after it, kept distinct from `@k = "true"`.
+enum class AttrValueKind : uint32_t { Flag, Scalar, List };
 
-// Lowering ==================================================================
+// `On:main` and `On:1`: a submachine qualifier by name or by ordinal. Both
+// absent is the unqualified case.
+struct PathSeg {
+  StrRef name;
+  StrRef qualifier;
+  uint32_t ordinal;  // INVALID when the qualifier is a name or absent
+};
 
-// One document into an empty chart: rebases pd's front-end slice, creates its
-// entity rows, leaves every include unresolved. False if it reported anything.
-bool lower_document(Chart &c, ParsedDocument const &pd, std::vector<Diagnostic> &diags);
+struct Endpoint {
+  uint32_t wildcard;  // `*`: initial or final by position, so segs is empty
+  Span segs;          // -> path_segs
+};
+
+struct ChartStmt {
+  StrRef name, label;
+};
+
+struct IncludeStmt {
+  StrRef path, alias;
+};
+
+struct StateStmt {
+  StrRef name, label;
+  StateKind kind;
+  uint32_t has_block;  // `state Foo` and `state Foo {}` are different source
+};
+
+struct SubmachineStmt {
+  StrRef name, label;  // both may be empty; the block is mandatory
+};
+
+struct TransStmt {
+  Endpoint src, dst;
+  StrRef label;
+  TransKind kind;
+  uint32_t has_block;
+};
+
+struct AttrEntry {
+  StrRef key;
+  Span values;  // -> attr_values; empty for Flag, one for Scalar, n for List
+  AttrValueKind kind;
+};
+
+// One row for `@k`, `@ns:k` and `@ns { a, b }` alike. The block spelling is n
+// entries under one namespace; the others are one.
+struct AttrStmt {
+  StrRef ns;
+  Span entries;  // -> attr_entries
+};
+
+struct ParsedDocument {
+  DocId id;
+  Document doc;
+  std::vector<scav_byte> src_bytes;  // normalized; never canonicalized
+
+  std::vector<Statement> stmts;
+  std::vector<uint32_t> stmt_payload;  // parallel to stmts; row in the kind's array
+  std::vector<Span> stmt_children;     // parallel to stmts; -> stmt_ids
+  std::vector<StmtId> stmt_ids;
+  std::vector<Trivia> comments;
+
+  std::vector<ChartStmt> charts;
+  std::vector<IncludeStmt> includes;
+  std::vector<StateStmt> states;
+  std::vector<SubmachineStmt> submachines;
+  std::vector<TransStmt> transitions;
+  std::vector<AttrStmt> attrs;
+  std::vector<AttrEntry> attr_entries;
+  std::vector<StrRef> attr_values;
+  std::vector<PathSeg> path_segs;
+
+  StringPool strings;  // append-order, not deduplicated
+};
+
+// Block levels, not state levels: the format spends two blocks per state level
+// plus one for the chart, so a depth-16 chart nests 33 deep.
+constexpr uint32_t DEFAULT_MAX_DEPTH{ 256 };
+
+struct ParseOptions {
+  uint32_t max_depth;
+};
+
+ParseOptions parse_default_options();
+
+// normalize -> lex -> parse, over bytes from anywhere. `name` is what a
+// diagnostic quotes.
+bool parse_document(scav_byte const *bytes,
+                    size_t len,
+                    std::string_view name,
+                    ParseOptions const &opts,
+                    ParsedDocument &out,
+                    std::vector<Diagnostic> &diags);
 
 // Document paths ============================================================
 
@@ -761,15 +617,15 @@ bool lower_document(Chart &c, ParsedDocument const &pd, std::vector<Diagnostic> 
 // directory and folds `.` and `..`; an absolute or scheme-carrying one does not.
 bool path_resolve(std::string_view base, std::string_view ref, std::string &out);
 
-// Loader ==============================================================
+// Loader ====================================================================
 
 // Add the root, read `pending`, resolve and add each, repeat until empty,
 // finish. Parsed once per distinct name, instantiated once per include.
 
 struct Pending {
-  Span path;          // -> the loader'loader path pool; read with load_pending_path
+  Span path;          // -> the loader's path pool; read with load_pending_path
   DocId from;         // the document whose include statement claimed this one
-  uint32_t stmt_row;  // that statement'loader row in `from`'loader parsed document
+  uint32_t stmt_row;  // that statement's row in `from`'s parsed document
 };
 
 // A DocId is fixed by the first include statement naming that path, ordered by
@@ -777,9 +633,9 @@ struct Pending {
 struct LoadDoc {
   StrRef name;        // the resolved key, into Loader::paths
   uint32_t arrived;   // 0 until load_add supplied its bytes
-  Span edges;         // -> Loader::edges, this document'loader includes
+  Span edges;         // -> Loader::edges, this document's includes
   DocId from;         // who claimed it; INVALID for the root
-  uint32_t stmt_row;  // the claiming include statement'loader row in `from`
+  uint32_t stmt_row;  // the claiming statement's row in `from`
 };
 
 // One include statement, discovered. The junction between the document graph
@@ -787,7 +643,7 @@ struct LoadDoc {
 struct IncludeEdge {
   DocId from;
   DocId to;
-  uint32_t stmt_row;  // the include statement'loader row in `from`'loader document
+  uint32_t stmt_row;  // that statement's row in `from`'s document
 };
 
 // Parsed documents are held until finish, which instantiates from their
@@ -828,7 +684,7 @@ bool load_document_bytes(Loader const &loader,
 // `out` gained documents says which pool the diagnostics index.
 bool load_finish(Loader &loader, Chart &out, std::vector<Diagnostic> &diags);
 
-// The filesystem transport, composed from the calls above.
+// Filesystem transport ======================================================
 
 // Reads `path` whole. Returns false when it cannot be opened or read.
 bool read_file(char const *path, std::vector<scav_byte> &out);
@@ -840,21 +696,6 @@ bool load_file(char const *path,
                Chart &out,
                std::vector<Diagnostic> &diags,
                std::string &failed_path);
-
-// Structural hash ===========================================================
-
-// The canonical serialization of a chart's entity arrays and authored text,
-// field by field in array order with every string length-prefixed.
-void chart_digest_bytes(Chart const &c, std::vector<scav_byte> &out);
-
-// xxHash32 over the above.
-uint32_t chart_structural_hash(Chart const &c);
-
-// Validation ================================================================
-
-// Structural checks over the live rows, a tombstoned one only as a target.
-// Appends findings sorted by (code, subject kind, subject ordinal).
-bool validate_chart(Chart const &c, std::vector<Diagnostic> &diags);
 
 }  // namespace scav
 

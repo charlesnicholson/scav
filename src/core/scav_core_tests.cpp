@@ -1,6 +1,7 @@
 // scav_core.h's own vocabulary: ids, spans, checked narrowing, and reading a
 // string pool. The lexer, parser, and normalizer have their own suites.
 
+#include "core/core_internal.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 

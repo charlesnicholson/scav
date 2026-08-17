@@ -1,6 +1,7 @@
 // Corpus charts become entity arrays, placement rules fire, wildcards
 // synthesize, and every entity walks back to its declaring statement.
 
+#include "core/core_internal.h"
 #include "core/tests/test_charts.h"
 #include "core/tests/test_support.h"
 #include "scav/scav_core.h"

@@ -1,6 +1,7 @@
 // Floors, never times, to catch an accidental O(n^2); the scaling assertion is
 // the machine-independent one. Instrumented builds shrink the input.
 
+#include "core/core_internal.h"
 #include "core/tests/test_support.h"
 #include "core/tests/test_synth.h"
 #include "scav/scav_core.h"

@@ -1,6 +1,7 @@
 // Type-erased byte arrays with a stride, indexed by entity ordinal. Stored,
 // kept index-aligned, and passed through unread.
 
+#include "core/core_internal.h"
 #include "core/model/model.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"

@@ -1,6 +1,7 @@
 // Statements to entities in four steps: attach a file's front-end slice,
 // instantiate, rebuild containment, resolve transitions.
 
+#include "core/core_internal.h"
 #include "core/model/model.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"

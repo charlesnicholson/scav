@@ -1,6 +1,7 @@
 // BOM stripping, line-ending folding, UTF-8 validation and the NFC pass over
 // bytes, plus the line/column derivation every diagnostic goes through.
 
+#include "core/core_internal.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 

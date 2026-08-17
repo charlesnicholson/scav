@@ -1,5 +1,6 @@
 #include "core/lang/unicode_nfc.h"
 
+#include "core/core_internal.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 

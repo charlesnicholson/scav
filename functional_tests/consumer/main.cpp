@@ -91,7 +91,7 @@ int check_abi() {
   return rc;
 }
 
-// Parse, lower, validate, resolve through the installed public header, so every
+// Load, validate and resolve through the installed public header, so every
 // section of the API is proven linkable without reaching a private one.
 int check_model() {
   std::string_view const chart_text{ R"(chart consumer "from an installed scav" {
@@ -101,24 +101,24 @@ int check_model() {
   trans Idle -> Running "go",
 })" };
 
-  scav::ParsedDocument doc;
+  scav::Loader loader;
   std::vector<scav::Diagnostic> diags;
-  bool const parsed{ scav::parse_document(
-      reinterpret_cast<scav_byte const *>(chart_text.data()),
-      static_cast<uint32_t>(chart_text.size()),
-      "consumer.scav",
-      scav::parse_default_options(),
-      doc,
-      diags) };
-  if (!parsed) {
+  if (!scav::load_add(loader,
+                      reinterpret_cast<scav_byte const *>(chart_text.data()),
+                      chart_text.size(),
+                      "consumer.scav")) {
     scav::DiagCode const code{ diags.empty() ? scav::DiagCode::Ok : diags[0].code };
-    std::fprintf(stderr, "parse failed: %s\n", scav::diag_message(code));
+    std::fprintf(stderr, "load_add failed: %s\n", scav::diag_message(code));
+    return 1;
+  }
+  if (!scav::load_pending(loader).empty()) {
+    std::fprintf(stderr, "a chart with no includes wanted a document\n");
     return 1;
   }
 
   scav::Chart chart;
-  if (!scav::lower_document(chart, doc, diags)) {
-    std::fprintf(stderr, "lowering reported a diagnostic\n");
+  if (!scav::load_finish(loader, chart, diags)) {
+    std::fprintf(stderr, "load_finish reported a diagnostic\n");
     return 1;
   }
   if (!scav::validate_chart(chart, diags)) {

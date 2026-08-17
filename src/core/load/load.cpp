@@ -1,6 +1,7 @@
 // Two walks. Discovery covers documents, claiming a DocId per unseen key, which
 // `pending` reports. Finish covers instantiations, then resolves endpoints.
 
+#include "core/core_internal.h"
 #include "core/model/model.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
@@ -106,7 +107,7 @@ uint32_t first_back_edge(Loader const &loader) {
 
   struct Frame {
     uint32_t doc;
-    uint32_t next;  // how many of this document'loader edges are walked
+    uint32_t next;  // how many of this document's edges are walked
   };
   std::vector<Frame> stack;
 

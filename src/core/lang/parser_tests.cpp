@@ -1,6 +1,7 @@
 // The grammar statement by statement, plus the statement tree, trivia
 // attachment, the depth cap and every diagnostic. Charts are inline literals.
 
+#include "core/core_internal.h"
 #include "core/tests/test_support.h"
 #include "core/tests/test_synth.h"
 #include "scav/scav_core.h"

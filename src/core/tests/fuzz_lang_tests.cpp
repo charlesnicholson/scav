@@ -1,6 +1,7 @@
 // A deterministic mutation sweep, running in the ordinary suite. The bar is
 // that nothing crashes and every diagnostic still points inside its document.
 
+#include "core/core_internal.h"
 #include "core/tests/test_support.h"
 #include "core/tests/test_synth.h"
 #include "scav/scav_core.h"

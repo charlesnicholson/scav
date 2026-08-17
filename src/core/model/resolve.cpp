@@ -1,6 +1,7 @@
 // The first segment is lexically scoped -- innermost submachine outward,
 // nearest match winning -- and every later segment descends strictly.
 
+#include "core/core_internal.h"
 #include "core/model/model.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"

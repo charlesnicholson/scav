@@ -1,6 +1,7 @@
 // A deterministic sweep over malformed networks. The loader terminates, every
 // diagnostic lands inside its document, and any chart returned is resolved.
 
+#include "core/core_internal.h"
 #include "core/tests/test_support.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"

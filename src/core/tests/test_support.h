@@ -4,6 +4,7 @@
 // Shared by the core unit tests, header-only and test-only. Charts are inline
 // literals, so nothing here reaches a filesystem.
 
+#include "core/core_internal.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 

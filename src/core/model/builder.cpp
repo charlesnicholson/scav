@@ -1,6 +1,7 @@
 // The append-only builder. An append inside a shared array -- state_ids,
 // submachine_ids, attrs -- shifts it and fixes every span into it.
 
+#include "core/core_internal.h"
 #include "core/model/model.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"

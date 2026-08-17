@@ -1,6 +1,7 @@
 // Two ways of reaching one model agree: a depth-16 / 2k-state chart built and
 // parsed, and a three-document network loaded from memory and from disk.
 
+#include "core/core_internal.h"
 #include "core/tests/test_support.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
