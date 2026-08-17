@@ -39,9 +39,8 @@ bool read_file(char const *path, std::vector<scav_byte> &out) {
   std::FILE *const file{ std::fopen(path, "rb") };
   if (file == nullptr) { return false; }
 
-  // ferror is checked at each read rather than after the loop: a stream's
-  // position is indeterminate once an operation has failed, so nothing may
-  // touch it again.
+  // The loop exits on the stream's own flags rather than on a short read: once
+  // either is set the stream may not be touched again, short read or not.
   std::array<scav_byte, READ_CHUNK> buffer{};
   bool ok{ true };
   for (;;) {
@@ -51,7 +50,7 @@ bool read_file(char const *path, std::vector<scav_byte> &out) {
       ok = false;
       break;
     }
-    if (got < buffer.size()) { break; }
+    if (std::feof(file) != 0) { break; }
   }
   std::ignore = std::fclose(file);
   if (!ok) { out.clear(); }

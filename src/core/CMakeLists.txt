@@ -39,6 +39,9 @@ target_include_directories(scav_shared PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>")
 set_target_properties(scav_shared PROPERTIES
   OUTPUT_NAME scav
+  # OUTPUT_NAME would land this on the scav executable's own PDB, and the two
+  # links race for the write. The PDB alone keeps the target name.
+  PDB_NAME scav_shared
   # MSVC exports nothing without either a .def file or this.
   WINDOWS_EXPORT_ALL_SYMBOLS TRUE
 )
