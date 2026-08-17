@@ -102,6 +102,9 @@ function(scav_warnings_init)
     else()
       target_compile_options(scav_warnings INTERFACE ${SCAV_WARNINGS_MSVC})
     endif()
+    # The CRT deprecates the standard <cstdio> entry points in favour of
+    # Annex K, and clang-cl inherits that through the same headers.
+    target_compile_definitions(scav_warnings INTERFACE _CRT_SECURE_NO_WARNINGS)
     if(SCAV_WARNINGS_AS_ERRORS)
       target_compile_options(scav_warnings INTERFACE /WX)
     endif()

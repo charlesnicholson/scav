@@ -188,7 +188,7 @@ class TestLoadOverCtypes(unittest.TestCase):
     def shared_library(cls) -> Path:
         names = ("libscav.dylib", "libscav.so", "scav.dll")
         for where in (cls.cfg.build_dir / "bin", cls.cfg.build_dir / "lib",
-                      cls.cfg.build_dir / "src" / "abi"):
+                      cls.cfg.build_dir / "src" / "core"):
             for name in names:
                 if (where / name).is_file():
                     return where / name

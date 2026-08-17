@@ -110,6 +110,13 @@ TEST_CASE("path: a drive letter is an opaque root, and stays one") {
   CHECK(resolved("C:vac.scav", "dock.scav") == "C:dock.scav");
 }
 
+TEST_CASE("path: a drive letter needs its separator to resolve under it") {
+  // What load_file's native-path conversion is for: spelled with backslashes,
+  // the drive prefix is the whole root and a sibling lands beside the drive.
+  CHECK(resolved("D:\\a\\vac.scav", "dock.scav") == "D:dock.scav");
+  CHECK(resolved("D:/a/vac.scav", "dock.scav") == "D:/a/dock.scav");
+}
+
 TEST_CASE("path: a backslash is an ordinary byte") {
   // Not a separator, so it survives into the key verbatim.
   CHECK(resolved("a/vac.scav", "sub\\dock.scav") == "a/sub\\dock.scav");

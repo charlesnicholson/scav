@@ -14,7 +14,24 @@
 
 namespace scav {
 
-namespace { constexpr size_t READ_CHUNK{ size_t{ 64 } * 1024U }; }  // namespace
+namespace {
+
+constexpr size_t READ_CHUNK{ size_t{ 64 } * 1024U };
+
+// Document names are `/`-separated on every transport, so the one entry point
+// taking a native path converts it. A backslash is a legal filename byte off
+// Windows, where this would corrupt a name rather than fix it.
+std::string native_to_key(char const *path) {
+  std::string out{ (path == nullptr) ? "" : path };
+#ifdef _WIN32
+  for (char &ch : out) {
+    if (ch == '\\') { ch = '/'; }
+  }
+#endif
+  return out;
+}
+
+}  // namespace
 
 bool read_file(char const *path, std::vector<scav_byte> &out) {
   out.clear();
@@ -46,7 +63,8 @@ bool load_file(char const *path,
     failed_path.assign((path == nullptr) ? "" : path);
     return false;
   }
-  if (!load_add(loader, bytes.data(), bytes.size(), path)) {
+  std::string const root{ native_to_key(path) };
+  if (!load_add(loader, bytes.data(), bytes.size(), root)) {
     return load_finish(loader, out, diags);
   }
 
