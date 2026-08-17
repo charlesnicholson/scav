@@ -30,7 +30,8 @@ enum {
 /* Bumped whenever anything below changes shape. A binding checks it once. */
 uint32_t scav_abi_version(void);
 
-/* NOLINTBEGIN(modernize-use-using) -- `typedef` is the C spelling */
+/* NOLINTBEGIN(modernize-use-using, readability-identifier-naming) --
+ * `typedef` is the C spelling, and a handle's tag is its ABI name. */
 typedef struct scav_load scav_load;
 typedef struct scav_chart scav_chart;
 
@@ -42,7 +43,7 @@ typedef struct {
   uint32_t from;
   uint32_t stmt_row;
 } scav_pending;
-/* NOLINTEND(modernize-use-using) */
+/* NOLINTEND(modernize-use-using, readability-identifier-naming) */
 
 /* Add the root, read pending, resolve each however you like, add each, repeat
  * until empty, finish. */

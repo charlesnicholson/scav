@@ -88,7 +88,7 @@ Run drive(std::vector<Doc> const &corpus, uint64_t order) {
 
     // A deterministic rotation of the batch, derived from the seed.
     if (wanted.size() > 1) {
-      size_t const by{ static_cast<size_t>(rnd(order, round) % wanted.size()) };
+      size_t const by{ narrow_clamp<size_t>(rnd(order, round) % wanted.size()) };
       std::vector<std::string> rotated;
       rotated.reserve(wanted.size());
       for (size_t i = 0; i < wanted.size(); ++i) {
