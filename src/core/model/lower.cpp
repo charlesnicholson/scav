@@ -80,18 +80,20 @@ void lower_attr(Lowerer &lo, uint32_t row, ElemRef subject) {
   std::string composed;
   for (uint32_t i = 0; i < stmt.entries.len; ++i) {
     AttrEntry const &entry{ lo.pd->attr_entries[stmt.entries.off + i] };
-    std::string_view key{ pd_str(lo, entry.key) };
-    if (!ns.empty()) {
+    std::string_view const key{ [&] {
+      std::string_view const bare{ pd_str(lo, entry.key) };
+      if (ns.empty()) { return bare; }
       composed.assign(ns);
       composed.push_back(':');
-      composed += key;
-      key = composed;
-    }
+      composed += bare;
+      return std::string_view{ composed };
+    }() };
     // Stamped from the returned index before the next append, which would
     // shift it.
     auto const append = [&](std::string_view value) {
-      uint32_t const at{ build_attr(*lo.c, subject, key, value) };
-      if (at != INVALID) { lo.c->attrs[at].stmt = global_stmt(lo, row); }
+      if (uint32_t const at{ build_attr(*lo.c, subject, key, value) }; at != INVALID) {
+        lo.c->attrs[at].stmt = global_stmt(lo, row);
+      }
     };
     switch (entry.kind) {
       case AttrValueKind::Flag: append("true"); break;
@@ -181,9 +183,9 @@ void lower_entities(Lowerer &lo,
               .inst = lo.inst,
               .live = 1 }) };
         if (lo.pd->stmt_children[row].len != 0) {
-          SubmachineId implicit{ INVALID };
-          if (needs_implicit_submachine(*lo.pd, row)) {
-            implicit = model_append_submachine_row(
+          SubmachineId const implicit{ [&]() -> SubmachineId {
+            if (!needs_implicit_submachine(*lo.pd, row)) { return { INVALID }; }
+            return model_append_submachine_row(
                 *lo.c,
                 { .owner = id,
                   .ordinal = 0,  // assigned for real by the containment rebuild
@@ -194,7 +196,7 @@ void lower_entities(Lowerer &lo,
                   .stmt = global_stmt(lo, row),
                   .inst = lo.inst,
                   .live = 1 });
-          }
+          }() };
           stack.push_back(
               { .children = lo.pd->stmt_children[row],
                 .next = 0,

@@ -104,8 +104,9 @@ ResolveStatus model_resolve_segments(Chart const &c,
   StateId const found{ [&] {
     SubmachineId sm{ scope };
     for (size_t guard = 0; guard <= c.submachines.size(); ++guard) {
-      StateId const hit{ find_in_submachine(c, sm, segs[0].name) };
-      if (hit.v != INVALID) { return hit; }
+      if (StateId const hit{ find_in_submachine(c, sm, segs[0].name) }; hit.v != INVALID) {
+        return hit;
+      }
       StateId const owner{ c.submachines[sm.v].owner };
       if ((owner.v == INVALID) || (owner.v >= c.states.size())) { break; }
       if (c.submachines[sm.v].inst != c.states[owner.v].inst) { break; }
@@ -119,8 +120,10 @@ ResolveStatus model_resolve_segments(Chart const &c,
   StateId cur{ found };
   for (uint32_t i = 0; i + 1 < count; ++i) {
     SubmachineId next{ INVALID };
-    ResolveStatus const status{ select_submachine(c, cur, segs[i], next) };
-    if (status != ResolveStatus::Ok) { return status; }
+    if (ResolveStatus const status{ select_submachine(c, cur, segs[i], next) };
+        status != ResolveStatus::Ok) {
+      return status;
+    }
     cur = find_in_submachine(c, next, segs[i + 1].name);
     if (cur.v == INVALID) { return ResolveStatus::NotFound; }
   }

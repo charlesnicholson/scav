@@ -64,8 +64,11 @@ void append_state_segment(std::string &out, Chart const &c, StateId id) {
     out += chart_string(c, s.name);
     return;
   }
-  std::string path;
-  chart_path_of(c, id, path);
+  std::string const path{ [&] {
+    std::string p;
+    chart_path_of(c, id, p);
+    return p;
+  }() };
   size_t const slash{ path.rfind('/') };
   out += (slash == std::string::npos) ? path : path.substr(slash + 1);
 }
@@ -104,8 +107,9 @@ void append_model(std::string &out, Chart const &c) {
     for (uint32_t i = 0; i < c.transitions.size(); ++i) {
       Transition const &t{ c.transitions[i] };
       if ((t.live == 0) || (t.src.v >= c.states.size())) { continue; }
-      uint32_t const owner{ c.states[t.src.v].parent.v };
-      if (owner < by_sub.size()) { by_sub[owner].push_back(i); }
+      if (uint32_t const owner{ c.states[t.src.v].parent.v }; owner < by_sub.size()) {
+        by_sub[owner].push_back(i);
+      }
     }
     return by_sub;
   }() };
@@ -186,13 +190,9 @@ void append_model(std::string &out, Chart const &c) {
           Transition const &t{ c.transitions[idx] };
           append_indent(out, f.depth);
           out += "trans ";
-          std::string path;
-          chart_path_of(c, t.src, path);
-          out += path;
+          chart_path_of(c, t.src, out);
           out += " -> ";
-          path.clear();
-          chart_path_of(c, t.dst, path);
-          out += path;
+          chart_path_of(c, t.dst, out);
           if (t.kind != TransKind::External) {
             out += ' ';
             out += syntax_trans_kind_name(t.kind);
@@ -273,31 +273,27 @@ void append_chart_diag(std::string &out,
                        char const *path,
                        Chart const &c,
                        Diagnostic const &d) {
-  Span span{ d.src };
-  DocId doc{ d.doc };
-  if ((span.len == 0) && (d.subject.kind != ElemKind::None) &&
-      chart_ref_valid(c, d.subject)) {
-    // A model diagnostic carries only its subject, so the position comes from
-    // walking to that subject's statement.
-    StmtId stmt{ INVALID };
+  // A model diagnostic carries only its subject, so the position comes from
+  // walking to that subject's statement.
+  StmtId const stmt{ [&]() -> StmtId {
+    if ((d.src.len != 0) || !chart_ref_valid(c, d.subject)) { return { INVALID }; }
     switch (d.subject.kind) {
-      case ElemKind::State: stmt = c.states[d.subject.ordinal].stmt; break;
-      case ElemKind::Submachine: stmt = c.submachines[d.subject.ordinal].stmt; break;
-      case ElemKind::Transition: stmt = c.transitions[d.subject.ordinal].stmt; break;
+      case ElemKind::State: return c.states[d.subject.ordinal].stmt;
+      case ElemKind::Submachine: return c.submachines[d.subject.ordinal].stmt;
+      case ElemKind::Transition: return c.transitions[d.subject.ordinal].stmt;
       case ElemKind::Chart:
-        stmt = (c.root_submachine.v >= c.submachines.size())
+        return (c.root_submachine.v >= c.submachines.size())
                    ? StmtId{ INVALID }
                    : c.submachines[c.root_submachine.v].stmt;
-        break;
       case ElemKind::Point:
       case ElemKind::PathBox:
       case ElemKind::None: break;
     }
-    if ((stmt.v != INVALID) && (stmt.v < c.stmts.size())) {
-      span = c.stmts[stmt.v].src;
-      doc = c.stmts[stmt.v].doc;
-    }
-  }
+    return { INVALID };
+  }() };
+  bool const walked{ (stmt.v != INVALID) && (stmt.v < c.stmts.size()) };
+  Span const span{ walked ? c.stmts[stmt.v].src : d.src };
+  DocId const doc{ walked ? c.stmts[stmt.v].doc : d.doc };
   // The document carrying the statement, which in a network is often not the
   // one named on the command line.
   if ((span.len != 0) && (doc.v < c.documents.size())) {
@@ -326,7 +322,7 @@ int dump(char const *path, bool hash_only) {
   Chart c;
   std::vector<Diagnostic> diags;
   std::string failed;
-  bool loaded{ load_file(path, loader, c, diags, failed) };
+  bool const loaded{ load_file(path, loader, c, diags, failed) };
 
   if (!failed.empty()) {
     err += "scav: cannot read '";
@@ -344,7 +340,7 @@ int dump(char const *path, bool hash_only) {
     return 2;
   }
 
-  loaded = validate_chart(c, diags) && loaded;
+  bool const clean{ validate_chart(c, diags) && loaded };
   for (Diagnostic const &d : diags) { append_chart_diag(err, path, c, d); }
   write_stream(err, stderr);
 
@@ -355,7 +351,7 @@ int dump(char const *path, bool hash_only) {
     append_model(out, c);
   }
   write_stream(out, stdout);
-  return loaded ? 0 : 1;
+  return clean ? 0 : 1;
 }
 
 }  // namespace

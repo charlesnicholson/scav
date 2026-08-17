@@ -96,8 +96,9 @@ Span *attrs_span_of(Chart &c, ElemRef ref) {
 }
 
 AttrKeyId attr_key_intern(Chart &c, std::string_view key) {
-  AttrKeyId const found{ chart_attr_key_find(c, key) };
-  if (found.v != INVALID) { return found; }
+  if (AttrKeyId const found{ chart_attr_key_find(c, key) }; found.v != INVALID) {
+    return found;
+  }
   AttrKeyId const id{ size32(c.attr_key_names.size()) };
   c.attr_key_names.push_back(string_pool_add(c.attr_keys, key));
   return id;

@@ -47,8 +47,9 @@ void model_state_segment(Chart const &c, StateId id, std::string &out) {
   }
   out += '$';
   out += syntax_state_kind_name(s.kind);
-  uint32_t const ordinal{ synthetic_ordinal(c, id) };
-  if (ordinal != 0) { out += std::to_string(ordinal); }
+  if (uint32_t const ordinal{ synthetic_ordinal(c, id) }; ordinal != 0) {
+    out += std::to_string(ordinal);
+  }
 }
 
 StrRef string_pool_add(StringPool &pool, std::string_view text) {
@@ -130,8 +131,9 @@ uint32_t chart_attr_find(Chart const &c, ElemRef subject, std::string_view key) 
   if (!chart_live(c, subject)) { return INVALID; }
   Span const span{ chart_attrs_of(c, subject) };
   for (uint32_t i = 0; i < span.len; ++i) {
-    uint32_t const at{ span.off + i };
-    if (chart_attr_key(c, c.attrs[at].key) == key) { return at; }
+    if (uint32_t const at{ span.off + i }; chart_attr_key(c, c.attrs[at].key) == key) {
+      return at;
+    }
   }
   return INVALID;
 }
