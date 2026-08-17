@@ -1,3 +1,4 @@
+#include "core/core_internal.h"
 #include "scav/scav_core.h"
 
 #include "scav/scav_types.h"
@@ -82,9 +83,8 @@ bool expect(Parser &p, TokKind kind, DiagCode code) {
   return true;
 }
 
-// Straight into the document's pool, in the order the parser meets them. No
-// dedup: a repeated name costs its own bytes, and nothing asks whether two
-// StrRefs are the same string.
+// Straight into the document's pool in the order the parser meets them, so a
+// repeated name costs its own bytes.
 StrRef pool_append(Parser &p, scav_byte const *bytes, size_t len) {
   if (len == 0) { return {}; }
   std::vector<scav_byte> &pool{ p.pd->strings.bytes };
@@ -321,9 +321,8 @@ bool parse_state(Parser &p, uint32_t &out_stmt, bool &opens_block) {
 
   StateStmt stmt{ .name = {}, .label = {}, .kind = StateKind::Normal, .has_block = 0 };
   if (!take_name(p, stmt.name)) { return false; }
-  // The name slot is first and mandatory, so a bare identifier after it can only
-  // be a kind -- unless it is reserved, in which case it is the next statement
-  // with its comma missing, and saying so beats "unknown state kind: state".
+  // The name slot is first and mandatory, so a bare identifier after it is a
+  // kind -- or, if reserved, the next statement with its comma missing.
   if (at_kind(p, TokKind::Ident) && !lex_is_reserved_word(tok_text(p, peek(p)))) {
     Token const &t{ peek(p) };
     if (!syntax_state_kind_from_name(tok_text(p, t), stmt.kind)) {
@@ -529,9 +528,8 @@ struct WalkFrame {
   uint32_t last_child;  // the sibling a trailing comment attaches to
 };
 
-// Positional, and after the tree is built: a block statement's leading and
-// trailing trivia are separated in source order by all of its children's, so the
-// owner is only knowable once the spans close. Iterative, like the parser.
+// Positional, and after the tree is built: a block's leading and trailing
+// trivia are separated by all of its children's.
 void attach_comments(ParsedDocument &pd, std::vector<LexComment> const &lexed) {
   uint32_t const n{ narrow_clamp<uint32_t>(lexed.size()) };
   pd.comments.clear();
@@ -633,10 +631,8 @@ bool parse_tokens(scav_byte const *bytes,
   out.src_bytes.assign(bytes, bytes + len);
   out.doc.text = make_span(0, len);
 
-  // A statement is a keyword plus a couple of tokens, so tokens/4 lands close
-  // enough to spare the statement arrays their doubling copies. An
-  // underestimate just means one late growth; the memory floor reads capacity,
-  // so guessing high would be the costly direction.
+  // A statement is a keyword plus a couple of tokens, so tokens/4 spares the
+  // statement arrays most of their doubling copies.
   uint32_t const stmt_estimate{ narrow_clamp<uint32_t>(lexed.tokens.size() / 4) };
   out.stmts.reserve(stmt_estimate);
   out.stmt_payload.reserve(stmt_estimate);

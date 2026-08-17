@@ -1,7 +1,7 @@
-// Extension columns: type-erased byte arrays with a stride, indexed by entity
-// ordinal. The core stores them, keeps them index-aligned, and passes them
-// through unread -- what it owes an extension, and nothing more.
+// Type-erased byte arrays with a stride, indexed by entity ordinal. Stored,
+// kept index-aligned, and passed through unread.
 
+#include "core/core_internal.h"
 #include "core/model/model.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
@@ -21,7 +21,7 @@ bool column_entity_allowed(ElemKind entity) {
     case ElemKind::Submachine:
     case ElemKind::Transition:
     case ElemKind::Chart:
-    case ElemKind::Point:  // geometry's; length is the column's own (§11.7a)
+    case ElemKind::Point:  // length is the column's own, not an entity count
       return true;
     case ElemKind::PathBox:
     case ElemKind::None:
@@ -42,8 +42,7 @@ ColumnId column_register(Chart &c,
   if ((elem_size == 0) || (elem_align == 0) || ((elem_size % elem_align) != 0)) {
     return { INVALID };
   }
-  // A column is an identity: re-registering a name is a caller bug, not an
-  // upsert, or two plugins could silently share one column with two layouts.
+  // Re-registering a name is a caller bug, not an upsert.
   if (column_find(c, name).v != INVALID) { return { INVALID }; }
 
   ColumnId const id{ narrow_clamp<uint32_t>(c.columns.size()) };
@@ -53,8 +52,8 @@ ColumnId column_register(Chart &c,
                          .elem_size = elem_size,
                          .elem_align = elem_align,
                          .flags = flags };
-  // Sized to the rows that already exist, zero-filled: registration order and
-  // append order must not matter to what a column covers.
+  // Sized to the rows that already exist, so registration order does not change
+  // what a column covers.
   uint64_t const count{ chart_entity_count(c, entity) };
   c.columns.push_back(
       { .desc = desc,

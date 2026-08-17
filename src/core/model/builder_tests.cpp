@@ -1,6 +1,5 @@
-// The append-only builder: rows land where their ids say, spans stay
-// contiguous under out-of-order appends, and a bad call refuses rather than
-// building garbage.
+// Rows land where their ids say, spans stay contiguous under out-of-order
+// appends, and a bad call refuses.
 
 #include "core/tests/test_support.h"
 #include "scav/scav_core.h"
@@ -19,9 +18,7 @@ namespace {
 using namespace scav;
 using namespace scav::test;
 
-// Every id and span in the chart lands inside the array it names. The
-// hand-rolled half of P1's "every ref resolves" property; validation (§10)
-// will restate it as diagnostics.
+// Every id and span in the chart lands inside the array it names.
 void check_refs_resolve(Chart const &c) {
   for (State const &s : c.states) {
     CHECK(s.parent.v < c.submachines.size());
@@ -70,7 +67,7 @@ TEST_CASE("build: build_chart names the chart and returns the root submachine") 
   CHECK(c.submachines[0].owner.v == INVALID);
   CHECK(c.submachines[0].ordinal == 0);
   CHECK(c.submachines[0].live == 1);
-  // The root is the chart's implicit submachine, so it is unnamed (§15).
+  // The root is the chart's implicit submachine, so it is unnamed.
   CHECK(c.submachines[0].name.len == 0);
 }
 
@@ -255,11 +252,12 @@ TEST_CASE("build: attrs refuse an empty key, a dead subject, and a non-subject")
 TEST_CASE("build: an include synthesizes its alias host state") {
   Chart c;
   SubmachineId const root{ build_chart(c, "c", {}) };
-  InstId const inc{ build_include(c, root, "wifi") };
+  InstId const inc{ build_include(c, root, "wifi", "net/wifi.scav") };
   REQUIRE(inc.v == 0);
   Include const &row{ c.includes[inc.v] };
   CHECK(chart_string(c, row.alias) == "wifi");
-  CHECK(row.target.v == INVALID);  // the loader's to fill (P2)
+  CHECK(chart_string(c, row.path) == "net/wifi.scav");
+  CHECK(row.target.v == INVALID);  // the loader's to fill
   CHECK(row.stmt.v == INVALID);
   REQUIRE(row.host.v < c.states.size());
   State const &host{ c.states[row.host.v] };
@@ -267,18 +265,29 @@ TEST_CASE("build: an include synthesizes its alias host state") {
   CHECK(host.parent == root);
   CHECK(host.kind == StateKind::Normal);
   // The host is an ordinary state, so it is an ordinary path: `wifi` is a
-  // state (§9).
+  // state.
   CHECK(path(c, row.host) == "wifi");
   check_refs_resolve(c);
 }
 
-TEST_CASE("build: an include refuses an empty alias and a bad parent") {
+TEST_CASE("build: an include refuses an empty alias, an empty path, a bad parent") {
   Chart c;
   SubmachineId const root{ build_chart(c, "c", {}) };
-  CHECK(build_include(c, root, "").v == INVALID);
-  CHECK(build_include(c, SubmachineId{ 9 }, "w").v == INVALID);
+  CHECK(build_include(c, root, "", "w.scav").v == INVALID);
+  CHECK(build_include(c, root, "w", "").v == INVALID);
+  CHECK(build_include(c, SubmachineId{ 9 }, "w", "w.scav").v == INVALID);
   CHECK(c.includes.empty());
   CHECK(c.states.empty());
+}
+
+TEST_CASE("build: an include's alias interns once, not once per row") {
+  // The pool never deduplicates, so a second add of the same bytes is a second
+  // copy. The host state and the Include row are the same name and share one.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "c", {}) };
+  InstId const inc{ build_include(c, root, "wifi", "wifi.scav") };
+  REQUIRE(inc.v != INVALID);
+  CHECK(c.includes[inc.v].alias == c.states[c.includes[inc.v].host.v].name);
 }
 
 TEST_CASE("build: a walk skips tombstoned rows and never renumbers live ones") {
@@ -287,7 +296,7 @@ TEST_CASE("build: a walk skips tombstoned rows and never renumbers live ones") {
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
-  c.states[b.v].live = 0;  // no delete API in P1: tests poke the flag (§7.3)
+  c.states[b.v].live = 0;  // no delete API; a test pokes the flag
   CHECK(live_children(c, root) == std::vector<StateId>{ a, d });
   // The dead row keeps its slot in the span -- compaction would invalidate
   // every other span into the array.

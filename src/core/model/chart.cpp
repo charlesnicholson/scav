@@ -1,6 +1,7 @@
 // Reads over the model, and the string-pool append everything else builds on.
 // Nothing here mutates a chart.
 
+#include "core/core_internal.h"
 #include "core/model/model.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
@@ -20,9 +21,8 @@ uint64_t bytes_of(std::vector<T> const &v) {
   return static_cast<uint64_t>(v.capacity()) * sizeof(T);
 }
 
-// Position of `id` among its parent's unnamed same-kind siblings, counting
-// every row: liveness-independent, so tombstoning one sibling never renames
-// another.
+// Position of `id` among its parent's unnamed same-kind siblings. Counts every
+// row rather than the live ones, so tombstoning a sibling renames nothing.
 uint32_t synthetic_ordinal(Chart const &c, StateId id) {
   State const &s{ c.states[id.v] };
   Span const kids{ c.submachines[s.parent.v].children };
@@ -38,9 +38,8 @@ uint32_t synthetic_ordinal(Chart const &c, StateId id) {
 
 }  // namespace
 
-// One path segment: the authored name, or `$<kind>` with an ordinal suffix
-// past the first. The grammar's ident admits neither `$` nor a leading digit,
-// so a synthetic name can never collide with an authored one.
+// One path segment: the authored name, or `$<kind>` with an ordinal suffix past
+// the first. An ident admits no `$`, so the two spellings cannot collide.
 void model_state_segment(Chart const &c, StateId id, std::string &out) {
   State const &s{ c.states[id.v] };
   if (s.name.len != 0) {
@@ -49,8 +48,9 @@ void model_state_segment(Chart const &c, StateId id, std::string &out) {
   }
   out += '$';
   out += syntax_state_kind_name(s.kind);
-  uint32_t const ordinal{ synthetic_ordinal(c, id) };
-  if (ordinal != 0) { out += std::to_string(ordinal); }
+  if (uint32_t const ordinal{ synthetic_ordinal(c, id) }; ordinal != 0) {
+    out += std::to_string(ordinal);
+  }
 }
 
 StrRef string_pool_add(StringPool &pool, std::string_view text) {
@@ -67,8 +67,7 @@ std::string_view chart_attr_key(Chart const &c, AttrKeyId key) {
 }
 
 AttrKeyId chart_attr_key_find(Chart const &c, std::string_view key) {
-  // Linear over the interned keys: a chart holds few distinct keys, and the
-  // sorted index this could use is derived-scratch that P1 has no caller for.
+  // Linear over the interned keys; a chart holds few distinct ones.
   for (uint32_t i = 0; i < c.attr_key_names.size(); ++i) {
     if (string_pool_view(c.attr_keys, c.attr_key_names[i]) == key) { return { i }; }
   }
@@ -133,8 +132,9 @@ uint32_t chart_attr_find(Chart const &c, ElemRef subject, std::string_view key) 
   if (!chart_live(c, subject)) { return INVALID; }
   Span const span{ chart_attrs_of(c, subject) };
   for (uint32_t i = 0; i < span.len; ++i) {
-    uint32_t const at{ span.off + i };
-    if (chart_attr_key(c, c.attrs[at].key) == key) { return at; }
+    if (uint32_t const at{ span.off + i }; chart_attr_key(c, c.attrs[at].key) == key) {
+      return at;
+    }
   }
   return INVALID;
 }
@@ -142,10 +142,8 @@ uint32_t chart_attr_find(Chart const &c, ElemRef subject, std::string_view key) 
 void chart_path_of(Chart const &c, StateId id, std::string &out) {
   if (id.v >= c.states.size()) { return; }
 
-  // Collect the ancestor chain leaf-first. Under the append-only builder an
-  // owner's id is always smaller than its descendants', so the climb
-  // terminates; the guard turns a hand-corrupted model into a truncated path
-  // rather than a hang.
+  // The ancestor chain, leaf-first. An owner's id is below its descendants', so
+  // the climb terminates; the guard truncates rather than hangs on a bad one.
   auto const chain{ [&] {
     std::vector<StateId> links;
     links.reserve(17);  // the depth-16 design target plus the leaf; deeper is legal
@@ -165,10 +163,8 @@ void chart_path_of(Chart const &c, StateId id, std::string &out) {
     StateId const step{ chain[i] };
     model_state_segment(c, step, out);
     if (i == 0) { continue; }
-    // The qualifier names which of `step`'s submachines the next segment
-    // descends into, and only ambiguity earns one: `On:main/Idle` when On has
-    // two submachines, `On/Idle` when it has one. Row count, not live count,
-    // so a tombstoned sibling submachine never changes an address.
+    // Only ambiguity earns a qualifier: `On:main/Idle` against `On/Idle`. Row
+    // count, not live count, so a tombstoned sibling never moves an address.
     StateId const child{ chain[i - 1] };
     SubmachineId const sm{ c.states[child.v].parent };
     if (c.states[step.v].submachines.len > 1) {

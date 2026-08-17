@@ -1,3 +1,4 @@
+#include "core/core_internal.h"
 #include "scav/scav_core.h"
 
 #include "core/lang/unicode_nfc.h"
@@ -150,9 +151,8 @@ bool source_text_is_nfc(scav_byte const *bytes, size_t len) {
   return true;
 }
 
-// The slow lane of source_text_to_nfc: decode [at, stop) to codepoints,
-// normalize, and re-encode into `out`. Returns whether normalization changed
-// anything.
+// The slow lane of source_text_to_nfc: decode [at, stop), normalize, re-encode
+// into `out`. Returns whether anything changed.
 namespace {
 
 bool nfc_segment(scav_byte const *bytes,
@@ -188,13 +188,8 @@ bool source_text_to_nfc(scav_byte const *bytes, size_t len, std::vector<scav_byt
   out.clear();
   out.reserve(len);
 
-  // ASCII runs pass through verbatim; only the segments around non-ASCII
-  // bytes take the decode-normalize-encode lane. The boundaries are sound
-  // because every ASCII character is a starter and never the second half of a
-  // composition: the last ASCII character *before* a cluster may compose with
-  // a combining mark that follows it, so it rides along into the slow lane,
-  // while the first ASCII character *after* a cluster cannot interact with
-  // anything before it and is where the fast lane resumes.
+  // ASCII runs copy verbatim. The slow lane starts one character early, since
+  // a following mark may compose with it, and resumes at the next ASCII.
   size_t at{ 0 };
   bool changed{ false };
   while (at < len) {
@@ -250,10 +245,8 @@ bool source_text_normalize(scav_byte const *bytes,
   out.reserve(checked_len - at);
   bool multibyte{ false };
   while (at < checked_len) {
-    // Bytes that are neither CR nor the start of a multi-byte sequence pass
-    // through untouched, so they are copied as a run rather than one at a time --
-    // on an ASCII document with LF endings that is the entire file in one memcpy.
-    // A byte at a time cost more than the rest of a parse put together.
+    // Bytes that are neither CR nor a multi-byte lead copy as a run, which on
+    // an ASCII document with LF endings is the whole file in one memcpy.
     uint32_t const run{ [&] {
       uint32_t r{ at };
       while ((r < checked_len) && (bytes[r] < 0x80U) && (bytes[r] != '\r')) { ++r; }
@@ -284,9 +277,8 @@ bool source_text_normalize(scav_byte const *bytes,
     at += width;
   }
 
-  // ASCII is NFC by construction, and the loop above already looked at every
-  // byte -- so a document it copied as pure runs skips the NFC pass instead of
-  // paying a second full scan to learn nothing.
+  // ASCII is NFC by construction and the loop above saw every byte, so a
+  // document copied as pure runs skips the NFC pass.
   if (multibyte && !source_text_is_nfc(out.data(), out.size())) {
     std::vector<scav_byte> composed;
     source_text_to_nfc(out.data(), out.size(), composed);

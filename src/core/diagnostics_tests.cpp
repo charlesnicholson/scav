@@ -66,9 +66,8 @@ TEST_CASE("diag: the column counts characters, not bytes") {
   std::string_view const text{ "\xc3\xa9\xc3\xa9x" };  // e-acute, e-acute, x
   CHECK(at(text, 4).column == 3);
   CHECK(at(text, 2).column == 2);
-  // An offset inside a character reports the next column, because the lead byte
-  // is already behind it. Spans come from the lexer and start on a boundary, so
-  // this is pinned rather than relied on.
+  // An offset inside a character reports the next column. Lexer spans start on
+  // a boundary, so this is pinned rather than relied on.
   CHECK(at(text, 1).column == 2);
 }
 

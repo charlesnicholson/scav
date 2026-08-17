@@ -1,16 +1,16 @@
 chart brew "espresso machine" (test_data/charts/brew.scav:5)
-  @doc = "counter-top espresso robot"
-  @power:mains = "true"
-  @power:watts = "1200"
+  @doc = "counter-top espresso robot" (test_data/charts/brew.scav:6)
+  @power:mains = "true" (test_data/charts/brew.scav:7)
+  @power:watts = "1200" (test_data/charts/brew.scav:7)
   submachine :0 (test_data/charts/brew.scav:5)
     state Off (test_data/charts/brew.scav:9)
     state Standby "warm and idle" (test_data/charts/brew.scav:10)
     state SelfCheck choice (test_data/charts/brew.scav:11)
     state Brewing (test_data/charts/brew.scav:18)
-      @doc = "both submachines run while a shot pulls"
+      @doc = "both submachines run while a shot pulls" (test_data/charts/brew.scav:19)
       submachine water "boiler and pump" (test_data/charts/brew.scav:21)
         state Heating (test_data/charts/brew.scav:22)
-          @tune = "pid"
+          @tune = "pid" (test_data/charts/brew.scav:22)
         state Pumping (test_data/charts/brew.scav:23)
         state $initial (test_data/charts/brew.scav:24)
         trans Brewing:water/$initial -> Brewing:water/Heating (test_data/charts/brew.scav:24)

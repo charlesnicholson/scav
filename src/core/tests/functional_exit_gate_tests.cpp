@@ -1,13 +1,7 @@
-// P1's exit gate (§17): build, validate, and walk a depth-16 / 2k-state chart
-// from code with no text involved; then the same chart via P0's parser,
-// structurally identical.
-//
-// One GateSpec drives two generators kept side by side: gate_text writes the
-// chart as .scav source, gate_build makes the same builder calls in the order
-// lowering would make them. The structural compare is field-level -- ids,
-// kinds, dereferenced names, span sequences -- and excludes provenance, which
-// is exactly the part that legitimately differs between the two paths.
+// Two ways of reaching one model agree: a depth-16 / 2k-state chart built and
+// parsed, and a three-document network loaded from memory and from disk.
 
+#include "core/core_internal.h"
 #include "core/tests/test_support.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
@@ -47,9 +41,8 @@ std::string composite_name(uint32_t root, uint32_t level) {
 
 std::string leaf_name(uint32_t j) { return "A" + std::to_string(j); }
 
-// The text half. Statement order within a block: the attr, the leaves, the
-// side submachine, the nested composite, then every transition -- the order
-// gate_build repeats.
+// The text half. Within a block: the attr, the leaves, the side submachine, the
+// nested composite, then every transition -- the order gate_build repeats.
 void text_level(GateSpec const &spec, uint32_t root, uint32_t level, std::string &out) {
   std::string const my_name{ composite_name(root, level) };
   out += "state " + my_name + (level == 0 ? " \"root\" {\n" : " {\n");
@@ -90,9 +83,8 @@ std::string gate_text(GateSpec const &spec) {
   return out;
 }
 
-// The builder half. Mirrors lowering's two passes: entities in document
-// order (a state block's implicit submachine created before its children),
-// then transitions in statement order, wildcards synthesized as met.
+// The builder half, mirroring lowering: entities in document order, then
+// transitions in statement order with wildcards synthesized as met.
 struct GateTrans {
   SubmachineId scope;
   StateId src, dst;  // src INVALID = a `*` source
@@ -198,11 +190,8 @@ void gate_build(GateSpec const &spec, Chart &c) {
   }
 }
 
-// Field-level structural equality. Provenance (stmt, inst) and the front-end
-// slice (documents, stmts, comments, src_bytes) are excluded: they are what
-// legitimately differs between a code-built chart and a lowered one. Raw
-// state_ids order is not compared either -- only the per-span sequences, which
-// are what the order of a shared array means.
+// Field-level equality over the entity arrays and their per-span sequences.
+// Provenance and the front-end slice differ between the two paths.
 void check_same_chart(Chart const &a, Chart const &b) {
   CHECK(chart_string(a, a.name) == chart_string(b, b.name));
   CHECK(chart_string(a, a.label) == chart_string(b, b.label));
@@ -298,10 +287,8 @@ TEST_CASE(
   }() };
   CHECK(live >= 2000);
 
-  // Walk: the deepest leaf's address is 17 segments -- 16 composites down
-  // plus the leaf -- and resolves back to the row that printed it. Composites
-  // at side levels hold two submachines, so their segments carry the `:0`
-  // qualifier chart_path_of prints for an unnamed implicit submachine.
+  // The deepest leaf's address is 17 segments and resolves back to its own row.
+  // A side level holds two submachines, so its segment carries `:0`.
   std::string const deep_path{ [&] {
     std::string p{ "T0" };
     if (level_has_side(0)) { p += ":0"; }
@@ -334,4 +321,105 @@ TEST_CASE(
   };
   REQUIRE(col.v != INVALID);
   CHECK(column_count(lowered, col) == lowered.states.size());
+}
+
+// The corpus is read off disk here on purpose: this is about two transports
+// agreeing, so one of them has to be the filesystem.
+namespace {
+
+std::string read_corpus(char const *name) {
+  std::string path{ SCAV_TEST_DATA_DIR };
+  path += "/charts/";
+  path += name;
+  std::vector<scav_byte> bytes;
+  REQUIRE_MESSAGE(read_file(path.c_str(), bytes), path);
+  return { reinterpret_cast<char const *>(bytes.data()), bytes.size() };
+}
+
+}  // namespace
+
+TEST_CASE(
+    "exit gate: a three-document network from memory and from a filesystem"
+    " are the same model") {
+  // Transport one: bytes from wherever, under names that are not paths. The
+  // harness read the files; core never saw a filesystem.
+  std::string const vac{ read_corpus("vac.scav") };
+  std::string const dock{ read_corpus("dock.scav") };
+  std::string const led{ read_corpus("led.scav") };
+
+  Loader memory;
+  REQUIRE(load_add(memory, raw(vac), vac.size(), "buf:///vac.scav"));
+
+  for (uint32_t rounds = 0; rounds < 8; ++rounds) {
+    std::vector<std::string> wanted;
+    for (Pending const &p : load_pending(memory)) {
+      wanted.emplace_back(load_pending_path(memory, p));
+    }
+    if (wanted.empty()) { break; }
+    for (std::string const &want : wanted) {
+      // The application decides what a name means. Here it means "the last
+      // path segment picks a buffer", and core is none the wiser.
+      std::string_view body;
+      if (want == "buf:///dock.scav") { body = dock; }
+      if (want == "buf:///led.scav") { body = led; }
+      REQUIRE_MESSAGE(!body.empty(), want);
+      REQUIRE(load_add(memory, raw(body), body.size(), want));
+    }
+  }
+  Chart from_memory;
+  std::vector<Diagnostic> memory_diags;
+  REQUIRE_MESSAGE(load_finish(memory, from_memory, memory_diags),
+                  diag_message(first_code(memory_diags)));
+
+  // Transport two: the filesystem battery, `fopen` in the fetch slot, written
+  // against the very same primitives.
+  std::string const root_path{ std::string{ SCAV_TEST_DATA_DIR } + "/charts/vac.scav" };
+  Loader files;
+  Chart from_files;
+  std::vector<Diagnostic> file_diags;
+  std::string failed;
+  bool const read_ok{
+    load_file(root_path.c_str(), files, from_files, file_diags, failed)
+  };
+  std::string const why{ failed.empty()
+                             ? std::string{ diag_message(first_code(file_diags)) }
+                             : ("cannot read " + failed) };
+  REQUIRE_MESSAGE(read_ok, why);
+
+  std::vector<Diagnostic> validate_diags;
+  CHECK(validate_chart(from_memory, validate_diags));
+  CHECK(validate_chart(from_files, validate_diags));
+
+  // Three files, three instantiations: led.scav is included twice, so it is one
+  // Document and two disjoint sets of entity rows.
+  CHECK(from_memory.documents.size() == 3);
+  REQUIRE(from_memory.includes.size() == 3);
+
+  // Two levels deep: an include statement inside a document that is itself
+  // included, which is what exercises the instantiation queue.
+  bool nested{ false };
+  for (Include const &inc : from_memory.includes) {
+    if (from_memory.stmts[inc.stmt.v].doc.v != 0) { nested = true; }
+  }
+  CHECK(nested);
+
+  // The names differ -- `buf:///vac.scav` against an absolute filesystem path
+  // -- and the models do not.
+  CHECK(chart_string(from_memory, from_memory.documents[0].path) !=
+        chart_string(from_files, from_files.documents[0].path));
+
+  std::vector<scav_byte> memory_digest;
+  std::vector<scav_byte> file_digest;
+  chart_digest_bytes(from_memory, memory_digest);
+  chart_digest_bytes(from_files, file_digest);
+  CHECK(memory_digest == file_digest);
+  CHECK(chart_structural_hash(from_memory) == chart_structural_hash(from_files));
+
+  // And the cross-document endpoint really did resolve, in both.
+  for (Chart const &c : { std::cref(from_memory).get(), std::cref(from_files).get() }) {
+    StateId seated{ INVALID };
+    REQUIRE(resolve_path(c, c.root_submachine, "dock/On/Seated", seated) ==
+            ResolveStatus::Ok);
+    CHECK(path(c, seated) == "dock/On/Seated");
+  }
 }

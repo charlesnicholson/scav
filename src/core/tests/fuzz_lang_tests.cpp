@@ -1,7 +1,7 @@
-// A deterministic mutation sweep, not libFuzzer: a coverage-guided run only in a
-// long-running job is one nobody runs before pushing. The bar is "cannot crash
-// and cannot lie" -- every diagnostic still points inside the document.
+// A deterministic mutation sweep, running in the ordinary suite. The bar is
+// that nothing crashes and every diagnostic still points inside its document.
 
+#include "core/core_internal.h"
 #include "core/tests/test_support.h"
 #include "core/tests/test_synth.h"
 #include "scav/scav_core.h"

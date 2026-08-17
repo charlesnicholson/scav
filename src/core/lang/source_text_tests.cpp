@@ -1,6 +1,7 @@
 // BOM stripping, line-ending folding, UTF-8 validation and the NFC pass over
 // bytes, plus the line/column derivation every diagnostic goes through.
 
+#include "core/core_internal.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 
@@ -119,9 +120,8 @@ TEST_CASE("normalize: a character that only starts like a BOM is content") {
   CHECK(r.text == looks_like + "chart a {}");
 }
 
-// Plain bytes are copied a run at a time rather than one at a time, so the
-// boundaries of a run are where an off-by-one would live. Each case below puts a
-// CR or a multi-byte character at a different place relative to the run.
+// Plain bytes copy a run at a time, so each case below puts a CR or a
+// multi-byte character at a different place relative to a run boundary.
 
 TEST_CASE("normalize: a long run of plain bytes is copied whole") {
   std::string const long_run(10000, 'a');

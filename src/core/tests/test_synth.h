@@ -38,8 +38,7 @@ SynthSpec synth_default_spec();
 std::string synth_document(SynthSpec const &spec, SynthStats &stats);
 
 // A document that is `depth` blocks deep and nothing else, for the depth cap.
-// Deliberately not routed through SynthSpec: 10,000 levels of anything else
-// would be gigabytes.
+// Separate from SynthSpec: 10,000 levels with any body would be gigabytes.
 std::string synth_deep_document(uint32_t depth);
 
 }  // namespace scav

@@ -1,0 +1,36 @@
+// The root of a four-document network that instantiates one child repeatedly.
+//
+// axis.scav is included three times from this document alone and once more
+// from toolchanger.scav; estop.scav is included by all three of the others and
+// by this one. Four documents, eleven instantiations.
+chart mill "three-axis mill" {
+  @doc = "gantry mill with a carousel changer",
+  @machine { axes = "3", spindle_kw = "2" },
+
+  include "axis.scav" as x,
+  include "axis.scav" as y,
+  include "axis.scav" as z,
+  include "toolchanger.scav" as tool,
+  include "estop.scav" as stop,
+
+  state Idle,
+  state Homing,
+  state Cutting,
+  state Interlocked,
+
+  trans * -> Idle,
+  trans Idle -> Homing "cycle start",
+  trans Homing -> Cutting "all axes referenced",
+  trans Cutting -> Idle "program end",
+  trans Cutting -> Interlocked "door opened",
+  trans Interlocked -> Cutting "door closed",
+
+  // Three sibling instantiations of one document, addressed apart.
+  trans Homing -> x/Homing "home X",
+  trans Homing -> y/Homing "home Y",
+  trans Homing -> z/Homing "home Z",
+  // Through two include boundaries: mill -> toolchanger -> axis.
+  trans Cutting -> tool/arm/Ready "tool change",
+  trans Cutting -> tool/Rotating "select tool",
+  trans Interlocked -> stop/Tripped "estop",
+}

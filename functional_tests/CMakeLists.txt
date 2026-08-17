@@ -63,9 +63,28 @@ scav_add_functional_test(install_consumer
 )
 scav_add_functional_test(dump
   DEPENDS "${PROJECT_SOURCE_DIR}/test_data/charts/brew.scav"
+          "${PROJECT_SOURCE_DIR}/test_data/charts/vac.scav"
+          "${PROJECT_SOURCE_DIR}/test_data/charts/dock.scav"
+          "${PROJECT_SOURCE_DIR}/test_data/charts/led.scav"
+          "${PROJECT_SOURCE_DIR}/test_data/charts/mill.scav"
+          "${PROJECT_SOURCE_DIR}/test_data/charts/axis.scav"
+          "${PROJECT_SOURCE_DIR}/test_data/charts/toolchanger.scav"
+          "${PROJECT_SOURCE_DIR}/test_data/charts/estop.scav"
           "${PROJECT_SOURCE_DIR}/test_data/golden/dump/brew.txt"
+          "${PROJECT_SOURCE_DIR}/test_data/golden/dump/vac.txt"
+          "${PROJECT_SOURCE_DIR}/test_data/golden/dump/mill.txt"
           "$<TARGET_FILE:scav>"
   TARGETS scav
+)
+# P2's exit gate: the loader driven from Python over ctypes, faking a
+# network fetch. Needs the shared library, not an archive.
+scav_add_functional_test(load
+  DEPENDS "${PROJECT_SOURCE_DIR}/test_data/charts/vac.scav"
+          "${PROJECT_SOURCE_DIR}/test_data/charts/dock.scav"
+          "${PROJECT_SOURCE_DIR}/test_data/charts/led.scav"
+          "$<TARGET_FILE:scav_shared>"
+          "$<TARGET_FILE:scav>"
+  TARGETS scav_shared scav
 )
 scav_add_functional_test(presets
   DEPENDS "${PROJECT_SOURCE_DIR}/CMakePresets.json"

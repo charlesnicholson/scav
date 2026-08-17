@@ -1,3 +1,6 @@
+// The code table over every subsystem's diagnostics. A diagnostic carries a
+// code and either a span or an entity; position is derived from an offset.
+
 #include "scav/scav_core.h"
 
 #include "scav/scav_types.h"
@@ -68,6 +71,18 @@ char const *diag_message(DiagCode code) {
     case DiagCode::NumberOutOfRange: return "number does not fit in 32 bits";
     case DiagCode::TrailingContent: return "content after the end of the chart";
     case DiagCode::DepthLimitExceeded: return "nesting is deeper than the limit";
+
+    case DiagCode::IncludePathInvalid: return "path names no document";
+    case DiagCode::IncludePathUnresolved:
+      return "include path was never supplied to the loader";
+    case DiagCode::IncludeCycle: return "include cycle";
+    case DiagCode::IncludeExpansionTooLarge:
+      return "the include graph expands to more instantiations than the limit";
+    case DiagCode::DocumentNotRequested:
+      return "document was not on the loader's pending list";
+    case DiagCode::DocumentAlreadyLoaded: return "document was already added";
+    case DiagCode::LoaderEmpty:
+      return "loader has no root document, or the chart is not empty";
 
     case DiagCode::MisplacedStatement: return "statement is not permitted in this block";
     case DiagCode::WildcardBothEndpoints: return "a transition cannot run from '*' to '*'";

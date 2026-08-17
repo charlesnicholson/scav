@@ -71,8 +71,6 @@ class TestPresets(unittest.TestCase):
                     self.assertIn(f"{triple}-{config}", self.names())
 
     def test_wasm_row_is_absent(self) -> None:
-        # Native only for now. A stubbed preset would make the matrix look
-        # complete when it is not.
         self.assertEqual([], [n for n in self.names() if "wasm" in n or "wasi" in n])
 
     def test_each_triple_pins_a_compiler_and_its_host(self) -> None:
@@ -86,20 +84,16 @@ class TestPresets(unittest.TestCase):
                                   "rhs": host}, base["condition"])
 
     def test_every_preset_resolves_to_exactly_one_compiler(self) -> None:
-        # A bare name is only half a pin, so build.py resolves it against PATH and
-        # passes the absolute path, which is what actually makes a row reproducible
-        # and a toolchain swap visible. If a preset stopped reaching a compiler
-        # through its `inherits` chain that would silently stop happening, and the
-        # row would go back to meaning whatever is first on PATH.
+        # build.py resolves the name against PATH and passes an absolute path,
+        # which every preset must reach through its `inherits` chain.
         for name in sorted(self.names()):
             with self.subTest(preset=name):
                 triple = next(t for t in TRIPLES if name.startswith(f"{t}-"))
                 self.assertEqual(COMPILERS[triple], build.preset_compiler(name))
 
     def test_a_tree_reports_the_compiler_it_was_configured_with(self) -> None:
-        # Read back from the cache and compared, because CMake answers a changed
-        # compiler by resetting the cache -- which drops the -D arguments and then
-        # fails reporting a missing doctest, blaming the wrong thing entirely.
+        # Read back from the cache: CMake answers a changed compiler by
+        # resetting it, which drops the -D arguments and misreports the cause.
         with tempfile.TemporaryDirectory() as tmp:
             tree = Path(tmp)
             self.assertIsNone(build.cached_compiler(tree), "no cache is not an answer")

@@ -1,7 +1,7 @@
-// Lowering and validation floors, never times: the job is catching an
-// accidental O(n^2) -- a span rebuild per wildcard, a per-append fix-up walk
-// -- so the load-bearing assertion is the machine-independent scaling one.
+// Lowering and validation floors, never times, to catch an accidental O(n^2):
+// a span rebuild per wildcard, or a fix-up walk per append.
 
+#include "core/core_internal.h"
 #include "core/tests/test_support.h"
 #include "core/tests/test_synth.h"
 #include "scav/scav_core.h"
@@ -115,16 +115,15 @@ TEST_CASE(
       ++synthesized;
     }
   }
-  // + the alias host the generator's one include synthesizes (§9).
+  // plus the alias host the generator's one include synthesizes.
   CHECK(authored_states == stats.states + c.includes.size());
   CHECK(c.includes.size() == 1);
   CHECK(c.transitions.size() == stats.transitions);
   CHECK(c.attrs.size() >= stats.attrs);  // a block entry lowers to >= 1 row
   CHECK(synthesized > 0);
 
-  // Entity rows cost more than the text that declared them -- a 12-byte
-  // `state A123,` becomes a 52-byte row plus ids, statement, and name -- so
-  // the honest bound is a multiple, asserted so it cannot quietly grow.
+  // Entity rows cost more than their text: a 12-byte `state A123,` becomes a
+  // 52-byte row plus ids, statement and name. The bound is a multiple.
   uint64_t const footprint{ chart_footprint(c) };
   CHECK_MESSAGE(footprint < bytes * 8,
                 "chart " << ((footprint * 100) / bytes) << "% of input");

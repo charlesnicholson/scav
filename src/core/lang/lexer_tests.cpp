@@ -1,7 +1,7 @@
-// Tokens, trivia and string-literal decoding, through the lexer's own entry
-// point -- a stream only observed through a parse is not separable from it.
-// Source under test is a raw literal, so a `.scav` string keeps its quotes.
+// Tokens, trivia and string-literal decoding through the lexer's own entry
+// point. Source is a raw literal, so a `.scav` string keeps its quotes.
 
+#include "core/core_internal.h"
 #include "core/tests/test_support.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"

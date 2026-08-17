@@ -104,7 +104,7 @@ It is also the end-to-end exercise of the load path over a real filesystem — p
 | `fmt` | canonical print, `--check` to gate. §15's canonicity is a property of *running the printer*, not of the format — no verb, no pre-commit hook, and the format hash and merge story both degrade |
 | `check` | structural validation (§10) as a PR gate |
 | `deps` | the document network as a `make`/`ninja` depfile. Chart A includes B; without this, editing B either leaves A's diagram stale or forces a full re-render. `gcc -M`, and the need follows from includes existing |
-| `dump` | `--json` for non-C++ consumers and `jq`; `--layout` runs layout first and includes the geometry columns |
+| `dump` | `--json` for non-C++ consumers and `jq`; `--layout` runs layout first and includes the geometry columns; `--hash` prints the structural digest alone, which is how two transports of one network are compared without a golden |
 | `selftest` | recompute §6's hashes on this toolchain and diff against the goldens |
 
 **No `gen`.** Synthetic chart generation is test tooling (PB, P0) and lives in the harness; shipping it as a verb would imply a user need nobody has. Same reasoning retired a separate `layout` verb — dumping geometry is `dump --layout`, not a second command.
@@ -115,9 +115,22 @@ Mirrors `~/src/envy`: SHA-pinned deps under `cmake/deps/`, unit tests adjacent t
 
 ```
 include/scav/          the cross-library vocabulary: POD spellings, no functions
-src/<lib>/include/scav/  that library's public API: one `scav_<lib>.h`, no more
-src/core/model/        columnar aggregates, ids, string pool, builder, validation
-src/core/lang/         .scav lexer, parser, canonical printer, JSON dump, includes, resolution
+src/<lib>/include/scav/  that library's public API: `scav_<lib>.h`, plus `scav_c.h`
+                       where it projects a C surface. A C header is a second language,
+                       not a second place to look for the same symbol
+src/scav_*.h           determinism primitives that belong to no subsystem: the vendored
+                       stable sort and hash §6 mandates in place of the standard library's.
+                       Private — every library reaches them by `-Isrc`, none installs them
+src/<lib>/*.cpp        library-wide, owned by no subsystem — core's diagnostics, which
+                       every layer below produces
+src/core/lang/         .scav lexer, parser, canonical printer, JSON dump. Bytes to
+                       statements, and nothing here knows what an entity is
+src/core/model/        columnar aggregates, ids, string pool, builder, lowering,
+                       path resolution, structural digest, validation
+src/core/load/         the loader, document-name resolution, the filesystem
+                       batteries. A directory of its own because §16.2 is titled
+                       "loading and parsing are separate systems" — it composes `lang`
+                       and `model` and is neither
 src/<lib>/tests/       suite-level test classes (functional_*, fuzz_*, perf_*) + shared fixtures;
                        unit tests stay adjacent to their subject as <foo>_tests.cpp
 src/layout/            space requests, phases 0-3, routers, cost, thread shim
@@ -129,7 +142,8 @@ apps/view/             ImGui viewer + its Lua host [P10]
 plugins/libhsm/        columns, attributes, builder contribution (importer + codegen: §17)
 plugins/scxml/         reference example: importer, exporter, builder contribution
 assets/font/           the bundled TTF — a layout-hash input, so versioned here
-abi/scav_abi.json      committed golden ABI description (§16)
+abi/scav_abi.json      committed golden ABI description (§16), extracted from the
+                       C headers — the description is the ABI, the headers are the API
 test_data/charts/      corpus: synthetic fixtures + hand-transcribed real charts
 test_data/golden/      drawlist/, svg/, layout/ — see below
 functional_tests/      Python, drives the CLI and the C ABI via ctypes
@@ -330,6 +344,10 @@ C++20's P0907 fixed two's-complement *representation* but kept signed overflow U
 
 **Golden hash.** Split into a **structural hash** (ranks, orders, port assignments, bend sequences) and a **coordinate hash**, so a translation-only change is a reviewable diff instead of a global reflow. Hashed inputs: font identity and version, profile id, packer choice, router name and version, **and the space-request columns** — a golden is reproducible only against a stated measurement policy, and the corpus goldens use the reference builder's.
 
+**The hash is xxHash32, ours rather than the standard library's.** `std::hash` is permitted to differ between runs of one binary, let alone between implementations. xxhash is not cryptographic and does not need to be: what a golden wants is speed and even distribution over inputs measured in kilobytes. Lane reads are assembled from bytes rather than cast, so a big-endian host agrees, and rotation goes through `<bit>` because `__builtin_rotl` is not standard C++ and a hand-rolled shift pair is UB at a rotation of zero.
+
+**The model's structural digest arrives before layout does** (P2), because P2's exit gate has to compare one network loaded three ways and there are no coordinates yet to compare. It is a *serialization* first and a hash second: field by field in array order, never a struct's bytes — padding is unspecified — and length-prefixed on every string, so two adjacent names cannot spell one. The bytes are exposed alongside the hash because when two models disagree, diffing them says where and a hash only says that. Excluded: document names, which differ legitimately between a filesystem, a buffer, and a URL; statement ids and source spans, which say where a thing was written rather than what it is; and columns, which are the extension's to hash. P8 seeds the layout structural hash from this.
+
 ## 7. Data model
 
 **Not object-oriented. Flat arrays of POD aggregates linked by ordinal.** Column boundaries follow natural groupings, not individual fields.
@@ -402,11 +420,12 @@ struct Transition {
 };
 struct Include  {            // one row per instantiation; its ordinal is the InstId
   StrRef  alias;
+  StrRef  path;              // the authored string, verbatim — see below
   DocId   target;            // the file it instantiates
   StateId host;              // the alias state it synthesizes; never INVALID
   StmtId  stmt;
 };
-struct Attr     { AttrKeyId key; StrRef value; };
+struct Attr     { AttrKeyId key; StrRef value; StmtId stmt; };
 
 struct Document {            // one per distinct *file*, parsed once (P0)
   StrRef   path;
@@ -454,6 +473,10 @@ struct Chart {
 ```
 
 **All documents share the same arrays**, each entity tagged with the statement that declared it and the instantiation it belongs to — so no flattening step and no second model shape (§9).
+
+**An attribute carries its own `StmtId`, not its subject's.** `state On { @doc = "..." }` is two authored statements, so an `Attr` that only knew its owner could not be pointed at — a diagnostic about the attribute would name the `state` line, and an editor could not find the text to rewrite. The block spelling `@ns { a, b }` is one statement producing N rows, all naming it.
+
+**`Include.path` is the authored string, not the resolved key.** Three candidates were available and only one works: `documents[target].path` is the name the *caller* handed to `scav_load_add` and may spell the same file differently or not be a path at all; re-lexing `Statement.src` makes the printer depend on the parser; and dropping it entirely means an `include` statement cannot be reprinted at all, which §15's canonical form requires. So it is a `StrRef` into `strings` like every other authored token. The resolved key lives in the loader, which is where fetch policy already lives.
 
 `src_bytes` is a **separate pool from `strings`**, and neither can be derived from the other. A decoded string literal is not a span of any file — `"a\u0041b"` is nine authored bytes and three decoded ones — and neither is a `Document::path`, which the caller supplies. So `strings` is not an index into the source, it is storage. Going the other way, `src_bytes` is verbatim and never rewritten, so it cannot absorb decoded text without invalidating every `Statement.src`. "Verbatim" means post-normalization — §6 normalizes at parse (LF, no BOM, NFC), and `Statement.src` offsets index the **normalized** bytes, so reported columns are stable across platforms.
 
@@ -728,6 +751,7 @@ wifi/On/Ready        cross-document, via include alias
 - **Each `*` endpoint synthesizes its own pseudostate** — `initial` as a source, `final` as a target — owned by the submachine the statement lexically appears in, carrying that transition's `stmt`. One per statement, never merged per submachine: two authored `trans * -> X, trans * -> Y` are two initial arrows, which is what makes §10's more-than-one-`initial` check a reachable check rather than dead code. `trans * -> *` is rejected.
 - **A path's first segment resolves innermost-outward**: from the submachine the statement appears in, outward through each enclosing submachine to the chart root, taking the nearest match; every segment after the first descends strictly. That is what the worked example already assumes — inside `submachine main`, `trans * -> Idle` names main's own `Idle`, while `trans Ready -> dock/On/Seated` starts at a chart-root alias two levels up. Lexical scoping, because it is the rule every reader already knows.
 - **An include synthesizes one state, named for its alias**, in the submachine where the `include` statement appears; that state's `submachines` span gains the included document's root submachine. A submachine's children are states, so this is the only shape that type-checks — an included root is a submachine and has nowhere else to attach. It also makes `wifi/Up/Connected` an ordinary path: `wifi` *is* a state. The host state is lowering's (P1, so §10's alias-collision check can run without a loader); filling `Include.target` and attaching the included root is resolution's (P2), and until then a path descending past an alias diagnoses as unresolvable.
+- **The outward walk stops at the document it started in.** A path's first segment climbs from its own submachine to that instantiation's root and no further, so a name inside an included document may not silently bind to one in whichever host included it. Two reasons, and the second is the load-bearing one: a document is a reusable unit whose meaning must not depend on its include site, and §9 already says two instantiations of one file differ *only* by `InstId` — outward binding would make them differ structurally. Reaching the other way still works: `dock/On/Seated` is a downward descent past an alias, not an outward climb. The boundary is where a submachine and its owner state carry different `InstId`s, which is exactly the alias-host edge the loader built.
 - **Resolution links; it does not flatten** (§7). Containment crosses documents because `State.submachines` holds global ids, so layout sees one containment tree with no transformation having occurred — no cross-document LCA, no splice pass, no project handle.
 - **Provenance is two fields, not a computed column, because it is M:N** (§7.3). One statement declares N entities when its file is included N times; one instantiation contains the entities of N statements. So the entity row is the junction and carries both keys: `StmtId` says which authored construct produced it, `InstId` says which instantiation it belongs to. A renderer tinting sub-document submachines reads `inst`; a diagnostic or an editor reads `stmt`; layout ignores both.
 - **Statements are per file, entities are per instantiation.** The parser produces `Document` and `Statement` rows once per distinct file (P0); the loader instantiates entities per include (P2). Including a file twice therefore duplicates entities — which is correct, they lay out separately — but never duplicates source bytes or statements.
@@ -736,7 +760,7 @@ wifi/On/Ready        cross-document, via include alias
 - **No integrity attestation.** An include names a path, not a digest: a `.scav` document network is source code under the same version control as the code it describes, so pinning content hashes would duplicate what the VCS already guarantees while adding a second thing to keep current. Fetching a document over a network is the app's policy (§16.2) and so is verifying it.
 - Include cycles are a hard error.
 - **A document's `DocId` is a function of the include graph, never of arrival order.** The id is fixed by the *first* include statement naming that path, ordered by `(requesting DocId, statement ordinal)` — a breadth-first walk from the root. This is §6's shard rule applied to loading: the work items are enumerated deterministically and completion order is irrelevant. It has to be stated, because §16.2 hands the app the `pending` list and invites it to resolve the batch however it likes, including in parallel — and §7's iteration order is array order is document order, which §14 then requires to survive all the way to layout. Numbering documents as they arrive would make a parallel fetch reorder `documents`, and with it reading order and the diagram. Parallel *fetch* breaks determinism on its own under an arrival-order rule; no threaded parser is needed to get there.
-- **Loading is therefore parallelizable without core threading any of it.** Parsing is pure over one document's bytes and there is no library-global state (§16), so N documents parse independently; the load session stays single-threaded-per-instance and assigns ids by the rule above. Whether the app fetches serially, on a pool, or on a wasm host with no threads at all, the model is byte-identical. Splitting `scav_load_add` into a parse that the app may run off-thread and an `attach` that takes the result is a two-function addition, deliberately **not** made yet: 200 documents of a few KB parse in about 4 ms serially, which one `open` per file dominates.
+- **Loading is therefore parallelizable without core threading any of it.** Parsing is pure over one document's bytes and there is no library-global state (§16), so N documents parse independently; the loader stays single-threaded-per-instance and assigns ids by the rule above. Whether the app fetches serially, on a pool, or on a wasm host with no threads at all, the model is byte-identical. Splitting `scav_load_add` into a parse that the app may run off-thread and an `attach` that takes the result is a two-function addition, deliberately **not** made yet: 200 documents of a few KB parse in about 4 ms serially, which one `open` per file dominates.
 - **Instantiating one document twice means two include statements**, two aliases, and two disjoint sets of entity rows distinguished by `InstId`. Renaming that file then patches one path string per instantiation. Accepted: a **global include section with a reference sigil was considered and rejected** — a sigil names a document, but an endpoint must name an instance, so the two coincide only at one instantiation and above it the section needs instance names anyway. It would also still require a statement at the host to say where the subdocument attaches, and it would mark a cross-document distinction the model does not have, since an alias is an ordinary state.
 - Relative hints travel with an included chart; **absolute pins do not** — a pin is authored against a document's own frame and is meaningless in a host frame.
 - Resolution is a linear scan per path level (document order forbids sorting `state_ids` by name) or via the derived sorted index.
@@ -748,7 +772,7 @@ Mandatory, in core, structural only — `layout` reads ordinals and crashes on g
 
 - dangling `StateId`/`SubmachineId`/`ColumnId`; `INVALID` where a value is required; tombstoned targets
 - duplicate authored names within a submachine
-- include cycles, unresolvable include paths
+- include cycles and unresolvable include paths — the **loader's**, not `validate_chart`'s. Neither is representable in a finished chart, because `finish` refuses to produce one; checking for them afterwards would be checking for a state that cannot exist. Their diagnostics are therefore document-local, since they fire precisely when no chart does
 - unresolvable cross-document paths, checked at the **resolution phase** (§9)
 - a `Statement.src` span outside its document's `text` span
 - an alias colliding with a sibling state name — the same duplicate-name check, since an alias is a state (§9)
@@ -1000,7 +1024,7 @@ Local search from a structured seed with **restricted uphill moves** — "simula
 
 **Stability is a property of the algorithms, not a cost term.** A small model change yields a small diagram change because each stage is order-preserving and deterministic — LR-rectpacking preserves input order (§11.4), ranking and ordering have total-order tie-breaks (§6), document order drives reading order (§14).
 
-That removes `w_st`, `PriorLayout` and its version key, per-session hysteresis, the sticky packer bit, dirty-region tracking, and VPSC (§11.13) — plus a class of defects: layout depending on edit history, and a golden hash needing a "cold-start" qualifier to mean anything.
+That removes `w_st`, `PriorLayout` and its version key, per-loader hysteresis, the sticky packer bit, dirty-region tracking, and VPSC (§11.13) — plus a class of defects: layout depending on edit history, and a golden hash needing a "cold-start" qualifier to mean anything.
 
 **Honest limit.** Stability-by-construction is not a guarantee. A one-node change can flip a crossing-minimisation decision and cascade, and no ordering discipline prevents that in general. Those are the boundary conditions **hints** exist for (§14): when the engine makes a defensible choice the author dislikes, the author pins it rather than the engine remembering what it did last time.
 
@@ -1293,7 +1317,11 @@ typedef struct { int32_t x, y, w, h; } scav_rect;   // also the Placed type (§8
 typedef scav_rect scav_placed;
 ```
 
-**Handles: five, each with a create and a destroy.** `scav_chart` (the model), `scav_load` (a multi-document load session, §16.2), `scav_metrics` (font tables), `scav_images` (the raster registry a backend reads), and `scav_drawlist` — which exists because `DrawList` is five `std::` containers (§12) and §16.1 requires the reference builder and SVG backend to be reachable from a binding. Its arrays are read out with the same span accessors as a column. Destroy is idempotent on `NULL`; a `scav_chart` outlives every `scav_span` handed out from it, and nothing else owns model memory. `scav_metrics_create(const scav_byte* ttf, uint32_t len, scav_metrics** out)` — the bundled font is embedded, so `NULL` selects it. `scav_metrics` is immutable after create, so it is shared across threads without locking; the other three are single-threaded-per-instance, and any number of instances may be used concurrently. There is no library-global state and no init call.
+**"ABI" names the property, not a component.** The component is each library's C API — `src/<lib>/c_api.cpp` against `src/<lib>/include/scav/scav_c.h` — and the ABI is what that surface guarantees: calling convention, struct layout, the extracted JSON. Every library projects its own C API at its own root, and the shared object links them; there is no directory that owns "the ABI".
+
+**A slice of this lands with P2, ahead of the rest.** §17's P2 gate requires the loader driven from Python over ctypes, so `scav_load_*`, `scav_chart_destroy`, and enough of a chart to compare two — counts, the structural hash, the digest under the out-param protocol — ship then, along with the one shared object a binding can actually load. The reason is not schedule: if driving a no-callback loader from a foreign runtime were awkward, §16.1's central claim would be wrong, and that is worth learning before four more phases are built on it. Allocator injection, the full five-handle lifecycle, column access, and the extracted ABI JSON golden remain **P3**, which is where a binding is written rather than demonstrated.
+
+**Handles: five, each with a create and a destroy.** `scav_chart` (the model), `scav_load` (a multi-document loader, §16.2), `scav_metrics` (font tables), `scav_images` (the raster registry a backend reads), and `scav_drawlist` — which exists because `DrawList` is five `std::` containers (§12) and §16.1 requires the reference builder and SVG backend to be reachable from a binding. Its arrays are read out with the same span accessors as a column. Destroy is idempotent on `NULL`; a `scav_chart` outlives every `scav_span` handed out from it, and nothing else owns model memory. `scav_metrics_create(const scav_byte* ttf, uint32_t len, scav_metrics** out)` — the bundled font is embedded, so `NULL` selects it. `scav_metrics` is immutable after create, so it is shared across threads without locking; the other three are single-threaded-per-instance, and any number of instances may be used concurrently. There is no library-global state and no init call.
 
 **The profile reaches layout inside `scav_layout_opts`**, as a `scav_profile` POD by value plus the `scav_router_id` — not a handle, not a file path, so its bytes hash into the golden (§6) directly. `scav_profile_named(const char*, scav_profile* out)` fills it from a shipped profile; `scav_profile_validate` is called by `scav_layout_run` regardless (§11.15).
 
@@ -1359,9 +1387,9 @@ Editor commands do not cross the C boundary as objects; that layer's API is opco
 
 **Parsing takes a byte span. Acquiring those bytes is a different system.** Core may ship a helper that does both — and it does — but **no API forces a caller through a filesystem**, and no entry point that needs bytes will only accept a path. That is the invariant, not an abstinence from `fopen`: a browser host, a binding, a zip reader, and an editor holding unsaved buffers must all be first-class, and fusing the two systems is what would demote them.
 
-The two are separable in both directions. Parse bytes you got anywhere; drive the load session without parsing anything yet.
+The two are separable in both directions. Parse bytes you got anywhere; drive the loader without parsing anything yet.
 
-Include resolution is therefore **iterative and data-driven, not a callback** — a load session accumulating documents and reporting what it still needs:
+Include resolution is therefore **iterative and data-driven, not a callback** — a loader accumulating documents and reporting what it still needs:
 
 ```c
 scav_result scav_load_begin(scav_load** out);
@@ -1377,18 +1405,27 @@ scav_result scav_load_file(const char* path, scav_chart** out);
 typedef uint32_t scav_doc_id;              // ABI spellings of DocId / InstId / StmtId (§7)
 typedef uint32_t scav_inst_id;
 typedef uint32_t scav_stmt_id;
-struct scav_pending {                      // 12 bytes, no padding
-  scav_span   path;                        // into the load session's own byte pool
-  scav_inst_id from;                       // the instantiation that requested it
+struct scav_pending {                      // 16 bytes, no padding
+  scav_span   path;                        // into the loader's own byte pool
+  scav_doc_id from;                        // the document whose include statement claimed it
+  uint32_t    stmt_row;                    // that statement's row within `from`
 };
 scav_result scav_load_bytes(const scav_load*, scav_span, const scav_byte** out, uint32_t* len);
 ```
 
 `add` the root, read `pending`, resolve each however you like, `add` each, repeat until empty, `finish`. The app owns fetch policy, caching, and parallelism; cycles and unresolvable paths are core's errors; and `name` makes diagnostics say `wifi.scav:12` rather than `<buffer>:12`. Resolving a `pending` batch concurrently is expected, which is exactly why §9 fixes `DocId` from the include graph rather than from the order documents come back.
 
+**`from` is a `DocId`, not an `InstId`.** Pending is reported before anything is instantiated — the loader's first walk is over *documents*, and no entity row exists yet to have an `InstId`. It is also the right key: a file included N times is fetched once, so an `InstId` there would mean N pendings for one document and defeat parse-once. `stmt_row` accompanies it so "cannot resolve this path" names a line rather than only a file.
+
+**Two walks, over two graphs, and keeping them apart is the design.** The first is over documents: as each parses, its include paths resolve to keys and an unseen key claims the next `DocId`. That is what `pending` reports, and it needs no entities. The second runs at `finish` and is over *instantiations* — breadth-first from the root, each job creating one document's entity rows under its alias host. Only when every host has its target attached does anything resolve a transition endpoint, which is what lets a path descend through an include.
+
+**Document names are keys, not filesystem queries.** `path_resolve(base, ref)` is pure and byte-wise — no `realpath`, no case folding, no symlink walk — because those answer differently on a filesystem, in a zip, and over HTTP, and the answer decides whether two include statements name one document or two. That is a structural difference in the model, so it may not vary by transport. Names are `/`-separated everywhere and a backslash is an ordinary byte; converting a native path is the caller's job at its own boundary. A ref that is absolute or carries a scheme passes through verbatim, because whether `https://x/a.scav` and `/srv/a.scav` are one file is fetch policy. Two accepted consequences, both stated rather than discovered: on a case-insensitive filesystem `Dock.scav` and `dock.scav` are two documents, and `scheme://x` makes `x` an authority, so a sibling of it lands under it.
+
+**The instantiation walk states its cap.** A DAG is not a cycle and still expands exponentially — N documents each including the next twice is 2^N instantiations from a few KB — so the queue is bounded and overrunning it is a diagnostic, not a hang (§6's fixed-iteration rule).
+
 Works identically over a filesystem, HTTP, a zip, or memory, and preserves §16.1's no-callback property.
 
-**Nothing is hidden, and nothing is mandatory.** `scav_parse` on a byte span and the session calls above are the primitives, always available and never bypassed internally. `scav_read_file` and `scav_load_file` ship in core, compose those primitives, and are skippable in full — `scav_load_file("root.scav", &chart)` is the one-liner most callers want, and it is implemented in terms of the API it wraps, with no private path. Same layering as the reference builder (§8.1.1): primitives below, batteries on top, and the batteries buy nothing you could not have written yourself. They use `<cstdio>` rather than an `ifstream`, to keep the global stream objects out of every consumer's static-init (§4) — a preference, not a portability constraint.
+**Nothing is hidden, and nothing is mandatory.** `scav_parse` on a byte span and the loader calls above are the primitives, always available and never bypassed internally. `scav_read_file` and `scav_load_file` ship in core, compose those primitives, and are skippable in full — `scav_load_file("root.scav", &chart)` is the one-liner most callers want, and it is implemented in terms of the API it wraps, with no private path. Same layering as the reference builder (§8.1.1): primitives below, batteries on top, and the batteries buy nothing you could not have written yourself. They use `<cstdio>` rather than an `ifstream`, to keep the global stream objects out of every consumer's static-init (§4) — a preference, not a portability constraint.
 
 No stream type: a `.scav` file is kilobytes, so bytes are the simpler composition point. Revisit only if incremental parse becomes an editor-responsiveness requirement.
 
@@ -1437,10 +1474,13 @@ Where a phase states production LOC, multiply by 1.5–2 for the mandated test c
 **P1 — model spine.** Entity arrays, ids as ordinals with tombstones, spans, extension columns and `ColumnDesc`, append-only builder API, structural validation (§10). Lowering from statements to entities — an `include` statement included, which lowers to its `Include` row and its alias host state with `target` left unresolved, because the host is an ordinary state (§9) and §10's alias-collision check cannot run without it. Determinism discipline (§6) is in force from the first commit; it cannot be retrofitted.
 *Exit:* build, validate, and walk a depth-16 / 2k-state chart from code with no text involved; then the same chart via P0's parser, structurally identical.
 
-**P2 — the loader.** The iterative load session (§16.2): pending list, app-supplied bytes, alias resolution (§9 — the host state exists from P1's lowering; P2 fills `Include.target` and attaches the included root submachine), cross-document path resolution, cycle detection. Separate system from the parser, and no callbacks (§16.2). Includes `scav_read_file`/`scav_load_file`, the composing helpers — written against the same public primitives, so they demonstrate the layering rather than shortcutting it. `Include.target`, `InstId`, and every entity row are the loader's; the parser produces `Document`, `Statement`, and `src_bytes` and stops (§7.3).
+**P2 — the loader.** The iterative loader (§16.2): pending list, app-supplied bytes, alias resolution (§9 — the host state exists from P1's lowering; P2 fills `Include.target` and attaches the included root submachine), cross-document path resolution, cycle detection. Separate system from the parser, and no callbacks (§16.2). Includes `read_file`/`load_file`, the composing helpers — written against the same public primitives, so they demonstrate the layering rather than shortcutting it. `Include.target`, `InstId`, and every entity row are the loader's; the parser produces `Document`, `Statement`, and `src_bytes` and stops (§7.3).
+
+Three things P2 turned out to own that the phase list did not name. **Lowering splits in four** — attach a file's front-end slice, instantiate its entities, rebuild containment, resolve transitions — because a file is parsed once and instantiated once per include (§9), and because nothing may resolve an endpoint until every alias host has its target. **Path resolution is core's** (§16.2), since a transport-dependent answer changes how many documents the model holds. **The structural digest** arrives here rather than with layout (§6), because the exit gate compares one network three ways and there are no coordinates yet.
+
 *Exit:* one 3-document network resolved **three ways** — from memory, through the CLI over a filesystem, and from Python/ctypes faking a network fetch — yielding the same chart and the same hash.
 
-**P3 — printer and ABI.** Comment-preserving canonical printer and the seven canonical rules (§15), `scav fmt --check`, `scav deps`, `scav dump`; **handle lifecycle — create/destroy per handle, allocator injection, thread-safety per call (§16.1 blocks on it)**, ABI JSON extraction and its golden.
+**P3 — printer and ABI.** Comment-preserving canonical printer and the seven canonical rules (§15), `scav fmt --check`, `scav deps`, `scav dump`; **handle lifecycle — create/destroy per handle, allocator injection, thread-safety per call (§16.1 blocks on it)**, ABI JSON extraction and its golden. The loader's entry points and the shared object landed in P2 (§16); P3 extends that surface rather than starting it, and `deps` reads `documents` plus `Include.target`, which P2 already populates.
 *Exit:* round-trip a depth-16 / 2k-state chart byte-identically, including unknown extension columns; `fmt` idempotent on the corpus; ABI driven from Python.
 
 **P4 — metrics, space requests, layout skeleton.** Font metrics helper, the space tables, Phase 0 splitting, derived classification, trivial placement, straight-line routes, geometry columns. Validate the coordinate extent estimate (§11.2).

@@ -1,0 +1,20 @@
+// Included by vac.scav, and includes led.scav itself -- so the network is two
+// levels deep and the DocId walk has something to be breadth-first about.
+chart dock "charging dock" {
+  include "led.scav" as lamp,
+
+  state Empty,
+  state On {
+    state Seated,
+    state Charging,
+    trans * -> Seated,
+    trans Seated -> Charging "contacts closed",
+    // Down into this document's own include, which resolves the same way an
+    // ordinary path does once the alias host has its target.
+    trans Charging -> lamp/Solid "full",
+  },
+
+  trans * -> Empty,
+  trans Empty -> On "vacuum docked",
+  trans On -> Empty "vacuum left",
+}
