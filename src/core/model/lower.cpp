@@ -27,6 +27,16 @@ struct Lowerer {
   bool clean;
 };
 
+// Never below double the capacity: reserving the exact size on every round
+// replaces the vector's geometric growth with one reallocation per round, which
+// is quadratic over a network of many documents.
+template <typename T>
+void reserve_at_least(std::vector<T> &v, size_t want) {
+  if (want <= v.capacity()) { return; }
+  size_t const doubled{ v.capacity() * 2 };
+  v.reserve((want > doubled) ? want : doubled);
+}
+
 // The entity a lowering diagnostic would name was never created, so the payload
 // is the statement's span, rebased into the chart's pool.
 void report(Lowerer &lo, DiagCode code, uint32_t row) {
@@ -374,9 +384,9 @@ DocId model_attach_document(Chart &c, ParsedDocument const &pd, uint32_t &stmt_b
   stmt_base = narrow_clamp<uint32_t>(c.stmts.size());
 
   c.src_bytes.insert(c.src_bytes.end(), pd.src_bytes.begin(), pd.src_bytes.end());
-  c.comments.reserve(c.comments.size() + pd.comments.size());
-  c.stmts.reserve(c.stmts.size() + pd.stmts.size());
-  c.strings.bytes.reserve(c.strings.bytes.size() + pd.strings.bytes.size());
+  reserve_at_least(c.comments, c.comments.size() + pd.comments.size());
+  reserve_at_least(c.stmts, c.stmts.size() + pd.stmts.size());
+  reserve_at_least(c.strings.bytes, c.strings.bytes.size() + pd.strings.bytes.size());
   for (Trivia const &t : pd.comments) {
     c.comments.push_back(
         { .src = make_span(t.src.off + src_base, t.src.len), .pos = t.pos });
@@ -407,10 +417,10 @@ bool model_instantiate(Chart &c,
 
   // The known floor for this instantiation. Wildcards land past it and grow
   // normally.
-  c.states.reserve(c.states.size() + pd.states.size() + pd.includes.size());
-  c.submachines.reserve(c.submachines.size() + pd.submachines.size() + 1);
-  c.transitions.reserve(c.transitions.size() + pd.transitions.size());
-  c.attrs.reserve(c.attrs.size() + pd.attr_entries.size());
+  reserve_at_least(c.states, c.states.size() + pd.states.size() + pd.includes.size());
+  reserve_at_least(c.submachines, c.submachines.size() + pd.submachines.size() + 1);
+  reserve_at_least(c.transitions, c.transitions.size() + pd.transitions.size());
+  reserve_at_least(c.attrs, c.attrs.size() + pd.attr_entries.size());
 
   Lowerer lo{ .c = &c,
               .pd = &pd,

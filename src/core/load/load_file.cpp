@@ -39,13 +39,20 @@ bool read_file(char const *path, std::vector<scav_byte> &out) {
   std::FILE *const file{ std::fopen(path, "rb") };
   if (file == nullptr) { return false; }
 
+  // ferror is checked at each read rather than after the loop: a stream's
+  // position is indeterminate once an operation has failed, so nothing may
+  // touch it again.
   std::array<scav_byte, READ_CHUNK> buffer{};
+  bool ok{ true };
   for (;;) {
     size_t const got{ std::fread(buffer.data(), 1, buffer.size(), file) };
     out.insert(out.end(), buffer.data(), buffer.data() + got);
+    if (std::ferror(file) != 0) {
+      ok = false;
+      break;
+    }
     if (got < buffer.size()) { break; }
   }
-  bool const ok{ std::ferror(file) == 0 };
   std::ignore = std::fclose(file);
   if (!ok) { out.clear(); }
   return ok;

@@ -1,4 +1,4 @@
-// Load-loader floors, never times, over documents generated in RAM. Catches a
+// Loader floors, never times, over documents generated in RAM. Catches a
 // per-document scan going quadratic in discovery, resolution or the rebuild.
 
 #include "core/tests/test_support.h"
@@ -28,6 +28,11 @@ constexpr uint64_t LOAD_FLOOR_MB_PER_S{ 5 };
 // the point is catching a quadratic and not tracking a constant factor.
 constexpr double SCALING_SLACK{ 3.0 };
 constexpr uint32_t SCALING_RUNS{ 3 };
+
+// Instrumentation makes the absolute numbers describe the instrumentation, so
+// those rows run a smaller network; the ratio is what carries the assertion.
+constexpr uint32_t WIDE{ (SCAV_PERF_INPUT_BYTES <= 4U * 1024U * 1024U) ? 60U : 200U };
+constexpr uint32_t NARROW{ WIDE / 2U };
 
 struct Doc {
   std::string name;
@@ -151,13 +156,13 @@ Outcome run_once(std::vector<Doc> const &corpus) {
 }  // namespace
 
 TEST_CASE("perf: a deep chain loads at the throughput floor") {
-  std::vector<Doc> const corpus{ chain(200, 20) };
+  std::vector<Doc> const corpus{ chain(WIDE, 20) };
   uint64_t const bytes{ corpus_bytes(corpus) };
 
   Outcome const outcome{ run_once(corpus) };
   REQUIRE(outcome.ok);
-  CHECK(outcome.documents == 200);
-  CHECK(outcome.includes == 199);
+  CHECK(outcome.documents == WIDE);
+  CHECK(outcome.includes == WIDE - 1);
 
   uint64_t const us{ fastest_micros([&] { std::ignore = run_once(corpus); }) };
   uint64_t const rate{ (bytes * 1'000'000ULL) / (us * 1024ULL * 1024ULL) };
@@ -169,41 +174,41 @@ TEST_CASE("perf: a deep chain loads at the throughput floor") {
 TEST_CASE("perf: chain load is linear in the number of documents") {
   // The machine-independent assertion. Discovery's find-by-key, the resolver's
   // include scan and the containment rebuild are all per-document scans.
-  std::vector<Doc> const small{ chain(100, 20) };
-  std::vector<Doc> const large{ chain(200, 20) };
+  std::vector<Doc> const small{ chain(NARROW, 20) };
+  std::vector<Doc> const large{ chain(WIDE, 20) };
 
   uint64_t const small_us{ fastest_micros([&] { std::ignore = run_once(small); }) };
   uint64_t const large_us{ fastest_micros([&] { std::ignore = run_once(large); }) };
 
   double const ratio{ static_cast<double>(large_us) / static_cast<double>(small_us) };
-  MESSAGE("chain 100 -> 200 documents: " << small_us << " us -> " << large_us << " us ("
-                                         << ratio << "x)");
+  MESSAGE("chain " << NARROW << " -> " << WIDE << " documents: " << small_us << " us -> "
+                   << large_us << " us (" << ratio << "x)");
   CHECK(ratio < (2.0 * SCALING_SLACK));
 }
 
 TEST_CASE("perf: instantiation is linear in the number of instantiations") {
   // One document, many instances: parse-once must not be paid per instance,
   // and the span rebuilds must stay one-per-network.
-  std::vector<Doc> const small{ star(100, 20) };
-  std::vector<Doc> const large{ star(200, 20) };
+  std::vector<Doc> const small{ star(NARROW, 20) };
+  std::vector<Doc> const large{ star(WIDE, 20) };
 
   Outcome const outcome{ run_once(large) };
   REQUIRE(outcome.ok);
-  CHECK(outcome.documents == 2);   // parsed once, whatever the instance count
-  CHECK(outcome.includes == 200);  // and instantiated once per include
+  CHECK(outcome.documents == 2);    // parsed once, whatever the instance count
+  CHECK(outcome.includes == WIDE);  // and instantiated once per include
 
   uint64_t const small_us{ fastest_micros([&] { std::ignore = run_once(small); }) };
   uint64_t const large_us{ fastest_micros([&] { std::ignore = run_once(large); }) };
 
   double const ratio{ static_cast<double>(large_us) / static_cast<double>(small_us) };
-  MESSAGE("star 100 -> 200 instantiations: " << small_us << " us -> " << large_us
-                                             << " us (" << ratio << "x)");
+  MESSAGE("star " << NARROW << " -> " << WIDE << " instantiations: " << small_us
+                  << " us -> " << large_us << " us (" << ratio << "x)");
   CHECK(ratio < (2.0 * SCALING_SLACK));
 }
 
 TEST_CASE("perf: the digest is linear in the model") {
-  std::vector<Doc> const small{ chain(100, 20) };
-  std::vector<Doc> const large{ chain(200, 20) };
+  std::vector<Doc> const small{ chain(NARROW, 20) };
+  std::vector<Doc> const large{ chain(WIDE, 20) };
 
   auto const hash_of = [](std::vector<Doc> const &corpus) {
     Loader loader;
@@ -236,7 +241,7 @@ TEST_CASE("perf: the digest is linear in the model") {
   uint64_t const b_us{ fastest_micros([&] { std::ignore = chart_structural_hash(b); }) };
 
   double const ratio{ static_cast<double>(b_us) / static_cast<double>(a_us) };
-  MESSAGE("digest 100 -> 200 documents: " << a_us << " us -> " << b_us << " us (" << ratio
-                                          << "x)");
+  MESSAGE("digest " << NARROW << " -> " << WIDE << " documents: " << a_us << " us -> "
+                    << b_us << " us (" << ratio << "x)");
   CHECK(ratio < (2.0 * SCALING_SLACK));
 }

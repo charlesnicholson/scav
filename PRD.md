@@ -1480,7 +1480,7 @@ Three things P2 turned out to own that the phase list did not name. **Lowering s
 
 *Exit:* one 3-document network resolved **three ways** — from memory, through the CLI over a filesystem, and from Python/ctypes faking a network fetch — yielding the same chart and the same hash.
 
-**P3 — printer and ABI.** Comment-preserving canonical printer and the seven canonical rules (§15), `scav fmt --check`, `scav deps`, `scav dump`; **handle lifecycle — create/destroy per handle, allocator injection, thread-safety per call (§16.1 blocks on it)**, ABI JSON extraction and its golden. The load-loader entry points and the shared object landed in P2 (§16); P3 extends that surface rather than starting it, and `deps` reads `documents` plus `Include.target`, which P2 already populates.
+**P3 — printer and ABI.** Comment-preserving canonical printer and the seven canonical rules (§15), `scav fmt --check`, `scav deps`, `scav dump`; **handle lifecycle — create/destroy per handle, allocator injection, thread-safety per call (§16.1 blocks on it)**, ABI JSON extraction and its golden. The loader's entry points and the shared object landed in P2 (§16); P3 extends that surface rather than starting it, and `deps` reads `documents` plus `Include.target`, which P2 already populates.
 *Exit:* round-trip a depth-16 / 2k-state chart byte-identically, including unknown extension columns; `fmt` idempotent on the corpus; ABI driven from Python.
 
 **P4 — metrics, space requests, layout skeleton.** Font metrics helper, the space tables, Phase 0 splitting, derived classification, trivial placement, straight-line routes, geometry columns. Validate the coordinate extent estimate (§11.2).
