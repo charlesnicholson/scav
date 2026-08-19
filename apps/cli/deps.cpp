@@ -31,10 +31,10 @@ void append_depfile_path(std::string &out, std::string_view path) {
 }  // namespace
 
 int run_deps(char const *path, char const *target) {
-  Network net;
+  Loaded net;
   // Structural validity is `check`'s question: a network that resolved is enough
   // to name its files.
-  load_network(path, false, net);
+  load_and_report(path, false, net);
   if (net.code == EXIT_UNUSABLE) { return EXIT_UNUSABLE; }
 
   std::string out;

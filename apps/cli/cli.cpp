@@ -1,5 +1,5 @@
-// Output and exit codes: the policy half of loading a network, where core
-// supplies the load, the validation and the rendering of a diagnostic.
+// Output streams and exit codes, which are a process's to choose. Everything
+// below them -- loading, validating, rendering a diagnostic -- is core's.
 
 #include "cli.h"
 
@@ -26,7 +26,7 @@ void write_error(std::string_view what, std::string_view path) {
   write_stream(err, stderr);
 }
 
-void load_network(char const *path, bool validate, Network &out) {
+void load_and_report(char const *path, bool validate, Loaded &out) {
   std::string failed;
   bool const loaded{ load_file(path, out.loader, out.chart, out.diags, failed) };
   if (!failed.empty()) {

@@ -69,8 +69,8 @@ int dispatch(int argc, char **argv) {
 
   if (verb == "check") {
     if (!one_flagged_path(argc, argv, "", "", flag_a, flag_b, path)) { return usage(); }
-    Network net;
-    load_network(path, true, net);
+    Loaded net;
+    load_and_report(path, true, net);
     return net.code;
   }
 

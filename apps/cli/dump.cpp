@@ -460,8 +460,8 @@ void append_json(std::string &out, Chart const &c) {
 }  // namespace
 
 int run_dump(char const *path, bool hash_only, bool as_json) {
-  Network net;
-  load_network(path, true, net);
+  Loaded net;
+  load_and_report(path, true, net);
   if (net.code == EXIT_UNUSABLE) { return EXIT_UNUSABLE; }
 
   std::string out;

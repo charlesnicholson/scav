@@ -8,6 +8,7 @@
 
 #include <cstdio>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace cli {
@@ -24,17 +25,16 @@ void write_stream(std::string const &text, std::FILE *to);
 // `scav: ...` on stderr, which is how every verb reports a path it cannot use.
 void write_error(std::string_view what, std::string_view path);
 
-// A whole network, diagnostics already on stderr. EXIT_DIAGNOSED when the load
-// or validation reported anything, EXIT_UNUSABLE when no chart was built.
-struct Network {
+struct Loaded {
   Loader loader;
   Chart chart;
   std::vector<Diagnostic> diags;
   int code;
 };
 
-// `validate` runs the structural checks as well as the load.
-void load_network(char const *path, bool validate, Network &out);
+// The prologue three verbs share. Core does the loading, the validation and the
+// rendering; the two decisions here are which stream and which exit code.
+void load_and_report(char const *path, bool validate, Loaded &out);
 
 int run_dump(char const *path, bool hash_only, bool as_json);
 int run_fmt(std::vector<char const *> const &paths, bool check_only);
