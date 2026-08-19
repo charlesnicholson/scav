@@ -23,13 +23,13 @@ void report(std::string &err,
             std::vector<Diagnostic> const &diags) {
   for (Diagnostic const &d : diags) {
     err += path;
-    if ((d.src.len != 0) && ((static_cast<size_t>(d.src.off) + d.src.len) <=
-                             bytes.size())) {
+    if ((d.src.len != 0) &&
+        ((static_cast<size_t>(d.src.off) + d.src.len) <= bytes.size())) {
       LineCol const lc{ diag_line_col(bytes.data(), bytes.size(), d.src.off) };
       err += ':';
-      append_u32(err, lc.line);
+      string_append_u32(err, lc.line);
       err += ':';
-      append_u32(err, lc.column);
+      string_append_u32(err, lc.column);
     }
     err += ": ";
     err += diag_message(d.code);
@@ -43,7 +43,8 @@ int run_fmt(std::vector<char const *> const &paths, bool check_only) {
   int worst{ EXIT_CLEAN };
   for (char const *const path : paths) {
     std::vector<scav_byte> bytes;
-    if (!read_source(path, bytes)) {
+    if (!read_file(path, bytes)) {
+      write_error("cannot read", path);
       worst = EXIT_UNUSABLE;
       continue;
     }
@@ -86,7 +87,12 @@ int run_fmt(std::vector<char const *> const &paths, bool check_only) {
       if (worst == EXIT_CLEAN) { worst = EXIT_DIAGNOSED; }
       continue;
     }
-    if (!write_source(path, canonical)) { worst = EXIT_UNUSABLE; }
+    if (!write_file(path,
+                    reinterpret_cast<scav_byte const *>(canonical.data()),
+                    canonical.size())) {
+      write_error("cannot write", path);
+      worst = EXIT_UNUSABLE;
+    }
   }
   return worst;
 }

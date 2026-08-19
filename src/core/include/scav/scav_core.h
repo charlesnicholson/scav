@@ -209,6 +209,11 @@ inline std::string_view string_pool_view(StringPool const &pool, StrRef ref) {
   return { reinterpret_cast<char const *>(pool.bytes.data() + ref.off), ref.len };
 }
 
+// Decimal and eight lowercase hex digits. Hand-rolled, so that no locale can
+// reach a byte scav emits.
+void string_append_u32(std::string &out, uint32_t value);
+void string_append_hex32(std::string &out, uint32_t value);
+
 // Statements ================================================================
 
 // Authored source, kept beside the entities it produced. A Chart and a
@@ -247,6 +252,9 @@ struct Statement {
   DocId doc;
   Span src;       // -> src_bytes; the whole construct, block included
   Span comments;  // -> comments, grouped by owner
+  // A blank line separated this statement from whatever came before, its own
+  // leading comments included. The only whitespace the model records.
+  uint32_t blank_before;
 };
 
 struct Trivia {
@@ -611,7 +619,7 @@ bool parse_document(scav_byte const *bytes,
 // Canonical printing ========================================================
 
 // A parsed document back to text, reconstructed rather than echoed, so two
-// documents differing only in formatting print the same bytes.
+// documents differing only in formatting print the same bytes. See the README.
 
 // A block fitting inside the budget stays on one line.
 constexpr uint32_t PRINT_COLUMNS_MIN{ 20 };
@@ -706,10 +714,33 @@ bool load_document_bytes(Loader const &loader,
 // `out` gained documents says which pool the diagnostics index.
 bool load_finish(Loader &loader, Chart &out, std::vector<Diagnostic> &diags);
 
+// Diagnostic rendering ======================================================
+
+// `name:line:col: message`, newline-terminated, appended to `out`. A diagnostic
+// carries a code plus a span or a subject, so the position is derived here.
+
+// A finding from before any chart existed -- a parse error, a cycle, a missing
+// document -- whose span indexes the bytes the loader still holds.
+void diag_append(std::string &out,
+                 Loader const &loader,
+                 Diagnostic const &d,
+                 std::string_view fallback_name);
+
+// A model finding, positioned by walking to its subject's statement. That
+// statement often sits in a document other than the one the caller named.
+void diag_append(std::string &out,
+                 Chart const &chart,
+                 Diagnostic const &d,
+                 std::string_view fallback_name);
+
 // Filesystem transport ======================================================
 
 // Reads `path` whole. Returns false when it cannot be opened or read.
 bool read_file(char const *path, std::vector<scav_byte> &out);
+
+// Writes `bytes` over `path`. Returns false when it cannot be opened, written
+// or closed.
+bool write_file(char const *path, scav_byte const *bytes, size_t len);
 
 // The load loop with `read_file` in the fetch slot. `loader` outlives the call
 // for load_document_bytes; `failed_path` names a document it could not read.

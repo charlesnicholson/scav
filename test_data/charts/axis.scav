@@ -2,13 +2,16 @@
 // parent submachine, and once more from toolchanger.scav.
 chart axis "servo axis" {
   include "estop.scav" as stop,
+
   state Parked,
   state Homing,
   state Ready,
   state Reached choice,
+
   // Concurrent: travel runs the profile while monitor watches following error.
   state Moving "under motion" {
     @doc = "both submachines run while the axis travels",
+
     submachine travel {
       state Accelerating,
       state Cruising,
@@ -25,6 +28,7 @@ chart axis "servo axis" {
       trans Nominal -> Excessive "error over limit",
     },
   },
+
   trans * -> Parked,
   trans Parked -> Homing "home",
   trans Homing -> Ready "index found",

@@ -134,6 +134,32 @@ class TestFmt(unittest.TestCase):
             self.assertIn(comment, text)
         self.assertIn("state A, // trailing A", text)
 
+    def test_blank_lines_between_statements_survive(self) -> None:
+        path = self.write(
+            "spaced.scav",
+            "chart c {\n"
+            "  state A,\n"
+            "\n"
+            "  state B,\n"
+            "\n"
+            "  // a heading\n"
+            "\n"
+            "  trans A -> B,\n"
+            "}\n",
+        )
+        before = path.read_bytes()
+        self.assertEqual(0, self.run_scav("fmt", path).returncode)
+        self.assertEqual(before, path.read_bytes())
+
+    def test_the_corpus_keeps_the_grouping_it_was_written_with(self) -> None:
+        # The reason the bit exists: a chart of any size is unreadable once its
+        # groups run together.
+        for name in self.corpus():
+            text = (self.cfg.repo_root / name).read_text(encoding="utf-8")
+            if "\n\n" in text:
+                return
+        self.fail("no corpus chart has a blank line, so this asserts nothing")
+
     # Failure ===============================================================
 
     def test_a_parse_error_leaves_the_file_alone(self) -> None:

@@ -19,6 +19,12 @@ attributes sorted by key bytes while structure keeps document order, a trailing
 comma iff the block broke, and line breaking by a column budget. Comments carry
 their position (leading, trailing, own-line) and are the expensive half.
 
+Whitespace is otherwise not the model's, with one exception: `blank_before` on a
+`Statement` keeps a blank line between two statements, because source order is a
+layout hint and grouping is how an author writes that hint down. It is a bit and
+not a count, so a run collapses to one, and it is suppressed where it would open
+or close a block.
+
 The `scav` executable (`apps/cli`) now has five spellings across four verbs:
 
 ```

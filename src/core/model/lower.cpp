@@ -396,7 +396,8 @@ DocId model_attach_document(Chart &c, ParsedDocument const &pd, uint32_t &stmt_b
         { .kind = s.kind,
           .doc = doc,
           .src = make_span(s.src.off + src_base, s.src.len),
-          .comments = make_span(s.comments.off + comment_base, s.comments.len) });
+          .comments = make_span(s.comments.off + comment_base, s.comments.len),
+          .blank_before = s.blank_before });
   }
   c.documents.push_back(
       { .path = string_pool_add(c.strings, string_pool_view(pd.strings, pd.doc.path)),

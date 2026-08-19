@@ -673,6 +673,69 @@ TEST_CASE("parse: a normalization failure stops before the lexer") {
   CHECK(r.pd.stmts.empty());
 }
 
+TEST_CASE("parse: a blank line above a statement is the one whitespace fact kept") {
+  Parsed const r{ parse("chart c {\n"
+                        "  state A,\n"
+                        "\n"
+                        "  state B,\n"
+                        "  state C,\n"
+                        "}") };
+  REQUIRE(r.ok);
+  std::vector<uint32_t> const states{ stmts_of(r.pd, StmtKind::State) };
+  REQUIRE(states.size() == 3);
+  CHECK(r.pd.stmts[states[0]].blank_before == 0);
+  CHECK(r.pd.stmts[states[1]].blank_before == 1);
+  CHECK(r.pd.stmts[states[2]].blank_before == 0);
+}
+
+TEST_CASE("parse: the blank belongs above a leading comment run, not below it") {
+  Parsed const r{ parse("chart c {\n"
+                        "  state A,\n"
+                        "\n"
+                        "  // about B\n"
+                        "  state B,\n"
+                        "}") };
+  REQUIRE(r.ok);
+  std::vector<uint32_t> const states{ stmts_of(r.pd, StmtKind::State) };
+  REQUIRE(states.size() == 2);
+  CHECK(r.pd.stmts[states[1]].blank_before == 1);
+
+  // And the other spelling: the gap under the comment is the comment's own,
+  // which `CommentPos::OwnLine` already records.
+  Parsed const under{ parse("chart c {\n"
+                            "  state A,\n"
+                            "  // a heading\n"
+                            "\n"
+                            "  state B,\n"
+                            "}") };
+  REQUIRE(under.ok);
+  std::vector<uint32_t> const rows{ stmts_of(under.pd, StmtKind::State) };
+  REQUIRE(rows.size() == 2);
+  CHECK(under.pd.stmts[rows[1]].blank_before == 0);
+  REQUIRE(under.pd.comments.size() == 1);
+  CHECK(under.pd.comments[0].pos == CommentPos::OwnLine);
+}
+
+TEST_CASE("parse: the chart statement never carries a blank, having nothing above") {
+  Parsed const r{ parse("\n\n\nchart c { state A, }") };
+  REQUIRE(r.ok);
+  CHECK(r.pd.stmts[syntax_root_statement(r.pd)].blank_before == 0);
+}
+
+TEST_CASE("parse: a blank inside one statement's span belongs to what follows it") {
+  Parsed const r{ parse("chart c {\n"
+                        "  state A {\n"
+                        "\n"
+                        "    state B,\n"
+                        "  },\n"
+                        "}") };
+  REQUIRE(r.ok);
+  std::vector<uint32_t> const states{ stmts_of(r.pd, StmtKind::State) };
+  REQUIRE(states.size() == 2);
+  CHECK(r.pd.stmts[states[0]].blank_before == 0);
+  CHECK(r.pd.stmts[states[1]].blank_before == 1);
+}
+
 TEST_CASE("parse: comments attach as leading, trailing or own-line") {
   Parsed const r{ parse(R"(
 // about the chart

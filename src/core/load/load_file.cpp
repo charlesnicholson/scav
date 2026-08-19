@@ -56,6 +56,16 @@ bool read_file(char const *path, std::vector<scav_byte> &out) {
   return ok;
 }
 
+bool write_file(char const *path, scav_byte const *bytes, size_t len) {
+  if ((path == nullptr) || ((bytes == nullptr) && (len != 0))) { return false; }
+  std::FILE *const file{ std::fopen(path, "wb") };
+  if (file == nullptr) { return false; }
+  bool const wrote{ (len == 0) || (std::fwrite(bytes, 1, len, file) == len) };
+  // Closed either way, and the close itself can fail: a short write often
+  // surfaces only when the buffer is flushed.
+  return (std::fclose(file) == 0) && wrote;
+}
+
 bool load_file(char const *path,
                Loader &loader,
                Chart &out,

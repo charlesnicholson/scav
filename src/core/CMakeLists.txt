@@ -69,6 +69,7 @@ if(SCAV_BUILD_TESTS)
     lang/source_text_tests.cpp
     lang/syntax_tests.cpp
     lang/unicode_nfc_tests.cpp
+    load/load_file_tests.cpp
     load/load_tests.cpp
     load/path_tests.cpp
     model/builder_tests.cpp

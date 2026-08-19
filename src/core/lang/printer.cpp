@@ -4,7 +4,6 @@
 #include "scav_stable_sort.h"
 #include "scav/scav_types.h"
 
-#include <array>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -56,16 +55,6 @@ void append_indent(std::string &out, uint32_t depth) {
   for (uint32_t i = 0; i < depth; ++i) { out += INDENT_UNIT; }
 }
 
-void append_u32(std::string &out, uint32_t value) {
-  std::array<char, 10> digits{};  // hand-rolled, so no locale can reach it
-  uint32_t n{ 0 };
-  do {
-    digits[n++] = static_cast<char>('0' + (value % 10U));
-    value /= 10U;
-  } while (value != 0);
-  while (n-- > 0) { out += digits[n]; }
-}
-
 // Always the escaped spelling: a `"""` literal decodes to the same text, so one
 // of the two has to win.
 void append_literal(std::string &out, std::string_view text) {
@@ -110,6 +99,7 @@ struct ItemOut {
   Span entries;   // -> Printer::entries; >1 makes this the block spelling
   Span comments;  // -> Printer::comment_ids
   uint32_t cps;
+  uint32_t blank;  // a blank line above, from the first statement that merged in
 };
 
 struct BlockOut {
@@ -128,6 +118,7 @@ struct StmtOut {
   Span tail;          // -> Printer::comment_ids, lines after the closing brace
   uint32_t open;      // trailing the `{`, or INVALID
   uint32_t post;      // trailing the `,`, or INVALID
+  uint32_t blank;     // a blank line above, before any leading comment
 };
 
 // A merged (ns, key) before grouping into an item.
@@ -185,7 +176,7 @@ void append_endpoint(Printer &p, ParsedDocument const &pd, Endpoint const &ep) {
       p.text += pool_of(pd, seg.qualifier);
     } else if (seg.ordinal != INVALID) {
       p.text += ':';
-      append_u32(p.text, seg.ordinal);
+      string_append_u32(p.text, seg.ordinal);
     }
   }
 }
@@ -274,6 +265,7 @@ void bucket_comments(Printer &p, uint32_t stmt) {
   StmtOut &so{ p.stmts[stmt] };
   so.open = INVALID;
   so.post = INVALID;
+  so.blank = pd.stmts[stmt].blank_before;
 
   uint32_t const pre_begin{ narrow_clamp<uint32_t>(p.comment_ids.size()) };
   for (uint32_t i = 0; i < span.len; ++i) {
@@ -475,7 +467,8 @@ Span build_items(Printer &p, Span children, std::vector<uint32_t> &orphans) {
                                        narrow_clamp<uint32_t>(p.entries.size()) -
                                            entries_begin),
                   .comments = {},
-                  .cps = 0 };
+                  .cps = 0,
+                  .blank = 0 };
     if (merged[i].ns.len != 0) {
       item.ns = append_text(p, pool_of(pd, merged[i].ns));
     }
@@ -549,6 +542,12 @@ Span build_items(Printer &p, Span children, std::vector<uint32_t> &orphans) {
   for (uint32_t i = 0; i < items.len; ++i) {
     p.items[items_begin + i].comments =
         make_span(base + counts[i], counts[i + 1] - counts[i]);
+  }
+  // Source order, so the earliest statement reaching an item decides its blank.
+  for (auto i = narrow_clamp<uint32_t>(attr_stmts.size()); i-- > 0;) {
+    if (owner[i] != INVALID) {
+      p.items[owner[i]].blank = pd.stmts[attr_stmts[i]].blank_before;
+    }
   }
   return items;
 }
@@ -658,7 +657,8 @@ void compute_flat(Printer &p, uint32_t stmt) {
   uint64_t sum{ 0 };
   for (uint32_t i = 0; i < b.items.len; ++i) {
     ItemOut const &item{ p.items[b.items.off + i] };
-    if (item.comments.len != 0) { return; }
+    // A blank line and a comment both end a line, so neither fits the flat form.
+    if ((item.comments.len != 0) || ((i != 0) && (item.blank != 0))) { return; }
     sum += item.cps;
     ++count;
   }
@@ -667,6 +667,7 @@ void compute_flat(Printer &p, uint32_t stmt) {
     if ((ko.flat_cps == INVALID) || (ko.pre.len != 0) || (ko.post != INVALID)) {
       return;
     }
+    if ((ko.blank != 0) && ((i != 0) || (b.items.len != 0))) { return; }
     sum += ko.flat_cps;
     ++count;
   }
@@ -783,9 +784,10 @@ void emit_entry(Emitter &e, EntryOut const &entry, uint32_t depth, uint32_t comm
   *e.out += ']';
 }
 
-void emit_item(Emitter &e, ItemOut const &item, uint32_t depth) {
+void emit_item(Emitter &e, ItemOut const &item, uint32_t depth, uint32_t blank) {
   Printer const &p{ *e.p };
   bool const group{ item.entries.len >= 2 };
+  if (blank != 0) { *e.out += '\n'; }
 
   // All but a final trailing comment go on lines above: a line takes one, and
   // merging two statements can hand this item two.
@@ -839,6 +841,7 @@ struct Job {
   uint32_t depth;
   uint32_t comma;
   uint32_t closing;  // 1 = write the closing brace, not the head
+  uint32_t blank;    // 1 = a blank line above, which the first item never takes
 };
 
 // An explicit stack rather than the call stack: nesting depth is the document's
@@ -846,7 +849,8 @@ struct Job {
 void emit_document(Emitter &e, uint32_t root) {
   Printer const &p{ *e.p };
   std::vector<Job> stack;
-  stack.push_back({ .stmt = root, .depth = 0, .comma = 0, .closing = 0 });
+  stack.push_back(
+      { .stmt = root, .depth = 0, .comma = 0, .closing = 0, .blank = 0 });
 
   while (!stack.empty()) {
     Job const job{ stack.back() };
@@ -864,6 +868,7 @@ void emit_document(Emitter &e, uint32_t root) {
       continue;
     }
 
+    if (job.blank != 0) { *e.out += '\n'; }
     emit_comment_lines(e, so.pre, job.depth);
 
     // The root always breaks: a one-line file is legal and makes every edit a
@@ -895,17 +900,26 @@ void emit_document(Emitter &e, uint32_t root) {
 
     BlockOut const &b{ p.blocks[so.block] };
     emit_comment_lines(e, b.orphans, job.depth + 1);
+    // A blank line opening a block would sit under the brace that opened it, so
+    // whatever comes first in the body never takes one.
+    uint32_t written{ b.orphans.len };
     for (uint32_t i = 0; i < b.items.len; ++i) {
-      emit_item(e, p.items[b.items.off + i], job.depth + 1);
+      ItemOut const &item{ p.items[b.items.off + i] };
+      emit_item(e, item, job.depth + 1, (written++ == 0) ? 0U : item.blank);
     }
 
-    stack.push_back(
-        { .stmt = job.stmt, .depth = job.depth, .comma = job.comma, .closing = 1 });
+    stack.push_back({ .stmt = job.stmt,
+                      .depth = job.depth,
+                      .comma = job.comma,
+                      .closing = 1,
+                      .blank = 0 });
     for (uint32_t i = b.kids.len; i-- > 0;) {
-      stack.push_back({ .stmt = p.kids[b.kids.off + i],
+      uint32_t const kid{ p.kids[b.kids.off + i] };
+      stack.push_back({ .stmt = kid,
                         .depth = job.depth + 1,
                         .comma = 1,
-                        .closing = 0 });
+                        .closing = 0,
+                        .blank = ((written + i) == 0) ? 0U : p.stmts[kid].blank });
     }
   }
 }
@@ -935,7 +949,7 @@ bool print_document(ParsedDocument const &pd,
   p.stmts.resize(pd.stmts.size(),
                  { .block = INVALID, .head = {}, .head_cps = 0, .flat_cps = INVALID,
                    .pre = {}, .dang = {}, .tail = {}, .open = INVALID,
-                   .post = INVALID });
+                   .post = INVALID, .blank = 0 });
 
   for (uint32_t i = 0; i < pd.stmts.size(); ++i) { bucket_comments(p, i); }
 

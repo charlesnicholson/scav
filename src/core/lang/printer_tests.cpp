@@ -632,6 +632,120 @@ TEST_CASE("print: trailing blanks inside a comment do not reach the output") {
         "}\n");
 }
 
+// Blank lines ===============================================================
+
+TEST_CASE("print: a blank line between two statements survives") {
+  CHECK(print("chart c {\n  state A,\n\n  state B,\n}") ==
+        "chart c {\n"
+        "  state A,\n"
+        "\n"
+        "  state B,\n"
+        "}\n");
+}
+
+TEST_CASE("print: a run of blank lines collapses to one") {
+  CHECK(print("chart c {\n  state A,\n\n\n\n  state B,\n}") ==
+        "chart c {\n"
+        "  state A,\n"
+        "\n"
+        "  state B,\n"
+        "}\n");
+}
+
+TEST_CASE("print: a blank opening or closing a block is dropped") {
+  CHECK(print("chart c {\n\n  state A,\n\n}") ==
+        "chart c {\n"
+        "  state A,\n"
+        "}\n");
+  CHECK(print("chart c {\n  state A {\n\n    state B,\n  },\n}") ==
+        "chart c {\n"
+        "  state A { state B },\n"
+        "}\n");
+}
+
+TEST_CASE("print: a blank stays above the comments it was written above") {
+  CHECK(print("chart c {\n  state A,\n\n  // about B\n  state B,\n}") ==
+        "chart c {\n"
+        "  state A,\n"
+        "\n"
+        "  // about B\n"
+        "  state B,\n"
+        "}\n");
+}
+
+TEST_CASE("print: a blank between a comment and its statement is the own-line rule") {
+  // Two ways to write a gap, and each keeps its own shape: the blank above the
+  // comment is the statement's, the blank below it is the comment's.
+  CHECK(print("chart c {\n  state A,\n  // a heading\n\n  state B,\n}") ==
+        "chart c {\n"
+        "  state A,\n"
+        "  // a heading\n"
+        "\n"
+        "  state B,\n"
+        "}\n");
+}
+
+TEST_CASE("print: a blank forces its block to break") {
+  CHECK(print("chart c {\n  state A { state B,\n\n state C, },\n}") ==
+        "chart c {\n"
+        "  state A {\n"
+        "    state B,\n"
+        "\n"
+        "    state C,\n"
+        "  },\n"
+        "}\n");
+}
+
+TEST_CASE("print: a blank above an attribute travels with it when it sorts") {
+  CHECK(print("chart c {\n  @m,\n  @z,\n\n  @a,\n}") ==
+        "chart c {\n"
+        "  @a,\n"
+        "  @m,\n"
+        "  @z,\n"
+        "}\n");
+  CHECK(print("chart c {\n  @a,\n\n  @z,\n  state S,\n}") ==
+        "chart c {\n"
+        "  @a,\n"
+        "\n"
+        "  @z,\n"
+        "  state S,\n"
+        "}\n");
+}
+
+TEST_CASE("print: a blank between the attributes and the structure survives") {
+  CHECK(print("chart c {\n  @a,\n\n  state S,\n}") ==
+        "chart c {\n"
+        "  @a,\n"
+        "\n"
+        "  state S,\n"
+        "}\n");
+}
+
+TEST_CASE("print: every blank spelling is its own fixed point") {
+  std::string const text{
+    "// header\n"
+    "\n"
+    "chart c {\n"
+    "  @z,\n"
+    "\n"
+    "  @a,\n"
+    "  state Off,\n"
+    "\n"
+    "  // a heading\n"
+    "\n"
+    "  state On {\n"
+    "    state Inner,\n"
+    "\n"
+    "    trans * -> Inner,\n"
+    "  },\n"
+    "}\n"
+  };
+  std::string const once{ print(text) };
+  CHECK(once == print(once));
+  CHECK(parse(once).ok);
+  CHECK(once.find("\n\n") != std::string::npos);
+}
+
 // Structure ordering ========================================================
 
 TEST_CASE("print: structure keeps document order, which is a layout hint") {

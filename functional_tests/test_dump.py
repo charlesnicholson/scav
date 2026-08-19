@@ -76,16 +76,26 @@ class TestDump(unittest.TestCase):
         self.assertIn("trans dock/lamp/Off -> dock/lamp/Blinking", out)
         self.assertIn("trans lamp/Off -> lamp/Blinking", out)
 
+    def line_of(self, chart: Path, needle: str) -> int:
+        text = (self.cfg.repo_root / chart).read_text(encoding="utf-8")
+        for n, line in enumerate(text.split("\n"), 1):
+            if needle in line:
+                return n
+        self.fail(f"{needle} not in {chart}")
+
     def test_an_attribute_points_at_its_own_statement(self) -> None:
         out = self.check_golden(MILL, MILL_GOLDEN)
         # The `@machine { ... }` block is one statement producing two rows, so
         # both point at that line rather than at the chart's.
-        self.assertIn('@machine:axes = "3" (test_data/charts/mill.scav:8)', out)
-        self.assertIn('@machine:spindle_kw = "2" (test_data/charts/mill.scav:8)', out)
+        machine = self.line_of(MILL, "@machine {")
+        self.assertIn(f'@machine:axes = "3" (test_data/charts/mill.scav:{machine})', out)
+        self.assertIn(
+            f'@machine:spindle_kw = "2" (test_data/charts/mill.scav:{machine})', out)
         # And an attribute inside a state names the attribute's line, not the
         # state's.
+        doc = self.line_of(MILL, "@doc = ")
         self.assertIn('@doc = "gantry mill with a carousel changer" '
-                      '(test_data/charts/mill.scav:7)', out)
+                      f'(test_data/charts/mill.scav:{doc})', out)
 
     def test_a_repeated_child_is_one_document_and_many_instantiations(self) -> None:
         out = self.check_golden(MILL, MILL_GOLDEN)

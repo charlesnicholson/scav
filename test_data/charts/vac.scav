@@ -1,22 +1,22 @@
-// The worked example from PRD 15, and the root of the corpus network: three
-// documents, two of them included, one of those included twice. `scav dump`
-// prints the whole network as one containment tree -- resolution links, it
-// does not flatten (PRD 9) -- and the golden under test_data/golden/dump/
-// pins the output byte for byte.
+// The design's worked example, and the root of a three-document network with
+// one of them included twice. Its dump is a golden, compared byte for byte.
 chart vac "robot vacuum" {
   include "dock.scav" as dock,
-  // led.scav is also included by dock.scav, so it is one Document parsed once
-  // and two instantiations with disjoint entity rows (PRD 9). The two sets
-  // differ only by InstId, and they lay out separately, which is correct.
+  // dock.scav includes led.scav too, so it is one document parsed once and two
+  // instantiations with disjoint rows, differing only by InstId.
   include "./led.scav" as lamp,
+
   state Off "powered down",
   state Booting,
   state PreConfig choice,
+
   trans * -> Off,
   trans Off -> Booting "POWER_ON",
+
   state On {
     @doc = "Enter: publishes EVT_POWERED_ON",
     @nav { follow_walls = "false", uses_lidar },
+
     submachine main {
       state Idle { @nav:retry = "false" },
       state Ready,

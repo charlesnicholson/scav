@@ -42,7 +42,7 @@ void append_loc(std::string &out, Chart const &c, StmtId stmt) {
   out += " (";
   out += loc.file;
   out += ':';
-  append_u32(out, loc.line);
+  string_append_u32(out, loc.line);
   out += ')';
 }
 
@@ -139,7 +139,7 @@ void append_model(std::string &out, Chart const &c) {
           out += chart_string(c, m.name);
         } else {
           out += ':';
-          append_u32(out, m.ordinal);
+          string_append_u32(out, m.ordinal);
         }
         if (m.label.len != 0) { append_quoted(out, chart_string(c, m.label)); }
         append_loc(out, c, m.stmt);
@@ -266,7 +266,7 @@ void append_json_id(std::string &out, uint32_t id) {
     out += "null";
     return;
   }
-  append_u32(out, id);
+  string_append_u32(out, id);
 }
 
 // One `{...}` object under construction. `n` counts fields written, which is
@@ -289,7 +289,7 @@ void row_str(Row &r, std::string_view key, std::string_view value) {
 
 void row_num(Row &r, std::string_view key, uint32_t value) {
   row_key(r, key);
-  append_u32(*r.out, value);
+  string_append_u32(*r.out, value);
 }
 
 void row_id(Row &r, std::string_view key, uint32_t id) {
@@ -305,7 +305,7 @@ void row_ids(Row &r, std::string_view key, Ids const &ids, Span span) {
     uint32_t const at{ span.off + i };
     if (at >= ids.size()) { break; }
     if (i != 0) { *r.out += ", "; }
-    append_u32(*r.out, ids[at].v);
+    string_append_u32(*r.out, ids[at].v);
   }
   *r.out += ']';
 }
@@ -317,7 +317,7 @@ void row_range(Row &r, std::string_view key, Span span) {
   *r.out += '[';
   for (uint32_t i = 0; i < span.len; ++i) {
     if (i != 0) { *r.out += ", "; }
-    append_u32(*r.out, span.off + i);
+    string_append_u32(*r.out, span.off + i);
   }
   *r.out += ']';
 }
@@ -466,7 +466,8 @@ int run_dump(char const *path, bool hash_only, bool as_json) {
 
   std::string out;
   if (hash_only) {
-    append_hash(out, chart_structural_hash(net.chart));
+    string_append_hex32(out, chart_structural_hash(net.chart));
+    out += '\n';
   } else if (as_json) {
     append_json(out, net.chart);
   } else {
