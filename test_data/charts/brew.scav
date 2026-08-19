@@ -5,19 +5,15 @@
 chart brew "espresso machine" {
   @doc = "counter-top espresso robot",
   @power { mains, watts = "1200" },
-
   state Off,
   state Standby "warm and idle",
   state SelfCheck choice,
-
   trans * -> Off,
   trans Off -> SelfCheck "power switch",
   trans SelfCheck -> Standby "ok",
   trans SelfCheck -> Off "fault",
-
   state Brewing {
     @doc = "both submachines run while a shot pulls",
-
     submachine water "boiler and pump" {
       state Heating { @tune = "pid" },
       state Pumping,
@@ -32,7 +28,6 @@ chart brew "espresso machine" {
       trans Grinding -> Dosing "ground",
     },
   },
-
   trans Standby -> Brewing "brew button",
   trans Brewing -> Standby "shot done",
   trans Standby -> * "descale overdue",

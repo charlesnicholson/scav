@@ -3,21 +3,34 @@
 Statechart authoring, layout, rendering. [PRD.md](PRD.md) is the normative design
 document; everything below describes what is built.
 
-**Status: P1 — the model spine.** `libscavcore` now carries the model itself:
-flat entity arrays (`State`, `Submachine`, `Transition`, `Include`, `Attr`)
-linked by ordinal ids with tombstones, extension columns kept in lockstep with
-their entity, an append-only builder API, structural validation, and lowering
-from P0's statement stream into entities — with `resolve_path` carrying the
-PRD's addressing rules (lexical first segment, strict descent, `$kind`
-spellings for unnamed pseudostates). P1's exit gate is a test: a depth-16 /
-2k-state chart built from code and the same chart parsed from text are
-structurally identical. Cross-document resolution — filling `Include.target`
-and attaching included submachines — is P2, the loader. The `scav` executable
-(`apps/cli`) carries the first verb, `dump`: load a chart from a file and print
-the model — the entity rows, not the syntax — each element line ending with the
-source file and line its declaration started on.
+**Status: P3 — the printer.** `libscavcore` carries the `.scav` lexer and
+parser, the model (flat entity arrays linked by ordinal ids with tombstones,
+extension columns in lockstep, an append-only builder, structural validation),
+the iterative loader that turns one document into a resolved network, and now
+the comment-preserving canonical printer.
 
-Three properties of the front end are worth knowing before reading it:
+Canonical form is a property of *running* the printer, not of the format, so
+`scav fmt` is what makes it something a repo can rely on. Printing reconstructs
+gofmt-style rather than echoing the source: two documents that differ only in
+formatting print the same bytes, which is what the format hash and a three-way
+merge rest on. The seven rules are PRD §15's — long keyword spellings, a
+repeated key as a list, `"true"` as a flag, a shared namespace as a block,
+attributes sorted by key bytes while structure keeps document order, a trailing
+comma iff the block broke, and line breaking by a column budget. Comments carry
+their position (leading, trailing, own-line) and are the expensive half.
+
+The `scav` executable (`apps/cli`) now has five spellings across four verbs:
+
+```
+scav fmt [--check] <file>...      canonical print, in place; --check gates
+scav check <file>                 structural validation, exit 1 on a finding
+scav deps [--target N] <file>     the document network as a make/ninja depfile
+scav dump [--hash|--json] <file>  the model: entity rows, not syntax
+```
+
+Layout, `DrawList`, and rendering are P4 onward and are not built.
+
+Four properties of the front end are worth knowing before reading it:
 
 - **Lexing and parsing are separate passes over a materialized token vector**, not
   a pull loop. `lex()` returns every token at once; the parser walks the array by
@@ -29,10 +42,17 @@ Three properties of the front end are worth knowing before reading it:
   Nesting depth is attacker-controlled, so a call-recursive parser answers a
   hostile document with a stack overflow. Here the depth cap is an ordinary
   comparison and the answer is a diagnostic. Same reason the trivia-attachment
-  walk and the synthetic generator are iterative.
-- **Nothing takes a path.** Parsing takes bytes; acquiring bytes is a different
-  system. There is no file I/O anywhere in core yet, and the unit tests
-  carry their charts as inline literals rather than as fixtures on disk.
+  walk and the synthetic generator are iterative. The printer's emitter and its
+  width pass are stacks for the same reason.
+- **No API forces a caller through a filesystem.** Parsing takes bytes;
+  acquiring them is a different system. `read_file` and `load_file` ship in
+  core as batteries written against the same public primitives, and are
+  skippable in full — a browser host, a binding and an editor holding unsaved
+  buffers stay first-class. Unit tests carry their charts as inline literals.
+- **The printer reads a `ParsedDocument`, not a `Chart`.** Only the statement
+  stream distinguishes `@k` from `@k = "true"`, records the `@ns { ... }`
+  spelling, and holds the endpoint path an author wrote; a `Chart` has resolved
+  those to `StateId`s. Model-to-text arrives with the editor that needs it.
 
 ## Build
 

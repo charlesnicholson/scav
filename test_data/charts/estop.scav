@@ -3,11 +3,9 @@
 // from this one parsed copy.
 chart estop "emergency stop" {
   @doc = "one latching mushroom head",
-
   state Clear,
   state Tripped,
   state Latched,
-
   trans * -> Clear,
   trans Clear -> Tripped "pressed",
   trans Tripped -> Latched "held",

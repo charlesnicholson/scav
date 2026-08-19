@@ -9,18 +9,14 @@ chart vac "robot vacuum" {
   // and two instantiations with disjoint entity rows (PRD 9). The two sets
   // differ only by InstId, and they lay out separately, which is correct.
   include "./led.scav" as lamp,
-
   state Off "powered down",
   state Booting,
   state PreConfig choice,
-
   trans * -> Off,
   trans Off -> Booting "POWER_ON",
-
   state On {
     @doc = "Enter: publishes EVT_POWERED_ON",
-    @nav { uses_lidar, follow_walls = "false" },
-
+    @nav { follow_walls = "false", uses_lidar },
     submachine main {
       state Idle { @nav:retry = "false" },
       state Ready,
@@ -30,9 +26,6 @@ chart vac "robot vacuum" {
       // include alias two levels up.
       trans Ready -> dock/On/Seated "battery low",
     },
-    submachine aux "sweeps while main drives" {
-      state Idle,
-      trans * -> Idle,
-    },
+    submachine aux "sweeps while main drives" { state Idle, trans * -> Idle },
   },
 }

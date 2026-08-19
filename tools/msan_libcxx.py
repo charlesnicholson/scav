@@ -23,11 +23,8 @@ WORK_DIR = REPO_ROOT / "out/msan-libcxx"
 PREFIX = WORK_DIR / "prefix"
 MARKER = PREFIX / "include/c++/v1/vector"
 
-# Pinned and hash-verified: this is a compilation input, so an unpinned one makes
-# the MSan row depend on whatever upstream published that morning.
-#
-# The major version tracks the clang that builds and then consumes this libc++.
-# Three majors of daylight between them is a build failure, not a warning.
+# Pinned and hash-verified, being a compilation input. The major tracks the
+# clang that builds and consumes it; three majors apart is a build failure.
 VERSION = "21.1.8"
 TARBALL = f"llvm-project-{VERSION}.src.tar.xz"
 URL = f"https://github.com/llvm/llvm-project/releases/download/llvmorg-{VERSION}/{TARBALL}"

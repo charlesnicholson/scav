@@ -1,0 +1,83 @@
+{
+  "chart": {"name": "vac", "label": "robot vacuum", "root_submachine": 0, "attrs": [], "structural_hash": 1832472053},
+  "documents": [
+    {"path": "test_data/charts/vac.scav"},
+    {"path": "test_data/charts/dock.scav"},
+    {"path": "test_data/charts/led.scav"}
+  ],
+  "states": [
+    {"name": "dock", "label": "", "kind": "normal", "parent": 0, "submachines": [3], "attrs": [], "stmt": 1, "inst": null, "live": 1},
+    {"name": "lamp", "label": "", "kind": "normal", "parent": 0, "submachines": [5], "attrs": [], "stmt": 2, "inst": null, "live": 1},
+    {"name": "Off", "label": "powered down", "kind": "normal", "parent": 0, "submachines": [], "attrs": [], "stmt": 3, "inst": null, "live": 1},
+    {"name": "Booting", "label": "", "kind": "normal", "parent": 0, "submachines": [], "attrs": [], "stmt": 4, "inst": null, "live": 1},
+    {"name": "PreConfig", "label": "", "kind": "choice", "parent": 0, "submachines": [], "attrs": [], "stmt": 5, "inst": null, "live": 1},
+    {"name": "On", "label": "", "kind": "normal", "parent": 0, "submachines": [1, 2], "attrs": [0, 1, 2], "stmt": 8, "inst": null, "live": 1},
+    {"name": "Idle", "label": "", "kind": "normal", "parent": 1, "submachines": [], "attrs": [3], "stmt": 12, "inst": null, "live": 1},
+    {"name": "Ready", "label": "", "kind": "normal", "parent": 1, "submachines": [], "attrs": [], "stmt": 14, "inst": null, "live": 1},
+    {"name": "Idle", "label": "", "kind": "normal", "parent": 2, "submachines": [], "attrs": [], "stmt": 19, "inst": null, "live": 1},
+    {"name": "lamp", "label": "", "kind": "normal", "parent": 3, "submachines": [6], "attrs": [], "stmt": 22, "inst": 0, "live": 1},
+    {"name": "Empty", "label": "", "kind": "normal", "parent": 3, "submachines": [], "attrs": [], "stmt": 23, "inst": 0, "live": 1},
+    {"name": "On", "label": "", "kind": "normal", "parent": 3, "submachines": [4], "attrs": [], "stmt": 24, "inst": 0, "live": 1},
+    {"name": "Seated", "label": "", "kind": "normal", "parent": 4, "submachines": [], "attrs": [], "stmt": 25, "inst": 0, "live": 1},
+    {"name": "Charging", "label": "", "kind": "normal", "parent": 4, "submachines": [], "attrs": [], "stmt": 26, "inst": 0, "live": 1},
+    {"name": "Off", "label": "", "kind": "normal", "parent": 5, "submachines": [], "attrs": [], "stmt": 35, "inst": 1, "live": 1},
+    {"name": "Blinking", "label": "", "kind": "normal", "parent": 5, "submachines": [], "attrs": [], "stmt": 36, "inst": 1, "live": 1},
+    {"name": "Solid", "label": "", "kind": "normal", "parent": 5, "submachines": [], "attrs": [], "stmt": 37, "inst": 1, "live": 1},
+    {"name": "Off", "label": "", "kind": "normal", "parent": 6, "submachines": [], "attrs": [], "stmt": 35, "inst": 2, "live": 1},
+    {"name": "Blinking", "label": "", "kind": "normal", "parent": 6, "submachines": [], "attrs": [], "stmt": 36, "inst": 2, "live": 1},
+    {"name": "Solid", "label": "", "kind": "normal", "parent": 6, "submachines": [], "attrs": [], "stmt": 37, "inst": 2, "live": 1},
+    {"name": "", "label": "", "kind": "initial", "parent": 0, "submachines": [], "attrs": [], "stmt": 6, "inst": null, "live": 1},
+    {"name": "", "label": "", "kind": "initial", "parent": 1, "submachines": [], "attrs": [], "stmt": 15, "inst": null, "live": 1},
+    {"name": "", "label": "", "kind": "initial", "parent": 2, "submachines": [], "attrs": [], "stmt": 20, "inst": null, "live": 1},
+    {"name": "", "label": "", "kind": "initial", "parent": 4, "submachines": [], "attrs": [], "stmt": 27, "inst": 0, "live": 1},
+    {"name": "", "label": "", "kind": "initial", "parent": 3, "submachines": [], "attrs": [], "stmt": 30, "inst": 0, "live": 1},
+    {"name": "", "label": "", "kind": "initial", "parent": 5, "submachines": [], "attrs": [], "stmt": 38, "inst": 1, "live": 1},
+    {"name": "", "label": "", "kind": "initial", "parent": 6, "submachines": [], "attrs": [], "stmt": 38, "inst": 2, "live": 1}
+  ],
+  "submachines": [
+    {"name": "", "label": "", "owner": null, "ordinal": 0, "children": [0, 1, 2, 3, 4, 5, 20], "attrs": [], "stmt": 0, "inst": null, "live": 1},
+    {"name": "main", "label": "", "owner": 5, "ordinal": 0, "children": [6, 7, 21], "attrs": [], "stmt": 11, "inst": null, "live": 1},
+    {"name": "aux", "label": "sweeps while main drives", "owner": 5, "ordinal": 1, "children": [8, 22], "attrs": [], "stmt": 18, "inst": null, "live": 1},
+    {"name": "", "label": "charging dock", "owner": 0, "ordinal": 0, "children": [9, 10, 11, 24], "attrs": [], "stmt": 21, "inst": 0, "live": 1},
+    {"name": "", "label": "", "owner": 11, "ordinal": 0, "children": [12, 13, 23], "attrs": [], "stmt": 24, "inst": 0, "live": 1},
+    {"name": "", "label": "status lamp", "owner": 1, "ordinal": 0, "children": [14, 15, 16, 25], "attrs": [4], "stmt": 33, "inst": 1, "live": 1},
+    {"name": "", "label": "status lamp", "owner": 9, "ordinal": 0, "children": [17, 18, 19, 26], "attrs": [5], "stmt": 33, "inst": 2, "live": 1}
+  ],
+  "transitions": [
+    {"src": 20, "dst": 2, "kind": "external", "label": "", "attrs": [], "stmt": 6, "inst": null, "live": 1},
+    {"src": 2, "dst": 3, "kind": "external", "label": "POWER_ON", "attrs": [], "stmt": 7, "inst": null, "live": 1},
+    {"src": 21, "dst": 6, "kind": "external", "label": "", "attrs": [], "stmt": 15, "inst": null, "live": 1},
+    {"src": 7, "dst": 7, "kind": "internal", "label": "BUMP_RETRY", "attrs": [], "stmt": 16, "inst": null, "live": 1},
+    {"src": 7, "dst": 12, "kind": "external", "label": "battery low", "attrs": [], "stmt": 17, "inst": null, "live": 1},
+    {"src": 22, "dst": 8, "kind": "external", "label": "", "attrs": [], "stmt": 20, "inst": null, "live": 1},
+    {"src": 23, "dst": 12, "kind": "external", "label": "", "attrs": [], "stmt": 27, "inst": 0, "live": 1},
+    {"src": 12, "dst": 13, "kind": "external", "label": "contacts closed", "attrs": [], "stmt": 28, "inst": 0, "live": 1},
+    {"src": 13, "dst": 19, "kind": "external", "label": "full", "attrs": [], "stmt": 29, "inst": 0, "live": 1},
+    {"src": 24, "dst": 10, "kind": "external", "label": "", "attrs": [], "stmt": 30, "inst": 0, "live": 1},
+    {"src": 10, "dst": 11, "kind": "external", "label": "vacuum docked", "attrs": [], "stmt": 31, "inst": 0, "live": 1},
+    {"src": 11, "dst": 10, "kind": "external", "label": "vacuum left", "attrs": [], "stmt": 32, "inst": 0, "live": 1},
+    {"src": 25, "dst": 14, "kind": "external", "label": "", "attrs": [], "stmt": 38, "inst": 1, "live": 1},
+    {"src": 14, "dst": 15, "kind": "external", "label": "charging", "attrs": [], "stmt": 39, "inst": 1, "live": 1},
+    {"src": 15, "dst": 16, "kind": "external", "label": "charged", "attrs": [], "stmt": 40, "inst": 1, "live": 1},
+    {"src": 16, "dst": 14, "kind": "external", "label": "undocked", "attrs": [], "stmt": 41, "inst": 1, "live": 1},
+    {"src": 26, "dst": 17, "kind": "external", "label": "", "attrs": [], "stmt": 38, "inst": 2, "live": 1},
+    {"src": 17, "dst": 18, "kind": "external", "label": "charging", "attrs": [], "stmt": 39, "inst": 2, "live": 1},
+    {"src": 18, "dst": 19, "kind": "external", "label": "charged", "attrs": [], "stmt": 40, "inst": 2, "live": 1},
+    {"src": 19, "dst": 17, "kind": "external", "label": "undocked", "attrs": [], "stmt": 41, "inst": 2, "live": 1}
+  ],
+  "includes": [
+    {"alias": "dock", "path": "dock.scav", "target": 1, "host": 0, "stmt": 1},
+    {"alias": "lamp", "path": "./led.scav", "target": 2, "host": 1, "stmt": 2},
+    {"alias": "lamp", "path": "led.scav", "target": 2, "host": 9, "stmt": 22}
+  ],
+  "attrs": [
+    {"key": "doc", "value": "Enter: publishes EVT_POWERED_ON", "stmt": 9},
+    {"key": "nav:follow_walls", "value": "false", "stmt": 10},
+    {"key": "nav:uses_lidar", "value": "true", "stmt": 10},
+    {"key": "nav:retry", "value": "false", "stmt": 13},
+    {"key": "doc", "value": "one RGB indicator", "stmt": 34},
+    {"key": "doc", "value": "one RGB indicator", "stmt": 34}
+  ],
+  "columns": [
+  ]
+}

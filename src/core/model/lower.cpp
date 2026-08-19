@@ -28,9 +28,8 @@ struct Lowerer {
   bool clean;
 };
 
-// Never below double the capacity: reserving the exact size on every round
-// replaces the vector's geometric growth with one reallocation per round, which
-// is quadratic over a network of many documents.
+// Never below double the capacity: an exact reserve every round replaces
+// geometric growth with one reallocation per round, which is quadratic.
 template <typename T>
 void reserve_at_least(std::vector<T> &v, size_t want) {
   if (want <= v.capacity()) { return; }
@@ -435,9 +434,8 @@ bool model_instantiate(Chart &c,
 }
 
 void model_finalize_containment(Chart &c) {
-  // A counting pass: the child index already ascends, so bucketing by parent
-  // lands each container's children in creation order. `children.len` is the
-  // fill cursor, starting at zero and ending at the count.
+  // The child index already ascends, so bucketing by parent lands each
+  // container's children in creation order. `children.len` is the fill cursor.
   std::vector<uint32_t> start(c.submachines.size() + 1, 0);
   for (State const &s : c.states) {
     // A parentless state reaches here only from a hand-built chart; skipping

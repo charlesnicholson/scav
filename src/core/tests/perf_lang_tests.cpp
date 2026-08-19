@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <ostream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -122,6 +123,33 @@ uint64_t time_normalize(std::string const &text) {
   uint64_t const micros{ micros_since(start) };
   REQUIRE(ok);
   return micros;
+}
+
+
+constexpr uint64_t PRINT_FLOOR_MB_PER_S{ 5 };
+
+struct Printed {
+  uint64_t micros;
+  uint64_t bytes;
+};
+
+// Timed over an already-parsed document: folding the parse in would hide a
+// quadratic behind a linear term that dominates it.
+Printed time_print(ParsedDocument const &pd) {
+  std::string out;
+  auto const start{ std::chrono::steady_clock::now() };
+  bool const ok{ print_document(pd, print_default_options(), out) };
+  Printed const p{ .micros = micros_since(start), .bytes = out.size() };
+  REQUIRE(ok);
+  return p;
+}
+
+ParsedDocument parse_for_print(std::string const &text) {
+  ParsedDocument pd;
+  std::vector<Diagnostic> diags;
+  REQUIRE(parse_document(raw(text), size32(text), "perf.scav",
+                         parse_default_options(), pd, diags));
+  return pd;
 }
 
 }  // namespace
@@ -367,4 +395,65 @@ TEST_CASE("perf: the generated document is what it claims to be") {
   CHECK(stmts_of(r.pd, StmtKind::Submachine).size() == stats.submachines);
   CHECK(stmts_of(r.pd, StmtKind::Trans).size() == stats.transitions);
   CHECK(stmts_of(r.pd, StmtKind::Attr).size() == stats.attrs);
+}
+
+TEST_CASE("perf: print a large document") {
+  SynthStats stats{};
+  std::string const text{ generate(INPUT_BYTES, stats) };
+  ParsedDocument const pd{ parse_for_print(text) };
+
+  Printed const printed{ time_print(pd) };
+  uint64_t const rate{ throughput_mb_per_s(printed.bytes, printed.micros) };
+  MESSAGE("print: " << rate << " MB/s over " << printed.bytes << " bytes");
+  if (ASSERT_FLOOR) {
+    CHECK_MESSAGE(rate >= PRINT_FLOOR_MB_PER_S, "print at " << rate << " MB/s");
+  }
+  // Canonical text is the same order of magnitude as its source. A printer that
+  // quietly quadrupled the file would still pass every idempotence test.
+  CHECK(printed.bytes > (text.size() / 2));
+  CHECK(printed.bytes < (text.size() * 2));
+}
+
+TEST_CASE("perf: printing is linear in the input") {
+  SynthStats stats{};
+  uint64_t const small_target{ INPUT_BYTES / 8 };
+  ParsedDocument const small{ parse_for_print(generate(small_target, stats)) };
+  ParsedDocument const large{ parse_for_print(generate(small_target * 4, stats)) };
+  double const ratio{ static_cast<double>(large.src_bytes.size()) /
+                      static_cast<double>(small.src_bytes.size()) };
+
+  uint64_t const small_us{ fastest_micros([&] { std::ignore = time_print(small); }) };
+  uint64_t const large_us{ fastest_micros([&] { std::ignore = time_print(large); }) };
+
+  double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
+  if (ASSERT_FLOOR) {
+    CHECK_MESSAGE(growth < ratio * SCALING_SLACK,
+                  "grew " << growth << "x for " << ratio << "x the bytes");
+  }
+}
+
+TEST_CASE("perf: a block with many attributes does not degrade") {
+  // Sorting and merging attributes is where a quadratic would live: the
+  // statement-to-item mapping is a lookup, not a scan.
+  auto const attr_block{ [](uint32_t count) {
+    std::string text{ "chart c {\n" };
+    for (uint32_t i = 0; i < count; ++i) {
+      text += "  @ns:k";
+      text += std::to_string(count - i);  // reverse order, so every one moves
+      text += " = \"v\",\n";
+    }
+    text += "}\n";
+    return text;
+  } };
+
+  ParsedDocument const small{ parse_for_print(attr_block(2000)) };
+  ParsedDocument const large{ parse_for_print(attr_block(8000)) };
+
+  uint64_t const small_us{ fastest_micros([&] { std::ignore = time_print(small); }) };
+  uint64_t const large_us{ fastest_micros([&] { std::ignore = time_print(large); }) };
+  double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
+  if (ASSERT_FLOOR) {
+    CHECK_MESSAGE(growth < 4.0 * SCALING_SLACK,
+                  "grew " << growth << "x for 4x the attributes");
+  }
 }

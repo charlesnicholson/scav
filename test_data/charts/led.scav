@@ -2,11 +2,9 @@
 // exercises is being the third document, not being an interesting chart.
 chart led "status lamp" {
   @doc = "one RGB indicator",
-
   state Off,
   state Blinking,
   state Solid,
-
   trans * -> Off,
   trans Off -> Blinking "charging",
   trans Blinking -> Solid "charged",

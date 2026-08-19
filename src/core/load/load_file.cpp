@@ -18,9 +18,8 @@ namespace {
 
 constexpr size_t READ_CHUNK{ size_t{ 64 } * 1024U };
 
-// Document names are `/`-separated on every transport, so the one entry point
-// taking a native path converts it. A backslash is a legal filename byte off
-// Windows, where this would corrupt a name rather than fix it.
+// Document names are `/`-separated on every transport. Windows only: off it, a
+// backslash is a legal filename byte and this would corrupt a name.
 std::string native_to_key(char const *path) {
   std::string out{ (path == nullptr) ? "" : path };
 #ifdef _WIN32

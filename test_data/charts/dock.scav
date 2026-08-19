@@ -2,7 +2,6 @@
 // levels deep and the DocId walk has something to be breadth-first about.
 chart dock "charging dock" {
   include "led.scav" as lamp,
-
   state Empty,
   state On {
     state Seated,
@@ -13,7 +12,6 @@ chart dock "charging dock" {
     // ordinary path does once the alias host has its target.
     trans Charging -> lamp/Solid "full",
   },
-
   trans * -> Empty,
   trans Empty -> On "vacuum docked",
   trans On -> Empty "vacuum left",

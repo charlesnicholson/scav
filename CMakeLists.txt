@@ -20,9 +20,8 @@ include(CMakeDependentOption)
 # integer, so this must produce byte-identical output to release.
 option(SCAV_TESTING "Define SCAV_TESTING for the shipping libraries too" OFF)
 
-# Measured at 20% off a full load at the 2k-state target, and -O2 and -O3 tie
-# once it is on. Off by default because a toolchain without it is still a
-# supported toolchain; the optimized presets turn it on.
+# Measured at 20% off a full load at the 2k-state target. Off by default: a
+# toolchain without it is still supported, and the optimized presets set it.
 option(SCAV_LTO "Link-time optimization" OFF)
 
 option(SCAV_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
@@ -58,15 +57,12 @@ else()
 endif()
 option(SCAV_BUILD_TESTS "Build the unit tests" ${scav_tests_default})
 
-# Tests are build steps (cmake/ScavTesting.cmake), so building *is* testing and a
-# green build cannot hide a red test. Turning this off keeps the executables and
-# drops them from ALL, leaving `--target run.<name>` for one-at-a-time runs.
+# Tests are build steps, so a green build cannot hide a red test. Off keeps the
+# executables and drops them from ALL, leaving `--target run.<name>`.
 option(SCAV_RUN_TESTS "Run the tests as part of the build" ON)
 
-# Off because the determinism matrix runs on shared CI runners, where a stalled box
-# reports a regression that is not there. The performance tests always run and their
-# memory bounds always assert -- those are counted, not timed. This adds the wall
-# clock ones, which mean something only on a machine you can name.
+# Off: a shared runner stalling reports a regression that is not there. The
+# counted bounds always assert; this adds the wall-clock ones.
 option(SCAV_PERF_FLOORS "Assert the performance timing floors" OFF)
 
 # Language baseline
@@ -149,9 +145,8 @@ file(WRITE "${PROJECT_BINARY_DIR}/scav_sources.txt" "${scav_production_sources_t
 
 include(CMakePackageConfigHelpers)
 
-# The cross-library vocabulary only. A library's own API is installed by
-# scav_install_library from its src/<lib>/include, which is also the only place
-# a consumer can reach in the build tree.
+# The cross-library vocabulary only; scav_install_library installs each
+# library's own API from its src/<lib>/include.
 install(DIRECTORY include/scav
   DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
   FILES_MATCHING PATTERN "*.h"

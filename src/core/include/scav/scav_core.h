@@ -608,6 +608,28 @@ bool parse_document(scav_byte const *bytes,
                     ParsedDocument &out,
                     std::vector<Diagnostic> &diags);
 
+// Canonical printing ========================================================
+
+// A parsed document back to text, reconstructed rather than echoed, so two
+// documents differing only in formatting print the same bytes.
+
+// A block fitting inside the budget stays on one line.
+constexpr uint32_t PRINT_COLUMNS_MIN{ 20 };
+constexpr uint32_t PRINT_COLUMNS_MAX{ 4096 };
+constexpr uint32_t DEFAULT_PRINT_COLUMNS{ 90 };
+
+struct PrintOptions {
+  uint32_t columns;
+};
+
+PrintOptions print_default_options();
+
+bool print_options_validate(PrintOptions const &opts);
+
+// Appends canonical text for `pd`, newline-terminated. False only when the
+// options are out of range; a half-parsed document prints the rows it produced.
+bool print_document(ParsedDocument const &pd, PrintOptions const &opts, std::string &out);
+
 // Document paths ============================================================
 
 // A document name is a key, resolved by byte-wise segment folding. Names are

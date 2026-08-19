@@ -4,12 +4,10 @@
 chart toolchanger "carousel tool changer" {
   include "axis.scav" as arm,
   include "estop.scav" as stop,
-
   state Parked,
   state Rotating,
   state Gripping,
   state Releasing,
-
   trans * -> Parked,
   trans Parked -> Rotating "select pocket",
   trans Rotating -> Gripping "pocket aligned",

@@ -285,8 +285,7 @@ TEST_CASE("abi: two loaders in one process do not share state") {
   REQUIRE(scav_chart_structural_hash(b, &hb) == SCAV_OK);
   CHECK(ha == hb);
 
-  // And a chart outlives the loader that produced it.
-  scav_load_destroy(first_loader);
+  scav_load_destroy(first_loader);  // a chart outlives the loader that made it
   uint32_t after{ 0 };
   REQUIRE(scav_chart_structural_hash(a, &after) == SCAV_OK);
   CHECK(after == ha);
