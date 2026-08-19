@@ -685,6 +685,33 @@ TEST_CASE("print: a blank between a comment and its statement is the own-line ru
         "}\n");
 }
 
+TEST_CASE("print: a trailing comment above does not swallow the blank below it") {
+  CHECK(print("chart c {\n"
+              "  state A, // trailing\n"
+              "\n"
+              "  state B,\n"
+              "}") ==
+        "chart c {\n"
+        "  state A, // trailing\n"
+        "\n"
+        "  state B,\n"
+        "}\n");
+  // And with a heading between them, where the gap is measured from the end of
+  // the trailing comment to the start of the heading.
+  CHECK(print("chart c {\n"
+              "  state A, // trailing\n"
+              "\n"
+              "  // a heading\n"
+              "  state B,\n"
+              "}") ==
+        "chart c {\n"
+        "  state A, // trailing\n"
+        "\n"
+        "  // a heading\n"
+        "  state B,\n"
+        "}\n");
+}
+
 TEST_CASE("print: a blank forces its block to break") {
   CHECK(print("chart c {\n  state A { state B,\n\n state C, },\n}") ==
         "chart c {\n"

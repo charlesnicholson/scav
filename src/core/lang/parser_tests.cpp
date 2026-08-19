@@ -716,6 +716,43 @@ TEST_CASE("parse: the blank belongs above a leading comment run, not below it") 
   CHECK(under.pd.comments[0].pos == CommentPos::OwnLine);
 }
 
+TEST_CASE("parse: a trailing comment above does not hide the blank below it") {
+  // The gap is measured from the end of that comment, not from the token before
+  // it: the comment sits between the two, so counting from the comma finds no
+  // newlines at all and the blank disappears.
+  Parsed const r{ parse("chart c {\n"
+                        "  state A, // trailing\n"
+                        "\n"
+                        "  state B,\n"
+                        "}") };
+  REQUIRE(r.ok);
+  std::vector<uint32_t> const states{ stmts_of(r.pd, StmtKind::State) };
+  REQUIRE(states.size() == 2);
+  CHECK(r.pd.stmts[states[1]].blank_before == 1);
+
+  // The same with a heading in between, so the run start is a comment too.
+  Parsed const heading{ parse("chart c {\n"
+                              "  state A, // trailing\n"
+                              "\n"
+                              "  // a heading\n"
+                              "  state B,\n"
+                              "}") };
+  REQUIRE(heading.ok);
+  std::vector<uint32_t> const rows{ stmts_of(heading.pd, StmtKind::State) };
+  REQUIRE(rows.size() == 2);
+  CHECK(heading.pd.stmts[rows[1]].blank_before == 1);
+
+  // And without the blank, so the test above is not passing on the comment.
+  Parsed const tight{ parse("chart c {\n"
+                            "  state A, // trailing\n"
+                            "  state B,\n"
+                            "}") };
+  REQUIRE(tight.ok);
+  std::vector<uint32_t> const packed{ stmts_of(tight.pd, StmtKind::State) };
+  REQUIRE(packed.size() == 2);
+  CHECK(tight.pd.stmts[packed[1]].blank_before == 0);
+}
+
 TEST_CASE("parse: the chart statement never carries a blank, having nothing above") {
   Parsed const r{ parse("\n\n\nchart c { state A, }") };
   REQUIRE(r.ok);

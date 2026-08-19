@@ -164,11 +164,21 @@ bool take_number(Parser &p, uint32_t &out) {
   return true;
 }
 
-// Measured to the start of the leading comment run rather than to the statement,
-// so a blank above a heading comment stays above it.
+// Measured between the leading comment run and whatever ended above it, so a
+// blank stays above a heading comment and a trailing one does not hide it.
 uint32_t blank_before(Parser &p, uint32_t at) {
   while ((p.comment_cursor < p.comment_count) &&
          (p.comments[p.comment_cursor].src.off < p.last_end)) {
+    ++p.comment_cursor;
+  }
+  // A comment with code earlier on its line trails the statement above, so the
+  // gap begins after it rather than before it.
+  uint32_t from{ p.last_end };
+  while ((p.comment_cursor < p.comment_count) &&
+         (p.comments[p.comment_cursor].src.off < at) &&
+         (p.comments[p.comment_cursor].code_before != 0)) {
+    Span const &src{ p.comments[p.comment_cursor].src };
+    from = src.off + src.len;
     ++p.comment_cursor;
   }
   uint32_t stop{ at };
@@ -177,7 +187,7 @@ uint32_t blank_before(Parser &p, uint32_t at) {
     stop = p.comments[p.comment_cursor].src.off;
   }
   uint32_t newlines{ 0 };
-  for (uint32_t i = p.last_end; (i < stop) && (newlines < 2); ++i) {
+  for (uint32_t i = from; (i < stop) && (newlines < 2); ++i) {
     if (p.bytes[i] == '\n') { ++newlines; }
   }
   return (newlines >= 2) ? 1U : 0U;
