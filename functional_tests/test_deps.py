@@ -113,21 +113,18 @@ class TestDeps(unittest.TestCase):
             'chart root {\n  include "leaf.scav" as l,\n  state R,\n}\n',
             encoding="utf-8",
         )
-        # `cmake -E chdir` to the source directory, where a sanitizer build's
-        # bare-filename suppressions path resolves. scav therefore takes an
-        # absolute input, while the build statement stays relative to the build
-        # directory -- ninja reads `:` there as the output separator, so a
-        # `D:/...` output is a syntax error rather than a path.
-        exe = Path(self.exe).as_posix()
-        chdir = f"{Path(self.cfg.cmake).as_posix()} -E chdir "
-        chdir += f"{Path(self.cfg.repo_root).as_posix()} "
-        src = (build / "root.scav").as_posix()
+        # scav takes an absolute input and writes through the shell, so the
+        # build statement stays relative to the build directory -- ninja reads
+        # `:` there as the output separator, and a `D:/...` output is a syntax
+        # error rather than a path. Native separators inside the command, which
+        # ninja hands to the shell verbatim and only `$` is special to.
+        exe = str(self.exe)
+        src = str(build / "root.scav")
         # `dump` stands in for a renderer: what matters is that ninja learns
         # the second dependency from the depfile, not from the description.
         (build / "build.ninja").write_text(
             f"""rule render
-  command = {chdir}{exe} dump {src} > $out && """
-            f"""{chdir}{exe} deps --target $out {src} > $out.d
+  command = {exe} dump {src} > $out && {exe} deps --target $out {src} > $out.d
   depfile = $out.d
   description = render $out
 
@@ -137,13 +134,14 @@ build root.txt: render root.scav
         )
 
         ninja = Path(self.cfg.make_program)
-        self.assertEqual(0, scavtest.run([ninja, "-C", build]).returncode)
+        env = scavtest.env_without_suppressions()
+        self.assertEqual(0, scavtest.run([ninja, "-C", build], env=env).returncode)
         first = (build / "root.txt").read_text(encoding="utf-8")
         self.assertIn("state L", first)
 
         # Nothing changed, so nothing reruns: without this the next assertion
         # would pass for the wrong reason.
-        second = scavtest.run([ninja, "-C", build])
+        second = scavtest.run([ninja, "-C", build], env=env)
         self.assertEqual(0, second.returncode)
         self.assertIn("no work to do", second.stdout)
 
@@ -151,7 +149,7 @@ build root.txt: render root.scav
         (build / "leaf.scav").write_text(
             "chart leaf {\n  state Renamed,\n}\n", encoding="utf-8"
         )
-        third = scavtest.run([ninja, "-C", build])
+        third = scavtest.run([ninja, "-C", build], env=env)
         self.assertEqual(0, third.returncode)
         self.assertNotIn("no work to do", third.stdout)
         self.assertIn("state Renamed", (build / "root.txt").read_text(encoding="utf-8"))
