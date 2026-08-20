@@ -1,8 +1,8 @@
 #include "core/core_internal.h"
 #include "scav/scav_core.h"
 
-#include "scav_stable_sort.h"
 #include "scav/scav_types.h"
+#include "scav_stable_sort.h"
 
 #include <cstdint>
 #include <string>
@@ -35,16 +35,15 @@ std::string_view comment_of(ParsedDocument const &pd, uint32_t index) {
   if ((static_cast<uint64_t>(src.off) + src.len) > pd.src_bytes.size()) { return {}; }
   std::string_view text{ reinterpret_cast<char const *>(pd.src_bytes.data() + src.off),
                          src.len };
-  while (!text.empty() && ((text.back() == ' ') || (text.back() == '\t') ||
-                           (text.back() == '\r'))) {
+  while (!text.empty() &&
+         ((text.back() == ' ') || (text.back() == '\t') || (text.back() == '\r'))) {
     text.remove_suffix(1);
   }
   return text;
 }
 
 bool comment_is_trailing(ParsedDocument const &pd, uint32_t index) {
-  return (index < pd.comments.size()) &&
-         (pd.comments[index].pos == CommentPos::Trailing);
+  return (index < pd.comments.size()) && (pd.comments[index].pos == CommentPos::Trailing);
 }
 
 bool comment_is_own_line(ParsedDocument const &pd, uint32_t index) {
@@ -109,8 +108,8 @@ struct BlockOut {
 };
 
 struct StmtOut {
-  uint32_t block;     // -> Printer::blocks; INVALID when the statement owns none
-  Span head;          // -> Printer::text
+  uint32_t block;  // -> Printer::blocks; INVALID when the statement owns none
+  Span head;       // -> Printer::text
   uint32_t head_cps;
   uint32_t flat_cps;  // INVALID when the subtree cannot be one line
   Span pre;           // -> Printer::comment_ids, lines above
@@ -124,7 +123,7 @@ struct StmtOut {
 // A merged (ns, key) before grouping into an item.
 struct Merged {
   StrRef ns, key;
-  Span values;  // -> Printer::merged_values
+  Span values;    // -> Printer::merged_values
   Span composed;  // -> Printer::text, `ns:key` or `key`, the sort key
 };
 
@@ -274,8 +273,7 @@ void bucket_comments(Printer &p, uint32_t stmt) {
     if (comment_is_trailing(pd, id)) { continue; }
     if (pd.comments[id].src.off < src.off) { p.comment_ids.push_back(id); }
   }
-  so.pre = make_span(pre_begin,
-                     narrow_clamp<uint32_t>(p.comment_ids.size()) - pre_begin);
+  so.pre = make_span(pre_begin, narrow_clamp<uint32_t>(p.comment_ids.size()) - pre_begin);
 
   uint32_t const dang_begin{ narrow_clamp<uint32_t>(p.comment_ids.size()) };
   for (uint32_t i = 0; i < span.len; ++i) {
@@ -296,8 +294,8 @@ void bucket_comments(Printer &p, uint32_t stmt) {
     }
     if ((off >= src.off) && (off < end)) { p.comment_ids.push_back(id); }
   }
-  so.dang = make_span(dang_begin,
-                      narrow_clamp<uint32_t>(p.comment_ids.size()) - dang_begin);
+  so.dang =
+      make_span(dang_begin, narrow_clamp<uint32_t>(p.comment_ids.size()) - dang_begin);
 
   uint32_t const tail_begin{ narrow_clamp<uint32_t>(p.comment_ids.size()) };
   for (uint32_t i = 0; i < span.len; ++i) {
@@ -313,8 +311,8 @@ void bucket_comments(Printer &p, uint32_t stmt) {
     }
     p.comment_ids.push_back(id);
   }
-  so.tail = make_span(tail_begin,
-                      narrow_clamp<uint32_t>(p.comment_ids.size()) - tail_begin);
+  so.tail =
+      make_span(tail_begin, narrow_clamp<uint32_t>(p.comment_ids.size()) - tail_begin);
 }
 
 // Attribute canonicalization ================================================
@@ -358,8 +356,8 @@ EntryOut build_entry(Printer &p,
     }
     if (list) { p.text += ']'; }
   }
-  out.values = make_span(values_begin,
-                         narrow_clamp<uint32_t>(p.values.size()) - values_begin);
+  out.values =
+      make_span(values_begin, narrow_clamp<uint32_t>(p.values.size()) - values_begin);
   out.text = text_since(p, begin);
   out.cps = count_cp(text_of(p, out.text));
   return out;
@@ -380,9 +378,7 @@ Span build_items(Printer &p, Span children, std::vector<uint32_t> &orphans) {
     uint32_t const at{ children.off + i };
     if (at >= pd.stmt_ids.size()) { continue; }
     uint32_t const stmt{ pd.stmt_ids[at].v };
-    if ((stmt >= pd.stmts.size()) || (pd.stmts[stmt].kind != StmtKind::Attr)) {
-      continue;
-    }
+    if ((stmt >= pd.stmts.size()) || (pd.stmts[stmt].kind != StmtKind::Attr)) { continue; }
     attr_stmts.push_back(stmt);
     uint32_t const payload{ pd.stmt_payload[stmt] };
     if (payload >= pd.attrs.size()) { continue; }
@@ -402,11 +398,11 @@ Span build_items(Printer &p, Span children, std::vector<uint32_t> &orphans) {
           }
         }
       }
-      flat.push_back({ .ns = as.ns,
-                       .key = entry.key,
-                       .values = make_span(vbegin,
-                                           narrow_clamp<uint32_t>(vals.size()) - vbegin),
-                       .composed = build_composed(p, as.ns, entry.key) });
+      flat.push_back(
+          { .ns = as.ns,
+            .key = entry.key,
+            .values = make_span(vbegin, narrow_clamp<uint32_t>(vals.size()) - vbegin),
+            .composed = build_composed(p, as.ns, entry.key) });
     }
   }
 
@@ -424,14 +420,13 @@ Span build_items(Printer &p, Span children, std::vector<uint32_t> &orphans) {
   for (uint32_t const slot : order) {
     Merged const &row{ flat[slot] };
     bool const same{ !merged.empty() &&
-                     (text_of(p, merged.back().composed) ==
-                      text_of(p, row.composed)) };
+                     (text_of(p, merged.back().composed) == text_of(p, row.composed)) };
     if (!same) {
-      merged.push_back({ .ns = row.ns,
-                         .key = row.key,
-                         .values = make_span(narrow_clamp<uint32_t>(merged_vals.size()),
-                                             0),
-                         .composed = row.composed });
+      merged.push_back(
+          { .ns = row.ns,
+            .key = row.key,
+            .values = make_span(narrow_clamp<uint32_t>(merged_vals.size()), 0),
+            .composed = row.composed });
     }
     for (uint32_t v = 0; v < row.values.len; ++v) {
       merged_vals.push_back(vals[row.values.off + v]);
@@ -463,15 +458,13 @@ Span build_items(Printer &p, Span children, std::vector<uint32_t> &orphans) {
       item_of.push_back(narrow_clamp<uint32_t>(p.items.size()));
     }
     ItemOut item{ .ns = {},
-                  .entries = make_span(entries_begin,
-                                       narrow_clamp<uint32_t>(p.entries.size()) -
-                                           entries_begin),
+                  .entries =
+                      make_span(entries_begin,
+                                narrow_clamp<uint32_t>(p.entries.size()) - entries_begin),
                   .comments = {},
                   .cps = 0,
                   .blank = 0 };
-    if (merged[i].ns.len != 0) {
-      item.ns = append_text(p, pool_of(pd, merged[i].ns));
-    }
+    if (merged[i].ns.len != 0) { item.ns = append_text(p, pool_of(pd, merged[i].ns)); }
 
     item.cps = 1 + count_cp(text_of(p, item.ns));  // `@k`, `@ns:k`, `@ns { a, b }`
     if (group) {
@@ -516,8 +509,7 @@ Span build_items(Printer &p, Span children, std::vector<uint32_t> &orphans) {
         hi = mid;
       }
     }
-    if ((lo < item_keys.size()) &&
-        (text_of(p, item_keys[lo]) == text_of(p, composed))) {
+    if ((lo < item_keys.size()) && (text_of(p, item_keys[lo]) == text_of(p, composed))) {
       owner[i] = item_of[lo];
     }
   }
@@ -529,9 +521,7 @@ Span build_items(Printer &p, Span children, std::vector<uint32_t> &orphans) {
     if (owner[i] == INVALID) { continue; }
     Span const span{ pd.stmts[attr_stmts[i]].comments };
     for (uint32_t c = 0; c < span.len; ++c) {
-      if ((span.off + c) < pd.comments.size()) {
-        ++counts[(owner[i] - items_begin) + 1];
-      }
+      if ((span.off + c) < pd.comments.size()) { ++counts[(owner[i] - items_begin) + 1]; }
     }
   }
   for (uint32_t i = 0; i < items.len; ++i) { counts[i + 1] += counts[i]; }
@@ -629,11 +619,10 @@ void build_block(Printer &p, uint32_t stmt) {
 
   p.blocks.push_back(
       { .items = items,
-        .kids = make_span(kids_begin,
-                          narrow_clamp<uint32_t>(p.kids.size()) - kids_begin),
-        .orphans = make_span(orphans_begin,
-                             narrow_clamp<uint32_t>(p.comment_ids.size()) -
-                                 orphans_begin) });
+        .kids = make_span(kids_begin, narrow_clamp<uint32_t>(p.kids.size()) - kids_begin),
+        .orphans =
+            make_span(orphans_begin,
+                      narrow_clamp<uint32_t>(p.comment_ids.size()) - orphans_begin) });
   p.stmts[stmt].block = narrow_clamp<uint32_t>(p.blocks.size()) - 1;
 }
 
@@ -675,9 +664,7 @@ void compute_flat(Printer &p, uint32_t stmt) {
   }
   for (uint32_t i = 0; i < b.kids.len; ++i) {
     StmtOut const &ko{ p.stmts[p.kids[b.kids.off + i]] };
-    if ((ko.flat_cps == INVALID) || (ko.pre.len != 0) || (ko.post != INVALID)) {
-      return;
-    }
+    if ((ko.flat_cps == INVALID) || (ko.pre.len != 0) || (ko.post != INVALID)) { return; }
     if ((ko.blank != 0) && ((i != 0) || (b.items.len != 0))) { return; }
     sum += ko.flat_cps;
     ++count;
@@ -685,9 +672,9 @@ void compute_flat(Printer &p, uint32_t stmt) {
 
   // `head {}` when empty, else `head { a, b }`: a space and a comma per item,
   // less the comma the last one does not take, plus the braces.
-  uint64_t const flat{ (count == 0) ? (uint64_t{ so.head_cps } + 3)
-                                    : (uint64_t{ so.head_cps } + sum +
-                                       (2ULL * count) + 3ULL) };
+  uint64_t const flat{ (count == 0)
+                           ? (uint64_t{ so.head_cps } + 3)
+                           : (uint64_t{ so.head_cps } + sum + (2ULL * count) + 3ULL) };
   so.flat_cps = (flat >= INVALID) ? INVALID : static_cast<uint32_t>(flat);
 }
 
@@ -724,7 +711,7 @@ void emit_trailing(Emitter &e, uint32_t id) {
 void emit_flat(Emitter &e, uint32_t root) {
   struct Frame {
     uint32_t stmt;
-    uint32_t next;   // index into the block's items, then its kids
+    uint32_t next;  // index into the block's items, then its kids
     uint32_t total;
   };
   std::vector<Frame> stack;
@@ -809,12 +796,10 @@ void emit_item(Emitter &e, ItemOut const &item, uint32_t depth, uint32_t blank) 
   // All but a final trailing comment go on lines above: a line takes one, and
   // merging two statements can hand this item two.
   uint32_t const n{ item.comments.len };
-  bool const trails{ (n != 0) &&
-                     comment_is_trailing(*p.pd,
-                                         p.comment_ids[item.comments.off + n - 1]) };
-  emit_comment_lines(e,
-                     make_span(item.comments.off, trails ? (n - 1) : n),
-                     depth);
+  bool const trails{
+    (n != 0) && comment_is_trailing(*p.pd, p.comment_ids[item.comments.off + n - 1])
+  };
+  emit_comment_lines(e, make_span(item.comments.off, trails ? (n - 1) : n), depth);
 
   append_indent(*e.out, depth);
   if (fits(p, depth, item.cps, 1)) {
@@ -867,8 +852,7 @@ struct Job {
 void emit_document(Emitter &e, uint32_t root) {
   Printer const &p{ *e.p };
   std::vector<Job> stack;
-  stack.push_back(
-      { .stmt = root, .depth = 0, .comma = 0, .closing = 0, .blank = 0 });
+  stack.push_back({ .stmt = root, .depth = 0, .comma = 0, .closing = 0, .blank = 0 });
 
   while (!stack.empty()) {
     Job const job{ stack.back() };
@@ -891,8 +875,7 @@ void emit_document(Emitter &e, uint32_t root) {
 
     // The root always breaks: a one-line file is legal and makes every edit a
     // whole-file diff.
-    bool const broken{ (job.stmt == root) ||
-                       !fits(p, job.depth, so.flat_cps, job.comma) };
+    bool const broken{ (job.stmt == root) || !fits(p, job.depth, so.flat_cps, job.comma) };
     if (!broken) {
       append_indent(*e.out, job.depth);
       emit_flat(e, job.stmt);
@@ -950,9 +933,7 @@ bool print_options_validate(PrintOptions const &opts) {
   return (opts.columns >= PRINT_COLUMNS_MIN) && (opts.columns <= PRINT_COLUMNS_MAX);
 }
 
-bool print_document(ParsedDocument const &pd,
-                    PrintOptions const &opts,
-                    std::string &out) {
+bool print_document(ParsedDocument const &pd, PrintOptions const &opts, std::string &out) {
   if (!print_options_validate(opts)) { return false; }
   uint32_t const root{ syntax_root_statement(pd) };
   if (root == INVALID) { return true; }
@@ -961,13 +942,27 @@ bool print_document(ParsedDocument const &pd,
     return true;
   }
 
-  Printer p{ .pd = &pd, .columns = opts.columns, .text = {}, .values = {},
-             .entries = {}, .items = {}, .blocks = {}, .kids = {},
-             .comment_ids = {}, .stmts = {} };
+  Printer p{ .pd = &pd,
+             .columns = opts.columns,
+             .text = {},
+             .values = {},
+             .entries = {},
+             .items = {},
+             .blocks = {},
+             .kids = {},
+             .comment_ids = {},
+             .stmts = {} };
   p.stmts.resize(pd.stmts.size(),
-                 { .block = INVALID, .head = {}, .head_cps = 0, .flat_cps = INVALID,
-                   .pre = {}, .dang = {}, .tail = {}, .open = INVALID,
-                   .post = INVALID, .blank = 0 });
+                 { .block = INVALID,
+                   .head = {},
+                   .head_cps = 0,
+                   .flat_cps = INVALID,
+                   .pre = {},
+                   .dang = {},
+                   .tail = {},
+                   .open = INVALID,
+                   .post = INVALID,
+                   .blank = 0 });
 
   for (uint32_t i = 0; i < pd.stmts.size(); ++i) { bucket_comments(p, i); }
 

@@ -62,10 +62,13 @@ class TestDeps(unittest.TestCase):
         self.assertTrue(result.stdout.startswith("out/vac.svg: "))
 
     def test_a_chart_with_no_includes_depends_on_itself(self) -> None:
+        # The target is the caller's string verbatim, since a build system has to
+        # match it; a dependency is a document name, which is `/`-separated on
+        # every transport. On Windows those two are spelled differently.
         chart = self.write("solo.scav", "chart solo {\n  state A,\n}\n")
         result = self.run_scav("deps", chart)
         self.assertEqual(0, result.returncode)
-        self.assertEqual(f"{chart}: {chart}\n", result.stdout)
+        self.assertEqual(f"{chart}: {chart.as_posix()}\n", result.stdout)
 
     def test_document_order_is_the_include_graph_not_arrival(self) -> None:
         # A DocId comes from the first include statement naming it, ordered
@@ -90,7 +93,7 @@ class TestDeps(unittest.TestCase):
         )
         result = self.run_scav("deps", chart)
         self.assertEqual(0, result.returncode)
-        self.assertIn(str(leaf), result.stdout)
+        self.assertIn(leaf.as_posix(), result.stdout)
         self.assertEqual(1, self.run_scav("check", chart).returncode)
 
     def test_a_missing_document_is_an_error_with_no_output(self) -> None:
@@ -111,22 +114,24 @@ class TestDeps(unittest.TestCase):
             encoding="utf-8",
         )
         # `cmake -E chdir` to the source directory, where a sanitizer build's
-        # bare-filename suppressions path resolves. Absolute paths everywhere.
+        # bare-filename suppressions path resolves. scav therefore takes an
+        # absolute input, while the build statement stays relative to the build
+        # directory -- ninja reads `:` there as the output separator, so a
+        # `D:/...` output is a syntax error rather than a path.
         exe = Path(self.exe).as_posix()
         chdir = f"{Path(self.cfg.cmake).as_posix()} -E chdir "
         chdir += f"{Path(self.cfg.repo_root).as_posix()} "
-        out = (build / "root.txt").as_posix()
         src = (build / "root.scav").as_posix()
         # `dump` stands in for a renderer: what matters is that ninja learns
         # the second dependency from the depfile, not from the description.
         (build / "build.ninja").write_text(
             f"""rule render
-  command = {chdir}{exe} dump $in > $out && """
-            f"""{chdir}{exe} deps --target $out $in > $out.d
+  command = {chdir}{exe} dump {src} > $out && """
+            f"""{chdir}{exe} deps --target $out {src} > $out.d
   depfile = $out.d
   description = render $out
 
-build {out}: render {src}
+build root.txt: render root.scav
 """,
             encoding="utf-8",
         )

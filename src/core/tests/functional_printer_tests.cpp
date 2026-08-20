@@ -5,9 +5,9 @@
 #include "core/tests/test_charts.h"
 #include "core/tests/test_support.h"
 #include "core/tests/test_synth.h"
-#include "scav_stable_sort.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
+#include "scav_stable_sort.h"
 
 #include "doctest.h"
 
@@ -43,9 +43,7 @@ void append_attrs(std::string &out, Chart const &c, Span attrs) {
     rows.push_back(std::string{ chart_attr_key(c, a.key) } + "=" +
                    std::string{ chart_string(c, a.value) });
   }
-  scav_stable_sort(rows, [](std::string const &a, std::string const &b) {
-    return a < b;
-  });
+  scav_stable_sort(rows, [](std::string const &a, std::string const &b) { return a < b; });
   for (std::string const &row : rows) {
     out += " @";
     out += row;
@@ -244,4 +242,3 @@ TEST_CASE("printer: the deep document the depth cap admits still prints") {
   CHECK(once == print(once));
   CHECK(parse(once).ok);
 }
-

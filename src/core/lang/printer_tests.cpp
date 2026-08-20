@@ -231,8 +231,9 @@ TEST_CASE("print: a block within the budget stays on one line") {
 }
 
 TEST_CASE("print: a block over the budget breaks, and only the block that overflows") {
-  std::string const out{ print(
-      "chart c { state A { state B, state C, }, state D { state E, }, }", 30) };
+  std::string const out{
+    print("chart c { state A { state B, state C, }, state D { state E, }, }", 30)
+  };
   CHECK(out ==
         "chart c {\n"
         "  state A {\n"
@@ -311,8 +312,8 @@ TEST_CASE("print: the budget counts the @ and the namespace above the entry") {
 TEST_CASE("print: no attribute line runs past the budget it can break under") {
   // The property behind the case above, over every prefix width and budget: a
   // line holding a breakable list is never wider than the budget.
-  for (std::string const &ns : { std::string{}, std::string{ "n:" },
-                                 std::string{ "averylongnamespace:" } }) {
+  for (std::string const &ns :
+       { std::string{}, std::string{ "n:" }, std::string{ "averylongnamespace:" } }) {
     for (uint32_t const columns : { PRINT_COLUMNS_MIN, 24U, 32U, 48U, 90U }) {
       std::string const src{ "chart c { @" + ns +
                              R"(k = ["aaaaaaaa", "bbbbbbbb", "cccccccc"], })" };
@@ -327,7 +328,9 @@ TEST_CASE("print: no attribute line runs past the budget it can break under") {
                                      (end == std::string::npos ? out.size() : end) -
                                          begin };
         // A line still holding two values had room to break and did not.
-        if (line.size() > columns) { CHECK(line.find("\", \"") == std::string_view::npos); }
+        if (line.size() > columns) {
+          CHECK(line.find("\", \"") == std::string_view::npos);
+        }
         if (end == std::string::npos) { break; }
         begin = end + 1;
       }
@@ -631,12 +634,13 @@ TEST_CASE("print: a comment on an attribute travels with it when it sorts") {
 }
 
 TEST_CASE("print: merging two statements under one key keeps both their comments") {
-  std::string const out{ print("chart c {\n"
-                               "  // first\n"
-                               "  @k = \"a\", // one\n"
-                               "  // second\n"
-                               "  @k = \"b\",\n"
-                               "}") };
+  std::string const out{ print(
+      "chart c {\n"
+      "  // first\n"
+      "  @k = \"a\", // one\n"
+      "  // second\n"
+      "  @k = \"b\",\n"
+      "}") };
   CHECK(out ==
         "chart c {\n"
         "  // first\n"
@@ -867,7 +871,6 @@ TEST_CASE("print: the canonicity helper means canonical, not merely convergent")
   CHECK_FALSE(is_canonical("chart c {\n  state A\n}\n"));
   CHECK(is_canonical("chart c {\n  state A,\n}\n"));
 }
-
 
 TEST_CASE("print: canonical output parses and prints as itself") {
   // One document exercising every rule at once, so the fixed point is asserted

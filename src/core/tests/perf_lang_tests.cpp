@@ -126,7 +126,6 @@ uint64_t time_normalize(std::string const &text) {
   return micros;
 }
 
-
 constexpr uint64_t PRINT_FLOOR_MB_PER_S{ 5 };
 
 struct Printed {
@@ -148,8 +147,12 @@ Printed time_print(ParsedDocument const &pd) {
 ParsedDocument parse_for_print(std::string const &text) {
   ParsedDocument pd;
   std::vector<Diagnostic> diags;
-  REQUIRE(parse_document(raw(text), size32(text), "perf.scav",
-                         parse_default_options(), pd, diags));
+  REQUIRE(parse_document(raw(text),
+                         size32(text),
+                         "perf.scav",
+                         parse_default_options(),
+                         pd,
+                         diags));
   return pd;
 }
 

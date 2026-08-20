@@ -51,12 +51,9 @@ int run_fmt(std::vector<char const *> const &paths, bool check_only) {
 
     ParsedDocument pd;
     std::vector<Diagnostic> diags;
-    bool const ok{ parse_document(bytes.data(),
-                                  bytes.size(),
-                                  path,
-                                  parse_default_options(),
-                                  pd,
-                                  diags) };
+    bool const ok{
+      parse_document(bytes.data(), bytes.size(), path, parse_default_options(), pd, diags)
+    };
     std::string err;
     report(err, path, pd.src_bytes, diags);
     write_stream(err, stderr);

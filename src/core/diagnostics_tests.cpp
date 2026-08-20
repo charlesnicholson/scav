@@ -154,8 +154,8 @@ TEST_CASE("diag: a finding with no position at all still names something") {
                          .src = {} };
   std::string out;
   diag_append(out, r.chart, bare, "cmdline.scav");
-  CHECK(out == std::string{ "cmdline.scav: " } +
-                 diag_message(DiagCode::LoaderEmpty) + "\n");
+  CHECK(out ==
+        std::string{ "cmdline.scav: " } + diag_message(DiagCode::LoaderEmpty) + "\n");
 }
 
 TEST_CASE("diag: a loader finding is positioned against the bytes it still holds") {
@@ -178,8 +178,8 @@ TEST_CASE("diag: an unnamed document falls back to the name the caller supplied"
                       .src = {} };
   std::string out;
   diag_append(out, loader, d, "cmdline.scav");
-  CHECK(out == std::string{ "cmdline.scav: " } +
-                 diag_message(DiagCode::LoaderEmpty) + "\n");
+  CHECK(out ==
+        std::string{ "cmdline.scav: " } + diag_message(DiagCode::LoaderEmpty) + "\n");
 }
 
 TEST_CASE("diag: rendering appends, so a run of findings is one string") {
