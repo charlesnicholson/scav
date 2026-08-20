@@ -83,11 +83,11 @@ inline std::string print(std::string_view text,
   return out;
 }
 
-// Canonical text prints as itself.
+// Canonical text prints as itself -- not merely that a second pass agrees with
+// the first, which every input satisfies.
 inline bool is_canonical(std::string_view text,
                          uint32_t columns = DEFAULT_PRINT_COLUMNS) {
-  std::string const once{ print(text, columns) };
-  return once == print(once, columns);
+  return std::string{ text } == print(text, columns);
 }
 
 inline std::string_view str(ParsedDocument const &pd, StrRef ref) {

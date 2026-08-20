@@ -503,11 +503,22 @@ Span build_items(Printer &p, Span children, std::vector<uint32_t> &orphans) {
     uint32_t const eat{ as.entries.off };
     if (eat >= pd.attr_entries.size()) { continue; }
     Span const composed{ build_composed(p, as.ns, pd.attr_entries[eat].key) };
-    for (uint32_t k = 0; k < item_keys.size(); ++k) {
-      if (text_of(p, item_keys[k]) == text_of(p, composed)) {
-        owner[i] = item_of[k];
-        break;
+    // `item_keys` is the merged list in composed-key order, so this is a search
+    // rather than a scan -- a block of thousands of attributes is otherwise
+    // quadratic.
+    uint32_t lo{ 0 };
+    uint32_t hi{ narrow_clamp<uint32_t>(item_keys.size()) };
+    while (lo < hi) {
+      uint32_t const mid{ lo + ((hi - lo) / 2U) };
+      if (text_of(p, item_keys[mid]) < text_of(p, composed)) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
       }
+    }
+    if ((lo < item_keys.size()) &&
+        (text_of(p, item_keys[lo]) == text_of(p, composed))) {
+      owner[i] = item_of[lo];
     }
   }
 
@@ -767,9 +778,15 @@ void emit_flat(Emitter &e, uint32_t root) {
 }
 
 // `@k = [` then one value per line: the only break a single attribute admits.
-void emit_entry(Emitter &e, EntryOut const &entry, uint32_t depth, uint32_t comma) {
+// `prefix` is what the caller already wrote on this line -- the `@` and any
+// `ns:` -- which the width test has to carry or it measures the wrong line.
+void emit_entry(Emitter &e,
+                EntryOut const &entry,
+                uint32_t depth,
+                uint32_t prefix,
+                uint32_t comma) {
   Printer const &p{ *e.p };
-  if (fits(p, depth, entry.cps, comma) || (entry.values.len < 2)) {
+  if (fits(p, depth, prefix + entry.cps, comma) || (entry.values.len < 2)) {
     *e.out += text_of(p, entry.text);
     return;
   }
@@ -820,7 +837,7 @@ void emit_item(Emitter &e, ItemOut const &item, uint32_t depth, uint32_t blank) 
     *e.out += " {\n";
     for (uint32_t k = 0; k < item.entries.len; ++k) {
       append_indent(*e.out, depth + 1);
-      emit_entry(e, p.entries[item.entries.off + k], depth + 1, 1);
+      emit_entry(e, p.entries[item.entries.off + k], depth + 1, 0, 1);
       *e.out += ",\n";
     }
     append_indent(*e.out, depth);
@@ -829,7 +846,8 @@ void emit_item(Emitter &e, ItemOut const &item, uint32_t depth, uint32_t blank) 
     *e.out += '@';
     *e.out += text_of(p, item.ns);
     if (item.ns.len != 0) { *e.out += ':'; }
-    emit_entry(e, p.entries[item.entries.off], depth, 1);
+    EntryOut const &entry{ p.entries[item.entries.off] };
+    emit_entry(e, entry, depth, item.cps - entry.cps, 1);
   }
   *e.out += ',';
   if (trails) { emit_trailing(e, p.comment_ids[item.comments.off + n - 1]); }

@@ -23,6 +23,7 @@ using namespace scav::test;
 
 constexpr uint64_t INPUT_BYTES{ SCAV_PERF_INPUT_BYTES };
 constexpr bool ASSERT_FLOOR{ SCAV_PERF_ASSERT_FLOOR != 0 };
+constexpr bool ASSERT_SCALING{ SCAV_PERF_ASSERT_SCALING != 0 };
 
 // An order of magnitude under a 2020-era laptop: a halved throughput is not what
 // this catches, and a quadratic one blows through it regardless.
@@ -250,7 +251,7 @@ TEST_CASE("perf: lexing is linear in the input") {
   uint64_t const large_us{ fastest_micros([&] { time_lex(large_bytes); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
-  if (ASSERT_FLOOR) {
+  if (ASSERT_SCALING) {
     CHECK_MESSAGE(growth < ratio * SCALING_SLACK,
                   "grew " << growth << "x for " << ratio << "x the bytes");
   }
@@ -288,7 +289,7 @@ TEST_CASE("perf: parsing is linear in the input") {
   uint64_t const large_us{ time_parse(large_bytes, large_lexed, footprint) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
-  if (ASSERT_FLOOR) {
+  if (ASSERT_SCALING) {
     CHECK_MESSAGE(growth < ratio * SCALING_SLACK,
                   "grew " << growth << "x for " << ratio << "x the bytes");
   }
@@ -319,7 +320,7 @@ TEST_CASE("perf: a wide sibling list does not degrade") {
   uint64_t const large_us{ fastest_micros([&] { parse(large); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
-  if (ASSERT_FLOOR) {
+  if (ASSERT_SCALING) {
     CHECK_MESSAGE(growth < ratio * SCALING_SLACK,
                   "grew " << growth << "x for " << ratio << "x the bytes");
   }
@@ -357,7 +358,7 @@ TEST_CASE("perf: a long comment run does not degrade") {
   CHECK(large_parsed.pd.comments.size() == 16000);
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
-  if (ASSERT_FLOOR) {
+  if (ASSERT_SCALING) {
     CHECK_MESSAGE(growth < ratio * SCALING_SLACK,
                   "grew " << growth << "x for " << ratio << "x the bytes");
   }
@@ -377,7 +378,7 @@ TEST_CASE("perf: deep nesting does not degrade") {
   uint64_t const large_us{ fastest_micros([&] { parse_deep(large, 300); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
-  if (ASSERT_FLOOR) {
+  if (ASSERT_SCALING) {
     CHECK_MESSAGE(growth < ratio * SCALING_SLACK,
                   "grew " << growth << "x for " << ratio << "x the bytes");
   }
@@ -426,7 +427,7 @@ TEST_CASE("perf: printing is linear in the input") {
   uint64_t const large_us{ fastest_micros([&] { std::ignore = time_print(large); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
-  if (ASSERT_FLOOR) {
+  if (ASSERT_SCALING) {
     CHECK_MESSAGE(growth < ratio * SCALING_SLACK,
                   "grew " << growth << "x for " << ratio << "x the bytes");
   }
@@ -452,7 +453,7 @@ TEST_CASE("perf: a block with many attributes does not degrade") {
   uint64_t const small_us{ fastest_micros([&] { std::ignore = time_print(small); }) };
   uint64_t const large_us{ fastest_micros([&] { std::ignore = time_print(large); }) };
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
-  if (ASSERT_FLOOR) {
+  if (ASSERT_SCALING) {
     CHECK_MESSAGE(growth < 4.0 * SCALING_SLACK,
                   "grew " << growth << "x for 4x the attributes");
   }

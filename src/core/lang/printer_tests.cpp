@@ -283,6 +283,58 @@ TEST_CASE("print: a long namespace block breaks one entry per line") {
         "}\n");
 }
 
+TEST_CASE("print: the budget counts the @ and the namespace above the entry") {
+  // The entry alone fits at 24; `@nsx:` in front of it does not, and measuring
+  // the entry on its own emitted a 29-column line.
+  CHECK(print(R"(chart c { @nsx:k = ["aaaaaa", "bbb"], })", 24) ==
+        "chart c {\n"
+        "  @nsx:k = [\n"
+        "    \"aaaaaa\",\n"
+        "    \"bbb\",\n"
+        "  ],\n"
+        "}\n");
+  // A bare key carries only the `@`, and one wide enough still breaks.
+  CHECK(print(R"(chart c { @k = ["aaaaaaaaaaaaaaaa", "bbb"], })", 24) ==
+        "chart c {\n"
+        "  @k = [\n"
+        "    \"aaaaaaaaaaaaaaaa\",\n"
+        "    \"bbb\",\n"
+        "  ],\n"
+        "}\n");
+  // And the prefix does not push a list over when it still fits.
+  CHECK(print(R"(chart c { @n:k = ["a", "b"], })", 24) ==
+        "chart c {\n"
+        "  @n:k = [\"a\", \"b\"],\n"
+        "}\n");
+}
+
+TEST_CASE("print: no attribute line runs past the budget it can break under") {
+  // The property behind the case above, over every prefix width and budget: a
+  // line holding a breakable list is never wider than the budget.
+  for (std::string const &ns : { std::string{}, std::string{ "n:" },
+                                 std::string{ "averylongnamespace:" } }) {
+    for (uint32_t const columns : { PRINT_COLUMNS_MIN, 24U, 32U, 48U, 90U }) {
+      std::string const src{ "chart c { @" + ns +
+                             R"(k = ["aaaaaaaa", "bbbbbbbb", "cccccccc"], })" };
+      std::string const out{ print(src, columns) };
+      CAPTURE(ns);
+      CAPTURE(columns);
+      CHECK(is_canonical(out, columns));
+      size_t begin{ 0 };
+      while (begin < out.size()) {
+        size_t const end{ out.find('\n', begin) };
+        std::string_view const line{ out.data() + begin,
+                                     (end == std::string::npos ? out.size() : end) -
+                                         begin };
+        // A line still holding two values had room to break and did not.
+        if (line.size() > columns) { CHECK(line.find("\", \"") == std::string_view::npos); }
+        if (end == std::string::npos) { break; }
+        begin = end + 1;
+      }
+    }
+  }
+}
+
 TEST_CASE("print: an atom wider than the budget overflows rather than corrupting") {
   std::string const out{ print("chart c { state Aaaaaaaaaaaaaaaaaaaaaaaaaaaaa, }", 20) };
   CHECK(out ==
@@ -807,6 +859,15 @@ TEST_CASE("print: nesting survives to sixteen levels") {
 }
 
 // Idempotence ===============================================================
+
+TEST_CASE("print: the canonicity helper means canonical, not merely convergent") {
+  // Every input converges by the second pass, so a helper that compared two
+  // prints would accept anything and every case using it would assert nothing.
+  CHECK_FALSE(is_canonical("chart c { s A, }"));
+  CHECK_FALSE(is_canonical("chart c {\n  state A\n}\n"));
+  CHECK(is_canonical("chart c {\n  state A,\n}\n"));
+}
+
 
 TEST_CASE("print: canonical output parses and prints as itself") {
   // One document exercising every rule at once, so the fixed point is asserted

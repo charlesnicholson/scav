@@ -113,8 +113,11 @@ if(SCAV_BUILD_TESTS)
   set(scav_floors "$<AND:$<BOOL:${SCAV_PERF_FLOORS}>,$<NOT:${scav_light}>>")
   # 100 MB is for the timing floors, which assert only on a named machine; 8 MB
   # exposes a quadratic to the scaling and memory bounds in seconds.
+  # A rate needs a named machine; a ratio does not, and instrumentation scales
+  # both of its sides. So scaling asserts wherever the numbers mean anything.
   target_compile_definitions(scav_core_tests PRIVATE
     "SCAV_PERF_INPUT_BYTES=$<IF:${scav_light},4194304,$<IF:${scav_floors},104857600,8388608>>"
     "SCAV_PERF_ASSERT_FLOOR=$<IF:${scav_floors},1,0>"
+    "SCAV_PERF_ASSERT_SCALING=$<IF:${scav_light},0,1>"
   )
 endif()
