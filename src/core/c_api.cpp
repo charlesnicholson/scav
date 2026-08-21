@@ -11,9 +11,8 @@
 #include <string_view>
 #include <vector>
 
-// Pinned where the ABI is projected: the binding generator reproduces these
-// layouts from the JSON, so a platform where they drift must fail to compile
-// rather than misread.
+// Pinned where the ABI is projected: a platform where these drift must fail
+// to compile rather than misread the layouts a binding reproduces.
 static_assert(sizeof(scav_span) == 8);
 static_assert(sizeof(scav_point) == 8);
 static_assert(sizeof(scav_extent) == 8);

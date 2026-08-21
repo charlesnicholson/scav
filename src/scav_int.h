@@ -1,9 +1,8 @@
 #ifndef SCAV_INT_H_INCLUDED
 #define SCAV_INT_H_INCLUDED
 
-// The integer primitives standing in for <cmath> and raw signed division:
-// division rounding one documented way regardless of sign, floor sqrt and
-// log2, and ratio comparison that never constructs a quotient.
+// Integer stand-ins for <cmath> and raw signed division: division rounding
+// one documented way for every sign, floor sqrt/log2, ratio comparison.
 
 #include <bit>
 #include <cstdint>
@@ -11,11 +10,8 @@
 
 namespace scav {
 
-// The only division primitives. Raw / and % truncate toward zero, which
-// buckets asymmetrically about the origin; these round toward negative
-// infinity (floor_div, floor_mod) or positive infinity (ceil_div) for every
-// sign combination. b must be nonzero, and the exact quotient must be
-// representable -- floor_div(INT_MIN, -1) is the caller's overflow.
+// The only division primitives: floor_div/floor_mod round toward negative
+// infinity, ceil_div toward positive. b nonzero; INT_MIN / -1 is the caller's.
 
 template <typename T>
 constexpr T floor_div(T a, T b) {
@@ -71,9 +67,8 @@ constexpr uint32_t ilog2(T x) {
   return static_cast<uint32_t>(std::bit_width(x)) - 1U;
 }
 
-// a_num/a_den < b_num/b_den by cross-multiplication. Denominators must be
-// positive, and the caller's own bounds prove the products fit int64 -- the
-// profile caps every ratio field for exactly this.
+// a_num/a_den < b_num/b_den by cross-multiplication: denominators positive,
+// products proven inside int64 by the caller's own bounds.
 constexpr bool ratio_less(int64_t a_num, int64_t a_den, int64_t b_num, int64_t b_den) {
   return (a_num * b_den) < (b_num * a_den);
 }

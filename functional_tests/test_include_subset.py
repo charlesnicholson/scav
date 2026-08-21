@@ -38,8 +38,9 @@ class TestLayoutIncludeSubset(unittest.TestCase):
     def test_layout_sources_stay_inside_the_subset(self) -> None:
         cfg = scavtest.load_config()
         layout = cfg.repo_root / "src/layout"
+        sources = sorted(layout.rglob("*")) if layout.is_dir() else []
         offences: list[str] = []
-        for path in sorted(layout.rglob("*")) if layout.is_dir() else []:
+        for path in sources:
             if path.suffix not in (".h", ".cpp") or path.stem.endswith("_tests"):
                 continue
             for number, line in enumerate(

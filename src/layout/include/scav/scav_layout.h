@@ -1,9 +1,8 @@
 #ifndef SCAV_LAYOUT_H_INCLUDED
 #define SCAV_LAYOUT_H_INCLUDED
 
-// libscavlayout's public API: validation and digest over the space tables, the
-// shipped profiles, and the router registry. The input types are the C ABI's
-// flat PODs, used directly -- both languages spell them the same way.
+// libscavlayout's public API: validation and digest over the space tables,
+// the shipped profiles, and the router registry, over the C ABI's own PODs.
 
 #include "scav/scav_core.h"
 #include "scav/scav_layout_c.h"
@@ -20,9 +19,8 @@ namespace scav {
 // an illegal box: the box formula adds requests, padding, and packed children.
 inline constexpr int32_t SPACE_MAX{ COORD_MAX / 4 };
 
-// Every row of every table against the domain, appending findings sorted by
-// (code, subject kind, subject ordinal). False when it found anything; the
-// caller rejects, never clamps.
+// Every row of every table against the domain, findings sorted by (code,
+// kind, ordinal). False when it found anything; the caller rejects, never clamps.
 bool spaces_validate(Chart const &c,
                      scav_spaces const &s,
                      std::vector<Diagnostic> &diags);

@@ -110,10 +110,8 @@ scav_result scav_chart_digest(scav_chart const *chart,
                               uint32_t cap,
                               uint32_t *out_count);
 
-/* A finding from an operation on an existing chart -- validation, layout. A
- * producer running before entities exist fills (doc, off, len); one running
- * after fills the subject, and a position is derived by walking to the
- * subject's statement. 24 bytes, no padding. */
+/* A finding from an operation on an existing chart. A producer running before
+ * entities exist fills (doc, off, len); one after fills the subject. 24 bytes. */
 /* NOLINTNEXTLINE(modernize-use-using) */
 typedef struct {
   uint32_t code; /* scav_diag_message renders it */
@@ -123,19 +121,16 @@ typedef struct {
   uint32_t off, len;
 } scav_diag;
 
-/* The latest operation's findings, owned by the chart and overwritten at each
- * operation's entry. The loader's own diagnostics stay on the loader: a failed
- * load leaves no chart to carry them. */
+/* The latest operation's findings, owned by the chart, overwritten at each
+ * operation's entry. The loader keeps its own: a failed load has no chart. */
 scav_result scav_chart_diag_count(scav_chart const *chart, uint32_t *out_count);
 scav_result scav_chart_diag(scav_chart const *chart, uint32_t index, scav_diag *out);
 
 /* NOLINTNEXTLINE(modernize-use-using) */
 typedef uint32_t scav_column_id;
 
-/* Column access is three calls: a builder cannot walk a column without the row
- * count, and the stride is the registered element size. A name nothing
- * registered is SCAV_E_INVALID_ARG; an empty column reads back as a NULL data
- * pointer and a zero count. */
+/* Three calls: a walk needs the row count, and the stride is the registered
+ * element size. Unknown name: SCAV_E_INVALID_ARG. Empty column: NULL, zero. */
 scav_result scav_column_find(scav_chart const *chart,
                              char const *name,
                              scav_column_id *out);
@@ -147,9 +142,8 @@ scav_result scav_column_count(scav_chart const *chart,
                               scav_column_id id,
                               uint32_t *out_count);
 
-/* A span into the chart's string pool -- authored names and labels, the spans
- * a strref column holds. Not NUL-terminated; a zero-length span reads back as
- * NULL and zero, and one past the pool is SCAV_E_INVALID_ARG. */
+/* A span into the chart's string pool, not NUL-terminated. Zero length reads
+ * back NULL and zero; a span past the pool is SCAV_E_INVALID_ARG. */
 scav_result scav_str(scav_chart const *chart,
                      scav_span ref,
                      scav_byte const **out,

@@ -521,9 +521,8 @@ scav_byte const *column_data(Chart const &c, ColumnId id);
 // Rows, not bytes: bytes.size() / elem_size.
 uint32_t column_count(Chart const &c, ColumnId id);
 
-// Sets the row count of a self-length column -- ElemKind::Point, whose count is
-// the column's own rather than an entity array's. Growth zero-fills; shrinking
-// truncates. False for any other entity or an id out of range.
+// Sets a self-length (ElemKind::Point) column's row count; growth zero-fills.
+// False for any other entity or an id out of range.
 bool column_resize(Chart &c, ColumnId id, uint32_t rows);
 
 // Syntax tree ===============================================================

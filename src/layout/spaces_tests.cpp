@@ -64,6 +64,18 @@ TEST_CASE("spaces: empty and all-zero tables both validate") {
   CHECK(diags.empty());
 }
 
+TEST_CASE("spaces: the domain boundary itself is legal") {
+  Chart const c{ two_state_chart() };
+  Tables t{ full_tables(c) };
+  t.box_state[0] = { .min_w = SPACE_MAX, .h_before = SPACE_MAX, .h_after = SPACE_MAX };
+  t.path_clear[0] = { .src = SPACE_MAX, .dst = SPACE_MAX };
+  t.path_box = { { .subject = 0, .w = SPACE_MAX, .h = SPACE_MAX, .order = 0 } };
+
+  std::vector<Diagnostic> diags;
+  CHECK(spaces_validate(c, as_spaces(t), diags));
+  CHECK(diags.empty());
+}
+
 TEST_CASE("spaces: a count neither zero nor the entity's is a mismatch") {
   Chart const c{ two_state_chart() };
   Tables t{ full_tables(c) };
@@ -187,4 +199,11 @@ TEST_CASE("spaces: the digest hears every field and both zero shapes differ") {
   // No requests at all and zero-valued requests are different policies.
   scav_spaces const none{};
   CHECK(spaces_digest(none) != spaces_digest(as_spaces(full_tables(c))));
+
+  // Count prefixes keep adjacent tables apart: the same 12 bytes hash
+  // differently as one state row versus one submachine row.
+  scav_box_space const row{ .min_w = 3, .h_before = 5, .h_after = 7 };
+  scav_spaces const as_state{ .box_state = &row, .n_box_state = 1 };
+  scav_spaces const as_sub{ .box_sub = &row, .n_box_sub = 1 };
+  CHECK(spaces_digest(as_state) != spaces_digest(as_sub));
 }

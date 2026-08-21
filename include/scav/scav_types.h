@@ -46,10 +46,8 @@ typedef struct {
 
 namespace scav {
 
-// Coordinates are int32 grid units of 1/16 point; intermediates widen to Wide
-// before multiplying.
-using Coord = int32_t;
-using Wide = int64_t;
+using Coord = int32_t;  // grid units of 1/16 point
+using Wide = int64_t;   // widen to Wide before multiplying coordinates
 
 // Symmetric domain, so negation, abs, and the RTL x-mirror stay in range on
 // every value.

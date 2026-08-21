@@ -1,9 +1,8 @@
 #ifndef SCAV_LAYOUT_C_H_INCLUDED
 #define SCAV_LAYOUT_C_H_INCLUDED
 
-/* libscavlayout's C API: the space tables an application fills, the profile
- * that parameterizes layout, and the router registry. Every type is a flat POD
- * of fixed-width integers, so the same structs serve C++ callers directly. */
+/* libscavlayout's C API: the space tables an application fills, the profile,
+ * and the router registry. Flat PODs of fixed-width integers, C++ uses them too. */
 
 #include "scav/scav_types.h"
 
@@ -23,13 +22,12 @@ typedef uint32_t scav_router_id;
  * exceed what was requested. */
 typedef scav_rect scav_placed;
 
-/* Interior space a state or submachine box must make room for: a width floor,
- * and heights reserved before and after the packed-submachine area. All-zero
+/* Interior space a state or submachine box must make room for; all-zero
  * requests nothing. */
 typedef struct {
-  int32_t min_w;
-  int32_t h_before;
-  int32_t h_after;
+  int32_t min_w;    /* interior at least this wide */
+  int32_t h_before; /* height reserved before the packed-submachine area */
+  int32_t h_after;  /* ... after */
 } scav_box_space;
 
 /* Route shortening at each end, for arrowheads and terminal glyphs. */
@@ -37,17 +35,15 @@ typedef struct {
   int32_t src, dst;
 } scav_path_clear;
 
-/* A rect layout slides along `subject`'s route. `order` positions it among the
- * boxes sharing that route and must be unique per subject. */
+/* A rect layout slides along `subject`'s route. */
 typedef struct {
   uint32_t subject; /* TransId ordinal */
   int32_t w, h;
-  uint32_t order;
+  uint32_t order; /* position among the subject's boxes; unique per subject */
 } scav_path_box;
 
-/* The three space tables. The app owns every array; scav only reads. box and
- * clear counts either match their entity array or are zero; path boxes are
- * 0..N per transition. */
+/* The app owns every array; scav only reads. Box and clear counts match their
+ * entity array or are zero; path boxes are 0..N per transition. */
 typedef struct {
   scav_box_space const *box_state;
   uint32_t n_box_state;
@@ -60,44 +56,28 @@ typedef struct {
 } scav_spaces;
 
 /* Every knob layout reads, flat int32 with no padding, so the bytes hash into
- * a golden directly. Bounds, validated by scav_profile_validate and rejected
- * out of range:
- *
- *   pad, kind_min_*, spacing_inflation_increment    [0, COORD_MAX/4]
- *   font_size_grid                                  [1, COORD_MAX/4]
- *   line_height_k_num, _k_den, dar_num, dar_den     [1, 1024]
- *   trybox, sm_tiebreak                             [0, 1]
- *   w_*                                             [0, 1024]
- *   portfolio_k                                     [1, 64]
- *   sweep_count, congestion_iterations, ripup_cap,
- *   spacing_inflation_cap                           [0, 1024]
- *   print_columns                                   [20, 4096]
- *   profile_id                                      [0, INT32_MAX]
- *   profile_version                                 [1, INT32_MAX]
- *
- * Weight ceilings keep the summed cost inside int64; bounded dar and k keep
- * their products inside the isqrt and line-height intermediates. */
+ * a golden directly. Each field's bound rides it; validate rejects the rest. */
 typedef struct {
-  int32_t profile_id;
-  int32_t profile_version;
+  int32_t profile_id;      /* [0, INT32_MAX] */
+  int32_t profile_version; /* [1, INT32_MAX] */
 
-  int32_t pad; /* interior padding on every composed box */
+  int32_t pad; /* around every composed box; [0, COORD_MAX/4] */
 
-  int32_t font_size_grid; /* 1/16 pt units */
-  int32_t line_height_k_num;
-  int32_t line_height_k_den;
+  int32_t font_size_grid;    /* 1/16 pt units; [1, COORD_MAX/4] */
+  int32_t line_height_k_num; /* [1, 1024] */
+  int32_t line_height_k_den; /* [1, 1024] */
 
-  /* Minimum extents indexed by StateKind ordinal; fork and join are wide and
-   * thin, and nothing scales with arity. */
+  /* Min extents by StateKind ordinal; fork/join wide and thin. [0, COORD_MAX/4] */
   int32_t kind_min_w[9];
   int32_t kind_min_h[9];
 
-  int32_t dar_num; /* desired aspect ratio, held as a pair */
+  int32_t dar_num;     /* desired aspect ratio as a pair; each [1, 1024] */
   int32_t dar_den;
-  int32_t trybox;      /* 1 = evaluate the box packer alongside */
-  int32_t sm_tiebreak; /* 0 = area then aspect, 1 = aspect then area */
+  int32_t trybox;      /* 1 = evaluate the box packer alongside; [0, 1] */
+  int32_t sm_tiebreak; /* 0 = area then aspect, 1 = reversed; [0, 1] */
 
-  /* Tier-2 weights, highest to lowest. */
+  /* Tier-2 weights, highest to lowest; each [0, 1024], which keeps the summed
+   * cost inside int64. */
   int32_t w_bends;
   int32_t w_corridor;
   int32_t w_crossings;
@@ -107,14 +87,14 @@ typedef struct {
   int32_t w_aspect;
   int32_t w_area;
 
-  int32_t portfolio_k;
-  int32_t sweep_count;
-  int32_t congestion_iterations;
-  int32_t ripup_cap;
-  int32_t spacing_inflation_cap;
-  int32_t spacing_inflation_increment;
+  int32_t portfolio_k;           /* [1, 64] */
+  int32_t sweep_count;           /* [0, 1024] */
+  int32_t congestion_iterations; /* [0, 1024] */
+  int32_t ripup_cap;             /* [0, 1024] */
+  int32_t spacing_inflation_cap; /* [0, 1024] */
+  int32_t spacing_inflation_increment; /* [0, COORD_MAX/4] */
 
-  int32_t print_columns; /* the canonical printer's line-break budget */
+  int32_t print_columns; /* the printer's line-break budget; [20, 4096] */
 } scav_profile;
 
 /* NOLINTEND(modernize-use-using, readability-identifier-naming) */

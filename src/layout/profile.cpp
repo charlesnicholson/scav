@@ -11,8 +11,7 @@ namespace scav {
 
 namespace {
 
-// Grid units are 1/16 pt, so a point is 16.
-constexpr int32_t PT{ 16 };
+constexpr int32_t PT{ 16 };  // grid units are 1/16 pt
 
 constexpr scav_profile READABLE{
   .profile_id = 2,
