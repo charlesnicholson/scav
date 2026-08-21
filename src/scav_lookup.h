@@ -1,10 +1,10 @@
-#ifndef SCAV_LOOKUP_MAP_H_INCLUDED
-#define SCAV_LOOKUP_MAP_H_INCLUDED
+#ifndef SCAV_LOOKUP_H_INCLUDED
+#define SCAV_LOOKUP_H_INCLUDED
 
-// A hash map exposing lookup and insertion and no iteration, so "never
-// iterated" is a compile error rather than a review comment. Bucket order and
-// hash values stay inside, which is what makes an unordered container safe
-// where output determinism is the rule.
+// Keyed lookup and insertion, and no iteration, so "never iterated" is a
+// compile error rather than a review comment. Bucket order and hash values
+// stay inside, which is what makes an unordered container safe where output
+// determinism is the rule.
 
 #include <cstddef>
 #include <unordered_map>
@@ -13,7 +13,7 @@
 namespace scav {
 
 template <typename K, typename V, typename Hash = std::hash<K>>
-class LookupMap {
+class Lookup {
 public:
   // False when the key is already present; the stored value is untouched.
   bool insert(K const &key, V value) {
@@ -42,4 +42,4 @@ private:
 
 }  // namespace scav
 
-#endif  // SCAV_LOOKUP_MAP_H_INCLUDED
+#endif  // SCAV_LOOKUP_H_INCLUDED

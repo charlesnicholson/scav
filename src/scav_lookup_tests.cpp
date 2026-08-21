@@ -1,7 +1,7 @@
 // Lookup, insertion, and the absence of iteration -- the last one asserted at
 // compile time, which is the type's whole job.
 
-#include "scav_lookup_map.h"
+#include "scav_lookup.h"
 
 #include "doctest.h"
 
@@ -18,13 +18,13 @@ using namespace scav;
 template <typename T>
 concept Iterable = requires(T t) { t.begin(); };
 
-static_assert(!Iterable<LookupMap<uint32_t, uint32_t>>);
-static_assert(!Iterable<LookupMap<std::string, uint32_t> const>);
+static_assert(!Iterable<Lookup<uint32_t, uint32_t>>);
+static_assert(!Iterable<Lookup<std::string, uint32_t> const>);
 
 }  // namespace
 
-TEST_CASE("lookup_map: insert claims a key once and find sees the first value") {
-  LookupMap<std::string, uint32_t> map;
+TEST_CASE("lookup: insert claims a key once and find sees the first value") {
+  Lookup<std::string, uint32_t> map;
   CHECK(map.empty());
   CHECK(map.insert("a", 1));
   CHECK(!map.insert("a", 2));
@@ -36,15 +36,15 @@ TEST_CASE("lookup_map: insert claims a key once and find sees the first value") 
   CHECK(!map.contains("b"));
 }
 
-TEST_CASE("lookup_map: found values mutate in place and clear empties") {
-  LookupMap<uint32_t, uint32_t> map;
+TEST_CASE("lookup: found values mutate in place and clear empties") {
+  Lookup<uint32_t, uint32_t> map;
   map.reserve(64);
   for (uint32_t i = 0; i < 64; ++i) { CHECK(map.insert(i, i * 3)); }
   CHECK(map.size() == 64);
   *map.find(7) = 99;
   CHECK(*map.find(7) == 99);
 
-  LookupMap<uint32_t, uint32_t> const &view{ map };
+  Lookup<uint32_t, uint32_t> const &view{ map };
   REQUIRE(view.find(7) != nullptr);
   CHECK(*view.find(7) == 99);
 

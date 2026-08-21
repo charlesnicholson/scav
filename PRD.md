@@ -226,7 +226,7 @@ The bar for a discouraged construct is that a reader can still follow control fl
 
 **No to all** → transient scratch, whatever is convenient: `unordered_map`, priority queues, visibility graphs, sweep structures, union-find. Not an exception grudgingly granted to `layout` — the normal treatment of data built and discarded inside one call.
 
-Two constraints survive on scratch (§6), both structurally enforceable: **never iterate an unordered container where order reaches output**, and **never let a hash value escape**. `LookupMap` makes the first a compile error.
+Two constraints survive on scratch (§6), both structurally enforceable: **never iterate an unordered container where order reaches output**, and **never let a hash value escape**. `Lookup` makes the first a compile error.
 
 What this rules out is not hash maps but a **graph of long-lived heap nodes pointing at each other** — the thing that makes a model unserializable, unhashable, and untestable.
 
@@ -340,7 +340,7 @@ C++20's P0907 fixed two's-complement *representation* but kept signed overflow U
 
 **`libscavlayout` uses a documented standard-library subset** — `<cstdint>`, `<bit>`, `<limits>`, `<vector>`, `<array>`, `<utility>`, `<type_traits>`, `<cstring>` — and nothing else. Every sort, hash, and container with iteration order that reaches output is scav's own (above). The subset is enforced by an include-check in CI, so "bring your own compiler" does not quietly mean "bring your own conforming `<algorithm>`".
 
-**Scope of this section: anything that can reach layout geometry or rendered output.** A structure that only ferries data inside one call is outside it, and `std::unordered_map` is the right choice there — deterministic *by usage*, because a key lookup has no order and the hash value never escapes as a bucket index. Enforce that structurally: `LookupMap<K,V>` exposes `find`/`at`/`insert` and **no `begin()`/`end()`**, so "never iterated" is a compile error rather than a review comment.
+**Scope of this section: anything that can reach layout geometry or rendered output.** A structure that only ferries data inside one call is outside it, and `std::unordered_map` is the right choice there — deterministic *by usage*, because a key lookup has no order and the hash value never escapes as a bucket index. Enforce that structurally: `Lookup<K,V>` exposes `find`/`at`/`insert` and **no `begin()`/`end()`**, so "never iterated" is a compile error rather than a review comment.
 
 **Golden hash.** Split into a **structural hash** (ranks, orders, port assignments, bend sequences) and a **coordinate hash**, so a translation-only change is a reviewable diff instead of a global reflow. Hashed inputs: font identity and version, profile id, packer choice, router name and version, **and the space-request columns** — a golden is reproducible only against a stated measurement policy, and the corpus goldens use the reference builder's.
 
@@ -494,9 +494,9 @@ struct Chart {
 |---|---|---|---|---|
 | **authored** | yes, as the attributes it was projected from (§8) | format hash | columnar POD | builder API, editor |
 | **derived-persistent** — the geometry columns layout writes | **no** | **layout hash**, by explicit allowlist (§11.7a) | **columnar POD; tombstones in lockstep** | layout only |
-| **derived-scratch** — name→id and path→id indices, state→in/out edges, containment depth, LCA table, per-transition crossing counts and flags, each submachine's initial state | no | no | §4.1 convenience; `LookupMap` where lookup-only | anyone, rebuilt freely |
+| **derived-scratch** — name→id and path→id indices, state→in/out edges, containment depth, LCA table, per-transition crossing counts and flags, each submachine's initial state | no | no | §4.1 convenience; `Lookup` where lookup-only | anyone, rebuilt freely |
 
-Only **derived-scratch** gets §4.1's container latitude. Geometry is hashed and read across frames, so it is columnar POD — a route polyline in a `LookupMap`, iterated for the coordinate hash, is the §6 failure this split exists to forbid.
+Only **derived-scratch** gets §4.1's container latitude. Geometry is hashed and read across frames, so it is columnar POD — a route polyline in a `Lookup`, iterated for the coordinate hash, is the §6 failure this split exists to forbid.
 
 `ColumnDesc` carries a `derived` flag (§8). Nothing writes a derived column back out — not the printer, not any later serializer — and they are **exempt from round-trip-unknown**, or a stale geometry snapshot survives a save and gets trusted instead of recomputed.
 

@@ -93,7 +93,7 @@ if(SCAV_BUILD_TESTS)
     # The src/-root primitives standing in for the standard library's: they
     # belong to no subsystem, so their tests sit beside them.
     ../scav_int_tests.cpp
-    ../scav_lookup_map_tests.cpp
+    ../scav_lookup_tests.cpp
     ../scav_stable_sort_tests.cpp
     ../scav_xxhash_tests.cpp
   )

@@ -41,10 +41,6 @@ typedef struct {
   int32_t x, y, w, h;
 } scav_rect;
 
-// One row of scav_layout_run's out-param, parallel to the path boxes; w and h
-// may exceed what was requested. NOLINTNEXTLINE(modernize-use-using)
-typedef scav_rect scav_placed;
-
 #ifdef __cplusplus
 }  // extern "C"
 
@@ -67,13 +63,6 @@ inline constexpr int32_t COORD_MAX{ (INT32_C(1) << 19) - 1 };
 inline constexpr int32_t COORD_MIN{ -COORD_MAX };
 
 }  // namespace scav
-
-// Pinned: the binding generator reproduces these layouts from the JSON, so a
-// platform where they drift must fail to compile rather than misread.
-static_assert(sizeof(scav_span) == 8);
-static_assert(sizeof(scav_point) == 8);
-static_assert(sizeof(scav_extent) == 8);
-static_assert(sizeof(scav_rect) == 16);
 #endif
 
 #endif  // SCAV_TYPES_H_INCLUDED

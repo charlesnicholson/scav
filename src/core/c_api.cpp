@@ -11,6 +11,14 @@
 #include <string_view>
 #include <vector>
 
+// Pinned where the ABI is projected: the binding generator reproduces these
+// layouts from the JSON, so a platform where they drift must fail to compile
+// rather than misread.
+static_assert(sizeof(scav_span) == 8);
+static_assert(sizeof(scav_point) == 8);
+static_assert(sizeof(scav_extent) == 8);
+static_assert(sizeof(scav_rect) == 16);
+
 namespace {
 
 // Copied field by field rather than reinterpreted. The layouts match today and
