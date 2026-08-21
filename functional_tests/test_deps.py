@@ -113,18 +113,28 @@ class TestDeps(unittest.TestCase):
             'chart root {\n  include "leaf.scav" as l,\n  state R,\n}\n',
             encoding="utf-8",
         )
-        # scav takes an absolute input and writes through the shell, so the
-        # build statement stays relative to the build directory -- ninja reads
-        # `:` there as the output separator, and a `D:/...` output is a syntax
-        # error rather than a path. Native separators inside the command, which
-        # ninja hands to the shell verbatim and only `$` is special to.
-        exe = str(self.exe)
-        src = str(build / "root.scav")
-        # `dump` stands in for a renderer: what matters is that ninja learns
-        # the second dependency from the depfile, not from the description.
+        # Ninja runs a command through a shell on POSIX and through CreateProcess
+        # on Windows, so `>` and `&&` reach the program as ordinary arguments
+        # there. The rule is one process that does its own redirection.
+        (build / "render.py").write_text(
+            "import subprocess, sys\n"
+            "scav, src, out = sys.argv[1:4]\n"
+            'with open(out, "w", encoding="utf-8") as f:\n'
+            '    subprocess.run([scav, "dump", src], stdout=f, check=True)\n'
+            'with open(out + ".d", "w", encoding="utf-8") as f:\n'
+            '    subprocess.run([scav, "deps", "--target", out, src],\n'
+            "                   stdout=f, check=True)\n",
+            encoding="utf-8",
+        )
+        # The build statement stays relative to the build directory: ninja reads
+        # `:` there as the output separator, so a `D:/...` output is a syntax
+        # error rather than a path.
+        # `dump` stands in for a renderer: what matters is that ninja learns the
+        # second dependency from the depfile, not from the build description.
         (build / "build.ninja").write_text(
             f"""rule render
-  command = {exe} dump {src} > $out && {exe} deps --target $out {src} > $out.d
+  command = {self.cfg.python} {build / "render.py"} {self.exe} """
+            f"""{build / "root.scav"} $out
   depfile = $out.d
   description = render $out
 
@@ -138,6 +148,8 @@ build root.txt: render root.scav
         self.assertEqual(0, scavtest.run([ninja, "-C", build], env=env).returncode)
         first = (build / "root.txt").read_text(encoding="utf-8")
         self.assertIn("state L", first)
+        # The depfile names the included document, which is the whole point.
+        self.assertIn("leaf.scav", (build / "root.txt.d").read_text(encoding="utf-8"))
 
         # Nothing changed, so nothing reruns: without this the next assertion
         # would pass for the wrong reason.
