@@ -12,6 +12,8 @@ namespace scav {
 
 namespace {
 
+// `name` points at a string literal: static storage, so a handed-out name
+// lives as long as the process. The constexpr table cannot compile otherwise.
 struct RouterRow {
   char const *name;
   uint32_t name_len;
