@@ -67,7 +67,7 @@ def env_without_suppressions() -> dict[str, str]:
     resolves against the source directory, which a spawned build tool does not
     run in, and a runtime that cannot read it aborts before main.
     """
-    env = dict(os.environ)
+    env = os.environ.copy()
     for name in SANITIZERS:
         if value := env.get(name):
             kept = [p for p in value.split(":") if not p.startswith("suppressions=")]

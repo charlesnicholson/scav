@@ -77,6 +77,35 @@ TEST_CASE("digest: reformatting the source is not a model change") {
   CHECK(chart_structural_hash(spaced) == chart_structural_hash(dense));
 }
 
+TEST_CASE("digest: the order two attributes were written in is not a model change") {
+  // `scav fmt` sorts attributes by key bytes, so the authored order and the
+  // canonical one are two producers of one model and have to agree.
+  Chart const authored{ lowered(R"(chart c { @zeta = "1", @alpha = "2", })") };
+  Chart const sorted{ lowered(R"(chart c { @alpha = "2", @zeta = "1", })") };
+  CHECK(chart_structural_hash(authored) == chart_structural_hash(sorted));
+
+  // Namespaced keys compose to `ns:key`, which is what the printer sorts on.
+  Chart const blocked{ lowered(R"(chart c { @ns { b = "2", a = "1" }, })") };
+  Chart const split{ lowered(R"(chart c { @ns:a = "1", @ns:b = "2", })") };
+  CHECK(chart_structural_hash(blocked) == chart_structural_hash(split));
+}
+
+TEST_CASE("digest: one key's values keep the order they were written in") {
+  // The sort is stable for exactly this: a repeated key is a list, and a list
+  // that reordered itself would be a different model.
+  Chart const ab{ lowered(R"(chart c { @k = "a", @k = "b", })") };
+  Chart const ba{ lowered(R"(chart c { @k = "b", @k = "a", })") };
+  CHECK(chart_structural_hash(ab) != chart_structural_hash(ba));
+}
+
+TEST_CASE("digest: sorting attributes does not erase one") {
+  Chart const two{ lowered(R"(chart c { @a = "1", @b = "2", })") };
+  Chart const one{ lowered(R"(chart c { @a = "1", })") };
+  Chart const other{ lowered(R"(chart c { @a = "1", @b = "3", })") };
+  CHECK(chart_structural_hash(two) != chart_structural_hash(one));
+  CHECK(chart_structural_hash(two) != chart_structural_hash(other));
+}
+
 TEST_CASE("digest: a comment is not a model change") {
   Chart const bare{ lowered("chart c { state A, }") };
   Chart const noted{ lowered("chart c {\n // why\n state A, // trailing\n}") };

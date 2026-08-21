@@ -513,6 +513,48 @@ class TestFmt(unittest.TestCase):
         self.assertEqual(0, result.returncode)
         self.assertEqual("", result.stdout)
 
+    def test_formatting_does_not_move_the_structural_hash(self) -> None:
+        """Canonical form is a spelling, not a model change.
+
+        The attribute sort reorders rows the digest walks, so the digest sorts
+        them too; without that, running the gate would change what `dump --hash`
+        reports and two copies of one chart would stop comparing.
+        """
+        # The whole directory, so an included document still resolves beside its
+        # root, and the network is three documents rather than one.
+        network = scavtest.fresh_dir(self.scratch / "network")
+        for chart in (self.cfg.repo_root / CHARTS).glob("*.scav"):
+            (network / chart.name).write_bytes(chart.read_bytes())
+
+        # Undo the one thing the sort moved, so the comparison is not a no-op.
+        root = network / "vac.scav"
+        canonical = root.read_text(encoding="utf-8")
+        authored = canonical.replace(
+            '@nav { follow_walls = "false", uses_lidar }',
+            '@nav { uses_lidar, follow_walls = "false" }',
+        )
+        self.assertNotEqual(canonical, authored, "corpus no longer has the case")
+        root.write_text(authored, encoding="utf-8", newline="")
+
+        before = self.run_scav("dump", "--hash", root)
+        self.assertEqual(0, before.returncode, before.stderr)
+        self.assertEqual(0, self.run_scav("fmt", root).returncode)
+        self.assertEqual(canonical, root.read_text(encoding="utf-8"))
+
+        after = self.run_scav("dump", "--hash", root)
+        self.assertEqual(0, after.returncode, after.stderr)
+        self.assertEqual(before.stdout, after.stdout)
+
+    def test_the_hash_survives_an_attribute_reordering(self) -> None:
+        # The same property on one file, where the sort is the only difference.
+        source = 'chart c {\n  @zeta = "1",\n  @alpha = "2",\n  state A,\n}\n'
+        path = self.write(source)
+        before = self.run_scav("dump", "--hash", path)
+        self.assertEqual(0, before.returncode)
+        self.assertEqual(0, self.run_scav("fmt", path).returncode)
+        self.assertIn("@alpha", path.read_text(encoding="utf-8").split("\n")[1])
+        self.assertEqual(before.stdout, self.run_scav("dump", "--hash", path).stdout)
+
     def test_every_corpus_chart_is_its_own_fixed_point(self) -> None:
         # Copied out of the tree so a bug here cannot rewrite the corpus.
         for name in self.corpus():

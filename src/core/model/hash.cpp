@@ -1,6 +1,7 @@
 // Serializes the whole structure, then hashes it once. Field by field, strings
 // length-prefixed, and a span contributing its contents rather than its offset.
 
+#include "scav_stable_sort.h"
 #include "scav_xxhash.h"
 
 #include "core/core_internal.h"
@@ -28,13 +29,28 @@ void put_text(std::vector<scav_byte> &out, std::string_view text) {
 
 // Key bytes, never the interned id. An AttrKeyId is first-encounter order, so
 // two producers of one model can hold different ids for the same key.
+// Sorted by key bytes, stably, so a repeated key keeps insertion order -- the
+// ordering PRD 15's rule seven prints and PRD 7 requires of anything canonical.
+// Span order is insertion order, which is first-encounter, so two producers of
+// one model would disagree: an authored file and its `scav fmt` output do.
 void put_attrs(std::vector<scav_byte> &out, Chart const &c, Span attrs) {
-  put_u32(out, attrs.len);
-  for (uint32_t i = 0; i < attrs.len; ++i) {
-    if ((static_cast<uint64_t>(attrs.off) + i) >= c.attrs.size()) { return; }
-    Attr const &a{ c.attrs[attrs.off + i] };
-    put_text(out, chart_attr_key(c, a.key));
-    put_text(out, chart_string(c, a.value));
+  uint32_t len{ attrs.len };
+  if ((static_cast<uint64_t>(attrs.off) + len) > c.attrs.size()) {
+    len = (attrs.off < c.attrs.size())
+              ? (narrow_clamp<uint32_t>(c.attrs.size()) - attrs.off)
+              : 0;
+  }
+
+  std::vector<uint32_t> order(len);
+  for (uint32_t i = 0; i < len; ++i) { order[i] = attrs.off + i; }
+  scav_stable_sort(order, [&](uint32_t a, uint32_t b) {
+    return chart_attr_key(c, c.attrs[a].key) < chart_attr_key(c, c.attrs[b].key);
+  });
+
+  put_u32(out, len);
+  for (uint32_t const at : order) {
+    put_text(out, chart_attr_key(c, c.attrs[at].key));
+    put_text(out, chart_string(c, c.attrs[at].value));
   }
 }
 

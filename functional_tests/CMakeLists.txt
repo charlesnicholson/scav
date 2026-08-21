@@ -38,6 +38,18 @@ function(scav_add_functional_test name)
   )
 endfunction()
 
+# The whole corpus, for the gates that read all of it rather than one root.
+set(scav_corpus_charts
+  "${PROJECT_SOURCE_DIR}/test_data/charts/axis.scav"
+  "${PROJECT_SOURCE_DIR}/test_data/charts/brew.scav"
+  "${PROJECT_SOURCE_DIR}/test_data/charts/dock.scav"
+  "${PROJECT_SOURCE_DIR}/test_data/charts/estop.scav"
+  "${PROJECT_SOURCE_DIR}/test_data/charts/led.scav"
+  "${PROJECT_SOURCE_DIR}/test_data/charts/mill.scav"
+  "${PROJECT_SOURCE_DIR}/test_data/charts/toolchanger.scav"
+  "${PROJECT_SOURCE_DIR}/test_data/charts/vac.scav"
+)
+
 # install_consumer installs the whole project and configures a separate CMake
 # project against it, so it has to run after every archive and header exists.
 get_property(scav_all_libraries GLOBAL PROPERTY SCAV_LIBRARIES)
@@ -54,14 +66,7 @@ scav_add_functional_test(install_consumer
   TARGETS ${scav_all_libraries} ${scav_all_test_exes}
 )
 scav_add_functional_test(dump
-  DEPENDS "${PROJECT_SOURCE_DIR}/test_data/charts/brew.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/vac.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/dock.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/led.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/mill.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/axis.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/toolchanger.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/estop.scav"
+  DEPENDS ${scav_corpus_charts}
           "${PROJECT_SOURCE_DIR}/test_data/golden/dump/brew.txt"
           "${PROJECT_SOURCE_DIR}/test_data/golden/dump/vac.txt"
           "${PROJECT_SOURCE_DIR}/test_data/golden/dump/mill.txt"
@@ -80,28 +85,12 @@ scav_add_functional_test(load
   TARGETS scav_shared scav
 )
 scav_add_functional_test(fmt
-  DEPENDS
-          "${PROJECT_SOURCE_DIR}/test_data/charts/axis.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/brew.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/dock.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/estop.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/led.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/mill.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/toolchanger.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/vac.scav"
+  DEPENDS ${scav_corpus_charts}
           "$<TARGET_FILE:scav>"
   TARGETS scav
 )
 scav_add_functional_test(check
-  DEPENDS
-          "${PROJECT_SOURCE_DIR}/test_data/charts/axis.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/brew.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/dock.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/estop.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/led.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/mill.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/toolchanger.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/vac.scav"
+  DEPENDS ${scav_corpus_charts}
           "$<TARGET_FILE:scav>"
   TARGETS scav
 )

@@ -964,7 +964,11 @@ bool print_document(ParsedDocument const &pd, PrintOptions const &opts, std::str
                    .post = INVALID,
                    .blank = 0 });
 
-  for (uint32_t i = 0; i < pd.stmts.size(); ++i) { bucket_comments(p, i); }
+  // Not attributes: build_items sorts their comments onto the item they merged
+  // into, so bucketing them here would fill three spans nothing reads.
+  for (uint32_t i = 0; i < pd.stmts.size(); ++i) {
+    if (pd.stmts[i].kind != StmtKind::Attr) { bucket_comments(p, i); }
+  }
 
   // Children are parsed after their parent, so a reverse walk sees a block's
   // contents first: the elision and width tests both need them.
