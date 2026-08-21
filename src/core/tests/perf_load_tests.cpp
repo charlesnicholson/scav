@@ -81,7 +81,7 @@ std::vector<Doc> chain(uint32_t count, uint32_t states_each) {
     // resolve at all before the whole network was attached.
     if (i + 1 < count) { text += "trans S0 -> nxt/S0,\n"; }
     text += "}\n";
-    out.push_back({ "d" + std::to_string(i) + ".scav", text });
+    out.push_back({ .name = "d" + std::to_string(i) + ".scav", .text = text });
   }
   return out;
 }
@@ -104,7 +104,7 @@ std::vector<Doc> star(uint32_t count, uint32_t states_each) {
     leaf += "trans S" + std::to_string(s) + " -> S" + std::to_string(s + 1) + ",\n";
   }
   leaf += "}\n";
-  return { { "root.scav", root }, { "leaf.scav", leaf } };
+  return { { .name = "root.scav", .text = root }, { .name = "leaf.scav", .text = leaf } };
 }
 
 uint64_t corpus_bytes(std::vector<Doc> const &corpus) {

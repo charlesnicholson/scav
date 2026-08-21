@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Run clang-format over scav's C++ sources.
 
-clang-format ships with the compiler, so CI gets a version pinned by its container
-image. Its output moves between releases, which is why the gate runs on one row
-rather than on every developer's differently-versioned copy.
+envy.lua pins the version, because clang-format's output moves between releases
+and a gate is only a gate if every machine runs the same one.
 
     $(./bin/envy product python3) tools/format.py            # rewrite files in place
     $(./bin/envy product python3) tools/format.py --check    # exit non-zero on any diff
 """
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -23,11 +23,20 @@ SOURCE_SUFFIXES: tuple[str, ...] = (".h", ".cpp")
 
 
 def clang_format() -> str:
-    if found := shutil.which("clang-format"):
-        return found
+    """envy's copy, whose version envy.lua pins, so a diff reads the same
+    everywhere. It sits behind SCAV_LINT, so the query fails fast without it --
+    which is what the PATH fallback is for."""
+    envy = REPO_ROOT / "bin" / ("envy.bat" if os.name == "nt" else "envy")
+    if envy.is_file():
+        found = subprocess.run([str(envy), "product", "clang-format"],
+                               capture_output=True, text=True)
+        if found.returncode == 0 and (path := found.stdout.strip()):
+            return path
+    if on_path := shutil.which("clang-format"):
+        return on_path
     raise SystemExit(
-        "clang-format is not on PATH. It ships with the clang toolchain; install "
-        "that, or leave formatting to CI, which runs it from a pinned image."
+        "no clang-format. Set SCAV_LINT=1 for envy's pinned copy, or put one "
+        "on PATH; without either, the gate is CI's."
     )
 
 

@@ -72,6 +72,22 @@ inline Lexed lex_text(std::string_view text) {
   return r;
 }
 
+// Canonical text for source. The parse is not asserted: some callers feed input
+// the parser rejects, to see the printer walk what survived.
+inline std::string print(std::string_view text, uint32_t columns = DEFAULT_PRINT_COLUMNS) {
+  Parsed const r{ parse(text) };
+  std::string out;
+  PrintOptions const opts{ .columns = columns };
+  print_document(r.pd, opts, out);
+  return out;
+}
+
+// Canonical text prints as itself -- not merely that a second pass agrees with
+// the first, which every input satisfies.
+inline bool is_canonical(std::string_view text, uint32_t columns = DEFAULT_PRINT_COLUMNS) {
+  return std::string{ text } == print(text, columns);
+}
+
 inline std::string_view str(ParsedDocument const &pd, StrRef ref) {
   return string_pool_view(pd.strings, ref);
 }

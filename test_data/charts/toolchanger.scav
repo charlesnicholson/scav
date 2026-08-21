@@ -1,6 +1,5 @@
-// A middle document: included once by mill.scav, and itself including both
-// axis.scav and estop.scav. An endpoint reaching `tool/arm/...` from the root
-// therefore descends through two include boundaries.
+// A middle document including two others, so `tool/arm/...` from the root
+// descends through two include boundaries.
 chart toolchanger "carousel tool changer" {
   include "axis.scav" as arm,
   include "estop.scav" as stop,

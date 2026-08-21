@@ -34,21 +34,19 @@ struct Doc {
 // C++ loader tests use.
 std::vector<Doc> diamond() {
   return {
-    { "root.scav",
-      R"(chart root {
+    { .name = "root.scav", .text = R"(chart root {
            include "mid.scav" as mid,
            include "leaf.scav" as leaf,
            state A,
            trans * -> A,
            trans A -> mid/M,
          })" },
-    { "mid.scav",
-      R"(chart mid {
+    { .name = "mid.scav", .text = R"(chart mid {
            include "leaf.scav" as inner,
            state M,
            trans * -> M,
          })" },
-    { "leaf.scav", R"(chart leaf { state L, trans * -> L, })" },
+    { .name = "leaf.scav", .text = R"(chart leaf { state L, trans * -> L, })" },
   };
 }
 
@@ -220,8 +218,8 @@ TEST_CASE("abi: the digest honours the query-then-fill out-param protocol") {
 
 TEST_CASE("abi: a cycle is refused with no chart and a legible diagnostic") {
   std::vector<Doc> const cyclic{
-    { "a.scav", R"(chart a { include "b.scav" as b, state A, })" },
-    { "b.scav", R"(chart b { state B, include "a.scav" as a, })" },
+    { .name = "a.scav", .text = R"(chart a { include "b.scav" as b, state A, })" },
+    { .name = "b.scav", .text = R"(chart b { state B, include "a.scav" as a, })" },
   };
   scav_load *loader{ nullptr };
   scav_chart *chart{ drive(cyclic, &loader) };
@@ -285,8 +283,7 @@ TEST_CASE("abi: two loaders in one process do not share state") {
   REQUIRE(scav_chart_structural_hash(b, &hb) == SCAV_OK);
   CHECK(ha == hb);
 
-  // And a chart outlives the loader that produced it.
-  scav_load_destroy(first_loader);
+  scav_load_destroy(first_loader);  // a chart outlives the loader that made it
   uint32_t after{ 0 };
   REQUIRE(scav_chart_structural_hash(a, &after) == SCAV_OK);
   CHECK(after == ha);

@@ -1,8 +1,5 @@
-// The root of a four-document network that instantiates one child repeatedly.
-//
-// axis.scav is included three times from this document alone and once more
-// from toolchanger.scav; estop.scav is included by all three of the others and
-// by this one. Four documents, eleven instantiations.
+// The root of a four-document network instantiating one child repeatedly:
+// eleven instantiations, of which axis.scav takes four and estop.scav six.
 chart mill "three-axis mill" {
   @doc = "gantry mill with a carousel changer",
   @machine { axes = "3", spindle_kw = "2" },

@@ -161,14 +161,14 @@ TEST_CASE("fuzz: any network the loader accepts is complete, or it built nothing
     CAPTURE(i);
 
     std::vector<Doc> corpus{
-      { "a.scav", synth_doc("a", key) },
-      { "b.scav", synth_doc("b", key ^ 0x11U) },
-      { "c.scav", synth_doc("c", key ^ 0x22U) },
+      { .name = "a.scav", .text = synth_doc("a", key) },
+      { .name = "b.scav", .text = synth_doc("b", key ^ 0x11U) },
+      { .name = "c.scav", .text = synth_doc("c", key ^ 0x22U) },
     };
     // Sometimes the escaping path is real, sometimes it is a hole the
     // application can never fill.
     if ((rnd(key, 20) % 3U) == 0U) {
-      corpus.push_back({ "../b.scav", synth_doc("up", key ^ 0x33U) });
+      corpus.push_back({ .name = "../b.scav", .text = synth_doc("up", key ^ 0x33U) });
     }
 
     Run run{ drive(corpus, key) };
@@ -228,10 +228,10 @@ TEST_CASE("fuzz: arrival order never changes the model") {
     uint64_t const key{ SEED + i };
     CAPTURE(i);
     std::vector<Doc> const corpus{
-      { "a.scav", synth_doc("a", key) },
-      { "b.scav", synth_doc("b", key ^ 0x11U) },
-      { "c.scav", synth_doc("c", key ^ 0x22U) },
-      { "../b.scav", synth_doc("up", key ^ 0x33U) },
+      { .name = "a.scav", .text = synth_doc("a", key) },
+      { .name = "b.scav", .text = synth_doc("b", key ^ 0x11U) },
+      { .name = "c.scav", .text = synth_doc("c", key ^ 0x22U) },
+      { .name = "../b.scav", .text = synth_doc("up", key ^ 0x33U) },
     };
 
     Run const first{ drive(corpus, key) };
@@ -258,7 +258,7 @@ TEST_CASE("fuzz: a cycle at any length is caught rather than followed") {
       text += " {\ninclude \"d";
       text += std::to_string((i + 1) % n);  // the last one closes the ring
       text += ".scav\" as nxt,\nstate S,\n}\n";
-      corpus.push_back({ "d" + std::to_string(i) + ".scav", text });
+      corpus.push_back({ .name = "d" + std::to_string(i) + ".scav", .text = text });
     }
     Run const run{ drive(corpus, n) };
     CHECK_FALSE(run.ok);
@@ -281,7 +281,7 @@ TEST_CASE("fuzz: a deep include chain resolves without recursing") {
       text += "include \"d" + std::to_string(i + 1) + ".scav\" as nxt,\n";
     }
     text += "state S,\ntrans * -> S,\n}\n";
-    corpus.push_back({ "d" + std::to_string(i) + ".scav", text });
+    corpus.push_back({ .name = "d" + std::to_string(i) + ".scav", .text = text });
   }
 
   Run const run{ drive(corpus, 0) };
@@ -320,7 +320,7 @@ TEST_CASE("fuzz: an exponential DAG is capped rather than expanded") {
       text += "include \"d" + nxt + ".scav\" as r,\n";
     }
     text += "state S,\n}\n";
-    corpus.push_back({ "d" + std::to_string(i) + ".scav", text });
+    corpus.push_back({ .name = "d" + std::to_string(i) + ".scav", .text = text });
   }
 
   Run const run{ drive(corpus, 0) };

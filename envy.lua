@@ -2,7 +2,7 @@
 -- generates lives under out/, so the package cache does too.
 
 -- @envy schema "1"
--- @envy version "0.1.2"
+-- @envy version "0.1.9"
 -- @envy bin "bin"
 -- @envy cache-posix "out/.envy"
 -- @envy cache-win "out\.envy"
@@ -27,3 +27,16 @@ PACKAGES = {
     options = { version = "3.14.6", release = "20260623",
                 provide_python = true, provide_python3 = true } },
 }
+
+-- The lint gates, behind SCAV_LINT because nothing compiles with them: an
+-- ordinary build, and every CI row but the lint one, never downloads a
+-- toolchain it would not use. Set the variable to run the gates anywhere,
+-- which on darwin means compiling clang once. Pinned rather than installed by
+-- the job, so the version judging a diff is the version in this file.
+if os.getenv("SCAV_LINT") then
+  envy.extend(PACKAGES, {
+    { spec = "scav.clang-tools@r0",
+      source = envy.abspath("envy") .. "/scav.clang-tools.lua",
+      options = { version = "22.1.8", tools = { "clang-format", "clang-tidy" } } },
+  })
+end

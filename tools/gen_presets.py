@@ -46,9 +46,8 @@ DESC: dict[str, str] = {t: desc for t, (_, desc, _) in TRIPLES.items()}
 
 CONFIGS: list[str] = ["debug", "release", "testable"]
 
-# Availability is a property of the toolchains, not a preference: MSVC has no
-# UBSan, clang-cl's ASan runtime is added by a driver CMake does not use to link,
-# neither Windows toolchain has TSan, and only clang/Linux can do MSan.
+# Availability is the toolchains': no UBSan on MSVC, no ASan link on clang-cl,
+# no TSan on Windows at all, and MSan only on clang/Linux.
 SANITIZERS: dict[str, list[str]] = {
     "asan": [t for t in TRIPLES if t != "windows-clang"],
     "ubsan": [t for t in TRIPLES if t != "windows-msvc"],
@@ -132,10 +131,8 @@ def build_document() -> Preset:
         "version": 6,
         "cmakeMinimumRequired": {"major": 3, "minor": 28, "patch": 0},
         "configurePresets": configure,
-        # No testPresets: tests are build steps (cmake/ScavTesting.cmake), so the
-        # build preset runs them. ctest's noTestsAction=error has a configure-time
-        # equivalent in scav_check_tests(), which fires earlier and cannot be
-        # skipped by forgetting a second command.
+        # No testPresets: tests are build steps, so the build preset runs them
+        # and scav_check_tests() fires earlier than noTestsAction would.
         "buildPresets": [{"name": n, "configurePreset": n, "jobs": 0} for n in concrete],
     }
 

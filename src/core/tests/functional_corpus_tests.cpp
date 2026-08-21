@@ -24,7 +24,9 @@ struct CorpusChart {
 };
 
 std::vector<CorpusChart> corpus() {
-  return { { "vac", VAC }, { "tcp", TCP }, { "ota", OTA } };
+  return { { .name = "vac", .text = VAC },
+           { .name = "tcp", .text = TCP },
+           { .name = "ota", .text = OTA } };
 }
 
 uint32_t count_of(ParsedDocument const &pd, StmtKind kind) {

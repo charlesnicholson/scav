@@ -492,13 +492,13 @@ struct Chart {
 
 | Class | Serialized | Hashed | Container | Written by |
 |---|---|---|---|---|
-| **authored** | yes | format hash | columnar POD | builder API, editor |
+| **authored** | yes, as the attributes it was projected from (§8) | format hash | columnar POD | builder API, editor |
 | **derived-persistent** — the geometry columns layout writes | **no** | **layout hash**, by explicit allowlist (§11.7a) | **columnar POD; tombstones in lockstep** | layout only |
 | **derived-scratch** — name→id and path→id indices, state→in/out edges, containment depth, LCA table, per-transition crossing counts and flags, each submachine's initial state | no | no | §4.1 convenience; `lookup_map` where lookup-only | anyone, rebuilt freely |
 
 Only **derived-scratch** gets §4.1's container latitude. Geometry is hashed and read across frames, so it is columnar POD — a route polyline in a `lookup_map`, iterated for the coordinate hash, is the §6 failure this split exists to forbid.
 
-`ColumnDesc` carries a `derived` flag (§8). The serializer skips derived columns and they are **exempt from round-trip-unknown**, or a stale geometry snapshot survives a save and gets trusted instead of recomputed.
+`ColumnDesc` carries a `derived` flag (§8). Nothing writes a derived column back out — not the printer, not any later serializer — and they are **exempt from round-trip-unknown**, or a stale geometry snapshot survives a save and gets trusted instead of recomputed.
 
 **Column names live in their own pool, not `Chart.strings`.** A registered name is not authored text, and `scav.geom.state` names a **derived** column the serializer skips (§8) — so keeping the two apart is what stops saving a laid-out chart from leaking a derived column's name into the authored pool. Registration takes a `char const*` and interns it there; no pointer is stored in a row, so a `ColumnDesc` is hashable and serializable like any other record.
 
@@ -592,7 +592,7 @@ Type-erased byte arrays with a stride, indexed by entity ordinal. C ABI is the t
 **What core owes an extension:**
 
 1. Store it, indexed by entity ordinal; keep it index-aligned under mutation and tombstoning.
-2. **Round-trip it losslessly, including unknown columns** — otherwise an older build silently strips a colleague's data on save. Wire encoding: all scalars **little-endian**, `strref`/`span` as two `u32`, `blob` as `u32` length then bytes, `elem_align` ignored on the wire. `pod` is `elem_size` opaque bytes whose interior the serializer does not interpret — the escape hatch a struct-valued column needs, and what every geometry column uses (§11.7a), which is sound because those columns are `derived` and never written to the wire at all. A column block is `{name, entity, kind, elem_size, count}` then `count * elem_size` bytes — enough to round-trip a column whose meaning is unknown.
+2. **Round-trip its authored form losslessly, including data this build does not understand.** The on-disk carrier is **attributes, not columns**: `.scav` has no column syntax (§15) and there is no binary model format. A column is a *runtime projection* — core resolves `scav:` attributes into hint columns at load (§14), and a plugin fills its own columns from its own attributes or its own importer (§8.2). An unknown attribute round-trips as text like any other, so an older build cannot strip a colleague's data on save, and the guarantee costs no second format. Should one ever be wanted, a column block of `{name, entity, kind, elem_size, count}` plus `count * elem_size` little-endian bytes carries a column whose meaning is unknown — recorded so it is not re-derived, not because a phase owns it.
 3. **Pass it through unread.** `layout` never reads extension data.
 4. Let it contribute **space requests** (§8.1) and a builder function the app may call (§8.2).
 5. Expose `ColumnDesc` so an editor can present unknown columns generically.
@@ -1079,9 +1079,12 @@ A versioned, hashed artifact (§6), so it needs a field list rather than thirtee
 | packing | `dar_num`/`dar_den` (each in `[1, 2^10]`), `trybox`, SM tiebreak order |
 | cost | the eight Tier-2 weights, each with a ceiling keeping `Σ Tier-2` inside §11.2's budget |
 | search | portfolio `K`, sweep count, congestion iterations, rip-up cap, spacing-inflation cap and increment |
+| format | `print_columns` — the canonical printer's line-break budget (§15) |
 | id | `profile_id`, `profile_version` |
 
 Profile load **validates every bound and rejects out of range** — weight ceilings give the Tier-2 sum a proven bound, and bounded `dar_num` keeps `total_area * dar_num` under `2^50` before `isqrt`.
+
+`print_columns` arrives ahead of the rest, with the printer (P3) rather than with layout (P4), because canonical output is part of the contract from the moment `fmt` exists. It is the one field the printer reads and the only one nothing else does.
 
 Named profiles ship as data: `compact`, `readable`. There is no `print` profile — fit-to-page would need the top-down layout §11.4 rejects.
 
@@ -1292,9 +1295,17 @@ Reserved: `chart` `include` `state` `submachine` `trans` `external` `internal` `
 
 **Structure is never reordered** (§14). Comments carry position (leading, trailing, own-line) on `Statement.comments` (§7), and are the expensive half of the printer.
 
+Two consequences of the rules above, stated because each looks like a defect until it is read as canonical form doing its job. **The `chart` block always breaks**, whatever the budget says: a document is a file, and a one-line file makes every edit a whole-file diff. **Blank lines are the one whitespace the model records**, as `Statement.blank_before` — a bit rather than a count, so a run of them collapses to one, and suppressed wherever it would open or close a block. Source order is a layout hint (§14), and grouping is how an author writes that hint down; a printer that ran the groups together would be discarding it. A blank *after* a comment is `CommentPos::OwnLine` instead, which is why the two spellings around a heading comment each keep their own shape.
+
+**Two more spellings collapse, for the same reason the seven rules exist.** A `"""` raw string prints escaped, since both spellings decode to the same text and canonical means one of them. And `state Foo {}` prints as `state Foo`: an empty block says exactly what leaving it out says. A `submachine` keeps its empty block, the grammar requiring one.
+
 **One printer, always reconstructing.** Stored source bytes (§7) are **not** a printing shortcut: emitting untouched statements verbatim preserves their formatting, so two semantically identical models from differently-formatted files print differently — breaking the canonicity the format hash and merges rest on. Print reconstructs, gofmt-style; a repo is expected canonical (`scav fmt` pre-commit). Source bytes are for diagnostics and source mapping.
 
-Also required: text normalized on read (§6); extension columns round-trip losslessly including unknown ones (§8).
+**The printer's input is a `ParsedDocument`, not a `Chart`.** Everything the seven rules need lives in the statement stream and only there: `AttrValueKind` separates `@k` from `@k = "true"` before lowering collapses both to `"true"`, `AttrStmt.ns` records the block spelling, and `PathSeg` holds the endpoint text an author wrote. A `Chart` holds *resolved* `StateId` endpoints, so printing from one reprints `trans Ready -> dock/On/Seated` as `trans On:main/Ready -> dock/On/Seated` — canonical enough, but different bytes, and nothing above says which spelling wins.
+
+Model-to-text is therefore **P12's**, with the editor that first needs it, and it owes two things this printer does not: an **eighth canonical rule fixing endpoint spelling** — root-absolute, the only spelling that is a pure function of the model — and a dedup pass, since a document included twice has one statement stream and two sets of entity rows. Both are cheap to add and expensive to guess at now, and `fmt` needs neither.
+
+Also required: text normalized on read (§6).
 
 **Cost.** Lexer ~400 LOC including `"""` handling and comment capture, parser ~500, comment-preserving printer 3,000–5,000. The printer is the expensive half and a simpler grammar barely helps it.
 
@@ -1319,7 +1330,7 @@ typedef scav_rect scav_placed;
 
 **"ABI" names the property, not a component.** The component is each library's C API — `src/<lib>/c_api.cpp` against `src/<lib>/include/scav/scav_c.h` — and the ABI is what that surface guarantees: calling convention, struct layout, the extracted JSON. Every library projects its own C API at its own root, and the shared object links them; there is no directory that owns "the ABI".
 
-**A slice of this lands with P2, ahead of the rest.** §17's P2 gate requires the loader driven from Python over ctypes, so `scav_load_*`, `scav_chart_destroy`, and enough of a chart to compare two — counts, the structural hash, the digest under the out-param protocol — ship then, along with the one shared object a binding can actually load. The reason is not schedule: if driving a no-callback loader from a foreign runtime were awkward, §16.1's central claim would be wrong, and that is worth learning before four more phases are built on it. Allocator injection, the full five-handle lifecycle, column access, and the extracted ABI JSON golden remain **P3**, which is where a binding is written rather than demonstrated.
+**A slice of this lands with P2, ahead of the rest.** §17's P2 gate requires the loader driven from Python over ctypes, so `scav_load_*`, `scav_chart_destroy`, and enough of a chart to compare two — counts, the structural hash, the digest under the out-param protocol — ship then, along with the one shared object a binding can actually load. The reason is not schedule: if driving a no-callback loader from a foreign runtime were awkward, §16.1's central claim would be wrong, and that is worth learning before four more phases are built on it. The lifecycle rules below bind from **P3**, though only two of the five handles exist to obey them there. Column access lands with the geometry columns a binding must read (**P4**), and the extracted ABI JSON with the surface it describes (**P5**) — generating bindings against a surface four phases from complete means generating them four more times.
 
 **Handles: five, each with a create and a destroy.** `scav_chart` (the model), `scav_load` (a multi-document loader, §16.2), `scav_metrics` (font tables), `scav_images` (the raster registry a backend reads), and `scav_drawlist` — which exists because `DrawList` is five `std::` containers (§12) and §16.1 requires the reference builder and SVG backend to be reachable from a binding. Its arrays are read out with the same span accessors as a column. Destroy is idempotent on `NULL`; a `scav_chart` outlives every `scav_span` handed out from it, and nothing else owns model memory. `scav_metrics_create(const scav_byte* ttf, uint32_t len, scav_metrics** out)` — the bundled font is embedded, so `NULL` selects it. `scav_metrics` is immutable after create, so it is shared across threads without locking; the other three are single-threaded-per-instance, and any number of instances may be used concurrently. There is no library-global state and no init call.
 
@@ -1327,7 +1338,9 @@ typedef scav_rect scav_placed;
 
 **Column access** needs three calls, not one: `scav_column_find(chart, name, scav_column_id* out)`, `scav_column_data(chart, id, const scav_byte** out, uint32_t* stride)`, `scav_column_count(chart, id, uint32_t* out)`. A builder cannot walk a column without the row count.
 
-**Out-param protocol**, uniform: pass `cap = 0` with a non-null `out_count` to query the required count, then call again with a buffer. `cap` too small returns `SCAV_E_CAPACITY` and writes the required count; it never truncates silently. Allocation is via one injected allocator, set per handle at create.
+**Out-param protocol**, uniform: pass `cap = 0` with a non-null `out_count` to query the required count, then call again with a buffer. `cap` too small returns `SCAV_E_CAPACITY` and writes the required count; it never truncates silently.
+
+**Allocation is the system allocator's, and there is no injection hook.** No scav target supplies its own — desktop hosts, wasm, and a ctypes binding all have `malloc` — and injection is not free. Under `-fno-exceptions` an allocator that can fail puts an error path on every `push_back` in core; one that cannot fail is a pointer threaded through every container for no buyer. Honoring it literally would also mean `std::pmr` throughout, which costs `Chart c;` — §7's usable empty chart — since a pmr container needs its resource at construction. `scav_abi_version()` is the escape hatch if a host that needs it ever appears.
 
 **ABI type rule:** every type crossing the boundary is either an opaque handle or a fixed-layout POD whose only variable-length members are `{uint32 off, len}` spans into separately-exposed flat arrays. **No `std::` type ever crosses** — `struct Chart` is C++-internal and reaches the ABI only as `scav_chart*`. Padding is pinned; single-field id structs must not be flattened to ints by the binding generator (golden ABI case).
 
@@ -1365,7 +1378,9 @@ typedef struct { scav_profile profile; scav_router_id router; uint32_t threads; 
 
 **Routers are exposed by name only.** Function pointers cannot cross: `void* ud` is undescribable in the ABI JSON, routers run on worker threads, and `-fno-exceptions` makes a binding-language exception crossing back UB.
 
-**Machine-readable ABI:** the header is the source of truth; a libclang build-time tool extracts functions, structs, enums, and field offsets to a committed JSON sidecar. Bindings are generated; a golden test asserts extraction matches, so an ABI break is a review diff rather than a downstream segfault. libclang is tooling-only.
+**Machine-readable ABI:** the header is the source of truth; a build-time tool extracts functions, structs, enums, and field offsets to a committed JSON sidecar. Bindings are generated; a golden test asserts extraction matches, so an ABI break is a review diff rather than a downstream segfault.
+
+**The extraction tool is deliberately unchosen, and lands with P5.** Two shapes work. libclang models the layout of any target without running anything, at the cost of provisioning LLVM on six triples that today carry a compiler and little else. A scraper over this header plus a probe program compiled and run by the toolchain under test needs no new dependency and reports the *real* layout rather than a second parser's model of one, at the cost of not answering for a target it cannot execute. Each header is one flat C file with no macros precisely so that either works, so the choice can wait for the phase that writes the tool. Whichever it is, it is tooling-only, and a scraper must fail closed on a declaration form it does not recognize — silently skipping one would leave exactly the drift the golden exists to catch.
 
 Editor commands do not cross the C boundary as objects; that layer's API is opcodes. (Note `virtual Command Inverse()` returning an abstract base by value does not compile — the editor's inverse is a command buffer append.)
 
@@ -1377,11 +1392,11 @@ Editor commands do not cross the C boundary as objects; that layer's API is opco
 
 **One redistributable shared library** — `libscav` = core + layout + draw + svg. The static libraries are a build-time decomposition; the distribution unit is one shared object. `libscavimgui` stays out of it: it needs an ImGui context, which only the host application has. The batteries are everything except the interactive viewer, so the reference builder and SVG backend must be reachable through the C ABI rather than being C++-only conveniences.
 
-- **Generated, not hand-written.** libclang → ABI JSON (§16) → generated low-level layer, plus a thin hand-written idiomatic wrapper per language. The generated half never drifts.
+- **Generated, not hand-written.** ABI JSON (§16) → generated low-level layer, plus a thin hand-written idiomatic wrapper per language. The generated half never drifts.
 - **Prebuilt binaries**: macOS arm64/x86_64, Linux x86_64/aarch64 (manylinux), Windows x64, plus wasm. No compiler required to `pip install`.
 - **Self-contained**, because there are no runtime dependencies. The bundled font is **embedded in the library**, not loaded from a path — it is a layout-hash input and must travel with the code.
 
-**One hazard:** Python makes §8.1's integer purity easy to violate (`/` yields float), so setters reject non-integers and range-check, and space-computation helpers live in the shared library. Handle lifecycle was the other, and §16 now specifies it; it remains a **P3** deliverable because a binding cannot be written without it.
+**One hazard:** Python makes §8.1's integer purity easy to violate (`/` yields float), so setters reject non-integers and range-check, and space-computation helpers live in the shared library. Handle lifecycle was the other, and §16 now specifies it; the rules bind from **P3**, and each handle inherits them as it lands.
 
 ### 16.2 Loading and parsing are separate systems
 
@@ -1480,14 +1495,18 @@ Three things P2 turned out to own that the phase list did not name. **Lowering s
 
 *Exit:* one 3-document network resolved **three ways** — from memory, through the CLI over a filesystem, and from Python/ctypes faking a network fetch — yielding the same chart and the same hash.
 
-**P3 — printer and ABI.** Comment-preserving canonical printer and the seven canonical rules (§15), `scav fmt --check`, `scav deps`, `scav dump`; **handle lifecycle — create/destroy per handle, allocator injection, thread-safety per call (§16.1 blocks on it)**, ABI JSON extraction and its golden. The loader's entry points and the shared object landed in P2 (§16); P3 extends that surface rather than starting it, and `deps` reads `documents` plus `Include.target`, which P2 already populates.
-*Exit:* round-trip a depth-16 / 2k-state chart byte-identically, including unknown extension columns; `fmt` idempotent on the corpus; ABI driven from Python.
+**P3 — the printer.** The comment-preserving canonical printer over a `ParsedDocument` and the seven canonical rules (§15), plus the CLI surface that falls out of having one: `fmt` and `fmt --check`, `deps`, `check`, and `dump --json`. One large thing and a handful of small ones, and the ratio is the point — §15 budgets the printer at 3,000–5,000 LOC, half again the production code standing after P2, with comments the expensive half of that. Everything else here is already sitting in the model: `deps` is `documents` plus `Include.target`, `check` is `validate_chart` behind an exit code, and `dump --json` is a mechanical projection of columnar data (§15) whose shape is pinned by a golden the first time it runs.
 
-**P4 — metrics, space requests, layout skeleton.** Font metrics helper, the space tables, Phase 0 splitting, derived classification, trivial placement, straight-line routes, geometry columns. Validate the coordinate extent estimate (§11.2).
-*Exit:* geometry columns populated for every chart, no overflow at depth 16.
+The printer's line-break budget is `print_columns` (§11.15); P3 ships that field and its bound check ahead of the rest of the profile. **Handle lifecycle** — create and destroy per handle, destroy idempotent on `NULL`, a `scav_chart` outliving every span it handed out, no library-global state, no init call, single-threaded per instance with any number of instances concurrent — is **stated and tested here**, against the two handles that exist; §16's other three inherit it as they land. There is no allocator injection (§16) and no ABI JSON (P5), so the C surface P2 shipped is unchanged by this phase.
+
+*Exit:* `print(parse(bytes))` is idempotent for every corpus document and for a depth-16 / 2k-state document, comments and attribute forms included; the corpus is committed in canonical form and `fmt --check` is green over it; `deps` output feeds a real `ninja` build that rebuilds a diagram when an included document changes.
+
+**P4 — metrics, space requests, layout skeleton.** Font metrics helper, the space tables, Phase 0 splitting, derived classification, trivial placement, straight-line routes, geometry columns. Validate the coordinate extent estimate (§11.2). The `scav_metrics` handle lands here with the font tables it wraps, and so does the ABI's three-call column accessor plus `scav_str` (§16) — geometry *is* columns, so P4 is the first phase where a binding has one to read.
+*Exit:* geometry columns populated for every chart, no overflow at depth 16; a Python caller reads a geometry column through the accessor.
 
 **P5 — `DrawList`, reference builder, SVG backend, baseline harness.** The `DrawList` type, a builder covering standard appearance, the SVG backend with integer body and single `viewBox`, `textLength`, per-element classes, golden harness, and the `dot`/elkjs/scav side-by-side (§11.12).
-*Exit:* `scav render` produces a readable diagram; baseline harness runs.
+`scav_images` and `scav_drawlist` land here, completing §16's five handles — and with the surface finally whole, so does **ABI JSON extraction, its golden, and the generated binding layer** (§16.1). Held to here on purpose: the JSON describes a surface, and generating against one four phases from complete means generating it four more times.
+*Exit:* `scav render` produces a readable diagram; baseline harness runs; extracted ABI JSON matches its golden, and a generated Python layer drives model, layout, `DrawList`, and SVG end to end.
 
 **P6 — real layout.** Layered rank, median or sifting ordering, Brandes & Köpf coordinates, bottom-up sizing (fixed pass count, no hysteresis), LR-rectpacking with `box` fallback.
 *Exit:* better than P4 on the Tier-2 vector **and no worse than the incumbent** on blind review.

@@ -5,11 +5,49 @@
 
 #include "scav/scav_types.h"
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace scav {
+
+namespace {
+
+void append_position(std::string &out, std::string_view name, LineCol const *lc) {
+  out += name;
+  if (lc != nullptr) {
+    out += ':';
+    string_append_u32(out, lc->line);
+    out += ':';
+    string_append_u32(out, lc->column);
+  }
+}
+
+void append_message(std::string &out, DiagCode code) {
+  out += ": ";
+  out += diag_message(code);
+  out += '\n';
+}
+
+}  // namespace
+
+void string_append_u32(std::string &out, uint32_t value) {
+  std::array<char, 10> digits{};
+  uint32_t n{ 0 };
+  do {
+    digits[n++] = static_cast<char>('0' + (value % 10U));
+    value /= 10U;
+  } while (value != 0);
+  while (n-- > 0) { out += digits[n]; }
+}
+
+void string_append_hex32(std::string &out, uint32_t value) {
+  constexpr std::string_view DIGITS{ "0123456789abcdef" };
+  for (uint32_t i = 8; i-- > 0;) { out += DIGITS[(value >> (i * 4U)) & 0xFU]; }
+}
 
 LineCol diag_line_col(scav_byte const *bytes, size_t len, size_t offset) {
   size_t const stop{ (offset < len) ? offset : len };
@@ -112,6 +150,61 @@ bool diag_has_errors(std::vector<Diagnostic> const &diags) {
     if (d.code != DiagCode::Ok) { return true; }
   }
   return false;
+}
+
+void diag_append(std::string &out,
+                 Loader const &loader,
+                 Diagnostic const &d,
+                 std::string_view fallback_name) {
+  std::string_view const name{ load_document_name(loader, d.doc) };
+  std::string_view const where{ name.empty() ? fallback_name : name };
+  scav_byte const *bytes{ nullptr };
+  uint32_t len{ 0 };
+  if ((d.src.len != 0) && load_document_bytes(loader, d.doc, &bytes, &len) &&
+      ((static_cast<size_t>(d.src.off) + d.src.len) <= len)) {
+    LineCol const lc{ diag_line_col(bytes, len, d.src.off) };
+    append_position(out, where, &lc);
+  } else {
+    append_position(out, where, nullptr);
+  }
+  append_message(out, d.code);
+}
+
+void diag_append(std::string &out,
+                 Chart const &chart,
+                 Diagnostic const &d,
+                 std::string_view fallback_name) {
+  StmtId const stmt{ [&]() -> StmtId {
+    if ((d.src.len != 0) || !chart_ref_valid(chart, d.subject)) { return { INVALID }; }
+    switch (d.subject.kind) {
+      case ElemKind::State: return chart.states[d.subject.ordinal].stmt;
+      case ElemKind::Submachine: return chart.submachines[d.subject.ordinal].stmt;
+      case ElemKind::Transition: return chart.transitions[d.subject.ordinal].stmt;
+      case ElemKind::Chart:
+        return (chart.root_submachine.v >= chart.submachines.size())
+                   ? StmtId{ INVALID }
+                   : chart.submachines[chart.root_submachine.v].stmt;
+      case ElemKind::Point:
+      case ElemKind::PathBox:
+      case ElemKind::None: break;
+    }
+    return { INVALID };
+  }() };
+  bool const walked{ (stmt.v != INVALID) && (stmt.v < chart.stmts.size()) };
+  Span const span{ walked ? chart.stmts[stmt.v].src : d.src };
+  DocId const doc{ walked ? chart.stmts[stmt.v].doc : d.doc };
+
+  if ((span.len != 0) && (doc.v < chart.documents.size())) {
+    Document const &document{ chart.documents[doc.v] };
+    std::string_view const where{ chart_string(chart, document.path) };
+    LineCol const lc{ diag_line_col(chart.src_bytes.data() + document.text.off,
+                                    document.text.len,
+                                    span.off - document.text.off) };
+    append_position(out, where.empty() ? fallback_name : where, &lc);
+  } else {
+    append_position(out, fallback_name, nullptr);
+  }
+  append_message(out, d.code);
 }
 
 }  // namespace scav

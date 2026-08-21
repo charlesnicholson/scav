@@ -43,6 +43,9 @@ struct Parser {
   std::vector<Diagnostic> *diags;
   uint32_t pos;
   uint32_t last_end;  // end offset of the most recently consumed token
+  LexComment const *comments;
+  uint32_t comment_count;
+  uint32_t comment_cursor;  // monotone: statements begin in source order
   std::vector<StmtId> scratch;
   std::vector<Frame> frames;
   std::vector<scav_byte> strbuf;  // reused by the string decoder
@@ -161,10 +164,44 @@ bool take_number(Parser &p, uint32_t &out) {
   return true;
 }
 
+// Measured between the leading comment run and whatever ended above it, so a
+// blank stays above a heading comment and a trailing one does not hide it.
+uint32_t blank_before(Parser &p, uint32_t at) {
+  while ((p.comment_cursor < p.comment_count) &&
+         (p.comments[p.comment_cursor].src.off < p.last_end)) {
+    ++p.comment_cursor;
+  }
+  // A comment with code earlier on its line trails the statement above, so the
+  // gap begins after it rather than before it.
+  uint32_t from{ p.last_end };
+  while ((p.comment_cursor < p.comment_count) &&
+         (p.comments[p.comment_cursor].src.off < at) &&
+         (p.comments[p.comment_cursor].code_before != 0)) {
+    Span const &src{ p.comments[p.comment_cursor].src };
+    from = src.off + src.len;
+    ++p.comment_cursor;
+  }
+  uint32_t stop{ at };
+  if ((p.comment_cursor < p.comment_count) &&
+      (p.comments[p.comment_cursor].src.off < at)) {
+    stop = p.comments[p.comment_cursor].src.off;
+  }
+  uint32_t newlines{ 0 };
+  for (uint32_t i = from; (i < stop) && (newlines < 2); ++i) {
+    if (p.bytes[i] == '\n') { ++newlines; }
+  }
+  return (newlines >= 2) ? 1U : 0U;
+}
+
 uint32_t begin_stmt(Parser &p, StmtKind kind, uint32_t payload) {
   uint32_t const id{ narrow_clamp<uint32_t>(p.pd->stmts.size()) };
-  p.pd->stmts.push_back(
-      { .kind = kind, .doc = p.doc, .src = make_span(peek(p).off, 0), .comments = {} });
+  uint32_t const at{ peek(p).off };
+  p.pd->stmts.push_back({ .kind = kind,
+                          .doc = p.doc,
+                          .src = make_span(at, 0),
+                          .comments = {},
+                          // The chart opens the file, so nothing precedes it.
+                          .blank_before = (id == 0) ? 0U : blank_before(p, at) });
   p.pd->stmt_payload.push_back(payload);
   p.pd->stmt_children.push_back({});
   return id;
@@ -657,6 +694,9 @@ bool parse_tokens(scav_byte const *bytes,
             .diags = &diags,
             .pos = 0,
             .last_end = 0,
+            .comments = lexed.comments.data(),
+            .comment_count = narrow_clamp<uint32_t>(lexed.comments.size()),
+            .comment_cursor = 0,
             .scratch = {},
             .frames = {},
             .strbuf = {} };

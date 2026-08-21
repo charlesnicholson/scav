@@ -1,9 +1,5 @@
-# Tests are build steps: each is a custom command whose output is a stamp, wired
-# into ALL. Building verifies, and a second build is a no-op. That last part is
-# why there is no CTest -- ctest re-runs everything every invocation.
-#
-# No mocks and no seams: a unit test is a translation unit compiled against the
-# testable archive, reaching internals through SCAV_INTERNAL.
+# Each test is a custom command whose output is a stamp, wired into ALL, so a
+# second build is a no-op -- which is why there is no CTest.
 
 include_guard(GLOBAL)
 
@@ -81,9 +77,8 @@ function(scav_test_environment out_var stamp_name)
   set(${out_var} "${env}" PARENT_SCOPE)
 endfunction()
 
-# Delete the stamp, run, touch the stamp -- so a crashed run never leaves behind
-# a stamp a later build would trust. The run goes through ScavRunTest.cmake, so
-# a passing test prints nothing and a failing one prints everything.
+# Delete the stamp, run, touch it -- so a crashed run leaves behind no stamp a
+# later build would trust.
 function(scav_stamped_test stamp_name)
   cmake_parse_arguments(arg "" "COMMENT" "DEPENDS;COMMAND;TARGETS;ENV" ${ARGN})
 
@@ -148,9 +143,8 @@ function(scav_tests name)
   set_property(GLOBAL APPEND PROPERTY SCAV_TEST_EXECUTABLES ${name})
 endfunction()
 
-# A harness that silently passes everything looks like a working one, so one case
-# is written to fail. Inverting needs a script: a build step succeeds by exiting
-# zero, and this has to succeed by exiting non-zero.
+# One case is written to fail. Inverting needs a script: a build step succeeds by
+# exiting zero, and this succeeds by exiting non-zero.
 function(scav_expect_test_failure name filter)
   scav_stamped_test(${name}_reports_failures
     COMMAND "${CMAKE_COMMAND}"

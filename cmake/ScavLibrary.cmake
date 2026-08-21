@@ -8,9 +8,7 @@ set(SCAV_LIBRARY_DEPS_draw core)
 set(SCAV_LIBRARY_DEPS_svg draw)
 set(SCAV_LIBRARY_DEPS_imgui draw)
 
-# scav_settings(<target>)
-#
-# scav's warning set, sanitizer, coverage instrumentation and include paths.
+# scav_settings(<target>) -- warning set, sanitizer, coverage and include paths.
 function(scav_settings target)
   # BUILD_INTERFACE so an exported archive names none of them. COMPILE_ONLY would
   # be the more precise relationship but survives into the export by name.
@@ -31,11 +29,8 @@ function(scav_settings target)
   target_compile_features(${target} PUBLIC cxx_std_20)
 endfunction()
 
-# scav_static_library(<name> <source>...)
-#
-# Two archives from one source list: <name> ships, and <name>_testable carries
-# SCAV_TESTING so a test can link a function that otherwise has internal linkage.
-# Link them, install them and test them yourself.
+# scav_static_library(<name> <source>...) -- two archives from one source list.
+# <name>_testable carries SCAV_TESTING, dropping internal linkage.
 function(scav_static_library name)
   if(NOT ARGN)
     message(FATAL_ERROR "scav_static_library(${name}): no sources")
@@ -79,10 +74,8 @@ function(scav_static_library name)
   endforeach()
 endfunction()
 
-# scav_install_library(<target> <exported name>)
-#
-# An ALIAS is not exported, so EXPORT_NAME is what lets an installed tree and an
-# add_subdirectory tree spell the dependency the same way.
+# scav_install_library(<target> <exported name>). An ALIAS is not exported, so
+# EXPORT_NAME is what makes both trees spell the dependency alike.
 function(scav_install_library target exported)
   add_library(scav::${exported} ALIAS ${target})
   set_target_properties(${target} PROPERTIES EXPORT_NAME ${exported})
@@ -96,10 +89,8 @@ function(scav_install_library target exported)
   )
 endfunction()
 
-# scav_check_layering()
-#
-# Reads what the targets actually link rather than what a wrapper was told, so an
-# ordinary target_link_libraries cannot slip a forbidden edge past it.
+# scav_check_layering() reads what targets link rather than what a wrapper was
+# told, so a plain target_link_libraries cannot slip an edge past it.
 function(scav_check_layering)
   get_property(libraries GLOBAL PROPERTY SCAV_LIBRARIES)
   foreach(library IN LISTS libraries)

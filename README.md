@@ -3,21 +3,40 @@
 Statechart authoring, layout, rendering. [PRD.md](PRD.md) is the normative design
 document; everything below describes what is built.
 
-**Status: P1 — the model spine.** `libscavcore` now carries the model itself:
-flat entity arrays (`State`, `Submachine`, `Transition`, `Include`, `Attr`)
-linked by ordinal ids with tombstones, extension columns kept in lockstep with
-their entity, an append-only builder API, structural validation, and lowering
-from P0's statement stream into entities — with `resolve_path` carrying the
-PRD's addressing rules (lexical first segment, strict descent, `$kind`
-spellings for unnamed pseudostates). P1's exit gate is a test: a depth-16 /
-2k-state chart built from code and the same chart parsed from text are
-structurally identical. Cross-document resolution — filling `Include.target`
-and attaching included submachines — is P2, the loader. The `scav` executable
-(`apps/cli`) carries the first verb, `dump`: load a chart from a file and print
-the model — the entity rows, not the syntax — each element line ending with the
-source file and line its declaration started on.
+**Status: P3 — the printer.** `libscavcore` carries the `.scav` lexer and
+parser, the model (flat entity arrays linked by ordinal ids with tombstones,
+extension columns in lockstep, an append-only builder, structural validation),
+the iterative loader that turns one document into a resolved network, and now
+the comment-preserving canonical printer.
 
-Three properties of the front end are worth knowing before reading it:
+Canonical form is a property of *running* the printer, not of the format, so
+`scav fmt` is what makes it something a repo can rely on. Printing reconstructs
+gofmt-style rather than echoing the source: two documents that differ only in
+formatting print the same bytes, which is what the format hash and a three-way
+merge rest on. The seven rules are PRD §15's — long keyword spellings, a
+repeated key as a list, `"true"` as a flag, a shared namespace as a block,
+attributes sorted by key bytes while structure keeps document order, a trailing
+comma iff the block broke, and line breaking by a column budget. Comments carry
+their position (leading, trailing, own-line) and are the expensive half.
+
+Whitespace is otherwise not the model's, with one exception: `blank_before` on a
+`Statement` keeps a blank line between two statements, because source order is a
+layout hint and grouping is how an author writes that hint down. It is a bit and
+not a count, so a run collapses to one, and it is suppressed where it would open
+or close a block.
+
+The `scav` executable (`apps/cli`) now has five spellings across four verbs:
+
+```
+scav fmt [--check] <file>...      canonical print, in place; --check gates
+scav check <file>                 structural validation, exit 1 on a finding
+scav deps [--target N] <file>     the document network as a make/ninja depfile
+scav dump [--hash|--json] <file>  the model: entity rows, not syntax
+```
+
+Layout, `DrawList`, and rendering are P4 onward and are not built.
+
+Four properties of the front end are worth knowing before reading it:
 
 - **Lexing and parsing are separate passes over a materialized token vector**, not
   a pull loop. `lex()` returns every token at once; the parser walks the array by
@@ -29,10 +48,17 @@ Three properties of the front end are worth knowing before reading it:
   Nesting depth is attacker-controlled, so a call-recursive parser answers a
   hostile document with a stack overflow. Here the depth cap is an ordinary
   comparison and the answer is a diagnostic. Same reason the trivia-attachment
-  walk and the synthetic generator are iterative.
-- **Nothing takes a path.** Parsing takes bytes; acquiring bytes is a different
-  system. There is no file I/O anywhere in core yet, and the unit tests
-  carry their charts as inline literals rather than as fixtures on disk.
+  walk and the synthetic generator are iterative. The printer's emitter and its
+  width pass are stacks for the same reason.
+- **No API forces a caller through a filesystem.** Parsing takes bytes;
+  acquiring them is a different system. `read_file` and `load_file` ship in
+  core as batteries written against the same public primitives, and are
+  skippable in full — a browser host, a binding and an editor holding unsaved
+  buffers stay first-class. Unit tests carry their charts as inline literals.
+- **The printer reads a `ParsedDocument`, not a `Chart`.** Only the statement
+  stream distinguishes `@k` from `@k = "true"`, records the `@ns { ... }`
+  spelling, and holds the endpoint path an author wrote; a `Chart` has resolved
+  those to `StateId`s. Model-to-text arrives with the editor that needs it.
 
 ## Build
 
@@ -53,7 +79,7 @@ build back to back is `ninja: no work to do` in zero seconds, and editing
 incremental.
 
 The first run takes a few minutes: [envy](https://github.com/envy-package-manager/envy)
-bootstraps itself, then provisions cmake, ninja, doctest, and python 3.14 into
+bootstraps itself, then provisions cmake, ninja, doctest and python 3.14 into
 `out/.envy`. After that it is a cache hit.
 
 ```
@@ -72,6 +98,20 @@ test scratch. `rm -rf out` is a factory reset, and nothing writes to `$HOME`.
 **Nothing comes from the system but the compiler.** cmake, ninja, doctest and
 python are envy's — CI's Linux container ships its own copies and scav ignores
 them, which `func.provisioning` enforces.
+
+**The lint gates are behind `SCAV_LINT`.** Nothing compiles with clang-format or
+clang-tidy, so an ordinary build never downloads them and neither does any CI
+row but the one Linux job that runs them, in parallel with the builds. Set the
+variable to run a gate yourself — on macOS that compiles clang once, since LLVM
+publishes no darwin prebuilt:
+
+```
+SCAV_LINT=1 $(./bin/envy product python3) tools/format.py          # rewrite
+SCAV_LINT=1 ./build.sh --no-test -- -DSCAV_CLANG_TIDY=ON           # tidy
+```
+
+`envy.lua` pins the version both gates run, so a finding reads the same
+everywhere; without `SCAV_LINT` they fall back to whatever is on `PATH`.
 
 ## Building without envy
 
@@ -96,7 +136,7 @@ second command and no ctest.
 | | |
 |---|---|
 | `envy.lua` | toolchain and package manifest; envy's root marker |
-| `bin/envy`, `bin/envy.bat` | envy bootstrap, checked in. Everything else in `bin/` is generated |
+| `bin/` | envy's product launchers, checked in and deployed by `envy sync`. Each one bootstraps envy and its package cache on a machine that has neither. The clang ones appear only under `SCAV_LINT`, so they are not tracked |
 | `CMakePresets.json` | the determinism matrix, generated by `tools/gen_presets.py` |
 | `cmake/` | warnings, sanitizers, the library/subsystem helpers, the export config |
 | `include/scav/` | the cross-library vocabulary: POD spellings, no functions |

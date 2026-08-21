@@ -1,18 +1,10 @@
-# Python, standard library only: a functional test that needs `pip install` is one
-# more thing between a clean checkout and a green run.
-#
-# These are stamped build steps like the unit tests, so `cmake --build` runs them
-# and a second build skips them. Each one declares the files it actually reads,
-# which is what makes the skip correct rather than merely fast: edit ci.yml and
-# only func.ci_anchor re-runs.
+# Python, standard library only. Stamped build steps like the unit tests, each
+# declaring the files it reads, so a second build skips what did not change.
 
 find_package(Python3 3.14 COMPONENTS Interpreter REQUIRED)
 
-# Handed to the Python side as data rather than rediscovered there: a test that
-# guesses the compiler is testing its guess.
-#
-# Forward slashes throughout: a Windows path drops raw into the JSON, where every
-# backslash is an escape and `D:\a` is a parse error.
+# Data rather than rediscovered: a test that guesses the compiler tests its
+# guess. Forward slashes, since every backslash in the JSON is an escape.
 foreach(pair
   "SOURCE_DIR;${PROJECT_SOURCE_DIR}"
   "BINARY_DIR;${PROJECT_BINARY_DIR}"
@@ -46,6 +38,18 @@ function(scav_add_functional_test name)
   )
 endfunction()
 
+# The whole corpus, for the gates that read all of it rather than one root.
+set(scav_corpus_charts
+  "${PROJECT_SOURCE_DIR}/test_data/charts/axis.scav"
+  "${PROJECT_SOURCE_DIR}/test_data/charts/brew.scav"
+  "${PROJECT_SOURCE_DIR}/test_data/charts/dock.scav"
+  "${PROJECT_SOURCE_DIR}/test_data/charts/estop.scav"
+  "${PROJECT_SOURCE_DIR}/test_data/charts/led.scav"
+  "${PROJECT_SOURCE_DIR}/test_data/charts/mill.scav"
+  "${PROJECT_SOURCE_DIR}/test_data/charts/toolchanger.scav"
+  "${PROJECT_SOURCE_DIR}/test_data/charts/vac.scav"
+)
+
 # install_consumer installs the whole project and configures a separate CMake
 # project against it, so it has to run after every archive and header exists.
 get_property(scav_all_libraries GLOBAL PROPERTY SCAV_LIBRARIES)
@@ -62,22 +66,16 @@ scav_add_functional_test(install_consumer
   TARGETS ${scav_all_libraries} ${scav_all_test_exes}
 )
 scav_add_functional_test(dump
-  DEPENDS "${PROJECT_SOURCE_DIR}/test_data/charts/brew.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/vac.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/dock.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/led.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/mill.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/axis.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/toolchanger.scav"
-          "${PROJECT_SOURCE_DIR}/test_data/charts/estop.scav"
+  DEPENDS ${scav_corpus_charts}
           "${PROJECT_SOURCE_DIR}/test_data/golden/dump/brew.txt"
           "${PROJECT_SOURCE_DIR}/test_data/golden/dump/vac.txt"
           "${PROJECT_SOURCE_DIR}/test_data/golden/dump/mill.txt"
+          "${PROJECT_SOURCE_DIR}/test_data/golden/dump/vac.json"
           "$<TARGET_FILE:scav>"
   TARGETS scav
 )
-# P2's exit gate: the loader driven from Python over ctypes, faking a
-# network fetch. Needs the shared library, not an archive.
+# The loader driven from Python over ctypes, faking a network fetch. Needs the
+# shared library, not an archive.
 scav_add_functional_test(load
   DEPENDS "${PROJECT_SOURCE_DIR}/test_data/charts/vac.scav"
           "${PROJECT_SOURCE_DIR}/test_data/charts/dock.scav"
@@ -85,6 +83,23 @@ scav_add_functional_test(load
           "$<TARGET_FILE:scav_shared>"
           "$<TARGET_FILE:scav>"
   TARGETS scav_shared scav
+)
+scav_add_functional_test(fmt
+  DEPENDS ${scav_corpus_charts}
+          "$<TARGET_FILE:scav>"
+  TARGETS scav
+)
+scav_add_functional_test(check
+  DEPENDS ${scav_corpus_charts}
+          "$<TARGET_FILE:scav>"
+  TARGETS scav
+)
+scav_add_functional_test(deps
+  DEPENDS "${PROJECT_SOURCE_DIR}/test_data/charts/vac.scav"
+          "${PROJECT_SOURCE_DIR}/test_data/charts/dock.scav"
+          "${PROJECT_SOURCE_DIR}/test_data/charts/led.scav"
+          "$<TARGET_FILE:scav>"
+  TARGETS scav
 )
 scav_add_functional_test(presets
   DEPENDS "${PROJECT_SOURCE_DIR}/CMakePresets.json"

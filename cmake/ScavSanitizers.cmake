@@ -68,19 +68,16 @@ function(scav_sanitizers_init)
 
   scav_sanitizer_check("${san}")
 
-  # Both Windows toolchains take the MSVC driver's spellings: /Zi for the debug
-  # info a report needs to symbolize, /Oy- for the frame pointers, and no
-  # incremental linking. The GNU spellings below are ignored there, and an ignored
-  # argument is itself a warning.
+  # Both Windows toolchains take the MSVC driver's spellings, and the GNU ones
+  # below would be ignored there -- which is itself a warning.
   if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
     set(flags /Zi /Oy-)
     target_link_options(scav_sanitizer INTERFACE /INCREMENTAL:NO)
     if(san STREQUAL "ASAN")
       list(APPEND flags /fsanitize=address)
     elseif(san STREQUAL "UBSAN")
-      # Trap rather than diagnose: the diagnosing runtime is built against one CRT
-      # and mismatches ours at link. A trap needs no runtime, and a test that dies
-      # on undefined behaviour is what the row is for.
+      # Trap rather than diagnose: the diagnosing runtime is built against one
+      # CRT and mismatches ours at link.
       list(APPEND flags -fsanitize=undefined -fsanitize-trap=undefined)
     endif()
     target_compile_options(scav_sanitizer INTERFACE ${flags})

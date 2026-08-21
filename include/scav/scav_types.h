@@ -11,19 +11,15 @@
 extern "C" {
 #endif
 
-// Only char, unsigned char and std::byte may alias an object representation;
-// uint8_t need not be one of them, so byte inspection through it is UB where it
-// is not. Not std::byte either: no arithmetic operators, and the C ABI needs
-// unsigned char.
-// NOLINTNEXTLINE(modernize-use-using)
+// uint8_t need not alias an object representation, and std::byte has no
+// arithmetic. NOLINTNEXTLINE(modernize-use-using)
 typedef unsigned char scav_byte;
 
 // 0 = ok; negative = error enum.
 // NOLINTNEXTLINE(modernize-use-using)
 typedef int32_t scav_result;
 
-// StrRef and Span both: an offset and a length into a separately-exposed flat
-// array. The only variable-length member any ABI type is allowed.
+// StrRef and Span both, and the only variable-length member an ABI type holds.
 // NOLINTNEXTLINE(modernize-use-using)
 typedef struct {
   uint32_t off, len;

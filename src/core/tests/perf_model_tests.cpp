@@ -22,6 +22,7 @@ using namespace scav::test;
 
 constexpr uint64_t INPUT_BYTES{ SCAV_PERF_INPUT_BYTES };
 constexpr bool ASSERT_FLOOR{ SCAV_PERF_ASSERT_FLOOR != 0 };
+constexpr bool ASSERT_SCALING{ SCAV_PERF_ASSERT_SCALING != 0 };
 
 // An order of magnitude under a 2020-era laptop, like the front end's floors.
 constexpr uint64_t LOWER_FLOOR_MB_PER_S{ 10 };
@@ -158,7 +159,7 @@ TEST_CASE("perf: lowering is linear in the input") {
   uint64_t const large_us{ fastest_micros([&] { lower_once(large_pd); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
-  if (ASSERT_FLOOR) {
+  if (ASSERT_SCALING) {
     CHECK_MESSAGE(growth < ratio * SCALING_SLACK,
                   "grew " << growth << "x for " << ratio << "x the bytes");
   }
@@ -186,7 +187,7 @@ TEST_CASE("perf: validation is linear in the model") {
   uint64_t const large_us{ fastest_micros([&] { time_validate(large_chart); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
-  if (ASSERT_FLOOR) {
+  if (ASSERT_SCALING) {
     CHECK_MESSAGE(growth < ratio * SCALING_SLACK,
                   "grew " << growth << "x for " << ratio << "x the bytes");
   }
@@ -217,7 +218,7 @@ TEST_CASE("perf: a wide sibling list lowers without degrading") {
   uint64_t const large_us{ fastest_micros([&] { lower_once(large_pd); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
-  if (ASSERT_FLOOR) {
+  if (ASSERT_SCALING) {
     CHECK_MESSAGE(growth < 4.0 * SCALING_SLACK,
                   "grew " << growth << "x for 4x the states");
   }

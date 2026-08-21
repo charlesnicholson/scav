@@ -7,13 +7,15 @@
 # stray `ctest` in the source root should not be committable.
 /Testing/
 
-# envy deploys a product shim per tool here; only the bootstrap scripts are ours.
-/bin/*
-!/bin/envy
-!/bin/envy.bat
-
 # Rewritten by envy on every invocation, and names a per-machine cache path.
 /.luarc.json
+
+# envy deploys a launcher per product, and these two exist only under SCAV_LINT.
+# Tracking them would make an ordinary `envy sync` delete them.
+/bin/clang-format
+/bin/clang-format.bat
+/bin/clang-tidy
+/bin/clang-tidy.bat
 
 # The tests and tools import each other, so bytecode lands next to the sources.
 __pycache__/

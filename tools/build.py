@@ -153,11 +153,8 @@ def main() -> int:
 
     build_dir = REPO_ROOT / "out" / preset
 
-    # The presets name a compiler unqualified -- `clang++`, not a path -- because
-    # CMakePresets.json is committed and every matrix host keeps its compilers
-    # somewhere different. Resolving it here pins the choice into the cache and
-    # prints it, so putting a second toolchain on PATH is a visible decision rather
-    # than a silent swap of what the sanitizer rows are built with.
+    # The presets name a compiler unqualified, since every matrix host keeps its
+    # own somewhere different. Resolving here pins and prints the choice.
     resolved = which(c) if (c := preset_compiler(preset)) else None
     resolved = Path(resolved).as_posix() if resolved else None
 
@@ -165,10 +162,8 @@ def main() -> int:
         print(f"+ rm -rf {build_dir}", flush=True)
         rmtree(build_dir)
     elif resolved and (was := cached_compiler(build_dir)) and was != resolved:
-        # CMake answers a changed compiler by resetting the cache, and the -D
-        # arguments below do not survive that internal re-run -- so configure fails
-        # reporting a missing doctest and blames the wrong thing entirely. Cleaning
-        # is the same work CMake was going to do, minus the misleading error.
+        # A changed compiler resets the cache, and the -D arguments below do not
+        # survive that re-run: configure then blames a missing doctest.
         print(f"+ rm -rf {build_dir}\n    compiler changed: {was} -> {resolved}",
               flush=True)
         rmtree(build_dir)

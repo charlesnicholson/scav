@@ -88,10 +88,8 @@ function(scav_warnings_init)
 
   if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-      # clang-cl is conforming without the /Zc: switches and ignores MSVC's
-      # numeric warning ids, and an ignored argument is itself a warning. MSVC's
-      # headers do not survive the GNU-like list, so it gets the clang extras
-      # that are header-clean and nothing more.
+      # clang-cl ignores MSVC's numeric ids, and an ignored argument is itself
+      # a warning. MSVC's headers do not survive the whole GNU-like list.
       target_compile_options(scav_warnings INTERFACE
         /W4
         /utf-8

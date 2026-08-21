@@ -18,9 +18,8 @@ namespace {
 
 constexpr size_t READ_CHUNK{ size_t{ 64 } * 1024U };
 
-// Document names are `/`-separated on every transport, so the one entry point
-// taking a native path converts it. A backslash is a legal filename byte off
-// Windows, where this would corrupt a name rather than fix it.
+// Document names are `/`-separated on every transport. Windows only: off it, a
+// backslash is a legal filename byte and this would corrupt a name.
 std::string native_to_key(char const *path) {
   std::string out{ (path == nullptr) ? "" : path };
 #ifdef _WIN32
@@ -55,6 +54,16 @@ bool read_file(char const *path, std::vector<scav_byte> &out) {
   std::ignore = std::fclose(file);
   if (!ok) { out.clear(); }
   return ok;
+}
+
+bool write_file(char const *path, scav_byte const *bytes, size_t len) {
+  if ((path == nullptr) || ((bytes == nullptr) && (len != 0))) { return false; }
+  std::FILE *const file{ std::fopen(path, "wb") };
+  if (file == nullptr) { return false; }
+  bool const wrote{ (len == 0) || (std::fwrite(bytes, 1, len, file) == len) };
+  // Closed either way, and the close itself can fail: a short write often
+  // surfaces only when the buffer is flushed.
+  return (std::fclose(file) == 0) && wrote;
 }
 
 bool load_file(char const *path,

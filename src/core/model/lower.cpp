@@ -28,9 +28,8 @@ struct Lowerer {
   bool clean;
 };
 
-// Never below double the capacity: reserving the exact size on every round
-// replaces the vector's geometric growth with one reallocation per round, which
-// is quadratic over a network of many documents.
+// Never below double the capacity: an exact reserve every round replaces
+// geometric growth with one reallocation per round, which is quadratic.
 template <typename T>
 void reserve_at_least(std::vector<T> &v, size_t want) {
   if (want <= v.capacity()) { return; }
@@ -397,7 +396,8 @@ DocId model_attach_document(Chart &c, ParsedDocument const &pd, uint32_t &stmt_b
         { .kind = s.kind,
           .doc = doc,
           .src = make_span(s.src.off + src_base, s.src.len),
-          .comments = make_span(s.comments.off + comment_base, s.comments.len) });
+          .comments = make_span(s.comments.off + comment_base, s.comments.len),
+          .blank_before = s.blank_before });
   }
   c.documents.push_back(
       { .path = string_pool_add(c.strings, string_pool_view(pd.strings, pd.doc.path)),
@@ -435,9 +435,8 @@ bool model_instantiate(Chart &c,
 }
 
 void model_finalize_containment(Chart &c) {
-  // A counting pass: the child index already ascends, so bucketing by parent
-  // lands each container's children in creation order. `children.len` is the
-  // fill cursor, starting at zero and ending at the count.
+  // The child index already ascends, so bucketing by parent lands each
+  // container's children in creation order. `children.len` is the fill cursor.
   std::vector<uint32_t> start(c.submachines.size() + 1, 0);
   for (State const &s : c.states) {
     // A parentless state reaches here only from a hand-built chart; skipping

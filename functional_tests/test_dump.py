@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
-"""`scav dump` loads a document network from a file and prints the model, each
-element line carrying the file and line its declaration started on. The output
-is a golden: byte-compared, so it stays deterministic across platforms.
+"""The model from a file, each element line carrying the source it came from,
+byte-compared against a golden. Also the loader over a real filesystem."""
 
-This is the loader over a real filesystem -- real paths in diagnostics,
-and a cycle reported against files rather than buffers."""
-
+import json
 import os
 import subprocess
 import sys
@@ -22,6 +19,7 @@ NETWORK = Path("test_data/charts/vac.scav")
 NETWORK_GOLDEN = Path("test_data/golden/dump/vac.txt")
 MILL = Path("test_data/charts/mill.scav")
 MILL_GOLDEN = Path("test_data/golden/dump/mill.txt")
+JSON_GOLDEN = Path("test_data/golden/dump/vac.json")
 
 
 class TestDump(unittest.TestCase):
@@ -78,16 +76,26 @@ class TestDump(unittest.TestCase):
         self.assertIn("trans dock/lamp/Off -> dock/lamp/Blinking", out)
         self.assertIn("trans lamp/Off -> lamp/Blinking", out)
 
+    def line_of(self, chart: Path, needle: str) -> int:
+        text = (self.cfg.repo_root / chart).read_text(encoding="utf-8")
+        for n, line in enumerate(text.split("\n"), 1):
+            if needle in line:
+                return n
+        self.fail(f"{needle} not in {chart}")
+
     def test_an_attribute_points_at_its_own_statement(self) -> None:
         out = self.check_golden(MILL, MILL_GOLDEN)
         # The `@machine { ... }` block is one statement producing two rows, so
         # both point at that line rather than at the chart's.
-        self.assertIn('@machine:axes = "3" (test_data/charts/mill.scav:8)', out)
-        self.assertIn('@machine:spindle_kw = "2" (test_data/charts/mill.scav:8)', out)
+        machine = self.line_of(MILL, "@machine {")
+        self.assertIn(f'@machine:axes = "3" (test_data/charts/mill.scav:{machine})', out)
+        self.assertIn(
+            f'@machine:spindle_kw = "2" (test_data/charts/mill.scav:{machine})', out)
         # And an attribute inside a state names the attribute's line, not the
         # state's.
+        doc = self.line_of(MILL, "@doc = ")
         self.assertIn('@doc = "gantry mill with a carousel changer" '
-                      '(test_data/charts/mill.scav:7)', out)
+                      f'(test_data/charts/mill.scav:{doc})', out)
 
     def test_a_repeated_child_is_one_document_and_many_instantiations(self) -> None:
         out = self.check_golden(MILL, MILL_GOLDEN)
@@ -211,6 +219,75 @@ class TestDump(unittest.TestCase):
         self.assertEqual(2, result.returncode)
         self.assertEqual("", result.stdout)
         self.assertIn(":1:", result.stderr)
+
+    # --json ================================================================
+
+    def test_json_matches_the_golden(self) -> None:
+        result = self.run_dump("--json", NETWORK.as_posix())
+        self.assertEqual("", result.stderr)
+        self.assertEqual(0, result.returncode)
+        want = (self.cfg.repo_root / JSON_GOLDEN).read_text(encoding="utf-8")
+        if result.stdout != want:
+            actual = self.cfg.scratch_dir / "golden" / "dump" / JSON_GOLDEN.name
+            actual.parent.mkdir(parents=True, exist_ok=True)
+            actual.write_text(result.stdout, encoding="utf-8")
+            self.fail(
+                f"golden mismatch: {self.cfg.repo_root / JSON_GOLDEN} vs {actual}"
+            )
+
+    def test_json_parses_and_carries_every_entity_array(self) -> None:
+        doc = json.loads(self.run_dump("--json", NETWORK.as_posix()).stdout)
+        self.assertEqual("vac", doc["chart"]["name"])
+        self.assertEqual("robot vacuum", doc["chart"]["label"])
+        self.assertEqual(3, len(doc["documents"]))
+        self.assertEqual(3, len(doc["includes"]))
+        for key in ("states", "submachines", "transitions", "attrs", "columns"):
+            self.assertIn(key, doc)
+        self.assertGreater(len(doc["states"]), 10)
+
+    def test_json_ids_index_the_arrays_they_name(self) -> None:
+        doc = json.loads(self.run_dump("--json", NETWORK.as_posix()).stdout)
+        for state in doc["states"]:
+            if state["parent"] is not None:
+                self.assertLess(state["parent"], len(doc["submachines"]))
+            for sub in state["submachines"]:
+                self.assertLess(sub, len(doc["submachines"]))
+            for attr in state["attrs"]:
+                self.assertLess(attr, len(doc["attrs"]))
+        for trans in doc["transitions"]:
+            self.assertLess(trans["src"], len(doc["states"]))
+            self.assertLess(trans["dst"], len(doc["states"]))
+        for inc in doc["includes"]:
+            self.assertLess(inc["target"], len(doc["documents"]))
+            self.assertLess(inc["host"], len(doc["states"]))
+
+    def test_json_spells_an_absent_id_as_null(self) -> None:
+        doc = json.loads(self.run_dump("--json", NETWORK.as_posix()).stdout)
+        # A root document's entities have no instantiation, and the chart's own
+        # root submachine has no owner.
+        self.assertTrue(any(s["inst"] is None for s in doc["states"]))
+        self.assertTrue(any(m["owner"] is None for m in doc["submachines"]))
+
+    def test_json_agrees_with_the_hash_verb(self) -> None:
+        doc = json.loads(self.run_dump("--json", NETWORK.as_posix()).stdout)
+        text = self.run_dump("--hash", NETWORK.as_posix()).stdout.strip()
+        self.assertEqual(int(text, 16), doc["chart"]["structural_hash"])
+
+    def test_json_escapes_what_json_requires(self) -> None:
+        chart = self.write(
+            "escapes.scav",
+            'chart e {\n  state A "quote \\" back \\\\ tab \\t nl \\n",\n}\n',
+        )
+        result = self.run_dump("--json", chart)
+        self.assertEqual(0, result.returncode)
+        doc = json.loads(result.stdout)
+        labels = [s["label"] for s in doc["states"] if s["name"] == "A"]
+        self.assertEqual(['quote " back \\ tab \t nl \n'], labels)
+
+    def test_hash_and_json_cannot_be_asked_for_together(self) -> None:
+        result = self.run_dump("--hash", "--json", NETWORK.as_posix())
+        self.assertEqual(2, result.returncode)
+        self.assertIn("usage:", result.stderr)
 
     def test_a_missing_file_is_an_error(self) -> None:
         result = self.run_dump("test_data/charts/no_such_chart.scav")

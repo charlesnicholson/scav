@@ -201,3 +201,49 @@ TEST_CASE("fuzz: the mutation corpus is reproducible from its seed") {
   CHECK(rnd(1, 1) != rnd(1, 2));
   CHECK(rnd(1, 1) != rnd(2, 1));
 }
+
+TEST_CASE("fuzz: printing any parse tree terminates and reaches a fixed point") {
+  constexpr uint64_t SEED{ 0x5CA1'AB1E'0000'0005ULL };
+  std::vector<std::string> const seeds{ seed_corpus() };
+  uint32_t printed{ 0 };
+  for (uint32_t i = 0; i < 4000; ++i) {
+    std::string const input{ mutate(seeds[i % seeds.size()], SEED + i) };
+    Parsed const r{ parse(input) };
+
+    // A rejected parse leaves a half-built tree, and the printer must walk it
+    // without reading past a span -- there is no gate between the two.
+    std::string once;
+    REQUIRE(print_document(r.pd, print_default_options(), once));
+    if (!r.ok) { continue; }
+    ++printed;
+
+    // Reparsing is what makes idempotence a claim about the format rather than
+    // about one function.
+    Parsed const again{ parse(once) };
+    CHECK(again.ok);
+    CHECK(again.diags.empty());
+    check_document(again.pd);
+    std::string twice;
+    REQUIRE(print_document(again.pd, print_default_options(), twice));
+    CHECK(once == twice);
+  }
+  CHECK(printed > 0);
+}
+
+TEST_CASE("fuzz: a narrow budget breaks everything and still reaches a fixed point") {
+  constexpr uint64_t SEED{ 0x5CA1'AB1E'0000'0006ULL };
+  std::vector<std::string> const seeds{ seed_corpus() };
+  PrintOptions const narrow{ .columns = PRINT_COLUMNS_MIN };
+  for (uint32_t i = 0; i < 2000; ++i) {
+    std::string const input{ mutate(seeds[i % seeds.size()], SEED + i) };
+    Parsed const r{ parse(input) };
+    if (!r.ok) { continue; }
+    std::string once;
+    REQUIRE(print_document(r.pd, narrow, once));
+    Parsed const again{ parse(once) };
+    REQUIRE(again.ok);
+    std::string twice;
+    REQUIRE(print_document(again.pd, narrow, twice));
+    CHECK(once == twice);
+  }
+}

@@ -33,12 +33,11 @@ Checks: >
 # misc-const-correctness false-positives on a loop accumulator, and magic-numbers
 # fires on tables and hash constants that are numbers by nature.
 
-# performance-enum-size wants the narrowest underlying type it can find, which
-# contradicts PRD 7: the model's enums are uint32_t fields in POD rows whose
-# layout is pinned for the C ABI, and narrowing them would move every offset.
+# performance-enum-size narrows an underlying type; the model's enums are
+# uint32_t fields in POD rows whose C ABI layout is pinned.
 
-# readability-use-anyofallof rewrites plain loops into <ranges> view pipelines,
-# which PRD 4 discourages by name -- the default answer there is the plain loop.
+# readability-use-anyofallof rewrites plain loops into <ranges> pipelines, and
+# the plain loop is the default answer here.
 
 WarningsAsErrors: '*'
 HeaderFilterRegex: '(include/scav|src)/.*'

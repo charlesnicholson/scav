@@ -40,16 +40,39 @@ def load_config() -> Config:
     return Config(json.loads(Path(path).read_text(encoding="utf-8")))
 
 
-def run(cmd: list[Arg]) -> subprocess.CompletedProcess[str]:
+def run(
+    cmd: list[Arg], env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
     """Capture both streams so a failure prints them once."""
     argv = [str(c) for c in cmd]
     print(f"+ {' '.join(argv)}", flush=True)
     result = subprocess.run(
-        argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+        argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env
     )
     if result.returncode:
         print(result.stdout, flush=True)
     return result
+
+
+SANITIZERS: tuple[str, ...] = (
+    "ASAN_OPTIONS", "LSAN_OPTIONS", "MSAN_OPTIONS", "TSAN_OPTIONS", "UBSAN_OPTIONS",
+)
+
+
+def env_without_suppressions() -> dict[str, str]:
+    """The environment for a process this test spawns rather than the build.
+
+    A sanitizer's suppressions path is a bare filename, because those option
+    strings split on ':' and a Windows drive letter would split with them. It
+    resolves against the source directory, which a spawned build tool does not
+    run in, and a runtime that cannot read it aborts before main.
+    """
+    env = os.environ.copy()
+    for name in SANITIZERS:
+        if value := env.get(name):
+            kept = [p for p in value.split(":") if not p.startswith("suppressions=")]
+            env[name] = ":".join(kept)
+    return env
 
 
 def fresh_dir(path: Path) -> Path:

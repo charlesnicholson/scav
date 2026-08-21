@@ -1,8 +1,5 @@
-# Runs one doctest case written to fail, and succeeds only if it did -- which a
-# custom command cannot express, since a build step succeeds by exiting zero.
-#
-# Its output is captured, not printed: a build log full of a deliberate failure
-# trains people to ignore the real ones. Echoed only on an unexpected pass.
+# Runs one doctest case written to fail and succeeds only if it did. Output is
+# captured and echoed only on an unexpected pass.
 
 if(NOT DEFINED SCAV_EXE OR NOT DEFINED SCAV_FILTER)
   message(FATAL_ERROR "ScavExpectFailure.cmake needs -DSCAV_EXE and -DSCAV_FILTER")
