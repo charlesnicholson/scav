@@ -101,7 +101,17 @@ scav_add_functional_test(deps
           "$<TARGET_FILE:scav>"
   TARGETS scav
 )
-scav_add_functional_test(include_subset)
+scav_add_functional_test(include_subset
+  DEPENDS "${PROJECT_SOURCE_DIR}/src/layout/c_api.cpp"
+          "${PROJECT_SOURCE_DIR}/src/layout/include/scav/scav_layout.h"
+          "${PROJECT_SOURCE_DIR}/src/layout/include/scav/scav_layout_c.h"
+          "${PROJECT_SOURCE_DIR}/src/layout/profile.cpp"
+          "${PROJECT_SOURCE_DIR}/src/layout/profile_tests.cpp"
+          "${PROJECT_SOURCE_DIR}/src/layout/router.cpp"
+          "${PROJECT_SOURCE_DIR}/src/layout/router_tests.cpp"
+          "${PROJECT_SOURCE_DIR}/src/layout/spaces.cpp"
+          "${PROJECT_SOURCE_DIR}/src/layout/spaces_tests.cpp"
+)
 scav_add_functional_test(presets
   DEPENDS "${PROJECT_SOURCE_DIR}/CMakePresets.json"
           "${PROJECT_SOURCE_DIR}/tools/gen_presets.py"

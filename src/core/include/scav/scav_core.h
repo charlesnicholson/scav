@@ -169,6 +169,13 @@ enum class DiagCode : uint32_t {
   NameHasMetacharacter,
   StatementSpanOutOfRange,
   ColumnCountMismatch,
+
+  // Space requests. These carry the requesting entity, so the failure is
+  // attributed to the request that caused it.
+  SpaceOutOfRange,
+  SpaceOrderDuplicate,
+  SpaceSubjectInvalid,
+  SpaceCountMismatch,
 };
 
 // A producer running before entities exist fills `src`; one running after fills

@@ -34,7 +34,7 @@ scav deps [--target N] <file>     the document network as a make/ninja depfile
 scav dump [--hash|--json] <file>  the model: entity rows, not syntax
 ```
 
-Layout, `DrawList`, and rendering are P4 onward and are not built.
+`libscavlayout` carries its input contracts -- space tables, profile, routers; the layout phases, `DrawList`, and rendering are not built.
 
 Four properties of the front end are worth knowing before reading it:
 

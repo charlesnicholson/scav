@@ -3,6 +3,8 @@
 
 #include <scav/scav_core_c.h>
 #include <scav/scav_core.h>
+#include <scav/scav_layout.h>
+#include <scav/scav_layout_c.h>
 #include <scav/scav_types.h>
 
 #include <cstdint>
@@ -186,10 +188,37 @@ int check_core() {
   return 0;
 }
 
+// The layout inputs through both installed headers: a shipped profile and the
+// router registry, C++ and C.
+int check_layout() {
+  scav::Profile profile{};
+  if (!scav::profile_named("readable", profile) || !scav::profile_validate(profile)) {
+    std::fprintf(stderr, "the shipped profile failed to load or validate\n");
+    return 1;
+  }
+  scav_profile c_profile{};
+  if ((scav_profile_named("compact", &c_profile) != SCAV_OK) ||
+      (scav_profile_validate(&c_profile) != SCAV_OK)) {
+    std::fprintf(stderr, "the C profile surface failed\n");
+    return 1;
+  }
+  scav_router_id router{ 0 };
+  scav_byte const *name{ nullptr };
+  uint32_t len{ 0 };
+  if ((scav_router_name(0, &name, &len) != SCAV_OK) ||
+      (scav_router_by_name(name, len, &router) != SCAV_OK)) {
+    std::fprintf(stderr, "the router registry failed\n");
+    return 1;
+  }
+  std::printf("consumer layout ok: %u routers\n", scav::router_count());
+  return 0;
+}
+
 }  // namespace
 
 int main() {
   if (int const rc = check_core(); rc != 0) { return rc; }
   if (int const rc = check_model(); rc != 0) { return rc; }
+  if (int const rc = check_layout(); rc != 0) { return rc; }
   return check_abi();
 }

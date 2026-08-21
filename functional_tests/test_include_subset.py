@@ -23,6 +23,8 @@ import scavtest  # noqa: E402
 ALLOWED_SYSTEM = {
     "cstdint", "bit", "limits", "vector", "array", "utility", "type_traits",
     "cstring",
+    # The C spelling of cstdint, for the header that must compile as C.
+    "stdint.h",
 }
 
 # Own subsystem headers, public vocabulary, and the src/-root primitives that
@@ -38,7 +40,7 @@ class TestLayoutIncludeSubset(unittest.TestCase):
         layout = cfg.repo_root / "src/layout"
         offences: list[str] = []
         for path in sorted(layout.rglob("*")) if layout.is_dir() else []:
-            if path.suffix not in (".h", ".cpp"):
+            if path.suffix not in (".h", ".cpp") or path.stem.endswith("_tests"):
                 continue
             for number, line in enumerate(
                     path.read_text(encoding="utf-8").splitlines(), start=1):
