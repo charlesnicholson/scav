@@ -185,6 +185,56 @@ scav_result scav_chart_diag(scav_chart const *chart, uint32_t index, scav_diag *
   return SCAV_OK;
 }
 
+scav_result scav_column_find(scav_chart const *chart,
+                             char const *name,
+                             scav_column_id *out) {
+  if ((chart == nullptr) || (name == nullptr) || (out == nullptr)) {
+    return SCAV_E_INVALID_ARG;
+  }
+  scav::ColumnId const id{ scav::column_find(chart->chart, name) };
+  if (id.v == scav::INVALID) { return SCAV_E_INVALID_ARG; }
+  *out = id.v;
+  return SCAV_OK;
+}
+
+scav_result scav_column_data(scav_chart const *chart,
+                             scav_column_id id,
+                             scav_byte const **out,
+                             uint32_t *out_stride) {
+  if ((chart == nullptr) || (out == nullptr) || (out_stride == nullptr)) {
+    return SCAV_E_INVALID_ARG;
+  }
+  if (id >= chart->chart.columns.size()) { return SCAV_E_INVALID_ARG; }
+  *out = scav::column_data(chart->chart, { id });
+  *out_stride = chart->chart.columns[id].desc.elem_size;
+  return SCAV_OK;
+}
+
+scav_result scav_column_count(scav_chart const *chart,
+                              scav_column_id id,
+                              uint32_t *out_count) {
+  if ((chart == nullptr) || (out_count == nullptr)) { return SCAV_E_INVALID_ARG; }
+  if (id >= chart->chart.columns.size()) { return SCAV_E_INVALID_ARG; }
+  *out_count = scav::column_count(chart->chart, { id });
+  return SCAV_OK;
+}
+
+scav_result scav_str(scav_chart const *chart,
+                     scav_span ref,
+                     scav_byte const **out,
+                     uint32_t *out_len) {
+  if ((chart == nullptr) || (out == nullptr) || (out_len == nullptr)) {
+    return SCAV_E_INVALID_ARG;
+  }
+  std::vector<scav_byte> const &pool{ chart->chart.strings.bytes };
+  if ((static_cast<uint64_t>(ref.off) + ref.len) > pool.size()) {
+    return SCAV_E_INVALID_ARG;
+  }
+  *out = (ref.len == 0) ? nullptr : (pool.data() + ref.off);
+  *out_len = ref.len;
+  return SCAV_OK;
+}
+
 scav_result scav_chart_structural_hash(scav_chart const *chart, uint32_t *out) {
   if ((chart == nullptr) || (out == nullptr)) { return SCAV_E_INVALID_ARG; }
   *out = scav::chart_structural_hash(chart->chart);

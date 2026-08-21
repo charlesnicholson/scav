@@ -346,3 +346,75 @@ TEST_CASE("abi: a chart diagnostic reads back field for field") {
   scav_chart_destroy(chart);
   scav_load_destroy(loader);
 }
+
+TEST_CASE("abi: a registered column reads back through the three-call accessor") {
+  scav_load *loader{ nullptr };
+  scav_chart *chart{ drive(diamond(), &loader) };
+  REQUIRE(chart != nullptr);
+
+  // Registered through the C++ API the way layout will; the C caller sees
+  // only find, data, count.
+  scav::ColumnId const id{ scav::column_register(
+      chart->chart, "scav.geom.state", scav::ElemKind::State,
+      scav::ValueKind::Pod, 16, 4, scav::COLUMN_DERIVED) };
+  REQUIRE(id.v != scav::INVALID);
+  scav::column_data(chart->chart, id)[0] = 0x5C;
+
+  scav_column_id found{ 0 };
+  REQUIRE(scav_column_find(chart, "scav.geom.state", &found) == SCAV_OK);
+  CHECK(found == id.v);
+  CHECK(scav_column_find(chart, "no.such.column", &found) == SCAV_E_INVALID_ARG);
+
+  scav_byte const *data{ nullptr };
+  uint32_t stride{ 0 };
+  REQUIRE(scav_column_data(chart, found, &data, &stride) == SCAV_OK);
+  CHECK(stride == 16);
+  REQUIRE(data != nullptr);
+  CHECK(data[0] == 0x5C);
+
+  uint32_t count{ 0 };
+  REQUIRE(scav_column_count(chart, found, &count) == SCAV_OK);
+  CHECK(count == scav::chart_entity_count(chart->chart, scav::ElemKind::State));
+
+  CHECK(scav_column_data(chart, 999, &data, &stride) == SCAV_E_INVALID_ARG);
+  CHECK(scav_column_count(chart, 999, &count) == SCAV_E_INVALID_ARG);
+
+  scav_chart_destroy(chart);
+  scav_load_destroy(loader);
+}
+
+TEST_CASE("abi: scav_str reads the pool a strref names, and only the pool") {
+  scav_load *loader{ nullptr };
+  scav_chart *chart{ drive(diamond(), &loader) };
+  REQUIRE(chart != nullptr);
+
+  // Any named state's name is a span into the chart's string pool.
+  scav::StrRef named{};
+  for (scav::State const &s : chart->chart.states) {
+    if (s.name.len != 0) {
+      named = s.name;
+      break;
+    }
+  }
+  REQUIRE(named.len != 0);
+
+  scav_byte const *bytes{ nullptr };
+  uint32_t len{ 0 };
+  scav_span const ref{ .off = named.off, .len = named.len };
+  REQUIRE(scav_str(chart, ref, &bytes, &len) == SCAV_OK);
+  CHECK(span_text(bytes, len) == scav::chart_string(chart->chart, named));
+
+  scav_span const empty{ .off = 0, .len = 0 };
+  REQUIRE(scav_str(chart, empty, &bytes, &len) == SCAV_OK);
+  CHECK(bytes == nullptr);
+  CHECK(len == 0);
+
+  uint32_t const pool_size{
+    static_cast<uint32_t>(chart->chart.strings.bytes.size())
+  };
+  scav_span const past{ .off = pool_size, .len = 1 };
+  CHECK(scav_str(chart, past, &bytes, &len) == SCAV_E_INVALID_ARG);
+
+  scav_chart_destroy(chart);
+  scav_load_destroy(loader);
+}

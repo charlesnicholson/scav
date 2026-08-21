@@ -129,6 +129,32 @@ typedef struct {
 scav_result scav_chart_diag_count(scav_chart const *chart, uint32_t *out_count);
 scav_result scav_chart_diag(scav_chart const *chart, uint32_t index, scav_diag *out);
 
+/* NOLINTNEXTLINE(modernize-use-using) */
+typedef uint32_t scav_column_id;
+
+/* Column access is three calls: a builder cannot walk a column without the row
+ * count, and the stride is the registered element size. A name nothing
+ * registered is SCAV_E_INVALID_ARG; an empty column reads back as a NULL data
+ * pointer and a zero count. */
+scav_result scav_column_find(scav_chart const *chart,
+                             char const *name,
+                             scav_column_id *out);
+scav_result scav_column_data(scav_chart const *chart,
+                             scav_column_id id,
+                             scav_byte const **out,
+                             uint32_t *out_stride);
+scav_result scav_column_count(scav_chart const *chart,
+                              scav_column_id id,
+                              uint32_t *out_count);
+
+/* A span into the chart's string pool -- authored names and labels, the spans
+ * a strref column holds. Not NUL-terminated; a zero-length span reads back as
+ * NULL and zero, and one past the pool is SCAV_E_INVALID_ARG. */
+scav_result scav_str(scav_chart const *chart,
+                     scav_span ref,
+                     scav_byte const **out,
+                     uint32_t *out_len);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

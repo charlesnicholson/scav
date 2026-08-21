@@ -158,3 +158,34 @@ TEST_CASE("column: accessors refuse a bad id rather than reading garbage") {
   Chart const &cc{ c };
   CHECK(column_data(cc, ColumnId{ 0 }) == nullptr);
 }
+
+TEST_CASE("column: resize applies to a point column and nothing else") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "c", {}) };
+  build_state(c, root, "A", StateKind::Normal, {});
+  ColumnId const pts{
+    column_register(c, "scav.geom.point", ElemKind::Point, ValueKind::Pod, 8, 4, 0)
+  };
+  ColumnId const per_state{
+    column_register(c, "libhsm.events", ElemKind::State, ValueKind::U32, 4, 4, 0)
+  };
+  REQUIRE(pts.v != INVALID);
+  REQUIRE(per_state.v != INVALID);
+
+  // Growth zero-fills.
+  REQUIRE(column_resize(c, pts, 3));
+  REQUIRE(column_count(c, pts) == 3);
+  for (uint32_t i = 0; i < 3 * 8; ++i) { CHECK(column_data(c, pts)[i] == 0); }
+
+  // Shrink truncates; a regrown row does not resurrect old bytes.
+  column_data(c, pts)[0] = 0xAB;
+  REQUIRE(column_resize(c, pts, 0));
+  CHECK(column_count(c, pts) == 0);
+  REQUIRE(column_resize(c, pts, 1));
+  CHECK(column_data(c, pts)[0] == 0);
+
+  // An entity-parallel column resizes only with its entity array.
+  CHECK(!column_resize(c, per_state, 5));
+  CHECK(column_count(c, per_state) == 1);
+  CHECK(!column_resize(c, { INVALID }, 1));
+}
