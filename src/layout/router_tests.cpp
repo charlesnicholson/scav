@@ -29,7 +29,7 @@ TEST_CASE("router: the registry holds straight and resolves it by name") {
   CHECK(std::string_view{ reinterpret_cast<char const *>(name), len } == "straight");
   CHECK(!router_name(1, name, len));
 
-  RouterId id{ 99 };
+  scav_router_id id{ 99 };
   REQUIRE(router_by_name(bytes_of("straight"), 8, id));
   CHECK(id == 0);
   CHECK(!router_by_name(bytes_of("straigh"), 7, id));

@@ -373,9 +373,10 @@ struct SubmachineId { uint32_t v; };
 struct TransId  { uint32_t v; };
 struct StrRef   { uint32_t off, len; };            // into StringPool
 struct Span     { uint32_t off, len; };            // into a side array
-struct Point    { int32_t x, y; };                 // grid units (§11.2)
-struct Extent   { int32_t w, h; };
-struct Rect     { int32_t x, y, w, h; };           // half-open (§6)
+struct scav_point  { int32_t x, y; };              // grid units (§11.2)
+struct scav_extent { int32_t w, h; };
+struct scav_rect   { int32_t x, y, w, h; };        // half-open (§6); one spelling in
+                                                   // both languages, never aliased
 // Ids are global from the start, so endpoints are plain StateIds (§9).
 
 constexpr uint32_t INVALID = 0xFFFF'FFFFu;        // per-id sentinel

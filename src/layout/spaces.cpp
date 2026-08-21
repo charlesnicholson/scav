@@ -51,7 +51,7 @@ void check_boxes(std::vector<Diagnostic> &out,
 
 }  // namespace
 
-bool spaces_validate(Chart const &c, Spaces const &s, std::vector<Diagnostic> &diags) {
+bool spaces_validate(Chart const &c, scav_spaces const &s, std::vector<Diagnostic> &diags) {
   std::vector<Diagnostic> found;
 
   if (check_count(found, s.box_state, s.n_box_state,
@@ -135,7 +135,7 @@ void append_i32(std::vector<scav_byte> &out, int32_t v) {
 
 }  // namespace
 
-uint32_t spaces_digest(Spaces const &s) {
+uint32_t spaces_digest(scav_spaces const &s) {
   // Field by field, never a struct's bytes, with each table's count prefixed
   // so two adjacent tables cannot spell one.
   std::vector<scav_byte> bytes;

@@ -26,20 +26,20 @@ Chart two_state_chart() {
 }
 
 struct Tables {
-  std::vector<BoxSpace> box_state;
-  std::vector<BoxSpace> box_sub;
-  std::vector<PathClear> path_clear;
-  std::vector<PathBox> path_box;
+  std::vector<scav_box_space> box_state;
+  std::vector<scav_box_space> box_sub;
+  std::vector<scav_path_clear> path_clear;
+  std::vector<scav_path_box> path_box;
 };
 
 Tables full_tables(Chart const &c) {
-  return { .box_state = std::vector<BoxSpace>(c.states.size()),
-           .box_sub = std::vector<BoxSpace>(c.submachines.size()),
-           .path_clear = std::vector<PathClear>(c.transitions.size()),
+  return { .box_state = std::vector<scav_box_space>(c.states.size()),
+           .box_sub = std::vector<scav_box_space>(c.submachines.size()),
+           .path_clear = std::vector<scav_path_clear>(c.transitions.size()),
            .path_box = {} };
 }
 
-Spaces as_spaces(Tables const &t) {
+scav_spaces as_spaces(Tables const &t) {
   return { .box_state = t.box_state.data(),
            .n_box_state = static_cast<uint32_t>(t.box_state.size()),
            .box_sub = t.box_sub.data(),
@@ -56,7 +56,7 @@ TEST_CASE("spaces: empty and all-zero tables both validate") {
   Chart const c{ two_state_chart() };
   std::vector<Diagnostic> diags;
 
-  Spaces const none{};
+  scav_spaces const none{};
   CHECK(spaces_validate(c, none, diags));
 
   Tables const t{ full_tables(c) };
@@ -185,6 +185,6 @@ TEST_CASE("spaces: the digest hears every field and both zero shapes differ") {
   CHECK(spaces_digest(as_spaces(poked)) != base);
 
   // No requests at all and zero-valued requests are different policies.
-  Spaces const none{};
+  scav_spaces const none{};
   CHECK(spaces_digest(none) != spaces_digest(as_spaces(full_tables(c))));
 }

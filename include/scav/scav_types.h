@@ -44,13 +44,7 @@ typedef struct {
 #ifdef __cplusplus
 }  // extern "C"
 
-// The C++ spellings. One layout under two names: the model and layout say
-// Point and Rect, the ABI says scav_point and scav_rect.
 namespace scav {
-
-using Point = ::scav_point;
-using Extent = ::scav_extent;
-using Rect = ::scav_rect;
 
 // Coordinates are int32 grid units of 1/16 point; intermediates widen to Wide
 // before multiplying.

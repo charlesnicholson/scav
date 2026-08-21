@@ -14,7 +14,7 @@ namespace {
 // Grid units are 1/16 pt, so a point is 16.
 constexpr int32_t PT{ 16 };
 
-constexpr Profile READABLE{
+constexpr scav_profile READABLE{
   .profile_id = 2,
   .profile_version = 1,
   .pad = 8 * PT,
@@ -48,7 +48,7 @@ constexpr Profile READABLE{
   .print_columns = static_cast<int32_t>(DEFAULT_PRINT_COLUMNS),
 };
 
-constexpr Profile COMPACT{
+constexpr scav_profile COMPACT{
   .profile_id = 1,
   .profile_version = 1,
   .pad = 4 * PT,
@@ -84,7 +84,7 @@ bool in_range(int32_t v, int32_t lo, int32_t hi) { return (v >= lo) && (v <= hi)
 
 }  // namespace
 
-bool profile_named(char const *name, Profile &out) {
+bool profile_named(char const *name, scav_profile &out) {
   if (name == nullptr) { return false; }
   if (std::strcmp(name, "readable") == 0) {
     out = READABLE;
@@ -97,7 +97,7 @@ bool profile_named(char const *name, Profile &out) {
   return false;
 }
 
-bool profile_validate(Profile const &p) {
+bool profile_validate(scav_profile const &p) {
   constexpr int32_t I32_MAX{ 0x7FFF'FFFF };
   bool ok{ in_range(p.profile_id, 0, I32_MAX) &&
            in_range(p.profile_version, 1, I32_MAX) &&

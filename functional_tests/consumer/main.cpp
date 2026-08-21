@@ -191,7 +191,7 @@ int check_core() {
 // The layout inputs through both installed headers: a shipped profile and the
 // router registry, C++ and C.
 int check_layout() {
-  scav::Profile profile{};
+  scav_profile profile{};
   if (!scav::profile_named("readable", profile) || !scav::profile_validate(profile)) {
     std::fprintf(stderr, "the shipped profile failed to load or validate\n");
     return 1;

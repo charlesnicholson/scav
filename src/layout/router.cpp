@@ -32,7 +32,7 @@ bool router_name(uint32_t index, scav_byte const *&out, uint32_t &len) {
   return true;
 }
 
-bool router_by_name(scav_byte const *name, uint32_t len, RouterId &out) {
+bool router_by_name(scav_byte const *name, uint32_t len, scav_router_id &out) {
   if (name == nullptr) { return false; }
   for (uint32_t i = 0; i < ROUTERS.size(); ++i) {
     if ((ROUTERS[i].name_len == len) &&
