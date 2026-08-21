@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Run clang-format over scav's C++ sources.
 
-clang-format ships with the compiler, so CI gets a version pinned by its container
-image. Its output moves between releases, which is why the gate runs on one row
-rather than on every developer's differently-versioned copy.
+envy.lua pins the version, because clang-format's output moves between releases
+and a gate is only a gate if every machine runs the same one.
 
     $(./bin/envy product python3) tools/format.py            # rewrite files in place
     $(./bin/envy product python3) tools/format.py --check    # exit non-zero on any diff
 """
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -23,11 +23,19 @@ SOURCE_SUFFIXES: tuple[str, ...] = (".h", ".cpp")
 
 
 def clang_format() -> str:
+    """envy's launcher first, and it bootstraps envy and the package if neither
+    is there. PATH is for a tree built without envy at all."""
+    launcher = REPO_ROOT / "bin" / ("clang-format.bat" if os.name == "nt"
+                                    else "clang-format")
+    if launcher.is_file():
+        probe = subprocess.run([str(launcher), "--version"], capture_output=True)
+        if probe.returncode == 0:
+            return str(launcher)
     if found := shutil.which("clang-format"):
         return found
     raise SystemExit(
-        "clang-format is not on PATH. It ships with the clang toolchain; install "
-        "that, or leave formatting to CI, which runs it from a pinned image."
+        "no clang-format: neither bin/clang-format nor one on PATH. envy.lua "
+        "pins the version the gate reads, so prefer `envy sync` over your own."
     )
 
 

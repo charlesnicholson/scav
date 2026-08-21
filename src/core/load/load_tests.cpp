@@ -92,22 +92,20 @@ std::vector<std::string> document_names(Chart const &c) {
 // `leaf` too, so leaf is one document and two instantiations.
 std::vector<Doc> diamond() {
   return {
-    { "root.scav",
-      R"(chart root {
+    { .name = "root.scav", .text = R"(chart root {
            include "mid.scav" as mid,
            include "leaf.scav" as leaf,
            state A,
            trans * -> A,
            trans A -> mid/M,
          })" },
-    { "mid.scav",
-      R"(chart mid {
+    { .name = "mid.scav", .text = R"(chart mid {
            include "leaf.scav" as inner,
            state M,
            trans * -> M,
            trans M -> inner/L,
          })" },
-    { "leaf.scav", R"(chart leaf { state L, trans * -> L, })" },
+    { .name = "leaf.scav", .text = R"(chart leaf { state L, trans * -> L, })" },
   };
 }
 
@@ -123,7 +121,7 @@ uint32_t count_live_named(Chart const &c, std::string_view name) {
 
 TEST_CASE("load: one document with no includes matches lower_document") {
   constexpr std::string_view TEXT{ "chart c { state A, state B, trans A -> B, }" };
-  Loaded r{ load_network({ { "c.scav", TEXT } }, "c.scav") };
+  Loaded r{ load_network({ { .name = "c.scav", .text = TEXT } }, "c.scav") };
   REQUIRE_MESSAGE(r.ok, diag_message(first_code(r.diags)));
 
   Chart direct;
@@ -138,9 +136,10 @@ TEST_CASE("load: one document with no includes matches lower_document") {
 
 TEST_CASE("load: a two-document network resolves its alias and its endpoints") {
   Loaded r{ load_network(
-      { { "a.scav",
-          R"(chart a { include "b.scav" as b, state A, trans * -> A, trans A -> b/B, })" },
-        { "b.scav", R"(chart b { state B, trans * -> B, })" } },
+      { { .name = "a.scav",
+          .text =
+              R"(chart a { include "b.scav" as b, state A, trans * -> A, trans A -> b/B, })" },
+        { .name = "b.scav", .text = R"(chart b { state B, trans * -> B, })" } },
       "a.scav") };
   REQUIRE_MESSAGE(r.ok, diag_message(first_code(r.diags)));
 
@@ -225,10 +224,10 @@ TEST_CASE("load: pending empties as documents arrive") {
 
 TEST_CASE("load: two spellings of one path claim one document") {
   Loaded r{ load_network(
-      { { "a.scav",
-          R"(chart a { include "./b.scav" as x, include "sub/../b.scav" as y,
+      { { .name = "a.scav",
+          .text = R"(chart a { include "./b.scav" as x, include "sub/../b.scav" as y,
                        state A, })" },
-        { "b.scav", R"(chart b { state B, })" } },
+        { .name = "b.scav", .text = R"(chart b { state B, })" } },
       "a.scav") };
   REQUIRE_MESSAGE(r.ok, diag_message(first_code(r.diags)));
   CHECK(r.chart.documents.size() == 2);
@@ -266,9 +265,10 @@ TEST_CASE("load: entities carry the instantiation they belong to") {
 TEST_CASE("load: an included root submachine is unnamed and keeps its label") {
   // Naming it after the sub-chart would make `Host:leaf/L` a legal address
   // spelled from a word nobody wrote as a submachine name.
-  Loaded r{ load_network({ { "a.scav", R"(chart a { include "b.scav" as b, state A, })" },
-                           { "b.scav", R"(chart b "the label" { state B, })" } },
-                         "a.scav") };
+  Loaded r{ load_network(
+      { { .name = "a.scav", .text = R"(chart a { include "b.scav" as b, state A, })" },
+        { .name = "b.scav", .text = R"(chart b "the label" { state B, })" } },
+      "a.scav") };
   REQUIRE(r.ok);
 
   StateId const host{ r.chart.includes[0].host };
@@ -290,8 +290,8 @@ TEST_CASE("load: a sub-document's chart attrs land on its root submachine") {
   // A model holds exactly one Chart entity and it belongs to the root
   // document, so an included chart's attrs cannot attach there.
   Loaded r{ load_network(
-      { { "a.scav", R"(chart a { @top = "1", include "b.scav" as b, })" },
-        { "b.scav", R"(chart b { @sub = "2", state B, })" } },
+      { { .name = "a.scav", .text = R"(chart a { @top = "1", include "b.scav" as b, })" },
+        { .name = "b.scav", .text = R"(chart b { @sub = "2", state B, })" } },
       "a.scav") };
   REQUIRE(r.ok);
 
@@ -345,8 +345,8 @@ TEST_CASE("load: every live state's address round-trips across the network") {
 
 TEST_CASE("load: an include cycle is refused and names the closing statement") {
   Loaded r{ load_network(
-      { { "a.scav", R"(chart a { include "b.scav" as b, state A, })" },
-        { "b.scav", R"(chart b { state B, include "a.scav" as a, })" } },
+      { { .name = "a.scav", .text = R"(chart a { include "b.scav" as b, state A, })" },
+        { .name = "b.scav", .text = R"(chart b { state B, include "a.scav" as a, })" } },
       "a.scav") };
   CHECK_FALSE(r.ok);
   CHECK(has_code(r.diags, DiagCode::IncludeCycle));
@@ -366,17 +366,18 @@ TEST_CASE("load: an include cycle is refused and names the closing statement") {
 
 TEST_CASE("load: a document that includes itself is a cycle") {
   Loaded r{ load_network(
-      { { "a.scav", R"(chart a { include "a.scav" as me, state A, })" } },
+      { { .name = "a.scav", .text = R"(chart a { include "a.scav" as me, state A, })" } },
       "a.scav") };
   CHECK_FALSE(r.ok);
   CHECK(has_code(r.diags, DiagCode::IncludeCycle));
 }
 
 TEST_CASE("load: a longer cycle is caught too") {
-  Loaded r{ load_network({ { "a.scav", R"(chart a { include "b.scav" as b, })" },
-                           { "b.scav", R"(chart b { include "c.scav" as c, })" },
-                           { "c.scav", R"(chart c { include "a.scav" as a, })" } },
-                         "a.scav") };
+  Loaded r{ load_network(
+      { { .name = "a.scav", .text = R"(chart a { include "b.scav" as b, })" },
+        { .name = "b.scav", .text = R"(chart b { include "c.scav" as c, })" },
+        { .name = "c.scav", .text = R"(chart c { include "a.scav" as a, })" } },
+      "a.scav") };
   CHECK_FALSE(r.ok);
   CHECK(has_code(r.diags, DiagCode::IncludeCycle));
 }
@@ -456,9 +457,10 @@ TEST_CASE("load: finishing into a chart that already holds a model is refused") 
 }
 
 TEST_CASE("load: a parse error in an included document names that document") {
-  Loaded r{ load_network({ { "a.scav", R"(chart a { include "b.scav" as b, state A, })" },
-                           { "b.scav", "chart b { state , }" } },
-                         "a.scav") };
+  Loaded r{ load_network(
+      { { .name = "a.scav", .text = R"(chart a { include "b.scav" as b, state A, })" },
+        { .name = "b.scav", .text = "chart b { state , }" } },
+      "a.scav") };
   CHECK_FALSE(r.ok);
   CHECK(r.chart.documents.empty());
   // parse_document holds one document and is not told which; the loader is
@@ -475,9 +477,10 @@ TEST_CASE("load: a parse error in an included document names that document") {
 
 TEST_CASE("load: an alias colliding with a sibling state is an ordinary duplicate") {
   // An alias is a state, so the ordinary duplicate-name check covers it.
-  Loaded r{ load_network({ { "a.scav", R"(chart a { include "b.scav" as b, state b, })" },
-                           { "b.scav", R"(chart b { state B, })" } },
-                         "a.scav") };
+  Loaded r{ load_network(
+      { { .name = "a.scav", .text = R"(chart a { include "b.scav" as b, state b, })" },
+        { .name = "b.scav", .text = R"(chart b { state B, })" } },
+      "a.scav") };
   REQUIRE(r.ok);  // structurally loadable; validation is what objects
   std::vector<Diagnostic> diags;
   CHECK_FALSE(validate_chart(r.chart, diags));
@@ -486,8 +489,9 @@ TEST_CASE("load: an alias colliding with a sibling state is an ordinary duplicat
 
 TEST_CASE("load: an endpoint naming nothing across an include still diagnoses") {
   Loaded r{ load_network(
-      { { "a.scav", R"(chart a { include "b.scav" as b, state A, trans A -> b/Nope, })" },
-        { "b.scav", R"(chart b { state B, })" } },
+      { { .name = "a.scav",
+          .text = R"(chart a { include "b.scav" as b, state A, trans A -> b/Nope, })" },
+        { .name = "b.scav", .text = R"(chart b { state B, })" } },
       "a.scav") };
   CHECK_FALSE(r.ok);
   CHECK(has_code(r.diags, DiagCode::EndpointUnresolved));
@@ -499,9 +503,10 @@ TEST_CASE("load: an endpoint naming nothing across an include still diagnoses") 
 
 TEST_CASE("load: an included document sees its own scope, not the host's") {
   // Lexical scoping is per document: `A` in the leaf must not find the root's.
-  Loaded r{ load_network({ { "a.scav", R"(chart a { include "b.scav" as b, state A, })" },
-                           { "b.scav", R"(chart b { state B, trans B -> A, })" } },
-                         "a.scav") };
+  Loaded r{ load_network(
+      { { .name = "a.scav", .text = R"(chart a { include "b.scav" as b, state A, })" },
+        { .name = "b.scav", .text = R"(chart b { state B, trans B -> A, })" } },
+      "a.scav") };
   CHECK_FALSE(r.ok);
   CHECK(has_code(r.diags, DiagCode::EndpointUnresolved));
 }
@@ -519,8 +524,7 @@ TEST_CASE("load: one document included three times from one parent") {
   // Three aliases in one submachine, all naming one file. One Document, three
   // instantiations, and three disjoint sets of rows addressed apart.
   Loaded r{ load_network(
-      { { "mill.scav",
-          R"(chart mill {
+      { { .name = "mill.scav", .text = R"(chart mill {
                include "axis.scav" as x,
                include "axis.scav" as y,
                include "axis.scav" as z,
@@ -529,8 +533,8 @@ TEST_CASE("load: one document included three times from one parent") {
                trans Ready -> x/Homing,
                trans Ready -> z/Homing,
              })" },
-        { "axis.scav",
-          R"(chart axis { state Parked, state Homing, trans * -> Parked, })" } },
+        { .name = "axis.scav",
+          .text = R"(chart axis { state Parked, state Homing, trans * -> Parked, })" } },
       "mill.scav") };
   REQUIRE_MESSAGE(r.ok, diag_message(first_code(r.diags)));
 
@@ -564,12 +568,13 @@ TEST_CASE("load: one document included three times from one parent") {
 }
 
 TEST_CASE("load: a path descends through three include boundaries") {
-  Loaded r{ load_network({ { "a.scav", R"(chart a { include "b.scav" as b, state A,
+  Loaded r{ load_network(
+      { { .name = "a.scav", .text = R"(chart a { include "b.scav" as b, state A,
                                  trans A -> b/c/d/D, })" },
-                           { "b.scav", R"(chart b { include "c.scav" as c, state B, })" },
-                           { "c.scav", R"(chart c { include "d.scav" as d, state C, })" },
-                           { "d.scav", R"(chart d { state D, })" } },
-                         "a.scav") };
+        { .name = "b.scav", .text = R"(chart b { include "c.scav" as c, state B, })" },
+        { .name = "c.scav", .text = R"(chart c { include "d.scav" as d, state C, })" },
+        { .name = "d.scav", .text = R"(chart d { state D, })" } },
+      "a.scav") };
   REQUIRE_MESSAGE(r.ok, diag_message(first_code(r.diags)));
 
   StateId deep{ INVALID };
@@ -582,16 +587,17 @@ TEST_CASE("load: one leaf reached from several including documents") {
   // `leaf` is named by the root and by both middles, so it is one Document and
   // three instantiations whose rows never mix.
   Loaded r{ load_network(
-      { { "root.scav",
-          R"(chart root {
+      { { .name = "root.scav", .text = R"(chart root {
                include "one.scav" as one,
                include "two.scav" as two,
                include "leaf.scav" as leaf,
                state R,
              })" },
-        { "one.scav", R"(chart one { include "leaf.scav" as leaf, state O, })" },
-        { "two.scav", R"(chart two { include "leaf.scav" as leaf, state T, })" },
-        { "leaf.scav", R"(chart leaf { state L, trans * -> L, })" } },
+        { .name = "one.scav",
+          .text = R"(chart one { include "leaf.scav" as leaf, state O, })" },
+        { .name = "two.scav",
+          .text = R"(chart two { include "leaf.scav" as leaf, state T, })" },
+        { .name = "leaf.scav", .text = R"(chart leaf { state L, trans * -> L, })" } },
       "root.scav") };
   REQUIRE_MESSAGE(r.ok, diag_message(first_code(r.diags)));
 

@@ -7,11 +7,6 @@
 # stray `ctest` in the source root should not be committable.
 /Testing/
 
-# envy deploys a product shim per tool here; only the bootstrap scripts are ours.
-/bin/*
-!/bin/envy
-!/bin/envy.bat
-
 # Rewritten by envy on every invocation, and names a per-machine cache path.
 /.luarc.json
 

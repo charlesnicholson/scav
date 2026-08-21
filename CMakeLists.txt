@@ -98,7 +98,17 @@ scav_coverage_init()
 scav_testing_init()
 
 if(SCAV_CLANG_TIDY)
-  find_program(SCAV_CLANG_TIDY_EXE NAMES clang-tidy REQUIRED)
+  # envy's launcher first, since envy.lua pins the version whose findings the
+  # gate is calibrated against; PATH is for a tree built without envy.
+  set(scav_tidy "${PROJECT_SOURCE_DIR}/bin/clang-tidy")
+  if(WIN32)
+    set(scav_tidy "${scav_tidy}.bat")
+  endif()
+  if(EXISTS "${scav_tidy}")
+    set(SCAV_CLANG_TIDY_EXE "${scav_tidy}")
+  else()
+    find_program(SCAV_CLANG_TIDY_EXE NAMES clang-tidy REQUIRED)
+  endif()
   set(CMAKE_CXX_CLANG_TIDY "${SCAV_CLANG_TIDY_EXE}" "--warnings-as-errors=*")
   # An upstream clang-tidy has no default macOS sysroot, so every diagnostic
   # arrives as a missing standard header instead of the finding it looked for.

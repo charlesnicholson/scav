@@ -73,7 +73,7 @@ TEST_CASE("sort: equal keys keep insertion order") {
   std::vector<Row> rows;
   rows.reserve(512);
   for (uint32_t i = 0; i < 512; ++i) {
-    rows.push_back({ static_cast<uint32_t>(rnd(2, i) % 5U), i });
+    rows.push_back({ .key = static_cast<uint32_t>(rnd(2, i) % 5U), .seq = i });
   }
   std::vector<Row> oracle{ rows };
   std::ranges::stable_sort(oracle, by_key);

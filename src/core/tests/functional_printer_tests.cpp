@@ -29,7 +29,9 @@ struct CorpusChart {
 };
 
 std::vector<CorpusChart> corpus() {
-  return { { "vac", VAC }, { "tcp", TCP }, { "ota", OTA } };
+  return { { .name = "vac", .text = VAC },
+           { .name = "tcp", .text = TCP },
+           { .name = "ota", .text = OTA } };
 }
 
 // The model as text, in array order, with each subject's attributes sorted --

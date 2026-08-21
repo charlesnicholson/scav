@@ -2,7 +2,7 @@
 -- generates lives under out/, so the package cache does too.
 
 -- @envy schema "1"
--- @envy version "0.1.2"
+-- @envy version "0.1.9"
 -- @envy bin "bin"
 -- @envy cache-posix "out/.envy"
 -- @envy cache-win "out\.envy"
@@ -26,4 +26,11 @@ PACKAGES = {
   { spec = "envy.python@r1", bundle = "envy",
     options = { version = "3.14.6", release = "20260623",
                 provide_python = true, provide_python3 = true } },
+
+  -- Both gates, pinned here rather than installed by the job that runs them, so
+  -- the version judging a diff is the version in this file. LLVM ships no darwin
+  -- prebuilt, so darwin compiles clang once and caches it like any other package.
+  { spec = "scav.clang-tools@r0",
+    source = envy.abspath("envy") .. "/scav.clang-tools.lua",
+    options = { version = "22.1.8", tools = { "clang-format", "clang-tidy" } } },
 }
