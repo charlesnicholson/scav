@@ -3,11 +3,12 @@
 
 #include "scav/scav_core_c.h"
 
+#include "core/c_api_internal.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 
 #include <cstdint>
-#include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -20,25 +21,6 @@ scav_pending to_abi(scav::Pending const &p) {
            .stmt_row = p.stmt_row };
 }
 
-}  // namespace
-
-// Complete here and opaque everywhere else, so no C++ member can reach a
-// caller's translation unit.
-struct scav_load {
-  scav::Loader loader;
-  std::vector<scav::Diagnostic> diags;  // the loader's, plus finish's
-  std::vector<scav_pending> pending;
-  uint32_t finished;
-};
-
-// No cached digest: scav_chart_digest recomputes, so a stored copy could only
-// go stale.
-struct scav_chart {
-  scav::Chart chart;
-};
-
-namespace {
-
 // Whichever diagnostic vector is current: the loader's before finish, the
 // handle's after. Outside extern "C", which forbids returning a std:: type.
 std::vector<scav::Diagnostic> const &diags_of(scav_load const *loader) {
@@ -49,7 +31,7 @@ std::vector<scav::Diagnostic> const &diags_of(scav_load const *loader) {
 
 extern "C" {
 
-uint32_t scav_abi_version(void) { return 2; }
+uint32_t scav_abi_version(void) { return 3; }
 
 scav_result scav_load_begin(scav_load **out) {
   if (out == nullptr) { return SCAV_E_INVALID_ARG; }
@@ -181,6 +163,25 @@ scav_result scav_chart_counts(scav_chart const *chart,
   *out_submachines = static_cast<uint32_t>(chart->chart.submachines.size());
   *out_transitions = static_cast<uint32_t>(chart->chart.transitions.size());
   *out_includes = static_cast<uint32_t>(chart->chart.includes.size());
+  return SCAV_OK;
+}
+
+scav_result scav_chart_diag_count(scav_chart const *chart, uint32_t *out_count) {
+  if ((chart == nullptr) || (out_count == nullptr)) { return SCAV_E_INVALID_ARG; }
+  *out_count = static_cast<uint32_t>(chart->diags.size());
+  return SCAV_OK;
+}
+
+scav_result scav_chart_diag(scav_chart const *chart, uint32_t index, scav_diag *out) {
+  if ((chart == nullptr) || (out == nullptr)) { return SCAV_E_INVALID_ARG; }
+  if (index >= chart->diags.size()) { return SCAV_E_INVALID_ARG; }
+  scav::Diagnostic const &d{ chart->diags[index] };
+  *out = { .code = static_cast<uint32_t>(d.code),
+           .subject_kind = static_cast<uint32_t>(d.subject.kind),
+           .subject_ordinal = d.subject.ordinal,
+           .doc = d.doc.v,
+           .off = d.src.off,
+           .len = d.src.len };
   return SCAV_OK;
 }
 

@@ -3,6 +3,9 @@
 
 #include "scav/scav_core_c.h"
 
+#include "core/c_api_internal.h"
+#include "scav/scav_core.h"
+
 #include "doctest.h"
 
 #include <cstdint>
@@ -291,4 +294,55 @@ TEST_CASE("abi: two loaders in one process do not share state") {
   scav_chart_destroy(a);
   scav_chart_destroy(b);
   scav_load_destroy(second_loader);
+}
+
+TEST_CASE("abi: a fresh chart carries no diagnostics") {
+  scav_load *loader{ nullptr };
+  scav_chart *chart{ drive(diamond(), &loader) };
+  REQUIRE(chart != nullptr);
+
+  uint32_t count{ 99 };
+  REQUIRE(scav_chart_diag_count(chart, &count) == SCAV_OK);
+  CHECK(count == 0);
+
+  scav_diag d{};
+  CHECK(scav_chart_diag(chart, 0, &d) == SCAV_E_INVALID_ARG);
+
+  CHECK(scav_chart_diag_count(nullptr, &count) == SCAV_E_INVALID_ARG);
+  CHECK(scav_chart_diag_count(chart, nullptr) == SCAV_E_INVALID_ARG);
+  CHECK(scav_chart_diag(nullptr, 0, &d) == SCAV_E_INVALID_ARG);
+  CHECK(scav_chart_diag(chart, 0, nullptr) == SCAV_E_INVALID_ARG);
+
+  scav_chart_destroy(chart);
+  scav_load_destroy(loader);
+}
+
+TEST_CASE("abi: a chart diagnostic reads back field for field") {
+  scav_load *loader{ nullptr };
+  scav_chart *chart{ drive(diamond(), &loader) };
+  REQUIRE(chart != nullptr);
+
+  // Planted through the internal definition, the way layout and validation
+  // will write them; the C caller sees only the flat struct.
+  chart->diags.push_back({ .code = scav::DiagCode::DanglingRef,
+                           .subject = { .kind = scav::ElemKind::State, .ordinal = 7 },
+                           .doc = { 2 },
+                           .src = { .off = 11, .len = 5 } });
+
+  uint32_t count{ 0 };
+  REQUIRE(scav_chart_diag_count(chart, &count) == SCAV_OK);
+  REQUIRE(count == 1);
+
+  scav_diag d{};
+  REQUIRE(scav_chart_diag(chart, 0, &d) == SCAV_OK);
+  CHECK(d.code == static_cast<uint32_t>(scav::DiagCode::DanglingRef));
+  CHECK(d.subject_kind == static_cast<uint32_t>(scav::ElemKind::State));
+  CHECK(d.subject_ordinal == 7);
+  CHECK(d.doc == 2);
+  CHECK(d.off == 11);
+  CHECK(d.len == 5);
+  CHECK(scav_diag_message(d.code) != nullptr);
+
+  scav_chart_destroy(chart);
+  scav_load_destroy(loader);
 }

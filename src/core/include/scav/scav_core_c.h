@@ -110,6 +110,25 @@ scav_result scav_chart_digest(scav_chart const *chart,
                               uint32_t cap,
                               uint32_t *out_count);
 
+/* A finding from an operation on an existing chart -- validation, layout. A
+ * producer running before entities exist fills (doc, off, len); one running
+ * after fills the subject, and a position is derived by walking to the
+ * subject's statement. 24 bytes, no padding. */
+/* NOLINTNEXTLINE(modernize-use-using) */
+typedef struct {
+  uint32_t code; /* scav_diag_message renders it */
+  uint32_t subject_kind;
+  uint32_t subject_ordinal;
+  uint32_t doc;
+  uint32_t off, len;
+} scav_diag;
+
+/* The latest operation's findings, owned by the chart and overwritten at each
+ * operation's entry. The loader's own diagnostics stay on the loader: a failed
+ * load leaves no chart to carry them. */
+scav_result scav_chart_diag_count(scav_chart const *chart, uint32_t *out_count);
+scav_result scav_chart_diag(scav_chart const *chart, uint32_t index, scav_diag *out);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
