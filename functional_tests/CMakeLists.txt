@@ -101,6 +101,9 @@ scav_add_functional_test(deps
           "$<TARGET_FILE:scav>"
   TARGETS scav
 )
+# Green while src/layout/ is empty. When layout lands, its sources join
+# DEPENDS so an edit re-runs the check.
+scav_add_functional_test(include_subset)
 scav_add_functional_test(presets
   DEPENDS "${PROJECT_SOURCE_DIR}/CMakePresets.json"
           "${PROJECT_SOURCE_DIR}/tools/gen_presets.py"
