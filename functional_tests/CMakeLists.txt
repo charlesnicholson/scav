@@ -111,6 +111,9 @@ scav_add_functional_test(include_subset
           "${PROJECT_SOURCE_DIR}/src/layout/router_tests.cpp"
           "${PROJECT_SOURCE_DIR}/src/layout/spaces.cpp"
           "${PROJECT_SOURCE_DIR}/src/layout/spaces_tests.cpp"
+          "${PROJECT_SOURCE_DIR}/src/layout/split.cpp"
+          "${PROJECT_SOURCE_DIR}/src/layout/split.h"
+          "${PROJECT_SOURCE_DIR}/src/layout/split_tests.cpp"
 )
 scav_add_functional_test(presets
   DEPENDS "${PROJECT_SOURCE_DIR}/CMakePresets.json"

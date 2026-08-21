@@ -5,6 +5,7 @@ scav_static_library(scavlayout
   profile.cpp
   router.cpp
   spaces.cpp
+  split.cpp
 )
 scav_install_library(scavlayout layout)
 target_link_libraries(scavlayout PUBLIC scavcore)
@@ -19,6 +20,7 @@ if(SCAV_BUILD_TESTS)
     profile_tests.cpp
     router_tests.cpp
     spaces_tests.cpp
+    split_tests.cpp
   )
   target_link_libraries(scav_layout_tests PRIVATE scavlayout_testable)
 endif()

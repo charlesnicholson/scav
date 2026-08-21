@@ -77,7 +77,7 @@ bool spaces_validate(Chart const &c, scav_spaces const &s, std::vector<Diagnosti
     for (uint32_t i = 0; i < s.n_path_box; ++i) {
       scav_path_box const &box{ s.path_box[i] };
       uint32_t subject{ box.subject };
-      if ((subject >= transitions) || !c.transitions[subject].live) {
+      if ((subject >= transitions) || (c.transitions[subject].live == 0)) {
         report(found, DiagCode::SpaceSubjectInvalid, ElemKind::Transition,
              (subject >= transitions) ? INVALID : subject);
         subject = INVALID;
