@@ -1,7 +1,7 @@
 // The C API driven as C: handles, out-params, error codes. Runs under the
 // sanitizers, where a handle-lifetime mistake shows up.
 
-#include "scav/scav_c.h"
+#include "scav/scav_core_c.h"
 
 #include "doctest.h"
 

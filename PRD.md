@@ -115,7 +115,7 @@ Mirrors `~/src/envy`: SHA-pinned deps under `cmake/deps/`, unit tests adjacent t
 
 ```
 include/scav/          the cross-library vocabulary: POD spellings, no functions
-src/<lib>/include/scav/  that library's public API: `scav_<lib>.h`, plus `scav_c.h`
+src/<lib>/include/scav/  that library's public API: `scav_<lib>.h`, plus `scav_<lib>_c.h`
                        where it projects a C surface. A C header is a second language,
                        not a second place to look for the same symbol
 src/scav_*.h           determinism primitives that belong to no subsystem: the vendored
@@ -1328,7 +1328,7 @@ typedef struct { int32_t x, y, w, h; } scav_rect;   // also the Placed type (§8
 typedef scav_rect scav_placed;
 ```
 
-**"ABI" names the property, not a component.** The component is each library's C API — `src/<lib>/c_api.cpp` against `src/<lib>/include/scav/scav_c.h` — and the ABI is what that surface guarantees: calling convention, struct layout, the extracted JSON. Every library projects its own C API at its own root, and the shared object links them; there is no directory that owns "the ABI".
+**"ABI" names the property, not a component.** The component is each library's C API — `src/<lib>/c_api.cpp` against `src/<lib>/include/scav/scav_<lib>_c.h` — every library's headers install into one `include/scav/`, so the C header carries the library's name — and the ABI is what that surface guarantees: calling convention, struct layout, the extracted JSON. Every library projects its own C API at its own root, and the shared object links them; there is no directory that owns "the ABI".
 
 **A slice of this lands with P2, ahead of the rest.** §17's P2 gate requires the loader driven from Python over ctypes, so `scav_load_*`, `scav_chart_destroy`, and enough of a chart to compare two — counts, the structural hash, the digest under the out-param protocol — ship then, along with the one shared object a binding can actually load. The reason is not schedule: if driving a no-callback loader from a foreign runtime were awkward, §16.1's central claim would be wrong, and that is worth learning before four more phases are built on it. The lifecycle rules below bind from **P3**, though only two of the five handles exist to obey them there. Column access lands with the geometry columns a binding must read (**P4**), and the extracted ABI JSON with the surface it describes (**P5c**) — generating bindings against a surface four phases from complete means generating them four more times.
 

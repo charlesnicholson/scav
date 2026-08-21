@@ -1,7 +1,7 @@
 // Compiled with exceptions and RTTI on against archives built without either,
 // reaching every public header with only the install prefix on the path.
 
-#include <scav/scav_c.h>
+#include <scav/scav_core_c.h>
 #include <scav/scav_core.h>
 #include <scav/scav_types.h>
 

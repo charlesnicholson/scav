@@ -1,7 +1,7 @@
 // The C projection of scav_core.h. Each function converts its arguments, calls
 // one core function, and converts the result; a handle owns its C++ objects.
 
-#include "scav/scav_c.h"
+#include "scav/scav_core_c.h"
 
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"

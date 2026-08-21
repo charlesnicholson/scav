@@ -1,5 +1,5 @@
-#ifndef SCAV_C_H_INCLUDED
-#define SCAV_C_H_INCLUDED
+#ifndef SCAV_CORE_C_H_INCLUDED
+#define SCAV_CORE_C_H_INCLUDED
 
 /* libscavcore's C API, and the ABI a binding is generated against: flat
  * extern "C", opaque handles, POD structs, out-params, error enums.
@@ -114,4 +114,4 @@ scav_result scav_chart_digest(scav_chart const *chart,
 } /* extern "C" */
 #endif
 
-#endif /* SCAV_C_H_INCLUDED */
+#endif /* SCAV_CORE_C_H_INCLUDED */
