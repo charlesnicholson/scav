@@ -23,19 +23,20 @@ SOURCE_SUFFIXES: tuple[str, ...] = (".h", ".cpp")
 
 
 def clang_format() -> str:
-    """envy's launcher first, and it bootstraps envy and the package if neither
-    is there. PATH is for a tree built without envy at all."""
-    launcher = REPO_ROOT / "bin" / ("clang-format.bat" if os.name == "nt"
-                                    else "clang-format")
-    if launcher.is_file():
-        probe = subprocess.run([str(launcher), "--version"], capture_output=True)
-        if probe.returncode == 0:
-            return str(launcher)
-    if found := shutil.which("clang-format"):
-        return found
+    """envy's copy, whose version envy.lua pins, so a diff reads the same
+    everywhere. It sits behind SCAV_LINT, so the query fails fast without it --
+    which is what the PATH fallback is for."""
+    envy = REPO_ROOT / "bin" / ("envy.bat" if os.name == "nt" else "envy")
+    if envy.is_file():
+        found = subprocess.run([str(envy), "product", "clang-format"],
+                               capture_output=True, text=True)
+        if found.returncode == 0 and (path := found.stdout.strip()):
+            return path
+    if on_path := shutil.which("clang-format"):
+        return on_path
     raise SystemExit(
-        "no clang-format: neither bin/clang-format nor one on PATH. envy.lua "
-        "pins the version the gate reads, so prefer `envy sync` over your own."
+        "no clang-format. Set SCAV_LINT=1 for envy's pinned copy, or put one "
+        "on PATH; without either, the gate is CI's."
     )
 
 

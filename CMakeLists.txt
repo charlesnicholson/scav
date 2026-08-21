@@ -98,17 +98,18 @@ scav_coverage_init()
 scav_testing_init()
 
 if(SCAV_CLANG_TIDY)
-  # envy's launcher when it runs, since envy.lua pins the version whose findings
-  # the gate is calibrated against. Probed rather than assumed: the launcher is
-  # checked in, so its presence says nothing about whether the package installs.
-  set(scav_tidy "${PROJECT_SOURCE_DIR}/bin/clang-tidy")
+  # envy's copy, whose version envy.lua pins. It sits behind SCAV_LINT, so
+  # without that the query fails and PATH answers instead.
   if(WIN32)
-    set(scav_tidy "${scav_tidy}.bat")
+    set(scav_envy "${PROJECT_SOURCE_DIR}/bin/envy.bat")
+  else()
+    set(scav_envy "${PROJECT_SOURCE_DIR}/bin/envy")
   endif()
-  execute_process(COMMAND "${scav_tidy}" --version
-    RESULT_VARIABLE scav_tidy_probe OUTPUT_QUIET ERROR_QUIET
+  execute_process(COMMAND "${scav_envy}" product clang-tidy
+    RESULT_VARIABLE scav_tidy_found
+    OUTPUT_VARIABLE scav_tidy OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET
   )
-  if(scav_tidy_probe EQUAL 0)
+  if(scav_tidy_found EQUAL 0 AND EXISTS "${scav_tidy}")
     set(SCAV_CLANG_TIDY_EXE "${scav_tidy}")
   else()
     find_program(SCAV_CLANG_TIDY_EXE NAMES clang-tidy REQUIRED)

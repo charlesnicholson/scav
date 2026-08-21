@@ -26,11 +26,17 @@ PACKAGES = {
   { spec = "envy.python@r1", bundle = "envy",
     options = { version = "3.14.6", release = "20260623",
                 provide_python = true, provide_python3 = true } },
-
-  -- Both gates, pinned here rather than installed by the job that runs them, so
-  -- the version judging a diff is the version in this file. LLVM ships no darwin
-  -- prebuilt, so darwin compiles clang once and caches it like any other package.
-  { spec = "scav.clang-tools@r0",
-    source = envy.abspath("envy") .. "/scav.clang-tools.lua",
-    options = { version = "22.1.8", tools = { "clang-format", "clang-tidy" } } },
 }
+
+-- The lint gates, behind SCAV_LINT because nothing compiles with them: an
+-- ordinary build, and every CI row but the lint one, never downloads a
+-- toolchain it would not use. Set the variable to run the gates anywhere,
+-- which on darwin means compiling clang once. Pinned rather than installed by
+-- the job, so the version judging a diff is the version in this file.
+if os.getenv("SCAV_LINT") then
+  envy.extend(PACKAGES, {
+    { spec = "scav.clang-tools@r0",
+      source = envy.abspath("envy") .. "/scav.clang-tools.lua",
+      options = { version = "22.1.8", tools = { "clang-format", "clang-tidy" } } },
+  })
+end

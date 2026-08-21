@@ -1,9 +1,0 @@
-@echo off
-rem envy-managed schema "1"
-for /f "delims=" %%i in ('call "%~dp0envy.bat" product "clang-tidy"') do set "PRODUCT_PATH=%%i"
-if not defined PRODUCT_PATH (
-    echo envy: failed to resolve product 'clang-tidy' 1>&2
-    exit /b 1
-)
-call "%PRODUCT_PATH%" %*
-exit /b %ERRORLEVEL%

@@ -231,6 +231,10 @@ jobs:
     name: clang-format and clang-tidy
     runs-on: ubuntu-latest
     container: ghcr.io/charlesnicholson/docker-image:latest
+    # The one job that provisions the clang tools; nothing else compiles with
+    # them, so no other row pays to download a toolchain.
+    env:
+      SCAV_LINT: 1
     steps:
       - name: Install what the image lacks
         run: |
@@ -241,7 +245,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: out/.envy
-          key: envy-lint-${{ hashFiles('envy.lua') }}
+          key: envy-lint-${{ hashFiles('envy.lua', 'envy/*.lua') }}
 
       - name: clang-format --check
         run: "$(./bin/envy product python3) tools/format.py --check"
