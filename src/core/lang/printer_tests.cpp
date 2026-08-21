@@ -46,6 +46,13 @@ TEST_CASE("print: a document that produced no statements prints nothing") {
   CHECK(out.empty());
 }
 
+TEST_CASE("print: is_canonical means already canonical, not merely convergent") {
+  // The helper printed first and compared the two passes, which every input
+  // satisfies -- so it answered true for text the printer would rewrite.
+  CHECK_FALSE(is_canonical("chart c { s A, }"));
+  CHECK(is_canonical("chart c {\n  state A,\n}\n"));
+}
+
 // Rule 1 -- keyword spelling ================================================
 
 TEST_CASE("print: s, m and t normalize to their long spellings") {
