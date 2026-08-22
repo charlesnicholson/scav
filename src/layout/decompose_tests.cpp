@@ -1,5 +1,5 @@
-// Phase 0 against hand-written charts: split counts, port and frame sequences,
-// the kind rules, and the concurrent direct arrow.
+// Decomposition against hand-written charts: split counts, port and frame
+// sequences, the kind rules, and the concurrent direct arrow.
 
 #include "layout/decompose.h"
 #include "scav/scav_core.h"
@@ -34,7 +34,7 @@ TEST_CASE("split: a sibling transition is one segment in the shared frame") {
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   build_trans(c, a, b, TransKind::External, {});
 
-  SplitGraph const g{ phase0_split(c) };
+  SplitGraph const g{ decompose(c) };
   CHECK(g.ports.empty());
   REQUIRE(segs_of(g, 0).len == 1);
   CHECK(seg(g, 0, 0) == SplitSegment{ .trans = { 0 },
@@ -56,7 +56,7 @@ TEST_CASE("split: exiting a composite splits once at its border") {
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
   build_trans(c, s, d, TransKind::External, {});
 
-  SplitGraph const g{ phase0_split(c) };
+  SplitGraph const g{ decompose(c) };
   REQUIRE(segs_of(g, 0).len == 2);
   CHECK(seg(g, 0, 0).frame == inner);
   CHECK(seg(g, 0, 1).frame == root);
@@ -82,7 +82,7 @@ TEST_CASE("split: exits run innermost-out, enters outermost-in, frames follow") 
   StateId const d{ build_state(c, n1, "D", StateKind::Normal, {}) };
   build_trans(c, s, d, TransKind::External, {});
 
-  SplitGraph const g{ phase0_split(c) };
+  SplitGraph const g{ decompose(c) };
   REQUIRE(segs_of(g, 0).len == 4);
   CHECK(dst_port(g, 0, 0).state == c2);  // innermost exit first
   CHECK(dst_port(g, 0, 1).state == c1);
@@ -106,7 +106,7 @@ TEST_CASE("split: kind decides whether the source border splits") {
   build_trans(c, comp, child, TransKind::Internal, {});
   build_trans(c, comp, child, TransKind::Local, {});
 
-  SplitGraph const g{ phase0_split(c) };
+  SplitGraph const g{ decompose(c) };
 
   // External exits and re-enters: a port on the source's own border.
   REQUIRE(segs_of(g, 0).len == 2);
@@ -133,7 +133,7 @@ TEST_CASE("split: self-transitions route outside or not at all") {
   build_trans(c, a, a, TransKind::Internal, {});
   build_trans(c, a, a, TransKind::Local, {});
 
-  SplitGraph const g{ phase0_split(c) };
+  SplitGraph const g{ decompose(c) };
   REQUIRE(segs_of(g, 0).len == 1);  // the loop outside, in the parent frame
   CHECK(seg(g, 0, 0).frame == root);
   CHECK(segs_of(g, 1).len == 0);  // the app draws these inside the box
@@ -151,7 +151,7 @@ TEST_CASE("split: concurrent siblings get a direct arrow through the separator")
   StateId const b{ build_state(c, m2, "b", StateKind::Normal, {}) };
   build_trans(c, a, b, TransKind::External, {});
 
-  SplitGraph const g{ phase0_split(c) };
+  SplitGraph const g{ decompose(c) };
   REQUIRE(segs_of(g, 0).len == 3);
   CHECK(dst_port(g, 0, 0).sub == m1);
   CHECK(dst_port(g, 0, 1).sub == m2);
@@ -180,7 +180,7 @@ TEST_CASE("split: a deep exit pulls on every ancestor it crosses") {
   build_trans(c, leaf, top, TransKind::External, {});
   build_trans(c, leaf, top, TransKind::External, {});
 
-  SplitGraph const g{ phase0_split(c) };
+  SplitGraph const g{ decompose(c) };
   CHECK(g.state_depth[leaf.v] == DEPTH);
   for (uint32_t t : { 0U, 1U }) {
     CAPTURE(t);
@@ -201,7 +201,7 @@ TEST_CASE("split: a transition into an enclosing composite stops on its inner fa
   StateId const s{ build_state(c, m_mid, "S", StateKind::Normal, {}) };
   build_trans(c, s, outer, TransKind::External, {});
 
-  SplitGraph const g{ phase0_split(c) };
+  SplitGraph const g{ decompose(c) };
   REQUIRE(segs_of(g, 0).len == 2);  // exits mid only; the endpoint is outer itself
   CHECK(dst_port(g, 0, 0).state == mid);
   CHECK(seg(g, 0, 0).frame == m_mid);
@@ -222,15 +222,15 @@ TEST_CASE("split: tombstones drop out and identical charts split identically") {
   Chart c1{ build() };
   Chart const c2{ build() };
 
-  SplitGraph const g1{ phase0_split(c1) };
-  SplitGraph const g2{ phase0_split(c2) };
+  SplitGraph const g1{ decompose(c1) };
+  SplitGraph const g2{ decompose(c2) };
   CHECK(g1.ports == g2.ports);
   CHECK(g1.segments == g2.segments);
   CHECK(g1.trans_segments == g2.trans_segments);
   CHECK(g1.state_crossings == g2.state_crossings);
 
   c1.transitions[1].live = 0;
-  SplitGraph const g3{ phase0_split(c1) };
+  SplitGraph const g3{ decompose(c1) };
   CHECK(segs_of(g3, 0).len == 1);
   CHECK(segs_of(g3, 1).len == 0);
 }
@@ -327,7 +327,7 @@ TEST_CASE("split: every endpoint pair and kind holds the route invariants") {
     }
   }
 
-  SplitGraph const g{ phase0_split(c) };
+  SplitGraph const g{ decompose(c) };
   for (uint32_t t = 0; t < c.transitions.size(); ++t) {
     CAPTURE(t);
     check_route(c, g, t);
@@ -359,7 +359,7 @@ TEST_CASE("split: intermediate borders split even when the source's does not") {
   build_trans(c, comp, grand, TransKind::Internal, {});
   build_trans(c, comp, grand, TransKind::Local, {});
 
-  SplitGraph const g{ phase0_split(c) };
+  SplitGraph const g{ decompose(c) };
 
   REQUIRE(segs_of(g, 0).len == 3);  // external: source border plus the child's
   CHECK(dst_port(g, 0, 0).state == comp);
@@ -390,7 +390,7 @@ TEST_CASE("split: a shallow source enters a deep target outermost first") {
   StateId const grand{ build_state(c, km, "G", StateKind::Normal, {}) };
   build_trans(c, a, grand, TransKind::External, {});
 
-  SplitGraph const g{ phase0_split(c) };
+  SplitGraph const g{ decompose(c) };
   REQUIRE(segs_of(g, 0).len == 3);
   CHECK(dst_port(g, 0, 0).state == outer);
   CHECK(dst_port(g, 0, 1).state == kid);
@@ -417,7 +417,7 @@ TEST_CASE("split: a nested concurrent crossing exits, crosses, and enters") {
   StateId const q1{ build_state(c, qm, "Q1", StateKind::Normal, {}) };
   build_trans(c, p1, q1, TransKind::External, {});
 
-  SplitGraph const g{ phase0_split(c) };
+  SplitGraph const g{ decompose(c) };
   REQUIRE(segs_of(g, 0).len == 5);
   CHECK(dst_port(g, 0, 0).state == p);  // exit
   CHECK(dst_port(g, 0, 1).sub == m1);   // separator, both sides
@@ -447,7 +447,7 @@ TEST_CASE("split: siblings deep inside one composite meet in its region") {
   StateId const y1{ build_state(c, ym, "y1", StateKind::Normal, {}) };
   build_trans(c, x1, y1, TransKind::External, {});
 
-  SplitGraph const g{ phase0_split(c) };
+  SplitGraph const g{ decompose(c) };
   REQUIRE(segs_of(g, 0).len == 3);
   CHECK(seg(g, 0, 1).frame == nm);  // the common frame is nested, not the root
   CHECK(seg(g, 0, 1).separator == 0);
@@ -456,7 +456,7 @@ TEST_CASE("split: siblings deep inside one composite meet in its region") {
 
 TEST_CASE("split: degenerate inputs are sized, empty, and skipped") {
   Chart empty;
-  SplitGraph const g0{ phase0_split(empty) };
+  SplitGraph const g0{ decompose(empty) };
   CHECK(g0.ports.empty());
   CHECK(g0.segments.empty());
   CHECK(g0.trans_segments.empty());
@@ -476,7 +476,7 @@ TEST_CASE("split: degenerate inputs are sized, empty, and skipped") {
   c.transitions[1].src = { INVALID };
   c.states[b.v].live = 0;
 
-  SplitGraph const g{ phase0_split(c) };
+  SplitGraph const g{ decompose(c) };
   REQUIRE(segs_of(g, 0).len == 1);  // the loop routes outside, no ports
   CHECK(seg(g, 0, 0).frame == root);
   CHECK(g.ports.empty());
@@ -513,7 +513,7 @@ TEST_CASE("split: a loaded network splits across its include host") {
   StateId const host{ c.submachines[c.states[l.v].parent.v].owner };
   REQUIRE(host.v != INVALID);
 
-  SplitGraph const g{ phase0_split(c) };
+  SplitGraph const g{ decompose(c) };
   for (uint32_t t = 0; t < c.transitions.size(); ++t) {
     CAPTURE(t);
     check_route(c, g, t);

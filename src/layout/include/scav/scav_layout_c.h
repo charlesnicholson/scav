@@ -119,7 +119,7 @@ typedef struct {
 typedef struct {
   scav_profile profile;
   scav_router_id router;
-  uint32_t threads; /* scheduling only; ignored until the thread shim lands */
+  uint32_t threads; /* scheduling only; ignored */
 } scav_layout_opts;
 
 /* Validates the profile and spaces, runs layout, writes the geometry columns,

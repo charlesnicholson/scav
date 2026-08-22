@@ -1,5 +1,5 @@
-# Space tables, profile, and the router registry -- what layout consumes; the
-# phases land beside them.
+# The layout library: its input contracts, the decomposition, and the
+# pipeline that writes the geometry columns.
 scav_static_library(scavlayout
   c_api.cpp
   layout.cpp

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Renders `scav dump --layout --json` as a standalone SVG-in-HTML page, for
-eyeballing skeleton layouts before the real renderer exists. Throwaway by
-design: dies when `scav render` lands at P5b.
+eyeballing layouts. Throwaway: superseded by `scav render` once that exists.
 
     python3 tools/scratch_viewer.py test_data/charts/vac.scav > /tmp/vac.html
 """

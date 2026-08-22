@@ -1,5 +1,5 @@
-// The skeleton pipeline: exact rects from the box formula, stacking, routes,
-// placed boxes, the columns, the hash split, and a geometry invariant sweep.
+// Exact rects from the box formula, stacking, routes, placed boxes, the
+// columns, the hash split, and a geometry invariant sweep.
 
 #include "layout/decompose.h"
 #include "scav/scav_core.h"
@@ -479,7 +479,7 @@ namespace {
 
 // The invariants any laid-out chart owes, checked from the columns alone.
 void check_geometry(Chart const &c) {
-  SplitGraph const g{ phase0_split(c) };
+  SplitGraph const g{ decompose(c) };
   scav_rect const chart_box{ row_of<scav_rect>(c, "scav.geom.chart", 0) };
 
   for (uint32_t i = 0; i < c.states.size(); ++i) {
@@ -644,9 +644,9 @@ TEST_CASE("layout: the coordinate extent estimate holds under fat text") {
                        .n_box_state = static_cast<uint32_t>(boxes.size()) };
   run(c, s, readable());
 
-  // Measured at the skeleton: 181120 x 277888 -- inside the domain with 1.9x
-  // headroom on the tall axis, so the 1/16 pt grid stands. Real packing only
-  // shrinks this; the bar below trips if a regression eats the margin.
+  // Measured: 181120 x 277888 -- inside the domain with 1.9x headroom on the
+  // tall axis, so the 1/16 pt grid stands. The bar below trips when a change
+  // eats the margin.
   scav_rect const extent{ row_of<scav_rect>(c, "scav.geom.chart", 0) };
   MESSAGE("2k-state fat-text extent: ", extent.w, " x ", extent.h, " of ",
           COORD_MAX, " grid units");

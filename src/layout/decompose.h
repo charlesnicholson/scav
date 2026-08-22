@@ -1,8 +1,8 @@
 #ifndef SCAV_LAYOUT_DECOMPOSE_H_INCLUDED
 #define SCAV_LAYOUT_DECOMPOSE_H_INCLUDED
 
-// Phase 0: split every transition at each boundary it crosses, so each segment
-// is local to one submachine frame. Internal POD; nothing here crosses the ABI.
+// Splits every transition at each boundary it crosses, so each segment is
+// local to one submachine frame. Internal POD; nothing here crosses the ABI.
 
 #include "scav/scav_core.h"
 
@@ -44,7 +44,7 @@ struct SplitGraph {
 
 // A pure function of the model: no-route transitions (internal or local
 // self-transitions) get an empty span, tombstones are skipped.
-SplitGraph phase0_split(Chart const &c);
+SplitGraph decompose(Chart const &c);
 
 }  // namespace scav
 

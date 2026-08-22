@@ -18,7 +18,7 @@ sys.path.insert(0, str(HERE))
 
 import scavtest  # noqa: E402
 
-# Transcribed from the PRD on purpose: a test that derives its expectation from
+# Transcribed on purpose: a test that derives its expectation from
 # the thing under test is worth nothing.
 ALLOWED_SYSTEM = {
     "cstdint", "bit", "limits", "vector", "array", "utility", "type_traits",

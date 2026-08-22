@@ -86,8 +86,8 @@ scav_add_functional_test(load
           "$<TARGET_FILE:scav>"
   TARGETS scav_shared scav
 )
-# The P4 exit gate: layout driven from Python over ctypes, geometry read back
-# through the column accessor.
+# Layout driven from Python over ctypes, geometry read back through the
+# column accessor.
 scav_add_functional_test(layout
   DEPENDS "${PROJECT_SOURCE_DIR}/test_data/charts/brew.scav"
           "$<TARGET_FILE:scav_shared>"

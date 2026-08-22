@@ -30,7 +30,7 @@ void put_text(std::vector<scav_byte> &out, std::string_view text) {
 // Key bytes, never the interned id. An AttrKeyId is first-encounter order, so
 // two producers of one model can hold different ids for the same key.
 // Sorted by key bytes, stably, so a repeated key keeps insertion order -- the
-// ordering PRD 15's rule seven prints and PRD 7 requires of anything canonical.
+// same ordering the canonical printer emits.
 // Span order is insertion order, which is first-encounter, so two producers of
 // one model would disagree: an authored file and its `scav fmt` output do.
 void put_attrs(std::vector<scav_byte> &out, Chart const &c, Span attrs) {

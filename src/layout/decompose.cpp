@@ -32,7 +32,7 @@ struct Crossing {
 
 }  // namespace
 
-SplitGraph phase0_split(Chart const &c) {
+SplitGraph decompose(Chart const &c) {
   SplitGraph g;
   g.state_depth.assign(c.states.size(), 0);
   for (uint32_t s = 0; s < c.states.size(); ++s) {

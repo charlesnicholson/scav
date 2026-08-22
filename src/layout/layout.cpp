@@ -1,6 +1,6 @@
-// The skeleton pipeline: sizes composed bottom-up by the box formula, boxes
-// stacked top-down in document order, straight-line routes through phase 0's
-// ports, and the geometry columns as the only output.
+// Sizes composed bottom-up by the box formula, boxes stacked top-down in
+// document order, straight-line routes through the decomposition's ports, and
+// the geometry columns as the only output.
 
 #include "layout/decompose.h"
 #include "layout/wire.h"
@@ -365,7 +365,7 @@ bool layout_run(Chart &c,
   }
   if (!spaces_validate(c, s, diags)) { return false; }
 
-  SplitGraph const g{ phase0_split(c) };
+  SplitGraph const g{ decompose(c) };
   Geometry geo;
   if (!size_boxes(c, g, s, p, geo, diags)) { return false; }
   place_boxes(c, s, p, geo);

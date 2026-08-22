@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""The P4 exit gate: a Python caller runs layout through the shared library
-and reads geometry columns back through the three-call accessor."""
+"""A Python caller runs layout through the shared library and reads geometry
+columns back through the three-call accessor."""
 
 import ctypes
 import sys
@@ -128,8 +128,7 @@ class TestLayoutOverCtypes(unittest.TestCase):
         )
         self.assertEqual(0, placed.value)  # no path boxes were requested
 
-        # The exit gate: geometry columns through the accessor, typed by the
-        # caller, exactly as a generated binding would.
+        # Geometry columns through the accessor, typed by the caller.
         raw, stride, rows = self.column(chart, b"scav.geom.state")
         self.assertEqual(ctypes.sizeof(Rect), stride)
         self.assertEqual(n_states, rows)

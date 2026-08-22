@@ -40,11 +40,10 @@ bool profile_validate(scav_profile const &p);
 
 // Layout ====================================================================
 
-// The skeleton pipeline over phase 0's split: the box formula bottom-up,
-// document-order stacking top-down, straight-line routes through the ports.
-// Writes the geometry columns and sizes `placed` to the path boxes. False
-// leaves the columns holding the last successful run, findings sorted like
-// every validator's.
+// Decomposes, sizes, places, and routes: the box formula bottom-up,
+// document-order stacking top-down, straight lines through the ports. Writes
+// the geometry columns and sizes `placed` to the path boxes. False leaves the
+// columns holding the last successful run, findings sorted like a validator's.
 bool layout_run(Chart &c,
                 scav_spaces const &s,
                 scav_profile const &p,
