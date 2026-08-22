@@ -1568,7 +1568,7 @@ scav is MIT or Apache-2.0. Verified from LICENSE bytes; GitHub's detected field 
 | Adaptagrams (libavoid, libcola, libvpsc, …) | LGPL-2.1-or-later, uniformly | dynamic link only, or buy Monash's commercial license |
 | OGDF | GPL-2.0/3.0 | **blocker** — its exception is outbound-only |
 | Graphviz ≥14.1.4 | EPL-2.0, no Secondary License | cleanest, but `dot` is weak on compound graphs |
-| the bundled TTF | **[OPEN]** — must be OFL-1.1 or public domain | a layout-hash input, so it is redistributed inside the library (§16.1) |
+| the bundled TTF | JetBrains Mono 2.304 Regular, OFL-1.1, verified from `assets/font/OFL.txt` bytes | a layout-hash input, so it is redistributed inside the library (§16.1). `head`/`hhea`/`hmtx`/`maxp` plus cmap formats 4 and 12 verified; upem 1000, 1743 glyphs, 268 KB |
 
 **Read the permissive reimplementations, not Adaptagrams** — Dwyer released the same algorithms twice:
 
