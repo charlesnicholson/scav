@@ -171,8 +171,9 @@ def main() -> int:
     extra = [a for a in args.cmake_args if a != "--"]
     if resolved:
         extra.append(f"-DCMAKE_CXX_COMPILER={resolved}")
-    if args.no_test:
-        extra.append("-DSCAV_RUN_TESTS=OFF")
+    # Always stated, so a --no-test run cannot stick in the cache and turn
+    # every later plain build into a silent test skip.
+    extra.append(f"-DSCAV_RUN_TESTS={'OFF' if args.no_test else 'ON'}")
 
     # MSan without an instrumented libc++ reports false positives forever, and one
     # command has to cover that rather than documenting a step.
