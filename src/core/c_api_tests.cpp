@@ -3,8 +3,8 @@
 
 #include "scav/scav_core_c.h"
 
-#include "core/c_api_internal.h"
 #include "scav/scav_core.h"
+#include "scav_c_handles.h"
 
 #include "doctest.h"
 

@@ -131,6 +131,7 @@ class TestInstallAndConsume(unittest.TestCase):
         # public headers, which is what proves none of them needs a private one.
         self.assertIn("consumer model ok", result.stdout)
         self.assertIn("consumer layout ok", result.stdout)
+        self.assertIn("consumer layout run ok", result.stdout)
 
     def test_version_compatibility_is_same_minor(self) -> None:
         # The C ABI is additive within a minor version, so a newer minor must be

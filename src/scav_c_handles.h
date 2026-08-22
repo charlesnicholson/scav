@@ -1,8 +1,8 @@
-#ifndef SCAV_CORE_C_API_INTERNAL_H_INCLUDED
-#define SCAV_CORE_C_API_INTERNAL_H_INCLUDED
+#ifndef SCAV_C_HANDLES_H_INCLUDED
+#define SCAV_C_HANDLES_H_INCLUDED
 
-// The C handles, complete: a later library's C surface operates on the same
-// handles, so the definitions live where -Isrc reaches. Nothing installs them.
+// The C handles, complete: every library's C surface operates on the same
+// handles, so the definitions live at the src root. Nothing installs them.
 
 #include "scav/scav_core.h"
 #include "scav/scav_core_c.h"
@@ -24,4 +24,4 @@ struct scav_chart {
   std::vector<scav::Diagnostic> diags;  // latest operation's; cleared at entry
 };
 
-#endif  // SCAV_CORE_C_API_INTERNAL_H_INCLUDED
+#endif  // SCAV_C_HANDLES_H_INCLUDED

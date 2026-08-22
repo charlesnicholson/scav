@@ -2,6 +2,7 @@
 # phases land beside them.
 scav_static_library(scavlayout
   c_api.cpp
+  layout.cpp
   profile.cpp
   router.cpp
   spaces.cpp
@@ -17,6 +18,7 @@ target_link_libraries(scav_shared PRIVATE scavlayout)
 
 if(SCAV_BUILD_TESTS)
   scav_tests(scav_layout_tests
+    layout_tests.cpp
     profile_tests.cpp
     router_tests.cpp
     spaces_tests.cpp

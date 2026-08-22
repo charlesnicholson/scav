@@ -4,6 +4,7 @@
 /* libscavlayout's C API: the space tables an application fills, the profile,
  * and the router registry. Flat PODs of fixed-width integers, C++ uses them too. */
 
+#include "scav/scav_core_c.h"
 #include "scav/scav_types.h"
 
 /* NOLINTNEXTLINE(modernize-deprecated-headers) -- this header must compile as C */
@@ -105,6 +106,33 @@ scav_result scav_profile_named(char const *name, scav_profile *out);
 
 /* Every bound above, checked; scav_layout_run revalidates regardless. */
 scav_result scav_profile_validate(scav_profile const *profile);
+
+/* One row of the portslot geometry column: a port's coordinate, which side of
+ * its boundary rect it sits on (0 left, 1 right, 2 top, 3 bottom), and how
+ * many state borders enclose that boundary. */
+typedef struct {
+  int32_t x, y;
+  uint32_t side;
+  uint32_t boundary_depth;
+} scav_port_slot;
+
+typedef struct {
+  scav_profile profile;
+  scav_router_id router;
+  uint32_t threads; /* scheduling only; ignored until the thread shim lands */
+} scav_layout_opts;
+
+/* Validates the profile and spaces, runs layout, writes the geometry columns,
+ * and fills `out_placed` parallel to the path boxes. NULL `spaces` means no
+ * requests. cap = 0 with boxes pending queries the required count; a cap too
+ * small is SCAV_E_CAPACITY. SCAV_E_LAYOUT means findings await on the chart's
+ * scav_chart_diag, and the columns keep the last successful run's values. */
+scav_result scav_layout_run(scav_chart *chart,
+                            scav_spaces const *spaces,
+                            scav_layout_opts const *opts,
+                            scav_placed *out_placed,
+                            uint32_t cap,
+                            uint32_t *out_count);
 
 /* Routers cross the ABI by name only; function pointers never do. */
 scav_result scav_router_list(uint32_t *out_count);

@@ -176,6 +176,10 @@ enum class DiagCode : uint32_t {
   SpaceOrderDuplicate,
   SpaceSubjectInvalid,
   SpaceCountMismatch,
+
+  // Layout.
+  ProfileOutOfRange,
+  CoordinateOverflow,
 };
 
 // A producer running before entities exist fills `src`; one running after fills

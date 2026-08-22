@@ -23,7 +23,8 @@ enum {
   SCAV_E_INVALID_ARG = -1, /* a null out-param, or an index out of range */
   SCAV_E_STATE = -2,       /* the call does not apply in the handle's state */
   SCAV_E_CAPACITY = -3,    /* buffer too small; the required count was written */
-  SCAV_E_LOAD = -4         /* the load reported diagnostics; read them */
+  SCAV_E_LOAD = -4,        /* the load reported diagnostics; read them */
+  SCAV_E_LAYOUT = -5       /* layout reported diagnostics; read scav_chart_diag */
 };
 /* NOLINTEND(readability-identifier-naming) */
 

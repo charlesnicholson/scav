@@ -38,6 +38,25 @@ bool profile_named(char const *name, scav_profile &out);
 // Every bound in the C header's table. scav_layout_run revalidates regardless.
 bool profile_validate(scav_profile const &p);
 
+// Layout ====================================================================
+
+// The skeleton pipeline over phase 0's split: the box formula bottom-up,
+// document-order stacking top-down, straight-line routes through the ports.
+// Writes the geometry columns and sizes `placed` to the path boxes. False
+// leaves the columns holding the last successful run, findings sorted like
+// every validator's.
+bool layout_run(Chart &c,
+                scav_spaces const &s,
+                scav_profile const &p,
+                std::vector<scav_placed> &placed,
+                std::vector<Diagnostic> &diags);
+
+// Split so a pure translation moves the coordinate hash and never the
+// structural one: structure is port sides, depths, and per-route direction
+// tokens; coordinates are every rect and point. Unlaid charts hash as empty.
+uint32_t layout_structural_hash(Chart const &c);
+uint32_t layout_coordinate_hash(Chart const &c);
+
 // Routers ===================================================================
 
 uint32_t router_count();

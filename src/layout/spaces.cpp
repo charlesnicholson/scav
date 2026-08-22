@@ -1,6 +1,7 @@
 // The space tables: domain validation attributing each failure to its request,
 // and the digest that makes a measurement policy a hashed layout input.
 
+#include "layout/wire.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 #include "scav/scav_types.h"
@@ -77,7 +78,13 @@ bool spaces_validate(Chart const &c, scav_spaces const &s, std::vector<Diagnosti
     for (uint32_t i = 0; i < s.n_path_box; ++i) {
       scav_path_box const &box{ s.path_box[i] };
       uint32_t subject{ box.subject };
-      if ((subject >= transitions) || (c.transitions[subject].live == 0)) {
+      // A transition that gets no route -- an internal or local self-loop --
+      // has nothing to slide a box along.
+      auto const routeless = [&](Transition const &x) {
+        return (x.src == x.dst) && (x.kind != TransKind::External);
+      };
+      if ((subject >= transitions) || (c.transitions[subject].live == 0) ||
+          routeless(c.transitions[subject])) {
         report(found, DiagCode::SpaceSubjectInvalid, ElemKind::Transition,
              (subject >= transitions) ? INVALID : subject);
         subject = INVALID;
@@ -122,21 +129,6 @@ bool spaces_validate(Chart const &c, scav_spaces const &s, std::vector<Diagnosti
   diags.insert(diags.end(), found.begin(), found.end());
   return clean;
 }
-
-namespace {
-
-void append_u32(std::vector<scav_byte> &out, uint32_t v) {
-  out.push_back(static_cast<scav_byte>(v & 0xFFU));
-  out.push_back(static_cast<scav_byte>((v >> 8U) & 0xFFU));
-  out.push_back(static_cast<scav_byte>((v >> 16U) & 0xFFU));
-  out.push_back(static_cast<scav_byte>((v >> 24U) & 0xFFU));
-}
-
-void append_i32(std::vector<scav_byte> &out, int32_t v) {
-  append_u32(out, static_cast<uint32_t>(v));
-}
-
-}  // namespace
 
 uint32_t spaces_digest(scav_spaces const &s) {
   // Field by field, never a struct's bytes, with each table's count prefixed

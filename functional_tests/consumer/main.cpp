@@ -88,6 +88,21 @@ int check_abi() {
     }
   }
 
+  // Layout through the installed C surface: run, then read a geometry column.
+  if ((rc == 0) && (chart != nullptr)) {
+    scav_layout_opts opts{};
+    uint32_t placed{ 0 };
+    scav_column_id column{ 0 };
+    if ((scav_profile_named("readable", &opts.profile) != SCAV_OK) ||
+        (scav_layout_run(chart, nullptr, &opts, nullptr, 0, &placed) != SCAV_OK) ||
+        (scav_column_find(chart, "scav.geom.state", &column) != SCAV_OK)) {
+      std::fprintf(stderr, "layout through the C surface failed\n");
+      rc = 1;
+    } else {
+      std::printf("consumer layout run ok\n");
+    }
+  }
+
   scav_chart_destroy(chart);
   scav_load_destroy(loader);
   return rc;

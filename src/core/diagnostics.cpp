@@ -149,6 +149,10 @@ char const *diag_message(DiagCode code) {
       return "path box names a transition that does not exist";
     case DiagCode::SpaceCountMismatch:
       return "space table count does not match its entity array";
+
+    case DiagCode::ProfileOutOfRange: return "profile field out of range";
+    case DiagCode::CoordinateOverflow:
+      return "composed geometry exceeds the coordinate domain";
   }
   return "unknown diagnostic";
 }
