@@ -13,6 +13,7 @@ namespace {
 
 constexpr int32_t PT{ 16 };  // grid units are 1/16 pt
 
+// One of the two shipped profiles scav_profile_named hands out by name.
 constexpr scav_profile READABLE{
   .profile_id = 2,
   .profile_version = 1,
@@ -47,6 +48,7 @@ constexpr scav_profile READABLE{
   .print_columns = static_cast<int32_t>(DEFAULT_PRINT_COLUMNS),
 };
 
+// The other shipped profile: tighter spacing and type for dense charts.
 constexpr scav_profile COMPACT{
   .profile_id = 1,
   .profile_version = 1,
