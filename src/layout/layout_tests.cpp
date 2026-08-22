@@ -585,10 +585,13 @@ TEST_CASE("layout: geometry invariants hold across topologies and spaces") {
   check_geometry(c);
 }
 
-TEST_CASE("layout: two thousand states lay out, and quickly") {
+namespace {
+
+// The scale target: depth 16, ~2k states, ~3.7k transitions including one
+// long hierarchical edge per level.
+Chart two_k_chart() {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
-  std::vector<StateId> tops;
   for (uint32_t r = 0; r < 8; ++r) {
     SubmachineId parent{ root };
     StateId last{ INVALID };
@@ -606,8 +609,14 @@ TEST_CASE("layout: two thousand states lay out, and quickly") {
       last = comp;
       parent = build_submachine(c, comp, {}, {});
     }
-    tops.push_back(last);
   }
+  return c;
+}
+
+}  // namespace
+
+TEST_CASE("layout: two thousand states lay out, and quickly") {
+  Chart c{ two_k_chart() };
   REQUIRE(c.states.size() >= 2000);
   REQUIRE(c.transitions.size() >= 3500);
 
@@ -617,5 +626,129 @@ TEST_CASE("layout: two thousand states lay out, and quickly") {
   auto const us{ std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() };
   MESSAGE("layout_run over ", c.states.size(), " states / ", c.transitions.size(),
           " transitions: ", us, " us");
+#if SCAV_PERF_ASSERT_FLOOR == 1
+  // A floor, not a time: named machines only, never under instrumentation.
+  CHECK(us < 20000);
+#endif
   check_geometry(c);
+}
+
+TEST_CASE("layout: the coordinate extent estimate holds under fat text") {
+  // Deliberately generous stand-ins for measured text -- twenty wide glyphs
+  // of width, two title lines, a compartment -- so the grid decision errs
+  // conservative: if this fits, real fonts fit smaller.
+  Chart c{ two_k_chart() };
+  std::vector<scav_box_space> const boxes(
+      c.states.size(), { .min_w = 3200, .h_before = 448, .h_after = 96 });
+  scav_spaces const s{ .box_state = boxes.data(),
+                       .n_box_state = static_cast<uint32_t>(boxes.size()) };
+  run(c, s, readable());
+
+  // Measured at the skeleton: 181120 x 277888 -- inside the domain with 1.9x
+  // headroom on the tall axis, so the 1/16 pt grid stands. Real packing only
+  // shrinks this; the bar below trips if a regression eats the margin.
+  scav_rect const extent{ row_of<scav_rect>(c, "scav.geom.chart", 0) };
+  MESSAGE("2k-state fat-text extent: ", extent.w, " x ", extent.h, " of ",
+          COORD_MAX, " grid units");
+  CHECK(extent.w <= (COORD_MAX / 4) * 3);
+  CHECK(extent.h <= (COORD_MAX / 4) * 3);
+}
+
+TEST_CASE("layout: corpus charts hash to the committed golden") {
+  // The stated measurement policy for these goldens: no space requests, the
+  // readable profile -- what dump --layout does.
+  std::string actual;
+  for (char const *name : { "axis.scav", "brew.scav", "dock.scav", "estop.scav",
+                            "led.scav", "mill.scav", "toolchanger.scav",
+                            "vac.scav" }) {
+    CAPTURE(name);
+    std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
+    path += name;
+    Loader loader;
+    Chart c;
+    std::vector<Diagnostic> diags;
+    std::string failed;
+    REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
+    run(c, {}, readable());
+    actual += name;
+    actual += ' ';
+    string_append_hex32(actual, layout_structural_hash(c));
+    actual += ' ';
+    string_append_hex32(actual, layout_coordinate_hash(c));
+    actual += '\n';
+  }
+
+  std::vector<scav_byte> golden;
+  REQUIRE(read_file(SCAV_TEST_DATA_DIR "/golden/layout/corpus_hashes.txt", golden));
+  std::string const want{ reinterpret_cast<char const *>(golden.data()),
+                          golden.size() };
+  if (want != actual) {
+    write_file(SCAV_TEST_OUT_DIR "/corpus_hashes.txt",
+               reinterpret_cast<scav_byte const *>(actual.data()),
+               actual.size());
+    MESSAGE("actual written to " SCAV_TEST_OUT_DIR "/corpus_hashes.txt:\n", actual);
+  }
+  CHECK(want == actual);
+}
+
+TEST_CASE("layout: fuzzed charts and spaces either lay out or diagnose") {
+  uint64_t rng{ 0x5CA7'F00D'0123'4567ULL };
+  auto const next = [&rng](uint32_t bound) {
+    rng = (rng * 6364136223846793005ULL) + 1442695040888963407ULL;
+    return static_cast<uint32_t>((rng >> 33U) % bound);
+  };
+
+  for (uint32_t iter = 0; iter < 150; ++iter) {
+    CAPTURE(iter);
+    Chart c;
+    SubmachineId const root{ build_chart(c, "f", {}) };
+    std::vector<SubmachineId> frames{ root };
+    uint32_t const n_states{ 2 + next(10) };
+    for (uint32_t i = 0; i < n_states; ++i) {
+      SubmachineId const parent{
+        frames[next(static_cast<uint32_t>(frames.size()))]
+      };
+      StateId const st{ build_state(c, parent, {}, StateKind::Normal, {}) };
+      if (next(3) == 0) { frames.push_back(build_submachine(c, st, {}, {})); }
+      if (next(4) == 0) { frames.push_back(build_submachine(c, st, {}, {})); }
+    }
+    uint32_t const total{ static_cast<uint32_t>(c.states.size()) };
+    for (uint32_t i = next(12); i-- > 0;) {
+      build_trans(c, { next(total) }, { next(total) },
+                  static_cast<TransKind>(next(3)), {});
+    }
+    if (!c.transitions.empty() && (next(4) == 0)) {
+      c.transitions[next(static_cast<uint32_t>(c.transitions.size()))].live = 0;
+    }
+
+    // Hostile by construction: fields wander outside the domain, subjects
+    // outside the transition array, orders colliding.
+    std::vector<scav_box_space> boxes(c.states.size());
+    for (scav_box_space &b : boxes) {
+      b = { .min_w = static_cast<int32_t>(next(200000)) - 20000,
+            .h_before = static_cast<int32_t>(next(150000)) - 10000,
+            .h_after = static_cast<int32_t>(next(150000)) - 10000 };
+    }
+    std::vector<scav_path_box> path_boxes(next(4));
+    for (scav_path_box &b : path_boxes) {
+      b = { .subject = next(static_cast<uint32_t>(c.transitions.size()) + 2),
+            .w = static_cast<int32_t>(next(150000)) - 10000,
+            .h = static_cast<int32_t>(next(150000)) - 10000,
+            .order = next(3) };
+    }
+    scav_spaces const s{ .box_state = boxes.data(),
+                         .n_box_state = static_cast<uint32_t>(boxes.size()),
+                         .path_box = path_boxes.data(),
+                         .n_path_box = static_cast<uint32_t>(path_boxes.size()) };
+
+    std::vector<scav_placed> placed;
+    std::vector<Diagnostic> diags;
+    if (layout_run(c, s, readable(), placed, diags)) {
+      CHECK(diags.empty());
+      CHECK(placed.size() == path_boxes.size());
+      check_geometry(c);
+    } else {
+      CHECK(!diags.empty());
+    }
+  }
 }

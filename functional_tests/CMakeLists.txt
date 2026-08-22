@@ -71,6 +71,8 @@ scav_add_functional_test(dump
           "${PROJECT_SOURCE_DIR}/test_data/golden/dump/vac.txt"
           "${PROJECT_SOURCE_DIR}/test_data/golden/dump/mill.txt"
           "${PROJECT_SOURCE_DIR}/test_data/golden/dump/vac.json"
+          "${PROJECT_SOURCE_DIR}/test_data/golden/dump/vac_layout.txt"
+          "${PROJECT_SOURCE_DIR}/test_data/golden/dump/vac_layout.json"
           "$<TARGET_FILE:scav>"
   TARGETS scav
 )
@@ -83,6 +85,13 @@ scav_add_functional_test(load
           "$<TARGET_FILE:scav_shared>"
           "$<TARGET_FILE:scav>"
   TARGETS scav_shared scav
+)
+# The P4 exit gate: layout driven from Python over ctypes, geometry read back
+# through the column accessor.
+scav_add_functional_test(layout
+  DEPENDS "${PROJECT_SOURCE_DIR}/test_data/charts/brew.scav"
+          "$<TARGET_FILE:scav_shared>"
+  TARGETS scav_shared
 )
 scav_add_functional_test(fmt
   DEPENDS ${scav_corpus_charts}

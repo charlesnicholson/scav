@@ -1,0 +1,119 @@
+chart vac "robot vacuum" (test_data/charts/vac.scav:3)
+  submachine :0 (test_data/charts/vac.scav:3)
+    state dock (test_data/charts/vac.scav:4)
+      submachine :0 "charging dock" (test_data/charts/dock.scav:3)
+        state lamp (test_data/charts/dock.scav:4)
+          submachine :0 "status lamp" (test_data/charts/led.scav:3)
+            @doc = "one RGB indicator" (test_data/charts/led.scav:4)
+            state Off (test_data/charts/led.scav:6)
+            state Blinking (test_data/charts/led.scav:7)
+            state Solid (test_data/charts/led.scav:8)
+            state $initial (test_data/charts/led.scav:10)
+            trans dock/lamp/$initial -> dock/lamp/Off (test_data/charts/led.scav:10)
+            trans dock/lamp/Off -> dock/lamp/Blinking "charging" (test_data/charts/led.scav:11)
+            trans dock/lamp/Blinking -> dock/lamp/Solid "charged" (test_data/charts/led.scav:12)
+            trans dock/lamp/Solid -> dock/lamp/Off "undocked" (test_data/charts/led.scav:13)
+        state Empty (test_data/charts/dock.scav:6)
+        state On (test_data/charts/dock.scav:7)
+          submachine :0 (test_data/charts/dock.scav:7)
+            state Seated (test_data/charts/dock.scav:8)
+            state Charging (test_data/charts/dock.scav:9)
+            state $initial (test_data/charts/dock.scav:10)
+            trans dock/On/$initial -> dock/On/Seated (test_data/charts/dock.scav:10)
+            trans dock/On/Seated -> dock/On/Charging "contacts closed" (test_data/charts/dock.scav:11)
+            trans dock/On/Charging -> dock/lamp/Solid "full" (test_data/charts/dock.scav:14)
+        state $initial (test_data/charts/dock.scav:17)
+        trans dock/$initial -> dock/Empty (test_data/charts/dock.scav:17)
+        trans dock/Empty -> dock/On "vacuum docked" (test_data/charts/dock.scav:18)
+        trans dock/On -> dock/Empty "vacuum left" (test_data/charts/dock.scav:19)
+    state lamp (test_data/charts/vac.scav:7)
+      submachine :0 "status lamp" (test_data/charts/led.scav:3)
+        @doc = "one RGB indicator" (test_data/charts/led.scav:4)
+        state Off (test_data/charts/led.scav:6)
+        state Blinking (test_data/charts/led.scav:7)
+        state Solid (test_data/charts/led.scav:8)
+        state $initial (test_data/charts/led.scav:10)
+        trans lamp/$initial -> lamp/Off (test_data/charts/led.scav:10)
+        trans lamp/Off -> lamp/Blinking "charging" (test_data/charts/led.scav:11)
+        trans lamp/Blinking -> lamp/Solid "charged" (test_data/charts/led.scav:12)
+        trans lamp/Solid -> lamp/Off "undocked" (test_data/charts/led.scav:13)
+    state Off "powered down" (test_data/charts/vac.scav:9)
+    state Booting (test_data/charts/vac.scav:10)
+    state PreConfig choice (test_data/charts/vac.scav:11)
+    state On (test_data/charts/vac.scav:16)
+      @doc = "Enter: publishes EVT_POWERED_ON" (test_data/charts/vac.scav:17)
+      @nav:follow_walls = "false" (test_data/charts/vac.scav:18)
+      @nav:uses_lidar = "true" (test_data/charts/vac.scav:18)
+      submachine main (test_data/charts/vac.scav:20)
+        state Idle (test_data/charts/vac.scav:21)
+          @nav:retry = "false" (test_data/charts/vac.scav:21)
+        state Ready (test_data/charts/vac.scav:22)
+        state $initial (test_data/charts/vac.scav:23)
+        trans On:main/$initial -> On:main/Idle (test_data/charts/vac.scav:23)
+        trans On:main/Ready -> On:main/Ready internal "BUMP_RETRY" (test_data/charts/vac.scav:24)
+        trans On:main/Ready -> dock/On/Seated "battery low" (test_data/charts/vac.scav:27)
+      submachine aux "sweeps while main drives" (test_data/charts/vac.scav:29)
+        state Idle (test_data/charts/vac.scav:29)
+        state $initial (test_data/charts/vac.scav:29)
+        trans On:aux/$initial -> On:aux/Idle (test_data/charts/vac.scav:29)
+    state $initial (test_data/charts/vac.scav:13)
+    trans $initial -> Off (test_data/charts/vac.scav:13)
+    trans Off -> Booting "POWER_ON" (test_data/charts/vac.scav:14)
+  include dock "dock.scav" -> test_data/charts/dock.scav (test_data/charts/vac.scav:4)
+  include lamp "./led.scav" -> test_data/charts/led.scav (test_data/charts/vac.scav:7)
+  include lamp "led.scav" -> test_data/charts/led.scav (test_data/charts/dock.scav:4)
+geometry structural f97c74a8 coordinate d427c1d6
+  chart 0,0 5952x8864
+  state dock 0,0 3040x5088 before 128,128 2784x0 after 128,4960 2784x0
+  state lamp 3168,0 1760x2432 before 3296,128 1504x0 after 3296,2304 1504x0
+  state Off 5056,0 896x640 before 5184,128 640x0 after 5184,128 640x0
+  state Booting 0,5216 896x640 before 128,5344 640x0 after 128,5344 640x0
+  state PreConfig 1024,5216 576x576 before 1152,5344 320x0 after 1152,5344 320x0
+  state On 1728,5216 1152x3648 before 1856,5344 896x0 after 1856,8736 896x0
+  state On:main/Idle 1856,5344 896x640 before 1984,5472 640x0 after 1984,5472 640x0
+  state On:main/Ready 1856,6112 896x640 before 1984,6240 640x0 after 1984,6240 640x0
+  state On:aux/Idle 1856,7488 896x640 before 1984,7616 640x0 after 1984,7616 640x0
+  state dock/lamp 128,128 1760x2432 before 256,256 1504x0 after 256,2432 1504x0
+  state dock/Empty 2016,128 896x640 before 2144,256 640x0 after 2144,256 640x0
+  state dock/On 128,2688 1152x2272 before 256,2816 896x0 after 256,4832 896x0
+  state dock/On/Seated 256,2816 896x640 before 384,2944 640x0 after 384,2944 640x0
+  state dock/On/Charging 256,3584 896x640 before 384,3712 640x0 after 384,3712 640x0
+  state lamp/Off 3296,128 896x640 before 3424,256 640x0 after 3424,256 640x0
+  state lamp/Blinking 3296,896 896x640 before 3424,1024 640x0 after 3424,1024 640x0
+  state lamp/Solid 3296,1664 896x640 before 3424,1792 640x0 after 3424,1792 640x0
+  state dock/lamp/Off 256,256 896x640 before 384,384 640x0 after 384,384 640x0
+  state dock/lamp/Blinking 256,1024 896x640 before 384,1152 640x0 after 384,1152 640x0
+  state dock/lamp/Solid 256,1792 896x640 before 384,1920 640x0 after 384,1920 640x0
+  state $initial 3008,5216 480x480 before 3136,5344 224x0 after 3136,5344 224x0
+  state On:main/$initial 1856,6880 480x480 before 1984,7008 224x0 after 1984,7008 224x0
+  state On:aux/$initial 1856,8256 480x480 before 1984,8384 224x0 after 1984,8384 224x0
+  state dock/On/$initial 256,4352 480x480 before 384,4480 224x0 after 384,4480 224x0
+  state dock/$initial 1408,2688 480x480 before 1536,2816 224x0 after 1536,2816 224x0
+  state lamp/$initial 4320,1664 480x480 before 4448,1792 224x0 after 4448,1792 224x0
+  state dock/lamp/$initial 1280,1792 480x480 before 1408,1920 224x0 after 1408,1920 224x0
+  sub 0 0,0 5952x8864
+  sub 1 1856,5344 896x2016
+  sub 2 1856,7488 896x1248
+  sub 3 128,128 2784x4832
+  sub 4 256,2816 896x2016
+  sub 5 3296,128 1504x2176
+  sub 6 256,256 1504x2176
+  route $initial -> Off (3248,5456) (5504,320)
+  route Off -> Booting (5504,320) (448,5536)
+  route On:main/$initial -> On:main/Idle (2096,7120) (2304,5664)
+  route On:main/Ready -> dock/On/Seated (2304,6432) (2304,5216) (0,2544) (704,2688) (704,3136) port s2 d0 port s0 d0 port s2 d1
+  route On:aux/$initial -> On:aux/Idle (2096,8496) (2304,7808)
+  route dock/On/$initial -> dock/On/Seated (496,4592) (704,3136)
+  route dock/On/Seated -> dock/On/Charging (704,3136) (704,3904)
+  route dock/On/Charging -> dock/lamp/Solid (704,3904) (704,2688) (1008,2560) (704,2112) port s2 d1 port s3 d1
+  route dock/$initial -> dock/Empty (1648,2928) (2464,448)
+  route dock/Empty -> dock/On (2464,448) (704,3824)
+  route dock/On -> dock/Empty (704,3824) (2464,448)
+  route lamp/$initial -> lamp/Off (4560,1904) (3744,448)
+  route lamp/Off -> lamp/Blinking (3744,448) (3744,1216)
+  route lamp/Blinking -> lamp/Solid (3744,1216) (3744,1984)
+  route lamp/Solid -> lamp/Off (3744,1984) (3744,448)
+  route dock/lamp/$initial -> dock/lamp/Off (1520,2032) (704,576)
+  route dock/lamp/Off -> dock/lamp/Blinking (704,576) (704,1344)
+  route dock/lamp/Blinking -> dock/lamp/Solid (704,1344) (704,2112)
+  route dock/lamp/Solid -> dock/lamp/Off (704,2112) (704,576)
