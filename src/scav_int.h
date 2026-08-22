@@ -42,6 +42,19 @@ constexpr T ceil_div(T a, T b) {
   }
 }
 
+// The larger and the smaller of two integers, so a fold reads as intent.
+template <typename T>
+constexpr T imax(T a, T b) {
+  static_assert(std::is_integral_v<T>, "integers only");
+  return (a < b) ? b : a;
+}
+
+template <typename T>
+constexpr T imin(T a, T b) {
+  static_assert(std::is_integral_v<T>, "integers only");
+  return (b < a) ? b : a;
+}
+
 // Floor square root, digit by digit from the top bit pair, so no float and no
 // libm can disagree about the last bit.
 constexpr uint64_t isqrt(uint64_t x) {

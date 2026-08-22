@@ -71,33 +71,27 @@ SplitGraph phase0_split(Chart const &c) {
         --i;
         --j;
       }
-      // i and j now count the divergent prefix of each chain, endpoint included.
-      if (i == 0) {
-        // src is a proper ancestor of dst; its border splits only when exited.
+      // i and j now count the divergent prefix of each chain, endpoint
+      // included. One shape covers every case: an empty run contributes nothing.
+      if (i == 0) {  // src encloses dst; its border splits only when external
         src_inner = tr.kind != TransKind::External;
         if (!src_inner) { route.push_back({ Crossing::Enter, tr.src, {} }); }
-        for (size_t k = j; k-- > 1;) {
-          route.push_back({ Crossing::Enter, chain_dst[k], {} });
-        }
-      } else if (j == 0) {  // dst is a proper ancestor; exit up to its inner face
-        for (size_t k = 1; k < i; ++k) {
-          route.push_back({ Crossing::Exit, chain_src[k], {} });
-        }
-      } else {
-        for (size_t k = 1; k < i; ++k) {
-          route.push_back({ Crossing::Exit, chain_src[k], {} });
-        }
-        // Concurrent siblings meet at a common state through two of its
-        // submachines: the arrow crosses their separator, never that state.
+      }
+      for (size_t k = 1; k < i; ++k) {
+        route.push_back({ Crossing::Exit, chain_src[k], {} });
+      }
+      if ((i > 0) && (j > 0) && (i < chain_src.size())) {
+        // The chains meet at a state; entering through two of its submachines
+        // crosses their separator, never that state's border.
         SubmachineId const sub_src{ c.states[chain_src[i - 1].v].parent };
         SubmachineId const sub_dst{ c.states[chain_dst[j - 1].v].parent };
-        if ((i < chain_src.size()) && (sub_src != sub_dst)) {
+        if (sub_src != sub_dst) {
           route.push_back({ Crossing::SepSrc, {}, sub_src });
           route.push_back({ Crossing::SepDst, {}, sub_dst });
         }
-        for (size_t k = j; k-- > 1;) {
-          route.push_back({ Crossing::Enter, chain_dst[k], {} });
-        }
+      }
+      for (size_t k = j; k-- > 1;) {
+        route.push_back({ Crossing::Enter, chain_dst[k], {} });
       }
     }
 

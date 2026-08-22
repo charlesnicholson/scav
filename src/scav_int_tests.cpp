@@ -53,6 +53,16 @@ TEST_CASE("int: ceil_div rounds toward positive infinity, signed and unsigned") 
         == UINT64_C(0x8000'0000'0000'0000));
 }
 
+TEST_CASE("int: imax and imin pick the right end, ties either way") {
+  CHECK(imax(2, 3) == 3);
+  CHECK(imax(-5, -9) == -5);
+  CHECK(imax(7, 7) == 7);
+  CHECK(imin(2, 3) == 2);
+  CHECK(imin(-5, -9) == -9);
+  CHECK(imin(UINT64_C(1) << 40U, UINT64_C(9)) == 9);
+  static_assert(imax(INT32_MIN, INT32_MAX) == INT32_MAX);
+}
+
 TEST_CASE("int: isqrt is the floor square root across the whole domain") {
   CHECK(isqrt(0) == 0);
   CHECK(isqrt(1) == 1);

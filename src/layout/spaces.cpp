@@ -75,16 +75,17 @@ bool spaces_validate(Chart const &c, scav_spaces const &s, std::vector<Diagnosti
   if ((s.path_box == nullptr) && (s.n_path_box != 0)) {
     report(found, DiagCode::SpaceCountMismatch, ElemKind::Chart, 0);
   } else {
+    // A transition that gets no route -- an internal or local self-loop --
+    // has nothing to slide a box along.
+    auto const routeless = [&c](uint32_t t) {
+      return (c.transitions[t].src == c.transitions[t].dst) &&
+             (c.transitions[t].kind != TransKind::External);
+    };
     for (uint32_t i = 0; i < s.n_path_box; ++i) {
       scav_path_box const &box{ s.path_box[i] };
       uint32_t subject{ box.subject };
-      // A transition that gets no route -- an internal or local self-loop --
-      // has nothing to slide a box along.
-      auto const routeless = [&](Transition const &x) {
-        return (x.src == x.dst) && (x.kind != TransKind::External);
-      };
       if ((subject >= transitions) || (c.transitions[subject].live == 0) ||
-          routeless(c.transitions[subject])) {
+          routeless(subject)) {
         report(found, DiagCode::SpaceSubjectInvalid, ElemKind::Transition,
              (subject >= transitions) ? INVALID : subject);
         subject = INVALID;

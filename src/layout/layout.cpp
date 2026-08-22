@@ -18,12 +18,10 @@ namespace scav {
 
 namespace {
 
-struct Sizes {
-  std::vector<int32_t> state_w, state_h;  // zero for tombstones
-  std::vector<int32_t> sub_w, sub_h;
-  std::vector<scav_point> offset;  // each state within its parent submachine
-};
-
+// Every box the pipeline computes, in the columns' own shapes. Sizing fills
+// each rect's extent and its position relative to the parent submachine;
+// placement makes positions root-absolute in one descent. Tombstones stay
+// all-zero throughout.
 struct Geometry {
   std::vector<scav_rect> state, before, after, sub;
   scav_rect chart{};
@@ -49,26 +47,21 @@ bool size_boxes(Chart const &c,
                 SplitGraph const &g,
                 scav_spaces const &s,
                 scav_profile const &p,
-                Sizes &out,
+                Geometry &geo,
                 std::vector<Diagnostic> &diags) {
-  uint32_t const n_states{ static_cast<uint32_t>(c.states.size()) };
-  uint32_t const n_subs{ static_cast<uint32_t>(c.submachines.size()) };
-  out.state_w.assign(n_states, 0);
-  out.state_h.assign(n_states, 0);
-  out.sub_w.assign(n_subs, 0);
-  out.sub_h.assign(n_subs, 0);
-  out.offset.assign(n_states, {});
+  geo.state.assign(c.states.size(), {});
+  geo.before.assign(c.states.size(), {});
+  geo.after.assign(c.states.size(), {});
+  geo.sub.assign(c.submachines.size(), {});
 
   uint32_t max_depth{ 0 };
-  for (uint32_t const d : g.state_depth) { max_depth = (d > max_depth) ? d : max_depth; }
-
-  // Buckets: states by depth; submachines by their children's depth.
+  for (uint32_t const d : g.state_depth) { max_depth = imax(max_depth, d); }
   std::vector<std::vector<uint32_t>> states_at(max_depth + 1);
   std::vector<std::vector<uint32_t>> subs_at(max_depth + 2);
-  for (uint32_t i = 0; i < n_states; ++i) {
+  for (uint32_t i = 0; i < c.states.size(); ++i) {
     if (c.states[i].live != 0) { states_at[g.state_depth[i]].push_back(i); }
   }
-  for (uint32_t m = 0; m < n_subs; ++m) {
+  for (uint32_t m = 0; m < c.submachines.size(); ++m) {
     if (c.submachines[m].live == 0) { continue; }
     StateId const owner{ c.submachines[m].owner };
     subs_at[(owner.v == INVALID) ? 0 : g.state_depth[owner.v] + 1].push_back(m);
@@ -82,10 +75,9 @@ bool size_boxes(Chart const &c,
     Wide area{ 0 };
     Wide widest{ 0 };
     for (uint32_t k = 0; k < kids.len; ++k) {
-      StateId const child{ c.state_ids[kids.off + k] };
-      if (c.states[child.v].live == 0) { continue; }
-      area += static_cast<Wide>(out.state_w[child.v]) * out.state_h[child.v];
-      widest = (out.state_w[child.v] > widest) ? out.state_w[child.v] : widest;
+      scav_rect const &r{ geo.state[c.state_ids[kids.off + k].v] };
+      area += static_cast<Wide>(r.w) * r.h;  // tombstones are zero-area
+      widest = imax(widest, Wide{ r.w });
     }
     constexpr Wide AREA_MAX{ static_cast<Wide>(COORD_MAX) * COORD_MAX };
     if (area > AREA_MAX) {
@@ -93,36 +85,37 @@ bool size_boxes(Chart const &c,
       ok = false;
       return;
     }
-    Wide target{ static_cast<Wide>(
-        isqrt(static_cast<uint64_t>(floor_div(area * p.dar_num, Wide{ p.dar_den })))) };
-    target = (widest > target) ? widest : target;
+    Wide const target{ imax(
+        widest,
+        static_cast<Wide>(isqrt(
+            static_cast<uint64_t>(floor_div(area * p.dar_num, Wide{ p.dar_den }))))) };
 
     Wide cx{ 0 };
     Wide row_y{ 0 };
     Wide row_h{ 0 };
     Wide ext_w{ 0 };
     for (uint32_t k = 0; k < kids.len; ++k) {
-      StateId const child{ c.state_ids[kids.off + k] };
-      if (c.states[child.v].live == 0) { continue; }
-      Wide const w{ out.state_w[child.v] };
-      if ((cx > 0) && ((cx + w) > target)) {
+      uint32_t const child{ c.state_ids[kids.off + k].v };
+      if (c.states[child].live == 0) { continue; }
+      scav_rect &r{ geo.state[child] };
+      if ((cx > 0) && ((cx + r.w) > target)) {
         row_y += row_h + p.pad;
         cx = 0;
         row_h = 0;
       }
-      if ((row_y + out.state_h[child.v]) > COORD_MAX) {
+      if ((row_y + r.h) > COORD_MAX) {
         overflow(diags, ElemKind::Submachine, m);
         ok = false;
         return;
       }
-      out.offset[child.v] = { .x = static_cast<int32_t>(cx),
-                              .y = static_cast<int32_t>(row_y) };
-      cx += w + p.pad;
-      row_h = (out.state_h[child.v] > row_h) ? out.state_h[child.v] : row_h;
-      ext_w = ((cx - p.pad) > ext_w) ? (cx - p.pad) : ext_w;
+      r.x = static_cast<int32_t>(cx);
+      r.y = static_cast<int32_t>(row_y);
+      cx += r.w + p.pad;
+      row_h = imax(row_h, Wide{ r.h });
+      ext_w = imax(ext_w, cx - p.pad);
     }
-    out.sub_w[m] = static_cast<int32_t>(ext_w);
-    out.sub_h[m] = static_cast<int32_t>(row_y + row_h);
+    geo.sub[m].w = static_cast<int32_t>(ext_w);
+    geo.sub[m].h = static_cast<int32_t>(row_y + row_h);
   };
 
   auto const size_state = [&](uint32_t i) {
@@ -131,90 +124,79 @@ bool size_boxes(Chart const &c,
     uint32_t n{ 0 };
     Span const subs{ c.states[i].submachines };
     for (uint32_t k = 0; k < subs.len; ++k) {
-      SubmachineId const m{ c.submachine_ids[subs.off + k] };
-      if (c.submachines[m.v].live == 0) { continue; }
-      subs_w = (out.sub_w[m.v] > subs_w) ? out.sub_w[m.v] : subs_w;
-      subs_h += out.sub_h[m.v];
+      uint32_t const m{ c.submachine_ids[subs.off + k].v };
+      if (c.submachines[m].live == 0) { continue; }
+      subs_w = imax(subs_w, Wide{ geo.sub[m].w });
+      subs_h += geo.sub[m].h;
       ++n;
     }
     if (n > 1) { subs_h += static_cast<Wide>(p.pad) * (n - 1); }
 
     scav_box_space const b{ box_of(s.box_state, s.n_box_state, i) };
     uint32_t const kind{ static_cast<uint32_t>(c.states[i].kind) };
-    Wide w{ (b.min_w > subs_w) ? b.min_w : subs_w };
-    w = (p.kind_min_w[kind] > w) ? p.kind_min_w[kind] : w;
-    w += 2 * static_cast<Wide>(p.pad);
-    Wide h{ b.h_before + subs_h + b.h_after };
-    h = (p.kind_min_h[kind] > h) ? p.kind_min_h[kind] : h;
-    h += 2 * static_cast<Wide>(p.pad);
+    Wide const w{ imax(imax(Wide{ b.min_w }, subs_w), Wide{ p.kind_min_w[kind] }) +
+                  (2 * static_cast<Wide>(p.pad)) };
+    Wide const h{ imax(Wide{ b.h_before } + subs_h + b.h_after,
+                       Wide{ p.kind_min_h[kind] }) +
+                  (2 * static_cast<Wide>(p.pad)) };
     if ((w > COORD_MAX) || (h > COORD_MAX)) {
       overflow(diags, ElemKind::State, i);
       ok = false;
       return;
     }
-    out.state_w[i] = static_cast<int32_t>(w);
-    out.state_h[i] = static_cast<int32_t>(h);
+    geo.state[i].w = static_cast<int32_t>(w);
+    geo.state[i].h = static_cast<int32_t>(h);
   };
 
-  for (uint32_t d = max_depth + 1; d-- > 0;) {
-    if ((d + 1) < subs_at.size()) {
-      for (uint32_t const m : subs_at[d + 1]) { size_sub(m); }
+  // Levels interleave: submachines whose children sit at this depth, then the
+  // states one level up that wrap them; level 0 sizes the document roots.
+  for (uint32_t level = max_depth + 2; level-- > 0;) {
+    for (uint32_t const m : subs_at[level]) { size_sub(m); }
+    if (level > 0) {
+      for (uint32_t const i : states_at[level - 1]) { size_state(i); }
     }
-    for (uint32_t const i : states_at[d]) { size_state(i); }
   }
-  for (uint32_t const m : subs_at[0]) { size_sub(m); }
   return ok;
 }
 
-// Top-down, document order, vertical stacks. Positions stay inside the sized
-// extents, so int32 arithmetic cannot leave the domain here.
-void place_boxes(Chart const &c,
-                 scav_spaces const &s,
-                 scav_profile const &p,
-                 Sizes const &z,
-                 Geometry &geo) {
-  geo.state.assign(c.states.size(), {});
-  geo.before.assign(c.states.size(), {});
-  geo.after.assign(c.states.size(), {});
-  geo.sub.assign(c.submachines.size(), {});
-
-  struct Slot {
+// One descent from the root, adding each frame's origin to the relative
+// positions sizing left behind. Everything stays inside the sized extents,
+// so int32 arithmetic cannot leave the domain here.
+void place_boxes(Chart const &c, scav_spaces const &s, scav_profile const &p, Geometry &geo) {
+  struct Frame {
     uint32_t sub;
     int32_t x, y;
   };
-  std::vector<Slot> work;
+  std::vector<Frame> work;
   if (c.root_submachine.v != INVALID) {
-    geo.sub[c.root_submachine.v] = { .x = 0,
-                                     .y = 0,
-                                     .w = z.sub_w[c.root_submachine.v],
-                                     .h = z.sub_h[c.root_submachine.v] };
     geo.chart = geo.sub[c.root_submachine.v];
     work.push_back({ c.root_submachine.v, 0, 0 });
   }
   while (!work.empty()) {
-    Slot const at{ work.back() };
+    Frame const at{ work.back() };
     work.pop_back();
+    geo.sub[at.sub].x = at.x;
+    geo.sub[at.sub].y = at.y;
     Span const kids{ c.submachines[at.sub].children };
     for (uint32_t k = 0; k < kids.len; ++k) {
       uint32_t const i{ c.state_ids[kids.off + k].v };
       if (c.states[i].live == 0) { continue; }
-      int32_t const x{ at.x + z.offset[i].x };
-      int32_t const y{ at.y + z.offset[i].y };
-      geo.state[i] = { .x = x, .y = y, .w = z.state_w[i], .h = z.state_h[i] };
+      scav_rect &r{ geo.state[i] };
+      r.x += at.x;
+      r.y += at.y;
 
       scav_box_space const b{ box_of(s.box_state, s.n_box_state, i) };
-      int32_t const ix{ x + p.pad };
-      int32_t const iw{ z.state_w[i] - (2 * p.pad) };
-      geo.before[i] = { .x = ix, .y = y + p.pad, .w = iw, .h = b.h_before };
-      int32_t sy{ y + p.pad + b.h_before };
+      int32_t const ix{ r.x + p.pad };
+      int32_t const iw{ r.w - (2 * p.pad) };
+      geo.before[i] = { .x = ix, .y = r.y + p.pad, .w = iw, .h = b.h_before };
+      int32_t sy{ r.y + p.pad + b.h_before };
       Span const subs{ c.states[i].submachines };
       uint32_t placed{ 0 };
       for (uint32_t u = 0; u < subs.len; ++u) {
         uint32_t const m{ c.submachine_ids[subs.off + u].v };
         if (c.submachines[m].live == 0) { continue; }
-        geo.sub[m] = { .x = ix, .y = sy, .w = z.sub_w[m], .h = z.sub_h[m] };
-        work.push_back({ m, ix, sy });
-        sy += z.sub_h[m] + p.pad;
+        work.push_back({ m, ix, sy });  // concurrent regions stack vertically
+        sy += geo.sub[m].h + p.pad;
         ++placed;
       }
       if (placed > 0) { sy -= p.pad; }
@@ -256,8 +238,7 @@ scav_point trim(scav_point a, scav_point b, int32_t amount) {
   Wide const len{ static_cast<Wide>(
       isqrt(static_cast<uint64_t>((dx * dx) + (dy * dy)))) };
   if (len == 0) { return a; }
-  Wide const k{ (amount < floor_div(len, Wide{ 2 })) ? amount
-                                                     : floor_div(len, Wide{ 2 }) };
+  Wide const k{ imin(Wide{ amount }, floor_div(len, Wide{ 2 })) };
   return { .x = a.x + static_cast<int32_t>(floor_div(dx * k, len)),
            .y = a.y + static_cast<int32_t>(floor_div(dy * k, len)) };
 }
@@ -385,11 +366,9 @@ bool layout_run(Chart &c,
   if (!spaces_validate(c, s, diags)) { return false; }
 
   SplitGraph const g{ phase0_split(c) };
-  Sizes sizes;
-  if (!size_boxes(c, g, s, p, sizes, diags)) { return false; }
-
   Geometry geo;
-  place_boxes(c, s, p, sizes, geo);
+  if (!size_boxes(c, g, s, p, geo, diags)) { return false; }
+  place_boxes(c, s, p, geo);
   route_transitions(c, g, s, p, geo);
 
   placed.assign(s.n_path_box, {});
