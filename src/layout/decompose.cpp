@@ -1,7 +1,7 @@
 // Boundary discovery per transition: climb both endpoint chains to their
 // divergence, then emit ports and segments in route order.
 
-#include "layout/split.h"
+#include "layout/decompose.h"
 
 #include "scav/scav_core.h"
 

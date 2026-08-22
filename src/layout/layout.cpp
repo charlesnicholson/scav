@@ -2,7 +2,7 @@
 // stacked top-down in document order, straight-line routes through phase 0's
 // ports, and the geometry columns as the only output.
 
-#include "layout/split.h"
+#include "layout/decompose.h"
 #include "layout/wire.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"

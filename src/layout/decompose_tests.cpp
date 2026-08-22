@@ -1,7 +1,7 @@
 // Phase 0 against hand-written charts: split counts, port and frame sequences,
 // the kind rules, and the concurrent direct arrow.
 
-#include "layout/split.h"
+#include "layout/decompose.h"
 #include "scav/scav_core.h"
 
 #include "doctest.h"

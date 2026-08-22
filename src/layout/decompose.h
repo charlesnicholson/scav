@@ -1,5 +1,5 @@
-#ifndef SCAV_LAYOUT_SPLIT_H_INCLUDED
-#define SCAV_LAYOUT_SPLIT_H_INCLUDED
+#ifndef SCAV_LAYOUT_DECOMPOSE_H_INCLUDED
+#define SCAV_LAYOUT_DECOMPOSE_H_INCLUDED
 
 // Phase 0: split every transition at each boundary it crosses, so each segment
 // is local to one submachine frame. Internal POD; nothing here crosses the ABI.
@@ -48,4 +48,4 @@ SplitGraph phase0_split(Chart const &c);
 
 }  // namespace scav
 
-#endif  // SCAV_LAYOUT_SPLIT_H_INCLUDED
+#endif  // SCAV_LAYOUT_DECOMPOSE_H_INCLUDED

@@ -1,7 +1,7 @@
 // The skeleton pipeline: exact rects from the box formula, stacking, routes,
 // placed boxes, the columns, the hash split, and a geometry invariant sweep.
 
-#include "layout/split.h"
+#include "layout/decompose.h"
 #include "scav/scav_core.h"
 #include "scav/scav_core_c.h"
 #include "scav/scav_layout.h"
