@@ -36,6 +36,9 @@ function(scav_testing_init)
 
   # `rm -rf out/<preset>/stamp` re-runs the suite without rebuilding anything.
   file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/stamp")
+# Tests write scratch under here; a fresh tree must not depend on which test
+# happens to create it first.
+file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/test")
   set(SCAV_STAMP_DIR "${PROJECT_BINARY_DIR}/stamp" PARENT_SCOPE)
 endfunction()
 

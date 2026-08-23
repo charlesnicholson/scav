@@ -51,7 +51,7 @@ scav_result scav_layout_run(scav_chart *chart,
   if (!scav::layout_run(chart->chart, s, opts->profile, placed, chart->diags)) {
     return SCAV_E_LAYOUT;
   }
-  if (!placed.empty()) {
+  if ((out_placed != nullptr) && !placed.empty()) {
     std::memcpy(out_placed, placed.data(), placed.size() * sizeof(scav_placed));
   }
   return SCAV_OK;

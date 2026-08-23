@@ -98,15 +98,6 @@ typedef struct {
   int32_t print_columns; /* the printer's line-break budget; [20, 4096] */
 } scav_profile;
 
-/* NOLINTEND(modernize-use-using, readability-identifier-naming) */
-
-/* Fills `out` from a shipped profile: "compact" or "readable". An unknown name
- * is SCAV_E_INVALID_ARG and writes nothing. */
-scav_result scav_profile_named(char const *name, scav_profile *out);
-
-/* Every bound above, checked; scav_layout_run revalidates regardless. */
-scav_result scav_profile_validate(scav_profile const *profile);
-
 /* One row of the portslot geometry column: a port's coordinate, which side of
  * its boundary rect it sits on (0 left, 1 right, 2 top, 3 bottom), and how
  * many state borders enclose that boundary. */
@@ -121,6 +112,15 @@ typedef struct {
   scav_router_id router;
   uint32_t threads; /* scheduling only; ignored */
 } scav_layout_opts;
+
+/* NOLINTEND(modernize-use-using, readability-identifier-naming) */
+
+/* Fills `out` from a shipped profile: "compact" or "readable". An unknown name
+ * is SCAV_E_INVALID_ARG and writes nothing. */
+scav_result scav_profile_named(char const *name, scav_profile *out);
+
+/* Every bound above, checked; scav_layout_run revalidates regardless. */
+scav_result scav_profile_validate(scav_profile const *profile);
 
 /* Validates the profile and spaces, runs layout, writes the geometry columns,
  * and fills `out_placed` parallel to the path boxes. NULL `spaces` means no
