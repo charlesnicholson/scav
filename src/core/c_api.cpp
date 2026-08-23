@@ -24,7 +24,7 @@ namespace {
 // nothing enforces that they keep matching.
 scav_pending to_abi(scav::Pending const &p) {
   return { .path = { .off = p.path.off, .len = p.path.len },
-           .from = p.from.v,
+           .from_doc = p.from.v,
            .stmt_row = p.stmt_row };
 }
 

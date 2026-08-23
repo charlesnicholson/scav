@@ -283,6 +283,55 @@ scav_result scav_image_extent(scav_images const *images,
   return SCAV_OK;
 }
 
+scav_result scav_measure_chart(scav_chart const *chart,
+                               scav_metrics const *metrics,
+                               scav_profile const *profile,
+                               scav_box_space *box_state,
+                               uint32_t cap_box_state,
+                               scav_box_space *box_sub,
+                               uint32_t cap_box_sub,
+                               scav_path_clear *path_clear,
+                               uint32_t cap_path_clear,
+                               scav_path_box *path_box,
+                               uint32_t cap_path_box,
+                               uint32_t *out_counts) {
+  if ((chart == nullptr) || (metrics == nullptr) || (profile == nullptr) ||
+      (out_counts == nullptr)) {
+    return SCAV_E_INVALID_ARG;
+  }
+  scav::Spaces spaces;
+  if (!scav::measure_chart(chart->chart, metrics->metrics, *profile, spaces)) {
+    return SCAV_E_STATE;
+  }
+
+  auto const count = [](auto const &v) { return static_cast<uint32_t>(v.size()); };
+  out_counts[0] = count(spaces.box_state);
+  out_counts[1] = count(spaces.box_sub);
+  out_counts[2] = count(spaces.path_clear);
+  out_counts[3] = count(spaces.path_box);
+  if ((cap_box_state == 0) && (cap_box_sub == 0) && (cap_path_clear == 0) &&
+      (cap_path_box == 0)) {
+    return SCAV_OK; /* count query */
+  }
+  if ((cap_box_state < out_counts[0]) || (cap_box_sub < out_counts[1]) ||
+      (cap_path_clear < out_counts[2]) || (cap_path_box < out_counts[3])) {
+    return SCAV_E_CAPACITY;
+  }
+
+  auto const copy = [](auto *out, auto const &rows) {
+    if (!rows.empty()) {
+      if (out == nullptr) { return false; }
+      std::memcpy(out, rows.data(), rows.size() * sizeof(rows[0]));
+    }
+    return true;
+  };
+  if (!copy(box_state, spaces.box_state) || !copy(box_sub, spaces.box_sub) ||
+      !copy(path_clear, spaces.path_clear) || !copy(path_box, spaces.path_box)) {
+    return SCAV_E_INVALID_ARG;
+  }
+  return SCAV_OK;
+}
+
 scav_result scav_palette_standard(scav_style *out, uint32_t cap) {
   if (out == nullptr) { return SCAV_E_INVALID_ARG; }
   scav::Palette const p{ scav::palette_standard() };

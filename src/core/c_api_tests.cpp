@@ -180,7 +180,7 @@ TEST_CASE("abi: pending names what the loader still needs, resolved") {
   uint32_t count{ 0 };
   REQUIRE(scav_load_pending(loader, &pending, &count) == SCAV_OK);
   REQUIRE(count == 1);
-  CHECK(pending[0].from == 0);
+  CHECK(pending[0].from_doc == 0);
 
   scav_byte const *bytes{ nullptr };
   uint32_t len{ 0 };

@@ -204,6 +204,29 @@ scav_result scav_emit_chart(scav_drawlist *list,
                             uint32_t placed_count,
                             int32_t depth);
 
+/* The reference measurement pass, which is the policy every corpus golden is
+ * stated against -- and the reason it lives in the shared library rather than
+ * in each binding: Python's `/` yields a float, and a space request computed
+ * that way would differ under FMA contraction and fail the golden silently.
+ *
+ * Pass all four caps as 0 with a non-null `out_counts` to query the four
+ * counts, then call again with buffers. `out_counts` receives four values in
+ * this order: box_state, box_sub, path_clear, path_box. A cap too small is
+ * SCAV_E_CAPACITY and never truncates. SCAV_E_NO_GLYPH when the font cannot
+ * measure some text; SCAV_E_STATE when a request leaves the legal domain. */
+scav_result scav_measure_chart(scav_chart const *chart,
+                               scav_metrics const *metrics,
+                               scav_profile const *profile,
+                               scav_box_space *box_state,
+                               uint32_t cap_box_state,
+                               scav_box_space *box_sub,
+                               uint32_t cap_box_sub,
+                               scav_path_clear *path_clear,
+                               uint32_t cap_path_clear,
+                               scav_path_box *path_box,
+                               uint32_t cap_path_box,
+                               uint32_t *out_counts);
+
 /* The palette `scav_emit_chart` wants, in this order. */
 enum {
   SCAV_STYLE_STATE = 0,   /* state box outline and fill */

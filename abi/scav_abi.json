@@ -1,0 +1,3291 @@
+{
+  "version": 1,
+  "headers": [
+    {
+      "path": "include/scav/scav_types.h",
+      "structs": [
+        {
+          "name": "scav_span",
+          "fields": [
+            {
+              "name": "off",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 0,
+              "size": 4
+            },
+            {
+              "name": "len",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 4,
+              "size": 4
+            }
+          ],
+          "size": 8,
+          "align": 4,
+          "padding": 0
+        },
+        {
+          "name": "scav_point",
+          "fields": [
+            {
+              "name": "x",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 0,
+              "size": 4
+            },
+            {
+              "name": "y",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 4,
+              "size": 4
+            }
+          ],
+          "size": 8,
+          "align": 4,
+          "padding": 0
+        },
+        {
+          "name": "scav_extent",
+          "fields": [
+            {
+              "name": "w",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 0,
+              "size": 4
+            },
+            {
+              "name": "h",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 4,
+              "size": 4
+            }
+          ],
+          "size": 8,
+          "align": 4,
+          "padding": 0
+        },
+        {
+          "name": "scav_rect",
+          "fields": [
+            {
+              "name": "x",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 0,
+              "size": 4
+            },
+            {
+              "name": "y",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 4,
+              "size": 4
+            },
+            {
+              "name": "w",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 8,
+              "size": 4
+            },
+            {
+              "name": "h",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 12,
+              "size": 4
+            }
+          ],
+          "size": 16,
+          "align": 4,
+          "padding": 0
+        }
+      ],
+      "handles": [],
+      "aliases": [
+        {
+          "name": "scav_byte",
+          "target": {
+            "name": "unsigned char",
+            "pointer": 0,
+            "const": false
+          }
+        },
+        {
+          "name": "scav_result",
+          "target": {
+            "name": "int32_t",
+            "pointer": 0,
+            "const": false
+          }
+        }
+      ],
+      "enums": [],
+      "functions": []
+    },
+    {
+      "path": "src/core/include/scav/scav_core_c.h",
+      "structs": [
+        {
+          "name": "scav_pending",
+          "fields": [
+            {
+              "name": "path",
+              "type": {
+                "name": "scav_span",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 0,
+              "size": 8
+            },
+            {
+              "name": "from_doc",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 8,
+              "size": 4
+            },
+            {
+              "name": "stmt_row",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 12,
+              "size": 4
+            }
+          ],
+          "size": 16,
+          "align": 4,
+          "padding": 0
+        },
+        {
+          "name": "scav_diag",
+          "fields": [
+            {
+              "name": "code",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 0,
+              "size": 4
+            },
+            {
+              "name": "subject_kind",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 4,
+              "size": 4
+            },
+            {
+              "name": "subject_ordinal",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 8,
+              "size": 4
+            },
+            {
+              "name": "doc",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 12,
+              "size": 4
+            },
+            {
+              "name": "off",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 16,
+              "size": 4
+            },
+            {
+              "name": "len",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 20,
+              "size": 4
+            }
+          ],
+          "size": 24,
+          "align": 4,
+          "padding": 0
+        }
+      ],
+      "handles": [
+        {
+          "name": "scav_load"
+        },
+        {
+          "name": "scav_chart"
+        }
+      ],
+      "aliases": [
+        {
+          "name": "scav_column_id",
+          "target": {
+            "name": "uint32_t",
+            "pointer": 0,
+            "const": false
+          }
+        }
+      ],
+      "enums": [
+        {
+          "values": [
+            {
+              "name": "SCAV_OK",
+              "value": 0
+            },
+            {
+              "name": "SCAV_E_INVALID_ARG",
+              "value": -1
+            },
+            {
+              "name": "SCAV_E_STATE",
+              "value": -2
+            },
+            {
+              "name": "SCAV_E_CAPACITY",
+              "value": -3
+            },
+            {
+              "name": "SCAV_E_LOAD",
+              "value": -4
+            },
+            {
+              "name": "SCAV_E_LAYOUT",
+              "value": -5
+            },
+            {
+              "name": "SCAV_E_FONT",
+              "value": -6
+            },
+            {
+              "name": "SCAV_E_NO_GLYPH",
+              "value": -7
+            },
+            {
+              "name": "SCAV_E_DRAWLIST",
+              "value": -8
+            }
+          ]
+        }
+      ],
+      "functions": [
+        {
+          "name": "scav_abi_version",
+          "returns": {
+            "name": "uint32_t",
+            "pointer": 0,
+            "const": false
+          },
+          "params": []
+        },
+        {
+          "name": "scav_load_begin",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_load",
+                "pointer": 2,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_load_add",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "loader",
+              "type": {
+                "name": "scav_load",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "bytes",
+              "type": {
+                "name": "scav_byte",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "len",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "name",
+              "type": {
+                "name": "char",
+                "pointer": 1,
+                "const": true
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_load_pending",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "loader",
+              "type": {
+                "name": "scav_load",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_pending",
+                "pointer": 2,
+                "const": true
+              }
+            },
+            {
+              "name": "out_count",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_load_path",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "loader",
+              "type": {
+                "name": "scav_load",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "path",
+              "type": {
+                "name": "scav_span",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_byte",
+                "pointer": 2,
+                "const": true
+              }
+            },
+            {
+              "name": "out_len",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_load_finish",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "loader",
+              "type": {
+                "name": "scav_load",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_chart",
+                "pointer": 2,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_load_destroy",
+          "returns": {
+            "name": "void",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "loader",
+              "type": {
+                "name": "scav_load",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_chart_destroy",
+          "returns": {
+            "name": "void",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "chart",
+              "type": {
+                "name": "scav_chart",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_load_diag_count",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "loader",
+              "type": {
+                "name": "scav_load",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "out_count",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_load_diag",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "loader",
+              "type": {
+                "name": "scav_load",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "index",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "out_code",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "out_doc",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "out_off",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "out_len",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_diag_message",
+          "returns": {
+            "name": "char",
+            "pointer": 1,
+            "const": true
+          },
+          "params": [
+            {
+              "name": "code",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_load_document_name",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "loader",
+              "type": {
+                "name": "scav_load",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "doc",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_byte",
+                "pointer": 2,
+                "const": true
+              }
+            },
+            {
+              "name": "out_len",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_chart_counts",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "chart",
+              "type": {
+                "name": "scav_chart",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "out_documents",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "out_states",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "out_submachines",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "out_transitions",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "out_includes",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_chart_structural_hash",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "chart",
+              "type": {
+                "name": "scav_chart",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_chart_digest",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "chart",
+              "type": {
+                "name": "scav_chart",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_byte",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "cap",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "out_count",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_chart_diag_count",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "chart",
+              "type": {
+                "name": "scav_chart",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "out_count",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_chart_diag",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "chart",
+              "type": {
+                "name": "scav_chart",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "index",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_diag",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_column_find",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "chart",
+              "type": {
+                "name": "scav_chart",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "name",
+              "type": {
+                "name": "char",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_column_id",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_column_data",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "chart",
+              "type": {
+                "name": "scav_chart",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "id",
+              "type": {
+                "name": "scav_column_id",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_byte",
+                "pointer": 2,
+                "const": true
+              }
+            },
+            {
+              "name": "out_stride",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_column_count",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "chart",
+              "type": {
+                "name": "scav_chart",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "id",
+              "type": {
+                "name": "scav_column_id",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "out_count",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_str",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "chart",
+              "type": {
+                "name": "scav_chart",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "ref",
+              "type": {
+                "name": "scav_span",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_byte",
+                "pointer": 2,
+                "const": true
+              }
+            },
+            {
+              "name": "out_len",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/layout/include/scav/scav_layout_c.h",
+      "structs": [
+        {
+          "name": "scav_box_space",
+          "fields": [
+            {
+              "name": "min_w",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 0,
+              "size": 4
+            },
+            {
+              "name": "h_before",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 4,
+              "size": 4
+            },
+            {
+              "name": "h_after",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 8,
+              "size": 4
+            }
+          ],
+          "size": 12,
+          "align": 4,
+          "padding": 0
+        },
+        {
+          "name": "scav_path_clear",
+          "fields": [
+            {
+              "name": "src",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 0,
+              "size": 4
+            },
+            {
+              "name": "dst",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 4,
+              "size": 4
+            }
+          ],
+          "size": 8,
+          "align": 4,
+          "padding": 0
+        },
+        {
+          "name": "scav_path_box",
+          "fields": [
+            {
+              "name": "subject",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 0,
+              "size": 4
+            },
+            {
+              "name": "w",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 4,
+              "size": 4
+            },
+            {
+              "name": "h",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 8,
+              "size": 4
+            },
+            {
+              "name": "order",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 12,
+              "size": 4
+            }
+          ],
+          "size": 16,
+          "align": 4,
+          "padding": 0
+        },
+        {
+          "name": "scav_spaces",
+          "fields": [
+            {
+              "name": "box_state",
+              "type": {
+                "name": "scav_box_space",
+                "pointer": 1,
+                "const": true
+              },
+              "offset": 0,
+              "size": 8
+            },
+            {
+              "name": "n_box_state",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 8,
+              "size": 4
+            },
+            {
+              "name": "box_sub",
+              "type": {
+                "name": "scav_box_space",
+                "pointer": 1,
+                "const": true
+              },
+              "offset": 16,
+              "size": 8
+            },
+            {
+              "name": "n_box_sub",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 24,
+              "size": 4
+            },
+            {
+              "name": "path_clear",
+              "type": {
+                "name": "scav_path_clear",
+                "pointer": 1,
+                "const": true
+              },
+              "offset": 32,
+              "size": 8
+            },
+            {
+              "name": "n_path_clear",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 40,
+              "size": 4
+            },
+            {
+              "name": "path_box",
+              "type": {
+                "name": "scav_path_box",
+                "pointer": 1,
+                "const": true
+              },
+              "offset": 48,
+              "size": 8
+            },
+            {
+              "name": "n_path_box",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 56,
+              "size": 4
+            }
+          ],
+          "size": 64,
+          "align": 8,
+          "padding": 16
+        },
+        {
+          "name": "scav_profile",
+          "fields": [
+            {
+              "name": "profile_id",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 0,
+              "size": 4
+            },
+            {
+              "name": "profile_version",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 4,
+              "size": 4
+            },
+            {
+              "name": "pad",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 8,
+              "size": 4
+            },
+            {
+              "name": "font_size_grid",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 12,
+              "size": 4
+            },
+            {
+              "name": "line_height_k_num",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 16,
+              "size": 4
+            },
+            {
+              "name": "line_height_k_den",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 20,
+              "size": 4
+            },
+            {
+              "name": "kind_min_w",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "array": 9,
+              "offset": 24,
+              "size": 36
+            },
+            {
+              "name": "kind_min_h",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "array": 9,
+              "offset": 60,
+              "size": 36
+            },
+            {
+              "name": "dar_num",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 96,
+              "size": 4
+            },
+            {
+              "name": "dar_den",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 100,
+              "size": 4
+            },
+            {
+              "name": "trybox",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 104,
+              "size": 4
+            },
+            {
+              "name": "sm_tiebreak",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 108,
+              "size": 4
+            },
+            {
+              "name": "w_bends",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 112,
+              "size": 4
+            },
+            {
+              "name": "w_corridor",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 116,
+              "size": 4
+            },
+            {
+              "name": "w_crossings",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 120,
+              "size": 4
+            },
+            {
+              "name": "w_excess_len",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 124,
+              "size": 4
+            },
+            {
+              "name": "w_adjacency",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 128,
+              "size": 4
+            },
+            {
+              "name": "w_label",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 132,
+              "size": 4
+            },
+            {
+              "name": "w_aspect",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 136,
+              "size": 4
+            },
+            {
+              "name": "w_area",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 140,
+              "size": 4
+            },
+            {
+              "name": "portfolio_k",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 144,
+              "size": 4
+            },
+            {
+              "name": "sweep_count",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 148,
+              "size": 4
+            },
+            {
+              "name": "congestion_iterations",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 152,
+              "size": 4
+            },
+            {
+              "name": "ripup_cap",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 156,
+              "size": 4
+            },
+            {
+              "name": "spacing_inflation_cap",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 160,
+              "size": 4
+            },
+            {
+              "name": "spacing_inflation_increment",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 164,
+              "size": 4
+            },
+            {
+              "name": "print_columns",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 168,
+              "size": 4
+            }
+          ],
+          "size": 172,
+          "align": 4,
+          "padding": 0
+        },
+        {
+          "name": "scav_port_slot",
+          "fields": [
+            {
+              "name": "x",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 0,
+              "size": 4
+            },
+            {
+              "name": "y",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 4,
+              "size": 4
+            },
+            {
+              "name": "side",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 8,
+              "size": 4
+            },
+            {
+              "name": "boundary_depth",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 12,
+              "size": 4
+            }
+          ],
+          "size": 16,
+          "align": 4,
+          "padding": 0
+        },
+        {
+          "name": "scav_layout_opts",
+          "fields": [
+            {
+              "name": "profile",
+              "type": {
+                "name": "scav_profile",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 0,
+              "size": 172
+            },
+            {
+              "name": "router",
+              "type": {
+                "name": "scav_router_id",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 172,
+              "size": 4
+            },
+            {
+              "name": "threads",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 176,
+              "size": 4
+            }
+          ],
+          "size": 180,
+          "align": 4,
+          "padding": 0
+        }
+      ],
+      "handles": [],
+      "aliases": [
+        {
+          "name": "scav_router_id",
+          "target": {
+            "name": "uint32_t",
+            "pointer": 0,
+            "const": false
+          }
+        },
+        {
+          "name": "scav_placed",
+          "target": {
+            "name": "scav_rect",
+            "pointer": 0,
+            "const": false
+          }
+        }
+      ],
+      "enums": [],
+      "functions": [
+        {
+          "name": "scav_profile_named",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "name",
+              "type": {
+                "name": "char",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_profile",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_profile_validate",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "profile",
+              "type": {
+                "name": "scav_profile",
+                "pointer": 1,
+                "const": true
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_layout_run",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "chart",
+              "type": {
+                "name": "scav_chart",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "spaces",
+              "type": {
+                "name": "scav_spaces",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "opts",
+              "type": {
+                "name": "scav_layout_opts",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "out_placed",
+              "type": {
+                "name": "scav_placed",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "cap",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "out_count",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_router_list",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "out_count",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_router_name",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "index",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_byte",
+                "pointer": 2,
+                "const": true
+              }
+            },
+            {
+              "name": "out_len",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_router_by_name",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "name",
+              "type": {
+                "name": "scav_byte",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "len",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_router_id",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/draw/include/scav/scav_draw_c.h",
+      "structs": [
+        {
+          "name": "scav_style",
+          "fields": [
+            {
+              "name": "stroke_rgba",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 0,
+              "size": 4
+            },
+            {
+              "name": "fill_rgba",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 4,
+              "size": 4
+            },
+            {
+              "name": "stroke_w",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 8,
+              "size": 4
+            },
+            {
+              "name": "dash",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 12,
+              "size": 4
+            },
+            {
+              "name": "font_size_grid",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 16,
+              "size": 4
+            }
+          ],
+          "size": 20,
+          "align": 4,
+          "padding": 0
+        },
+        {
+          "name": "scav_prim",
+          "fields": [
+            {
+              "name": "kind",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 0,
+              "size": 4
+            },
+            {
+              "name": "depth",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 4,
+              "size": 4
+            },
+            {
+              "name": "style",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 8,
+              "size": 4
+            },
+            {
+              "name": "clip",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 12,
+              "size": 4
+            },
+            {
+              "name": "origin_kind",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 16,
+              "size": 4
+            },
+            {
+              "name": "origin_ordinal",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 20,
+              "size": 4
+            },
+            {
+              "name": "points",
+              "type": {
+                "name": "scav_span",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 24,
+              "size": 8
+            },
+            {
+              "name": "payload",
+              "type": {
+                "name": "scav_span",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 32,
+              "size": 8
+            },
+            {
+              "name": "a",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 40,
+              "size": 4
+            },
+            {
+              "name": "b",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 44,
+              "size": 4
+            }
+          ],
+          "size": 48,
+          "align": 4,
+          "padding": 0
+        }
+      ],
+      "handles": [
+        {
+          "name": "scav_metrics"
+        },
+        {
+          "name": "scav_images"
+        },
+        {
+          "name": "scav_drawlist"
+        }
+      ],
+      "aliases": [],
+      "enums": [
+        {
+          "values": [
+            {
+              "name": "SCAV_PRIM_RECT",
+              "value": 0
+            },
+            {
+              "name": "SCAV_PRIM_RRECT",
+              "value": 1
+            },
+            {
+              "name": "SCAV_PRIM_LINE",
+              "value": 2
+            },
+            {
+              "name": "SCAV_PRIM_POLYLINE",
+              "value": 3
+            },
+            {
+              "name": "SCAV_PRIM_PATH",
+              "value": 4
+            },
+            {
+              "name": "SCAV_PRIM_TEXT",
+              "value": 5
+            },
+            {
+              "name": "SCAV_PRIM_CIRCLE",
+              "value": 6
+            },
+            {
+              "name": "SCAV_PRIM_ARC",
+              "value": 7
+            },
+            {
+              "name": "SCAV_PRIM_IMAGE",
+              "value": 8
+            },
+            {
+              "name": "SCAV_PRIM_KIND_COUNT",
+              "value": 9
+            }
+          ]
+        },
+        {
+          "values": [
+            {
+              "name": "SCAV_CLIP_NONE",
+              "value": 4294967295
+            }
+          ]
+        },
+        {
+          "values": [
+            {
+              "name": "SCAV_STYLE_STATE",
+              "value": 0
+            },
+            {
+              "name": "SCAV_STYLE_SUB",
+              "value": 1
+            },
+            {
+              "name": "SCAV_STYLE_ROUTE",
+              "value": 2
+            },
+            {
+              "name": "SCAV_STYLE_TITLE",
+              "value": 3
+            },
+            {
+              "name": "SCAV_STYLE_LABEL",
+              "value": 4
+            },
+            {
+              "name": "SCAV_STYLE_PSEUDO",
+              "value": 5
+            },
+            {
+              "name": "SCAV_STYLE_COUNT",
+              "value": 6
+            }
+          ]
+        }
+      ],
+      "functions": [
+        {
+          "name": "scav_metrics_create",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "ttf",
+              "type": {
+                "name": "scav_byte",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "len",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_metrics",
+                "pointer": 2,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_metrics_destroy",
+          "returns": {
+            "name": "void",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "metrics",
+              "type": {
+                "name": "scav_metrics",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_metrics_identity",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "metrics",
+              "type": {
+                "name": "scav_metrics",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_metrics_units_per_em",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "metrics",
+              "type": {
+                "name": "scav_metrics",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_metrics_glyph_count",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "metrics",
+              "type": {
+                "name": "scav_metrics",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_measure_text",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "metrics",
+              "type": {
+                "name": "scav_metrics",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "utf8_nfc",
+              "type": {
+                "name": "scav_byte",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "len",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "font_size_grid",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_extent",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_line_height",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "font_size_grid",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "k_num",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "k_den",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "int32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_measure_block",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "metrics",
+              "type": {
+                "name": "scav_metrics",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "utf8_nfc",
+              "type": {
+                "name": "scav_byte",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "len",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "font_size_grid",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "k_num",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "k_den",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_extent",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_drawlist_create",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_drawlist",
+                "pointer": 2,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_drawlist_destroy",
+          "returns": {
+            "name": "void",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "list",
+              "type": {
+                "name": "scav_drawlist",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_drawlist_counts",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "list",
+              "type": {
+                "name": "scav_drawlist",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "out_prims",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "out_styles",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "out_points",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "out_clips",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "out_text",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_drawlist_prims",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "list",
+              "type": {
+                "name": "scav_drawlist",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_prim",
+                "pointer": 2,
+                "const": true
+              }
+            },
+            {
+              "name": "out_count",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_drawlist_styles",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "list",
+              "type": {
+                "name": "scav_drawlist",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_style",
+                "pointer": 2,
+                "const": true
+              }
+            },
+            {
+              "name": "out_count",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_drawlist_points",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "list",
+              "type": {
+                "name": "scav_drawlist",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_point",
+                "pointer": 2,
+                "const": true
+              }
+            },
+            {
+              "name": "out_count",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_drawlist_clips",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "list",
+              "type": {
+                "name": "scav_drawlist",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_rect",
+                "pointer": 2,
+                "const": true
+              }
+            },
+            {
+              "name": "out_count",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_drawlist_str",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "list",
+              "type": {
+                "name": "scav_drawlist",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "payload",
+              "type": {
+                "name": "scav_span",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_byte",
+                "pointer": 2,
+                "const": true
+              }
+            },
+            {
+              "name": "out_len",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_drawlist_validate",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "list",
+              "type": {
+                "name": "scav_drawlist",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "out_prim",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_drawlist_canonicalize",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "list",
+              "type": {
+                "name": "scav_drawlist",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_drawlist_digest",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "list",
+              "type": {
+                "name": "scav_drawlist",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "metrics",
+              "type": {
+                "name": "scav_metrics",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_drawlist_append",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "dst",
+              "type": {
+                "name": "scav_drawlist",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "src",
+              "type": {
+                "name": "scav_drawlist",
+                "pointer": 1,
+                "const": true
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_images_create",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_images",
+                "pointer": 2,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_images_destroy",
+          "returns": {
+            "name": "void",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "images",
+              "type": {
+                "name": "scav_images",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_image_register",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "images",
+              "type": {
+                "name": "scav_images",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "id",
+              "type": {
+                "name": "char",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "bytes",
+              "type": {
+                "name": "scav_byte",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "len",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "w",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "h",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "mime",
+              "type": {
+                "name": "char",
+                "pointer": 1,
+                "const": true
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_image_count",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "images",
+              "type": {
+                "name": "scav_images",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "out_count",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_image_find",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "images",
+              "type": {
+                "name": "scav_images",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "id",
+              "type": {
+                "name": "scav_byte",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "id_len",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "out_index",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_image_extent",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "images",
+              "type": {
+                "name": "scav_images",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "index",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_extent",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_emit_chart",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "list",
+              "type": {
+                "name": "scav_drawlist",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "chart",
+              "type": {
+                "name": "scav_chart",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "metrics",
+              "type": {
+                "name": "scav_metrics",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "palette",
+              "type": {
+                "name": "scav_style",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "palette_len",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "spaces",
+              "type": {
+                "name": "scav_spaces",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "placed",
+              "type": {
+                "name": "scav_placed",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "placed_count",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "depth",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_measure_chart",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "chart",
+              "type": {
+                "name": "scav_chart",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "metrics",
+              "type": {
+                "name": "scav_metrics",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "profile",
+              "type": {
+                "name": "scav_profile",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "box_state",
+              "type": {
+                "name": "scav_box_space",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "cap_box_state",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "box_sub",
+              "type": {
+                "name": "scav_box_space",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "cap_box_sub",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "path_clear",
+              "type": {
+                "name": "scav_path_clear",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "cap_path_clear",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "path_box",
+              "type": {
+                "name": "scav_path_box",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "cap_path_box",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "out_counts",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_palette_standard",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_style",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "cap",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "src/svg/include/scav/scav_svg_c.h",
+      "structs": [
+        {
+          "name": "scav_svg_options",
+          "fields": [
+            {
+              "name": "embed_font",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 0,
+              "size": 4
+            },
+            {
+              "name": "margin",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 4,
+              "size": 4
+            }
+          ],
+          "size": 8,
+          "align": 4,
+          "padding": 0
+        }
+      ],
+      "handles": [],
+      "aliases": [],
+      "enums": [],
+      "functions": [
+        {
+          "name": "scav_svg_write",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "list",
+              "type": {
+                "name": "scav_drawlist",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "metrics",
+              "type": {
+                "name": "scav_metrics",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "images",
+              "type": {
+                "name": "scav_images",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "options",
+              "type": {
+                "name": "scav_svg_options",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_byte",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "cap",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "out_count",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        },
+        {
+          "name": "scav_svg_bounds",
+          "returns": {
+            "name": "scav_result",
+            "pointer": 0,
+            "const": false
+          },
+          "params": [
+            {
+              "name": "list",
+              "type": {
+                "name": "scav_drawlist",
+                "pointer": 1,
+                "const": true
+              }
+            },
+            {
+              "name": "out",
+              "type": {
+                "name": "scav_rect",
+                "pointer": 1,
+                "const": false
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -144,6 +144,8 @@ plugins/scxml/         reference example: importer, exporter, builder contributi
 assets/font/           the bundled TTF — a layout-hash input, so versioned here
 abi/scav_abi.json      committed golden ABI description (§16), extracted from the
                        C headers — the description is the ABI, the headers are the API
+bindings/python/scav/  `_abi.py` generated from that JSON; `__init__.py` the thin
+                       hand-written idiomatic half. The generated half never drifts
 test_data/charts/      corpus: synthetic fixtures + hand-transcribed real charts
 test_data/golden/      drawlist/, svg/, layout/ — see below
 functional_tests/      Python, drives the CLI and the C ABI via ctypes
@@ -1396,7 +1398,17 @@ typedef struct { scav_profile profile; scav_router_id router; uint32_t threads; 
 
 **Machine-readable ABI:** the header is the source of truth; a build-time tool extracts functions, structs, enums, and field offsets to a committed JSON sidecar. Bindings are generated; a golden test asserts extraction matches, so an ABI break is a review diff rather than a downstream segfault.
 
-**The extraction tool is deliberately unchosen, and lands with P5c.** Two shapes work. libclang models the layout of any target without running anything, at the cost of provisioning LLVM on six triples that today carry a compiler and little else. A scraper over this header plus a probe program compiled and run by the toolchain under test needs no new dependency and reports the *real* layout rather than a second parser's model of one, at the cost of not answering for a target it cannot execute. Each header is one flat C file with no macros precisely so that either works, so the choice can wait for the phase that writes the tool. Whichever it is, it is tooling-only, and a scraper must fail closed on a declaration form it does not recognize — silently skipping one would leave exactly the drift the golden exists to catch.
+**The extraction tool is the scraper plus a probe, chosen at P5c.** libclang was the alternative and it lost on the cost §16 already named: provisioning LLVM on six triples that carry a compiler and little else. That cost turned out to be worse than estimated — on darwin the lint gate's clang-tools package *compiles clang from source*, which is what an ABI extractor would have inherited on every row. The scraper needs nothing new, and the probe reports the layout the shipping compiler really produces rather than a second parser's model of one.
+
+**Accepted cost, stated plainly: it cannot answer for a target it cannot execute.** `wasm32-wasi` therefore needs either a runner in the P11 row or a declared fallback, and that is a P11 decision rather than a gap here.
+
+The scraper **fails closed** — a declaration form it does not model is an error, never a silent skip, because skipping one would leave exactly the drift the golden exists to catch. It reads each header the way a C compiler does, with `__cplusplus` undefined, so the `extern "C"` braces and any C++-only section drop out together; a namespace body scraped as if it were ABI is the failure mode that rule prevents. The probe compiles as C++ with the project's own compiler, since that is the toolchain that ships and these are standard-layout PODs; that the headers *also* compile as C is a separate claim, checked by a separate C11 compile of all of them together.
+
+**Padding is recorded, not inferred.** Every struct carries its size, alignment, per-field offsets and total padding, so a struct that grows a hole reads as an ABI break in the diff. Only `scav_spaces` has any — 16 bytes, from four pointer-and-count pairs on LP64 — which is exactly the case an inferring reader would have got wrong.
+
+**No single-field id struct crosses this ABI**, so the flatten-to-int hazard has nothing to bite: `scav_router_id` and `scav_column_id` are `typedef uint32_t` and every id-shaped C++ type (`StateId`, `TransId`) stays C++-internal. The rule stands for whenever one appears.
+
+**One ABI field was renamed for the bindings' sake**: `scav_pending.from` became `from_doc`. `from` is a keyword in Python and several other binding languages, so no generated attribute could name it — a permanent wart in exchange for one rename at the phase that first generates bindings.
 
 Editor commands do not cross the C boundary as objects; that layer's API is opcodes. (Note `virtual Command Inverse()` returning an abstract base by value does not compile — the editor's inverse is a command buffer append.)
 

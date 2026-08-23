@@ -133,6 +133,24 @@ file(GLOB_RECURSE scav_layout_checked_sources CONFIGURE_DEPENDS
 scav_add_functional_test(include_subset
   DEPENDS ${scav_layout_checked_sources}
 )
+# The ABI golden, and the generated bindings driving the whole pipeline. Needs
+# the shared library, since that is what a binding loads.
+file(GLOB scav_abi_headers CONFIGURE_DEPENDS
+  "${PROJECT_SOURCE_DIR}/include/scav/*.h"
+  "${PROJECT_SOURCE_DIR}/src/*/include/scav/*_c.h"
+)
+scav_add_functional_test(abi
+  DEPENDS ${scav_abi_headers}
+          ${scav_corpus_charts}
+          "${PROJECT_SOURCE_DIR}/abi/scav_abi.json"
+          "${PROJECT_SOURCE_DIR}/bindings/python/scav/_abi.py"
+          "${PROJECT_SOURCE_DIR}/bindings/python/scav/__init__.py"
+          "${PROJECT_SOURCE_DIR}/tools/abi_extract.py"
+          "${PROJECT_SOURCE_DIR}/tools/gen_bindings.py"
+          "$<TARGET_FILE:scav_shared>"
+          "$<TARGET_FILE:scav>"
+  TARGETS scav_shared scav
+)
 scav_add_functional_test(presets
   DEPENDS "${PROJECT_SOURCE_DIR}/CMakePresets.json"
           "${PROJECT_SOURCE_DIR}/tools/gen_presets.py"

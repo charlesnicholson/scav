@@ -39,12 +39,15 @@ uint32_t scav_abi_version(void);
 typedef struct scav_load scav_load;
 typedef struct scav_chart scav_chart;
 
-/* 16 bytes, no padding. `from` is a DocId: pending is reported before anything
- * is instantiated, and a file included N times is fetched once. `stmt_row`
- * indexes the statements of `from`'s document. */
+/* 16 bytes, no padding. `from_doc` is a DocId: pending is reported before
+ * anything is instantiated, and a file included N times is fetched once.
+ * `stmt_row` indexes the statements of that document. Not spelled `from`,
+ * because that is a keyword in Python and several other binding languages, and
+ * a field no binding can name as an attribute is a field with a permanent
+ * wart. */
 typedef struct {
   scav_span path;
-  uint32_t from;
+  uint32_t from_doc;
   uint32_t stmt_row;
 } scav_pending;
 /* NOLINTEND(modernize-use-using, readability-identifier-naming) */
