@@ -37,6 +37,10 @@ struct Loaded {
 void load_and_report(char const *path, bool validate, Loaded &out);
 
 int run_dump(char const *path, bool hash_only, bool as_json, bool with_layout);
+int run_render(char const *path,
+               char const *out_path,
+               bool embed_font,
+               char const *profile_name);
 int run_fmt(std::vector<char const *> const &paths, bool check_only);
 int run_deps(char const *path, char const *target);
 

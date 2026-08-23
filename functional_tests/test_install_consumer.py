@@ -66,6 +66,8 @@ class TestInstallAndConsume(unittest.TestCase):
                     "include/scav/scav_draw_c.h",
                     "include/scav/scav_layout.h",
                     "include/scav/scav_layout_c.h",
+                    "include/scav/scav_svg.h",
+                    "include/scav/scav_svg_c.h",
                     "lib/cmake/scav/scav-config.cmake",
                     "lib/cmake/scav/scav-config-version.cmake",
                     "lib/cmake/scav/scav-targets.cmake"):
@@ -74,6 +76,7 @@ class TestInstallAndConsume(unittest.TestCase):
         self.assertTrue(list((self.prefix / "lib").glob("*scavcore*")), "no archive")
         self.assertTrue(list((self.prefix / "lib").glob("*scavlayout*")), "no layout archive")
         self.assertTrue(list((self.prefix / "lib").glob("*scavdraw*")), "no draw archive")
+        self.assertTrue(list((self.prefix / "lib").glob("*scavsvg*")), "no svg archive")
 
     def test_every_installed_header_is_a_public_one(self) -> None:
         """The public/private split is a directory layout, so it is only real if
@@ -103,6 +106,8 @@ class TestInstallAndConsume(unittest.TestCase):
              "include/scav/scav_draw_c.h",
              "include/scav/scav_layout.h",
              "include/scav/scav_layout_c.h",
+             "include/scav/scav_svg.h",
+             "include/scav/scav_svg_c.h",
              "include/scav/scav_types.h"],
             sorted(p.relative_to(self.prefix).as_posix()
                    for p in self.prefix.rglob("*.h")))

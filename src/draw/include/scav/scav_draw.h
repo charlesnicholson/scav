@@ -165,6 +165,45 @@ uint32_t drawlist_digest(DrawList const &d, Metrics const &m);
 // Rebases `src`'s style, clip, point and payload indices onto `dst`.
 void drawlist_append(DrawList &dst, DrawList const &src);
 
+// Images ====================================================================
+
+// The app registers, the DrawList references. Raster only: an arbitrary SVG
+// fragment would be unimplementable in an ImGui backend and would break the
+// one-IR property, and vector content is primitives.
+struct Images {
+  struct Row {
+    StrRef id, mime;
+    Span bytes;  // into `pool`
+    int32_t w, h;
+  };
+  std::vector<Row> rows;
+  std::vector<scav_byte> pool;  // ids, mime types and image bytes, one arena
+};
+
+// Dimensions come from registration rather than decoding, so no backend needs a
+// decoder to size an image. False on a duplicate id, an empty one, no bytes, or
+// a non-positive extent.
+bool image_register(Images &images,
+                    std::string_view id,
+                    scav_byte const *bytes,
+                    uint32_t len,
+                    int32_t w,
+                    int32_t h,
+                    std::string_view mime);
+
+// The row an id names, or INVALID.
+uint32_t image_find(Images const &images, std::string_view id);
+
+inline std::string_view image_str(Images const &images, StrRef ref) {
+  if (ref.len == 0) { return {}; }
+  return { reinterpret_cast<char const *>(images.pool.data() + ref.off), ref.len };
+}
+
+inline std::string_view image_bytes(Images const &images, Span ref) {
+  if (ref.len == 0) { return {}; }
+  return { reinterpret_cast<char const *>(images.pool.data() + ref.off), ref.len };
+}
+
 // Helper layer ==============================================================
 
 // Utilities an app may call, never machinery that calls the app. Pure
@@ -203,6 +242,33 @@ using Palette = std::vector<scav_style>;
 
 Palette palette_standard();
 
+// The measurement pass, and the stated policy every corpus golden is against:
+// a state's interior reserves its title, a submachine its own name, every
+// transition arrowhead room, and a labelled transition one path box. An
+// internal or local self-transition gets no route, so its label rides the
+// source's `h_after` instead. Nothing else asks for anything.
+struct Spaces {
+  std::vector<scav_box_space> box_state, box_sub;
+  std::vector<scav_path_clear> path_clear;
+  std::vector<scav_path_box> path_box;
+  std::vector<StrRef> label;  // parallel to path_box: what it was measured from
+};
+
+bool measure_chart(Chart const &c, Metrics const &m, scav_profile const &p, Spaces &out);
+
+// Base pointers and counts over a Spaces, for handing to layout.
+scav_spaces as_spaces(Spaces const &s);
+
+// Where `trans`'s label goes: the box layout placed for it, or the band its
+// source reserved when the transition gets no route at all. False when the
+// transition asked for neither.
+bool label_box(Chart const &c,
+               scav_spaces const &s,
+               scav_placed const *placed,
+               uint32_t placed_count,
+               uint32_t trans,
+               scav_rect &out);
+
 void emit_state(DrawList &d,
                 Chart const &c,
                 Metrics const &m,
@@ -219,36 +285,31 @@ void emit_route(DrawList &d,
                 Palette const &p,
                 uint32_t trans,
                 int32_t depth);
+
+// Draws the label centred in `box`, which is the rect layout actually placed
+// rather than one the builder recomputed. A placed box may exceed its request,
+// so an emitter deriving its own would drift the moment a router stops
+// centring on the route midpoint.
 void emit_label(DrawList &d,
                 Chart const &c,
                 Metrics const &m,
                 Palette const &p,
                 uint32_t trans,
+                scav_rect box,
                 int32_t depth);
 
 // Every emitter in an order this function documents and nothing else depends
-// on: submachines, states, routes, then labels. False when the chart carries
-// no geometry, which means layout has not run.
+// on: submachines, states, routes, then labels. It takes the space tables and
+// the placed boxes back, because that is where a label's rect actually is.
+// False when the chart carries no geometry, which means layout has not run.
 bool emit_chart(DrawList &d,
-                 Chart const &c,
-                 Metrics const &m,
-                 Palette const &p,
-                 int32_t depth);
-
-// The measurement pass, and the stated policy every corpus golden is against:
-// a state's interior reserves its title, a transition's label becomes one path
-// box, and nothing else asks for room. Sizes the three tables to the chart.
-struct Spaces {
-  std::vector<scav_box_space> box_state, box_sub;
-  std::vector<scav_path_clear> path_clear;
-  std::vector<scav_path_box> path_box;
-  std::vector<StrRef> label;  // parallel to path_box: what it was measured from
-};
-
-bool measure_chart(Chart const &c, Metrics const &m, scav_profile const &p, Spaces &out);
-
-// Base pointers and counts over a Spaces, for handing to layout.
-scav_spaces as_spaces(Spaces const &s);
+                Chart const &c,
+                Metrics const &m,
+                Palette const &p,
+                scav_spaces const &s,
+                scav_placed const *placed,
+                uint32_t placed_count,
+                int32_t depth);
 
 }  // namespace scav
 

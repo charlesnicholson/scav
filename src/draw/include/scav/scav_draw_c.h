@@ -9,6 +9,8 @@
  * reading padding. */
 
 #include "scav/scav_core_c.h"
+/* The space tables and the placed boxes, which is where a label's rect is. */
+#include "scav/scav_layout_c.h"
 #include "scav/scav_types.h"
 
 /* NOLINTNEXTLINE(modernize-deprecated-headers) -- this header must compile as C */
@@ -189,13 +191,18 @@ scav_result scav_image_extent(scav_images const *images,
 /* The standard appearance over a laid-out chart. Emitters take the depth to
  * draw at, so an app interleaves its own primitives without forking anything;
  * `scav_emit_chart` calls them in an order it documents and nothing else
- * depends on. A chart with no geometry columns is SCAV_E_STATE. */
+ * depends on. Hand back the same space tables and placed boxes layout was
+ * given: a label's rect is the one layout placed, not one a builder recomputes.
+ * A chart with no geometry columns is SCAV_E_STATE. */
 scav_result scav_emit_chart(scav_drawlist *list,
-                             scav_chart const *chart,
-                             scav_metrics const *metrics,
-                             scav_style const *palette,
-                             uint32_t palette_len,
-                             int32_t depth);
+                            scav_chart const *chart,
+                            scav_metrics const *metrics,
+                            scav_style const *palette,
+                            uint32_t palette_len,
+                            scav_spaces const *spaces,
+                            scav_placed const *placed,
+                            uint32_t placed_count,
+                            int32_t depth);
 
 /* The palette `scav_emit_chart` wants, in this order. */
 enum {

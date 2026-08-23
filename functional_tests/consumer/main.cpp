@@ -7,6 +7,8 @@
 #include <scav/scav_draw_c.h>
 #include <scav/scav_layout.h>
 #include <scav/scav_layout_c.h>
+#include <scav/scav_svg.h>
+#include <scav/scav_svg_c.h>
 #include <scav/scav_types.h>
 
 #include <cstdint>
@@ -119,7 +121,8 @@ int check_abi() {
         (scav_metrics_units_per_em(metrics, &upem) != SCAV_OK) || (upem == 0) ||
         (scav_measure_text(metrics, text, 4, 160, &extent) != SCAV_OK) ||
         (extent.w <= 0) || (scav_drawlist_create(&list) != SCAV_OK) ||
-        (scav_emit_chart(list, chart, metrics, nullptr, 0, 0) != SCAV_OK) ||
+        (scav_emit_chart(list, chart, metrics, nullptr, 0, nullptr, nullptr, 0, 0) !=
+         SCAV_OK) ||
         (scav_drawlist_canonicalize(list) != SCAV_OK) ||
         (scav_drawlist_counts(list, &prims, nullptr, nullptr, nullptr, nullptr) !=
          SCAV_OK) ||
@@ -128,6 +131,29 @@ int check_abi() {
       rc = 1;
     } else {
       std::printf("consumer drawlist ok: %u primitives\n", prims);
+    }
+    // And out the far end: the SVG backend, under the count-then-write protocol
+    // every other span accessor uses.
+    if (rc == 0) {
+      uint32_t bytes{ 0 };
+      if ((scav_svg_write(list, metrics, nullptr, nullptr, nullptr, 0, &bytes) !=
+           SCAV_OK) ||
+          (bytes == 0)) {
+        std::fprintf(stderr, "scav_svg_write count query failed\n");
+        rc = 1;
+      } else {
+        std::vector<scav_byte> doc(bytes);
+        uint32_t again{ 0 };
+        if ((scav_svg_write(list, metrics, nullptr, nullptr, doc.data(), bytes,
+                            &again) != SCAV_OK) ||
+            (std::string_view{ reinterpret_cast<char const *>(doc.data()), 5 } !=
+             "<?xml")) {
+          std::fprintf(stderr, "scav_svg_write failed\n");
+          rc = 1;
+        } else {
+          std::printf("consumer svg ok: %u bytes\n", bytes);
+        }
+      }
     }
     scav_drawlist_destroy(list);
     scav_metrics_destroy(metrics);

@@ -69,7 +69,15 @@ Run run_pipeline(char const *name, Metrics const &m, scav_profile const &p) {
     why += diag_message(d.code);
   }
   REQUIRE_MESSAGE(laid, why);
-  REQUIRE_MESSAGE(emit_chart(r.list, r.chart, m, palette_standard(), 0), name);
+  REQUIRE_MESSAGE(emit_chart(r.list,
+                             r.chart,
+                             m,
+                             palette_standard(),
+                             as_spaces(r.spaces),
+                             r.placed.data(),
+                             static_cast<uint32_t>(r.placed.size()),
+                             0),
+                  name);
   uint32_t bad{ 0 };
   REQUIRE_MESSAGE(drawlist_validate(r.list, bad), name);
   drawlist_canonicalize(r.list);
@@ -188,14 +196,29 @@ TEST_CASE("drawlist corpus: canonical form is reached from any emission order") 
   REQUIRE(layout_run(c, as_spaces(spaces), opts, placed, diags));
 
   DrawList wrapper;
-  REQUIRE(emit_chart(wrapper, c, m, palette_standard(), 0));
+  REQUIRE(emit_chart(wrapper,
+                     c,
+                     m,
+                     palette_standard(),
+                     as_spaces(spaces),
+                     placed.data(),
+                     static_cast<uint32_t>(placed.size()),
+                     0));
 
   // The same picture, emitted by calling the per-kind emitters in an order the
   // convenience wrapper does not use: routes and labels first, then the boxes.
   DrawList by_hand;
   Palette const palette{ palette_standard() };
   for (uint32_t i = 0; i < c.transitions.size(); ++i) {
-    emit_label(by_hand, c, m, palette, i, 0);
+    scav_rect box{};
+    if (label_box(c,
+                  as_spaces(spaces),
+                  placed.data(),
+                  static_cast<uint32_t>(placed.size()),
+                  i,
+                  box)) {
+      emit_label(by_hand, c, m, palette, i, box, 0);
+    }
   }
   for (uint32_t i = static_cast<uint32_t>(c.transitions.size()); i-- > 0;) {
     emit_route(by_hand, c, palette, i, 0);
@@ -310,7 +333,14 @@ TEST_CASE("drawlist corpus: a 2k-state chart builds, and quickly") {
   REQUIRE(layout_run(c, as_spaces(spaces), opts, placed, diags));
 
   DrawList d;
-  REQUIRE(emit_chart(d, c, m, palette_standard(), 0));
+  REQUIRE(emit_chart(d,
+                     c,
+                     m,
+                     palette_standard(),
+                     as_spaces(spaces),
+                     placed.data(),
+                     static_cast<uint32_t>(placed.size()),
+                     0));
   uint32_t bad{ 0 };
   REQUIRE(drawlist_validate(d, bad));
   drawlist_canonicalize(d);

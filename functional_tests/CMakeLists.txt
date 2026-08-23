@@ -46,6 +46,8 @@ set(scav_corpus_charts
   "${PROJECT_SOURCE_DIR}/test_data/charts/estop.scav"
   "${PROJECT_SOURCE_DIR}/test_data/charts/led.scav"
   "${PROJECT_SOURCE_DIR}/test_data/charts/mill.scav"
+  "${PROJECT_SOURCE_DIR}/test_data/charts/ota.scav"
+  "${PROJECT_SOURCE_DIR}/test_data/charts/tcp.scav"
   "${PROJECT_SOURCE_DIR}/test_data/charts/toolchanger.scav"
   "${PROJECT_SOURCE_DIR}/test_data/charts/vac.scav"
 )
@@ -93,6 +95,15 @@ scav_add_functional_test(layout
           "$<TARGET_FILE:scav_shared>"
   TARGETS scav_shared
 )
+# `render` over the corpus, plus the side-by-side harness the P6 and P7 blind
+# reviews score against. `dot` and `node` are not prerequisites: the harness
+# reports what it could not compare.
+scav_add_functional_test(render
+  DEPENDS ${scav_corpus_charts}
+          "${PROJECT_SOURCE_DIR}/tools/baseline.py"
+          "$<TARGET_FILE:scav>"
+  TARGETS scav
+)
 scav_add_functional_test(fmt
   DEPENDS ${scav_corpus_charts}
           "$<TARGET_FILE:scav>"
@@ -111,10 +122,13 @@ scav_add_functional_test(deps
   TARGETS scav
 )
 # Globbed with CONFIGURE_DEPENDS: the checker scans whatever exists under
-# src/layout, so the stamp's inputs track the same set, new files included.
+# src/layout and src/draw, so the stamp's inputs track the same sets, new files
+# included.
 file(GLOB_RECURSE scav_layout_checked_sources CONFIGURE_DEPENDS
   "${PROJECT_SOURCE_DIR}/src/layout/*.h"
   "${PROJECT_SOURCE_DIR}/src/layout/*.cpp"
+  "${PROJECT_SOURCE_DIR}/src/draw/*.h"
+  "${PROJECT_SOURCE_DIR}/src/draw/*.cpp"
 )
 scav_add_functional_test(include_subset
   DEPENDS ${scav_layout_checked_sources}

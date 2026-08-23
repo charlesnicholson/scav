@@ -239,45 +239,21 @@ scav_result scav_image_register(scav_images *images,
                                int32_t w,
                                int32_t h,
                                char const *mime) {
-  if ((images == nullptr) || (id == nullptr) || (mime == nullptr) ||
-      ((bytes == nullptr) && (len != 0U))) {
+  if ((images == nullptr) || (id == nullptr) || (mime == nullptr)) {
     return SCAV_E_INVALID_ARG;
   }
-  // Dimensions come from registration and not from decoding, so a zero one is
-  // the caller's error rather than something to infer later.
-  if ((w <= 0) || (h <= 0) || (len == 0U)) { return SCAV_E_INVALID_ARG; }
-
   std::string_view const id_view{ id };
-  std::string_view const mime_view{ mime };
-  if (id_view.empty() || mime_view.empty()) { return SCAV_E_INVALID_ARG; }
-  uint32_t found{ 0 };
-  if (scav_image_find(images,
-                      reinterpret_cast<scav_byte const *>(id_view.data()),
-                      static_cast<uint32_t>(id_view.size()),
-                      &found) == SCAV_OK) {
+  if (scav::image_find(images->images, id_view) != scav::INVALID) {
     return SCAV_E_STATE;  // an id names one image for the registry's life
   }
-
-  auto const claim = [&](void const *from, size_t n) {
-    uint32_t const off{ static_cast<uint32_t>(images->pool.size()) };
-    auto const *raw{ static_cast<scav_byte const *>(from) };
-    images->pool.insert(images->pool.end(), raw, raw + n);
-    return scav::Span{ .off = off, .len = static_cast<uint32_t>(n) };
-  };
-  scav::Span const id_span{ claim(id_view.data(), id_view.size()) };
-  scav::Span const mime_span{ claim(mime_view.data(), mime_view.size()) };
-  scav::Span const byte_span{ claim(bytes, len) };
-  images->rows.push_back({ .id = { .off = id_span.off, .len = id_span.len },
-                           .mime = { .off = mime_span.off, .len = mime_span.len },
-                           .bytes = byte_span,
-                           .w = w,
-                           .h = h });
-  return SCAV_OK;
+  return scav::image_register(images->images, id_view, bytes, len, w, h, mime)
+             ? SCAV_OK
+             : SCAV_E_INVALID_ARG;
 }
 
 scav_result scav_image_count(scav_images const *images, uint32_t *out_count) {
   if ((images == nullptr) || (out_count == nullptr)) { return SCAV_E_INVALID_ARG; }
-  *out_count = static_cast<uint32_t>(images->rows.size());
+  *out_count = static_cast<uint32_t>(images->images.rows.size());
   return SCAV_OK;
 }
 
@@ -288,24 +264,22 @@ scav_result scav_image_find(scav_images const *images,
   if ((images == nullptr) || (id == nullptr) || (out_index == nullptr)) {
     return SCAV_E_INVALID_ARG;
   }
-  for (uint32_t i = 0; i < images->rows.size(); ++i) {
-    scav::StrRef const ref{ images->rows[i].id };
-    if ((ref.len == id_len) &&
-        (std::memcmp(images->pool.data() + ref.off, id, id_len) == 0)) {
-      *out_index = i;
-      return SCAV_OK;
-    }
-  }
-  return SCAV_E_INVALID_ARG;
+  uint32_t const row{ scav::image_find(
+      images->images,
+      { reinterpret_cast<char const *>(id), id_len }) };
+  if (row == scav::INVALID) { return SCAV_E_INVALID_ARG; }
+  *out_index = row;
+  return SCAV_OK;
 }
 
 scav_result scav_image_extent(scav_images const *images,
                               uint32_t index,
                               scav_extent *out) {
-  if ((images == nullptr) || (out == nullptr) || (index >= images->rows.size())) {
+  if ((images == nullptr) || (out == nullptr) ||
+      (index >= images->images.rows.size())) {
     return SCAV_E_INVALID_ARG;
   }
-  *out = { .w = images->rows[index].w, .h = images->rows[index].h };
+  *out = { .w = images->images.rows[index].w, .h = images->images.rows[index].h };
   return SCAV_OK;
 }
 
@@ -318,11 +292,14 @@ scav_result scav_palette_standard(scav_style *out, uint32_t cap) {
 }
 
 scav_result scav_emit_chart(scav_drawlist *list,
-                             scav_chart const *chart,
-                             scav_metrics const *metrics,
-                             scav_style const *palette,
-                             uint32_t palette_len,
-                             int32_t depth) {
+                            scav_chart const *chart,
+                            scav_metrics const *metrics,
+                            scav_style const *palette,
+                            uint32_t palette_len,
+                            scav_spaces const *spaces,
+                            scav_placed const *placed,
+                            uint32_t placed_count,
+                            int32_t depth) {
   if ((list == nullptr) || (chart == nullptr) || (metrics == nullptr)) {
     return SCAV_E_INVALID_ARG;
   }
@@ -331,7 +308,15 @@ scav_result scav_emit_chart(scav_drawlist *list,
     if (palette_len < SCAV_STYLE_COUNT) { return SCAV_E_INVALID_ARG; }
     p.assign(palette, palette + palette_len);
   }
-  return scav::emit_chart(list->list, chart->chart, metrics->metrics, p, depth)
+  scav_spaces const none{};
+  return scav::emit_chart(list->list,
+                          chart->chart,
+                          metrics->metrics,
+                          p,
+                          (spaces != nullptr) ? *spaces : none,
+                          placed,
+                          placed_count,
+                          depth)
              ? SCAV_OK
              : SCAV_E_STATE;
 }

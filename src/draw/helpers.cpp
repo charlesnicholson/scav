@@ -4,6 +4,7 @@
 
 #include "scav/scav_draw.h"
 
+#include "scav/scav_core.h"
 #include "scav/scav_types.h"
 #include "scav_int.h"
 
@@ -63,6 +64,43 @@ std::vector<std::string_view> text_lines(std::string_view s) {
   }
   if (lines.empty()) { lines.emplace_back(); }
   return lines;
+}
+
+bool image_register(Images &images,
+                    std::string_view id,
+                    scav_byte const *bytes,
+                    uint32_t len,
+                    int32_t w,
+                    int32_t h,
+                    std::string_view mime) {
+  if (id.empty() || mime.empty() || (bytes == nullptr) || (len == 0U) || (w <= 0) ||
+      (h <= 0)) {
+    return false;
+  }
+  if (image_find(images, id) != INVALID) { return false; }  // an id names one image
+
+  auto const claim = [&images](void const *from, size_t n) {
+    uint32_t const off{ static_cast<uint32_t>(images.pool.size()) };
+    auto const *raw{ static_cast<scav_byte const *>(from) };
+    images.pool.insert(images.pool.end(), raw, raw + n);
+    return Span{ .off = off, .len = static_cast<uint32_t>(n) };
+  };
+  Span const id_span{ claim(id.data(), id.size()) };
+  Span const mime_span{ claim(mime.data(), mime.size()) };
+  Span const byte_span{ claim(bytes, len) };
+  images.rows.push_back({ .id = { .off = id_span.off, .len = id_span.len },
+                          .mime = { .off = mime_span.off, .len = mime_span.len },
+                          .bytes = byte_span,
+                          .w = w,
+                          .h = h });
+  return true;
+}
+
+uint32_t image_find(Images const &images, std::string_view id) {
+  for (uint32_t i = 0; i < images.rows.size(); ++i) {
+    if (image_str(images, images.rows[i].id) == id) { return i; }
+  }
+  return INVALID;
 }
 
 void push_arrowhead(DrawList &d,

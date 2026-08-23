@@ -6,6 +6,7 @@ add_executable(scav
   dump.cpp
   fmt.cpp
   main.cpp
+  render.cpp
 )
 scav_settings(scav)
-target_link_libraries(scav PRIVATE scavcore scavlayout scavdraw)
+target_link_libraries(scav PRIVATE scavcore scavlayout scavdraw scavsvg)

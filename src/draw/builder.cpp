@@ -51,19 +51,6 @@ ElemRef trans_ref(uint32_t i) {
   return { .kind = ElemKind::Transition, .ordinal = i };
 }
 
-// The route's midpoint, by the same rule layout centres a path box on, so a
-// label the builder draws lands where the box layout reserved for it went.
-bool route_midpoint(std::vector<scav_span> const &routes,
-                    std::vector<scav_point> const &points,
-                    uint32_t trans,
-                    scav_point &out) {
-  if (trans >= routes.size()) { return false; }
-  scav_span const r{ routes[trans] };
-  if (r.len == 0U) { return false; }
-  out = points[r.off + (r.len / 2U)];
-  return true;
-}
-
 uint32_t style_for_kind(StateKind kind) {
   return (kind == StateKind::Normal) ? SCAV_STYLE_STATE : SCAV_STYLE_PSEUDO;
 }
@@ -76,15 +63,25 @@ bool routeless(Chart const &c, uint32_t trans) {
   return (t.src == t.dst) && (t.kind != TransKind::External);
 }
 
-// Which line of the source's after-band this transition's label occupies:
-// every earlier routeless labelled transition on the same source takes one.
-uint32_t after_slot(Chart const &c, uint32_t trans) {
-  uint32_t slot{ 0 };
-  for (uint32_t i = 0; i < trans; ++i) {
-    if ((c.transitions[i].live != 0U) && (c.transitions[i].label.len != 0U) &&
-        routeless(c, i) && (c.transitions[i].src.v == c.transitions[trans].src.v)) {
-      ++slot;
-    }
+bool claims_after(Chart const &c, uint32_t trans, uint32_t src) {
+  return (c.transitions[trans].live != 0U) && (c.transitions[trans].label.len != 0U) &&
+         routeless(c, trans) && (c.transitions[trans].src.v == src);
+}
+
+// Which line of the source's after-band a label occupies, and how many lines
+// that band was reserved for: every routeless labelled transition on the same
+// source takes one, in transition order.
+struct AfterSlot {
+  uint32_t index, total;
+};
+
+AfterSlot after_slot(Chart const &c, uint32_t trans) {
+  uint32_t const src{ c.transitions[trans].src.v };
+  AfterSlot slot{ .index = 0, .total = 0 };
+  for (uint32_t i = 0; i < c.transitions.size(); ++i) {
+    if (!claims_after(c, i, src)) { continue; }
+    if (i < trans) { ++slot.index; }
+    ++slot.total;
   }
   return slot;
 }
@@ -377,11 +374,50 @@ void emit_route(DrawList &d,
                  origin);
 }
 
+bool label_box(Chart const &c,
+               scav_spaces const &s,
+               scav_placed const *placed,
+               uint32_t placed_count,
+               uint32_t trans,
+               scav_rect &out) {
+  if ((trans >= c.transitions.size()) || (c.transitions[trans].live == 0U)) {
+    return false;
+  }
+  if (routeless(c, trans)) {
+    // The band the source reserved, sliced into one line per label that claimed
+    // it. Nothing placed a box, because there was no route to slide one along.
+    if (c.transitions[trans].label.len == 0U) { return false; }
+    std::vector<scav_rect> const afters{
+      rows_of<scav_rect>(c, "scav.geom.state_after")
+    };
+    uint32_t const src{ c.transitions[trans].src.v };
+    if ((src >= afters.size()) || (afters[src].h == 0)) { return false; }
+    AfterSlot const slot{ after_slot(c, trans) };
+    scav_rect const band{ afters[src] };
+    int32_t const each{ (slot.total > 0U)
+                            ? (band.h / static_cast<int32_t>(slot.total))
+                            : band.h };
+    out = { .x = band.x,
+            .y = band.y + (static_cast<int32_t>(slot.index) * each),
+            .w = band.w,
+            .h = each };
+    return true;
+  }
+  for (uint32_t i = 0; i < s.n_path_box; ++i) {
+    if (s.path_box[i].subject != trans) { continue; }
+    if ((i >= placed_count) || (placed == nullptr)) { return false; }
+    out = placed[i];
+    return true;
+  }
+  return false;
+}
+
 void emit_label(DrawList &d,
                 Chart const &c,
                 Metrics const &m,
                 Palette const &p,
                 uint32_t trans,
+                scav_rect box,
                 int32_t depth) {
   if ((trans >= c.transitions.size()) || (c.transitions[trans].live == 0U) ||
       (p.size() < SCAV_STYLE_COUNT)) {
@@ -397,26 +433,10 @@ void emit_label(DrawList &d,
   std::vector<std::string_view> const lines{ text_lines(text) };
   int32_t const block_h{ lh * static_cast<int32_t>(lines.size()) };
 
-  scav_point mid{};
-  if (routeless(c, trans)) {
-    // Inside the source box, in the band its own h_after reserved, stacked
-    // under whatever earlier routeless label claimed the line above.
-    std::vector<scav_rect> const afters{
-      rows_of<scav_rect>(c, "scav.geom.state_after")
-    };
-    uint32_t const src{ c.transitions[trans].src.v };
-    if (src >= afters.size()) { return; }
-    scav_rect const band{ afters[src] };
-    if (band.h == 0) { return; }
-    mid = { .x = band.x + (band.w / 2),
-            .y = band.y + (static_cast<int32_t>(after_slot(c, trans)) * lh) +
-                 (block_h / 2) };
-  } else {
-    std::vector<scav_span> const routes{ rows_of<scav_span>(c, "scav.geom.route") };
-    std::vector<scav_point> const points{ rows_of<scav_point>(c, "scav.geom.point") };
-    if (!route_midpoint(routes, points, trans, mid)) { return; }
-  }
-
+  // Centred in the rect layout placed, which is where the room actually is. A
+  // placed box may exceed what was asked for, so recomputing one here would
+  // drift the moment a router stops centring on the route midpoint.
+  int32_t const top{ box.y + floor_div(box.h - block_h, 2) };
   int32_t line{ 0 };
   for (std::string_view const &one : lines) {
     scav_extent ext{};
@@ -430,9 +450,8 @@ void emit_label(DrawList &d,
     push_text(d,
               depth,
               label_style,
-              { .x = mid.x - (ext.w / 2),
-                .y = baseline_of(mid.y - (block_h / 2) + (line * lh),
-                                 style.font_size_grid) },
+              { .x = box.x + floor_div(box.w - ext.w, 2),
+                .y = baseline_of(top + (line * lh), style.font_size_grid) },
               one,
               origin);
     ++line;
@@ -440,21 +459,29 @@ void emit_label(DrawList &d,
 }
 
 bool emit_chart(DrawList &d,
-                 Chart const &c,
-                 Metrics const &m,
-                 Palette const &p,
-                 int32_t depth) {
+                Chart const &c,
+                Metrics const &m,
+                Palette const &p,
+                scav_spaces const &s,
+                scav_placed const *placed,
+                uint32_t placed_count,
+                int32_t depth) {
   if ((p.size() < SCAV_STYLE_COUNT) || (column_find(c, "scav.geom.state").v == INVALID)) {
     return false;
   }
   // Submachines, states, routes, then labels: an order this function documents
   // and nothing else depends on. Every primitive lands at the one depth it was
   // given, so a caller that wants layering calls the emitters itself.
-  for (uint32_t i = 0; i < c.submachines.size(); ++i) { emit_submachine(d, c, p, i, depth); }
+  for (uint32_t i = 0; i < c.submachines.size(); ++i) {
+    emit_submachine(d, c, p, i, depth);
+  }
   for (uint32_t i = 0; i < c.states.size(); ++i) { emit_state(d, c, m, p, i, depth); }
   for (uint32_t i = 0; i < c.transitions.size(); ++i) { emit_route(d, c, p, i, depth); }
   for (uint32_t i = 0; i < c.transitions.size(); ++i) {
-    emit_label(d, c, m, p, i, depth);
+    scav_rect box{};
+    if (label_box(c, s, placed, placed_count, i, box)) {
+      emit_label(d, c, m, p, i, box, depth);
+    }
   }
   return true;
 }

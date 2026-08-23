@@ -1175,6 +1175,10 @@ Renderer-vs-metrics agreement, in order: one bundled font, named with a fallback
 
 Emit a stable `class` per element, synthesized from `Prim.origin`: `scav-state scav-id-1234`. External CSS can then restyle a static SVG.
 
+**`arc` is the one kind this backend refuses.** An `A` command needs endpoint coordinates, and deriving those from a start-and-sweep angle needs trigonometry that no integer path in scav supplies — a table at 1/64-degree resolution would be ~23,000 entries, and no shipped builder emits an arc. So `svg_write` reports the offending primitive rather than approximating it, and the table arrives with the first builder that needs one. Eight of nine kinds render.
+
+**Opacity is the one ratio that reaches the output**, because SVG has no integer spelling for it. `fill-opacity="0.501"` is assembled digit by digit from `alpha * 1000 / 255` in integer arithmetic — not a float-to-decimal conversion, so every platform emits the same bytes. Colours stay `#rrggbb` with a separate opacity attribute rather than CSS Color 4's `#rrggbbaa`, which older consumers ignore silently instead of refusing.
+
 PDF is out of v1: xref tables, content streams, and a real TTF subsetter, ~1,500–3,000 LOC, most of it duplicating `--embed-font`. SVG→PDF via any converter covers it.
 
 ## 13. Live highlighting

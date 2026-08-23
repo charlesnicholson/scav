@@ -57,17 +57,24 @@ Chart small_chart() {
 struct Built {
   Chart chart;
   Spaces spaces;
+  std::vector<scav_placed> placed;
   DrawList list;
 };
 
 Built pipeline(Chart c, scav_profile const &p) {
-  Built b{ .chart = std::move(c), .spaces = {}, .list = {} };
+  Built b{ .chart = std::move(c), .spaces = {}, .placed = {}, .list = {} };
   Metrics const m{ bundled() };
   REQUIRE(measure_chart(b.chart, m, p, b.spaces));
-  std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
-  REQUIRE(layout_run(b.chart, as_spaces(b.spaces), opts(p), placed, diags));
-  REQUIRE(emit_chart(b.list, b.chart, m, palette_standard(), 0));
+  REQUIRE(layout_run(b.chart, as_spaces(b.spaces), opts(p), b.placed, diags));
+  REQUIRE(emit_chart(b.list,
+                     b.chart,
+                     m,
+                     palette_standard(),
+                     as_spaces(b.spaces),
+                     b.placed.data(),
+                     static_cast<uint32_t>(b.placed.size()),
+                     0));
   uint32_t bad{ 0 };
   REQUIRE_MESSAGE(drawlist_validate(b.list, bad), bad);
   return b;
@@ -238,13 +245,22 @@ TEST_CASE("builder: a label lands on the route its own path box was placed on") 
   REQUIRE(layout_run(c, as_spaces(s), opts(p), placed, diags));
   REQUIRE(placed.size() == 1);
 
+  // The rect layout placed, read back rather than recomputed, which is what
+  // keeps the drawn label inside the box that was reserved for it.
+  scav_rect box{};
+  REQUIRE(label_box(c,
+                    as_spaces(s),
+                    placed.data(),
+                    static_cast<uint32_t>(placed.size()),
+                    s.path_box[0].subject,
+                    box));
+  CHECK(box.x == placed[0].x);
+  CHECK(box.w == placed[0].w);
+
   DrawList d;
-  emit_label(d, c, m, palette_standard(), s.path_box[0].subject, 0);
+  emit_label(d, c, m, palette_standard(), s.path_box[0].subject, box, 0);
   REQUIRE(d.prims.size() == 1);
   scav_point const at{ d.points[d.prims[0].points.off] };
-  // Both the builder and layout centre on the route's midpoint, which is what
-  // keeps the drawn label inside the box that was reserved for it.
-  scav_placed const box{ placed[0] };
   CHECK(at.x >= box.x);
   CHECK(at.x <= (box.x + box.w));
 }
@@ -298,7 +314,7 @@ TEST_CASE("builder: an emitter given a row it cannot draw emits nothing") {
   emit_state(d, b.chart, m, p, 9999, 0);          // past the array
   emit_submachine(d, b.chart, p, 9999, 0);
   emit_route(d, b.chart, p, 9999, 0);
-  emit_label(d, b.chart, m, p, 9999, 0);
+  emit_label(d, b.chart, m, p, 9999, { .x = 0, .y = 0, .w = 10, .h = 10 }, 0);
   CHECK(d.prims.empty());
 
   // A short palette is refused rather than read past.
@@ -315,7 +331,7 @@ TEST_CASE("builder: an emitter given a row it cannot draw emits nothing") {
 TEST_CASE("builder: a chart layout never ran on is refused") {
   Chart c{ small_chart() };
   DrawList d;
-  CHECK(!emit_chart(d, c, bundled(), palette_standard(), 0));
+  CHECK(!emit_chart(d, c, bundled(), palette_standard(), {}, nullptr, 0, 0));
   CHECK(d.prims.empty());
 }
 
@@ -330,7 +346,14 @@ TEST_CASE("builder: depth is the caller's, and every primitive gets the one give
   REQUIRE(layout_run(c, as_spaces(s), opts(p), placed, diags));
 
   DrawList d;
-  REQUIRE(emit_chart(d, c, m, palette_standard(), 42));
+  REQUIRE(emit_chart(d,
+                     c,
+                     m,
+                     palette_standard(),
+                     as_spaces(s),
+                     placed.data(),
+                     static_cast<uint32_t>(placed.size()),
+                     42));
   for (scav_prim const &prim : d.prims) { CHECK(prim.depth == 42); }
 
   // Which is what lets an app interleave: the emitters take their own numbers,
@@ -393,7 +416,7 @@ TEST_CASE("builder: the C surface builds through the handles") {
   REQUIRE(scav_palette_standard(palette.data(), SCAV_STYLE_COUNT) == SCAV_OK);
   CHECK(scav_palette_standard(palette.data(), 1) == SCAV_E_CAPACITY);
 
-  REQUIRE(scav_emit_chart(list, &chart, metrics, palette.data(), SCAV_STYLE_COUNT, 0) ==
+  REQUIRE(scav_emit_chart(list, &chart, metrics, palette.data(), SCAV_STYLE_COUNT, nullptr, nullptr, 0, 0) ==
           SCAV_OK);
   uint32_t prims{ 0 };
   REQUIRE(scav_drawlist_counts(list, &prims, nullptr, nullptr, nullptr, nullptr) ==
@@ -403,15 +426,15 @@ TEST_CASE("builder: the C surface builds through the handles") {
   // A null palette takes the shipped one; a short one is refused.
   scav_drawlist *defaulted{ nullptr };
   REQUIRE(scav_drawlist_create(&defaulted) == SCAV_OK);
-  REQUIRE(scav_emit_chart(defaulted, &chart, metrics, nullptr, 0, 0) == SCAV_OK);
-  CHECK(scav_emit_chart(list, &chart, metrics, palette.data(), 1, 0) ==
+  REQUIRE(scav_emit_chart(defaulted, &chart, metrics, nullptr, 0, nullptr, nullptr, 0, 0) == SCAV_OK);
+  CHECK(scav_emit_chart(list, &chart, metrics, palette.data(), 1, nullptr, nullptr, 0, 0) ==
         SCAV_E_INVALID_ARG);
-  CHECK(scav_emit_chart(nullptr, &chart, metrics, nullptr, 0, 0) == SCAV_E_INVALID_ARG);
+  CHECK(scav_emit_chart(nullptr, &chart, metrics, nullptr, 0, nullptr, nullptr, 0, 0) == SCAV_E_INVALID_ARG);
 
   // A chart with no geometry is a state error, not a bad argument: the caller
   // did nothing wrong except skip layout.
   scav_chart unlaid{ .chart = small_chart(), .diags = {} };
-  CHECK(scav_emit_chart(list, &unlaid, metrics, nullptr, 0, 0) == SCAV_E_STATE);
+  CHECK(scav_emit_chart(list, &unlaid, metrics, nullptr, 0, nullptr, nullptr, 0, 0) == SCAV_E_STATE);
 
   scav_drawlist_destroy(defaulted);
   scav_drawlist_destroy(list);
