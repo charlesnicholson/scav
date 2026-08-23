@@ -25,16 +25,26 @@ layout hint and grouping is how an author writes that hint down. It is a bit and
 not a count, so a run collapses to one, and it is suppressed where it would open
 or close a block.
 
-The `scav` executable (`apps/cli`) now has five spellings across four verbs:
+The `scav` executable (`apps/cli`) now has five verbs:
 
 ```
+scav render [-o F] [--embed-font] [--profile N] <file>   chart -> SVG
 scav fmt [--check] <file>...      canonical print, in place; --check gates
 scav check <file>                 structural validation, exit 1 on a finding
 scav deps [--target N] <file>     the document network as a make/ninja depfile
-scav dump [--hash|--json] <file>  the model: entity rows, not syntax
+scav dump [--hash|--json] [--layout] <file>  the model: entity rows, not syntax
 ```
 
-`libscavlayout` computes skeleton geometry -- boundary splitting, the box formula, row packing, straight-line routes -- read back as columns or `scav dump --layout`; real ordering, routing, `DrawList`, and rendering are not built.
+`libscavlayout` computes skeleton geometry -- boundary splitting, the box
+formula, row packing, straight-line routes. `libscavdraw` measures text against
+the bundled font, builds a `DrawList` from the geometry columns, and
+`libscavsvg` writes it out; `scav render` is those three in a line. Real
+ordering and orthogonal routing are not built, so labels can still land on top
+of a state name -- that is the trivial router, and P6 and P7 are what fix it.
+
+Bindings are generated from `abi/scav_abi.json`, which is extracted from the C
+headers and committed as a golden, so an ABI break is a review diff rather than
+a downstream segfault. `bindings/python/scav` drives the whole pipeline.
 
 Four properties of the front end are worth knowing before reading it:
 
