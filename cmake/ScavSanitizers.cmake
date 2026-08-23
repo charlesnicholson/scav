@@ -71,7 +71,9 @@ function(scav_sanitizers_init)
   # Both Windows toolchains take the MSVC driver's spellings, and the GNU ones
   # below would be ignored there -- which is itself a warning.
   if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
-    set(flags /Zi /Oy-)
+    # /Z7 rather than /Zi: same debug info, embedded per object, so no
+    # shared PDB write serializes or defeats a compiler cache.
+    set(flags /Z7 /Oy-)
     target_link_options(scav_sanitizer INTERFACE /INCREMENTAL:NO)
     if(san STREQUAL "ASAN")
       list(APPEND flags /fsanitize=address)

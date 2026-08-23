@@ -422,6 +422,12 @@ std::vector<T> rows_of(Chart const &c, char const *name) {
   return rows;
 }
 
+// 0, 1, or 2: decreasing, level, or increasing along one axis.
+uint32_t direction_token(int32_t from, int32_t to) {
+  if (to > from) { return 2U; }
+  return (to < from) ? 0U : 1U;
+}
+
 }  // namespace
 
 uint32_t layout_coordinate_hash(Chart const &c) {
@@ -458,9 +464,7 @@ uint32_t layout_structural_hash(Chart const &c) {
     for (uint32_t k = 0; (k + 1) < route.len; ++k) {
       scav_point const &a{ points[route.off + k] };
       scav_point const &d{ points[route.off + k + 1] };
-      uint32_t const sx{ (d.x > a.x) ? 2U : (d.x < a.x) ? 0U : 1U };
-      uint32_t const sy{ (d.y > a.y) ? 2U : (d.y < a.y) ? 0U : 1U };
-      append_u32(b, (sx * 3U) + sy);
+      append_u32(b, (direction_token(a.x, d.x) * 3U) + direction_token(a.y, d.y));
     }
   }
   for (scav_port_slot const &sl : rows_of<scav_port_slot>(c, "scav.geom.portslot")) {
