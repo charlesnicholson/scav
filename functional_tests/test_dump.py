@@ -20,6 +20,8 @@ NETWORK_GOLDEN = Path("test_data/golden/dump/vac.txt")
 MILL = Path("test_data/charts/mill.scav")
 MILL_GOLDEN = Path("test_data/golden/dump/mill.txt")
 JSON_GOLDEN = Path("test_data/golden/dump/vac.json")
+LAYOUT_GOLDEN = Path("test_data/golden/dump/vac_layout.txt")
+LAYOUT_JSON_GOLDEN = Path("test_data/golden/dump/vac_layout.json")
 
 
 class TestDump(unittest.TestCase):
@@ -61,6 +63,33 @@ class TestDump(unittest.TestCase):
 
     def test_dump_matches_the_golden(self) -> None:
         self.check_golden(CHART, GOLDEN)
+
+    def test_layout_dump_matches_the_golden(self) -> None:
+        result = self.run_dump("--layout", NETWORK.as_posix())
+        self.assertEqual("", result.stderr)
+        self.assertEqual(0, result.returncode)
+        want = (self.cfg.repo_root / LAYOUT_GOLDEN).read_text(encoding="utf-8")
+        if result.stdout != want:
+            actual = self.cfg.scratch_dir / "golden" / "dump" / LAYOUT_GOLDEN.name
+            actual.parent.mkdir(parents=True, exist_ok=True)
+            actual.write_text(result.stdout, encoding="utf-8")
+            self.fail(f"golden mismatch: {self.cfg.repo_root / LAYOUT_GOLDEN} vs {actual}")
+
+    def test_layout_json_parses_and_matches_the_golden(self) -> None:
+        result = self.run_dump("--layout", "--json", NETWORK.as_posix())
+        self.assertEqual("", result.stderr)
+        self.assertEqual(0, result.returncode)
+        doc = json.loads(result.stdout)  # a consumer parses before it trusts
+        geometry = doc["geometry"]
+        self.assertEqual(len(doc["states"]), len(geometry["state"]))
+        self.assertEqual(len(doc["transitions"]), len(geometry["route"]))
+        self.assertGreater(geometry["chart"][2], 0)
+        want = (self.cfg.repo_root / LAYOUT_JSON_GOLDEN).read_text(encoding="utf-8")
+        self.assertEqual(want, result.stdout)
+
+    def test_hash_refuses_layout_and_json(self) -> None:
+        result = self.run_dump("--hash", "--layout", NETWORK.as_posix())
+        self.assertEqual(2, result.returncode)
 
     def test_a_three_document_network_matches_the_golden(self) -> None:
         out = self.check_golden(NETWORK, NETWORK_GOLDEN)

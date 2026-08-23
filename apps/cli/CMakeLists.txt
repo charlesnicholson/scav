@@ -8,4 +8,4 @@ add_executable(scav
   main.cpp
 )
 scav_settings(scav)
-target_link_libraries(scav PRIVATE scavcore)
+target_link_libraries(scav PRIVATE scavcore scavlayout)

@@ -17,7 +17,7 @@ constexpr std::string_view USAGE{
   "  fmt [--check] <file>...      canonical print, in place; --check gates\n"
   "  check <file>                 structural validation, exit 1 on a finding\n"
   "  deps [--target NAME] <file>  the document network as a depfile\n"
-  "  dump [--hash|--json] <file>  the model: entity rows, not syntax\n"
+  "  dump [--hash|--json] [--layout] <file>  the model; --layout adds geometry\n"
 };
 
 int usage() {
@@ -25,52 +25,41 @@ int usage() {
   return EXIT_UNUSABLE;
 }
 
-// One optional flag from a fixed set, then exactly one path. Returns false when
-// the tail is not shaped that way.
-bool one_flagged_path(int argc,
-                      char **argv,
-                      std::string_view flag_a,
-                      std::string_view flag_b,
-                      bool &a,
-                      bool &b,
-                      char const *&path) {
-  a = false;
-  b = false;
-  path = nullptr;
-  for (int i = 2; i < argc; ++i) {
-    std::string_view const arg{ argv[i] };
-    if (!flag_a.empty() && (arg == flag_a)) {
-      if (a) { return false; }
-      a = true;
-    } else if (!flag_b.empty() && (arg == flag_b)) {
-      if (b) { return false; }
-      b = true;
-    } else if ((path == nullptr) && !arg.starts_with("-")) {
-      path = argv[i];
-    } else {
-      return false;
-    }
-  }
-  return (path != nullptr) && !(a && b);
-}
-
 int dispatch(int argc, char **argv) {
   std::string_view const verb{ argv[1] };
-  bool flag_a{ false };
-  bool flag_b{ false };
   char const *path{ nullptr };
 
   if (verb == "dump") {
-    if (!one_flagged_path(argc, argv, "--hash", "--json", flag_a, flag_b, path)) {
-      return usage();
+    bool hash{ false };
+    bool json{ false };
+    bool layout{ false };
+    for (int i = 2; i < argc; ++i) {
+      std::string_view const arg{ argv[i] };
+      bool *flag{ nullptr };
+      if (arg == "--hash") {
+        flag = &hash;
+      } else if (arg == "--json") {
+        flag = &json;
+      } else if (arg == "--layout") {
+        flag = &layout;
+      }
+      if (flag != nullptr) {
+        if (*flag) { return usage(); }
+        *flag = true;
+      } else if ((path == nullptr) && !arg.starts_with("-")) {
+        path = argv[i];
+      } else {
+        return usage();
+      }
     }
-    return run_dump(path, flag_a, flag_b);
+    if ((path == nullptr) || (hash && (json || layout))) { return usage(); }
+    return run_dump(path, hash, json, layout);
   }
 
   if (verb == "check") {
-    if (!one_flagged_path(argc, argv, "", "", flag_a, flag_b, path)) { return usage(); }
+    if ((argc != 3) || std::string_view{ argv[2] }.starts_with("-")) { return usage(); }
     Loaded net;
-    load_and_report(path, true, net);
+    load_and_report(argv[2], true, net);
     return net.code;
   }
 

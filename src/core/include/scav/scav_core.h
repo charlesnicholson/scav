@@ -169,6 +169,17 @@ enum class DiagCode : uint32_t {
   NameHasMetacharacter,
   StatementSpanOutOfRange,
   ColumnCountMismatch,
+
+  // Space requests. These carry the requesting entity, so the failure is
+  // attributed to the request that caused it.
+  SpaceOutOfRange,
+  SpaceOrderDuplicate,
+  SpaceSubjectInvalid,
+  SpaceCountMismatch,
+
+  // Layout.
+  ProfileOutOfRange,
+  CoordinateOverflow,
 };
 
 // A producer running before entities exist fills `src`; one running after fills
@@ -513,6 +524,10 @@ scav_byte const *column_data(Chart const &c, ColumnId id);
 
 // Rows, not bytes: bytes.size() / elem_size.
 uint32_t column_count(Chart const &c, ColumnId id);
+
+// Sets a self-length (ElemKind::Point) column's row count; growth zero-fills.
+// False for any other entity or an id out of range.
+bool column_resize(Chart &c, ColumnId id, uint32_t rows);
 
 // Syntax tree ===============================================================
 

@@ -1,14 +1,22 @@
 // The C projection of scav_core.h. Each function converts its arguments, calls
 // one core function, and converts the result; a handle owns its C++ objects.
 
-#include "scav/scav_c.h"
+#include "scav/scav_core_c.h"
 
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
+#include "scav_c_handles.h"
 
 #include <cstdint>
-#include <string>
+#include <string_view>
 #include <vector>
+
+// Pinned where the ABI is projected: a platform where these drift must fail
+// to compile rather than misread the layouts a binding reproduces.
+static_assert(sizeof(scav_span) == 8);
+static_assert(sizeof(scav_point) == 8);
+static_assert(sizeof(scav_extent) == 8);
+static_assert(sizeof(scav_rect) == 16);
 
 namespace {
 
@@ -20,25 +28,6 @@ scav_pending to_abi(scav::Pending const &p) {
            .stmt_row = p.stmt_row };
 }
 
-}  // namespace
-
-// Complete here and opaque everywhere else, so no C++ member can reach a
-// caller's translation unit.
-struct scav_load {
-  scav::Loader loader;
-  std::vector<scav::Diagnostic> diags;  // the loader's, plus finish's
-  std::vector<scav_pending> pending;
-  uint32_t finished;
-};
-
-// No cached digest: scav_chart_digest recomputes, so a stored copy could only
-// go stale.
-struct scav_chart {
-  scav::Chart chart;
-};
-
-namespace {
-
 // Whichever diagnostic vector is current: the loader's before finish, the
 // handle's after. Outside extern "C", which forbids returning a std:: type.
 std::vector<scav::Diagnostic> const &diags_of(scav_load const *loader) {
@@ -49,7 +38,7 @@ std::vector<scav::Diagnostic> const &diags_of(scav_load const *loader) {
 
 extern "C" {
 
-uint32_t scav_abi_version(void) { return 2; }
+uint32_t scav_abi_version(void) { return 4; }
 
 scav_result scav_load_begin(scav_load **out) {
   if (out == nullptr) { return SCAV_E_INVALID_ARG; }
@@ -181,6 +170,75 @@ scav_result scav_chart_counts(scav_chart const *chart,
   *out_submachines = static_cast<uint32_t>(chart->chart.submachines.size());
   *out_transitions = static_cast<uint32_t>(chart->chart.transitions.size());
   *out_includes = static_cast<uint32_t>(chart->chart.includes.size());
+  return SCAV_OK;
+}
+
+scav_result scav_chart_diag_count(scav_chart const *chart, uint32_t *out_count) {
+  if ((chart == nullptr) || (out_count == nullptr)) { return SCAV_E_INVALID_ARG; }
+  *out_count = static_cast<uint32_t>(chart->diags.size());
+  return SCAV_OK;
+}
+
+scav_result scav_chart_diag(scav_chart const *chart, uint32_t index, scav_diag *out) {
+  if ((chart == nullptr) || (out == nullptr)) { return SCAV_E_INVALID_ARG; }
+  if (index >= chart->diags.size()) { return SCAV_E_INVALID_ARG; }
+  scav::Diagnostic const &d{ chart->diags[index] };
+  *out = { .code = static_cast<uint32_t>(d.code),
+           .subject_kind = static_cast<uint32_t>(d.subject.kind),
+           .subject_ordinal = d.subject.ordinal,
+           .doc = d.doc.v,
+           .off = d.src.off,
+           .len = d.src.len };
+  return SCAV_OK;
+}
+
+scav_result scav_column_find(scav_chart const *chart,
+                             char const *name,
+                             scav_column_id *out) {
+  if ((chart == nullptr) || (name == nullptr) || (out == nullptr)) {
+    return SCAV_E_INVALID_ARG;
+  }
+  scav::ColumnId const id{ scav::column_find(chart->chart, name) };
+  if (id.v == scav::INVALID) { return SCAV_E_INVALID_ARG; }
+  *out = id.v;
+  return SCAV_OK;
+}
+
+scav_result scav_column_data(scav_chart const *chart,
+                             scav_column_id id,
+                             scav_byte const **out,
+                             uint32_t *out_stride) {
+  if ((chart == nullptr) || (out == nullptr) || (out_stride == nullptr)) {
+    return SCAV_E_INVALID_ARG;
+  }
+  if (id >= chart->chart.columns.size()) { return SCAV_E_INVALID_ARG; }
+  *out = scav::column_data(chart->chart, { id });
+  *out_stride = chart->chart.columns[id].desc.elem_size;
+  return SCAV_OK;
+}
+
+scav_result scav_column_count(scav_chart const *chart,
+                              scav_column_id id,
+                              uint32_t *out_count) {
+  if ((chart == nullptr) || (out_count == nullptr)) { return SCAV_E_INVALID_ARG; }
+  if (id >= chart->chart.columns.size()) { return SCAV_E_INVALID_ARG; }
+  *out_count = scav::column_count(chart->chart, { id });
+  return SCAV_OK;
+}
+
+scav_result scav_str(scav_chart const *chart,
+                     scav_span ref,
+                     scav_byte const **out,
+                     uint32_t *out_len) {
+  if ((chart == nullptr) || (out == nullptr) || (out_len == nullptr)) {
+    return SCAV_E_INVALID_ARG;
+  }
+  std::vector<scav_byte> const &pool{ chart->chart.strings.bytes };
+  if ((static_cast<uint64_t>(ref.off) + ref.len) > pool.size()) {
+    return SCAV_E_INVALID_ARG;
+  }
+  *out = (ref.len == 0) ? nullptr : (pool.data() + ref.off);
+  *out_len = ref.len;
   return SCAV_OK;
 }
 

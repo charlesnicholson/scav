@@ -29,9 +29,10 @@ scav_install_library(scavcore core)
 
 # The redistributable: one shared object, with the static archives a build-time
 # decomposition. Each later library contributes its own c_api.cpp.
+# scavcore itself arrives transitively: every later library links it PUBLIC,
+# and a direct link here would repeat the archive on the link line.
 add_library(scav_shared SHARED c_api.cpp)
 scav_settings(scav_shared)
-target_link_libraries(scav_shared PRIVATE scavcore)
 target_include_directories(scav_shared PUBLIC
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>")
 set_target_properties(scav_shared PROPERTIES
@@ -92,6 +93,8 @@ if(SCAV_BUILD_TESTS)
     scav_core_tests.cpp
     # The src/-root primitives standing in for the standard library's: they
     # belong to no subsystem, so their tests sit beside them.
+    ../scav_int_tests.cpp
+    ../scav_hash_map_tests.cpp
     ../scav_stable_sort_tests.cpp
     ../scav_xxhash_tests.cpp
   )

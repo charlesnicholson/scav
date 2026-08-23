@@ -115,7 +115,7 @@ Mirrors `~/src/envy`: SHA-pinned deps under `cmake/deps/`, unit tests adjacent t
 
 ```
 include/scav/          the cross-library vocabulary: POD spellings, no functions
-src/<lib>/include/scav/  that library's public API: `scav_<lib>.h`, plus `scav_c.h`
+src/<lib>/include/scav/  that library's public API: `scav_<lib>.h`, plus `scav_<lib>_c.h`
                        where it projects a C surface. A C header is a second language,
                        not a second place to look for the same symbol
 src/scav_*.h           determinism primitives that belong to no subsystem: the vendored
@@ -226,7 +226,7 @@ The bar for a discouraged construct is that a reader can still follow control fl
 
 **No to all** → transient scratch, whatever is convenient: `unordered_map`, priority queues, visibility graphs, sweep structures, union-find. Not an exception grudgingly granted to `layout` — the normal treatment of data built and discarded inside one call.
 
-Two constraints survive on scratch (§6), both structurally enforceable: **never iterate an unordered container where order reaches output**, and **never let a hash value escape**. `lookup_map` makes the first a compile error.
+Two constraints survive on scratch (§6), both structurally enforceable: **never iterate an unordered container where order reaches output**, and **never let a hash value escape**. `HashMap` makes the first a compile error.
 
 What this rules out is not hash maps but a **graph of long-lived heap nodes pointing at each other** — the thing that makes a model unserializable, unhashable, and untestable.
 
@@ -340,7 +340,7 @@ C++20's P0907 fixed two's-complement *representation* but kept signed overflow U
 
 **`libscavlayout` uses a documented standard-library subset** — `<cstdint>`, `<bit>`, `<limits>`, `<vector>`, `<array>`, `<utility>`, `<type_traits>`, `<cstring>` — and nothing else. Every sort, hash, and container with iteration order that reaches output is scav's own (above). The subset is enforced by an include-check in CI, so "bring your own compiler" does not quietly mean "bring your own conforming `<algorithm>`".
 
-**Scope of this section: anything that can reach layout geometry or rendered output.** A structure that only ferries data inside one call is outside it, and `std::unordered_map` is the right choice there — deterministic *by usage*, because a key lookup has no order and the hash value never escapes as a bucket index. Enforce that structurally: `lookup_map<K,V>` exposes `find`/`at`/`insert` and **no `begin()`/`end()`**, so "never iterated" is a compile error rather than a review comment.
+**Scope of this section: anything that can reach layout geometry or rendered output.** A structure that only ferries data inside one call is outside it, and `std::unordered_map` is the right choice there — deterministic *by usage*, because a key lookup has no order and the hash value never escapes as a bucket index. Enforce that structurally: `HashMap<K,V>` exposes `find`/`at`/`insert` and **no `begin()`/`end()`**, so "never iterated" is a compile error rather than a review comment.
 
 **Golden hash.** Split into a **structural hash** (ranks, orders, port assignments, bend sequences) and a **coordinate hash**, so a translation-only change is a reviewable diff instead of a global reflow. Hashed inputs: font identity and version, profile id, packer choice, router name and version, **and the space-request columns** — a golden is reproducible only against a stated measurement policy, and the corpus goldens use the reference builder's.
 
@@ -373,9 +373,10 @@ struct SubmachineId { uint32_t v; };
 struct TransId  { uint32_t v; };
 struct StrRef   { uint32_t off, len; };            // into StringPool
 struct Span     { uint32_t off, len; };            // into a side array
-struct Point    { int32_t x, y; };                 // grid units (§11.2)
-struct Extent   { int32_t w, h; };
-struct Rect     { int32_t x, y, w, h; };           // half-open (§6)
+struct scav_point  { int32_t x, y; };              // grid units (§11.2)
+struct scav_extent { int32_t w, h; };
+struct scav_rect   { int32_t x, y, w, h; };        // half-open (§6); one spelling in
+                                                   // both languages, never aliased
 // Ids are global from the start, so endpoints are plain StateIds (§9).
 
 constexpr uint32_t INVALID = 0xFFFF'FFFFu;        // per-id sentinel
@@ -494,9 +495,9 @@ struct Chart {
 |---|---|---|---|---|
 | **authored** | yes, as the attributes it was projected from (§8) | format hash | columnar POD | builder API, editor |
 | **derived-persistent** — the geometry columns layout writes | **no** | **layout hash**, by explicit allowlist (§11.7a) | **columnar POD; tombstones in lockstep** | layout only |
-| **derived-scratch** — name→id and path→id indices, state→in/out edges, containment depth, LCA table, per-transition crossing counts and flags, each submachine's initial state | no | no | §4.1 convenience; `lookup_map` where lookup-only | anyone, rebuilt freely |
+| **derived-scratch** — name→id and path→id indices, state→in/out edges, containment depth, LCA table, per-transition crossing counts and flags, each submachine's initial state | no | no | §4.1 convenience; `HashMap` where lookup-only | anyone, rebuilt freely |
 
-Only **derived-scratch** gets §4.1's container latitude. Geometry is hashed and read across frames, so it is columnar POD — a route polyline in a `lookup_map`, iterated for the coordinate hash, is the §6 failure this split exists to forbid.
+Only **derived-scratch** gets §4.1's container latitude. Geometry is hashed and read across frames, so it is columnar POD — a route polyline in a `HashMap`, iterated for the coordinate hash, is the §6 failure this split exists to forbid.
 
 `ColumnDesc` carries a `derived` flag (§8). Nothing writes a derived column back out — not the printer, not any later serializer — and they are **exempt from round-trip-unknown**, or a stale geometry snapshot survives a save and gets trusted instead of recomputed.
 
@@ -1034,7 +1035,7 @@ That removes `w_st`, `PriorLayout` and its version key, per-loader hysteresis, t
 
 The likeliest failure is producing layouts that score well on `Cost` and that readers find worse than the PlantUML output they already have. Nothing in a cost vector detects this.
 
-**A side-by-side harness ships at P5**: the same chart through `dot -Tsvg`, elkjs, and scav. Blind scored review of the corpus at the P6 and P7 gates. Exit criterion is **"no worse than the incumbent on the transcribed corpus"** — not "visually reasonable."
+**A side-by-side harness ships at P5b**: the same chart through `dot -Tsvg`, elkjs, and scav. Blind scored review of the corpus at the P6 and P7 gates. Exit criterion is **"no worse than the incumbent on the transcribed corpus"** — not "visually reasonable."
 
 ### 11.13 Rejected
 
@@ -1157,7 +1158,7 @@ Two properties worth keeping:
 
 ### 12.1 The reference SVG backend
 
-Headless `scav render` is the first user-visible deliverable (P5), so this one ships.
+Headless `scav render` is the first user-visible deliverable (P5b), so this one ships.
 
 **Emit the body in integer grid units with the entire scale in one integer `viewBox`.** Float-to-decimal conversion is not portable (MSVC UCRT, glibc, musl, and Apple libc disagree on the last digit) and `-ffp-contract=fast` is the default, so `grid * scale` differs by 1 ULP between Debug and Release. **No float is printed, ever.**
 
@@ -1328,11 +1329,13 @@ typedef struct { int32_t x, y, w, h; } scav_rect;   // also the Placed type (§8
 typedef scav_rect scav_placed;
 ```
 
-**"ABI" names the property, not a component.** The component is each library's C API — `src/<lib>/c_api.cpp` against `src/<lib>/include/scav/scav_c.h` — and the ABI is what that surface guarantees: calling convention, struct layout, the extracted JSON. Every library projects its own C API at its own root, and the shared object links them; there is no directory that owns "the ABI".
+**"ABI" names the property, not a component.** The component is each library's C API — `src/<lib>/c_api.cpp` against `src/<lib>/include/scav/scav_<lib>_c.h` — every library's headers install into one `include/scav/`, so the C header carries the library's name — and the ABI is what that surface guarantees: calling convention, struct layout, the extracted JSON. Every library projects its own C API at its own root, and the shared object links them; there is no directory that owns "the ABI".
 
-**A slice of this lands with P2, ahead of the rest.** §17's P2 gate requires the loader driven from Python over ctypes, so `scav_load_*`, `scav_chart_destroy`, and enough of a chart to compare two — counts, the structural hash, the digest under the out-param protocol — ship then, along with the one shared object a binding can actually load. The reason is not schedule: if driving a no-callback loader from a foreign runtime were awkward, §16.1's central claim would be wrong, and that is worth learning before four more phases are built on it. The lifecycle rules below bind from **P3**, though only two of the five handles exist to obey them there. Column access lands with the geometry columns a binding must read (**P4**), and the extracted ABI JSON with the surface it describes (**P5**) — generating bindings against a surface four phases from complete means generating them four more times.
+**A slice of this lands with P2, ahead of the rest.** §17's P2 gate requires the loader driven from Python over ctypes, so `scav_load_*`, `scav_chart_destroy`, and enough of a chart to compare two — counts, the structural hash, the digest under the out-param protocol — ship then, along with the one shared object a binding can actually load. The reason is not schedule: if driving a no-callback loader from a foreign runtime were awkward, §16.1's central claim would be wrong, and that is worth learning before four more phases are built on it. The lifecycle rules below bind from **P3**, though only two of the five handles exist to obey them there. Column access lands with the geometry columns a binding must read (**P4**), and the extracted ABI JSON with the surface it describes (**P5c**) — generating bindings against a surface four phases from complete means generating them four more times.
 
 **Handles: five, each with a create and a destroy.** `scav_chart` (the model), `scav_load` (a multi-document loader, §16.2), `scav_metrics` (font tables), `scav_images` (the raster registry a backend reads), and `scav_drawlist` — which exists because `DrawList` is five `std::` containers (§12) and §16.1 requires the reference builder and SVG backend to be reachable from a binding. Its arrays are read out with the same span accessors as a column. Destroy is idempotent on `NULL`; a `scav_chart` outlives every `scav_span` handed out from it, and nothing else owns model memory. `scav_metrics_create(const scav_byte* ttf, uint32_t len, scav_metrics** out)` — the bundled font is embedded, so `NULL` selects it. `scav_metrics` is immutable after create, so it is shared across threads without locking; the other three are single-threaded-per-instance, and any number of instances may be used concurrently. There is no library-global state and no init call.
+
+**Operations on an existing chart report through the chart handle.** Validation and layout findings land in a diagnostics vector the handle owns, overwritten at each operation's entry and read back with `scav_chart_diag_count` / `scav_chart_diag` — each a flat `scav_diag` of code, subject kind and ordinal, document, and source span, rendered with `scav_diag_message` like any other code. The loader keeps its own diagnostics (§16.2's calls), because a cycle or a missing document leaves no chart to carry them.
 
 **The profile reaches layout inside `scav_layout_opts`**, as a `scav_profile` POD by value plus the `scav_router_id` — not a handle, not a file path, so its bytes hash into the golden (§6) directly. `scav_profile_named(const char*, scav_profile* out)` fills it from a shipped profile; `scav_profile_validate` is called by `scav_layout_run` regardless (§11.15).
 
@@ -1380,7 +1383,7 @@ typedef struct { scav_profile profile; scav_router_id router; uint32_t threads; 
 
 **Machine-readable ABI:** the header is the source of truth; a build-time tool extracts functions, structs, enums, and field offsets to a committed JSON sidecar. Bindings are generated; a golden test asserts extraction matches, so an ABI break is a review diff rather than a downstream segfault.
 
-**The extraction tool is deliberately unchosen, and lands with P5.** Two shapes work. libclang models the layout of any target without running anything, at the cost of provisioning LLVM on six triples that today carry a compiler and little else. A scraper over this header plus a probe program compiled and run by the toolchain under test needs no new dependency and reports the *real* layout rather than a second parser's model of one, at the cost of not answering for a target it cannot execute. Each header is one flat C file with no macros precisely so that either works, so the choice can wait for the phase that writes the tool. Whichever it is, it is tooling-only, and a scraper must fail closed on a declaration form it does not recognize — silently skipping one would leave exactly the drift the golden exists to catch.
+**The extraction tool is deliberately unchosen, and lands with P5c.** Two shapes work. libclang models the layout of any target without running anything, at the cost of provisioning LLVM on six triples that today carry a compiler and little else. A scraper over this header plus a probe program compiled and run by the toolchain under test needs no new dependency and reports the *real* layout rather than a second parser's model of one, at the cost of not answering for a target it cannot execute. Each header is one flat C file with no macros precisely so that either works, so the choice can wait for the phase that writes the tool. Whichever it is, it is tooling-only, and a scraper must fail closed on a declaration form it does not recognize — silently skipping one would leave exactly the drift the golden exists to catch.
 
 Editor commands do not cross the C boundary as objects; that layer's API is opcodes. (Note `virtual Command Inverse()` returning an abstract base by value does not compile — the editor's inverse is a command buffer append.)
 
@@ -1497,16 +1500,24 @@ Three things P2 turned out to own that the phase list did not name. **Lowering s
 
 **P3 — the printer.** The comment-preserving canonical printer over a `ParsedDocument` and the seven canonical rules (§15), plus the CLI surface that falls out of having one: `fmt` and `fmt --check`, `deps`, `check`, and `dump --json`. One large thing and a handful of small ones, and the ratio is the point — §15 budgets the printer at 3,000–5,000 LOC, half again the production code standing after P2, with comments the expensive half of that. Everything else here is already sitting in the model: `deps` is `documents` plus `Include.target`, `check` is `validate_chart` behind an exit code, and `dump --json` is a mechanical projection of columnar data (§15) whose shape is pinned by a golden the first time it runs.
 
-The printer's line-break budget is `print_columns` (§11.15); P3 ships that field and its bound check ahead of the rest of the profile. **Handle lifecycle** — create and destroy per handle, destroy idempotent on `NULL`, a `scav_chart` outliving every span it handed out, no library-global state, no init call, single-threaded per instance with any number of instances concurrent — is **stated and tested here**, against the two handles that exist; §16's other three inherit it as they land. There is no allocator injection (§16) and no ABI JSON (P5), so the C surface P2 shipped is unchanged by this phase.
+The printer's line-break budget is `print_columns` (§11.15); P3 ships that field and its bound check ahead of the rest of the profile. **Handle lifecycle** — create and destroy per handle, destroy idempotent on `NULL`, a `scav_chart` outliving every span it handed out, no library-global state, no init call, single-threaded per instance with any number of instances concurrent — is **stated and tested here**, against the two handles that exist; §16's other three inherit it as they land. There is no allocator injection (§16) and no ABI JSON (P5c), so the C surface P2 shipped is unchanged by this phase.
 
 *Exit:* `print(parse(bytes))` is idempotent for every corpus document and for a depth-16 / 2k-state document, comments and attribute forms included; the corpus is committed in canonical form and `fmt --check` is green over it; `deps` output feeds a real `ninja` build that rebuilds a diagram when an included document changes.
 
-**P4 — metrics, space requests, layout skeleton.** Font metrics helper, the space tables, Phase 0 splitting, derived classification, trivial placement, straight-line routes, geometry columns. Validate the coordinate extent estimate (§11.2). The `scav_metrics` handle lands here with the font tables it wraps, and so does the ABI's three-call column accessor plus `scav_str` (§16) — geometry *is* columns, so P4 is the first phase where a binding has one to read.
+**P4 — space requests and the layout skeleton.** The space tables and their domain checks, the profile, Phase 0 splitting — including §11.14's source-boundary suppression for `internal` and `local` and the crossing counts that follow from it — trivial placement, straight-line routes, the geometry columns. Validate the coordinate extent estimate (§11.2). The ABI's three-call column accessor plus `scav_str` (§16) land with the columns — geometry *is* columns, so P4 is the first phase where a binding has one to read.
+
+**No metrics and no font.** Layout is font-blind by construction (§3, §11): text reaches it only as integers in the space tables, measured upstream by the app. Metrics' real consumers — the reference builder's measurement pass and the SVG backend's `textLength` — arrive at P5a, and §6's corpus goldens are stated against the reference builder's measurement policy, which cannot exist earlier. Until then the CLI passes all-zero spaces, which is the specified no-request semantics (§11.4) rather than a degenerate mode, and the test harness uses a fabricated integer measurement — a pure function of model and profile, so it digests and goldens like a real one. The extent estimate is validated with deliberately fat fabricated advances, so the grid decision errs conservative; P5a re-asserts it under the real font, and the geometry goldens restate their measurement policy once, there.
+
 *Exit:* geometry columns populated for every chart, no overflow at depth 16; a Python caller reads a geometry column through the accessor.
 
-**P5 — `DrawList`, reference builder, SVG backend, baseline harness.** The `DrawList` type, a builder covering standard appearance, the SVG backend with integer body and single `viewBox`, `textLength`, per-element classes, golden harness, and the `dot`/elkjs/scav side-by-side (§11.12).
-`scav_images` and `scav_drawlist` land here, completing §16's five handles — and with the surface finally whole, so does **ABI JSON extraction, its golden, and the generated binding layer** (§16.1). Held to here on purpose: the JSON describes a surface, and generating against one four phases from complete means generating it four more times.
-*Exit:* `scav render` produces a readable diagram; baseline harness runs; extracted ABI JSON matches its golden, and a generated Python layer drives model, layout, `DrawList`, and SVG end to end.
+**P5a — metrics, `DrawList`, the reference builder.** The font metrics helper and the bundled font (§11.9.1; license resolved per §18 before this phase starts, since the font is a layout-hash input), the `scav_metrics` handle, the `DrawList` type, and a builder covering standard appearance — including the measurement pass that becomes §6's stated policy for the corpus goldens.
+*Exit:* the reference builder emits a pinned `drawlist/` golden for every corpus chart; the extent estimate holds under real metrics.
+
+**P5b — SVG backend and the baseline harness.** The SVG backend with integer body and single `viewBox`, `textLength`, per-element classes, `scav render`, `scav_images`, the golden harness, and the `dot`/elkjs/scav side-by-side (§11.12).
+*Exit:* `scav render` produces a readable diagram; baseline harness runs.
+
+**P5c — ABI JSON and generated bindings.** `scav_drawlist` completes §16's five handles — and with the surface finally whole, **ABI JSON extraction, its golden, and the generated binding layer** (§16.1). Held to here on purpose: the JSON describes a surface, and generating against one still moving means generating it again per phase.
+*Exit:* extracted ABI JSON matches its golden, and a generated Python layer drives model, layout, `DrawList`, and SVG end to end.
 
 **P6 — real layout.** Layered rank, median or sifting ordering, Brandes & Köpf coordinates, bottom-up sizing (fixed pass count, no hysteresis), LR-rectpacking with `box` fallback.
 *Exit:* better than P4 on the Tier-2 vector **and no worse than the incumbent** on blind review.
@@ -1528,7 +1539,7 @@ The printer's line-break budget is `print_columns` (§11.15); P3 ships that fiel
 
 **P12 — editor.** In-place mutation, undo/redo. **[OPEN]** arena snapshot vs command buffer with inverse.
 
-**Plugin work is not a phase.** Column registration and the builder API land in P1; space requests need P4; builder contributions need P5. `scav-scxml` should be built incrementally alongside, because it is the acceptance test for the extension boundary (§8.2) — deferring it means discovering the boundary is wrong after everything is built against it.
+**Plugin work is not a phase.** Column registration and the builder API land in P1; space requests need P4; builder contributions need P5a. `scav-scxml` should be built incrementally alongside, because it is the acceptance test for the extension boundary (§8.2) — deferring it means discovering the boundary is wrong after everything is built against it.
 
 **Out of scope for this document, but must not be precluded:** `.puml` importer; libhsm codegen backend; PDF; layout hints beyond the minimum.
 
@@ -1557,7 +1568,7 @@ scav is MIT or Apache-2.0. Verified from LICENSE bytes; GitHub's detected field 
 | Adaptagrams (libavoid, libcola, libvpsc, …) | LGPL-2.1-or-later, uniformly | dynamic link only, or buy Monash's commercial license |
 | OGDF | GPL-2.0/3.0 | **blocker** — its exception is outbound-only |
 | Graphviz ≥14.1.4 | EPL-2.0, no Secondary License | cleanest, but `dot` is weak on compound graphs |
-| the bundled TTF | **[OPEN]** — must be OFL-1.1 or public domain | a layout-hash input, so it is redistributed inside the library (§16.1) |
+| the bundled TTF | JetBrains Mono 2.304 Regular, OFL-1.1, verified from `assets/font/OFL.txt` bytes | a layout-hash input, so it is redistributed inside the library (§16.1). `head`/`hhea`/`hmtx`/`maxp` plus cmap formats 4 and 12 verified; upem 1000, 1743 glyphs, 268 KB |
 
 **Read the permissive reimplementations, not Adaptagrams** — Dwyer released the same algorithms twice:
 

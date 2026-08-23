@@ -84,6 +84,14 @@ uint32_t column_count(Chart const &c, ColumnId id) {
   return narrow_clamp<uint32_t>(col.bytes.size() / col.desc.elem_size);
 }
 
+bool column_resize(Chart &c, ColumnId id, uint32_t rows) {
+  if (id.v >= c.columns.size()) { return false; }
+  Column &col{ c.columns[id.v] };
+  if (col.desc.entity != ElemKind::Point) { return false; }
+  col.bytes.resize(narrow_clamp<size_t>(uint64_t{ rows } * col.desc.elem_size), 0);
+  return true;
+}
+
 void model_append_column_rows(Chart &c, ElemKind entity) {
   for (Column &col : c.columns) {
     if (col.desc.entity == entity) {

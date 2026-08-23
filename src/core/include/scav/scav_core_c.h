@@ -1,5 +1,5 @@
-#ifndef SCAV_C_H_INCLUDED
-#define SCAV_C_H_INCLUDED
+#ifndef SCAV_CORE_C_H_INCLUDED
+#define SCAV_CORE_C_H_INCLUDED
 
 /* libscavcore's C API, and the ABI a binding is generated against: flat
  * extern "C", opaque handles, POD structs, out-params, error enums.
@@ -23,7 +23,8 @@ enum {
   SCAV_E_INVALID_ARG = -1, /* a null out-param, or an index out of range */
   SCAV_E_STATE = -2,       /* the call does not apply in the handle's state */
   SCAV_E_CAPACITY = -3,    /* buffer too small; the required count was written */
-  SCAV_E_LOAD = -4         /* the load reported diagnostics; read them */
+  SCAV_E_LOAD = -4,        /* the load reported diagnostics; read them */
+  SCAV_E_LAYOUT = -5       /* layout reported diagnostics; read scav_chart_diag */
 };
 /* NOLINTEND(readability-identifier-naming) */
 
@@ -110,8 +111,47 @@ scav_result scav_chart_digest(scav_chart const *chart,
                               uint32_t cap,
                               uint32_t *out_count);
 
+/* A finding from an operation on an existing chart. A producer running before
+ * entities exist fills (doc, off, len); one after fills the subject. 24 bytes. */
+/* NOLINTNEXTLINE(modernize-use-using) */
+typedef struct {
+  uint32_t code; /* scav_diag_message renders it */
+  uint32_t subject_kind;
+  uint32_t subject_ordinal;
+  uint32_t doc;
+  uint32_t off, len;
+} scav_diag;
+
+/* The latest operation's findings, owned by the chart, overwritten at each
+ * operation's entry. The loader keeps its own: a failed load has no chart. */
+scav_result scav_chart_diag_count(scav_chart const *chart, uint32_t *out_count);
+scav_result scav_chart_diag(scav_chart const *chart, uint32_t index, scav_diag *out);
+
+/* NOLINTNEXTLINE(modernize-use-using) */
+typedef uint32_t scav_column_id;
+
+/* Three calls: a walk needs the row count, and the stride is the registered
+ * element size. Unknown name: SCAV_E_INVALID_ARG. Empty column: NULL, zero. */
+scav_result scav_column_find(scav_chart const *chart,
+                             char const *name,
+                             scav_column_id *out);
+scav_result scav_column_data(scav_chart const *chart,
+                             scav_column_id id,
+                             scav_byte const **out,
+                             uint32_t *out_stride);
+scav_result scav_column_count(scav_chart const *chart,
+                              scav_column_id id,
+                              uint32_t *out_count);
+
+/* A span into the chart's string pool, not NUL-terminated. Zero length reads
+ * back NULL and zero; a span past the pool is SCAV_E_INVALID_ARG. */
+scav_result scav_str(scav_chart const *chart,
+                     scav_span ref,
+                     scav_byte const **out,
+                     uint32_t *out_len);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif
 
-#endif /* SCAV_C_H_INCLUDED */
+#endif /* SCAV_CORE_C_H_INCLUDED */

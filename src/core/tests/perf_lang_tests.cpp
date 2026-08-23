@@ -187,7 +187,7 @@ TEST_CASE("perf: lex and parse a large document in RAM") {
                   "lex " << lex_rate << " MiB/s over " << lexing.tokens << " tokens");
     CHECK_MESSAGE(parse_rate >= PARSE_FLOOR_MB_PER_S, "parse " << parse_rate << " MiB/s");
 
-    // A ratio between two phases on one box. Lexing is more work per byte, so a
+    // A ratio between two stages on one box. Lexing is more work per byte, so a
     // slower normalize means it went back to copying one byte at a time.
     CHECK_MESSAGE(norm_rate >= lex_rate,
                   "normalize " << norm_rate << " MiB/s is slower than lex " << lex_rate);

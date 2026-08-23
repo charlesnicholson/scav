@@ -4,9 +4,12 @@
 #include "cli.h"
 
 #include "scav/scav_core.h"
+#include "scav/scav_layout.h"
+#include "scav/scav_layout_c.h"
 #include "scav/scav_types.h"
 
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -228,6 +231,102 @@ void append_model(std::string &out, Chart const &c) {
   }
 }
 
+// The geometry projection ==================================================
+
+// A signed grid coordinate; the domain is symmetric, so minus must print.
+void append_i32v(std::string &out, int32_t v) {
+  if (v < 0) {
+    out += '-';
+    string_append_u32(out, static_cast<uint32_t>(-static_cast<int64_t>(v)));
+    return;
+  }
+  string_append_u32(out, static_cast<uint32_t>(v));
+}
+
+// A geometry column's rows, memcpy'd out of the type-erased bytes.
+template <typename T>
+std::vector<T> geom_rows(Chart const &c, char const *name) {
+  ColumnId const id{ column_find(c, name) };
+  if (id.v == INVALID) { return {}; }
+  std::vector<T> rows(column_count(c, id));
+  if (!rows.empty()) {
+    std::memcpy(rows.data(), column_data(c, id), rows.size() * sizeof(T));
+  }
+  return rows;
+}
+
+void append_rect(std::string &out, scav_rect r) {
+  append_i32v(out, r.x);
+  out += ',';
+  append_i32v(out, r.y);
+  out += ' ';
+  append_i32v(out, r.w);
+  out += 'x';
+  append_i32v(out, r.h);
+}
+
+void append_geometry_text(std::string &out, Chart const &c) {
+  auto const state{ geom_rows<scav_rect>(c, "scav.geom.state") };
+  auto const before{ geom_rows<scav_rect>(c, "scav.geom.state_before") };
+  auto const after{ geom_rows<scav_rect>(c, "scav.geom.state_after") };
+  auto const sub{ geom_rows<scav_rect>(c, "scav.geom.sub") };
+  auto const routes{ geom_rows<scav_span>(c, "scav.geom.route") };
+  auto const points{ geom_rows<scav_point>(c, "scav.geom.point") };
+  auto const port_spans{ geom_rows<scav_span>(c, "scav.geom.port") };
+  auto const slots{ geom_rows<scav_port_slot>(c, "scav.geom.portslot") };
+
+  out += "geometry structural ";
+  string_append_hex32(out, layout_structural_hash(c));
+  out += " coordinate ";
+  string_append_hex32(out, layout_coordinate_hash(c));
+  out += "\n  chart ";
+  append_rect(out, geom_rows<scav_rect>(c, "scav.geom.chart")[0]);
+  out += '\n';
+  for (uint32_t i = 0; i < state.size(); ++i) {
+    if (c.states[i].live == 0) { continue; }
+    out += "  state ";
+    chart_path_of(c, { i }, out);
+    out += ' ';
+    append_rect(out, state[i]);
+    out += " before ";
+    append_rect(out, before[i]);
+    out += " after ";
+    append_rect(out, after[i]);
+    out += '\n';
+  }
+  for (uint32_t m = 0; m < sub.size(); ++m) {
+    if (c.submachines[m].live == 0) { continue; }
+    out += "  sub ";
+    string_append_u32(out, m);
+    out += ' ';
+    append_rect(out, sub[m]);
+    out += '\n';
+  }
+  for (uint32_t t = 0; t < routes.size(); ++t) {
+    if ((c.transitions[t].live == 0) || (routes[t].len == 0)) { continue; }
+    out += "  route ";
+    chart_path_of(c, c.transitions[t].src, out);
+    out += " -> ";
+    chart_path_of(c, c.transitions[t].dst, out);
+    for (uint32_t k = 0; k < routes[t].len; ++k) {
+      scav_point const pt{ points[routes[t].off + k] };
+      out += " (";
+      append_i32v(out, pt.x);
+      out += ',';
+      append_i32v(out, pt.y);
+      out += ')';
+    }
+    for (uint32_t k = 0; k < port_spans[t].len; ++k) {
+      scav_port_slot const sl{ slots[port_spans[t].off + k] };
+      out += " port s";
+      string_append_u32(out, sl.side);
+      out += " d";
+      string_append_u32(out, sl.boundary_depth);
+    }
+    out += '\n';
+  }
+}
+
 // The JSON projection ======================================================
 
 // One array per entity array, one field per row field, ids as numbers and
@@ -368,6 +467,86 @@ char const *json_elem_kind_name(ElemKind kind) {
   return "unknown";
 }
 
+void append_json_rect(std::string &out, scav_rect r) {
+  out += '[';
+  append_i32v(out, r.x);
+  out += ", ";
+  append_i32v(out, r.y);
+  out += ", ";
+  append_i32v(out, r.w);
+  out += ", ";
+  append_i32v(out, r.h);
+  out += ']';
+}
+
+// Row-major arrays keyed by entity ordinal, the columnar model's own shape, so
+// a renderer indexes geometry with the ids the entity arrays already use.
+void append_geometry_json(std::string &out, Chart const &c) {
+  out += ",\n  \"geometry\": {\n    \"gen\": ";
+  string_append_u32(out, geom_rows<uint32_t>(c, "scav.geom.gen")[0]);
+  out += ",\n    \"structural_hash\": ";
+  string_append_u32(out, layout_structural_hash(c));
+  out += ",\n    \"coordinate_hash\": ";
+  string_append_u32(out, layout_coordinate_hash(c));
+  out += ",\n    \"chart\": ";
+  append_json_rect(out, geom_rows<scav_rect>(c, "scav.geom.chart")[0]);
+
+  for (char const *name : { "scav.geom.state",
+                            "scav.geom.state_before",
+                            "scav.geom.state_after",
+                            "scav.geom.sub" }) {
+    out += ",\n    ";
+    append_json_string(out, std::string_view{ name }.substr(10));  // "state", ...
+    out += ": [";
+    auto const rows{ geom_rows<scav_rect>(c, name) };
+    for (uint32_t i = 0; i < rows.size(); ++i) {
+      if (i != 0) { out += ", "; }
+      append_json_rect(out, rows[i]);
+    }
+    out += ']';
+  }
+
+  auto const routes{ geom_rows<scav_span>(c, "scav.geom.route") };
+  auto const points{ geom_rows<scav_point>(c, "scav.geom.point") };
+  auto const port_spans{ geom_rows<scav_span>(c, "scav.geom.port") };
+  auto const slots{ geom_rows<scav_port_slot>(c, "scav.geom.portslot") };
+  out += ",\n    \"route\": [";
+  for (uint32_t t = 0; t < routes.size(); ++t) {
+    if (t != 0) { out += ", "; }
+    out += '[';
+    for (uint32_t k = 0; k < routes[t].len; ++k) {
+      if (k != 0) { out += ", "; }
+      scav_point const pt{ points[routes[t].off + k] };
+      out += '[';
+      append_i32v(out, pt.x);
+      out += ", ";
+      append_i32v(out, pt.y);
+      out += ']';
+    }
+    out += ']';
+  }
+  out += "],\n    \"port\": [";
+  for (uint32_t t = 0; t < port_spans.size(); ++t) {
+    if (t != 0) { out += ", "; }
+    out += '[';
+    for (uint32_t k = 0; k < port_spans[t].len; ++k) {
+      if (k != 0) { out += ", "; }
+      scav_port_slot const sl{ slots[port_spans[t].off + k] };
+      out += '[';
+      append_i32v(out, sl.x);
+      out += ", ";
+      append_i32v(out, sl.y);
+      out += ", ";
+      string_append_u32(out, sl.side);
+      out += ", ";
+      string_append_u32(out, sl.boundary_depth);
+      out += ']';
+    }
+    out += ']';
+  }
+  out += "]\n  }";
+}
+
 void append_json(std::string &out, Chart const &c) {
   out += "{\n  \"chart\": {";
   Row chart{ .out = &out, .n = 0 };
@@ -454,15 +633,28 @@ void append_json(std::string &out, Chart const &c) {
     row_num(r, "flags", d.flags);
     row_num(r, "count", column_count(c, ColumnId{ i }));
   });
-  out += "\n}\n";
 }
 
 }  // namespace
 
-int run_dump(char const *path, bool hash_only, bool as_json) {
+int run_dump(char const *path, bool hash_only, bool as_json, bool with_layout) {
   Loaded net;
   load_and_report(path, true, net);
   if (net.code == EXIT_UNUSABLE) { return EXIT_UNUSABLE; }
+
+  if (with_layout) {
+    scav_profile profile{};
+    profile_named("readable", profile);
+    scav_spaces const none{};  // the CLI has nothing to measure with
+    std::vector<scav_placed> placed;
+    std::vector<Diagnostic> diags;
+    if (!layout_run(net.chart, none, profile, placed, diags)) {
+      std::string err;
+      for (Diagnostic const &d : diags) { diag_append(err, net.chart, d, path); }
+      write_stream(err, stderr);
+      return EXIT_DIAGNOSED;
+    }
+  }
 
   std::string out;
   if (hash_only) {
@@ -470,8 +662,11 @@ int run_dump(char const *path, bool hash_only, bool as_json) {
     out += '\n';
   } else if (as_json) {
     append_json(out, net.chart);
+    if (with_layout) { append_geometry_json(out, net.chart); }
+    out += "\n}\n";
   } else {
     append_model(out, net.chart);
+    if (with_layout) { append_geometry_text(out, net.chart); }
   }
   write_stream(out, stdout);
   return net.code;

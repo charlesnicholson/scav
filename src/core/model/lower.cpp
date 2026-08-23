@@ -476,8 +476,8 @@ void model_finalize_containment(Chart &c) {
   }
 }
 
-// Three phases: resolve every path, synthesize and attach the wildcards, append
-// the transition rows. A failed path skips its statement before phase two.
+// Three passes: resolve every path, synthesize and attach the wildcards, append
+// the transition rows. A failed path skips its statement before pass two.
 bool model_resolve_transitions(Chart &c,
                                ParsedDocument const *const *docs,
                                uint32_t doc_count,

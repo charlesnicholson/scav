@@ -71,6 +71,8 @@ scav_add_functional_test(dump
           "${PROJECT_SOURCE_DIR}/test_data/golden/dump/vac.txt"
           "${PROJECT_SOURCE_DIR}/test_data/golden/dump/mill.txt"
           "${PROJECT_SOURCE_DIR}/test_data/golden/dump/vac.json"
+          "${PROJECT_SOURCE_DIR}/test_data/golden/dump/vac_layout.txt"
+          "${PROJECT_SOURCE_DIR}/test_data/golden/dump/vac_layout.json"
           "$<TARGET_FILE:scav>"
   TARGETS scav
 )
@@ -83,6 +85,13 @@ scav_add_functional_test(load
           "$<TARGET_FILE:scav_shared>"
           "$<TARGET_FILE:scav>"
   TARGETS scav_shared scav
+)
+# Layout driven from Python over ctypes, geometry read back through the
+# column accessor.
+scav_add_functional_test(layout
+  DEPENDS "${PROJECT_SOURCE_DIR}/test_data/charts/brew.scav"
+          "$<TARGET_FILE:scav_shared>"
+  TARGETS scav_shared
 )
 scav_add_functional_test(fmt
   DEPENDS ${scav_corpus_charts}
@@ -100,6 +109,15 @@ scav_add_functional_test(deps
           "${PROJECT_SOURCE_DIR}/test_data/charts/led.scav"
           "$<TARGET_FILE:scav>"
   TARGETS scav
+)
+# Globbed with CONFIGURE_DEPENDS: the checker scans whatever exists under
+# src/layout, so the stamp's inputs track the same set, new files included.
+file(GLOB_RECURSE scav_layout_checked_sources CONFIGURE_DEPENDS
+  "${PROJECT_SOURCE_DIR}/src/layout/*.h"
+  "${PROJECT_SOURCE_DIR}/src/layout/*.cpp"
+)
+scav_add_functional_test(include_subset
+  DEPENDS ${scav_layout_checked_sources}
 )
 scav_add_functional_test(presets
   DEPENDS "${PROJECT_SOURCE_DIR}/CMakePresets.json"

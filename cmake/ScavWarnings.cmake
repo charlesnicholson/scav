@@ -29,6 +29,9 @@ set(SCAV_WARNINGS_GNU_LIKE
 )
 
 set(SCAV_WARNINGS_CLANG
+  # An omitted designated field value-initializes, which is the idiom for wide
+  # POD inputs like scav_spaces; newer clang puts this warning in -Wextra.
+  -Wno-missing-designated-field-initializers
   -Wcomma
   -Wconditional-uninitialized
   -Wheader-hygiene
@@ -44,6 +47,9 @@ set(SCAV_WARNINGS_CLANG
 )
 
 set(SCAV_WARNINGS_GCC
+  # gcc has no designated-only spelling of this, and an omitted designated
+  # field value-initializes; clang rows still enforce the positional form.
+  -Wno-missing-field-initializers
   -Warith-conversion
   -Wduplicated-branches
   -Wduplicated-cond
@@ -93,6 +99,7 @@ function(scav_warnings_init)
       target_compile_options(scav_warnings INTERFACE
         /W4
         /utf-8
+        -Wno-missing-designated-field-initializers  # /W4 enables it; see above
         -Wshift-sign-overflow
         -Wtautological-compare
         -Wthread-safety
