@@ -10,6 +10,12 @@
 # Rewritten by envy on every invocation, and names a per-machine cache path.
 /.luarc.json
 
+# Per-machine build settings -- today just SCAV_ENVY_CACHE_ROOT, which redirects
+# envy's package cache out of out/. Machine-specific by nature, so it is never
+# committed; Conductor copies `.env*` into each new workspace, which is what
+# makes writing it once enough.
+/.env
+
 # envy deploys a launcher per product, and these two exist only under SCAV_LINT.
 # Tracking them would make an ordinary `envy sync` delete them.
 /bin/clang-format

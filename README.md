@@ -93,56 +93,53 @@ bootstraps itself, then provisions cmake, ninja, doctest and python 3.14 into
 `out/.envy`. After that it is a cache hit. Every build prints which cache it
 used, because the default costs ~540 MB and that should not be silent.
 
-### Sharing one envy cache across worktrees
+### Where the toolchain lives
 
-The cache defaults into `out/.envy`, which is deliberate — a factory reset is
-`rm -rf out`, and nothing writes to `$HOME`. The cost is one toolchain copy per
-checkout, which stings if you keep several worktrees or run parallel agents.
+Under `out/.envy`, with everything else scav generates, so **`rm -rf out` removes
+every tool, package and build artifact** and leaves nothing on your machine. That
+is the default and it is not opt-in — build scav once, delete `out`, and you are
+back where you started. Nothing is written to `$HOME`.
 
-If you already use envy and would rather scav's packages land in your user-wide
-cache, that is one line in your shell profile:
+The cost is one toolchain copy per checkout, about 540 MB. If you keep several
+worktrees or run parallel agents that adds up, so there is a power-user override:
+point scav's cache at your own envy cache and every worktree shares one copy.
 
 ```sh
-export SCAV_ENVY_CACHE_ROOT="$HOME/Library/Caches/envy"              # macOS
-export SCAV_ENVY_CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/envy"   # Linux
+echo 'SCAV_ENVY_CACHE_ROOT=~/Library/Caches/envy' > .env       # macOS
+echo 'SCAV_ENVY_CACHE_ROOT=~/.cache/envy'         > .env       # Linux
 ```
 
-**Note the `SCAV_` prefix — that is the whole point of the variable.** envy's own
-`ENVY_CACHE_ROOT` would do the same job, but it is global: exported from a
-profile it retargets the cache of *every* envy project on the machine, including
-ones that chose a project-local sandbox deliberately. `SCAV_ENVY_CACHE_ROOT` is
-read only by scav's own entry points, which translate it to `ENVY_CACHE_ROOT` for
-the build. Setting `ENVY_CACHE_ROOT` yourself still wins — it is envy's
-documented override, and CI uses it.
+`.env` is gitignored and holds this one key. It is the place to write the override
+once: Conductor copies `.env*` into every new workspace, so a fresh worktree
+inherits it without a second step. The file is *parsed*, never sourced, so a line
+in it cannot run. An environment variable of the same name takes precedence, which
+is what a one-off `SCAV_ENVY_CACHE_ROOT=... ./build.sh` uses.
 
-A profile export is inherited by every new worktree and every tool session, which
-is what makes it stick where a per-shell `export` does not. Precedence is
-`ENVY_CACHE_ROOT` > `SCAV_ENVY_CACHE_ROOT` > `out/.envy`, and every build prints
-which tier answered.
+Three things worth knowing before you turn it on:
 
-The translation lives in `build.sh`, `build.bat` and `tools/build.py` rather than
-in the manifest, for a specific reason: envy's cache directive *does* understand
-`${VAR:-default}`, but only in the envy binary. The shell launcher that bootstraps
-that binary has a simpler expander and would take
-`${SCAV_ENVY_CACHE_ROOT:-out/.envy}` literally, creating a directory by that name.
-Translating to the one variable both tiers read first keeps them agreeing. The
-consequence is that the shims — `bin/cmake`, `bin/ninja` run *directly*, outside
-`build.sh` — still use `out/.envy`; go through `build.sh` and everything agrees.
-
-Two things worth knowing before you do it:
-
-- **Packages are keyed by fingerprint, so sharing is safe and often free.**
+- **The `SCAV_` prefix is the point.** envy's own `ENVY_CACHE_ROOT` does the same
+  job, but it is global: set for the user it retargets *every* envy project on
+  the machine, including ones that chose a project-local sandbox deliberately —
+  the same choice scav made. `SCAV_ENVY_CACHE_ROOT` is read only by scav's own
+  entry points. Setting `ENVY_CACHE_ROOT` yourself still wins; that is envy's
+  documented override and CI uses it.
+- **Sharing is mostly free**, because packages are keyed by content fingerprint.
   scav's `envy.cmake@r0` is the same `darwin-arm64-blake3-49a9b2620de8c380` build
-  another project would have fetched, so it is already a hit. Measured on one
-  machine: three of four packages hit immediately, leaving a 58 MB python fetch,
-  and ~499 MB saved per additional worktree.
+  another envy project already fetched. Measured on one machine: three of four
+  packages hit immediately, leaving a 58 MB python fetch, and ~499 MB saved per
+  additional worktree.
 - **Concurrent access is safe.** Three simultaneous `envy sync` runs against one
-  fresh cache all exit 0 — one installs, the others see hits, and the resulting
-  tree is correct. Parallel agents in separate worktrees can share one cache.
+  fresh cache all exit 0 — one installs, the others hit, and the resulting tree
+  is correct. Parallel agents in separate worktrees can share one cache.
 
-What you give up is the `rm -rf out` factory reset for the toolchain, and you
-accept a machine-global directory that another checkout could invalidate. That
-trade is why project-local is the default rather than the other way round.
+What you give up is precisely the factory reset: `rm -rf out` no longer removes
+the toolchain, and a machine-global directory can be invalidated by another
+checkout. That is why the sandbox is the default and this is the opt-in.
+
+This cannot live in a CMake preset, which is the obvious place to look for it:
+envy resolves the cache and hands back absolute paths to cmake, ninja and python
+*before* CMake is invoked at all, so a preset is read several envy calls too late.
+Every build prints which tier answered.
 
 ```
 ./build.sh --config debug            # matrix config: debug | release | testable

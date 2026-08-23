@@ -39,26 +39,50 @@ def run(*cmd: str | Path) -> None:
     subprocess.run(argv, cwd=REPO_ROOT, check=True)
 
 
-def adopt_scav_cache_root() -> str:
-    """Honour SCAV_ENVY_CACHE_ROOT, and say which tier answered.
+def cache_root_from_dotenv() -> str | None:
+    """`SCAV_ENVY_CACHE_ROOT` out of a gitignored `.env`, parsed and not executed.
 
-    envy's own ENVY_CACHE_ROOT is global, so a developer who exported it from a
-    shell profile would retarget every other envy project on the machine --
-    including ones that chose a project-local sandbox deliberately. A
-    scav-scoped name is safe to leave in a profile, and translating it to the
-    variable envy reads keeps the launcher and the binary agreeing: both take
-    ENVY_CACHE_ROOT as their first tier, whereas a `${VAR:-default}` manifest
-    directive is understood by the binary and not by the shell launcher.
+    The file is where a power user writes the override once: Conductor copies
+    `.env*` into every new workspace, so a fresh worktree inherits it. Only this
+    one key is read, and only `~` is expanded -- anything more would be a shell
+    this does not need to be.
     """
-    scoped = os.environ.get("SCAV_ENVY_CACHE_ROOT")
+    path = REPO_ROOT / ".env"
+    if not path.is_file():
+        return None
+    value = None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        head, sep, tail = line.partition("=")
+        if sep and (head.strip() == "SCAV_ENVY_CACHE_ROOT"):
+            value = tail.strip().strip("\"'")
+    if not value:
+        return None
+    return str(Path(value).expanduser())
+
+
+def adopt_scav_cache_root() -> str:
+    """Resolve the cache override and say which tier answered.
+
+    The default is the manifest's `out/.envy`, so `rm -rf out` stays a factory
+    reset for tools, packages and build trees alike. Overriding it is opt-in and
+    scav-scoped: envy's own `ENVY_CACHE_ROOT` is global, so a developer who left
+    it in a shell profile would retarget every other envy project on the
+    machine, including ones that chose a project-local sandbox on purpose.
+
+    Translating the scoped name to the one envy reads also keeps envy's launcher
+    and its binary agreeing -- both take `ENVY_CACHE_ROOT` as their first tier,
+    whereas a `${VAR:-default}` manifest directive is understood by the binary
+    and not by the shell launcher that bootstraps it.
+    """
+    scoped = os.environ.get("SCAV_ENVY_CACHE_ROOT") or cache_root_from_dotenv()
     if current := os.environ.get("ENVY_CACHE_ROOT"):
-        # build.sh exports the scoped one before this runs, so equality is what
-        # tells the two tiers apart rather than which variable is set.
+        # build.sh exports both before this runs, so equality is what tells the
+        # tiers apart rather than which variable happens to be set.
         return "SCAV_ENVY_CACHE_ROOT" if current == scoped else "ENVY_CACHE_ROOT"
     if scoped:
         os.environ["ENVY_CACHE_ROOT"] = scoped
         return "SCAV_ENVY_CACHE_ROOT"
-    return "project-local; see README to share one across worktrees"
+    return "sandboxed in out/; see README to share one across worktrees"
 
 
 def envy_cache_root() -> str:
