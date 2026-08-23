@@ -114,6 +114,13 @@ bool size_boxes(Chart const &c,
       row_h = imax(row_h, Wide{ r.h });
       ext_w = imax(ext_w, cx - p.pad);
     }
+    // Width needs its own bound: the aspect target may exceed the domain, and
+    // the root submachine has no wrapping state whose check would catch it.
+    if (ext_w > COORD_MAX) {
+      overflow(diags, ElemKind::Submachine, m);
+      ok = false;
+      return;
+    }
     geo.sub[m].w = static_cast<int32_t>(ext_w);
     geo.sub[m].h = static_cast<int32_t>(row_y + row_h);
   };

@@ -383,6 +383,30 @@ TEST_CASE("layout: composed geometry past the domain is rejected, columns kept")
   CHECK(column_find(c, "scav.geom.state").v == INVALID);  // nothing written
 }
 
+TEST_CASE("layout: a packed row wider than the domain is rejected") {
+  // dar at its bound stretches the aspect target past COORD_MAX, so five
+  // maximal-width children land in one row that no wrapping state bounds.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  for (uint32_t i = 0; i < 5; ++i) { build_state(c, root, {}, StateKind::Normal, {}); }
+  std::vector<scav_box_space> const boxes(
+      c.states.size(), { .min_w = SPACE_MAX, .h_before = 0, .h_after = 0 });
+  scav_spaces const s{ .box_state = boxes.data(),
+                       .n_box_state = static_cast<uint32_t>(boxes.size()) };
+  scav_profile wide{ readable() };
+  wide.dar_num = 1024;
+  wide.dar_den = 1;
+
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  CHECK(!layout_run(c, s, wide, placed, diags));
+  REQUIRE(!diags.empty());
+  CHECK(diags[0].code == DiagCode::CoordinateOverflow);
+  CHECK(diags[0].subject.kind == ElemKind::Submachine);
+  CHECK(diags[0].subject.ordinal == root.v);
+  CHECK(column_find(c, "scav.geom.state").v == INVALID);
+}
+
 TEST_CASE("layout: invalid profiles and spaces fail before any geometry") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
