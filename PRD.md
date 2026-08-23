@@ -253,7 +253,9 @@ out/test/             functional-test scratch, golden diffs, perf reports
 -- @envy cache-win   "out\.envy"
 ```
 
-Precedence is `ENVY_CACHE_ROOT` > manifest directive > platform default, so **project-local is the default and a shared global cache is one env var away** — which is what CI wants, where a cache warm across jobs is the point. Cost of the default: one toolchain copy per checkout, the right trade against a machine-global directory a second checkout can invalidate.
+Precedence is `ENVY_CACHE_ROOT` > manifest directive > platform default, so **project-local is the default and a shared global cache is one env var away**. Two callers want the override, not one: CI, where a cache warm across jobs is the point, and a developer keeping several worktrees or running parallel agents, who otherwise pays ~540 MB per checkout. Cost of the default is exactly that copy, and it is the right trade against a machine-global directory a second checkout can invalidate — but the developer case is common enough that `build.sh` prints which cache it used rather than spending half a gigabyte quietly.
+
+**Sharing one cache is safe, and measured rather than assumed.** Packages are keyed by content fingerprint, so an override is usually a partial hit on arrival — scav's `envy.cmake@r0` is the same build another project already fetched. Three simultaneous `envy sync` runs against one fresh cache all succeed: one installs, the others hit, and the resulting tree is correct. So parallel agents in separate worktrees can share one cache without a lock of our own. The override reaches every entry point because each `bin/` launcher bootstraps through `bin/envy`, and a shell-profile export is inherited by every new worktree and tool session, which a per-shell `export` is not.
 
 **Not a build prerequisite, and deliberately so.** §6's claim is about the C++ abstract machine, so any conforming C++20 toolchain is supported and `scav selftest` is how a user confirms theirs agrees. Requiring envy to build would contradict that. Standard CMake: `find_package`, no vendored toolchain assumptions, no compiler-specific flags in the exported targets.
 

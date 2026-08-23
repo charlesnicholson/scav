@@ -39,6 +39,23 @@ def run(*cmd: str | Path) -> None:
     subprocess.run(argv, cwd=REPO_ROOT, check=True)
 
 
+def envy_cache_root() -> str:
+    """Which package cache this build used, asked of envy rather than derived.
+
+    The precedence is ENVY_CACHE_ROOT > the manifest directive > the platform
+    default, and duplicating that here is how the two answers drift. One extra
+    invocation is worth not silently spending half a gigabyte per worktree.
+    """
+    out = subprocess.run(
+        [str(ENVY), "cache"], cwd=REPO_ROOT, check=False,
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+    ).stdout
+    for line in out.splitlines():
+        if line.startswith("Cache:"):
+            return line.split(":", 1)[1].strip()
+    return "unknown"
+
+
 def envy_product(name: str) -> Path:
     """envy narrates to stderr and prints the path to stdout."""
     out = subprocess.run(
@@ -146,6 +163,16 @@ def main() -> int:
 
     if not args.no_sync:
         run(ENVY, "sync")
+
+    # Which cache, said out loud. The default is project-local, so a developer
+    # with several worktrees pays for a toolchain copy in each one unless they
+    # set ENVY_CACHE_ROOT -- and that cost should not be silent.
+    cache = envy_cache_root()
+    shared = bool(os.environ.get("ENVY_CACHE_ROOT"))
+    print(f"envy cache: {cache}"
+          + ("  (ENVY_CACHE_ROOT)" if shared
+             else "  (project-local; see README to share one across worktrees)"),
+          flush=True)
 
     cmake, ninja, doctest, python = [
         envy_product(p) for p in ("cmake", "ninja", "doctest_cpp_dir", "python3")

@@ -90,7 +90,43 @@ incremental.
 
 The first run takes a few minutes: [envy](https://github.com/envy-package-manager/envy)
 bootstraps itself, then provisions cmake, ninja, doctest and python 3.14 into
-`out/.envy`. After that it is a cache hit.
+`out/.envy`. After that it is a cache hit. Every build prints which cache it
+used, because the default costs ~540 MB and that should not be silent.
+
+### Sharing one envy cache across worktrees
+
+The cache defaults into `out/.envy`, which is deliberate — a factory reset is
+`rm -rf out`, and nothing writes to `$HOME`. The cost is one toolchain copy per
+checkout, which stings if you keep several worktrees or run parallel agents.
+
+If you already use envy and would rather scav's packages land in your user-wide
+cache, that is one line in your shell profile:
+
+```sh
+export ENVY_CACHE_ROOT="$HOME/Library/Caches/envy"   # macOS
+export ENVY_CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/envy"   # Linux
+```
+
+`ENVY_CACHE_ROOT` beats the manifest directive, so that is all it takes — and
+because every launcher under `bin/` bootstraps through `bin/envy`, it covers
+`build.sh`, `bin/cmake`, `bin/ninja`, and the `envy product` lookups CMake does.
+A profile export is inherited by every new worktree and every tool session, which
+is what makes it stick where a per-shell `export` does not.
+
+Two things worth knowing before you do it:
+
+- **Packages are keyed by fingerprint, so sharing is safe and often free.**
+  scav's `envy.cmake@r0` is the same `darwin-arm64-blake3-49a9b2620de8c380` build
+  another project would have fetched, so it is already a hit. Measured on one
+  machine: three of four packages hit immediately, leaving a 58 MB python fetch,
+  and ~499 MB saved per additional worktree.
+- **Concurrent access is safe.** Three simultaneous `envy sync` runs against one
+  fresh cache all exit 0 — one installs, the others see hits, and the resulting
+  tree is correct. Parallel agents in separate worktrees can share one cache.
+
+What you give up is the `rm -rf out` factory reset for the toolchain, and you
+accept a machine-global directory that another checkout could invalidate. That
+trade is why project-local is the default rather than the other way round.
 
 ```
 ./build.sh --config debug            # matrix config: debug | release | testable
