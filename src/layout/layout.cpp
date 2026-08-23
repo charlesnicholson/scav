@@ -179,7 +179,7 @@ void place_boxes(Chart const &c,
   std::vector<Frame> work;
   if (c.root_submachine.v != INVALID) {
     geo.chart = geo.sub[c.root_submachine.v];
-    work.push_back({ c.root_submachine.v, 0, 0 });
+    work.push_back({ .sub = c.root_submachine.v, .x = 0, .y = 0 });
   }
   while (!work.empty()) {
     Frame const at{ work.back() };
@@ -204,7 +204,7 @@ void place_boxes(Chart const &c,
       for (uint32_t u = 0; u < subs.len; ++u) {
         uint32_t const m{ c.submachine_ids[subs.off + u].v };
         if (c.submachines[m].live == 0) { continue; }
-        work.push_back({ m, ix, sy });  // concurrent regions stack vertically
+        work.push_back({ .sub = m, .x = ix, .y = sy });  // concurrent regions stack
         sy += geo.sub[m].h + p.pad;
         ++placed;
       }
@@ -458,8 +458,8 @@ uint32_t layout_structural_hash(Chart const &c) {
     for (uint32_t k = 0; (k + 1) < route.len; ++k) {
       scav_point const &a{ points[route.off + k] };
       scav_point const &d{ points[route.off + k + 1] };
-      uint32_t const sx{ static_cast<uint32_t>((d.x > a.x) - (d.x < a.x) + 1) };
-      uint32_t const sy{ static_cast<uint32_t>((d.y > a.y) - (d.y < a.y) + 1) };
+      uint32_t const sx{ (d.x > a.x) ? 2U : (d.x < a.x) ? 0U : 1U };
+      uint32_t const sy{ (d.y > a.y) ? 2U : (d.y < a.y) ? 0U : 1U };
       append_u32(b, (sx * 3U) + sy);
     }
   }

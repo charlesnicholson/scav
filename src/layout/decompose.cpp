@@ -75,10 +75,12 @@ SplitGraph decompose(Chart const &c) {
       // included. One shape covers every case: an empty run contributes nothing.
       if (i == 0) {  // src encloses dst; its border splits only when external
         src_inner = tr.kind != TransKind::External;
-        if (!src_inner) { route.push_back({ Crossing::Enter, tr.src, {} }); }
+        if (!src_inner) {
+          route.push_back({ .kind = Crossing::Enter, .state = tr.src, .sub = {} });
+        }
       }
       for (size_t k = 1; k < i; ++k) {
-        route.push_back({ Crossing::Exit, chain_src[k], {} });
+        route.push_back({ .kind = Crossing::Exit, .state = chain_src[k], .sub = {} });
       }
       if ((i > 0) && (j > 0) && (i < chain_src.size())) {
         // The chains meet at a state; entering through two of its submachines
@@ -86,12 +88,12 @@ SplitGraph decompose(Chart const &c) {
         SubmachineId const sub_src{ c.states[chain_src[i - 1].v].parent };
         SubmachineId const sub_dst{ c.states[chain_dst[j - 1].v].parent };
         if (sub_src != sub_dst) {
-          route.push_back({ Crossing::SepSrc, {}, sub_src });
-          route.push_back({ Crossing::SepDst, {}, sub_dst });
+          route.push_back({ .kind = Crossing::SepSrc, .state = {}, .sub = sub_src });
+          route.push_back({ .kind = Crossing::SepDst, .state = {}, .sub = sub_dst });
         }
       }
       for (size_t k = j; k-- > 1;) {
-        route.push_back({ Crossing::Enter, chain_dst[k], {} });
+        route.push_back({ .kind = Crossing::Enter, .state = chain_dst[k], .sub = {} });
       }
     }
 
