@@ -14,8 +14,8 @@ namespace scav {
 // A hierarchical port, one per (transition, crossed boundary). A state border
 // names the state; a concurrent separator names the submachine instead.
 struct SplitPort {
-  StateId state;      // INVALID for a separator port
-  SubmachineId sub;   // INVALID for a state-border port
+  StateId state;     // INVALID for a separator port
+  SubmachineId sub;  // INVALID for a state-border port
   TransId trans;
   uint32_t crossing;  // this port's ordinal along its transition's route
   constexpr bool operator==(SplitPort const &) const = default;
@@ -34,9 +34,9 @@ struct SplitSegment {
 };
 
 struct SplitGraph {
-  std::vector<SplitPort> ports;        // route order within each transition
-  std::vector<SplitSegment> segments;  // contiguous per transition
-  std::vector<Span> trans_segments;    // parallel to transitions; -> segments
+  std::vector<SplitPort> ports;           // route order within each transition
+  std::vector<SplitSegment> segments;     // contiguous per transition
+  std::vector<Span> trans_segments;       // parallel to transitions; -> segments
   std::vector<uint32_t> trans_crossings;  // boundaries crossed, kind-adjusted
   std::vector<uint32_t> state_crossings;  // edges through each state's border
   std::vector<uint32_t> state_depth;      // enclosing state borders above each state

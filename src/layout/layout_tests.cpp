@@ -56,7 +56,9 @@ T row_of(Chart const &c, char const *name, uint32_t row) {
   REQUIRE(id.v != INVALID);
   REQUIRE(row < column_count(c, id));
   T out{};
-  std::memcpy(&out, column_data(c, id) + (static_cast<size_t>(row) * sizeof(T)), sizeof(T));
+  std::memcpy(&out,
+              column_data(c, id) + (static_cast<size_t>(row) * sizeof(T)),
+              sizeof(T));
   return out;
 }
 
@@ -208,12 +210,11 @@ TEST_CASE("layout: children wrap into rows at the aspect-ratio target") {
   int32_t const h{ p.kind_min_h[0] + (2 * p.pad) };
   Wide const target{ static_cast<Wide>(
       isqrt(static_cast<uint64_t>(9LL * w * h * p.dar_num / p.dar_den))) };
-  REQUIRE(target >= (2 * w) + p.pad);  // two fit
+  REQUIRE(target >= (2 * w) + p.pad);       // two fit
   REQUIRE(target < (3 * w) + (2 * p.pad));  // three do not
 
   CHECK((state_rect(c, kids[0]) == scav_rect{ .x = 0, .y = 0, .w = w, .h = h }));
-  CHECK((state_rect(c, kids[1]) ==
-         scav_rect{ .x = w + p.pad, .y = 0, .w = w, .h = h }));
+  CHECK((state_rect(c, kids[1]) == scav_rect{ .x = w + p.pad, .y = 0, .w = w, .h = h }));
   CHECK((state_rect(c, kids[2]) == scav_rect{ .x = 0, .y = h + p.pad, .w = w, .h = h }));
   CHECK((state_rect(c, kids[8]) ==
          scav_rect{ .x = 0, .y = 4 * (h + p.pad), .w = w, .h = h }));
@@ -334,11 +335,16 @@ TEST_CASE("layout: the hash split separates size changes from shape changes") {
                          .n_box_state = static_cast<uint32_t>(boxes.size()) };
     std::vector<scav_placed> placed;
     std::vector<Diagnostic> diags;
-    REQUIRE(layout_run(c, s, [] {
-      scav_profile p{};
-      REQUIRE(profile_named("readable", p));
-      return p;
-    }(), placed, diags));
+    REQUIRE(layout_run(
+        c,
+        s,
+        [] {
+          scav_profile p{};
+          REQUIRE(profile_named("readable", p));
+          return p;
+        }(),
+        placed,
+        diags));
     return c;
   };
 
@@ -390,7 +396,8 @@ TEST_CASE("layout: a packed row wider than the domain is rejected") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   for (uint32_t i = 0; i < 5; ++i) { build_state(c, root, {}, StateKind::Normal, {}); }
   std::vector<scav_box_space> const boxes(
-      c.states.size(), { .min_w = SPACE_MAX, .h_before = 0, .h_after = 0 });
+      c.states.size(),
+      { .min_w = SPACE_MAX, .h_before = 0, .h_after = 0 });
   scav_spaces const s{ .box_state = boxes.data(),
                        .n_box_state = static_cast<uint32_t>(boxes.size()) };
   scav_profile wide{ readable() };
@@ -545,9 +552,8 @@ void check_geometry(Chart const &c) {
         row_of<scav_port_slot>(c, "scav.geom.portslot", ports.off + k)
       };
       SplitPort const &port{ g.ports[g.segments[segs.off + k].dst_port] };
-      scav_rect const boundary{ (port.state.v != INVALID)
-                                    ? state_rect(c, port.state)
-                                    : sub_rect(c, port.sub) };
+      scav_rect const boundary{ (port.state.v != INVALID) ? state_rect(c, port.state)
+                                                          : sub_rect(c, port.sub) };
       CHECK(on_border({ .x = slot.x, .y = slot.y }, boundary));
       CHECK(slot.side <= 3);
     }
@@ -598,8 +604,7 @@ TEST_CASE("layout: geometry invariants hold across topologies and spaces") {
                    .h_before = static_cast<int32_t>(30 + (i % 3) * 10),
                    .h_after = static_cast<int32_t>((i % 2) * 20) };
     }
-    std::vector<scav_path_clear> clears(c.transitions.size(),
-                                        { .src = 4, .dst = 8 });
+    std::vector<scav_path_clear> clears(c.transitions.size(), { .src = 4, .dst = 8 });
     scav_spaces const s{ .box_state = boxes.data(),
                          .n_box_state = static_cast<uint32_t>(boxes.size()),
                          .path_clear = clears.data(),
@@ -648,8 +653,13 @@ TEST_CASE("layout: two thousand states lay out, and quickly") {
   run(c, {}, readable());
   auto const t1{ std::chrono::steady_clock::now() };
   auto const us{ std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() };
-  MESSAGE("layout_run over ", c.states.size(), " states / ", c.transitions.size(),
-          " transitions: ", us, " us");
+  MESSAGE("layout_run over ",
+          c.states.size(),
+          " states / ",
+          c.transitions.size(),
+          " transitions: ",
+          us,
+          " us");
 #if SCAV_PERF_ASSERT_FLOOR == 1
   // A floor, not a time: named machines only, never under instrumentation.
   CHECK(us < 20000);
@@ -663,7 +673,8 @@ TEST_CASE("layout: the coordinate extent estimate holds under fat text") {
   // conservative: if this fits, real fonts fit smaller.
   Chart c{ two_k_chart() };
   std::vector<scav_box_space> const boxes(
-      c.states.size(), { .min_w = 3200, .h_before = 448, .h_after = 96 });
+      c.states.size(),
+      { .min_w = 3200, .h_before = 448, .h_after = 96 });
   scav_spaces const s{ .box_state = boxes.data(),
                        .n_box_state = static_cast<uint32_t>(boxes.size()) };
   run(c, s, readable());
@@ -672,8 +683,13 @@ TEST_CASE("layout: the coordinate extent estimate holds under fat text") {
   // tall axis, so the 1/16 pt grid stands. The bar below trips when a change
   // eats the margin.
   scav_rect const extent{ row_of<scav_rect>(c, "scav.geom.chart", 0) };
-  MESSAGE("2k-state fat-text extent: ", extent.w, " x ", extent.h, " of ",
-          COORD_MAX, " grid units");
+  MESSAGE("2k-state fat-text extent: ",
+          extent.w,
+          " x ",
+          extent.h,
+          " of ",
+          COORD_MAX,
+          " grid units");
   CHECK(extent.w <= (COORD_MAX / 4) * 3);
   CHECK(extent.h <= (COORD_MAX / 4) * 3);
 }
@@ -682,8 +698,13 @@ TEST_CASE("layout: corpus charts hash to the committed golden") {
   // The stated measurement policy for these goldens: no space requests, the
   // readable profile -- what dump --layout does.
   std::string actual;
-  for (char const *name : { "axis.scav", "brew.scav", "dock.scav", "estop.scav",
-                            "led.scav", "mill.scav", "toolchanger.scav",
+  for (char const *name : { "axis.scav",
+                            "brew.scav",
+                            "dock.scav",
+                            "estop.scav",
+                            "led.scav",
+                            "mill.scav",
+                            "toolchanger.scav",
                             "vac.scav" }) {
     CAPTURE(name);
     std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
@@ -704,8 +725,7 @@ TEST_CASE("layout: corpus charts hash to the committed golden") {
 
   std::vector<scav_byte> golden;
   REQUIRE(read_file(SCAV_TEST_DATA_DIR "/golden/layout/corpus_hashes.txt", golden));
-  std::string const want{ reinterpret_cast<char const *>(golden.data()),
-                          golden.size() };
+  std::string const want{ reinterpret_cast<char const *>(golden.data()), golden.size() };
   if (want != actual) {
     write_file(SCAV_TEST_OUT_DIR "/corpus_hashes.txt",
                reinterpret_cast<scav_byte const *>(actual.data()),
@@ -729,17 +749,18 @@ TEST_CASE("layout: fuzzed charts and spaces either lay out or diagnose") {
     std::vector<SubmachineId> frames{ root };
     uint32_t const n_states{ 2 + next(10) };
     for (uint32_t i = 0; i < n_states; ++i) {
-      SubmachineId const parent{
-        frames[next(static_cast<uint32_t>(frames.size()))]
-      };
+      SubmachineId const parent{ frames[next(static_cast<uint32_t>(frames.size()))] };
       StateId const st{ build_state(c, parent, {}, StateKind::Normal, {}) };
       if (next(3) == 0) { frames.push_back(build_submachine(c, st, {}, {})); }
       if (next(4) == 0) { frames.push_back(build_submachine(c, st, {}, {})); }
     }
     uint32_t const total{ static_cast<uint32_t>(c.states.size()) };
     for (uint32_t i = next(12); i-- > 0;) {
-      build_trans(c, { next(total) }, { next(total) },
-                  static_cast<TransKind>(next(3)), {});
+      build_trans(c,
+                  { next(total) },
+                  { next(total) },
+                  static_cast<TransKind>(next(3)),
+                  {});
     }
     if (!c.transitions.empty() && (next(4) == 0)) {
       c.transitions[next(static_cast<uint32_t>(c.transitions.size()))].live = 0;

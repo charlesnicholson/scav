@@ -12,11 +12,9 @@ namespace scav {
 
 template <typename K, typename V, typename Hash = std::hash<K>>
 class HashMap {
-public:
+ public:
   // False when the key is already present; the stored value is untouched.
-  bool insert(K const &key, V value) {
-    return map.emplace(key, std::move(value)).second;
-  }
+  bool insert(K const &key, V value) { return map.emplace(key, std::move(value)).second; }
 
   // Null when absent, so presence and access are one probe.
   [[nodiscard]] V *find(K const &key) {
@@ -34,7 +32,7 @@ public:
   void clear() { map.clear(); }
   void reserve(size_t count) { map.reserve(count); }
 
-private:
+ private:
   std::unordered_map<K, V, Hash> map;
 };
 

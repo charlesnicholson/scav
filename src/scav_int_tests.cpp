@@ -8,11 +8,7 @@
 #include <cstdint>
 #include <ostream>
 
-namespace {
-
-using namespace scav;
-
-}  // namespace
+namespace { using namespace scav; }  // namespace
 
 TEST_CASE("int: floor_div rounds toward negative infinity for every sign pair") {
   CHECK(floor_div(7, 2) == 3);
@@ -49,8 +45,8 @@ TEST_CASE("int: ceil_div rounds toward positive infinity, signed and unsigned") 
   CHECK(ceil_div(6, 2) == 3);
   CHECK(ceil_div(0, 5) == 0);
   CHECK(ceil_div(7U, 2U) == 4U);
-  CHECK(ceil_div(UINT64_C(0xFFFF'FFFF'FFFF'FFFF), UINT64_C(2))
-        == UINT64_C(0x8000'0000'0000'0000));
+  CHECK(ceil_div(UINT64_C(0xFFFF'FFFF'FFFF'FFFF), UINT64_C(2)) ==
+        UINT64_C(0x8000'0000'0000'0000));
 }
 
 TEST_CASE("int: imax and imin pick the right end, ties either way") {

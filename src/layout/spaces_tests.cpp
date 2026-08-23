@@ -98,14 +98,22 @@ TEST_CASE("spaces: a field outside the quarter-domain names its requester") {
     uint32_t ordinal;
   };
   std::array const bads{
-    Bad{ "negative h_before", [](Tables &t) { t.box_state[1].h_before = -1; },
-         ElemKind::State, 1 },
-    Bad{ "min_w past the cap", [](Tables &t) { t.box_state[0].min_w = SPACE_MAX + 1; },
-         ElemKind::State, 0 },
-    Bad{ "submachine h_after", [](Tables &t) { t.box_sub[0].h_after = -5; },
-         ElemKind::Submachine, 0 },
-    Bad{ "path clear src", [](Tables &t) { t.path_clear[0].src = SPACE_MAX + 1; },
-         ElemKind::Transition, 0 },
+    Bad{ "negative h_before",
+         [](Tables &t) { t.box_state[1].h_before = -1; },
+         ElemKind::State,
+         1 },
+    Bad{ "min_w past the cap",
+         [](Tables &t) { t.box_state[0].min_w = SPACE_MAX + 1; },
+         ElemKind::State,
+         0 },
+    Bad{ "submachine h_after",
+         [](Tables &t) { t.box_sub[0].h_after = -5; },
+         ElemKind::Submachine,
+         0 },
+    Bad{ "path clear src",
+         [](Tables &t) { t.path_clear[0].src = SPACE_MAX + 1; },
+         ElemKind::Transition,
+         0 },
   };
   for (Bad const &bad : bads) {
     CAPTURE(bad.what);

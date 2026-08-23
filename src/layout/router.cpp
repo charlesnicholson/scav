@@ -37,8 +37,7 @@ bool router_name(uint32_t index, scav_byte const *&out, uint32_t &len) {
 bool router_by_name(scav_byte const *name, uint32_t len, scav_router_id &out) {
   if (name == nullptr) { return false; }
   for (uint32_t i = 0; i < ROUTERS.size(); ++i) {
-    if ((ROUTERS[i].name_len == len) &&
-        (std::memcmp(ROUTERS[i].name, name, len) == 0)) {
+    if ((ROUTERS[i].name_len == len) && (std::memcmp(ROUTERS[i].name, name, len) == 0)) {
       out = i;
       return true;
     }

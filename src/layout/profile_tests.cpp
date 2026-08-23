@@ -74,11 +74,14 @@ TEST_CASE("profile: every bound rejects out of range") {
     Poke{ "congestion_iterations", &scav_profile::congestion_iterations, -1, 1025 },
     Poke{ "ripup_cap", &scav_profile::ripup_cap, -1, 1025 },
     Poke{ "spacing_inflation_cap", &scav_profile::spacing_inflation_cap, -1, 1025 },
-    Poke{ "spacing_inflation_increment", &scav_profile::spacing_inflation_increment, -1,
-      SPACE_MAX + 1 },
-    Poke{ "print_columns", &scav_profile::print_columns,
-      static_cast<int32_t>(PRINT_COLUMNS_MIN) - 1,
-      static_cast<int32_t>(PRINT_COLUMNS_MAX) + 1 },
+    Poke{ "spacing_inflation_increment",
+          &scav_profile::spacing_inflation_increment,
+          -1,
+          SPACE_MAX + 1 },
+    Poke{ "print_columns",
+          &scav_profile::print_columns,
+          static_cast<int32_t>(PRINT_COLUMNS_MIN) - 1,
+          static_cast<int32_t>(PRINT_COLUMNS_MAX) + 1 },
   };
   for (Poke const &poke : pokes) {
     CAPTURE(poke.what);

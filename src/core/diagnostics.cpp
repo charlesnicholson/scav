@@ -142,8 +142,7 @@ char const *diag_message(DiagCode code) {
     case DiagCode::ColumnCountMismatch:
       return "column row count does not match its entity array";
 
-    case DiagCode::SpaceOutOfRange:
-      return "space request outside the coordinate domain";
+    case DiagCode::SpaceOutOfRange: return "space request outside the coordinate domain";
     case DiagCode::SpaceOrderDuplicate: return "path boxes repeat an order value";
     case DiagCode::SpaceSubjectInvalid:
       return "path box names a transition that does not exist";

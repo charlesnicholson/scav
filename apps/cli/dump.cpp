@@ -491,8 +491,10 @@ void append_geometry_json(std::string &out, Chart const &c) {
   out += ",\n    \"chart\": ";
   append_json_rect(out, geom_rows<scav_rect>(c, "scav.geom.chart")[0]);
 
-  for (char const *name : { "scav.geom.state", "scav.geom.state_before",
-                            "scav.geom.state_after", "scav.geom.sub" }) {
+  for (char const *name : { "scav.geom.state",
+                            "scav.geom.state_before",
+                            "scav.geom.state_after",
+                            "scav.geom.sub" }) {
     out += ",\n    ";
     append_json_string(out, std::string_view{ name }.substr(10));  // "state", ...
     out += ": [";

@@ -354,9 +354,13 @@ TEST_CASE("abi: a registered column reads back through the three-call accessor")
 
   // Registered through the C++ API the way layout will; the C caller sees
   // only find, data, count.
-  scav::ColumnId const id{ scav::column_register(
-      chart->chart, "scav.geom.state", scav::ElemKind::State,
-      scav::ValueKind::Pod, 16, 4, scav::COLUMN_DERIVED) };
+  scav::ColumnId const id{ scav::column_register(chart->chart,
+                                                 "scav.geom.state",
+                                                 scav::ElemKind::State,
+                                                 scav::ValueKind::Pod,
+                                                 16,
+                                                 4,
+                                                 scav::COLUMN_DERIVED) };
   REQUIRE(id.v != scav::INVALID);
   scav::column_data(chart->chart, id)[0] = 0x5C;
 
@@ -409,9 +413,7 @@ TEST_CASE("abi: scav_str reads the pool a strref names, and only the pool") {
   CHECK(bytes == nullptr);
   CHECK(len == 0);
 
-  uint32_t const pool_size{
-    static_cast<uint32_t>(chart->chart.strings.bytes.size())
-  };
+  uint32_t const pool_size{ static_cast<uint32_t>(chart->chart.strings.bytes.size()) };
   scav_span const past{ .off = pool_size, .len = 1 };
   CHECK(scav_str(chart, past, &bytes, &len) == SCAV_E_INVALID_ARG);
 

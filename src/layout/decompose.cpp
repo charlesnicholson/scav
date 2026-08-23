@@ -108,14 +108,15 @@ SplitGraph decompose(Chart const &c) {
     for (size_t k = 0; k < route.size(); ++k) {
       Crossing const &x{ route[k] };
       uint32_t const port{ static_cast<uint32_t>(g.ports.size()) };
-      g.ports.push_back({ .state = (x.kind == Crossing::Exit) || (x.kind == Crossing::Enter)
-                                       ? x.state
-                                       : StateId{ INVALID },
-                          .sub = (x.kind == Crossing::SepSrc) || (x.kind == Crossing::SepDst)
-                                     ? x.sub
-                                     : SubmachineId{ INVALID },
-                          .trans = { t },
-                          .crossing = static_cast<uint32_t>(k) });
+      g.ports.push_back(
+          { .state = (x.kind == Crossing::Exit) || (x.kind == Crossing::Enter)
+                         ? x.state
+                         : StateId{ INVALID },
+            .sub = (x.kind == Crossing::SepSrc) || (x.kind == Crossing::SepDst)
+                       ? x.sub
+                       : SubmachineId{ INVALID },
+            .trans = { t },
+            .crossing = static_cast<uint32_t>(k) });
       g.segments.push_back({ .trans = { t },
                              .ordinal = static_cast<uint32_t>(k),
                              .frame = frame,

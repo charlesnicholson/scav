@@ -68,9 +68,7 @@ scav_result scav_router_name(uint32_t index, scav_byte const **out, uint32_t *ou
   return scav::router_name(index, *out, *out_len) ? SCAV_OK : SCAV_E_INVALID_ARG;
 }
 
-scav_result scav_router_by_name(scav_byte const *name,
-                                uint32_t len,
-                                scav_router_id *out) {
+scav_result scav_router_by_name(scav_byte const *name, uint32_t len, scav_router_id *out) {
   if ((name == nullptr) || (out == nullptr)) { return SCAV_E_INVALID_ARG; }
   return scav::router_by_name(name, len, *out) ? SCAV_OK : SCAV_E_INVALID_ARG;
 }

@@ -21,9 +21,7 @@ inline constexpr int32_t SPACE_MAX{ COORD_MAX / 4 };
 
 // Every row of every table against the domain, findings sorted by (code,
 // kind, ordinal). False when it found anything; the caller rejects, never clamps.
-bool spaces_validate(Chart const &c,
-                     scav_spaces const &s,
-                     std::vector<Diagnostic> &diags);
+bool spaces_validate(Chart const &c, scav_spaces const &s, std::vector<Diagnostic> &diags);
 
 // xxh32 over counts and rows, field by field. A hashed layout input: a golden
 // is reproducible only against a stated measurement policy.

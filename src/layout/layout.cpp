@@ -85,10 +85,9 @@ bool size_boxes(Chart const &c,
       ok = false;
       return;
     }
-    Wide const target{ imax(
-        widest,
-        static_cast<Wide>(isqrt(
-            static_cast<uint64_t>(floor_div(area * p.dar_num, Wide{ p.dar_den }))))) };
+    Wide const target{ imax(widest,
+                            static_cast<Wide>(isqrt(static_cast<uint64_t>(
+                                floor_div(area * p.dar_num, Wide{ p.dar_den }))))) };
 
     Wide cx{ 0 };
     Wide row_y{ 0 };
@@ -169,7 +168,10 @@ bool size_boxes(Chart const &c,
 // One descent from the root, adding each frame's origin to the relative
 // positions sizing left behind. Everything stays inside the sized extents,
 // so int32 arithmetic cannot leave the domain here.
-void place_boxes(Chart const &c, scav_spaces const &s, scav_profile const &p, Geometry &geo) {
+void place_boxes(Chart const &c,
+                 scav_spaces const &s,
+                 scav_profile const &p,
+                 Geometry &geo) {
   struct Frame {
     uint32_t sub;
     int32_t x, y;
@@ -242,8 +244,7 @@ scav_point trim(scav_point a, scav_point b, int32_t amount) {
   if (amount <= 0) { return a; }
   Wide const dx{ static_cast<Wide>(b.x) - a.x };
   Wide const dy{ static_cast<Wide>(b.y) - a.y };
-  Wide const len{ static_cast<Wide>(
-      isqrt(static_cast<uint64_t>((dx * dx) + (dy * dy)))) };
+  Wide const len{ static_cast<Wide>(isqrt(static_cast<uint64_t>((dx * dx) + (dy * dy)))) };
   if (len == 0) { return a; }
   Wide const k{ imin(Wide{ amount }, floor_div(len, Wide{ 2 })) };
   return { .x = a.x + static_cast<int32_t>(floor_div(dx * k, len)),
@@ -278,10 +279,9 @@ void route_transitions(Chart const &c,
         SplitPort const &port{ g.ports[g.segments[segs.off + k].dst_port] };
         bool const on_state{ port.state.v != INVALID };
         scav_rect const b{ on_state ? geo.state[port.state.v] : geo.sub[port.sub.v] };
-        uint32_t const depth{
-          on_state ? g.state_depth[port.state.v]
-                   : g.state_depth[c.submachines[port.sub.v].owner.v] + 1
-        };
+        uint32_t const depth{ on_state
+                                  ? g.state_depth[port.state.v]
+                                  : g.state_depth[c.submachines[port.sub.v].owner.v] + 1 };
         scav_port_slot const slot{ port_point(b, to, depth) };
         geo.slots.push_back(slot);
         geo.points.push_back({ .x = slot.x, .y = slot.y });
@@ -322,34 +322,48 @@ void write_rows(Chart &c, ColumnId id, std::vector<T> const &rows) {
 
 void write_columns(Chart &c, Geometry const &geo) {
   constexpr uint32_t RECT{ sizeof(scav_rect) };
-  write_rows(c, geom_column(c, "scav.geom.state", ElemKind::State, ValueKind::Pod, RECT),
+  write_rows(c,
+             geom_column(c, "scav.geom.state", ElemKind::State, ValueKind::Pod, RECT),
              geo.state);
+  write_rows(
+      c,
+      geom_column(c, "scav.geom.state_before", ElemKind::State, ValueKind::Pod, RECT),
+      geo.before);
+  write_rows(
+      c,
+      geom_column(c, "scav.geom.state_after", ElemKind::State, ValueKind::Pod, RECT),
+      geo.after);
   write_rows(c,
-             geom_column(c, "scav.geom.state_before", ElemKind::State, ValueKind::Pod, RECT),
-             geo.before);
-  write_rows(c,
-             geom_column(c, "scav.geom.state_after", ElemKind::State, ValueKind::Pod, RECT),
-             geo.after);
-  write_rows(c, geom_column(c, "scav.geom.sub", ElemKind::Submachine, ValueKind::Pod, RECT),
+             geom_column(c, "scav.geom.sub", ElemKind::Submachine, ValueKind::Pod, RECT),
              geo.sub);
-  write_rows(c, geom_column(c, "scav.geom.route", ElemKind::Transition, ValueKind::Span, 8),
+  write_rows(c,
+             geom_column(c, "scav.geom.route", ElemKind::Transition, ValueKind::Span, 8),
              geo.routes);
-  write_rows(c, geom_column(c, "scav.geom.port", ElemKind::Transition, ValueKind::Span, 8),
+  write_rows(c,
+             geom_column(c, "scav.geom.port", ElemKind::Transition, ValueKind::Span, 8),
              geo.port_spans);
 
-  ColumnId const pts{ geom_column(c, "scav.geom.point", ElemKind::Point, ValueKind::Pod, 8) };
+  ColumnId const pts{
+    geom_column(c, "scav.geom.point", ElemKind::Point, ValueKind::Pod, 8)
+  };
   column_resize(c, pts, static_cast<uint32_t>(geo.points.size()));
   write_rows(c, pts, geo.points);
-  ColumnId const slots{ geom_column(c, "scav.geom.portslot", ElemKind::Point, ValueKind::Pod,
+  ColumnId const slots{ geom_column(c,
+                                    "scav.geom.portslot",
+                                    ElemKind::Point,
+                                    ValueKind::Pod,
                                     sizeof(scav_port_slot)) };
   column_resize(c, slots, static_cast<uint32_t>(geo.slots.size()));
   write_rows(c, slots, geo.slots);
 
-  ColumnId const chart{ geom_column(c, "scav.geom.chart", ElemKind::Chart, ValueKind::Pod,
-                                    RECT) };
+  ColumnId const chart{
+    geom_column(c, "scav.geom.chart", ElemKind::Chart, ValueKind::Pod, RECT)
+  };
   std::memcpy(column_data(c, chart), &geo.chart, sizeof(geo.chart));
 
-  ColumnId const gen{ geom_column(c, "scav.geom.gen", ElemKind::Chart, ValueKind::U32, 4) };
+  ColumnId const gen{
+    geom_column(c, "scav.geom.gen", ElemKind::Chart, ValueKind::U32, 4)
+  };
   uint32_t n{ 0 };
   std::memcpy(&n, column_data(c, gen), 4);
   ++n;
@@ -382,9 +396,8 @@ bool layout_run(Chart &c,
   for (uint32_t i = 0; i < s.n_path_box; ++i) {
     scav_path_box const &pb{ s.path_box[i] };
     scav_span const route{ geo.routes[pb.subject] };
-    scav_point const mid{ (route.len == 0)
-                              ? scav_point{}
-                              : geo.points[route.off + (route.len / 2)] };
+    scav_point const mid{ (route.len == 0) ? scav_point{}
+                                           : geo.points[route.off + (route.len / 2)] };
     placed[i] = { .x = mid.x - floor_div(pb.w, 2),
                   .y = mid.y - floor_div(pb.h, 2),
                   .w = pb.w,
@@ -413,8 +426,10 @@ std::vector<T> rows_of(Chart const &c, char const *name) {
 
 uint32_t layout_coordinate_hash(Chart const &c) {
   std::vector<scav_byte> b;
-  for (char const *name : { "scav.geom.state", "scav.geom.state_before",
-                            "scav.geom.state_after", "scav.geom.sub",
+  for (char const *name : { "scav.geom.state",
+                            "scav.geom.state_before",
+                            "scav.geom.state_after",
+                            "scav.geom.sub",
                             "scav.geom.chart" }) {
     for (scav_rect const &r : rows_of<scav_rect>(c, name)) {
       append_i32(b, r.x);

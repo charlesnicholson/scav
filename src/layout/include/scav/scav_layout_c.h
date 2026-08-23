@@ -72,7 +72,7 @@ typedef struct {
   int32_t kind_min_w[9];
   int32_t kind_min_h[9];
 
-  int32_t dar_num;     /* desired aspect ratio as a pair; each [1, 1024] */
+  int32_t dar_num; /* desired aspect ratio as a pair; each [1, 1024] */
   int32_t dar_den;
   int32_t trybox;      /* 1 = evaluate the box packer alongside; [0, 1] */
   int32_t sm_tiebreak; /* 0 = area then aspect, 1 = reversed; [0, 1] */
@@ -88,11 +88,11 @@ typedef struct {
   int32_t w_aspect;
   int32_t w_area;
 
-  int32_t portfolio_k;           /* [1, 64] */
-  int32_t sweep_count;           /* [0, 1024] */
-  int32_t congestion_iterations; /* [0, 1024] */
-  int32_t ripup_cap;             /* [0, 1024] */
-  int32_t spacing_inflation_cap; /* [0, 1024] */
+  int32_t portfolio_k;                 /* [1, 64] */
+  int32_t sweep_count;                 /* [0, 1024] */
+  int32_t congestion_iterations;       /* [0, 1024] */
+  int32_t ripup_cap;                   /* [0, 1024] */
+  int32_t spacing_inflation_cap;       /* [0, 1024] */
   int32_t spacing_inflation_increment; /* [0, COORD_MAX/4] */
 
   int32_t print_columns; /* the printer's line-break budget; [20, 4096] */
@@ -137,9 +137,7 @@ scav_result scav_layout_run(scav_chart *chart,
 /* Routers cross the ABI by name only; function pointers never do. */
 scav_result scav_router_list(uint32_t *out_count);
 scav_result scav_router_name(uint32_t index, scav_byte const **out, uint32_t *out_len);
-scav_result scav_router_by_name(scav_byte const *name,
-                                uint32_t len,
-                                scav_router_id *out);
+scav_result scav_router_by_name(scav_byte const *name, uint32_t len, scav_router_id *out);
 
 #ifdef __cplusplus
 } /* extern "C" */

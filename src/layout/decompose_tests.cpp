@@ -239,8 +239,7 @@ namespace {
 
 // Ancestor-or-self, by climbing s's chain.
 bool is_ancestor(Chart const &c, StateId anc, StateId s) {
-  for (StateId x{ s }; x.v != INVALID;
-       x = c.submachines[c.states[x.v].parent.v].owner) {
+  for (StateId x{ s }; x.v != INVALID; x = c.submachines[c.states[x.v].parent.v].owner) {
     if (x == anc) { return true; }
   }
   return false;

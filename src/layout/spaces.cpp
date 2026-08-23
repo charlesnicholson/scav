@@ -51,14 +51,20 @@ void check_boxes(std::vector<Diagnostic> &out,
 
 }  // namespace
 
-bool spaces_validate(Chart const &c, scav_spaces const &s, std::vector<Diagnostic> &diags) {
+bool spaces_validate(Chart const &c,
+                     scav_spaces const &s,
+                     std::vector<Diagnostic> &diags) {
   std::vector<Diagnostic> found;
 
-  if (check_count(found, s.box_state, s.n_box_state,
+  if (check_count(found,
+                  s.box_state,
+                  s.n_box_state,
                   chart_entity_count(c, ElemKind::State))) {
     check_boxes(found, s.box_state, s.n_box_state, ElemKind::State);
   }
-  if (check_count(found, s.box_sub, s.n_box_sub,
+  if (check_count(found,
+                  s.box_sub,
+                  s.n_box_sub,
                   chart_entity_count(c, ElemKind::Submachine))) {
     check_boxes(found, s.box_sub, s.n_box_sub, ElemKind::Submachine);
   }
@@ -86,8 +92,10 @@ bool spaces_validate(Chart const &c, scav_spaces const &s, std::vector<Diagnosti
       uint32_t subject{ box.subject };
       if ((subject >= transitions) || (c.transitions[subject].live == 0) ||
           routeless(subject)) {
-        report(found, DiagCode::SpaceSubjectInvalid, ElemKind::Transition,
-             (subject >= transitions) ? INVALID : subject);
+        report(found,
+               DiagCode::SpaceSubjectInvalid,
+               ElemKind::Transition,
+               (subject >= transitions) ? INVALID : subject);
         subject = INVALID;
       }
       if (!in_domain(box.w) || !in_domain(box.h)) {
@@ -109,8 +117,7 @@ bool spaces_validate(Chart const &c, scav_spaces const &s, std::vector<Diagnosti
       scav_path_box const &cur{ s.path_box[by_key[i]] };
       scav_path_box const &prev{ s.path_box[by_key[i - 1]] };
       if ((cur.subject == prev.subject) && (cur.order == prev.order)) {
-        report(found, DiagCode::SpaceOrderDuplicate, ElemKind::Transition,
-               cur.subject);
+        report(found, DiagCode::SpaceOrderDuplicate, ElemKind::Transition, cur.subject);
       }
     }
   }
@@ -135,8 +142,8 @@ uint32_t spaces_digest(scav_spaces const &s) {
   // Field by field, never a struct's bytes, with each table's count prefixed
   // so two adjacent tables cannot spell one.
   std::vector<scav_byte> bytes;
-  bytes.reserve(16 + (12ULL * (s.n_box_state + s.n_box_sub)) +
-                (8ULL * s.n_path_clear) + (16ULL * s.n_path_box));
+  bytes.reserve(16 + (12ULL * (s.n_box_state + s.n_box_sub)) + (8ULL * s.n_path_clear) +
+                (16ULL * s.n_path_box));
   append_u32(bytes, s.n_box_state);
   for (uint32_t i = 0; i < s.n_box_state; ++i) {
     append_i32(bytes, s.box_state[i].min_w);
