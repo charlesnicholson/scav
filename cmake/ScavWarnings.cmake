@@ -29,6 +29,9 @@ set(SCAV_WARNINGS_GNU_LIKE
 )
 
 set(SCAV_WARNINGS_CLANG
+  # An omitted designated field value-initializes, which is the idiom for wide
+  # POD inputs like scav_spaces; newer clang puts this warning in -Wextra.
+  -Wno-missing-designated-field-initializers
   -Wcomma
   -Wconditional-uninitialized
   -Wheader-hygiene
