@@ -342,7 +342,11 @@ C++20's P0907 fixed two's-complement *representation* but kept signed overflow U
 
 **Scope of this section: anything that can reach layout geometry or rendered output.** A structure that only ferries data inside one call is outside it, and `std::unordered_map` is the right choice there — deterministic *by usage*, because a key lookup has no order and the hash value never escapes as a bucket index. Enforce that structurally: `HashMap<K,V>` exposes `find`/`at`/`insert` and **no `begin()`/`end()`**, so "never iterated" is a compile error rather than a review comment.
 
-**Golden hash.** Split into a **structural hash** (ranks, orders, port assignments, bend sequences) and a **coordinate hash**, so a translation-only change is a reviewable diff instead of a global reflow. Hashed inputs: font identity and version, profile id, packer choice, router name and version, **and the space-request columns** — a golden is reproducible only against a stated measurement policy, and the corpus goldens use the reference builder's.
+**Golden hash.** Split into a **structural hash** (ranks, orders, port assignments, bend sequences) and a **coordinate hash**, so a translation-only change is a reviewable diff instead of a global reflow.
+
+**The inputs digest is a third value beside them, not a seed for them.** It covers profile id, packer choice, router name and version, **and the space-request columns** — a golden is reproducible only against a stated measurement policy, and the corpus goldens use the reference builder's. It lands in `scav.geom.inputs` (§11.7a) so it round-trips the model and a binding can read it, and a golden row is `inputs structural coordinate`. Seeding the two geometry hashes with it was the obvious shape and is wrong: the space tables move whenever a label's width does, so the structural hash would move on every remeasure and the split would report a global reflow for a change that reordered nothing. Three values say *which inputs* and *what moved* separately, which is what a reviewer needs.
+
+**Font identity and version reach that digest through the space tables, not as an argument.** Layout is font-blind by construction — text arrives only as integers the app measured — so a font field on `scav_layout_opts` would be a knob layout never reads and a caller could set wrongly. Two fonts that measure one corpus identically *should* hash identically at this stage, because layout genuinely produced the same geometry; the difference is real at the `DrawList`, where glyph advances and `textLength` live, and that is where font identity is hashed explicitly.
 
 **The hash is xxHash32, ours rather than the standard library's.** `std::hash` is permitted to differ between runs of one binary, let alone between implementations. xxhash is not cryptographic and does not need to be: what a golden wants is speed and even distribution over inputs measured in kilobytes. Lane reads are assembled from bytes rather than cast, so a big-endian host agrees, and rotation goes through `<bit>` because `__builtin_rotl` is not standard C++ and a hand-rolled shift pair is UB at a rotation of zero.
 
@@ -842,7 +846,7 @@ Rules:
 - Validate the domain at `scav_layout_run` entry in **every** build (§8.1), and after each retry inflation.
 - Output is **root-absolute**, applied as one final `O(n)` transform over submachine-local internals (ELK's LCA-relative coordinates are a documented trap).
 
-Extent estimate: 2k states ≈ 8,000 x 3,200 pt = 128,000 x 51,200 units, ~4x headroom. **Validate at P4**; if real charts exceed it, reduce the grid to 1/8 pt rather than widening the domain.
+Extent estimate: 2k states ≈ 8,000 x 3,200 pt = 128,000 x 51,200 units. **Measured at P4** against a 2k-state chart under deliberately fat fabricated text: **181,120 x 277,888**, so the estimate was low by 5.4x on the tall axis and the real headroom is **1.9x, not the 4x first assumed**. The 1/16 pt grid stands, and the margin is thinner than it looks heading into P6, where rank separation and label dummy nodes make charts taller. Height, not text, is what consumed it — the blowup is depth-driven stacking. If real charts exceed the domain, reduce the grid to 1/8 pt rather than widening it.
 
 Coordinate assignment uses two linear integer primitives, not a solver: **Brandes & Köpf** for cross-axis coordinates (GD 2001 — **read the erratum, arXiv:2008.01252**), and optimal topological numbering for compaction. On an integer grid with integer gaps and an acyclic constraint graph, non-overlap plus separation *is* longest-path.
 
@@ -951,6 +955,7 @@ This list *is* the layout output ABI — there is no bespoke result type (§16) 
 | `scav.geom.port` | `TransId` | `Span` into `scav.geom.portslot` |
 | `scav.geom.portslot` | port ordinal | `{int32 x, y; uint32 side, boundary_depth}` |
 | `scav.geom.chart` | chart | root bounding box |
+| `scav.geom.inputs` | chart | digest of the run's non-geometry inputs (§6) — `u32` |
 | `scav.geom.gen` | chart | generation counter (§13) — `u32`, **not hashed, not serialized** |
 
 `ElemKind::Point` exists so the point and port-slot arrays are real columns rather than side arrays outside the column rules; entity count is the column length. A transition splits into one port per boundary it crosses (§11.1), not two — a depth-16 edge has up to 15, and the structural hash covers all their sides, so one row per transition cannot hold them.
@@ -1156,11 +1161,15 @@ Two properties worth keeping:
 
 **Images: the app registers, the `DrawList` references.** `scav_image_register(images, id, bytes, len, w, h, mime)`. Raster only — arbitrary SVG fragments would be unimplementable in an ImGui backend and would break the one-IR property; vector content is primitives. Dimensions come from registration, not decoding, so no backend needs a decoder to *size* an image and the SVG backend needs none at all (base64 the bytes with their MIME type). Bytes hash into the SVG golden.
 
+**No backend imposes an extent limit of its own.** Diagram size is bounded by the layout grid on the way in (§11.2) and by the output format on the way out, and by nothing in between — no configured maximum, no page, and no writer's own bookkeeping narrower than the format it targets. A format's own ceiling is the only one that may reject: SVG has none, and PNG's `IHDR` is `uint32` capped at 2^31-1 by spec. Where such a ceiling exists, exceeding it is a diagnostic naming the format — never a silent clamp and never a quietly scaled-down diagram, both of which produce a picture that lies about the model.
+
+**A raster backend streams.** Whole-image residency is a memory bound with no format behind it: a 2k-state chart at print resolution is gigabytes of framebuffer that nothing needs at once. Emit row bands instead, which is what PNG's `IDAT` chunk sequence already is, so peak memory tracks the band and not the diagram. v1 ships SVG and ImGui, so this binds whichever raster writer lands later rather than describing code that exists.
+
 ### 12.1 The reference SVG backend
 
 Headless `scav render` is the first user-visible deliverable (P5b), so this one ships.
 
-**Emit the body in integer grid units with the entire scale in one integer `viewBox`.** Float-to-decimal conversion is not portable (MSVC UCRT, glibc, musl, and Apple libc disagree on the last digit) and `-ffp-contract=fast` is the default, so `grid * scale` differs by 1 ULP between Debug and Release. **No float is printed, ever.**
+**Emit the body in integer grid units with the entire scale in one integer `viewBox`.** Float-to-decimal conversion is not portable (MSVC UCRT, glibc, musl, and Apple libc disagree on the last digit) and `-ffp-contract=fast` is the default, so `grid * scale` differs by 1 ULP between Debug and Release. **No float is printed, ever.** SVG sets no extent ceiling, so neither does `render`.
 
 Renderer-vs-metrics agreement, in order: one bundled font, named with a fallback · `textLength` with `lengthAdjust="spacing"` from our own advance sum, turning overflow into slightly loose spacing (Graphviz emits none, which is why its SVG overflows under substitution) · `font-kerning: none` per §11.9.1 · explicit padding, never sizing to exactly the text width · `--embed-font` base64ing the bundled TTF whole into `<defs><style>@font-face`, the only exact agreement that keeps text selectable — whole, not subsetted, because a subsetter is the expensive part of the PDF backend and v1 does not have one. **Never convert text to paths** — needs the outline stack we avoid, discards selection and accessibility.
 

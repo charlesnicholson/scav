@@ -1,0 +1,39 @@
+chart ota "firmware OTA" {
+  @tags = ["firmware", "safety-critical"],
+  @vendor:component = "bootloader",
+
+  state Idle,
+  trans * -> Idle,
+
+  state Downloading {
+    @doc = "Chunks arrive out of order and are written straight to the\ninactive slot. The manifest is verified only once every chunk\nhas landed.",
+    submachine main {
+      state Fetching,
+      state Writing,
+      trans * -> Fetching,
+      trans Fetching -> Writing "chunk ready",
+      trans internal Writing -> Writing "flash busy",
+      trans Writing -> Fetching "chunk written",
+    },
+  },
+
+  state Verify fork,
+  state CheckSignature,
+  state CheckVersion,
+  state Verified join,
+  state Failed,
+
+  trans Idle -> Downloading "update offered",
+  trans Downloading -> Verify "all chunks received",
+  trans Verify -> CheckSignature,
+  trans Verify -> CheckVersion,
+  trans CheckSignature -> Verified,
+  trans CheckVersion -> Verified,
+  trans Verified -> Idle "swap slots and reboot",
+
+  // Anything can fail at any time, and failure is terminal for this attempt.
+  trans CheckSignature -> Failed "bad signature",
+  trans CheckVersion -> Failed "downgrade refused",
+  trans Downloading -> Failed "timeout",
+  trans Failed -> *,
+}

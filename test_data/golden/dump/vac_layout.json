@@ -88,6 +88,7 @@
     {"name": "scav.geom.point", "entity": "point", "kind": "pod", "elem_size": 8, "elem_align": 4, "flags": 1, "count": 43},
     {"name": "scav.geom.portslot", "entity": "point", "kind": "pod", "elem_size": 16, "elem_align": 4, "flags": 1, "count": 5},
     {"name": "scav.geom.chart", "entity": "chart", "kind": "pod", "elem_size": 16, "elem_align": 4, "flags": 1, "count": 1},
+    {"name": "scav.geom.inputs", "entity": "chart", "kind": "u32", "elem_size": 4, "elem_align": 4, "flags": 1, "count": 1},
     {"name": "scav.geom.gen", "entity": "chart", "kind": "u32", "elem_size": 4, "elem_align": 4, "flags": 1, "count": 1}
   ],
   "geometry": {

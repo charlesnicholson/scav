@@ -34,11 +34,17 @@ scav_profile readable() {
   return p;
 }
 
+// The default router and no thread request, which is every test that does not
+// say otherwise.
+scav_layout_opts opts(scav_profile const &p) {
+  return { .profile = p, .router = 0, .threads = 0 };
+}
+
 // A run expected to succeed, returning its placed boxes.
 std::vector<scav_placed> run(Chart &c, scav_spaces const &s, scav_profile const &p) {
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
-  bool const ok{ layout_run(c, s, p, placed, diags) };
+  bool const ok{ layout_run(c, s, opts(p), placed, diags) };
   std::string why;
   for (Diagnostic const &d : diags) {
     why += diag_message(d.code);
@@ -336,16 +342,7 @@ TEST_CASE("layout: the hash split separates size changes from shape changes") {
                          .n_box_state = static_cast<uint32_t>(boxes.size()) };
     std::vector<scav_placed> placed;
     std::vector<Diagnostic> diags;
-    REQUIRE(layout_run(
-        c,
-        s,
-        [] {
-          scav_profile p{};
-          REQUIRE(profile_named("readable", p));
-          return p;
-        }(),
-        placed,
-        diags));
+    REQUIRE(layout_run(c, s, opts(readable()), placed, diags));
     return c;
   };
 
@@ -362,8 +359,61 @@ TEST_CASE("layout: the hash split separates size changes from shape changes") {
   std::vector<Diagnostic> diags;
   scav_profile p{};
   REQUIRE(profile_named("readable", p));
-  REQUIRE(layout_run(more, {}, p, placed, diags));
+  REQUIRE(layout_run(more, {}, opts(p), placed, diags));
   CHECK(layout_structural_hash(more) != layout_structural_hash(narrow));
+}
+
+TEST_CASE("layout: the inputs digest hears every input that is not the model") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  build_state(c, root, "A", StateKind::Normal, {});
+  CHECK(layout_inputs_digest(c) == 0);  // never laid out
+
+  run(c, {}, readable());
+  uint32_t const base{ layout_inputs_digest(c) };
+  CHECK(base != 0);
+  run(c, {}, readable());
+  CHECK(layout_inputs_digest(c) == base);  // same inputs, same digest
+
+  // A profile knob layout does read, and one it does not: both are inputs a
+  // golden was produced under, so both move the digest.
+  scav_profile moved{ readable() };
+  moved.pad += 1;
+  run(c, {}, moved);
+  CHECK(layout_inputs_digest(c) != base);
+
+  scav_profile renamed{ readable() };
+  renamed.profile_version += 1;
+  run(c, {}, renamed);
+  CHECK(layout_inputs_digest(c) != base);
+
+  // The space tables ride in, which is how the font reaches a digest it can
+  // never be an argument to.
+  std::vector<scav_box_space> boxes(c.states.size());
+  boxes[0].min_w = 64;
+  scav_spaces const s{ .box_state = boxes.data(),
+                       .n_box_state = static_cast<uint32_t>(boxes.size()) };
+  run(c, s, readable());
+  CHECK(layout_inputs_digest(c) != base);
+
+  // And it is a third value, not a seed: a space change that leaves the shape
+  // alone must not disturb the structural hash.
+  run(c, {}, readable());
+  uint32_t const structure{ layout_structural_hash(c) };
+  run(c, s, readable());
+  CHECK(layout_structural_hash(c) == structure);
+  CHECK(layout_inputs_digest(c) != base);
+}
+
+TEST_CASE("layout: the router carries a version, and both stop at the end") {
+  scav_byte const *name{ nullptr };
+  uint32_t len{ 0 };
+  uint32_t version{ 0 };
+  REQUIRE(router_name(0, name, len));
+  REQUIRE(router_version(0, version));
+  CHECK(version >= 1);
+  CHECK(!router_name(router_count(), name, len));
+  CHECK(!router_version(router_count(), version));
 }
 
 TEST_CASE("layout: composed geometry past the domain is rejected, columns kept") {
@@ -383,7 +433,7 @@ TEST_CASE("layout: composed geometry past the domain is rejected, columns kept")
 
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
-  CHECK(!layout_run(c, s, readable(), placed, diags));
+  CHECK(!layout_run(c, s, opts(readable()), placed, diags));
   REQUIRE(!diags.empty());
   CHECK(diags[0].code == DiagCode::CoordinateOverflow);
   CHECK(diags[0].subject.kind == ElemKind::State);
@@ -407,7 +457,7 @@ TEST_CASE("layout: a packed row wider than the domain is rejected") {
 
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
-  CHECK(!layout_run(c, s, wide, placed, diags));
+  CHECK(!layout_run(c, s, opts(wide), placed, diags));
   REQUIRE(!diags.empty());
   CHECK(diags[0].code == DiagCode::CoordinateOverflow);
   CHECK(diags[0].subject.kind == ElemKind::Submachine);
@@ -424,14 +474,14 @@ TEST_CASE("layout: invalid profiles and spaces fail before any geometry") {
   std::vector<Diagnostic> diags;
   scav_profile bad{ readable() };
   bad.dar_den = 0;
-  CHECK(!layout_run(c, {}, bad, placed, diags));
+  CHECK(!layout_run(c, {}, opts(bad), placed, diags));
   REQUIRE(diags.size() == 1);
   CHECK(diags[0].code == DiagCode::ProfileOutOfRange);
 
   diags.clear();
   std::vector<scav_box_space> boxes{ { .min_w = -1, .h_before = 0, .h_after = 0 } };
   scav_spaces const s{ .box_state = boxes.data(), .n_box_state = 1 };
-  CHECK(!layout_run(c, s, readable(), placed, diags));
+  CHECK(!layout_run(c, s, opts(readable()), placed, diags));
   REQUIRE(diags.size() == 1);
   CHECK(diags[0].code == DiagCode::SpaceOutOfRange);
   CHECK(column_find(c, "scav.geom.state").v == INVALID);
@@ -697,8 +747,9 @@ TEST_CASE("layout: the coordinate extent estimate holds under fat text") {
 }
 
 TEST_CASE("layout: corpus charts hash to the committed golden") {
-  // The stated measurement policy for these goldens: no space requests, the
-  // readable profile -- what dump --layout does.
+  // Three columns per chart: the inputs digest naming the measurement policy,
+  // then the structural and coordinate hashes it produced. The policy here is
+  // no space requests and the readable profile -- what dump --layout does.
   std::string actual;
   for (char const *name : { "axis.scav",
                             "brew.scav",
@@ -706,6 +757,8 @@ TEST_CASE("layout: corpus charts hash to the committed golden") {
                             "estop.scav",
                             "led.scav",
                             "mill.scav",
+                            "ota.scav",
+                            "tcp.scav",
                             "toolchanger.scav",
                             "vac.scav" }) {
     CAPTURE(name);
@@ -718,6 +771,8 @@ TEST_CASE("layout: corpus charts hash to the committed golden") {
     REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
     run(c, {}, readable());
     actual += name;
+    actual += ' ';
+    string_append_hex32(actual, layout_inputs_digest(c));
     actual += ' ';
     string_append_hex32(actual, layout_structural_hash(c));
     actual += ' ';
@@ -790,7 +845,7 @@ TEST_CASE("layout: fuzzed charts and spaces either lay out or diagnose") {
 
     std::vector<scav_placed> placed;
     std::vector<Diagnostic> diags;
-    if (layout_run(c, s, readable(), placed, diags)) {
+    if (layout_run(c, s, opts(readable()), placed, diags)) {
       CHECK(diags.empty());
       CHECK(placed.size() == path_boxes.size());
       check_geometry(c);

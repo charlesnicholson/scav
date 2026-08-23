@@ -1,0 +1,44 @@
+// RFC 793 connection states, as a chart rather than as a table.
+chart tcp "TCP connection" {
+  @doc = "Passive and active opens share the established substate.",
+
+  state Closed,
+  state Listen,
+  state SynSent,
+  state SynReceived,
+
+  trans * -> Closed,
+  trans Closed -> Listen "passive open",
+  trans Closed -> SynSent "active open",
+  trans Listen -> SynReceived "recv SYN",
+  trans SynSent -> SynReceived "recv SYN",
+
+  state Established "data may flow both ways" {
+    // Both halves close independently, which is why this is concurrent.
+    submachine inbound {
+      state Open,
+      state HalfClosed,
+      trans * -> Open,
+      trans Open -> HalfClosed "recv FIN",
+    },
+    submachine outbound {
+      state Open,
+      state FinSent,
+      trans * -> Open,
+      trans Open -> FinSent "send FIN", // no more data from us
+    },
+  },
+
+  trans SynReceived -> Established "recv ACK",
+  trans SynSent -> Established "recv SYN+ACK",
+
+  state Closing choice,
+  state TimeWait,
+
+  // A transition out of a nested state to a top-level one: the long
+  // hierarchical edge the whole project exists for.
+  trans Established:inbound/HalfClosed -> Closing,
+  trans Established:outbound/FinSent -> Closing,
+  trans Closing -> TimeWait "both halves closed",
+  trans TimeWait -> Closed "2MSL elapsed",
+}

@@ -48,7 +48,7 @@ scav_result scav_layout_run(scav_chart *chart,
 
   chart->diags.clear();
   std::vector<scav_placed> placed;
-  if (!scav::layout_run(chart->chart, s, opts->profile, placed, chart->diags)) {
+  if (!scav::layout_run(chart->chart, s, *opts, placed, chart->diags)) {
     return SCAV_E_LAYOUT;
   }
   if ((out_placed != nullptr) && !placed.empty()) {

@@ -643,12 +643,12 @@ int run_dump(char const *path, bool hash_only, bool as_json, bool with_layout) {
   if (net.code == EXIT_UNUSABLE) { return EXIT_UNUSABLE; }
 
   if (with_layout) {
-    scav_profile profile{};
-    profile_named("readable", profile);
+    scav_layout_opts opts{};
+    profile_named("readable", opts.profile);
     scav_spaces const none{};  // the CLI has nothing to measure with
     std::vector<scav_placed> placed;
     std::vector<Diagnostic> diags;
-    if (!layout_run(net.chart, none, profile, placed, diags)) {
+    if (!layout_run(net.chart, none, opts, placed, diags)) {
       std::string err;
       for (Diagnostic const &d : diags) { diag_append(err, net.chart, d, path); }
       write_stream(err, stderr);

@@ -10,6 +10,7 @@
 #include "scav_int.h"
 #include "scav_xxhash.h"
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -320,7 +321,35 @@ void write_rows(Chart &c, ColumnId id, std::vector<T> const &rows) {
   }
 }
 
-void write_columns(Chart &c, Geometry const &geo) {
+static_assert(sizeof(scav_profile) == 43 * sizeof(int32_t),
+              "the profile must stay a flat block of int32 with no padding, or the "
+              "inputs digest below would hash bytes whose values are unspecified");
+
+// Every non-geometry input a golden depends on. Without it a hash names the
+// numbers that came out and not the run that produced them.
+uint32_t inputs_digest(scav_spaces const &s, scav_layout_opts const &o) {
+  std::vector<scav_byte> b;
+  // Padding is what forbids hashing a struct's bytes, and the assert above
+  // proves there is none, so the copy reads all 43 knobs and nothing else.
+  std::array<int32_t, sizeof(scav_profile) / sizeof(int32_t)> profile{};
+  std::memcpy(profile.data(), &o.profile, sizeof(scav_profile));
+  for (int32_t const field : profile) { append_i32(b, field); }
+
+  scav_byte const *name{ nullptr };
+  uint32_t name_len{ 0 };
+  uint32_t version{ 0 };
+  if (router_name(o.router, name, name_len) && router_version(o.router, version)) {
+    append_u32(b, name_len);
+    b.insert(b.end(), name, name + name_len);
+    append_u32(b, version);
+  }
+  // The font reaches layout only as the integers it measured, so its identity
+  // rides in here rather than as an argument layout would never read.
+  append_u32(b, spaces_digest(s));
+  return xxhash32(b.data(), b.size(), 0);
+}
+
+void write_columns(Chart &c, Geometry const &geo, uint32_t inputs) {
   constexpr uint32_t RECT{ sizeof(scav_rect) };
   write_rows(c,
              geom_column(c, "scav.geom.state", ElemKind::State, ValueKind::Pod, RECT),
@@ -361,6 +390,11 @@ void write_columns(Chart &c, Geometry const &geo) {
   };
   std::memcpy(column_data(c, chart), &geo.chart, sizeof(geo.chart));
 
+  ColumnId const in{
+    geom_column(c, "scav.geom.inputs", ElemKind::Chart, ValueKind::U32, 4)
+  };
+  std::memcpy(column_data(c, in), &inputs, 4);
+
   ColumnId const gen{
     geom_column(c, "scav.geom.gen", ElemKind::Chart, ValueKind::U32, 4)
   };
@@ -374,9 +408,10 @@ void write_columns(Chart &c, Geometry const &geo) {
 
 bool layout_run(Chart &c,
                 scav_spaces const &s,
-                scav_profile const &p,
+                scav_layout_opts const &o,
                 std::vector<scav_placed> &placed,
                 std::vector<Diagnostic> &diags) {
+  scav_profile const &p{ o.profile };
   if (!profile_validate(p)) {
     diags.push_back({ .code = DiagCode::ProfileOutOfRange,
                       .subject = { .kind = ElemKind::Chart, .ordinal = 0 },
@@ -404,7 +439,7 @@ bool layout_run(Chart &c,
                   .h = pb.h };
   }
 
-  write_columns(c, geo);
+  write_columns(c, geo, inputs_digest(s, o));
   return true;
 }
 
@@ -429,6 +464,14 @@ uint32_t direction_token(int32_t from, int32_t to) {
 }
 
 }  // namespace
+
+uint32_t layout_inputs_digest(Chart const &c) {
+  ColumnId const id{ column_find(c, "scav.geom.inputs") };
+  if ((id.v == INVALID) || (column_count(c, id) == 0)) { return 0; }
+  uint32_t inputs{ 0 };
+  std::memcpy(&inputs, column_data(c, id), 4);
+  return inputs;
+}
 
 uint32_t layout_coordinate_hash(Chart const &c) {
   std::vector<scav_byte> b;
