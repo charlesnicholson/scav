@@ -4,6 +4,7 @@
 #include "cli.h"
 
 #include "scav/scav_core.h"
+#include "scav/scav_draw.h"
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
 #include "scav/scav_types.h"
@@ -645,10 +646,18 @@ int run_dump(char const *path, bool hash_only, bool as_json, bool with_layout) {
   if (with_layout) {
     scav_layout_opts opts{};
     profile_named("readable", opts.profile);
-    scav_spaces const none{};  // the CLI has nothing to measure with
+    // The reference builder's measurement pass, which is the policy every
+    // corpus golden is stated against.
+    Metrics metrics;
+    Spaces spaces;
+    if (!metrics_create(nullptr, 0, metrics) ||
+        !measure_chart(net.chart, metrics, opts.profile, spaces)) {
+      write_stream("cannot measure the chart with the bundled font\n", stderr);
+      return EXIT_UNUSABLE;
+    }
     std::vector<scav_placed> placed;
     std::vector<Diagnostic> diags;
-    if (!layout_run(net.chart, none, opts, placed, diags)) {
+    if (!layout_run(net.chart, as_spaces(spaces), opts, placed, diags)) {
       std::string err;
       for (Diagnostic const &d : diags) { diag_append(err, net.chart, d, path); }
       write_stream(err, stderr);

@@ -24,7 +24,10 @@ enum {
   SCAV_E_STATE = -2,       /* the call does not apply in the handle's state */
   SCAV_E_CAPACITY = -3,    /* buffer too small; the required count was written */
   SCAV_E_LOAD = -4,        /* the load reported diagnostics; read them */
-  SCAV_E_LAYOUT = -5       /* layout reported diagnostics; read scav_chart_diag */
+  SCAV_E_LAYOUT = -5,      /* layout reported diagnostics; read scav_chart_diag */
+  SCAV_E_FONT = -6,        /* the font is missing a table, or its tables disagree */
+  SCAV_E_NO_GLYPH = -7,    /* the font has no glyph for a codepoint measured */
+  SCAV_E_DRAWLIST = -8     /* a primitive contradicts its own kind */
 };
 /* NOLINTEND(readability-identifier-naming) */
 

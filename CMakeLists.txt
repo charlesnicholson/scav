@@ -89,6 +89,7 @@ endif()
 include(ScavWarnings)
 include(ScavSanitizers)
 include(ScavCoverage)
+include(ScavEmbed)
 include(ScavLibrary)
 include(ScavTesting)
 

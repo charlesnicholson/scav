@@ -1,0 +1,97 @@
+// The optional helper layer: interior subdivision, the lines an author wrote,
+// and shape emission. Pure functions over PODs, and nothing in scav's pipeline
+// calls any of them.
+
+#include "scav/scav_draw.h"
+
+#include "scav/scav_types.h"
+#include "scav_int.h"
+
+#include <cstdint>
+#include <string_view>
+#include <vector>
+
+namespace scav {
+
+void stack_v(scav_rect r, int32_t const *heights, uint32_t n, scav_rect *out) {
+  if ((heights == nullptr) || (out == nullptr)) { return; }
+  int32_t y{ r.y };
+  for (uint32_t i = 0; i < n; ++i) {
+    int32_t const remaining{ imax(0, (r.y + r.h) - y) };
+    int32_t const h{ imin(imax(0, heights[i]), remaining) };
+    out[i] = { .x = r.x, .y = y, .w = r.w, .h = h };
+    y += h;
+  }
+}
+
+void row_h(scav_rect r, int32_t const *widths, uint32_t n, scav_rect *out) {
+  if ((widths == nullptr) || (out == nullptr)) { return; }
+  int32_t x{ r.x };
+  for (uint32_t i = 0; i < n; ++i) {
+    int32_t const remaining{ imax(0, (r.x + r.w) - x) };
+    int32_t const w{ imin(imax(0, widths[i]), remaining) };
+    out[i] = { .x = x, .y = r.y, .w = w, .h = r.h };
+    x += w;
+  }
+}
+
+scav_rect align(scav_rect r, int32_t w, int32_t h, Anchor a) {
+  uint32_t const cell{ static_cast<uint32_t>(a) };
+  uint32_t const col{ cell % 3U };
+  uint32_t const row{ cell / 3U };
+  // floor_div, not `/`: the slack is negative whenever the content is wider
+  // than its rect, and truncation toward zero would bias that case one way.
+  int32_t const slack_x{ r.w - w };
+  int32_t const slack_y{ r.h - h };
+  int32_t const x{ (col == 0U) ? r.x
+                              : ((col == 1U) ? (r.x + floor_div(slack_x, 2))
+                                             : (r.x + slack_x)) };
+  int32_t const y{ (row == 0U) ? r.y
+                              : ((row == 1U) ? (r.y + floor_div(slack_y, 2))
+                                             : (r.y + slack_y)) };
+  return { .x = x, .y = y, .w = w, .h = h };
+}
+
+std::vector<std::string_view> text_lines(std::string_view s) {
+  std::vector<std::string_view> lines;
+  size_t start{ 0 };
+  for (size_t i = 0; i <= s.size(); ++i) {
+    if ((i != s.size()) && (s[i] != '\n')) { continue; }
+    if ((i == s.size()) && (i != 0) && (s[i - 1] == '\n')) { break; }
+    lines.push_back(s.substr(start, i - start));
+    start = i + 1;
+  }
+  if (lines.empty()) { lines.emplace_back(); }
+  return lines;
+}
+
+void push_arrowhead(DrawList &d,
+                    int32_t depth,
+                    uint32_t style,
+                    scav_point tip,
+                    scav_point from,
+                    int32_t size,
+                    ElemRef origin) {
+  if (size <= 0) { return; }
+  Wide const dx{ static_cast<Wide>(tip.x) - from.x };
+  Wide const dy{ static_cast<Wide>(tip.y) - from.y };
+  // isqrt floors, so the barbs sit a shade long rather than a shade short --
+  // the same direction every other rounding here leans.
+  Wide const len{ static_cast<Wide>(isqrt(static_cast<uint64_t>((dx * dx) + (dy * dy)))) };
+  if (len == 0) { return; }
+
+  Wide const back_x{ tip.x - floor_div(dx * size, len) };
+  Wide const back_y{ tip.y - floor_div(dy * size, len) };
+  Wide const half_x{ floor_div(dy * size, 2 * len) };
+  Wide const half_y{ floor_div(dx * size, 2 * len) };
+  scav_point const pts[3]{
+    tip,
+    { .x = static_cast<int32_t>(back_x - half_x),
+      .y = static_cast<int32_t>(back_y + half_y) },
+    { .x = static_cast<int32_t>(back_x + half_x),
+      .y = static_cast<int32_t>(back_y - half_y) },
+  };
+  push_path(d, depth, style, pts, 3, origin);
+}
+
+}  // namespace scav
