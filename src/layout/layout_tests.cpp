@@ -199,6 +199,7 @@ TEST_CASE("layout: children wrap into rows at the aspect-ratio target") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   std::vector<StateId> kids;
+  kids.reserve(9);
   for (uint32_t i = 0; i < 9; ++i) {
     kids.push_back(build_state(c, root, {}, StateKind::Normal, {}));
   }
@@ -626,6 +627,7 @@ Chart two_k_chart() {
     StateId last{ INVALID };
     for (uint32_t d = 0; d < 16; ++d) {
       std::vector<StateId> level;
+      level.reserve(15);
       for (uint32_t k = 0; k < 15; ++k) {
         level.push_back(build_state(c, parent, {}, StateKind::Normal, {}));
       }

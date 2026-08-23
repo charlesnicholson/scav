@@ -35,10 +35,14 @@ int dispatch(int argc, char **argv) {
     bool layout{ false };
     for (int i = 2; i < argc; ++i) {
       std::string_view const arg{ argv[i] };
-      bool *const flag{ (arg == "--hash")     ? &hash
-                        : (arg == "--json")   ? &json
-                        : (arg == "--layout") ? &layout
-                                              : nullptr };
+      bool *flag{ nullptr };
+      if (arg == "--hash") {
+        flag = &hash;
+      } else if (arg == "--json") {
+        flag = &json;
+      } else if (arg == "--layout") {
+        flag = &layout;
+      }
       if (flag != nullptr) {
         if (*flag) { return usage(); }
         *flag = true;
