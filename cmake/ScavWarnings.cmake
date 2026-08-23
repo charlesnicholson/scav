@@ -47,6 +47,9 @@ set(SCAV_WARNINGS_CLANG
 )
 
 set(SCAV_WARNINGS_GCC
+  # gcc has no designated-only spelling of this, and an omitted designated
+  # field value-initializes; clang rows still enforce the positional form.
+  -Wno-missing-field-initializers
   -Warith-conversion
   -Wduplicated-branches
   -Wduplicated-cond
@@ -96,6 +99,7 @@ function(scav_warnings_init)
       target_compile_options(scav_warnings INTERFACE
         /W4
         /utf-8
+        -Wno-missing-designated-field-initializers  # /W4 enables it; see above
         -Wshift-sign-overflow
         -Wtautological-compare
         -Wthread-safety

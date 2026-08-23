@@ -68,6 +68,12 @@ class TestLayoutOverCtypes(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.cfg = scavtest.load_config()
+        if cls.cfg["sanitizer"].upper() not in ("", "NONE"):
+            # A sanitized library dlopen'd into a clean host aborts, since its
+            # interceptors must be installed before the process starts.
+            raise unittest.SkipTest(
+                f"ctypes cannot load a {cls.cfg['sanitizer']} build; "
+                "c_api_tests covers these entry points under the sanitizer")
         names = ("libscav.dylib", "libscav.so", "scav.dll")
         found = next(
             (c for name in names for c in cls.cfg.build_dir.rglob(name)), None

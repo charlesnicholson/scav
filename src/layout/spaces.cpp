@@ -78,8 +78,8 @@ bool spaces_validate(Chart const &c,
     }
   }
 
-  if ((s.path_box == nullptr) && (s.n_path_box != 0)) {
-    report(found, DiagCode::SpaceCountMismatch, ElemKind::Chart, 0);
+  if (s.path_box == nullptr) {
+    if (s.n_path_box != 0) { report(found, DiagCode::SpaceCountMismatch, ElemKind::Chart, 0); }
   } else {
     // A transition that gets no route -- an internal or local self-loop --
     // has nothing to slide a box along.
