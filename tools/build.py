@@ -39,6 +39,28 @@ def run(*cmd: str | Path) -> None:
     subprocess.run(argv, cwd=REPO_ROOT, check=True)
 
 
+def adopt_scav_cache_root() -> str:
+    """Honour SCAV_ENVY_CACHE_ROOT, and say which tier answered.
+
+    envy's own ENVY_CACHE_ROOT is global, so a developer who exported it from a
+    shell profile would retarget every other envy project on the machine --
+    including ones that chose a project-local sandbox deliberately. A
+    scav-scoped name is safe to leave in a profile, and translating it to the
+    variable envy reads keeps the launcher and the binary agreeing: both take
+    ENVY_CACHE_ROOT as their first tier, whereas a `${VAR:-default}` manifest
+    directive is understood by the binary and not by the shell launcher.
+    """
+    scoped = os.environ.get("SCAV_ENVY_CACHE_ROOT")
+    if current := os.environ.get("ENVY_CACHE_ROOT"):
+        # build.sh exports the scoped one before this runs, so equality is what
+        # tells the two tiers apart rather than which variable is set.
+        return "SCAV_ENVY_CACHE_ROOT" if current == scoped else "ENVY_CACHE_ROOT"
+    if scoped:
+        os.environ["ENVY_CACHE_ROOT"] = scoped
+        return "SCAV_ENVY_CACHE_ROOT"
+    return "project-local; see README to share one across worktrees"
+
+
 def envy_cache_root() -> str:
     """Which package cache this build used, asked of envy rather than derived.
 
@@ -161,18 +183,17 @@ def main() -> int:
         raise SystemExit(f"preset {preset!r} is not runnable on this host. Available:\n  "
                          + "\n  ".join(available_presets()))
 
+    # build.sh and build.bat do this before their own envy calls; repeating it
+    # here is what lets `tools/build.py` be run directly.
+    origin = adopt_scav_cache_root()
+
     if not args.no_sync:
         run(ENVY, "sync")
 
     # Which cache, said out loud. The default is project-local, so a developer
-    # with several worktrees pays for a toolchain copy in each one unless they
-    # set ENVY_CACHE_ROOT -- and that cost should not be silent.
-    cache = envy_cache_root()
-    shared = bool(os.environ.get("ENVY_CACHE_ROOT"))
-    print(f"envy cache: {cache}"
-          + ("  (ENVY_CACHE_ROOT)" if shared
-             else "  (project-local; see README to share one across worktrees)"),
-          flush=True)
+    # with several worktrees pays for a toolchain copy in each one -- and that
+    # cost should not be silent.
+    print(f"envy cache: {envy_cache_root()}  ({origin})", flush=True)
 
     cmake, ninja, doctest, python = [
         envy_product(p) for p in ("cmake", "ninja", "doctest_cpp_dir", "python3")

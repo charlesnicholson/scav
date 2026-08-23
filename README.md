@@ -103,15 +103,31 @@ If you already use envy and would rather scav's packages land in your user-wide
 cache, that is one line in your shell profile:
 
 ```sh
-export ENVY_CACHE_ROOT="$HOME/Library/Caches/envy"   # macOS
-export ENVY_CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/envy"   # Linux
+export SCAV_ENVY_CACHE_ROOT="$HOME/Library/Caches/envy"              # macOS
+export SCAV_ENVY_CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/envy"   # Linux
 ```
 
-`ENVY_CACHE_ROOT` beats the manifest directive, so that is all it takes — and
-because every launcher under `bin/` bootstraps through `bin/envy`, it covers
-`build.sh`, `bin/cmake`, `bin/ninja`, and the `envy product` lookups CMake does.
+**Note the `SCAV_` prefix — that is the whole point of the variable.** envy's own
+`ENVY_CACHE_ROOT` would do the same job, but it is global: exported from a
+profile it retargets the cache of *every* envy project on the machine, including
+ones that chose a project-local sandbox deliberately. `SCAV_ENVY_CACHE_ROOT` is
+read only by scav's own entry points, which translate it to `ENVY_CACHE_ROOT` for
+the build. Setting `ENVY_CACHE_ROOT` yourself still wins — it is envy's
+documented override, and CI uses it.
+
 A profile export is inherited by every new worktree and every tool session, which
-is what makes it stick where a per-shell `export` does not.
+is what makes it stick where a per-shell `export` does not. Precedence is
+`ENVY_CACHE_ROOT` > `SCAV_ENVY_CACHE_ROOT` > `out/.envy`, and every build prints
+which tier answered.
+
+The translation lives in `build.sh`, `build.bat` and `tools/build.py` rather than
+in the manifest, for a specific reason: envy's cache directive *does* understand
+`${VAR:-default}`, but only in the envy binary. The shell launcher that bootstraps
+that binary has a simpler expander and would take
+`${SCAV_ENVY_CACHE_ROOT:-out/.envy}` literally, creating a directory by that name.
+Translating to the one variable both tiers read first keeps them agreeing. The
+consequence is that the shims — `bin/cmake`, `bin/ninja` run *directly*, outside
+`build.sh` — still use `out/.envy`; go through `build.sh` and everything agrees.
 
 Two things worth knowing before you do it:
 
