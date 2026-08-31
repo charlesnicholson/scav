@@ -357,7 +357,10 @@ def check_compiles_as_c(cc: str, include_dirs: list[Path],
         src = Path(work) / "c_check.c"
         src.write_text("".join(f'#include "{h}"\n' for h in headers)
                        + "int main(void) { return 0; }\n", encoding="utf-8")
-        cmd = [cc, "-std=c11", "-Wall", "-Werror", "-c", "-o", "/dev/null", str(src)]
+        # An object in the scratch directory, not /dev/null: Windows has no such
+        # path, and the compiler there fails before it reads a single header.
+        cmd = [cc, "-std=c11", "-Wall", "-Werror", "-c",
+               "-o", str(Path(work) / "c_check.o"), str(src)]
         for directory in include_dirs:
             cmd += ["-I", str(directory)]
         built = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -385,7 +388,10 @@ def extract(compiler: str) -> dict:
     # Spelled the way a consumer spells them, since that is the include path the
     # install tree presents and the one the probe has to prove works.
     spelled = [f"scav/{Path(h).name}" for h in HEADERS]
-    check_compiles_as_c("cc", include_dirs, spelled)
+    if (skipped := check_compiles_as_c("cc", include_dirs, spelled)) is not None:
+        # Said out loud: a check that quietly did not run reads like one that
+        # passed.
+        print(f"abi_extract: headers not checked as C: {skipped}", file=sys.stderr)
     layout = run_probe(compiler, include_dirs, spelled, all_structs, all_fields)
 
     # Padding is pinned, so the JSON carries it explicitly rather than leaving a
