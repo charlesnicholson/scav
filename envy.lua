@@ -1,11 +1,9 @@
--- scav's toolchain and package manifest, and envy's root marker. Everything scav
--- generates lives under out/, so the package cache does too.
+-- scav's toolchain and package manifest, and envy's root marker.
 
 -- @envy schema "1"
--- @envy version "0.1.9"
+-- @envy version "0.2.1"
 -- @envy bin "bin"
--- @envy cache-posix "out/.envy"
--- @envy cache-win "out\.envy"
+-- @envy cache-local "out/.envy"
 -- @envy deploy "true"
 
 BUNDLES = {
@@ -28,11 +26,8 @@ PACKAGES = {
                 provide_python = true, provide_python3 = true } },
 }
 
--- The lint gates, behind SCAV_LINT because nothing compiles with them: an
--- ordinary build, and every CI row but the lint one, never downloads a
--- toolchain it would not use. Set the variable to run the gates anywhere,
--- which on darwin means compiling clang once. Pinned rather than installed by
--- the job, so the version judging a diff is the version in this file.
+-- Behind SCAV_LINT because nothing compiles with them, and on darwin they mean
+-- compiling clang once.
 if os.getenv("SCAV_LINT") then
   envy.extend(PACKAGES, {
     { spec = "scav.clang-tools@r0",

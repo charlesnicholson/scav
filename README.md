@@ -96,50 +96,49 @@ used, because the default costs ~540 MB and that should not be silent.
 ### Where the toolchain lives
 
 Under `out/.envy`, with everything else scav generates, so **`rm -rf out` removes
-every tool, package and build artifact** and leaves nothing on your machine. That
-is the default and it is not opt-in — build scav once, delete `out`, and you are
-back where you started. Nothing is written to `$HOME`.
+every tool, package and build artifact**. Nothing is written to `$HOME`. That is
+the manifest's choice:
 
-The cost is one toolchain copy per checkout, about 540 MB. If you keep several
-worktrees or run parallel agents that adds up, so there is a power-user override:
-point scav's cache at your own envy cache and every worktree shares one copy.
-
-```sh
-echo 'SCAV_ENVY_CACHE_ROOT=~/Library/Caches/envy' > .env       # macOS
-echo 'SCAV_ENVY_CACHE_ROOT=~/.cache/envy'         > .env       # Linux
+```lua
+-- @envy cache-local "out/.envy"
 ```
 
-`.env` is gitignored and holds this one key. It is the place to write the override
-once: Conductor copies `.env*` into every new workspace, so a fresh worktree
-inherits it without a second step. The file is *parsed*, never sourced, so a line
-in it cannot run. An environment variable of the same name takes precedence, which
-is what a one-off `SCAV_ENVY_CACHE_ROOT=... ./build.sh` uses.
+envy defaults to a user-wide cache; naming a project tree is what opts out of it.
 
-Three things worth knowing before you turn it on:
+The cost is one toolchain copy per checkout, ~540 MB. If you keep several
+worktrees or run parallel agents, run this once from the repo root and every
+worktree shares one copy:
 
-- **The `SCAV_` prefix is the point.** envy's own `ENVY_CACHE_ROOT` does the same
-  job, but it is global: set for the user it retargets *every* envy project on
-  the machine, including ones that chose a project-local sandbox deliberately —
-  the same choice scav made. `SCAV_ENVY_CACHE_ROOT` is read only by scav's own
-  entry points. Setting `ENVY_CACHE_ROOT` yourself still wins; that is envy's
-  documented override and CI uses it.
-- **Sharing is mostly free**, because packages are keyed by content fingerprint.
-  scav's `envy.cmake@r0` is the same `darwin-arm64-blake3-49a9b2620de8c380` build
-  another envy project already fetched. Measured on one machine: three of four
-  packages hit immediately, leaving a 58 MB python fetch, and ~499 MB saved per
-  additional worktree.
+```sh
+./bin/envy cache --shared
+```
+
+That writes a zero-byte `.envy-cache-shared` marker, which every reader — the
+binary and both bootstrap launchers — honours. `./bin/envy cache --local` goes
+back and removes the marker; a marker is only ever written when it diverges from
+the manifest, so the steady state is no marker at all. `.envy-cache-*` is
+gitignored and listed in `.worktreeinclude`, so Conductor carries your choice
+into new workspaces. Every build prints the resolved root.
+
+Worth knowing before sharing:
+
+- **Mostly free.** Packages are keyed by content fingerprint, so scav's
+  `envy.cmake@r0` is the same `darwin-arm64-blake3-49a9b2620de8c380` build any
+  other envy project already fetched. Measured: three of four packages hit
+  immediately, a 58 MB python fetch, ~499 MB saved per extra worktree.
 - **Concurrent access is safe.** Three simultaneous `envy sync` runs against one
-  fresh cache all exit 0 — one installs, the others hit, and the resulting tree
-  is correct. Parallel agents in separate worktrees can share one cache.
+  fresh cache all exit 0 — one installs, the others hit, resulting tree correct.
+- **What you give up is the factory reset.** `rm -rf out` no longer removes the
+  toolchain, and another checkout can invalidate a shared tree. Hence the default.
 
-What you give up is precisely the factory reset: `rm -rf out` no longer removes
-the toolchain, and a machine-global directory can be invalidated by another
-checkout. That is why the sandbox is the default and this is the opt-in.
+`ENVY_CACHE_ROOT` (absolute only) still overrides everything, which is what CI
+uses. This cannot live in a CMake preset: envy resolves the cache and hands back
+absolute paths to cmake, ninja and python before CMake is invoked at all.
 
-This cannot live in a CMake preset, which is the obvious place to look for it:
-envy resolves the cache and hands back absolute paths to cmake, ninja and python
-*before* CMake is invoked at all, so a preset is read several envy calls too late.
-Every build prints which tier answered.
+Bumping the pinned envy version means regenerating the tracked launchers under
+`bin/` with `./bin/envy deploy --platform all` — `envy sync` deploys only the
+host's flavour, and a mixed set is a build step resolving the cache by older
+rules than the binary it bootstraps. `func.provisioning` fails on a mixed set.
 
 ```
 ./build.sh --config debug            # matrix config: debug | release | testable

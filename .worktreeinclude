@@ -1,0 +1,3 @@
+# Listing anything here replaces Conductor's default `.env*` pattern.
+.envy-cache-local
+.envy-cache-shared

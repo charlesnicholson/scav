@@ -8,6 +8,14 @@ function(scav_testing_init)
     return()
   endif()
 
+  # find_path caches its answer, so a changed hint is never re-searched: switching
+  # cache modes would leave the tree pointing into the abandoned root.
+  if(NOT "${SCAV_DOCTEST_DIR}" STREQUAL "${SCAV_DOCTEST_DIR_SEARCHED}")
+    unset(SCAV_DOCTEST_INCLUDE_DIR CACHE)
+    set(SCAV_DOCTEST_DIR_SEARCHED "${SCAV_DOCTEST_DIR}" CACHE INTERNAL
+      "The hint the cached include dir was found under")
+  endif()
+
   # find_path returns the directory *containing* the header, so the amalgamated
   # layout and an upstream install both resolve `#include "doctest.h"`.
   find_path(SCAV_DOCTEST_INCLUDE_DIR doctest.h

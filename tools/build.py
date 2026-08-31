@@ -39,67 +39,12 @@ def run(*cmd: str | Path) -> None:
     subprocess.run(argv, cwd=REPO_ROOT, check=True)
 
 
-def cache_root_from_dotenv() -> str | None:
-    """`SCAV_ENVY_CACHE_ROOT` out of a gitignored `.env`, parsed and not executed.
-
-    The file is where a power user writes the override once: Conductor copies
-    `.env*` into every new workspace, so a fresh worktree inherits it. Only this
-    one key is read, and only `~` is expanded -- anything more would be a shell
-    this does not need to be.
-    """
-    path = REPO_ROOT / ".env"
-    if not path.is_file():
-        return None
-    value = None
-    for line in path.read_text(encoding="utf-8").splitlines():
-        head, sep, tail = line.partition("=")
-        if sep and (head.strip() == "SCAV_ENVY_CACHE_ROOT"):
-            value = tail.strip().strip("\"'")
-    if not value:
-        return None
-    return str(Path(value).expanduser())
-
-
-def adopt_scav_cache_root() -> str:
-    """Resolve the cache override and say which tier answered.
-
-    The default is the manifest's `out/.envy`, so `rm -rf out` stays a factory
-    reset for tools, packages and build trees alike. Overriding it is opt-in and
-    scav-scoped: envy's own `ENVY_CACHE_ROOT` is global, so a developer who left
-    it in a shell profile would retarget every other envy project on the
-    machine, including ones that chose a project-local sandbox on purpose.
-
-    Translating the scoped name to the one envy reads also keeps envy's launcher
-    and its binary agreeing -- both take `ENVY_CACHE_ROOT` as their first tier,
-    whereas a `${VAR:-default}` manifest directive is understood by the binary
-    and not by the shell launcher that bootstraps it.
-    """
-    scoped = os.environ.get("SCAV_ENVY_CACHE_ROOT") or cache_root_from_dotenv()
-    if current := os.environ.get("ENVY_CACHE_ROOT"):
-        # build.sh exports both before this runs, so equality is what tells the
-        # tiers apart rather than which variable happens to be set.
-        return "SCAV_ENVY_CACHE_ROOT" if current == scoped else "ENVY_CACHE_ROOT"
-    if scoped:
-        os.environ["ENVY_CACHE_ROOT"] = scoped
-        return "SCAV_ENVY_CACHE_ROOT"
-    return "sandboxed in out/; see README to share one across worktrees"
-
-
 def envy_cache_root() -> str:
-    """Which package cache this build used, asked of envy rather than derived.
-
-    The precedence is ENVY_CACHE_ROOT > the manifest directive > the platform
-    default, and duplicating that here is how the two answers drift. One extra
-    invocation is worth not silently spending half a gigabyte per worktree.
-    """
-    out = subprocess.run(
-        [str(ENVY), "cache"], cwd=REPO_ROOT, check=False,
+    """Asked of envy rather than derived; `--root` skips the usage scan."""
+    return subprocess.run(
+        [str(ENVY), "cache", "--root"], cwd=REPO_ROOT, check=False,
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-    ).stdout
-    for line in out.splitlines():
-        if line.startswith("Cache:"):
-            return line.split(":", 1)[1].strip()
-    return "unknown"
+    ).stdout.strip() or "unknown"
 
 
 def envy_product(name: str) -> Path:
@@ -207,17 +152,13 @@ def main() -> int:
         raise SystemExit(f"preset {preset!r} is not runnable on this host. Available:\n  "
                          + "\n  ".join(available_presets()))
 
-    # build.sh and build.bat do this before their own envy calls; repeating it
-    # here is what lets `tools/build.py` be run directly.
-    origin = adopt_scav_cache_root()
-
     if not args.no_sync:
         run(ENVY, "sync")
 
-    # Which cache, said out loud. The default is project-local, so a developer
-    # with several worktrees pays for a toolchain copy in each one -- and that
-    # cost should not be silent.
-    print(f"envy cache: {envy_cache_root()}  ({origin})", flush=True)
+    cache = envy_cache_root()
+    hint = ("  (./bin/envy cache --shared to share one across worktrees)"
+            if Path(cache).is_relative_to(REPO_ROOT) else "")
+    print(f"envy cache: {cache}{hint}", flush=True)
 
     cmake, ninja, doctest, python = [
         envy_product(p) for p in ("cmake", "ninja", "doctest_cpp_dir", "python3")
