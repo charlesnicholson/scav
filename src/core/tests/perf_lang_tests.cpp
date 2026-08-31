@@ -58,6 +58,21 @@ uint64_t fastest_micros(Once &&once) {
   return best;
 }
 
+// A ratio wants both sides measured the same way, and min-of-N does not deliver
+// that under load: the shorter run finds an uncontended window more often than
+// the longer one, which biases the ratio upward. Summing every run instead lets
+// contention inflate numerator and denominator together.
+template <typename Once>
+uint64_t total_micros(Once &&once) {
+  uint64_t total{ 0 };
+  for (uint32_t i = 0; i < SCALING_RUNS; ++i) {
+    auto const start{ std::chrono::steady_clock::now() };
+    once();
+    total += micros_since(start);
+  }
+  return total;
+}
+
 uint64_t throughput_mb_per_s(uint64_t bytes, uint64_t micros) {
   return (bytes * 1'000'000ULL) / (micros * 1024ULL * 1024ULL);
 }
@@ -250,8 +265,8 @@ TEST_CASE("perf: lexing is linear in the input") {
   // faults the second one does not.
   time_lex(small_bytes);
   time_lex(large_bytes);
-  uint64_t const small_us{ fastest_micros([&] { time_lex(small_bytes); }) };
-  uint64_t const large_us{ fastest_micros([&] { time_lex(large_bytes); }) };
+  uint64_t const small_us{ total_micros([&] { time_lex(small_bytes); }) };
+  uint64_t const large_us{ total_micros([&] { time_lex(large_bytes); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_SCALING) {
@@ -319,8 +334,8 @@ TEST_CASE("perf: a wide sibling list does not degrade") {
 
   REQUIRE(parse(small).ok);
   REQUIRE(parse(large).ok);
-  uint64_t const small_us{ fastest_micros([&] { parse(small); }) };
-  uint64_t const large_us{ fastest_micros([&] { parse(large); }) };
+  uint64_t const small_us{ total_micros([&] { parse(small); }) };
+  uint64_t const large_us{ total_micros([&] { parse(large); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_SCALING) {
@@ -352,8 +367,8 @@ TEST_CASE("perf: a long comment run does not degrade") {
 
   Parsed const small_parsed{ parse(small) };
   Parsed const large_parsed{ parse(large) };
-  uint64_t const small_us{ fastest_micros([&] { parse(small); }) };
-  uint64_t const large_us{ fastest_micros([&] { parse(large); }) };
+  uint64_t const small_us{ total_micros([&] { parse(small); }) };
+  uint64_t const large_us{ total_micros([&] { parse(large); }) };
 
   REQUIRE(small_parsed.ok);
   REQUIRE(large_parsed.ok);
@@ -377,8 +392,8 @@ TEST_CASE("perf: deep nesting does not degrade") {
 
   REQUIRE(parse_deep(small, 300).ok);
   REQUIRE(parse_deep(large, 300).ok);
-  uint64_t const small_us{ fastest_micros([&] { parse_deep(small, 300); }) };
-  uint64_t const large_us{ fastest_micros([&] { parse_deep(large, 300); }) };
+  uint64_t const small_us{ total_micros([&] { parse_deep(small, 300); }) };
+  uint64_t const large_us{ total_micros([&] { parse_deep(large, 300); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_SCALING) {
@@ -426,8 +441,8 @@ TEST_CASE("perf: printing is linear in the input") {
   double const ratio{ static_cast<double>(large.src_bytes.size()) /
                       static_cast<double>(small.src_bytes.size()) };
 
-  uint64_t const small_us{ fastest_micros([&] { std::ignore = time_print(small); }) };
-  uint64_t const large_us{ fastest_micros([&] { std::ignore = time_print(large); }) };
+  uint64_t const small_us{ total_micros([&] { std::ignore = time_print(small); }) };
+  uint64_t const large_us{ total_micros([&] { std::ignore = time_print(large); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_SCALING) {
@@ -453,8 +468,8 @@ TEST_CASE("perf: a block with many attributes does not degrade") {
   ParsedDocument const small{ parse_for_print(attr_block(2000)) };
   ParsedDocument const large{ parse_for_print(attr_block(8000)) };
 
-  uint64_t const small_us{ fastest_micros([&] { std::ignore = time_print(small); }) };
-  uint64_t const large_us{ fastest_micros([&] { std::ignore = time_print(large); }) };
+  uint64_t const small_us{ total_micros([&] { std::ignore = time_print(small); }) };
+  uint64_t const large_us{ total_micros([&] { std::ignore = time_print(large); }) };
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_SCALING) {
     CHECK_MESSAGE(growth < 4.0 * SCALING_SLACK,

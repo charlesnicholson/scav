@@ -97,7 +97,9 @@ void push_prim(DrawList &d,
   d.prims.push_back({ .kind = kind,
                       .depth = depth,
                       .style = style,
-                      .clip = SCAV_CLIP_NONE,
+                      // Cast because a C enum's underlying type is the
+                      // implementation's choice, and MSVC calls this narrowing.
+                      .clip = static_cast<uint32_t>(SCAV_CLIP_NONE),
                       .origin_kind = static_cast<uint32_t>(origin.kind),
                       .origin_ordinal = origin.ordinal,
                       .points = points,

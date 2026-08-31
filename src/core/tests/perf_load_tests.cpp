@@ -58,6 +58,21 @@ uint64_t fastest_micros(Once &&once) {
   return best;
 }
 
+// A ratio wants both sides measured the same way, and min-of-N does not deliver
+// that under load: the shorter run finds an uncontended window more often than
+// the longer one, which biases the ratio upward. Summing every run instead lets
+// contention inflate numerator and denominator together.
+template <typename Once>
+uint64_t total_micros(Once &&once) {
+  uint64_t total{ 0 };
+  for (uint32_t i = 0; i < SCALING_RUNS; ++i) {
+    auto const start{ std::chrono::steady_clock::now() };
+    once();
+    total += micros_since(start);
+  }
+  return total;
+}
+
 // Document i includes document i+1, so the network is `count` deep with one
 // instantiation each. Depth stresses the resolver's walk and the rebuild.
 std::vector<Doc> chain(uint32_t count, uint32_t states_each) {
@@ -177,8 +192,8 @@ TEST_CASE("perf: chain load is linear in the number of documents") {
   std::vector<Doc> const small{ chain(NARROW, 20) };
   std::vector<Doc> const large{ chain(WIDE, 20) };
 
-  uint64_t const small_us{ fastest_micros([&] { std::ignore = run_once(small); }) };
-  uint64_t const large_us{ fastest_micros([&] { std::ignore = run_once(large); }) };
+  uint64_t const small_us{ total_micros([&] { std::ignore = run_once(small); }) };
+  uint64_t const large_us{ total_micros([&] { std::ignore = run_once(large); }) };
 
   double const ratio{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   MESSAGE("chain " << NARROW << " -> " << WIDE << " documents: " << small_us << " us -> "
@@ -197,8 +212,8 @@ TEST_CASE("perf: instantiation is linear in the number of instantiations") {
   CHECK(outcome.documents == 2);    // parsed once, whatever the instance count
   CHECK(outcome.includes == WIDE);  // and instantiated once per include
 
-  uint64_t const small_us{ fastest_micros([&] { std::ignore = run_once(small); }) };
-  uint64_t const large_us{ fastest_micros([&] { std::ignore = run_once(large); }) };
+  uint64_t const small_us{ total_micros([&] { std::ignore = run_once(small); }) };
+  uint64_t const large_us{ total_micros([&] { std::ignore = run_once(large); }) };
 
   double const ratio{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   MESSAGE("star " << NARROW << " -> " << WIDE << " instantiations: " << small_us
@@ -237,8 +252,8 @@ TEST_CASE("perf: the digest is linear in the model") {
 
   Chart const a{ hash_of(small) };
   Chart const b{ hash_of(large) };
-  uint64_t const a_us{ fastest_micros([&] { std::ignore = chart_structural_hash(a); }) };
-  uint64_t const b_us{ fastest_micros([&] { std::ignore = chart_structural_hash(b); }) };
+  uint64_t const a_us{ total_micros([&] { std::ignore = chart_structural_hash(a); }) };
+  uint64_t const b_us{ total_micros([&] { std::ignore = chart_structural_hash(b); }) };
 
   double const ratio{ static_cast<double>(b_us) / static_cast<double>(a_us) };
   MESSAGE("digest " << NARROW << " -> " << WIDE << " documents: " << a_us << " us -> "

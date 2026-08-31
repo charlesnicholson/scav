@@ -50,6 +50,21 @@ uint64_t fastest_micros(Once &&once) {
   return best;
 }
 
+// A ratio wants both sides measured the same way, and min-of-N does not deliver
+// that under load: the shorter run finds an uncontended window more often than
+// the longer one, which biases the ratio upward. Summing every run instead lets
+// contention inflate numerator and denominator together.
+template <typename Once>
+uint64_t total_micros(Once &&once) {
+  uint64_t total{ 0 };
+  for (uint32_t i = 0; i < SCALING_RUNS; ++i) {
+    auto const start{ std::chrono::steady_clock::now() };
+    once();
+    total += micros_since(start);
+  }
+  return total;
+}
+
 uint64_t throughput_mb_per_s(uint64_t bytes, uint64_t micros) {
   return (bytes * 1'000'000ULL) / (micros * 1024ULL * 1024ULL);
 }
@@ -155,8 +170,8 @@ TEST_CASE("perf: lowering is linear in the input") {
   };
   lower_once(small_pd);  // warm both paths before timing either
   lower_once(large_pd);
-  uint64_t const small_us{ fastest_micros([&] { lower_once(small_pd); }) };
-  uint64_t const large_us{ fastest_micros([&] { lower_once(large_pd); }) };
+  uint64_t const small_us{ total_micros([&] { lower_once(small_pd); }) };
+  uint64_t const large_us{ total_micros([&] { lower_once(large_pd); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_SCALING) {
@@ -183,8 +198,8 @@ TEST_CASE("perf: validation is linear in the model") {
 
   time_validate(small_chart);  // warm
   time_validate(large_chart);
-  uint64_t const small_us{ fastest_micros([&] { time_validate(small_chart); }) };
-  uint64_t const large_us{ fastest_micros([&] { time_validate(large_chart); }) };
+  uint64_t const small_us{ total_micros([&] { time_validate(small_chart); }) };
+  uint64_t const large_us{ total_micros([&] { time_validate(large_chart); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_SCALING) {
@@ -214,8 +229,8 @@ TEST_CASE("perf: a wide sibling list lowers without degrading") {
   };
   lower_once(small_pd);
   lower_once(large_pd);
-  uint64_t const small_us{ fastest_micros([&] { lower_once(small_pd); }) };
-  uint64_t const large_us{ fastest_micros([&] { lower_once(large_pd); }) };
+  uint64_t const small_us{ total_micros([&] { lower_once(small_pd); }) };
+  uint64_t const large_us{ total_micros([&] { lower_once(large_pd); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_SCALING) {
