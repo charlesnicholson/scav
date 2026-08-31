@@ -44,12 +44,12 @@ scav_rect align(scav_rect r, int32_t w, int32_t h, Anchor a) {
   // than its rect, and truncation toward zero would bias that case one way.
   int32_t const slack_x{ r.w - w };
   int32_t const slack_y{ r.h - h };
-  int32_t const x{ (col == 0U) ? r.x
-                              : ((col == 1U) ? (r.x + floor_div(slack_x, 2))
-                                             : (r.x + slack_x)) };
-  int32_t const y{ (row == 0U) ? r.y
-                              : ((row == 1U) ? (r.y + floor_div(slack_y, 2))
-                                             : (r.y + slack_y)) };
+  int32_t const x{ (col == 0U)
+                       ? r.x
+                       : ((col == 1U) ? (r.x + floor_div(slack_x, 2)) : (r.x + slack_x)) };
+  int32_t const y{ (row == 0U)
+                       ? r.y
+                       : ((row == 1U) ? (r.y + floor_div(slack_y, 2)) : (r.y + slack_y)) };
   return { .x = x, .y = y, .w = w, .h = h };
 }
 

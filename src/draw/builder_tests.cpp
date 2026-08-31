@@ -218,7 +218,8 @@ TEST_CASE("builder: a name lands inside the rect its own h_before reserved") {
   ColumnId const id{ column_find(b.chart, "scav.geom.state_before") };
   REQUIRE(id.v != INVALID);
   std::vector<scav_rect> befores(column_count(b.chart, id));
-  std::memcpy(befores.data(), column_data(b.chart, id),
+  std::memcpy(befores.data(),
+              column_data(b.chart, id),
               befores.size() * sizeof(scav_rect));
 
   for (scav_prim const &p : b.list.prims) {
@@ -269,16 +270,16 @@ TEST_CASE("builder: a label lands on the route its own path box was placed on") 
 TEST_CASE("builder: each pseudostate kind draws as its own shape") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
-  constexpr StateKind KINDS[8]{ StateKind::Initial,  StateKind::Final,
-                                StateKind::Choice,   StateKind::Junction,
-                                StateKind::Fork,     StateKind::Join,
-                                StateKind::History,  StateKind::DeepHistory };
+  constexpr StateKind KINDS[8]{ StateKind::Initial, StateKind::Final,
+                                StateKind::Choice,  StateKind::Junction,
+                                StateKind::Fork,    StateKind::Join,
+                                StateKind::History, StateKind::DeepHistory };
   for (StateKind const k : KINDS) { build_state(c, root, {}, k, {}); }
   Built const b{ pipeline(std::move(c), readable()) };
 
-  CHECK(kind_count(b.list, SCAV_PRIM_RRECT) == 0);   // no normal state here
-  CHECK(kind_count(b.list, SCAV_PRIM_RECT) == 2);    // fork and join are bars
-  CHECK(kind_count(b.list, SCAV_PRIM_PATH) == 1);    // choice is a diamond
+  CHECK(kind_count(b.list, SCAV_PRIM_RRECT) == 0);  // no normal state here
+  CHECK(kind_count(b.list, SCAV_PRIM_RECT) == 2);   // fork and join are bars
+  CHECK(kind_count(b.list, SCAV_PRIM_PATH) == 1);   // choice is a diamond
   // Initial, junction, history and deep history are one circle each; final and
   // the two history states carry a second circle or a glyph.
   CHECK(kind_count(b.list, SCAV_PRIM_CIRCLE) == 6);
@@ -312,7 +313,7 @@ TEST_CASE("builder: an emitter given a row it cannot draw emits nothing") {
   Palette const p{ palette_standard() };
   DrawList d;
 
-  emit_state(d, b.chart, m, p, 9999, 0);          // past the array
+  emit_state(d, b.chart, m, p, 9999, 0);  // past the array
   emit_submachine(d, b.chart, p, 9999, 0);
   emit_route(d, b.chart, p, 9999, 0);
   emit_label(d, b.chart, m, p, 9999, { .x = 0, .y = 0, .w = 10, .h = 10 }, 0);
@@ -417,8 +418,15 @@ TEST_CASE("builder: the C surface builds through the handles") {
   REQUIRE(scav_palette_standard(palette.data(), SCAV_STYLE_COUNT) == SCAV_OK);
   CHECK(scav_palette_standard(palette.data(), 1) == SCAV_E_CAPACITY);
 
-  REQUIRE(scav_emit_chart(list, &chart, metrics, palette.data(), SCAV_STYLE_COUNT, nullptr, nullptr, 0, 0) ==
-          SCAV_OK);
+  REQUIRE(scav_emit_chart(list,
+                          &chart,
+                          metrics,
+                          palette.data(),
+                          SCAV_STYLE_COUNT,
+                          nullptr,
+                          nullptr,
+                          0,
+                          0) == SCAV_OK);
   uint32_t prims{ 0 };
   REQUIRE(scav_drawlist_counts(list, &prims, nullptr, nullptr, nullptr, nullptr) ==
           SCAV_OK);
@@ -427,15 +435,20 @@ TEST_CASE("builder: the C surface builds through the handles") {
   // A null palette takes the shipped one; a short one is refused.
   scav_drawlist *defaulted{ nullptr };
   REQUIRE(scav_drawlist_create(&defaulted) == SCAV_OK);
-  REQUIRE(scav_emit_chart(defaulted, &chart, metrics, nullptr, 0, nullptr, nullptr, 0, 0) == SCAV_OK);
-  CHECK(scav_emit_chart(list, &chart, metrics, palette.data(), 1, nullptr, nullptr, 0, 0) ==
+  REQUIRE(
+      scav_emit_chart(defaulted, &chart, metrics, nullptr, 0, nullptr, nullptr, 0, 0) ==
+      SCAV_OK);
+  CHECK(
+      scav_emit_chart(list, &chart, metrics, palette.data(), 1, nullptr, nullptr, 0, 0) ==
+      SCAV_E_INVALID_ARG);
+  CHECK(scav_emit_chart(nullptr, &chart, metrics, nullptr, 0, nullptr, nullptr, 0, 0) ==
         SCAV_E_INVALID_ARG);
-  CHECK(scav_emit_chart(nullptr, &chart, metrics, nullptr, 0, nullptr, nullptr, 0, 0) == SCAV_E_INVALID_ARG);
 
   // A chart with no geometry is a state error, not a bad argument: the caller
   // did nothing wrong except skip layout.
   scav_chart unlaid{ .chart = small_chart(), .diags = {} };
-  CHECK(scav_emit_chart(list, &unlaid, metrics, nullptr, 0, nullptr, nullptr, 0, 0) == SCAV_E_STATE);
+  CHECK(scav_emit_chart(list, &unlaid, metrics, nullptr, 0, nullptr, nullptr, 0, 0) ==
+        SCAV_E_STATE);
 
   scav_drawlist_destroy(defaulted);
   scav_drawlist_destroy(list);

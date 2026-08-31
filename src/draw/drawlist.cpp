@@ -157,8 +157,7 @@ scav_span drawlist_text(DrawList &d, std::string_view s) {
 }
 
 void push_rect(DrawList &d, int32_t depth, uint32_t style, scav_rect r, ElemRef origin) {
-  scav_point const pts[2]{ { .x = r.x, .y = r.y },
-                           { .x = r.x + r.w, .y = r.y + r.h } };
+  scav_point const pts[2]{ { .x = r.x, .y = r.y }, { .x = r.x + r.w, .y = r.y + r.h } };
   push_prim(d,
             SCAV_PRIM_RECT,
             depth,
@@ -176,8 +175,7 @@ void push_rrect(DrawList &d,
                 scav_rect r,
                 int32_t radius,
                 ElemRef origin) {
-  scav_point const pts[2]{ { .x = r.x, .y = r.y },
-                           { .x = r.x + r.w, .y = r.y + r.h } };
+  scav_point const pts[2]{ { .x = r.x, .y = r.y }, { .x = r.x + r.w, .y = r.y + r.h } };
   push_prim(d,
             SCAV_PRIM_RRECT,
             depth,
@@ -301,8 +299,7 @@ void push_image(DrawList &d,
                 scav_rect r,
                 std::string_view id,
                 ElemRef origin) {
-  scav_point const pts[2]{ { .x = r.x, .y = r.y },
-                           { .x = r.x + r.w, .y = r.y + r.h } };
+  scav_point const pts[2]{ { .x = r.x, .y = r.y }, { .x = r.x + r.w, .y = r.y + r.h } };
   push_prim(d,
             SCAV_PRIM_IMAGE,
             depth,
@@ -335,8 +332,7 @@ bool drawlist_validate(DrawList const &d, uint32_t &bad) {
     if ((p.clip != SCAV_CLIP_NONE) && (p.clip >= d.clips.size())) { return false; }
     // Text names a string and an image names an id; the other kinds carry none,
     // so a payload on one of them means a builder wrote to the wrong field.
-    bool const wants_payload{ (p.kind == SCAV_PRIM_TEXT) ||
-                              (p.kind == SCAV_PRIM_IMAGE) };
+    bool const wants_payload{ (p.kind == SCAV_PRIM_TEXT) || (p.kind == SCAV_PRIM_IMAGE) };
     if (!wants_payload && (p.payload.len != 0U)) { return false; }
     if ((p.kind == SCAV_PRIM_IMAGE) && (p.payload.len == 0U)) { return false; }
     if (((p.kind == SCAV_PRIM_RRECT) || (p.kind == SCAV_PRIM_CIRCLE)) && (p.a < 0)) {
@@ -460,7 +456,8 @@ void drawlist_append(DrawList &dst, DrawList const &src) {
   uint32_t const point_base{ static_cast<uint32_t>(dst.points.size()) };
   uint32_t const text_base{ static_cast<uint32_t>(dst.text.bytes.size()) };
   dst.points.insert(dst.points.end(), src.points.begin(), src.points.end());
-  dst.text.bytes.insert(dst.text.bytes.end(), src.text.bytes.begin(),
+  dst.text.bytes.insert(dst.text.bytes.end(),
+                        src.text.bytes.begin(),
                         src.text.bytes.end());
 
   // Styles and clips intern rather than concatenate, so appending a list twice

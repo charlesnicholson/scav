@@ -21,11 +21,11 @@ namespace scav {
 // in `bad` rather than emitting something a viewer would misdraw.
 enum class SvgStatus : uint32_t {
   Ok,
-  InvalidDrawList,   // the DrawList validator refused it
-  UnsupportedPrim,   // a kind this backend does not render; see below
-  UnknownImage,      // an image primitive naming nothing in the registry
-  MissingGlyph,      // textLength needs the advance sum, so the font must have it
-  ExtentOverflow,    // the content does not fit an integer viewBox
+  InvalidDrawList,  // the DrawList validator refused it
+  UnsupportedPrim,  // a kind this backend does not render; see below
+  UnknownImage,     // an image primitive naming nothing in the registry
+  MissingGlyph,     // textLength needs the advance sum, so the font must have it
+  ExtentOverflow,   // the content does not fit an integer viewBox
 };
 
 struct SvgOptions {

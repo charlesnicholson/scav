@@ -221,7 +221,7 @@ TEST_CASE("perf: chain load is linear in the number of documents") {
   std::vector<Doc> const large{ chain(WIDE, 20) };
 
   auto const [small_us, large_us]{ best_pair([&] { std::ignore = run_once(small); },
-                                       [&] { std::ignore = run_once(large); }) };
+                                             [&] { std::ignore = run_once(large); }) };
 
   double const ratio{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   MESSAGE("chain " << NARROW << " -> " << WIDE << " documents: " << small_us << " us -> "
@@ -241,7 +241,7 @@ TEST_CASE("perf: instantiation is linear in the number of instantiations") {
   CHECK(outcome.includes == WIDE);  // and instantiated once per include
 
   auto const [small_us, large_us]{ best_pair([&] { std::ignore = run_once(small); },
-                                       [&] { std::ignore = run_once(large); }) };
+                                             [&] { std::ignore = run_once(large); }) };
 
   double const ratio{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   MESSAGE("star " << NARROW << " -> " << WIDE << " instantiations: " << small_us
@@ -281,7 +281,7 @@ TEST_CASE("perf: the digest is linear in the model") {
   Chart const a{ hash_of(small) };
   Chart const b{ hash_of(large) };
   auto const [a_us, b_us]{ best_pair([&] { std::ignore = chart_structural_hash(a); },
-                                       [&] { std::ignore = chart_structural_hash(b); }) };
+                                     [&] { std::ignore = chart_structural_hash(b); }) };
 
   double const ratio{ static_cast<double>(b_us) / static_cast<double>(a_us) };
   MESSAGE("digest " << NARROW << " -> " << WIDE << " documents: " << a_us << " us -> "

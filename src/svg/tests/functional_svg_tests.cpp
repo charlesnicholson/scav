@@ -145,10 +145,9 @@ TEST_CASE("svg corpus: builder and backend agree on every box") {
   uint32_t checked{ 0 };
   for (scav_prim const &p : r.list.prims) {
     if (p.kind != SCAV_PRIM_TEXT) { continue; }
-    std::string_view const text{
-      reinterpret_cast<char const *>(r.list.text.bytes.data() + p.payload.off),
-      p.payload.len
-    };
+    std::string_view const text{ reinterpret_cast<char const *>(r.list.text.bytes.data() +
+                                                                p.payload.off),
+                                 p.payload.len };
     if (text.empty()) { continue; }
     scav_extent ext{};
     REQUIRE(measure_text(m,

@@ -322,9 +322,9 @@ TEST_CASE("drawlist: append rebases all four index spaces") {
 
   // The guest's own payload and points still read back as its own.
   scav_span const payload{ host.prims[1].payload };
-  std::string_view const text{
-    reinterpret_cast<char const *>(host.text.bytes.data() + payload.off), payload.len
-  };
+  std::string_view const text{ reinterpret_cast<char const *>(host.text.bytes.data() +
+                                                              payload.off),
+                               payload.len };
   CHECK(text == "guest");
   CHECK(host.points[host.prims[1].points.off].x == 2);
   CHECK(host.points[host.prims[2].points.off].x == 3);
@@ -355,8 +355,7 @@ TEST_CASE("drawlist: the C surface reads every array and refuses nulls") {
 
   uint32_t const s{ drawlist_style(list->list, ink(0xAA)) };
   push_text(list->list, 3, s, { .x = 7, .y = 8 }, "Idle", state(4));
-  list->list.prims[0].clip =
-      drawlist_clip(list->list, { .x = 0, .y = 0, .w = 9, .h = 9 });
+  list->list.prims[0].clip = drawlist_clip(list->list, { .x = 0, .y = 0, .w = 9, .h = 9 });
 
   uint32_t prims{ 0 };
   uint32_t styles{ 0 };
@@ -444,8 +443,9 @@ TEST_CASE("images: registration carries the dimensions, and an id names one") {
   CHECK(count == 1);
 
   uint32_t index{ 0 };
-  REQUIRE(scav_image_find(images, reinterpret_cast<scav_byte const *>("logo"), 4,
-                          &index) == SCAV_OK);
+  REQUIRE(
+      scav_image_find(images, reinterpret_cast<scav_byte const *>("logo"), 4, &index) ==
+      SCAV_OK);
   CHECK(index == 0);
   scav_extent extent{};
   REQUIRE(scav_image_extent(images, 0, &extent) == SCAV_OK);
@@ -458,21 +458,20 @@ TEST_CASE("images: registration carries the dimensions, and an id names one") {
         SCAV_E_INVALID_ARG);
   CHECK(scav_image_register(images, "bad", png, 0, 8, 16, "image/png") ==
         SCAV_E_INVALID_ARG);
-  CHECK(scav_image_register(images, "", png, 4, 8, 16, "image/png") ==
-        SCAV_E_INVALID_ARG);
+  CHECK(scav_image_register(images, "", png, 4, 8, 16, "image/png") == SCAV_E_INVALID_ARG);
   CHECK(scav_image_register(images, "logo", png, 4, 8, 8, "image/png") == SCAV_E_STATE);
 
   // Many rows share one pool, so an id survives the vector growing.
   for (uint32_t i = 0; i < 64; ++i) {
     std::string const id{ "img" + std::to_string(i) };
-    REQUIRE(scav_image_register(images, id.c_str(), png, 4, 1, 1, "image/png") ==
-            SCAV_OK);
+    REQUIRE(scav_image_register(images, id.c_str(), png, 4, 1, 1, "image/png") == SCAV_OK);
   }
-  REQUIRE(scav_image_find(images, reinterpret_cast<scav_byte const *>("logo"), 4,
-                          &index) == SCAV_OK);
+  REQUIRE(
+      scav_image_find(images, reinterpret_cast<scav_byte const *>("logo"), 4, &index) ==
+      SCAV_OK);
   CHECK(index == 0);
-  CHECK(scav_image_find(images, reinterpret_cast<scav_byte const *>("none"), 4,
-                        &index) == SCAV_E_INVALID_ARG);
+  CHECK(scav_image_find(images, reinterpret_cast<scav_byte const *>("none"), 4, &index) ==
+        SCAV_E_INVALID_ARG);
   CHECK(scav_image_extent(images, 9999, &extent) == SCAV_E_INVALID_ARG);
 
   scav_images_destroy(images);

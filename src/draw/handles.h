@@ -8,7 +8,6 @@
 #include "scav/scav_draw.h"
 #include "scav/scav_types.h"
 
-
 struct scav_metrics {
   scav::Metrics metrics;
 };

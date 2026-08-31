@@ -20,9 +20,9 @@ namespace {
 using namespace scav;
 
 // The corpus, in the order the layout golden lists it.
-constexpr char const *CORPUS[10]{ "axis.scav",  "brew.scav",        "dock.scav",
-                                  "estop.scav", "led.scav",         "mill.scav",
-                                  "ota.scav",   "tcp.scav",         "toolchanger.scav",
+constexpr char const *CORPUS[10]{ "axis.scav",  "brew.scav", "dock.scav",
+                                  "estop.scav", "led.scav",  "mill.scav",
+                                  "ota.scav",   "tcp.scav",  "toolchanger.scav",
                                   "vac.scav" };
 
 Metrics bundled() {
@@ -268,8 +268,9 @@ TEST_CASE("drawlist corpus: the extent estimate holds under the real font") {
   Chart c;
   SubmachineId parent{ build_chart(c, "extent", {}) };
   for (uint32_t level = 0; level < 16; ++level) {
-    StateId const composite{ build_state(
-        c, parent, "Composite" + std::to_string(level), StateKind::Normal, {}) };
+    StateId const composite{
+      build_state(c, parent, "Composite" + std::to_string(level), StateKind::Normal, {})
+    };
     for (uint32_t i = 0; i < 128; ++i) {
       // Names as long as a real chart's deepest, so the measurement is not
       // flattered by short ones.
@@ -294,12 +295,7 @@ TEST_CASE("drawlist corpus: the extent estimate holds under the real font") {
   REQUIRE(id.v != INVALID);
   scav_rect extent{};
   std::memcpy(&extent, column_data(c, id), sizeof(extent));
-  MESSAGE("2k-state real-font extent: ",
-          extent.w,
-          " x ",
-          extent.h,
-          " of ",
-          COORD_MAX);
+  MESSAGE("2k-state real-font extent: ", extent.w, " x ", extent.h, " of ", COORD_MAX);
   // The same bar P4 set for itself, so a change that eats the margin trips in
   // both places rather than only the fabricated one.
   CHECK(extent.w <= ((COORD_MAX / 4) * 3));
@@ -315,8 +311,9 @@ TEST_CASE("drawlist corpus: a 2k-state chart builds, and quickly") {
   SubmachineId parent{ build_chart(c, "big", {}) };
   std::vector<SubmachineId> frames{ parent };
   for (uint32_t level = 0; level < 16; ++level) {
-    StateId const composite{ build_state(
-        c, parent, "Level" + std::to_string(level), StateKind::Normal, {}) };
+    StateId const composite{
+      build_state(c, parent, "Level" + std::to_string(level), StateKind::Normal, {})
+    };
     for (uint32_t i = 0; i < 128; ++i) {
       build_state(c, parent, "State" + std::to_string(i), StateKind::Normal, {});
     }

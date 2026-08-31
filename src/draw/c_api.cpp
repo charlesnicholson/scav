@@ -3,10 +3,10 @@
 
 #include "scav/scav_draw_c.h"
 
+#include "draw/handles.h"
 #include "scav/scav_core_c.h"
 #include "scav/scav_draw.h"
 #include "scav/scav_types.h"
-#include "draw/handles.h"
 #include "scav_c_handles.h"
 
 #include <cstdint>
@@ -108,8 +108,13 @@ scav_result scav_measure_block(scav_metrics const *metrics,
                                int32_t k_den,
                                scav_extent *out) {
   if ((metrics == nullptr) || (out == nullptr)) { return SCAV_E_INVALID_ARG; }
-  return measure_result(scav::measure_block(
-      metrics->metrics, utf8_nfc, len, font_size_grid, k_num, k_den, *out));
+  return measure_result(scav::measure_block(metrics->metrics,
+                                            utf8_nfc,
+                                            len,
+                                            font_size_grid,
+                                            k_num,
+                                            k_den,
+                                            *out));
 }
 
 scav_result scav_drawlist_create(scav_drawlist **out) {
@@ -132,9 +137,7 @@ scav_result scav_drawlist_counts(scav_drawlist const *list,
   if (out_styles != nullptr) { *out_styles = static_cast<uint32_t>(d.styles.size()); }
   if (out_points != nullptr) { *out_points = static_cast<uint32_t>(d.points.size()); }
   if (out_clips != nullptr) { *out_clips = static_cast<uint32_t>(d.clips.size()); }
-  if (out_text != nullptr) {
-    *out_text = static_cast<uint32_t>(d.text.bytes.size());
-  }
+  if (out_text != nullptr) { *out_text = static_cast<uint32_t>(d.text.bytes.size()); }
   return SCAV_OK;
 }
 
@@ -233,12 +236,12 @@ scav_result scav_images_create(scav_images **out) {
 void scav_images_destroy(scav_images *images) { delete images; }
 
 scav_result scav_image_register(scav_images *images,
-                               char const *id,
-                               scav_byte const *bytes,
-                               uint32_t len,
-                               int32_t w,
-                               int32_t h,
-                               char const *mime) {
+                                char const *id,
+                                scav_byte const *bytes,
+                                uint32_t len,
+                                int32_t w,
+                                int32_t h,
+                                char const *mime) {
   if ((images == nullptr) || (id == nullptr) || (mime == nullptr)) {
     return SCAV_E_INVALID_ARG;
   }
@@ -264,9 +267,8 @@ scav_result scav_image_find(scav_images const *images,
   if ((images == nullptr) || (id == nullptr) || (out_index == nullptr)) {
     return SCAV_E_INVALID_ARG;
   }
-  uint32_t const row{ scav::image_find(
-      images->images,
-      { reinterpret_cast<char const *>(id), id_len }) };
+  uint32_t const row{ scav::image_find(images->images,
+                                       { reinterpret_cast<char const *>(id), id_len }) };
   if (row == scav::INVALID) { return SCAV_E_INVALID_ARG; }
   *out_index = row;
   return SCAV_OK;
@@ -275,8 +277,7 @@ scav_result scav_image_find(scav_images const *images,
 scav_result scav_image_extent(scav_images const *images,
                               uint32_t index,
                               scav_extent *out) {
-  if ((images == nullptr) || (out == nullptr) ||
-      (index >= images->images.rows.size())) {
+  if ((images == nullptr) || (out == nullptr) || (index >= images->images.rows.size())) {
     return SCAV_E_INVALID_ARG;
   }
   *out = { .w = images->images.rows[index].w, .h = images->images.rows[index].h };

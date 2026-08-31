@@ -144,8 +144,8 @@ int check_abi() {
       } else {
         std::vector<scav_byte> doc(bytes);
         uint32_t again{ 0 };
-        if ((scav_svg_write(list, metrics, nullptr, nullptr, doc.data(), bytes,
-                            &again) != SCAV_OK) ||
+        if ((scav_svg_write(list, metrics, nullptr, nullptr, doc.data(), bytes, &again) !=
+             SCAV_OK) ||
             (std::string_view{ reinterpret_cast<char const *>(doc.data()), 5 } !=
              "<?xml")) {
           std::fprintf(stderr, "scav_svg_write failed\n");

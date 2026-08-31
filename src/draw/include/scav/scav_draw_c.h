@@ -46,23 +46,23 @@ enum {
 typedef struct {
   uint32_t stroke_rgba;
   uint32_t fill_rgba;
-  int32_t stroke_w;        /* grid units */
-  uint32_t dash;           /* 0 = solid; app-defined otherwise */
-  int32_t font_size_grid;  /* 1/16 pt, the same width as everywhere else */
+  int32_t stroke_w;       /* grid units */
+  uint32_t dash;          /* 0 = solid; app-defined otherwise */
+  int32_t font_size_grid; /* 1/16 pt, the same width as everywhere else */
 } scav_style;
 
 /* Draw order is `depth`, not array position, which is what makes a DrawList
  * appendable. 48 bytes, no padding. */
 typedef struct {
-  uint32_t kind;         /* one of SCAV_PRIM_* */
+  uint32_t kind; /* one of SCAV_PRIM_* */
   int32_t depth;
-  uint32_t style;        /* -> the style table */
-  uint32_t clip;         /* -> the clip table; SCAV_CLIP_NONE = unclipped */
-  uint32_t origin_kind;  /* the defining entity, or none */
+  uint32_t style;       /* -> the style table */
+  uint32_t clip;        /* -> the clip table; SCAV_CLIP_NONE = unclipped */
+  uint32_t origin_kind; /* the defining entity, or none */
   uint32_t origin_ordinal;
-  scav_span points;      /* -> the point array; meaning per kind */
-  scav_span payload;     /* -> the text pool: a string, or an image id */
-  int32_t a, b;          /* kind-specific scalars */
+  scav_span points;  /* -> the point array; meaning per kind */
+  scav_span payload; /* -> the text pool: a string, or an image id */
+  int32_t a, b;      /* kind-specific scalars */
 } scav_prim;
 
 /* An unclipped primitive names no clip rect. */
@@ -171,20 +171,18 @@ scav_result scav_drawlist_append(scav_drawlist *dst, scav_drawlist const *src);
 scav_result scav_images_create(scav_images **out);
 void scav_images_destroy(scav_images *images);
 scav_result scav_image_register(scav_images *images,
-                               char const *id,
-                               scav_byte const *bytes,
-                               uint32_t len,
-                               int32_t w,
-                               int32_t h,
-                               char const *mime);
+                                char const *id,
+                                scav_byte const *bytes,
+                                uint32_t len,
+                                int32_t w,
+                                int32_t h,
+                                char const *mime);
 scav_result scav_image_count(scav_images const *images, uint32_t *out_count);
 scav_result scav_image_find(scav_images const *images,
                             scav_byte const *id,
                             uint32_t id_len,
                             uint32_t *out_index);
-scav_result scav_image_extent(scav_images const *images,
-                              uint32_t index,
-                              scav_extent *out);
+scav_result scav_image_extent(scav_images const *images, uint32_t index, scav_extent *out);
 
 /* Reference builder ======================================================= */
 
@@ -229,12 +227,12 @@ scav_result scav_measure_chart(scav_chart const *chart,
 
 /* The palette `scav_emit_chart` wants, in this order. */
 enum {
-  SCAV_STYLE_STATE = 0,   /* state box outline and fill */
-  SCAV_STYLE_SUB = 1,     /* submachine divider */
-  SCAV_STYLE_ROUTE = 2,   /* transition polyline and arrowhead */
-  SCAV_STYLE_TITLE = 3,   /* state name */
-  SCAV_STYLE_LABEL = 4,   /* transition label */
-  SCAV_STYLE_PSEUDO = 5,  /* initial, final, choice, fork, join, history */
+  SCAV_STYLE_STATE = 0,  /* state box outline and fill */
+  SCAV_STYLE_SUB = 1,    /* submachine divider */
+  SCAV_STYLE_ROUTE = 2,  /* transition polyline and arrowhead */
+  SCAV_STYLE_TITLE = 3,  /* state name */
+  SCAV_STYLE_LABEL = 4,  /* transition label */
+  SCAV_STYLE_PSEUDO = 5, /* initial, final, choice, fork, join, history */
   SCAV_STYLE_COUNT = 6
 };
 

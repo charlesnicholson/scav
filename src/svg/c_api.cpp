@@ -3,11 +3,11 @@
 
 #include "scav/scav_svg_c.h"
 
+#include "draw/handles.h"
 #include "scav/scav_core_c.h"
 #include "scav/scav_draw.h"
 #include "scav/scav_svg.h"
 #include "scav/scav_types.h"
-#include "draw/handles.h"
 
 #include <cstdint>
 #include <cstring>

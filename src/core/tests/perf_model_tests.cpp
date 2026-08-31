@@ -199,7 +199,7 @@ TEST_CASE("perf: lowering is linear in the input") {
   lower_once(small_pd);  // warm both paths before timing either
   lower_once(large_pd);
   auto const [small_us, large_us]{ best_pair([&] { lower_once(small_pd); },
-                                       [&] { lower_once(large_pd); }) };
+                                             [&] { lower_once(large_pd); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_SCALING) {
@@ -227,7 +227,7 @@ TEST_CASE("perf: validation is linear in the model") {
   time_validate(small_chart);  // warm
   time_validate(large_chart);
   auto const [small_us, large_us]{ best_pair([&] { time_validate(small_chart); },
-                                       [&] { time_validate(large_chart); }) };
+                                             [&] { time_validate(large_chart); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_SCALING) {
@@ -258,7 +258,7 @@ TEST_CASE("perf: a wide sibling list lowers without degrading") {
   lower_once(small_pd);
   lower_once(large_pd);
   auto const [small_us, large_us]{ best_pair([&] { lower_once(small_pd); },
-                                       [&] { lower_once(large_pd); }) };
+                                             [&] { lower_once(large_pd); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_SCALING) {

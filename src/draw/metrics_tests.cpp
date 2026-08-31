@@ -51,9 +51,7 @@ std::vector<scav_byte> assemble(std::vector<Table> const &tables) {
     be32(out, static_cast<uint32_t>(t.bytes.size()));
     offset += static_cast<uint32_t>(t.bytes.size());
   }
-  for (Table const &t : tables) {
-    out.insert(out.end(), t.bytes.begin(), t.bytes.end());
-  }
+  for (Table const &t : tables) { out.insert(out.end(), t.bytes.begin(), t.bytes.end()); }
   return out;
 }
 
@@ -80,8 +78,7 @@ std::vector<scav_byte> maxp_table(uint32_t glyphs) {
 
 // One record per advance, then one left-side bearing per glyph past them --
 // which is the shape the tail rule exists for.
-std::vector<scav_byte> hmtx_table(std::vector<uint32_t> const &advances,
-                                 uint32_t glyphs) {
+std::vector<scav_byte> hmtx_table(std::vector<uint32_t> const &advances, uint32_t glyphs) {
   std::vector<scav_byte> t;
   for (uint32_t const a : advances) {
     be16(t, a);
@@ -154,9 +151,11 @@ Metrics bundled() {
 }
 
 MeasureStatus measure(Metrics const &m, std::string_view s, int32_t fs, scav_extent &e) {
-  return measure_text(
-      m, reinterpret_cast<scav_byte const *>(s.data()),
-      static_cast<uint32_t>(s.size()), fs, e);
+  return measure_text(m,
+                      reinterpret_cast<scav_byte const *>(s.data()),
+                      static_cast<uint32_t>(s.size()),
+                      fs,
+                      e);
 }
 
 }  // namespace
@@ -241,10 +240,10 @@ TEST_CASE("metrics: a newline is refused, because wrapping is the caller's") {
 TEST_CASE("metrics: malformed UTF-8 is refused rather than measured") {
   Metrics const m{ bundled() };
   scav_extent e{};
-  CHECK(measure(m, "\xC0\x80", 16, e) == MeasureStatus::BadUtf8);       // overlong
-  CHECK(measure(m, "\xED\xA0\x80", 16, e) == MeasureStatus::BadUtf8);   // surrogate
-  CHECK(measure(m, "\xE2\x82", 16, e) == MeasureStatus::BadUtf8);       // truncated
-  CHECK(measure(m, "\x80", 16, e) == MeasureStatus::BadUtf8);           // stray tail
+  CHECK(measure(m, "\xC0\x80", 16, e) == MeasureStatus::BadUtf8);          // overlong
+  CHECK(measure(m, "\xED\xA0\x80", 16, e) == MeasureStatus::BadUtf8);      // surrogate
+  CHECK(measure(m, "\xE2\x82", 16, e) == MeasureStatus::BadUtf8);          // truncated
+  CHECK(measure(m, "\x80", 16, e) == MeasureStatus::BadUtf8);              // stray tail
   CHECK(measure(m, "\xF5\x80\x80\x80", 16, e) == MeasureStatus::BadUtf8);  // > 10FFFF
 }
 
@@ -384,10 +383,10 @@ TEST_CASE("metrics: tables that contradict each other are refused") {
     return !metrics_create(f.data(), static_cast<uint32_t>(f.size()), m);
   };
 
-  CHECK(refused(build(0, 2, 2, { 0, 600 })));      // upem of zero
-  CHECK(refused(build(1000, 0, 2, { 0, 600 })));   // no advance records
-  CHECK(refused(build(1000, 2, 0, {})));           // no glyphs
-  CHECK(refused(build(1000, 5, 2, { 0, 600 })));   // more records than glyphs
+  CHECK(refused(build(0, 2, 2, { 0, 600 })));     // upem of zero
+  CHECK(refused(build(1000, 0, 2, { 0, 600 })));  // no advance records
+  CHECK(refused(build(1000, 2, 0, {})));          // no glyphs
+  CHECK(refused(build(1000, 5, 2, { 0, 600 })));  // more records than glyphs
   // An hmtx too short for the records it claims would index past the table.
   CHECK(refused(assemble({
       { .tag = "cmap", .bytes = cmap4_table('a', 'z', 1) },
@@ -454,7 +453,7 @@ TEST_CASE("metrics: a block is its widest line by its own line count") {
   };
   REQUIRE(block("wide", one) == MeasureStatus::Ok);
   REQUIRE(block("a\nwide\nb", three) == MeasureStatus::Ok);
-  CHECK(three.w == one.w);                     // the widest line, not the sum
+  CHECK(three.w == one.w);  // the widest line, not the sum
   CHECK(three.h == 3 * line_height(16, 7, 5));
   CHECK(one.h == line_height(16, 7, 5));
 
@@ -527,8 +526,11 @@ TEST_CASE("metrics: the C surface agrees with the C++ one, and refuses nulls") {
   // Every failure mode keeps its own code: a missing glyph is not a bad
   // argument, because one is the font's fault and the other the caller's.
   CHECK(scav_measure_text(m, raw, 4, 0, &got) == SCAV_E_INVALID_ARG);
-  CHECK(scav_measure_text(m, reinterpret_cast<scav_byte const *>("\xF3\xB0\x80\x81"), 4,
-                          160, &got) == SCAV_E_NO_GLYPH);
+  CHECK(scav_measure_text(m,
+                          reinterpret_cast<scav_byte const *>("\xF3\xB0\x80\x81"),
+                          4,
+                          160,
+                          &got) == SCAV_E_NO_GLYPH);
   CHECK(scav_measure_text(nullptr, raw, 4, 160, &got) == SCAV_E_INVALID_ARG);
   CHECK(scav_measure_text(m, raw, 4, 160, nullptr) == SCAV_E_INVALID_ARG);
   CHECK(scav_metrics_identity(nullptr, &identity) == SCAV_E_INVALID_ARG);

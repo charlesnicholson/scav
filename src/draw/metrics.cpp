@@ -144,9 +144,7 @@ uint32_t lookup_format4(Reader const &r, uint32_t sub, uint32_t cp) {
         !read_u16(r, range_base + (2U * i), range)) {
       return 0U;
     }
-    if (range == 0U) {
-      return (cp + static_cast<uint32_t>(delta)) & 0xFFFFU;
-    }
+    if (range == 0U) { return (cp + static_cast<uint32_t>(delta)) & 0xFFFFU; }
     // idRangeOffset is a byte offset from its own slot, which is the one place
     // in the format that is relative to where it was read from.
     uint32_t const at{ range_base + (2U * i) + range + (2U * (cp - start)) };
@@ -228,9 +226,7 @@ scav_byte const *bundled_font(uint32_t &len) {
 }
 
 bool metrics_create(scav_byte const *ttf, uint32_t len, Metrics &out) {
-  if ((ttf == nullptr) || (len == 0U)) {
-    ttf = bundled_font(len);
-  }
+  if ((ttf == nullptr) || (len == 0U)) { ttf = bundled_font(len); }
   Reader const r{ .bytes = ttf, .len = len };
 
   Span head{};

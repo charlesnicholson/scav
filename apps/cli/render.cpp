@@ -22,8 +22,9 @@ char const *why(SvgStatus status) {
   switch (status) {
     case SvgStatus::Ok: return "";
     case SvgStatus::InvalidDrawList: return "the builder produced an invalid drawlist";
-    case SvgStatus::UnsupportedPrim: return "the drawlist holds a primitive this "
-                                            "backend does not render";
+    case SvgStatus::UnsupportedPrim:
+      return "the drawlist holds a primitive this "
+             "backend does not render";
     case SvgStatus::UnknownImage: return "the drawlist names an unregistered image";
     case SvgStatus::MissingGlyph: return "the bundled font has no glyph for some text";
     case SvgStatus::ExtentOverflow: return "the diagram does not fit an integer viewBox";
@@ -91,9 +92,7 @@ int run_render(char const *path,
     write_stream(doc, stdout);
     return net.code;
   }
-  if (!write_file(out_path,
-                  reinterpret_cast<scav_byte const *>(doc.data()),
-                  doc.size())) {
+  if (!write_file(out_path, reinterpret_cast<scav_byte const *>(doc.data()), doc.size())) {
     write_error("cannot write", out_path);
     return EXIT_UNUSABLE;
   }

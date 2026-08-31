@@ -3,10 +3,10 @@
 
 #include "scav/scav_svg.h"
 
+#include "draw/handles.h"
 #include "scav/scav_core.h"
 #include "scav/scav_draw.h"
 #include "scav/scav_types.h"
-#include "draw/handles.h"
 
 #include "doctest.h"
 
@@ -116,8 +116,11 @@ TEST_CASE("svg: the viewBox carries the extent and the frame is whole points") {
   // An extent that does not divide into whole points is ceiled, so the frame
   // can only ever be a sliver large.
   DrawList odd;
-  push_rect(odd, 0, drawlist_style(odd, shape(0x000000FFU, 0)),
-            { .x = 0, .y = 0, .w = 17, .h = 1 }, NONE);
+  push_rect(odd,
+            0,
+            drawlist_style(odd, shape(0x000000FFU, 0)),
+            { .x = 0, .y = 0, .w = 17, .h = 1 },
+            NONE);
   Written const ceiled{ write(odd) };
   REQUIRE(ceiled.status == SvgStatus::Ok);
   CHECK(has(ceiled.doc, "width=\"2\""));
@@ -174,10 +177,16 @@ TEST_CASE("svg: each kind lands as the element a viewer expects") {
 
 TEST_CASE("svg: a transparent paint is none, and a partial one is a fixed decimal") {
   DrawList d;
-  push_rect(d, 0, drawlist_style(d, shape(0x000000FFU, 0x11223300U)),
-            { .x = 0, .y = 0, .w = 1, .h = 1 }, NONE);
-  push_rect(d, 0, drawlist_style(d, shape(0x000000FFU, 0x11223380U)),
-            { .x = 0, .y = 0, .w = 1, .h = 1 }, NONE);
+  push_rect(d,
+            0,
+            drawlist_style(d, shape(0x000000FFU, 0x11223300U)),
+            { .x = 0, .y = 0, .w = 1, .h = 1 },
+            NONE);
+  push_rect(d,
+            0,
+            drawlist_style(d, shape(0x000000FFU, 0x11223380U)),
+            { .x = 0, .y = 0, .w = 1, .h = 1 },
+            NONE);
   Written const w{ write(d) };
   REQUIRE(w.status == SvgStatus::Ok);
   CHECK(has(w.doc, "fill=\"none\""));
@@ -190,8 +199,7 @@ TEST_CASE("svg: a dashed style becomes a dasharray scaled to its stroke") {
   DrawList d;
   scav_style dashed{ shape(0x808080FFU, 0) };
   dashed.dash = 1;
-  push_line(d, 0, drawlist_style(d, dashed), { .x = 0, .y = 0 }, { .x = 8, .y = 0 },
-            NONE);
+  push_line(d, 0, drawlist_style(d, dashed), { .x = 0, .y = 0 }, { .x = 8, .y = 0 }, NONE);
   Written const w{ write(d) };
   REQUIRE(w.status == SvgStatus::Ok);
   CHECK(has(w.doc, "stroke-dasharray=\"64,48\""));
@@ -204,8 +212,9 @@ TEST_CASE("svg: text carries textLength from our own advance sum") {
   REQUIRE(w.status == SvgStatus::Ok);
 
   scav_extent want{};
-  REQUIRE(measure_text(bundled(), reinterpret_cast<scav_byte const *>("Idle"), 4, 160,
-                       want) == MeasureStatus::Ok);
+  REQUIRE(
+      measure_text(bundled(), reinterpret_cast<scav_byte const *>("Idle"), 4, 160, want) ==
+      MeasureStatus::Ok);
   std::string expected{ "textLength=\"" };
   string_append_u32(expected, static_cast<uint32_t>(want.w));
   expected += '"';
@@ -230,10 +239,18 @@ TEST_CASE("svg: empty text carries no textLength to be zero about") {
 
 TEST_CASE("svg: the five predefined entities are escaped and nothing else is") {
   DrawList d;
-  push_text(d, 0, drawlist_style(d, glyphs(160)), { .x = 0, .y = 0 },
-            "a&b<c>d\"e'f", NONE);
+  push_text(d,
+            0,
+            drawlist_style(d, glyphs(160)),
+            { .x = 0, .y = 0 },
+            "a&b<c>d\"e'f",
+            NONE);
   // Multi-byte UTF-8 passes through: SVG is UTF-8 and the pool is NFC.
-  push_text(d, 0, drawlist_style(d, glyphs(160)), { .x = 0, .y = 0 }, "na\xc3\xafve",
+  push_text(d,
+            0,
+            drawlist_style(d, glyphs(160)),
+            { .x = 0, .y = 0 },
+            "na\xc3\xafve",
             NONE);
   Written const w{ write(d) };
   REQUIRE(w.status == SvgStatus::Ok);
@@ -245,7 +262,10 @@ TEST_CASE("svg: a class is synthesized from the origin, never carried in the IR"
   DrawList d;
   uint32_t const s{ drawlist_style(d, shape(0x000000FFU, 0)) };
   push_rect(d, 0, s, { .x = 0, .y = 0, .w = 1, .h = 1 }, state(1234));
-  push_rect(d, 0, s, { .x = 0, .y = 0, .w = 1, .h = 1 },
+  push_rect(d,
+            0,
+            s,
+            { .x = 0, .y = 0, .w = 1, .h = 1 },
             { .kind = ElemKind::Transition, .ordinal = 7 });
   push_rect(d, 0, s, { .x = 0, .y = 0, .w = 1, .h = 1 }, NONE);
   Written const w{ write(d) };
@@ -306,8 +326,12 @@ TEST_CASE("svg: an image goes inline with the mime it was registered under") {
   REQUIRE(image_register(images, "logo", png, 5, 16, 16, "image/png"));
 
   DrawList d;
-  push_image(d, 0, drawlist_style(d, shape(0, 0)),
-             { .x = 0, .y = 0, .w = 32, .h = 32 }, "logo", NONE);
+  push_image(d,
+             0,
+             drawlist_style(d, shape(0, 0)),
+             { .x = 0, .y = 0, .w = 32, .h = 32 },
+             "logo",
+             NONE);
   Written const w{ write(d, {}, images) };
   REQUIRE(w.status == SvgStatus::Ok);
   CHECK(has(w.doc, "<image x=\"0\" y=\"0\" width=\"32\" height=\"32\""));
@@ -318,12 +342,20 @@ TEST_CASE("svg: an image goes inline with the mime it was registered under") {
 TEST_CASE("svg: base64 covers all three tail lengths") {
   auto const encoded = [](std::string_view bytes) {
     Images images;
-    REQUIRE(image_register(images, "i",
+    REQUIRE(image_register(images,
+                           "i",
                            reinterpret_cast<scav_byte const *>(bytes.data()),
-                           static_cast<uint32_t>(bytes.size()), 1, 1, "application/x"));
+                           static_cast<uint32_t>(bytes.size()),
+                           1,
+                           1,
+                           "application/x"));
     DrawList d;
-    push_image(d, 0, drawlist_style(d, shape(0, 0)),
-               { .x = 0, .y = 0, .w = 1, .h = 1 }, "i", NONE);
+    push_image(d,
+               0,
+               drawlist_style(d, shape(0, 0)),
+               { .x = 0, .y = 0, .w = 1, .h = 1 },
+               "i",
+               NONE);
     Written const w{ write(d, {}, images) };
     REQUIRE(w.status == SvgStatus::Ok);
     size_t const at{ w.doc.find("base64,") + 7 };
@@ -350,8 +382,12 @@ TEST_CASE("svg: an unrenderable primitive is refused, and names itself") {
 
 TEST_CASE("svg: an image naming nothing registered is refused") {
   DrawList d;
-  push_image(d, 0, drawlist_style(d, shape(0, 0)),
-             { .x = 0, .y = 0, .w = 1, .h = 1 }, "absent", NONE);
+  push_image(d,
+             0,
+             drawlist_style(d, shape(0, 0)),
+             { .x = 0, .y = 0, .w = 1, .h = 1 },
+             "absent",
+             NONE);
   Written const w{ write(d) };
   CHECK(w.status == SvgStatus::UnknownImage);
   CHECK(w.bad == 0);
@@ -371,8 +407,12 @@ TEST_CASE("svg: an invalid drawlist is refused before anything is measured") {
 
 TEST_CASE("svg: text the font cannot render is refused, not silently narrowed") {
   DrawList d;
-  push_text(d, 0, drawlist_style(d, glyphs(160)), { .x = 0, .y = 0 },
-            "\xF3\xB0\x80\x81", NONE);
+  push_text(d,
+            0,
+            drawlist_style(d, glyphs(160)),
+            { .x = 0, .y = 0 },
+            "\xF3\xB0\x80\x81",
+            NONE);
   Written const w{ write(d) };
   CHECK(w.status == SvgStatus::MissingGlyph);
   CHECK(w.doc.empty());
@@ -390,8 +430,11 @@ TEST_CASE("svg: an extent past an integer viewBox is refused") {
 
 TEST_CASE("svg: a negative coordinate prints its own sign") {
   DrawList d;
-  push_rect(d, 0, drawlist_style(d, shape(0x000000FFU, 0)),
-            { .x = -100, .y = -50, .w = 10, .h = 10 }, NONE);
+  push_rect(d,
+            0,
+            drawlist_style(d, shape(0x000000FFU, 0)),
+            { .x = -100, .y = -50, .w = 10, .h = 10 },
+            NONE);
   Written const w{ write(d) };
   REQUIRE(w.status == SvgStatus::Ok);
   CHECK(has(w.doc, "viewBox=\"-100 -50 10 10\""));
@@ -400,8 +443,11 @@ TEST_CASE("svg: a negative coordinate prints its own sign") {
 
 TEST_CASE("svg: writing twice appends rather than replacing") {
   DrawList d;
-  push_rect(d, 0, drawlist_style(d, shape(0x000000FFU, 0)),
-            { .x = 0, .y = 0, .w = 1, .h = 1 }, NONE);
+  push_rect(d,
+            0,
+            drawlist_style(d, shape(0x000000FFU, 0)),
+            { .x = 0, .y = 0, .w = 1, .h = 1 },
+            NONE);
   std::string out{ "prefix" };
   uint32_t bad{ 0 };
   REQUIRE(svg_write(d, bundled(), {}, {}, out, bad) == SvgStatus::Ok);
@@ -426,8 +472,12 @@ TEST_CASE("svg: the C surface queries then writes, and refuses nulls") {
   scav_metrics *metrics{ nullptr };
   REQUIRE(scav_drawlist_create(&list) == SCAV_OK);
   REQUIRE(scav_metrics_create(nullptr, 0, &metrics) == SCAV_OK);
-  push_text(list->list, 0, drawlist_style(list->list, glyphs(160)),
-            { .x = 0, .y = 0 }, "Idle", state(3));
+  push_text(list->list,
+            0,
+            drawlist_style(list->list, glyphs(160)),
+            { .x = 0, .y = 0 },
+            "Idle",
+            state(3));
 
   uint32_t count{ 0 };
   REQUIRE(scav_svg_write(list, metrics, nullptr, nullptr, nullptr, 0, &count) == SCAV_OK);
@@ -436,11 +486,12 @@ TEST_CASE("svg: the C surface queries then writes, and refuses nulls") {
   std::vector<scav_byte> buffer(count);
   // A cap too small writes the required count rather than truncating.
   uint32_t again{ 0 };
-  CHECK(scav_svg_write(list, metrics, nullptr, nullptr, buffer.data(), count - 1,
-                       &again) == SCAV_E_CAPACITY);
+  CHECK(
+      scav_svg_write(list, metrics, nullptr, nullptr, buffer.data(), count - 1, &again) ==
+      SCAV_E_CAPACITY);
   CHECK(again == count);
-  REQUIRE(scav_svg_write(list, metrics, nullptr, nullptr, buffer.data(), count,
-                         &again) == SCAV_OK);
+  REQUIRE(scav_svg_write(list, metrics, nullptr, nullptr, buffer.data(), count, &again) ==
+          SCAV_OK);
   std::string const doc{ reinterpret_cast<char const *>(buffer.data()), count };
   CHECK(doc.starts_with("<?xml"));
   CHECK(has(doc, "scav-id-3"));
@@ -467,8 +518,13 @@ TEST_CASE("svg: the C surface queries then writes, and refuses nulls") {
   CHECK(scav_svg_bounds(nullptr, &bounds) == SCAV_E_INVALID_ARG);
 
   // An unrenderable primitive is one code, whatever made it unrenderable.
-  push_arc(list->list, 0, drawlist_style(list->list, shape(0x000000FFU, 0)),
-           { .x = 0, .y = 0, .w = 1, .h = 1 }, 0, 64, NONE);
+  push_arc(list->list,
+           0,
+           drawlist_style(list->list, shape(0x000000FFU, 0)),
+           { .x = 0, .y = 0, .w = 1, .h = 1 },
+           0,
+           64,
+           NONE);
   CHECK(scav_svg_write(list, metrics, nullptr, nullptr, nullptr, 0, &again) ==
         SCAV_E_DRAWLIST);
 

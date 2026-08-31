@@ -234,9 +234,9 @@ SvgStatus svg_write(DrawList const &d,
       return SvgStatus::UnsupportedPrim;
     }
     if ((p.kind == SCAV_PRIM_IMAGE) &&
-        (image_find(images, { reinterpret_cast<char const *>(d.text.bytes.data() +
-                                                            p.payload.off),
-                              p.payload.len }) == INVALID)) {
+        (image_find(images,
+                    { reinterpret_cast<char const *>(d.text.bytes.data() + p.payload.off),
+                      p.payload.len }) == INVALID)) {
       return SvgStatus::UnknownImage;
     }
   }
@@ -248,9 +248,7 @@ SvgStatus svg_write(DrawList const &d,
   Wide const view_h{ static_cast<Wide>(tight.h) + (2 * margin) };
   // The viewBox is integer, so the extent has to fit one. Output size is
   // unbounded by anything here: SVG sets no ceiling, so neither does this.
-  if ((view_w > COORD_MAX) || (view_h > COORD_MAX)) {
-    return SvgStatus::ExtentOverflow;
-  }
+  if ((view_w > COORD_MAX) || (view_h > COORD_MAX)) { return SvgStatus::ExtentOverflow; }
 
   std::string body;
   for (scav_prim const &p : d.prims) {
@@ -311,17 +309,14 @@ SvgStatus svg_write(DrawList const &d,
         body += " href=\"data:";
         body += image_str(images, img.mime);
         body += ";base64,";
-        put_base64(body,
-                   images.pool.data() + img.bytes.off,
-                   img.bytes.len);
+        put_base64(body, images.pool.data() + img.bytes.off, img.bytes.len);
         body += '"';
         break;
       }
       case SCAV_PRIM_TEXT: {
-        std::string_view const text{
-          reinterpret_cast<char const *>(d.text.bytes.data() + p.payload.off),
-          p.payload.len
-        };
+        std::string_view const text{ reinterpret_cast<char const *>(d.text.bytes.data() +
+                                                                    p.payload.off),
+                                     p.payload.len };
         // textLength comes from our own advance sum, which turns any font
         // substitution into slightly loose spacing rather than overflow. It is
         // also the assertion that builder and backend measure alike.
@@ -377,13 +372,15 @@ SvgStatus svg_write(DrawList const &d,
 
   // One bundled font, named with a fallback, and kerning off on both sides:
   // the metrics helper ignores kerning, so the renderer has to as well.
-  doc += "  <style>text { font-family: \"JetBrains Mono\", monospace;"
-         " font-kerning: none; }</style>\n";
+  doc +=
+      "  <style>text { font-family: \"JetBrains Mono\", monospace;"
+      " font-kerning: none; }</style>\n";
   if (o.embed_font) {
     uint32_t len{ 0 };
     scav_byte const *ttf{ bundled_font(len) };
-    doc += "  <defs><style>@font-face { font-family: \"JetBrains Mono\";"
-           " src: url(data:font/ttf;base64,";
+    doc +=
+        "  <defs><style>@font-face { font-family: \"JetBrains Mono\";"
+        " src: url(data:font/ttf;base64,";
     put_base64(doc, ttf, len);
     doc += ") format(\"truetype\"); }</style></defs>\n";
   }

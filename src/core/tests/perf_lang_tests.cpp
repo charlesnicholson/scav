@@ -294,7 +294,7 @@ TEST_CASE("perf: lexing is linear in the input") {
   time_lex(small_bytes);
   time_lex(large_bytes);
   auto const [small_us, large_us]{ best_pair([&] { time_lex(small_bytes); },
-                                       [&] { time_lex(large_bytes); }) };
+                                             [&] { time_lex(large_bytes); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_SCALING) {
@@ -362,8 +362,8 @@ TEST_CASE("perf: a wide sibling list does not degrade") {
 
   REQUIRE(parse(small).ok);
   REQUIRE(parse(large).ok);
-  auto const [small_us, large_us]{ best_pair([&] { parse(small); },
-                                       [&] { parse(large); }) };
+  auto const [small_us,
+              large_us]{ best_pair([&] { parse(small); }, [&] { parse(large); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_SCALING) {
@@ -395,8 +395,8 @@ TEST_CASE("perf: a long comment run does not degrade") {
 
   Parsed const small_parsed{ parse(small) };
   Parsed const large_parsed{ parse(large) };
-  auto const [small_us, large_us]{ best_pair([&] { parse(small); },
-                                       [&] { parse(large); }) };
+  auto const [small_us,
+              large_us]{ best_pair([&] { parse(small); }, [&] { parse(large); }) };
 
   REQUIRE(small_parsed.ok);
   REQUIRE(large_parsed.ok);
@@ -421,7 +421,7 @@ TEST_CASE("perf: deep nesting does not degrade") {
   REQUIRE(parse_deep(small, 300).ok);
   REQUIRE(parse_deep(large, 300).ok);
   auto const [small_us, large_us]{ best_pair([&] { parse_deep(small, 300); },
-                                       [&] { parse_deep(large, 300); }) };
+                                             [&] { parse_deep(large, 300); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_SCALING) {
@@ -470,7 +470,7 @@ TEST_CASE("perf: printing is linear in the input") {
                       static_cast<double>(small.src_bytes.size()) };
 
   auto const [small_us, large_us]{ best_pair([&] { std::ignore = time_print(small); },
-                                       [&] { std::ignore = time_print(large); }) };
+                                             [&] { std::ignore = time_print(large); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_SCALING) {
@@ -497,7 +497,7 @@ TEST_CASE("perf: a block with many attributes does not degrade") {
   ParsedDocument const large{ parse_for_print(attr_block(8000)) };
 
   auto const [small_us, large_us]{ best_pair([&] { std::ignore = time_print(small); },
-                                       [&] { std::ignore = time_print(large); }) };
+                                             [&] { std::ignore = time_print(large); }) };
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_SCALING) {
     CHECK_MESSAGE(growth < 4.0 * SCALING_SLACK,

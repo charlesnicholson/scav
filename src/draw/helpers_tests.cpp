@@ -73,22 +73,32 @@ TEST_CASE("helpers: a null array is a no-op rather than a crash") {
 
 TEST_CASE("helpers: every anchor cell places its content in the right corner") {
   scav_rect const r{ .x = 0, .y = 0, .w = 100, .h = 50 };
-  CHECK(same(align(r, 10, 6, Anchor::TopLeft), scav_rect{ .x = 0, .y = 0, .w = 10, .h = 6 }));
-  CHECK(same(align(r, 10, 6, Anchor::TopCentre), scav_rect{ .x = 45, .y = 0, .w = 10, .h = 6 }));
-  CHECK(same(align(r, 10, 6, Anchor::TopRight), scav_rect{ .x = 90, .y = 0, .w = 10, .h = 6 }));
-  CHECK(same(align(r, 10, 6, Anchor::MidLeft), scav_rect{ .x = 0, .y = 22, .w = 10, .h = 6 }));
-  CHECK(same(align(r, 10, 6, Anchor::MidCentre), scav_rect{ .x = 45, .y = 22, .w = 10, .h = 6 }));
-  CHECK(same(align(r, 10, 6, Anchor::BottomRight), scav_rect{ .x = 90, .y = 44, .w = 10, .h = 6 }));
-  CHECK(same(align(r, 10, 6, Anchor::BottomCentre), scav_rect{ .x = 45, .y = 44, .w = 10, .h = 6 }));
-  CHECK(same(align(r, 10, 6, Anchor::MidRight), scav_rect{ .x = 90, .y = 22, .w = 10, .h = 6 }));
-  CHECK(same(align(r, 10, 6, Anchor::BottomLeft), scav_rect{ .x = 0, .y = 44, .w = 10, .h = 6 }));
+  CHECK(same(align(r, 10, 6, Anchor::TopLeft),
+             scav_rect{ .x = 0, .y = 0, .w = 10, .h = 6 }));
+  CHECK(same(align(r, 10, 6, Anchor::TopCentre),
+             scav_rect{ .x = 45, .y = 0, .w = 10, .h = 6 }));
+  CHECK(same(align(r, 10, 6, Anchor::TopRight),
+             scav_rect{ .x = 90, .y = 0, .w = 10, .h = 6 }));
+  CHECK(same(align(r, 10, 6, Anchor::MidLeft),
+             scav_rect{ .x = 0, .y = 22, .w = 10, .h = 6 }));
+  CHECK(same(align(r, 10, 6, Anchor::MidCentre),
+             scav_rect{ .x = 45, .y = 22, .w = 10, .h = 6 }));
+  CHECK(same(align(r, 10, 6, Anchor::BottomRight),
+             scav_rect{ .x = 90, .y = 44, .w = 10, .h = 6 }));
+  CHECK(same(align(r, 10, 6, Anchor::BottomCentre),
+             scav_rect{ .x = 45, .y = 44, .w = 10, .h = 6 }));
+  CHECK(same(align(r, 10, 6, Anchor::MidRight),
+             scav_rect{ .x = 90, .y = 22, .w = 10, .h = 6 }));
+  CHECK(same(align(r, 10, 6, Anchor::BottomLeft),
+             scav_rect{ .x = 0, .y = 44, .w = 10, .h = 6 }));
 }
 
 TEST_CASE("helpers: content wider than its rect centres by floor, not toward zero") {
   scav_rect const r{ .x = 0, .y = 0, .w = 10, .h = 10 };
   // Slack is -5, and floor_div takes it to -3 rather than -2: overhang is
   // symmetric about the rect either way, and `/` would bias it one direction.
-  CHECK(same(align(r, 15, 15, Anchor::MidCentre), scav_rect{ .x = -3, .y = -3, .w = 15, .h = 15 }));
+  CHECK(same(align(r, 15, 15, Anchor::MidCentre),
+             scav_rect{ .x = -3, .y = -3, .w = 15, .h = 15 }));
 }
 
 TEST_CASE("helpers: the lines are the ones the author wrote") {
@@ -111,9 +121,12 @@ TEST_CASE("helpers: the lines are the ones the author wrote") {
 
 TEST_CASE("helpers: an arrowhead is a closed triangle behind its own tip") {
   DrawList d;
-  uint32_t const s{ drawlist_style(
-      d, { .stroke_rgba = 0, .fill_rgba = 0, .stroke_w = 1, .dash = 0,
-           .font_size_grid = 0 }) };
+  uint32_t const s{ drawlist_style(d,
+                                   { .stroke_rgba = 0,
+                                     .fill_rgba = 0,
+                                     .stroke_w = 1,
+                                     .dash = 0,
+                                     .font_size_grid = 0 }) };
   // Pointing straight down, so the barbs land either side of the shaft.
   push_arrowhead(d, 0, s, { .x = 100, .y = 200 }, { .x = 100, .y = 100 }, 20, NONE);
   REQUIRE(d.prims.size() == 1);
@@ -124,7 +137,7 @@ TEST_CASE("helpers: an arrowhead is a closed triangle behind its own tip") {
   CHECK(pts[0].y == 200);
   CHECK(pts[1].y == 180);  // twenty back along the shaft
   CHECK(pts[2].y == 180);
-  CHECK(pts[1].x == 90);   // ten either side
+  CHECK(pts[1].x == 90);  // ten either side
   CHECK(pts[2].x == 110);
 
   uint32_t bad{ 0 };
@@ -133,11 +146,14 @@ TEST_CASE("helpers: an arrowhead is a closed triangle behind its own tip") {
 
 TEST_CASE("helpers: a degenerate arrowhead emits nothing rather than dividing by zero") {
   DrawList d;
-  uint32_t const s{ drawlist_style(
-      d, { .stroke_rgba = 0, .fill_rgba = 0, .stroke_w = 1, .dash = 0,
-           .font_size_grid = 0 }) };
+  uint32_t const s{ drawlist_style(d,
+                                   { .stroke_rgba = 0,
+                                     .fill_rgba = 0,
+                                     .stroke_w = 1,
+                                     .dash = 0,
+                                     .font_size_grid = 0 }) };
   scav_point const same{ .x = 5, .y = 5 };
-  push_arrowhead(d, 0, s, same, same, 10, NONE);   // no direction to point in
+  push_arrowhead(d, 0, s, same, same, 10, NONE);                // no direction to point in
   push_arrowhead(d, 0, s, same, { .x = 0, .y = 0 }, 0, NONE);   // no size
   push_arrowhead(d, 0, s, same, { .x = 0, .y = 0 }, -4, NONE);  // negative size
   CHECK(d.prims.empty());
@@ -145,12 +161,15 @@ TEST_CASE("helpers: a degenerate arrowhead emits nothing rather than dividing by
 
 TEST_CASE("helpers: an arrowhead points along any diagonal it is given") {
   DrawList d;
-  uint32_t const s{ drawlist_style(
-      d, { .stroke_rgba = 0, .fill_rgba = 0, .stroke_w = 1, .dash = 0,
-           .font_size_grid = 0 }) };
+  uint32_t const s{ drawlist_style(d,
+                                   { .stroke_rgba = 0,
+                                     .fill_rgba = 0,
+                                     .stroke_w = 1,
+                                     .dash = 0,
+                                     .font_size_grid = 0 }) };
   // Eight directions, each of which must put the tip where it was told and the
   // barbs somewhere behind it.
-  constexpr scav_point FROM[8]{ { .x = 0, .y = 0 },  { .x = 200, .y = 0 },
+  constexpr scav_point FROM[8]{ { .x = 0, .y = 0 },     { .x = 200, .y = 0 },
                                 { .x = 200, .y = 200 }, { .x = 0, .y = 200 },
                                 { .x = 100, .y = 0 },   { .x = 200, .y = 100 },
                                 { .x = 100, .y = 200 }, { .x = 0, .y = 100 } };

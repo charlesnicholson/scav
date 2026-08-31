@@ -35,21 +35,13 @@ std::vector<T> rows_of(Chart const &c, char const *name) {
 // the top: font vertical metrics are off the table, and builder and backend
 // have to agree on *some* integer, so it is this one and it is pinned by the
 // golden.
-int32_t baseline_of(int32_t top, int32_t font_size_grid) {
-  return top + font_size_grid;
-}
+int32_t baseline_of(int32_t top, int32_t font_size_grid) { return top + font_size_grid; }
 
-ElemRef state_ref(uint32_t i) {
-  return { .kind = ElemKind::State, .ordinal = i };
-}
+ElemRef state_ref(uint32_t i) { return { .kind = ElemKind::State, .ordinal = i }; }
 
-ElemRef sub_ref(uint32_t i) {
-  return { .kind = ElemKind::Submachine, .ordinal = i };
-}
+ElemRef sub_ref(uint32_t i) { return { .kind = ElemKind::Submachine, .ordinal = i }; }
 
-ElemRef trans_ref(uint32_t i) {
-  return { .kind = ElemKind::Transition, .ordinal = i };
-}
+ElemRef trans_ref(uint32_t i) { return { .kind = ElemKind::Transition, .ordinal = i }; }
 
 uint32_t style_for_kind(StateKind kind) {
   return (kind == StateKind::Normal) ? SCAV_STYLE_STATE : SCAV_STYLE_PSEUDO;
@@ -202,10 +194,7 @@ bool measure_chart(Chart const &c, Metrics const &m, scav_profile const &p, Spac
       if (!fits(box.min_w) || !fits(box.h_after)) { return false; }
       continue;
     }
-    scav_path_box const box{ .subject = i,
-                             .w = ext.w + pad,
-                             .h = ext.h,
-                             .order = 0 };
+    scav_path_box const box{ .subject = i, .w = ext.w + pad, .h = ext.h, .order = 0 };
     if (!fits(box.w) || !fits(box.h)) { return false; }
     out.path_box.push_back(box);
     out.label.push_back(label);
@@ -235,9 +224,7 @@ void emit_state(DrawList &d,
     return;
   }
   std::vector<scav_rect> const boxes{ rows_of<scav_rect>(c, "scav.geom.state") };
-  std::vector<scav_rect> const befores{
-    rows_of<scav_rect>(c, "scav.geom.state_before")
-  };
+  std::vector<scav_rect> const befores{ rows_of<scav_rect>(c, "scav.geom.state_before") };
   if (state >= boxes.size()) { return; }
   scav_rect const box{ boxes[state] };
   if ((box.w == 0) || (box.h == 0)) { return; }
@@ -261,8 +248,7 @@ void emit_state(DrawList &d,
     case StateKind::Final: {
       scav_point const centre{ .x = box.x + (box.w / 2), .y = box.y + (box.h / 2) };
       int32_t const outer{ imin(box.w, box.h) / 2 };
-      push_circle(d, depth, drawlist_style(d, p[SCAV_STYLE_STATE]), centre, outer,
-                  origin);
+      push_circle(d, depth, drawlist_style(d, p[SCAV_STYLE_STATE]), centre, outer, origin);
       push_circle(d, depth, shape, centre, imax(1, (outer * 3) / 5), origin);
       break;
     }
@@ -279,8 +265,12 @@ void emit_state(DrawList &d,
     case StateKind::History:
     case StateKind::DeepHistory: {
       scav_point const centre{ .x = box.x + (box.w / 2), .y = box.y + (box.h / 2) };
-      push_circle(d, depth, drawlist_style(d, p[SCAV_STYLE_STATE]), centre,
-                  imin(box.w, box.h) / 2, origin);
+      push_circle(d,
+                  depth,
+                  drawlist_style(d, p[SCAV_STYLE_STATE]),
+                  centre,
+                  imin(box.w, box.h) / 2,
+                  origin);
       std::string_view const glyph{ (kind == StateKind::History) ? "H" : "H*" };
       scav_extent ext{};
       scav_style const title{ p[SCAV_STYLE_TITLE] };
@@ -387,16 +377,13 @@ bool label_box(Chart const &c,
     // The band the source reserved, sliced into one line per label that claimed
     // it. Nothing placed a box, because there was no route to slide one along.
     if (c.transitions[trans].label.len == 0U) { return false; }
-    std::vector<scav_rect> const afters{
-      rows_of<scav_rect>(c, "scav.geom.state_after")
-    };
+    std::vector<scav_rect> const afters{ rows_of<scav_rect>(c, "scav.geom.state_after") };
     uint32_t const src{ c.transitions[trans].src.v };
     if ((src >= afters.size()) || (afters[src].h == 0)) { return false; }
     AfterSlot const slot{ after_slot(c, trans) };
     scav_rect const band{ afters[src] };
-    int32_t const each{ (slot.total > 0U)
-                            ? (band.h / static_cast<int32_t>(slot.total))
-                            : band.h };
+    int32_t const each{ (slot.total > 0U) ? (band.h / static_cast<int32_t>(slot.total))
+                                          : band.h };
     out = { .x = band.x,
             .y = band.y + (static_cast<int32_t>(slot.index) * each),
             .w = band.w,

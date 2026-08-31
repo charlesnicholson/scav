@@ -31,8 +31,8 @@ struct Metrics {
   uint32_t units_per_em{ 0 };
   uint32_t num_glyphs{ 0 };
   uint32_t num_h_metrics{ 0 };
-  Span hmtx{};             // into `ttf`
-  Span cmap_sub{};         // the chosen subtable, into `ttf`
+  Span hmtx{};                // into `ttf`
+  Span cmap_sub{};            // the chosen subtable, into `ttf`
   uint32_t cmap_format{ 0 };  // 4 or 12
 };
 
@@ -210,9 +210,15 @@ inline std::string_view image_bytes(Images const &images, Span ref) {
 // functions over PODs, all optional; nothing in scav's pipeline invokes them.
 
 enum class Anchor : uint32_t {
-  TopLeft, TopCentre, TopRight,
-  MidLeft, MidCentre, MidRight,
-  BottomLeft, BottomCentre, BottomRight,
+  TopLeft,
+  TopCentre,
+  TopRight,
+  MidLeft,
+  MidCentre,
+  MidRight,
+  BottomLeft,
+  BottomCentre,
+  BottomRight,
 };
 
 // Turns "I have a rect and three things" into positions. Heights and widths
