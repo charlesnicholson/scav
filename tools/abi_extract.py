@@ -63,7 +63,10 @@ def strip_comments(text: str) -> str:
     return LINE_COMMENT.sub("", COMMENT.sub("", text))
 
 
-def body_of(text: str) -> str:
+DEFINE = re.compile(r"^define\s+(?P<name>[A-Za-z_]\w*)(?P<args>\()?(?P<rest>.*)$")
+
+
+def body_of(text: str, constants: list[dict] | None = None) -> str:
     """The header as a C compiler sees it, which is what the ABI *is*.
 
     `__cplusplus` is undefined, so the `extern "C" {` braces and any C++-only
@@ -97,7 +100,27 @@ def body_of(text: str) -> str:
                 if not stack:
                     raise Unrecognized("#endif with no #if")
                 stack.pop()
-            elif directive.startswith(("include", "define", "pragma")):
+            elif directive.startswith("define"):
+                m = DEFINE.match(directive)
+                if m is None:
+                    raise Unrecognized(f"#{directive}")
+                if m.group("args") is not None:
+                    # A function-like macro is code, not a constant, and nothing
+                    # here can describe one to a binding generator.
+                    raise Unrecognized(f"function-like macro {m.group('name')}")
+                value = m.group("rest").strip()
+                if not value:
+                    continue  # an include guard names nothing
+                if constants is None:
+                    continue
+                literal = value.rstrip("uUlL")
+                try:
+                    constants.append({"name": m.group("name"),
+                                      "value": int(literal, 0)})
+                except ValueError as bad:
+                    raise Unrecognized(
+                        f"#define {m.group('name')} {value}") from bad
+            elif directive.startswith(("include", "pragma")):
                 pass
             else:
                 raise Unrecognized(f"#{directive}")
@@ -220,9 +243,10 @@ FUNCTION = re.compile(
 
 
 def scrape(path: Path) -> dict:
-    text = body_of(strip_comments(path.read_text(encoding="utf-8")))
+    constants: list[dict] = []
+    text = body_of(strip_comments(path.read_text(encoding="utf-8")), constants)
     surface: dict = {"structs": [], "handles": [], "aliases": [], "enums": [],
-                     "functions": []}
+                     "constants": constants, "functions": []}
 
     for decl in split_declarations(text):
         if m := TYPEDEF_STRUCT.match(decl):

@@ -65,8 +65,11 @@ typedef struct {
   int32_t a, b;      /* kind-specific scalars */
 } scav_prim;
 
-/* An unclipped primitive names no clip rect. */
-enum { SCAV_CLIP_NONE = 0xFFFFFFFFU };
+/* An unclipped primitive names no clip rect. A macro, not an enumerator: an
+ * unnamed C enum takes an implementation-chosen underlying type, and under the
+ * MS ABI that is `int`, which makes this value -1 on one platform and
+ * 4294967295 on the others. */
+#define SCAV_CLIP_NONE 0xFFFFFFFFU
 
 /* Metrics ================================================================= */
 

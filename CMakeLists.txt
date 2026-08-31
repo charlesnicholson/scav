@@ -154,6 +154,9 @@ endif()
 # The coverage gate's list of what was supposed to be tested. Written here because
 # every library has declared itself by now.
 get_property(scav_production_sources GLOBAL PROPERTY SCAV_PRODUCTION_SOURCES)
+# A generated source has no author and nothing a test could exercise, so it is
+# not something the gate can ask about.
+list(FILTER scav_production_sources EXCLUDE REGEX "^${PROJECT_BINARY_DIR}/")
 list(JOIN scav_production_sources "\n" scav_production_sources_text)
 file(WRITE "${PROJECT_BINARY_DIR}/scav_sources.txt" "${scav_production_sources_text}\n")
 

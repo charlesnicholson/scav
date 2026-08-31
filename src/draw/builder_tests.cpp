@@ -16,6 +16,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <ostream>
 #include <string>
 #include <string_view>
 #include <vector>

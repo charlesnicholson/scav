@@ -152,6 +152,9 @@ def generate(abi: dict) -> str:
                 constants.append(f'{value["name"]} = {value["value"]}')
                 if value["name"].startswith("SCAV_E_") or value["name"] == "SCAV_OK":
                     errors[value["name"]] = value["value"]
+    for header in abi["headers"]:
+        for constant in header.get("constants", []):
+            constants.append(f'{constant["name"]} = {constant["value"]}')
     out.append("\n".join(constants) + "\n")
     out.append("ERROR_NAMES = {\n"
                + "".join(f'    {v}: "{k}",\n' for k, v in errors.items())

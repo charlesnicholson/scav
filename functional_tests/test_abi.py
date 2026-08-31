@@ -87,7 +87,9 @@ class TestAbiGolden(unittest.TestCase):
                 ("#if defined(SOMETHING)\nint x;\n#endif", "a condition"),
                 ("#ifdef SOMETHING\nint x;\n#endif", "an unknown ifdef"),
                 ("enum { SCAV_NO_VALUE };", "an enumerator without a value"),
-                ("int trailing_with_no_semicolon", "a missing semicolon")):
+                ("int trailing_with_no_semicolon", "a missing semicolon"),
+                ("#define SCAV_TWICE(x) ((x) * 2)", "a function-like macro"),
+                ("#define SCAV_ODD not_a_number", "a macro that is not a constant")):
             with self.subTest(why=why):
                 with self.assertRaises(abi_extract.Unrecognized):
                     abi_extract.scrape(header(body))
@@ -131,6 +133,12 @@ class TestAbiGolden(unittest.TestCase):
                      for f in header["functions"]}
         for handle in handles:
             self.assertIn(f"{handle}_destroy", functions)
+        # An object-like macro carries ABI surface too, and used to be dropped
+        # in silence.
+        constants = {c["name"] for header in abi["headers"]
+                     for c in header.get("constants", [])}
+        self.assertIn("SCAV_CLIP_NONE", constants)
+
         for entry in ("scav_abi_version", "scav_layout_run", "scav_column_data",
                       "scav_measure_text", "scav_measure_chart", "scav_emit_chart",
                       "scav_svg_write", "scav_image_register",

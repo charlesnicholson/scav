@@ -157,6 +157,7 @@
         }
       ],
       "enums": [],
+      "constants": [],
       "functions": []
     },
     {
@@ -329,6 +330,7 @@
           ]
         }
       ],
+      "constants": [],
       "functions": [
         {
           "name": "scav_abi_version",
@@ -1613,6 +1615,7 @@
         }
       ],
       "enums": [],
+      "constants": [],
       "functions": [
         {
           "name": "scav_profile_named",
@@ -2034,14 +2037,6 @@
         {
           "values": [
             {
-              "name": "SCAV_CLIP_NONE",
-              "value": 4294967295
-            }
-          ]
-        },
-        {
-          "values": [
-            {
               "name": "SCAV_STYLE_STATE",
               "value": 0
             },
@@ -2070,6 +2065,12 @@
               "value": 6
             }
           ]
+        }
+      ],
+      "constants": [
+        {
+          "name": "SCAV_CLIP_NONE",
+          "value": 4294967295
         }
       ],
       "functions": [
@@ -3192,6 +3193,7 @@
       "handles": [],
       "aliases": [],
       "enums": [],
+      "constants": [],
       "functions": [
         {
           "name": "scav_svg_write",
