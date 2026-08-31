@@ -27,9 +27,10 @@ CORPUS = REPO_ROOT / "test_data/charts"
 
 
 def find_scav() -> Path:
-    """The first `scav` under out/, newest build tree first."""
+    """The newest `scav` under out/, whichever preset built it."""
     candidates = sorted(
-        (REPO_ROOT / "out").glob("*/bin/scav"),
+        (c for name in ("scav", "scav.exe")
+         for c in (REPO_ROOT / "out").glob(f"*/bin/{name}")),
         key=lambda p: p.stat().st_mtime, reverse=True)
     if not candidates:
         raise SystemExit("no scav binary under out/; run ./build.sh first")
@@ -199,9 +200,13 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--chart", action="append", default=[])
     ap.add_argument("--out", type=Path, default=REPO_ROOT / "out/baseline")
+    ap.add_argument("--scav", type=Path,
+                    help="the binary to render with; found under out/ otherwise")
     args = ap.parse_args()
 
-    scav = find_scav()
+    scav = args.scav or find_scav()
+    if not scav.is_file():
+        raise SystemExit(f"no scav binary at {scav}")
     charts = ([CORPUS / c for c in args.chart] if args.chart
               else sorted(CORPUS.glob("*.scav")))
     args.out.mkdir(parents=True, exist_ok=True)

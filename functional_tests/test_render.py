@@ -134,8 +134,10 @@ class TestBaselineHarness(unittest.TestCase):
     def test_the_harness_runs_and_names_what_it_could_not_compare(self) -> None:
         cfg = scavtest.load_config()
         out = cfg.build_dir / "baseline"
+        name = "scav.exe" if os.name == "nt" else "scav"
         result = subprocess.run(
             [str(cfg.python), str(cfg.repo_root / "tools/baseline.py"),
+             "--scav", str(cfg.build_dir / "bin" / name),
              "--out", str(out), "--chart", "estop.scav", "--chart", "tcp.scav"],
             capture_output=True, text=True, check=False)
         self.assertEqual(0, result.returncode, result.stderr)
