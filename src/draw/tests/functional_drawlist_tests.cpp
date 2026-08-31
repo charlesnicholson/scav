@@ -10,6 +10,7 @@
 
 #include "doctest.h"
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -20,10 +21,10 @@ namespace {
 using namespace scav;
 
 // The corpus, in the order the layout golden lists it.
-constexpr char const *CORPUS[10]{ "axis.scav",  "brew.scav", "dock.scav",
-                                  "estop.scav", "led.scav",  "mill.scav",
-                                  "ota.scav",   "tcp.scav",  "toolchanger.scav",
-                                  "vac.scav" };
+constexpr std::array<char const *, 10> CORPUS{
+  "axis.scav", "brew.scav", "dock.scav", "estop.scav",       "led.scav",
+  "mill.scav", "ota.scav",  "tcp.scav",  "toolchanger.scav", "vac.scav"
+};
 
 Metrics bundled() {
   Metrics m;
@@ -220,10 +221,10 @@ TEST_CASE("drawlist corpus: canonical form is reached from any emission order") 
       emit_label(by_hand, c, m, palette, i, box, 0);
     }
   }
-  for (uint32_t i = static_cast<uint32_t>(c.transitions.size()); i-- > 0;) {
+  for (auto i = static_cast<uint32_t>(c.transitions.size()); i-- > 0;) {
     emit_route(by_hand, c, palette, i, 0);
   }
-  for (uint32_t i = static_cast<uint32_t>(c.states.size()); i-- > 0;) {
+  for (auto i = static_cast<uint32_t>(c.states.size()); i-- > 0;) {
     emit_state(by_hand, c, m, palette, i, 0);
   }
   for (uint32_t i = 0; i < c.submachines.size(); ++i) {

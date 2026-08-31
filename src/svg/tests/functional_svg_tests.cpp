@@ -12,6 +12,7 @@
 
 #include "doctest.h"
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -21,10 +22,10 @@ namespace {
 
 using namespace scav;
 
-constexpr char const *CORPUS[10]{ "axis.scav",  "brew.scav", "dock.scav",
-                                  "estop.scav", "led.scav",  "mill.scav",
-                                  "ota.scav",   "tcp.scav",  "toolchanger.scav",
-                                  "vac.scav" };
+constexpr std::array<char const *, 10> CORPUS{
+  "axis.scav", "brew.scav", "dock.scav", "estop.scav",       "led.scav",
+  "mill.scav", "ota.scav",  "tcp.scav",  "toolchanger.scav", "vac.scav"
+};
 
 Metrics bundled() {
   Metrics m;

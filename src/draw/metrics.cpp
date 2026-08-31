@@ -4,10 +4,13 @@
 
 #include "scav/scav_draw.h"
 
+#include "scav_embed_bundled_ttf.h"
+
 #include "scav/scav_types.h"
 #include "scav_int.h"
 #include "scav_xxhash.h"
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -204,7 +207,7 @@ bool decode_utf8(scav_byte const *s, uint32_t len, uint32_t &at, uint32_t &cp) {
     if ((cont & 0xC0U) != 0x80U) { return false; }
     value = (value << 6U) | (cont & 0x3FU);
   }
-  constexpr uint32_t MIN_FOR[4]{ 0U, 0x80U, 0x800U, 0x10000U };
+  constexpr std::array<uint32_t, 4> MIN_FOR{ 0U, 0x80U, 0x800U, 0x10000U };
   if ((value < MIN_FOR[need]) || (value > 0x10FFFFU) ||
       ((value >= 0xD800U) && (value <= 0xDFFFU))) {
     return false;
@@ -216,14 +219,7 @@ bool decode_utf8(scav_byte const *s, uint32_t len, uint32_t &at, uint32_t &cp) {
 
 }  // namespace
 
-// Defined by the generated source scav_embed_bytes writes.
-extern scav_byte const bundled_ttf[];
-extern uint32_t const bundled_ttf_len;
-
-scav_byte const *bundled_font(uint32_t &len) {
-  len = bundled_ttf_len;
-  return static_cast<scav_byte const *>(bundled_ttf);
-}
+scav_byte const *bundled_font(uint32_t &len) { return bundled_ttf_bytes(len); }
 
 bool metrics_create(scav_byte const *ttf, uint32_t len, Metrics &out) {
   if ((ttf == nullptr) || (len == 0U)) { ttf = bundled_font(len); }

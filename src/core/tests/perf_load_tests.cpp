@@ -78,7 +78,7 @@ uint64_t median_micros(Once &&once) {
     once();
     samples[i] = micros_since(start);
   }
-  std::sort(samples.begin(), samples.end());
+  std::ranges::sort(samples);
   return samples[SCALING_RUNS / 2];
 }
 

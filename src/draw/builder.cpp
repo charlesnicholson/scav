@@ -9,6 +9,7 @@
 #include "scav/scav_types.h"
 #include "scav_int.h"
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <string_view>
@@ -253,11 +254,13 @@ void emit_state(DrawList &d,
       break;
     }
     case StateKind::Choice: {
-      scav_point const pts[4]{ { .x = box.x + (box.w / 2), .y = box.y },
-                               { .x = box.x + box.w, .y = box.y + (box.h / 2) },
-                               { .x = box.x + (box.w / 2), .y = box.y + box.h },
-                               { .x = box.x, .y = box.y + (box.h / 2) } };
-      push_path(d, depth, drawlist_style(d, p[SCAV_STYLE_STATE]), pts, 4, origin);
+      std::array<scav_point, 4> const pts{
+        { { .x = box.x + (box.w / 2), .y = box.y },
+          { .x = box.x + box.w, .y = box.y + (box.h / 2) },
+          { .x = box.x + (box.w / 2), .y = box.y + box.h },
+          { .x = box.x, .y = box.y + (box.h / 2) } }
+      };
+      push_path(d, depth, drawlist_style(d, p[SCAV_STYLE_STATE]), pts.data(), 4, origin);
       break;
     }
     case StateKind::Fork:

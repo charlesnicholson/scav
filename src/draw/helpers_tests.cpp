@@ -9,6 +9,7 @@
 
 #include "doctest.h"
 
+#include <array>
 #include <cstdint>
 #include <string_view>
 #include <vector>
@@ -27,9 +28,9 @@ bool same(scav_rect a, scav_rect b) {
 
 TEST_CASE("helpers: a vertical stack partitions its rect top down") {
   scav_rect const r{ .x = 10, .y = 20, .w = 100, .h = 60 };
-  int32_t const heights[3]{ 10, 20, 30 };
-  scav_rect out[3]{};
-  stack_v(r, heights, 3, out);
+  std::array<int32_t, 3> const heights{ 10, 20, 30 };
+  std::array<scav_rect, 3> out{};
+  stack_v(r, heights.data(), 3, out.data());
   CHECK(same(out[0], scav_rect{ .x = 10, .y = 20, .w = 100, .h = 10 }));
   CHECK(same(out[1], scav_rect{ .x = 10, .y = 30, .w = 100, .h = 20 }));
   CHECK(same(out[2], scav_rect{ .x = 10, .y = 50, .w = 100, .h = 30 }));
@@ -37,37 +38,37 @@ TEST_CASE("helpers: a vertical stack partitions its rect top down") {
 
 TEST_CASE("helpers: a stack asking for more than it has is clipped, not overrun") {
   scav_rect const r{ .x = 0, .y = 0, .w = 10, .h = 10 };
-  int32_t const heights[3]{ 8, 8, 8 };
-  scav_rect out[3]{};
-  stack_v(r, heights, 3, out);
+  std::array<int32_t, 3> const heights{ 8, 8, 8 };
+  std::array<scav_rect, 3> out{};
+  stack_v(r, heights.data(), 3, out.data());
   CHECK(out[0].h == 8);
   CHECK(out[1].h == 2);  // what was left
   CHECK(out[2].h == 0);
   CHECK(out[2].y == 10);
   // A negative request is zero, never a rect that inverts.
-  int32_t const negative[2]{ -5, 4 };
-  stack_v(r, negative, 2, out);
+  std::array<int32_t, 2> const negative{ -5, 4 };
+  stack_v(r, negative.data(), 2, out.data());
   CHECK(out[0].h == 0);
   CHECK(same(out[1], scav_rect{ .x = 0, .y = 0, .w = 10, .h = 4 }));
 }
 
 TEST_CASE("helpers: a horizontal row partitions its rect left to right") {
   scav_rect const r{ .x = 5, .y = 5, .w = 30, .h = 8 };
-  int32_t const widths[2]{ 10, 25 };
-  scav_rect out[2]{};
-  row_h(r, widths, 2, out);
+  std::array<int32_t, 2> const widths{ 10, 25 };
+  std::array<scav_rect, 2> out{};
+  row_h(r, widths.data(), 2, out.data());
   CHECK(same(out[0], scav_rect{ .x = 5, .y = 5, .w = 10, .h = 8 }));
   CHECK(same(out[1], scav_rect{ .x = 15, .y = 5, .w = 20, .h = 8 }));  // clipped
 }
 
 TEST_CASE("helpers: a null array is a no-op rather than a crash") {
-  scav_rect out[1]{ { .x = 7, .y = 7, .w = 7, .h = 7 } };
+  std::array<scav_rect, 1> out{ { { .x = 7, .y = 7, .w = 7, .h = 7 } } };
   scav_rect const r{ .x = 0, .y = 0, .w = 1, .h = 1 };
-  stack_v(r, nullptr, 1, out);
-  row_h(r, nullptr, 1, out);
-  int32_t const one[1]{ 1 };
-  stack_v(r, one, 1, nullptr);
-  row_h(r, one, 1, nullptr);
+  stack_v(r, nullptr, 1, out.data());
+  row_h(r, nullptr, 1, out.data());
+  std::array<int32_t, 1> const one{ 1 };
+  stack_v(r, one.data(), 1, nullptr);
+  row_h(r, one.data(), 1, nullptr);
   CHECK(same(out[0], scav_rect{ .x = 7, .y = 7, .w = 7, .h = 7 }));
 }
 
@@ -169,10 +170,14 @@ TEST_CASE("helpers: an arrowhead points along any diagonal it is given") {
                                      .font_size_grid = 0 }) };
   // Eight directions, each of which must put the tip where it was told and the
   // barbs somewhere behind it.
-  constexpr scav_point FROM[8]{ { .x = 0, .y = 0 },     { .x = 200, .y = 0 },
-                                { .x = 200, .y = 200 }, { .x = 0, .y = 200 },
-                                { .x = 100, .y = 0 },   { .x = 200, .y = 100 },
-                                { .x = 100, .y = 200 }, { .x = 0, .y = 100 } };
+  constexpr std::array<scav_point, 8> FROM{ { { .x = 0, .y = 0 },
+                                              { .x = 200, .y = 0 },
+                                              { .x = 200, .y = 200 },
+                                              { .x = 0, .y = 200 },
+                                              { .x = 100, .y = 0 },
+                                              { .x = 200, .y = 100 },
+                                              { .x = 100, .y = 200 },
+                                              { .x = 0, .y = 100 } } };
   scav_point const tip{ .x = 100, .y = 100 };
   for (scav_point const &from : FROM) {
     d.prims.clear();

@@ -15,6 +15,11 @@ scav_static_library(scavdraw
   builder.cpp
   "${font_source}"
 )
+# The generated font header sits in the build tree beside its source.
+foreach(target scavdraw scavdraw_testable)
+  target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+endforeach()
+
 scav_install_library(scavdraw draw)
 target_link_libraries(scavdraw PUBLIC scavcore)
 target_link_libraries(scavdraw_testable PUBLIC scavcore_testable)

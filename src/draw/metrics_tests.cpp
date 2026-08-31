@@ -9,6 +9,7 @@
 
 #include "doctest.h"
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -84,9 +85,7 @@ std::vector<scav_byte> hmtx_table(std::vector<uint32_t> const &advances, uint32_
     be16(t, a);
     be16(t, 0);
   }
-  for (uint32_t i = static_cast<uint32_t>(advances.size()); i < glyphs; ++i) {
-    be16(t, 0);
-  }
+  for (auto i = static_cast<uint32_t>(advances.size()); i < glyphs; ++i) { be16(t, 0); }
   return t;
 }
 
@@ -537,9 +536,9 @@ TEST_CASE("metrics: the C surface agrees with the C++ one, and refuses nulls") {
   CHECK(scav_metrics_create(nullptr, 0, nullptr) == SCAV_E_INVALID_ARG);
 
   // A font it cannot parse is a font error, not an argument error.
-  scav_byte const junk[8]{ 1, 2, 3, 4, 5, 6, 7, 8 };
+  std::array<scav_byte, 8> const junk{ 1, 2, 3, 4, 5, 6, 7, 8 };
   scav_metrics *bad{ nullptr };
-  CHECK(scav_metrics_create(junk, 8, &bad) == SCAV_E_FONT);
+  CHECK(scav_metrics_create(junk.data(), 8, &bad) == SCAV_E_FONT);
   CHECK(bad == nullptr);
 
   scav_metrics_destroy(m);

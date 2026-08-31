@@ -8,6 +8,7 @@
 #include "scav/scav_types.h"
 #include "scav_int.h"
 
+#include <array>
 #include <cstdint>
 #include <string_view>
 #include <vector>
@@ -44,13 +45,14 @@ scav_rect align(scav_rect r, int32_t w, int32_t h, Anchor a) {
   // than its rect, and truncation toward zero would bias that case one way.
   int32_t const slack_x{ r.w - w };
   int32_t const slack_y{ r.h - h };
-  int32_t const x{ (col == 0U)
-                       ? r.x
-                       : ((col == 1U) ? (r.x + floor_div(slack_x, 2)) : (r.x + slack_x)) };
-  int32_t const y{ (row == 0U)
-                       ? r.y
-                       : ((row == 1U) ? (r.y + floor_div(slack_y, 2)) : (r.y + slack_y)) };
-  return { .x = x, .y = y, .w = w, .h = h };
+  auto const place = [](int32_t origin, int32_t slack, uint32_t lane) {
+    switch (lane) {
+      case 0U: return origin;
+      case 1U: return origin + floor_div(slack, 2);
+      default: return origin + slack;
+    }
+  };
+  return { .x = place(r.x, slack_x, col), .y = place(r.y, slack_y, row), .w = w, .h = h };
 }
 
 std::vector<std::string_view> text_lines(std::string_view s) {
@@ -122,14 +124,14 @@ void push_arrowhead(DrawList &d,
   Wide const back_y{ tip.y - floor_div(dy * size, len) };
   Wide const half_x{ floor_div(dy * size, 2 * len) };
   Wide const half_y{ floor_div(dx * size, 2 * len) };
-  scav_point const pts[3]{
+  std::array<scav_point, 3> const pts{
     tip,
     { .x = static_cast<int32_t>(back_x - half_x),
       .y = static_cast<int32_t>(back_y + half_y) },
     { .x = static_cast<int32_t>(back_x + half_x),
       .y = static_cast<int32_t>(back_y - half_y) },
   };
-  push_path(d, depth, style, pts, 3, origin);
+  push_path(d, depth, style, pts.data(), 3, origin);
 }
 
 }  // namespace scav

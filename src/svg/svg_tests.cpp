@@ -10,6 +10,7 @@
 
 #include "doctest.h"
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -149,13 +150,15 @@ TEST_CASE("svg: bounds are the tight box, and a circle reaches its radius") {
 TEST_CASE("svg: each kind lands as the element a viewer expects") {
   DrawList d;
   uint32_t const s{ drawlist_style(d, shape(0xAABBCCFFU, 0x102030FFU)) };
-  scav_point const pts[3]{ { .x = 0, .y = 0 }, { .x = 10, .y = 0 }, { .x = 10, .y = 10 } };
+  std::array<scav_point, 3> const pts{
+    { { .x = 0, .y = 0 }, { .x = 10, .y = 0 }, { .x = 10, .y = 10 } }
+  };
 
   push_rect(d, 0, s, { .x = 1, .y = 2, .w = 3, .h = 4 }, NONE);
   push_rrect(d, 0, s, { .x = 1, .y = 2, .w = 3, .h = 4 }, 2, NONE);
   push_line(d, 0, s, pts[0], pts[1], NONE);
-  push_polyline(d, 0, s, pts, 3, NONE);
-  push_path(d, 0, s, pts, 3, NONE);
+  push_polyline(d, 0, s, pts.data(), 3, NONE);
+  push_path(d, 0, s, pts.data(), 3, NONE);
   push_circle(d, 0, s, pts[0], 5, NONE);
   Written const w{ write(d) };
   REQUIRE(w.status == SvgStatus::Ok);
@@ -283,11 +286,11 @@ TEST_CASE("svg: a class is synthesized from the origin, never carried in the IR"
 TEST_CASE("svg: every element kind carries its class") {
   DrawList d;
   uint32_t const s{ drawlist_style(d, shape(0x000000FFU, 0)) };
-  scav_point const pts[2]{ { .x = 0, .y = 0 }, { .x = 1, .y = 1 } };
+  std::array<scav_point, 2> const pts{ { { .x = 0, .y = 0 }, { .x = 1, .y = 1 } } };
   push_rect(d, 0, s, { .x = 0, .y = 0, .w = 1, .h = 1 }, state(0));
   push_line(d, 0, s, pts[0], pts[1], state(1));
-  push_polyline(d, 0, s, pts, 2, state(2));
-  push_path(d, 0, s, pts, 2, state(3));
+  push_polyline(d, 0, s, pts.data(), 2, state(2));
+  push_path(d, 0, s, pts.data(), 2, state(3));
   push_circle(d, 0, s, pts[0], 1, state(4));
   push_text(d, 0, drawlist_style(d, glyphs(160)), pts[0], "x", state(5));
   Written const w{ write(d) };
@@ -315,15 +318,15 @@ TEST_CASE("svg: --embed-font base64s the bundled TTF whole") {
   // Whole, not subsetted: base64 is four characters per three bytes.
   uint32_t len{ 0 };
   (void)bundled_font(len);
-  CHECK(embedded.doc.size() > (bare.doc.size() + ((len / 3U) * 4U)));
+  CHECK(embedded.doc.size() > (bare.doc.size() + (size_t{ len / 3U } * 4U)));
   // And never converted to paths, which would discard selection.
   CHECK(!has(embedded.doc, "<path"));
 }
 
 TEST_CASE("svg: an image goes inline with the mime it was registered under") {
   Images images;
-  scav_byte const png[5]{ 0x89, 'P', 'N', 'G', 0x0D };
-  REQUIRE(image_register(images, "logo", png, 5, 16, 16, "image/png"));
+  std::array<scav_byte, 5> const png{ 0x89, 'P', 'N', 'G', 0x0D };
+  REQUIRE(image_register(images, "logo", png.data(), 5, 16, 16, "image/png"));
 
   DrawList d;
   push_image(d,

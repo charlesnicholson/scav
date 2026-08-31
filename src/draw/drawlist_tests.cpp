@@ -10,6 +10,7 @@
 
 #include "doctest.h"
 
+#include <array>
 #include <cstdint>
 #include <string_view>
 #include <vector>
@@ -88,13 +89,15 @@ TEST_CASE("drawlist: every kind lands with the point count its kind demands") {
   DrawList d;
   uint32_t const s{ drawlist_style(d, ink(0)) };
   scav_rect const r{ .x = 10, .y = 20, .w = 30, .h = 40 };
-  scav_point const pts[3]{ { .x = 0, .y = 0 }, { .x = 1, .y = 1 }, { .x = 2, .y = 2 } };
+  std::array<scav_point, 3> const pts{
+    { { .x = 0, .y = 0 }, { .x = 1, .y = 1 }, { .x = 2, .y = 2 } }
+  };
 
   push_rect(d, 0, s, r, state(0));
   push_rrect(d, 0, s, r, 4, state(1));
   push_line(d, 0, s, pts[0], pts[1], NONE);
-  push_polyline(d, 0, s, pts, 3, NONE);
-  push_path(d, 0, s, pts, 3, NONE);
+  push_polyline(d, 0, s, pts.data(), 3, NONE);
+  push_path(d, 0, s, pts.data(), 3, NONE);
   push_text(d, 0, s, pts[0], "hi", state(2));
   push_circle(d, 0, s, pts[0], 8, NONE);
   push_arc(d, 0, s, r, 90 * 64, 180 * 64, NONE);
@@ -436,8 +439,9 @@ TEST_CASE("images: registration carries the dimensions, and an id names one") {
   scav_images *images{ nullptr };
   REQUIRE(scav_images_create(&images) == SCAV_OK);
 
-  scav_byte const png[4]{ 0x89, 'P', 'N', 'G' };
-  REQUIRE(scav_image_register(images, "logo", png, 4, 32, 16, "image/png") == SCAV_OK);
+  std::array<scav_byte, 4> const png{ 0x89, 'P', 'N', 'G' };
+  REQUIRE(scav_image_register(images, "logo", png.data(), 4, 32, 16, "image/png") ==
+          SCAV_OK);
   uint32_t count{ 0 };
   REQUIRE(scav_image_count(images, &count) == SCAV_OK);
   CHECK(count == 1);
@@ -454,17 +458,20 @@ TEST_CASE("images: registration carries the dimensions, and an id names one") {
 
   // Dimensions come from registration, so a zero one is the caller's error and
   // not something to infer from the bytes later.
-  CHECK(scav_image_register(images, "bad", png, 4, 0, 16, "image/png") ==
+  CHECK(scav_image_register(images, "bad", png.data(), 4, 0, 16, "image/png") ==
         SCAV_E_INVALID_ARG);
-  CHECK(scav_image_register(images, "bad", png, 0, 8, 16, "image/png") ==
+  CHECK(scav_image_register(images, "bad", png.data(), 0, 8, 16, "image/png") ==
         SCAV_E_INVALID_ARG);
-  CHECK(scav_image_register(images, "", png, 4, 8, 16, "image/png") == SCAV_E_INVALID_ARG);
-  CHECK(scav_image_register(images, "logo", png, 4, 8, 8, "image/png") == SCAV_E_STATE);
+  CHECK(scav_image_register(images, "", png.data(), 4, 8, 16, "image/png") ==
+        SCAV_E_INVALID_ARG);
+  CHECK(scav_image_register(images, "logo", png.data(), 4, 8, 8, "image/png") ==
+        SCAV_E_STATE);
 
   // Many rows share one pool, so an id survives the vector growing.
   for (uint32_t i = 0; i < 64; ++i) {
     std::string const id{ "img" + std::to_string(i) };
-    REQUIRE(scav_image_register(images, id.c_str(), png, 4, 1, 1, "image/png") == SCAV_OK);
+    REQUIRE(scav_image_register(images, id.c_str(), png.data(), 4, 1, 1, "image/png") ==
+            SCAV_OK);
   }
   REQUIRE(
       scav_image_find(images, reinterpret_cast<scav_byte const *>("logo"), 4, &index) ==

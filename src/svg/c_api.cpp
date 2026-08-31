@@ -51,6 +51,9 @@ scav_result scav_svg_write(scav_drawlist const *list,
   if (cap == 0) { return SCAV_OK; /* count query */ }
   if (cap < doc.size()) { return SCAV_E_CAPACITY; }
   if (out == nullptr) { return SCAV_E_INVALID_ARG; }
+  // Not NUL-terminated, which the header states: the caller was handed the byte
+  // count and every other span accessor here works the same way.
+  // NOLINTNEXTLINE(bugprone-not-null-terminated-result)
   std::memcpy(out, doc.data(), doc.size());
   return SCAV_OK;
 }

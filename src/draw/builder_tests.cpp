@@ -13,6 +13,7 @@
 
 #include "doctest.h"
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -270,10 +271,10 @@ TEST_CASE("builder: a label lands on the route its own path box was placed on") 
 TEST_CASE("builder: each pseudostate kind draws as its own shape") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
-  constexpr StateKind KINDS[8]{ StateKind::Initial, StateKind::Final,
-                                StateKind::Choice,  StateKind::Junction,
-                                StateKind::Fork,    StateKind::Join,
-                                StateKind::History, StateKind::DeepHistory };
+  constexpr std::array<StateKind, 8> KINDS{ StateKind::Initial, StateKind::Final,
+                                            StateKind::Choice,  StateKind::Junction,
+                                            StateKind::Fork,    StateKind::Join,
+                                            StateKind::History, StateKind::DeepHistory };
   for (StateKind const k : KINDS) { build_state(c, root, {}, k, {}); }
   Built const b{ pipeline(std::move(c), readable()) };
 

@@ -244,8 +244,9 @@ SvgStatus svg_write(DrawList const &d,
 
   scav_rect const tight{ svg_bounds(d) };
   int32_t const margin{ imax(0, o.margin) };
-  Wide const view_w{ static_cast<Wide>(tight.w) + (2 * margin) };
-  Wide const view_h{ static_cast<Wide>(tight.h) + (2 * margin) };
+  Wide const both_margins{ Wide{ 2 } * margin };
+  Wide const view_w{ static_cast<Wide>(tight.w) + both_margins };
+  Wide const view_h{ static_cast<Wide>(tight.h) + both_margins };
   // The viewBox is integer, so the extent has to fit one. Output size is
   // unbounded by anything here: SVG sets no ceiling, so neither does this.
   if ((view_w > COORD_MAX) || (view_h > COORD_MAX)) { return SvgStatus::ExtentOverflow; }

@@ -9,6 +9,7 @@
 #include "scav_stable_sort.h"
 #include "scav_xxhash.h"
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <string_view>
@@ -157,12 +158,13 @@ scav_span drawlist_text(DrawList &d, std::string_view s) {
 }
 
 void push_rect(DrawList &d, int32_t depth, uint32_t style, scav_rect r, ElemRef origin) {
-  scav_point const pts[2]{ { .x = r.x, .y = r.y }, { .x = r.x + r.w, .y = r.y + r.h } };
+  std::array<scav_point, 2> const pts{ { { .x = r.x, .y = r.y },
+                                         { .x = r.x + r.w, .y = r.y + r.h } } };
   push_prim(d,
             SCAV_PRIM_RECT,
             depth,
             style,
-            { .off = push_points(d, pts, 2), .len = 2 },
+            { .off = push_points(d, pts.data(), 2), .len = 2 },
             {},
             0,
             0,
@@ -175,12 +177,13 @@ void push_rrect(DrawList &d,
                 scav_rect r,
                 int32_t radius,
                 ElemRef origin) {
-  scav_point const pts[2]{ { .x = r.x, .y = r.y }, { .x = r.x + r.w, .y = r.y + r.h } };
+  std::array<scav_point, 2> const pts{ { { .x = r.x, .y = r.y },
+                                         { .x = r.x + r.w, .y = r.y + r.h } } };
   push_prim(d,
             SCAV_PRIM_RRECT,
             depth,
             style,
-            { .off = push_points(d, pts, 2), .len = 2 },
+            { .off = push_points(d, pts.data(), 2), .len = 2 },
             {},
             radius,
             0,
@@ -193,12 +196,12 @@ void push_line(DrawList &d,
                scav_point a,
                scav_point b,
                ElemRef origin) {
-  scav_point const pts[2]{ a, b };
+  std::array<scav_point, 2> const pts{ a, b };
   push_prim(d,
             SCAV_PRIM_LINE,
             depth,
             style,
-            { .off = push_points(d, pts, 2), .len = 2 },
+            { .off = push_points(d, pts.data(), 2), .len = 2 },
             {},
             0,
             0,
@@ -280,13 +283,14 @@ void push_arc(DrawList &d,
               int32_t start_64,
               int32_t sweep_64,
               ElemRef origin) {
-  scav_point const pts[2]{ { .x = bounds.x, .y = bounds.y },
-                           { .x = bounds.x + bounds.w, .y = bounds.y + bounds.h } };
+  std::array<scav_point, 2> const pts{ { { .x = bounds.x, .y = bounds.y },
+                                         { .x = bounds.x + bounds.w,
+                                           .y = bounds.y + bounds.h } } };
   push_prim(d,
             SCAV_PRIM_ARC,
             depth,
             style,
-            { .off = push_points(d, pts, 2), .len = 2 },
+            { .off = push_points(d, pts.data(), 2), .len = 2 },
             {},
             start_64,
             sweep_64,
@@ -299,12 +303,13 @@ void push_image(DrawList &d,
                 scav_rect r,
                 std::string_view id,
                 ElemRef origin) {
-  scav_point const pts[2]{ { .x = r.x, .y = r.y }, { .x = r.x + r.w, .y = r.y + r.h } };
+  std::array<scav_point, 2> const pts{ { { .x = r.x, .y = r.y },
+                                         { .x = r.x + r.w, .y = r.y + r.h } } };
   push_prim(d,
             SCAV_PRIM_IMAGE,
             depth,
             style,
-            { .off = push_points(d, pts, 2), .len = 2 },
+            { .off = push_points(d, pts.data(), 2), .len = 2 },
             drawlist_text(d, id),
             0,
             0,
