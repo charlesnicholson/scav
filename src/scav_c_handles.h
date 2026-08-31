@@ -1,8 +1,9 @@
 #ifndef SCAV_C_HANDLES_H_INCLUDED
 #define SCAV_C_HANDLES_H_INCLUDED
 
-// The C handles, complete: every library's C surface operates on the same
-// handles, so the definitions live at the src root. Nothing installs them.
+// The handles more than one library's C surface operates on, which is why they
+// live at the src root rather than in either. A handle only one library touches
+// belongs to that library: see src/draw/handles.h. Nothing installs them.
 
 #include "scav/scav_core.h"
 #include "scav/scav_core_c.h"

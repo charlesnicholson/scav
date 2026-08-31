@@ -144,6 +144,8 @@ plugins/scxml/         reference example: importer, exporter, builder contributi
 assets/font/           the bundled TTF — a layout-hash input, so versioned here
 abi/scav_abi.json      committed golden ABI description (§16), extracted from the
                        C headers — the description is the ABI, the headers are the API
+bindings/python/scav/  `_abi.py` generated from that JSON; `__init__.py` the thin
+                       hand-written idiomatic half. The generated half never drifts
 test_data/charts/      corpus: synthetic fixtures + hand-transcribed real charts
 test_data/golden/      drawlist/, svg/, layout/ — see below
 functional_tests/      Python, drives the CLI and the C ABI via ctypes
@@ -247,11 +249,18 @@ out/test/             functional-test scratch, golden diffs, perf reports
 **The envy cache defaults into the build root**, declared in the manifest. `envy.lua` sits at the repo root and is envy's root marker, so a relative path is relative to it:
 
 ```lua
--- @envy cache-posix "out/.envy"
--- @envy cache-win   "out\.envy"
+-- @envy cache-local "out/.envy"
 ```
 
-Precedence is `ENVY_CACHE_ROOT` > manifest directive > platform default, so **project-local is the default and a shared global cache is one env var away** — which is what CI wants, where a cache warm across jobs is the point. Cost of the default: one toolchain copy per checkout, the right trade against a machine-global directory a second checkout can invalidate.
+envy's own default is a user-wide cache; naming a project tree is what opts out. One directive for every platform, because `cache-local` is a literal project-relative path — no absolute values, no `..`, and no expansion of any kind, which is what leaves the binary and both bootstrap launchers nothing to disagree about. (envy ≤ 0.1.9 had `cache-posix`/`cache-win` holding absolute paths with shell-style expansion; four readers implemented it four ways. Those directives are now hard errors naming their replacement, so this migration could not fail silently.)
+
+**The sandbox is the promise; sharing is the opt-in.** Someone who builds scav once and does not care about envy must be able to `rm -rf out` and have nothing left, so the manifest's choice is checked by a test that runs whether or not envy is required. A maintainer with several worktrees runs `./bin/envy cache --shared` once, which records a zero-byte `.envy-cache-shared` marker beside the manifest; `--local` reverses it. A marker is written only when it diverges from the manifest, so most projects never have one. Markers are gitignored and listed in `.worktreeinclude`, which is what carries the choice into a new worktree.
+
+Precedence, identical in every reader: `ENVY_CACHE_ROOT` (absolute only) > marker > `@envy cache-mode` > `@envy cache-local` > user-wide. `build.sh` prints the resolved root, so a 540 MB per-checkout copy is never silent.
+
+**Sharing one cache is safe, and measured rather than assumed.** Packages are keyed by content fingerprint, so an override is usually a partial hit on arrival — scav's `envy.cmake@r0` is the same build another project already fetched. Three simultaneous `envy sync` runs against one fresh cache all succeed. Parallel agents in separate worktrees can share one cache without a lock of our own.
+
+**Not a CMake preset**, which is the obvious place to look: envy resolves the cache and hands back absolute paths to cmake, ninja and python before CMake is invoked at all.
 
 **Not a build prerequisite, and deliberately so.** §6's claim is about the C++ abstract machine, so any conforming C++20 toolchain is supported and `scav selftest` is how a user confirms theirs agrees. Requiring envy to build would contradict that. Standard CMake: `find_package`, no vendored toolchain assumptions, no compiler-specific flags in the exported targets.
 
@@ -342,7 +351,11 @@ C++20's P0907 fixed two's-complement *representation* but kept signed overflow U
 
 **Scope of this section: anything that can reach layout geometry or rendered output.** A structure that only ferries data inside one call is outside it, and `std::unordered_map` is the right choice there — deterministic *by usage*, because a key lookup has no order and the hash value never escapes as a bucket index. Enforce that structurally: `HashMap<K,V>` exposes `find`/`at`/`insert` and **no `begin()`/`end()`**, so "never iterated" is a compile error rather than a review comment.
 
-**Golden hash.** Split into a **structural hash** (ranks, orders, port assignments, bend sequences) and a **coordinate hash**, so a translation-only change is a reviewable diff instead of a global reflow. Hashed inputs: font identity and version, profile id, packer choice, router name and version, **and the space-request columns** — a golden is reproducible only against a stated measurement policy, and the corpus goldens use the reference builder's.
+**Golden hash.** Split into a **structural hash** (ranks, orders, port assignments, bend sequences) and a **coordinate hash**, so a translation-only change is a reviewable diff instead of a global reflow.
+
+**The inputs digest is a third value beside them, not a seed for them.** It covers profile id, packer choice, router name and version, **and the space-request columns** — a golden is reproducible only against a stated measurement policy, and the corpus goldens use the reference builder's. It lands in `scav.geom.inputs` (§11.7a) so it round-trips the model and a binding can read it, and a golden row is `inputs structural coordinate`. Seeding the two geometry hashes with it was the obvious shape and is wrong: the space tables move whenever a label's width does, so the structural hash would move on every remeasure and the split would report a global reflow for a change that reordered nothing. Three values say *which inputs* and *what moved* separately, which is what a reviewer needs.
+
+**Font identity and version reach that digest through the space tables, not as an argument.** Layout is font-blind by construction — text arrives only as integers the app measured — so a font field on `scav_layout_opts` would be a knob layout never reads and a caller could set wrongly. Two fonts that measure one corpus identically *should* hash identically at this stage, because layout genuinely produced the same geometry; the difference is real at the `DrawList`, where glyph advances and `textLength` live, and that is where font identity is hashed explicitly.
 
 **The hash is xxHash32, ours rather than the standard library's.** `std::hash` is permitted to differ between runs of one binary, let alone between implementations. xxhash is not cryptographic and does not need to be: what a golden wants is speed and even distribution over inputs measured in kilobytes. Lane reads are assembled from bytes rather than cast, so a big-endian host agrees, and rotation goes through `<bit>` because `__builtin_rotl` is not standard C++ and a hand-rolled shift pair is UB at a rotation of zero.
 
@@ -842,7 +855,7 @@ Rules:
 - Validate the domain at `scav_layout_run` entry in **every** build (§8.1), and after each retry inflation.
 - Output is **root-absolute**, applied as one final `O(n)` transform over submachine-local internals (ELK's LCA-relative coordinates are a documented trap).
 
-Extent estimate: 2k states ≈ 8,000 x 3,200 pt = 128,000 x 51,200 units, ~4x headroom. **Validate at P4**; if real charts exceed it, reduce the grid to 1/8 pt rather than widening the domain.
+Extent estimate: 2k states ≈ 8,000 x 3,200 pt = 128,000 x 51,200 units, ~4x headroom. **Measured twice, and both numbers are worth keeping.** Under P4's deliberately fat fabricated advances a 2k-state chart came out **181,120 x 277,888** — 1.9x headroom on the tall axis, which is the conservative bound the fabricated measurement exists to produce. Under P5a's real bundled font the same shape is **152,628 x 101,044**, or **5.2x**, so the original estimate was sound and the grid decision was never close. Keep asserting the fabricated case: it is the one that would trip first if a later phase grows boxes, and P6's rank separation and label dummy nodes will grow them. If real charts ever exceed the domain, reduce the grid to 1/8 pt rather than widening it.
 
 Coordinate assignment uses two linear integer primitives, not a solver: **Brandes & Köpf** for cross-axis coordinates (GD 2001 — **read the erratum, arXiv:2008.01252**), and optimal topological numbering for compaction. On an integer grid with integer gaps and an acyclic constraint graph, non-overlap plus separation *is* longest-path.
 
@@ -951,6 +964,7 @@ This list *is* the layout output ABI — there is no bespoke result type (§16) 
 | `scav.geom.port` | `TransId` | `Span` into `scav.geom.portslot` |
 | `scav.geom.portslot` | port ordinal | `{int32 x, y; uint32 side, boundary_depth}` |
 | `scav.geom.chart` | chart | root bounding box |
+| `scav.geom.inputs` | chart | digest of the run's non-geometry inputs (§6) — `u32` |
 | `scav.geom.gen` | chart | generation counter (§13) — `u32`, **not hashed, not serialized** |
 
 `ElemKind::Point` exists so the point and port-slot arrays are real columns rather than side arrays outside the column rules; entity count is the column length. A transition splits into one port per boundary it crosses (§11.1), not two — a depth-16 edge has up to 15, and the structural hash covers all their sides, so one row per transition cannot hold them.
@@ -1125,7 +1139,7 @@ struct DrawList {
 };
 ```
 
-`points` and the scalars are fixed per kind, so a backend switches once and never guesses: `rect`/`rrect` 2 points (corners, `a` = radius) · `line` 2 · `polyline`/`path` N >= 2 (`path` closes, `polyline` does not) · `text` 1 (baseline origin, `payload` = the string) · `circle` 1 + `a` = radius · `arc` 1 + `a`/`b` = start/sweep in 1/64 degree · `image` 2 + `payload` = registered id. Any other count is invalid, and the `DrawList` validator rejects it.
+`points` and the scalars are fixed per kind, so a backend switches once and never guesses: `rect`/`rrect` 2 points (corners, `a` = radius) · `line` 2 · `polyline`/`path` N >= 2 (`path` closes, `polyline` does not) · `text` 1 (baseline origin, `payload` = the string) · `circle` 1 + `a` = radius · `arc` **2** (the corners of its bounding box, as `rect`) + `a`/`b` = start/sweep in 1/64 degree · `image` 2 + `payload` = registered id. Arc takes two points rather than one because a centre plus two angles has nowhere to put a radius, and a bounding box is how SVG, Qt and Cairo all spell an arc — it makes the elliptical case free and needs no field packed two ways. Any other count is invalid, and the `DrawList` validator rejects it.
 
 **Draw order is an explicit `depth`, not array position**, which makes `DrawList`s **appendable**: an app appends the reference builder's output to its own and depth resolves interleaving — no splice, no forking the builder to reach the middle of its stack. Append is not raw concatenation, because `style`, `clip`, `points`, and `payload` are indices into per-list arrays; `scav_drawlist_append` rebases all four, which is the whole reason it is a shipped function rather than a documented `insert()` call.
 
@@ -1156,15 +1170,23 @@ Two properties worth keeping:
 
 **Images: the app registers, the `DrawList` references.** `scav_image_register(images, id, bytes, len, w, h, mime)`. Raster only — arbitrary SVG fragments would be unimplementable in an ImGui backend and would break the one-IR property; vector content is primitives. Dimensions come from registration, not decoding, so no backend needs a decoder to *size* an image and the SVG backend needs none at all (base64 the bytes with their MIME type). Bytes hash into the SVG golden.
 
+**No backend imposes an extent limit of its own.** Diagram size is bounded by the layout grid on the way in (§11.2) and by the output format on the way out, and by nothing in between — no configured maximum, no page, and no writer's own bookkeeping narrower than the format it targets. A format's own ceiling is the only one that may reject: SVG has none, and PNG's `IHDR` is `uint32` capped at 2^31-1 by spec. Where such a ceiling exists, exceeding it is a diagnostic naming the format — never a silent clamp and never a quietly scaled-down diagram, both of which produce a picture that lies about the model.
+
+**A raster backend streams.** Whole-image residency is a memory bound with no format behind it: a 2k-state chart at print resolution is gigabytes of framebuffer that nothing needs at once. Emit row bands instead, which is what PNG's `IDAT` chunk sequence already is, so peak memory tracks the band and not the diagram. v1 ships SVG and ImGui, so this binds whichever raster writer lands later rather than describing code that exists.
+
 ### 12.1 The reference SVG backend
 
 Headless `scav render` is the first user-visible deliverable (P5b), so this one ships.
 
-**Emit the body in integer grid units with the entire scale in one integer `viewBox`.** Float-to-decimal conversion is not portable (MSVC UCRT, glibc, musl, and Apple libc disagree on the last digit) and `-ffp-contract=fast` is the default, so `grid * scale` differs by 1 ULP between Debug and Release. **No float is printed, ever.**
+**Emit the body in integer grid units with the entire scale in one integer `viewBox`.** Float-to-decimal conversion is not portable (MSVC UCRT, glibc, musl, and Apple libc disagree on the last digit) and `-ffp-contract=fast` is the default, so `grid * scale` differs by 1 ULP between Debug and Release. **No float is printed, ever.** SVG sets no extent ceiling, so neither does `render`.
 
 Renderer-vs-metrics agreement, in order: one bundled font, named with a fallback · `textLength` with `lengthAdjust="spacing"` from our own advance sum, turning overflow into slightly loose spacing (Graphviz emits none, which is why its SVG overflows under substitution) · `font-kerning: none` per §11.9.1 · explicit padding, never sizing to exactly the text width · `--embed-font` base64ing the bundled TTF whole into `<defs><style>@font-face`, the only exact agreement that keeps text selectable — whole, not subsetted, because a subsetter is the expensive part of the PDF backend and v1 does not have one. **Never convert text to paths** — needs the outline stack we avoid, discards selection and accessibility.
 
 Emit a stable `class` per element, synthesized from `Prim.origin`: `scav-state scav-id-1234`. External CSS can then restyle a static SVG.
+
+**`arc` is the one kind this backend refuses.** An `A` command needs endpoint coordinates, and deriving those from a start-and-sweep angle needs trigonometry that no integer path in scav supplies — a table at 1/64-degree resolution would be ~23,000 entries, and no shipped builder emits an arc. So `svg_write` reports the offending primitive rather than approximating it, and the table arrives with the first builder that needs one. Eight of nine kinds render.
+
+**Opacity is the one ratio that reaches the output**, because SVG has no integer spelling for it. `fill-opacity="0.501"` is assembled digit by digit from `alpha * 1000 / 255` in integer arithmetic — not a float-to-decimal conversion, so every platform emits the same bytes. Colours stay `#rrggbb` with a separate opacity attribute rather than CSS Color 4's `#rrggbbaa`, which older consumers ignore silently instead of refusing.
 
 PDF is out of v1: xref tables, content streams, and a real TTF subsetter, ~1,500–3,000 LOC, most of it duplicating `--embed-font`. SVG→PDF via any converter covers it.
 
@@ -1383,7 +1405,17 @@ typedef struct { scav_profile profile; scav_router_id router; uint32_t threads; 
 
 **Machine-readable ABI:** the header is the source of truth; a build-time tool extracts functions, structs, enums, and field offsets to a committed JSON sidecar. Bindings are generated; a golden test asserts extraction matches, so an ABI break is a review diff rather than a downstream segfault.
 
-**The extraction tool is deliberately unchosen, and lands with P5c.** Two shapes work. libclang models the layout of any target without running anything, at the cost of provisioning LLVM on six triples that today carry a compiler and little else. A scraper over this header plus a probe program compiled and run by the toolchain under test needs no new dependency and reports the *real* layout rather than a second parser's model of one, at the cost of not answering for a target it cannot execute. Each header is one flat C file with no macros precisely so that either works, so the choice can wait for the phase that writes the tool. Whichever it is, it is tooling-only, and a scraper must fail closed on a declaration form it does not recognize — silently skipping one would leave exactly the drift the golden exists to catch.
+**The extraction tool is the scraper plus a probe, chosen at P5c.** libclang was the alternative and it lost on the cost §16 already named: provisioning LLVM on six triples that carry a compiler and little else. That cost turned out to be worse than estimated — on darwin the lint gate's clang-tools package *compiles clang from source*, which is what an ABI extractor would have inherited on every row. The scraper needs nothing new, and the probe reports the layout the shipping compiler really produces rather than a second parser's model of one.
+
+**Accepted cost, stated plainly: it cannot answer for a target it cannot execute.** `wasm32-wasi` therefore needs either a runner in the P11 row or a declared fallback, and that is a P11 decision rather than a gap here.
+
+The scraper **fails closed** — a declaration form it does not model is an error, never a silent skip, because skipping one would leave exactly the drift the golden exists to catch. It reads each header the way a C compiler does, with `__cplusplus` undefined, so the `extern "C"` braces and any C++-only section drop out together; a namespace body scraped as if it were ABI is the failure mode that rule prevents. The probe compiles as C++ with the project's own compiler, since that is the toolchain that ships and these are standard-layout PODs; that the headers *also* compile as C is a separate claim, checked by a separate C11 compile of all of them together.
+
+**Padding is recorded, not inferred.** Every struct carries its size, alignment, per-field offsets and total padding, so a struct that grows a hole reads as an ABI break in the diff. Only `scav_spaces` has any — 16 bytes, from four pointer-and-count pairs on LP64 — which is exactly the case an inferring reader would have got wrong.
+
+**No single-field id struct crosses this ABI**, so the flatten-to-int hazard has nothing to bite: `scav_router_id` and `scav_column_id` are `typedef uint32_t` and every id-shaped C++ type (`StateId`, `TransId`) stays C++-internal. The rule stands for whenever one appears.
+
+**One ABI field was renamed for the bindings' sake**: `scav_pending.from` became `from_doc`. `from` is a keyword in Python and several other binding languages, so no generated attribute could name it — a permanent wart in exchange for one rename at the phase that first generates bindings.
 
 Editor commands do not cross the C boundary as objects; that layer's API is opcodes. (Note `virtual Command Inverse()` returning an abstract base by value does not compile — the editor's inverse is a command buffer append.)
 

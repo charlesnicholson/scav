@@ -17,10 +17,11 @@ namespace {
 struct RouterRow {
   char const *name;
   uint32_t name_len;
+  uint32_t version;  // bumped whenever this router's output moves
 };
 
 constexpr std::array<RouterRow, 1> ROUTERS{ {
-    { .name = "straight", .name_len = 8 },
+    { .name = "straight", .name_len = 8, .version = 1 },
 } };
 
 }  // namespace
@@ -31,6 +32,12 @@ bool router_name(uint32_t index, scav_byte const *&out, uint32_t &len) {
   if (index >= ROUTERS.size()) { return false; }
   out = reinterpret_cast<scav_byte const *>(ROUTERS[index].name);
   len = ROUTERS[index].name_len;
+  return true;
+}
+
+bool router_version(uint32_t index, uint32_t &out) {
+  if (index >= ROUTERS.size()) { return false; }
+  out = ROUTERS[index].version;
   return true;
 }
 

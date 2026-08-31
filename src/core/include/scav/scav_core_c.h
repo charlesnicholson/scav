@@ -24,7 +24,10 @@ enum {
   SCAV_E_STATE = -2,       /* the call does not apply in the handle's state */
   SCAV_E_CAPACITY = -3,    /* buffer too small; the required count was written */
   SCAV_E_LOAD = -4,        /* the load reported diagnostics; read them */
-  SCAV_E_LAYOUT = -5       /* layout reported diagnostics; read scav_chart_diag */
+  SCAV_E_LAYOUT = -5,      /* layout reported diagnostics; read scav_chart_diag */
+  SCAV_E_FONT = -6,        /* the font is missing a table, or its tables disagree */
+  SCAV_E_NO_GLYPH = -7,    /* the font has no glyph for a codepoint measured */
+  SCAV_E_DRAWLIST = -8     /* a primitive contradicts its own kind */
 };
 /* NOLINTEND(readability-identifier-naming) */
 
@@ -36,12 +39,15 @@ uint32_t scav_abi_version(void);
 typedef struct scav_load scav_load;
 typedef struct scav_chart scav_chart;
 
-/* 16 bytes, no padding. `from` is a DocId: pending is reported before anything
- * is instantiated, and a file included N times is fetched once. `stmt_row`
- * indexes the statements of `from`'s document. */
+/* 16 bytes, no padding. `from_doc` is a DocId: pending is reported before
+ * anything is instantiated, and a file included N times is fetched once.
+ * `stmt_row` indexes the statements of that document. Not spelled `from`,
+ * because that is a keyword in Python and several other binding languages, and
+ * a field no binding can name as an attribute is a field with a permanent
+ * wart. */
 typedef struct {
   scav_span path;
-  uint32_t from;
+  uint32_t from_doc;
   uint32_t stmt_row;
 } scav_pending;
 /* NOLINTEND(modernize-use-using, readability-identifier-naming) */

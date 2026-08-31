@@ -14,7 +14,8 @@ find_package(scav REQUIRED)
 add_executable(consumer main.cpp)
 # Compiles every public header with nothing on the include path but the
 # installed prefix.
-target_link_libraries(consumer PRIVATE scav::core scav::layout)
+target_link_libraries(consumer PRIVATE
+  scav::core scav::layout scav::draw scav::svg)
 
 # The consumer picks its own language level; the exported target asks only for
 # cxx_std_20.

@@ -7,6 +7,8 @@
 
 #include "doctest.h"
 
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <ostream>
@@ -27,7 +29,8 @@ constexpr uint64_t LOAD_FLOOR_MB_PER_S{ 5 };
 // Doubling the network must not more than treble the work. Generous, because
 // the point is catching a quadratic and not tracking a constant factor.
 constexpr double SCALING_SLACK{ 3.0 };
-constexpr uint32_t SCALING_RUNS{ 3 };
+constexpr uint32_t SCALING_RUNS{ 5 };
+constexpr uint32_t SCALING_ATTEMPTS{ 3 };
 
 // Instrumentation makes the absolute numbers describe the instrumentation, so
 // those rows run a smaller network; the ratio is what carries the assertion.
@@ -54,6 +57,46 @@ uint64_t fastest_micros(Once &&once) {
     once();
     uint64_t const us{ micros_since(start) };
     best = (us < best) ? us : best;
+  }
+  return best;
+}
+
+// The estimator for a *ratio*, which is not the one for a throughput floor.
+//
+// min-of-N biases a ratio upward: the shorter side finds an uncontended window
+// more often than the longer one, so growth reads high on a loaded machine.
+// Summing is worse -- it keeps every outlier. The median discards them from both
+// sides alike, which is what leaves the ratio meaningful while a build runs
+// beside it. One unmeasured run first, so a cold allocator is not one of the
+// samples.
+template <typename Once>
+uint64_t median_micros(Once &&once) {
+  once();
+  std::array<uint64_t, SCALING_RUNS> samples{};
+  for (uint32_t i = 0; i < SCALING_RUNS; ++i) {
+    auto const start{ std::chrono::steady_clock::now() };
+    once();
+    samples[i] = micros_since(start);
+  }
+  std::ranges::sort(samples);
+  return samples[SCALING_RUNS / 2];
+}
+
+// Both sides of a ratio, measured together and retried.
+//
+// A scheduling hiccup inflates one attempt; a quadratic inflates every one. So
+// the pair kept is the one with the lowest growth, which noise can only make
+// look better and a real quadratic cannot fake.
+struct Pair {
+  uint64_t small, large;
+};
+
+template <typename Small, typename Large>
+Pair best_pair(Small &&small, Large &&large) {
+  Pair best{ .small = 1, .large = UINT64_MAX };
+  for (uint32_t attempt = 0; attempt < SCALING_ATTEMPTS; ++attempt) {
+    Pair const got{ .small = median_micros(small), .large = median_micros(large) };
+    if ((got.large * best.small) < (best.large * got.small)) { best = got; }
   }
   return best;
 }
@@ -177,8 +220,8 @@ TEST_CASE("perf: chain load is linear in the number of documents") {
   std::vector<Doc> const small{ chain(NARROW, 20) };
   std::vector<Doc> const large{ chain(WIDE, 20) };
 
-  uint64_t const small_us{ fastest_micros([&] { std::ignore = run_once(small); }) };
-  uint64_t const large_us{ fastest_micros([&] { std::ignore = run_once(large); }) };
+  auto const [small_us, large_us]{ best_pair([&] { std::ignore = run_once(small); },
+                                             [&] { std::ignore = run_once(large); }) };
 
   double const ratio{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   MESSAGE("chain " << NARROW << " -> " << WIDE << " documents: " << small_us << " us -> "
@@ -197,8 +240,8 @@ TEST_CASE("perf: instantiation is linear in the number of instantiations") {
   CHECK(outcome.documents == 2);    // parsed once, whatever the instance count
   CHECK(outcome.includes == WIDE);  // and instantiated once per include
 
-  uint64_t const small_us{ fastest_micros([&] { std::ignore = run_once(small); }) };
-  uint64_t const large_us{ fastest_micros([&] { std::ignore = run_once(large); }) };
+  auto const [small_us, large_us]{ best_pair([&] { std::ignore = run_once(small); },
+                                             [&] { std::ignore = run_once(large); }) };
 
   double const ratio{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   MESSAGE("star " << NARROW << " -> " << WIDE << " instantiations: " << small_us
@@ -237,8 +280,8 @@ TEST_CASE("perf: the digest is linear in the model") {
 
   Chart const a{ hash_of(small) };
   Chart const b{ hash_of(large) };
-  uint64_t const a_us{ fastest_micros([&] { std::ignore = chart_structural_hash(a); }) };
-  uint64_t const b_us{ fastest_micros([&] { std::ignore = chart_structural_hash(b); }) };
+  auto const [a_us, b_us]{ best_pair([&] { std::ignore = chart_structural_hash(a); },
+                                     [&] { std::ignore = chart_structural_hash(b); }) };
 
   double const ratio{ static_cast<double>(b_us) / static_cast<double>(a_us) };
   MESSAGE("digest " << NARROW << " -> " << WIDE << " documents: " << a_us << " us -> "

@@ -10,6 +10,11 @@
 # Rewritten by envy on every invocation, and names a per-machine cache path.
 /.luarc.json
 
+# `envy cache --local|--shared` writes one of these to record one machine's
+# preference. Conductor workspaces get shared via .conductor/settings.toml.
+/.envy-cache-local
+/.envy-cache-shared
+
 # envy deploys a launcher per product, and these two exist only under SCAV_LINT.
 # Tracking them would make an ordinary `envy sync` delete them.
 /bin/clang-format

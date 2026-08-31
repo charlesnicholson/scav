@@ -44,7 +44,7 @@ bool profile_validate(scav_profile const &p);
 // columns holding the last successful run, findings sorted like a validator's.
 bool layout_run(Chart &c,
                 scav_spaces const &s,
-                scav_profile const &p,
+                scav_layout_opts const &o,
                 std::vector<scav_placed> &placed,
                 std::vector<Diagnostic> &diags);
 
@@ -54,12 +54,22 @@ bool layout_run(Chart &c,
 uint32_t layout_structural_hash(Chart const &c);
 uint32_t layout_coordinate_hash(Chart const &c);
 
+// Everything the run depended on that is not geometry: the profile, the
+// router's name and version, and the space tables -- through which the font
+// reaches a digest it cannot be an argument to. A third value rather than a
+// seed for the two above, which would move the structural hash on any space
+// change and cost the split its whole point. 0 on a chart never laid out.
+uint32_t layout_inputs_digest(Chart const &c);
+
 // Routers ===================================================================
 
 uint32_t router_count();
 
 // The name of the router at `index`. False past the end.
 bool router_name(uint32_t index, scav_byte const *&out, uint32_t &len);
+
+// Its version, bumped whenever its output moves. False past the end.
+bool router_version(uint32_t index, uint32_t &out);
 
 // False when nothing registered has that name.
 bool router_by_name(scav_byte const *name, uint32_t len, scav_router_id &out);

@@ -18,6 +18,7 @@ constexpr std::string_view USAGE{
   "  check <file>                 structural validation, exit 1 on a finding\n"
   "  deps [--target NAME] <file>  the document network as a depfile\n"
   "  dump [--hash|--json] [--layout] <file>  the model; --layout adds geometry\n"
+  "  render [-o FILE] [--embed-font] [--profile NAME] <file>   chart -> SVG\n"
 };
 
 int usage() {
@@ -54,6 +55,31 @@ int dispatch(int argc, char **argv) {
     }
     if ((path == nullptr) || (hash && (json || layout))) { return usage(); }
     return run_dump(path, hash, json, layout);
+  }
+
+  if (verb == "render") {
+    char const *out{ nullptr };
+    char const *profile{ "readable" };
+    bool embed{ false };
+    for (int i = 2; i < argc; ++i) {
+      std::string_view const arg{ argv[i] };
+      if (arg == "-o") {
+        if (((i + 1) >= argc) || (out != nullptr)) { return usage(); }
+        out = argv[++i];
+      } else if (arg == "--profile") {
+        if ((i + 1) >= argc) { return usage(); }
+        profile = argv[++i];
+      } else if (arg == "--embed-font") {
+        if (embed) { return usage(); }
+        embed = true;
+      } else if ((path == nullptr) && !arg.starts_with("-")) {
+        path = argv[i];
+      } else {
+        return usage();
+      }
+    }
+    if (path == nullptr) { return usage(); }
+    return run_render(path, out, embed, profile);
   }
 
   if (verb == "check") {

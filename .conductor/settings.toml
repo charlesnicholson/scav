@@ -1,0 +1,9 @@
+"$schema" = "https://conductor.build/schemas/settings.repo.schema.json"
+
+# Every workspace is a fresh worktree, and the manifest's own cache lives in
+# out/, so without this each one downloads its own ~540 MB toolchain. `envy cache
+# --shared` records a marker that points this worktree at the user-wide cache,
+# where the packages are almost certainly already present. Idempotent, so it is
+# safe on every workspace creation.
+[scripts]
+setup = "./bin/envy cache --shared"

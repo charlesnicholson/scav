@@ -25,16 +25,26 @@ layout hint and grouping is how an author writes that hint down. It is a bit and
 not a count, so a run collapses to one, and it is suppressed where it would open
 or close a block.
 
-The `scav` executable (`apps/cli`) now has five spellings across four verbs:
+The `scav` executable (`apps/cli`) now has five verbs:
 
 ```
+scav render [-o F] [--embed-font] [--profile N] <file>   chart -> SVG
 scav fmt [--check] <file>...      canonical print, in place; --check gates
 scav check <file>                 structural validation, exit 1 on a finding
 scav deps [--target N] <file>     the document network as a make/ninja depfile
-scav dump [--hash|--json] <file>  the model: entity rows, not syntax
+scav dump [--hash|--json] [--layout] <file>  the model: entity rows, not syntax
 ```
 
-`libscavlayout` computes skeleton geometry -- boundary splitting, the box formula, row packing, straight-line routes -- read back as columns or `scav dump --layout`; real ordering, routing, `DrawList`, and rendering are not built.
+`libscavlayout` computes skeleton geometry -- boundary splitting, the box
+formula, row packing, straight-line routes. `libscavdraw` measures text against
+the bundled font, builds a `DrawList` from the geometry columns, and
+`libscavsvg` writes it out; `scav render` is those three in a line. Real
+ordering and orthogonal routing are not built, so labels can still land on top
+of a state name -- that is the trivial router, and P6 and P7 are what fix it.
+
+Bindings are generated from `abi/scav_abi.json`, which is extracted from the C
+headers and committed as a golden, so an ABI break is a review diff rather than
+a downstream segfault. `bindings/python/scav` drives the whole pipeline.
 
 Four properties of the front end are worth knowing before reading it:
 
@@ -80,7 +90,59 @@ incremental.
 
 The first run takes a few minutes: [envy](https://github.com/envy-package-manager/envy)
 bootstraps itself, then provisions cmake, ninja, doctest and python 3.14 into
-`out/.envy`. After that it is a cache hit.
+`out/.envy`. After that it is a cache hit. Every build prints which cache it
+used, because the default costs ~540 MB and that should not be silent.
+
+### Where the toolchain lives
+
+Under `out/.envy`, with everything else scav generates, so **`rm -rf out` removes
+every tool, package and build artifact**. Nothing is written to `$HOME`. That is
+the manifest's choice:
+
+```lua
+-- @envy cache-local "out/.envy"
+```
+
+envy defaults to a user-wide cache; naming a project tree is what opts out of it.
+
+The cost is one toolchain copy per checkout, ~540 MB. If you keep several
+worktrees or run parallel agents, run this once from the repo root and every
+worktree shares one copy:
+
+```sh
+./bin/envy cache --shared
+```
+
+That writes a zero-byte `.envy-cache-shared` marker, which every reader — the
+binary and both bootstrap launchers — honours. `./bin/envy cache --local` goes
+back and removes the marker; a marker is only ever written when it diverges from
+the manifest, so the steady state is no marker at all. `.envy-cache-*` is
+gitignored and listed in `.worktreeinclude`, so Conductor carries your choice
+into new workspaces. Every build prints the resolved root.
+
+Worth knowing before sharing:
+
+- **Mostly free.** Packages are keyed by content fingerprint, so scav's
+  `envy.cmake@r0` is the same `darwin-arm64-blake3-49a9b2620de8c380` build any
+  other envy project already fetched. Measured: three of four packages hit
+  immediately, a 58 MB python fetch, ~499 MB saved per extra worktree.
+- **Concurrent access is safe.** Three simultaneous `envy sync` runs against one
+  fresh cache all exit 0 — one installs, the others hit, resulting tree correct.
+- **What you give up is the factory reset.** `rm -rf out` no longer removes the
+  toolchain, and another checkout can invalidate a shared tree. Hence the default.
+
+`ENVY_CACHE_ROOT` (absolute only) still overrides everything, which is what CI
+uses. This cannot live in a CMake preset: envy resolves the cache and hands back
+absolute paths to cmake, ninja and python before CMake is invoked at all.
+
+Conductor workspaces run `./bin/envy cache --shared` from
+`.conductor/settings.toml`, so an agentic session on a fresh worktree reuses the
+user-wide cache instead of downloading its own.
+
+Bumping the pinned envy version means regenerating the tracked launchers under
+`bin/` with `./bin/envy deploy --platform all` — `envy sync` deploys only the
+host's flavour, and a mixed set is a build step resolving the cache by older
+rules than the binary it bootstraps. `func.provisioning` fails on a mixed set.
 
 ```
 ./build.sh --config debug            # matrix config: debug | release | testable

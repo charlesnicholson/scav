@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """Every tool the configured tree recorded came from envy, not from whatever the
-machine had. Opt-in, because envy is explicitly not a build prerequisite."""
+machine had. Opt-in, because envy is explicitly not a build prerequisite.
+
+The sandbox itself is not opt-in and is checked unconditionally below: the
+manifest asks for a cache under out/ so that removing that one directory removes
+every tool, package and build artifact."""
 
 import os
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -17,6 +22,12 @@ PROVISIONED: tuple[str, ...] = (
 )
 
 
+def envy(repo_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    launcher = "bin/envy.bat" if os.name == "nt" else "bin/envy"
+    return subprocess.run([str(repo_root / launcher), *args], cwd=repo_root,
+                          capture_output=True, text=True, check=False)
+
+
 class TestProvisioning(unittest.TestCase):
     cfg: scavtest.Config
     packages: Path
@@ -24,11 +35,13 @@ class TestProvisioning(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.cfg = scavtest.load_config()
-        # ENVY_CACHE_ROOT beats the manifest directive; CI sets it so one warm
-        # cache is shared across jobs.
-        override = os.environ.get("ENVY_CACHE_ROOT")
-        root = Path(override or cls.cfg.repo_root / "out/.envy")
-        cls.packages = (root / "packages").resolve()
+        # Asked of envy, not guessed. envy resolves this from four tiers -- an
+        # absolute ENVY_CACHE_ROOT, a `--local`/`--shared` marker, `@envy
+        # cache-mode`, then `@envy cache-local` -- and reimplementing that here
+        # is how a test starts disagreeing with the thing it is testing.
+        resolved = envy(cls.cfg.repo_root, "cache", "--root")
+        assert resolved.returncode == 0, resolved.stderr
+        cls.packages = (Path(resolved.stdout.strip()) / "packages").resolve()
 
     def setUp(self) -> None:
         if os.environ.get("SCAV_REQUIRE_ENVY") != "1":
@@ -46,12 +59,87 @@ class TestProvisioning(unittest.TestCase):
                 self.assertTrue(path.is_relative_to(self.packages),
                                 f"{key} resolved to {path}, outside {self.packages}")
 
-    def test_the_manifest_defaults_the_cache_under_out(self) -> None:
+
+class TestSandbox(unittest.TestCase):
+    """`rm -rf out` is a factory reset. That is a promise to anyone who builds
+    scav once and does not want a toolchain left on their machine, so it is
+    checked whether or not envy is required."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.cfg = scavtest.load_config()
+        cls.manifest = (cls.cfg.repo_root / "envy.lua").read_text(encoding="utf-8")
+
+    def test_the_manifest_asks_for_a_cache_under_out(self) -> None:
         # A property of the manifest, not of this invocation, so it is checked as
-        # text: CI's override must not hide a manifest that changed the default.
-        manifest = (self.cfg.repo_root / "envy.lua").read_text(encoding="utf-8")
-        for directive in ('cache-posix "out/.envy"', 'cache-win "out\\.envy"'):
-            self.assertIn(f"-- @envy {directive}", manifest)
+        # text: a marker or an override must not hide a manifest that changed the
+        # default for everyone.
+        self.assertIn('-- @envy cache-local "out/.envy"', self.manifest)
+
+    def test_the_manifest_does_not_use_the_removed_directives(self) -> None:
+        """cache-posix/cache-win are errors in envy 0.2.1, not synonyms. They held
+        absolute paths and needed shell expansion, which four readers implemented
+        four ways -- the bug cache-local exists to remove."""
+        for gone in ("cache-posix", "cache-win"):
+            self.assertNotIn(gone, self.manifest)
+
+    def test_naming_the_tree_is_what_selects_local_mode(self) -> None:
+        """envy defaults to the user-wide cache with no directives at all, so the
+        sandbox is `cache-local` doing its job. A `cache-mode "shared"` line would
+        silently undo it, which is why its absence is asserted rather than assumed."""
+        self.assertNotIn("cache-mode", self.manifest)
+
+    def test_the_resolved_root_is_under_out_on_a_clean_checkout(self) -> None:
+        """The manifest is only half the claim; this is envy agreeing with it.
+
+        Skipped when a marker or an override is in play, because then the
+        developer has deliberately said otherwise and that is the feature.
+        """
+        state = self.cfg.repo_root
+        if os.environ.get("ENVY_CACHE_ROOT") or any(
+                (state / m).exists()
+                for m in (".envy-cache-local", ".envy-cache-shared")):
+            self.skipTest("a marker or ENVY_CACHE_ROOT is deliberately overriding")
+        resolved = envy(self.cfg.repo_root, "cache", "--root")
+        self.assertEqual(0, resolved.returncode, resolved.stderr)
+        root = Path(resolved.stdout.strip()).resolve()
+        self.assertEqual((self.cfg.repo_root / "out/.envy").resolve(), root)
+
+    def test_the_mode_markers_can_never_be_committed(self) -> None:
+        """A marker records one machine's preference. Committing one would hand
+        every other checkout a cache location it never asked for."""
+        ignored = (self.cfg.repo_root / ".gitignore").read_text(encoding="utf-8")
+        for marker in (".envy-cache-local", ".envy-cache-shared"):
+            self.assertIn(f"/{marker}", ignored.splitlines())
+
+    def test_the_tracked_launchers_are_all_one_schema(self) -> None:
+        """`envy sync` deploys only the host's flavour, so a bump run on one OS
+        leaves the other's tracked scripts behind. A stale launcher resolves the
+        cache by older rules than the binary it bootstraps, which is the exact
+        split `cache-local` was introduced to end. Regenerate with
+        `./bin/envy deploy --platform all`."""
+        schemas: dict[str, set[str]] = {}
+        for script in sorted((self.cfg.repo_root / "bin").iterdir()):
+            if not script.is_file():
+                continue
+            for line in script.read_text(encoding="utf-8",
+                                         errors="replace").splitlines()[:4]:
+                if "envy-managed schema" in line:
+                    schemas.setdefault(line.split('"')[1], set()).add(script.name)
+                    break
+        self.assertTrue(schemas, "no envy-managed launchers found under bin/")
+        self.assertEqual(1, len(schemas), f"mixed launcher schemas: {schemas}")
+
+    def test_a_new_conductor_workspace_shares_the_cache(self) -> None:
+        """Every Conductor workspace is a fresh worktree, so without this each one
+        downloads its own toolchain. One mechanism only: a copied marker would
+        fight the setup script over which cache a workspace uses."""
+        settings = self.cfg.repo_root / ".conductor/settings.toml"
+        self.assertTrue(settings.is_file(), ".conductor/settings.toml is missing")
+        self.assertIn("envy cache --shared",
+                      settings.read_text(encoding="utf-8"))
+        self.assertFalse((self.cfg.repo_root / ".worktreeinclude").exists(),
+                         "a copied marker would contradict the setup script")
 
 
 if __name__ == "__main__":

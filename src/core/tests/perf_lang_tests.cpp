@@ -9,6 +9,8 @@
 
 #include "doctest.h"
 
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <ostream>
@@ -45,6 +47,7 @@ uint64_t micros_since(std::chrono::steady_clock::time_point start) {
 // The scaling inputs run in hundreds of microseconds. Noise only adds time, so
 // the fastest of several runs is the estimate.
 constexpr uint32_t SCALING_RUNS{ 5 };
+constexpr uint32_t SCALING_ATTEMPTS{ 3 };
 
 template <typename Once>
 uint64_t fastest_micros(Once &&once) {
@@ -54,6 +57,46 @@ uint64_t fastest_micros(Once &&once) {
     once();
     uint64_t const us{ micros_since(start) };
     best = (us < best) ? us : best;
+  }
+  return best;
+}
+
+// The estimator for a *ratio*, which is not the one for a throughput floor.
+//
+// min-of-N biases a ratio upward: the shorter side finds an uncontended window
+// more often than the longer one, so growth reads high on a loaded machine.
+// Summing is worse -- it keeps every outlier. The median discards them from both
+// sides alike, which is what leaves the ratio meaningful while a build runs
+// beside it. One unmeasured run first, so a cold allocator is not one of the
+// samples.
+template <typename Once>
+uint64_t median_micros(Once &&once) {
+  once();
+  std::array<uint64_t, SCALING_RUNS> samples{};
+  for (uint32_t i = 0; i < SCALING_RUNS; ++i) {
+    auto const start{ std::chrono::steady_clock::now() };
+    once();
+    samples[i] = micros_since(start);
+  }
+  std::ranges::sort(samples);
+  return samples[SCALING_RUNS / 2];
+}
+
+// Both sides of a ratio, measured together and retried.
+//
+// A scheduling hiccup inflates one attempt; a quadratic inflates every one. So
+// the pair kept is the one with the lowest growth, which noise can only make
+// look better and a real quadratic cannot fake.
+struct Pair {
+  uint64_t small, large;
+};
+
+template <typename Small, typename Large>
+Pair best_pair(Small &&small, Large &&large) {
+  Pair best{ .small = 1, .large = UINT64_MAX };
+  for (uint32_t attempt = 0; attempt < SCALING_ATTEMPTS; ++attempt) {
+    Pair const got{ .small = median_micros(small), .large = median_micros(large) };
+    if ((got.large * best.small) < (best.large * got.small)) { best = got; }
   }
   return best;
 }
@@ -250,8 +293,8 @@ TEST_CASE("perf: lexing is linear in the input") {
   // faults the second one does not.
   time_lex(small_bytes);
   time_lex(large_bytes);
-  uint64_t const small_us{ fastest_micros([&] { time_lex(small_bytes); }) };
-  uint64_t const large_us{ fastest_micros([&] { time_lex(large_bytes); }) };
+  auto const [small_us, large_us]{ best_pair([&] { time_lex(small_bytes); },
+                                             [&] { time_lex(large_bytes); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_SCALING) {
@@ -319,8 +362,8 @@ TEST_CASE("perf: a wide sibling list does not degrade") {
 
   REQUIRE(parse(small).ok);
   REQUIRE(parse(large).ok);
-  uint64_t const small_us{ fastest_micros([&] { parse(small); }) };
-  uint64_t const large_us{ fastest_micros([&] { parse(large); }) };
+  auto const [small_us,
+              large_us]{ best_pair([&] { parse(small); }, [&] { parse(large); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_SCALING) {
@@ -352,8 +395,8 @@ TEST_CASE("perf: a long comment run does not degrade") {
 
   Parsed const small_parsed{ parse(small) };
   Parsed const large_parsed{ parse(large) };
-  uint64_t const small_us{ fastest_micros([&] { parse(small); }) };
-  uint64_t const large_us{ fastest_micros([&] { parse(large); }) };
+  auto const [small_us,
+              large_us]{ best_pair([&] { parse(small); }, [&] { parse(large); }) };
 
   REQUIRE(small_parsed.ok);
   REQUIRE(large_parsed.ok);
@@ -377,8 +420,8 @@ TEST_CASE("perf: deep nesting does not degrade") {
 
   REQUIRE(parse_deep(small, 300).ok);
   REQUIRE(parse_deep(large, 300).ok);
-  uint64_t const small_us{ fastest_micros([&] { parse_deep(small, 300); }) };
-  uint64_t const large_us{ fastest_micros([&] { parse_deep(large, 300); }) };
+  auto const [small_us, large_us]{ best_pair([&] { parse_deep(small, 300); },
+                                             [&] { parse_deep(large, 300); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_SCALING) {
@@ -426,8 +469,8 @@ TEST_CASE("perf: printing is linear in the input") {
   double const ratio{ static_cast<double>(large.src_bytes.size()) /
                       static_cast<double>(small.src_bytes.size()) };
 
-  uint64_t const small_us{ fastest_micros([&] { std::ignore = time_print(small); }) };
-  uint64_t const large_us{ fastest_micros([&] { std::ignore = time_print(large); }) };
+  auto const [small_us, large_us]{ best_pair([&] { std::ignore = time_print(small); },
+                                             [&] { std::ignore = time_print(large); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_SCALING) {
@@ -453,8 +496,8 @@ TEST_CASE("perf: a block with many attributes does not degrade") {
   ParsedDocument const small{ parse_for_print(attr_block(2000)) };
   ParsedDocument const large{ parse_for_print(attr_block(8000)) };
 
-  uint64_t const small_us{ fastest_micros([&] { std::ignore = time_print(small); }) };
-  uint64_t const large_us{ fastest_micros([&] { std::ignore = time_print(large); }) };
+  auto const [small_us, large_us]{ best_pair([&] { std::ignore = time_print(small); },
+                                             [&] { std::ignore = time_print(large); }) };
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_SCALING) {
     CHECK_MESSAGE(growth < 4.0 * SCALING_SLACK,

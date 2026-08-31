@@ -1,0 +1,10 @@
+axis.scav 296edfac 81
+brew.scav 1552da6d 53
+dock.scav cf084b41 46
+estop.scav 7b8b4719 18
+led.scav c2bf4bf1 18
+mill.scav f0bc8b4a 450
+ota.scav 8b2db1d5 61
+tcp.scav b55d6d61 66
+toolchanger.scav 0ff4f5b5 135
+vac.scav 91ca733e 99

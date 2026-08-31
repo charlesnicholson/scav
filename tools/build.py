@@ -39,6 +39,14 @@ def run(*cmd: str | Path) -> None:
     subprocess.run(argv, cwd=REPO_ROOT, check=True)
 
 
+def envy_cache_root() -> str:
+    """Asked of envy rather than derived; `--root` skips the usage scan."""
+    return subprocess.run(
+        [str(ENVY), "cache", "--root"], cwd=REPO_ROOT, check=False,
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+    ).stdout.strip() or "unknown"
+
+
 def envy_product(name: str) -> Path:
     """envy narrates to stderr and prints the path to stdout."""
     out = subprocess.run(
@@ -146,6 +154,11 @@ def main() -> int:
 
     if not args.no_sync:
         run(ENVY, "sync")
+
+    cache = envy_cache_root()
+    hint = ("  (./bin/envy cache --shared to share one across worktrees)"
+            if Path(cache).is_relative_to(REPO_ROOT) else "")
+    print(f"envy cache: {cache}{hint}", flush=True)
 
     cmake, ninja, doctest, python = [
         envy_product(p) for p in ("cmake", "ninja", "doctest_cpp_dir", "python3")
