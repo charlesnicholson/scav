@@ -130,14 +130,16 @@ class TestSandbox(unittest.TestCase):
         self.assertTrue(schemas, "no envy-managed launchers found under bin/")
         self.assertEqual(1, len(schemas), f"mixed launcher schemas: {schemas}")
 
-    def test_a_new_worktree_inherits_the_developers_choice(self) -> None:
-        """The markers are the one piece of state a fresh worktree needs and git
-        will not carry, so Conductor is told to copy them."""
-        include = self.cfg.repo_root / ".worktreeinclude"
-        self.assertTrue(include.is_file(), ".worktreeinclude is missing")
-        listed = include.read_text(encoding="utf-8")
-        for marker in (".envy-cache-local", ".envy-cache-shared"):
-            self.assertIn(marker, listed)
+    def test_a_new_conductor_workspace_shares_the_cache(self) -> None:
+        """Every Conductor workspace is a fresh worktree, so without this each one
+        downloads its own toolchain. One mechanism only: a copied marker would
+        fight the setup script over which cache a workspace uses."""
+        settings = self.cfg.repo_root / ".conductor/settings.toml"
+        self.assertTrue(settings.is_file(), ".conductor/settings.toml is missing")
+        self.assertIn("envy cache --shared",
+                      settings.read_text(encoding="utf-8"))
+        self.assertFalse((self.cfg.repo_root / ".worktreeinclude").exists(),
+                         "a copied marker would contradict the setup script")
 
 
 if __name__ == "__main__":

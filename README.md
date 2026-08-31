@@ -135,6 +135,10 @@ Worth knowing before sharing:
 uses. This cannot live in a CMake preset: envy resolves the cache and hands back
 absolute paths to cmake, ninja and python before CMake is invoked at all.
 
+Conductor workspaces run `./bin/envy cache --shared` from
+`.conductor/settings.toml`, so an agentic session on a fresh worktree reuses the
+user-wide cache instead of downloading its own.
+
 Bumping the pinned envy version means regenerating the tracked launchers under
 `bin/` with `./bin/envy deploy --platform all` — `envy sync` deploys only the
 host's flavour, and a mixed set is a build step resolving the cache by older

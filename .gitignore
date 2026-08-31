@@ -11,7 +11,7 @@
 /.luarc.json
 
 # `envy cache --local|--shared` writes one of these to record one machine's
-# preference. Carried into new worktrees by .worktreeinclude, never committed.
+# preference. Conductor workspaces get shared via .conductor/settings.toml.
 /.envy-cache-local
 /.envy-cache-shared
 
