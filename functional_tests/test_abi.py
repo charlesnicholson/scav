@@ -108,6 +108,33 @@ class TestAbiGolden(unittest.TestCase):
         # must not appear as an alias.
         self.assertNotIn("Coord", {a["name"] for a in surface["aliases"]})
 
+    def test_the_probe_speaks_each_compiler_driver_dialect(self) -> None:
+        """cl ignores `-std=c++20` and deprecates `-o`, so a GNU command line
+        silently built the wrong thing there. Asserted for both dialects because
+        only one of them can be exercised on any given machine."""
+        sys.path.insert(0, str(EXTRACT.parent))
+        import abi_extract
+        args = (Path("p.cpp"), Path("p"), Path("w"), [Path("inc")])
+
+        gnu = abi_extract.probe_command("clang++", *args)
+        self.assertIn("-std=c++20", gnu)
+        self.assertIn("-o", gnu)
+
+        for spelling in ("cl", "cl.exe", "C:/VC/bin/cl.EXE"):
+            with self.subTest(compiler=spelling):
+                self.assertTrue(abi_extract.is_msvc(spelling))
+                msvc = abi_extract.probe_command(spelling, *args)
+                self.assertIn("/std:c++20", msvc)
+                self.assertNotIn("-std=c++20", msvc)
+                self.assertNotIn("-o", msvc)
+                # /Fe and /Fo carry their path attached, and without /Fo the
+                # object lands in the working directory.
+                self.assertTrue(any(a.startswith("/Fe") for a in msvc))
+                self.assertTrue(any(a.startswith("/Fo") for a in msvc))
+
+        # clang-cl takes the GNU branch on purpose; see is_msvc.
+        self.assertFalse(abi_extract.is_msvc("clang-cl"))
+
     def test_the_generated_layer_is_the_one_the_golden_describes(self) -> None:
         """Generated, so it cannot drift -- which is only true if regenerating
         is a no-op."""

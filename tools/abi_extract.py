@@ -312,6 +312,30 @@ def probe_source(headers: list[str], structs: list[str],
     return "\n".join(lines) + "\n"
 
 
+def is_msvc(compiler: str) -> bool:
+    """Whether the compiler needs cl's flag dialect rather than the GNU one.
+
+    Only plain `cl`. clang-cl drives like cl but accepts `-std=` and `-o` as
+    well, and the windows-clang rows already pass through the GNU branch, so it
+    stays there rather than being switched on a platform this cannot try.
+    """
+    return Path(compiler).stem.lower() == "cl"
+
+
+def probe_command(compiler: str, src: Path, exe: Path, work: Path,
+                  include_dirs: list[Path]) -> list[str]:
+    if is_msvc(compiler):
+        # /Fe and /Fo take their path attached, and without /Fo the object lands
+        # in the working directory.
+        cmd = [compiler, "/nologo", "/std:c++20", "/EHsc",
+               f"/Fe{exe}", f"/Fo{work / 'abi_probe.obj'}", str(src)]
+    else:
+        cmd = [compiler, "-std=c++20", "-o", str(exe), str(src)]
+    for directory in include_dirs:
+        cmd += ["-I", str(directory)]
+    return cmd
+
+
 def run_probe(compiler: str, include_dirs: list[Path], headers: list[str],
               structs: list[str], fields: dict[str, list[str]]) -> dict:
     """Compile and run the probe, and read the layout back off its stdout."""
@@ -320,17 +344,18 @@ def run_probe(compiler: str, include_dirs: list[Path], headers: list[str],
         # and these are standard-layout PODs, so its answer is the C answer. That
         # the headers also compile *as C* is a separate claim, checked below.
         src = Path(work) / "abi_probe.cpp"
-        exe = Path(work) / "abi_probe"
+        exe = Path(work) / ("abi_probe.exe" if is_msvc(compiler) else "abi_probe")
         src.write_text(probe_source(headers, structs, fields), encoding="utf-8")
-        cmd = [compiler, "-std=c++20", "-o", str(exe), str(src)]
-        for directory in include_dirs:
-            cmd += ["-I", str(directory)]
+        cmd = probe_command(compiler, src, exe, Path(work), include_dirs)
         built = subprocess.run(cmd, capture_output=True, text=True, check=False)
         if built.returncode != 0:
-            raise SystemExit(f"the ABI probe did not compile:\n{built.stderr}")
+            # cl writes its diagnostics to stdout, so a message built from stderr
+            # alone reported the warnings and hid the error.
+            raise SystemExit("the ABI probe did not compile:\n"
+                             f"{' '.join(cmd)}\n{built.stdout}{built.stderr}")
         ran = subprocess.run([str(exe)], capture_output=True, text=True, check=False)
         if ran.returncode != 0:
-            raise SystemExit(f"the ABI probe did not run:\n{ran.stderr}")
+            raise SystemExit(f"the ABI probe did not run:\n{ran.stdout}{ran.stderr}")
 
     layout: dict = {}
     for line in ran.stdout.splitlines():
@@ -365,7 +390,8 @@ def check_compiles_as_c(cc: str, include_dirs: list[Path],
             cmd += ["-I", str(directory)]
         built = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if built.returncode != 0:
-        raise SystemExit(f"the C headers do not compile as C:\n{built.stderr}")
+        raise SystemExit("the C headers do not compile as C:\n"
+                         f"{built.stdout}{built.stderr}")
     return None
 
 
