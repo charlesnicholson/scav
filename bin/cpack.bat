@@ -1,5 +1,5 @@
 @echo off
-rem envy-managed schema "3"
+rem envy-managed schema "4"
 rem setlocal (plain, not delayed -- a product path with '!' must survive): without it PATH
 rem grows a copy per invocation and a sibling inherits our product path, re-running us forever.
 setlocal

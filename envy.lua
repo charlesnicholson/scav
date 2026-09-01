@@ -1,7 +1,7 @@
 -- scav's toolchain and package manifest, and envy's root marker.
 
 -- @envy schema "1"
--- @envy version "0.2.2"
+-- @envy version "0.2.3"
 -- @envy bin "bin"
 -- @envy cache-local "out/.envy"
 -- @envy deploy "true"

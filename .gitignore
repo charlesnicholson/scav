@@ -7,9 +7,6 @@
 # stray `ctest` in the source root should not be committable.
 /Testing/
 
-# Rewritten by envy on every invocation, and names a per-machine cache path.
-/.luarc.json
-
 # `envy cache --local|--shared` writes one of these to record one machine's
 # preference. Conductor workspaces get shared via .conductor/settings.toml.
 /.envy-cache-local
