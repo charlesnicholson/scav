@@ -192,9 +192,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SCCACHE_PREFIX: sccache-${{ matrix.triple }}-${{ matrix.config }}-
           SCCACHE_KEEP: ${{ steps.sccache-save.outcome == 'success' && steps.sccache.outputs.cache-primary-key || '' }}
-        shell: bash
+        # bin/envy is a bash bootstrap that rejects MSYS's uname, so the Windows
+        # interpreter comes from the sibling .bat launcher instead.
+        shell: powershell
         run: |
-          "$(./bin/envy product python3)" .github/scripts/purge_superseded_caches.py
+          & "$env:GITHUB_WORKSPACE\bin\python3.bat" .github/scripts/purge_superseded_caches.py
 
   # Sanitizers. Which one exists where is a toolchain fact, enumerated once by the
   # preset generator and checked by its test.
@@ -416,9 +418,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           SCCACHE_PREFIX: sccache-${{ matrix.triple }}-${{ matrix.sanitizer }}-
           SCCACHE_KEEP: ${{ steps.sccache-save.outcome == 'success' && steps.sccache.outputs.cache-primary-key || '' }}
-        shell: bash
+        # bin/envy is a bash bootstrap that rejects MSYS's uname, so the Windows
+        # interpreter comes from the sibling .bat launcher instead.
+        shell: powershell
         run: |
-          "$(./bin/envy product python3)" .github/scripts/purge_superseded_caches.py
+          & "$env:GITHUB_WORKSPACE\bin\python3.bat" .github/scripts/purge_superseded_caches.py
 
   # Branch coverage, and the gate that an untested file fails the build.
 
