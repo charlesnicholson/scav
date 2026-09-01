@@ -1,6 +1,7 @@
-# The Linux rows run in a curated container rather than a hosted runner image. It
-# carries a compiler and little else; scav still takes cmake, ninja, doctest and
-# python from envy and ignores the image's own, which func.provisioning enforces.
+# The Linux rows run in scav's own container rather than a hosted runner image.
+# The Dockerfile at the repository root builds it and .github/workflows/docker-image.yml
+# republishes it weekly. It carries the compilers and little else; scav still takes
+# cmake, ninja, doctest and python from envy, which func.provisioning enforces.
 #
 # The package cache is the manifest's own out/.envy, which actions/cache carries
 # between jobs -- warmth comes from the cache key, not from relocating the root.
@@ -20,7 +21,10 @@ concurrency:
   cancel-in-progress: true
 
 # Naming a scope drops the ones not named, so the ghcr pull needs saying too.
+# `actions: write` is what lets the purge step's `gh cache delete` through; with
+# only read it lists the superseded caches and then cannot remove any of them.
 permissions:
+  actions: write
   contents: write
   packages: read
 
@@ -40,20 +44,13 @@ jobs:
     name: ${{ matrix.triple }} / ${{ matrix.config }}
     needs: format-code
     runs-on: ubuntu-latest
-    container: ghcr.io/charlesnicholson/docker-image:latest
+    container: ghcr.io/charlesnicholson/scav-ci:latest
     strategy:
       fail-fast: false
       matrix:
         triple: [linux-clang-libcxx, linux-clang-libstdcxx, linux-gcc-libstdcxx]
         config: [debug, release, testable]
     steps:
-      - name: Install what the image lacks
-        if: matrix.triple == 'linux-clang-libcxx'
-        run: |
-          set -eux
-          apt-get update
-          apt-get install -y --no-install-recommends libc++-dev libc++abi-dev
-
       - uses: actions/checkout@v4
 
       # No restore-keys: a bundle is cached under its identity, so a manifest that
@@ -205,7 +202,7 @@ jobs:
     name: ${{ matrix.triple }} / ${{ matrix.sanitizer }}
     needs: format-code
     runs-on: ubuntu-latest
-    container: ghcr.io/charlesnicholson/docker-image:latest
+    container: ghcr.io/charlesnicholson/scav-ci:latest
     strategy:
       fail-fast: false
       matrix:
@@ -220,13 +217,6 @@ jobs:
           - { triple: linux-gcc-libstdcxx, sanitizer: ubsan }
           - { triple: linux-gcc-libstdcxx, sanitizer: tsan }
     steps:
-      - name: Install what the image lacks
-        if: matrix.triple == 'linux-clang-libcxx'
-        run: |
-          set -eux
-          apt-get update
-          apt-get install -y --no-install-recommends libc++-dev libc++abi-dev
-
       - uses: actions/checkout@v4
 
       - uses: actions/cache@v4
@@ -269,14 +259,8 @@ jobs:
     # MSan against an uninstrumented one reports false positives forever.
     name: linux-clang-libcxx / msan
     runs-on: ubuntu-latest
-    container: ghcr.io/charlesnicholson/docker-image:latest
+    container: ghcr.io/charlesnicholson/scav-ci:latest
     steps:
-      - name: Install what the image lacks
-        run: |
-          set -eux
-          apt-get update
-          apt-get install -y --no-install-recommends libc++-dev libc++abi-dev
-
       - uses: actions/checkout@v4
 
       - uses: actions/cache@v4
@@ -430,13 +414,8 @@ jobs:
     name: coverage gate
     needs: format-code
     runs-on: ubuntu-latest
-    container: ghcr.io/charlesnicholson/docker-image:latest
+    container: ghcr.io/charlesnicholson/scav-ci:latest
     steps:
-      - name: Install what the image lacks
-        run: |
-          set -eux
-          apt-get update
-          apt-get install -y --no-install-recommends libc++-dev libc++abi-dev llvm
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
         with:
@@ -484,7 +463,7 @@ jobs:
   format-code:
     name: format code
     runs-on: ubuntu-latest
-    container: ghcr.io/charlesnicholson/docker-image:latest
+    container: ghcr.io/charlesnicholson/scav-ci:latest
     env:
       SCAV_LINT: 1
       # `secrets` is not usable in an `if:`.
@@ -544,15 +523,10 @@ jobs:
     name: clang-tidy
     needs: format-code
     runs-on: ubuntu-latest
-    container: ghcr.io/charlesnicholson/docker-image:latest
+    container: ghcr.io/charlesnicholson/scav-ci:latest
     env:
       SCAV_LINT: 1  # the clang tools, which no compiling row pays for
     steps:
-      - name: Install what the image lacks
-        run: |
-          set -eux
-          apt-get update
-          apt-get install -y --no-install-recommends libc++-dev libc++abi-dev
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
         with:
