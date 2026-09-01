@@ -9,6 +9,7 @@
 #include "doctest.h"
 
 #include <cstdint>
+#include <functional>
 #include <ostream>
 #include <string>
 #include <string_view>

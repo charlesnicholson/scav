@@ -1,0 +1,75 @@
+# Builds the container the Linux CI rows run in. Weekly rather than on every
+# change, so the image a run pulls is the same one the last run proved out, and
+# the toolchain moves on a schedule someone is watching rather than under a
+# pull request that only meant to touch C++.
+#
+# A Dockerfile change builds without pushing, which is the review: a broken
+# image fails its own pull request instead of every job on main afterwards.
+
+name: docker image
+
+on:
+  schedule:
+    - cron: "0 2 * * 0"  # Sundays at 02:00 UTC
+  push:
+    branches: ["main"]
+    paths:
+      - "Dockerfile"
+      - ".github/workflows/docker-image.yml"
+  pull_request:
+    paths:
+      - "Dockerfile"
+      - ".github/workflows/docker-image.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}-ci
+
+jobs:
+  build:
+    name: build and publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      # A pull request has nothing to push to and no token that could, so the
+      # login is skipped rather than failing on a read-only GITHUB_TOKEN.
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ env.IMAGE }}:latest,${{ env.IMAGE }}:${{ github.sha }}
+          # ghcr links a package to a repository through this label, and the
+          # link is what lets ci.yml's GITHUB_TOKEN pull it with packages: read.
+          labels: org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          # The base moves under us between rebuilds, which is the point; a
+          # layer cache keyed on the Dockerfile alone would serve the old one.
+          pull: true
+          provenance: false
+
+      # The versions this week's image pins, recorded where a later bisect can
+      # read them without pulling the image.
+      - name: Report the toolchain
+        run: |
+          set -eux
+          docker run --rm "${IMAGE}:${{ github.sha }}" bash -c '
+            g++ --version | head -1
+            clang++ --version | head -1
+            ld --version | head -1
+            gh --version | head -1
+          ' | tee -a "$GITHUB_STEP_SUMMARY"
+        if: github.event_name != 'pull_request'
