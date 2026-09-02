@@ -1,0 +1,116 @@
+// The deep one. Every other corpus chart nests two or three levels, which is
+// where the incumbents look their best; this one runs six and sends faults from
+// the innermost valve straight out to the root, so the long-hierarchical edge is
+// the point rather than an incidental. Still short of the depth-16 design
+// target, which belongs to the generated charts -- a hand-authored one that deep
+// is unreadable by construction, which is what the connector hatch is for.
+//
+// Hand-authored rather than transcribed, and shaped deliberately: the branching
+// is uneven at every level, because a chart with uniform fan-out has no
+// accidental structure to trip over.
+chart bottler "rotary bottling line" {
+  @doc = "six nested levels, faults escalating from the valve to the line",
+  @machine { heads = "12", rate_bph = "18000" },
+
+  include "estop.scav" as stop,
+
+  state Offline,
+  state Draining,
+  state Fault,
+
+  state Running "line under production" {
+    submachine line {
+      state Priming,
+      state Idling,
+
+      state Filling "carousel turning" {
+        submachine station {
+          state Indexing,
+
+          state Docked "bottle clamped" {
+            submachine head {
+              state Retracted,
+
+              state Engaged "head down on the neck" {
+                submachine nozzle {
+                  state Sealing,
+
+                  state Dispensing "product flowing" {
+                    // The deepest states run concurrently: the valve meters
+                    // while the cell integrates weight. Both sit at depth 5.
+                    submachine valve {
+                      state Metering,
+                      state Topping,
+                      state Shut,
+
+                      trans * -> Metering,
+                      trans Metering -> Topping "coarse volume reached",
+                      trans Topping -> Shut "target weight",
+                      trans internal Metering -> Metering "flow sample",
+                    },
+                    submachine cell "load cell integrator" {
+                      state Tare,
+                      state Weighing,
+                      state Settled,
+
+                      trans * -> Tare,
+                      trans Tare -> Weighing "first drop",
+                      trans Weighing -> Settled "rate below limit",
+                      trans internal Weighing -> Weighing "strain sample",
+                    },
+                  },
+
+                  state Purging,
+
+                  trans * -> Sealing,
+                  trans Sealing -> Dispensing "seal confirmed",
+                  trans Dispensing -> Purging "shut and clear",
+                  trans Purging -> Sealing "line pressure restored",
+                },
+              },
+
+              trans * -> Retracted,
+              trans Retracted -> Engaged "neck located",
+              trans Engaged -> Retracted "cycle complete",
+            },
+          },
+
+          state Releasing,
+
+          trans * -> Indexing,
+          trans Indexing -> Docked "bottle present",
+          trans Docked -> Releasing "fill complete",
+          trans Releasing -> Indexing "clamp open",
+        },
+      },
+
+      state Capping,
+
+      trans * -> Priming,
+      trans Priming -> Idling "pressure nominal",
+      trans Idling -> Filling "start command",
+      trans Filling -> Capping "bottle filled",
+      trans Capping -> Idling "cap torqued",
+    },
+  },
+
+  trans * -> Offline,
+  trans Offline -> Running "enable line",
+  trans Running -> Draining "shutdown requested",
+  trans Draining -> Offline "circuit empty",
+
+  // The reason this chart exists. Each of these crosses several submachine
+  // boundaries, and the deepest leaves the valve at depth 5 for the root.
+  trans Running/Filling/Docked/Engaged/Dispensing:valve/Metering -> Fault "overfill detected",
+  trans Running/Filling/Docked/Engaged/Dispensing:cell/Weighing -> Fault "load cell open circuit",
+  trans Running/Filling/Docked/Engaged/Sealing -> Fault "seal never confirmed",
+
+  // Not every long edge escapes to the root: this one lands three levels up,
+  // at the station that owns the head.
+  trans Running/Filling/Docked/Engaged/Purging -> Running/Filling/Releasing "abandon this bottle",
+
+  // And back in, which is what makes the ancestor chain pull both ways.
+  trans Fault -> Running/Filling/Docked/Retracted "operator cleared",
+  trans Fault -> stop/Tripped "latch the estop",
+  trans Draining -> Running/Capping "finish the bottle in the capper",
+}

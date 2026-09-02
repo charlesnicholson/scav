@@ -295,6 +295,12 @@ def to_elk(model: dict) -> dict:
             # processors that route what is left. Neither is ELK's default.
             "elk.hierarchyHandling": "INCLUDE_CHILDREN",
             "elk.edgeRouting": "ORTHOGONAL",
+            # Layered alone puts every chart here in a 6:1-to-8:1 ribbon, and
+            # wrapping is ELK's own answer to that. Measured on `mill`:
+            # unset 6.35:1, MULTI_EDGE 3.59:1. `elk.aspectRatio` and
+            # SINGLE_EDGE are both byte-for-byte no-ops on this input, and
+            # `elk.direction=DOWN` overshoots to 0.27:1.
+            "elk.layered.wrapping.strategy": "MULTI_EDGE",
         },
         "children": children,
         # The root's own, plus any container that never rendered.

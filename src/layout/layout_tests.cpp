@@ -752,6 +752,7 @@ TEST_CASE("layout: corpus charts hash to the committed golden") {
   // no space requests and the readable profile -- what dump --layout does.
   std::string actual;
   for (char const *name : { "axis.scav",
+                            "bottler.scav",
                             "brew.scav",
                             "dock.scav",
                             "estop.scav",
