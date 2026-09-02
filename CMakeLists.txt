@@ -24,7 +24,7 @@ option(SCAV_TESTING "Define SCAV_TESTING for the shipping libraries too" OFF)
 # toolchain without it is still supported, and the optimized presets set it.
 option(SCAV_LTO "Link-time optimization" OFF)
 
-option(SCAV_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
+option(SCAV_WARNINGS_AS_ERRORS "Treat compiler and linker warnings as errors" ON)
 option(SCAV_CLANG_TIDY "Run clang-tidy as part of compilation" OFF)
 option(SCAV_COVERAGE "Instrument for branch coverage" OFF)
 

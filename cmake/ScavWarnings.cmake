@@ -122,6 +122,12 @@ function(scav_warnings_init)
     endif()
     if(SCAV_WARNINGS_AS_ERRORS)
       target_compile_options(scav_warnings INTERFACE -Werror)
+      if(APPLE)
+        # Apple's linker warns rather than errors on a link line it silently
+        # repairs -- a repeated archive, an ignored flag. There is no per-warning
+        # spelling, so the whole set is promoted.
+        target_link_options(scav_warnings INTERFACE -Wl,-fatal_warnings)
+      endif()
     endif()
   endif()
 
