@@ -12,12 +12,18 @@
 /.envy-cache-local
 /.envy-cache-shared
 
-# envy deploys a launcher per product, and these two exist only under SCAV_LINT.
-# Tracking them would make an ordinary `envy sync` delete them.
+# envy deploys a launcher per product, and these exist only under SCAV_LINT or
+# SCAV_BASELINE. Tracking them would make an ordinary `envy sync` delete them.
 /bin/clang-format
 /bin/clang-format.bat
 /bin/clang-tidy
 /bin/clang-tidy.bat
+/bin/elk_bundle
+/bin/elk_bundle.bat
+/bin/node
+/bin/node.bat
+/bin/plantuml
+/bin/plantuml.bat
 
 # The tests and tools import each other, so bytecode lands next to the sources.
 __pycache__/
