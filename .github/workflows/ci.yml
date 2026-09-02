@@ -564,12 +564,18 @@ jobs:
 
       # No container for the linux row: nothing here compiles, so the hosted
       # image is enough and the engines are what is under test.
+      # Each engine renders a two-state probe rather than reporting a version.
+      # `plantuml -version` exits 16, and a version string proves only that the
+      # binary starts -- not that it found the AWT and freetype libraries the
+      # archive ships beside it, which is the failure worth catching here.
       - name: Provision and run each engine
         if: runner.os != 'Windows'
         run: |
           set -euo pipefail
           ./bin/envy sync
-          "$(./bin/envy product plantuml)" -version | head -1
+          printf '@startuml\nstate A\nstate B\nA --> B\n@enduml\n' > out/probe.puml
+          "$(./bin/envy product plantuml)" -tsvg -Playout=smetana out/probe.puml
+          grep -q '<svg' out/probe.svg
           "$(./bin/envy product node)" --version
           "$(./bin/envy product node)" -e \
             "new (require(process.argv[1]))().layout({id:'r',children:[{id:'a',width:1,height:1}]}).then(g=>console.log('elkjs',g.id))" \
@@ -589,8 +595,12 @@ jobs:
           # Each native call overwrites $LASTEXITCODE, so checking it once at
           # the end would let a failing plantuml or node leave the job green --
           # which is the failure this row exists to catch.
-          & $puml -version | Select-Object -First 1
+          Set-Content -Path out\probe.puml -Value "@startuml`nstate A`nstate B`nA --> B`n@enduml"
+          & $puml -tsvg -Playout=smetana out\probe.puml
           if ($LASTEXITCODE -ne 0) { throw "plantuml failed to run" }
+          if (-not (Select-String -Path out\probe.svg -Pattern "<svg" -Quiet)) {
+            throw "plantuml wrote no svg"
+          }
           & $node --version
           if ($LASTEXITCODE -ne 0) { throw "node failed to run" }
           & $node -e "new (require(process.argv[1]))().layout({id:'r',children:[{id:'a',width:1,height:1}]}).then(g=>console.log('elkjs',g.id))" $elk
