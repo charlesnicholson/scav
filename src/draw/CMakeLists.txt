@@ -31,9 +31,10 @@ foreach(target scavdraw scavdraw_testable)
     "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src/layout/include>")
 endforeach()
 
-# The redistributable carries every library's C surface.
+# The redistributable carries every library's C surface. The archive arrives
+# transitively -- svg links draw PUBLIC, and a direct link here would repeat it
+# on the link line.
 target_sources(scav_shared PRIVATE c_api.cpp "${font_source}")
-target_link_libraries(scav_shared PRIVATE scavdraw)
 
 if(SCAV_BUILD_TESTS)
   scav_tests(scav_draw_tests

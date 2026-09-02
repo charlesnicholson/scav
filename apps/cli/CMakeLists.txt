@@ -9,4 +9,7 @@ add_executable(scav
   render.cpp
 )
 scav_settings(scav)
-target_link_libraries(scav PRIVATE scavcore scavlayout scavdraw scavsvg)
+# Two edges reach all four archives: svg links draw PUBLIC and both leaves link
+# core PUBLIC. Naming an archive that also arrives transitively repeats it on the
+# link line.
+target_link_libraries(scav PRIVATE scavlayout scavsvg)
