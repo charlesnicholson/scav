@@ -140,7 +140,10 @@ class TestBaselineHarness(unittest.TestCase):
             [str(cfg.python), str(cfg.repo_root / "tools/baseline.py"),
              "--scav", str(cfg.build_dir / "bin" / name),
              "--out", str(out), "--chart", "estop.scav", "--chart", "tcp.scav"],
-            capture_output=True, text=True, check=False)
+            capture_output=True, text=True, check=False,
+            # subprocess inherits os.environ, so a developer with the variable
+            # exported would render the engines and empty the skip list.
+            env={k: v for k, v in os.environ.items() if k != "SCAV_BASELINE"})
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("estop.scav: ", result.stdout)
         self.assertIn("scav", result.stdout)

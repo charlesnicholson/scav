@@ -131,27 +131,72 @@ def puml_text(s: str) -> str:
     return s.replace('"', "'").replace("\n", "\\n")
 
 
-def to_puml(model: dict) -> str:
-    """The model as a PlantUML state diagram.
+def to_puml(model: dict) -> tuple[str, list[str]]:
+    """The model as a PlantUML state diagram, plus what had to be degraded.
 
     A composite state's regions are separated by `--`, which is PlantUML's own
     spelling for concurrency, so the nesting survives the translation intact.
 
     Each transition is written inside the innermost region holding both of its
     endpoints. PlantUML resolves only a block's *first* region from outside the
-    block, so a transition inside a later region has to be written there.
+    block, so a transition inside a later region has to be written there -- and
+    an endpoint reachable only through a *later* region cannot be named at all.
+    Those anchor at the enclosing composite instead, which is what a PlantUML
+    author writes by hand, and each substitution is returned so the picture is
+    never passed off as a faithful one. Dropping the edge instead would leave a
+    gap that reads as a cleaner diagram than the tool can actually draw.
     """
     states, subs = model["states"], model["submachines"]
     innermost = lca_submachine(model)
 
+    def chain(state: int) -> list[int]:
+        up = []
+        sub = states[state]["parent"]
+        while sub is not None:
+            up.append(sub)
+            owner = subs[sub]["owner"]
+            sub = None if owner is None else states[owner]["parent"]
+        return up[::-1]
+
+    def is_first_region(sub: int) -> bool:
+        owner = subs[sub]["owner"]
+        if owner is None:
+            return True
+        live = [m for m in states[owner]["submachines"] if subs[m]["live"]]
+        return bool(live) and live[0] == sub
+
+    degraded: list[str] = []
+
+    def nameable(state: int, lca: int) -> int:
+        """The deepest state PlantUML can reference from inside `lca`'s block."""
+        path = chain(state)
+        for sub in path[path.index(lca) + 1:]:
+            if not is_first_region(sub):
+                owner = subs[sub]["owner"]
+                degraded.append(
+                    f'{states[state]["name"] or "pseudostate"} -> '
+                    f'{states[owner]["name"]} (unreachable region)')
+                return owner
+        return state
+
     by_sub: dict[int, list[str]] = {}
+    described: dict[int, list[str]] = {}
     for trans in model["transitions"]:
         if not trans["live"]:
             continue
-        arrow = f's{trans["src"]} --> s{trans["dst"]}'
+        # PlantUML spells an internal transition as a description line, and
+        # scav's measured extent already reserves room for that label -- an
+        # arrow here would draw it a second time.
+        if trans["kind"] != "external":
+            if trans["label"]:
+                described.setdefault(trans["src"], []).append(trans["label"])
+            continue
+        lca = innermost(trans)
+        src, dst = nameable(trans["src"], lca), nameable(trans["dst"], lca)
+        arrow = f"s{src} --> s{dst}"
         if trans["label"]:
             arrow += f' : {puml_text(trans["label"])}'
-        by_sub.setdefault(innermost(trans), []).append(arrow)
+        by_sub.setdefault(lca, []).append(arrow)
 
     out = ["@startuml", "hide empty description"]
 
@@ -182,6 +227,8 @@ def to_puml(model: dict) -> str:
 
         if row["label"]:
             out.append(f'{pad}s{index} : {puml_text(row["label"])}')
+        for text in described.get(index, []):
+            out.append(f"{pad}s{index} : {puml_text(text)}")
 
     root = model["chart"]["root_submachine"]
     for child in subs[root]["children"]:
@@ -194,7 +241,7 @@ def to_puml(model: dict) -> str:
         out.extend(by_sub.pop(leftover))
 
     out.append("@enduml")
-    return "\n".join(out) + "\n"
+    return "\n".join(out) + "\n", degraded
 
 
 def puml_reason(svg: Path) -> str | None:
@@ -253,7 +300,9 @@ def to_elk(model: dict) -> dict:
     # Keyed by the state that owns the enclosing region, or None for the root.
     by_owner: dict[int | None, list[dict]] = {}
     for i, trans in enumerate(model["transitions"]):
-        if not trans["live"]:
+        # ELK has no representation for an internal transition, and scav's
+        # measured extent already carries its label.
+        if not trans["live"] or trans["kind"] != "external":
             continue
         sub = innermost(trans)
         edge = {"id": f"e{i}",
@@ -295,12 +344,13 @@ def to_elk(model: dict) -> dict:
             # processors that route what is left. Neither is ELK's default.
             "elk.hierarchyHandling": "INCLUDE_CHILDREN",
             "elk.edgeRouting": "ORTHOGONAL",
-            # Layered alone puts every chart here in a 6:1-to-8:1 ribbon, and
-            # wrapping is ELK's own answer to that. Measured on `mill`:
-            # unset 6.35:1, MULTI_EDGE 3.59:1. `elk.aspectRatio` and
-            # SINGLE_EDGE are both byte-for-byte no-ops on this input, and
-            # `elk.direction=DOWN` overshoots to 0.27:1.
-            "elk.layered.wrapping.strategy": "MULTI_EDGE",
+            # Layered alone puts every chart here in a 6:1-to-8:1 ribbon and
+            # nothing available fixes it: `elk.aspectRatio` and
+            # `wrapping.strategy=SINGLE_EDGE` are byte-for-byte no-ops on this
+            # input, `MULTI_EDGE` reaches 3.59:1 on `mill` but leaves one edge
+            # per chart with empty `sections` on four of them, and
+            # `elk.direction=DOWN` overshoots to 0.27:1. A ribbon is a
+            # judgement a reader can make; a missing arrow is one they cannot.
         },
         "children": children,
         # The root's own, plus any container that never rendered.
@@ -329,6 +379,10 @@ function seen(x, y) {
   box.x1 = Math.max(box.x1, x); box.y1 = Math.max(box.y1, y);
 }
 
+// An edge ELK could not route comes back with an empty `sections`, and drawing
+// nothing for it would quietly improve the diagram.
+let unrouted = 0;
+
 function draw(node, dx, dy, out) {
   for (const child of node.children || []) {
     const x = dx + (child.x || 0), y = dy + (child.y || 0);
@@ -344,6 +398,7 @@ function draw(node, dx, dy, out) {
   // A hierarchy-crossing edge is reported in the frame of the container it was
   // declared on, so edges walk with that container rather than with either end.
   for (const edge of node.edges || []) {
+    if (!edge.sections || !edge.sections.length) { unrouted++; }
     for (const section of edge.sections || []) {
       const pts = [section.startPoint, ...(section.bendPoints || []), section.endPoint];
       pts.forEach(p => seen(dx + p.x, dy + p.y));
@@ -370,6 +425,7 @@ elk.layout(graph).then(laid => {
   const defs = '<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"'
     + ' markerWidth="6" markerHeight="6" orient="auto-start-reverse">'
     + '<path d="M 0 0 L 10 5 L 0 10 z" fill="black"/></marker></defs>';
+  if (unrouted) { process.stderr.write(`unrouted ${unrouted}`); process.exit(2); }
   process.stdout.write(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}"`
     + ` height="${h}" viewBox="${x} ${y} ${w} ${h}">${defs}${out.join('\\n')}</svg>\\n`);
 }).catch(e => { process.stderr.write(String(e)); process.exit(1); });
@@ -387,6 +443,8 @@ def render_elk(node: Path | None, bundle: Path | None,
     code, svg, err = run([str(node), str(driver), str(bundle), str(graph)])
     if code != 0:
         text = err.decode().strip()
+        if text.startswith("unrouted "):
+            return f"elkjs left {text.split()[1]} edge(s) unrouted"
         return text.splitlines()[0] if text else "elkjs failed"
     out.write_bytes(svg)
     return None
@@ -423,6 +481,7 @@ def main() -> int:
 
     rows: list[str] = []
     skipped: list[tuple[str, str, str]] = []
+    notes: list[tuple[str, str, str]] = []
     for chart in charts:
         model = chart_model(scav, chart)
 
@@ -432,8 +491,11 @@ def main() -> int:
             source, origin = original, "authored"
         else:
             source = args.out / f"{chart.stem}.puml"
-            source.write_text(to_puml(model), encoding="utf-8")
+            text, degraded = to_puml(model)
+            source.write_text(text, encoding="utf-8")
             origin = "translated"
+            for what in degraded:
+                notes.append((chart.name, "plantuml", f"anchored {what}"))
 
         cells = []
         drawn: list[str] = []
@@ -471,6 +533,10 @@ def main() -> int:
         # Say what was not compared rather than leaving a gap that reads as
         # agreement.
         print(f"  {name} {engine}: {why}")
+    # A rendered-but-degraded cell is not a skip, and saying so is what keeps
+    # the side-by-side from crediting the incumbent with a chart it cannot draw.
+    for name, engine, what in notes:
+        print(f"  {name} {engine}: {what}")
     return 0
 
 

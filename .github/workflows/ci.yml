@@ -586,10 +586,15 @@ jobs:
           $puml = & .\bin\envy.bat product plantuml
           $node = & .\bin\envy.bat product node
           $elk = & .\bin\envy.bat product elk_bundle
+          # Each native call overwrites $LASTEXITCODE, so checking it once at
+          # the end would let a failing plantuml or node leave the job green --
+          # which is the failure this row exists to catch.
           & $puml -version | Select-Object -First 1
+          if ($LASTEXITCODE -ne 0) { throw "plantuml failed to run" }
           & $node --version
+          if ($LASTEXITCODE -ne 0) { throw "node failed to run" }
           & $node -e "new (require(process.argv[1]))().layout({id:'r',children:[{id:'a',width:1,height:1}]}).then(g=>console.log('elkjs',g.id))" $elk
-          if ($LASTEXITCODE -ne 0) { throw "an engine failed to run" }
+          if ($LASTEXITCODE -ne 0) { throw "elkjs failed to run" }
 
   # The one check branch protection names. Jobs come and go; this does not, so
   # adding or retiring a row is a workflow edit rather than a repository settings
