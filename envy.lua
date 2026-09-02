@@ -1,7 +1,7 @@
 -- scav's toolchain and package manifest, and envy's root marker.
 
 -- @envy schema "1"
--- @envy version "0.2.3"
+-- @envy version "0.2.5"
 -- @envy bin "bin"
 -- @envy cache-local "out/.envy"
 -- @envy deploy "true"
@@ -33,5 +33,23 @@ if os.getenv("SCAV_LINT") then
     { spec = "scav.clang-tools@r0",
       source = envy.abspath("envy") .. "/scav.clang-tools.lua",
       options = { version = "22.1.8", tools = { "clang-format", "clang-tidy" } } },
+  })
+end
+
+-- Behind SCAV_BASELINE because only tools/baseline.py reads them, and that runs
+-- by hand at a layout gate rather than as part of any build.
+if os.getenv("SCAV_BASELINE") then
+  envy.extend(PACKAGES, {
+    { spec = "scav.plantuml@r0",
+      source = envy.abspath("envy") .. "/scav.plantuml.lua",
+      options = { version = "1.2026.7" } },
+
+    { spec = "scav.node@r0",
+      source = envy.abspath("envy") .. "/scav.node.lua",
+      options = { version = "24.20.0" } },
+
+    { spec = "scav.elkjs@r0",
+      source = envy.abspath("envy") .. "/scav.elkjs.lua",
+      options = { version = "0.12.0" } },
   })
 end

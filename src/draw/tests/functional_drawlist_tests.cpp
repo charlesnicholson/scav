@@ -21,9 +21,9 @@ namespace {
 using namespace scav;
 
 // The corpus, in the order the layout golden lists it.
-constexpr std::array<char const *, 10> CORPUS{
-  "axis.scav", "brew.scav", "dock.scav", "estop.scav",       "led.scav",
-  "mill.scav", "ota.scav",  "tcp.scav",  "toolchanger.scav", "vac.scav"
+constexpr std::array<char const *, 11> CORPUS{
+  "axis.scav", "bottler.scav", "brew.scav", "dock.scav",        "estop.scav", "led.scav",
+  "mill.scav", "ota.scav",     "tcp.scav",  "toolchanger.scav", "vac.scav"
 };
 
 Metrics bundled() {

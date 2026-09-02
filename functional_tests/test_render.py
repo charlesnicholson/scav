@@ -127,9 +127,10 @@ class TestRender(unittest.TestCase):
 
 
 class TestBaselineHarness(unittest.TestCase):
-    """The blind-review harness. `dot` and `node` are not build prerequisites,
-    so what is asserted is that scav renders and that anything absent is
-    reported rather than left as a silent gap."""
+    """The blind-review harness. The incumbent engines are provisioned only
+    under SCAV_BASELINE, which this deliberately does not set, so what is
+    asserted is that scav renders and that anything absent is reported rather
+    than left as a silent gap."""
 
     def test_the_harness_runs_and_names_what_it_could_not_compare(self) -> None:
         cfg = scavtest.load_config()
@@ -139,7 +140,10 @@ class TestBaselineHarness(unittest.TestCase):
             [str(cfg.python), str(cfg.repo_root / "tools/baseline.py"),
              "--scav", str(cfg.build_dir / "bin" / name),
              "--out", str(out), "--chart", "estop.scav", "--chart", "tcp.scav"],
-            capture_output=True, text=True, check=False)
+            capture_output=True, text=True, check=False,
+            # subprocess inherits os.environ, so a developer with the variable
+            # exported would render the engines and empty the skip list.
+            env={k: v for k, v in os.environ.items() if k != "SCAV_BASELINE"})
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("estop.scav: ", result.stdout)
         self.assertIn("scav", result.stdout)
@@ -149,7 +153,7 @@ class TestBaselineHarness(unittest.TestCase):
         page = index.read_text(encoding="utf-8")
         for chart in ("estop.scav", "tcp.scav"):
             self.assertIn(chart, page)
-        for engine in ("scav", "dot", "elkjs"):
+        for engine in ("scav", "plantuml", "elkjs"):
             self.assertIn(engine, page)
         # scav is the one engine that must always be there. The name is
         # `<chart stem>.<engine>.svg`, so scav's own is `estop.scav.svg`.
@@ -157,10 +161,10 @@ class TestBaselineHarness(unittest.TestCase):
             rendered = out / f"{chart}.scav.svg"
             self.assertTrue(rendered.is_file(), f"{rendered} not written")
             self.assertTrue(rendered.read_text(encoding="utf-8").startswith("<?xml"))
-        # Whatever was missing is named, not silently skipped.
-        for engine in ("dot", "elkjs"):
-            if f"{engine} skipped:" in result.stdout:
-                self.assertIn("not installed", result.stdout)
+        # Whatever was missing is named against its chart, not silently
+        # skipped. Without SCAV_BASELINE that is both incumbents, every time.
+        for engine in ("plantuml", "elkjs"):
+            self.assertIn(f" {engine}: ", result.stdout)
 
 
 if __name__ == "__main__":

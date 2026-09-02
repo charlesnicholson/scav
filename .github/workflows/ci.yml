@@ -540,6 +540,72 @@ jobs:
           ./build.sh --preset linux-clang-libcxx-debug --no-test
           -- -DSCAV_CLANG_TIDY=ON
 
+  # The incumbent layout engines, provisioned on every platform. It cannot
+  # score a blind review -- that is a human looking at pictures -- so what it
+  # gates is provisioning: that the three specs still resolve, download and run
+  # everywhere. That is the part which rots silently between layout gates, and
+  # it is no more exposed to a network hiccup than any compiling row already is.
+  baseline-engines:
+    name: baseline engines / ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      SCAV_BASELINE: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: out/.envy
+          key: envy-baseline-${{ runner.os }}-${{ hashFiles('envy.lua', 'envy/*.lua') }}
+
+      # No container for the linux row: nothing here compiles, so the hosted
+      # image is enough and the engines are what is under test.
+      # Each engine renders a two-state probe rather than reporting a version.
+      # `plantuml -version` exits 16, and a version string proves only that the
+      # binary starts -- not that it found the AWT and freetype libraries the
+      # archive ships beside it, which is the failure worth catching here.
+      - name: Provision and run each engine
+        if: runner.os != 'Windows'
+        run: |
+          set -euo pipefail
+          ./bin/envy sync
+          printf '@startuml\nstate A\nstate B\nA --> B\n@enduml\n' > out/probe.puml
+          "$(./bin/envy product plantuml)" -tsvg -Playout=smetana out/probe.puml
+          grep -q '<svg' out/probe.svg
+          "$(./bin/envy product node)" --version
+          "$(./bin/envy product node)" -e \
+            "new (require(process.argv[1]))().layout({id:'r',children:[{id:'a',width:1,height:1}]}).then(g=>console.log('elkjs',g.id))" \
+            "$(./bin/envy product elk_bundle)"
+
+      # bin/envy is a bash bootstrap that rejects MSYS's uname, so the Windows
+      # interpreter comes from the sibling .bat launcher instead.
+      - name: Provision and run each engine
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          & .\bin\envy.bat sync
+          if ($LASTEXITCODE -ne 0) { throw "envy sync failed" }
+          $puml = & .\bin\envy.bat product plantuml
+          $node = & .\bin\envy.bat product node
+          $elk = & .\bin\envy.bat product elk_bundle
+          # Each native call overwrites $LASTEXITCODE, so checking it once at
+          # the end would let a failing plantuml or node leave the job green --
+          # which is the failure this row exists to catch.
+          Set-Content -Path out\probe.puml -Value "@startuml`nstate A`nstate B`nA --> B`n@enduml"
+          & $puml -tsvg -Playout=smetana out\probe.puml
+          if ($LASTEXITCODE -ne 0) { throw "plantuml failed to run" }
+          if (-not (Select-String -Path out\probe.svg -Pattern "<svg" -Quiet)) {
+            throw "plantuml wrote no svg"
+          }
+          & $node --version
+          if ($LASTEXITCODE -ne 0) { throw "node failed to run" }
+          & $node -e "new (require(process.argv[1]))().layout({id:'r',children:[{id:'a',width:1,height:1}]}).then(g=>console.log('elkjs',g.id))" $elk
+          if ($LASTEXITCODE -ne 0) { throw "elkjs failed to run" }
+
   # The one check branch protection names. Jobs come and go; this does not, so
   # adding or retiring a row is a workflow edit rather than a repository settings
   # change -- and an old commit rebuilt years from now still reports against a
@@ -563,6 +629,7 @@ jobs:
       - coverage
       - format-code
       - clang-tidy
+      - baseline-engines
     runs-on: ubuntu-latest
     steps:
       - name: Report
