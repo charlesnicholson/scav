@@ -248,7 +248,14 @@ std::vector<uint32_t> south_of(Frame const &f, uint32_t north_rank) {
       pairs.push_back({ .north = f.nodes[e.src].pos, .south = f.nodes[e.dst].pos });
     }
   }
-  scav_stable_sort(pairs, [](Pair const &a, Pair const &b) { return a.north < b.north; });
+  // The south tiebreak is what keeps two edges leaving one node from scoring
+  // as a crossing: they share an endpoint, so they cannot cross, and without
+  // it their south values arrive in edge order and can read as an inversion.
+  // The mirrored case needs nothing -- `inversions` compares strictly, so two
+  // edges sharing a south node already score zero.
+  scav_stable_sort(pairs, [](Pair const &a, Pair const &b) {
+    return (a.north != b.north) ? (a.north < b.north) : (a.south < b.south);
+  });
   std::vector<uint32_t> south;
   south.reserve(pairs.size());
   for (Pair const &pr : pairs) { south.push_back(pr.south); }

@@ -62,7 +62,7 @@ chart vac "robot vacuum" (test_data/charts/vac.scav:3)
   include dock "dock.scav" -> test_data/charts/dock.scav (test_data/charts/vac.scav:4)
   include lamp "./led.scav" -> test_data/charts/led.scav (test_data/charts/vac.scav:7)
   include lamp "led.scav" -> test_data/charts/led.scav (test_data/charts/dock.scav:4)
-geometry structural f3ed578b coordinate 1802a341
+geometry structural f48408e4 coordinate 5a446915
   chart 0,0 17800x5934
   state dock 9415,0 6145x5934 before 9543,128 5889x397 after 9543,5806 5889x0
   state lamp 0,0 2208x3476 before 128,128 1952x397 after 128,3348 1952x0
@@ -101,7 +101,7 @@ geometry structural f3ed578b coordinate 1802a341
   route $initial -> Off (16088,326) (17256,326)
   route Off -> Booting (17352,326) (16571,1195)
   route On:main/$initial -> On:main/Idle (4701,3914) (5907,3914)
-  route On:main/Ready -> dock/On/Seated (5293,2551) (4333,3300) (9415,1466) (10599,1466) (9543,3861) (11234,3611) port s0 d0 port s0 d0 port s0 d1
+  route On:main/Ready -> dock/On/Seated (5293,2551) (8839,3300) (9415,1466) (10599,1466) (9543,3861) (11234,3611) port s1 d0 port s0 d0 port s0 d1
   route On:aux/$initial -> On:aux/Idle (6922,2416) (8128,2416)
   route dock/On/$initial -> dock/On/Seated (9911,3333) (11234,3579)
   route dock/On/Seated -> dock/On/Charging (11329,3597) (10455,4470)

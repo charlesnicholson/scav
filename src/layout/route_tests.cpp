@@ -163,6 +163,47 @@ TEST_CASE("route: a crossing puts its slot on the crossed border") {
   CHECK((r.points[1] == scav_point{ .x = slot.x, .y = slot.y }));
 }
 
+TEST_CASE("route: the slot side follows the route's direction, not the packing") {
+  // An entering route: the boundary node is a source in the inner frame, so
+  // the slot belongs on the composite's leading border. Sizing places such a
+  // node at its *component's* leading edge and then the packer offsets the
+  // whole component, so the node's absolute x says nothing about which border
+  // it is on -- a frame with more than one component puts it anywhere.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
+  StateId const s{ build_state(c, inner, "S", StateKind::Normal, {}) };
+  build_trans(c, d, s, TransKind::External, {});
+
+  SplitGraph const g{ decompose(c) };
+  REQUIRE(g.trans_segments[0].len == 2);
+  uint32_t const enter{ g.trans_segments[0].off + 1 };  // the piece inside `inner`
+  SubmachineOrders o{ empty_orders(c, g) };
+  o.nodes = { { .kind = OrderKind::Boundary, .subject = enter, .rank = 0, .pos = 0 },
+              { .kind = OrderKind::State, .subject = s.v, .rank = 1, .pos = 0 } };
+  o.edges = { { .src = 0, .dst = 1, .segment = enter, .reversed = 0 } };
+  o.seg_node[enter] = 0;
+  o.seg_port[enter] = 0;
+  o.sub_nodes[inner.v] = make_span(0, 2);
+  SizedLayout z{ blank(c, o) };
+  z.state[d.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
+  z.state[comp.v] = { .x = 400, .y = 0, .w = 200, .h = 200 };
+  z.state[s.v] = { .x = 480, .y = 60, .w = 100, .h = 40 };
+  z.sub[root.v] = { .x = 0, .y = 0, .w = 600, .h = 200 };
+  z.sub[inner.v] = { .x = 410, .y = 10, .w = 180, .h = 180 };
+  // Nowhere near the frame's own origin, which is exactly the case a packed
+  // second component produces.
+  z.node[0] = { .x = 560, .y = 80 };
+
+  Routes const r{ phase3_route(c, g, o, z, {}, profile()) };
+  REQUIRE(r.port[0].len == 1);
+  CHECK(r.slots[0].side == 0);
+  CHECK(r.slots[0].x == z.state[comp.v].x);
+  CHECK(r.slots[0].y == 80);
+}
+
 TEST_CASE("route: an internal transition starts on the source's inner face") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };

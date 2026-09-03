@@ -78,9 +78,15 @@ Routes phase3_route(Chart const &c,
     }
   }
 
+  // Whether a route arrives at a boundary or leaves through one, which is the
+  // same question sizing asked when it put the node at its component's leading
+  // or trailing edge. Read from the node's own direction rather than from its
+  // absolute x, which carries whatever offset the packer gave its component.
+  std::vector<uint8_t> source_node(o.nodes.size(), 0);
+  for (OrderEdge const &e : o.edges) { source_node[e.src] = 1; }
+
   // A slot sits on the crossed box's own border, at the height its boundary
-  // node ended up: which border follows from whether the node was placed at
-  // its frame's leading or trailing edge.
+  // node ended up.
   auto const slot_of = [&](uint32_t port) {
     SplitPort const &pt{ g.ports[port] };
     uint32_t const seg{ port_seg[port] };
@@ -93,8 +99,7 @@ Routes phase3_route(Chart const &c,
       scav_point const at{ centre(box) };
       return scav_port_slot{ .x = at.x, .y = at.y, .side = 0, .boundary_depth = depth };
     }
-    scav_rect const frame{ z.sub[g.segments[seg].frame.v] };
-    bool const leading{ z.node[node].x <= frame.x };
+    bool const leading{ source_node[node] != 0 };
     return scav_port_slot{ .x = leading ? box.x : (box.x + box.w),
                            .y = z.node[node].y,
                            .side = leading ? 0U : 1U,

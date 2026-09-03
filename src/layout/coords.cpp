@@ -133,8 +133,7 @@ void align_vertical(CoordGraph const &g,
         if (align[node] != node) { continue; }
         uint32_t const edge{ v.up_edge[v.up_off[node] + m] };
         uint32_t const up{ upper_of(g.edges[edge], upward) };
-        if ((mark[edge] != 0) ||
-            ((reached != INVALID) && (reached >= v.pos[up]))) {
+        if ((mark[edge] != 0) || ((reached != INVALID) && (reached >= v.pos[up]))) {
           continue;
         }
         align[up] = node;
