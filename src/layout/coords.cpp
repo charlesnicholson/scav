@@ -90,14 +90,16 @@ View view_of(CoordGraph const &g, bool upward, bool rightward) {
     }
   }
   // The medians the alignment step picks are positions in the upper layer, so
-  // a node's upper edges have to be in that order and not in edge order.
+  // a node's upper edges have to be in that order and not in edge order. In
+  // place over each CSR slice: a copy per node is one allocation per node per
+  // pass, and there are four passes over every chunk of every component.
   for (uint32_t i = 0; i < n; ++i) {
-    std::vector<uint32_t> ups(v.up_edge.begin() + v.up_off[i],
-                              v.up_edge.begin() + v.up_off[i + 1]);
-    scav_stable_sort(ups, [&](uint32_t a, uint32_t b) {
-      return v.pos[upper_of(g.edges[a], upward)] < v.pos[upper_of(g.edges[b], upward)];
-    });
-    for (uint32_t k = 0; k < ups.size(); ++k) { v.up_edge[v.up_off[i] + k] = ups[k]; }
+    scav_insertion_sort(v.up_edge.data() + v.up_off[i],
+                        v.up_edge.data() + v.up_off[i + 1],
+                        [&](uint32_t a, uint32_t b) {
+                          return v.pos[upper_of(g.edges[a], upward)] <
+                                 v.pos[upper_of(g.edges[b], upward)];
+                        });
   }
   return v;
 }

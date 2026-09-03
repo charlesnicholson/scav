@@ -9,10 +9,35 @@
 
 namespace scav {
 
+// Stable insertion sort over a raw range. The merge below allocates a scratch
+// buffer per call, and a layout runs hundreds of thousands of sorts of two or
+// three elements, where that allocation is the whole of the cost.
+template <typename T, typename Less>
+void scav_insertion_sort(T *first, T *last, Less less) {
+  if (first == last) { return; }
+  for (T *i = first + 1; i < last; ++i) {
+    T const key{ *i };
+    T *j{ i };
+    // Move only past strictly greater keys, which is the stability guarantee.
+    while ((j > first) && less(key, *(j - 1))) {
+      *j = *(j - 1);
+      --j;
+    }
+    *j = key;
+  }
+}
+
+// Where a merge pass would cost more in scratch than it saves in comparisons.
+inline constexpr size_t SCAV_SORT_SMALL{ 32 };
+
 template <typename T, typename Less>
 void scav_stable_sort(std::vector<T> &v, Less less) {
   size_t const n{ v.size() };
   if (n < 2) { return; }
+  if (n <= SCAV_SORT_SMALL) {
+    scav_insertion_sort(v.data(), v.data() + n, less);
+    return;
+  }
 
   std::vector<T> scratch(n);
   T *src{ v.data() };

@@ -264,18 +264,23 @@ uint64_t total_crossings(Frame const &f) {
 }
 
 // Median of the adjacent positions in the fixed rank; INVALID when the node
-// has no neighbour there, which pins it where it is.
-uint32_t median_of(Frame const &f, uint32_t node, bool from_predecessors) {
+// has no neighbour there, which pins it where it is. `scratch` is the
+// caller's, because this runs once per node per rank per sweep.
+uint32_t median_of(Frame const &f,
+                   uint32_t node,
+                   bool from_predecessors,
+                   std::vector<uint32_t> &scratch) {
   Adjacency const &a{ from_predecessors ? f.in : f.out };
-  std::vector<uint32_t> adj;
-  adj.reserve(a.off[node + 1] - a.off[node]);
+  scratch.clear();
   for (uint32_t k = a.off[node]; k < a.off[node + 1]; ++k) {
     OrderEdge const &e{ f.edges[a.edge[k]] };
-    adj.push_back(f.nodes[from_predecessors ? e.src : e.dst].pos);
+    scratch.push_back(f.nodes[from_predecessors ? e.src : e.dst].pos);
   }
-  if (adj.empty()) { return INVALID; }
-  scav_stable_sort(adj, [](uint32_t a2, uint32_t b2) { return a2 < b2; });
-  return adj[adj.size() / 2];
+  if (scratch.empty()) { return INVALID; }
+  scav_insertion_sort(scratch.data(),
+                      scratch.data() + scratch.size(),
+                      [](uint32_t a2, uint32_t b2) { return a2 < b2; });
+  return scratch[scratch.size() / 2];
 }
 
 // Adjacent exchanges only, and only between two nodes that both have a
@@ -284,8 +289,9 @@ uint32_t median_of(Frame const &f, uint32_t node, bool from_predecessors) {
 void reorder_rank(Frame &f, uint32_t rank, bool from_predecessors) {
   std::vector<uint32_t> &bucket{ f.ranks[rank] };
   std::vector<uint32_t> med(bucket.size(), INVALID);
+  std::vector<uint32_t> scratch;
   for (uint32_t i = 0; i < bucket.size(); ++i) {
-    med[i] = median_of(f, bucket[i], from_predecessors);
+    med[i] = median_of(f, bucket[i], from_predecessors, scratch);
   }
   for (uint32_t pass = 0; pass < bucket.size(); ++pass) {
     bool moved{ false };

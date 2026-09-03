@@ -769,13 +769,87 @@ TEST_CASE("layout: two thousand states lay out, and quickly") {
           " us");
 #if SCAV_PERF_ASSERT_FLOOR == 1
   // A floor, not a time: named machines only, never under instrumentation.
-  // Real layout measures ~31 ms here against P4's 0.2 ms, and the work is
+  // Real layout measures ~25 ms here against P4's 0.2 ms, and the work is
   // named rather than guessed: four coordinate passes per piece, two candidate
   // shapes per component, and the median sweeps. The floor is set to catch an
   // accidental quadratic, not to track that number.
   CHECK(us < 150000);
 #endif
   check_geometry(c);
+}
+
+TEST_CASE("layout: the flat two thousand lay out too, and quickly") {
+  // One submachine holding the whole scale target is legal input, and it is
+  // the shape the per-submachine cost bounds assume away: ordering there runs
+  // over a graph an order of magnitude larger than a nested frame's (11.3).
+  Chart c;
+  SubmachineId const root{ build_chart(c, "flat", {}) };
+  std::vector<StateId> all;
+  all.reserve(2048);
+  for (uint32_t i = 0; i < 2048; ++i) {
+    all.push_back(build_state(c, root, {}, StateKind::Normal, {}));
+  }
+  for (uint32_t i = 1; i < all.size(); ++i) {
+    build_trans(c, all[i - 1], all[i], TransKind::External, {});
+    if ((i % 16) == 0) { build_trans(c, all[i], all[i - 16], TransKind::External, {}); }
+  }
+  REQUIRE(c.transitions.size() >= 2000);
+
+  auto const t0{ std::chrono::steady_clock::now() };
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  bool const laid{ layout_run(c, {}, opts(readable()), placed, diags) };
+  auto const t1{ std::chrono::steady_clock::now() };
+  auto const us{ std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() };
+  MESSAGE("flat layout_run over ",
+          c.states.size(),
+          " states / ",
+          c.transitions.size(),
+          " transitions: ",
+          us,
+          " us, laid out: ",
+          laid);
+  // Whether it fits the domain is the model's business; that it terminates
+  // without a quadratic is this phase's.
+  if (!laid) {
+    REQUIRE(!diags.empty());
+    CHECK(diags[0].code == DiagCode::CoordinateOverflow);
+  }
+#if SCAV_PERF_ASSERT_FLOOR == 1
+  CHECK(us < 150000);
+#endif
+}
+
+TEST_CASE("layout: a frame full of long edges terminates, expensively") {
+  // The shape the case above deliberately is not. Cycle breaking reverses in
+  // node order, and a reversed chain edge turns a thirteen-rank skip into a
+  // thousand-rank one, each rank of which is chained through a bend: the node
+  // count comes out two orders of magnitude over the state count. Pinned at a
+  // size a build can afford, because the fix -- a cycle-breaking heuristic
+  // that leaves a chain alone -- has a quality story that wants review.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "wide", {}) };
+  std::vector<StateId> all;
+  all.reserve(512);
+  for (uint32_t i = 0; i < 512; ++i) {
+    all.push_back(build_state(c, root, {}, StateKind::Normal, {}));
+  }
+  for (uint32_t i = 1; i < all.size(); ++i) {
+    build_trans(c, all[i - 1], all[i], TransKind::External, {});
+    build_trans(c, all[i], all[(i + 13) % all.size()], TransKind::External, {});
+  }
+
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ phase1_order(c, g, {}, readable()) };
+  MESSAGE("512 states with wrapping skips: ",
+          o.nodes.size(),
+          " ordering nodes, ",
+          o.sub_ranks[root.v],
+          " ranks");
+  CHECK(o.nodes.size() > c.states.size());
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  CHECK((layout_run(c, {}, opts(readable()), placed, diags) || !diags.empty()));
 }
 
 TEST_CASE("layout: the coordinate extent estimate holds under fat text") {
