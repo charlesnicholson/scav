@@ -916,6 +916,7 @@ TEST_CASE("layout: corpus charts hash to the committed golden") {
     std::string failed;
     REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
     run(c, {}, readable());
+    check_geometry(c);  // the invariants, over real charts and not only fuzz
     actual += name;
     actual += ' ';
     string_append_hex32(actual, layout_inputs_digest(c));
