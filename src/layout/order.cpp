@@ -387,7 +387,8 @@ SubmachineOrders phase1_order(Chart const &c,
       uint32_t const child{ c.state_ids[kids.off + k].v };
       if (c.states[child].live == 0) { continue; }
       o.state_node[child] = static_cast<uint32_t>(f.nodes.size());
-      f.nodes.push_back({ .kind = OrderKind::State, .subject = child, .rank = 0, .pos = 0 });
+      f.nodes.push_back(
+          { .kind = OrderKind::State, .subject = child, .rank = 0, .pos = 0 });
     }
 
     // A port on a child's border is that child; a port on the frame's own
@@ -478,8 +479,10 @@ SubmachineOrders phase1_order(Chart const &c,
       }
     }
 
-    o.sub_nodes[m] = make_span(node_base, static_cast<uint32_t>(o.nodes.size()) - node_base);
-    o.sub_edges[m] = make_span(edge_base, static_cast<uint32_t>(o.edges.size()) - edge_base);
+    o.sub_nodes[m] =
+        make_span(node_base, static_cast<uint32_t>(o.nodes.size()) - node_base);
+    o.sub_edges[m] =
+        make_span(edge_base, static_cast<uint32_t>(o.edges.size()) - edge_base);
     o.sub_ranks[m] = static_cast<uint32_t>(f.ranks.size());
     o.sub_gaps[m] = make_span(gap_base, static_cast<uint32_t>(o.gaps.size()) - gap_base);
   }

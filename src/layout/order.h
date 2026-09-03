@@ -41,10 +41,10 @@ struct OrderEdge {
 };
 
 struct SubmachineOrders {
-  std::vector<OrderNode> nodes;   // contiguous per submachine
-  std::vector<OrderEdge> edges;   // contiguous per submachine
-  std::vector<Span> sub_nodes;    // parallel to submachines -> nodes
-  std::vector<Span> sub_edges;    // parallel to submachines -> edges
+  std::vector<OrderNode> nodes;     // contiguous per submachine
+  std::vector<OrderEdge> edges;     // contiguous per submachine
+  std::vector<Span> sub_nodes;      // parallel to submachines -> nodes
+  std::vector<Span> sub_edges;      // parallel to submachines -> edges
   std::vector<uint32_t> sub_ranks;  // parallel to submachines; layer count
 
   // The extra width each rank boundary must carry beyond `rank_sep`, one row

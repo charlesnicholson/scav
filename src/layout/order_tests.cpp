@@ -109,9 +109,7 @@ TEST_CASE("order: a cycle reverses exactly one edge and still ranks") {
   for (OrderEdge const &e : o.edges) { reversed += e.reversed; }
   CHECK(reversed == 1);
   // Both edges point the DAG way after orientation, whatever they were authored as.
-  for (OrderEdge const &e : o.edges) {
-    CHECK(o.nodes[e.src].rank < o.nodes[e.dst].rank);
-  }
+  for (OrderEdge const &e : o.edges) { CHECK(o.nodes[e.src].rank < o.nodes[e.dst].rank); }
 }
 
 TEST_CASE("order: an external self-loop contributes no edge") {

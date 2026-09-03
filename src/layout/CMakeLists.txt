@@ -8,6 +8,7 @@ scav_static_library(scavlayout
   spaces.cpp
   decompose.cpp
   order.cpp
+  coords.cpp
 )
 scav_install_library(scavlayout layout)
 target_link_libraries(scavlayout PUBLIC scavcore)
@@ -25,6 +26,7 @@ if(SCAV_BUILD_TESTS)
     spaces_tests.cpp
     decompose_tests.cpp
     order_tests.cpp
+    coords_tests.cpp
   )
   target_link_libraries(scav_layout_tests PRIVATE scavlayout_testable)
   # A floor is asserted only where the number means anything: never under
