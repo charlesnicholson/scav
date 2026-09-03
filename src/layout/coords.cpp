@@ -121,7 +121,10 @@ void align_vertical(CoordGraph const &g,
     align[i] = i;
   }
   for (std::vector<uint32_t> const &lay : v.layers) {
-    int64_t reached{ -1 };
+    // The rightmost upper neighbour this layer has already aligned onto, which
+    // is what keeps two alignments in one layer from crossing. INVALID rather
+    // than -1 so the comparison below stays within one signedness.
+    uint32_t reached{ INVALID };
     for (uint32_t const node : lay) {
       uint32_t const d{ v.up_off[node + 1] - v.up_off[node] };
       if (d == 0) { continue; }
@@ -130,7 +133,8 @@ void align_vertical(CoordGraph const &g,
         if (align[node] != node) { continue; }
         uint32_t const edge{ v.up_edge[v.up_off[node] + m] };
         uint32_t const up{ upper_of(g.edges[edge], upward) };
-        if ((mark[edge] != 0) || (reached >= static_cast<int64_t>(v.pos[up]))) {
+        if ((mark[edge] != 0) ||
+            ((reached != INVALID) && (reached >= v.pos[up]))) {
           continue;
         }
         align[up] = node;

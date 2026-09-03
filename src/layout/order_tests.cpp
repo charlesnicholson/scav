@@ -247,6 +247,7 @@ TEST_CASE("order: a sweep removes a crossing document order would have left") {
   REQUIRE(o.sub_ranks[root.v] == 2);
   // Zero crossings means the two sinks ended up under their own sources.
   std::vector<uint32_t> south;
+  south.reserve(o.edges.size());
   for (OrderEdge const &e : o.edges) { south.push_back(o.nodes[e.dst].pos); }
   CHECK(rank_crossings(south) == 0);
   CHECK(node_of(o, b2).pos == node_of(o, a1).pos);

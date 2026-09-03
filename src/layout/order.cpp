@@ -157,7 +157,7 @@ void assign_ranks(Frame &f) {
     }
   }
 
-  for (uint32_t at = static_cast<uint32_t>(topo.size()); at-- > 0;) {
+  for (auto at = static_cast<uint32_t>(topo.size()); at-- > 0;) {
     uint32_t const v{ topo[at] };
     if ((f.nodes[v].kind == OrderKind::Boundary) || (out_deg(v) == 0) ||
         (in_deg(v) >= out_deg(v))) {
