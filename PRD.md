@@ -1597,10 +1597,10 @@ The printer's line-break budget is `print_columns` (§11.15); P3 ships that fiel
 | | P4 | P6 |
 |---|---|---|
 | Tier 0, edges through a box | 383 | **196** |
-| geometric crossings | 251 | 292 |
+| geometric crossings | 251 | 293 |
 | bends | 48 | 129 |
-| aspect deviation | 630,976 | **449,408** |
-| bounding-box area | 5.63e8 | **1.31e9** |
+| aspect deviation | 630,976 | **455,408** |
+| bounding-box area | 5.63e8 | 1.30e9 |
 
 **Tier 0 is strictly better on ten charts of eleven and worse on none**, and Tier 0 is the tier compared first, so on `Cost` as defined P6 wins outright. **Tier 2 is worse on every chart**, and the reason is worth stating plainly rather than smoothing: the Tier-2 sum is `w_area * area` to within a rounding error (§19), so "the Tier-2 vector" is currently an area comparison, and area is exactly what a packer optimises and what layering spends. Aspect — the one Tier-2 term whose scale is comparable to the others — improves. The gate as written is therefore not met, and the two things that would meet it are P9's weight calibration and §11.4's unspent compaction, neither of which belongs to this phase. Blind review is the half that decides whether that trade reads as better.
 
