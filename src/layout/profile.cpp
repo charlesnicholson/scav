@@ -16,8 +16,11 @@ constexpr int32_t PT{ 16 };  // grid units are 1/16 pt
 // One of the two shipped profiles scav_profile_named hands out by name.
 constexpr scav_profile READABLE{
   .profile_id = 2,
-  .profile_version = 1,
+  .profile_version = 2,
   .pad = 8 * PT,
+  .rank_sep = 36 * PT,
+  .node_sep = 18 * PT,
+  .sub_sep = 12 * PT,
   .font_size_grid = 12 * PT,
   .line_height_k_num = 7,
   .line_height_k_den = 5,
@@ -65,8 +68,11 @@ constexpr scav_profile READABLE{
 // The other shipped profile: tighter spacing and type for dense charts.
 constexpr scav_profile COMPACT{
   .profile_id = 1,
-  .profile_version = 1,
+  .profile_version = 2,
   .pad = 4 * PT,
+  .rank_sep = 22 * PT,
+  .node_sep = 11 * PT,
+  .sub_sep = 8 * PT,
   .font_size_grid = 10 * PT,
   .line_height_k_num = 6,
   .line_height_k_den = 5,
@@ -129,7 +135,9 @@ bool profile_named(char const *name, scav_profile &out) {
 bool profile_validate(scav_profile const &p) {
   constexpr int32_t I32_MAX{ 0x7FFF'FFFF };
   bool ok{ in_range(p.profile_id, 0, I32_MAX) && in_range(p.profile_version, 1, I32_MAX) &&
-           in_range(p.pad, 0, SPACE_MAX) && in_range(p.font_size_grid, 1, SPACE_MAX) &&
+           in_range(p.pad, 0, SPACE_MAX) && in_range(p.rank_sep, 0, SPACE_MAX) &&
+           in_range(p.node_sep, 0, SPACE_MAX) && in_range(p.sub_sep, 0, SPACE_MAX) &&
+           in_range(p.font_size_grid, 1, SPACE_MAX) &&
            in_range(p.line_height_k_num, 1, 1024) &&
            in_range(p.line_height_k_den, 1, 1024) && in_range(p.dar_num, 1, 1024) &&
            in_range(p.dar_den, 1, 1024) && in_range(p.trybox, 0, 1) &&

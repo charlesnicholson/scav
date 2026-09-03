@@ -62,7 +62,13 @@ typedef struct {
   int32_t profile_id;      /* [0, INT32_MAX] */
   int32_t profile_version; /* [1, INT32_MAX] */
 
-  int32_t pad; /* around every composed box; [0, COORD_MAX/4] */
+  int32_t pad; /* a box's interior ring only; [0, COORD_MAX/4] */
+
+  /* Gaps between two things, as against `pad`, which is inside one thing.
+   * [0, COORD_MAX/4] each. */
+  int32_t rank_sep; /* adjacent ranks, along the layering axis */
+  int32_t node_sep; /* adjacent nodes within one rank */
+  int32_t sub_sep;  /* packed sibling submachines */
 
   int32_t font_size_grid;    /* 1/16 pt units; [1, COORD_MAX/4] */
   int32_t line_height_k_num; /* [1, 1024] */

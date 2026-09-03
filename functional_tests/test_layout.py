@@ -25,7 +25,7 @@ class Rect(ctypes.Structure):
 
 class LayoutOpts(ctypes.Structure):
     """scav_layout_opts: the profile is 43 int32 fields, flat."""
-    _fields_ = [("profile", ctypes.c_int32 * 43),
+    _fields_ = [("profile", ctypes.c_int32 * 46),
                 ("router", ctypes.c_uint32),
                 ("threads", ctypes.c_uint32)]
 
