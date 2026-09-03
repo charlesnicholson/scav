@@ -1,7 +1,11 @@
 // Exact rects from the box formula, stacking, routes, placed boxes, the
 // columns, the hash split, and a geometry invariant sweep.
 
+#include "layout/cost.h"
 #include "layout/decompose.h"
+#include "layout/order.h"
+#include "layout/route.h"
+#include "layout/size.h"
 #include "scav/scav_core.h"
 #include "scav/scav_core_c.h"
 #include "scav/scav_layout.h"
@@ -856,6 +860,70 @@ TEST_CASE("layout: corpus charts hash to the committed golden") {
                reinterpret_cast<scav_byte const *>(actual.data()),
                actual.size());
     MESSAGE("actual written to " SCAV_TEST_OUT_DIR "/corpus_hashes.txt:\n", actual);
+  }
+  CHECK(want == actual);
+}
+
+TEST_CASE("layout: the corpus cost vector is committed, term by term") {
+  // The gate's own numbers, in the open: 11.6's terms with no space requests
+  // and the readable profile, so a later phase is compared against a row
+  // rather than against a claim. `corridor` needs channels and stays zero
+  // until P7 registers a router that has them.
+  scav_profile const p{ readable() };
+  std::string actual;
+  for (char const *name : { "axis.scav",
+                            "bottler.scav",
+                            "brew.scav",
+                            "dock.scav",
+                            "estop.scav",
+                            "led.scav",
+                            "mill.scav",
+                            "ota.scav",
+                            "tcp.scav",
+                            "toolchanger.scav",
+                            "vac.scav" }) {
+    CAPTURE(name);
+    std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
+    path += name;
+    Loader loader;
+    Chart c;
+    std::vector<Diagnostic> diags;
+    std::string failed;
+    REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
+
+    SplitGraph const g{ decompose(c) };
+    SubmachineOrders const o{ phase1_order(c, g, {}, p) };
+    SizedLayout z;
+    REQUIRE(phase2_size(c, g, o, {}, p, z, diags));
+    Routes const r{ phase3_route(c, g, o, z, {}, p) };
+    CostTerms const t{ cost_terms(c, g, z, r, {}, p) };
+    Cost const scored{ cost_of(t, p) };
+
+    actual += name;
+    for (int64_t const term : { int64_t{ scored.t0_violations },
+                                t.bends,
+                                t.corridor,
+                                t.crossings,
+                                t.excess_len,
+                                t.adjacency,
+                                t.label,
+                                t.aspect,
+                                t.area,
+                                scored.t2 }) {
+      actual += ' ';
+      actual += std::to_string(term);
+    }
+    actual += '\n';
+  }
+
+  std::vector<scav_byte> golden;
+  REQUIRE(read_file(SCAV_TEST_DATA_DIR "/golden/layout/corpus_cost.txt", golden));
+  std::string const want{ reinterpret_cast<char const *>(golden.data()), golden.size() };
+  if (want != actual) {
+    write_file(SCAV_TEST_OUT_DIR "/corpus_cost.txt",
+               reinterpret_cast<scav_byte const *>(actual.data()),
+               actual.size());
+    MESSAGE("actual written to " SCAV_TEST_OUT_DIR "/corpus_cost.txt:\n", actual);
   }
   CHECK(want == actual);
 }
