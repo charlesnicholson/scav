@@ -54,6 +54,11 @@ struct SubmachineOrders {
 
   std::vector<uint32_t> state_node;  // parallel to states -> nodes; INVALID if dead
   std::vector<uint32_t> seg_node;    // parallel to segments -> its boundary node
+
+  // The port that boundary node stands for, so a consumer can put the slot on
+  // the crossed state's border. INVALID when the boundary is the transition's
+  // own endpoint on an inner face rather than a crossing (11.14).
+  std::vector<uint32_t> seg_port;
 };
 
 // Pure in `(Chart, SplitGraph, Spaces, Profile)`: ranks by longest path,

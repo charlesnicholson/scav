@@ -349,6 +349,7 @@ SubmachineOrders phase1_order(Chart const &c,
   o.sub_gaps.assign(c.submachines.size(), Span{});
   o.state_node.assign(c.states.size(), INVALID);
   o.seg_node.assign(g.segments.size(), INVALID);
+  o.seg_port.assign(g.segments.size(), INVALID);
 
   // Which segments each frame routes, gathered once: a segment names its frame
   // but a frame does not name its segments.
@@ -394,9 +395,10 @@ SubmachineOrders phase1_order(Chart const &c,
     // A port on a child's border is that child; a port on the frame's own
     // border is a node of its own, and there is at most one such end per
     // segment because consecutive crossings always change frame.
-    auto const boundary_node = [&](uint32_t seg) {
+    auto const boundary_node = [&](uint32_t seg, uint32_t port) {
       if (o.seg_node[seg] == INVALID) {
         o.seg_node[seg] = static_cast<uint32_t>(f.nodes.size());
+        o.seg_port[seg] = port;
         f.nodes.push_back(
             { .kind = OrderKind::Boundary, .subject = seg, .rank = 0, .pos = 0 });
       }
@@ -408,14 +410,15 @@ SubmachineOrders phase1_order(Chart const &c,
       if (port == INVALID) {
         StateId const st{ endpoint_state(c, sg, is_src) };
         if ((st.v == INVALID) || (c.states[st.v].live == 0)) { return INVALID; }
-        return (c.states[st.v].parent.v == m) ? o.state_node[st.v] : boundary_node(seg);
+        return (c.states[st.v].parent.v == m) ? o.state_node[st.v]
+                                              : boundary_node(seg, INVALID);
       }
       SplitPort const &pt{ g.ports[port] };
       if (pt.state.v != INVALID) {
         return (c.states[pt.state.v].parent.v == m) ? o.state_node[pt.state.v]
-                                                    : boundary_node(seg);
+                                                    : boundary_node(seg, port);
       }
-      if (pt.sub.v == m) { return boundary_node(seg); }
+      if (pt.sub.v == m) { return boundary_node(seg, port); }
       StateId const owner{ c.submachines[pt.sub.v].owner };
       if ((owner.v != INVALID) && (c.states[owner.v].parent.v == m)) {
         return o.state_node[owner.v];
