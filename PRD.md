@@ -278,6 +278,8 @@ Testability comes from pure functions, not seams. **Mocks and interface seams ar
 #endif
 ```
 
+**Unit means unit: no disk, no parse, no prior stage.** A unit test builds its subject's inputs directly in RAM — as literal PODs, or through the in-memory chart builders where a real model is what is actually under test — and asserts on the return value. It does not read a `.scav` file, does not run the stage before the one under test in order to manufacture an input, and does not open a font. The payoff grows with pipeline depth: a defect in rank assignment should fail one test that types in a graph, not a golden hash three stages downstream that reports only that something moved. This constrains code shape as much as test shape, which is why every stage's intermediate type is declared in a header rather than being file-local (§11). Functional tests do the composing, over the corpus, end to end — the two classes answer different questions and neither substitutes for the other.
+
 All layout arithmetic is integer, so inlining cannot change results: the `testable` build must be byte-identical to release, and is a row in the matrix. Divergence means UB.
 
 Required test classes: **unit** (every internal function, doctest) · **functional** (full pipeline over the corpus) · **golden** (canonical serialization, structural hash, coordinate hash, **`DrawList`** — the primary surface, §12 — plus a thin SVG serializer check, ABI JSON) · **property** (round-trip identity, all refs resolve, zero box overlap, zero edge-through-box, surrogate cost ranks like exact cost) · **determinism** (§6) · **sanitizer** (UBSan signed-overflow+shift, ASan, TSan, and MSan on Linux/clang, which is the only place an instrumented `libc++` exists — see PB) · **fuzz** (deserializer and reference resolver — untrusted input) · **binding** (drive the C ABI from Python/ctypes in CI) · **baseline** (§11.12) · **performance** (see below) · **regression** (every fixed bug leaves a test).
@@ -803,15 +805,21 @@ Isolated static library, imperative entry, POD in. Writes **derived** geometry c
 Scale target: **2k states, 5k transitions, depth 16.**
 
 ```
-phase0_split(model)                              -> SplitGraph
-phase1_order(SplitGraph, Spaces)                 -> SubmachineOrders
-phase2_size(SubmachineOrders, Spaces)            -> SizedLayout
-phase3_route(SizedLayout, Router)                -> geometry columns + Placed[]
+phase0_split(Chart)                                        -> SplitGraph
+phase1_order(SplitGraph, Spaces, Profile)                  -> SubmachineOrders
+phase2_size(SplitGraph, SubmachineOrders, Spaces, Profile) -> SizedLayout
+phase3_route(SizedLayout, Router, Profile)                 -> geometry columns + Placed[]
 ```
 
 The four intermediates are internal POD: `Spaces` is the three §8.1 tables; `SplitGraph` is segments, ports, and the containment tree; `SubmachineOrders` adds rank and in-rank position per node; `SizedLayout` adds box extents and port coordinates. None crosses the ABI (§16) — only geometry columns and `Placed[]` do — so they are free to change without an ABI break.
 
 Every stage is POD in, POD out, so any stage is testable with hand-written inputs and no font present. Hint columns are integers (§14), so layout never touches a string or resolves a path — §3's font-blindness is structural, not a convention.
+
+**Each phase is its own translation unit, and its output intermediate is declared in that unit's header** — the shape `decompose.h` already has. That is what makes the previous paragraph a fact rather than an aspiration: a phase whose intermediate is a file-local type in a monolithic `layout.cpp` is reachable only by running every phase before it, which is a functional test wearing a unit test's name.
+
+**Unit tests construct the input intermediate directly and never run the preceding phase.** A `SubmachineOrders` with three ranks is nine integers typed into a test; a `SizedLayout` with two overlapping boxes is a literal. Nothing is loaded from disk, no document is parsed, and no font is opened — there are in-RAM chart builders for the cases where a real model is genuinely what is under test (§5), and hand-written PODs for every case where it is not. The pipeline's own composition is then the *functional* class's job, over the corpus, end to end.
+
+Two consequences worth stating because they are easy to erode. A phase may not reach back for the `Chart` to recover something its input intermediate failed to carry — if phase 2 needs a boundary-crossing count, `SplitGraph` carries it. And no phase may read the clock, the environment, a global, or a thread id, so a stage's output is a function of its arguments and a test needs no fixture to pin it.
 
 Geometry columns are derived: never serialized, never authored (§7), so "layout writes the model" does not compromise round-trip stability.
 
@@ -819,9 +827,9 @@ Geometry columns are derived: never serialized, never authored (§7), so "layout
 
 Build the containment tree. Split every transition at each boundary it crosses, terminating each segment on a **hierarchical port** on the compound state's border. Each segment is then local to one submachine, and the long-hierarchical-edge problem becomes 1D port ordering per compound side.
 
-A port carries the **accumulated weight** of every edge through it, so a state at depth 16 with a transition to a top-level state exerts real pull on its ancestor chain. This is the differentiator.
+A long edge's weight **accumulates structurally, not in a scalar**: one port per crossed ancestor border means a state at depth 16 with a transition to a top-level state contributes an ordering constraint in *every* one of the frames between, so it exerts real pull on its whole ancestor chain. This is the differentiator, and it is why `SplitPort` needs no weight field — the accumulation is the port count along the chain, and what a consumer needs to know about congestion at one boundary is `state_crossings`.
 
-Port order is a solver output. Ties break on the port's stable key (§6), never on weight-insertion order.
+Port order is a solver output (§11.3). Ties break on the port's stable key (§6), never on weight-insertion order.
 
 ### 11.2 Coordinates
 
@@ -863,13 +871,21 @@ Coordinate assignment uses two linear integer primitives, not a solver: **Brande
 
 Independent per submachine: the parallel unit and the dirty unit. Layered rank assignment, then intra-rank ordering by **median** (tight 3-approximation) or **global sifting** (5–10% fewer crossings than level-by-level sweeps, eliminates type-2 conflicts). **Not barycenter** — no constant-factor bound, ratio Ω(√n).
 
-Inter-rank edge labels become **label dummy nodes** sized to the label, so rank separation accommodates them by construction (§11.9).
+**The layering axis runs left to right.** Ranks are columns, nodes stack vertically within a rank, and successive ranks proceed in +x. This is not a new choice — it is what §11.4's size composition already encodes, and recording it here keeps `rank_sep` from being read as the other axis by half its readers. So `rank_sep` is a horizontal gap between adjacent columns and `node_sep` a vertical gap between adjacent nodes in one column (§11.15). The RTL mirror (§11.9) is an x-flip, which is the layering axis, so it reverses reading order exactly as intended.
+
+**Ports are nodes in their frame's layered graph**, one per `SplitPort` whose frame this is, ranked and ordered alongside real states. That is what turns §11.1's split into 1D port ordering per compound side without a second algorithm: a port's rank fixes which side of the compound state it lands on, and its position within that rank fixes its offset along the side. Phase 2 turns those two ordinals into coordinates; nothing else assigns a port a side.
+
+**Ordering-edge weights are uniform at 1.** The known lever if blind review wants straighter long edges is dot's schedule — real-to-real 1, real-to-dummy 2, dummy-to-dummy 8 — and it is deliberately not taken up front: it is three integers and a golden rebase whenever it is wanted, and taking it now would mean tuning against no measurement.
+
+Inter-rank edge labels become **label dummy nodes** sized to the label, so rank separation accommodates them by construction (§11.9). Their extents come from the `PathBox` rows of `Spaces`, which makes **`Spaces` a phase-1 input and not only a phase-3 one**: a label wide enough to set the gap between two ranks has to be known before the ranks have coordinates. Placement of the box along the finished route stays phase 3's (§11.9), so `PathBox` is read twice for two different questions — how much room to leave, then where the room ended up.
+
+**The degenerate flat chart bounds the ordering algorithm, not just the router.** One submachine holding 2k states is legal input (§11.5), and global sifting there is `O(|V||E|)` per pass over a graph an order of magnitude larger than the n≈20–50 the per-submachine case assumes. So the ordering stage carries its own measured floor at the flat 2k shape, alongside the nested one, and the choice between median and sifting is allowed to depend on submachine size — deterministically, on a size threshold that is a profile field, never on elapsed time.
 
 ### 11.4 Phase 2 — sizing and sibling packing
 
 Sizes bottom-up; port positions and hints top-down; fixed pass count.
 
-Submachine size composition (Castelló et al., JGAA 6(3), 2002): **width = Σ over layers of (max width in layer); height = max over layers of (Σ heights in layer)**.
+Submachine size composition (Castelló et al., JGAA 6(3), 2002): **width = Σ over layers of (max width in layer); height = max over layers of (Σ heights in layer)**. Layers are columns, which is §11.3's left-to-right axis restated — a layer contributes its widest member to the total width and its stacked members to a candidate height. The gaps go in the same two sums: `rank_sep` once per layer boundary along the width, `node_sep` once per adjacent pair within a layer along the height. **Every node in a layer shares that layer's x origin** — left-aligned, not centred within the layer's width — which is what leaves rank recoverable from the finished coordinates (§11.7a).
 
 Composite state box, from the requesting entity's `BoxSpace` (§8.1):
 
@@ -878,9 +894,9 @@ w = max(min_w, packed_subs_w, kind_min_w) + 2*pad
 h = max(h_before + packed_subs_h + h_after, kind_min_h) + 2*pad
 ```
 
-`pad` and the per-`StateKind` `kind_min_w`/`kind_min_h` are profile fields (§11.15), never hardcoded. A state with no space request passes an all-zero `BoxSpace`, so `kind_min_*` is what gives a fork bar its wide-and-thin extent (§7.2) — without that term the formula would size it `2*pad` square.
+`pad` and the per-`StateKind` `kind_min_w`/`kind_min_h` are profile fields (§11.15), never hardcoded. **`pad` is interior only** — the ring between a box's border and its contents, which is why it appears exactly twice per axis in the formula above and nowhere else. Every gap *between* two things is `rank_sep`, `node_sep`, or `sub_sep`. Serving all four roles from one field is the trap here: it forces the space around a submachine title, the space between two ranks, and the space between two sibling submachines to move together, and the three want different numbers in both shipped profiles. A state with no space request passes an all-zero `BoxSpace`, so `kind_min_*` is what gives a fork bar its wide-and-thin extent (§7.2) — without that term the formula would size it `2*pad` square.
 
-**Sibling submachines are packed here, not in phase 1** — packing requires the siblings already sized. **LR-rectpacking** (Domrös et al., IVAPP 2021): greedy width approximation → placement → compaction → whitespace elimination, `O(n log n)`. Take the LR variant; plain rectpacking's one-oversized-child special case was deleted by its own authors as unmaintainable and aspect-ratio-blind.
+**Sibling submachines are packed here, not in phase 1** — packing requires the siblings already sized. **LR-rectpacking** (Domrös et al., IVAPP 2021): greedy width approximation → placement → compaction → whitespace elimination, `O(n log n)`. Take the LR variant; plain rectpacking's one-oversized-child special case was deleted by its own authors as unmaintainable and aspect-ratio-blind. The gap the packer leaves between two placed siblings, and preserves through compaction and whitespace elimination, is `sub_sep`.
 
 Order-preserving and gap-avoiding are one constraint: restricting placement to four positions relative to the predecessor (directly right; right on the current row level; next subrow; next row) is exactly what makes local whitespace elimination always possible.
 
@@ -937,6 +953,10 @@ w_area * bounding_box_area                           -- lowest
 
 Weights are integers in **named, versioned profiles**. Express each as an exchange rate ("n means an edge would rather turn n times than cross"), not a bare number. A weight change, a profile change, a font change, or a packer change is an **output-format change**: versioned, golden-tested, reviewable.
 
+**Not every term has a nonzero multiplicand at every phase.** `w_b` and `w_par` price properties of a *route*, and until P7 the only registered router is `straight`, which bends nowhere and shares no corridor — both products are identically zero however the weights are set. So P6's exit gate is over the six terms straight-line geometry defines (`w_x`, `w_len`, `w_adj`, `w_lbl`, `w_ar`, `w_area`) and P7's is over all eight. This is a statement about the inputs, not a mode: `Cost` is one struct with the same three fields throughout, and registering a router that bends makes the other two terms nonzero with no other change anywhere.
+
+**`Cost` is scored from PODs, never by re-running layout.** Its inputs are the geometry columns and the `SplitGraph` — rects, points, port slots, and the segment table — so a test hands it two hand-written boxes and one hand-written route and asserts a single term, with no model, no profile beyond the weights under test, and no pipeline. That also makes the P6 gate mechanical: score P4's committed geometry and P6's, compare the vectors.
+
 Area is deliberately last: minimizing it directly produces crammed blobs with snaking edges, and narrow channels force bends. For the packing sub-problem the objective is the **scale measure** `SM = min(DAR/w, 1/h)` — held as a rational and **compared by cross-multiplication, never computed**. Its tiebreak order (area, then aspect) is a versioned profile field.
 
 Two cost functions: a cheap **surrogate** for search (bends from port sides plus Manhattan distance, crossings from straight-line segments) and the exact one for scoring. A test asserts they agree on *ranking*; a misranking surrogate optimizes the wrong thing silently. Crossings are counted by **inversion counting** in the layered formulation, `O(|E| log|V|)` — the general straight-line formulation is `O(n^{4/3})` or worse and is not affordable inside search.
@@ -970,6 +990,8 @@ This list *is* the layout output ABI — there is no bespoke result type (§16) 
 `ElemKind::Point` exists so the point and port-slot arrays are real columns rather than side arrays outside the column rules; entity count is the column length. A transition splits into one port per boundary it crosses (§11.1), not two — a depth-16 edge has up to 15, and the structural hash covers all their sides, so one row per transition cannot hold them.
 
 **Hashing is by explicit allowlist, not by enumerating `Chart.columns`** — otherwise app and plugin columns perturb scav's own goldens, and the same corpus hashed through `scav` and through `scavview` would differ. The **structural hash** covers ranks, orders, port sides, and bend sequences *as direction-turn tokens*; the **coordinate hash** covers the rects and every point and port coordinate. Turn tokens rather than points is what makes a pure translation move the coordinate hash and not the structural one, which is the whole point of the split.
+
+**Rank and in-rank position are recovered from the rects as ordinals, not stored in a column.** On an integer grid with a left-to-right layering axis (§11.3), a submachine's rank sequence is the sorted distinct x of its children and a node's in-rank position is its index by y within its column — so both are derivable, and derived *as indices* they are translation-invariant, which is exactly the property the split needs. `SubmachineOrders` therefore stays an internal intermediate (§11) with no ABI presence, and the structural hash stays recomputable from a laid-out chart alone, which is what `scav selftest` (§6) requires. A `scav.geom.rank` column would be the alternative and is rejected twice over: no builder would consume it, breaking this section's own rule, and storing an ordinal that the coordinates already determine invites the two to disagree.
 
 ### 11.8 Transitions between concurrent submachines
 
@@ -1007,7 +1029,7 @@ Font size is a profile field and integer rounding is nonlinear, so changing it f
 
 **Labels routinely dominate transition length: a constraint, not a pathology.** ``min_len(e) = max(geometric_min, Σ PathBox widths along the route)``, a hard sizing input. `w_len` charges **excess only** (§11.6) — charging raw length makes the optimizer fight an unwinnable constraint and cram everything else. Rank separation grows via label dummy nodes (§11.3).
 
-**Placing a `PathBox`** is Kakoulis & Tollis strip matching: slice into strips sized to the tallest box, slide candidates until they touch their route, keep those overlapping nothing. Candidate order `(transition, order, strip, slide_offset)`; components process in ascending minimum key. NP-hard, so heuristic. On failure, bounded rip-up-and-reroute of that one edge (§11.5).
+**A `PathBox`'s size is a phase-1 input; its position is a phase-3 output** (§11.3). Sizing rank separation needs the extent before any coordinate exists, and placement needs a finished route, so the same row answers two questions at two stages. **Placing a `PathBox`** is Kakoulis & Tollis strip matching: slice into strips sized to the tallest box, slide candidates until they touch their route, keep those overlapping nothing. Candidate order `(transition, order, strip, slide_offset)`; components process in ascending minimum key. NP-hard, so heuristic. On failure, bounded rip-up-and-reroute of that one edge (§11.5).
 
 #### 11.9.1 Font metrics
 
@@ -1088,7 +1110,9 @@ A versioned, hashed artifact (§6), so it needs a field list rather than thirtee
 
 | Group | Fields |
 |---|---|
-| geometry | `pad` |
+| geometry | `pad` — a box's interior ring only (§11.4) |
+| separation | `rank_sep` between adjacent ranks, `node_sep` between adjacent nodes in a rank (§11.3), `sub_sep` between packed sibling submachines (§11.4). Each `[0, COORD_MAX/4]`. Distinct from `pad` because that one is interior and these are between things |
+| ordering | `sift_threshold` — submachine node count at or above which phase 1 uses global sifting instead of median (§11.3); `[0, INT32_MAX]`, where 0 means always sift |
 | type | `font_size_grid`, `line_height_k_num`/`_k_den` (`k_den >= 1`) |
 | pseudostate sizes | per-`StateKind` min extent. `fork`/`join` are wide-and-thin boxes; nothing scales with arity (§7.2) |
 | packing | `dar_num`/`dar_den` (each in `[1, 2^10]`), `trybox`, SM tiebreak order |
@@ -1551,8 +1575,13 @@ The printer's line-break budget is `print_columns` (§11.15); P3 ships that fiel
 **P5c — ABI JSON and generated bindings.** `scav_drawlist` completes §16's five handles — and with the surface finally whole, **ABI JSON extraction, its golden, and the generated binding layer** (§16.1). Held to here on purpose: the JSON describes a surface, and generating against one still moving means generating it again per phase.
 *Exit:* extracted ABI JSON matches its golden, and a generated Python layer drives model, layout, `DrawList`, and SVG end to end.
 
-**P6 — real layout.** Layered rank, median or sifting ordering, Brandes & Köpf coordinates, bottom-up sizing (fixed pass count, no hysteresis), LR-rectpacking with `box` fallback.
-*Exit:* better than P4 on the Tier-2 vector **and no worse than the incumbent** on blind review.
+**P6 — real layout.** Layered rank, median or sifting ordering, Brandes & Köpf coordinates, bottom-up sizing (fixed pass count, no hysteresis), LR-rectpacking with `box` fallback. Everything P4 stood in for gets replaced: document-order row wrapping by real ranks and real packing, dominant-axis port midpoints by ports ordered as nodes in their own frame (§11.3). Straight-line routes survive to P7 unchanged — this phase moves nodes, not edges.
+
+**Read the Brandes & Köpf erratum (arXiv:2008.01252) before implementing it, not after.** The GD 2001 paper's algorithm is wrong as published; this is the single most likely way this phase ships a subtle defect that goldens happily pin.
+
+**Four things this phase owes beyond the algorithms.** The phases stop being file-local functions in one `layout.cpp` and become a translation unit each with its intermediate in a header (§11), because P4's three stages are today reachable only by running the whole pipeline and P6 quadruples what needs isolating. `Cost` arrives here rather than with search (P9), since the exit gate is a comparison of cost vectors and cannot be stated without one — the **surrogate** and its ranking test stay with P9, which is the only thing that consumes a surrogate. The profile gains `rank_sep`, `node_sep`, `sub_sep`, and `sift_threshold` (§11.15) and so bumps `profile_version`, which rebases every geometry, `DrawList`, and SVG golden — take that churn here, in the phase that was going to move every coordinate anyway, rather than dribbling it across P6a..d. And the ordering stage gets a performance floor at the **flat 2k-state** shape, not only the nested one (§11.3).
+
+*Exit:* better than P4 on the six Tier-2 terms straight-line geometry defines (§11.6) **and no worse than the incumbent** on blind review of the corpus, PlantUML and elkjs side by side through the P5b harness.
 
 **P7 — orthogonal routing.** Router behind the vtable, channel-representative graph, separated OVG, A* with bend state, obstacles including submachines and placed boxes, LCA-owned separator channels, combinatorial nudging with integer offsets, `PathBox` strip placement, bench harness over ≥2 routers.
 *Exit:* zero edges through boxes; blind review no worse than incumbent.
@@ -1630,4 +1659,4 @@ Never vendor: `libnest2d` (LGPL-3.0), OGDF (GPL), Graphviz's `textspan_lut.c` (E
 - No published integer or combinatorial reformulation of VPSC.
 - `textLength` support is patchy in non-browser SVG consumers (Inkscape, librsvg, resvg). Test before relying on it.
 - Total pairwise rectangle overlap area has no published complexity bound; the `O(n log n)` sweep is our derivation. Union area at `O(n log n)` is published and optimal. Moot while Tier 0 forbids overlap.
-- The coordinate extent estimate (§11.2) is derived, not measured. P4 validates it (§11.2, §17).
+- ~~The coordinate extent estimate (§11.2) is derived, not measured.~~ **Settled by measurement**, twice: 1.9x headroom under P4's fabricated advances, 5.2x under P5a's real font (§11.2). The fabricated case is the bound that trips first and stays asserted, because P6's rank separation and label dummy nodes grow boxes.
