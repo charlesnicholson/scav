@@ -35,12 +35,13 @@ scav deps [--target N] <file>     the document network as a make/ninja depfile
 scav dump [--hash|--json] [--layout] <file>  the model: entity rows, not syntax
 ```
 
-`libscavlayout` computes skeleton geometry -- boundary splitting, the box
-formula, row packing, straight-line routes. `libscavdraw` measures text against
-the bundled font, builds a `DrawList` from the geometry columns, and
-`libscavsvg` writes it out; `scav render` is those three in a line. Real
-ordering and orthogonal routing are not built, so labels can still land on top
-of a state name -- that is the trivial router, and P6 and P7 are what fix it.
+`libscavlayout` runs four phases: boundary splitting, a layered graph per
+submachine, extents composed bottom-up onto those ranks, and routes through
+them. `libscavdraw` measures text against the bundled font, builds a `DrawList`
+from the geometry columns, and `libscavsvg` writes it out; `scav render` is
+those three in a line. Routes are still straight lines between the points the
+ranks decided, so an edge can cross a box and a label can land on a state name
+-- that is the `straight` router, and P7 is what replaces it.
 
 Bindings are generated from `abi/scav_abi.json`, which is extracted from the C
 headers and committed as a golden, so an ABI break is a review diff rather than
