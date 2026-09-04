@@ -64,19 +64,19 @@ bool enters_box(scav_point a, scav_point b, scav_rect const &r) {
 // Shortest path over the same plane-split graph by an O(V^2) scan: no
 // heuristic, no heap, no tie-break. -1 when the target is unreachable.
 Wide reference_cost(OrthoGrid const &g, uint32_t from, uint32_t to, Wide bend) {
-  uint32_t const nodes{ g.nx() * g.ny() * 2 };
+  size_t const nodes{ size_t{ g.nx() } * g.ny() * 2 };
   std::vector<Wide> dist(nodes, -1);
   std::vector<uint8_t> done(nodes, 0);
-  dist[from * 2] = 0;
-  dist[(from * 2) + 1] = 0;
+  dist[size_t{ from } * 2] = 0;
+  dist[(size_t{ from } * 2) + 1] = 0;
   for (;;) {
     uint32_t at{ INVALID };
     Wide best{ -1 };
-    for (uint32_t i = 0; i < nodes; ++i) {
+    for (size_t i = 0; i < nodes; ++i) {
       if ((done[i] != 0) || (dist[i] < 0)) { continue; }
       if ((best < 0) || (dist[i] < best)) {
         best = dist[i];
-        at = i;
+        at = static_cast<uint32_t>(i);
       }
     }
     if (at == INVALID) { break; }
@@ -105,8 +105,8 @@ Wide reference_cost(OrthoGrid const &g, uint32_t from, uint32_t to, Wide bend) {
       }
     }
   }
-  Wide const a{ dist[to * 2] };
-  Wide const b{ dist[(to * 2) + 1] };
+  Wide const a{ dist[size_t{ to } * 2] };
+  Wide const b{ dist[(size_t{ to } * 2) + 1] };
   if (a < 0) { return b; }
   if (b < 0) { return a; }
   return imin(a, b);
@@ -529,6 +529,7 @@ TEST_CASE("ortho: a grid past the vertex budget is refused rather than built") {
   // Coprime strides so no lane lands on another's, and enough of them that two
   // lanes per box per axis multiply past the cap.
   std::vector<scav_rect> many;
+  many.reserve(400);
   for (int32_t i = 0; i < 400; ++i) { many.push_back(rect(i * 13, i * 11, 5, 7)); }
   OrthoGrid g;
   CHECK(!ortho_grid(rect(0, 0, 8000, 8000), many, {}, 2, g));

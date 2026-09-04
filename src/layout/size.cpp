@@ -355,9 +355,12 @@ bool phase2_size(Chart const &c,
     for (uint32_t k = 0; k < span.len; ++k) {
       scav_rect const &at{ packed.at[component[k]] };
       OrderNode const &nd{ o.nodes[span.off + k] };
-      int32_t const x{ (nd.kind == OrderKind::Boundary)
-                           ? ((out_deg[k] != 0) ? 0 : out.sub[m].w)
-                           : (local[k].x + at.x) };
+      int32_t x{ local[k].x + at.x };
+      if (nd.kind == OrderKind::Boundary) {
+        // The frame's edge, not the piece's: sources where a route arrives,
+        // sinks where one leaves.
+        x = (out_deg[k] != 0) ? 0 : out.sub[m].w;
+      }
       int32_t const y{ local[k].y + at.y };
       out.node[span.off + k] = { .x = x, .y = y };
       if (nd.kind == OrderKind::State) {

@@ -264,6 +264,7 @@ TEST_CASE("layout: routes are orthogonal, meet borders, and skip internal loops"
   scav_span const r0{ row_of<scav_span>(c, "scav.geom.route", 0) };
   REQUIRE(r0.len >= 2);
   std::vector<scav_point> route;
+  route.reserve(r0.len);
   for (uint32_t k = 0; k < r0.len; ++k) {
     route.push_back(row_of<scav_point>(c, "scav.geom.point", r0.off + k));
   }

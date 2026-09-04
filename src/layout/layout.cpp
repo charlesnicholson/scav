@@ -37,32 +37,65 @@ struct GeomShape {
 // Index into GEOM, so the writer below and the check in `layout_run` name the
 // same row rather than repeating its fields.
 enum GeomColumnIndex : uint32_t {
-  GEOM_STATE,
-  GEOM_BEFORE,
-  GEOM_AFTER,
-  GEOM_SUB,
-  GEOM_ROUTE,
-  GEOM_PORT,
-  GEOM_POINT,
-  GEOM_PORTSLOT,
-  GEOM_CHART,
-  GEOM_INPUTS,
-  GEOM_GEN,
-  GEOM_COUNT,
+  GeomState,
+  GeomBefore,
+  GeomAfter,
+  GeomSub,
+  GeomRoute,
+  GeomPort,
+  GeomPoint,
+  GeomPortSlot,
+  GeomChart,
+  GeomInputs,
+  GeomGen,
+  GeomCount,
 };
 
-constexpr std::array<GeomShape, GEOM_COUNT> GEOM{ {
-    { "scav.geom.state", ElemKind::State, ValueKind::Pod, RECT },
-    { "scav.geom.state_before", ElemKind::State, ValueKind::Pod, RECT },
-    { "scav.geom.state_after", ElemKind::State, ValueKind::Pod, RECT },
-    { "scav.geom.sub", ElemKind::Submachine, ValueKind::Pod, RECT },
-    { "scav.geom.route", ElemKind::Transition, ValueKind::Span, 8 },
-    { "scav.geom.port", ElemKind::Transition, ValueKind::Span, 8 },
-    { "scav.geom.point", ElemKind::Point, ValueKind::Pod, 8 },
-    { "scav.geom.portslot", ElemKind::Point, ValueKind::Pod, sizeof(scav_port_slot) },
-    { "scav.geom.chart", ElemKind::Chart, ValueKind::Pod, RECT },
-    { "scav.geom.inputs", ElemKind::Chart, ValueKind::U32, 4 },
-    { "scav.geom.gen", ElemKind::Chart, ValueKind::U32, 4 },
+constexpr std::array<GeomShape, GeomCount> GEOM{ {
+    { .name = "scav.geom.state",
+      .entity = ElemKind::State,
+      .kind = ValueKind::Pod,
+      .elem_size = RECT },
+    { .name = "scav.geom.state_before",
+      .entity = ElemKind::State,
+      .kind = ValueKind::Pod,
+      .elem_size = RECT },
+    { .name = "scav.geom.state_after",
+      .entity = ElemKind::State,
+      .kind = ValueKind::Pod,
+      .elem_size = RECT },
+    { .name = "scav.geom.sub",
+      .entity = ElemKind::Submachine,
+      .kind = ValueKind::Pod,
+      .elem_size = RECT },
+    { .name = "scav.geom.route",
+      .entity = ElemKind::Transition,
+      .kind = ValueKind::Span,
+      .elem_size = 8 },
+    { .name = "scav.geom.port",
+      .entity = ElemKind::Transition,
+      .kind = ValueKind::Span,
+      .elem_size = 8 },
+    { .name = "scav.geom.point",
+      .entity = ElemKind::Point,
+      .kind = ValueKind::Pod,
+      .elem_size = 8 },
+    { .name = "scav.geom.portslot",
+      .entity = ElemKind::Point,
+      .kind = ValueKind::Pod,
+      .elem_size = sizeof(scav_port_slot) },
+    { .name = "scav.geom.chart",
+      .entity = ElemKind::Chart,
+      .kind = ValueKind::Pod,
+      .elem_size = RECT },
+    { .name = "scav.geom.inputs",
+      .entity = ElemKind::Chart,
+      .kind = ValueKind::U32,
+      .elem_size = 4 },
+    { .name = "scav.geom.gen",
+      .entity = ElemKind::Chart,
+      .kind = ValueKind::U32,
+      .elem_size = 4 },
 } };
 
 // Registered on first use, found thereafter; every run overwrites in place. The
@@ -74,9 +107,9 @@ ColumnId geom_column(Chart &c, GeomShape const &g) {
 }
 
 // The first name already registered under another entity, value kind, or
-// element size. GEOM_COUNT when every one of them is layout's own to write.
+// element size. GeomCount when every one of them is layout's own to write.
 uint32_t geom_column_clash(Chart const &c) {
-  for (uint32_t i = 0; i < GEOM_COUNT; ++i) {
+  for (uint32_t i = 0; i < GeomCount; ++i) {
     ColumnId const found{ column_find(c, GEOM[i].name) };
     if (found.v == INVALID) { continue; }
     ColumnDesc const &d{ c.columns[found.v].desc };
@@ -85,7 +118,7 @@ uint32_t geom_column_clash(Chart const &c) {
       return i;
     }
   }
-  return GEOM_COUNT;
+  return GeomCount;
 }
 
 template <typename T>
@@ -124,27 +157,27 @@ uint32_t inputs_digest(scav_spaces const &s, scav_layout_opts const &o) {
 }
 
 void write_columns(Chart &c, SizedLayout const &z, Routes const &r, uint32_t inputs) {
-  write_rows(c, geom_column(c, GEOM[GEOM_STATE]), z.state);
-  write_rows(c, geom_column(c, GEOM[GEOM_BEFORE]), z.before);
-  write_rows(c, geom_column(c, GEOM[GEOM_AFTER]), z.after);
-  write_rows(c, geom_column(c, GEOM[GEOM_SUB]), z.sub);
-  write_rows(c, geom_column(c, GEOM[GEOM_ROUTE]), r.route);
-  write_rows(c, geom_column(c, GEOM[GEOM_PORT]), r.port);
+  write_rows(c, geom_column(c, GEOM[GeomState]), z.state);
+  write_rows(c, geom_column(c, GEOM[GeomBefore]), z.before);
+  write_rows(c, geom_column(c, GEOM[GeomAfter]), z.after);
+  write_rows(c, geom_column(c, GEOM[GeomSub]), z.sub);
+  write_rows(c, geom_column(c, GEOM[GeomRoute]), r.route);
+  write_rows(c, geom_column(c, GEOM[GeomPort]), r.port);
 
-  ColumnId const pts{ geom_column(c, GEOM[GEOM_POINT]) };
+  ColumnId const pts{ geom_column(c, GEOM[GeomPoint]) };
   column_resize(c, pts, static_cast<uint32_t>(r.points.size()));
   write_rows(c, pts, r.points);
-  ColumnId const slots{ geom_column(c, GEOM[GEOM_PORTSLOT]) };
+  ColumnId const slots{ geom_column(c, GEOM[GeomPortSlot]) };
   column_resize(c, slots, static_cast<uint32_t>(r.slots.size()));
   write_rows(c, slots, r.slots);
 
-  ColumnId const chart{ geom_column(c, GEOM[GEOM_CHART]) };
+  ColumnId const chart{ geom_column(c, GEOM[GeomChart]) };
   std::memcpy(column_data(c, chart), &z.chart, sizeof(z.chart));
 
-  ColumnId const in{ geom_column(c, GEOM[GEOM_INPUTS]) };
+  ColumnId const in{ geom_column(c, GEOM[GeomInputs]) };
   std::memcpy(column_data(c, in), &inputs, 4);
 
-  ColumnId const gen{ geom_column(c, GEOM[GEOM_GEN]) };
+  ColumnId const gen{ geom_column(c, GEOM[GeomGen]) };
   uint32_t n{ 0 };
   std::memcpy(&n, column_data(c, gen), 4);
   ++n;
@@ -168,7 +201,7 @@ bool layout_run(Chart &c,
   }
   if (!spaces_validate(c, s, diags)) { return false; }
 
-  if (geom_column_clash(c) != GEOM_COUNT) {
+  if (geom_column_clash(c) != GeomCount) {
     diags.push_back({ .code = DiagCode::GeometryColumnClash,
                       .subject = { .kind = ElemKind::Chart, .ordinal = 0 },
                       .doc = { INVALID },

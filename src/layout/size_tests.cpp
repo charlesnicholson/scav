@@ -297,6 +297,7 @@ TEST_CASE("size: a folded rank run packs its pieces rather than stacking them") 
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   std::vector<StateId> chain;
+  chain.reserve(9);
   for (uint32_t i = 0; i < 9; ++i) {
     chain.push_back(build_state(c, root, {}, StateKind::Normal, {}));
   }
@@ -443,11 +444,13 @@ TEST_CASE("size: a boundary node sits on the frame's border, not on its piece's"
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   std::vector<StateId> chain;
+  chain.reserve(9);
   for (uint32_t i = 0; i < 9; ++i) {
     chain.push_back(build_state(c, root, {}, StateKind::Normal, {}));
   }
   std::vector<OrderNode> nodes;
   std::vector<OrderEdge> edges;
+  nodes.reserve(10);
   for (uint32_t i = 0; i < 7; ++i) { nodes.push_back(state_node(chain[i].v, i, 0)); }
   uint32_t const boundary{ static_cast<uint32_t>(nodes.size()) };
   nodes.push_back({ .kind = OrderKind::Boundary, .subject = 0, .rank = 7, .pos = 0 });

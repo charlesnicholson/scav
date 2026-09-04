@@ -379,7 +379,7 @@ bool ortho_search(OrthoGrid const &g,
   for (uint32_t node = reached; node != INVALID; node = s.parent[node]) {
     s.path.push_back(node / 2);
   }
-  for (uint32_t i = static_cast<uint32_t>(s.path.size()); i-- > 0;) {
+  for (auto i = static_cast<uint32_t>(s.path.size()); i-- > 0;) {
     if (out.empty() || (out.back() != s.path[i])) { out.push_back(s.path[i]); }
   }
   return true;

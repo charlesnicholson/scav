@@ -379,8 +379,10 @@ namespace {
 // end-to-end join must leave visible.
 class ScriptedRouter final : public Router {
  public:
-  explicit ScriptedRouter(bool honour_src) : honour_src_{ honour_src } {}
-  [[nodiscard]] RouterName name() const override { return { "scripted", 8 }; }
+  explicit ScriptedRouter(bool honour) : honour_src{ honour } {}
+  [[nodiscard]] RouterName name() const override {
+    return { .bytes = "scripted", .len = 8 };
+  }
   [[nodiscard]] uint32_t version() const override { return 1; }
   void route(RouteInput const &in, RouteOutput &out) const override {
     out.points.clear();
@@ -389,8 +391,8 @@ class ScriptedRouter final : public Router {
     for (RouteNet const &net : in.nets) {
       uint32_t const off{ static_cast<uint32_t>(out.points.size()) };
       out.points.push_back(
-          honour_src_ ? net.src
-                      : scav_point{ .x = net.src.x + STRAY, .y = net.src.y + STRAY });
+          honour_src ? net.src
+                     : scav_point{ .x = net.src.x + STRAY, .y = net.src.y + STRAY });
       out.points.push_back(net.dst);
       scav_span const at{ .off = off,
                           .len = static_cast<uint32_t>(out.points.size()) - off };
@@ -404,7 +406,7 @@ class ScriptedRouter final : public Router {
   static constexpr int32_t STRAY{ 7 };
 
  private:
-  bool honour_src_;
+  bool honour_src;
 };
 
 }  // namespace

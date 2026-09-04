@@ -361,7 +361,7 @@ void emit_submachine(DrawList &d,
   if ((q.x + q.w) <= r.x) {
     // Side by side: a vertical rule down the middle of the gap, spanning both
     // regions so it reads as one divider and not as one region's edge.
-    int32_t const x{ (q.x + q.w) + (((r.x - (q.x + q.w))) / 2) };
+    int32_t const x{ (q.x + q.w) + ((r.x - (q.x + q.w)) / 2) };
     push_line(d,
               depth,
               style,
@@ -369,7 +369,7 @@ void emit_submachine(DrawList &d,
               { .x = x, .y = imax(q.y + q.h, r.y + r.h) },
               sub_ref(sub));
   } else {
-    int32_t const y{ (q.y + q.h) + (((r.y - (q.y + q.h))) / 2) };
+    int32_t const y{ (q.y + q.h) + ((r.y - (q.y + q.h)) / 2) };
     push_line(d,
               depth,
               style,

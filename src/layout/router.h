@@ -91,7 +91,9 @@ class Router {
 // obstacle set, no opinion of its own.
 class StraightRouter final : public Router {
  public:
-  [[nodiscard]] RouterName name() const override { return { "straight", 8 }; }
+  [[nodiscard]] RouterName name() const override {
+    return { .bytes = "straight", .len = 8 };
+  }
   [[nodiscard]] uint32_t version() const override { return 1; }
   void route(RouteInput const &in, RouteOutput &out) const override;
 };
@@ -100,7 +102,9 @@ class StraightRouter final : public Router {
 // through a box is unrepresentable rather than priced (11.5).
 class OrthogonalRouter final : public Router {
  public:
-  [[nodiscard]] RouterName name() const override { return { "orthogonal", 10 }; }
+  [[nodiscard]] RouterName name() const override {
+    return { .bytes = "orthogonal", .len = 10 };
+  }
   [[nodiscard]] uint32_t version() const override { return 1; }
   [[nodiscard]] int32_t margin(scav_profile const &p) const override;
   void route(RouteInput const &in, RouteOutput &out) const override;
