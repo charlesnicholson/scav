@@ -49,7 +49,7 @@ void model_state_segment(Chart const &c, StateId id, std::string &out) {
   out += '$';
   out += syntax_state_kind_name(s.kind);
   if (uint32_t const ordinal{ synthetic_ordinal(c, id) }; ordinal != 0) {
-    out += std::to_string(ordinal);
+    string_append_u32(out, ordinal);
   }
 }
 
@@ -173,7 +173,7 @@ void chart_path_of(Chart const &c, StateId id, std::string &out) {
       if (m.name.len != 0) {
         out += chart_string(c, m.name);
       } else {
-        out += std::to_string(m.ordinal);
+        string_append_u32(out, m.ordinal);
       }
     }
     out += '/';

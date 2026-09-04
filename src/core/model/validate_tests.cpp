@@ -1,6 +1,7 @@
 // Every check fires on a crafted violation and stays silent on a well-built
 // chart. Violations are direct row pokes; the builder refuses to make them.
 
+#include "core/model/model.h"
 #include "core/tests/test_support.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
@@ -217,7 +218,201 @@ TEST_CASE("validate: column counts must match their entity array") {
   std::vector<Diagnostic> const diags{ run(r.c) };
   REQUIRE(diags.size() == 1);
   CHECK(diags[0].code == DiagCode::ColumnCountMismatch);
-  CHECK(diags[0].subject.ordinal == col.v);
+  // A column has no ElemKind, so the subject is the array the column failed to
+  // cover, spelled with the INVALID ordinal that names a kind and no row.
+  CHECK(diags[0].subject.kind == ElemKind::State);
+  CHECK(diags[0].subject.ordinal == INVALID);
+  CHECK_FALSE(chart_ref_valid(r.c, diags[0].subject));
+
+  // The renderer has no statement to walk to, so it falls back to the name the
+  // caller supplied rather than indexing a row that is not there.
+  std::string out;
+  diag_append(out, r.c, diags[0], "cmdline.scav");
+  CHECK(out == std::string{ "cmdline.scav: " } +
+                   diag_message(DiagCode::ColumnCountMismatch) + "\n");
+}
+
+TEST_CASE("validate: an include names its host state, or names nothing") {
+  Built r{ built() };
+  InstId const inc{ build_include(r.c, r.root, "sub", "sub.scav") };
+  REQUIRE(inc.v != INVALID);
+  CHECK(run(r.c).empty());
+
+  SUBCASE("a host that exists is the subject") {
+    r.c.includes[inc.v].alias = {};
+    std::vector<Diagnostic> const diags{ run(r.c) };
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == DiagCode::MissingRequiredId);
+    CHECK(diags[0].subject == ref(r.c.includes[inc.v].host));
+  }
+  SUBCASE("an absent host leaves the finding subjectless") {
+    r.c.includes[inc.v].host = StateId{ INVALID };
+    std::vector<Diagnostic> const diags{ run(r.c) };
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == DiagCode::MissingRequiredId);
+    CHECK(diags[0].subject.kind == ElemKind::None);
+    CHECK(diags[0].subject.ordinal == INVALID);
+  }
+  SUBCASE("an out-of-range host does too") {
+    r.c.includes[inc.v].host = StateId{ 99 };
+    std::vector<Diagnostic> const diags{ run(r.c) };
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == DiagCode::DanglingRef);
+    CHECK(diags[0].subject.kind == ElemKind::None);
+    CHECK(diags[0].subject.ordinal == INVALID);
+    std::string out;
+    diag_append(out, r.c, diags[0], "cmdline.scav");
+    CHECK(out ==
+          std::string{ "cmdline.scav: " } + diag_message(DiagCode::DanglingRef) + "\n");
+  }
+}
+
+// Containment ===============================================================
+
+TEST_CASE("validate: both producers of the containment spans are accepted") {
+  // The builder writes the spans one insertion at a time; finalize rebuilds
+  // them all at once. The check must accept what either leaves behind.
+  Built r{ built() };
+  StateId const on{ build_state(r.c, r.root, "On", StateKind::Normal, {}) };
+  SubmachineId const m{ build_submachine(r.c, on, "m", {}) };
+  StateId const idle{ build_state(r.c, m, "Idle", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(r.c, idle, {}, {}) };
+  build_state(r.c, inner, "Deep", StateKind::Normal, {});
+  build_submachine(r.c, on, "aux", {});
+  CHECK(run(r.c).empty());
+  model_finalize_containment(r.c);
+  CHECK(run(r.c).empty());
+}
+
+TEST_CASE("validate: a state sits in its parent's children exactly once") {
+  Built r{ built() };
+  SUBCASE("absent") {
+    r.c.submachines[r.root.v].children.len -= 1;  // drops B
+    std::vector<Diagnostic> const diags{ run(r.c) };
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == DiagCode::ContainmentInconsistent);
+    CHECK(diags[0].subject == ref(r.b));
+  }
+  SUBCASE("twice") {
+    // Nameless and not an initial, so the duplicate entry trips neither the
+    // duplicate-name check nor the multiple-initial one.
+    StateId const anon{ build_state(r.c, r.root, {}, StateKind::Choice, {}) };
+    r.c.state_ids.push_back(anon);
+    r.c.submachines[r.root.v].children.len += 1;
+    std::vector<Diagnostic> const diags{ run(r.c) };
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == DiagCode::ContainmentInconsistent);
+    CHECK(diags[0].subject == ref(anon));
+  }
+}
+
+TEST_CASE("validate: a children entry points back at the submachine holding it") {
+  Built r{ built() };
+  StateId const on{ build_state(r.c, r.root, "On", StateKind::Normal, {}) };
+  SubmachineId const m{ build_submachine(r.c, on, "m", {}) };
+  // A is listed under m as well as under its own parent, so A's side of the
+  // relation still agrees and only m disagrees.
+  r.c.submachines[m.v].children =
+      make_span(static_cast<uint32_t>(r.c.state_ids.size()), 1);
+  r.c.state_ids.push_back(r.a);
+  std::vector<Diagnostic> const diags{ run(r.c) };
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::ContainmentInconsistent);
+  CHECK(diags[0].subject == ref(m));
+}
+
+TEST_CASE("validate: a submachine sits in its owner's span exactly once") {
+  Built r{ built() };
+  StateId const on{ build_state(r.c, r.root, "On", StateKind::Normal, {}) };
+  SubmachineId const m{ build_submachine(r.c, on, "m", {}) };
+  SUBCASE("absent") {
+    r.c.states[on.v].submachines.len = 0;
+    std::vector<Diagnostic> const diags{ run(r.c) };
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == DiagCode::ContainmentInconsistent);
+    CHECK(diags[0].subject == ref(m));
+  }
+  SUBCASE("twice") {
+    r.c.submachine_ids.push_back(m);
+    r.c.states[on.v].submachines.len += 1;
+    std::vector<Diagnostic> const diags{ run(r.c) };
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == DiagCode::ContainmentInconsistent);
+    CHECK(diags[0].subject == ref(m));
+  }
+}
+
+TEST_CASE("validate: a submachines entry points back at the state holding it") {
+  Built r{ built() };
+  StateId const on{ build_state(r.c, r.root, "On", StateKind::Normal, {}) };
+  SubmachineId const m{ build_submachine(r.c, on, "m", {}) };
+  r.c.states[r.a.v].submachines =
+      make_span(static_cast<uint32_t>(r.c.submachine_ids.size()), 1);
+  SUBCASE("a submachine another state owns") {
+    r.c.submachine_ids.push_back(m);
+    std::vector<Diagnostic> const diags{ run(r.c) };
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == DiagCode::ContainmentInconsistent);
+    CHECK(diags[0].subject == ref(r.a));
+  }
+  SUBCASE("a document root, which no state owns") {
+    r.c.submachine_ids.push_back(r.root);
+    std::vector<Diagnostic> const diags{ run(r.c) };
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == DiagCode::ContainmentInconsistent);
+    CHECK(diags[0].subject == ref(r.a));
+  }
+}
+
+TEST_CASE("validate: only the chart's own root submachine may be ownerless") {
+  Built r{ built() };
+  // Appended rather than built: the builder has no way to make a second root.
+  r.c.submachines.push_back({ .owner = { INVALID },
+                              .ordinal = 0,
+                              .name = {},
+                              .label = {},
+                              .children = {},
+                              .attrs = {},
+                              .stmt = { INVALID },
+                              .inst = { INVALID },
+                              .live = 1 });
+  std::vector<Diagnostic> const diags{ run(r.c) };
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::ContainmentInconsistent);
+  CHECK(diags[0].subject == ref(SubmachineId{ 1 }));
+}
+
+TEST_CASE("validate: a containment cycle is reported and the walk terminates") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "c", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  SubmachineId const ma{ build_submachine(c, a, "ma", {}) };
+  StateId const b{ build_state(c, ma, "B", StateKind::Normal, {}) };
+  SubmachineId const mb{ build_submachine(c, b, "mb", {}) };
+
+  // A moves under its own grandchild's submachine, spans and all, so the climb
+  // A -> mb -> B -> ma -> A closes and the cycle is the only disagreement.
+  c.states[a.v].parent = mb;
+  c.submachines[root.v].children = make_span(0, 0);
+  c.submachines[mb.v].children = make_span(0, 1);  // state_ids[0] is A
+
+  std::vector<Diagnostic> const diags{ run(c) };
+  REQUIRE(diags.size() == 2);
+  // Both states are on the cycle, so neither of them reaches a document root.
+  CHECK(diags[0].code == DiagCode::ContainmentInconsistent);
+  CHECK(diags[0].subject == ref(a));
+  CHECK(diags[1].code == DiagCode::ContainmentInconsistent);
+  CHECK(diags[1].subject == ref(b));
+}
+
+TEST_CASE("validate: a broken containment ordinal is one finding, not two") {
+  // The dangling parent is already a DanglingRef, so the containment check
+  // stays silent about the same ordinal rather than piling on.
+  Built r{ built() };
+  r.c.states[r.a.v].parent = SubmachineId{ 99 };
+  std::vector<Diagnostic> const diags{ run(r.c) };
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::DanglingRef);
 }
 
 TEST_CASE("validate: findings arrive in (code, subject kind, ordinal) order") {

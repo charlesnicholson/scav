@@ -164,8 +164,11 @@ void check_includes(Validator &v) {
   for (uint32_t i = 0; i < c.includes.size(); ++i) {
     Include const &inc{ c.includes[i] };
     // An include has no ElemKind of its own, so every finding here names its
-    // host state.
-    ElemRef const subject{ .kind = ElemKind::State, .ordinal = inc.host.v };
+    // host state -- and no subject at all when the host names no row, rather
+    // than an ordinal no reader can follow.
+    ElemRef const subject{ (inc.host.v < c.states.size())
+                               ? ElemRef{ .kind = ElemKind::State, .ordinal = inc.host.v }
+                               : ElemRef{ .kind = ElemKind::None, .ordinal = INVALID } };
     if ((inc.alias.len == 0) || (inc.path.len == 0)) {
       report(v, DiagCode::MissingRequiredId, subject);
     }
@@ -253,6 +256,135 @@ void check_multiple_initial(Validator &v) {
   }
 }
 
+// Containment is stored twice -- as a back-pointer and as a span -- and this
+// cross-checks the two. A link the sides disagree about, or a climb that never
+// reaches a document root, is one finding on the row it was seen from.
+//
+// A link already reported as dangling, missing or tombstoned is skipped
+// throughout, so a single broken ordinal yields a single finding.
+void check_containment(Validator &v) {
+  Chart const &c{ *v.c };
+
+  // Occurrences of each row in the container its own back-pointer names. No
+  // other container contributes, so the count answers "exactly once" directly.
+  // Dead containers count too: a live row may sit inside a tombstoned one.
+  std::vector<uint32_t> in_parent(c.states.size(), 0);
+  for (uint32_t i = 0; i < c.submachines.size(); ++i) {
+    Span const kids{ c.submachines[i].children };
+    if (!span_in(kids, c.state_ids.size())) { continue; }
+    for (uint32_t k = 0; k < kids.len; ++k) {
+      uint32_t const id{ c.state_ids[kids.off + k].v };
+      if ((id < c.states.size()) && (c.states[id].parent.v == i)) { in_parent[id] += 1; }
+    }
+  }
+  std::vector<uint32_t> in_owner(c.submachines.size(), 0);
+  for (uint32_t i = 0; i < c.states.size(); ++i) {
+    Span const subs{ c.states[i].submachines };
+    if (!span_in(subs, c.submachine_ids.size())) { continue; }
+    for (uint32_t k = 0; k < subs.len; ++k) {
+      uint32_t const id{ c.submachine_ids[subs.off + k].v };
+      if ((id < c.submachines.size()) && (c.submachines[id].owner.v == i)) {
+        in_owner[id] += 1;
+      }
+    }
+  }
+
+  // state -> parent -> owner -> ... , coloured so the whole forest costs one
+  // pass: 0 unvisited, 1 on the current climb, 2 settled reaching, 3 settled
+  // cyclic. Meeting a 1 is the cycle; a climb that ends anywhere else settles
+  // to what it ended on.
+  constexpr uint8_t UNVISITED{ 0 };
+  constexpr uint8_t CLIMBING{ 1 };
+  constexpr uint8_t REACHES{ 2 };
+  constexpr uint8_t CYCLIC{ 3 };
+  std::vector<uint8_t> mark(c.states.size(), UNVISITED);
+  std::vector<uint32_t> climb;
+  for (uint32_t i = 0; i < c.states.size(); ++i) {
+    if (mark[i] != UNVISITED) { continue; }
+    climb.clear();
+    uint32_t cur{ i };
+    uint8_t settled{ REACHES };
+    for (;;) {
+      if (mark[cur] == CLIMBING) {
+        settled = CYCLIC;
+        break;
+      }
+      if (mark[cur] != UNVISITED) {
+        settled = mark[cur];
+        break;
+      }
+      mark[cur] = CLIMBING;
+      climb.push_back(cur);
+      SubmachineId const sm{ c.states[cur].parent };
+      if (sm.v >= c.submachines.size()) { break; }
+      StateId const owner{ c.submachines[sm.v].owner };
+      // INVALID lands here too: a document root ends the climb having reached
+      // one.
+      if (owner.v >= c.states.size()) { break; }
+      cur = owner.v;
+    }
+    for (uint32_t const step : climb) { mark[step] = settled; }
+  }
+
+  for (uint32_t i = 0; i < c.states.size(); ++i) {
+    State const &s{ c.states[i] };
+    if (s.live == 0) { continue; }
+    bool bad{ mark[i] == CYCLIC };
+    if (!bad && (s.parent.v < c.submachines.size()) &&
+        span_in(c.submachines[s.parent.v].children, c.state_ids.size())) {
+      bad = in_parent[i] != 1;
+    }
+    if (!bad && span_in(s.submachines, c.submachine_ids.size())) {
+      for (uint32_t k = 0; k < s.submachines.len; ++k) {
+        uint32_t const id{ c.submachine_ids[s.submachines.off + k].v };
+        if ((id >= c.submachines.size()) || (c.submachines[id].live == 0)) { continue; }
+        uint32_t const owner{ c.submachines[id].owner.v };
+        if ((owner != INVALID) && (owner >= c.states.size())) { continue; }
+        if (owner != i) {
+          bad = true;
+          break;
+        }
+      }
+    }
+    if (bad) {
+      report(v,
+             DiagCode::ContainmentInconsistent,
+             ElemRef{ .kind = ElemKind::State, .ordinal = i });
+    }
+  }
+
+  for (uint32_t i = 0; i < c.submachines.size(); ++i) {
+    Submachine const &m{ c.submachines[i] };
+    if (m.live == 0) { continue; }
+    // One ownerless submachine is legitimate, and it is the one the chart row
+    // names; a second is a document root nothing addresses.
+    bool bad{ false };
+    if (m.owner.v == INVALID) {
+      bad = SubmachineId{ i } != c.root_submachine;
+    } else if ((m.owner.v < c.states.size()) &&
+               span_in(c.states[m.owner.v].submachines, c.submachine_ids.size())) {
+      bad = in_owner[i] != 1;
+    }
+    if (!bad && span_in(m.children, c.state_ids.size())) {
+      for (uint32_t k = 0; k < m.children.len; ++k) {
+        uint32_t const id{ c.state_ids[m.children.off + k].v };
+        if ((id >= c.states.size()) || (c.states[id].live == 0)) { continue; }
+        uint32_t const parent{ c.states[id].parent.v };
+        if (parent >= c.submachines.size()) { continue; }
+        if (parent != i) {
+          bad = true;
+          break;
+        }
+      }
+    }
+    if (bad) {
+      report(v,
+             DiagCode::ContainmentInconsistent,
+             ElemRef{ .kind = ElemKind::Submachine, .ordinal = i });
+    }
+  }
+}
+
 // Every statement's src must land inside its own document's text. Vacuous on a
 // code-built chart, which owns no statements.
 void check_statements(Validator &v) {
@@ -287,8 +419,9 @@ void check_statements(Validator &v) {
   }
 }
 
-// Columns must cover their entity array exactly. The subject ordinal is the
-// ColumnId; columns have no ElemKind of their own.
+// Columns must cover their entity array exactly. Columns have no ElemKind of
+// their own, so the subject is the array the column failed to cover, with the
+// INVALID ordinal that names a kind rather than a row.
 void check_columns(Validator &v) {
   Chart const &c{ *v.c };
   for (uint32_t i = 0; i < c.columns.size(); ++i) {
@@ -300,7 +433,7 @@ void check_columns(Validator &v) {
     if (column_count(c, ColumnId{ i }) != chart_entity_count(c, desc.entity)) {
       report(v,
              DiagCode::ColumnCountMismatch,
-             ElemRef{ .kind = ElemKind::None, .ordinal = i });
+             ElemRef{ .kind = desc.entity, .ordinal = INVALID });
     }
   }
 }
@@ -316,6 +449,7 @@ bool validate_chart(Chart const &c, std::vector<Diagnostic> &diags) {
   check_includes(v);
   check_duplicate_names(v);
   check_multiple_initial(v);
+  check_containment(v);
   check_statements(v);
   check_columns(v);
 
