@@ -35,19 +35,11 @@ scav_point trim(scav_point a, scav_point b, int32_t amount) {
            .y = a.y + static_cast<int32_t>(floor_div(dy * k, len)) };
 }
 
+bool same(scav_point a, scav_point b) { return (a.x == b.x) && (a.y == b.y); }
+
 bool overlaps(scav_rect const &a, scav_rect const &b) {
   return (a.x < (b.x + b.w)) && (b.x < (a.x + a.w)) && (a.y < (b.y + b.h)) &&
          (b.y < (a.y + a.h));
-}
-
-// `maybe` encloses `of`, so it cannot be an obstacle to anything routed inside
-// it. INVALID `of` is a document root, which nothing encloses.
-bool encloses(Chart const &c, StateId maybe, StateId of) {
-  for (StateId at{ of }; at.v != INVALID;
-       at = c.submachines[c.states[at.v].parent.v].owner) {
-    if (at == maybe) { return true; }
-  }
-  return false;
 }
 
 // One segment's routing problem, before it is grouped into its frame's batch.
@@ -150,22 +142,26 @@ Routes phase3_route(Chart const &c,
                           .dst_state = INVALID,
                           .seg = segs.off });
     } else {
-      // A source whose own border is not crossed starts on that border's
-      // inner face, which is where its boundary node was placed (11.14).
+      // An endpoint that encloses its end of the route is met on that state's
+      // inner face, which is where phase 1 put the segment's boundary node.
+      // Nothing is crossed there, so the end names no obstacle and no slot.
       uint32_t const head{ o.seg_node[segs.off] };
-      bool const inner{ (g.segments[segs.off].src_port == INVALID) &&
-                        (head != INVALID) && (o.seg_port[segs.off] == INVALID) };
-      scav_point at{ inner ? z.node[head] : centre(z.state[tr.src.v]) };
-      uint32_t at_state{ inner ? INVALID : tr.src.v };
+      bool const head_inner{ (g.segments[segs.off].src_inner != 0) && (head != INVALID) };
+      scav_point at{ head_inner ? z.node[head] : centre(z.state[tr.src.v]) };
+      uint32_t at_state{ head_inner ? INVALID : tr.src.v };
       for (uint32_t k = 0; k < segs.len; ++k) {
         uint32_t const seg{ segs.off + k };
         uint32_t const port{ g.segments[seg].dst_port };
+        uint32_t const tail{ o.seg_node[seg] };
+        bool const tail_inner{ (g.segments[seg].dst_inner != 0) && (tail != INVALID) };
         scav_point end{};
         uint32_t end_state{ INVALID };
         if (port != INVALID) {
           scav_port_slot const slot{ slot_of(port) };
           out.slots.push_back(slot);
           end = { .x = slot.x, .y = slot.y };
+        } else if (tail_inner) {
+          end = z.node[tail];
         } else {
           end = centre(z.state[tr.dst.v]);
           end_state = tr.dst.v;
@@ -239,11 +235,11 @@ Routes phase3_route(Chart const &c,
     auto const shields = [&](uint32_t st) {
       StateId const up{ c.submachines[c.states[st].parent.v].owner };
       if (up.v == INVALID) { return false; }
-      return !encloses(c, up, owner) && overlaps(region, z.state[up.v]);
+      return !ancestor_or_self(c, up, owner) && overlaps(region, z.state[up.v]);
     };
-for (uint32_t st = 0; st < c.states.size(); ++st) {
+    for (uint32_t st = 0; st < c.states.size(); ++st) {
       if ((c.states[st].live == 0) || !overlaps(region, z.state[st])) { continue; }
-      if (encloses(c, { st }, owner) || shields(st)) { continue; }
+      if (ancestor_or_self(c, { st }, owner) || shields(st)) { continue; }
       obstacle_index[st] = static_cast<uint32_t>(in.obstacles.size());
       obstacle_states.push_back(st);
       in.obstacles.push_back(z.state[st]);
@@ -281,15 +277,22 @@ for (uint32_t st = 0; st < c.states.size(); ++st) {
   }
 
   // Laid end to end: consecutive nets share the endpoint the planner handed
-  // both of them, so every net after the first drops its own first point.
+  // both of them, so a net that begins on the point already laid down drops
+  // it. Matched against that point rather than against the net's ordinal, so a
+  // router that began somewhere else leaves the break in the polyline instead
+  // of having a leg spliced over it.
   for (uint32_t t = 0; t < n; ++t) {
     Span const nets{ trans_nets[t] };
     if (nets.len == 0) { continue; }
     uint32_t const first_point{ static_cast<uint32_t>(out.points.size()) };
     for (uint32_t j = 0; j < nets.len; ++j) {
       scav_span const at{ net_span[nets.off + j] };
-      uint32_t const skip{ ((j == 0) || (at.len == 0)) ? 0U : 1U };
-      for (uint32_t k = skip; k < at.len; ++k) { out.points.push_back(routed[at.off + k]); }
+      if (at.len == 0) { continue; }
+      bool const joined{ (out.points.size() > first_point) &&
+                         same(out.points.back(), routed[at.off]) };
+      for (uint32_t k = (joined ? 1U : 0U); k < at.len; ++k) {
+        out.points.push_back(routed[at.off + k]);
+      }
     }
     uint32_t const count{ static_cast<uint32_t>(out.points.size()) - first_point };
     if ((s.path_clear != nullptr) && (t < s.n_path_clear) && (count >= 2)) {

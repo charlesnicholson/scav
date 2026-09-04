@@ -77,6 +77,13 @@ class Router {
   [[nodiscard]] virtual int32_t margin(scav_profile const & /*p*/) const { return 0; }
 
   // Pure in `in`, reentrant, no global state, must not unwind.
+  //
+  // One polyline per net, in `in.nets` order, at least two points each. A
+  // polyline runs from `net.src` to `net.dst`; at an end naming an obstacle it
+  // runs from or to a point on that box's border instead, the caller having
+  // put the named end at the box's centre. Phase 3 lays a transition's nets
+  // end to end on that: consecutive nets are handed the same shared point and
+  // it appears once in the joined route.
   virtual void route(RouteInput const &in, RouteOutput &out) const = 0;
 };
 

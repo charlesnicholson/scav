@@ -12,15 +12,14 @@ namespace scav {
 
 namespace {
 
-// The state enclosing `s`; INVALID for a child of a document root.
-StateId enclosing(Chart const &c, StateId s) {
-  return c.submachines[c.states[s.v].parent.v].owner;
-}
-
-// `s` plus every enclosing state, innermost first.
+// `s` plus every enclosing state, innermost first. Capped at one entry per
+// state, so a containment cycle stops instead of growing without end.
 void chain_of(Chart const &c, StateId s, std::vector<StateId> &out) {
   out.clear();
-  for (StateId x{ s }; x.v != INVALID; x = enclosing(c, x)) { out.push_back(x); }
+  for (StateId x{ s }; (x.v != INVALID) && (out.size() < c.states.size());
+       x = enclosing_state(c, x)) {
+    out.push_back(x);
+  }
 }
 
 // One planned boundary crossing, in route order.
@@ -32,23 +31,34 @@ struct Crossing {
 
 }  // namespace
 
+StateId enclosing_state(Chart const &c, StateId s) {
+  if (s.v == INVALID) { return { INVALID }; }
+  SubmachineId const parent{ c.states[s.v].parent };
+  return (parent.v == INVALID) ? StateId{ INVALID } : c.submachines[parent.v].owner;
+}
+
+bool ancestor_or_self(Chart const &c, StateId ancestor, StateId of) {
+  StateId at{ of };
+  for (size_t step = 0; (step < c.states.size()) && (at.v != INVALID); ++step) {
+    if (at == ancestor) { return true; }
+    at = enclosing_state(c, at);
+  }
+  return false;
+}
+
 SplitGraph decompose(Chart const &c) {
   SplitGraph g;
+  std::vector<StateId> chain_src;  // scratch, reused per state and transition
+  std::vector<StateId> chain_dst;
+  std::vector<Crossing> route;
+
   g.state_depth.assign(c.states.size(), 0);
   for (uint32_t s = 0; s < c.states.size(); ++s) {
-    uint32_t depth{ 0 };
-    for (StateId x{ enclosing(c, { s }) }; x.v != INVALID; x = enclosing(c, x)) {
-      ++depth;
-    }
-    g.state_depth[s] = depth;
+    chain_of(c, { s }, chain_src);
+    g.state_depth[s] = static_cast<uint32_t>(chain_src.size() - 1);
   }
   g.state_crossings.assign(c.states.size(), 0);
   g.trans_segments.assign(c.transitions.size(), Span{});
-  g.trans_crossings.assign(c.transitions.size(), 0);
-
-  std::vector<StateId> chain_src;  // scratch, reused per transition
-  std::vector<StateId> chain_dst;
-  std::vector<Crossing> route;
 
   for (uint32_t t = 0; t < c.transitions.size(); ++t) {
     Transition const &tr{ c.transitions[t] };
@@ -62,6 +72,7 @@ SplitGraph decompose(Chart const &c) {
 
     route.clear();
     bool src_inner{ false };  // route starts on the source border's inner face
+    bool dst_inner{ false };  // route ends on the target border's inner face
     if (tr.src != tr.dst) {
       chain_of(c, tr.src, chain_src);
       chain_of(c, tr.dst, chain_dst);
@@ -95,6 +106,11 @@ SplitGraph decompose(Chart const &c) {
       for (size_t k = j; k-- > 1;) {
         route.push_back({ .kind = Crossing::Enter, .state = chain_dst[k], .sub = {} });
       }
+      // The target chain ran out first, so dst is one of src's ancestors and
+      // the last frame is a submachine of dst: the route arrives inside it
+      // without crossing anything. i == 0 is the mirror and cannot coincide,
+      // since both chains running out means src == dst.
+      dst_inner = (j == 0);
     }
 
     // The state an Enter at `at` opens into next, which owns the next frame.
@@ -124,7 +140,9 @@ SplitGraph decompose(Chart const &c) {
                              .frame = frame,
                              .src_port = prev,
                              .dst_port = port,
-                             .separator = (x.kind == Crossing::SepDst) ? 1U : 0U });
+                             .separator = (x.kind == Crossing::SepDst) ? 1U : 0U,
+                             .src_inner = ((k == 0) && src_inner) ? 1U : 0U,
+                             .dst_inner = 0 });
       switch (x.kind) {
         case Crossing::Exit:
           frame = c.states[x.state.v].parent;
@@ -147,11 +165,12 @@ SplitGraph decompose(Chart const &c) {
                            .frame = frame,
                            .src_port = prev,
                            .dst_port = INVALID,
-                           .separator = 0 });
+                           .separator = 0,
+                           .src_inner = (route.empty() && src_inner) ? 1U : 0U,
+                           .dst_inner = dst_inner ? 1U : 0U });
 
     g.trans_segments[t] =
         make_span(first_segment, static_cast<uint32_t>(g.segments.size()) - first_segment);
-    g.trans_crossings[t] = static_cast<uint32_t>(route.size());
   }
   return g;
 }

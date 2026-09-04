@@ -23,6 +23,9 @@ struct SplitPort {
 
 // One route piece between two ports, or between an endpoint state and a port.
 // INVALID port means the transition's own src (first) or dst (last) state.
+// An `_inner` flag on such an end says that endpoint state encloses `frame`,
+// so the route meets the state's inner face rather than its box centre; the
+// border is not crossed there, so the end carries no port.
 struct SplitSegment {
   TransId trans;
   uint32_t ordinal;    // (trans, ordinal) is the stable key
@@ -30,6 +33,8 @@ struct SplitSegment {
   uint32_t src_port;
   uint32_t dst_port;
   uint32_t separator;  // 1 = the channel between two concurrent submachines
+  uint32_t src_inner;  // 0/1, only ever set when src_port is INVALID
+  uint32_t dst_inner;  // 0/1, only ever set when dst_port is INVALID
   constexpr bool operator==(SplitSegment const &) const = default;
 };
 
@@ -37,7 +42,6 @@ struct SplitGraph {
   std::vector<SplitPort> ports;           // route order within each transition
   std::vector<SplitSegment> segments;     // contiguous per transition
   std::vector<Span> trans_segments;       // parallel to transitions; -> segments
-  std::vector<uint32_t> trans_crossings;  // boundaries crossed, kind-adjusted
   std::vector<uint32_t> state_crossings;  // edges through each state's border
   std::vector<uint32_t> state_depth;      // enclosing state borders above each state
 };
@@ -45,6 +49,15 @@ struct SplitGraph {
 // A pure function of the model: no-route transitions (internal or local
 // self-transitions) get an empty span, tombstones are skipped.
 SplitGraph decompose(Chart const &c);
+
+// The state enclosing `s`; INVALID for a child of a document root and for
+// INVALID itself.
+StateId enclosing_state(Chart const &c, StateId s);
+
+// `ancestor` is `of` itself or encloses it. The climb stops after one step per
+// state, so containment that has been corrupted into a cycle answers false
+// rather than spinning.
+bool ancestor_or_self(Chart const &c, StateId ancestor, StateId of);
 
 }  // namespace scav
 

@@ -322,3 +322,140 @@ TEST_CASE("route: a path box centres on its route's middle point") {
   }
   CHECK((r.placed[0] == scav_rect{ .x = mid.x - 10, .y = mid.y - 4, .w = 20, .h = 8 }));
 }
+
+TEST_CASE("route: a transition to an enclosing state ends on that state's inner face") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const outer{ build_state(c, root, "O", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, outer, {}, {}) };
+  StateId const s{ build_state(c, inner, "S", StateKind::Normal, {}) };
+  build_trans(c, s, outer, TransKind::External, {});
+
+  SplitGraph const g{ decompose(c) };
+  REQUIRE(g.trans_segments[0].len == 1);
+  REQUIRE(g.segments[0].src_inner == 0);
+  REQUIRE(g.segments[0].dst_inner == 1);
+  SubmachineOrders o{ empty_orders(c, g) };
+  o.nodes = { { .kind = OrderKind::State, .subject = s.v, .rank = 0, .pos = 0 },
+              { .kind = OrderKind::Boundary, .subject = 0, .rank = 1, .pos = 0 } };
+  o.edges = { { .src = 0, .dst = 1, .segment = 0, .reversed = 0 } };
+  o.state_node[s.v] = 0;
+  o.seg_node[0] = 1;  // seg_port stays INVALID: an inner face, not a crossing
+  o.sub_nodes[inner.v] = make_span(0, 2);
+  SizedLayout z{ blank(c, o) };
+  z.state[outer.v] = { .x = 0, .y = 0, .w = 400, .h = 200 };
+  z.state[s.v] = { .x = 40, .y = 60, .w = 100, .h = 40 };
+  z.sub[inner.v] = { .x = 10, .y = 10, .w = 380, .h = 180 };
+  z.chart = { .x = 0, .y = 0, .w = 400, .h = 200 };
+  z.node[1] = { .x = 390, .y = 80 };  // Outer's inner face, at the frame's trailing edge
+
+  OrthogonalRouter const orthogonal;
+  std::vector<Router const *> const routers{ &STRAIGHT, &orthogonal };
+  for (Router const *router : routers) {
+    CAPTURE(router->name().bytes);
+    Routes const r{ phase3_route(c, g, o, z, {}, profile(), *router) };
+    REQUIRE(r.route[0].len >= 2);
+    // The head is the source's own box, not the boundary node the target end
+    // put in this same frame; the straight router takes the centre it was
+    // handed and the orthogonal one slides it onto the border.
+    scav_point const head{ r.points[r.route[0].off] };
+    CHECK(head.x >= z.state[s.v].x);
+    CHECK(head.x <= (z.state[s.v].x + z.state[s.v].w));
+    CHECK(head.y >= z.state[s.v].y);
+    CHECK(head.y <= (z.state[s.v].y + z.state[s.v].h));
+    // The tail is the boundary node exactly: no obstacle names that end, so no
+    // router moves it, and no border is crossed, so there is no slot.
+    CHECK((r.points[(r.route[0].off + r.route[0].len) - 1] ==
+           scav_point{ .x = 390, .y = 80 }));
+    CHECK(r.port[0].len == 0);
+    CHECK(r.degraded() == 0);
+  }
+}
+
+namespace {
+
+// One leg per net, from `net.src` to `net.dst`. A router built to break the
+// contract starts a step off `net.src` instead, which is the shape phase 3's
+// end-to-end join must leave visible.
+class ScriptedRouter final : public Router {
+ public:
+  explicit ScriptedRouter(bool honour_src) : honour_src_{ honour_src } {}
+  [[nodiscard]] RouterName name() const override { return { "scripted", 8 }; }
+  [[nodiscard]] uint32_t version() const override { return 1; }
+  void route(RouteInput const &in, RouteOutput &out) const override {
+    out.points.clear();
+    out.net_points.clear();
+    out.metrics.clear();
+    for (RouteNet const &net : in.nets) {
+      uint32_t const off{ static_cast<uint32_t>(out.points.size()) };
+      out.points.push_back(
+          honour_src_ ? net.src
+                      : scav_point{ .x = net.src.x + STRAY, .y = net.src.y + STRAY });
+      out.points.push_back(net.dst);
+      scav_span const at{ .off = off,
+                          .len = static_cast<uint32_t>(out.points.size()) - off };
+      out.net_points.push_back(at);
+      RouteMetrics m;
+      measure(out.points, at, m);
+      out.metrics.push_back(m);
+    }
+  }
+
+  static constexpr int32_t STRAY{ 7 };
+
+ private:
+  bool honour_src_;
+};
+
+}  // namespace
+
+TEST_CASE("route: nets join only where one ends exactly where the next begins") {
+  // One transition out of a composite, so phase 3 has two nets to lay down.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
+  StateId const s{ build_state(c, inner, "S", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  build_trans(c, s, d, TransKind::External, {});
+
+  SplitGraph const g{ decompose(c) };
+  REQUIRE(g.trans_segments[0].len == 2);
+  SubmachineOrders o{ empty_orders(c, g) };
+  o.nodes = { { .kind = OrderKind::Boundary, .subject = 0, .rank = 1, .pos = 0 } };
+  o.seg_node[0] = 0;
+  o.seg_port[0] = 0;
+  o.sub_nodes[inner.v] = make_span(0, 1);
+  SizedLayout z{ blank(c, o) };
+  z.state[comp.v] = { .x = 0, .y = 0, .w = 200, .h = 200 };
+  z.state[s.v] = { .x = 20, .y = 60, .w = 100, .h = 40 };
+  z.state[d.v] = { .x = 400, .y = 0, .w = 100, .h = 40 };
+  z.sub[root.v] = { .x = 0, .y = 0, .w = 500, .h = 200 };
+  z.sub[inner.v] = { .x = 10, .y = 10, .w = 180, .h = 180 };
+  z.chart = { .x = 0, .y = 0, .w = 500, .h = 200 };
+  z.node[0] = { .x = 190, .y = 80 };
+
+  SUBCASE("a net that honours the contract contributes the shared point once") {
+    ScriptedRouter const scripted{ true };
+    Routes const r{ phase3_route(c, g, o, z, {}, profile(), scripted) };
+    REQUIRE(r.port[0].len == 1);
+    scav_point const meet{ .x = r.slots[0].x, .y = r.slots[0].y };
+    REQUIRE(r.route[0].len == 3);
+    CHECK((r.points[0] == scav_point{ .x = 70, .y = 80 }));  // the source's centre
+    CHECK((r.points[1] == meet));
+    CHECK((r.points[2] == scav_point{ .x = 450, .y = 20 }));  // the target's centre
+  }
+
+  SUBCASE("a net that starts elsewhere keeps the point it did start at") {
+    // Dropping the second net's first point regardless would splice a leg
+    // straight from the slot to the target and hide the break.
+    ScriptedRouter const scripted{ false };
+    Routes const r{ phase3_route(c, g, o, z, {}, profile(), scripted) };
+    REQUIRE(r.port[0].len == 1);
+    scav_point const meet{ .x = r.slots[0].x, .y = r.slots[0].y };
+    REQUIRE(r.route[0].len == 4);
+    CHECK((r.points[1] == meet));
+    CHECK((r.points[2] == scav_point{ .x = meet.x + ScriptedRouter::STRAY,
+                                      .y = meet.y + ScriptedRouter::STRAY }));
+  }
+}

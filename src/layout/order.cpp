@@ -423,8 +423,12 @@ SubmachineOrders phase1_order(Chart const &c,
       if (port == INVALID) {
         StateId const st{ endpoint_state(c, sg, is_src) };
         if ((st.v == INVALID) || (c.states[st.v].live == 0)) { return INVALID; }
-        return (c.states[st.v].parent.v == m) ? o.state_node[st.v]
-                                              : boundary_node(seg, INVALID);
+        // The endpoint encloses this frame rather than sitting in it: no
+        // border is crossed, so the boundary node carries no port.
+        if ((is_src ? sg.src_inner : sg.dst_inner) != 0) {
+          return boundary_node(seg, INVALID);
+        }
+        return o.state_node[st.v];
       }
       SplitPort const &pt{ g.ports[port] };
       if (pt.state.v != INVALID) {
