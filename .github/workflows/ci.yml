@@ -495,28 +495,42 @@ jobs:
             git --no-pager diff --stat
           fi
 
-      # Never to main, and never to a fork's branch.
+      # Never to main, and never to a fork's branch. The default token can push,
+      # since the workflow already holds `contents: write` -- what it cannot do
+      # is start a run, so CI_PUSH_TOKEN is what turns the push into a fresh one.
+      # Gating the push itself on the PAT was wrong: without it the job rejected
+      # a diff it was perfectly able to fix.
       - name: Commit and push the formatting
         id: push
         if: >
           steps.diff.outputs.changed == '1'
           && github.event_name == 'pull_request'
           && github.event.pull_request.head.repo.full_name == github.repository
-          && env.HAS_PUSH_TOKEN == 'true'
         run: |
           set -euo pipefail
           git config user.name "scav format bot"
           git config user.email "noreply@github.com"
           git commit -am "style: clang-format"
           git push origin "HEAD:${{ github.event.pull_request.head.ref }}"
-          echo "Pushed a formatting commit; this run is superseded." >> "$GITHUB_STEP_SUMMARY"
+          if [ "$HAS_PUSH_TOKEN" = "true" ]; then
+            echo "Pushed a formatting commit; this run is superseded." >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo "Pushed a formatting commit with the default token."
+              echo
+              echo "A push made with \`GITHUB_TOKEN\` does not start a workflow run, so"
+              echo "the head commit carries no checks of its own. Set a \`CI_PUSH_TOKEN\`"
+              echo "secret to have the push trigger one; until then, re-run this workflow"
+              echo "or push again to get checks onto the new head."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
-      # Only when the diff could not be pushed.
+      # Only when the diff could not be pushed at all: a fork's PR, or main.
       - name: Report unformatted code
         if: steps.diff.outputs.changed == '1' && steps.push.outcome == 'skipped'
         run: |
           git --no-pager diff
-          echo "Run: \$(./bin/envy product python3) tools/format.py" >&2
+          echo "Run: SCAV_LINT=1 \$(./bin/envy product python3) tools/format.py" >&2
           exit 1
 
   clang-tidy:
