@@ -638,6 +638,70 @@ TEST_CASE("layout: a rank taller than the domain is rejected") {
   CHECK(column_find(c, "scav.geom.state").v == INVALID);
 }
 
+TEST_CASE("layout: a geometry column of another shape stops the run") {
+  scav_profile const p{ readable() };
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  build_state(c, root, "A", StateKind::Normal, {});
+
+  // Four bytes a row where layout writes a sixteen-byte rect: a run that wrote
+  // through this column would leave three quarters of every row past its bytes.
+  REQUIRE(
+      column_register(c, "scav.geom.state", ElemKind::State, ValueKind::U32, 4, 4, 0).v !=
+      INVALID);
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  CHECK(!layout_run(c, {}, opts(p), placed, diags));
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::GeometryColumnClash);
+  CHECK(diags[0].subject.kind == ElemKind::Chart);
+
+  // The clash was found before any geometry: the column still holds the zeros
+  // registration gave it, and no other geometry column exists at all.
+  ColumnId const clashing{ column_find(c, "scav.geom.state") };
+  REQUIRE(clashing.v != INVALID);
+  REQUIRE(column_count(c, clashing) == 1);
+  uint32_t row{ INVALID };
+  std::memcpy(&row, column_data(c, clashing), 4);
+  CHECK(row == 0);
+  CHECK(column_find(c, "scav.geom.chart").v == INVALID);
+  CHECK(column_find(c, "scav.geom.sub").v == INVALID);
+
+  // The entity is checked as well as the width, an application indexing the
+  // same rects by submachine being the likelier collision.
+  Chart by_entity;
+  SubmachineId const other{ build_chart(by_entity, "t", {}) };
+  build_state(by_entity, other, "A", StateKind::Normal, {});
+  REQUIRE(column_register(by_entity,
+                          "scav.geom.state",
+                          ElemKind::Submachine,
+                          ValueKind::Pod,
+                          sizeof(scav_rect),
+                          4,
+                          COLUMN_DERIVED)
+              .v != INVALID);
+  diags.clear();
+  CHECK(!layout_run(by_entity, {}, opts(p), placed, diags));
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::GeometryColumnClash);
+
+  // Layout's own shape under layout's own name is layout's own column to
+  // overwrite, however it got there.
+  Chart same;
+  SubmachineId const same_root{ build_chart(same, "t", {}) };
+  StateId const b{ build_state(same, same_root, "A", StateKind::Normal, {}) };
+  REQUIRE(column_register(same,
+                          "scav.geom.state",
+                          ElemKind::State,
+                          ValueKind::Pod,
+                          sizeof(scav_rect),
+                          4,
+                          COLUMN_DERIVED)
+              .v != INVALID);
+  run(same, {}, p);
+  CHECK(state_rect(same, b).w == (p.kind_min_w[0] + (2 * p.pad)));
+}
+
 TEST_CASE("layout: invalid profiles and spaces fail before any geometry") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
