@@ -82,14 +82,6 @@ uint32_t direction(scav_point a, scav_point b) {
   return (axis(a.x, b.x) * 3U) + axis(a.y, b.y);
 }
 
-bool ancestor_or_self(Chart const &c, StateId maybe, StateId of) {
-  for (StateId at{ of }; at.v != INVALID;
-       at = c.submachines[c.states[at.v].parent.v].owner) {
-    if (at == maybe) { return true; }
-  }
-  return false;
-}
-
 }  // namespace
 
 CostTerms cost_terms(Chart const &c,

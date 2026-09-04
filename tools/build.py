@@ -18,6 +18,7 @@ import argparse
 import json
 import os
 import platform
+import re
 import subprocess
 from pathlib import Path
 from shutil import rmtree, which
@@ -105,6 +106,36 @@ def cached_compiler(build_dir: Path) -> str | None:
         if line.startswith("CMAKE_CXX_COMPILER:") and "=" in line:
             return line.split("=", 1)[1].strip()
     return None
+
+
+# A ninja failure names what it could not make: a `stamp/` edge is a red test,
+# anything else -- an object, an executable, a generated header -- is a bad tree.
+FAILED_EDGE = re.compile(r"^FAILED: (?:\[[^\]]*\] )?(\S+)", re.MULTILINE)
+
+
+def build_is_stale(output: str) -> bool:
+    """Whether a failed build left binaries that no longer match the sources.
+
+    A test failure leaves them current, and they are what a red test is
+    diagnosed and a golden regenerated with. A compile failure stopped ninja at
+    the broken edge, so anything already linked is the previous build's."""
+    edges = FAILED_EDGE.findall(output)
+    if not edges:
+        return True  # a failure that named nothing: assume the worst
+    return any(not edge.startswith("stamp/") for edge in edges)
+
+
+def discard_binaries(build_dir: Path) -> None:
+    """Delete every executable, after a build that failed to compile.
+
+    A stale binary answers a question about code no longer in the tree, with
+    the same exit code and output as a real answer. Costs one relink."""
+    binaries = build_dir / "bin"
+    if not binaries.is_dir():
+        return
+    for path in sorted(binaries.iterdir()):
+        if path.is_file() and os.access(path, os.X_OK):
+            path.unlink(missing_ok=True)
 
 
 def link_compile_commands(build_dir: Path) -> None:
@@ -202,7 +233,15 @@ def main() -> int:
     link_compile_commands(build_dir)
     # Tests are build steps, so this one command builds and verifies. A second
     # run is a no-op: every test stamp is newer than its inputs.
-    run(cmake, "--build", "--preset", preset)
+    built = subprocess.run([str(cmake), "--build", "--preset", preset], cwd=REPO_ROOT,
+                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    print(built.stdout, end="", flush=True)
+    if built.returncode != 0:
+        if build_is_stale(built.stdout):
+            discard_binaries(build_dir)
+            print("\nThe tree did not build; binaries removed rather than left stale.",
+                  flush=True)
+        raise SystemExit(built.returncode)
 
     if args.coverage:
         run(python, REPO_ROOT / "tools/coverage.py", "--build", build_dir)

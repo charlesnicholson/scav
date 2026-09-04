@@ -150,8 +150,13 @@ char const *diag_message(DiagCode code) {
       return "space table count does not match its entity array";
 
     case DiagCode::ProfileOutOfRange: return "profile field out of range";
+    case DiagCode::RouterUnknown: return "no router registered under that id";
     case DiagCode::CoordinateOverflow:
       return "composed geometry exceeds the coordinate domain";
+    case DiagCode::ContainmentInconsistent:
+      return "containment relation disagrees with its inverse, or cycles";
+    case DiagCode::GeometryColumnClash:
+      return "a scav.geom column is registered with a different shape";
   }
   return "unknown diagnostic";
 }

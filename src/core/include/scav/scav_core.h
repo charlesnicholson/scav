@@ -180,10 +180,22 @@ enum class DiagCode : uint32_t {
   // Layout.
   ProfileOutOfRange,
   CoordinateOverflow,
+  RouterUnknown,
+
+  // Appended past the groups above so no earlier code's value moves.
+  // Validation: a containment relation whose two sides disagree, or a cycle.
+  ContainmentInconsistent,
+  // Layout: a column already registered under a scav.geom name with another
+  // shape, which layout refuses to write through.
+  GeometryColumnClash,
 };
 
 // A producer running before entities exist fills `src`; one running after fills
 // `subject`, and the reader walks to that subject's statement for a position.
+//
+// A subject ordinal of INVALID names the entity kind rather than one of its
+// rows, which is how a finding about a whole array is spelled. `None` carries
+// INVALID and nothing else: it is the absence of a subject.
 struct Diagnostic {
   DiagCode code;
   ElemRef subject{ .kind = ElemKind::None, .ordinal = INVALID };

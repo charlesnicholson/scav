@@ -11,8 +11,15 @@
 
 namespace scav {
 
+// Where a sum over a row or a column stops rather than wrapping, the domain
+// bounding one rect at a time and not their total. Far enough past COORD_MAX
+// that every caller's rejection fires and that no packing inside the domain
+// ever reaches it, so `pack_better` still measures both candidates as they
+// are; inside int32 so its products below stay inside int64.
+inline constexpr int32_t PACK_SATURATED{ INT32_MAX };
+
 // `w` and `h` are read from the input rects; `x` and `y` come back filled,
-// relative to the packing's own origin.
+// relative to the packing's own origin. All four saturate at PACK_SATURATED.
 struct Packing {
   std::vector<scav_rect> at;
   int32_t w{ 0 }, h{ 0 };

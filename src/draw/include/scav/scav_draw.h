@@ -1,17 +1,14 @@
 #ifndef SCAV_DRAW_H_INCLUDED
 #define SCAV_DRAW_H_INCLUDED
 
-// libscavdraw's public API: font metrics, the DrawList render IR, the optional
-// helper layer, and the reference builder.
-//
-// A builder reads model columns and produces a DrawList; a backend consumes
-// one. Neither knows about the other, and neither is required to be scav's.
+// libscavdraw's public API: font metrics, the DrawList render IR, the helper
+// layer, and the reference builder. A builder produces one, a backend consumes
+// one, and neither knows about the other or has to be scav's.
 
 #include "scav/scav_core.h"
 #include "scav/scav_draw_c.h"
-// The space tables and the profile, for the measurement pass. A header of PODs
-// and no functions, so this is vocabulary and not a link on layout -- which
-// draw still may not have, since a builder does not care who wrote the geometry.
+// The space tables and the profile, for the measurement pass: PODs and no
+// functions, so this is vocabulary rather than a link on layout.
 #include "scav/scav_layout_c.h"
 #include "scav/scav_types.h"
 
@@ -48,14 +45,12 @@ bool metrics_create(scav_byte const *ttf, uint32_t len, Metrics &out);
 // an error, never as a zero-width glyph.
 uint32_t metrics_glyph(Metrics const &m, uint32_t codepoint);
 
-// A glyph's advance in font design units. The last hmtx record's advance
-// applies to every glyph past the table, which is the rule that breaks
-// monospaced fonts when it is missed.
+// A glyph's advance in font design units. The last hmtx record applies to every
+// glyph past the table, which is the rule that breaks monospaced fonts.
 uint32_t metrics_advance(Metrics const &m, uint32_t glyph);
 
-// One line of NFC UTF-8. Accumulates in int64 and divides exactly once,
-// ceiling: an under-sized box is a diagram that lies. Kerning is deliberately
-// ignored, which for Latin over-sizes and so never under-sizes.
+// One line of NFC UTF-8, accumulated in int64 and divided once, ceiling: an
+// under-sized box lies. Kerning is ignored, which over-sizes Latin.
 enum class MeasureStatus : uint32_t { Ok, BadUtf8, Newline, MissingGlyph, BadSize };
 MeasureStatus measure_text(Metrics const &m,
                            scav_byte const *utf8_nfc,
@@ -152,10 +147,8 @@ void push_image(DrawList &d,
 // False writes the offending primitive's row to `bad`.
 bool drawlist_validate(DrawList const &d, uint32_t &bad);
 
-// Sorts by (depth, primitive bytes), deduplicates the style and clip tables in
-// field order, and rewrites the indices. Content rather than emission order is
-// what makes two builders drawing one picture compare equal; an emission-index
-// tiebreak would not. Idempotent.
+// Sorts by (depth, primitive bytes) and dedupes the style and clip tables.
+// Content, not emission order, is what makes two builders compare equal.
 void drawlist_canonicalize(DrawList &d);
 
 // xxh32 over the canonical form, opening with the font's identity. Field by
@@ -167,9 +160,8 @@ void drawlist_append(DrawList &dst, DrawList const &src);
 
 // Images ====================================================================
 
-// The app registers, the DrawList references. Raster only: an arbitrary SVG
-// fragment would be unimplementable in an ImGui backend and would break the
-// one-IR property, and vector content is primitives.
+// The app registers, the DrawList references. Raster only: an SVG fragment is
+// unimplementable in an ImGui backend, and vector content is primitives.
 struct Images {
   struct Row {
     StrRef id, mime;
@@ -180,9 +172,8 @@ struct Images {
   std::vector<scav_byte> pool;  // ids, mime types and image bytes, one arena
 };
 
-// Dimensions come from registration rather than decoding, so no backend needs a
-// decoder to size an image. False on a duplicate id, an empty one, no bytes, or
-// a non-positive extent.
+// Dimensions come from registration, so no backend needs a decoder. False on a
+// duplicate or empty id, no bytes, or a non-positive extent.
 bool image_register(Images &images,
                     std::string_view id,
                     scav_byte const *bytes,
@@ -248,11 +239,9 @@ using Palette = std::vector<scav_style>;
 
 Palette palette_standard();
 
-// The measurement pass, and the stated policy every corpus golden is against:
-// a state's interior reserves its title, a submachine its own name, every
-// transition arrowhead room, and a labelled transition one path box. An
-// internal or local self-transition gets no route, so its label rides the
-// source's `h_after` instead. Nothing else asks for anything.
+// The measurement pass, and the policy every corpus golden is against: a title,
+// a submachine name, arrowhead room, and one path box per labelled transition.
+// A routeless self-transition's label rides its source's `h_after` instead.
 struct Spaces {
   std::vector<scav_box_space> box_state, box_sub;
   std::vector<scav_path_clear> path_clear;
@@ -265,9 +254,8 @@ bool measure_chart(Chart const &c, Metrics const &m, scav_profile const &p, Spac
 // Base pointers and counts over a Spaces, for handing to layout.
 scav_spaces as_spaces(Spaces const &s);
 
-// Where `trans`'s label goes: the box layout placed for it, or the band its
-// source reserved when the transition gets no route at all. False when the
-// transition asked for neither.
+// Where `trans`'s label goes: the box layout placed, or the band its source
+// reserved when it gets no route. False when it asked for neither.
 bool label_box(Chart const &c,
                scav_spaces const &s,
                scav_placed const *placed,
@@ -287,15 +275,14 @@ void emit_submachine(DrawList &d,
                      uint32_t sub,
                      int32_t depth);
 void emit_route(DrawList &d,
+                scav_spaces const &s,
                 Chart const &c,
                 Palette const &p,
                 uint32_t trans,
                 int32_t depth);
 
-// Draws the label centred in `box`, which is the rect layout actually placed
-// rather than one the builder recomputed. A placed box may exceed its request,
-// so an emitter deriving its own would drift the moment a router stops
-// centring on the route midpoint.
+// Draws the label centred in `box`, the rect layout placed rather than one the
+// builder recomputed -- a placed box may exceed its request.
 void emit_label(DrawList &d,
                 Chart const &c,
                 Metrics const &m,
@@ -304,10 +291,8 @@ void emit_label(DrawList &d,
                 scav_rect box,
                 int32_t depth);
 
-// Every emitter in an order this function documents and nothing else depends
-// on: submachines, states, routes, then labels. It takes the space tables and
-// the placed boxes back, because that is where a label's rect actually is.
-// False when the chart carries no geometry, which means layout has not run.
+// Every emitter, in an order nothing else depends on: submachines, states,
+// routes, labels. False when the chart carries no geometry.
 bool emit_chart(DrawList &d,
                 Chart const &c,
                 Metrics const &m,

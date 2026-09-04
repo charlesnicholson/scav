@@ -227,9 +227,8 @@ TEST_CASE("layout: components pack to the aspect-ratio target") {
   scav_profile const p{ readable() };
   run(c, {}, p);
 
-  // Nine identical leaves, so nine one-node components. The target width is
-  // the same isqrt the packer runs, over the area each rect occupies once its
-  // own gap is folded in, and it says three across.
+  // Nine identical leaves, so nine one-node components. The target width is the
+  // same isqrt the packer runs, over the area each rect occupies with its gap.
   int32_t const w{ p.kind_min_w[0] + (2 * p.pad) };
   int32_t const h{ p.kind_min_h[0] + (2 * p.pad) };
   int32_t const sep{ p.node_sep };
@@ -249,7 +248,7 @@ TEST_CASE("layout: components pack to the aspect-ratio target") {
          scav_rect{ .x = 0, .y = 0, .w = (3 * w) + (2 * sep), .h = (3 * h) + (2 * sep) }));
 }
 
-TEST_CASE("layout: routes are straight, ports on borders, self-loops outside") {
+TEST_CASE("layout: routes are orthogonal, meet borders, and skip internal loops") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
@@ -263,21 +262,42 @@ TEST_CASE("layout: routes are straight, ports on borders, self-loops outside") {
   run(c, {}, p);
 
   scav_span const r0{ row_of<scav_span>(c, "scav.geom.route", 0) };
-  REQUIRE(r0.len == 3);
-  scav_point const src{ row_of<scav_point>(c, "scav.geom.point", r0.off) };
-  scav_point const mid{ row_of<scav_point>(c, "scav.geom.point", r0.off + 1) };
-  scav_rect const rs{ state_rect(c, s1) };
-  CHECK(src.x == rs.x + (rs.w / 2));
-  CHECK(src.y == rs.y + (rs.h / 2));
-  CHECK(on_border(mid, state_rect(c, comp)));
+  REQUIRE(r0.len >= 2);
+  std::vector<scav_point> route;
+  route.reserve(r0.len);
+  for (uint32_t k = 0; k < r0.len; ++k) {
+    route.push_back(row_of<scav_point>(c, "scav.geom.point", r0.off + k));
+  }
+  // Axis-aligned is the hard constraint the router exists to keep (11.5), and
+  // the ends meet their boxes' borders rather than sitting at their centres.
+  for (uint32_t k = 0; (k + 1) < r0.len; ++k) {
+    CAPTURE(k);
+    bool const square{ (route[k].x == route[k + 1].x) || (route[k].y == route[k + 1].y) };
+    CHECK(square);
+  }
+  CHECK(on_border(route.front(), state_rect(c, s1)));
+  CHECK(on_border(route.back(), state_rect(c, d1)));
 
   scav_span const ports{ row_of<scav_span>(c, "scav.geom.port", 0) };
   REQUIRE(ports.len == 1);
   scav_port_slot const slot{ row_of<scav_port_slot>(c, "scav.geom.portslot", ports.off) };
-  CHECK(slot.x == mid.x);
-  CHECK(slot.y == mid.y);
+  CHECK(on_border({ .x = slot.x, .y = slot.y }, state_rect(c, comp)));
   CHECK(slot.boundary_depth == 0);
   CHECK(slot.side <= 3);
+
+  // Through the port it was split at, along a leg rather than as a vertex: a port
+  // a route runs straight through is exactly what the polyline drops.
+  bool through_port{ false };
+  for (uint32_t k = 0; (k + 1) < r0.len; ++k) {
+    scav_point const a{ route[k] };
+    scav_point const b{ route[k + 1] };
+    bool const along_y{ (a.x == b.x) && (slot.x == a.x) && (slot.y >= imin(a.y, b.y)) &&
+                        (slot.y <= imax(a.y, b.y)) };
+    bool const along_x{ (a.y == b.y) && (slot.y == a.y) && (slot.x >= imin(a.x, b.x)) &&
+                        (slot.x <= imax(a.x, b.x)) };
+    if (along_x || along_y) { through_port = true; }
+  }
+  CHECK(through_port);
 
   scav_span const r1{ row_of<scav_span>(c, "scav.geom.route", 1) };
   REQUIRE(r1.len == 2);
@@ -302,34 +322,144 @@ TEST_CASE("layout: path clears trim the route ends by exact integers") {
   scav_spaces const s{ .path_clear = clears.data(), .n_path_clear = 1 };
   run(c, s, p);
 
-  // The transition ranks A before B, so the route runs along the layering
-  // axis and the trims apply to x alone.
+  // A ranks before B with nothing in the way, so the route is one horizontal leg
+  // between their facing borders and the trims apply to x alone.
   scav_span const r{ row_of<scav_span>(c, "scav.geom.route", 0) };
+  REQUIRE(r.len == 2);
   scav_point const p0{ row_of<scav_point>(c, "scav.geom.point", r.off) };
   scav_point const p1{ row_of<scav_point>(c, "scav.geom.point", r.off + 1) };
   scav_rect const ra{ state_rect(c, a) };
   scav_rect const rb{ state_rect(c, b) };
   CHECK(ra.x < rb.x);
   CHECK(p0.y == ra.y + (ra.h / 2));
-  CHECK(p0.x == (ra.x + (ra.w / 2)) + 10);
-  CHECK(p1.x == (rb.x + (rb.w / 2)) - 6);
+  CHECK(p0.y == p1.y);
+  // Trimmed inward from the borders the router attached to, not from centres.
+  CHECK(p0.x == (ra.x + ra.w) + 10);
+  CHECK(p1.x == rb.x - 6);
 }
 
-TEST_CASE("layout: placed boxes center on the route midpoint") {
+TEST_CASE("layout: the chart rect bounds every point and every placed box") {
+  // A consumer sizes its viewport from this rect (11.7a); bounding only the root
+  // submachine clips whatever reached past it.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const z{ build_state(c, root, "Z", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, z, TransKind::External, {});
+  build_trans(c, z, a, TransKind::External, {});
+
+  // Path boxes wide enough that wherever they land they push the extent.
+  std::vector<scav_path_box> const wide{
+    { .subject = 0, .w = 4000, .h = 300, .order = 0 },
+    { .subject = 2, .w = 4000, .h = 300, .order = 0 },
+  };
+  scav_spaces const s{ .path_box = wide.data(), .n_path_box = 2 };
+  std::vector<scav_placed> const placed{ run(c, s, readable()) };
+
+  scav_rect const chart{ row_of<scav_rect>(c, "scav.geom.chart", 0) };
+  for (scav_placed const &at : placed) {
+    CAPTURE(at.x);
+    CAPTURE(at.y);
+    CHECK(at.x >= chart.x);
+    CHECK(at.y >= chart.y);
+    CHECK((at.x + at.w) <= (chart.x + chart.w));
+    CHECK((at.y + at.h) <= (chart.y + chart.h));
+  }
+  ColumnId const pts{ column_find(c, "scav.geom.point") };
+  REQUIRE(pts.v != INVALID);
+  for (uint32_t i = 0; i < column_count(c, pts); ++i) {
+    scav_point const at{ row_of<scav_point>(c, "scav.geom.point", i) };
+    CAPTURE(i);
+    CHECK(at.x >= chart.x);
+    CHECK(at.y >= chart.y);
+    CHECK(at.x <= (chart.x + chart.w));
+    CHECK(at.y <= (chart.y + chart.h));
+  }
+}
+
+TEST_CASE("layout: a wide placed box is slid inside rather than hung off") {
+  // A box is as wide as its text and its leg can be far shorter near a frame's
+  // edge, so centring alone puts half the label outside and grows the canvas.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   build_trans(c, a, b, TransKind::External, {});
 
-  std::vector<scav_path_box> const boxes{ { .subject = 0, .w = 20, .h = 8, .order = 0 } };
+  scav_profile const p{ readable() };
+  std::vector<scav_placed> const bare{ run(c, {}, p) };
+  scav_rect const before{ row_of<scav_rect>(c, "scav.geom.chart", 0) };
+
+  // Wider than the route it rides on, but still narrower than the chart.
+  std::vector<scav_path_box> const boxes{
+    { .subject = 0, .w = before.w - 1, .h = 8, .order = 0 }
+  };
+  scav_spaces const s{ .path_box = boxes.data(), .n_path_box = 1 };
+  std::vector<scav_placed> const placed{ run(c, s, p) };
+  REQUIRE(placed.size() == 1);
+  scav_rect const after{ row_of<scav_rect>(c, "scav.geom.chart", 0) };
+
+  CHECK(placed[0].x >= after.x);
+  CHECK(placed[0].y >= after.y);
+  CHECK((placed[0].x + placed[0].w) <= (after.x + after.w));
+  CHECK((placed[0].y + placed[0].h) <= (after.y + after.h));
+}
+
+TEST_CASE("layout: a placed box sits on the longest leg of its route") {
+  // Phase 1 widens a rank boundary by the widest box crossing it (11.3), and that
+  // is where the box goes; the polyline's middle point is usually over a state.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, d, TransKind::External, {});
+  build_trans(c, d, b, TransKind::External, {});
+
+  std::vector<scav_path_box> const boxes{
+    { .subject = 2, .w = 240, .h = 80, .order = 0 }
+  };
   scav_spaces const s{ .path_box = boxes.data(), .n_path_box = 1 };
   std::vector<scav_placed> const placed{ run(c, s, readable()) };
-
   REQUIRE(placed.size() == 1);
-  scav_span const r{ row_of<scav_span>(c, "scav.geom.route", 0) };
-  scav_point const mid{ row_of<scav_point>(c, "scav.geom.point", r.off + (r.len / 2)) };
-  CHECK((placed[0] == scav_placed{ .x = mid.x - 10, .y = mid.y - 4, .w = 20, .h = 8 }));
+
+  scav_span const r{ row_of<scav_span>(c, "scav.geom.route", 2) };
+  REQUIRE(r.len >= 2);
+  int32_t const cx{ placed[0].x + (placed[0].w / 2) };
+  int32_t const cy{ placed[0].y + (placed[0].h / 2) };
+
+  // The longest horizontal leg, found here rather than trusted from the
+  // implementation. Horizontal is the direction text and the boundary both run.
+  int64_t longest{ -1 };
+  scav_point best_a{};
+  scav_point best_b{};
+  for (uint32_t k = 0; (k + 1) < r.len; ++k) {
+    scav_point const p0{ row_of<scav_point>(c, "scav.geom.point", r.off + k) };
+    scav_point const p1{ row_of<scav_point>(c, "scav.geom.point", r.off + k + 1) };
+    if (p0.y != p1.y) { continue; }
+    int64_t const span{ imax(int64_t{ p0.x } - p1.x, int64_t{ p1.x } - p0.x) };
+    if (span > longest) {
+      longest = span;
+      best_a = p0;
+      best_b = p1;
+    }
+  }
+  REQUIRE(longest > 0);
+  // The centre lies on that leg: collinear with it and between its ends.
+  CAPTURE(cx);
+  CAPTURE(cy);
+  if (best_a.y == best_b.y) {
+    CHECK(cy == best_a.y);
+    CHECK(cx >= imin(best_a.x, best_b.x));
+    CHECK(cx <= imax(best_a.x, best_b.x));
+  } else {
+    CHECK(cx == best_a.x);
+    CHECK(cy >= imin(best_a.y, best_b.y));
+    CHECK(cy <= imax(best_a.y, best_b.y));
+  }
 }
 
 TEST_CASE("layout: reruns rewrite in place, bumping only the generation") {
@@ -389,9 +519,8 @@ TEST_CASE("layout: the hash split separates size changes from shape changes") {
 
   Chart const narrow{ build(0) };
   Chart const wide{ build(4000) };
-  // Where a size change reflows the ranks it moves the structural hash too,
-  // which is the honest limit of the split: sizing feeds back into shape
-  // because the rank run folds to keep the aspect (11.11).
+  // A size change that reflows the ranks moves the structural hash too, the
+  // honest limit of the split: sizing feeds back into shape through the fold.
   CHECK(layout_coordinate_hash(narrow) != layout_coordinate_hash(wide));
   CHECK(layout_structural_hash(narrow) != layout_structural_hash(wide));
 
@@ -509,6 +638,70 @@ TEST_CASE("layout: a rank taller than the domain is rejected") {
   CHECK(diags[0].subject.kind == ElemKind::Submachine);
   CHECK(diags[0].subject.ordinal == root.v);
   CHECK(column_find(c, "scav.geom.state").v == INVALID);
+}
+
+TEST_CASE("layout: a geometry column of another shape stops the run") {
+  scav_profile const p{ readable() };
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  build_state(c, root, "A", StateKind::Normal, {});
+
+  // Four bytes a row where layout writes a sixteen-byte rect: a run that wrote
+  // through this column would leave three quarters of every row past its bytes.
+  REQUIRE(
+      column_register(c, "scav.geom.state", ElemKind::State, ValueKind::U32, 4, 4, 0).v !=
+      INVALID);
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  CHECK(!layout_run(c, {}, opts(p), placed, diags));
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::GeometryColumnClash);
+  CHECK(diags[0].subject.kind == ElemKind::Chart);
+
+  // The clash was found before any geometry: the column still holds the zeros
+  // registration gave it, and no other geometry column exists at all.
+  ColumnId const clashing{ column_find(c, "scav.geom.state") };
+  REQUIRE(clashing.v != INVALID);
+  REQUIRE(column_count(c, clashing) == 1);
+  uint32_t row{ INVALID };
+  std::memcpy(&row, column_data(c, clashing), 4);
+  CHECK(row == 0);
+  CHECK(column_find(c, "scav.geom.chart").v == INVALID);
+  CHECK(column_find(c, "scav.geom.sub").v == INVALID);
+
+  // The entity is checked as well as the width, an application indexing the
+  // same rects by submachine being the likelier collision.
+  Chart by_entity;
+  SubmachineId const other{ build_chart(by_entity, "t", {}) };
+  build_state(by_entity, other, "A", StateKind::Normal, {});
+  REQUIRE(column_register(by_entity,
+                          "scav.geom.state",
+                          ElemKind::Submachine,
+                          ValueKind::Pod,
+                          sizeof(scav_rect),
+                          4,
+                          COLUMN_DERIVED)
+              .v != INVALID);
+  diags.clear();
+  CHECK(!layout_run(by_entity, {}, opts(p), placed, diags));
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::GeometryColumnClash);
+
+  // Layout's own shape under layout's own name is layout's own column to
+  // overwrite, however it got there.
+  Chart same;
+  SubmachineId const same_root{ build_chart(same, "t", {}) };
+  StateId const b{ build_state(same, same_root, "A", StateKind::Normal, {}) };
+  REQUIRE(column_register(same,
+                          "scav.geom.state",
+                          ElemKind::State,
+                          ValueKind::Pod,
+                          sizeof(scav_rect),
+                          4,
+                          COLUMN_DERIVED)
+              .v != INVALID);
+  run(same, {}, p);
+  CHECK(state_rect(same, b).w == (p.kind_min_w[0] + (2 * p.pad)));
 }
 
 TEST_CASE("layout: invalid profiles and spaces fail before any geometry") {
@@ -768,20 +961,17 @@ TEST_CASE("layout: two thousand states lay out, and quickly") {
           us,
           " us");
 #if SCAV_PERF_ASSERT_FLOOR == 1
-  // A floor, not a time: named machines only, never under instrumentation.
-  // Real layout measures ~25 ms here against P4's 0.2 ms, and the work is
-  // named rather than guessed: four coordinate passes per piece, two candidate
-  // shapes per component, and the median sweeps. The floor is set to catch an
-  // accidental quadratic, not to track that number.
-  CHECK(us < 150000);
+  // A floor, not a time: named machines only, never instrumented. ~47 ms here
+  // against P6's 8 ms, the difference being a graph and a search per net. It
+  // catches an accidental quadratic, not that number.
+  CHECK(us < 200000);
 #endif
   check_geometry(c);
 }
 
 TEST_CASE("layout: the flat two thousand lay out too, and quickly") {
-  // One submachine holding the whole scale target is legal input, and it is
-  // the shape the per-submachine cost bounds assume away: ordering there runs
-  // over a graph an order of magnitude larger than a nested frame's (11.3).
+  // One submachine holding the whole scale target is legal input, and the shape
+  // the per-submachine cost bounds assume away (11.3).
   Chart c;
   SubmachineId const root{ build_chart(c, "flat", {}) };
   std::vector<StateId> all;
@@ -816,17 +1006,154 @@ TEST_CASE("layout: the flat two thousand lay out too, and quickly") {
     CHECK(diags[0].code == DiagCode::CoordinateOverflow);
   }
 #if SCAV_PERF_ASSERT_FLOOR == 1
-  CHECK(us < 150000);
+  // Every one of the 2,048 boxes in one frame, so the largest single routing
+  // graph any chart produces. ~215 ms against the nested shape's ~47 ms.
+  CHECK(us < 500000);
 #endif
 }
 
+TEST_CASE("layout: no corpus chart runs a route flush along a box") {
+  // The router's own suite proves clearance over the graph; what it cannot see is
+  // a box flush against the *frame's* edge, which has no room for a lane. Phase 3
+  // owns the margin, and `brew` is where the shape occurs.
+  scav_profile const p{ readable() };
+  std::string report;
+  uint32_t reseated{ 0 };
+  for (char const *name : { "axis.scav",
+                            "bottler.scav",
+                            "brew.scav",
+                            "dock.scav",
+                            "estop.scav",
+                            "led.scav",
+                            "mill.scav",
+                            "ota.scav",
+                            "tcp.scav",
+                            "toolchanger.scav",
+                            "vac.scav" }) {
+    CAPTURE(name);
+    std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
+    path += name;
+    Loader loader;
+    Chart c;
+    std::vector<Diagnostic> diags;
+    std::string failed;
+    REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
+    run(c, {}, p);
+    SplitGraph const g{ decompose(c) };
+    SubmachineOrders const o{ phase1_order(c, g, {}, p) };
+    SizedLayout z;
+    REQUIRE(phase2_size(c, g, o, {}, p, z, diags));
+    Routes const routes{ phase3_route(c, g, o, z, {}, p, *router_at(0)) };
+    reseated += routes.reseated;
+
+    for (uint32_t t = 0; t < c.transitions.size(); ++t) {
+      scav_span const route{ row_of<scav_span>(c, "scav.geom.route", t) };
+      for (uint32_t k = 0; (k + 1) < route.len; ++k) {
+        scav_point const a{ row_of<scav_point>(c, "scav.geom.point", route.off + k) };
+        scav_point const b{ row_of<scav_point>(c, "scav.geom.point", route.off + k + 1) };
+        for (uint32_t st = 0; st < c.states.size(); ++st) {
+          if (c.states[st].live == 0) { continue; }
+          scav_rect const r{ row_of<scav_rect>(c, "scav.geom.state", st) };
+          bool const along_cap{ (a.y == b.y) && ((a.y == r.y) || (a.y == (r.y + r.h))) &&
+                                (imin(a.x, b.x) < (r.x + r.w)) && (imax(a.x, b.x) > r.x) };
+          bool const along_side{ (a.x == b.x) && ((a.x == r.x) || (a.x == (r.x + r.w))) &&
+                                 (imin(a.y, b.y) < (r.y + r.h)) &&
+                                 (imax(a.y, b.y) > r.y) };
+          if (!along_cap && !along_side) { continue; }
+          report += name;
+          report += " transition ";
+          report += std::to_string(t);
+          report += " (";
+          report += std::to_string(a.x);
+          report += ",";
+          report += std::to_string(a.y);
+          report += ")-(";
+          report += std::to_string(b.x);
+          report += ",";
+          report += std::to_string(b.y);
+          report += ") along state ";
+          report += std::to_string(st);
+          report += "\n";
+        }
+      }
+    }
+  }
+  // No net gave up its clearance, so what is left is not 11.5's degradation.
+  CHECK(reseated == 0);
+  MESSAGE("routes flush against a box:\n", report);
+  // All three are separator ports: such a port sits on a submachine rect flush
+  // with a child's border and lays a lane there. Same cause as the stubs below,
+  // same fix -- 11.5's LCA-owned separator channel, P7c's. Pinned so it cannot grow.
+  uint32_t lines{ 0 };
+  for (char const ch : report) {
+    if (ch == '\n') { ++lines; }
+  }
+  CHECK(lines <= 3);
+}
+
+TEST_CASE("layout: Tier 0 at the scale target, and where the grid gives out") {
+  // The corpus fits the budget; these two are the shapes that might not, and
+  // which of them still routes is the finding rather than an assumption.
+  {
+    Chart c{ two_k_chart() };
+    scav_profile const p{ readable() };
+    SplitGraph const g{ decompose(c) };
+    SubmachineOrders const o{ phase1_order(c, g, {}, p) };
+    SizedLayout z;
+    std::vector<Diagnostic> diags;
+    REQUIRE(phase2_size(c, g, o, {}, p, z, diags));
+    Routes const r{ phase3_route(c, g, o, z, {}, p, *router_at(0)) };
+    CostTerms const t{ cost_terms(c, g, z, r, {}, p) };
+    MESSAGE("nested 2k: through_box ",
+            t.through_box,
+            ", outside ",
+            r.outside_region,
+            ", unreachable ",
+            r.unreachable,
+            ", too large ",
+            r.too_large,
+            " of ",
+            g.segments.size());
+    // No net degrades: every frame here fits the budget and every end is
+    // reachable, so the router routed all 3,704 of them.
+    CHECK(r.degraded() == 0);
+    // All endpoint stubs: a separator port sits inside its owner and 11.5 gives the
+    // segment to the parent frame, where the owner is an obstacle. The fix is the
+    // LCA-owned separator channel, P7c's; pinned so it cannot grow first.
+    CHECK(t.through_box <= 496);
+  }
+  {
+    Chart c;
+    SubmachineId const root{ build_chart(c, "flat", {}) };
+    std::vector<StateId> all;
+    all.reserve(2048);
+    for (uint32_t i = 0; i < 2048; ++i) {
+      all.push_back(build_state(c, root, {}, StateKind::Normal, {}));
+    }
+    for (uint32_t i = 0; (i + 1) < all.size(); ++i) {
+      build_trans(c, all[i], all[i + 1], TransKind::External, {});
+    }
+    scav_profile const p{ readable() };
+    SplitGraph const g{ decompose(c) };
+    SubmachineOrders const o{ phase1_order(c, g, {}, p) };
+    SizedLayout z;
+    std::vector<Diagnostic> diags;
+    if (phase2_size(c, g, o, {}, p, z, diags)) {
+      Routes const r{ phase3_route(c, g, o, z, {}, p, *router_at(0)) };
+      CostTerms const t{ cost_terms(c, g, z, r, {}, p) };
+      // The grid is the product of two line sets, not a function of box count, and a
+      // packed grid shares columns and rows -- so this fits. What blows the budget is
+      // boxes at distinct offsets, which the router's own suite builds.
+      MESSAGE("flat 2k: through_box ", t.through_box, ", too large ", r.too_large);
+      CHECK(r.degraded() == 0);
+      CHECK(t.through_box == 0);
+    }
+  }
+}
+
 TEST_CASE("layout: a frame full of long edges terminates, expensively") {
-  // The shape the case above deliberately is not. Cycle breaking reverses in
-  // node order, and a reversed chain edge turns a thirteen-rank skip into a
-  // thousand-rank one, each rank of which is chained through a bend: the node
-  // count comes out two orders of magnitude over the state count. Pinned at a
-  // size a build can afford, because the fix -- a cycle-breaking heuristic
-  // that leaves a chain alone -- has a quality story that wants review.
+  // The shape the case above is not. Cycle breaking reverses in node order, and a
+  // reversed chain edge turns a thirteen-rank skip into a thousand-rank one.
   Chart c;
   SubmachineId const root{ build_chart(c, "wide", {}) };
   std::vector<StateId> all;
@@ -853,9 +1180,8 @@ TEST_CASE("layout: a frame full of long edges terminates, expensively") {
 }
 
 TEST_CASE("layout: the coordinate extent estimate holds under fat text") {
-  // Deliberately generous stand-ins for measured text -- twenty wide glyphs
-  // of width, two title lines, a compartment -- so the grid decision errs
-  // conservative: if this fits, real fonts fit smaller.
+  // Generous stand-ins for measured text, so the grid decision errs conservative:
+  // twenty wide glyphs, two title lines, a compartment.
   int32_t lo{ 0 };
   int32_t hi{ 8192 };
   scav_rect best{};
@@ -893,8 +1219,7 @@ TEST_CASE("layout: the coordinate extent estimate holds under fat text") {
 
 TEST_CASE("layout: corpus charts hash to the committed golden") {
   // Three columns per chart: the inputs digest naming the measurement policy,
-  // then the structural and coordinate hashes it produced. The policy here is
-  // no space requests and the readable profile -- what dump --layout does.
+  // then the structural and coordinate hashes it produced.
   std::string actual;
   for (char const *name : { "axis.scav",
                             "bottler.scav",
@@ -940,10 +1265,8 @@ TEST_CASE("layout: corpus charts hash to the committed golden") {
 }
 
 TEST_CASE("layout: the corpus cost vector is committed, term by term") {
-  // The gate's own numbers, in the open: 11.6's terms with no space requests
-  // and the readable profile, so a later phase is compared against a row
-  // rather than against a claim. `corridor` needs channels and stays zero
-  // until P7 registers a router that has them.
+  // The gate's numbers in the open: 11.6's terms with no space requests and the
+  // readable profile, so a later phase is compared against a row not a claim.
   scav_profile const p{ readable() };
   std::string actual;
   for (char const *name : { "axis.scav",
@@ -970,7 +1293,7 @@ TEST_CASE("layout: the corpus cost vector is committed, term by term") {
     SubmachineOrders const o{ phase1_order(c, g, {}, p) };
     SizedLayout z;
     REQUIRE(phase2_size(c, g, o, {}, p, z, diags));
-    Routes const r{ phase3_route(c, g, o, z, {}, p) };
+    Routes const r{ phase3_route(c, g, o, z, {}, p, *router_at(0)) };
     CostTerms const t{ cost_terms(c, g, z, r, {}, p) };
     Cost const scored{ cost_of(t, p) };
 
@@ -1001,6 +1324,136 @@ TEST_CASE("layout: the corpus cost vector is committed, term by term") {
     MESSAGE("actual written to " SCAV_TEST_OUT_DIR "/corpus_cost.txt:\n", actual);
   }
   CHECK(want == actual);
+}
+
+namespace {
+
+// The Tier-0 predicate, rewritten rather than read from `cost_terms`: a gate
+// that asks the scorer whether the scorer is happy is worth nothing.
+Wide gate_orient(scav_point a, scav_point b, scav_point c) {
+  return ((Wide{ b.x } - a.x) * (Wide{ c.y } - a.y)) -
+         ((Wide{ b.y } - a.y) * (Wide{ c.x } - a.x));
+}
+
+bool gate_crosses(scav_point a, scav_point b, scav_point c, scav_point d) {
+  Wide const d1{ gate_orient(a, b, c) };
+  Wide const d2{ gate_orient(a, b, d) };
+  Wide const d3{ gate_orient(c, d, a) };
+  Wide const d4{ gate_orient(c, d, b) };
+  if ((d1 == 0) || (d2 == 0) || (d3 == 0) || (d4 == 0)) { return false; }
+  return ((d1 > 0) != (d2 > 0)) && ((d3 > 0) != (d4 > 0));
+}
+
+bool gate_inside(scav_point pt, scav_rect const &r) {
+  return (pt.x > r.x) && (pt.x < (r.x + r.w)) && (pt.y > r.y) && (pt.y < (r.y + r.h));
+}
+
+bool gate_enters(scav_point a, scav_point b, scav_rect const &r) {
+  if (gate_inside(a, r) || gate_inside(b, r)) { return true; }
+  scav_point const tl{ .x = r.x, .y = r.y };
+  scav_point const tr{ .x = r.x + r.w, .y = r.y };
+  scav_point const bl{ .x = r.x, .y = r.y + r.h };
+  scav_point const br{ .x = r.x + r.w, .y = r.y + r.h };
+  return gate_crosses(a, b, tl, tr) || gate_crosses(a, b, bl, br) ||
+         gate_crosses(a, b, tl, bl) || gate_crosses(a, b, tr, br);
+}
+
+bool gate_ancestor(Chart const &c, StateId maybe, StateId of) {
+  for (StateId at{ of }; at.v != INVALID;
+       at = c.submachines[c.states[at.v].parent.v].owner) {
+    if (at == maybe) { return true; }
+  }
+  return false;
+}
+
+}  // namespace
+
+TEST_CASE("layout: no corpus chart routes an edge through a box") {
+  // P7's gate, and the precondition for blind review (11.12): both incumbents sit
+  // at zero, so one violation settles the comparison on the first tier.
+  scav_profile const p{ readable() };
+  std::string report;
+  for (char const *name : { "axis.scav",
+                            "bottler.scav",
+                            "brew.scav",
+                            "dock.scav",
+                            "estop.scav",
+                            "led.scav",
+                            "mill.scav",
+                            "ota.scav",
+                            "tcp.scav",
+                            "toolchanger.scav",
+                            "vac.scav" }) {
+    CAPTURE(name);
+    std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
+    path += name;
+    Loader loader;
+    Chart c;
+    std::vector<Diagnostic> diags;
+    std::string failed;
+    REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
+    run(c, {}, p);
+
+    for (uint32_t t = 0; t < c.transitions.size(); ++t) {
+      scav_span const route{ row_of<scav_span>(c, "scav.geom.route", t) };
+      if (route.len < 2) { continue; }
+      Transition const &tr{ c.transitions[t] };
+      for (uint32_t k = 0; (k + 1) < route.len; ++k) {
+        scav_point const a{ row_of<scav_point>(c, "scav.geom.point", route.off + k) };
+        scav_point const b{ row_of<scav_point>(c, "scav.geom.point", route.off + k + 1) };
+        for (uint32_t st = 0; st < c.states.size(); ++st) {
+          if (c.states[st].live == 0) { continue; }
+          // 11.14's carve-out: an edge may occupy the interior of a state it
+          // is an endpoint of or a descendant of, and only that one.
+          if (gate_ancestor(c, { st }, tr.src) || gate_ancestor(c, { st }, tr.dst)) {
+            continue;
+          }
+          if (!gate_enters(a, b, row_of<scav_rect>(c, "scav.geom.state", st))) {
+            continue;
+          }
+          report += name;
+          report += " transition ";
+          report += std::to_string(t);
+          report += " segment ";
+          report += std::to_string(k);
+          report += " (";
+          report += std::to_string(a.x);
+          report += ",";
+          report += std::to_string(a.y);
+          report += ")-(";
+          report += std::to_string(b.x);
+          report += ",";
+          report += std::to_string(b.y);
+          report += ") through state ";
+          report += std::to_string(st);
+          report += " rect(";
+          scav_rect const box{ row_of<scav_rect>(c, "scav.geom.state", st) };
+          report += std::to_string(box.x);
+          report += ",";
+          report += std::to_string(box.y);
+          report += " ";
+          report += std::to_string(box.w);
+          report += "x";
+          report += std::to_string(box.h);
+          report += ") | src=";
+          report += std::to_string(tr.src.v);
+          report += " parent=";
+          report += std::to_string(c.states[tr.src.v].parent.v);
+          report += " dst=";
+          report += std::to_string(tr.dst.v);
+          report += " parent=";
+          report += std::to_string(c.states[tr.dst.v].parent.v);
+          report += " | state parent=";
+          report += std::to_string(c.states[st].parent.v);
+          report += " owner=";
+          report += std::to_string(c.submachines[c.states[st].parent.v].owner.v);
+          report += "\n";
+        }
+      }
+    }
+  }
+  if (!report.empty()) { MESSAGE("edges through boxes:\n", report); }
+  CHECK(report.empty());
 }
 
 TEST_CASE("layout: fuzzed charts and spaces either lay out or diagnose") {

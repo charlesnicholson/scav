@@ -4,6 +4,7 @@
 #include "layout/decompose.h"
 #include "layout/order.h"
 #include "layout/route.h"
+#include "layout/router.h"
 #include "layout/size.h"
 #include "layout/wire.h"
 #include "scav/scav_core.h"
@@ -21,15 +22,103 @@ namespace scav {
 
 namespace {
 
-// Registered on first use, found thereafter; every run overwrites in place.
-ColumnId geom_column(Chart &c,
-                     char const *name,
-                     ElemKind entity,
-                     ValueKind kind,
-                     uint32_t elem_size) {
-  ColumnId const found{ column_find(c, name) };
+constexpr uint32_t RECT{ sizeof(scav_rect) };
+
+// One name and the shape it is registered under. `write_rows` copies a row per
+// entity through whichever column carries the name, so the shape has to be the
+// one layout would have registered or the copy runs past the column's bytes.
+struct GeomShape {
+  char const *name;
+  ElemKind entity;
+  ValueKind kind;
+  uint32_t elem_size;
+};
+
+// Index into GEOM, so the writer below and the check in `layout_run` name the
+// same row rather than repeating its fields.
+enum GeomColumnIndex : uint32_t {
+  GeomState,
+  GeomBefore,
+  GeomAfter,
+  GeomSub,
+  GeomRoute,
+  GeomPort,
+  GeomPoint,
+  GeomPortSlot,
+  GeomChart,
+  GeomInputs,
+  GeomGen,
+  GeomCount,
+};
+
+constexpr std::array<GeomShape, GeomCount> GEOM{ {
+    { .name = "scav.geom.state",
+      .entity = ElemKind::State,
+      .kind = ValueKind::Pod,
+      .elem_size = RECT },
+    { .name = "scav.geom.state_before",
+      .entity = ElemKind::State,
+      .kind = ValueKind::Pod,
+      .elem_size = RECT },
+    { .name = "scav.geom.state_after",
+      .entity = ElemKind::State,
+      .kind = ValueKind::Pod,
+      .elem_size = RECT },
+    { .name = "scav.geom.sub",
+      .entity = ElemKind::Submachine,
+      .kind = ValueKind::Pod,
+      .elem_size = RECT },
+    { .name = "scav.geom.route",
+      .entity = ElemKind::Transition,
+      .kind = ValueKind::Span,
+      .elem_size = 8 },
+    { .name = "scav.geom.port",
+      .entity = ElemKind::Transition,
+      .kind = ValueKind::Span,
+      .elem_size = 8 },
+    { .name = "scav.geom.point",
+      .entity = ElemKind::Point,
+      .kind = ValueKind::Pod,
+      .elem_size = 8 },
+    { .name = "scav.geom.portslot",
+      .entity = ElemKind::Point,
+      .kind = ValueKind::Pod,
+      .elem_size = sizeof(scav_port_slot) },
+    { .name = "scav.geom.chart",
+      .entity = ElemKind::Chart,
+      .kind = ValueKind::Pod,
+      .elem_size = RECT },
+    { .name = "scav.geom.inputs",
+      .entity = ElemKind::Chart,
+      .kind = ValueKind::U32,
+      .elem_size = 4 },
+    { .name = "scav.geom.gen",
+      .entity = ElemKind::Chart,
+      .kind = ValueKind::U32,
+      .elem_size = 4 },
+} };
+
+// Registered on first use, found thereafter; every run overwrites in place. The
+// found column's shape was checked before any geometry was computed.
+ColumnId geom_column(Chart &c, GeomShape const &g) {
+  ColumnId const found{ column_find(c, g.name) };
   if (found.v != INVALID) { return found; }
-  return column_register(c, name, entity, kind, elem_size, 4, COLUMN_DERIVED);
+  return column_register(c, g.name, g.entity, g.kind, g.elem_size, 4, COLUMN_DERIVED);
+}
+
+// The first name already registered under another entity, value kind, or
+// element size. GeomCount when every one of them is layout's own to write.
+uint32_t geom_column_clash(Chart const &c) {
+  for (uint32_t i = 0; i < GeomCount; ++i) {
+    ColumnId const found{ column_find(c, GEOM[i].name) };
+    if (found.v == INVALID) { continue; }
+    ColumnDesc const &d{ c.columns[found.v].desc };
+    if ((d.entity != GEOM[i].entity) || (d.kind != GEOM[i].kind) ||
+        (d.elem_size != GEOM[i].elem_size)) {
+      return i;
+    }
+  }
+  return GeomCount;
 }
 
 template <typename T>
@@ -68,54 +157,27 @@ uint32_t inputs_digest(scav_spaces const &s, scav_layout_opts const &o) {
 }
 
 void write_columns(Chart &c, SizedLayout const &z, Routes const &r, uint32_t inputs) {
-  constexpr uint32_t RECT{ sizeof(scav_rect) };
-  write_rows(c,
-             geom_column(c, "scav.geom.state", ElemKind::State, ValueKind::Pod, RECT),
-             z.state);
-  write_rows(
-      c,
-      geom_column(c, "scav.geom.state_before", ElemKind::State, ValueKind::Pod, RECT),
-      z.before);
-  write_rows(
-      c,
-      geom_column(c, "scav.geom.state_after", ElemKind::State, ValueKind::Pod, RECT),
-      z.after);
-  write_rows(c,
-             geom_column(c, "scav.geom.sub", ElemKind::Submachine, ValueKind::Pod, RECT),
-             z.sub);
-  write_rows(c,
-             geom_column(c, "scav.geom.route", ElemKind::Transition, ValueKind::Span, 8),
-             r.route);
-  write_rows(c,
-             geom_column(c, "scav.geom.port", ElemKind::Transition, ValueKind::Span, 8),
-             r.port);
+  write_rows(c, geom_column(c, GEOM[GeomState]), z.state);
+  write_rows(c, geom_column(c, GEOM[GeomBefore]), z.before);
+  write_rows(c, geom_column(c, GEOM[GeomAfter]), z.after);
+  write_rows(c, geom_column(c, GEOM[GeomSub]), z.sub);
+  write_rows(c, geom_column(c, GEOM[GeomRoute]), r.route);
+  write_rows(c, geom_column(c, GEOM[GeomPort]), r.port);
 
-  ColumnId const pts{
-    geom_column(c, "scav.geom.point", ElemKind::Point, ValueKind::Pod, 8)
-  };
+  ColumnId const pts{ geom_column(c, GEOM[GeomPoint]) };
   column_resize(c, pts, static_cast<uint32_t>(r.points.size()));
   write_rows(c, pts, r.points);
-  ColumnId const slots{ geom_column(c,
-                                    "scav.geom.portslot",
-                                    ElemKind::Point,
-                                    ValueKind::Pod,
-                                    sizeof(scav_port_slot)) };
+  ColumnId const slots{ geom_column(c, GEOM[GeomPortSlot]) };
   column_resize(c, slots, static_cast<uint32_t>(r.slots.size()));
   write_rows(c, slots, r.slots);
 
-  ColumnId const chart{
-    geom_column(c, "scav.geom.chart", ElemKind::Chart, ValueKind::Pod, RECT)
-  };
+  ColumnId const chart{ geom_column(c, GEOM[GeomChart]) };
   std::memcpy(column_data(c, chart), &z.chart, sizeof(z.chart));
 
-  ColumnId const in{
-    geom_column(c, "scav.geom.inputs", ElemKind::Chart, ValueKind::U32, 4)
-  };
+  ColumnId const in{ geom_column(c, GEOM[GeomInputs]) };
   std::memcpy(column_data(c, in), &inputs, 4);
 
-  ColumnId const gen{
-    geom_column(c, "scav.geom.gen", ElemKind::Chart, ValueKind::U32, 4)
-  };
+  ColumnId const gen{ geom_column(c, GEOM[GeomGen]) };
   uint32_t n{ 0 };
   std::memcpy(&n, column_data(c, gen), 4);
   ++n;
@@ -139,12 +201,45 @@ bool layout_run(Chart &c,
   }
   if (!spaces_validate(c, s, diags)) { return false; }
 
+  if (geom_column_clash(c) != GeomCount) {
+    diags.push_back({ .code = DiagCode::GeometryColumnClash,
+                      .subject = { .kind = ElemKind::Chart, .ordinal = 0 },
+                      .doc = { INVALID },
+                      .src = {} });
+    return false;
+  }
+
+  Router const *const router{ router_at(o.router) };
+  if (router == nullptr) {
+    diags.push_back({ .code = DiagCode::RouterUnknown,
+                      .subject = { .kind = ElemKind::Chart, .ordinal = 0 },
+                      .doc = { INVALID },
+                      .src = {} });
+    return false;
+  }
+
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const orders{ phase1_order(c, g, s, p) };
   SizedLayout sized;
   if (!phase2_size(c, g, orders, s, p, sized, diags)) { return false; }
-  Routes const routes{ phase3_route(c, g, orders, sized, s, p) };
+  Routes const routes{ phase3_route(c, g, orders, sized, s, p, *router) };
   placed = routes.placed;
+
+  // Bounds everything laid out, not just the root submachine: a route bends into
+  // a frame's padding and a path box centres on one, so both can reach past it.
+  auto const cover = [&sized](int32_t x, int32_t y) {
+    int32_t const right{ imax(sized.chart.x + sized.chart.w, x) };
+    int32_t const bottom{ imax(sized.chart.y + sized.chart.h, y) };
+    sized.chart.x = imin(sized.chart.x, x);
+    sized.chart.y = imin(sized.chart.y, y);
+    sized.chart.w = right - sized.chart.x;
+    sized.chart.h = bottom - sized.chart.y;
+  };
+  for (scav_point const &at : routes.points) { cover(at.x, at.y); }
+  for (scav_rect const &at : routes.placed) {
+    cover(at.x, at.y);
+    cover(at.x + at.w, at.y + at.h);
+  }
 
   write_columns(c, sized, routes, inputs_digest(s, o));
   return true;

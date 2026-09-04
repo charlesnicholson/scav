@@ -222,7 +222,7 @@ TEST_CASE("drawlist corpus: canonical form is reached from any emission order") 
     }
   }
   for (auto i = static_cast<uint32_t>(c.transitions.size()); i-- > 0;) {
-    emit_route(by_hand, c, palette, i, 0);
+    emit_route(by_hand, as_spaces(spaces), c, palette, i, 0);
   }
   for (auto i = static_cast<uint32_t>(c.states.size()); i-- > 0;) {
     emit_state(by_hand, c, m, palette, i, 0);

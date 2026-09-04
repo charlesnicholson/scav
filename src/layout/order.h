@@ -13,15 +13,12 @@
 
 namespace scav {
 
-// What a node of one frame's layered graph stands for. `Boundary` is a
-// hierarchical port sitting on the frame's own enclosing border, which is
-// where a route leaves or arrives from outside; `Bend` is a dummy the chain of
-// a multi-rank edge passes through.
+// `Boundary` is a hierarchical port on the frame's enclosing border; `Bend` is a
+// dummy the chain of a multi-rank edge passes through.
 enum class OrderKind : uint32_t { State, Boundary, Bend };
 
-// `subject` is a StateId ordinal for `State` and an index into
-// `SplitGraph::segments` for the other two: a boundary node is one-to-one with
-// the segment that reaches it, since consecutive crossings always change frame.
+// `subject` is a StateId for `State`, else an index into `SplitGraph::segments`:
+// consecutive crossings change frame, so a boundary node has exactly one.
 struct OrderNode {
   OrderKind kind;
   uint32_t subject;
@@ -30,9 +27,8 @@ struct OrderNode {
   constexpr bool operator==(OrderNode const &) const = default;
 };
 
-// Always between adjacent ranks: a longer span was chained through `Bend`
-// nodes before this edge was emitted. `reversed` marks an edge whose authored
-// direction is dst to src, flipped to make the frame acyclic.
+// Always between adjacent ranks; longer spans were chained through `Bend` first.
+// `reversed` marks an edge flipped dst-to-src to make the frame acyclic.
 struct OrderEdge {
   uint32_t src, dst;  // -> nodes
   uint32_t segment;   // -> SplitGraph::segments
@@ -55,24 +51,21 @@ struct SubmachineOrders {
   std::vector<uint32_t> state_node;  // parallel to states -> nodes; INVALID if dead
   std::vector<uint32_t> seg_node;    // parallel to segments -> its boundary node
 
-  // The port that boundary node stands for, so a consumer can put the slot on
-  // the crossed state's border. INVALID when the boundary is the transition's
-  // own endpoint on an inner face rather than a crossing (11.14).
+  // The port a boundary node stands for, so a slot can go on the crossed state's
+  // border. INVALID when it is an endpoint on an inner face, not a crossing (11.14).
   std::vector<uint32_t> seg_port;
 };
 
-// Pure in `(Chart, SplitGraph, Spaces, Profile)`: ranks by longest path,
-// multi-rank edges chained through bends, then `sweep_count` median sweeps
-// keeping the ordering with the fewest crossings. Reads no extent except a
-// path box's own, so it runs before anything is sized.
+// Ranks by longest path, multi-rank edges chained through bends, then
+// `sweep_count` median sweeps keeping the fewest crossings. Reads no extent but
+// a path box's, so it runs before anything is sized.
 SubmachineOrders phase1_order(Chart const &c,
                               SplitGraph const &g,
                               scav_spaces const &s,
                               scav_profile const &p);
 
-// The crossings between two adjacent ranks, by inversion counting over the
-// edges' endpoint positions. Exposed because it is what the ordering
-// minimizes and what a test measures it against.
+// Crossings between two adjacent ranks by inversion counting. Exposed because
+// it is what the ordering minimizes and what a test measures against.
 uint64_t rank_crossings(std::vector<uint32_t> const &south_positions);
 
 }  // namespace scav
