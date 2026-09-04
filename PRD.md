@@ -4,6 +4,19 @@ Statechart authoring, layout, rendering. Normative. Terse by intent: read by age
 
 `[OPEN]` marks unsettled decisions. Everything else is settled; changing it needs new evidence, not a new opinion.
 
+**A living document, and a peer of the source, not its upstream.** The two co-evolve: a design decision lands here first, an implementation finding lands in the code first, and each review reconciles the pair. Where this document describes something the tree does not yet do, it says so with `[OWED]`; where the tree taught the design something, the section records the measurement. A claim here that the tree contradicts is a defect in one of them, and the review decides which.
+
+## 0. Status ledger
+
+Reconciled against the tree on 2026-09-04. Phase names are §17's.
+
+| Built and green | Owed, with an owner section |
+|---|---|
+| PB bootstrap, P0 language, P1 model spine, P2 loader, P3 printer and CLI, P4 space tables, P5a metrics + `DrawList` + reference builder, P5b SVG + baseline harness, P5c ABI JSON + Python binding, P6 real layout, P7a router boundary, P7b orthogonal router | P7c separator channels, congestion, nudging (§11.5) · P7d label placement and the bench (§11.9) · P8 determinism infrastructure and `selftest` (§6) · P9 search and calibration (§11.10) · P10 viewer · P11 wasm · P12 editor |
+| | **ABI: entity rows, builder, validate, columns, attrs, and path resolution from C** (§16) · **hints** (§14) · **top/bottom port sides** (§11.3) · **a bulk attribute path** (§7.3) · **`scav_read_file`/`scav_load_file` in C** (§16.2) · **`--strict-attrs`** (§8) · **ImGui backend** (§3.1) |
+
+The bottom-left cell is empty on purpose: everything built is in the top row, and everything owed names the section that owns it.
+
 ---
 
 ## 1. Purpose
@@ -90,7 +103,7 @@ Applications, each supplying (or reusing) a builder and a backend:
 
 `libscavdraw` depends on `libscavcore` but **not** on `libscavlayout`: a builder reads geometry columns, and does not care who wrote them. Enforced in CI, along with the rule that no library links anything above it.
 
-Internally each library is built from per-subsystem CMake `OBJECT` libraries with their own usage requirements, so subsystem boundaries stay declared and lintable inside one shipped artifact.
+Internally each library is one static archive built twice, shipping and `testable`, and the subsystem boundaries inside it are directories plus a CI layering check (`scav_check_layering`), not separate CMake targets. Per-subsystem `OBJECT` libraries were the plan and were not built: the directory rule and the include-path rule below already make a cross-subsystem include a build failure, and a target per subsystem would have been machinery for a requirement nothing exercises.
 
 ### 3.2 The CLI
 
@@ -105,7 +118,7 @@ It is also the end-to-end exercise of the load path over a real filesystem — p
 | `check` | structural validation (§10) as a PR gate |
 | `deps` | the document network as a `make`/`ninja` depfile. Chart A includes B; without this, editing B either leaves A's diagram stale or forces a full re-render. `gcc -M`, and the need follows from includes existing |
 | `dump` | `--json` for non-C++ consumers and `jq`; `--layout` runs layout first and includes the geometry columns; `--hash` prints the structural digest alone, which is how two transports of one network are compared without a golden |
-| `selftest` | recompute §6's hashes on this toolchain and diff against the goldens |
+| `selftest` | recompute §6's hashes on this toolchain and diff against the goldens. **[OWED, P8]**: the five verbs above exist; this one lands with the determinism infrastructure it reports on |
 
 **No `gen`.** Synthetic chart generation is test tooling (PB, P0) and lives in the harness; shipping it as a verb would imply a user need nobody has. Same reasoning retired a separate `layout` verb — dumping geometry is `dump --layout`, not a second command.
 
@@ -133,36 +146,38 @@ src/core/load/         the loader, document-name resolution, the filesystem
                        and `model` and is neither
 src/<lib>/tests/       suite-level test classes (functional_*, fuzz_*, perf_*) + shared fixtures;
                        unit tests stay adjacent to their subject as <foo>_tests.cpp
-src/layout/            space requests, phases 0-3, routers, cost, thread shim
+src/layout/            space requests, phases 0-3, routers, cost; thread shim [OWED, P8]
 src/draw/              DrawList type, text metrics, helpers, reference builder
 src/svg/               reference SVG backend
-src/imgui/             reference ImGui backend
+src/imgui/             reference ImGui backend [OWED, P10]
 apps/cli/              the scav executable
-apps/view/             ImGui viewer + its Lua host [P10]
-plugins/libhsm/        columns, attributes, builder contribution (importer + codegen: §17)
-plugins/scxml/         reference example: importer, exporter, builder contribution
-assets/font/           the bundled TTF — a layout-hash input, so versioned here
+apps/view/             ImGui viewer + its Lua host [OWED, P10]
+plugins/libhsm/        columns, attributes, builder contribution [OWED; importer + codegen: §17]
+plugins/scxml/         reference example: importer, exporter, builder contribution [OWED]
+assets/font/           the bundled TTF — a layout-hash input, so it is versioned here
 abi/scav_abi.json      committed golden ABI description (§16), extracted from the
                        C headers — the description is the ABI, the headers are the API
 bindings/python/scav/  `_abi.py` generated from that JSON; `__init__.py` the thin
                        hand-written idiomatic half. The generated half never drifts
 test_data/charts/      corpus: synthetic fixtures + hand-transcribed real charts
-test_data/golden/      drawlist/, svg/, layout/ — see below
+test_data/golden/      drawlist/, svg/, layout/, dump/ — see below
 functional_tests/      Python, drives the CLI and the C ABI via ctypes
-cmake/deps/*.cmake     one file per third-party dep envy does not package
-cmake/Dependencies.cmake   SHA pins
+cmake/*.cmake          the build's own modules: warnings, sanitizers, coverage, layering,
+                       test registration. No `deps/`: envy packages every third-party
+                       dependency the tree has, so nothing needs a SHA-pinned fetch
 tools/                 project-wide tooling only; a script one library uses lives with that library
-docs/
 envy.lua               toolchain + package manifest, and envy's root marker
 build.sh  build.bat    one command, clean checkout to green tests
-CMakePresets.json      one preset per §6 matrix cell
-.github/workflows/     the matrix, on bare runners
+CMakePresets.json      one preset per §6 matrix cell, generated by tools/gen_presets.py
+.github/workflows/     the matrix, on bare runners, plus the weekly container image
 out/                   gitignored: all build output + the envy cache (§4.2)
 ```
 
+No `docs/`: this document and the README are the documentation, and a directory for prose nobody has written would be an invitation to write it somewhere other than here.
+
 `apps/` is separate from `src/` because an application is a *consumer* — that keeps the CLI and viewer from quietly becoming privileged layers.
 
-**Unit tests are adjacent** and compile library sources with `-DSCAV_TESTING`, which is how `SCAV_INTERNAL` (§5) drops `static`. Each library builds twice, shipping and testable; both are matrix rows (§6).
+**Unit tests are adjacent** and compile library sources with `-DSCAV_TESTING`, which is how `SCAV_INTERNAL_BEGIN`/`_END` (§5) drop the anonymous namespace. Each library builds twice, shipping and testable; both are matrix rows (§6).
 
 **Public and private are a directory, not a convention.** A library's API is `src/<lib>/include/scav/scav_*.h` and that directory is its only `PUBLIC` include path; everything else under `src/<lib>/` — private headers, sources, tests — needs `-Isrc`, which is `PRIVATE` to the library and its own tests. A consumer therefore *cannot* name a private header, in the build tree or in an installed one, and `func.install_consumer` compiles every public header of every library with nothing on its include path but the install prefix. **One public header per library** — `scav/scav_core.h` is all of `libscavcore` — so a reader never has to work out which of several headers a symbol lives in. Within it, **every function carries the prefix of its section** (`parse_`, `lex_`, `source_text_`, `diag_`, `syntax_`, `string_`), which makes the section list a table of contents and a symbol self-locating. Splitting a library's API across headers is the thing this rule exists to prevent: it trades one decision the author makes once for a decision every caller makes repeatedly.
 
@@ -216,7 +231,7 @@ The bar for a discouraged construct is that a reader can still follow control fl
 
 **`scav_byte` is `unsigned char`, not `uint8_t`.** Only `char`, `unsigned char`, and `std::byte` may alias an object representation; `uint8_t` need not be one of them, so byte inspection through it is UB where it isn't. Not `std::byte` either: no arithmetic operators, and the C ABI needs `unsigned char`.
 
-**Runtime polymorphism has exactly one permitted site:** the internal router vtable (§11.5, a POD struct of function pointers, never crossing the C ABI). The P12 editor may add a second if the command-buffer mechanism wins over arena snapshots (§17). Everywhere else: static selection, separate binaries, or link-time choice.
+**Runtime polymorphism has exactly one permitted site:** the internal `Router` abstract base class (§11.5: no data members, one virtual call per frame, never crossing the C ABI, which sees routers by name). The P12 editor may add a second if the command-buffer mechanism wins over arena snapshots (§17). Everywhere else: static selection, separate binaries, or link-time choice.
 
 ### 4.1 Data structure discipline
 
@@ -271,12 +286,17 @@ Precedence, identical in every reader: `ENVY_CACHE_ROOT` (absolute only) > marke
 Testability comes from pure functions, not seams. **Mocks and interface seams are rejected** — they cost an indirection and make control flow unreadable without running it. Intrusive access instead:
 
 ```cpp
+// Brackets the *definition* of a function that would otherwise be file-local.
 #ifdef SCAV_TESTING
-#  define SCAV_INTERNAL           // external linkage; tests declare the prototype and link
+#  define SCAV_INTERNAL_BEGIN     // external linkage; tests declare the prototype and link
+#  define SCAV_INTERNAL_END
 #else
-#  define SCAV_INTERNAL static
+#  define SCAV_INTERNAL_BEGIN namespace {
+#  define SCAV_INTERNAL_END }
 #endif
 ```
+
+A bracket pair rather than a `static` keyword, because the file-local spelling in this codebase is the anonymous namespace, and a keyword that has to appear on every definition is one a reader forgets. Never in a header: the test declares the prototype itself.
 
 **Unit means unit: no disk, no parse, no prior stage.** A unit test builds its subject's inputs directly in RAM — as literal PODs, or through the in-memory chart builders where a real model is what is actually under test — and asserts on the return value. It does not read a `.scav` file, does not run the stage before the one under test in order to manufacture an input, and does not open a font. The payoff grows with pipeline depth: a defect in rank assignment should fail one test that types in a graph, not a golden hash three stages downstream that reports only that something moved. This constrains code shape as much as test shape, which is why every stage's intermediate type is declared in a header rather than being file-local (§11). Functional tests do the composing, over the corpus, end to end — the two classes answer different questions and neither substitutes for the other.
 
@@ -318,7 +338,7 @@ Odd and prime thread counts are mandatory — they expose reduction-shape bugs p
 - **Vendored stable merge sort** for any sort whose result reaches output. `std::sort` is permitted only in tests.
 - All rectangles are **half-open**: `[x0,x1) x [y0,y1)`.
 - Fixed iteration counts. Every retry loop states its cap, its integer increment schedule, its subject order, and its terminal diagnostic.
-- Diagnostics are collected per shard, concatenated in shard order, then sorted by `(code, subject_kind, subject_index)`. They are part of the golden artifact. **A diagnostic carries nothing but that triple** — file, line, column, and the offending text are derived by walking to the statement's `src` span (§7), so no layer threads positions through its call stack. Diagnostics that precede the model — normalization, lexing, parsing — have no entity to name, so they carry `subject_kind = None` plus a raw source span directly: no statement exists yet to walk to. On a model mutated since load that span is cleared, and a diagnostic degrades to the triple alone; goldens run on unmutated models, so the artifact is unaffected.
+- Diagnostics are collected per shard, concatenated in shard order, then sorted by `(code, subject_kind, subject_index)`. They are part of the golden artifact. **A diagnostic carries nothing but that triple** — file, line, column, and the offending text are derived by walking to the statement's `src` span (§7), so no layer threads positions through its call stack. Diagnostics that precede the model — normalization, lexing, parsing — have no entity to name, so they carry `subject_kind = None` plus a raw source span directly: no statement exists yet to walk to. **An ordinal of `INVALID` under a real kind names the kind and no row** — a column whose count disagrees with its entity array reports that entity's kind and `INVALID`, since `ElemKind` has no `Column` and cannot grow without an ABI break — and `None` carries `INVALID` and nothing else. So a reader never has to know, per code, what an ordinal means. On a model mutated since load that span is cleared, and a diagnostic degrades to the triple alone; goldens run on unmutated models, so the artifact is unaffected.
 - **Text is normalized at parse**: LF-only, BOM stripped, NFC. Ship `.gitattributes` with `*.scav -text`. Without this, `core.autocrlf` on Windows and NFD on macOS change the name and label *bytes* — same commit, different canonical print, and different text metrics, so different space requests and different coordinates. NFC needs a table: it is a **P0** dependency.
 - Threading via a shim over pthreads / Win32 / **null (inline)**. Not C11 `<threads.h>`. The null backend makes WASI and the matrix work.
 
@@ -410,7 +430,7 @@ struct State {
   StateKind     kind;
   Span          submachines; // -> submachine_ids
   Span          attrs;
-  StmtId        stmt;        // the statement that declared it (§9)
+  StmtId        stmt;        // the statement that declared it (§9); INVALID when code-built
   InstId        inst;        // INVALID in the root document
   uint32_t      live;        // 0 = tombstone; see §7.3
 };
@@ -457,6 +477,7 @@ struct Statement {           // one per authored construct, shared by every inst
   DocId    doc;
   Span     src;              // -> src_bytes; valid iff unmutated since load
   Span     comments;         // -> Chart.comments, grouped by owner
+  uint32_t blank_before;     // a blank line preceded it: the one whitespace recorded (§15)
 };
 
 enum class CommentPos : uint32_t { Leading, Trailing, OwnLine };
@@ -567,6 +588,8 @@ Columns are never all 1:1, so "index into the other array" is only one of five p
 
 **Spans require contiguity, so they are rebuilt rather than patched.** Appending a child to any submachine but the last shifts the shared id array. Invisible while the builder is append-only (P1) and squarely a P12 problem. The answer is `O(n)` rebuild, not a chunked or linked span: `state_ids` at the 2k-state target is ~8KB, so a full rebuild per edit is microseconds, and an indirection that survives mutation would cost every read forever to save that.
 
+Two of the three shared arrays have that rebuild today and one does not. `state_ids` and `submachine_ids` are rebuilt once per network by `model_finalize_containment`, so the loader never pays the per-insert fix-up; `attrs` is only ever grown through the builder's `insert_attr`, whose non-tail insert walks every entity's span. A document that writes an attribute after a nested block (`state On { state Idle { @x }, @doc }`) takes that walk once per such attribute, which is quadratic in the pathological case and unmeasurable on the corpus. **[OWED, with P12]**: a bulk attribute path, `model_append_attr_row` plus one rebuild, the same shape the other two arrays already have.
+
 **Derived span targets carry no liveness at all.** `scav.geom.point` and `scav.geom.portslot` are parallel to nothing that has a `live` field; layout rebuilds them wholesale, so there is no tombstone to check and no lockstep to maintain. Tombstones exist only for authored entities.
 
 ## 8. Extensibility
@@ -613,7 +636,7 @@ Type-erased byte arrays with a stride, indexed by entity ordinal. C ABI is the t
 4. Let it contribute **space requests** (§8.1) and a builder function the app may call (§8.2).
 5. Expose `ColumnDesc` so an editor can present unknown columns generically.
 
-Columns are canonically ordered by name bytes, never by registration order. Attributes reserve the `scav:` namespace for core-meaningful keys; unprefixed keys belong to the user. Values are strings on disk with typed accessors; `--strict-attrs` checks a known-key registry, since a typo is otherwise silent forever.
+Columns are canonically ordered by name bytes, never by registration order. Attributes reserve the `scav:` namespace for core-meaningful keys; unprefixed keys belong to the user. Values are strings on disk with typed accessors; `--strict-attrs` **[OWED]** checks a known-key registry, since a typo is otherwise silent forever.
 
 libhsm absorbs cleanly: `libhsm:handler`, `libhsm:legacy`, `libhsm:submachine_handler`, and a `libhsm.events` column. Core never learns statecharts have handlers.
 
@@ -766,7 +789,7 @@ wifi/On/Ready        cross-document, via include alias
 - **Unnamed pseudostates get synthetic stable names** for addressing: `$initial`, `$final`, `$history`, ordinal-suffixed for uniqueness within a submachine, and exempt from §10's duplicate-name check. These are an API and diagnostic spelling only — the grammar's `ident` admits no `$`, and the format reaches them via `*` (§15). A pseudostate an author needs to name is named, like `PreConfig kind choice`.
 - **Each `*` endpoint synthesizes its own pseudostate** — `initial` as a source, `final` as a target — owned by the submachine the statement lexically appears in, carrying that transition's `stmt`. One per statement, never merged per submachine: two authored `trans * -> X, trans * -> Y` are two initial arrows, which is what makes §10's more-than-one-`initial` check a reachable check rather than dead code. `trans * -> *` is rejected.
 - **A path's first segment resolves innermost-outward**: from the submachine the statement appears in, outward through each enclosing submachine to the chart root, taking the nearest match; every segment after the first descends strictly. That is what the worked example already assumes — inside `submachine main`, `trans * -> Idle` names main's own `Idle`, while `trans Ready -> dock/On/Seated` starts at a chart-root alias two levels up. Lexical scoping, because it is the rule every reader already knows.
-- **An include synthesizes one state, named for its alias**, in the submachine where the `include` statement appears; that state's `submachines` span gains the included document's root submachine. A submachine's children are states, so this is the only shape that type-checks — an included root is a submachine and has nowhere else to attach. It also makes `wifi/Up/Connected` an ordinary path: `wifi` *is* a state. The host state is lowering's (P1, so §10's alias-collision check can run without a loader); filling `Include.target` and attaching the included root is resolution's (P2), and until then a path descending past an alias diagnoses as unresolvable.
+- **An include synthesizes one state, named for its alias**, in the submachine where the `include` statement appears; that state's `submachines` span gains the included document's root submachine. **The included document's chart-level attributes land on that root submachine**, since the network has one `Chart` entity and it belongs to the root document; the included chart's *name* is dropped, its alias being the name, and its label survives as the submachine's label. A plugin that reads chart-level attributes therefore reads them from two places depending on provenance: the Chart entity for the root document, the alias host's root submachine for an included one. Recorded because it is a surprise, not because it is wrong: the alternative, a Chart entity per document, would give the network several roots. A submachine's children are states, so this is the only shape that type-checks — an included root is a submachine and has nowhere else to attach. It also makes `wifi/Up/Connected` an ordinary path: `wifi` *is* a state. The host state is lowering's (P1, so §10's alias-collision check can run without a loader); filling `Include.target` and attaching the included root is resolution's (P2), and until then a path descending past an alias diagnoses as unresolvable.
 - **The outward walk stops at the document it started in.** A path's first segment climbs from its own submachine to that instantiation's root and no further, so a name inside an included document may not silently bind to one in whichever host included it. Two reasons, and the second is the load-bearing one: a document is a reusable unit whose meaning must not depend on its include site, and §9 already says two instantiations of one file differ *only* by `InstId` — outward binding would make them differ structurally. Reaching the other way still works: `dock/On/Seated` is a downward descent past an alias, not an outward climb. The boundary is where a submachine and its owner state carry different `InstId`s, which is exactly the alias-host edge the loader built.
 - **Resolution links; it does not flatten** (§7). Containment crosses documents because `State.submachines` holds global ids, so layout sees one containment tree with no transformation having occurred — no cross-document LCA, no splice pass, no project handle.
 - **Provenance is two fields, not a computed column, because it is M:N** (§7.3). One statement declares N entities when its file is included N times; one instantiation contains the entities of N statements. So the entity row is the junction and carries both keys: `StmtId` says which authored construct produced it, `InstId` says which instantiation it belongs to. A renderer tinting sub-document submachines reads `inst`; a diagnostic or an editor reads `stmt`; layout ignores both.
@@ -786,7 +809,9 @@ wifi/On/Ready        cross-document, via include alias
 
 Mandatory, in core, structural only — `layout` reads ordinals and crashes on garbage:
 
-- dangling `StateId`/`SubmachineId`/`ColumnId`; `INVALID` where a value is required; tombstoned targets
+- dangling `StateId`/`SubmachineId`; `INVALID` where a value is required; tombstoned targets
+- **containment consistency**: every relation is stored on both sides (`State.parent` against `Submachine.children`, `Submachine.owner` against `State.submachines`), so the two sides must agree row for row, and the parent-owner walk from every live state must reach a document root. `Chart` is a public struct and layout's ancestor walks trust it, so a disagreement or a cycle is a finding here rather than a hang there. The builder and the loader cannot produce either; a hand-mutated chart can
+- every column covers its entity array exactly, except a self-length `Point` column
 - duplicate authored names within a submachine
 - include cycles and unresolvable include paths — the **loader's**, not `validate_chart`'s. Neither is representable in a finished chart, because `finish` refuses to produce one; checking for them afterwards would be checking for a state that cannot exist. Their diagnostics are therefore document-local, since they fire precisely when no chart does
 - unresolvable cross-document paths, checked at the **resolution phase** (§9)
@@ -794,7 +819,7 @@ Mandatory, in core, structural only — `layout` reads ordinals and crashes on g
 - an alias colliding with a sibling state name — the same duplicate-name check, since an alias is a state (§9)
 - authored names must not contain the path metacharacters `/ : $`, nor `@` (the format's attribute sigil, §15)
 - more than one `initial` per submachine. **No degree checks per pseudostate kind** — "a fork has one incoming edge" is a dialect rule, and §7.2 requires every topology to be drawable
-- authored `scav:pin` coordinates outside §11.2's domain — the only authored geometry there is. Lands with the hint columns (§14, P4); no earlier phase produces the column it checks
+- authored `scav:pin` coordinates outside §11.2's domain — the only authored geometry there is. **[OWED]** with the hint columns (§14); no earlier phase produces the column it checks
 
 Semantic lint is out of scope. Identifier-sanitization collision checks belong to the codegen backend, not core.
 
@@ -805,13 +830,17 @@ Isolated static library, imperative entry, POD in. Writes **derived** geometry c
 Scale target: **2k states, 5k transitions, depth 16.**
 
 ```
-phase0_split(Chart)                                        -> SplitGraph
-phase1_order(SplitGraph, Spaces, Profile)                  -> SubmachineOrders
-phase2_size(SplitGraph, SubmachineOrders, Spaces, Profile) -> SizedLayout
-phase3_route(SizedLayout, Router, Profile)                 -> geometry columns + Placed[]
+decompose(Chart)                                              -> SplitGraph
+phase1_order(Chart, SplitGraph, Spaces, Profile)              -> SubmachineOrders
+phase2_size(Chart, SplitGraph, SubmachineOrders, Spaces, Profile) -> SizedLayout
+phase3_route(Chart, SplitGraph, SubmachineOrders, SizedLayout, Spaces, Profile, Router)
+                                                              -> Routes: points, slots, Placed[]
+layout_run                                                    -> the geometry columns (§11.7a)
 ```
 
-The four intermediates are internal POD: `Spaces` is the three §8.1 tables; `SplitGraph` is segments, ports, and the containment tree; `SubmachineOrders` adds rank and in-rank position per node; `SizedLayout` adds box extents and port coordinates. None crosses the ABI (§16) — only geometry columns and `Placed[]` do — so they are free to change without an ABI break.
+The four intermediates are internal POD: `Spaces` is the three §8.1 tables; `SplitGraph` is segments and ports plus the containment facts they imply (each state's depth, each border's crossing count); `SubmachineOrders` adds rank and in-rank position per node; `SizedLayout` adds box extents and node coordinates. None crosses the ABI (§16) — only geometry columns and `Placed[]` do — so they are free to change without an ABI break.
+
+**Every phase also takes the `Chart`, for containment and liveness.** The model already holds the containment tree as columns, so copying it into `SplitGraph` would be a second spelling of the same rows; a phase reads `parent`, `owner`, `children`, `submachines`, `kind`, and `live` from the model and everything *derived* from its input intermediate. One helper pair in `decompose.h` does the ancestor walk for every phase and the cost scorer, bounded by the state count so a corrupted chain terminates.
 
 Every stage is POD in, POD out, so any stage is testable with hand-written inputs and no font present. Hint columns are integers (§14), so layout never touches a string or resolves a path — §3's font-blindness is structural, not a convention.
 
@@ -819,7 +848,7 @@ Every stage is POD in, POD out, so any stage is testable with hand-written input
 
 **Unit tests construct the input intermediate directly and never run the preceding phase.** A `SubmachineOrders` with three ranks is nine integers typed into a test; a `SizedLayout` with two overlapping boxes is a literal. Nothing is loaded from disk, no document is parsed, and no font is opened — there are in-RAM chart builders for the cases where a real model is genuinely what is under test (§5), and hand-written PODs for every case where it is not. The pipeline's own composition is then the *functional* class's job, over the corpus, end to end.
 
-Two consequences worth stating because they are easy to erode. A phase may not reach back for the `Chart` to recover something its input intermediate failed to carry — if phase 2 needs a boundary-crossing count, `SplitGraph` carries it. And no phase may read the clock, the environment, a global, or a thread id, so a stage's output is a function of its arguments and a test needs no fixture to pin it.
+Two consequences worth stating because they are easy to erode. A phase may read the `Chart` for what the model *stores* and never for what an earlier phase *computed* — if phase 2 needs a boundary-crossing count, `SplitGraph` carries it, and if phase 3 needs to know which end of a segment meets an inner face, `SplitSegment` says so rather than phase 3 inferring it from phase 1's node tables (§11.1; the one defect of that kind found so far was exactly such an inference). And no phase may read the clock, the environment, a global, or a thread id, so a stage's output is a function of its arguments and a test needs no fixture to pin it.
 
 Geometry columns are derived: never serialized, never authored (§7), so "layout writes the model" does not compromise round-trip stability.
 
@@ -830,6 +859,8 @@ Build the containment tree. Split every transition at each boundary it crosses, 
 A long edge's weight **accumulates structurally, not in a scalar**: one port per crossed ancestor border means a state at depth 16 with a transition to a top-level state contributes an ordering constraint in *every* one of the frames between, so it exerts real pull on its whole ancestor chain. This is the differentiator, and it is why `SplitPort` needs no weight field — the accumulation is the port count along the chain, and what a consumer needs to know about congestion at one boundary is `state_crossings`.
 
 Port order is a solver output (§11.3). Ties break on the port's stable key (§6), never on weight-insertion order.
+
+**Each segment end is one of three things, and the segment says which.** An end is a *port* on a crossed border, the endpoint state's *box* in this frame, or the endpoint state's *inner face* when that state encloses the frame and its border is not crossed (§11.14: an `internal` or `local` source, and every destination that encloses its source). `SplitSegment` carries the inner-face flag per end explicitly. Phase 1 places a boundary node for an inner-face end; phase 3 starts or ends the route at that node and emits no port slot, because no border was crossed. Phase 3 does not deduce the end kind from which node tables phase 1 happened to fill.
 
 ### 11.2 Coordinates
 
@@ -877,6 +908,8 @@ Independent per submachine: the parallel unit and the dirty unit. Layered rank a
 
 **Ports are nodes in their frame's layered graph**, one per `SplitPort` whose frame this is, ranked and ordered alongside real states. That is what turns §11.1's split into 1D port ordering per compound side without a second algorithm: a port's rank fixes which side of the compound state it lands on, and its position within that rank fixes its offset along the side. Phase 2 turns those two ordinals into coordinates; nothing else assigns a port a side.
 
+**Only the left and right sides are produced.** Ranks run in +x, so a port is a source boundary at the frame's left edge or a sink at its right, and every slot reports side 0 or 1. **[OWED]**: top and bottom sides, which need a port to be allowed onto the cross axis; the `side` field already admits 2 and 3 so the column does not change shape when they arrive. A boundary node's coordinate is the frame's edge, not the edge of whichever folded piece (§11.4) it was laid out in.
+
 **Ordering-edge weights are uniform at 1.** The known lever if blind review wants straighter long edges is dot's schedule — real-to-real 1, real-to-dummy 2, dummy-to-dummy 8 — and it is deliberately not taken up front: it is three integers and a golden rebase whenever it is wanted, and taking it now would mean tuning against no measurement.
 
 **Inter-rank edge labels widen the rank boundary they cross**, so rank separation accommodates them by construction (§11.9): the gap between two adjacent ranks is `rank_sep` plus the widest `PathBox` any edge crossing that gap carries. That makes **`Spaces` a phase-1 input and not only a phase-3 one** — a label wide enough to set the gap between two ranks has to be known before the ranks have coordinates — while placement along the finished route stays phase 3's, so a `PathBox` row is read twice for two different questions: how much room to leave, then where the room ended up.
@@ -902,13 +935,15 @@ h = max(h_before + packed_subs_h + h_after, kind_min_h) + 2*pad
 
 `pad` and the per-`StateKind` `kind_min_w`/`kind_min_h` are profile fields (§11.15), never hardcoded. **`pad` is interior only** — the ring between a box's border and its contents, which is why it appears exactly twice per axis in the formula above and nowhere else.
 
-**A bare pseudostate takes no ring**, having no contents to ring. Padding one does not merely make a 14pt dot occupy a 30pt box: a route attaches to the *box* while the glyph is drawn inside it, so every arrow into a pseudostate stops one `pad` short of the mark. The rule is `glyph == box` — a builder fills its box, layout gives no more than the mark needs. Ordinary states keep the ring even when empty, or two same-kind states differ in size for no visible reason.
+**A bare pseudostate takes no ring**, having no contents to ring. One rule, applied at sizing and again when the interior bands are placed: a non-`Normal` kind, no `h_before`, no `h_after`, and no live submachine with a nonzero extent. Padding one does not merely make a 14pt dot occupy a 30pt box: a route attaches to the *box* while the glyph is drawn inside it, so every arrow into a pseudostate stops one `pad` short of the mark. The rule is `glyph == box` — a builder fills its box, layout gives no more than the mark needs. Ordinary states keep the ring even when empty, or two same-kind states differ in size for no visible reason.
 
 **A glyph inscribed in its box holds less than half of it.** A diamond takes a centred `w` by `h` label only where `w/2a + h/2b <= 1`, so the measurement pass asks for twice the text on both axes and the builder centres the name rather than setting it at the top of the band. Every gap *between* two things is `rank_sep`, `node_sep`, or `sub_sep`. Serving all four roles from one field is the trap here: it forces the space around a submachine title, the space between two ranks, and the space between two sibling submachines to move together, and the three want different numbers in both shipped profiles. A state with no space request passes an all-zero `BoxSpace`, so `kind_min_*` is what gives a fork bar its wide-and-thin extent (§7.2) — without that term the formula would size it `2*pad` square.
 
 **Sibling submachines are packed here, not in phase 1** — packing requires the siblings already sized. **LR-rectpacking** (Domrös et al., IVAPP 2021): greedy width approximation → placement → compaction → whitespace elimination, `O(n log n)`. Take the LR variant; plain rectpacking's one-oversized-child special case was deleted by its own authors as unmaintainable and aspect-ratio-blind. The gap the packer leaves between two placed siblings, and preserves through compaction and whitespace elimination, is `sub_sep`.
 
-Order-preserving and gap-avoiding are one constraint: restricting placement to four positions relative to the predecessor (directly right; right on the current row level; next subrow; next row) is exactly what makes local whitespace elimination always possible. **Compaction and whitespace elimination are the two steps not taken**: both reclaim leftover space, both change a box's extent rather than its place, and both want blind review to judge before they ship.
+Order-preserving and gap-avoiding are one constraint: restricting placement to four positions relative to the predecessor (directly right; right on the current row level; next subrow; next row) is exactly what makes local whitespace elimination always possible. **Compaction and whitespace elimination are the two steps not taken**: both reclaim leftover space, and both want blind review to judge before they ship.
+
+Review has now judged, and the number is `vac`. Its root frame is five components — four isolated composites and one three-rank chain — with **55% occupancy**: 64.9M of component area in a 118.7M canvas. A 4173x3783 block sits empty left of `dock` and below `On` while the 1696x1594 chain occupies a row of its own beneath everything. Order-preserving placement offers a late arrival only the four positions relative to its predecessor, and "next row" was the only one that fit; nothing then goes back for the hole. That is what these two steps are for.
 
 **A rank run folds when folding scales larger.** A run grows along the layering axis without bound and nesting multiplies it by the depth, so sixteen levels of a fifteen-state chain draws as a strip a million units wide. Cutting the run and stacking the pieces fixes that, but not everywhere: at two ranks it makes the aspect *worse*, which a greedy fold at the target width demonstrates on the first chart it meets. So both shapes are laid out and the scale measure picks, the same way `trybox` picks a packer. An edge the cut crosses has its ends in two pieces and gets no say in either's coordinates, as a wrapped line's does not.
 
@@ -951,6 +986,10 @@ An anchor outside the region, an unreachable end, and a graph past the budget ar
 **Clearance is a bumper, not a penalty.** Obstacles block against their rect grown by `clear`, so "no segment comes within `clear` of a box" is a property of the graph. Pricing the flush lane instead was built first and is worse: it needs a constant tuned against the bend penalty — going round a box costs two turns, so anything at or below two bends leaves hugging cheaper — and it can only ever be probably right, so a test asserts nothing stronger than "not on these inputs."
 
 The cost is over-constraint: two boxes closer than twice the clearance seal the channel between them. That is what §11.5's re-seat is for and the whole of it — the same graph without bumpers, tried once per net. A re-seated net is reported and is not a failure: it routed at spacing the profile did not ask for. **A route's own ends are exempt by construction**: the search runs between *ring* points one clearance off the border, and the leg from ring to border is emitted rather than searched, so it is perpendicular for free.
+
+Two numbers the orthogonal router derives from the profile rather than reads: the clearance is `node_sep / 3` and the bend penalty is one `rank_sep` (P7b's measurement, §17). Neither is a profile field until P9's calibration says what the fields should be.
+
+**A router's polyline begins at `net.src` and ends at `net.dst`**, except that an end naming an obstacle box is moved onto that box's border. Phase 3 relies on it to lay a transition's nets end to end, dropping a net's first point only when it repeats the previous net's last, and the `straight` router's output is the reference for it.
 
 ### 11.6 Cost
 
@@ -1010,12 +1049,14 @@ This list *is* the layout output ABI — there is no bespoke result type (§16) 
 | `scav.geom.route` | `TransId` | `Span` into `scav.geom.point` |
 | `scav.geom.point` | point ordinal | `{int32 x, y}` |
 | `scav.geom.port` | `TransId` | `Span` into `scav.geom.portslot` |
-| `scav.geom.portslot` | port ordinal | `{int32 x, y; uint32 side, boundary_depth}` |
+| `scav.geom.portslot` | port ordinal | `{int32 x, y; uint32 side, boundary_depth}`; `side` is 0 left or 1 right today, 2 top and 3 bottom reserved (§11.3) |
 | `scav.geom.chart` | chart | bounding box of everything laid out |
 | `scav.geom.inputs` | chart | digest of the run's non-geometry inputs (§6) — `u32` |
 | `scav.geom.gen` | chart | generation counter (§13) — `u32`, **not hashed, not serialized** |
 
-`ElemKind::Point` exists so the point and port-slot arrays are real columns rather than side arrays outside the column rules; entity count is the column length. A transition splits into one port per boundary it crosses (§11.1), not two — a depth-16 edge has up to 15, and the structural hash covers all their sides, so one row per transition cannot hold them.
+`ElemKind::Point` exists so the point and port-slot arrays are real columns rather than side arrays outside the column rules; entity count is the column length.
+
+**The `scav.geom.` names are layout's.** A run finds each by name and writes through it, so a column an application registered under one of these names with another entity, kind, or element size is refused before any geometry is computed, with `GeometryColumnClash` on the chart and every column left as it was. Layout does not trust a descriptor it did not write. A transition splits into one port per boundary it crosses (§11.1), not two — a depth-16 edge has up to 15, and the structural hash covers all their sides, so one row per transition cannot hold them.
 
 `scav.geom.chart` bounds **everything laid out, not only the root submachine's extent**: a route bends into a frame's padding and a path box centres on a point of one, so either can reach past it. A consumer sizes its viewport from this rect, and one cut to the root clips whatever crossed the line.
 
@@ -1130,6 +1171,8 @@ That also blocks §11.3's global sifting and edge-weight schedule and §11.4's c
 | `local` | not crossed | as `internal` at the source; differs only at intermediate boundaries for a composite source (does not exit the composite, does exit substates) |
 
 **`internal` does not imply a self-transition.** A transition from a composite state to one of its own descendants can be `internal` — libhsm's `Online --> online_idle : internal` is exactly this. So the rule is about the *source border*, not about `src == dst`.
+
+**The mirror case: a destination that encloses its source.** `trans Idle -> On` from inside `On` exits every state between `Idle` and `On` and then has nowhere left to cross: `On`'s own border is not on the route. The arrow therefore **terminates on `On`'s inner face**, at the boundary node phase 1 placed for it, with no port slot, whatever the transition's kind. It does not end at `On`'s centre, and `On`'s border is never counted crossed. Found by review rather than by the corpus, which has no such transition: phase 3 was inferring the inner-face end from phase 1's tables and mistook the destination's boundary node for the source's, drawing the arrow from a point on `On`'s border to `On`'s centre and touching `Idle` nowhere. The fix is §11.1's explicit end kinds, pinned by unit tests on both routers. **[OWED]**: a corpus chart carrying the shape, so blind review and the goldens see it too.
 
 Consequences:
 
@@ -1273,6 +1316,8 @@ If an app embeds a script host (§8.3), the natural split is transport and decod
 
 ## 14. Layout hints
 
+**[OWED in full: nothing here is built.]** No hint column exists, no `scav:` attribute is resolved at load, and layout reads only the space tables and the model. What follows is the design the tree is expected to grow into.
+
 **Hints are columns, like geometry.** There is no separate `HintTable` input: layout reads hint columns the way it reads space and model columns. The only distinction that matters is the one §7 already draws — **authored hints persist and serialize; app-computed hints are derived and get overwritten.** That falls out of the column classes rather than needing a mechanism.
 
 Absolute pins fall out of the same rule: a pin is an **authored** column, so it round-trips. `scav:pin` alongside `scav:right-of` and the rest, all resolved from `scav:` attributes at load (§8) into integer columns so layout never sees a string or a path.
@@ -1414,6 +1459,15 @@ typedef scav_rect scav_placed;
 
 **Handles: five, each with a create and a destroy.** `scav_chart` (the model), `scav_load` (a multi-document loader, §16.2), `scav_metrics` (font tables), `scav_images` (the raster registry a backend reads), and `scav_drawlist` — which exists because `DrawList` is five `std::` containers (§12) and §16.1 requires the reference builder and SVG backend to be reachable from a binding. Its arrays are read out with the same span accessors as a column. Destroy is idempotent on `NULL`; a `scav_chart` outlives every `scav_span` handed out from it, and nothing else owns model memory. `scav_metrics_create(const scav_byte* ttf, uint32_t len, scav_metrics** out)` — the bundled font is embedded, so `NULL` selects it. `scav_metrics` is immutable after create, so it is shared across threads without locking; the other three are single-threaded-per-instance, and any number of instances may be used concurrently. There is no library-global state and no init call.
 
+**What the chart handle exposes today, and what it owes.** Built: counts, the structural hash and digest, diagnostics, the three-call column accessor, `scav_str`, layout, and everything in `libscavdraw` and `libscavsvg` a binding needs to run the *reference* pipeline end to end. **[OWED]**, and the largest gap against §16.1's "extending scav means writing an application": a binding cannot read one entity row. No state name, no transition endpoint, no attribute, no path resolution, no validation, no builder, no column registration. A Python app can therefore run scav's builder but cannot write its own, and cannot construct a model except by loading text. The shape decided for closing it:
+
+- **Entity arrays as read-only columns.** `State`, `Submachine`, `Transition`, `Attr`, and `Include` are already flat records of `uint32_t` with no padding, so they are exposed through the *existing* three-call accessor under reserved names (`scav.model.state`, `scav.model.submachine`, `scav.model.transition`, `scav.model.attr`, `scav.model.include`), stride equal to the record size, plus the two id arrays `scav.model.state_ids` and `scav.model.submachine_ids`. No new accessor, no per-field getters, and the ABI JSON already describes a column read. The chart's own `name`, `label`, `root_submachine`, and `chart_attrs` come back through one small `scav_chart_header` POD.
+- **The builder, projected.** `scav_chart_create`, `scav_build_chart`, `scav_build_state`, `scav_build_submachine`, `scav_build_trans`, `scav_build_attr`, `scav_build_include`: one C function per §7's builder function, returning the ordinal or `UINT32_MAX`.
+- **`scav_chart_validate`**, reporting through the handle's diagnostics like layout does.
+- **`scav_column_register`** and **`scav_column_data_mut`**, so a plugin written in a binding can own a column; **`scav_attr_find`** and **`scav_attr_key`**; **`scav_resolve_path`**.
+
+Each is a projection of a function that exists in C++ today; none changes the model. They land together, because a binding that can read rows but not write them is a viewer and §16.1 promises an application.
+
 **Operations on an existing chart report through the chart handle.** Validation and layout findings land in a diagnostics vector the handle owns, overwritten at each operation's entry and read back with `scav_chart_diag_count` / `scav_chart_diag` — each a flat `scav_diag` of code, subject kind and ordinal, document, and source span, rendered with `scav_diag_message` like any other code. The loader keeps its own diagnostics (§16.2's calls), because a cycle or a missing document leaves no chart to carry them.
 
 **The profile reaches layout inside `scav_layout_opts`**, as a `scav_profile` POD by value plus the `scav_router_id` — not a handle, not a file path, so its bytes hash into the golden (§6) directly. `scav_profile_named(const char*, scav_profile* out)` fills it from a shipped profile; `scav_profile_validate` is called by `scav_layout_run` regardless (§11.15).
@@ -1505,7 +1559,8 @@ scav_result scav_load_pending(const scav_load*, const scav_pending** out, uint32
 scav_result scav_load_finish(scav_load*, scav_chart** out);
 void        scav_load_destroy(scav_load*);
 
-// batteries, in core, written against the calls above and skippable in full:
+// batteries, in core, written against the calls above and skippable in full.
+// [OWED] as C: today they are the C++ read_file and load_file, and the CLI is their caller.
 scav_result scav_read_file(const char* path, const scav_byte** out, uint32_t* len);
 scav_result scav_load_file(const char* path, scav_chart** out);
 
@@ -1517,10 +1572,12 @@ struct scav_pending {                      // 16 bytes, no padding
   scav_doc_id from;                        // the document whose include statement claimed it
   uint32_t    stmt_row;                    // that statement's row within `from`
 };
-scav_result scav_load_bytes(const scav_load*, scav_span, const scav_byte** out, uint32_t* len);
+scav_result scav_load_path(const scav_load*, scav_span, const scav_byte** out, uint32_t* len);
 ```
 
 `add` the root, read `pending`, resolve each however you like, `add` each, repeat until empty, `finish`. The app owns fetch policy, caching, and parallelism; cycles and unresolvable paths are core's errors; and `name` makes diagnostics say `wifi.scav:12` rather than `<buffer>:12`. Resolving a `pending` batch concurrently is expected, which is exactly why §9 fixes `DocId` from the include graph rather than from the order documents come back.
+
+Of the block above, the loader calls and `scav_load_path` (the C spelling of `scav_load_bytes`) exist; `scav_read_file` and `scav_load_file` exist in C++ (`read_file`, `load_file`) and are **[OWED]** as C projections. The CLI is their only caller today, and it is C++.
 
 **`from` is a `DocId`, not an `InstId`.** Pending is reported before anything is instantiated — the loader's first walk is over *documents*, and no entity row exists yet to have an `InstId`. It is also the right key: a file included N times is fetched once, so an `InstId` there would mean N pendings for one document and defeat parse-once. `stmt_row` accompanies it so "cannot resolve this path" names a line rather than only a file.
 
@@ -1652,13 +1709,15 @@ Bends up and everything else down is the trade an orthogonal router is: it buys 
 
 **The separator port is the one shape P7b does not route properly.** It sits on a submachine rect and so inside that submachine's owner, and §11.5 gives the segment to the *parent* frame, where the owner is an obstacle walling off its own port. P7b stubs from the port out to the owner's border and the stub crosses whatever lies between; §11.14 excuses the owner and nothing else. The corpus pays nothing, but a synthetic 2k chart of eight depth-16 chains scores **496** violations from these stubs, pinned by a test. The fix is §11.5's LCA-owned separator channel, P7c's.
 
-**P7c — channels, congestion, and nudging.** Separator channels owned by the LCA and routed there, history-based congestion with the double-buffered map, and combinatorial nudging with integer offsets. `w_par` gets its first nonzero multiplicand here: a corridor is a channel the current graph does not have, so Tier 2's eighth term is still identically zero (§11.6).
+**P7c — channels, congestion, and nudging. [OWED]** Separator channels owned by the LCA and routed there, history-based congestion with the double-buffered map, and combinatorial nudging with integer offsets. `w_par` gets its first nonzero multiplicand here: a corridor is a channel the current graph does not have, so Tier 2's eighth term is still identically zero (§11.6).
+
+**Two routes sharing a run is what that zero costs.** Nothing separates two edges reaching the same lane, so they draw as one polyline fanning out at its ends. Over the corpus under real text: **311 collinear overlapping segment pairs of 986 segments, 483,950 grid units of shared run**, worst on `mill` at 114 pairs. The cost vector sees none of it, because `corridor` is the term for exactly this and is zero on every chart. Nudging both fixes and prices it.
 *Exit:* Tier 0 zero on the synthetic 2k shapes as well as the corpus, and whatever blind review asked for at P7b.
 
-**P7d — labels and the bench.** `PathBox` strip placement by Kakoulis & Tollis matching (§11.9), bounded rip-up on failure, the degenerate-enclosure inflation and its diagnostic, and the bench harness over the two registered routers.
+**P7d — labels and the bench. [OWED]** `PathBox` strip placement by Kakoulis & Tollis matching (§11.9), bounded rip-up on failure, the degenerate-enclosure inflation and its diagnostic, and the bench harness over the two registered routers. Until it lands, a placed box centres on its route's longest horizontal leg and is slid inside the chart rect, and the gap phase 1 widened for it (§11.3) and the leg phase 3 chose need not coincide.
 *Exit:* better than P7b on all eight Tier-2 terms.
 
-**P8 — determinism infrastructure.** Thread shim, model-derived sharding, counter-based RNG, index-ordered reduction, tiered matrix, sanitizer configs, scheduling-delay injector, the standard-library-subset include check (§6), and **`scav selftest`** — the command that makes §6's compiler-independence claim checkable by a user rather than only by our CI.
+**P8 — determinism infrastructure. [OWED]** Thread shim, model-derived sharding, counter-based RNG, index-ordered reduction, tiered matrix, sanitizer configs, scheduling-delay injector, the standard-library-subset include check (§6), and **`scav selftest`** — the command that makes §6's compiler-independence claim checkable by a user rather than only by our CI. Today `threads` is accepted and ignored, every phase runs inline, and the six-triple matrix is CI's alone.
 *Exit:* one structural hash and one coordinate hash across the blocking matrix; full grid green nightly. The `wasm32-wasi` row lands with P11 — until then the matrix is the six native triples, and §6's discipline is what makes adding the row a build change rather than a redesign.
 
 **P9 — search and calibration.** Portfolio, local search, surrogate with ranking test, weight calibration, versioned profiles.
@@ -1723,7 +1782,7 @@ Never vendor: `libnest2d` (LGPL-3.0), OGDF (GPL), Graphviz's `textspan_lut.c` (E
 
 ## 19. Open questions
 
-**Decisions owed:** §11.8 whether to depict the implicit submachine reset · §9 durable per-element GUIDs for cross-branch rename identity · §17 P9 undo/redo mechanism.
+**Decisions owed:** §11.8 whether to depict the implicit submachine reset · §9 durable per-element GUIDs for cross-branch rename identity · §17 P12 undo/redo mechanism · §16 whether the entity-row columns are the permanent ABI or a bridge to a generated per-record accessor once the binding generator can emit one.
 
 **Unverified claims, flagged not smoothed:**
 - No diagram-routing work found doing history-based negotiated congestion with rip-up-and-reroute. Unconfirmed absence, **not** novelty.

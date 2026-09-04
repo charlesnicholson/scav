@@ -57,6 +57,20 @@ def flush(a, b, box):
     return False
 
 
+def overlap(a, b, c, d):
+    """Two collinear segments' shared length, or 0. Routes sharing a run read as
+    one polyline that fans out at the ends; 11.5's nudging separates them."""
+    if a[1] == b[1] == c[1] == d[1]:
+        i, j = sorted((a[0], b[0]))
+        k, l = sorted((c[0], d[0]))
+    elif a[0] == b[0] == c[0] == d[0]:
+        i, j = sorted((a[1], b[1]))
+        k, l = sorted((c[1], d[1]))
+    else:
+        return 0
+    return max(0, min(j, l) - max(i, k))
+
+
 def geometry(chart, scav_bin):
     out = subprocess.run([str(scav_bin), "dump", "--layout", "--json", str(chart)],
                          capture_output=True, text=True, check=True).stdout
@@ -77,6 +91,7 @@ def audit(svg, every, chart, verbose):
             notes.append(f"    {kind}: {detail}")
 
     cx, cy, cw, ch = chart
+    legs = []
     for m in POLYLINE.finditer(svg):
         pts, trans = points(m.group(1)), m.group(2)
         found["route segments"] = found.get("route segments", 0) + len(pts) - 1
@@ -89,11 +104,21 @@ def audit(svg, every, chart, verbose):
             if not (cx <= pt[0] <= cx + cw and cy <= pt[1] <= cy + ch):
                 note("drawn outside the chart rect", f"t{trans} point {pt}")
         for a, b in zip(pts, pts[1:]):
+            legs.append((a, b, trans))
             if a[0] != b[0] and a[1] != b[1]:
                 note("segment not axis-aligned", f"t{trans} {a}-{b}")
             for box in every:
                 if flush(a, b, box):
                     note("segment flush along a box", f"t{trans} {a}-{b} box {box}")
+
+    for i, (a, b, t1) in enumerate(legs):
+        for c, d, t2 in legs[i + 1:]:
+            if t1 == t2:
+                continue
+            shared = overlap(a, b, c, d)
+            if shared:
+                found["overlapped units"] = found.get("overlapped units", 0) + shared
+                note("routes share a run", f"t{t1}/t{t2} {a}-{b} over {shared}")
 
     for m in ARROWHEAD.finditer(svg):
         tip, trans = points(m.group(1))[0], m.group(2)
@@ -175,6 +200,7 @@ def main():
              "arrowhead not on any border": "arrowheads",
              "divider not axis-aligned": "region dividers",
              "drawn outside the chart rect": "route segments",
+             "routes share a run": "route segments",
              "label over a state box": "transition labels"}
     for key in ("route segments", "route starts", "arrowheads", "region dividers",
                 "transition labels"):
