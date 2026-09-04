@@ -73,17 +73,26 @@ void check_lower_diags(Chart const &c, std::vector<Diagnostic> const &diags) {
   }
 }
 
-// Validation subjects must name rows that exist, whatever the model held.
+// Validation subjects must name rows that exist, whatever the model held. An
+// INVALID ordinal names the entity kind instead of a row, and `None` carries
+// nothing else.
 void check_validate_diags(Chart const &c, std::vector<Diagnostic> const &diags) {
   for (Diagnostic const &d : diags) {
+    bool const whole_kind{ d.subject.ordinal == INVALID };
     switch (d.subject.kind) {
-      case ElemKind::State: CHECK(d.subject.ordinal < c.states.size()); break;
-      case ElemKind::Submachine: CHECK(d.subject.ordinal < c.submachines.size()); break;
-      case ElemKind::Transition: CHECK(d.subject.ordinal < c.transitions.size()); break;
+      case ElemKind::State:
+        CHECK((whole_kind || (d.subject.ordinal < c.states.size())));
+        break;
+      case ElemKind::Submachine:
+        CHECK((whole_kind || (d.subject.ordinal < c.submachines.size())));
+        break;
+      case ElemKind::Transition:
+        CHECK((whole_kind || (d.subject.ordinal < c.transitions.size())));
+        break;
       case ElemKind::Chart: CHECK(d.subject.ordinal == 0); break;
       case ElemKind::Point:
       case ElemKind::PathBox: FAIL("no validator names these"); break;
-      case ElemKind::None: break;  // a column finding, or an include's
+      case ElemKind::None: CHECK(whole_kind); break;
     }
   }
 }

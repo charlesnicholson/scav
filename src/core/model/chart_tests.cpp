@@ -129,6 +129,22 @@ TEST_CASE("path: an unnamed submachine qualifies by ordinal") {
   CHECK(path(c, b) == "On:1/Idle");
 }
 
+TEST_CASE("path: an ordinal past nine spells both of its digits") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "c", {}) };
+  StateId const on{ build_state(c, root, "On", StateKind::Normal, {}) };
+  SubmachineId eleventh{ INVALID };
+  for (uint32_t i = 0; i <= 10; ++i) { eleventh = build_submachine(c, on, {}, {}); }
+  StateId const idle{ build_state(c, eleventh, "Idle", StateKind::Normal, {}) };
+  CHECK(path(c, idle) == "On:10/Idle");
+
+  StateId choice{ INVALID };
+  for (uint32_t i = 0; i <= 10; ++i) {
+    choice = build_state(c, root, {}, StateKind::Choice, {});
+  }
+  CHECK(path(c, choice) == "$choice10");
+}
+
 TEST_CASE("path: qualifiers apply per level, not per chart") {
   Chart c;
   SubmachineId const root{ build_chart(c, "c", {}) };
