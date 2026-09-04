@@ -191,3 +191,28 @@ TEST_CASE("pack: sane on a spread of shapes, and twice the same") {
     check_sane(pack_box(boxes(wh), 13));
   }
 }
+
+TEST_CASE("pack: a column of maximal rects saturates rather than wrapping") {
+  // Five thousand rects the domain admits one at a time. Only one fits a row,
+  // so the column runs to 2.6 billion: an int32 cursor would have wrapped
+  // through it four thousand rects in.
+  std::vector<scav_rect> const tall(
+      5000,
+      { .x = 0, .y = 0, .w = COORD_MAX, .h = COORD_MAX });
+
+  Packing const p{ pack_lr(tall, 0, 16, 10) };
+  REQUIRE(p.at.size() == tall.size());
+  CHECK(p.w == COORD_MAX);
+  CHECK(p.h == PACK_SATURATED);
+  CHECK(p.h > COORD_MAX);  // the only thing a caller tests
+  bool ordered{ true };
+  for (uint32_t i = 1; i < p.at.size(); ++i) {
+    ordered = ordered && (p.at[i].y >= p.at[i - 1].y) && (p.at[i].x >= 0);
+  }
+  CHECK(ordered);
+
+  // The row packer sums the other axis, and stops in the same place.
+  Packing const row{ pack_box(tall, 0) };
+  CHECK(row.w == PACK_SATURATED);
+  CHECK(row.h == COORD_MAX);
+}

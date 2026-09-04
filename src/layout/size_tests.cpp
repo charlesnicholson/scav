@@ -244,7 +244,7 @@ TEST_CASE("size: unconnected states are separate components and pack") {
   CHECK(z.state[b.v].y == 0);
 }
 
-TEST_CASE("size: a boundary node lands on its component's leading or trailing edge") {
+TEST_CASE("size: a boundary node lands on its frame's leading or trailing edge") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -253,7 +253,7 @@ TEST_CASE("size: a boundary node lands on its component's leading or trailing ed
   SizedLayout z;
   std::vector<Diagnostic> diags;
   // One state with a route leaving it: the boundary is a sink, so it belongs
-  // at the trailing edge whatever rank arithmetic put it in.
+  // at the frame's trailing edge whatever rank arithmetic put it in.
   REQUIRE(phase2_size(
       c,
       depths({ 0 }),
@@ -380,4 +380,107 @@ TEST_CASE("size: a rank past the domain is diagnosed rather than truncated") {
   CHECK(diags[0].code == DiagCode::CoordinateOverflow);
   CHECK(diags[0].subject.kind == ElemKind::Submachine);
   CHECK(diags[0].subject.ordinal == root.v);
+}
+
+TEST_CASE("size: a pseudostate takes the padding ring only where it has contents") {
+  // A junction's kind minimum is narrower than two pads, so a ring the descent
+  // insets but the box formula never reserved gives the bands a negative width.
+  scav_profile const p{ profile() };
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const lone{ build_state(c, root, "J", StateKind::Junction, {}) };
+  StateId const empty{ build_state(c, root, "K", StateKind::Junction, {}) };
+  build_submachine(c, empty, {}, {});
+  StateId const holding{ build_state(c, root, "L", StateKind::Junction, {}) };
+  SubmachineId const inner{ build_submachine(c, holding, {}, {}) };
+  build_state(c, inner, "M", StateKind::Normal, {});
+  StateId const ordinary{ build_state(c, root, "N", StateKind::Normal, {}) };
+
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ phase1_order(c, g, {}, p) };
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(phase2_size(c, g, o, {}, p, z, diags));
+
+  auto const banded = [&](StateId s) {
+    scav_rect const r{ z.state[s.v] };
+    CAPTURE(s.v);
+    for (scav_rect const &band : { z.before[s.v], z.after[s.v] }) {
+      CHECK(band.w >= 0);
+      CHECK(band.x >= r.x);
+      CHECK(band.y >= r.y);
+      CHECK((band.x + band.w) <= (r.x + r.w));
+      CHECK((band.y + band.h) <= (r.y + r.h));
+    }
+  };
+
+  uint32_t const junction{ static_cast<uint32_t>(StateKind::Junction) };
+  // Nothing inside either, declared submachine or not, so both are the mark
+  // itself and the bands span the whole of it.
+  CHECK(z.state[lone.v].w == p.kind_min_w[junction]);
+  CHECK(z.state[empty.v].w == p.kind_min_w[junction]);
+  CHECK(z.before[lone.v].w == z.state[lone.v].w);
+  CHECK(z.before[empty.v].w == z.state[empty.v].w);
+  banded(lone);
+  banded(empty);
+
+  // One with a child submachine to ring, and an ordinary box, which is a
+  // container even with nothing in it.
+  CHECK(z.state[holding.v].w == z.sub[inner.v].w + (2 * p.pad));
+  CHECK(z.before[holding.v].w == z.state[holding.v].w - (2 * p.pad));
+  CHECK(z.state[ordinary.v].w == p.kind_min_w[0] + (2 * p.pad));
+  CHECK(z.before[ordinary.v].w == z.state[ordinary.v].w - (2 * p.pad));
+  banded(holding);
+  banded(ordinary);
+}
+
+TEST_CASE("size: a boundary node sits on the frame's border, not on its piece's") {
+  // Nine ranks in a chain with one tall rank in the middle: the fold cuts three
+  // pieces and the packer puts the last beside the first, so the middle piece's
+  // own right edge is well inside the frame. A sink boundary sharing a rank
+  // with that piece is the node the difference shows on.
+  scav_profile const pf{ profile() };
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  std::vector<StateId> chain;
+  for (uint32_t i = 0; i < 9; ++i) {
+    chain.push_back(build_state(c, root, {}, StateKind::Normal, {}));
+  }
+  std::vector<OrderNode> nodes;
+  std::vector<OrderEdge> edges;
+  for (uint32_t i = 0; i < 7; ++i) { nodes.push_back(state_node(chain[i].v, i, 0)); }
+  uint32_t const boundary{ static_cast<uint32_t>(nodes.size()) };
+  nodes.push_back({ .kind = OrderKind::Boundary, .subject = 0, .rank = 7, .pos = 0 });
+  nodes.push_back(state_node(chain[7].v, 7, 1));
+  nodes.push_back(state_node(chain[8].v, 8, 0));
+  for (uint32_t i = 1; i < 7; ++i) {
+    edges.push_back({ .src = i - 1, .dst = i, .segment = i - 1, .reversed = 0 });
+  }
+  edges.push_back({ .src = 6, .dst = boundary, .segment = 6, .reversed = 0 });
+  edges.push_back({ .src = 6, .dst = boundary + 1, .segment = 7, .reversed = 0 });
+  edges.push_back({ .src = boundary + 1, .dst = boundary + 2, .segment = 8, .reversed = 0 });
+
+  std::vector<scav_box_space> boxes(c.states.size(), scav_box_space{});
+  boxes[chain[4].v] = { .min_w = 0, .h_before = 6000, .h_after = 0 };
+  scav_spaces const s{ .box_state = boxes.data(),
+                       .n_box_state = static_cast<uint32_t>(boxes.size()) };
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(phase2_size(c,
+                      depths(std::vector<uint32_t>(c.states.size(), 0)),
+                      one_frame(c, root, nodes, edges, { 0, 0, 0, 0, 0, 0, 0, 0 }),
+                      s,
+                      pf,
+                      z,
+                      diags));
+
+  // The boundary's own rank ends mid-frame, which is where taking its x from
+  // its piece would have left it.
+  scav_rect const mate{ z.state[chain[7].v] };
+  REQUIRE((mate.x + mate.w) < z.sub[root.v].w);
+  CHECK(z.node[boundary].x == z.sub[root.v].w);
+  // Only the x moves: the cross-axis assignment still owns the other.
+  CHECK(z.node[boundary].y >= 0);
+  CHECK(z.node[boundary].y <= z.sub[root.v].h);
 }

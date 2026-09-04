@@ -27,6 +27,29 @@ void overflow(std::vector<Diagnostic> &diags, ElemKind kind, uint32_t ordinal) {
                     .src = {} });
 }
 
+// `pad` rings a box's *contents*, and a bare pseudostate has none; the route
+// attaches to the box, so padding leaves the arrow short of the glyph.
+// Pseudostates only: an ordinary box is a container even when empty. The box
+// formula and the descent that insets the bands both ask here, so a band's
+// width is the box's own width less the ring the formula actually reserved,
+// and never negative.
+bool bare_pseudostate(Chart const &c,
+                      std::vector<scav_rect> const &sub,
+                      scav_box_space const &b,
+                      uint32_t i) {
+  if ((c.states[i].kind == StateKind::Normal) || (b.h_before != 0) ||
+      (b.h_after != 0)) {
+    return false;
+  }
+  Span const subs{ c.states[i].submachines };
+  for (uint32_t k = 0; k < subs.len; ++k) {
+    uint32_t const m{ c.submachine_ids[subs.off + k].v };
+    if (c.submachines[m].live == 0) { continue; }
+    if ((sub[m].w != 0) || (sub[m].h != 0)) { return false; }
+  }
+  return true;
+}
+
 }  // namespace
 
 bool phase2_size(Chart const &c,
@@ -198,7 +221,6 @@ bool phase2_size(Chart const &c,
             cg.extent.push_back(extent[i]);
             cg.layers[r - first].push_back(chunk_index[i]);
           }
-          std::vector<uint32_t> out_deg(chunk_nodes.size(), 0);
           for (uint32_t k = 0; k < espan.len; ++k) {
             OrderEdge const &e{ o.edges[espan.off + k] };
             uint32_t const from{ index[e.src - span.off] };
@@ -207,7 +229,6 @@ bool phase2_size(Chart const &c,
             if ((chunk_index[from] == INVALID) || (chunk_index[to] == INVALID)) {
               continue;
             }
-            ++out_deg[chunk_index[from]];
             cg.edges.push_back({ .from = chunk_index[from],
                                  .to = chunk_index[to],
                                  .inner = ((o.nodes[e.src].kind == OrderKind::Bend) &&
@@ -233,17 +254,12 @@ bool phase2_size(Chart const &c,
           }
           for (uint32_t i = 0; i < chunk_nodes.size(); ++i) {
             uint32_t const at{ chunk_nodes[i] };
-            OrderNode const &nd{ o.nodes[span.off + nodes[at]] };
-            Wide x{ layer_x[local_rank[nodes[at]] - first] };
-            if (nd.kind == OrderKind::Boundary) {
-              // A boundary node's rank puts it on a border, so it goes to the piece's edge:
-              // sources where a route arrives, sinks where one leaves.
-              x = (out_deg[i] != 0) ? 0 : chunk_w;
-            }
             // Local to the piece; the packing below decides where the piece
             // itself goes.
-            shape.at[at] = { .x = static_cast<int32_t>(x),
-                             .y = static_cast<int32_t>(centre[i]) };
+            shape.at[at] = {
+              .x = static_cast<int32_t>(layer_x[local_rank[nodes[at]] - first]),
+              .y = static_cast<int32_t>(centre[i])
+            };
           }
           fits = fits && (chunk_w <= COORD_MAX) && (chunk_h <= COORD_MAX);
           if (!fits) { break; }
@@ -266,14 +282,17 @@ bool phase2_size(Chart const &c,
             packed = row;
           }
         }
+        shape.w = packed.w;
+        shape.h = packed.h;
+        shape.ok = (shape.w <= COORD_MAX) && (shape.h <= COORD_MAX);
+        // A saturated position would leave int32 when the offset below added
+        // to it, and no caller reads a shape this phase goes on to diagnose.
+        if (!shape.ok) { return shape; }
         for (uint32_t i = 0; i < nodes.size(); ++i) {
           scav_rect const &at{ packed.at[chunk_of[local_rank[nodes[i]]]] };
           shape.at[i].x += at.x;
           shape.at[i].y += at.y;
         }
-        shape.w = packed.w;
-        shape.h = packed.h;
-        shape.ok = (shape.w <= COORD_MAX) && (shape.h <= COORD_MAX);
         return shape;
       };
 
@@ -327,12 +346,22 @@ bool phase2_size(Chart const &c,
     out.sub[m].w = packed.w;
     out.sub[m].h = packed.h;
 
+    // A boundary node's rank puts it on the frame's border, and the folding and
+    // the two packings above leave a piece's own edges mid-frame, so its x comes
+    // from the frame: sources where a route arrives, sinks where one leaves.
+    std::vector<uint32_t> out_deg(span.len, 0);
+    for (uint32_t k = 0; k < espan.len; ++k) {
+      ++out_deg[o.edges[espan.off + k].src - span.off];
+    }
+
     for (uint32_t k = 0; k < span.len; ++k) {
       scav_rect const &at{ packed.at[component[k]] };
-      int32_t const x{ local[k].x + at.x };
+      OrderNode const &nd{ o.nodes[span.off + k] };
+      int32_t const x{ (nd.kind == OrderKind::Boundary)
+                           ? ((out_deg[k] != 0) ? 0 : out.sub[m].w)
+                           : (local[k].x + at.x) };
       int32_t const y{ local[k].y + at.y };
       out.node[span.off + k] = { .x = x, .y = y };
-      OrderNode const &nd{ o.nodes[span.off + k] };
       if (nd.kind == OrderKind::State) {
         out.state[nd.subject].x = x;
         out.state[nd.subject].y = y - (out.state[nd.subject].h / 2);
@@ -366,13 +395,8 @@ bool phase2_size(Chart const &c,
 
     scav_box_space const b{ box_of(s.box_state, s.n_box_state, i) };
     uint32_t const kind{ static_cast<uint32_t>(c.states[i].kind) };
-
-    // `pad` rings a box's *contents* (11.4), and a bare pseudostate has none; the
-    // route attaches to the box, so padding leaves the arrow short of the glyph.
-    // Pseudostates only: an ordinary box is a container even when empty.
-    bool const bare{ (c.states[i].kind != StateKind::Normal) && (b.h_before == 0) &&
-                     (b.h_after == 0) && (packed.w == 0) && (packed.h == 0) };
-    Wide const ring{ bare ? Wide{ 0 } : (2 * static_cast<Wide>(p.pad)) };
+    Wide const ring{ bare_pseudostate(c, out.sub, b, i) ? Wide{ 0 }
+                                                        : (2 * static_cast<Wide>(p.pad)) };
     Wide const w{ imax(imax(Wide{ b.min_w }, Wide{ packed.w }),
                        Wide{ p.kind_min_w[kind] }) +
                   ring };
@@ -426,10 +450,7 @@ bool phase2_size(Chart const &c,
       r.y += at.y;
 
       scav_box_space const b{ box_of(s.box_state, s.n_box_state, i) };
-      // The same rule, so the bands land inside whatever ring was reserved.
-      bool const bare{ (c.states[i].kind != StateKind::Normal) && (b.h_before == 0) &&
-                       (b.h_after == 0) && (c.states[i].submachines.len == 0) };
-      int32_t const pad{ bare ? 0 : p.pad };
+      int32_t const pad{ bare_pseudostate(c, out.sub, b, i) ? 0 : p.pad };
       int32_t const ix{ r.x + pad };
       int32_t const iw{ r.w - (2 * pad) };
       out.before[i] = { .x = ix, .y = r.y + pad, .w = iw, .h = b.h_before };
