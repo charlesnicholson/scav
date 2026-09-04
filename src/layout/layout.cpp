@@ -4,6 +4,7 @@
 #include "layout/decompose.h"
 #include "layout/order.h"
 #include "layout/route.h"
+#include "layout/router.h"
 #include "layout/size.h"
 #include "layout/wire.h"
 #include "scav/scav_core.h"
@@ -139,12 +140,37 @@ bool layout_run(Chart &c,
   }
   if (!spaces_validate(c, s, diags)) { return false; }
 
+  Router const *const router{ router_at(o.router) };
+  if (router == nullptr) {
+    diags.push_back({ .code = DiagCode::RouterUnknown,
+                      .subject = { .kind = ElemKind::Chart, .ordinal = 0 },
+                      .doc = { INVALID },
+                      .src = {} });
+    return false;
+  }
+
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const orders{ phase1_order(c, g, s, p) };
   SizedLayout sized;
   if (!phase2_size(c, g, orders, s, p, sized, diags)) { return false; }
-  Routes const routes{ phase3_route(c, g, orders, sized, s, p) };
+  Routes const routes{ phase3_route(c, g, orders, sized, s, p, *router) };
   placed = routes.placed;
+
+  // Bounds everything laid out, not just the root submachine: a route bends into
+  // a frame's padding and a path box centres on one, so both can reach past it.
+  auto const cover = [&sized](int32_t x, int32_t y) {
+    int32_t const right{ imax(sized.chart.x + sized.chart.w, x) };
+    int32_t const bottom{ imax(sized.chart.y + sized.chart.h, y) };
+    sized.chart.x = imin(sized.chart.x, x);
+    sized.chart.y = imin(sized.chart.y, y);
+    sized.chart.w = right - sized.chart.x;
+    sized.chart.h = bottom - sized.chart.y;
+  };
+  for (scav_point const &at : routes.points) { cover(at.x, at.y); }
+  for (scav_rect const &at : routes.placed) {
+    cover(at.x, at.y);
+    cover(at.x + at.w, at.y + at.h);
+  }
 
   write_columns(c, sized, routes, inputs_digest(s, o));
   return true;

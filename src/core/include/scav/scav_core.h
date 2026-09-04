@@ -180,6 +180,14 @@ enum class DiagCode : uint32_t {
   // Layout.
   ProfileOutOfRange,
   CoordinateOverflow,
+  RouterUnknown,
+
+  // Appended past the groups above so no earlier code's value moves.
+  // Validation: a containment relation whose two sides disagree, or a cycle.
+  ContainmentInconsistent,
+  // Layout: a column already registered under a scav.geom name with another
+  // shape, which layout refuses to write through.
+  GeometryColumnClash,
 };
 
 // A producer running before entities exist fills `src`; one running after fills

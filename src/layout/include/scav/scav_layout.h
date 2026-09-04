@@ -38,27 +38,22 @@ bool profile_validate(scav_profile const &p);
 
 // Layout ====================================================================
 
-// Decomposes, sizes, places, and routes: the box formula bottom-up,
-// document-order stacking top-down, straight lines through the ports. Writes
-// the geometry columns and sizes `placed` to the path boxes. False leaves the
-// columns holding the last successful run, findings sorted like a validator's.
+// Decomposes, sizes, places, routes. Writes the geometry columns and sizes
+// `placed` to the path boxes. False leaves the last successful run's columns.
 bool layout_run(Chart &c,
                 scav_spaces const &s,
                 scav_layout_opts const &o,
                 std::vector<scav_placed> &placed,
                 std::vector<Diagnostic> &diags);
 
-// Split so a pure translation moves the coordinate hash and never the
-// structural one: structure is port sides, depths, and per-route direction
-// tokens; coordinates are every rect and point. Unlaid charts hash as empty.
+// Split so a pure translation moves the coordinate hash and not the structural
+// one: structure is sides, depths and turn tokens; coordinates are the rest.
 uint32_t layout_structural_hash(Chart const &c);
 uint32_t layout_coordinate_hash(Chart const &c);
 
-// Everything the run depended on that is not geometry: the profile, the
-// router's name and version, and the space tables -- through which the font
-// reaches a digest it cannot be an argument to. A third value rather than a
-// seed for the two above, which would move the structural hash on any space
-// change and cost the split its whole point. 0 on a chart never laid out.
+// Every non-geometry input: profile, router name and version, space tables --
+// through which the font reaches a digest it cannot be an argument to. A third
+// value, since seeding the other two would cost the split its point.
 uint32_t layout_inputs_digest(Chart const &c);
 
 // Routers ===================================================================

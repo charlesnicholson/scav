@@ -1,14 +1,15 @@
-// Routing against a hand-written `SizedLayout`: rects and node positions
-// typed straight into the test, so the polyline and the port slots are what
-// is under test rather than whatever sizing produced.
+// Routing against a hand-written `SizedLayout`, so the polyline and the port
+// slots are what is under test rather than whatever sizing produced.
 
 #include "layout/route.h"
 
 #include "layout/decompose.h"
 #include "layout/order.h"
+#include "layout/router.h"
 #include "layout/size.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
+#include "scav_int.h"
 
 #include "doctest.h"
 
@@ -33,6 +34,10 @@ scav_profile profile() {
   REQUIRE(profile_named("readable", p));
   return p;
 }
+
+// These cases pin the shape the ranks alone produce, so they name the router
+// that does nothing else rather than taking whatever index 0 is today.
+StraightRouter const STRAIGHT;
 
 SubmachineOrders empty_orders(Chart const &c, SplitGraph const &g) {
   SubmachineOrders o;
@@ -72,7 +77,7 @@ TEST_CASE("route: a sibling transition is a straight line between two centres") 
   z.state[b.v] = { .x = 300, .y = 60, .w = 100, .h = 40 };
   z.sub[root.v] = { .x = 0, .y = 0, .w = 400, .h = 100 };
 
-  Routes const r{ phase3_route(c, g, o, z, {}, profile()) };
+  Routes const r{ phase3_route(c, g, o, z, {}, profile(), STRAIGHT) };
   REQUIRE(r.route[0].len == 2);
   CHECK((r.points[0] == scav_point{ .x = 50, .y = 20 }));
   CHECK((r.points[1] == scav_point{ .x = 350, .y = 80 }));
@@ -96,7 +101,7 @@ TEST_CASE("route: a bend the layering left is a point on the way") {
   z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 40 };
   z.node[0] = { .x = 250, .y = 200 };
 
-  Routes const r{ phase3_route(c, g, o, z, {}, profile()) };
+  Routes const r{ phase3_route(c, g, o, z, {}, profile(), STRAIGHT) };
   REQUIRE(r.route[0].len == 3);
   CHECK((r.points[1] == scav_point{ .x = 250, .y = 200 }));
 }
@@ -119,7 +124,7 @@ TEST_CASE("route: a reversed chain is walked the way it was authored") {
   z.node[0] = { .x = 150, .y = 10 };  // rank 1
   z.node[1] = { .x = 300, .y = 10 };  // rank 2
 
-  Routes const r{ phase3_route(c, g, o, z, {}, profile()) };
+  Routes const r{ phase3_route(c, g, o, z, {}, profile(), STRAIGHT) };
   REQUIRE(r.route[0].len == 4);
   // Ranks climb the acyclic way, so a reversed edge walks them back down.
   CHECK(r.points[1].x == 300);
@@ -151,7 +156,7 @@ TEST_CASE("route: a crossing puts its slot on the crossed border") {
   z.sub[inner.v] = { .x = 10, .y = 10, .w = 180, .h = 180 };
   z.node[0] = { .x = 190, .y = 80 };  // the frame's trailing edge
 
-  Routes const r{ phase3_route(c, g, o, z, {}, profile()) };
+  Routes const r{ phase3_route(c, g, o, z, {}, profile(), STRAIGHT) };
   REQUIRE(r.port[0].len == 1);
   scav_port_slot const slot{ r.slots[0] };
   // The node's height, but the composite's own border, not the frame's.
@@ -164,11 +169,8 @@ TEST_CASE("route: a crossing puts its slot on the crossed border") {
 }
 
 TEST_CASE("route: the slot side follows the route's direction, not the packing") {
-  // An entering route: the boundary node is a source in the inner frame, so
-  // the slot belongs on the composite's leading border. Sizing places such a
-  // node at its *component's* leading edge and then the packer offsets the
-  // whole component, so the node's absolute x says nothing about which border
-  // it is on -- a frame with more than one component puts it anywhere.
+  // An entering route: the boundary node is a source in the inner frame, so the
+  // slot belongs on the composite's leading border.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
@@ -197,7 +199,7 @@ TEST_CASE("route: the slot side follows the route's direction, not the packing")
   // second component produces.
   z.node[0] = { .x = 560, .y = 80 };
 
-  Routes const r{ phase3_route(c, g, o, z, {}, profile()) };
+  Routes const r{ phase3_route(c, g, o, z, {}, profile(), STRAIGHT) };
   REQUIRE(r.port[0].len == 1);
   CHECK(r.slots[0].side == 0);
   CHECK(r.slots[0].x == z.state[comp.v].x);
@@ -224,7 +226,7 @@ TEST_CASE("route: an internal transition starts on the source's inner face") {
   z.sub[inner.v] = { .x = 10, .y = 10, .w = 180, .h = 180 };
   z.node[0] = { .x = 10, .y = 90 };
 
-  Routes const r{ phase3_route(c, g, o, z, {}, profile()) };
+  Routes const r{ phase3_route(c, g, o, z, {}, profile(), STRAIGHT) };
   REQUIRE(r.route[0].len == 2);
   CHECK((r.points[0] == scav_point{ .x = 10, .y = 90 }));  // not the composite's centre
   CHECK(r.port[0].len == 0);
@@ -242,7 +244,7 @@ TEST_CASE("route: an external self-loop leaves and returns, with no slot") {
   z.state[a.v] = { .x = 40, .y = 0, .w = 100, .h = 40 };
   scav_profile const p{ profile() };
 
-  Routes const r{ phase3_route(c, g, o, z, {}, p) };
+  Routes const r{ phase3_route(c, g, o, z, {}, p, STRAIGHT) };
   REQUIRE(r.route[0].len == 2);
   CHECK((r.points[0] == scav_point{ .x = 140, .y = 20 }));
   CHECK((r.points[1] == scav_point{ .x = 140 + (2 * p.pad), .y = 20 }));
@@ -258,7 +260,7 @@ TEST_CASE("route: an internal self-transition has no route at all") {
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const o{ empty_orders(c, g) };
   SizedLayout const z{ blank(c, o) };
-  Routes const r{ phase3_route(c, g, o, z, {}, profile()) };
+  Routes const r{ phase3_route(c, g, o, z, {}, profile(), STRAIGHT) };
   CHECK(r.route[0].len == 0);
   CHECK(r.points.empty());
 }
@@ -278,7 +280,7 @@ TEST_CASE("route: clears trim each end toward the other, capped at half") {
   std::vector<scav_path_clear> const clears{ { .src = 30, .dst = 700 } };
   scav_spaces const s{ .path_clear = clears.data(), .n_path_clear = 1 };
 
-  Routes const r{ phase3_route(c, g, o, z, s, profile()) };
+  Routes const r{ phase3_route(c, g, o, z, s, profile(), STRAIGHT) };
   REQUIRE(r.route[0].len == 2);
   CHECK(r.points[0].x == 30);
   // The far end is capped at half of what is left after the near end moved,
@@ -301,8 +303,22 @@ TEST_CASE("route: a path box centres on its route's middle point") {
   std::vector<scav_path_box> const boxes{ { .subject = 0, .w = 20, .h = 8, .order = 0 } };
   scav_spaces const s{ .path_box = boxes.data(), .n_path_box = 1 };
 
-  Routes const r{ phase3_route(c, g, o, z, s, profile()) };
+  Routes const r{ phase3_route(c, g, o, z, s, profile(), STRAIGHT) };
   REQUIRE(r.placed.size() == 1);
-  scav_point const mid{ r.points[r.route[0].off + (r.route[0].len / 2)] };
+  // The middle of the longest leg, which is the one crossing the boundary
+  // phase 1 widened for this box -- not the middle point of the polyline.
+  scav_span const at{ r.route[0] };
+  Wide longest{ -1 };
+  scav_point mid{};
+  for (uint32_t k = 0; (k + 1) < at.len; ++k) {
+    scav_point const p0{ r.points[at.off + k] };
+    scav_point const p1{ r.points[at.off + k + 1] };
+    Wide const span{ imax(Wide{ p0.x } - p1.x, Wide{ p1.x } - p0.x) +
+                     imax(Wide{ p0.y } - p1.y, Wide{ p1.y } - p0.y) };
+    if (span > longest) {
+      longest = span;
+      mid = { .x = p0.x + ((p1.x - p0.x) / 2), .y = p0.y + ((p1.y - p0.y) / 2) };
+    }
+  }
   CHECK((r.placed[0] == scav_rect{ .x = mid.x - 10, .y = mid.y - 4, .w = 20, .h = 8 }));
 }

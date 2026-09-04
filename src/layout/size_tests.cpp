@@ -1,6 +1,5 @@
-// Sizing against hand-written intermediates: a `SplitGraph` and a
-// `SubmachineOrders` typed straight into the test, so what is under test is
-// the box formula and the two axes, not whatever ordering decided.
+// Sizing against hand-written intermediates, so what is under test is the box
+// formula rather than whatever ordering produced.
 
 #include "layout/size.h"
 
@@ -8,11 +7,13 @@
 #include "layout/order.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
+#include "scav_int.h"
 #include "scav/scav_layout_c.h"
 
 #include "doctest.h"
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace {
@@ -287,6 +288,64 @@ TEST_CASE("size: a boundary node lands on its component's leading or trailing ed
       diags));
   CHECK(in.node[0].x == 0);
   CHECK(in.state[a.v].x > 0);
+}
+
+TEST_CASE("size: a folded rank run packs its pieces rather than stacking them") {
+  // Stacking gives every piece the width of the widest. One huge rank among small
+  // ones is where that shows: each small piece gets a row as wide as the huge one.
+  scav_profile const p{ profile() };
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  std::vector<StateId> chain;
+  for (uint32_t i = 0; i < 9; ++i) {
+    chain.push_back(build_state(c, root, {}, StateKind::Normal, {}));
+  }
+  for (uint32_t i = 1; i < chain.size(); ++i) {
+    build_trans(c, chain[i - 1], chain[i], TransKind::External, {});
+  }
+  // One rank far larger than the rest, which is the shape a composite state
+  // makes of its siblings.
+  std::vector<scav_box_space> boxes(c.states.size(), scav_box_space{});
+  boxes[chain[4].v] = { .min_w = 400, .h_before = 6000, .h_after = 0 };
+  scav_spaces const sp{ .box_state = boxes.data(),
+                        .n_box_state = static_cast<uint32_t>(boxes.size()) };
+
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ phase1_order(c, g, sp, p) };
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(phase2_size(c, g, o, sp, p, z, diags));
+
+  scav_rect const frame{ z.sub[root.v] };
+  REQUIRE(frame.w > 0);
+  REQUIRE(frame.h > 0);
+  MESSAGE("folded frame: ", frame.w, " x ", frame.h);
+
+  // Stacking is monotonic, so a later rank can never sit higher than an earlier
+  // one. Packing is not, and here it puts the last short piece beside the first.
+  Span const all{ o.sub_nodes[root.v] };
+  int32_t highest_so_far{ 0 };
+  uint32_t previous_rank{ 0 };
+  bool beside{ false };
+  for (uint32_t k = 0; k < all.len; ++k) {
+    uint32_t const rank{ o.nodes[all.off + k].rank };
+    int32_t const y{ z.node[all.off + k].y };
+    if ((rank > previous_rank) && (y < highest_so_far)) { beside = true; }
+    highest_so_far = imax(highest_so_far, y);
+    previous_rank = imax(previous_rank, rank);
+  }
+  CHECK(beside);
+
+  // And every node still lands inside the frame it was sized into.
+  Span const nodes{ o.sub_nodes[root.v] };
+  for (uint32_t k = 0; k < nodes.len; ++k) {
+    scav_point const at{ z.node[nodes.off + k] };
+    CAPTURE(k);
+    CHECK(at.x >= frame.x);
+    CHECK(at.y >= frame.y);
+    CHECK(at.x <= (frame.x + frame.w));
+    CHECK(at.y <= (frame.y + frame.h));
+  }
 }
 
 TEST_CASE("size: a rank past the domain is diagnosed rather than truncated") {

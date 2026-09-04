@@ -158,6 +158,9 @@ scav_add_functional_test(presets
 scav_add_functional_test(provisioning
   DEPENDS "${PROJECT_SOURCE_DIR}/envy.lua"
 )
+scav_add_functional_test(build_tool
+  DEPENDS "${PROJECT_SOURCE_DIR}/tools/build.py"
+)
 scav_add_functional_test(ci_anchor
   DEPENDS "${PROJECT_SOURCE_DIR}/.github/workflows/ci.yml"
 )

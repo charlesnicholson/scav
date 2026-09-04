@@ -1,7 +1,6 @@
-// One pass per depth level, deepest first, because a submachine needs its
-// children sized and a state needs its submachines. Within a frame the ranks
-// give the layering axis and `cross_coordinates` gives the other; a state's
-// own box then comes from the box formula over its packed submachines.
+// One pass per depth level, deepest first: a submachine needs its children sized
+// and a state needs its submachines. Ranks give one axis, `cross_coordinates`
+// the other; the box formula then sizes the state.
 
 #include "layout/size.h"
 
@@ -63,11 +62,8 @@ bool phase2_size(Chart const &c,
 
   bool ok{ true };
 
-  // A frame's graph need not be connected, and a submachine of unconnected
-  // states is the common case: every one of them ranks 0, so laying the frame
-  // out as a single graph would stack them all in one column. Each component
-  // is laid out on its own and the components are then packed, which is the
-  // same treatment sibling submachines get one level up.
+  // A frame's graph need not be connected, and unconnected states all rank 0, so
+  // one graph would stack them in a column. Components are laid out and packed.
   auto const size_sub = [&](uint32_t m) {
     Span const span{ o.sub_nodes[m] };
     uint32_t const ranks{ o.sub_ranks[m] };
@@ -123,9 +119,8 @@ bool phase2_size(Chart const &c,
     for (uint32_t id = 0; id < members.size(); ++id) {
       std::vector<uint32_t> const &nodes{ members[id] };
 
-      // The component's own ranks, renumbered to run from zero, with the
-      // frame's rank kept alongside so a label's gap still lands where it was
-      // charged.
+      // Ranks renumbered from zero, with the frame's rank kept alongside so a label's
+      // gap still lands where it was charged.
       std::vector<uint32_t> global_rank;
       std::vector<uint32_t> local_rank(span.len, INVALID);
       for (uint32_t const k : nodes) {
@@ -155,11 +150,9 @@ bool phase2_size(Chart const &c,
                                             : Wide{ 0 };
       };
 
-      // A rank run grows along one axis without bound and nesting multiplies
-      // that by the depth, so a deep chart of chains draws as a strip. Cutting
-      // the run and stacking the pieces is the answer, but only where it
-      // helps: at two ranks it makes the aspect worse, so both shapes are laid
-      // out and the scale measure picks, exactly as `trybox` picks a packer.
+      // A rank run grows unbounded along one axis and nesting multiplies it by depth.
+      // Cutting helps only sometimes -- at two ranks it worsens the aspect -- so both
+      // shapes are laid out and the scale measure picks, as `trybox` picks a packer.
       struct Shape {
         std::vector<scav_point> at;
         Wide w{ 0 }, h{ 0 };
@@ -184,14 +177,15 @@ bool phase2_size(Chart const &c,
           chunk_of[r] = static_cast<uint32_t>(chunks.size()) - 1;
         }
 
+        std::vector<scav_rect> pieces(chunks.size(), scav_rect{});
+        bool fits{ true };
         for (uint32_t chunk = 0; chunk < chunks.size(); ++chunk) {
           uint32_t const first{ chunks[chunk] };
           uint32_t const last{ ((chunk + 1) < chunks.size()) ? chunks[chunk + 1]
                                                              : layers };
 
-          // Only this chunk's nodes and the edges wholly inside it: an edge
-          // the cut crosses has its ends in two pieces and gets no say in
-          // either's coordinates, as a wrapped line's does not.
+          // Only this chunk's nodes and the edges wholly inside it: an edge the cut
+          // crosses has its ends in two pieces, as a wrapped line's does.
           CoordGraph cg;
           cg.layers.assign(last - first, {});
           std::vector<uint32_t> chunk_index(nodes.size(), INVALID);
@@ -232,9 +226,8 @@ bool phase2_size(Chart const &c,
           Wide const chunk_w{ layer_x[last - first - 1] + layer_w[last - 1] };
           Wide chunk_h{ 0 };
           for (uint32_t i = 0; i < chunk_nodes.size(); ++i) {
-            // A node's own trailing edge, not its centre plus half its extent:
-            // an odd extent halves down, so a box built from the halved value
-            // would not contain its own rects.
+            // A node's trailing edge, not its centre plus half its extent: an odd extent
+            // halves down, so the box would not contain its own rects.
             chunk_h =
                 imax(chunk_h, (Wide{ centre[i] } - (cg.extent[i] / 2)) + cg.extent[i]);
           }
@@ -243,17 +236,43 @@ bool phase2_size(Chart const &c,
             OrderNode const &nd{ o.nodes[span.off + nodes[at]] };
             Wide x{ layer_x[local_rank[nodes[at]] - first] };
             if (nd.kind == OrderKind::Boundary) {
-              // A boundary node's rank is what puts it on a border, so it goes
-              // to the piece's edge rather than to its layer's leading one:
+              // A boundary node's rank puts it on a border, so it goes to the piece's edge:
               // sources where a route arrives, sinks where one leaves.
               x = (out_deg[i] != 0) ? 0 : chunk_w;
             }
+            // Local to the piece; the packing below decides where the piece
+            // itself goes.
             shape.at[at] = { .x = static_cast<int32_t>(x),
-                             .y = static_cast<int32_t>(shape.h + centre[i]) };
+                             .y = static_cast<int32_t>(centre[i]) };
           }
-          shape.w = imax(shape.w, chunk_w);
-          shape.h += chunk_h + (((chunk + 1) < chunks.size()) ? p.node_sep : 0);
+          fits = fits && (chunk_w <= COORD_MAX) && (chunk_h <= COORD_MAX);
+          if (!fits) { break; }
+          pieces[chunk] = { .x = 0,
+                            .y = 0,
+                            .w = static_cast<int32_t>(chunk_w),
+                            .h = static_cast<int32_t>(chunk_h) };
         }
+        if (!fits) {
+          shape.ok = false;
+          return shape;
+        }
+
+        // Packed, not stacked: stacking left-aligned gives every piece the width of the
+        // widest. They are rectangles sharing an area, which is `pack_lr`'s job (11.4).
+        Packing packed{ pack_lr(pieces, p.node_sep, p.dar_num, p.dar_den) };
+        if (p.trybox != 0) {
+          Packing const row{ pack_box(pieces, p.node_sep) };
+          if (pack_better(row, packed, p.dar_num, p.dar_den, p.sm_tiebreak != 0)) {
+            packed = row;
+          }
+        }
+        for (uint32_t i = 0; i < nodes.size(); ++i) {
+          scav_rect const &at{ packed.at[chunk_of[local_rank[nodes[i]]]] };
+          shape.at[i].x += at.x;
+          shape.at[i].y += at.y;
+        }
+        shape.w = packed.w;
+        shape.h = packed.h;
         shape.ok = (shape.w <= COORD_MAX) && (shape.h <= COORD_MAX);
         return shape;
       };
@@ -347,12 +366,19 @@ bool phase2_size(Chart const &c,
 
     scav_box_space const b{ box_of(s.box_state, s.n_box_state, i) };
     uint32_t const kind{ static_cast<uint32_t>(c.states[i].kind) };
+
+    // `pad` rings a box's *contents* (11.4), and a bare pseudostate has none; the
+    // route attaches to the box, so padding leaves the arrow short of the glyph.
+    // Pseudostates only: an ordinary box is a container even when empty.
+    bool const bare{ (c.states[i].kind != StateKind::Normal) && (b.h_before == 0) &&
+                     (b.h_after == 0) && (packed.w == 0) && (packed.h == 0) };
+    Wide const ring{ bare ? Wide{ 0 } : (2 * static_cast<Wide>(p.pad)) };
     Wide const w{ imax(imax(Wide{ b.min_w }, Wide{ packed.w }),
                        Wide{ p.kind_min_w[kind] }) +
-                  (2 * static_cast<Wide>(p.pad)) };
+                  ring };
     Wide const h{ imax(Wide{ b.h_before } + packed.h + b.h_after,
                        Wide{ p.kind_min_h[kind] }) +
-                  (2 * static_cast<Wide>(p.pad)) };
+                  ring };
     if ((w > COORD_MAX) || (h > COORD_MAX)) {
       overflow(diags, ElemKind::State, i);
       ok = false;
@@ -372,9 +398,8 @@ bool phase2_size(Chart const &c,
   }
   if (!ok) { return false; }
 
-  // One descent from the root, adding each frame's origin to the positions
-  // sizing left frame-local. Everything stays inside the sized extents, so
-  // int32 cannot leave the domain here.
+  // One descent from the root, adding each frame's origin. Everything stays inside
+  // the sized extents, so int32 cannot leave the domain here.
   struct Frame {
     uint32_t sub;
     int32_t x, y;
@@ -401,10 +426,14 @@ bool phase2_size(Chart const &c,
       r.y += at.y;
 
       scav_box_space const b{ box_of(s.box_state, s.n_box_state, i) };
-      int32_t const ix{ r.x + p.pad };
-      int32_t const iw{ r.w - (2 * p.pad) };
-      out.before[i] = { .x = ix, .y = r.y + p.pad, .w = iw, .h = b.h_before };
-      int32_t const sy{ r.y + p.pad + b.h_before };
+      // The same rule, so the bands land inside whatever ring was reserved.
+      bool const bare{ (c.states[i].kind != StateKind::Normal) && (b.h_before == 0) &&
+                       (b.h_after == 0) && (c.states[i].submachines.len == 0) };
+      int32_t const pad{ bare ? 0 : p.pad };
+      int32_t const ix{ r.x + pad };
+      int32_t const iw{ r.w - (2 * pad) };
+      out.before[i] = { .x = ix, .y = r.y + pad, .w = iw, .h = b.h_before };
+      int32_t const sy{ r.y + pad + b.h_before };
       int32_t packed_h{ 0 };
       Span const subs{ c.states[i].submachines };
       for (uint32_t u = 0; u < subs.len; ++u) {

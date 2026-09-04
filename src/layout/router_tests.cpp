@@ -20,17 +20,23 @@ scav_byte const *bytes_of(std::string_view text) {
 
 }  // namespace
 
-TEST_CASE("router: the registry holds straight and resolves it by name") {
-  REQUIRE(router_count() == 1);
+TEST_CASE("router: the registry resolves both routers by name") {
+  REQUIRE(router_count() == 2);
 
   scav_byte const *name{ nullptr };
   uint32_t len{ 0 };
+  // Index 0 is what a caller with no opinion gets, so the registry order is
+  // asserted rather than left to whoever edits the table next.
   REQUIRE(router_name(0, name, len));
+  CHECK(std::string_view{ reinterpret_cast<char const *>(name), len } == "orthogonal");
+  REQUIRE(router_name(1, name, len));
   CHECK(std::string_view{ reinterpret_cast<char const *>(name), len } == "straight");
-  CHECK(!router_name(1, name, len));
+  CHECK(!router_name(2, name, len));
 
   scav_router_id id{ 99 };
   REQUIRE(router_by_name(bytes_of("straight"), 8, id));
+  CHECK(id == 1);
+  REQUIRE(router_by_name(bytes_of("orthogonal"), 10, id));
   CHECK(id == 0);
   CHECK(!router_by_name(bytes_of("straigh"), 7, id));
   CHECK(!router_by_name(bytes_of("straightx"), 9, id));

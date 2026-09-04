@@ -1,11 +1,11 @@
-// A transition's polyline is its segments' chains laid end to end: the
-// bends the layering put between two ranks, and a port slot wherever the
-// route leaves one box's border for the next.
+// A transition's polyline is its segments' nets end to end: one net per segment,
+// routed in that segment's frame, with a port slot at every border it crosses.
 
 #include "layout/route.h"
 
 #include "layout/decompose.h"
 #include "layout/order.h"
+#include "layout/router.h"
 #include "layout/size.h"
 #include "scav/scav_core.h"
 #include "scav_int.h"
@@ -35,6 +35,29 @@ scav_point trim(scav_point a, scav_point b, int32_t amount) {
            .y = a.y + static_cast<int32_t>(floor_div(dy * k, len)) };
 }
 
+bool overlaps(scav_rect const &a, scav_rect const &b) {
+  return (a.x < (b.x + b.w)) && (b.x < (a.x + a.w)) && (a.y < (b.y + b.h)) &&
+         (b.y < (a.y + a.h));
+}
+
+// `maybe` encloses `of`, so it cannot be an obstacle to anything routed inside
+// it. INVALID `of` is a document root, which nothing encloses.
+bool encloses(Chart const &c, StateId maybe, StateId of) {
+  for (StateId at{ of }; at.v != INVALID;
+       at = c.submachines[c.states[at.v].parent.v].owner) {
+    if (at == maybe) { return true; }
+  }
+  return false;
+}
+
+// One segment's routing problem, before it is grouped into its frame's batch.
+struct Planned {
+  uint32_t frame;
+  scav_point src, dst;
+  uint32_t src_state, dst_state;  // -> states, INVALID unless the end is a box centre
+  uint32_t seg;                   // -> SplitGraph::segments, for its bend chain
+};
+
 }  // namespace
 
 Routes phase3_route(Chart const &c,
@@ -42,7 +65,8 @@ Routes phase3_route(Chart const &c,
                     SubmachineOrders const &o,
                     SizedLayout const &z,
                     scav_spaces const &s,
-                    scav_profile const &p) {
+                    scav_profile const &p,
+                    Router const &router) {
   Routes out;
   uint32_t const n{ static_cast<uint32_t>(c.transitions.size()) };
   out.route.assign(n, {});
@@ -78,10 +102,8 @@ Routes phase3_route(Chart const &c,
     }
   }
 
-  // Whether a route arrives at a boundary or leaves through one, which is the
-  // same question sizing asked when it put the node at its component's leading
-  // or trailing edge. Read from the node's own direction rather than from its
-  // absolute x, which carries whatever offset the packer gave its component.
+  // Whether a route arrives at a boundary or leaves through one. Read from the
+  // node's direction, not its absolute x, which carries the packer's offset.
   std::vector<uint8_t> source_node(o.nodes.size(), 0);
   for (OrderEdge const &e : o.edges) { source_node[e.src] = 1; }
 
@@ -106,63 +128,212 @@ Routes phase3_route(Chart const &c,
                            .boundary_depth = depth };
   };
 
+  // Plan every net before routing any, so the port slots come out in
+  // transition order however the frames are then visited.
+  std::vector<Planned> planned;
+  std::vector<Span> trans_nets(n, Span{});
   for (uint32_t t = 0; t < n; ++t) {
     Span const segs{ g.trans_segments[t] };
     if (segs.len == 0) { continue; }
     Transition const &tr{ c.transitions[t] };
-    uint32_t const first_point{ static_cast<uint32_t>(out.points.size()) };
+    uint32_t const first_net{ static_cast<uint32_t>(planned.size()) };
     uint32_t const first_slot{ static_cast<uint32_t>(out.slots.size()) };
 
     if (tr.src == tr.dst) {
       // The external self-loop: out the trailing side and back.
       scav_rect const r{ z.state[tr.src.v] };
       scav_point const lip{ .x = r.x + r.w, .y = r.y + floor_div(r.h, 2) };
-      out.points.push_back(lip);
-      out.points.push_back({ .x = lip.x + (2 * p.pad), .y = lip.y });
+      planned.push_back({ .frame = g.segments[segs.off].frame.v,
+                          .src = lip,
+                          .dst = { .x = lip.x + (2 * p.pad), .y = lip.y },
+                          .src_state = INVALID,
+                          .dst_state = INVALID,
+                          .seg = segs.off });
     } else {
       // A source whose own border is not crossed starts on that border's
       // inner face, which is where its boundary node was placed (11.14).
       uint32_t const head{ o.seg_node[segs.off] };
-      if ((g.segments[segs.off].src_port == INVALID) && (head != INVALID) &&
-          (o.seg_port[segs.off] == INVALID)) {
-        out.points.push_back(z.node[head]);
-      } else {
-        out.points.push_back(centre(z.state[tr.src.v]));
-      }
+      bool const inner{ (g.segments[segs.off].src_port == INVALID) &&
+                        (head != INVALID) && (o.seg_port[segs.off] == INVALID) };
+      scav_point at{ inner ? z.node[head] : centre(z.state[tr.src.v]) };
+      uint32_t at_state{ inner ? INVALID : tr.src.v };
       for (uint32_t k = 0; k < segs.len; ++k) {
         uint32_t const seg{ segs.off + k };
-        for (uint32_t const bend : seg_bends[seg]) { out.points.push_back(z.node[bend]); }
         uint32_t const port{ g.segments[seg].dst_port };
-        if (port == INVALID) { continue; }
-        scav_port_slot const slot{ slot_of(port) };
-        out.slots.push_back(slot);
-        out.points.push_back({ .x = slot.x, .y = slot.y });
+        scav_point end{};
+        uint32_t end_state{ INVALID };
+        if (port != INVALID) {
+          scav_port_slot const slot{ slot_of(port) };
+          out.slots.push_back(slot);
+          end = { .x = slot.x, .y = slot.y };
+        } else {
+          end = centre(z.state[tr.dst.v]);
+          end_state = tr.dst.v;
+        }
+        planned.push_back({ .frame = g.segments[seg].frame.v,
+                            .src = at,
+                            .dst = end,
+                            .src_state = at_state,
+                            .dst_state = end_state,
+                            .seg = seg });
+        at = end;
+        at_state = end_state;
       }
-      out.points.push_back(centre(z.state[tr.dst.v]));
     }
-
-    if ((s.path_clear != nullptr) && (t < s.n_path_clear)) {
-      scav_point *const pts{ out.points.data() + first_point };
-      uint32_t const count{ static_cast<uint32_t>(out.points.size()) - first_point };
-      pts[0] = trim(pts[0], pts[1], s.path_clear[t].src);
-      pts[count - 1] = trim(pts[count - 1], pts[count - 2], s.path_clear[t].dst);
-    }
-    out.route[t] = { .off = first_point,
-                     .len = static_cast<uint32_t>(out.points.size()) - first_point };
+    trans_nets[t] =
+        make_span(first_net, static_cast<uint32_t>(planned.size()) - first_net);
     out.port[t] = { .off = first_slot,
                     .len = static_cast<uint32_t>(out.slots.size()) - first_slot };
   }
 
+  // One batch per frame, in submachine order. A frame's nets keep the order
+  // they were planned in, which is `(transition, ordinal)`.
+  std::vector<std::vector<uint32_t>> by_frame(c.submachines.size());
+  for (uint32_t i = 0; i < planned.size(); ++i) {
+    if (planned[i].frame < by_frame.size()) { by_frame[planned[i].frame].push_back(i); }
+  }
+
+  std::vector<scav_point> routed;
+  std::vector<scav_span> net_span(planned.size(), scav_span{});
+  std::vector<uint32_t> obstacle_index(c.states.size(), INVALID);
+  std::vector<uint32_t> obstacle_states;
+  RouteInput in;
+  RouteOutput ro;
+  in.profile = p;
+  int32_t const margin{ router.margin(p) };
+  for (uint32_t m = 0; m < by_frame.size(); ++m) {
+    if (by_frame[m].empty()) { continue; }
+    in.obstacles.clear();
+    in.nets.clear();
+    in.waypoints.clear();
+    obstacle_states.clear();
+
+    // Grown to hold every point its nets reach: a port sits on the *crossed* box's
+    // border, which is outside this submachine by the owner's padding.
+    scav_rect region{ z.sub[m] };
+    auto const cover = [&region](scav_point at) {
+      int32_t const right{ imax(region.x + region.w, at.x) };
+      int32_t const bottom{ imax(region.y + region.h, at.y) };
+      region.x = imin(region.x, at.x);
+      region.y = imin(region.y, at.y);
+      region.w = right - region.x;
+      region.h = bottom - region.y;
+    };
+    for (uint32_t const i : by_frame[m]) {
+      cover(planned[i].src);
+      cover(planned[i].dst);
+      for (uint32_t const bend : seg_bends[planned[i].seg]) { cover(z.node[bend]); }
+    }
+
+    // Exactly what this router asked for, not a guess: a margin larger than it
+    // needs is canvas nobody draws in, smaller leaves a frame-edge box no lane.
+    region.x -= margin;
+    region.y -= margin;
+    region.w += 2 * margin;
+    region.h += 2 * margin;
+    in.region = region;
+
+    // Every live box overlapping the region except those enclosing it, and of those
+    // only the outermost -- a box already blocks its own descendants (11.14).
+    StateId const owner{ c.submachines[m].owner };
+    auto const shields = [&](uint32_t st) {
+      StateId const up{ c.submachines[c.states[st].parent.v].owner };
+      if (up.v == INVALID) { return false; }
+      return !encloses(c, up, owner) && overlaps(region, z.state[up.v]);
+    };
+for (uint32_t st = 0; st < c.states.size(); ++st) {
+      if ((c.states[st].live == 0) || !overlaps(region, z.state[st])) { continue; }
+      if (encloses(c, { st }, owner) || shields(st)) { continue; }
+      obstacle_index[st] = static_cast<uint32_t>(in.obstacles.size());
+      obstacle_states.push_back(st);
+      in.obstacles.push_back(z.state[st]);
+    }
+    for (uint32_t const i : by_frame[m]) {
+      Planned const &pn{ planned[i] };
+      RouteNet net{ .src = pn.src, .dst = pn.dst };
+      if (pn.src_state != INVALID) { net.src_obstacle = obstacle_index[pn.src_state]; }
+      if (pn.dst_state != INVALID) { net.dst_obstacle = obstacle_index[pn.dst_state]; }
+      net.waypoint_off = static_cast<uint32_t>(in.waypoints.size());
+      for (uint32_t const bend : seg_bends[pn.seg]) {
+        in.waypoints.push_back(z.node[bend]);
+      }
+      net.waypoint_len =
+          static_cast<uint32_t>(in.waypoints.size()) - net.waypoint_off;
+      in.nets.push_back(net);
+    }
+    router.route(in, ro);
+    for (uint32_t j = 0; j < by_frame[m].size(); ++j) {
+      scav_span const at{ (j < ro.net_points.size()) ? ro.net_points[j] : scav_span{} };
+      if (j < ro.metrics.size()) {
+        out.reseated += static_cast<uint32_t>(ro.metrics[j].reseated);
+        switch (ro.metrics[j].failed) {
+          case RouteFailure::OutsideRegion: ++out.outside_region; break;
+          case RouteFailure::Unreachable: ++out.unreachable; break;
+          case RouteFailure::TooLarge: ++out.too_large; break;
+          case RouteFailure::None: break;
+        }
+      }
+      uint32_t const off{ static_cast<uint32_t>(routed.size()) };
+      for (uint32_t k = 0; k < at.len; ++k) { routed.push_back(ro.points[at.off + k]); }
+      net_span[by_frame[m][j]] = { .off = off, .len = at.len };
+    }
+    for (uint32_t const st : obstacle_states) { obstacle_index[st] = INVALID; }
+  }
+
+  // Laid end to end: consecutive nets share the endpoint the planner handed
+  // both of them, so every net after the first drops its own first point.
+  for (uint32_t t = 0; t < n; ++t) {
+    Span const nets{ trans_nets[t] };
+    if (nets.len == 0) { continue; }
+    uint32_t const first_point{ static_cast<uint32_t>(out.points.size()) };
+    for (uint32_t j = 0; j < nets.len; ++j) {
+      scav_span const at{ net_span[nets.off + j] };
+      uint32_t const skip{ ((j == 0) || (at.len == 0)) ? 0U : 1U };
+      for (uint32_t k = skip; k < at.len; ++k) { out.points.push_back(routed[at.off + k]); }
+    }
+    uint32_t const count{ static_cast<uint32_t>(out.points.size()) - first_point };
+    if ((s.path_clear != nullptr) && (t < s.n_path_clear) && (count >= 2)) {
+      scav_point *const pts{ out.points.data() + first_point };
+      pts[0] = trim(pts[0], pts[1], s.path_clear[t].src);
+      pts[count - 1] = trim(pts[count - 1], pts[count - 2], s.path_clear[t].dst);
+    }
+    out.route[t] = { .off = first_point, .len = count };
+  }
+
+  // Centred on the longest leg, not the polyline's middle point: phase 1 widened
+  // a rank boundary by this box (11.3) and the leg crossing it is the long one.
   out.placed.assign(s.n_path_box, {});
   for (uint32_t i = 0; i < s.n_path_box; ++i) {
     scav_path_box const &box{ s.path_box[i] };
     scav_span const route{ (box.subject < n) ? out.route[box.subject] : scav_span{} };
-    scav_point const mid{ (route.len == 0) ? scav_point{}
-                                           : out.points[route.off + (route.len / 2)] };
-    out.placed[i] = { .x = mid.x - floor_div(box.w, 2),
-                      .y = mid.y - floor_div(box.h, 2),
-                      .w = box.w,
-                      .h = box.h };
+    // Horizontal first: ranks run left to right, so the widened boundary and a line
+    // of text run the same way. On a vertical leg a wide label hangs out sideways.
+    scav_point mid{};
+    Wide longest{ -1 };
+    for (uint32_t pass = 0; (pass < 2) && (longest < 0); ++pass) {
+      for (uint32_t k = 0; (k + 1) < route.len; ++k) {
+        scav_point const a{ out.points[route.off + k] };
+        scav_point const b{ out.points[route.off + k + 1] };
+        if ((pass == 0) && (a.y != b.y)) { continue; }
+        Wide const span{ imax(Wide{ a.x } - b.x, Wide{ b.x } - a.x) +
+                         imax(Wide{ a.y } - b.y, Wide{ b.y } - a.y) };
+        if (span <= longest) { continue; }
+        longest = span;
+        mid = { .x = a.x + static_cast<int32_t>(floor_div(Wide{ b.x } - a.x, Wide{ 2 })),
+                .y = a.y +
+                     static_cast<int32_t>(floor_div(Wide{ b.y } - a.y, Wide{ 2 })) };
+      }
+    }
+    if (longest < 0) {
+      mid = (route.len == 0) ? scav_point{} : out.points[route.off];
+    }
+    // Slid inside rather than hung off: the chart rect bounds everything laid out
+    // (11.7a), so a label half outside grows the canvas to hold whitespace.
+    int32_t x{ mid.x - floor_div(box.w, 2) };
+    int32_t y{ mid.y - floor_div(box.h, 2) };
+    if (box.w <= z.chart.w) { x = imin(imax(x, z.chart.x), (z.chart.x + z.chart.w) - box.w); }
+    if (box.h <= z.chart.h) { y = imin(imax(y, z.chart.y), (z.chart.y + z.chart.h) - box.h); }
+    out.placed[i] = { .x = x, .y = y, .w = box.w, .h = box.h };
   }
   return out;
 }

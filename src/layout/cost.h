@@ -46,10 +46,8 @@ CostTerms cost_terms(Chart const &c,
                      scav_spaces const &s,
                      scav_profile const &p);
 
-// The same scoring over a chart that already carries geometry columns, which
-// is what lets one build score another's output. `label` needs the placed
-// boxes, which are a run's out-param rather than a column, so it comes back
-// zero here.
+// The same scoring from the geometry columns, so one build scores another's
+// output. `label` needs the placed boxes, an out-param, so it comes back zero.
 CostTerms cost_columns(Chart const &c, SplitGraph const &g, scav_profile const &p);
 
 // Every weight is capped at 2^10 and area at 2^40, so the sum stays inside

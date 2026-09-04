@@ -5,6 +5,8 @@ scav_static_library(scavlayout
   layout.cpp
   profile.cpp
   router.cpp
+  router_straight.cpp
+  router_orthogonal.cpp
   spaces.cpp
   decompose.cpp
   order.cpp
@@ -27,6 +29,7 @@ if(SCAV_BUILD_TESTS)
     layout_tests.cpp
     profile_tests.cpp
     router_tests.cpp
+    router_orthogonal_tests.cpp
     spaces_tests.cpp
     decompose_tests.cpp
     order_tests.cpp

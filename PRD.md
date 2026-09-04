@@ -900,13 +900,21 @@ w = max(min_w, packed_subs_w, kind_min_w) + 2*pad
 h = max(h_before + packed_subs_h + h_after, kind_min_h) + 2*pad
 ```
 
-`pad` and the per-`StateKind` `kind_min_w`/`kind_min_h` are profile fields (§11.15), never hardcoded. **`pad` is interior only** — the ring between a box's border and its contents, which is why it appears exactly twice per axis in the formula above and nowhere else. Every gap *between* two things is `rank_sep`, `node_sep`, or `sub_sep`. Serving all four roles from one field is the trap here: it forces the space around a submachine title, the space between two ranks, and the space between two sibling submachines to move together, and the three want different numbers in both shipped profiles. A state with no space request passes an all-zero `BoxSpace`, so `kind_min_*` is what gives a fork bar its wide-and-thin extent (§7.2) — without that term the formula would size it `2*pad` square.
+`pad` and the per-`StateKind` `kind_min_w`/`kind_min_h` are profile fields (§11.15), never hardcoded. **`pad` is interior only** — the ring between a box's border and its contents, which is why it appears exactly twice per axis in the formula above and nowhere else.
+
+**A bare pseudostate takes no ring**, having no contents to ring. Padding one does not merely make a 14pt dot occupy a 30pt box: a route attaches to the *box* while the glyph is drawn inside it, so every arrow into a pseudostate stops one `pad` short of the mark. The rule is `glyph == box` — a builder fills its box, layout gives no more than the mark needs. Ordinary states keep the ring even when empty, or two same-kind states differ in size for no visible reason.
+
+**A glyph inscribed in its box holds less than half of it.** A diamond takes a centred `w` by `h` label only where `w/2a + h/2b <= 1`, so the measurement pass asks for twice the text on both axes and the builder centres the name rather than setting it at the top of the band. Every gap *between* two things is `rank_sep`, `node_sep`, or `sub_sep`. Serving all four roles from one field is the trap here: it forces the space around a submachine title, the space between two ranks, and the space between two sibling submachines to move together, and the three want different numbers in both shipped profiles. A state with no space request passes an all-zero `BoxSpace`, so `kind_min_*` is what gives a fork bar its wide-and-thin extent (§7.2) — without that term the formula would size it `2*pad` square.
 
 **Sibling submachines are packed here, not in phase 1** — packing requires the siblings already sized. **LR-rectpacking** (Domrös et al., IVAPP 2021): greedy width approximation → placement → compaction → whitespace elimination, `O(n log n)`. Take the LR variant; plain rectpacking's one-oversized-child special case was deleted by its own authors as unmaintainable and aspect-ratio-blind. The gap the packer leaves between two placed siblings, and preserves through compaction and whitespace elimination, is `sub_sep`.
 
 Order-preserving and gap-avoiding are one constraint: restricting placement to four positions relative to the predecessor (directly right; right on the current row level; next subrow; next row) is exactly what makes local whitespace elimination always possible. **Compaction and whitespace elimination are the two steps not taken**: both reclaim leftover space, both change a box's extent rather than its place, and both want blind review to judge before they ship.
 
 **A rank run folds when folding scales larger.** A run grows along the layering axis without bound and nesting multiplies it by the depth, so sixteen levels of a fifteen-state chain draws as a strip a million units wide. Cutting the run and stacking the pieces fixes that, but not everywhere: at two ranks it makes the aspect *worse*, which a greedy fold at the target width demonstrates on the first chart it meets. So both shapes are laid out and the scale measure picks, the same way `trybox` picks a packer. An edge the cut crosses has its ends in two pieces and gets no say in either's coordinates, as a wrapped line's does not.
+
+**The pieces a fold makes are packed, not stacked.** Stacking them left-aligned gives every piece the width of the widest, however little it holds; they are rectangles sharing an area, which is what LR-rectpacking already does for this frame's components and a state's sibling submachines. Over the corpus the Tier-2 sum falls 5.6% with area, Tier 0 unchanged at zero, `toolchanger` best at 0.79x. Under real measurements `brew` goes 35.7M to 28.9M, arriving at the arrangement a reader proposes unprompted: `Standby` beside `Brewing`, terminal below it, inside `Brewing`'s own vertical extent.
+
+That is worth separating from the win. **Nothing generates candidates**: the pipeline ranks, orders, sizes and packs once, and `Cost` is never asked about a second arrangement. The packer found this one because one more shape happened to be in the set it already compares. §11.8's "reorder sibling submachines" is P9's, and until it exists every improvement of this kind is a special case in phase 2 rather than something the layout found.
 
 The fold is what costs §11.7a's hash split a property it had while sizing did not feed back into shape: a size change that reflows the ranks now moves the structural hash as well as the coordinate one. That is the honest form of §11.11's limit rather than a new exception to it — what survives is that a route whose shape cannot depend on its box, a self-loop for instance, moves coordinates and no turn.
 
@@ -930,9 +938,19 @@ Congestion is **history-based** (PathFinder, McMurchie & Ebeling, FPGA'95; Trito
 
 **Nudging** retains the combinatorial stage: build the shared-edge graph, assign pseudo-directions by BFS from the lowest-`(channel, edge)`-keyed member (enumerate components by minimum key; on conflict mark a split point and reverse), then insert into each shared edge's order by projecting from the lowest-keyed already-ordered neighbor. Path-consistent components get minimum crossings with no extra bends. Placement assigns **integer offsets `k*gap`** within the channel; segment order is a total integral key `(channel, offset_slot, edge)`, never a partial comparator.
 
-**Router is swappable** behind a POD vtable — internal only. Contract: pure w.r.t. `(input, ud)`, reentrant, no global state, allocates only from a caller-supplied arena, called concurrently from workers, must not unwind. Router name and version are hashed inputs. The C ABI exposes routers **by name** (`scav_router_by_name`, `scav_router_list`); function pointers never cross it.
+**Router is swappable** — internal only. Contract: pure w.r.t. its input, reentrant, no global state, called concurrently from workers, must not unwind. Router name and version are hashed inputs. The C ABI exposes routers **by name** (`scav_router_by_name`, `scav_router_list`); function pointers never cross it.
 
-`RouteInput`: submachine box, obstacle rects, port assignments. `RouteOutput`: integer polylines plus per-edge metrics (bends, length, boundary crossings, crossing span) so routers are A/B'd automatically. Internal POD — no `scav_` prefix, because neither crosses the ABI.
+**An abstract base class, not the POD vtable this section first specified.** The boundary never crosses the ABI, so the C shape bought nothing; a `Router` has no members and one virtual call. The registry holds `Router const *` because C++ has no array of references, `reference_wrapper` needs `<functional>` (outside §6's subset), and `router_at` must answer "no such id" for an unvalidated index. `ud` goes with the function pointer.
+
+`RouteInput`: the frame's region, obstacle rects, and nets carrying their two ends and the corridor phase 1 chose. `RouteOutput`: integer polylines plus per-net metrics — bends, length, and a named failure cause — so routers are A/B'd automatically. Internal POD, no `scav_` prefix, because neither crosses the ABI.
+
+**A route never leaves `region`**, which is what makes a per-frame obstacle set sound: every frame a decomposed transition passes through is owned by an ancestor of one of its endpoints (§11.1), so anything enclosing the region is excused by §11.14 and anything else is blocked or out of reach. Phase 3 sizes the region to the frame plus every point its nets touch — a port sits on the *crossed* box's border, outside this submachine by the owner's padding — plus the margin the router asks for, since a box flush against the frame's edge has no room for a lane otherwise. Obstacles are every live box overlapping it that does not enclose it, **outermost only**: a box contains its own descendants, so adding them blocks nothing and multiplies the grid by the subtree.
+
+An anchor outside the region, an unreachable end, and a graph past the budget are three different failures and are reported as three: a degraded net is a straight line, and a straight line is what Tier 0 counts.
+
+**Clearance is a bumper, not a penalty.** Obstacles block against their rect grown by `clear`, so "no segment comes within `clear` of a box" is a property of the graph. Pricing the flush lane instead was built first and is worse: it needs a constant tuned against the bend penalty — going round a box costs two turns, so anything at or below two bends leaves hugging cheaper — and it can only ever be probably right, so a test asserts nothing stronger than "not on these inputs."
+
+The cost is over-constraint: two boxes closer than twice the clearance seal the channel between them. That is what §11.5's re-seat is for and the whole of it — the same graph without bumpers, tried once per net. A re-seated net is reported and is not a failure: it routed at spacing the profile did not ask for. **A route's own ends are exempt by construction**: the search runs between *ring* points one clearance off the border, and the leg from ring to border is emitted rather than searched, so it is perpendicular for free.
 
 ### 11.6 Cost
 
@@ -993,11 +1011,13 @@ This list *is* the layout output ABI — there is no bespoke result type (§16) 
 | `scav.geom.point` | point ordinal | `{int32 x, y}` |
 | `scav.geom.port` | `TransId` | `Span` into `scav.geom.portslot` |
 | `scav.geom.portslot` | port ordinal | `{int32 x, y; uint32 side, boundary_depth}` |
-| `scav.geom.chart` | chart | root bounding box |
+| `scav.geom.chart` | chart | bounding box of everything laid out |
 | `scav.geom.inputs` | chart | digest of the run's non-geometry inputs (§6) — `u32` |
 | `scav.geom.gen` | chart | generation counter (§13) — `u32`, **not hashed, not serialized** |
 
 `ElemKind::Point` exists so the point and port-slot arrays are real columns rather than side arrays outside the column rules; entity count is the column length. A transition splits into one port per boundary it crosses (§11.1), not two — a depth-16 edge has up to 15, and the structural hash covers all their sides, so one row per transition cannot hold them.
+
+`scav.geom.chart` bounds **everything laid out, not only the root submachine's extent**: a route bends into a frame's padding and a path box centres on a point of one, so either can reach past it. A consumer sizes its viewport from this rect, and one cut to the root clips whatever crossed the line.
 
 **Hashing is by explicit allowlist, not by enumerating `Chart.columns`** — otherwise app and plugin columns perturb scav's own goldens, and the same corpus hashed through `scav` and through `scavview` would differ. The **structural hash** covers ranks, orders, port sides, and bend sequences *as direction-turn tokens*; the **coordinate hash** covers the rects and every point and port coordinate. Turn tokens rather than points is what makes a pure translation move the coordinate hash and not the structural one, which is the whole point of the split.
 
@@ -1081,7 +1101,11 @@ That removes `w_st`, `PriorLayout` and its version key, per-loader hysteresis, t
 
 The likeliest failure is producing layouts that score well on `Cost` and that readers find worse than the PlantUML output they already have. Nothing in a cost vector detects this.
 
-**A side-by-side harness ships at P5b**: the same chart through `dot -Tsvg`, elkjs, and scav. Blind scored review of the corpus at the P6 and P7 gates. Exit criterion is **"no worse than the incumbent on the transcribed corpus"** — not "visually reasonable."
+**A side-by-side harness ships at P5b**: the same chart through `dot -Tsvg`, elkjs, and scav. Blind scored review of the corpus at the **P7** gate. Exit criterion is **"no worse than the incumbent on the transcribed corpus"** — not "visually reasonable."
+
+**Tier 0 at zero is a precondition for scoring, not one of the things scored.** Both incumbents route around obstacles and sit at zero edges-through-a-box on every chart by construction, so one violation settles the comparison on the tier compared first and the scores measure the missing router rather than the layout. The review therefore cannot run before a router with an obstacle set does (§11.5).
+
+That also blocks §11.3's global sifting and edge-weight schedule and §11.4's compaction, each of which is written to be bought when review says that term is wrong.
 
 ### 11.13 Rejected
 
@@ -1590,9 +1614,9 @@ The printer's line-break budget is `print_columns` (§11.15); P3 ships that fiel
 
 **Four things this phase owes beyond the algorithms.** The phases stop being file-local functions in one `layout.cpp` and become a translation unit each with its intermediate in a header (§11), because P4's three stages are today reachable only by running the whole pipeline and P6 quadruples what needs isolating. `Cost` arrives here rather than with search (P9), since the exit gate is a comparison of cost vectors and cannot be stated without one — the **surrogate** and its ranking test stay with P9, which is the only thing that consumes a surrogate. The profile gains `rank_sep`, `node_sep`, and `sub_sep` (§11.15) and so bumps `profile_version`, which rebases every geometry, `DrawList`, and SVG golden — take that churn here, in the phase that was going to move every coordinate anyway, rather than dribbling it across P6a..d. And the ordering stage gets a performance floor at the **flat 2k-state** shape, not only the nested one (§11.3).
 
-*Exit:* better than P4 on the seven Tier-2 terms straight-line geometry defines (§11.6) **and no worse than the incumbent** on blind review of the corpus, PlantUML and elkjs side by side through the P5b harness.
+*Exit:* better than P4 on the seven Tier-2 terms straight-line geometry defines (§11.6) **and no worse than the incumbent** on blind review of the corpus. The second half was misplaced: it belongs to P7 and has moved there (§11.12).
 
-**Measured, and only half of it passed.** The corpus is scored term by term into a committed golden, and the same scorer was built against the P4 tree so the two are on one scale:
+**Measured, and neither clause came back clean.** The corpus is scored term by term into a committed golden, and the same scorer was built against the P4 tree so the two are on one scale:
 
 | | P4 | P6 |
 |---|---|---|
@@ -1602,10 +1626,37 @@ The printer's line-break budget is `print_columns` (§11.15); P3 ships that fiel
 | aspect deviation | 630,976 | **455,408** |
 | bounding-box area | 5.63e8 | 1.30e9 |
 
-**Tier 0 is better on ten charts of eleven and worse on none**, and Tier 0 is the tier compared first, so on `Cost` as defined P6 wins outright. **Tier 2 is worse on every chart**, and the reason is worth stating plainly rather than smoothing: the Tier-2 sum is `w_area * area` to within a rounding error (§19), so "the Tier-2 vector" is currently an area comparison, and area is exactly what a packer optimises and what layering spends. Aspect — the one Tier-2 term whose scale is comparable to the others — improves. The gate as written is therefore not met, and the two things that would meet it are P9's weight calibration and §11.4's unspent compaction, neither of which belongs to this phase. Blind review is the half that decides whether that trade reads as better.
+**Tier 0 is better on ten charts of eleven and worse on none**, and Tier 0 is the tier compared first, so on `Cost` as defined P6 wins outright. **Tier 2 is worse on every chart**, and the reason is that the Tier-2 sum is `w_area * area` to within a rounding error (§19), so "the Tier-2 vector" is an area comparison — and area is what a packer optimises and what layering spends. Aspect — the one Tier-2 term whose scale is comparable to the others — improves. The Tier-2 half of the gate is therefore not met, and the two things that would meet it are P9's weight calibration and §11.4's unspent compaction, neither of which belongs to this phase.
 
-**P7 — orthogonal routing.** Router behind the vtable, channel-representative graph, separated OVG, A* with bend state, obstacles including submachines and placed boxes, LCA-owned separator channels, combinatorial nudging with integer offsets, `PathBox` strip placement, bench harness over ≥2 routers.
-*Exit:* zero edges through boxes; blind review no worse than incumbent.
+**The other half was unscoreable, not merely unscored.** `straight` has no obstacle set, so Tier 0 is nonzero on all eleven charts — 79 on `mill`, 46 on `bottler`, 1 even on `led` — where both incumbents are at zero everywhere. There is nothing for a reviewer to weigh (§11.12), so the review moves to P7. 383 → 186 is a P4-to-P6 measurement and never an incumbent comparison: the property being compared is that the count is *zero*.
+
+**P7 — orthogonal routing.** Router behind its own boundary, separated OVG, A* with bend state, obstacles including submachines and placed boxes, LCA-owned separator channels, combinatorial nudging with integer offsets, `PathBox` strip placement, bench harness over ≥2 routers. It splits in four: the first two are what blind review waits on, the last two are not.
+
+**P7a — the boundary, and nothing through it.** `RouteInput`/`RouteOutput`, the `Router` base class, the registry rebuilt on it, and phase 3 restructured into one net per segment routed in that segment's frame. `straight` moves behind the boundary and produces the same points, so *every geometry, cost, `DrawList` and SVG golden holds unchanged* — the whole exit criterion.
+
+**P7b — the orthogonal router.** An orthogonal visibility graph per frame, separated into h-plane and v-plane copies joined by an edge whose weight is the bend penalty, and A* over that with the total tie-break key `(f, g, node)`. It becomes registry index 0, so it is what a caller with no opinion gets.
+
+*Exit, met:* **Tier 0 is zero on all eleven corpus charts**, asserted by a test that rewrites the predicate rather than asking the scorer whether it is happy. That is §11.12's precondition, so **blind review becomes scoreable here**.
+
+| | P6 | P7b |
+|---|---|---|
+| Tier 0, edges through a box | 186 | **0** |
+| geometric crossings | 282 | **49** |
+| excess length | 2,367,494 | **514,592** |
+| bends | 129 | 357 |
+| aspect deviation, area | 455,408 / 1.30e9 | unchanged |
+
+Bends up and everything else down is the trade an orthogonal router is: it buys the forbidden tier and the crossings with turns. Aspect and area do not move, because this phase moves edges and not nodes. All 648 corpus route segments are axis-aligned; 85% of routes turn twice or fewer.
+
+**Three things measured that the phase list did not name.** The **bend penalty is one rank separation**, not §11.6's exchange rate — that is sixteen grid units on both profiles and buys a staircase wherever the grid offers one. A profile field for it is P9's, so no `profile_version` bump and the golden rebase is the router's alone. **The grid is the product of two line sets, not a function of box count**, so the flat 2k chart needs no sparse graph after all: a packed grid shares columns and rows. What exceeds the budget is boxes at *distinct* offsets, which the router's suite builds deliberately. And routing costs what it costs: the nested 2k went 8 ms to **47 ms**, the flat one to 215 ms, both floors raised to match.
+
+**The separator port is the one shape P7b does not route properly.** It sits on a submachine rect and so inside that submachine's owner, and §11.5 gives the segment to the *parent* frame, where the owner is an obstacle walling off its own port. P7b stubs from the port out to the owner's border and the stub crosses whatever lies between; §11.14 excuses the owner and nothing else. The corpus pays nothing, but a synthetic 2k chart of eight depth-16 chains scores **496** violations from these stubs, pinned by a test. The fix is §11.5's LCA-owned separator channel, P7c's.
+
+**P7c — channels, congestion, and nudging.** Separator channels owned by the LCA and routed there, history-based congestion with the double-buffered map, and combinatorial nudging with integer offsets. `w_par` gets its first nonzero multiplicand here: a corridor is a channel the current graph does not have, so Tier 2's eighth term is still identically zero (§11.6).
+*Exit:* Tier 0 zero on the synthetic 2k shapes as well as the corpus, and whatever blind review asked for at P7b.
+
+**P7d — labels and the bench.** `PathBox` strip placement by Kakoulis & Tollis matching (§11.9), bounded rip-up on failure, the degenerate-enclosure inflation and its diagnostic, and the bench harness over the two registered routers.
+*Exit:* better than P7b on all eight Tier-2 terms.
 
 **P8 — determinism infrastructure.** Thread shim, model-derived sharding, counter-based RNG, index-ordered reduction, tiered matrix, sanitizer configs, scheduling-delay injector, the standard-library-subset include check (§6), and **`scav selftest`** — the command that makes §6's compiler-independence claim checkable by a user rather than only by our CI.
 *Exit:* one structural hash and one coordinate hash across the blocking matrix; full grid green nightly. The `wasm32-wasi` row lands with P11 — until then the matrix is the six native triples, and §6's discipline is what makes adding the row a build change rather than a redesign.
