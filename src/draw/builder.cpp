@@ -241,26 +241,17 @@ void emit_state(DrawList &d,
   switch (kind) {
     case StateKind::Normal: push_rrect(d, depth, shape, box, radius, origin); break;
     case StateKind::Initial:
-    case StateKind::Junction:
-      push_circle(d, depth, shape, middle, glyph, origin);
-      break;
+    case StateKind::Junction: push_circle(d, depth, shape, middle, glyph, origin); break;
     case StateKind::Final: {
-      push_circle(d,
-                  depth,
-                  drawlist_style(d, p[SCAV_STYLE_STATE]),
-                  middle,
-                  glyph,
-                  origin);
+      push_circle(d, depth, drawlist_style(d, p[SCAV_STYLE_STATE]), middle, glyph, origin);
       push_circle(d, depth, shape, middle, imax(1, (glyph * 3) / 5), origin);
       break;
     }
     case StateKind::Choice: {
-      std::array<scav_point, 4> const pts{
-        { { .x = middle.x, .y = inner.y },
-          { .x = inner.x + inner.w, .y = middle.y },
-          { .x = middle.x, .y = inner.y + inner.h },
-          { .x = inner.x, .y = middle.y } }
-      };
+      std::array<scav_point, 4> const pts{ { { .x = middle.x, .y = inner.y },
+                                             { .x = inner.x + inner.w, .y = middle.y },
+                                             { .x = middle.x, .y = inner.y + inner.h },
+                                             { .x = inner.x, .y = middle.y } } };
       push_path(d, depth, drawlist_style(d, p[SCAV_STYLE_STATE]), pts.data(), 4, origin);
       break;
     }

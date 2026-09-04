@@ -253,8 +253,7 @@ Routes phase3_route(Chart const &c,
       for (uint32_t const bend : seg_bends[pn.seg]) {
         in.waypoints.push_back(z.node[bend]);
       }
-      net.waypoint_len =
-          static_cast<uint32_t>(in.waypoints.size()) - net.waypoint_off;
+      net.waypoint_len = static_cast<uint32_t>(in.waypoints.size()) - net.waypoint_off;
       in.nets.push_back(net);
     }
     router.route(in, ro);
@@ -323,19 +322,20 @@ Routes phase3_route(Chart const &c,
         if (span <= longest) { continue; }
         longest = span;
         mid = { .x = a.x + static_cast<int32_t>(floor_div(Wide{ b.x } - a.x, Wide{ 2 })),
-                .y = a.y +
-                     static_cast<int32_t>(floor_div(Wide{ b.y } - a.y, Wide{ 2 })) };
+                .y = a.y + static_cast<int32_t>(floor_div(Wide{ b.y } - a.y, Wide{ 2 })) };
       }
     }
-    if (longest < 0) {
-      mid = (route.len == 0) ? scav_point{} : out.points[route.off];
-    }
+    if (longest < 0) { mid = (route.len == 0) ? scav_point{} : out.points[route.off]; }
     // Slid inside rather than hung off: the chart rect bounds everything laid out
     // (11.7a), so a label half outside grows the canvas to hold whitespace.
     int32_t x{ mid.x - floor_div(box.w, 2) };
     int32_t y{ mid.y - floor_div(box.h, 2) };
-    if (box.w <= z.chart.w) { x = imin(imax(x, z.chart.x), (z.chart.x + z.chart.w) - box.w); }
-    if (box.h <= z.chart.h) { y = imin(imax(y, z.chart.y), (z.chart.y + z.chart.h) - box.h); }
+    if (box.w <= z.chart.w) {
+      x = imin(imax(x, z.chart.x), (z.chart.x + z.chart.w) - box.w);
+    }
+    if (box.h <= z.chart.h) {
+      y = imin(imax(y, z.chart.y), (z.chart.y + z.chart.h) - box.h);
+    }
     out.placed[i] = { .x = x, .y = y, .w = box.w, .h = box.h };
   }
   return out;

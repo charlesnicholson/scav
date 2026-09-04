@@ -12,8 +12,8 @@
 
 #include <cstdint>
 #include <ostream>
-#include <utility>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -311,7 +311,7 @@ TEST_CASE("ortho: escaping moves to the border nearest where the route is going"
   std::vector<scav_rect> const boxes{ rect(10, 10, 20, 20) };
   scav_point const centre{ pt(20, 20) };
 
-  CHECK((ortho_escape(centre, pt(100, 20), boxes) == pt(30, 20)));  // right
+  CHECK((ortho_escape(centre, pt(100, 20), boxes) == pt(30, 20)));   // right
   CHECK((ortho_escape(centre, pt(-100, 20), boxes) == pt(10, 20)));  // left
   CHECK((ortho_escape(centre, pt(20, -100), boxes) == pt(20, 10)));  // up
   CHECK((ortho_escape(centre, pt(20, 100), boxes) == pt(20, 30)));   // down
@@ -595,11 +595,7 @@ TEST_CASE("ortho: a wall with no gap is unreachable rather than crossed") {
 TEST_CASE("ortho: a box in the way is routed around, never through") {
   scav_rect const box{ rect(40, 40, 20, 20) };
   OrthoGrid g;
-  REQUIRE(ortho_grid(rect(0, 0, 100, 100),
-                     { box },
-                     { pt(0, 50), pt(100, 50) },
-                     0,
-                     g));
+  REQUIRE(ortho_grid(rect(0, 0, 100, 100), { box }, { pt(0, 50), pt(100, 50) }, 0, g));
   OrthoScratch s;
   std::vector<uint32_t> path;
   uint32_t const from{ g.vertex(ortho_index_of(g.xs, 0), ortho_index_of(g.ys, 50)) };
@@ -770,8 +766,7 @@ TEST_CASE("ortho: two identical searches return identical paths") {
     OrthoScratch s2;
     std::vector<uint32_t> a;
     std::vector<uint32_t> b;
-    CHECK(ortho_search(g, from, to, 200, s1, a) ==
-          ortho_search(g, from, to, 200, s2, b));
+    CHECK(ortho_search(g, from, to, 200, s1, a) == ortho_search(g, from, to, 200, s2, b));
     CHECK(a == b);
   }
 }
@@ -801,13 +796,11 @@ void check_no_segment_hugs_a_box(RouteInput const &in, RouteOutput const &out) {
         CAPTURE(k);
         if (a.y == b.y) {
           bool const on_cap{ (a.y == r.y) || (a.y == (r.y + r.h)) };
-          bool const overlaps{ (imin(a.x, b.x) < (r.x + r.w)) &&
-                               (imax(a.x, b.x) > r.x) };
+          bool const overlaps{ (imin(a.x, b.x) < (r.x + r.w)) && (imax(a.x, b.x) > r.x) };
           CHECK(!(on_cap && overlaps));
         } else {
           bool const on_side{ (a.x == r.x) || (a.x == (r.x + r.w)) };
-          bool const overlaps{ (imin(a.y, b.y) < (r.y + r.h)) &&
-                               (imax(a.y, b.y) > r.y) };
+          bool const overlaps{ (imin(a.y, b.y) < (r.y + r.h)) && (imax(a.y, b.y) > r.y) };
           CHECK(!(on_side && overlaps));
         }
       }
@@ -832,12 +825,10 @@ void check_keeps_its_clearance(RouteInput const &in, RouteOutput const &out) {
         scav_rect const &r{ in.obstacles[i] };
         CAPTURE(i);
         CAPTURE(k);
-        CHECK(!enters_box(a,
-                          b,
-                          rect(r.x - clear,
-                               r.y - clear,
-                               r.w + (2 * clear),
-                               r.h + (2 * clear))));
+        CHECK(!enters_box(
+            a,
+            b,
+            rect(r.x - clear, r.y - clear, r.w + (2 * clear), r.h + (2 * clear))));
       }
     }
   }
@@ -927,10 +918,8 @@ TEST_CASE("ortho: a net whose ends name boxes starts and ends on their borders")
   in.region = rect(0, 0, 1000, 400);
   in.obstacles.push_back(rect(100, 150, 100, 100));  // 0
   in.obstacles.push_back(rect(700, 150, 100, 100));  // 1
-  in.nets.push_back({ .src = pt(150, 200),
-                      .dst = pt(750, 200),
-                      .src_obstacle = 0,
-                      .dst_obstacle = 1 });
+  in.nets.push_back(
+      { .src = pt(150, 200), .dst = pt(750, 200), .src_obstacle = 0, .dst_obstacle = 1 });
   RouteOutput out;
   ORTHO.route(in, out);
 
@@ -965,10 +954,8 @@ TEST_CASE("ortho: waypoints are threaded, in the order they were given") {
   in.region = rect(0, 0, 1000, 1000);
   in.waypoints.push_back(pt(300, 100));
   in.waypoints.push_back(pt(700, 900));
-  in.nets.push_back({ .src = pt(0, 500),
-                      .dst = pt(1000, 500),
-                      .waypoint_off = 0,
-                      .waypoint_len = 2 });
+  in.nets.push_back(
+      { .src = pt(0, 500), .dst = pt(1000, 500), .waypoint_off = 0, .waypoint_len = 2 });
   RouteOutput out;
   ORTHO.route(in, out);
 
@@ -1013,9 +1000,7 @@ TEST_CASE("ortho: a grid past the budget degrades every net in the frame") {
   in.region = rect(0, 0, 6000, 6000);
   // Coprime strides, so no box's side or clearance lane lands on another's and
   // the line sets really do multiply out past the cap.
-  for (int32_t i = 0; i < 300; ++i) {
-    in.obstacles.push_back(rect(i * 13, i * 11, 5, 7));
-  }
+  for (int32_t i = 0; i < 300; ++i) { in.obstacles.push_back(rect(i * 13, i * 11, 5, 7)); }
   in.nets.push_back({ .src = pt(0, 3000), .dst = pt(6000, 3000) });
   RouteOutput out;
   ORTHO.route(in, out);
@@ -1063,10 +1048,8 @@ TEST_CASE("ortho: a polyline never carries the same point twice in a row") {
   in.profile = profile();
   in.region = rect(0, 0, 2000, 2000);
   in.obstacles.push_back(rect(500, 500, 400, 400));
-  in.nets.push_back({ .src = pt(700, 700),
-                      .dst = pt(700, 700),
-                      .src_obstacle = 0,
-                      .dst_obstacle = 0 });
+  in.nets.push_back(
+      { .src = pt(700, 700), .dst = pt(700, 700), .src_obstacle = 0, .dst_obstacle = 0 });
   RouteOutput out;
   ORTHO.route(in, out);
 

@@ -196,9 +196,8 @@ TEST_CASE("pack: a column of maximal rects saturates rather than wrapping") {
   // Five thousand rects the domain admits one at a time. Only one fits a row,
   // so the column runs to 2.6 billion: an int32 cursor would have wrapped
   // through it four thousand rects in.
-  std::vector<scav_rect> const tall(
-      5000,
-      { .x = 0, .y = 0, .w = COORD_MAX, .h = COORD_MAX });
+  std::vector<scav_rect> const tall(5000,
+                                    { .x = 0, .y = 0, .w = COORD_MAX, .h = COORD_MAX });
 
   Packing const p{ pack_lr(tall, 0, 16, 10) };
   REQUIRE(p.at.size() == tall.size());

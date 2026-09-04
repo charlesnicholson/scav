@@ -102,13 +102,11 @@ bool strictly_inside(scav_point p, scav_rect const &r) {
 bool ortho_blocks_h(scav_rect const &r, int32_t y, int32_t x0, int32_t x1) {
   // `w > 0` is not implied by the straddle: a zero-width box has two sides a
   // segment passes between, and blocking there forbids what the scorer allows.
-  return (r.w > 0) && (y > r.y) && (y < (r.y + r.h)) && (x0 < (r.x + r.w)) &&
-         (x1 > r.x);
+  return (r.w > 0) && (y > r.y) && (y < (r.y + r.h)) && (x0 < (r.x + r.w)) && (x1 > r.x);
 }
 
 bool ortho_blocks_v(scav_rect const &r, int32_t x, int32_t y0, int32_t y1) {
-  return (r.h > 0) && (x > r.x) && (x < (r.x + r.w)) && (y0 < (r.y + r.h)) &&
-         (y1 > r.y);
+  return (r.h > 0) && (x > r.x) && (x < (r.x + r.w)) && (y0 < (r.y + r.h)) && (y1 > r.y);
 }
 
 void ortho_sort_unique(std::vector<int32_t> &v) {

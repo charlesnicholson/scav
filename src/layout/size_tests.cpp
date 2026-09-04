@@ -7,8 +7,8 @@
 #include "layout/order.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
-#include "scav_int.h"
 #include "scav/scav_layout_c.h"
+#include "scav_int.h"
 
 #include "doctest.h"
 
@@ -458,7 +458,8 @@ TEST_CASE("size: a boundary node sits on the frame's border, not on its piece's"
   }
   edges.push_back({ .src = 6, .dst = boundary, .segment = 6, .reversed = 0 });
   edges.push_back({ .src = 6, .dst = boundary + 1, .segment = 7, .reversed = 0 });
-  edges.push_back({ .src = boundary + 1, .dst = boundary + 2, .segment = 8, .reversed = 0 });
+  edges.push_back(
+      { .src = boundary + 1, .dst = boundary + 2, .segment = 8, .reversed = 0 });
 
   std::vector<scav_box_space> boxes(c.states.size(), scav_box_space{});
   boxes[chain[4].v] = { .min_w = 0, .h_before = 6000, .h_after = 0 };

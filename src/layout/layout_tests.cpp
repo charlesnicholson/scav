@@ -271,8 +271,7 @@ TEST_CASE("layout: routes are orthogonal, meet borders, and skip internal loops"
   // the ends meet their boxes' borders rather than sitting at their centres.
   for (uint32_t k = 0; (k + 1) < r0.len; ++k) {
     CAPTURE(k);
-    bool const square{ (route[k].x == route[k + 1].x) ||
-                       (route[k].y == route[k + 1].y) };
+    bool const square{ (route[k].x == route[k + 1].x) || (route[k].y == route[k + 1].y) };
     CHECK(square);
   }
   CHECK(on_border(route.front(), state_rect(c, s1)));
@@ -291,10 +290,10 @@ TEST_CASE("layout: routes are orthogonal, meet borders, and skip internal loops"
   for (uint32_t k = 0; (k + 1) < r0.len; ++k) {
     scav_point const a{ route[k] };
     scav_point const b{ route[k + 1] };
-    bool const along_y{ (a.x == b.x) && (slot.x == a.x) &&
-                        (slot.y >= imin(a.y, b.y)) && (slot.y <= imax(a.y, b.y)) };
-    bool const along_x{ (a.y == b.y) && (slot.y == a.y) &&
-                        (slot.x >= imin(a.x, b.x)) && (slot.x <= imax(a.x, b.x)) };
+    bool const along_y{ (a.x == b.x) && (slot.x == a.x) && (slot.y >= imin(a.y, b.y)) &&
+                        (slot.y <= imax(a.y, b.y)) };
+    bool const along_x{ (a.y == b.y) && (slot.y == a.y) && (slot.x >= imin(a.x, b.x)) &&
+                        (slot.x <= imax(a.x, b.x)) };
     if (along_x || along_y) { through_port = true; }
   }
   CHECK(through_port);
@@ -419,7 +418,9 @@ TEST_CASE("layout: a placed box sits on the longest leg of its route") {
   build_trans(c, a, d, TransKind::External, {});
   build_trans(c, d, b, TransKind::External, {});
 
-  std::vector<scav_path_box> const boxes{ { .subject = 2, .w = 240, .h = 80, .order = 0 } };
+  std::vector<scav_path_box> const boxes{
+    { .subject = 2, .w = 240, .h = 80, .order = 0 }
+  };
   scav_spaces const s{ .path_box = boxes.data(), .n_path_box = 1 };
   std::vector<scav_placed> const placed{ run(c, s, readable()) };
   REQUIRE(placed.size() == 1);
@@ -1053,10 +1054,8 @@ TEST_CASE("layout: no corpus chart runs a route flush along a box") {
           if (c.states[st].live == 0) { continue; }
           scav_rect const r{ row_of<scav_rect>(c, "scav.geom.state", st) };
           bool const along_cap{ (a.y == b.y) && ((a.y == r.y) || (a.y == (r.y + r.h))) &&
-                                (imin(a.x, b.x) < (r.x + r.w)) &&
-                                (imax(a.x, b.x) > r.x) };
-          bool const along_side{ (a.x == b.x) &&
-                                 ((a.x == r.x) || (a.x == (r.x + r.w))) &&
+                                (imin(a.x, b.x) < (r.x + r.w)) && (imax(a.x, b.x) > r.x) };
+          bool const along_side{ (a.x == b.x) && ((a.x == r.x) || (a.x == (r.x + r.w))) &&
                                  (imin(a.y, b.y) < (r.y + r.h)) &&
                                  (imax(a.y, b.y) > r.y) };
           if (!along_cap && !along_side) { continue; }

@@ -13,8 +13,8 @@
 
 #include "doctest.h"
 
-#include <array>
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <ostream>
@@ -319,8 +319,7 @@ TEST_CASE("builder: only a sibling submachine draws a divider") {
     scav_rect out{};
     std::memcpy(&out,
                 column_data(b.chart, id) +
-                    (size_t{ b.chart.submachine_ids[kids.off + k].v } *
-                     sizeof(scav_rect)),
+                    (size_t{ b.chart.submachine_ids[kids.off + k].v } * sizeof(scav_rect)),
                 sizeof(scav_rect));
     return out;
   };

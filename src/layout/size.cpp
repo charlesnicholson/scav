@@ -37,8 +37,7 @@ bool bare_pseudostate(Chart const &c,
                       std::vector<scav_rect> const &sub,
                       scav_box_space const &b,
                       uint32_t i) {
-  if ((c.states[i].kind == StateKind::Normal) || (b.h_before != 0) ||
-      (b.h_after != 0)) {
+  if ((c.states[i].kind == StateKind::Normal) || (b.h_before != 0) || (b.h_after != 0)) {
     return false;
   }
   Span const subs{ c.states[i].submachines };
@@ -256,10 +255,9 @@ bool phase2_size(Chart const &c,
             uint32_t const at{ chunk_nodes[i] };
             // Local to the piece; the packing below decides where the piece
             // itself goes.
-            shape.at[at] = {
-              .x = static_cast<int32_t>(layer_x[local_rank[nodes[at]] - first]),
-              .y = static_cast<int32_t>(centre[i])
-            };
+            shape.at[at] = { .x = static_cast<int32_t>(
+                                 layer_x[local_rank[nodes[at]] - first]),
+                             .y = static_cast<int32_t>(centre[i]) };
           }
           fits = fits && (chunk_w <= COORD_MAX) && (chunk_h <= COORD_MAX);
           if (!fits) { break; }
@@ -397,12 +395,12 @@ bool phase2_size(Chart const &c,
     uint32_t const kind{ static_cast<uint32_t>(c.states[i].kind) };
     Wide const ring{ bare_pseudostate(c, out.sub, b, i) ? Wide{ 0 }
                                                         : (2 * static_cast<Wide>(p.pad)) };
-    Wide const w{ imax(imax(Wide{ b.min_w }, Wide{ packed.w }),
-                       Wide{ p.kind_min_w[kind] }) +
-                  ring };
-    Wide const h{ imax(Wide{ b.h_before } + packed.h + b.h_after,
-                       Wide{ p.kind_min_h[kind] }) +
-                  ring };
+    Wide const w{
+      imax(imax(Wide{ b.min_w }, Wide{ packed.w }), Wide{ p.kind_min_w[kind] }) + ring
+    };
+    Wide const h{
+      imax(Wide{ b.h_before } + packed.h + b.h_after, Wide{ p.kind_min_h[kind] }) + ring
+    };
     if ((w > COORD_MAX) || (h > COORD_MAX)) {
       overflow(diags, ElemKind::State, i);
       ok = false;
