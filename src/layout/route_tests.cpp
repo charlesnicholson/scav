@@ -4,6 +4,7 @@
 #include "layout/route.h"
 
 #include "layout/decompose.h"
+#include "layout/label.h"
 #include "layout/order.h"
 #include "layout/router.h"
 #include "layout/size.h"
@@ -288,6 +289,90 @@ TEST_CASE("route: clears trim each end toward the other, capped at half") {
   CHECK(r.points[1].x == 515);
 }
 
+TEST_CASE("route: a clear against a leg of no length trims nothing") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ empty_orders(c, g) };
+  SizedLayout z{ blank(c, o) };
+  // One rect for both, so the straight line between the two centres is a point.
+  z.state[a.v] = { .x = 100, .y = 100, .w = 40, .h = 40 };
+  z.state[b.v] = { .x = 100, .y = 100, .w = 40, .h = 40 };
+  std::vector<scav_path_clear> const clears{ { .src = 30, .dst = 30 } };
+  scav_spaces const s{ .path_clear = clears.data(), .n_path_clear = 1 };
+
+  Routes const r{ phase3_route(c, g, o, z, s, profile(), STRAIGHT) };
+  REQUIRE(r.route[0].len == 2);
+  CHECK((r.points[0] == scav_point{ .x = 120, .y = 120 }));
+  CHECK((r.points[1] == scav_point{ .x = 120, .y = 120 }));
+}
+
+TEST_CASE("route: a tombstoned state is no obstacle to the frame it sat in") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const gone{ build_state(c, root, "G", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  c.states[gone.v].live = 0;
+
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ empty_orders(c, g) };
+  SizedLayout z{ blank(c, o) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 40, .h = 40 };
+  z.state[b.v] = { .x = 400, .y = 0, .w = 40, .h = 40 };
+  z.state[gone.v] = { .x = 100, .y = -100, .w = 200, .h = 240 };  // right across the way
+  z.sub[root.v] = { .x = 0, .y = 0, .w = 440, .h = 40 };
+  z.chart = { .x = -100, .y = -200, .w = 700, .h = 500 };
+
+  OrthogonalRouter const orthogonal;
+  Routes const r{ phase3_route(c, g, o, z, {}, profile(), orthogonal) };
+  CHECK(r.degraded() == 0);
+  REQUIRE(r.route[0].len == 2);  // straight through where the tombstone lay
+  CHECK(r.points[0].y == 20);
+  CHECK(r.points[1].y == 20);
+}
+
+TEST_CASE("route: a port with no boundary node falls back on the crossed box's centre") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
+  StateId const s{ build_state(c, inner, "S", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  build_trans(c, s, d, TransKind::External, {});
+
+  SplitGraph const g{ decompose(c) };
+  REQUIRE(g.segments[0].dst_port != INVALID);
+  SubmachineOrders o{ empty_orders(c, g) };
+  SizedLayout z{ blank(c, o) };
+  z.state[comp.v] = { .x = 0, .y = 0, .w = 200, .h = 200 };
+  z.state[s.v] = { .x = 20, .y = 60, .w = 100, .h = 40 };
+  z.state[d.v] = { .x = 400, .y = 0, .w = 100, .h = 40 };
+  z.sub[root.v] = { .x = 0, .y = 0, .w = 500, .h = 200 };
+  z.sub[inner.v] = { .x = 10, .y = 10, .w = 180, .h = 180 };
+
+  SUBCASE("no ordering node behind the port") {
+    o.seg_port[0] = 0;  // the port is named, but seg_node stays INVALID
+    Routes const r{ phase3_route(c, g, o, z, {}, profile(), STRAIGHT) };
+    REQUIRE(r.port[0].len == 1);
+    CHECK(r.slots[0].x == 100);  // the composite's centre
+    CHECK(r.slots[0].y == 100);
+    CHECK(r.slots[0].side == 0);
+    CHECK(r.slots[0].boundary_depth == 0);
+  }
+  SUBCASE("no segment behind the port at all") {
+    Routes const r{ phase3_route(c, g, o, z, {}, profile(), STRAIGHT) };
+    REQUIRE(r.port[0].len == 1);
+    CHECK(r.slots[0].x == 100);
+    CHECK(r.slots[0].y == 100);
+  }
+}
+
 TEST_CASE("route: a path box centres on its route's middle point") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
@@ -410,6 +495,278 @@ class ScriptedRouter final : public Router {
 };
 
 }  // namespace
+
+namespace {
+
+// Every net routed as a straight line, with one net's index reported as a named
+// failure: the counters and `failed` are what phase 3 makes of that.
+class FailingRouter final : public Router {
+ public:
+  FailingRouter(uint32_t net, RouteFailure cause) : which{ net }, how{ cause } {}
+  [[nodiscard]] RouterName name() const override {
+    return { .bytes = "failing", .len = 7 };
+  }
+  [[nodiscard]] uint32_t version() const override { return 1; }
+  void route(RouteInput const &in, RouteOutput &out) const override {
+    out.points.clear();
+    out.net_points.clear();
+    out.metrics.clear();
+    for (uint32_t n = 0; n < in.nets.size(); ++n) {
+      uint32_t const off{ static_cast<uint32_t>(out.points.size()) };
+      out.points.push_back(in.nets[n].src);
+      out.points.push_back(in.nets[n].dst);
+      scav_span const at{ .off = off, .len = 2 };
+      out.net_points.push_back(at);
+      RouteMetrics m;
+      measure(out.points, at, m);
+      if (n == which) { m.failed = how; }
+      out.metrics.push_back(m);
+    }
+  }
+
+ private:
+  uint32_t which;
+  RouteFailure how;
+};
+
+// One elbow per net through a shared height, which is the one shape a lane is a
+// run of. `margin` is the knob phase 3 reads to decide whether to nudge at all.
+class LaneRouter final : public Router {
+ public:
+  explicit LaneRouter(int32_t want) : wanted{ want } {}
+  [[nodiscard]] RouterName name() const override { return { .bytes = "lane", .len = 4 }; }
+  [[nodiscard]] uint32_t version() const override { return 1; }
+  [[nodiscard]] int32_t margin(scav_profile const & /*p*/) const override {
+    return wanted;
+  }
+  void route(RouteInput const &in, RouteOutput &out) const override {
+    out.points.clear();
+    out.net_points.clear();
+    out.metrics.clear();
+    for (RouteNet const &net : in.nets) {
+      uint32_t const off{ static_cast<uint32_t>(out.points.size()) };
+      out.points.push_back(net.src);
+      out.points.push_back({ .x = net.src.x, .y = LANE });
+      out.points.push_back({ .x = net.dst.x, .y = LANE });
+      out.points.push_back(net.dst);
+      scav_span const at{ .off = off, .len = 4 };
+      out.net_points.push_back(at);
+      RouteMetrics m;
+      measure(out.points, at, m);
+      out.metrics.push_back(m);
+    }
+  }
+
+  static constexpr int32_t LANE{ 100 };
+
+ private:
+  int32_t wanted;
+};
+
+}  // namespace
+
+namespace {
+
+// A router that answers a frame with nothing at all, which is the one shape
+// phase 3 cannot read a polyline, a metric or a failure cause out of.
+class MuteRouter final : public Router {
+ public:
+  [[nodiscard]] RouterName name() const override { return { .bytes = "mute", .len = 4 }; }
+  [[nodiscard]] uint32_t version() const override { return 1; }
+  void route(RouteInput const & /*in*/, RouteOutput &out) const override {
+    out.points.clear();
+    out.net_points.clear();
+    out.metrics.clear();
+  }
+};
+
+}  // namespace
+
+TEST_CASE("route: a net the router said nothing about leaves no polyline behind") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ empty_orders(c, g) };
+  SizedLayout z{ blank(c, o) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
+  z.state[b.v] = { .x = 300, .y = 0, .w = 100, .h = 40 };
+  z.sub[root.v] = { .x = 0, .y = 0, .w = 400, .h = 40 };
+
+  MuteRouter const mute;
+  Routes const r{ phase3_route(c, g, o, z, {}, profile(), mute) };
+  CHECK(r.route[0].len == 0);
+  CHECK(r.points.empty());
+  // No metric came back either, so nothing is counted as a fallback.
+  CHECK(r.degraded() == 0);
+  CHECK(r.failed[0] == 0);
+}
+
+TEST_CASE("route: the transitions marked failed are the ones with a fallen-back net") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, d, TransKind::External, {});
+  build_trans(c, d, a, TransKind::External, {});
+
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ empty_orders(c, g) };
+  SizedLayout z{ blank(c, o) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
+  z.state[b.v] = { .x = 200, .y = 0, .w = 100, .h = 40 };
+  z.state[d.v] = { .x = 400, .y = 0, .w = 100, .h = 40 };
+  z.sub[root.v] = { .x = 0, .y = 0, .w = 500, .h = 40 };
+
+  SUBCASE("an unreachable end") {
+    FailingRouter const failing{ 1, RouteFailure::Unreachable };
+    Routes const r{ phase3_route(c, g, o, z, {}, profile(), failing) };
+    CHECK(r.failed[0] == 0);
+    CHECK(r.failed[1] == 1);
+    CHECK(r.failed[2] == 0);
+    CHECK(r.unreachable == 1);
+    CHECK(r.outside_region == 0);
+    CHECK(r.too_large == 0);
+    CHECK(r.degraded() == 1);
+  }
+  SUBCASE("an anchor outside the region") {
+    FailingRouter const failing{ 0, RouteFailure::OutsideRegion };
+    Routes const r{ phase3_route(c, g, o, z, {}, profile(), failing) };
+    CHECK(r.failed[0] == 1);
+    CHECK(r.failed[1] == 0);
+    CHECK(r.outside_region == 1);
+    CHECK(r.unreachable == 0);
+  }
+  SUBCASE("a graph past the budget") {
+    FailingRouter const failing{ 2, RouteFailure::TooLarge };
+    Routes const r{ phase3_route(c, g, o, z, {}, profile(), failing) };
+    CHECK(r.failed[2] == 1);
+    CHECK(r.too_large == 1);
+    CHECK(r.degraded() == 1);
+  }
+  SUBCASE("nothing at all") {
+    Routes const r{ phase3_route(c, g, o, z, {}, profile(), STRAIGHT) };
+    for (uint8_t const one : r.failed) { CHECK(one == 0); }
+    CHECK(r.degraded() == 0);
+  }
+}
+
+TEST_CASE("route: the unplaced count is the one the strip matching returned") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, a, TransKind::Internal, {});  // no route, so no strip to ride
+
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ empty_orders(c, g) };
+  SizedLayout z{ blank(c, o) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
+  z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 40 };
+  z.sub[root.v] = { .x = 0, .y = 0, .w = 500, .h = 40 };
+  z.chart = { .x = 0, .y = 0, .w = 500, .h = 200 };
+
+  std::vector<scav_path_box> const both{ { .subject = 0, .w = 20, .h = 8, .order = 0 },
+                                         { .subject = 1, .w = 20, .h = 8, .order = 0 } };
+  scav_spaces const s{ .path_box = both.data(), .n_path_box = 2 };
+  Routes const r{ phase3_route(c, g, o, z, s, profile(), STRAIGHT) };
+  REQUIRE(r.placed.size() == 2);
+  // One box rides its route and the other has none, which is exactly what the
+  // strip matching reports back.
+  std::vector<scav_rect> expected;
+  CHECK(place_labels(c, z, s, r.route, r.points, expected) == r.unplaced);
+  CHECK(r.unplaced == 1);
+}
+
+TEST_CASE("route: nothing is nudged for a router that asks for no margin") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const p{ build_state(c, root, "P", StateKind::Normal, {}) };
+  StateId const q{ build_state(c, root, "Q", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, p, q, TransKind::External, {});
+
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ empty_orders(c, g) };
+  SizedLayout z{ blank(c, o) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 40, .h = 40 };
+  z.state[b.v] = { .x = 200, .y = 0, .w = 40, .h = 40 };
+  z.state[p.v] = { .x = 0, .y = 200, .w = 40, .h = 40 };
+  z.state[q.v] = { .x = 200, .y = 200, .w = 40, .h = 40 };
+  z.sub[root.v] = { .x = 0, .y = 0, .w = 240, .h = 240 };
+  z.chart = { .x = -100, .y = -100, .w = 440, .h = 440 };
+
+  LaneRouter const asks{ 16 };
+  Routes const nudged{ phase3_route(c, g, o, z, {}, profile(), asks) };
+  CHECK(nudged.nudged.lanes == 1);
+  CHECK(nudged.nudged.moved == 2);
+  // The root frame has no owning state, so the region is what bounds it, and the
+  // region holds every point either net touches.
+  CHECK(nudged.points[nudged.route[0].off + 1].y == 92);
+  CHECK(nudged.points[nudged.route[1].off + 1].y == 108);
+
+  LaneRouter const silent{ 0 };
+  Routes const plain{ phase3_route(c, g, o, z, {}, profile(), silent) };
+  CHECK(plain.nudged.lanes == 0);
+  CHECK(plain.nudged.moved == 0);
+  // Untouched: both elbows still turn at the height the router put them at.
+  for (uint32_t t = 0; t < 2; ++t) {
+    CAPTURE(t);
+    scav_span const at{ plain.route[t] };
+    REQUIRE(at.len == 4);
+    CHECK(plain.points[at.off + 1].y == LaneRouter::LANE);
+    CHECK(plain.points[at.off + 2].y == LaneRouter::LANE);
+  }
+}
+
+TEST_CASE("route: a nudge inside a composite is bounded by that state's own box") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
+  StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, inner, "B", StateKind::Normal, {}) };
+  StateId const p{ build_state(c, inner, "P", StateKind::Normal, {}) };
+  StateId const q{ build_state(c, inner, "Q", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, p, q, TransKind::External, {});
+
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ empty_orders(c, g) };
+  SizedLayout z{ blank(c, o) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 40, .h = 40 };
+  z.state[b.v] = { .x = 200, .y = 0, .w = 40, .h = 40 };
+  z.state[p.v] = { .x = 0, .y = 200, .w = 40, .h = 40 };
+  z.state[q.v] = { .x = 200, .y = 200, .w = 40, .h = 40 };
+  z.sub[root.v] = { .x = 0, .y = 0, .w = 240, .h = 240 };
+  z.sub[inner.v] = { .x = 0, .y = 0, .w = 240, .h = 240 };
+  z.chart = { .x = -200, .y = -200, .w = 640, .h = 640 };
+
+  LaneRouter const asks{ 16 };
+  // A box that leaves the lane all the room it wants: the two members spread by
+  // the whole margin either side.
+  z.state[comp.v] = { .x = -40, .y = -40, .w = 320, .h = 320 };
+  Routes const wide{ phase3_route(c, g, o, z, {}, profile(), asks) };
+  REQUIRE(wide.nudged.lanes == 1);
+  CHECK(wide.points[wide.route[0].off + 1].y == 92);
+  CHECK(wide.points[wide.route[1].off + 1].y == 108);
+
+  // Eight units of it, centred on the lane. The region reaches a margin past
+  // every point either net touches, so only the owner's box can be doing this.
+  z.state[comp.v] = { .x = -40, .y = 96, .w = 320, .h = 8 };
+  Routes const tight{ phase3_route(c, g, o, z, {}, profile(), asks) };
+  REQUIRE(tight.nudged.lanes == 1);
+  CHECK(tight.points[tight.route[0].off + 1].y == 96);
+  CHECK(tight.points[tight.route[1].off + 1].y == 104);
+}
 
 TEST_CASE("route: nets join only where one ends exactly where the next begins") {
   // One transition out of a composite, so phase 3 has two nets to lay down.
