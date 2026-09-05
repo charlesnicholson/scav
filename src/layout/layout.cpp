@@ -16,6 +16,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <utility>
 #include <vector>
 
 namespace scav {
@@ -184,13 +185,24 @@ void write_columns(Chart &c, SizedLayout const &z, Routes const &r, uint32_t inp
   std::memcpy(column_data(c, gen), &n, 4);
 }
 
+// Every separation raised by one increment. False when the result leaves the
+// range the validator admits.
+bool inflate(scav_profile &p, int32_t by) {
+  p.rank_sep += by;
+  p.node_sep += by;
+  p.sub_sep += by;
+  return profile_validate(p);
+}
+
 }  // namespace
 
 bool layout_run(Chart &c,
                 scav_spaces const &s,
                 scav_layout_opts const &o,
                 std::vector<scav_placed> &placed,
-                std::vector<Diagnostic> &diags) {
+                std::vector<Diagnostic> &diags,
+                uint32_t *inflations) {
+  if (inflations != nullptr) { *inflations = 0; }
   scav_profile const &p{ o.profile };
   if (!profile_validate(p)) {
     diags.push_back({ .code = DiagCode::ProfileOutOfRange,
@@ -222,7 +234,31 @@ bool layout_run(Chart &c,
   SubmachineOrders const orders{ phase1_order(c, g, s, p) };
   SizedLayout sized;
   if (!phase2_size(c, g, orders, s, p, sized, diags)) { return false; }
-  Routes const routes{ phase3_route(c, g, orders, sized, s, p, *router) };
+  Routes routes{ phase3_route(c, g, orders, sized, s, p, *router) };
+
+  // `sized` and `routes` carry the best attempt so far, so the loop's own test
+  // reads that one while `settled` reads the attempt just made.
+  scav_profile wider{ p };
+  uint32_t fewest{ routes.degraded() };
+  // An increment of zero repeats one attempt to the cap, so it is not one.
+  for (int32_t k = 0; (routes.unreachable != 0) && (p.spacing_inflation_increment > 0) &&
+                      (k < p.spacing_inflation_cap);
+       ++k) {
+    if (!inflate(wider, p.spacing_inflation_increment)) { break; }
+    SubmachineOrders const next_orders{ phase1_order(c, g, s, wider) };
+    SizedLayout next_sized;
+    std::vector<Diagnostic> spilled;
+    if (!phase2_size(c, g, next_orders, s, wider, next_sized, spilled)) { break; }
+    Routes next{ phase3_route(c, g, next_orders, next_sized, s, wider, *router) };
+    bool const settled{ next.unreachable == 0 };
+    if (next.degraded() < fewest) {
+      fewest = next.degraded();
+      sized = std::move(next_sized);
+      routes = std::move(next);
+      if (inflations != nullptr) { *inflations = static_cast<uint32_t>(k) + 1; }
+    }
+    if (settled) { break; }
+  }
   placed = routes.placed;
 
   // Bounds everything laid out, not just the root submachine: a route bends into
@@ -239,6 +275,16 @@ bool layout_run(Chart &c,
   for (scav_rect const &at : routes.placed) {
     cover(at.x, at.y);
     cover(at.x + at.w, at.y + at.h);
+  }
+
+  // `failed` is parallel to the transitions, so one walk emits the findings in
+  // ordinal order.
+  for (uint32_t t = 0; t < routes.failed.size(); ++t) {
+    if (routes.failed[t] == 0) { continue; }
+    diags.push_back({ .code = DiagCode::RouteDegraded,
+                      .subject = { .kind = ElemKind::Transition, .ordinal = t },
+                      .doc = { INVALID },
+                      .src = {} });
   }
 
   write_columns(c, sized, routes, inputs_digest(s, o));
