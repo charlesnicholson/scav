@@ -1374,6 +1374,8 @@ TEST_CASE("layout: no corpus chart routes an edge through a box") {
   // at zero, so one violation settles the comparison on the first tier.
   scav_profile const p{ readable() };
   std::string report;
+  uint32_t uturns{ 0 };
+  uint32_t collapsed{ 0 };
   for (char const *name : { "axis.scav",
                             "bottler.scav",
                             "brew.scav",
@@ -1399,6 +1401,20 @@ TEST_CASE("layout: no corpus chart routes an edge through a box") {
       scav_span const route{ row_of<scav_span>(c, "scav.geom.route", t) };
       if (route.len < 2) { continue; }
       Transition const &tr{ c.transitions[t] };
+      // Nudging displaces a segment and drags the legs either end (11.5), and a
+      // displacement past a leg's own length turns that leg round.
+      for (uint32_t k = 0; (k + 1) < route.len; ++k) {
+        scav_point const a{ row_of<scav_point>(c, "scav.geom.point", route.off + k) };
+        scav_point const b{ row_of<scav_point>(c, "scav.geom.point", route.off + k + 1) };
+        if ((a.x == b.x) && (a.y == b.y)) { ++collapsed; }
+        if ((k + 2) >= route.len) { continue; }
+        scav_point const d{ row_of<scav_point>(c, "scav.geom.point", route.off + k + 2) };
+        Wide const cross{ ((Wide{ b.x } - a.x) * (Wide{ d.y } - b.y)) -
+                          ((Wide{ b.y } - a.y) * (Wide{ d.x } - b.x)) };
+        Wide const dot{ ((Wide{ b.x } - a.x) * (Wide{ d.x } - b.x)) +
+                        ((Wide{ b.y } - a.y) * (Wide{ d.y } - b.y)) };
+        if ((cross == 0) && (dot < 0)) { ++uturns; }
+      }
       for (uint32_t k = 0; (k + 1) < route.len; ++k) {
         scav_point const a{ row_of<scav_point>(c, "scav.geom.point", route.off + k) };
         scav_point const b{ row_of<scav_point>(c, "scav.geom.point", route.off + k + 1) };
@@ -1455,6 +1471,8 @@ TEST_CASE("layout: no corpus chart routes an edge through a box") {
   }
   if (!report.empty()) { MESSAGE("edges through boxes:\n", report); }
   CHECK(report.empty());
+  CHECK(uturns == 0);
+  CHECK(collapsed == 0);
 }
 
 TEST_CASE("layout: fuzzed charts and spaces either lay out or diagnose") {
