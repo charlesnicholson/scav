@@ -217,7 +217,10 @@ uint32_t place_labels(Chart const &c,
         if (flat == (a.x == b.x)) { continue; }
         int32_t const lo{ flat ? imin(a.x, b.x) : imin(a.y, b.y) };
         int32_t const hi{ flat ? imax(a.x, b.x) : imax(a.y, b.y) };
-        int32_t const first{ (chained && (k == prior_seg)) ? (prior_mid + 1) : lo };
+        // The sign of the leg's traversal: `dir` times a difference of two of
+        // its coordinates is how much further along the route the first lies.
+        int32_t const dir{ (flat ? (a.x < b.x) : (a.y < b.y)) ? 1 : -1 };
+        bool const bounded{ chained && (k == prior_seg) };
         for (uint32_t side = 0; side < 2; ++side) {
           for (int32_t strip = 0; strip < STRIPS; ++strip) {
             int32_t const off{ strip * step };
@@ -236,15 +239,17 @@ uint32_t place_labels(Chart const &c,
               if (chebyshev_gap(band, seg) <= (off + box.h)) { nearby.push_back(seg); }
             }
             for (int32_t slot = lo; slot <= (hi + (2 * step)); slot += step) {
-              // One slot past the high end is the high end itself, and the one
-              // after that the leg's exact centre.
+              // Both leg ends are slots whichever way it runs: the first is the
+              // low end, one past the high end is that end, then the centre.
               int32_t mid{ slot };
               if (slot > (hi + step)) {
                 mid = lo + floor_div(hi - lo, 2);
               } else if (slot > hi) {
                 mid = hi;
               }
-              if (mid < first) { continue; }
+              // Past the box before it is further along the route, which on a
+              // leg running backwards is the smaller coordinate.
+              if (bounded && (((mid - prior_mid) * dir) <= 0)) { continue; }
               scav_rect cand{ .x = 0, .y = 0, .w = box.w, .h = box.h };
               if (flat) {
                 cand.x = mid - floor_div(box.w, 2);

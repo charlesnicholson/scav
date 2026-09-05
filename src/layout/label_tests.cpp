@@ -191,6 +191,52 @@ TEST_CASE("label: a transition's second box goes past its first") {
   CHECK(!overlaps(placed[0], placed[1]));
 }
 
+TEST_CASE("label: a second box goes past the first along a right-to-left leg") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+
+  SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 1000, .h = 300 }) };
+  z.state[a.v] = { .x = 960, .y = 80, .w = 40, .h = 40 };
+  z.state[b.v] = { .x = 0, .y = 80, .w = 40, .h = 40 };
+  Lines const l{ lines_of({ { { .x = 960, .y = 100 }, { .x = 40, .y = 100 } } }) };
+  std::vector<scav_path_box> const boxes{ { .subject = 0, .w = 60, .h = 20, .order = 0 },
+                                          { .subject = 0, .w = 60, .h = 20, .order = 1 } };
+
+  std::vector<scav_rect> placed;
+  CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, placed) == 0);
+  CHECK((placed[0] == scav_rect{ .x = 470, .y = 80, .w = 60, .h = 20 }));
+  // Further along a leg running leftwards is the smaller x, the mirror of what
+  // the left-to-right case above asks for.
+  CHECK((placed[1] == scav_rect{ .x = 450, .y = 100, .w = 60, .h = 20 }));
+  CHECK(placed[1].x < placed[0].x);
+  CHECK(!overlaps(placed[0], placed[1]));
+}
+
+TEST_CASE("label: a second box goes past the first along a bottom-to-top leg") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+
+  SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 300, .h = 1000 }) };
+  z.state[a.v] = { .x = 80, .y = 960, .w = 40, .h = 40 };
+  z.state[b.v] = { .x = 80, .y = 0, .w = 40, .h = 40 };
+  Lines const l{ lines_of({ { { .x = 100, .y = 960 }, { .x = 100, .y = 40 } } }) };
+  std::vector<scav_path_box> const boxes{ { .subject = 0, .w = 60, .h = 20, .order = 0 },
+                                          { .subject = 0, .w = 60, .h = 20, .order = 1 } };
+
+  std::vector<scav_rect> placed;
+  CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, placed) == 0);
+  CHECK((placed[0] == scav_rect{ .x = 40, .y = 490, .w = 60, .h = 20 }));
+  CHECK((placed[1] == scav_rect{ .x = 40, .y = 470, .w = 60, .h = 20 }));
+  CHECK(placed[1].y < placed[0].y);
+  CHECK(!overlaps(placed[0], placed[1]));
+}
+
 TEST_CASE("label: a request with no route at all takes the centred fallback") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
