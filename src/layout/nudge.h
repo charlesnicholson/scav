@@ -17,9 +17,8 @@ struct NudgeStats {
   uint32_t moved{ 0 };
 };
 
-// `nets` are spans into `points`, which this rewrites in place. `region` bounds
-// every point and `bounds` the frame's own box, which the obstacle set never
-// carries and no displacement may cross.
+// `nets` are spans into `points`, rewritten in place. `region` bounds every
+// point and `bounds` is the frame's own box, which no displacement may cross.
 void nudge_lanes(scav_rect const &region,
                  scav_rect const &bounds,
                  std::vector<scav_rect> const &obstacles,

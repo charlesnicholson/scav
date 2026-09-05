@@ -1,8 +1,9 @@
-// One axis at a time: find the lanes two or more nets share, order the members
-// across the lane, and displace them onto integer offsets (11.5).
+// Finds the lanes two or more nets share, one axis at a time, and spreads their
+// members onto integer offsets.
 
 #include "layout/nudge.h"
 
+#include "layout/geom.h"
 #include "scav_int.h"
 #include "scav_stable_sort.h"
 
@@ -20,9 +21,8 @@ using Wide = int64_t;
 // leaves the real limits alone.
 constexpr Wide UNBOUNDED{ Wide{ 1 } << 40 };
 
-// A segment that may move: interior to its net, axis-aligned, and longer than
-// nothing. `lo`/`hi` are its extent along its own axis and `at` its position
-// across it, which is the coordinate a lane is keyed on.
+// An interior axis-aligned segment: `lo`/`hi` span its own axis and `at` is its
+// coordinate across it, which keys the lane.
 struct Member {
   uint32_t point{ 0 };  // index of the segment's first point
   uint32_t net{ 0 };    // -> nets, so a move is weighed against the other nets
@@ -32,30 +32,20 @@ struct Member {
   int32_t offset{ 0 };
 };
 
-bool same(scav_point a, scav_point b) { return (a.x == b.x) && (a.y == b.y); }
-
-bool overlaps_rect(scav_rect const &a, scav_rect const &b) {
-  return (a.x < (b.x + b.w)) && (b.x < (a.x + a.w)) && (a.y < (b.y + b.h)) &&
-         (b.y < (a.y + a.h));
-}
-
-// A segment as a rect, so one predicate covers a segment and a box. Zero on the
-// thin axis, which `overlaps_rect` treats as touching-not-overlapping -- exactly
-// the reading a route lying along a border needs.
+// A segment as a zero-thickness rect, so `overlaps` reads a run along a border
+// as touching rather than overlapping.
 scav_rect span_rect(scav_point a, scav_point b) {
   int32_t const x{ imin(a.x, b.x) };
   int32_t const y{ imin(a.y, b.y) };
   return { .x = x, .y = y, .w = imax(a.x, b.x) - x, .h = imax(a.y, b.y) - y };
 }
 
-// Obstacles block against their rect grown by `clear`, the same bumper the
-// router searches against (11.5), so a displaced segment cannot come to rest
-// hugging a border the router was at pains to stand off from.
+// The bumper the router searched against.
 scav_rect grow(scav_rect const &r, int32_t by) {
   return { .x = r.x - by, .y = r.y - by, .w = r.w + (2 * by), .h = r.h + (2 * by) };
 }
 
-bool inside(scav_rect const &outer, scav_rect const &r) {
+bool contains(scav_rect const &outer, scav_rect const &r) {
   return (r.x >= outer.x) && (r.y >= outer.y) && ((r.x + r.w) <= (outer.x + outer.w)) &&
          ((r.y + r.h) <= (outer.y + outer.h));
 }
@@ -99,9 +89,8 @@ void nudge_lanes(scav_rect const &region,
   std::vector<uint32_t> lane;
   for (uint32_t axis = 0; axis < 2; ++axis) {
     bool const horizontal{ axis == 0 };
-    // Rebuilt from the live points for each axis in turn: a horizontal
-    // displacement drags the vertical legs either side of it, and their extents
-    // and their arrival sides move with them.
+    // Rebuilt from the live points per axis: a horizontal displacement drags the
+    // vertical legs either side of it.
     members.clear();
     for (uint32_t net = 0; net < net_count; ++net) {
       scav_span const span{ nets[net] };
@@ -123,10 +112,8 @@ void nudge_lanes(scav_rect const &region,
         bool const forward{ horizontal ? (b.x < cpt.x) : (b.y < cpt.y) };
         scav_point const from{ forward ? a : d };
         m.toward = horizontal ? Wide{ from.y } : Wide{ from.x };
-        // The two legs the member drags, signed across the lane. A displacement
-        // past either one's own extent turns that leg round and doubles the
-        // polyline back over itself, so each caps the travel one short of
-        // collapsing itself, and a leg with no extent here caps it at nothing.
+        // The two dragged legs, signed across the lane; each caps the travel one
+        // short of turning itself round.
         Wide const u{ Wide{ m.at } - (horizontal ? a.y : a.x) };
         Wide const v{ (horizontal ? Wide{ d.y } : Wide{ d.x }) - m.at };
         m.up = UNBOUNDED;
@@ -184,22 +171,19 @@ void nudge_lanes(scav_rect const &region,
       Wide room_down{ horizontal ? (Wide{ region.y } + region.h) - at
                                  : (Wide{ region.x } + region.w) - at };
       Wide room_up{ horizontal ? (Wide{ at } - region.y) : (Wide{ at } - region.x) };
-      // The frame's own box, which the obstacle set never carries -- an owner is
-      // not an obstacle in its own frame -- and which `region` reaches past.
+      // The frame's own box bounds the room; `region` reaches past it.
       room_up = imin(room_up, Wide{ at } - (horizontal ? bounds.y : bounds.x));
-      room_down = imin(room_down,
-                       (horizontal ? (Wide{ bounds.y } + bounds.h)
-                                   : (Wide{ bounds.x } + bounds.w)) -
-                           at);
+      room_down = imin(
+          room_down,
+          (horizontal ? (Wide{ bounds.y } + bounds.h) : (Wide{ bounds.x } + bounds.w)) -
+              at);
 
       scav_rect const bar{ horizontal
                                ? scav_rect{ .x = lo, .y = at, .w = hi - lo, .h = 0 }
                                : scav_rect{ .x = at, .y = lo, .w = 0, .h = hi - lo } };
       for (scav_rect const &raw : obstacles) {
-        // Only a box the lane runs alongside can limit it; one it already runs
-        // through it was routed through legitimately (11.14), and that says
-        // nothing about the room either side.
-        if (overlaps_rect(bar, raw)) { continue; }
+        // Only a box the lane runs alongside limits it.
+        if (overlaps(bar, raw)) { continue; }
         scav_rect const box{ grow(raw, clear) };
         int32_t const span_lo{ horizontal ? box.x : box.y };
         int32_t const span_hi{ horizontal ? (box.x + box.w) : (box.y + box.h) };
@@ -209,17 +193,15 @@ void nudge_lanes(scav_rect const &region,
         int32_t const raw_lo{ horizontal ? raw.y : raw.x };
         int32_t const raw_hi{ horizontal ? (raw.y + raw.h) : (raw.x + raw.w) };
         if (raw_hi <= at) {
-          room_up = imin(room_up,
-                         Wide{ at } - (horizontal ? (box.y + box.h) : (box.x + box.w)));
+          room_up =
+              imin(room_up, Wide{ at } - (horizontal ? (box.y + box.h) : (box.x + box.w)));
         }
         if (raw_lo >= at) {
           room_down = imin(room_down, Wide{ horizontal ? box.y : box.x } - at);
         }
       }
 
-      // Sized to what every member can drag rather than to the widest, so the
-      // bundle stays evenly spaced instead of dropping the members that cannot
-      // reach their offset.
+      // Sized to what every member can drag, so the bundle stays evenly spaced.
       for (uint32_t j = 0; j < count; ++j) {
         room_up = imin(room_up, members[lane[j]].up);
         room_down = imin(room_down, members[lane[j]].down);
@@ -229,10 +211,8 @@ void nudge_lanes(scav_rect const &region,
       Wide const window{ room_up + room_down };
       if (window <= 0) { continue; }
 
-      // The window is not symmetric about the lane -- a box one side and open
-      // space the other is the common case -- so the bundle is sized to the whole
-      // of it and then slid back towards the lane as far as it will go. Centred
-      // where there is room both sides, which is the same expression.
+      // The bundle fills the window, then slides back towards the lane as far as
+      // it will go; with room both sides that centres it.
       Wide const step{ imin(Wide{ gap }, window / (count - 1)) };
       if (step <= 0) { continue; }
       Wide const bundle{ (count - 1) * step };
@@ -265,9 +245,8 @@ void nudge_lanes(scav_rect const &region,
           nc.x += m.offset;
         }
 
-        // Known good or not at all: the segment and the two legs it drags may not
-        // enter anything they were not already in, may not leave the region, may
-        // not turn round, and may not come to rest along another net.
+        // The segment and the two legs it drags: inside the region, no leg turned
+        // round, nothing newly entered, no new run along another net.
         std::array<scav_point, 4> const then{ a, b, cpt, d };
         std::array<scav_point, 4> const way{ a, nb, nc, d };
         std::array<scav_rect, 3> const was{ span_rect(a, b),
@@ -277,9 +256,8 @@ void nudge_lanes(scav_rect const &region,
                                             span_rect(nb, nc),
                                             span_rect(nc, d) };
         bool ok{ true };
-        for (scav_rect const &r : now) { ok = ok && inside(region, r); }
-        // A leg collapsed to nothing is a polyline with no direction at its end,
-        // and the arrowhead reads its direction off exactly that pair of points.
+        for (scav_rect const &r : now) { ok = ok && contains(region, r); }
+        // The arrowhead reads its direction off the end pair, so no leg collapses.
         ok = ok && !(same(a, nb) || same(nc, d));
         // Second guard on the leg extents already folded into the room.
         ok = ok && kept(horizontal ? (Wide{ b.y } - a.y) : (Wide{ b.x } - a.x),
@@ -292,8 +270,8 @@ void nudge_lanes(scav_rect const &region,
           // for the one leg that was already inside it rather than for the member.
           scav_rect const box{ grow(raw, clear) };
           for (uint32_t r = 0; r < now.size(); ++r) {
-            ok = ok && (overlaps_rect(was[r], raw) || !overlaps_rect(now[r], raw));
-            ok = ok && (overlaps_rect(was[r], box) || !overlaps_rect(now[r], box));
+            ok = ok && (overlaps(was[r], raw) || !overlaps(now[r], raw));
+            ok = ok && (overlaps(was[r], box) || !overlaps(now[r], box));
           }
         }
         // A leg may keep only a shared run it already had, so the lane a member

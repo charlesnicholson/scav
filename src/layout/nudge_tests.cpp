@@ -295,9 +295,9 @@ TEST_CASE("nudge: a vertical lane is measured after the horizontal one has moved
 TEST_CASE("nudge: a displacement onto another net's segment is refused") {
   // The lower member's 24 lands it exactly along a third net, trading the lane
   // it left for the one it makes.
-  std::vector<scav_point> points{ pt(0, 0),     pt(0, 100),   pt(200, 100), pt(200, 300),
-                                  pt(0, 400),   pt(0, 100),   pt(200, 100), pt(200, 500),
-                                  pt(0, 124),   pt(200, 124) };
+  std::vector<scav_point> points{ pt(0, 0),   pt(0, 100),  pt(200, 100), pt(200, 300),
+                                  pt(0, 400), pt(0, 100),  pt(200, 100), pt(200, 500),
+                                  pt(0, 124), pt(200, 124) };
   std::vector<scav_span> const nets{ scav_span{ .off = 0, .len = 4 },
                                      scav_span{ .off = 4, .len = 4 },
                                      scav_span{ .off = 8, .len = 2 } };

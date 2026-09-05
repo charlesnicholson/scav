@@ -259,7 +259,13 @@ Routes phase3_route(Chart const &c,
     // same obstacles, and the obstacles are in hand only here (11.5).
     if (margin > 0) {
       scav_rect const frame{ (owner.v == INVALID) ? region : z.state[owner.v] };
-      nudge_lanes(region, frame, in.obstacles, margin, margin, ro.net_points, ro.points,
+      nudge_lanes(region,
+                  frame,
+                  in.obstacles,
+                  margin,
+                  margin,
+                  ro.net_points,
+                  ro.points,
                   out.nudged);
     }
 
