@@ -256,9 +256,7 @@ Routes phase3_route(Chart const &c,
     }
     router.route(in, ro);
 
-    // Separated before the nets are laid end to end, because a lane is a
-    // property of one frame: two nets share it by both being routed against the
-    // same obstacles, and the obstacles are in hand only here (11.5).
+    // Nudged per frame, while the frame's obstacles are in hand.
     if (margin > 0) {
       scav_rect const frame{ (owner.v == INVALID) ? region : z.state[owner.v] };
       nudge_lanes(region,

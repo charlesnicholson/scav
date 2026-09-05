@@ -130,11 +130,8 @@ uint32_t ortho_index_of(std::vector<int32_t> const &v, int32_t at) {
 }
 
 scav_point ortho_escape_box(scav_point at, scav_point toward, scav_rect const &r) {
-  // How far outside the box `toward` lies on each axis, which is not the same as
-  // how far it is from a candidate point on the border. Measuring to the border
-  // charges an exit for the distance along the face it leaves through, so the
-  // longer a face is the worse its own perpendicular exit scores -- which is how
-  // a 4x60pt fork bar came to be left through a 4pt end.
+  // How far outside the box `toward` lies on each axis, measured from the box's
+  // span rather than from a border point, so a face's length does not count.
   auto const beyond = [](int32_t v, int32_t lo, int32_t len) {
     Wide const hi{ Wide{ lo } + len };
     if (v < lo) { return Wide{ lo } - v; }
@@ -144,11 +141,8 @@ scav_point ortho_escape_box(scav_point at, scav_point toward, scav_rect const &r
   Wide const dx{ beyond(toward.x, r.x, r.w) };
   Wide const dy{ beyond(toward.y, r.y, r.h) };
 
-  // The dominant separation picks the axis, and a tie goes to x because that is
-  // the layering axis (11.3): an end leaves through the face the flow runs
-  // through unless the other end is genuinely stacked above or below it. The
-  // side within the axis is the nearer border, which is total for a `toward`
-  // inside the span as well as outside it.
+  // The dominant separation picks the axis, a tie going to the layering axis x;
+  // the side is the nearer border, which is total for a `toward` inside the span.
   if (dx >= dy) {
     bool const left{ (Wide{ toward.x } - r.x) <= ((Wide{ r.x } + r.w) - toward.x) };
     return { .x = left ? r.x : (r.x + r.w), .y = at.y };

@@ -25,10 +25,7 @@ constexpr scav_profile READABLE{
   .line_height_k_num = 7,
   .line_height_k_den = 5,
   // StateKind order: Normal, Initial, Final, Choice, Junction, Fork, Join,
-  // History, DeepHistory. The fork and join bars are thin across the layering
-  // axis and long across the other, because ranks run in +x (11.3): an edge
-  // reaches them on a left or right face, and those are the faces that must be
-  // long enough to hold a fan-out.
+  // History, DeepHistory. Fork and join bars are thin in x, tall in y.
   .kind_min_w = { 40 * PT,
                   14 * PT,
                   14 * PT,

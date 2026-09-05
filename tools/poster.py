@@ -285,11 +285,12 @@ nothing.</li>
 non-first concurrent region is rejected outright, so the harness anchors that
 endpoint at its enclosing composite and says so. The arrow you see is not the
 arrow the model holds.</li>
-<li><b>What is still missing from scav is between the wires, not the wires.</b>
-No chart here routes an edge through a box. Two things are unbuilt and both are
-visible: nothing separates two edges that reach the same lane, so they draw as
-one polyline that fans out at its ends, and nothing places a transition label
-away from a state, so most of them land on a name.</li>
+<li><b>scav's remaining defects are between the wires, not the wires.</b>
+No chart here routes an edge through a box, edges reaching one lane are nudged
+apart, and labels sit beside their own route. What is left on the corpus is 136
+of 917 segments still sharing a run and 9 of 203 labels on a state box; the
+combinatorial nudging stage and rip-up-and-reroute that would take those are
+still design.</li>
 </ul>
 <table class="summary"><thead><tr><th>engine</th><th>total area</th>
 <th>median aspect</th><th>smallest of three</th></tr></thead>
