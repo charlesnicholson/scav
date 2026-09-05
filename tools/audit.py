@@ -188,10 +188,14 @@ def audit(svg, every, chart, doc, verbose):
 
         # The composite a transition runs inside encloses its own label, so only
         # the text bands that composite reserved are out of bounds for it (11.6).
+        # A transition with no route is the exception: nothing placed its label,
+        # and the builder draws it in the band its source reserved for exactly it.
         edge = doc["transitions"][int(ident)]
         under = enclosing(doc, edge["src"]) | enclosing(doc, edge["dst"])
+        own_band = edge["src"] if not doc["geometry"]["route"][int(ident)] else None
         for i in live:
-            hit = (any(struck(band[i]) for band in bands) if i in under
+            hit = (any(struck(band[i]) for j, band in enumerate(bands)
+                       if not (j == 1 and i == own_band)) if i in under
                    else struck(rects[i]))
             if hit:
                 note("label over a state box", f"t{ident} at ({x},{y})+{length}")
