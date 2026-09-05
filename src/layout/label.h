@@ -1,8 +1,8 @@
 #ifndef SCAV_LAYOUT_LABEL_H_INCLUDED
 #define SCAV_LAYOUT_LABEL_H_INCLUDED
 
-// Path boxes onto the finished routes: one strip either side of each leg,
-// slid along it, the feasible candidate nearest where centring would have put it.
+// Path boxes onto the finished routes: one strip either side of each leg, slid
+// along it, the feasible candidate least at risk of reading as somebody else's.
 
 #include "layout/geom.h"
 #include "layout/size.h"

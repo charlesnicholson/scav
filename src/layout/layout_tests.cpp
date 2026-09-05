@@ -3,6 +3,7 @@
 
 #include "layout/cost.h"
 #include "layout/decompose.h"
+#include "layout/geom.h"
 #include "layout/order.h"
 #include "layout/route.h"
 #include "layout/size.h"
@@ -407,9 +408,10 @@ TEST_CASE("layout: a wide placed box is slid inside rather than hung off") {
   CHECK((placed[0].y + placed[0].h) <= (after.y + after.h));
 }
 
-TEST_CASE("layout: a placed box sits beside the longest leg of its route") {
-  // Phase 1 widens a rank boundary by the widest box crossing it (11.3), and that
-  // is where the box goes; the polyline's middle point is usually over a state.
+TEST_CASE("layout: a placed box rides a leg of its own route, clear of every other") {
+  // Phase 1 widens a rank boundary by the widest box crossing it (11.3), and
+  // placement puts the box on a strip beside one of that route's legs — the one
+  // that leaves it nearer its own line than any stranger's (11.6).
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -426,41 +428,45 @@ TEST_CASE("layout: a placed box sits beside the longest leg of its route") {
   std::vector<scav_placed> const placed{ run(c, s, readable()) };
   REQUIRE(placed.size() == 1);
 
-  scav_span const r{ row_of<scav_span>(c, "scav.geom.route", 2) };
-  REQUIRE(r.len >= 2);
-  int32_t const cx{ placed[0].x + (placed[0].w / 2) };
-  int32_t const cy{ placed[0].y + (placed[0].h / 2) };
-
-  // The longest horizontal leg, found here rather than trusted from the
-  // implementation. Horizontal is the direction text and the boundary both run.
-  int64_t longest{ -1 };
-  scav_point best_a{};
-  scav_point best_b{};
-  for (uint32_t k = 0; (k + 1) < r.len; ++k) {
-    scav_point const p0{ row_of<scav_point>(c, "scav.geom.point", r.off + k) };
-    scav_point const p1{ row_of<scav_point>(c, "scav.geom.point", r.off + k + 1) };
-    if (p0.y != p1.y) { continue; }
-    int64_t const span{ imax(int64_t{ p0.x } - p1.x, int64_t{ p1.x } - p0.x) };
-    if (span > longest) {
-      longest = span;
-      best_a = p0;
-      best_b = p1;
+  // The nearest leg of each route, found here rather than trusted from the
+  // implementation.
+  struct Near {
+    int64_t away{ -1 };
+    scav_rect leg{};
+  };
+  auto const nearest = [&c, &placed](uint32_t trans) {
+    Near out;
+    scav_span const r{ row_of<scav_span>(c, "scav.geom.route", trans) };
+    for (uint32_t k = 0; (k + 1) < r.len; ++k) {
+      scav_point const p0{ row_of<scav_point>(c, "scav.geom.point", r.off + k) };
+      scav_point const p1{ row_of<scav_point>(c, "scav.geom.point", r.off + k + 1) };
+      scav_rect const leg{ span_rect(p0, p1) };
+      int64_t const away{ chebyshev_gap(placed[0], leg) };
+      if ((out.away < 0) || (away < out.away)) { out = { .away = away, .leg = leg }; }
     }
-  }
-  REQUIRE(longest > 0);
-  // One edge of the box lies on that leg and its centre along the leg is between
-  // the leg's ends: the strip beside the leg, not the line itself.
-  CAPTURE(cx);
-  CAPTURE(cy);
-  if (best_a.y == best_b.y) {
-    CHECK(((placed[0].y == best_a.y) || ((placed[0].y + placed[0].h) == best_a.y)));
-    CHECK(cx >= imin(best_a.x, best_b.x));
-    CHECK(cx <= imax(best_a.x, best_b.x));
+    return out;
+  };
+
+  Near const own{ nearest(2) };
+  REQUIRE(own.away >= 0);
+  // A strip is a whole box height off the leg, and there are five of them.
+  CHECK((own.away % placed[0].h) == 0);
+  CHECK(own.away < (5 * placed[0].h));
+  // Beside the leg's run rather than off one of its ends, which is what makes
+  // the gap above the perpendicular one the strips are cut on.
+  if (own.leg.h == 0) {
+    CHECK(placed[0].x <= (own.leg.x + own.leg.w));
+    CHECK(own.leg.x <= (placed[0].x + placed[0].w));
   } else {
-    CHECK(((placed[0].x == best_a.x) || ((placed[0].x + placed[0].w) == best_a.x)));
-    CHECK(cy >= imin(best_a.y, best_b.y));
-    CHECK(cy <= imax(best_a.y, best_b.y));
+    CHECK(placed[0].y <= (own.leg.y + own.leg.h));
+    CHECK(own.leg.y <= (placed[0].y + placed[0].h));
   }
+
+  // One line of its own text nearer its own route than either stranger's, which
+  // is what `label_near` charges for and what placement minimises first.
+  int64_t const other{ imin(nearest(0).away, nearest(1).away) };
+  REQUIRE(other >= 0);
+  CHECK((own.away + placed[0].h) <= other);
 }
 
 TEST_CASE("layout: reruns rewrite in place, bumping only the generation") {

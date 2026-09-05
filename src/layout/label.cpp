@@ -1,6 +1,6 @@
 // Strip matching over the finished routes: a leg's two sides are sliced into
-// strips, the box slides along each, and the feasible candidate nearest where
-// centring would have put it wins.
+// strips, the box slides along each, and the feasible candidate that reads as
+// its own transition's, then nearest where centring would have put it, wins.
 
 #include "layout/label.h"
 
@@ -30,17 +30,32 @@ struct Piece {
 // A candidate's whole identity, so the winner is a lexicographic minimum over
 // integers rather than an order of evaluation.
 struct Key {
+  Wide shortfall;
   Wide dist;
   uint32_t seg, side;
   int32_t strip, mid;
 };
 
 bool better(Key const &a, Key const &b) {
+  if (a.shortfall != b.shortfall) { return a.shortfall < b.shortfall; }
   if (a.dist != b.dist) { return a.dist < b.dist; }
   if (a.seg != b.seg) { return a.seg < b.seg; }
   if (a.side != b.side) { return a.side < b.side; }
   if (a.strip != b.strip) { return a.strip < b.strip; }
   return a.mid < b.mid;
+}
+
+// How far inside `reach` the nearest foreign segment lies, `reach` being the
+// candidate's gap to its own leg plus one line of its own text (11.6).
+Wide shortfall_of(scav_rect const &cand,
+                  Wide reach,
+                  std::vector<scav_rect> const &foreign) {
+  Wide nearest{ reach };
+  for (scav_rect const &seg : foreign) {
+    nearest = imin(nearest, Wide{ chebyshev_gap(cand, seg) });
+    if (nearest == 0) { break; }
+  }
+  return reach - nearest;
 }
 
 bool within(scav_rect const &outer, scav_rect const &inner) {
@@ -122,6 +137,8 @@ uint32_t place_labels(Chart const &c,
   };
 
   std::vector<scav_rect> blocked;
+  std::vector<scav_rect> foreign;
+  std::vector<scav_rect> nearby;
   std::vector<scav_rect> own;
   std::vector<uint32_t> settled;
   uint32_t fallbacks{ 0 };
@@ -139,7 +156,7 @@ uint32_t place_labels(Chart const &c,
     }
     scav_point const at{ anchor_of(points, r) };
     scav_rect best{ centred(at, box, z.chart) };
-    Key key{ .dist = -1, .seg = 0, .side = 0, .strip = 0, .mid = 0 };
+    Key key{ .shortfall = 0, .dist = -1, .seg = 0, .side = 0, .strip = 0, .mid = 0 };
     int32_t const step{ imax(box.h, 1) };
 
     if (r.len >= 2) {
@@ -155,10 +172,10 @@ uint32_t place_labels(Chart const &c,
         x1 = imax(x1, own[k].x + own[k].w);
         y1 = imax(y1, own[k].y + own[k].h);
       }
-      // Every candidate lies in the route's box grown by the box's extent plus
-      // the strips, so one pass over the obstacles here serves all of them.
-      int32_t const reach_x{ box.w + ((STRIPS - 1) * step) };
-      int32_t const reach_y{ box.h + ((STRIPS - 1) * step) };
+      // Every candidate lies in the route's box grown by the box's extent, the
+      // strips, and the box height the distance query reaches past them.
+      int32_t const reach_x{ box.w + ((STRIPS - 1) * step) + box.h };
+      int32_t const reach_y{ box.h + ((STRIPS - 1) * step) + box.h };
       scav_rect const region{ .x = x0 - reach_x,
                               .y = y0 - reach_y,
                               .w = (x1 - x0) + (2 * reach_x),
@@ -183,9 +200,13 @@ uint32_t place_labels(Chart const &c,
       for (uint32_t const j : settled) {
         if (overlaps(region, out[j])) { blocked.push_back(out[j]); }
       }
+      foreign.clear();
       for (Piece const &piece : pieces) {
         if (piece.trans == box.subject) { continue; }
-        if (overlaps(region, piece.at)) { blocked.push_back(piece.at); }
+        if (overlaps(region, piece.at)) {
+          blocked.push_back(piece.at);
+          foreign.push_back(piece.at);
+        }
       }
 
       for (uint32_t k = chained ? prior_seg : 0U; (k + 1) < r.len; ++k) {
@@ -200,6 +221,20 @@ uint32_t place_labels(Chart const &c,
         for (uint32_t side = 0; side < 2; ++side) {
           for (int32_t strip = 0; strip < STRIPS; ++strip) {
             int32_t const off{ strip * step };
+            // One band holds every candidate on this strip, each of them `off`
+            // from the leg, so what is out of reach is dropped once for all.
+            scav_rect const band{
+              .x = flat ? (lo - floor_div(box.w, 2))
+                        : ((side == 0) ? ((a.x - box.w) - off) : (a.x + off)),
+              .y = flat ? ((side == 0) ? ((a.y - box.h) - off) : (a.y + off))
+                        : (lo - floor_div(box.h, 2)),
+              .w = flat ? ((hi - lo) + box.w) : box.w,
+              .h = flat ? box.h : ((hi - lo) + box.h)
+            };
+            nearby.clear();
+            for (scav_rect const &seg : foreign) {
+              if (chebyshev_gap(band, seg) <= (off + box.h)) { nearby.push_back(seg); }
+            }
             for (int32_t slot = lo; slot <= (hi + (2 * step)); slot += step) {
               // One slot past the high end is the high end itself, and the one
               // after that the leg's exact centre.
@@ -220,14 +255,21 @@ uint32_t place_labels(Chart const &c,
               }
               Wide const dx{ (Wide{ cand.x } + floor_div(box.w, 2)) - at.x };
               Wide const dy{ (Wide{ cand.y } + floor_div(box.h, 2)) - at.y };
-              Key const here{ .dist = imax(dx, -dx) + imax(dy, -dy),
-                              .seg = k,
-                              .side = side,
-                              .strip = strip,
-                              .mid = mid };
-              // Keyed before tested: a candidate no better than the incumbent
-              // cannot win, so the obstacle sweep runs only on improvements.
+              Key here{ .shortfall = 0,
+                        .dist = imax(dx, -dx) + imax(dy, -dy),
+                        .seg = k,
+                        .side = side,
+                        .strip = strip,
+                        .mid = mid };
+              // Keyed before tested, and zero is the floor of any shortfall: one
+              // test with it standing in, then the real one, then the sweep.
               if ((key.dist >= 0) && !better(here, key)) { continue; }
+              if (!nearby.empty()) {
+                here.shortfall = shortfall_of(cand,
+                                              chebyshev_gap(cand, own[k]) + Wide{ box.h },
+                                              nearby);
+                if ((key.dist >= 0) && !better(here, key)) { continue; }
+              }
               if (!within(z.chart, cand)) { continue; }
               bool clear{ true };
               for (scav_rect const &obstacle : blocked) {

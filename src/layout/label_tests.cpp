@@ -146,6 +146,30 @@ TEST_CASE("label: a box takes the side clear of another transition's route") {
   CHECK((placed[0] == scav_rect{ .x = 220, .y = 150, .w = 60, .h = 20 }));
 }
 
+TEST_CASE("label: a box crosses to the far side of its own leg to keep its distance") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, a, TransKind::External, {});
+
+  SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 600, .h = 400 }) };
+  z.state[a.v] = { .x = 0, .y = 100, .w = 100, .h = 100 };
+  z.state[b.v] = { .x = 400, .y = 100, .w = 100, .h = 100 };
+  // Clear of the low side by half a line, so that side stays feasible and only
+  // the distance to the stranger tells the two apart.
+  Lines const l{ lines_of({ { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } },
+                            { { .x = 400, .y = 120 }, { .x = 100, .y = 120 } } }) };
+  std::vector<scav_path_box> const boxes{ { .subject = 0, .w = 60, .h = 20, .order = 0 } };
+
+  std::vector<scav_rect> placed;
+  CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, placed) == 0);
+  // Both sides are equally far from the centred placement and the low one wins
+  // that tie, so the far side is the shortfall's doing and nothing else.
+  CHECK((placed[0] == scav_rect{ .x = 220, .y = 150, .w = 60, .h = 20 }));
+}
+
 TEST_CASE("label: a transition's second box goes past its first") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
