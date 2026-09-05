@@ -2,7 +2,7 @@
 #define SCAV_LAYOUT_NUDGE_H_INCLUDED
 
 // A lane is a run of collinear overlapping interior segments across the nets of
-// one frame; its members are spread onto integer offsets either side of it.
+// one frame; its members spread onto integer offsets, one per bundle.
 
 #include "scav/scav_types.h"
 
@@ -15,6 +15,8 @@ struct NudgeStats {
   uint32_t lanes{ 0 };
   uint32_t spread{ 0 };  // lanes of those that had the room to take an offset
   uint32_t moved{ 0 };
+  uint32_t bundles{ 0 };  // members of a lane that run as one net and move as one
+  uint32_t refused{ 0 };  // bundles of those a member's own checks stopped
 };
 
 // `nets` are spans into `points`, rewritten in place. `region` bounds every

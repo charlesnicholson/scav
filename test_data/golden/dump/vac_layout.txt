@@ -62,7 +62,7 @@ chart vac "robot vacuum" (test_data/charts/vac.scav:3)
   include dock "dock.scav" -> test_data/charts/dock.scav (test_data/charts/vac.scav:4)
   include lamp "./led.scav" -> test_data/charts/led.scav (test_data/charts/vac.scav:7)
   include lamp "led.scav" -> test_data/charts/led.scav (test_data/charts/dock.scav:4)
-geometry structural 58c00d9e coordinate d8db71c9
+geometry structural 58c00d9e coordinate a590db5c
   chart 0,0 10785x11004
   state dock 4173,2823 6612x6299 before 4301,2951 6356x397 after 4301,8994 6356x0
   state lamp 0,0 3066x2535 before 128,128 2810x397 after 128,2407 2810x0
@@ -115,5 +115,5 @@ geometry structural 58c00d9e coordinate d8db71c9
   route lamp/Solid -> lamp/Off (1850,1792) (1754,1792) (1754,2407) (32,2407) (32,1274) (1376,1274) (1376,1226)
   route dock/lamp/$initial -> dock/lamp/Off (4653,6734) (5133,6734)
   route dock/lamp/Off -> dock/lamp/Blinking (5677,7061) (5677,7541) (5146,7541) (5146,7589)
-  route dock/lamp/Blinking -> dock/lamp/Solid (5863,7963) (6269,7963) (6269,6734) (6341,6734)
+  route dock/lamp/Blinking -> dock/lamp/Solid (5863,7963) (6221,7963) (6221,6734) (6317,6734)
   route dock/lamp/Solid -> dock/lamp/Off (6413,6734) (6317,6734) (6317,8578) (4333,8578) (4333,7157) (5677,7157) (5677,7109)
