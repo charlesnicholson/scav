@@ -3,6 +3,7 @@
 
 #include "layout/router_orthogonal.h"
 
+#include "layout/geom.h"
 #include "layout/router.h"
 #include "scav_int.h"
 #include "scav_stable_sort.h"
@@ -93,10 +94,6 @@ void heap_pop(OrthoScratch &s, Wide &f, Wide &g, uint32_t &node) {
   }
 }
 
-bool strictly_inside(scav_point p, scav_rect const &r) {
-  return (p.x > r.x) && (p.x < (r.x + r.w)) && (p.y > r.y) && (p.y < (r.y + r.h));
-}
-
 }  // namespace
 
 bool ortho_blocks_h(scav_rect const &r, int32_t y, int32_t x0, int32_t x1) {
@@ -168,7 +165,7 @@ scav_point ortho_escape(scav_point at,
   uint32_t chosen{ INVALID };
   Wide smallest{ -1 };
   for (uint32_t i = 0; i < boxes.size(); ++i) {
-    if (!strictly_inside(at, boxes[i])) { continue; }
+    if (!inside(at, boxes[i])) { continue; }
     Wide const area{ Wide{ boxes[i].w } * boxes[i].h };
     if ((smallest < 0) || (area < smallest)) {
       smallest = area;
@@ -457,7 +454,7 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
       ring.y = imin(imax(ring.y, lo_y), hi_y);
       bool ok{ (ring.x != attach.x) || (ring.y != attach.y) };
       for (scav_rect const &r : in.obstacles) {
-        if (strictly_inside(ring, r)) { ok = false; }
+        if (inside(ring, r)) { ok = false; }
       }
       if (ok) {
         lead.push_back(attach);

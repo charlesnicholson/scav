@@ -6,6 +6,7 @@
 #include "layout/nudge.h"
 
 #include "layout/decompose.h"
+#include "layout/geom.h"
 #include "layout/order.h"
 #include "layout/router.h"
 #include "layout/size.h"
@@ -35,13 +36,6 @@ scav_point trim(scav_point a, scav_point b, int32_t amount) {
   Wide const k{ imin(Wide{ amount }, floor_div(len, Wide{ 2 })) };
   return { .x = a.x + static_cast<int32_t>(floor_div(dx * k, len)),
            .y = a.y + static_cast<int32_t>(floor_div(dy * k, len)) };
-}
-
-bool same(scav_point a, scav_point b) { return (a.x == b.x) && (a.y == b.y); }
-
-bool overlaps(scav_rect const &a, scav_rect const &b) {
-  return (a.x < (b.x + b.w)) && (b.x < (a.x + a.w)) && (a.y < (b.y + b.h)) &&
-         (b.y < (a.y + a.h));
 }
 
 // One segment's routing problem, before it is grouped into its frame's batch.

@@ -5,6 +5,7 @@
 #include "layout/cost.h"
 
 #include "layout/decompose.h"
+#include "layout/geom.h"
 #include "layout/route.h"
 #include "layout/size.h"
 #include "scav/scav_core.h"
@@ -35,10 +36,6 @@ bool crosses(scav_point a, scav_point b, scav_point c, scav_point d) {
   return ((d1 > 0) != (d2 > 0)) && ((d3 > 0) != (d4 > 0));
 }
 
-bool inside(scav_point pt, scav_rect const &r) {
-  return (pt.x > r.x) && (pt.x < (r.x + r.w)) && (pt.y > r.y) && (pt.y < (r.y + r.h));
-}
-
 // The segment enters the rect's interior: either end inside, or it cuts one
 // of the four sides.
 bool enters(scav_point a, scav_point b, scav_rect const &r) {
@@ -49,11 +46,6 @@ bool enters(scav_point a, scav_point b, scav_rect const &r) {
   scav_point const br{ .x = r.x + r.w, .y = r.y + r.h };
   return crosses(a, b, tl, tr) || crosses(a, b, bl, br) || crosses(a, b, tl, bl) ||
          crosses(a, b, tr, br);
-}
-
-bool overlaps(scav_rect const &a, scav_rect const &b) {
-  return (a.x < (b.x + b.w)) && (b.x < (a.x + a.w)) && (a.y < (b.y + b.h)) &&
-         (b.y < (a.y + a.h));
 }
 
 // Touching or one separation apart on one axis while overlapping on the
@@ -96,7 +88,7 @@ CostTerms cost_terms(Chart const &c,
   t.area = Wide{ z.chart.w } * z.chart.h;
 
   // Every route segment once, with the transition it belongs to, so the
-  // crossing sweep below is over one flat list.
+  // pair sweep below is over one flat list.
   struct Piece {
     scav_point a, b;
     uint32_t trans;
@@ -117,24 +109,17 @@ CostTerms cost_terms(Chart const &c,
     }
   }
   for (uint32_t i = 0; i < pieces.size(); ++i) {
+    Piece const &u{ pieces[i] };
     for (uint32_t j = i + 1; j < pieces.size(); ++j) {
-      if (pieces[i].trans == pieces[j].trans) { continue; }
-      if (!crosses(pieces[i].a, pieces[i].b, pieces[j].a, pieces[j].b)) { continue; }
-      ++t.crossings;
-      ++crossings_of[pieces[i].trans];
-      ++crossings_of[pieces[j].trans];
-    }
-  }
-
-  // Two routes sharing a run draw as one polyline that fans out at its ends, so
-  // the term is the length they share rather than the number of pairs: a long
-  // overlap is one unreadable line and a short one is a corner two edges turn at
-  // the same place. Nudging (11.5) is what drives it down.
-  for (uint32_t i = 0; i < pieces.size(); ++i) {
-    for (uint32_t j = i + 1; j < pieces.size(); ++j) {
-      if (pieces[i].trans == pieces[j].trans) { continue; }
-      Piece const &u{ pieces[i] };
       Piece const &v{ pieces[j] };
+      if (u.trans == v.trans) { continue; }
+      if (crosses(u.a, u.b, v.a, v.b)) {
+        ++t.crossings;
+        ++crossings_of[u.trans];
+        ++crossings_of[v.trans];
+      }
+      // Corridor is the length one pair shares along one line, so a run three
+      // nets lie on is charged over its three pairs.
       bool const flat{ (u.a.y == u.b.y) && (v.a.y == v.b.y) && (u.a.y == v.a.y) };
       bool const upright{ (u.a.x == u.b.x) && (v.a.x == v.b.x) && (u.a.x == v.a.x) };
       if (!flat && !upright) { continue; }
