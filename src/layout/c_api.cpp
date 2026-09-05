@@ -15,7 +15,7 @@
 static_assert(sizeof(scav_box_space) == 12);
 static_assert(sizeof(scav_path_clear) == 8);
 static_assert(sizeof(scav_path_box) == 16);
-static_assert(sizeof(scav_profile) == 46 * sizeof(int32_t));
+static_assert(sizeof(scav_profile) == 47 * sizeof(int32_t));
 
 extern "C" {
 

@@ -15,7 +15,7 @@
 
 namespace scav {
 
-// The eight Tier-2 quantities before weighting, so a test reads one of them
+// The nine Tier-2 quantities before weighting, so a test reads one of them
 // rather than a sum.
 struct CostTerms {
   int64_t bends{ 0 };       // direction changes at a route's interior vertices
@@ -26,6 +26,9 @@ struct CostTerms {
   // Per placed box: another box, another transition's route, and per state its
   // `before`/`after` bands if it encloses an endpoint, else its whole rect.
   int64_t label{ 0 };
+  // Per placed box: how far short of its own height the box falls of being
+  // nearer its own route than every other transition's.
+  int64_t label_near{ 0 };
   int64_t aspect{ 0 };  // |w * dar_den - h * dar_num|
   int64_t area{ 0 };    // the root bounding box
 

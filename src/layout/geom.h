@@ -5,6 +5,7 @@
 // strict: rects touching do not overlap, and a point on a border is not inside.
 
 #include "scav/scav_types.h"
+#include "scav_int.h"
 
 namespace scav {
 
@@ -28,6 +29,14 @@ constexpr scav_rect span_rect(scav_point a, scav_point b) {
            .y = y,
            .w = ((a.x < b.x) ? b.x : a.x) - x,
            .h = ((a.y < b.y) ? b.y : a.y) - y };
+}
+
+// The Chebyshev gap between two rects: the larger of the two axes'
+// separations, and zero on the axis they overlap or touch on.
+constexpr int32_t chebyshev_gap(scav_rect const &a, scav_rect const &b) {
+  int32_t const dx{ imax(imax(b.x - (a.x + a.w), a.x - (b.x + b.w)), 0) };
+  int32_t const dy{ imax(imax(b.y - (a.y + a.h), a.y - (b.y + b.h)), 0) };
+  return imax(dx, dy);
 }
 
 }  // namespace scav

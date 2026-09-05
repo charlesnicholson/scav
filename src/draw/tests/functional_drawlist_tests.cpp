@@ -188,6 +188,7 @@ TEST_CASE("drawlist corpus: the cost terms on the rendered scale") {
                                 t.excess_len,
                                 t.adjacency,
                                 t.label,
+                                t.label_near,
                                 t.aspect,
                                 t.area,
                                 scored.t2 }) {

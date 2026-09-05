@@ -154,6 +154,7 @@ TEST_CASE("bench: every registered router scores the corpus, term by term") {
                                   t.excess_len,
                                   t.adjacency,
                                   t.label,
+                                  t.label_near,
                                   t.aspect,
                                   t.area,
                                   scored.t2,

@@ -1495,6 +1495,7 @@ TEST_CASE("layout: the corpus cost vector is committed, term by term") {
                                 t.excess_len,
                                 t.adjacency,
                                 t.label,
+                                t.label_near,
                                 t.aspect,
                                 t.area,
                                 scored.t2 }) {

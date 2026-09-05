@@ -169,9 +169,11 @@ CostTerms cost_terms(Chart const &c,
       if (overlaps(r.placed[i], r.placed[j])) { ++t.label; }
     }
     uint32_t subject{ INVALID };
+    Wide height{ 0 };
     if ((s.path_box != nullptr) && (i < s.n_path_box) &&
         (s.path_box[i].subject < c.transitions.size())) {
       subject = s.path_box[i].subject;
+      height = s.path_box[i].h;
       mark(c.transitions[subject].src, 1);
       mark(c.transitions[subject].dst, 1);
     }
@@ -185,9 +187,23 @@ CostTerms cost_terms(Chart const &c,
         ++t.label;
       }
     }
+    // -1 until a leg of that kind is seen, so a routeless subject and a chart
+    // with one transition both fall out of `label_near` rather than into it.
+    Wide own{ -1 };
+    Wide other{ -1 };
     for (Piece const &piece : pieces) {
-      if (piece.trans == subject) { continue; }
-      if (overlaps(r.placed[i], span_rect(piece.a, piece.b))) { ++t.label; }
+      scav_rect const seg{ span_rect(piece.a, piece.b) };
+      Wide const away{ chebyshev_gap(r.placed[i], seg) };
+      if (piece.trans == subject) {
+        own = (own < 0) ? away : imin(own, away);
+        continue;
+      }
+      other = (other < 0) ? away : imin(other, away);
+      if (overlaps(r.placed[i], seg)) { ++t.label; }
+    }
+    if ((own >= 0) && (other >= 0)) {
+      Wide const shortfall{ (own + height) - other };
+      if (shortfall > 0) { t.label_near += shortfall; }
     }
     if (subject != INVALID) {
       mark(c.transitions[subject].src, 0);
@@ -281,7 +297,8 @@ Cost cost_of(CostTerms const &t, scav_profile const &p) {
            (Wide{ p.w_crossings } * t.crossings) +
            (Wide{ p.w_excess_len } * t.excess_len) +
            (Wide{ p.w_adjacency } * t.adjacency) + (Wide{ p.w_label } * t.label) +
-           (Wide{ p.w_aspect } * t.aspect) + (Wide{ p.w_area } * t.area);
+           (Wide{ p.w_label_near } * t.label_near) + (Wide{ p.w_aspect } * t.aspect) +
+           (Wide{ p.w_area } * t.area);
   return out;
 }
 

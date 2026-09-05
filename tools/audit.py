@@ -75,6 +75,14 @@ def flush(a, b, box):
     return False
 
 
+def gap(a, b):
+    """The Chebyshev gap between two rects: zero on an axis they overlap or touch
+    on, the larger of the two separations otherwise. Layout's own predicate."""
+    dx = max(b[0] - (a[0] + a[2]), a[0] - (b[0] + b[2]), 0)
+    dy = max(b[1] - (a[1] + a[3]), a[1] - (b[1] + b[3]), 0)
+    return max(dx, dy)
+
+
 def overlap(a, b, c, d):
     """Two collinear segments' shared length, or 0. Routes sharing a run read as
     one polyline that fans out at the ends; 11.5's nudging separates them."""
@@ -205,6 +213,17 @@ def audit(svg, every, chart, doc, verbose):
                 note("label over another route", f"t{ident} over t{other} {a}-{b}")
                 break
 
+        # A reader ties a label to the nearest line, so a box that is not nearer
+        # its own route than every other by a line of its own text reads as
+        # somebody else's -- 11.6's `label_near`, counted where it is inked. The
+        # em box is shorter than the line box layout reserved, so this is the
+        # conservative count of the two.
+        mine = [gap(em, span(a, b)) for a, b, other in legs if other == ident]
+        theirs = [gap(em, span(a, b)) for a, b, other in legs if other != ident]
+        if mine and theirs and min(mine) + size > min(theirs):
+            note("label nearer another route than its own",
+                 f"t{ident} own {min(mine)} other {min(theirs)}")
+
     # Two strings inked into the same place read as one unreadable string, which
     # is a different defect from a label over a box: nudging moves the routes a
     # label follows, but nothing moves two labels apart. 11.9's strip matching.
@@ -290,21 +309,22 @@ def main():
              "routes share a run": "route segments",
              "label over a state box": "transition labels",
              "label over another route": "transition labels",
+             "label nearer another route than its own": "transition labels",
              "texts overprint each other": "texts",
              "mark outside its glyph": "marks in a glyph"}
     for key in ("route segments", "route starts", "arrowheads", "region dividers",
                 "transition labels", "texts", "marks in a glyph"):
-        print(f"{key:<28} {total.get(key, 0)}")
+        print(f"{key:<40} {total.get(key, 0)}")
     print()
     # Not a ratio, so it sits outside the block below: the shared run's extent is
     # what nudging has to pay back, and the pair count alone hides which chart owes.
-    print(f"  {'shared run, grid units':<28} {total.get('overlapped units', 0)}")
+    print(f"  {'shared run, grid units':<40} {total.get('overlapped units', 0)}")
     clean = True
     for key, over in scale.items():
         count = total.get(key, 0)
         if count:
             clean = False
-        print(f"  {key:<28} {count} of {total.get(over, 0)}")
+        print(f"  {key:<40} {count} of {total.get(over, 0)}")
     if clean:
         print("\nnothing this audit knows how to see.")
     return 0

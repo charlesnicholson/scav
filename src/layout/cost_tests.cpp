@@ -245,6 +245,58 @@ TEST_CASE("cost: a placed box over another transition's route is a label cost") 
   CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label == 1);
 }
 
+TEST_CASE("cost: a box nearer a foreign route than its own is charged the shortfall") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, a, TransKind::External, {});
+
+  SizedLayout z{ blank(c) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 200 };
+  z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 200 };
+  scav_path_box const box{ .subject = 0, .w = 60, .h = 20, .order = 0 };
+  scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
+  // The box rides its own leg at y 150; the foreign leg's height above it is
+  // the only thing that changes between the cases.
+  auto const scored = [&](int32_t foreign_y) {
+    Routes r{ routes_of(
+        c,
+        { { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } },
+          { { .x = 400, .y = foreign_y }, { .x = 100, .y = foreign_y } } }) };
+    r.placed = { { .x = 200, .y = 130, .w = 60, .h = 20 } };
+    return cost_terms(c, decompose(c), z, r, s, profile()).label_near;
+  };
+
+  CHECK(scored(120) == 10);  // half a line of text nearer the stranger than it may be
+  CHECK(scored(110) == 0);   // one whole line away, which is the margin it owes
+  CHECK(scored(90) == 0);
+
+  // Strip 1: the box's own leg is one height away, so the stranger has to be
+  // one height further out again, and here it is not.
+  Routes strip1{ routes_of(c,
+                           { { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } },
+                             { { .x = 400, .y = 90 }, { .x = 100, .y = 90 } } }) };
+  strip1.placed = { { .x = 200, .y = 110, .w = 60, .h = 20 } };
+  CHECK(cost_terms(c, decompose(c), z, strip1, s, profile()).label_near == 20);
+}
+
+TEST_CASE("cost: with no other route to be near, no box is charged") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+
+  SizedLayout z{ blank(c) };
+  Routes r{ routes_of(c, { { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } } }) };
+  r.placed = { { .x = 200, .y = 130, .w = 60, .h = 20 } };
+  scav_path_box const box{ .subject = 0, .w = 60, .h = 20, .order = 0 };
+  scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label_near == 0);
+}
+
 TEST_CASE("cost: two placed boxes over each other are one label cost") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };

@@ -1444,7 +1444,7 @@
               "size": 4
             },
             {
-              "name": "w_aspect",
+              "name": "w_label_near",
               "type": {
                 "name": "int32_t",
                 "pointer": 0,
@@ -1454,7 +1454,7 @@
               "size": 4
             },
             {
-              "name": "w_area",
+              "name": "w_aspect",
               "type": {
                 "name": "int32_t",
                 "pointer": 0,
@@ -1464,7 +1464,7 @@
               "size": 4
             },
             {
-              "name": "portfolio_k",
+              "name": "w_area",
               "type": {
                 "name": "int32_t",
                 "pointer": 0,
@@ -1474,7 +1474,7 @@
               "size": 4
             },
             {
-              "name": "sweep_count",
+              "name": "portfolio_k",
               "type": {
                 "name": "int32_t",
                 "pointer": 0,
@@ -1484,7 +1484,7 @@
               "size": 4
             },
             {
-              "name": "congestion_iterations",
+              "name": "sweep_count",
               "type": {
                 "name": "int32_t",
                 "pointer": 0,
@@ -1494,7 +1494,7 @@
               "size": 4
             },
             {
-              "name": "ripup_cap",
+              "name": "congestion_iterations",
               "type": {
                 "name": "int32_t",
                 "pointer": 0,
@@ -1504,7 +1504,7 @@
               "size": 4
             },
             {
-              "name": "spacing_inflation_cap",
+              "name": "ripup_cap",
               "type": {
                 "name": "int32_t",
                 "pointer": 0,
@@ -1514,7 +1514,7 @@
               "size": 4
             },
             {
-              "name": "spacing_inflation_increment",
+              "name": "spacing_inflation_cap",
               "type": {
                 "name": "int32_t",
                 "pointer": 0,
@@ -1524,7 +1524,7 @@
               "size": 4
             },
             {
-              "name": "print_columns",
+              "name": "spacing_inflation_increment",
               "type": {
                 "name": "int32_t",
                 "pointer": 0,
@@ -1532,9 +1532,19 @@
               },
               "offset": 180,
               "size": 4
+            },
+            {
+              "name": "print_columns",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 184,
+              "size": 4
             }
           ],
-          "size": 184,
+          "size": 188,
           "align": 4,
           "padding": 0
         },
@@ -1597,7 +1607,7 @@
                 "const": false
               },
               "offset": 0,
-              "size": 184
+              "size": 188
             },
             {
               "name": "router",
@@ -1606,7 +1616,7 @@
                 "pointer": 0,
                 "const": false
               },
-              "offset": 184,
+              "offset": 188,
               "size": 4
             },
             {
@@ -1616,11 +1626,11 @@
                 "pointer": 0,
                 "const": false
               },
-              "offset": 188,
+              "offset": 192,
               "size": 4
             }
           ],
-          "size": 192,
+          "size": 196,
           "align": 4,
           "padding": 0
         }

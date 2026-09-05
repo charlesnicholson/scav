@@ -129,7 +129,7 @@ void write_rows(Chart &c, ColumnId id, std::vector<T> const &rows) {
   }
 }
 
-static_assert(sizeof(scav_profile) == 46 * sizeof(int32_t),
+static_assert(sizeof(scav_profile) == 47 * sizeof(int32_t),
               "the profile must stay a flat block of int32 with no padding, or the "
               "inputs digest below would hash bytes whose values are unspecified");
 
@@ -138,7 +138,7 @@ static_assert(sizeof(scav_profile) == 46 * sizeof(int32_t),
 uint32_t inputs_digest(scav_spaces const &s, scav_layout_opts const &o) {
   std::vector<scav_byte> b;
   // Padding is what forbids hashing a struct's bytes, and the assert above
-  // proves there is none, so the copy reads all 46 knobs and nothing else.
+  // proves there is none, so the copy reads all 47 knobs and nothing else.
   std::array<int32_t, sizeof(scav_profile) / sizeof(int32_t)> profile{};
   std::memcpy(profile.data(), &o.profile, sizeof(scav_profile));
   for (int32_t const field : profile) { append_i32(b, field); }

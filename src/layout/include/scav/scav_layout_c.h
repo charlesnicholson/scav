@@ -91,6 +91,7 @@ typedef struct {
   int32_t w_excess_len;
   int32_t w_adjacency;
   int32_t w_label;
+  int32_t w_label_near; /* [0, 1024] */
   int32_t w_aspect;
   int32_t w_area;
 
