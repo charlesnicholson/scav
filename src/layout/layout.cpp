@@ -22,6 +22,12 @@
 
 namespace scav {
 
+SCAV_INTERNAL_BEGIN
+// The inflation loop's decision, bracketed so a test reaches the case no chart
+// does. The prototype a test uses is its own; see scav_internal.h.
+bool inflation_done(uint32_t fewest, uint32_t degraded, uint32_t unreachable, bool &keep);
+SCAV_INTERNAL_END
+
 namespace {
 
 constexpr uint32_t RECT{ sizeof(scav_rect) };
@@ -199,13 +205,12 @@ bool inflate(scav_profile &p, int32_t by) {
 
 SCAV_INTERNAL_BEGIN
 
-// Whether the inflation loop is finished, and through `keep` whether this
-// attempt replaces the best so far. Bracketed because the case that matters is
-// one no chart reaches: only a router answering `outside_region` or `too_large`
-// where it used to answer `unreachable` produces an attempt that reaches every
-// end while degrading more, and the shipped one does not do that on any chart
-// in the corpus or the suite. The prototype a test uses is its own; see
-// scav_internal.h.
+// Whether the loop is finished, and through `keep` whether this attempt
+// replaces the best so far. The case that matters is one no chart reaches: only
+// a router answering `outside_region` or `too_large` where it used to answer
+// `unreachable` produces an attempt that reaches every end while degrading
+// more, and the shipped one does not do that on any chart in the corpus or the
+// suite.
 bool inflation_done(uint32_t fewest, uint32_t degraded, uint32_t unreachable, bool &keep) {
   keep = degraded < fewest;
   // Only the attempt that is kept can end the loop, because the kept attempt is
