@@ -36,6 +36,10 @@ struct Routes {
   uint32_t reseated{ 0 };
 
   NudgeStats nudged;
+
+  // Path boxes that found no strip clear of everything and took the centred
+  // placement instead (11.9).
+  uint32_t unplaced{ 0 };
 };
 
 // One net per segment, routed in that segment's frame, laid end to end. The

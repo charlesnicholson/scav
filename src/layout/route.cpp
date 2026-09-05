@@ -7,6 +7,7 @@
 
 #include "layout/decompose.h"
 #include "layout/geom.h"
+#include "layout/label.h"
 #include "layout/order.h"
 #include "layout/router.h"
 #include "layout/size.h"
@@ -318,42 +319,7 @@ Routes phase3_route(Chart const &c,
     out.route[t] = { .off = first_point, .len = count };
   }
 
-  // Centred on the longest leg, not the polyline's middle point: phase 1 widened
-  // a rank boundary by this box (11.3) and the leg crossing it is the long one.
-  out.placed.assign(s.n_path_box, {});
-  for (uint32_t i = 0; i < s.n_path_box; ++i) {
-    scav_path_box const &box{ s.path_box[i] };
-    scav_span const route{ (box.subject < n) ? out.route[box.subject] : scav_span{} };
-    // Horizontal first: ranks run left to right, so the widened boundary and a line
-    // of text run the same way. On a vertical leg a wide label hangs out sideways.
-    scav_point mid{};
-    Wide longest{ -1 };
-    for (uint32_t pass = 0; (pass < 2) && (longest < 0); ++pass) {
-      for (uint32_t k = 0; (k + 1) < route.len; ++k) {
-        scav_point const a{ out.points[route.off + k] };
-        scav_point const b{ out.points[route.off + k + 1] };
-        if ((pass == 0) && (a.y != b.y)) { continue; }
-        Wide const span{ imax(Wide{ a.x } - b.x, Wide{ b.x } - a.x) +
-                         imax(Wide{ a.y } - b.y, Wide{ b.y } - a.y) };
-        if (span <= longest) { continue; }
-        longest = span;
-        mid = { .x = a.x + static_cast<int32_t>(floor_div(Wide{ b.x } - a.x, Wide{ 2 })),
-                .y = a.y + static_cast<int32_t>(floor_div(Wide{ b.y } - a.y, Wide{ 2 })) };
-      }
-    }
-    if (longest < 0) { mid = (route.len == 0) ? scav_point{} : out.points[route.off]; }
-    // Slid inside rather than hung off: the chart rect bounds everything laid out
-    // (11.7a), so a label half outside grows the canvas to hold whitespace.
-    int32_t x{ mid.x - floor_div(box.w, 2) };
-    int32_t y{ mid.y - floor_div(box.h, 2) };
-    if (box.w <= z.chart.w) {
-      x = imin(imax(x, z.chart.x), (z.chart.x + z.chart.w) - box.w);
-    }
-    if (box.h <= z.chart.h) {
-      y = imin(imax(y, z.chart.y), (z.chart.y + z.chart.h) - box.h);
-    }
-    out.placed[i] = { .x = x, .y = y, .w = box.w, .h = box.h };
-  }
+  out.unplaced = place_labels(c, z, s, out.route, out.points, out.placed);
   return out;
 }
 

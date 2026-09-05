@@ -15,6 +15,7 @@ scav_static_library(scavlayout
   size.cpp
   route.cpp
   nudge.cpp
+  label.cpp
   cost.cpp
 )
 scav_install_library(scavlayout layout)
@@ -40,6 +41,7 @@ if(SCAV_BUILD_TESTS)
     size_tests.cpp
     route_tests.cpp
     nudge_tests.cpp
+    label_tests.cpp
     cost_tests.cpp
   )
   target_link_libraries(scav_layout_tests PRIVATE scavlayout_testable)

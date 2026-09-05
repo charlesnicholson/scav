@@ -13,6 +13,7 @@
 
 #include "doctest.h"
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -171,7 +172,80 @@ TEST_CASE("cost: an edge through a stranger's box counts, through its own does n
   CHECK(cost_terms(c, decompose(c), z, r, {}, profile()).through_box == 0);
 }
 
-TEST_CASE("cost: a placed box overlapping a state is a label cost") {
+TEST_CASE("cost: a placed box over a state neither endpoint is under costs") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const other{ build_state(c, root, "X", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+
+  SizedLayout z{ blank(c) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 100 };
+  z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 100 };
+  z.state[other.v] = { .x = 200, .y = -200, .w = 100, .h = 100 };
+  Routes r{ routes_of(c, { { { .x = 100, .y = 50 }, { .x = 400, .y = 50 } } }) };
+  r.placed = { { .x = 200, .y = -190, .w = 60, .h = 20 } };
+  scav_path_box const box{ .subject = 0, .w = 60, .h = 20, .order = 0 };
+  scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label == 1);
+
+  z.state[other.v] = { .x = 200, .y = 500, .w = 100, .h = 100 };
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label == 0);
+}
+
+TEST_CASE("cost: inside the composite it runs in, only the text bands cost") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const outer{ build_state(c, root, "Outer", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, outer, "main", {}) };
+  StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, inner, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+
+  SizedLayout z{ blank(c) };
+  z.state[outer.v] = { .x = 0, .y = 0, .w = 600, .h = 200 };
+  z.before[outer.v] = { .x = 10, .y = 10, .w = 580, .h = 30 };
+  z.state[a.v] = { .x = 50, .y = 80, .w = 100, .h = 60 };
+  z.state[b.v] = { .x = 400, .y = 80, .w = 100, .h = 60 };
+  Routes r{ routes_of(c, { { { .x = 150, .y = 110 }, { .x = 400, .y = 110 } } }) };
+  scav_path_box const box{ .subject = 0, .w = 60, .h = 20, .order = 0 };
+  scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
+
+  r.placed = { { .x = 200, .y = 90, .w = 60, .h = 20 } };  // in Outer, clear of its band
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label == 0);
+
+  r.placed = { { .x = 200, .y = 15, .w = 60, .h = 20 } };  // in Outer's title band
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label == 1);
+}
+
+TEST_CASE("cost: a placed box over another transition's route is a label cost") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, a, TransKind::External, {});
+
+  SizedLayout z{ blank(c) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 100 };
+  z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 100 };
+  Routes r{ routes_of(c,
+                      { { { .x = 100, .y = 50 }, { .x = 400, .y = 50 } },
+                        { { .x = 400, .y = 80 }, { .x = 100, .y = 80 } } }) };
+  scav_path_box const box{ .subject = 0, .w = 60, .h = 20, .order = 0 };
+  scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
+
+  // Straddling its own route is free and straddling the other one is not, so
+  // the two rects differ only in which line they cross.
+  r.placed = { { .x = 200, .y = 40, .w = 60, .h = 20 } };
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label == 0);
+
+  r.placed = { { .x = 200, .y = 70, .w = 60, .h = 20 } };
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label == 1);
+}
+
+TEST_CASE("cost: two placed boxes over each other are one label cost") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -182,11 +256,18 @@ TEST_CASE("cost: a placed box overlapping a state is a label cost") {
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 100 };
   z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 100 };
   Routes r{ routes_of(c, { { { .x = 100, .y = 50 }, { .x = 400, .y = 50 } } }) };
-  r.placed = { { .x = 50, .y = 40, .w = 60, .h = 20 } };  // over A
-  CHECK(cost_terms(c, decompose(c), z, r, {}, profile()).label == 1);
+  std::array<scav_path_box, 2> const boxes{
+    { { .subject = 0, .w = 60, .h = 20, .order = 0 },
+      { .subject = 0, .w = 60, .h = 20, .order = 1 } }
+  };
+  scav_spaces const s{ .path_box = boxes.data(), .n_path_box = 2 };
 
-  r.placed = { { .x = 200, .y = 40, .w = 60, .h = 20 } };  // clear of both
-  CHECK(cost_terms(c, decompose(c), z, r, {}, profile()).label == 0);
+  r.placed = { { .x = 200, .y = 20, .w = 60, .h = 20 },
+               { .x = 230, .y = 30, .w = 60, .h = 20 } };
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label == 1);
+
+  r.placed[1] = { .x = 300, .y = 20, .w = 60, .h = 20 };
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label == 0);
 }
 
 TEST_CASE("cost: the weights turn terms into one integer, compared by tier") {
