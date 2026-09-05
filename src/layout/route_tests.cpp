@@ -759,13 +759,14 @@ TEST_CASE("route: a nudge inside a composite is bounded by that state's own box"
   CHECK(wide.points[wide.route[0].off + 1].y == 92);
   CHECK(wide.points[wide.route[1].off + 1].y == 108);
 
-  // Eight units of it, centred on the lane. The region reaches a margin past
-  // every point either net touches, so only the owner's box can be doing this.
+  // Eight units of it, centred on the lane, and the members stop one unit inside
+  // each border. The region reaches a margin past every point either net
+  // touches, so only the owner's box can be doing this.
   z.state[comp.v] = { .x = -40, .y = 96, .w = 320, .h = 8 };
   Routes const tight{ phase3_route(c, g, o, z, {}, profile(), asks) };
   REQUIRE(tight.nudged.lanes == 1);
-  CHECK(tight.points[tight.route[0].off + 1].y == 96);
-  CHECK(tight.points[tight.route[1].off + 1].y == 104);
+  CHECK(tight.points[tight.route[0].off + 1].y == 97);
+  CHECK(tight.points[tight.route[1].off + 1].y == 103);
 }
 
 TEST_CASE("route: nets join only where one ends exactly where the next begins") {
