@@ -226,14 +226,17 @@ uint32_t place_labels(Chart const &c,
             int32_t const off{ strip * step };
             // One band holds every candidate on this strip, each of them `off`
             // from the leg, so what is out of reach is dropped once for all.
-            scav_rect const band{
-              .x = flat ? (lo - floor_div(box.w, 2))
-                        : ((side == 0) ? ((a.x - box.w) - off) : (a.x + off)),
-              .y = flat ? ((side == 0) ? ((a.y - box.h) - off) : (a.y + off))
-                        : (lo - floor_div(box.h, 2)),
-              .w = flat ? ((hi - lo) + box.w) : box.w,
-              .h = flat ? box.h : ((hi - lo) + box.h)
-            };
+            int32_t const across{ (side == 0) ? -off : off };
+            scav_rect band{ .x = lo - floor_div(box.w, 2),
+                            .y = (side == 0) ? ((a.y - box.h) + across) : (a.y + across),
+                            .w = (hi - lo) + box.w,
+                            .h = box.h };
+            if (!flat) {
+              band = { .x = (side == 0) ? ((a.x - box.w) + across) : (a.x + across),
+                       .y = lo - floor_div(box.h, 2),
+                       .w = box.w,
+                       .h = (hi - lo) + box.h };
+            }
             nearby.clear();
             for (scav_rect const &seg : foreign) {
               if (chebyshev_gap(band, seg) <= (off + box.h)) { nearby.push_back(seg); }
