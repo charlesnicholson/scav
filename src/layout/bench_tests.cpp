@@ -14,9 +14,9 @@
 
 #include "doctest.h"
 
+#include <array>
 #include <chrono>
 #include <cstdint>
-#include <ostream>
 #include <string>
 #include <vector>
 
@@ -24,9 +24,10 @@ namespace {
 
 using namespace scav;
 
-char const *const CORPUS[]{ "axis.scav",  "bottler.scav",     "brew.scav", "dock.scav",
-                            "estop.scav", "led.scav",         "mill.scav", "ota.scav",
-                            "tcp.scav",   "toolchanger.scav", "vac.scav" };
+constexpr std::array<char const *, 11> CORPUS{
+  "axis.scav", "bottler.scav", "brew.scav", "dock.scav",        "estop.scav", "led.scav",
+  "mill.scav", "ota.scav",     "tcp.scav",  "toolchanger.scav", "vac.scav"
+};
 
 scav_profile readable() {
   scav_profile p{};
