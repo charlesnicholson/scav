@@ -1117,10 +1117,11 @@ TEST_CASE("layout: Tier 0 at the scale target, and where the grid gives out") {
     // No net degrades: every frame here fits the budget and every end is
     // reachable, so the router routed all 3,704 of them.
     CHECK(r.degraded() == 0);
-    // All endpoint stubs: a separator port sits inside its owner and 11.5 gives the
-    // segment to the parent frame, where the owner is an obstacle. The fix is the
-    // LCA-owned separator channel, P7c's; pinned so it cannot grow first.
-    CHECK(t.through_box <= 496);
+    // A separator port sits inside its owner and 11.5 gives the segment to the
+    // parent frame, where the owner is an obstacle walling off its own port. The
+    // stub out of it used to cross whatever lay between, 496 times on this shape;
+    // leaving through the face the flow runs through crosses nothing (11.5).
+    CHECK(t.through_box == 0);
   }
   {
     Chart c;

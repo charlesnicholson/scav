@@ -145,9 +145,15 @@ bool measure_chart(Chart const &c, Metrics const &m, scav_profile const &p, Spac
     scav_extent title{};
     if (!measure(c.states[i].name, title)) { return false; }
     if (title.w == 0) { continue; }  // a pseudostate has no name to reserve for
+    // Only these two glyphs show the name they reserve for: a rounded rect keeps a
+    // title band and an inscribed diamond centres the text. The rest are marks --
+    // a bar, a dot, an `H` -- so a reservation here would stretch the mark to the
+    // width of a word, and `kind_min_h` is a floor that cannot pull it back.
+    StateKind const kind{ c.states[i].kind };
+    if ((kind != StateKind::Normal) && (kind != StateKind::Choice)) { continue; }
     // A diamond inscribed in its box holds a centred label only where
     // `w/2a + h/2b <= 1`; twice the text on both axes satisfies that.
-    bool const inscribed{ c.states[i].kind == StateKind::Choice };
+    bool const inscribed{ kind == StateKind::Choice };
     int32_t const grow{ inscribed ? 2 : 1 };
     scav_box_space const box{ .min_w = grow * (title.w + (2 * pad)),
                               .h_before = grow * (title.h + pad),
@@ -263,7 +269,12 @@ void emit_state(DrawList &d,
       push_circle(d, depth, drawlist_style(d, p[SCAV_STYLE_STATE]), centre, glyph, origin);
       std::string_view const mark{ (kind == StateKind::History) ? "H" : "H*" };
       scav_extent ext{};
-      scav_style const title{ p[SCAV_STYLE_TITLE] };
+      // Sized from the circle, not from the profile: the box came from
+      // `kind_min_*` and knows nothing about this mark, so a title-sized `H*`
+      // straddles the border of a small one. At an em of the radius the widest
+      // mark is two monospace characters, 1.2r across a square of side 1.41r.
+      scav_style title{ p[SCAV_STYLE_TITLE] };
+      title.font_size_grid = imax(1, glyph);
       if (measure_text(m,
                        reinterpret_cast<scav_byte const *>(mark.data()),
                        static_cast<uint32_t>(mark.size()),

@@ -28,7 +28,7 @@ TEST_CASE("profile: both shipped profiles load and pass their own validation") {
     CAPTURE(name);
     scav_profile const p{ named(name) };
     CHECK(profile_validate(p));
-    CHECK(p.profile_version == 2);
+    CHECK(p.profile_version == 3);
   }
   CHECK(named("compact").profile_id != named("readable").profile_id);
 }

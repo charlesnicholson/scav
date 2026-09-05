@@ -267,9 +267,9 @@ def main() -> int:
 <h1>Statechart layout shootout</h1>
 <p class="sub">Every chart in the transcribed corpus, drawn by scav and by the two
 incumbents it exists to replace. Same model, same eleven files, three engines.
-scav is at <code>{commit}</code> with P6 layout: layered ranks per submachine,
-Brandes &amp; K&ouml;pf coordinates, and straight-line routes &mdash; orthogonal
-routing is P7 and is not in this picture.</p>
+scav is at <code>{commit}</code>: layered ranks per submachine, Brandes &amp;
+K&ouml;pf coordinates, and orthogonal routes from an A* over a per-frame
+visibility graph.</p>
 <div class="legend">{"".join(
     f'<span class="chip"><span class="swatch" style="background:{c}"></span>{l}</span>'
     for _, l, c in ENGINES)}</div>
@@ -285,9 +285,11 @@ nothing.</li>
 non-first concurrent region is rejected outright, so the harness anchors that
 endpoint at its enclosing composite and says so. The arrow you see is not the
 arrow the model holds.</li>
-<li><b>scav is drawing straight lines.</b> Edges cross boxes and labels land on
-names because there is no obstacle set until P7. Judge the placement, not the
-wires.</li>
+<li><b>What is still missing from scav is between the wires, not the wires.</b>
+No chart here routes an edge through a box. Two things are unbuilt and both are
+visible: nothing separates two edges that reach the same lane, so they draw as
+one polyline that fans out at its ends, and nothing places a transition label
+away from a state, so most of them land on a name.</li>
 </ul>
 <table class="summary"><thead><tr><th>engine</th><th>total area</th>
 <th>median aspect</th><th>smallest of three</th></tr></thead>

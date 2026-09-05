@@ -133,24 +133,31 @@ uint32_t ortho_index_of(std::vector<int32_t> const &v, int32_t at) {
 }
 
 scav_point ortho_escape_box(scav_point at, scav_point toward, scav_rect const &r) {
-  std::array<scav_point, 4> const options{ { { .x = r.x, .y = at.y },
-                                             { .x = r.x + r.w, .y = at.y },
-                                             { .x = at.x, .y = r.y },
-                                             { .x = at.x, .y = r.y + r.h } } };
-  scav_point best{ options[0] };
-  Wide best_d{ -1 };
-  for (scav_point const &option : options) {
-    Wide const dx{ Wide{ option.x } - toward.x };
-    Wide const dy{ Wide{ option.y } - toward.y };
-    Wide const d{ (dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy) };
-    // Strictly less: of two equal exits the earlier wins, so the order is the
-    // fixed left, right, top, bottom.
-    if ((best_d < 0) || (d < best_d)) {
-      best_d = d;
-      best = option;
-    }
+  // How far outside the box `toward` lies on each axis, which is not the same as
+  // how far it is from a candidate point on the border. Measuring to the border
+  // charges an exit for the distance along the face it leaves through, so the
+  // longer a face is the worse its own perpendicular exit scores -- which is how
+  // a 4x60pt fork bar came to be left through a 4pt end.
+  auto const beyond = [](int32_t v, int32_t lo, int32_t len) {
+    Wide const hi{ Wide{ lo } + len };
+    if (v < lo) { return Wide{ lo } - v; }
+    if (Wide{ v } > hi) { return Wide{ v } - hi; }
+    return Wide{ 0 };
+  };
+  Wide const dx{ beyond(toward.x, r.x, r.w) };
+  Wide const dy{ beyond(toward.y, r.y, r.h) };
+
+  // The dominant separation picks the axis, and a tie goes to x because that is
+  // the layering axis (11.3): an end leaves through the face the flow runs
+  // through unless the other end is genuinely stacked above or below it. The
+  // side within the axis is the nearer border, which is total for a `toward`
+  // inside the span as well as outside it.
+  if (dx >= dy) {
+    bool const left{ (Wide{ toward.x } - r.x) <= ((Wide{ r.x } + r.w) - toward.x) };
+    return { .x = left ? r.x : (r.x + r.w), .y = at.y };
   }
-  return best;
+  bool const top{ (Wide{ toward.y } - r.y) <= ((Wide{ r.y } + r.h) - toward.y) };
+  return { .x = at.x, .y = top ? r.y : (r.y + r.h) };
 }
 
 scav_point ortho_escape(scav_point at,

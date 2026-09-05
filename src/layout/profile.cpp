@@ -16,7 +16,7 @@ constexpr int32_t PT{ 16 };  // grid units are 1/16 pt
 // One of the two shipped profiles scav_profile_named hands out by name.
 constexpr scav_profile READABLE{
   .profile_id = 2,
-  .profile_version = 2,
+  .profile_version = 3,
   .pad = 8 * PT,
   .rank_sep = 36 * PT,
   .node_sep = 18 * PT,
@@ -25,14 +25,17 @@ constexpr scav_profile READABLE{
   .line_height_k_num = 7,
   .line_height_k_den = 5,
   // StateKind order: Normal, Initial, Final, Choice, Junction, Fork, Join,
-  // History, DeepHistory.
+  // History, DeepHistory. The fork and join bars are thin across the layering
+  // axis and long across the other, because ranks run in +x (11.3): an edge
+  // reaches them on a left or right face, and those are the faces that must be
+  // long enough to hold a fan-out.
   .kind_min_w = { 40 * PT,
                   14 * PT,
                   14 * PT,
                   20 * PT,
                   12 * PT,
-                  60 * PT,
-                  60 * PT,
+                  4 * PT,
+                  4 * PT,
                   16 * PT,
                   16 * PT },
   .kind_min_h = { 24 * PT,
@@ -40,8 +43,8 @@ constexpr scav_profile READABLE{
                   14 * PT,
                   20 * PT,
                   12 * PT,
-                  4 * PT,
-                  4 * PT,
+                  60 * PT,
+                  60 * PT,
                   16 * PT,
                   16 * PT },
   .dar_num = 16,
@@ -68,7 +71,7 @@ constexpr scav_profile READABLE{
 // The other shipped profile: tighter spacing and type for dense charts.
 constexpr scav_profile COMPACT{
   .profile_id = 1,
-  .profile_version = 2,
+  .profile_version = 3,
   .pad = 4 * PT,
   .rank_sep = 22 * PT,
   .node_sep = 11 * PT,
@@ -81,8 +84,8 @@ constexpr scav_profile COMPACT{
                   12 * PT,
                   16 * PT,
                   10 * PT,
-                  48 * PT,
-                  48 * PT,
+                  3 * PT,
+                  3 * PT,
                   14 * PT,
                   14 * PT },
   .kind_min_h = { 18 * PT,
@@ -90,8 +93,8 @@ constexpr scav_profile COMPACT{
                   12 * PT,
                   16 * PT,
                   10 * PT,
-                  3 * PT,
-                  3 * PT,
+                  48 * PT,
+                  48 * PT,
                   14 * PT,
                   14 * PT },
   .dar_num = 4,

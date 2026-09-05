@@ -5,6 +5,7 @@
 // and the path boxes slid onto the finished routes.
 
 #include "layout/decompose.h"
+#include "layout/nudge.h"
 #include "layout/order.h"
 #include "layout/router.h"
 #include "layout/size.h"
@@ -32,6 +33,8 @@ struct Routes {
   // Routed only after giving up the requested clearance (11.5). Not a failure; a
   // frame full of them means the boxes are packed tighter than the profile says.
   uint32_t reseated{ 0 };
+
+  NudgeStats nudged;
 };
 
 // One net per segment, routed in that segment's frame, laid end to end. The

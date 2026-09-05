@@ -126,6 +126,27 @@ CostTerms cost_terms(Chart const &c,
     }
   }
 
+  // Two routes sharing a run draw as one polyline that fans out at its ends, so
+  // the term is the length they share rather than the number of pairs: a long
+  // overlap is one unreadable line and a short one is a corner two edges turn at
+  // the same place. Nudging (11.5) is what drives it down.
+  for (uint32_t i = 0; i < pieces.size(); ++i) {
+    for (uint32_t j = i + 1; j < pieces.size(); ++j) {
+      if (pieces[i].trans == pieces[j].trans) { continue; }
+      Piece const &u{ pieces[i] };
+      Piece const &v{ pieces[j] };
+      bool const flat{ (u.a.y == u.b.y) && (v.a.y == v.b.y) && (u.a.y == v.a.y) };
+      bool const upright{ (u.a.x == u.b.x) && (v.a.x == v.b.x) && (u.a.x == v.a.x) };
+      if (!flat && !upright) { continue; }
+      Wide const ulo{ flat ? imin(u.a.x, u.b.x) : imin(u.a.y, u.b.y) };
+      Wide const uhi{ flat ? imax(u.a.x, u.b.x) : imax(u.a.y, u.b.y) };
+      Wide const vlo{ flat ? imin(v.a.x, v.b.x) : imin(v.a.y, v.b.y) };
+      Wide const vhi{ flat ? imax(v.a.x, v.b.x) : imax(v.a.y, v.b.y) };
+      Wide const shared{ imin(uhi, vhi) - imax(ulo, vlo) };
+      if (shared > 0) { t.corridor += shared; }
+    }
+  }
+
   // `min_len` is the direct distance between the endpoints, or the boxes the
   // route has to carry if those are longer; only the excess is charged, since
   // charging raw length makes the optimiser fight the constraint (11.9).

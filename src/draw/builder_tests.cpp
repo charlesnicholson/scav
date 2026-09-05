@@ -387,6 +387,107 @@ TEST_CASE("builder: a bare pseudostate's glyph fills its box exactly") {
   CHECK((centre.x + circle->a) == (box.x + box.w));
 }
 
+TEST_CASE("builder: a mark-drawn glyph is its profile minimum whatever it is named") {
+  // Only a rounded rect and a diamond show the name they reserve for. Reserving
+  // for the rest stretches a bar, a dot or an `H` to the width of a word and then
+  // paints over it -- `kind_min_h` is a floor and cannot pull it back.
+  scav_profile const p{ readable() };
+  for (StateKind const kind : { StateKind::Junction,
+                                StateKind::Fork,
+                                StateKind::Join,
+                                StateKind::History,
+                                StateKind::DeepHistory }) {
+    CAPTURE(static_cast<uint32_t>(kind));
+    std::array<scav_rect, 2> box{};
+    for (uint32_t which = 0; which < 2; ++which) {
+      Chart c;
+      SubmachineId const root{ build_chart(c, "t", {}) };
+      StateId const mark{
+        build_state(c, root, (which == 0) ? "V" : "AVeryLongPseudostateName", kind, {})
+      };
+      StateId const to{ build_state(c, root, "S", StateKind::Normal, {}) };
+      build_trans(c, mark, to, TransKind::External, {});
+
+      Spaces s;
+      REQUIRE(measure_chart(c, bundled(), p, s));
+      CHECK(s.box_state[mark.v].min_w == 0);
+      CHECK(s.box_state[mark.v].h_before == 0);
+
+      Built const b{ pipeline(std::move(c), p) };
+      ColumnId const boxes{ column_find(b.chart, "scav.geom.state") };
+      REQUIRE(boxes.v != INVALID);
+      std::memcpy(&box[which],
+                  column_data(b.chart, boxes) + (size_t{ mark.v } * sizeof(scav_rect)),
+                  sizeof(scav_rect));
+      // Nothing draws the name, so nothing may be drawn for it either.
+      for (scav_prim const &prim : b.list.prims) {
+        if ((prim.kind == SCAV_PRIM_TEXT) &&
+            (prim.origin_kind == static_cast<uint32_t>(ElemKind::State)) &&
+            (prim.origin_ordinal == mark.v)) {
+          std::string_view const drawn{ reinterpret_cast<char const *>(
+                                            b.list.text.bytes.data() + prim.payload.off),
+                                        prim.payload.len };
+          CHECK(drawn != "AVeryLongPseudostateName");
+        }
+      }
+    }
+    // The name is an identifier, not a caption: a longer one may not grow the mark.
+    CHECK(box[0].w == box[1].w);
+    CHECK(box[0].h == box[1].h);
+    CHECK(box[0].w == p.kind_min_w[static_cast<uint32_t>(kind)]);
+    CHECK(box[0].h == p.kind_min_h[static_cast<uint32_t>(kind)]);
+  }
+}
+
+TEST_CASE("builder: a history mark stays inside the circle it is drawn in") {
+  // The box comes from `kind_min_*`, which knows nothing about `H*`, so the mark
+  // is sized from the circle instead. Checked at the em box's worst corner.
+  for (StateKind const kind : { StateKind::History, StateKind::DeepHistory }) {
+    CAPTURE(static_cast<uint32_t>(kind));
+    Chart c;
+    SubmachineId const root{ build_chart(c, "t", {}) };
+    StateId const h{ build_state(c, root, "Memory", kind, {}) };
+    StateId const to{ build_state(c, root, "S", StateKind::Normal, {}) };
+    build_trans(c, h, to, TransKind::External, {});
+
+    Built const b{ pipeline(std::move(c), readable()) };
+    scav_prim const *circle{ nullptr };
+    scav_prim const *text{ nullptr };
+    for (scav_prim const &prim : b.list.prims) {
+      if ((prim.origin_kind != static_cast<uint32_t>(ElemKind::State)) ||
+          (prim.origin_ordinal != h.v)) {
+        continue;
+      }
+      if (prim.kind == SCAV_PRIM_CIRCLE) { circle = &prim; }
+      if (prim.kind == SCAV_PRIM_TEXT) { text = &prim; }
+    }
+    REQUIRE(circle != nullptr);
+    REQUIRE(text != nullptr);
+    scav_point const centre{ b.list.points[circle->points.off] };
+    scav_point const at{ b.list.points[text->points.off] };
+    int32_t const fs{ b.list.styles[text->style].font_size_grid };
+    scav_extent ext{};
+    std::string_view const mark{ reinterpret_cast<char const *>(b.list.text.bytes.data() +
+                                                                text->payload.off),
+                                 text->payload.len };
+    REQUIRE(measure_text(bundled(),
+                         reinterpret_cast<scav_byte const *>(mark.data()),
+                         static_cast<uint32_t>(mark.size()),
+                         fs,
+                         ext) == MeasureStatus::Ok);
+    // `at` is the baseline's left end, so the em box runs one font size above it.
+    int64_t worst{ 0 };
+    for (int32_t const x : { at.x, at.x + ext.w }) {
+      for (int32_t const y : { at.y - fs, at.y }) {
+        int64_t const dx{ int64_t{ x } - centre.x };
+        int64_t const dy{ int64_t{ y } - centre.y };
+        worst = std::max(worst, (dx * dx) + (dy * dy));
+      }
+    }
+    CHECK(worst <= (int64_t{ circle->a } * circle->a));
+  }
+}
+
 TEST_CASE("builder: a route into a pseudostate reaches the drawn mark") {
   // The property the case above exists to protect, stated end to end.
   Chart c;

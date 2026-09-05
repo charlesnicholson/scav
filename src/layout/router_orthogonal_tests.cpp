@@ -321,9 +321,34 @@ TEST_CASE("ortho: escaping moves to the border nearest where the route is going"
   CHECK(((away.x == centre.x) || (away.y == centre.y)));
 }
 
+TEST_CASE("ortho: an elongated box is left through a long face, not an end") {
+  // The separation is measured from the box, not from a candidate border point:
+  // measuring to the border charges an exit for the run along the face it leaves
+  // through, so the longer a face is the worse its own exit scores. A fork bar is
+  // the shape that makes the difference visible.
+  std::vector<scav_rect> const bar{ rect(0, 0, 4, 60) };  // 4x60, ends at top and bottom
+  scav_point const centre{ pt(2, 30) };
+
+  // Far to the right and slightly above: the target is nearer the top end in y,
+  // but x is what separates them, so the exit is the long right face.
+  CHECK((ortho_escape(centre, pt(500, 1), bar) == pt(4, 30)));
+  CHECK((ortho_escape(centre, pt(-500, 1), bar) == pt(0, 30)));
+  CHECK((ortho_escape(centre, pt(500, 59), bar) == pt(4, 30)));
+
+  // Only a target genuinely stacked above or below leaves through an end.
+  CHECK((ortho_escape(centre, pt(2, -500), bar) == pt(2, 0)));
+  CHECK((ortho_escape(centre, pt(2, 500), bar) == pt(2, 60)));
+
+  // And the transpose behaves the same way about its own long faces.
+  std::vector<scav_rect> const flat{ rect(0, 0, 60, 4) };
+  CHECK((ortho_escape(pt(30, 2), pt(1, 500), flat) == pt(30, 4)));
+  CHECK((ortho_escape(pt(30, 2), pt(1, -500), flat) == pt(30, 0)));
+  CHECK((ortho_escape(pt(30, 2), pt(-500, 2), flat) == pt(0, 2)));
+}
+
 TEST_CASE("ortho: an equidistant escape is decided by the fixed side order") {
-  // Dead centre with a target dead centre: all four exits tie, and the fixed
-  // left, right, top, bottom order settles it rather than the box list's.
+  // Dead centre with a target dead centre: neither axis separates, so the tie
+  // goes to x and then to the nearer border, which is the left one.
   std::vector<scav_rect> const boxes{ rect(0, 0, 20, 20) };
   CHECK((ortho_escape(pt(10, 10), pt(10, 10), boxes) == pt(0, 10)));
 

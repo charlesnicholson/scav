@@ -15,10 +15,10 @@
 namespace scav {
 
 // The eight Tier-2 quantities before weighting, so a test reads one of them
-// rather than a sum. `corridor` needs channels and stays zero until P7.
+// rather than a sum.
 struct CostTerms {
   int64_t bends{ 0 };       // direction changes at a route's interior vertices
-  int64_t corridor{ 0 };    // shared corridor overlap
+  int64_t corridor{ 0 };    // length two routes' segments run collinear over
   int64_t crossings{ 0 };   // properly crossing route segment pairs
   int64_t excess_len{ 0 };  // over min_len, charged per crossing on the edge
   int64_t adjacency{ 0 };   // sibling submachine pairs joined but not adjacent

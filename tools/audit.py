@@ -28,8 +28,13 @@ ARROWHEAD = re.compile(r'<polygon points="([^"]+)"[^>]*class="scav-trans scav-id
 DIVIDER = re.compile(
     r'<line x1="(-?\d+)" y1="(-?\d+)" x2="(-?\d+)" y2="(-?\d+)"[^>]*class="scav-sub')
 TEXT = re.compile(
-    r'<text x="(-?\d+)" y="(-?\d+)"[^>]*textLength="(\d+)"[^>]*'
-    r'class="scav-(trans|state) scav-id-(\d+)"[^>]*>')
+    r'<text x="(-?\d+)" y="(-?\d+)" font-size="(\d+)"[^>]*textLength="(\d+)"[^>]*'
+    r'class="scav-(trans|state|sub) scav-id-(\d+)"[^>]*>')
+
+# A mark and the glyph it belongs to carry the same id, which is what lets the
+# two be checked against each other without knowing the state's kind.
+CIRCLE = re.compile(
+    r'<circle cx="(-?\d+)" cy="(-?\d+)" r="(\d+)"[^>]*class="scav-state scav-id-(\d+)"')
 
 
 def points(text):
@@ -45,6 +50,13 @@ def on_border(pt, box):
 def inside(pt, box):
     x, y, w, h = box
     return x < pt[0] < x + w and y < pt[1] < y + h
+
+
+def overlaps(a, b):
+    """Two rects sharing area. Touching is not overlapping: adjacent boxes are
+    what packing produces, and adjacent glyphs read fine."""
+    return (a[0] < b[0] + b[2] and b[0] < a[0] + a[2] and
+            a[1] < b[1] + b[3] and b[1] < a[1] + a[3])
 
 
 def flush(a, b, box):
@@ -134,11 +146,16 @@ def audit(svg, every, chart, verbose):
 
     # A transition label overlapping a state box is the label placement 11.9
     # calls strip matching and P7d owns; counted so its arrival is measurable.
+    # `y` is a baseline and `textLength` the advance sum, so one font size up from
+    # the baseline is the em box the builder reserved -- the same rectangle it
+    # measured with, which is what makes these comparable to the geometry.
+    inked = []
     for m in TEXT.finditer(svg):
-        x, y, length, which, ident = m.groups()
+        x, y, size, length, which, ident = m.groups()
+        x, y, size, length = int(x), int(y), int(size), int(length)
+        inked.append(((x, y - size, length, size), which, ident))
         if which != "trans":
             continue
-        x, y, length = int(x), int(y), int(length)
         found["transition labels"] = found.get("transition labels", 0) + 1
         if not (cx <= x and x + length <= cx + cw and cy <= y <= cy + ch):
             note("drawn outside the chart rect", f"t{ident} label at ({x},{y})")
@@ -147,6 +164,35 @@ def audit(svg, every, chart, verbose):
             if x < bx + bw and x + length > bx and by < y < by + bh:
                 note("label over a state box", f"t{ident} at ({x},{y})+{length}")
                 break
+
+    # Two strings inked into the same place read as one unreadable string, which
+    # is a different defect from a label over a box: nudging moves the routes a
+    # label follows, but nothing moves two labels apart. 11.9's strip matching.
+    found["texts"] = found.get("texts", 0) + len(inked)
+    for i, (a_box, a_which, a_id) in enumerate(inked):
+        for b_box, b_which, b_id in inked[i + 1:]:
+            if overlaps(a_box, b_box):
+                note("texts overprint each other",
+                     f"{a_which} {a_id} over {b_which} {b_id} at {a_box[:2]}")
+
+    # A mark drawn past the glyph that holds it. The circle and its text share an
+    # id, and the em box's worst corner against the radius is the whole check --
+    # `kind_min_*` sizes the glyph and knows nothing about what goes in it.
+    glyph = {}
+    for m in CIRCLE.finditer(svg):
+        gx, gy, r, ident = int(m.group(1)), int(m.group(2)), int(m.group(3)), m.group(4)
+        if r > glyph.get(ident, (0, 0, -1))[2]:
+            glyph[ident] = (gx, gy, r)
+    for box, which, ident in inked:
+        if which != "state" or ident not in glyph:
+            continue
+        gx, gy, r = glyph[ident]
+        found["marks in a glyph"] = found.get("marks in a glyph", 0) + 1
+        bx, by, bw, bh = box
+        worst = max((px - gx) ** 2 + (py - gy) ** 2
+                    for px in (bx, bx + bw) for py in (by, by + bh))
+        if worst > r * r:
+            note("mark outside its glyph", f"state {ident} in r={r} at {box}")
 
     return found, notes
 
@@ -201,11 +247,16 @@ def main():
              "divider not axis-aligned": "region dividers",
              "drawn outside the chart rect": "route segments",
              "routes share a run": "route segments",
-             "label over a state box": "transition labels"}
+             "label over a state box": "transition labels",
+             "texts overprint each other": "texts",
+             "mark outside its glyph": "marks in a glyph"}
     for key in ("route segments", "route starts", "arrowheads", "region dividers",
-                "transition labels"):
+                "transition labels", "texts", "marks in a glyph"):
         print(f"{key:<28} {total.get(key, 0)}")
     print()
+    # Not a ratio, so it sits outside the block below: the shared run's extent is
+    # what nudging has to pay back, and the pair count alone hides which chart owes.
+    print(f"  {'shared run, grid units':<28} {total.get('overlapped units', 0)}")
     clean = True
     for key, over in scale.items():
         count = total.get(key, 0)

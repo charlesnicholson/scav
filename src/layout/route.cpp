@@ -3,6 +3,8 @@
 
 #include "layout/route.h"
 
+#include "layout/nudge.h"
+
 #include "layout/decompose.h"
 #include "layout/order.h"
 #include "layout/router.h"
@@ -197,6 +199,11 @@ Routes phase3_route(Chart const &c,
   RouteOutput ro;
   in.profile = p;
   int32_t const margin{ router.margin(p) };
+  // The lane spacing, derived like the router's clearance rather than read: a
+  // profile field for it is P9's, and this phase should not bump the version
+  // (11.5).
+  int32_t const gap{ imax(1, p.node_sep / 3) };
+  int32_t const clear{ imax(0, p.node_sep / 3) };
   for (uint32_t m = 0; m < by_frame.size(); ++m) {
     if (by_frame[m].empty()) { continue; }
     in.obstacles.clear();
@@ -257,6 +264,12 @@ Routes phase3_route(Chart const &c,
       in.nets.push_back(net);
     }
     router.route(in, ro);
+
+    // Separated before the nets are laid end to end, because a lane is a
+    // property of one frame: two nets share it by both being routed against the
+    // same obstacles, and the obstacles are in hand only here (11.5).
+    nudge_lanes(region, in.obstacles, gap, clear, ro.net_points, ro.points, out.nudged);
+
     for (uint32_t j = 0; j < by_frame[m].size(); ++j) {
       scav_span const at{ (j < ro.net_points.size()) ? ro.net_points[j] : scav_span{} };
       if (j < ro.metrics.size()) {
