@@ -6,7 +6,6 @@
 
 #include "layout/decompose.h"
 #include "layout/geom.h"
-#include "layout/label.h"
 #include "layout/route.h"
 #include "layout/size.h"
 #include "scav/scav_core.h"
@@ -65,6 +64,56 @@ Wide length_of(scav_point a, scav_point b) {
   return static_cast<Wide>(isqrt(static_cast<uint64_t>((dx * dx) + (dy * dy))));
 }
 
+// What two axis-aligned segments share of one line: zero unless they are
+// collinear and meet in more than a point.
+Wide shared_run(scav_point a, scav_point b, scav_point c, scav_point d) {
+  bool const flat{ (a.y == b.y) && (c.y == d.y) && (a.y == c.y) };
+  bool const upright{ (a.x == b.x) && (c.x == d.x) && (a.x == c.x) };
+  if (!(flat || upright)) { return 0; }
+  Wide const alo{ flat ? imin(a.x, b.x) : imin(a.y, b.y) };
+  Wide const ahi{ flat ? imax(a.x, b.x) : imax(a.y, b.y) };
+  Wide const clo{ flat ? imin(c.x, d.x) : imin(c.y, d.y) };
+  Wide const chi{ flat ? imax(c.x, d.x) : imax(c.y, d.y) };
+  return imax(Wide{ 0 }, imin(ahi, chi) - imax(alo, clo));
+}
+
+// Two routes' shared ends: the identical points they finish and start with,
+// and whether the leg reaching each of those runs lies along it.
+struct Trunk {
+  uint32_t tail{ 0 }, head{ 0 };
+  bool merged_tail{ false }, merged_head{ false };
+};
+
+Trunk trunk_of(std::vector<scav_point> const &pts, scav_span a, scav_span b) {
+  Trunk out;
+  uint32_t const shortest{ imin(a.len, b.len) };
+  while ((out.tail < shortest) &&
+         same(pts[(a.off + a.len - 1) - out.tail], pts[(b.off + b.len - 1) - out.tail])) {
+    ++out.tail;
+  }
+  while ((out.head < shortest) && same(pts[a.off + out.head], pts[b.off + out.head])) {
+    ++out.head;
+  }
+  if ((out.tail > 0) && (out.tail < a.len) && (out.tail < b.len)) {
+    uint32_t const i{ (a.off + a.len - 1) - out.tail };
+    uint32_t const j{ (b.off + b.len - 1) - out.tail };
+    out.merged_tail = shared_run(pts[i], pts[i + 1], pts[j], pts[j + 1]) > 0;
+  }
+  if ((out.head > 0) && (out.head < a.len) && (out.head < b.len)) {
+    uint32_t const i{ (a.off + out.head) - 1 };
+    uint32_t const j{ (b.off + out.head) - 1 };
+    out.merged_head = shared_run(pts[i], pts[i + 1], pts[j], pts[j + 1]) > 0;
+  }
+  return out;
+}
+
+// Segment `k` of one route of the pair lies in the trunk: inside a shared run,
+// or the leg that merges into one. `len` counts that route's points.
+bool trunk_piece(Trunk const &t, uint32_t len, uint32_t k) {
+  return ((k + t.tail) >= len) || (t.merged_tail && ((k + t.tail + 1) == len)) ||
+         ((k + 1) < t.head) || (t.merged_head && ((k + 1) == t.head));
+}
+
 // 0, 1, or 2 per axis, the same token the structural hash uses, so a bend is
 // a change in the pair.
 uint32_t direction(scav_point a, scav_point b) {
@@ -93,14 +142,17 @@ CostTerms cost_terms(Chart const &c,
   struct Piece {
     scav_point a, b;
     uint32_t trans;
+    uint32_t k;  // its index in that transition's own polyline
   };
   std::vector<Piece> pieces;
   std::vector<uint32_t> crossings_of(c.transitions.size(), 0);
   for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {
     scav_span const route{ r.route[tr] };
     for (uint32_t k = 0; (k + 1) < route.len; ++k) {
-      pieces.push_back(
-          { .a = r.points[route.off + k], .b = r.points[route.off + k + 1], .trans = tr });
+      pieces.push_back({ .a = r.points[route.off + k],
+                         .b = r.points[route.off + k + 1],
+                         .trans = tr,
+                         .k = k });
       if ((k + 2) < route.len) {
         if (direction(r.points[route.off + k], r.points[route.off + k + 1]) !=
             direction(r.points[route.off + k + 1], r.points[route.off + k + 2])) {
@@ -120,16 +172,16 @@ CostTerms cost_terms(Chart const &c,
         ++crossings_of[v.trans];
       }
       // Corridor is the length one pair shares along one line, so a run three
-      // nets lie on is charged over its three pairs.
-      bool const flat{ (u.a.y == u.b.y) && (v.a.y == v.b.y) && (u.a.y == v.a.y) };
-      bool const upright{ (u.a.x == u.b.x) && (v.a.x == v.b.x) && (u.a.x == v.a.x) };
-      if (!flat && !upright) { continue; }
-      Wide const ulo{ flat ? imin(u.a.x, u.b.x) : imin(u.a.y, u.b.y) };
-      Wide const uhi{ flat ? imax(u.a.x, u.b.x) : imax(u.a.y, u.b.y) };
-      Wide const vlo{ flat ? imin(v.a.x, v.b.x) : imin(v.a.y, v.b.y) };
-      Wide const vhi{ flat ? imax(v.a.x, v.b.x) : imax(v.a.y, v.b.y) };
-      Wide const shared{ imin(uhi, vhi) - imax(ulo, vlo) };
-      if (shared > 0) { t.corridor += shared; }
+      // nets lie on is charged over its three pairs. Two routes fanning into
+      // one trunk are not that run and are not charged for it.
+      Wide const shared{ shared_run(u.a, u.b, v.a, v.b) };
+      if (shared <= 0) { continue; }
+      Trunk const pair{ trunk_of(r.points, r.route[u.trans], r.route[v.trans]) };
+      if (trunk_piece(pair, r.route[u.trans].len, u.k) &&
+          trunk_piece(pair, r.route[v.trans].len, v.k)) {
+        continue;
+      }
+      t.corridor += shared;
     }
   }
 

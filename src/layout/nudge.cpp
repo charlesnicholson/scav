@@ -64,6 +64,37 @@ bool kept(Wide before, Wide after) {
   return (before > 0) ? (after > 0) : ((before < 0) && (after < 0));
 }
 
+// Two members whose nets run as one from the segment's far point to the end, or
+// from the start to its near point: one trunk, so one offset.
+bool bundled(std::vector<scav_point> const &points,
+             std::vector<scav_span> const &nets,
+             Member const &x,
+             Member const &y) {
+  scav_span const a{ nets[x.net] };
+  scav_span const b{ nets[y.net] };
+  uint32_t const a_end{ a.off + a.len };
+  uint32_t const b_end{ b.off + b.len };
+  bool tail{ (a_end - x.point) == (b_end - y.point) };
+  for (uint32_t k = 1; tail && ((x.point + k) < a_end); ++k) {
+    tail = same(points[x.point + k], points[y.point + k]);
+  }
+  if (tail) { return true; }
+  bool head{ (x.point - a.off) == (y.point - b.off) };
+  for (uint32_t k = 0; head && ((a.off + k) <= x.point); ++k) {
+    head = same(points[a.off + k], points[b.off + k]);
+  }
+  return head;
+}
+
+// Path-halving find over the parents a lane's bundles are unioned into.
+uint32_t bundle_root(std::vector<uint32_t> &of, uint32_t x) {
+  while (of[x] != x) {
+    of[x] = of[of[x]];
+    x = of[x];
+  }
+  return x;
+}
+
 }  // namespace
 
 void nudge_lanes(scav_rect const &region,
@@ -79,6 +110,11 @@ void nudge_lanes(scav_rect const &region,
 
   std::vector<Member> members;
   std::vector<uint32_t> lane;
+  std::vector<uint32_t> parent;  // -> lane, each member's bundle parent
+  std::vector<uint32_t> slot;    // -> lane, the bundle it ended up in
+  std::vector<uint32_t> sizes;
+  std::vector<uint32_t> group;
+  std::vector<uint32_t> kin;
   for (uint32_t axis = 0; axis < 2; ++axis) {
     bool const horizontal{ axis == 0 };
     // Rebuilt from the live points per axis: a horizontal displacement drags the
@@ -130,6 +166,74 @@ void nudge_lanes(scav_rect const &region,
       return x.point < y.point;
     });
 
+    // The segment and the two legs it drags: inside the region, no leg turned
+    // round, nothing newly entered, no new run along a net outside `kin`.
+    auto const known_good = [&](Member const &m) {
+      uint32_t const i{ m.point };
+      scav_point const a{ points[i - 1] };
+      scav_point const b{ points[i] };
+      scav_point const cpt{ points[i + 1] };
+      scav_point const d{ points[i + 2] };
+      scav_point nb{ b };
+      scav_point nc{ cpt };
+      if (horizontal) {
+        nb.y += m.offset;
+        nc.y += m.offset;
+      } else {
+        nb.x += m.offset;
+        nc.x += m.offset;
+      }
+
+      std::array<scav_point, 4> const then{ a, b, cpt, d };
+      std::array<scav_point, 4> const way{ a, nb, nc, d };
+      std::array<scav_rect, 3> const was{ span_rect(a, b),
+                                          span_rect(b, cpt),
+                                          span_rect(cpt, d) };
+      std::array<scav_rect, 3> const now{ span_rect(a, nb),
+                                          span_rect(nb, nc),
+                                          span_rect(nc, d) };
+      bool ok{ true };
+      for (scav_rect const &r : now) { ok = ok && contains(region, r); }
+      // The arrowhead reads its direction off the end pair, so no leg collapses.
+      ok = ok && !(same(a, nb) || same(nc, d));
+      // Second guard on the leg extents already folded into the room.
+      ok = ok && kept(horizontal ? (Wide{ b.y } - a.y) : (Wide{ b.x } - a.x),
+                      horizontal ? (Wide{ nb.y } - a.y) : (Wide{ nb.x } - a.x));
+      ok = ok && kept(horizontal ? (Wide{ d.y } - cpt.y) : (Wide{ d.x } - cpt.x),
+                      horizontal ? (Wide{ d.y } - nc.y) : (Wide{ d.x } - nc.x));
+      for (scav_rect const &raw : obstacles) {
+        if (!ok) { break; }
+        // The raw rect is a hard wall and its bumper a soft one, each exempted
+        // for the one leg that was already inside it rather than for the member.
+        scav_rect const box{ grow(raw, clear) };
+        for (uint32_t r = 0; r < now.size(); ++r) {
+          ok = ok && (overlaps(was[r], raw) || !overlaps(now[r], raw));
+          ok = ok && (overlaps(was[r], box) || !overlaps(now[r], box));
+        }
+      }
+      // A leg may keep only a shared run it already had, so the lane a member
+      // leaves is not traded for one it lands on; `kin`'s own three move with it.
+      for (uint32_t q = 0; ok && (q < net_count); ++q) {
+        if (q == m.net) { continue; }
+        scav_span const other{ nets[q] };
+        for (uint32_t k = 0; ok && ((k + 1) < other.len); ++k) {
+          uint32_t const at{ other.off + k };
+          bool sibling{ false };
+          for (uint32_t const p : kin) {
+            sibling = sibling || (((at + 1) >= p) && (at <= (p + 1)));
+          }
+          if (sibling) { continue; }
+          scav_point const s{ points[at] };
+          scav_point const e{ points[at + 1] };
+          for (uint32_t r = 0; r < now.size(); ++r) {
+            if (shared_run(then[r], then[r + 1], s, e) > 0) { continue; }
+            ok = ok && (shared_run(way[r], way[r + 1], s, e) == 0);
+          }
+        }
+      }
+      return ok;
+    };
+
     for (uint32_t start = 0; start < members.size();) {
       // A lane is a run of collinear members whose extents chain into one another,
       // which is the same grouping `hi` carries forward as the sweep advances.
@@ -155,20 +259,48 @@ void nudge_lanes(scav_rect const &region,
         return members[x].point < members[y].point;
       });
 
-      // The room the whole bundle has, measured over the lane's union extent so a
-      // member cannot be displaced into something a shorter neighbour cleared.
+      // Members whose nets already run as one share one offset; unioned onto the
+      // lower lane position, so a bundle's root is its first member and the
+      // numbering below is by least `toward`.
+      parent.resize(count);
+      for (uint32_t j = 0; j < count; ++j) { parent[j] = j; }
+      for (uint32_t j = 0; j < count; ++j) {
+        for (uint32_t q = j + 1; q < count; ++q) {
+          if (!bundled(points, nets, members[lane[j]], members[lane[q]])) { continue; }
+          uint32_t const one{ bundle_root(parent, j) };
+          uint32_t const two{ bundle_root(parent, q) };
+          parent[imax(one, two)] = imin(one, two);
+        }
+      }
+      slot.resize(count);
+      uint32_t groups{ 0 };
+      for (uint32_t j = 0; j < count; ++j) {
+        if (bundle_root(parent, j) != j) { continue; }
+        slot[j] = groups;
+        ++groups;
+      }
+      for (uint32_t j = 0; j < count; ++j) { slot[j] = slot[bundle_root(parent, j)]; }
+      sizes.assign(groups, 0);
+      for (uint32_t j = 0; j < count; ++j) { ++sizes[slot[j]]; }
+      for (uint32_t const n : sizes) { stats.bundles += (n > 1) ? 1 : 0; }
+      if (groups < 2) { continue; }
+
+      // The room the whole lane has, measured over its union extent so a member
+      // cannot be displaced into something a shorter neighbour cleared.
       int32_t const at{ members[first].at };
       int32_t const lo{ members[first].lo };
       int32_t const hi{ reach };
       Wide room_down{ horizontal ? (Wide{ region.y } + region.h) - at
                                  : (Wide{ region.x } + region.w) - at };
       Wide room_up{ horizontal ? (Wide{ at } - region.y) : (Wide{ at } - region.x) };
-      // The frame's own box bounds the room; `region` reaches past it.
-      room_up = imin(room_up, Wide{ at } - (horizontal ? bounds.y : bounds.x));
+      // The frame's own box bounds the room and `region` reaches past it; one
+      // unit inside, because a lane on that border is drawn over the border.
+      room_up = imin(room_up, (Wide{ at } - (horizontal ? bounds.y : bounds.x)) - 1);
       room_down = imin(
           room_down,
-          (horizontal ? (Wide{ bounds.y } + bounds.h) : (Wide{ bounds.x } + bounds.w)) -
-              at);
+          ((horizontal ? (Wide{ bounds.y } + bounds.h) : (Wide{ bounds.x } + bounds.w)) -
+           at) -
+              1);
 
       scav_rect const bar{ horizontal
                                ? scav_rect{ .x = lo, .y = at, .w = hi - lo, .h = 0 }
@@ -193,7 +325,7 @@ void nudge_lanes(scav_rect const &region,
         }
       }
 
-      // Sized to what every member can drag, so the bundle stays evenly spaced.
+      // Sized to what every member can drag, so the lane stays evenly spaced.
       for (uint32_t j = 0; j < count; ++j) {
         room_up = imin(room_up, members[lane[j]].up);
         room_down = imin(room_down, members[lane[j]].down);
@@ -203,87 +335,53 @@ void nudge_lanes(scav_rect const &region,
       Wide const window{ room_up + room_down };
       if (window <= 0) { continue; }
 
-      // The bundle fills the window, then slides back towards the lane as far as
-      // it will go; with room both sides that centres it.
-      Wide const step{ imin(Wide{ gap }, window / (count - 1)) };
+      // The bundles fill the window, then slide back towards the lane as far as
+      // they will go; with room both sides that centres them.
+      Wide const step{ imin(Wide{ gap }, window / (groups - 1)) };
       if (step <= 0) { continue; }
-      Wide const bundle{ (count - 1) * step };
-      Wide const lowest{ imax(-room_up, imin(-(bundle / 2), room_down - bundle)) };
+      Wide const spread{ (groups - 1) * step };
+      Wide const lowest{ imax(-room_up, imin(-(spread / 2), room_down - spread)) };
 
       bool any{ false };
       for (uint32_t j = 0; j < count; ++j) {
         Member &m{ members[lane[j]] };
-        m.offset = static_cast<int32_t>(lowest + (Wide{ j } * step));
+        m.offset = static_cast<int32_t>(lowest + (Wide{ slot[j] } * step));
         if (m.offset != 0) { any = true; }
       }
       if (!any) { continue; }
       ++stats.spread;
 
-      for (uint32_t j = 0; j < count; ++j) {
-        Member const &m{ members[lane[j]] };
-        if (m.offset == 0) { continue; }
-        uint32_t const i{ m.point };
-        scav_point const a{ points[i - 1] };
-        scav_point const b{ points[i] };
-        scav_point const cpt{ points[i + 1] };
-        scav_point const d{ points[i + 2] };
-        scav_point nb{ b };
-        scav_point nc{ cpt };
-        if (horizontal) {
-          nb.y += m.offset;
-          nc.y += m.offset;
-        } else {
-          nb.x += m.offset;
-          nc.x += m.offset;
+      for (uint32_t b = 0; b < groups; ++b) {
+        group.clear();
+        for (uint32_t j = 0; j < count; ++j) {
+          if (slot[j] == b) { group.push_back(lane[j]); }
         }
-
-        // The segment and the two legs it drags: inside the region, no leg turned
-        // round, nothing newly entered, no new run along another net.
-        std::array<scav_point, 4> const then{ a, b, cpt, d };
-        std::array<scav_point, 4> const way{ a, nb, nc, d };
-        std::array<scav_rect, 3> const was{ span_rect(a, b),
-                                            span_rect(b, cpt),
-                                            span_rect(cpt, d) };
-        std::array<scav_rect, 3> const now{ span_rect(a, nb),
-                                            span_rect(nb, nc),
-                                            span_rect(nc, d) };
+        if (members[group[0]].offset == 0) { continue; }
+        // Every member is asked before any of them moves, so each is checked
+        // against the geometry the others still have, and one refusal stops all.
         bool ok{ true };
-        for (scav_rect const &r : now) { ok = ok && contains(region, r); }
-        // The arrowhead reads its direction off the end pair, so no leg collapses.
-        ok = ok && !(same(a, nb) || same(nc, d));
-        // Second guard on the leg extents already folded into the room.
-        ok = ok && kept(horizontal ? (Wide{ b.y } - a.y) : (Wide{ b.x } - a.x),
-                        horizontal ? (Wide{ nb.y } - a.y) : (Wide{ nb.x } - a.x));
-        ok = ok && kept(horizontal ? (Wide{ d.y } - cpt.y) : (Wide{ d.x } - cpt.x),
-                        horizontal ? (Wide{ d.y } - nc.y) : (Wide{ d.x } - nc.x));
-        for (scav_rect const &raw : obstacles) {
-          if (!ok) { break; }
-          // The raw rect is a hard wall and its bumper a soft one, each exempted
-          // for the one leg that was already inside it rather than for the member.
-          scav_rect const box{ grow(raw, clear) };
-          for (uint32_t r = 0; r < now.size(); ++r) {
-            ok = ok && (overlaps(was[r], raw) || !overlaps(now[r], raw));
-            ok = ok && (overlaps(was[r], box) || !overlaps(now[r], box));
+        for (uint32_t const i : group) {
+          kin.clear();
+          for (uint32_t const other : group) {
+            if (other != i) { kin.push_back(members[other].point); }
           }
+          ok = ok && known_good(members[i]);
         }
-        // A leg may keep only a shared run it already had, so the lane a member
-        // leaves is not traded for one it lands on.
-        for (uint32_t q = 0; ok && (q < net_count); ++q) {
-          if (q == m.net) { continue; }
-          scav_span const other{ nets[q] };
-          for (uint32_t k = 0; ok && ((k + 1) < other.len); ++k) {
-            scav_point const s{ points[other.off + k] };
-            scav_point const e{ points[other.off + k + 1] };
-            for (uint32_t r = 0; r < now.size(); ++r) {
-              if (shared_run(then[r], then[r + 1], s, e) > 0) { continue; }
-              ok = ok && (shared_run(way[r], way[r + 1], s, e) == 0);
-            }
+        if (!ok) {
+          stats.refused += (group.size() > 1) ? 1 : 0;
+          continue;
+        }
+        for (uint32_t const i : group) {
+          Member const &m{ members[i] };
+          if (horizontal) {
+            points[m.point].y += m.offset;
+            points[m.point + 1].y += m.offset;
+          } else {
+            points[m.point].x += m.offset;
+            points[m.point + 1].x += m.offset;
           }
+          ++stats.moved;
         }
-        if (!ok) { continue; }
-        points[i] = nb;
-        points[i + 1] = nc;
-        ++stats.moved;
       }
     }
   }

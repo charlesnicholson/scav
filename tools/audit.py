@@ -97,6 +97,31 @@ def overlap(a, b, c, d):
     return max(0, min(j, l) - max(i, k))
 
 
+def trunks(a, b):
+    """Which segments of two routes lie in a run they end -- or begin -- as one:
+    the common suffix and prefix, plus each merge leg where the two legs reaching
+    that run lie along it. 11.5 keeps these together and 11.6 charges neither."""
+    n = min(len(a), len(b))
+    tail = 0
+    while tail < n and a[len(a) - 1 - tail] == b[len(b) - 1 - tail]:
+        tail += 1
+    head = 0
+    while head < n and a[head] == b[head]:
+        head += 1
+    at = set(range(len(a) - tail, len(a) - 1)) | set(range(max(0, head - 1)))
+    bt = set(range(len(b) - tail, len(b) - 1)) | set(range(max(0, head - 1)))
+    i, j = len(a) - tail - 1, len(b) - tail - 1
+    if tail and i >= 0 and j >= 0 and overlap(a[i], a[i + 1], b[j], b[j + 1]):
+        at.add(i)
+        bt.add(j)
+    k = head - 1
+    if head and k + 1 < len(a) and k + 1 < len(b) and \
+            overlap(a[k], a[k + 1], b[k], b[k + 1]):
+        at.add(k)
+        bt.add(k)
+    return at, bt
+
+
 def enclosing(doc, state):
     """`state` and every state whose box contains it. A parent is a submachine
     id, and that submachine's owner is the state one level up."""
@@ -130,8 +155,10 @@ def audit(svg, every, chart, doc, verbose):
 
     cx, cy, cw, ch = chart
     legs = []
+    route = {}
     for m in POLYLINE.finditer(svg):
         pts, trans = points(m.group(1)), m.group(2)
+        route[trans] = pts
         found["route segments"] = found.get("route segments", 0) + len(pts) - 1
         # The tail is the arrowhead's business; this is the other end, which
         # has no glyph of its own to give it away.
@@ -141,22 +168,32 @@ def audit(svg, every, chart, doc, verbose):
         for pt in pts:
             if not (cx <= pt[0] <= cx + cw and cy <= pt[1] <= cy + ch):
                 note("drawn outside the chart rect", f"t{trans} point {pt}")
-        for a, b in zip(pts, pts[1:]):
-            legs.append((a, b, trans))
+        for k, (a, b) in enumerate(zip(pts, pts[1:])):
+            legs.append((a, b, trans, k))
             if a[0] != b[0] and a[1] != b[1]:
                 note("segment not axis-aligned", f"t{trans} {a}-{b}")
             for box in every:
                 if flush(a, b, box):
                     note("segment flush along a box", f"t{trans} {a}-{b} box {box}")
 
-    for i, (a, b, t1) in enumerate(legs):
-        for c, d, t2 in legs[i + 1:]:
+    merged = {}
+    for i, (a, b, t1, ka) in enumerate(legs):
+        for c, d, t2, kb in legs[i + 1:]:
             if t1 == t2:
                 continue
             shared = overlap(a, b, c, d)
-            if shared:
-                found["overlapped units"] = found.get("overlapped units", 0) + shared
-                note("routes share a run", f"t{t1}/t{t2} {a}-{b} over {shared}")
+            if not shared:
+                continue
+            if (t1, t2) not in merged:
+                merged[(t1, t2)] = trunks(route[t1], route[t2])
+            at, bt = merged[(t1, t2)]
+            if ka in at and kb in bt:
+                found["merged trunks"] = found.get("merged trunks", 0) + 1
+                found["merged trunk units"] = (found.get("merged trunk units", 0) +
+                                               shared)
+                continue
+            found["overlapped units"] = found.get("overlapped units", 0) + shared
+            note("routes share a run", f"t{t1}/t{t2} {a}-{b} over {shared}")
 
     for m in ARROWHEAD.finditer(svg):
         tip, trans = points(m.group(1))[0], m.group(2)
@@ -208,7 +245,7 @@ def audit(svg, every, chart, doc, verbose):
             if hit:
                 note("label over a state box", f"t{ident} at ({x},{y})+{length}")
                 break
-        for a, b, other in legs:
+        for a, b, other, _ in legs:
             if other != ident and overlaps(em, span(a, b)):
                 note("label over another route", f"t{ident} over t{other} {a}-{b}")
                 break
@@ -218,8 +255,8 @@ def audit(svg, every, chart, doc, verbose):
         # somebody else's -- 11.6's `label_near`, counted where it is inked. The
         # em box is shorter than the line box layout reserved, so this is the
         # conservative count of the two.
-        mine = [gap(em, span(a, b)) for a, b, other in legs if other == ident]
-        theirs = [gap(em, span(a, b)) for a, b, other in legs if other != ident]
+        mine = [gap(em, span(a, b)) for a, b, other, _ in legs if other == ident]
+        theirs = [gap(em, span(a, b)) for a, b, other, _ in legs if other != ident]
         if mine and theirs and min(mine) + size > min(theirs):
             note("label nearer another route than its own",
                  f"t{ident} own {min(mine)} other {min(theirs)}")
@@ -319,6 +356,10 @@ def main():
     # Not a ratio, so it sits outside the block below: the shared run's extent is
     # what nudging has to pay back, and the pair count alone hides which chart owes.
     print(f"  {'shared run, grid units':<40} {total.get('overlapped units', 0)}")
+    # The run two routes end or begin as one, which is a fan-in rather than a
+    # lane and is left alone by both nudging and the corridor term.
+    print(f"  {'merged trunks':<40} {total.get('merged trunks', 0)}")
+    print(f"  {'merged trunk, grid units':<40} {total.get('merged trunk units', 0)}")
     clean = True
     for key, over in scale.items():
         count = total.get(key, 0)

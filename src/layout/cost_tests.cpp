@@ -117,6 +117,173 @@ TEST_CASE("cost: two routes that properly cross count once") {
   CHECK(cost_terms(c, decompose(c), z, touching, {}, profile()).crossings == 0);
 }
 
+namespace {
+
+// `n` transitions between two states, which is all `corridor` reads of a model.
+Chart edges(uint32_t n) {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  for (uint32_t i = 0; i < n; ++i) { build_trans(c, a, b, TransKind::External, {}); }
+  return c;
+}
+
+int64_t corridor_of(Chart const &c, std::vector<std::vector<scav_point>> const &lines) {
+  SizedLayout const z{ blank(c) };
+  return cost_terms(c, decompose(c), z, routes_of(c, lines), {}, profile()).corridor;
+}
+
+}  // namespace
+
+TEST_CASE("cost: two routes ending as one line are not charged for the run they share") {
+  Chart const c{ edges(2) };
+  // Both turn up onto x=500 and finish at the same point, so the 20 they share
+  // is one line fanning in rather than two lines side by side.
+  CHECK(corridor_of(
+            c,
+            { { { .x = 0, .y = 60 }, { .x = 500, .y = 60 }, { .x = 500, .y = 100 } },
+              { { .x = 0, .y = 80 }, { .x = 500, .y = 80 }, { .x = 500, .y = 100 } } }) ==
+        0);
+
+  // One unit short of the same point: the same 20 units of one line, now with
+  // two ends on it.
+  CHECK(corridor_of(
+            c,
+            { { { .x = 0, .y = 60 }, { .x = 500, .y = 60 }, { .x = 500, .y = 100 } },
+              { { .x = 0, .y = 80 }, { .x = 500, .y = 80 }, { .x = 500, .y = 101 } } }) ==
+        20);
+}
+
+TEST_CASE("cost: a shared endpoint alone exempts nothing") {
+  Chart const c{ edges(2) };
+  // The two reach (200,300) at right angles, so neither last leg joins the
+  // other's run and the 100 they share upstream is two lines on one line.
+  CHECK(corridor_of(
+            c,
+            { { { .x = 0, .y = 100 }, { .x = 200, .y = 100 }, { .x = 200, .y = 300 } },
+              { { .x = 100, .y = 100 },
+                { .x = 300, .y = 100 },
+                { .x = 300, .y = 300 },
+                { .x = 200, .y = 300 } } }) == 100);
+}
+
+TEST_CASE("cost: a run upstream of the merge is charged and the merge is not") {
+  Chart const c{ edges(2) };
+  auto const lines = [](int32_t end_y) {
+    return std::vector<std::vector<scav_point>>{ { { .x = 0, .y = 0 },
+                                                   { .x = 300, .y = 0 },
+                                                   { .x = 300, .y = 60 },
+                                                   { .x = 500, .y = 60 },
+                                                   { .x = 500, .y = 100 } },
+                                                 { { .x = 100, .y = 0 },
+                                                   { .x = 400, .y = 0 },
+                                                   { .x = 400, .y = 80 },
+                                                   { .x = 500, .y = 80 },
+                                                   { .x = 500, .y = end_y } } };
+  };
+  // 200 along y=0 before either turns off it, and 20 where they finish as one.
+  CHECK(corridor_of(c, lines(100)) == 200);
+  CHECK(corridor_of(c, lines(101)) == 220);
+}
+
+TEST_CASE("cost: two routes leaving as one line are not charged for it") {
+  Chart const c{ edges(2) };
+  auto const lines = [](int32_t start_x) {
+    return std::vector<std::vector<scav_point>>{
+      { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
+      { { .x = start_x, .y = 0 }, { .x = 150, .y = 0 }, { .x = 150, .y = -100 } }
+    };
+  };
+  CHECK(corridor_of(c, lines(0)) == 0);
+  CHECK(corridor_of(c, lines(1)) == 149);
+}
+
+TEST_CASE("cost: three routes on one trunk are free over all three pairs") {
+  Chart const c{ edges(3) };
+  auto const lines = [](int32_t end_y) {
+    return std::vector<std::vector<scav_point>>{
+      { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
+      { { .x = 50, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
+      { { .x = 100, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = end_y } }
+    };
+  };
+  CHECK(corridor_of(c, lines(100)) == 0);
+  // The third one unit past the others: its two pairs are charged and the pair
+  // that still ends as one line is not.
+  CHECK(corridor_of(c, lines(101)) == 400);
+}
+
+TEST_CASE("cost: two routes with the same polyline are one trunk end to end") {
+  Chart const c{ edges(2) };
+  CHECK(corridor_of(
+            c,
+            { { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
+              { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } } }) ==
+        0);
+}
+
+TEST_CASE("cost: a route that is the whole of another's end is trunk end to end") {
+  Chart const c{ edges(2) };
+  // A degraded net is a straight line (11.5), and one drawn between two points of
+  // another route is that route's tail or its head rather than a second lane.
+  CHECK(corridor_of(c,
+                    { { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
+                      { { .x = 200, .y = 0 }, { .x = 200, .y = 100 } } }) == 0);
+  CHECK(corridor_of(c,
+                    { { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
+                      { { .x = 0, .y = 0 }, { .x = 200, .y = 0 } } }) == 0);
+}
+
+TEST_CASE("cost: a run the two find again after they part is charged") {
+  Chart const c{ edges(2) };
+  // 100 along y=0 out of the shared start, which is free, and 100 more along
+  // y=100 where the two happen to meet again, which is two lanes on one line.
+  CHECK(corridor_of(c,
+                    { { { .x = 0, .y = 0 },
+                        { .x = 200, .y = 0 },
+                        { .x = 200, .y = 100 },
+                        { .x = 400, .y = 100 } },
+                      { { .x = 0, .y = 0 },
+                        { .x = 100, .y = 0 },
+                        { .x = 100, .y = 200 },
+                        { .x = 300, .y = 200 },
+                        { .x = 300, .y = 100 },
+                        { .x = 500, .y = 100 } } }) == 100);
+}
+
+TEST_CASE("cost: a run against the trunk is charged and the trunk is not") {
+  Chart const c{ edges(2) };
+  // The second crosses x=400 on its way round and joins it later; the 50 it
+  // spends on the trunk before joining it is one lane over another.
+  CHECK(
+      corridor_of(c,
+                  { { { .x = 300, .y = 0 }, { .x = 400, .y = 0 }, { .x = 400, .y = 100 } },
+                    { { .x = 200, .y = 50 },
+                      { .x = 400, .y = 50 },
+                      { .x = 400, .y = -100 },
+                      { .x = 600, .y = -100 },
+                      { .x = 600, .y = 0 },
+                      { .x = 400, .y = 0 },
+                      { .x = 400, .y = 100 } } }) == 50);
+}
+
+TEST_CASE("cost: a degraded net's diagonal is no one's merge leg") {
+  Chart const c{ edges(2) };
+  // A degraded net is a straight line (11.5), so a trunk can be reached over one.
+  // The common suffix is still a trunk; the diagonals into it are not, so the
+  // 200 the two share along y=200 is charged and the 100 they share is not.
+  CHECK(corridor_of(c,
+                    { { { .x = 0, .y = 200 },
+                        { .x = 300, .y = 200 },
+                        { .x = 400, .y = 100 },
+                        { .x = 400, .y = 0 } },
+                      { { .x = 100, .y = 200 },
+                        { .x = 350, .y = 200 },
+                        { .x = 400, .y = 100 },
+                        { .x = 400, .y = 0 } } }) == 200);
+}
+
 TEST_CASE("cost: only the excess over the direct distance is charged") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
