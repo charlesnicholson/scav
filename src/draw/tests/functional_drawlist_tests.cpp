@@ -2,6 +2,8 @@
 // out, build, canonicalize, hash. This is where the measurement policy the
 // layout goldens are stated against finally exists.
 
+#include "layout/cost.h"
+#include "layout/decompose.h"
 #include "scav/scav_core.h"
 #include "scav/scav_draw.h"
 #include "scav/scav_layout.h"
@@ -145,6 +147,50 @@ TEST_CASE("drawlist corpus: the layout hashes under the reference measurement") 
                reinterpret_cast<scav_byte const *>(actual.data()),
                actual.size());
     MESSAGE("actual written to " SCAV_TEST_OUT_DIR "/corpus_measured.txt:\n", actual);
+  }
+  CHECK(want == actual);
+}
+
+TEST_CASE("drawlist corpus: the cost terms on the rendered scale") {
+  // The other scale's cost golden. `label` is scored from the placed boxes and
+  // the path-box part of `excess_len` from the requests, so both are zero
+  // wherever the measurement is not real text (11.6).
+  Metrics const m{ bundled() };
+  scav_profile const p{ readable() };
+
+  std::string actual;
+  for (char const *name : CORPUS) {
+    CAPTURE(name);
+    Run const r{ run_pipeline(name, m, p) };
+    CostTerms const t{
+      cost_columns(r.chart, decompose(r.chart), p, as_spaces(r.spaces), r.placed)
+    };
+    Cost const scored{ cost_of(t, p) };
+    actual += name;
+    for (int64_t const term : { int64_t{ scored.t0_violations },
+                                t.bends,
+                                t.corridor,
+                                t.crossings,
+                                t.excess_len,
+                                t.adjacency,
+                                t.label,
+                                t.aspect,
+                                t.area,
+                                scored.t2 }) {
+      actual += ' ';
+      actual += std::to_string(term);
+    }
+    actual += '\n';
+  }
+
+  std::vector<scav_byte> golden;
+  REQUIRE(read_file(SCAV_TEST_DATA_DIR "/golden/layout/corpus_cost_measured.txt", golden));
+  std::string const want{ reinterpret_cast<char const *>(golden.data()), golden.size() };
+  if (want != actual) {
+    write_file(SCAV_TEST_OUT_DIR "/corpus_cost_measured.txt",
+               reinterpret_cast<scav_byte const *>(actual.data()),
+               actual.size());
+    MESSAGE("actual written to " SCAV_TEST_OUT_DIR "/corpus_cost_measured.txt:\n", actual);
   }
   CHECK(want == actual);
 }

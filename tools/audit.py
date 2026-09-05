@@ -59,6 +59,12 @@ def overlaps(a, b):
             a[1] < b[1] + b[3] and b[1] < a[1] + a[3])
 
 
+def span(a, b):
+    """A segment's bounding box: zero thickness when the segment is axis-aligned,
+    so `overlaps` against it is the strict interior test."""
+    return (min(a[0], b[0]), min(a[1], b[1]), abs(a[0] - b[0]), abs(a[1] - b[1]))
+
+
 def flush(a, b, box):
     """The segment runs along one of the box's own edges."""
     x, y, w, h = box
@@ -83,6 +89,18 @@ def overlap(a, b, c, d):
     return max(0, min(j, l) - max(i, k))
 
 
+def enclosing(doc, state):
+    """`state` and every state whose box contains it. A parent is a submachine
+    id, and that submachine's owner is the state one level up."""
+    seen = []
+    at = state
+    while at is not None and at not in seen:
+        seen.append(at)
+        parent = doc["states"][at]["parent"]
+        at = None if parent is None else doc["submachines"][parent]["owner"]
+    return set(seen)
+
+
 def geometry(chart, scav_bin):
     out = subprocess.run([str(scav_bin), "dump", "--layout", "--json", str(chart)],
                          capture_output=True, text=True, check=True).stdout
@@ -90,10 +108,10 @@ def geometry(chart, scav_bin):
     live = [i for i, st in enumerate(doc["states"]) if st["live"]]
     rects = doc["geometry"]["state"]
     boxes = [tuple(rects[i]) for i in live if rects[i][2] and rects[i][3]]
-    return boxes, tuple(doc["geometry"]["chart"])
+    return boxes, tuple(doc["geometry"]["chart"]), doc
 
 
-def audit(svg, every, chart, verbose):
+def audit(svg, every, chart, doc, verbose):
     found = {}
     notes = []
 
@@ -149,20 +167,38 @@ def audit(svg, every, chart, verbose):
     # `y` is a baseline and `textLength` the advance sum, so one font size up from
     # the baseline is the em box the builder reserved -- the same rectangle it
     # measured with, which is what makes these comparable to the geometry.
+    live = [i for i, st in enumerate(doc["states"]) if st["live"]]
+    rects = doc["geometry"]["state"]
+    bands = (doc["geometry"]["state_before"], doc["geometry"]["state_after"])
     inked = []
     for m in TEXT.finditer(svg):
         x, y, size, length, which, ident = m.groups()
         x, y, size, length = int(x), int(y), int(size), int(length)
-        inked.append(((x, y - size, length, size), which, ident))
+        em = (x, y - size, length, size)
+        inked.append((em, which, ident))
         if which != "trans":
             continue
         found["transition labels"] = found.get("transition labels", 0) + 1
         if not (cx <= x and x + length <= cx + cw and cy <= y <= cy + ch):
             note("drawn outside the chart rect", f"t{ident} label at ({x},{y})")
-        for box in every:
-            bx, by, bw, bh = box
-            if x < bx + bw and x + length > bx and by < y < by + bh:
+
+        def struck(rect):
+            bx, by, bw, bh = rect
+            return bw and bh and x < bx + bw and x + length > bx and by < y < by + bh
+
+        # The composite a transition runs inside encloses its own label, so only
+        # the text bands that composite reserved are out of bounds for it (11.6).
+        edge = doc["transitions"][int(ident)]
+        under = enclosing(doc, edge["src"]) | enclosing(doc, edge["dst"])
+        for i in live:
+            hit = (any(struck(band[i]) for band in bands) if i in under
+                   else struck(rects[i]))
+            if hit:
                 note("label over a state box", f"t{ident} at ({x},{y})+{length}")
+                break
+        for a, b, other in legs:
+            if other != ident and overlaps(em, span(a, b)):
+                note("label over another route", f"t{ident} over t{other} {a}-{b}")
                 break
 
     # Two strings inked into the same place read as one unreadable string, which
@@ -225,8 +261,9 @@ def main():
         if not svg.exists():
             missing.append(name)
             continue
-        every, chart = geometry(CORPUS / name, scav_bin)
-        found, notes = audit(svg.read_text(encoding="utf-8"), every, chart, verbose)
+        every, chart, doc = geometry(CORPUS / name, scav_bin)
+        found, notes = audit(svg.read_text(encoding="utf-8"), every, chart, doc,
+                             verbose)
         for key, count in found.items():
             total[key] = total.get(key, 0) + count
         if verbose and notes:
@@ -248,6 +285,7 @@ def main():
              "drawn outside the chart rect": "route segments",
              "routes share a run": "route segments",
              "label over a state box": "transition labels",
+             "label over another route": "transition labels",
              "texts overprint each other": "texts",
              "mark outside its glyph": "marks in a glyph"}
     for key in ("route segments", "route starts", "arrowheads", "region dividers",

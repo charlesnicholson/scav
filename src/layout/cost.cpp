@@ -6,6 +6,7 @@
 
 #include "layout/decompose.h"
 #include "layout/geom.h"
+#include "layout/label.h"
 #include "layout/route.h"
 #include "layout/size.h"
 #include "scav/scav_core.h"
@@ -152,13 +153,45 @@ CostTerms cost_terms(Chart const &c,
     if (excess > 0) { t.excess_len += excess * (1 + crossings_of[tr]); }
   }
 
-  // Placed boxes against each other and against any state they land on.
+  // Placed boxes against each other, against the states, and against the routes
+  // they do not belong to. A state enclosing an endpoint is the composite the
+  // label lives inside, so only the text bands it reserved are out of bounds.
+  std::vector<uint8_t> encloses(c.states.size(), 0);
+  auto const mark = [&](StateId of, uint8_t v) {
+    StateId at{ of };
+    for (size_t step = 0; (step < c.states.size()) && (at.v != INVALID); ++step) {
+      encloses[at.v] = v;
+      at = enclosing_state(c, at);
+    }
+  };
   for (uint32_t i = 0; i < r.placed.size(); ++i) {
     for (uint32_t j = i + 1; j < r.placed.size(); ++j) {
       if (overlaps(r.placed[i], r.placed[j])) { ++t.label; }
     }
+    uint32_t subject{ INVALID };
+    if ((s.path_box != nullptr) && (i < s.n_path_box) &&
+        (s.path_box[i].subject < c.transitions.size())) {
+      subject = s.path_box[i].subject;
+      mark(c.transitions[subject].src, 1);
+      mark(c.transitions[subject].dst, 1);
+    }
     for (uint32_t st = 0; st < c.states.size(); ++st) {
-      if ((c.states[st].live != 0) && overlaps(r.placed[i], z.state[st])) { ++t.label; }
+      if (c.states[st].live == 0) { continue; }
+      if (encloses[st] != 0) {
+        if (overlaps(r.placed[i], z.before[st]) || overlaps(r.placed[i], z.after[st])) {
+          ++t.label;
+        }
+      } else if (overlaps(r.placed[i], z.state[st])) {
+        ++t.label;
+      }
+    }
+    for (Piece const &piece : pieces) {
+      if (piece.trans == subject) { continue; }
+      if (overlaps(r.placed[i], span_rect(piece.a, piece.b))) { ++t.label; }
+    }
+    if (subject != INVALID) {
+      mark(c.transitions[subject].src, 0);
+      mark(c.transitions[subject].dst, 0);
     }
   }
 
@@ -210,7 +243,11 @@ CostTerms cost_terms(Chart const &c,
   return t;
 }
 
-CostTerms cost_columns(Chart const &c, SplitGraph const &g, scav_profile const &p) {
+CostTerms cost_columns(Chart const &c,
+                       SplitGraph const &g,
+                       scav_profile const &p,
+                       scav_spaces const &s,
+                       std::vector<scav_rect> const &placed) {
   auto const rows = [&c](char const *name, auto &out) {
     ColumnId const id{ column_find(c, name) };
     if (id.v == INVALID) { return; }
@@ -223,6 +260,8 @@ CostTerms cost_columns(Chart const &c, SplitGraph const &g, scav_profile const &
   };
   SizedLayout z;
   rows("scav.geom.state", z.state);
+  rows("scav.geom.state_before", z.before);
+  rows("scav.geom.state_after", z.after);
   rows("scav.geom.sub", z.sub);
   std::vector<scav_rect> chart;
   rows("scav.geom.chart", chart);
@@ -231,7 +270,8 @@ CostTerms cost_columns(Chart const &c, SplitGraph const &g, scav_profile const &
   rows("scav.geom.point", r.points);
   rows("scav.geom.route", r.route);
   r.route.resize(c.transitions.size());
-  return cost_terms(c, g, z, r, {}, p);
+  r.placed = placed;
+  return cost_terms(c, g, z, r, s, p);
 }
 
 Cost cost_of(CostTerms const &t, scav_profile const &p) {

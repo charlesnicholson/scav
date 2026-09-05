@@ -11,6 +11,7 @@
 #include "scav/scav_layout_c.h"
 
 #include <cstdint>
+#include <vector>
 
 namespace scav {
 
@@ -22,9 +23,11 @@ struct CostTerms {
   int64_t crossings{ 0 };   // properly crossing route segment pairs
   int64_t excess_len{ 0 };  // over min_len, charged per crossing on the edge
   int64_t adjacency{ 0 };   // sibling submachine pairs joined but not adjacent
-  int64_t label{ 0 };       // placed boxes overlapping a box or each other
-  int64_t aspect{ 0 };      // |w * dar_den - h * dar_num|
-  int64_t area{ 0 };        // the root bounding box
+  // Per placed box: another box, another transition's route, and per state its
+  // `before`/`after` bands if it encloses an endpoint, else its whole rect.
+  int64_t label{ 0 };
+  int64_t aspect{ 0 };  // |w * dar_den - h * dar_num|
+  int64_t area{ 0 };    // the root bounding box
 
   // Tier 0, forbidden rather than priced: the obstacle set makes these
   // unrepresentable, and the count survives as a net (11.6).
@@ -47,8 +50,12 @@ CostTerms cost_terms(Chart const &c,
                      scav_profile const &p);
 
 // The same scoring from the geometry columns, so one build scores another's
-// output. `label` needs the placed boxes, an out-param, so it comes back zero.
-CostTerms cost_columns(Chart const &c, SplitGraph const &g, scav_profile const &p);
+// output. The placed boxes are an out-param of the run, so they come back in.
+CostTerms cost_columns(Chart const &c,
+                       SplitGraph const &g,
+                       scav_profile const &p,
+                       scav_spaces const &s = {},
+                       std::vector<scav_rect> const &placed = {});
 
 // Every weight is capped at 2^10 and area at 2^40, so the sum stays inside
 // int64 by construction rather than by measurement (11.6).
