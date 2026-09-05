@@ -219,7 +219,8 @@ uint32_t place_labels(Chart const &c,
         int32_t const hi{ flat ? imax(a.x, b.x) : imax(a.y, b.y) };
         // The sign of the leg's traversal: `dir` times a difference of two of
         // its coordinates is how much further along the route the first lies.
-        int32_t const dir{ (flat ? (a.x < b.x) : (a.y < b.y)) ? 1 : -1 };
+        bool const ascending{ flat ? (a.x < b.x) : (a.y < b.y) };
+        int32_t const dir{ ascending ? 1 : -1 };
         bool const bounded{ chained && (k == prior_seg) };
         for (uint32_t side = 0; side < 2; ++side) {
           for (int32_t strip = 0; strip < STRIPS; ++strip) {

@@ -368,7 +368,7 @@ void nudge_lanes(scav_rect const &region,
           ok = ok && known_good(members[i]);
         }
         if (!ok) {
-          stats.refused += (group.size() > 1) ? 1 : 0;
+          stats.refused += (group.size() > 1) ? 1U : 0U;
           continue;
         }
         for (uint32_t const i : group) {

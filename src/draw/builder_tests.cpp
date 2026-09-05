@@ -17,6 +17,10 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+// Not unused: doctest stringifies a failing CHECK's operands, and the insertion
+// operator for `string_view` is declared here. libc++ hands it over through
+// another header and the MSVC STL does not.
+#include <ostream>
 #include <string>
 #include <string_view>
 #include <vector>
