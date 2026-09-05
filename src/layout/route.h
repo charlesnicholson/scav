@@ -26,6 +26,7 @@ struct Routes {
   // Nets the router fell back on, by cause. A fallback is a straight line, and a
   // straight line is what Tier 0 counts.
   uint32_t outside_region{ 0 }, unreachable{ 0 }, too_large{ 0 };
+  std::vector<uint8_t> failed;  // parallel to transitions; 1 = a net of it fell back
   [[nodiscard]] uint32_t degraded() const {
     return outside_region + unreachable + too_large;
   }

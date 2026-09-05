@@ -59,6 +59,7 @@ Routes phase3_route(Chart const &c,
   uint32_t const n{ static_cast<uint32_t>(c.transitions.size()) };
   out.route.assign(n, {});
   out.port.assign(n, {});
+  out.failed.assign(n, 0);
 
   // The segment each port's boundary node belongs to, and the bends each
   // segment was chained through, both gathered once.
@@ -273,6 +274,9 @@ Routes phase3_route(Chart const &c,
       scav_span const at{ (j < ro.net_points.size()) ? ro.net_points[j] : scav_span{} };
       if (j < ro.metrics.size()) {
         out.reseated += static_cast<uint32_t>(ro.metrics[j].reseated);
+        if (ro.metrics[j].failed != RouteFailure::None) {
+          out.failed[g.segments[planned[by_frame[m][j]].seg].trans.v] = 1;
+        }
         switch (ro.metrics[j].failed) {
           case RouteFailure::OutsideRegion: ++out.outside_region; break;
           case RouteFailure::Unreachable: ++out.unreachable; break;
