@@ -1191,6 +1191,44 @@ scav_point last_point(Chart const &c, uint32_t trans) {
 
 }  // namespace
 
+namespace scav {
+
+// The decision `layout.cpp` brackets with SCAV_INTERNAL, declared here rather
+// than in a header so the shipping build keeps it internal.
+bool inflation_done(uint32_t fewest, uint32_t degraded, uint32_t unreachable, bool &keep);
+
+}  // namespace scav
+
+TEST_CASE("layout: only a kept inflation attempt ends the retry loop") {
+  // The loop exists to remove unreachable ends, and the geometry that ships is
+  // whichever attempt was kept. An attempt is reachable-but-worse when a wider
+  // spacing trades unreachable nets for `outside_region` or `too_large` ones --
+  // no chart drives the shipped router there, which is why this asks the
+  // decision directly rather than through a fixture.
+  bool keep{ true };
+
+  // The case the loop got wrong: every end reached, but more degraded overall,
+  // so the attempt is discarded -- and a discarded attempt cannot stop the loop
+  // or the run ships the unreachable ends it was retrying to remove.
+  CHECK(!inflation_done(3, 4, 0, keep));
+  CHECK(!keep);
+  // Equal is not better, so it is discarded on the same grounds.
+  CHECK(!inflation_done(3, 3, 0, keep));
+  CHECK(!keep);
+
+  // Better and complete: kept, and the loop is finished.
+  CHECK(inflation_done(3, 0, 0, keep));
+  CHECK(keep);
+
+  // Better but still short: kept, and the loop runs on to widen again.
+  CHECK(!inflation_done(3, 1, 1, keep));
+  CHECK(keep);
+
+  // Worse and still short: neither kept nor finished.
+  CHECK(!inflation_done(1, 2, 2, keep));
+  CHECK(!keep);
+}
+
 TEST_CASE("layout: a sealed channel is opened by inflating the spacing") {
   Chart c{ sealed_chart() };
   scav_profile const p{ sealed_profile() };

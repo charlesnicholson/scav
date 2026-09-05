@@ -11,6 +11,7 @@
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
 #include "scav_int.h"
+#include "scav_internal.h"
 #include "scav_xxhash.h"
 
 #include <array>
@@ -196,6 +197,26 @@ bool inflate(scav_profile &p, int32_t by) {
 
 }  // namespace
 
+SCAV_INTERNAL_BEGIN
+
+// Whether the inflation loop is finished, and through `keep` whether this
+// attempt replaces the best so far. Bracketed because the case that matters is
+// one no chart reaches: only a router answering `outside_region` or `too_large`
+// where it used to answer `unreachable` produces an attempt that reaches every
+// end while degrading more, and the shipped one does not do that on any chart
+// in the corpus or the suite. The prototype a test uses is its own; see
+// scav_internal.h.
+bool inflation_done(uint32_t fewest, uint32_t degraded, uint32_t unreachable, bool &keep) {
+  keep = degraded < fewest;
+  // Only the attempt that is kept can end the loop, because the kept attempt is
+  // the geometry that ships. One that reaches every end while degrading more
+  // elsewhere is discarded, and stopping on it would leave behind exactly the
+  // unreachable ends the retry existed to remove.
+  return keep && (unreachable == 0);
+}
+
+SCAV_INTERNAL_END
+
 bool layout_run(Chart &c,
                 scav_spaces const &s,
                 scav_layout_opts const &o,
@@ -236,13 +257,14 @@ bool layout_run(Chart &c,
   if (!phase2_size(c, g, orders, s, p, sized, diags)) { return false; }
   Routes routes{ phase3_route(c, g, orders, sized, s, p, *router) };
 
-  // `sized` and `routes` carry the best attempt so far, so the loop's own test
-  // reads that one while `settled` reads the attempt just made.
+  // `sized` and `routes` carry the best attempt so far, and `done` is set from
+  // that one rather than from whichever attempt was just made.
   scav_profile wider{ p };
   uint32_t fewest{ routes.degraded() };
+  bool done{ routes.unreachable == 0 };
   // An increment of zero repeats one attempt to the cap, so it is not one.
-  for (int32_t k = 0; (routes.unreachable != 0) && (p.spacing_inflation_increment > 0) &&
-                      (k < p.spacing_inflation_cap);
+  for (int32_t k = 0;
+       !done && (p.spacing_inflation_increment > 0) && (k < p.spacing_inflation_cap);
        ++k) {
     if (!inflate(wider, p.spacing_inflation_increment)) { break; }
     SubmachineOrders const next_orders{ phase1_order(c, g, s, wider) };
@@ -250,14 +272,14 @@ bool layout_run(Chart &c,
     std::vector<Diagnostic> spilled;
     if (!phase2_size(c, g, next_orders, s, wider, next_sized, spilled)) { break; }
     Routes next{ phase3_route(c, g, next_orders, next_sized, s, wider, *router) };
-    bool const settled{ next.unreachable == 0 };
-    if (next.degraded() < fewest) {
+    bool keep{ false };
+    done = inflation_done(fewest, next.degraded(), next.unreachable, keep);
+    if (keep) {
       fewest = next.degraded();
       sized = std::move(next_sized);
       routes = std::move(next);
       if (inflations != nullptr) { *inflations = static_cast<uint32_t>(k) + 1; }
     }
-    if (settled) { break; }
   }
   placed = routes.placed;
 
