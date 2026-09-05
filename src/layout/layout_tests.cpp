@@ -20,7 +20,6 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
-#include <ostream>
 #include <string>
 #include <vector>
 
@@ -1260,6 +1259,198 @@ TEST_CASE("layout: a cap or an increment of zero never retries") {
   CHECK(inflations == 0);
   CHECK(unwidened.size() == 1);
   CHECK(layout_coordinate_hash(flat_increment) == layout_coordinate_hash(capped));
+}
+
+TEST_CASE("layout: an increment the validator refuses ends the retries") {
+  scav_profile p{ sealed_profile() };
+  p.spacing_inflation_increment = SPACE_MAX;
+  REQUIRE(profile_validate(p));
+  scav_profile widened{ p };
+  widened.rank_sep += p.spacing_inflation_increment;
+  widened.node_sep += p.spacing_inflation_increment;
+  widened.sub_sep += p.spacing_inflation_increment;
+  REQUIRE(!profile_validate(widened));
+
+  Chart c{ sealed_chart() };
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  uint32_t inflations{ 9 };
+  REQUIRE(layout_run(c, {}, opts(p), placed, diags, &inflations));
+  CHECK(inflations == 0);
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::RouteDegraded);
+
+  // The first attempt's geometry, which is what a run that never retried writes.
+  Chart never{ sealed_chart() };
+  scav_profile no_retry{ sealed_profile() };
+  no_retry.spacing_inflation_cap = 0;
+  std::vector<Diagnostic> other;
+  REQUIRE(layout_run(never, {}, opts(no_retry), placed, other, &inflations));
+  CHECK(layout_coordinate_hash(c) == layout_coordinate_hash(never));
+}
+
+namespace {
+
+// The sealed chart with a rank chain beside it: wide enough that a retry's
+// spacing composes past the coordinate domain even though the profile is legal.
+Chart sealed_with_chain() {
+  Chart c{ sealed_chart() };
+  SubmachineId const root{ 0 };
+  std::vector<StateId> chain;
+  chain.reserve(16);
+  for (uint32_t i = 0; i < 16; ++i) {
+    chain.push_back(build_state(c, root, {}, StateKind::Normal, {}));
+  }
+  for (uint32_t i = 1; i < chain.size(); ++i) {
+    build_trans(c, chain[i - 1], chain[i], TransKind::External, {});
+  }
+  return c;
+}
+
+}  // namespace
+
+TEST_CASE("layout: a retry whose sizing leaves the domain ends them too") {
+  scav_profile p{ sealed_profile() };
+  p.spacing_inflation_increment = 120000;
+  REQUIRE(profile_validate(p));
+  scav_profile widened{ p };
+  widened.rank_sep += p.spacing_inflation_increment;
+  widened.node_sep += p.spacing_inflation_increment;
+  widened.sub_sep += p.spacing_inflation_increment;
+  REQUIRE(profile_validate(widened));  // the validator lets this copy through
+
+  Chart c{ sealed_with_chain() };
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ phase1_order(c, g, {}, widened) };
+  SizedLayout z;
+  std::vector<Diagnostic> spilled;
+  REQUIRE(!phase2_size(c, g, o, {}, widened, z, spilled));  // sizing is what refuses
+
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  uint32_t inflations{ 9 };
+  REQUIRE(layout_run(c, {}, opts(p), placed, diags, &inflations));
+  CHECK(inflations == 0);
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::RouteDegraded);
+  CHECK(diags[0].subject.ordinal == 0);
+}
+
+TEST_CASE("layout: an attempt that degrades no less than the best is not taken") {
+  // Two retries that neither settle nor improve: the count stays at zero and the
+  // geometry is the first attempt's, not the widest one tried.
+  Chart twice{ sealed_chart() };
+  scav_profile p{ sealed_profile() };
+  p.spacing_inflation_cap = 2;
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  uint32_t inflations{ 9 };
+  REQUIRE(layout_run(twice, {}, opts(p), placed, diags, &inflations));
+  CHECK(inflations == 0);
+  CHECK(diags.size() == 1);
+
+  Chart never{ sealed_chart() };
+  p.spacing_inflation_cap = 0;
+  std::vector<Diagnostic> other;
+  REQUIRE(layout_run(never, {}, opts(p), placed, other, &inflations));
+  CHECK(layout_coordinate_hash(twice) == layout_coordinate_hash(never));
+}
+
+TEST_CASE("layout: the inflation count is optional") {
+  Chart c{ sealed_chart() };
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  REQUIRE(layout_run(c, {}, opts(sealed_profile()), placed, diags, nullptr));
+  CHECK(diags.empty());
+
+  Chart counted{ sealed_chart() };
+  uint32_t inflations{ 0 };
+  std::vector<Diagnostic> other;
+  REQUIRE(layout_run(counted, {}, opts(sealed_profile()), placed, other, &inflations));
+  CHECK(inflations == 3);
+  CHECK(layout_coordinate_hash(c) == layout_coordinate_hash(counted));
+}
+
+TEST_CASE("layout: a transition every net of which fell back is diagnosed once") {
+  // Two boundaries between the bar and its target, so the transition has three
+  // nets and the bar seals two of them off.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const bar{ build_state(c, root, "S", StateKind::Fork, {}) };
+  StateId const outer{ build_state(c, root, "P", StateKind::Normal, {}) };
+  SubmachineId const mid{ build_submachine(c, outer, {}, {}) };
+  StateId const inner{ build_state(c, mid, "I", StateKind::Normal, {}) };
+  SubmachineId const under{ build_submachine(c, inner, {}, {}) };
+  StateId const deep{ build_state(c, under, "C", StateKind::Normal, {}) };
+  StateId const beside{ build_state(c, under, "D", StateKind::Normal, {}) };
+  build_trans(c, bar, deep, TransKind::External, {});
+  build_trans(c, deep, beside, TransKind::External, {});  // routes, so nothing to say
+
+  scav_profile p{ sealed_profile() };
+  p.spacing_inflation_cap = 0;
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ phase1_order(c, g, {}, p) };
+  SizedLayout z;
+  std::vector<Diagnostic> spilled;
+  REQUIRE(phase2_size(c, g, o, {}, p, z, spilled));
+  Routes const r{ phase3_route(c, g, o, z, {}, p, *router_at(0)) };
+  REQUIRE(g.trans_segments[0].len == 3);
+  REQUIRE(r.unreachable == 2);
+  REQUIRE(r.failed[0] == 1);
+
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  uint32_t inflations{ 9 };
+  REQUIRE(layout_run(c, {}, opts(p), placed, diags, &inflations));
+  CHECK(inflations == 0);
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::RouteDegraded);
+  CHECK(diags[0].subject.kind == ElemKind::Transition);
+  CHECK(diags[0].subject.ordinal == 0);
+}
+
+TEST_CASE("layout: a graph past the router's budget is not a spacing problem") {
+  // Cycle breaking turns a thirteen-rank skip into a long one, and the frame that
+  // holds them all is the shape whose grid the router refuses.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "wide", {}) };
+  std::vector<StateId> all;
+  all.reserve(256);
+  for (uint32_t i = 0; i < 256; ++i) {
+    all.push_back(build_state(c, root, {}, StateKind::Normal, {}));
+  }
+  for (uint32_t i = 1; i < all.size(); ++i) {
+    build_trans(c, all[i - 1], all[i], TransKind::External, {});
+    build_trans(c, all[i], all[(i + 13) % all.size()], TransKind::External, {});
+  }
+
+  scav_profile const p{ readable() };
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ phase1_order(c, g, {}, p) };
+  SizedLayout z;
+  std::vector<Diagnostic> spilled;
+  REQUIRE(phase2_size(c, g, o, {}, p, z, spilled));
+  Routes const r{ phase3_route(c, g, o, z, {}, p, *router_at(0)) };
+  REQUIRE(r.too_large > 0);
+  REQUIRE(r.unreachable == 0);
+  uint32_t marked{ 0 };
+  for (uint8_t const one : r.failed) { marked += (one != 0) ? 1U : 0U; }
+
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  uint32_t inflations{ 9 };
+  REQUIRE(layout_run(c, {}, opts(p), placed, diags, &inflations));
+  CHECK(inflations == 0);  // only an unreachable end moves with spacing
+  CHECK(diags.size() == marked);
+  uint32_t last{ 0 };
+  for (uint32_t i = 0; i < diags.size(); ++i) {
+    CAPTURE(i);
+    CHECK(diags[i].code == DiagCode::RouteDegraded);
+    CHECK(diags[i].subject.kind == ElemKind::Transition);
+    bool const ascends{ (i == 0) || (diags[i].subject.ordinal > last) };
+    CHECK(ascends);
+    last = diags[i].subject.ordinal;
+  }
 }
 
 TEST_CASE("layout: inflating the profile leaves the inputs digest alone") {

@@ -11,8 +11,6 @@
 #include "doctest.h"
 
 #include <cstdint>
-#include <ostream>
-#include <string>
 #include <utility>
 #include <vector>
 
@@ -439,6 +437,60 @@ TEST_CASE("ortho: escaping a named box does not ask whether it contains the poin
   CHECK((ortho_escape_box(pt(20, 50), pt(100, 50), r) == pt(30, 50)));
   // Equidistant resolves left, right, top, bottom.
   CHECK((ortho_escape_box(pt(20, 20), pt(20, 20), r) == pt(10, 20)));
+}
+
+TEST_CASE("ortho: the separation the target lies outside on decides the axis") {
+  // Diagonally away on both axes, so neither separation is zero and the larger
+  // of the two names the face.
+  scav_rect const r{ rect(10, 10, 20, 20) };
+  scav_point const centre{ pt(20, 20) };
+  CHECK((ortho_escape_box(centre, pt(40, 35), r) == pt(30, 20)));  // 10 out on x, 5 on y
+  CHECK((ortho_escape_box(centre, pt(35, 40), r) == pt(20, 30)));  // 5 out on x, 10 on y
+  CHECK((ortho_escape_box(centre, pt(-10, 5), r) == pt(10, 20)));
+  CHECK((ortho_escape_box(centre, pt(5, -10), r) == pt(20, 10)));
+  // Equal separations go to x, the layering axis, on either diagonal.
+  CHECK((ortho_escape_box(centre, pt(40, 40), r) == pt(30, 20)));
+  CHECK((ortho_escape_box(centre, pt(0, 0), r) == pt(10, 20)));
+}
+
+TEST_CASE("ortho: a target inside a span is not outside it, border included") {
+  scav_rect const r{ rect(10, 10, 20, 20) };
+  scav_point const centre{ pt(20, 20) };
+  // Inside the x span and far off the y one: the y separation is the only one
+  // there is, so the exit is a cap however near the target's x sits to a side.
+  CHECK((ortho_escape_box(centre, pt(10, 100), r) == pt(20, 30)));
+  CHECK((ortho_escape_box(centre, pt(30, -100), r) == pt(20, 10)));
+  // And the transpose: on the y span's own border, far off the x one.
+  CHECK((ortho_escape_box(centre, pt(100, 10), r) == pt(30, 20)));
+  CHECK((ortho_escape_box(centre, pt(-100, 30), r) == pt(10, 20)));
+  // A corner is inside both spans, so it is the x tie and the nearer border.
+  CHECK((ortho_escape_box(centre, pt(10, 10), r) == pt(10, 20)));
+  CHECK((ortho_escape_box(centre, pt(30, 30), r) == pt(30, 20)));
+
+  // Two units past a long face, level with the middle of it: the span the target
+  // lies in counts for nothing, so the exit is that face and not an end.
+  scav_rect const bar{ rect(0, 0, 4, 60) };
+  CHECK((ortho_escape_box(pt(2, 30), pt(6, 30), bar) == pt(4, 30)));
+  CHECK((ortho_escape_box(pt(2, 30), pt(-2, 30), bar) == pt(0, 30)));
+}
+
+TEST_CASE("ortho: a box with no width or no height still names a face") {
+  // A zero-width box is a vertical segment: only a target off its ends is
+  // outside a span at all, and its two x borders are the same line.
+  scav_rect const upright{ rect(20, 0, 0, 60) };
+  CHECK((ortho_escape_box(pt(20, 30), pt(20, -100), upright) == pt(20, 0)));
+  CHECK((ortho_escape_box(pt(20, 30), pt(20, 200), upright) == pt(20, 60)));
+  CHECK((ortho_escape_box(pt(20, 30), pt(100, 30), upright) == pt(20, 30)));
+
+  scav_rect const flat{ rect(0, 20, 60, 0) };
+  CHECK((ortho_escape_box(pt(30, 20), pt(-100, 20), flat) == pt(0, 20)));
+  CHECK((ortho_escape_box(pt(30, 20), pt(200, 20), flat) == pt(60, 20)));
+  CHECK((ortho_escape_box(pt(30, 20), pt(30, 100), flat) == pt(30, 20)));
+
+  // A point box has one border on each axis and answers with it.
+  scav_rect const dot{ rect(10, 10, 0, 0) };
+  CHECK((ortho_escape_box(pt(10, 10), pt(50, 10), dot) == pt(10, 10)));
+  CHECK((ortho_escape_box(pt(10, 10), pt(10, 50), dot) == pt(10, 10)));
 }
 
 TEST_CASE("ortho: the box under a point is the innermost whose border holds it") {
