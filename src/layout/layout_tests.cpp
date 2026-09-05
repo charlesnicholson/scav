@@ -1152,6 +1152,194 @@ TEST_CASE("layout: Tier 0 at the scale target, and where the grid gives out") {
   }
 }
 
+namespace {
+
+// The bar ranks before `outer` and stands taller than it, so under the profile
+// below it spans `outer`'s frame and walls off the route into `deep`.
+Chart sealed_chart() {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const bar{ build_state(c, root, "S", StateKind::Fork, {}) };
+  StateId const outer{ build_state(c, root, "P", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, outer, {}, {}) };
+  StateId const deep{ build_state(c, inner, "C", StateKind::Normal, {}) };
+  build_trans(c, bar, deep, TransKind::External, {});
+  return c;
+}
+
+// Clearance is a third of `node_sep`, so this asks for 192 grid units of it
+// across a rank boundary nothing wide.
+scav_profile sealed_profile() {
+  scav_profile p{ readable() };
+  p.pad = 16;
+  p.rank_sep = 0;
+  p.node_sep = 576;
+  return p;
+}
+
+scav_point last_point(Chart const &c, uint32_t trans) {
+  scav_span const route{ row_of<scav_span>(c, "scav.geom.route", trans) };
+  REQUIRE(route.len >= 2);
+  return row_of<scav_point>(c, "scav.geom.point", (route.off + route.len) - 1);
+}
+
+}  // namespace
+
+TEST_CASE("layout: a sealed channel is opened by inflating the spacing") {
+  Chart c{ sealed_chart() };
+  scav_profile const p{ sealed_profile() };
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  uint32_t inflations{ 0 };
+  REQUIRE(layout_run(c, {}, opts(p), placed, diags, &inflations));
+  CHECK(inflations == 3);
+  CHECK(diags.empty());
+  // A routed end sits on C's border; the straight-line fallback leaves it at
+  // C's centre instead.
+  CHECK(on_border(last_point(c, 0), state_rect(c, { 2 })));
+}
+
+TEST_CASE("layout: at the inflation cap the degraded transition is diagnosed") {
+  Chart c{ sealed_chart() };
+  scav_profile p{ sealed_profile() };
+  p.spacing_inflation_cap = 1;
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  uint32_t inflations{ 0 };
+  REQUIRE(layout_run(c, {}, opts(p), placed, diags, &inflations));
+  CHECK(inflations == 0);
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::RouteDegraded);
+  CHECK(diags[0].subject.kind == ElemKind::Transition);
+  CHECK(diags[0].subject.ordinal == 0);
+
+  // The geometry is written all the same, with the straight line in it.
+  scav_rect const deep{ state_rect(c, { 2 }) };
+  scav_point const end{ last_point(c, 0) };
+  CHECK(end.x == (deep.x + (deep.w / 2)));
+  CHECK(end.y == (deep.y + (deep.h / 2)));
+  CHECK(inside(deep, state_rect(c, { 1 })));
+  CHECK(inside(state_rect(c, { 1 }), row_of<scav_rect>(c, "scav.geom.chart", 0)));
+  CHECK(row_of<uint32_t>(c, "scav.geom.gen", 0) == 1);
+}
+
+TEST_CASE("layout: a cap or an increment of zero never retries") {
+  Chart capped{ sealed_chart() };
+  scav_profile p{ sealed_profile() };
+  p.spacing_inflation_cap = 0;
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  uint32_t inflations{ 0 };
+  REQUIRE(layout_run(capped, {}, opts(p), placed, diags, &inflations));
+  CHECK(inflations == 0);
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::RouteDegraded);
+
+  // One retry is one attempt and this chart needs three, so both runs write the
+  // same straight line.
+  Chart once{ sealed_chart() };
+  p.spacing_inflation_cap = 1;
+  std::vector<Diagnostic> again;
+  REQUIRE(layout_run(once, {}, opts(p), placed, again, &inflations));
+  CHECK(inflations == 0);
+  CHECK(layout_coordinate_hash(once) == layout_coordinate_hash(capped));
+
+  // Eight retries that widen nothing are eight copies of the first attempt.
+  Chart flat_increment{ sealed_chart() };
+  p.spacing_inflation_cap = 8;
+  p.spacing_inflation_increment = 0;
+  std::vector<Diagnostic> unwidened;
+  REQUIRE(layout_run(flat_increment, {}, opts(p), placed, unwidened, &inflations));
+  CHECK(inflations == 0);
+  CHECK(unwidened.size() == 1);
+  CHECK(layout_coordinate_hash(flat_increment) == layout_coordinate_hash(capped));
+}
+
+TEST_CASE("layout: inflating the profile leaves the inputs digest alone") {
+  scav_profile const p{ sealed_profile() };
+  Chart sealed{ sealed_chart() };
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  uint32_t inflations{ 0 };
+  REQUIRE(layout_run(sealed, {}, opts(p), placed, diags, &inflations));
+  REQUIRE(inflations == 3);
+
+  // The digest reads the profile, the router and the spaces and nothing else,
+  // so the same caller profile over a chart that never widened lands here too.
+  Chart plain;
+  SubmachineId const root{ build_chart(plain, "t", {}) };
+  build_state(plain, root, "A", StateKind::Normal, {});
+  std::vector<Diagnostic> clean;
+  REQUIRE(layout_run(plain, {}, opts(p), placed, clean, &inflations));
+  CHECK(inflations == 0);
+  CHECK(layout_inputs_digest(sealed) == layout_inputs_digest(plain));
+
+  scav_profile q{ p };
+  q.rank_sep += 3 * p.spacing_inflation_increment;
+  q.node_sep += 3 * p.spacing_inflation_increment;
+  q.sub_sep += 3 * p.spacing_inflation_increment;
+  Chart widened;
+  SubmachineId const other{ build_chart(widened, "t", {}) };
+  build_state(widened, other, "A", StateKind::Normal, {});
+  std::vector<Diagnostic> spread;
+  REQUIRE(layout_run(widened, {}, opts(q), placed, spread, &inflations));
+  CHECK(layout_inputs_digest(widened) != layout_inputs_digest(sealed));
+}
+
+TEST_CASE("layout: nothing in the corpus or at the scale target inflates") {
+  scav_profile const p{ readable() };
+  for (char const *name : { "axis.scav",
+                            "bottler.scav",
+                            "brew.scav",
+                            "dock.scav",
+                            "estop.scav",
+                            "led.scav",
+                            "mill.scav",
+                            "ota.scav",
+                            "tcp.scav",
+                            "toolchanger.scav",
+                            "vac.scav" }) {
+    CAPTURE(name);
+    std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
+    path += name;
+    Loader loader;
+    Chart c;
+    std::vector<Diagnostic> diags;
+    std::string failed;
+    REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
+    std::vector<scav_placed> placed;
+    std::vector<Diagnostic> laid;
+    uint32_t inflations{ 1 };
+    REQUIRE(layout_run(c, {}, opts(p), placed, laid, &inflations));
+    CHECK(inflations == 0);
+    CHECK(laid.empty());
+  }
+
+  Chart nested{ two_k_chart() };
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  uint32_t inflations{ 1 };
+  REQUIRE(layout_run(nested, {}, opts(p), placed, diags, &inflations));
+  CHECK(inflations == 0);
+  CHECK(diags.empty());
+
+  Chart flat;
+  SubmachineId const root{ build_chart(flat, "flat", {}) };
+  std::vector<StateId> all;
+  all.reserve(2048);
+  for (uint32_t i = 0; i < 2048; ++i) {
+    all.push_back(build_state(flat, root, {}, StateKind::Normal, {}));
+  }
+  for (uint32_t i = 0; (i + 1) < all.size(); ++i) {
+    build_trans(flat, all[i], all[i + 1], TransKind::External, {});
+  }
+  inflations = 1;
+  std::vector<Diagnostic> wide;
+  REQUIRE(layout_run(flat, {}, opts(p), placed, wide, &inflations));
+  CHECK(inflations == 0);
+  CHECK(wide.empty());
+}
+
 TEST_CASE("layout: a frame full of long edges terminates, expensively") {
   // The shape the case above is not. Cycle breaking reverses in node order, and a
   // reversed chain edge turns a thirteen-rank skip into a thousand-rank one.
@@ -1529,7 +1717,8 @@ TEST_CASE("layout: fuzzed charts and spaces either lay out or diagnose") {
     std::vector<scav_placed> placed;
     std::vector<Diagnostic> diags;
     if (layout_run(c, s, opts(readable()), placed, diags)) {
-      CHECK(diags.empty());
+      // A success carries marks, never rejections.
+      for (Diagnostic const &d : diags) { CHECK(d.code == DiagCode::RouteDegraded); }
       CHECK(placed.size() == path_boxes.size());
       check_geometry(c);
     } else {

@@ -188,6 +188,9 @@ enum class DiagCode : uint32_t {
   // Layout: a column already registered under a scav.geom name with another
   // shape, which layout refuses to write through.
   GeometryColumnClash,
+  // Layout: a transition whose route came out as a straight line because the
+  // router could not thread it. Geometry is written and the run succeeds.
+  RouteDegraded,
 };
 
 // A producer running before entities exist fills `src`; one running after fills

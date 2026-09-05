@@ -58,12 +58,13 @@ int run_render(char const *path,
 
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
-  if (!layout_run(net.chart, as_spaces(spaces), opts, placed, diags)) {
+  bool const laid{ layout_run(net.chart, as_spaces(spaces), opts, placed, diags) };
+  if (!diags.empty()) {
     std::string err;
     for (Diagnostic const &d : diags) { diag_append(err, net.chart, d, path); }
     write_stream(err, stderr);
-    return EXIT_DIAGNOSED;
   }
+  if (!laid) { return EXIT_DIAGNOSED; }
 
   DrawList list;
   if (!emit_chart(list,
