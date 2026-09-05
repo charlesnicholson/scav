@@ -407,7 +407,7 @@ TEST_CASE("layout: a wide placed box is slid inside rather than hung off") {
   CHECK((placed[0].y + placed[0].h) <= (after.y + after.h));
 }
 
-TEST_CASE("layout: a placed box sits on the longest leg of its route") {
+TEST_CASE("layout: a placed box sits beside the longest leg of its route") {
   // Phase 1 widens a rank boundary by the widest box crossing it (11.3), and that
   // is where the box goes; the polyline's middle point is usually over a state.
   Chart c;
@@ -448,15 +448,16 @@ TEST_CASE("layout: a placed box sits on the longest leg of its route") {
     }
   }
   REQUIRE(longest > 0);
-  // The centre lies on that leg: collinear with it and between its ends.
+  // One edge of the box lies on that leg and its centre along the leg is between
+  // the leg's ends: the strip beside the leg, not the line itself.
   CAPTURE(cx);
   CAPTURE(cy);
   if (best_a.y == best_b.y) {
-    CHECK(cy == best_a.y);
+    CHECK(((placed[0].y == best_a.y) || ((placed[0].y + placed[0].h) == best_a.y)));
     CHECK(cx >= imin(best_a.x, best_b.x));
     CHECK(cx <= imax(best_a.x, best_b.x));
   } else {
-    CHECK(cx == best_a.x);
+    CHECK(((placed[0].x == best_a.x) || ((placed[0].x + placed[0].w) == best_a.x)));
     CHECK(cy >= imin(best_a.y, best_b.y));
     CHECK(cy <= imax(best_a.y, best_b.y));
   }

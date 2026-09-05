@@ -32,14 +32,6 @@ struct Member {
   int32_t offset{ 0 };
 };
 
-// A segment as a zero-thickness rect, so `overlaps` reads a run along a border
-// as touching rather than overlapping.
-scav_rect span_rect(scav_point a, scav_point b) {
-  int32_t const x{ imin(a.x, b.x) };
-  int32_t const y{ imin(a.y, b.y) };
-  return { .x = x, .y = y, .w = imax(a.x, b.x) - x, .h = imax(a.y, b.y) - y };
-}
-
 // The bumper the router searched against.
 scav_rect grow(scav_rect const &r, int32_t by) {
   return { .x = r.x - by, .y = r.y - by, .w = r.w + (2 * by), .h = r.h + (2 * by) };
