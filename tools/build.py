@@ -138,6 +138,23 @@ def discard_binaries(build_dir: Path) -> None:
             path.unlink(missing_ok=True)
 
 
+def build_and_relay(cmake: Path, preset: str) -> tuple[str, int]:
+    """Run the build, echoing each line as it arrives, and return the transcript.
+
+    Collected because build_is_stale reads the `FAILED:` lines afterwards; echoed
+    as it goes because ninja's per-edge progress is the only sign of life during
+    the compile. ninja flushes per edge into a pipe, so a line at a time is live."""
+    argv = [str(cmake), "--build", "--preset", preset]
+    print(f"+ {' '.join(argv)}", flush=True)
+    proc = subprocess.Popen(argv, cwd=REPO_ROOT, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True)
+    lines = []
+    for line in proc.stdout:
+        print(line, end="", flush=True)
+        lines.append(line)
+    return "".join(lines), proc.wait()
+
+
 def link_compile_commands(build_dir: Path) -> None:
     """Point the single compilation database at the tree just configured."""
     if not (source := build_dir / "compile_commands.json").exists():
@@ -233,15 +250,13 @@ def main() -> int:
     link_compile_commands(build_dir)
     # Tests are build steps, so this one command builds and verifies. A second
     # run is a no-op: every test stamp is newer than its inputs.
-    built = subprocess.run([str(cmake), "--build", "--preset", preset], cwd=REPO_ROOT,
-                           stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    print(built.stdout, end="", flush=True)
-    if built.returncode != 0:
-        if build_is_stale(built.stdout):
+    transcript, code = build_and_relay(cmake, preset)
+    if code != 0:
+        if build_is_stale(transcript):
             discard_binaries(build_dir)
             print("\nThe tree did not build; binaries removed rather than left stale.",
                   flush=True)
-        raise SystemExit(built.returncode)
+        raise SystemExit(code)
 
     if args.coverage:
         run(python, REPO_ROOT / "tools/coverage.py", "--build", build_dir)
