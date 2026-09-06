@@ -7,6 +7,7 @@
 // `std::quoted` in scope wins ADL against a test's own `quoted` -- twenty-three
 // files include test_support.h and none of the other twenty need a clock.
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 
@@ -64,14 +65,21 @@ uint64_t nanos_per_run(Once &&once) {
   // The probe is also the warm-up, so a cold allocator is never a sample.
   auto const probe_start{ std::chrono::steady_clock::now() };
   once();
-  uint64_t const probe{ nanos_since(probe_start) };
-  uint64_t const reps{ (probe >= SCALING_WINDOW_NANOS) ? 1ULL
-                                                       : (SCALING_WINDOW_NANOS / probe) };
+  // `nanos_since` never answers zero and `reps` is only ever raised from one, so
+  // neither division below can divide by it. Written as a floor and a raise
+  // rather than as a ternary because that is the form the analyser can follow:
+  // it does not carry the guarantee out of `nanos_since` on its own.
+  uint64_t const measured{ nanos_since(probe_start) };
+  uint64_t const probe{ (measured == 0) ? 1ULL : measured };
+  uint64_t reps{ 1 };
+  if (probe < SCALING_WINDOW_NANOS) {
+    reps = std::max(reps, SCALING_WINDOW_NANOS / probe);
+  }
   auto const start{ std::chrono::steady_clock::now() };
   for (uint64_t i = 0; i < reps; ++i) { once(); }
   uint64_t const total{ nanos_since(start) };
   uint64_t const each{ total / reps };
-  return (each == 0) ? 1U : each;
+  return (each == 0) ? 1ULL : each;
 }
 
 // Both sides of a ratio, measured together and retried.
