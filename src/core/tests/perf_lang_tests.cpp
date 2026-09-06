@@ -2,6 +2,7 @@
 // the machine-independent one. Instrumented builds shrink the input.
 
 #include "core/core_internal.h"
+#include "core/tests/perf_support.h"
 #include "core/tests/test_support.h"
 #include "core/tests/test_synth.h"
 #include "scav/scav_core.h"

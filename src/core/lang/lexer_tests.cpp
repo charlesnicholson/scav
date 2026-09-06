@@ -49,7 +49,10 @@ std::string u_escape(uint32_t cp) {
   return out;
 }
 
-std::string quoted(std::string_view body) {
+// Not `quoted`: the argument is a `std::string` at most call sites, so ADL puts
+// `std::quoted` in the overload set wherever <iomanip> has reached this file --
+// and it wins, being the exact match. That is a header away at all times.
+std::string in_quotes(std::string_view body) {
   std::string out{ '"' };
   out += body;
   out.push_back('"');
@@ -357,10 +360,10 @@ TEST_CASE("decode: every escape the format defines") {
   CHECK(decode(R"("a\"b")").text == R"(a"b)");
   CHECK(decode(R"("a\nb")").text == "a\nb");
   CHECK(decode(R"("a\tb")").text == "a\tb");
-  CHECK(decode(quoted(u_escape(0x0041))).text == "A");
-  CHECK(decode(quoted(u_escape(0x00E9))).text == "\xc3\xa9");
-  CHECK(decode(quoted(u_escape(0xFFFD))).text == "\xef\xbf\xbd");
-  CHECK(decode(quoted(u_escape(0x0000))).text == std::string(1, '\0'));
+  CHECK(decode(in_quotes(u_escape(0x0041))).text == "A");
+  CHECK(decode(in_quotes(u_escape(0x00E9))).text == "\xc3\xa9");
+  CHECK(decode(in_quotes(u_escape(0xFFFD))).text == "\xef\xbf\xbd");
+  CHECK(decode(in_quotes(u_escape(0x0000))).text == std::string(1, '\0'));
 }
 
 TEST_CASE("decode: an unknown escape is rejected rather than passed through") {
@@ -389,24 +392,26 @@ TEST_CASE("decode: a span ending mid-escape is rejected rather than read past") 
 }
 
 TEST_CASE("decode: a malformed backslash-u is rejected") {
-  CHECK(first_code(decode(quoted(R"(\u12)")).diags) == DiagCode::InvalidHexEscape);
-  CHECK(first_code(decode(quoted(R"(\u12g4)")).diags) == DiagCode::InvalidHexEscape);
-  CHECK(first_code(decode(quoted(R"(\u)")).diags) == DiagCode::InvalidHexEscape);
+  CHECK(first_code(decode(in_quotes(R"(\u12)")).diags) == DiagCode::InvalidHexEscape);
+  CHECK(first_code(decode(in_quotes(R"(\u12g4)")).diags) == DiagCode::InvalidHexEscape);
+  CHECK(first_code(decode(in_quotes(R"(\u)")).diags) == DiagCode::InvalidHexEscape);
 }
 
 TEST_CASE("decode: a surrogate escape names the fix instead of encoding garbage") {
-  CHECK(first_code(decode(quoted(u_escape(0xD800))).diags) == DiagCode::EscapedSurrogate);
-  CHECK(first_code(decode(quoted(u_escape(0xDFFF))).diags) == DiagCode::EscapedSurrogate);
+  CHECK(first_code(decode(in_quotes(u_escape(0xD800))).diags) ==
+        DiagCode::EscapedSurrogate);
+  CHECK(first_code(decode(in_quotes(u_escape(0xDFFF))).diags) ==
+        DiagCode::EscapedSurrogate);
   // No pairing either: an astral character is written directly, so there is one
   // spelling of it rather than two.
-  CHECK(first_code(decode(quoted(u_escape(0xD83D) + u_escape(0xDE00))).diags) ==
+  CHECK(first_code(decode(in_quotes(u_escape(0xD83D) + u_escape(0xDE00))).diags) ==
         DiagCode::EscapedSurrogate);
 }
 
 TEST_CASE("decode: an escape decoding to a decomposed sequence is NFC-folded") {
   // The source bytes were folded on read, but \u runs after that. Without this
   // the pool would hold two spellings of one string.
-  Decoded const d{ decode(quoted("e" + u_escape(0x0301))) };
+  Decoded const d{ decode(in_quotes("e" + u_escape(0x0301))) };
   CHECK(d.ok);
   CHECK(d.text == "\xc3\xa9");
 }

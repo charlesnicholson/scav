@@ -1,6 +1,7 @@
 // Loader floors, never times, over documents generated in RAM. Catches a
 // per-document scan going quadratic in discovery, resolution or the rebuild.
 
+#include "core/tests/perf_support.h"
 #include "core/tests/test_support.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
