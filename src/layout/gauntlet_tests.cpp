@@ -124,8 +124,7 @@ bool on_long_face(scav_point at, scav_rect const &r) {
     return ((at.x == r.x) || (at.x == (r.x + r.w))) && (at.y > r.y) &&
            (at.y < (r.y + r.h));
   }
-  return ((at.y == r.y) || (at.y == (r.y + r.h))) && (at.x > r.x) &&
-         (at.x < (r.x + r.w));
+  return ((at.y == r.y) || (at.y == (r.y + r.h))) && (at.x > r.x) && (at.x < (r.x + r.w));
 }
 
 // The overlap of two collinear axis-aligned segments, zero unless they meet in
@@ -454,7 +453,8 @@ TEST_CASE("gauntlet: a fan-in's arrivals are four arrows, none inside another") 
           scav_point const to{ l.r.points[a.off + i + 1] };
           Wide under{ 0 };
           for (uint32_t j = 0; (j + 1) < b.len; ++j) {
-            under += run_shared(from, to, l.r.points[b.off + j], l.r.points[b.off + j + 1]);
+            under +=
+                run_shared(from, to, l.r.points[b.off + j], l.r.points[b.off + j + 1]);
           }
           covered += imin(under, run_shared(from, to, from, to));
         }
@@ -565,7 +565,6 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     }
     CHECK(through == 2);
     CHECK(back == 2);
-
 
     // 11.5's face rule, which picks a face by how far the target lies outside
     // the box on each axis rather than by the distance to a point on it. A
