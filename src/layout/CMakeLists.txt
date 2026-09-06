@@ -64,6 +64,9 @@ if(SCAV_BUILD_TESTS)
     layout_tests.cpp
     bench_tests.cpp
     gauntlet_tests.cpp
+    # Suite-level, beside the fixture both it and the unit tests drive (3.3).
+    tests/determinism_tests.cpp
+    tests/test_synth.cpp
     profile_tests.cpp
     router_tests.cpp
     router_orthogonal_tests.cpp
