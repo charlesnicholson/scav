@@ -77,10 +77,34 @@ scav_point ortho_attach_box(scav_point toward,
                             int32_t clear,
                             bool inscribed);
 
+// `at` holds `2 * nets.size()` points below, src then dst per net, and only the
+// ends naming a box are read or written. The three run in this order.
+
+// An inscribed glyph's face midpoint that would hold an arrival and a departure
+// together, moved a face apart. A disc or a diamond has four faces and one
+// point on each, so a mixed midpoint is seatable without sliding an end off the
+// glyph, which is what the spread below may not do to one. `toward` is what each
+// seat was aimed at -- `ortho_attach_box`'s own argument, so `2 * nets.size()`
+// points again -- and it picks which of the other axis's two faces they take.
+void ortho_reface_attachments(std::vector<RouteNet> const &nets,
+                              std::vector<scav_rect> const &boxes,
+                              std::vector<uint8_t> const &inscribed,
+                              std::vector<scav_point> const &toward,
+                              std::vector<scav_point> &at);
+
+// The two ends of one net, seated on one coordinate where that makes the net one
+// straight segment: each was the other box's *centre* projected onto its own
+// face, so two parallel faces a shared run apart still produce two coordinates
+// and a jog between them. Skipped where phase 1 asked for a corridor.
+void ortho_align_attachments(std::vector<RouteNet> const &nets,
+                             std::vector<scav_rect> const &boxes,
+                             std::vector<uint8_t> const &inscribed,
+                             int32_t clear,
+                             std::vector<scav_point> &at);
+
 // The attachments one face still lands on one point -- two states each other's
 // target project onto the same place -- pushed `clear` apart along that face and
-// clamped back onto it. `at` holds `2 * nets.size()` points, src then dst per
-// net, and only the ends naming a box are read or written.
+// clamped back onto it.
 void ortho_spread_attachments(std::vector<RouteNet> const &nets,
                               std::vector<scav_rect> const &boxes,
                               std::vector<uint8_t> const &inscribed,
