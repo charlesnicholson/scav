@@ -117,7 +117,9 @@ typedef struct {
 typedef struct {
   scav_profile profile;
   scav_router_id router;
-  uint32_t threads; /* scheduling only; ignored */
+  /* Workers over the sharded phases; 0 means 1, any value is legal, and none
+   * of them reaches the output. */
+  uint32_t threads;
 } scav_layout_opts;
 
 /* NOLINTEND(modernize-use-using, readability-identifier-naming) */
