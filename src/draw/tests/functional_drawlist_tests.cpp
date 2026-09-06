@@ -2,6 +2,10 @@
 // out, build, canonicalize, hash. This is where the measurement policy the
 // layout goldens are stated against finally exists.
 
+#include "layout/cost.h"
+#include "layout/decompose.h"
+#include "layout/label.h"
+#include "layout/size.h"
 #include "scav/scav_core.h"
 #include "scav/scav_draw.h"
 #include "scav/scav_layout.h"
@@ -85,6 +89,18 @@ Run run_pipeline(char const *name, Metrics const &m, scav_profile const &p) {
   return r;
 }
 
+// The column's rows, memcpy'd out so nothing reads padding in place.
+template <typename T>
+std::vector<T> rows(Chart const &c, char const *name) {
+  ColumnId const id{ column_find(c, name) };
+  if (id.v == INVALID) { return {}; }
+  std::vector<T> out(column_count(c, id));
+  if (!out.empty()) {
+    std::memcpy(out.data(), column_data(c, id), out.size() * sizeof(T));
+  }
+  return out;
+}
+
 }  // namespace
 
 TEST_CASE("drawlist corpus: every chart builds and hashes to the committed golden") {
@@ -147,6 +163,94 @@ TEST_CASE("drawlist corpus: the layout hashes under the reference measurement") 
     MESSAGE("actual written to " SCAV_TEST_OUT_DIR "/corpus_measured.txt:\n", actual);
   }
   CHECK(want == actual);
+}
+
+TEST_CASE("drawlist corpus: the cost terms on the rendered scale") {
+  // The other scale's cost golden. `label` is scored from the placed boxes and
+  // the path-box part of `excess_len` from the requests, so both are zero
+  // wherever the measurement is not real text (11.6).
+  Metrics const m{ bundled() };
+  scav_profile const p{ readable() };
+
+  std::string actual;
+  for (char const *name : CORPUS) {
+    CAPTURE(name);
+    Run const r{ run_pipeline(name, m, p) };
+    CostTerms const t{
+      cost_columns(r.chart, decompose(r.chart), p, as_spaces(r.spaces), r.placed)
+    };
+    Cost const scored{ cost_of(t, p) };
+    actual += name;
+    for (int64_t const term : { int64_t{ scored.t0_violations },
+                                t.bends,
+                                t.corridor,
+                                t.crossings,
+                                t.excess_len,
+                                t.adjacency,
+                                t.label,
+                                t.label_near,
+                                t.aspect,
+                                t.area,
+                                scored.t2 }) {
+      actual += ' ';
+      actual += std::to_string(term);
+    }
+    actual += '\n';
+  }
+
+  std::vector<scav_byte> golden;
+  REQUIRE(read_file(SCAV_TEST_DATA_DIR "/golden/layout/corpus_cost_measured.txt", golden));
+  std::string const want{ reinterpret_cast<char const *>(golden.data()), golden.size() };
+  if (want != actual) {
+    write_file(SCAV_TEST_OUT_DIR "/corpus_cost_measured.txt",
+               reinterpret_cast<scav_byte const *>(actual.data()),
+               actual.size());
+    MESSAGE("actual written to " SCAV_TEST_OUT_DIR "/corpus_cost_measured.txt:\n", actual);
+  }
+  CHECK(want == actual);
+}
+
+TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back") {
+  // Placement re-run from the emitted columns: the check that the columns carry
+  // everything it reads, and the corpus's count of boxes that found no strip.
+  Metrics const m{ bundled() };
+  scav_profile const p{ readable() };
+
+  uint32_t fell{ 0 };
+  uint32_t boxes{ 0 };
+  for (char const *name : CORPUS) {
+    CAPTURE(name);
+    Run const r{ run_pipeline(name, m, p) };
+    SizedLayout z;
+    z.state = rows<scav_rect>(r.chart, "scav.geom.state");
+    z.before = rows<scav_rect>(r.chart, "scav.geom.state_before");
+    z.after = rows<scav_rect>(r.chart, "scav.geom.state_after");
+    z.sub = rows<scav_rect>(r.chart, "scav.geom.sub");
+    std::vector<scav_rect> const chart{ rows<scav_rect>(r.chart, "scav.geom.chart") };
+    REQUIRE(chart.size() == 1);
+    z.chart = chart[0];
+
+    std::vector<scav_rect> again;
+    fell += place_labels(r.chart,
+                         z,
+                         as_spaces(r.spaces),
+                         rows<scav_span>(r.chart, "scav.geom.route"),
+                         rows<scav_point>(r.chart, "scav.geom.point"),
+                         again);
+    boxes += static_cast<uint32_t>(again.size());
+    REQUIRE(again.size() == r.placed.size());
+    // Inside the chart rect, which the run then grew to cover: the re-run sees
+    // the grown one, so it is a bound on the placement and not a repeat of it.
+    for (scav_rect const &at : r.placed) {
+      CHECK(at.x >= z.chart.x);
+      CHECK(at.y >= z.chart.y);
+      CHECK((at.x + at.w) <= (z.chart.x + z.chart.w));
+      CHECK((at.y + at.h) <= (z.chart.y + z.chart.h));
+    }
+  }
+  MESSAGE("corpus path boxes: ", boxes, ", centred fallbacks: ", fell);
+  CHECK(boxes == 192);
+  CHECK(fell == 14);
 }
 
 TEST_CASE("drawlist corpus: the layout goldens' measurement policy is stated here") {

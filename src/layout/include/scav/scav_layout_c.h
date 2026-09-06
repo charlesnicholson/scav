@@ -91,6 +91,7 @@ typedef struct {
   int32_t w_excess_len;
   int32_t w_adjacency;
   int32_t w_label;
+  int32_t w_label_near; /* [0, 1024] */
   int32_t w_aspect;
   int32_t w_area;
 
@@ -132,7 +133,11 @@ scav_result scav_profile_validate(scav_profile const *profile);
  * and fills `out_placed` parallel to the path boxes. NULL `spaces` means no
  * requests. cap = 0 with boxes pending queries the required count; a cap too
  * small is SCAV_E_CAPACITY. SCAV_E_LAYOUT means findings await on the chart's
- * scav_chart_diag, and the columns keep the last successful run's values. */
+ * scav_chart_diag, and the columns keep the last successful run's values.
+ *
+ * SCAV_OK leaves findings there as well, marking geometry that was written: one
+ * per transition the router could not thread even after widening the spacing,
+ * whose route is the straight line between its ends. Read them, draw anyway. */
 scav_result scav_layout_run(scav_chart *chart,
                             scav_spaces const *spaces,
                             scav_layout_opts const *opts,

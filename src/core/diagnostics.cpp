@@ -157,6 +157,8 @@ char const *diag_message(DiagCode code) {
       return "containment relation disagrees with its inverse, or cycles";
     case DiagCode::GeometryColumnClash:
       return "a scav.geom column is registered with a different shape";
+    case DiagCode::RouteDegraded:
+      return "transition routed as a straight line: no free channel";
   }
   return "unknown diagnostic";
 }

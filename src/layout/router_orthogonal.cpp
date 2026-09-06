@@ -3,6 +3,7 @@
 
 #include "layout/router_orthogonal.h"
 
+#include "layout/geom.h"
 #include "layout/router.h"
 #include "scav_int.h"
 #include "scav_stable_sort.h"
@@ -93,10 +94,6 @@ void heap_pop(OrthoScratch &s, Wide &f, Wide &g, uint32_t &node) {
   }
 }
 
-bool strictly_inside(scav_point p, scav_rect const &r) {
-  return (p.x > r.x) && (p.x < (r.x + r.w)) && (p.y > r.y) && (p.y < (r.y + r.h));
-}
-
 }  // namespace
 
 bool ortho_blocks_h(scav_rect const &r, int32_t y, int32_t x0, int32_t x1) {
@@ -133,24 +130,25 @@ uint32_t ortho_index_of(std::vector<int32_t> const &v, int32_t at) {
 }
 
 scav_point ortho_escape_box(scav_point at, scav_point toward, scav_rect const &r) {
-  std::array<scav_point, 4> const options{ { { .x = r.x, .y = at.y },
-                                             { .x = r.x + r.w, .y = at.y },
-                                             { .x = at.x, .y = r.y },
-                                             { .x = at.x, .y = r.y + r.h } } };
-  scav_point best{ options[0] };
-  Wide best_d{ -1 };
-  for (scav_point const &option : options) {
-    Wide const dx{ Wide{ option.x } - toward.x };
-    Wide const dy{ Wide{ option.y } - toward.y };
-    Wide const d{ (dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy) };
-    // Strictly less: of two equal exits the earlier wins, so the order is the
-    // fixed left, right, top, bottom.
-    if ((best_d < 0) || (d < best_d)) {
-      best_d = d;
-      best = option;
-    }
+  // How far outside the box `toward` lies on each axis, measured from the box's
+  // span rather than from a border point, so a face's length does not count.
+  auto const beyond = [](int32_t v, int32_t lo, int32_t len) {
+    Wide const hi{ Wide{ lo } + len };
+    if (v < lo) { return Wide{ lo } - v; }
+    if (Wide{ v } > hi) { return Wide{ v } - hi; }
+    return Wide{ 0 };
+  };
+  Wide const dx{ beyond(toward.x, r.x, r.w) };
+  Wide const dy{ beyond(toward.y, r.y, r.h) };
+
+  // The dominant separation picks the axis, a tie going to the layering axis x;
+  // the side is the nearer border, which is total for a `toward` inside the span.
+  if (dx >= dy) {
+    bool const left{ (Wide{ toward.x } - r.x) <= ((Wide{ r.x } + r.w) - toward.x) };
+    return { .x = left ? r.x : (r.x + r.w), .y = at.y };
   }
-  return best;
+  bool const top{ (Wide{ toward.y } - r.y) <= ((Wide{ r.y } + r.h) - toward.y) };
+  return { .x = at.x, .y = top ? r.y : (r.y + r.h) };
 }
 
 scav_point ortho_escape(scav_point at,
@@ -161,7 +159,7 @@ scav_point ortho_escape(scav_point at,
   uint32_t chosen{ INVALID };
   Wide smallest{ -1 };
   for (uint32_t i = 0; i < boxes.size(); ++i) {
-    if (!strictly_inside(at, boxes[i])) { continue; }
+    if (!inside(at, boxes[i])) { continue; }
     Wide const area{ Wide{ boxes[i].w } * boxes[i].h };
     if ((smallest < 0) || (area < smallest)) {
       smallest = area;
@@ -450,7 +448,7 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
       ring.y = imin(imax(ring.y, lo_y), hi_y);
       bool ok{ (ring.x != attach.x) || (ring.y != attach.y) };
       for (scav_rect const &r : in.obstacles) {
-        if (strictly_inside(ring, r)) { ok = false; }
+        if (inside(ring, r)) { ok = false; }
       }
       if (ok) {
         lead.push_back(attach);

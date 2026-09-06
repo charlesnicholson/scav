@@ -1,6 +1,7 @@
 // Loader floors, never times, over documents generated in RAM. Catches a
 // per-document scan going quadratic in discovery, resolution or the rebuild.
 
+#include "core/tests/perf_support.h"
 #include "core/tests/test_support.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
@@ -29,8 +30,6 @@ constexpr uint64_t LOAD_FLOOR_MB_PER_S{ 5 };
 // Doubling the network must not more than treble the work. Generous, because
 // the point is catching a quadratic and not tracking a constant factor.
 constexpr double SCALING_SLACK{ 3.0 };
-constexpr uint32_t SCALING_RUNS{ 5 };
-constexpr uint32_t SCALING_ATTEMPTS{ 3 };
 
 // Instrumentation makes the absolute numbers describe the instrumentation, so
 // those rows run a smaller network; the ratio is what carries the assertion.
@@ -41,65 +40,6 @@ struct Doc {
   std::string name;
   std::string text;
 };
-
-uint64_t micros_since(std::chrono::steady_clock::time_point start) {
-  auto const elapsed{ std::chrono::steady_clock::now() - start };
-  uint64_t const us{ static_cast<uint64_t>(
-      std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count()) };
-  return (us == 0) ? 1U : us;
-}
-
-template <typename Once>
-uint64_t fastest_micros(Once &&once) {
-  uint64_t best{ UINT64_MAX };
-  for (uint32_t i = 0; i < SCALING_RUNS; ++i) {
-    auto const start{ std::chrono::steady_clock::now() };
-    once();
-    uint64_t const us{ micros_since(start) };
-    best = (us < best) ? us : best;
-  }
-  return best;
-}
-
-// The estimator for a *ratio*, which is not the one for a throughput floor.
-//
-// min-of-N biases a ratio upward: the shorter side finds an uncontended window
-// more often than the longer one, so growth reads high on a loaded machine.
-// Summing is worse -- it keeps every outlier. The median discards them from both
-// sides alike, which is what leaves the ratio meaningful while a build runs
-// beside it. One unmeasured run first, so a cold allocator is not one of the
-// samples.
-template <typename Once>
-uint64_t median_micros(Once &&once) {
-  once();
-  std::array<uint64_t, SCALING_RUNS> samples{};
-  for (uint32_t i = 0; i < SCALING_RUNS; ++i) {
-    auto const start{ std::chrono::steady_clock::now() };
-    once();
-    samples[i] = micros_since(start);
-  }
-  std::ranges::sort(samples);
-  return samples[SCALING_RUNS / 2];
-}
-
-// Both sides of a ratio, measured together and retried.
-//
-// A scheduling hiccup inflates one attempt; a quadratic inflates every one. So
-// the pair kept is the one with the lowest growth, which noise can only make
-// look better and a real quadratic cannot fake.
-struct Pair {
-  uint64_t small, large;
-};
-
-template <typename Small, typename Large>
-Pair best_pair(Small &&small, Large &&large) {
-  Pair best{ .small = 1, .large = UINT64_MAX };
-  for (uint32_t attempt = 0; attempt < SCALING_ATTEMPTS; ++attempt) {
-    Pair const got{ .small = median_micros(small), .large = median_micros(large) };
-    if ((got.large * best.small) < (best.large * got.small)) { best = got; }
-  }
-  return best;
-}
 
 // Document i includes document i+1, so the network is `count` deep with one
 // instantiation each. Depth stresses the resolver's walk and the rebuild.

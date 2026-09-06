@@ -13,6 +13,7 @@
 
 #include "doctest.h"
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -116,6 +117,173 @@ TEST_CASE("cost: two routes that properly cross count once") {
   CHECK(cost_terms(c, decompose(c), z, touching, {}, profile()).crossings == 0);
 }
 
+namespace {
+
+// `n` transitions between two states, which is all `corridor` reads of a model.
+Chart edges(uint32_t n) {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  for (uint32_t i = 0; i < n; ++i) { build_trans(c, a, b, TransKind::External, {}); }
+  return c;
+}
+
+int64_t corridor_of(Chart const &c, std::vector<std::vector<scav_point>> const &lines) {
+  SizedLayout const z{ blank(c) };
+  return cost_terms(c, decompose(c), z, routes_of(c, lines), {}, profile()).corridor;
+}
+
+}  // namespace
+
+TEST_CASE("cost: two routes ending as one line are not charged for the run they share") {
+  Chart const c{ edges(2) };
+  // Both turn up onto x=500 and finish at the same point, so the 20 they share
+  // is one line fanning in rather than two lines side by side.
+  CHECK(corridor_of(
+            c,
+            { { { .x = 0, .y = 60 }, { .x = 500, .y = 60 }, { .x = 500, .y = 100 } },
+              { { .x = 0, .y = 80 }, { .x = 500, .y = 80 }, { .x = 500, .y = 100 } } }) ==
+        0);
+
+  // One unit short of the same point: the same 20 units of one line, now with
+  // two ends on it.
+  CHECK(corridor_of(
+            c,
+            { { { .x = 0, .y = 60 }, { .x = 500, .y = 60 }, { .x = 500, .y = 100 } },
+              { { .x = 0, .y = 80 }, { .x = 500, .y = 80 }, { .x = 500, .y = 101 } } }) ==
+        20);
+}
+
+TEST_CASE("cost: a shared endpoint alone exempts nothing") {
+  Chart const c{ edges(2) };
+  // The two reach (200,300) at right angles, so neither last leg joins the
+  // other's run and the 100 they share upstream is two lines on one line.
+  CHECK(corridor_of(
+            c,
+            { { { .x = 0, .y = 100 }, { .x = 200, .y = 100 }, { .x = 200, .y = 300 } },
+              { { .x = 100, .y = 100 },
+                { .x = 300, .y = 100 },
+                { .x = 300, .y = 300 },
+                { .x = 200, .y = 300 } } }) == 100);
+}
+
+TEST_CASE("cost: a run upstream of the merge is charged and the merge is not") {
+  Chart const c{ edges(2) };
+  auto const lines = [](int32_t end_y) {
+    return std::vector<std::vector<scav_point>>{ { { .x = 0, .y = 0 },
+                                                   { .x = 300, .y = 0 },
+                                                   { .x = 300, .y = 60 },
+                                                   { .x = 500, .y = 60 },
+                                                   { .x = 500, .y = 100 } },
+                                                 { { .x = 100, .y = 0 },
+                                                   { .x = 400, .y = 0 },
+                                                   { .x = 400, .y = 80 },
+                                                   { .x = 500, .y = 80 },
+                                                   { .x = 500, .y = end_y } } };
+  };
+  // 200 along y=0 before either turns off it, and 20 where they finish as one.
+  CHECK(corridor_of(c, lines(100)) == 200);
+  CHECK(corridor_of(c, lines(101)) == 220);
+}
+
+TEST_CASE("cost: two routes leaving as one line are not charged for it") {
+  Chart const c{ edges(2) };
+  auto const lines = [](int32_t start_x) {
+    return std::vector<std::vector<scav_point>>{
+      { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
+      { { .x = start_x, .y = 0 }, { .x = 150, .y = 0 }, { .x = 150, .y = -100 } }
+    };
+  };
+  CHECK(corridor_of(c, lines(0)) == 0);
+  CHECK(corridor_of(c, lines(1)) == 149);
+}
+
+TEST_CASE("cost: three routes on one trunk are free over all three pairs") {
+  Chart const c{ edges(3) };
+  auto const lines = [](int32_t end_y) {
+    return std::vector<std::vector<scav_point>>{
+      { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
+      { { .x = 50, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
+      { { .x = 100, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = end_y } }
+    };
+  };
+  CHECK(corridor_of(c, lines(100)) == 0);
+  // The third one unit past the others: its two pairs are charged and the pair
+  // that still ends as one line is not.
+  CHECK(corridor_of(c, lines(101)) == 400);
+}
+
+TEST_CASE("cost: two routes with the same polyline are one trunk end to end") {
+  Chart const c{ edges(2) };
+  CHECK(corridor_of(
+            c,
+            { { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
+              { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } } }) ==
+        0);
+}
+
+TEST_CASE("cost: a route that is the whole of another's end is trunk end to end") {
+  Chart const c{ edges(2) };
+  // A degraded net is a straight line (11.5), and one drawn between two points of
+  // another route is that route's tail or its head rather than a second lane.
+  CHECK(corridor_of(c,
+                    { { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
+                      { { .x = 200, .y = 0 }, { .x = 200, .y = 100 } } }) == 0);
+  CHECK(corridor_of(c,
+                    { { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
+                      { { .x = 0, .y = 0 }, { .x = 200, .y = 0 } } }) == 0);
+}
+
+TEST_CASE("cost: a run the two find again after they part is charged") {
+  Chart const c{ edges(2) };
+  // 100 along y=0 out of the shared start, which is free, and 100 more along
+  // y=100 where the two happen to meet again, which is two lanes on one line.
+  CHECK(corridor_of(c,
+                    { { { .x = 0, .y = 0 },
+                        { .x = 200, .y = 0 },
+                        { .x = 200, .y = 100 },
+                        { .x = 400, .y = 100 } },
+                      { { .x = 0, .y = 0 },
+                        { .x = 100, .y = 0 },
+                        { .x = 100, .y = 200 },
+                        { .x = 300, .y = 200 },
+                        { .x = 300, .y = 100 },
+                        { .x = 500, .y = 100 } } }) == 100);
+}
+
+TEST_CASE("cost: a run against the trunk is charged and the trunk is not") {
+  Chart const c{ edges(2) };
+  // The second crosses x=400 on its way round and joins it later; the 50 it
+  // spends on the trunk before joining it is one lane over another.
+  CHECK(
+      corridor_of(c,
+                  { { { .x = 300, .y = 0 }, { .x = 400, .y = 0 }, { .x = 400, .y = 100 } },
+                    { { .x = 200, .y = 50 },
+                      { .x = 400, .y = 50 },
+                      { .x = 400, .y = -100 },
+                      { .x = 600, .y = -100 },
+                      { .x = 600, .y = 0 },
+                      { .x = 400, .y = 0 },
+                      { .x = 400, .y = 100 } } }) == 50);
+}
+
+TEST_CASE("cost: a degraded net's diagonal is no one's merge leg") {
+  Chart const c{ edges(2) };
+  // A degraded net is a straight line (11.5), so a trunk can be reached over one.
+  // The common suffix is still a trunk; the diagonals into it are not, so the
+  // 200 the two share along y=200 is charged and the 100 they share is not.
+  CHECK(corridor_of(c,
+                    { { { .x = 0, .y = 200 },
+                        { .x = 300, .y = 200 },
+                        { .x = 400, .y = 100 },
+                        { .x = 400, .y = 0 } },
+                      { { .x = 100, .y = 200 },
+                        { .x = 350, .y = 200 },
+                        { .x = 400, .y = 100 },
+                        { .x = 400, .y = 0 } } }) == 200);
+}
+
 TEST_CASE("cost: only the excess over the direct distance is charged") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
@@ -171,7 +339,132 @@ TEST_CASE("cost: an edge through a stranger's box counts, through its own does n
   CHECK(cost_terms(c, decompose(c), z, r, {}, profile()).through_box == 0);
 }
 
-TEST_CASE("cost: a placed box overlapping a state is a label cost") {
+TEST_CASE("cost: a placed box over a state neither endpoint is under costs") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const other{ build_state(c, root, "X", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+
+  SizedLayout z{ blank(c) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 100 };
+  z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 100 };
+  z.state[other.v] = { .x = 200, .y = -200, .w = 100, .h = 100 };
+  Routes r{ routes_of(c, { { { .x = 100, .y = 50 }, { .x = 400, .y = 50 } } }) };
+  r.placed = { { .x = 200, .y = -190, .w = 60, .h = 20 } };
+  scav_path_box const box{ .subject = 0, .w = 60, .h = 20, .order = 0 };
+  scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label == 1);
+
+  z.state[other.v] = { .x = 200, .y = 500, .w = 100, .h = 100 };
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label == 0);
+}
+
+TEST_CASE("cost: inside the composite it runs in, only the text bands cost") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const outer{ build_state(c, root, "Outer", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, outer, "main", {}) };
+  StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, inner, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+
+  SizedLayout z{ blank(c) };
+  z.state[outer.v] = { .x = 0, .y = 0, .w = 600, .h = 200 };
+  z.before[outer.v] = { .x = 10, .y = 10, .w = 580, .h = 30 };
+  z.state[a.v] = { .x = 50, .y = 80, .w = 100, .h = 60 };
+  z.state[b.v] = { .x = 400, .y = 80, .w = 100, .h = 60 };
+  Routes r{ routes_of(c, { { { .x = 150, .y = 110 }, { .x = 400, .y = 110 } } }) };
+  scav_path_box const box{ .subject = 0, .w = 60, .h = 20, .order = 0 };
+  scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
+
+  r.placed = { { .x = 200, .y = 90, .w = 60, .h = 20 } };  // in Outer, clear of its band
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label == 0);
+
+  r.placed = { { .x = 200, .y = 15, .w = 60, .h = 20 } };  // in Outer's title band
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label == 1);
+}
+
+TEST_CASE("cost: a placed box over another transition's route is a label cost") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, a, TransKind::External, {});
+
+  SizedLayout z{ blank(c) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 100 };
+  z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 100 };
+  Routes r{ routes_of(c,
+                      { { { .x = 100, .y = 50 }, { .x = 400, .y = 50 } },
+                        { { .x = 400, .y = 80 }, { .x = 100, .y = 80 } } }) };
+  scav_path_box const box{ .subject = 0, .w = 60, .h = 20, .order = 0 };
+  scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
+
+  // Straddling its own route is free and straddling the other one is not, so
+  // the two rects differ only in which line they cross.
+  r.placed = { { .x = 200, .y = 40, .w = 60, .h = 20 } };
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label == 0);
+
+  r.placed = { { .x = 200, .y = 70, .w = 60, .h = 20 } };
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label == 1);
+}
+
+TEST_CASE("cost: a box nearer a foreign route than its own is charged the shortfall") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, a, TransKind::External, {});
+
+  SizedLayout z{ blank(c) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 200 };
+  z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 200 };
+  scav_path_box const box{ .subject = 0, .w = 60, .h = 20, .order = 0 };
+  scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
+  // The box rides its own leg at y 150; the foreign leg's height above it is
+  // the only thing that changes between the cases.
+  auto const scored = [&](int32_t foreign_y) {
+    Routes r{ routes_of(
+        c,
+        { { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } },
+          { { .x = 400, .y = foreign_y }, { .x = 100, .y = foreign_y } } }) };
+    r.placed = { { .x = 200, .y = 130, .w = 60, .h = 20 } };
+    return cost_terms(c, decompose(c), z, r, s, profile()).label_near;
+  };
+
+  CHECK(scored(120) == 10);  // half a line of text nearer the stranger than it may be
+  CHECK(scored(110) == 0);   // one whole line away, which is the margin it owes
+  CHECK(scored(90) == 0);
+
+  // Strip 1: the box's own leg is one height away, so the stranger has to be
+  // one height further out again, and here it is not.
+  Routes strip1{ routes_of(c,
+                           { { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } },
+                             { { .x = 400, .y = 90 }, { .x = 100, .y = 90 } } }) };
+  strip1.placed = { { .x = 200, .y = 110, .w = 60, .h = 20 } };
+  CHECK(cost_terms(c, decompose(c), z, strip1, s, profile()).label_near == 20);
+}
+
+TEST_CASE("cost: with no other route to be near, no box is charged") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+
+  SizedLayout z{ blank(c) };
+  Routes r{ routes_of(c, { { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } } }) };
+  r.placed = { { .x = 200, .y = 130, .w = 60, .h = 20 } };
+  scav_path_box const box{ .subject = 0, .w = 60, .h = 20, .order = 0 };
+  scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label_near == 0);
+}
+
+TEST_CASE("cost: two placed boxes over each other are one label cost") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -182,11 +475,18 @@ TEST_CASE("cost: a placed box overlapping a state is a label cost") {
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 100 };
   z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 100 };
   Routes r{ routes_of(c, { { { .x = 100, .y = 50 }, { .x = 400, .y = 50 } } }) };
-  r.placed = { { .x = 50, .y = 40, .w = 60, .h = 20 } };  // over A
-  CHECK(cost_terms(c, decompose(c), z, r, {}, profile()).label == 1);
+  std::array<scav_path_box, 2> const boxes{
+    { { .subject = 0, .w = 60, .h = 20, .order = 0 },
+      { .subject = 0, .w = 60, .h = 20, .order = 1 } }
+  };
+  scav_spaces const s{ .path_box = boxes.data(), .n_path_box = 2 };
 
-  r.placed = { { .x = 200, .y = 40, .w = 60, .h = 20 } };  // clear of both
-  CHECK(cost_terms(c, decompose(c), z, r, {}, profile()).label == 0);
+  r.placed = { { .x = 200, .y = 20, .w = 60, .h = 20 },
+               { .x = 230, .y = 30, .w = 60, .h = 20 } };
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label == 1);
+
+  r.placed[1] = { .x = 300, .y = 20, .w = 60, .h = 20 };
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label == 0);
 }
 
 TEST_CASE("cost: the weights turn terms into one integer, compared by tier") {

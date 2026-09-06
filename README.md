@@ -39,9 +39,15 @@ scav dump [--hash|--json] [--layout] <file>  the model: entity rows, not syntax
 submachine, extents composed bottom-up onto those ranks, and routes through
 them. `libscavdraw` measures text against the bundled font, builds a `DrawList`
 from the geometry columns, and `libscavsvg` writes it out; `scav render` is
-those three in a line. Routes are still straight lines between the points the
-ranks decided, so an edge can cross a box and a label can land on a state name
--- that is the `straight` router, and P7 is what replaces it.
+those three in a line. Routes are orthogonal: an A* over a per-frame visibility
+graph separated into h- and v-planes, which is what a caller with no opinion
+gets. No corpus chart routes an edge through a box. Two edges reaching the same
+lane are nudged apart, and a transition label is placed on a strip beside its
+own route, clear of states and other routes, and nearer its own line than any
+other. What `tools/audit.py` still finds on the corpus -- 136 of 917 segments
+sharing a run, 9 of 203 labels on a state box -- is what the combinatorial
+nudging stage and rip-up-and-reroute are for, and both are still design in
+`PRD.md`.
 
 Bindings are generated from `abi/scav_abi.json`, which is extracted from the C
 headers and committed as a golden, so an ABI break is a review diff rather than

@@ -28,7 +28,7 @@ TEST_CASE("profile: both shipped profiles load and pass their own validation") {
     CAPTURE(name);
     scav_profile const p{ named(name) };
     CHECK(profile_validate(p));
-    CHECK(p.profile_version == 2);
+    CHECK(p.profile_version == 4);
   }
   CHECK(named("compact").profile_id != named("readable").profile_id);
 }
@@ -96,6 +96,10 @@ TEST_CASE("profile: every bound rejects out of range") {
           .bad_high = 2 },
     Poke{ .what = "w_bends",
           .field = &scav_profile::w_bends,
+          .bad_low = -1,
+          .bad_high = 1025 },
+    Poke{ .what = "w_label_near",
+          .field = &scav_profile::w_label_near,
           .bad_low = -1,
           .bad_high = 1025 },
     Poke{ .what = "w_area",

@@ -17,6 +17,9 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+// Not unused: doctest stringifies a failing CHECK's operands, and the insertion
+// operator for `string_view` is declared here. libc++ hands it over through
+// another header and the MSVC STL does not.
 #include <ostream>
 #include <string>
 #include <string_view>
@@ -180,6 +183,40 @@ TEST_CASE("builder: an unnamed state and a tombstone request nothing") {
   CHECK(s.box_state[1].h_before == 0);
   CHECK(s.box_state[dead.v].min_w == 0);
   CHECK(s.path_clear.empty());
+}
+
+TEST_CASE("builder: only a rounded rect and a diamond reserve room for a name") {
+  scav_profile const p{ readable() };
+  Metrics const m{ bundled() };
+  scav_extent title{};
+  REQUIRE(measure_block(m,
+                        reinterpret_cast<scav_byte const *>("Named"),
+                        5,
+                        p.font_size_grid,
+                        p.line_height_k_num,
+                        p.line_height_k_den,
+                        title) == MeasureStatus::Ok);
+
+  constexpr std::array<StateKind, 9> KINDS{ StateKind::Normal,     StateKind::Initial,
+                                            StateKind::Final,      StateKind::Choice,
+                                            StateKind::Junction,   StateKind::Fork,
+                                            StateKind::Join,       StateKind::History,
+                                            StateKind::DeepHistory };
+  for (StateKind const kind : KINDS) {
+    CAPTURE(static_cast<uint32_t>(kind));
+    Chart c;
+    SubmachineId const root{ build_chart(c, "t", {}) };
+    StateId const s{ build_state(c, root, "Named", kind, {}) };
+    Spaces sp;
+    REQUIRE(measure_chart(c, m, p, sp));
+    // A diamond holds a centred label only where twice the text fits, so the
+    // one kind drawn inscribed asks for twice what a rectangle does.
+    int32_t const grow{ (kind == StateKind::Choice) ? 2 : 0 };
+    int32_t const rect{ (kind == StateKind::Normal) ? 1 : grow };
+    CHECK(sp.box_state[s.v].min_w == (rect * (title.w + (2 * p.pad))));
+    CHECK(sp.box_state[s.v].h_before == (rect * (title.h + p.pad)));
+    CHECK(sp.box_state[s.v].h_after == 0);
+  }
 }
 
 TEST_CASE("builder: a request past the domain is refused, never clamped") {
@@ -385,6 +422,228 @@ TEST_CASE("builder: a bare pseudostate's glyph fills its box exactly") {
   // reached at is the mark's own edge.
   CHECK((centre.x - circle->a) == box.x);
   CHECK((centre.x + circle->a) == (box.x + box.w));
+}
+
+TEST_CASE("builder: a mark-drawn glyph is its profile minimum whatever it is named") {
+  // Only a rounded rect and a diamond show the name they reserve for. Reserving
+  // for the rest stretches a bar, a dot or an `H` to the width of a word and then
+  // paints over it -- `kind_min_h` is a floor and cannot pull it back.
+  scav_profile const p{ readable() };
+  for (StateKind const kind : { StateKind::Junction,
+                                StateKind::Fork,
+                                StateKind::Join,
+                                StateKind::History,
+                                StateKind::DeepHistory }) {
+    CAPTURE(static_cast<uint32_t>(kind));
+    std::array<scav_rect, 2> box{};
+    for (uint32_t which = 0; which < 2; ++which) {
+      Chart c;
+      SubmachineId const root{ build_chart(c, "t", {}) };
+      StateId const mark{
+        build_state(c, root, (which == 0) ? "V" : "AVeryLongPseudostateName", kind, {})
+      };
+      StateId const to{ build_state(c, root, "S", StateKind::Normal, {}) };
+      build_trans(c, mark, to, TransKind::External, {});
+
+      Spaces s;
+      REQUIRE(measure_chart(c, bundled(), p, s));
+      CHECK(s.box_state[mark.v].min_w == 0);
+      CHECK(s.box_state[mark.v].h_before == 0);
+
+      Built const b{ pipeline(std::move(c), p) };
+      ColumnId const boxes{ column_find(b.chart, "scav.geom.state") };
+      REQUIRE(boxes.v != INVALID);
+      std::memcpy(&box[which],
+                  column_data(b.chart, boxes) + (size_t{ mark.v } * sizeof(scav_rect)),
+                  sizeof(scav_rect));
+      // Nothing draws the name, so nothing may be drawn for it either.
+      for (scav_prim const &prim : b.list.prims) {
+        if ((prim.kind == SCAV_PRIM_TEXT) &&
+            (prim.origin_kind == static_cast<uint32_t>(ElemKind::State)) &&
+            (prim.origin_ordinal == mark.v)) {
+          std::string_view const drawn{ reinterpret_cast<char const *>(
+                                            b.list.text.bytes.data() + prim.payload.off),
+                                        prim.payload.len };
+          CHECK(drawn != "AVeryLongPseudostateName");
+        }
+      }
+    }
+    // The name is an identifier, not a caption: a longer one may not grow the mark.
+    CHECK(box[0].w == box[1].w);
+    CHECK(box[0].h == box[1].h);
+    CHECK(box[0].w == p.kind_min_w[static_cast<uint32_t>(kind)]);
+    CHECK(box[0].h == p.kind_min_h[static_cast<uint32_t>(kind)]);
+  }
+}
+
+TEST_CASE("builder: a history mark stays inside the circle it is drawn in") {
+  // The box comes from `kind_min_*`, which knows nothing about `H*`, so the mark
+  // is sized from the circle instead. Checked at the em box's worst corner.
+  for (StateKind const kind : { StateKind::History, StateKind::DeepHistory }) {
+    CAPTURE(static_cast<uint32_t>(kind));
+    Chart c;
+    SubmachineId const root{ build_chart(c, "t", {}) };
+    StateId const h{ build_state(c, root, "Memory", kind, {}) };
+    StateId const to{ build_state(c, root, "S", StateKind::Normal, {}) };
+    build_trans(c, h, to, TransKind::External, {});
+
+    Built const b{ pipeline(std::move(c), readable()) };
+    scav_prim const *circle{ nullptr };
+    scav_prim const *text{ nullptr };
+    for (scav_prim const &prim : b.list.prims) {
+      if ((prim.origin_kind != static_cast<uint32_t>(ElemKind::State)) ||
+          (prim.origin_ordinal != h.v)) {
+        continue;
+      }
+      if (prim.kind == SCAV_PRIM_CIRCLE) { circle = &prim; }
+      if (prim.kind == SCAV_PRIM_TEXT) { text = &prim; }
+    }
+    REQUIRE(circle != nullptr);
+    REQUIRE(text != nullptr);
+    scav_point const centre{ b.list.points[circle->points.off] };
+    scav_point const at{ b.list.points[text->points.off] };
+    int32_t const fs{ b.list.styles[text->style].font_size_grid };
+    scav_extent ext{};
+    std::string_view const mark{ reinterpret_cast<char const *>(b.list.text.bytes.data() +
+                                                                text->payload.off),
+                                 text->payload.len };
+    REQUIRE(measure_text(bundled(),
+                         reinterpret_cast<scav_byte const *>(mark.data()),
+                         static_cast<uint32_t>(mark.size()),
+                         fs,
+                         ext) == MeasureStatus::Ok);
+    // `at` is the baseline's left end, so the em box runs one font size above it.
+    int64_t worst{ 0 };
+    for (int32_t const x : { at.x, at.x + ext.w }) {
+      for (int32_t const y : { at.y - fs, at.y }) {
+        int64_t const dx{ int64_t{ x } - centre.x };
+        int64_t const dy{ int64_t{ y } - centre.y };
+        worst = std::max(worst, (dx * dx) + (dy * dy));
+      }
+    }
+    CHECK(worst <= (int64_t{ circle->a } * circle->a));
+  }
+}
+
+TEST_CASE("builder: the history mark fits its circle at every radius the profile gives") {
+  // The mark is sized from the circle, so the property has to hold as the box
+  // grows rather than at the one size the stock profile happens to produce.
+  for (int32_t side : { 32, 64, 128, 256, 512, 1024 }) {
+    CAPTURE(side);
+    scav_profile p{ readable() };
+    p.kind_min_w[static_cast<uint32_t>(StateKind::DeepHistory)] = side;
+    p.kind_min_h[static_cast<uint32_t>(StateKind::DeepHistory)] = side;
+    Chart c;
+    SubmachineId const root{ build_chart(c, "t", {}) };
+    StateId const h{ build_state(c, root, {}, StateKind::DeepHistory, {}) };
+
+    Built const b{ pipeline(std::move(c), p) };
+    scav_prim const *circle{ nullptr };
+    scav_prim const *text{ nullptr };
+    for (scav_prim const &prim : b.list.prims) {
+      if (prim.origin_ordinal != h.v) { continue; }
+      if (prim.kind == SCAV_PRIM_CIRCLE) { circle = &prim; }
+      if (prim.kind == SCAV_PRIM_TEXT) { text = &prim; }
+    }
+    REQUIRE(circle != nullptr);
+    REQUIRE(text != nullptr);
+    scav_point const centre{ b.list.points[circle->points.off] };
+    scav_point const at{ b.list.points[text->points.off] };
+    int32_t const fs{ b.list.styles[text->style].font_size_grid };
+    scav_extent ext{};
+    REQUIRE(
+        measure_text(bundled(), reinterpret_cast<scav_byte const *>("H*"), 2, fs, ext) ==
+        MeasureStatus::Ok);
+    int64_t worst{ 0 };
+    for (int32_t const x : { at.x, at.x + ext.w }) {
+      for (int32_t const y : { at.y - fs, at.y }) {
+        int64_t const dx{ int64_t{ x } - centre.x };
+        int64_t const dy{ int64_t{ y } - centre.y };
+        worst = std::max(worst, (dx * dx) + (dy * dy));
+      }
+    }
+    CHECK(worst <= (int64_t{ circle->a } * circle->a));
+  }
+}
+
+TEST_CASE("builder: a routeless transition's label rides the source's after band") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const s{ build_state(c, root, "Idle", StateKind::Normal, {}) };
+  StateId const other{ build_state(c, root, "Busy", StateKind::Normal, {}) };
+  build_trans(c, s, s, TransKind::Internal, "tick");
+  build_trans(c, s, other, TransKind::External, "go");  // routed, so a path box
+  build_trans(c, s, s, TransKind::Local, "tock");       // routeless again
+
+  scav_profile const p{ readable() };
+  Metrics const m{ bundled() };
+  Spaces sp;
+  REQUIRE(measure_chart(c, m, p, sp));
+  // The two routeless labels reserve a line each after the source's submachine
+  // area, and only the routed one asks for a box to slide.
+  scav_extent line{};
+  REQUIRE(measure_block(m,
+                        reinterpret_cast<scav_byte const *>("tick"),
+                        4,
+                        p.font_size_grid,
+                        p.line_height_k_num,
+                        p.line_height_k_den,
+                        line) == MeasureStatus::Ok);
+  CHECK(sp.box_state[s.v].h_after == (2 * line.h));
+  REQUIRE(sp.path_box.size() == 1);
+  CHECK(sp.path_box[0].subject == 1);
+
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  REQUIRE(layout_run(c, as_spaces(sp), opts(p), placed, diags));
+  ColumnId const after{ column_find(c, "scav.geom.state_after") };
+  REQUIRE(after.v != INVALID);
+  scav_rect band{};
+  std::memcpy(&band,
+              column_data(c, after) + (static_cast<size_t>(s.v) * sizeof(scav_rect)),
+              sizeof(scav_rect));
+  REQUIRE(band.h > 0);
+
+  scav_rect first{};
+  scav_rect second{};
+  uint32_t const count{ static_cast<uint32_t>(placed.size()) };
+  REQUIRE(label_box(c, as_spaces(sp), placed.data(), count, 0, first));
+  REQUIRE(label_box(c, as_spaces(sp), placed.data(), count, 2, second));
+  // One line each, in transition order, sharing the band the source reserved.
+  CHECK(first.x == band.x);
+  CHECK(first.w == band.w);
+  CHECK(first.y == band.y);
+  CHECK(second.y == (band.y + (band.h / 2)));
+  CHECK(first.h == (band.h / 2));
+  CHECK(second.h == first.h);
+  CHECK(first.y < second.y);
+}
+
+TEST_CASE("builder: a label is drawn centred in the box that was placed for it") {
+  Chart c{ small_chart() };
+  scav_profile const p{ readable() };
+  Metrics const m{ bundled() };
+  Spaces s;
+  REQUIRE(measure_chart(c, m, p, s));
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  REQUIRE(layout_run(c, as_spaces(s), opts(p), placed, diags));
+  REQUIRE(placed.size() == 1);
+
+  DrawList d;
+  Palette const pal{ palette_standard() };
+  emit_label(d, c, m, pal, s.path_box[0].subject, placed[0], 0);
+  REQUIRE(d.prims.size() == 1);
+  int32_t const fs{ pal[SCAV_STYLE_LABEL].font_size_grid };
+  scav_extent ext{};
+  REQUIRE(
+      measure_text(m, reinterpret_cast<scav_byte const *>("work arrived"), 12, fs, ext) ==
+      MeasureStatus::Ok);
+  scav_point const at{ d.points[d.prims[0].points.off] };
+  // Centred on both axes of the rect layout wrote, not of the request, and the
+  // baseline is one em below the block's top.
+  CHECK(at.x == (placed[0].x + ((placed[0].w - ext.w) / 2)));
+  CHECK(at.y == (placed[0].y + ((placed[0].h - line_height(fs, 1, 1)) / 2) + fs));
 }
 
 TEST_CASE("builder: a route into a pseudostate reaches the drawn mark") {

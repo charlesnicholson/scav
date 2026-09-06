@@ -2,6 +2,13 @@
 # and no build step writes to $HOME.
 /out/
 
+# A coverage build writes its raw profile to $LLVM_PROFILE_FILE, which the test
+# harness points into the build tree (cmake/ScavTesting.cmake). Running an
+# instrumented binary by hand instead drops `default.profraw` in whatever the
+# cwd happened to be, so the pattern is unanchored rather than rooted.
+*.profraw
+*.profdata
+
 # CTest's scratch, which it drops in whatever directory it was invoked from.
 # Nothing should invoke it from here -- the build tree is the place -- but a
 # stray `ctest` in the source root should not be committable.

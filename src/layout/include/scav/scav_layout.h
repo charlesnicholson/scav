@@ -40,11 +40,15 @@ bool profile_validate(scav_profile const &p);
 
 // Decomposes, sizes, places, routes. Writes the geometry columns and sizes
 // `placed` to the path boxes. False leaves the last successful run's columns.
+// True can still leave RouteDegraded findings in `diags`, one per transition
+// drawn as a straight line. `inflations` receives how many spacing inflations
+// the written geometry took.
 bool layout_run(Chart &c,
                 scav_spaces const &s,
                 scav_layout_opts const &o,
                 std::vector<scav_placed> &placed,
-                std::vector<Diagnostic> &diags);
+                std::vector<Diagnostic> &diags,
+                uint32_t *inflations = nullptr);
 
 // Split so a pure translation moves the coordinate hash and not the structural
 // one: structure is sides, depths and turn tokens; coordinates are the rest.

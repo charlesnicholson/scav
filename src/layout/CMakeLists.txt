@@ -14,6 +14,8 @@ scav_static_library(scavlayout
   pack.cpp
   size.cpp
   route.cpp
+  nudge.cpp
+  label.cpp
   cost.cpp
 )
 scav_install_library(scavlayout layout)
@@ -27,6 +29,7 @@ target_link_libraries(scav_shared PRIVATE scavlayout)
 if(SCAV_BUILD_TESTS)
   scav_tests(scav_layout_tests
     layout_tests.cpp
+    bench_tests.cpp
     profile_tests.cpp
     router_tests.cpp
     router_orthogonal_tests.cpp
@@ -37,6 +40,8 @@ if(SCAV_BUILD_TESTS)
     pack_tests.cpp
     size_tests.cpp
     route_tests.cpp
+    nudge_tests.cpp
+    label_tests.cpp
     cost_tests.cpp
   )
   target_link_libraries(scav_layout_tests PRIVATE scavlayout_testable)

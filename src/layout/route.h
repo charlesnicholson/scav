@@ -5,6 +5,7 @@
 // and the path boxes slid onto the finished routes.
 
 #include "layout/decompose.h"
+#include "layout/nudge.h"
 #include "layout/order.h"
 #include "layout/router.h"
 #include "layout/size.h"
@@ -25,6 +26,7 @@ struct Routes {
   // Nets the router fell back on, by cause. A fallback is a straight line, and a
   // straight line is what Tier 0 counts.
   uint32_t outside_region{ 0 }, unreachable{ 0 }, too_large{ 0 };
+  std::vector<uint8_t> failed;  // parallel to transitions; 1 = a net of it fell back
   [[nodiscard]] uint32_t degraded() const {
     return outside_region + unreachable + too_large;
   }
@@ -32,6 +34,12 @@ struct Routes {
   // Routed only after giving up the requested clearance (11.5). Not a failure; a
   // frame full of them means the boxes are packed tighter than the profile says.
   uint32_t reseated{ 0 };
+
+  NudgeStats nudged;
+
+  // Path boxes that found no strip clear of everything and took the centred
+  // placement instead (11.9).
+  uint32_t unplaced{ 0 };
 };
 
 // One net per segment, routed in that segment's frame, laid end to end. The

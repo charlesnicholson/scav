@@ -3,7 +3,11 @@
 
 #include "layout/route.h"
 
+#include "layout/nudge.h"
+
 #include "layout/decompose.h"
+#include "layout/geom.h"
+#include "layout/label.h"
 #include "layout/order.h"
 #include "layout/router.h"
 #include "layout/size.h"
@@ -35,13 +39,6 @@ scav_point trim(scav_point a, scav_point b, int32_t amount) {
            .y = a.y + static_cast<int32_t>(floor_div(dy * k, len)) };
 }
 
-bool same(scav_point a, scav_point b) { return (a.x == b.x) && (a.y == b.y); }
-
-bool overlaps(scav_rect const &a, scav_rect const &b) {
-  return (a.x < (b.x + b.w)) && (b.x < (a.x + a.w)) && (a.y < (b.y + b.h)) &&
-         (b.y < (a.y + a.h));
-}
-
 // One segment's routing problem, before it is grouped into its frame's batch.
 struct Planned {
   uint32_t frame;
@@ -63,6 +60,7 @@ Routes phase3_route(Chart const &c,
   uint32_t const n{ static_cast<uint32_t>(c.transitions.size()) };
   out.route.assign(n, {});
   out.port.assign(n, {});
+  out.failed.assign(n, 0);
 
   // The segment each port's boundary node belongs to, and the bends each
   // segment was chained through, both gathered once.
@@ -257,10 +255,27 @@ Routes phase3_route(Chart const &c,
       in.nets.push_back(net);
     }
     router.route(in, ro);
+
+    // Nudged per frame, while the frame's obstacles are in hand.
+    if (margin > 0) {
+      scav_rect const frame{ (owner.v == INVALID) ? region : z.state[owner.v] };
+      nudge_lanes(region,
+                  frame,
+                  in.obstacles,
+                  margin,
+                  margin,
+                  ro.net_points,
+                  ro.points,
+                  out.nudged);
+    }
+
     for (uint32_t j = 0; j < by_frame[m].size(); ++j) {
       scav_span const at{ (j < ro.net_points.size()) ? ro.net_points[j] : scav_span{} };
       if (j < ro.metrics.size()) {
         out.reseated += static_cast<uint32_t>(ro.metrics[j].reseated);
+        if (ro.metrics[j].failed != RouteFailure::None) {
+          out.failed[g.segments[planned[by_frame[m][j]].seg].trans.v] = 1;
+        }
         switch (ro.metrics[j].failed) {
           case RouteFailure::OutsideRegion: ++out.outside_region; break;
           case RouteFailure::Unreachable: ++out.unreachable; break;
@@ -302,42 +317,7 @@ Routes phase3_route(Chart const &c,
     out.route[t] = { .off = first_point, .len = count };
   }
 
-  // Centred on the longest leg, not the polyline's middle point: phase 1 widened
-  // a rank boundary by this box (11.3) and the leg crossing it is the long one.
-  out.placed.assign(s.n_path_box, {});
-  for (uint32_t i = 0; i < s.n_path_box; ++i) {
-    scav_path_box const &box{ s.path_box[i] };
-    scav_span const route{ (box.subject < n) ? out.route[box.subject] : scav_span{} };
-    // Horizontal first: ranks run left to right, so the widened boundary and a line
-    // of text run the same way. On a vertical leg a wide label hangs out sideways.
-    scav_point mid{};
-    Wide longest{ -1 };
-    for (uint32_t pass = 0; (pass < 2) && (longest < 0); ++pass) {
-      for (uint32_t k = 0; (k + 1) < route.len; ++k) {
-        scav_point const a{ out.points[route.off + k] };
-        scav_point const b{ out.points[route.off + k + 1] };
-        if ((pass == 0) && (a.y != b.y)) { continue; }
-        Wide const span{ imax(Wide{ a.x } - b.x, Wide{ b.x } - a.x) +
-                         imax(Wide{ a.y } - b.y, Wide{ b.y } - a.y) };
-        if (span <= longest) { continue; }
-        longest = span;
-        mid = { .x = a.x + static_cast<int32_t>(floor_div(Wide{ b.x } - a.x, Wide{ 2 })),
-                .y = a.y + static_cast<int32_t>(floor_div(Wide{ b.y } - a.y, Wide{ 2 })) };
-      }
-    }
-    if (longest < 0) { mid = (route.len == 0) ? scav_point{} : out.points[route.off]; }
-    // Slid inside rather than hung off: the chart rect bounds everything laid out
-    // (11.7a), so a label half outside grows the canvas to hold whitespace.
-    int32_t x{ mid.x - floor_div(box.w, 2) };
-    int32_t y{ mid.y - floor_div(box.h, 2) };
-    if (box.w <= z.chart.w) {
-      x = imin(imax(x, z.chart.x), (z.chart.x + z.chart.w) - box.w);
-    }
-    if (box.h <= z.chart.h) {
-      y = imin(imax(y, z.chart.y), (z.chart.y + z.chart.h) - box.h);
-    }
-    out.placed[i] = { .x = x, .y = y, .w = box.w, .h = box.h };
-  }
+  out.unplaced = place_labels(c, z, s, out.route, out.points, out.placed);
   return out;
 }
 
