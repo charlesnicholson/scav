@@ -139,11 +139,7 @@ def discard_binaries(build_dir: Path) -> None:
 
 
 def build_and_relay(cmake: Path, preset: str) -> tuple[str, int]:
-    """Run the build, echoing each line as it arrives, and return the transcript.
-
-    Collected because build_is_stale reads the `FAILED:` lines afterwards; echoed
-    as it goes because ninja's per-edge progress is the only sign of life during
-    the compile. ninja flushes per edge into a pipe, so a line at a time is live."""
+    """Echoes each line as it arrives, keeping the transcript for build_is_stale."""
     argv = [str(cmake), "--build", "--preset", preset]
     print(f"+ {' '.join(argv)}", flush=True)
     proc = subprocess.Popen(argv, cwd=REPO_ROOT, stdout=subprocess.PIPE,
