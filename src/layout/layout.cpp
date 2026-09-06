@@ -260,7 +260,7 @@ bool layout_run(Chart &c,
   SubmachineOrders const orders{ phase1_order(c, g, s, p) };
   SizedLayout sized;
   if (!phase2_size(c, g, orders, s, p, sized, diags)) { return false; }
-  Routes routes{ phase3_route(c, g, orders, sized, s, p, *router) };
+  Routes routes{ phase3_route(c, g, orders, sized, s, p, *router, o.threads) };
 
   // `sized` and `routes` carry the best attempt so far, and `done` is set from
   // that one rather than from whichever attempt was just made.
@@ -276,7 +276,9 @@ bool layout_run(Chart &c,
     SizedLayout next_sized;
     std::vector<Diagnostic> spilled;
     if (!phase2_size(c, g, next_orders, s, wider, next_sized, spilled)) { break; }
-    Routes next{ phase3_route(c, g, next_orders, next_sized, s, wider, *router) };
+    Routes next{
+      phase3_route(c, g, next_orders, next_sized, s, wider, *router, o.threads)
+    };
     bool keep{ false };
     done = inflation_done(fewest, next.degraded(), next.unreachable, keep);
     if (keep) {

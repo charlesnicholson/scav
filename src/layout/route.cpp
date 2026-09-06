@@ -10,10 +10,13 @@
 #include "layout/label.h"
 #include "layout/order.h"
 #include "layout/router.h"
+#include "layout/shard.h"
 #include "layout/size.h"
 #include "scav/scav_core.h"
 #include "scav_int.h"
+#include "scav_shard.h"
 #include "scav_stable_sort.h"
+#include "scav_thread.h"
 
 #include <cstdint>
 #include <vector>
@@ -47,6 +50,32 @@ struct Planned {
   uint32_t seg;                   // -> SplitGraph::segments, for its bend chain
 };
 
+// One frame's answer, written by the shard that owns the frame and read back
+// in frame order.
+struct FrameRoutes {
+  std::vector<scav_point> points;
+  std::vector<scav_span> net_points;  // -> points, parallel to the frame's nets
+  std::vector<RouteMetrics> metrics;  // parallel to the frame's nets
+  NudgeStats nudged;
+};
+
+// Allocated once per shard and reused across that shard's frames.
+struct FrameScratch {
+  RouteInput in;
+  RouteOutput ro;
+  std::vector<uint32_t> obstacle_index;  // -> in.obstacles; INVALID off this frame
+  std::vector<uint32_t> obstacle_states;
+};
+
+void merge_nudged(NudgeStats &into, NudgeStats const &from) {
+  into.lanes += from.lanes;
+  into.spread += from.spread;
+  into.moved += from.moved;
+  into.bundles += from.bundles;
+  into.refused += from.refused;
+  into.reordered += from.reordered;
+}
+
 }  // namespace
 
 Routes phase3_route(Chart const &c,
@@ -55,7 +84,8 @@ Routes phase3_route(Chart const &c,
                     SizedLayout const &z,
                     scav_spaces const &s,
                     scav_profile const &p,
-                    Router const &router) {
+                    Router const &router,
+                    uint32_t threads) {
   Routes out;
   uint32_t const n{ static_cast<uint32_t>(c.transitions.size()) };
   out.route.assign(n, {});
@@ -187,21 +217,19 @@ Routes phase3_route(Chart const &c,
     if (planned[i].frame < by_frame.size()) { by_frame[planned[i].frame].push_back(i); }
   }
 
-  std::vector<scav_point> routed;
-  std::vector<scav_span> net_span(planned.size(), scav_span{});
-  std::vector<uint32_t> obstacle_index(c.states.size(), INVALID);
-  std::vector<uint32_t> obstacle_states;
-  RouteInput in;
-  RouteOutput ro;
-  in.profile = p;
   int32_t const margin{ router.margin(p) };
-  for (uint32_t m = 0; m < by_frame.size(); ++m) {
-    if (by_frame[m].empty()) { continue; }
+  std::vector<FrameRoutes> frames(by_frame.size());
+
+  // Reads the model, the orders, the geometry and the plan; writes `frames[m]`
+  // and the caller's own scratch, so two frames share nothing.
+  auto const route_frame = [&](uint32_t m, FrameScratch &sc) {
+    RouteInput &in{ sc.in };
+    RouteOutput &ro{ sc.ro };
     in.obstacles.clear();
     in.inscribed.clear();
     in.nets.clear();
     in.waypoints.clear();
-    obstacle_states.clear();
+    sc.obstacle_states.clear();
 
     // Grown to hold every point its nets reach: a port sits on the *crossed* box's
     // border, which is outside this submachine by the owner's padding.
@@ -239,16 +267,16 @@ Routes phase3_route(Chart const &c,
     for (uint32_t st = 0; st < c.states.size(); ++st) {
       if ((c.states[st].live == 0) || !overlaps(region, z.state[st])) { continue; }
       if (ancestor_or_self(c, { st }, owner) || shields(st)) { continue; }
-      obstacle_index[st] = static_cast<uint32_t>(in.obstacles.size());
-      obstacle_states.push_back(st);
+      sc.obstacle_index[st] = static_cast<uint32_t>(in.obstacles.size());
+      sc.obstacle_states.push_back(st);
       in.obstacles.push_back(z.state[st]);
       in.inscribed.push_back(kind_inscribed(c.states[st].kind) ? 1U : 0U);
     }
     for (uint32_t const i : by_frame[m]) {
       Planned const &pn{ planned[i] };
       RouteNet net{ .src = pn.src, .dst = pn.dst };
-      if (pn.src_state != INVALID) { net.src_obstacle = obstacle_index[pn.src_state]; }
-      if (pn.dst_state != INVALID) { net.dst_obstacle = obstacle_index[pn.dst_state]; }
+      if (pn.src_state != INVALID) { net.src_obstacle = sc.obstacle_index[pn.src_state]; }
+      if (pn.dst_state != INVALID) { net.dst_obstacle = sc.obstacle_index[pn.dst_state]; }
       net.waypoint_off = static_cast<uint32_t>(in.waypoints.size());
       for (uint32_t const bend : seg_bends[pn.seg]) {
         in.waypoints.push_back(z.node[bend]);
@@ -268,17 +296,45 @@ Routes phase3_route(Chart const &c,
                   margin,
                   ro.net_points,
                   ro.points,
-                  out.nudged);
+                  frames[m].nudged);
     }
 
+    frames[m].points = ro.points;
+    frames[m].net_points = ro.net_points;
+    frames[m].metrics = ro.metrics;
+    for (uint32_t const st : sc.obstacle_states) { sc.obstacle_index[st] = INVALID; }
+  };
+
+  uint32_t const shards{ layout_shard_count(c) };
+  auto body = [&](uint32_t shard) {
+    scav_span const mine{
+      shard_range(shard, shards, static_cast<uint32_t>(by_frame.size()))
+    };
+    FrameScratch sc;
+    sc.in.profile = p;
+    sc.obstacle_index.assign(c.states.size(), INVALID);
+    for (uint32_t k = 0; k < mine.len; ++k) {
+      uint32_t const m{ mine.off + k };
+      if (!by_frame[m].empty()) { route_frame(m, sc); }
+    }
+  };
+  parallel_for(shards, threads, body);
+
+  // Merged in frame order, which is what makes the totals and the point array
+  // the same at every worker count (6).
+  std::vector<scav_point> routed;
+  std::vector<scav_span> net_span(planned.size(), scav_span{});
+  for (uint32_t m = 0; m < by_frame.size(); ++m) {
+    FrameRoutes const &fr{ frames[m] };
+    merge_nudged(out.nudged, fr.nudged);
     for (uint32_t j = 0; j < by_frame[m].size(); ++j) {
-      scav_span const at{ (j < ro.net_points.size()) ? ro.net_points[j] : scav_span{} };
-      if (j < ro.metrics.size()) {
-        out.reseated += static_cast<uint32_t>(ro.metrics[j].reseated);
-        if (ro.metrics[j].failed != RouteFailure::None) {
+      scav_span const at{ (j < fr.net_points.size()) ? fr.net_points[j] : scav_span{} };
+      if (j < fr.metrics.size()) {
+        out.reseated += static_cast<uint32_t>(fr.metrics[j].reseated);
+        if (fr.metrics[j].failed != RouteFailure::None) {
           out.failed[g.segments[planned[by_frame[m][j]].seg].trans.v] = 1;
         }
-        switch (ro.metrics[j].failed) {
+        switch (fr.metrics[j].failed) {
           case RouteFailure::OutsideRegion: ++out.outside_region; break;
           case RouteFailure::Unreachable: ++out.unreachable; break;
           case RouteFailure::TooLarge: ++out.too_large; break;
@@ -286,10 +342,9 @@ Routes phase3_route(Chart const &c,
         }
       }
       uint32_t const off{ static_cast<uint32_t>(routed.size()) };
-      for (uint32_t k = 0; k < at.len; ++k) { routed.push_back(ro.points[at.off + k]); }
+      for (uint32_t k = 0; k < at.len; ++k) { routed.push_back(fr.points[at.off + k]); }
       net_span[by_frame[m][j]] = { .off = off, .len = at.len };
     }
-    for (uint32_t const st : obstacle_states) { obstacle_index[st] = INVALID; }
   }
 
   // Laid end to end: consecutive nets share the endpoint the planner handed
