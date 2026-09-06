@@ -619,6 +619,27 @@ TEST_CASE("nudge: a pair that must cross either way is left in the key's order")
   CHECK(net_pt(mirror, 1, 1).y == 76);
 }
 
+TEST_CASE("nudge: a chain of votes orders a lane the key cannot") {
+  // Staggered extents: net 0 over [0,100] leaves up at its high end inside net
+  // 1's [50,150], net 1 over [50,150] leaves up at its high end inside net 2's
+  // [120,200], and nets 0 and 2 share no coordinate at all, so nothing votes on
+  // that pair. Keyed on the arrivals at 149, 200 and 260 the lane enters as 2,
+  // 0, 1, and the chain 0 before 1 before 2 has one linear extension.
+  Frame f{ frame_of({ { pt(0, 200), pt(0, 100), pt(100, 100), pt(100, -400) },
+                      { pt(50, 260), pt(50, 100), pt(150, 100), pt(150, -500) },
+                      { pt(120, 149), pt(120, 100), pt(200, 100), pt(200, 400) } }) };
+  NudgeStats s;
+  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+
+  CHECK(s.lanes == 1);
+  CHECK(s.reordered == 1);
+  // The middle of the three is already where it belongs, so two of them move.
+  CHECK(s.moved == 2);
+  CHECK(net_pt(f, 0, 1).y == 52);
+  CHECK(net_pt(f, 1, 1).y == 100);
+  CHECK(net_pt(f, 2, 1).y == 148);
+}
+
 TEST_CASE("nudge: a lane whose crossing order is not known good keeps its place") {
   // Same shape as the bundle above with the loner's leg back on the bundle's own
   // line. The crossings still want the loner above, and taking that order would
@@ -633,5 +654,22 @@ TEST_CASE("nudge: a lane whose crossing order is not known good keeps its place"
 
   CHECK(s.bundles == 1);
   CHECK(s.moved == 0);
+  CHECK(s.reordered == 1);
   for (uint32_t net = 0; net < 4; ++net) { CHECK(net_pt(f, net, 1).y == 100); }
+}
+
+TEST_CASE("nudge: a lane the votes reorder counts as one whatever the room says") {
+  // The pair the crossings settle, walled top and bottom so the lane has no
+  // window to spread into at all: `reordered` is counted where the order is
+  // decided, so this lane is one of them and none of `spread`.
+  Frame f{ frame_of({ { pt(0, 0), pt(0, 100), pt(200, 100), pt(200, 300) },
+                      { pt(100, 50), pt(100, 100), pt(300, 100), pt(300, 400) } }) };
+  std::vector<scav_rect> const walls{ rect(0, 0, 300, 100), rect(0, 100, 300, 100) };
+  NudgeStats s;
+  nudge_lanes(OPEN, OPEN, walls, 48, 0, f.nets, f.points, s);
+
+  CHECK(s.lanes == 1);
+  CHECK(s.spread == 0);
+  CHECK(s.moved == 0);
+  CHECK(s.reordered == 1);
 }
