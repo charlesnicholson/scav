@@ -258,11 +258,12 @@ TEST_CASE("gauntlet: an arrowhead is never inked over another route's own end") 
   // Two ends on one point of one box, one arriving and one leaving: the head is
   // drawn along the other route's first leg and reads as belonging to it. Two
   // arrivals sharing a point are a fan-in and keep their one head, which is
-  // what gauntlet/fanin.scav is for; this is the mixed case.
+  // what gauntlet/fanin.scav is for; this is the mixed case. An inscribed glyph
+  // seats one point per face and no other, so it answers by moving a direction
+  // onto a face of its own rather than by sliding along one (11.5).
   for (char const *name : GAUNTLET) {
     for (scav_profile const &p : { readable(), compact() }) {
-      std::string_view const chart{ name };
-      CAPTURE(chart);
+      CAPTURE(name);
       CAPTURE(p.profile_id);
       Laid l;
       lay(name, p, l);
@@ -272,15 +273,6 @@ TEST_CASE("gauntlet: an arrowhead is never inked over another route's own end") 
         for (uint32_t b = 0; b < l.c.transitions.size(); ++b) {
           scav_span const two{ l.r.route[b] };
           if ((a == b) || (two.len < 2)) { continue; }
-          // A disc or a diamond has one attachable point per face, so four
-          // incident transitions is all it can seat and a fifth doubles up
-          // whatever the seating does. Spreading those over the faces is
-          // 11.3's owed top and bottom port sides; the count is pinned below.
-          StateKind const kind{ l.c.states[l.c.transitions[b].src.v].kind };
-          if ((kind != StateKind::Normal) && (kind != StateKind::Fork) &&
-              (kind != StateKind::Join)) {
-            continue;
-          }
           CAPTURE(a);
           CAPTURE(b);
           CHECK_FALSE(same(l.r.points[one.off + one.len - 1], l.r.points[two.off]));
@@ -355,10 +347,20 @@ TEST_CASE("gauntlet: two states each other's target are two lines") {
     scav_span const b{ l.r.route[down] };
     CHECK_FALSE(same(l.r.points[a.off], l.r.points[b.off + b.len - 1]));
     CHECK_FALSE(same(l.r.points[b.off], l.r.points[a.off + a.len - 1]));
-    // The middle is a different question: breaking the cycle sends one of them
-    // the long way round the frame, and the two then share a run of it that
+    // Nor is any interior point, so the two are two polylines and not one drawn
+    // twice over.
+    for (uint32_t i = 0; i < a.len; ++i) {
+      for (uint32_t j = 0; j < b.len; ++j) {
+        CAPTURE(i);
+        CAPTURE(j);
+        CHECK_FALSE(same(l.r.points[a.off + i], l.r.points[b.off + j]));
+      }
+    }
+    // The middle is a different question: breaking the cycle gives one of them
+    // a corridor the long way round the frame, and where the frame is tight
+    // enough that both take the same side of it the two share a run of it that
     // nudging has no room to take apart. 11.3's cycle-breaking heuristic is the
-    // lever, and the count is pinned below.
+    // lever, so the compact profile's run is pinned here rather than excused.
     Wide shared{ 0 };
     for (uint32_t i = 0; (i + 1) < a.len; ++i) {
       for (uint32_t j = 0; (j + 1) < b.len; ++j) {
@@ -368,7 +370,7 @@ TEST_CASE("gauntlet: two states each other's target are two lines") {
                              l.r.points[b.off + j + 1]);
       }
     }
-    MESSAGE("mutual: the pair shares ", shared, " grid units of one line");
+    CHECK(shared == ((p.profile_id == compact().profile_id) ? 652 : 0));
   }
 }
 
@@ -452,7 +454,7 @@ TEST_CASE("gauntlet: a chain of states turns only where the fold cuts it") {
 }
 
 TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
-  // Three properties above carve out a chart, and a carve-out with no number on
+  // Two properties above carve out a chart, and a carve-out with no number on
   // it is an excuse. Each count is what the tree does today with the section
   // that owns it named; a count that grows is a regression and one that shrinks
   // is the fix arriving, and either way the test says so.
@@ -495,23 +497,5 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     }
     CHECK(through == 2);
     CHECK(back == 2);
-
-    // 11.3's owed top and bottom port sides. A disc or a diamond has one
-    // attachable point per face and only the left and right ones are produced,
-    // so a mark with more than two incident transitions seats an arrival and a
-    // departure together however they are ordered.
-    Laid m;
-    lay("marks.scav", p, m);
-    uint32_t doubled{ 0 };
-    for (uint32_t a = 0; a < m.c.transitions.size(); ++a) {
-      scav_span const one{ m.r.route[a] };
-      if (one.len < 2) { continue; }
-      for (uint32_t b = 0; b < m.c.transitions.size(); ++b) {
-        scav_span const two{ m.r.route[b] };
-        if ((a == b) || (two.len < 2)) { continue; }
-        doubled += same(m.r.points[one.off + one.len - 1], m.r.points[two.off]) ? 1U : 0U;
-      }
-    }
-    CHECK(doubled == 4);
   }
 }
