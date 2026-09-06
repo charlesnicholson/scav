@@ -13,6 +13,10 @@ on:
     branches: ["main"]
   pull_request:
   workflow_dispatch:
+  # The full grid on main daily, whether or not anything was pushed: the toolchain
+  # image is rebuilt weekly, and drift in it is what a quiet week would otherwise hide.
+  schedule:
+    - cron: "0 6 * * *"
 
 # A formatting push cancels the run that made it and starts a fresh one, which is
 # the whole mechanism: the second run finds nothing to format and proceeds.
