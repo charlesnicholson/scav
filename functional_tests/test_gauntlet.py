@@ -26,7 +26,7 @@ SVG_NS = "{http://www.w3.org/2000/svg}"
 
 # The array initializer, then the names inside it. Anchored on the declaration
 # so a chart name appearing in a comment elsewhere in the file is not one.
-ARRAY = re.compile(r"GAUNTLET\[\]\{(.*?)\}", re.S)
+ARRAY = re.compile(r"GAUNTLET\{(.*?)\}", re.S)
 NAME = re.compile(r'"([^"]+)"')
 
 PROFILES = ("readable", "compact")
