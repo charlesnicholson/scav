@@ -62,7 +62,7 @@ chart vac "robot vacuum" (test_data/charts/vac.scav:3)
   include dock "dock.scav" -> test_data/charts/dock.scav (test_data/charts/vac.scav:4)
   include lamp "./led.scav" -> test_data/charts/led.scav (test_data/charts/vac.scav:7)
   include lamp "led.scav" -> test_data/charts/led.scav (test_data/charts/dock.scav:4)
-geometry structural 58c00d9e coordinate a590db5c
+geometry structural 8a86341c coordinate 77adf266
   chart 0,0 10785x11004
   state dock 4173,2823 6612x6299 before 4301,2951 6356x397 after 4301,8994 6356x0
   state lamp 0,0 3066x2535 before 128,128 2810x397 after 128,2407 2810x0
@@ -99,21 +99,21 @@ geometry structural 58c00d9e coordinate a590db5c
   sub 5 128,525 2810x1882
   sub 6 4429,6408 3072x2458
   route $initial -> Off (224,9736) (704,9736)
-  route Off -> Booting (1248,10063) (1248,10255) (659,10255) (659,10303)
-  route On:main/$initial -> On:main/Idle (352,4670) (448,4670) (448,4884) (544,4884)
-  route On:main/Ready -> dock/On/Seated (1792,3809) (1888,3809) (1888,3252) (3885,3252) (3885,3348) (3981,3348) (3981,5086) (4173,5086) (8295,5086) (8295,4399) (8391,4399) (9223,4399) (9223,4199) (9271,4199) port s1 d0 port s0 d0 port s0 d1
-  route On:aux/$initial -> On:aux/Idle (2496,3460) (2592,3460) (2592,3674) (2688,3674)
-  route dock/On/$initial -> dock/On/Seated (8743,3999) (8839,3999) (8839,4199) (9223,4199)
-  route dock/On/Seated -> dock/On/Charging (9921,4526) (9921,4718) (9236,4718) (9236,4766)
-  route dock/On/Charging -> dock/lamp/Solid (9953,5140) (10657,5140) (10753,5140) (10753,5787) (4205,5787) (4205,7349) (4301,7349) (4302,7349) (4302,8866) (6221,8866) (6221,6734) (6317,6734) port s1 d1 port s0 d1
+  route Off -> Booting (896,10063) (896,10255) (1223,10255) (1223,10303)
+  route On:main/$initial -> On:main/Idle (352,4670) (544,4670)
+  route On:main/Ready -> dock/On/Seated (1792,3444) (1888,3444) (1888,3252) (3885,3252) (3885,3348) (3981,3348) (3981,5086) (4173,5086) (8199,5086) (8199,4399) (8391,4399) (9223,4399) port s1 d0 port s0 d0 port s0 d1
+  route On:aux/$initial -> On:aux/Idle (2496,3460) (2688,3460)
+  route dock/On/$initial -> dock/On/Seated (8743,3999) (9223,3999)
+  route dock/On/Seated -> dock/On/Charging (9415,4526) (9415,4718) (9857,4718) (9857,4766)
+  route dock/On/Charging -> dock/lamp/Solid (9953,5140) (10657,5140) (10753,5140) (10753,5787) (4205,5787) (4205,7349) (4301,7349) (4302,7349) (4302,8866) (6317,8866) (6317,6965) (6365,6965) port s1 d1 port s0 d1
   route dock/$initial -> dock/Empty (4525,4471) (5005,4471)
-  route dock/Empty -> dock/On (6189,4471) (8295,4471)
-  route dock/On -> dock/Empty (8391,4471) (6285,4471)
+  route dock/Empty -> dock/On (6189,4423) (6285,4423) (6285,4519) (8295,4519)
+  route dock/On -> dock/Empty (8391,4423) (8295,4423) (8295,4519) (6285,4519)
   route lamp/$initial -> lamp/Off (352,851) (832,851)
-  route lamp/Off -> lamp/Blinking (1376,1178) (1376,1370) (845,1370) (845,1418)
+  route lamp/Off -> lamp/Blinking (1024,1178) (1024,1370) (1376,1370) (1376,1418)
   route lamp/Blinking -> lamp/Solid (1562,1792) (1754,1792)
-  route lamp/Solid -> lamp/Off (1850,1792) (1754,1792) (1754,2407) (32,2407) (32,1274) (1376,1274) (1376,1226)
+  route lamp/Solid -> lamp/Off (1850,2023) (1754,2023) (1754,2407) (32,2407) (32,1274) (1072,1274) (1072,1226)
   route dock/lamp/$initial -> dock/lamp/Off (4653,6734) (5133,6734)
-  route dock/lamp/Off -> dock/lamp/Blinking (5677,7061) (5677,7541) (5146,7541) (5146,7589)
-  route dock/lamp/Blinking -> dock/lamp/Solid (5863,7963) (6221,7963) (6221,6734) (6317,6734)
-  route dock/lamp/Solid -> dock/lamp/Off (6413,6734) (6317,6734) (6317,8578) (4333,8578) (4333,7157) (5677,7157) (5677,7109)
+  route dock/lamp/Off -> dock/lamp/Blinking (5325,7061) (5325,7541) (5677,7541) (5677,7589)
+  route dock/lamp/Blinking -> dock/lamp/Solid (5863,7733) (6317,7733) (6317,6965) (6365,6965)
+  route dock/lamp/Solid -> dock/lamp/Off (6413,6917) (6221,6917) (6221,8578) (4333,8578) (4333,7157) (5373,7157) (5373,7109)

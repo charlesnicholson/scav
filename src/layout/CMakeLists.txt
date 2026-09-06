@@ -30,6 +30,7 @@ if(SCAV_BUILD_TESTS)
   scav_tests(scav_layout_tests
     layout_tests.cpp
     bench_tests.cpp
+    gauntlet_tests.cpp
     profile_tests.cpp
     router_tests.cpp
     router_orthogonal_tests.cpp

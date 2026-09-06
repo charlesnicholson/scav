@@ -1,0 +1,20 @@
+// Concurrent regions, and a transition between two of them. The segment is
+// routed in the parent's frame with both regions as obstacles, which is the
+// one shape a per-submachine router cannot do on its own (11.1).
+chart regions "two regions and a crossing" {
+  state Running {
+    submachine motor {
+      state Spinning,
+      state Stopped,
+      trans * -> Stopped,
+      trans Stopped -> Spinning "start",
+    },
+    submachine light { state Dark, state Lit, trans * -> Dark, trans Dark -> Lit "on" },
+  },
+  state Halted,
+
+  trans * -> Running,
+  trans Running:motor/Spinning -> Running:light/Lit "spun up",
+  trans Running:light/Lit -> Running:motor/Stopped "lamp fault",
+  trans Running -> Halted "stop",
+}

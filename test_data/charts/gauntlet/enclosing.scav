@@ -1,0 +1,14 @@
+// A composite and its own contents, both ways round. Into a child, the route
+// starts on the composite's border and the crossing it makes there is that same
+// point; out of a child, it ends on it. Neither should draw a leg along the
+// border between the endpoint and the crossing.
+chart enclosing "a composite and its own contents" {
+  state Outer { state Inner, state Other, trans * -> Inner, trans Inner -> Other "step" },
+  state Away,
+
+  trans * -> Outer,
+  trans Outer -> Outer/Inner "reset to Inner",
+  trans Outer/Other -> Outer "restart",
+  trans Outer/Inner -> Away "bail out",
+  trans Away -> Outer/Other "resume",
+}

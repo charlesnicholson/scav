@@ -4,6 +4,8 @@
 // The orthogonal router's parts, each callable on its own so a test builds the
 // graph it wants and asks the search one question (11).
 
+#include "layout/router.h"
+
 #include "scav/scav_core.h"
 #include "scav/scav_layout_c.h"
 #include "scav_int.h"
@@ -57,9 +59,33 @@ void ortho_sort_unique(std::vector<int32_t> &v);
 // Last element not greater than `at`. Callers pass a value the vector holds.
 uint32_t ortho_index_of(std::vector<int32_t> const &v, int32_t at);
 
+// Whether an end leaves `r` by a left or right face rather than a top or bottom
+// one, by how far `toward` lies outside the box on each axis (11.5).
+bool ortho_escape_horizontal(scav_point toward, scav_rect const &r);
+
 // `at` onto `r`'s border, along the one axis whose exit lands nearest
 // `toward`. One axis, so the stub it leaves stays axis-aligned.
 scav_point ortho_escape_box(scav_point at, scav_point toward, scav_rect const &r);
+
+// The point on `r`'s border a route to `toward` attaches at: the same face, and
+// `toward`'s own projection onto it rather than the box's centre, held `clear`
+// off the face's two corners.
+// `inscribed` is `RouteInput`'s: the face's midpoint and nothing else, because
+// that is where an axis-aligned route meets a disc or a diamond.
+scav_point ortho_attach_box(scav_point toward,
+                            scav_rect const &r,
+                            int32_t clear,
+                            bool inscribed);
+
+// The attachments one face still lands on one point -- two states each other's
+// target project onto the same place -- pushed `clear` apart along that face and
+// clamped back onto it. `at` holds `2 * nets.size()` points, src then dst per
+// net, and only the ends naming a box are read or written.
+void ortho_spread_attachments(std::vector<RouteNet> const &nets,
+                              std::vector<scav_rect> const &boxes,
+                              std::vector<uint8_t> const &inscribed,
+                              int32_t clear,
+                              std::vector<scav_point> &at);
 
 // The same, off whichever box `at` is strictly inside: innermost by area, then
 // by list order. Unchanged when it is inside none.

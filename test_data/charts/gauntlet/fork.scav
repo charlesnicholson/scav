@@ -1,0 +1,23 @@
+// A fork bar's branches and a join bar's arrivals. The bar is a wide-and-thin
+// mark whose long face is its attachment face, and every branch off it used to
+// be handed the box's centre: three arrows on one point of a 960-unit face,
+// with the incoming arrowhead inked over one of them.
+chart fork "fork and join bars" {
+  state Idle,
+  state Split fork,
+  state Left,
+  state Middle,
+  state Right,
+  state Merge join,
+  state Done,
+
+  trans * -> Idle,
+  trans Idle -> Split "go",
+  trans Split -> Left,
+  trans Split -> Middle,
+  trans Split -> Right,
+  trans Left -> Merge,
+  trans Middle -> Merge,
+  trans Right -> Merge,
+  trans Merge -> Done,
+}

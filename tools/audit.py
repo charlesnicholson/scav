@@ -156,6 +156,8 @@ def audit(svg, every, chart, doc, verbose):
     cx, cy, cw, ch = chart
     legs = []
     route = {}
+    starts = []
+    tips = []
     for m in POLYLINE.finditer(svg):
         pts, trans = points(m.group(1)), m.group(2)
         route[trans] = pts
@@ -163,6 +165,7 @@ def audit(svg, every, chart, doc, verbose):
         # The tail is the arrowhead's business; this is the other end, which
         # has no glyph of its own to give it away.
         found["route starts"] = found.get("route starts", 0) + 1
+        starts.append((pts[0], trans))
         if not any(on_border(pts[0], box) for box in every):
             note("route start not on any border", f"t{trans} at {pts[0]}")
         for pt in pts:
@@ -198,8 +201,21 @@ def audit(svg, every, chart, doc, verbose):
     for m in ARROWHEAD.finditer(svg):
         tip, trans = points(m.group(1))[0], m.group(2)
         found["arrowheads"] = found.get("arrowheads", 0) + 1
+        tips.append((tip, trans))
         if not any(on_border(tip, box) for box in every):
             note("arrowhead not on any border", f"t{trans} tip {tip}")
+
+    # A head and a departure on one point of one box: the head is inked over the
+    # other route's own first leg, so it reads as belonging to the line it sits
+    # on. Two arrivals sharing a point are a fan-in and keep their one head
+    # (11.5's bundles); this is the mixed case, which no trunk explains. A fork
+    # bar is where it shows, every branch off one face having been handed the
+    # box's centre before 11.5's attachment projected them apart.
+    for tip, head in tips:
+        for start, leaving in starts:
+            if head != leaving and tip == start:
+                note("an arrowhead over another route's end",
+                     f"t{head} head on t{leaving} at {tip}")
 
     for m in DIVIDER.finditer(svg):
         x1, y1, x2, y2 = (int(v) for v in m.groups())
@@ -341,6 +357,7 @@ def main():
              "segment flush along a box": "route segments",
              "route start not on any border": "route starts",
              "arrowhead not on any border": "arrowheads",
+             "an arrowhead over another route's end": "arrowheads",
              "divider not axis-aligned": "region dividers",
              "drawn outside the chart rect": "route segments",
              "routes share a run": "route segments",

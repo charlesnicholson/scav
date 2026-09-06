@@ -846,10 +846,20 @@ void check_geometry(Chart const &c) {
     Transition const &tr{ c.transitions[t] };
     // One point per endpoint and per crossing, plus a bend wherever the
     // layering put one between two ranks, which is why this is a floor.
+    // `served` below takes off the crossings an endpoint already stands on.
     if (tr.src == tr.dst) {
       CHECK(route.len == 2);
     } else {
-      CHECK(route.len >= segs.len + 1);
+      // A crossing on the source's or the destination's own border is not a
+      // second point: the route reaches that state by reaching that border, and
+      // 11.5's aimed attachment puts both on the same place rather than running
+      // a leg along the border between them.
+      uint32_t served{ 0 };
+      for (uint32_t k = 0; (k + 1) < segs.len; ++k) {
+        StateId const on{ g.ports[g.segments[segs.off + k].dst_port].state };
+        served += ((on.v == tr.src.v) || (on.v == tr.dst.v)) ? 1U : 0U;
+      }
+      CHECK(route.len + served >= segs.len + 1);
     }
     CHECK(ports.len == segs.len - 1);
     for (uint32_t k = 0; k < ports.len; ++k) {

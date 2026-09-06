@@ -24,7 +24,12 @@ struct RouteNet {
 struct RouteInput {
   scav_rect region{};                // the frame's rect; a route stays inside it
   std::vector<scav_rect> obstacles;  // every box overlapping the region
-  std::vector<RouteNet> nets;        // in (transition, ordinal) order
+  // Parallel to `obstacles`, or empty for none of them: a box whose glyph is
+  // inscribed in it rather than filling it -- a disc or a diamond -- which an
+  // axis-aligned route reaches only at the midpoint of a face. Layout knows it
+  // from the kind; a router only needs the consequence.
+  std::vector<uint8_t> inscribed;
+  std::vector<RouteNet> nets;  // in (transition, ordinal) order
   std::vector<scav_point> waypoints;
   scav_profile profile{};
 };

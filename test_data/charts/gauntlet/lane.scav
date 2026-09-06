@@ -1,0 +1,16 @@
+// Routes that want the same run of one line and are not one net. Nudging has to
+// take them apart, in the order the crossings ask for rather than the order the
+// low end alone suggests, and it may not trade the lane it clears for another.
+chart lane "two runs down one line" {
+  state Top,
+  state Bottom,
+  state Middle { state Near, state Far, trans * -> Near, trans Near -> Far },
+  state Sink,
+
+  trans * -> Top,
+  trans Top -> Sink "over",
+  trans Bottom -> Sink "under",
+  trans Top -> Bottom "down",
+  trans Middle/Near -> Sink "out of the middle",
+  trans Middle/Far -> Top "back to the top",
+}
