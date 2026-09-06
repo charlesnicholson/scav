@@ -16,6 +16,7 @@
 #include "doctest.h"
 
 #include "scav_int.h"
+#include "scav_xxhash.h"
 
 #include <chrono>
 #include <cstdint>
@@ -538,6 +539,51 @@ TEST_CASE("layout: the hash split separates size changes from shape changes") {
   REQUIRE(profile_named("readable", p));
   REQUIRE(layout_run(more, {}, opts(p), placed, diags));
   CHECK(layout_structural_hash(more) != layout_structural_hash(narrow));
+}
+
+TEST_CASE("layout: the structural hash separates two models of one geometry") {
+  // Names reach layout only through the space tables, so with no requests two
+  // charts of one shape lay out to the same coordinates -- and the structural
+  // hash still has to tell them apart, which is what the model seed buys.
+  auto build = [](char const *first, char const *second) {
+    Chart c;
+    SubmachineId const root{ build_chart(c, "t", {}) };
+    StateId const a{ build_state(c, root, first, StateKind::Normal, {}) };
+    StateId const b{ build_state(c, root, second, StateKind::Normal, {}) };
+    build_trans(c, a, b, TransKind::External, {});
+    std::vector<scav_placed> placed;
+    std::vector<Diagnostic> diags;
+    REQUIRE(layout_run(c, {}, opts(readable()), placed, diags));
+    return c;
+  };
+
+  Chart const named{ build("A", "B") };
+  Chart const renamed{ build("X", "Y") };
+  CHECK(chart_structural_hash(named) != chart_structural_hash(renamed));
+  CHECK(layout_coordinate_hash(named) == layout_coordinate_hash(renamed));
+  CHECK(layout_structural_hash(named) != layout_structural_hash(renamed));
+
+  // The same model twice is the same pair of hashes, so what moved above is
+  // the model and not the run.
+  Chart const again{ build("A", "B") };
+  CHECK(layout_coordinate_hash(again) == layout_coordinate_hash(named));
+  CHECK(layout_structural_hash(again) == layout_structural_hash(named));
+}
+
+TEST_CASE("layout: an unlaid-out chart hashes to its model digest alone") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+
+  // No geometry columns, so the serialization is empty and the seed is the
+  // whole of it.
+  CHECK(layout_structural_hash(c) == xxhash32(nullptr, 0, chart_structural_hash(c)));
+  CHECK(layout_coordinate_hash(c) == xxhash32(nullptr, 0, 0));
+
+  run(c, {}, readable());
+  CHECK(layout_structural_hash(c) != xxhash32(nullptr, 0, chart_structural_hash(c)));
 }
 
 TEST_CASE("layout: the inputs digest hears every input that is not the model") {

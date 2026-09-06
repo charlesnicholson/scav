@@ -391,7 +391,7 @@ uint32_t layout_structural_hash(Chart const &c) {
     append_u32(b, sl.side);
     append_u32(b, sl.boundary_depth);
   }
-  return xxhash32(b.data(), b.size(), 0);
+  return xxhash32(b.data(), b.size(), chart_structural_hash(c));
 }
 
 }  // namespace scav

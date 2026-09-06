@@ -52,6 +52,7 @@ bool layout_run(Chart &c,
 
 // Split so a pure translation moves the coordinate hash and not the structural
 // one: structure is sides, depths and turn tokens; coordinates are the rest.
+// The structural hash is seeded with the model's structural digest (6).
 uint32_t layout_structural_hash(Chart const &c);
 uint32_t layout_coordinate_hash(Chart const &c);
 
