@@ -242,14 +242,7 @@ Routes phase3_route(Chart const &c,
       obstacle_index[st] = static_cast<uint32_t>(in.obstacles.size());
       obstacle_states.push_back(st);
       in.obstacles.push_back(z.state[st]);
-      // A rounded rect and a bar fill the box layout gave them; every other
-      // kind draws a disc or a diamond inside it, which a route meets at one
-      // point per face (11.4).
-      StateKind const kind{ c.states[st].kind };
-      in.inscribed.push_back((kind == StateKind::Normal) || (kind == StateKind::Fork) ||
-                                     (kind == StateKind::Join)
-                                 ? 0U
-                                 : 1U);
+      in.inscribed.push_back(kind_inscribed(c.states[st].kind) ? 1U : 0U);
     }
     for (uint32_t const i : by_frame[m]) {
       Planned const &pn{ planned[i] };

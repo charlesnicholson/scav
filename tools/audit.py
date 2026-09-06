@@ -9,6 +9,7 @@ the PRD, so it reports rather than fails.
   tools/audit.py                    every corpus chart, out/baseline
   tools/audit.py --in DIR
   tools/audit.py --chart vac.scav   one of them, with each finding listed
+  tools/audit.py --gauntlet         the element suite instead of the corpus
 """
 
 import argparse
@@ -20,6 +21,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CORPUS = REPO_ROOT / "test_data/charts"
+# The element suite, rendered by tools/baseline.py --gauntlet into the same
+# directory. src/layout/gauntlet_tests.cpp lays the same charts out with no
+# space requests, so its numbers and these are two scales and never comparable.
+GAUNTLET = CORPUS / "gauntlet"
 
 # State boxes come from the geometry columns, not the drawing: a choice is a
 # polygon and a final state two circles, so reading rects back exempts them.
@@ -313,6 +318,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--in", dest="where", default=str(REPO_ROOT / "out/baseline"))
     ap.add_argument("--chart", default=None)
+    ap.add_argument("--gauntlet", action="store_true",
+                    help="the element suite under test_data/charts/gauntlet")
     ap.add_argument("--scav", default=None)
     args = ap.parse_args()
     scav_bin = Path(args.scav) if args.scav else (
@@ -325,19 +332,19 @@ def main():
         scav_bin = found[0]
 
     where = Path(args.where)
+    root = GAUNTLET if args.gauntlet else CORPUS
     names = ([args.chart] if args.chart else
-             sorted(p.name for p in CORPUS.glob("*.scav")))
+             sorted(p.name for p in root.glob("*.scav")))
     verbose = args.chart is not None
 
     total = {}
     missing = []
     for name in names:
-        svg = where / f"{name}.svg" if name.endswith(".svg") else where / f"{name}.svg"
         svg = where / (name + ".svg")
         if not svg.exists():
             missing.append(name)
             continue
-        every, chart, doc = geometry(CORPUS / name, scav_bin)
+        every, chart, doc = geometry(root / name, scav_bin)
         found, notes = audit(svg.read_text(encoding="utf-8"), every, chart, doc,
                              verbose)
         for key, count in found.items():

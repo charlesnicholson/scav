@@ -1,13 +1,25 @@
 #ifndef SCAV_LAYOUT_GEOM_H_INCLUDED
 #define SCAV_LAYOUT_GEOM_H_INCLUDED
 
-// The rect and point predicates the phases share. Both containment tests are
-// strict: rects touching do not overlap, and a point on a border is not inside.
+// The rect, point and kind predicates the phases share. Both containment tests
+// are strict: rects touching do not overlap, and a point on a border is not
+// inside.
 
+#include "scav/scav_core.h"
 #include "scav/scav_types.h"
 #include "scav_int.h"
 
 namespace scav {
+
+// Whether this kind's glyph is drawn inside its box rather than filling it: a
+// disc for the pseudostates that carry a mark, a diamond on the face midpoints
+// for a choice. A rounded rect and a bar fill the box layout gave them, so an
+// axis-aligned route meets those anywhere along a face and the rest only at a
+// face's midpoint.
+constexpr bool kind_inscribed(StateKind kind) {
+  return (kind != StateKind::Normal) && (kind != StateKind::Fork) &&
+         (kind != StateKind::Join);
+}
 
 constexpr bool same(scav_point a, scav_point b) { return (a.x == b.x) && (a.y == b.y); }
 

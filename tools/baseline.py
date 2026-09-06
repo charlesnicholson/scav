@@ -17,6 +17,7 @@ what it could not run rather than failing. Set SCAV_BASELINE to provision them.
 
   SCAV_BASELINE=1 tools/baseline.py      every corpus chart, default build dir
   tools/baseline.py --chart vac.scav     one of them, scav only
+  tools/baseline.py --gauntlet           the element suite instead of the corpus
   tools/baseline.py --puml ~/charts      render real .puml where names match
   tools/baseline.py --out DIR            somewhere other than out/baseline
 """
@@ -33,6 +34,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CORPUS = REPO_ROOT / "test_data/charts"
+# One layout element per chart, held to reader-visible properties by
+# src/layout/gauntlet_tests.cpp. Those run with no space requests; rendering
+# them here is the same shapes on the measured-text scale.
+GAUNTLET = CORPUS / "gauntlet"
 
 # Layout works in sixteenths of a point, and every other engine here is
 # unitless. Points keep the numbers small without changing any proportion.
@@ -461,6 +466,8 @@ def render_scav(scav: Path, chart: Path, out: Path) -> str | None:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--chart", action="append", default=[])
+    ap.add_argument("--gauntlet", action="store_true",
+                    help="the element suite under test_data/charts/gauntlet")
     ap.add_argument("--out", type=Path, default=REPO_ROOT / "out/baseline")
     ap.add_argument("--puml", type=Path,
                     help="directory of real .puml sources; used where the stem matches")
@@ -471,8 +478,9 @@ def main() -> int:
     scav = args.scav or find_scav()
     if not scav.is_file():
         raise SystemExit(f"no scav binary at {scav}")
-    charts = ([CORPUS / c for c in args.chart] if args.chart
-              else sorted(CORPUS.glob("*.scav")))
+    root = GAUNTLET if args.gauntlet else CORPUS
+    charts = ([root / c for c in args.chart] if args.chart
+              else sorted(root.glob("*.scav")))
     args.out.mkdir(parents=True, exist_ok=True)
 
     plantuml = envy_product("plantuml")
