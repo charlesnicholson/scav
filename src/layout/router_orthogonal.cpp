@@ -166,13 +166,15 @@ scav_point ortho_attach_box(scav_point toward,
   // Along the face, `toward`'s own projection onto it, so the end leaves aimed
   // at where it is going. A box centre carries no such information and every
   // net naming one face of one box would otherwise be handed the same point.
-  // An inscribed glyph has one point per face and the projection is the
-  // midpoint, which an inset of half the face gives without a second rule.
+  // An inscribed glyph has one point per face and it is the midpoint, spelled
+  // the way the reference builder spells the centre it draws the mark on: an
+  // inset of half the face leaves two units to choose from on an odd one, and
+  // the upper of them misses the tangent.
   scav_point aimed{ toward };
   if (ortho_escape_horizontal(toward, r)) {
-    aimed.y = ortho_onto_face(toward.y, r.y, r.h, inscribed ? r.h : clear);
+    aimed.y = inscribed ? (r.y + (r.h / 2)) : ortho_onto_face(toward.y, r.y, r.h, clear);
   } else {
-    aimed.x = ortho_onto_face(toward.x, r.x, r.w, inscribed ? r.w : clear);
+    aimed.x = inscribed ? (r.x + (r.w / 2)) : ortho_onto_face(toward.x, r.x, r.w, clear);
   }
   return ortho_escape_box(aimed, toward, r);
 }

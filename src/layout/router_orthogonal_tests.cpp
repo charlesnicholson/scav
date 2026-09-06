@@ -420,18 +420,32 @@ TEST_CASE("ortho: ends of one direction sharing a seat are a trunk and keep it")
 }
 
 TEST_CASE("ortho: a face with no room for the seats leaves them where they are") {
-  // The step is sized to the face, so a mark too small to seat its ends apart
-  // keeps them stacked rather than sliding them off its own border.
-  std::vector<scav_rect> const boxes{ rect(0, 0, 4, 4) };
-  std::vector<RouteNet> const nets{
-    { .src = pt(2, 2), .dst = pt(900, 2), .src_obstacle = 0 },
-    { .src = pt(2, 2), .dst = pt(900, 3), .src_obstacle = 0 },
+  // A mark too small to seat an arrival apart from a departure keeps them
+  // stacked rather than sliding one off its own border, and it is stopped twice
+  // over: once where the face is too short for a step at all, and once where
+  // the step is a unit but the corner inset pulls both back to the middle.
+  auto const run = [](int32_t h, int32_t clear) {
+    std::vector<scav_rect> const boxes{ rect(0, 0, 4, h) };
+    std::vector<RouteNet> const nets{
+      { .src = pt(2, h / 2), .dst = pt(900, 0), .src_obstacle = 0 },
+      { .src = pt(900, h), .dst = pt(2, h / 2), .dst_obstacle = 0 },
+    };
+    std::vector<scav_point> at{ pt(4, h / 2), pt(900, 0), pt(900, h), pt(4, h / 2) };
+    ortho_spread_attachments(nets, boxes, {}, clear, at);
+    return std::pair<scav_point, scav_point>{ at[0], at[3] };
   };
-  std::vector<scav_point> at{ pt(4, 2), pt(900, 2), pt(4, 2), pt(900, 3) };
-  ortho_spread_attachments(nets, boxes, {}, 8, at);
 
-  CHECK((at[0] == pt(4, 2)));
-  CHECK((at[2] == pt(4, 2)));
+  // A two-unit face: `len / 3` is zero, so no step exists to take.
+  CHECK((run(2, 8).first == pt(4, 1)));
+  CHECK((run(2, 8).second == pt(4, 1)));
+  // A four-unit face: the step is one unit and the inset is two either side, so
+  // both seats clamp back onto the one point the face has room for.
+  CHECK((run(4, 8).first == pt(4, 2)));
+  CHECK((run(4, 8).second == pt(4, 2)));
+  // And the same face with room to spare does separate them, which is what
+  // makes the two above a property of the face and not of the pair.
+  CHECK((run(64, 8).first == pt(4, 28)));
+  CHECK((run(64, 8).second == pt(4, 36)));
 }
 
 TEST_CASE("ortho: seats do not depend on the order the nets arrive in") {
@@ -1465,6 +1479,15 @@ TEST_CASE("ortho: a glyph inscribed in its box is met at the middle of a face") 
   CHECK((ortho_attach_box(pt(10, -900), dot, 8, true) == pt(50, 0)));
   // The same box filled is projected, which is the contrast the flag draws.
   CHECK((ortho_attach_box(pt(900, 10), dot, 8, false) == pt(100, 10)));
+
+  // An odd face has no exact half, and the midpoint is the one the builder
+  // draws the mark on -- the lower of the two an inset of half the face would
+  // leave to choose from, and the only one on the glyph.
+  scav_rect const odd{ rect(0, 0, 101, 101) };
+  CHECK((ortho_attach_box(pt(900, 10), odd, 8, true) == pt(101, 50)));
+  CHECK((ortho_attach_box(pt(900, 90), odd, 8, true) == pt(101, 50)));
+  CHECK((ortho_attach_box(pt(10, -900), odd, 8, true) == pt(50, 0)));
+  CHECK((ortho_attach_box(pt(90, -900), odd, 8, true) == pt(50, 0)));
 
   std::vector<scav_rect> const boxes{ dot };
   std::vector<uint8_t> const inscribed{ 1 };
