@@ -43,6 +43,7 @@ int run_render(char const *path,
                char const *profile_name);
 int run_fmt(std::vector<char const *> const &paths, bool check_only);
 int run_deps(char const *path, char const *target);
+int run_selftest(char const *against_path);
 
 }  // namespace cli
 
