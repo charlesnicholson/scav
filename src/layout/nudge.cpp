@@ -21,6 +21,10 @@ using Wide = int64_t;
 // leaves the real limits alone.
 constexpr Wide UNBOUNDED{ Wide{ 1 } << 40 };
 
+// Past any in-degree the vote digraph can reach, so a bundle already ordered is
+// never ready a second time.
+constexpr uint32_t PLACED{ 0xffffffffU };
+
 // An interior axis-aligned segment: `lo`/`hi` span its own axis and `at` is its
 // coordinate across it, which keys the lane.
 struct Member {
@@ -120,6 +124,7 @@ void nudge_lanes(scav_rect const &region,
   std::vector<uint32_t> group;
   std::vector<uint32_t> kin;
   std::vector<int32_t> votes;  // groups x groups, antisymmetric; see below
+  std::vector<uint32_t> degree;
   std::vector<uint32_t> order;
   std::vector<uint32_t> rank;  // -> order, inverted
   for (uint32_t axis = 0; axis < 2; ++axis) {
@@ -318,33 +323,57 @@ void nudge_lanes(scav_rect const &region,
         }
       }
 
-      // Bundles enter in the key's order and each takes the position that
-      // contradicts the fewest votes, the last of the positions that tie -- so a
-      // bundle no vote separates from those already placed lands after them and
-      // a lane with no incidences at all comes out in the key order it went in
-      // with. A consistent one comes out a linear extension of its votes.
+      // The votes are a digraph -- an edge from `u` to `v` for every pair they
+      // separate that way round -- and Kahn's algorithm over it takes the
+      // lowest key of the bundles nothing left precedes. That is a linear
+      // extension of the votes, so it contradicts none of them, and it is the
+      // key's own order on a lane with no incidences at all.
+      degree.assign(groups, 0);
+      for (uint32_t u = 0; u < groups; ++u) {
+        for (uint32_t v = 0; v < groups; ++v) {
+          if (votes[(u * groups) + v] > 0) { ++degree[v]; }
+        }
+      }
       order.clear();
-      for (uint32_t b = 0; b < groups; ++b) {
-        uint32_t best{ 0 };
-        Wide best_cost{ -1 };
-        for (uint32_t at = 0; at <= order.size(); ++at) {
-          Wide cost{ 0 };
-          for (uint32_t q = 0; q < order.size(); ++q) {
-            int32_t const w{ votes[(b * groups) + order[q]] };
-            // `b` lands above everything from `at` on, so a vote for the other
-            // order is contradicted by its own weight.
-            if ((q >= at) == (w < 0)) { cost += (w < 0) ? -Wide{ w } : Wide{ w }; }
-          }
-          if ((best_cost < 0) || (cost <= best_cost)) {
-            best_cost = cost;
-            best = at;
-          }
+      while (order.size() < groups) {
+        uint32_t next{ groups };
+        for (uint32_t b = 0; (next == groups) && (b < groups); ++b) {
+          if (degree[b] == 0) { next = b; }
         }
-        order.push_back(b);
-        for (uint32_t k = static_cast<uint32_t>(order.size()) - 1; k > best; --k) {
-          order[k] = order[k - 1];
+        if (next == groups) { break; }  // every bundle left is preceded by another
+        order.push_back(next);
+        degree[next] = PLACED;
+        for (uint32_t v = 0; v < groups; ++v) {
+          if (votes[(next * groups) + v] > 0) { --degree[v]; }
         }
-        order[best] = b;
+      }
+      if (order.size() < groups) {
+        // Votes around a cycle have no order that satisfies them, so the
+        // bundles enter in the key's order instead and each takes the position
+        // that contradicts the fewest, the last of the positions that tie.
+        order.clear();
+        for (uint32_t b = 0; b < groups; ++b) {
+          uint32_t best{ 0 };
+          Wide best_cost{ -1 };
+          for (uint32_t at = 0; at <= order.size(); ++at) {
+            Wide cost{ 0 };
+            for (uint32_t q = 0; q < order.size(); ++q) {
+              int32_t const w{ votes[(b * groups) + order[q]] };
+              // `b` lands above everything from `at` on, so a vote for the
+              // other order is contradicted by its own weight.
+              if ((q >= at) == (w < 0)) { cost += (w < 0) ? -Wide{ w } : Wide{ w }; }
+            }
+            if ((best_cost < 0) || (cost <= best_cost)) {
+              best_cost = cost;
+              best = at;
+            }
+          }
+          order.push_back(b);
+          for (uint32_t k = static_cast<uint32_t>(order.size()) - 1; k > best; --k) {
+            order[k] = order[k - 1];
+          }
+          order[best] = b;
+        }
       }
       rank.assign(groups, 0);
       bool keyed{ true };
@@ -352,6 +381,9 @@ void nudge_lanes(scav_rect const &region,
         rank[order[i]] = i;
         keyed = keyed && (order[i] == i);
       }
+      // Counted where the order is decided, so a lane the votes reorder and the
+      // room then refuses is one of these and none of `spread`.
+      stats.reordered += keyed ? 0U : 1U;
       for (uint32_t j = 0; j < count; ++j) { slot[j] = rank[slot[j]]; }
 
       // The room the whole lane has, measured over its union extent so a member
@@ -419,7 +451,6 @@ void nudge_lanes(scav_rect const &region,
       }
       if (!any) { continue; }
       ++stats.spread;
-      stats.reordered += keyed ? 0U : 1U;
 
       for (uint32_t b = 0; b < groups; ++b) {
         group.clear();
