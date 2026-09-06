@@ -9,6 +9,7 @@ the PRD, so it reports rather than fails.
   tools/audit.py                    every corpus chart, out/baseline
   tools/audit.py --in DIR
   tools/audit.py --chart vac.scav   one of them, with each finding listed
+  tools/audit.py --gauntlet         the element suite instead of the corpus
 """
 
 import argparse
@@ -20,6 +21,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CORPUS = REPO_ROOT / "test_data/charts"
+# The element suite, rendered by tools/baseline.py --gauntlet into the same
+# directory. src/layout/gauntlet_tests.cpp lays the same charts out with no
+# space requests, so its numbers and these are two scales and never comparable.
+GAUNTLET = CORPUS / "gauntlet"
 
 # State boxes come from the geometry columns, not the drawing: a choice is a
 # polygon and a final state two circles, so reading rects back exempts them.
@@ -156,6 +161,8 @@ def audit(svg, every, chart, doc, verbose):
     cx, cy, cw, ch = chart
     legs = []
     route = {}
+    starts = []
+    tips = []
     for m in POLYLINE.finditer(svg):
         pts, trans = points(m.group(1)), m.group(2)
         route[trans] = pts
@@ -163,6 +170,7 @@ def audit(svg, every, chart, doc, verbose):
         # The tail is the arrowhead's business; this is the other end, which
         # has no glyph of its own to give it away.
         found["route starts"] = found.get("route starts", 0) + 1
+        starts.append((pts[0], trans))
         if not any(on_border(pts[0], box) for box in every):
             note("route start not on any border", f"t{trans} at {pts[0]}")
         for pt in pts:
@@ -198,8 +206,21 @@ def audit(svg, every, chart, doc, verbose):
     for m in ARROWHEAD.finditer(svg):
         tip, trans = points(m.group(1))[0], m.group(2)
         found["arrowheads"] = found.get("arrowheads", 0) + 1
+        tips.append((tip, trans))
         if not any(on_border(tip, box) for box in every):
             note("arrowhead not on any border", f"t{trans} tip {tip}")
+
+    # A head and a departure on one point of one box: the head is inked over the
+    # other route's own first leg, so it reads as belonging to the line it sits
+    # on. Two arrivals sharing a point are a fan-in and keep their one head
+    # (11.5's bundles); this is the mixed case, which no trunk explains. A fork
+    # bar is where it shows, every branch off one face having been handed the
+    # box's centre before 11.5's attachment projected them apart.
+    for tip, head in tips:
+        for start, leaving in starts:
+            if head != leaving and tip == start:
+                note("an arrowhead over another route's end",
+                     f"t{head} head on t{leaving} at {tip}")
 
     for m in DIVIDER.finditer(svg):
         x1, y1, x2, y2 = (int(v) for v in m.groups())
@@ -297,6 +318,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--in", dest="where", default=str(REPO_ROOT / "out/baseline"))
     ap.add_argument("--chart", default=None)
+    ap.add_argument("--gauntlet", action="store_true",
+                    help="the element suite under test_data/charts/gauntlet")
     ap.add_argument("--scav", default=None)
     args = ap.parse_args()
     scav_bin = Path(args.scav) if args.scav else (
@@ -309,19 +332,19 @@ def main():
         scav_bin = found[0]
 
     where = Path(args.where)
+    root = GAUNTLET if args.gauntlet else CORPUS
     names = ([args.chart] if args.chart else
-             sorted(p.name for p in CORPUS.glob("*.scav")))
+             sorted(p.name for p in root.glob("*.scav")))
     verbose = args.chart is not None
 
     total = {}
     missing = []
     for name in names:
-        svg = where / f"{name}.svg" if name.endswith(".svg") else where / f"{name}.svg"
         svg = where / (name + ".svg")
         if not svg.exists():
             missing.append(name)
             continue
-        every, chart, doc = geometry(CORPUS / name, scav_bin)
+        every, chart, doc = geometry(root / name, scav_bin)
         found, notes = audit(svg.read_text(encoding="utf-8"), every, chart, doc,
                              verbose)
         for key, count in found.items():
@@ -341,6 +364,7 @@ def main():
              "segment flush along a box": "route segments",
              "route start not on any border": "route starts",
              "arrowhead not on any border": "arrowheads",
+             "an arrowhead over another route's end": "arrowheads",
              "divider not axis-aligned": "region dividers",
              "drawn outside the chart rect": "route segments",
              "routes share a run": "route segments",

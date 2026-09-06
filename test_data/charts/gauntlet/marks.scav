@@ -1,0 +1,20 @@
+// Every kind whose glyph is inscribed in its box rather than filling it. A disc
+// and a diamond touch their box at four points, so an end anywhere else on the
+// face stops short of the mark the arrow is drawn to.
+chart marks "the inscribed glyphs" {
+  state Start,
+  state Pick choice,
+  state Hop junction,
+  state Shallow history,
+  state Deep deephistory,
+  state Stop,
+
+  trans * -> Start,
+  trans Start -> Pick "check",
+  trans Pick -> Hop "one",
+  trans Pick -> Shallow "two",
+  trans Hop -> Deep,
+  trans Shallow -> Stop,
+  trans Deep -> Stop,
+  trans Stop -> *,
+}

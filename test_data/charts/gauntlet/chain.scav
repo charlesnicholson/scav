@@ -1,0 +1,14 @@
+// The trivial case, which nothing else in this directory checks: four states in
+// a row and nothing in the way. Every route is one straight segment, and any
+// bend, lane or displacement here is the pipeline inventing work.
+chart chain "four in a row" {
+  state One,
+  state Two,
+  state Three,
+  state Four,
+
+  trans * -> One,
+  trans One -> Two,
+  trans Two -> Three,
+  trans Three -> Four,
+}

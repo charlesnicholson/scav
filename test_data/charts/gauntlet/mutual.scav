@@ -1,0 +1,15 @@
+// Two states that are each other's target. Both transitions project onto the
+// same point of the same face at both ends, so without a seat apiece they draw
+// as one line carrying an arrowhead at each end and two labels on top of each
+// other -- a reader sees one transition where the chart has two.
+chart mutual "a pair each other's target" {
+  state Up,
+  state Down,
+  state Sideways,
+
+  trans * -> Up,
+  trans Up -> Down "fall",
+  trans Down -> Up "rise",
+  trans Up -> Sideways "drift",
+  trans Sideways -> Down "settle",
+}

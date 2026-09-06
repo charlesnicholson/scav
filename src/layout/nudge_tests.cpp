@@ -352,9 +352,11 @@ TEST_CASE("nudge: two nets with one tail take one offset between them") {
 TEST_CASE("nudge: two nets with one head take one offset between them") {
   // A fork's fan-out is the fan-in read backwards: identical from the net's start
   // to the segment, and apart after it.
+  // The loner's leg is off the bundle's so the lane is about the bundle alone:
+  // two legs on one line share a run whichever way the lane is ordered.
   Frame f{ frame_of({ { pt(0, 0), pt(0, 100), pt(200, 100), pt(200, 300) },
                       { pt(0, 0), pt(0, 100), pt(150, 100), pt(150, 400) },
-                      { pt(0, 400), pt(0, 100), pt(200, 100), pt(200, 500) } }) };
+                      { pt(-40, 400), pt(-40, 100), pt(200, 100), pt(200, 500) } }) };
   NudgeStats s;
   nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
 
@@ -415,16 +417,19 @@ TEST_CASE("nudge: a net bundled by its head and another by its tail are one bund
   Frame f{ frame_of({ { pt(0, 0), pt(0, 100), pt(200, 100), pt(200, 300) },
                       { pt(0, 0), pt(0, 100), pt(150, 100), pt(150, 400) },
                       { pt(30, 700), pt(30, 100), pt(150, 100), pt(150, 400) },
-                      { pt(0, 900), pt(0, 100), pt(200, 100), pt(200, 1200) } }) };
+                      { pt(-40, 900), pt(-40, 100), pt(200, 100), pt(200, 1200) } }) };
   NudgeStats s;
   nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
 
   CHECK(s.bundles == 1);
   CHECK(s.moved == 4);
-  CHECK(net_pt(f, 0, 1).y == 76);
-  CHECK(net_pt(f, 1, 1).y == 76);
-  CHECK(net_pt(f, 2, 1).y == 76);
-  CHECK(net_pt(f, 3, 1).y == 124);
+  // The loner goes above rather than below: the bundle's middle member leaves
+  // downward at x=30, inside the loner's extent, so the other way round the
+  // loner's segment is crossed by it.
+  CHECK(net_pt(f, 3, 1).y == 76);
+  CHECK(net_pt(f, 0, 1).y == 124);
+  CHECK(net_pt(f, 1, 1).y == 124);
+  CHECK(net_pt(f, 2, 1).y == 124);
 }
 
 TEST_CASE("nudge: a bundle's own legs may land on each other") {
@@ -557,4 +562,114 @@ TEST_CASE("nudge: bundles do not depend on the order the nets arrive in") {
   CHECK(same(a.points, b.points));
   CHECK(sa.bundles == sb.bundles);
   CHECK(sa.moved == sb.moved);
+}
+
+TEST_CASE("nudge: a leg crossing the other member's segment settles the order") {
+  // Two members overlapping over x in [100,200] rather than end to end. The key
+  // reads only the low end, where both legs go up and the first goes further, so
+  // it puts net 0 above; both crossings say the opposite. Net 0's leg down at
+  // x=200 is inside net 1's extent, and net 1's leg up at x=100 is inside net
+  // 0's, so either one of them is crossed unless net 1 goes above.
+  Frame f{ frame_of({ { pt(0, 0), pt(0, 100), pt(200, 100), pt(200, 300) },
+                      { pt(100, 50), pt(100, 100), pt(300, 100), pt(300, 400) } }) };
+  NudgeStats s;
+  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+
+  CHECK(s.lanes == 1);
+  CHECK(s.spread == 1);
+  CHECK(s.reordered == 1);
+  CHECK(s.moved == 2);
+  CHECK(net_pt(f, 1, 1).y == 76);
+  CHECK(net_pt(f, 1, 2).y == 76);
+  CHECK(net_pt(f, 0, 1).y == 124);
+  CHECK(net_pt(f, 0, 2).y == 124);
+}
+
+TEST_CASE("nudge: a lane whose members share both ends keeps the key's order") {
+  // Neither member's leg lands inside the other's extent, so no crossing is
+  // available to order them by and the low-end key is the whole answer.
+  Lane l{ two_over(100) };
+  NudgeStats s;
+  nudge_lanes(OPEN, OPEN, {}, 48, 0, l.nets, l.points, s);
+
+  CHECK(s.spread == 1);
+  CHECK(s.reordered == 0);
+  CHECK(lane_y(l, 0) == 76);
+  CHECK(lane_y(l, 1) == 124);
+}
+
+TEST_CASE("nudge: a pair that must cross either way is left in the key's order") {
+  // Net 0 runs inside net 1 and leaves up at one end and down at the other, so
+  // one of its two legs is crossed whichever way round they go. The votes cancel
+  // and the key decides, rather than the first constraint found winning.
+  Frame f{ frame_of({ { pt(100, 0), pt(100, 100), pt(200, 100), pt(200, 300) },
+                      { pt(0, 50), pt(0, 100), pt(300, 100), pt(300, 150) } }) };
+  Frame mirror{ frame_of({ { pt(0, 50), pt(0, 100), pt(300, 100), pt(300, 150) },
+                           { pt(100, 0), pt(100, 100), pt(200, 100), pt(200, 300) } }) };
+  NudgeStats s;
+  NudgeStats t;
+  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+  nudge_lanes(OPEN, OPEN, {}, 48, 0, mirror.nets, mirror.points, t);
+
+  CHECK(s.reordered == 0);
+  CHECK(t.reordered == 0);
+  // Keyed on the low-end leg, which is net 0's y=0 against net 1's y=50 either
+  // way round, so the two frames put the same net on top.
+  CHECK(net_pt(f, 0, 1).y == 76);
+  CHECK(net_pt(mirror, 1, 1).y == 76);
+}
+
+TEST_CASE("nudge: a chain of votes orders a lane the key cannot") {
+  // Staggered extents: net 0 over [0,100] leaves up at its high end inside net
+  // 1's [50,150], net 1 over [50,150] leaves up at its high end inside net 2's
+  // [120,200], and nets 0 and 2 share no coordinate at all, so nothing votes on
+  // that pair. Keyed on the arrivals at 149, 200 and 260 the lane enters as 2,
+  // 0, 1, and the chain 0 before 1 before 2 has one linear extension.
+  Frame f{ frame_of({ { pt(0, 200), pt(0, 100), pt(100, 100), pt(100, -400) },
+                      { pt(50, 260), pt(50, 100), pt(150, 100), pt(150, -500) },
+                      { pt(120, 149), pt(120, 100), pt(200, 100), pt(200, 400) } }) };
+  NudgeStats s;
+  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+
+  CHECK(s.lanes == 1);
+  CHECK(s.reordered == 1);
+  // The middle of the three is already where it belongs, so two of them move.
+  CHECK(s.moved == 2);
+  CHECK(net_pt(f, 0, 1).y == 52);
+  CHECK(net_pt(f, 1, 1).y == 100);
+  CHECK(net_pt(f, 2, 1).y == 148);
+}
+
+TEST_CASE("nudge: a lane whose crossing order is not known good keeps its place") {
+  // Same shape as the bundle above with the loner's leg back on the bundle's own
+  // line. The crossings still want the loner above, and taking that order would
+  // lay its leg along the bundle's, so both refuse and the lane stays stacked --
+  // the order is chosen on crossings and taken only where the room is good.
+  Frame f{ frame_of({ { pt(0, 0), pt(0, 100), pt(200, 100), pt(200, 300) },
+                      { pt(0, 0), pt(0, 100), pt(150, 100), pt(150, 400) },
+                      { pt(30, 700), pt(30, 100), pt(150, 100), pt(150, 400) },
+                      { pt(0, 900), pt(0, 100), pt(200, 100), pt(200, 1200) } }) };
+  NudgeStats s;
+  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+
+  CHECK(s.bundles == 1);
+  CHECK(s.moved == 0);
+  CHECK(s.reordered == 1);
+  for (uint32_t net = 0; net < 4; ++net) { CHECK(net_pt(f, net, 1).y == 100); }
+}
+
+TEST_CASE("nudge: a lane the votes reorder counts as one whatever the room says") {
+  // The pair the crossings settle, walled top and bottom so the lane has no
+  // window to spread into at all: `reordered` is counted where the order is
+  // decided, so this lane is one of them and none of `spread`.
+  Frame f{ frame_of({ { pt(0, 0), pt(0, 100), pt(200, 100), pt(200, 300) },
+                      { pt(100, 50), pt(100, 100), pt(300, 100), pt(300, 400) } }) };
+  std::vector<scav_rect> const walls{ rect(0, 0, 300, 100), rect(0, 100, 300, 100) };
+  NudgeStats s;
+  nudge_lanes(OPEN, OPEN, walls, 48, 0, f.nets, f.points, s);
+
+  CHECK(s.lanes == 1);
+  CHECK(s.spread == 0);
+  CHECK(s.moved == 0);
+  CHECK(s.reordered == 1);
 }

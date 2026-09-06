@@ -1,0 +1,24 @@
+// Concurrent regions, and a transition between two of them. The two regions are
+// siblings under a state, so the nearest enclosing submachine is one level
+// further out than that state, and there the state is an ordinary obstacle
+// walling the route out of the space between its own regions: it goes the long
+// way round instead, through whatever else that frame holds and back along the
+// line it arrived on. Two edges through a box and two routes doubling back at
+// both profiles, pinned in gauntlet_tests.cpp; 11.8 owes the fix.
+chart regions "two regions and a crossing" {
+  state Running {
+    submachine motor {
+      state Spinning,
+      state Stopped,
+      trans * -> Stopped,
+      trans Stopped -> Spinning "start",
+    },
+    submachine light { state Dark, state Lit, trans * -> Dark, trans Dark -> Lit "on" },
+  },
+  state Halted,
+
+  trans * -> Running,
+  trans Running:motor/Spinning -> Running:light/Lit "spun up",
+  trans Running:light/Lit -> Running:motor/Stopped "lamp fault",
+  trans Running -> Halted "stop",
+}

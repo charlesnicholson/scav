@@ -198,6 +198,7 @@ Routes phase3_route(Chart const &c,
   for (uint32_t m = 0; m < by_frame.size(); ++m) {
     if (by_frame[m].empty()) { continue; }
     in.obstacles.clear();
+    in.inscribed.clear();
     in.nets.clear();
     in.waypoints.clear();
     obstacle_states.clear();
@@ -241,6 +242,7 @@ Routes phase3_route(Chart const &c,
       obstacle_index[st] = static_cast<uint32_t>(in.obstacles.size());
       obstacle_states.push_back(st);
       in.obstacles.push_back(z.state[st]);
+      in.inscribed.push_back(kind_inscribed(c.states[st].kind) ? 1U : 0U);
     }
     for (uint32_t const i : by_frame[m]) {
       Planned const &pn{ planned[i] };

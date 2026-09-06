@@ -1,0 +1,13 @@
+// A self-transition and a two-state cycle. The self-loop leaves and re-enters
+// one box and its arrowhead reads its direction off a leg no displacement may
+// collapse; the cycle is what makes an edge reverse and a rank run long.
+chart loop "self and cycle" {
+  state Waiting,
+  state Working,
+
+  trans * -> Waiting,
+  trans Waiting -> Waiting "tick",
+  trans Waiting -> Working "job",
+  trans Working -> Waiting "done",
+  trans internal Working -> Working "progress",
+}

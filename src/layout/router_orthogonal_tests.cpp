@@ -344,6 +344,292 @@ TEST_CASE("ortho: an elongated box is left through a long face, not an end") {
   CHECK((ortho_escape(pt(30, 2), pt(-500, 2), flat) == pt(0, 2)));
 }
 
+TEST_CASE("ortho: an end attaches where on the face its target is, not the middle") {
+  // A fork bar's whole face is available and the centre carries no information
+  // about where a branch is going, so every branch off one face used to be
+  // handed one point. The face is still chosen by separation; where on it is the
+  // target's own projection.
+  scav_rect const bar{ rect(0, 0, 4, 60) };  // as above, a tall thin fork bar
+
+  CHECK((ortho_attach_box(pt(500, 10), bar, 0, false) == pt(4, 10)));
+  CHECK((ortho_attach_box(pt(500, 50), bar, 0, false) == pt(4, 50)));
+  CHECK((ortho_attach_box(pt(-500, 20), bar, 0, false) == pt(0, 20)));
+
+  // Past either end of the face it clamps onto the face rather than sliding
+  // round the corner: the face is the escape rule's, and this only says where.
+  CHECK((ortho_attach_box(pt(5000, -500), bar, 0, false) == pt(4, 0)));
+  CHECK((ortho_attach_box(pt(5000, 900), bar, 0, false) == pt(4, 60)));
+
+  // And a target genuinely stacked over an end still leaves by that end, where
+  // it is the other axis that is projected.
+  CHECK((ortho_attach_box(pt(3, -500), bar, 0, false) == pt(3, 0)));
+  CHECK((ortho_attach_box(pt(-500, -5000), bar, 0, false) == pt(0, 0)));
+}
+
+TEST_CASE("ortho: an attachment is held off the corners of its own face") {
+  // An end on a corner leaves along the face it did not pick, so the projection
+  // is inset by the clearance -- and by half the face where there is not room
+  // for that, which is a mark's whole width.
+  scav_rect const bar{ rect(0, 0, 4, 60) };
+  CHECK((ortho_attach_box(pt(5000, -500), bar, 8, false) == pt(4, 8)));
+  CHECK((ortho_attach_box(pt(5000, 900), bar, 8, false) == pt(4, 52)));
+  CHECK((ortho_attach_box(pt(5000, 30), bar, 8, false) == pt(4, 30)));
+
+  // The 4-unit axis has no room for an 8 inset either side, so every end that
+  // leaves by a cap lands on the midpoint rather than crossing over.
+  CHECK((ortho_attach_box(pt(1, -5000), bar, 8, false) == pt(2, 0)));
+  CHECK((ortho_attach_box(pt(3, -5000), bar, 8, false) == pt(2, 0)));
+  CHECK((ortho_attach_box(pt(3, 5000), bar, 8, false) == pt(2, 60)));
+}
+
+TEST_CASE("ortho: two ends wanting one seat are pushed apart along the face") {
+  // Two states each other's target project onto the same point of the same
+  // face, and one arrow is then drawn over the other with two heads on it.
+  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 100), rect(400, 0, 100, 100) };
+  std::vector<RouteNet> const nets{
+    { .src = pt(50, 50), .dst = pt(450, 50), .src_obstacle = 0, .dst_obstacle = 1 },
+    { .src = pt(450, 50), .dst = pt(50, 50), .src_obstacle = 1, .dst_obstacle = 0 },
+  };
+  std::vector<scav_point> at{ pt(100, 50), pt(400, 50), pt(400, 50), pt(100, 50) };
+  ortho_spread_attachments(nets, boxes, {}, 8, at);
+
+  // The seat is by the direction the net runs through the face, not by which of
+  // its ends this is: net 0 runs + through both, so it takes the lower seat at
+  // both and comes out one straight line, and net 1 takes the higher at both.
+  CHECK((at[0] == pt(100, 46)));  // net 0 leaves box 0
+  CHECK((at[1] == pt(400, 46)));  // net 0 arrives at box 1
+  CHECK((at[2] == pt(400, 54)));  // net 1 leaves box 1
+  CHECK((at[3] == pt(100, 54)));  // net 1 arrives at box 0
+}
+
+TEST_CASE("ortho: a seat the spread lands on a third is separated in its turn") {
+  // A group's two directions move half a step each way, and the projection
+  // clamps several seats onto one corner inset, so a mixed pair can be seated
+  // exactly where a third seat already sits. The run therefore repeats until
+  // nothing moves rather than sweeping the face once.
+  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 300) };
+  std::vector<RouteNet> const nets{
+    { .src = pt(50, 150), .dst = pt(900, 10), .src_obstacle = 0 },
+    { .src = pt(900, 20), .dst = pt(50, 150), .dst_obstacle = 0 },
+    { .src = pt(50, 150), .dst = pt(900, 30), .src_obstacle = 0 },
+  };
+  // A mixed pair on the right face at 150, and a departure at 154, which is
+  // exactly where the pair's arrival is sent.
+  std::vector<scav_point> at{ pt(100, 150), pt(900, 10),  pt(900, 20),
+                              pt(100, 150), pt(100, 154), pt(900, 30) };
+  ortho_spread_attachments(nets, boxes, {}, 8, at);
+  CHECK((at[0] == pt(100, 146)));  // the pair's departure, one half-step down
+  CHECK((at[3] == pt(100, 158)));  // its arrival, moved on again by the second sweep
+  CHECK((at[4] == pt(100, 150)));  // and the third seat, moved down out of its way
+}
+
+TEST_CASE("ortho: an inscribed glyph's mixed midpoint is moved onto another face") {
+  // A disc has one point per face and four of them, so an arrival and a
+  // departure on one midpoint have somewhere to go that does not slide either
+  // off the glyph. The departure here is the one whose target lies off the axis
+  // the escape rule picked, so it is the one with a second face to gain by.
+  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 100) };
+  std::vector<uint8_t> const inscribed{ 1 };
+  std::vector<RouteNet> const nets{
+    { .src = pt(900, 50), .dst = pt(50, 50), .dst_obstacle = 0 },
+    { .src = pt(50, 50), .dst = pt(900, 900), .src_obstacle = 0 },
+  };
+  std::vector<scav_point> toward{ pt(50, 50), pt(900, 50), pt(900, 900), pt(50, 50) };
+  std::vector<scav_point> at{ pt(900, 50), pt(100, 50), pt(100, 50), pt(900, 900) };
+  ortho_reface_attachments(nets, boxes, inscribed, toward, at);
+  CHECK((at[1] == pt(100, 50)));  // the arrival keeps the face it was aimed along
+  CHECK((at[2] == pt(50, 100)));  // and the departure takes the midpoint below it
+
+  // Nothing moves where the two faces are already different, and nothing moves
+  // a box whose glyph fills it.
+  std::vector<scav_point> apart{ pt(900, 50), pt(100, 50), pt(0, 50), pt(900, 900) };
+  ortho_reface_attachments(nets, boxes, inscribed, toward, apart);
+  CHECK((apart[1] == pt(100, 50)));
+  CHECK((apart[2] == pt(0, 50)));
+  std::vector<scav_point> filled{ pt(900, 50), pt(100, 50), pt(100, 50), pt(900, 900) };
+  ortho_reface_attachments(nets, boxes, {}, toward, filled);
+  CHECK((filled[2] == pt(100, 50)));
+}
+
+TEST_CASE("ortho: a mark with no free face keeps both ends on the one it has") {
+  // An arrival on every one of the four faces, so the departure sharing the
+  // right one has nowhere to go and the pair stays stacked -- left as it is
+  // rather than slid off the glyph.
+  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 100) };
+  std::vector<uint8_t> const inscribed{ 1 };
+  std::vector<RouteNet> const nets{
+    { .src = pt(900, 50), .dst = pt(50, 50), .dst_obstacle = 0 },
+    { .src = pt(-900, 50), .dst = pt(50, 50), .dst_obstacle = 0 },
+    { .src = pt(50, -900), .dst = pt(50, 50), .dst_obstacle = 0 },
+    { .src = pt(50, 900), .dst = pt(50, 50), .dst_obstacle = 0 },
+    { .src = pt(50, 50), .dst = pt(900, 900), .src_obstacle = 0 },
+  };
+  std::vector<scav_point> toward{ pt(50, 50),   pt(900, 50),  pt(50, 50), pt(-900, 50),
+                                  pt(50, 50),   pt(50, -900), pt(50, 50), pt(50, 900),
+                                  pt(900, 900), pt(50, 50) };
+  std::vector<scav_point> at{ pt(900, 50),  pt(100, 50), pt(-900, 50), pt(0, 50),
+                              pt(50, -900), pt(50, 0),   pt(50, 900),  pt(50, 100),
+                              pt(100, 50),  pt(900, 900) };
+  ortho_reface_attachments(nets, boxes, inscribed, toward, at);
+  CHECK((at[1] == pt(100, 50)));
+  CHECK((at[8] == pt(100, 50)));
+}
+
+TEST_CASE("ortho: two parallel faces with room in common seat one coordinate") {
+  // Each end was the *other* box's centre projected onto its own face, so two
+  // faces a straight line apart still got two coordinates and a jog between
+  // them. The pair is seated on one coordinate wherever both faces can hold it.
+  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 300), rect(400, 100, 100, 300) };
+  std::vector<RouteNet> const nets{
+    { .src = pt(50, 150), .dst = pt(450, 250), .src_obstacle = 0, .dst_obstacle = 1 },
+  };
+  std::vector<scav_point> at{ pt(100, 250), pt(400, 150) };
+  ortho_align_attachments(nets, boxes, {}, 8, at);
+  CHECK((at[0] == pt(100, 200)));  // halfway between the two centres, 150 and 250
+  CHECK((at[1] == pt(400, 200)));
+
+  // Symmetric in the pair: the reverse net answers with the same coordinate,
+  // which is what lets the spread put the two on parallel lines.
+  std::vector<RouteNet> const back{
+    { .src = pt(450, 250), .dst = pt(50, 150), .src_obstacle = 1, .dst_obstacle = 0 },
+  };
+  std::vector<scav_point> other{ pt(400, 150), pt(100, 250) };
+  ortho_align_attachments(back, boxes, {}, 8, other);
+  CHECK((other[0] == pt(400, 200)));
+  CHECK((other[1] == pt(100, 200)));
+
+  // Clamped into what the shorter face can seat when the midpoint is off it.
+  std::vector<scav_rect> const stubby{ rect(0, 0, 100, 300), rect(400, 200, 100, 40) };
+  std::vector<RouteNet> const short_face{
+    { .src = pt(50, 150), .dst = pt(450, 220), .src_obstacle = 0, .dst_obstacle = 1 },
+  };
+  std::vector<scav_point> reach{ pt(100, 220), pt(400, 208) };
+  ortho_align_attachments(short_face, stubby, {}, 8, reach);
+  CHECK((reach[0] == pt(100, 208)));  // halfway is 185, and 208 is as near as it seats
+  CHECK((reach[1] == pt(400, 208)));
+}
+
+TEST_CASE("ortho: faces with no run in common, or a corridor, are left alone") {
+  // Perpendicular faces have no one coordinate to share; faces that do not
+  // overlap have no room for one; and a net phase 1 gave a corridor keeps the
+  // shape it asked for rather than being straightened past it.
+  std::vector<scav_rect> const apart{ rect(0, 0, 100, 100), rect(400, 900, 100, 100) };
+  std::vector<RouteNet> const nets{
+    { .src = pt(50, 50), .dst = pt(450, 950), .src_obstacle = 0, .dst_obstacle = 1 },
+  };
+  std::vector<scav_point> perpendicular{ pt(50, 100), pt(400, 950) };
+  ortho_align_attachments(nets, apart, {}, 8, perpendicular);
+  CHECK((perpendicular[0] == pt(50, 100)));
+  CHECK((perpendicular[1] == pt(400, 950)));
+
+  std::vector<scav_point> disjoint{ pt(100, 92), pt(400, 908) };
+  ortho_align_attachments(nets, apart, {}, 8, disjoint);
+  CHECK((disjoint[0] == pt(100, 92)));
+  CHECK((disjoint[1] == pt(400, 908)));
+
+  std::vector<RouteNet> const threaded{ { .src = pt(50, 50),
+                                          .dst = pt(450, 950),
+                                          .src_obstacle = 0,
+                                          .dst_obstacle = 1,
+                                          .waypoint_off = 0,
+                                          .waypoint_len = 1 } };
+  std::vector<scav_point> corridor{ pt(100, 50), pt(400, 950) };
+  ortho_align_attachments(threaded, apart, {}, 8, corridor);
+  CHECK((corridor[0] == pt(100, 50)));
+  CHECK((corridor[1] == pt(400, 950)));
+
+  // An inscribed end seats one point and no other, so it is the other end that
+  // comes to it rather than the pair meeting halfway off the glyph.
+  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 300), rect(400, 100, 100, 300) };
+  std::vector<uint8_t> const inscribed{ 1, 0 };
+  std::vector<RouteNet> const from_glyph{
+    { .src = pt(50, 150), .dst = pt(450, 250), .src_obstacle = 0, .dst_obstacle = 1 },
+  };
+  std::vector<scav_point> glyph{ pt(100, 150), pt(400, 290) };
+  ortho_align_attachments(from_glyph, boxes, inscribed, 8, glyph);
+  CHECK((glyph[0] == pt(100, 150)));
+  CHECK((glyph[1] == pt(400, 150)));
+}
+
+TEST_CASE("ortho: ends of one direction sharing a seat are a trunk and keep it") {
+  // Everything arriving at one point is a fan-in and everything leaving is a
+  // fan-out: each is one line a reader wants whole, which is the shape 11.5's
+  // bundles exist to protect. Only a mixed run has no trunk to explain it.
+  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 100) };
+  std::vector<RouteNet> const nets{
+    { .src = pt(-900, 10), .dst = pt(50, 50), .dst_obstacle = 0 },
+    { .src = pt(-900, 90), .dst = pt(50, 50), .dst_obstacle = 0 },
+    { .src = pt(-900, 50), .dst = pt(50, 50), .dst_obstacle = 0 },
+  };
+  std::vector<scav_point> at{ pt(-900, 10), pt(0, 50),    pt(-900, 90),
+                              pt(0, 50),    pt(-900, 50), pt(0, 50) };
+  ortho_spread_attachments(nets, boxes, {}, 8, at);
+  CHECK((at[1] == pt(0, 50)));
+  CHECK((at[3] == pt(0, 50)));
+  CHECK((at[5] == pt(0, 50)));
+}
+
+TEST_CASE("ortho: a face with no room for the seats leaves them where they are") {
+  // A mark too small to seat an arrival apart from a departure keeps them
+  // stacked rather than sliding one off its own border, and it is stopped twice
+  // over: once where the face is too short for a step at all, and once where
+  // the step is a unit but the corner inset pulls both back to the middle.
+  auto const run = [](int32_t h, int32_t clear) {
+    std::vector<scav_rect> const boxes{ rect(0, 0, 4, h) };
+    std::vector<RouteNet> const nets{
+      { .src = pt(2, h / 2), .dst = pt(900, 0), .src_obstacle = 0 },
+      { .src = pt(900, h), .dst = pt(2, h / 2), .dst_obstacle = 0 },
+    };
+    std::vector<scav_point> at{ pt(4, h / 2), pt(900, 0), pt(900, h), pt(4, h / 2) };
+    ortho_spread_attachments(nets, boxes, {}, clear, at);
+    return std::pair<scav_point, scav_point>{ at[0], at[3] };
+  };
+
+  // A two-unit face: `len / 3` is zero, so no step exists to take.
+  CHECK((run(2, 8).first == pt(4, 1)));
+  CHECK((run(2, 8).second == pt(4, 1)));
+  // A four-unit face: the step is one unit and the inset is two either side, so
+  // both seats clamp back onto the one point the face has room for.
+  CHECK((run(4, 8).first == pt(4, 2)));
+  CHECK((run(4, 8).second == pt(4, 2)));
+  // And the same face with room to spare does separate them, which is what
+  // makes the two above a property of the face and not of the pair.
+  CHECK((run(64, 8).first == pt(4, 28)));
+  CHECK((run(64, 8).second == pt(4, 36)));
+}
+
+TEST_CASE("ortho: seats do not depend on the order the nets arrive in") {
+  // Two leaving and two arriving on one seat, handed over in both orders.
+  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 100) };
+  auto const run = [&boxes](bool flip) {
+    std::vector<RouteNet> nets{
+      { .src = pt(50, 50), .dst = pt(900, 10), .src_obstacle = 0 },
+      { .src = pt(900, 20), .dst = pt(50, 50), .dst_obstacle = 0 },
+      { .src = pt(50, 50), .dst = pt(900, 30), .src_obstacle = 0 },
+      { .src = pt(900, 40), .dst = pt(50, 50), .dst_obstacle = 0 },
+    };
+    std::vector<scav_point> at{ pt(100, 50), pt(900, 10), pt(900, 20), pt(100, 50),
+                                pt(100, 50), pt(900, 30), pt(900, 40), pt(100, 50) };
+    if (flip) {
+      std::vector<RouteNet> const rev{ nets[3], nets[2], nets[1], nets[0] };
+      nets = rev;
+      std::vector<scav_point> const back{ at[6], at[7], at[4], at[5],
+                                          at[2], at[3], at[0], at[1] };
+      at = back;
+      ortho_spread_attachments(nets, boxes, {}, 8, at);
+      return std::vector<int32_t>{ at[6].y, at[5].y, at[2].y, at[1].y };
+    }
+    ortho_spread_attachments(nets, boxes, {}, 8, at);
+    return std::vector<int32_t>{ at[0].y, at[3].y, at[4].y, at[7].y };
+  };
+  std::vector<int32_t> const a{ run(false) };
+  std::vector<int32_t> const b{ run(true) };
+  CHECK(a == b);
+  // Both departures keep one seat and both arrivals the other, so the two
+  // trunks stay whole and the head is not inked over either of them.
+  CHECK(a == std::vector<int32_t>{ 46, 54, 46, 54 });
+}
+
 TEST_CASE("ortho: an equidistant escape is decided by the fixed side order") {
   // Dead centre with a target dead centre: neither axis separates, so the tie
   // goes to x and then to the nearer border, which is the left one.
@@ -1330,4 +1616,37 @@ TEST_CASE("ortho: the profile-derived knobs are the two documented numbers") {
   p.node_sep = 0;
   CHECK(ortho_bend_penalty(p) == 1);
   CHECK(ortho_clearance(p) == 1);
+}
+
+TEST_CASE("ortho: a glyph inscribed in its box is met at the middle of a face") {
+  // A disc or a diamond touches its box at four points, so projecting a target
+  // onto the face would stop the route short of the mark it is drawn to. Its
+  // ends take the midpoint whatever they are aimed at, and the spread leaves
+  // them there rather than sliding them off the glyph.
+  scav_rect const dot{ rect(0, 0, 100, 100) };
+  CHECK((ortho_attach_box(pt(900, 10), dot, 8, true) == pt(100, 50)));
+  CHECK((ortho_attach_box(pt(900, 90), dot, 8, true) == pt(100, 50)));
+  CHECK((ortho_attach_box(pt(10, -900), dot, 8, true) == pt(50, 0)));
+  // The same box filled is projected, which is the contrast the flag draws.
+  CHECK((ortho_attach_box(pt(900, 10), dot, 8, false) == pt(100, 10)));
+
+  // An odd face has no exact half, and the midpoint is the one the builder
+  // draws the mark on -- the lower of the two an inset of half the face would
+  // leave to choose from, and the only one on the glyph.
+  scav_rect const odd{ rect(0, 0, 101, 101) };
+  CHECK((ortho_attach_box(pt(900, 10), odd, 8, true) == pt(101, 50)));
+  CHECK((ortho_attach_box(pt(900, 90), odd, 8, true) == pt(101, 50)));
+  CHECK((ortho_attach_box(pt(10, -900), odd, 8, true) == pt(50, 0)));
+  CHECK((ortho_attach_box(pt(90, -900), odd, 8, true) == pt(50, 0)));
+
+  std::vector<scav_rect> const boxes{ dot };
+  std::vector<uint8_t> const inscribed{ 1 };
+  std::vector<RouteNet> const nets{
+    { .src = pt(50, 50), .dst = pt(900, 10), .src_obstacle = 0 },
+    { .src = pt(50, 50), .dst = pt(900, 90), .src_obstacle = 0 },
+  };
+  std::vector<scav_point> at{ pt(100, 50), pt(900, 10), pt(100, 50), pt(900, 90) };
+  ortho_spread_attachments(nets, boxes, inscribed, 8, at);
+  CHECK((at[0] == pt(100, 50)));
+  CHECK((at[2] == pt(100, 50)));
 }

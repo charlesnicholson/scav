@@ -15,8 +15,9 @@ struct NudgeStats {
   uint32_t lanes{ 0 };
   uint32_t spread{ 0 };  // lanes of those that had the room to take an offset
   uint32_t moved{ 0 };
-  uint32_t bundles{ 0 };  // members of a lane that run as one net and move as one
-  uint32_t refused{ 0 };  // bundles of those a member's own checks stopped
+  uint32_t bundles{ 0 };    // members of a lane that run as one net and move as one
+  uint32_t refused{ 0 };    // bundles of those a member's own checks stopped
+  uint32_t reordered{ 0 };  // lanes the crossing constraints took off the key order
 };
 
 // `nets` are spans into `points`, rewritten in place. `region` bounds every

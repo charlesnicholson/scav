@@ -114,6 +114,20 @@ scav_add_functional_test(check
           "$<TARGET_FILE:scav>"
   TARGETS scav
 )
+# The element suite through the verbs, and its charts against the array the
+# unit suite iterates. Globbed with CONFIGURE_DEPENDS, since a chart added to
+# the directory is exactly what this gate exists to notice.
+file(GLOB scav_gauntlet_charts CONFIGURE_DEPENDS
+  "${PROJECT_SOURCE_DIR}/test_data/charts/gauntlet/*.scav"
+)
+scav_add_functional_test(gauntlet
+  DEPENDS ${scav_gauntlet_charts}
+          "${PROJECT_SOURCE_DIR}/src/layout/gauntlet_tests.cpp"
+          "${PROJECT_SOURCE_DIR}/tools/baseline.py"
+          "${PROJECT_SOURCE_DIR}/tools/audit.py"
+          "$<TARGET_FILE:scav>"
+  TARGETS scav
+)
 scav_add_functional_test(deps
   DEPENDS "${PROJECT_SOURCE_DIR}/test_data/charts/vac.scav"
           "${PROJECT_SOURCE_DIR}/test_data/charts/dock.scav"

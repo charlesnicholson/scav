@@ -1,0 +1,20 @@
+// Several transitions into one state. Their routes coincide near the target by
+// construction and that trunk is the shape a reader wants: one line arriving
+// with one arrowhead, not four parallel lines a gap apart. The counterpart to
+// gauntlet/lane.scav, which is the case that must come apart.
+chart fanin "many sources, one target" {
+  state A,
+  state B,
+  state C,
+  state D,
+  state Fault,
+
+  trans * -> A,
+  trans A -> B,
+  trans B -> C,
+  trans C -> D,
+  trans A -> Fault "a failed",
+  trans B -> Fault "b failed",
+  trans C -> Fault "c failed",
+  trans D -> Fault "d failed",
+}
