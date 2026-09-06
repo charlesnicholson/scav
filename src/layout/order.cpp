@@ -6,10 +6,13 @@
 #include "layout/order.h"
 
 #include "layout/decompose.h"
+#include "layout/shard.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout_c.h"
 #include "scav_int.h"
+#include "scav_shard.h"
 #include "scav_stable_sort.h"
+#include "scav_thread.h"
 
 #include <cstdint>
 #include <vector>
@@ -53,6 +56,28 @@ struct Frame {
   std::vector<OrderEdge> edges;
   std::vector<std::vector<uint32_t>> ranks;  // rank -> node indices, in order
   Adjacency in, out;
+};
+
+// The port a boundary node stands for, recorded as the frame makes it: the
+// node itself carries the segment, so only the port has to be carried out.
+struct SegPort {
+  uint32_t seg;
+  uint32_t port;
+};
+
+// One submachine's answer, written by the shard that owns it and emitted in
+// submachine order.
+struct FrameOrder {
+  Frame f;
+  std::vector<int32_t> gaps;
+  std::vector<SegPort> seg_ports;
+};
+
+// Allocated once per shard and reused across that shard's frames. Both maps
+// hold frame-local node indices and are cleared back to INVALID per frame.
+struct FrameScratch {
+  std::vector<uint32_t> state_local;  // -> states
+  std::vector<uint32_t> seg_local;    // -> SplitGraph::segments
 };
 
 // The endpoint state of a segment's src or dst end when that end carries no
@@ -354,7 +379,8 @@ uint64_t rank_crossings(std::vector<uint32_t> const &south_positions) {
 SubmachineOrders phase1_order(Chart const &c,
                               SplitGraph const &g,
                               scav_spaces const &s,
-                              scav_profile const &p) {
+                              scav_profile const &p,
+                              uint32_t threads) {
   SubmachineOrders o;
   o.sub_nodes.assign(c.submachines.size(), Span{});
   o.sub_edges.assign(c.submachines.size(), Span{});
@@ -392,15 +418,19 @@ SubmachineOrders phase1_order(Chart const &c,
     seg_label[segs.off + (segs.len / 2)] += box.w;
   }
 
-  for (uint32_t m = 0; m < c.submachines.size(); ++m) {
-    if (c.submachines[m].live == 0) { continue; }
-    Frame f;
+  std::vector<FrameOrder> frames(c.submachines.size());
+
+  // Reads the model, the split and the label charges; writes `frames[m]` and
+  // the caller's own scratch, so two frames share nothing.
+  auto const order_frame = [&](uint32_t m, FrameScratch &sc) {
+    Frame &f{ frames[m].f };
+    std::vector<SegPort> &seg_ports{ frames[m].seg_ports };
 
     Span const kids{ c.submachines[m].children };
     for (uint32_t k = 0; k < kids.len; ++k) {
       uint32_t const child{ c.state_ids[kids.off + k].v };
       if (c.states[child].live == 0) { continue; }
-      o.state_node[child] = static_cast<uint32_t>(f.nodes.size());
+      sc.state_local[child] = static_cast<uint32_t>(f.nodes.size());
       f.nodes.push_back(
           { .kind = OrderKind::State, .subject = child, .rank = 0, .pos = 0 });
     }
@@ -409,13 +439,13 @@ SubmachineOrders phase1_order(Chart const &c,
     // border is a node of its own, and there is at most one such end per
     // segment because consecutive crossings always change frame.
     auto const boundary_node = [&](uint32_t seg, uint32_t port) {
-      if (o.seg_node[seg] == INVALID) {
-        o.seg_node[seg] = static_cast<uint32_t>(f.nodes.size());
-        o.seg_port[seg] = port;
+      if (sc.seg_local[seg] == INVALID) {
+        sc.seg_local[seg] = static_cast<uint32_t>(f.nodes.size());
+        seg_ports.push_back({ .seg = seg, .port = port });
         f.nodes.push_back(
             { .kind = OrderKind::Boundary, .subject = seg, .rank = 0, .pos = 0 });
       }
-      return o.seg_node[seg];
+      return sc.seg_local[seg];
     };
     auto const resolve = [&](uint32_t seg, bool is_src) -> uint32_t {
       SplitSegment const &sg{ g.segments[seg] };
@@ -428,17 +458,17 @@ SubmachineOrders phase1_order(Chart const &c,
         if ((is_src ? sg.src_inner : sg.dst_inner) != 0) {
           return boundary_node(seg, INVALID);
         }
-        return o.state_node[st.v];
+        return sc.state_local[st.v];
       }
       SplitPort const &pt{ g.ports[port] };
       if (pt.state.v != INVALID) {
-        return (c.states[pt.state.v].parent.v == m) ? o.state_node[pt.state.v]
+        return (c.states[pt.state.v].parent.v == m) ? sc.state_local[pt.state.v]
                                                     : boundary_node(seg, port);
       }
       if (pt.sub.v == m) { return boundary_node(seg, port); }
       StateId const owner{ c.submachines[pt.sub.v].owner };
       if ((owner.v != INVALID) && (c.states[owner.v].parent.v == m)) {
-        return o.state_node[owner.v];
+        return sc.state_local[owner.v];
       }
       return INVALID;
     };
@@ -458,7 +488,8 @@ SubmachineOrders phase1_order(Chart const &c,
     // label sits in the middle of.
     uint32_t top{ 0 };
     for (OrderNode const &nd : f.nodes) { top = imax(top, nd.rank); }
-    std::vector<int32_t> gaps(top, 0);
+    std::vector<int32_t> &gaps{ frames[m].gaps };
+    gaps.assign(top, 0);
     for (OrderEdge const &e : f.edges) {
       int32_t const label{ seg_label[e.segment] };
       if (label == 0) { continue; }
@@ -470,6 +501,33 @@ SubmachineOrders phase1_order(Chart const &c,
     chain_long_edges(f);
     bucket_ranks(f);
     minimize_crossings(f, static_cast<uint32_t>(p.sweep_count));
+
+    for (uint32_t k = 0; k < kids.len; ++k) {
+      sc.state_local[c.state_ids[kids.off + k].v] = INVALID;
+    }
+    for (SegPort const &sp : seg_ports) { sc.seg_local[sp.seg] = INVALID; }
+  };
+
+  uint32_t const shards{ layout_shard_count(c) };
+  auto body = [&](uint32_t shard) {
+    scav_span const mine{
+      shard_range(shard, shards, static_cast<uint32_t>(c.submachines.size()))
+    };
+    FrameScratch sc;
+    sc.state_local.assign(c.states.size(), INVALID);
+    sc.seg_local.assign(g.segments.size(), INVALID);
+    for (uint32_t k = 0; k < mine.len; ++k) {
+      uint32_t const m{ mine.off + k };
+      if (c.submachines[m].live != 0) { order_frame(m, sc); }
+    }
+  };
+  parallel_for(shards, threads, body);
+
+  // Emitted in submachine order, so the global numbering and every span into it
+  // are what one worker would have produced (6).
+  for (uint32_t m = 0; m < c.submachines.size(); ++m) {
+    if (c.submachines[m].live == 0) { continue; }
+    Frame const &f{ frames[m].f };
 
     uint32_t const node_base{ static_cast<uint32_t>(o.nodes.size()) };
     uint32_t const edge_base{ static_cast<uint32_t>(o.edges.size()) };
@@ -489,7 +547,7 @@ SubmachineOrders phase1_order(Chart const &c,
                           .segment = e.segment,
                           .reversed = e.reversed });
     }
-    for (int32_t const gap : gaps) { o.gaps.push_back(gap); }
+    for (int32_t const gap : frames[m].gaps) { o.gaps.push_back(gap); }
     for (uint32_t v = 0; v < f.nodes.size(); ++v) {
       OrderNode const &nd{ f.nodes[v] };
       if (nd.kind == OrderKind::State) {
@@ -498,6 +556,7 @@ SubmachineOrders phase1_order(Chart const &c,
         o.seg_node[nd.subject] = global[v];
       }
     }
+    for (SegPort const &sp : frames[m].seg_ports) { o.seg_port[sp.seg] = sp.port; }
 
     o.sub_nodes[m] =
         make_span(node_base, static_cast<uint32_t>(o.nodes.size()) - node_base);
