@@ -1,5 +1,11 @@
 @PACKAGE_INIT@
 
+if("@SCAV_THREAD_BACKEND_RESOLVED@" STREQUAL "PTHREAD")
+  include(CMakeFindDependencyMacro)
+  set(THREADS_PREFER_PTHREAD_FLAG ON)
+  find_dependency(Threads)
+endif()
+
 include("${CMAKE_CURRENT_LIST_DIR}/scav-targets.cmake")
 
 check_required_components(scav)

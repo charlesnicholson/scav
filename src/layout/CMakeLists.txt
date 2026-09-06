@@ -1,6 +1,30 @@
+set(SCAV_THREAD_BACKEND "AUTO" CACHE STRING
+  "Thread shim backend: AUTO|NULL|PTHREAD|WIN32")
+set_property(CACHE SCAV_THREAD_BACKEND PROPERTY STRINGS AUTO NULL PTHREAD WIN32)
+
+set(scav_thread_backend "${SCAV_THREAD_BACKEND}")
+if(scav_thread_backend STREQUAL "AUTO")
+  if(WIN32)
+    set(scav_thread_backend "WIN32")
+  else()
+    set(scav_thread_backend "PTHREAD")
+  endif()
+endif()
+if(NOT scav_thread_backend MATCHES "^(NULL|PTHREAD|WIN32)$")
+  message(FATAL_ERROR
+    "SCAV_THREAD_BACKEND=${SCAV_THREAD_BACKEND}: expected AUTO, NULL, PTHREAD or WIN32")
+endif()
+# A cache entry, so the root scope that configures the package file can read it.
+set(SCAV_THREAD_BACKEND_RESOLVED "${scav_thread_backend}" CACHE INTERNAL
+  "SCAV_THREAD_BACKEND with AUTO resolved")
+string(TOLOWER "${scav_thread_backend}" scav_thread_backend_file)
+
 # The layout library: its input contracts, the decomposition, and the
 # pipeline that writes the geometry columns.
 scav_static_library(scavlayout
+  # A src/-root primitive belonging to no library; layout compiles the backend
+  # its build selected, and anything linking layout reaches the shim.
+  "../scav_thread_${scav_thread_backend_file}.cpp"
   c_api.cpp
   layout.cpp
   profile.cpp
@@ -21,6 +45,15 @@ scav_static_library(scavlayout
 scav_install_library(scavlayout layout)
 target_link_libraries(scavlayout PUBLIC scavcore)
 target_link_libraries(scavlayout_testable PUBLIC scavcore_testable)
+
+# PUBLIC: a static archive carries no link flags of its own, so the consumer of
+# either variant is where -pthread has to land.
+if(scav_thread_backend STREQUAL "PTHREAD")
+  set(THREADS_PREFER_PTHREAD_FLAG ON)
+  find_package(Threads REQUIRED)
+  target_link_libraries(scavlayout PUBLIC Threads::Threads)
+  target_link_libraries(scavlayout_testable PUBLIC Threads::Threads)
+endif()
 
 # The redistributable carries every library's C surface.
 target_sources(scav_shared PRIVATE c_api.cpp)
@@ -48,6 +81,7 @@ if(SCAV_BUILD_TESTS)
     # belong to no subsystem, so their tests sit beside them.
     ../scav_rnd_tests.cpp
     ../scav_shard_tests.cpp
+    ../scav_thread_tests.cpp
   )
   target_link_libraries(scav_layout_tests PRIVATE scavlayout_testable)
   # A floor is asserted only where the number means anything: never under
