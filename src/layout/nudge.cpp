@@ -40,6 +40,12 @@ struct Member {
   int32_t offset{ 0 };
 };
 
+// -1, 0 or +1: which side of the lane a leg leaves by.
+int32_t sign(Wide v) {
+  if (v < 0) { return -1; }
+  return (v > 0) ? 1 : 0;
+}
+
 // The bumper the router searched against.
 scav_rect grow(scav_rect const &r, int32_t by) {
   return { .x = r.x - by, .y = r.y - by, .w = r.w + (2 * by), .h = r.h + (2 * by) };
@@ -155,8 +161,8 @@ void nudge_lanes(scav_rect const &region,
         m.toward = horizontal ? Wide{ from.y } : Wide{ from.x };
         Wide const low_leg{ (horizontal ? Wide{ from.y } : Wide{ from.x }) - m.at };
         Wide const high_leg{ (horizontal ? Wide{ to.y } : Wide{ to.x }) - m.at };
-        m.low_dir = (low_leg < 0) ? -1 : ((low_leg > 0) ? 1 : 0);
-        m.high_dir = (high_leg < 0) ? -1 : ((high_leg > 0) ? 1 : 0);
+        m.low_dir = sign(low_leg);
+        m.high_dir = sign(high_leg);
         // The two dragged legs, signed across the lane; each caps the travel one
         // short of turning itself round.
         Wide const u{ Wide{ m.at } - (horizontal ? a.y : a.x) };
@@ -308,7 +314,8 @@ void nudge_lanes(scav_rect const &region,
       // such incidence is one vote for the order that avoids it. Both members'
       // legs are read into one pair, which is what makes the matrix
       // antisymmetric and the pair's answer independent of which end asked.
-      votes.assign(groups * groups, 0);
+      uint32_t const cells{ groups * groups };
+      votes.assign(cells, 0);
       for (uint32_t j = 0; j < count; ++j) {
         for (uint32_t q = 0; q < count; ++q) {
           if (slot[j] == slot[q]) { continue; }
