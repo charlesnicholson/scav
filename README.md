@@ -25,7 +25,7 @@ layout hint and grouping is how an author writes that hint down. It is a bit and
 not a count, so a run collapses to one, and it is suppressed where it would open
 or close a block.
 
-The `scav` executable (`apps/cli`) now has five verbs:
+The `scav` executable (`apps/cli`) now has six verbs:
 
 ```
 scav render [-o F] [--embed-font] [--profile N] <file>   chart -> SVG
@@ -33,6 +33,7 @@ scav fmt [--check] <file>...      canonical print, in place; --check gates
 scav check <file>                 structural validation, exit 1 on a finding
 scav deps [--target N] <file>     the document network as a make/ninja depfile
 scav dump [--hash|--json] [--layout] <file>  the model: entity rows, not syntax
+scav selftest [--against FILE]    the layout hashes on this toolchain vs the goldens
 ```
 
 `libscavlayout` runs four phases: boundary splitting, a layered graph per
@@ -159,7 +160,16 @@ rules than the binary it bootstraps. `func.provisioning` fails on a mixed set.
 ./build.sh --list                    # the presets this host can run
 ./build.sh --clean                   # delete the build tree first
 ./build.sh -- -DSCAV_CLANG_TIDY=ON   # anything after `--` goes to cmake
+./build.sh -- -DSCAV_THREAD_BACKEND=NULL   # AUTO | NULL | PTHREAD | WIN32
 ```
+
+**The thread backend is a cmake cache variable, not a build flag.**
+`SCAV_THREAD_BACKEND` picks the one shim implementation `libscavlayout`
+compiles — `AUTO` resolves to `WIN32` on Windows and `PTHREAD` everywhere else,
+and `NULL` runs every shard inline on the calling thread. All three produce the
+same bytes, which is the point: worker count reaches scheduling and nothing
+else. `NULL` is what the `wasm32-wasi` target will use, and building it now is
+how that stays true.
 
 **Everything generated lives under `out/`.** Build trees, the envy package cache,
 test scratch. `rm -rf out` is a factory reset, and nothing writes to `$HOME`.
@@ -334,6 +344,16 @@ document is a rule that gets discovered late:
 - **envy really provisioned it.** `func.provisioning` fails if the configured tree
   recorded a tool from outside the envy cache. CI's Linux rows go further and run
   in a container with nothing installed but a compiler.
+- **The thread count reaches nothing.** `src/layout/tests/determinism_tests.cpp`
+  lays the corpus and both 2k synthetic charts out at 2, 3, 5, 8, 13 and 16
+  workers and compares every `scav.geom.*` column byte for byte, plus all three
+  hashes, against one worker — under a scheduling-delay injector that reorders
+  the shards without changing what any one of them waits for.
+- **And a user can check it on their own compiler.** `scav selftest` runs the
+  same thread counts over the corpus embedded in the binary and diffs the hashes
+  against the embedded goldens, so the determinism claim needs no checkout to
+  verify. A column that moved against the golden and a column that moved against
+  one worker are different bugs and print as different lines.
 
 ## Formatting and clang-tidy
 
