@@ -664,10 +664,10 @@ TEST_CASE("size: a fold whose pieces will not pack is dropped for the flat run")
   CHECK(z.sub[root.v].h == ((2 * (SPACE_MAX + (2 * p.pad))) + p.node_sep));
 }
 
-TEST_CASE("size: a packing wider than the domain is diagnosed, not saturated") {
+TEST_CASE("size: a row that leaves the domain does not displace the column that fits") {
   // Two unconnected states, each half the domain wide and half of it tall. The
   // column of the two fits; the row the box packer offers scales larger and
-  // does not, and it is the one the frame is measured on.
+  // does not, so it is no candidate and the frame is measured on the column.
   scav_profile p{ profile() };
   p.pad = 130800;
   Chart c;
@@ -678,19 +678,21 @@ TEST_CASE("size: a packing wider than the domain is diagnosed, not saturated") {
 
   SizedLayout z;
   std::vector<Diagnostic> diags;
-  CHECK_FALSE(size_layout(c,
-                          depths(std::vector<uint32_t>(c.states.size(), 0)),
-                          one_frame(c, root, nodes, {}, {}),
-                          {},
-                          p,
-                          z,
-                          diags));
-  REQUIRE(diags.size() == 1);
-  CHECK(diags[0].code == DiagCode::CoordinateOverflow);
-  CHECK(diags[0].subject.kind == ElemKind::Submachine);
-  CHECK(diags[0].subject.ordinal == root.v);
+  REQUIRE(size_layout(c,
+                      depths(std::vector<uint32_t>(c.states.size(), 0)),
+                      one_frame(c, root, nodes, {}, {}),
+                      {},
+                      p,
+                      z,
+                      diags));
+  CHECK(diags.empty());
+  CHECK(z.sub[root.v].w == (p.kind_min_w[0] + (2 * p.pad)));
+  CHECK(z.sub[root.v].h == ((2 * (p.kind_min_h[0] + (2 * p.pad))) + p.node_sep));
+  // The row it declined is the one that leaves the domain.
+  CHECK(((2 * (p.kind_min_w[0] + (2 * p.pad))) + p.node_sep) > COORD_MAX);
 
-  // Without the box packer to offer it, the column is what the frame keeps.
+  // The same extents with no box packer to offer a row at all, which is what
+  // makes them the column's.
   p.trybox = 0;
   SizedLayout column;
   diags.clear();
@@ -701,8 +703,415 @@ TEST_CASE("size: a packing wider than the domain is diagnosed, not saturated") {
                       p,
                       column,
                       diags));
-  CHECK(column.sub[root.v].w == (p.kind_min_w[0] + (2 * p.pad)));
-  CHECK(column.sub[root.v].h == ((2 * (p.kind_min_h[0] + (2 * p.pad))) + p.node_sep));
+  CHECK(column.sub[root.v].w == z.sub[root.v].w);
+  CHECK(column.sub[root.v].h == z.sub[root.v].h);
+}
+
+namespace {
+
+// A frame of unconnected states of one shape: one component each, so the two
+// packers see n equal rects and offer a column n tall against a row n wide.
+struct EqualStates {
+  std::vector<OrderNode> nodes;
+  std::vector<scav_box_space> boxes;
+};
+
+EqualStates equal_states(Chart &c, SubmachineId root, uint32_t n, int32_t min_w) {
+  EqualStates out;
+  for (uint32_t i = 0; i < n; ++i) {
+    StateId const s{ build_state(c, root, "S", StateKind::Normal, {}) };
+    out.nodes.push_back(state_node(s.v, 0, i));
+  }
+  out.boxes.assign(c.states.size(), scav_box_space{});
+  for (OrderNode const &nd : out.nodes) {
+    out.boxes[nd.subject] = { .min_w = min_w, .h_before = SPACE_MAX, .h_after = 0 };
+  }
+  return out;
+}
+
+// No ring and no gap, so a rect's extents are the request; a desired aspect
+// this tall keeps the width target under two rects, so `pack_lr` stacks them.
+scav_profile stacking() {
+  scav_profile p{ profile() };
+  p.pad = 0;
+  p.node_sep = 0;
+  p.dar_num = 1;
+  p.dar_den = 1024;
+  return p;
+}
+
+}  // namespace
+
+TEST_CASE("size: a column that leaves the domain gives way to the row that fits") {
+  scav_profile p{ stacking() };
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  EqualStates const five{ equal_states(c, root, 5, 0) };
+  scav_spaces const s{ .box_state = five.boxes.data(),
+                       .n_box_state = static_cast<uint32_t>(five.boxes.size()) };
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c,
+                      depths(std::vector<uint32_t>(c.states.size(), 0)),
+                      one_frame(c, root, five.nodes, {}, {}),
+                      s,
+                      p,
+                      z,
+                      diags));
+  CHECK(diags.empty());
+
+  // Five states side by side at one y, which is the row and not the stack.
+  CHECK(z.sub[root.v].w == (5 * p.kind_min_w[0]));
+  CHECK(z.sub[root.v].h == SPACE_MAX);
+  for (uint32_t i = 0; i < five.nodes.size(); ++i) {
+    CHECK(z.state[five.nodes[i].subject].x == (static_cast<int32_t>(i) * p.kind_min_w[0]));
+    CHECK(z.state[five.nodes[i].subject].y == z.state[five.nodes[0].subject].y);
+  }
+
+  // With no box packer to offer it, the column is all there is, and it is the
+  // one that leaves the domain.
+  p.trybox = 0;
+  SizedLayout stacked;
+  diags.clear();
+  CHECK_FALSE(size_layout(c,
+                          depths(std::vector<uint32_t>(c.states.size(), 0)),
+                          one_frame(c, root, five.nodes, {}, {}),
+                          s,
+                          p,
+                          stacked,
+                          diags));
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::CoordinateOverflow);
+  CHECK(diags[0].subject.kind == ElemKind::Submachine);
+  CHECK(diags[0].subject.ordinal == root.v);
+}
+
+TEST_CASE("size: a frame no packing fits is diagnosed, not saturated") {
+  // The same five, each as wide as it is tall: the row leaves the domain along
+  // x and the column along y, so the frame has no shape rather than a
+  // saturated one.
+  scav_profile const p{ stacking() };
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  EqualStates const five{ equal_states(c, root, 5, SPACE_MAX) };
+  scav_spaces const s{ .box_state = five.boxes.data(),
+                       .n_box_state = static_cast<uint32_t>(five.boxes.size()) };
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  CHECK_FALSE(size_layout(c,
+                          depths(std::vector<uint32_t>(c.states.size(), 0)),
+                          one_frame(c, root, five.nodes, {}, {}),
+                          s,
+                          p,
+                          z,
+                          diags));
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::CoordinateOverflow);
+  CHECK(diags[0].subject.kind == ElemKind::Submachine);
+  CHECK(diags[0].subject.ordinal == root.v);
+  CHECK((5 * SPACE_MAX) > COORD_MAX);
+  CHECK(z.sub[root.v].w == 0);
+  CHECK(z.sub[root.v].h == 0);
+}
+
+namespace {
+
+// One state per rank, chained, so a frame is a single component whose rank run
+// is what the fold cuts into pieces.
+struct RankRun {
+  std::vector<OrderNode> nodes;
+  std::vector<OrderEdge> edges;
+  std::vector<scav_box_space> boxes;
+};
+
+RankRun rank_run(Chart &c,
+                 SubmachineId root,
+                 uint32_t n,
+                 int32_t min_w,
+                 int32_t h_before) {
+  RankRun out;
+  for (uint32_t i = 0; i < n; ++i) {
+    StateId const s{ build_state(c, root, "S", StateKind::Normal, {}) };
+    out.nodes.push_back(state_node(s.v, i, 0));
+    if (i > 0) {
+      out.edges.push_back({ .src = i - 1, .dst = i, .segment = i - 1, .reversed = 0 });
+    }
+  }
+  out.boxes.assign(c.states.size(), scav_box_space{});
+  for (OrderNode const &nd : out.nodes) {
+    out.boxes[nd.subject] = { .min_w = min_w, .h_before = h_before, .h_after = 0 };
+  }
+  return out;
+}
+
+}  // namespace
+
+TEST_CASE("size: a row of fold pieces that leaves the domain keeps the column") {
+  // Five ranks end to end are wider than the domain, so the flat run has no
+  // shape and the fold is the only one on offer. Its pieces in a row are that
+  // same width again; stacked they fit, and the stack is what the frame keeps.
+  scav_profile p{ profile() };
+  p.pad = 0;
+  p.rank_sep = 0;
+  p.node_sep = 0;
+  p.dar_num = 1024;
+  p.dar_den = 1;
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  RankRun const run{ rank_run(c, root, 5, SPACE_MAX, 0) };
+  scav_spaces const s{ .box_state = run.boxes.data(),
+                       .n_box_state = static_cast<uint32_t>(run.boxes.size()) };
+  CHECK((5 * SPACE_MAX) > COORD_MAX);
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c,
+                      depths(std::vector<uint32_t>(c.states.size(), 0)),
+                      one_frame(c, root, run.nodes, run.edges, {}),
+                      s,
+                      p,
+                      z,
+                      diags));
+  CHECK(diags.empty());
+
+  // Three ranks in the first piece and two in the second, one above the other.
+  CHECK(z.sub[root.v].w == (3 * SPACE_MAX));
+  CHECK(z.sub[root.v].h == (2 * p.kind_min_h[0]));
+
+  // The same shape with no box packer to offer the row at all, which is what
+  // makes it the column's.
+  p.trybox = 0;
+  SizedLayout column;
+  diags.clear();
+  REQUIRE(size_layout(c,
+                      depths(std::vector<uint32_t>(c.states.size(), 0)),
+                      one_frame(c, root, run.nodes, run.edges, {}),
+                      s,
+                      p,
+                      column,
+                      diags));
+  CHECK(column.sub[root.v].w == z.sub[root.v].w);
+  CHECK(column.sub[root.v].h == z.sub[root.v].h);
+}
+
+TEST_CASE("size: a column of fold pieces that leaves the domain takes the row") {
+  // Five ranks of one tall state each. The fold cuts every rank into its own
+  // piece; stacked they are five times the domain's height, in a row they are
+  // the flat run less the four rank gaps the cuts removed -- the narrower
+  // shape, so the fold is taken rather than dropped.
+  scav_profile p{ profile() };
+  p.pad = 0;
+  p.node_sep = 0;
+  p.dar_num = 1;
+  p.dar_den = 1024;
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  RankRun const run{ rank_run(c, root, 5, 0, SPACE_MAX) };
+  scav_spaces const s{ .box_state = run.boxes.data(),
+                       .n_box_state = static_cast<uint32_t>(run.boxes.size()) };
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c,
+                      depths(std::vector<uint32_t>(c.states.size(), 0)),
+                      one_frame(c, root, run.nodes, run.edges, {}),
+                      s,
+                      p,
+                      z,
+                      diags));
+  CHECK(diags.empty());
+  CHECK(z.sub[root.v].w == (5 * p.kind_min_w[0]));
+  CHECK(z.sub[root.v].h == SPACE_MAX);
+  CHECK((5 * SPACE_MAX) > COORD_MAX);
+
+  // With no box packer the stack is all the fold has, it leaves the domain,
+  // and the fold is dropped for the flat run -- four rank gaps wider.
+  p.trybox = 0;
+  SizedLayout flat;
+  diags.clear();
+  REQUIRE(size_layout(c,
+                      depths(std::vector<uint32_t>(c.states.size(), 0)),
+                      one_frame(c, root, run.nodes, run.edges, {}),
+                      s,
+                      p,
+                      flat,
+                      diags));
+  CHECK(diags.empty());
+  CHECK(flat.sub[root.v].w == ((5 * p.kind_min_w[0]) + (4 * p.rank_sep)));
+  CHECK(flat.sub[root.v].h == SPACE_MAX);
+}
+
+TEST_CASE("size: a fold no packing of the pieces fits is dropped for the flat run") {
+  // A node gap wide enough that the pieces leave the domain either way: in a
+  // row it is charged four times between them, stacked it is charged four
+  // times under them. The flat run pays it neither way and is what is kept.
+  scav_profile const p{ [] {
+    scav_profile q{ profile() };
+    q.pad = 0;
+    q.rank_sep = 0;
+    q.node_sep = SPACE_MAX;
+    q.dar_num = 1;
+    q.dar_den = 1024;
+    return q;
+  }() };
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  RankRun const run{ rank_run(c, root, 5, 0, SPACE_MAX) };
+  scav_spaces const s{ .box_state = run.boxes.data(),
+                       .n_box_state = static_cast<uint32_t>(run.boxes.size()) };
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c,
+                      depths(std::vector<uint32_t>(c.states.size(), 0)),
+                      one_frame(c, root, run.nodes, run.edges, {}),
+                      s,
+                      p,
+                      z,
+                      diags));
+  CHECK(diags.empty());
+  // Five ranks end to end with no rank gap, which is neither packing of the
+  // pieces: the row would be four node gaps wider and leave the domain.
+  CHECK(z.sub[root.v].w == (5 * p.kind_min_w[0]));
+  CHECK(z.sub[root.v].h == SPACE_MAX);
+  CHECK(((5 * p.kind_min_w[0]) + (4 * p.node_sep)) > COORD_MAX);
+}
+
+namespace {
+
+// `subs` sibling submachines under one state, each a chain of `ranks` states of
+// one shape, so the state's own packing is over that many equal rects.
+struct SiblingSubs {
+  StateId owner{ INVALID };
+  std::vector<scav_box_space> boxes;
+};
+
+SiblingSubs sibling_subs(Chart &c,
+                         SubmachineId root,
+                         uint32_t subs,
+                         uint32_t ranks,
+                         int32_t min_w,
+                         int32_t h_before) {
+  SiblingSubs out;
+  out.owner = build_state(c, root, "Outer", StateKind::Normal, {});
+  for (uint32_t k = 0; k < subs; ++k) {
+    SubmachineId const m{ build_submachine(c, out.owner, "r", {}) };
+    StateId prev{ INVALID };
+    for (uint32_t i = 0; i < ranks; ++i) {
+      StateId const at{ build_state(c, m, "S", StateKind::Normal, {}) };
+      if (prev.v != INVALID) { build_trans(c, prev, at, TransKind::External, {}); }
+      prev = at;
+    }
+  }
+  out.boxes.assign(c.states.size(), scav_box_space{});
+  for (uint32_t i = 0; i < c.states.size(); ++i) {
+    if (i == out.owner.v) { continue; }
+    out.boxes[i] = { .min_w = min_w, .h_before = h_before, .h_after = 0 };
+  }
+  return out;
+}
+
+}  // namespace
+
+TEST_CASE("size: a sibling row that leaves the domain does not displace the column") {
+  // Two regions, each two ranks wide and one state tall, so side by side they
+  // are wider than the domain and stacked they are not.
+  scav_profile p{ profile() };
+  p.pad = 0;
+  p.rank_sep = 64;
+  p.node_sep = 0;
+  p.sub_sep = 0;
+  p.dar_num = 1024;
+  p.dar_den = 1;
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  SiblingSubs const two{ sibling_subs(c, root, 2, 2, SPACE_MAX, SPACE_MAX) };
+  scav_spaces const s{ .box_state = two.boxes.data(),
+                       .n_box_state = static_cast<uint32_t>(two.boxes.size()) };
+  int32_t const region_w{ (2 * SPACE_MAX) + p.rank_sep };
+  CHECK(((2 * region_w) + p.sub_sep) > COORD_MAX);
+
+  SplitGraph const g{ decompose(c) };
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c, g, order_submachines(c, g, {}, p), s, p, z, diags));
+  CHECK(diags.empty());
+  CHECK(z.state[two.owner.v].w == region_w);
+  CHECK(z.state[two.owner.v].h == ((2 * SPACE_MAX) + p.sub_sep));
+
+  // The same extents with no box packer to offer the row.
+  p.trybox = 0;
+  SizedLayout column;
+  diags.clear();
+  REQUIRE(size_layout(c, g, order_submachines(c, g, {}, p), s, p, column, diags));
+  CHECK(column.state[two.owner.v].w == z.state[two.owner.v].w);
+  CHECK(column.state[two.owner.v].h == z.state[two.owner.v].h);
+}
+
+TEST_CASE("size: a sibling column that leaves the domain gives way to the row") {
+  // Five regions of one tall state each: stacked they are five times the
+  // domain's height, side by side they are five narrow boxes.
+  scav_profile p{ profile() };
+  p.pad = 0;
+  p.sub_sep = 0;
+  p.dar_num = 1;
+  p.dar_den = 1024;
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  SiblingSubs const five{ sibling_subs(c, root, 5, 1, 0, SPACE_MAX) };
+  scav_spaces const s{ .box_state = five.boxes.data(),
+                       .n_box_state = static_cast<uint32_t>(five.boxes.size()) };
+
+  SplitGraph const g{ decompose(c) };
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c, g, order_submachines(c, g, {}, p), s, p, z, diags));
+  CHECK(diags.empty());
+  CHECK(z.state[five.owner.v].w == (5 * p.kind_min_w[0]));
+  CHECK(z.state[five.owner.v].h == SPACE_MAX);
+
+  // With no box packer the stack is all there is, and the state that holds it
+  // cannot exist -- which is what makes the run above the row.
+  p.trybox = 0;
+  SizedLayout stacked;
+  diags.clear();
+  CHECK_FALSE(size_layout(c, g, order_submachines(c, g, {}, p), s, p, stacked, diags));
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::CoordinateOverflow);
+  CHECK(diags[0].subject.kind == ElemKind::State);
+  CHECK(diags[0].subject.ordinal == five.owner.v);
+}
+
+TEST_CASE("size: a state no sibling packing fits is charged the overflow") {
+  // The same five, each as wide as it is tall: the row leaves the domain along
+  // x and the column along y, so the composed box is charged to the state.
+  scav_profile const p{ [] {
+    scav_profile q{ profile() };
+    q.pad = 0;
+    q.sub_sep = 0;
+    q.dar_num = 1;
+    q.dar_den = 1024;
+    return q;
+  }() };
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  SiblingSubs const five{ sibling_subs(c, root, 5, 1, SPACE_MAX, SPACE_MAX) };
+  scav_spaces const s{ .box_state = five.boxes.data(),
+                       .n_box_state = static_cast<uint32_t>(five.boxes.size()) };
+
+  SplitGraph const g{ decompose(c) };
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  CHECK_FALSE(size_layout(c, g, order_submachines(c, g, {}, p), s, p, z, diags));
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::CoordinateOverflow);
+  CHECK(diags[0].subject.kind == ElemKind::State);
+  CHECK(diags[0].subject.ordinal == five.owner.v);
+  CHECK((5 * SPACE_MAX) > COORD_MAX);
+  CHECK(z.state[five.owner.v].w == 0);
+  CHECK(z.state[five.owner.v].h == 0);
 }
 
 TEST_CASE("size: a box formula that leaves the domain is charged to the state") {

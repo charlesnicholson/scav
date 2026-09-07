@@ -210,7 +210,7 @@ class TestRender(unittest.TestCase):
                     result.stderr)
 
     def test_geometry_past_the_coordinate_domain_is_diagnosed_not_rendered(self) -> None:
-        chart = self.write("overflow.scav", nested_chart(255, 40, 3))
+        chart = self.write("overflow.scav", nested_chart(255, 40, 4))
         target = self.scratch / "overflow.svg"
         result = self.run_render("-o", target, chart)
         # Layout's own finding, so it is exit 1 with a located diagnostic

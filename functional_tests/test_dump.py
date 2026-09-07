@@ -370,7 +370,7 @@ class TestDump(unittest.TestCase):
         # Nested boxes, each level adding a padding ring and a sibling beside
         # the one it nests, until the composed width leaves the domain.
         body = "".join(
-            f"state S{i} {{" + "".join(f" state W{i}_{k}{'w' * 40}," for k in range(3))
+            f"state S{i} {{" + "".join(f" state W{i}_{k}{'w' * 40}," for k in range(4))
             for i in range(255))
         chart = self.write(
             "overflow.scav", "chart big {" + body + "state Leaf," + ("}," * 255) + "}\n")

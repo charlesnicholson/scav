@@ -800,6 +800,94 @@ TEST_CASE("cost: a chart with no geometry columns scores as nothing") {
   CHECK(cost_of(nothing, profile()).t2 == 0);
 }
 
+TEST_CASE("cost: a chart that was never laid out scores nothing") {
+  // Two siblings and a transition, and not one geometry column: the sibling
+  // pairs and the route table are both indexed by ordinal, so scoring this
+  // reads past the columns unless the geometry is answered for as a whole.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+
+  CostTerms const unlaid{ cost_columns(c, decompose(c), profile()) };
+  CHECK(unlaid.bends == 0);
+  CHECK(unlaid.corridor == 0);
+  CHECK(unlaid.crossings == 0);
+  CHECK(unlaid.excess_len == 0);
+  CHECK(unlaid.adjacency == 0);
+  CHECK(unlaid.label == 0);
+  CHECK(unlaid.label_near == 0);
+  CHECK(unlaid.aspect == 0);
+  CHECK(unlaid.area == 0);
+  CHECK(unlaid.through_box == 0);
+  CHECK(unlaid.box_overlap == 0);
+  CHECK(cost_of(unlaid, profile()).t2 == 0);
+
+  // Rects but no route table, which is the same gap one column over: the
+  // chart rect is there to be scored and is not, because nothing else is.
+  SizedLayout z{ blank(c) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
+  z.state[b.v] = { .x = 300, .y = 0, .w = 100, .h = 40 };
+  z.chart = { .x = 0, .y = 0, .w = 400, .h = 40 };
+  CostTerms const routeless{ cost_terms(c, decompose(c), z, {}, {}, profile()) };
+  CHECK(routeless.area == 0);
+  CHECK(routeless.aspect == 0);
+  CHECK(routeless.box_overlap == 0);
+  CHECK(cost_of(routeless, profile()).t2 == 0);
+
+  // Every rect column is read by entity ordinal, so any one of them stopping
+  // short is the same gap: the geometry that scores, minus one column.
+  Routes const r{ routes_of(c, { { { .x = 100, .y = 20 }, { .x = 300, .y = 20 } } }) };
+  CHECK(cost_terms(c, decompose(c), z, r, {}, profile()).area == (400LL * 40));
+  SizedLayout no_state{ z };
+  no_state.state.clear();
+  CHECK(cost_terms(c, decompose(c), no_state, r, {}, profile()).area == 0);
+  SizedLayout no_before{ z };
+  no_before.before.clear();
+  CHECK(cost_terms(c, decompose(c), no_before, r, {}, profile()).area == 0);
+  SizedLayout no_after{ z };
+  no_after.after.clear();
+  CHECK(cost_terms(c, decompose(c), no_after, r, {}, profile()).area == 0);
+  SizedLayout no_sub{ z };
+  no_sub.sub.clear();
+  CHECK(cost_terms(c, decompose(c), no_sub, r, {}, profile()).area == 0);
+}
+
+TEST_CASE("cost: a route reaching past the points scores nothing") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+
+  SizedLayout z{ blank(c) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
+  z.state[b.v] = { .x = 300, .y = 0, .w = 100, .h = 40 };
+  z.chart = { .x = 0, .y = 0, .w = 400, .h = 40 };
+  Routes r{ routes_of(c, { { { .x = 100, .y = 20 }, { .x = 300, .y = 20 } } }) };
+
+  // One point more than the route was given, so the last segment would be read
+  // from past the end of the point column.
+  r.route[0].len += 1;
+  CostTerms const past{ cost_terms(c, decompose(c), z, r, {}, profile()) };
+  CHECK(past.bends == 0);
+  CHECK(past.area == 0);
+  CHECK(past.aspect == 0);
+  CHECK(cost_of(past, profile()).t2 == 0);
+
+  // The same geometry with the span it actually has, scored as it always was.
+  r.route[0].len -= 1;
+  CostTerms const t{ cost_terms(c, decompose(c), z, r, {}, profile()) };
+  CHECK(t.bends == 0);
+  CHECK(t.crossings == 0);
+  CHECK(t.excess_len == 0);
+  CHECK(t.through_box == 0);
+  CHECK(t.box_overlap == 0);
+  CHECK(t.area == 400LL * 40);
+  CHECK(t.aspect == ((400LL * 10) - (40LL * 16)));
+}
+
 TEST_CASE("cost: a chart already at the desired ratio pays no aspect") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
