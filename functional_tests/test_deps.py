@@ -77,11 +77,28 @@ class TestDeps(unittest.TestCase):
         for _ in range(3):
             self.assertEqual(first, self.run_scav("deps", VAC.as_posix()).stdout)
 
-    def test_a_space_in_a_path_is_escaped(self) -> None:
-        chart = self.write("has space.scav", "chart s {\n  state A,\n}\n")
-        result = self.run_scav("deps", chart)
-        self.assertEqual(0, result.returncode)
-        self.assertIn("has\\ space.scav", result.stdout)
+    def test_every_character_a_depfile_reserves_is_escaped(self) -> None:
+        # A space and a `#` take a backslash; a `$` doubles, since both dialects
+        # read one as opening a variable. Target and dependency alike.
+        for name, want in (("has space.scav", "has\\ space.scav"),
+                           ("has#hash.scav", "has\\#hash.scav"),
+                           ("has$dollar.scav", "has$$dollar.scav")):
+            with self.subTest(name=name):
+                chart = self.write(name, "chart s {\n  state A,\n}\n")
+                result = self.run_scav("deps", chart)
+                self.assertEqual("", result.stderr)
+                self.assertEqual(0, result.returncode)
+                # The target is the caller's string verbatim and a dependency is
+                # a document name, so on Windows the two differ in separator.
+                self.assertEqual(
+                    f"{str(chart).replace(name, want)}: "
+                    f"{chart.as_posix().replace(name, want)}\n",
+                    result.stdout)
+                targeted = self.run_scav("deps", "--target", f"out/{name}.svg", chart)
+                self.assertEqual(0, targeted.returncode)
+                self.assertEqual(
+                    f"out/{want}.svg: {chart.as_posix().replace(name, want)}\n",
+                    targeted.stdout)
 
     def test_deps_does_not_gate_on_structural_validity(self) -> None:
         # A duplicate name is `check`'s finding. A build should not lose its
@@ -95,6 +112,21 @@ class TestDeps(unittest.TestCase):
         self.assertEqual(0, result.returncode)
         self.assertIn(leaf.as_posix(), result.stdout)
         self.assertEqual(1, self.run_scav("check", chart).returncode)
+
+    def test_bad_arguments_are_refused(self) -> None:
+        chart = self.write("args.scav", "chart a {\n  state A,\n}\n")
+        for args in (["deps"],
+                     ["deps", "--target"],
+                     ["deps", "--target", "out.svg"],
+                     ["deps", "--target", "a.svg", "--target", "b.svg", chart],
+                     ["deps", "--nope", chart],
+                     ["deps", chart, chart]):
+            with self.subTest(args=[str(a) for a in args]):
+                result = self.run_scav(*args)
+                self.assertEqual(2, result.returncode)
+                self.assertEqual("", result.stdout)
+                self.assertTrue(result.stderr.startswith("usage: scav <verb>"),
+                                result.stderr)
 
     def test_a_missing_document_is_an_error_with_no_output(self) -> None:
         chart = self.write("missing.scav", 'chart m {\n  include "gone.scav" as g,\n}\n')

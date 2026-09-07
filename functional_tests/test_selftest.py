@@ -198,6 +198,26 @@ class TestSelftest(unittest.TestCase):
         self.assertEqual(0, result.returncode)
         self.check_summary(result.stdout.strip(), 0, 0)
 
+    def test_the_report_is_the_same_however_the_golden_ends_its_lines(self) -> None:
+        """A golden is a file a maintainer edited, so its line shape varies."""
+        two = [list(r) for r in self.golden[:2]]
+        joined = " ".join(two[0]) + "\n" + " ".join(two[1])
+        want = ("".join(f"ok   {' '.join(r)}\n" for r in two)
+                + f"selftest: 2 charts, {THREAD_COUNTS} thread counts, 0 failures\n")
+        shapes = {
+            "no_trailing_newline": joined,
+            "crlf": joined.replace("\n", "\r\n") + "\r\n",
+            "blank_lines": "\n\n" + joined.replace("\n", "\n\n") + "\n\n",
+        }
+        for name, text in shapes.items():
+            with self.subTest(shape=name):
+                path = self.scratch() / f"{name}.txt"
+                path.write_text(text, encoding="utf-8", newline="")
+                result = self.run_selftest("--against", path)
+                self.assertEqual("", result.stderr)
+                self.assertEqual(0, result.returncode)
+                self.assertEqual(want, result.stdout)
+
     # Usage ==================================================================
 
     def check_usage(self, *args: scavtest.Arg) -> None:
