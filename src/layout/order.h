@@ -61,11 +61,11 @@ struct SubmachineOrders {
 // a path box's, so it runs before anything is sized. Submachines are sharded
 // across `threads` workers and emitted in submachine order, so the result is
 // one value at every worker count (6).
-SubmachineOrders phase1_order(Chart const &c,
-                              SplitGraph const &g,
-                              scav_spaces const &s,
-                              scav_profile const &p,
-                              uint32_t threads = 0);
+SubmachineOrders order_submachines(Chart const &c,
+                                   SplitGraph const &g,
+                                   scav_spaces const &s,
+                                   scav_profile const &p,
+                                   uint32_t threads = 0);
 
 // Crossings between two adjacent ranks by inversion counting. Exposed because
 // it is what the ordering minimizes and what a test measures against.

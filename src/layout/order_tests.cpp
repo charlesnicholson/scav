@@ -24,10 +24,10 @@ scav_profile profile() {
 }
 
 SubmachineOrders order_of(Chart const &c, scav_spaces const &s = {}) {
-  return phase1_order(c, decompose(c), s, profile());
+  return order_submachines(c, decompose(c), s, profile());
 }
 
-// The nodes of one frame, which `phase1_order` emits contiguously.
+// The nodes of one frame, which `order_submachines` emits contiguously.
 std::vector<OrderNode> frame_nodes(SubmachineOrders const &o, SubmachineId m) {
   Span const sp{ o.sub_nodes[m.v] };
   return { o.nodes.begin() + sp.off, o.nodes.begin() + sp.off + sp.len };

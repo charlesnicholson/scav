@@ -854,12 +854,12 @@ Isolated static library, imperative entry, POD in. Writes **derived** geometry c
 Scale target: **2k states, 5k transitions, depth 16.**
 
 ```
-decompose(Chart)                                              -> SplitGraph
-phase1_order(Chart, SplitGraph, Spaces, Profile)              -> SubmachineOrders
-phase2_size(Chart, SplitGraph, SubmachineOrders, Spaces, Profile) -> SizedLayout
-phase3_route(Chart, SplitGraph, SubmachineOrders, SizedLayout, Spaces, Profile, Router)
-                                                              -> Routes: points, slots, Placed[]
-layout_run                                                    -> the geometry columns (§11.7a)
+decompose(Chart)                                                  -> SplitGraph
+order_submachines(Chart, SplitGraph, Spaces, Profile, Threads)    -> SubmachineOrders
+size_layout(Chart, SplitGraph, SubmachineOrders, Spaces, Profile) -> SizedLayout
+route_transitions(Chart, SplitGraph, SubmachineOrders, SizedLayout, Spaces, Profile, Router, Threads)
+                                                                  -> Routes: points, slots, Placed[]
+layout_run                                                        -> the geometry columns (§11.7a)
 ```
 
 The four intermediates are internal POD: `Spaces` is the three §8.1 tables; `SplitGraph` is segments and ports plus the containment facts they imply (each state's depth, each border's crossing count); `SubmachineOrders` adds rank and in-rank position per node; `SizedLayout` adds box extents and node coordinates. None crosses the ABI (§16) — only geometry columns and `Placed[]` do — so they are free to change without an ABI break.
@@ -915,7 +915,7 @@ Rules:
 - **Intersection *tests* are degree 2** — four `orient2d` calls, never constructing the point. Compare signs; **never multiply two determinants** (degree 4).
 - Constructed points snap to grid with a documented rounding rule.
 - **Widen before multiplying.** `int32 * int32` computes in 32 bits then widens. Wrap it: `cross(ax,ay,bx,by) -> int64`.
-- Validate the domain at `scav_layout_run` entry in **every** build (§8.1), and again on each inflated profile copy before its retry runs: a copy out of range ends the retries, as does a `phase2_size` that overflows, and the last successful geometry stands (§11.6).
+- Validate the domain at `scav_layout_run` entry in **every** build (§8.1), and again on each inflated profile copy before its retry runs: a copy out of range ends the retries, as does a `size_layout` that overflows, and the last successful geometry stands (§11.6).
 - Output is **root-absolute**, applied as one final `O(n)` transform over submachine-local internals (ELK's LCA-relative coordinates are a documented trap).
 
 Extent estimate: 2k states ≈ 8,000 x 3,200 pt = 128,000 x 51,200 units, ~4x headroom. **Measured twice, and both numbers are worth keeping.** Under P4's deliberately fat fabricated advances a 2k-state chart came out **181,120 x 277,888** — 1.9x headroom on the tall axis, which is the conservative bound the fabricated measurement exists to produce. Under P5a's real bundled font the same shape is **152,628 x 101,044**, or **5.2x**, so the original estimate was sound and the grid decision was never close. Keep asserting the fabricated case: it is the one that trips first when a later phase grows boxes, and P6's did. **Measured a third time, under P6:** the widest fabricated `min_w` the 2k shape carries is **4768**, against P4's 3200 stand-in, at 523,584 x 417,456 — and the real font puts the same shape at **167,194 x 109,253**, 3.1x headroom. That the fabricated number went *up* is the fold of §11.4 doing its work; without it the same shape carries only 1280, because a rank run grows along one axis and nesting multiplies it by the depth. If real charts ever exceed the domain, reduce the grid to 1/8 pt rather than widening it.
@@ -1071,7 +1071,7 @@ struct Cost {                 // compared lexicographically, in this order
 
 **Tier 0 — forbidden, not priced.** Edge through a state box, submachine box, or placed box; box-box overlap. Structurally impossible via the obstacle set. The predicate survives as a net for three cases: the straight-line **surrogate** during search; **degenerate enclosure**, a net whose ends the obstacles seal apart even after §11.5's re-seat; and a marked violation with a stable code when the retries run out. Never a silent overlap. **`CostTerms` carries the net as two counts and `t0_violations` is their sum**: `through_box`, a route segment entering the interior of a state box its transition is neither an endpoint of nor a descendant of (§11.14's carve-out), and `box_overlap`, a pair of sibling state boxes sharing area. The submachine box and the placed box are the obstacle set's alone — nothing re-checks them after the fact.
 
-**Degenerate enclosure is answered by inflation, and only `unreachable` triggers it.** `layout_run` raises `rank_sep`, `node_sep` and `sub_sep` by `spacing_inflation_increment` on a copy of the caller's profile and re-runs phases 1–3, up to `spacing_inflation_cap` times, stopping at the first attempt with nothing unreachable and keeping the attempt that degraded least — ties to the earliest. `outside_region` is a disagreement between phase 3's plan and the region it handed the router, and `too_large` is a graph budget; neither moves with spacing, so neither retries. A copy the validator rejects ends the retries, as does a `phase2_size` that leaves the domain, and the last geometry that succeeded stands. The digest hashes the caller's profile, never the copy, so a retry cannot move a golden.
+**Degenerate enclosure is answered by inflation, and only `unreachable` triggers it.** `layout_run` raises `rank_sep`, `node_sep` and `sub_sep` by `spacing_inflation_increment` on a copy of the caller's profile and re-runs phases 1–3, up to `spacing_inflation_cap` times, stopping at the first attempt with nothing unreachable and keeping the attempt that degraded least — ties to the earliest. `outside_region` is a disagreement between phase 3's plan and the region it handed the router, and `too_large` is a graph budget; neither moves with spacing, so neither retries. A copy the validator rejects ends the retries, as does a `size_layout` that leaves the domain, and the last geometry that succeeded stands. The digest hashes the caller's profile, never the copy, so a retry cannot move a golden.
 
 Whatever is still degraded at the end is written as the straight line and marked: one `RouteDegraded` per transition, subject `(Transition, ordinal)`, ordinal-ordered, on `scav_chart_diag`, under `SCAV_OK`. **Measured: the corpus and both 2k shapes inflate zero times with no space requests, and the corpus stays at zero under real text — `scav render` writes nothing to stderr for any of the eleven.** The shape that does not is a fork bar one rank ahead of a composite with `pad` 16, `rank_sep` 0 and `node_sep` 576: the clearance is a third of `node_sep`, so the composite's frame reaches 192 units past its own border onto a bar that spans it top to bottom, and the bar walls the frame off from the route into it. Three inflations of 32 units clear it — the rank gap outgrows the clearance and the bar leaves the frame's obstacle set.
 

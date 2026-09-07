@@ -89,7 +89,7 @@ TEST_CASE("size: a leaf is its kind minimum plus two pads") {
 
   SizedLayout z;
   std::vector<Diagnostic> diags;
-  REQUIRE(phase2_size(c,
+  REQUIRE(size_layout(c,
                       depths({ 0 }),
                       one_frame(c, root, { state_node(a.v, 0, 0) }, {}, {}),
                       {},
@@ -113,7 +113,7 @@ TEST_CASE("size: two ranks sit rank_sep apart along the layering axis") {
 
   SizedLayout z;
   std::vector<Diagnostic> diags;
-  REQUIRE(phase2_size(c,
+  REQUIRE(size_layout(c,
                       depths({ 0, 0 }),
                       one_frame(c,
                                 root,
@@ -140,7 +140,7 @@ TEST_CASE("size: a label's gap widens the boundary it was charged to") {
 
   SizedLayout z;
   std::vector<Diagnostic> diags;
-  REQUIRE(phase2_size(c,
+  REQUIRE(size_layout(c,
                       depths({ 0, 0 }),
                       one_frame(c,
                                 root,
@@ -175,10 +175,10 @@ TEST_CASE("size: a rank run folds when folding scales larger") {
   SizedLayout flat;
   std::vector<Diagnostic> diags;
   REQUIRE(
-      phase2_size(c, depths(std::vector<uint32_t>(6, 0)), o, {}, unfolded(), flat, diags));
+      size_layout(c, depths(std::vector<uint32_t>(6, 0)), o, {}, unfolded(), flat, diags));
   SizedLayout folded;
   diags.clear();
-  REQUIRE(phase2_size(c,
+  REQUIRE(size_layout(c,
                       depths(std::vector<uint32_t>(6, 0)),
                       o,
                       {},
@@ -203,7 +203,7 @@ TEST_CASE("size: two nodes in one rank stack node_sep apart") {
 
   SizedLayout z;
   std::vector<Diagnostic> diags;
-  REQUIRE(phase2_size(
+  REQUIRE(size_layout(
       c,
       depths({ 0, 0, 0 }),
       one_frame(c,
@@ -229,7 +229,7 @@ TEST_CASE("size: unconnected states are separate components and pack") {
 
   SizedLayout z;
   std::vector<Diagnostic> diags;
-  REQUIRE(phase2_size(
+  REQUIRE(size_layout(
       c,
       depths({ 0, 0 }),
       one_frame(c, root, { state_node(a.v, 0, 0), state_node(b.v, 0, 1) }, {}, {}),
@@ -254,7 +254,7 @@ TEST_CASE("size: a boundary node lands on its frame's leading or trailing edge")
   std::vector<Diagnostic> diags;
   // One state with a route leaving it: the boundary is a sink, so it belongs
   // at the frame's trailing edge whatever rank arithmetic put it in.
-  REQUIRE(phase2_size(
+  REQUIRE(size_layout(
       c,
       depths({ 0 }),
       one_frame(c,
@@ -273,7 +273,7 @@ TEST_CASE("size: a boundary node lands on its frame's leading or trailing edge")
   // edge, and the state to its right.
   SizedLayout in;
   diags.clear();
-  REQUIRE(phase2_size(
+  REQUIRE(size_layout(
       c,
       depths({ 0 }),
       one_frame(c,
@@ -312,10 +312,10 @@ TEST_CASE("size: a folded rank run packs its pieces rather than stacking them") 
                         .n_box_state = static_cast<uint32_t>(boxes.size()) };
 
   SplitGraph const g{ decompose(c) };
-  SubmachineOrders const o{ phase1_order(c, g, sp, p) };
+  SubmachineOrders const o{ order_submachines(c, g, sp, p) };
   SizedLayout z;
   std::vector<Diagnostic> diags;
-  REQUIRE(phase2_size(c, g, o, sp, p, z, diags));
+  REQUIRE(size_layout(c, g, o, sp, p, z, diags));
 
   scav_rect const frame{ z.sub[root.v] };
   REQUIRE(frame.w > 0);
@@ -370,7 +370,7 @@ TEST_CASE("size: a rank past the domain is diagnosed rather than truncated") {
 
   SizedLayout z;
   std::vector<Diagnostic> diags;
-  CHECK_FALSE(phase2_size(c,
+  CHECK_FALSE(size_layout(c,
                           depths(std::vector<uint32_t>(c.states.size(), 0)),
                           one_frame(c, root, nodes, edges, { 0 }),
                           s,
@@ -398,10 +398,10 @@ TEST_CASE("size: a pseudostate takes the padding ring only where it has contents
   StateId const ordinary{ build_state(c, root, "N", StateKind::Normal, {}) };
 
   SplitGraph const g{ decompose(c) };
-  SubmachineOrders const o{ phase1_order(c, g, {}, p) };
+  SubmachineOrders const o{ order_submachines(c, g, {}, p) };
   SizedLayout z;
   std::vector<Diagnostic> diags;
-  REQUIRE(phase2_size(c, g, o, {}, p, z, diags));
+  REQUIRE(size_layout(c, g, o, {}, p, z, diags));
 
   auto const banded = [&](StateId s) {
     scav_rect const r{ z.state[s.v] };
@@ -471,7 +471,7 @@ TEST_CASE("size: a boundary node sits on the frame's border, not on its piece's"
 
   SizedLayout z;
   std::vector<Diagnostic> diags;
-  REQUIRE(phase2_size(c,
+  REQUIRE(size_layout(c,
                       depths(std::vector<uint32_t>(c.states.size(), 0)),
                       one_frame(c, root, nodes, edges, { 0, 0, 0, 0, 0, 0, 0, 0 }),
                       s,

@@ -78,7 +78,7 @@ TEST_CASE("route: a sibling transition is a straight line between two centres") 
   z.state[b.v] = { .x = 300, .y = 60, .w = 100, .h = 40 };
   z.sub[root.v] = { .x = 0, .y = 0, .w = 400, .h = 100 };
 
-  Routes const r{ phase3_route(c, g, o, z, {}, profile(), STRAIGHT) };
+  Routes const r{ route_transitions(c, g, o, z, {}, profile(), STRAIGHT) };
   REQUIRE(r.route[0].len == 2);
   CHECK((r.points[0] == scav_point{ .x = 50, .y = 20 }));
   CHECK((r.points[1] == scav_point{ .x = 350, .y = 80 }));
@@ -102,7 +102,7 @@ TEST_CASE("route: a bend the layering left is a point on the way") {
   z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 40 };
   z.node[0] = { .x = 250, .y = 200 };
 
-  Routes const r{ phase3_route(c, g, o, z, {}, profile(), STRAIGHT) };
+  Routes const r{ route_transitions(c, g, o, z, {}, profile(), STRAIGHT) };
   REQUIRE(r.route[0].len == 3);
   CHECK((r.points[1] == scav_point{ .x = 250, .y = 200 }));
 }
@@ -125,7 +125,7 @@ TEST_CASE("route: a reversed chain is walked the way it was authored") {
   z.node[0] = { .x = 150, .y = 10 };  // rank 1
   z.node[1] = { .x = 300, .y = 10 };  // rank 2
 
-  Routes const r{ phase3_route(c, g, o, z, {}, profile(), STRAIGHT) };
+  Routes const r{ route_transitions(c, g, o, z, {}, profile(), STRAIGHT) };
   REQUIRE(r.route[0].len == 4);
   // Ranks climb the acyclic way, so a reversed edge walks them back down.
   CHECK(r.points[1].x == 300);
@@ -157,7 +157,7 @@ TEST_CASE("route: a crossing puts its slot on the crossed border") {
   z.sub[inner.v] = { .x = 10, .y = 10, .w = 180, .h = 180 };
   z.node[0] = { .x = 190, .y = 80 };  // the frame's trailing edge
 
-  Routes const r{ phase3_route(c, g, o, z, {}, profile(), STRAIGHT) };
+  Routes const r{ route_transitions(c, g, o, z, {}, profile(), STRAIGHT) };
   REQUIRE(r.port[0].len == 1);
   scav_port_slot const slot{ r.slots[0] };
   // The node's height, but the composite's own border, not the frame's.
@@ -200,7 +200,7 @@ TEST_CASE("route: the slot side follows the route's direction, not the packing")
   // second component produces.
   z.node[0] = { .x = 560, .y = 80 };
 
-  Routes const r{ phase3_route(c, g, o, z, {}, profile(), STRAIGHT) };
+  Routes const r{ route_transitions(c, g, o, z, {}, profile(), STRAIGHT) };
   REQUIRE(r.port[0].len == 1);
   CHECK(r.slots[0].side == 0);
   CHECK(r.slots[0].x == z.state[comp.v].x);
@@ -227,7 +227,7 @@ TEST_CASE("route: an internal transition starts on the source's inner face") {
   z.sub[inner.v] = { .x = 10, .y = 10, .w = 180, .h = 180 };
   z.node[0] = { .x = 10, .y = 90 };
 
-  Routes const r{ phase3_route(c, g, o, z, {}, profile(), STRAIGHT) };
+  Routes const r{ route_transitions(c, g, o, z, {}, profile(), STRAIGHT) };
   REQUIRE(r.route[0].len == 2);
   CHECK((r.points[0] == scav_point{ .x = 10, .y = 90 }));  // not the composite's centre
   CHECK(r.port[0].len == 0);
@@ -245,7 +245,7 @@ TEST_CASE("route: an external self-loop leaves and returns, with no slot") {
   z.state[a.v] = { .x = 40, .y = 0, .w = 100, .h = 40 };
   scav_profile const p{ profile() };
 
-  Routes const r{ phase3_route(c, g, o, z, {}, p, STRAIGHT) };
+  Routes const r{ route_transitions(c, g, o, z, {}, p, STRAIGHT) };
   REQUIRE(r.route[0].len == 2);
   CHECK((r.points[0] == scav_point{ .x = 140, .y = 20 }));
   CHECK((r.points[1] == scav_point{ .x = 140 + (2 * p.pad), .y = 20 }));
@@ -261,7 +261,7 @@ TEST_CASE("route: an internal self-transition has no route at all") {
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const o{ empty_orders(c, g) };
   SizedLayout const z{ blank(c, o) };
-  Routes const r{ phase3_route(c, g, o, z, {}, profile(), STRAIGHT) };
+  Routes const r{ route_transitions(c, g, o, z, {}, profile(), STRAIGHT) };
   CHECK(r.route[0].len == 0);
   CHECK(r.points.empty());
 }
@@ -281,7 +281,7 @@ TEST_CASE("route: clears trim each end toward the other, capped at half") {
   std::vector<scav_path_clear> const clears{ { .src = 30, .dst = 700 } };
   scav_spaces const s{ .path_clear = clears.data(), .n_path_clear = 1 };
 
-  Routes const r{ phase3_route(c, g, o, z, s, profile(), STRAIGHT) };
+  Routes const r{ route_transitions(c, g, o, z, s, profile(), STRAIGHT) };
   REQUIRE(r.route[0].len == 2);
   CHECK(r.points[0].x == 30);
   // The far end is capped at half of what is left after the near end moved,
@@ -305,7 +305,7 @@ TEST_CASE("route: a clear against a leg of no length trims nothing") {
   std::vector<scav_path_clear> const clears{ { .src = 30, .dst = 30 } };
   scav_spaces const s{ .path_clear = clears.data(), .n_path_clear = 1 };
 
-  Routes const r{ phase3_route(c, g, o, z, s, profile(), STRAIGHT) };
+  Routes const r{ route_transitions(c, g, o, z, s, profile(), STRAIGHT) };
   REQUIRE(r.route[0].len == 2);
   CHECK((r.points[0] == scav_point{ .x = 120, .y = 120 }));
   CHECK((r.points[1] == scav_point{ .x = 120, .y = 120 }));
@@ -330,7 +330,7 @@ TEST_CASE("route: a tombstoned state is no obstacle to the frame it sat in") {
   z.chart = { .x = -100, .y = -200, .w = 700, .h = 500 };
 
   OrthogonalRouter const orthogonal;
-  Routes const r{ phase3_route(c, g, o, z, {}, profile(), orthogonal) };
+  Routes const r{ route_transitions(c, g, o, z, {}, profile(), orthogonal) };
   CHECK(r.degraded() == 0);
   REQUIRE(r.route[0].len == 2);  // straight through where the tombstone lay
   CHECK(r.points[0].y == 20);
@@ -358,7 +358,7 @@ TEST_CASE("route: a port with no boundary node falls back on the crossed box's c
 
   SUBCASE("no ordering node behind the port") {
     o.seg_port[0] = 0;  // the port is named, but seg_node stays INVALID
-    Routes const r{ phase3_route(c, g, o, z, {}, profile(), STRAIGHT) };
+    Routes const r{ route_transitions(c, g, o, z, {}, profile(), STRAIGHT) };
     REQUIRE(r.port[0].len == 1);
     CHECK(r.slots[0].x == 100);  // the composite's centre
     CHECK(r.slots[0].y == 100);
@@ -366,7 +366,7 @@ TEST_CASE("route: a port with no boundary node falls back on the crossed box's c
     CHECK(r.slots[0].boundary_depth == 0);
   }
   SUBCASE("no segment behind the port at all") {
-    Routes const r{ phase3_route(c, g, o, z, {}, profile(), STRAIGHT) };
+    Routes const r{ route_transitions(c, g, o, z, {}, profile(), STRAIGHT) };
     REQUIRE(r.port[0].len == 1);
     CHECK(r.slots[0].x == 100);
     CHECK(r.slots[0].y == 100);
@@ -388,7 +388,7 @@ TEST_CASE("route: a path box centres on its route's middle point") {
   std::vector<scav_path_box> const boxes{ { .subject = 0, .w = 20, .h = 8, .order = 0 } };
   scav_spaces const s{ .path_box = boxes.data(), .n_path_box = 1 };
 
-  Routes const r{ phase3_route(c, g, o, z, s, profile(), STRAIGHT) };
+  Routes const r{ route_transitions(c, g, o, z, s, profile(), STRAIGHT) };
   REQUIRE(r.placed.size() == 1);
   // The middle of the longest leg, which is the one crossing the boundary
   // phase 1 widened for this box -- not the middle point of the polyline.
@@ -438,7 +438,7 @@ TEST_CASE("route: a transition to an enclosing state ends on that state's inner 
   std::vector<Router const *> const routers{ &STRAIGHT, &orthogonal };
   for (Router const *router : routers) {
     CAPTURE(router->name().bytes);
-    Routes const r{ phase3_route(c, g, o, z, {}, profile(), *router) };
+    Routes const r{ route_transitions(c, g, o, z, {}, profile(), *router) };
     REQUIRE(r.route[0].len >= 2);
     // The head is the source's own box, not the boundary node the target end
     // put in this same frame; the straight router takes the centre it was
@@ -597,7 +597,7 @@ TEST_CASE("route: a net the router said nothing about leaves no polyline behind"
   z.sub[root.v] = { .x = 0, .y = 0, .w = 400, .h = 40 };
 
   MuteRouter const mute;
-  Routes const r{ phase3_route(c, g, o, z, {}, profile(), mute) };
+  Routes const r{ route_transitions(c, g, o, z, {}, profile(), mute) };
   CHECK(r.route[0].len == 0);
   CHECK(r.points.empty());
   // No metric came back either, so nothing is counted as a fallback.
@@ -625,7 +625,7 @@ TEST_CASE("route: the transitions marked failed are the ones with a fallen-back 
 
   SUBCASE("an unreachable end") {
     FailingRouter const failing{ 1, RouteFailure::Unreachable };
-    Routes const r{ phase3_route(c, g, o, z, {}, profile(), failing) };
+    Routes const r{ route_transitions(c, g, o, z, {}, profile(), failing) };
     CHECK(r.failed[0] == 0);
     CHECK(r.failed[1] == 1);
     CHECK(r.failed[2] == 0);
@@ -636,7 +636,7 @@ TEST_CASE("route: the transitions marked failed are the ones with a fallen-back 
   }
   SUBCASE("an anchor outside the region") {
     FailingRouter const failing{ 0, RouteFailure::OutsideRegion };
-    Routes const r{ phase3_route(c, g, o, z, {}, profile(), failing) };
+    Routes const r{ route_transitions(c, g, o, z, {}, profile(), failing) };
     CHECK(r.failed[0] == 1);
     CHECK(r.failed[1] == 0);
     CHECK(r.outside_region == 1);
@@ -644,13 +644,13 @@ TEST_CASE("route: the transitions marked failed are the ones with a fallen-back 
   }
   SUBCASE("a graph past the budget") {
     FailingRouter const failing{ 2, RouteFailure::TooLarge };
-    Routes const r{ phase3_route(c, g, o, z, {}, profile(), failing) };
+    Routes const r{ route_transitions(c, g, o, z, {}, profile(), failing) };
     CHECK(r.failed[2] == 1);
     CHECK(r.too_large == 1);
     CHECK(r.degraded() == 1);
   }
   SUBCASE("nothing at all") {
-    Routes const r{ phase3_route(c, g, o, z, {}, profile(), STRAIGHT) };
+    Routes const r{ route_transitions(c, g, o, z, {}, profile(), STRAIGHT) };
     for (uint8_t const one : r.failed) { CHECK(one == 0); }
     CHECK(r.degraded() == 0);
   }
@@ -675,7 +675,7 @@ TEST_CASE("route: the unplaced count is the one the strip matching returned") {
   std::vector<scav_path_box> const both{ { .subject = 0, .w = 20, .h = 8, .order = 0 },
                                          { .subject = 1, .w = 20, .h = 8, .order = 0 } };
   scav_spaces const s{ .path_box = both.data(), .n_path_box = 2 };
-  Routes const r{ phase3_route(c, g, o, z, s, profile(), STRAIGHT) };
+  Routes const r{ route_transitions(c, g, o, z, s, profile(), STRAIGHT) };
   REQUIRE(r.placed.size() == 2);
   // One box rides its route and the other has none, which is exactly what the
   // strip matching reports back.
@@ -705,7 +705,7 @@ TEST_CASE("route: nothing is nudged for a router that asks for no margin") {
   z.chart = { .x = -100, .y = -100, .w = 440, .h = 440 };
 
   LaneRouter const asks{ 16 };
-  Routes const nudged{ phase3_route(c, g, o, z, {}, profile(), asks) };
+  Routes const nudged{ route_transitions(c, g, o, z, {}, profile(), asks) };
   CHECK(nudged.nudged.lanes == 1);
   CHECK(nudged.nudged.moved == 2);
   // The root frame has no owning state, so the region is what bounds it, and the
@@ -714,7 +714,7 @@ TEST_CASE("route: nothing is nudged for a router that asks for no margin") {
   CHECK(nudged.points[nudged.route[1].off + 1].y == 108);
 
   LaneRouter const silent{ 0 };
-  Routes const plain{ phase3_route(c, g, o, z, {}, profile(), silent) };
+  Routes const plain{ route_transitions(c, g, o, z, {}, profile(), silent) };
   CHECK(plain.nudged.lanes == 0);
   CHECK(plain.nudged.moved == 0);
   // Untouched: both elbows still turn at the height the router put them at.
@@ -754,7 +754,7 @@ TEST_CASE("route: a nudge inside a composite is bounded by that state's own box"
   // A box that leaves the lane all the room it wants: the two members spread by
   // the whole margin either side.
   z.state[comp.v] = { .x = -40, .y = -40, .w = 320, .h = 320 };
-  Routes const wide{ phase3_route(c, g, o, z, {}, profile(), asks) };
+  Routes const wide{ route_transitions(c, g, o, z, {}, profile(), asks) };
   REQUIRE(wide.nudged.lanes == 1);
   CHECK(wide.points[wide.route[0].off + 1].y == 92);
   CHECK(wide.points[wide.route[1].off + 1].y == 108);
@@ -763,7 +763,7 @@ TEST_CASE("route: a nudge inside a composite is bounded by that state's own box"
   // each border. The region reaches a margin past every point either net
   // touches, so only the owner's box can be doing this.
   z.state[comp.v] = { .x = -40, .y = 96, .w = 320, .h = 8 };
-  Routes const tight{ phase3_route(c, g, o, z, {}, profile(), asks) };
+  Routes const tight{ route_transitions(c, g, o, z, {}, profile(), asks) };
   REQUIRE(tight.nudged.lanes == 1);
   CHECK(tight.points[tight.route[0].off + 1].y == 97);
   CHECK(tight.points[tight.route[1].off + 1].y == 103);
@@ -797,7 +797,7 @@ TEST_CASE("route: nets join only where one ends exactly where the next begins") 
 
   SUBCASE("a net that honours the contract contributes the shared point once") {
     ScriptedRouter const scripted{ true };
-    Routes const r{ phase3_route(c, g, o, z, {}, profile(), scripted) };
+    Routes const r{ route_transitions(c, g, o, z, {}, profile(), scripted) };
     REQUIRE(r.port[0].len == 1);
     scav_point const meet{ .x = r.slots[0].x, .y = r.slots[0].y };
     REQUIRE(r.route[0].len == 3);
@@ -810,7 +810,7 @@ TEST_CASE("route: nets join only where one ends exactly where the next begins") 
     // Dropping the second net's first point regardless would splice a leg
     // straight from the slot to the target and hide the break.
     ScriptedRouter const scripted{ false };
-    Routes const r{ phase3_route(c, g, o, z, {}, profile(), scripted) };
+    Routes const r{ route_transitions(c, g, o, z, {}, profile(), scripted) };
     REQUIRE(r.port[0].len == 1);
     scav_point const meet{ .x = r.slots[0].x, .y = r.slots[0].y };
     REQUIRE(r.route[0].len == 4);

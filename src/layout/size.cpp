@@ -51,7 +51,7 @@ bool bare_pseudostate(Chart const &c,
 
 }  // namespace
 
-bool phase2_size(Chart const &c,
+bool size_layout(Chart const &c,
                  SplitGraph const &g,
                  SubmachineOrders const &o,
                  scav_spaces const &s,

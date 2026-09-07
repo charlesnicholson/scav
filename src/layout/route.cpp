@@ -78,14 +78,14 @@ void merge_nudged(NudgeStats &into, NudgeStats const &from) {
 
 }  // namespace
 
-Routes phase3_route(Chart const &c,
-                    SplitGraph const &g,
-                    SubmachineOrders const &o,
-                    SizedLayout const &z,
-                    scav_spaces const &s,
-                    scav_profile const &p,
-                    Router const &router,
-                    uint32_t threads) {
+Routes route_transitions(Chart const &c,
+                         SplitGraph const &g,
+                         SubmachineOrders const &o,
+                         SizedLayout const &z,
+                         scav_spaces const &s,
+                         scav_profile const &p,
+                         Router const &router,
+                         uint32_t threads) {
   Routes out;
   uint32_t const n{ static_cast<uint32_t>(c.transitions.size()) };
   out.route.assign(n, {});

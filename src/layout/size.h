@@ -26,7 +26,7 @@ struct SizedLayout {
 
 // False on an extent that would leave the coordinate domain, with one
 // diagnostic per offending entity and `out` left partly written.
-bool phase2_size(Chart const &c,
+bool size_layout(Chart const &c,
                  SplitGraph const &g,
                  SubmachineOrders const &o,
                  scav_spaces const &s,

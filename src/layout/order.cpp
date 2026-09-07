@@ -376,11 +376,11 @@ uint64_t rank_crossings(std::vector<uint32_t> const &south_positions) {
   return inversions(south_positions);
 }
 
-SubmachineOrders phase1_order(Chart const &c,
-                              SplitGraph const &g,
-                              scav_spaces const &s,
-                              scav_profile const &p,
-                              uint32_t threads) {
+SubmachineOrders order_submachines(Chart const &c,
+                                   SplitGraph const &g,
+                                   scav_spaces const &s,
+                                   scav_profile const &p,
+                                   uint32_t threads) {
   SubmachineOrders o;
   o.sub_nodes.assign(c.submachines.size(), Span{});
   o.sub_edges.assign(c.submachines.size(), Span{});

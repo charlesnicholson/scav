@@ -1062,10 +1062,10 @@ TEST_CASE("layout: no corpus chart runs a route flush along a box") {
     REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
     run(c, {}, p);
     SplitGraph const g{ decompose(c) };
-    SubmachineOrders const o{ phase1_order(c, g, {}, p) };
+    SubmachineOrders const o{ order_submachines(c, g, {}, p) };
     SizedLayout z;
-    REQUIRE(phase2_size(c, g, o, {}, p, z, diags));
-    Routes const routes{ phase3_route(c, g, o, z, {}, p, *router_at(0)) };
+    REQUIRE(size_layout(c, g, o, {}, p, z, diags));
+    Routes const routes{ route_transitions(c, g, o, z, {}, p, *router_at(0)) };
     reseated += routes.reseated;
 
     for (uint32_t t = 0; t < c.transitions.size(); ++t) {
@@ -1120,11 +1120,11 @@ TEST_CASE("layout: Tier 0 at the scale target, and where the grid gives out") {
     Chart c{ nested_2k_chart() };
     scav_profile const p{ readable() };
     SplitGraph const g{ decompose(c) };
-    SubmachineOrders const o{ phase1_order(c, g, {}, p) };
+    SubmachineOrders const o{ order_submachines(c, g, {}, p) };
     SizedLayout z;
     std::vector<Diagnostic> diags;
-    REQUIRE(phase2_size(c, g, o, {}, p, z, diags));
-    Routes const r{ phase3_route(c, g, o, z, {}, p, *router_at(0)) };
+    REQUIRE(size_layout(c, g, o, {}, p, z, diags));
+    Routes const r{ route_transitions(c, g, o, z, {}, p, *router_at(0)) };
     CostTerms const t{ cost_terms(c, g, z, r, {}, p) };
     MESSAGE("nested 2k: through_box ",
             t.through_box,
@@ -1158,11 +1158,11 @@ TEST_CASE("layout: Tier 0 at the scale target, and where the grid gives out") {
     }
     scav_profile const p{ readable() };
     SplitGraph const g{ decompose(c) };
-    SubmachineOrders const o{ phase1_order(c, g, {}, p) };
+    SubmachineOrders const o{ order_submachines(c, g, {}, p) };
     SizedLayout z;
     std::vector<Diagnostic> diags;
-    if (phase2_size(c, g, o, {}, p, z, diags)) {
-      Routes const r{ phase3_route(c, g, o, z, {}, p, *router_at(0)) };
+    if (size_layout(c, g, o, {}, p, z, diags)) {
+      Routes const r{ route_transitions(c, g, o, z, {}, p, *router_at(0)) };
       CostTerms const t{ cost_terms(c, g, z, r, {}, p) };
       // The grid is the product of two line sets, not a function of box count, and a
       // packed grid shares columns and rows -- so this fits. What blows the budget is
@@ -1352,10 +1352,10 @@ TEST_CASE("layout: a retry whose sizing leaves the domain ends them too") {
 
   Chart c{ sealed_with_chain() };
   SplitGraph const g{ decompose(c) };
-  SubmachineOrders const o{ phase1_order(c, g, {}, widened) };
+  SubmachineOrders const o{ order_submachines(c, g, {}, widened) };
   SizedLayout z;
   std::vector<Diagnostic> spilled;
-  REQUIRE(!phase2_size(c, g, o, {}, widened, z, spilled));  // sizing is what refuses
+  REQUIRE(!size_layout(c, g, o, {}, widened, z, spilled));  // sizing is what refuses
 
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
@@ -1425,11 +1425,11 @@ TEST_CASE("layout: a transition every net of which fell back is diagnosed once")
   scav_profile p{ sealed_profile(readable()) };
   p.spacing_inflation_cap = 0;
   SplitGraph const g{ decompose(c) };
-  SubmachineOrders const o{ phase1_order(c, g, {}, p) };
+  SubmachineOrders const o{ order_submachines(c, g, {}, p) };
   SizedLayout z;
   std::vector<Diagnostic> spilled;
-  REQUIRE(phase2_size(c, g, o, {}, p, z, spilled));
-  Routes const r{ phase3_route(c, g, o, z, {}, p, *router_at(0)) };
+  REQUIRE(size_layout(c, g, o, {}, p, z, spilled));
+  Routes const r{ route_transitions(c, g, o, z, {}, p, *router_at(0)) };
   REQUIRE(g.trans_segments[0].len == 3);
   REQUIRE(r.unreachable == 2);
   REQUIRE(r.failed[0] == 1);
@@ -1462,11 +1462,11 @@ TEST_CASE("layout: a graph past the router's budget is not a spacing problem") {
 
   scav_profile const p{ readable() };
   SplitGraph const g{ decompose(c) };
-  SubmachineOrders const o{ phase1_order(c, g, {}, p) };
+  SubmachineOrders const o{ order_submachines(c, g, {}, p) };
   SizedLayout z;
   std::vector<Diagnostic> spilled;
-  REQUIRE(phase2_size(c, g, o, {}, p, z, spilled));
-  Routes const r{ phase3_route(c, g, o, z, {}, p, *router_at(0)) };
+  REQUIRE(size_layout(c, g, o, {}, p, z, spilled));
+  Routes const r{ route_transitions(c, g, o, z, {}, p, *router_at(0)) };
   REQUIRE(r.too_large > 0);
   REQUIRE(r.unreachable == 0);
   uint32_t marked{ 0 };
@@ -1590,7 +1590,7 @@ TEST_CASE("layout: a frame full of long edges terminates, expensively") {
   }
 
   SplitGraph const g{ decompose(c) };
-  SubmachineOrders const o{ phase1_order(c, g, {}, readable()) };
+  SubmachineOrders const o{ order_submachines(c, g, {}, readable()) };
   MESSAGE("512 states with wrapping skips: ",
           o.nodes.size(),
           " ordering nodes, ",
@@ -1713,10 +1713,10 @@ TEST_CASE("layout: the corpus cost vector is committed, term by term") {
     REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
 
     SplitGraph const g{ decompose(c) };
-    SubmachineOrders const o{ phase1_order(c, g, {}, p) };
+    SubmachineOrders const o{ order_submachines(c, g, {}, p) };
     SizedLayout z;
-    REQUIRE(phase2_size(c, g, o, {}, p, z, diags));
-    Routes const r{ phase3_route(c, g, o, z, {}, p, *router_at(0)) };
+    REQUIRE(size_layout(c, g, o, {}, p, z, diags));
+    Routes const r{ route_transitions(c, g, o, z, {}, p, *router_at(0)) };
     CostTerms const t{ cost_terms(c, g, z, r, {}, p) };
     Cost const scored{ cost_of(t, p) };
 

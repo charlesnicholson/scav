@@ -87,16 +87,16 @@ TEST_CASE("bench: every registered router scores the corpus, term by term") {
     load_corpus(name, c);
 
     SplitGraph const g{ decompose(c) };
-    SubmachineOrders const o{ phase1_order(c, g, {}, p) };
+    SubmachineOrders const o{ order_submachines(c, g, {}, p) };
     SizedLayout z;
     std::vector<Diagnostic> diags;
-    REQUIRE(phase2_size(c, g, o, {}, p, z, diags));
-    Routes const ref{ phase3_route(c, g, o, z, {}, p, *router_at(reference)) };
+    REQUIRE(size_layout(c, g, o, {}, p, z, diags));
+    Routes const ref{ route_transitions(c, g, o, z, {}, p, *router_at(reference)) };
 
     for (uint32_t ri = 0; ri < router_count(); ++ri) {
       std::string const label{ router_label(ri) };
       CAPTURE(label);
-      Routes const r{ phase3_route(c, g, o, z, {}, p, *router_at(ri)) };
+      Routes const r{ route_transitions(c, g, o, z, {}, p, *router_at(ri)) };
       CostTerms const t{ cost_terms(c, g, z, r, {}, p) };
       Cost const scored{ cost_of(t, p) };
 
