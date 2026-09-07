@@ -164,8 +164,8 @@ TEST_CASE("perf: chain load is linear in the number of documents") {
                                              [&] { std::ignore = run_once(large); }) };
 
   double const ratio{ static_cast<double>(large_us) / static_cast<double>(small_us) };
-  MESSAGE("chain " << NARROW << " -> " << WIDE << " documents: " << small_us << " us -> "
-                   << large_us << " us (" << ratio << "x)");
+  MESSAGE("chain " << NARROW << " -> " << WIDE << " documents: " << small_us << " ns -> "
+                   << large_us << " ns (" << ratio << "x)");
   CHECK(ratio < (2.0 * SCALING_SLACK));
 }
 
@@ -185,7 +185,7 @@ TEST_CASE("perf: instantiation is linear in the number of instantiations") {
 
   double const ratio{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   MESSAGE("star " << NARROW << " -> " << WIDE << " instantiations: " << small_us
-                  << " us -> " << large_us << " us (" << ratio << "x)");
+                  << " ns -> " << large_us << " ns (" << ratio << "x)");
   CHECK(ratio < (2.0 * SCALING_SLACK));
 }
 
@@ -224,7 +224,7 @@ TEST_CASE("perf: the digest is linear in the model") {
                                      [&] { std::ignore = chart_structural_hash(b); }) };
 
   double const ratio{ static_cast<double>(b_us) / static_cast<double>(a_us) };
-  MESSAGE("digest " << NARROW << " -> " << WIDE << " documents: " << a_us << " us -> "
-                    << b_us << " us (" << ratio << "x)");
+  MESSAGE("digest " << NARROW << " -> " << WIDE << " documents: " << a_us << " ns -> "
+                    << b_us << " ns (" << ratio << "x)");
   CHECK(ratio < (2.0 * SCALING_SLACK));
 }

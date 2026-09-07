@@ -124,6 +124,22 @@ uint32_t direction(scav_point a, scav_point b) {
   return (axis(a.x, b.x) * 3U) + axis(a.y, b.y);
 }
 
+// Every term below indexes a column by entity ordinal and every route by its
+// span, so geometry shorter than the entities it parallels is answered here.
+bool geometry_complete(Chart const &c, SizedLayout const &z, Routes const &r) {
+  if ((z.state.size() < c.states.size()) || (z.before.size() < c.states.size()) ||
+      (z.after.size() < c.states.size()) || (z.sub.size() < c.submachines.size()) ||
+      (r.route.size() < c.transitions.size())) {
+    return false;
+  }
+  for (scav_span const &span : r.route) {
+    if ((Wide{ span.off } + span.len) > static_cast<Wide>(r.points.size())) {
+      return false;
+    }
+  }
+  return true;
+}
+
 }  // namespace
 
 CostTerms cost_terms(Chart const &c,
@@ -133,6 +149,7 @@ CostTerms cost_terms(Chart const &c,
                      scav_spaces const &s,
                      scav_profile const &p) {
   CostTerms t;
+  if (!geometry_complete(c, z, r)) { return t; }
   t.aspect = (Wide{ z.chart.w } * p.dar_den) - (Wide{ z.chart.h } * p.dar_num);
   if (t.aspect < 0) { t.aspect = -t.aspect; }
   t.area = Wide{ z.chart.w } * z.chart.h;

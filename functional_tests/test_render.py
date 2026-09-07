@@ -7,10 +7,12 @@ only a real process can: the file lands where -o said, the document is one a
 parser accepts, and the harness runs and says what it could not compare."""
 
 import os
+import re
 import subprocess
 import sys
 import unittest
 import xml.etree.ElementTree as ElementTree
+from collections.abc import Iterator
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -21,10 +23,40 @@ import scavtest  # noqa: E402
 SVG_NS = "{http://www.w3.org/2000/svg}"
 
 
+def nested_chart(depth: int, width: int, siblings: int = 1, fine: int = 0) -> str:
+    """A chart whose composed geometry approaches the coordinate domain.
+
+    Every level adds its own padding ring plus `siblings` states beside the one
+    it nests, so the width grows with the depth rather than folding into a grid.
+    `fine` lengthens the innermost name alone, which moves the total by one
+    character at a time.
+    """
+    body = ""
+    for i in range(depth):
+        body += f"state S{i} {{"
+        for k in range(siblings):
+            extra = fine if (i == (depth - 1)) and (k == 0) else 0
+            body += f" state W{i}_{k}{'w' * (width + extra)},"
+    return "chart big {" + body + "state Leaf," + ("}," * depth) + "}\n"
+
+
+# Depth and per-level name length putting the chart just short of the domain,
+# and the first `fine` known to land inside the viewBox window.
+OVERSIZE_DEPTH = 250
+OVERSIZE_WIDTH = 38
+OVERSIZE_SEED = 109
+
+
+def oversize_lengths() -> Iterator[int]:
+    yield from range(OVERSIZE_SEED, OVERSIZE_SEED + 3)
+    yield from range(0, 300)
+
+
 class TestRender(unittest.TestCase):
     cfg: scavtest.Config
     exe: Path
     charts: list[Path]
+    scratch: Path
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -33,6 +65,12 @@ class TestRender(unittest.TestCase):
         cls.exe = cls.cfg.build_dir / "bin" / name
         cls.charts = sorted((cls.cfg.repo_root / "test_data/charts").glob("*.scav"))
         assert cls.charts
+        cls.scratch = scavtest.fresh_dir(cls.cfg.scratch_dir / "render")
+
+    def write(self, name: str, source: str) -> Path:
+        path = self.scratch / name
+        path.write_text(source, encoding="utf-8", newline="")
+        return path
 
     def run_render(self, *args: scavtest.Arg) -> subprocess.CompletedProcess[str]:
         # Both streams separately: the document goes to stdout and diagnostics
@@ -109,21 +147,105 @@ class TestRender(unittest.TestCase):
 
     def test_bad_arguments_are_refused(self) -> None:
         chart = self.cfg.repo_root / "test_data/charts/led.scav"
+        out = self.scratch / "unused.svg"
         for args in (["render"],
-                     ["render", "--profile", "nonesuch", str(chart)],
                      ["render", "--nope", str(chart)],
                      ["render", "-o"],
                      ["render", str(chart), "-o"],
-                     ["render", "--embed-font", "--embed-font", str(chart)]):
+                     ["render", "-o", str(out), "-o", str(out), str(chart)],
+                     ["render", "--profile"],
+                     ["render", str(chart), "--profile"],
+                     ["render", "--embed-font", "--embed-font", str(chart)],
+                     ["render", str(chart), str(chart)]):
             with self.subTest(args=args):
                 result = self.run_render(*args[1:])
-                self.assertNotEqual(0, result.returncode)
+                self.assertEqual(2, result.returncode)
+                self.assertEqual("", result.stdout)
+                self.assertTrue(result.stderr.startswith("usage: scav <verb>"),
+                                result.stderr)
+        self.assertFalse(out.exists())
+
+    def test_an_unknown_profile_is_named_and_nothing_is_rendered(self) -> None:
+        chart = self.cfg.repo_root / "test_data/charts/led.scav"
+        result = self.run_render("--profile", "nonesuch", chart)
+        self.assertEqual(2, result.returncode)
+        self.assertEqual("", result.stdout)
+        self.assertEqual("scav: no such profile 'nonesuch'\n", result.stderr)
 
     def test_an_unreadable_chart_is_diagnosed_not_rendered(self) -> None:
         result = self.run_render(self.cfg.build_dir / "no_such.scav")
         self.assertEqual(2, result.returncode)
         self.assertEqual("", result.stdout)
         self.assertIn("scav:", result.stderr)
+
+    # Failures past the load ================================================
+
+    def test_an_output_path_that_cannot_be_written_is_named(self) -> None:
+        target = self.scratch / "no_such_dir" / "out.svg"
+        chart = self.cfg.repo_root / "test_data/charts/led.scav"
+        result = self.run_render("-o", target, chart)
+        self.assertEqual(2, result.returncode)
+        self.assertEqual("", result.stdout)
+        self.assertEqual(f"scav: cannot write '{target}'\n", result.stderr)
+        self.assertFalse(target.parent.exists())
+
+    def test_text_the_bundled_font_cannot_measure_is_refused(self) -> None:
+        # Both ways a chart can defeat the measurement pass: a codepoint the
+        # font has no glyph for, and a name whose box would leave the domain.
+        cases = {
+            # U+F0001, a private-use codepoint JetBrains Mono does not carry.
+            "glyph": 'chart g {\n  state A,\n  state B,\n'
+                     '  trans A -> B "\U000f0001",\n}\n',
+            "wide": "chart w {\n  state A" + ("a" * 4000) + ",\n}\n",
+        }
+        for name, source in cases.items():
+            with self.subTest(case=name):
+                chart = self.write(f"{name}.scav", source)
+                result = self.run_render(chart)
+                self.assertEqual(2, result.returncode)
+                self.assertEqual("", result.stdout)
+                self.assertEqual(
+                    "scav: cannot measure the chart with the bundled font "
+                    f"'{chart}'\n",
+                    result.stderr)
+
+    def test_geometry_past_the_coordinate_domain_is_diagnosed_not_rendered(self) -> None:
+        chart = self.write("overflow.scav", nested_chart(255, 40, 4))
+        target = self.scratch / "overflow.svg"
+        result = self.run_render("-o", target, chart)
+        # Layout's own finding, so it is exit 1 with a located diagnostic
+        # rather than a refusal to use the file.
+        self.assertEqual(1, result.returncode)
+        self.assertEqual("", result.stdout)
+        self.assertRegex(
+            result.stderr,
+            r"^" + re.escape(chart.as_posix())
+            + r":\d+:\d+: composed geometry exceeds the coordinate domain\n$")
+        self.assertFalse(target.exists())
+
+    def test_a_diagram_too_large_for_an_integer_viewbox_is_refused(self) -> None:
+        # Layout admits geometry up to the coordinate domain and the backend
+        # then adds the profile's padding as a margin, so what overflows the
+        # viewBox and not layout is the domain's last 2*pad. The innermost name
+        # walks the total through that window a character at a time, and the
+        # packer refolds every few dozen characters, so it arrives repeatedly.
+        target = self.scratch / "viewbox.svg"
+        tried = 0
+        for fine in oversize_lengths():
+            chart = self.write(
+                "viewbox.scav",
+                nested_chart(OVERSIZE_DEPTH, OVERSIZE_WIDTH, fine=fine))
+            result = self.run_render("-o", target, chart)
+            tried += 1
+            if result.stderr.startswith("scav: the diagram does not fit"):
+                self.assertEqual(2, result.returncode)
+                self.assertEqual("", result.stdout)
+                self.assertEqual(
+                    f"scav: the diagram does not fit an integer viewBox '{chart}'\n",
+                    result.stderr)
+                self.assertFalse(target.exists())
+                return
+        self.fail(f"none of {tried} sizes overflowed the viewBox")
 
 
 class TestBaselineHarness(unittest.TestCase):

@@ -135,6 +135,29 @@ TEST_CASE("pack: a rect wider than the target opens a new row") {
   check_sane(p);
 }
 
+TEST_CASE("pack: a rect that fits neither its subrow nor its block opens a row") {
+  // Inflated area 3000 + 7200 + 2400 + 3000 = 15600, times 16 over 10 is 24960,
+  // so the target is isqrt(24960) = 157. The third rect goes back to row level
+  // and starts a block at x=120; the fourth fits neither beside it (160 + 40)
+  // nor at that block's left edge (120 + 40), so it wraps to a new row.
+  Packing const p{
+    pack_lr(boxes({ { 40, 50 }, { 110, 50 }, { 30, 50 }, { 40, 50 } }), 10, 16, 10)
+  };
+  REQUIRE(p.at.size() == 4);
+  CHECK(p.at[0].x == 0);
+  CHECK(p.at[0].y == 0);
+  CHECK(p.at[1].x == 0);
+  CHECK(p.at[1].y == 60);
+  CHECK(p.at[2].x == 120);
+  CHECK(p.at[2].y == 0);
+  // The new row clears the whole of the one above it, block and subrows alike.
+  CHECK(p.at[3].x == 0);
+  CHECK(p.at[3].y == 120);
+  CHECK(p.w == 150);
+  CHECK(p.h == 170);
+  check_sane(p);
+}
+
 TEST_CASE("pack: the box packer is one row whatever the extents") {
   Packing const p{ pack_box(boxes({ { 40, 10 }, { 900, 300 }, { 5, 5 } }), 7) };
   REQUIRE(p.at.size() == 3);

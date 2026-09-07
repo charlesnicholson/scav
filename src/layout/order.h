@@ -58,11 +58,14 @@ struct SubmachineOrders {
 
 // Ranks by longest path, multi-rank edges chained through bends, then
 // `sweep_count` median sweeps keeping the fewest crossings. Reads no extent but
-// a path box's, so it runs before anything is sized.
-SubmachineOrders phase1_order(Chart const &c,
-                              SplitGraph const &g,
-                              scav_spaces const &s,
-                              scav_profile const &p);
+// a path box's, so it runs before anything is sized. Submachines are sharded
+// across `threads` workers and emitted in submachine order, so the result is
+// one value at every worker count (6).
+SubmachineOrders order_submachines(Chart const &c,
+                                   SplitGraph const &g,
+                                   scav_spaces const &s,
+                                   scav_profile const &p,
+                                   uint32_t threads = 0);
 
 // Crossings between two adjacent ranks by inversion counting. Exposed because
 // it is what the ordering minimizes and what a test measures against.

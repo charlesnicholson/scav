@@ -14,6 +14,10 @@ function(scav_embed_bytes source symbol out_var)
     message(FATAL_ERROR "scav_embed_bytes: no such file: ${absolute}")
   endif()
 
+  # Read at configure time, so a later edit to the file has to re-run configure
+  # or the executable would keep the bytes from the last one.
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${absolute}")
+
   string(TOUPPER "${symbol}" upper)
   file(READ "${absolute}" hex HEX)
   string(LENGTH "${hex}" hex_length)

@@ -257,10 +257,10 @@ bool layout_run(Chart &c,
   }
 
   SplitGraph const g{ decompose(c) };
-  SubmachineOrders const orders{ phase1_order(c, g, s, p) };
+  SubmachineOrders const orders{ order_submachines(c, g, s, p, o.threads) };
   SizedLayout sized;
-  if (!phase2_size(c, g, orders, s, p, sized, diags)) { return false; }
-  Routes routes{ phase3_route(c, g, orders, sized, s, p, *router) };
+  if (!size_layout(c, g, orders, s, p, sized, diags)) { return false; }
+  Routes routes{ route_transitions(c, g, orders, sized, s, p, *router, o.threads) };
 
   // `sized` and `routes` carry the best attempt so far, and `done` is set from
   // that one rather than from whichever attempt was just made.
@@ -272,11 +272,13 @@ bool layout_run(Chart &c,
        !done && (p.spacing_inflation_increment > 0) && (k < p.spacing_inflation_cap);
        ++k) {
     if (!inflate(wider, p.spacing_inflation_increment)) { break; }
-    SubmachineOrders const next_orders{ phase1_order(c, g, s, wider) };
+    SubmachineOrders const next_orders{ order_submachines(c, g, s, wider, o.threads) };
     SizedLayout next_sized;
     std::vector<Diagnostic> spilled;
-    if (!phase2_size(c, g, next_orders, s, wider, next_sized, spilled)) { break; }
-    Routes next{ phase3_route(c, g, next_orders, next_sized, s, wider, *router) };
+    if (!size_layout(c, g, next_orders, s, wider, next_sized, spilled)) { break; }
+    Routes next{
+      route_transitions(c, g, next_orders, next_sized, s, wider, *router, o.threads)
+    };
     bool keep{ false };
     done = inflation_done(fewest, next.degraded(), next.unreachable, keep);
     if (keep) {
@@ -389,7 +391,7 @@ uint32_t layout_structural_hash(Chart const &c) {
     append_u32(b, sl.side);
     append_u32(b, sl.boundary_depth);
   }
-  return xxhash32(b.data(), b.size(), 0);
+  return xxhash32(b.data(), b.size(), chart_structural_hash(c));
 }
 
 }  // namespace scav

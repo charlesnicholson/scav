@@ -213,8 +213,9 @@ scav_result scav_emit_chart(scav_drawlist *list,
  * Pass all four caps as 0 with a non-null `out_counts` to query the four
  * counts, then call again with buffers. `out_counts` receives four values in
  * this order: box_state, box_sub, path_clear, path_box. A cap too small is
- * SCAV_E_CAPACITY and never truncates. SCAV_E_NO_GLYPH when the font cannot
- * measure some text; SCAV_E_STATE when a request leaves the legal domain. */
+ * SCAV_E_CAPACITY and never truncates. SCAV_E_STATE when the pass fails, whether
+ * a codepoint has no glyph or a request leaves the legal domain; the two are not
+ * told apart here, only by scav_measure_text on the text itself. */
 scav_result scav_measure_chart(scav_chart const *chart,
                                scav_metrics const *metrics,
                                scav_profile const *profile,

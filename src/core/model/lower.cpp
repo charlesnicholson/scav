@@ -55,7 +55,7 @@ StmtId global_stmt(Lowerer const &lo, uint32_t row) { return { lo.stmt_base + ro
 // includes; a state block's is its implicit submachine.
 struct Ctx {
   ElemRef subject;   // attr statements attach here
-  SubmachineId sub;  // INVALID inside a trans block
+  SubmachineId sub;  // INVALID where the block earned no implicit submachine
   StateId state;     // valid only for a state block: explicit submachines' owner
 };
 
@@ -176,10 +176,6 @@ void lower_entities(Lowerer &lo,
 
     switch (lo.pd->stmts[row].kind) {
       case StmtKind::State: {
-        if (ctx.sub.v == INVALID) {  // inside a trans block
-          report(lo, DiagCode::MisplacedStatement, row);
-          break;
-        }
         StateStmt const &s{ lo.pd->states[lo.pd->stmt_payload[row]] };
         StateId const id{ model_append_state_row(
             *lo.c,
@@ -246,10 +242,6 @@ void lower_entities(Lowerer &lo,
       }
 
       case StmtKind::Include: {
-        if (ctx.sub.v == INVALID) {
-          report(lo, DiagCode::MisplacedStatement, row);
-          break;
-        }
         IncludeStmt const &inc{ lo.pd->includes[lo.pd->stmt_payload[row]] };
         // An ordinary state append. One intern of the alias serves both the
         // state's name and the Include row.
@@ -276,10 +268,6 @@ void lower_entities(Lowerer &lo,
       }
 
       case StmtKind::Trans: {
-        if (ctx.sub.v == INVALID) {
-          report(lo, DiagCode::MisplacedStatement, row);
-          break;
-        }
         trans.push_back({ .row = row,
                           .doc = lo.doc,
                           .inst = lo.inst,

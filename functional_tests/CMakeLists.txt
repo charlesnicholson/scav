@@ -128,6 +128,16 @@ scav_add_functional_test(gauntlet
           "$<TARGET_FILE:scav>"
   TARGETS scav
 )
+# Every chart under test_data/charts, matching what apps/cli embeds.
+file(GLOB scav_selftest_charts CONFIGURE_DEPENDS
+  "${PROJECT_SOURCE_DIR}/test_data/charts/*.scav"
+)
+scav_add_functional_test(selftest
+  DEPENDS ${scav_selftest_charts}
+          "${PROJECT_SOURCE_DIR}/test_data/golden/layout/corpus_hashes.txt"
+          "$<TARGET_FILE:scav>"
+  TARGETS scav
+)
 scav_add_functional_test(deps
   DEPENDS "${PROJECT_SOURCE_DIR}/test_data/charts/vac.scav"
           "${PROJECT_SOURCE_DIR}/test_data/charts/dock.scav"

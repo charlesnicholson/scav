@@ -66,9 +66,9 @@ void lay(char const *name, scav_profile const &p, Laid &out) {
   std::string failed;
   REQUIRE(load_file(path.c_str(), loader, out.c, diags, failed));
   out.g = decompose(out.c);
-  out.o = phase1_order(out.c, out.g, {}, p);
-  REQUIRE(phase2_size(out.c, out.g, out.o, {}, p, out.z, diags));
-  out.r = phase3_route(out.c, out.g, out.o, out.z, {}, p, *router_at(id));
+  out.o = order_submachines(out.c, out.g, {}, p);
+  REQUIRE(size_layout(out.c, out.g, out.o, {}, p, out.z, diags));
+  out.r = route_transitions(out.c, out.g, out.o, out.z, {}, p, *router_at(id));
 }
 
 // The Tier-0 predicate, rewritten here as it is for the corpus: a gate that

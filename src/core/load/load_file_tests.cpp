@@ -74,3 +74,63 @@ TEST_CASE("load_file: a path that cannot be opened is false, not a crash") {
   // A null buffer with a non-zero length is a caller error, not an empty write.
   CHECK_FALSE(write_file(scratch("nullbuf.txt").c_str(), nullptr, 4));
 }
+
+TEST_CASE("load_file: a path that opens but cannot be read fails and keeps nothing") {
+  // A directory opens for reading on POSIX and fails on the first read; on
+  // Windows the open itself fails. Either way nothing is handed back.
+  std::vector<scav_byte> bytes{ 1, 2, 3 };
+  CHECK_FALSE(read_file(std::string{ SCAV_TEST_OUT_DIR }.c_str(), bytes));
+  CHECK(bytes.empty());
+}
+
+TEST_CASE("load_file: a null path fails before anything is opened") {
+  Loader loader;
+  Chart c;
+  std::vector<Diagnostic> diags;
+  std::string failed{ "stale" };
+  CHECK_FALSE(load_file(nullptr, loader, c, diags, failed));
+  CHECK(failed.empty());  // there is no path to name
+  CHECK(diags.empty());
+  CHECK(c.documents.empty());
+}
+
+TEST_CASE("load_file: a two-document network loads from disk and resolves across it") {
+  std::string const root{ scratch("net_root.scav") };
+  REQUIRE(put(root,
+              "chart a {\n"
+              "  include \"core_load_file_net_sub.scav\" as sub,\n"
+              "  state A,\n"
+              "  trans A -> sub/B,\n"
+              "}\n"));
+  REQUIRE(put(scratch("net_sub.scav"), "chart b {\n  state B,\n}\n"));
+
+  Loader loader;
+  Chart c;
+  std::vector<Diagnostic> diags;
+  std::string failed{ "stale" };
+  CHECK(load_file(root.c_str(), loader, c, diags, failed));
+  CHECK(failed.empty());
+  CHECK(diags.empty());
+  CHECK(c.documents.size() == 2);
+  StateId b{ INVALID };
+  CHECK(resolve_path(c, c.root_submachine, "sub/B", b) == ResolveStatus::Ok);
+  REQUIRE(c.transitions.size() == 1);
+  CHECK(c.transitions[0].dst == b);
+}
+
+TEST_CASE("load_file: an include naming an absent file reports which one") {
+  std::string const root{ scratch("absent_root.scav") };
+  REQUIRE(put(root,
+              "chart a {\n"
+              "  include \"core_load_file_absent_sub.scav\" as sub,\n"
+              "  state A,\n"
+              "}\n"));
+
+  Loader loader;
+  Chart c;
+  std::vector<Diagnostic> diags;
+  std::string failed;
+  CHECK_FALSE(load_file(root.c_str(), loader, c, diags, failed));
+  CHECK(failed == scratch("absent_sub.scav"));
+  CHECK(c.documents.empty());
+}

@@ -7,6 +7,7 @@
 #include "layout/order.h"
 #include "layout/route.h"
 #include "layout/size.h"
+#include "layout/tests/test_synth.h"
 #include "scav/scav_core.h"
 #include "scav/scav_core_c.h"
 #include "scav/scav_layout.h"
@@ -16,6 +17,7 @@
 #include "doctest.h"
 
 #include "scav_int.h"
+#include "scav_xxhash.h"
 
 #include <chrono>
 #include <cstdint>
@@ -540,6 +542,51 @@ TEST_CASE("layout: the hash split separates size changes from shape changes") {
   CHECK(layout_structural_hash(more) != layout_structural_hash(narrow));
 }
 
+TEST_CASE("layout: the structural hash separates two models of one geometry") {
+  // Names reach layout only through the space tables, so with no requests two
+  // charts of one shape lay out to the same coordinates -- and the structural
+  // hash still has to tell them apart, which is what the model seed buys.
+  auto build = [](char const *first, char const *second) {
+    Chart c;
+    SubmachineId const root{ build_chart(c, "t", {}) };
+    StateId const a{ build_state(c, root, first, StateKind::Normal, {}) };
+    StateId const b{ build_state(c, root, second, StateKind::Normal, {}) };
+    build_trans(c, a, b, TransKind::External, {});
+    std::vector<scav_placed> placed;
+    std::vector<Diagnostic> diags;
+    REQUIRE(layout_run(c, {}, opts(readable()), placed, diags));
+    return c;
+  };
+
+  Chart const named{ build("A", "B") };
+  Chart const renamed{ build("X", "Y") };
+  CHECK(chart_structural_hash(named) != chart_structural_hash(renamed));
+  CHECK(layout_coordinate_hash(named) == layout_coordinate_hash(renamed));
+  CHECK(layout_structural_hash(named) != layout_structural_hash(renamed));
+
+  // The same model twice is the same pair of hashes, so what moved above is
+  // the model and not the run.
+  Chart const again{ build("A", "B") };
+  CHECK(layout_coordinate_hash(again) == layout_coordinate_hash(named));
+  CHECK(layout_structural_hash(again) == layout_structural_hash(named));
+}
+
+TEST_CASE("layout: an unlaid-out chart hashes to its model digest alone") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+
+  // No geometry columns, so the serialization is empty and the seed is the
+  // whole of it.
+  CHECK(layout_structural_hash(c) == xxhash32(nullptr, 0, chart_structural_hash(c)));
+  CHECK(layout_coordinate_hash(c) == xxhash32(nullptr, 0, 0));
+
+  run(c, {}, readable());
+  CHECK(layout_structural_hash(c) != xxhash32(nullptr, 0, chart_structural_hash(c)));
+}
+
 TEST_CASE("layout: the inputs digest hears every input that is not the model") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
@@ -693,6 +740,24 @@ TEST_CASE("layout: a geometry column of another shape stops the run") {
   REQUIRE(diags.size() == 1);
   CHECK(diags[0].code == DiagCode::GeometryColumnClash);
 
+  // The width is checked on its own, an application storing a smaller rect
+  // under the same entity and value kind being the subtler collision.
+  Chart by_width;
+  SubmachineId const narrow{ build_chart(by_width, "t", {}) };
+  build_state(by_width, narrow, "A", StateKind::Normal, {});
+  REQUIRE(column_register(by_width,
+                          "scav.geom.state",
+                          ElemKind::State,
+                          ValueKind::Pod,
+                          sizeof(scav_rect) / 2,
+                          4,
+                          COLUMN_DERIVED)
+              .v != INVALID);
+  diags.clear();
+  CHECK(!layout_run(by_width, {}, opts(p), placed, diags));
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::GeometryColumnClash);
+
   // Layout's own shape under layout's own name is layout's own column to
   // overwrite, however it got there.
   Chart same;
@@ -730,6 +795,45 @@ TEST_CASE("layout: invalid profiles and spaces fail before any geometry") {
   REQUIRE(diags.size() == 1);
   CHECK(diags[0].code == DiagCode::SpaceOutOfRange);
   CHECK(column_find(c, "scav.geom.state").v == INVALID);
+}
+
+TEST_CASE("layout: a router that is not in the registry is diagnosed") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  build_state(c, root, "A", StateKind::Normal, {});
+
+  scav_layout_opts unknown{ opts(readable()) };
+  unknown.router = router_count();  // one past the last registered id
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  CHECK(!layout_run(c, {}, unknown, placed, diags));
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::RouterUnknown);
+  CHECK(diags[0].subject.kind == ElemKind::Chart);
+  // Named before anything is written, so the chart is as it arrived.
+  CHECK(column_find(c, "scav.geom.state").v == INVALID);
+  CHECK(column_find(c, "scav.geom.chart").v == INVALID);
+  CHECK(placed.empty());
+}
+
+TEST_CASE("layout: an inputs column with no row is no digest") {
+  // The name is layout's, the rows are not: a producer that registered it
+  // against a length of its own leaves nothing for the digest to read.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  build_state(c, root, "A", StateKind::Normal, {});
+  REQUIRE(column_register(c,
+                          "scav.geom.inputs",
+                          ElemKind::Point,
+                          ValueKind::U32,
+                          4,
+                          4,
+                          COLUMN_DERIVED)
+              .v != INVALID);
+  ColumnId const id{ column_find(c, "scav.geom.inputs") };
+  REQUIRE(id.v != INVALID);
+  REQUIRE(column_count(c, id) == 0);
+  CHECK(layout_inputs_digest(c) == 0);
 }
 
 TEST_CASE("layout: tombstones leave zero rects and no routes") {
@@ -929,39 +1033,8 @@ TEST_CASE("layout: geometry invariants hold across topologies and spaces") {
   check_geometry(c);
 }
 
-namespace {
-
-// The scale target: depth 16, ~2k states, ~3.7k transitions including one
-// long hierarchical edge per level.
-Chart two_k_chart() {
-  Chart c;
-  SubmachineId const root{ build_chart(c, "t", {}) };
-  for (uint32_t r = 0; r < 8; ++r) {
-    SubmachineId parent{ root };
-    StateId last{ INVALID };
-    for (uint32_t d = 0; d < 16; ++d) {
-      std::vector<StateId> level;
-      level.reserve(15);
-      for (uint32_t k = 0; k < 15; ++k) {
-        level.push_back(build_state(c, parent, {}, StateKind::Normal, {}));
-      }
-      StateId const comp{ build_state(c, parent, {}, StateKind::Normal, {}) };
-      for (uint32_t k = 1; k < level.size(); ++k) {
-        build_trans(c, level[k - 1], level[k], TransKind::External, {});
-        build_trans(c, level[k], comp, TransKind::External, {});
-      }
-      if (last.v != INVALID) { build_trans(c, comp, last, TransKind::External, {}); }
-      last = comp;
-      parent = build_submachine(c, comp, {}, {});
-    }
-  }
-  return c;
-}
-
-}  // namespace
-
 TEST_CASE("layout: two thousand states lay out, and quickly") {
-  Chart c{ two_k_chart() };
+  Chart c{ nested_2k_chart() };
   REQUIRE(c.states.size() >= 2000);
   REQUIRE(c.transitions.size() >= 3500);
 
@@ -988,17 +1061,7 @@ TEST_CASE("layout: two thousand states lay out, and quickly") {
 TEST_CASE("layout: the flat two thousand lay out too, and quickly") {
   // One submachine holding the whole scale target is legal input, and the shape
   // the per-submachine cost bounds assume away (11.3).
-  Chart c;
-  SubmachineId const root{ build_chart(c, "flat", {}) };
-  std::vector<StateId> all;
-  all.reserve(2048);
-  for (uint32_t i = 0; i < 2048; ++i) {
-    all.push_back(build_state(c, root, {}, StateKind::Normal, {}));
-  }
-  for (uint32_t i = 1; i < all.size(); ++i) {
-    build_trans(c, all[i - 1], all[i], TransKind::External, {});
-    if ((i % 16) == 0) { build_trans(c, all[i], all[i - 16], TransKind::External, {}); }
-  }
+  Chart c{ flat_2k_chart() };
   REQUIRE(c.transitions.size() >= 2000);
 
   auto const t0{ std::chrono::steady_clock::now() };
@@ -1056,10 +1119,10 @@ TEST_CASE("layout: no corpus chart runs a route flush along a box") {
     REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
     run(c, {}, p);
     SplitGraph const g{ decompose(c) };
-    SubmachineOrders const o{ phase1_order(c, g, {}, p) };
+    SubmachineOrders const o{ order_submachines(c, g, {}, p) };
     SizedLayout z;
-    REQUIRE(phase2_size(c, g, o, {}, p, z, diags));
-    Routes const routes{ phase3_route(c, g, o, z, {}, p, *router_at(0)) };
+    REQUIRE(size_layout(c, g, o, {}, p, z, diags));
+    Routes const routes{ route_transitions(c, g, o, z, {}, p, *router_at(0)) };
     reseated += routes.reseated;
 
     for (uint32_t t = 0; t < c.transitions.size(); ++t) {
@@ -1111,14 +1174,14 @@ TEST_CASE("layout: Tier 0 at the scale target, and where the grid gives out") {
   // The corpus fits the budget; these two are the shapes that might not, and
   // which of them still routes is the finding rather than an assumption.
   {
-    Chart c{ two_k_chart() };
+    Chart c{ nested_2k_chart() };
     scav_profile const p{ readable() };
     SplitGraph const g{ decompose(c) };
-    SubmachineOrders const o{ phase1_order(c, g, {}, p) };
+    SubmachineOrders const o{ order_submachines(c, g, {}, p) };
     SizedLayout z;
     std::vector<Diagnostic> diags;
-    REQUIRE(phase2_size(c, g, o, {}, p, z, diags));
-    Routes const r{ phase3_route(c, g, o, z, {}, p, *router_at(0)) };
+    REQUIRE(size_layout(c, g, o, {}, p, z, diags));
+    Routes const r{ route_transitions(c, g, o, z, {}, p, *router_at(0)) };
     CostTerms const t{ cost_terms(c, g, z, r, {}, p) };
     MESSAGE("nested 2k: through_box ",
             t.through_box,
@@ -1152,11 +1215,11 @@ TEST_CASE("layout: Tier 0 at the scale target, and where the grid gives out") {
     }
     scav_profile const p{ readable() };
     SplitGraph const g{ decompose(c) };
-    SubmachineOrders const o{ phase1_order(c, g, {}, p) };
+    SubmachineOrders const o{ order_submachines(c, g, {}, p) };
     SizedLayout z;
     std::vector<Diagnostic> diags;
-    if (phase2_size(c, g, o, {}, p, z, diags)) {
-      Routes const r{ phase3_route(c, g, o, z, {}, p, *router_at(0)) };
+    if (size_layout(c, g, o, {}, p, z, diags)) {
+      Routes const r{ route_transitions(c, g, o, z, {}, p, *router_at(0)) };
       CostTerms const t{ cost_terms(c, g, z, r, {}, p) };
       // The grid is the product of two line sets, not a function of box count, and a
       // packed grid shares columns and rows -- so this fits. What blows the budget is
@@ -1169,29 +1232,6 @@ TEST_CASE("layout: Tier 0 at the scale target, and where the grid gives out") {
 }
 
 namespace {
-
-// The bar ranks before `outer` and stands taller than it, so under the profile
-// below it spans `outer`'s frame and walls off the route into `deep`.
-Chart sealed_chart() {
-  Chart c;
-  SubmachineId const root{ build_chart(c, "t", {}) };
-  StateId const bar{ build_state(c, root, "S", StateKind::Fork, {}) };
-  StateId const outer{ build_state(c, root, "P", StateKind::Normal, {}) };
-  SubmachineId const inner{ build_submachine(c, outer, {}, {}) };
-  StateId const deep{ build_state(c, inner, "C", StateKind::Normal, {}) };
-  build_trans(c, bar, deep, TransKind::External, {});
-  return c;
-}
-
-// Clearance is a third of `node_sep`, so this asks for 192 grid units of it
-// across a rank boundary nothing wide.
-scav_profile sealed_profile() {
-  scav_profile p{ readable() };
-  p.pad = 16;
-  p.rank_sep = 0;
-  p.node_sep = 576;
-  return p;
-}
 
 scav_point last_point(Chart const &c, uint32_t trans) {
   scav_span const route{ row_of<scav_span>(c, "scav.geom.route", trans) };
@@ -1241,7 +1281,7 @@ TEST_CASE("layout: only a kept inflation attempt ends the retry loop") {
 
 TEST_CASE("layout: a sealed channel is opened by inflating the spacing") {
   Chart c{ sealed_chart() };
-  scav_profile const p{ sealed_profile() };
+  scav_profile const p{ sealed_profile(readable()) };
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
   uint32_t inflations{ 0 };
@@ -1255,7 +1295,7 @@ TEST_CASE("layout: a sealed channel is opened by inflating the spacing") {
 
 TEST_CASE("layout: at the inflation cap the degraded transition is diagnosed") {
   Chart c{ sealed_chart() };
-  scav_profile p{ sealed_profile() };
+  scav_profile p{ sealed_profile(readable()) };
   p.spacing_inflation_cap = 1;
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
@@ -1279,7 +1319,7 @@ TEST_CASE("layout: at the inflation cap the degraded transition is diagnosed") {
 
 TEST_CASE("layout: a cap or an increment of zero never retries") {
   Chart capped{ sealed_chart() };
-  scav_profile p{ sealed_profile() };
+  scav_profile p{ sealed_profile(readable()) };
   p.spacing_inflation_cap = 0;
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
@@ -1310,7 +1350,7 @@ TEST_CASE("layout: a cap or an increment of zero never retries") {
 }
 
 TEST_CASE("layout: an increment the validator refuses ends the retries") {
-  scav_profile p{ sealed_profile() };
+  scav_profile p{ sealed_profile(readable()) };
   p.spacing_inflation_increment = SPACE_MAX;
   REQUIRE(profile_validate(p));
   scav_profile widened{ p };
@@ -1330,7 +1370,7 @@ TEST_CASE("layout: an increment the validator refuses ends the retries") {
 
   // The first attempt's geometry, which is what a run that never retried writes.
   Chart never{ sealed_chart() };
-  scav_profile no_retry{ sealed_profile() };
+  scav_profile no_retry{ sealed_profile(readable()) };
   no_retry.spacing_inflation_cap = 0;
   std::vector<Diagnostic> other;
   REQUIRE(layout_run(never, {}, opts(no_retry), placed, other, &inflations));
@@ -1358,7 +1398,7 @@ Chart sealed_with_chain() {
 }  // namespace
 
 TEST_CASE("layout: a retry whose sizing leaves the domain ends them too") {
-  scav_profile p{ sealed_profile() };
+  scav_profile p{ sealed_profile(readable()) };
   p.spacing_inflation_increment = 120000;
   REQUIRE(profile_validate(p));
   scav_profile widened{ p };
@@ -1369,10 +1409,10 @@ TEST_CASE("layout: a retry whose sizing leaves the domain ends them too") {
 
   Chart c{ sealed_with_chain() };
   SplitGraph const g{ decompose(c) };
-  SubmachineOrders const o{ phase1_order(c, g, {}, widened) };
+  SubmachineOrders const o{ order_submachines(c, g, {}, widened) };
   SizedLayout z;
   std::vector<Diagnostic> spilled;
-  REQUIRE(!phase2_size(c, g, o, {}, widened, z, spilled));  // sizing is what refuses
+  REQUIRE(!size_layout(c, g, o, {}, widened, z, spilled));  // sizing is what refuses
 
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
@@ -1388,7 +1428,7 @@ TEST_CASE("layout: an attempt that degrades no less than the best is not taken")
   // Two retries that neither settle nor improve: the count stays at zero and the
   // geometry is the first attempt's, not the widest one tried.
   Chart twice{ sealed_chart() };
-  scav_profile p{ sealed_profile() };
+  scav_profile p{ sealed_profile(readable()) };
   p.spacing_inflation_cap = 2;
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
@@ -1408,13 +1448,18 @@ TEST_CASE("layout: the inflation count is optional") {
   Chart c{ sealed_chart() };
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
-  REQUIRE(layout_run(c, {}, opts(sealed_profile()), placed, diags, nullptr));
+  REQUIRE(layout_run(c, {}, opts(sealed_profile(readable())), placed, diags, nullptr));
   CHECK(diags.empty());
 
   Chart counted{ sealed_chart() };
   uint32_t inflations{ 0 };
   std::vector<Diagnostic> other;
-  REQUIRE(layout_run(counted, {}, opts(sealed_profile()), placed, other, &inflations));
+  REQUIRE(layout_run(counted,
+                     {},
+                     opts(sealed_profile(readable())),
+                     placed,
+                     other,
+                     &inflations));
   CHECK(inflations == 3);
   CHECK(layout_coordinate_hash(c) == layout_coordinate_hash(counted));
 }
@@ -1434,14 +1479,14 @@ TEST_CASE("layout: a transition every net of which fell back is diagnosed once")
   build_trans(c, bar, deep, TransKind::External, {});
   build_trans(c, deep, beside, TransKind::External, {});  // routes, so nothing to say
 
-  scav_profile p{ sealed_profile() };
+  scav_profile p{ sealed_profile(readable()) };
   p.spacing_inflation_cap = 0;
   SplitGraph const g{ decompose(c) };
-  SubmachineOrders const o{ phase1_order(c, g, {}, p) };
+  SubmachineOrders const o{ order_submachines(c, g, {}, p) };
   SizedLayout z;
   std::vector<Diagnostic> spilled;
-  REQUIRE(phase2_size(c, g, o, {}, p, z, spilled));
-  Routes const r{ phase3_route(c, g, o, z, {}, p, *router_at(0)) };
+  REQUIRE(size_layout(c, g, o, {}, p, z, spilled));
+  Routes const r{ route_transitions(c, g, o, z, {}, p, *router_at(0)) };
   REQUIRE(g.trans_segments[0].len == 3);
   REQUIRE(r.unreachable == 2);
   REQUIRE(r.failed[0] == 1);
@@ -1474,11 +1519,11 @@ TEST_CASE("layout: a graph past the router's budget is not a spacing problem") {
 
   scav_profile const p{ readable() };
   SplitGraph const g{ decompose(c) };
-  SubmachineOrders const o{ phase1_order(c, g, {}, p) };
+  SubmachineOrders const o{ order_submachines(c, g, {}, p) };
   SizedLayout z;
   std::vector<Diagnostic> spilled;
-  REQUIRE(phase2_size(c, g, o, {}, p, z, spilled));
-  Routes const r{ phase3_route(c, g, o, z, {}, p, *router_at(0)) };
+  REQUIRE(size_layout(c, g, o, {}, p, z, spilled));
+  Routes const r{ route_transitions(c, g, o, z, {}, p, *router_at(0)) };
   REQUIRE(r.too_large > 0);
   REQUIRE(r.unreachable == 0);
   uint32_t marked{ 0 };
@@ -1502,7 +1547,7 @@ TEST_CASE("layout: a graph past the router's budget is not a spacing problem") {
 }
 
 TEST_CASE("layout: inflating the profile leaves the inputs digest alone") {
-  scav_profile const p{ sealed_profile() };
+  scav_profile const p{ sealed_profile(readable()) };
   Chart sealed{ sealed_chart() };
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
@@ -1561,7 +1606,7 @@ TEST_CASE("layout: nothing in the corpus or at the scale target inflates") {
     CHECK(laid.empty());
   }
 
-  Chart nested{ two_k_chart() };
+  Chart nested{ nested_2k_chart() };
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
   uint32_t inflations{ 1 };
@@ -1602,7 +1647,7 @@ TEST_CASE("layout: a frame full of long edges terminates, expensively") {
   }
 
   SplitGraph const g{ decompose(c) };
-  SubmachineOrders const o{ phase1_order(c, g, {}, readable()) };
+  SubmachineOrders const o{ order_submachines(c, g, {}, readable()) };
   MESSAGE("512 states with wrapping skips: ",
           o.nodes.size(),
           " ordering nodes, ",
@@ -1622,7 +1667,7 @@ TEST_CASE("layout: the coordinate extent estimate holds under fat text") {
   scav_rect best{};
   while ((hi - lo) > 16) {
     int32_t const mid{ lo + ((hi - lo) / 2) };
-    Chart c{ two_k_chart() };
+    Chart c{ nested_2k_chart() };
     std::vector<scav_box_space> const boxes(
         c.states.size(),
         { .min_w = mid, .h_before = 448, .h_after = 96 });
@@ -1725,10 +1770,10 @@ TEST_CASE("layout: the corpus cost vector is committed, term by term") {
     REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
 
     SplitGraph const g{ decompose(c) };
-    SubmachineOrders const o{ phase1_order(c, g, {}, p) };
+    SubmachineOrders const o{ order_submachines(c, g, {}, p) };
     SizedLayout z;
-    REQUIRE(phase2_size(c, g, o, {}, p, z, diags));
-    Routes const r{ phase3_route(c, g, o, z, {}, p, *router_at(0)) };
+    REQUIRE(size_layout(c, g, o, {}, p, z, diags));
+    Routes const r{ route_transitions(c, g, o, z, {}, p, *router_at(0)) };
     CostTerms const t{ cost_terms(c, g, z, r, {}, p) };
     Cost const scored{ cost_of(t, p) };
 

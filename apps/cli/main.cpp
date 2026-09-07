@@ -19,6 +19,8 @@ constexpr std::string_view USAGE{
   "  deps [--target NAME] <file>  the document network as a depfile\n"
   "  dump [--hash|--json] [--layout] <file>  the model; --layout adds geometry\n"
   "  render [-o FILE] [--embed-font] [--profile NAME] <file>   chart -> SVG\n"
+  "  selftest [--against FILE]   recompute the layout hashes on this toolchain "
+  "and diff against the goldens\n"
 };
 
 int usage() {
@@ -80,6 +82,18 @@ int dispatch(int argc, char **argv) {
     }
     if (path == nullptr) { return usage(); }
     return run_render(path, out, embed, profile);
+  }
+
+  if (verb == "selftest") {
+    char const *against{ nullptr };
+    for (int i = 2; i < argc; ++i) {
+      if ((std::string_view{ argv[i] } != "--against") || ((i + 1) >= argc) ||
+          (against != nullptr)) {
+        return usage();
+      }
+      against = argv[++i];
+    }
+    return run_selftest(against);
   }
 
   if (verb == "check") {

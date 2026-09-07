@@ -43,14 +43,17 @@ struct Routes {
 };
 
 // One net per segment, routed in that segment's frame, laid end to end. The
-// planning is the router's input, so two routers see the same problem.
-Routes phase3_route(Chart const &c,
-                    SplitGraph const &g,
-                    SubmachineOrders const &o,
-                    SizedLayout const &z,
-                    scav_spaces const &s,
-                    scav_profile const &p,
-                    Router const &router);
+// planning is the router's input, so two routers see the same problem. Frames
+// are sharded across `threads` workers and merged in frame order, so the
+// result is one value at every worker count (6).
+Routes route_transitions(Chart const &c,
+                         SplitGraph const &g,
+                         SubmachineOrders const &o,
+                         SizedLayout const &z,
+                         scav_spaces const &s,
+                         scav_profile const &p,
+                         Router const &router,
+                         uint32_t threads = 0);
 
 }  // namespace scav
 
