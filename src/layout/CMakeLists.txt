@@ -61,6 +61,7 @@ target_link_libraries(scav_shared PRIVATE scavlayout)
 
 if(SCAV_BUILD_TESTS)
   scav_tests(scav_layout_tests
+    c_api_tests.cpp
     layout_tests.cpp
     bench_tests.cpp
     gauntlet_tests.cpp

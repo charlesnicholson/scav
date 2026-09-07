@@ -38,6 +38,7 @@ target_sources(scav_shared PRIVATE c_api.cpp "${font_source}")
 
 if(SCAV_BUILD_TESTS)
   scav_tests(scav_draw_tests
+    c_api_tests.cpp
     metrics_tests.cpp
     drawlist_tests.cpp
     helpers_tests.cpp

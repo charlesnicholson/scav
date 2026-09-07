@@ -17,6 +17,9 @@
 
 namespace {
 
+// What a refused call must leave an out-param holding.
+constexpr uint32_t SENTINEL{ 0xD1CE'D1CEU };
+
 std::string_view span_text(scav_byte const *bytes, uint32_t len) {
   return { reinterpret_cast<char const *>(bytes), len };
 }
@@ -416,6 +419,302 @@ TEST_CASE("abi: scav_str reads the pool a strref names, and only the pool") {
   uint32_t const pool_size{ static_cast<uint32_t>(chart->chart.strings.bytes.size()) };
   scav_span const past{ .off = pool_size, .len = 1 };
   CHECK(scav_str(chart, past, &bytes, &len) == SCAV_E_INVALID_ARG);
+
+  scav_chart_destroy(chart);
+  scav_load_destroy(loader);
+}
+
+TEST_CASE("abi: a null argument is refused whichever one it is, and writes nothing") {
+  scav_load *loader{ nullptr };
+  scav_chart *chart{ drive(diamond(), &loader) };
+  REQUIRE(chart != nullptr);
+
+  // Each out-param carries a value the call must leave alone; a pointer one
+  // carries an address, since a written pointer could legitimately be null.
+  scav_byte const guard{ 0x5C };
+  scav_pending const marker{};
+  scav_pending const *pending{ &marker };
+  scav_byte const *bytes{ &guard };
+  uint32_t code{ SENTINEL };
+  uint32_t doc{ SENTINEL };
+  uint32_t off{ SENTINEL };
+  uint32_t len{ SENTINEL };
+  uint32_t count{ SENTINEL };
+  uint32_t stride{ SENTINEL };
+  uint32_t hash{ SENTINEL };
+  scav_column_id column{ SENTINEL };
+  scav_span const empty{ .off = 0, .len = 0 };
+
+  struct Case {
+    char const *what;
+    scav_result got;
+    scav_result want;
+  };
+  std::vector<Case> const cases{
+    { .what = "load_add: no name",
+      .got = scav_load_add(loader, &guard, 1, nullptr),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "load_pending: no loader",
+      .got = scav_load_pending(nullptr, &pending, &count),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "load_pending: nowhere to put the rows",
+      .got = scav_load_pending(loader, nullptr, &count),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "load_pending: nowhere to put the count",
+      .got = scav_load_pending(loader, &pending, nullptr),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "load_path: no loader",
+      .got = scav_load_path(nullptr, empty, &bytes, &len),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "load_path: nowhere to put the bytes",
+      .got = scav_load_path(loader, empty, nullptr, &len),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "load_path: nowhere to put the length",
+      .got = scav_load_path(loader, empty, &bytes, nullptr),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "load_finish: nowhere to put the chart",
+      .got = scav_load_finish(loader, nullptr),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "load_diag_count: nowhere to put the count",
+      .got = scav_load_diag_count(loader, nullptr),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "load_diag: no loader",
+      .got = scav_load_diag(nullptr, 0, &code, &doc, &off, &len),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "load_diag: nowhere to put the code",
+      .got = scav_load_diag(loader, 0, nullptr, &doc, &off, &len),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "load_diag: nowhere to put the document",
+      .got = scav_load_diag(loader, 0, &code, nullptr, &off, &len),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "load_diag: nowhere to put the offset",
+      .got = scav_load_diag(loader, 0, &code, &doc, nullptr, &len),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "load_diag: nowhere to put the length",
+      .got = scav_load_diag(loader, 0, &code, &doc, &off, nullptr),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "load_document_name: no loader",
+      .got = scav_load_document_name(nullptr, 0, &bytes, &len),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "load_document_name: nowhere to put the bytes",
+      .got = scav_load_document_name(loader, 0, nullptr, &len),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "load_document_name: nowhere to put the length",
+      .got = scav_load_document_name(loader, 0, &bytes, nullptr),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "chart_counts: nowhere to put the documents",
+      .got = scav_chart_counts(chart, nullptr, &code, &doc, &off, &len),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "chart_counts: nowhere to put the states",
+      .got = scav_chart_counts(chart, &code, nullptr, &doc, &off, &len),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "chart_counts: nowhere to put the submachines",
+      .got = scav_chart_counts(chart, &code, &doc, nullptr, &off, &len),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "chart_counts: nowhere to put the transitions",
+      .got = scav_chart_counts(chart, &code, &doc, &off, nullptr, &len),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "chart_counts: nowhere to put the includes",
+      .got = scav_chart_counts(chart, &code, &doc, &off, &len, nullptr),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "chart_structural_hash: nowhere to put the hash",
+      .got = scav_chart_structural_hash(chart, nullptr),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "chart_digest: nowhere to put the count",
+      .got = scav_chart_digest(chart, nullptr, 0, nullptr),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "column_find: no chart",
+      .got = scav_column_find(nullptr, "scav.geom.state", &column),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "column_find: no name to look for",
+      .got = scav_column_find(chart, nullptr, &column),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "column_find: nowhere to put the id",
+      .got = scav_column_find(chart, "scav.geom.state", nullptr),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "column_data: no chart",
+      .got = scav_column_data(nullptr, 0, &bytes, &stride),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "column_data: nowhere to put the rows",
+      .got = scav_column_data(chart, 0, nullptr, &stride),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "column_data: nowhere to put the stride",
+      .got = scav_column_data(chart, 0, &bytes, nullptr),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "column_count: no chart",
+      .got = scav_column_count(nullptr, 0, &count),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "column_count: nowhere to put the count",
+      .got = scav_column_count(chart, 0, nullptr),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "str: no chart",
+      .got = scav_str(nullptr, empty, &bytes, &len),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "str: nowhere to put the bytes",
+      .got = scav_str(chart, empty, nullptr, &len),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "str: nowhere to put the length",
+      .got = scav_str(chart, empty, &bytes, nullptr),
+      .want = SCAV_E_INVALID_ARG },
+  };
+  for (Case const &c : cases) {
+    CAPTURE(c.what);
+    CHECK(c.got == c.want);
+  }
+
+  CHECK(pending == &marker);
+  CHECK(bytes == &guard);
+  CHECK(column == SENTINEL);
+  for (uint32_t const *slot : { &code, &doc, &off, &len, &count, &stride, &hash }) {
+    CHECK(*slot == SENTINEL);
+  }
+
+  scav_chart_destroy(chart);
+  scav_load_destroy(loader);
+}
+
+TEST_CASE("abi: an ordinal or a span past the end is refused, and writes nothing") {
+  scav_load *loader{ nullptr };
+  scav_chart *chart{ drive(diamond(), &loader) };
+  REQUIRE(chart != nullptr);
+
+  uint32_t diags{ SENTINEL };
+  REQUIRE(scav_load_diag_count(loader, &diags) == SCAV_OK);
+
+  scav_byte const guard{ 0x5C };
+  scav_byte const *bytes{ &guard };
+  uint32_t code{ SENTINEL };
+  uint32_t doc{ SENTINEL };
+  uint32_t off{ SENTINEL };
+  uint32_t len{ SENTINEL };
+
+  uint32_t const paths{ static_cast<uint32_t>(loader->loader.paths.bytes.size()) };
+  scav_span const past_paths{ .off = paths, .len = 1 };
+  scav_span const wraps{ .off = 0xFFFF'FFFFU, .len = 1 };
+
+  struct Case {
+    char const *what;
+    scav_result got;
+    scav_result want;
+  };
+  std::vector<Case> const cases{
+    { .what = "load_diag: one past the last diagnostic",
+      .got = scav_load_diag(loader, diags, &code, &doc, &off, &len),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "load_document_name: no such document",
+      .got = scav_load_document_name(loader, 999, &bytes, &len),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "load_path: a span past the path pool",
+      .got = scav_load_path(loader, past_paths, &bytes, &len),
+      .want = SCAV_E_INVALID_ARG },
+    // Summed in 64 bits, so a span whose end wraps 32 is out of range rather
+    // than back inside the pool.
+    { .what = "load_path: a span whose end wraps",
+      .got = scav_load_path(loader, wraps, &bytes, &len),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "str: a span whose end wraps",
+      .got = scav_str(chart, wraps, &bytes, &len),
+      .want = SCAV_E_INVALID_ARG },
+  };
+  for (Case const &c : cases) {
+    CAPTURE(c.what);
+    CHECK(c.got == c.want);
+  }
+
+  CHECK(bytes == &guard);
+  for (uint32_t const *slot : { &code, &doc, &off, &len }) { CHECK(*slot == SENTINEL); }
+
+  scav_chart_destroy(chart);
+  scav_load_destroy(loader);
+}
+
+TEST_CASE("abi: a finished loader has nothing left to say about what it wants") {
+  scav_load *loader{ nullptr };
+  scav_chart *chart{ drive(diamond(), &loader) };
+  REQUIRE(chart != nullptr);
+
+  scav_pending const marker{};
+  scav_pending const *pending{ &marker };
+  uint32_t count{ SENTINEL };
+  CHECK(scav_load_pending(loader, &pending, &count) == SCAV_E_STATE);
+  CHECK(pending == &marker);
+  CHECK(count == SENTINEL);
+
+  scav_chart_destroy(chart);
+  scav_load_destroy(loader);
+}
+
+TEST_CASE("abi: the digest refuses a buffer it was promised but not given") {
+  scav_load *loader{ nullptr };
+  scav_chart *chart{ drive(diamond(), &loader) };
+  REQUIRE(chart != nullptr);
+
+  uint32_t needed{ 0 };
+  REQUIRE(scav_chart_digest(chart, nullptr, 0, &needed) == SCAV_OK);
+  REQUIRE(needed != 0);
+
+  // A capacity with no buffer under it is the capacity error, not a write: the
+  // count is still reported, so a caller can allocate and come back.
+  uint32_t again{ SENTINEL };
+  CHECK(scav_chart_digest(chart, nullptr, needed, &again) == SCAV_E_CAPACITY);
+  CHECK(again == needed);
+
+  scav_chart_destroy(chart);
+  scav_load_destroy(loader);
+}
+
+TEST_CASE("abi: a loader still open reports its own diagnostics, and its refusals") {
+  scav_load *loader{ nullptr };
+  REQUIRE(scav_load_begin(&loader) == SCAV_OK);
+
+  // Bytes that do not parse: the add itself is the load error, and the
+  // diagnostics are readable from the loader before anything is finished.
+  CHECK(add(loader, "chart c { state", "bad.scav") == SCAV_E_LOAD);
+  uint32_t count{ 0 };
+  REQUIRE(scav_load_diag_count(loader, &count) == SCAV_OK);
+  REQUIRE(count != 0);
+
+  uint32_t code{ SENTINEL };
+  uint32_t doc{ SENTINEL };
+  uint32_t off{ SENTINEL };
+  uint32_t len{ SENTINEL };
+  REQUIRE(scav_load_diag(loader, 0, &code, &doc, &off, &len) == SCAV_OK);
+  CHECK(code != SENTINEL);
+  CHECK(scav_diag_message(code) != nullptr);
+
+  scav_load_destroy(loader);
+
+  // No bytes and no length is an empty document rather than the null-pointer
+  // refusal: it reaches the parser, which is what has nothing to say about it.
+  scav_load *empty{ nullptr };
+  REQUIRE(scav_load_begin(&empty) == SCAV_OK);
+  CHECK(scav_load_add(empty, nullptr, 0, "empty.scav") == SCAV_E_LOAD);
+  count = 0;
+  REQUIRE(scav_load_diag_count(empty, &count) == SCAV_OK);
+  CHECK(count != 0);
+  scav_load_destroy(empty);
+}
+
+TEST_CASE("abi: a chart that builds with findings comes back with both") {
+  scav_load *loader{ nullptr };
+  REQUIRE(scav_load_begin(&loader) == SCAV_OK);
+  // The document parses and instantiates, so there is a chart; the endpoint
+  // resolves to nothing, so there is a finding on it as well.
+  REQUIRE(add(loader, "chart c { state A, trans A -> Nope, }", "c.scav") == SCAV_OK);
+
+  scav_chart *chart{ nullptr };
+  CHECK(scav_load_finish(loader, &chart) == SCAV_E_LOAD);
+  REQUIRE(chart != nullptr);
+
+  uint32_t states{ SENTINEL };
+  uint32_t ignored{ SENTINEL };
+  REQUIRE(scav_chart_counts(chart, &ignored, &states, &ignored, &ignored, &ignored) ==
+          SCAV_OK);
+  CHECK(states != 0);
+
+  uint32_t count{ 0 };
+  REQUIRE(scav_load_diag_count(loader, &count) == SCAV_OK);
+  CHECK(count != 0);
 
   scav_chart_destroy(chart);
   scav_load_destroy(loader);
