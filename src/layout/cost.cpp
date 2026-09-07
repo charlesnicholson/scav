@@ -13,6 +13,7 @@
 #include "scav_internal.h"
 #include "scav_stable_sort.h"
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <type_traits>
@@ -729,15 +730,54 @@ CostTerms cost_columns(Chart const &c,
   return cost_terms(c, g, z, r, s, p);
 }
 
+namespace {
+
+// Each term in the unit the profile already names it in, then weighted: counts
+// stay counts, lengths become ems of `font_size_grid`, area ems squared. The
+// division is ceiling, so a term nonzero in grid units is nonzero here (11.6),
+// and the em is floored at 1 because a profile the validator never saw could
+// carry a zero the bound [1, SPACE_MAX] forbids.
+std::array<Wide, TIER2_TERMS> weighted_terms(CostTerms const &t, scav_profile const &p) {
+  Wide const em{ imax(Wide{ p.font_size_grid }, Wide{ 1 }) };
+  Wide const em2{ em * em };
+  return { Wide{ p.w_bends } * t.bends,
+           Wide{ p.w_corridor } * ceil_div(t.corridor, em),
+           Wide{ p.w_crossings } * t.crossings,
+           Wide{ p.w_excess_len } * ceil_div(t.excess_len, em),
+           Wide{ p.w_adjacency } * t.adjacency,
+           Wide{ p.w_label } * t.label,
+           Wide{ p.w_label_near } * ceil_div(t.label_near, em),
+           Wide{ p.w_aspect } * ceil_div(t.aspect, em),
+           Wide{ p.w_area } * ceil_div(t.area, em2) };
+}
+
+}  // namespace
+
 Cost cost_of(CostTerms const &t, scav_profile const &p) {
   Cost out;
   out.t0_violations = t.through_box + t.box_overlap;
-  out.t2 = (Wide{ p.w_bends } * t.bends) + (Wide{ p.w_corridor } * t.corridor) +
-           (Wide{ p.w_crossings } * t.crossings) +
-           (Wide{ p.w_excess_len } * t.excess_len) +
-           (Wide{ p.w_adjacency } * t.adjacency) + (Wide{ p.w_label } * t.label) +
-           (Wide{ p.w_label_near } * t.label_near) + (Wide{ p.w_aspect } * t.aspect) +
-           (Wide{ p.w_area } * t.area);
+  // Area is the largest term at (2 * COORD_MAX)^2 < 2^40, its em^2 only divides
+  // it down, and nine of those under a weight capped at 2^10 stay below 2^54.
+  for (Wide const term : weighted_terms(t, p)) { out.t2 += term; }
+  return out;
+}
+
+std::array<int64_t, TIER2_TERMS> cost_shares(CostTerms const &t, scav_profile const &p) {
+  std::array<Wide, TIER2_TERMS> const part{ weighted_terms(t, p) };
+  Wide whole{ 0 };
+  for (Wide const term : part) { whole += term; }
+  std::array<int64_t, TIER2_TERMS> out{};
+  if (whole <= 0) { return out; }
+  // The multiplier needs fourteen bits, so a sum past 2^48 shifts both sides
+  // down until the product fits; no sum the weight caps allow ever gets there.
+  constexpr Wide BASIS_POINTS{ 10'000 };
+  constexpr uint32_t SAFE_BITS{ 48 };
+  uint32_t const bits{ ilog2(static_cast<uint64_t>(whole)) };
+  uint32_t const shift{ (bits > SAFE_BITS) ? (bits - SAFE_BITS) : 0U };
+  Wide const den{ whole >> shift };
+  for (uint32_t i = 0; i < TIER2_TERMS; ++i) {
+    out[i] = floor_div((part[i] >> shift) * BASIS_POINTS, den);
+  }
   return out;
 }
 

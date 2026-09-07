@@ -10,6 +10,7 @@
 #include "scav/scav_core.h"
 #include "scav/scav_layout_c.h"
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -57,6 +58,8 @@ struct GridQuery {
   std::vector<uint32_t> hit;  // -> ChildGrid::child
 };
 
+inline constexpr uint32_t TIER2_TERMS{ 9 };
+
 // The nine Tier-2 quantities before weighting, so a test reads one of them
 // rather than a sum.
 struct CostTerms {
@@ -102,9 +105,13 @@ CostTerms cost_columns(Chart const &c,
                        scav_spaces const &s = {},
                        std::vector<scav_rect> const &placed = {});
 
-// Every weight is capped at 2^10 and area at 2^40, so the sum stays inside
-// int64 by construction rather than by measurement (11.6).
+// Every term is converted to the unit the profile names it in before its weight
+// applies, so a weight is an exchange rate between comparable quantities (11.6).
 Cost cost_of(CostTerms const &t, scav_profile const &p);
+
+// Each weighted term's share of `cost_of`'s sum in basis points, floored and in
+// CostTerms order, so a golden watches the balance a weight change moves.
+std::array<int64_t, TIER2_TERMS> cost_shares(CostTerms const &t, scav_profile const &p);
 
 bool cost_less(Cost const &a, Cost const &b);
 

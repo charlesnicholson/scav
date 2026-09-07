@@ -10,6 +10,7 @@
 #include "layout/size.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
+#include "scav_int.h"
 
 #include "doctest.h"
 
@@ -585,7 +586,9 @@ TEST_CASE("cost: the weights turn terms into one integer, compared by tier") {
   t.area = 1000;
   Cost const scored{ cost_of(t, p) };
   CHECK(scored.t0_violations == 0);
-  CHECK(scored.t2 == ((int64_t{ p.w_crossings } * 2) + (int64_t{ p.w_area } * 1000)));
+  // A crossing is a count and 1000 square grid units is a fraction of one em
+  // squared, which ceils to one rather than away (11.6).
+  CHECK(scored.t2 == ((int64_t{ p.w_crossings } * 2) + int64_t{ p.w_area }));
 
   // Tier 0 dominates whatever Tier 2 says, because the tiers are compared in
   // order and never summed.
@@ -594,6 +597,97 @@ TEST_CASE("cost: the weights turn terms into one integer, compared by tier") {
   Cost const bad{ cost_of(violating, p) };
   CHECK(cost_less(scored, bad));
   CHECK_FALSE(cost_less(bad, scored));
+}
+
+TEST_CASE("cost: every Tier-2 term is scored in the unit the profile names it") {
+  scav_profile const p{ profile() };
+  int64_t const em{ p.font_size_grid };
+  auto const only = [&p](int64_t CostTerms::*term, int64_t v) {
+    CostTerms t;
+    t.*term = v;
+    return cost_of(t, p).t2;
+  };
+
+  // A count is already a count; a length is ems and an area ems squared, and
+  // the division ceils, so one grid unit of either still costs a whole one.
+  CHECK(only(&CostTerms::bends, 1) == int64_t{ p.w_bends });
+  CHECK(only(&CostTerms::crossings, 1) == int64_t{ p.w_crossings });
+  CHECK(only(&CostTerms::adjacency, 1) == int64_t{ p.w_adjacency });
+  CHECK(only(&CostTerms::label, 1) == int64_t{ p.w_label });
+  CHECK(only(&CostTerms::corridor, 1) == int64_t{ p.w_corridor });
+  CHECK(only(&CostTerms::excess_len, 1) == int64_t{ p.w_excess_len });
+  CHECK(only(&CostTerms::label_near, 1) == int64_t{ p.w_label_near });
+  CHECK(only(&CostTerms::aspect, 1) == int64_t{ p.w_aspect });
+  CHECK(only(&CostTerms::area, 1) == int64_t{ p.w_area });
+
+  // A whole unit each way, and one grid unit past it.
+  CHECK(only(&CostTerms::corridor, em) == int64_t{ p.w_corridor });
+  CHECK(only(&CostTerms::corridor, em + 1) == (2 * int64_t{ p.w_corridor }));
+  CHECK(only(&CostTerms::area, em * em) == int64_t{ p.w_area });
+  CHECK(only(&CostTerms::area, (em * em) + 1) == (2 * int64_t{ p.w_area }));
+
+  // Nothing scored is still nothing, which is what makes an unlaid chart zero.
+  CHECK(cost_of(CostTerms{}, p).t2 == 0);
+  CHECK(only(&CostTerms::corridor, 0) == 0);
+  CHECK(only(&CostTerms::area, 0) == 0);
+}
+
+TEST_CASE("cost: the shipped weights sum a hand-built term vector") {
+  scav_profile const p{ profile() };
+  REQUIRE(p.font_size_grid == 192);  // the ceilings below are read against it
+  CostTerms t;
+  t.bends = 3;
+  t.corridor = 400;  // 3 ems
+  t.crossings = 5;
+  t.excess_len = 1000;  // 6
+  t.adjacency = 2;
+  t.label = 4;
+  t.label_near = 300;  // 2
+  t.aspect = 500;      // 3
+  t.area = 100000;     // 3 em squared
+  CHECK(cost_of(t, p).t2 ==
+        ((int64_t{ p.w_bends } * 3) + (int64_t{ p.w_corridor } * 3) +
+         (int64_t{ p.w_crossings } * 5) + (int64_t{ p.w_excess_len } * 6) +
+         (int64_t{ p.w_adjacency } * 2) + (int64_t{ p.w_label } * 4) +
+         (int64_t{ p.w_label_near } * 2) + (int64_t{ p.w_aspect } * 3) +
+         (int64_t{ p.w_area } * 3)));
+  CHECK(cost_of(t, p).t2 == 753);
+}
+
+TEST_CASE("cost: an em of one grid unit leaves every length where it stood") {
+  // The smallest font_size_grid the profile's bound allows, which is also the
+  // divisor that makes the conversion an identity.
+  scav_profile p{ profile() };
+  p.font_size_grid = 1;
+  REQUIRE(profile_validate(p));
+
+  CostTerms t;
+  t.corridor = 400;
+  t.excess_len = 1000;
+  t.label_near = 300;
+  t.aspect = 500;
+  t.area = 100000;
+  CHECK(cost_of(t, p).t2 ==
+        ((int64_t{ p.w_corridor } * 400) + (int64_t{ p.w_excess_len } * 1000) +
+         (int64_t{ p.w_label_near } * 300) + (int64_t{ p.w_aspect } * 500) +
+         (int64_t{ p.w_area } * 100000)));
+}
+
+TEST_CASE("cost: the shares divide the sum into floored basis points") {
+  scav_profile const p{ profile() };
+  CostTerms t;
+  t.bends = 1;
+  CHECK(cost_shares(t, p)[0] == 10000);  // one term is the whole of the sum
+
+  t.area = 100000;  // three em squared at w_area against one bend at w_bends
+  int64_t total{ 0 };
+  for (int64_t const bp : cost_shares(t, p)) { total += bp; }
+  // Floored per term, so a row is at most the whole and short of it by under
+  // one basis point per term that scored anything.
+  CHECK(total <= 10000);
+  CHECK(total > (10000 - static_cast<int64_t>(TIER2_TERMS)));
+
+  for (int64_t const bp : cost_shares(CostTerms{}, p)) { CHECK(bp == 0); }
 }
 
 TEST_CASE("cost: a hint outranks whatever Tier 2 adds up to") {
@@ -939,12 +1033,14 @@ TEST_CASE("cost: a chart already at the desired ratio pays no aspect") {
   CHECK(fitting.aspect == 0);
   CHECK(fitting.area == ((16LL * 40) * (10LL * 40)));
 
-  // One unit off the ratio is one unit of the term, weighted like any other.
+  // One unit off the ratio is one unit of the term, weighted like any other --
+  // and both the deviation and the area are ems before the weight applies.
   z.chart.w += 1;
   CostTerms const off{ cost_terms(c, decompose(c), z, {}, {}, p) };
   CHECK(off.aspect == p.dar_den);
-  CHECK(cost_of(off, p).t2 ==
-        ((int64_t{ p.w_aspect } * p.dar_den) + (int64_t{ p.w_area } * off.area)));
+  int64_t const em{ p.font_size_grid };
+  CHECK(cost_of(off, p).t2 == ((int64_t{ p.w_aspect } * ceil_div(off.aspect, em)) +
+                               (int64_t{ p.w_area } * ceil_div(off.area, em * em))));
 }
 
 TEST_CASE("cost: the containment walk nests a descendant's interval in its own") {

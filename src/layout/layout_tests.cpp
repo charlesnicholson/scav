@@ -1816,11 +1816,14 @@ TEST_CASE("layout: corpus charts hash to the committed golden") {
   CHECK(want == actual);
 }
 
-TEST_CASE("layout: the corpus cost vector is committed, term by term") {
+TEST_CASE("layout: the corpus cost vector is committed, term by term and by share") {
   // The gate's numbers in the open: 11.6's terms with no space requests and the
   // readable profile, so a later phase is compared against a row not a claim.
+  // The share table beside it says how the sum divides between the nine terms,
+  // which is what a weight change moves and a term column does not show.
   scav_profile const p{ readable() };
   std::string actual;
+  std::string shares;
   for (char const *name : { "axis.scav",
                             "bottler.scav",
                             "brew.scav",
@@ -1865,6 +1868,13 @@ TEST_CASE("layout: the corpus cost vector is committed, term by term") {
       actual += std::to_string(term);
     }
     actual += '\n';
+
+    shares += name;
+    for (int64_t const bp : cost_shares(t, p)) {
+      shares += ' ';
+      shares += std::to_string(bp);
+    }
+    shares += '\n';
   }
 
   std::vector<scav_byte> golden;
@@ -1877,6 +1887,19 @@ TEST_CASE("layout: the corpus cost vector is committed, term by term") {
     MESSAGE("actual written to " SCAV_TEST_OUT_DIR "/corpus_cost.txt:\n", actual);
   }
   CHECK(want == actual);
+
+  std::vector<scav_byte> shares_golden;
+  REQUIRE(read_file(SCAV_TEST_DATA_DIR "/golden/layout/corpus_cost_shares.txt",
+                    shares_golden));
+  std::string const want_shares{ reinterpret_cast<char const *>(shares_golden.data()),
+                                 shares_golden.size() };
+  if (want_shares != shares) {
+    write_file(SCAV_TEST_OUT_DIR "/corpus_cost_shares.txt",
+               reinterpret_cast<scav_byte const *>(shares.data()),
+               shares.size());
+    MESSAGE("actual written to " SCAV_TEST_OUT_DIR "/corpus_cost_shares.txt:\n", shares);
+  }
+  CHECK(want_shares == shares);
 }
 
 namespace {
