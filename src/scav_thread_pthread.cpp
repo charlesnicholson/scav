@@ -49,9 +49,9 @@ struct Worker {
 
 void run_worker(Worker const &worker) {
 #ifdef SCAV_TESTING
-  for (uint32_t shard{ worker.first }; shard < worker.shards; shard += worker.workers) {
-    delay(shard);
-    worker.fn(worker.ctx, shard);
+  for (uint64_t shard{ worker.first }; shard < worker.shards; shard += worker.workers) {
+    delay(static_cast<uint32_t>(shard));
+    worker.fn(worker.ctx, static_cast<uint32_t>(shard));
   }
 #else
   run_stripe(worker.shards, worker.workers, worker.first, worker.fn, worker.ctx);

@@ -32,13 +32,13 @@ constexpr std::array<char const *, 11> CORPUS{
   "mill.scav", "ota.scav",     "tcp.scav",  "toolchanger.scav", "vac.scav"
 };
 
-// Every geometry column but `scav.geom.gen`, which counts runs rather than
-// describing one.
-constexpr std::array<char const *, 10> GEOM{
-  "scav.geom.state", "scav.geom.state_before", "scav.geom.state_after",
-  "scav.geom.sub",   "scav.geom.route",        "scav.geom.port",
-  "scav.geom.point", "scav.geom.portslot",     "scav.geom.chart",
-  "scav.geom.inputs"
+// Every geometry column, `scav.geom.gen` included: each run below is on a
+// fresh chart, so its run count is one like every other's.
+constexpr std::array<char const *, 11> GEOM{
+  "scav.geom.state",  "scav.geom.state_before", "scav.geom.state_after",
+  "scav.geom.sub",    "scav.geom.route",        "scav.geom.port",
+  "scav.geom.point",  "scav.geom.portslot",     "scav.geom.chart",
+  "scav.geom.inputs", "scav.geom.gen"
 };
 
 // Restores the injector however a case leaves it, failed assertion included.

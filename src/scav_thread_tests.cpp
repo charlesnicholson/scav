@@ -341,4 +341,9 @@ TEST_CASE("thread: run_stripe walks one worker's shards in index order") {
   visited.clear();
   run_stripe(3U, 4U, 3U, visit, &visited);
   CHECK(visited.empty());
+
+  // The next index after the one shard here is above UINT32_MAX.
+  visited.clear();
+  run_stripe(UINT32_MAX, UINT32_MAX - 1U, UINT32_MAX - 2U, visit, &visited);
+  CHECK(visited == std::vector<uint32_t>{ UINT32_MAX - 2U });
 }

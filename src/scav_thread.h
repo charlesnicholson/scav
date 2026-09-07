@@ -33,7 +33,11 @@ inline void run_stripe(uint32_t shards,
                        uint32_t first,
                        ShardFn fn,
                        void *ctx) {
-  for (uint32_t shard{ first }; shard < shards; shard += workers) { fn(ctx, shard); }
+  // 64-bit, so the index after the last stripe is representable near the top of
+  // the domain instead of wrapping back into it.
+  for (uint64_t shard{ first }; shard < shards; shard += workers) {
+    fn(ctx, static_cast<uint32_t>(shard));
+  }
 }
 
 }  // namespace scav
