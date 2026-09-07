@@ -2,6 +2,7 @@
 // synthesize, and every entity walks back to its declaring statement.
 
 #include "core/core_internal.h"
+#include "core/model/model.h"
 #include "core/tests/test_charts.h"
 #include "core/tests/test_support.h"
 #include "scav/scav_core.h"
@@ -9,10 +10,12 @@
 
 #include "doctest.h"
 
+#include <array>
 #include <cstdint>
 #include <ostream>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 namespace {
@@ -347,4 +350,184 @@ TEST_CASE("lower: refuses a non-empty chart and a chartless parse") {
   ParsedDocument const empty_pd{};
   Chart fresh;
   CHECK_FALSE(lower_document(fresh, empty_pd, diags));
+}
+
+TEST_CASE("lower: any of the three child kinds earns a state its implicit submachine") {
+  // A state block gets one as soon as it holds a state, a transition or an
+  // include, and the answer comes from whichever of the three is met first.
+  SUBCASE("a transition leads the block") {
+    Lowered const r{ lower("chart c { state A, state On { trans A -> A, }, }") };
+    REQUIRE(r.parsed);
+    CHECK(r.clean);
+    StateId on{ INVALID };
+    REQUIRE(resolve_path(r.c, r.c.root_submachine, "On", on) == ResolveStatus::Ok);
+    CHECK(r.c.states[on.v].submachines.len == 1);
+  }
+  SUBCASE("an include leads the block") {
+    Lowered const r{ lower(R"(chart c { state On { include "w.scav" as w, }, })") };
+    REQUIRE(r.parsed);
+    CHECK(r.clean);
+    StateId on{ INVALID };
+    REQUIRE(resolve_path(r.c, r.c.root_submachine, "On", on) == ResolveStatus::Ok);
+    CHECK(r.c.states[on.v].submachines.len == 1);
+    StateId host{ INVALID };
+    CHECK(resolve_path(r.c, r.c.root_submachine, "On/w", host) == ResolveStatus::Ok);
+    REQUIRE(r.c.includes.size() == 1);
+    CHECK(r.c.includes[0].host == host);
+  }
+  SUBCASE("only submachines and attrs earns none") {
+    Lowered const r{ lower(
+        R"(chart c { state On { @k, submachine m { state X, }, }, })") };
+    REQUIRE(r.parsed);
+    CHECK(r.clean);
+    StateId on{ INVALID };
+    REQUIRE(resolve_path(r.c, r.c.root_submachine, "On", on) == ResolveStatus::Ok);
+    CHECK(r.c.states[on.v].submachines.len == 1);  // the authored one, not an implicit
+    CHECK(chart_string(
+              r.c,
+              r.c.submachines[r.c.submachine_ids[r.c.states[on.v].submachines.off].v]
+                  .name) == "m");
+  }
+}
+
+TEST_CASE("lower: instantiating a root into a chart that has one adds nothing") {
+  Parsed const p{ parse("chart c { state A, }") };
+  REQUIRE(p.ok);
+  Chart c;
+  REQUIRE(build_chart(c, "already", {}).v == 0);
+  std::vector<PendingTrans> trans;
+  std::vector<PendingInc> incs;
+  std::vector<Diagnostic> diags;
+  InstJob const job{ .doc = { 0 },
+                     .inst = { INVALID },
+                     .host = { INVALID },
+                     .stmt_base = 0 };
+  CHECK(model_instantiate(c, p.pd, job, trans, incs, diags));
+  CHECK(c.states.empty());
+  CHECK(c.submachines.size() == 1);
+  CHECK(chart_string(c, c.name) == "already");
+
+  // And a document that parsed no chart statement has no root row to hang on.
+  ParsedDocument const chartless{};
+  Chart fresh;
+  CHECK_FALSE(model_instantiate(fresh, chartless, job, trans, incs, diags));
+  CHECK(fresh.submachines.empty());
+}
+
+TEST_CASE("lower: a chart already holding a document is refused before entities") {
+  Parsed const p{ parse("chart c { state A, }") };
+  REQUIRE(p.ok);
+  Chart c;
+  uint32_t base{ 0 };
+  std::ignore = model_attach_document(c, p.pd, base);
+  REQUIRE(c.documents.size() == 1);
+  REQUIRE(c.submachines.empty());
+  std::vector<Diagnostic> diags;
+  CHECK_FALSE(lower_document(c, p.pd, diags));
+  CHECK(c.states.empty());
+  CHECK(c.documents.size() == 1);
+}
+
+TEST_CASE("lower: a parentless row is left out of the rebuilt spans, not written past") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "c", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  c.states[a.v].parent = SubmachineId{ INVALID };
+  model_finalize_containment(c);
+
+  Span const kids{ c.submachines[root.v].children };
+  REQUIRE(kids.len == 1);
+  CHECK(c.state_ids[kids.off] == b);
+  // Validation is where the missing link is reported, one finding on the row.
+  std::vector<Diagnostic> diags;
+  CHECK_FALSE(validate_chart(c, diags));
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::MissingRequiredId);
+  CHECK(diags[0].subject == ref(a));
+}
+
+TEST_CASE("lower: a pending transition naming an unsupplied document is skipped") {
+  Parsed const p{ parse("chart c { state A, }") };
+  REQUIRE(p.ok);
+  Chart c;
+  std::vector<Diagnostic> diags;
+  REQUIRE(lower_document(c, p.pd, diags));
+  REQUIRE(c.transitions.empty());
+
+  std::array<ParsedDocument const *, 1> const docs{ &p.pd };
+  std::vector<PendingTrans> const pending{ { .row = 0,
+                                             .doc = { 5 },
+                                             .inst = { INVALID },
+                                             .scope = c.root_submachine,
+                                             .stmt_base = 0 } };
+  std::vector<Diagnostic> more;
+  CHECK(model_resolve_transitions(c, docs.data(), 1, pending, more));
+  CHECK(more.empty());
+  CHECK(c.transitions.empty());
+}
+
+TEST_CASE("lower: a chart statement inside a block is refused where it stands") {
+  // The grammar admits one chart and only as the root, so this shape is a
+  // producer bug rather than authored text. The document is built by hand
+  // because no source text reaches the arm that reports it.
+  constexpr std::string_view SOURCE{ "chart c { state A { chart nested {} } }" };
+  ParsedDocument pd;
+  for (char const ch : SOURCE) { pd.src_bytes.push_back(static_cast<scav_byte>(ch)); }
+  auto const span_of = [&](std::string_view text) {
+    return make_span(narrow_clamp<uint32_t>(SOURCE.find(text)), size32(text));
+  };
+  Span const whole{ make_span(0, size32(SOURCE)) };
+
+  pd.id = { 0 };
+  pd.doc = { .path = string_pool_add(pd.strings, "hand.scav"),
+             .text = whole,
+             .statements = make_span(0, 3) };
+  pd.stmts = {
+    { .kind = StmtKind::Chart,
+      .doc = { 0 },
+      .src = whole,
+      .comments = {},
+      .blank_before = 0 },
+    { .kind = StmtKind::State,
+      .doc = { 0 },
+      .src = span_of("state A { chart nested {} }"),
+      .comments = {},
+      .blank_before = 0 },
+    { .kind = StmtKind::Chart,
+      .doc = { 0 },
+      .src = span_of("chart nested {}"),
+      .comments = {},
+      .blank_before = 0 },
+  };
+  pd.stmt_payload = { 0, 0, 1 };
+  pd.stmt_children = { make_span(0, 1), make_span(1, 1), {} };
+  pd.stmt_ids = { StmtId{ 1 }, StmtId{ 2 } };
+  pd.charts = { { .name = string_pool_add(pd.strings, "c"), .label = {} },
+                { .name = string_pool_add(pd.strings, "nested"), .label = {} } };
+  pd.states = { { .name = string_pool_add(pd.strings, "A"),
+                  .label = {},
+                  .kind = StateKind::Normal,
+                  .has_block = 1 } };
+
+  Chart c;
+  uint32_t base{ 0 };
+  std::ignore = model_attach_document(c, pd, base);
+  std::vector<PendingTrans> trans;
+  std::vector<PendingInc> incs;
+  std::vector<Diagnostic> diags;
+  InstJob const job{ .doc = { 0 },
+                     .inst = { INVALID },
+                     .host = { INVALID },
+                     .stmt_base = base };
+  CHECK_FALSE(model_instantiate(c, pd, job, trans, incs, diags));
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::MisplacedStatement);
+  CHECK(diags[0].doc == DocId{ 0 });
+  CHECK(src_text(c, diags[0].src) == "chart nested {}");
+  // The state was created; only the statement inside it was refused, and the
+  // block it opened earned no submachine.
+  REQUIRE(c.states.size() == 1);
+  CHECK(chart_string(c, c.states[0].name) == "A");
+  CHECK(c.states[0].submachines.len == 0);
 }

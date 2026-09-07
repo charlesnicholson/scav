@@ -236,3 +236,53 @@ TEST_CASE("digest: length prefixes keep adjacent strings apart") {
   Chart const two{ lowered(R"(chart c { state a "b", })") };
   CHECK(chart_structural_hash(one) != chart_structural_hash(two));
 }
+
+TEST_CASE("digest: an attrs span past the array contributes what the array holds") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "c", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  REQUIRE(build_attr(c, ref(a), "k", "v") != INVALID);
+  std::vector<scav_byte> clean;
+  chart_digest_bytes(c, clean);
+
+  SUBCASE("a length running past the end clips to the remainder") {
+    c.states[a.v].attrs.len = 5;
+    std::vector<scav_byte> bytes;
+    chart_digest_bytes(c, bytes);
+    CHECK(bytes == clean);  // the one row that is there, and nothing past it
+  }
+  SUBCASE("an offset past the end contributes nothing") {
+    Chart bare;
+    SubmachineId const bare_root{ build_chart(bare, "c", {}) };
+    build_state(bare, bare_root, "A", StateKind::Normal, {});
+    std::vector<scav_byte> expected;
+    chart_digest_bytes(bare, expected);
+
+    c.states[a.v].attrs = make_span(9, 3);
+    std::vector<scav_byte> bytes;
+    chart_digest_bytes(c, bytes);
+    CHECK(bytes == expected);
+  }
+}
+
+TEST_CASE("digest: a containment span past its array stops at the array's end") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "c", {}) };
+  StateId const on{ build_state(c, root, "On", StateKind::Normal, {}) };
+  REQUIRE(build_submachine(c, on, "m", {}).v != INVALID);
+  std::vector<scav_byte> clean;
+  chart_digest_bytes(c, clean);
+
+  SUBCASE("children") { c.submachines[root.v].children.len += 2; }
+  SUBCASE("submachines") { c.states[on.v].submachines.len += 2; }
+
+  std::vector<scav_byte> bytes;
+  chart_digest_bytes(c, bytes);
+  // The declared count is content, so the digest moves; nothing past the array
+  // was read, so its length does not.
+  CHECK(bytes.size() == clean.size());
+  CHECK(bytes != clean);
+  std::vector<scav_byte> again;
+  chart_digest_bytes(c, again);
+  CHECK(again == bytes);
+}

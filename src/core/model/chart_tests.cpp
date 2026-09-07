@@ -205,3 +205,65 @@ TEST_CASE("chart: footprint counts what the arrays hold") {
   }
   CHECK(chart_footprint(c) > small);
 }
+
+TEST_CASE("chart: a kind this build does not know counts and validates as nothing") {
+  // ElemKind crosses the C ABI, so a newer producer can hand back a value no
+  // arm names. Every query answers "no rows" rather than indexing one.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "c", {}) };
+  build_state(c, root, "A", StateKind::Normal, {});
+  // NOLINTNEXTLINE(clang-analyzer-optin.core.EnumCastOutOfRange) -- that is the case
+  ElemKind const unknown{ static_cast<ElemKind>(99) };
+  CHECK(chart_entity_count(c, unknown) == 0);
+  CHECK_FALSE(chart_ref_valid(c, ElemRef{ unknown, 0 }));
+  CHECK_FALSE(chart_ref_valid(c, ElemRef{ ElemKind::PathBox, 0 }));
+  CHECK_FALSE(chart_live(c, ElemRef{ unknown, 0 }));
+  CHECK(chart_attrs_of(c, ElemRef{ unknown, 0 }) == Span{});
+}
+
+TEST_CASE("chart: attrs of a ref that names no row is the empty span") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "c", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  build_attr(c, ref(a), "doc", "text");
+  CHECK(chart_attrs_of(c, ref(a)).len == 1);
+  CHECK(chart_attrs_of(c, ElemRef{ ElemKind::State, 9 }) == Span{});
+  CHECK(chart_attrs_of(c, ElemRef{ ElemKind::Point, 0 }) == Span{});
+  CHECK(chart_attrs_of(c, ElemRef{ ElemKind::None, INVALID }) == Span{});
+  // A tombstoned row still has its span; liveness is chart_live's question.
+  c.states[a.v].live = 0;
+  CHECK(chart_attrs_of(c, ref(a)).len == 1);
+}
+
+TEST_CASE("path: a broken link truncates the address rather than walking off it") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "c", {}) };
+  StateId const outer{ build_state(c, root, "Outer", StateKind::Normal, {}) };
+  SubmachineId const om{ build_submachine(c, outer, {}, {}) };
+  StateId const on{ build_state(c, om, "On", StateKind::Normal, {}) };
+  SubmachineId const m{ build_submachine(c, on, {}, {}) };
+  StateId const idle{ build_state(c, m, "Idle", StateKind::Normal, {}) };
+  REQUIRE(path(c, idle) == "Outer/On/Idle");
+
+  SUBCASE("a parent past the submachine array") {
+    c.states[on.v].parent = SubmachineId{ 99 };
+    CHECK(path(c, idle) == "On/Idle");
+  }
+  SUBCASE("an owner past the state array") {
+    c.submachines[m.v].owner = StateId{ 99 };
+    CHECK(path(c, idle) == "Idle");
+  }
+}
+
+TEST_CASE("chart: footprint counts a column's bytes as well as the arrays") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "c", {}) };
+  build_state(c, root, "A", StateKind::Normal, {});
+  uint64_t const bare{ chart_footprint(c) };
+  ColumnId const col{
+    column_register(c, "libhsm.events", ElemKind::State, ValueKind::U32, 4, 4, 0)
+  };
+  REQUIRE(col.v != INVALID);
+  REQUIRE(column_count(c, col) == 1);
+  CHECK(chart_footprint(c) >= bare + (uint64_t{ column_count(c, col) } * 4U));
+}
