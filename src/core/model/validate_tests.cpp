@@ -450,3 +450,194 @@ TEST_CASE("validate: pre-model diagnostics default to a None subject") {
   CHECK(d.subject.kind == ElemKind::None);
   CHECK(d.subject.ordinal == INVALID);
 }
+
+TEST_CASE("validate: a span that lands but holds a bad ordinal names its owner") {
+  Built r{ built() };
+  SUBCASE("a submachines entry past the submachine array") {
+    StateId const on{ build_state(r.c, r.root, "On", StateKind::Normal, {}) };
+    build_submachine(r.c, on, "m", {});
+    r.c.submachine_ids.push_back(SubmachineId{ 99 });
+    r.c.states[on.v].submachines.len += 1;
+    std::vector<Diagnostic> const diags{ run(r.c) };
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == DiagCode::DanglingRef);
+    CHECK(diags[0].subject == ref(on));
+  }
+  SUBCASE("a children entry past the state array") {
+    r.c.state_ids.push_back(StateId{ 999 });
+    r.c.submachines[r.root.v].children.len += 1;
+    std::vector<Diagnostic> const diags{ run(r.c) };
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == DiagCode::DanglingRef);
+    CHECK(diags[0].subject == ref(r.root));
+  }
+  SUBCASE("a submachines span running past the array") {
+    StateId const on{ build_state(r.c, r.root, "On", StateKind::Normal, {}) };
+    build_submachine(r.c, on, "m", {});
+    r.c.states[on.v].submachines.len += 10;
+    std::vector<Diagnostic> const diags{ run(r.c) };
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == DiagCode::DanglingRef);
+    CHECK(diags[0].subject == ref(on));
+  }
+}
+
+TEST_CASE("validate: a submachine whose owner is out of range is one finding") {
+  // The containment check sees the same broken ordinal and stays silent, so the
+  // dangling reference is reported once, on the row that holds it.
+  Built r{ built() };
+  StateId const on{ build_state(r.c, r.root, "On", StateKind::Normal, {}) };
+  SubmachineId const m{ build_submachine(r.c, on, "m", {}) };
+  r.c.submachines[m.v].owner = StateId{ 99 };
+  std::vector<Diagnostic> const diags{ run(r.c) };
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::DanglingRef);
+  CHECK(diags[0].subject == ref(m));
+}
+
+TEST_CASE("validate: an attr row's own statement ordinal must land in the array") {
+  Built r{ built() };
+  Span const span{ chart_attrs_of(r.c, ref(r.a)) };
+  REQUIRE(span.len == 1);
+  r.c.attrs[span.off].stmt = StmtId{ 9 };  // no statements exist
+  std::vector<Diagnostic> const diags{ run(r.c) };
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::DanglingRef);
+  CHECK(diags[0].subject == ref(r.a));
+}
+
+TEST_CASE("validate: an include's target, path and statement are all checked") {
+  Built r{ built() };
+  InstId const inc{ build_include(r.c, r.root, "sub", "sub.scav") };
+  REQUIRE(inc.v != INVALID);
+  StateId const host{ r.c.includes[inc.v].host };
+
+  SUBCASE("an empty path names no document") {
+    r.c.includes[inc.v].path = {};
+    std::vector<Diagnostic> const diags{ run(r.c) };
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == DiagCode::MissingRequiredId);
+    CHECK(diags[0].subject == ref(host));
+  }
+  SUBCASE("a resolved target past the documents") {
+    r.c.includes[inc.v].target = DocId{ 7 };
+    std::vector<Diagnostic> const diags{ run(r.c) };
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == DiagCode::DanglingRef);
+    CHECK(diags[0].subject == ref(host));
+  }
+  SUBCASE("a resolved target whose host gained no submachine") {
+    r.c.documents.push_back({ .path = {}, .text = {}, .statements = {} });
+    r.c.includes[inc.v].target = DocId{ 0 };
+    std::vector<Diagnostic> const diags{ run(r.c) };
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == DiagCode::MissingRequiredId);
+    CHECK(diags[0].subject == ref(host));
+  }
+  SUBCASE("an attached target is clean") {
+    r.c.documents.push_back({ .path = {}, .text = {}, .statements = {} });
+    r.c.includes[inc.v].target = DocId{ 0 };
+    build_submachine(r.c, host, {}, {});
+    CHECK(run(r.c).empty());
+  }
+  SUBCASE("a statement ordinal past the array") {
+    r.c.includes[inc.v].stmt = StmtId{ 5 };
+    std::vector<Diagnostic> const diags{ run(r.c) };
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == DiagCode::DanglingRef);
+    CHECK(diags[0].subject == ref(host));
+  }
+}
+
+TEST_CASE("validate: a document's own spans must land in the chart's pools") {
+  // No entity exists to blame, so the finding carries the document and the None
+  // subject that names no row at all.
+  Built r{ built() };
+  SUBCASE("text past src_bytes") {
+    r.c.documents.push_back({ .path = {}, .text = make_span(0, 5), .statements = {} });
+  }
+  SUBCASE("statements past the statement array") {
+    r.c.documents.push_back({ .path = {}, .text = {}, .statements = make_span(0, 3) });
+  }
+  std::vector<Diagnostic> const diags{ run(r.c) };
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::DanglingRef);
+  CHECK(diags[0].subject.kind == ElemKind::None);
+  CHECK(diags[0].subject.ordinal == INVALID);
+  CHECK(diags[0].doc == DocId{ 0 });
+}
+
+TEST_CASE("validate: a statement's spans must land inside its own document") {
+  Built r{ built() };
+  r.c.src_bytes.resize(10, 0);
+  // One document owning one statement, so the only thing under test is where
+  // that statement's spans point.
+  auto const with = [&](Span src, Span comments) {
+    r.c.stmts.push_back({ .kind = StmtKind::Chart,
+                          .doc = { 0 },
+                          .src = src,
+                          .comments = comments,
+                          .blank_before = 0 });
+    r.c.documents.push_back(
+        { .path = {}, .text = make_span(2, 5), .statements = make_span(0, 1) });
+    return run(r.c);
+  };
+
+  SUBCASE("inside is clean") { CHECK(with(make_span(2, 5), {}).empty()); }
+  SUBCASE("beginning before the document's text") {
+    std::vector<Diagnostic> const diags{ with(make_span(0, 3), {}) };
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == DiagCode::StatementSpanOutOfRange);
+    CHECK(diags[0].subject.kind == ElemKind::None);
+    CHECK(diags[0].src == make_span(0, 3));
+  }
+  SUBCASE("ending past the document's text") {
+    std::vector<Diagnostic> const diags{ with(make_span(6, 4), {}) };
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == DiagCode::StatementSpanOutOfRange);
+    CHECK(diags[0].src == make_span(6, 4));
+  }
+  SUBCASE("a comments span past the comment array") {
+    std::vector<Diagnostic> const diags{ with(make_span(2, 5), make_span(0, 1)) };
+    REQUIRE(diags.size() == 1);
+    CHECK(diags[0].code == DiagCode::DanglingRef);
+    CHECK(diags[0].subject.kind == ElemKind::None);
+    CHECK(diags[0].src == make_span(2, 5));
+  }
+}
+
+TEST_CASE("validate: a column over an entity with no array is held to no count") {
+  Built r{ built() };
+  ColumnId const col{
+    column_register(r.c, "scav.geom.point", ElemKind::Point, ValueKind::Pod, 8, 4, 0)
+  };
+  REQUIRE(col.v != INVALID);
+  REQUIRE(column_resize(r.c, col, 5));  // five rows against two states
+  CHECK(column_count(r.c, col) == 5);
+  CHECK(run(r.c).empty());
+
+  // Neither kind can be registered, so the arms that skip them are reached by
+  // rewriting the descriptor the way a stale extension would.
+  SUBCASE("a path box counts nothing either") {
+    r.c.columns[col.v].desc.entity = ElemKind::PathBox;
+    CHECK(run(r.c).empty());
+  }
+  SUBCASE("and neither does None") {
+    r.c.columns[col.v].desc.entity = ElemKind::None;
+    CHECK(run(r.c).empty());
+  }
+}
+
+TEST_CASE("validate: findings under one code sort by subject kind before ordinal") {
+  Built r{ built() };
+  StateId const on{ build_state(r.c, r.root, "On", StateKind::Normal, {}) };
+  SubmachineId const m{ build_submachine(r.c, on, "m", {}) };
+  r.c.submachines[m.v].owner = StateId{ 99 };
+  r.c.states[on.v].parent = SubmachineId{ 99 };
+  std::vector<Diagnostic> const diags{ run(r.c) };
+  REQUIRE(diags.size() == 2);
+  CHECK(diags[0].code == DiagCode::DanglingRef);
+  CHECK(diags[0].subject == ref(on));  // State sorts before Submachine
+  CHECK(diags[1].code == DiagCode::DanglingRef);
+  CHECK(diags[1].subject == ref(m));
+}

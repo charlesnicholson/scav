@@ -194,3 +194,122 @@ TEST_CASE("diag: rendering appends, so a run of findings is one string") {
   for (char const ch : out) { lines += (ch == '\n') ? 1U : 0U; }
   CHECK(lines == found.size());
 }
+
+TEST_CASE("diag: a finding on any subject kind walks to its own statement") {
+  Rendered r;
+  load_one(r,
+           "chart c {\n"
+           "  state On {\n"
+           "    submachine m {\n"
+           "      state A,\n"
+           "    },\n"
+           "  },\n"
+           "  trans On:m/A -> On:m/A,\n"
+           "}\n",
+           "kinds.scav");
+  REQUIRE(r.diags.empty());
+  StateId a{ INVALID };
+  REQUIRE(resolve_path(r.chart, r.chart.root_submachine, "On:m/A", a) ==
+          ResolveStatus::Ok);
+  SubmachineId const m{ r.chart.states[a.v].parent };
+  REQUIRE(r.chart.transitions.size() == 1);
+
+  auto const rendered = [&](ElemRef subject) {
+    std::string out;
+    diag_append(out,
+                r.chart,
+                { .code = DiagCode::DanglingRef,
+                  .subject = subject,
+                  .doc = { INVALID },
+                  .src = {} },
+                "cmdline.scav");
+    return out;
+  };
+  std::string const tail{ std::string{ ": " } + diag_message(DiagCode::DanglingRef) +
+                          "\n" };
+  CHECK(rendered(ref(a)) == "kinds.scav:4:7" + tail);
+  CHECK(rendered(ref(m)) == "kinds.scav:3:5" + tail);
+  CHECK(rendered(ref(TransId{ 0 })) == "kinds.scav:7:3" + tail);
+  // The chart entity's statement is the root submachine's, which is the chart
+  // line itself.
+  CHECK(rendered(chart_ref()) == "kinds.scav:1:1" + tail);
+}
+
+TEST_CASE("diag: a chart finding with no root submachine falls back to the name") {
+  Rendered r;
+  load_one(r, "chart c {\n  state A,\n}\n", "solo.scav");
+  r.chart.root_submachine = SubmachineId{ 99 };
+  std::string out;
+  diag_append(out,
+              r.chart,
+              { .code = DiagCode::DanglingRef,
+                .subject = chart_ref(),
+                .doc = { INVALID },
+                .src = {} },
+              "cmdline.scav");
+  CHECK(out ==
+        std::string{ "cmdline.scav: " } + diag_message(DiagCode::DanglingRef) + "\n");
+}
+
+TEST_CASE("diag: a finding that already carries a span is positioned by that span") {
+  // A producer running before the entity existed fills `src`, so the reader must
+  // not walk to the subject and report the statement's position instead.
+  Rendered r;
+  load_one(r, "chart c {\n  state A,\n}\n", "solo.scav");
+  StateId a{ INVALID };
+  REQUIRE(resolve_path(r.chart, r.chart.root_submachine, "A", a) == ResolveStatus::Ok);
+  std::string out;
+  // The state's own statement begins at 2:3; the span names 2:6.
+  diag_append(out,
+              r.chart,
+              { .code = DiagCode::DanglingRef,
+                .subject = ref(a),
+                .doc = { 0 },
+                .src = make_span(15, 1) },
+              "cmdline.scav");
+  CHECK(out ==
+        std::string{ "solo.scav:2:6: " } + diag_message(DiagCode::DanglingRef) + "\n");
+}
+
+TEST_CASE("diag: a statement span cleared by mutation degrades to the triple") {
+  Rendered r;
+  load_one(r, "chart c {\n  state A,\n}\n", "solo.scav");
+  StateId a{ INVALID };
+  REQUIRE(resolve_path(r.chart, r.chart.root_submachine, "A", a) == ResolveStatus::Ok);
+  StmtId const stmt{ r.chart.states[a.v].stmt };
+  REQUIRE(stmt.v < r.chart.stmts.size());
+
+  Diagnostic const d{ .code = DiagCode::DanglingRef,
+                      .subject = ref(a),
+                      .doc = { INVALID },
+                      .src = {} };
+  std::string located;
+  diag_append(located, r.chart, d, "cmdline.scav");
+  CHECK(located ==
+        std::string{ "solo.scav:2:3: " } + diag_message(DiagCode::DanglingRef) + "\n");
+
+  r.chart.stmts[stmt.v].src = {};  // what a mutation leaves behind
+  std::string bare;
+  diag_append(bare, r.chart, d, "cmdline.scav");
+  CHECK(bare ==
+        std::string{ "cmdline.scav: " } + diag_message(DiagCode::DanglingRef) + "\n");
+}
+
+TEST_CASE("diag: an unnamed document still positions, under the caller's name") {
+  // A chart built from a buffer nobody named keeps its offsets, so the line and
+  // column survive even though the document has no path to quote.
+  Rendered r;
+  load_one(r, "chart c {\n  state A,\n}\n", "solo.scav");
+  REQUIRE(r.chart.documents.size() == 1);
+  r.chart.documents[0].path = {};
+  StateId a{ INVALID };
+  REQUIRE(resolve_path(r.chart, r.chart.root_submachine, "A", a) == ResolveStatus::Ok);
+  std::string out;
+  diag_append(
+      out,
+      r.chart,
+      { .code = DiagCode::DanglingRef, .subject = ref(a), .doc = { INVALID }, .src = {} },
+      "<buffer>");
+  CHECK(out ==
+        std::string{ "<buffer>:2:3: " } + diag_message(DiagCode::DanglingRef) + "\n");
+}

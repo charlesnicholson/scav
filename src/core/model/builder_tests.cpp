@@ -157,8 +157,10 @@ TEST_CASE("build: transitions take live endpoints only") {
   CHECK(chart_string(c, c.transitions[t.v].label) == "go");
 
   CHECK(build_trans(c, a, StateId{ 77 }, TransKind::External, {}).v == INVALID);
+  CHECK(build_trans(c, StateId{ 77 }, b, TransKind::External, {}).v == INVALID);
   c.states[b.v].live = 0;
   CHECK(build_trans(c, a, b, TransKind::External, {}).v == INVALID);
+  CHECK(build_trans(c, b, a, TransKind::External, {}).v == INVALID);  // a dead source
   CHECK(c.transitions.size() == 1);
   check_refs_resolve(c);
 }
@@ -330,4 +332,46 @@ TEST_CASE("build: a depth-16 chain builds and walks back") {
   CHECK(depth == 16);
   CHECK(path(c, leaf) == "S/S/S/S/S/S/S/S/S/S/S/S/S/S/S/S");
   check_refs_resolve(c);
+}
+
+namespace {
+
+// The value of `subject`'s first attr under `key`, empty when it carries none.
+std::string_view attr_value(Chart const &c, ElemRef subject, std::string_view key) {
+  uint32_t const at{ chart_attr_find(c, subject, key) };
+  return (at == INVALID) ? std::string_view{} : chart_string(c, c.attrs[at].value);
+}
+
+}  // namespace
+
+TEST_CASE("build: an attr inserted inside the array fixes all four owner spans") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "c", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  SubmachineId const m{ build_submachine(c, a, "m", {}) };
+  StateId const idle{ build_state(c, m, "Idle", StateKind::Normal, {}) };
+  TransId const t{ build_trans(c, idle, idle, TransKind::Internal, {}) };
+
+  // One row per owner kind with the state's first, so a second attr on the
+  // state lands at row 1 and every span at or past it shifts.
+  REQUIRE(build_attr(c, ref(a), "state1", "s1") == 0);
+  REQUIRE(build_attr(c, chart_ref(), "chart1", "c1") == 1);
+  REQUIRE(build_attr(c, ref(m), "sub1", "m1") == 2);
+  REQUIRE(build_attr(c, ref(t), "trans1", "t1") == 3);
+  REQUIRE(build_attr(c, ref(a), "state2", "s2") == 1);
+
+  CHECK(chart_attrs_of(c, ref(a)) == make_span(0, 2));
+  CHECK(chart_attrs_of(c, chart_ref()) == make_span(2, 1));
+  CHECK(chart_attrs_of(c, ref(m)) == make_span(3, 1));
+  CHECK(chart_attrs_of(c, ref(t)) == make_span(4, 1));
+
+  CHECK(attr_value(c, ref(a), "state1") == "s1");
+  CHECK(attr_value(c, ref(a), "state2") == "s2");
+  CHECK(attr_value(c, chart_ref(), "chart1") == "c1");
+  CHECK(attr_value(c, ref(m), "sub1") == "m1");
+  CHECK(attr_value(c, ref(t), "trans1") == "t1");
+  check_refs_resolve(c);
+
+  std::vector<Diagnostic> diags;
+  CHECK(validate_chart(c, diags));
 }

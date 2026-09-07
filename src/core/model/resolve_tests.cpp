@@ -1,6 +1,7 @@
 // The public text-path resolver, against a code-built chart,
 // so resolution is tested without the parser in the loop.
 
+#include "core/model/model.h"
 #include "core/tests/test_support.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
@@ -151,4 +152,86 @@ TEST_CASE("resolve: malformed text misses rather than crashing") {
   CHECK(at(r, r.root, "On:", out) == ResolveStatus::NotFound);
   CHECK(at(r, r.root, "On:99999999999/Idle", out) == ResolveStatus::BadQualifier);
   CHECK(at(r, SubmachineId{ INVALID }, "Off", out) == ResolveStatus::NotFound);
+}
+
+TEST_CASE("resolve: a path with no segments at all names nothing") {
+  Rig const r{ rig() };
+  StateId out{ INVALID };
+  CHECK(model_resolve_segments(r.c, r.root, nullptr, 0, out) == ResolveStatus::NotFound);
+  CHECK(out.v == INVALID);
+}
+
+TEST_CASE("resolve: a name qualifier on the last segment selects nothing") {
+  // The ordinal spelling is refused above; the named one takes the other arm of
+  // the same test, so both spellings fail alike.
+  Rig const r{ rig() };
+  StateId out{ INVALID };
+  CHECK(at(r, r.root, "Off:main", out) == ResolveStatus::BadQualifier);
+  CHECK(at(r, r.root, "On:main/Idle:aux", out) == ResolveStatus::BadQualifier);
+}
+
+TEST_CASE("resolve: a qualifier that is not all digits is a submachine name") {
+  // The digit test has to reject bytes below '0' as well as above '9', or a
+  // qualifier like `+m` would be read as an ordinal.
+  Rig const r{ rig() };
+  StateId out{ INVALID };
+  CHECK(at(r, r.root, "On:+m/Idle", out) == ResolveStatus::BadQualifier);
+  CHECK(at(r, r.root, "On:1x/Idle", out) == ResolveStatus::BadQualifier);
+}
+
+TEST_CASE("resolve: descending into an ordinary leaf misses, and crosses nothing") {
+  // A state with no submachines is not an unresolved alias, so the descent is a
+  // plain miss rather than the include-crossing report.
+  Rig const r{ rig() };
+  StateId out{ INVALID };
+  CHECK(at(r, r.root, "Off/X", out) == ResolveStatus::NotFound);
+  CHECK(at(r, r.root, "On:main/Idle/X", out) == ResolveStatus::NotFound);
+}
+
+TEST_CASE("resolve: a broken ordinal in a span is skipped, not dereferenced") {
+  SUBCASE("a child past the state array") {
+    Rig r{ rig() };
+    Span const kids{ r.c.submachines[r.root.v].children };
+    r.c.state_ids[kids.off] = StateId{ 999 };  // Off's slot
+    StateId out{ INVALID };
+    CHECK(at(r, r.root, "On", out) == ResolveStatus::Ok);
+    CHECK(out == r.on);
+    CHECK(at(r, r.root, "Off", out) == ResolveStatus::NotFound);
+  }
+  SUBCASE("a submachine past the submachine array") {
+    Rig r{ rig() };
+    Span const subs{ r.c.states[r.on.v].submachines };
+    r.c.submachine_ids[subs.off] = SubmachineId{ 99 };  // main's slot
+    StateId out{ INVALID };
+    // aux is now the sole submachine On has, so the descent needs no qualifier.
+    CHECK(at(r, r.root, "On/Idle", out) == ResolveStatus::Ok);
+    CHECK(out == r.aux_idle);
+  }
+  SUBCASE("a tombstoned submachine") {
+    Rig r{ rig() };
+    r.c.submachines[r.main_sm.v].live = 0;
+    StateId out{ INVALID };
+    CHECK(at(r, r.root, "On/Idle", out) == ResolveStatus::Ok);
+    CHECK(out == r.aux_idle);
+    CHECK(at(r, r.root, "On:main/Idle", out) == ResolveStatus::BadQualifier);
+  }
+}
+
+TEST_CASE("resolve: a broken link stops the outward climb rather than walking off") {
+  SUBCASE("an owner past the state array") {
+    Rig r{ rig() };
+    r.c.submachines[r.main_sm.v].owner = StateId{ 99 };
+    StateId out{ INVALID };
+    CHECK(at(r, r.main_sm, "Idle", out) == ResolveStatus::Ok);  // still local
+    CHECK(out == r.idle);
+    CHECK(at(r, r.main_sm, "Off", out) == ResolveStatus::NotFound);
+  }
+  SUBCASE("a parent past the submachine array") {
+    Rig r{ rig() };
+    r.c.states[r.on.v].parent = SubmachineId{ 99 };
+    StateId out{ INVALID };
+    CHECK(at(r, r.main_sm, "Idle", out) == ResolveStatus::Ok);
+    CHECK(out == r.idle);
+    CHECK(at(r, r.main_sm, "Off", out) == ResolveStatus::NotFound);
+  }
 }
