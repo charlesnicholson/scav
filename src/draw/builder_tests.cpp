@@ -113,9 +113,7 @@ constexpr uint32_t RECT_SIZE{ static_cast<uint32_t>(sizeof(scav_rect)) };
 // is what makes a measurement fail rather than come out narrow.
 constexpr char const *NO_GLYPH{ "\xF3\xB0\x80\x81" };
 
-// A geometry column in layout's own shape, written by hand: the emitters read
-// what layout wrote, and a unit test states that input rather than running the
-// stage before it to manufacture one.
+// A geometry column in layout's own shape, written by hand.
 ColumnId geom_column(Chart &c,
                      char const *name,
                      ElemKind entity,
@@ -1146,9 +1144,8 @@ TEST_CASE("builder: an emitter with no geometry column to read draws nothing") {
 }
 
 TEST_CASE("builder: a geometry column of a foreign shape is not read as layout's") {
-  // Layout refuses to write through a descriptor it did not register (11.7a),
-  // and the builder must not read through one either: a narrower stride reports
-  // more rows than the bytes behind it hold.
+  // A narrower stride reports one row per entity over fewer bytes than that
+  // (11.7a).
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
