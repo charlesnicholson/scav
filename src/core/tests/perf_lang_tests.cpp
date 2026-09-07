@@ -268,8 +268,9 @@ TEST_CASE("perf: parsing is linear in the input") {
   uint64_t footprint{ 0 };
   time_parse(small_bytes, small_lexed, footprint);
   time_parse(large_bytes, large_lexed, footprint);
-  uint64_t const small_us{ time_parse(small_bytes, small_lexed, footprint) };
-  uint64_t const large_us{ time_parse(large_bytes, large_lexed, footprint) };
+  auto const [small_us, large_us]{ best_pair(
+      [&] { time_parse(small_bytes, small_lexed, footprint); },
+      [&] { time_parse(large_bytes, large_lexed, footprint); }) };
 
   double const growth{ static_cast<double>(large_us) / static_cast<double>(small_us) };
   if (ASSERT_SCALING) {
