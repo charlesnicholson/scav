@@ -121,6 +121,28 @@ TEST_CASE("helpers: the lines are the ones the author wrote") {
   CHECK(text_lines("a\n\nb")[1].empty());
 }
 
+TEST_CASE("images: registration refuses anything a backend could not draw later") {
+  Images images;
+  std::array<scav_byte, 3> const bytes{ 1, 2, 3 };
+  // Every field is load-bearing at draw time: the mime names the data URL, the
+  // bytes are the image, and the extent is not inferred from either.
+  CHECK(!image_register(images, "a", bytes.data(), 3, 8, 8, {}));
+  CHECK(!image_register(images, "a", nullptr, 3, 8, 8, "image/png"));
+  CHECK(!image_register(images, "a", bytes.data(), 3, 8, 0, "image/png"));
+  CHECK(images.rows.empty());
+  CHECK(images.pool.empty());  // and a refusal claims no arena
+
+  REQUIRE(image_register(images, "a", bytes.data(), 3, 8, 8, "image/png"));
+  CHECK(image_find(images, "a") == 0);
+  // An id names one image for the registry's life, so a second claim on it is
+  // refused and the first is left as it was.
+  CHECK(!image_register(images, "a", bytes.data(), 3, 4, 4, "image/jpeg"));
+  REQUIRE(images.rows.size() == 1);
+  CHECK(images.rows[0].w == 8);
+  CHECK(images.rows[0].h == 8);
+  CHECK(image_str(images, images.rows[0].mime) == "image/png");
+}
+
 TEST_CASE("helpers: an arrowhead is a closed triangle behind its own tip") {
   DrawList d;
   uint32_t const s{ drawlist_style(d,

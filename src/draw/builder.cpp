@@ -24,6 +24,9 @@ template <typename T>
 std::vector<T> rows_of(Chart const &c, char const *name) {
   ColumnId const id{ column_find(c, name) };
   if (id.v == INVALID) { return {}; }
+  // A narrower stride reports one row per entity over fewer bytes than that,
+  // so a copy sized from the row count would read past the column.
+  if (c.columns[id.v].desc.elem_size != sizeof(T)) { return {}; }
   std::vector<T> rows(column_count(c, id));
   if (!rows.empty()) {
     std::memcpy(rows.data(), column_data(c, id), rows.size() * sizeof(T));

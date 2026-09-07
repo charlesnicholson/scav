@@ -199,6 +199,45 @@ TEST_CASE("svg: a transparent paint is none, and a partial one is a fixed decima
   CHECK(has(w.doc, "fill-opacity=\"0.501\""));
 }
 
+TEST_CASE("svg: a stroke with no alpha carries no width to be about") {
+  DrawList d;
+  push_rect(d,
+            0,
+            drawlist_style(d, shape(0x11223300U, 0x000000FFU)),
+            { .x = 0, .y = 0, .w = 4, .h = 4 },
+            NONE);
+  Written const w{ write(d) };
+  REQUIRE(w.status == SvgStatus::Ok);
+  CHECK(has(w.doc, "stroke=\"none\""));
+  CHECK(!has(w.doc, "stroke-width"));
+}
+
+TEST_CASE("svg: a shape wearing a text style is still drawn as the shape it is") {
+  DrawList d;
+  push_rect(d,
+            0,
+            drawlist_style(d, glyphs(160)),
+            { .x = 0, .y = 0, .w = 4, .h = 4 },
+            state(3));
+  Written const w{ write(d) };
+  REQUIRE(w.status == SvgStatus::Ok);
+  CHECK(has(w.doc, "<rect x=\"0\" y=\"0\" width=\"4\" height=\"4\""));
+  // The glyph path writes its own class before its closing tag, so the shared
+  // tail writes one only for a style that is not a text style.
+  CHECK(!has(w.doc, "class="));
+}
+
+TEST_CASE("svg: text the metrics refuse for any other reason is an invalid drawlist") {
+  DrawList d;
+  push_text(d, 0, drawlist_style(d, glyphs(160)), { .x = 0, .y = 0 }, "two\nlines", NONE);
+  Written const w{ write(d) };
+  // A text primitive is one line: the break is the builder's bug, and it is
+  // named rather than measured around.
+  CHECK(w.status == SvgStatus::InvalidDrawList);
+  CHECK(w.bad == 0);
+  CHECK(w.doc.empty());
+}
+
 TEST_CASE("svg: a dashed style becomes a dasharray scaled to its stroke") {
   DrawList d;
   scav_style dashed{ shape(0x808080FFU, 0) };
@@ -422,14 +461,68 @@ TEST_CASE("svg: text the font cannot render is refused, not silently narrowed") 
   CHECK(w.doc.empty());
 }
 
-TEST_CASE("svg: an extent past an integer viewBox is refused") {
+TEST_CASE("svg: an extent past an integer viewBox is refused on either axis") {
+  DrawList wide;
+  uint32_t const s{ drawlist_style(wide, shape(0x000000FFU, 0)) };
+  push_rect(wide, 0, s, { .x = -COORD_MAX, .y = 0, .w = COORD_MAX, .h = 1 }, NONE);
+  push_rect(wide, 0, s, { .x = COORD_MAX - 1, .y = 0, .w = 1, .h = 1 }, NONE);
+  Written const across{ write(wide) };
+  CHECK(across.status == SvgStatus::ExtentOverflow);
+  CHECK(across.doc.empty());
+
+  // The same content turned on its side: a viewBox that fits on x and not on y
+  // is no more writable than the other way round.
+  DrawList tall;
+  uint32_t const t{ drawlist_style(tall, shape(0x000000FFU, 0)) };
+  push_rect(tall, 0, t, { .x = 0, .y = -COORD_MAX, .w = 1, .h = COORD_MAX }, NONE);
+  push_rect(tall, 0, t, { .x = 0, .y = COORD_MAX - 1, .w = 1, .h = 1 }, NONE);
+  Written const down{ write(tall) };
+  CHECK(down.status == SvgStatus::ExtentOverflow);
+  CHECK(down.doc.empty());
+}
+
+TEST_CASE("svg: every element kind scav names reaches the class attribute") {
   DrawList d;
   uint32_t const s{ drawlist_style(d, shape(0x000000FFU, 0)) };
-  push_rect(d, 0, s, { .x = -COORD_MAX, .y = 0, .w = COORD_MAX, .h = 1 }, NONE);
-  push_rect(d, 0, s, { .x = COORD_MAX - 1, .y = 0, .w = 1, .h = 1 }, NONE);
+  push_rect(d,
+            0,
+            s,
+            { .x = 0, .y = 0, .w = 1, .h = 1 },
+            { .kind = ElemKind::Chart, .ordinal = 1 });
+  push_rect(d,
+            0,
+            s,
+            { .x = 0, .y = 0, .w = 1, .h = 1 },
+            { .kind = ElemKind::Point, .ordinal = 2 });
+  push_rect(d,
+            0,
+            s,
+            { .x = 0, .y = 0, .w = 1, .h = 1 },
+            { .kind = ElemKind::PathBox, .ordinal = 3 });
+  CHECK(svg_class(d.prims[0]) == "scav-chart scav-id-1");
+  CHECK(svg_class(d.prims[1]) == "scav-point scav-id-2");
+  CHECK(svg_class(d.prims[2]) == "scav-pathbox scav-id-3");
+
   Written const w{ write(d) };
-  CHECK(w.status == SvgStatus::ExtentOverflow);
-  CHECK(w.doc.empty());
+  REQUIRE(w.status == SvgStatus::Ok);
+  CHECK(has(w.doc, "class=\"scav-chart scav-id-1\""));
+  CHECK(has(w.doc, "class=\"scav-point scav-id-2\""));
+  CHECK(has(w.doc, "class=\"scav-pathbox scav-id-3\""));
+}
+
+TEST_CASE("svg: an origin kind scav has no name for carries no class") {
+  DrawList d;
+  uint32_t const s{ drawlist_style(d, shape(0x000000FFU, 0)) };
+  push_rect(d, 0, s, { .x = 0, .y = 0, .w = 1, .h = 1 }, state(1));
+  d.prims[0].origin_kind = 99;  // no ElemKind spells this
+
+  CHECK(svg_class(d.prims[0]).empty());
+  Written const w{ write(d) };
+  REQUIRE(w.status == SvgStatus::Ok);
+  // The rect is still drawn: an unrecognized origin costs the selector, not the
+  // primitive.
+  CHECK(has(w.doc, "<rect"));
+  CHECK(!has(w.doc, "class="));
 }
 
 TEST_CASE("svg: a negative coordinate prints its own sign") {

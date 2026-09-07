@@ -107,6 +107,66 @@ bool has_text(DrawList const &d, std::string_view want) {
   return false;
 }
 
+constexpr uint32_t RECT_SIZE{ static_cast<uint32_t>(sizeof(scav_rect)) };
+
+// A plane-15 private-use codepoint. The bundled font has no glyph for it, which
+// is what makes a measurement fail rather than come out narrow.
+constexpr char const *NO_GLYPH{ "\xF3\xB0\x80\x81" };
+
+// A geometry column in layout's own shape, written by hand: the emitters read
+// what layout wrote, and a unit test states that input rather than running the
+// stage before it to manufacture one.
+ColumnId geom_column(Chart &c,
+                     char const *name,
+                     ElemKind entity,
+                     ValueKind kind,
+                     uint32_t elem_size) {
+  ColumnId const id{
+    column_register(c, name, entity, kind, elem_size, 4, COLUMN_DERIVED)
+  };
+  REQUIRE(id.v != INVALID);
+  return id;
+}
+
+template <typename T>
+void put_row(Chart &c, ColumnId id, uint32_t row, T const &value) {
+  REQUIRE(column_count(c, id) > row);
+  std::memcpy(column_data(c, id) + (static_cast<size_t>(row) * sizeof(T)),
+              &value,
+              sizeof(T));
+}
+
+ColumnId state_boxes(Chart &c) {
+  return geom_column(c, "scav.geom.state", ElemKind::State, ValueKind::Pod, RECT_SIZE);
+}
+
+// Two thousand of one glyph at the profile's em leave the quarter-domain on x,
+// and six hundred lines of one leave it on y. Both stay inside what the
+// measurement will report at all.
+std::string wide_text() {
+  std::string s;
+  s.append(2000, 'W');
+  return s;
+}
+
+std::string tall_text() {
+  std::string s;
+  for (uint32_t i = 0; i < 600; ++i) { s += "W\n"; }
+  return s;
+}
+
+scav_extent measured(std::string_view text, scav_profile const &p) {
+  scav_extent e{};
+  REQUIRE(measure_block(bundled(),
+                        reinterpret_cast<scav_byte const *>(text.data()),
+                        static_cast<uint32_t>(text.size()),
+                        p.font_size_grid,
+                        p.line_height_k_num,
+                        p.line_height_k_den,
+                        e) == MeasureStatus::Ok);
+  return e;
+}
+
 }  // namespace
 
 TEST_CASE("builder: the standard palette fills every slot the builder indexes") {
@@ -939,4 +999,534 @@ TEST_CASE("builder: the C surface builds through the handles") {
   scav_drawlist_destroy(defaulted);
   scav_drawlist_destroy(list);
   scav_metrics_destroy(metrics);
+}
+
+TEST_CASE("builder: an empty chart reserves nothing and hands layout no pointers") {
+  Chart const c;  // no root submachine either: there is nothing to measure
+  Spaces s;
+  REQUIRE(measure_chart(c, bundled(), readable(), s));
+  CHECK(s.box_state.empty());
+  CHECK(s.box_sub.empty());
+  CHECK(s.path_clear.empty());
+  CHECK(s.path_box.empty());
+
+  // A null base with a zero count, never a pointer into an empty vector.
+  scav_spaces const view{ as_spaces(s) };
+  CHECK(view.box_state == nullptr);
+  CHECK(view.n_box_state == 0);
+  CHECK(view.box_sub == nullptr);
+  CHECK(view.n_box_sub == 0);
+  CHECK(view.path_clear == nullptr);
+  CHECK(view.n_path_clear == 0);
+  CHECK(view.path_box == nullptr);
+  CHECK(view.n_path_box == 0);
+}
+
+TEST_CASE("builder: a state name past the quarter-domain is refused on either axis") {
+  scav_profile const p{ readable() };
+  auto const refused = [&p](std::string const &name) {
+    Chart c;
+    SubmachineId const root{ build_chart(c, "t", {}) };
+    build_state(c, root, name, StateKind::Normal, {});
+    Spaces s;
+    return !measure_chart(c, bundled(), p, s);
+  };
+
+  // Measurable, and past what a space table may hold. The pass refuses rather
+  // than clamping, on whichever axis leaves the domain.
+  scav_extent const wide{ measured(wide_text(), p) };
+  CHECK(wide.w > SPACE_MAX);
+  CHECK(wide.h < SPACE_MAX);
+  CHECK(refused(wide_text()));
+
+  scav_extent const tall{ measured(tall_text(), p) };
+  CHECK(tall.w < SPACE_MAX);
+  CHECK(tall.h > SPACE_MAX);
+  CHECK(refused(tall_text()));
+}
+
+TEST_CASE("builder: a submachine name is measured under the rules a state name is") {
+  scav_profile const p{ readable() };
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const owner{ build_state(c, root, "S", StateKind::Normal, {}) };
+
+  SUBCASE("a tombstone reserves nothing") {
+    SubmachineId const dead{ build_submachine(c, owner, "region", {}) };
+    c.submachines[dead.v].live = 0;
+    Spaces s;
+    REQUIRE(measure_chart(c, bundled(), p, s));
+    CHECK(s.box_sub[dead.v].min_w == 0);
+    CHECK(s.box_sub[dead.v].h_before == 0);
+  }
+  SUBCASE("a name the font cannot measure refuses the pass") {
+    build_submachine(c, owner, NO_GLYPH, {});
+    Spaces s;
+    CHECK(!measure_chart(c, bundled(), p, s));
+  }
+  SUBCASE("a name too wide for the domain is refused") {
+    build_submachine(c, owner, wide_text(), {});
+    Spaces s;
+    CHECK(!measure_chart(c, bundled(), p, s));
+  }
+  SUBCASE("a name too tall for the domain is refused") {
+    build_submachine(c, owner, tall_text(), {});
+    Spaces s;
+    CHECK(!measure_chart(c, bundled(), p, s));
+  }
+}
+
+TEST_CASE("builder: a tombstoned transition reserves neither arrowhead room nor a box") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  TransId const dead{ build_trans(c, a, b, TransKind::External, "gone") };
+  TransId const kept{ build_trans(c, b, a, TransKind::External, "kept") };
+  c.transitions[dead.v].live = 0;
+
+  Spaces s;
+  REQUIRE(measure_chart(c, bundled(), readable(), s));
+  CHECK(s.path_clear[dead.v].dst == 0);  // no head to leave room for
+  CHECK(s.path_clear[kept.v].dst > 0);
+  REQUIRE(s.path_box.size() == 1);  // and no box for a label nothing will draw
+  CHECK(s.path_box[0].subject == kept.v);
+  REQUIRE(s.label.size() == 1);
+  CHECK(chart_string(c, s.label[0]) == "kept");
+}
+
+TEST_CASE("builder: a label the font cannot measure refuses the pass") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, NO_GLYPH);
+  Spaces s;
+  CHECK(!measure_chart(c, bundled(), readable(), s));
+}
+
+TEST_CASE("builder: a routeless label past the quarter-domain is refused either way") {
+  // An internal self-transition's label rides its source's after-band, so the
+  // domain check lands on that band rather than on a path box.
+  auto const refused = [](std::string const &label) {
+    Chart c;
+    SubmachineId const root{ build_chart(c, "t", {}) };
+    StateId const s{ build_state(c, root, "S", StateKind::Normal, {}) };
+    build_trans(c, s, s, TransKind::Internal, label);
+    Spaces sp;
+    return !measure_chart(c, bundled(), readable(), sp);
+  };
+  CHECK(refused(wide_text()));
+  CHECK(refused(tall_text()));
+}
+
+TEST_CASE("builder: a path box past the quarter-domain is refused on either axis") {
+  auto const refused = [](std::string const &label) {
+    Chart c;
+    SubmachineId const root{ build_chart(c, "t", {}) };
+    StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+    StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+    build_trans(c, a, b, TransKind::External, label);
+    Spaces sp;
+    return !measure_chart(c, bundled(), readable(), sp);
+  };
+  CHECK(refused(wide_text()));
+  CHECK(refused(tall_text()));
+}
+
+TEST_CASE("builder: an emitter with no geometry column to read draws nothing") {
+  Chart const c{ small_chart() };  // built, never laid out: no scav.geom.* at all
+  Metrics const m{ bundled() };
+  Palette const p{ palette_standard() };
+  DrawList d;
+  for (uint32_t i = 0; i < c.states.size(); ++i) { emit_state(d, c, m, p, i, 0); }
+  for (uint32_t i = 0; i < c.submachines.size(); ++i) { emit_submachine(d, c, p, i, 0); }
+  for (uint32_t i = 0; i < c.transitions.size(); ++i) { emit_route(d, {}, c, p, i, 0); }
+  CHECK(d.prims.empty());
+}
+
+TEST_CASE("builder: a geometry column of a foreign shape is not read as layout's") {
+  // Layout refuses to write through a descriptor it did not register (11.7a),
+  // and the builder must not read through one either: a narrower stride reports
+  // more rows than the bytes behind it hold.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  geom_column(c, "scav.geom.state", ElemKind::State, ValueKind::Pod, RECT_SIZE / 2);
+  geom_column(c, "scav.geom.route", ElemKind::Transition, ValueKind::Span, 4);
+  geom_column(c, "scav.geom.point", ElemKind::Point, ValueKind::Pod, 4);
+
+  DrawList d;
+  emit_state(d, c, bundled(), palette_standard(), 0, 0);
+  emit_state(d, c, bundled(), palette_standard(), 1, 0);
+  emit_route(d, {}, c, palette_standard(), 0, 0);
+  CHECK(d.prims.empty());
+}
+
+TEST_CASE("builder: a state box with no extent draws nothing") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  build_state(c, root, "A", StateKind::Normal, {});
+  build_state(c, root, "B", StateKind::Normal, {});
+  ColumnId const boxes{ state_boxes(c) };
+  put_row(c, boxes, 0, scav_rect{ .x = 0, .y = 0, .w = 0, .h = 40 });
+  put_row(c, boxes, 1, scav_rect{ .x = 0, .y = 0, .w = 40, .h = 0 });
+
+  DrawList d;
+  emit_state(d, c, bundled(), palette_standard(), 0, 0);
+  emit_state(d, c, bundled(), palette_standard(), 1, 0);
+  CHECK(d.prims.empty());
+}
+
+TEST_CASE("builder: a name with no band reserved for it is not drawn") {
+  // The `state_before` rect is what says where a title goes; without it there is
+  // a box to draw and nowhere to put the name.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  build_state(c, root, "Named", StateKind::Normal, {});
+  ColumnId const boxes{ state_boxes(c) };
+  put_row(c, boxes, 0, scav_rect{ .x = 10, .y = 20, .w = 100, .h = 60 });
+
+  DrawList d;
+  emit_state(d, c, bundled(), palette_standard(), 0, 0);
+  CHECK(kind_count(d, SCAV_PRIM_RRECT) == 1);
+  CHECK(kind_count(d, SCAV_PRIM_TEXT) == 0);
+}
+
+TEST_CASE("builder: a divider goes in the gap, and only where there is one to divide") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const owner{ build_state(c, root, "S", StateKind::Normal, {}) };
+  SubmachineId const first{ build_submachine(c, owner, "a", {}) };
+  SubmachineId const second{ build_submachine(c, owner, "b", {}) };
+  ColumnId const rects{
+    geom_column(c, "scav.geom.sub", ElemKind::Submachine, ValueKind::Pod, RECT_SIZE)
+  };
+  put_row(c, rects, first.v, scav_rect{ .x = 0, .y = 0, .w = 100, .h = 50 });
+  put_row(c, rects, second.v, scav_rect{ .x = 0, .y = 60, .w = 100, .h = 50 });
+  Palette const p{ palette_standard() };
+  DrawList d;
+
+  SUBCASE("regions stacked one above the other take a horizontal rule") {
+    emit_submachine(d, c, p, second.v, 0);
+    REQUIRE(d.prims.size() == 1);
+    CHECK(d.prims[0].kind == SCAV_PRIM_LINE);
+    CHECK(d.prims[0].origin_kind == static_cast<uint32_t>(ElemKind::Submachine));
+    CHECK(d.prims[0].origin_ordinal == second.v);
+    REQUIRE(d.prims[0].points.len == 2);
+    scav_point const a{ d.points[d.prims[0].points.off] };
+    scav_point const z{ d.points[d.prims[0].points.off + 1] };
+    // Down the middle of the ten-unit gap, spanning both regions.
+    CHECK(a.y == 55);
+    CHECK(z.y == 55);
+    CHECK(a.x == 0);
+    CHECK(z.x == 100);
+  }
+  SUBCASE("a tombstoned region draws none") {
+    c.submachines[second.v].live = 0;
+    emit_submachine(d, c, p, second.v, 0);
+    CHECK(d.prims.empty());
+  }
+  SUBCASE("a palette too short to index draws none") {
+    emit_submachine(d, c, Palette(1), second.v, 0);
+    CHECK(d.prims.empty());
+  }
+  SUBCASE("a region with no height draws none") {
+    put_row(c, rects, second.v, scav_rect{ .x = 0, .y = 60, .w = 100, .h = 0 });
+    emit_submachine(d, c, p, second.v, 0);
+    CHECK(d.prims.empty());
+  }
+  SUBCASE("a region with no owner draws none") {
+    c.submachines[second.v].owner = { INVALID };
+    emit_submachine(d, c, p, second.v, 0);
+    CHECK(d.prims.empty());
+  }
+  SUBCASE("a tombstoned sibling is not one to divide from") {
+    c.submachines[first.v].live = 0;
+    emit_submachine(d, c, p, second.v, 0);
+    CHECK(d.prims.empty());
+  }
+  SUBCASE("a region its owner does not list draws none") {
+    c.states[owner.v].submachines = {};
+    emit_submachine(d, c, p, second.v, 0);
+    CHECK(d.prims.empty());
+  }
+  SUBCASE("a sibling with no extent draws none") {
+    put_row(c, rects, first.v, scav_rect{ .x = 0, .y = 0, .w = 0, .h = 50 });
+    emit_submachine(d, c, p, second.v, 0);
+    CHECK(d.prims.empty());
+    put_row(c, rects, first.v, scav_rect{ .x = 0, .y = 0, .w = 100, .h = 0 });
+    emit_submachine(d, c, p, second.v, 0);
+    CHECK(d.prims.empty());
+  }
+}
+
+TEST_CASE("builder: a route draws one polyline and one head, or nothing at all") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  ColumnId const routes{
+    geom_column(c, "scav.geom.route", ElemKind::Transition, ValueKind::Span, 8)
+  };
+  ColumnId const points{
+    geom_column(c, "scav.geom.point", ElemKind::Point, ValueKind::Pod, 8)
+  };
+  REQUIRE(column_resize(c, points, 2));
+  put_row(c, points, 0, scav_point{ .x = 0, .y = 0 });
+  put_row(c, points, 1, scav_point{ .x = 100, .y = 0 });
+  put_row(c, routes, 0, scav_span{ .off = 0, .len = 2 });
+  Palette const p{ palette_standard() };
+
+  DrawList d;
+  emit_route(d, {}, c, p, 0, 0);
+  CHECK(kind_count(d, SCAV_PRIM_POLYLINE) == 1);
+  CHECK(kind_count(d, SCAV_PRIM_PATH) == 1);
+  // Nothing asked for clearance, so the head's tip is the route's last point.
+  for (scav_prim const &prim : d.prims) {
+    if (prim.kind != SCAV_PRIM_PATH) { continue; }
+    CHECK(d.points[prim.points.off].x == 100);
+    CHECK(d.points[prim.points.off].y == 0);
+  }
+
+  DrawList dead;
+  c.transitions[0].live = 0;
+  emit_route(dead, {}, c, p, 0, 0);
+  CHECK(dead.prims.empty());
+  c.transitions[0].live = 1;
+
+  DrawList stub;
+  emit_route(stub, {}, c, Palette(1), 0, 0);
+  CHECK(stub.prims.empty());
+}
+
+TEST_CASE("builder: a transition that asked for no box gets none") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const s{ build_state(c, root, "S", StateKind::Normal, {}) };
+  StateId const other{ build_state(c, root, "O", StateKind::Normal, {}) };
+  TransId const silent{ build_trans(c, s, s, TransKind::Internal, {}) };
+  TransId const dead{ build_trans(c, s, other, TransKind::External, "gone") };
+  TransId const spoken{ build_trans(c, s, s, TransKind::Internal, "tick") };
+  c.transitions[dead.v].live = 0;
+
+  Spaces sp;
+  REQUIRE(measure_chart(c, bundled(), readable(), sp));
+  scav_spaces const view{ as_spaces(sp) };
+  scav_rect box{ .x = 1, .y = 2, .w = 3, .h = 4 };
+  CHECK(!label_box(c, view, nullptr, 0, 9999, box));      // past the array
+  CHECK(!label_box(c, view, nullptr, 0, dead.v, box));    // a tombstone
+  CHECK(!label_box(c, view, nullptr, 0, silent.v, box));  // nothing to say
+  // Labelled and routeless, but its source reserved no band to ride.
+  CHECK(!label_box(c, view, nullptr, 0, spoken.v, box));
+  ColumnId const after{
+    geom_column(c, "scav.geom.state_after", ElemKind::State, ValueKind::Pod, RECT_SIZE)
+  };
+  put_row(c, after, s.v, scav_rect{ .x = 0, .y = 0, .w = 100, .h = 0 });
+  CHECK(!label_box(c, view, nullptr, 0, spoken.v, box));  // a band of no height
+  CHECK(box.w == 3);  // and `out` is left alone throughout
+}
+
+TEST_CASE("builder: a routed label is found only where one was placed for it") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, "go");
+  Spaces sp;
+  REQUIRE(measure_chart(c, bundled(), readable(), sp));
+  REQUIRE(sp.path_box.size() == 1);
+  scav_spaces const view{ as_spaces(sp) };
+
+  scav_rect box{};
+  CHECK(!label_box(c, view, nullptr, 1, 0, box));  // a count with no array behind it
+  std::array<scav_placed, 1> const placed{ { { .x = 5, .y = 6, .w = 7, .h = 8 } } };
+  CHECK(!label_box(c, view, placed.data(), 0, 0, box));  // an array layout never filled
+  REQUIRE(label_box(c, view, placed.data(), 1, 0, box));
+  CHECK(box.x == 5);
+  CHECK(box.h == 8);
+}
+
+TEST_CASE("builder: a label with nothing to say or no way to say it draws nothing") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  TransId const bare{ build_trans(c, a, b, TransKind::External, {}) };
+  TransId const dead{ build_trans(c, a, b, TransKind::External, "gone") };
+  TransId const unglyphed{ build_trans(c, a, b, TransKind::External, NO_GLYPH) };
+  TransId const good{ build_trans(c, a, b, TransKind::External, "go") };
+  c.transitions[dead.v].live = 0;
+
+  Metrics const m{ bundled() };
+  Palette const p{ palette_standard() };
+  scav_rect const box{ .x = 0, .y = 0, .w = 200, .h = 100 };
+  DrawList d;
+  emit_label(d, c, m, p, dead.v, box, 0);
+  emit_label(d, c, m, Palette(1), good.v, box, 0);
+  emit_label(d, c, m, p, bare.v, box, 0);
+  // Refused rather than drawn narrow, which is the same answer the backend gives.
+  emit_label(d, c, m, p, unglyphed.v, box, 0);
+  CHECK(d.prims.empty());
+
+  // The same box and the palette it needs: what the four above refused was the
+  // transition and the palette, not the rect.
+  emit_label(d, c, m, p, good.v, box, 0);
+  CHECK(d.prims.size() == 1);
+}
+
+TEST_CASE("builder: a profile whose pad is negative is refused, not drawn inside out") {
+  scav_profile p{ readable() };
+  p.pad = -1000;  // more than a short name is wide, so the box inverts
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  build_state(c, root, "Named", StateKind::Normal, {});
+  Spaces s;
+  CHECK(!measure_chart(c, bundled(), p, s));
+}
+
+TEST_CASE("builder: a tombstoned transition claims no line of the after band") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const s{ build_state(c, root, "S", StateKind::Normal, {}) };
+  TransId const dead{ build_trans(c, s, s, TransKind::Internal, "gone") };
+  TransId const live{ build_trans(c, s, s, TransKind::Internal, "tick") };
+  c.transitions[dead.v].live = 0;
+
+  Spaces sp;
+  REQUIRE(measure_chart(c, bundled(), readable(), sp));
+  ColumnId const after{
+    geom_column(c, "scav.geom.state_after", ElemKind::State, ValueKind::Pod, RECT_SIZE)
+  };
+  put_row(c, after, s.v, scav_rect{ .x = 0, .y = 0, .w = 100, .h = 40 });
+
+  scav_rect box{};
+  REQUIRE(label_box(c, as_spaces(sp), nullptr, 0, live.v, box));
+  // One claimant, so the band is not divided: the live label takes it whole.
+  CHECK(box.y == 0);
+  CHECK(box.h == 40);
+}
+
+TEST_CASE("builder: a history circle too big for the metrics draws the ring and no mark") {
+  // The mark is sized from the circle, so a circle past what the metrics will
+  // measure at all leaves nothing to size it with.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  build_state(c, root, {}, StateKind::History, {});
+  ColumnId const boxes{ state_boxes(c) };
+  put_row(c, boxes, 0, scav_rect{ .x = 0, .y = 0, .w = 400000, .h = 400000 });
+
+  DrawList d;
+  emit_state(d, c, bundled(), palette_standard(), 0, 0);
+  CHECK(kind_count(d, SCAV_PRIM_CIRCLE) == 1);
+  CHECK(kind_count(d, SCAV_PRIM_TEXT) == 0);
+}
+
+TEST_CASE("builder: a name the metrics refuse is placed from its band, not its glyphs") {
+  // A diamond centres its name on the measured width. Where there is no
+  // measurement there is no centring, and the name is still drawn.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  build_state(c, root, NO_GLYPH, StateKind::Choice, {});
+  ColumnId const boxes{ state_boxes(c) };
+  ColumnId const befores{
+    geom_column(c, "scav.geom.state_before", ElemKind::State, ValueKind::Pod, RECT_SIZE)
+  };
+  put_row(c, boxes, 0, scav_rect{ .x = 0, .y = 0, .w = 400, .h = 200 });
+  put_row(c, befores, 0, scav_rect{ .x = 8, .y = 4, .w = 80, .h = 40 });
+
+  DrawList d;
+  emit_state(d, c, bundled(), palette_standard(), 0, 0);
+  REQUIRE(kind_count(d, SCAV_PRIM_TEXT) == 1);
+  for (scav_prim const &prim : d.prims) {
+    if (prim.kind != SCAV_PRIM_TEXT) { continue; }
+    CHECK(d.points[prim.points.off].x == (8 + (80 / 8)));
+  }
+}
+
+TEST_CASE("builder: what the head is set back by comes from the clear table or nothing") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, a, TransKind::External, {});
+  ColumnId const routes{
+    geom_column(c, "scav.geom.route", ElemKind::Transition, ValueKind::Span, 8)
+  };
+  ColumnId const points{
+    geom_column(c, "scav.geom.point", ElemKind::Point, ValueKind::Pod, 8)
+  };
+  REQUIRE(column_resize(c, points, 4));
+  put_row(c, points, 0, scav_point{ .x = 0, .y = 0 });
+  put_row(c, points, 1, scav_point{ .x = 100, .y = 0 });
+  put_row(c, points, 2, scav_point{ .x = 0, .y = 0 });
+  put_row(c, points, 3, scav_point{ .x = 100, .y = 50 });  // not axis-aligned
+  put_row(c, routes, 0, scav_span{ .off = 0, .len = 2 });
+  put_row(c, routes, 1, scav_span{ .off = 2, .len = 2 });
+  Palette const p{ palette_standard() };
+
+  scav_path_clear const one{ .src = 0, .dst = 16 };
+  scav_spaces const s{ .box_state = nullptr,
+                       .n_box_state = 0,
+                       .box_sub = nullptr,
+                       .n_box_sub = 0,
+                       .path_clear = &one,
+                       .n_path_clear = 1,
+                       .path_box = nullptr,
+                       .n_path_box = 0 };
+
+  auto const tip = [&](uint32_t trans, scav_spaces const &spaces) {
+    DrawList d;
+    emit_route(d, spaces, c, p, trans, 0);
+    REQUIRE(kind_count(d, SCAV_PRIM_PATH) == 1);
+    scav_point out{};
+    for (scav_prim const &prim : d.prims) {
+      if (prim.kind == SCAV_PRIM_PATH) { out = d.points[prim.points.off]; }
+    }
+    return out;
+  };
+
+  // The row the table holds is the set-back the head takes.
+  CHECK(tip(0, s).x == (100 + 16));
+  // The second transition is past the table's end, so it asks for nothing.
+  CHECK(tip(1, s).x == 100);
+  CHECK(tip(1, s).y == 50);
+  // And a last leg on neither axis leaves the tip on the route's own end.
+  CHECK(tip(0, {}).x == 100);
+}
+
+TEST_CASE("builder: a route whose point column was never filled draws nothing") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  ColumnId const routes{
+    geom_column(c, "scav.geom.route", ElemKind::Transition, ValueKind::Span, 8)
+  };
+  // Registered and never resized: a point column carries its own length.
+  geom_column(c, "scav.geom.point", ElemKind::Point, ValueKind::Pod, 8);
+  put_row(c, routes, 0, scav_span{ .off = 0, .len = 0 });
+
+  DrawList d;
+  emit_route(d, {}, c, palette_standard(), 0, 0);
+  CHECK(d.prims.empty());
+}
+
+TEST_CASE("builder: emit_chart refuses a palette too short to index") {
+  Built const b{ pipeline(small_chart(), readable()) };
+  DrawList d;
+  CHECK(!emit_chart(d,
+                    b.chart,
+                    bundled(),
+                    Palette(1),
+                    as_spaces(b.spaces),
+                    b.placed.data(),
+                    static_cast<uint32_t>(b.placed.size()),
+                    0));
+  CHECK(d.prims.empty());
 }

@@ -37,6 +37,10 @@ uint32_t valid(DrawList const &d) {
   return drawlist_validate(d, bad) ? INVALID : bad;
 }
 
+bool same(scav_rect a, scav_rect b) {
+  return (a.x == b.x) && (a.y == b.y) && (a.w == b.w) && (a.h == b.h);
+}
+
 }  // namespace
 
 TEST_CASE("drawlist: an empty list is valid, canonical, and hashes stably") {
@@ -157,6 +161,19 @@ TEST_CASE("drawlist: the validator rejects what a backend could not draw") {
     DrawList d{ base };
     d.prims[0].points.off = 99;
     CHECK(valid(d) == 0);
+    // And one that starts inside the array and ends one point past its end.
+    d.prims[0].points.off = 1;
+    CHECK(valid(d) == 0);
+  }
+  SUBCASE("a payload reaching past the text pool") {
+    DrawList d;
+    uint32_t const style{ drawlist_style(d, ink(0)) };
+    push_text(d, 0, style, { .x = 0, .y = 0 }, "five!", NONE);
+    REQUIRE(valid(d) == INVALID);
+    d.prims[0].payload.off = 99;
+    CHECK(valid(d) == 0);
+    d.prims[0].payload = { .off = 1, .len = 99 };  // starts inside, ends past
+    CHECK(valid(d) == 0);
   }
   SUBCASE("a style or clip index out of range") {
     DrawList d{ base };
@@ -267,6 +284,93 @@ TEST_CASE("drawlist: canonicalizing is idempotent and dedups the tables") {
   CHECK(d.styles.size() == 2);
 }
 
+TEST_CASE("drawlist: canonical style order is colour, then width, then dash") {
+  DrawList d;
+  // Four styles agreeing on every field ahead of the one they differ in, laid
+  // out so each neighbouring pair is decided by exactly one of them.
+  d.styles = {
+    { .stroke_rgba = 1, .fill_rgba = 2, .stroke_w = 16, .dash = 1, .font_size_grid = 0 },
+    { .stroke_rgba = 1, .fill_rgba = 2, .stroke_w = 16, .dash = 0, .font_size_grid = 0 },
+    { .stroke_rgba = 1, .fill_rgba = 2, .stroke_w = 8, .dash = 0, .font_size_grid = 0 },
+    { .stroke_rgba = 1, .fill_rgba = 2, .stroke_w = 8, .dash = 1, .font_size_grid = 0 }
+  };
+  std::array<int32_t, 4> const want_w{ 16, 16, 8, 8 };
+  std::array<uint32_t, 4> const want_dash{ 1, 0, 0, 1 };
+  for (uint32_t i = 0; i < 4; ++i) {
+    push_rect(d, 0, i, { .x = static_cast<int32_t>(i), .y = 0, .w = 1, .h = 1 }, NONE);
+  }
+  REQUIRE(valid(d) == INVALID);
+
+  drawlist_canonicalize(d);
+  REQUIRE(d.styles.size() == 4);
+  CHECK(d.styles[0].stroke_w == 8);
+  CHECK(d.styles[0].dash == 0);
+  CHECK(d.styles[1].stroke_w == 8);
+  CHECK(d.styles[1].dash == 1);
+  CHECK(d.styles[2].stroke_w == 16);
+  CHECK(d.styles[2].dash == 0);
+  CHECK(d.styles[3].stroke_w == 16);
+  CHECK(d.styles[3].dash == 1);
+
+  // Reordering the table rewrites the indices: every primitive still names the
+  // style it was drawn with.
+  for (scav_prim const &p : d.prims) {
+    uint32_t const which{ static_cast<uint32_t>(d.points[p.points.off].x) };
+    CAPTURE(which);
+    CHECK(d.styles[p.style].stroke_w == want_w[which]);
+    CHECK(d.styles[p.style].dash == want_dash[which]);
+  }
+  CHECK(valid(d) == INVALID);
+}
+
+TEST_CASE("drawlist: canonical clip order is x, then y, then w, then h") {
+  DrawList d;
+  uint32_t const s{ drawlist_style(d, ink(0)) };
+  std::array<scav_rect, 5> const want{ { { .x = 0, .y = 0, .w = 0, .h = 5 },
+                                         { .x = 0, .y = 0, .w = 0, .h = 1 },
+                                         { .x = 0, .y = 0, .w = 7, .h = 1 },
+                                         { .x = 0, .y = 9, .w = 0, .h = 0 },
+                                         { .x = 4, .y = 0, .w = 0, .h = 0 } } };
+  d.clips.assign(want.begin(), want.end());
+  for (uint32_t i = 0; i < want.size(); ++i) {
+    push_rect(d, 0, s, { .x = static_cast<int32_t>(i), .y = 0, .w = 1, .h = 1 }, NONE);
+    d.prims[i].clip = i;
+  }
+  REQUIRE(valid(d) == INVALID);
+
+  drawlist_canonicalize(d);
+  REQUIRE(d.clips.size() == 5);
+  CHECK(same(d.clips[0], want[1]));  // h decides what the first three fields tie
+  CHECK(same(d.clips[1], want[0]));
+  CHECK(same(d.clips[2], want[2]));  // then w
+  CHECK(same(d.clips[3], want[3]));  // then y
+  CHECK(same(d.clips[4], want[4]));  // then x
+  for (scav_prim const &p : d.prims) {
+    uint32_t const which{ static_cast<uint32_t>(d.points[p.points.off].x) };
+    CAPTURE(which);
+    CHECK(same(d.clips[p.clip], want[which]));
+  }
+  CHECK(valid(d) == INVALID);
+}
+
+TEST_CASE("drawlist: canonicalizing a list whose tables are empty leaves index zero") {
+  // Not a list a backend would take -- it is what an app hands over when it
+  // clears a table and forgets the primitives indexing it. The remap reads the
+  // map it built, so an empty one must not be indexed.
+  DrawList d;
+  push_rect(d, 0, 0, { .x = 0, .y = 0, .w = 1, .h = 1 }, NONE);
+  d.styles.clear();
+  d.prims[0].clip = 0;
+  CHECK(valid(d) == 0);
+
+  drawlist_canonicalize(d);
+  REQUIRE(d.prims.size() == 1);
+  CHECK(d.prims[0].style == 0);
+  CHECK(d.prims[0].clip == 0);
+  CHECK(d.styles.empty());
+  CHECK(d.clips.empty());
+}
+
 TEST_CASE("drawlist: the digest hears content and the font, not indices") {
   Metrics bundled;
   REQUIRE(metrics_create(nullptr, 0, bundled));
@@ -335,6 +439,27 @@ TEST_CASE("drawlist: append rebases all four index spaces") {
   // Depth decides the interleave, not the order things were appended in.
   CHECK(host.prims[0].depth == 0);
   CHECK(host.prims[1].depth == 5);
+}
+
+TEST_CASE("drawlist: append rebases a primitive naming a row its own list lacks") {
+  DrawList dst;
+  drawlist_style(dst, ink(0xAA));
+  DrawList src;
+  uint32_t const s{ drawlist_style(src, ink(0xBB)) };
+  push_rect(src, 0, s, { .x = 0, .y = 0, .w = 1, .h = 1 }, NONE);
+  push_rect(src, 0, s, { .x = 2, .y = 0, .w = 1, .h = 1 }, NONE);
+  src.prims[1].style = 9;  // past its own table, so the map has no row for it
+  src.prims[1].clip = 9;
+  CHECK(valid(src) == 1);
+
+  drawlist_append(dst, src);
+  REQUIRE(dst.prims.size() == 2);
+  CHECK(dst.prims[0].style == 1);  // the appended style's row in `dst`
+  // What cannot be rebased lands on a row that exists rather than on a wild
+  // index: style zero, and unclipped.
+  CHECK(dst.prims[1].style == 0);
+  CHECK(dst.prims[1].clip == SCAV_CLIP_NONE);
+  CHECK(valid(dst) == INVALID);
 }
 
 TEST_CASE("drawlist: appending an empty list changes nothing") {
