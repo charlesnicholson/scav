@@ -16,7 +16,7 @@ constexpr int32_t PT{ 16 };  // grid units are 1/16 pt
 // One of the two shipped profiles scav_profile_named hands out by name.
 constexpr scav_profile READABLE{
   .profile_id = 2,
-  .profile_version = 4,
+  .profile_version = 5,
   .pad = 8 * PT,
   .rank_sep = 36 * PT,
   .node_sep = 18 * PT,
@@ -58,6 +58,7 @@ constexpr scav_profile READABLE{
   .w_aspect = 2,
   .w_area = 1,
   .portfolio_k = 4,
+  .portfolio_m = 1,
   .sweep_count = 8,
   .congestion_iterations = 8,
   .ripup_cap = 16,
@@ -69,7 +70,7 @@ constexpr scav_profile READABLE{
 // The other shipped profile: tighter spacing and type for dense charts.
 constexpr scav_profile COMPACT{
   .profile_id = 1,
-  .profile_version = 4,
+  .profile_version = 5,
   .pad = 4 * PT,
   .rank_sep = 22 * PT,
   .node_sep = 11 * PT,
@@ -109,6 +110,7 @@ constexpr scav_profile COMPACT{
   .w_aspect = 2,
   .w_area = 1,
   .portfolio_k = 4,
+  .portfolio_m = 1,
   .sweep_count = 8,
   .congestion_iterations = 8,
   .ripup_cap = 16,
@@ -148,7 +150,8 @@ bool profile_validate(scav_profile const &p) {
            in_range(p.w_excess_len, 0, 1024) && in_range(p.w_adjacency, 0, 1024) &&
            in_range(p.w_label, 0, 1024) && in_range(p.w_label_near, 0, 1024) &&
            in_range(p.w_aspect, 0, 1024) && in_range(p.w_area, 0, 1024) &&
-           in_range(p.portfolio_k, 1, 64) && in_range(p.sweep_count, 0, 1024) &&
+           in_range(p.portfolio_k, 1, 64) && in_range(p.portfolio_m, 1, 64) &&
+           in_range(p.sweep_count, 0, 1024) &&
            in_range(p.congestion_iterations, 0, 1024) && in_range(p.ripup_cap, 0, 1024) &&
            in_range(p.spacing_inflation_cap, 0, 1024) &&
            in_range(p.spacing_inflation_increment, 0, SPACE_MAX) &&
