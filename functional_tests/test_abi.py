@@ -342,6 +342,33 @@ class TestGeneratedBindings(unittest.TestCase):
         self.assertEqual(scav._abi.SCAV_E_INVALID_ARG, caught.exception.code)
         self.assertIn("SCAV_E_INVALID_ARG", str(caught.exception))
 
+    def test_a_buffer_too_small_reaches_the_caller_as_a_capacity_error(self) -> None:
+        """The query-then-fill protocol from the other side of the boundary: a
+        cap too small is its own code and the required count, never a short
+        buffer the caller would then read as the whole digest."""
+        scav = self.scav
+        lib = scav.library()
+        chart = scav.load_network(
+            "estop.scav",
+            {"estop.scav": (self.charts / "estop.scav").read_text(encoding="utf-8")})
+        size = ctypes.c_uint32(0)
+        scav._abi.check(
+            lib.scav_chart_digest(chart.pointer, None, 0, ctypes.byref(size)),
+            "scav_chart_digest")
+        self.assertGreater(size.value, 1)
+
+        needed = ctypes.c_uint32(0)
+        buffer = (ctypes.c_ubyte * (size.value - 1))()
+        code = lib.scav_chart_digest(chart.pointer, buffer, size.value - 1,
+                                     ctypes.byref(needed))
+        self.assertEqual(scav._abi.SCAV_E_CAPACITY, code)
+        self.assertEqual(size.value, needed.value)
+        self.assertEqual(0, sum(buffer))  # refused, so nothing was written
+        with self.assertRaises(scav.ScavError) as caught:
+            scav._abi.check(code, "scav_chart_digest")
+        self.assertIn("SCAV_E_CAPACITY", str(caught.exception))
+        chart.close()
+
     def test_a_drawlist_appends_with_its_indices_rebased(self) -> None:
         scav = self.scav
         chart = scav.load_network(
