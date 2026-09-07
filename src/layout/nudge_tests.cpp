@@ -673,3 +673,157 @@ TEST_CASE("nudge: a lane the votes reorder counts as one whatever the room says"
   CHECK(s.moved == 0);
   CHECK(s.reordered == 1);
 }
+
+namespace {
+
+// Three members on y=100 whose crossing votes run in a circle. The first net
+// carries two of them, so the leg they share at x=200 is its own to cross.
+std::vector<std::vector<scav_point>> cyclic_lane() {
+  return { { pt(100, 400),
+             pt(100, 100),
+             pt(200, 100),
+             pt(200, -400),
+             pt(600, -400),
+             pt(600, -300),
+             pt(0, -300),
+             pt(0, 100),
+             pt(200, 100),
+             pt(200, 500) },
+           { pt(100, -200), pt(100, 100), pt(300, 100), pt(300, -100) } };
+}
+
+}  // namespace
+
+TEST_CASE("nudge: votes that run in a circle are settled by fewest contradictions") {
+  // Extents [0,200], [100,300] and [100,200], keyed in that order by their
+  // arrivals at -300, -200 and 400. Their legs vote 1 before 0 by two, 2 before
+  // 1 by one and 0 before 2 by one, which is a circle: Kahn's algorithm finds
+  // no bundle nothing precedes and places none of them.
+  Frame f{ frame_of(cyclic_lane()) };
+  NudgeStats s;
+  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+
+  CHECK(s.lanes == 1);
+  CHECK(s.bundles == 0);
+  CHECK(s.reordered == 1);
+  CHECK(s.spread == 1);
+  CHECK(s.moved == 2);
+
+  // [100,300] on top, then [0,200], then [100,200]: one vote of weight one is
+  // contradicted, where the key's own order contradicts three.
+  CHECK(net_pt(f, 1, 1).y == 52);
+  CHECK(net_pt(f, 1, 2).y == 52);
+  CHECK(net_pt(f, 0, 7).y == 100);
+  CHECK(net_pt(f, 0, 8).y == 100);
+  CHECK(net_pt(f, 0, 1).y == 148);
+  CHECK(net_pt(f, 0, 2).y == 148);
+
+  // The keys are the geometry, so the arrival order of the nets cannot move it.
+  Frame g{ frame_of(cyclic_lane()) };
+  std::vector<scav_span> const swapped{ g.nets[1], g.nets[0] };
+  NudgeStats t;
+  nudge_lanes(OPEN, OPEN, {}, 48, 0, swapped, g.points, t);
+  CHECK(same(f.points, g.points));
+  CHECK(t.reordered == s.reordered);
+  CHECK(t.moved == s.moved);
+}
+
+TEST_CASE("nudge: a box the lane already runs through does not bound it") {
+  // A re-seated route runs through the box it could not stand off from (11.5).
+  // Straddling the lane, the box bounds nothing; below it, it is a wall.
+  Lane through{ two_over(100) };
+  std::vector<scav_rect> const across{ rect(50, 60, 100, 80) };
+  NudgeStats s;
+  nudge_lanes(OPEN, OPEN, across, 48, 0, through.nets, through.points, s);
+  CHECK(s.spread == 1);
+  CHECK(lane_y(through, 0) == 76);
+  CHECK(lane_y(through, 1) == 124);
+
+  Lane beside{ two_over(100) };
+  std::vector<scav_rect> const under{ rect(50, 110, 100, 80) };
+  NudgeStats t;
+  nudge_lanes(OPEN, OPEN, under, 48, 0, beside.nets, beside.points, t);
+  CHECK(t.spread == 1);
+  CHECK(lane_y(beside, 0) == 62);
+  CHECK(lane_y(beside, 1) == 110);
+}
+
+TEST_CASE("nudge: a leg outside the region is refused before a box is consulted") {
+  // The first net's leg at x=-50 is left of the region, so its displacement is
+  // refused whatever the boxes say; the box here is not even beside the lane.
+  std::vector<scav_point> points{ pt(-50, 0), pt(-50, 100), pt(200, 100), pt(200, 300),
+                                  pt(0, 400), pt(0, 100),   pt(200, 100), pt(200, 500) };
+  std::vector<scav_span> const nets{ scav_span{ .off = 0, .len = 4 },
+                                     scav_span{ .off = 4, .len = 4 } };
+  std::vector<scav_rect> const away{ rect(400, 0, 100, 100) };
+  NudgeStats s;
+  nudge_lanes(rect(0, -1000, 3000, 3000), OPEN, away, 48, 0, nets, points, s);
+
+  CHECK(s.lanes == 1);
+  CHECK(s.spread == 1);
+  CHECK(s.moved == 1);
+  CHECK(points[1].y == 100);
+  CHECK(points[5].y == 124);
+}
+
+TEST_CASE("nudge: three bundles and one unit of room stay stacked") {
+  // The legs leave one unit of window between them, which three bundles cannot
+  // divide into offsets of their own: there is no integer step under one.
+  Frame f{ frame_of({ { pt(0, 99), pt(0, 100), pt(200, 100), pt(200, 300) },
+                      { pt(0, 0), pt(0, 100), pt(200, 100), pt(200, 102) },
+                      { pt(0, 50), pt(0, 100), pt(200, 100), pt(200, 400) } }) };
+  std::vector<scav_point> const before{ f.points };
+  NudgeStats s;
+  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+
+  CHECK(s.lanes == 1);
+  CHECK(s.bundles == 0);
+  CHECK(s.spread == 0);
+  CHECK(s.moved == 0);
+  CHECK(same(f.points, before));
+}
+
+TEST_CASE("nudge: a leg an earlier lane shortened is not folded onto its own end") {
+  // Two lanes of one net, joined by the leg from (200,100) to (200,148). The
+  // room each member has was read before either moved, so the second's 24 up is
+  // measured against a leg of 48 that the first has already cut to 24.
+  Frame f{ frame_of(
+      { { pt(0, 0), pt(0, 100), pt(200, 100), pt(200, 148), pt(400, 148), pt(400, 600) },
+        { pt(10, -100), pt(10, 100), pt(210, 100), pt(210, 500) },
+        { pt(250, 300), pt(250, 148), pt(450, 148), pt(450, 600) } }) };
+  NudgeStats s;
+  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+
+  CHECK(s.lanes == 2);
+  CHECK(s.spread == 2);
+  CHECK(s.moved == 3);
+  CHECK(net_pt(f, 1, 1).y == 76);
+  CHECK(net_pt(f, 0, 1).y == 124);
+  CHECK(net_pt(f, 0, 2).y == 124);
+  // Its 24 would land the segment exactly on the leg's far end, so it stays and
+  // its lane partner takes the offset it was given.
+  CHECK(net_pt(f, 0, 3).y == 148);
+  CHECK(net_pt(f, 0, 4).y == 148);
+  CHECK(net_pt(f, 2, 1).y == 172);
+}
+
+TEST_CASE("nudge: a trailing leg an earlier lane shortened is refused the same way") {
+  // The mirror of the leading leg: here the stale end is the one the segment
+  // runs into, and the lane below has already brought it 24 nearer.
+  Frame f{ frame_of(
+      { { pt(0, 0), pt(0, 148), pt(200, 148), pt(200, 100), pt(400, 100), pt(400, 600) },
+        { pt(210, -300), pt(210, 100), pt(410, 100), pt(410, 500) },
+        { pt(50, 800), pt(50, 148), pt(250, 148), pt(250, 700) } }) };
+  NudgeStats s;
+  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+
+  CHECK(s.lanes == 2);
+  CHECK(s.spread == 2);
+  CHECK(s.moved == 3);
+  CHECK(net_pt(f, 1, 1).y == 76);
+  CHECK(net_pt(f, 0, 3).y == 124);
+  CHECK(net_pt(f, 0, 4).y == 124);
+  CHECK(net_pt(f, 0, 1).y == 148);
+  CHECK(net_pt(f, 0, 2).y == 148);
+  CHECK(net_pt(f, 2, 1).y == 172);
+}
