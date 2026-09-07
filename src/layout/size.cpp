@@ -24,6 +24,23 @@ scav_box_space box_of(scav_box_space const *rows, uint32_t count, uint32_t i) {
 // overflowed saturates at `PACK_SATURATED`, which is far past `COORD_MAX`.
 bool fits(Packing const &p) { return (p.w <= COORD_MAX) && (p.h <= COORD_MAX); }
 
+// The better-scaling of the two packings, among those inside the domain. A
+// packing outside it cannot compose a box inside it, so it is no candidate.
+Packing pack_best(std::vector<scav_rect> const &rects,
+                  int32_t sep,
+                  scav_profile const &p) {
+  Packing packed{ pack_lr(rects, sep, p.dar_num, p.dar_den) };
+  if (p.trybox != 0) {
+    Packing const row{ pack_box(rects, sep) };
+    if (fits(row) &&
+        (!fits(packed) ||
+         pack_better(row, packed, p.dar_num, p.dar_den, p.sm_tiebreak != 0))) {
+      packed = row;
+    }
+  }
+  return packed;
+}
+
 void overflow(std::vector<Diagnostic> &diags, ElemKind kind, uint32_t ordinal) {
   diags.push_back({ .code = DiagCode::CoordinateOverflow,
                     .subject = { .kind = kind, .ordinal = ordinal },
@@ -204,7 +221,7 @@ bool size_layout(Chart const &c,
         }
 
         std::vector<scav_rect> pieces(chunks.size(), scav_rect{});
-        bool fits{ true };
+        bool pieces_fit{ true };
         for (uint32_t chunk = 0; chunk < chunks.size(); ++chunk) {
           uint32_t const first{ chunks[chunk] };
           uint32_t const last{ ((chunk + 1) < chunks.size()) ? chunks[chunk + 1]
@@ -263,30 +280,24 @@ bool size_layout(Chart const &c,
                                  layer_x[local_rank[nodes[at]] - first]),
                              .y = static_cast<int32_t>(centre[i]) };
           }
-          fits = fits && (chunk_w <= COORD_MAX) && (chunk_h <= COORD_MAX);
-          if (!fits) { break; }
+          pieces_fit = pieces_fit && (chunk_w <= COORD_MAX) && (chunk_h <= COORD_MAX);
+          if (!pieces_fit) { break; }
           pieces[chunk] = { .x = 0,
                             .y = 0,
                             .w = static_cast<int32_t>(chunk_w),
                             .h = static_cast<int32_t>(chunk_h) };
         }
-        if (!fits) {
+        if (!pieces_fit) {
           shape.ok = false;
           return shape;
         }
 
         // Packed, not stacked: stacking left-aligned gives every piece the width of the
         // widest. They are rectangles sharing an area, which is `pack_lr`'s job (11.4).
-        Packing packed{ pack_lr(pieces, p.node_sep, p.dar_num, p.dar_den) };
-        if (p.trybox != 0) {
-          Packing const row{ pack_box(pieces, p.node_sep) };
-          if (pack_better(row, packed, p.dar_num, p.dar_den, p.sm_tiebreak != 0)) {
-            packed = row;
-          }
-        }
+        Packing const packed{ pack_best(pieces, p.node_sep, p) };
         shape.w = packed.w;
         shape.h = packed.h;
-        shape.ok = (shape.w <= COORD_MAX) && (shape.h <= COORD_MAX);
+        shape.ok = fits(packed);
         // A saturated position would leave int32 when the offset below added
         // to it, and no caller reads a shape this phase goes on to diagnose.
         if (!shape.ok) { return shape; }
@@ -333,17 +344,7 @@ bool size_layout(Chart const &c,
       for (uint32_t i = 0; i < nodes.size(); ++i) { local[nodes[i]] = best.at[i]; }
     }
 
-    Packing packed{ pack_lr(boxes, p.node_sep, p.dar_num, p.dar_den) };
-    if (p.trybox != 0) {
-      // Leaving the domain disqualifies a candidate before the two are
-      // compared, so the better-scoring one never displaces one that fits.
-      Packing const row{ pack_box(boxes, p.node_sep) };
-      if (fits(row) &&
-          (!fits(packed) ||
-           pack_better(row, packed, p.dar_num, p.dar_den, p.sm_tiebreak != 0))) {
-        packed = row;
-      }
-    }
+    Packing const packed{ pack_best(boxes, p.node_sep, p) };
     if (!fits(packed)) {
       overflow(diags, ElemKind::Submachine, m);
       ok = false;
@@ -390,13 +391,7 @@ bool size_layout(Chart const &c,
     }
     Packing packed;
     if (!kids.empty()) {
-      packed = pack_lr(kids, p.sub_sep, p.dar_num, p.dar_den);
-      if (p.trybox != 0) {
-        Packing const row{ pack_box(kids, p.sub_sep) };
-        if (pack_better(row, packed, p.dar_num, p.dar_den, p.sm_tiebreak != 0)) {
-          packed = row;
-        }
-      }
+      packed = pack_best(kids, p.sub_sep, p);
       for (uint32_t k = 0; k < ids.size(); ++k) {
         sub_local[ids[k]] = { .x = packed.at[k].x, .y = packed.at[k].y };
       }

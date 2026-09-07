@@ -981,7 +981,7 @@ The fold is what costs §11.7a's hash split a property it had while sizing did n
 
 Width approximation is `target_w = isqrt(floor_div(total_area * dar_num, dar_den))` with that exact operation order, `isqrt` = floor. `DAR` is an integer pair. On same-height submachines the older `box` packer wins; `trybox` is evaluated once per layout, deterministically. A 1-unit change can flip the packer and reflow siblings; that is a boundary condition for hints (§14), not grounds for remembering the previous choice.
 
-**Where a frame's components are packed, fitting the domain (§11.2) is a precondition of that comparison rather than a check after it.** Row and column are each measured against `COORD_MAX` before `pack_better` is asked, so a better-scoring packing that does not fit never displaces one that does, and the submachine is diagnosed `CoordinateOverflow` only where neither fit.
+**Fitting the domain (§11.2) is a precondition of the comparison, not a check after it.** Every packing comparison — a frame's components, the pieces a fold makes, and a state's sibling submachines — measures each candidate against `COORD_MAX` first, so a better-scoring packing that does not fit never displaces one that does, and `CoordinateOverflow` is reported only where no candidate fit. A packing outside the domain cannot compose a box inside it, so nothing viable is discarded by asking.
 
 **Bottom-up sizing has no locality** — a leaf growing one unit resizes every ancestor to the root. Inherent, and simply paid: one pass up, one pass down, fixed count. No hysteresis; that would be hidden state (§11.11).
 
