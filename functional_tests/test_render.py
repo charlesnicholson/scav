@@ -219,7 +219,7 @@ class TestRender(unittest.TestCase):
         self.assertEqual("", result.stdout)
         self.assertRegex(
             result.stderr,
-            r"^" + re.escape(str(chart))
+            r"^" + re.escape(chart.as_posix())
             + r":\d+:\d+: composed geometry exceeds the coordinate domain\n$")
         self.assertFalse(target.exists())
 

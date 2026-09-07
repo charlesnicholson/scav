@@ -647,11 +647,13 @@ TEST_CASE("metrics: the C surface agrees with the C++ one, and refuses nulls") {
 }
 
 TEST_CASE("metrics: a table directory that runs off the end is refused") {
+  // Sized once and filled from the front, so nothing is resized after a push.
   auto const header = [](uint32_t tables, uint32_t bytes) {
-    std::vector<scav_byte> f;
-    be32(f, 0x0001'0000U);
-    be16(f, tables);
-    f.resize(bytes, 0);
+    std::vector<scav_byte> head;
+    be32(head, 0x0001'0000U);
+    be16(head, tables);
+    std::vector<scav_byte> f(bytes, 0);
+    for (uint32_t i = 0; (i < head.size()) && (i < bytes); ++i) { f[i] = head[i]; }
     return f;
   };
   std::vector<scav_byte> const good{ assemble({

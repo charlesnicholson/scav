@@ -91,7 +91,7 @@ class TestCheck(unittest.TestCase):
                 result = self.run_scav("check", chart)
                 self.assertEqual(1, result.returncode)
                 self.assertEqual("", result.stdout)
-                self.assertEqual(f"{chart}:{want}\n", result.stderr)
+                self.assertEqual(f"{chart.as_posix()}:{want}\n", result.stderr)
 
     def test_an_alias_colliding_with_a_sibling_is_a_finding(self) -> None:
         # An include synthesizes a state named for its alias, so the ordinary

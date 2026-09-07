@@ -379,7 +379,7 @@ class TestDump(unittest.TestCase):
         self.assertEqual("", result.stdout)
         self.assertRegex(
             result.stderr,
-            "^" + re.escape(str(chart))
+            "^" + re.escape(chart.as_posix())
             + r":\d+:\d+: composed geometry exceeds the coordinate domain\n$")
 
     # Usage =================================================================
