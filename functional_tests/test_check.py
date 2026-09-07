@@ -54,21 +54,44 @@ class TestCheck(unittest.TestCase):
             self.assertEqual(0, result.returncode, chart.name)
             self.assertEqual("", result.stdout, chart.name)
 
-    def test_a_duplicate_name_is_a_finding(self) -> None:
-        chart = self.write("dup.scav", "chart d {\n  state A,\n  state A,\n}\n")
-        result = self.run_scav("check", chart)
-        self.assertEqual(1, result.returncode)
-        self.assertEqual("", result.stdout)
-        self.assertIn("duplicate", result.stderr.lower())
-
-    def test_two_initials_in_one_submachine_is_a_finding(self) -> None:
-        chart = self.write(
-            "two_initial.scav",
+    # Every finding class a `.scav` file can reach. The rest of §10's checks are
+    # about a model built in memory -- a tombstoned row, a span outside its
+    # document, a column of the wrong length -- and no loaded chart has one.
+    FINDINGS = {
+        "duplicate_name": (
+            "chart d {\n  state A,\n  state A,\n}\n",
+            "3:3: duplicate name within a submachine",
+        ),
+        "multiple_initial": (
             "chart t {\n  state A,\n  state B,\n  trans * -> A,\n  trans * -> B,\n}\n",
-        )
-        result = self.run_scav("check", chart)
-        self.assertEqual(1, result.returncode)
-        self.assertIn("initial", result.stderr.lower())
+            "5:3: more than one initial state in a submachine",
+        ),
+        "endpoint_unresolved": (
+            "chart e {\n  state A,\n  trans A -> Nope,\n}\n",
+            "3:3: endpoint path names no state",
+        ),
+        "bad_qualifier": (
+            "chart q {\n  state A,\n  state B,\n  trans A:main -> B,\n}\n",
+            "4:3: submachine qualifier names no submachine, or qualifies nothing",
+        ),
+        "wildcard_both_ends": (
+            "chart w {\n  state A,\n  trans * -> *,\n}\n",
+            "3:3: a transition cannot run from '*' to '*'",
+        ),
+        "misplaced_statement": (
+            "chart m {\n  state A,\n  trans A -> A { state Inner, },\n}\n",
+            "3:18: statement is not permitted in this block",
+        ),
+    }
+
+    def test_every_finding_class_a_file_can_reach_names_a_line_and_column(self) -> None:
+        for name, (source, want) in self.FINDINGS.items():
+            with self.subTest(finding=name):
+                chart = self.write(f"{name}.scav", source)
+                result = self.run_scav("check", chart)
+                self.assertEqual(1, result.returncode)
+                self.assertEqual("", result.stdout)
+                self.assertEqual(f"{chart}:{want}\n", result.stderr)
 
     def test_an_alias_colliding_with_a_sibling_is_a_finding(self) -> None:
         # An include synthesizes a state named for its alias, so the ordinary
@@ -103,10 +126,18 @@ class TestCheck(unittest.TestCase):
         self.assertEqual(2, result.returncode)
         self.assertEqual("", result.stdout)
 
-    def test_check_takes_exactly_one_path(self) -> None:
+    def test_check_takes_exactly_one_path_and_no_options(self) -> None:
         chart = self.write("one.scav", "chart o {\n  state A,\n}\n")
-        self.assertEqual(2, self.run_scav("check").returncode)
-        self.assertEqual(2, self.run_scav("check", chart, chart).returncode)
+        for args in (["check"],
+                     ["check", chart, chart],
+                     ["check", "--json"],
+                     ["check", "--json", chart]):
+            with self.subTest(args=[str(a) for a in args]):
+                result = self.run_scav(*args)
+                self.assertEqual(2, result.returncode)
+                self.assertEqual("", result.stdout)
+                self.assertTrue(result.stderr.startswith("usage: scav <verb>"),
+                                result.stderr)
 
     def test_an_unknown_verb_prints_usage(self) -> None:
         result = self.run_scav("validate", "x.scav")

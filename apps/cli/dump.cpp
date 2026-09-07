@@ -652,7 +652,7 @@ int run_dump(char const *path, bool hash_only, bool as_json, bool with_layout) {
     Spaces spaces;
     if (!metrics_create(nullptr, 0, metrics) ||
         !measure_chart(net.chart, metrics, opts.profile, spaces)) {
-      write_stream("cannot measure the chart with the bundled font\n", stderr);
+      write_error("cannot measure the chart with the bundled font", path);
       return EXIT_UNUSABLE;
     }
     std::vector<scav_placed> placed;

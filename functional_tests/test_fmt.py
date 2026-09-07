@@ -576,7 +576,8 @@ class TestFmt(unittest.TestCase):
         before = path.read_bytes()
         result = self.run_scav("fmt", "--check", path)
         self.assertEqual(1, result.returncode)
-        self.assertIn("not canonical", result.stderr)
+        self.assertEqual("", result.stdout)
+        self.assertEqual(f"{path}: not canonical\n", result.stderr)
         self.assertEqual(before, path.read_bytes())
 
     def test_check_names_every_file_that_fails(self) -> None:
@@ -585,9 +586,21 @@ class TestFmt(unittest.TestCase):
         c = self.write("chart c { m x { s C, }, }\n", name="loose_c")
         result = self.run_scav("fmt", "--check", a, b, c)
         self.assertEqual(1, result.returncode)
-        self.assertIn("loose_a.scav: not canonical", result.stderr)
-        self.assertIn("loose_c.scav: not canonical", result.stderr)
-        self.assertNotIn("canonical_b.scav: not canonical", result.stderr)
+        self.assertEqual("", result.stdout)
+        self.assertEqual(f"{a}: not canonical\n{c}: not canonical\n", result.stderr)
+
+    def test_a_canonical_file_is_left_untouched(self) -> None:
+        path = self.write("chart c { s A, }\n")
+        self.assertEqual(0, self.run_scav("fmt", path).returncode)
+        self.assertEqual(b"chart c {\n  state A,\n}\n", path.read_bytes())
+        # Pinned into the past, so a rewrite shows up whatever the filesystem's
+        # timestamp resolution is.
+        os.utime(path, (1_000_000_000, 1_000_000_000))
+        before = path.stat().st_mtime_ns
+        result = self.run_scav("fmt", path)
+        self.assertEqual("", result.stderr)
+        self.assertEqual(0, result.returncode)
+        self.assertEqual(before, path.stat().st_mtime_ns)
 
     # Failure ===============================================================
 
@@ -614,6 +627,34 @@ class TestFmt(unittest.TestCase):
         result = self.run_scav("fmt", self.scratch / "nope.scav")
         self.assertEqual(2, result.returncode)
         self.assertIn("cannot read", result.stderr)
+
+    def test_a_list_mixing_a_readable_and_an_unreadable_path_reports_both(self) -> None:
+        loose = self.write("chart a { s A, }\n", name="mixed_loose")
+        missing = self.scratch / "mixed_absent.scav"
+        canonical = self.write("chart b {\n  state B,\n}\n", name="mixed_canonical")
+        result = self.run_scav("fmt", "--check", loose, missing, canonical)
+        # Argument order, and the worst outcome across the list is the one the
+        # process exits with.
+        self.assertEqual(2, result.returncode)
+        self.assertEqual("", result.stdout)
+        self.assertEqual(f"{loose}: not canonical\nscav: cannot read '{missing}'\n",
+                         result.stderr)
+        self.assertEqual("chart a { s A, }\n", loose.read_text(encoding="utf-8"))
+
+    def test_a_file_that_cannot_be_written_is_named_and_left_alone(self) -> None:
+        path = self.write("chart c { s A, }\n")
+        before = path.read_bytes()
+        os.chmod(path, 0o444)
+        try:
+            if os.access(path, os.W_OK):
+                self.skipTest("this account writes files it has no write bit for")
+            result = self.run_scav("fmt", path)
+            self.assertEqual(2, result.returncode)
+            self.assertEqual("", result.stdout)
+            self.assertEqual(f"scav: cannot write '{path}'\n", result.stderr)
+            self.assertEqual(before, path.read_bytes())
+        finally:
+            os.chmod(path, 0o644)
 
     def test_fmt_does_not_follow_includes(self) -> None:
         # Canonical form is a property of a document; a network's documents are
