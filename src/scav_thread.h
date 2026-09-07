@@ -11,12 +11,8 @@ namespace scav {
 
 using ShardFn = void (*)(void *ctx, uint32_t shard);
 
-// Workers per call are capped here, so every backend's tables are fixed arrays.
-inline constexpr uint32_t MAX_WORKERS{ 256 };
-
-// Runs fn(ctx, s) once for every s in [0, shards) on min(threads, shards,
-// MAX_WORKERS) workers and returns once the last has finished; `threads` <= 1
-// runs them all on the caller in index order.
+// Runs fn(ctx, s) once for every s in [0, shards) and returns once the last has
+// finished. `threads` <= 1 runs them all on the caller in index order.
 void parallel_for(uint32_t shards, uint32_t threads, ShardFn fn, void *ctx);
 
 // The same over a functor, erased to the overload above by a capture-free

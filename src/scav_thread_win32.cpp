@@ -10,8 +10,8 @@
 #define NOMINMAX
 #include <windows.h>
 
-#include <array>
 #include <cstdint>
+#include <vector>
 
 namespace scav {
 
@@ -66,22 +66,22 @@ DWORD WINAPI worker_main(LPVOID arg) {
 
 void parallel_for(uint32_t shards, uint32_t threads, ShardFn fn, void *ctx) {
   uint32_t const requested{ (threads == 0U) ? 1U : threads };
-  uint32_t const workers{ imin(imin(requested, shards), MAX_WORKERS) };
+  uint32_t const workers{ imin(requested, shards) };
   if (workers <= 1U) {
     run_stripe(shards, 1U, 0U, fn, ctx);
     return;
   }
 
-  std::array<Worker, MAX_WORKERS> plan{};
+  std::vector<Worker> plan(workers);
   for (uint32_t w{ 0 }; w < workers; ++w) {
     plan[w] =
         Worker{ .fn = fn, .ctx = ctx, .shards = shards, .workers = workers, .first = w };
   }
 
-  // A spawned worker reads its own `plan` entry and nothing else; both arrays
+  // A spawned worker reads its own `plan` entry and nothing else; both vectors
   // below stay on the calling thread.
-  std::array<HANDLE, MAX_WORKERS> handles{};
-  std::array<uint8_t, MAX_WORKERS> spawned{};
+  std::vector<HANDLE> handles(workers, nullptr);
+  std::vector<uint8_t> spawned(workers, 0);
   for (uint32_t w{ 1 }; w < workers; ++w) {
 #ifdef SCAV_TESTING
     if ((test_spawn_limit != 0) && (w > test_spawn_limit)) { continue; }

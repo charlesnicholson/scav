@@ -165,16 +165,6 @@ TEST_CASE("thread: no more workers than shards") {
   }
 }
 
-TEST_CASE("thread: workers are capped at MAX_WORKERS however many are asked for") {
-  uint32_t const shards{ 1000 };
-  std::vector<std::thread::id> where(shards);
-  auto body = [&where](uint32_t shard) { where[shard] = std::this_thread::get_id(); };
-  parallel_for(shards, 1000U, body);
-  std::set<std::thread::id> const distinct(where.begin(), where.end());
-  CHECK(distinct.size() <= MAX_WORKERS);
-  CHECK(count_of(run_hits(shards, 1000U), 1U) == shards);
-}
-
 TEST_CASE("thread: asking for more threads than shards still runs every shard") {
   HookGuard const guard;
   for (uint32_t shards : { 2U, 3U, 8U, 16U }) {
