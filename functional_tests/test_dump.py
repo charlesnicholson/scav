@@ -4,6 +4,7 @@ byte-compared against a golden. Also the loader over a real filesystem."""
 
 import json
 import os
+import re
 import subprocess
 import sys
 import unittest
@@ -86,6 +87,17 @@ class TestDump(unittest.TestCase):
         self.assertGreater(geometry["chart"][2], 0)
         want = (self.cfg.repo_root / LAYOUT_JSON_GOLDEN).read_text(encoding="utf-8")
         self.assertEqual(want, result.stdout)
+
+    def test_layout_columns_carry_only_the_kinds_this_build_registers(self) -> None:
+        # A consumer switches on these two names, so the set is the contract.
+        # A column of a kind not here would reach the emitter untested.
+        doc = json.loads(self.run_dump("--layout", "--json", NETWORK.as_posix()).stdout)
+        self.assertEqual(
+            {("state", "pod"), ("submachine", "pod"), ("transition", "span"),
+             ("point", "pod"), ("chart", "pod"), ("chart", "u32")},
+            {(c["entity"], c["kind"]) for c in doc["columns"]})
+        self.assertEqual([], json.loads(
+            self.run_dump("--json", NETWORK.as_posix()).stdout)["columns"])
 
     def test_hash_refuses_layout_and_json(self) -> None:
         result = self.run_dump("--hash", "--layout", NETWORK.as_posix())
@@ -318,10 +330,77 @@ class TestDump(unittest.TestCase):
         self.assertEqual(2, result.returncode)
         self.assertIn("usage:", result.stderr)
 
+    def test_json_escapes_every_control_character_it_names(self) -> None:
+        # \r, \b and \f have their own two-character spellings; anything else
+        # below 0x20 takes the \u00xx form.
+        chart = self.write(
+            "control.scav",
+            'chart c {\n  state A "cr\\u000d bs\\u0008 ff\\u000c us\\u001f",\n}\n',
+        )
+        result = self.run_dump("--json", chart)
+        self.assertEqual("", result.stderr)
+        self.assertEqual(0, result.returncode)
+        self.assertIn(r'"label": "cr\r bs\b ff\f us\u001f"', result.stdout)
+        doc = json.loads(result.stdout)
+        self.assertEqual(
+            ["cr\r bs\b ff\f us\x1f"],
+            [s["label"] for s in doc["states"] if s["name"] == "A"])
+
     def test_a_missing_file_is_an_error(self) -> None:
         result = self.run_dump("test_data/charts/no_such_chart.scav")
         self.assertEqual(2, result.returncode)
         self.assertIn("cannot read", result.stderr)
+
+    # --layout failures =====================================================
+
+    def test_layout_refuses_text_the_bundled_font_cannot_measure(self) -> None:
+        # U+F0001, a private-use codepoint JetBrains Mono does not carry. The
+        # measurement pass is what sizes a box, so nothing downstream runs.
+        chart = self.write(
+            "unmeasurable.scav",
+            'chart g {\n  state A,\n  state B,\n  trans A -> B "\U000f0001",\n}\n')
+        result = self.run_dump("--layout", chart)
+        self.assertEqual(2, result.returncode)
+        self.assertEqual("", result.stdout)
+        self.assertEqual(
+            f"scav: cannot measure the chart with the bundled font '{chart}'\n",
+            result.stderr)
+
+    def test_layout_reports_geometry_past_the_coordinate_domain(self) -> None:
+        # Nested boxes, each level adding a padding ring and a sibling beside
+        # the one it nests, until the composed width leaves the domain.
+        body = "".join(
+            f"state S{i} {{" + "".join(f" state W{i}_{k}{'w' * 40}," for k in range(3))
+            for i in range(255))
+        chart = self.write(
+            "overflow.scav", "chart big {" + body + "state Leaf," + ("}," * 255) + "}\n")
+        result = self.run_dump("--layout", chart)
+        self.assertEqual(1, result.returncode)
+        self.assertEqual("", result.stdout)
+        self.assertRegex(
+            result.stderr,
+            "^" + re.escape(str(chart))
+            + r":\d+:\d+: composed geometry exceeds the coordinate domain\n$")
+
+    # Usage =================================================================
+
+    def test_bad_arguments_are_refused(self) -> None:
+        chart = NETWORK.as_posix()
+        for args in (["dump"],
+                     ["dump", "--json"],
+                     ["dump", "--hash"],
+                     ["dump", "--layout"],
+                     ["dump", "--json", "--json", chart],
+                     ["dump", "--layout", "--layout", chart],
+                     ["dump", "--hash", "--hash", chart],
+                     ["dump", "--nope", chart],
+                     ["dump", chart, chart]):
+            with self.subTest(args=args):
+                result = self.run_dump(*args[1:])
+                self.assertEqual(2, result.returncode)
+                self.assertEqual("", result.stdout)
+                self.assertTrue(result.stderr.startswith("usage: scav <verb>"),
+                                result.stderr)
 
 
 if __name__ == "__main__":
