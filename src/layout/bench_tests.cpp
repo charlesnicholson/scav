@@ -45,9 +45,9 @@ scav_profile compact() {
 // Every chart in test_data/charts/gauntlet, by the bare name the element suite
 // next door names it by, so one functional test holds both arrays to the
 // directory.
-constexpr std::array<char const *, 9> GAUNTLET{
-  "chain.scav", "enclosing.scav", "fanin.scav",  "fork.scav",   "lane.scav",
-  "loop.scav",  "marks.scav",     "mutual.scav", "regions.scav"
+constexpr std::array<char const *, 10> GAUNTLET{
+  "chain.scav", "crowd.scav",  "enclosing.scav", "fanin.scav",  "fork.scav",
+  "lane.scav",  "loop.scav",   "marks.scav",     "mutual.scav", "regions.scav"
 };
 
 std::string router_label(uint32_t index) {
