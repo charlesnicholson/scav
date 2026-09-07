@@ -210,6 +210,21 @@ TEST_CASE("drawlist corpus: the cost terms on the rendered scale") {
   CHECK(want == actual);
 }
 
+TEST_CASE("drawlist gauntlet: what crowd's tighter packing costs its labels") {
+  // The element suite scores no placed boxes, so these two terms only exist
+  // here. Carved out to 11.6's normalisation and P9c: `sweep_count = 0,
+  // trybox = 0` reads `label` 0 and `label_near` 172, for 56% more area and a
+  // Tier 2 of 25,258,540 against 16,166,700 -- which is why nothing picks it.
+  Metrics const m{ bundled() };
+  scav_profile const p{ readable() };
+  Run const r{ run_pipeline("gauntlet/crowd.scav", m, p) };
+  CostTerms const t{
+    cost_columns(r.chart, decompose(r.chart), p, as_spaces(r.spaces), r.placed)
+  };
+  CHECK(t.label == 4);
+  CHECK(t.label_near == 442);
+}
+
 TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back") {
   // Placement re-run from the emitted columns: the check that the columns carry
   // everything it reads, and the corpus's count of boxes that found no strip.

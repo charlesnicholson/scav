@@ -1,0 +1,24 @@
+// A state carrying three labelled transitions, two of them a pair to and from a
+// composite holding two concurrent regions. The packer takes the tighter of its
+// two arrangements because that one measures the smaller area, and the pair's
+// labels are then left with no strip to sit in: they print over each other and
+// over an arrow. Turning the box packer off draws them both clear at more area
+// -- the trade 11.6 owes a unit for, counted in functional_drawlist_tests.cpp.
+chart crowd "a labelled pair and a packed composite" {
+  state Loaded,
+  state Ready,
+  state Running {
+    submachine drum {
+      state Still,
+      state Turning,
+      trans * -> Still,
+      trans Still -> Turning,
+    },
+    submachine valve { state Shut, state Open, trans * -> Shut, trans Shut -> Open },
+  },
+
+  trans * -> Loaded,
+  trans Loaded -> Ready "door closed",
+  trans Ready -> Running "start button",
+  trans Running -> Ready "cycle done",
+}

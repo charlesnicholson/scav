@@ -41,9 +41,10 @@ scav_profile compact() {
 
 // Every chart in test_data/charts/gauntlet, named so a failure says which shape
 // broke rather than which index did.
-constexpr std::array GAUNTLET{ "chain.scav", "enclosing.scav", "fanin.scav",
-                               "fork.scav",  "lane.scav",      "loop.scav",
-                               "marks.scav", "mutual.scav",    "regions.scav" };
+constexpr std::array GAUNTLET{ "chain.scav",  "crowd.scav", "enclosing.scav",
+                               "fanin.scav",  "fork.scav",  "lane.scav",
+                               "loop.scav",   "marks.scav", "mutual.scav",
+                               "regions.scav" };
 
 // One chart, laid out: the pieces every property below reads.
 struct Laid {
