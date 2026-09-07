@@ -488,3 +488,244 @@ TEST_CASE("size: a boundary node sits on the frame's border, not on its piece's"
   CHECK(z.node[boundary].y >= 0);
   CHECK(z.node[boundary].y <= z.sub[root.v].h);
 }
+
+TEST_CASE("size: a pseudostate with a band of its own is a container") {
+  scav_profile const p{ profile() };
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const bare{ build_state(c, root, "J", StateKind::Junction, {}) };
+  StateId const trailing{ build_state(c, root, "K", StateKind::Junction, {}) };
+  std::vector<scav_box_space> boxes(c.states.size(), scav_box_space{});
+  boxes[trailing.v] = { .min_w = 0, .h_before = 0, .h_after = 24 };
+  scav_spaces const s{ .box_state = boxes.data(),
+                       .n_box_state = static_cast<uint32_t>(boxes.size()) };
+
+  SplitGraph const g{ decompose(c) };
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c, g, order_submachines(c, g, s, p), s, p, z, diags));
+
+  // A band is text the mark has to hold, so the ring the box formula skips for
+  // a bare mark is reserved for this one after all.
+  uint32_t const junction{ static_cast<uint32_t>(StateKind::Junction) };
+  CHECK(z.state[bare.v].w == p.kind_min_w[junction]);
+  CHECK(z.state[trailing.v].w == p.kind_min_w[junction] + (2 * p.pad));
+  CHECK(z.state[trailing.v].h == p.kind_min_h[junction] + (2 * p.pad));
+  CHECK(z.after[trailing.v].w == z.state[trailing.v].w - (2 * p.pad));
+  CHECK(z.after[trailing.v].h == 24);
+}
+
+TEST_CASE("size: a tombstoned submachine is neither sized nor descended into") {
+  scav_profile const p{ profile() };
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const owner{ build_state(c, root, "J", StateKind::Junction, {}) };
+  SubmachineId const gone{ build_submachine(c, owner, "gone", {}) };
+  build_state(c, gone, "M", StateKind::Normal, {});
+  uint32_t const junction{ static_cast<uint32_t>(StateKind::Junction) };
+
+  auto const sized = [&](SizedLayout &z) {
+    SplitGraph const g{ decompose(c) };
+    std::vector<Diagnostic> diags;
+    REQUIRE(size_layout(c, g, order_submachines(c, g, {}, p), {}, p, z, diags));
+  };
+
+  SizedLayout live;
+  sized(live);
+  REQUIRE(live.sub[gone.v].w > 0);
+  CHECK(live.state[owner.v].w == live.sub[gone.v].w + (2 * p.pad));
+
+  // Tombstoned, the submachine is no longer contents: the mark is bare again
+  // and the frame keeps the zero rect it was assigned.
+  c.submachines[gone.v].live = 0;
+  SizedLayout dead;
+  sized(dead);
+  CHECK(dead.sub[gone.v].w == 0);
+  CHECK(dead.sub[gone.v].h == 0);
+  CHECK(dead.state[owner.v].w == p.kind_min_w[junction]);
+  CHECK(dead.state[owner.v].h == p.kind_min_h[junction]);
+  CHECK(dead.before[owner.v].w == dead.state[owner.v].w);
+}
+
+TEST_CASE("size: a submachine with height and no width is still contents") {
+  // A profile that asks no width of a junction, so the mark inside is a line:
+  // the one extent it has is enough to make its frame contents.
+  uint32_t const junction{ static_cast<uint32_t>(StateKind::Junction) };
+  scav_profile p{ profile() };
+  p.kind_min_w[junction] = 0;
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const bare{ build_state(c, root, "J", StateKind::Junction, {}) };
+  StateId const owner{ build_state(c, root, "K", StateKind::Junction, {}) };
+  SubmachineId const inner{ build_submachine(c, owner, "inner", {}) };
+  build_state(c, inner, "M", StateKind::Junction, {});
+
+  SplitGraph const g{ decompose(c) };
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c, g, order_submachines(c, g, {}, p), {}, p, z, diags));
+
+  CHECK(z.sub[inner.v].w == 0);
+  CHECK(z.sub[inner.v].h == p.kind_min_h[junction]);
+  // Contents either way round: the mark with nothing inside it stays bare, the
+  // one holding this frame takes the ring.
+  CHECK(z.state[bare.v].w == 0);
+  CHECK(z.state[owner.v].w == 2 * p.pad);
+  CHECK(z.state[owner.v].h == p.kind_min_h[junction] + (2 * p.pad));
+}
+
+TEST_CASE("size: orders that name nodes but no rank size nothing") {
+  scav_profile const p{ profile() };
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  SubmachineOrders o{ one_frame(c, root, { state_node(a.v, 0, 0) }, {}, {}) };
+  o.sub_ranks[root.v] = 0;
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c,
+                      depths(std::vector<uint32_t>(c.states.size(), 0)),
+                      o,
+                      {},
+                      p,
+                      z,
+                      diags));
+
+  // The two are one input: a span of nodes with no rank to lay them on is not
+  // a frame, and the frame keeps its zero rect rather than a diagnostic.
+  CHECK(diags.empty());
+  CHECK(z.sub[root.v].w == 0);
+  CHECK(z.sub[root.v].h == 0);
+  // The box formula still answers for the state itself, which reads no orders.
+  CHECK(z.state[a.v].w == p.kind_min_w[0] + (2 * p.pad));
+}
+
+TEST_CASE("size: a fold whose pieces will not pack is dropped for the flat run") {
+  // Two tall ranks and two wide ones, and no box packer to lay the pieces in a
+  // row: stacked they leave the domain, so the fold is dropped for the flat run
+  // rather than diagnosed against a frame that has a shape after all.
+  scav_profile p{ profile() };
+  p.trybox = 0;
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  std::vector<StateId> ids;
+  ids.reserve(6);
+  for (uint32_t i = 0; i < 6; ++i) {
+    ids.push_back(build_state(c, root, "S", StateKind::Normal, {}));
+  }
+  std::vector<scav_box_space> boxes(c.states.size(), scav_box_space{});
+  for (uint32_t const tall : { 0U, 1U, 3U, 4U }) {
+    boxes[ids[tall].v] = { .min_w = 0, .h_before = SPACE_MAX, .h_after = 0 };
+  }
+  for (uint32_t const wide : { 2U, 5U }) {
+    boxes[ids[wide].v] = { .min_w = SPACE_MAX, .h_before = 0, .h_after = 0 };
+  }
+  scav_spaces const s{ .box_state = boxes.data(),
+                       .n_box_state = static_cast<uint32_t>(boxes.size()) };
+
+  std::vector<OrderNode> const nodes{
+    state_node(ids[0].v, 0, 0), state_node(ids[1].v, 0, 1), state_node(ids[2].v, 1, 0),
+    state_node(ids[3].v, 2, 0), state_node(ids[4].v, 2, 1), state_node(ids[5].v, 3, 0)
+  };
+  std::vector<OrderEdge> const edges{
+    { .src = 0, .dst = 2, .segment = 0, .reversed = 0 },
+    { .src = 1, .dst = 2, .segment = 1, .reversed = 0 },
+    { .src = 2, .dst = 3, .segment = 2, .reversed = 0 },
+    { .src = 2, .dst = 4, .segment = 3, .reversed = 0 },
+    { .src = 3, .dst = 5, .segment = 4, .reversed = 0 },
+    { .src = 4, .dst = 5, .segment = 5, .reversed = 0 }
+  };
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c,
+                      depths(std::vector<uint32_t>(c.states.size(), 0)),
+                      one_frame(c, root, nodes, edges, {}),
+                      s,
+                      p,
+                      z,
+                      diags));
+  CHECK(diags.empty());
+
+  // Four ranks end to end, each one rank_sep past the last, which is the flat
+  // run rather than any arrangement of pieces.
+  int32_t const tall_w{ p.kind_min_w[0] + (2 * p.pad) };
+  int32_t const wide_w{ SPACE_MAX + (2 * p.pad) };
+  CHECK(z.state[ids[0].v].x == 0);
+  CHECK(z.state[ids[2].v].x == (tall_w + p.rank_sep));
+  CHECK(z.state[ids[3].v].x == (z.state[ids[2].v].x + wide_w + p.rank_sep));
+  CHECK(z.state[ids[5].v].x == (z.state[ids[3].v].x + tall_w + p.rank_sep));
+  CHECK(z.sub[root.v].w == (z.state[ids[5].v].x + wide_w));
+  CHECK(z.sub[root.v].w <= COORD_MAX);
+  CHECK(z.sub[root.v].h <= COORD_MAX);
+  // Two tall states one node_sep apart is the whole height, so the flat run is
+  // one rank deep and nothing wrapped under anything.
+  CHECK(z.sub[root.v].h == ((2 * (SPACE_MAX + (2 * p.pad))) + p.node_sep));
+}
+
+TEST_CASE("size: a packing wider than the domain is diagnosed, not saturated") {
+  // Two unconnected states, each half the domain wide and half of it tall. The
+  // column of the two fits; the row the box packer offers scales larger and
+  // does not, and it is the one the frame is measured on.
+  scav_profile p{ profile() };
+  p.pad = 130800;
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  std::vector<OrderNode> const nodes{ state_node(a.v, 0, 0), state_node(b.v, 0, 1) };
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  CHECK_FALSE(size_layout(c,
+                          depths(std::vector<uint32_t>(c.states.size(), 0)),
+                          one_frame(c, root, nodes, {}, {}),
+                          {},
+                          p,
+                          z,
+                          diags));
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::CoordinateOverflow);
+  CHECK(diags[0].subject.kind == ElemKind::Submachine);
+  CHECK(diags[0].subject.ordinal == root.v);
+
+  // Without the box packer to offer it, the column is what the frame keeps.
+  p.trybox = 0;
+  SizedLayout column;
+  diags.clear();
+  REQUIRE(size_layout(c,
+                      depths(std::vector<uint32_t>(c.states.size(), 0)),
+                      one_frame(c, root, nodes, {}, {}),
+                      {},
+                      p,
+                      column,
+                      diags));
+  CHECK(column.sub[root.v].w == (p.kind_min_w[0] + (2 * p.pad)));
+  CHECK(column.sub[root.v].h == ((2 * (p.kind_min_h[0] + (2 * p.pad))) + p.node_sep));
+}
+
+TEST_CASE("size: a box formula that leaves the domain is charged to the state") {
+  // A ring of the widest padding a profile may ask for, around a submachine
+  // already most of the domain wide: the state that holds it cannot exist.
+  scav_profile p{ profile() };
+  p.pad = SPACE_MAX;
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const owner{ build_state(c, root, "Outer", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, owner, "inner", {}) };
+  build_state(c, inner, "A", StateKind::Normal, {});
+
+  SplitGraph const g{ decompose(c) };
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  CHECK_FALSE(size_layout(c, g, order_submachines(c, g, {}, p), {}, p, z, diags));
+  REQUIRE(!diags.empty());
+  CHECK(diags[0].code == DiagCode::CoordinateOverflow);
+  CHECK(diags[0].subject.kind == ElemKind::State);
+  CHECK(diags[0].subject.ordinal == owner.v);
+  // The submachine underneath was inside the domain, so the state's own ring is
+  // what left it.
+  CHECK(z.sub[inner.v].w <= COORD_MAX);
+  CHECK((z.sub[inner.v].w + (2 * p.pad)) > COORD_MAX);
+}

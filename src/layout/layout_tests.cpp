@@ -740,6 +740,24 @@ TEST_CASE("layout: a geometry column of another shape stops the run") {
   REQUIRE(diags.size() == 1);
   CHECK(diags[0].code == DiagCode::GeometryColumnClash);
 
+  // The width is checked on its own, an application storing a smaller rect
+  // under the same entity and value kind being the subtler collision.
+  Chart by_width;
+  SubmachineId const narrow{ build_chart(by_width, "t", {}) };
+  build_state(by_width, narrow, "A", StateKind::Normal, {});
+  REQUIRE(column_register(by_width,
+                          "scav.geom.state",
+                          ElemKind::State,
+                          ValueKind::Pod,
+                          sizeof(scav_rect) / 2,
+                          4,
+                          COLUMN_DERIVED)
+              .v != INVALID);
+  diags.clear();
+  CHECK(!layout_run(by_width, {}, opts(p), placed, diags));
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::GeometryColumnClash);
+
   // Layout's own shape under layout's own name is layout's own column to
   // overwrite, however it got there.
   Chart same;
@@ -777,6 +795,45 @@ TEST_CASE("layout: invalid profiles and spaces fail before any geometry") {
   REQUIRE(diags.size() == 1);
   CHECK(diags[0].code == DiagCode::SpaceOutOfRange);
   CHECK(column_find(c, "scav.geom.state").v == INVALID);
+}
+
+TEST_CASE("layout: a router that is not in the registry is diagnosed") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  build_state(c, root, "A", StateKind::Normal, {});
+
+  scav_layout_opts unknown{ opts(readable()) };
+  unknown.router = router_count();  // one past the last registered id
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  CHECK(!layout_run(c, {}, unknown, placed, diags));
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::RouterUnknown);
+  CHECK(diags[0].subject.kind == ElemKind::Chart);
+  // Named before anything is written, so the chart is as it arrived.
+  CHECK(column_find(c, "scav.geom.state").v == INVALID);
+  CHECK(column_find(c, "scav.geom.chart").v == INVALID);
+  CHECK(placed.empty());
+}
+
+TEST_CASE("layout: an inputs column with no row is no digest") {
+  // The name is layout's, the rows are not: a producer that registered it
+  // against a length of its own leaves nothing for the digest to read.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  build_state(c, root, "A", StateKind::Normal, {});
+  REQUIRE(column_register(c,
+                          "scav.geom.inputs",
+                          ElemKind::Point,
+                          ValueKind::U32,
+                          4,
+                          4,
+                          COLUMN_DERIVED)
+              .v != INVALID);
+  ColumnId const id{ column_find(c, "scav.geom.inputs") };
+  REQUIRE(id.v != INVALID);
+  REQUIRE(column_count(c, id) == 0);
+  CHECK(layout_inputs_digest(c) == 0);
 }
 
 TEST_CASE("layout: tombstones leave zero rects and no routes") {
