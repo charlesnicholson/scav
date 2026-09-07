@@ -981,6 +981,8 @@ The fold is what costs §11.7a's hash split a property it had while sizing did n
 
 Width approximation is `target_w = isqrt(floor_div(total_area * dar_num, dar_den))` with that exact operation order, `isqrt` = floor. `DAR` is an integer pair. On same-height submachines the older `box` packer wins; `trybox` is evaluated once per layout, deterministically. A 1-unit change can flip the packer and reflow siblings; that is a boundary condition for hints (§14), not grounds for remembering the previous choice.
 
+**Where a frame's components are packed, fitting the domain (§11.2) is a precondition of that comparison rather than a check after it.** Row and column are each measured against `COORD_MAX` before `pack_better` is asked, so a better-scoring packing that does not fit never displaces one that does, and the submachine is diagnosed `CoordinateOverflow` only where neither fit.
+
 **Bottom-up sizing has no locality** — a leaf growing one unit resizes every ancestor to the root. Inherent, and simply paid: one pass up, one pass down, fixed count. No hysteresis; that would be hidden state (§11.11).
 
 Not top-down layout: its central size-approximation problem is unsolved by its own authors, it introduces per-level scale factors that break port-split segment continuity, and it is mutually exclusive with cross-hierarchy edges in ELK. Cost: bottom-up sizing at depth is a readability problem on fixed media (a depth-9 SCChart lays out to 0.322 pt max font on A4). Acceptable because output is a zoomable canvas.

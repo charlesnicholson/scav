@@ -664,10 +664,10 @@ TEST_CASE("size: a fold whose pieces will not pack is dropped for the flat run")
   CHECK(z.sub[root.v].h == ((2 * (SPACE_MAX + (2 * p.pad))) + p.node_sep));
 }
 
-TEST_CASE("size: a packing wider than the domain is diagnosed, not saturated") {
+TEST_CASE("size: a row that leaves the domain does not displace the column that fits") {
   // Two unconnected states, each half the domain wide and half of it tall. The
   // column of the two fits; the row the box packer offers scales larger and
-  // does not, and it is the one the frame is measured on.
+  // does not, so it is no candidate and the frame is measured on the column.
   scav_profile p{ profile() };
   p.pad = 130800;
   Chart c;
@@ -678,19 +678,21 @@ TEST_CASE("size: a packing wider than the domain is diagnosed, not saturated") {
 
   SizedLayout z;
   std::vector<Diagnostic> diags;
-  CHECK_FALSE(size_layout(c,
-                          depths(std::vector<uint32_t>(c.states.size(), 0)),
-                          one_frame(c, root, nodes, {}, {}),
-                          {},
-                          p,
-                          z,
-                          diags));
-  REQUIRE(diags.size() == 1);
-  CHECK(diags[0].code == DiagCode::CoordinateOverflow);
-  CHECK(diags[0].subject.kind == ElemKind::Submachine);
-  CHECK(diags[0].subject.ordinal == root.v);
+  REQUIRE(size_layout(c,
+                      depths(std::vector<uint32_t>(c.states.size(), 0)),
+                      one_frame(c, root, nodes, {}, {}),
+                      {},
+                      p,
+                      z,
+                      diags));
+  CHECK(diags.empty());
+  CHECK(z.sub[root.v].w == (p.kind_min_w[0] + (2 * p.pad)));
+  CHECK(z.sub[root.v].h == ((2 * (p.kind_min_h[0] + (2 * p.pad))) + p.node_sep));
+  // The row it declined is the one that leaves the domain.
+  CHECK(((2 * (p.kind_min_w[0] + (2 * p.pad))) + p.node_sep) > COORD_MAX);
 
-  // Without the box packer to offer it, the column is what the frame keeps.
+  // The same extents with no box packer to offer a row at all, which is what
+  // makes them the column's.
   p.trybox = 0;
   SizedLayout column;
   diags.clear();
@@ -701,8 +703,117 @@ TEST_CASE("size: a packing wider than the domain is diagnosed, not saturated") {
                       p,
                       column,
                       diags));
-  CHECK(column.sub[root.v].w == (p.kind_min_w[0] + (2 * p.pad)));
-  CHECK(column.sub[root.v].h == ((2 * (p.kind_min_h[0] + (2 * p.pad))) + p.node_sep));
+  CHECK(column.sub[root.v].w == z.sub[root.v].w);
+  CHECK(column.sub[root.v].h == z.sub[root.v].h);
+}
+
+namespace {
+
+// A frame of unconnected states of one shape: one component each, so the two
+// packers see n equal rects and offer a column n tall against a row n wide.
+struct EqualStates {
+  std::vector<OrderNode> nodes;
+  std::vector<scav_box_space> boxes;
+};
+
+EqualStates equal_states(Chart &c, SubmachineId root, uint32_t n, int32_t min_w) {
+  EqualStates out;
+  for (uint32_t i = 0; i < n; ++i) {
+    StateId const s{ build_state(c, root, "S", StateKind::Normal, {}) };
+    out.nodes.push_back(state_node(s.v, 0, i));
+  }
+  out.boxes.assign(c.states.size(), scav_box_space{});
+  for (OrderNode const &nd : out.nodes) {
+    out.boxes[nd.subject] = { .min_w = min_w, .h_before = SPACE_MAX, .h_after = 0 };
+  }
+  return out;
+}
+
+// No ring and no gap, so a rect's extents are the request; a desired aspect
+// this tall keeps the width target under two rects, so `pack_lr` stacks them.
+scav_profile stacking() {
+  scav_profile p{ profile() };
+  p.pad = 0;
+  p.node_sep = 0;
+  p.dar_num = 1;
+  p.dar_den = 1024;
+  return p;
+}
+
+}  // namespace
+
+TEST_CASE("size: a column that leaves the domain gives way to the row that fits") {
+  scav_profile p{ stacking() };
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  EqualStates const five{ equal_states(c, root, 5, 0) };
+  scav_spaces const s{ .box_state = five.boxes.data(),
+                       .n_box_state = static_cast<uint32_t>(five.boxes.size()) };
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c,
+                      depths(std::vector<uint32_t>(c.states.size(), 0)),
+                      one_frame(c, root, five.nodes, {}, {}),
+                      s,
+                      p,
+                      z,
+                      diags));
+  CHECK(diags.empty());
+
+  // Five states side by side at one y, which is the row and not the stack.
+  CHECK(z.sub[root.v].w == (5 * p.kind_min_w[0]));
+  CHECK(z.sub[root.v].h == SPACE_MAX);
+  for (uint32_t i = 0; i < five.nodes.size(); ++i) {
+    CHECK(z.state[five.nodes[i].subject].x == (static_cast<int32_t>(i) * p.kind_min_w[0]));
+    CHECK(z.state[five.nodes[i].subject].y == z.state[five.nodes[0].subject].y);
+  }
+
+  // With no box packer to offer it, the column is all there is, and it is the
+  // one that leaves the domain.
+  p.trybox = 0;
+  SizedLayout stacked;
+  diags.clear();
+  CHECK_FALSE(size_layout(c,
+                          depths(std::vector<uint32_t>(c.states.size(), 0)),
+                          one_frame(c, root, five.nodes, {}, {}),
+                          s,
+                          p,
+                          stacked,
+                          diags));
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::CoordinateOverflow);
+  CHECK(diags[0].subject.kind == ElemKind::Submachine);
+  CHECK(diags[0].subject.ordinal == root.v);
+}
+
+TEST_CASE("size: a frame no packing fits is diagnosed, not saturated") {
+  // The same five, each as wide as it is tall: the row leaves the domain along
+  // x and the column along y, so the frame has no shape rather than a
+  // saturated one.
+  scav_profile const p{ stacking() };
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  EqualStates const five{ equal_states(c, root, 5, SPACE_MAX) };
+  scav_spaces const s{ .box_state = five.boxes.data(),
+                       .n_box_state = static_cast<uint32_t>(five.boxes.size()) };
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  CHECK_FALSE(size_layout(c,
+                          depths(std::vector<uint32_t>(c.states.size(), 0)),
+                          one_frame(c, root, five.nodes, {}, {}),
+                          s,
+                          p,
+                          z,
+                          diags));
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::CoordinateOverflow);
+  CHECK(diags[0].subject.kind == ElemKind::Submachine);
+  CHECK(diags[0].subject.ordinal == root.v);
+  CHECK((5 * SPACE_MAX) > COORD_MAX);
+  CHECK(z.sub[root.v].w == 0);
+  CHECK(z.sub[root.v].h == 0);
 }
 
 TEST_CASE("size: a box formula that leaves the domain is charged to the state") {

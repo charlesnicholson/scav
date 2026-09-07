@@ -20,6 +20,10 @@ scav_box_space box_of(scav_box_space const *rows, uint32_t count, uint32_t i) {
   return ((rows != nullptr) && (i < count)) ? rows[i] : scav_box_space{};
 }
 
+// Inside the coordinate domain on both axes. A row or a column whose sum
+// overflowed saturates at `PACK_SATURATED`, which is far past `COORD_MAX`.
+bool fits(Packing const &p) { return (p.w <= COORD_MAX) && (p.h <= COORD_MAX); }
+
 void overflow(std::vector<Diagnostic> &diags, ElemKind kind, uint32_t ordinal) {
   diags.push_back({ .code = DiagCode::CoordinateOverflow,
                     .subject = { .kind = kind, .ordinal = ordinal },
@@ -331,12 +335,16 @@ bool size_layout(Chart const &c,
 
     Packing packed{ pack_lr(boxes, p.node_sep, p.dar_num, p.dar_den) };
     if (p.trybox != 0) {
+      // Leaving the domain disqualifies a candidate before the two are
+      // compared, so the better-scoring one never displaces one that fits.
       Packing const row{ pack_box(boxes, p.node_sep) };
-      if (pack_better(row, packed, p.dar_num, p.dar_den, p.sm_tiebreak != 0)) {
+      if (fits(row) &&
+          (!fits(packed) ||
+           pack_better(row, packed, p.dar_num, p.dar_den, p.sm_tiebreak != 0))) {
         packed = row;
       }
     }
-    if ((packed.w > COORD_MAX) || (packed.h > COORD_MAX)) {
+    if (!fits(packed)) {
       overflow(diags, ElemKind::Submachine, m);
       ok = false;
       return;
