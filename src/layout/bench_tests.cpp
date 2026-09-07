@@ -36,6 +36,20 @@ scav_profile readable() {
   return p;
 }
 
+scav_profile compact() {
+  scav_profile p{};
+  REQUIRE(profile_named("compact", p));
+  return p;
+}
+
+// Every chart in test_data/charts/gauntlet, by the bare name the element suite
+// next door names it by, so one functional test holds both arrays to the
+// directory.
+constexpr std::array<char const *, 9> GAUNTLET{
+  "chain.scav", "enclosing.scav", "fanin.scav",  "fork.scav",   "lane.scav",
+  "loop.scav",  "marks.scav",     "mutual.scav", "regions.scav"
+};
+
 std::string router_label(uint32_t index) {
   scav_byte const *bytes{ nullptr };
   uint32_t len{ 0 };
@@ -43,9 +57,11 @@ std::string router_label(uint32_t index) {
   return std::string{ reinterpret_cast<char const *>(bytes), len };
 }
 
-void load_corpus(char const *name, Chart &c) {
+// `rel` is relative to test_data/charts, so an element chart is
+// "gauntlet/loop.scav".
+void load_chart(std::string const &rel, Chart &c) {
   std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
-  path += name;
+  path += rel;
   Loader loader;
   std::vector<Diagnostic> diags;
   std::string failed;
@@ -84,7 +100,7 @@ TEST_CASE("bench: every registered router scores the corpus, term by term") {
   for (char const *name : CORPUS) {
     CAPTURE(name);
     Chart c;
-    load_corpus(name, c);
+    load_chart(name, c);
 
     SplitGraph const g{ decompose(c) };
     SubmachineOrders const o{ order_submachines(c, g, {}, p) };
@@ -175,7 +191,7 @@ TEST_CASE("bench: every registered router is timed over the corpus and at scale"
     for (char const *name : CORPUS) {
       CAPTURE(name);
       Chart c;
-      load_corpus(name, c);
+      load_chart(name, c);
       bool laid{ false };
       corpus_us += timed_run(c, o, laid);
       CHECK_MESSAGE(laid, label);
@@ -203,4 +219,71 @@ TEST_CASE("bench: every registered router is timed over the corpus and at scale"
     CHECK_MESSAGE(flat_us < 500000, label, " flat 2k");
 #endif
   }
+}
+
+TEST_CASE("bench: the cells corpus_routers.txt leaves unscored, term by term") {
+  // chart x profile x router, less the corpus at `readable` next door: the
+  // corpus at `compact`, and the element suite at both. Raw terms and the
+  // Tier-0 count with no weighted sum, so a weight change cannot move a row.
+  std::string actual;
+  auto const row = [&actual](char const *profile,
+                             scav_profile const &p,
+                             uint32_t ri,
+                             std::string const &dir,
+                             char const *name) {
+    CAPTURE(profile);
+    CAPTURE(name);
+    Chart c;
+    load_chart(dir + name, c);
+    SplitGraph const g{ decompose(c) };
+    SubmachineOrders const o{ order_submachines(c, g, {}, p) };
+    SizedLayout z;
+    std::vector<Diagnostic> diags;
+    REQUIRE(size_layout(c, g, o, {}, p, z, diags));
+    Routes const r{ route_transitions(c, g, o, z, {}, p, *router_at(ri)) };
+    CostTerms const t{ cost_terms(c, g, z, r, {}, p) };
+
+    actual += profile;
+    actual += ' ';
+    actual += router_label(ri);
+    actual += ' ';
+    actual += dir;
+    actual += name;
+    for (int64_t const term : { int64_t{ t.through_box } + t.box_overlap,
+                                t.bends,
+                                t.corridor,
+                                t.crossings,
+                                t.excess_len,
+                                t.adjacency,
+                                t.label,
+                                t.label_near,
+                                t.aspect,
+                                t.area }) {
+      actual += ' ';
+      actual += std::to_string(term);
+    }
+    actual += '\n';
+  };
+
+  for (uint32_t ri = 0; ri < router_count(); ++ri) {
+    for (char const *name : CORPUS) { row("compact", compact(), ri, "", name); }
+  }
+  for (char const *profile : { "readable", "compact" }) {
+    scav_profile p{};
+    REQUIRE(profile_named(profile, p));
+    for (uint32_t ri = 0; ri < router_count(); ++ri) {
+      for (char const *name : GAUNTLET) { row(profile, p, ri, "gauntlet/", name); }
+    }
+  }
+
+  std::vector<scav_byte> golden;
+  REQUIRE(read_file(SCAV_TEST_DATA_DIR "/golden/layout/cost_terms.txt", golden));
+  std::string const want{ reinterpret_cast<char const *>(golden.data()), golden.size() };
+  if (want != actual) {
+    write_file(SCAV_TEST_OUT_DIR "/cost_terms.txt",
+               reinterpret_cast<scav_byte const *>(actual.data()),
+               actual.size());
+    MESSAGE("actual written to " SCAV_TEST_OUT_DIR "/cost_terms.txt:\n", actual);
+  }
+  CHECK(want == actual);
 }

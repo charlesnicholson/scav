@@ -19,10 +19,12 @@
 #include "scav_int.h"
 #include "scav_xxhash.h"
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -1229,6 +1231,76 @@ TEST_CASE("layout: Tier 0 at the scale target, and where the grid gives out") {
       CHECK(t.through_box == 0);
     }
   }
+}
+
+namespace {
+
+// The scored cells of chart x profile x router at the scale target. Literals
+// rather than a golden file: eight rows a reader can hold in their head, with
+// the two Tier-0 counts apart rather than summed, `straight` being the case
+// where they are nonzero.
+constexpr std::array<char const *, 2> SCALE_CHARTS{ "nested", "flat" };
+constexpr std::array<char const *, 2> SCALE_PROFILES{ "readable", "compact" };
+constexpr std::array<char const *, 2> SCALE_ROUTERS{ "orthogonal", "straight" };
+
+// One row per cell, chart-major then profile then router, each holding
+// `CostTerms` in declaration order with the Tier-0 pair moved to the front:
+// through_box, box_overlap, bends, corridor, crossings, excess_len, adjacency,
+// label, label_near, aspect, area.
+constexpr std::array<std::array<int64_t, 11>, 8> SCALE_PINNED{
+  { { 0, 0, 4136, 139984, 1880, 46592352, 0, 0, 0, 2527936, 89039694848 },
+    { 11464, 0, 3416, 172160, 75136, 605104352, 0, 0, 0, 2527936, 89039694848 },
+    { 0, 0, 4784, 11680, 2224, 34003552, 0, 0, 0, 125776, 32837048320 },
+    { 12944, 0, 3504, 0, 65752, 596909344, 0, 0, 0, 125776, 32837048320 },
+    { 0, 0, 740, 111680, 152, 4553385, 0, 0, 0, 53760, 3718840320 },
+    { 1996, 0, 318, 0, 270, 7357645, 0, 0, 0, 53760, 3718840320 },
+    { 0, 0, 774, 0, 173, 3760046, 0, 0, 0, 10688, 1589407744 },
+    { 1998, 0, 328, 0, 278, 5584737, 0, 0, 0, 10688, 1589407744 } }
+};
+
+}  // namespace
+
+TEST_CASE("layout: both scale targets score to pinned terms, profile by router") {
+  // Nothing else pins a `CostTerms` over 2k states, and the scorer's shape is
+  // what changes underneath these: a chart deep enough for a hierarchy walk to
+  // get wrong, and one flat enough for it to have nothing to walk.
+  uint32_t row{ 0 };
+  for (char const *chart : SCALE_CHARTS) {
+    Chart const built{ (std::string_view{ chart } == "nested") ? nested_2k_chart()
+                                                               : flat_2k_chart() };
+    for (char const *profile : SCALE_PROFILES) {
+      scav_profile p{};
+      REQUIRE(profile_named(profile, p));
+      SplitGraph const g{ decompose(built) };
+      SubmachineOrders const o{ order_submachines(built, g, {}, p) };
+      SizedLayout z;
+      std::vector<Diagnostic> diags;
+      REQUIRE(size_layout(built, g, o, {}, p, z, diags));
+
+      for (char const *name : SCALE_ROUTERS) {
+        CAPTURE(chart);
+        CAPTURE(profile);
+        CAPTURE(name);
+        scav_router_id router{ 0 };
+        REQUIRE(router_by_name(reinterpret_cast<scav_byte const *>(name),
+                               static_cast<uint32_t>(std::strlen(name)),
+                               router));
+        Routes const r{ route_transitions(built, g, o, z, {}, p, *router_at(router)) };
+        CostTerms const t{ cost_terms(built, g, z, r, {}, p) };
+        std::array<int64_t, 11> const got{ t.through_box, t.box_overlap, t.bends,
+                                           t.corridor,    t.crossings,   t.excess_len,
+                                           t.adjacency,   t.label,       t.label_near,
+                                           t.aspect,      t.area };
+        REQUIRE(row < SCALE_PINNED.size());
+        for (uint32_t i = 0; i < got.size(); ++i) {
+          CAPTURE(i);
+          CHECK(got[i] == SCALE_PINNED[row][i]);
+        }
+        ++row;
+      }
+    }
+  }
+  CHECK(row == SCALE_PINNED.size());
 }
 
 namespace {
