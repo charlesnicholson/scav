@@ -12,6 +12,7 @@
 #include <ostream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -693,6 +694,13 @@ TEST_CASE("print: trailing blanks inside a comment do not reach the output") {
         "  // padded\n"
         "  state A,\n"
         "}\n");
+  // Tabs too: the lexed span runs to the newline, whatever whitespace precedes
+  // it.
+  CHECK(print("chart c {\n  // padded\t\t\n  state A,\n}") ==
+        "chart c {\n"
+        "  // padded\n"
+        "  state A,\n"
+        "}\n");
 }
 
 // Blank lines ===============================================================
@@ -940,3 +948,257 @@ TEST_CASE("print: payload rows out of step with the statements print nothing") {
 }
 
 }  // namespace
+
+// Attribute positions =======================================================
+
+TEST_CASE("print: an attribute is written in every block the grammar admits") {
+  CHECK(print(R"(chart c {
+                   @top,
+                   state A { @onstate, },
+                   state B { submachine m { @onsub, state C, }, },
+                   trans A -> B { @ontrans, },
+                 })") ==
+        "chart c {\n"
+        "  @top,\n"
+        "  state A { @onstate },\n"
+        "  state B { submachine m { @onsub, state C } },\n"
+        "  trans A -> B { @ontrans },\n"
+        "}\n");
+}
+
+TEST_CASE("print: a namespace block survives inside a one-line block") {
+  // The flat spelling has its own grouping arm, reached only when a block that
+  // holds a grouped attribute fits the budget.
+  CHECK(print(R"(chart c { state A { @ns { a, b = "2" }, }, })") ==
+        "chart c {\n"
+        "  state A { @ns { a, b = \"2\" } },\n"
+        "}\n");
+  CHECK(is_canonical(print(R"(chart c { state A { @ns { a, b = "2" }, }, })")));
+}
+
+// Width boundaries ==========================================================
+
+TEST_CASE("print: a line exactly at the budget stays flat and one over breaks") {
+  constexpr std::string_view TEXT{ "chart c { state A { state Bxx, }, }" };
+  // `  state A { state Bxx },` is twenty-four columns, comma included.
+  CHECK(print(TEXT, 24) ==
+        "chart c {\n"
+        "  state A { state Bxx },\n"
+        "}\n");
+  CHECK(print(TEXT, 23) ==
+        "chart c {\n"
+        "  state A {\n"
+        "    state Bxx,\n"
+        "  },\n"
+        "}\n");
+  CHECK(is_canonical(print(TEXT, 24), 24));
+  CHECK(is_canonical(print(TEXT, 23), 23));
+}
+
+// Comments ==================================================================
+
+TEST_CASE("print: a comment inside an empty block keeps the block open") {
+  CHECK(print("chart c {\n"
+              "  state A {\n"
+              "    // note\n"
+              "  },\n"
+              "}") ==
+        "chart c {\n"
+        "  state A {\n"
+        "    // note\n"
+        "  },\n"
+        "}\n");
+}
+
+TEST_CASE("print: a dropped attribute's comment keeps its otherwise empty block") {
+  CHECK(print("chart c {\n"
+              "  state A {\n"
+              "    // orphaned\n"
+              "    @ns {},\n"
+              "  },\n"
+              "}") ==
+        "chart c {\n"
+        "  state A {\n"
+        "    // orphaned\n"
+        "  },\n"
+        "}\n");
+}
+
+TEST_CASE("print: eliding a submachine keeps every comment it was carrying") {
+  CHECK(print("chart c {\n"
+              "  state A {\n"
+              "    submachine { // opens\n"
+              "      // orphaned\n"
+              "      @ns {},\n"
+              "      state B,\n"
+              "    }, // after\n"
+              "  },\n"
+              "}") ==
+        "chart c {\n"
+        "  state A {\n"
+        "    // orphaned\n"
+        "    // opens\n"
+        "    // after\n"
+        "    state B,\n"
+        "  },\n"
+        "}\n");
+}
+
+// Malformed documents =======================================================
+
+TEST_CASE("print: a mutated document prints what it holds and reads nothing past it") {
+  // fmt prints whatever parsed, so every walk is bounds-checked. Each mutation
+  // is one a corrupted or partially-built document could carry.
+  SUBCASE("a children span past the id array") {
+    Parsed r{ parse("chart c { state A, }") };
+    r.pd.stmt_children[0].len += 1;
+    std::string out;
+    CHECK(print_document(r.pd, print_default_options(), out));
+    CHECK(out == "chart c {\n  state A,\n}\n");
+  }
+  SUBCASE("a child id past the statement array") {
+    Parsed r{ parse("chart c { state A, }") };
+    r.pd.stmt_ids.push_back(StmtId{ 99 });
+    r.pd.stmt_children[0].len += 1;
+    std::string out;
+    CHECK(print_document(r.pd, print_default_options(), out));
+    CHECK(out == "chart c {\n  state A,\n}\n");
+  }
+  SUBCASE("an attribute payload past its array") {
+    Parsed r{ parse(R"(chart c { @k = "v", state A, })") };
+    REQUIRE(r.pd.stmts[1].kind == StmtKind::Attr);
+    r.pd.stmt_payload[1] = 9;
+    std::string out;
+    CHECK(print_document(r.pd, print_default_options(), out));
+    CHECK(out == "chart c {\n  state A,\n}\n");
+  }
+  SUBCASE("an attribute's entries past their array") {
+    Parsed r{ parse(R"(chart c { @k = "v", state A, })") };
+    REQUIRE_FALSE(r.pd.attrs.empty());
+    r.pd.attrs[0].entries = make_span(9, 1);
+    std::string out;
+    CHECK(print_document(r.pd, print_default_options(), out));
+    CHECK(out == "chart c {\n  state A,\n}\n");
+  }
+  SUBCASE("a comments span past the comment array") {
+    Parsed r{ parse("chart c { state A, }") };
+    r.pd.stmts[1].comments = make_span(0, 2);
+    std::string out;
+    CHECK(print_document(r.pd, print_default_options(), out));
+    CHECK(out == "chart c {\n  state A,\n}\n");
+  }
+  SUBCASE("an attribute's comments span past the comment array") {
+    Parsed r{ parse(R"(chart c { @k = "v", state A, })") };
+    REQUIRE(r.pd.stmts[1].kind == StmtKind::Attr);
+    r.pd.stmts[1].comments = make_span(0, 2);
+    std::string out;
+    CHECK(print_document(r.pd, print_default_options(), out));
+    CHECK(out == "chart c {\n  @k = \"v\",\n  state A,\n}\n");
+  }
+  SUBCASE("an endpoint's segments past the array") {
+    Parsed r{ parse("chart c { state A, trans A -> A, }") };
+    REQUIRE_FALSE(r.pd.transitions.empty());
+    r.pd.transitions[0].dst.segs = make_span(9, 1);
+    std::string out;
+    CHECK(print_document(r.pd, print_default_options(), out));
+    CHECK(out == "chart c {\n  state A,\n  trans A -> ,\n}\n");
+  }
+  SUBCASE("a submachine payload past its array") {
+    Parsed r{ parse("chart c { state A { submachine m { state B, }, }, }") };
+    REQUIRE(r.pd.stmts[2].kind == StmtKind::Submachine);
+    r.pd.stmt_payload[2] = 9;
+    std::string out;
+    CHECK(print_document(r.pd, print_default_options(), out));
+    // The submachine's head came out empty, so its block stands where the
+    // keyword would have been; nothing else moved.
+    CHECK(out == "chart c {\n  state A {  { state B } },\n}\n");
+  }
+  SUBCASE("statement children out of step with the statements") {
+    Parsed r{ parse("chart c { state A, }") };
+    r.pd.stmt_children.clear();
+    std::string out;
+    CHECK(print_document(r.pd, print_default_options(), out));
+    CHECK(out.empty());
+  }
+  SUBCASE("a child pointing back at a block not built yet") {
+    Parsed r{ parse("chart c { state A { submachine { state B, }, }, }") };
+    REQUIRE(r.pd.stmts[2].kind == StmtKind::Submachine);
+    REQUIRE(r.pd.stmts[3].kind == StmtKind::State);
+    // The leaf claims the submachine above it. Rows are walked in reverse, so
+    // the elision test meets a block whose row has not been built; the output
+    // is the well-formed one, which is the point.
+    r.pd.stmt_children[3] = make_span(narrow_clamp<uint32_t>(r.pd.stmt_ids.size()), 1);
+    r.pd.stmt_ids.push_back(StmtId{ 2 });
+    std::string out;
+    CHECK(print_document(r.pd, print_default_options(), out));
+    CHECK(out == "chart c {\n  state A { state B },\n}\n");
+  }
+  SUBCASE("a root statement that is not a chart") {
+    Parsed r{ parse("chart c { state A, }") };
+    r.pd.stmts[0].kind = StmtKind::Attr;  // an attribute owns no block
+    std::string out;
+    CHECK(print_document(r.pd, print_default_options(), out));
+    CHECK(out == "\n");
+  }
+}
+
+TEST_CASE("print: a comment span outside the document prints as nothing") {
+  Parsed r{ parse("chart c { state A, }") };
+  REQUIRE(r.pd.comments.empty());
+  // A trivia row pointing past src_bytes, then one holding bytes normalization
+  // would never leave behind. Both hang off the chart statement, past its span,
+  // so they print after the closing brace.
+  uint32_t const off{ narrow_clamp<uint32_t>(r.pd.src_bytes.size()) };
+  std::string_view const text{ "// tabbed\r" };
+  for (char const ch : text) { r.pd.src_bytes.push_back(static_cast<scav_byte>(ch)); }
+  r.pd.comments.push_back({ .src = make_span(off, 999), .pos = CommentPos::Leading });
+  r.pd.comments.push_back(
+      { .src = make_span(off, size32(text)), .pos = CommentPos::Leading });
+  r.pd.stmts[0].comments = make_span(0, 2);
+
+  std::string out;
+  CHECK(print_document(r.pd, print_default_options(), out));
+  CHECK(out ==
+        "chart c {\n"
+        "  state A,\n"
+        "}\n"
+        "\n"
+        "// tabbed\n");
+}
+
+// Round trip ================================================================
+
+TEST_CASE("print: printing is a fixpoint and its output is already canonical") {
+  // The property behind `fmt --check`: canonical text prints to itself, so a
+  // second pass can never move a byte a first pass left.
+  std::vector<std::string_view> const documents{
+    "chart c {}",
+    "chart c { state A, }",
+    R"(chart c { @ns { a, b = "2" }, @k = ["x", "y"], @flag = "true", })",
+    "chart c { s A, m x { s B, t * -> B, }, }",
+    R"(// header
+       chart vac "robot vacuum" { // opens
+         include """dock.scav""" as dock,
+         state Off "powered down", state PreConfig choice,
+         trans * -> Off, trans Off -> PreConfig "POWER_ON",
+         state On { submachine { state Idle, trans * -> Idle, }, },
+
+         // a heading
+
+         state Two { m main { s Idle, }, m aux "sweeps" { s Idle, }, },
+         // dangling
+       }
+       // afterword)",
+  };
+  for (uint32_t const columns : { PRINT_COLUMNS_MIN, 24U, 40U, DEFAULT_PRINT_COLUMNS }) {
+    for (std::string_view const text : documents) {
+      CAPTURE(columns);
+      std::string const once{ print(text, columns) };
+      CHECK(once == print(once, columns));
+      CHECK(is_canonical(once, columns));
+      Parsed const again{ parse(once) };
+      CHECK(again.ok);
+      CHECK(again.diags.empty());
+    }
+  }
+}

@@ -613,3 +613,123 @@ TEST_CASE("load: one leaf reached from several including documents") {
     CHECK(path(r.chart, found) == address);
   }
 }
+
+TEST_CASE("load: a root name that names no document poisons the loader") {
+  constexpr std::string_view ROOT{ R"(chart a { state A, })" };
+  Loader s;
+  SUBCASE("a name ending in a separator") {
+    CHECK_FALSE(load_add(s, raw(ROOT), ROOT.size(), "docs/"));
+  }
+  SUBCASE("no name at all") { CHECK_FALSE(load_add(s, raw(ROOT), ROOT.size(), "")); }
+
+  REQUIRE(s.diags.size() == 1);
+  CHECK(s.diags[0].code == DiagCode::IncludePathInvalid);
+  CHECK(s.docs.empty());
+  // Poisoned: a later add is refused without a second finding, and finish only
+  // replays what is already there.
+  CHECK_FALSE(load_add(s, raw(ROOT), ROOT.size(), "a.scav"));
+  CHECK(s.diags.size() == 1);
+  CHECK(s.docs.empty());
+  Chart c;
+  std::vector<Diagnostic> diags;
+  CHECK_FALSE(load_finish(s, c, diags));
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::IncludePathInvalid);
+  CHECK(c.documents.empty());
+}
+
+TEST_CASE("load: bytes are readable for an arrived document and no other") {
+  Loader s;
+  constexpr std::string_view ROOT{ R"(chart a { include "b.scav" as b, })" };
+  REQUIRE(load_add(s, raw(ROOT), ROOT.size(), "a.scav"));
+  scav_byte const *bytes{ nullptr };
+  uint32_t len{ 0 };
+  CHECK(load_document_bytes(s, DocId{ 0 }, &bytes, &len));
+  CHECK(bytes != nullptr);
+  CHECK(len == ROOT.size());
+  // Claimed by the include but not supplied yet, and one nobody ever claimed.
+  CHECK_FALSE(load_document_bytes(s, DocId{ 1 }, &bytes, &len));
+  CHECK_FALSE(load_document_bytes(s, DocId{ 9 }, &bytes, &len));
+  CHECK(load_document_name(s, DocId{ 1 }) == "b.scav");
+  CHECK(load_document_name(s, DocId{ 9 }).empty());
+}
+
+TEST_CASE("load: finishing a second time into the same chart is refused") {
+  Loader s;
+  constexpr std::string_view ROOT{ R"(chart a { state A, })" };
+  REQUIRE(load_add(s, raw(ROOT), ROOT.size(), "a.scav"));
+  Chart c;
+  std::vector<Diagnostic> diags;
+  REQUIRE(load_finish(s, c, diags));
+  CHECK(diags.empty());
+  size_t const states{ c.states.size() };
+
+  std::vector<Diagnostic> again;
+  CHECK_FALSE(load_finish(s, c, again));
+  CHECK(has_code(again, DiagCode::LoaderEmpty));
+  CHECK(c.states.size() == states);  // the finished chart is left alone
+}
+
+TEST_CASE("load: an unresolved document with nothing to quote still reports") {
+  // The claiming statement is what a diagnostic points at, so a claim naming a
+  // document or a row that is not there degrades to the code alone.
+  Chart c;
+  std::vector<Diagnostic> diags;
+  Loader s;
+  SUBCASE("a claimant past the parsed documents") {
+    s.docs.push_back({ .name = string_pool_add(s.paths, "ghost.scav"),
+                       .arrived = 0,
+                       .edges = {},
+                       .from = { 4 },
+                       .stmt_row = 9 });
+    s.parsed.emplace_back();
+  }
+  SUBCASE("a statement row past the claimant's statements") {
+    s.docs.push_back({ .name = string_pool_add(s.paths, "host.scav"),
+                       .arrived = 1,
+                       .edges = {},
+                       .from = { INVALID },
+                       .stmt_row = INVALID });
+    s.parsed.emplace_back();
+    s.docs.push_back({ .name = string_pool_add(s.paths, "ghost.scav"),
+                       .arrived = 0,
+                       .edges = {},
+                       .from = { 0 },
+                       .stmt_row = 9 });
+    s.parsed.emplace_back();
+  }
+
+  CHECK_FALSE(load_finish(s, c, diags));
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::IncludePathUnresolved);
+  CHECK(diags[0].src.len == 0);
+  CHECK(c.documents.empty());
+
+  std::string out;
+  diag_append(out, s, diags[0], "cmdline.scav");
+  CHECK(out.find(':') == out.rfind(':'));  // a name, then the message: no position
+}
+
+TEST_CASE("load: an include statement with no edge leaves its target unresolved") {
+  // Every include the discovery walk saw has an edge; one that does not must
+  // leave the host unattached rather than instantiate whatever is at index 0.
+  Loader s;
+  constexpr std::string_view ROOT{ R"(chart a { include "b.scav" as b, state A, })" };
+  constexpr std::string_view SUB{ R"(chart b { state B, })" };
+  REQUIRE(load_add(s, raw(ROOT), ROOT.size(), "a.scav"));
+  REQUIRE(load_add(s, raw(SUB), SUB.size(), "b.scav"));
+  s.edges.clear();
+  s.docs[0].edges = {};
+
+  Chart c;
+  std::vector<Diagnostic> diags;
+  CHECK(load_finish(s, c, diags));
+  CHECK(diags.empty());
+  CHECK(c.documents.size() == 2);  // both are attached; only the instance is not
+  REQUIRE(c.includes.size() == 1);
+  CHECK(c.includes[0].target.v == INVALID);
+  StateId host{ INVALID };
+  REQUIRE(resolve_path(c, c.root_submachine, "b", host) == ResolveStatus::Ok);
+  CHECK(c.states[host.v].submachines.len == 0);
+  CHECK(count_live_named(c, "B") == 0);
+}
