@@ -15,6 +15,7 @@
 #include "doctest.h"
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -173,12 +174,18 @@ TEST_CASE("drawlist corpus: the cost terms on the rendered scale") {
   scav_profile const p{ readable() };
 
   std::string actual;
+  // Scoring under real text is the only scale with placed boxes on it, so
+  // `label` and `label_near` -- O(placed x states) and O(placed x pieces) --
+  // have a multiplicand here and nowhere else (11.6). Timed, not asserted.
+  int64_t scoring_us{ 0 };
   for (char const *name : CORPUS) {
     CAPTURE(name);
     Run const r{ run_pipeline(name, m, p) };
-    CostTerms const t{
-      cost_columns(r.chart, decompose(r.chart), p, as_spaces(r.spaces), r.placed)
-    };
+    SplitGraph const g{ decompose(r.chart) };
+    auto const t0{ std::chrono::steady_clock::now() };
+    CostTerms const t{ cost_columns(r.chart, g, p, as_spaces(r.spaces), r.placed) };
+    auto const t1{ std::chrono::steady_clock::now() };
+    scoring_us += std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
     Cost const scored{ cost_of(t, p) };
     actual += name;
     for (int64_t const term : { int64_t{ scored.t0_violations },
@@ -197,6 +204,7 @@ TEST_CASE("drawlist corpus: the cost terms on the rendered scale") {
     }
     actual += '\n';
   }
+  MESSAGE("cost_columns over the corpus under real text: ", scoring_us, " us");
 
   std::vector<scav_byte> golden;
   REQUIRE(read_file(SCAV_TEST_DATA_DIR "/golden/layout/corpus_cost_measured.txt", golden));

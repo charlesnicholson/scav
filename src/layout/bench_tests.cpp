@@ -287,3 +287,44 @@ TEST_CASE("bench: the cells corpus_routers.txt leaves unscored, term by term") {
   }
   CHECK(want == actual);
 }
+
+TEST_CASE("bench: the scorer is timed over the corpus and at scale") {
+  // Scoring alone, with routing outside the clock: `layout_run` never calls
+  // `cost_terms`, so no timing above this one would notice it going quadratic.
+  scav_profile const p{ readable() };
+  auto const scored_us = [&p](Chart const &c, uint32_t times) {
+    SplitGraph const g{ decompose(c) };
+    SubmachineOrders const o{ order_submachines(c, g, {}, p) };
+    SizedLayout z;
+    std::vector<Diagnostic> diags;
+    REQUIRE(size_layout(c, g, o, {}, p, z, diags));
+    Routes const r{ route_transitions(c, g, o, z, {}, p, *router_at(0)) };
+    auto const t0{ std::chrono::steady_clock::now() };
+    for (uint32_t i = 0; i < times; ++i) { (void)cost_terms(c, g, z, r, {}, p); }
+    auto const t1{ std::chrono::steady_clock::now() };
+    return std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+  };
+
+  int64_t corpus_us{ 0 };
+  for (char const *name : CORPUS) {
+    CAPTURE(name);
+    Chart c;
+    load_chart(name, c);
+    corpus_us += scored_us(c, 10);
+  }
+  int64_t const nested_us{ scored_us(nested_2k_chart(), 1) };
+  int64_t const flat_us{ scored_us(flat_2k_chart(), 1) };
+  MESSAGE("cost_terms: corpus x10 ",
+          corpus_us,
+          " us, nested 2k ",
+          nested_us,
+          " us, flat 2k ",
+          flat_us,
+          " us");
+#if SCAV_PERF_ASSERT_FLOOR == 1
+  // Floors, not times: what they catch is a per-piece sweep over every state,
+  // which puts both of these back into hundreds of milliseconds.
+  CHECK(nested_us < 20000);
+  CHECK(flat_us < 20000);
+#endif
+}
