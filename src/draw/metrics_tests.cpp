@@ -150,6 +150,89 @@ Metrics bundled() {
   return m;
 }
 
+// One cmap table wrapping one subtable under a platform and encoding the caller
+// chooses: those two are all the picker ranks a subtable by.
+std::vector<scav_byte> cmap_wrap(uint32_t platform,
+                                 uint32_t encoding,
+                                 std::vector<scav_byte> const &sub) {
+  std::vector<scav_byte> t;
+  be16(t, 0);
+  be16(t, 1);
+  be16(t, platform);
+  be16(t, encoding);
+  be32(t, 12);
+  t.insert(t.end(), sub.begin(), sub.end());
+  return t;
+}
+
+struct Seg {
+  uint32_t end;
+  uint32_t start;
+  uint32_t delta;  // idDelta, two's complement in sixteen bits
+  uint32_t range;  // idRangeOffset, a byte offset from its own slot
+};
+
+// Format 4 over segments written verbatim -- the 0xFFFF terminator included
+// only if the caller asks -- then the glyph id array the range offsets index.
+std::vector<scav_byte> cmap4_sub(std::vector<Seg> const &segs,
+                                 std::vector<uint32_t> const &glyphs) {
+  std::vector<scav_byte> sub;
+  be16(sub, 4);
+  be16(sub, 0);  // length, patched below
+  be16(sub, 0);
+  be16(sub, 2U * static_cast<uint32_t>(segs.size()));
+  be16(sub, 0);
+  be16(sub, 0);
+  be16(sub, 0);
+  for (Seg const &s : segs) { be16(sub, s.end); }
+  be16(sub, 0);  // reservedPad
+  for (Seg const &s : segs) { be16(sub, s.start); }
+  for (Seg const &s : segs) { be16(sub, s.delta); }
+  for (Seg const &s : segs) { be16(sub, s.range); }
+  for (uint32_t const g : glyphs) { be16(sub, g); }
+  sub[2] = static_cast<scav_byte>((sub.size() >> 8U) & 0xFFU);
+  sub[3] = static_cast<scav_byte>(sub.size() & 0xFFU);
+  return sub;
+}
+
+// An idRangeOffset that reaches glyph `slot` of the array from segment `i` of
+// `n`: the slot is read relative to where the offset itself was read from.
+uint32_t range_offset(uint32_t n, uint32_t i, uint32_t slot) {
+  return 2U * ((n - i) + slot);
+}
+
+// The cmap goes last, so cutting the cmap table cuts the file: every bounds
+// check reads against the file's length rather than the table's.
+std::vector<scav_byte> font_with_cmap(std::vector<scav_byte> cmap, uint32_t cut) {
+  if (cut < cmap.size()) { cmap.resize(cut); }
+  return assemble({
+      { .tag = "head", .bytes = head_table(1000) },
+      { .tag = "hhea", .bytes = hhea_table(2) },
+      { .tag = "hmtx", .bytes = hmtx_table({ 500, 600 }, 8) },
+      { .tag = "maxp", .bytes = maxp_table(8) },
+      { .tag = "cmap", .bytes = std::move(cmap) },
+  });
+}
+
+Metrics from_bytes(std::vector<scav_byte> const &font) {
+  Metrics m;
+  REQUIRE(metrics_create(font.data(), static_cast<uint32_t>(font.size()), m));
+  return m;
+}
+
+bool refuses(std::vector<scav_byte> const &font) {
+  Metrics m;
+  return !metrics_create(font.data(), static_cast<uint32_t>(font.size()), m);
+}
+
+uint32_t rd16(std::vector<scav_byte> const &b, uint32_t at) {
+  return (static_cast<uint32_t>(b[at]) << 8U) | b[at + 1U];
+}
+
+uint32_t rd32(std::vector<scav_byte> const &b, uint32_t at) {
+  return (rd16(b, at) << 16U) | rd16(b, at + 2U);
+}
+
 MeasureStatus measure(Metrics const &m, std::string_view s, int32_t fs, scav_extent &e) {
   return measure_text(m,
                       reinterpret_cast<scav_byte const *>(s.data()),
@@ -245,6 +328,10 @@ TEST_CASE("metrics: malformed UTF-8 is refused rather than measured") {
   CHECK(measure(m, "\xE2\x82", 16, e) == MeasureStatus::BadUtf8);          // truncated
   CHECK(measure(m, "\x80", 16, e) == MeasureStatus::BadUtf8);              // stray tail
   CHECK(measure(m, "\xF5\x80\x80\x80", 16, e) == MeasureStatus::BadUtf8);  // > 10FFFF
+  CHECK(measure(m, "\xC2\x41", 16, e) == MeasureStatus::BadUtf8);  // no continuation
+  // No bytes at all where a length says there are some.
+  CHECK(measure_text(m, nullptr, 5, 16, e) == MeasureStatus::BadUtf8);
+  CHECK(e.w == 0);
 }
 
 TEST_CASE("metrics: a size outside the domain is refused") {
@@ -436,6 +523,8 @@ TEST_CASE("metrics: line height is the profile ratio, not the font's opinion") {
   CHECK(line_height(160, 7, 0) == 0);
   CHECK(line_height(160, 1025, 5) == 0);
   CHECK(line_height(160, 7, 1025) == 0);
+  // And a product past the coordinate domain, which every bound above is in.
+  CHECK(line_height(COORD_MAX, 1024, 1) == 0);
 }
 
 TEST_CASE("metrics: a block is its widest line by its own line count") {
@@ -488,6 +577,17 @@ TEST_CASE("metrics: a block refuses what a line refuses") {
   CHECK(block("ok", 16, 7, 0) == MeasureStatus::BadSize);
   CHECK(block("\xC0\x80", 16, 7, 5) == MeasureStatus::BadUtf8);
   CHECK(block("\xF3\xB0\x80\x81", 16, 7, 5) == MeasureStatus::MissingGlyph);
+  // Two lines of the tallest line height there is overflows the height a line
+  // of it does not, so the sum is checked and not just each term.
+  CHECK(block("\n\n", COORD_MAX / 4, 4, 1) == MeasureStatus::BadSize);
+
+  // No bytes at all where a length says there are some, which measure_text
+  // refuses and this used to read through.
+  CHECK(measure_block(m, nullptr, 5, 16, 7, 5, e) == MeasureStatus::BadUtf8);
+  CHECK(e.w == 0);
+  CHECK(e.h == 0);
+  CHECK(measure_block(m, nullptr, 0, 16, 7, 5, e) == MeasureStatus::Ok);
+  CHECK(e.h == line_height(16, 7, 5));
 }
 
 TEST_CASE("metrics: the C surface agrees with the C++ one, and refuses nulls") {
@@ -544,4 +644,317 @@ TEST_CASE("metrics: the C surface agrees with the C++ one, and refuses nulls") {
 
   scav_metrics_destroy(m);
   scav_metrics_destroy(nullptr);  // idempotent on NULL
+}
+
+TEST_CASE("metrics: a table directory that runs off the end is refused") {
+  auto const header = [](uint32_t tables, uint32_t bytes) {
+    std::vector<scav_byte> f;
+    be32(f, 0x0001'0000U);
+    be16(f, tables);
+    f.resize(bytes, 0);
+    return f;
+  };
+  std::vector<scav_byte> const good{ assemble({
+      { .tag = "cmap", .bytes = cmap4_table('a', 'z', 1) },
+      { .tag = "head", .bytes = head_table(1000) },
+      { .tag = "hhea", .bytes = hhea_table(2) },
+      { .tag = "hmtx", .bytes = hmtx_table({ 0, 600 }, 2) },
+      { .tag = "maxp", .bytes = maxp_table(2) },
+  }) };
+  REQUIRE(!refuses(good));
+
+  // The first record's offset field sits at 20 and its length at 24.
+  std::vector<scav_byte> far_off{ good };
+  std::vector<scav_byte> far_len{ good };
+  for (uint32_t i = 0; i < 4; ++i) {
+    far_off[20U + i] = 0xFF;
+    far_len[24U + i] = 0xFF;
+  }
+
+  struct Case {
+    char const *what;
+    std::vector<scav_byte> font;
+  };
+  std::vector<Case> const cases{
+    { .what = "four bytes: the table count is not there", .font = header(4, 4) },
+    { .what = "one record, cut before its offset", .font = header(2, 20) },
+    { .what = "one record, cut before its length", .font = header(1, 24) },
+    { .what = "a record whose offset is past the file", .font = far_off },
+    { .what = "a record whose length runs off the file", .font = far_len },
+  };
+  for (Case const &c : cases) {
+    CAPTURE(c.what);
+    CHECK(refuses(c.font));
+  }
+}
+
+TEST_CASE("metrics: a table too short for the field it must carry is refused") {
+  // The short table goes last, so its field lands past the file rather than in
+  // the next table's bytes: every read is bounded by the file, not the table.
+  auto const with_short = [](char const *tag) {
+    std::vector<Table> tables{
+      { .tag = "cmap", .bytes = cmap4_table('a', 'z', 1) },
+      { .tag = "hmtx", .bytes = hmtx_table({ 0, 600 }, 2) },
+      { .tag = "head", .bytes = head_table(1000) },
+      { .tag = "hhea", .bytes = hhea_table(2) },
+      { .tag = "maxp", .bytes = maxp_table(2) },
+    };
+    Table short_one{ .tag = tag, .bytes = std::vector<scav_byte>(4, 0) };
+    for (uint32_t i = 0; i < tables.size(); ++i) {
+      if (std::string_view{ tables[i].tag } == std::string_view{ tag }) {
+        tables.erase(tables.begin() + i);
+        break;
+      }
+    }
+    tables.push_back(std::move(short_one));
+    return assemble(tables);
+  };
+  for (char const *tag : { "head", "maxp", "hhea" }) {
+    CAPTURE(tag);
+    CHECK(refuses(with_short(tag)));
+  }
+}
+
+TEST_CASE("metrics: a cmap with no subtable this code can read is refused") {
+  // A subtable record is 8 bytes at table offset 4, so a table cut at 12, 14 or
+  // 16 stops the second record's platform, encoding or offset in turn.
+  auto const two_records = [](uint32_t bytes) {
+    std::vector<scav_byte> t;
+    be16(t, 0);
+    be16(t, 2);
+    be16(t, 3);
+    be16(t, 1);
+    be32(t, 0xFFFFU);  // past the table, so this record contributes nothing
+    t.resize(bytes, 0);
+    return t;
+  };
+  std::vector<scav_byte> unreadable_offset;
+  be16(unreadable_offset, 0);
+  be16(unreadable_offset, 1);
+  be16(unreadable_offset, 3);
+  be16(unreadable_offset, 1);
+  be32(unreadable_offset, 11);  // inside the table, but one byte from the file
+
+  std::vector<Seg> const whole{ { .end = 0xFFFFU, .start = 0, .delta = 1, .range = 0 } };
+  std::vector<scav_byte> const twelve{ cmap12_table(0x20U, 0x30U, 1) };
+  std::vector<scav_byte> const twelve_sub{ twelve.begin() + 12, twelve.end() };
+
+  struct Case {
+    char const *what;
+    std::vector<scav_byte> font;
+  };
+  std::vector<Case> const cases{
+    { .what = "a cmap cut before its subtable count",
+      .font = font_with_cmap(cmap4_table('a', 'z', 1), 2) },
+    { .what = "a record cut before its platform",
+      .font = font_with_cmap(two_records(12), 12) },
+    { .what = "a record cut before its encoding",
+      .font = font_with_cmap(two_records(14), 14) },
+    { .what = "a record cut before its subtable offset",
+      .font = font_with_cmap(two_records(16), 16) },
+    { .what = "every subtable offset past the table",
+      .font = font_with_cmap(two_records(20), 20) },
+    { .what = "a subtable offset one byte from the file's end",
+      .font = font_with_cmap(unreadable_offset, 12) },
+    { .what = "a Macintosh subtable, which this code does not read",
+      .font = font_with_cmap(cmap_wrap(1, 0, cmap4_sub(whole, {})), 0xFFFFU) },
+    // Format and encoding are ranked together: a full-repertoire table under a
+    // BMP-only encoding is a contradiction, and neither half alone qualifies.
+    { .what = "a format 12 subtable under a BMP-only encoding",
+      .font = font_with_cmap(cmap_wrap(0, 3, twelve_sub), 0xFFFFU) },
+  };
+  for (Case const &c : cases) {
+    CAPTURE(c.what);
+    CHECK(refuses(c.font));
+  }
+}
+
+TEST_CASE("metrics: a format 4 table that lies about its own size maps nothing") {
+  // For one segment the arrays land at 26 (end), 30 (start), 32 (delta) and 34
+  // (range) within the cmap table; cutting the file there stops the read after.
+  std::vector<Seg> const one{ { .end = 0xFFFFU, .start = 0, .delta = 1, .range = 0 } };
+  std::vector<Seg> const two{ { .end = 0x10U, .start = 0, .delta = 1, .range = 0 },
+                              { .end = 0xFFFFU, .start = 0x20U, .delta = 1, .range = 0 } };
+  std::vector<scav_byte> const wide{ cmap_wrap(3, 1, cmap4_sub(two, {})) };
+  std::vector<scav_byte> const narrow{ cmap_wrap(3, 1, cmap4_sub(one, {})) };
+
+  struct Case {
+    char const *what;
+    std::vector<scav_byte> font;
+  };
+  std::vector<Case> const cases{
+    { .what = "cut before the segment count", .font = font_with_cmap(narrow, 14) },
+    { .what = "cut before the second end code", .font = font_with_cmap(wide, 28) },
+    { .what = "cut before the start codes", .font = font_with_cmap(narrow, 30) },
+    { .what = "cut before the deltas", .font = font_with_cmap(narrow, 32) },
+    { .what = "cut before the range offsets", .font = font_with_cmap(narrow, 34) },
+  };
+  for (Case const &c : cases) {
+    CAPTURE(c.what);
+    Metrics const m{ from_bytes(c.font) };
+    REQUIRE(m.cmap_format == 4);
+    CHECK(metrics_glyph(m, 0x41U) == 0);
+  }
+
+  // A segment count of zero is a table with no segments at all, which is not
+  // the same as one whose first segment starts at zero.
+  std::vector<scav_byte> empty{ cmap_wrap(3, 1, cmap4_sub(one, {})) };
+  empty[12U + 6U] = 0;
+  empty[12U + 7U] = 0;
+  Metrics const none{ from_bytes(font_with_cmap(empty, 0xFFFFU)) };
+  CHECK(metrics_glyph(none, 0x41U) == 0);
+}
+
+TEST_CASE("metrics: format 4 maps through an idRangeOffset, or through nothing") {
+  // Two segments and a two-glyph array: one codepoint reaches a live glyph
+  // through the offset, and one reaches the array's own zero.
+  std::vector<Seg> const segs{
+    { .end = 0x42U, .start = 0x41U, .delta = 0, .range = 0 },
+    { .end = 0xFFFFU, .start = 0xFFFFU, .delta = 1, .range = 0 },
+  };
+  std::vector<Seg> patched{ segs };
+  patched[0].range = range_offset(2, 0, 0);
+  Metrics const m{ from_bytes(
+      font_with_cmap(cmap_wrap(3, 1, cmap4_sub(patched, { 5, 0 })), 0xFFFFU)) };
+  REQUIRE(m.cmap_format == 4);
+  CHECK(metrics_glyph(m, 0x41U) == 5);  // out of the array, then the delta
+  CHECK(metrics_glyph(m, 0x42U) == 0);  // the array's own zero, not a glyph
+
+  // An offset reaching past the end of the file reads back nothing rather than
+  // whatever happens to follow the table.
+  std::vector<Seg> far{ segs };
+  far[0].range = 0xFFF0U;
+  Metrics const past{ from_bytes(
+      font_with_cmap(cmap_wrap(3, 1, cmap4_sub(far, { 5, 0 })), 0xFFFFU)) };
+  CHECK(metrics_glyph(past, 0x41U) == 0);
+
+  // Without the mandatory 0xFFFF terminator, a codepoint above the last segment
+  // runs out of segments, which is a miss rather than a read past the array.
+  std::vector<Seg> const unterminated{
+    { .end = 0x42U, .start = 0x41U, .delta = 0xFFC0U, .range = 0 }
+  };
+  Metrics const open{ from_bytes(
+      font_with_cmap(cmap_wrap(3, 1, cmap4_sub(unterminated, {})), 0xFFFFU)) };
+  CHECK(metrics_glyph(open, 0x41U) == 1);
+  CHECK(metrics_glyph(open, 0x43U) == 0);
+
+  // A glyph id past the font's own count is nothing, rather than a row of the
+  // hmtx that belongs to no glyph.
+  std::vector<Seg> const beyond{
+    { .end = 0x42U, .start = 0x41U, .delta = 0, .range = 0 }
+  };
+  Metrics const over{ from_bytes(
+      font_with_cmap(cmap_wrap(3, 1, cmap4_sub(beyond, {})), 0xFFFFU)) };
+  REQUIRE(over.num_glyphs == 8);
+  CHECK(metrics_glyph(over, 0x41U) == 0);  // 0x41 itself, which is past eight
+}
+
+TEST_CASE("metrics: the bundled font's own format 4 subtable agrees with format 12") {
+  // The picker passes over format 4 wherever a font offers format 12, so the
+  // bundled font's format 4 table is reached by pointing a Metrics at it.
+  Metrics const twelve{ bundled() };
+  REQUIRE(twelve.cmap_format == 12);
+
+  uint32_t cmap_off{ 0 };
+  uint32_t const tables{ rd16(twelve.ttf, 4) };
+  for (uint32_t i = 0; i < tables; ++i) {
+    uint32_t const at{ 12U + (16U * i) };
+    if (rd32(twelve.ttf, at) == 0x636D'6170U) { cmap_off = rd32(twelve.ttf, at + 8U); }
+  }
+  REQUIRE(cmap_off != 0);
+
+  uint32_t sub{ 0 };
+  uint32_t const subtables{ rd16(twelve.ttf, cmap_off + 2U) };
+  for (uint32_t i = 0; i < subtables; ++i) {
+    uint32_t const at{ cmap_off + 4U + (8U * i) };
+    uint32_t const candidate{ cmap_off + rd32(twelve.ttf, at + 4U) };
+    if (rd16(twelve.ttf, candidate) == 4U) { sub = candidate; }
+  }
+  REQUIRE(sub != 0);
+
+  Metrics four{ twelve };
+  four.cmap_sub = { .off = sub, .len = 0 };
+  four.cmap_format = 4;
+
+  // U+0021 sits in a segment whose idRangeOffset is non-zero, so its glyph
+  // comes out of the array rather than out of the delta.
+  uint32_t const seg_x2{ rd16(twelve.ttf, sub + 6U) };
+  uint32_t const end_base{ sub + 14U };
+  uint32_t const start_base{ end_base + seg_x2 + 2U };
+  uint32_t const delta_base{ start_base + seg_x2 };
+  uint32_t const range_base{ delta_base + seg_x2 };
+  constexpr uint32_t CP{ 0x21U };
+  uint32_t walked{ 0 };
+  for (uint32_t i = 0; i < (seg_x2 / 2U); ++i) {
+    if (rd16(twelve.ttf, end_base + (2U * i)) < CP) { continue; }
+    uint32_t const start{ rd16(twelve.ttf, start_base + (2U * i)) };
+    uint32_t const range{ rd16(twelve.ttf, range_base + (2U * i)) };
+    REQUIRE(start <= CP);
+    REQUIRE(range != 0);  // the path under test, not the delta one
+    uint32_t const delta{ rd16(twelve.ttf, delta_base + (2U * i)) };
+    uint32_t const at{ range_base + (2U * i) + range + (2U * (CP - start)) };
+    walked = (rd16(twelve.ttf, at) + delta) & 0xFFFFU;
+    break;
+  }
+  REQUIRE(walked != 0);
+
+  uint32_t const glyph{ metrics_glyph(four, CP) };
+  CHECK(glyph == walked);
+  CHECK(glyph == metrics_glyph(twelve, CP));  // one font, read two ways
+  CHECK(metrics_advance(four, glyph) != 0);
+  CHECK(metrics_advance(four, glyph) == metrics_advance(twelve, glyph));
+}
+
+TEST_CASE("metrics: a format 12 table that lies about its own size maps nothing") {
+  // A group is 12 bytes at subtable offset 16, and nGroups sits at 12; the cut
+  // is measured from the start of the cmap table, whose subtable begins at 12.
+  auto const groups = []() {
+    std::vector<scav_byte> sub;
+    be16(sub, 12);
+    be16(sub, 0);
+    be32(sub, 16 + (12 * 2));
+    be32(sub, 0);
+    be32(sub, 2);
+    be32(sub, 0x20U);
+    be32(sub, 0x30U);
+    be32(sub, 1);
+    be32(sub, 0x50U);
+    be32(sub, 0x60U);
+    be32(sub, 2);
+    return cmap_wrap(3, 10, sub);
+  };
+  struct Case {
+    char const *what;
+    uint32_t cut;
+  };
+  std::vector<Case> const cases{
+    { .what = "cut before the group count", .cut = 12 + 14 },
+    { .what = "cut before the second group's first codepoint", .cut = 12 + 28 },
+    { .what = "cut before its last codepoint", .cut = 12 + 32 },
+    { .what = "cut before its start glyph", .cut = 12 + 36 },
+  };
+  for (Case const &c : cases) {
+    CAPTURE(c.what);
+    Metrics const m{ from_bytes(font_with_cmap(groups(), c.cut)) };
+    REQUIRE(m.cmap_format == 12);
+    CHECK(metrics_glyph(m, 0x40U) == 0);  // past group 0, into the cut
+  }
+}
+
+TEST_CASE("metrics: a codepoint in a gap between groups is missing, not mapped") {
+  // The groups ascend, so the first one starting above the codepoint ends the
+  // search: nothing later can match, and reading on would be wasted work.
+  Metrics const m{ bundled() };
+  CHECK(metrics_glyph(m, 0x0EU) == 0);  // between U+000D and U+0020
+  CHECK(metrics_glyph(m, 0x01U) == 0);  // below the first group of all
+  scav_extent e{};
+  CHECK(measure(m, "\x0E", 16, e) == MeasureStatus::MissingGlyph);
+}
+
+TEST_CASE("metrics: an hmtx that points past the font reads back no advance") {
+  // Reachable only by hand: metrics_create refuses a font whose hmtx cannot
+  // hold the records hhea claims, which is what makes the read safe.
+  Metrics m{ bundled() };
+  m.hmtx.off = static_cast<uint32_t>(m.ttf.size());
+  CHECK(metrics_advance(m, 0) == 0);
 }

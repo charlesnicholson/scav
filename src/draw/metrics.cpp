@@ -335,6 +335,8 @@ MeasureStatus measure_block(Metrics const &m,
   out = {};
   int32_t const lh{ line_height(font_size_grid, k_num, k_den) };
   if (lh == 0) { return MeasureStatus::BadSize; }
+  // Before the scan below, which reads a byte per index rather than per line.
+  if ((utf8_nfc == nullptr) && (len != 0U)) { return MeasureStatus::BadUtf8; }
 
   int32_t widest{ 0 };
   uint32_t lines{ 0 };
