@@ -513,6 +513,7 @@ SubmachineOrders order_submachines(Chart const &c,
     scav_span const mine{
       shard_range(shard, shards, static_cast<uint32_t>(c.submachines.size()))
     };
+    if (mine.len == 0) { return; }
     FrameScratch sc;
     sc.state_local.assign(c.states.size(), INVALID);
     sc.seg_local.assign(g.segments.size(), INVALID);

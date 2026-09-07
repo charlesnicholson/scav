@@ -6,6 +6,7 @@
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
+#include "scav_shard.h"
 
 #include "doctest.h"
 
@@ -128,14 +129,36 @@ void check_corpus_chart(std::string const &name, scav_profile const &p) {
   }
 }
 
-void check_scale_chart(std::string const &name, Chart (*build)(), scav_profile const &p) {
+// Shards with a frame to work on: the count comes from every entity, the
+// ranges are cut over submachines, so a one-frame chart busies one shard.
+uint32_t busy_shards(Chart const &c) {
+  uint32_t const shards{ layout_shard_count(c) };
+  uint32_t const subs{ static_cast<uint32_t>(c.submachines.size()) };
+  uint32_t busy{ 0 };
+  for (uint32_t s = 0; s < shards; ++s) {
+    busy += (shard_range(s, shards, subs).len > 0) ? 1U : 0U;
+  }
+  return busy;
+}
+
+void check_scale_chart(std::string const &name,
+                       Chart (*build)(),
+                       scav_profile const &p,
+                       bool concurrent_frames) {
   CAPTURE(name);
   Chart first{ build() };
-  // Asserted rather than assumed: without it the case would quietly degrade to
-  // the single-shard path the corpus already covers.
+  // Asserted rather than assumed, so neither case can quietly cover the other's
+  // path: the nested chart runs frames concurrently, the flat one has one frame
+  // and every other shard empty.
   uint32_t const shards{ layout_shard_count(first) };
+  uint32_t const busy{ busy_shards(first) };
   REQUIRE(shards > 1);
-  MESSAGE(name, " shards: ", shards);
+  if (concurrent_frames) {
+    REQUIRE(busy > 1);
+  } else {
+    REQUIRE(busy == 1);
+  }
+  MESSAGE(name, " shards: ", shards, ", busy: ", busy);
   Snapshot const want{ lay_out(first, p, 1) };
   for (uint32_t const threads : THREADS) {
     CAPTURE(threads);
@@ -177,8 +200,8 @@ TEST_CASE("determinism: the corpus lays out to one answer at every thread count"
 
 TEST_CASE("determinism: the scale targets lay out to one answer at every thread count") {
   scav_profile const p{ readable() };
-  SUBCASE("nested") { check_scale_chart("nested 2k", nested_2k_chart, p); }
-  SUBCASE("flat") { check_scale_chart("flat 2k", flat_2k_chart, p); }
+  SUBCASE("nested") { check_scale_chart("nested 2k", nested_2k_chart, p, true); }
+  SUBCASE("flat") { check_scale_chart("flat 2k", flat_2k_chart, p, false); }
 }
 
 TEST_CASE("determinism: the scheduling-delay injector moves nothing at scale") {

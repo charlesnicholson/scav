@@ -167,11 +167,11 @@ TEST_CASE("thread: no more workers than shards") {
 
 TEST_CASE("thread: asking for more threads than shards still runs every shard") {
   HookGuard const guard;
-  for (uint32_t shards : { 2U, 3U, 8U, 16U }) {
+  for (uint32_t shards : { 3U, 8U, 16U }) {
     CAPTURE(shards);
-    // One fewer spawn than the shim would attempt, so the last stripe has to
-    // come back to the caller.
-    thread_test_spawn_limit(shards - 1U);
+    // The shim attempts workers 1..shards-1, so a limit of shards-2 refuses the
+    // last one and its stripe comes back to the caller.
+    thread_test_spawn_limit(shards - 2U);
     std::vector<uint32_t> const hits{ run_hits(shards, 64U) };
     CHECK(count_of(hits, 1U) == shards);
   }

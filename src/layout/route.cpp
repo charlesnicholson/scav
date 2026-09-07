@@ -310,6 +310,7 @@ Routes route_transitions(Chart const &c,
     scav_span const mine{
       shard_range(shard, shards, static_cast<uint32_t>(by_frame.size()))
     };
+    if (mine.len == 0) { return; }
     FrameScratch sc;
     sc.in.profile = p;
     sc.obstacle_index.assign(c.states.size(), INVALID);
