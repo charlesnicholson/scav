@@ -6,6 +6,7 @@
 #include "layout/geom.h"
 #include "layout/order.h"
 #include "layout/route.h"
+#include "layout/shard.h"
 #include "layout/size.h"
 #include "layout/tests/test_synth.h"
 #include "scav/scav_core.h"
@@ -99,6 +100,24 @@ bool inside(scav_rect const &inner, scav_rect const &outer) {
 bool overlap(scav_rect const &a, scav_rect const &b) {
   return (a.x < (b.x + b.w)) && (b.x < (a.x + a.w)) && (a.y < (b.y + b.h)) &&
          (b.y < (a.y + a.h));
+}
+
+void load_corpus(char const *name, Chart &c) {
+  std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
+  path += name;
+  Loader loader;
+  std::vector<Diagnostic> diags;
+  std::string failed;
+  REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
+}
+
+// The profile's 48 knobs as a block, so a test can say which of them moved.
+// The assert layout.cpp's digest rests on is what makes the copy total.
+std::array<int32_t, sizeof(scav_profile) / sizeof(int32_t)> profile_fields(
+    scav_profile const &p) {
+  std::array<int32_t, sizeof(scav_profile) / sizeof(int32_t)> out{};
+  std::memcpy(out.data(), &p, sizeof(scav_profile));
+  return out;
 }
 
 bool on_border(scav_point pt, scav_rect const &r) {
@@ -1359,11 +1378,153 @@ scav_point last_point(Chart const &c, uint32_t trans) {
 
 namespace scav {
 
-// The decision `layout.cpp` brackets with SCAV_INTERNAL, declared here rather
-// than in a header so the shipping build keeps it internal.
+// The decision and the portfolio's three pure parts, which `layout.cpp`
+// brackets with SCAV_INTERNAL, declared here rather than in a header so the
+// shipping build keeps them internal.
 bool inflation_done(uint32_t fewest, uint32_t degraded, uint32_t unreachable, bool &keep);
+uint32_t search_tuple_count(scav_profile const &p, uint32_t entity_count);
+void search_tuple(scav_profile &p, DarSource &dar, uint32_t index);
+uint32_t search_argmin(std::vector<Cost> const &cost, std::vector<uint8_t> const &viable);
 
 }  // namespace scav
+
+TEST_CASE("layout: the table's first row is the profile as given") {
+  // Row 0 has to be the caller's own tuple, or `portfolio_m` of 1 would not be
+  // the pipeline as it ran before the portfolio existed. The other seven are
+  // the two packer knobs crossed, then the same four handing the ratios down.
+  for (int32_t const trybox : { 0, 1 }) {
+    for (int32_t const tiebreak : { 0, 1 }) {
+      CAPTURE(trybox);
+      CAPTURE(tiebreak);
+      scav_profile given{ readable() };
+      given.trybox = trybox;
+      given.sm_tiebreak = tiebreak;
+      for (uint32_t row = 0; row < 8; ++row) {
+        CAPTURE(row);
+        scav_profile knobs{ given };
+        DarSource dar{ DarSource::OwnerHole };
+        search_tuple(knobs, dar, row);
+        CHECK(knobs.sm_tiebreak == (given.sm_tiebreak ^ static_cast<int32_t>(row & 1U)));
+        CHECK(knobs.trybox == (given.trybox ^ static_cast<int32_t>((row >> 1U) & 1U)));
+        CHECK((dar == ((row < 4) ? DarSource::Profile : DarSource::OwnerHole)));
+        // Nothing else about the profile is the table's to touch, all 48 knobs
+        // read back to say so.
+        knobs.trybox = given.trybox;
+        knobs.sm_tiebreak = given.sm_tiebreak;
+        CHECK(profile_fields(knobs) == profile_fields(given));
+      }
+      // The four rows of each half are the four combinations, once each.
+      uint32_t seen{ 0 };
+      for (uint32_t row = 0; row < 4; ++row) {
+        scav_profile knobs{ given };
+        DarSource dar{ DarSource::Profile };
+        search_tuple(knobs, dar, row);
+        seen |= 1U << static_cast<uint32_t>((knobs.trybox * 2) + knobs.sm_tiebreak);
+      }
+      CHECK(seen == 0xFU);
+    }
+  }
+}
+
+TEST_CASE("layout: how many tuples a chart runs is closed form and model-derived") {
+  // M halves for every doubling of the entity count past 512, so a chart under
+  // 1,024 entities gets the whole of M and either 2k shape gets one row. The
+  // table has eight rows, which is what caps a `portfolio_m` above it.
+  scav_profile p{ readable() };
+  struct Row {
+    uint32_t entities;
+    uint32_t at_one, at_four, at_sixtyfour;
+  };
+  for (Row const &row :
+       { Row{ .entities = 0, .at_one = 1, .at_four = 4, .at_sixtyfour = 8 },
+         Row{ .entities = 1, .at_one = 1, .at_four = 4, .at_sixtyfour = 8 },
+         Row{ .entities = 1023, .at_one = 1, .at_four = 4, .at_sixtyfour = 8 },
+         Row{ .entities = 1024, .at_one = 1, .at_four = 2, .at_sixtyfour = 8 },
+         Row{ .entities = 2047, .at_one = 1, .at_four = 2, .at_sixtyfour = 8 },
+         Row{ .entities = 2048, .at_one = 1, .at_four = 1, .at_sixtyfour = 8 },
+         Row{ .entities = 6000, .at_one = 1, .at_four = 1, .at_sixtyfour = 8 } }) {
+    CAPTURE(row.entities);
+    p.portfolio_m = 1;
+    CHECK(search_tuple_count(p, row.entities) == row.at_one);
+    p.portfolio_m = 4;
+    CHECK(search_tuple_count(p, row.entities) == row.at_four);
+    p.portfolio_m = 64;
+    CHECK(search_tuple_count(p, row.entities) == row.at_sixtyfour);
+  }
+
+  // Past 8,192 entities the shift bites into the largest M there is, and the
+  // floor is what answers rather than the table's size.
+  p.portfolio_m = 64;
+  CHECK(search_tuple_count(p, 1U << 14U) == 2);
+  CHECK(search_tuple_count(p, 1U << 15U) == 1);
+  CHECK(search_tuple_count(p, 0xFFFF'FFFFU) == 1);
+
+  // Both 2k shapes, which is the claim the rule is written for.
+  Chart nested{ nested_2k_chart() };
+  Chart flat{ flat_2k_chart() };
+  p.portfolio_m = 4;
+  CHECK(search_tuple_count(p, layout_entity_count(nested)) == 1);
+  CHECK(search_tuple_count(p, layout_entity_count(flat)) == 1);
+}
+
+TEST_CASE("layout: the portfolio reduces in index order and a tie keeps the lower row") {
+  Cost const cheap{ .t0_violations = 0, .t1_hints = 0, .t2 = 10 };
+  Cost const dear{ .t0_violations = 0, .t1_hints = 0, .t2 = 20 };
+  Cost const violating{ .t0_violations = 1, .t1_hints = 0, .t2 = 1 };
+
+  CHECK(search_argmin({ dear, cheap, dear }, { 1, 1, 1 }) == 1);
+  // Equal costs are a tie, and `cost_less` is strict, so the lower index wins
+  // however many rows agree with it.
+  CHECK(search_argmin({ cheap, cheap, cheap }, { 1, 1, 1 }) == 0);
+  CHECK(search_argmin({ dear, cheap, cheap }, { 1, 1, 1 }) == 1);
+  // Tier 0 is compared first, so a violating row loses to any admissible one
+  // however small its sum.
+  CHECK(search_argmin({ violating, dear }, { 1, 1 }) == 1);
+  // A row that left the coordinate domain is no candidate at all.
+  CHECK(search_argmin({ dear, cheap }, { 1, 0 }) == 0);
+  CHECK(search_argmin({ cheap, dear }, { 0, 1 }) == 1);
+  // Nothing viable answers row 0, the caller's own tuple.
+  CHECK(search_argmin({ cheap, cheap }, { 0, 0 }) == 0);
+  CHECK(search_argmin({}, {}) == 0);
+}
+
+TEST_CASE("layout: the pick is the row exact Cost ranks first over the whole table") {
+  // End to end on a real chart: run the portfolio, then run each of its rows on
+  // its own as a one-tuple layout, score all four the way the driver does, and
+  // hold the reduction and the written geometry to the same row.
+  scav_profile const p{ readable() };
+  Chart searched;
+  load_corpus("axis.scav", searched);
+  scav_profile four{ p };
+  four.portfolio_m = 4;
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  uint32_t picked{ INVALID };
+  REQUIRE(layout_run(searched, {}, opts(four), placed, diags, nullptr, &picked));
+  REQUIRE(picked < 4);
+
+  std::vector<Cost> cost;
+  std::vector<uint32_t> coordinate;
+  for (uint32_t row = 0; row < 4; ++row) {
+    CAPTURE(row);
+    scav_profile knobs{ p };
+    knobs.portfolio_m = 1;
+    DarSource dar{ DarSource::Profile };
+    search_tuple(knobs, dar, row);
+    Chart alone;
+    load_corpus("axis.scav", alone);
+    uint32_t only{ INVALID };
+    std::vector<Diagnostic> spilled;
+    REQUIRE(layout_run(alone, {}, opts(knobs), placed, spilled, nullptr, &only));
+    CHECK(only == 0);  // one row, and it is row 0 of that run's own table
+    cost.push_back(cost_of(cost_columns(alone, decompose(alone), p), p));
+    coordinate.push_back(layout_coordinate_hash(alone));
+  }
+  CHECK(search_argmin(cost, { 1, 1, 1, 1 }) == picked);
+  CHECK(coordinate[picked] == layout_coordinate_hash(searched));
+  // The pick is an improvement on the profile as given, or it would be row 0.
+  CHECK(cost_less(cost[picked], cost[0]) == (picked != 0));
+}
 
 TEST_CASE("layout: only a kept inflation attempt ends the retry loop") {
   // The loop exists to remove unreachable ends, and the geometry that ships is

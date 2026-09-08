@@ -1,10 +1,13 @@
-// The four phases in a line, then the geometry columns as the only output.
+// The four phases in a line, the portfolio of phase-2 tuples wrapped around
+// the last two of them, then the geometry columns as the only output.
 // Everything else here is the columns and the two hashes over them.
 
+#include "layout/cost.h"
 #include "layout/decompose.h"
 #include "layout/order.h"
 #include "layout/route.h"
 #include "layout/router.h"
+#include "layout/shard.h"
 #include "layout/size.h"
 #include "layout/wire.h"
 #include "scav/scav_core.h"
@@ -23,14 +26,22 @@
 namespace scav {
 
 SCAV_INTERNAL_BEGIN
-// The inflation loop's decision, bracketed so a test reaches the case no chart
-// does. The prototype a test uses is its own; see scav_internal.h.
+// The inflation loop's decision and the portfolio's three pure parts,
+// bracketed so a test reaches cases no chart does. The prototypes a test uses
+// are its own; see scav_internal.h.
 bool inflation_done(uint32_t fewest, uint32_t degraded, uint32_t unreachable, bool &keep);
+uint32_t search_tuple_count(scav_profile const &p, uint32_t entity_count);
+void search_tuple(scav_profile &p, DarSource &dar, uint32_t index);
+uint32_t search_argmin(std::vector<Cost> const &cost, std::vector<uint8_t> const &viable);
 SCAV_INTERNAL_END
 
 namespace {
 
 constexpr uint32_t RECT{ sizeof(scav_rect) };
+
+// The chart-global phase-2 tuples the portfolio chooses between: two packer
+// knobs and where a frame's desired ratio comes from, so eight rows (11.10).
+constexpr uint32_t SEARCH_TUPLES{ 8 };
 
 // One name and the shape it is registered under. `write_rows` copies a row per
 // entity through whichever column carries the name, so the shape has to be the
@@ -201,6 +212,75 @@ bool inflate(scav_profile &p, int32_t by) {
   return profile_validate(p);
 }
 
+// One candidate: its geometry and what it took to reach.
+struct Candidate {
+  SizedLayout sized;
+  Routes routes;
+  uint32_t inflations{ 0 };
+  bool viable{ false };
+};
+
+// Phases 2 and 3 for one tuple, with the spacing-inflation retry exactly as a
+// lone run has it. `knobs` is the caller's profile with the tuple applied.
+Candidate search_candidate(Chart const &c,
+                           SplitGraph const &g,
+                           SubmachineOrders const &orders,
+                           scav_spaces const &s,
+                           scav_profile const &knobs,
+                           DarSource dar,
+                           Router const &router,
+                           uint32_t threads,
+                           std::vector<Diagnostic> &diags) {
+  Candidate out;
+  if (!size_layout(c, g, orders, s, knobs, out.sized, diags, dar)) { return out; }
+  out.routes = route_transitions(c, g, orders, out.sized, s, knobs, router, threads);
+
+  // `out` carries the best attempt so far, and `done` is set from that one
+  // rather than from whichever attempt was just made.
+  scav_profile wider{ knobs };
+  uint32_t fewest{ out.routes.degraded() };
+  bool done{ out.routes.unreachable == 0 };
+  // An increment of zero repeats one attempt to the cap, so it is not one.
+  for (int32_t k = 0; !done && (knobs.spacing_inflation_increment > 0) &&
+                      (k < knobs.spacing_inflation_cap);
+       ++k) {
+    if (!inflate(wider, knobs.spacing_inflation_increment)) { break; }
+    SizedLayout next_sized;
+    std::vector<Diagnostic> spilled;
+    if (!size_layout(c, g, orders, s, wider, next_sized, spilled, dar)) { break; }
+    Routes next{ route_transitions(c, g, orders, next_sized, s, wider, router, threads) };
+    bool keep{ false };
+    done = inflation_done(fewest, next.degraded(), next.unreachable, keep);
+    if (keep) {
+      fewest = next.degraded();
+      out.sized = std::move(next_sized);
+      out.routes = std::move(next);
+      out.inflations = static_cast<uint32_t>(k) + 1;
+    }
+  }
+
+  // Bounds everything laid out, not just the root submachine: a route bends into
+  // a frame's padding and a path box centres on one, so both can reach past it.
+  // Before the score rather than after the pick, so `area` and `aspect` price
+  // the canvas that ships.
+  auto const cover = [&out](int32_t x, int32_t y) {
+    scav_rect &chart{ out.sized.chart };
+    int32_t const right{ imax(chart.x + chart.w, x) };
+    int32_t const bottom{ imax(chart.y + chart.h, y) };
+    chart.x = imin(chart.x, x);
+    chart.y = imin(chart.y, y);
+    chart.w = right - chart.x;
+    chart.h = bottom - chart.y;
+  };
+  for (scav_point const &at : out.routes.points) { cover(at.x, at.y); }
+  for (scav_rect const &at : out.routes.placed) {
+    cover(at.x, at.y);
+    cover(at.x + at.w, at.y + at.h);
+  }
+  out.viable = true;
+  return out;
+}
+
 }  // namespace
 
 SCAV_INTERNAL_BEGIN
@@ -220,6 +300,46 @@ bool inflation_done(uint32_t fewest, uint32_t degraded, uint32_t unreachable, bo
   return keep && (unreachable == 0);
 }
 
+// How many of the table's rows this chart runs: `portfolio_m`, halved for every
+// doubling of the entity count past 512, floored at one row and capped at the
+// table. So a chart under 1,024 entities gets the whole of M and either 2k
+// shape gets one -- the largest chart is searched least, which is backwards for
+// quality and right for latency (11.10). `ilog2` of a `uint32_t` is at most 31,
+// so the shift is at most 22.
+uint32_t search_tuple_count(scav_profile const &p, uint32_t entity_count) {
+  uint32_t const scale{ (entity_count == 0) ? 0U : ilog2(entity_count) };
+  uint32_t const shift{ (scale > 9U) ? (scale - 9U) : 0U };
+  uint32_t const rows{ static_cast<uint32_t>(imax(p.portfolio_m, 1)) >> shift };
+  return imin(imax(rows, 1U), SEARCH_TUPLES);
+}
+
+// Row `index` of the fixed table, as a delta from the profile as given: bit 0
+// flips the scale-measure tiebreak, bit 1 the box packer, bit 2 hands each
+// frame its owner's hole. Row 0 is therefore the caller's own tuple, and
+// `portfolio_m` of 1 is the pipeline as it ran before the portfolio existed.
+void search_tuple(scav_profile &p, DarSource &dar, uint32_t index) {
+  p.sm_tiebreak ^= static_cast<int32_t>(index & 1U);
+  p.trybox ^= static_cast<int32_t>((index >> 1U) & 1U);
+  dar = (((index >> 2U) & 1U) != 0) ? DarSource::OwnerHole : DarSource::Profile;
+}
+
+// `argmin(Cost, index)` over the candidates, in index order: the combine is
+// associative and not commutative, so the order is what makes it one value (6).
+// `viable` is parallel to `cost`, and row 0 answers for a set with nothing in
+// it -- the caller's own tuple, whose failure it was already told about.
+uint32_t search_argmin(std::vector<Cost> const &cost, std::vector<uint8_t> const &viable) {
+  uint32_t best{ 0 };
+  bool found{ false };
+  for (uint32_t i = 0; i < cost.size(); ++i) {
+    if (viable[i] == 0) { continue; }
+    if (!found || cost_less(cost[i], cost[best])) {
+      best = i;
+      found = true;
+    }
+  }
+  return best;
+}
+
 SCAV_INTERNAL_END
 
 bool layout_run(Chart &c,
@@ -227,8 +347,10 @@ bool layout_run(Chart &c,
                 scav_layout_opts const &o,
                 std::vector<scav_placed> &placed,
                 std::vector<Diagnostic> &diags,
-                uint32_t *inflations) {
+                uint32_t *inflations,
+                uint32_t *tuple) {
   if (inflations != nullptr) { *inflations = 0; }
+  if (tuple != nullptr) { *tuple = 0; }
   scav_profile const &p{ o.profile };
   if (!profile_validate(p)) {
     diags.push_back({ .code = DiagCode::ProfileOutOfRange,
@@ -260,52 +382,52 @@ bool layout_run(Chart &c,
   // Once for every attempt below: phase 1 reads `sweep_count` and no extent, so
   // the inflated copies the retry loop makes order to the same rows.
   SubmachineOrders const orders{ order_submachines(c, g, s, p, o.threads) };
-  SizedLayout sized;
-  if (!size_layout(c, g, orders, s, p, sized, diags)) { return false; }
-  Routes routes{ route_transitions(c, g, orders, sized, s, p, *router, o.threads) };
 
-  // `sized` and `routes` carry the best attempt so far, and `done` is set from
-  // that one rather than from whichever attempt was just made.
-  scav_profile wider{ p };
-  uint32_t fewest{ routes.degraded() };
-  bool done{ routes.unreachable == 0 };
-  // An increment of zero repeats one attempt to the cap, so it is not one.
-  for (int32_t k = 0;
-       !done && (p.spacing_inflation_increment > 0) && (k < p.spacing_inflation_cap);
-       ++k) {
-    if (!inflate(wider, p.spacing_inflation_increment)) { break; }
-    SizedLayout next_sized;
+  // Level 2: every row of the table this chart's size admits, each its own
+  // whole phase 2 and 3, collected rather than folded into a best-so-far, and
+  // reduced in index order afterwards (6, 11.10). Row 0 is the profile as
+  // given, so it is what a failure is reported for and what M of 1 runs alone.
+  uint32_t const rows{ search_tuple_count(p, layout_entity_count(c)) };
+  std::vector<Candidate> candidates(rows);
+  std::vector<Cost> cost(rows);
+  std::vector<uint8_t> viable(rows, 0);
+  for (uint32_t i = 0; i < rows; ++i) {
+    scav_profile knobs{ p };
+    DarSource dar{ DarSource::Profile };
+    search_tuple(knobs, dar, i);
     std::vector<Diagnostic> spilled;
-    if (!size_layout(c, g, orders, s, wider, next_sized, spilled)) { break; }
-    Routes next{
-      route_transitions(c, g, orders, next_sized, s, wider, *router, o.threads)
-    };
-    bool keep{ false };
-    done = inflation_done(fewest, next.degraded(), next.unreachable, keep);
-    if (keep) {
-      fewest = next.degraded();
-      sized = std::move(next_sized);
-      routes = std::move(next);
-      if (inflations != nullptr) { *inflations = static_cast<uint32_t>(k) + 1; }
+    candidates[i] = search_candidate(c,
+                                     g,
+                                     orders,
+                                     s,
+                                     knobs,
+                                     dar,
+                                     *router,
+                                     o.threads,
+                                     (i == 0) ? diags : spilled);
+    // A tuple that leaves the coordinate domain is no candidate, and the
+    // caller's own tuple leaving it is the run's failure, as it was before
+    // anything else was tried.
+    if ((i == 0) && !candidates[0].viable) { return false; }
+    viable[i] = candidates[i].viable ? 1U : 0U;
+    // One row has nothing to rank, so it is not scored: `argmin` over one
+    // candidate is that candidate, and this is what leaves a chart the scaling
+    // rule gives one row costing exactly what it did before. The objective is
+    // the caller's profile and not the tuple's copy, so two rows are compared
+    // on one scale even where one of them inflated.
+    if ((rows > 1) && (viable[i] != 0)) {
+      CostTerms const t{
+        cost_terms(c, g, candidates[i].sized, candidates[i].routes, s, p)
+      };
+      cost[i] = cost_of(t, p);
     }
   }
+  uint32_t const best{ search_argmin(cost, viable) };
+  SizedLayout sized{ std::move(candidates[best].sized) };
+  Routes routes{ std::move(candidates[best].routes) };
+  if (inflations != nullptr) { *inflations = candidates[best].inflations; }
+  if (tuple != nullptr) { *tuple = best; }
   placed = routes.placed;
-
-  // Bounds everything laid out, not just the root submachine: a route bends into
-  // a frame's padding and a path box centres on one, so both can reach past it.
-  auto const cover = [&sized](int32_t x, int32_t y) {
-    int32_t const right{ imax(sized.chart.x + sized.chart.w, x) };
-    int32_t const bottom{ imax(sized.chart.y + sized.chart.h, y) };
-    sized.chart.x = imin(sized.chart.x, x);
-    sized.chart.y = imin(sized.chart.y, y);
-    sized.chart.w = right - sized.chart.x;
-    sized.chart.h = bottom - sized.chart.y;
-  };
-  for (scav_point const &at : routes.points) { cover(at.x, at.y); }
-  for (scav_rect const &at : routes.placed) {
-    cover(at.x, at.y);
-    cover(at.x + at.w, at.y + at.h);
-  }
 
   // `failed` is parallel to the transitions, so one walk emits the findings in
   // ordinal order.

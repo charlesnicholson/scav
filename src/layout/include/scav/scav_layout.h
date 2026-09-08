@@ -39,17 +39,21 @@ bool profile_validate(scav_profile const &p);
 
 // Layout ====================================================================
 
-// Decomposes, sizes, places, routes. Writes the geometry columns and sizes
-// `placed` to the path boxes. False leaves the last successful run's columns.
-// True can still leave RouteDegraded findings in `diags`, one per transition
-// drawn as a straight line. `inflations` receives how many spacing inflations
-// the written geometry took.
+// Decomposes, orders, then sizes, places and routes every phase-2 tuple the
+// chart's size admits and keeps the one exact `Cost` ranks first (11.10).
+// Writes the geometry columns and sizes `placed` to the path boxes. False
+// leaves the last successful run's columns. True can still leave RouteDegraded
+// findings in `diags`, one per transition drawn as a straight line.
+// `inflations` receives how many spacing inflations the written geometry took
+// and `tuple` which row of the table produced it, row 0 being the profile as
+// the caller passed it.
 bool layout_run(Chart &c,
                 scav_spaces const &s,
                 scav_layout_opts const &o,
                 std::vector<scav_placed> &placed,
                 std::vector<Diagnostic> &diags,
-                uint32_t *inflations = nullptr);
+                uint32_t *inflations = nullptr,
+                uint32_t *tuple = nullptr);
 
 // Split so a pure translation moves the coordinate hash and not the structural
 // one: structure is sides, depths and turn tokens; coordinates are the rest.

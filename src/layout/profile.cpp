@@ -16,7 +16,7 @@ constexpr int32_t PT{ 16 };  // grid units are 1/16 pt
 // One of the two shipped profiles scav_profile_named hands out by name.
 constexpr scav_profile READABLE{
   .profile_id = 2,
-  .profile_version = 5,
+  .profile_version = 6,
   .pad = 8 * PT,
   .rank_sep = 36 * PT,
   .node_sep = 18 * PT,
@@ -58,7 +58,7 @@ constexpr scav_profile READABLE{
   .w_aspect = 2,
   .w_area = 1,
   .portfolio_k = 4,
-  .portfolio_m = 1,
+  .portfolio_m = 4,
   .sweep_count = 8,
   .congestion_iterations = 8,
   .ripup_cap = 16,
@@ -70,7 +70,7 @@ constexpr scav_profile READABLE{
 // The other shipped profile: tighter spacing and type for dense charts.
 constexpr scav_profile COMPACT{
   .profile_id = 1,
-  .profile_version = 5,
+  .profile_version = 6,
   .pad = 4 * PT,
   .rank_sep = 22 * PT,
   .node_sep = 11 * PT,
@@ -110,7 +110,7 @@ constexpr scav_profile COMPACT{
   .w_aspect = 2,
   .w_area = 1,
   .portfolio_k = 4,
-  .portfolio_m = 1,
+  .portfolio_m = 4,
   .sweep_count = 8,
   .congestion_iterations = 8,
   .ripup_cap = 16,

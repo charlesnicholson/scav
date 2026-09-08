@@ -30,9 +30,10 @@ TEST_CASE("profile: both shipped profiles load and pass their own validation") {
     CAPTURE(name);
     scav_profile const p{ named(name) };
     CHECK(profile_validate(p));
-    CHECK(p.profile_version == 5);
-    // One chart-global candidate, which is the pipeline as it runs today.
-    CHECK(p.portfolio_m == 1);
+    CHECK(p.profile_version == 6);
+    // The four chart-global candidates that differ in no ratio: the two packer
+    // knobs crossed, with row 0 the profile as it stands (11.10).
+    CHECK(p.portfolio_m == 4);
   }
   CHECK(named("compact").profile_id != named("readable").profile_id);
 }

@@ -41,10 +41,13 @@ def nested_chart(depth: int, width: int, siblings: int = 1, fine: int = 0) -> st
 
 
 # Depth and per-level name length putting the chart just short of the domain,
-# and the first `fine` known to land inside the viewBox window.
+# and the first `fine` known to land inside the viewBox window. The names are
+# what grew when the layout portfolio landed: it keeps whichever of its rows
+# scores best and area is a term, so reaching the last 2*pad of the domain now
+# takes a bigger chart.
 OVERSIZE_DEPTH = 250
-OVERSIZE_WIDTH = 38
-OVERSIZE_SEED = 109
+OVERSIZE_WIDTH = 170
+OVERSIZE_SEED = 162
 
 
 def oversize_lengths() -> Iterator[int]:
