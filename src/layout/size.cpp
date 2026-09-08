@@ -417,7 +417,21 @@ bool size_pass(Chart const &c,
     if (!kids.empty()) {
       packed = pack_best(kids, p.sub_sep, p, dar_of(i));
       for (uint32_t k = 0; k < ids.size(); ++k) {
-        sub_local[ids[k]] = { .x = packed.at[k].x, .y = packed.at[k].y };
+        uint32_t const m{ ids[k] };
+        sub_local[m] = { .x = packed.at[k].x, .y = packed.at[k].y };
+        // Whitespace elimination grew the frame to fill its row, and this is
+        // the one packing whose rect is a box a reader sees. A sink boundary
+        // node sits on the frame's trailing edge, so the growth moves it; a
+        // source sits at zero and does not.
+        Span const span{ o.sub_nodes[m] };
+        for (uint32_t u = 0; u < span.len; ++u) {
+          if ((o.nodes[span.off + u].kind == OrderKind::Boundary) &&
+              (out.node[span.off + u].x == out.sub[m].w)) {
+            out.node[span.off + u].x = packed.at[k].w;
+          }
+        }
+        out.sub[m].w = packed.at[k].w;
+        out.sub[m].h = packed.at[k].h;
       }
     }
 

@@ -59,7 +59,7 @@
   <polygon points="4022,7637 3974,7541 4070,7541" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-17"/>
   <polygon points="5024,6917 4928,6965 4928,6869" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-18"/>
   <polygon points="3936,7061 3976,7141 3896,7141" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-19"/>
-  <polygon points="4775,0 6196,525 4775,1050 3354,525" fill="#ffffff" stroke="#1a1a1a" stroke-width="16" class="scav-state scav-id-4"/>
+  <polygon points="6375,0 7796,525 6375,1050 4954,525" fill="#ffffff" stroke="#1a1a1a" stroke-width="16" class="scav-state scav-id-4"/>
   <text x="9728" y="829" font-size="160" textLength="768" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-1">POWER_ON</text>
   <text x="480" y="5556" font-size="160" textLength="960" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-3">BUMP_RETRY</text>
   <text x="4317" y="5300" font-size="160" textLength="1056" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-4">battery low</text>
@@ -77,7 +77,7 @@
   <text x="479" y="320" font-size="192" textLength="461" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-1">lamp</text>
   <text x="10692" y="320" font-size="192" textLength="346" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-2">Off</text>
   <text x="9944" y="1261" font-size="192" textLength="807" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-3">Booting</text>
-  <text x="4257" y="621" font-size="192" textLength="1037" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-4">PreConfig</text>
+  <text x="5857" y="621" font-size="192" textLength="1037" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-4">PreConfig</text>
   <text x="372" y="4612" font-size="192" textLength="231" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-5">On</text>
   <text x="857" y="6347" font-size="192" textLength="461" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-6">Idle</text>
   <text x="432" y="5137" font-size="192" textLength="576" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-7">Ready</text>

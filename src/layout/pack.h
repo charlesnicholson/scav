@@ -18,23 +18,28 @@ namespace scav {
 // are; inside int32 so its products below stay inside int64.
 inline constexpr int32_t PACK_SATURATED{ INT32_MAX };
 
-// `w` and `h` are read from the input rects; `x` and `y` come back filled,
-// relative to the packing's own origin. All four saturate at PACK_SATURATED.
+// All four fields come back filled, `x` and `y` relative to the packing's own
+// origin: whitespace elimination grows a rect past the extents it arrived
+// with, so `w` and `h` are the step's answer and not an echo of the input.
+// Every field saturates at PACK_SATURATED. `w` and `h` on the packing itself
+// are the extents before that growth, which cannot change them.
 struct Packing {
   std::vector<scav_rect> at;
   int32_t w{ 0 }, h{ 0 };
 };
 
-// Greedy width approximation from the desired aspect ratio, then placement
-// restricted to four positions relative to the predecessor. Reading order
-// survives: rect i is never left of and above rect j for i > j.
+// Greedy width approximation from the desired aspect ratio, placement
+// restricted to four positions relative to the predecessor, then whitespace
+// elimination, which grows every rect to fill its subrow, block and row.
+// Reading order survives: rect i is never left of and above rect j for i > j.
 Packing pack_lr(std::vector<scav_rect> const &rects,
                 int32_t sep,
                 int32_t dar_num,
                 int32_t dar_den);
 
-// One row, every rect side by side. The packer that wins whenever the rects
-// are all the same height, which is what the profile's `trybox` catches.
+// One row, every rect side by side and grown to the tallest. The packer that
+// wins whenever the rects are all the same height, which is what the profile's
+// `trybox` catches.
 Packing pack_box(std::vector<scav_rect> const &rects, int32_t sep);
 
 // `a` beats `b` under the scale measure `SM = min(DAR/w, 1/h)`, held as a

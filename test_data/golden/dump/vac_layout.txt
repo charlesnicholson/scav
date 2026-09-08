@@ -62,13 +62,13 @@ chart vac "robot vacuum" (test_data/charts/vac.scav:3)
   include dock "dock.scav" -> test_data/charts/dock.scav (test_data/charts/vac.scav:4)
   include lamp "./led.scav" -> test_data/charts/led.scav (test_data/charts/vac.scav:7)
   include lamp "led.scav" -> test_data/charts/led.scav (test_data/charts/dock.scav:4)
-geometry structural 4e59baff coordinate 226488f7
+geometry structural 4e59baff coordinate 363dfea1
   chart 0,0 11380x9122
   state dock 2784,2823 6612x6299 before 2912,2951 6356x397 after 2912,8994 6356x0
   state lamp 0,0 3066x2535 before 128,128 2810x397 after 128,2407 2810x0
   state Off 10484,0 896x653 before 10612,128 640x397 after 10612,525 640x0
   state Booting 9684,941 1319x653 before 9812,1069 1063x397 after 9812,1466 1063x0
-  state PreConfig 3354,0 2842x1050 before 3482,128 2586x794 after 3482,922 2586x0
+  state PreConfig 4954,0 2842x1050 before 5082,128 2586x794 after 5082,922 2586x0
   state On 0,4292 2208x3361 before 128,4420 1952x397 after 128,7525 1952x0
   state On:main/Idle 640,6027 973x653 before 768,6155 717x397 after 768,6552 717x0
   state On:main/Ready 128,4817 1664x922 before 256,4945 1408x397 after 256,5342 1408x269
@@ -93,7 +93,7 @@ geometry structural 4e59baff coordinate 226488f7
   state dock/lamp/$initial 3040,6622 224x224 before 3040,6622 224x0 after 3040,6622 224x0
   sub 0 0,0 11380x9122
   sub 1 128,4817 1952x1863
-  sub 2 128,6872 1485x653
+  sub 2 128,6872 1952x653
   sub 3 2912,3348 6356x5646
   sub 4 7130,3873 2010x1594
   sub 5 128,525 2810x1882

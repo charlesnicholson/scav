@@ -1325,3 +1325,61 @@ TEST_CASE("size: a first pass that leaves the domain ends the handed-down one") 
   CHECK(diags[0].code == DiagCode::CoordinateOverflow);
   CHECK(diags[0].subject.ordinal == owner.v);
 }
+
+TEST_CASE("size: whitespace elimination grows a sibling submachine's own rect") {
+  // Three frames of 896 x 896, 896 x 640 and 896 x 640 packed at `sub_sep`.
+  // The placement seats the first two side by side and wraps the third, so the
+  // second grows in height to its subrow's 896 and the third in width to the
+  // block's 1984. This is the one packing whose rect is a box a reader sees, so
+  // it is the one the step is written back to.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const owner{ build_state(c, root, "P", StateKind::Normal, {}) };
+  std::vector<SubmachineId> subs;
+  std::vector<StateId> kids;
+  for (uint32_t i = 0; i < 3; ++i) {
+    subs.push_back(build_submachine(c, owner, {}, {}));
+    kids.push_back(build_state(c, subs.back(), "K", StateKind::Normal, {}));
+  }
+  scav_profile const p{ profile() };
+
+  std::vector<scav_box_space> spaces(c.states.size(), scav_box_space{});
+  spaces[kids[0].v] = { .min_w = 0, .h_before = 640, .h_after = 0 };
+  scav_spaces const sp{ .box_state = spaces.data(),
+                        .n_box_state = static_cast<uint32_t>(spaces.size()) };
+
+  SubmachineOrders o;
+  o.sub_nodes.assign(c.submachines.size(), Span{});
+  o.sub_edges.assign(c.submachines.size(), Span{});
+  o.sub_ranks.assign(c.submachines.size(), 0);
+  o.sub_gaps.assign(c.submachines.size(), Span{});
+  o.state_node.assign(c.states.size(), INVALID);
+  for (uint32_t i = 0; i < 3; ++i) {
+    o.nodes.push_back(state_node(kids[i].v, 0, 0));
+    o.state_node[kids[i].v] = i;
+    o.sub_nodes[subs[i].v] = make_span(i, 1);
+    o.sub_ranks[subs[i].v] = 1;
+  }
+  o.nodes.push_back(state_node(owner.v, 0, 0));
+  o.state_node[owner.v] = 3;
+  o.sub_nodes[root.v] = make_span(3, 1);
+  o.sub_ranks[root.v] = 1;
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c, depths({ 0, 1, 1, 1 }), o, sp, p, z, diags));
+  CHECK(z.sub[subs[0].v].w == 896);
+  CHECK(z.sub[subs[0].v].h == 896);
+  CHECK(z.sub[subs[1].v].w == 896);
+  CHECK(z.sub[subs[1].v].h == 896);   // 640 as sized, then its subrow's height
+  CHECK(z.sub[subs[2].v].w == 1984);  // 896 as sized, then its block's width
+  CHECK(z.sub[subs[2].v].h == 640);
+  // Every gap is still `sub_sep`, which is what the apportionment preserves.
+  CHECK(z.sub[subs[1].v].x == (z.sub[subs[0].v].x + 896 + p.sub_sep));
+  CHECK(z.sub[subs[1].v].y == z.sub[subs[0].v].y);
+  CHECK(z.sub[subs[2].v].x == z.sub[subs[0].v].x);
+  CHECK(z.sub[subs[2].v].y == (z.sub[subs[0].v].y + 896 + p.sub_sep));
+  // Extent-neutral: the owner's box is the packing's own extents plus its ring.
+  CHECK(z.state[owner.v].w == (1984 + (2 * p.pad)));
+  CHECK(z.state[owner.v].h == (1728 + (2 * p.pad)));
+}
