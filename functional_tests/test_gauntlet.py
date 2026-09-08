@@ -21,7 +21,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import scavtest  # noqa: E402
 
 CHARTS = Path("test_data/charts/gauntlet")
-SUITE = Path("src/layout/gauntlet_tests.cpp")
+# Every suite carrying a hand-maintained copy of the directory: the element
+# properties, and the bench row the cost golden is built from.
+SUITES = (Path("src/layout/gauntlet_tests.cpp"), Path("src/layout/bench_tests.cpp"))
 SVG_NS = "{http://www.w3.org/2000/svg}"
 
 # The array initializer, then the names inside it. Anchored on the declaration
@@ -51,12 +53,14 @@ class TestGauntlet(unittest.TestCase):
         return subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                               text=True, cwd=self.cfg.repo_root)
 
-    def test_the_directory_and_the_suite_name_the_same_charts(self) -> None:
-        source = (self.cfg.repo_root / SUITE).read_text(encoding="utf-8")
-        body = ARRAY.search(source)
-        self.assertIsNotNone(body, f"no GAUNTLET array in {SUITE}")
-        named = set(NAME.findall(body.group(1)))
-        self.assertEqual({c.name for c in self.charts}, named)
+    def test_the_directory_and_the_suites_name_the_same_charts(self) -> None:
+        for suite in SUITES:
+            with self.subTest(suite=suite.name):
+                source = (self.cfg.repo_root / suite).read_text(encoding="utf-8")
+                body = ARRAY.search(source)
+                self.assertIsNotNone(body, f"no GAUNTLET array in {suite}")
+                named = set(NAME.findall(body.group(1)))
+                self.assertEqual({c.name for c in self.charts}, named)
 
     def test_every_chart_is_canonical_and_valid(self) -> None:
         for chart in self.charts:

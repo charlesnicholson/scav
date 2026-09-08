@@ -28,7 +28,9 @@ TEST_CASE("profile: both shipped profiles load and pass their own validation") {
     CAPTURE(name);
     scav_profile const p{ named(name) };
     CHECK(profile_validate(p));
-    CHECK(p.profile_version == 4);
+    CHECK(p.profile_version == 5);
+    // One chart-global candidate, which is the pipeline as it runs today.
+    CHECK(p.portfolio_m == 1);
   }
   CHECK(named("compact").profile_id != named("readable").profile_id);
 }
@@ -108,6 +110,10 @@ TEST_CASE("profile: every bound rejects out of range") {
           .bad_high = 1025 },
     Poke{ .what = "portfolio_k",
           .field = &scav_profile::portfolio_k,
+          .bad_low = 0,
+          .bad_high = 65 },
+    Poke{ .what = "portfolio_m",
+          .field = &scav_profile::portfolio_m,
           .bad_low = 0,
           .bad_high = 65 },
     Poke{ .what = "sweep_count",

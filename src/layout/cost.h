@@ -10,10 +10,55 @@
 #include "scav/scav_core.h"
 #include "scav/scav_layout_c.h"
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
 namespace scav {
+
+// One route segment, with the transition it belongs to and its index in that
+// transition's own polyline, which is what the trunk exemption reads.
+struct Piece {
+  scav_point a, b;
+  uint32_t trans;
+  uint32_t k;
+};
+
+// Entry and exit times from one depth-first walk of the containment forest, so
+// a state's descendants are exactly the states whose interval nests inside its
+// own and 11.14's carve-out is two comparisons.
+struct Ancestry {
+  std::vector<uint32_t> tin, tout;  // 0 = the walk never reached the state
+  // Live states Tier 0's descent cannot arrive at: one a tombstone stands
+  // above, whose zero rect prunes nothing, and one no document root encloses.
+  std::vector<uint32_t> detached;
+};
+
+// One uniform bucket grid per submachine over its live children. Siblings are
+// disjoint by Tier 0, so a cell holds a bounded number of them.
+struct ChildGrid {
+  struct Frame {
+    int32_t x0{ 0 }, y0{ 0 };  // the grid's origin
+    Wide cell_w{ 1 }, cell_h{ 1 };
+    uint32_t side{ 0 };    // cells per axis
+    uint32_t bucket{ 0 };  // -> bucket_off, this frame's first cell
+    Span children{};       // -> child
+  };
+  std::vector<Frame> frame;          // parallel to Chart::submachines
+  std::vector<uint32_t> child;       // live child state ordinals, in span order
+  std::vector<uint32_t> bucket_off;  // one entry per cell over all frames, plus a tail
+  std::vector<uint32_t> bucket_at;   // -> child
+};
+
+// Scratch for one grid query. `stamp` marks a child the running query already
+// yielded, so a rect covering several cells comes back once.
+struct GridQuery {
+  std::vector<uint64_t> stamp;  // parallel to ChildGrid::child
+  uint64_t epoch{ 0 };
+  std::vector<uint32_t> hit;  // -> ChildGrid::child
+};
+
+inline constexpr uint32_t TIER2_TERMS{ 9 };
 
 // The nine Tier-2 quantities before weighting, so a test reads one of them
 // rather than a sum.
@@ -60,9 +105,13 @@ CostTerms cost_columns(Chart const &c,
                        scav_spaces const &s = {},
                        std::vector<scav_rect> const &placed = {});
 
-// Every weight is capped at 2^10 and area at 2^40, so the sum stays inside
-// int64 by construction rather than by measurement (11.6).
+// Every term is converted to the unit the profile names it in before its weight
+// applies, so a weight is an exchange rate between comparable quantities (11.6).
 Cost cost_of(CostTerms const &t, scav_profile const &p);
+
+// Each weighted term's share of `cost_of`'s sum in basis points, floored and in
+// CostTerms order, so a golden watches the balance a weight change moves.
+std::array<int64_t, TIER2_TERMS> cost_shares(CostTerms const &t, scav_profile const &p);
 
 bool cost_less(Cost const &a, Cost const &b);
 

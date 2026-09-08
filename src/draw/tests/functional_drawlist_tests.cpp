@@ -15,6 +15,7 @@
 #include "doctest.h"
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -166,19 +167,26 @@ TEST_CASE("drawlist corpus: the layout hashes under the reference measurement") 
 }
 
 TEST_CASE("drawlist corpus: the cost terms on the rendered scale") {
-  // The other scale's cost golden. `label` is scored from the placed boxes and
-  // the path-box part of `excess_len` from the requests, so both are zero
-  // wherever the measurement is not real text (11.6).
+  // The other scale's cost golden, and the other share table. `label` is scored
+  // from the placed boxes and the path-box part of `excess_len` from the
+  // requests, so both are zero wherever the measurement is not real text (11.6).
   Metrics const m{ bundled() };
   scav_profile const p{ readable() };
 
   std::string actual;
+  std::string shares;
+  // Scoring under real text is the only scale with placed boxes on it, so
+  // `label` and `label_near` -- O(placed x states) and O(placed x pieces) --
+  // have a multiplicand here and nowhere else (11.6). Timed, not asserted.
+  int64_t scoring_us{ 0 };
   for (char const *name : CORPUS) {
     CAPTURE(name);
     Run const r{ run_pipeline(name, m, p) };
-    CostTerms const t{
-      cost_columns(r.chart, decompose(r.chart), p, as_spaces(r.spaces), r.placed)
-    };
+    SplitGraph const g{ decompose(r.chart) };
+    auto const t0{ std::chrono::steady_clock::now() };
+    CostTerms const t{ cost_columns(r.chart, g, p, as_spaces(r.spaces), r.placed) };
+    auto const t1{ std::chrono::steady_clock::now() };
+    scoring_us += std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
     Cost const scored{ cost_of(t, p) };
     actual += name;
     for (int64_t const term : { int64_t{ scored.t0_violations },
@@ -196,7 +204,15 @@ TEST_CASE("drawlist corpus: the cost terms on the rendered scale") {
       actual += std::to_string(term);
     }
     actual += '\n';
+
+    shares += name;
+    for (int64_t const bp : cost_shares(t, p)) {
+      shares += ' ';
+      shares += std::to_string(bp);
+    }
+    shares += '\n';
   }
+  MESSAGE("cost_columns over the corpus under real text: ", scoring_us, " us");
 
   std::vector<scav_byte> golden;
   REQUIRE(read_file(SCAV_TEST_DATA_DIR "/golden/layout/corpus_cost_measured.txt", golden));
@@ -208,6 +224,35 @@ TEST_CASE("drawlist corpus: the cost terms on the rendered scale") {
     MESSAGE("actual written to " SCAV_TEST_OUT_DIR "/corpus_cost_measured.txt:\n", actual);
   }
   CHECK(want == actual);
+
+  std::vector<scav_byte> shares_golden;
+  REQUIRE(read_file(SCAV_TEST_DATA_DIR "/golden/layout/corpus_cost_shares_measured.txt",
+                    shares_golden));
+  std::string const want_shares{ reinterpret_cast<char const *>(shares_golden.data()),
+                                 shares_golden.size() };
+  if (want_shares != shares) {
+    write_file(SCAV_TEST_OUT_DIR "/corpus_cost_shares_measured.txt",
+               reinterpret_cast<scav_byte const *>(shares.data()),
+               shares.size());
+    MESSAGE("actual written to " SCAV_TEST_OUT_DIR "/corpus_cost_shares_measured.txt:\n",
+            shares);
+  }
+  CHECK(want_shares == shares);
+}
+
+TEST_CASE("drawlist gauntlet: what crowd's tighter packing costs its labels") {
+  // The element suite scores no placed boxes, so these two terms only exist
+  // here. Carved out to P9c: `sweep_count = 0, trybox = 0` reads `label` 0 and
+  // `label_near` 172, for 56% more area and a Tier 2 of 1,438 against 1,230 --
+  // which is why nothing picks it, by a sixth rather than by half.
+  Metrics const m{ bundled() };
+  scav_profile const p{ readable() };
+  Run const r{ run_pipeline("gauntlet/crowd.scav", m, p) };
+  CostTerms const t{
+    cost_columns(r.chart, decompose(r.chart), p, as_spaces(r.spaces), r.placed)
+  };
+  CHECK(t.label == 4);
+  CHECK(t.label_near == 442);
 }
 
 TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back") {
