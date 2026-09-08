@@ -8,8 +8,10 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "bindings/python"))
 
 import scavtest  # noqa: E402
+from scav._abi import scav_layout_opts  # noqa: E402
 
 CHART = Path("test_data/charts/brew.scav")
 
@@ -21,13 +23,6 @@ COORD_MAX = (1 << 19) - 1
 class Rect(ctypes.Structure):
     _fields_ = [("x", ctypes.c_int32), ("y", ctypes.c_int32),
                 ("w", ctypes.c_int32), ("h", ctypes.c_int32)]
-
-
-class LayoutOpts(ctypes.Structure):
-    """scav_layout_opts: the profile is 46 int32 fields, flat."""
-    _fields_ = [("profile", ctypes.c_int32 * 46),
-                ("router", ctypes.c_uint32),
-                ("threads", ctypes.c_uint32)]
 
 
 def bind(lib: ctypes.CDLL) -> None:
@@ -122,9 +117,12 @@ class TestLayoutOverCtypes(unittest.TestCase):
         n_states = counts[1].value
         self.assertGreater(n_states, 0)
 
-        opts = LayoutOpts()
+        # The generated binding's struct, which test_abi.py holds to the header: a
+        # hand-rolled copy was one field short and passed only while the bytes past
+        # it happened to read as router 0.
+        opts = scav_layout_opts()
         self.assertEqual(
-            SCAV_OK, self.lib.scav_profile_named(b"readable", ctypes.byref(opts))
+            SCAV_OK, self.lib.scav_profile_named(b"readable", ctypes.byref(opts.profile))
         )
         placed = ctypes.c_uint32(99)
         self.assertEqual(
