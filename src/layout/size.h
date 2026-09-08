@@ -7,6 +7,7 @@
 
 #include "layout/decompose.h"
 #include "layout/order.h"
+#include "layout/pack.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout_c.h"
 
@@ -39,7 +40,9 @@ struct FrameDar {
 enum class DarSource : uint32_t { Profile, OwnerHole };
 
 // False on an extent that would leave the coordinate domain, with one
-// diagnostic per offending entity and `out` left partly written.
+// diagnostic per offending entity and `out` left partly written. `dar` and
+// `compaction` default to the row-0 tuple, which is the pipeline as it ran
+// before the portfolio existed.
 bool size_layout(Chart const &c,
                  SplitGraph const &g,
                  SubmachineOrders const &o,
@@ -47,7 +50,8 @@ bool size_layout(Chart const &c,
                  scav_profile const &p,
                  SizedLayout &out,
                  std::vector<Diagnostic> &diags,
-                 DarSource dar = DarSource::Profile);
+                 DarSource dar = DarSource::Profile,
+                 Compaction compaction = Compaction::Off);
 
 }  // namespace scav
 

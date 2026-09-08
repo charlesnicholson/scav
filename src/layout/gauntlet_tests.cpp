@@ -28,7 +28,7 @@ namespace scav {
 
 // The portfolio's row, which `layout.cpp` brackets with SCAV_INTERNAL, declared
 // here rather than in a header so the shipping build keeps it internal.
-void search_tuple(scav_profile &p, DarSource &dar, uint32_t index);
+void search_tuple(scav_profile &p, DarSource &dar, Compaction &pack, uint32_t index);
 
 }  // namespace scav
 
@@ -125,10 +125,11 @@ void lay(char const *name, scav_profile const &p, Laid &out) {
 
   scav_profile knobs{ p };
   DarSource dar{ DarSource::Profile };
-  search_tuple(knobs, dar, out.tuple);
+  Compaction pack{ Compaction::Off };
+  search_tuple(knobs, dar, pack, out.tuple);
   out.g = decompose(out.c);
   out.o = order_submachines(out.c, out.g, {}, knobs);
-  REQUIRE(size_layout(out.c, out.g, out.o, {}, knobs, out.z, diags, dar));
+  REQUIRE(size_layout(out.c, out.g, out.o, {}, knobs, out.z, diags, dar, pack));
   out.r = route_transitions(out.c, out.g, out.o, out.z, {}, knobs, *router_at(id));
   column_holds(out.c, "scav.geom.state", out.z.state);
   column_holds(out.c, "scav.geom.sub", out.z.sub);

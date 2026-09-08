@@ -28,14 +28,23 @@ struct Packing {
   int32_t w{ 0 }, h{ 0 };
 };
 
+// Whether the placement is compacted before it is filled: `On` re-offers each
+// rect the three positions it did not take and keeps a move only where the
+// packing shrinks on one axis and grows on neither. A chart-global phase-2
+// knob, because it is a smaller drawing at the price of a reflowed one, and
+// only the whole chart's `Cost` can say which the reader wanted (11.10).
+enum class Compaction : uint32_t { Off, On };
+
 // Greedy width approximation from the desired aspect ratio, placement
-// restricted to four positions relative to the predecessor, then whitespace
-// elimination, which grows every rect to fill its subrow, block and row.
-// Reading order survives: rect i is never left of and above rect j for i > j.
+// restricted to four positions relative to the predecessor, `compaction`, then
+// whitespace elimination, which grows every rect to fill its subrow, block and
+// row. Reading order survives: rect i is never left of and above rect j for
+// i > j, whichever steps ran.
 Packing pack_lr(std::vector<scav_rect> const &rects,
                 int32_t sep,
                 int32_t dar_num,
-                int32_t dar_den);
+                int32_t dar_den,
+                Compaction compaction);
 
 // One row, every rect side by side and grown to the tallest. The packer that
 // wins whenever the rects are all the same height, which is what the profile's

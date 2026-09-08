@@ -1,9 +1,9 @@
 // LR-rectpacking: a target width from the desired aspect ratio, every rect
-// placed at one of four positions relative to its predecessor, then whitespace
-// elimination. A row holds blocks left to right, a block holds subrows top to
-// bottom, and a subrow holds rects left to right, so reading order is the
-// placement order by construction and the structure the last step fills is the
-// structure the placement built.
+// placed at one of four positions relative to its predecessor, compaction
+// where the knob asks for it, then whitespace elimination. A row holds blocks left to
+// right, a block holds subrows top to bottom, and a subrow holds rects left to right, so
+// reading order is the placement order by construction and the structure the last step
+// fills is the structure the placement built.
 
 #include "layout/pack.h"
 
@@ -15,14 +15,18 @@
 
 namespace scav {
 
-// Bracketed with the last step switchable so a test can measure what it bought
-// against the placement it started from; nothing shipping passes false. The
-// prototype a test uses is its own; see scav_internal.h.
+// Bracketed with whitespace elimination switchable as well as compaction, so a
+// test can measure either against what it started from; nothing shipping
+// passes false. Prototyped here because gcc's -Werror=missing-declarations
+// refuses a namespace-scope definition with no declaration above it, which is
+// what an internal function is under SCAV_TESTING. The prototype a test uses
+// is its own; see scav_internal.h.
 SCAV_INTERNAL_BEGIN
 Packing pack_rows(std::vector<scav_rect> const &rects,
                   int32_t sep,
                   int32_t dar_num,
                   int32_t dar_den,
+                  Compaction compaction,
                   bool expanded);
 SCAV_INTERNAL_END
 
@@ -33,6 +37,7 @@ namespace {
 // the next subrow of its block, into a new block at the row's top level, or
 // into a new row. Every structure is therefore a cut of the input sequence.
 enum class Spot : uint8_t { Right = 0, Subrow = 1, Level = 2, Row = 3 };
+constexpr uint8_t SPOTS{ 4 };
 
 // Where the packing has got to. `row_right` is the whole row's rightmost
 // edge, which is what a new block at row level has to clear. Wide because a
@@ -170,6 +175,57 @@ void place(std::vector<scav_rect> const &rects,
   }
 }
 
+// Smaller area, then shorter, then narrower: a total order on two extents,
+// which is all the choice below has to separate.
+bool tighter(Extent const &a, Extent const &b) {
+  Wide const a_area{ a.w * a.h };
+  Wide const b_area{ b.w * b.h };
+  if (a_area != b_area) { return a_area < b_area; }
+  if (a.h != b.h) { return a.h < b.h; }
+  return a.w < b.w;
+}
+
+// Compaction. Each rect gets one chance, in index order, to take one of the
+// other three positions -- back left into its predecessor's subrow, or up into
+// the hole an earlier row left the late arrival that could not use it. A move
+// is kept only where neither extent grew and one shrank, so occupancy rises,
+// the scale measure rises, and a packing inside the domain stays inside it.
+void compact(std::vector<scav_rect> const &rects,
+             int32_t sep,
+             std::vector<Spot> &spot,
+             std::vector<scav_rect> &at) {
+  Extent cur{ lay(rects, spot, sep, at) };
+  Cursor before{ seeded(rects[0], sep) };
+  for (uint32_t i = 1; i < rects.size(); ++i) {
+    Wide const w{ rects[i].w };
+    Wide const h{ rects[i].h };
+    Spot chosen{ spot[i] };
+    Extent chosen_e{ cur };
+    for (uint8_t s = 0; s < SPOTS; ++s) {
+      Spot const cand{ static_cast<Spot>(s) };
+      if (cand == spot[i]) { continue; }
+      // The rect's own edges bound the drawing's, so a candidate putting one of
+      // them past the current extent cannot shrink either. Asking here rather
+      // than laying the whole packing out is what keeps compaction linear on a
+      // packing it has nothing to move.
+      Cursor probe{ before };
+      Wide const x{ seat(probe, cand, w, h, sep) };
+      if (((x + w) > cur.w) || ((probe.sub_y + h) > cur.h)) { continue; }
+      Spot const was{ spot[i] };
+      spot[i] = cand;
+      Extent const e{ lay(rects, spot, sep, at) };
+      spot[i] = was;
+      if ((e.w <= cur.w) && (e.h <= cur.h) && tighter(e, chosen_e)) {
+        chosen = cand;
+        chosen_e = e;
+      }
+    }
+    spot[i] = chosen;
+    cur = chosen_e;
+    (void)seat(before, chosen, w, h, sep);
+  }
+}
+
 // The `i`th of `parts` shares of `extra`. Floor-apportioned from the running
 // prefix, so the shares sum to exactly `extra`, no two differ by more than
 // one, and the prefix is the shift the `i`th thing owes the ones before it.
@@ -270,12 +326,14 @@ Packing pack_rows(std::vector<scav_rect> const &rects,
                   int32_t sep,
                   int32_t dar_num,
                   int32_t dar_den,
+                  Compaction compaction,
                   bool expanded) {
   Packing out;
   out.at = rects;
   if (rects.empty()) { return out; }
   std::vector<Spot> spot;
   place(rects, sep, target_width(rects, sep, dar_num, dar_den), spot);
+  if (compaction == Compaction::On) { compact(rects, sep, spot, out.at); }
   Extent const e{ lay(rects, spot, sep, out.at) };
   out.w = narrow(e.w);
   out.h = narrow(e.h);
@@ -290,8 +348,9 @@ SCAV_INTERNAL_END
 Packing pack_lr(std::vector<scav_rect> const &rects,
                 int32_t sep,
                 int32_t dar_num,
-                int32_t dar_den) {
-  return pack_rows(rects, sep, dar_num, dar_den, true);
+                int32_t dar_den,
+                Compaction compaction) {
+  return pack_rows(rects, sep, dar_num, dar_den, compaction, true);
 }
 
 Packing pack_box(std::vector<scav_rect> const &rects, int32_t sep) {

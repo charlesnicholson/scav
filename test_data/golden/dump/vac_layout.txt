@@ -62,7 +62,7 @@ chart vac "robot vacuum" (test_data/charts/vac.scav:3)
   include dock "dock.scav" -> test_data/charts/dock.scav (test_data/charts/vac.scav:4)
   include lamp "./led.scav" -> test_data/charts/led.scav (test_data/charts/vac.scav:7)
   include lamp "led.scav" -> test_data/charts/led.scav (test_data/charts/dock.scav:4)
-geometry structural 4e59baff coordinate 363dfea1
+geometry structural 28c7f7b0 coordinate 05da4349
   chart 0,0 11380x9122
   state dock 2784,2823 6612x6299 before 2912,2951 6356x397 after 2912,8994 6356x0
   state lamp 0,0 3066x2535 before 128,128 2810x397 after 128,2407 2810x0
@@ -73,7 +73,7 @@ geometry structural 4e59baff coordinate 363dfea1
   state On:main/Idle 640,6027 973x653 before 768,6155 717x397 after 768,6552 717x0
   state On:main/Ready 128,4817 1664x922 before 256,4945 1408x397 after 256,5342 1408x269
   state On:aux/Idle 640,6872 973x653 before 768,7000 717x397 after 768,7397 717x0
-  state dock/lamp 2912,5883 3328x3111 before 3040,6011 3072x397 after 3040,8866 3072x0
+  state dock/lamp 2912,5883 3066x3111 before 3040,6011 2810x397 after 3040,8866 2810x0
   state dock/Empty 3712,4145 1088x653 before 3840,4273 832x397 after 3840,4670 832x0
   state dock/On 7002,3348 2266x2247 before 7130,3476 2010x397 after 7130,5467 2010x0
   state dock/On/Seated 7930,3873 1204x653 before 8058,4001 948x397 after 8058,4398 948x0
@@ -83,7 +83,7 @@ geometry structural 4e59baff coordinate 363dfea1
   state lamp/Solid 1850,1466 1088x653 before 1978,1594 832x397 after 1978,1991 832x0
   state dock/lamp/Off 3840,6408 896x653 before 3968,6536 640x397 after 3968,6933 640x0
   state dock/lamp/Blinking 3040,7637 1434x653 before 3168,7765 1178x397 after 3168,8162 1178x0
-  state dock/lamp/Solid 5024,6408 1088x653 before 5152,6536 832x397 after 5152,6933 832x0
+  state dock/lamp/Solid 4762,7637 1088x653 before 4890,7765 832x397 after 4890,8162 832x0
   state $initial 9684,214 224x224 before 9684,214 224x0 after 9684,214 224x0
   state On:main/$initial 128,6027 224x224 before 128,6027 224x0 after 128,6027 224x0
   state On:aux/$initial 128,6872 224x224 before 128,6872 224x0 after 128,6872 224x0
@@ -97,7 +97,7 @@ geometry structural 4e59baff coordinate 363dfea1
   sub 3 2912,3348 6356x5646
   sub 4 7130,3873 2010x1594
   sub 5 128,525 2810x1882
-  sub 6 3040,6408 3072x2458
+  sub 6 3040,6408 2810x2458
   route $initial -> Off (9908,326) (10388,326)
   route Off -> Booting (10637,653) (10637,845)
   route On:main/$initial -> On:main/Idle (352,6139) (544,6139)
@@ -105,7 +105,7 @@ geometry structural 4e59baff coordinate 363dfea1
   route On:aux/$initial -> On:aux/Idle (352,6984) (544,6984)
   route dock/On/$initial -> dock/On/Seated (7354,3999) (7834,3999)
   route dock/On/Seated -> dock/On/Charging (8189,4526) (8189,4718)
-  route dock/On/Charging -> dock/lamp/Solid (8564,5140) (9268,5140) (9364,5140) (9364,5787) (2816,5787) (2816,7349) (2912,7349) (2913,7349) (2913,8866) (4832,8866) (4832,6917) (4928,6917) port s1 d1 port s0 d1
+  route dock/On/Charging -> dock/lamp/Solid (8564,5140) (9268,5140) (9364,5140) (9364,5787) (2816,5787) (2816,7349) (2912,7349) (2913,7349) (2913,8866) (4570,8866) (4570,8146) (4666,8146) port s1 d1 port s0 d1
   route dock/$initial -> dock/Empty (3136,4471) (3616,4471)
   route dock/Empty -> dock/On (4800,4423) (6906,4423)
   route dock/On -> dock/Empty (7002,4519) (4896,4519)
@@ -115,5 +115,5 @@ geometry structural 4e59baff coordinate 363dfea1
   route lamp/Solid -> lamp/Off (1850,2023) (1754,2023) (1754,2407) (32,2407) (32,1274) (1024,1274) (1024,1226)
   route dock/lamp/$initial -> dock/lamp/Off (3264,6734) (3744,6734)
   route dock/lamp/Off -> dock/lamp/Blinking (4022,7061) (4022,7541)
-  route dock/lamp/Blinking -> dock/lamp/Solid (4474,7733) (4832,7733) (4832,6917) (4928,6917)
-  route dock/lamp/Solid -> dock/lamp/Off (5024,6965) (4928,6965) (4928,8578) (2944,8578) (2944,7157) (3936,7157) (3936,7109)
+  route dock/lamp/Blinking -> dock/lamp/Solid (4474,7963) (4666,7963)
+  route dock/lamp/Solid -> dock/lamp/Off (4762,8194) (4666,8194) (4666,8578) (2944,8578) (2944,7157) (3936,7157) (3936,7109)

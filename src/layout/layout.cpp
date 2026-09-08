@@ -31,7 +31,7 @@ SCAV_INTERNAL_BEGIN
 // are its own; see scav_internal.h.
 bool inflation_done(uint32_t fewest, uint32_t degraded, uint32_t unreachable, bool &keep);
 uint32_t search_tuple_count(scav_profile const &p, uint32_t entity_count);
-void search_tuple(scav_profile &p, DarSource &dar, uint32_t index);
+void search_tuple(scav_profile &p, DarSource &dar, Compaction &pack, uint32_t index);
 uint32_t search_argmin(std::vector<Cost> const &cost, std::vector<uint8_t> const &viable);
 SCAV_INTERNAL_END
 
@@ -39,8 +39,9 @@ namespace {
 
 constexpr uint32_t RECT{ sizeof(scav_rect) };
 
-// The chart-global phase-2 tuples the portfolio chooses between: two packer
-// knobs and where a frame's desired ratio comes from, so eight rows (11.10).
+// The chart-global phase-2 tuples the portfolio chooses between: the box
+// packer, compaction, and where a frame's desired ratio comes from, so eight
+// rows (11.10).
 constexpr uint32_t SEARCH_TUPLES{ 8 };
 
 // One name and the shape it is registered under. `write_rows` copies a row per
@@ -228,11 +229,12 @@ Candidate search_candidate(Chart const &c,
                            scav_spaces const &s,
                            scav_profile const &knobs,
                            DarSource dar,
+                           Compaction pack,
                            Router const &router,
                            uint32_t threads,
                            std::vector<Diagnostic> &diags) {
   Candidate out;
-  if (!size_layout(c, g, orders, s, knobs, out.sized, diags, dar)) { return out; }
+  if (!size_layout(c, g, orders, s, knobs, out.sized, diags, dar, pack)) { return out; }
   out.routes = route_transitions(c, g, orders, out.sized, s, knobs, router, threads);
 
   // `out` carries the best attempt so far, and `done` is set from that one
@@ -247,7 +249,7 @@ Candidate search_candidate(Chart const &c,
     if (!inflate(wider, knobs.spacing_inflation_increment)) { break; }
     SizedLayout next_sized;
     std::vector<Diagnostic> spilled;
-    if (!size_layout(c, g, orders, s, wider, next_sized, spilled, dar)) { break; }
+    if (!size_layout(c, g, orders, s, wider, next_sized, spilled, dar, pack)) { break; }
     Routes next{ route_transitions(c, g, orders, next_sized, s, wider, router, threads) };
     bool keep{ false };
     done = inflation_done(fewest, next.degraded(), next.unreachable, keep);
@@ -315,14 +317,17 @@ uint32_t search_tuple_count(scav_profile const &p, uint32_t entity_count) {
 }
 
 // Row `index` of the fixed table, as a delta from the profile as given: bit 0
-// flips the box packer, bit 1 the scale-measure tiebreak, bit 2 hands each
-// frame its owner's hole. Row 0 is therefore the caller's own tuple, and
-// `portfolio_m` of 1 is the pipeline as it ran before the portfolio existed.
-// The packer is bit 0 because it is the knob that moves a chart: every pick
-// the corpus makes on either scale is row 1, and the tiebreak has moved none.
-void search_tuple(scav_profile &p, DarSource &dar, uint32_t index) {
+// flips the box packer, bit 1 turns compaction on, bit 2 hands each frame its
+// owner's hole. Row 0 is therefore the caller's own tuple, and `portfolio_m` of
+// 1 is the pipeline as it ran before the portfolio existed. The packer is bit 0
+// because it is the knob that moves a chart: every pick the corpus makes on
+// either scale is row 1. **`sm_tiebreak` is no longer a row**: it won on no
+// chart at either scale, so the table spent a bit on a knob that decided
+// nothing, and compaction — which does move charts, in both directions — took
+// it. The field stays a profile knob a caller may set; no row flips it.
+void search_tuple(scav_profile &p, DarSource &dar, Compaction &pack, uint32_t index) {
   p.trybox ^= static_cast<int32_t>(index & 1U);
-  p.sm_tiebreak ^= static_cast<int32_t>((index >> 1U) & 1U);
+  pack = (((index >> 1U) & 1U) != 0) ? Compaction::On : Compaction::Off;
   dar = (((index >> 2U) & 1U) != 0) ? DarSource::OwnerHole : DarSource::Profile;
 }
 
@@ -397,7 +402,8 @@ bool layout_run(Chart &c,
   for (uint32_t i = 0; i < rows; ++i) {
     scav_profile knobs{ p };
     DarSource dar{ DarSource::Profile };
-    search_tuple(knobs, dar, i);
+    Compaction pack{ Compaction::Off };
+    search_tuple(knobs, dar, pack, i);
     std::vector<Diagnostic> spilled;
     candidates[i] = search_candidate(c,
                                      g,
@@ -405,6 +411,7 @@ bool layout_run(Chart &c,
                                      s,
                                      knobs,
                                      dar,
+                                     pack,
                                      *router,
                                      o.threads,
                                      (i == 0) ? diags : spilled);

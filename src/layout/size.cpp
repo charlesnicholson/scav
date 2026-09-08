@@ -34,13 +34,15 @@ bool fits(Packing const &p) { return (p.w <= COORD_MAX) && (p.h <= COORD_MAX); }
 
 // The better-scaling of the two packings, among those inside the domain. A
 // packing outside it cannot compose a box inside it, so it is no candidate.
-// The ratio is an argument rather than the profile's field, because a frame
-// aims at the hole it fills and not every hole is 16:10 (11.4).
+// The ratio and the compaction knob are arguments rather than the profile's
+// fields, because a frame aims at the hole it fills and not every hole is
+// 16:10, and because compaction is a row of the portfolio's table (11.4).
 Packing pack_best(std::vector<scav_rect> const &rects,
                   int32_t sep,
                   scav_profile const &p,
-                  FrameDar dar) {
-  Packing packed{ pack_lr(rects, sep, dar.num, dar.den) };
+                  FrameDar dar,
+                  Compaction compaction) {
+  Packing packed{ pack_lr(rects, sep, dar.num, dar.den, compaction) };
   if (p.trybox != 0) {
     Packing const row{ pack_box(rects, sep) };
     if (fits(row) && (!fits(packed) ||
@@ -89,6 +91,7 @@ bool size_pass(Chart const &c,
                scav_spaces const &s,
                scav_profile const &p,
                std::vector<FrameDar> const &hole,
+               Compaction compaction,
                SizedLayout &out,
                std::vector<Diagnostic> &diags) {
   FrameDar const profile_dar{ .num = p.dar_num, .den = p.dar_den };
@@ -318,7 +321,7 @@ bool size_pass(Chart const &c,
 
         // Packed, not stacked: stacking left-aligned gives every piece the width of the
         // widest. They are rectangles sharing an area, which is `pack_lr`'s job (11.4).
-        Packing const packed{ pack_best(pieces, p.node_sep, p, dar) };
+        Packing const packed{ pack_best(pieces, p.node_sep, p, dar, compaction) };
         shape.w = packed.w;
         shape.h = packed.h;
         shape.ok = fits(packed);
@@ -368,7 +371,7 @@ bool size_pass(Chart const &c,
       for (uint32_t i = 0; i < nodes.size(); ++i) { local[nodes[i]] = best.at[i]; }
     }
 
-    Packing const packed{ pack_best(boxes, p.node_sep, p, dar) };
+    Packing const packed{ pack_best(boxes, p.node_sep, p, dar, compaction) };
     if (!fits(packed)) {
       overflow(diags, ElemKind::Submachine, m);
       ok = false;
@@ -415,7 +418,7 @@ bool size_pass(Chart const &c,
     }
     Packing packed;
     if (!kids.empty()) {
-      packed = pack_best(kids, p.sub_sep, p, dar_of(i));
+      packed = pack_best(kids, p.sub_sep, p, dar_of(i), compaction);
       for (uint32_t k = 0; k < ids.size(); ++k) {
         uint32_t const m{ ids[k] };
         sub_local[m] = { .x = packed.at[k].x, .y = packed.at[k].y };
@@ -564,13 +567,17 @@ bool size_layout(Chart const &c,
                  scav_profile const &p,
                  SizedLayout &out,
                  std::vector<Diagnostic> &diags,
-                 DarSource dar) {
-  if (dar == DarSource::Profile) { return size_pass(c, g, o, s, p, {}, out, diags); }
+                 DarSource dar,
+                 Compaction compaction) {
+  if (dar == DarSource::Profile) {
+    return size_pass(c, g, o, s, p, {}, compaction, out, diags);
+  }
   // A hole is only knowable once its owner is sized, and sizing is bottom-up,
-  // so the ratios come off a first pass at the profile's own ratio.
+  // so the ratios come off a first pass at the profile's own ratio. That pass
+  // packs the same way, or the holes would be a different packer's.
   SizedLayout first;
-  if (!size_pass(c, g, o, s, p, {}, first, diags)) { return false; }
-  return size_pass(c, g, o, s, p, size_owner_holes(c, first), out, diags);
+  if (!size_pass(c, g, o, s, p, {}, compaction, first, diags)) { return false; }
+  return size_pass(c, g, o, s, p, size_owner_holes(c, first), compaction, out, diags);
 }
 
 }  // namespace scav
