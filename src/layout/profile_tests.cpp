@@ -31,9 +31,10 @@ TEST_CASE("profile: both shipped profiles load and pass their own validation") {
     scav_profile const p{ named(name) };
     CHECK(profile_validate(p));
     CHECK(p.profile_version == 6);
-    // The four chart-global candidates that differ in no ratio: the two packer
-    // knobs crossed, with row 0 the profile as it stands (11.10).
-    CHECK(p.portfolio_m == 4);
+    // The two chart-global candidates that ship: row 0 the profile as it
+    // stands and row 1 the other packer, which is every row the corpus picks
+    // that improved a picture. The table holds eight (11.10).
+    CHECK(p.portfolio_m == 2);
   }
   CHECK(named("compact").profile_id != named("readable").profile_id);
 }

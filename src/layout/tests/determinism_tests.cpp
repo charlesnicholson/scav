@@ -208,11 +208,14 @@ int64_t timed(Chart &c, uint32_t threads) {
 }  // namespace
 
 TEST_CASE("determinism: the corpus lays out to one answer at every thread count") {
-  scav_profile const p{ readable() };
   // Four chart-global candidates on every corpus chart, since none of them
   // reaches the 1,024 entities the scaling rule starts halving at: the pick is
-  // a real choice here rather than the one row a 2k shape runs.
-  REQUIRE(p.portfolio_m == 4);
+  // a real choice here rather than the one row a 2k shape runs. Four rather
+  // than the two that ship, so the claim covers the compaction rows the table
+  // holds unshipped -- a row nothing runs is a row nothing proves determinate.
+  scav_profile p{ readable() };
+  p.portfolio_m = 4;
+  REQUIRE(profile_validate(p));
   std::string shards;
   for (char const *name : CORPUS) {
     Chart sized;

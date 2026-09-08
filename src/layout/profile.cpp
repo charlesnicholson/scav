@@ -58,7 +58,12 @@ constexpr scav_profile READABLE{
   .w_aspect = 2,
   .w_area = 1,
   .portfolio_k = 4,
-  .portfolio_m = 4,
+  // Rows {as given, trybox}, which is every row the corpus picks that improved
+  // a picture. Rows 2 and 3 turn compaction on and 4 through 7 hand a frame its
+  // owner's hole: both are built, tested and measured, and neither ships until
+  // 11.6's label weights are fitted and can price what they cost a reader
+  // (11.10, 17 P9d).
+  .portfolio_m = 2,
   .sweep_count = 8,
   .congestion_iterations = 8,
   .ripup_cap = 16,
@@ -110,7 +115,12 @@ constexpr scav_profile COMPACT{
   .w_aspect = 2,
   .w_area = 1,
   .portfolio_k = 4,
-  .portfolio_m = 4,
+  // Rows {as given, trybox}, which is every row the corpus picks that improved
+  // a picture. Rows 2 and 3 turn compaction on and 4 through 7 hand a frame its
+  // owner's hole: both are built, tested and measured, and neither ships until
+  // 11.6's label weights are fitted and can price what they cost a reader
+  // (11.10, 17 P9d).
+  .portfolio_m = 2,
   .sweep_count = 8,
   .congestion_iterations = 8,
   .ripup_cap = 16,

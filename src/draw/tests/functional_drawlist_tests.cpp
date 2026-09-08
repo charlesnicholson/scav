@@ -295,7 +295,7 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
   }
   MESSAGE("corpus path boxes: ", boxes, ", centred fallbacks: ", fell);
   CHECK(boxes == 192);
-  CHECK(fell == 20);
+  CHECK(fell == 16);
 }
 
 TEST_CASE("drawlist corpus: the layout goldens' measurement policy is stated here") {

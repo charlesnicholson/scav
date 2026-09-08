@@ -9,7 +9,7 @@
   <rect x="640" y="6027" width="973" height="653" rx="81" fill="#ffffff" stroke="#1a1a1a" stroke-width="16" class="scav-state scav-id-6"/>
   <rect x="128" y="4817" width="1664" height="922" rx="115" fill="#ffffff" stroke="#1a1a1a" stroke-width="16" class="scav-state scav-id-7"/>
   <rect x="640" y="6872" width="973" height="653" rx="81" fill="#ffffff" stroke="#1a1a1a" stroke-width="16" class="scav-state scav-id-8"/>
-  <rect x="2912" y="5883" width="3066" height="3111" rx="383" fill="#ffffff" stroke="#1a1a1a" stroke-width="16" class="scav-state scav-id-9"/>
+  <rect x="2912" y="5883" width="3328" height="3111" rx="388" fill="#ffffff" stroke="#1a1a1a" stroke-width="16" class="scav-state scav-id-9"/>
   <rect x="3712" y="4145" width="1088" height="653" rx="81" fill="#ffffff" stroke="#1a1a1a" stroke-width="16" class="scav-state scav-id-10"/>
   <rect x="7002" y="3348" width="2266" height="2247" rx="280" fill="#ffffff" stroke="#1a1a1a" stroke-width="16" class="scav-state scav-id-11"/>
   <rect x="7930" y="3873" width="1204" height="653" rx="81" fill="#ffffff" stroke="#1a1a1a" stroke-width="16" class="scav-state scav-id-12"/>
@@ -19,7 +19,7 @@
   <rect x="1850" y="1466" width="1088" height="653" rx="81" fill="#ffffff" stroke="#1a1a1a" stroke-width="16" class="scav-state scav-id-16"/>
   <rect x="3840" y="6408" width="896" height="653" rx="81" fill="#ffffff" stroke="#1a1a1a" stroke-width="16" class="scav-state scav-id-17"/>
   <rect x="3040" y="7637" width="1434" height="653" rx="81" fill="#ffffff" stroke="#1a1a1a" stroke-width="16" class="scav-state scav-id-18"/>
-  <rect x="4762" y="7637" width="1088" height="653" rx="81" fill="#ffffff" stroke="#1a1a1a" stroke-width="16" class="scav-state scav-id-19"/>
+  <rect x="5024" y="6408" width="1088" height="653" rx="81" fill="#ffffff" stroke="#1a1a1a" stroke-width="16" class="scav-state scav-id-19"/>
   <line x1="128" y1="6776" x2="2080" y2="6776" fill="none" stroke="#808080" stroke-width="16" stroke-dasharray="64,48" class="scav-sub scav-id-2"/>
   <polyline points="9908,326 10388,326" fill="none" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-0"/>
   <polyline points="10637,653 10637,845" fill="none" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-1"/>
@@ -28,7 +28,7 @@
   <polyline points="352,6984 544,6984" fill="none" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-5"/>
   <polyline points="7354,3999 7834,3999" fill="none" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-6"/>
   <polyline points="8189,4526 8189,4718" fill="none" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-7"/>
-  <polyline points="8564,5140 9268,5140 9364,5140 9364,5787 2816,5787 2816,7349 2912,7349 2913,7349 2913,8866 4570,8866 4570,8146 4666,8146" fill="none" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-8"/>
+  <polyline points="8564,5140 9268,5140 9364,5140 9364,5787 2816,5787 2816,7349 2912,7349 2913,7349 2913,8866 4832,8866 4832,6917 4928,6917" fill="none" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-8"/>
   <polyline points="3136,4471 3616,4471" fill="none" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-9"/>
   <polyline points="4800,4423 6906,4423" fill="none" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-10"/>
   <polyline points="7002,4519 4896,4519" fill="none" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-11"/>
@@ -38,8 +38,8 @@
   <polyline points="1850,2023 1754,2023 1754,2407 32,2407 32,1274 1024,1274 1024,1226" fill="none" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-15"/>
   <polyline points="3264,6734 3744,6734" fill="none" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-16"/>
   <polyline points="4022,7061 4022,7541" fill="none" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-17"/>
-  <polyline points="4474,7963 4666,7963" fill="none" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-18"/>
-  <polyline points="4762,8194 4666,8194 4666,8578 2944,8578 2944,7157 3936,7157 3936,7109" fill="none" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-19"/>
+  <polyline points="4474,7733 4832,7733 4832,6917 4928,6917" fill="none" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-18"/>
+  <polyline points="5024,6965 4928,6965 4928,8578 2944,8578 2944,7157 3936,7157 3936,7109" fill="none" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-19"/>
   <polygon points="10484,326 10388,374 10388,278" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-0"/>
   <polygon points="10637,941 10589,845 10685,845" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-1"/>
   <polygon points="640,6139 544,6187 544,6091" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-2"/>
@@ -47,7 +47,7 @@
   <polygon points="640,6984 544,7032 544,6936" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-5"/>
   <polygon points="7930,3999 7834,4047 7834,3951" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-6"/>
   <polygon points="8189,4814 8141,4718 8237,4718" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-7"/>
-  <polygon points="4762,8146 4666,8194 4666,8098" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-8"/>
+  <polygon points="5024,6917 4928,6965 4928,6869" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-8"/>
   <polygon points="3712,4471 3616,4519 3616,4423" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-9"/>
   <polygon points="7002,4423 6906,4471 6906,4375" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-10"/>
   <polygon points="4800,4519 4896,4471 4896,4567" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-11"/>
@@ -57,7 +57,7 @@
   <polygon points="1024,1178 1064,1258 984,1258" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-15"/>
   <polygon points="3840,6734 3744,6782 3744,6686" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-16"/>
   <polygon points="4022,7637 3974,7541 4070,7541" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-17"/>
-  <polygon points="4762,7963 4666,8011 4666,7915" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-18"/>
+  <polygon points="5024,6917 4928,6965 4928,6869" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-18"/>
   <polygon points="3936,7061 3976,7141 3896,7141" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-19"/>
   <polygon points="6375,0 7796,525 6375,1050 4954,525" fill="#ffffff" stroke="#1a1a1a" stroke-width="16" class="scav-state scav-id-4"/>
   <text x="9728" y="829" font-size="160" textLength="768" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-1">POWER_ON</text>
@@ -70,9 +70,9 @@
   <text x="1251" y="1354" font-size="160" textLength="768" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-13">charging</text>
   <text x="1322" y="2813" font-size="160" textLength="672" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-14">charged</text>
   <text x="509" y="2352" font-size="160" textLength="768" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-15">undocked</text>
-  <text x="4163" y="7381" font-size="160" textLength="768" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-17">charging</text>
-  <text x="4234" y="8043" font-size="160" textLength="672" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-18">charged</text>
-  <text x="3367" y="8523" font-size="160" textLength="768" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-19">undocked</text>
+  <text x="3113" y="7410" font-size="160" textLength="768" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-17">charging</text>
+  <text x="5232" y="7813" font-size="160" textLength="672" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-18">charged</text>
+  <text x="3552" y="8523" font-size="160" textLength="768" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-19">undocked</text>
   <text x="3706" y="3143" font-size="192" textLength="461" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-0">dock</text>
   <text x="479" y="320" font-size="192" textLength="461" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-1">lamp</text>
   <text x="10692" y="320" font-size="192" textLength="346" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-2">Off</text>
@@ -82,7 +82,7 @@
   <text x="857" y="6347" font-size="192" textLength="461" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-6">Idle</text>
   <text x="432" y="5137" font-size="192" textLength="576" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-7">Ready</text>
   <text x="857" y="7192" font-size="192" textLength="461" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-8">Idle</text>
-  <text x="3391" y="6203" font-size="192" textLength="461" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-9">lamp</text>
+  <text x="3424" y="6203" font-size="192" textLength="461" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-9">lamp</text>
   <text x="3944" y="4465" font-size="192" textLength="576" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-10">Empty</text>
   <text x="7381" y="3668" font-size="192" textLength="231" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-11">On</text>
   <text x="8176" y="4193" font-size="192" textLength="692" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-12">Seated</text>
@@ -92,7 +92,7 @@
   <text x="2082" y="1786" font-size="192" textLength="576" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-16">Solid</text>
   <text x="4048" y="6728" font-size="192" textLength="346" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-17">Off</text>
   <text x="3315" y="7957" font-size="192" textLength="922" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-18">Blinking</text>
-  <text x="4994" y="7957" font-size="192" textLength="576" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-19">Solid</text>
+  <text x="5256" y="6728" font-size="192" textLength="576" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-19">Solid</text>
   <circle cx="9796" cy="326" r="112" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="16" class="scav-state scav-id-20"/>
   <circle cx="240" cy="6139" r="112" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="16" class="scav-state scav-id-21"/>
   <circle cx="240" cy="6984" r="112" fill="#1a1a1a" stroke="#1a1a1a" stroke-width="16" class="scav-state scav-id-22"/>
