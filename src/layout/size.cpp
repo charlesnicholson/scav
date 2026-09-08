@@ -8,6 +8,7 @@
 #include "layout/pack.h"
 #include "scav/scav_core.h"
 #include "scav_int.h"
+#include "scav_internal.h"
 
 #include <cstdint>
 #include <vector>
@@ -26,15 +27,17 @@ bool fits(Packing const &p) { return (p.w <= COORD_MAX) && (p.h <= COORD_MAX); }
 
 // The better-scaling of the two packings, among those inside the domain. A
 // packing outside it cannot compose a box inside it, so it is no candidate.
+// The ratio is an argument rather than the profile's field, because a frame
+// aims at the hole it fills and not every hole is 16:10 (11.4).
 Packing pack_best(std::vector<scav_rect> const &rects,
                   int32_t sep,
-                  scav_profile const &p) {
-  Packing packed{ pack_lr(rects, sep, p.dar_num, p.dar_den) };
+                  scav_profile const &p,
+                  FrameDar dar) {
+  Packing packed{ pack_lr(rects, sep, dar.num, dar.den) };
   if (p.trybox != 0) {
     Packing const row{ pack_box(rects, sep) };
-    if (fits(row) &&
-        (!fits(packed) ||
-         pack_better(row, packed, p.dar_num, p.dar_den, p.sm_tiebreak != 0))) {
+    if (fits(row) && (!fits(packed) ||
+                      pack_better(row, packed, dar.num, dar.den, p.sm_tiebreak != 0))) {
       packed = row;
     }
   }
@@ -70,15 +73,28 @@ bool bare_pseudostate(Chart const &c,
   return true;
 }
 
-}  // namespace
+// One whole sizing. `hole` is parallel to states -- the ratio every packing
+// inside that state's interior aims at, a `num` of 0 or a short vector falling
+// back to the profile's.
+bool size_pass(Chart const &c,
+               SplitGraph const &g,
+               SubmachineOrders const &o,
+               scav_spaces const &s,
+               scav_profile const &p,
+               std::vector<FrameDar> const &hole,
+               SizedLayout &out,
+               std::vector<Diagnostic> &diags) {
+  FrameDar const profile_dar{ .num = p.dar_num, .den = p.dar_den };
+  // Every packing inside one state's interior fills the same hole, so the state
+  // carries the ratio and its frames read their owner's.
+  auto const dar_of = [&](uint32_t state) {
+    return ((state < hole.size()) && (hole[state].num != 0)) ? hole[state] : profile_dar;
+  };
+  auto const owner_dar = [&](uint32_t m) {
+    StateId const owner{ c.submachines[m].owner };
+    return (owner.v == INVALID) ? profile_dar : dar_of(owner.v);
+  };
 
-bool size_layout(Chart const &c,
-                 SplitGraph const &g,
-                 SubmachineOrders const &o,
-                 scav_spaces const &s,
-                 scav_profile const &p,
-                 SizedLayout &out,
-                 std::vector<Diagnostic> &diags) {
   out.state.assign(c.states.size(), {});
   out.before.assign(c.states.size(), {});
   out.after.assign(c.states.size(), {});
@@ -111,6 +127,7 @@ bool size_layout(Chart const &c,
     Span const span{ o.sub_nodes[m] };
     uint32_t const ranks{ o.sub_ranks[m] };
     if ((span.len == 0) || (ranks == 0)) { return; }
+    FrameDar const dar{ owner_dar(m) };
     Span const espan{ o.sub_edges[m] };
     Span const gspan{ o.sub_gaps[m] };
 
@@ -294,7 +311,7 @@ bool size_layout(Chart const &c,
 
         // Packed, not stacked: stacking left-aligned gives every piece the width of the
         // widest. They are rectangles sharing an area, which is `pack_lr`'s job (11.4).
-        Packing const packed{ pack_best(pieces, p.node_sep, p) };
+        Packing const packed{ pack_best(pieces, p.node_sep, p, dar) };
         shape.w = packed.w;
         shape.h = packed.h;
         shape.ok = fits(packed);
@@ -317,7 +334,7 @@ bool size_layout(Chart const &c,
       }
       Wide const target{ imax(Wide{ widest },
                               static_cast<Wide>(isqrt(static_cast<uint64_t>(
-                                  floor_div(area * p.dar_num, Wide{ p.dar_den }))))) };
+                                  floor_div(area * dar.num, Wide{ dar.den }))))) };
 
       Shape best{ lay_out(Wide{ COORD_MAX } * 2) };
       Shape const folded{ lay_out(target) };
@@ -328,8 +345,8 @@ bool size_layout(Chart const &c,
                                                 { .at = {},
                                                   .w = static_cast<int32_t>(best.w),
                                                   .h = static_cast<int32_t>(best.h) },
-                                                p.dar_num,
-                                                p.dar_den,
+                                                dar.num,
+                                                dar.den,
                                                 p.sm_tiebreak != 0)) };
       if (swap) { best = folded; }
       if (!best.ok) {
@@ -344,7 +361,7 @@ bool size_layout(Chart const &c,
       for (uint32_t i = 0; i < nodes.size(); ++i) { local[nodes[i]] = best.at[i]; }
     }
 
-    Packing const packed{ pack_best(boxes, p.node_sep, p) };
+    Packing const packed{ pack_best(boxes, p.node_sep, p, dar) };
     if (!fits(packed)) {
       overflow(diags, ElemKind::Submachine, m);
       ok = false;
@@ -391,7 +408,7 @@ bool size_layout(Chart const &c,
     }
     Packing packed;
     if (!kids.empty()) {
-      packed = pack_best(kids, p.sub_sep, p);
+      packed = pack_best(kids, p.sub_sep, p, dar_of(i));
       for (uint32_t k = 0; k < ids.size(); ++k) {
         sub_local[ids[k]] = { .x = packed.at[k].x, .y = packed.at[k].y };
       }
@@ -471,6 +488,68 @@ bool size_layout(Chart const &c,
     }
   }
   return true;
+}
+
+}  // namespace
+
+// Bracketed so a test can hand the hole reader two rects and read the ratio
+// back, rather than inferring it from a whole chart's extents. The prototypes a
+// test uses are its own; see scav_internal.h.
+SCAV_INTERNAL_BEGIN
+
+// A hole's aspect as a pair inside the profile's own `[1, 1024]` bounds, which
+// is where `pack.cpp` proved its products. The longer axis takes the cap and
+// the shorter one floors at 1, so an extreme hole reads as 1024:1 rather than
+// as no ratio at all; a hole with no extent on an axis has no aspect.
+FrameDar size_hole_ratio(int32_t w, int32_t h) {
+  constexpr Wide CAP{ 1024 };
+  if ((w <= 0) || (h <= 0)) { return {}; }
+  Wide const num{ (w >= h) ? CAP : imax(floor_div(CAP * w, Wide{ h }), Wide{ 1 }) };
+  Wide const den{ (w >= h) ? imax(floor_div(CAP * h, Wide{ w }), Wide{ 1 }) : CAP };
+  return { .num = static_cast<int32_t>(num), .den = static_cast<int32_t>(den) };
+}
+
+// Per state, the aspect of the interior region its submachines are packed into:
+// the interior width by the height between the `before` and `after` bands,
+// which is the whole of the interior where a state requests neither band and
+// includes whatever slack `kind_min_h` left. Zero for a state with no live
+// submachine, which is no hole for anything to fill.
+std::vector<FrameDar> size_owner_holes(Chart const &c, SizedLayout const &z) {
+  std::vector<FrameDar> hole(c.states.size(), FrameDar{});
+  for (uint32_t i = 0; i < c.states.size(); ++i) {
+    if (c.states[i].live == 0) { continue; }
+    bool packed{ false };
+    Span const subs{ c.states[i].submachines };
+    for (uint32_t k = 0; k < subs.len; ++k) {
+      packed = packed || (c.submachines[c.submachine_ids[subs.off + k].v].live != 0);
+    }
+    if (!packed) { continue; }
+    // The ring is what the band origin sits inside, so it comes back off the
+    // rects rather than off `pad`, which a bare pseudostate does not take.
+    int32_t const pad{ z.before[i].y - z.state[i].y };
+    int32_t const top{ z.before[i].y + z.before[i].h };
+    int32_t const bottom{ (z.state[i].y + z.state[i].h) - pad - z.after[i].h };
+    hole[i] = size_hole_ratio(z.before[i].w, bottom - top);
+  }
+  return hole;
+}
+
+SCAV_INTERNAL_END
+
+bool size_layout(Chart const &c,
+                 SplitGraph const &g,
+                 SubmachineOrders const &o,
+                 scav_spaces const &s,
+                 scav_profile const &p,
+                 SizedLayout &out,
+                 std::vector<Diagnostic> &diags,
+                 DarSource dar) {
+  if (dar == DarSource::Profile) { return size_pass(c, g, o, s, p, {}, out, diags); }
+  // A hole is only knowable once its owner is sized, and sizing is bottom-up,
+  // so the ratios come off a first pass at the profile's own ratio.
+  SizedLayout first;
+  if (!size_pass(c, g, o, s, p, {}, first, diags)) { return false; }
+  return size_pass(c, g, o, s, p, size_owner_holes(c, first), out, diags);
 }
 
 }  // namespace scav

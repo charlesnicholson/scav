@@ -24,6 +24,20 @@ struct SizedLayout {
   scav_rect chart{};
 };
 
+// A desired aspect ratio as a pair, in the profile's own `[1, 1024]` bounds so
+// the packer's products stay where it proved them. `num` 0 is no ratio at all.
+struct FrameDar {
+  int32_t num{ 0 }, den{ 0 };
+};
+
+// Which ratio every packing inside a state's interior aims at: the profile's
+// one ratio at every depth, or the aspect of the hole the state leaves between
+// its two text bands, which is the rect its submachines are packed into
+// (11.4, 11.10). The hole is only knowable once the state is sized, so
+// `OwnerHole` sizes twice -- once at the profile's ratio to find the holes,
+// then again against them.
+enum class DarSource : uint32_t { Profile, OwnerHole };
+
 // False on an extent that would leave the coordinate domain, with one
 // diagnostic per offending entity and `out` left partly written.
 bool size_layout(Chart const &c,
@@ -32,7 +46,8 @@ bool size_layout(Chart const &c,
                  scav_spaces const &s,
                  scav_profile const &p,
                  SizedLayout &out,
-                 std::vector<Diagnostic> &diags);
+                 std::vector<Diagnostic> &diags,
+                 DarSource dar = DarSource::Profile);
 
 }  // namespace scav
 
