@@ -15,6 +15,13 @@
 
 namespace scav {
 
+// Bracketed so a test reaches the hole a frame is handed without sizing a
+// whole chart. The prototypes a test uses are its own; see scav_internal.h.
+SCAV_INTERNAL_BEGIN
+FrameDar size_hole_ratio(int32_t w, int32_t h);
+std::vector<FrameDar> size_owner_holes(Chart const &c, SizedLayout const &z);
+SCAV_INTERNAL_END
+
 namespace {
 
 scav_box_space box_of(scav_box_space const *rows, uint32_t count, uint32_t i) {
