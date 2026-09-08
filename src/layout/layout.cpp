@@ -257,6 +257,8 @@ bool layout_run(Chart &c,
   }
 
   SplitGraph const g{ decompose(c) };
+  // Once for every attempt below: phase 1 reads `sweep_count` and no extent, so
+  // the inflated copies the retry loop makes order to the same rows.
   SubmachineOrders const orders{ order_submachines(c, g, s, p, o.threads) };
   SizedLayout sized;
   if (!size_layout(c, g, orders, s, p, sized, diags)) { return false; }
@@ -272,12 +274,11 @@ bool layout_run(Chart &c,
        !done && (p.spacing_inflation_increment > 0) && (k < p.spacing_inflation_cap);
        ++k) {
     if (!inflate(wider, p.spacing_inflation_increment)) { break; }
-    SubmachineOrders const next_orders{ order_submachines(c, g, s, wider, o.threads) };
     SizedLayout next_sized;
     std::vector<Diagnostic> spilled;
-    if (!size_layout(c, g, next_orders, s, wider, next_sized, spilled)) { break; }
+    if (!size_layout(c, g, orders, s, wider, next_sized, spilled)) { break; }
     Routes next{
-      route_transitions(c, g, next_orders, next_sized, s, wider, *router, o.threads)
+      route_transitions(c, g, orders, next_sized, s, wider, *router, o.threads)
     };
     bool keep{ false };
     done = inflation_done(fewest, next.degraded(), next.unreachable, keep);
