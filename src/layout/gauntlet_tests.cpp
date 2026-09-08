@@ -19,9 +19,18 @@
 
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <string_view>
 #include <vector>
+
+namespace scav {
+
+// The portfolio's row, which `layout.cpp` brackets with SCAV_INTERNAL, declared
+// here rather than in a header so the shipping build keeps it internal.
+void search_tuple(scav_profile &p, DarSource &dar, uint32_t index);
+
+}  // namespace scav
 
 namespace {
 
@@ -55,8 +64,46 @@ struct Laid {
   SubmachineOrders o;
   SizedLayout z;
   Routes r;
+  uint32_t tuple{ INVALID };  // the portfolio row the run kept
 };
 
+// The profile with the portfolio switched off, so one row lays out and it is
+// row 0 -- the caller's own tuple, and the pipeline as it ran before Level 2.
+scav_profile one_row(scav_profile const &p) {
+  scav_profile out{ p };
+  out.portfolio_m = 1;
+  return out;
+}
+
+// The column's rows against what the phases produced, word for word. Every
+// geometry POD is a block of int32 with no padding, so a word compare reads no
+// byte whose value is unspecified.
+template <typename T>
+void column_holds(Chart const &c, char const *name, std::vector<T> const &rows) {
+  static_assert((sizeof(T) % sizeof(int32_t)) == 0, "geometry PODs are int32 blocks");
+  constexpr uint32_t WORDS{ sizeof(T) / sizeof(int32_t) };
+  ColumnId const id{ column_find(c, name) };
+  REQUIRE(id.v != INVALID);
+  REQUIRE(column_count(c, id) == static_cast<uint32_t>(rows.size()));
+  for (uint32_t i = 0; i < rows.size(); ++i) {
+    std::array<int32_t, WORDS> want{};
+    std::array<int32_t, WORDS> got{};
+    std::memcpy(want.data(), &rows[i], sizeof(T));
+    std::memcpy(got.data(),
+                column_data(c, id) + (static_cast<size_t>(i) * sizeof(T)),
+                sizeof(T));
+    CAPTURE(name);
+    CAPTURE(i);
+    REQUIRE(want == got);
+  }
+}
+
+// What a reader gets: `layout_run` picks a phase-2 tuple out of the portfolio
+// and writes the geometry columns (11.10). The phases are then re-run for that
+// same row, because the nudge statistics and the per-transition fallback flag
+// have no column of their own, and every column they came with is held to the
+// one the run wrote -- so the properties below read the drawing that ships and
+// not a candidate nobody drew.
 void lay(char const *name, scav_profile const &p, Laid &out) {
   // The router these properties are about, by the name it crosses every other
   // boundary under rather than by its position in the registry.
@@ -68,10 +115,27 @@ void lay(char const *name, scav_profile const &p, Laid &out) {
   std::vector<Diagnostic> diags;
   std::string failed;
   REQUIRE(load_file(path.c_str(), loader, out.c, diags, failed));
+
+  std::vector<scav_placed> placed;
+  scav_layout_opts const o{ .profile = p, .router = id, .threads = 0 };
+  REQUIRE(layout_run(out.c, {}, o, placed, diags, nullptr, &out.tuple));
+  // Nothing here is a shape the router has to give up on, so a RouteDegraded
+  // is a failure rather than a documented fallback.
+  CHECK(diags.empty());
+
+  scav_profile knobs{ p };
+  DarSource dar{ DarSource::Profile };
+  search_tuple(knobs, dar, out.tuple);
   out.g = decompose(out.c);
-  out.o = order_submachines(out.c, out.g, {}, p);
-  REQUIRE(size_layout(out.c, out.g, out.o, {}, p, out.z, diags));
-  out.r = route_transitions(out.c, out.g, out.o, out.z, {}, p, *router_at(id));
+  out.o = order_submachines(out.c, out.g, {}, knobs);
+  REQUIRE(size_layout(out.c, out.g, out.o, {}, knobs, out.z, diags, dar));
+  out.r = route_transitions(out.c, out.g, out.o, out.z, {}, knobs, *router_at(id));
+  column_holds(out.c, "scav.geom.state", out.z.state);
+  column_holds(out.c, "scav.geom.sub", out.z.sub);
+  column_holds(out.c, "scav.geom.point", out.r.points);
+  column_holds(out.c, "scav.geom.route", out.r.route);
+  column_holds(out.c, "scav.geom.port", out.r.port);
+  column_holds(out.c, "scav.geom.portslot", out.r.slots);
 }
 
 // The Tier-0 predicate, rewritten here as it is for the corpus: a gate that
@@ -146,6 +210,10 @@ Wide run_shared(scav_point a, scav_point b, scav_point c, scav_point d) {
   return 0;
 }
 
+// The two counts the regions carve-out is about: route segments entering a box
+// 11.14 does not carve out, and legs that fold a polyline back over itself.
+void shape_counts(Laid const &l, uint32_t &through, uint32_t &back);
+
 // Live boxes, which is what a route may not enter and what its ends sit on.
 std::vector<uint32_t> live_of(Chart const &c) {
   std::vector<uint32_t> live;
@@ -155,13 +223,63 @@ std::vector<uint32_t> live_of(Chart const &c) {
   return live;
 }
 
+void shape_counts(Laid const &l, uint32_t &through, uint32_t &back) {
+  std::vector<uint32_t> const live{ live_of(l.c) };
+  through = 0;
+  back = 0;
+  for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+    scav_span const route{ l.r.route[t] };
+    Transition const &tr{ l.c.transitions[t] };
+    for (uint32_t k = 0; (k + 1) < route.len; ++k) {
+      scav_point const a{ l.r.points[route.off + k] };
+      scav_point const b{ l.r.points[route.off + k + 1] };
+      for (uint32_t const st : live) {
+        if ((st == tr.src.v) || (st == tr.dst.v)) { continue; }
+        if (ancestor(l.c, { st }, tr.src) || ancestor(l.c, { st }, tr.dst)) { continue; }
+        through += enters(a, b, l.z.state[st]) ? 1U : 0U;
+      }
+    }
+    for (uint32_t k = 0; (k + 2) < route.len; ++k) {
+      scav_point const a{ l.r.points[route.off + k] };
+      scav_point const b{ l.r.points[route.off + k + 1] };
+      scav_point const c{ l.r.points[route.off + k + 2] };
+      back += (((a.x == b.x) && (b.x == c.x) && ((b.y > a.y) == (b.y > c.y))) ||
+               ((a.y == b.y) && (b.y == c.y) && ((b.x > a.x) == (b.x > c.x))))
+                  ? 1U
+                  : 0U;
+    }
+  }
+}
+
+// Every branch off a bar that left through one of its two short caps instead of
+// along one of the long faces 11.5's rule is about.
+uint32_t capped_branches(Laid const &l) {
+  uint32_t capped{ 0 };
+  for (uint32_t st = 0; st < l.c.states.size(); ++st) {
+    StateKind const kind{ l.c.states[st].kind };
+    if ((kind != StateKind::Fork) && (kind != StateKind::Join)) { continue; }
+    scav_rect const box{ l.z.state[st] };
+    for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+      scav_span const route{ l.r.route[t] };
+      if (route.len < 2) { continue; }
+      Transition const &tr{ l.c.transitions[t] };
+      if (tr.src.v == st) { capped += on_long_face(l.r.points[route.off], box) ? 0U : 1U; }
+      if (tr.dst.v == st) {
+        capped += on_long_face(l.r.points[route.off + route.len - 1], box) ? 0U : 1U;
+      }
+    }
+  }
+  return capped;
+}
+
 }  // namespace
 
 TEST_CASE("gauntlet: no element routes an edge through a box") {
+  // Every chart, `regions.scav` included: what the portfolio ships routes
+  // through nothing at either profile. It carved this out while the suite
+  // scored one candidate, and the count 11.8 still owns is pinned at the end
+  // of this file against the row that produces it.
   for (char const *name : GAUNTLET) {
-    // regions.scav is the one shape that does, and 11.8 owns it: see the
-    // pinned count at the end of this file.
-    if (std::string_view{ name } == "regions.scav") { continue; }
     for (scav_profile const &p : { readable(), compact() }) {
       CAPTURE(name);
       CAPTURE(p.profile_id);
@@ -203,9 +321,7 @@ TEST_CASE("gauntlet: every route is axis-aligned, forward, and reaches its ends"
       lay(name, p, l);
       for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
         CAPTURE(t);
-        // Nothing here is a shape the router has to give up on, so a degraded
-        // straight line is a failure rather than a documented fallback.
-        CHECK(l.r.failed[t] == 0);
+        CHECK(l.r.failed[t] == 0);  // `lay` holds the run's diagnostics to this
         scav_span const route{ l.r.route[t] };
         if (l.g.trans_segments[t].len == 0) {
           CHECK(route.len == 0);
@@ -539,35 +655,42 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     // state is an obstacle walling the route out of the space between its own
     // two regions, and the route goes the long way round it: through whatever
     // else that frame holds, and back along the line it arrived on.
-    Laid l;
-    lay("regions.scav", p, l);
-    std::vector<uint32_t> const live{ live_of(l.c) };
+    //
+    // The portfolio routes around that hole rather than closing it: at the
+    // shipped M the packer choice puts the two regions where the long way round
+    // clips nothing, which is why the property above now holds on this chart
+    // too. So the count stays visible against the row that produces it -- row 0
+    // alone, the profile's own tuple -- until 11.8 is built and it is zero
+    // whichever row lays out.
+    Laid row_zero;
+    lay("regions.scav", one_row(p), row_zero);
+    REQUIRE(row_zero.tuple == 0);
     uint32_t through{ 0 };
     uint32_t back{ 0 };
-    for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
-      scav_span const route{ l.r.route[t] };
-      Transition const &tr{ l.c.transitions[t] };
-      for (uint32_t k = 0; (k + 1) < route.len; ++k) {
-        scav_point const a{ l.r.points[route.off + k] };
-        scav_point const b{ l.r.points[route.off + k + 1] };
-        for (uint32_t const st : live) {
-          if ((st == tr.src.v) || (st == tr.dst.v)) { continue; }
-          if (ancestor(l.c, { st }, tr.src) || ancestor(l.c, { st }, tr.dst)) { continue; }
-          through += enters(a, b, l.z.state[st]) ? 1U : 0U;
-        }
-      }
-      for (uint32_t k = 0; (k + 2) < route.len; ++k) {
-        scav_point const a{ l.r.points[route.off + k] };
-        scav_point const b{ l.r.points[route.off + k + 1] };
-        scav_point const c{ l.r.points[route.off + k + 2] };
-        back += (((a.x == b.x) && (b.x == c.x) && ((b.y > a.y) == (b.y > c.y))) ||
-                 ((a.y == b.y) && (b.y == c.y) && ((b.x > a.x) == (b.x > c.x))))
-                    ? 1U
-                    : 0U;
-      }
-    }
+    shape_counts(row_zero, through, back);
     CHECK(through == 2);
     CHECK(back == 2);
+    // The scorer from the other end, over the columns that run wrote: 11.6's
+    // descent and the predicate above are two implementations of one question,
+    // and a carve-out is worth more when both answer it.
+    CHECK(cost_columns(row_zero.c, row_zero.g, p).through_box == 2);
+
+    // What ships, scored both ways: the shape is still there and the drawing no
+    // longer shows it, which is why the properties above hold on this chart.
+    Laid shipped;
+    lay("regions.scav", p, shipped);
+    CHECK(shipped.tuple != 0);
+    uint32_t shipped_through{ 0 };
+    uint32_t shipped_back{ 0 };
+    shape_counts(shipped, shipped_through, shipped_back);
+    CHECK(shipped_through == 0);
+    CHECK(cost_columns(shipped.c, shipped.g, p).through_box == 0);
+    // The other half of the same hole, and it got worse rather than better: the
+    // route still leaves and returns along one line, and the arrangement the
+    // packer picked makes it double back twice each way instead of once. That
+    // is the count the axis-aligned property still carves this chart out for,
+    // and it is 11.8's to take to zero.
+    CHECK(shipped_back == 4);
 
     // 11.5's face rule, which picks a face by how far the target lies outside
     // the box on each axis rather than by the distance to a point on it. A
@@ -575,25 +698,16 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     // the y separation dominate, so it leaves through the bar's own 64-unit
     // cap while the 960-unit face beside it goes unused, and the arrow then
     // reads as coming off the bar's end instead of off its length.
-    Laid f;
-    lay("fork.scav", p, f);
-    uint32_t capped{ 0 };
-    for (uint32_t st = 0; st < f.c.states.size(); ++st) {
-      StateKind const kind{ f.c.states[st].kind };
-      if ((kind != StateKind::Fork) && (kind != StateKind::Join)) { continue; }
-      scav_rect const box{ f.z.state[st] };
-      for (uint32_t t = 0; t < f.c.transitions.size(); ++t) {
-        scav_span const route{ f.r.route[t] };
-        if (route.len < 2) { continue; }
-        Transition const &tr{ f.c.transitions[t] };
-        if (tr.src.v == st) {
-          capped += on_long_face(f.r.points[route.off], box) ? 0U : 1U;
-        }
-        if (tr.dst.v == st) {
-          capped += on_long_face(f.r.points[route.off + route.len - 1], box) ? 0U : 1U;
-        }
-      }
-    }
-    CHECK(capped == 1);
+    Laid fork_zero;
+    lay("fork.scav", one_row(p), fork_zero);
+    CHECK(capped_branches(fork_zero) == 1);
+    // And what ships: at `readable` the packer choice stacks the branch beside
+    // the bar rather than below it, so the y separation stops dominating and
+    // the count is zero. The rule is still the rule -- `compact` packs tighter,
+    // ships row 0, and still reads one.
+    Laid fork_shipped;
+    lay("fork.scav", p, fork_shipped);
+    CHECK(capped_branches(fork_shipped) ==
+          ((p.profile_id == compact().profile_id) ? 1U : 0U));
   }
 }

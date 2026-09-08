@@ -150,7 +150,7 @@ bool profile_validate(scav_profile const &p) {
            in_range(p.w_excess_len, 0, 1024) && in_range(p.w_adjacency, 0, 1024) &&
            in_range(p.w_label, 0, 1024) && in_range(p.w_label_near, 0, 1024) &&
            in_range(p.w_aspect, 0, 1024) && in_range(p.w_area, 0, 1024) &&
-           in_range(p.portfolio_k, 1, 64) && in_range(p.portfolio_m, 1, 64) &&
+           in_range(p.portfolio_k, 1, 64) && in_range(p.portfolio_m, 1, 8) &&
            in_range(p.sweep_count, 0, 1024) &&
            in_range(p.congestion_iterations, 0, 1024) && in_range(p.ripup_cap, 0, 1024) &&
            in_range(p.spacing_inflation_cap, 0, 1024) &&

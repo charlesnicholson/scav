@@ -301,11 +301,12 @@ bool inflation_done(uint32_t fewest, uint32_t degraded, uint32_t unreachable, bo
 }
 
 // How many of the table's rows this chart runs: `portfolio_m`, halved for every
-// doubling of the entity count past 512, floored at one row and capped at the
-// table. So a chart under 1,024 entities gets the whole of M and either 2k
-// shape gets one -- the largest chart is searched least, which is backwards for
-// quality and right for latency (11.10). `ilog2` of a `uint32_t` is at most 31,
-// so the shift is at most 22.
+// doubling of the entity count past 512, floored at one row. So a chart under
+// 1,024 entities gets the whole of M and either 2k shape gets one -- the
+// largest chart is searched least, which is backwards for quality and right
+// for latency (11.10). `ilog2` of a `uint32_t` is at most 31, so the shift is
+// at most 22, and the cap holds the row index inside the table for a profile
+// this never saw validated -- the validator itself rejects a larger M.
 uint32_t search_tuple_count(scav_profile const &p, uint32_t entity_count) {
   uint32_t const scale{ (entity_count == 0) ? 0U : ilog2(entity_count) };
   uint32_t const shift{ (scale > 9U) ? (scale - 9U) : 0U };
@@ -314,12 +315,14 @@ uint32_t search_tuple_count(scav_profile const &p, uint32_t entity_count) {
 }
 
 // Row `index` of the fixed table, as a delta from the profile as given: bit 0
-// flips the scale-measure tiebreak, bit 1 the box packer, bit 2 hands each
+// flips the box packer, bit 1 the scale-measure tiebreak, bit 2 hands each
 // frame its owner's hole. Row 0 is therefore the caller's own tuple, and
 // `portfolio_m` of 1 is the pipeline as it ran before the portfolio existed.
+// The packer is bit 0 because it is the knob that moves a chart: every pick
+// the corpus makes on either scale is row 1, and the tiebreak has moved none.
 void search_tuple(scav_profile &p, DarSource &dar, uint32_t index) {
-  p.sm_tiebreak ^= static_cast<int32_t>(index & 1U);
-  p.trybox ^= static_cast<int32_t>((index >> 1U) & 1U);
+  p.trybox ^= static_cast<int32_t>(index & 1U);
+  p.sm_tiebreak ^= static_cast<int32_t>((index >> 1U) & 1U);
   dar = (((index >> 2U) & 1U) != 0) ? DarSource::OwnerHole : DarSource::Profile;
 }
 

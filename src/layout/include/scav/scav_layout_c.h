@@ -114,7 +114,7 @@ typedef struct {
   int32_t w_area;
 
   int32_t portfolio_k;                 /* [1, 64] */
-  int32_t portfolio_m;                 /* [1, 64] */
+  int32_t portfolio_m;                 /* chart-global phase-2 tuples; [1, 8] */
   int32_t sweep_count;                 /* [0, 1024] */
   int32_t congestion_iterations;       /* [0, 1024] */
   int32_t ripup_cap;                   /* [0, 1024] */

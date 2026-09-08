@@ -115,10 +115,12 @@ TEST_CASE("profile: every bound rejects out of range") {
           .field = &scav_profile::portfolio_k,
           .bad_low = 0,
           .bad_high = 65 },
+    // The table Level 2 chooses over has eight rows, so nine is out of range
+    // rather than silently capped (11.10, 11.15).
     Poke{ .what = "portfolio_m",
           .field = &scav_profile::portfolio_m,
           .bad_low = 0,
-          .bad_high = 65 },
+          .bad_high = 9 },
     Poke{ .what = "sweep_count",
           .field = &scav_profile::sweep_count,
           .bad_low = -1,

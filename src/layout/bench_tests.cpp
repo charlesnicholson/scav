@@ -91,7 +91,9 @@ int64_t timed_run(Chart &c, scav_layout_opts const &o, bool &laid) {
 
 TEST_CASE("bench: every registered router scores the corpus, term by term") {
   // No space requests and the readable profile, so a row is comparable with the
-  // single-router cost golden and with whatever registers next.
+  // single-router cost golden and with whatever registers next. The phases
+  // directly and no portfolio, deliberately: this is an A/B between routers on
+  // one candidate, so both sides have to be the same candidate (11.10).
   scav_profile const p{ readable() };
   scav_router_id reference{ 0 };
   REQUIRE(router_by_name(reinterpret_cast<scav_byte const *>("straight"), 8, reference));
@@ -225,6 +227,8 @@ TEST_CASE("bench: the cells corpus_routers.txt leaves unscored, term by term") {
   // chart x profile x router, less the corpus at `readable` next door: the
   // corpus at `compact`, and the element suite at both. Raw terms and the
   // Tier-0 count with no weighted sum, so a weight change cannot move a row.
+  // The phases directly and no portfolio, for the same reason: this pins the
+  // scorer over a fixed candidate, so neither a weight nor a pick can move it.
   std::string actual;
   auto const row = [&actual](char const *profile,
                              scav_profile const &p,

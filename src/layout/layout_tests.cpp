@@ -1392,6 +1392,8 @@ TEST_CASE("layout: the table's first row is the profile as given") {
   // Row 0 has to be the caller's own tuple, or `portfolio_m` of 1 would not be
   // the pipeline as it ran before the portfolio existed. The other seven are
   // the two packer knobs crossed, then the same four handing the ratios down.
+  // The packer takes bit 0 because it is the knob that moves a chart, so row 1
+  // is where every corpus pick lands and M of 2 would reach all of them.
   for (int32_t const trybox : { 0, 1 }) {
     for (int32_t const tiebreak : { 0, 1 }) {
       CAPTURE(trybox);
@@ -1404,8 +1406,9 @@ TEST_CASE("layout: the table's first row is the profile as given") {
         scav_profile knobs{ given };
         DarSource dar{ DarSource::OwnerHole };
         search_tuple(knobs, dar, row);
-        CHECK(knobs.sm_tiebreak == (given.sm_tiebreak ^ static_cast<int32_t>(row & 1U)));
-        CHECK(knobs.trybox == (given.trybox ^ static_cast<int32_t>((row >> 1U) & 1U)));
+        CHECK(knobs.trybox == (given.trybox ^ static_cast<int32_t>(row & 1U)));
+        CHECK(knobs.sm_tiebreak ==
+              (given.sm_tiebreak ^ static_cast<int32_t>((row >> 1U) & 1U)));
         CHECK((dar == ((row < 4) ? DarSource::Profile : DarSource::OwnerHole)));
         // Nothing else about the profile is the table's to touch, all 48 knobs
         // read back to say so.
@@ -1413,6 +1416,15 @@ TEST_CASE("layout: the table's first row is the profile as given") {
         knobs.sm_tiebreak = given.sm_tiebreak;
         CHECK(profile_fields(knobs) == profile_fields(given));
       }
+      // Row 1 is the packer and nothing else, which is the whole reason the
+      // bits are in this order.
+      scav_profile second{ given };
+      DarSource one{ DarSource::OwnerHole };
+      search_tuple(second, one, 1);
+      CHECK(second.trybox != given.trybox);
+      CHECK(second.sm_tiebreak == given.sm_tiebreak);
+      CHECK((one == DarSource::Profile));
+
       // The four rows of each half are the four combinations, once each.
       uint32_t seen{ 0 };
       for (uint32_t row = 0; row < 4; ++row) {
@@ -1428,36 +1440,42 @@ TEST_CASE("layout: the table's first row is the profile as given") {
 
 TEST_CASE("layout: how many tuples a chart runs is closed form and model-derived") {
   // M halves for every doubling of the entity count past 512, so a chart under
-  // 1,024 entities gets the whole of M and either 2k shape gets one row. The
-  // table has eight rows, which is what caps a `portfolio_m` above it.
+  // 1,024 entities gets the whole of M and either 2k shape gets one row. Eight
+  // is the whole table and the largest M the validator admits.
   scav_profile p{ readable() };
   struct Row {
     uint32_t entities;
-    uint32_t at_one, at_four, at_sixtyfour;
+    uint32_t at_one, at_four, at_eight;
   };
   for (Row const &row :
-       { Row{ .entities = 0, .at_one = 1, .at_four = 4, .at_sixtyfour = 8 },
-         Row{ .entities = 1, .at_one = 1, .at_four = 4, .at_sixtyfour = 8 },
-         Row{ .entities = 1023, .at_one = 1, .at_four = 4, .at_sixtyfour = 8 },
-         Row{ .entities = 1024, .at_one = 1, .at_four = 2, .at_sixtyfour = 8 },
-         Row{ .entities = 2047, .at_one = 1, .at_four = 2, .at_sixtyfour = 8 },
-         Row{ .entities = 2048, .at_one = 1, .at_four = 1, .at_sixtyfour = 8 },
-         Row{ .entities = 6000, .at_one = 1, .at_four = 1, .at_sixtyfour = 8 } }) {
+       { Row{ .entities = 0, .at_one = 1, .at_four = 4, .at_eight = 8 },
+         Row{ .entities = 1, .at_one = 1, .at_four = 4, .at_eight = 8 },
+         Row{ .entities = 1023, .at_one = 1, .at_four = 4, .at_eight = 8 },
+         Row{ .entities = 1024, .at_one = 1, .at_four = 2, .at_eight = 4 },
+         Row{ .entities = 2047, .at_one = 1, .at_four = 2, .at_eight = 4 },
+         Row{ .entities = 2048, .at_one = 1, .at_four = 1, .at_eight = 2 },
+         Row{ .entities = 6000, .at_one = 1, .at_four = 1, .at_eight = 1 } }) {
     CAPTURE(row.entities);
     p.portfolio_m = 1;
     CHECK(search_tuple_count(p, row.entities) == row.at_one);
     p.portfolio_m = 4;
     CHECK(search_tuple_count(p, row.entities) == row.at_four);
-    p.portfolio_m = 64;
-    CHECK(search_tuple_count(p, row.entities) == row.at_sixtyfour);
+    p.portfolio_m = 8;
+    CHECK(search_tuple_count(p, row.entities) == row.at_eight);
+    CHECK(profile_validate(p));
   }
 
-  // Past 8,192 entities the shift bites into the largest M there is, and the
-  // floor is what answers rather than the table's size.
-  p.portfolio_m = 64;
-  CHECK(search_tuple_count(p, 1U << 14U) == 2);
-  CHECK(search_tuple_count(p, 1U << 15U) == 1);
+  // Past 4,096 entities the shift bites into the largest M the validator
+  // admits, and the floor is what answers.
+  p.portfolio_m = 8;
+  CHECK(search_tuple_count(p, 1U << 12U) == 1);
   CHECK(search_tuple_count(p, 0xFFFF'FFFFU) == 1);
+
+  // A profile this never saw validated is held inside the table all the same:
+  // a row index past its last row would repeat a tuple already run.
+  p.portfolio_m = 64;
+  CHECK(!profile_validate(p));
+  CHECK(search_tuple_count(p, 1) == 8);
 
   // Both 2k shapes, which is the claim the rule is written for.
   Chart nested{ nested_2k_chart() };
@@ -2026,6 +2044,12 @@ TEST_CASE("layout: the corpus cost vector is committed, term by term and by shar
   // readable profile, so a later phase is compared against a row not a claim.
   // The share table beside it says how the sum divides between the nine terms,
   // which is what a weight change moves and a term column does not show.
+  //
+  // Scored from the geometry columns a whole `layout_run` wrote, portfolio and
+  // all, because these two rows are what 17's phase tables say the pipeline
+  // does. A golden that claims to describe the diagram scores what ships; one
+  // that pins a component scores the component, which is what
+  // `corpus_routers.txt` and `cost_terms.txt` do next door.
   scav_profile const p{ readable() };
   std::string actual;
   std::string shares;
@@ -2041,20 +2065,10 @@ TEST_CASE("layout: the corpus cost vector is committed, term by term and by shar
                             "toolchanger.scav",
                             "vac.scav" }) {
     CAPTURE(name);
-    std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
-    path += name;
-    Loader loader;
     Chart c;
-    std::vector<Diagnostic> diags;
-    std::string failed;
-    REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
-
-    SplitGraph const g{ decompose(c) };
-    SubmachineOrders const o{ order_submachines(c, g, {}, p) };
-    SizedLayout z;
-    REQUIRE(size_layout(c, g, o, {}, p, z, diags));
-    Routes const r{ route_transitions(c, g, o, z, {}, p, *router_at(0)) };
-    CostTerms const t{ cost_terms(c, g, z, r, {}, p) };
+    load_corpus(name, c);
+    run(c, {}, p);
+    CostTerms const t{ cost_columns(c, decompose(c), p) };
     Cost const scored{ cost_of(t, p) };
 
     actual += name;
