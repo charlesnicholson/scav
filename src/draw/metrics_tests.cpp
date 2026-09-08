@@ -20,6 +20,9 @@ namespace {
 
 using namespace scav;
 
+// The size the C surface checks against, as this build measures it.
+constexpr uint32_t EXTENT_SIZE{ static_cast<uint32_t>(sizeof(scav_extent)) };
+
 void be16(std::vector<scav_byte> &out, uint32_t v) {
   out.push_back(static_cast<scav_byte>((v >> 8U) & 0xFFU));
   out.push_back(static_cast<scav_byte>(v & 0xFFU));
@@ -609,7 +612,7 @@ TEST_CASE("metrics: the C surface agrees with the C++ one, and refuses nulls") {
   auto const *raw{ reinterpret_cast<scav_byte const *>(text.data()) };
   scav_extent got{};
   scav_extent want{};
-  REQUIRE(scav_measure_text(m, raw, 4, 160, &got) == SCAV_OK);
+  REQUIRE(scav_measure_text(m, raw, 4, 160, &got, EXTENT_SIZE) == SCAV_OK);
   REQUIRE(measure(bundled(), text, 160, want) == MeasureStatus::Ok);
   CHECK(got.w == want.w);
   CHECK(got.h == want.h);
@@ -620,19 +623,20 @@ TEST_CASE("metrics: the C surface agrees with the C++ one, and refuses nulls") {
   CHECK(scav_line_height(160, 7, 0, &lh) == SCAV_E_INVALID_ARG);
 
   scav_extent block{};
-  REQUIRE(scav_measure_block(m, raw, 4, 160, 7, 5, &block) == SCAV_OK);
+  REQUIRE(scav_measure_block(m, raw, 4, 160, 7, 5, &block, EXTENT_SIZE) == SCAV_OK);
   CHECK(block.h == 224);
 
   // Every failure mode keeps its own code: a missing glyph is not a bad
   // argument, because one is the font's fault and the other the caller's.
-  CHECK(scav_measure_text(m, raw, 4, 0, &got) == SCAV_E_INVALID_ARG);
+  CHECK(scav_measure_text(m, raw, 4, 0, &got, EXTENT_SIZE) == SCAV_E_INVALID_ARG);
   CHECK(scav_measure_text(m,
                           reinterpret_cast<scav_byte const *>("\xF3\xB0\x80\x81"),
                           4,
                           160,
-                          &got) == SCAV_E_NO_GLYPH);
-  CHECK(scav_measure_text(nullptr, raw, 4, 160, &got) == SCAV_E_INVALID_ARG);
-  CHECK(scav_measure_text(m, raw, 4, 160, nullptr) == SCAV_E_INVALID_ARG);
+                          &got,
+                          EXTENT_SIZE) == SCAV_E_NO_GLYPH);
+  CHECK(scav_measure_text(nullptr, raw, 4, 160, &got, EXTENT_SIZE) == SCAV_E_INVALID_ARG);
+  CHECK(scav_measure_text(m, raw, 4, 160, nullptr, EXTENT_SIZE) == SCAV_E_INVALID_ARG);
   CHECK(scav_metrics_identity(nullptr, &identity) == SCAV_E_INVALID_ARG);
   CHECK(scav_metrics_create(nullptr, 0, nullptr) == SCAV_E_INVALID_ARG);
 

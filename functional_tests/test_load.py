@@ -58,7 +58,7 @@ def bind(lib: ctypes.CDLL) -> None:
     lib.scav_load_add.argtypes = [ctypes.c_void_p, ctypes.c_char_p, u32, ctypes.c_char_p]
 
     lib.scav_load_pending.restype = ctypes.c_int32
-    lib.scav_load_pending.argtypes = [ctypes.c_void_p, p(p(Pending)), p(u32)]
+    lib.scav_load_pending.argtypes = [ctypes.c_void_p, p(p(Pending)), p(u32), p(u32)]
 
     lib.scav_load_path.restype = ctypes.c_int32
     lib.scav_load_path.argtypes = [ctypes.c_void_p, ctypes.c_uint64, p(byte_p), p(u32)]
@@ -100,9 +100,16 @@ class Loader:
 
     def pending(self) -> list[tuple[str, int, int]]:
         rows = ctypes.POINTER(Pending)()
+        stride = ctypes.c_uint32(0)
         count = ctypes.c_uint32(0)
         assert self.lib.scav_load_pending(
-            self.handle, ctypes.byref(rows), ctypes.byref(count)) == SCAV_OK
+            self.handle, ctypes.byref(rows), ctypes.byref(stride),
+            ctypes.byref(count)) == SCAV_OK
+        # The rows are scav's, so the pitch to walk them at is scav's to state:
+        # this struct is hand-rolled, and the assertion is what keeps it honest.
+        assert stride.value == ctypes.sizeof(Pending), (
+            f"scav_pending is {ctypes.sizeof(Pending)} bytes here and "
+            f"{stride.value} in the library")
         out = []
         for i in range(count.value):
             row = rows[i]

@@ -17,6 +17,8 @@ static_assert(sizeof(scav_span) == 8);
 static_assert(sizeof(scav_point) == 8);
 static_assert(sizeof(scav_extent) == 8);
 static_assert(sizeof(scav_rect) == 16);
+static_assert(sizeof(scav_diag) == 24);
+static_assert(sizeof(scav_pending) == 16);
 
 namespace {
 
@@ -38,7 +40,7 @@ std::vector<scav::Diagnostic> const &diags_of(scav_load const *loader) {
 
 extern "C" {
 
-uint32_t scav_abi_version(void) { return 4; }
+uint32_t scav_abi_version(void) { return 5; }
 
 scav_result scav_load_begin(scav_load **out) {
   if (out == nullptr) { return SCAV_E_INVALID_ARG; }
@@ -58,8 +60,10 @@ scav_result scav_load_add(scav_load *loader,
 
 scav_result scav_load_pending(scav_load *loader,
                               scav_pending const **out,
+                              uint32_t *out_stride,
                               uint32_t *out_count) {
-  if ((loader == nullptr) || (out == nullptr) || (out_count == nullptr)) {
+  if ((loader == nullptr) || (out == nullptr) || (out_stride == nullptr) ||
+      (out_count == nullptr)) {
     return SCAV_E_INVALID_ARG;
   }
   if (loader->finished != 0) { return SCAV_E_STATE; }
@@ -68,6 +72,7 @@ scav_result scav_load_pending(scav_load *loader,
     loader->pending.push_back(to_abi(p));
   }
   *out = loader->pending.data();
+  *out_stride = static_cast<uint32_t>(sizeof(scav_pending));
   *out_count = static_cast<uint32_t>(loader->pending.size());
   return SCAV_OK;
 }
@@ -179,7 +184,11 @@ scav_result scav_chart_diag_count(scav_chart const *chart, uint32_t *out_count) 
   return SCAV_OK;
 }
 
-scav_result scav_chart_diag(scav_chart const *chart, uint32_t index, scav_diag *out) {
+scav_result scav_chart_diag(scav_chart const *chart,
+                            uint32_t index,
+                            scav_diag *out,
+                            uint32_t out_size) {
+  if (out_size != sizeof(scav_diag)) { return SCAV_E_ABI; }
   if ((chart == nullptr) || (out == nullptr)) { return SCAV_E_INVALID_ARG; }
   if (index >= chart->diags.size()) { return SCAV_E_INVALID_ARG; }
   scav::Diagnostic const &d{ chart->diags[index] };

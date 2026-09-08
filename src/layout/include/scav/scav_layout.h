@@ -24,7 +24,8 @@ inline constexpr int32_t SPACE_MAX{ COORD_MAX / 4 };
 bool spaces_validate(Chart const &c, scav_spaces const &s, std::vector<Diagnostic> &diags);
 
 // xxh32 over counts and rows, field by field. A hashed layout input: a golden
-// is reproducible only against a stated measurement policy.
+// is reproducible only against a stated measurement policy. The strides are ABI
+// facts rather than layout inputs and are deliberately not hashed.
 uint32_t spaces_digest(scav_spaces const &s);
 
 // Profile ===================================================================

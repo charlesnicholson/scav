@@ -27,15 +27,17 @@ namespace {
 
 using namespace scav;
 
+constexpr uint32_t PROFILE_SIZE{ static_cast<uint32_t>(sizeof(scav_profile)) };
+
 scav_profile readable() {
   scav_profile p{};
-  REQUIRE(scav_profile_named("readable", &p) == SCAV_OK);
+  REQUIRE(scav_profile_named("readable", &p, PROFILE_SIZE) == SCAV_OK);
   return p;
 }
 
 scav_profile compact() {
   scav_profile p{};
-  REQUIRE(scav_profile_named("compact", &p) == SCAV_OK);
+  REQUIRE(scav_profile_named("compact", &p, PROFILE_SIZE) == SCAV_OK);
   return p;
 }
 

@@ -42,12 +42,16 @@ Tables full_tables(Chart const &c) {
 scav_spaces as_spaces(Tables const &t) {
   return { .box_state = t.box_state.data(),
            .n_box_state = static_cast<uint32_t>(t.box_state.size()),
+           .box_state_stride = static_cast<uint32_t>(sizeof(scav_box_space)),
            .box_sub = t.box_sub.data(),
            .n_box_sub = static_cast<uint32_t>(t.box_sub.size()),
+           .box_sub_stride = static_cast<uint32_t>(sizeof(scav_box_space)),
            .path_clear = t.path_clear.data(),
            .n_path_clear = static_cast<uint32_t>(t.path_clear.size()),
+           .path_clear_stride = static_cast<uint32_t>(sizeof(scav_path_clear)),
            .path_box = t.path_box.data(),
-           .n_path_box = static_cast<uint32_t>(t.path_box.size()) };
+           .n_path_box = static_cast<uint32_t>(t.path_box.size()),
+           .path_box_stride = static_cast<uint32_t>(sizeof(scav_path_box)) };
 }
 
 }  // namespace
@@ -214,4 +218,15 @@ TEST_CASE("spaces: the digest hears every field and both zero shapes differ") {
   scav_spaces const as_state{ .box_state = &row, .n_box_state = 1 };
   scav_spaces const as_sub{ .box_sub = &row, .n_box_sub = 1 };
   CHECK(spaces_digest(as_state) != spaces_digest(as_sub));
+
+  // A stride is an ABI fact and not a layout input, so the four of them are the
+  // one part of this struct the digest cannot hear -- otherwise hardening the
+  // boundary would have rebased every golden.
+  Tables const unheard{ t };
+  scav_spaces bare{ as_spaces(unheard) };
+  bare.box_state_stride = 0;
+  bare.box_sub_stride = 1;
+  bare.path_clear_stride = 2;
+  bare.path_box_stride = 3;
+  CHECK(spaces_digest(bare) == base);
 }

@@ -22,6 +22,9 @@ using namespace scav;
 
 constexpr ElemRef NONE{ .kind = ElemKind::None, .ordinal = INVALID };
 
+// The size the C surface checks against, as this build measures it.
+constexpr uint32_t EXTENT_SIZE{ static_cast<uint32_t>(sizeof(scav_extent)) };
+
 ElemRef state(uint32_t i) { return { .kind = ElemKind::State, .ordinal = i }; }
 
 scav_style ink(uint32_t rgba) {
@@ -503,15 +506,22 @@ TEST_CASE("drawlist: the C surface reads every array and refuses nulls") {
   scav_point const *point_rows{ nullptr };
   scav_rect const *clip_rows{ nullptr };
   uint32_t count{ 0 };
-  REQUIRE(scav_drawlist_prims(list, &prim_rows, &count) == SCAV_OK);
+  uint32_t stride{ 0 };
+  // Each array reports the stride to walk it at, which a reader asserts against
+  // its own row size rather than assuming the two agree.
+  REQUIRE(scav_drawlist_prims(list, &prim_rows, &stride, &count) == SCAV_OK);
   CHECK(count == 1);
+  CHECK(stride == sizeof(scav_prim));
   CHECK(prim_rows[0].depth == 3);
   CHECK(prim_rows[0].kind == SCAV_PRIM_TEXT);
-  REQUIRE(scav_drawlist_styles(list, &style_rows, &count) == SCAV_OK);
+  REQUIRE(scav_drawlist_styles(list, &style_rows, &stride, &count) == SCAV_OK);
+  CHECK(stride == sizeof(scav_style));
   CHECK(style_rows[0].stroke_rgba == 0xAA);
-  REQUIRE(scav_drawlist_points(list, &point_rows, &count) == SCAV_OK);
+  REQUIRE(scav_drawlist_points(list, &point_rows, &stride, &count) == SCAV_OK);
+  CHECK(stride == sizeof(scav_point));
   CHECK(point_rows[0].x == 7);
-  REQUIRE(scav_drawlist_clips(list, &clip_rows, &count) == SCAV_OK);
+  REQUIRE(scav_drawlist_clips(list, &clip_rows, &stride, &count) == SCAV_OK);
+  CHECK(stride == sizeof(scav_rect));
   CHECK(clip_rows[0].w == 9);
 
   scav_byte const *bytes{ nullptr };
@@ -550,7 +560,7 @@ TEST_CASE("drawlist: the C surface reads every array and refuses nulls") {
 
   CHECK(scav_drawlist_counts(nullptr, &prims, nullptr, nullptr, nullptr, nullptr) ==
         SCAV_E_INVALID_ARG);
-  CHECK(scav_drawlist_prims(list, nullptr, &count) == SCAV_E_INVALID_ARG);
+  CHECK(scav_drawlist_prims(list, nullptr, &stride, &count) == SCAV_E_INVALID_ARG);
   CHECK(scav_drawlist_digest(list, nullptr, &digest) == SCAV_E_INVALID_ARG);
   CHECK(scav_drawlist_append(other, nullptr) == SCAV_E_INVALID_ARG);
   CHECK(scav_drawlist_create(nullptr) == SCAV_E_INVALID_ARG);
@@ -578,7 +588,7 @@ TEST_CASE("images: registration carries the dimensions, and an id names one") {
       SCAV_OK);
   CHECK(index == 0);
   scav_extent extent{};
-  REQUIRE(scav_image_extent(images, 0, &extent) == SCAV_OK);
+  REQUIRE(scav_image_extent(images, 0, &extent, EXTENT_SIZE) == SCAV_OK);
   CHECK(extent.w == 32);
   CHECK(extent.h == 16);
 
@@ -605,7 +615,7 @@ TEST_CASE("images: registration carries the dimensions, and an id names one") {
   CHECK(index == 0);
   CHECK(scav_image_find(images, reinterpret_cast<scav_byte const *>("none"), 4, &index) ==
         SCAV_E_INVALID_ARG);
-  CHECK(scav_image_extent(images, 9999, &extent) == SCAV_E_INVALID_ARG);
+  CHECK(scav_image_extent(images, 9999, &extent, EXTENT_SIZE) == SCAV_E_INVALID_ARG);
 
   scav_images_destroy(images);
   scav_images_destroy(nullptr);

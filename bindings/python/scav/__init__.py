@@ -71,6 +71,32 @@ def _bytes(text: str | bytes) -> bytes:
     return text if isinstance(text, bytes) else text.encode("utf-8")
 
 
+def _stride(got: int, kind: type, call: str) -> None:
+    """A stride scav reported against the row this binding lays out.
+
+    Every array scav hands back says what a row is, so the assertion is cheap
+    and the alternative is walking someone else's memory at the wrong pitch.
+    """
+    want = ctypes.sizeof(kind)
+    if got != want:
+        raise ScavError(_abi.SCAV_E_ABI,
+                        f"{call}: {kind.__name__} is {want} bytes here and "
+                        f"{got} in the library")
+
+
+def _no_spaces() -> scav_spaces:
+    """An empty space table that still declares its four strides.
+
+    A stride is an ABI fact rather than a layout input, so scav checks all four
+    whether or not a count is zero: that is what makes a member a caller's
+    header lacks read as zero and be refused.
+    """
+    return scav_spaces(box_state_stride=ctypes.sizeof(scav_box_space),
+                       box_sub_stride=ctypes.sizeof(scav_box_space),
+                       path_clear_stride=ctypes.sizeof(scav_path_clear),
+                       path_box_stride=ctypes.sizeof(scav_path_box))
+
+
 def _integer(value: object, name: str) -> int:
     """Every number crossing into a space request, checked.
 
@@ -142,9 +168,12 @@ class Loader(_Handle):
         """The document names the loader still wants, in the order it asked."""
         lib = library()
         rows = ctypes.POINTER(_abi.scav_pending)()
+        stride = ctypes.c_uint32(0)
         count = ctypes.c_uint32(0)
         check(lib.scav_load_pending(self.pointer, ctypes.byref(rows),
-                                    ctypes.byref(count)), "scav_load_pending")
+                                    ctypes.byref(stride), ctypes.byref(count)),
+              "scav_load_pending")
+        _stride(stride.value, _abi.scav_pending, "scav_load_pending")
         wanted = []
         for i in range(count.value):
             data = ctypes.POINTER(ctypes.c_ubyte)()
@@ -220,8 +249,8 @@ class Chart(_Handle):
         out = []
         for i in range(count.value):
             row = scav_diag()
-            check(lib.scav_chart_diag(self.pointer, i, ctypes.byref(row)),
-                  "scav_chart_diag")
+            check(lib.scav_chart_diag(self.pointer, i, ctypes.byref(row),
+                                      ctypes.sizeof(scav_diag)), "scav_chart_diag")
             out.append(lib.scav_diag_message(row.code).decode("utf-8"))
         return out
 
@@ -231,6 +260,10 @@ class Chart(_Handle):
         Three calls, because a walk needs the row count: the view is a window
         onto memory the chart owns, so it dies when the chart does.
         """
+        return self._column(name)[0]
+
+    def _column(self, name: str) -> tuple[memoryview, int]:
+        """The bytes and the stride scav registered the column at."""
         lib = library()
         column = ctypes.c_uint32(0)
         check(lib.scav_column_find(self.pointer, _bytes(name), ctypes.byref(column)),
@@ -243,14 +276,15 @@ class Chart(_Handle):
         check(lib.scav_column_count(self.pointer, column, ctypes.byref(rows)),
               "scav_column_count")
         if rows.value == 0:
-            return memoryview(b"")
+            return memoryview(b""), stride.value
         return memoryview(
             ctypes.cast(data, ctypes.POINTER(
-                ctypes.c_ubyte * (rows.value * stride.value))).contents)
+                ctypes.c_ubyte * (rows.value * stride.value))).contents), stride.value
 
     def rects(self, name: str) -> list[scav_rect]:
         """A geometry column of rects, typed."""
-        raw = self.column(name)
+        raw, stride = self._column(name)
+        _stride(stride, scav_rect, f"scav_column_data({name})")
         count = len(raw) // ctypes.sizeof(scav_rect)
         return list((scav_rect * count).from_buffer_copy(raw))
 
@@ -272,17 +306,20 @@ class Chart(_Handle):
         lib = library()
         opts = options if options is not None else scav_layout_opts(
             profile=profile("readable"), router=0, threads=0)
-        table = spaces.as_c() if spaces is not None else scav_spaces()
+        table = spaces.as_c() if spaces is not None else _no_spaces()
         count = ctypes.c_uint32(0)
         code = lib.scav_layout_run(self.pointer, ctypes.byref(table),
-                                   ctypes.byref(opts), None, 0, ctypes.byref(count))
+                                   ctypes.sizeof(table), ctypes.byref(opts),
+                                   ctypes.sizeof(opts), None, 0,
+                                   ctypes.sizeof(scav_placed), ctypes.byref(count))
         check(code, f"scav_layout_run: {self.diagnostics()}")
         if count.value == 0:
             return []
         placed = (scav_placed * count.value)()
         check(lib.scav_layout_run(self.pointer, ctypes.byref(table),
-                                  ctypes.byref(opts), placed, count.value,
-                                  ctypes.byref(count)),
+                                  ctypes.sizeof(table), ctypes.byref(opts),
+                                  ctypes.sizeof(opts), placed, count.value,
+                                  ctypes.sizeof(scav_placed), ctypes.byref(count)),
               f"scav_layout_run: {self.diagnostics()}")
         return list(placed)
 
@@ -328,8 +365,8 @@ class Metrics(_Handle):
         buffer = (ctypes.c_ubyte * len(raw)).from_buffer_copy(raw) if raw else None
         check(library().scav_measure_text(
             self.pointer, buffer, len(raw),
-            _integer(font_size_grid, "font_size_grid"), ctypes.byref(out)),
-            "scav_measure_text")
+            _integer(font_size_grid, "font_size_grid"), ctypes.byref(out),
+            ctypes.sizeof(out)), "scav_measure_text")
         return out.w, out.h
 
 
@@ -372,17 +409,23 @@ class Spaces:
                 prof: scav_profile) -> "Spaces":
         lib = library()
         counts = (ctypes.c_uint32 * 4)()
+        box = ctypes.sizeof(scav_box_space)
+        clear = ctypes.sizeof(scav_path_clear)
+        path = ctypes.sizeof(scav_path_box)
+        # The four row sizes travel on the count query as well: they are the
+        # strides this binding will read the second call's rows back at.
         check(lib.scav_measure_chart(chart.pointer, metrics.pointer,
-                                     ctypes.byref(prof), None, 0, None, 0, None, 0,
-                                     None, 0, counts), "scav_measure_chart")
+                                     ctypes.byref(prof), ctypes.sizeof(prof),
+                                     None, 0, box, None, 0, box, None, 0, clear,
+                                     None, 0, path, counts), "scav_measure_chart")
         box_state = (scav_box_space * counts[0])()
         box_sub = (scav_box_space * counts[1])()
         path_clear = (scav_path_clear * counts[2])()
         path_box = (scav_path_box * counts[3])()
         check(lib.scav_measure_chart(
-            chart.pointer, metrics.pointer, ctypes.byref(prof),
-            box_state, counts[0], box_sub, counts[1],
-            path_clear, counts[2], path_box, counts[3], counts),
+            chart.pointer, metrics.pointer, ctypes.byref(prof), ctypes.sizeof(prof),
+            box_state, counts[0], box, box_sub, counts[1], box,
+            path_clear, counts[2], clear, path_box, counts[3], path, counts),
             "scav_measure_chart")
         return cls(box_state, box_sub, path_clear, path_box)
 
@@ -399,12 +442,16 @@ class Spaces:
         return scav_spaces(
             box_state=base(self.box_state, scav_box_space),
             n_box_state=len(self.box_state),
+            box_state_stride=ctypes.sizeof(scav_box_space),
             box_sub=base(self.box_sub, scav_box_space),
             n_box_sub=len(self.box_sub),
+            box_sub_stride=ctypes.sizeof(scav_box_space),
             path_clear=base(self.path_clear, scav_path_clear),
             n_path_clear=len(self.path_clear),
+            path_clear_stride=ctypes.sizeof(scav_path_clear),
             path_box=base(self.path_box, scav_path_box),
-            n_path_box=len(self.path_box))
+            n_path_box=len(self.path_box),
+            path_box_stride=ctypes.sizeof(scav_path_box))
 
 
 class DrawList(_Handle):
@@ -428,7 +475,7 @@ class DrawList(_Handle):
         label's rect is the one layout placed, not one a builder recomputes.
         """
         out = cls()
-        table = spaces.as_c() if spaces is not None else scav_spaces()
+        table = spaces.as_c() if spaces is not None else _no_spaces()
         rows = (scav_placed * len(placed))(*placed) if placed else None
         style_rows = None
         style_count = 0
@@ -437,8 +484,9 @@ class DrawList(_Handle):
             style_count = len(palette)
         check(library().scav_emit_chart(
             out.pointer, chart.pointer, metrics.pointer, style_rows, style_count,
-            ctypes.byref(table), rows, len(placed), _integer(depth, "depth")),
-            "scav_emit_chart")
+            ctypes.sizeof(scav_style), ctypes.byref(table), ctypes.sizeof(table),
+            rows, len(placed), ctypes.sizeof(scav_placed),
+            _integer(depth, "depth")), "scav_emit_chart")
         return out
 
     def validate(self) -> None:
@@ -470,18 +518,24 @@ class DrawList(_Handle):
 
     def prims(self) -> list[scav_prim]:
         rows = ctypes.POINTER(scav_prim)()
+        stride = ctypes.c_uint32(0)
         count = ctypes.c_uint32(0)
         check(library().scav_drawlist_prims(self.pointer, ctypes.byref(rows),
+                                           ctypes.byref(stride),
                                            ctypes.byref(count)),
               "scav_drawlist_prims")
+        _stride(stride.value, scav_prim, "scav_drawlist_prims")
         return [rows[i] for i in range(count.value)]
 
     def points(self) -> list[scav_point]:
         rows = ctypes.POINTER(scav_point)()
+        stride = ctypes.c_uint32(0)
         count = ctypes.c_uint32(0)
         check(library().scav_drawlist_points(self.pointer, ctypes.byref(rows),
+                                            ctypes.byref(stride),
                                             ctypes.byref(count)),
               "scav_drawlist_points")
+        _stride(stride.value, scav_point, "scav_drawlist_points")
         return [rows[i] for i in range(count.value)]
 
     def payload(self, prim: scav_prim) -> str:
@@ -509,19 +563,21 @@ class DrawList(_Handle):
         size = ctypes.c_uint32(0)
         check(lib.scav_svg_write(self.pointer, metrics.pointer,
                                  images.pointer if images else None,
-                                 ctypes.byref(options), None, 0,
-                                 ctypes.byref(size)), "scav_svg_write")
+                                 ctypes.byref(options), ctypes.sizeof(options),
+                                 None, 0, ctypes.byref(size)), "scav_svg_write")
         buffer = (ctypes.c_ubyte * size.value)()
         check(lib.scav_svg_write(self.pointer, metrics.pointer,
                                  images.pointer if images else None,
-                                 ctypes.byref(options), buffer, size.value,
-                                 ctypes.byref(size)), "scav_svg_write")
+                                 ctypes.byref(options), ctypes.sizeof(options),
+                                 buffer, size.value, ctypes.byref(size)),
+              "scav_svg_write")
         return bytes(buffer).decode("utf-8")
 
 
 def profile(name: str = "readable") -> scav_profile:
     out = scav_profile()
-    check(library().scav_profile_named(_bytes(name), ctypes.byref(out)),
+    check(library().scav_profile_named(_bytes(name), ctypes.byref(out),
+                                      ctypes.sizeof(out)),
           f"scav_profile_named({name})")
     return out
 

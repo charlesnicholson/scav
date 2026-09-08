@@ -36,6 +36,13 @@ constexpr bool operator==(scav_rect const &a, scav_rect const &b) {
   return (a.x == b.x) && (a.y == b.y) && (a.w == b.w) && (a.h == b.h);
 }
 
+// The sizes the C surface checks against, as this build measures them.
+constexpr uint32_t PROFILE_SIZE{ static_cast<uint32_t>(sizeof(scav_profile)) };
+constexpr uint32_t OPTS_SIZE{ static_cast<uint32_t>(sizeof(scav_layout_opts)) };
+constexpr uint32_t SPACES_SIZE{ static_cast<uint32_t>(sizeof(scav_spaces)) };
+constexpr uint32_t PLACED_SIZE{ static_cast<uint32_t>(sizeof(scav_placed)) };
+constexpr uint32_t DIAG_SIZE{ static_cast<uint32_t>(sizeof(scav_diag)) };
+
 scav_profile readable() {
   scav_profile p{};
   REQUIRE(profile_named("readable", p));
@@ -870,17 +877,38 @@ TEST_CASE("layout: the C surface runs, queries, and reports end to end") {
   REQUIRE(scav_load_finish(loader, &chart) == SCAV_OK);
 
   scav_layout_opts opts{};
-  REQUIRE(scav_profile_named("compact", &opts.profile) == SCAV_OK);
+  REQUIRE(scav_profile_named("compact", &opts.profile, PROFILE_SIZE) == SCAV_OK);
 
   std::vector<scav_path_box> const boxes{ { .subject = 0, .w = 10, .h = 4, .order = 0 } };
-  scav_spaces const s{ .path_box = boxes.data(), .n_path_box = 1 };
+  scav_spaces const s{ .box_state_stride = static_cast<uint32_t>(sizeof(scav_box_space)),
+                       .box_sub_stride = static_cast<uint32_t>(sizeof(scav_box_space)),
+                       .path_clear_stride = static_cast<uint32_t>(sizeof(scav_path_clear)),
+                       .path_box = boxes.data(),
+                       .n_path_box = 1,
+                       .path_box_stride = static_cast<uint32_t>(sizeof(scav_path_box)) };
 
   // The out-param protocol: query, too small, filled.
   uint32_t count{ 0 };
-  REQUIRE(scav_layout_run(chart, &s, &opts, nullptr, 0, &count) == SCAV_OK);
+  REQUIRE(scav_layout_run(chart,
+                          &s,
+                          SPACES_SIZE,
+                          &opts,
+                          OPTS_SIZE,
+                          nullptr,
+                          0,
+                          PLACED_SIZE,
+                          &count) == SCAV_OK);
   CHECK(count == 1);
   scav_placed one{};
-  CHECK(scav_layout_run(chart, &s, &opts, &one, 1, &count) == SCAV_OK);
+  CHECK(scav_layout_run(chart,
+                        &s,
+                        SPACES_SIZE,
+                        &opts,
+                        OPTS_SIZE,
+                        &one,
+                        1,
+                        PLACED_SIZE,
+                        &count) == SCAV_OK);
   CHECK(one.w == 10);
 
   // Geometry reads back through the three-call accessor.
@@ -896,15 +924,31 @@ TEST_CASE("layout: the C surface runs, queries, and reports end to end") {
 
   // A bad router id is an argument error; a bad profile is a diagnosed one.
   opts.router = 99;
-  CHECK(scav_layout_run(chart, &s, &opts, &one, 1, &count) == SCAV_E_INVALID_ARG);
+  CHECK(scav_layout_run(chart,
+                        &s,
+                        SPACES_SIZE,
+                        &opts,
+                        OPTS_SIZE,
+                        &one,
+                        1,
+                        PLACED_SIZE,
+                        &count) == SCAV_E_INVALID_ARG);
   opts.router = 0;
   opts.profile.trybox = 7;
-  CHECK(scav_layout_run(chart, &s, &opts, &one, 1, &count) == SCAV_E_LAYOUT);
+  CHECK(scav_layout_run(chart,
+                        &s,
+                        SPACES_SIZE,
+                        &opts,
+                        OPTS_SIZE,
+                        &one,
+                        1,
+                        PLACED_SIZE,
+                        &count) == SCAV_E_LAYOUT);
   uint32_t n_diags{ 0 };
   REQUIRE(scav_chart_diag_count(chart, &n_diags) == SCAV_OK);
   REQUIRE(n_diags == 1);
   scav_diag d{};
-  REQUIRE(scav_chart_diag(chart, 0, &d) == SCAV_OK);
+  REQUIRE(scav_chart_diag(chart, 0, &d, DIAG_SIZE) == SCAV_OK);
   CHECK(d.code == static_cast<uint32_t>(DiagCode::ProfileOutOfRange));
 
   scav_chart_destroy(chart);

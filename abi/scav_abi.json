@@ -326,6 +326,10 @@
             {
               "name": "SCAV_E_DRAWLIST",
               "value": -8
+            },
+            {
+              "name": "SCAV_E_ABI",
+              "value": -9
             }
           ]
         }
@@ -423,6 +427,14 @@
                 "name": "scav_pending",
                 "pointer": 2,
                 "const": true
+              }
+            },
+            {
+              "name": "out_stride",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
               }
             },
             {
@@ -866,6 +878,14 @@
                 "pointer": 1,
                 "const": false
               }
+            },
+            {
+              "name": "out_size",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
             }
           ]
         },
@@ -1164,6 +1184,16 @@
               "size": 4
             },
             {
+              "name": "box_state_stride",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 12,
+              "size": 4
+            },
+            {
               "name": "box_sub",
               "type": {
                 "name": "scav_box_space",
@@ -1181,6 +1211,16 @@
                 "const": false
               },
               "offset": 24,
+              "size": 4
+            },
+            {
+              "name": "box_sub_stride",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 28,
               "size": 4
             },
             {
@@ -1204,6 +1244,16 @@
               "size": 4
             },
             {
+              "name": "path_clear_stride",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 44,
+              "size": 4
+            },
+            {
               "name": "path_box",
               "type": {
                 "name": "scav_path_box",
@@ -1222,11 +1272,21 @@
               },
               "offset": 56,
               "size": 4
+            },
+            {
+              "name": "path_box_stride",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 60,
+              "size": 4
             }
           ],
           "size": 64,
           "align": 8,
-          "padding": 16
+          "padding": 0
         },
         {
           "name": "scav_profile",
@@ -1690,6 +1750,14 @@
                 "pointer": 1,
                 "const": false
               }
+            },
+            {
+              "name": "out_size",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
             }
           ]
         },
@@ -1707,6 +1775,14 @@
                 "name": "scav_profile",
                 "pointer": 1,
                 "const": true
+              }
+            },
+            {
+              "name": "profile_size",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
               }
             }
           ]
@@ -1736,6 +1812,14 @@
               }
             },
             {
+              "name": "spaces_size",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
               "name": "opts",
               "type": {
                 "name": "scav_layout_opts",
@@ -1744,7 +1828,15 @@
               }
             },
             {
-              "name": "out_placed",
+              "name": "opts_size",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "placed",
               "type": {
                 "name": "scav_placed",
                 "pointer": 1,
@@ -1752,7 +1844,15 @@
               }
             },
             {
-              "name": "cap",
+              "name": "placed_cap",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "placed_size",
               "type": {
                 "name": "uint32_t",
                 "pointer": 0,
@@ -2301,6 +2401,14 @@
                 "pointer": 1,
                 "const": false
               }
+            },
+            {
+              "name": "out_size",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
             }
           ]
         },
@@ -2407,6 +2515,14 @@
               "type": {
                 "name": "scav_extent",
                 "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "out_size",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
                 "const": false
               }
             }
@@ -2531,6 +2647,14 @@
               }
             },
             {
+              "name": "out_stride",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
               "name": "out_count",
               "type": {
                 "name": "uint32_t",
@@ -2562,6 +2686,14 @@
                 "name": "scav_style",
                 "pointer": 2,
                 "const": true
+              }
+            },
+            {
+              "name": "out_stride",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
               }
             },
             {
@@ -2599,6 +2731,14 @@
               }
             },
             {
+              "name": "out_stride",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
+              }
+            },
+            {
               "name": "out_count",
               "type": {
                 "name": "uint32_t",
@@ -2630,6 +2770,14 @@
                 "name": "scav_rect",
                 "pointer": 2,
                 "const": true
+              }
+            },
+            {
+              "name": "out_stride",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 1,
+                "const": false
               }
             },
             {
@@ -2989,6 +3137,14 @@
                 "pointer": 1,
                 "const": false
               }
+            },
+            {
+              "name": "out_size",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
             }
           ]
         },
@@ -3041,11 +3197,27 @@
               }
             },
             {
+              "name": "palette_row_size",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
               "name": "spaces",
               "type": {
                 "name": "scav_spaces",
                 "pointer": 1,
                 "const": true
+              }
+            },
+            {
+              "name": "spaces_size",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
               }
             },
             {
@@ -3058,6 +3230,14 @@
             },
             {
               "name": "placed_count",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "placed_row_size",
               "type": {
                 "name": "uint32_t",
                 "pointer": 0,
@@ -3107,6 +3287,14 @@
               }
             },
             {
+              "name": "profile_size",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
               "name": "box_state",
               "type": {
                 "name": "scav_box_space",
@@ -3116,6 +3304,14 @@
             },
             {
               "name": "cap_box_state",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "box_state_row_size",
               "type": {
                 "name": "uint32_t",
                 "pointer": 0,
@@ -3139,6 +3335,14 @@
               }
             },
             {
+              "name": "box_sub_row_size",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
               "name": "path_clear",
               "type": {
                 "name": "scav_path_clear",
@@ -3155,6 +3359,14 @@
               }
             },
             {
+              "name": "path_clear_row_size",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
               "name": "path_box",
               "type": {
                 "name": "scav_path_box",
@@ -3164,6 +3376,14 @@
             },
             {
               "name": "cap_path_box",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "path_box_row_size",
               "type": {
                 "name": "uint32_t",
                 "pointer": 0,
@@ -3198,6 +3418,14 @@
             },
             {
               "name": "cap",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
+              "name": "row_size",
               "type": {
                 "name": "uint32_t",
                 "pointer": 0,
@@ -3286,6 +3514,14 @@
               }
             },
             {
+              "name": "options_size",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              }
+            },
+            {
               "name": "out",
               "type": {
                 "name": "scav_byte",
@@ -3332,6 +3568,14 @@
               "type": {
                 "name": "scav_rect",
                 "pointer": 1,
+                "const": false
+              }
+            },
+            {
+              "name": "out_size",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
                 "const": false
               }
             }

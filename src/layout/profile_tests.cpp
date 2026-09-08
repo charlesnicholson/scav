@@ -15,6 +15,8 @@ namespace {
 
 using namespace scav;
 
+constexpr uint32_t PROFILE_SIZE{ static_cast<uint32_t>(sizeof(scav_profile)) };
+
 scav_profile named(char const *name) {
   scav_profile p{};
   REQUIRE(profile_named(name, p));
@@ -162,12 +164,12 @@ TEST_CASE("profile: every bound rejects out of range") {
 
 TEST_CASE("profile: the C surface round-trips named, validate, and null args") {
   scav_profile p{};
-  REQUIRE(scav_profile_named("compact", &p) == SCAV_OK);
-  CHECK(scav_profile_validate(&p) == SCAV_OK);
+  REQUIRE(scav_profile_named("compact", &p, PROFILE_SIZE) == SCAV_OK);
+  CHECK(scav_profile_validate(&p, PROFILE_SIZE) == SCAV_OK);
   p.dar_num = 0;
-  CHECK(scav_profile_validate(&p) == SCAV_E_INVALID_ARG);
-  CHECK(scav_profile_named("ornate", &p) == SCAV_E_INVALID_ARG);
-  CHECK(scav_profile_named(nullptr, &p) == SCAV_E_INVALID_ARG);
-  CHECK(scav_profile_named("compact", nullptr) == SCAV_E_INVALID_ARG);
-  CHECK(scav_profile_validate(nullptr) == SCAV_E_INVALID_ARG);
+  CHECK(scav_profile_validate(&p, PROFILE_SIZE) == SCAV_E_INVALID_ARG);
+  CHECK(scav_profile_named("ornate", &p, PROFILE_SIZE) == SCAV_E_INVALID_ARG);
+  CHECK(scav_profile_named(nullptr, &p, PROFILE_SIZE) == SCAV_E_INVALID_ARG);
+  CHECK(scav_profile_named("compact", nullptr, PROFILE_SIZE) == SCAV_E_INVALID_ARG);
+  CHECK(scav_profile_validate(nullptr, PROFILE_SIZE) == SCAV_E_INVALID_ARG);
 }

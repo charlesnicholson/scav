@@ -2,7 +2,12 @@
 #define SCAV_SVG_C_H_INCLUDED
 
 /* libscavsvg's C API: one DrawList to one SVG document, under the out-param
- * protocol every other span accessor follows. */
+ * protocol every other span accessor follows.
+ *
+ * Sizes cross under scav_core_c.h's rule: a caller-owned POD is passed with its
+ * own size beside it, checked before any other argument and whether or not the
+ * pointer is NULL, and a size that disagrees with this library's is
+ * SCAV_E_ABI. */
 
 #include "scav/scav_core_c.h"
 #include "scav/scav_draw_c.h"
@@ -29,20 +34,22 @@ typedef struct {
  * SCAV_E_CAPACITY and writes the required count rather than truncating. The
  * bytes are not NUL-terminated.
  *
- * `images` may be NULL when no primitive names one. SCAV_E_DRAWLIST covers
- * every refusal -- an invalid list, a kind this backend does not render, an
- * unknown image id, a glyph the font lacks -- because each of them means the
+ * `images` may be NULL when no primitive names one, and so may `options`, which
+ * takes the defaults -- `options_size` is checked either way. SCAV_E_DRAWLIST
+ * covers every refusal -- an invalid list, a kind this backend does not render,
+ * an unknown image id, a glyph the font lacks -- because each of them means the
  * DrawList and the backend disagree about what is drawable. */
 scav_result scav_svg_write(scav_drawlist const *list,
                            scav_metrics const *metrics,
                            scav_images const *images,
                            scav_svg_options const *options,
+                           uint32_t options_size,
                            scav_byte *out,
                            uint32_t cap,
                            uint32_t *out_count);
 
 /* The tight bounding box over every primitive's points, in grid units. */
-scav_result scav_svg_bounds(scav_drawlist const *list, scav_rect *out);
+scav_result scav_svg_bounds(scav_drawlist const *list, scav_rect *out, uint32_t out_size);
 
 #ifdef __cplusplus
 } /* extern "C" */
