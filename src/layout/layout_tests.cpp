@@ -1393,8 +1393,8 @@ TEST_CASE("layout: the table's first row is the profile as given") {
   // the pipeline as it ran before the portfolio existed. The other seven are
   // the packer crossed with compaction, then the same four handing the ratios
   // down. The packer takes bit 0 because it is the knob that moves a chart, so
-  // row 1 is where every corpus pick lands and M of 2 would reach all of them;
-  // compaction takes bit 1, so the shipped M of 4 runs exactly the four rows
+  // row 1 is where every corpus pick lands, which is all the shipped M of 2
+  // reaches; compaction takes bit 1, so an M of 4 runs exactly the four rows
   // the two packing knobs make.
   for (int32_t const trybox : { 0, 1 }) {
     for (int32_t const tiebreak : { 0, 1 }) {
@@ -1438,8 +1438,8 @@ TEST_CASE("layout: the table's first row is the profile as given") {
       CHECK((two_pack == Compaction::On));
       CHECK((two == DarSource::Profile));
 
-      // The four rows of each half are the four combinations, once each: the
-      // shipped M of 4 is exactly {as given, trybox, compact, trybox+compact}.
+      // The four rows of each half are the four combinations, once each: an
+      // M of 4 is exactly {as given, trybox, compact, trybox+compact}.
       uint32_t seen{ 0 };
       for (uint32_t row = 0; row < 4; ++row) {
         scav_profile knobs{ given };
