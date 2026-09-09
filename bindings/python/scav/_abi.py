@@ -51,6 +51,7 @@ SCAV_E_LAYOUT = -5
 SCAV_E_FONT = -6
 SCAV_E_NO_GLYPH = -7
 SCAV_E_DRAWLIST = -8
+SCAV_E_ABI = -9
 SCAV_PRIM_RECT = 0
 SCAV_PRIM_RRECT = 1
 SCAV_PRIM_LINE = 2
@@ -80,6 +81,7 @@ ERROR_NAMES = {
     -6: "SCAV_E_FONT",
     -7: "SCAV_E_NO_GLYPH",
     -8: "SCAV_E_DRAWLIST",
+    -9: "SCAV_E_ABI",
 }
 
 scav_byte = ctypes.c_ubyte
@@ -210,24 +212,32 @@ class scav_spaces(ctypes.Structure):
     _fields_ = [
         ("box_state", ctypes.POINTER(scav_box_space)),
         ("n_box_state", ctypes.c_uint32),
+        ("box_state_stride", ctypes.c_uint32),
         ("box_sub", ctypes.POINTER(scav_box_space)),
         ("n_box_sub", ctypes.c_uint32),
+        ("box_sub_stride", ctypes.c_uint32),
         ("path_clear", ctypes.POINTER(scav_path_clear)),
         ("n_path_clear", ctypes.c_uint32),
+        ("path_clear_stride", ctypes.c_uint32),
         ("path_box", ctypes.POINTER(scav_path_box)),
         ("n_path_box", ctypes.c_uint32),
+        ("path_box_stride", ctypes.c_uint32),
     ]
 
 assert ctypes.sizeof(scav_spaces) == 64, "scav_spaces is not 64 bytes"
 assert ctypes.alignment(scav_spaces) == 8
 assert getattr(scav_spaces, "box_state").offset == 0
 assert getattr(scav_spaces, "n_box_state").offset == 8
+assert getattr(scav_spaces, "box_state_stride").offset == 12
 assert getattr(scav_spaces, "box_sub").offset == 16
 assert getattr(scav_spaces, "n_box_sub").offset == 24
+assert getattr(scav_spaces, "box_sub_stride").offset == 28
 assert getattr(scav_spaces, "path_clear").offset == 32
 assert getattr(scav_spaces, "n_path_clear").offset == 40
+assert getattr(scav_spaces, "path_clear_stride").offset == 44
 assert getattr(scav_spaces, "path_box").offset == 48
 assert getattr(scav_spaces, "n_path_box").offset == 56
+assert getattr(scav_spaces, "path_box_stride").offset == 60
 
 class scav_profile(ctypes.Structure):
     _fields_ = [
@@ -392,7 +402,7 @@ def _bind(lib: ctypes.CDLL) -> None:
     lib.scav_load_begin.restype = scav_result
     lib.scav_load_add.argtypes = [ctypes.POINTER(scav_load), ctypes.POINTER(scav_byte), ctypes.c_uint32, ctypes.c_char_p]
     lib.scav_load_add.restype = scav_result
-    lib.scav_load_pending.argtypes = [ctypes.POINTER(scav_load), ctypes.POINTER(ctypes.POINTER(scav_pending)), ctypes.POINTER(ctypes.c_uint32)]
+    lib.scav_load_pending.argtypes = [ctypes.POINTER(scav_load), ctypes.POINTER(ctypes.POINTER(scav_pending)), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
     lib.scav_load_pending.restype = scav_result
     lib.scav_load_path.argtypes = [ctypes.POINTER(scav_load), scav_span, ctypes.POINTER(ctypes.POINTER(scav_byte)), ctypes.POINTER(ctypes.c_uint32)]
     lib.scav_load_path.restype = scav_result
@@ -418,7 +428,7 @@ def _bind(lib: ctypes.CDLL) -> None:
     lib.scav_chart_digest.restype = scav_result
     lib.scav_chart_diag_count.argtypes = [ctypes.POINTER(scav_chart), ctypes.POINTER(ctypes.c_uint32)]
     lib.scav_chart_diag_count.restype = scav_result
-    lib.scav_chart_diag.argtypes = [ctypes.POINTER(scav_chart), ctypes.c_uint32, ctypes.POINTER(scav_diag)]
+    lib.scav_chart_diag.argtypes = [ctypes.POINTER(scav_chart), ctypes.c_uint32, ctypes.POINTER(scav_diag), ctypes.c_uint32]
     lib.scav_chart_diag.restype = scav_result
     lib.scav_column_find.argtypes = [ctypes.POINTER(scav_chart), ctypes.c_char_p, ctypes.POINTER(scav_column_id)]
     lib.scav_column_find.restype = scav_result
@@ -428,11 +438,11 @@ def _bind(lib: ctypes.CDLL) -> None:
     lib.scav_column_count.restype = scav_result
     lib.scav_str.argtypes = [ctypes.POINTER(scav_chart), scav_span, ctypes.POINTER(ctypes.POINTER(scav_byte)), ctypes.POINTER(ctypes.c_uint32)]
     lib.scav_str.restype = scav_result
-    lib.scav_profile_named.argtypes = [ctypes.c_char_p, ctypes.POINTER(scav_profile)]
+    lib.scav_profile_named.argtypes = [ctypes.c_char_p, ctypes.POINTER(scav_profile), ctypes.c_uint32]
     lib.scav_profile_named.restype = scav_result
-    lib.scav_profile_validate.argtypes = [ctypes.POINTER(scav_profile)]
+    lib.scav_profile_validate.argtypes = [ctypes.POINTER(scav_profile), ctypes.c_uint32]
     lib.scav_profile_validate.restype = scav_result
-    lib.scav_layout_run.argtypes = [ctypes.POINTER(scav_chart), ctypes.POINTER(scav_spaces), ctypes.POINTER(scav_layout_opts), ctypes.POINTER(scav_placed), ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32)]
+    lib.scav_layout_run.argtypes = [ctypes.POINTER(scav_chart), ctypes.POINTER(scav_spaces), ctypes.c_uint32, ctypes.POINTER(scav_layout_opts), ctypes.c_uint32, ctypes.POINTER(scav_placed), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32)]
     lib.scav_layout_run.restype = scav_result
     lib.scav_router_list.argtypes = [ctypes.POINTER(ctypes.c_uint32)]
     lib.scav_router_list.restype = scav_result
@@ -450,11 +460,11 @@ def _bind(lib: ctypes.CDLL) -> None:
     lib.scav_metrics_units_per_em.restype = scav_result
     lib.scav_metrics_glyph_count.argtypes = [ctypes.POINTER(scav_metrics), ctypes.POINTER(ctypes.c_uint32)]
     lib.scav_metrics_glyph_count.restype = scav_result
-    lib.scav_measure_text.argtypes = [ctypes.POINTER(scav_metrics), ctypes.POINTER(scav_byte), ctypes.c_uint32, ctypes.c_int32, ctypes.POINTER(scav_extent)]
+    lib.scav_measure_text.argtypes = [ctypes.POINTER(scav_metrics), ctypes.POINTER(scav_byte), ctypes.c_uint32, ctypes.c_int32, ctypes.POINTER(scav_extent), ctypes.c_uint32]
     lib.scav_measure_text.restype = scav_result
     lib.scav_line_height.argtypes = [ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.POINTER(ctypes.c_int32)]
     lib.scav_line_height.restype = scav_result
-    lib.scav_measure_block.argtypes = [ctypes.POINTER(scav_metrics), ctypes.POINTER(scav_byte), ctypes.c_uint32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.POINTER(scav_extent)]
+    lib.scav_measure_block.argtypes = [ctypes.POINTER(scav_metrics), ctypes.POINTER(scav_byte), ctypes.c_uint32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.POINTER(scav_extent), ctypes.c_uint32]
     lib.scav_measure_block.restype = scav_result
     lib.scav_drawlist_create.argtypes = [ctypes.POINTER(ctypes.POINTER(scav_drawlist))]
     lib.scav_drawlist_create.restype = scav_result
@@ -462,13 +472,13 @@ def _bind(lib: ctypes.CDLL) -> None:
     lib.scav_drawlist_destroy.restype = None
     lib.scav_drawlist_counts.argtypes = [ctypes.POINTER(scav_drawlist), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
     lib.scav_drawlist_counts.restype = scav_result
-    lib.scav_drawlist_prims.argtypes = [ctypes.POINTER(scav_drawlist), ctypes.POINTER(ctypes.POINTER(scav_prim)), ctypes.POINTER(ctypes.c_uint32)]
+    lib.scav_drawlist_prims.argtypes = [ctypes.POINTER(scav_drawlist), ctypes.POINTER(ctypes.POINTER(scav_prim)), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
     lib.scav_drawlist_prims.restype = scav_result
-    lib.scav_drawlist_styles.argtypes = [ctypes.POINTER(scav_drawlist), ctypes.POINTER(ctypes.POINTER(scav_style)), ctypes.POINTER(ctypes.c_uint32)]
+    lib.scav_drawlist_styles.argtypes = [ctypes.POINTER(scav_drawlist), ctypes.POINTER(ctypes.POINTER(scav_style)), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
     lib.scav_drawlist_styles.restype = scav_result
-    lib.scav_drawlist_points.argtypes = [ctypes.POINTER(scav_drawlist), ctypes.POINTER(ctypes.POINTER(scav_point)), ctypes.POINTER(ctypes.c_uint32)]
+    lib.scav_drawlist_points.argtypes = [ctypes.POINTER(scav_drawlist), ctypes.POINTER(ctypes.POINTER(scav_point)), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
     lib.scav_drawlist_points.restype = scav_result
-    lib.scav_drawlist_clips.argtypes = [ctypes.POINTER(scav_drawlist), ctypes.POINTER(ctypes.POINTER(scav_rect)), ctypes.POINTER(ctypes.c_uint32)]
+    lib.scav_drawlist_clips.argtypes = [ctypes.POINTER(scav_drawlist), ctypes.POINTER(ctypes.POINTER(scav_rect)), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
     lib.scav_drawlist_clips.restype = scav_result
     lib.scav_drawlist_str.argtypes = [ctypes.POINTER(scav_drawlist), scav_span, ctypes.POINTER(ctypes.POINTER(scav_byte)), ctypes.POINTER(ctypes.c_uint32)]
     lib.scav_drawlist_str.restype = scav_result
@@ -490,17 +500,17 @@ def _bind(lib: ctypes.CDLL) -> None:
     lib.scav_image_count.restype = scav_result
     lib.scav_image_find.argtypes = [ctypes.POINTER(scav_images), ctypes.POINTER(scav_byte), ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32)]
     lib.scav_image_find.restype = scav_result
-    lib.scav_image_extent.argtypes = [ctypes.POINTER(scav_images), ctypes.c_uint32, ctypes.POINTER(scav_extent)]
+    lib.scav_image_extent.argtypes = [ctypes.POINTER(scav_images), ctypes.c_uint32, ctypes.POINTER(scav_extent), ctypes.c_uint32]
     lib.scav_image_extent.restype = scav_result
-    lib.scav_emit_chart.argtypes = [ctypes.POINTER(scav_drawlist), ctypes.POINTER(scav_chart), ctypes.POINTER(scav_metrics), ctypes.POINTER(scav_style), ctypes.c_uint32, ctypes.POINTER(scav_spaces), ctypes.POINTER(scav_placed), ctypes.c_uint32, ctypes.c_int32]
+    lib.scav_emit_chart.argtypes = [ctypes.POINTER(scav_drawlist), ctypes.POINTER(scav_chart), ctypes.POINTER(scav_metrics), ctypes.POINTER(scav_style), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(scav_spaces), ctypes.c_uint32, ctypes.POINTER(scav_placed), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int32]
     lib.scav_emit_chart.restype = scav_result
-    lib.scav_measure_chart.argtypes = [ctypes.POINTER(scav_chart), ctypes.POINTER(scav_metrics), ctypes.POINTER(scav_profile), ctypes.POINTER(scav_box_space), ctypes.c_uint32, ctypes.POINTER(scav_box_space), ctypes.c_uint32, ctypes.POINTER(scav_path_clear), ctypes.c_uint32, ctypes.POINTER(scav_path_box), ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32)]
+    lib.scav_measure_chart.argtypes = [ctypes.POINTER(scav_chart), ctypes.POINTER(scav_metrics), ctypes.POINTER(scav_profile), ctypes.c_uint32, ctypes.POINTER(scav_box_space), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(scav_box_space), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(scav_path_clear), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(scav_path_box), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32)]
     lib.scav_measure_chart.restype = scav_result
-    lib.scav_palette_standard.argtypes = [ctypes.POINTER(scav_style), ctypes.c_uint32]
+    lib.scav_palette_standard.argtypes = [ctypes.POINTER(scav_style), ctypes.c_uint32, ctypes.c_uint32]
     lib.scav_palette_standard.restype = scav_result
-    lib.scav_svg_write.argtypes = [ctypes.POINTER(scav_drawlist), ctypes.POINTER(scav_metrics), ctypes.POINTER(scav_images), ctypes.POINTER(scav_svg_options), ctypes.POINTER(scav_byte), ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32)]
+    lib.scav_svg_write.argtypes = [ctypes.POINTER(scav_drawlist), ctypes.POINTER(scav_metrics), ctypes.POINTER(scav_images), ctypes.POINTER(scav_svg_options), ctypes.c_uint32, ctypes.POINTER(scav_byte), ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32)]
     lib.scav_svg_write.restype = scav_result
-    lib.scav_svg_bounds.argtypes = [ctypes.POINTER(scav_drawlist), ctypes.POINTER(scav_rect)]
+    lib.scav_svg_bounds.argtypes = [ctypes.POINTER(scav_drawlist), ctypes.POINTER(scav_rect), ctypes.c_uint32]
     lib.scav_svg_bounds.restype = scav_result
 
 
@@ -555,6 +565,7 @@ __all__ = [
     "SCAV_E_FONT",
     "SCAV_E_NO_GLYPH",
     "SCAV_E_DRAWLIST",
+    "SCAV_E_ABI",
     "SCAV_PRIM_RECT",
     "SCAV_PRIM_RRECT",
     "SCAV_PRIM_LINE",

@@ -21,9 +21,11 @@ scav_result scav_svg_write(scav_drawlist const *list,
                            scav_metrics const *metrics,
                            scav_images const *images,
                            scav_svg_options const *options,
+                           uint32_t options_size,
                            scav_byte *out,
                            uint32_t cap,
                            uint32_t *out_count) {
+  if (options_size != sizeof(scav_svg_options)) { return SCAV_E_ABI; }
   if ((list == nullptr) || (metrics == nullptr) || (out_count == nullptr)) {
     return SCAV_E_INVALID_ARG;
   }
@@ -58,7 +60,8 @@ scav_result scav_svg_write(scav_drawlist const *list,
   return SCAV_OK;
 }
 
-scav_result scav_svg_bounds(scav_drawlist const *list, scav_rect *out) {
+scav_result scav_svg_bounds(scav_drawlist const *list, scav_rect *out, uint32_t out_size) {
+  if (out_size != sizeof(scav_rect)) { return SCAV_E_ABI; }
   if ((list == nullptr) || (out == nullptr)) { return SCAV_E_INVALID_ARG; }
   *out = scav::svg_bounds(list->list);
   return SCAV_OK;

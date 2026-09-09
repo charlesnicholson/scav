@@ -23,6 +23,10 @@ using namespace scav;
 
 constexpr ElemRef NONE{ .kind = ElemKind::None, .ordinal = INVALID };
 
+// The sizes the C surface checks against, as this build measures them.
+constexpr uint32_t OPTIONS_SIZE{ static_cast<uint32_t>(sizeof(scav_svg_options)) };
+constexpr uint32_t RECT_SIZE{ static_cast<uint32_t>(sizeof(scav_rect)) };
+
 ElemRef state(uint32_t i) { return { .kind = ElemKind::State, .ordinal = i }; }
 
 Metrics bundled() {
@@ -577,42 +581,100 @@ TEST_CASE("svg: the C surface queries then writes, and refuses nulls") {
             state(3));
 
   uint32_t count{ 0 };
-  REQUIRE(scav_svg_write(list, metrics, nullptr, nullptr, nullptr, 0, &count) == SCAV_OK);
+  REQUIRE(
+      scav_svg_write(list, metrics, nullptr, nullptr, OPTIONS_SIZE, nullptr, 0, &count) ==
+      SCAV_OK);
   REQUIRE(count > 0);
 
   std::vector<scav_byte> buffer(count);
   // A cap too small writes the required count rather than truncating.
   uint32_t again{ 0 };
-  CHECK(
-      scav_svg_write(list, metrics, nullptr, nullptr, buffer.data(), count - 1, &again) ==
-      SCAV_E_CAPACITY);
+  CHECK(scav_svg_write(list,
+                       metrics,
+                       nullptr,
+                       nullptr,
+                       OPTIONS_SIZE,
+                       buffer.data(),
+                       count - 1,
+                       &again) == SCAV_E_CAPACITY);
   CHECK(again == count);
-  REQUIRE(scav_svg_write(list, metrics, nullptr, nullptr, buffer.data(), count, &again) ==
-          SCAV_OK);
+  REQUIRE(scav_svg_write(list,
+                         metrics,
+                         nullptr,
+                         nullptr,
+                         OPTIONS_SIZE,
+                         buffer.data(),
+                         count,
+                         &again) == SCAV_OK);
   std::string const doc{ reinterpret_cast<char const *>(buffer.data()), count };
   CHECK(doc.starts_with("<?xml"));
   CHECK(has(doc, "scav-id-3"));
 
   scav_svg_options opts{ .embed_font = 1, .margin = 4 };
-  REQUIRE(scav_svg_write(list, metrics, nullptr, &opts, nullptr, 0, &again) == SCAV_OK);
+  REQUIRE(
+      scav_svg_write(list, metrics, nullptr, &opts, OPTIONS_SIZE, nullptr, 0, &again) ==
+      SCAV_OK);
   CHECK(again > count);
   opts.embed_font = 2;
-  CHECK(scav_svg_write(list, metrics, nullptr, &opts, nullptr, 0, &again) ==
+  CHECK(scav_svg_write(list, metrics, nullptr, &opts, OPTIONS_SIZE, nullptr, 0, &again) ==
         SCAV_E_INVALID_ARG);
+  opts.embed_font = 1;
 
   scav_rect bounds{};
-  REQUIRE(scav_svg_bounds(list, &bounds) == SCAV_OK);
+  REQUIRE(scav_svg_bounds(list, &bounds, RECT_SIZE) == SCAV_OK);
   CHECK(bounds.w == 0);  // one text primitive is one point
 
-  CHECK(scav_svg_write(nullptr, metrics, nullptr, nullptr, nullptr, 0, &again) ==
-        SCAV_E_INVALID_ARG);
-  CHECK(scav_svg_write(list, nullptr, nullptr, nullptr, nullptr, 0, &again) ==
-        SCAV_E_INVALID_ARG);
-  CHECK(scav_svg_write(list, metrics, nullptr, nullptr, nullptr, 0, nullptr) ==
-        SCAV_E_INVALID_ARG);
-  CHECK(scav_svg_write(list, metrics, nullptr, nullptr, nullptr, count, &again) ==
-        SCAV_E_INVALID_ARG);
-  CHECK(scav_svg_bounds(nullptr, &bounds) == SCAV_E_INVALID_ARG);
+  CHECK(scav_svg_write(nullptr,
+                       metrics,
+                       nullptr,
+                       nullptr,
+                       OPTIONS_SIZE,
+                       nullptr,
+                       0,
+                       &again) == SCAV_E_INVALID_ARG);
+  CHECK(
+      scav_svg_write(list, nullptr, nullptr, nullptr, OPTIONS_SIZE, nullptr, 0, &again) ==
+      SCAV_E_INVALID_ARG);
+  CHECK(
+      scav_svg_write(list, metrics, nullptr, nullptr, OPTIONS_SIZE, nullptr, 0, nullptr) ==
+      SCAV_E_INVALID_ARG);
+  CHECK(scav_svg_write(list,
+                       metrics,
+                       nullptr,
+                       nullptr,
+                       OPTIONS_SIZE,
+                       nullptr,
+                       count,
+                       &again) == SCAV_E_INVALID_ARG);
+  CHECK(scav_svg_bounds(nullptr, &bounds, RECT_SIZE) == SCAV_E_INVALID_ARG);
+
+  // A size that disagrees with this library's is refused before anything else,
+  // NULL options and a NULL rect included: the size is the caller's claim about
+  // its own headers, so it outranks every other refusal.
+  uint32_t const unmoved{ again };
+  for (int32_t delta : { -4, 4 }) {
+    CAPTURE(delta);
+    uint32_t const bad_options{ OPTIONS_SIZE + static_cast<uint32_t>(delta) };
+    uint32_t const bad_rect{ RECT_SIZE + static_cast<uint32_t>(delta) };
+    scav_rect untouched{ .x = 0x5CA5, .y = 0, .w = 0, .h = 0 };
+    CHECK(scav_svg_write(list, metrics, nullptr, &opts, bad_options, nullptr, 0, &again) ==
+          SCAV_E_ABI);
+    CHECK(
+        scav_svg_write(list, metrics, nullptr, nullptr, bad_options, nullptr, 0, &again) ==
+        SCAV_E_ABI);
+    CHECK(scav_svg_write(nullptr,
+                         nullptr,
+                         nullptr,
+                         nullptr,
+                         bad_options,
+                         nullptr,
+                         0,
+                         nullptr) == SCAV_E_ABI);
+    CHECK(scav_svg_bounds(list, &untouched, bad_rect) == SCAV_E_ABI);
+    CHECK(scav_svg_bounds(nullptr, nullptr, bad_rect) == SCAV_E_ABI);
+    CHECK(untouched.x == 0x5CA5);  // refused before anything was written
+  }
+  CHECK(again == unmoved);  // and no refusal moved the byte count
 
   // An unrenderable primitive is one code, whatever made it unrenderable.
   push_arc(list->list,
@@ -622,8 +684,9 @@ TEST_CASE("svg: the C surface queries then writes, and refuses nulls") {
            0,
            64,
            NONE);
-  CHECK(scav_svg_write(list, metrics, nullptr, nullptr, nullptr, 0, &again) ==
-        SCAV_E_DRAWLIST);
+  CHECK(
+      scav_svg_write(list, metrics, nullptr, nullptr, OPTIONS_SIZE, nullptr, 0, &again) ==
+      SCAV_E_DRAWLIST);
 
   scav_metrics_destroy(metrics);
   scav_drawlist_destroy(list);

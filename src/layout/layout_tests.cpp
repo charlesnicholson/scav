@@ -6,6 +6,7 @@
 #include "layout/geom.h"
 #include "layout/order.h"
 #include "layout/route.h"
+#include "layout/shard.h"
 #include "layout/size.h"
 #include "layout/tests/test_synth.h"
 #include "scav/scav_core.h"
@@ -35,6 +36,13 @@ using namespace scav;
 constexpr bool operator==(scav_rect const &a, scav_rect const &b) {
   return (a.x == b.x) && (a.y == b.y) && (a.w == b.w) && (a.h == b.h);
 }
+
+// The sizes the C surface checks against, as this build measures them.
+constexpr uint32_t PROFILE_SIZE{ static_cast<uint32_t>(sizeof(scav_profile)) };
+constexpr uint32_t OPTS_SIZE{ static_cast<uint32_t>(sizeof(scav_layout_opts)) };
+constexpr uint32_t SPACES_SIZE{ static_cast<uint32_t>(sizeof(scav_spaces)) };
+constexpr uint32_t PLACED_SIZE{ static_cast<uint32_t>(sizeof(scav_placed)) };
+constexpr uint32_t DIAG_SIZE{ static_cast<uint32_t>(sizeof(scav_diag)) };
 
 scav_profile readable() {
   scav_profile p{};
@@ -92,6 +100,24 @@ bool inside(scav_rect const &inner, scav_rect const &outer) {
 bool overlap(scav_rect const &a, scav_rect const &b) {
   return (a.x < (b.x + b.w)) && (b.x < (a.x + a.w)) && (a.y < (b.y + b.h)) &&
          (b.y < (a.y + a.h));
+}
+
+void load_corpus(char const *name, Chart &c) {
+  std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
+  path += name;
+  Loader loader;
+  std::vector<Diagnostic> diags;
+  std::string failed;
+  REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
+}
+
+// The profile's 48 knobs as a block, so a test can say which of them moved.
+// The assert layout.cpp's digest rests on is what makes the copy total.
+std::array<int32_t, sizeof(scav_profile) / sizeof(int32_t)> profile_fields(
+    scav_profile const &p) {
+  std::array<int32_t, sizeof(scav_profile) / sizeof(int32_t)> out{};
+  std::memcpy(out.data(), &p, sizeof(scav_profile));
+  return out;
 }
 
 bool on_border(scav_point pt, scav_rect const &r) {
@@ -870,17 +896,38 @@ TEST_CASE("layout: the C surface runs, queries, and reports end to end") {
   REQUIRE(scav_load_finish(loader, &chart) == SCAV_OK);
 
   scav_layout_opts opts{};
-  REQUIRE(scav_profile_named("compact", &opts.profile) == SCAV_OK);
+  REQUIRE(scav_profile_named("compact", &opts.profile, PROFILE_SIZE) == SCAV_OK);
 
   std::vector<scav_path_box> const boxes{ { .subject = 0, .w = 10, .h = 4, .order = 0 } };
-  scav_spaces const s{ .path_box = boxes.data(), .n_path_box = 1 };
+  scav_spaces const s{ .box_state_stride = static_cast<uint32_t>(sizeof(scav_box_space)),
+                       .box_sub_stride = static_cast<uint32_t>(sizeof(scav_box_space)),
+                       .path_clear_stride = static_cast<uint32_t>(sizeof(scav_path_clear)),
+                       .path_box = boxes.data(),
+                       .n_path_box = 1,
+                       .path_box_stride = static_cast<uint32_t>(sizeof(scav_path_box)) };
 
   // The out-param protocol: query, too small, filled.
   uint32_t count{ 0 };
-  REQUIRE(scav_layout_run(chart, &s, &opts, nullptr, 0, &count) == SCAV_OK);
+  REQUIRE(scav_layout_run(chart,
+                          &s,
+                          SPACES_SIZE,
+                          &opts,
+                          OPTS_SIZE,
+                          nullptr,
+                          0,
+                          PLACED_SIZE,
+                          &count) == SCAV_OK);
   CHECK(count == 1);
   scav_placed one{};
-  CHECK(scav_layout_run(chart, &s, &opts, &one, 1, &count) == SCAV_OK);
+  CHECK(scav_layout_run(chart,
+                        &s,
+                        SPACES_SIZE,
+                        &opts,
+                        OPTS_SIZE,
+                        &one,
+                        1,
+                        PLACED_SIZE,
+                        &count) == SCAV_OK);
   CHECK(one.w == 10);
 
   // Geometry reads back through the three-call accessor.
@@ -896,15 +943,31 @@ TEST_CASE("layout: the C surface runs, queries, and reports end to end") {
 
   // A bad router id is an argument error; a bad profile is a diagnosed one.
   opts.router = 99;
-  CHECK(scav_layout_run(chart, &s, &opts, &one, 1, &count) == SCAV_E_INVALID_ARG);
+  CHECK(scav_layout_run(chart,
+                        &s,
+                        SPACES_SIZE,
+                        &opts,
+                        OPTS_SIZE,
+                        &one,
+                        1,
+                        PLACED_SIZE,
+                        &count) == SCAV_E_INVALID_ARG);
   opts.router = 0;
   opts.profile.trybox = 7;
-  CHECK(scav_layout_run(chart, &s, &opts, &one, 1, &count) == SCAV_E_LAYOUT);
+  CHECK(scav_layout_run(chart,
+                        &s,
+                        SPACES_SIZE,
+                        &opts,
+                        OPTS_SIZE,
+                        &one,
+                        1,
+                        PLACED_SIZE,
+                        &count) == SCAV_E_LAYOUT);
   uint32_t n_diags{ 0 };
   REQUIRE(scav_chart_diag_count(chart, &n_diags) == SCAV_OK);
   REQUIRE(n_diags == 1);
   scav_diag d{};
-  REQUIRE(scav_chart_diag(chart, 0, &d) == SCAV_OK);
+  REQUIRE(scav_chart_diag(chart, 0, &d, DIAG_SIZE) == SCAV_OK);
   CHECK(d.code == static_cast<uint32_t>(DiagCode::ProfileOutOfRange));
 
   scav_chart_destroy(chart);
@@ -1315,11 +1378,233 @@ scav_point last_point(Chart const &c, uint32_t trans) {
 
 namespace scav {
 
-// The decision `layout.cpp` brackets with SCAV_INTERNAL, declared here rather
-// than in a header so the shipping build keeps it internal.
+// The decision and the portfolio's three pure parts, which `layout.cpp`
+// brackets with SCAV_INTERNAL, declared here rather than in a header so the
+// shipping build keeps them internal.
 bool inflation_done(uint32_t fewest, uint32_t degraded, uint32_t unreachable, bool &keep);
+uint32_t search_tuple_count(scav_profile const &p, uint32_t entity_count);
+void search_tuple(scav_profile &p, DarSource &dar, Compaction &pack, uint32_t index);
+uint32_t search_argmin(std::vector<Cost> const &cost, std::vector<uint8_t> const &viable);
 
 }  // namespace scav
+
+TEST_CASE("layout: the table's first row is the profile as given") {
+  // Row 0 has to be the caller's own tuple, or `portfolio_m` of 1 would not be
+  // the pipeline as it ran before the portfolio existed. The other seven are
+  // the packer crossed with compaction, then the same four handing the ratios
+  // down. The packer takes bit 0 because it is the knob that moves a chart, so
+  // row 1 is where every corpus pick lands and M of 2 would reach all of them;
+  // compaction takes bit 1, so the shipped M of 4 runs exactly the four rows
+  // the two packing knobs make.
+  for (int32_t const trybox : { 0, 1 }) {
+    for (int32_t const tiebreak : { 0, 1 }) {
+      CAPTURE(trybox);
+      CAPTURE(tiebreak);
+      scav_profile given{ readable() };
+      given.trybox = trybox;
+      given.sm_tiebreak = tiebreak;
+      for (uint32_t row = 0; row < 8; ++row) {
+        CAPTURE(row);
+        scav_profile knobs{ given };
+        DarSource dar{ DarSource::OwnerHole };
+        Compaction pack{ Compaction::On };
+        search_tuple(knobs, dar, pack, row);
+        CHECK(knobs.trybox == (given.trybox ^ static_cast<int32_t>(row & 1U)));
+        CHECK((pack == ((((row >> 1U) & 1U) != 0) ? Compaction::On : Compaction::Off)));
+        CHECK((dar == ((row < 4) ? DarSource::Profile : DarSource::OwnerHole)));
+        // The scale-measure tiebreak is no longer a row of the table, so no row
+        // may touch it -- it won on no chart at either scale, and compaction
+        // took the bit. All 48 knobs read back to say the row moved one.
+        CHECK(knobs.sm_tiebreak == given.sm_tiebreak);
+        knobs.trybox = given.trybox;
+        CHECK(profile_fields(knobs) == profile_fields(given));
+      }
+      // Row 1 is the packer and nothing else, which is the whole reason the
+      // bits are in this order.
+      scav_profile second{ given };
+      DarSource one{ DarSource::OwnerHole };
+      Compaction one_pack{ Compaction::On };
+      search_tuple(second, one, one_pack, 1);
+      CHECK(second.trybox != given.trybox);
+      CHECK((one_pack == Compaction::Off));
+      CHECK((one == DarSource::Profile));
+
+      // Row 2 is compaction and nothing else, and row 3 is both.
+      scav_profile third{ given };
+      DarSource two{ DarSource::OwnerHole };
+      Compaction two_pack{ Compaction::Off };
+      search_tuple(third, two, two_pack, 2);
+      CHECK(third.trybox == given.trybox);
+      CHECK((two_pack == Compaction::On));
+      CHECK((two == DarSource::Profile));
+
+      // The four rows of each half are the four combinations, once each: the
+      // shipped M of 4 is exactly {as given, trybox, compact, trybox+compact}.
+      uint32_t seen{ 0 };
+      for (uint32_t row = 0; row < 4; ++row) {
+        scav_profile knobs{ given };
+        DarSource dar{ DarSource::Profile };
+        Compaction pack{ Compaction::Off };
+        search_tuple(knobs, dar, pack, row);
+        CHECK((dar == DarSource::Profile));
+        seen |= 1U << static_cast<uint32_t>(((knobs.trybox ^ given.trybox) * 2) +
+                                            ((pack == Compaction::On) ? 1 : 0));
+      }
+      CHECK(seen == 0xFU);
+    }
+  }
+}
+
+TEST_CASE("layout: how many tuples a chart runs is closed form and model-derived") {
+  // M halves for every doubling of the entity count past 512, so a chart under
+  // 1,024 entities gets the whole of M and either 2k shape gets one row. Eight
+  // is the whole table and the largest M the validator admits.
+  scav_profile p{ readable() };
+  struct Row {
+    uint32_t entities;
+    uint32_t at_one, at_four, at_eight;
+  };
+  for (Row const &row :
+       { Row{ .entities = 0, .at_one = 1, .at_four = 4, .at_eight = 8 },
+         Row{ .entities = 1, .at_one = 1, .at_four = 4, .at_eight = 8 },
+         Row{ .entities = 1023, .at_one = 1, .at_four = 4, .at_eight = 8 },
+         Row{ .entities = 1024, .at_one = 1, .at_four = 2, .at_eight = 4 },
+         Row{ .entities = 2047, .at_one = 1, .at_four = 2, .at_eight = 4 },
+         Row{ .entities = 2048, .at_one = 1, .at_four = 1, .at_eight = 2 },
+         Row{ .entities = 6000, .at_one = 1, .at_four = 1, .at_eight = 1 } }) {
+    CAPTURE(row.entities);
+    p.portfolio_m = 1;
+    CHECK(search_tuple_count(p, row.entities) == row.at_one);
+    p.portfolio_m = 4;
+    CHECK(search_tuple_count(p, row.entities) == row.at_four);
+    p.portfolio_m = 8;
+    CHECK(search_tuple_count(p, row.entities) == row.at_eight);
+    CHECK(profile_validate(p));
+  }
+
+  // Past 4,096 entities the shift bites into the largest M the validator
+  // admits, and the floor is what answers.
+  p.portfolio_m = 8;
+  CHECK(search_tuple_count(p, 1U << 12U) == 1);
+  CHECK(search_tuple_count(p, 0xFFFF'FFFFU) == 1);
+
+  // A profile this never saw validated is held inside the table all the same:
+  // a row index past its last row would repeat a tuple already run.
+  p.portfolio_m = 64;
+  CHECK(!profile_validate(p));
+  CHECK(search_tuple_count(p, 1) == 8);
+
+  // Both 2k shapes, which is the claim the rule is written for.
+  Chart nested{ nested_2k_chart() };
+  Chart flat{ flat_2k_chart() };
+  p.portfolio_m = 4;
+  CHECK(search_tuple_count(p, layout_entity_count(nested)) == 1);
+  CHECK(search_tuple_count(p, layout_entity_count(flat)) == 1);
+}
+
+TEST_CASE("layout: the portfolio reduces in index order and a tie keeps the lower row") {
+  Cost const cheap{ .t0_violations = 0, .t1_hints = 0, .t2 = 10 };
+  Cost const dear{ .t0_violations = 0, .t1_hints = 0, .t2 = 20 };
+  Cost const violating{ .t0_violations = 1, .t1_hints = 0, .t2 = 1 };
+
+  CHECK(search_argmin({ dear, cheap, dear }, { 1, 1, 1 }) == 1);
+  // Equal costs are a tie, and `cost_less` is strict, so the lower index wins
+  // however many rows agree with it.
+  CHECK(search_argmin({ cheap, cheap, cheap }, { 1, 1, 1 }) == 0);
+  CHECK(search_argmin({ dear, cheap, cheap }, { 1, 1, 1 }) == 1);
+  // Tier 0 is compared first, so a violating row loses to any admissible one
+  // however small its sum.
+  CHECK(search_argmin({ violating, dear }, { 1, 1 }) == 1);
+  // A row that left the coordinate domain is no candidate at all.
+  CHECK(search_argmin({ dear, cheap }, { 1, 0 }) == 0);
+  CHECK(search_argmin({ cheap, dear }, { 0, 1 }) == 1);
+  // Nothing viable answers row 0, the caller's own tuple.
+  CHECK(search_argmin({ cheap, cheap }, { 0, 0 }) == 0);
+  CHECK(search_argmin({}, {}) == 0);
+}
+
+TEST_CASE("layout: the pick is the row exact Cost ranks first over the whole table") {
+  // End to end on a real chart: run the portfolio, then run each of its four
+  // rows' phases 2 and 3 on their own, score all four the way the driver does,
+  // and hold the reduction and the written geometry to the same row. Phases 2
+  // and 3 directly rather than four `layout_run`s, because two of the four
+  // knobs -- the ratio's source and compaction -- are arguments to `size_layout`
+  // and not profile fields a one-row run could carry.
+  scav_profile const p{ readable() };
+  Chart searched;
+  load_corpus("axis.scav", searched);
+  scav_profile four{ p };
+  four.portfolio_m = 4;
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  uint32_t picked{ INVALID };
+  REQUIRE(layout_run(searched, {}, opts(four), placed, diags, nullptr, &picked));
+  REQUIRE(picked < 4);
+
+  SplitGraph const g{ decompose(searched) };
+  std::vector<Cost> cost;
+  std::vector<scav_rect> shipped;
+  for (uint32_t row = 0; row < 4; ++row) {
+    CAPTURE(row);
+    scav_profile knobs{ p };
+    DarSource dar{ DarSource::Profile };
+    Compaction pack{ Compaction::Off };
+    search_tuple(knobs, dar, pack, row);
+    SubmachineOrders const o{ order_submachines(searched, g, {}, knobs) };
+    SizedLayout z;
+    std::vector<Diagnostic> spilled;
+    REQUIRE(size_layout(searched, g, o, {}, knobs, z, spilled, dar, pack));
+    Routes const r{ route_transitions(searched, g, o, z, {}, knobs, *router_at(0)) };
+    // Scored on the caller's profile, not the tuple's copy, which is what puts
+    // two rows on one scale.
+    cost.push_back(cost_of(cost_terms(searched, g, z, r, {}, p), p));
+    if (row == picked) { shipped = z.state; }
+  }
+  CHECK(search_argmin(cost, { 1, 1, 1, 1 }) == picked);
+  // The geometry the run wrote is the picked row's, box for box.
+  for (uint32_t i = 0; i < shipped.size(); ++i) {
+    CAPTURE(i);
+    CHECK((row_of<scav_rect>(searched, "scav.geom.state", i) == shipped[i]));
+  }
+  // The pick is an improvement on the profile as given, or it would be row 0.
+  CHECK(cost_less(cost[picked], cost[0]) == (picked != 0));
+}
+
+TEST_CASE("layout: a chart compaction cannot improve keeps the lower row") {
+  // Compaction is dominance-bounded, so on a chart it moves nothing the
+  // compaction row's geometry is the plain row's, byte for byte -- and two rows
+  // of equal `Cost` are separated by `argmin(value, index)`, which keeps the
+  // lower. `estop.scav` is such a chart: nothing in it has three components,
+  // three fold pieces or three sibling frames in one packing.
+  scav_profile const p{ readable() };
+  Chart c;
+  load_corpus("estop.scav", c);
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ order_submachines(c, g, {}, p) };
+
+  SizedLayout plain;
+  SizedLayout compacted;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c, g, o, {}, p, plain, diags, DarSource::Profile, Compaction::Off));
+  REQUIRE(
+      size_layout(c, g, o, {}, p, compacted, diags, DarSource::Profile, Compaction::On));
+  REQUIRE(plain.state.size() == compacted.state.size());
+  for (uint32_t i = 0; i < plain.state.size(); ++i) {
+    CAPTURE(i);
+    CHECK((plain.state[i] == compacted.state[i]));
+  }
+  CHECK((plain.chart == compacted.chart));
+
+  // So rows 0 and 2 tie, and 1 and 3 tie, and the pick is whichever of the
+  // lower two the packer choice wins on.
+  scav_profile four{ p };
+  four.portfolio_m = 4;
+  std::vector<scav_placed> placed;
+  uint32_t picked{ INVALID };
+  diags.clear();
+  REQUIRE(layout_run(c, {}, opts(four), placed, diags, nullptr, &picked));
+  CHECK(picked < 2);
+}
 
 TEST_CASE("layout: only a kept inflation attempt ends the retry loop") {
   // The loop exists to remove unreachable ends, and the geometry that ships is
@@ -1821,6 +2106,12 @@ TEST_CASE("layout: the corpus cost vector is committed, term by term and by shar
   // readable profile, so a later phase is compared against a row not a claim.
   // The share table beside it says how the sum divides between the nine terms,
   // which is what a weight change moves and a term column does not show.
+  //
+  // Scored from the geometry columns a whole `layout_run` wrote, portfolio and
+  // all, because these two rows are what 17's phase tables say the pipeline
+  // does. A golden that claims to describe the diagram scores what ships; one
+  // that pins a component scores the component, which is what
+  // `corpus_routers.txt` and `cost_terms.txt` do next door.
   scav_profile const p{ readable() };
   std::string actual;
   std::string shares;
@@ -1836,20 +2127,10 @@ TEST_CASE("layout: the corpus cost vector is committed, term by term and by shar
                             "toolchanger.scav",
                             "vac.scav" }) {
     CAPTURE(name);
-    std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
-    path += name;
-    Loader loader;
     Chart c;
-    std::vector<Diagnostic> diags;
-    std::string failed;
-    REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
-
-    SplitGraph const g{ decompose(c) };
-    SubmachineOrders const o{ order_submachines(c, g, {}, p) };
-    SizedLayout z;
-    REQUIRE(size_layout(c, g, o, {}, p, z, diags));
-    Routes const r{ route_transitions(c, g, o, z, {}, p, *router_at(0)) };
-    CostTerms const t{ cost_terms(c, g, z, r, {}, p) };
+    load_corpus(name, c);
+    run(c, {}, p);
+    CostTerms const t{ cost_columns(c, decompose(c), p) };
     Cost const scored{ cost_of(t, p) };
 
     actual += name;

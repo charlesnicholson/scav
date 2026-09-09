@@ -274,6 +274,48 @@ TEST_CASE("order: two runs over one chart agree row for row") {
   CHECK(a.seg_node == b.seg_node);
 }
 
+TEST_CASE("order: widened separations order to the same rows") {
+  // What lets `layout_run` order once and reuse the result on every
+  // spacing-inflation attempt: the three separations reach no decision here.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
+  StateId const deep{ build_state(c, inner, "S", StateKind::Normal, {}) };
+  StateId prev{ build_state(c, root, "S0", StateKind::Normal, {}) };
+  for (uint32_t i = 1; i < 9; ++i) {
+    StateId const next{ build_state(c, root, "S", StateKind::Normal, {}) };
+    build_trans(c, prev, next, TransKind::External, {});
+    if ((i % 4) == 0) { build_trans(c, next, prev, TransKind::External, {}); }
+    prev = next;
+  }
+  build_trans(c, prev, deep, TransKind::External, {});  // crosses a boundary
+
+  scav_path_box const box{ .subject = 0, .w = 300, .h = 40, .order = 0 };
+  scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
+
+  scav_profile const p{ profile() };
+  scav_profile wider{ p };
+  wider.rank_sep += 8 * p.spacing_inflation_increment;
+  wider.node_sep += 8 * p.spacing_inflation_increment;
+  wider.sub_sep += 8 * p.spacing_inflation_increment;
+  REQUIRE(profile_validate(wider));
+
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const a{ order_submachines(c, g, s, p) };
+  SubmachineOrders const b{ order_submachines(c, g, s, wider) };
+  CHECK(a.nodes == b.nodes);
+  CHECK(a.edges == b.edges);
+  CHECK(a.sub_nodes == b.sub_nodes);
+  CHECK(a.sub_edges == b.sub_edges);
+  CHECK(a.sub_ranks == b.sub_ranks);
+  CHECK(a.sub_gaps == b.sub_gaps);
+  CHECK(a.gaps == b.gaps);
+  CHECK(a.state_node == b.state_node);
+  CHECK(a.seg_node == b.seg_node);
+  CHECK(a.seg_port == b.seg_port);
+}
+
 TEST_CASE("order: a dead submachine gets an empty span and no nodes") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };

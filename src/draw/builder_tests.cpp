@@ -109,6 +109,11 @@ bool has_text(DrawList const &d, std::string_view want) {
 
 constexpr uint32_t RECT_SIZE{ static_cast<uint32_t>(sizeof(scav_rect)) };
 
+// The sizes the C surface checks against, as this build measures them.
+constexpr uint32_t STYLE_SIZE{ static_cast<uint32_t>(sizeof(scav_style)) };
+constexpr uint32_t SPACES_SIZE{ static_cast<uint32_t>(sizeof(scav_spaces)) };
+constexpr uint32_t PLACED_SIZE{ static_cast<uint32_t>(sizeof(scav_placed)) };
+
 // A plane-15 private-use codepoint. The bundled font has no glyph for it, which
 // is what makes a measurement fail rather than come out narrow.
 constexpr char const *NO_GLYPH{ "\xF3\xB0\x80\x81" };
@@ -959,17 +964,20 @@ TEST_CASE("builder: the C surface builds through the handles") {
   REQUIRE(scav_drawlist_create(&list) == SCAV_OK);
 
   std::vector<scav_style> palette(SCAV_STYLE_COUNT);
-  REQUIRE(scav_palette_standard(palette.data(), SCAV_STYLE_COUNT) == SCAV_OK);
-  CHECK(scav_palette_standard(palette.data(), 1) == SCAV_E_CAPACITY);
+  REQUIRE(scav_palette_standard(palette.data(), SCAV_STYLE_COUNT, STYLE_SIZE) == SCAV_OK);
+  CHECK(scav_palette_standard(palette.data(), 1, STYLE_SIZE) == SCAV_E_CAPACITY);
 
   REQUIRE(scav_emit_chart(list,
                           &chart,
                           metrics,
                           palette.data(),
                           SCAV_STYLE_COUNT,
+                          STYLE_SIZE,
                           nullptr,
+                          SPACES_SIZE,
                           nullptr,
                           0,
+                          PLACED_SIZE,
                           0) == SCAV_OK);
   uint32_t prims{ 0 };
   REQUIRE(scav_drawlist_counts(list, &prims, nullptr, nullptr, nullptr, nullptr) ==
@@ -979,20 +987,58 @@ TEST_CASE("builder: the C surface builds through the handles") {
   // A null palette takes the shipped one; a short one is refused.
   scav_drawlist *defaulted{ nullptr };
   REQUIRE(scav_drawlist_create(&defaulted) == SCAV_OK);
-  REQUIRE(
-      scav_emit_chart(defaulted, &chart, metrics, nullptr, 0, nullptr, nullptr, 0, 0) ==
-      SCAV_OK);
-  CHECK(
-      scav_emit_chart(list, &chart, metrics, palette.data(), 1, nullptr, nullptr, 0, 0) ==
-      SCAV_E_INVALID_ARG);
-  CHECK(scav_emit_chart(nullptr, &chart, metrics, nullptr, 0, nullptr, nullptr, 0, 0) ==
-        SCAV_E_INVALID_ARG);
+  REQUIRE(scav_emit_chart(defaulted,
+                          &chart,
+                          metrics,
+                          nullptr,
+                          0,
+                          STYLE_SIZE,
+                          nullptr,
+                          SPACES_SIZE,
+                          nullptr,
+                          0,
+                          PLACED_SIZE,
+                          0) == SCAV_OK);
+  CHECK(scav_emit_chart(list,
+                        &chart,
+                        metrics,
+                        palette.data(),
+                        1,
+                        STYLE_SIZE,
+                        nullptr,
+                        SPACES_SIZE,
+                        nullptr,
+                        0,
+                        PLACED_SIZE,
+                        0) == SCAV_E_INVALID_ARG);
+  CHECK(scav_emit_chart(nullptr,
+                        &chart,
+                        metrics,
+                        nullptr,
+                        0,
+                        STYLE_SIZE,
+                        nullptr,
+                        SPACES_SIZE,
+                        nullptr,
+                        0,
+                        PLACED_SIZE,
+                        0) == SCAV_E_INVALID_ARG);
 
   // A chart with no geometry is a state error, not a bad argument: the caller
   // did nothing wrong except skip layout.
   scav_chart unlaid{ .chart = small_chart(), .diags = {} };
-  CHECK(scav_emit_chart(list, &unlaid, metrics, nullptr, 0, nullptr, nullptr, 0, 0) ==
-        SCAV_E_STATE);
+  CHECK(scav_emit_chart(list,
+                        &unlaid,
+                        metrics,
+                        nullptr,
+                        0,
+                        STYLE_SIZE,
+                        nullptr,
+                        SPACES_SIZE,
+                        nullptr,
+                        0,
+                        PLACED_SIZE,
+                        0) == SCAV_E_STATE);
 
   scav_drawlist_destroy(defaulted);
   scav_drawlist_destroy(list);

@@ -1138,3 +1138,248 @@ TEST_CASE("size: a box formula that leaves the domain is charged to the state") 
   CHECK(z.sub[inner.v].w <= COORD_MAX);
   CHECK((z.sub[inner.v].w + (2 * p.pad)) > COORD_MAX);
 }
+
+namespace scav {
+
+// The two halves of the owner-hole ratio `size.cpp` brackets with
+// SCAV_INTERNAL, declared here rather than in a header so the shipping build
+// keeps them internal.
+FrameDar size_hole_ratio(int32_t w, int32_t h);
+std::vector<FrameDar> size_owner_holes(Chart const &c, SizedLayout const &z);
+
+}  // namespace scav
+
+namespace {
+
+// A profile whose Choice states reserve a hole a hundred thousand units tall,
+// so an owner leaves its frame a shape nothing about the frame produced.
+scav_profile tall_choice() {
+  scav_profile p{ profile() };
+  p.kind_min_h[static_cast<uint32_t>(StateKind::Choice)] = 100000;
+  return p;
+}
+
+// A Choice state owning `kids` unconnected leaves: one hole, and as many
+// components in it as there are leaves.
+Chart hole_chart(uint32_t kids, StateId &owner, SubmachineId &frame) {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  owner = build_state(c, root, "Owner", StateKind::Choice, {});
+  frame = build_submachine(c, owner, "inner", {});
+  for (uint32_t i = 0; i < kids; ++i) {
+    build_state(c, frame, "K", StateKind::Normal, {});
+  }
+  return c;
+}
+
+// How many distinct x and y origins the frame's children came out at, which is
+// the packing's shape as a reader sees it.
+void packing_shape(Chart const &c,
+                   SizedLayout const &z,
+                   SubmachineId frame,
+                   uint32_t &columns,
+                   uint32_t &rows) {
+  std::vector<int32_t> xs;
+  std::vector<int32_t> ys;
+  for (uint32_t i = 0; i < c.states.size(); ++i) {
+    if (!(c.states[i].parent == frame)) { continue; }
+    bool seen_x{ false };
+    bool seen_y{ false };
+    for (int32_t const at : xs) { seen_x = seen_x || (at == z.state[i].x); }
+    for (int32_t const at : ys) { seen_y = seen_y || (at == z.state[i].y); }
+    if (!seen_x) { xs.push_back(z.state[i].x); }
+    if (!seen_y) { ys.push_back(z.state[i].y); }
+  }
+  columns = static_cast<uint32_t>(xs.size());
+  rows = static_cast<uint32_t>(ys.size());
+}
+
+}  // namespace
+
+TEST_CASE("size: a hole's aspect is a ratio inside the profile's own bounds") {
+  // Both fields stay in [1, 1024], because that is where pack.cpp proved its
+  // products, and the longer axis is the one that takes the cap.
+  CHECK(size_hole_ratio(1000, 1000).num == 1024);
+  CHECK(size_hole_ratio(1000, 1000).den == 1024);
+  CHECK(size_hole_ratio(2000, 1000).num == 1024);
+  CHECK(size_hole_ratio(2000, 1000).den == 512);
+  CHECK(size_hole_ratio(1000, 2000).num == 512);
+  CHECK(size_hole_ratio(1000, 2000).den == 1024);
+  // 16:10 is the readable profile's own ratio, and a hole of that shape reads
+  // as the same number.
+  CHECK(size_hole_ratio(1600, 1000).num == 1024);
+  CHECK(size_hole_ratio(1600, 1000).den == 640);
+
+  // A hole a million times longer than it is wide floors at 1 rather than
+  // rounding down to no ratio at all, which no profile would validate.
+  CHECK(size_hole_ratio(1000000, 1).num == 1024);
+  CHECK(size_hole_ratio(1000000, 1).den == 1);
+  CHECK(size_hole_ratio(1, 1000000).num == 1);
+  CHECK(size_hole_ratio(1, 1000000).den == 1024);
+
+  // No extent on an axis is no aspect: the caller falls back to the profile's.
+  CHECK(size_hole_ratio(0, 500).num == 0);
+  CHECK(size_hole_ratio(500, 0).num == 0);
+  CHECK(size_hole_ratio(-1, 500).num == 0);
+}
+
+TEST_CASE("size: only a state with a live frame in it leaves a hole") {
+  StateId owner{ INVALID };
+  SubmachineId frame{ INVALID };
+  Chart c{ hole_chart(4, owner, frame) };
+  scav_profile const p{ tall_choice() };
+
+  SplitGraph const g{ decompose(c) };
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c, g, order_submachines(c, g, {}, p), {}, p, z, diags));
+
+  std::vector<FrameDar> const hole{ size_owner_holes(c, z) };
+  REQUIRE(hole.size() == c.states.size());
+  // The owner reserves 100,000 units of height for a frame a fraction of that
+  // tall, so the hole it leaves is far taller than it is wide.
+  CHECK(hole[owner.v].num < hole[owner.v].den);
+  CHECK(hole[owner.v].den == 1024);
+  // A leaf holds no frame, so nothing is packed into it.
+  for (uint32_t i = 0; i < c.states.size(); ++i) {
+    if (i != owner.v) { CHECK(hole[i].num == 0); }
+  }
+
+  // A tombstoned frame is no hole either, the state having nothing left to pack.
+  c.submachines[frame.v].live = 0;
+  CHECK(size_owner_holes(c, z)[owner.v].num == 0);
+}
+
+TEST_CASE("size: a frame handed its owner's hole packs to that shape") {
+  // The hole is tall and narrow and the profile's ratio is 16:10, so the same
+  // four components come out two by two at the one and in a column at the other.
+  StateId owner{ INVALID };
+  SubmachineId frame{ INVALID };
+  Chart c{ hole_chart(4, owner, frame) };
+  scav_profile const p{ tall_choice() };
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ order_submachines(c, g, {}, p) };
+
+  SizedLayout flat;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c, g, o, {}, p, flat, diags, DarSource::Profile));
+  uint32_t columns{ 0 };
+  uint32_t rows{ 0 };
+  packing_shape(c, flat, frame, columns, rows);
+  CHECK(columns == 2);
+  CHECK(rows == 2);
+
+  SizedLayout handed;
+  REQUIRE(size_layout(c, g, o, {}, p, handed, diags, DarSource::OwnerHole));
+  packing_shape(c, handed, frame, columns, rows);
+  CHECK(columns == 1);
+  CHECK(rows == 4);
+  CHECK(handed.sub[frame.v].w < flat.sub[frame.v].w);
+  CHECK(handed.sub[frame.v].h > flat.sub[frame.v].h);
+}
+
+TEST_CASE("size: a root frame has no owner hole and keeps the profile's ratio") {
+  // Every packing in this chart is the root frame's own, so handing the ratios
+  // down cannot reach one and both passes agree rect for rect.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  for (uint32_t i = 0; i < 5; ++i) { build_state(c, root, "K", StateKind::Normal, {}); }
+  scav_profile const p{ profile() };
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ order_submachines(c, g, {}, p) };
+
+  SizedLayout flat;
+  SizedLayout handed;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c, g, o, {}, p, flat, diags, DarSource::Profile));
+  REQUIRE(size_layout(c, g, o, {}, p, handed, diags, DarSource::OwnerHole));
+  for (uint32_t i = 0; i < c.states.size(); ++i) {
+    CHECK((flat.state[i] == handed.state[i]));
+  }
+  CHECK((flat.chart == handed.chart));
+}
+
+TEST_CASE("size: a first pass that leaves the domain ends the handed-down one") {
+  // The failure is the same failure and it is reported once: the second pass
+  // never runs, so nothing can diagnose the same state twice.
+  scav_profile p{ profile() };
+  p.pad = SPACE_MAX;
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const owner{ build_state(c, root, "Outer", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, owner, "inner", {}) };
+  build_state(c, inner, "A", StateKind::Normal, {});
+
+  SplitGraph const g{ decompose(c) };
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  CHECK_FALSE(size_layout(c,
+                          g,
+                          order_submachines(c, g, {}, p),
+                          {},
+                          p,
+                          z,
+                          diags,
+                          DarSource::OwnerHole));
+  REQUIRE(diags.size() == 1);
+  CHECK(diags[0].code == DiagCode::CoordinateOverflow);
+  CHECK(diags[0].subject.ordinal == owner.v);
+}
+
+TEST_CASE("size: whitespace elimination grows a sibling submachine's own rect") {
+  // Three frames of 896 x 896, 896 x 640 and 896 x 640 packed at `sub_sep`.
+  // The placement seats the first two side by side and wraps the third, so the
+  // second grows in height to its subrow's 896 and the third in width to the
+  // block's 1984. This is the one packing whose rect is a box a reader sees, so
+  // it is the one the step is written back to.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const owner{ build_state(c, root, "P", StateKind::Normal, {}) };
+  std::vector<SubmachineId> subs;
+  std::vector<StateId> kids;
+  for (uint32_t i = 0; i < 3; ++i) {
+    subs.push_back(build_submachine(c, owner, {}, {}));
+    kids.push_back(build_state(c, subs.back(), "K", StateKind::Normal, {}));
+  }
+  scav_profile const p{ profile() };
+
+  std::vector<scav_box_space> spaces(c.states.size(), scav_box_space{});
+  spaces[kids[0].v] = { .min_w = 0, .h_before = 640, .h_after = 0 };
+  scav_spaces const sp{ .box_state = spaces.data(),
+                        .n_box_state = static_cast<uint32_t>(spaces.size()) };
+
+  SubmachineOrders o;
+  o.sub_nodes.assign(c.submachines.size(), Span{});
+  o.sub_edges.assign(c.submachines.size(), Span{});
+  o.sub_ranks.assign(c.submachines.size(), 0);
+  o.sub_gaps.assign(c.submachines.size(), Span{});
+  o.state_node.assign(c.states.size(), INVALID);
+  for (uint32_t i = 0; i < 3; ++i) {
+    o.nodes.push_back(state_node(kids[i].v, 0, 0));
+    o.state_node[kids[i].v] = i;
+    o.sub_nodes[subs[i].v] = make_span(i, 1);
+    o.sub_ranks[subs[i].v] = 1;
+  }
+  o.nodes.push_back(state_node(owner.v, 0, 0));
+  o.state_node[owner.v] = 3;
+  o.sub_nodes[root.v] = make_span(3, 1);
+  o.sub_ranks[root.v] = 1;
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c, depths({ 0, 1, 1, 1 }), o, sp, p, z, diags));
+  CHECK(z.sub[subs[0].v].w == 896);
+  CHECK(z.sub[subs[0].v].h == 896);
+  CHECK(z.sub[subs[1].v].w == 896);
+  CHECK(z.sub[subs[1].v].h == 896);   // 640 as sized, then its subrow's height
+  CHECK(z.sub[subs[2].v].w == 1984);  // 896 as sized, then its block's width
+  CHECK(z.sub[subs[2].v].h == 640);
+  // Every gap is still `sub_sep`, which is what the apportionment preserves.
+  CHECK(z.sub[subs[1].v].x == (z.sub[subs[0].v].x + 896 + p.sub_sep));
+  CHECK(z.sub[subs[1].v].y == z.sub[subs[0].v].y);
+  CHECK(z.sub[subs[2].v].x == z.sub[subs[0].v].x);
+  CHECK(z.sub[subs[2].v].y == (z.sub[subs[0].v].y + 896 + p.sub_sep));
+  // Extent-neutral: the owner's box is the packing's own extents plus its ring.
+  CHECK(z.state[owner.v].w == (1984 + (2 * p.pad)));
+  CHECK(z.state[owner.v].h == (1728 + (2 * p.pad)));
+}

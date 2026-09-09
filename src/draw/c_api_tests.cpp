@@ -26,6 +26,16 @@ using namespace scav;
 constexpr uint32_t SENTINEL{ 0xD1CE'D1CEU };
 constexpr int32_t SENTINEL_I{ 0x5CA5 };
 
+// The sizes the C surface checks against, as this build measures them.
+constexpr uint32_t PROFILE_SIZE{ static_cast<uint32_t>(sizeof(scav_profile)) };
+constexpr uint32_t EXTENT_SIZE{ static_cast<uint32_t>(sizeof(scav_extent)) };
+constexpr uint32_t STYLE_SIZE{ static_cast<uint32_t>(sizeof(scav_style)) };
+constexpr uint32_t SPACES_SIZE{ static_cast<uint32_t>(sizeof(scav_spaces)) };
+constexpr uint32_t PLACED_SIZE{ static_cast<uint32_t>(sizeof(scav_placed)) };
+constexpr uint32_t BOX_SIZE{ static_cast<uint32_t>(sizeof(scav_box_space)) };
+constexpr uint32_t CLEAR_SIZE{ static_cast<uint32_t>(sizeof(scav_path_clear)) };
+constexpr uint32_t PATH_BOX_SIZE{ static_cast<uint32_t>(sizeof(scav_path_box)) };
+
 // A named state, a submachine with two children and a labelled transition: the
 // smallest chart that fills all four space tables with something.
 Chart small_chart() {
@@ -43,6 +53,63 @@ scav_profile readable() {
   scav_profile p{};
   REQUIRE(profile_named("readable", p));
   return p;
+}
+
+// The measurement pass with every size right, so a case below varies only its
+// caps and its buffers; what a wrong size does has its own case.
+scav_result measure(scav_chart const *chart,
+                    scav_metrics const *metrics,
+                    scav_profile const *profile,
+                    scav_box_space *box_state,
+                    uint32_t cap_box_state,
+                    scav_box_space *box_sub,
+                    uint32_t cap_box_sub,
+                    scav_path_clear *path_clear,
+                    uint32_t cap_path_clear,
+                    scav_path_box *path_box,
+                    uint32_t cap_path_box,
+                    uint32_t *out_counts) {
+  return scav_measure_chart(chart,
+                            metrics,
+                            profile,
+                            PROFILE_SIZE,
+                            box_state,
+                            cap_box_state,
+                            BOX_SIZE,
+                            box_sub,
+                            cap_box_sub,
+                            BOX_SIZE,
+                            path_clear,
+                            cap_path_clear,
+                            CLEAR_SIZE,
+                            path_box,
+                            cap_path_box,
+                            PATH_BOX_SIZE,
+                            out_counts);
+}
+
+// The reference builder with every size right, under the same rule.
+scav_result emit(scav_drawlist *list,
+                 scav_chart const *chart,
+                 scav_metrics const *metrics,
+                 scav_style const *palette,
+                 uint32_t palette_len,
+                 scav_spaces const *spaces,
+                 scav_placed const *placed,
+                 uint32_t placed_count,
+                 int32_t depth) {
+  return scav_emit_chart(list,
+                         chart,
+                         metrics,
+                         palette,
+                         palette_len,
+                         STYLE_SIZE,
+                         spaces,
+                         SPACES_SIZE,
+                         placed,
+                         placed_count,
+                         PLACED_SIZE,
+                         depth);
 }
 
 struct Case {
@@ -100,19 +167,19 @@ TEST_CASE("draw abi: a null argument is refused whichever one it is") {
         .got = scav_metrics_glyph_count(metrics, nullptr),
         .want = SCAV_E_INVALID_ARG },
       { .what = "measure_text: no handle",
-        .got = scav_measure_text(nullptr, &guard, 1, 16, &extent),
+        .got = scav_measure_text(nullptr, &guard, 1, 16, &extent, EXTENT_SIZE),
         .want = SCAV_E_INVALID_ARG },
       { .what = "measure_text: nowhere to put the extent",
-        .got = scav_measure_text(metrics, &guard, 1, 16, nullptr),
+        .got = scav_measure_text(metrics, &guard, 1, 16, nullptr, EXTENT_SIZE),
         .want = SCAV_E_INVALID_ARG },
       { .what = "line_height: nowhere to put it",
         .got = scav_line_height(16, 7, 5, nullptr),
         .want = SCAV_E_INVALID_ARG },
       { .what = "measure_block: no handle",
-        .got = scav_measure_block(nullptr, &guard, 1, 16, 7, 5, &extent),
+        .got = scav_measure_block(nullptr, &guard, 1, 16, 7, 5, &extent, EXTENT_SIZE),
         .want = SCAV_E_INVALID_ARG },
       { .what = "measure_block: nowhere to put the extent",
-        .got = scav_measure_block(metrics, &guard, 1, 16, 7, 5, nullptr),
+        .got = scav_measure_block(metrics, &guard, 1, 16, 7, 5, nullptr, EXTENT_SIZE),
         .want = SCAV_E_INVALID_ARG },
       { .what = "drawlist_counts: no list",
         .got = scav_drawlist_counts(nullptr, &count, nullptr, nullptr, nullptr, nullptr),
@@ -169,75 +236,75 @@ TEST_CASE("draw abi: a null argument is refused whichever one it is") {
         .got = scav_image_find(images, &guard, 1, nullptr),
         .want = SCAV_E_INVALID_ARG },
       { .what = "image_extent: no registry",
-        .got = scav_image_extent(nullptr, 0, &extent),
+        .got = scav_image_extent(nullptr, 0, &extent, EXTENT_SIZE),
         .want = SCAV_E_INVALID_ARG },
       { .what = "image_extent: nowhere to put the extent",
-        .got = scav_image_extent(images, 0, nullptr),
+        .got = scav_image_extent(images, 0, nullptr, EXTENT_SIZE),
         .want = SCAV_E_INVALID_ARG },
       { .what = "measure_chart: no chart",
-        .got = scav_measure_chart(nullptr,
-                                  metrics,
-                                  &profile,
-                                  nullptr,
-                                  0,
-                                  nullptr,
-                                  0,
-                                  nullptr,
-                                  0,
-                                  nullptr,
-                                  0,
-                                  counts.data()),
+        .got = measure(nullptr,
+                       metrics,
+                       &profile,
+                       nullptr,
+                       0,
+                       nullptr,
+                       0,
+                       nullptr,
+                       0,
+                       nullptr,
+                       0,
+                       counts.data()),
         .want = SCAV_E_INVALID_ARG },
       { .what = "measure_chart: no metrics",
-        .got = scav_measure_chart(&chart,
-                                  nullptr,
-                                  &profile,
-                                  nullptr,
-                                  0,
-                                  nullptr,
-                                  0,
-                                  nullptr,
-                                  0,
-                                  nullptr,
-                                  0,
-                                  counts.data()),
+        .got = measure(&chart,
+                       nullptr,
+                       &profile,
+                       nullptr,
+                       0,
+                       nullptr,
+                       0,
+                       nullptr,
+                       0,
+                       nullptr,
+                       0,
+                       counts.data()),
         .want = SCAV_E_INVALID_ARG },
       { .what = "measure_chart: no profile",
-        .got = scav_measure_chart(&chart,
-                                  metrics,
-                                  nullptr,
-                                  nullptr,
-                                  0,
-                                  nullptr,
-                                  0,
-                                  nullptr,
-                                  0,
-                                  nullptr,
-                                  0,
-                                  counts.data()),
+        .got = measure(&chart,
+                       metrics,
+                       nullptr,
+                       nullptr,
+                       0,
+                       nullptr,
+                       0,
+                       nullptr,
+                       0,
+                       nullptr,
+                       0,
+                       counts.data()),
         .want = SCAV_E_INVALID_ARG },
       { .what = "measure_chart: nowhere to put the counts",
-        .got = scav_measure_chart(&chart,
-                                  metrics,
-                                  &profile,
-                                  nullptr,
-                                  0,
-                                  nullptr,
-                                  0,
-                                  nullptr,
-                                  0,
-                                  nullptr,
-                                  0,
-                                  nullptr),
+        .got = measure(&chart,
+                       metrics,
+                       &profile,
+                       nullptr,
+                       0,
+                       nullptr,
+                       0,
+                       nullptr,
+                       0,
+                       nullptr,
+                       0,
+                       nullptr),
         .want = SCAV_E_INVALID_ARG },
       { .what = "palette_standard: nowhere to put the rows",
-        .got = scav_palette_standard(nullptr, SCAV_STYLE_COUNT),
+        .got = scav_palette_standard(nullptr, SCAV_STYLE_COUNT, STYLE_SIZE),
         .want = SCAV_E_INVALID_ARG },
       { .what = "emit_chart: no chart",
-        .got = scav_emit_chart(list, nullptr, metrics, nullptr, 0, nullptr, nullptr, 0, 0),
+        .got = emit(list, nullptr, metrics, nullptr, 0, nullptr, nullptr, 0, 0),
         .want = SCAV_E_INVALID_ARG },
       { .what = "emit_chart: no metrics",
-        .got = scav_emit_chart(list, &chart, nullptr, nullptr, 0, nullptr, nullptr, 0, 0),
+        .got = emit(list, &chart, nullptr, nullptr, 0, nullptr, nullptr, 0, 0),
         .want = SCAV_E_INVALID_ARG },
   });
 
@@ -262,20 +329,21 @@ TEST_CASE("draw abi: each way a measurement can fail keeps its own code") {
   // argument error; a codepoint the font lacks is the font's, and is its own.
   run({
       { .what = "measure_text: a newline, which the caller splits on itself",
-        .got = scav_measure_text(metrics, text, 7, 160, &extent),
+        .got = scav_measure_text(metrics, text, 7, 160, &extent, EXTENT_SIZE),
         .want = SCAV_E_INVALID_ARG },
       { .what = "measure_text: bytes that are not UTF-8",
         .got = scav_measure_text(metrics,
                                  reinterpret_cast<scav_byte const *>("\xC0\x80"),
                                  2,
                                  160,
-                                 &extent),
+                                 &extent,
+                                 EXTENT_SIZE),
         .want = SCAV_E_INVALID_ARG },
       { .what = "measure_text: no bytes where a length says there are some",
-        .got = scav_measure_text(metrics, nullptr, 5, 160, &extent),
+        .got = scav_measure_text(metrics, nullptr, 5, 160, &extent, EXTENT_SIZE),
         .want = SCAV_E_INVALID_ARG },
       { .what = "measure_block: no bytes where a length says there are some",
-        .got = scav_measure_block(metrics, nullptr, 5, 160, 7, 5, &extent),
+        .got = scav_measure_block(metrics, nullptr, 5, 160, 7, 5, &extent, EXTENT_SIZE),
         .want = SCAV_E_INVALID_ARG },
       { .what = "measure_block: bytes that are not UTF-8",
         .got = scav_measure_block(metrics,
@@ -284,7 +352,8 @@ TEST_CASE("draw abi: each way a measurement can fail keeps its own code") {
                                   160,
                                   7,
                                   5,
-                                  &extent),
+                                  &extent,
+                                  EXTENT_SIZE),
         .want = SCAV_E_INVALID_ARG },
       { .what = "measure_block: a codepoint the font has no glyph for",
         .got = scav_measure_block(metrics,
@@ -293,10 +362,11 @@ TEST_CASE("draw abi: each way a measurement can fail keeps its own code") {
                                   160,
                                   7,
                                   5,
-                                  &extent),
+                                  &extent,
+                                  EXTENT_SIZE),
         .want = SCAV_E_NO_GLYPH },
       { .what = "measure_block: a line height outside the domain",
-        .got = scav_measure_block(metrics, text, 7, 160, 7, 0, &extent),
+        .got = scav_measure_block(metrics, text, 7, 160, 7, 0, &extent, EXTENT_SIZE),
         .want = SCAV_E_INVALID_ARG },
   });
 
@@ -317,22 +387,29 @@ TEST_CASE("draw abi: an empty drawlist reads back null and zero, not a bad point
   scav_point const *points{ nullptr };
   scav_rect const *clips{ nullptr };
   uint32_t count{ SENTINEL };
+  uint32_t stride{ SENTINEL };
 
-  REQUIRE(scav_drawlist_prims(list, &prims, &count) == SCAV_OK);
+  // An empty array still reports its stride: a reader sizes its walk from what
+  // scav says a row is, whether or not there are any.
+  REQUIRE(scav_drawlist_prims(list, &prims, &stride, &count) == SCAV_OK);
   CHECK(prims == nullptr);
   CHECK(count == 0);
+  CHECK(stride == sizeof(scav_prim));
   count = SENTINEL;
-  REQUIRE(scav_drawlist_styles(list, &styles, &count) == SCAV_OK);
+  REQUIRE(scav_drawlist_styles(list, &styles, &stride, &count) == SCAV_OK);
   CHECK(styles == nullptr);
   CHECK(count == 0);
+  CHECK(stride == sizeof(scav_style));
   count = SENTINEL;
-  REQUIRE(scav_drawlist_points(list, &points, &count) == SCAV_OK);
+  REQUIRE(scav_drawlist_points(list, &points, &stride, &count) == SCAV_OK);
   CHECK(points == nullptr);
   CHECK(count == 0);
+  CHECK(stride == sizeof(scav_point));
   count = SENTINEL;
-  REQUIRE(scav_drawlist_clips(list, &clips, &count) == SCAV_OK);
+  REQUIRE(scav_drawlist_clips(list, &clips, &stride, &count) == SCAV_OK);
   CHECK(clips == nullptr);
   CHECK(count == 0);
+  CHECK(stride == sizeof(scav_rect));
 
   // The pool is empty, so every span but the empty one is past its end.
   scav_byte const guard{ 0x5C };
@@ -362,37 +439,40 @@ TEST_CASE("draw abi: an empty drawlist reads back null and zero, not a bad point
   // Each array accessor refuses each of its own out-params.
   run({
       { .what = "prims: no list",
-        .got = scav_drawlist_prims(nullptr, &prims, &count),
+        .got = scav_drawlist_prims(nullptr, &prims, &stride, &count),
         .want = SCAV_E_INVALID_ARG },
       { .what = "prims: nowhere to put the count",
-        .got = scav_drawlist_prims(list, &prims, nullptr),
+        .got = scav_drawlist_prims(list, &prims, &stride, nullptr),
+        .want = SCAV_E_INVALID_ARG },
+      { .what = "prims: nowhere to put the stride",
+        .got = scav_drawlist_prims(list, &prims, nullptr, &count),
         .want = SCAV_E_INVALID_ARG },
       { .what = "styles: no list",
-        .got = scav_drawlist_styles(nullptr, &styles, &count),
+        .got = scav_drawlist_styles(nullptr, &styles, &stride, &count),
         .want = SCAV_E_INVALID_ARG },
       { .what = "styles: nowhere to put the rows",
-        .got = scav_drawlist_styles(list, nullptr, &count),
+        .got = scav_drawlist_styles(list, nullptr, &stride, &count),
         .want = SCAV_E_INVALID_ARG },
       { .what = "styles: nowhere to put the count",
-        .got = scav_drawlist_styles(list, &styles, nullptr),
+        .got = scav_drawlist_styles(list, &styles, &stride, nullptr),
         .want = SCAV_E_INVALID_ARG },
       { .what = "points: no list",
-        .got = scav_drawlist_points(nullptr, &points, &count),
+        .got = scav_drawlist_points(nullptr, &points, &stride, &count),
         .want = SCAV_E_INVALID_ARG },
       { .what = "points: nowhere to put the rows",
-        .got = scav_drawlist_points(list, nullptr, &count),
+        .got = scav_drawlist_points(list, nullptr, &stride, &count),
         .want = SCAV_E_INVALID_ARG },
       { .what = "points: nowhere to put the count",
-        .got = scav_drawlist_points(list, &points, nullptr),
+        .got = scav_drawlist_points(list, &points, &stride, nullptr),
         .want = SCAV_E_INVALID_ARG },
       { .what = "clips: no list",
-        .got = scav_drawlist_clips(nullptr, &clips, &count),
+        .got = scav_drawlist_clips(nullptr, &clips, &stride, &count),
         .want = SCAV_E_INVALID_ARG },
       { .what = "clips: nowhere to put the rows",
-        .got = scav_drawlist_clips(list, nullptr, &count),
+        .got = scav_drawlist_clips(list, nullptr, &stride, &count),
         .want = SCAV_E_INVALID_ARG },
       { .what = "clips: nowhere to put the count",
-        .got = scav_drawlist_clips(list, &clips, nullptr),
+        .got = scav_drawlist_clips(list, &clips, &stride, nullptr),
         .want = SCAV_E_INVALID_ARG },
   });
   CHECK(count == 0);  // the last successful read's, untouched by any of those
@@ -407,18 +487,18 @@ TEST_CASE("draw abi: the measurement pass honours the query-then-fill protocol")
   scav_profile const profile{ readable() };
 
   std::vector<uint32_t> counts(4, SENTINEL);
-  REQUIRE(scav_measure_chart(&chart,
-                             metrics,
-                             &profile,
-                             nullptr,
-                             0,
-                             nullptr,
-                             0,
-                             nullptr,
-                             0,
-                             nullptr,
-                             0,
-                             counts.data()) == SCAV_OK);
+  REQUIRE(measure(&chart,
+                  metrics,
+                  &profile,
+                  nullptr,
+                  0,
+                  nullptr,
+                  0,
+                  nullptr,
+                  0,
+                  nullptr,
+                  0,
+                  counts.data()) == SCAV_OK);
   for (uint32_t const row : counts) { CHECK(row != 0); }
 
   std::vector<scav_box_space> box_state(counts[0], scav_box_space{});
@@ -439,18 +519,18 @@ TEST_CASE("draw abi: the measurement pass honours the query-then-fill protocol")
     std::vector<uint32_t> caps{ counts };
     caps[s.at] -= 1;
     std::vector<uint32_t> got(4, SENTINEL);
-    CHECK(scav_measure_chart(&chart,
-                             metrics,
-                             &profile,
-                             box_state.data(),
-                             caps[0],
-                             box_sub.data(),
-                             caps[1],
-                             path_clear.data(),
-                             caps[2],
-                             path_box.data(),
-                             caps[3],
-                             got.data()) == SCAV_E_CAPACITY);
+    CHECK(measure(&chart,
+                  metrics,
+                  &profile,
+                  box_state.data(),
+                  caps[0],
+                  box_sub.data(),
+                  caps[1],
+                  path_clear.data(),
+                  caps[2],
+                  path_box.data(),
+                  caps[3],
+                  got.data()) == SCAV_E_CAPACITY);
     // Never truncates, and still says how much was wanted.
     for (uint32_t i = 0; i < 4; ++i) { CHECK(got[i] == counts[i]); }
     CHECK(box_state[0].min_w == 0);
@@ -460,33 +540,33 @@ TEST_CASE("draw abi: the measurement pass honours the query-then-fill protocol")
   for (uint32_t which = 0; which < 4; ++which) {
     CAPTURE(which);
     std::vector<uint32_t> got(4, SENTINEL);
-    CHECK(scav_measure_chart(&chart,
-                             metrics,
-                             &profile,
-                             (which == 0) ? nullptr : box_state.data(),
-                             counts[0],
-                             (which == 1) ? nullptr : box_sub.data(),
-                             counts[1],
-                             (which == 2) ? nullptr : path_clear.data(),
-                             counts[2],
-                             (which == 3) ? nullptr : path_box.data(),
-                             counts[3],
-                             got.data()) == SCAV_E_INVALID_ARG);
+    CHECK(measure(&chart,
+                  metrics,
+                  &profile,
+                  (which == 0) ? nullptr : box_state.data(),
+                  counts[0],
+                  (which == 1) ? nullptr : box_sub.data(),
+                  counts[1],
+                  (which == 2) ? nullptr : path_clear.data(),
+                  counts[2],
+                  (which == 3) ? nullptr : path_box.data(),
+                  counts[3],
+                  got.data()) == SCAV_E_INVALID_ARG);
     for (uint32_t i = 0; i < 4; ++i) { CHECK(got[i] == counts[i]); }
   }
 
-  REQUIRE(scav_measure_chart(&chart,
-                             metrics,
-                             &profile,
-                             box_state.data(),
-                             counts[0],
-                             box_sub.data(),
-                             counts[1],
-                             path_clear.data(),
-                             counts[2],
-                             path_box.data(),
-                             counts[3],
-                             counts.data()) == SCAV_OK);
+  REQUIRE(measure(&chart,
+                  metrics,
+                  &profile,
+                  box_state.data(),
+                  counts[0],
+                  box_sub.data(),
+                  counts[1],
+                  path_clear.data(),
+                  counts[2],
+                  path_box.data(),
+                  counts[3],
+                  counts.data()) == SCAV_OK);
   CHECK(box_state[0].min_w != 0);
 
   // All four caps zero is the query; any one of them non-zero is a fill, so a
@@ -496,18 +576,18 @@ TEST_CASE("draw abi: the measurement pass honours the query-then-fill protocol")
     std::vector<uint32_t> caps(4, 0);
     caps[which] = counts[which];
     std::vector<uint32_t> got(4, SENTINEL);
-    CHECK(scav_measure_chart(&chart,
-                             metrics,
-                             &profile,
-                             box_state.data(),
-                             caps[0],
-                             box_sub.data(),
-                             caps[1],
-                             path_clear.data(),
-                             caps[2],
-                             path_box.data(),
-                             caps[3],
-                             got.data()) == SCAV_E_CAPACITY);
+    CHECK(measure(&chart,
+                  metrics,
+                  &profile,
+                  box_state.data(),
+                  caps[0],
+                  box_sub.data(),
+                  caps[1],
+                  path_clear.data(),
+                  caps[2],
+                  path_box.data(),
+                  caps[3],
+                  got.data()) == SCAV_E_CAPACITY);
     for (uint32_t i = 0; i < 4; ++i) { CHECK(got[i] == counts[i]); }
   }
 
@@ -518,18 +598,18 @@ TEST_CASE("draw abi: the measurement pass honours the query-then-fill protocol")
   std::vector<scav_box_space> untouched(
       1,
       scav_box_space{ .min_w = SENTINEL_I, .h_before = 0, .h_after = 0 });
-  REQUIRE(scav_measure_chart(&bare,
-                             metrics,
-                             &profile,
-                             untouched.data(),
-                             1,
-                             nullptr,
-                             0,
-                             nullptr,
-                             0,
-                             nullptr,
-                             0,
-                             none.data()) == SCAV_OK);
+  REQUIRE(measure(&bare,
+                  metrics,
+                  &profile,
+                  untouched.data(),
+                  1,
+                  nullptr,
+                  0,
+                  nullptr,
+                  0,
+                  nullptr,
+                  0,
+                  none.data()) == SCAV_OK);
   for (uint32_t const row : none) { CHECK(row == 0); }
   CHECK(untouched[0].min_w == SENTINEL_I);
 
@@ -537,18 +617,18 @@ TEST_CASE("draw abi: the measurement pass honours the query-then-fill protocol")
   // is the handle's state rather than one bad argument.
   scav_profile const unusable{};
   std::vector<uint32_t> unreached(4, SENTINEL);
-  CHECK(scav_measure_chart(&chart,
-                           metrics,
-                           &unusable,
-                           nullptr,
-                           0,
-                           nullptr,
-                           0,
-                           nullptr,
-                           0,
-                           nullptr,
-                           0,
-                           unreached.data()) == SCAV_E_STATE);
+  CHECK(measure(&chart,
+                metrics,
+                &unusable,
+                nullptr,
+                0,
+                nullptr,
+                0,
+                nullptr,
+                0,
+                nullptr,
+                0,
+                unreached.data()) == SCAV_E_STATE);
   for (uint32_t const row : unreached) { CHECK(row == SENTINEL); }
 
   scav_metrics_destroy(metrics);
@@ -556,8 +636,235 @@ TEST_CASE("draw abi: the measurement pass honours the query-then-fill protocol")
 
 TEST_CASE("draw abi: the shipped palette is written only when it fits") {
   std::vector<scav_style> rows(SCAV_STYLE_COUNT, scav_style{});
-  CHECK(scav_palette_standard(rows.data(), 0) == SCAV_E_CAPACITY);
+  CHECK(scav_palette_standard(rows.data(), 0, STYLE_SIZE) == SCAV_E_CAPACITY);
   CHECK(rows[0].stroke_rgba == 0);  // refused, so nothing was written
-  REQUIRE(scav_palette_standard(rows.data(), SCAV_STYLE_COUNT) == SCAV_OK);
+  REQUIRE(scav_palette_standard(rows.data(), SCAV_STYLE_COUNT, STYLE_SIZE) == SCAV_OK);
   CHECK(rows[SCAV_STYLE_COUNT - 1].stroke_rgba != 0);
+}
+
+TEST_CASE("draw abi: a size that disagrees with the header is refused first") {
+  scav_metrics *metrics{ nullptr };
+  scav_drawlist *list{ nullptr };
+  scav_images *images{ nullptr };
+  REQUIRE(scav_metrics_create(nullptr, 0, &metrics) == SCAV_OK);
+  REQUIRE(scav_drawlist_create(&list) == SCAV_OK);
+  REQUIRE(scav_images_create(&images) == SCAV_OK);
+  scav_byte const png{ 0x89 };
+  REQUIRE(scav_image_register(images, "logo", &png, 1, 8, 8, "image/png") == SCAV_OK);
+  scav_chart chart{ .chart = small_chart(), .diags = {} };
+  scav_profile const profile{ readable() };
+
+  auto const *text{ reinterpret_cast<scav_byte const *>("Idle") };
+  scav_extent extent{ .w = SENTINEL_I, .h = SENTINEL_I };
+  std::vector<scav_style> palette(SCAV_STYLE_COUNT, scav_style{});
+  std::vector<uint32_t> counts(4, SENTINEL);
+
+  for (int32_t delta : { -4, 4 }) {
+    CAPTURE(delta);
+    uint32_t const bad_extent{ EXTENT_SIZE + static_cast<uint32_t>(delta) };
+    uint32_t const bad_style{ STYLE_SIZE + static_cast<uint32_t>(delta) };
+    uint32_t const bad_profile{ PROFILE_SIZE + static_cast<uint32_t>(delta) };
+    uint32_t const bad_box{ BOX_SIZE + static_cast<uint32_t>(delta) };
+    uint32_t const bad_clear{ CLEAR_SIZE + static_cast<uint32_t>(delta) };
+    uint32_t const bad_path_box{ PATH_BOX_SIZE + static_cast<uint32_t>(delta) };
+    uint32_t const bad_spaces{ SPACES_SIZE + static_cast<uint32_t>(delta) };
+    uint32_t const bad_placed{ PLACED_SIZE + static_cast<uint32_t>(delta) };
+
+    run({
+        { .what = "measure_text: an extent this library does not have",
+          .got = scav_measure_text(metrics, text, 4, 160, &extent, bad_extent),
+          .want = SCAV_E_ABI },
+        // SCAV_E_ABI outranks the null-argument refusal: a caller whose header
+        // differs has said nothing about its other arguments worth reading.
+        { .what = "measure_text: and before the null check",
+          .got = scav_measure_text(nullptr, text, 4, 160, nullptr, bad_extent),
+          .want = SCAV_E_ABI },
+        { .what = "measure_block: an extent this library does not have",
+          .got = scav_measure_block(metrics, text, 4, 160, 7, 5, &extent, bad_extent),
+          .want = SCAV_E_ABI },
+        { .what = "image_extent: an extent this library does not have",
+          .got = scav_image_extent(images, 0, &extent, bad_extent),
+          .want = SCAV_E_ABI },
+        { .what = "palette_standard: a style row this library does not have",
+          .got = scav_palette_standard(palette.data(), SCAV_STYLE_COUNT, bad_style),
+          .want = SCAV_E_ABI },
+        { .what = "palette_standard: and before the null check",
+          .got = scav_palette_standard(nullptr, SCAV_STYLE_COUNT, bad_style),
+          .want = SCAV_E_ABI },
+        { .what = "measure_chart: a profile this library does not have",
+          .got = scav_measure_chart(&chart,
+                                    metrics,
+                                    &profile,
+                                    bad_profile,
+                                    nullptr,
+                                    0,
+                                    BOX_SIZE,
+                                    nullptr,
+                                    0,
+                                    BOX_SIZE,
+                                    nullptr,
+                                    0,
+                                    CLEAR_SIZE,
+                                    nullptr,
+                                    0,
+                                    PATH_BOX_SIZE,
+                                    counts.data()),
+          .want = SCAV_E_ABI },
+        // A row size is checked on the count query too, where every cap is zero
+        // and every buffer null: it is the stride the second call's rows will be
+        // read back at.
+        { .what = "measure_chart: a state box row this library does not have",
+          .got = scav_measure_chart(&chart,
+                                    metrics,
+                                    &profile,
+                                    PROFILE_SIZE,
+                                    nullptr,
+                                    0,
+                                    bad_box,
+                                    nullptr,
+                                    0,
+                                    BOX_SIZE,
+                                    nullptr,
+                                    0,
+                                    CLEAR_SIZE,
+                                    nullptr,
+                                    0,
+                                    PATH_BOX_SIZE,
+                                    counts.data()),
+          .want = SCAV_E_ABI },
+        { .what = "measure_chart: a submachine box row this library does not have",
+          .got = scav_measure_chart(&chart,
+                                    metrics,
+                                    &profile,
+                                    PROFILE_SIZE,
+                                    nullptr,
+                                    0,
+                                    BOX_SIZE,
+                                    nullptr,
+                                    0,
+                                    bad_box,
+                                    nullptr,
+                                    0,
+                                    CLEAR_SIZE,
+                                    nullptr,
+                                    0,
+                                    PATH_BOX_SIZE,
+                                    counts.data()),
+          .want = SCAV_E_ABI },
+        { .what = "measure_chart: a clearance row this library does not have",
+          .got = scav_measure_chart(&chart,
+                                    metrics,
+                                    &profile,
+                                    PROFILE_SIZE,
+                                    nullptr,
+                                    0,
+                                    BOX_SIZE,
+                                    nullptr,
+                                    0,
+                                    BOX_SIZE,
+                                    nullptr,
+                                    0,
+                                    bad_clear,
+                                    nullptr,
+                                    0,
+                                    PATH_BOX_SIZE,
+                                    counts.data()),
+          .want = SCAV_E_ABI },
+        { .what = "measure_chart: a path box row this library does not have",
+          .got = scav_measure_chart(&chart,
+                                    metrics,
+                                    &profile,
+                                    PROFILE_SIZE,
+                                    nullptr,
+                                    0,
+                                    BOX_SIZE,
+                                    nullptr,
+                                    0,
+                                    BOX_SIZE,
+                                    nullptr,
+                                    0,
+                                    CLEAR_SIZE,
+                                    nullptr,
+                                    0,
+                                    bad_path_box,
+                                    counts.data()),
+          .want = SCAV_E_ABI },
+        { .what = "emit_chart: a palette row this library does not have",
+          .got = scav_emit_chart(list,
+                                 &chart,
+                                 metrics,
+                                 nullptr,
+                                 0,
+                                 bad_style,
+                                 nullptr,
+                                 SPACES_SIZE,
+                                 nullptr,
+                                 0,
+                                 PLACED_SIZE,
+                                 0),
+          .want = SCAV_E_ABI },
+        { .what = "emit_chart: a space table this library does not have",
+          .got = scav_emit_chart(list,
+                                 &chart,
+                                 metrics,
+                                 nullptr,
+                                 0,
+                                 STYLE_SIZE,
+                                 nullptr,
+                                 bad_spaces,
+                                 nullptr,
+                                 0,
+                                 PLACED_SIZE,
+                                 0),
+          .want = SCAV_E_ABI },
+        { .what = "emit_chart: a placed row this library does not have",
+          .got = scav_emit_chart(list,
+                                 &chart,
+                                 metrics,
+                                 nullptr,
+                                 0,
+                                 STYLE_SIZE,
+                                 nullptr,
+                                 SPACES_SIZE,
+                                 nullptr,
+                                 0,
+                                 bad_placed,
+                                 0),
+          .want = SCAV_E_ABI },
+    });
+  }
+
+  // A space table whose strides its own header did not declare reads as zeroes.
+  scav_spaces const unstrided{};
+  CHECK(emit(list, &chart, metrics, nullptr, 0, &unstrided, nullptr, 0, 0) == SCAV_E_ABI);
+
+  // Nothing above was written to, and nothing was drawn.
+  CHECK(extent.w == SENTINEL_I);
+  CHECK(palette[0].stroke_rgba == 0);
+  for (uint32_t const row : counts) { CHECK(row == SENTINEL); }
+  uint32_t prims{ SENTINEL };
+  REQUIRE(scav_drawlist_counts(list, &prims, nullptr, nullptr, nullptr, nullptr) ==
+          SCAV_OK);
+  CHECK(prims == 0);
+
+  // And the exact sizes go through.
+  REQUIRE(scav_measure_text(metrics, text, 4, 160, &extent, EXTENT_SIZE) == SCAV_OK);
+  CHECK(extent.w > 0);
+  REQUIRE(measure(&chart,
+                  metrics,
+                  &profile,
+                  nullptr,
+                  0,
+                  nullptr,
+                  0,
+                  nullptr,
+                  0,
+                  nullptr,
+                  0,
+                  counts.data()) == SCAV_OK);
+  CHECK(counts[0] != 0);
+
+  scav_images_destroy(images);
+  scav_drawlist_destroy(list);
+  scav_metrics_destroy(metrics);
 }

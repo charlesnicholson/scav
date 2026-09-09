@@ -51,8 +51,10 @@ int check_abi() {
   }
 
   scav_pending const *pending{ nullptr };
+  uint32_t stride{ 0 };
   uint32_t count{ 0 };
-  if ((rc == 0) && (scav_load_pending(loader, &pending, &count) != SCAV_OK)) {
+  if ((rc == 0) && ((scav_load_pending(loader, &pending, &stride, &count) != SCAV_OK) ||
+                    (stride != sizeof(scav_pending)))) {
     std::fprintf(stderr, "scav_load_pending failed\n");
     rc = 1;
   }
@@ -97,8 +99,18 @@ int check_abi() {
     scav_layout_opts opts{};
     uint32_t placed{ 0 };
     scav_column_id column{ 0 };
-    if ((scav_profile_named("readable", &opts.profile) != SCAV_OK) ||
-        (scav_layout_run(chart, nullptr, &opts, nullptr, 0, &placed) != SCAV_OK) ||
+    // Every caller-owned struct crosses with its own size beside it, which is
+    // what makes a consumer built against a different header fail loudly.
+    if ((scav_profile_named("readable", &opts.profile, sizeof(opts.profile)) != SCAV_OK) ||
+        (scav_layout_run(chart,
+                         nullptr,
+                         sizeof(scav_spaces),
+                         &opts,
+                         sizeof(opts),
+                         nullptr,
+                         0,
+                         sizeof(scav_placed),
+                         &placed) != SCAV_OK) ||
         (scav_column_find(chart, "scav.geom.state", &column) != SCAV_OK)) {
       std::fprintf(stderr, "layout through the C surface failed\n");
       rc = 1;
@@ -119,10 +131,20 @@ int check_abi() {
     auto const *text{ reinterpret_cast<scav_byte const *>("Idle") };
     if ((scav_metrics_create(nullptr, 0, &metrics) != SCAV_OK) ||
         (scav_metrics_units_per_em(metrics, &upem) != SCAV_OK) || (upem == 0) ||
-        (scav_measure_text(metrics, text, 4, 160, &extent) != SCAV_OK) ||
+        (scav_measure_text(metrics, text, 4, 160, &extent, sizeof(extent)) != SCAV_OK) ||
         (extent.w <= 0) || (scav_drawlist_create(&list) != SCAV_OK) ||
-        (scav_emit_chart(list, chart, metrics, nullptr, 0, nullptr, nullptr, 0, 0) !=
-         SCAV_OK) ||
+        (scav_emit_chart(list,
+                         chart,
+                         metrics,
+                         nullptr,
+                         0,
+                         sizeof(scav_style),
+                         nullptr,
+                         sizeof(scav_spaces),
+                         nullptr,
+                         0,
+                         sizeof(scav_placed),
+                         0) != SCAV_OK) ||
         (scav_drawlist_canonicalize(list) != SCAV_OK) ||
         (scav_drawlist_counts(list, &prims, nullptr, nullptr, nullptr, nullptr) !=
          SCAV_OK) ||
@@ -136,16 +158,28 @@ int check_abi() {
     // every other span accessor uses.
     if (rc == 0) {
       uint32_t bytes{ 0 };
-      if ((scav_svg_write(list, metrics, nullptr, nullptr, nullptr, 0, &bytes) !=
-           SCAV_OK) ||
+      if ((scav_svg_write(list,
+                          metrics,
+                          nullptr,
+                          nullptr,
+                          sizeof(scav_svg_options),
+                          nullptr,
+                          0,
+                          &bytes) != SCAV_OK) ||
           (bytes == 0)) {
         std::fprintf(stderr, "scav_svg_write count query failed\n");
         rc = 1;
       } else {
         std::vector<scav_byte> doc(bytes);
         uint32_t again{ 0 };
-        if ((scav_svg_write(list, metrics, nullptr, nullptr, doc.data(), bytes, &again) !=
-             SCAV_OK) ||
+        if ((scav_svg_write(list,
+                            metrics,
+                            nullptr,
+                            nullptr,
+                            sizeof(scav_svg_options),
+                            doc.data(),
+                            bytes,
+                            &again) != SCAV_OK) ||
             (std::string_view{ reinterpret_cast<char const *>(doc.data()), 5 } !=
              "<?xml")) {
           std::fprintf(stderr, "scav_svg_write failed\n");
@@ -268,8 +302,8 @@ int check_layout() {
     return 1;
   }
   scav_profile c_profile{};
-  if ((scav_profile_named("compact", &c_profile) != SCAV_OK) ||
-      (scav_profile_validate(&c_profile) != SCAV_OK)) {
+  if ((scav_profile_named("compact", &c_profile, sizeof(c_profile)) != SCAV_OK) ||
+      (scav_profile_validate(&c_profile, sizeof(c_profile)) != SCAV_OK)) {
     std::fprintf(stderr, "the C profile surface failed\n");
     return 1;
   }

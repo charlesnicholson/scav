@@ -7,6 +7,7 @@
 #include "scav/scav_core_c.h"
 #include "scav/scav_draw.h"
 #include "scav/scav_types.h"
+#include "scav_c_abi.h"
 #include "scav_c_handles.h"
 
 #include <cstdint>
@@ -28,6 +29,23 @@ scav_result measure_result(scav::MeasureStatus st) {
     case scav::MeasureStatus::BadSize: return SCAV_E_INVALID_ARG;
   }
   return SCAV_E_INVALID_ARG;
+}
+
+// One of the DrawList's own arrays with the stride to walk it at, so a reader is
+// told the row size rather than assuming its own header's -- exactly how a
+// column is read. An empty array reads back NULL and zero, and its stride.
+template <typename T>
+scav_result rows_out(std::vector<T> const &rows,
+                     T const **out,
+                     uint32_t *out_stride,
+                     uint32_t *out_count) {
+  if ((out == nullptr) || (out_stride == nullptr) || (out_count == nullptr)) {
+    return SCAV_E_INVALID_ARG;
+  }
+  *out = rows.empty() ? nullptr : rows.data();
+  *out_stride = static_cast<uint32_t>(sizeof(T));
+  *out_count = static_cast<uint32_t>(rows.size());
+  return SCAV_OK;
 }
 
 // A span against a flat byte pool, under the rule every other span accessor
@@ -85,7 +103,9 @@ scav_result scav_measure_text(scav_metrics const *metrics,
                               scav_byte const *utf8_nfc,
                               uint32_t len,
                               int32_t font_size_grid,
-                              scav_extent *out) {
+                              scav_extent *out,
+                              uint32_t out_size) {
+  if (out_size != sizeof(scav_extent)) { return SCAV_E_ABI; }
   if ((metrics == nullptr) || (out == nullptr)) { return SCAV_E_INVALID_ARG; }
   return measure_result(
       scav::measure_text(metrics->metrics, utf8_nfc, len, font_size_grid, *out));
@@ -106,7 +126,9 @@ scav_result scav_measure_block(scav_metrics const *metrics,
                                int32_t font_size_grid,
                                int32_t k_num,
                                int32_t k_den,
-                               scav_extent *out) {
+                               scav_extent *out,
+                               uint32_t out_size) {
+  if (out_size != sizeof(scav_extent)) { return SCAV_E_ABI; }
   if ((metrics == nullptr) || (out == nullptr)) { return SCAV_E_INVALID_ARG; }
   return measure_result(scav::measure_block(metrics->metrics,
                                             utf8_nfc,
@@ -143,46 +165,34 @@ scav_result scav_drawlist_counts(scav_drawlist const *list,
 
 scav_result scav_drawlist_prims(scav_drawlist const *list,
                                 scav_prim const **out,
+                                uint32_t *out_stride,
                                 uint32_t *out_count) {
-  if ((list == nullptr) || (out == nullptr) || (out_count == nullptr)) {
-    return SCAV_E_INVALID_ARG;
-  }
-  *out = list->list.prims.empty() ? nullptr : list->list.prims.data();
-  *out_count = static_cast<uint32_t>(list->list.prims.size());
-  return SCAV_OK;
+  if (list == nullptr) { return SCAV_E_INVALID_ARG; }
+  return rows_out(list->list.prims, out, out_stride, out_count);
 }
 
 scav_result scav_drawlist_styles(scav_drawlist const *list,
                                  scav_style const **out,
+                                 uint32_t *out_stride,
                                  uint32_t *out_count) {
-  if ((list == nullptr) || (out == nullptr) || (out_count == nullptr)) {
-    return SCAV_E_INVALID_ARG;
-  }
-  *out = list->list.styles.empty() ? nullptr : list->list.styles.data();
-  *out_count = static_cast<uint32_t>(list->list.styles.size());
-  return SCAV_OK;
+  if (list == nullptr) { return SCAV_E_INVALID_ARG; }
+  return rows_out(list->list.styles, out, out_stride, out_count);
 }
 
 scav_result scav_drawlist_points(scav_drawlist const *list,
                                  scav_point const **out,
+                                 uint32_t *out_stride,
                                  uint32_t *out_count) {
-  if ((list == nullptr) || (out == nullptr) || (out_count == nullptr)) {
-    return SCAV_E_INVALID_ARG;
-  }
-  *out = list->list.points.empty() ? nullptr : list->list.points.data();
-  *out_count = static_cast<uint32_t>(list->list.points.size());
-  return SCAV_OK;
+  if (list == nullptr) { return SCAV_E_INVALID_ARG; }
+  return rows_out(list->list.points, out, out_stride, out_count);
 }
 
 scav_result scav_drawlist_clips(scav_drawlist const *list,
                                 scav_rect const **out,
+                                uint32_t *out_stride,
                                 uint32_t *out_count) {
-  if ((list == nullptr) || (out == nullptr) || (out_count == nullptr)) {
-    return SCAV_E_INVALID_ARG;
-  }
-  *out = list->list.clips.empty() ? nullptr : list->list.clips.data();
-  *out_count = static_cast<uint32_t>(list->list.clips.size());
-  return SCAV_OK;
+  if (list == nullptr) { return SCAV_E_INVALID_ARG; }
+  return rows_out(list->list.clips, out, out_stride, out_count);
 }
 
 scav_result scav_drawlist_str(scav_drawlist const *list,
@@ -276,7 +286,9 @@ scav_result scav_image_find(scav_images const *images,
 
 scav_result scav_image_extent(scav_images const *images,
                               uint32_t index,
-                              scav_extent *out) {
+                              scav_extent *out,
+                              uint32_t out_size) {
+  if (out_size != sizeof(scav_extent)) { return SCAV_E_ABI; }
   if ((images == nullptr) || (out == nullptr) || (index >= images->images.rows.size())) {
     return SCAV_E_INVALID_ARG;
   }
@@ -287,15 +299,27 @@ scav_result scav_image_extent(scav_images const *images,
 scav_result scav_measure_chart(scav_chart const *chart,
                                scav_metrics const *metrics,
                                scav_profile const *profile,
+                               uint32_t profile_size,
                                scav_box_space *box_state,
                                uint32_t cap_box_state,
+                               uint32_t box_state_row_size,
                                scav_box_space *box_sub,
                                uint32_t cap_box_sub,
+                               uint32_t box_sub_row_size,
                                scav_path_clear *path_clear,
                                uint32_t cap_path_clear,
+                               uint32_t path_clear_row_size,
                                scav_path_box *path_box,
                                uint32_t cap_path_box,
+                               uint32_t path_box_row_size,
                                uint32_t *out_counts) {
+  if ((profile_size != sizeof(scav_profile)) ||
+      (box_state_row_size != sizeof(scav_box_space)) ||
+      (box_sub_row_size != sizeof(scav_box_space)) ||
+      (path_clear_row_size != sizeof(scav_path_clear)) ||
+      (path_box_row_size != sizeof(scav_path_box))) {
+    return SCAV_E_ABI;
+  }
   if ((chart == nullptr) || (metrics == nullptr) || (profile == nullptr) ||
       (out_counts == nullptr)) {
     return SCAV_E_INVALID_ARG;
@@ -333,7 +357,8 @@ scav_result scav_measure_chart(scav_chart const *chart,
   return SCAV_OK;
 }
 
-scav_result scav_palette_standard(scav_style *out, uint32_t cap) {
+scav_result scav_palette_standard(scav_style *out, uint32_t cap, uint32_t row_size) {
+  if (row_size != sizeof(scav_style)) { return SCAV_E_ABI; }
   if (out == nullptr) { return SCAV_E_INVALID_ARG; }
   scav::Palette const p{ scav::palette_standard() };
   if (cap < p.size()) { return SCAV_E_CAPACITY; }
@@ -346,10 +371,18 @@ scav_result scav_emit_chart(scav_drawlist *list,
                             scav_metrics const *metrics,
                             scav_style const *palette,
                             uint32_t palette_len,
+                            uint32_t palette_row_size,
                             scav_spaces const *spaces,
+                            uint32_t spaces_size,
                             scav_placed const *placed,
                             uint32_t placed_count,
+                            uint32_t placed_row_size,
                             int32_t depth) {
+  if ((palette_row_size != sizeof(scav_style)) || (spaces_size != sizeof(scav_spaces)) ||
+      (placed_row_size != sizeof(scav_placed))) {
+    return SCAV_E_ABI;
+  }
+  if ((spaces != nullptr) && !scav::spaces_strides_agree(*spaces)) { return SCAV_E_ABI; }
   if ((list == nullptr) || (chart == nullptr) || (metrics == nullptr)) {
     return SCAV_E_INVALID_ARG;
   }

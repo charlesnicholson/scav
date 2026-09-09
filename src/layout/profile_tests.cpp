@@ -15,6 +15,8 @@ namespace {
 
 using namespace scav;
 
+constexpr uint32_t PROFILE_SIZE{ static_cast<uint32_t>(sizeof(scav_profile)) };
+
 scav_profile named(char const *name) {
   scav_profile p{};
   REQUIRE(profile_named(name, p));
@@ -28,9 +30,11 @@ TEST_CASE("profile: both shipped profiles load and pass their own validation") {
     CAPTURE(name);
     scav_profile const p{ named(name) };
     CHECK(profile_validate(p));
-    CHECK(p.profile_version == 5);
-    // One chart-global candidate, which is the pipeline as it runs today.
-    CHECK(p.portfolio_m == 1);
+    CHECK(p.profile_version == 6);
+    // The two chart-global candidates that ship: row 0 the profile as it
+    // stands and row 1 the other packer, which is every row the corpus picks
+    // that improved a picture. The table holds eight (11.10).
+    CHECK(p.portfolio_m == 2);
   }
   CHECK(named("compact").profile_id != named("readable").profile_id);
 }
@@ -112,10 +116,12 @@ TEST_CASE("profile: every bound rejects out of range") {
           .field = &scav_profile::portfolio_k,
           .bad_low = 0,
           .bad_high = 65 },
+    // The table Level 2 chooses over has eight rows, so nine is out of range
+    // rather than silently capped (11.10, 11.15).
     Poke{ .what = "portfolio_m",
           .field = &scav_profile::portfolio_m,
           .bad_low = 0,
-          .bad_high = 65 },
+          .bad_high = 9 },
     Poke{ .what = "sweep_count",
           .field = &scav_profile::sweep_count,
           .bad_low = -1,
@@ -162,12 +168,12 @@ TEST_CASE("profile: every bound rejects out of range") {
 
 TEST_CASE("profile: the C surface round-trips named, validate, and null args") {
   scav_profile p{};
-  REQUIRE(scav_profile_named("compact", &p) == SCAV_OK);
-  CHECK(scav_profile_validate(&p) == SCAV_OK);
+  REQUIRE(scav_profile_named("compact", &p, PROFILE_SIZE) == SCAV_OK);
+  CHECK(scav_profile_validate(&p, PROFILE_SIZE) == SCAV_OK);
   p.dar_num = 0;
-  CHECK(scav_profile_validate(&p) == SCAV_E_INVALID_ARG);
-  CHECK(scav_profile_named("ornate", &p) == SCAV_E_INVALID_ARG);
-  CHECK(scav_profile_named(nullptr, &p) == SCAV_E_INVALID_ARG);
-  CHECK(scav_profile_named("compact", nullptr) == SCAV_E_INVALID_ARG);
-  CHECK(scav_profile_validate(nullptr) == SCAV_E_INVALID_ARG);
+  CHECK(scav_profile_validate(&p, PROFILE_SIZE) == SCAV_E_INVALID_ARG);
+  CHECK(scav_profile_named("ornate", &p, PROFILE_SIZE) == SCAV_E_INVALID_ARG);
+  CHECK(scav_profile_named(nullptr, &p, PROFILE_SIZE) == SCAV_E_INVALID_ARG);
+  CHECK(scav_profile_named("compact", nullptr, PROFILE_SIZE) == SCAV_E_INVALID_ARG);
+  CHECK(scav_profile_validate(nullptr, PROFILE_SIZE) == SCAV_E_INVALID_ARG);
 }

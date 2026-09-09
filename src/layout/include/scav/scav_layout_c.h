@@ -2,7 +2,12 @@
 #define SCAV_LAYOUT_C_H_INCLUDED
 
 /* libscavlayout's C API: the space tables an application fills, the profile,
- * and the router registry. Flat PODs of fixed-width integers, C++ uses them too. */
+ * and the router registry. Flat PODs of fixed-width integers, C++ uses them too.
+ *
+ * Sizes cross under scav_core_c.h's rule: a caller-owned POD is passed with its
+ * own size beside it, checked before any other argument and whether or not the
+ * pointer is NULL, and a size that disagrees with this library's is
+ * SCAV_E_ABI. */
 
 #include "scav/scav_core_c.h"
 #include "scav/scav_types.h"
@@ -44,16 +49,29 @@ typedef struct {
 } scav_path_box;
 
 /* The app owns every array; scav only reads. Box and clear counts match their
- * entity array or are zero; path boxes are 0..N per transition. */
+ * entity array or are zero; path boxes are 0..N per transition.
+ *
+ * Each table states the stride it was filled at, so four caller-owned row
+ * layouts are declared by one struct rather than by eight more parameters on
+ * the two entry points that read it. A stride is an ABI fact and not a layout
+ * input -- nothing hashes one -- and each is checked against sizeof whether or
+ * not its count is zero, so a member a caller's header does not have reads as
+ * zero and is refused. On LP64 the four land in the padding the
+ * pointer-and-count pairs left behind, so the struct is the size it always was
+ * and this ABI now has no padding anywhere. */
 typedef struct {
   scav_box_space const *box_state;
   uint32_t n_box_state;
+  uint32_t box_state_stride;
   scav_box_space const *box_sub;
   uint32_t n_box_sub;
+  uint32_t box_sub_stride;
   scav_path_clear const *path_clear;
   uint32_t n_path_clear;
+  uint32_t path_clear_stride;
   scav_path_box const *path_box;
   uint32_t n_path_box;
+  uint32_t path_box_stride;
 } scav_spaces;
 
 /* Every knob layout reads, flat int32 with no padding, so the bytes hash into
@@ -96,7 +114,7 @@ typedef struct {
   int32_t w_area;
 
   int32_t portfolio_k;                 /* [1, 64] */
-  int32_t portfolio_m;                 /* [1, 64] */
+  int32_t portfolio_m;                 /* chart-global phase-2 tuples; [1, 8] */
   int32_t sweep_count;                 /* [0, 1024] */
   int32_t congestion_iterations;       /* [0, 1024] */
   int32_t ripup_cap;                   /* [0, 1024] */
@@ -126,26 +144,37 @@ typedef struct {
 /* NOLINTEND(modernize-use-using, readability-identifier-naming) */
 
 /* Fills `out` from a shipped profile: "compact" or "readable". An unknown name
- * is SCAV_E_INVALID_ARG and writes nothing. */
-scav_result scav_profile_named(char const *name, scav_profile *out);
+ * is SCAV_E_INVALID_ARG and writes nothing; an out_size that is not
+ * sizeof(scav_profile) is SCAV_E_ABI and writes nothing either. */
+scav_result scav_profile_named(char const *name, scav_profile *out, uint32_t out_size);
 
 /* Every bound above, checked; scav_layout_run revalidates regardless. */
-scav_result scav_profile_validate(scav_profile const *profile);
+scav_result scav_profile_validate(scav_profile const *profile, uint32_t profile_size);
 
 /* Validates the profile and spaces, runs layout, writes the geometry columns,
- * and fills `out_placed` parallel to the path boxes. NULL `spaces` means no
- * requests. cap = 0 with boxes pending queries the required count; a cap too
- * small is SCAV_E_CAPACITY. SCAV_E_LAYOUT means findings await on the chart's
- * scav_chart_diag, and the columns keep the last successful run's values.
+ * and fills `placed` parallel to the path boxes. NULL `spaces` means no
+ * requests. placed_cap = 0 with boxes pending queries the required count; a cap
+ * too small is SCAV_E_CAPACITY. SCAV_E_LAYOUT means findings await on the
+ * chart's scav_chart_diag, and the columns keep the last successful run's
+ * values.
  *
  * SCAV_OK leaves findings there as well, marking geometry that was written: one
  * per transition the router could not thread even after widening the spacing,
- * whose route is the straight line between its ends. Read them, draw anyway. */
+ * whose route is the straight line between its ends. Read them, draw anyway.
+ *
+ * The three sizes and, when `spaces` is given, its four strides are checked
+ * before anything else; any disagreement is SCAV_E_ABI, and nothing is written
+ * and no finding recorded, because a caller whose header differs has said
+ * nothing scav can act on. `opts_size` covers the profile nested inside it:
+ * one header, one layout. */
 scav_result scav_layout_run(scav_chart *chart,
                             scav_spaces const *spaces,
+                            uint32_t spaces_size,
                             scav_layout_opts const *opts,
-                            scav_placed *out_placed,
-                            uint32_t cap,
+                            uint32_t opts_size,
+                            scav_placed *placed,
+                            uint32_t placed_cap,
+                            uint32_t placed_size,
                             uint32_t *out_count);
 
 /* Routers cross the ABI by name only; function pointers never do. */

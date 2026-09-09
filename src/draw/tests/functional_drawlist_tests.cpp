@@ -242,7 +242,7 @@ TEST_CASE("drawlist corpus: the cost terms on the rendered scale") {
 
 TEST_CASE("drawlist gauntlet: what crowd's tighter packing costs its labels") {
   // The element suite scores no placed boxes, so these two terms only exist
-  // here. Carved out to P9c: `sweep_count = 0, trybox = 0` reads `label` 0 and
+  // here. Carved out to P9d: `sweep_count = 0, trybox = 0` reads `label` 0 and
   // `label_near` 172, for 56% more area and a Tier 2 of 1,438 against 1,230 --
   // which is why nothing picks it, by a sixth rather than by half.
   Metrics const m{ bundled() };
@@ -295,7 +295,7 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
   }
   MESSAGE("corpus path boxes: ", boxes, ", centred fallbacks: ", fell);
   CHECK(boxes == 192);
-  CHECK(fell == 25);
+  CHECK(fell == 16);
 }
 
 TEST_CASE("drawlist corpus: the layout goldens' measurement policy is stated here") {

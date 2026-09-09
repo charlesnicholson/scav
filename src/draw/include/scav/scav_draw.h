@@ -251,7 +251,7 @@ struct Spaces {
 
 bool measure_chart(Chart const &c, Metrics const &m, scav_profile const &p, Spaces &out);
 
-// Base pointers and counts over a Spaces, for handing to layout.
+// Base pointers, counts and strides over a Spaces, for handing to layout.
 scav_spaces as_spaces(Spaces const &s);
 
 // Where `trans`'s label goes: the box layout placed, or the band its source

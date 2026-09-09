@@ -208,14 +208,20 @@ bool measure_chart(Chart const &c, Metrics const &m, scav_profile const &p, Spac
 }
 
 scav_spaces as_spaces(Spaces const &s) {
+  // The strides are filled even though nothing in C++ reads them, so the view
+  // is one the C entry points accept as well.
   return { .box_state = s.box_state.empty() ? nullptr : s.box_state.data(),
            .n_box_state = static_cast<uint32_t>(s.box_state.size()),
+           .box_state_stride = static_cast<uint32_t>(sizeof(scav_box_space)),
            .box_sub = s.box_sub.empty() ? nullptr : s.box_sub.data(),
            .n_box_sub = static_cast<uint32_t>(s.box_sub.size()),
+           .box_sub_stride = static_cast<uint32_t>(sizeof(scav_box_space)),
            .path_clear = s.path_clear.empty() ? nullptr : s.path_clear.data(),
            .n_path_clear = static_cast<uint32_t>(s.path_clear.size()),
+           .path_clear_stride = static_cast<uint32_t>(sizeof(scav_path_clear)),
            .path_box = s.path_box.empty() ? nullptr : s.path_box.data(),
-           .n_path_box = static_cast<uint32_t>(s.path_box.size()) };
+           .n_path_box = static_cast<uint32_t>(s.path_box.size()),
+           .path_box_stride = static_cast<uint32_t>(sizeof(scav_path_box)) };
 }
 
 void emit_state(DrawList &d,

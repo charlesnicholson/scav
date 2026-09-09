@@ -6,7 +6,13 @@
  * A DrawList is five flat arrays plus a string pool, read out with the same
  * span accessors as a column. Every field of scav_style and scav_prim is four
  * bytes wide, so the canonical form can be compared byte for byte without
- * reading padding. */
+ * reading padding.
+ *
+ * Sizes cross under scav_core_c.h's rule: a caller-owned POD or row array is
+ * passed with its own size beside it, checked before any other argument and
+ * whether or not the pointer is NULL, and a size that disagrees with this
+ * library's is SCAV_E_ABI. Each array scav hands back reports the stride to
+ * walk it with. */
 
 #include "scav/scav_core_c.h"
 /* The space tables and the placed boxes, which is where a label's rect is. */
@@ -96,7 +102,8 @@ scav_result scav_measure_text(scav_metrics const *metrics,
                               scav_byte const *utf8_nfc,
                               uint32_t len,
                               int32_t font_size_grid,
-                              scav_extent *out);
+                              scav_extent *out,
+                              uint32_t out_size);
 
 /* The height of one line at a profile's ratio: ceil_div(size * num, den). */
 scav_result scav_line_height(int32_t font_size_grid,
@@ -112,7 +119,8 @@ scav_result scav_measure_block(scav_metrics const *metrics,
                                int32_t font_size_grid,
                                int32_t k_num,
                                int32_t k_den,
-                               scav_extent *out);
+                               scav_extent *out,
+                               uint32_t out_size);
 
 /* DrawList ================================================================ */
 
@@ -127,18 +135,23 @@ scav_result scav_drawlist_counts(scav_drawlist const *list,
                                  uint32_t *out_clips,
                                  uint32_t *out_text);
 
-/* The flat arrays, read out with the same three-call shape as a column. */
+/* The flat arrays, read out with the same three-call shape as a column, each
+ * reporting the stride to walk it with the way a column does. */
 scav_result scav_drawlist_prims(scav_drawlist const *list,
                                 scav_prim const **out,
+                                uint32_t *out_stride,
                                 uint32_t *out_count);
 scav_result scav_drawlist_styles(scav_drawlist const *list,
                                  scav_style const **out,
+                                 uint32_t *out_stride,
                                  uint32_t *out_count);
 scav_result scav_drawlist_points(scav_drawlist const *list,
                                  scav_point const **out,
+                                 uint32_t *out_stride,
                                  uint32_t *out_count);
 scav_result scav_drawlist_clips(scav_drawlist const *list,
                                 scav_rect const **out,
+                                uint32_t *out_stride,
                                 uint32_t *out_count);
 
 /* A payload span against the list's own pool. Not NUL-terminated. */
@@ -185,7 +198,10 @@ scav_result scav_image_find(scav_images const *images,
                             scav_byte const *id,
                             uint32_t id_len,
                             uint32_t *out_index);
-scav_result scav_image_extent(scav_images const *images, uint32_t index, scav_extent *out);
+scav_result scav_image_extent(scav_images const *images,
+                              uint32_t index,
+                              scav_extent *out,
+                              uint32_t out_size);
 
 /* Reference builder ======================================================= */
 
@@ -194,15 +210,21 @@ scav_result scav_image_extent(scav_images const *images, uint32_t index, scav_ex
  * `scav_emit_chart` calls them in an order it documents and nothing else
  * depends on. Hand back the same space tables and placed boxes layout was
  * given: a label's rect is the one layout placed, not one a builder recomputes.
- * A chart with no geometry columns is SCAV_E_STATE. */
+ * A chart with no geometry columns is SCAV_E_STATE.
+ *
+ * The two row sizes and `spaces_size` are checked first and are SCAV_E_ABI when
+ * any disagrees, a NULL palette, NULL spaces and zero placed rows included. */
 scav_result scav_emit_chart(scav_drawlist *list,
                             scav_chart const *chart,
                             scav_metrics const *metrics,
                             scav_style const *palette,
                             uint32_t palette_len,
+                            uint32_t palette_row_size,
                             scav_spaces const *spaces,
+                            uint32_t spaces_size,
                             scav_placed const *placed,
                             uint32_t placed_count,
+                            uint32_t placed_row_size,
                             int32_t depth);
 
 /* The reference measurement pass, which is the policy every corpus golden is
@@ -215,18 +237,27 @@ scav_result scav_emit_chart(scav_drawlist *list,
  * this order: box_state, box_sub, path_clear, path_box. A cap too small is
  * SCAV_E_CAPACITY and never truncates. SCAV_E_STATE when the pass fails, whether
  * a codepoint has no glyph or a request leaves the legal domain; the two are not
- * told apart here, only by scav_measure_text on the text itself. */
+ * told apart here, only by scav_measure_text on the text itself.
+ *
+ * The profile's size and all four row sizes are checked first and are
+ * SCAV_E_ABI when any disagrees -- on the count query too, since a row size is
+ * the stride the caller will read the second call's rows back at. */
 scav_result scav_measure_chart(scav_chart const *chart,
                                scav_metrics const *metrics,
                                scav_profile const *profile,
+                               uint32_t profile_size,
                                scav_box_space *box_state,
                                uint32_t cap_box_state,
+                               uint32_t box_state_row_size,
                                scav_box_space *box_sub,
                                uint32_t cap_box_sub,
+                               uint32_t box_sub_row_size,
                                scav_path_clear *path_clear,
                                uint32_t cap_path_clear,
+                               uint32_t path_clear_row_size,
                                scav_path_box *path_box,
                                uint32_t cap_path_box,
+                               uint32_t path_box_row_size,
                                uint32_t *out_counts);
 
 /* The palette `scav_emit_chart` wants, in this order. */
@@ -244,7 +275,7 @@ enum {
 
 /* The shipped palette, so a caller that wants the standard look passes it
  * straight through. Writes SCAV_STYLE_COUNT rows. */
-scav_result scav_palette_standard(scav_style *out, uint32_t cap);
+scav_result scav_palette_standard(scav_style *out, uint32_t cap, uint32_t row_size);
 
 #ifdef __cplusplus
 } /* extern "C" */

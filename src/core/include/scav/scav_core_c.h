@@ -5,7 +5,14 @@
  * extern "C", opaque handles, POD structs, out-params, error enums.
  *
  * No std:: type crosses. A string comes out as a span into memory the handle
- * owns, not NUL-terminated, and every destroy is idempotent on NULL. */
+ * owns, not NUL-terminated, and every destroy is idempotent on NULL.
+ *
+ * Every caller-owned POD crosses with its own size beside it, and every array
+ * scav hands out reports the stride to read it with. A size that disagrees
+ * with this library's is SCAV_E_ABI, tested before any other argument: a
+ * caller compiled against a different header cannot be trusted about the rest
+ * of what it passed. Sizes are tested whether or not the pointer beside them
+ * is NULL, since the size is the caller's claim about its own headers. */
 
 #include "scav/scav_types.h"
 
@@ -27,7 +34,9 @@ enum {
   SCAV_E_LAYOUT = -5,      /* layout reported diagnostics; read scav_chart_diag */
   SCAV_E_FONT = -6,        /* the font is missing a table, or its tables disagree */
   SCAV_E_NO_GLYPH = -7,    /* the font has no glyph for a codepoint measured */
-  SCAV_E_DRAWLIST = -8     /* a primitive contradicts its own kind */
+  SCAV_E_DRAWLIST = -8,    /* a primitive contradicts its own kind */
+  SCAV_E_ABI = -9          /* a caller-owned struct or row's size disagrees
+                            * with this library's */
 };
 /* NOLINTEND(readability-identifier-naming) */
 
@@ -60,9 +69,11 @@ scav_result scav_load_add(scav_load *loader,
                           uint32_t len,
                           char const *name);
 
-/* The view is invalidated by the next scav_load_add. */
+/* The view is invalidated by the next scav_load_add. `out_stride` is the row
+ * size to walk it with, which a caller asserts against its own sizeof. */
 scav_result scav_load_pending(scav_load *loader,
                               scav_pending const **out,
+                              uint32_t *out_stride,
                               uint32_t *out_count);
 
 /* A pending path's bytes, from the loader's own pool. Not NUL-terminated. */
@@ -131,7 +142,10 @@ typedef struct {
 /* The latest operation's findings, owned by the chart, overwritten at each
  * operation's entry. The loader keeps its own: a failed load has no chart. */
 scav_result scav_chart_diag_count(scav_chart const *chart, uint32_t *out_count);
-scav_result scav_chart_diag(scav_chart const *chart, uint32_t index, scav_diag *out);
+scav_result scav_chart_diag(scav_chart const *chart,
+                            uint32_t index,
+                            scav_diag *out,
+                            uint32_t out_size);
 
 /* NOLINTNEXTLINE(modernize-use-using) */
 typedef uint32_t scav_column_id;

@@ -20,6 +20,10 @@ namespace {
 // What a refused call must leave an out-param holding.
 constexpr uint32_t SENTINEL{ 0xD1CE'D1CEU };
 
+// The sizes the C surface checks against, as this build measures them.
+constexpr uint32_t DIAG_SIZE{ static_cast<uint32_t>(sizeof(scav_diag)) };
+constexpr uint32_t PENDING_SIZE{ static_cast<uint32_t>(sizeof(scav_pending)) };
+
 std::string_view span_text(scav_byte const *bytes, uint32_t len) {
   return { reinterpret_cast<char const *>(bytes), len };
 }
@@ -66,8 +70,12 @@ scav_chart *drive(std::vector<Doc> const &corpus, scav_load **keep) {
 
   for (uint32_t round = 0; round < 64; ++round) {
     scav_pending const *pending{ nullptr };
+    uint32_t stride{ 0 };
     uint32_t count{ 0 };
-    REQUIRE(scav_load_pending(loader, &pending, &count) == SCAV_OK);
+    REQUIRE(scav_load_pending(loader, &pending, &stride, &count) == SCAV_OK);
+    // What a binding does with the stride: assert it against its own row size
+    // before walking rows it did not lay out.
+    REQUIRE(stride == PENDING_SIZE);
     if (count == 0) { break; }
 
     // Copied out before the first add, which invalidates the view.
@@ -99,7 +107,7 @@ TEST_CASE("abi: the version is a number a binding can check") {
 TEST_CASE("abi: every entry point rejects a null argument rather than crashing") {
   CHECK(scav_load_begin(nullptr) == SCAV_E_INVALID_ARG);
   CHECK(scav_load_add(nullptr, nullptr, 0, "x") == SCAV_E_INVALID_ARG);
-  CHECK(scav_load_pending(nullptr, nullptr, nullptr) == SCAV_E_INVALID_ARG);
+  CHECK(scav_load_pending(nullptr, nullptr, nullptr, nullptr) == SCAV_E_INVALID_ARG);
   CHECK(scav_load_finish(nullptr, nullptr) == SCAV_E_INVALID_ARG);
   CHECK(scav_chart_counts(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr) ==
         SCAV_E_INVALID_ARG);
@@ -126,8 +134,10 @@ TEST_CASE("abi: a single-document load produces a chart with counts and a hash")
   REQUIRE(add(loader, "chart c { state A, state B, trans A -> B, }", "c.scav") == SCAV_OK);
 
   scav_pending const *pending{ nullptr };
+  uint32_t stride{ 0 };
   uint32_t count{ 1 };
-  REQUIRE(scav_load_pending(loader, &pending, &count) == SCAV_OK);
+  REQUIRE(scav_load_pending(loader, &pending, &stride, &count) == SCAV_OK);
+  CHECK(stride == PENDING_SIZE);
   CHECK(count == 0);
 
   scav_chart *chart{ nullptr };
@@ -180,9 +190,11 @@ TEST_CASE("abi: pending names what the loader still needs, resolved") {
               "top/a.scav") == SCAV_OK);
 
   scav_pending const *pending{ nullptr };
+  uint32_t stride{ 0 };
   uint32_t count{ 0 };
-  REQUIRE(scav_load_pending(loader, &pending, &count) == SCAV_OK);
+  REQUIRE(scav_load_pending(loader, &pending, &stride, &count) == SCAV_OK);
   REQUIRE(count == 1);
+  CHECK(stride == PENDING_SIZE);
   CHECK(pending[0].from_doc == 0);
 
   scav_byte const *bytes{ nullptr };
@@ -309,12 +321,12 @@ TEST_CASE("abi: a fresh chart carries no diagnostics") {
   CHECK(count == 0);
 
   scav_diag d{};
-  CHECK(scav_chart_diag(chart, 0, &d) == SCAV_E_INVALID_ARG);
+  CHECK(scav_chart_diag(chart, 0, &d, DIAG_SIZE) == SCAV_E_INVALID_ARG);
 
   CHECK(scav_chart_diag_count(nullptr, &count) == SCAV_E_INVALID_ARG);
   CHECK(scav_chart_diag_count(chart, nullptr) == SCAV_E_INVALID_ARG);
-  CHECK(scav_chart_diag(nullptr, 0, &d) == SCAV_E_INVALID_ARG);
-  CHECK(scav_chart_diag(chart, 0, nullptr) == SCAV_E_INVALID_ARG);
+  CHECK(scav_chart_diag(nullptr, 0, &d, DIAG_SIZE) == SCAV_E_INVALID_ARG);
+  CHECK(scav_chart_diag(chart, 0, nullptr, DIAG_SIZE) == SCAV_E_INVALID_ARG);
 
   scav_chart_destroy(chart);
   scav_load_destroy(loader);
@@ -337,7 +349,7 @@ TEST_CASE("abi: a chart diagnostic reads back field for field") {
   REQUIRE(count == 1);
 
   scav_diag d{};
-  REQUIRE(scav_chart_diag(chart, 0, &d) == SCAV_OK);
+  REQUIRE(scav_chart_diag(chart, 0, &d, DIAG_SIZE) == SCAV_OK);
   CHECK(d.code == static_cast<uint32_t>(scav::DiagCode::DanglingRef));
   CHECK(d.subject_kind == static_cast<uint32_t>(scav::ElemKind::State));
   CHECK(d.subject_ordinal == 7);
@@ -455,13 +467,16 @@ TEST_CASE("abi: a null argument is refused whichever one it is, and writes nothi
       .got = scav_load_add(loader, &guard, 1, nullptr),
       .want = SCAV_E_INVALID_ARG },
     { .what = "load_pending: no loader",
-      .got = scav_load_pending(nullptr, &pending, &count),
+      .got = scav_load_pending(nullptr, &pending, &stride, &count),
       .want = SCAV_E_INVALID_ARG },
     { .what = "load_pending: nowhere to put the rows",
-      .got = scav_load_pending(loader, nullptr, &count),
+      .got = scav_load_pending(loader, nullptr, &stride, &count),
+      .want = SCAV_E_INVALID_ARG },
+    { .what = "load_pending: nowhere to put the stride",
+      .got = scav_load_pending(loader, &pending, nullptr, &count),
       .want = SCAV_E_INVALID_ARG },
     { .what = "load_pending: nowhere to put the count",
-      .got = scav_load_pending(loader, &pending, nullptr),
+      .got = scav_load_pending(loader, &pending, &stride, nullptr),
       .want = SCAV_E_INVALID_ARG },
     { .what = "load_path: no loader",
       .got = scav_load_path(nullptr, empty, &bytes, &len),
@@ -635,9 +650,11 @@ TEST_CASE("abi: a finished loader has nothing left to say about what it wants") 
 
   scav_pending const marker{};
   scav_pending const *pending{ &marker };
+  uint32_t stride{ SENTINEL };
   uint32_t count{ SENTINEL };
-  CHECK(scav_load_pending(loader, &pending, &count) == SCAV_E_STATE);
+  CHECK(scav_load_pending(loader, &pending, &stride, &count) == SCAV_E_STATE);
   CHECK(pending == &marker);
+  CHECK(stride == SENTINEL);
   CHECK(count == SENTINEL);
 
   scav_chart_destroy(chart);
@@ -693,6 +710,35 @@ TEST_CASE("abi: a loader still open reports its own diagnostics, and its refusal
   REQUIRE(scav_load_diag_count(empty, &count) == SCAV_OK);
   CHECK(count != 0);
   scav_load_destroy(empty);
+}
+
+TEST_CASE("abi: a struct size that disagrees with the header is refused first") {
+  scav_load *loader{ nullptr };
+  scav_chart *chart{ drive(diamond(), &loader) };
+  REQUIRE(chart != nullptr);
+  chart->diags.push_back({ .code = scav::DiagCode::DanglingRef,
+                           .subject = { .kind = scav::ElemKind::State, .ordinal = 7 },
+                           .doc = { 0 },
+                           .src = { .off = 0, .len = 0 } });
+
+  scav_diag d{ .code = SENTINEL };
+  for (uint32_t size : { DIAG_SIZE - 4, DIAG_SIZE + 4 }) {
+    CAPTURE(size);
+    CHECK(scav_chart_diag(chart, 0, &d, size) == SCAV_E_ABI);
+    CHECK(d.code == SENTINEL);  // refused before anything was written
+    // The size is the caller's claim about its own headers, so it is tested
+    // whether or not there is a pointer beside it: SCAV_E_ABI outranks the
+    // null-argument refusal, because a caller whose struct differs cannot be
+    // trusted about the rest of what it passed.
+    CHECK(scav_chart_diag(chart, 0, nullptr, size) == SCAV_E_ABI);
+    CHECK(scav_chart_diag(nullptr, 0, &d, size) == SCAV_E_ABI);
+  }
+  CHECK(scav_chart_diag(chart, 0, &d, 0) == SCAV_E_ABI);
+  REQUIRE(scav_chart_diag(chart, 0, &d, DIAG_SIZE) == SCAV_OK);
+  CHECK(d.subject_ordinal == 7);
+
+  scav_chart_destroy(chart);
+  scav_load_destroy(loader);
 }
 
 TEST_CASE("abi: a chart that builds with findings comes back with both") {

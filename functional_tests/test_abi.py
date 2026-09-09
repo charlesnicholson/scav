@@ -172,6 +172,46 @@ class TestAbiGolden(unittest.TestCase):
                       "scav_router_by_name", "scav_str"):
             self.assertIn(entry, functions)
 
+        codes = {value["name"] for header in abi["headers"]
+                 for enum in header["enums"] for value in enum["values"]}
+        self.assertIn("SCAV_E_ABI", codes)
+
+        # Every caller-owned POD crosses with its own size beside it and every
+        # array scav hands out reports its stride, so a caller built against a
+        # different header is refused rather than written past. The codes are
+        # the C tests'; what the golden owes is that the parameters are here.
+        params = {f["name"]: [p["name"] for p in f["params"]]
+                  for header in abi["headers"] for f in header["functions"]}
+        for entry, size in (("scav_profile_named", "out_size"),
+                            ("scav_profile_validate", "profile_size"),
+                            ("scav_layout_run", "spaces_size"),
+                            ("scav_layout_run", "opts_size"),
+                            ("scav_layout_run", "placed_size"),
+                            ("scav_chart_diag", "out_size"),
+                            ("scav_measure_text", "out_size"),
+                            ("scav_measure_chart", "profile_size"),
+                            ("scav_measure_chart", "box_state_row_size"),
+                            ("scav_emit_chart", "palette_row_size"),
+                            ("scav_emit_chart", "placed_row_size"),
+                            ("scav_palette_standard", "row_size"),
+                            ("scav_svg_write", "options_size"),
+                            ("scav_svg_bounds", "out_size")):
+            with self.subTest(entry=entry, size=size):
+                self.assertIn(size, params[entry])
+        for entry in ("scav_load_pending", "scav_column_data", "scav_drawlist_prims",
+                      "scav_drawlist_styles", "scav_drawlist_points",
+                      "scav_drawlist_clips"):
+            with self.subTest(entry=entry):
+                self.assertIn("out_stride", params[entry])
+        # The four caller-owned row arrays behind one struct, each declaring the
+        # stride it was filled at.
+        spaces = next(s for header in abi["headers"] for s in header["structs"]
+                      if s["name"] == "scav_spaces")
+        self.assertEqual(
+            ["box_state_stride", "box_sub_stride", "path_clear_stride",
+             "path_box_stride"],
+            [f["name"] for f in spaces["fields"] if f["name"].endswith("_stride")])
+
         # Padding is pinned rather than inferred: a struct that grows some is an
         # ABI break and should read as one in the diff.
         for header in abi["headers"]:
@@ -368,6 +408,19 @@ class TestGeneratedBindings(unittest.TestCase):
             scav._abi.check(code, "scav_chart_digest")
         self.assertIn("SCAV_E_CAPACITY", str(caught.exception))
         chart.close()
+
+    def test_a_struct_size_the_library_disagrees_with_is_its_own_code(self) -> None:
+        """The refusal from the other side of the boundary: SCAV_E_ABI is its
+        own code and its own name, not an argument error a caller would go
+        looking for a null in."""
+        scav = self.scav
+        prof = scav.profile("readable")
+        code = scav.library().scav_profile_named(
+            b"readable", ctypes.byref(prof), ctypes.sizeof(prof) - 4)
+        self.assertEqual(scav._abi.SCAV_E_ABI, code)
+        with self.assertRaises(scav.ScavError) as caught:
+            scav._abi.check(code, "scav_profile_named")
+        self.assertIn("SCAV_E_ABI", str(caught.exception))
 
     def test_a_drawlist_appends_with_its_indices_rebased(self) -> None:
         scav = self.scav
