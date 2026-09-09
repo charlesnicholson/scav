@@ -1225,14 +1225,19 @@ TEST_CASE("layout: no corpus chart runs a route flush along a box") {
   // No net gave up its clearance, so what is left is not 11.5's degradation.
   CHECK(reseated == 0);
   MESSAGE("routes flush against a box:\n", report);
-  // All three are separator ports: such a port sits on a submachine rect flush
+  // All four are separator ports: such a port sits on a submachine rect flush
   // with a child's border and lays a lane there. Same cause as the stubs below,
-  // same fix -- 11.5's LCA-owned separator channel, P7c's. Pinned so it cannot grow.
+  // same fix -- 11.5's LCA-owned separator channel, P7c's. Pinned so it cannot
+  // grow. **Three until the corner inset landed**: keeping a seat off the arc
+  // drawn at a corner moved `vac`'s t4, which had been 19 units inside a
+  // 115-unit radius, onto a coordinate where it runs flush instead. One lane
+  // for seven attachments that had pointed at blank canvas, and the class it
+  // joins is one 11.5 already owns.
   uint32_t lines{ 0 };
   for (char const ch : report) {
     if (ch == '\n') { ++lines; }
   }
-  CHECK(lines <= 3);
+  CHECK(lines <= 4);
 }
 
 TEST_CASE("layout: Tier 0 at the scale target, and where the grid gives out") {
@@ -1310,10 +1315,13 @@ constexpr std::array<char const *, 2> SCALE_ROUTERS{ "orthogonal", "straight" };
 // `CostTerms` in declaration order with the Tier-0 pair moved to the front:
 // through_box, box_overlap, bends, corridor, crossings, excess_len, adjacency,
 // label, label_near, aspect, area.
+// `excess_len` on the two nested rows moved when the corner inset landed: a
+// seat held off an arc is a slightly longer route, +560 and +2,752 units of
+// 46.6M and 34.0M.
 constexpr std::array<std::array<int64_t, 11>, 8> SCALE_PINNED{
-  { { 0, 0, 4136, 139984, 1880, 46592352, 0, 0, 0, 2527936, 89039694848 },
+  { { 0, 0, 4136, 139984, 1880, 46592912, 0, 0, 0, 2527936, 89039694848 },
     { 11464, 0, 3416, 172160, 75136, 605104352, 0, 0, 0, 2527936, 89039694848 },
-    { 0, 0, 4784, 11680, 2224, 34003552, 0, 0, 0, 125776, 32837048320 },
+    { 0, 0, 4784, 11680, 2224, 34006304, 0, 0, 0, 125776, 32837048320 },
     { 12944, 0, 3504, 0, 65752, 596909344, 0, 0, 0, 125776, 32837048320 },
     { 0, 0, 740, 111680, 152, 4553385, 0, 0, 0, 53760, 3718840320 },
     { 1996, 0, 318, 0, 270, 7357645, 0, 0, 0, 53760, 3718840320 },

@@ -104,11 +104,12 @@ Wide beyond(int32_t v, int32_t lo, int32_t len) {
   return Wide{ 0 };
 }
 
-// A coordinate onto the face `[lo, lo + len]`, held `clear` off each corner or
-// at the middle where the face has no room for that: an end on a corner leaves
-// along the face it did not pick.
-int32_t onto_face(int32_t v, int32_t lo, int32_t len, int32_t clear) {
-  int32_t const inset{ imin(clear, len / 2) };
+// A coordinate onto the face `[lo, lo + len]`, held off each corner by the
+// larger of the clearance and the arc drawn there, or at the middle where the
+// face has no room for that: an end on a corner leaves along the face it did
+// not pick, and an end on an arc points at canvas nothing was drawn on.
+int32_t onto_face(int32_t v, int32_t lo, int32_t len, int32_t clear, int32_t corner) {
+  int32_t const inset{ imin(imax(clear, corner), len / 2) };
   return imin(imax(v, lo + inset), (lo + len) - inset);
 }
 
@@ -206,7 +207,8 @@ scav_point ortho_escape_box(scav_point at, scav_point toward, scav_rect const &r
 scav_point ortho_attach_box(scav_point toward,
                             scav_rect const &r,
                             int32_t clear,
-                            bool inscribed) {
+                            bool inscribed,
+                            int32_t corner) {
   // Along the face, `toward`'s own projection onto it, so the end leaves aimed
   // at where it is going. A box centre carries no such information and every
   // net naming one face of one box would otherwise be handed the same point.
@@ -216,9 +218,9 @@ scav_point ortho_attach_box(scav_point toward,
   // the upper of them misses the tangent.
   scav_point aimed{ toward };
   if (ortho_escape_horizontal(toward, r)) {
-    aimed.y = inscribed ? (r.y + (r.h / 2)) : onto_face(toward.y, r.y, r.h, clear);
+    aimed.y = inscribed ? (r.y + (r.h / 2)) : onto_face(toward.y, r.y, r.h, clear, corner);
   } else {
-    aimed.x = inscribed ? (r.x + (r.w / 2)) : onto_face(toward.x, r.x, r.w, clear);
+    aimed.x = inscribed ? (r.x + (r.w / 2)) : onto_face(toward.x, r.x, r.w, clear, corner);
   }
   return ortho_escape_box(aimed, toward, r);
 }
@@ -312,8 +314,13 @@ void ortho_reface_attachments(std::vector<RouteNet> const &nets,
 void ortho_align_attachments(std::vector<RouteNet> const &nets,
                              std::vector<scav_rect> const &boxes,
                              std::vector<uint8_t> const &inscribed,
+                             std::vector<int32_t> const &corner,
                              int32_t clear,
                              std::vector<scav_point> &at) {
+  // Empty for zero throughout, the way `inscribed` is.
+  auto const arc = [&corner](uint32_t box) {
+    return (box < corner.size()) ? corner[box] : 0;
+  };
   for (uint32_t n = 0; n < nets.size(); ++n) {
     RouteNet const &net{ nets[n] };
     if (net.waypoint_len != 0) { continue; }
@@ -341,7 +348,7 @@ void ortho_align_attachments(std::vector<RouteNet> const &nets,
       int32_t const start{ along_y ? r.y : r.x };
       int32_t const len{ along_y ? r.h : r.w };
       bool const one_point{ (box < inscribed.size()) && (inscribed[box] != 0) };
-      int32_t const inset{ one_point ? (len / 2) : imin(clear, len / 2) };
+      int32_t const inset{ one_point ? (len / 2) : imin(imax(clear, arc(box)), len / 2) };
       int32_t const face_lo{ start + inset };
       int32_t const face_hi{ one_point ? face_lo : ((start + len) - inset) };
       lo = (k == 0) ? face_lo : imax(lo, face_lo);
@@ -367,8 +374,13 @@ void ortho_align_attachments(std::vector<RouteNet> const &nets,
 void ortho_spread_attachments(std::vector<RouteNet> const &nets,
                               std::vector<scav_rect> const &boxes,
                               std::vector<uint8_t> const &inscribed,
+                              std::vector<int32_t> const &corner,
                               int32_t clear,
                               std::vector<scav_point> &at) {
+  // Empty for zero throughout, the way `inscribed` is.
+  auto const arc = [&corner](uint32_t box) {
+    return (box < corner.size()) ? corner[box] : 0;
+  };
   if (clear <= 0) { return; }
   std::vector<Seat> seats;
   for (uint32_t n = 0; n < nets.size(); ++n) {
@@ -433,7 +445,7 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
         // departure, so a fan-in and a fan-out each keep their one point.
         bool const forward{ (seat.end == 0) == ((seat.face == 1) || (seat.face == 3)) };
         int32_t const want{ seat.pos + (forward ? -(step / 2) : (step - (step / 2))) };
-        int32_t const got{ onto_face(want, lo, len, clear) };
+        int32_t const got{ onto_face(want, lo, len, clear, arc(seat.box)) };
         int32_t &held{ along_y ? at[seat.slot].y : at[seat.slot].x };
         if (held != got) {
           held = got;
@@ -776,6 +788,9 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
     auto const glyph = [&in](uint32_t box) {
       return (box < in.inscribed.size()) && (in.inscribed[box] != 0);
     };
+    auto const arc = [&in](uint32_t box) {
+      return (box < in.corner.size()) ? in.corner[box] : 0;
+    };
     uint32_t const src_slot{ 2 * n };
     uint32_t const dst_slot{ src_slot + 1 };
     toward[src_slot] = after;
@@ -784,20 +799,22 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
                          ? ortho_attach_box(after,
                                             in.obstacles[net.src_obstacle],
                                             clear,
-                                            glyph(net.src_obstacle))
+                                            glyph(net.src_obstacle),
+                                            arc(net.src_obstacle))
                          : after;
     seat[dst_slot] = (net.dst_obstacle < in.obstacles.size())
                          ? ortho_attach_box(before,
                                             in.obstacles[net.dst_obstacle],
                                             clear,
-                                            glyph(net.dst_obstacle))
+                                            glyph(net.dst_obstacle),
+                                            arc(net.dst_obstacle))
                          : before;
   }
   // Faces first, since a glyph moved onto another face is a different line for
   // the two passes below to line up and pull apart.
   ortho_reface_attachments(in.nets, in.obstacles, in.inscribed, toward, seat);
-  ortho_align_attachments(in.nets, in.obstacles, in.inscribed, clear, seat);
-  ortho_spread_attachments(in.nets, in.obstacles, in.inscribed, clear, seat);
+  ortho_align_attachments(in.nets, in.obstacles, in.inscribed, in.corner, clear, seat);
+  ortho_spread_attachments(in.nets, in.obstacles, in.inscribed, in.corner, clear, seat);
 
   for (uint32_t n = 0; n < in.nets.size(); ++n) {
     RouteNet const &net{ in.nets[n] };

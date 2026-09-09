@@ -4,6 +4,7 @@
 #include "scav/scav_draw.h"
 
 #include "scav/scav_core.h"
+#include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
 #include "scav/scav_types.h"
 #include "scav_int.h"
@@ -243,7 +244,10 @@ void emit_state(DrawList &d,
   StateKind const kind{ c.states[state].kind };
   uint32_t const shape{ drawlist_style(d, p[style_for_kind(kind)]) };
   ElemRef const origin{ state_ref(state) };
-  int32_t const radius{ imin(box.w, box.h) / 8 };
+  // The ring the band origin sits inside, which is what layout inset the
+  // children by; reading it back keeps the arc and the ring one number.
+  int32_t const ring{ (state < befores.size()) ? (befores[state].x - box.x) : 0 };
+  int32_t const radius{ state_corner_radius(kind, box, ring) };
 
   // A glyph fills its box: layout gives a bare pseudostate no padding ring (11.4)
   // so a route reaching the border reaches the mark. Inset leaves it one pad short.

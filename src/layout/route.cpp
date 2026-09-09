@@ -13,6 +13,7 @@
 #include "layout/shard.h"
 #include "layout/size.h"
 #include "scav/scav_core.h"
+#include "scav/scav_layout.h"
 #include "scav_int.h"
 #include "scav_shard.h"
 #include "scav_stable_sort.h"
@@ -271,6 +272,9 @@ Routes route_transitions(Chart const &c,
       sc.obstacle_states.push_back(st);
       in.obstacles.push_back(z.state[st]);
       in.inscribed.push_back(kind_inscribed(c.states[st].kind) ? 1U : 0U);
+      in.corner.push_back(state_corner_radius(c.states[st].kind,
+                                              z.state[st],
+                                              z.before[st].x - z.state[st].x));
     }
     for (uint32_t const i : by_frame[m]) {
       Planned const &pn{ planned[i] };

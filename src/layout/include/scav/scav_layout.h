@@ -38,6 +38,30 @@ bool profile_named(char const *name, scav_profile &out);
 // Every bound in the C header's table. scav_layout_run revalidates regardless.
 bool profile_validate(scav_profile const &p);
 
+// Drawn silhouette =========================================================
+
+// The corner arc a `Normal` state is drawn with. Zero for every other kind --
+// a fork or join bar is square, and an inscribed glyph takes the one face
+// midpoint 11.5 already gives it.
+//
+// Stated here rather than in the reference builder because three places need
+// it and only one may own it: the builder draws this arc, the router keeps its
+// seats out of it, and phase 2 keeps children out of it.
+//
+// **Capped at the interior ring.** An eighth of the shorter side is a
+// proportion, and a proportion has no bound: a 12,904-unit composite draws a
+// 1,613-unit arc, twelve times the ring its children are inset by, so a child
+// at the ring sits outside the shape and a seat near a corner points at blank
+// canvas. Past `pad` the arc stops growing, which leaves a large box a rounded
+// rectangle rather than a stadium and puts the whole ring in the straight
+// zone. `pad` comes off the rects rather than the profile, the way
+// `size_owner_holes` reads it, so the three sites cannot disagree about it.
+inline int32_t state_corner_radius(StateKind kind, scav_rect const &box, int32_t pad) {
+  if (kind != StateKind::Normal) { return 0; }
+  int32_t const proportional{ ((box.w < box.h) ? box.w : box.h) / 8 };
+  return (proportional < pad) ? proportional : pad;
+}
+
 // Layout ====================================================================
 
 // Rows in the fixed table of chart-global phase-2 tuples Level 2 chooses
