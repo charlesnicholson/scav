@@ -289,6 +289,10 @@ DEFECTS = [
     "label over a state box", "label over another route",
     "label nearer another route than its own", "texts overprint each other",
     "mark outside its glyph",
+    # The classes P9d's review added, each one an absolute the objective was
+    # blind to rather than a preference it priced badly.
+    "attachment on a drawn corner", "label detached from its own polyline",
+    "label outside its enclosing state",
 ]
 
 if __name__ == "__main__":

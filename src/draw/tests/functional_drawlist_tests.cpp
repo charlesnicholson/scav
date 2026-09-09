@@ -245,13 +245,18 @@ TEST_CASE("drawlist gauntlet: what crowd's tighter packing costs its labels") {
   // here. Carved out to P9d: `sweep_count = 0, trybox = 0` reads `label` 0 and
   // `label_near` 172, for 56% more area and a Tier 2 of 1,438 against 1,230 --
   // which is why nothing picks it, by a sixth rather than by half.
+  //
+  // **`label` was 4 and is 6.** Two of the six lie over a box the transition
+  // itself names, which `label` exempted while its walk started at the
+  // endpoint rather than above it. The pin goes up because the count was
+  // short, not because the drawing moved; what P9d owes is still zero.
   Metrics const m{ bundled() };
   scav_profile const p{ readable() };
   Run const r{ run_pipeline("gauntlet/crowd.scav", m, p) };
   CostTerms const t{
     cost_columns(r.chart, decompose(r.chart), p, as_spaces(r.spaces), r.placed)
   };
-  CHECK(t.label == 4);
+  CHECK(t.label == 6);
   CHECK(t.label_near == 442);
 }
 

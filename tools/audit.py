@@ -130,15 +130,37 @@ def trunks(a, b):
 
 
 def enclosing(doc, state):
-    """`state` and every state whose box contains it. A parent is a submachine
-    id, and that submachine's owner is the state one level up."""
+    """Every state whose box contains `state`, and not `state` itself.
+
+    11.6 exempts a state from the whole-rect test where it *encloses* the
+    transition's source or target, because a label inside the composite its
+    transition runs in is where it belongs and charging it there makes zero
+    unreachable. An endpoint encloses nothing, so it is not exempt -- a label
+    over `Tripped` is a label over a box a reader sees, whether or not
+    `Tripped` is the transition it belongs to.
+    """
     seen = []
-    at = state
+    parent = doc["states"][state]["parent"]
+    at = None if parent is None else doc["submachines"][parent]["owner"]
     while at is not None and at not in seen:
         seen.append(at)
         parent = doc["states"][at]["parent"]
         at = None if parent is None else doc["submachines"][parent]["owner"]
     return set(seen)
+
+
+def corner_arc(doc, state):
+    """The arc drawn at `state`'s corners, which no attachment may sit on.
+
+    Mirrors `state_corner_radius` in scav_layout.h: an eighth of the shorter
+    side, capped at the interior ring, and zero for a kind not drawn as a
+    rounded rect. The ring comes off the band origin the way layout reads it.
+    """
+    bx, _, bw, bh = doc["geometry"]["state"][state]
+    if doc["states"][state]["kind"] != "normal" or not (bw and bh):
+        return 0
+    ring = max(doc["geometry"]["state_before"][state][0] - bx, 0)
+    return min(min(bw, bh) // 8, ring)
 
 
 def geometry(chart, scav_bin, row=None):
@@ -171,6 +193,9 @@ def audit(svg, every, chart, doc, verbose):
             notes.append(f"    {kind}: {detail}")
 
     cx, cy, cw, ch = chart
+    live = [i for i, st in enumerate(doc["states"]) if st["live"]]
+    rects = doc["geometry"]["state"]
+    bands = (doc["geometry"]["state_before"], doc["geometry"]["state_after"])
     legs = []
     route = {}
     starts = []
@@ -222,6 +247,25 @@ def audit(svg, every, chart, doc, verbose):
         if not any(on_border(tip, box) for box in every):
             note("arrowhead not on any border", f"t{trans} tip {tip}")
 
+    # An attachment on the arc a rounded corner is drawn with is anchored to
+    # nothing: the bounding box has border there and the drawing does not.
+    for pt, trans in starts + tips:
+        for i in live:
+            bx, by, bw, bh = rects[i]
+            if not (bw and bh) or not on_border(pt, (bx, by, bw, bh)):
+                continue
+            found["state attachments"] = found.get("state attachments", 0) + 1
+            r = corner_arc(doc, i)
+            if not r:
+                break
+            vertical = pt[0] in (bx, bx + bw)
+            along, lo, length = ((pt[1], by, bh) if vertical else (pt[0], bx, bw))
+            into = max(lo + r - along, along - (lo + length - r))
+            if into > 0:
+                note("attachment on a drawn corner",
+                     f"t{trans} at {pt} {into} into r={r}")
+            break
+
     # A head and a departure on one point of one box: the head is inked over the
     # other route's own first leg, so it reads as belonging to the line it sits
     # on. Two arrivals sharing a point are a fan-in and keep their one head
@@ -245,9 +289,6 @@ def audit(svg, every, chart, doc, verbose):
     # `y` is a baseline and `textLength` the advance sum, so one font size up from
     # the baseline is the em box the builder reserved -- the same rectangle it
     # measured with, which is what makes these comparable to the geometry.
-    live = [i for i, st in enumerate(doc["states"]) if st["live"]]
-    rects = doc["geometry"]["state"]
-    bands = (doc["geometry"]["state_before"], doc["geometry"]["state_after"])
     inked = []
     for m in TEXT.finditer(svg):
         x, y, size, length, which, ident = m.groups()
@@ -293,6 +334,29 @@ def audit(svg, every, chart, doc, verbose):
         if mine and theirs and min(mine) + size > min(theirs):
             note("label nearer another route than its own",
                  f"t{ident} own {min(mine)} other {min(theirs)}")
+
+        # A label hangs off its own polyline, full stop -- not merely nearer to
+        # it than to somebody else's. One text height is the bound: past that
+        # there is room for another line between the two and the reader has
+        # nothing tying them together. Absolute, so an orphan in empty canvas
+        # is caught where the relative test above sees nothing to compare.
+        if mine and min(mine) > size:
+            note("label detached from its own polyline",
+                 f"t{ident} {min(mine)} from its nearest leg, one height {size}")
+
+        # Everything of a submachine is contained in its parent state's box,
+        # out-of-machine transitions excepted -- a transition with no state
+        # enclosing both ends has no box to be inside.
+        both = enclosing(doc, edge["src"]) & enclosing(doc, edge["dst"])
+        for i in both:
+            bx, by, bw, bh = rects[i]
+            if not (bw and bh):
+                continue
+            if not (bx <= x and x + length <= bx + bw and by <= y - size
+                    and y <= by + bh):
+                note("label outside its enclosing state",
+                     f"t{ident} at ({x},{y})+{length} outside state {i}")
+                break
 
     # Two strings inked into the same place read as one unreadable string, which
     # is a different defect from a label over a box: nudging moves the routes a
@@ -392,6 +456,9 @@ def main():
 
     # Counts first, then the findings, so the ratio is visible.
     scale = {"segment not axis-aligned": "route segments",
+             "attachment on a drawn corner": "state attachments",
+             "label detached from its own polyline": "transition labels",
+             "label outside its enclosing state": "transition labels",
              "segment flush along a box": "route segments",
              "route start not on any border": "route starts",
              "arrowhead not on any border": "arrowheads",
@@ -404,8 +471,8 @@ def main():
              "label nearer another route than its own": "transition labels",
              "texts overprint each other": "texts",
              "mark outside its glyph": "marks in a glyph"}
-    for key in ("route segments", "route starts", "arrowheads", "region dividers",
-                "transition labels", "texts", "marks in a glyph"):
+    for key in ("route segments", "route starts", "arrowheads", "state attachments",
+                "region dividers", "transition labels", "texts", "marks in a glyph"):
         print(f"{key:<40} {total.get(key, 0)}")
     print()
     # Not a ratio, so it sits outside the block below: the shared run's extent is
