@@ -303,10 +303,14 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
   MESSAGE("corpus path boxes: ", boxes, ", centred fallbacks: ", fell);
   CHECK(boxes == 192);
   // **16 -> 7 when the placer stopped sitting on state boxes and the fold
-  // stopped discarding a label's charged rank gap.** A refusal makes strips
-  // infeasible and would raise this on its own; the room the fold gives back
-  // more than pays for it (11.9.3).
-  CHECK(fell == 7);
+  // stopped discarding a label's charged rank gap**, then **7 -> 12** when the
+  // exemption narrowed to states enclosing *both* ends: a label may no longer
+  // lie inside a state its transition merely crosses into, and twelve boxes
+  // have nowhere left to go. **Every fallback is a sliced label**, so this
+  // number and 11.9.3's slice count are one number, and the pair is the
+  // measured case for rip-up: prohibiting without providing moves the
+  // violation rather than removing it (11.9.3).
+  CHECK(fell == 12);
 }
 
 TEST_CASE("drawlist corpus: the layout goldens' measurement policy is stated here") {

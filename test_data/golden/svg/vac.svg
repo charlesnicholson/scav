@@ -62,9 +62,9 @@
   <polygon points="4161,0 5582,525 4161,1050 2740,525" fill="#ffffff" stroke="#1a1a1a" stroke-width="16" class="scav-state scav-id-4"/>
   <text x="16690" y="829" font-size="160" textLength="768" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-1">POWER_ON</text>
   <text x="6350" y="1264" font-size="160" textLength="960" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-3">BUMP_RETRY</text>
-  <text x="7284" y="2653" font-size="160" textLength="1056" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-4">battery low</text>
+  <text x="4548" y="2788" font-size="160" textLength="1056" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-4">battery low</text>
   <text x="11960" y="4587" font-size="160" textLength="1440" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-7">contacts closed</text>
-  <text x="12802" y="5335" font-size="160" textLength="384" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-8">full</text>
+  <text x="12802" y="5873" font-size="160" textLength="384" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-8">full</text>
   <text x="8027" y="4289" font-size="160" textLength="1248" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-10">vacuum docked</text>
   <text x="8171" y="4606" font-size="160" textLength="1056" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-11">vacuum left</text>
   <text x="2170" y="1354" font-size="160" textLength="768" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-13">charging</text>

@@ -187,15 +187,24 @@ uint32_t place_labels(Chart const &c,
                               .h = (y1 - y0) + (2 * reach_y) };
 
       if (box.subject < c.transitions.size()) {
+        // Both ends, not either: a state enclosing one endpoint does not have
+        // to hold the label -- the label belongs on the ancestral side of that
+        // crossing -- so only a state enclosing *both* is exempt from its own
+        // rect. `2` is the intersection; `1` is src's chain alone, which the
+        // reset below clears along with it (11.9.3).
         mark(c.transitions[box.subject].src, 1);
-        mark(c.transitions[box.subject].dst, 1);
+        StateId above{ enclosing_state(c, c.transitions[box.subject].dst) };
+        for (size_t up = 0; (up < c.states.size()) && (above.v != INVALID); ++up) {
+          if (encloses[above.v] == 1) { encloses[above.v] = 2; }
+          above = enclosing_state(c, above);
+        }
       }
       blocked.clear();
       for (uint32_t st = 0; st < c.states.size(); ++st) {
         if (c.states[st].live == 0) { continue; }
-        // A state enclosing an endpoint holds the label legitimately; the bands
-        // it reserved for its own text do not.
-        if (encloses[st] != 0) {
+        // A state enclosing both endpoints holds the label legitimately; the
+        // bands it reserved for its own text do not.
+        if (encloses[st] == 2) {
           if (overlaps(region, z.before[st])) { blocked.push_back(z.before[st]); }
           if (overlaps(region, z.after[st])) { blocked.push_back(z.after[st]); }
         } else if (overlaps(region, z.state[st])) {
@@ -302,10 +311,7 @@ uint32_t place_labels(Chart const &c,
           }
         }
       }
-      if (box.subject < c.transitions.size()) {
-        mark(c.transitions[box.subject].src, 0);
-        mark(c.transitions[box.subject].dst, 0);
-      }
+      if (box.subject < c.transitions.size()) { mark(c.transitions[box.subject].src, 0); }
     }
 
     if (key.dist < 0) {

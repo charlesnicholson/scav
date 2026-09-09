@@ -333,7 +333,10 @@ def audit(svg, every, chart, doc, verbose):
         # A transition with no route is the exception: nothing placed its label,
         # and the builder draws it in the band its source reserved for exactly it.
         edge = doc["transitions"][int(ident)]
-        under = enclosing(doc, edge["src"]) | enclosing(doc, edge["dst"])
+        # States enclosing *both* ends. One enclosing a single end does not have
+        # to hold the label -- the label belongs on the ancestral side of that
+        # crossing -- so it is not exempt from the whole-rect test.
+        under = enclosing(doc, edge["src"]) & enclosing(doc, edge["dst"])
         own_band = edge["src"] if not doc["geometry"]["route"][int(ident)] else None
         for i in live:
             hit = (any(struck(band[i]) for j, band in enumerate(bands)
