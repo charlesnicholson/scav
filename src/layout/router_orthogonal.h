@@ -75,7 +75,8 @@ scav_point ortho_escape_box(scav_point at, scav_point toward, scav_rect const &r
 scav_point ortho_attach_box(scav_point toward,
                             scav_rect const &r,
                             int32_t clear,
-                            bool inscribed);
+                            bool inscribed,
+                            int32_t corner);
 
 // `at` holds `2 * nets.size()` points below, src then dst per net, and only the
 // ends naming a box are read or written. The three run in this order.
@@ -99,6 +100,7 @@ void ortho_reface_attachments(std::vector<RouteNet> const &nets,
 void ortho_align_attachments(std::vector<RouteNet> const &nets,
                              std::vector<scav_rect> const &boxes,
                              std::vector<uint8_t> const &inscribed,
+                             std::vector<int32_t> const &corner,
                              int32_t clear,
                              std::vector<scav_point> &at);
 
@@ -108,6 +110,7 @@ void ortho_align_attachments(std::vector<RouteNet> const &nets,
 void ortho_spread_attachments(std::vector<RouteNet> const &nets,
                               std::vector<scav_rect> const &boxes,
                               std::vector<uint8_t> const &inscribed,
+                              std::vector<int32_t> const &corner,
                               int32_t clear,
                               std::vector<scav_point> &at);
 

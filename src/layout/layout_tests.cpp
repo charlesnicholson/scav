@@ -1225,14 +1225,19 @@ TEST_CASE("layout: no corpus chart runs a route flush along a box") {
   // No net gave up its clearance, so what is left is not 11.5's degradation.
   CHECK(reseated == 0);
   MESSAGE("routes flush against a box:\n", report);
-  // All three are separator ports: such a port sits on a submachine rect flush
+  // All four are separator ports: such a port sits on a submachine rect flush
   // with a child's border and lays a lane there. Same cause as the stubs below,
-  // same fix -- 11.5's LCA-owned separator channel, P7c's. Pinned so it cannot grow.
+  // same fix -- 11.5's LCA-owned separator channel, P7c's. Pinned so it cannot
+  // grow. **Three until the corner inset landed**: keeping a seat off the arc
+  // drawn at a corner moved `vac`'s t4, which had been 19 units inside a
+  // 115-unit radius, onto a coordinate where it runs flush instead. One lane
+  // for seven attachments that had pointed at blank canvas, and the class it
+  // joins is one 11.5 already owns.
   uint32_t lines{ 0 };
   for (char const ch : report) {
     if (ch == '\n') { ++lines; }
   }
-  CHECK(lines <= 3);
+  CHECK(lines <= 4);
 }
 
 TEST_CASE("layout: Tier 0 at the scale target, and where the grid gives out") {
@@ -1310,10 +1315,13 @@ constexpr std::array<char const *, 2> SCALE_ROUTERS{ "orthogonal", "straight" };
 // `CostTerms` in declaration order with the Tier-0 pair moved to the front:
 // through_box, box_overlap, bends, corridor, crossings, excess_len, adjacency,
 // label, label_near, aspect, area.
+// `excess_len` on the two nested rows moved when the corner inset landed: a
+// seat held off an arc is a slightly longer route, +560 and +2,752 units of
+// 46.6M and 34.0M.
 constexpr std::array<std::array<int64_t, 11>, 8> SCALE_PINNED{
-  { { 0, 0, 4136, 139984, 1880, 46592352, 0, 0, 0, 2527936, 89039694848 },
+  { { 0, 0, 4136, 139984, 1880, 46592912, 0, 0, 0, 2527936, 89039694848 },
     { 11464, 0, 3416, 172160, 75136, 605104352, 0, 0, 0, 2527936, 89039694848 },
-    { 0, 0, 4784, 11680, 2224, 34003552, 0, 0, 0, 125776, 32837048320 },
+    { 0, 0, 4784, 11680, 2224, 34006304, 0, 0, 0, 125776, 32837048320 },
     { 12944, 0, 3504, 0, 65752, 596909344, 0, 0, 0, 125776, 32837048320 },
     { 0, 0, 740, 111680, 152, 4553385, 0, 0, 0, 53760, 3718840320 },
     { 1996, 0, 318, 0, 270, 7357645, 0, 0, 0, 53760, 3718840320 },
@@ -1393,8 +1401,8 @@ TEST_CASE("layout: the table's first row is the profile as given") {
   // the pipeline as it ran before the portfolio existed. The other seven are
   // the packer crossed with compaction, then the same four handing the ratios
   // down. The packer takes bit 0 because it is the knob that moves a chart, so
-  // row 1 is where every corpus pick lands and M of 2 would reach all of them;
-  // compaction takes bit 1, so the shipped M of 4 runs exactly the four rows
+  // row 1 is where every corpus pick lands, which is all the shipped M of 2
+  // reaches; compaction takes bit 1, so an M of 4 runs exactly the four rows
   // the two packing knobs make.
   for (int32_t const trybox : { 0, 1 }) {
     for (int32_t const tiebreak : { 0, 1 }) {
@@ -1438,8 +1446,8 @@ TEST_CASE("layout: the table's first row is the profile as given") {
       CHECK((two_pack == Compaction::On));
       CHECK((two == DarSource::Profile));
 
-      // The four rows of each half are the four combinations, once each: the
-      // shipped M of 4 is exactly {as given, trybox, compact, trybox+compact}.
+      // The four rows of each half are the four combinations, once each: an
+      // M of 4 is exactly {as given, trybox, compact, trybox+compact}.
       uint32_t seen{ 0 };
       for (uint32_t row = 0; row < 4; ++row) {
         scav_profile knobs{ given };
@@ -1568,6 +1576,69 @@ TEST_CASE("layout: the pick is the row exact Cost ranks first over the whole tab
   }
   // The pick is an improvement on the profile as given, or it would be row 0.
   CHECK(cost_less(cost[picked], cost[0]) == (picked != 0));
+}
+
+TEST_CASE("layout: a pinned row runs that row and no search") {
+  // Calibration's one knob: a row the objective would never pick, laid out and
+  // written anyway, so its drawing can be scored beside the row that ships
+  // (11.10, 11.12). Every row of the table is held to the phases driven at its
+  // own tuple, which is the same check the argmin test makes of the pick.
+  scav_profile const p{ readable() };
+  Chart reference;
+  load_corpus("axis.scav", reference);
+  SplitGraph const g{ decompose(reference) };
+
+  for (uint32_t pin = 0; pin < LAYOUT_SEARCH_ROWS; ++pin) {
+    CAPTURE(pin);
+    scav_profile knobs{ p };
+    DarSource dar{ DarSource::Profile };
+    Compaction pack{ Compaction::Off };
+    search_tuple(knobs, dar, pack, pin);
+    SubmachineOrders const o{ order_submachines(reference, g, {}, knobs) };
+    SizedLayout z;
+    std::vector<Diagnostic> spilled;
+    REQUIRE(size_layout(reference, g, o, {}, knobs, z, spilled, dar, pack));
+
+    Chart c;
+    load_corpus("axis.scav", c);
+    std::vector<scav_placed> placed;
+    std::vector<Diagnostic> diags;
+    uint32_t got{ INVALID };
+    REQUIRE(layout_run(c, {}, opts(p), placed, diags, nullptr, &got, pin));
+    // The pinned row is what `tuple` answers, so a caller rendering row 3 is
+    // told it got row 3 rather than the row an argmin would have preferred.
+    CHECK(got == pin);
+    for (uint32_t i = 0; i < z.state.size(); ++i) {
+      CAPTURE(i);
+      CHECK((row_of<scav_rect>(c, "scav.geom.state", i) == z.state[i]));
+    }
+  }
+
+  // `portfolio_m` is unread when a row is pinned: the table is one row, and it
+  // is the named one rather than a prefix ending at it.
+  scav_profile four{ p };
+  four.portfolio_m = 4;
+  Chart pinned_at_four;
+  Chart pinned_at_one;
+  load_corpus("axis.scav", pinned_at_four);
+  load_corpus("axis.scav", pinned_at_one);
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  uint32_t at_four{ INVALID };
+  uint32_t at_one{ INVALID };
+  REQUIRE(layout_run(pinned_at_four, {}, opts(four), placed, diags, nullptr, &at_four, 3));
+  REQUIRE(layout_run(pinned_at_one, {}, opts(p), placed, diags, nullptr, &at_one, 3));
+  CHECK(at_four == 3);
+  CHECK(at_one == 3);
+  CHECK(layout_coordinate_hash(pinned_at_four) == layout_coordinate_hash(pinned_at_one));
+
+  // And an unpinned run of the shipped profile is still the search: row 1 is
+  // what `axis` picks, so the pin above reached a row the argmin does not.
+  Chart searched;
+  load_corpus("axis.scav", searched);
+  uint32_t picked{ INVALID };
+  REQUIRE(layout_run(searched, {}, opts(p), placed, diags, nullptr, &picked));
+  CHECK(picked == 1);
 }
 
 TEST_CASE("layout: a chart compaction cannot improve keeps the lower row") {

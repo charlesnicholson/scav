@@ -245,14 +245,21 @@ TEST_CASE("drawlist gauntlet: what crowd's tighter packing costs its labels") {
   // here. Carved out to P9d: `sweep_count = 0, trybox = 0` reads `label` 0 and
   // `label_near` 172, for 56% more area and a Tier 2 of 1,438 against 1,230 --
   // which is why nothing picks it, by a sixth rather than by half.
+  //
+  // **`label` was 4, read 6 once the count stopped exempting a transition's own
+  // endpoints, and is 5 now the placer stops choosing those positions**; the
+  // one left is structural. `label_near` 442 -> 470 is what that costs: a box
+  // refused a state's rect takes a strip further from its own leg, because
+  // 11.9's objective ranks the shortfall but its feasibility set holds only
+  // I4 -- I2 and I3 are still terms rather than constraints (11.9.3).
   Metrics const m{ bundled() };
   scav_profile const p{ readable() };
   Run const r{ run_pipeline("gauntlet/crowd.scav", m, p) };
   CostTerms const t{
     cost_columns(r.chart, decompose(r.chart), p, as_spaces(r.spaces), r.placed)
   };
-  CHECK(t.label == 4);
-  CHECK(t.label_near == 442);
+  CHECK(t.label == 5);
+  CHECK(t.label_near == 470);
 }
 
 TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back") {
@@ -295,7 +302,11 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
   }
   MESSAGE("corpus path boxes: ", boxes, ", centred fallbacks: ", fell);
   CHECK(boxes == 192);
-  CHECK(fell == 16);
+  // **16 -> 7 when the placer stopped sitting on state boxes and the fold
+  // stopped discarding a label's charged rank gap.** A refusal makes strips
+  // infeasible and would raise this on its own; the room the fold gives back
+  // more than pays for it (11.9.3).
+  CHECK(fell == 7);
 }
 
 TEST_CASE("drawlist corpus: the layout goldens' measurement policy is stated here") {

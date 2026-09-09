@@ -617,9 +617,16 @@ CostTerms cost_terms(Chart const &c,
   // Placed boxes against each other, against the states, and against the routes
   // they do not belong to. A state enclosing an endpoint is the composite the
   // label lives inside, so only the text bands it reserved are out of bounds.
+  //
+  // **The walk starts above the endpoint, not at it.** An endpoint encloses
+  // nothing, so the carve-out's own reason -- a label inside the composite its
+  // transition runs in is where it belongs, and charging it there makes zero
+  // unreachable -- does not reach it. Marking the endpoint exempted its whole
+  // rect and left `label` blind to a label lying over the very box it names:
+  // 3 of 203 on the corpus against 26 once the walk starts one level up.
   std::vector<uint8_t> encloses(c.states.size(), 0);
   auto const mark = [&](StateId of, uint8_t v) {
-    StateId at{ of };
+    StateId at{ enclosing_state(c, of) };
     for (size_t step = 0; (step < c.states.size()) && (at.v != INVALID); ++step) {
       encloses[at.v] = v;
       at = enclosing_state(c, at);
@@ -752,6 +759,13 @@ std::array<Wide, TIER2_TERMS> weighted_terms(CostTerms const &t, scav_profile co
 }
 
 }  // namespace
+
+CostTerms layout_cost(Chart const &c,
+                      scav_profile const &p,
+                      scav_spaces const &s,
+                      std::vector<scav_rect> const &placed) {
+  return cost_columns(c, decompose(c), p, s, placed);
+}
 
 Cost cost_of(CostTerms const &t, scav_profile const &p) {
   Cost out;

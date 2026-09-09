@@ -29,6 +29,11 @@ struct RouteInput {
   // axis-aligned route reaches only at the midpoint of a face. Layout knows it
   // from the kind; a router only needs the consequence.
   std::vector<uint8_t> inscribed;
+  // Parallel to `obstacles`, or empty for zero throughout: the corner arc of
+  // the shape drawn in that box, which is border a seat must stay out of
+  // because nothing is drawn under it. Layout knows it from the kind and the
+  // extent; a router only needs the inset.
+  std::vector<int32_t> corner;
   std::vector<RouteNet> nets;  // in (transition, ordinal) order
   std::vector<scav_point> waypoints;
   scav_profile profile{};

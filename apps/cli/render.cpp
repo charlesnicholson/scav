@@ -37,7 +37,8 @@ char const *why(SvgStatus status) {
 int run_render(char const *path,
                char const *out_path,
                bool embed_font,
-               char const *profile_name) {
+               char const *profile_name,
+               uint32_t row) {
   Loaded net;
   load_and_report(path, true, net);
   if (net.code == EXIT_UNUSABLE) { return EXIT_UNUSABLE; }
@@ -58,7 +59,9 @@ int run_render(char const *path,
 
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
-  bool const laid{ layout_run(net.chart, as_spaces(spaces), opts, placed, diags) };
+  bool const laid{
+    layout_run(net.chart, as_spaces(spaces), opts, placed, diags, nullptr, nullptr, row)
+  };
   if (!diags.empty()) {
     std::string err;
     for (Diagnostic const &d : diags) { diag_append(err, net.chart, d, path); }

@@ -39,11 +39,6 @@ namespace {
 
 constexpr uint32_t RECT{ sizeof(scav_rect) };
 
-// The chart-global phase-2 tuples the portfolio chooses between: the box
-// packer, compaction, and where a frame's desired ratio comes from, so eight
-// rows (11.10).
-constexpr uint32_t SEARCH_TUPLES{ 8 };
-
 // One name and the shape it is registered under. `write_rows` copies a row per
 // entity through whichever column carries the name, so the shape has to be the
 // one layout would have registered or the copy runs past the column's bytes.
@@ -313,7 +308,7 @@ uint32_t search_tuple_count(scav_profile const &p, uint32_t entity_count) {
   uint32_t const scale{ (entity_count == 0) ? 0U : ilog2(entity_count) };
   uint32_t const shift{ (scale > 9U) ? (scale - 9U) : 0U };
   uint32_t const rows{ static_cast<uint32_t>(imax(p.portfolio_m, 1)) >> shift };
-  return imin(imax(rows, 1U), SEARCH_TUPLES);
+  return imin(imax(rows, 1U), LAYOUT_SEARCH_ROWS);
 }
 
 // Row `index` of the fixed table, as a delta from the profile as given: bit 0
@@ -356,7 +351,8 @@ bool layout_run(Chart &c,
                 std::vector<scav_placed> &placed,
                 std::vector<Diagnostic> &diags,
                 uint32_t *inflations,
-                uint32_t *tuple) {
+                uint32_t *tuple,
+                uint32_t row) {
   if (inflations != nullptr) { *inflations = 0; }
   if (tuple != nullptr) { *tuple = 0; }
   scav_profile const &p{ o.profile };
@@ -395,7 +391,12 @@ bool layout_run(Chart &c,
   // whole phase 2 and 3, collected rather than folded into a best-so-far, and
   // reduced in index order afterwards (6, 11.10). Row 0 is the profile as
   // given, so it is what a failure is reported for and what M of 1 runs alone.
-  uint32_t const rows{ search_tuple_count(p, layout_entity_count(c)) };
+  //
+  // A pinned row is a table of one, so it is slot 0 of everything below: the
+  // row a failure is reported for, the row nothing is ranked against, and the
+  // row `tuple` comes back as.
+  bool const pinned{ row != INVALID };
+  uint32_t const rows{ pinned ? 1U : search_tuple_count(p, layout_entity_count(c)) };
   std::vector<Candidate> candidates(rows);
   std::vector<Cost> cost(rows);
   std::vector<uint8_t> viable(rows, 0);
@@ -403,7 +404,7 @@ bool layout_run(Chart &c,
     scav_profile knobs{ p };
     DarSource dar{ DarSource::Profile };
     Compaction pack{ Compaction::Off };
-    search_tuple(knobs, dar, pack, i);
+    search_tuple(knobs, dar, pack, pinned ? row : i);
     std::vector<Diagnostic> spilled;
     candidates[i] = search_candidate(c,
                                      g,
@@ -436,7 +437,7 @@ bool layout_run(Chart &c,
   SizedLayout sized{ std::move(candidates[best].sized) };
   Routes routes{ std::move(candidates[best].routes) };
   if (inflations != nullptr) { *inflations = candidates[best].inflations; }
-  if (tuple != nullptr) { *tuple = best; }
+  if (tuple != nullptr) { *tuple = pinned ? row : best; }
   placed = routes.placed;
 
   // `failed` is parallel to the transitions, so one walk emits the findings in

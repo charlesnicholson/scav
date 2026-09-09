@@ -10,6 +10,8 @@ the PRD, so it reports rather than fails.
   tools/audit.py --in DIR
   tools/audit.py --chart vac.scav   one of them, with each finding listed
   tools/audit.py --gauntlet         the element suite instead of the corpus
+  tools/audit.py --portfolio-row 4  one row of 11.10's table, not the pick
+  tools/audit.py --json             the counts as JSON, per chart and totalled
 """
 
 import argparse
@@ -32,6 +34,11 @@ POLYLINE = re.compile(r'<polyline points="([^"]+)"[^>]*class="scav-trans scav-id
 ARROWHEAD = re.compile(r'<polygon points="([^"]+)"[^>]*class="scav-trans scav-id-(\d+)"')
 DIVIDER = re.compile(
     r'<line x1="(-?\d+)" y1="(-?\d+)" x2="(-?\d+)" y2="(-?\d+)"[^>]*class="scav-sub')
+# The dotted concurrency boundary with the width it is stroked at: "sliced" is
+# about ink, and a zero-thickness segment misses a label the stroke covers.
+DIVIDER_INK = re.compile(
+    r'<line x1="(-?\d+)" y1="(-?\d+)" x2="(-?\d+)" y2="(-?\d+)"[^>]*'
+    r'stroke-width="(\d+)"[^>]*class="scav-sub')
 TEXT = re.compile(
     r'<text x="(-?\d+)" y="(-?\d+)" font-size="(\d+)"[^>]*textLength="(\d+)"[^>]*'
     r'class="scav-(trans|state|sub) scav-id-(\d+)"[^>]*>')
@@ -62,6 +69,14 @@ def overlaps(a, b):
     what packing produces, and adjacent glyphs read fine."""
     return (a[0] < b[0] + b[2] and b[0] < a[0] + a[2] and
             a[1] < b[1] + b[3] and b[1] < a[1] + a[3])
+
+
+def ink_span(a, b, width):
+    """A segment's bounding box grown to the ink it is stroked with, so a line
+    laid along the edge of a label counts as crossing it."""
+    half = width // 2
+    return (min(a[0], b[0]) - half, min(a[1], b[1]) - half,
+            abs(a[0] - b[0]) + (2 * half), abs(a[1] - b[1]) + (2 * half))
 
 
 def span(a, b):
@@ -128,10 +143,18 @@ def trunks(a, b):
 
 
 def enclosing(doc, state):
-    """`state` and every state whose box contains it. A parent is a submachine
-    id, and that submachine's owner is the state one level up."""
+    """Every state whose box contains `state`, and not `state` itself.
+
+    11.6 exempts a state from the whole-rect test where it *encloses* the
+    transition's source or target, because a label inside the composite its
+    transition runs in is where it belongs and charging it there makes zero
+    unreachable. An endpoint encloses nothing, so it is not exempt -- a label
+    over `Tripped` is a label over a box a reader sees, whether or not
+    `Tripped` is the transition it belongs to.
+    """
     seen = []
-    at = state
+    parent = doc["states"][state]["parent"]
+    at = None if parent is None else doc["submachines"][parent]["owner"]
     while at is not None and at not in seen:
         seen.append(at)
         parent = doc["states"][at]["parent"]
@@ -139,8 +162,32 @@ def enclosing(doc, state):
     return set(seen)
 
 
-def geometry(chart, scav_bin):
-    out = subprocess.run([str(scav_bin), "dump", "--layout", "--json", str(chart)],
+def corner_arc(doc, state):
+    """The arc drawn at `state`'s corners, which no attachment may sit on.
+
+    Mirrors `state_corner_radius` in scav_layout.h: an eighth of the shorter
+    side, capped at the interior ring, and zero for a kind not drawn as a
+    rounded rect. The ring comes off the band origin the way layout reads it.
+    """
+    bx, _, bw, bh = doc["geometry"]["state"][state]
+    if doc["states"][state]["kind"] != "normal" or not (bw and bh):
+        return 0
+    ring = max(doc["geometry"]["state_before"][state][0] - bx, 0)
+    return min(min(bw, bh) // 8, ring)
+
+
+def geometry(chart, scav_bin, row=None):
+    """The geometry columns of one candidate.
+
+    `row` pins a row of the portfolio's table, and it has to be the row the SVG
+    beside it was rendered at: the boxes here and the drawing there are two
+    halves of one candidate, and pairing them across rows compares a picture to
+    somebody else's geometry.
+    """
+    cmd = [str(scav_bin), "dump", "--layout", "--json"]
+    if row is not None:
+        cmd += ["--portfolio-row", str(row)]
+    out = subprocess.run(cmd + [str(chart)],
                          capture_output=True, text=True, check=True).stdout
     doc = json.loads(out)
     live = [i for i, st in enumerate(doc["states"]) if st["live"]]
@@ -152,13 +199,22 @@ def geometry(chart, scav_bin):
 def audit(svg, every, chart, doc, verbose):
     found = {}
     notes = []
+    # Where each finding is, in the drawing's own grid units, so a reviewer
+    # checks the call rather than hunting for it. `at` is a rect; a finding
+    # with no natural extent passes none and is counted without a mark.
+    marks = []
 
-    def note(kind, detail):
+    def note(kind, detail, at=None):
         found[kind] = found.get(kind, 0) + 1
+        if at is not None:
+            marks.append((kind, tuple(at), detail))
         if verbose:
             notes.append(f"    {kind}: {detail}")
 
     cx, cy, cw, ch = chart
+    live = [i for i, st in enumerate(doc["states"]) if st["live"]]
+    rects = doc["geometry"]["state"]
+    bands = (doc["geometry"]["state_before"], doc["geometry"]["state_after"])
     legs = []
     route = {}
     starts = []
@@ -210,6 +266,26 @@ def audit(svg, every, chart, doc, verbose):
         if not any(on_border(tip, box) for box in every):
             note("arrowhead not on any border", f"t{trans} tip {tip}")
 
+    # An attachment on the arc a rounded corner is drawn with is anchored to
+    # nothing: the bounding box has border there and the drawing does not.
+    for pt, trans in starts + tips:
+        for i in live:
+            bx, by, bw, bh = rects[i]
+            if not (bw and bh) or not on_border(pt, (bx, by, bw, bh)):
+                continue
+            found["state attachments"] = found.get("state attachments", 0) + 1
+            r = corner_arc(doc, i)
+            if not r:
+                break
+            vertical = pt[0] in (bx, bx + bw)
+            along, lo, length = ((pt[1], by, bh) if vertical else (pt[0], bx, bw))
+            into = max(lo + r - along, along - (lo + length - r))
+            if into > 0:
+                note("attachment on a drawn corner",
+                     f"{into} into r={r}",
+                     (pt[0] - r, pt[1] - r, 2 * r, 2 * r))
+            break
+
     # A head and a departure on one point of one box: the head is inked over the
     # other route's own first leg, so it reads as belonging to the line it sits
     # on. Two arrivals sharing a point are a fan-in and keep their one head
@@ -233,10 +309,10 @@ def audit(svg, every, chart, doc, verbose):
     # `y` is a baseline and `textLength` the advance sum, so one font size up from
     # the baseline is the em box the builder reserved -- the same rectangle it
     # measured with, which is what makes these comparable to the geometry.
-    live = [i for i, st in enumerate(doc["states"]) if st["live"]]
-    rects = doc["geometry"]["state"]
-    bands = (doc["geometry"]["state_before"], doc["geometry"]["state_after"])
     inked = []
+    boundaries = [ink_span((int(a), int(b)), (int(c), int(d)), int(w))
+                  for a, b, c, d, w in DIVIDER_INK.findall(svg)]
+
     for m in TEXT.finditer(svg):
         x, y, size, length, which, ident = m.groups()
         x, y, size, length = int(x), int(y), int(size), int(length)
@@ -264,11 +340,32 @@ def audit(svg, every, chart, doc, verbose):
                        if not (j == 1 and i == own_band)) if i in under
                    else struck(rects[i]))
             if hit:
-                note("label over a state box", f"t{ident} at ({x},{y})+{length}")
+                note("label over a state box", f"t{ident} over state {i}",
+                     (x, y - size, length, size))
                 break
         for a, b, other, _ in legs:
             if other != ident and overlaps(em, span(a, b)):
-                note("label over another route", f"t{ident} over t{other} {a}-{b}")
+                note("label over another route", f"t{ident} over t{other}",
+                     (x, y - size, length, size))
+                break
+
+        # A line drawn through a label cuts the word in half, and whose line it
+        # is makes no difference to the reader. 11.9's strips sit *beside* a
+        # leg, so this is the centred fallback and nothing else: a box with no
+        # feasible strip keeps the leg's exact centre and the leg goes through
+        # it (11.9.3).
+        for a, b, other, _ in legs:
+            if other == ident and overlaps(em, span(a, b)):
+                note("label sliced by its own route", f"t{ident} on its own leg",
+                     (x, y - size, length, size))
+                break
+
+        # The same for a dotted concurrency boundary, which is a region divider
+        # and not a route, so no route test sees it.
+        for boundary in boundaries:
+            if overlaps(em, boundary):
+                note("label sliced by a region divider", f"t{ident} across a divider",
+                     (x, y - size, length, size))
                 break
 
         # A reader ties a label to the nearest line, so a box that is not nearer
@@ -280,7 +377,31 @@ def audit(svg, every, chart, doc, verbose):
         theirs = [gap(em, span(a, b)) for a, b, other, _ in legs if other != ident]
         if mine and theirs and min(mine) + size > min(theirs):
             note("label nearer another route than its own",
-                 f"t{ident} own {min(mine)} other {min(theirs)}")
+                 f"own {min(mine)} vs {min(theirs)}", (x, y - size, length, size))
+
+        # A label hangs off its own polyline, full stop -- not merely nearer to
+        # it than to somebody else's. One text height is the bound: past that
+        # there is room for another line between the two and the reader has
+        # nothing tying them together. Absolute, so an orphan in empty canvas
+        # is caught where the relative test above sees nothing to compare.
+        if mine and min(mine) > size:
+            note("label detached from its own polyline",
+                 f"{min(mine)} away, one height is {size}",
+                 (x, y - size, length, size))
+
+        # Everything of a submachine is contained in its parent state's box,
+        # out-of-machine transitions excepted -- a transition with no state
+        # enclosing both ends has no box to be inside.
+        both = enclosing(doc, edge["src"]) & enclosing(doc, edge["dst"])
+        for i in both:
+            bx, by, bw, bh = rects[i]
+            if not (bw and bh):
+                continue
+            if not (bx <= x and x + length <= bx + bw and by <= y - size
+                    and y <= by + bh):
+                note("label outside its enclosing state",
+                     f"outside state {i}", (x, y - size, length, size))
+                break
 
     # Two strings inked into the same place read as one unreadable string, which
     # is a different defect from a label over a box: nudging moves the routes a
@@ -290,7 +411,7 @@ def audit(svg, every, chart, doc, verbose):
         for b_box, b_which, b_id in inked[i + 1:]:
             if overlaps(a_box, b_box):
                 note("texts overprint each other",
-                     f"{a_which} {a_id} over {b_which} {b_id} at {a_box[:2]}")
+                     f"{a_which} {a_id} over {b_which} {b_id}", a_box)
 
     # A mark drawn past the glyph that holds it. The circle and its text share an
     # id, and the em box's worst corner against the radius is the whole check --
@@ -311,7 +432,18 @@ def audit(svg, every, chart, doc, verbose):
         if worst > r * r:
             note("mark outside its glyph", f"state {ident} in r={r} at {box}")
 
-    return found, notes
+    return found, notes, marks
+
+
+def find_scav(explicit=None):
+    """The binary to read geometry with, the host release build preferred."""
+    if explicit:
+        return Path(explicit)
+    at = REPO_ROOT / "out/macos-clang-libcxx-release/bin/scav"
+    if at.exists():
+        return at
+    found = sorted(REPO_ROOT.glob("out/*/bin/scav"))
+    return found[0] if found else None
 
 
 def main():
@@ -321,15 +453,15 @@ def main():
     ap.add_argument("--gauntlet", action="store_true",
                     help="the element suite under test_data/charts/gauntlet")
     ap.add_argument("--scav", default=None)
+    ap.add_argument("--portfolio-row", dest="row", type=int, default=None,
+                    help="audit one row of 11.10's table rather than the pick")
+    ap.add_argument("--json", action="store_true",
+                    help="the counts as JSON, per chart and totalled")
     args = ap.parse_args()
-    scav_bin = Path(args.scav) if args.scav else (
-        REPO_ROOT / "out/macos-clang-libcxx-release/bin/scav")
-    if not scav_bin.exists():
-        found = sorted(REPO_ROOT.glob("out/*/bin/scav"))
-        if not found:
-            print("no scav binary; build first", file=sys.stderr)
-            return 1
-        scav_bin = found[0]
+    scav_bin = find_scav(args.scav)
+    if scav_bin is None or not scav_bin.exists():
+        print("no scav binary; build first", file=sys.stderr)
+        return 1
 
     where = Path(args.where)
     root = GAUNTLET if args.gauntlet else CORPUS
@@ -338,20 +470,28 @@ def main():
     verbose = args.chart is not None
 
     total = {}
+    per_chart = {}
     missing = []
     for name in names:
         svg = where / (name + ".svg")
         if not svg.exists():
             missing.append(name)
             continue
-        every, chart, doc = geometry(root / name, scav_bin)
-        found, notes = audit(svg.read_text(encoding="utf-8"), every, chart, doc,
-                             verbose)
+        every, chart, doc = geometry(root / name, scav_bin, args.row)
+        found, notes, _ = audit(svg.read_text(encoding="utf-8"), every, chart,
+                                doc, verbose)
+        per_chart[name] = found
         for key, count in found.items():
             total[key] = total.get(key, 0) + count
         if verbose and notes:
             print(f"{name}:")
             print("\n".join(notes))
+
+    if args.json:
+        json.dump({"row": args.row, "charts": per_chart, "total": total},
+                  sys.stdout, indent=2, sort_keys=True)
+        print()
+        return 1 if len(missing) == len(names) else 0
 
     if missing:
         print(f"not rendered ({len(missing)}): run tools/baseline.py first",
@@ -361,6 +501,11 @@ def main():
 
     # Counts first, then the findings, so the ratio is visible.
     scale = {"segment not axis-aligned": "route segments",
+             "label sliced by its own route": "transition labels",
+             "label sliced by a region divider": "transition labels",
+             "attachment on a drawn corner": "state attachments",
+             "label detached from its own polyline": "transition labels",
+             "label outside its enclosing state": "transition labels",
              "segment flush along a box": "route segments",
              "route start not on any border": "route starts",
              "arrowhead not on any border": "arrowheads",
@@ -373,8 +518,8 @@ def main():
              "label nearer another route than its own": "transition labels",
              "texts overprint each other": "texts",
              "mark outside its glyph": "marks in a glyph"}
-    for key in ("route segments", "route starts", "arrowheads", "region dividers",
-                "transition labels", "texts", "marks in a glyph"):
+    for key in ("route segments", "route starts", "arrowheads", "state attachments",
+                "region dividers", "transition labels", "texts", "marks in a glyph"):
         print(f"{key:<40} {total.get(key, 0)}")
     print()
     # Not a ratio, so it sits outside the block below: the shared run's extent is

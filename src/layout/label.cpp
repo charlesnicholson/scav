@@ -127,9 +127,14 @@ uint32_t place_labels(Chart const &c,
     return s.path_box[a].order < s.path_box[b].order;
   });
 
+  // The walk starts above the endpoint, not at it: a state *enclosing* an
+  // endpoint is the composite the label lives inside, and charging it there
+  // would make zero unreachable, but an endpoint encloses nothing. Marking the
+  // endpoint let a candidate lying over the very box its transition names read
+  // as feasible, so the placer chose one (11.9.3).
   std::vector<uint8_t> encloses(c.states.size(), 0);
   auto const mark = [&](StateId of, uint8_t v) {
-    StateId at{ of };
+    StateId at{ enclosing_state(c, of) };
     for (size_t step = 0; (step < c.states.size()) && (at.v != INVALID); ++step) {
       encloses[at.v] = v;
       at = enclosing_state(c, at);
