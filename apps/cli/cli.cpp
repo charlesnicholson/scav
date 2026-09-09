@@ -4,7 +4,10 @@
 #include "cli.h"
 
 #include "scav/scav_core.h"
+#include "scav/scav_layout.h"
 
+#include <charconv>
+#include <cstdint>
 #include <cstdio>
 #include <string>
 #include <string_view>
@@ -24,6 +27,18 @@ void write_error(std::string_view what, std::string_view path) {
   err += path;
   err += "'\n";
   write_stream(err, stderr);
+}
+
+bool portfolio_row(char const *text, uint32_t &out) {
+  std::string_view const arg{ text };
+  uint32_t at{ 0 };
+  std::from_chars_result const got{
+    std::from_chars(arg.data(), arg.data() + arg.size(), at)
+  };
+  if ((got.ec != std::errc{}) || (got.ptr != (arg.data() + arg.size()))) { return false; }
+  if (at >= LAYOUT_SEARCH_ROWS) { return false; }
+  out = at;
+  return true;
 }
 
 void load_and_report(char const *path, bool validate, Loaded &out) {

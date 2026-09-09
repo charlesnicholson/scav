@@ -4,6 +4,7 @@
 #include "cli.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <string_view>
 #include <vector>
 
@@ -17,8 +18,10 @@ constexpr std::string_view USAGE{
   "  fmt [--check] <file>...      canonical print, in place; --check gates\n"
   "  check <file>                 structural validation, exit 1 on a finding\n"
   "  deps [--target NAME] <file>  the document network as a depfile\n"
-  "  dump [--hash|--json] [--layout] <file>  the model; --layout adds geometry\n"
-  "  render [-o FILE] [--embed-font] [--profile NAME] <file>   chart -> SVG\n"
+  "  dump [--hash|--json] [--layout] [--portfolio-row N] <file>  the model; "
+  "--layout adds geometry\n"
+  "  render [-o FILE] [--embed-font] [--profile NAME] [--portfolio-row N] <file>"
+  "   chart -> SVG\n"
   "  selftest [--against FILE]   recompute the layout hashes on this toolchain "
   "and diff against the goldens\n"
 };
@@ -36,9 +39,16 @@ int dispatch(int argc, char **argv) {
     bool hash{ false };
     bool json{ false };
     bool layout{ false };
+    uint32_t row{ INVALID };
     for (int i = 2; i < argc; ++i) {
       std::string_view const arg{ argv[i] };
       bool *flag{ nullptr };
+      if (arg == "--portfolio-row") {
+        if (((i + 1) >= argc) || (row != INVALID) || !portfolio_row(argv[++i], row)) {
+          return usage();
+        }
+        continue;
+      }
       if (arg == "--hash") {
         flag = &hash;
       } else if (arg == "--json") {
@@ -55,17 +65,26 @@ int dispatch(int argc, char **argv) {
         return usage();
       }
     }
-    if ((path == nullptr) || (hash && (json || layout))) { return usage(); }
-    return run_dump(path, hash, json, layout);
+    // A pinned row only reaches layout, so it is the geometry's flag and not
+    // the model's: `--hash` and a bare dump have nothing to point at.
+    if ((path == nullptr) || (hash && (json || layout)) || ((row != INVALID) && !layout)) {
+      return usage();
+    }
+    return run_dump(path, hash, json, layout, row);
   }
 
   if (verb == "render") {
     char const *out{ nullptr };
     char const *profile{ "readable" };
     bool embed{ false };
+    uint32_t row{ INVALID };
     for (int i = 2; i < argc; ++i) {
       std::string_view const arg{ argv[i] };
-      if (arg == "-o") {
+      if (arg == "--portfolio-row") {
+        if (((i + 1) >= argc) || (row != INVALID) || !portfolio_row(argv[++i], row)) {
+          return usage();
+        }
+      } else if (arg == "-o") {
         if (((i + 1) >= argc) || (out != nullptr)) { return usage(); }
         out = argv[++i];
       } else if (arg == "--profile") {
@@ -81,7 +100,7 @@ int dispatch(int argc, char **argv) {
       }
     }
     if (path == nullptr) { return usage(); }
-    return run_render(path, out, embed, profile);
+    return run_render(path, out, embed, profile, row);
   }
 
   if (verb == "selftest") {

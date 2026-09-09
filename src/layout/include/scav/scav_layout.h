@@ -39,6 +39,11 @@ bool profile_validate(scav_profile const &p);
 
 // Layout ====================================================================
 
+// Rows in the fixed table of chart-global phase-2 tuples Level 2 chooses
+// between: the box packer, compaction, and where a frame's desired ratio comes
+// from (11.10). The bound on `portfolio_m` and on `layout_run`'s `row`.
+inline constexpr uint32_t LAYOUT_SEARCH_ROWS{ 8 };
+
 // Decomposes, orders, then sizes, places and routes every phase-2 tuple the
 // chart's size admits and keeps the one exact `Cost` ranks first (11.10).
 // Writes the geometry columns and sizes `placed` to the path boxes. False
@@ -47,13 +52,21 @@ bool profile_validate(scav_profile const &p);
 // `inflations` receives how many spacing inflations the written geometry took
 // and `tuple` which row of the table produced it, row 0 being the profile as
 // the caller passed it.
+//
+// `row` runs one named row of the table in place of the search, which is what
+// lets calibration render a candidate the objective would never pick and score
+// it beside the one it does (11.10, 11.12). It is not a search knob: nothing
+// shipping passes it, `portfolio_m` is unread when it is set, and the caller
+// bounds it -- `INVALID` searches, and anything else must be below
+// `LAYOUT_SEARCH_ROWS`.
 bool layout_run(Chart &c,
                 scav_spaces const &s,
                 scav_layout_opts const &o,
                 std::vector<scav_placed> &placed,
                 std::vector<Diagnostic> &diags,
                 uint32_t *inflations = nullptr,
-                uint32_t *tuple = nullptr);
+                uint32_t *tuple = nullptr,
+                uint32_t row = INVALID);
 
 // Split so a pure translation moves the coordinate hash and not the structural
 // one: structure is sides, depths and turn tokens; coordinates are the rest.

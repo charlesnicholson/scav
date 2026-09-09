@@ -6,6 +6,7 @@
 
 #include "scav/scav_core.h"
 
+#include <cstdint>
 #include <cstdio>
 #include <string>
 #include <string_view>
@@ -36,11 +37,22 @@ struct Loaded {
 // rendering; the two decisions here are which stream and which exit code.
 void load_and_report(char const *path, bool validate, Loaded &out);
 
-int run_dump(char const *path, bool hash_only, bool as_json, bool with_layout);
+// `--portfolio-row N`: a row of 11.10's table in place of the search, so
+// `render` and `dump` can both be pointed at one candidate and the drawing and
+// the geometry come from the same one. False on anything that is not a row.
+// `INVALID` is the search, which is what every verb does unasked.
+bool portfolio_row(char const *text, uint32_t &out);
+
+int run_dump(char const *path,
+             bool hash_only,
+             bool as_json,
+             bool with_layout,
+             uint32_t row);
 int run_render(char const *path,
                char const *out_path,
                bool embed_font,
-               char const *profile_name);
+               char const *profile_name,
+               uint32_t row);
 int run_fmt(std::vector<char const *> const &paths, bool check_only);
 int run_deps(char const *path, char const *target);
 int run_selftest(char const *against_path);

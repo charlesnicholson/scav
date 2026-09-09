@@ -638,7 +638,11 @@ void append_json(std::string &out, Chart const &c) {
 
 }  // namespace
 
-int run_dump(char const *path, bool hash_only, bool as_json, bool with_layout) {
+int run_dump(char const *path,
+             bool hash_only,
+             bool as_json,
+             bool with_layout,
+             uint32_t row) {
   Loaded net;
   load_and_report(path, true, net);
   if (net.code == EXIT_UNUSABLE) { return EXIT_UNUSABLE; }
@@ -657,7 +661,9 @@ int run_dump(char const *path, bool hash_only, bool as_json, bool with_layout) {
     }
     std::vector<scav_placed> placed;
     std::vector<Diagnostic> diags;
-    bool const laid{ layout_run(net.chart, as_spaces(spaces), opts, placed, diags) };
+    bool const laid{
+      layout_run(net.chart, as_spaces(spaces), opts, placed, diags, nullptr, nullptr, row)
+    };
     if (!diags.empty()) {
       std::string err;
       for (Diagnostic const &d : diags) { diag_append(err, net.chart, d, path); }

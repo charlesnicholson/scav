@@ -1570,6 +1570,69 @@ TEST_CASE("layout: the pick is the row exact Cost ranks first over the whole tab
   CHECK(cost_less(cost[picked], cost[0]) == (picked != 0));
 }
 
+TEST_CASE("layout: a pinned row runs that row and no search") {
+  // Calibration's one knob: a row the objective would never pick, laid out and
+  // written anyway, so its drawing can be scored beside the row that ships
+  // (11.10, 11.12). Every row of the table is held to the phases driven at its
+  // own tuple, which is the same check the argmin test makes of the pick.
+  scav_profile const p{ readable() };
+  Chart reference;
+  load_corpus("axis.scav", reference);
+  SplitGraph const g{ decompose(reference) };
+
+  for (uint32_t pin = 0; pin < LAYOUT_SEARCH_ROWS; ++pin) {
+    CAPTURE(pin);
+    scav_profile knobs{ p };
+    DarSource dar{ DarSource::Profile };
+    Compaction pack{ Compaction::Off };
+    search_tuple(knobs, dar, pack, pin);
+    SubmachineOrders const o{ order_submachines(reference, g, {}, knobs) };
+    SizedLayout z;
+    std::vector<Diagnostic> spilled;
+    REQUIRE(size_layout(reference, g, o, {}, knobs, z, spilled, dar, pack));
+
+    Chart c;
+    load_corpus("axis.scav", c);
+    std::vector<scav_placed> placed;
+    std::vector<Diagnostic> diags;
+    uint32_t got{ INVALID };
+    REQUIRE(layout_run(c, {}, opts(p), placed, diags, nullptr, &got, pin));
+    // The pinned row is what `tuple` answers, so a caller rendering row 3 is
+    // told it got row 3 rather than the row an argmin would have preferred.
+    CHECK(got == pin);
+    for (uint32_t i = 0; i < z.state.size(); ++i) {
+      CAPTURE(i);
+      CHECK((row_of<scav_rect>(c, "scav.geom.state", i) == z.state[i]));
+    }
+  }
+
+  // `portfolio_m` is unread when a row is pinned: the table is one row, and it
+  // is the named one rather than a prefix ending at it.
+  scav_profile four{ p };
+  four.portfolio_m = 4;
+  Chart pinned_at_four;
+  Chart pinned_at_one;
+  load_corpus("axis.scav", pinned_at_four);
+  load_corpus("axis.scav", pinned_at_one);
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  uint32_t at_four{ INVALID };
+  uint32_t at_one{ INVALID };
+  REQUIRE(layout_run(pinned_at_four, {}, opts(four), placed, diags, nullptr, &at_four, 3));
+  REQUIRE(layout_run(pinned_at_one, {}, opts(p), placed, diags, nullptr, &at_one, 3));
+  CHECK(at_four == 3);
+  CHECK(at_one == 3);
+  CHECK(layout_coordinate_hash(pinned_at_four) == layout_coordinate_hash(pinned_at_one));
+
+  // And an unpinned run of the shipped profile is still the search: row 1 is
+  // what `axis` picks, so the pin above reached a row the argmin does not.
+  Chart searched;
+  load_corpus("axis.scav", searched);
+  uint32_t picked{ INVALID };
+  REQUIRE(layout_run(searched, {}, opts(p), placed, diags, nullptr, &picked));
+  CHECK(picked == 1);
+}
+
 TEST_CASE("layout: a chart compaction cannot improve keeps the lower row") {
   // Compaction is dominance-bounded, so on a chart it moves nothing the
   // compaction row's geometry is the plain row's, byte for byte -- and two rows
