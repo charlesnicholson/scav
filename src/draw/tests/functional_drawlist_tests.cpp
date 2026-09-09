@@ -288,6 +288,7 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
                          as_spaces(r.spaces),
                          rows<scav_span>(r.chart, "scav.geom.route"),
                          rows<scav_point>(r.chart, "scav.geom.point"),
+                         p,
                          again);
     boxes += static_cast<uint32_t>(again.size());
     REQUIRE(again.size() == r.placed.size());

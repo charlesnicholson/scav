@@ -18,9 +18,39 @@ namespace scav {
 
 namespace {
 
-// Strips either side of a leg, one box height apart: strip 0 puts the box's
-// edge on the leg and each further one clears another line of text.
-constexpr int32_t STRIPS{ 5 };
+// The eight points of the label's own rectangle the leader may attach to: its
+// four corners, then the midpoints of its four sides. Corners because a
+// polyline is kinked -- a label hung off a bend belongs on the diagonal, and an
+// axis-aligned leader reaches a diagonal position only through a corner.
+constexpr uint32_t ATTACH{ 8 };
+
+// The four directions the leader runs in, so its length is exact in integers:
+// a diagonal of the same length is not representable on a 1/16-pt grid.
+constexpr uint32_t LEADS{ 4 };
+
+// Where attachment point `which` sits inside a `w` by `h` rectangle.
+scav_point attach_at(uint32_t which, int32_t w, int32_t h) {
+  switch (which) {
+    case 0: return { .x = 0, .y = 0 };
+    case 1: return { .x = w, .y = 0 };
+    case 2: return { .x = 0, .y = h };
+    case 3: return { .x = w, .y = h };
+    case 4: return { .x = w / 2, .y = 0 };
+    case 5: return { .x = w / 2, .y = h };
+    case 6: return { .x = 0, .y = h / 2 };
+    default: return { .x = w, .y = h / 2 };
+  }
+}
+
+// The leader's own offset: `lead` 0..3 is up, down, left, right by `len`.
+scav_point lead_by(uint32_t lead, int32_t len) {
+  switch (lead) {
+    case 0: return { .x = 0, .y = -len };
+    case 1: return { .x = 0, .y = len };
+    case 2: return { .x = -len, .y = 0 };
+    default: return { .x = len, .y = 0 };
+  }
+}
 
 struct Piece {
   scav_rect at;
@@ -32,16 +62,16 @@ struct Piece {
 struct Key {
   Wide shortfall;
   Wide dist;
-  uint32_t seg, side;
-  int32_t strip, mid;
+  uint32_t seg, attach, lead;
+  int32_t mid;
 };
 
 bool better(Key const &a, Key const &b) {
   if (a.shortfall != b.shortfall) { return a.shortfall < b.shortfall; }
   if (a.dist != b.dist) { return a.dist < b.dist; }
   if (a.seg != b.seg) { return a.seg < b.seg; }
-  if (a.side != b.side) { return a.side < b.side; }
-  if (a.strip != b.strip) { return a.strip < b.strip; }
+  if (a.attach != b.attach) { return a.attach < b.attach; }
+  if (a.lead != b.lead) { return a.lead < b.lead; }
   return a.mid < b.mid;
 }
 
@@ -103,6 +133,7 @@ uint32_t place_labels(Chart const &c,
                       scav_spaces const &s,
                       std::vector<scav_span> const &route,
                       std::vector<scav_point> const &points,
+                      scav_profile const &p,
                       std::vector<scav_rect> &out) {
   out.assign(s.n_path_box, {});
   if ((s.path_box == nullptr) || (s.n_path_box == 0)) { return 0; }
@@ -161,8 +192,13 @@ uint32_t place_labels(Chart const &c,
     }
     scav_point const at{ anchor_of(points, r) };
     scav_rect best{ centred(at, box, z.chart) };
-    Key key{ .shortfall = 0, .dist = -1, .seg = 0, .side = 0, .strip = 0, .mid = 0 };
-    int32_t const step{ imax(box.h, 1) };
+    Key key{ .shortfall = 0, .dist = -1, .seg = 0, .attach = 0, .lead = 0, .mid = 0 };
+    // Half the label's height, so the anchor slides finer than the box it
+    // carries; the floor is one grid unit, which is 1/16 pt (11.9.4).
+    int32_t const step{ imax(box.h / 2, 1) };
+    // Half an em, derived rather than a knob: the tighter profile sits tighter
+    // for free and a font-size change cannot leave the leader looking wrong.
+    int32_t const leader{ imax(p.font_size_grid / 2, 1) };
 
     if (r.len >= 2) {
       own.assign(r.len - 1, {});
@@ -179,8 +215,10 @@ uint32_t place_labels(Chart const &c,
       }
       // Every candidate lies in the route's box grown by the box's extent, the
       // strips, and the box height the distance query reaches past them.
-      int32_t const reach_x{ box.w + ((STRIPS - 1) * step) + box.h };
-      int32_t const reach_y{ box.h + ((STRIPS - 1) * step) + box.h };
+      // Every candidate lies within the leader plus the box from the polyline,
+      // and the distance query reaches one box height past that.
+      int32_t const reach_x{ box.w + leader + box.h };
+      int32_t const reach_y{ box.h + leader + box.h };
       scav_rect const region{ .x = x0 - reach_x,
                               .y = y0 - reach_y,
                               .w = (x1 - x0) + (2 * reach_x),
@@ -236,53 +274,42 @@ uint32_t place_labels(Chart const &c,
         bool const ascending{ flat ? (a.x < b.x) : (a.y < b.y) };
         int32_t const dir{ ascending ? 1 : -1 };
         bool const bounded{ chained && (k == prior_seg) };
-        for (uint32_t side = 0; side < 2; ++side) {
-          for (int32_t strip = 0; strip < STRIPS; ++strip) {
-            int32_t const off{ strip * step };
-            // One band holds every candidate on this strip, each of them `off`
-            // from the leg, so what is out of reach is dropped once for all.
-            int32_t const across{ (side == 0) ? -off : off };
-            scav_rect band{ .x = lo - floor_div(box.w, 2),
-                            .y = (side == 0) ? ((a.y - box.h) + across) : (a.y + across),
-                            .w = (hi - lo) + box.w,
-                            .h = box.h };
-            if (!flat) {
-              band = { .x = (side == 0) ? ((a.x - box.w) + across) : (a.x + across),
-                       .y = lo - floor_div(box.h, 2),
-                       .w = box.w,
-                       .h = (hi - lo) + box.h };
-            }
-            nearby.clear();
-            for (scav_rect const &seg : foreign) {
-              if (chebyshev_gap(band, seg) <= (off + box.h)) { nearby.push_back(seg); }
-            }
-            for (int32_t slot = lo; slot <= (hi + (2 * step)); slot += step) {
-              // Both leg ends are slots whichever way it runs: the first is the
-              // low end, one past the high end is that end, then the centre.
-              int32_t mid{ slot };
-              if (slot > (hi + step)) {
-                mid = lo + floor_div(hi - lo, 2);
-              } else if (slot > hi) {
-                mid = hi;
-              }
-              // Past the box before it is further along the route, which on a
-              // leg running backwards is the smaller coordinate.
-              if (bounded && (((mid - prior_mid) * dir) <= 0)) { continue; }
-              scav_rect cand{ .x = 0, .y = 0, .w = box.w, .h = box.h };
-              if (flat) {
-                cand.x = mid - floor_div(box.w, 2);
-                cand.y = (side == 0) ? ((a.y - box.h) - off) : (a.y + off);
-              } else {
-                cand.x = (side == 0) ? ((a.x - box.w) - off) : (a.x + off);
-                cand.y = mid - floor_div(box.h, 2);
-              }
+        // Every candidate for this leg lies within the leader plus the box of
+        // it, so the distance prefilter runs once per leg rather than once per
+        // band as the strip grid needed.
+        nearby.clear();
+        for (scav_rect const &seg : foreign) {
+          if (chebyshev_gap(own[k], seg) <= (leader + box.w + box.h)) {
+            nearby.push_back(seg);
+          }
+        }
+        // Both ends of the leg are anchors whatever the step divides into, so
+        // the last slot is clamped rather than skipped.
+        int32_t const runs{ (hi - lo) / step };
+        for (int32_t n = 0; n <= (runs + 1); ++n) {
+          int32_t const mid{ imin(lo + (n * step), hi) };
+          // Past the box before it is further along the route, which on a leg
+          // running backwards is the smaller coordinate.
+          if (bounded && (((mid - prior_mid) * dir) <= 0)) { continue; }
+          scav_point const on{ flat ? scav_point{ .x = mid, .y = a.y }
+                                    : scav_point{ .x = a.x, .y = mid } };
+          for (uint32_t lead = 0; lead < LEADS; ++lead) {
+            scav_point const away{ lead_by(lead, leader) };
+            for (uint32_t which = 0; which < ATTACH; ++which) {
+              // The leader ends on the attachment point, so the box's origin is
+              // that point less where the point sits inside the box.
+              scav_point const in{ attach_at(which, box.w, box.h) };
+              scav_rect const cand{ .x = (on.x + away.x) - in.x,
+                                    .y = (on.y + away.y) - in.y,
+                                    .w = box.w,
+                                    .h = box.h };
               Wide const dx{ (Wide{ cand.x } + floor_div(box.w, 2)) - at.x };
               Wide const dy{ (Wide{ cand.y } + floor_div(box.h, 2)) - at.y };
               Key here{ .shortfall = 0,
                         .dist = imax(dx, -dx) + imax(dy, -dy),
                         .seg = k,
-                        .side = side,
-                        .strip = strip,
+                        .attach = which,
+                        .lead = lead,
                         .mid = mid };
               // Keyed before tested, and zero is the floor of any shortfall: one
               // test with it standing in, then the real one, then the sweep.
@@ -301,8 +328,12 @@ uint32_t place_labels(Chart const &c,
                   break;
                 }
               }
+              // Every leg of its own route, this one included: an axis-aligned
+              // leader off a corner can still put the label across the line it
+              // is anchored to, which is the slice the anchor exists to stop
+              // and is not structural (11.9.4).
               for (uint32_t j = 0; clear && (j < own.size()); ++j) {
-                if ((j != k) && overlaps(cand, own[j])) { clear = false; }
+                if (overlaps(cand, own[j])) { clear = false; }
               }
               if (!clear) { continue; }
               key = here;
