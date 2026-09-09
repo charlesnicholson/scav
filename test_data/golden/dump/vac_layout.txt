@@ -64,6 +64,17 @@ chart vac "robot vacuum" (test_data/charts/vac.scav:3)
   include lamp "led.scav" -> test_data/charts/led.scav (test_data/charts/dock.scav:4)
 geometry structural 4e59baff coordinate 363dfea1
   chart 0,0 11380x9122
+  cost t0 0 t2 6200
+    tier0 through_box 0 box_overlap 0
+    bends 26 share 2683bp
+    corridor 0 share 0bp
+    crossings 2 share 103bp
+    excess_len 37915 share 1277bp
+    adjacency 0 share 0bp
+    label 0 share 0bp
+    label_near 2019 share 851bp
+    aspect 32152 share 541bp
+    area 103808360 share 4541bp
   state dock 2784,2823 6612x6299 before 2912,2951 6356x397 after 2912,8994 6356x0
   state lamp 0,0 3066x2535 before 128,128 2810x397 after 128,2407 2810x0
   state Off 10484,0 896x653 before 10612,128 640x397 after 10612,525 640x0

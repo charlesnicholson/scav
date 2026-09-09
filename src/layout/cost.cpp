@@ -753,6 +753,13 @@ std::array<Wide, TIER2_TERMS> weighted_terms(CostTerms const &t, scav_profile co
 
 }  // namespace
 
+CostTerms layout_cost(Chart const &c,
+                      scav_profile const &p,
+                      scav_spaces const &s,
+                      std::vector<scav_rect> const &placed) {
+  return cost_columns(c, decompose(c), p, s, placed);
+}
+
 Cost cost_of(CostTerms const &t, scav_profile const &p) {
   Cost out;
   out.t0_violations = t.through_box + t.box_overlap;

@@ -9,6 +9,7 @@
 #include "scav/scav_layout_c.h"
 #include "scav/scav_types.h"
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -234,6 +235,21 @@ void append_model(std::string &out, Chart const &c) {
 
 // The geometry projection ==================================================
 
+// A cost term, which is int64: the core's appender stops at u32 and the
+// weighted sum reaches 2^54. Negating through unsigned so INT64_MIN prints.
+void append_i64v(std::string &out, int64_t v) {
+  bool const neg{ v < 0 };
+  uint64_t mag{ neg ? (~static_cast<uint64_t>(v) + 1U) : static_cast<uint64_t>(v) };
+  std::array<char, 20> digits{};
+  uint32_t n{ 0 };
+  do {
+    digits[n++] = static_cast<char>('0' + static_cast<char>(mag % 10U));
+    mag /= 10U;
+  } while (mag != 0U);
+  if (neg) { out += '-'; }
+  while (n != 0U) { out += digits[--n]; }
+}
+
 // A signed grid coordinate; the domain is symmetric, so minus must print.
 void append_i32v(std::string &out, int32_t v) {
   if (v < 0) {
@@ -266,7 +282,22 @@ void append_rect(std::string &out, scav_rect r) {
   append_i32v(out, r.h);
 }
 
-void append_geometry_text(std::string &out, Chart const &c) {
+// The nine Tier-2 terms in CostTerms order, which is the order `cost_shares`
+// answers in, so a name and a share never come apart.
+constexpr std::array<char const *, TIER2_TERMS> TERMS{
+  "bends", "corridor",   "crossings", "excess_len", "adjacency",
+  "label", "label_near", "aspect",    "area"
+};
+
+std::array<int64_t, TIER2_TERMS> term_values(CostTerms const &t) {
+  return { t.bends, t.corridor,   t.crossings, t.excess_len, t.adjacency,
+           t.label, t.label_near, t.aspect,    t.area };
+}
+
+void append_geometry_text(std::string &out,
+                          Chart const &c,
+                          CostTerms const &terms,
+                          scav_profile const &p) {
   auto const state{ geom_rows<scav_rect>(c, "scav.geom.state") };
   auto const before{ geom_rows<scav_rect>(c, "scav.geom.state_before") };
   auto const after{ geom_rows<scav_rect>(c, "scav.geom.state_after") };
@@ -283,6 +314,30 @@ void append_geometry_text(std::string &out, Chart const &c) {
   out += "\n  chart ";
   append_rect(out, geom_rows<scav_rect>(c, "scav.geom.chart")[0]);
   out += '\n';
+
+  // The objective over those columns, so a candidate carries the number that
+  // ranked it beside the geometry it ranked (11.6, 11.10).
+  Cost const scored{ cost_of(terms, p) };
+  std::array<int64_t, TIER2_TERMS> const values{ term_values(terms) };
+  std::array<int64_t, TIER2_TERMS> const shares{ cost_shares(terms, p) };
+  out += "  cost t0 ";
+  append_i32v(out, scored.t0_violations);
+  out += " t2 ";
+  append_i64v(out, scored.t2);
+  out += "\n    tier0 through_box ";
+  append_i32v(out, terms.through_box);
+  out += " box_overlap ";
+  append_i32v(out, terms.box_overlap);
+  out += '\n';
+  for (uint32_t i = 0; i < TIER2_TERMS; ++i) {
+    out += "    ";
+    out += TERMS[i];
+    out += ' ';
+    append_i64v(out, values[i]);
+    out += " share ";
+    append_i64v(out, shares[i]);
+    out += "bp\n";
+  }
   for (uint32_t i = 0; i < state.size(); ++i) {
     if (c.states[i].live == 0) { continue; }
     out += "  state ";
@@ -482,7 +537,10 @@ void append_json_rect(std::string &out, scav_rect r) {
 
 // Row-major arrays keyed by entity ordinal, the columnar model's own shape, so
 // a renderer indexes geometry with the ids the entity arrays already use.
-void append_geometry_json(std::string &out, Chart const &c) {
+void append_geometry_json(std::string &out,
+                          Chart const &c,
+                          CostTerms const &terms,
+                          scav_profile const &p) {
   out += ",\n  \"geometry\": {\n    \"gen\": ";
   string_append_u32(out, geom_rows<uint32_t>(c, "scav.geom.gen")[0]);
   out += ",\n    \"structural_hash\": ";
@@ -491,6 +549,32 @@ void append_geometry_json(std::string &out, Chart const &c) {
   string_append_u32(out, layout_coordinate_hash(c));
   out += ",\n    \"chart\": ";
   append_json_rect(out, geom_rows<scav_rect>(c, "scav.geom.chart")[0]);
+
+  // The objective over those columns, so a candidate carries the number that
+  // ranked it beside the geometry it ranked (11.6, 11.10).
+  Cost const scored{ cost_of(terms, p) };
+  std::array<int64_t, TIER2_TERMS> const values{ term_values(terms) };
+  std::array<int64_t, TIER2_TERMS> const shares{ cost_shares(terms, p) };
+  out += ",\n    \"cost\": {\n      \"t0_violations\": ";
+  append_i32v(out, scored.t0_violations);
+  out += ",\n      \"t2\": ";
+  append_i64v(out, scored.t2);
+  out += ",\n      \"through_box\": ";
+  append_i32v(out, terms.through_box);
+  out += ",\n      \"box_overlap\": ";
+  append_i32v(out, terms.box_overlap);
+  for (uint32_t i = 0; i < TIER2_TERMS; ++i) {
+    out += ",\n      ";
+    append_json_string(out, TERMS[i]);
+    out += ": ";
+    append_i64v(out, values[i]);
+  }
+  out += ",\n      \"shares_bp\": [";
+  for (uint32_t i = 0; i < TIER2_TERMS; ++i) {
+    if (i != 0) { out += ", "; }
+    append_i64v(out, shares[i]);
+  }
+  out += "]\n    }";
 
   for (char const *name : { "scav.geom.state",
                             "scav.geom.state_before",
@@ -647,9 +731,10 @@ int run_dump(char const *path,
   load_and_report(path, true, net);
   if (net.code == EXIT_UNUSABLE) { return EXIT_UNUSABLE; }
 
+  scav_layout_opts opts{};
+  profile_named("readable", opts.profile);
+  CostTerms cost{};
   if (with_layout) {
-    scav_layout_opts opts{};
-    profile_named("readable", opts.profile);
     // The reference builder's measurement pass, which is the policy every
     // corpus golden is stated against.
     Metrics metrics;
@@ -670,6 +755,10 @@ int run_dump(char const *path,
       write_stream(err, stderr);
     }
     if (!laid) { return EXIT_DIAGNOSED; }
+    // Scored from the columns the run just wrote, at the caller's profile and
+    // with the real-text tables beside them, so `label` and `label_near` have
+    // the placed boxes they are about.
+    cost = layout_cost(net.chart, opts.profile, as_spaces(spaces), placed);
   }
 
   std::string out;
@@ -678,11 +767,11 @@ int run_dump(char const *path,
     out += '\n';
   } else if (as_json) {
     append_json(out, net.chart);
-    if (with_layout) { append_geometry_json(out, net.chart); }
+    if (with_layout) { append_geometry_json(out, net.chart, cost, opts.profile); }
     out += "\n}\n";
   } else {
     append_model(out, net.chart);
-    if (with_layout) { append_geometry_text(out, net.chart); }
+    if (with_layout) { append_geometry_text(out, net.chart, cost, opts.profile); }
   }
   write_stream(out, stdout);
   return net.code;
