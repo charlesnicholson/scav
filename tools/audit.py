@@ -10,6 +10,8 @@ the PRD, so it reports rather than fails.
   tools/audit.py --in DIR
   tools/audit.py --chart vac.scav   one of them, with each finding listed
   tools/audit.py --gauntlet         the element suite instead of the corpus
+  tools/audit.py --portfolio-row 4  one row of 11.10's table, not the pick
+  tools/audit.py --json             the counts as JSON, per chart and totalled
 """
 
 import argparse
@@ -139,8 +141,18 @@ def enclosing(doc, state):
     return set(seen)
 
 
-def geometry(chart, scav_bin):
-    out = subprocess.run([str(scav_bin), "dump", "--layout", "--json", str(chart)],
+def geometry(chart, scav_bin, row=None):
+    """The geometry columns of one candidate.
+
+    `row` pins a row of the portfolio's table, and it has to be the row the SVG
+    beside it was rendered at: the boxes here and the drawing there are two
+    halves of one candidate, and pairing them across rows compares a picture to
+    somebody else's geometry.
+    """
+    cmd = [str(scav_bin), "dump", "--layout", "--json"]
+    if row is not None:
+        cmd += ["--portfolio-row", str(row)]
+    out = subprocess.run(cmd + [str(chart)],
                          capture_output=True, text=True, check=True).stdout
     doc = json.loads(out)
     live = [i for i, st in enumerate(doc["states"]) if st["live"]]
@@ -314,6 +326,17 @@ def audit(svg, every, chart, doc, verbose):
     return found, notes
 
 
+def find_scav(explicit=None):
+    """The binary to read geometry with, the host release build preferred."""
+    if explicit:
+        return Path(explicit)
+    at = REPO_ROOT / "out/macos-clang-libcxx-release/bin/scav"
+    if at.exists():
+        return at
+    found = sorted(REPO_ROOT.glob("out/*/bin/scav"))
+    return found[0] if found else None
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--in", dest="where", default=str(REPO_ROOT / "out/baseline"))
@@ -321,15 +344,15 @@ def main():
     ap.add_argument("--gauntlet", action="store_true",
                     help="the element suite under test_data/charts/gauntlet")
     ap.add_argument("--scav", default=None)
+    ap.add_argument("--portfolio-row", dest="row", type=int, default=None,
+                    help="audit one row of 11.10's table rather than the pick")
+    ap.add_argument("--json", action="store_true",
+                    help="the counts as JSON, per chart and totalled")
     args = ap.parse_args()
-    scav_bin = Path(args.scav) if args.scav else (
-        REPO_ROOT / "out/macos-clang-libcxx-release/bin/scav")
-    if not scav_bin.exists():
-        found = sorted(REPO_ROOT.glob("out/*/bin/scav"))
-        if not found:
-            print("no scav binary; build first", file=sys.stderr)
-            return 1
-        scav_bin = found[0]
+    scav_bin = find_scav(args.scav)
+    if scav_bin is None or not scav_bin.exists():
+        print("no scav binary; build first", file=sys.stderr)
+        return 1
 
     where = Path(args.where)
     root = GAUNTLET if args.gauntlet else CORPUS
@@ -338,20 +361,28 @@ def main():
     verbose = args.chart is not None
 
     total = {}
+    per_chart = {}
     missing = []
     for name in names:
         svg = where / (name + ".svg")
         if not svg.exists():
             missing.append(name)
             continue
-        every, chart, doc = geometry(root / name, scav_bin)
+        every, chart, doc = geometry(root / name, scav_bin, args.row)
         found, notes = audit(svg.read_text(encoding="utf-8"), every, chart, doc,
                              verbose)
+        per_chart[name] = found
         for key, count in found.items():
             total[key] = total.get(key, 0) + count
         if verbose and notes:
             print(f"{name}:")
             print("\n".join(notes))
+
+    if args.json:
+        json.dump({"row": args.row, "charts": per_chart, "total": total},
+                  sys.stdout, indent=2, sort_keys=True)
+        print()
+        return 1 if len(missing) == len(names) else 0
 
     if missing:
         print(f"not rendered ({len(missing)}): run tools/baseline.py first",
