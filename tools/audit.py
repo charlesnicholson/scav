@@ -186,9 +186,15 @@ def geometry(chart, scav_bin, row=None):
 def audit(svg, every, chart, doc, verbose):
     found = {}
     notes = []
+    # Where each finding is, in the drawing's own grid units, so a reviewer
+    # checks the call rather than hunting for it. `at` is a rect; a finding
+    # with no natural extent passes none and is counted without a mark.
+    marks = []
 
-    def note(kind, detail):
+    def note(kind, detail, at=None):
         found[kind] = found.get(kind, 0) + 1
+        if at is not None:
+            marks.append((kind, tuple(at), detail))
         if verbose:
             notes.append(f"    {kind}: {detail}")
 
@@ -263,7 +269,8 @@ def audit(svg, every, chart, doc, verbose):
             into = max(lo + r - along, along - (lo + length - r))
             if into > 0:
                 note("attachment on a drawn corner",
-                     f"t{trans} at {pt} {into} into r={r}")
+                     f"{into} into r={r}",
+                     (pt[0] - r, pt[1] - r, 2 * r, 2 * r))
             break
 
     # A head and a departure on one point of one box: the head is inked over the
@@ -317,11 +324,13 @@ def audit(svg, every, chart, doc, verbose):
                        if not (j == 1 and i == own_band)) if i in under
                    else struck(rects[i]))
             if hit:
-                note("label over a state box", f"t{ident} at ({x},{y})+{length}")
+                note("label over a state box", f"t{ident} over state {i}",
+                     (x, y - size, length, size))
                 break
         for a, b, other, _ in legs:
             if other != ident and overlaps(em, span(a, b)):
-                note("label over another route", f"t{ident} over t{other} {a}-{b}")
+                note("label over another route", f"t{ident} over t{other}",
+                     (x, y - size, length, size))
                 break
 
         # A reader ties a label to the nearest line, so a box that is not nearer
@@ -333,7 +342,7 @@ def audit(svg, every, chart, doc, verbose):
         theirs = [gap(em, span(a, b)) for a, b, other, _ in legs if other != ident]
         if mine and theirs and min(mine) + size > min(theirs):
             note("label nearer another route than its own",
-                 f"t{ident} own {min(mine)} other {min(theirs)}")
+                 f"own {min(mine)} vs {min(theirs)}", (x, y - size, length, size))
 
         # A label hangs off its own polyline, full stop -- not merely nearer to
         # it than to somebody else's. One text height is the bound: past that
@@ -342,7 +351,8 @@ def audit(svg, every, chart, doc, verbose):
         # is caught where the relative test above sees nothing to compare.
         if mine and min(mine) > size:
             note("label detached from its own polyline",
-                 f"t{ident} {min(mine)} from its nearest leg, one height {size}")
+                 f"{min(mine)} away, one height is {size}",
+                 (x, y - size, length, size))
 
         # Everything of a submachine is contained in its parent state's box,
         # out-of-machine transitions excepted -- a transition with no state
@@ -355,7 +365,7 @@ def audit(svg, every, chart, doc, verbose):
             if not (bx <= x and x + length <= bx + bw and by <= y - size
                     and y <= by + bh):
                 note("label outside its enclosing state",
-                     f"t{ident} at ({x},{y})+{length} outside state {i}")
+                     f"outside state {i}", (x, y - size, length, size))
                 break
 
     # Two strings inked into the same place read as one unreadable string, which
@@ -387,7 +397,7 @@ def audit(svg, every, chart, doc, verbose):
         if worst > r * r:
             note("mark outside its glyph", f"state {ident} in r={r} at {box}")
 
-    return found, notes
+    return found, notes, marks
 
 
 def find_scav(explicit=None):
@@ -433,8 +443,8 @@ def main():
             missing.append(name)
             continue
         every, chart, doc = geometry(root / name, scav_bin, args.row)
-        found, notes = audit(svg.read_text(encoding="utf-8"), every, chart, doc,
-                             verbose)
+        found, notes, _ = audit(svg.read_text(encoding="utf-8"), every, chart,
+                                doc, verbose)
         per_chart[name] = found
         for key, count in found.items():
             total[key] = total.get(key, 0) + count

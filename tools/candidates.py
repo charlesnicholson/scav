@@ -57,7 +57,8 @@ def counts(scav_bin, chart, svg, row, verbose=False):
     that ranked a candidate travels beside the defects a reader sees in it.
     """
     every, rect, doc = audit.geometry(chart, scav_bin, row)
-    found, _ = audit.audit(svg.read_text(encoding="utf-8"), every, rect, doc, verbose)
+    found, _, _ = audit.audit(svg.read_text(encoding="utf-8"), every, rect, doc,
+                              verbose)
     return found, doc["geometry"]["cost"], (tuple(every), rect)
 
 
