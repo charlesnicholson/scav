@@ -32,6 +32,8 @@ CLASSES = {
     "label detached from its own polyline": ("#c2185b", "detached"),
     "label outside its enclosing state": ("#6a1b9a", "outside parent"),
     "label over a state box": ("#b71c1c", "over a box"),
+    "label sliced by its own route": ("#0d47a1", "sliced by its own line"),
+    "label sliced by a region divider": ("#004d40", "sliced by a divider"),
     "label over another route": ("#e65100", "over a route"),
     "label nearer another route than its own": ("#f9a825", "nearer another"),
     "attachment on a drawn corner": ("#00695c", "on a corner"),

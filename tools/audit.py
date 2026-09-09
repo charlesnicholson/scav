@@ -34,6 +34,11 @@ POLYLINE = re.compile(r'<polyline points="([^"]+)"[^>]*class="scav-trans scav-id
 ARROWHEAD = re.compile(r'<polygon points="([^"]+)"[^>]*class="scav-trans scav-id-(\d+)"')
 DIVIDER = re.compile(
     r'<line x1="(-?\d+)" y1="(-?\d+)" x2="(-?\d+)" y2="(-?\d+)"[^>]*class="scav-sub')
+# The dotted concurrency boundary with the width it is stroked at: "sliced" is
+# about ink, and a zero-thickness segment misses a label the stroke covers.
+DIVIDER_INK = re.compile(
+    r'<line x1="(-?\d+)" y1="(-?\d+)" x2="(-?\d+)" y2="(-?\d+)"[^>]*'
+    r'stroke-width="(\d+)"[^>]*class="scav-sub')
 TEXT = re.compile(
     r'<text x="(-?\d+)" y="(-?\d+)" font-size="(\d+)"[^>]*textLength="(\d+)"[^>]*'
     r'class="scav-(trans|state|sub) scav-id-(\d+)"[^>]*>')
@@ -64,6 +69,14 @@ def overlaps(a, b):
     what packing produces, and adjacent glyphs read fine."""
     return (a[0] < b[0] + b[2] and b[0] < a[0] + a[2] and
             a[1] < b[1] + b[3] and b[1] < a[1] + a[3])
+
+
+def ink_span(a, b, width):
+    """A segment's bounding box grown to the ink it is stroked with, so a line
+    laid along the edge of a label counts as crossing it."""
+    half = width // 2
+    return (min(a[0], b[0]) - half, min(a[1], b[1]) - half,
+            abs(a[0] - b[0]) + (2 * half), abs(a[1] - b[1]) + (2 * half))
 
 
 def span(a, b):
@@ -297,6 +310,9 @@ def audit(svg, every, chart, doc, verbose):
     # the baseline is the em box the builder reserved -- the same rectangle it
     # measured with, which is what makes these comparable to the geometry.
     inked = []
+    boundaries = [ink_span((int(a), int(b)), (int(c), int(d)), int(w))
+                  for a, b, c, d, w in DIVIDER_INK.findall(svg)]
+
     for m in TEXT.finditer(svg):
         x, y, size, length, which, ident = m.groups()
         x, y, size, length = int(x), int(y), int(size), int(length)
@@ -330,6 +346,25 @@ def audit(svg, every, chart, doc, verbose):
         for a, b, other, _ in legs:
             if other != ident and overlaps(em, span(a, b)):
                 note("label over another route", f"t{ident} over t{other}",
+                     (x, y - size, length, size))
+                break
+
+        # A line drawn through a label cuts the word in half, and whose line it
+        # is makes no difference to the reader. 11.9's strips sit *beside* a
+        # leg, so this is the centred fallback and nothing else: a box with no
+        # feasible strip keeps the leg's exact centre and the leg goes through
+        # it (11.9.3).
+        for a, b, other, _ in legs:
+            if other == ident and overlaps(em, span(a, b)):
+                note("label sliced by its own route", f"t{ident} on its own leg",
+                     (x, y - size, length, size))
+                break
+
+        # The same for a dotted concurrency boundary, which is a region divider
+        # and not a route, so no route test sees it.
+        for boundary in boundaries:
+            if overlaps(em, boundary):
+                note("label sliced by a region divider", f"t{ident} across a divider",
                      (x, y - size, length, size))
                 break
 
@@ -466,6 +501,8 @@ def main():
 
     # Counts first, then the findings, so the ratio is visible.
     scale = {"segment not axis-aligned": "route segments",
+             "label sliced by its own route": "transition labels",
+             "label sliced by a region divider": "transition labels",
              "attachment on a drawn corner": "state attachments",
              "label detached from its own polyline": "transition labels",
              "label outside its enclosing state": "transition labels",
