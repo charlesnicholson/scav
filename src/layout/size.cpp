@@ -286,7 +286,17 @@ bool size_pass(Chart const &c,
           cg.sep = p.node_sep;
           std::vector<int32_t> const centre{ cross_coordinates(cg) };
 
-          std::vector<Wide> layer_x(last - first, 0);
+          // The gap a label was charged to the boundary this cut falls on, less
+          // what the packing between two pieces already gives it. Inside a
+          // chunk the charge is `rank_sep + boundary_gap`; across a cut the
+          // packer separates by `node_sep` alone and the charge was being
+          // dropped, which is why `estop` draws a 384-wide label across a
+          // 288-unit gap (11.9.3). Carried on the new chunk's leading edge, so
+          // it is room wherever the packing puts the two pieces.
+          Wide const carried{ (first == 0) ? Wide{ 0 }
+                                           : imax(boundary_gap(first - 1) - p.node_sep,
+                                                  Wide{ 0 }) };
+          std::vector<Wide> layer_x(last - first, carried);
           for (uint32_t r = first + 1; r < last; ++r) {
             layer_x[r - first] =
                 layer_x[r - first - 1] + layer_w[r - 1] + p.rank_sep + boundary_gap(r - 1);
