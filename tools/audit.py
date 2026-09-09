@@ -376,7 +376,7 @@ def audit(svg, every, chart, doc, verbose):
         for b_box, b_which, b_id in inked[i + 1:]:
             if overlaps(a_box, b_box):
                 note("texts overprint each other",
-                     f"{a_which} {a_id} over {b_which} {b_id} at {a_box[:2]}")
+                     f"{a_which} {a_id} over {b_which} {b_id}", a_box)
 
     # A mark drawn past the glyph that holds it. The circle and its text share an
     # id, and the em box's worst corner against the radius is the whole check --

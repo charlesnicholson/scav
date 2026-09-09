@@ -42,30 +42,50 @@ VIEWBOX = re.compile(r'viewBox="(-?[\d.]+) (-?[\d.]+) ([\d.]+) ([\d.]+)"')
 
 
 def annotate(svg, marks):
-    """The findings as SVG, in the document's own units, before `</svg>`."""
+    """The findings as SVG, in the document's own units, before `</svg>`.
+
+    Grouped by location and badged with an index rather than tagged in place:
+    one label routinely fires three classes at once, and three captions on one
+    rect is three captions nobody can read. The detail goes in a table beside
+    the drawing, keyed by the badge.
+    """
     box = VIEWBOX.search(svg)
     if not box:
-        return svg, 0
+        return svg, []
     # Stroke and type scaled to the drawing, so a 2k chart's marks are legible
     # at the same zoom as a small one's.
     span = max(float(box.group(3)), float(box.group(4)))
-    stroke = max(int(span / 400), 2)
-    size = max(int(span / 45), 8)
+    stroke = max(int(span / 500), 2)
+    badge = max(int(span / 55), 7)
+
+    # One entry per distinct rect, in the order the audit found them, so a
+    # badge's number is stable for a given drawing.
+    groups = []
+    seen = {}
+    for kind, rect, detail in marks:
+        if rect not in seen:
+            seen[rect] = len(groups)
+            groups.append((rect, []))
+        groups[seen[rect]][1].append((kind, detail))
+
     out = []
-    drawn = 0
-    for kind, (x, y, w, h), detail in marks:
-        colour, short = CLASSES.get(kind, ("#1565c0", kind))
+    for i, (rect, hits) in enumerate(groups, start=1):
+        x, y, w, h = rect
+        colour = CLASSES.get(hits[0][0], ("#1565c0", ""))[0]
         pad = stroke * 2
         out.append(
             f'<rect x="{x - pad}" y="{y - pad}" width="{w + 2 * pad}" '
             f'height="{h + 2 * pad}" fill="none" stroke="{colour}" '
             f'stroke-width="{stroke}" stroke-dasharray="{stroke * 3},{stroke * 2}"/>')
+        # Outside the rect's top-left corner, so the badge never sits on the
+        # text the finding is about.
+        cx, cy = x - pad - badge, y - pad - badge
+        out.append(f'<circle cx="{cx}" cy="{cy}" r="{badge}" fill="{colour}"/>')
         out.append(
-            f'<text x="{x}" y="{y - pad - (stroke * 2)}" font-size="{size}" '
-            f'fill="{colour}" font-family="monospace">'
-            f'{html.escape(short)} &#183; {html.escape(detail)}</text>')
-        drawn += 1
-    return svg.replace("</svg>", "".join(out) + "</svg>"), drawn
+            f'<text x="{cx}" y="{cy + (badge * 2 // 5)}" font-size="{int(badge * 1.3)}" '
+            f'fill="#fff" text-anchor="middle" font-family="monospace" '
+            f'font-weight="bold">{i}</text>')
+    return svg.replace("</svg>", "".join(out) + "</svg>"), groups
 
 
 HEAD = """<!doctype html><meta charset="utf-8"><title>scav: findings on the page</title>
@@ -83,11 +103,17 @@ HEAD = """<!doctype html><meta charset="utf-8"><title>scav: findings on the page
  .chart>h2{font-size:15px;margin:0 0 2px;font-family:ui-monospace,monospace}
  .tally{color:#666;margin:0 0 12px;font-family:ui-monospace,monospace;font-size:12px}
  .clean{color:#1c6b3c;font-style:italic}
+ .pane{display:grid;grid-template-columns:minmax(0,1fr) 22em;gap:18px;align-items:start}
  svg{width:100%;height:auto;border:1px solid #ecece8;border-radius:4px}
+ .keys{border-collapse:collapse;font-size:12px;width:100%}
+ .keys td{border-top:1px solid #eee;padding:5px 7px;vertical-align:top}
+ .keys td.n{color:#fff;font-family:ui-monospace,monospace;font-weight:700;
+            text-align:center;width:1.6em;border-top-color:#fff}
 </style>
 <h1>Every finding, marked on the drawing it is about</h1>
 <p class="sub">One panel per chart, the drawing that ships. Each dashed box is a
-finding, labelled with its class and its measurement. <b>The thresholds are
+finding, labelled with its class and its measurement. Each finding is a numbered badge; the key beside the
+drawing says which classes fired on it and by how much. <b>The thresholds are
 chosen, not given</b> &mdash; detachment is one text height, a corner is the
 capped arc, and an out-of-machine transition is exempt from containment
 entirely. If a mark is not a violation to you, the threshold is wrong and every
@@ -129,13 +155,23 @@ def main():
                                       rect, doc, False)
         for k, v in found.items():
             total[k] = total.get(k, 0) + v
-        marked, _ = annotate(svg_path.read_text(encoding="utf-8"), marks)
+        marked, groups = annotate(svg_path.read_text(encoding="utf-8"), marks)
         tally = ", ".join(f"{CLASSES[k][1]} {found[k]}" for k in CLASSES
                           if found.get(k))
         note = (f'<p class="tally">{html.escape(tally)}</p>' if tally
                 else '<p class="tally clean">nothing this audit knows how to see.</p>')
+        rows = []
+        for i, (_, hits) in enumerate(groups, start=1):
+            colour = CLASSES.get(hits[0][0], ("#1565c0", ""))[0]
+            what = "<br>".join(
+                f'<b style="color:{CLASSES.get(k, ("#1565c0", k))[0]}">'
+                f'{html.escape(CLASSES.get(k, (None, k))[1])}</b> '
+                f'{html.escape(d)}' for k, d in hits)
+            rows.append(f'<tr><td class="n" style="background:{colour}">{i}</td>'
+                        f'<td>{what}</td></tr>')
+        table = (f'<table class="keys">{"".join(rows)}</table>' if rows else "")
         body.append(f'<div class="chart"><h2>{html.escape(chart.name)}</h2>'
-                    f'{note}{marked}</div>')
+                    f'{note}<div class="pane">{marked}{table}</div></div>')
 
     keys = ''.join(f'<span><i class="sw" style="border-color:{c}"></i>{n}</span>'
                    for c, n in CLASSES.values())
