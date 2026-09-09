@@ -44,9 +44,12 @@ int dispatch(int argc, char **argv) {
       std::string_view const arg{ argv[i] };
       bool *flag{ nullptr };
       if (arg == "--portfolio-row") {
-        if (((i + 1) >= argc) || (row != INVALID) || !portfolio_row(argv[++i], row)) {
-          return usage();
-        }
+        // The increment is its own statement: clang-tidy's
+        // bugprone-inc-dec-in-conditions is right that `++i` inside a compound
+        // condition depends on an evaluation order a reader has to reconstruct.
+        if (((i + 1) >= argc) || (row != INVALID)) { return usage(); }
+        ++i;
+        if (!portfolio_row(argv[i], row)) { return usage(); }
         continue;
       }
       if (arg == "--hash") {
@@ -81,9 +84,12 @@ int dispatch(int argc, char **argv) {
     for (int i = 2; i < argc; ++i) {
       std::string_view const arg{ argv[i] };
       if (arg == "--portfolio-row") {
-        if (((i + 1) >= argc) || (row != INVALID) || !portfolio_row(argv[++i], row)) {
-          return usage();
-        }
+        // The increment is its own statement: clang-tidy's
+        // bugprone-inc-dec-in-conditions is right that `++i` inside a compound
+        // condition depends on an evaluation order a reader has to reconstruct.
+        if (((i + 1) >= argc) || (row != INVALID)) { return usage(); }
+        ++i;
+        if (!portfolio_row(argv[i], row)) { return usage(); }
       } else if (arg == "-o") {
         if (((i + 1) >= argc) || (out != nullptr)) { return usage(); }
         out = argv[++i];
