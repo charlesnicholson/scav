@@ -62,6 +62,20 @@ inline int32_t state_corner_radius(StateKind kind, scav_rect const &box, int32_t
   return (proportional < pad) ? proportional : pad;
 }
 
+// The distance a label's chosen attachment point is held from the point on its
+// own polyline that anchors it: half an em, so the tighter profile sits tighter
+// for free and a font-size change cannot leave the leader looking wrong
+// (11.9.4).
+//
+// **Half an em of box, not of whitespace.** The distance is to the placed
+// `scav_path_box`, and that box is a line height tall, so the gap a reader
+// sees is this plus whatever of the box the glyphs do not fill. Measuring to
+// the ink instead would need the app to declare its inset, which the space
+// tables do not carry; recorded as owed rather than assumed (11.9.4).
+inline int32_t label_leader(scav_profile const &p) {
+  return (p.font_size_grid / 2 > 1) ? (p.font_size_grid / 2) : 1;
+}
+
 // Layout ====================================================================
 
 // Rows in the fixed table of chart-global phase-2 tuples Level 2 chooses

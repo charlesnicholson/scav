@@ -297,7 +297,9 @@ std::array<int64_t, TIER2_TERMS> term_values(CostTerms const &t) {
 void append_geometry_text(std::string &out,
                           Chart const &c,
                           CostTerms const &terms,
-                          scav_profile const &p) {
+                          scav_profile const &p,
+                          std::vector<scav_placed> const &placed,
+                          scav_spaces const &s) {
   auto const state{ geom_rows<scav_rect>(c, "scav.geom.state") };
   auto const before{ geom_rows<scav_rect>(c, "scav.geom.state_before") };
   auto const after{ geom_rows<scav_rect>(c, "scav.geom.state_after") };
@@ -337,6 +339,16 @@ void append_geometry_text(std::string &out,
     out += " share ";
     append_i64v(out, shares[i]);
     out += "bp\n";
+  }
+  out += "  label leader ";
+  append_i32v(out, label_leader(p));
+  out += '\n';
+  for (uint32_t i = 0; i < placed.size(); ++i) {
+    out += "    placed t";
+    string_append_u32(out, (i < s.n_path_box) ? s.path_box[i].subject : INVALID);
+    out += ' ';
+    append_rect(out, placed[i]);
+    out += '\n';
   }
   for (uint32_t i = 0; i < state.size(); ++i) {
     if (c.states[i].live == 0) { continue; }
@@ -540,7 +552,9 @@ void append_json_rect(std::string &out, scav_rect r) {
 void append_geometry_json(std::string &out,
                           Chart const &c,
                           CostTerms const &terms,
-                          scav_profile const &p) {
+                          scav_profile const &p,
+                          std::vector<scav_placed> const &placed,
+                          scav_spaces const &s) {
   out += ",\n  \"geometry\": {\n    \"gen\": ";
   string_append_u32(out, geom_rows<uint32_t>(c, "scav.geom.gen")[0]);
   out += ",\n    \"structural_hash\": ";
@@ -575,6 +589,25 @@ void append_geometry_json(std::string &out,
     append_i64v(out, shares[i]);
   }
   out += "]\n    }";
+
+  // The placed label boxes and the leader each is held from its own polyline
+  // at, which is the only place the anchor invariant is checkable: it holds on
+  // the box, and the drawing shows the glyphs inside it (11.9.4).
+  out += ",\n    \"label_leader\": ";
+  append_i32v(out, label_leader(p));
+  out += ",\n    \"placed\": [";
+  for (uint32_t i = 0; i < placed.size(); ++i) {
+    if (i != 0) { out += ", "; }
+    append_json_rect(out, placed[i]);
+  }
+  // The transition each box belongs to, so a reader of this can pair a box
+  // with the polyline it is anchored to rather than guess at the order.
+  out += "],\n    \"placed_subject\": [";
+  for (uint32_t i = 0; i < placed.size(); ++i) {
+    if (i != 0) { out += ", "; }
+    string_append_u32(out, (i < s.n_path_box) ? s.path_box[i].subject : INVALID);
+  }
+  out += ']';
 
   for (char const *name : { "scav.geom.state",
                             "scav.geom.state_before",
@@ -734,17 +767,19 @@ int run_dump(char const *path,
   scav_layout_opts opts{};
   profile_named("readable", opts.profile);
   CostTerms cost{};
+  // Hoisted for the emitters: the anchor invariant holds on these boxes and
+  // nowhere else, so the dump is where it becomes checkable (11.9.4).
+  std::vector<scav_placed> placed;
+  Spaces spaces;
   if (with_layout) {
     // The reference builder's measurement pass, which is the policy every
     // corpus golden is stated against.
     Metrics metrics;
-    Spaces spaces;
     if (!metrics_create(nullptr, 0, metrics) ||
         !measure_chart(net.chart, metrics, opts.profile, spaces)) {
       write_error("cannot measure the chart with the bundled font", path);
       return EXIT_UNUSABLE;
     }
-    std::vector<scav_placed> placed;
     std::vector<Diagnostic> diags;
     bool const laid{
       layout_run(net.chart, as_spaces(spaces), opts, placed, diags, nullptr, nullptr, row)
@@ -767,11 +802,15 @@ int run_dump(char const *path,
     out += '\n';
   } else if (as_json) {
     append_json(out, net.chart);
-    if (with_layout) { append_geometry_json(out, net.chart, cost, opts.profile); }
+    if (with_layout) {
+      append_geometry_json(out, net.chart, cost, opts.profile, placed, as_spaces(spaces));
+    }
     out += "\n}\n";
   } else {
     append_model(out, net.chart);
-    if (with_layout) { append_geometry_text(out, net.chart, cost, opts.profile); }
+    if (with_layout) {
+      append_geometry_text(out, net.chart, cost, opts.profile, placed, as_spaces(spaces));
+    }
   }
   write_stream(out, stdout);
   return net.code;

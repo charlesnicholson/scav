@@ -29,7 +29,7 @@ import audit  # noqa: E402
 
 # One colour per class, and the classes a reader is being asked about first.
 CLASSES = {
-    "label detached from its own polyline": ("#c2185b", "detached"),
+    "label not anchored to its own polyline": ("#c2185b", "not anchored"),
     "label outside its enclosing state": ("#6a1b9a", "outside parent"),
     "label over a state box": ("#b71c1c", "over a box"),
     "label sliced by its own route": ("#0d47a1", "sliced by its own line"),

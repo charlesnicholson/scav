@@ -379,7 +379,7 @@ Routes route_transitions(Chart const &c,
     out.route[t] = { .off = first_point, .len = count };
   }
 
-  out.unplaced = place_labels(c, z, s, out.route, out.points, out.placed);
+  out.unplaced = place_labels(c, z, s, out.route, out.points, p, out.placed);
   return out;
 }
 

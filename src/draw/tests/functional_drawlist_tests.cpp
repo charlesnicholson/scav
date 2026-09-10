@@ -248,10 +248,11 @@ TEST_CASE("drawlist gauntlet: what crowd's tighter packing costs its labels") {
   //
   // **`label` was 4, read 6 once the count stopped exempting a transition's own
   // endpoints, and is 5 now the placer stops choosing those positions**; the
-  // one left is structural. `label_near` 442 -> 470 is what that costs: a box
-  // refused a state's rect takes a strip further from its own leg, because
-  // 11.9's objective ranks the shortfall but its feasibility set holds only
-  // I4 -- I2 and I3 are still terms rather than constraints (11.9.3).
+  // one left is structural. `label_near` went 442 -> 470 when a box refused a
+  // state's rect had to take a strip further from its own leg, and **back to
+  // 442 under 11.9.4's anchor**: there is no "further" to take, so the term
+  // that measured how far a box had drifted from its own line reads what it
+  // read before the refusal, with the refusal still in force.
   Metrics const m{ bundled() };
   scav_profile const p{ readable() };
   Run const r{ run_pipeline("gauntlet/crowd.scav", m, p) };
@@ -259,7 +260,7 @@ TEST_CASE("drawlist gauntlet: what crowd's tighter packing costs its labels") {
     cost_columns(r.chart, decompose(r.chart), p, as_spaces(r.spaces), r.placed)
   };
   CHECK(t.label == 5);
-  CHECK(t.label_near == 470);
+  CHECK(t.label_near == 442);
 }
 
 TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back") {
@@ -269,6 +270,7 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
   scav_profile const p{ readable() };
 
   uint32_t fell{ 0 };
+  uint32_t anchored{ 0 };
   uint32_t boxes{ 0 };
   for (char const *name : CORPUS) {
     CAPTURE(name);
@@ -288,6 +290,7 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
                          as_spaces(r.spaces),
                          rows<scav_span>(r.chart, "scav.geom.route"),
                          rows<scav_point>(r.chart, "scav.geom.point"),
+                         p,
                          again);
     boxes += static_cast<uint32_t>(again.size());
     REQUIRE(again.size() == r.placed.size());
@@ -299,14 +302,61 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
       CHECK((at.x + at.w) <= (z.chart.x + z.chart.w));
       CHECK((at.y + at.h) <= (z.chart.y + z.chart.h));
     }
+
+    // **11.9.4's anchor, over every box the corpus places.** A leader holds one
+    // of the eight points of a box exactly `label_leader` from a point on its
+    // own polyline, so the box's *nearest edge* is at most that far -- a corner
+    // attachment with an axis-aligned leader sits closer, being held by a
+    // corner rather than by the edge facing the leg. The bound is therefore the
+    // whole of what anchoring means to a reader: a label is never further from
+    // its own line than half an em. Only a box that found no feasible
+    // candidate breaks it, and that box is anchored to nothing by definition.
+    scav_spaces const sp{ as_spaces(r.spaces) };
+    std::vector<scav_span> const routes{ rows<scav_span>(r.chart, "scav.geom.route") };
+    std::vector<scav_point> const pts{ rows<scav_point>(r.chart, "scav.geom.point") };
+    for (uint32_t i = 0; i < again.size(); ++i) {
+      if (i >= sp.n_path_box) { continue; }
+      uint32_t const subject{ sp.path_box[i].subject };
+      if (subject >= routes.size()) { continue; }
+      scav_span const route{ routes[subject] };
+      if (route.len < 2) { continue; }
+      Wide nearest{ -1 };
+      for (uint32_t k = 0; (k + 1) < route.len; ++k) {
+        Wide const away{
+          chebyshev_gap(again[i], span_rect(pts[route.off + k], pts[route.off + k + 1]))
+        };
+        nearest = (nearest < 0) ? away : imin(nearest, away);
+      }
+      CAPTURE(name);
+      CAPTURE(subject);
+      // A fallback is the centred placement and rides its own leg, so it is
+      // zero away rather than past the leader; the bound holds on it too, and
+      // what catches it is the slice it makes (11.9.3).
+      CHECK(nearest <= Wide{ label_leader(p) });
+      anchored += (nearest <= Wide{ label_leader(p) }) ? 1U : 0U;
+    }
   }
-  MESSAGE("corpus path boxes: ", boxes, ", centred fallbacks: ", fell);
+  MESSAGE("corpus path boxes: ",
+          boxes,
+          ", centred fallbacks: ",
+          fell,
+          ", within the leader: ",
+          anchored);
+  // Every box the corpus places, without exception: the anchor is a
+  // property of the model rather than of the charts it ran on.
+  CHECK(anchored == boxes);
   CHECK(boxes == 192);
-  // **16 -> 7 when the placer stopped sitting on state boxes and the fold
-  // stopped discarding a label's charged rank gap.** A refusal makes strips
-  // infeasible and would raise this on its own; the room the fold gives back
-  // more than pays for it (11.9.3).
-  CHECK(fell == 7);
+  // 16 at P9c, then 7 when the placer stopped sitting on state boxes and the
+  // fold stopped discarding a label's charged rank gap, then 12 when the
+  // exemption narrowed to states enclosing *both* ends, and **18 under
+  // 11.9.4's anchor**: a leader admits eight attachment points at four
+  // directions where the strip grid admitted five offsets at two sides, and it
+  // forbids overlapping the leg it is anchored to, so six more boxes have
+  // nowhere left to go. **Every fallback is a sliced label**, so this number
+  // and 11.9.3's slice count are one number -- and the anchor makes that the
+  // *only* way a label ends up unanchored, which is what turns rip-up from an
+  // improvement into the last thing between this and zero (11.9.4).
+  CHECK(fell == 18);
 }
 
 TEST_CASE("drawlist corpus: the layout goldens' measurement policy is stated here") {

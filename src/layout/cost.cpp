@@ -642,12 +642,21 @@ CostTerms cost_terms(Chart const &c,
         (s.path_box[i].subject < c.transitions.size())) {
       subject = s.path_box[i].subject;
       height = s.path_box[i].h;
+      // Both ends, not either: a state enclosing one endpoint does not have to
+      // hold the label -- the label belongs on the ancestral side of that
+      // crossing -- so only a state enclosing *both* is exempt from its own
+      // rect. `2` is the intersection; `1` is src's chain alone, which the
+      // reset below clears along with it (11.9.3).
       mark(c.transitions[subject].src, 1);
-      mark(c.transitions[subject].dst, 1);
+      StateId up{ enclosing_state(c, c.transitions[subject].dst) };
+      for (size_t step = 0; (step < c.states.size()) && (up.v != INVALID); ++step) {
+        if (encloses[up.v] == 1) { encloses[up.v] = 2; }
+        up = enclosing_state(c, up);
+      }
     }
     for (uint32_t st = 0; st < c.states.size(); ++st) {
       if (c.states[st].live == 0) { continue; }
-      if (encloses[st] != 0) {
+      if (encloses[st] == 2) {
         if (overlaps(r.placed[i], z.before[st]) || overlaps(r.placed[i], z.after[st])) {
           ++t.label;
         }
@@ -673,10 +682,7 @@ CostTerms cost_terms(Chart const &c,
       Wide const shortfall{ (own + height) - other };
       if (shortfall > 0) { t.label_near += shortfall; }
     }
-    if (subject != INVALID) {
-      mark(c.transitions[subject].src, 0);
-      mark(c.transitions[subject].dst, 0);
-    }
+    if (subject != INVALID) { mark(c.transitions[subject].src, 0); }
   }
 
   // A direct arrow between two concurrent submachines wants them adjacent;

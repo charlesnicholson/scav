@@ -313,6 +313,36 @@ def audit(svg, every, chart, doc, verbose):
     boundaries = [ink_span((int(a), int(b)), (int(c), int(d)), int(w))
                   for a, b, c, d, w in DIVIDER_INK.findall(svg)]
 
+    # 11.9.4's anchor, checked where it holds. The leader fixes the distance
+    # from a point on a label's own polyline to one of the eight points of its
+    # *placed box*, and the drawing shows the glyphs inside that box, so the
+    # SVG cannot see the invariant and the geometry columns can.
+    #
+    # **The bound, not an equality.** The leader fixes the distance to the
+    # attachment *point*, and the box's nearest edge is at most that far: a
+    # corner attachment with an axis-aligned leader legitimately sits closer,
+    # since the point it is held by is a corner and not the edge facing the
+    # leg. So `<= leader` is the whole of what anchoring means for a reader --
+    # a label is never further from its own line than half an em -- and it is
+    # true by construction of every anchored box. What it catches is the
+    # centred fallback, which is anchored to nothing.
+    leader = doc["geometry"].get("label_leader")
+    for i, rect in enumerate(doc["geometry"].get("placed") or []):
+        subjects = doc["geometry"].get("placed_subject") or []
+        if leader is None or i >= len(subjects):
+            continue
+        t = subjects[i]
+        pts = doc["geometry"]["route"][t] if t < len(doc["geometry"]["route"]) else []
+        pairs = list(zip(pts, pts[1:]))
+        if not pairs:
+            continue
+        found["placed label boxes"] = found.get("placed label boxes", 0) + 1
+        near = min(gap(tuple(rect), span(tuple(a), tuple(b))) for a, b in pairs)
+        if near > leader:
+            note("label not anchored to its own polyline",
+                 f"t{t} box is {near} from its nearest own leg, leader {leader}",
+                 tuple(rect))
+
     for m in TEXT.finditer(svg):
         x, y, size, length, which, ident = m.groups()
         x, y, size, length = int(x), int(y), int(size), int(length)
@@ -333,7 +363,10 @@ def audit(svg, every, chart, doc, verbose):
         # A transition with no route is the exception: nothing placed its label,
         # and the builder draws it in the band its source reserved for exactly it.
         edge = doc["transitions"][int(ident)]
-        under = enclosing(doc, edge["src"]) | enclosing(doc, edge["dst"])
+        # States enclosing *both* ends. One enclosing a single end does not have
+        # to hold the label -- the label belongs on the ancestral side of that
+        # crossing -- so it is not exempt from the whole-rect test.
+        under = enclosing(doc, edge["src"]) & enclosing(doc, edge["dst"])
         own_band = edge["src"] if not doc["geometry"]["route"][int(ident)] else None
         for i in live:
             hit = (any(struck(band[i]) for j, band in enumerate(bands)
@@ -378,16 +411,6 @@ def audit(svg, every, chart, doc, verbose):
         if mine and theirs and min(mine) + size > min(theirs):
             note("label nearer another route than its own",
                  f"own {min(mine)} vs {min(theirs)}", (x, y - size, length, size))
-
-        # A label hangs off its own polyline, full stop -- not merely nearer to
-        # it than to somebody else's. One text height is the bound: past that
-        # there is room for another line between the two and the reader has
-        # nothing tying them together. Absolute, so an orphan in empty canvas
-        # is caught where the relative test above sees nothing to compare.
-        if mine and min(mine) > size:
-            note("label detached from its own polyline",
-                 f"{min(mine)} away, one height is {size}",
-                 (x, y - size, length, size))
 
         # Everything of a submachine is contained in its parent state's box,
         # out-of-machine transitions excepted -- a transition with no state
@@ -504,7 +527,7 @@ def main():
              "label sliced by its own route": "transition labels",
              "label sliced by a region divider": "transition labels",
              "attachment on a drawn corner": "state attachments",
-             "label detached from its own polyline": "transition labels",
+             "label not anchored to its own polyline": "placed label boxes",
              "label outside its enclosing state": "transition labels",
              "segment flush along a box": "route segments",
              "route start not on any border": "route starts",
@@ -519,7 +542,8 @@ def main():
              "texts overprint each other": "texts",
              "mark outside its glyph": "marks in a glyph"}
     for key in ("route segments", "route starts", "arrowheads", "state attachments",
-                "region dividers", "transition labels", "texts", "marks in a glyph"):
+                "region dividers", "transition labels", "placed label boxes", "texts",
+                "marks in a glyph"):
         print(f"{key:<40} {total.get(key, 0)}")
     print()
     # Not a ratio, so it sits outside the block below: the shared run's extent is
