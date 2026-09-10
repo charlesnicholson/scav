@@ -313,6 +313,34 @@ def audit(svg, every, chart, doc, verbose):
     boundaries = [ink_span((int(a), int(b)), (int(c), int(d)), int(w))
                   for a, b, c, d, w in DIVIDER_INK.findall(svg)]
 
+    # **Two lanes closer than the type they carry.** `routes share a run` counts
+    # segments that are *collinear*; this counts ones that merely run alongside
+    # closer than a line of text is tall, which is what makes `mill` unreadable
+    # and what no class here could see (11.9.3). Parallel, overlapping along
+    # their own axis, and separated by less than one text height.
+    heights = [int(m.group(3)) for m in TEXT.finditer(svg)]
+    line = min(heights) if heights else 0
+    for i, (a, b, t1, _) in enumerate(legs):
+        for c, d, t2, _ in legs[i + 1:]:
+            if t1 == t2 or not line:
+                continue
+            flat = (a[1] == b[1]) and (c[1] == d[1])
+            up = (a[0] == b[0]) and (c[0] == d[0])
+            if not (flat or up):
+                continue
+            if flat:
+                apart = abs(a[1] - c[1])
+                along = min(max(a[0], b[0]), max(c[0], d[0])) - \
+                    max(min(a[0], b[0]), min(c[0], d[0]))
+            else:
+                apart = abs(a[0] - c[0])
+                along = min(max(a[1], b[1]), max(c[1], d[1])) - \
+                    max(min(a[1], b[1]), min(c[1], d[1]))
+            if (0 < apart < line) and (along > 0):
+                note("lanes closer than one line of text",
+                     f"t{t1}/t{t2} {apart} apart over {along}, one line is {line}",
+                     ink_span(a, b, apart))
+
     # 11.9.4's anchor, checked where it holds. The leader fixes the distance
     # from a point on a label's own polyline to one of the eight points of its
     # *placed box*, and the drawing shows the glyphs inside that box, so the
@@ -524,6 +552,7 @@ def main():
 
     # Counts first, then the findings, so the ratio is visible.
     scale = {"segment not axis-aligned": "route segments",
+             "lanes closer than one line of text": "route segments",
              "label sliced by its own route": "transition labels",
              "label sliced by a region divider": "transition labels",
              "attachment on a drawn corner": "state attachments",

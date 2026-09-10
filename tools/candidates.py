@@ -294,6 +294,7 @@ DEFECTS = [
     # blind to rather than a preference it priced badly.
     "attachment on a drawn corner", "label not anchored to its own polyline",
     "label sliced by its own route", "label sliced by a region divider",
+    "lanes closer than one line of text",
     "label outside its enclosing state",
 ]
 
