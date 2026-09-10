@@ -124,38 +124,39 @@ uint32_t piece_axis(Piece const &p, int32_t &at) {
 // Two routes' shared ends: the identical points they finish and start with,
 // and whether the leg reaching each of those runs lies along it.
 struct Trunk {
-  uint32_t tail{ 0 }, head{ 0 };
-  bool merged_tail{ false }, merged_head{ false };
+  uint32_t tail{ 0 };
+  bool merged_tail{ false };
 };
+
+// **The exemption is one shared kink into a common destination, and nothing
+// else** (11.9.3). Two routes may read as one line where they are arriving at
+// the same state, because the reader has one thing to follow them to; two
+// routes leaving the same state read as one line going somewhere ambiguous,
+// and the fan-out that used to be excused here is exactly that. So the head is
+// no longer counted, and the tail is capped at the final leg -- two shared
+// points -- rather than at however much suffix happens to coincide.
+constexpr uint32_t TRUNK_TAIL{ 2 };
 
 Trunk trunk_of(std::vector<scav_point> const &pts, scav_span a, scav_span b) {
   Trunk out;
-  uint32_t const shortest{ imin(a.len, b.len) };
+  uint32_t const shortest{ imin(imin(a.len, b.len), TRUNK_TAIL) };
   while ((out.tail < shortest) &&
          same(pts[(a.off + a.len - 1) - out.tail], pts[(b.off + b.len - 1) - out.tail])) {
     ++out.tail;
-  }
-  while ((out.head < shortest) && same(pts[a.off + out.head], pts[b.off + out.head])) {
-    ++out.head;
   }
   if ((out.tail > 0) && (out.tail < a.len) && (out.tail < b.len)) {
     uint32_t const i{ (a.off + a.len - 1) - out.tail };
     uint32_t const j{ (b.off + b.len - 1) - out.tail };
     out.merged_tail = shared_run(pts[i], pts[i + 1], pts[j], pts[j + 1]) > 0;
   }
-  if ((out.head > 0) && (out.head < a.len) && (out.head < b.len)) {
-    uint32_t const i{ (a.off + out.head) - 1 };
-    uint32_t const j{ (b.off + out.head) - 1 };
-    out.merged_head = shared_run(pts[i], pts[i + 1], pts[j], pts[j + 1]) > 0;
-  }
   return out;
 }
 
-// Segment `k` of one route of the pair lies in the trunk: inside a shared run,
-// or the leg that merges into one. `len` counts that route's points.
+// Segment `k` of one route of the pair lies in the trunk: the final leg they
+// arrive on as one, or the leg that merges into it. `len` counts that route's
+// points.
 bool trunk_piece(Trunk const &t, uint32_t len, uint32_t k) {
-  return ((k + t.tail) >= len) || (t.merged_tail && ((k + t.tail + 1) == len)) ||
-         ((k + 1) < t.head) || (t.merged_head && ((k + 1) == t.head));
+  return ((k + t.tail) >= len) || (t.merged_tail && ((k + t.tail + 1) == len));
 }
 
 // 0, 1, or 2 per axis, the same token the structural hash uses, so a bend is

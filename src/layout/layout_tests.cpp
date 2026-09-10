@@ -1317,15 +1317,18 @@ constexpr std::array<char const *, 2> SCALE_ROUTERS{ "orthogonal", "straight" };
 // label, label_near, aspect, area.
 // `excess_len` on the two nested rows moved when the corner inset landed: a
 // seat held off an arc is a slightly longer route, +560 and +2,752 units of
-// 46.6M and 34.0M.
+// 46.6M and 34.0M. **`corridor` then moved by much more** when the trunk
+// exemption narrowed to a common destination (11.9.3): a fan-out out of one
+// state is charged now, and both 2k shapes are largely fan-out -- 139,984 to
+// 396,000 on the nested rows and 11,680 to 992,208 on the flat.
 constexpr std::array<std::array<int64_t, 11>, 8> SCALE_PINNED{
-  { { 0, 0, 4136, 139984, 1880, 46592912, 0, 0, 0, 2527936, 89039694848 },
+  { { 0, 0, 4136, 396000, 1880, 46592912, 0, 0, 0, 2527936, 89039694848 },
     { 11464, 0, 3416, 172160, 75136, 605104352, 0, 0, 0, 2527936, 89039694848 },
-    { 0, 0, 4784, 11680, 2224, 34006304, 0, 0, 0, 125776, 32837048320 },
+    { 0, 0, 4784, 992208, 2224, 34006304, 0, 0, 0, 125776, 32837048320 },
     { 12944, 0, 3504, 0, 65752, 596909344, 0, 0, 0, 125776, 32837048320 },
-    { 0, 0, 740, 111680, 152, 4553385, 0, 0, 0, 53760, 3718840320 },
+    { 0, 0, 740, 112416, 152, 4553385, 0, 0, 0, 53760, 3718840320 },
     { 1996, 0, 318, 0, 270, 7357645, 0, 0, 0, 53760, 3718840320 },
-    { 0, 0, 774, 0, 173, 3760046, 0, 0, 0, 10688, 1589407744 },
+    { 0, 0, 774, 648, 173, 3760046, 0, 0, 0, 10688, 1589407744 },
     { 1998, 0, 328, 0, 278, 5584737, 0, 0, 0, 10688, 1589407744 } }
 };
 
