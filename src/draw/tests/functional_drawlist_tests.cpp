@@ -248,10 +248,11 @@ TEST_CASE("drawlist gauntlet: what crowd's tighter packing costs its labels") {
   //
   // **`label` was 4, read 6 once the count stopped exempting a transition's own
   // endpoints, and is 5 now the placer stops choosing those positions**; the
-  // one left is structural. `label_near` 442 -> 470 is what that costs: a box
-  // refused a state's rect takes a strip further from its own leg, because
-  // 11.9's objective ranks the shortfall but its feasibility set holds only
-  // I4 -- I2 and I3 are still terms rather than constraints (11.9.3).
+  // one left is structural. `label_near` went 442 -> 470 when a box refused a
+  // state's rect had to take a strip further from its own leg, and **back to
+  // 442 under 11.9.4's anchor**: there is no "further" to take, so the term
+  // that measured how far a box had drifted from its own line reads what it
+  // read before the refusal, with the refusal still in force.
   Metrics const m{ bundled() };
   scav_profile const p{ readable() };
   Run const r{ run_pipeline("gauntlet/crowd.scav", m, p) };
@@ -259,7 +260,7 @@ TEST_CASE("drawlist gauntlet: what crowd's tighter packing costs its labels") {
     cost_columns(r.chart, decompose(r.chart), p, as_spaces(r.spaces), r.placed)
   };
   CHECK(t.label == 5);
-  CHECK(t.label_near == 470);
+  CHECK(t.label_near == 442);
 }
 
 TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back") {

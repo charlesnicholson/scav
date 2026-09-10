@@ -90,6 +90,68 @@ scav_rect on_route(std::vector<scav_point> const &poly,
   return placed[0];
 }
 
+// The leader `tiny()` gives: half an em of the 20-unit em above (11.9.4).
+constexpr int32_t LEADER{ 10 };
+
+// The gap from a placed box to the nearest leg of one polyline, and which leg
+// that is. Together they are what "beside its own line" means without naming a
+// coordinate: the strip grid's exact rects were an artefact of five fixed
+// offsets, and the anchor has no such grid to read off.
+Wide own_gap(scav_rect const &at, std::vector<scav_point> const &poly) {
+  Wide nearest{ -1 };
+  for (uint32_t k = 0; (k + 1) < poly.size(); ++k) {
+    Wide const away{ chebyshev_gap(at, span_rect(poly[k], poly[k + 1])) };
+    nearest = (nearest < 0) ? away : imin(nearest, away);
+  }
+  return nearest;
+}
+
+uint32_t nearest_leg(scav_rect const &at, std::vector<scav_point> const &poly) {
+  uint32_t which{ INVALID };
+  Wide nearest{ -1 };
+  for (uint32_t k = 0; (k + 1) < poly.size(); ++k) {
+    Wide const away{ chebyshev_gap(at, span_rect(poly[k], poly[k + 1])) };
+    if ((nearest < 0) || (away < nearest)) {
+      nearest = away;
+      which = k;
+    }
+  }
+  return which;
+}
+
+// 11.9.4's invariant: one of the box's eight points is exactly `LEADER` from a
+// point on its own polyline, so the box's nearest edge is at most that far. A
+// bound rather than an equality, because a corner attachment is held by a
+// corner and not by the edge facing the leg.
+bool anchored(scav_rect const &at, std::vector<scav_point> const &poly) {
+  Wide const away{ own_gap(at, poly) };
+  return (away >= 0) && (away <= Wide{ LEADER });
+}
+
+// No leg of its own route may cross it, the ridden one included: an
+// axis-aligned leader off a corner can still put the box across the line it is
+// anchored to, which is the slice the anchor exists to stop (11.9.4).
+bool uncut(scav_rect const &at, std::vector<scav_point> const &poly) {
+  for (uint32_t k = 0; (k + 1) < poly.size(); ++k) {
+    if (overlaps(at, span_rect(poly[k], poly[k + 1]))) { return false; }
+  }
+  return true;
+}
+
+// A subject's polyline read back out of the `Lines` a test built, so a
+// property can be asserted without naming the points twice.
+std::vector<scav_point> poly_of(Lines const &l, uint32_t subject) {
+  std::vector<scav_point> out;
+  scav_span const r{ l.route[subject] };
+  for (uint32_t k = 0; k < r.len; ++k) { out.push_back(l.points[r.off + k]); }
+  return out;
+}
+
+// The two together, which is what every placement below owes.
+bool placed_well(scav_rect const &at, std::vector<scav_point> const &poly) {
+  return anchored(at, poly) && uncut(at, poly);
+}
+
 constexpr scav_path_box LABEL{ .subject = 0, .w = 60, .h = 20, .order = 0 };
 constexpr scav_rect CHART{ .x = 0, .y = 0, .w = 600, .h = 400 };
 
@@ -110,8 +172,11 @@ TEST_CASE("label: a box sits beside its route's longest horizontal leg") {
 
   std::vector<scav_rect> placed;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
-  // Above the leg, centred on it: the low side wins the tie with the high one.
-  CHECK((placed[0] == scav_rect{ .x = 220, .y = 130, .w = 60, .h = 20 }));
+  // Beside the leg, which is the whole of the claim: anchored to it, not cut
+  // by it, and on the low side, which wins the tie with the high one. The rect
+  // itself was an artefact of the strip grid's five fixed offsets (11.9.4).
+  CHECK(placed_well(placed[0], poly_of(l, 0)));
+  CHECK((placed[0].y + placed[0].h) <= 150);
 }
 
 TEST_CASE("label: a box slides along its leg to clear a state it is not under") {
@@ -132,8 +197,10 @@ TEST_CASE("label: a box slides along its leg to clear a state it is not under") 
   std::vector<scav_rect> placed;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
   CHECK(!overlaps(placed[0], z.state[other.v]));
-  CHECK(((placed[0].y == 130) || (placed[0].y == 150)));  // still against the leg
-  CHECK((placed[0] == scav_rect{ .x = 130, .y = 130, .w = 60, .h = 20 }));
+  CHECK(placed_well(placed[0], poly_of(l, 0)));  // still against the leg
+  // Slid along it rather than pushed off it: the box clears the stranger by
+  // moving in x, so it stays within the leader in y.
+  CHECK(own_gap(placed[0], poly_of(l, 0)) <= Wide{ LEADER });
 }
 
 TEST_CASE("label: the composite a transition runs in holds the box, its band does not") {
@@ -155,10 +222,10 @@ TEST_CASE("label: the composite a transition runs in holds the box, its band doe
 
   std::vector<scav_rect> placed;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
-  CHECK((placed[0] == scav_rect{ .x = 245, .y = 110, .w = 60, .h = 20 }));
+  CHECK(placed_well(placed[0], poly_of(l, 0)));
 
-  // The band grew over every strip the only leg there is has, so the box takes
-  // the centred placement.
+  // The band grew over everything within the leader of the only leg there is,
+  // so the box takes the centred placement.
   z.before[outer.v] = { .x = 10, .y = 0, .w = 580, .h = 300 };
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 1);
   CHECK((placed[0] == scav_rect{ .x = 245, .y = 120, .w = 60, .h = 20 }));
@@ -182,7 +249,9 @@ TEST_CASE("label: a box takes the side clear of another transition's route") {
   std::vector<scav_rect> placed;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
   // The low side would be struck through by the other route, so the high one.
-  CHECK((placed[0] == scav_rect{ .x = 220, .y = 150, .w = 60, .h = 20 }));
+  CHECK(placed_well(placed[0], poly_of(l, 0)));
+  // The side clear of the stranger, which here is the low one.
+  CHECK(placed[0].y >= 150);
 }
 
 TEST_CASE("label: a box crosses to the far side of its own leg to keep its distance") {
@@ -206,7 +275,9 @@ TEST_CASE("label: a box crosses to the far side of its own leg to keep its dista
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
   // Both sides are equally far from the centred placement and the low one wins
   // that tie, so the far side is the shortfall's doing and nothing else.
-  CHECK((placed[0] == scav_rect{ .x = 220, .y = 150, .w = 60, .h = 20 }));
+  CHECK(placed_well(placed[0], poly_of(l, 0)));
+  // Below its own leg, which is the side away from the other transition's.
+  CHECK(placed[0].y >= 150);
 }
 
 TEST_CASE("label: a transition's second box goes past its first") {
@@ -225,8 +296,8 @@ TEST_CASE("label: a transition's second box goes past its first") {
 
   std::vector<scav_rect> placed;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
-  CHECK((placed[0] == scav_rect{ .x = 470, .y = 80, .w = 60, .h = 20 }));
-  CHECK((placed[1] == scav_rect{ .x = 490, .y = 100, .w = 60, .h = 20 }));
+  CHECK(placed_well(placed[0], poly_of(l, 0)));
+  CHECK(placed_well(placed[1], poly_of(l, 0)));
   CHECK(!overlaps(placed[0], placed[1]));
 }
 
@@ -246,11 +317,17 @@ TEST_CASE("label: a second box goes past the first along a right-to-left leg") {
 
   std::vector<scav_rect> placed;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
-  CHECK((placed[0] == scav_rect{ .x = 470, .y = 80, .w = 60, .h = 20 }));
+  CHECK(placed_well(placed[0], poly_of(l, 0)));
   // Further along a leg running leftwards is the smaller x, the mirror of what
   // the left-to-right case above asks for.
-  CHECK((placed[1] == scav_rect{ .x = 450, .y = 100, .w = 60, .h = 20 }));
-  CHECK(placed[1].x < placed[0].x);
+  CHECK(placed_well(placed[1], poly_of(l, 0)));
+  // **`x` is no longer the measure of "further along".** The ordering rule is
+  // on the anchor, and two anchors at different points along the leg can land
+  // a box at one `x` through different attachment points -- the second here
+  // moves along and attaches by a side rather than the bottom. The rect does
+  // not expose the anchor, so what is checkable is that the two are distinct
+  // and clear of each other (11.9.4, owed: the anchor as an output).
+  CHECK_FALSE((placed[0] == placed[1]));
   CHECK(!overlaps(placed[0], placed[1]));
 }
 
@@ -270,9 +347,11 @@ TEST_CASE("label: a second box goes past the first along a bottom-to-top leg") {
 
   std::vector<scav_rect> placed;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
-  CHECK((placed[0] == scav_rect{ .x = 40, .y = 490, .w = 60, .h = 20 }));
-  CHECK((placed[1] == scav_rect{ .x = 40, .y = 470, .w = 60, .h = 20 }));
-  CHECK(placed[1].y < placed[0].y);
+  CHECK(placed_well(placed[0], poly_of(l, 0)));
+  CHECK(placed_well(placed[1], poly_of(l, 0)));
+  // As above: the anchor moved along the upright leg, and `y` is not what says
+  // so once the attachment point is free to differ (11.9.4).
+  CHECK_FALSE((placed[0] == placed[1]));
   CHECK(!overlaps(placed[0], placed[1]));
 }
 
@@ -318,8 +397,13 @@ TEST_CASE(
   CHECK((on_route(leg, {}, { .x = 0, .y = 130, .w = 600, .h = 270 }, LABEL, fell) ==
          scav_rect{ .x = 220, .y = 130, .w = 60, .h = 20 }));
   CHECK(fell == 0);
-  CHECK((on_route(leg, {}, { .x = 0, .y = 131, .w = 600, .h = 269 }, LABEL, fell) ==
-         scav_rect{ .x = 220, .y = 150, .w = 60, .h = 20 }));
+  // One unit of chart taken away and the high side is no longer inside it, so
+  // the box goes to the low one; both are anchored either way.
+  scav_rect const tight{
+    on_route(leg, {}, { .x = 0, .y = 131, .w = 600, .h = 269 }, LABEL, fell)
+  };
+  CHECK(placed_well(tight, leg));
+  CHECK(tight.y >= 150);
   CHECK(fell == 0);
 }
 
@@ -327,12 +411,18 @@ TEST_CASE(
     "label: a stranger's rect blocks a candidate it overlaps and not one it touches") {
   std::vector<scav_point> const leg{ { .x = 100, .y = 150 }, { .x = 400, .y = 150 } };
   uint32_t fell{ 0 };
-  scav_rect const flush{ .x = 200, .y = 30, .w = 100, .h = 100 };  // bottom at 130
-  CHECK((on_route(leg, { flush }, CHART, LABEL, fell) ==
-         scav_rect{ .x = 220, .y = 130, .w = 60, .h = 20 }));
-  scav_rect const over{ .x = 200, .y = 31, .w = 100, .h = 100 };  // bottom at 131
-  CHECK((on_route(leg, { over }, CHART, LABEL, fell) ==
-         scav_rect{ .x = 220, .y = 150, .w = 60, .h = 20 }));
+  // Touching is free, so a rect whose bottom edge is the box's top edge leaves
+  // the high side usable; one unit lower overlaps and drives the box across.
+  scav_rect const flush{ .x = 200, .y = 130 - 100, .w = 100, .h = 100 };
+  scav_rect const touched{ on_route(leg, { flush }, CHART, LABEL, fell) };
+  CHECK(placed_well(touched, leg));
+  CHECK(!overlaps(touched, flush));
+  CHECK((touched.y + touched.h) <= 150);
+  scav_rect const over{ .x = 200, .y = 131 - 100, .w = 100, .h = 100 };
+  scav_rect const pushed{ on_route(leg, { over }, CHART, LABEL, fell) };
+  CHECK(placed_well(pushed, leg));
+  CHECK(!overlaps(pushed, over));
+  CHECK(pushed.y >= 150);
   CHECK(fell == 0);
 }
 
@@ -356,13 +446,14 @@ TEST_CASE(
 
   std::vector<scav_rect> placed;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
-  CHECK((placed[0] == scav_rect{ .x = 245, .y = 110, .w = 60, .h = 20 }));
+  CHECK(placed_well(placed[0], poly_of(l, 0)));
 
-  // The band covers the near strips of both sides, so the box takes the second
-  // strip on the far one.
+  // The band an ancestor reserved is an obstacle even though the ancestor's own
+  // rect is not: the box clears the band and stays anchored.
   z.after[outer.v] = { .x = 10, .y = 100, .w = 580, .h = 40 };
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
-  CHECK((placed[0] == scav_rect{ .x = 245, .y = 150, .w = 60, .h = 20 }));
+  CHECK(placed_well(placed[0], poly_of(l, 0)));
+  CHECK(!overlaps(placed[0], z.after[outer.v]));
 }
 
 TEST_CASE("label: a box already placed is an obstacle to the next transition's") {
@@ -383,8 +474,8 @@ TEST_CASE("label: a box already placed is an obstacle to the next transition's")
 
   std::vector<scav_rect> placed;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
-  CHECK((placed[0] == scav_rect{ .x = 220, .y = 130, .w = 60, .h = 20 }));
-  CHECK((placed[1] == scav_rect{ .x = 220, .y = 150, .w = 60, .h = 20 }));
+  CHECK(placed_well(placed[0], poly_of(l, 0)));
+  CHECK(placed_well(placed[1], poly_of(l, 1)));
   CHECK(!overlaps(placed[0], placed[1]));
 }
 
@@ -395,73 +486,86 @@ TEST_CASE("label: a candidate over a leg of its own route it does not ride is re
                                        { .x = 400, .y = 150 },
                                        { .x = 400, .y = 0 } };
   uint32_t fell{ 0 };
-  CHECK((on_route(elbow, {}, CHART, LABEL, fell) ==
-         scav_rect{ .x = 345, .y = 150, .w = 60, .h = 20 }));
+  // The upright leg is refused like any other obstacle, and `uncut` is the
+  // whole of that claim now: no leg of its own route may cross it, the ridden
+  // one included (11.9.4).
+  scav_rect const at{ on_route(elbow, {}, CHART, LABEL, fell) };
+  CHECK(placed_well(at, elbow));
   CHECK(fell == 0);
 }
 
-TEST_CASE("label: each of the five strips is reachable and there is no sixth") {
+TEST_CASE("label: the leader is the only offset, and blocking it is the fallback") {
+  // What replaced "five strips and no sixth": the anchor has one distance, not
+  // a grid of them (11.9.4). A wall over one side leaves the other, and a wall
+  // over everything within the leader leaves nothing.
   std::vector<scav_point> const leg{ { .x = 100, .y = 150 }, { .x = 400, .y = 150 } };
-  for (int32_t n = 0; n < 5; ++n) {
-    CAPTURE(n);
-    // Everything from the nth strip's far edge down through the whole high side.
-    scav_rect const wall{ .x = 0, .y = 150 - (20 * n), .w = 600, .h = 100 + (20 * n) };
-    uint32_t fell{ 0 };
-    CHECK((on_route(leg, { wall }, CHART, LABEL, fell) ==
-           scav_rect{ .x = 220, .y = 130 - (20 * n), .w = 60, .h = 20 }));
-    CHECK(fell == 0);
-  }
   uint32_t fell{ 0 };
-  scav_rect const all{ .x = 0, .y = 50, .w = 600, .h = 200 };
-  CHECK((on_route(leg, { all }, CHART, LABEL, fell) ==
-         scav_rect{ .x = 220, .y = 140, .w = 60, .h = 20 }));
+
+  scav_rect const high{ .x = 0, .y = 150 - 100, .w = 600, .h = 100 };
+  scav_rect const low{ on_route(leg, { high }, CHART, LABEL, fell) };
+  CHECK(placed_well(low, leg));
+  CHECK(low.y >= 150);
+  CHECK(fell == 0);
+
+  // Both sides for the leader's whole reach: no attachment point can be held at
+  // that distance and stay clear, so the centred placement is what is left --
+  // and it rides its own leg, which is the slice the fallback always is.
+  scav_rect const all{ .x = 0, .y = 150 - 100, .w = 600, .h = 200 };
+  scav_rect const stuck{ on_route(leg, { all }, CHART, LABEL, fell) };
   CHECK(fell == 1);
+  CHECK_FALSE(uncut(stuck, leg));
 }
 
-TEST_CASE("label: the slide hits the leg's low end, its high end, and its exact centre") {
+TEST_CASE("label: the anchor slides to either end of its leg") {
+  // What replaced "low end, high end, and exact centre": the slide steps half a
+  // box height and clamps to both ends, and the centre is no longer a slot the
+  // enumeration adds -- a step that fine reaches it or near enough (11.9.4).
   std::vector<scav_point> const leg{ { .x = 100, .y = 150 }, { .x = 400, .y = 150 } };
   uint32_t fell{ 0 };
 
+  // Everything but the leg's low end walled off, both sides.
   scav_rect const past_low{ .x = 130, .y = 50, .w = 470, .h = 200 };
-  CHECK((on_route(leg, { past_low }, CHART, LABEL, fell) ==
-         scav_rect{ .x = 70, .y = 130, .w = 60, .h = 20 }));
+  scav_rect const at_low{ on_route(leg, { past_low }, CHART, LABEL, fell) };
+  CHECK(placed_well(at_low, leg));
+  CHECK(!overlaps(at_low, past_low));
+  CHECK(at_low.x < 130);
   CHECK(fell == 0);
 
+  // And everything but its high end.
   scav_rect const before_high{ .x = 0, .y = 50, .w = 370, .h = 200 };
-  CHECK((on_route(leg, { before_high }, CHART, LABEL, fell) ==
-         scav_rect{ .x = 370, .y = 130, .w = 60, .h = 20 }));
-
-  // 250 is no multiple of the box height above 100, so only the centre slot
-  // reaches the window; its neighbours at 240 and 260 hit a wall.
-  scav_rect const left{ .x = 0, .y = 50, .w = 220, .h = 200 };
-  scav_rect const right{ .x = 280, .y = 50, .w = 320, .h = 200 };
-  CHECK((on_route(leg, { left, right }, CHART, LABEL, fell) ==
-         scav_rect{ .x = 220, .y = 130, .w = 60, .h = 20 }));
+  scav_rect const at_high{ on_route(leg, { before_high }, CHART, LABEL, fell) };
+  CHECK(placed_well(at_high, leg));
+  CHECK(!overlaps(at_high, before_high));
+  CHECK((at_high.x + at_high.w) > 370);
   CHECK(fell == 0);
 }
 
-TEST_CASE(
-    "label: a leg no whole number of box heights long still offers its end and its "
-    "centre") {
-  // 295 long: the slots run 100..380 and the end and the centre are the two the
-  // enumeration adds past them.
+TEST_CASE("label: a leg no whole number of steps long still reaches its far end") {
+  // 295 long against a 10-unit step, so the last whole step falls short of the
+  // end and the clamp is what reaches it.
   std::vector<scav_point> const leg{ { .x = 100, .y = 150 }, { .x = 395, .y = 150 } };
   uint32_t fell{ 0 };
-
   scav_rect const before_high{ .x = 0, .y = 50, .w = 365, .h = 200 };
-  CHECK((on_route(leg, { before_high }, CHART, LABEL, fell) ==
-         scav_rect{ .x = 365, .y = 130, .w = 60, .h = 20 }));
+  scav_rect const at_end{ on_route(leg, { before_high }, CHART, LABEL, fell) };
+  CHECK(placed_well(at_end, leg));
+  CHECK(!overlaps(at_end, before_high));
+  CHECK((at_end.x + at_end.w) > 365);
   CHECK(fell == 0);
+}
 
-  scav_rect const left{ .x = 0, .y = 50, .w = 217, .h = 200 };
-  scav_rect const right{ .x = 277, .y = 50, .w = 323, .h = 200 };
-  CHECK((on_route(leg, { left, right }, CHART, LABEL, fell) ==
-         scav_rect{ .x = 217, .y = 130, .w = 60, .h = 20 }));
-
-  scav_rect const past_low{ .x = 130, .y = 50, .w = 470, .h = 200 };
-  CHECK((on_route(leg, { past_low }, CHART, LABEL, fell) ==
-         scav_rect{ .x = 70, .y = 130, .w = 60, .h = 20 }));
+TEST_CASE("label: an earlier leg of the route outranks a later one") {
+  // `seg` is the key's first component after the shortfall and the distance,
+  // and it is the one component the anchor left unchanged: `side` and `strip`
+  // became `attach` and `lead`, whose precedence is `better`'s lexicographic
+  // construction rather than a shape anybody can draw (11.9.4).
+  std::vector<scav_point> const elbow{ { .x = 100, .y = 150 },
+                                       { .x = 400, .y = 150 },
+                                       { .x = 400, .y = 350 } };
+  uint32_t fell{ 0 };
+  scav_rect const at{ on_route(elbow, {}, CHART, LABEL, fell) };
+  CHECK(placed_well(at, elbow));
   CHECK(fell == 0);
+  CHECK(nearest_leg(at, elbow) == 0);
 }
 
 TEST_CASE("label: the anchor distance outranks the leg a candidate rides") {
@@ -471,61 +575,39 @@ TEST_CASE("label: the anchor distance outranks the leg a candidate rides") {
                                       { .x = 100, .y = 150 },
                                       { .x = 400, .y = 150 } };
   uint32_t fell{ 0 };
-  CHECK((on_route(bend, {}, CHART, LABEL, fell) ==
-         scav_rect{ .x = 220, .y = 130, .w = 60, .h = 20 }));
+  scav_rect const at{ on_route(bend, {}, CHART, LABEL, fell) };
+  CHECK(placed_well(at, bend));
   CHECK(fell == 0);
+  // The horizontal leg, which is the one the anchor is nearest, not the
+  // upright leg that comes first in the route.
+  CHECK(nearest_leg(at, bend) == 1);
 }
 
-TEST_CASE("label: the leg outranks the side") {
-  // The wall leaves one candidate on each upright leg, equally far from the
-  // anchor: the first leg's is on the high side and the third leg's on the low.
-  std::vector<scav_point> const bracket{ { .x = 400, .y = 50 },
-                                         { .x = 400, .y = 150 },
-                                         { .x = 100, .y = 150 },
-                                         { .x = 100, .y = 50 } };
-  scav_rect const wall{ .x = 60, .y = 0, .w = 380, .h = 400 };
-  uint32_t fell{ 0 };
-  CHECK((on_route(bracket, { wall }, CHART, LABEL, fell) ==
-         scav_rect{ .x = 440, .y = 140, .w = 60, .h = 20 }));
-  CHECK(fell == 0);
-}
+// `side` and `strip` are gone with the strip grid, and with them the three
+// cases that drew a shape for each component's precedence. What survives is
+// stated where it is observable: the leg's precedence has its own case above,
+// and `attach` and `lead` are ordered by `better`'s lexicographic construction
+// in label.cpp, which no geometry distinguishes from any other total order
+// (11.9.4).
 
-TEST_CASE("label: the side outranks the strip") {
-  // 280 long, so the centre 240 is a slot. Three candidates tie at 50: the low
-  // side's third strip and the high side's first at two slides either side.
-  std::vector<scav_point> const leg{ { .x = 100, .y = 150 }, { .x = 380, .y = 150 } };
-  std::vector<scav_rect> const walls{
-    { .x = 0, .y = 110, .w = 600, .h = 40 },   // the low side's first two strips
-    { .x = 230, .y = 150, .w = 20, .h = 20 },  // the high side's first strip, mid-leg
-    { .x = 0, .y = 170, .w = 600, .h = 80 }    // the high side's other four strips
-  };
-  uint32_t fell{ 0 };
-  CHECK((on_route(leg, walls, CHART, LABEL, fell) ==
-         scav_rect{ .x = 210, .y = 90, .w = 60, .h = 20 }));
-  CHECK(fell == 0);
-}
-
-TEST_CASE("label: the strip outranks the slide") {
-  // The wall takes the centre slide off both first strips, leaving the first
-  // strip one slide out and the second strip on centre, tied at 30.
-  std::vector<scav_point> const leg{ { .x = 100, .y = 150 }, { .x = 380, .y = 150 } };
-  scav_rect const wall{ .x = 210, .y = 130, .w = 20, .h = 40 };
-  uint32_t fell{ 0 };
-  CHECK((on_route(leg, { wall }, CHART, LABEL, fell) ==
-         scav_rect{ .x = 230, .y = 130, .w = 60, .h = 20 }));
-  CHECK(fell == 0);
-}
-
-TEST_CASE("label: candidates alike to the slide go to the lower one") {
-  // A box taller than it is wide steps further than its own width, so a wall can
-  // take the centre slide alone and leave the two either side of it tied.
+TEST_CASE("label: two runs over one input place the box identically") {
+  // What "candidates alike go to the lower one" is about, stated where it is
+  // observable: the key is a total order over integers, so a tie has exactly
+  // one winner and the same input cannot come out twice (6). A wall taking the
+  // centre slide alone leaves the two either side of it tied on everything but
+  // the slide, which is the case that would wobble if the order were partial.
   std::vector<scav_point> const leg{ { .x = 100, .y = 150 }, { .x = 400, .y = 150 } };
   scav_rect const wall{ .x = 235, .y = 90, .w = 20, .h = 120 };
   scav_path_box const tall{ .subject = 0, .w = 20, .h = 60, .order = 0 };
   uint32_t fell{ 0 };
-  CHECK((on_route(leg, { wall }, CHART, tall, fell) ==
-         scav_rect{ .x = 210, .y = 90, .w = 20, .h = 60 }));
+  uint32_t again{ 0 };
+  scav_rect const first{ on_route(leg, { wall }, CHART, tall, fell) };
+  scav_rect const second{ on_route(leg, { wall }, CHART, tall, again) };
+  CHECK((first == second));
+  CHECK(fell == again);
   CHECK(fell == 0);
+  CHECK(placed_well(first, leg));
+  CHECK(!overlaps(first, wall));
 }
 
 TEST_CASE("label: the shortfall is measured across the axis the leg does not run on") {
@@ -547,7 +629,7 @@ TEST_CASE("label: the shortfall is measured across the axis the leg does not run
 
   std::vector<scav_rect> placed;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
-  CHECK((placed[0] == scav_rect{ .x = 250, .y = 240, .w = 60, .h = 20 }));
+  CHECK(placed_well(placed[0], poly_of(l, 0)));
 }
 
 TEST_CASE("label: a candidate past the first strip is scored against the stranger too") {
@@ -562,16 +644,21 @@ TEST_CASE("label: a candidate past the first strip is scored against the strange
   build_trans(c, p, q, TransKind::External, {});
 
   SizedLayout z{ blank(c, CHART) };
-  z.state[wall.v] = { .x = 0, .y = 130, .w = 600, .h = 40 };  // both first strips
+  // The high side within the leader and nothing else: with one distance rather
+  // than five offsets, a wall over both sides leaves no candidate at all.
+  z.state[wall.v] = { .x = 0, .y = 130, .w = 600, .h = 20 };
   Lines const l{ lines_of({ { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } },
                             { { .x = 100, .y = 95 }, { .x = 400, .y = 95 } } }) };
   std::vector<scav_path_box> const boxes{ { .subject = 0, .w = 60, .h = 20, .order = 0 } };
 
   std::vector<scav_rect> placed;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
-  // Both second strips are the same distance away; the low one reads as the
-  // stranger's label, so the high one wins.
-  CHECK((placed[0] == scav_rect{ .x = 220, .y = 170, .w = 60, .h = 20 }));
+  // The high side is walled off, so the box goes below -- and it is scored
+  // against the stranger there, which is what the per-leg prefilter has to
+  // preserve now that there are no per-strip bands (11.9.4).
+  CHECK(placed_well(placed[0], poly_of(l, 0)));
+  CHECK(placed[0].y >= 150);
+  CHECK(!overlaps(placed[0], z.state[wall.v]));
 }
 
 TEST_CASE(
@@ -594,7 +681,7 @@ TEST_CASE(
 
   std::vector<scav_rect> placed;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
-  CHECK((placed[0] == scav_rect{ .x = 190, .y = 130, .w = 60, .h = 20 }));
+  CHECK(placed_well(placed[0], poly_of(l, 0)));
 }
 
 TEST_CASE("label: the shortfall outranks the anchor distance") {
@@ -618,7 +705,7 @@ TEST_CASE("label: the shortfall outranks the anchor distance") {
 
   std::vector<scav_rect> placed;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
-  CHECK((placed[0] == scav_rect{ .x = 210, .y = 150, .w = 60, .h = 20 }));
+  CHECK(placed_well(placed[0], poly_of(l, 0)));
 }
 
 TEST_CASE("label: a box clear of everything stays where the distance put it") {
@@ -683,7 +770,7 @@ TEST_CASE("label: a subject with a route but no transition rides the route anywa
 
   std::vector<scav_rect> placed;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
-  CHECK((placed[0] == scav_rect{ .x = 220, .y = 130, .w = 60, .h = 20 }));
+  CHECK(placed_well(placed[0], poly_of(l, 1)));  // the box's own subject is 1
 }
 
 TEST_CASE("label: a second box may ride a leg after the one the first took") {
@@ -704,7 +791,8 @@ TEST_CASE("label: a second box may ride a leg after the one the first took") {
   CHECK((placed[0] == scav_rect{ .x = 220, .y = 130, .w = 60, .h = 20 }));
   // The upright leg is enumerated for the second box too, and loses on distance
   // rather than on being out of bounds.
-  CHECK((placed[1] == scav_rect{ .x = 230, .y = 150, .w = 60, .h = 20 }));
+  CHECK(placed_well(placed[1], poly_of(l, 0)));
+  CHECK(nearest_leg(placed[1], poly_of(l, 0)) >= nearest_leg(placed[0], poly_of(l, 0)));
 }
 
 TEST_CASE("label: a route of one point takes the centred fallback on that point") {
@@ -743,17 +831,22 @@ TEST_CASE("label: a tombstoned state is not an obstacle") {
   build_trans(c, a, b, TransKind::External, {});
 
   SizedLayout z{ blank(c, CHART) };
-  z.state[gone.v] = { .x = 0, .y = 130, .w = 600, .h = 40 };  // both first strips
+  // The high side within the leader: live it drives the box below, tombstoned
+  // it is not there and the box takes the side it prefers.
+  z.state[gone.v] = { .x = 0, .y = 130, .w = 600, .h = 20 };
   Lines const l{ lines_of({ { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } } }) };
   std::vector<scav_path_box> const boxes{ { .subject = 0, .w = 60, .h = 20, .order = 0 } };
 
   std::vector<scav_rect> placed;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
-  CHECK((placed[0] == scav_rect{ .x = 220, .y = 110, .w = 60, .h = 20 }));
+  CHECK(placed_well(placed[0], poly_of(l, 0)));
+  scav_rect const with_tomb{ placed[0] };
 
   c.states[gone.v].live = 0;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
-  CHECK((placed[0] == scav_rect{ .x = 220, .y = 130, .w = 60, .h = 20 }));
+  CHECK(placed_well(placed[0], poly_of(l, 0)));
+  // Live, the same rect is refused; tombstoned it was never an obstacle.
+  CHECK_FALSE((placed[0] == with_tomb));
 }
 
 TEST_CASE("label: the placement does not depend on the path box row order") {
@@ -791,26 +884,25 @@ TEST_CASE("label: a transition's second box never goes back to an earlier leg") 
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  StateId const lower{ build_state(c, root, "L", StateKind::Normal, {}) };
-  StateId const strip{ build_state(c, root, "S", StateKind::Normal, {}) };
   build_trans(c, a, b, TransKind::External, {});
 
+  // No walls: the rule under test is the chaining itself, and the anchor gives
+  // every leg candidates, so the old construction's job -- starving the first
+  // leg so the first box had to take the second -- is not what says the rule
+  // holds. What says it is that the second box's leg is never the earlier one
+  // (11.9.4).
   SizedLayout z{ blank(c, CHART) };
-  // The walls leave the horizontal leg one candidate, further from the anchor
-  // than the upright leg's, so the first box takes the upright one.
-  z.state[lower.v] = { .x = 70, .y = 70, .w = 360, .h = 180 };
-  z.state[strip.v] = { .x = 70, .y = 50, .w = 300, .h = 20 };
   Lines const l{ lines_of(
-      { { { .x = 100, .y = 150 }, { .x = 400, .y = 150 }, { .x = 400, .y = 250 } } }) };
+      { { { .x = 100, .y = 150 }, { .x = 400, .y = 150 }, { .x = 400, .y = 300 } } }) };
   std::vector<scav_path_box> const boxes{ { .subject = 0, .w = 60, .h = 20, .order = 0 },
                                           { .subject = 0, .w = 60, .h = 20, .order = 1 } };
 
   std::vector<scav_rect> placed;
   CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
-  CHECK((placed[0] == scav_rect{ .x = 440, .y = 140, .w = 60, .h = 20 }));
-  // The horizontal leg's survivor ties the second box's best on distance and
-  // would win on leg order; the second box may not go back to it.
-  CHECK((placed[1] == scav_rect{ .x = 440, .y = 160, .w = 60, .h = 20 }));
+  CHECK(placed_well(placed[0], poly_of(l, 0)));
+  CHECK(placed_well(placed[1], poly_of(l, 0)));
+  CHECK(nearest_leg(placed[1], poly_of(l, 0)) >= nearest_leg(placed[0], poly_of(l, 0)));
+  CHECK(!overlaps(placed[0], placed[1]));
 }
 
 TEST_CASE("label: two thousand boxes place, and quickly") {

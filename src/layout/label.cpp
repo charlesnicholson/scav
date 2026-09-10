@@ -30,16 +30,24 @@ constexpr uint32_t ATTACH{ 8 };
 constexpr uint32_t LEADS{ 4 };
 
 // Where attachment point `which` sits inside a `w` by `h` rectangle.
+//
+// **Side midpoints before corners, and the bottom one first.** The key is
+// lexicographic, so this order is what a tie resolves to, and the first
+// combination it reaches -- the bottom midpoint with the leader running up --
+// is the box centred above its leg, which is where a reader expects a label.
+// Corners are what a bend needs and a straight leg does not, so they come
+// last: with them first, every label took a diagonal offset it had no reason
+// to take (11.9.4).
 scav_point attach_at(uint32_t which, int32_t w, int32_t h) {
   switch (which) {
-    case 0: return { .x = 0, .y = 0 };
-    case 1: return { .x = w, .y = 0 };
-    case 2: return { .x = 0, .y = h };
-    case 3: return { .x = w, .y = h };
-    case 4: return { .x = w / 2, .y = 0 };
-    case 5: return { .x = w / 2, .y = h };
-    case 6: return { .x = 0, .y = h / 2 };
-    default: return { .x = w, .y = h / 2 };
+    case 0: return { .x = w / 2, .y = h };
+    case 1: return { .x = w / 2, .y = 0 };
+    case 2: return { .x = w, .y = h / 2 };
+    case 3: return { .x = 0, .y = h / 2 };
+    case 4: return { .x = 0, .y = 0 };
+    case 5: return { .x = w, .y = 0 };
+    case 6: return { .x = 0, .y = h };
+    default: return { .x = w, .y = h };
   }
 }
 
