@@ -141,10 +141,8 @@ bool uncut(scav_rect const &at, std::vector<scav_point> const &poly) {
 // A subject's polyline read back out of the `Lines` a test built, so a
 // property can be asserted without naming the points twice.
 std::vector<scav_point> poly_of(Lines const &l, uint32_t subject) {
-  std::vector<scav_point> out;
   scav_span const r{ l.route[subject] };
-  for (uint32_t k = 0; k < r.len; ++k) { out.push_back(l.points[r.off + k]); }
-  return out;
+  return { l.points.begin() + r.off, l.points.begin() + r.off + r.len };
 }
 
 // The two together, which is what every placement below owes.
