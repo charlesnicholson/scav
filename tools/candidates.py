@@ -292,7 +292,7 @@ DEFECTS = [
     "mark outside its glyph",
     # The classes P9d's review added, each one an absolute the objective was
     # blind to rather than a preference it priced badly.
-    "attachment on a drawn corner", "label detached from its own polyline",
+    "attachment on a drawn corner", "label not anchored to its own polyline",
     "label sliced by its own route", "label sliced by a region divider",
     "label outside its enclosing state",
 ]

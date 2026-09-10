@@ -27,7 +27,6 @@ scav_profile tiny() {
   return out;
 }
 
-
 using namespace scav;
 
 constexpr bool operator==(scav_rect const &a, scav_rect const &b) {
@@ -862,7 +861,9 @@ TEST_CASE("label: two thousand boxes place, and quickly") {
 
   std::vector<scav_rect> placed;
   auto const t0{ std::chrono::steady_clock::now() };
-  uint32_t const fell{ place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) };
+  uint32_t const fell{
+    place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed)
+  };
   auto const t1{ std::chrono::steady_clock::now() };
   auto const us{ std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count() };
   MESSAGE("place_labels over ", boxes.size(), " boxes: ", us, " us, ", fell, " fell back");

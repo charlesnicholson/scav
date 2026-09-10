@@ -8,6 +8,7 @@
 #include "layout/geom.h"
 #include "layout/size.h"
 #include "scav/scav_core.h"
+#include "scav/scav_layout.h"
 #include "scav_int.h"
 #include "scav_stable_sort.h"
 
@@ -196,9 +197,7 @@ uint32_t place_labels(Chart const &c,
     // Half the label's height, so the anchor slides finer than the box it
     // carries; the floor is one grid unit, which is 1/16 pt (11.9.4).
     int32_t const step{ imax(box.h / 2, 1) };
-    // Half an em, derived rather than a knob: the tighter profile sits tighter
-    // for free and a font-size change cannot leave the leader looking wrong.
-    int32_t const leader{ imax(p.font_size_grid / 2, 1) };
+    int32_t const leader{ label_leader(p) };
 
     if (r.len >= 2) {
       own.assign(r.len - 1, {});

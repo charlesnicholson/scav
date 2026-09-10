@@ -680,8 +680,7 @@ TEST_CASE("route: the unplaced count is the one the strip matching returned") {
   // One box rides its route and the other has none, which is exactly what the
   // strip matching reports back.
   std::vector<scav_rect> expected;
-  CHECK(place_labels(c, z, s, r.route, r.points, profile(), expected) ==
-        r.unplaced);
+  CHECK(place_labels(c, z, s, r.route, r.points, profile(), expected) == r.unplaced);
   CHECK(r.unplaced == 1);
 }
 
