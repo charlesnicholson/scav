@@ -228,6 +228,10 @@ Routes route_transitions(Chart const &c,
     RouteOutput &ro{ sc.ro };
     in.obstacles.clear();
     in.inscribed.clear();
+    // Parallel to `obstacles`, so it is cleared with them: left to accumulate,
+    // a later frame reads an earlier frame's radius for the same index and the
+    // corner inset silently stops applying (11.9.4).
+    in.corner.clear();
     in.nets.clear();
     in.waypoints.clear();
     sc.obstacle_states.clear();
