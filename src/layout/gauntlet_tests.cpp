@@ -515,7 +515,11 @@ TEST_CASE("gauntlet: two states each other's target are two lines") {
                              l.r.points[b.off + j + 1]);
       }
     }
-    CHECK(shared == ((p.profile_id == compact().profile_id) ? 654 : 0));
+    // **Zero at both profiles since 11.9.5's reservation.** The run was the
+    // tight compact frame leaving nudging nowhere to take the two apart; a
+    // corridor reserved `lanes x line height` wide has the room, so what was
+    // pinned here as 11.3's lever is now closed by phase 2 charging for it.
+    CHECK(shared == 0);
   }
 }
 
@@ -536,12 +540,12 @@ TEST_CASE("gauntlet: a fan-in's arrivals are four arrows, none inside another") 
       if (chart_string(l.c, l.c.states[st].name) == "Fault") { fault = st; }
     }
     REQUIRE(fault != INVALID);
-    // Compact refuses two: nudging now spreads by a line of text rather than by
-    // the router's clearance, and in a frame this tight two members are asked
-    // for room that is not there. A refusal leaves the route exactly as routed,
-    // so what it costs is a crowded lane and not a broken one -- and it is the
-    // scarcity signal, the thing 11.9.5's reservation is sized against.
-    CHECK(l.r.nudged.refused == ((p.profile_id == compact().profile_id) ? 2U : 0U));
+    // One at both profiles. Compact refused two spreads for want of room before
+    // 11.9.5's reservation and `readable` refused none; with the corridor
+    // reserved they meet at one, which is the fan's own trunk -- four arrivals
+    // that 11.5's bundles hold together and nudging is asking to take apart.
+    // A refusal there is the bundle winning, not the frame being short.
+    CHECK(l.r.nudged.refused == 1);
     std::vector<uint32_t> into;
     for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
       if ((l.r.route[t].len >= 2) && (l.c.transitions[t].dst.v == fault)) {
@@ -691,12 +695,12 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     shape_counts(shipped, shipped_through, shipped_back);
     CHECK(shipped_through == 0);
     CHECK(cost_columns(shipped.c, shipped.g, p).through_box == 0);
-    // The other half of the same hole, and it got worse rather than better: the
-    // route still leaves and returns along one line, and the arrangement the
-    // packer picked makes it double back twice each way instead of once. That
-    // is the count the axis-aligned property still carves this chart out for,
-    // and it is 11.8's to take to zero.
-    CHECK(shipped_back == 4);
+    // The other half of the same hole: the route still leaves and returns along
+    // one line. Four at both profiles until 11.9.5's reservation, and three at
+    // `compact` since -- the arrangement moving, not the hole closing, which is
+    // why this is pinned per profile rather than excused. It is 11.8's to take
+    // to zero.
+    CHECK(shipped_back == ((p.profile_id == compact().profile_id) ? 3U : 4U));
 
     // 11.5's face rule, which picks a face by how far the target lies outside
     // the box on each axis rather than by the distance to a point on it. A
@@ -704,16 +708,22 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     // the y separation dominate, so it leaves through the bar's own 64-unit
     // cap while the 960-unit face beside it goes unused, and the arrow then
     // reads as coming off the bar's end instead of off its length.
+    //
+    // **Two since 11.9.5's reservation, where it was one.** Room reserved beside
+    // a labelled leg pushes the branch further below the bar, so the y
+    // separation dominates on both branches instead of one. The rule is the
+    // defect and the reservation only made more targets meet its condition --
+    // which is the argument for fixing the rule rather than for spending less
+    // room, and it is why this chart pins the count rather than excusing it.
     Laid fork_zero;
     lay("fork.scav", one_row(p), fork_zero);
-    CHECK(capped_branches(fork_zero) == 1);
-    // And what ships: at `readable` the packer choice stacks the branch beside
-    // the bar rather than below it, so the y separation stops dominating and
-    // the count is zero. The rule is still the rule -- `compact` packs tighter,
-    // ships row 0, and still reads one.
+    CHECK(capped_branches(fork_zero) == 2);
+    // And what ships, which used to differ by profile -- `readable` stacked the
+    // branch beside the bar and read zero where `compact` read one. Under the
+    // reservation both branches sit below the bar at both profiles and both
+    // read two, so the packer no longer hides the rule from one of them.
     Laid fork_shipped;
     lay("fork.scav", p, fork_shipped);
-    CHECK(capped_branches(fork_shipped) ==
-          ((p.profile_id == compact().profile_id) ? 1U : 0U));
+    CHECK(capped_branches(fork_shipped) == 2);
   }
 }

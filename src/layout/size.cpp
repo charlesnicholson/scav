@@ -7,6 +7,7 @@
 #include "layout/coords.h"
 #include "layout/pack.h"
 #include "scav/scav_core.h"
+#include "scav/scav_layout.h"
 #include "scav_int.h"
 #include "scav_internal.h"
 
@@ -131,6 +132,18 @@ bool size_pass(Chart const &c,
 
   bool ok{ true };
 
+  // The height of the label charged to each segment, charged to the same middle
+  // segment 11.3's width charge lands on so one label reserves in one frame.
+  std::vector<int32_t> seg_label_h(g.segments.size(), 0);
+  for (uint32_t i = 0; i < s.n_path_box; ++i) {
+    scav_path_box const &box{ s.path_box[i] };
+    if (box.subject >= g.trans_segments.size()) { continue; }
+    Span const segs{ g.trans_segments[box.subject] };
+    if (segs.len == 0) { continue; }
+    int32_t &at{ seg_label_h[segs.off + (segs.len / 2)] };
+    at = imax(at, box.h);
+  }
+
   // A frame's graph need not be connected, and unconnected states all rank 0, so
   // one graph would stack them in a column. Components are laid out and packed.
   auto const size_sub = [&](uint32_t m) {
@@ -140,6 +153,34 @@ bool size_pass(Chart const &c,
     FrameDar const dar{ owner_dar(m) };
     Span const espan{ o.sub_edges[m] };
     Span const gspan{ o.sub_gaps[m] };
+
+    // An anchored label needs `leader + box height` beside the leg it hangs off,
+    // and phase 3 has only the cross-axis room phase 2 left it (11.9.5). Carried
+    // on the extent of both ends of the labelled edge -- which is the slot
+    // `cross_coordinates` separates by, not the rect a reader sees -- so the
+    // edge leaves its node in a corridor wide enough to hang a label in. Every
+    // piece of a chained edge carries it, because every piece is a leg the
+    // label may slide onto -- charging only the leg 11.3 charged the width to
+    // is byte-identical in violations and in area, so the whole route carries
+    // it and the two charges do not have to agree about which leg is middle.
+    //
+    // **The whole distance rather than its shortfall against `node_sep`.** Two
+    // stacked nodes are already a `node_sep` apart, so `leader + box_h -
+    // node_sep` looks like the same room for less; it reads 133 violations
+    // against 110, because the leg leaves its node's *centre* and what the
+    // shortfall opens is the gap between two node *edges*.
+    int32_t const leader{ label_leader(p) };
+    std::vector<int32_t> reserve(span.len, 0);
+    for (uint32_t k = 0; k < espan.len; ++k) {
+      OrderEdge const &e{ o.edges[espan.off + k] };
+      if (e.segment >= seg_label_h.size()) { continue; }  // a hand-built frame
+      int32_t const box_h{ seg_label_h[e.segment] };
+      if (box_h == 0) { continue; }
+      uint32_t const src{ e.src - span.off };
+      uint32_t const dst{ e.dst - span.off };
+      reserve[src] = imax(reserve[src], leader + box_h);
+      reserve[dst] = imax(reserve[dst], leader + box_h);
+    }
 
     std::vector<uint32_t> adj_count(span.len, 0);
     for (uint32_t k = 0; k < espan.len; ++k) {
@@ -213,6 +254,8 @@ bool size_pass(Chart const &c,
           extent[i] = out.state[nd.subject].h;
           layer_w[r] = imax(layer_w[r], out.state[nd.subject].w);
         }
+        extent[i] = static_cast<int32_t>(
+            imin(Wide{ extent[i] } + reserve[nodes[i]], Wide{ COORD_MAX }));
         layer_h[r] += extent[i] + p.node_sep;
       }
       auto const boundary_gap = [&](uint32_t r) {

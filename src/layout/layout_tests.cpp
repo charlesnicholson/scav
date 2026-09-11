@@ -1326,15 +1326,30 @@ constexpr std::array<char const *, 2> SCALE_ROUTERS{ "orthogonal", "straight" };
 // on them -- down where merging two near-parallel lanes into one lane lets the
 // spread separate them, up where the spread has no room and leaves them
 // collinear. `crossings` and `excess_len` move with the routes.
+// **Every cell then moved with 11.9.5's reservation.** These charts request no
+// space, so no label is charged and the leg reservation is inert; what reaches
+// them is the corridor's `lanes x line height`, charged per component and to the
+// two boundaries each edge turns in. `area` is 1.51x and 1.43x on the nested
+// rows and 1.04x and 1.07x on the flat ones, and it is the reservation itself
+// -- the same boxes in frames whose rank boundaries now hold a lane apiece.
+//
+// **Rows 6 and 7 became one row, and that is a router cliff rather than a
+// reservation.** Flat at `compact` now reads the straight router's numbers
+// exactly, `through_box` 0 -> 2,019: `ORTHO_VERTEX_BUDGET` bounds `nx * ny`,
+// the reservation left the fold a squarer frame, and a squarer frame of 2k
+// boxes spends more grid vertices than the same area laid out as a strip.
+// Nothing on the corpus reaches it and `readable` at the same size does not, so
+// what it costs is the largest flat chart at the tighter profile; the lever is
+// the budget's shape rather than this section.
 constexpr std::array<std::array<int64_t, 11>, 8> SCALE_PINNED{
-  { { 0, 0, 4136, 372192, 1944, 46555536, 0, 0, 0, 2527936, 89039694848 },
-    { 11464, 0, 3416, 172160, 75136, 605104352, 0, 0, 0, 2527936, 89039694848 },
-    { 0, 0, 4784, 1073992, 2184, 32206056, 0, 0, 0, 125776, 32837048320 },
-    { 12944, 0, 3504, 0, 65752, 596909344, 0, 0, 0, 125776, 32837048320 },
-    { 0, 0, 740, 1120, 100, 3141071, 0, 0, 0, 53760, 3718840320 },
-    { 1996, 0, 318, 0, 270, 7357645, 0, 0, 0, 53760, 3718840320 },
-    { 0, 0, 774, 125510, 111, 2416928, 0, 0, 0, 10688, 1589407744 },
-    { 1998, 0, 328, 0, 278, 5584737, 0, 0, 0, 10688, 1589407744 } }
+  { { 0, 0, 4864, 564512, 1264, 39158832, 0, 0, 0, 2984776, 134823986304 },
+    { 10808, 0, 3464, 0, 71464, 917243432, 0, 0, 0, 2984776, 134823986304 },
+    { 0, 0, 5240, 415104, 1376, 24264192, 0, 0, 0, 145264, 46911586048 },
+    { 9312, 0, 3576, 0, 83896, 1110858824, 0, 0, 0, 145264, 46911586048 },
+    { 0, 0, 738, 0, 88, 2718135, 0, 0, 0, 33184, 3869256960 },
+    { 2039, 0, 319, 0, 265, 7627654, 0, 0, 0, 33184, 3869256960 },
+    { 2019, 0, 324, 0, 268, 5814774, 0, 0, 0, 6672, 1693255680 },
+    { 2019, 0, 324, 0, 268, 5814774, 0, 0, 0, 6672, 1693255680 } }
 };
 
 }  // namespace

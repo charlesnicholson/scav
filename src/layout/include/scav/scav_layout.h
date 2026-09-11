@@ -76,6 +76,24 @@ inline int32_t label_leader(scav_profile const &p) {
   return (p.font_size_grid / 2 > 1) ? (p.font_size_grid / 2) : 1;
 }
 
+// One line of the profile's type, `ceil(font_size_grid * k_num / k_den)`. The
+// pitch two lanes carrying labels may not sit closer than, and the height of
+// the box a leader holds off a polyline (11.9.5).
+//
+// The same ratio `scav_draw.h`'s `line_height` applies, restated here because
+// layout is below draw and cannot call it; `functional_drawlist_tests.cpp`
+// pins the two against each other at both shipped profiles so the restatement
+// cannot drift.
+inline int32_t label_line_height(scav_profile const &p) {
+  if ((p.font_size_grid <= 0) || (p.line_height_k_num < 1) || (p.line_height_k_den < 1)) {
+    return 0;
+  }
+  int64_t const h{ ((int64_t{ p.font_size_grid } * p.line_height_k_num) +
+                    p.line_height_k_den - 1) /
+                   p.line_height_k_den };
+  return (h > COORD_MAX) ? COORD_MAX : static_cast<int32_t>(h);
+}
+
 // Layout ====================================================================
 
 // Rows in the fixed table of chart-global phase-2 tuples Level 2 chooses

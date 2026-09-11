@@ -248,19 +248,25 @@ TEST_CASE("drawlist gauntlet: what crowd's tighter packing costs its labels") {
   //
   // **`label` was 4, read 6 once the count stopped exempting a transition's own
   // endpoints, and is 5 now the placer stops choosing those positions**; the
-  // one left is structural. `label_near` went 442 -> 470 when a box refused a
-  // state's rect had to take a strip further from its own leg, and **back to
-  // 442 under 11.9.4's anchor**: there is no "further" to take, so the term
-  // that measured how far a box had drifted from its own line reads what it
-  // read before the refusal, with the refusal still in force.
+  // one left is structural -- **and then zero, because 11.9.5's reservation is
+  // what made that last position reachable**: the box was not refusing a rect
+  // it could avoid, it was in a frame with nowhere else to be.
+  //
+  // `label_near` went 442 -> 470 when a box refused a state's rect had to take
+  // a strip further from its own leg, back to 442 under 11.9.4's anchor, and
+  // **490 under the reservation**. It goes the other way from every other
+  // count here and that is what it measures: with room to take, boxes take
+  // positions that clear their neighbours and sit a little further from their
+  // own leg for it. The reader-visible classes the audit reads all fell, so
+  // this is the term disagreeing with the reader, which is P9d's own subject.
   Metrics const m{ bundled() };
   scav_profile const p{ readable() };
   Run const r{ run_pipeline("gauntlet/crowd.scav", m, p) };
   CostTerms const t{
     cost_columns(r.chart, decompose(r.chart), p, as_spaces(r.spaces), r.placed)
   };
-  CHECK(t.label == 5);
-  CHECK(t.label_near == 442);
+  CHECK(t.label == 0);
+  CHECK(t.label_near == 490);
 }
 
 TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back") {
@@ -361,7 +367,12 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
   // (11.9.5): a spread route lands where one box's last feasible attachment
   // used to be. Thirty-three crowded lanes for one more slice, and the slice
   // is the class rip-up is already owed, so the trade is taken on purpose.
-  CHECK(fell == 19);
+  //
+  // **And 5 once phase 2 reserved the room instead of phase 3 hunting for it**
+  // (11.9.5). This number was the argument that rip-up is what stands between
+  // the anchor and zero; three quarters of it was scarcity, and rip-up is what
+  // the last five need.
+  CHECK(fell == 5);
 }
 
 TEST_CASE("drawlist corpus: the layout goldens' measurement policy is stated here") {

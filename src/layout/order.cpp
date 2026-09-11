@@ -8,6 +8,7 @@
 #include "layout/decompose.h"
 #include "layout/shard.h"
 #include "scav/scav_core.h"
+#include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
 #include "scav_int.h"
 #include "scav_shard.h"
@@ -78,7 +79,19 @@ struct FrameOrder {
 struct FrameScratch {
   std::vector<uint32_t> state_local;  // -> states
   std::vector<uint32_t> seg_local;    // -> SplitGraph::segments
+  std::vector<uint32_t> part;         // -> nodes, union-find over the frame
+  std::vector<uint32_t> dense;        // -> nodes; a component root's ordinal
+  std::vector<uint32_t> lanes;        // boundaries x components, row-major
 };
+
+// Path-halving find over the components a frame's edges union its nodes into.
+uint32_t part_root(std::vector<uint32_t> &of, uint32_t x) {
+  while (of[x] != x) {
+    of[x] = of[of[x]];
+    x = of[x];
+  }
+  return x;
+}
 
 // The endpoint state of a segment's src or dst end when that end carries no
 // port: the transition's own src or dst.
@@ -485,7 +498,7 @@ SubmachineOrders order_submachines(Chart const &c,
     assign_ranks(f);
 
     // Charged before chaining, while an edge still knows the whole span its
-    // label sits in the middle of.
+    // label sits in the middle of and how many boundaries it crosses.
     uint32_t top{ 0 };
     for (OrderNode const &nd : f.nodes) { top = imax(top, nd.rank); }
     std::vector<int32_t> &gaps{ frames[m].gaps };
@@ -493,9 +506,66 @@ SubmachineOrders order_submachines(Chart const &c,
     for (OrderEdge const &e : f.edges) {
       int32_t const label{ seg_label[e.segment] };
       if (label == 0) { continue; }
-      uint32_t const from{ f.nodes[e.src].rank };
-      uint32_t const at{ from + ((f.nodes[e.dst].rank - from) / 2) };
+      uint32_t const from{ imin(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
+      uint32_t const to{ imax(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
+      uint32_t const at{ from + ((to - from) / 2) };
       if (at < gaps.size()) { gaps[at] = imax(gaps[at], label); }
+    }
+
+    // An edge turning in one boundary needs a lane of its own inside it, and two
+    // lanes carrying type may not sit closer than one line of that type
+    // (11.9.5). Phase 3 cannot reserve this: nudging spreads into the width
+    // phase 2 left, so a pitch with no room to spread into only refuses.
+    //
+    // **The two boundaries an edge turns in, not every boundary it crosses.** A
+    // route changes cross position where it leaves its source and where it
+    // meets its destination; in between it runs straight along a rank and wants
+    // cross-axis room rather than corridor width. Charging every boundary reads
+    // fourteen lanes at every one of a 256-chain's boundaries where three turn
+    // there, which is 960k grid units of corridor against a 524k domain.
+    //
+    // **Counted per component, because phase 2 lays components out separately
+    // and packs them.** Edges in two components never share a corridor, and
+    // summing them reserves a width neither needs -- and un-seals the one
+    // `sealed_chart` builds, whose whole shape is a zero-width boundary.
+    //
+    // A max rather than a sum against the label charge above: both say how wide
+    // this one corridor has to be, and a label sitting at one lane's height
+    // does not consume the widths the others are spread across.
+    std::vector<uint32_t> &part{ sc.part };
+    part.assign(f.nodes.size(), 0);
+    for (uint32_t i = 0; i < part.size(); ++i) { part[i] = i; }
+    for (OrderEdge const &e : f.edges) {
+      uint32_t const a{ part_root(part, e.src) };
+      uint32_t const b{ part_root(part, e.dst) };
+      if (a != b) { part[a] = b; }
+    }
+    // Dense, so the table below is boundaries x components rather than
+    // boundaries x nodes.
+    std::vector<uint32_t> &dense{ sc.dense };
+    dense.assign(f.nodes.size(), INVALID);
+    uint32_t parts{ 0 };
+    for (uint32_t i = 0; i < part.size(); ++i) {
+      uint32_t const root{ part_root(part, i) };
+      if (dense[root] == INVALID) { dense[root] = parts++; }
+    }
+    std::vector<uint32_t> &lanes{ sc.lanes };
+    lanes.assign(static_cast<size_t>(gaps.size()) * parts, 0);
+    int32_t const pitch{ label_line_height(p) };
+    auto const turn = [&](uint32_t b, uint32_t of) {
+      if (b >= gaps.size()) { return; }
+      uint32_t &here{ lanes[(static_cast<size_t>(b) * parts) + of] };
+      ++here;
+      if (here < 2) { return; }
+      gaps[b] = imax(gaps[b],
+                     static_cast<int32_t>(imin(Wide{ here } * pitch, Wide{ SPACE_MAX })));
+    };
+    for (OrderEdge const &e : f.edges) {
+      uint32_t const from{ imin(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
+      uint32_t const to{ imax(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
+      uint32_t const of{ dense[part_root(part, e.src)] };
+      turn(from, of);
+      if (to > (from + 1)) { turn(to - 1, of); }
     }
 
     chain_long_edges(f);

@@ -228,7 +228,20 @@ TEST_CASE("order: a label on a hierarchy-crossing route widens one frame only") 
   SubmachineOrders const o{ order_of(c, s3) };
   int32_t total{ 0 };
   for (int32_t const gap : o.gaps) { total += gap; }
-  CHECK(total == 500);
+  // 500 for the label, in one frame and not both, which is the property. The
+  // 538 on top of it is 11.9.5's lane reservation, two lines of `readable`
+  // text on the one boundary where two edges turn.
+  CHECK(total == 1038);
+  std::vector<int32_t> per;
+  for (Span const &frame : o.sub_gaps) {
+    int32_t most{ 0 };
+    for (uint32_t k = 0; k < frame.len; ++k) {
+      int32_t const here{ o.gaps[frame.off + k] };
+      if (here > most) { most = here; }
+    }
+    per.push_back(most);
+  }
+  CHECK(per == std::vector<int32_t>{ 500, 538 });
 }
 
 TEST_CASE("order: a sweep removes a crossing document order would have left") {
