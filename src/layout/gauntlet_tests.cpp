@@ -515,7 +515,7 @@ TEST_CASE("gauntlet: two states each other's target are two lines") {
                              l.r.points[b.off + j + 1]);
       }
     }
-    CHECK(shared == ((p.profile_id == compact().profile_id) ? 652 : 0));
+    CHECK(shared == ((p.profile_id == compact().profile_id) ? 654 : 0));
   }
 }
 
@@ -536,7 +536,12 @@ TEST_CASE("gauntlet: a fan-in's arrivals are four arrows, none inside another") 
       if (chart_string(l.c, l.c.states[st].name) == "Fault") { fault = st; }
     }
     REQUIRE(fault != INVALID);
-    CHECK(l.r.nudged.refused == 0);
+    // Compact refuses two: nudging now spreads by a line of text rather than by
+    // the router's clearance, and in a frame this tight two members are asked
+    // for room that is not there. A refusal leaves the route exactly as routed,
+    // so what it costs is a crowded lane and not a broken one -- and it is the
+    // scarcity signal, the thing 11.9.5's reservation is sized against.
+    CHECK(l.r.nudged.refused == ((p.profile_id == compact().profile_id) ? 2U : 0U));
     std::vector<uint32_t> into;
     for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
       if ((l.r.route[t].len >= 2) && (l.c.transitions[t].dst.v == fault)) {

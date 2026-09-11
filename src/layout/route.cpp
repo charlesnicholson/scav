@@ -297,10 +297,14 @@ Routes route_transitions(Chart const &c,
     // Nudged per frame, while the frame's obstacles are in hand.
     if (margin > 0) {
       scav_rect const frame{ (owner.v == INVALID) ? region : z.state[owner.v] };
+      // The lane pitch is a line of text, not the router's clearance: a lane
+      // carries type, and two of them closer than one line of it read as one
+      // (11.9.5). It is also the grouping tolerance, so the two agree -- what
+      // is spread `pitch` apart is exactly what was too close by `pitch`.
       nudge_lanes(region,
                   frame,
                   in.obstacles,
-                  margin,
+                  imax(margin, p.font_size_grid),
                   margin,
                   ro.net_points,
                   ro.points,

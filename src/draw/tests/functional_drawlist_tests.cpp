@@ -356,7 +356,12 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
   // and 11.9.3's slice count are one number -- and the anchor makes that the
   // *only* way a label ends up unanchored, which is what turns rip-up from an
   // improvement into the last thing between this and zero (11.9.4).
-  CHECK(fell == 18);
+  //
+  // 19 once nudging spread lanes by proximity rather than by equality
+  // (11.9.5): a spread route lands where one box's last feasible attachment
+  // used to be. Thirty-three crowded lanes for one more slice, and the slice
+  // is the class rip-up is already owed, so the trade is taken on purpose.
+  CHECK(fell == 19);
 }
 
 TEST_CASE("drawlist corpus: the layout goldens' measurement policy is stated here") {

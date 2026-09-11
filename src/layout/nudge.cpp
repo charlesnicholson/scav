@@ -258,11 +258,20 @@ void nudge_lanes(scav_rect const &region,
     };
 
     for (uint32_t start = 0; start < members.size();) {
-      // A lane is a run of collinear members whose extents chain into one another,
-      // which is the same grouping `hi` carries forward as the sweep advances.
+      // A lane is a run of members **within `gap` of one coordinate** whose
+      // extents chain into one another, which is the same grouping `hi` carries
+      // forward as the sweep advances.
+      //
+      // **Not collinear, which is what it used to mean.** Keyed on equality,
+      // two routes six units apart over seven hundred were two lanes and never
+      // met: `routes share a run` read 6 over the corpus while
+      // `lanes closer than one line of text` read 89 (11.9.5). A lane is what
+      // a reader cannot tell apart, and that is a distance, not an identity.
       uint32_t end{ start + 1 };
       int32_t reach{ members[start].hi };
-      while ((end < members.size()) && (members[end].at == members[start].at) &&
+      while ((end < members.size()) &&
+             (imax(members[end].at - members[start].at,
+                   members[start].at - members[end].at) < gap) &&
              (members[end].lo < reach)) {
         reach = imax(reach, members[end].hi);
         ++end;

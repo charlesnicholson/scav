@@ -62,7 +62,7 @@ chart vac "robot vacuum" (test_data/charts/vac.scav:3)
   include dock "dock.scav" -> test_data/charts/dock.scav (test_data/charts/vac.scav:4)
   include lamp "./led.scav" -> test_data/charts/led.scav (test_data/charts/vac.scav:7)
   include lamp "led.scav" -> test_data/charts/led.scav (test_data/charts/dock.scav:4)
-geometry structural 55d71851 coordinate fd4fb9f1
+geometry structural 55d71851 coordinate cfbd13eb
   chart 0,0 18884x7509
   cost t0 0 t2 6827
     tier0 through_box 0 box_overlap 0
@@ -129,7 +129,7 @@ geometry structural 55d71851 coordinate fd4fb9f1
   route On:aux/$initial -> On:aux/Idle (8366,637) (8558,637)
   route dock/On/$initial -> dock/On/Seated (9864,3980) (10344,3980)
   route dock/On/Seated -> dock/On/Charging (11483,4507) (11483,4699)
-  route dock/On/Charging -> dock/lamp/Solid (12642,5121) (13346,5121) (13442,5121) (13442,4795) (13935,4795) (14633,4795) (14633,6312) (14825,6312) (14825,6504) (14921,6504) (14921,6552) port s1 d1 port s0 d1
+  route dock/On/Charging -> dock/lamp/Solid (12642,5121) (13346,5121) (13442,5121) (13442,4795) (13935,4795) (14537,4795) (14537,6312) (14825,6312) (14825,6504) (14921,6504) (14921,6552) port s1 d1 port s0 d1
   route dock/$initial -> dock/Empty (6222,3655) (6702,3655)
   route dock/Empty -> dock/On (7886,3838) (9416,3838)
   route dock/On -> dock/Empty (9512,3934) (9416,3934) (9416,3886) (7982,3886)
