@@ -1343,6 +1343,20 @@ Diagram mirroring is an **output transform**, not a second layout algorithm: lay
 
 **A seat may not sit on a drawn corner, and none now does.** Landed: `state_corner_radius` is the one statement of the arc, capped at the interior ring — it was `min(w, h) / 8`, a proportion with no bound, so a 12,904-unit composite drew a 1,613-unit arc against a 128-unit ring, which is also why an initial state placed at the ring sits outside the shape. Corner attachments went 13 of 257 to 6, worst case 94% of the radius to 25%. **And then to zero, because the six remaining were a bug rather than a second site.** They read exactly 96 from a corner on every chart — `ortho_clearance` at `readable`, and precisely what `onto_face` returns when the arc it was given is zero. `in.corner` was never cleared between frames while `in.obstacles` and `in.inscribed` were, so from a frame's second onwards `arc(box)` read an earlier frame's radius at that index. Parallel arrays are cleared together now and the class reads **0 of 514**. Both scales' goldens moved with it: a corner is a corner whether or not a chart requested labels.
 
+**The representability test, run 2026-09-12, and it is what reorders P9.** Every row of §11.10's table rendered and audited over the corpus (`tools/candidates.py`), so each class can be asked the only question that separates a defect from a search gap: does any arrangement this search space can reach already fix it?
+
+| | defects |
+|---|---|
+| shipped, `portfolio_m = 2`, ranked by `t2` | **79** |
+| best single row per chart, chosen by defect count | **71** |
+| per-class, per-chart floor over all eight rows | 65 |
+
+**Level 2 is worth eight violations of seventy-nine, and it is nearly exhausted.** The floor of 65 is not a drawing — it takes each class's minimum independently and no single arrangement achieves them together — so 71 is the honest ceiling of running the whole table with a perfect objective. Class by class: `label sliced by a region divider` is the one class the row choice closes outright, 6 at rows 0/2/4/6 and 0 at the odd rows, and the pick already takes it. `texts overprint each other` reads **1 in all eight rows** and is invariant to the entire space. `lanes closer than one line of text` bottoms out at **49** in the best row and **41** at the per-chart floor, so it is structural and no amount of Level 2 reaches zero. Regret is 3 or less on every class.
+
+**And the objective mis-ranks five charts of eleven.** `bottler`, `brew`, `tcp`, `toolchanger` and `vac` each have a row a reader prefers and `t2` does not — `bottler` 22 defects against the picked row's 32, `brew` 2 against 7, `tcp` 1 against 3. That is most of the eight, and it is a weight fit rather than a search: **P9d's original job, blocked on nothing.** `t2` itself spreads 13% to 31% across the rows, so the objective has plenty to say and is saying some of it wrong.
+
+**What follows.** Local rules are done: the remaining 79 is 8 of search, some unknown share of Level 1 — which does not exist and so cannot be measured here — and a residue that is neither. Fitting the weights comes first because it is cheap and cashes the 8; Level 1 comes next because it is the only untested source of candidates; and the residue is re-asked after both, on the same instrument.
+
 **What this does to P9's order.** The weights cannot be fitted against an objective that cannot see four of its own violations, and none of the six is reachable by more search, so **P9d's fit and P9e's search both sit behind this work** — set 2026-09-09 on the measurement above rather than on a preference. `tools/candidates.py` is the instrument: it renders every row of §11.10's table, audits each, and reports the per-class floor and what the pick costs against it, so the next pass can say whether any of this got better.
 
 #### 11.9.4 A label is anchored to its polyline, not offered a grid beside it
