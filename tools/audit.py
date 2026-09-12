@@ -439,16 +439,23 @@ def audit(svg, every, chart, doc, verbose):
                      (x, y - size, length, size))
                 break
 
-        # A reader ties a label to the nearest line, so a box that is not nearer
-        # its own route than every other by a line of its own text reads as
-        # somebody else's -- 11.6's `label_near`, counted where it is inked. The
-        # em box is shorter than the line box layout reserved, so this is the
-        # conservative count of the two.
-        mine = [gap(em, span(a, b)) for a, b, other, _ in legs if other == ident]
+        # **A foreign line inside a label's leader.** This was "not nearer its own
+        # route than every other by a line of its own text", which was the right
+        # question against 11.9's strip grid, where a label's own gap ran from
+        # zero to four box heights and the reader had nothing constant to go by.
+        # Under 11.9.4's anchor that gap *is* the leader, exactly, for every
+        # label in the drawing -- so attribution is settled by construction and
+        # reads 0 of 192 placed boxes, and what the old form went on measuring
+        # was a `leader + em` clearance under an attribution rule's name.
+        #
+        # What is left worth counting is a stranger's line closer to the text
+        # than the text's own line is: the reader has no gap to tell them apart
+        # by. The em box sits inside the line box layout placed, so measuring
+        # here is the conservative count of the two.
         theirs = [gap(em, span(a, b)) for a, b, other, _ in legs if other != ident]
-        if mine and theirs and min(mine) + size > min(theirs):
-            note("label nearer another route than its own",
-                 f"own {min(mine)} vs {min(theirs)}", (x, y - size, length, size))
+        if theirs and leader is not None and min(theirs) < leader:
+            note("a foreign line inside a label's leader",
+                 f"{min(theirs)} away, leader {leader}", (x, y - size, length, size))
 
         # Everything of a submachine is contained in its parent state's box,
         # out-of-machine transitions excepted -- a transition with no state
@@ -577,7 +584,7 @@ def main():
              "routes share a run": "route segments",
              "label over a state box": "transition labels",
              "label over another route": "transition labels",
-             "label nearer another route than its own": "transition labels",
+             "a foreign line inside a label's leader": "transition labels",
              "texts overprint each other": "texts",
              "mark outside its glyph": "marks in a glyph"}
     for key in ("route segments", "route starts", "arrowheads", "state attachments",

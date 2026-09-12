@@ -1341,12 +1341,20 @@ constexpr std::array<char const *, 2> SCALE_ROUTERS{ "orthogonal", "straight" };
 // Nothing on the corpus reaches it and `readable` at the same size does not, so
 // what it costs is the largest flat chart at the tighter profile; the lever is
 // the budget's shape rather than this section.
+//
+// **And the two orthogonal rows that nudge moved again** when a lane became a
+// union over overlapping members rather than a run that stopped at the first
+// one whose extent did not reach (11.9.5): flat at `readable` reads `crossings`
+// 88 -> 70 and `excess_len` -8.7%, nested at `compact` a tenth of a percent
+// either way. The corpus does not move at all -- a run only reads differently
+// where a lane is crowded enough for a third member to sit behind one that
+// does not overlap, and that is these.
 constexpr std::array<std::array<int64_t, 11>, 8> SCALE_PINNED{
   { { 0, 0, 4864, 564512, 1264, 39158832, 0, 0, 0, 2984776, 134823986304 },
     { 10808, 0, 3464, 0, 71464, 917243432, 0, 0, 0, 2984776, 134823986304 },
-    { 0, 0, 5240, 415104, 1376, 24264192, 0, 0, 0, 145264, 46911586048 },
+    { 0, 0, 5240, 415744, 1376, 24263088, 0, 0, 0, 145264, 46911586048 },
     { 9312, 0, 3576, 0, 83896, 1110858824, 0, 0, 0, 145264, 46911586048 },
-    { 0, 0, 738, 0, 88, 2718135, 0, 0, 0, 33184, 3869256960 },
+    { 0, 0, 738, 0, 70, 2481615, 0, 0, 0, 33184, 3869256960 },
     { 2039, 0, 319, 0, 265, 7627654, 0, 0, 0, 33184, 3869256960 },
     { 2019, 0, 324, 0, 268, 5814774, 0, 0, 0, 6672, 1693255680 },
     { 2019, 0, 324, 0, 268, 5814774, 0, 0, 0, 6672, 1693255680 } }

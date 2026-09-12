@@ -36,7 +36,7 @@ CLASSES = {
     "label sliced by a region divider": ("#004d40", "sliced by a divider"),
     "lanes closer than one line of text": ("#4527a0", "lanes too close"),
     "label over another route": ("#e65100", "over a route"),
-    "label nearer another route than its own": ("#f9a825", "nearer another"),
+    "a foreign line inside a label's leader": ("#f9a825", "inside the leader"),
     "attachment on a drawn corner": ("#00695c", "on a corner"),
     "texts overprint each other": ("#37474f", "overprinted"),
 }

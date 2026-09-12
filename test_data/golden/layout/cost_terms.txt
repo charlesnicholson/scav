@@ -4,7 +4,7 @@ compact orthogonal brew.scav 0 17 0 1 2257 0 0 0 688 6338304
 compact orthogonal dock.scav 0 14 0 5 27663 0 0 0 4576 11531776
 compact orthogonal estop.scav 0 4 0 0 510 0 0 0 3552 2102784
 compact orthogonal led.scav 0 4 0 0 510 0 0 0 3552 2102784
-compact orthogonal mill.scav 0 202 33686 63 464371 0 0 0 1600 285407232
+compact orthogonal mill.scav 0 202 33686 63 466931 0 0 0 1600 285407232
 compact orthogonal ota.scav 0 17 292 7 17579 0 0 0 2944 13472768
 compact orthogonal tcp.scav 0 30 1072 7 28472 0 0 0 5360 16091392
 compact orthogonal toolchanger.scav 0 57 3178 10 51496 0 0 0 3440 84448000
@@ -25,7 +25,7 @@ readable orthogonal gauntlet/crowd.scav 0 4 0 0 162 0 0 0 3132 11255680
 readable orthogonal gauntlet/enclosing.scav 0 14 0 1 9281 0 0 0 11150 12246360
 readable orthogonal gauntlet/fanin.scav 0 17 1914 9 24873 0 0 0 24124 14171744
 readable orthogonal gauntlet/fork.scav 0 10 1120 5 7183 0 0 0 16564 16226496
-readable orthogonal gauntlet/lane.scav 0 17 704 3 31193 0 0 0 21426 20791120
+readable orthogonal gauntlet/lane.scav 0 17 96 4 38493 0 0 0 21426 20791120
 readable orthogonal gauntlet/loop.scav 0 0 0 0 0 0 0 0 8128 2659328
 readable orthogonal gauntlet/marks.scav 0 8 352 2 5793 0 0 0 16064 6801408
 readable orthogonal gauntlet/mutual.scav 0 10 0 1 8805 0 0 0 2380 7979040
@@ -45,7 +45,7 @@ compact orthogonal gauntlet/crowd.scav 0 4 0 0 38 0 0 0 1584 4893696
 compact orthogonal gauntlet/enclosing.scav 0 12 0 2 7482 0 0 0 1200 5228928
 compact orthogonal gauntlet/fanin.scav 0 17 1194 9 17418 0 0 0 2016 6205440
 compact orthogonal gauntlet/fork.scav 0 11 1172 3 2776 0 0 0 1152 7652352
-compact orthogonal gauntlet/lane.scav 0 19 646 3 15031 0 0 0 5680 7808512
+compact orthogonal gauntlet/lane.scav 0 19 0 3 17287 0 0 0 5680 7808512
 compact orthogonal gauntlet/loop.scav 0 0 0 0 0 0 0 0 480 1193472
 compact orthogonal gauntlet/marks.scav 0 8 198 2 2813 0 0 0 1728 3182592
 compact orthogonal gauntlet/mutual.scav 0 10 0 2 2544 0 0 0 4256 2311168

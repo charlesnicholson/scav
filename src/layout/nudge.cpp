@@ -124,6 +124,7 @@ void nudge_lanes(scav_rect const &region,
 
   std::vector<Member> members;
   std::vector<uint32_t> lane;
+  std::vector<uint32_t> link;    // -> members, union-find over one axis's lanes
   std::vector<uint32_t> parent;  // -> lane, each member's bundle parent
   std::vector<uint32_t> slot;    // -> lane, the bundle it ended up in
   std::vector<uint32_t> sizes;
@@ -257,33 +258,50 @@ void nudge_lanes(scav_rect const &region,
       return ok;
     };
 
-    for (uint32_t start = 0; start < members.size();) {
-      // A lane is a run of members **within `gap` of one coordinate** whose
-      // extents chain into one another, which is the same grouping `hi` carries
-      // forward as the sweep advances.
-      //
-      // **Not collinear, which is what it used to mean.** Keyed on equality,
-      // two routes six units apart over seven hundred were two lanes and never
-      // met: `routes share a run` read 6 over the corpus while
-      // `lanes closer than one line of text` read 89 (11.9.5). A lane is what
-      // a reader cannot tell apart, and that is a distance, not an identity.
-      uint32_t end{ start + 1 };
-      int32_t reach{ members[start].hi };
-      while ((end < members.size()) &&
-             (imax(members[end].at - members[start].at,
-                   members[start].at - members[end].at) < gap) &&
-             (members[end].lo < reach)) {
-        reach = imax(reach, members[end].hi);
-        ++end;
+    // A lane is a set of members **within `gap` of one coordinate** whose
+    // extents overlap, unioned over pairs.
+    //
+    // **Not collinear, which is what it used to mean.** Keyed on equality, two
+    // routes six units apart over seven hundred were two lanes and never met:
+    // `routes share a run` read 6 over the corpus while `lanes closer than one
+    // line of text` read 89 (11.9.5). A lane is what a reader cannot tell
+    // apart, and that is a distance, not an identity.
+    //
+    // **And unioned rather than run along.** Members sort by `at`, so `lo` is
+    // not monotonic and a run testing `lo < reach` as it advanced was wrong
+    // both ways: it stopped at the first member whose extent did not reach,
+    // leaving a third that overlapped the first in a lane of its own, and
+    // `lo < reach` is one-sided against a union, so it joined members whose
+    // extents never met at all.
+    link.assign(members.size(), 0);
+    for (uint32_t i = 0; i < link.size(); ++i) { link[i] = i; }
+    for (uint32_t i = 0; i < members.size(); ++i) {
+      for (uint32_t j = i + 1;
+           (j < members.size()) && ((Wide{ members[j].at } - members[i].at) < gap);
+           ++j) {
+        if ((members[j].lo >= members[i].hi) || (members[i].lo >= members[j].hi)) {
+          continue;
+        }
+        uint32_t const one{ bundle_root(link, i) };
+        uint32_t const two{ bundle_root(link, j) };
+        if (one != two) { link[imax(one, two)] = imin(one, two); }
       }
-      uint32_t const first{ start };
-      start = end;
-      uint32_t const count{ end - first };
+    }
+    for (uint32_t first = 0; first < members.size(); ++first) {
+      if (bundle_root(link, first) != first) { continue; }
+      lane.clear();
+      int32_t reach{ members[first].hi };
+      int32_t least{ members[first].lo };
+      for (uint32_t i = first; i < members.size(); ++i) {
+        if (bundle_root(link, i) != first) { continue; }
+        lane.push_back(i);
+        reach = imax(reach, members[i].hi);
+        least = imin(least, members[i].lo);
+      }
+      uint32_t const count{ static_cast<uint32_t>(lane.size()) };
       if (count < 2) { continue; }
       ++stats.lanes;
 
-      lane.clear();
-      for (uint32_t i = first; i < end; ++i) { lane.push_back(i); }
       scav_stable_sort(lane, [&members](uint32_t x, uint32_t y) {
         if (members[x].toward != members[y].toward) {
           return members[x].toward < members[y].toward;
@@ -404,8 +422,10 @@ void nudge_lanes(scav_rect const &region,
 
       // The room the whole lane has, measured over its union extent so a member
       // cannot be displaced into something a shorter neighbour cleared.
+      // The root is the lane's lowest `at`, members being sorted by it and
+      // unioned onto the lower index.
       int32_t const at{ members[first].at };
-      int32_t const lo{ members[first].lo };
+      int32_t const lo{ least };
       int32_t const hi{ reach };
       Wide room_down{ horizontal ? (Wide{ region.y } + region.h) - at
                                  : (Wide{ region.x } + region.w) - at };
