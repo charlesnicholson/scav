@@ -480,8 +480,8 @@ void nudge_lanes(scav_rect const &region,
       bool any{ false };
       for (uint32_t j = 0; j < count; ++j) {
         Member &m{ members[lane[j]] };
-        m.offset = static_cast<int32_t>((Wide{ at } + lowest + (Wide{ slot[j] } * step)) -
-                                        m.at);
+        m.offset =
+            static_cast<int32_t>((Wide{ at } + lowest + (Wide{ slot[j] } * step)) - m.at);
         if (m.offset != 0) { any = true; }
       }
       if (!any) { continue; }

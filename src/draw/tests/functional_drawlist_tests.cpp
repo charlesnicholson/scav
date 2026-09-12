@@ -554,8 +554,8 @@ TEST_CASE("drawlist: layout's line height is draw's, over the whole domain") {
   }
   // Up at every remainder, not on average.
   for (int32_t const size : { 10, 11, 12, 13, 14 }) { agree(size, 1, 5); }
-  CHECK(label_line_height(readable()) == 269);   // 192 * 7/5
-  CHECK(label_line_height(compact()) == 192);    // 160 * 6/5
+  CHECK(label_line_height(readable()) == 269);  // 192 * 7/5
+  CHECK(label_line_height(compact()) == 192);   // 160 * 6/5
 }
 
 TEST_CASE("drawlist corpus: a 2k-state chart builds, and quickly") {
