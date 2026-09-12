@@ -8,6 +8,7 @@
 #include "layout/route.h"
 #include "layout/shard.h"
 #include "layout/size.h"
+#include "layout/tests/pod_eq.h"
 #include "layout/tests/test_synth.h"
 #include "scav/scav_core.h"
 #include "scav/scav_core_c.h"
@@ -31,11 +32,6 @@
 namespace {
 
 using namespace scav;
-
-// The C structs carry no operators; the tests compare them field-wise.
-constexpr bool operator==(scav_rect const &a, scav_rect const &b) {
-  return (a.x == b.x) && (a.y == b.y) && (a.w == b.w) && (a.h == b.h);
-}
 
 // The sizes the C surface checks against, as this build measures them.
 constexpr uint32_t PROFILE_SIZE{ static_cast<uint32_t>(sizeof(scav_profile)) };
@@ -1315,18 +1311,28 @@ constexpr std::array<char const *, 2> SCALE_ROUTERS{ "orthogonal", "straight" };
 // `CostTerms` in declaration order with the Tier-0 pair moved to the front:
 // through_box, box_overlap, bends, corridor, crossings, excess_len, adjacency,
 // label, label_near, aspect, area.
-// `excess_len` on the two nested rows moved when the corner inset landed: a
-// seat held off an arc is a slightly longer route, +560 and +2,752 units of
-// 46.6M and 34.0M.
+// Moved by the corner inset (a seat off an arc is a longer route), then by the
+// trunk exemption narrowing to a common destination (11.9.3; both 2k shapes are
+// largely fan-out), then three times by 11.9.5 -- the lane pitch, the corridor
+// reservation, and offsets becoming lane positions.
+//
+// `area` is 1.51x and 1.43x nested, 1.04x and 1.07x flat: the reservation
+// itself, the same boxes in frames whose boundaries now hold a lane apiece.
+// These charts request no space, so only the corridor half of it reaches them.
+//
+// Rows 6 and 7 are one row, and that is a router cliff, not a reservation:
+// `ORTHO_VERTEX_BUDGET` bounds `nx * ny`, and a squarer 2k frame spends more
+// vertices than the same area as a strip. Flat at `compact` falls to the
+// straight router for it, `through_box` 0 -> 2,019. The lever is the budget.
 constexpr std::array<std::array<int64_t, 11>, 8> SCALE_PINNED{
-  { { 0, 0, 4136, 139984, 1880, 46592912, 0, 0, 0, 2527936, 89039694848 },
-    { 11464, 0, 3416, 172160, 75136, 605104352, 0, 0, 0, 2527936, 89039694848 },
-    { 0, 0, 4784, 11680, 2224, 34006304, 0, 0, 0, 125776, 32837048320 },
-    { 12944, 0, 3504, 0, 65752, 596909344, 0, 0, 0, 125776, 32837048320 },
-    { 0, 0, 740, 111680, 152, 4553385, 0, 0, 0, 53760, 3718840320 },
-    { 1996, 0, 318, 0, 270, 7357645, 0, 0, 0, 53760, 3718840320 },
-    { 0, 0, 774, 0, 173, 3760046, 0, 0, 0, 10688, 1589407744 },
-    { 1998, 0, 328, 0, 278, 5584737, 0, 0, 0, 10688, 1589407744 } }
+  { { 0, 0, 4864, 564512, 1264, 38903856, 0, 0, 0, 2984776, 134823986304 },
+    { 10808, 0, 3464, 0, 71464, 917243432, 0, 0, 0, 2984776, 134823986304 },
+    { 0, 0, 5240, 399176, 1392, 24397888, 0, 0, 0, 145264, 46911586048 },
+    { 9312, 0, 3576, 0, 83896, 1110858824, 0, 0, 0, 145264, 46911586048 },
+    { 0, 0, 738, 0, 70, 2470415, 0, 0, 0, 33184, 3869256960 },
+    { 2039, 0, 319, 0, 265, 7627654, 0, 0, 0, 33184, 3869256960 },
+    { 2019, 0, 324, 0, 268, 5814774, 0, 0, 0, 6672, 1693255680 },
+    { 2019, 0, 324, 0, 268, 5814774, 0, 0, 0, 6672, 1693255680 } }
 };
 
 }  // namespace

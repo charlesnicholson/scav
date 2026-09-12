@@ -515,7 +515,10 @@ TEST_CASE("gauntlet: two states each other's target are two lines") {
                              l.r.points[b.off + j + 1]);
       }
     }
-    CHECK(shared == ((p.profile_id == compact().profile_id) ? 652 : 0));
+    // 652 before 11.9.5's reservation, 0 with it, 650 once offsets became lane
+    // positions rather than per-member displacements. The room is there and
+    // spreading to the right places spends it; 11.3's cycle-breaking is the lever.
+    CHECK(shared == ((p.profile_id == compact().profile_id) ? 650 : 0));
   }
 }
 
@@ -536,7 +539,9 @@ TEST_CASE("gauntlet: a fan-in's arrivals are four arrows, none inside another") 
       if (chart_string(l.c, l.c.states[st].name) == "Fault") { fault = st; }
     }
     REQUIRE(fault != INVALID);
-    CHECK(l.r.nudged.refused == 0);
+    // Two refusals before 11.9.5's reservation, one after, none now that the
+    // offsets target lane positions -- the same room, asked for correctly.
+    CHECK(l.r.nudged.refused == ((p.profile_id == compact().profile_id) ? 0U : 1U));
     std::vector<uint32_t> into;
     for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
       if ((l.r.route[t].len >= 2) && (l.c.transitions[t].dst.v == fault)) {
@@ -686,12 +691,10 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     shape_counts(shipped, shipped_through, shipped_back);
     CHECK(shipped_through == 0);
     CHECK(cost_columns(shipped.c, shipped.g, p).through_box == 0);
-    // The other half of the same hole, and it got worse rather than better: the
-    // route still leaves and returns along one line, and the arrangement the
-    // packer picked makes it double back twice each way instead of once. That
-    // is the count the axis-aligned property still carves this chart out for,
-    // and it is 11.8's to take to zero.
-    CHECK(shipped_back == 4);
+    // The other half of the hole: the route still leaves and returns along one
+    // line. Four at both profiles until 11.9.5's reservation, three at `compact`
+    // since -- the arrangement moving, not the hole closing. 11.8's to close.
+    CHECK(shipped_back == ((p.profile_id == compact().profile_id) ? 3U : 4U));
 
     // 11.5's face rule, which picks a face by how far the target lies outside
     // the box on each axis rather than by the distance to a point on it. A
@@ -699,16 +702,19 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     // the y separation dominate, so it leaves through the bar's own 64-unit
     // cap while the 960-unit face beside it goes unused, and the arrow then
     // reads as coming off the bar's end instead of off its length.
+    //
+    // Two since 11.9.5's reservation, where it was one: room beside a labelled
+    // leg pushes the branch further below the bar, so y dominates on both. The
+    // rule is the defect; the reservation only found it more targets.
     Laid fork_zero;
     lay("fork.scav", one_row(p), fork_zero);
-    CHECK(capped_branches(fork_zero) == 1);
-    // And what ships: at `readable` the packer choice stacks the branch beside
-    // the bar rather than below it, so the y separation stops dominating and
-    // the count is zero. The rule is still the rule -- `compact` packs tighter,
-    // ships row 0, and still reads one.
+    CHECK(capped_branches(fork_zero) == 2);
+    // And what ships, which used to differ by profile -- `readable` stacked the
+    // branch beside the bar and read zero where `compact` read one. Under the
+    // reservation both branches sit below the bar at both profiles and both
+    // read two, so the packer no longer hides the rule from one of them.
     Laid fork_shipped;
     lay("fork.scav", p, fork_shipped);
-    CHECK(capped_branches(fork_shipped) ==
-          ((p.profile_id == compact().profile_id) ? 1U : 0U));
+    CHECK(capped_branches(fork_shipped) == 2);
   }
 }

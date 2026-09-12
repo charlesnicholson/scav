@@ -227,7 +227,7 @@ TEST_CASE("cost: a run upstream of the merge is charged and the merge is not") {
   CHECK(corridor_of(c, lines(101)) == 220);
 }
 
-TEST_CASE("cost: two routes leaving as one line are not charged for it") {
+TEST_CASE("cost: two routes leaving as one line are charged for it") {
   Chart const c{ edges(2) };
   auto const lines = [](int32_t start_x) {
     return std::vector<std::vector<scav_point>>{
@@ -235,7 +235,10 @@ TEST_CASE("cost: two routes leaving as one line are not charged for it") {
       { { .x = start_x, .y = 0 }, { .x = 150, .y = 0 }, { .x = 150, .y = -100 } }
     };
   };
-  CHECK(corridor_of(c, lines(0)) == 0);
+  // A fan-out is not the exemption (11.9.3): these two leave one state and
+  // part, so sharing the start buys nothing. The run is 150 either way, where
+  // one unit of offset used to be free against charged.
+  CHECK(corridor_of(c, lines(0)) == 150);
   CHECK(corridor_of(c, lines(1)) == 149);
 }
 
@@ -263,22 +266,24 @@ TEST_CASE("cost: two routes with the same polyline are one trunk end to end") {
         0);
 }
 
-TEST_CASE("cost: a route that is the whole of another's end is trunk end to end") {
+TEST_CASE("cost: a route arriving as another's last leg is trunk, its head is not") {
   Chart const c{ edges(2) };
-  // A degraded net is a straight line (11.5), and one drawn between two points of
-  // another route is that route's tail or its head rather than a second lane.
+  // A degraded net is a straight line (11.5); along another's final leg it is
+  // the arrival they share, not a second lane.
   CHECK(corridor_of(c,
                     { { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
                       { { .x = 200, .y = 0 }, { .x = 200, .y = 100 } } }) == 0);
+  // The head is charged now (11.9.3): two routes leaving one state as one line
+  // go somewhere ambiguous. The 200 along y=0 is that fan-out.
   CHECK(corridor_of(c,
                     { { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
-                      { { .x = 0, .y = 0 }, { .x = 200, .y = 0 } } }) == 0);
+                      { { .x = 0, .y = 0 }, { .x = 200, .y = 0 } } }) == 200);
 }
 
 TEST_CASE("cost: a run the two find again after they part is charged") {
   Chart const c{ edges(2) };
-  // 100 along y=0 out of the shared start, which is free, and 100 more along
-  // y=100 where the two happen to meet again, which is two lanes on one line.
+  // 100 along y=0 out of the shared start, charged now (11.9.3), and 100 more
+  // along y=100 where they meet again -- two lanes on one line either way.
   CHECK(corridor_of(c,
                     { { { .x = 0, .y = 0 },
                         { .x = 200, .y = 0 },
@@ -289,7 +294,7 @@ TEST_CASE("cost: a run the two find again after they part is charged") {
                         { .x = 100, .y = 200 },
                         { .x = 300, .y = 200 },
                         { .x = 300, .y = 100 },
-                        { .x = 500, .y = 100 } } }) == 100);
+                        { .x = 500, .y = 100 } } }) == 200);
 }
 
 TEST_CASE("cost: a run against the trunk is charged and the trunk is not") {

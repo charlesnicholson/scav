@@ -2,6 +2,7 @@
 // enough, since the candidates come from the route and nothing else.
 
 #include "layout/label.h"
+#include "layout/tests/pod_eq.h"
 
 #include "layout/geom.h"
 #include "layout/size.h"
@@ -28,10 +29,6 @@ scav_profile tiny() {
 }
 
 using namespace scav;
-
-constexpr bool operator==(scav_rect const &a, scav_rect const &b) {
-  return (a.x == b.x) && (a.y == b.y) && (a.w == b.w) && (a.h == b.h);
-}
 
 SizedLayout blank(Chart const &c, scav_rect chart) {
   SizedLayout z;

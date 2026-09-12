@@ -2,6 +2,7 @@
 // slots are what is under test rather than whatever sizing produced.
 
 #include "layout/route.h"
+#include "layout/tests/pod_eq.h"
 
 #include "layout/decompose.h"
 #include "layout/label.h"
@@ -20,15 +21,6 @@
 namespace {
 
 using namespace scav;
-
-// The C structs carry no operators; the tests compare them field-wise.
-constexpr bool operator==(scav_rect const &a, scav_rect const &b) {
-  return (a.x == b.x) && (a.y == b.y) && (a.w == b.w) && (a.h == b.h);
-}
-
-constexpr bool operator==(scav_point const &a, scav_point const &b) {
-  return (a.x == b.x) && (a.y == b.y);
-}
 
 scav_profile profile() {
   scav_profile p{};
@@ -709,9 +701,11 @@ TEST_CASE("route: nothing is nudged for a router that asks for no margin") {
   CHECK(nudged.nudged.lanes == 1);
   CHECK(nudged.nudged.moved == 2);
   // The root frame has no owning state, so the region is what bounds it, and the
-  // region holds every point either net touches.
-  CHECK(nudged.points[nudged.route[0].off + 1].y == 92);
-  CHECK(nudged.points[nudged.route[1].off + 1].y == 108);
+  // region holds every point either net touches. The pitch these two spread by
+  // is a line of the profile's text rather than the router's margin, so the
+  // 16 asked for above bounds the routing and not the spreading (11.9.5).
+  CHECK(nudged.points[nudged.route[0].off + 1].y == 56);
+  CHECK(nudged.points[nudged.route[1].off + 1].y == 184);
 
   LaneRouter const silent{ 0 };
   Routes const plain{ route_transitions(c, g, o, z, {}, profile(), silent) };
@@ -752,12 +746,12 @@ TEST_CASE("route: a nudge inside a composite is bounded by that state's own box"
 
   LaneRouter const asks{ 16 };
   // A box that leaves the lane all the room it wants: the two members spread by
-  // the whole margin either side.
+  // a whole line of text either side.
   z.state[comp.v] = { .x = -40, .y = -40, .w = 320, .h = 320 };
   Routes const wide{ route_transitions(c, g, o, z, {}, profile(), asks) };
   REQUIRE(wide.nudged.lanes == 1);
-  CHECK(wide.points[wide.route[0].off + 1].y == 92);
-  CHECK(wide.points[wide.route[1].off + 1].y == 108);
+  CHECK(wide.points[wide.route[0].off + 1].y == 56);
+  CHECK(wide.points[wide.route[1].off + 1].y == 184);
 
   // Eight units of it, centred on the lane, and the members stop one unit inside
   // each border. The region reaches a margin past every point either net

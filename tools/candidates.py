@@ -288,12 +288,13 @@ DEFECTS = [
     "an arrowhead over another route's end", "divider not axis-aligned",
     "drawn outside the chart rect", "routes share a run",
     "label over a state box", "label over another route",
-    "label nearer another route than its own", "texts overprint each other",
+    "a foreign line inside a label's leader", "texts overprint each other",
     "mark outside its glyph",
     # The classes P9d's review added, each one an absolute the objective was
     # blind to rather than a preference it priced badly.
     "attachment on a drawn corner", "label not anchored to its own polyline",
     "label sliced by its own route", "label sliced by a region divider",
+    "lanes closer than one line of text",
     "label outside its enclosing state",
 ]
 

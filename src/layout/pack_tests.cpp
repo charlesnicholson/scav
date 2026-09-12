@@ -3,6 +3,7 @@
 // packing has to keep whatever the shape.
 
 #include "layout/pack.h"
+#include "layout/tests/pod_eq.h"
 
 #include "scav_int.h"
 #include "scav_rnd.h"
@@ -38,11 +39,6 @@ std::vector<scav_rect> boxes(std::vector<std::pair<int32_t, int32_t>> const &wh)
     out.push_back({ .x = 0, .y = 0, .w = e.first, .h = e.second });
   }
   return out;
-}
-
-// The C structs carry no operators; the tests compare them field-wise.
-constexpr bool operator==(scav_rect const &a, scav_rect const &b) {
-  return (a.x == b.x) && (a.y == b.y) && (a.w == b.w) && (a.h == b.h);
 }
 
 bool same(std::vector<scav_rect> const &a, std::vector<scav_rect> const &b) {

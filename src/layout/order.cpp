@@ -6,8 +6,10 @@
 #include "layout/order.h"
 
 #include "layout/decompose.h"
+#include "layout/partition.h"
 #include "layout/shard.h"
 #include "scav/scav_core.h"
+#include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
 #include "scav_int.h"
 #include "scav_shard.h"
@@ -78,6 +80,9 @@ struct FrameOrder {
 struct FrameScratch {
   std::vector<uint32_t> state_local;  // -> states
   std::vector<uint32_t> seg_local;    // -> SplitGraph::segments
+  Partition part;                     // -> nodes, the frame's components
+  std::vector<uint32_t> dense;        // -> nodes; a component root's ordinal
+  std::vector<uint32_t> lanes;        // boundaries x components, row-major
 };
 
 // The endpoint state of a segment's src or dst end when that end carries no
@@ -485,7 +490,7 @@ SubmachineOrders order_submachines(Chart const &c,
     assign_ranks(f);
 
     // Charged before chaining, while an edge still knows the whole span its
-    // label sits in the middle of.
+    // label sits in the middle of and how many boundaries it crosses.
     uint32_t top{ 0 };
     for (OrderNode const &nd : f.nodes) { top = imax(top, nd.rank); }
     std::vector<int32_t> &gaps{ frames[m].gaps };
@@ -493,9 +498,48 @@ SubmachineOrders order_submachines(Chart const &c,
     for (OrderEdge const &e : f.edges) {
       int32_t const label{ seg_label[e.segment] };
       if (label == 0) { continue; }
-      uint32_t const from{ f.nodes[e.src].rank };
-      uint32_t const at{ from + ((f.nodes[e.dst].rank - from) / 2) };
+      uint32_t const from{ imin(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
+      uint32_t const to{ imax(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
+      uint32_t const at{ from + ((to - from) / 2) };
       if (at < gaps.size()) { gaps[at] = imax(gaps[at], label); }
+    }
+
+    // An edge turning in a boundary needs a lane of its own, and two lanes
+    // carrying type may not sit closer than a line of it (11.9.5). Phase 3
+    // spreads into the width phase 2 left, so only phase 2 can reserve it.
+    //
+    // The two boundaries an edge *turns* in, not every one it crosses: between
+    // them it runs straight and wants cross-axis room. Per component, because
+    // components are laid out separately and never share a corridor. Max rather
+    // than sum against the label charge: both size the same corridor.
+    Partition &part{ sc.part };
+    part.reset(f.nodes.size());
+    for (OrderEdge const &e : f.edges) { part.join(e.src, e.dst); }
+    // Dense, so the table is boundaries x components, not x nodes.
+    std::vector<uint32_t> &dense{ sc.dense };
+    dense.assign(f.nodes.size(), INVALID);
+    uint32_t parts{ 0 };
+    for (uint32_t i = 0; i < f.nodes.size(); ++i) {
+      uint32_t const root{ part.root(i) };
+      if (dense[root] == INVALID) { dense[root] = parts++; }
+    }
+    std::vector<uint32_t> &lanes{ sc.lanes };
+    lanes.assign(gaps.size() * parts, 0);
+    int32_t const pitch{ label_line_height(p) };
+    auto const turn = [&](uint32_t b, uint32_t of) {
+      if (b >= gaps.size()) { return; }
+      uint32_t &here{ lanes[(static_cast<size_t>(b) * parts) + of] };
+      ++here;
+      if (here < 2) { return; }
+      gaps[b] = imax(gaps[b],
+                     static_cast<int32_t>(imin(Wide{ here } * pitch, Wide{ SPACE_MAX })));
+    };
+    for (OrderEdge const &e : f.edges) {
+      uint32_t const from{ imin(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
+      uint32_t const to{ imax(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
+      uint32_t const of{ dense[part.root(e.src)] };
+      turn(from, of);
+      if (to > (from + 1)) { turn(to - 1, of); }
     }
 
     chain_long_edges(f);

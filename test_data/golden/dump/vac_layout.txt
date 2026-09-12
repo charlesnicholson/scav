@@ -62,82 +62,82 @@ chart vac "robot vacuum" (test_data/charts/vac.scav:3)
   include dock "dock.scav" -> test_data/charts/dock.scav (test_data/charts/vac.scav:4)
   include lamp "./led.scav" -> test_data/charts/led.scav (test_data/charts/vac.scav:7)
   include lamp "led.scav" -> test_data/charts/led.scav (test_data/charts/dock.scav:4)
-geometry structural 2faff629 coordinate 69b75713
-  chart 0,0 18884x7509
-  cost t0 0 t2 7343
+geometry structural f2f5775f coordinate 9265bdb5
+  chart 0,0 13871x12793
+  cost t0 0 t2 8278
     tier0 through_box 0 box_overlap 0
-    bends 35 share 3050bp
-    corridor 0 share 0bp
-    crossings 0 share 0bp
-    excess_len 13130 share 375bp
+    bends 26 share 2010bp
+    corridor 1777 share 579bp
+    crossings 1 share 38bp
+    excess_len 20618 share 521bp
     adjacency 0 share 0bp
-    label 1 share 32bp
-    label_near 860 share 326bp
-    aspect 68696 share 975bp
-    area 141799956 share 5239bp
+    label 1 share 28bp
+    label_near 403 share 173bp
+    aspect 65978 share 831bp
+    area 177451703 share 5815bp
   label leader 96
-    placed t1 17087,672 1050x269
-    placed t4 4378,2611 1396x269
-    placed t7 9627,4526 1856x269
-    placed t8 13346,5121 589x269
-    placed t10 7886,3537 1626x269
-    placed t11 8020,3902 1396x269
-    placed t13 1491,1197 1050x269
-    placed t14 1520,2234 935x269
-    placed t15 400,1140 1050x269
-    placed t17 15426,4622 1050x269
-    placed t18 15455,5966 935x269
-    placed t19 13775,4334 1050x269
-  state dock 5870,2804 10645x4705 before 5998,2932 10389x397 after 5998,7381 10389x0
-  state lamp 0,0 2452x3476 before 128,128 2196x397 after 128,3348 2196x0
-  state Off 17603,0 896x653 before 17731,128 640x397 after 17731,525 640x0
-  state Booting 17565,941 1319x653 before 17693,1069 1063x397 after 17693,1466 1063x0
-  state PreConfig 2740,0 2842x1050 before 2868,128 2586x794 after 2868,922 2586x0
-  state On 5870,0 3885x2516 before 5998,128 3629x397 after 5998,2388 3629x0
-  state On:main/Idle 6510,1735 973x653 before 6638,1863 717x397 after 6638,2260 717x0
-  state On:main/Ready 5998,525 1664x922 before 6126,653 1408x397 after 6126,1050 1408x269
-  state On:aux/Idle 8654,525 973x653 before 8782,653 717x397 after 8782,1050 717x0
-  state dock/lamp 13935,3329 2452x4052 before 14063,3457 2196x397 after 14063,7253 2196x0
-  state dock/Empty 6798,3329 1088x653 before 6926,3457 832x397 after 6926,3854 832x0
-  state dock/On 9512,3329 3834x2247 before 9640,3457 3578x397 after 9640,5448 3578x0
-  state dock/On/Seated 10440,3854 1204x653 before 10568,3982 948x397 after 10568,4379 948x0
-  state dock/On/Charging 11208,4795 1434x653 before 11336,4923 1178x397 after 11336,5320 1178x0
-  state lamp/Off 928,525 896x653 before 1056,653 640x397 after 1056,1050 640x0
-  state lamp/Blinking 890,1466 1434x653 before 1018,1594 1178x397 after 1018,1991 1178x0
-  state lamp/Solid 890,2695 1088x653 before 1018,2823 832x397 after 1018,3220 832x0
-  state dock/lamp/Off 14863,3854 896x653 before 14991,3982 640x397 after 14991,4379 640x0
-  state dock/lamp/Blinking 14825,5083 1434x653 before 14953,5211 1178x397 after 14953,5608 1178x0
-  state dock/lamp/Solid 14825,6600 1088x653 before 14953,6728 832x397 after 14953,7125 832x0
-  state $initial 16803,214 224x224 before 16803,214 224x0 after 16803,214 224x0
-  state On:main/$initial 5998,1735 224x224 before 5998,1735 224x0 after 5998,1735 224x0
-  state On:aux/$initial 8142,525 224x224 before 8142,525 224x0 after 8142,525 224x0
-  state dock/On/$initial 9640,3868 224x224 before 9640,3868 224x0 after 9640,3868 224x0
-  state dock/$initial 5998,3543 224x224 before 5998,3543 224x0 after 5998,3543 224x0
-  state lamp/$initial 128,739 224x224 before 128,739 224x0 after 128,739 224x0
-  state dock/lamp/$initial 14063,4068 224x224 before 14063,4068 224x0 after 14063,4068 224x0
-  sub 0 0,0 18884x7509
-  sub 1 5998,525 1952x1863
-  sub 2 8142,525 1485x1863
-  sub 3 5998,3329 10389x4052
-  sub 4 9640,3854 3578x1594
-  sub 5 128,525 2196x2823
-  sub 6 14063,3854 2196x3399
-  route $initial -> Off (17027,326) (17507,326)
-  route Off -> Booting (18137,653) (18137,845)
-  route On:main/$initial -> On:main/Idle (6222,1847) (6318,1847) (6318,1863) (6414,1863)
-  route On:main/Ready -> dock/On/Seated (7662,653) (7758,653) (7758,429) (9755,429) (9755,525) (9851,525) (9851,2708) (5774,2708) (5774,4270) (5870,4270) (6798,4270) (6798,4380) (9512,4380) (9512,4379) (10344,4379) port s1 d0 port s0 d0 port s0 d1
-  route On:aux/$initial -> On:aux/Idle (8366,637) (8462,637) (8462,653) (8558,653)
-  route dock/On/$initial -> dock/On/Seated (9864,3980) (9960,3980) (9960,3982) (10344,3982)
-  route dock/On/Seated -> dock/On/Charging (11483,4507) (11483,4699)
-  route dock/On/Charging -> dock/lamp/Solid (12642,5121) (13346,5121) (13442,5121) (13442,4795) (13935,4795) (14633,4795) (14633,6312) (14825,6312) (14825,6504) (14921,6504) (14921,6552) port s1 d1 port s0 d1
-  route dock/$initial -> dock/Empty (6222,3655) (6702,3655)
-  route dock/Empty -> dock/On (7886,3806) (9416,3806)
-  route dock/On -> dock/Empty (9512,3902) (9416,3902) (9416,3854) (7982,3854)
-  route lamp/$initial -> lamp/Off (352,851) (832,851)
-  route lamp/Off -> lamp/Blinking (1491,1178) (1491,1370)
-  route lamp/Blinking -> lamp/Solid (1520,2119) (1520,2599)
-  route lamp/Solid -> lamp/Off (986,2695) (986,2407) (794,2407) (794,1274) (1056,1274) (1056,1226)
-  route dock/lamp/$initial -> dock/lamp/Off (14287,4180) (14767,4180)
-  route dock/lamp/Off -> dock/lamp/Blinking (15426,4507) (15426,4987)
-  route dock/lamp/Blinking -> dock/lamp/Solid (15455,5736) (15455,6504)
-  route dock/lamp/Solid -> dock/lamp/Off (14969,6600) (14969,6024) (14729,6024) (14729,4603) (14991,4603) (14991,4555)
+    placed t1 12074,1007 1050x269
+    placed t4 4416,6961 1396x269
+    placed t7 7924,6159 1856x269
+    placed t8 6988,7891 589x269
+    placed t10 5568,5798 1626x269
+    placed t11 5798,6163 1396x269
+    placed t13 1491,1532 1050x269
+    placed t14 2661,2331 935x269
+    placed t15 1792,3051 1050x269
+    placed t17 4973,10056 1050x269
+    placed t18 5633,11287 935x269
+    placed t19 4371,11595 1050x269
+  state dock 2784,3919 8718x8874 before 2912,4047 8462x397 after 2912,12665 8462x0
+  state lamp 0,0 5166x3631 before 128,128 4910x397 after 128,3503 4910x0
+  state Off 12590,183 896x653 before 12718,311 640x397 after 12718,708 640x0
+  state Booting 12552,1489 1319x653 before 12680,1617 1063x397 after 12680,2014 1063x0
+  state PreConfig 7057,0 2842x1050 before 7185,128 2586x794 after 7185,922 2586x0
+  state On 0,6676 2208x3361 before 128,6804 1952x397 after 128,9909 1952x0
+  state On:main/Idle 640,8411 973x653 before 768,8539 717x397 after 768,8936 717x0
+  state On:main/Ready 128,7201 1664x922 before 256,7329 1408x397 after 256,7726 1408x269
+  state On:aux/Idle 640,9256 973x653 before 768,9384 717x397 after 768,9781 717x0
+  state dock/lamp 3213,8256 5166x4226 before 3341,8384 4910x397 after 3341,12354 4910x0
+  state dock/Empty 4250,5789 1088x653 before 4378,5917 832x397 after 4378,6314 832x0
+  state dock/On 7540,4627 3834x2977 before 7668,4755 3578x397 after 7668,7476 3578x0
+  state dock/On/Seated 9006,5335 1204x653 before 9134,5463 948x397 after 9134,5860 948x0
+  state dock/On/Charging 9236,6641 1434x653 before 9364,6769 1178x397 after 9364,7166 1178x0
+  state lamp/Off 928,708 896x653 before 1056,836 640x397 after 1056,1233 640x0
+  state lamp/Blinking 890,2014 1434x653 before 1018,2142 1178x397 after 1018,2539 1178x0
+  state lamp/Solid 3950,2504 1088x653 before 4078,2632 832x397 after 4078,3029 832x0
+  state dock/lamp/Off 4679,8964 896x653 before 4807,9092 640x397 after 4807,9489 640x0
+  state dock/lamp/Blinking 4103,10558 1434x653 before 4231,10686 1178x397 after 4231,11083 1178x0
+  state dock/lamp/Solid 7163,11519 1088x653 before 7291,11647 832x397 after 7291,12044 832x0
+  state $initial 11790,397 224x224 before 11790,397 224x0 after 11790,397 224x0
+  state On:main/$initial 128,8411 224x224 before 128,8411 224x0 after 128,8411 224x0
+  state On:aux/$initial 128,9256 224x224 before 128,9256 224x0 after 128,9256 224x0
+  state dock/On/$initial 7668,5349 224x224 before 7668,5349 224x0 after 7668,5349 224x0
+  state dock/$initial 2912,6003 224x224 before 2912,6003 224x0 after 2912,6003 224x0
+  state lamp/$initial 128,922 224x224 before 128,922 224x0 after 128,922 224x0
+  state dock/lamp/$initial 3341,9178 224x224 before 3341,9178 224x0 after 3341,9178 224x0
+  sub 0 0,0 13871x12793
+  sub 1 128,7201 1952x1863
+  sub 2 128,9256 1952x653
+  sub 3 2912,4444 8462x8221
+  sub 4 7668,5152 3578x2324
+  sub 5 128,525 4910x2978
+  sub 6 3341,8781 4910x3573
+  route $initial -> Off (12014,509) (12494,509)
+  route Off -> Booting (13124,836) (13124,1393)
+  route On:main/$initial -> On:main/Idle (352,8523) (544,8523)
+  route On:main/Ready -> dock/On/Seated (1792,7316) (1888,7316) (1888,7201) (2208,7201) (2304,7201) (2304,7095) (2784,7095) (7444,7095) (7444,5861) (7540,5861) (8910,5861) port s1 d0 port s0 d0 port s0 d1
+  route On:aux/$initial -> On:aux/Idle (352,9368) (544,9368)
+  route dock/On/$initial -> dock/On/Seated (7892,5461) (8910,5461)
+  route dock/On/Seated -> dock/On/Charging (9780,5988) (9780,6545)
+  route dock/On/Charging -> dock/lamp/Solid (10670,6967) (11374,6967) (11470,6967) (11470,8160) (3117,8160) (3117,10087) (3213,10087) (4007,10087) (4007,12335) (4103,12335) (4103,12076) (7067,12076) port s1 d1 port s0 d1
+  route dock/$initial -> dock/Empty (3136,6115) (4154,6115)
+  route dock/Empty -> dock/On (5338,6067) (7444,6067)
+  route dock/On -> dock/Empty (7540,6163) (5434,6163)
+  route lamp/$initial -> lamp/Off (352,1034) (832,1034)
+  route lamp/Off -> lamp/Blinking (1491,1361) (1491,1918)
+  route lamp/Blinking -> lamp/Solid (2324,2571) (2420,2571) (2420,2600) (3854,2600)
+  route lamp/Solid -> lamp/Off (3950,3061) (3854,3061) (3854,3320) (794,3320) (794,1457) (1024,1457) (1024,1409)
+  route dock/lamp/$initial -> dock/lamp/Off (3565,9290) (4583,9290)
+  route dock/lamp/Off -> dock/lamp/Blinking (4973,9617) (4973,10462)
+  route dock/lamp/Blinking -> dock/lamp/Solid (5537,11115) (5633,11115) (5633,11615) (7067,11615)
+  route dock/lamp/Solid -> dock/lamp/Off (7163,11864) (4007,11864) (4007,9713) (4775,9713) (4775,9665)

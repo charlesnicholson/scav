@@ -3,6 +3,8 @@
 
 #include "layout/nudge.h"
 
+#include "scav_int.h"
+
 #include "doctest.h"
 
 #include <cstddef>
@@ -91,6 +93,62 @@ TEST_CASE("nudge: two nets sharing a lane come off it in opposite directions") {
       CHECK(((a.x == b.x) || (a.y == b.y)));
     }
   }
+}
+
+TEST_CASE("nudge: routes a hair apart are one lane, not two") {
+  // A lane is what a reader cannot tell apart, which is a distance. Keyed on
+  // equality these two were two lanes and never met.
+  Frame f{ frame_of({ { pt(0, 0), pt(0, 100), pt(400, 100), pt(400, 300) },
+                      { pt(0, 500), pt(0, 106), pt(400, 106), pt(400, 800) } }) };
+  NudgeStats s;
+  nudge_lanes(OPEN, OPEN, {}, 160, 0, f.nets, f.points, s);
+
+  CHECK(s.lanes == 1);
+  CHECK(imax(net_pt(f, 0, 1).y - net_pt(f, 1, 1).y,
+             net_pt(f, 1, 1).y - net_pt(f, 0, 1).y) == 160);
+}
+
+TEST_CASE("nudge: a lane is every member that overlaps, not a run that stops") {
+  // Sorted by coordinate, extents are not monotonic. A third member overlapping
+  // the first can sit behind one that does not, and a run stops at the gap.
+  Frame f{ frame_of({ { pt(0, 0), pt(0, 100), pt(200, 100), pt(200, 400) },
+                      { pt(900, 0), pt(900, 104), pt(1100, 104), pt(1100, 400) },
+                      { pt(50, 600), pt(50, 108), pt(250, 108), pt(250, 900) } }) };
+  NudgeStats s;
+  nudge_lanes(OPEN, OPEN, {}, 160, 0, f.nets, f.points, s);
+
+  // Nets 0 and 2 overlap in x and must land a pitch apart; net 1 is elsewhere.
+  CHECK(imax(net_pt(f, 0, 1).y - net_pt(f, 2, 1).y,
+             net_pt(f, 2, 1).y - net_pt(f, 0, 1).y) == 160);
+  CHECK(net_pt(f, 1, 1).y == 104);
+}
+
+TEST_CASE("nudge: a run's one-sided reach does not bundle disjoint extents") {
+  // `lo < reach` against a running union joined members whose extents never
+  // met. These two overlap nothing, so neither is a lane and neither moves.
+  Frame f{ frame_of({ { pt(0, 0), pt(0, 100), pt(200, 100), pt(200, 400) },
+                      { pt(900, 0), pt(900, 104), pt(1100, 104), pt(1100, 400) } }) };
+  NudgeStats s;
+  nudge_lanes(OPEN, OPEN, {}, 160, 0, f.nets, f.points, s);
+
+  CHECK(s.lanes == 0);
+  CHECK(s.moved == 0);
+  CHECK(net_pt(f, 0, 1).y == 100);
+  CHECK(net_pt(f, 1, 1).y == 104);
+}
+
+TEST_CASE("nudge: a lane two coordinates wide spreads by the pitch, not past it") {
+  // Members 150 apart in one lane, with the slot order the reverse of the `at`
+  // order. An offset applied from each member's own `at` closes the lane to 10.
+  Frame f{ frame_of({ { pt(0, 400), pt(0, 100), pt(200, 100), pt(200, 600) },
+                      { pt(0, 200), pt(0, 250), pt(200, 250), pt(200, -100) } }) };
+  NudgeStats s;
+  nudge_lanes(OPEN, OPEN, {}, 160, 0, f.nets, f.points, s);
+
+  REQUIRE(s.lanes == 1);
+  int32_t const one{ net_pt(f, 0, 1).y };
+  int32_t const two{ net_pt(f, 1, 1).y };
+  CHECK(imax(one - two, two - one) == 160);
 }
 
 TEST_CASE("nudge: a lane with no room keeps its members stacked") {

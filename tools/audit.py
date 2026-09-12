@@ -313,6 +313,34 @@ def audit(svg, every, chart, doc, verbose):
     boundaries = [ink_span((int(a), int(b)), (int(c), int(d)), int(w))
                   for a, b, c, d, w in DIVIDER_INK.findall(svg)]
 
+    # **Two lanes closer than the type they carry.** `routes share a run` counts
+    # segments that are *collinear*; this counts ones that merely run alongside
+    # closer than a line of text is tall, which is what makes `mill` unreadable
+    # and what no class here could see (11.9.3). Parallel, overlapping along
+    # their own axis, and separated by less than one text height.
+    heights = [int(m.group(3)) for m in TEXT.finditer(svg)]
+    line = min(heights) if heights else 0
+    for i, (a, b, t1, _) in enumerate(legs):
+        for c, d, t2, _ in legs[i + 1:]:
+            if t1 == t2 or not line:
+                continue
+            flat = (a[1] == b[1]) and (c[1] == d[1])
+            up = (a[0] == b[0]) and (c[0] == d[0])
+            if not (flat or up):
+                continue
+            if flat:
+                apart = abs(a[1] - c[1])
+                along = min(max(a[0], b[0]), max(c[0], d[0])) - \
+                    max(min(a[0], b[0]), min(c[0], d[0]))
+            else:
+                apart = abs(a[0] - c[0])
+                along = min(max(a[1], b[1]), max(c[1], d[1])) - \
+                    max(min(a[1], b[1]), min(c[1], d[1]))
+            if (0 < apart < line) and (along > 0):
+                note("lanes closer than one line of text",
+                     f"t{t1}/t{t2} {apart} apart over {along}, one line is {line}",
+                     ink_span(a, b, apart))
+
     # 11.9.4's anchor, checked where it holds. The leader fixes the distance
     # from a point on a label's own polyline to one of the eight points of its
     # *placed box*, and the drawing shows the glyphs inside that box, so the
@@ -360,18 +388,28 @@ def audit(svg, every, chart, doc, verbose):
 
         # The composite a transition runs inside encloses its own label, so only
         # the text bands that composite reserved are out of bounds for it (11.6).
-        # A transition with no route is the exception: nothing placed its label,
-        # and the builder draws it in the band its source reserved for exactly it.
         edge = doc["transitions"][int(ident)]
         # States enclosing *both* ends. One enclosing a single end does not have
         # to hold the label -- the label belongs on the ancestral side of that
         # crossing -- so it is not exempt from the whole-rect test.
         under = enclosing(doc, edge["src"]) & enclosing(doc, edge["dst"])
+        # A transition with no route is the exception, and every one of them on
+        # the corpus is a self-transition: nothing placed its label and the
+        # builder draws it in the `after` band its own source reserved for
+        # exactly it. That band is inside the source's rect, so the whole-rect
+        # test reads eleven correct placements as violations -- `enclosing` is
+        # strict, so a source is never among its own ancestors and the exemption
+        # that used to live inside the `under` branch could never fire. What is
+        # still out of bounds there is the `before` band, which is the state's
+        # own title.
         own_band = edge["src"] if not doc["geometry"]["route"][int(ident)] else None
         for i in live:
-            hit = (any(struck(band[i]) for j, band in enumerate(bands)
-                       if not (j == 1 and i == own_band)) if i in under
-                   else struck(rects[i]))
+            if i == own_band:
+                hit = struck(bands[0][i])
+            elif i in under:
+                hit = any(struck(band[i]) for band in bands)
+            else:
+                hit = struck(rects[i])
             if hit:
                 note("label over a state box", f"t{ident} over state {i}",
                      (x, y - size, length, size))
@@ -401,16 +439,23 @@ def audit(svg, every, chart, doc, verbose):
                      (x, y - size, length, size))
                 break
 
-        # A reader ties a label to the nearest line, so a box that is not nearer
-        # its own route than every other by a line of its own text reads as
-        # somebody else's -- 11.6's `label_near`, counted where it is inked. The
-        # em box is shorter than the line box layout reserved, so this is the
-        # conservative count of the two.
-        mine = [gap(em, span(a, b)) for a, b, other, _ in legs if other == ident]
+        # **A foreign line inside a label's leader.** This was "not nearer its own
+        # route than every other by a line of its own text", which was the right
+        # question against 11.9's strip grid, where a label's own gap ran from
+        # zero to four box heights and the reader had nothing constant to go by.
+        # Under 11.9.4's anchor that gap *is* the leader, exactly, for every
+        # label in the drawing -- so attribution is settled by construction and
+        # reads 0 of 192 placed boxes, and what the old form went on measuring
+        # was a `leader + em` clearance under an attribution rule's name.
+        #
+        # What is left worth counting is a stranger's line closer to the text
+        # than the text's own line is: the reader has no gap to tell them apart
+        # by. The em box sits inside the line box layout placed, so measuring
+        # here is the conservative count of the two.
         theirs = [gap(em, span(a, b)) for a, b, other, _ in legs if other != ident]
-        if mine and theirs and min(mine) + size > min(theirs):
-            note("label nearer another route than its own",
-                 f"own {min(mine)} vs {min(theirs)}", (x, y - size, length, size))
+        if theirs and leader is not None and min(theirs) < leader:
+            note("a foreign line inside a label's leader",
+                 f"{min(theirs)} away, leader {leader}", (x, y - size, length, size))
 
         # Everything of a submachine is contained in its parent state's box,
         # out-of-machine transitions excepted -- a transition with no state
@@ -524,6 +569,7 @@ def main():
 
     # Counts first, then the findings, so the ratio is visible.
     scale = {"segment not axis-aligned": "route segments",
+             "lanes closer than one line of text": "route segments",
              "label sliced by its own route": "transition labels",
              "label sliced by a region divider": "transition labels",
              "attachment on a drawn corner": "state attachments",
@@ -538,7 +584,7 @@ def main():
              "routes share a run": "route segments",
              "label over a state box": "transition labels",
              "label over another route": "transition labels",
-             "label nearer another route than its own": "transition labels",
+             "a foreign line inside a label's leader": "transition labels",
              "texts overprint each other": "texts",
              "mark outside its glyph": "marks in a glyph"}
     for key in ("route segments", "route starts", "arrowheads", "state attachments",

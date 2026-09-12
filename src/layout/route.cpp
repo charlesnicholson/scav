@@ -228,6 +228,9 @@ Routes route_transitions(Chart const &c,
     RouteOutput &ro{ sc.ro };
     in.obstacles.clear();
     in.inscribed.clear();
+    // Cleared with the obstacles it parallels: otherwise a later frame reads an
+    // earlier one's radius at that index and the corner inset stops applying.
+    in.corner.clear();
     in.nets.clear();
     in.waypoints.clear();
     sc.obstacle_states.clear();
@@ -293,10 +296,13 @@ Routes route_transitions(Chart const &c,
     // Nudged per frame, while the frame's obstacles are in hand.
     if (margin > 0) {
       scav_rect const frame{ (owner.v == INVALID) ? region : z.state[owner.v] };
+      // The pitch is a line of text, not the router's clearance (11.9.5), and
+      // it is the grouping tolerance too, so what is spread apart by it is
+      // exactly what was too close by it.
       nudge_lanes(region,
                   frame,
                   in.obstacles,
-                  margin,
+                  imax(margin, p.font_size_grid),
                   margin,
                   ro.net_points,
                   ro.points,
