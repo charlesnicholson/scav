@@ -78,7 +78,7 @@ geometry structural f2f5775f coordinate 94c4e12e
   label leader 96
     placed t1 12074,1007 1050x269
     placed t4 4416,6961 1396x269
-    placed t7 9780,6159 1856x269
+    placed t7 7924,6159 1856x269
     placed t8 6988,7891 589x269
     placed t10 5568,5798 1626x269
     placed t11 5798,6163 1396x269

@@ -371,8 +371,13 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
   // **And 5 once phase 2 reserved the room instead of phase 3 hunting for it**
   // (11.9.5). This number was the argument that rip-up is what stands between
   // the anchor and zero; three quarters of it was scarcity, and rip-up is what
-  // the last five need.
-  CHECK(fell == 5);
+  // the last few need.
+  //
+  // **8 once I3 became a test.** A label whose transition runs inside a
+  // composite is bounded by that composite, and three boxes had nowhere inside
+  // it to go. Bought a class outright -- `label outside its enclosing state` is
+  // 8 of 203 to zero -- for three more of the class rip-up already owns.
+  CHECK(fell == 8);
 }
 
 TEST_CASE("drawlist corpus: the layout goldens' measurement policy is stated here") {

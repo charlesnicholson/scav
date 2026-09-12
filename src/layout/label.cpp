@@ -97,6 +97,17 @@ Wide shortfall_of(scav_rect const &cand,
   return reach - nearest;
 }
 
+// The rect both hold, empty where they do not meet. Nested rects intersect to
+// the inner one, which is how the innermost enclosing state is found without
+// ordering them by depth.
+scav_rect intersection(scav_rect const &a, scav_rect const &b) {
+  int32_t const x{ imax(a.x, b.x) };
+  int32_t const y{ imax(a.y, b.y) };
+  int32_t const w{ imin(a.x + a.w, b.x + b.w) - x };
+  int32_t const h{ imin(a.y + a.h, b.y + b.h) - y };
+  return { .x = x, .y = y, .w = imax(w, 0), .h = imax(h, 0) };
+}
+
 bool within(scav_rect const &outer, scav_rect const &inner) {
   return (inner.x >= outer.x) && (inner.y >= outer.y) &&
          ((inner.x + inner.w) <= (outer.x + outer.w)) &&
@@ -245,6 +256,16 @@ uint32_t place_labels(Chart const &c,
         }
       }
       blocked.clear();
+      // I3 as a test rather than a term: everything of a submachine is drawn
+      // inside its parent state's box, so a label whose transition runs inside
+      // a composite is bounded by that composite and not by the chart. The
+      // states enclosing both ends nest, so intersecting them all is the
+      // innermost of them without having to find it (11.9.3).
+      scav_rect holder{ z.chart };
+      for (uint32_t st = 0; st < c.states.size(); ++st) {
+        if ((c.states[st].live == 0) || (encloses[st] != 2)) { continue; }
+        holder = intersection(holder, z.state[st]);
+      }
       for (uint32_t st = 0; st < c.states.size(); ++st) {
         if (c.states[st].live == 0) { continue; }
         // A state enclosing both endpoints holds the label legitimately; the
@@ -327,7 +348,7 @@ uint32_t place_labels(Chart const &c,
                                               nearby);
                 if ((key.dist >= 0) && !better(here, key)) { continue; }
               }
-              if (!within(z.chart, cand)) { continue; }
+              if (!within(holder, cand)) { continue; }
               bool clear{ true };
               for (scav_rect const &obstacle : blocked) {
                 if (overlaps(cand, obstacle)) {
