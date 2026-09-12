@@ -388,18 +388,28 @@ def audit(svg, every, chart, doc, verbose):
 
         # The composite a transition runs inside encloses its own label, so only
         # the text bands that composite reserved are out of bounds for it (11.6).
-        # A transition with no route is the exception: nothing placed its label,
-        # and the builder draws it in the band its source reserved for exactly it.
         edge = doc["transitions"][int(ident)]
         # States enclosing *both* ends. One enclosing a single end does not have
         # to hold the label -- the label belongs on the ancestral side of that
         # crossing -- so it is not exempt from the whole-rect test.
         under = enclosing(doc, edge["src"]) & enclosing(doc, edge["dst"])
+        # A transition with no route is the exception, and every one of them on
+        # the corpus is a self-transition: nothing placed its label and the
+        # builder draws it in the `after` band its own source reserved for
+        # exactly it. That band is inside the source's rect, so the whole-rect
+        # test reads eleven correct placements as violations -- `enclosing` is
+        # strict, so a source is never among its own ancestors and the exemption
+        # that used to live inside the `under` branch could never fire. What is
+        # still out of bounds there is the `before` band, which is the state's
+        # own title.
         own_band = edge["src"] if not doc["geometry"]["route"][int(ident)] else None
         for i in live:
-            hit = (any(struck(band[i]) for j, band in enumerate(bands)
-                       if not (j == 1 and i == own_band)) if i in under
-                   else struck(rects[i]))
+            if i == own_band:
+                hit = struck(bands[0][i])
+            elif i in under:
+                hit = any(struck(band[i]) for band in bands)
+            else:
+                hit = struck(rects[i])
             if hit:
                 note("label over a state box", f"t{ident} over state {i}",
                      (x, y - size, length, size))
