@@ -1420,6 +1420,18 @@ Local search from a structured seed with **restricted uphill moves** — "simula
 
 **And the layered crossing model is not measuring what the reader sees.** Phase 1 reads zero crossings on every frame of the corpus while `Cost` reads **87 routed crossings** on the same drawings. Both are right: §11.1's decomposition splits every hierarchy-crossing transition, so a frame's own graph is small and its ranks order cleanly, and the crossings a reader counts happen between *routes in a frame's plane* rather than between ranks. **So the 71 remaining defects cannot come from in-rank ordering**, which is the dimension both frame-local moves search. What is untested is the third move — reorder sibling submachines, which is packing order and a different dimension — and the possibility that what is left belongs to phases 2 and 3 rather than to phase 1 at all. `[OWED]`
 
+**Where the 71 live, measured 2026-09-13 rather than assumed.** Attributed by the two objects each defect is *between*, and by which phase can move them:
+
+| | defects | reachable by |
+|---|---|---|
+| route against route | **50** | phase 3's seating and nudging |
+| route against a label | **12** | the same, plus the placer |
+| label against a box or another label | **9** | the placer, and rip-up for the 6 that are fallbacks |
+
+**A route is one of the two objects in 62 of 71 — 87%.** And they concentrate: **48 distinct routes of 257** carry the whole residue, over 36 crowded pairs and 20 shared runs. Phase-2 arrangement reaches one of them (the pick reads 71 against 70 for the best row per chart), and phase 1 reaches none (above).
+
+**Of the 41 crowded pairs, 34 involve a leg whose end is seated on a box** — 21 with both ends seated, 13 with one. Where the pair could be located, the two boxes are **652 to 2,432 grid units apart** against a 269-unit line of text, so the boxes are not crowding each other: **the seats chose to sit alongside.** That is the mechanism the residue needs and the tree does not have. `ortho_attach_box`, `ortho_reface_attachments`, `ortho_align_attachments` and `ortho_spread_attachments` all choose one box's seats in isolation, and spreading only ever spreads seats *on one face of one box*; two routes leaving two different boxes have no pass that sees them together. It is also why §11.9.5's seat slide separated none of them — sliding a seat along its own face spreads it within a lane's window rather than against the one route it is too close to. `[OWED]`, and it is the largest single item in the phase.
+
 **Three moves survive.** Frame-local: **swap adjacent in rank**, and **move a node across ranks**, the second of which can flip §11.4's fold, so its frame is re-sized. Chart-level and serial: **reorder sibling submachines**, subject the owner state's ordinal, parameter an adjacent-transposition index in the submachine span order phase 2 feeds the packer, scored exact after phase 2 — the move §11.8 has wanted since `w_adjacency` was written. **All three are behind P9e's gate too**, and for a blunter reason than the surrogate: nothing measured so far says a bounded move buys a reader anything, so they are built on the strength of that measurement rather than ahead of it (§17 P9e). Per sweep:
 
 - **Enumerate into a dense index** by prefix sum over `(move_kind, subject_index, parameter)`, **every slot written**, an infeasible move writing a sentinel, so the array is shard-split-proof; `parallel_for` over `layout_shard_count(c)` shards, each writing only its own slot range, and no reduction.
