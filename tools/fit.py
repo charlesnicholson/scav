@@ -16,6 +16,7 @@ import argparse
 import json
 import pathlib
 import random
+import re
 import subprocess
 import sys
 
@@ -29,6 +30,18 @@ TERMS = ("bends", "corridor", "crossings", "excess_len", "adjacency",
 # Parallel to TERMS: the em power each is divided by before weighting (11.6).
 EM_POWER = (0, 1, 0, 1, 0, 0, 1, 1, 2)
 WEIGHT_MAX = 1024
+
+
+def profile_weights(path):
+    """The nine weights the shipped `readable` profile carries, in TERMS order."""
+    text = path.read_text(encoding="utf-8")
+    out = []
+    for name in TERMS:
+        m = re.search(rf"\.w_{name} = (-?\d+),", text)
+        if m is None:
+            raise SystemExit(f"no .w_{name} in {path}")
+        out.append(int(m.group(1)))
+    return out
 
 
 def ceil_div(a, b):
@@ -205,7 +218,9 @@ def main():
     per_chart = pairs_of(by_chart)
     every = [p for ps in per_chart.values() for p in ps]
 
-    shipped = [64, 48, 32, 4, 16, 24, 48, 2, 1]
+    # Read off the profile rather than restated, so "shipped" cannot drift from
+    # what ships the moment one of these is fitted and landed.
+    shipped = profile_weights(REPO_ROOT / "src/layout/profile.cpp")
     floor = unreachable(every)
     print(f"{len(every)} ordered pairs over {len(per_chart)} charts, "
           f"{floor} of them unreachable by any weights")

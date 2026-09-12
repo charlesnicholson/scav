@@ -1458,6 +1458,21 @@ Local search from a structured seed with **restricted uphill moves** — "simula
 
 **(b) Moving a node across ranks.** §11.10's second bounded move, and the one `led` needs. It is not an in-rank permutation: it changes rank sizes, can empty a rank, flips the fold, and re-sizes the frame and every ancestor. Three things it must reconcile, none of them free: §11.10's empty-rank squeeze has to run before phase 2 sizes a phantom gap; §11.7a recovers rank from sorted distinct x, so a sweep may not leave two ranks sharing one; and the acceptance pass has to hold the frame's subject set disjoint, which it already specifies. **The delta cannot be the coordinate-free order cost** the in-rank move uses — crossings do not move when a node changes rank in a way a reader cares about (phase 1 already reads zero), so this move is scored on `Cost` after a re-size, and §11.4's measurement bounds that at roughly 2x per candidate rather than the order of magnitude a cache was expected to buy. `[OWED]`
 
+**(a) is built, and the answer it gives is that (b) should not be.** Landed 2026-09-13 as bit 3 — `Fold::Scale` keeps the scale measure's choice and `Fold::Always` hands `Cost` the folded shape — with `LAYOUT_SEARCH_ROWS` 8 → 16, `portfolio_m` re-bounded to `[1, 16]` and `profile_version` 7. It works: the objective now sees both folds and chooses. **What it chooses is not better, it is different.**
+
+| | corpus | element suite | canvas |
+|---|---|---|---|
+| eight rows, shipped weights | **71** | 18 | **4,680M pt²** |
+| sixteen, same weights | 78 | 18 | **3,748M** (−19.9%) |
+| sixteen, refitted over sixteen | 71 | 18 | 4,935M (+5.4%) |
+| sixteen, refitted but keeping `w_area` | 74 | 19 | 4,732M |
+
+**The fold is a frontier and the eight-row point is already on it.** Twenty percent of the canvas costs seven defects, at either end and at every weighting between; no setting of the nine weights reaches 71 defects *and* 4,680M with the extra rows available. The refit is honest about it — over 21 charts it reads 89 against a floor of 88, and the eight-row pick reads 89 too, so **the extra eight rows buy exactly zero defects**. They buy 5.4% more canvas, because the vector that reaches 89 does it with `w_area` at zero and then has nothing left to prefer the smaller of two equals.
+
+**So the test §11.10a set is answered, and answered no.** Given both folds and a fit over both, `Cost` does not pick the drawing a reader picks — it picks an equal-defect drawing with a larger canvas. **(b), moving a node across ranks, is not built on the strength of this**: a harder search over the same objective would search harder toward the same answer. What (b) waits on is an objective that can rank two arrangements of equal defect count by the one a reader prefers, which is a term `Cost` does not have and §11.12's comparison is the only evidence for.
+
+**The bit ships and the default does not run it.** `portfolio_m` stays at 8, so rows 8–15 are reachable by a profile that asks and by nothing else. A caller who wants the smaller drawing has the lever and the measurement above says what it costs; the shipped default stays at the point with the fewest defects.
+
 **Order: (a) first, and (b) only on what (a) leaves.** (a) is a row bit against machinery that exists and is measurable the day it lands; (b) is a new move with three interactions and a re-size per candidate. And (a) is the honest test of whether the objective can be trusted with this dimension at all — if a fitted `Cost` given both folds picks the drawing a reader picks, (b) is worth building; if it does not, (b) would only search harder toward the wrong answer.
 
 **Three moves survive.** Frame-local: **swap adjacent in rank**, and **move a node across ranks**, the second of which can flip §11.4's fold, so its frame is re-sized. Chart-level and serial: **reorder sibling submachines**, subject the owner state's ordinal, parameter an adjacent-transposition index in the submachine span order phase 2 feeds the packer, scored exact after phase 2 — the move §11.8 has wanted since `w_adjacency` was written. **All three are behind P9e's gate too**, and for a blunter reason than the surrogate: nothing measured so far says a bounded move buys a reader anything, so they are built on the strength of that measurement rather than ahead of it (§17 P9e). Per sweep:
