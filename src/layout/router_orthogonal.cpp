@@ -575,12 +575,9 @@ bool ortho_grid(scav_rect const &region,
   out.pass_h.assign(static_cast<size_t>(out.ny()) * (out.nx() - 1), 1);
   out.pass_v.assign(static_cast<size_t>(out.ny() - 1) * out.nx(), 1);
   for (scav_rect const &box : obstacles) {
-    // The bumper: blocking against it makes "no closer than `clear` to a box" a
+    // Blocking against the bumper makes "no closer than `clear` to a box" a
     // property of the graph.
-    scav_rect const r{ .x = box.x - clear,
-                       .y = box.y - clear,
-                       .w = box.w + (2 * clear),
-                       .h = box.h + (2 * clear) };
+    scav_rect const r{ grow(box, clear) };
     for (uint32_t iy = 0; iy < out.ny(); ++iy) {
       for (uint32_t ix = 0; (ix + 1) < out.nx(); ++ix) {
         if (ortho_blocks_h(r, out.ys[iy], out.xs[ix], out.xs[ix + 1])) {

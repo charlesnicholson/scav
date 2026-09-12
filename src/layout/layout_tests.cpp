@@ -2,6 +2,7 @@
 // columns, the hash split, and a geometry invariant sweep.
 
 #include "layout/cost.h"
+#include "layout/tests/pod_eq.h"
 #include "layout/decompose.h"
 #include "layout/geom.h"
 #include "layout/order.h"
@@ -31,11 +32,6 @@
 namespace {
 
 using namespace scav;
-
-// The C structs carry no operators; the tests compare them field-wise.
-constexpr bool operator==(scav_rect const &a, scav_rect const &b) {
-  return (a.x == b.x) && (a.y == b.y) && (a.w == b.w) && (a.h == b.h);
-}
 
 // The sizes the C surface checks against, as this build measures them.
 constexpr uint32_t PROFILE_SIZE{ static_cast<uint32_t>(sizeof(scav_profile)) };

@@ -2,6 +2,7 @@
 // slots are what is under test rather than whatever sizing produced.
 
 #include "layout/route.h"
+#include "layout/tests/pod_eq.h"
 
 #include "layout/decompose.h"
 #include "layout/label.h"
@@ -20,15 +21,6 @@
 namespace {
 
 using namespace scav;
-
-// The C structs carry no operators; the tests compare them field-wise.
-constexpr bool operator==(scav_rect const &a, scav_rect const &b) {
-  return (a.x == b.x) && (a.y == b.y) && (a.w == b.w) && (a.h == b.h);
-}
-
-constexpr bool operator==(scav_point const &a, scav_point const &b) {
-  return (a.x == b.x) && (a.y == b.y);
-}
 
 scav_profile profile() {
   scav_profile p{};

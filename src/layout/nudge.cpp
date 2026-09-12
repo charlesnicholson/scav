@@ -4,6 +4,7 @@
 #include "layout/nudge.h"
 
 #include "layout/geom.h"
+#include "layout/partition.h"
 #include "scav_int.h"
 #include "scav_stable_sort.h"
 
@@ -27,6 +28,11 @@ constexpr uint32_t PLACED{ 0xffffffffU };
 
 // An interior axis-aligned segment: `lo`/`hi` span its own axis and `at` is its
 // coordinate across it, which keys the lane.
+//
+// **A lane's members do not share `at`** -- a lane is a distance, not an
+// identity -- so two coordinate frames exist and everything below is in the
+// lane's. `reach_up`, `reach_down` and `offset_to` are the only crossings
+// between them, and each is where a bug lived before it was named.
 struct Member {
   uint32_t point{ 0 };  // index of the segment's first point
   uint32_t net{ 0 };    // -> nets, so a move is weighed against the other nets
@@ -37,23 +43,24 @@ struct Member {
   // coordinate across it, +1 towards the higher. Keyed to the segment's own
   // ends rather than the net's direction, so both members of a pair read alike.
   int32_t low_dir{ 0 }, high_dir{ 0 };
-  int32_t offset{ 0 };
+  int32_t offset{ 0 };  // a displacement of this member, not a lane position
+
+  // This member's travel in the lane's frame. Signed, and the sign carries:
+  // sitting above the root costs reach upward and lends it downward, so a
+  // member can put the lane's floor below its root.
+  [[nodiscard]] Wide reach_up(int32_t root) const { return up - (Wide{ at } - root); }
+  [[nodiscard]] Wide reach_down(int32_t root) const { return down + (Wide{ at } - root); }
+
+  // The displacement that puts this member at a lane position.
+  [[nodiscard]] int32_t offset_to(Wide position) const {
+    return static_cast<int32_t>(position - at);
+  }
 };
 
 // -1, 0 or +1: which side of the lane a leg leaves by.
 int32_t sign(Wide v) {
   if (v < 0) { return -1; }
   return (v > 0) ? 1 : 0;
-}
-
-// The bumper the router searched against.
-scav_rect grow(scav_rect const &r, int32_t by) {
-  return { .x = r.x - by, .y = r.y - by, .w = r.w + (2 * by), .h = r.h + (2 * by) };
-}
-
-bool contains(scav_rect const &outer, scav_rect const &r) {
-  return (r.x >= outer.x) && (r.y >= outer.y) && ((r.x + r.w) <= (outer.x + outer.w)) &&
-         ((r.y + r.h) <= (outer.y + outer.h));
 }
 
 // What two axis-aligned segments share of one line: zero unless they are
@@ -100,15 +107,6 @@ bool bundled(std::vector<scav_point> const &points,
   return head;
 }
 
-// Path-halving find over the parents a lane's bundles are unioned into.
-uint32_t bundle_root(std::vector<uint32_t> &of, uint32_t x) {
-  while (of[x] != x) {
-    of[x] = of[of[x]];
-    x = of[x];
-  }
-  return x;
-}
-
 }  // namespace
 
 void nudge_lanes(scav_rect const &region,
@@ -124,8 +122,8 @@ void nudge_lanes(scav_rect const &region,
 
   std::vector<Member> members;
   std::vector<uint32_t> lane;
-  std::vector<uint32_t> link;    // -> members, union-find over one axis's lanes
-  std::vector<uint32_t> parent;  // -> lane, each member's bundle parent
+  Partition link;    // -> members, the lanes of one axis
+  Partition parent;  // -> lane, the bundles of one lane
   std::vector<uint32_t> slot;    // -> lane, the bundle it ended up in
   std::vector<uint32_t> sizes;
   std::vector<uint32_t> group;
@@ -262,27 +260,23 @@ void nudge_lanes(scav_rect const &region,
     // overlap -- a distance, not collinearity, because that is what a reader
     // cannot tell apart. Unioned over pairs: sorted by `at`, `lo` is not
     // monotonic, so a run both stopped early and joined disjoint extents.
-    link.assign(members.size(), 0);
-    for (uint32_t i = 0; i < link.size(); ++i) { link[i] = i; }
+    link.reset(members.size());
     for (uint32_t i = 0; i < members.size(); ++i) {
       for (uint32_t j = i + 1;
            (j < members.size()) && ((Wide{ members[j].at } - members[i].at) < gap);
            ++j) {
-        if ((members[j].lo >= members[i].hi) || (members[i].lo >= members[j].hi)) {
-          continue;
+        if ((members[j].lo < members[i].hi) && (members[i].lo < members[j].hi)) {
+          link.join(i, j);
         }
-        uint32_t const one{ bundle_root(link, i) };
-        uint32_t const two{ bundle_root(link, j) };
-        if (one != two) { link[imax(one, two)] = imin(one, two); }
       }
     }
     for (uint32_t first = 0; first < members.size(); ++first) {
-      if (bundle_root(link, first) != first) { continue; }
+      if (!link.leads(first)) { continue; }
       lane.clear();
       int32_t reach{ members[first].hi };
       int32_t least{ members[first].lo };
       for (uint32_t i = first; i < members.size(); ++i) {
-        if (bundle_root(link, i) != first) { continue; }
+        if (link.root(i) != first) { continue; }
         lane.push_back(i);
         reach = imax(reach, members[i].hi);
         least = imin(least, members[i].lo);
@@ -301,24 +295,22 @@ void nudge_lanes(scav_rect const &region,
       // Members whose nets already run as one share one offset; unioned onto the
       // lower lane position, so a bundle's root is its first member and the
       // numbering below is by least `toward`.
-      parent.resize(count);
-      for (uint32_t j = 0; j < count; ++j) { parent[j] = j; }
+      parent.reset(count);
       for (uint32_t j = 0; j < count; ++j) {
         for (uint32_t q = j + 1; q < count; ++q) {
-          if (!bundled(points, nets, members[lane[j]], members[lane[q]])) { continue; }
-          uint32_t const one{ bundle_root(parent, j) };
-          uint32_t const two{ bundle_root(parent, q) };
-          parent[imax(one, two)] = imin(one, two);
+          if (bundled(points, nets, members[lane[j]], members[lane[q]])) {
+            parent.join(j, q);
+          }
         }
       }
       slot.resize(count);
       uint32_t groups{ 0 };
       for (uint32_t j = 0; j < count; ++j) {
-        if (bundle_root(parent, j) != j) { continue; }
+        if (!parent.leads(j)) { continue; }
         slot[j] = groups;
         ++groups;
       }
-      for (uint32_t j = 0; j < count; ++j) { slot[j] = slot[bundle_root(parent, j)]; }
+      for (uint32_t j = 0; j < count; ++j) { slot[j] = slot[parent.root(j)]; }
       sizes.assign(groups, 0);
       for (uint32_t j = 0; j < count; ++j) { ++sizes[slot[j]]; }
       for (uint32_t const n : sizes) { stats.bundles += (n > 1) ? 1 : 0; }
@@ -454,14 +446,10 @@ void nudge_lanes(scav_rect const &region,
       room_up = imax(room_up, Wide{ 0 });
       room_down = imax(room_down, Wide{ 0 });
 
-      // Members reach from where they sit, offsets from the root, and a lane is
-      // a distance so those differ. One `d` above the root reaches `up - d` up
-      // and `down + d` down, and may put the lane's floor below the root.
       for (uint32_t j = 0; j < count; ++j) {
         Member const &m{ members[lane[j]] };
-        Wide const d{ Wide{ m.at } - at };
-        room_up = imin(room_up, m.up - d);
-        room_down = imin(room_down, m.down + d);
+        room_up = imin(room_up, m.reach_up(at));
+        room_down = imin(room_down, m.reach_down(at));
       }
       Wide const window{ room_up + room_down };
       if (window <= 0) { continue; }
@@ -473,15 +461,13 @@ void nudge_lanes(scav_rect const &region,
       Wide const spread{ (groups - 1) * step };
       Wide const lowest{ imax(-room_up, imin(-(spread / 2), room_down - spread)) };
 
-      // A slot is a position and an offset is a displacement, so the member's
-      // own coordinate comes off it. Otherwise two bundles land
-      // `(at_j - at_i) + step` apart, which closes a lane whose slot order runs
-      // against its `at` order.
+      // A slot is a lane position. Applied as a displacement instead, two bundles
+      // land `(at_j - at_i) + step` apart, which closes a lane whose slot order
+      // runs against its `at` order.
       bool any{ false };
       for (uint32_t j = 0; j < count; ++j) {
         Member &m{ members[lane[j]] };
-        m.offset =
-            static_cast<int32_t>((Wide{ at } + lowest + (Wide{ slot[j] } * step)) - m.at);
+        m.offset = m.offset_to(Wide{ at } + lowest + (Wide{ slot[j] } * step));
         if (m.offset != 0) { any = true; }
       }
       if (!any) { continue; }

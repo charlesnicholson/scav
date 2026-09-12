@@ -97,21 +97,6 @@ Wide shortfall_of(scav_rect const &cand,
   return reach - nearest;
 }
 
-// The rect both hold, empty where they do not meet.
-scav_rect intersection(scav_rect const &a, scav_rect const &b) {
-  int32_t const x{ imax(a.x, b.x) };
-  int32_t const y{ imax(a.y, b.y) };
-  int32_t const w{ imin(a.x + a.w, b.x + b.w) - x };
-  int32_t const h{ imin(a.y + a.h, b.y + b.h) - y };
-  return { .x = x, .y = y, .w = imax(w, 0), .h = imax(h, 0) };
-}
-
-bool within(scav_rect const &outer, scav_rect const &inner) {
-  return (inner.x >= outer.x) && (inner.y >= outer.y) &&
-         ((inner.x + inner.w) <= (outer.x + outer.w)) &&
-         ((inner.y + inner.h) <= (outer.y + outer.h));
-}
-
 // The midpoint of the longest horizontal leg, else of the longest leg: phase 1
 // widened a rank boundary by this box (11.3) and the leg crossing it is long.
 scav_point anchor_of(std::vector<scav_point> const &points, scav_span route) {
@@ -344,7 +329,7 @@ uint32_t place_labels(Chart const &c,
                                               nearby);
                 if ((key.dist >= 0) && !better(here, key)) { continue; }
               }
-              if (!within(holder, cand)) { continue; }
+              if (!contains(holder, cand)) { continue; }
               bool clear{ true };
               for (scav_rect const &obstacle : blocked) {
                 if (overlaps(cand, obstacle)) {

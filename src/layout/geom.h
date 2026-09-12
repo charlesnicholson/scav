@@ -43,6 +43,31 @@ constexpr scav_rect span_rect(scav_point a, scav_point b) {
            .h = ((a.y < b.y) ? b.y : a.y) - y };
 }
 
+// `inner` lies wholly within `outer`. Not strict, unlike `overlaps` and
+// `inside`: a rect flush with its container is contained by it.
+constexpr bool contains(scav_rect const &outer, scav_rect const &inner) {
+  return (inner.x >= outer.x) && (inner.y >= outer.y) &&
+         ((inner.x + inner.w) <= (outer.x + outer.w)) &&
+         ((inner.y + inner.h) <= (outer.y + outer.h));
+}
+
+// The rect both hold, empty where they do not meet. Nested rects intersect to
+// the inner one.
+constexpr scav_rect intersection(scav_rect const &a, scav_rect const &b) {
+  int32_t const x{ imax(a.x, b.x) };
+  int32_t const y{ imax(a.y, b.y) };
+  return { .x = x,
+           .y = y,
+           .w = imax(imin(a.x + a.w, b.x + b.w) - x, 0),
+           .h = imax(imin(a.y + a.h, b.y + b.h) - y, 0) };
+}
+
+// The bumper: a box grown by the clearance a route must keep from it, so
+// "no closer than `by`" becomes a containment test.
+constexpr scav_rect grow(scav_rect const &r, int32_t by) {
+  return { .x = r.x - by, .y = r.y - by, .w = r.w + (2 * by), .h = r.h + (2 * by) };
+}
+
 // The Chebyshev gap between two rects: the larger of the two axes'
 // separations, and zero on the axis they overlap or touch on.
 constexpr int32_t chebyshev_gap(scav_rect const &a, scav_rect const &b) {

@@ -6,6 +6,7 @@
 #include "layout/order.h"
 
 #include "layout/decompose.h"
+#include "layout/partition.h"
 #include "layout/shard.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
@@ -79,19 +80,11 @@ struct FrameOrder {
 struct FrameScratch {
   std::vector<uint32_t> state_local;  // -> states
   std::vector<uint32_t> seg_local;    // -> SplitGraph::segments
-  std::vector<uint32_t> part;         // -> nodes, union-find over the frame
+  Partition part;                     // -> nodes, the frame's components
   std::vector<uint32_t> dense;        // -> nodes; a component root's ordinal
   std::vector<uint32_t> lanes;        // boundaries x components, row-major
 };
 
-// Path-halving find over the components a frame's edges union its nodes into.
-uint32_t part_root(std::vector<uint32_t> &of, uint32_t x) {
-  while (of[x] != x) {
-    of[x] = of[of[x]];
-    x = of[x];
-  }
-  return x;
-}
 
 // The endpoint state of a segment's src or dst end when that end carries no
 // port: the transition's own src or dst.
@@ -520,20 +513,15 @@ SubmachineOrders order_submachines(Chart const &c,
     // them it runs straight and wants cross-axis room. Per component, because
     // components are laid out separately and never share a corridor. Max rather
     // than sum against the label charge: both size the same corridor.
-    std::vector<uint32_t> &part{ sc.part };
-    part.assign(f.nodes.size(), 0);
-    for (uint32_t i = 0; i < part.size(); ++i) { part[i] = i; }
-    for (OrderEdge const &e : f.edges) {
-      uint32_t const a{ part_root(part, e.src) };
-      uint32_t const b{ part_root(part, e.dst) };
-      if (a != b) { part[a] = b; }
-    }
+    Partition &part{ sc.part };
+    part.reset(f.nodes.size());
+    for (OrderEdge const &e : f.edges) { part.join(e.src, e.dst); }
     // Dense, so the table is boundaries x components, not x nodes.
     std::vector<uint32_t> &dense{ sc.dense };
     dense.assign(f.nodes.size(), INVALID);
     uint32_t parts{ 0 };
-    for (uint32_t i = 0; i < part.size(); ++i) {
-      uint32_t const root{ part_root(part, i) };
+    for (uint32_t i = 0; i < f.nodes.size(); ++i) {
+      uint32_t const root{ part.root(i) };
       if (dense[root] == INVALID) { dense[root] = parts++; }
     }
     std::vector<uint32_t> &lanes{ sc.lanes };
@@ -550,7 +538,7 @@ SubmachineOrders order_submachines(Chart const &c,
     for (OrderEdge const &e : f.edges) {
       uint32_t const from{ imin(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
       uint32_t const to{ imax(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
-      uint32_t const of{ dense[part_root(part, e.src)] };
+      uint32_t const of{ dense[part.root(e.src)] };
       turn(from, of);
       if (to > (from + 1)) { turn(to - 1, of); }
     }

@@ -75,6 +75,7 @@ if(SCAV_BUILD_TESTS)
     decompose_tests.cpp
     order_tests.cpp
     coords_tests.cpp
+    geom_tests.cpp
     pack_tests.cpp
     size_tests.cpp
     route_tests.cpp
