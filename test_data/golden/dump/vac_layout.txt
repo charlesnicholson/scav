@@ -62,28 +62,28 @@ chart vac "robot vacuum" (test_data/charts/vac.scav:3)
   include dock "dock.scav" -> test_data/charts/dock.scav (test_data/charts/vac.scav:4)
   include lamp "./led.scav" -> test_data/charts/led.scav (test_data/charts/vac.scav:7)
   include lamp "led.scav" -> test_data/charts/led.scav (test_data/charts/dock.scav:4)
-geometry structural 683366e0 coordinate 17b28f4b
+geometry structural 91146d07 coordinate 1b6f4772
   chart 0,0 10588x14753
-  cost t0 0 t2 20042
+  cost t0 0 t2 19018
     tier0 through_box 0 box_overlap 0
-    bends 27 share 6897bp
-    corridor 1777 share 239bp
+    bends 25 share 6730bp
+    corridor 1777 share 252bp
     crossings 0 share 0bp
-    excess_len 20770 share 0bp
+    excess_len 20741 share 0bp
     adjacency 0 share 0bp
     label 0 share 0bp
-    label_near 403 share 71bp
-    aspect 130168 share 676bp
-    area 156204764 share 2114bp
+    label_near 403 share 75bp
+    aspect 130168 share 713bp
+    area 156204764 share 2228bp
   label leader 96
     placed t1 8791,4926 1050x269
     placed t4 1100,5568 1396x269
     placed t7 4346,8119 1856x269
     placed t8 5069,9851 589x269
-    placed t10 3280,5510 1626x269
-    placed t11 5002,5280 1396x269
+    placed t10 3295,5510 1626x269
+    placed t11 5050,5242 1396x269
     placed t13 1491,1532 1050x269
-    placed t14 2661,2331 935x269
+    placed t14 2623,2585 935x269
     placed t15 1792,3051 1050x269
     placed t17 4685,12016 1050x269
     placed t18 5345,13247 935x269
@@ -131,11 +131,11 @@ geometry structural 683366e0 coordinate 17b28f4b
   route dock/On/Seated -> dock/On/Charging (6202,7948) (6202,8505)
   route dock/On/Charging -> dock/lamp/Solid (7092,8927) (7796,8927) (7892,8927) (7892,10120) (2829,10120) (2829,12047) (2925,12047) (3719,12047) (3719,14295) (3815,14295) (3815,14036) (6779,14036) port s1 d1 port s0 d1
   route dock/$initial -> dock/Empty (2848,4953) (3866,4953)
-  route dock/Empty -> dock/On (4906,5280) (4906,6491)
-  route dock/On -> dock/Empty (5002,6587) (5002,5376) (4954,5376) (4954,5328)
+  route dock/Empty -> dock/On (4921,5280) (4921,6491)
+  route dock/On -> dock/Empty (5017,6587) (5017,5376) (4954,5376) (4954,5328)
   route lamp/$initial -> lamp/Off (352,1034) (832,1034)
   route lamp/Off -> lamp/Blinking (1491,1361) (1491,1918)
-  route lamp/Blinking -> lamp/Solid (2324,2571) (2420,2571) (2420,2600) (3854,2600)
+  route lamp/Blinking -> lamp/Solid (2324,2585) (3854,2585)
   route lamp/Solid -> lamp/Off (3950,3061) (3854,3061) (3854,3320) (794,3320) (794,1457) (1024,1457) (1024,1409)
   route dock/lamp/$initial -> dock/lamp/Off (3277,11250) (4295,11250)
   route dock/lamp/Off -> dock/lamp/Blinking (4685,11577) (4685,12422)

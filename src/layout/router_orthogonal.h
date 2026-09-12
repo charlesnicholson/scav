@@ -101,7 +101,6 @@ void ortho_align_attachments(std::vector<RouteNet> const &nets,
                              std::vector<scav_rect> const &boxes,
                              std::vector<uint8_t> const &inscribed,
                              std::vector<int32_t> const &corner,
-                             int32_t clear,
                              std::vector<scav_point> &at);
 
 // The attachments one face still lands on one point -- two states each other's

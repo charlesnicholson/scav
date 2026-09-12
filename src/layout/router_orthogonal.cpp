@@ -315,7 +315,6 @@ void ortho_align_attachments(std::vector<RouteNet> const &nets,
                              std::vector<scav_rect> const &boxes,
                              std::vector<uint8_t> const &inscribed,
                              std::vector<int32_t> const &corner,
-                             int32_t clear,
                              std::vector<scav_point> &at) {
   // Empty for zero throughout, the way `inscribed` is.
   auto const arc = [&corner](uint32_t box) {
@@ -337,8 +336,19 @@ void ortho_align_attachments(std::vector<RouteNet> const &nets,
     bool const along_y{ leaves < 2 };
     if (along_y != (arrives < 2)) { continue; }  // not parallel: no shared coordinate
 
-    // What each face can seat: its whole run less the corner inset the
-    // projection is held off by, or the one midpoint an inscribed glyph offers.
+    // What each face can seat: its whole run less the arc drawn at each corner,
+    // or the one midpoint an inscribed glyph offers.
+    //
+    // **The arc and one unit, where `onto_face` holds a seat off by
+    // `max(clear, arc)`.** Two reasons are folded into that number and only one
+    // of them is the clearance's: a seat under an arc points at canvas nothing
+    // was drawn on, and a seat at a face's very end leaves along the face it did
+    // not pick. The first wants the arc; the second wants to be strictly inside
+    // and nothing more, because two aligned seats have collinear approach legs
+    // out of parallel faces and no adjacent face to be confused with. Spending
+    // the router's obstacle clearance on it costs alignment: the corpus has
+    // **thirteen** pairs whose boxes overlap by 163 units and whose seatable
+    // runs then miss by 29, each paying a 29-unit jog on a run of a thousand.
     int32_t lo{ 0 };
     int32_t hi{ 0 };
     Wide centres{ 0 };
@@ -348,7 +358,7 @@ void ortho_align_attachments(std::vector<RouteNet> const &nets,
       int32_t const start{ along_y ? r.y : r.x };
       int32_t const len{ along_y ? r.h : r.w };
       bool const one_point{ (box < inscribed.size()) && (inscribed[box] != 0) };
-      int32_t const inset{ one_point ? (len / 2) : imin(imax(clear, arc(box)), len / 2) };
+      int32_t const inset{ one_point ? (len / 2) : imin(imax(arc(box), 1), len / 2) };
       int32_t const face_lo{ start + inset };
       int32_t const face_hi{ one_point ? face_lo : ((start + len) - inset) };
       lo = (k == 0) ? face_lo : imax(lo, face_lo);
@@ -810,7 +820,7 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
   // Faces first, since a glyph moved onto another face is a different line for
   // the two passes below to line up and pull apart.
   ortho_reface_attachments(in.nets, in.obstacles, in.inscribed, toward, seat);
-  ortho_align_attachments(in.nets, in.obstacles, in.inscribed, in.corner, clear, seat);
+  ortho_align_attachments(in.nets, in.obstacles, in.inscribed, in.corner, seat);
   ortho_spread_attachments(in.nets, in.obstacles, in.inscribed, in.corner, clear, seat);
 
   for (uint32_t n = 0; n < in.nets.size(); ++n) {
