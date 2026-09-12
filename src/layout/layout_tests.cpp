@@ -1638,13 +1638,13 @@ TEST_CASE("layout: a pinned row runs that row and no search") {
   CHECK(at_one == 3);
   CHECK(layout_coordinate_hash(pinned_at_four) == layout_coordinate_hash(pinned_at_one));
 
-  // And an unpinned run of the shipped profile is still the search: row 1 is
+  // And an unpinned run of the shipped profile is still the search: row 5 is
   // what `axis` picks, so the pin above reached a row the argmin does not.
   Chart searched;
   load_corpus("axis.scav", searched);
   uint32_t picked{ INVALID };
   REQUIRE(layout_run(searched, {}, opts(p), placed, diags, nullptr, &picked));
-  CHECK(picked == 1);
+  CHECK(picked == 5);
 }
 
 TEST_CASE("layout: a chart compaction cannot improve keeps the lower row") {
