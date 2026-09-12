@@ -122,9 +122,9 @@ void nudge_lanes(scav_rect const &region,
 
   std::vector<Member> members;
   std::vector<uint32_t> lane;
-  Partition link;    // -> members, the lanes of one axis
-  Partition parent;  // -> lane, the bundles of one lane
-  std::vector<uint32_t> slot;    // -> lane, the bundle it ended up in
+  Partition link;              // -> members, the lanes of one axis
+  Partition parent;            // -> lane, the bundles of one lane
+  std::vector<uint32_t> slot;  // -> lane, the bundle it ended up in
   std::vector<uint32_t> sizes;
   std::vector<uint32_t> group;
   std::vector<uint32_t> kin;

@@ -85,7 +85,6 @@ struct FrameScratch {
   std::vector<uint32_t> lanes;        // boundaries x components, row-major
 };
 
-
 // The endpoint state of a segment's src or dst end when that end carries no
 // port: the transition's own src or dst.
 StateId endpoint_state(Chart const &c, SplitSegment const &seg, bool is_src) {

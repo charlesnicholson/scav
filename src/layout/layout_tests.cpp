@@ -2,13 +2,13 @@
 // columns, the hash split, and a geometry invariant sweep.
 
 #include "layout/cost.h"
-#include "layout/tests/pod_eq.h"
 #include "layout/decompose.h"
 #include "layout/geom.h"
 #include "layout/order.h"
 #include "layout/route.h"
 #include "layout/shard.h"
 #include "layout/size.h"
+#include "layout/tests/pod_eq.h"
 #include "layout/tests/test_synth.h"
 #include "scav/scav_core.h"
 #include "scav/scav_core_c.h"

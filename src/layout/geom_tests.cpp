@@ -31,18 +31,22 @@ TEST_CASE("geom: containment is not strict and overlap is") {
 }
 
 TEST_CASE("geom: an intersection is empty rather than negative") {
-  CHECK((intersection(rect(0, 0, 100, 100), rect(50, 50, 100, 100)) == rect(50, 50, 50, 50)));
+  CHECK((intersection(rect(0, 0, 100, 100), rect(50, 50, 100, 100)) ==
+         rect(50, 50, 50, 50)));
   // Nested intersects to the inner one, which is how the innermost enclosing
   // state is found without ordering by depth (11.9.3).
-  CHECK((intersection(rect(0, 0, 100, 100), rect(10, 10, 20, 20)) == rect(10, 10, 20, 20)));
-  CHECK((intersection(rect(10, 10, 20, 20), rect(0, 0, 100, 100)) == rect(10, 10, 20, 20)));
+  CHECK(
+      (intersection(rect(0, 0, 100, 100), rect(10, 10, 20, 20)) == rect(10, 10, 20, 20)));
+  CHECK(
+      (intersection(rect(10, 10, 20, 20), rect(0, 0, 100, 100)) == rect(10, 10, 20, 20)));
   // Disjoint on both axes, on one, and merely touching: never a negative extent.
   CHECK((intersection(rect(0, 0, 10, 10), rect(50, 50, 10, 10)) == rect(50, 50, 0, 0)));
   CHECK((intersection(rect(0, 0, 10, 100), rect(50, 0, 10, 100)) == rect(50, 0, 0, 100)));
   CHECK((intersection(rect(0, 0, 10, 10), rect(10, 0, 10, 10)) == rect(10, 0, 0, 10)));
   // An empty rect contains nothing and is contained by anything holding its
   // corner, so the two predicates agree on the degenerate case.
-  CHECK(contains(rect(0, 0, 100, 100), intersection(rect(0, 0, 10, 10), rect(50, 50, 10, 10))));
+  CHECK(contains(rect(0, 0, 100, 100),
+                 intersection(rect(0, 0, 10, 10), rect(50, 50, 10, 10))));
 }
 
 TEST_CASE("geom: a bumper grows both sides and a negative one shrinks") {
