@@ -118,6 +118,13 @@ Palette palette_standard() {
                            .stroke_w = PT,
                            .dash = 0,
                            .font_size_grid = 0 };
+  // Fill and no stroke: the triangle's geometry is its outline, and a stroke
+  // would put half its width past the tip the router aimed at the border.
+  p[SCAV_STYLE_ARROW] = { .stroke_rgba = NONE,
+                          .fill_rgba = INK,
+                          .stroke_w = 0,
+                          .dash = 0,
+                          .font_size_grid = 0 };
   return p;
 }
 
@@ -441,7 +448,7 @@ void emit_route(DrawList &d,
   }
   push_arrowhead(d,
                  depth,
-                 style,
+                 drawlist_style(d, p[SCAV_STYLE_ARROW]),
                  tip,
                  prior,
                  imax(clear, p[SCAV_STYLE_LABEL].font_size_grid / 2),

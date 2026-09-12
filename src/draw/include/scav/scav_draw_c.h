@@ -264,11 +264,18 @@ scav_result scav_measure_chart(scav_chart const *chart,
 enum {
   SCAV_STYLE_STATE = 0,  /* state box outline and fill */
   SCAV_STYLE_SUB = 1,    /* submachine divider */
-  SCAV_STYLE_ROUTE = 2,  /* transition polyline and arrowhead */
+  SCAV_STYLE_ROUTE = 2,  /* transition polyline */
   SCAV_STYLE_TITLE = 3,  /* state name */
   SCAV_STYLE_LABEL = 4,  /* transition label */
   SCAV_STYLE_PSEUDO = 5, /* initial, final, choice, fork, join, history */
-  SCAV_STYLE_COUNT = 6
+  /* The arrowhead, which is a filled glyph and not a stroked one. Its own row
+   * because a stroke on a closed fill inflates it by half the width all round
+   * and spikes at the tip by the miter: at 16 units and a 53-degree head that
+   * is 18 units past the border the tip was aimed at. A caller restyling the
+   * route now says what the head touching the border should look like rather
+   * than inheriting a stroke the polyline needed. */
+  SCAV_STYLE_ARROW = 6,
+  SCAV_STYLE_COUNT = 7
 };
 
 /* NOLINTEND(modernize-use-using, readability-identifier-naming) */

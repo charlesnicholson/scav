@@ -2211,8 +2211,12 @@
               "value": 5
             },
             {
-              "name": "SCAV_STYLE_COUNT",
+              "name": "SCAV_STYLE_ARROW",
               "value": 6
+            },
+            {
+              "name": "SCAV_STYLE_COUNT",
+              "value": 7
             }
           ]
         }
