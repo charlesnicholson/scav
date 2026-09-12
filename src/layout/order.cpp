@@ -550,7 +550,7 @@ SubmachineOrders order_submachines(Chart const &c,
       if (dense[root] == INVALID) { dense[root] = parts++; }
     }
     std::vector<uint32_t> &lanes{ sc.lanes };
-    lanes.assign(static_cast<size_t>(gaps.size()) * parts, 0);
+    lanes.assign(gaps.size() * parts, 0);
     int32_t const pitch{ label_line_height(p) };
     auto const turn = [&](uint32_t b, uint32_t of) {
       if (b >= gaps.size()) { return; }

@@ -7,6 +7,7 @@
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
+#include "scav_int.h"
 
 #include "doctest.h"
 
@@ -235,10 +236,7 @@ TEST_CASE("order: a label on a hierarchy-crossing route widens one frame only") 
   std::vector<int32_t> per;
   for (Span const &frame : o.sub_gaps) {
     int32_t most{ 0 };
-    for (uint32_t k = 0; k < frame.len; ++k) {
-      int32_t const here{ o.gaps[frame.off + k] };
-      if (here > most) { most = here; }
-    }
+    for (uint32_t k = 0; k < frame.len; ++k) { most = imax(most, o.gaps[frame.off + k]); }
     per.push_back(most);
   }
   CHECK(per == std::vector<int32_t>{ 500, 538 });
