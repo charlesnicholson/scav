@@ -97,9 +97,7 @@ Wide shortfall_of(scav_rect const &cand,
   return reach - nearest;
 }
 
-// The rect both hold, empty where they do not meet. Nested rects intersect to
-// the inner one, which is how the innermost enclosing state is found without
-// ordering them by depth.
+// The rect both hold, empty where they do not meet.
 scav_rect intersection(scav_rect const &a, scav_rect const &b) {
   int32_t const x{ imax(a.x, b.x) };
   int32_t const y{ imax(a.y, b.y) };
@@ -256,11 +254,9 @@ uint32_t place_labels(Chart const &c,
         }
       }
       blocked.clear();
-      // I3 as a test rather than a term: everything of a submachine is drawn
-      // inside its parent state's box, so a label whose transition runs inside
-      // a composite is bounded by that composite and not by the chart. The
-      // states enclosing both ends nest, so intersecting them all is the
-      // innermost of them without having to find it (11.9.3).
+      // I3 as a test: a label inside a composite is bounded by it, not by the
+      // chart. Enclosing states nest, so intersecting them all is the innermost
+      // without having to order them by depth (11.9.3).
       scav_rect holder{ z.chart };
       for (uint32_t st = 0; st < c.states.size(); ++st) {
         if ((c.states[st].live == 0) || (encloses[st] != 2)) { continue; }

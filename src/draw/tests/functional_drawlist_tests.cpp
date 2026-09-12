@@ -43,6 +43,12 @@ scav_profile readable() {
   return p;
 }
 
+scav_profile compact() {
+  scav_profile p{};
+  REQUIRE(profile_named("compact", p));
+  return p;
+}
+
 Chart load_corpus(char const *name) {
   std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
   path += name;
@@ -248,17 +254,14 @@ TEST_CASE("drawlist gauntlet: what crowd's tighter packing costs its labels") {
   //
   // **`label` was 4, read 6 once the count stopped exempting a transition's own
   // endpoints, and is 5 now the placer stops choosing those positions**; the
-  // one left is structural -- **and then zero, because 11.9.5's reservation is
-  // what made that last position reachable**: the box was not refusing a rect
-  // it could avoid, it was in a frame with nowhere else to be.
+  // one left was structural, and zero once 11.9.5's reservation made that last
+  // position reachable -- the box had nowhere else to be, not a rect it refused.
   //
-  // `label_near` went 442 -> 470 when a box refused a state's rect had to take
-  // a strip further from its own leg, back to 442 under 11.9.4's anchor, and
-  // **490 under the reservation**. It goes the other way from every other
-  // count here and that is what it measures: with room to take, boxes take
-  // positions that clear their neighbours and sit a little further from their
-  // own leg for it. The reader-visible classes the audit reads all fell, so
-  // this is the term disagreeing with the reader, which is P9d's own subject.
+  // `label_near` 442 -> 470 when a refused box took a strip further from its own
+  // leg, 442 under the anchor, 490 under the reservation. It rises where every
+  // reader-visible class falls: with room, boxes clear their neighbours and sit
+  // further from their own leg for it. The term disagreeing with the reader is
+  // P9d's subject.
   Metrics const m{ bundled() };
   scav_profile const p{ readable() };
   Run const r{ run_pipeline("gauntlet/crowd.scav", m, p) };
@@ -363,20 +366,10 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
   // *only* way a label ends up unanchored, which is what turns rip-up from an
   // improvement into the last thing between this and zero (11.9.4).
   //
-  // 19 once nudging spread lanes by proximity rather than by equality
-  // (11.9.5): a spread route lands where one box's last feasible attachment
-  // used to be. Thirty-three crowded lanes for one more slice, and the slice
-  // is the class rip-up is already owed, so the trade is taken on purpose.
-  //
-  // **And 5 once phase 2 reserved the room instead of phase 3 hunting for it**
-  // (11.9.5). This number was the argument that rip-up is what stands between
-  // the anchor and zero; three quarters of it was scarcity, and rip-up is what
-  // the last few need.
-  //
-  // **8 once I3 became a test.** A label whose transition runs inside a
-  // composite is bounded by that composite, and three boxes had nowhere inside
-  // it to go. Bought a class outright -- `label outside its enclosing state` is
-  // 8 of 203 to zero -- for three more of the class rip-up already owns.
+  // 19 when nudging began grouping lanes by proximity: a spread route lands on
+  // a box's last feasible attachment. 5 once phase 2 reserved the room instead
+  // of phase 3 hunting for it, so three quarters of this was scarcity. 8 once I3
+  // became a test, which bought a class outright (11.9.5).
   CHECK(fell == 8);
 }
 
@@ -532,6 +525,37 @@ TEST_CASE("drawlist corpus: the extent estimate holds under the real font") {
   // both places rather than only the fabricated one.
   CHECK(extent.w <= ((COORD_MAX / 4) * 3));
   CHECK(extent.h <= ((COORD_MAX / 4) * 3));
+}
+
+TEST_CASE("drawlist: layout's line height is draw's, over the whole domain") {
+  // Layout restates `line_height` because it is below draw. Two statements of
+  // one function drift; this is what stops it.
+  auto const agree = [](int32_t size, int32_t num, int32_t den) {
+    scav_profile p{ readable() };
+    p.font_size_grid = size;
+    p.line_height_k_num = num;
+    p.line_height_k_den = den;
+    CAPTURE(size);
+    CAPTURE(num);
+    CAPTURE(den);
+    CHECK(label_line_height(p) == line_height(size, num, den));
+  };
+  for (scav_profile const &p : { readable(), compact() }) {
+    agree(p.font_size_grid, p.line_height_k_num, p.line_height_k_den);
+  }
+  // The corners, where a restatement diverges: both ratio bounds, either side.
+  for (int32_t const k : { 0, 1, 2, 1023, 1024, 1025 }) {
+    agree(192, k, 5);
+    agree(192, 7, k);
+  }
+  for (int32_t const size : { -1, 0, 1, 16, COORD_MAX / 4, COORD_MAX, COORD_MAX / 2 }) {
+    agree(size, 7, 5);
+    agree(size, 1024, 1);
+  }
+  // Up at every remainder, not on average.
+  for (int32_t const size : { 10, 11, 12, 13, 14 }) { agree(size, 1, 5); }
+  CHECK(label_line_height(readable()) == 269);   // 192 * 7/5
+  CHECK(label_line_height(compact()) == 192);    // 160 * 6/5
 }
 
 TEST_CASE("drawlist corpus: a 2k-state chart builds, and quickly") {

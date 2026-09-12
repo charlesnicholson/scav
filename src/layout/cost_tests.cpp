@@ -235,11 +235,9 @@ TEST_CASE("cost: two routes leaving as one line are charged for it") {
       { { .x = start_x, .y = 0 }, { .x = 150, .y = 0 }, { .x = 150, .y = -100 } }
     };
   };
-  // **A fan-out is not the exemption** (11.9.3): only a common destination
-  // gives a reader something to follow two merged lines to, and these two
-  // leave one state and part. Sharing the start point buys nothing -- the run
-  // is 150 either way, and one unit of offset used to be the difference
-  // between free and charged.
+  // A fan-out is not the exemption (11.9.3): these two leave one state and
+  // part, so sharing the start buys nothing. The run is 150 either way, where
+  // one unit of offset used to be free against charged.
   CHECK(corridor_of(c, lines(0)) == 150);
   CHECK(corridor_of(c, lines(1)) == 149);
 }
@@ -270,15 +268,13 @@ TEST_CASE("cost: two routes with the same polyline are one trunk end to end") {
 
 TEST_CASE("cost: a route arriving as another's last leg is trunk, its head is not") {
   Chart const c{ edges(2) };
-  // A degraded net is a straight line (11.5), and one drawn along another
-  // route's final leg is the arrival they share rather than a second lane.
+  // A degraded net is a straight line (11.5); along another's final leg it is
+  // the arrival they share, not a second lane.
   CHECK(corridor_of(c,
                     { { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
                       { { .x = 200, .y = 0 }, { .x = 200, .y = 100 } } }) == 0);
-  // **The same shape at the head is charged now** (11.9.3): two routes leaving
-  // one state as one line read as one line going somewhere ambiguous, and only
-  // a common *destination* gives the reader something to follow them to. The
-  // 200 along y=0 is that fan-out.
+  // The head is charged now (11.9.3): two routes leaving one state as one line
+  // go somewhere ambiguous. The 200 along y=0 is that fan-out.
   CHECK(corridor_of(c,
                     { { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
                       { { .x = 0, .y = 0 }, { .x = 200, .y = 0 } } }) == 200);
@@ -286,9 +282,8 @@ TEST_CASE("cost: a route arriving as another's last leg is trunk, its head is no
 
 TEST_CASE("cost: a run the two find again after they part is charged") {
   Chart const c{ edges(2) };
-  // 100 along y=0 out of the shared start, **which is charged now** -- a
-  // fan-out is not the exemption (11.9.3) -- and 100 more along y=100 where the
-  // two happen to meet again, which is two lanes on one line either way.
+  // 100 along y=0 out of the shared start, charged now (11.9.3), and 100 more
+  // along y=100 where they meet again -- two lanes on one line either way.
   CHECK(corridor_of(c,
                     { { { .x = 0, .y = 0 },
                         { .x = 200, .y = 0 },

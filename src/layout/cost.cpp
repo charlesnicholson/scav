@@ -128,13 +128,10 @@ struct Trunk {
   bool merged_tail{ false };
 };
 
-// **The exemption is one shared kink into a common destination, and nothing
-// else** (11.9.3). Two routes may read as one line where they are arriving at
-// the same state, because the reader has one thing to follow them to; two
-// routes leaving the same state read as one line going somewhere ambiguous,
-// and the fan-out that used to be excused here is exactly that. So the head is
-// no longer counted, and the tail is capped at the final leg -- two shared
-// points -- rather than at however much suffix happens to coincide.
+// One shared kink into a common destination and nothing else (11.9.3). Routes
+// arriving at one state may read as one line -- the reader has something to
+// follow them to. A fan-out does not. So no head, and the tail caps at the
+// final leg rather than at however much suffix coincides.
 constexpr uint32_t TRUNK_TAIL{ 2 };
 
 Trunk trunk_of(std::vector<scav_point> const &pts, scav_span a, scav_span b) {
@@ -152,9 +149,8 @@ Trunk trunk_of(std::vector<scav_point> const &pts, scav_span a, scav_span b) {
   return out;
 }
 
-// Segment `k` of one route of the pair lies in the trunk: the final leg they
-// arrive on as one, or the leg that merges into it. `len` counts that route's
-// points.
+// Segment `k` is in the trunk: the final leg they arrive on as one, or the leg
+// that merges into it. `len` counts that route's points.
 bool trunk_piece(Trunk const &t, uint32_t len, uint32_t k) {
   return ((k + t.tail) >= len) || (t.merged_tail && ((k + t.tail + 1) == len));
 }

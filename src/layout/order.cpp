@@ -512,26 +512,14 @@ SubmachineOrders order_submachines(Chart const &c,
       if (at < gaps.size()) { gaps[at] = imax(gaps[at], label); }
     }
 
-    // An edge turning in one boundary needs a lane of its own inside it, and two
-    // lanes carrying type may not sit closer than one line of that type
-    // (11.9.5). Phase 3 cannot reserve this: nudging spreads into the width
-    // phase 2 left, so a pitch with no room to spread into only refuses.
+    // An edge turning in a boundary needs a lane of its own, and two lanes
+    // carrying type may not sit closer than a line of it (11.9.5). Phase 3
+    // spreads into the width phase 2 left, so only phase 2 can reserve it.
     //
-    // **The two boundaries an edge turns in, not every boundary it crosses.** A
-    // route changes cross position where it leaves its source and where it
-    // meets its destination; in between it runs straight along a rank and wants
-    // cross-axis room rather than corridor width. Charging every boundary reads
-    // fourteen lanes at every one of a 256-chain's boundaries where three turn
-    // there, which is 960k grid units of corridor against a 524k domain.
-    //
-    // **Counted per component, because phase 2 lays components out separately
-    // and packs them.** Edges in two components never share a corridor, and
-    // summing them reserves a width neither needs -- and un-seals the one
-    // `sealed_chart` builds, whose whole shape is a zero-width boundary.
-    //
-    // A max rather than a sum against the label charge above: both say how wide
-    // this one corridor has to be, and a label sitting at one lane's height
-    // does not consume the widths the others are spread across.
+    // The two boundaries an edge *turns* in, not every one it crosses: between
+    // them it runs straight and wants cross-axis room. Per component, because
+    // components are laid out separately and never share a corridor. Max rather
+    // than sum against the label charge: both size the same corridor.
     std::vector<uint32_t> &part{ sc.part };
     part.assign(f.nodes.size(), 0);
     for (uint32_t i = 0; i < part.size(); ++i) { part[i] = i; }
@@ -540,8 +528,7 @@ SubmachineOrders order_submachines(Chart const &c,
       uint32_t const b{ part_root(part, e.dst) };
       if (a != b) { part[a] = b; }
     }
-    // Dense, so the table below is boundaries x components rather than
-    // boundaries x nodes.
+    // Dense, so the table is boundaries x components, not x nodes.
     std::vector<uint32_t> &dense{ sc.dense };
     dense.assign(f.nodes.size(), INVALID);
     uint32_t parts{ 0 };

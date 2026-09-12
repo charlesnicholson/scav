@@ -258,21 +258,10 @@ void nudge_lanes(scav_rect const &region,
       return ok;
     };
 
-    // A lane is a set of members **within `gap` of one coordinate** whose
-    // extents overlap, unioned over pairs.
-    //
-    // **Not collinear, which is what it used to mean.** Keyed on equality, two
-    // routes six units apart over seven hundred were two lanes and never met:
-    // `routes share a run` read 6 over the corpus while `lanes closer than one
-    // line of text` read 89 (11.9.5). A lane is what a reader cannot tell
-    // apart, and that is a distance, not an identity.
-    //
-    // **And unioned rather than run along.** Members sort by `at`, so `lo` is
-    // not monotonic and a run testing `lo < reach` as it advanced was wrong
-    // both ways: it stopped at the first member whose extent did not reach,
-    // leaving a third that overlapped the first in a lane of its own, and
-    // `lo < reach` is one-sided against a union, so it joined members whose
-    // extents never met at all.
+    // A lane is every member within `gap` of one coordinate whose extents
+    // overlap -- a distance, not collinearity, because that is what a reader
+    // cannot tell apart. Unioned over pairs: sorted by `at`, `lo` is not
+    // monotonic, so a run both stopped early and joined disjoint extents.
     link.assign(members.size(), 0);
     for (uint32_t i = 0; i < link.size(); ++i) { link[i] = i; }
     for (uint32_t i = 0; i < members.size(); ++i) {
@@ -422,8 +411,7 @@ void nudge_lanes(scav_rect const &region,
 
       // The room the whole lane has, measured over its union extent so a member
       // cannot be displaced into something a shorter neighbour cleared.
-      // The root is the lane's lowest `at`, members being sorted by it and
-      // unioned onto the lower index.
+      // The root is the lane's lowest `at`: sorted by it, unioned onto the lower.
       int32_t const at{ members[first].at };
       int32_t const lo{ least };
       int32_t const hi{ reach };
@@ -462,13 +450,19 @@ void nudge_lanes(scav_rect const &region,
         }
       }
 
-      // Sized to what every member can drag, so the lane stays evenly spaced.
-      for (uint32_t j = 0; j < count; ++j) {
-        room_up = imin(room_up, members[lane[j]].up);
-        room_down = imin(room_down, members[lane[j]].down);
-      }
+      // No room towards a box the lane is inside the bumper of, not negative.
       room_up = imax(room_up, Wide{ 0 });
       room_down = imax(room_down, Wide{ 0 });
+
+      // Members reach from where they sit, offsets from the root, and a lane is
+      // a distance so those differ. One `d` above the root reaches `up - d` up
+      // and `down + d` down, and may put the lane's floor below the root.
+      for (uint32_t j = 0; j < count; ++j) {
+        Member const &m{ members[lane[j]] };
+        Wide const d{ Wide{ m.at } - at };
+        room_up = imin(room_up, m.up - d);
+        room_down = imin(room_down, m.down + d);
+      }
       Wide const window{ room_up + room_down };
       if (window <= 0) { continue; }
 
@@ -479,10 +473,15 @@ void nudge_lanes(scav_rect const &region,
       Wide const spread{ (groups - 1) * step };
       Wide const lowest{ imax(-room_up, imin(-(spread / 2), room_down - spread)) };
 
+      // A slot is a position and an offset is a displacement, so the member's
+      // own coordinate comes off it. Otherwise two bundles land
+      // `(at_j - at_i) + step` apart, which closes a lane whose slot order runs
+      // against its `at` order.
       bool any{ false };
       for (uint32_t j = 0; j < count; ++j) {
         Member &m{ members[lane[j]] };
-        m.offset = static_cast<int32_t>(lowest + (Wide{ slot[j] } * step));
+        m.offset = static_cast<int32_t>((Wide{ at } + lowest + (Wide{ slot[j] } * step)) -
+                                        m.at);
         if (m.offset != 0) { any = true; }
       }
       if (!any) { continue; }

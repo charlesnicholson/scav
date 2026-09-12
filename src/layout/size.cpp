@@ -132,8 +132,8 @@ bool size_pass(Chart const &c,
 
   bool ok{ true };
 
-  // The height of the label charged to each segment, charged to the same middle
-  // segment 11.3's width charge lands on so one label reserves in one frame.
+  // The label's height, on the middle segment 11.3 charges its width to, so one
+  // label reserves in one frame.
   std::vector<int32_t> seg_label_h(g.segments.size(), 0);
   for (uint32_t i = 0; i < s.n_path_box; ++i) {
     scav_path_box const &box{ s.path_box[i] };
@@ -154,21 +154,13 @@ bool size_pass(Chart const &c,
     Span const espan{ o.sub_edges[m] };
     Span const gspan{ o.sub_gaps[m] };
 
-    // An anchored label needs `leader + box height` beside the leg it hangs off,
-    // and phase 3 has only the cross-axis room phase 2 left it (11.9.5). Carried
-    // on the extent of both ends of the labelled edge -- which is the slot
-    // `cross_coordinates` separates by, not the rect a reader sees -- so the
-    // edge leaves its node in a corridor wide enough to hang a label in. Every
-    // piece of a chained edge carries it, because every piece is a leg the
-    // label may slide onto -- charging only the leg 11.3 charged the width to
-    // is byte-identical in violations and in area, so the whole route carries
-    // it and the two charges do not have to agree about which leg is middle.
+    // An anchored label needs `leader + box height` beside its leg, and phase 3
+    // has only the cross-axis room phase 2 left (11.9.5). Carried on the extent
+    // of both ends -- the slot `cross_coordinates` separates by, not the drawn
+    // rect -- so half lands each side and the pair opens the whole distance.
     //
-    // **The whole distance rather than its shortfall against `node_sep`.** Two
-    // stacked nodes are already a `node_sep` apart, so `leader + box_h -
-    // node_sep` looks like the same room for less; it reads 133 violations
-    // against 110, because the leg leaves its node's *centre* and what the
-    // shortfall opens is the gap between two node *edges*.
+    // The whole distance, not its shortfall against `node_sep`: the leg leaves
+    // its node's *centre*, and the shortfall opens the gap between node *edges*.
     int32_t const leader{ label_leader(p) };
     std::vector<int32_t> reserve(span.len, 0);
     for (uint32_t k = 0; k < espan.len; ++k) {
