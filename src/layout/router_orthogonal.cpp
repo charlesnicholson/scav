@@ -470,9 +470,31 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
         int32_t const want{ seat.pos + (forward ? -(step / 2) : (step - (step / 2))) };
         int32_t const got{ onto_face(want, lo, len, clear, arc(seat.box)) };
         int32_t &held{ along_y ? at[seat.slot].y : at[seat.slot].x };
-        if (held != got) {
-          held = got;
-          moved = true;
+        if (held == got) { continue; }
+        held = got;
+        moved = true;
+
+        // **The net moves, not the seat.** The comment above is what this pass
+        // intends and moving one end is not it: alignment had put both ends of
+        // `brew`'s `Off -> SelfCheck` on one coordinate and separating the two
+        // seats on `Off`'s face alone bent a 2,000-unit straight run by
+        // `clear / 2`. The far end takes the same displacement where its own
+        // face can seat it exactly; where the face would clamp, the far end
+        // stays and the bend is the price of separating the near one.
+        uint32_t const net{ seat.slot / 2 };
+        uint32_t const twin{ (2 * net) + (1 - seat.end) };
+        uint32_t const box{ (seat.end == 0) ? nets[net].dst_obstacle
+                                            : nets[net].src_obstacle };
+        bool const one_point{ (box < inscribed.size()) && (inscribed[box] != 0) };
+        if ((box >= boxes.size()) || one_point) { continue; }
+        uint32_t const face{ face_of(at[twin], boxes[box]) };
+        if ((face == INVALID) || ((face < 2) != along_y)) { continue; }
+        scav_rect const &far{ boxes[box] };
+        int32_t &there{ along_y ? at[twin].y : at[twin].x };
+        int32_t const aim{ there + (got - seat.pos) };
+        if (onto_face(aim, along_y ? far.y : far.x, along_y ? far.h : far.w, clear,
+                      arc(box)) == aim) {
+          there = aim;
         }
       }
     }

@@ -654,6 +654,52 @@ TEST_CASE("ortho: a fan's far ends are not pushed apart") {
   for (uint32_t i = 0; i < at.size(); ++i) { CHECK((at[i] == held[i])); }
 }
 
+TEST_CASE("ortho: separating a pair at one box moves whole nets, not seats") {
+  // The spread's own claim: "a pair seated apart at one box is seated the same
+  // way apart at the other and stays two straight lines". Moving the near seat
+  // alone bends both instead, by half the clearance, which is what `brew`'s
+  // 2,000-unit run between two facing boxes used to read.
+  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 400), rect(900, 0, 100, 400) };
+  std::vector<RouteNet> const nets{
+    { .src = pt(50, 200), .dst = pt(950, 200), .src_obstacle = 0, .dst_obstacle = 1 },
+    { .src = pt(950, 200), .dst = pt(50, 200), .src_obstacle = 1, .dst_obstacle = 0 },
+  };
+  // Both nets aligned on y = 200, so each is one straight segment and the two
+  // sit on top of each other at both boxes.
+  std::vector<scav_point> at{ pt(100, 200), pt(900, 200), pt(900, 200), pt(100, 200) };
+  ortho_spread_attachments(nets, boxes, {}, {}, 8, at);
+
+  // Separated at both boxes...
+  CHECK(at[0].y != at[3].y);
+  CHECK(at[1].y != at[2].y);
+  // ...and still one straight segment each, which is the property.
+  CHECK(at[0].y == at[1].y);
+  CHECK(at[2].y == at[3].y);
+  // Each stayed on its own face.
+  CHECK(at[0].x == 100);
+  CHECK(at[3].x == 100);
+  CHECK(at[1].x == 900);
+  CHECK(at[2].x == 900);
+}
+
+TEST_CASE("ortho: a far end that cannot follow keeps its seat and takes the bend") {
+  // A choice diamond seats at one point per face, so two transitions at it
+  // cannot both be straight once they are separated at the other end. `brew`'s
+  // `Off <-> SelfCheck` is exactly this, and the bend there is not a defect.
+  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 400), rect(900, 0, 100, 400) };
+  std::vector<uint8_t> const glyph{ 0, 1 };
+  std::vector<RouteNet> const nets{
+    { .src = pt(50, 200), .dst = pt(950, 200), .src_obstacle = 0, .dst_obstacle = 1 },
+    { .src = pt(950, 200), .dst = pt(50, 200), .src_obstacle = 1, .dst_obstacle = 0 },
+  };
+  std::vector<scav_point> at{ pt(100, 200), pt(900, 200), pt(900, 200), pt(100, 200) };
+  ortho_spread_attachments(nets, boxes, glyph, {}, 8, at);
+
+  CHECK(at[0].y != at[3].y);   // separated at the box that can
+  CHECK(at[1].y == at[2].y);   // and the glyph keeps its one seat
+  CHECK(at[1].y == 200);
+}
+
 TEST_CASE("ortho: ends of one direction sharing a seat are a trunk and keep it") {
   // Everything arriving at one point is a fan-in and everything leaving is a
   // fan-out: each is one line a reader wants whole, which is the shape 11.5's

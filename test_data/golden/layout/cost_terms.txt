@@ -1,14 +1,14 @@
 compact orthogonal axis.scav 0 38 6324 4 18926 0 0 0 6880 15571968
-compact orthogonal bottler.scav 0 93 49796 13 245251 0 0 0 5392 114169344
+compact orthogonal bottler.scav 0 93 49796 13 245280 0 0 0 5392 114169344
 compact orthogonal brew.scav 0 17 0 1 2204 0 0 0 688 6338304
-compact orthogonal dock.scav 0 14 0 5 27663 0 0 0 4576 11531776
+compact orthogonal dock.scav 0 14 0 5 27591 0 0 0 4576 11531776
 compact orthogonal estop.scav 0 4 0 0 510 0 0 0 3552 2102784
 compact orthogonal led.scav 0 4 0 0 510 0 0 0 3552 2102784
 compact orthogonal mill.scav 0 206 33608 63 450051 0 0 0 1600 285407232
 compact orthogonal ota.scav 0 17 292 8 18341 0 0 0 2944 13472768
 compact orthogonal tcp.scav 0 30 1051 8 28607 0 0 0 5360 16091392
 compact orthogonal toolchanger.scav 0 55 3178 10 51488 0 0 0 3440 84448000
-compact orthogonal vac.scav 0 26 0 5 20421 0 0 0 12928 26829824
+compact orthogonal vac.scav 0 26 0 5 20349 0 0 0 12928 26829824
 compact straight axis.scav 16 7 0 15 45782 0 0 0 6880 15571968
 compact straight bottler.scav 53 36 0 121 1859263 0 0 0 5392 114169344
 compact straight brew.scav 6 0 1184 3 0 0 0 0 688 6338304

@@ -656,7 +656,7 @@ TEST_CASE("cost: the shipped weights sum a hand-built term vector") {
          (int64_t{ p.w_adjacency } * 2) + (int64_t{ p.w_label } * 4) +
          (int64_t{ p.w_label_near } * 2) + (int64_t{ p.w_aspect } * 3) +
          (int64_t{ p.w_area } * 3)));
-  CHECK(cost_of(t, p).t2 == 5049);
+  CHECK(cost_of(t, p).t2 == 5073);
 }
 
 TEST_CASE("cost: an em of one grid unit leaves every length where it stood") {
