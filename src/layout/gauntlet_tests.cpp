@@ -122,7 +122,17 @@ void lay(char const *name, scav_profile const &p, Laid &out) {
 
   std::vector<scav_placed> placed;
   scav_layout_opts const o{ .profile = p, .router = id, .threads = 0 };
-  REQUIRE(layout_run(out.c, {}, o, placed, diags, nullptr, &out.tuple));
+  std::vector<RankPin> pins;
+  REQUIRE(layout_run(out.c,
+                     {},
+                     o,
+                     placed,
+                     diags,
+                     nullptr,
+                     &out.tuple,
+                     INVALID,
+                     nullptr,
+                     &pins));
   // Nothing here is a shape the router has to give up on, so a RouteDegraded
   // is a failure rather than a documented fallback.
   CHECK(diags.empty());
@@ -133,7 +143,9 @@ void lay(char const *name, scav_profile const &p, Laid &out) {
   Fold fold{ Fold::Scale };
   search_tuple(knobs, dar, pack, fold, out.tuple);
   out.g = decompose(out.c);
-  out.o = order_submachines(out.c, out.g, {}, knobs);
+  // The drawing is the tuple's *and* the pins' (11.10a), so re-deriving it
+  // needs both or this measures a layout nobody was shown.
+  out.o = order_submachines(out.c, out.g, {}, knobs, 0, pins);
   REQUIRE(size_layout(out.c, out.g, out.o, {}, knobs, out.z, diags, dar, pack, fold));
   out.r = route_transitions(out.c, out.g, out.o, out.z, {}, knobs, *router_at(id));
   column_holds(out.c, "scav.geom.state", out.z.state);

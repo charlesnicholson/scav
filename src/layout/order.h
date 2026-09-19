@@ -6,6 +6,7 @@
 
 #include "layout/decompose.h"
 #include "scav/scav_core.h"
+#include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
 
 #include <cstdint>
@@ -62,22 +63,11 @@ struct SubmachineOrders {
 // across `threads` workers and emitted in submachine order, so the result is
 // one value at every worker count (6).
 
-// One state held at a rank of the caller's choosing instead of the one longest
-// path gives it: 11.10a's placement move, expressed as an input to phase 1
-// rather than as a mutation of its output.
-//
-// **Keyed by state and not by node**, because a node index is an artefact of
-// how a frame was built -- chaining appends bends, and which index a state
-// landed on is not something a caller can predict or should have to.
-//
-// **A pin is a re-derivation, not an edit.** Ranks feed the boundary charges,
-// the chaining of multi-rank edges, the buckets and the crossing sweeps, so a
-// moved state changes all four; pinning re-runs them rather than patching the
-// answer. Undoing a move is running with the pins one held before it.
-struct RankPin {
-  StateId state{ INVALID };
-  uint32_t rank{ 0 };
-};
+// `RankPin` is `scav_layout.h`'s. **A pin is a re-derivation, not an edit**:
+// ranks feed the boundary charges, the chaining of multi-rank edges, the
+// buckets and the crossing sweeps, so a moved state changes all four and
+// pinning re-runs them rather than patching the answer. Undoing a move is
+// running with the pins one held before it.
 
 SubmachineOrders order_submachines(Chart const &c,
                                    SplitGraph const &g,

@@ -93,6 +93,19 @@ inline int32_t label_line_height(scav_profile const &p) {
 
 // Layout ====================================================================
 
+// One state held at a rank longest path did not give it: 11.10a's placement
+// move, expressed as an input to phase 1 rather than a mutation of its output.
+// Public because a drawing is a function of its tuple *and* its pins, so a
+// caller re-deriving one from the model needs both.
+//
+// **Keyed by state and not by node**, because a node index is an artefact of
+// how a frame was built -- chaining appends bends, and which index a state
+// landed on is not something a caller can predict or should have to.
+struct RankPin {
+  StateId state{ INVALID };
+  uint32_t rank{ 0 };
+};
+
 // Rows in the fixed table of chart-global phase-2 tuples Level 2 chooses
 // between: the box packer, compaction, where a frame's desired ratio comes
 // from, and whether its rank run folds (11.10, 11.10a). The bound on
@@ -121,7 +134,9 @@ bool layout_run(Chart &c,
                 std::vector<Diagnostic> &diags,
                 uint32_t *inflations = nullptr,
                 uint32_t *tuple = nullptr,
-                uint32_t row = INVALID);
+                uint32_t row = INVALID,
+                uint32_t *moves = nullptr,
+                std::vector<RankPin> *taken = nullptr);
 
 // Split so a pure translation moves the coordinate hash and not the structural
 // one: structure is sides, depths and turn tokens; coordinates are the rest.

@@ -492,7 +492,10 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
         scav_rect const &far{ boxes[box] };
         int32_t &there{ along_y ? at[twin].y : at[twin].x };
         int32_t const aim{ there + (got - seat.pos) };
-        if (onto_face(aim, along_y ? far.y : far.x, along_y ? far.h : far.w, clear,
+        if (onto_face(aim,
+                      along_y ? far.y : far.x,
+                      along_y ? far.h : far.w,
+                      clear,
                       arc(box)) == aim) {
           there = aim;
         }

@@ -1668,6 +1668,54 @@ TEST_CASE("layout: a pinned row runs that row and no search") {
   CHECK(picked == 5);
 }
 
+TEST_CASE("layout: no budget is the run it was, and a budget only improves") {
+  // The loop 11.10a's moves run in, tested before any move goes through it. At
+  // `portfolio_k` of zero nothing is scored and the drawing is byte-identical
+  // to the one Level 2 picked -- which is what makes the field safe to ship at
+  // zero and what says a later reading is the moves and not the loop.
+  scav_profile p{ readable() };
+  p.portfolio_k = 0;
+  Chart none;
+  load_corpus("brew.scav", none);
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  uint32_t moves{ 9 };
+  REQUIRE(layout_run(none, {}, opts(p), placed, diags, nullptr, nullptr, INVALID, &moves));
+  CHECK(moves == 0);
+
+  // And the same chart with a budget: strictly improving, so whatever it takes
+  // it cannot come back worse than what it started from.
+  scav_profile some{ p };
+  some.portfolio_k = 8;
+  Chart searched;
+  load_corpus("brew.scav", searched);
+  std::vector<Diagnostic> more;
+  uint32_t took{ 0 };
+  REQUIRE(layout_run(searched,
+                     {},
+                     opts(some),
+                     placed,
+                     diags,
+                     nullptr,
+                     nullptr,
+                     INVALID,
+                     &took));
+  SplitGraph const g{ decompose(none) };
+  CostTerms const was{ cost_columns(none, g, p) };
+  CostTerms const now{ cost_columns(searched, decompose(searched), p) };
+  MESSAGE("brew moves taken: ",
+          took,
+          ", t2 ",
+          cost_of(was, p).t2,
+          " -> ",
+          cost_of(now, p).t2);
+  CHECK(cost_of(now, p).t2 <= cost_of(was, p).t2);
+  // A run that took nothing is the run with no budget, byte for byte.
+  if (took == 0) {
+    CHECK(layout_coordinate_hash(searched) == layout_coordinate_hash(none));
+  }
+}
+
 TEST_CASE("layout: a chart compaction cannot improve keeps the lower row") {
   // Compaction is dominance-bounded, so on a chart it moves nothing the
   // compaction row's geometry is the plain row's, byte for byte -- and two rows

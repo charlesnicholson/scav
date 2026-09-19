@@ -31,6 +31,7 @@ SCAV_INTERNAL_BEGIN
 // are its own; see scav_internal.h.
 bool inflation_done(uint32_t fewest, uint32_t degraded, uint32_t unreachable, bool &keep);
 uint32_t search_tuple_count(scav_profile const &p, uint32_t entity_count);
+uint32_t search_move_budget(scav_profile const &p, uint32_t entity_count);
 void search_tuple(scav_profile &p,
                   DarSource &dar,
                   Compaction &pack,
@@ -306,6 +307,94 @@ bool inflation_done(uint32_t fewest, uint32_t degraded, uint32_t unreachable, bo
   return keep && (unreachable == 0);
 }
 
+// What a bounded-move pass kept, so the caller replaces its candidate only when
+// something was taken (11.10a).
+struct Improved {
+  Candidate best;
+  Cost cost{};
+  std::vector<RankPin> held;
+  uint32_t took{ 0 };
+  uint32_t scored{ 0 };
+};
+
+// Level 1: hold one state at a rank longest path did not give it, re-derive
+// phase 1 from that, and run phases 2 and 3 whole. Greedy and strictly
+// improving on the exact objective, in state order then rank order, so the pass
+// is a function of the model rather than of the order candidates happened to be
+// enumerated in (6).
+//
+// **A move is a pin and pins compose**, so accepting one is appending to the
+// list the next round re-derives from, and rejecting one is not appending. No
+// geometry is ever mutated and nothing has to be rolled back (11.10a).
+Improved search_moves(Chart const &c,
+                      SplitGraph const &g,
+                      scav_spaces const &s,
+                      scav_profile const &objective,
+                      scav_profile const &knobs,
+                      DarSource dar,
+                      Compaction pack,
+                      Fold fold,
+                      Router const &router,
+                      uint32_t threads,
+                      uint32_t budget,
+                      Cost from) {
+  Improved out;
+  out.cost = from;
+  std::vector<RankPin> &held{ out.held };
+  SubmachineOrders here{ order_submachines(c, g, s, objective, threads, held) };
+
+  while (out.scored < budget) {
+    RankPin take{};
+    Candidate kept;
+    Cost best{ out.cost };
+    bool found{ false };
+
+    for (uint32_t st = 0; (st < c.states.size()) && (out.scored < budget); ++st) {
+      if ((c.states[st].live == 0) || (here.state_node[st] == INVALID)) { continue; }
+      uint32_t const at{ here.nodes[here.state_node[st]].rank };
+      uint32_t const frame{ c.states[st].parent.v };
+      if (frame >= here.sub_ranks.size()) { continue; }
+      uint32_t const ranks{ here.sub_ranks[frame] };
+      for (uint32_t r = 0; (r < ranks) && (out.scored < budget); ++r) {
+        if (r == at) { continue; }
+        std::vector<RankPin> tried{ held };
+        tried.push_back({ .state = StateId{ st }, .rank = r });
+        SubmachineOrders const moved{
+          order_submachines(c, g, s, objective, threads, tried)
+        };
+        std::vector<Diagnostic> spilled;
+        Candidate cand{ search_candidate(c,
+                                         g,
+                                         moved,
+                                         s,
+                                         knobs,
+                                         dar,
+                                         pack,
+                                         fold,
+                                         router,
+                                         threads,
+                                         spilled) };
+        ++out.scored;
+        if (!cand.viable) { continue; }
+        Cost const scored{ cost_of(cost_terms(c, g, cand.sized, cand.routes, s, objective),
+                                   objective) };
+        if (!cost_less(scored, best)) { continue; }
+        best = scored;
+        take = { .state = StateId{ st }, .rank = r };
+        kept = std::move(cand);
+        found = true;
+      }
+    }
+    if (!found) { break; }
+    held.push_back(take);
+    here = order_submachines(c, g, s, objective, threads, held);
+    out.best = std::move(kept);
+    out.cost = best;
+    ++out.took;
+  }
+  return out;
+}
+
 // How many of the table's rows this chart runs: `portfolio_m`, halved for every
 // doubling of the entity count past 512, floored at one row. So a chart under
 // 1,024 entities gets the whole of M and either 2k shape gets one -- the
@@ -318,6 +407,18 @@ uint32_t search_tuple_count(scav_profile const &p, uint32_t entity_count) {
   uint32_t const shift{ (scale > 9U) ? (scale - 9U) : 0U };
   uint32_t const rows{ static_cast<uint32_t>(imax(p.portfolio_m, 1)) >> shift };
   return imin(imax(rows, 1U), LAYOUT_SEARCH_ROWS);
+}
+
+// How many bounded moves this chart scores, by the same closed form the row
+// count uses (above): a move costs a whole phase 1 to 3, so what a chart can
+// afford shrinks as its own runs get dearer. Halved for every doubling of the
+// entity count past 512, and **floored at zero rather than one** -- a chart big
+// enough is one this cannot pay for at all, which is the honest answer and is
+// what keeps a 2k target costing what it costs today (11.10a).
+uint32_t search_move_budget(scav_profile const &p, uint32_t entity_count) {
+  uint32_t const scale{ (entity_count == 0) ? 0U : ilog2(entity_count) };
+  uint32_t const shift{ (scale > 9U) ? (scale - 9U) : 0U };
+  return static_cast<uint32_t>(imax(p.portfolio_k, 0)) >> shift;
 }
 
 // Row `index` of the fixed table, as a delta from the profile as given: bit 0
@@ -366,7 +467,9 @@ bool layout_run(Chart &c,
                 std::vector<Diagnostic> &diags,
                 uint32_t *inflations,
                 uint32_t *tuple,
-                uint32_t row) {
+                uint32_t row,
+                uint32_t *moves,
+                std::vector<RankPin> *taken) {
   if (inflations != nullptr) { *inflations = 0; }
   if (tuple != nullptr) { *tuple = 0; }
   scav_profile const &p{ o.profile };
@@ -449,7 +552,49 @@ bool layout_run(Chart &c,
       cost[i] = cost_of(t, p);
     }
   }
-  uint32_t const best{ search_argmin(cost, viable) };
+  uint32_t best{ search_argmin(cost, viable) };
+
+  // Level 1: bounded moves off the row Level 2 picked, each one a whole phase 1
+  // to 3 and scored on the exact objective, greedy and strictly improving
+  // (11.10, 11.10a). `portfolio_k` caps the candidates scored and **ships at
+  // zero**, so a run that does not ask for it is the run it was.
+  //
+  // Placed here rather than inside the row loop because a move is off the
+  // *pick*: scoring moves against a row the argmin is about to discard spends
+  // the budget on a drawing nobody sees.
+  uint32_t const budget{ search_move_budget(p, layout_entity_count(c)) };
+  // Written whichever way the branch below goes: a count nobody set is worse
+  // than a zero, and zero is the honest answer for a run with no budget.
+  if (moves != nullptr) { *moves = 0; }
+  if (taken != nullptr) { taken->clear(); }
+  if ((budget != 0) && (viable[best] != 0)) {
+    scav_profile knobs{ p };
+    DarSource dar{ DarSource::Profile };
+    Compaction pack{ Compaction::Off };
+    Fold fold{ Fold::Scale };
+    search_tuple(knobs, dar, pack, fold, pinned ? row : best);
+    Improved const done{ search_moves(c,
+                                      g,
+                                      s,
+                                      p,
+                                      knobs,
+                                      dar,
+                                      pack,
+                                      fold,
+                                      *router,
+                                      o.threads,
+                                      budget,
+                                      cost[best]) };
+    if (done.took != 0) {
+      candidates[best] = std::move(done.best);
+      cost[best] = done.cost;
+    }
+    if (moves != nullptr) { *moves = done.took; }
+    // The drawing is a function of the tuple *and* the pins, so a caller
+    // re-deriving it from the model needs both.
+    if (taken != nullptr) { *taken = done.held; }
+  }
+
   SizedLayout sized{ std::move(candidates[best].sized) };
   Routes routes{ std::move(candidates[best].routes) };
   if (inflations != nullptr) { *inflations = candidates[best].inflations; }

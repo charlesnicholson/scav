@@ -1511,6 +1511,22 @@ What the review did find is that `ortho_spread_attachments` did not do what its 
 
 **Keyed by state, not by node, and that was a finding rather than a preference.** Node indices are an artefact of how a frame was built — chaining appends bends, and a state's index is not something a caller can predict. Keyed by node the undo test silently did nothing, because the state it named had landed on a different index than the arithmetic said. `sc.state_local` is the map a frame already keeps, and a pin reads it.
 
+**The loop landed 2026-09-19, and the move it runs works.** `search_moves` sits after Level 2's `argmin`, on the row it picked: it enumerates one state onto one rank it does not hold, re-derives phase 1 from that pin, runs phases 2 and 3 whole, and keeps the candidate only if exact `Cost` strictly improves — greedy, in state order then rank order, so the pass is a function of the model rather than of the enumeration. `portfolio_k` is the budget, by the same closed form `portfolio_m` uses, **floored at zero rather than one**: a chart big enough is one this cannot pay for, and that is what leaves the 2k targets costing what they cost.
+
+**Measured at a budget of 24, and it is the largest single result of the phase:**
+
+| | before | with moves |
+|---|---|---|
+| corpus defects | 60 | **57** |
+| element suite | 16 | **15** |
+| canvas | 18.28M pt² | **14.75M** (−19.3%) |
+| against PlantUML | 1.33× | **1.07×** |
+| aspect, median | 1.32 | **1.53**, against a DAR of 1.60 |
+
+`brew` alone takes one move for `t2` 4,762 → 4,065. **This is the first mechanism in the tree that has ever changed which rank a state sits in**, and it recovers most of what §11.12's exit reading said the reservation had spent.
+
+**It ships at zero, and the reason is a seam rather than the result.** A drawing is now a function of its tuple *and* its pins, so anything re-deriving geometry from the model needs both — `layout_run` hands the pins back for exactly that, and `gauntlet_tests`' own re-derivation still does not reproduce the columns when pins are live. Shipping a search whose output cannot be re-derived would make every property test measure a layout nobody was shown. `[OWED]`: close that seam, then set `portfolio_k`.
+
 **(b) Moving a node across ranks.** §11.10's second bounded move, and the one `led` needs. It is not an in-rank permutation: it changes rank sizes, can empty a rank, flips the fold, and re-sizes the frame and every ancestor. Three things it must reconcile, none of them free: §11.10's empty-rank squeeze has to run before phase 2 sizes a phantom gap; §11.7a recovers rank from sorted distinct x, so a sweep may not leave two ranks sharing one; and the acceptance pass has to hold the frame's subject set disjoint, which it already specifies. **The delta cannot be the coordinate-free order cost** the in-rank move uses — crossings do not move when a node changes rank in a way a reader cares about (phase 1 already reads zero), so this move is scored on `Cost` after a re-size, and §11.4's measurement bounds that at roughly 2x per candidate rather than the order of magnitude a cache was expected to buy. `[OWED]`
 
 **(a) is built, and the answer it gives is that (b) should not be.** Landed 2026-09-13 as bit 3 — `Fold::Scale` keeps the scale measure's choice and `Fold::Always` hands `Cost` the folded shape — with `LAYOUT_SEARCH_ROWS` 8 → 16, `portfolio_m` re-bounded to `[1, 16]` and `profile_version` 7. It works: the objective now sees both folds and chooses. **What it chooses is not better, it is different.**

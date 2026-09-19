@@ -449,8 +449,8 @@ void rank_derived(Frame &f,
     uint32_t &here{ lanes[(static_cast<size_t>(b) * parts) + of] };
     ++here;
     if (here < 2) { return; }
-    gaps[b] = imax(gaps[b],
-                   static_cast<int32_t>(imin(Wide{ here } * pitch, Wide{ SPACE_MAX })));
+    gaps[b] =
+        imax(gaps[b], static_cast<int32_t>(imin(Wide{ here } * pitch, Wide{ SPACE_MAX })));
   };
   for (OrderEdge const &e : f.edges) {
     uint32_t const from{ imin(f.nodes[e.src].rank, f.nodes[e.dst].rank) };

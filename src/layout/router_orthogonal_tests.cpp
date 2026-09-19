@@ -695,8 +695,8 @@ TEST_CASE("ortho: a far end that cannot follow keeps its seat and takes the bend
   std::vector<scav_point> at{ pt(100, 200), pt(900, 200), pt(900, 200), pt(100, 200) };
   ortho_spread_attachments(nets, boxes, glyph, {}, 8, at);
 
-  CHECK(at[0].y != at[3].y);   // separated at the box that can
-  CHECK(at[1].y == at[2].y);   // and the glyph keeps its one seat
+  CHECK(at[0].y != at[3].y);  // separated at the box that can
+  CHECK(at[1].y == at[2].y);  // and the glyph keeps its one seat
   CHECK(at[1].y == 200);
 }
 
