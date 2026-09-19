@@ -31,7 +31,10 @@ SCAV_INTERNAL_BEGIN
 // are its own; see scav_internal.h.
 bool inflation_done(uint32_t fewest, uint32_t degraded, uint32_t unreachable, bool &keep);
 uint32_t search_tuple_count(scav_profile const &p, uint32_t entity_count);
-void search_tuple(scav_profile &p, DarSource &dar, Compaction &pack, Fold &fold,
+void search_tuple(scav_profile &p,
+                  DarSource &dar,
+                  Compaction &pack,
+                  Fold &fold,
                   uint32_t index);
 uint32_t search_argmin(std::vector<Cost> const &cost, std::vector<uint8_t> const &viable);
 SCAV_INTERNAL_END
@@ -326,7 +329,10 @@ uint32_t search_tuple_count(scav_profile const &p, uint32_t entity_count) {
 // chart at either scale, so the table spent a bit on a knob that decided
 // nothing, and compaction — which does move charts, in both directions — took
 // it. The field stays a profile knob a caller may set; no row flips it.
-void search_tuple(scav_profile &p, DarSource &dar, Compaction &pack, Fold &fold,
+void search_tuple(scav_profile &p,
+                  DarSource &dar,
+                  Compaction &pack,
+                  Fold &fold,
                   uint32_t index) {
   p.trybox ^= static_cast<int32_t>(index & 1U);
   pack = (((index >> 1U) & 1U) != 0) ? Compaction::On : Compaction::Off;

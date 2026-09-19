@@ -528,7 +528,8 @@ TEST_CASE("ortho: faces the clearance would keep apart still align on their arcs
   CHECK(at[0].y == 571);
 
   // The arc still holds: a seat may not sit under one whatever it costs.
-  std::vector<scav_rect> const far_apart{ rect(0, 0, 400, 653), rect(1000, 600, 400, 653) };
+  std::vector<scav_rect> const far_apart{ rect(0, 0, 400, 653),
+                                          rect(1000, 600, 400, 653) };
   std::vector<RouteNet> const missed{
     { .src = pt(400, 326), .dst = pt(1000, 926), .src_obstacle = 0, .dst_obstacle = 1 },
   };

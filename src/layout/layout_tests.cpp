@@ -1397,7 +1397,10 @@ namespace scav {
 // shipping build keeps them internal.
 bool inflation_done(uint32_t fewest, uint32_t degraded, uint32_t unreachable, bool &keep);
 uint32_t search_tuple_count(scav_profile const &p, uint32_t entity_count);
-void search_tuple(scav_profile &p, DarSource &dar, Compaction &pack, Fold &fold,
+void search_tuple(scav_profile &p,
+                  DarSource &dar,
+                  Compaction &pack,
+                  Fold &fold,
                   uint32_t index);
 uint32_t search_argmin(std::vector<Cost> const &cost, std::vector<uint8_t> const &viable);
 
@@ -1427,8 +1430,8 @@ TEST_CASE("layout: the table's first row is the profile as given") {
         search_tuple(knobs, dar, pack, fold, row);
         CHECK(knobs.trybox == (given.trybox ^ static_cast<int32_t>(row & 1U)));
         CHECK((pack == ((((row >> 1U) & 1U) != 0) ? Compaction::On : Compaction::Off)));
-        CHECK((dar == ((((row >> 2U) & 1U) != 0) ? DarSource::OwnerHole
-                                                 : DarSource::Profile)));
+        CHECK((dar ==
+               ((((row >> 2U) & 1U) != 0) ? DarSource::OwnerHole : DarSource::Profile)));
         // Bit 3, the highest, so the eight rows below it are what they were.
         CHECK((fold == ((row < 8) ? Fold::Scale : Fold::Always)));
         // The scale-measure tiebreak is no longer a row of the table, so no row

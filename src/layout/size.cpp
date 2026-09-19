@@ -396,16 +396,17 @@ bool size_pass(Chart const &c,
       Shape const folded{ lay_out(target) };
       // `Always` takes the folded shape wherever it laid out, so what chose is
       // `Cost` over the row rather than the scale measure inside the frame.
-      bool const swap{ folded.ok && ((fold == Fold::Always) ||
-                       (!best.ok || pack_better({ .at = {},
-                                                  .w = static_cast<int32_t>(folded.w),
-                                                  .h = static_cast<int32_t>(folded.h) },
-                                                { .at = {},
-                                                  .w = static_cast<int32_t>(best.w),
-                                                  .h = static_cast<int32_t>(best.h) },
-                                                dar.num,
-                                                dar.den,
-                                                p.sm_tiebreak != 0))) };
+      bool const swap{ folded.ok &&
+                       ((fold == Fold::Always) ||
+                        (!best.ok || pack_better({ .at = {},
+                                                   .w = static_cast<int32_t>(folded.w),
+                                                   .h = static_cast<int32_t>(folded.h) },
+                                                 { .at = {},
+                                                   .w = static_cast<int32_t>(best.w),
+                                                   .h = static_cast<int32_t>(best.h) },
+                                                 dar.num,
+                                                 dar.den,
+                                                 p.sm_tiebreak != 0))) };
       if (swap) { best = folded; }
       if (!best.ok) {
         overflow(diags, ElemKind::Submachine, m);
@@ -626,7 +627,16 @@ bool size_layout(Chart const &c,
   // packs the same way, or the holes would be a different packer's.
   SizedLayout first;
   if (!size_pass(c, g, o, s, p, {}, compaction, fold, first, diags)) { return false; }
-  return size_pass(c, g, o, s, p, size_owner_holes(c, first), compaction, fold, out, diags);
+  return size_pass(c,
+                   g,
+                   o,
+                   s,
+                   p,
+                   size_owner_holes(c, first),
+                   compaction,
+                   fold,
+                   out,
+                   diags);
 }
 
 }  // namespace scav

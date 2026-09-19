@@ -28,7 +28,10 @@ namespace scav {
 
 // The portfolio's row, which `layout.cpp` brackets with SCAV_INTERNAL, declared
 // here rather than in a header so the shipping build keeps it internal.
-void search_tuple(scav_profile &p, DarSource &dar, Compaction &pack, Fold &fold,
+void search_tuple(scav_profile &p,
+                  DarSource &dar,
+                  Compaction &pack,
+                  Fold &fold,
                   uint32_t index);
 
 }  // namespace scav
