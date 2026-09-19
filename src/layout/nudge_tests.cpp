@@ -60,7 +60,8 @@ scav_point net_pt(Frame const &f, uint32_t net, uint32_t k) {
 
 // One frame's box repeated for every net it routes, which is what a per-frame
 // call passes; the chart-wide pass gives each net its own.
-std::vector<scav_rect> bounds_of(scav_rect const &box, std::vector<scav_span> const &nets) {
+std::vector<scav_rect> bounds_of(scav_rect const &box,
+                                 std::vector<scav_span> const &nets) {
   return std::vector<scav_rect>(nets.size(), box);
 }
 
@@ -222,7 +223,14 @@ TEST_CASE("nudge: the step shrinks to the room rather than being refused") {
 TEST_CASE("nudge: the region bounds a lane the obstacles do not") {
   Lane l{ two_over(100) };
   NudgeStats s;
-  nudge_lanes(rect(0, 90, 200, 20), bounds_of(rect(0, 90, 200, 20), l.nets), {}, 480, 0, l.nets, l.points, s);
+  nudge_lanes(rect(0, 90, 200, 20),
+              bounds_of(rect(0, 90, 200, 20), l.nets),
+              {},
+              480,
+              0,
+              l.nets,
+              l.points,
+              s);
   // Room is 10 either side, so the step is 20 and both stay inside.
   for (uint32_t net = 0; net < 2; ++net) {
     CHECK(lane_y(l, net) >= 90);
@@ -329,7 +337,14 @@ TEST_CASE("nudge: the frame's own box bounds a lane the obstacles do not") {
   // line the frame draws, and a lane on it is drawn over it.
   Lane l{ two_over(100) };
   NudgeStats s;
-  nudge_lanes(OPEN, bounds_of(rect(-1000, 0, 3000, 110), l.nets), {}, 48, 0, l.nets, l.points, s);
+  nudge_lanes(OPEN,
+              bounds_of(rect(-1000, 0, 3000, 110), l.nets),
+              {},
+              48,
+              0,
+              l.nets,
+              l.points,
+              s);
 
   CHECK(s.moved == 2);
   CHECK(lane_y(l, 0) == 61);
@@ -589,7 +604,14 @@ TEST_CASE("nudge: a bundle the region does not hold stays whole") {
                       { pt(-50, 50), pt(-50, 100), pt(200, 100), pt(200, 300) },
                       { pt(0, 400), pt(0, 100), pt(200, 100), pt(200, 500) } }) };
   NudgeStats s;
-  nudge_lanes(rect(0, -1000, 3000, 3000), bounds_of(OPEN, f.nets), {}, 48, 0, f.nets, f.points, s);
+  nudge_lanes(rect(0, -1000, 3000, 3000),
+              bounds_of(OPEN, f.nets),
+              {},
+              48,
+              0,
+              f.nets,
+              f.points,
+              s);
 
   CHECK(s.bundles == 1);
   CHECK(s.refused == 1);
@@ -673,7 +695,14 @@ TEST_CASE("nudge: a pair that must cross either way is left in the key's order")
   NudgeStats s;
   NudgeStats t;
   nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 48, 0, f.nets, f.points, s);
-  nudge_lanes(OPEN, bounds_of(OPEN, mirror.nets), {}, 48, 0, mirror.nets, mirror.points, t);
+  nudge_lanes(OPEN,
+              bounds_of(OPEN, mirror.nets),
+              {},
+              48,
+              0,
+              mirror.nets,
+              mirror.points,
+              t);
 
   CHECK(s.reordered == 0);
   CHECK(t.reordered == 0);
@@ -798,7 +827,14 @@ TEST_CASE("nudge: a box the lane already runs through does not bound it") {
   Lane through{ two_over(100) };
   std::vector<scav_rect> const across{ rect(50, 60, 100, 80) };
   NudgeStats s;
-  nudge_lanes(OPEN, bounds_of(OPEN, through.nets), across, 48, 0, through.nets, through.points, s);
+  nudge_lanes(OPEN,
+              bounds_of(OPEN, through.nets),
+              across,
+              48,
+              0,
+              through.nets,
+              through.points,
+              s);
   CHECK(s.spread == 1);
   CHECK(lane_y(through, 0) == 76);
   CHECK(lane_y(through, 1) == 124);
@@ -806,7 +842,14 @@ TEST_CASE("nudge: a box the lane already runs through does not bound it") {
   Lane beside{ two_over(100) };
   std::vector<scav_rect> const under{ rect(50, 110, 100, 80) };
   NudgeStats t;
-  nudge_lanes(OPEN, bounds_of(OPEN, beside.nets), under, 48, 0, beside.nets, beside.points, t);
+  nudge_lanes(OPEN,
+              bounds_of(OPEN, beside.nets),
+              under,
+              48,
+              0,
+              beside.nets,
+              beside.points,
+              t);
   CHECK(t.spread == 1);
   CHECK(lane_y(beside, 0) == 62);
   CHECK(lane_y(beside, 1) == 110);
@@ -821,7 +864,14 @@ TEST_CASE("nudge: a leg outside the region is refused before a box is consulted"
                                      scav_span{ .off = 4, .len = 4 } };
   std::vector<scav_rect> const away{ rect(400, 0, 100, 100) };
   NudgeStats s;
-  nudge_lanes(rect(0, -1000, 3000, 3000), bounds_of(OPEN, nets), away, 48, 0, nets, points, s);
+  nudge_lanes(rect(0, -1000, 3000, 3000),
+              bounds_of(OPEN, nets),
+              away,
+              48,
+              0,
+              nets,
+              points,
+              s);
 
   CHECK(s.lanes == 1);
   CHECK(s.spread == 1);

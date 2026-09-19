@@ -410,21 +410,18 @@ Routes route_transitions(Chart const &c,
     std::vector<uint8_t> up(c.states.size(), 0);
     for (uint32_t t = 0; t < out.route.size(); ++t) {
       if (t >= c.transitions.size()) { continue; }
-      for (StateId a{ enclosing_state(c, c.transitions[t].src) };
-           a.v != INVALID;
+      for (StateId a{ enclosing_state(c, c.transitions[t].src) }; a.v != INVALID;
            a = enclosing_state(c, a)) {
         up[a.v] = 1;
       }
-      for (StateId b{ enclosing_state(c, c.transitions[t].dst) };
-           b.v != INVALID;
+      for (StateId b{ enclosing_state(c, c.transitions[t].dst) }; b.v != INVALID;
            b = enclosing_state(c, b)) {
         if (up[b.v] != 0) {
           held[t] = z.state[b.v];
           break;
         }
       }
-      for (StateId a{ enclosing_state(c, c.transitions[t].src) };
-           a.v != INVALID;
+      for (StateId a{ enclosing_state(c, c.transitions[t].src) }; a.v != INVALID;
            a = enclosing_state(c, a)) {
         up[a.v] = 0;
       }
