@@ -220,10 +220,13 @@ TEST_CASE("label: the composite a transition runs in holds the box, its band doe
   CHECK(placed_well(placed[0], poly_of(l, 0)));
 
   // The band grew over everything within the leader of the only leg there is,
-  // so the box takes the centred placement.
+  // so no candidate is clear -- and the box keeps its anchor and takes the
+  // collision rather than the centred placement, which would ride its own leg
+  // (11.9.4). Nothing fell back: a placement that is anchored is a placement.
   z.before[outer.v] = { .x = 10, .y = 0, .w = 580, .h = 300 };
-  CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 1);
-  CHECK((placed[0] == scav_rect{ .x = 245, .y = 120, .w = 60, .h = 20 }));
+  CHECK(place_labels(c, z, boxes_of(boxes), l.route, l.points, tiny(), placed) == 0);
+  CHECK(placed_well(placed[0], poly_of(l, 0)));
+  CHECK(overlaps(placed[0], z.before[outer.v]));
 }
 
 TEST_CASE("label: a box takes the side clear of another transition's route") {
@@ -503,12 +506,15 @@ TEST_CASE("label: the leader is the only offset, and blocking it is the fallback
   CHECK(fell == 0);
 
   // Both sides for the leader's whole reach: no attachment point can be held at
-  // that distance and stay clear, so the centred placement is what is left --
-  // and it rides its own leg, which is the slice the fallback always is.
+  // that distance and stay clear, so what is left is a collision -- taken with
+  // the anchor kept, because a box over an obstacle still reads as its own
+  // transition's and a box on its own line does not (11.9.4).
   scav_rect const all{ .x = 0, .y = 150 - 100, .w = 600, .h = 200 };
   scav_rect const stuck{ on_route(leg, { all }, CHART, LABEL, fell) };
-  CHECK(fell == 1);
-  CHECK_FALSE(uncut(stuck, leg));
+  CHECK(fell == 0);
+  CHECK(placed_well(stuck, leg));
+  CHECK(uncut(stuck, leg));
+  CHECK(overlaps(stuck, all));
 }
 
 TEST_CASE("label: the anchor slides to either end of its leg") {

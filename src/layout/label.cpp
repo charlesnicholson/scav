@@ -196,6 +196,14 @@ uint32_t place_labels(Chart const &c,
     scav_point const at{ anchor_of(points, r) };
     scav_rect best{ centred(at, box, z.chart) };
     Key key{ .shortfall = 0, .dist = -1, .seg = 0, .attach = 0, .lead = 0, .mid = 0 };
+    // **The fallback keeps the anchor and accepts a collision** (11.9.4). What
+    // it used to keep is the centred placement, which sits *on* the leg -- so
+    // every box with no clear candidate was a sliced label by construction, and
+    // the slice count and the fallback count were one number. An anchored box
+    // is a leader away from its own line and cannot be cut by it; a box over a
+    // state still reads as its transition's, and a detached one does not.
+    scav_rect lax{ best };
+    Key lax_key{ .shortfall = 0, .dist = -1, .seg = 0, .attach = 0, .lead = 0, .mid = 0 };
     // Half the label's height, so the anchor slides finer than the box it
     // carries; the floor is one grid unit, which is 1/16 pt (11.9.4).
     int32_t const step{ imax(box.h / 2, 1) };
@@ -322,6 +330,9 @@ uint32_t place_labels(Chart const &c,
                         .mid = mid };
               // Keyed before tested, and zero is the floor of any shortfall: one
               // test with it standing in, then the real one, then the sweep.
+              // Against the *strict* tier, which is the weaker bound: the loose
+              // one holds the best of a superset, so pruning by it would drop
+              // candidates the strict tier still wants.
               if ((key.dist >= 0) && !better(here, key)) { continue; }
               if (!nearby.empty()) {
                 here.shortfall = shortfall_of(cand,
@@ -330,19 +341,26 @@ uint32_t place_labels(Chart const &c,
                 if ((key.dist >= 0) && !better(here, key)) { continue; }
               }
               if (!contains(holder, cand)) { continue; }
+              // Every leg of its own route, this one included: an axis-aligned
+              // leader off a corner can still put the label across the line it
+              // is anchored to, which is the slice the anchor exists to stop
+              // and is not structural (11.9.4). This one holds in both tiers --
+              // a fallback that accepts a collision still may not be cut.
+              bool uncut{ true };
+              for (uint32_t j = 0; uncut && (j < own.size()); ++j) {
+                if (overlaps(cand, own[j])) { uncut = false; }
+              }
+              if (!uncut) { continue; }
+              if ((lax_key.dist < 0) || better(here, lax_key)) {
+                lax_key = here;
+                lax = cand;
+              }
               bool clear{ true };
               for (scav_rect const &obstacle : blocked) {
                 if (overlaps(cand, obstacle)) {
                   clear = false;
                   break;
                 }
-              }
-              // Every leg of its own route, this one included: an axis-aligned
-              // leader off a corner can still put the label across the line it
-              // is anchored to, which is the slice the anchor exists to stop
-              // and is not structural (11.9.4).
-              for (uint32_t j = 0; clear && (j < own.size()); ++j) {
-                if (overlaps(cand, own[j])) { clear = false; }
               }
               if (!clear) { continue; }
               key = here;
@@ -354,6 +372,10 @@ uint32_t place_labels(Chart const &c,
       if (box.subject < c.transitions.size()) { mark(c.transitions[box.subject].src, 0); }
     }
 
+    if ((key.dist < 0) && (lax_key.dist >= 0)) {
+      key = lax_key;
+      best = lax;
+    }
     if (key.dist < 0) {
       ++fallbacks;
     } else {

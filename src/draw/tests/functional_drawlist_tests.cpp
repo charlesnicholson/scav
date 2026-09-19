@@ -370,9 +370,15 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
   // a box's last feasible attachment. 5 once phase 2 reserved the room instead
   // of phase 3 hunting for it, so three quarters of this was scarcity. 8 once I3
   // became a test, which bought a class outright (11.9.5). 6 once the weights
-  // were fitted and the search ran the whole table -- the same placer, given
-  // arrangements it can place in (11.6).
-  CHECK(fell == 6);
+  // were fitted and the search ran the whole table (11.6).
+  //
+  // **And zero once the fallback stopped being the centred placement.** 11.9.4
+  // says a box with no clear candidate keeps its anchor and accepts a
+  // collision; what the code kept was the leg's centre, which is not anchored
+  // and rides the line -- so every fallback was a sliced label by construction.
+  // A box that collides with a state still reads as its transition's. **Every
+  // box the corpus places is anchored**, which is what this number now says.
+  CHECK(fell == 0);
 }
 
 TEST_CASE("drawlist corpus: the layout goldens' measurement policy is stated here") {
