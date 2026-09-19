@@ -327,6 +327,88 @@ TEST_CASE("order: widened separations order to the same rows") {
   CHECK(a.seg_port == b.seg_port);
 }
 
+TEST_CASE("order: a pin that asks for the rank a node already has changes nothing") {
+  // The spine 11.10a's placement move stands on. A pin is a re-derivation and
+  // not an edit, so pinning what longest path already chose has to be the
+  // identity -- if it is not, the move is not measuring the move.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, d, TransKind::External, {});
+
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const plain{ order_submachines(c, g, {}, profile()) };
+  std::vector<RankPin> same;
+  for (StateId const st : { a, b, d }) {
+    same.push_back({ .state = st, .rank = plain.nodes[plain.state_node[st.v]].rank });
+  }
+  SubmachineOrders const pinned{ order_submachines(c, g, {}, profile(), 0, same) };
+  CHECK(pinned.nodes == plain.nodes);
+  CHECK(pinned.edges == plain.edges);
+  CHECK(pinned.gaps == plain.gaps);
+  CHECK(pinned.sub_ranks == plain.sub_ranks);
+}
+
+TEST_CASE("order: a pin moves a node's rank and the ranks stay contiguous") {
+  // A -> B -> D ranks 0, 1, 2. Pinning D onto B's rank empties rank 2, and a
+  // rank nothing sits in would still be sized a gap in phase 2 (11.10), so the
+  // squeeze renumbers onto the ranks that kept a node.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, d, TransKind::External, {});
+
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const plain{ order_submachines(c, g, {}, profile()) };
+  CHECK(plain.sub_ranks[root.v] == 3);
+  CHECK(plain.nodes[plain.state_node[d.v]].rank == 2);
+
+  std::vector<RankPin> const onto_one{ { .state = d, .rank = 1 } };
+  SubmachineOrders const moved{ order_submachines(c, g, {}, profile(), 0, onto_one) };
+  CHECK(moved.nodes[moved.state_node[d.v]].rank == 1);
+  CHECK(moved.sub_ranks[root.v] == 2);
+  // Every rank below the top holds at least one node.
+  std::vector<uint32_t> held(moved.sub_ranks[root.v], 0);
+  Span const sp{ moved.sub_nodes[root.v] };
+  for (uint32_t i = 0; i < sp.len; ++i) { ++held[moved.nodes[sp.off + i].rank]; }
+  for (uint32_t const n : held) { CHECK(n > 0); }
+}
+
+TEST_CASE("order: undoing a move is running with the pins one held before it") {
+  // What makes a search loop possible at all: a move is not a mutation, so
+  // there is nothing to roll back and no state to get wrong. Applying the
+  // ranks a run produced reproduces that run exactly.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, d, TransKind::External, {});
+  build_trans(c, a, d, TransKind::External, {});
+
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const plain{ order_submachines(c, g, {}, profile()) };
+  std::vector<RankPin> before;
+  for (StateId const st : { a, b, d }) {
+    before.push_back({ .state = st, .rank = plain.nodes[plain.state_node[st.v]].rank });
+  }
+  std::vector<RankPin> const away{ { .state = d, .rank = 1 } };
+
+  SubmachineOrders const gone{ order_submachines(c, g, {}, profile(), 0, away) };
+  CHECK(gone.nodes != plain.nodes);  // the move did something
+  SubmachineOrders const back{ order_submachines(c, g, {}, profile(), 0, before) };
+  CHECK(back.nodes == plain.nodes);
+  CHECK(back.edges == plain.edges);
+  CHECK(back.gaps == plain.gaps);
+}
+
 TEST_CASE("order: a dead submachine gets an empty span and no nodes") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };

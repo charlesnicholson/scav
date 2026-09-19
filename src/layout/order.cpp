@@ -381,11 +381,96 @@ uint64_t rank_crossings(std::vector<uint32_t> const &south_positions) {
   return inversions(south_positions);
 }
 
+// Ranks renumbered onto the ones that still hold a node, keeping their order. A
+// move can empty the rank it left, and phase 2 sizes a rank gap whether or not
+// anything is in it (11.10).
+void squeeze_ranks(Frame &f) {
+  uint32_t top{ 0 };
+  for (OrderNode const &nd : f.nodes) { top = imax(top, nd.rank); }
+  std::vector<uint32_t> onto(static_cast<size_t>(top) + 1, INVALID);
+  for (OrderNode const &nd : f.nodes) { onto[nd.rank] = 0; }
+  uint32_t next{ 0 };
+  for (uint32_t r = 0; r <= top; ++r) {
+    if (onto[r] == 0) { onto[r] = next++; }
+  }
+  for (OrderNode &nd : f.nodes) { nd.rank = onto[nd.rank]; }
+}
+
+// Everything a frame's ordering derives from the ranks it was assigned: the
+// boundary charges, the chaining of multi-rank edges into single-rank ones, the
+// rank buckets and the crossing sweeps. **Pure in `f.nodes[].rank` and
+// `f.edges`**, which is what lets a bounded move re-derive a whole frame by
+// changing one node's rank and calling this again (11.10a). Not idempotent:
+// `chain_long_edges` adds nodes, so a second call wants the frame as it was
+// before the first.
+void rank_derived(Frame &f,
+                  std::vector<int32_t> &gaps,
+                  std::vector<int32_t> const &seg_label,
+                  scav_profile const &p,
+                  FrameScratch &sc) {
+  // Charged before chaining, while an edge still knows the whole span its
+  // label sits in the middle of and how many boundaries it crosses.
+  uint32_t top{ 0 };
+  for (OrderNode const &nd : f.nodes) { top = imax(top, nd.rank); }
+  gaps.assign(top, 0);
+  for (OrderEdge const &e : f.edges) {
+    int32_t const label{ seg_label[e.segment] };
+    if (label == 0) { continue; }
+    uint32_t const from{ imin(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
+    uint32_t const to{ imax(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
+    uint32_t const at{ from + ((to - from) / 2) };
+    if (at < gaps.size()) { gaps[at] = imax(gaps[at], label); }
+  }
+
+  // An edge turning in a boundary needs a lane of its own, and two lanes
+  // carrying type may not sit closer than a line of it (11.9.5). Phase 3
+  // spreads into the width phase 2 left, so only phase 2 can reserve it.
+  //
+  // The two boundaries an edge *turns* in, not every one it crosses: between
+  // them it runs straight and wants cross-axis room. Per component, because
+  // components are laid out separately and never share a corridor. Max rather
+  // than sum against the label charge: both size the same corridor.
+  Partition &part{ sc.part };
+  part.reset(f.nodes.size());
+  for (OrderEdge const &e : f.edges) { part.join(e.src, e.dst); }
+  // Dense, so the table is boundaries x components, not x nodes.
+  std::vector<uint32_t> &dense{ sc.dense };
+  dense.assign(f.nodes.size(), INVALID);
+  uint32_t parts{ 0 };
+  for (uint32_t i = 0; i < f.nodes.size(); ++i) {
+    uint32_t const root{ part.root(i) };
+    if (dense[root] == INVALID) { dense[root] = parts++; }
+  }
+  std::vector<uint32_t> &lanes{ sc.lanes };
+  lanes.assign(gaps.size() * parts, 0);
+  int32_t const pitch{ label_line_height(p) };
+  auto const turn = [&](uint32_t b, uint32_t of) {
+    if (b >= gaps.size()) { return; }
+    uint32_t &here{ lanes[(static_cast<size_t>(b) * parts) + of] };
+    ++here;
+    if (here < 2) { return; }
+    gaps[b] = imax(gaps[b],
+                   static_cast<int32_t>(imin(Wide{ here } * pitch, Wide{ SPACE_MAX })));
+  };
+  for (OrderEdge const &e : f.edges) {
+    uint32_t const from{ imin(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
+    uint32_t const to{ imax(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
+    uint32_t const of{ dense[part.root(e.src)] };
+    turn(from, of);
+    if (to > (from + 1)) { turn(to - 1, of); }
+  }
+
+  chain_long_edges(f);
+  bucket_ranks(f);
+  minimize_crossings(f, static_cast<uint32_t>(p.sweep_count));
+}
+
 SubmachineOrders order_submachines(Chart const &c,
                                    SplitGraph const &g,
                                    scav_spaces const &s,
                                    scav_profile const &p,
-                                   uint32_t threads) {
+                                   uint32_t threads,
+                                   std::vector<RankPin> const &pins) {
   SubmachineOrders o;
   o.sub_nodes.assign(c.submachines.size(), Span{});
   o.sub_edges.assign(c.submachines.size(), Span{});
@@ -489,62 +574,26 @@ SubmachineOrders order_submachines(Chart const &c,
     orient_acyclic(f);
     assign_ranks(f);
 
-    // Charged before chaining, while an edge still knows the whole span its
-    // label sits in the middle of and how many boundaries it crosses.
-    uint32_t top{ 0 };
-    for (OrderNode const &nd : f.nodes) { top = imax(top, nd.rank); }
-    std::vector<int32_t> &gaps{ frames[m].gaps };
-    gaps.assign(top, 0);
-    for (OrderEdge const &e : f.edges) {
-      int32_t const label{ seg_label[e.segment] };
-      if (label == 0) { continue; }
-      uint32_t const from{ imin(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
-      uint32_t const to{ imax(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
-      uint32_t const at{ from + ((to - from) / 2) };
-      if (at < gaps.size()) { gaps[at] = imax(gaps[at], label); }
+    // The pins land between the ranking and everything derived from it, which
+    // is the one place a rank is a free choice rather than a consequence.
+    // `first` is where this frame's nodes will sit in the merged array, and a
+    // pin names them there so a caller never has to know the merge order.
+    if (!pins.empty()) {
+      bool moved{ false };
+      for (RankPin const &pin : pins) {
+        if ((pin.state.v == INVALID) || (pin.state.v >= sc.state_local.size())) {
+          continue;
+        }
+        uint32_t const at{ sc.state_local[pin.state.v] };
+        if (at >= f.nodes.size()) { continue; }  // not a state this frame holds
+        f.nodes[at].rank = pin.rank;
+        moved = true;
+      }
+      // A rank a move emptied would size a phantom gap in phase 2 (11.10), so
+      // the ranks are renumbered onto the ones that still hold a node.
+      if (moved) { squeeze_ranks(f); }
     }
-
-    // An edge turning in a boundary needs a lane of its own, and two lanes
-    // carrying type may not sit closer than a line of it (11.9.5). Phase 3
-    // spreads into the width phase 2 left, so only phase 2 can reserve it.
-    //
-    // The two boundaries an edge *turns* in, not every one it crosses: between
-    // them it runs straight and wants cross-axis room. Per component, because
-    // components are laid out separately and never share a corridor. Max rather
-    // than sum against the label charge: both size the same corridor.
-    Partition &part{ sc.part };
-    part.reset(f.nodes.size());
-    for (OrderEdge const &e : f.edges) { part.join(e.src, e.dst); }
-    // Dense, so the table is boundaries x components, not x nodes.
-    std::vector<uint32_t> &dense{ sc.dense };
-    dense.assign(f.nodes.size(), INVALID);
-    uint32_t parts{ 0 };
-    for (uint32_t i = 0; i < f.nodes.size(); ++i) {
-      uint32_t const root{ part.root(i) };
-      if (dense[root] == INVALID) { dense[root] = parts++; }
-    }
-    std::vector<uint32_t> &lanes{ sc.lanes };
-    lanes.assign(gaps.size() * parts, 0);
-    int32_t const pitch{ label_line_height(p) };
-    auto const turn = [&](uint32_t b, uint32_t of) {
-      if (b >= gaps.size()) { return; }
-      uint32_t &here{ lanes[(static_cast<size_t>(b) * parts) + of] };
-      ++here;
-      if (here < 2) { return; }
-      gaps[b] = imax(gaps[b],
-                     static_cast<int32_t>(imin(Wide{ here } * pitch, Wide{ SPACE_MAX })));
-    };
-    for (OrderEdge const &e : f.edges) {
-      uint32_t const from{ imin(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
-      uint32_t const to{ imax(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
-      uint32_t const of{ dense[part.root(e.src)] };
-      turn(from, of);
-      if (to > (from + 1)) { turn(to - 1, of); }
-    }
-
-    chain_long_edges(f);
-    bucket_ranks(f);
-    minimize_crossings(f, static_cast<uint32_t>(p.sweep_count));
+    rank_derived(f, frames[m].gaps, seg_label, p, sc);
 
     for (uint32_t k = 0; k < kids.len; ++k) {
       sc.state_local[c.state_ids[kids.off + k].v] = INVALID;

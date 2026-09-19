@@ -61,11 +61,30 @@ struct SubmachineOrders {
 // a path box's, so it runs before anything is sized. Submachines are sharded
 // across `threads` workers and emitted in submachine order, so the result is
 // one value at every worker count (6).
+
+// One state held at a rank of the caller's choosing instead of the one longest
+// path gives it: 11.10a's placement move, expressed as an input to phase 1
+// rather than as a mutation of its output.
+//
+// **Keyed by state and not by node**, because a node index is an artefact of
+// how a frame was built -- chaining appends bends, and which index a state
+// landed on is not something a caller can predict or should have to.
+//
+// **A pin is a re-derivation, not an edit.** Ranks feed the boundary charges,
+// the chaining of multi-rank edges, the buckets and the crossing sweeps, so a
+// moved state changes all four; pinning re-runs them rather than patching the
+// answer. Undoing a move is running with the pins one held before it.
+struct RankPin {
+  StateId state{ INVALID };
+  uint32_t rank{ 0 };
+};
+
 SubmachineOrders order_submachines(Chart const &c,
                                    SplitGraph const &g,
                                    scav_spaces const &s,
                                    scav_profile const &p,
-                                   uint32_t threads = 0);
+                                   uint32_t threads = 0,
+                                   std::vector<RankPin> const &pins = {});
 
 // Crossings between two adjacent ranks by inversion counting. Exposed because
 // it is what the ordering minimizes and what a test measures against.
