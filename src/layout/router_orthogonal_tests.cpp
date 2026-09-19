@@ -585,8 +585,10 @@ TEST_CASE("ortho: two boxes' seats a hair apart are pushed to the pitch") {
   // 34 of the corpus's 41 crowded pairs are two seated legs on two different
   // boxes running alongside. No pass saw them: the spread separates seats on
   // one face and alignment straightens one net's own ends (11.10a).
-  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 400), rect(0, 500, 100, 400),
-                                      rect(900, 0, 100, 400), rect(900, 500, 100, 400) };
+  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 400),
+                                      rect(0, 500, 100, 400),
+                                      rect(900, 0, 100, 400),
+                                      rect(900, 500, 100, 400) };
   std::vector<RouteNet> const nets{
     { .src = pt(50, 200), .dst = pt(950, 200), .src_obstacle = 0, .dst_obstacle = 2 },
     { .src = pt(50, 700), .dst = pt(950, 700), .src_obstacle = 1, .dst_obstacle = 3 },
@@ -606,7 +608,8 @@ TEST_CASE("ortho: two boxes' seats a hair apart are pushed to the pitch") {
 }
 
 TEST_CASE("ortho: a pair already a pitch apart, or crossing, is left alone") {
-  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 400), rect(0, 500, 100, 400),
+  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 400),
+                                      rect(0, 500, 100, 400),
                                       rect(900, 0, 100, 900) };
   std::vector<RouteNet> const nets{
     { .src = pt(50, 200), .dst = pt(950, 450), .src_obstacle = 0, .dst_obstacle = 2 },
@@ -619,8 +622,10 @@ TEST_CASE("ortho: a pair already a pitch apart, or crossing, is left alone") {
 
   // Legs that never run alongside share no coordinate to be confused on: the
   // first runs x 100..300 and the second x 700..900.
-  std::vector<scav_rect> const apart{ rect(0, 0, 100, 400), rect(600, 0, 100, 400),
-                                      rect(300, 0, 100, 400), rect(900, 0, 100, 400) };
+  std::vector<scav_rect> const apart{ rect(0, 0, 100, 400),
+                                      rect(600, 0, 100, 400),
+                                      rect(300, 0, 100, 400),
+                                      rect(900, 0, 100, 400) };
   std::vector<RouteNet> const past{
     { .src = pt(50, 200), .dst = pt(350, 200), .src_obstacle = 0, .dst_obstacle = 2 },
     { .src = pt(650, 210), .dst = pt(950, 210), .src_obstacle = 1, .dst_obstacle = 3 },
@@ -635,7 +640,8 @@ TEST_CASE("ortho: a fan's far ends are not pushed apart") {
   // Two routes meeting at a box are one fan, and 11.5's bundles keep it whole.
   // Separating the ends they do not share bends the fan and crowds the end they
   // do: `gauntlet/fanin` reads five crowded pairs that way against one.
-  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 400), rect(0, 500, 100, 400),
+  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 400),
+                                      rect(0, 500, 100, 400),
                                       rect(900, 0, 100, 900) };
   std::vector<RouteNet> const fan{
     { .src = pt(50, 200), .dst = pt(950, 450), .src_obstacle = 0, .dst_obstacle = 2 },
