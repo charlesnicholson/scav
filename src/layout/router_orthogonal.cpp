@@ -5,6 +5,7 @@
 
 #include "layout/geom.h"
 #include "layout/router.h"
+#include "scav/scav_layout.h"
 #include "scav_int.h"
 #include "scav_stable_sort.h"
 
@@ -476,6 +477,127 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
   }
 }
 
+// Whether two nets meet at a box -- a fan out of one state or into one.
+bool shares_box(std::vector<RouteNet> const &nets, uint32_t a, uint32_t b) {
+  std::array<uint32_t, 2> const one{ nets[a].src_obstacle, nets[a].dst_obstacle };
+  std::array<uint32_t, 2> const two{ nets[b].src_obstacle, nets[b].dst_obstacle };
+  for (uint32_t const x : one) {
+    for (uint32_t const y : two) {
+      if ((x != INVALID) && (x == y)) { return true; }
+    }
+  }
+  return false;
+}
+
+void ortho_separate_attachments(std::vector<RouteNet> const &nets,
+                                std::vector<scav_rect> const &boxes,
+                                std::vector<uint8_t> const &inscribed,
+                                std::vector<int32_t> const &corner,
+                                int32_t clear,
+                                int32_t pitch,
+                                std::vector<scav_point> &at) {
+  auto const arc = [&corner](uint32_t box) {
+    return (box < corner.size()) ? corner[box] : 0;
+  };
+  if ((pitch <= 0) || (clear <= 0)) { return; }
+
+  // A seat on a left or right face leaves along x, so its leg sits at the
+  // seat's y and runs to the other end's x; on a top or bottom face the axes
+  // swap. `pos` is the coordinate the leg runs *at*, which is what a reader
+  // sees two of, and `lo`/`hi` are what it runs *across*.
+  struct Leg {
+    uint32_t box, face, slot, net;
+    int32_t pos, lo, hi;
+  };
+  std::vector<Leg> legs;
+  for (uint32_t n = 0; n < nets.size(); ++n) {
+    for (uint32_t end = 0; end < 2; ++end) {
+      uint32_t const box{ (end == 0) ? nets[n].src_obstacle : nets[n].dst_obstacle };
+      bool const one_point{ (box < inscribed.size()) && (inscribed[box] != 0) };
+      if ((box >= boxes.size()) || one_point) { continue; }
+      uint32_t const slot{ (2 * n) + end };
+      uint32_t const face{ face_of(at[slot], boxes[box]) };
+      if (face == INVALID) { continue; }
+      scav_point const here{ at[slot] };
+      scav_point const other{ at[(2 * n) + (1 - end)] };
+      bool const along_y{ face < 2 };
+      int32_t const run{ along_y ? other.x : other.y };
+      int32_t const from{ along_y ? here.x : here.y };
+      legs.push_back({ .box = box,
+                       .face = face,
+                       .slot = slot,
+                       .net = n,
+                       .pos = along_y ? here.y : here.x,
+                       .lo = imin(from, run),
+                       .hi = imax(from, run) });
+    }
+  }
+
+  // One axis at a time: two legs a reader confuses run at the same kind of
+  // coordinate, and a horizontal leg beside a vertical one is a crossing rather
+  // than a lane.
+  auto const sweep = [&](bool along_y) {
+    std::vector<uint32_t> here;
+    for (uint32_t i = 0; i < legs.size(); ++i) {
+      if ((legs[i].face < 2) == along_y) { here.push_back(i); }
+    }
+    scav_stable_sort(here, [&legs](uint32_t a, uint32_t b) {
+      if (legs[a].pos != legs[b].pos) { return legs[a].pos < legs[b].pos; }
+      return legs[a].slot < legs[b].slot;
+    });
+    bool moved{ false };
+    for (uint32_t k = 0; (k + 1) < here.size(); ++k) {
+      Leg &low{ legs[here[k]] };
+      Leg &high{ legs[here[k + 1]] };
+      // One net's own two ends are what alignment just put on one coordinate,
+      // and one face's crowd is the pass above's -- a trunk lives there.
+      if (low.net == high.net) { continue; }
+      if ((low.box == high.box) && (low.face == high.face)) { continue; }
+      // Two routes that meet at a box are a fan, and 11.5's bundles keep one
+      // whole. Pushing their far ends apart does not separate them, it bends
+      // the fan and crowds the end they share: `gauntlet/fanin` reads five
+      // crowded pairs that way against one.
+      if (shares_box(nets, low.net, high.net)) { continue; }
+      int32_t const apart{ high.pos - low.pos };
+      if ((apart <= 0) || (apart >= pitch)) { continue; }
+      if ((low.hi <= high.lo) || (high.hi <= low.lo)) { continue; }  // never alongside
+      // Half the shortfall each, so neither moves further than it has to and the
+      // pair is symmetric whichever order the sweep reached it in.
+      //
+      int32_t const want{ pitch - apart };
+      std::array<int32_t, 2> got{ low.pos, high.pos };
+      for (uint32_t which = 0; which < 2; ++which) {
+        Leg const &leg{ (which == 0) ? low : high };
+        scav_rect const &r{ boxes[leg.box] };
+        int32_t const face_lo{ (leg.face < 2) ? r.y : r.x };
+        int32_t const len{ (leg.face < 2) ? r.h : r.w };
+        int32_t const aim{ leg.pos + ((which == 0) ? -(want / 2) : (want - (want / 2))) };
+        got[which] = onto_face(aim, face_lo, len, clear, arc(leg.box));
+      }
+      for (uint32_t which = 0; which < 2; ++which) {
+        Leg &leg{ (which == 0) ? low : high };
+        if (got[which] == leg.pos) { continue; }
+        leg.pos = got[which];
+        if (leg.face < 2) {
+          at[leg.slot].y = got[which];
+        } else {
+          at[leg.slot].x = got[which];
+        }
+        moved = true;
+      }
+    }
+    return moved;
+  };
+
+  // A pair pushed apart can land on a third, and a face with no room stops
+  // moving, so the leg count bounds the run the way the spread above is bounded.
+  for (uint32_t round = 0; round < legs.size(); ++round) {
+    bool const y{ sweep(true) };
+    bool const x{ sweep(false) };
+    if (!y && !x) { break; }
+  }
+}
+
 scav_point ortho_escape(scav_point at,
                         scav_point toward,
                         std::vector<scav_rect> const &boxes) {
@@ -822,6 +944,15 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
   ortho_reface_attachments(in.nets, in.obstacles, in.inscribed, toward, seat);
   ortho_align_attachments(in.nets, in.obstacles, in.inscribed, in.corner, seat);
   ortho_spread_attachments(in.nets, in.obstacles, in.inscribed, in.corner, clear, seat);
+  // Last, because it is the only pass that compares two boxes: what it moves is
+  // what the three above have already settled on their own faces (11.10a).
+  ortho_separate_attachments(in.nets,
+                             in.obstacles,
+                             in.inscribed,
+                             in.corner,
+                             clear,
+                             label_line_height(in.profile),
+                             seat);
 
   for (uint32_t n = 0; n < in.nets.size(); ++n) {
     RouteNet const &net{ in.nets[n] };

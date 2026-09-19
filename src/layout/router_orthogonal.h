@@ -113,6 +113,20 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
                               int32_t clear,
                               std::vector<scav_point> &at);
 
+// Seats on *different* boxes whose legs run alongside closer than `pitch`,
+// pushed apart along their own faces. The pass above separates seats sharing
+// one face, and alignment straightens one net's own two ends; neither ever
+// compares a seat on one box with a seat on another, which is where 34 of the
+// corpus's 41 crowded pairs live (11.10a). Seats sharing a box and face are
+// left alone -- a fan-in's shared arrival is a trunk 11.5 keeps whole.
+void ortho_separate_attachments(std::vector<RouteNet> const &nets,
+                                std::vector<scav_rect> const &boxes,
+                                std::vector<uint8_t> const &inscribed,
+                                std::vector<int32_t> const &corner,
+                                int32_t clear,
+                                int32_t pitch,
+                                std::vector<scav_point> &at);
+
 // The same, off whichever box `at` is strictly inside: innermost by area, then
 // by list order. Unchanged when it is inside none.
 scav_point ortho_escape(scav_point at,
