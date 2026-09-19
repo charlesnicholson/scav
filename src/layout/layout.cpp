@@ -376,6 +376,11 @@ Improved search_moves(Chart const &c,
                                          spilled) };
         ++out.scored;
         if (!cand.viable) { continue; }
+        // A move that only fits once the whole chart's spacing was widened is
+        // not a better placement, it is a bigger drawing -- and it is one no
+        // caller can re-derive from the pins alone, because the geometry
+        // belongs to a profile the pins do not name.
+        if (cand.inflations != 0) { continue; }
         Cost const scored{ cost_of(cost_terms(c, g, cand.sized, cand.routes, s, objective),
                                    objective) };
         if (!cost_less(scored, best)) { continue; }

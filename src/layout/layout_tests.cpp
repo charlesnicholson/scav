@@ -1233,7 +1233,11 @@ TEST_CASE("layout: no corpus chart runs a route flush along a box") {
   for (char const ch : report) {
     if (ch == '\n') { ++lines; }
   }
-  CHECK(lines <= 4);
+  // **Five since 11.10a's placement move**: an arrangement a move reached runs
+  // one more segment along a box, taken because the same move takes the
+  // corpus's audit from 60 defects to 57 and its canvas down a fifth. A
+  // tripwire that fires on a net improvement is raised with its reason.
+  CHECK(lines <= 5);
 }
 
 TEST_CASE("layout: Tier 0 at the scale target, and where the grid gives out") {
@@ -1568,6 +1572,10 @@ TEST_CASE("layout: the pick is the row exact Cost ranks first over the whole tab
   load_corpus("axis.scav", searched);
   scav_profile four{ p };
   four.portfolio_m = 4;
+  // Level 2's argmin is what this is about, so the bounded moves are off: with
+  // them on the geometry written is the row's *and* its pins', and the four
+  // rows re-derived below hold no pins (11.10a).
+  four.portfolio_k = 0;
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
   uint32_t picked{ INVALID };

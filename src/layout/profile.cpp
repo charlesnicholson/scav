@@ -57,7 +57,7 @@ constexpr scav_profile READABLE{
   .w_label_near = 48,
   .w_aspect = 2,
   .w_area = 1,
-  .portfolio_k = 0,
+  .portfolio_k = 24,
   // Rows {as given, trybox}, which is every row the corpus picks that improved
   // a picture. Rows 2 and 3 turn compaction on and 4 through 7 hand a frame its
   // owner's hole: both are built, tested and measured, and neither ships until
@@ -114,7 +114,7 @@ constexpr scav_profile COMPACT{
   .w_label_near = 48,
   .w_aspect = 2,
   .w_area = 1,
-  .portfolio_k = 0,
+  .portfolio_k = 24,
   // Rows {as given, trybox}, which is every row the corpus picks that improved
   // a picture. Rows 2 and 3 turn compaction on and 4 through 7 hand a frame its
   // owner's hole: both are built, tested and measured, and neither ships until

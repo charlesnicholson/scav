@@ -557,10 +557,10 @@ TEST_CASE("gauntlet: a fan-in's arrivals are four arrows, none inside another") 
       if (chart_string(l.c, l.c.states[st].name) == "Fault") { fault = st; }
     }
     REQUIRE(fault != INVALID);
-    // Two refusals before 11.9.5's reservation and one after; the chart-wide
-    // pass asks a second time on the composed polyline, and at `readable` the
-    // fan's own trunk refuses it again. A refusal is the bundle winning.
-    CHECK(l.r.nudged.refused == ((p.profile_id == compact().profile_id) ? 0U : 2U));
+    // Two refusals before 11.9.5's reservation, one after, and none since
+    // 11.10a's placement move: what the fan was refusing was room, and a move
+    // is how a frame gets room rather than asks for it.
+    CHECK(l.r.nudged.refused == 0);
     std::vector<uint32_t> into;
     for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
       if ((l.r.route[t].len >= 2) && (l.c.transitions[t].dst.v == fault)) {
@@ -712,8 +712,10 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     CHECK(cost_columns(shipped.c, shipped.g, p).through_box == 0);
     // The other half of the hole: the route still leaves and returns along one
     // line. Four at both profiles until 11.9.5's reservation, three at `compact`
-    // since -- the arrangement moving, not the hole closing. 11.8's to close.
-    CHECK(shipped_back == ((p.profile_id == compact().profile_id) ? 3U : 4U));
+    // since, and two at both once a placement move could put the two regions
+    // somewhere the long way round is shorter -- the arrangement moving, not
+    // the hole closing. 11.8's to close.
+    CHECK(shipped_back == ((p.profile_id == compact().profile_id) ? 2U : 4U));
 
     // 11.5's face rule, which picks a face by how far the target lies outside
     // the box on each axis rather than by the distance to a point on it. A
@@ -728,12 +730,14 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     Laid fork_zero;
     lay("fork.scav", one_row(p), fork_zero);
     CHECK(capped_branches(fork_zero) == 2);
-    // And what ships, which used to differ by profile -- `readable` stacked the
-    // branch beside the bar and read zero where `compact` read one. Under the
-    // reservation both branches sit below the bar at both profiles and both
-    // read two, so the packer no longer hides the rule from one of them.
+    // And what ships: zero at both profiles since 11.10a's placement move. The
+    // rule is still the defect -- row 0 above still reads two -- but a move puts
+    // the branch beside the bar rather than below it, so the y separation stops
+    // dominating and nothing leaves through the bar's own cap. That is the
+    // first thing in the tree to fix this by choosing a better arrangement
+    // rather than by excusing the rule.
     Laid fork_shipped;
     lay("fork.scav", p, fork_shipped);
-    CHECK(capped_branches(fork_shipped) == 2);
+    CHECK(capped_branches(fork_shipped) == 0);
   }
 }
