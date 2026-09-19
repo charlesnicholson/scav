@@ -16,7 +16,7 @@ constexpr int32_t PT{ 16 };  // grid units are 1/16 pt
 // One of the two shipped profiles scav_profile_named hands out by name.
 constexpr scav_profile READABLE{
   .profile_id = 2,
-  .profile_version = 6,
+  .profile_version = 7,
   .pad = 8 * PT,
   .rank_sep = 36 * PT,
   .node_sep = 18 * PT,
@@ -48,12 +48,12 @@ constexpr scav_profile READABLE{
   .dar_den = 10,
   .trybox = 1,
   .sm_tiebreak = 0,
-  .w_bends = 64,
+  .w_bends = 512,
   .w_corridor = 48,
   .w_crossings = 32,
-  .w_excess_len = 4,
+  .w_excess_len = 0,
   .w_adjacency = 16,
-  .w_label = 24,
+  .w_label = 768,
   .w_label_near = 48,
   .w_aspect = 2,
   .w_area = 1,
@@ -63,7 +63,7 @@ constexpr scav_profile READABLE{
   // owner's hole: both are built, tested and measured, and neither ships until
   // 11.6's label weights are fitted and can price what they cost a reader
   // (11.10, 17 P9d).
-  .portfolio_m = 2,
+  .portfolio_m = 8,
   .sweep_count = 8,
   .congestion_iterations = 8,
   .ripup_cap = 16,
@@ -75,7 +75,7 @@ constexpr scav_profile READABLE{
 // The other shipped profile: tighter spacing and type for dense charts.
 constexpr scav_profile COMPACT{
   .profile_id = 1,
-  .profile_version = 6,
+  .profile_version = 7,
   .pad = 4 * PT,
   .rank_sep = 22 * PT,
   .node_sep = 11 * PT,
@@ -105,12 +105,12 @@ constexpr scav_profile COMPACT{
   .dar_den = 3,
   .trybox = 1,
   .sm_tiebreak = 0,
-  .w_bends = 64,
+  .w_bends = 512,
   .w_corridor = 48,
   .w_crossings = 32,
-  .w_excess_len = 4,
+  .w_excess_len = 0,
   .w_adjacency = 16,
-  .w_label = 24,
+  .w_label = 768,
   .w_label_near = 48,
   .w_aspect = 2,
   .w_area = 1,
@@ -120,7 +120,7 @@ constexpr scav_profile COMPACT{
   // owner's hole: both are built, tested and measured, and neither ships until
   // 11.6's label weights are fitted and can price what they cost a reader
   // (11.10, 17 P9d).
-  .portfolio_m = 2,
+  .portfolio_m = 8,
   .sweep_count = 8,
   .congestion_iterations = 8,
   .ripup_cap = 16,

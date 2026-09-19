@@ -93,6 +93,7 @@ bool size_pass(Chart const &c,
                scav_profile const &p,
                std::vector<FrameDar> const &hole,
                Compaction compaction,
+               Fold fold,
                SizedLayout &out,
                std::vector<Diagnostic> &diags) {
   FrameDar const profile_dar{ .num = p.dar_num, .den = p.dar_den };
@@ -393,16 +394,19 @@ bool size_pass(Chart const &c,
 
       Shape best{ lay_out(Wide{ COORD_MAX } * 2) };
       Shape const folded{ lay_out(target) };
+      // `Always` takes the folded shape wherever it laid out, so what chose is
+      // `Cost` over the row rather than the scale measure inside the frame.
       bool const swap{ folded.ok &&
-                       (!best.ok || pack_better({ .at = {},
-                                                  .w = static_cast<int32_t>(folded.w),
-                                                  .h = static_cast<int32_t>(folded.h) },
-                                                { .at = {},
-                                                  .w = static_cast<int32_t>(best.w),
-                                                  .h = static_cast<int32_t>(best.h) },
-                                                dar.num,
-                                                dar.den,
-                                                p.sm_tiebreak != 0)) };
+                       ((fold == Fold::Always) ||
+                        (!best.ok || pack_better({ .at = {},
+                                                   .w = static_cast<int32_t>(folded.w),
+                                                   .h = static_cast<int32_t>(folded.h) },
+                                                 { .at = {},
+                                                   .w = static_cast<int32_t>(best.w),
+                                                   .h = static_cast<int32_t>(best.h) },
+                                                 dar.num,
+                                                 dar.den,
+                                                 p.sm_tiebreak != 0))) };
       if (swap) { best = folded; }
       if (!best.ok) {
         overflow(diags, ElemKind::Submachine, m);
@@ -613,16 +617,26 @@ bool size_layout(Chart const &c,
                  SizedLayout &out,
                  std::vector<Diagnostic> &diags,
                  DarSource dar,
-                 Compaction compaction) {
+                 Compaction compaction,
+                 Fold fold) {
   if (dar == DarSource::Profile) {
-    return size_pass(c, g, o, s, p, {}, compaction, out, diags);
+    return size_pass(c, g, o, s, p, {}, compaction, fold, out, diags);
   }
   // A hole is only knowable once its owner is sized, and sizing is bottom-up,
   // so the ratios come off a first pass at the profile's own ratio. That pass
   // packs the same way, or the holes would be a different packer's.
   SizedLayout first;
-  if (!size_pass(c, g, o, s, p, {}, compaction, first, diags)) { return false; }
-  return size_pass(c, g, o, s, p, size_owner_holes(c, first), compaction, out, diags);
+  if (!size_pass(c, g, o, s, p, {}, compaction, fold, first, diags)) { return false; }
+  return size_pass(c,
+                   g,
+                   o,
+                   s,
+                   p,
+                   size_owner_holes(c, first),
+                   compaction,
+                   fold,
+                   out,
+                   diags);
 }
 
 }  // namespace scav

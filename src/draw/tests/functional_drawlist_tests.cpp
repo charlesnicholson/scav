@@ -257,11 +257,11 @@ TEST_CASE("drawlist gauntlet: what crowd's tighter packing costs its labels") {
   // one left was structural, and zero once 11.9.5's reservation made that last
   // position reachable -- the box had nowhere else to be, not a rect it refused.
   //
-  // `label_near` 442 -> 470 when a refused box took a strip further from its own
-  // leg, 442 under the anchor, 490 under the reservation. It rises where every
-  // reader-visible class falls: with room, boxes clear their neighbours and sit
-  // further from their own leg for it. The term disagreeing with the reader is
-  // P9d's subject.
+  // `label_near` 442 -> 470 when a refused box took a strip further from its
+  // own leg, 442 under the anchor, 490 under the reservation, and 346 once the
+  // weights were fitted and the search ran the whole table (11.6): the term
+  // rises where every reader-visible class falls, so the pick it argues for is
+  // one P9d's fit moved away from.
   Metrics const m{ bundled() };
   scav_profile const p{ readable() };
   Run const r{ run_pipeline("gauntlet/crowd.scav", m, p) };
@@ -269,7 +269,7 @@ TEST_CASE("drawlist gauntlet: what crowd's tighter packing costs its labels") {
     cost_columns(r.chart, decompose(r.chart), p, as_spaces(r.spaces), r.placed)
   };
   CHECK(t.label == 0);
-  CHECK(t.label_near == 490);
+  CHECK(t.label_near == 346);
 }
 
 TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back") {
@@ -369,8 +369,16 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
   // 19 when nudging began grouping lanes by proximity: a spread route lands on
   // a box's last feasible attachment. 5 once phase 2 reserved the room instead
   // of phase 3 hunting for it, so three quarters of this was scarcity. 8 once I3
-  // became a test, which bought a class outright (11.9.5).
-  CHECK(fell == 8);
+  // became a test, which bought a class outright (11.9.5). 6 once the weights
+  // were fitted and the search ran the whole table (11.6).
+  //
+  // **And zero once the fallback stopped being the centred placement.** 11.9.4
+  // says a box with no clear candidate keeps its anchor and accepts a
+  // collision; what the code kept was the leg's centre, which is not anchored
+  // and rides the line -- so every fallback was a sliced label by construction.
+  // A box that collides with a state still reads as its transition's. **Every
+  // box the corpus places is anchored**, which is what this number now says.
+  CHECK(fell == 0);
 }
 
 TEST_CASE("drawlist corpus: the layout goldens' measurement policy is stated here") {

@@ -639,7 +639,11 @@ TEST_CASE("draw abi: the shipped palette is written only when it fits") {
   CHECK(scav_palette_standard(rows.data(), 0, STYLE_SIZE) == SCAV_E_CAPACITY);
   CHECK(rows[0].stroke_rgba == 0);  // refused, so nothing was written
   REQUIRE(scav_palette_standard(rows.data(), SCAV_STYLE_COUNT, STYLE_SIZE) == SCAV_OK);
-  CHECK(rows[SCAV_STYLE_COUNT - 1].stroke_rgba != 0);
+  // The last row is the arrowhead, which is a fill and carries no stroke at
+  // all, so what says every row was written is the fill.
+  CHECK(rows[SCAV_STYLE_COUNT - 1].fill_rgba != 0);
+  CHECK(rows[SCAV_STYLE_COUNT - 1].stroke_rgba == 0);
+  CHECK(rows[SCAV_STYLE_COUNT - 1].stroke_w == 0);
 }
 
 TEST_CASE("draw abi: a size that disagrees with the header is refused first") {

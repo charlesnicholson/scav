@@ -39,6 +39,13 @@ struct FrameDar {
 // then again against them.
 enum class DarSource : uint32_t { Profile, OwnerHole };
 
+// Whether a frame's rank run may wrap. 11.4 lays a component out twice, once
+// unwrapped and once cut at the aspect target, and `Scale` keeps whichever the
+// scale measure prefers -- a local ratio that cannot see area. `Always` hands
+// `Cost` the folded shape instead, so the choice is scored rather than
+// arbitrated (11.10a).
+enum class Fold : uint32_t { Scale, Always };
+
 // False on an extent that would leave the coordinate domain, with one
 // diagnostic per offending entity and `out` left partly written. `dar` and
 // `compaction` default to the row-0 tuple, which is the pipeline as it ran
@@ -51,7 +58,8 @@ bool size_layout(Chart const &c,
                  SizedLayout &out,
                  std::vector<Diagnostic> &diags,
                  DarSource dar = DarSource::Profile,
-                 Compaction compaction = Compaction::Off);
+                 Compaction compaction = Compaction::Off,
+                 Fold fold = Fold::Scale);
 
 }  // namespace scav
 

@@ -232,13 +232,20 @@ class TestRender(unittest.TestCase):
         # viewBox and not layout is the domain's last 2*pad. The innermost name
         # walks the total through that window a character at a time, and the
         # packer refolds every few dozen characters, so it arrives repeatedly.
+        #
+        # **One row, because the search is what closed this window.** At
+        # `portfolio_m = 8` the argmin takes whichever candidate fits, so a
+        # generated chart lands at 485k of a 524k domain and never in the last
+        # 256 of it -- 303 sizes and not one arrived. What is under test is the
+        # backend's check, so the candidate is pinned and the sweep is the one
+        # candidate it was written against (11.10).
         target = self.scratch / "viewbox.svg"
         tried = 0
         for fine in oversize_lengths():
             chart = self.write(
                 "viewbox.scav",
                 nested_chart(OVERSIZE_DEPTH, OVERSIZE_WIDTH, fine=fine))
-            result = self.run_render("-o", target, chart)
+            result = self.run_render("--portfolio-row", "0", "-o", target, chart)
             tried += 1
             if result.stderr.startswith("scav: the diagram does not fit"):
                 self.assertEqual(2, result.returncode)

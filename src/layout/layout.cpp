@@ -31,7 +31,11 @@ SCAV_INTERNAL_BEGIN
 // are its own; see scav_internal.h.
 bool inflation_done(uint32_t fewest, uint32_t degraded, uint32_t unreachable, bool &keep);
 uint32_t search_tuple_count(scav_profile const &p, uint32_t entity_count);
-void search_tuple(scav_profile &p, DarSource &dar, Compaction &pack, uint32_t index);
+void search_tuple(scav_profile &p,
+                  DarSource &dar,
+                  Compaction &pack,
+                  Fold &fold,
+                  uint32_t index);
 uint32_t search_argmin(std::vector<Cost> const &cost, std::vector<uint8_t> const &viable);
 SCAV_INTERNAL_END
 
@@ -225,11 +229,14 @@ Candidate search_candidate(Chart const &c,
                            scav_profile const &knobs,
                            DarSource dar,
                            Compaction pack,
+                           Fold fold,
                            Router const &router,
                            uint32_t threads,
                            std::vector<Diagnostic> &diags) {
   Candidate out;
-  if (!size_layout(c, g, orders, s, knobs, out.sized, diags, dar, pack)) { return out; }
+  if (!size_layout(c, g, orders, s, knobs, out.sized, diags, dar, pack, fold)) {
+    return out;
+  }
   out.routes = route_transitions(c, g, orders, out.sized, s, knobs, router, threads);
 
   // `out` carries the best attempt so far, and `done` is set from that one
@@ -244,7 +251,9 @@ Candidate search_candidate(Chart const &c,
     if (!inflate(wider, knobs.spacing_inflation_increment)) { break; }
     SizedLayout next_sized;
     std::vector<Diagnostic> spilled;
-    if (!size_layout(c, g, orders, s, wider, next_sized, spilled, dar, pack)) { break; }
+    if (!size_layout(c, g, orders, s, wider, next_sized, spilled, dar, pack, fold)) {
+      break;
+    }
     Routes next{ route_transitions(c, g, orders, next_sized, s, wider, router, threads) };
     bool keep{ false };
     done = inflation_done(fewest, next.degraded(), next.unreachable, keep);
@@ -320,10 +329,15 @@ uint32_t search_tuple_count(scav_profile const &p, uint32_t entity_count) {
 // chart at either scale, so the table spent a bit on a knob that decided
 // nothing, and compaction — which does move charts, in both directions — took
 // it. The field stays a profile knob a caller may set; no row flips it.
-void search_tuple(scav_profile &p, DarSource &dar, Compaction &pack, uint32_t index) {
+void search_tuple(scav_profile &p,
+                  DarSource &dar,
+                  Compaction &pack,
+                  Fold &fold,
+                  uint32_t index) {
   p.trybox ^= static_cast<int32_t>(index & 1U);
   pack = (((index >> 1U) & 1U) != 0) ? Compaction::On : Compaction::Off;
   dar = (((index >> 2U) & 1U) != 0) ? DarSource::OwnerHole : DarSource::Profile;
+  fold = (((index >> 3U) & 1U) != 0) ? Fold::Always : Fold::Scale;
 }
 
 // `argmin(Cost, index)` over the candidates, in index order: the combine is
@@ -404,7 +418,8 @@ bool layout_run(Chart &c,
     scav_profile knobs{ p };
     DarSource dar{ DarSource::Profile };
     Compaction pack{ Compaction::Off };
-    search_tuple(knobs, dar, pack, pinned ? row : i);
+    Fold fold{ Fold::Scale };
+    search_tuple(knobs, dar, pack, fold, pinned ? row : i);
     std::vector<Diagnostic> spilled;
     candidates[i] = search_candidate(c,
                                      g,
@@ -413,6 +428,7 @@ bool layout_run(Chart &c,
                                      knobs,
                                      dar,
                                      pack,
+                                     fold,
                                      *router,
                                      o.threads,
                                      (i == 0) ? diags : spilled);

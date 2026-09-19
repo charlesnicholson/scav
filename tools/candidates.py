@@ -37,7 +37,7 @@ import audit  # noqa: E402
 import poster  # noqa: E402
 
 REPO_ROOT = audit.REPO_ROOT
-ROWS = 8
+ROWS = 16
 
 
 def render(scav_bin, chart, out, row):

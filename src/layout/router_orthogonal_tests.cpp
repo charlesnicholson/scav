@@ -484,7 +484,7 @@ TEST_CASE("ortho: two parallel faces with room in common seat one coordinate") {
     { .src = pt(50, 150), .dst = pt(450, 250), .src_obstacle = 0, .dst_obstacle = 1 },
   };
   std::vector<scav_point> at{ pt(100, 250), pt(400, 150) };
-  ortho_align_attachments(nets, boxes, {}, {}, 8, at);
+  ortho_align_attachments(nets, boxes, {}, {}, at);
   CHECK((at[0] == pt(100, 200)));  // halfway between the two centres, 150 and 250
   CHECK((at[1] == pt(400, 200)));
 
@@ -494,7 +494,7 @@ TEST_CASE("ortho: two parallel faces with room in common seat one coordinate") {
     { .src = pt(450, 250), .dst = pt(50, 150), .src_obstacle = 1, .dst_obstacle = 0 },
   };
   std::vector<scav_point> other{ pt(400, 150), pt(100, 250) };
-  ortho_align_attachments(back, boxes, {}, {}, 8, other);
+  ortho_align_attachments(back, boxes, {}, {}, other);
   CHECK((other[0] == pt(400, 200)));
   CHECK((other[1] == pt(100, 200)));
 
@@ -504,9 +504,39 @@ TEST_CASE("ortho: two parallel faces with room in common seat one coordinate") {
     { .src = pt(50, 150), .dst = pt(450, 220), .src_obstacle = 0, .dst_obstacle = 1 },
   };
   std::vector<scav_point> reach{ pt(100, 220), pt(400, 208) };
-  ortho_align_attachments(short_face, stubby, {}, {}, 8, reach);
-  CHECK((reach[0] == pt(100, 208)));  // halfway is 185, and 208 is as near as it seats
-  CHECK((reach[1] == pt(400, 208)));
+  ortho_align_attachments(short_face, stubby, {}, {}, reach);
+  // Halfway is 185; with no corner array a face seats to one unit of each end.
+  CHECK((reach[0] == pt(100, 201)));
+  CHECK((reach[1] == pt(400, 201)));
+}
+
+TEST_CASE("ortho: faces the clearance would keep apart still align on their arcs") {
+  // Two boxes overlapping by less than twice the clearance and more than twice
+  // the arc drawn on them. Held off by `max(clear, arc)` the seatable runs miss
+  // and each seat sits at its own face's end, which is a jog of the difference
+  // on a run of whatever the rank gap is -- 13 corpus transitions read exactly
+  // that, overlapping by 163 and missing by 29.
+  std::vector<scav_rect> const near{ rect(0, 0, 400, 653), rect(1000, 490, 400, 653) };
+  std::vector<int32_t> const arcs{ 81, 81 };
+  std::vector<RouteNet> const across{
+    { .src = pt(400, 326), .dst = pt(1000, 816), .src_obstacle = 0, .dst_obstacle = 1 },
+  };
+  std::vector<scav_point> at{ pt(400, 557), pt(1000, 586) };
+  ortho_align_attachments(across, near, {}, arcs, at);
+  CHECK(at[0].y == at[1].y);
+  // Inside both arcs: 81 off each face's ends is 81..572 and 571..1062.
+  CHECK(at[0].y == 571);
+
+  // The arc still holds: a seat may not sit under one whatever it costs.
+  std::vector<scav_rect> const far_apart{ rect(0, 0, 400, 653),
+                                          rect(1000, 600, 400, 653) };
+  std::vector<RouteNet> const missed{
+    { .src = pt(400, 326), .dst = pt(1000, 926), .src_obstacle = 0, .dst_obstacle = 1 },
+  };
+  std::vector<scav_point> ends{ pt(400, 572), pt(1000, 681) };
+  ortho_align_attachments(missed, far_apart, {}, arcs, ends);
+  CHECK(ends[0].y == 572);  // its own face's last seat, and no nearer
+  CHECK(ends[1].y == 681);
 }
 
 TEST_CASE("ortho: faces with no run in common, or a corridor, are left alone") {
@@ -518,12 +548,12 @@ TEST_CASE("ortho: faces with no run in common, or a corridor, are left alone") {
     { .src = pt(50, 50), .dst = pt(450, 950), .src_obstacle = 0, .dst_obstacle = 1 },
   };
   std::vector<scav_point> perpendicular{ pt(50, 100), pt(400, 950) };
-  ortho_align_attachments(nets, apart, {}, {}, 8, perpendicular);
+  ortho_align_attachments(nets, apart, {}, {}, perpendicular);
   CHECK((perpendicular[0] == pt(50, 100)));
   CHECK((perpendicular[1] == pt(400, 950)));
 
   std::vector<scav_point> disjoint{ pt(100, 92), pt(400, 908) };
-  ortho_align_attachments(nets, apart, {}, {}, 8, disjoint);
+  ortho_align_attachments(nets, apart, {}, {}, disjoint);
   CHECK((disjoint[0] == pt(100, 92)));
   CHECK((disjoint[1] == pt(400, 908)));
 
@@ -534,7 +564,7 @@ TEST_CASE("ortho: faces with no run in common, or a corridor, are left alone") {
                                           .waypoint_off = 0,
                                           .waypoint_len = 1 } };
   std::vector<scav_point> corridor{ pt(100, 50), pt(400, 950) };
-  ortho_align_attachments(threaded, apart, {}, {}, 8, corridor);
+  ortho_align_attachments(threaded, apart, {}, {}, corridor);
   CHECK((corridor[0] == pt(100, 50)));
   CHECK((corridor[1] == pt(400, 950)));
 
@@ -546,9 +576,82 @@ TEST_CASE("ortho: faces with no run in common, or a corridor, are left alone") {
     { .src = pt(50, 150), .dst = pt(450, 250), .src_obstacle = 0, .dst_obstacle = 1 },
   };
   std::vector<scav_point> glyph{ pt(100, 150), pt(400, 290) };
-  ortho_align_attachments(from_glyph, boxes, inscribed, {}, 8, glyph);
+  ortho_align_attachments(from_glyph, boxes, inscribed, {}, glyph);
   CHECK((glyph[0] == pt(100, 150)));
   CHECK((glyph[1] == pt(400, 150)));
+}
+
+TEST_CASE("ortho: two boxes' seats a hair apart are pushed to the pitch") {
+  // 34 of the corpus's 41 crowded pairs are two seated legs on two different
+  // boxes running alongside. No pass saw them: the spread separates seats on
+  // one face and alignment straightens one net's own ends (11.10a).
+  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 400),
+                                      rect(0, 500, 100, 400),
+                                      rect(900, 0, 100, 400),
+                                      rect(900, 500, 100, 400) };
+  std::vector<RouteNet> const nets{
+    { .src = pt(50, 200), .dst = pt(950, 200), .src_obstacle = 0, .dst_obstacle = 2 },
+    { .src = pt(50, 700), .dst = pt(950, 700), .src_obstacle = 1, .dst_obstacle = 3 },
+  };
+  // Two straight runs the length of the frame, 120 apart against a 200 pitch.
+  std::vector<scav_point> at{ pt(100, 390), pt(900, 390), pt(100, 510), pt(900, 510) };
+  ortho_separate_attachments(nets, boxes, {}, {}, 8, 200, at);
+  CHECK((at[2].y - at[0].y) >= 200);
+  // Both ends of a net move together, so each run is still one straight line.
+  CHECK(at[0].y == at[1].y);
+  CHECK(at[2].y == at[3].y);
+  // Each moved along its own face and stayed on it.
+  CHECK(at[0].x == 100);
+  CHECK(at[2].x == 100);
+  CHECK(at[0].y > 0);
+  CHECK(at[2].y < 900);
+}
+
+TEST_CASE("ortho: a pair already a pitch apart, or crossing, is left alone") {
+  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 400),
+                                      rect(0, 500, 100, 400),
+                                      rect(900, 0, 100, 900) };
+  std::vector<RouteNet> const nets{
+    { .src = pt(50, 200), .dst = pt(950, 450), .src_obstacle = 0, .dst_obstacle = 2 },
+    { .src = pt(50, 700), .dst = pt(950, 450), .src_obstacle = 1, .dst_obstacle = 2 },
+  };
+  std::vector<scav_point> far{ pt(100, 100), pt(900, 100), pt(100, 800), pt(900, 800) };
+  std::vector<scav_point> const held{ far };
+  ortho_separate_attachments(nets, boxes, {}, {}, 8, 200, far);
+  for (uint32_t i = 0; i < far.size(); ++i) { CHECK((far[i] == held[i])); }
+
+  // Legs that never run alongside share no coordinate to be confused on: the
+  // first runs x 100..300 and the second x 700..900.
+  std::vector<scav_rect> const apart{ rect(0, 0, 100, 400),
+                                      rect(600, 0, 100, 400),
+                                      rect(300, 0, 100, 400),
+                                      rect(900, 0, 100, 400) };
+  std::vector<RouteNet> const past{
+    { .src = pt(50, 200), .dst = pt(350, 200), .src_obstacle = 0, .dst_obstacle = 2 },
+    { .src = pt(650, 210), .dst = pt(950, 210), .src_obstacle = 1, .dst_obstacle = 3 },
+  };
+  std::vector<scav_point> ends{ pt(100, 200), pt(300, 200), pt(700, 210), pt(900, 210) };
+  std::vector<scav_point> const kept{ ends };
+  ortho_separate_attachments(past, apart, {}, {}, 8, 200, ends);
+  for (uint32_t i = 0; i < ends.size(); ++i) { CHECK((ends[i] == kept[i])); }
+}
+
+TEST_CASE("ortho: a fan's far ends are not pushed apart") {
+  // Two routes meeting at a box are one fan, and 11.5's bundles keep it whole.
+  // Separating the ends they do not share bends the fan and crowds the end they
+  // do: `gauntlet/fanin` reads five crowded pairs that way against one.
+  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 400),
+                                      rect(0, 500, 100, 400),
+                                      rect(900, 0, 100, 900) };
+  std::vector<RouteNet> const fan{
+    { .src = pt(50, 200), .dst = pt(950, 450), .src_obstacle = 0, .dst_obstacle = 2 },
+    { .src = pt(50, 700), .dst = pt(950, 450), .src_obstacle = 1, .dst_obstacle = 2 },
+  };
+  std::vector<scav_point> at{ pt(100, 390), pt(900, 390), pt(100, 510), pt(900, 510) };
+  std::vector<scav_point> const held{ at };
+  // The two arrivals share box 2, so the pair is a fan however close it runs.
+  ortho_separate_attachments(fan, boxes, {}, {}, 8, 200, at);
+  for (uint32_t i = 0; i < at.size(); ++i) { CHECK((at[i] == held[i])); }
 }
 
 TEST_CASE("ortho: ends of one direction sharing a seat are a trunk and keep it") {

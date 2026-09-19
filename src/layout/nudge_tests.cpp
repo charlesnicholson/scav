@@ -58,6 +58,14 @@ scav_point net_pt(Frame const &f, uint32_t net, uint32_t k) {
   return f.points[f.nets[net].off + k];
 }
 
+// One frame's box repeated for every net it routes, which is what a per-frame
+// call passes; the chart-wide pass gives each net its own.
+std::vector<scav_rect> bounds_of(scav_rect const &box,
+                                 std::vector<scav_span> const &nets) {
+  std::vector<scav_rect> every(nets.size(), box);
+  return every;
+}
+
 // Far enough out that only the obstacles bound a fixture.
 scav_rect const OPEN{ rect(-1000, -1000, 3000, 3000) };
 
@@ -76,7 +84,7 @@ bool same(std::vector<scav_point> const &a, std::vector<scav_point> const &b) {
 TEST_CASE("nudge: two nets sharing a lane come off it in opposite directions") {
   Lane l{ two_over(100) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, l.nets, l.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, l.nets), {}, 48, 0, l.nets, l.points, s);
 
   CHECK(s.lanes == 1);
   CHECK(s.spread == 1);
@@ -101,7 +109,7 @@ TEST_CASE("nudge: routes a hair apart are one lane, not two") {
   Frame f{ frame_of({ { pt(0, 0), pt(0, 100), pt(400, 100), pt(400, 300) },
                       { pt(0, 500), pt(0, 106), pt(400, 106), pt(400, 800) } }) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 160, 0, f.nets, f.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 160, 0, f.nets, f.points, s);
 
   CHECK(s.lanes == 1);
   CHECK(imax(net_pt(f, 0, 1).y - net_pt(f, 1, 1).y,
@@ -115,7 +123,7 @@ TEST_CASE("nudge: a lane is every member that overlaps, not a run that stops") {
                       { pt(900, 0), pt(900, 104), pt(1100, 104), pt(1100, 400) },
                       { pt(50, 600), pt(50, 108), pt(250, 108), pt(250, 900) } }) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 160, 0, f.nets, f.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 160, 0, f.nets, f.points, s);
 
   // Nets 0 and 2 overlap in x and must land a pitch apart; net 1 is elsewhere.
   CHECK(imax(net_pt(f, 0, 1).y - net_pt(f, 2, 1).y,
@@ -129,7 +137,7 @@ TEST_CASE("nudge: a run's one-sided reach does not bundle disjoint extents") {
   Frame f{ frame_of({ { pt(0, 0), pt(0, 100), pt(200, 100), pt(200, 400) },
                       { pt(900, 0), pt(900, 104), pt(1100, 104), pt(1100, 400) } }) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 160, 0, f.nets, f.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 160, 0, f.nets, f.points, s);
 
   CHECK(s.lanes == 0);
   CHECK(s.moved == 0);
@@ -143,7 +151,7 @@ TEST_CASE("nudge: a lane two coordinates wide spreads by the pitch, not past it"
   Frame f{ frame_of({ { pt(0, 400), pt(0, 100), pt(200, 100), pt(200, 600) },
                       { pt(0, 200), pt(0, 250), pt(200, 250), pt(200, -100) } }) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 160, 0, f.nets, f.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 160, 0, f.nets, f.points, s);
 
   REQUIRE(s.lanes == 1);
   int32_t const one{ net_pt(f, 0, 1).y };
@@ -157,7 +165,7 @@ TEST_CASE("nudge: a lane with no room keeps its members stacked") {
   Lane l{ two_over(100) };
   std::vector<scav_rect> const walls{ rect(0, 0, 200, 100), rect(0, 100, 200, 100) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, walls, 48, 0, l.nets, l.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, l.nets), walls, 48, 0, l.nets, l.points, s);
 
   CHECK(s.lanes == 1);
   CHECK(s.spread == 0);
@@ -173,7 +181,7 @@ TEST_CASE("nudge: a lane with room on one side only slides onto that side") {
   Lane l{ two_over(100) };
   std::vector<scav_rect> const wall{ rect(0, 0, 200, 100) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, wall, 48, 0, l.nets, l.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, l.nets), wall, 48, 0, l.nets, l.points, s);
 
   CHECK(s.spread == 1);
   CHECK(lane_y(l, 0) != lane_y(l, 1));
@@ -192,7 +200,7 @@ TEST_CASE("nudge: clearance is kept, so a displacement never ends up flush") {
   Lane l{ two_over(100) };
   std::vector<scav_rect> const wall{ rect(0, 0, 200, 40) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, wall, 48, 48, l.nets, l.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, l.nets), wall, 48, 48, l.nets, l.points, s);
   for (uint32_t net = 0; net < 2; ++net) { CHECK(lane_y(l, net) >= 88); }
 }
 
@@ -202,7 +210,7 @@ TEST_CASE("nudge: the step shrinks to the room rather than being refused") {
   Lane l{ two_over(100) };
   std::vector<scav_rect> const walls{ rect(0, 0, 200, 80), rect(0, 120, 200, 80) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, walls, 480, 0, l.nets, l.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, l.nets), walls, 480, 0, l.nets, l.points, s);
 
   CHECK(s.spread == 1);
   CHECK(s.moved == 2);
@@ -216,7 +224,14 @@ TEST_CASE("nudge: the step shrinks to the room rather than being refused") {
 TEST_CASE("nudge: the region bounds a lane the obstacles do not") {
   Lane l{ two_over(100) };
   NudgeStats s;
-  nudge_lanes(rect(0, 90, 200, 20), rect(0, 90, 200, 20), {}, 480, 0, l.nets, l.points, s);
+  nudge_lanes(rect(0, 90, 200, 20),
+              bounds_of(rect(0, 90, 200, 20), l.nets),
+              {},
+              480,
+              0,
+              l.nets,
+              l.points,
+              s);
   // Room is 10 either side, so the step is 20 and both stay inside.
   for (uint32_t net = 0; net < 2; ++net) {
     CHECK(lane_y(l, net) >= 90);
@@ -232,7 +247,7 @@ TEST_CASE("nudge: an end segment is left alone, having a border to hold") {
                                      scav_span{ .off = 3, .len = 3 } };
   std::vector<scav_point> const before{ points };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, nets, points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, nets), {}, 48, 0, nets, points, s);
   CHECK(s.lanes == 0);
   CHECK(s.moved == 0);
   CHECK(same(points, before));
@@ -247,7 +262,7 @@ TEST_CASE("nudge: nets that only touch at a point are not one lane") {
                                      scav_span{ .off = 4, .len = 4 } };
   std::vector<scav_point> const before{ points };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, nets, points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, nets), {}, 48, 0, nets, points, s);
   CHECK(s.lanes == 0);
   CHECK(same(points, before));
 }
@@ -259,7 +274,7 @@ TEST_CASE("nudge: a displacement that would enter a box is dropped, not clamped"
   // Beside the second net's trailing leg at x=200, below the lane.
   std::vector<scav_rect> const walls{ rect(150, 130, 100, 100) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, walls, 48, 0, l.nets, l.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, l.nets), walls, 48, 0, l.nets, l.points, s);
   CHECK(s.lanes == 1);
   // Whatever it decided, nothing ends up inside the box.
   for (scav_span const &net : l.nets) {
@@ -281,8 +296,8 @@ TEST_CASE("nudge: the same input twice is the same output") {
   std::vector<scav_span> const swapped{ b.nets[1], b.nets[0] };
   NudgeStats sa;
   NudgeStats sb;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, a.nets, a.points, sa);
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, swapped, b.points, sb);
+  nudge_lanes(OPEN, bounds_of(OPEN, a.nets), {}, 48, 0, a.nets, a.points, sa);
+  nudge_lanes(OPEN, bounds_of(OPEN, swapped), {}, 48, 0, swapped, b.points, sb);
   CHECK(same(a.points, b.points));
   CHECK(sa.moved == sb.moved);
 }
@@ -291,7 +306,7 @@ TEST_CASE("nudge: a gap of nothing is a stage that does nothing") {
   Lane l{ two_over(100) };
   std::vector<scav_point> const before{ l.points };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 0, 0, l.nets, l.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, l.nets), {}, 0, 0, l.nets, l.points, s);
   CHECK(same(l.points, before));
   CHECK(s.lanes == 0);
 }
@@ -305,7 +320,7 @@ TEST_CASE("nudge: the lane sizes to the shortest leg it has to drag") {
   std::vector<scav_span> const nets{ scav_span{ .off = 0, .len = 4 },
                                      scav_span{ .off = 4, .len = 4 } };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, nets, points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, nets), {}, 48, 0, nets, points, s);
 
   CHECK(s.moved == 2);
   CHECK(points[1].y == 92);
@@ -323,7 +338,14 @@ TEST_CASE("nudge: the frame's own box bounds a lane the obstacles do not") {
   // line the frame draws, and a lane on it is drawn over it.
   Lane l{ two_over(100) };
   NudgeStats s;
-  nudge_lanes(OPEN, rect(-1000, 0, 3000, 110), {}, 48, 0, l.nets, l.points, s);
+  nudge_lanes(OPEN,
+              bounds_of(rect(-1000, 0, 3000, 110), l.nets),
+              {},
+              48,
+              0,
+              l.nets,
+              l.points,
+              s);
 
   CHECK(s.moved == 2);
   CHECK(lane_y(l, 0) == 61);
@@ -340,7 +362,7 @@ TEST_CASE("nudge: a lane inside a box's bumper may not close on the box") {
                                      scav_span{ .off = 4, .len = 4 } };
   std::vector<scav_rect> const wall{ rect(0, 140, 200, 100) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, wall, 200, 48, nets, points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, nets), wall, 200, 48, nets, points, s);
 
   CHECK(s.moved == 1);
   CHECK(points[1].y == 100);
@@ -358,7 +380,7 @@ TEST_CASE("nudge: a vertical lane is measured after the horizontal one has moved
                                      scav_span{ .off = 6, .len = 6 } };
   std::vector<scav_rect> const wall{ rect(320, 105, 80, 15) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, wall, 48, 0, nets, points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, nets), wall, 48, 0, nets, points, s);
 
   CHECK(s.lanes == 2);
   CHECK(s.moved == 4);
@@ -380,7 +402,7 @@ TEST_CASE("nudge: a displacement onto another net's segment is refused") {
                                      scav_span{ .off = 4, .len = 4 },
                                      scav_span{ .off = 8, .len = 2 } };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, nets, points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, nets), {}, 48, 0, nets, points, s);
 
   CHECK(s.lanes == 1);
   CHECK(s.moved == 1);
@@ -396,7 +418,7 @@ TEST_CASE("nudge: two nets with one tail take one offset between them") {
                       { pt(0, 50), pt(0, 100), pt(200, 100), pt(200, 300) },
                       { pt(0, 400), pt(0, 100), pt(200, 100), pt(200, 500) } }) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 48, 0, f.nets, f.points, s);
 
   CHECK(s.lanes == 1);
   CHECK(s.bundles == 1);
@@ -416,7 +438,7 @@ TEST_CASE("nudge: two nets with one head take one offset between them") {
                       { pt(0, 0), pt(0, 100), pt(150, 100), pt(150, 400) },
                       { pt(-40, 400), pt(-40, 100), pt(200, 100), pt(200, 500) } }) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 48, 0, f.nets, f.points, s);
 
   CHECK(s.bundles == 1);
   CHECK(s.moved == 3);
@@ -429,7 +451,7 @@ TEST_CASE("nudge: two nets with different tails are spread as they always were")
   Frame f{ frame_of({ { pt(0, 0), pt(0, 100), pt(200, 100), pt(200, 300) },
                       { pt(0, 400), pt(0, 100), pt(200, 100), pt(200, 500) } }) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 48, 0, f.nets, f.points, s);
 
   CHECK(s.bundles == 0);
   CHECK(s.moved == 2);
@@ -443,7 +465,7 @@ TEST_CASE("nudge: a lane that is one bundle is left where the router put it") {
   Frame f{ frame_of({ { pt(0, 0), pt(0, 100), pt(200, 100), pt(200, 300) },
                       { pt(0, 50), pt(0, 100), pt(200, 100), pt(200, 300) } }) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 48, 0, f.nets, f.points, s);
 
   CHECK(s.lanes == 1);
   CHECK(s.bundles == 1);
@@ -459,7 +481,7 @@ TEST_CASE("nudge: three nets with one tail are one bundle") {
                       { pt(0, 150), pt(0, 100), pt(200, 100), pt(200, 300) },
                       { pt(0, 600), pt(0, 100), pt(200, 100), pt(200, 900) } }) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 48, 0, f.nets, f.points, s);
 
   CHECK(s.bundles == 1);
   CHECK(s.moved == 4);
@@ -477,7 +499,7 @@ TEST_CASE("nudge: a net bundled by its head and another by its tail are one bund
                       { pt(30, 700), pt(30, 100), pt(150, 100), pt(150, 400) },
                       { pt(-40, 900), pt(-40, 100), pt(200, 100), pt(200, 1200) } }) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 48, 0, f.nets, f.points, s);
 
   CHECK(s.bundles == 1);
   CHECK(s.moved == 4);
@@ -497,7 +519,7 @@ TEST_CASE("nudge: a bundle's own legs may land on each other") {
                       { pt(0, 0), pt(0, 100), pt(200, 100), pt(200, 300) },
                       { pt(0, 600), pt(0, 100), pt(200, 100), pt(200, 500) } }) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 48, 0, f.nets, f.points, s);
 
   CHECK(s.bundles == 1);
   CHECK(s.refused == 0);
@@ -514,7 +536,7 @@ TEST_CASE("nudge: a bundle is ordered by its least toward, not by its first memb
                       { pt(0, 10), pt(0, 100), pt(200, 100), pt(200, 300) },
                       { pt(0, 300), pt(0, 100), pt(200, 100), pt(200, 700) } }) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 48, 0, f.nets, f.points, s);
 
   CHECK(s.bundles == 1);
   CHECK(net_pt(f, 0, 1).y == 76);
@@ -544,7 +566,7 @@ TEST_CASE("nudge: both axes of one frame bundle") {
                         pt(500, -500),
                         pt(500, -1000) } }) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 48, 0, f.nets, f.points, s);
 
   // Three lanes: y=100 and x=300 hold all three nets, and the pair's own
   // (300,-400)-(500,-400) is a lane of nothing but the bundle.
@@ -566,7 +588,7 @@ TEST_CASE("nudge: a bundle another net's run would be traded for stays whole") {
                       { pt(0, 400), pt(0, 100), pt(200, 100), pt(200, 500) },
                       { pt(0, 76), pt(200, 76) } }) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 48, 0, f.nets, f.points, s);
 
   CHECK(s.bundles == 1);
   CHECK(s.refused == 1);
@@ -583,7 +605,14 @@ TEST_CASE("nudge: a bundle the region does not hold stays whole") {
                       { pt(-50, 50), pt(-50, 100), pt(200, 100), pt(200, 300) },
                       { pt(0, 400), pt(0, 100), pt(200, 100), pt(200, 500) } }) };
   NudgeStats s;
-  nudge_lanes(rect(0, -1000, 3000, 3000), OPEN, {}, 48, 0, f.nets, f.points, s);
+  nudge_lanes(rect(0, -1000, 3000, 3000),
+              bounds_of(OPEN, f.nets),
+              {},
+              48,
+              0,
+              f.nets,
+              f.points,
+              s);
 
   CHECK(s.bundles == 1);
   CHECK(s.refused == 1);
@@ -599,7 +628,7 @@ TEST_CASE("nudge: a bundle a box leaves no room for stays where it is") {
                       { pt(0, 400), pt(0, 100), pt(200, 100), pt(200, 500) } }) };
   std::vector<scav_rect> const walls{ rect(0, 0, 200, 100), rect(0, 100, 200, 100) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, walls, 48, 0, f.nets, f.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), walls, 48, 0, f.nets, f.points, s);
 
   CHECK(s.bundles == 1);
   CHECK(s.spread == 0);
@@ -615,8 +644,8 @@ TEST_CASE("nudge: bundles do not depend on the order the nets arrive in") {
   std::vector<scav_span> const shuffled{ b.nets[2], b.nets[0], b.nets[1] };
   NudgeStats sa;
   NudgeStats sb;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, a.nets, a.points, sa);
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, shuffled, b.points, sb);
+  nudge_lanes(OPEN, bounds_of(OPEN, a.nets), {}, 48, 0, a.nets, a.points, sa);
+  nudge_lanes(OPEN, bounds_of(OPEN, shuffled), {}, 48, 0, shuffled, b.points, sb);
   CHECK(same(a.points, b.points));
   CHECK(sa.bundles == sb.bundles);
   CHECK(sa.moved == sb.moved);
@@ -631,7 +660,7 @@ TEST_CASE("nudge: a leg crossing the other member's segment settles the order") 
   Frame f{ frame_of({ { pt(0, 0), pt(0, 100), pt(200, 100), pt(200, 300) },
                       { pt(100, 50), pt(100, 100), pt(300, 100), pt(300, 400) } }) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 48, 0, f.nets, f.points, s);
 
   CHECK(s.lanes == 1);
   CHECK(s.spread == 1);
@@ -648,7 +677,7 @@ TEST_CASE("nudge: a lane whose members share both ends keeps the key's order") {
   // available to order them by and the low-end key is the whole answer.
   Lane l{ two_over(100) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, l.nets, l.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, l.nets), {}, 48, 0, l.nets, l.points, s);
 
   CHECK(s.spread == 1);
   CHECK(s.reordered == 0);
@@ -666,8 +695,15 @@ TEST_CASE("nudge: a pair that must cross either way is left in the key's order")
                            { pt(100, 0), pt(100, 100), pt(200, 100), pt(200, 300) } }) };
   NudgeStats s;
   NudgeStats t;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, mirror.nets, mirror.points, t);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 48, 0, f.nets, f.points, s);
+  nudge_lanes(OPEN,
+              bounds_of(OPEN, mirror.nets),
+              {},
+              48,
+              0,
+              mirror.nets,
+              mirror.points,
+              t);
 
   CHECK(s.reordered == 0);
   CHECK(t.reordered == 0);
@@ -687,7 +723,7 @@ TEST_CASE("nudge: a chain of votes orders a lane the key cannot") {
                       { pt(50, 260), pt(50, 100), pt(150, 100), pt(150, -500) },
                       { pt(120, 149), pt(120, 100), pt(200, 100), pt(200, 400) } }) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 48, 0, f.nets, f.points, s);
 
   CHECK(s.lanes == 1);
   CHECK(s.reordered == 1);
@@ -708,7 +744,7 @@ TEST_CASE("nudge: a lane whose crossing order is not known good keeps its place"
                       { pt(30, 700), pt(30, 100), pt(150, 100), pt(150, 400) },
                       { pt(0, 900), pt(0, 100), pt(200, 100), pt(200, 1200) } }) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 48, 0, f.nets, f.points, s);
 
   CHECK(s.bundles == 1);
   CHECK(s.moved == 0);
@@ -724,7 +760,7 @@ TEST_CASE("nudge: a lane the votes reorder counts as one whatever the room says"
                       { pt(100, 50), pt(100, 100), pt(300, 100), pt(300, 400) } }) };
   std::vector<scav_rect> const walls{ rect(0, 0, 300, 100), rect(0, 100, 300, 100) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, walls, 48, 0, f.nets, f.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), walls, 48, 0, f.nets, f.points, s);
 
   CHECK(s.lanes == 1);
   CHECK(s.spread == 0);
@@ -759,7 +795,7 @@ TEST_CASE("nudge: votes that run in a circle are settled by fewest contradiction
   // no bundle nothing precedes and places none of them.
   Frame f{ frame_of(cyclic_lane()) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 48, 0, f.nets, f.points, s);
 
   CHECK(s.lanes == 1);
   CHECK(s.bundles == 0);
@@ -780,7 +816,7 @@ TEST_CASE("nudge: votes that run in a circle are settled by fewest contradiction
   Frame g{ frame_of(cyclic_lane()) };
   std::vector<scav_span> const swapped{ g.nets[1], g.nets[0] };
   NudgeStats t;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, swapped, g.points, t);
+  nudge_lanes(OPEN, bounds_of(OPEN, swapped), {}, 48, 0, swapped, g.points, t);
   CHECK(same(f.points, g.points));
   CHECK(t.reordered == s.reordered);
   CHECK(t.moved == s.moved);
@@ -792,7 +828,14 @@ TEST_CASE("nudge: a box the lane already runs through does not bound it") {
   Lane through{ two_over(100) };
   std::vector<scav_rect> const across{ rect(50, 60, 100, 80) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, across, 48, 0, through.nets, through.points, s);
+  nudge_lanes(OPEN,
+              bounds_of(OPEN, through.nets),
+              across,
+              48,
+              0,
+              through.nets,
+              through.points,
+              s);
   CHECK(s.spread == 1);
   CHECK(lane_y(through, 0) == 76);
   CHECK(lane_y(through, 1) == 124);
@@ -800,7 +843,14 @@ TEST_CASE("nudge: a box the lane already runs through does not bound it") {
   Lane beside{ two_over(100) };
   std::vector<scav_rect> const under{ rect(50, 110, 100, 80) };
   NudgeStats t;
-  nudge_lanes(OPEN, OPEN, under, 48, 0, beside.nets, beside.points, t);
+  nudge_lanes(OPEN,
+              bounds_of(OPEN, beside.nets),
+              under,
+              48,
+              0,
+              beside.nets,
+              beside.points,
+              t);
   CHECK(t.spread == 1);
   CHECK(lane_y(beside, 0) == 62);
   CHECK(lane_y(beside, 1) == 110);
@@ -815,7 +865,14 @@ TEST_CASE("nudge: a leg outside the region is refused before a box is consulted"
                                      scav_span{ .off = 4, .len = 4 } };
   std::vector<scav_rect> const away{ rect(400, 0, 100, 100) };
   NudgeStats s;
-  nudge_lanes(rect(0, -1000, 3000, 3000), OPEN, away, 48, 0, nets, points, s);
+  nudge_lanes(rect(0, -1000, 3000, 3000),
+              bounds_of(OPEN, nets),
+              away,
+              48,
+              0,
+              nets,
+              points,
+              s);
 
   CHECK(s.lanes == 1);
   CHECK(s.spread == 1);
@@ -832,7 +889,7 @@ TEST_CASE("nudge: three bundles and one unit of room stay stacked") {
                       { pt(0, 50), pt(0, 100), pt(200, 100), pt(200, 400) } }) };
   std::vector<scav_point> const before{ f.points };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 48, 0, f.nets, f.points, s);
 
   CHECK(s.lanes == 1);
   CHECK(s.bundles == 0);
@@ -850,7 +907,7 @@ TEST_CASE("nudge: a leg an earlier lane shortened is not folded onto its own end
         { pt(10, -100), pt(10, 100), pt(210, 100), pt(210, 500) },
         { pt(250, 300), pt(250, 148), pt(450, 148), pt(450, 600) } }) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 48, 0, f.nets, f.points, s);
 
   CHECK(s.lanes == 2);
   CHECK(s.spread == 2);
@@ -873,7 +930,7 @@ TEST_CASE("nudge: a trailing leg an earlier lane shortened is refused the same w
         { pt(210, -300), pt(210, 100), pt(410, 100), pt(410, 500) },
         { pt(50, 800), pt(50, 148), pt(250, 148), pt(250, 700) } }) };
   NudgeStats s;
-  nudge_lanes(OPEN, OPEN, {}, 48, 0, f.nets, f.points, s);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 48, 0, f.nets, f.points, s);
 
   CHECK(s.lanes == 2);
   CHECK(s.spread == 2);

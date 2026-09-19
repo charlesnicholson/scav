@@ -1318,6 +1318,12 @@ constexpr std::array<char const *, 2> SCALE_ROUTERS{ "orthogonal", "straight" };
 //
 // `area` is 1.51x and 1.43x nested, 1.04x and 1.07x flat: the reservation
 // itself, the same boxes in frames whose boundaries now hold a lane apiece.
+// They moved once more when seats on two different boxes began being pushed
+// apart (11.10a): `corridor` -40% on nested at `compact`, and `bends` up on the
+// orthogonal rows, which is what separating a pair costs the leg that moves.
+// And again when nudging began running once over the composed polylines
+// (11.10a): nested at `compact` reads `crossings` -10% and `excess_len` -17%,
+// a lane no per-frame pass ever had both members of.
 // These charts request no space, so only the corridor half of it reaches them.
 //
 // Rows 6 and 7 are one row, and that is a router cliff, not a reservation:
@@ -1325,11 +1331,11 @@ constexpr std::array<char const *, 2> SCALE_ROUTERS{ "orthogonal", "straight" };
 // vertices than the same area as a strip. Flat at `compact` falls to the
 // straight router for it, `through_box` 0 -> 2,019. The lever is the budget.
 constexpr std::array<std::array<int64_t, 11>, 8> SCALE_PINNED{
-  { { 0, 0, 4864, 564512, 1264, 38903856, 0, 0, 0, 2984776, 134823986304 },
+  { { 0, 0, 4960, 565024, 1264, 38820928, 0, 0, 0, 2984776, 134823986304 },
     { 10808, 0, 3464, 0, 71464, 917243432, 0, 0, 0, 2984776, 134823986304 },
-    { 0, 0, 5240, 399176, 1392, 24397888, 0, 0, 0, 145264, 46911586048 },
+    { 0, 0, 5384, 238832, 1248, 20108632, 0, 0, 0, 145264, 46911586048 },
     { 9312, 0, 3576, 0, 83896, 1110858824, 0, 0, 0, 145264, 46911586048 },
-    { 0, 0, 738, 0, 70, 2470415, 0, 0, 0, 33184, 3869256960 },
+    { 0, 0, 1172, 0, 71, 2484742, 0, 0, 0, 33184, 3869256960 },
     { 2039, 0, 319, 0, 265, 7627654, 0, 0, 0, 33184, 3869256960 },
     { 2019, 0, 324, 0, 268, 5814774, 0, 0, 0, 6672, 1693255680 },
     { 2019, 0, 324, 0, 268, 5814774, 0, 0, 0, 6672, 1693255680 } }
@@ -1397,7 +1403,11 @@ namespace scav {
 // shipping build keeps them internal.
 bool inflation_done(uint32_t fewest, uint32_t degraded, uint32_t unreachable, bool &keep);
 uint32_t search_tuple_count(scav_profile const &p, uint32_t entity_count);
-void search_tuple(scav_profile &p, DarSource &dar, Compaction &pack, uint32_t index);
+void search_tuple(scav_profile &p,
+                  DarSource &dar,
+                  Compaction &pack,
+                  Fold &fold,
+                  uint32_t index);
 uint32_t search_argmin(std::vector<Cost> const &cost, std::vector<uint8_t> const &viable);
 
 }  // namespace scav
@@ -1417,15 +1427,19 @@ TEST_CASE("layout: the table's first row is the profile as given") {
       scav_profile given{ readable() };
       given.trybox = trybox;
       given.sm_tiebreak = tiebreak;
-      for (uint32_t row = 0; row < 8; ++row) {
+      for (uint32_t row = 0; row < LAYOUT_SEARCH_ROWS; ++row) {
         CAPTURE(row);
         scav_profile knobs{ given };
         DarSource dar{ DarSource::OwnerHole };
         Compaction pack{ Compaction::On };
-        search_tuple(knobs, dar, pack, row);
+        Fold fold{ Fold::Always };
+        search_tuple(knobs, dar, pack, fold, row);
         CHECK(knobs.trybox == (given.trybox ^ static_cast<int32_t>(row & 1U)));
         CHECK((pack == ((((row >> 1U) & 1U) != 0) ? Compaction::On : Compaction::Off)));
-        CHECK((dar == ((row < 4) ? DarSource::Profile : DarSource::OwnerHole)));
+        CHECK((dar ==
+               ((((row >> 2U) & 1U) != 0) ? DarSource::OwnerHole : DarSource::Profile)));
+        // Bit 3, the highest, so the eight rows below it are what they were.
+        CHECK((fold == ((row < 8) ? Fold::Scale : Fold::Always)));
         // The scale-measure tiebreak is no longer a row of the table, so no row
         // may touch it -- it won on no chart at either scale, and compaction
         // took the bit. All 48 knobs read back to say the row moved one.
@@ -1438,7 +1452,9 @@ TEST_CASE("layout: the table's first row is the profile as given") {
       scav_profile second{ given };
       DarSource one{ DarSource::OwnerHole };
       Compaction one_pack{ Compaction::On };
-      search_tuple(second, one, one_pack, 1);
+      Fold one_fold{ Fold::Always };
+      search_tuple(second, one, one_pack, one_fold, 1);
+      CHECK((one_fold == Fold::Scale));
       CHECK(second.trybox != given.trybox);
       CHECK((one_pack == Compaction::Off));
       CHECK((one == DarSource::Profile));
@@ -1447,7 +1463,9 @@ TEST_CASE("layout: the table's first row is the profile as given") {
       scav_profile third{ given };
       DarSource two{ DarSource::OwnerHole };
       Compaction two_pack{ Compaction::Off };
-      search_tuple(third, two, two_pack, 2);
+      Fold two_fold{ Fold::Always };
+      search_tuple(third, two, two_pack, two_fold, 2);
+      CHECK((two_fold == Fold::Scale));
       CHECK(third.trybox == given.trybox);
       CHECK((two_pack == Compaction::On));
       CHECK((two == DarSource::Profile));
@@ -1459,7 +1477,8 @@ TEST_CASE("layout: the table's first row is the profile as given") {
         scav_profile knobs{ given };
         DarSource dar{ DarSource::Profile };
         Compaction pack{ Compaction::Off };
-        search_tuple(knobs, dar, pack, row);
+        Fold fold{ Fold::Scale };
+        search_tuple(knobs, dar, pack, fold, row);
         CHECK((dar == DarSource::Profile));
         seen |= 1U << static_cast<uint32_t>(((knobs.trybox ^ given.trybox) * 2) +
                                             ((pack == Compaction::On) ? 1 : 0));
@@ -1506,7 +1525,7 @@ TEST_CASE("layout: how many tuples a chart runs is closed form and model-derived
   // a row index past its last row would repeat a tuple already run.
   p.portfolio_m = 64;
   CHECK(!profile_validate(p));
-  CHECK(search_tuple_count(p, 1) == 8);
+  CHECK(search_tuple_count(p, 1) == LAYOUT_SEARCH_ROWS);
 
   // Both 2k shapes, which is the claim the rule is written for.
   Chart nested{ nested_2k_chart() };
@@ -1563,11 +1582,12 @@ TEST_CASE("layout: the pick is the row exact Cost ranks first over the whole tab
     scav_profile knobs{ p };
     DarSource dar{ DarSource::Profile };
     Compaction pack{ Compaction::Off };
-    search_tuple(knobs, dar, pack, row);
+    Fold fold{ Fold::Scale };
+    search_tuple(knobs, dar, pack, fold, row);
     SubmachineOrders const o{ order_submachines(searched, g, {}, knobs) };
     SizedLayout z;
     std::vector<Diagnostic> spilled;
-    REQUIRE(size_layout(searched, g, o, {}, knobs, z, spilled, dar, pack));
+    REQUIRE(size_layout(searched, g, o, {}, knobs, z, spilled, dar, pack, fold));
     Routes const r{ route_transitions(searched, g, o, z, {}, knobs, *router_at(0)) };
     // Scored on the caller's profile, not the tuple's copy, which is what puts
     // two rows on one scale.
@@ -1599,11 +1619,12 @@ TEST_CASE("layout: a pinned row runs that row and no search") {
     scav_profile knobs{ p };
     DarSource dar{ DarSource::Profile };
     Compaction pack{ Compaction::Off };
-    search_tuple(knobs, dar, pack, pin);
+    Fold fold{ Fold::Scale };
+    search_tuple(knobs, dar, pack, fold, pin);
     SubmachineOrders const o{ order_submachines(reference, g, {}, knobs) };
     SizedLayout z;
     std::vector<Diagnostic> spilled;
-    REQUIRE(size_layout(reference, g, o, {}, knobs, z, spilled, dar, pack));
+    REQUIRE(size_layout(reference, g, o, {}, knobs, z, spilled, dar, pack, fold));
 
     Chart c;
     load_corpus("axis.scav", c);
@@ -1638,13 +1659,13 @@ TEST_CASE("layout: a pinned row runs that row and no search") {
   CHECK(at_one == 3);
   CHECK(layout_coordinate_hash(pinned_at_four) == layout_coordinate_hash(pinned_at_one));
 
-  // And an unpinned run of the shipped profile is still the search: row 1 is
+  // And an unpinned run of the shipped profile is still the search: row 5 is
   // what `axis` picks, so the pin above reached a row the argmin does not.
   Chart searched;
   load_corpus("axis.scav", searched);
   uint32_t picked{ INVALID };
   REQUIRE(layout_run(searched, {}, opts(p), placed, diags, nullptr, &picked));
-  CHECK(picked == 1);
+  CHECK(picked == 5);
 }
 
 TEST_CASE("layout: a chart compaction cannot improve keeps the lower row") {

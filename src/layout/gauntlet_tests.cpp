@@ -28,7 +28,11 @@ namespace scav {
 
 // The portfolio's row, which `layout.cpp` brackets with SCAV_INTERNAL, declared
 // here rather than in a header so the shipping build keeps it internal.
-void search_tuple(scav_profile &p, DarSource &dar, Compaction &pack, uint32_t index);
+void search_tuple(scav_profile &p,
+                  DarSource &dar,
+                  Compaction &pack,
+                  Fold &fold,
+                  uint32_t index);
 
 }  // namespace scav
 
@@ -126,10 +130,11 @@ void lay(char const *name, scav_profile const &p, Laid &out) {
   scav_profile knobs{ p };
   DarSource dar{ DarSource::Profile };
   Compaction pack{ Compaction::Off };
-  search_tuple(knobs, dar, pack, out.tuple);
+  Fold fold{ Fold::Scale };
+  search_tuple(knobs, dar, pack, fold, out.tuple);
   out.g = decompose(out.c);
   out.o = order_submachines(out.c, out.g, {}, knobs);
-  REQUIRE(size_layout(out.c, out.g, out.o, {}, knobs, out.z, diags, dar, pack));
+  REQUIRE(size_layout(out.c, out.g, out.o, {}, knobs, out.z, diags, dar, pack, fold));
   out.r = route_transitions(out.c, out.g, out.o, out.z, {}, knobs, *router_at(id));
   column_holds(out.c, "scav.geom.state", out.z.state);
   column_holds(out.c, "scav.geom.sub", out.z.sub);
@@ -516,9 +521,10 @@ TEST_CASE("gauntlet: two states each other's target are two lines") {
       }
     }
     // 652 before 11.9.5's reservation, 0 with it, 650 once offsets became lane
-    // positions rather than per-member displacements. The room is there and
-    // spreading to the right places spends it; 11.3's cycle-breaking is the lever.
-    CHECK(shared == ((p.profile_id == compact().profile_id) ? 650 : 0));
+    // positions rather than per-member displacements, and **0 again once
+    // nudging ran once over the composed polylines** (11.10a) -- the run was
+    // between two segments the per-frame pass never had in hand at once.
+    CHECK(shared == 0);
   }
 }
 
@@ -539,9 +545,10 @@ TEST_CASE("gauntlet: a fan-in's arrivals are four arrows, none inside another") 
       if (chart_string(l.c, l.c.states[st].name) == "Fault") { fault = st; }
     }
     REQUIRE(fault != INVALID);
-    // Two refusals before 11.9.5's reservation, one after, none now that the
-    // offsets target lane positions -- the same room, asked for correctly.
-    CHECK(l.r.nudged.refused == ((p.profile_id == compact().profile_id) ? 0U : 1U));
+    // Two refusals before 11.9.5's reservation and one after; the chart-wide
+    // pass asks a second time on the composed polyline, and at `readable` the
+    // fan's own trunk refuses it again. A refusal is the bundle winning.
+    CHECK(l.r.nudged.refused == ((p.profile_id == compact().profile_id) ? 0U : 2U));
     std::vector<uint32_t> into;
     for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
       if ((l.r.route[t].len >= 2) && (l.c.transitions[t].dst.v == fault)) {

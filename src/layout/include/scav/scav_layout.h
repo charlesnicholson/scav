@@ -94,9 +94,10 @@ inline int32_t label_line_height(scav_profile const &p) {
 // Layout ====================================================================
 
 // Rows in the fixed table of chart-global phase-2 tuples Level 2 chooses
-// between: the box packer, compaction, and where a frame's desired ratio comes
-// from (11.10). The bound on `portfolio_m` and on `layout_run`'s `row`.
-inline constexpr uint32_t LAYOUT_SEARCH_ROWS{ 8 };
+// between: the box packer, compaction, where a frame's desired ratio comes
+// from, and whether its rank run folds (11.10, 11.10a). The bound on
+// `portfolio_m` and on `layout_run`'s `row`.
+inline constexpr uint32_t LAYOUT_SEARCH_ROWS{ 16 };
 
 // Decomposes, orders, then sizes, places and routes every phase-2 tuple the
 // chart's size admits and keeps the one exact `Cost` ranks first (11.10).
