@@ -21,9 +21,12 @@ struct NudgeStats {
 };
 
 // `nets` are spans into `points`, rewritten in place. `region` bounds every
-// point and `bounds` is the frame's own box, which no displacement may cross.
+// point and `bounds` is parallel to `nets`: the box that net's own frame is
+// drawn in, which no displacement of it may cross. One box repeated is a frame
+// nudging itself; one box per net is the chart-wide pass, where a lane's room
+// is what every member's frame allows (11.10a).
 void nudge_lanes(scav_rect const &region,
-                 scav_rect const &bounds,
+                 std::vector<scav_rect> const &bounds,
                  std::vector<scav_rect> const &obstacles,
                  int32_t gap,
                  int32_t clear,

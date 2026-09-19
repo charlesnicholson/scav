@@ -299,8 +299,9 @@ Routes route_transitions(Chart const &c,
       // The pitch is a line of text, not the router's clearance (11.9.5), and
       // it is the grouping tolerance too, so what is spread apart by it is
       // exactly what was too close by it.
+      std::vector<scav_rect> const own(ro.net_points.size(), frame);
       nudge_lanes(region,
-                  frame,
+                  own,
                   in.obstacles,
                   imax(margin, p.font_size_grid),
                   margin,
@@ -383,6 +384,59 @@ Routes route_transitions(Chart const &c,
       pts[count - 1] = trim(pts[count - 1], pts[count - 2], s.path_clear[t].dst);
     }
     out.route[t] = { .off = first_point, .len = count };
+  }
+
+  // **One pass over the composed polylines, because a lane is what a reader
+  // sees and a reader sees neither frames nor segments** (11.10a). Nudging
+  // above runs per frame on per-segment nets, so a shared run falls between two
+  // stools twice over: a decomposed transition's pieces are routed in different
+  // frames, and a piece three points long has no interior segment for a lane to
+  // hold. `dock` reads both -- `Charging -> Solid` runs down the line
+  // `Solid -> Off` runs up, 1,777 units of it in opposite directions, and the
+  // down leg is the last segment of its own three-point net.
+  if (margin > 0) {
+    std::vector<scav_rect> walls;
+    for (uint32_t st = 0; st < c.states.size(); ++st) {
+      if ((c.states[st].live != 0) && (z.state[st].w != 0) && (z.state[st].h != 0)) {
+        walls.push_back(z.state[st]);
+      }
+    }
+    // Each transition is bounded by the innermost state enclosing *both* its
+    // ends -- the frame it was routed in -- and by the chart where there is
+    // none. A hierarchy-crossing transition is bounded by the ancestor it
+    // crosses inside, which is what lets its pieces leave the child frames;
+    // one wholly inside a composite may not leave that composite.
+    std::vector<scav_rect> held(out.route.size(), z.chart);
+    std::vector<uint8_t> up(c.states.size(), 0);
+    for (uint32_t t = 0; t < out.route.size(); ++t) {
+      if (t >= c.transitions.size()) { continue; }
+      for (StateId a{ enclosing_state(c, c.transitions[t].src) };
+           a.v != INVALID;
+           a = enclosing_state(c, a)) {
+        up[a.v] = 1;
+      }
+      for (StateId b{ enclosing_state(c, c.transitions[t].dst) };
+           b.v != INVALID;
+           b = enclosing_state(c, b)) {
+        if (up[b.v] != 0) {
+          held[t] = z.state[b.v];
+          break;
+        }
+      }
+      for (StateId a{ enclosing_state(c, c.transitions[t].src) };
+           a.v != INVALID;
+           a = enclosing_state(c, a)) {
+        up[a.v] = 0;
+      }
+    }
+    nudge_lanes(z.chart,
+                held,
+                walls,
+                imax(margin, p.font_size_grid),
+                margin,
+                out.route,
+                out.points,
+                out.nudged);
   }
 
   out.unplaced = place_labels(c, z, s, out.route, out.points, p, out.placed);

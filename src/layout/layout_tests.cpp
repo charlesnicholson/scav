@@ -1321,6 +1321,9 @@ constexpr std::array<char const *, 2> SCALE_ROUTERS{ "orthogonal", "straight" };
 // They moved once more when seats on two different boxes began being pushed
 // apart (11.10a): `corridor` -40% on nested at `compact`, and `bends` up on the
 // orthogonal rows, which is what separating a pair costs the leg that moves.
+// And again when nudging began running once over the composed polylines
+// (11.10a): nested at `compact` reads `crossings` -10% and `excess_len` -17%,
+// a lane no per-frame pass ever had both members of.
 // These charts request no space, so only the corridor half of it reaches them.
 //
 // Rows 6 and 7 are one row, and that is a router cliff, not a reservation:
@@ -1328,11 +1331,11 @@ constexpr std::array<char const *, 2> SCALE_ROUTERS{ "orthogonal", "straight" };
 // vertices than the same area as a strip. Flat at `compact` falls to the
 // straight router for it, `through_box` 0 -> 2,019. The lever is the budget.
 constexpr std::array<std::array<int64_t, 11>, 8> SCALE_PINNED{
-  { { 0, 0, 4960, 564944, 1264, 38915552, 0, 0, 0, 2984776, 134823986304 },
+  { { 0, 0, 4960, 565024, 1264, 38820928, 0, 0, 0, 2984776, 134823986304 },
     { 10808, 0, 3464, 0, 71464, 917243432, 0, 0, 0, 2984776, 134823986304 },
-    { 0, 0, 5384, 238776, 1392, 24241048, 0, 0, 0, 145264, 46911586048 },
+    { 0, 0, 5384, 238832, 1248, 20108632, 0, 0, 0, 145264, 46911586048 },
     { 9312, 0, 3576, 0, 83896, 1110858824, 0, 0, 0, 145264, 46911586048 },
-    { 0, 0, 1172, 0, 71, 2479202, 0, 0, 0, 33184, 3869256960 },
+    { 0, 0, 1172, 0, 71, 2484742, 0, 0, 0, 33184, 3869256960 },
     { 2039, 0, 319, 0, 265, 7627654, 0, 0, 0, 33184, 3869256960 },
     { 2019, 0, 324, 0, 268, 5814774, 0, 0, 0, 6672, 1693255680 },
     { 2019, 0, 324, 0, 268, 5814774, 0, 0, 0, 6672, 1693255680 } }

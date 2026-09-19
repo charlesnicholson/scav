@@ -110,7 +110,7 @@ bool bundled(std::vector<scav_point> const &points,
 }  // namespace
 
 void nudge_lanes(scav_rect const &region,
-                 scav_rect const &bounds,
+                 std::vector<scav_rect> const &bounds,
                  std::vector<scav_rect> const &obstacles,
                  int32_t gap,
                  int32_t clear,
@@ -410,14 +410,19 @@ void nudge_lanes(scav_rect const &region,
       Wide room_down{ horizontal ? (Wide{ region.y } + region.h) - at
                                  : (Wide{ region.x } + region.w) - at };
       Wide room_up{ horizontal ? (Wide{ at } - region.y) : (Wide{ at } - region.x) };
-      // The frame's own box bounds the room and `region` reaches past it; one
-      // unit inside, because a lane on that border is drawn over the border.
-      room_up = imin(room_up, (Wide{ at } - (horizontal ? bounds.y : bounds.x)) - 1);
+      // Every member's own frame bounds the room and `region` reaches past it;
+      // one unit inside, because a lane on that border is drawn over it. The
+      // intersection, so a lane whose members come from two frames stays inside
+      // both of them.
+      scav_rect held{ region };
+      for (uint32_t j = 0; j < count; ++j) {
+        uint32_t const net{ members[lane[j]].net };
+        if (net < bounds.size()) { held = intersection(held, bounds[net]); }
+      }
+      room_up = imin(room_up, (Wide{ at } - (horizontal ? held.y : held.x)) - 1);
       room_down = imin(
           room_down,
-          ((horizontal ? (Wide{ bounds.y } + bounds.h) : (Wide{ bounds.x } + bounds.w)) -
-           at) -
-              1);
+          ((horizontal ? (Wide{ held.y } + held.h) : (Wide{ held.x } + held.w)) - at) - 1);
 
       scav_rect const bar{ horizontal
                                ? scav_rect{ .x = lo, .y = at, .w = hi - lo, .h = 0 }

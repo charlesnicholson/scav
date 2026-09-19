@@ -698,7 +698,9 @@ TEST_CASE("route: nothing is nudged for a router that asks for no margin") {
 
   LaneRouter const asks{ 16 };
   Routes const nudged{ route_transitions(c, g, o, z, {}, profile(), asks) };
-  CHECK(nudged.nudged.lanes == 1);
+  // Two: the frame's own pass and the chart-wide one over the composed
+  // polylines, which examines the same lane a second time (11.10a).
+  CHECK(nudged.nudged.lanes == 2);
   CHECK(nudged.nudged.moved == 2);
   // The root frame has no owning state, so the region is what bounds it, and the
   // region holds every point either net touches. The pitch these two spread by
@@ -749,7 +751,7 @@ TEST_CASE("route: a nudge inside a composite is bounded by that state's own box"
   // a whole line of text either side.
   z.state[comp.v] = { .x = -40, .y = -40, .w = 320, .h = 320 };
   Routes const wide{ route_transitions(c, g, o, z, {}, profile(), asks) };
-  REQUIRE(wide.nudged.lanes == 1);
+  REQUIRE(wide.nudged.lanes == 2);
   CHECK(wide.points[wide.route[0].off + 1].y == 56);
   CHECK(wide.points[wide.route[1].off + 1].y == 184);
 
@@ -758,7 +760,7 @@ TEST_CASE("route: a nudge inside a composite is bounded by that state's own box"
   // touches, so only the owner's box can be doing this.
   z.state[comp.v] = { .x = -40, .y = 96, .w = 320, .h = 8 };
   Routes const tight{ route_transitions(c, g, o, z, {}, profile(), asks) };
-  REQUIRE(tight.nudged.lanes == 1);
+  REQUIRE(tight.nudged.lanes == 2);
   CHECK(tight.points[tight.route[0].off + 1].y == 97);
   CHECK(tight.points[tight.route[1].off + 1].y == 103);
 }
