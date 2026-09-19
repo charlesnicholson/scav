@@ -125,6 +125,18 @@ struct Seat {
 // Which face of `r` a seated point lies on: 0 left, 1 right, 2 top, 3 bottom, or
 // INVALID for a point on none. Read in `ortho_ring`'s order, so the two agree
 // about a corner.
+// Whether two nets meet at a box -- a fan out of one state or into one.
+bool shares_box(std::vector<RouteNet> const &nets, uint32_t a, uint32_t b) {
+  std::array<uint32_t, 2> const one{ nets[a].src_obstacle, nets[a].dst_obstacle };
+  std::array<uint32_t, 2> const two{ nets[b].src_obstacle, nets[b].dst_obstacle };
+  for (uint32_t const x : one) {
+    for (uint32_t const y : two) {
+      if ((x != INVALID) && (x == y)) { return true; }
+    }
+  }
+  return false;
+}
+
 uint32_t face_of(scav_point at, scav_rect const &r) {
   if (at.x == r.x) { return 0; }
   if (at.x == (r.x + r.w)) { return 1; }
@@ -475,18 +487,6 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
   for (uint32_t round = 0; round < seats.size(); ++round) {
     if (!sweep()) { break; }
   }
-}
-
-// Whether two nets meet at a box -- a fan out of one state or into one.
-bool shares_box(std::vector<RouteNet> const &nets, uint32_t a, uint32_t b) {
-  std::array<uint32_t, 2> const one{ nets[a].src_obstacle, nets[a].dst_obstacle };
-  std::array<uint32_t, 2> const two{ nets[b].src_obstacle, nets[b].dst_obstacle };
-  for (uint32_t const x : one) {
-    for (uint32_t const y : two) {
-      if ((x != INVALID) && (x == y)) { return true; }
-    }
-  }
-  return false;
 }
 
 void ortho_separate_attachments(std::vector<RouteNet> const &nets,
