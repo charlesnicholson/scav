@@ -62,7 +62,8 @@ scav_point net_pt(Frame const &f, uint32_t net, uint32_t k) {
 // call passes; the chart-wide pass gives each net its own.
 std::vector<scav_rect> bounds_of(scav_rect const &box,
                                  std::vector<scav_span> const &nets) {
-  return std::vector<scav_rect>(nets.size(), box);
+  std::vector<scav_rect> every(nets.size(), box);
+  return every;
 }
 
 // Far enough out that only the obstacles bound a fixture.
