@@ -315,9 +315,17 @@ bool inflation_done(uint32_t fewest, uint32_t degraded, uint32_t unreachable, bo
 struct Improved {
   Candidate best;
   Cost cost{};
-  std::vector<RankPin> held;
+  SearchPins held;
   uint32_t took{ 0 };
   uint32_t scored{ 0 };
+};
+
+// One Level 1 move: a state held at a rank it was not given (11.10a), or a
+// segment left unchained (11.10b). `cut` names which of the two.
+struct Move {
+  RankPin pin{};
+  ChainCut leg{};
+  bool cut{ false };
 };
 
 // Level 1: hold one state at a rank longest path did not give it, re-derive
@@ -341,83 +349,138 @@ Improved search_moves(Chart const &c,
                       uint32_t threads,
                       uint32_t budget,
                       Cost from,
-                      std::vector<RankPin> const &seed) {
+                      SearchPins const &seed) {
   Improved out;
   out.cost = from;
   // Continued from, not restarted: `taken` reports every pin the drawing rests
   // on, so a caller handing them back gets the moves it already has plus more.
-  std::vector<RankPin> &held{ out.held };
+  SearchPins &held{ out.held };
   held = seed;
   SubmachineOrders here{ order_submachines(c, g, s, objective, threads, held) };
 
-  while (out.scored < budget) {
-    RankPin take{};
+  auto const with = [](SearchPins base, Move const &m) {
+    if (m.cut) {
+      base.cuts.push_back(m.leg);
+    } else {
+      base.ranks.push_back(m.pin);
+    }
+    return base;
+  };
+
+  // One counter per dimension, each capped at the budget. Shared, the sweep
+  // that runs first starves the other -- measured: cuts ahead of placements on
+  // one shared 24 took `axis` from 11,780 to 12,702, every move still strictly
+  // improving and the walk simply cut short (11.10b).
+  uint32_t cut_scored{ 0 };
+  uint32_t pin_scored{ 0 };
+  while ((cut_scored < budget) || (pin_scored < budget)) {
+    Move take{};
     Candidate kept;
     Cost best{ out.cost };
     bool found{ false };
 
-    for (uint32_t st = 0; (st < c.states.size()) && (out.scored < budget); ++st) {
+    // Scores one move and keeps it if it strictly improves. Both sweeps below
+    // go through here, so the two dimensions cannot drift on what "better" is.
+    auto const consider = [&](Move const &m) {
+      SubmachineOrders const moved{
+        order_submachines(c, g, s, objective, threads, with(held, m))
+      };
+      std::vector<Diagnostic> spilled;
+      Candidate cand{ search_candidate(c,
+                                       g,
+                                       moved,
+                                       s,
+                                       knobs,
+                                       dar,
+                                       pack,
+                                       fold,
+                                       router,
+                                       threads,
+                                       spilled) };
+      ++out.scored;
+      auto const verdict = [&](MoveVerdict v, Cost const &sc) {
+        trace_emit({ .kind = TraceKind::CandidateScored,
+                     .pass = static_cast<uint16_t>(v),
+                     .score = { .row = INVALID,
+                                .state = m.cut ? INVALID : m.pin.state.v,
+                                .rank = m.cut ? 0 : m.pin.rank,
+                                .trans = m.cut ? m.leg.trans.v : INVALID,
+                                .leg = m.cut ? m.leg.leg : 0,
+                                .t0 = sc.t0_violations,
+                                .t2 = sc.t2 } });
+      };
+      if (!cand.viable) {
+        verdict(MoveVerdict::NotViable, Cost{});
+        return;
+      }
+      // A move that only fits once the whole chart's spacing was widened is
+      // not a better placement, it is a bigger drawing -- and it is one no
+      // caller can re-derive from the pins alone, because the geometry
+      // belongs to a profile the pins do not name.
+      if (cand.inflations != 0) {
+        verdict(MoveVerdict::Inflated, Cost{});
+        return;
+      }
+      CostTerms const terms{ cost_terms(c, g, cand.sized, cand.routes, s, objective) };
+      Cost const scored{ cost_of(terms, objective) };
+      // Beside the score, so a rejected move says which term rejected it.
+      if (trace_sink() != nullptr) {
+        TraceEvent e{ .kind = TraceKind::CandidateTerms, .terms = {} };
+        std::array<int64_t, TIER2_TERMS> const share{ cost_shares(terms, objective) };
+        for (uint32_t k = 0; k < TIER2_TERMS; ++k) {
+          e.terms.share[k] = static_cast<int32_t>(share[k]);
+        }
+        trace_emit(e);
+      }
+      if (!cost_less(scored, best)) {
+        verdict(MoveVerdict::NotBetter, scored);
+        return;
+      }
+      verdict(MoveVerdict::Taken, scored);
+      best = scored;
+      take = m;
+      kept = std::move(cand);
+      found = true;
+    };
+
+    // Unchaining first: it is the dimension carrying most of the kinks and the
+    // budget is shared (11.10b). The segments a cut can free are exactly the
+    // ones phase 1 chained, which the bends it created name.
+    std::vector<uint8_t> chained(g.segments.size(), 0);
+    for (OrderNode const &nd : here.nodes) {
+      if ((nd.kind == OrderKind::Bend) && (nd.subject < chained.size())) {
+        chained[nd.subject] = 1;
+      }
+    }
+    for (ChainCut const &already : held.cuts) {
+      if (already.trans.v >= g.trans_segments.size()) { continue; }
+      Span const segs{ g.trans_segments[already.trans.v] };
+      if (already.leg < segs.len) { chained[segs.off + already.leg] = 0; }
+    }
+    for (uint32_t seg = 0; (seg < chained.size()) && (cut_scored < budget); ++seg) {
+      if (chained[seg] == 0) { continue; }
+      TransId const t{ g.segments[seg].trans };
+      if ((t.v == INVALID) || (t.v >= g.trans_segments.size())) { continue; }
+      ++cut_scored;
+      consider({ .leg = { .trans = t, .leg = seg - g.trans_segments[t.v].off },
+                 .cut = true });
+    }
+
+    for (uint32_t st = 0; (st < c.states.size()) && (pin_scored < budget); ++st) {
       if ((c.states[st].live == 0) || (here.state_node[st] == INVALID)) { continue; }
       uint32_t const at{ here.nodes[here.state_node[st]].rank };
       uint32_t const frame{ c.states[st].parent.v };
       if (frame >= here.sub_ranks.size()) { continue; }
       uint32_t const ranks{ here.sub_ranks[frame] };
-      for (uint32_t r = 0; (r < ranks) && (out.scored < budget); ++r) {
+      for (uint32_t r = 0; (r < ranks) && (pin_scored < budget); ++r) {
         if (r == at) { continue; }
-        std::vector<RankPin> tried{ held };
-        tried.push_back({ .state = StateId{ st }, .rank = r });
-        SubmachineOrders const moved{
-          order_submachines(c, g, s, objective, threads, tried)
-        };
-        std::vector<Diagnostic> spilled;
-        Candidate cand{ search_candidate(c,
-                                         g,
-                                         moved,
-                                         s,
-                                         knobs,
-                                         dar,
-                                         pack,
-                                         fold,
-                                         router,
-                                         threads,
-                                         spilled) };
-        ++out.scored;
-        auto const verdict = [&](MoveVerdict v, Cost const &sc) {
-          trace_emit({ .kind = TraceKind::CandidateScored,
-                       .pass = static_cast<uint16_t>(v),
-                       .score = { .row = INVALID,
-                                  .state = st,
-                                  .rank = r,
-                                  .t0 = sc.t0_violations,
-                                  .t2 = sc.t2 } });
-        };
-        if (!cand.viable) {
-          verdict(MoveVerdict::NotViable, Cost{});
-          continue;
-        }
-        // A move that only fits once the whole chart's spacing was widened is
-        // not a better placement, it is a bigger drawing -- and it is one no
-        // caller can re-derive from the pins alone, because the geometry
-        // belongs to a profile the pins do not name.
-        if (cand.inflations != 0) {
-          verdict(MoveVerdict::Inflated, Cost{});
-          continue;
-        }
-        Cost const scored{ cost_of(cost_terms(c, g, cand.sized, cand.routes, s, objective),
-                                   objective) };
-        if (!cost_less(scored, best)) {
-          verdict(MoveVerdict::NotBetter, scored);
-          continue;
-        }
-        verdict(MoveVerdict::Taken, scored);
-        best = scored;
-        take = { .state = StateId{ st }, .rank = r };
-        kept = std::move(cand);
-        found = true;
+        ++pin_scored;
+        consider({ .pin = { .state = StateId{ st }, .rank = r } });
       }
     }
+
     if (!found) { break; }
-    held.push_back(take);
+    held = with(held, take);
     here = order_submachines(c, g, s, objective, threads, held);
     out.best = std::move(kept);
     out.cost = best;
@@ -500,8 +563,8 @@ bool layout_run(Chart &c,
                 uint32_t *tuple,
                 uint32_t row,
                 uint32_t *moves,
-                std::vector<RankPin> *taken,
-                std::vector<RankPin> const *pins) {
+                SearchPins *taken,
+                SearchPins const *pins) {
   if (inflations != nullptr) { *inflations = 0; }
   if (tuple != nullptr) { *tuple = 0; }
   scav_profile const &p{ o.profile };
@@ -534,8 +597,7 @@ bool layout_run(Chart &c,
   SplitGraph const g{ decompose(c) };
   // Once for every attempt below: phase 1 reads `sweep_count` and no extent, so
   // the inflated copies the retry loop makes order to the same rows.
-  std::vector<RankPin> const seed{ (pins != nullptr) ? *pins
-                                                     : std::vector<RankPin>{} };
+  SearchPins const seed{ (pins != nullptr) ? *pins : SearchPins{} };
   SubmachineOrders const orders{ order_submachines(c, g, s, p, o.threads, seed) };
 
   // Level 2: every row of the table this chart's size admits, each its own
@@ -590,8 +652,8 @@ bool layout_run(Chart &c,
 
   // Level 1: bounded moves off the row Level 2 picked, each one a whole phase 1
   // to 3 and scored on the exact objective, greedy and strictly improving
-  // (11.10, 11.10a). `portfolio_k` caps the candidates scored and **ships at
-  // zero**, so a run that does not ask for it is the run it was.
+  // (11.10, 11.10a, 11.10b). `portfolio_k` caps the candidates scored across
+  // both dimensions, and at zero a run is exactly the run it was before Level 1.
   //
   // Placed here rather than inside the row loop because a move is off the
   // *pick*: scoring moves against a row the argmin is about to discard spends
@@ -713,11 +775,23 @@ bool layout_trace_json(Chart &c,
                        std::vector<scav_placed> &placed,
                        std::vector<Diagnostic> &diags,
                        std::vector<char> &out,
-                       uint32_t row) {
+                       uint32_t row,
+                       TraceScope scope) {
+  if (scope == TraceScope::Search) {
+    LayoutTrace t;
+    scav_layout_opts serial{ o };
+    serial.threads = 1;
+    trace_sink_set(&t);
+    bool const ran{ layout_run(c, s, serial, placed, diags, nullptr, nullptr, row) };
+    trace_sink_set(nullptr);
+    trace_to_json(t, c, out);
+    return ran;
+  }
+
   // Search first and keep what won, so the trace below is of the one drawing
   // that ships rather than of every candidate the search threw away (11.16).
   uint32_t won{ 0 };
-  std::vector<RankPin> pins;
+  SearchPins pins;
   if (!layout_run(c, s, o, placed, diags, nullptr, &won, row, nullptr, &pins)) {
     trace_to_json({}, c, out);
     return false;

@@ -38,7 +38,8 @@ int run_render(char const *path,
                char const *out_path,
                bool embed_font,
                char const *profile_name,
-               uint32_t row) {
+               uint32_t row,
+               std::vector<ChainCut> const &cuts) {
   Loaded net;
   load_and_report(path, true, net);
   if (net.code == EXIT_UNUSABLE) { return EXIT_UNUSABLE; }
@@ -59,8 +60,10 @@ int run_render(char const *path,
 
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
+  SearchPins const pins{ .cuts = cuts };
   bool const laid{
-    layout_run(net.chart, as_spaces(spaces), opts, placed, diags, nullptr, nullptr, row)
+    layout_run(net.chart, as_spaces(spaces), opts, placed, diags, nullptr, nullptr, row,
+               nullptr, nullptr, &pins)
   };
   if (!diags.empty()) {
     std::string err;

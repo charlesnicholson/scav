@@ -760,7 +760,9 @@ int run_dump(char const *path,
              bool as_json,
              bool with_layout,
              uint32_t row,
-             bool trace) {
+             bool trace,
+             bool trace_search,
+             std::vector<ChainCut> const &cuts) {
   Loaded net;
   load_and_report(path, true, net);
   if (net.code == EXIT_UNUSABLE) { return EXIT_UNUSABLE; }
@@ -783,11 +785,13 @@ int run_dump(char const *path,
     }
     std::vector<Diagnostic> diags;
     std::vector<char> events;
+    SearchPins const pins{ .cuts = cuts };
     bool const laid{
       trace ? layout_trace_json(net.chart, as_spaces(spaces), opts, placed, diags, events,
-                                row)
+                                row,
+                                trace_search ? TraceScope::Search : TraceScope::Shipped)
             : layout_run(net.chart, as_spaces(spaces), opts, placed, diags, nullptr,
-                         nullptr, row)
+                         nullptr, row, nullptr, nullptr, &pins)
     };
     // To stdout, ahead of the model: the trace is the answer `--trace` asked
     // for and the dump is the context it is read against.

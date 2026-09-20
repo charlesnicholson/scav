@@ -5,6 +5,7 @@
 // two output streams, and one entry point apiece.
 
 #include "scav/scav_core.h"
+#include "scav/scav_layout.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -43,17 +44,25 @@ void load_and_report(char const *path, bool validate, Loaded &out);
 // `INVALID` is the search, which is what every verb does unasked.
 bool portfolio_row(char const *text, uint32_t &out);
 
+// `TRANS:LEG` appended to `out`: a segment phase 1 leaves unchained, so the
+// drawing the objective declined can be looked at (11.10b). False on anything
+// that is not a pair of ordinals.
+bool chain_cut(char const *text, std::vector<ChainCut> &out);
+
 int run_dump(char const *path,
              bool hash_only,
              bool as_json,
              bool with_layout,
              uint32_t row,
-             bool trace);
+             bool trace,
+             bool trace_search,
+             std::vector<ChainCut> const &cuts);
 int run_render(char const *path,
                char const *out_path,
                bool embed_font,
                char const *profile_name,
-               uint32_t row);
+               uint32_t row,
+               std::vector<ChainCut> const &cuts);
 int run_fmt(std::vector<char const *> const &paths, bool check_only);
 int run_deps(char const *path, char const *target);
 int run_selftest(char const *against_path);

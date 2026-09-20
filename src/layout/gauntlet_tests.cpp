@@ -122,7 +122,7 @@ void lay(char const *name, scav_profile const &p, Laid &out) {
 
   std::vector<scav_placed> placed;
   scav_layout_opts const o{ .profile = p, .router = id, .threads = 0 };
-  std::vector<RankPin> pins;
+  SearchPins pins;
   REQUIRE(layout_run(out.c,
                      {},
                      o,

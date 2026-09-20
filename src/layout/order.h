@@ -63,18 +63,20 @@ struct SubmachineOrders {
 // across `threads` workers and emitted in submachine order, so the result is
 // one value at every worker count (6).
 
-// `RankPin` is `scav_layout.h`'s. **A pin is a re-derivation, not an edit**:
+// `SearchPins` is `scav_layout.h`'s. **A pin is a re-derivation, not an edit**:
 // ranks feed the boundary charges, the chaining of multi-rank edges, the
 // buckets and the crossing sweeps, so a moved state changes all four and
 // pinning re-runs them rather than patching the answer. Undoing a move is
-// running with the pins one held before it.
+// running with the pins one held before it. A `ChainCut` is the same shape one
+// step later: it drops a segment's bends, so the buckets and the sweeps are
+// re-run over a graph that no longer holds them.
 
 SubmachineOrders order_submachines(Chart const &c,
                                    SplitGraph const &g,
                                    scav_spaces const &s,
                                    scav_profile const &p,
                                    uint32_t threads = 0,
-                                   std::vector<RankPin> const &pins = {});
+                                   SearchPins const &pins = {});
 
 // Crossings between two adjacent ranks by inversion counting. Exposed because
 // it is what the ordering minimizes and what a test measures against.

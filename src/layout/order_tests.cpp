@@ -341,9 +341,9 @@ TEST_CASE("order: a pin that asks for the rank a node already has changes nothin
 
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const plain{ order_submachines(c, g, {}, profile()) };
-  std::vector<RankPin> same;
+  SearchPins same;
   for (StateId const st : { a, b, d }) {
-    same.push_back({ .state = st, .rank = plain.nodes[plain.state_node[st.v]].rank });
+    same.ranks.push_back({ .state = st, .rank = plain.nodes[plain.state_node[st.v]].rank });
   }
   SubmachineOrders const pinned{ order_submachines(c, g, {}, profile(), 0, same) };
   CHECK(pinned.nodes == plain.nodes);
@@ -369,7 +369,7 @@ TEST_CASE("order: a pin moves a node's rank and the ranks stay contiguous") {
   CHECK(plain.sub_ranks[root.v] == 3);
   CHECK(plain.nodes[plain.state_node[d.v]].rank == 2);
 
-  std::vector<RankPin> const onto_one{ { .state = d, .rank = 1 } };
+  SearchPins const onto_one{ .ranks = { { .state = d, .rank = 1 } } };
   SubmachineOrders const moved{ order_submachines(c, g, {}, profile(), 0, onto_one) };
   CHECK(moved.nodes[moved.state_node[d.v]].rank == 1);
   CHECK(moved.sub_ranks[root.v] == 2);
@@ -395,11 +395,12 @@ TEST_CASE("order: undoing a move is running with the pins one held before it") {
 
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const plain{ order_submachines(c, g, {}, profile()) };
-  std::vector<RankPin> before;
+  SearchPins before;
   for (StateId const st : { a, b, d }) {
-    before.push_back({ .state = st, .rank = plain.nodes[plain.state_node[st.v]].rank });
+    before.ranks.push_back(
+        { .state = st, .rank = plain.nodes[plain.state_node[st.v]].rank });
   }
-  std::vector<RankPin> const away{ { .state = d, .rank = 1 } };
+  SearchPins const away{ .ranks = { { .state = d, .rank = 1 } } };
 
   SubmachineOrders const gone{ order_submachines(c, g, {}, profile(), 0, away) };
   CHECK(gone.nodes != plain.nodes);  // the move did something
@@ -421,4 +422,117 @@ TEST_CASE("order: a dead submachine gets an empty span and no nodes") {
   CHECK(o.sub_nodes[inner.v].len == 0);
   CHECK(o.sub_ranks[inner.v] == 0);
   CHECK(frame_nodes(o, root).size() == 1);
+}
+
+// 11.10b: a cut drops a segment's bends, so phase 3 gets a net with no
+// waypoints. The chart is estop's shape -- a three-state cycle whose back edge
+// spans two ranks after cycle-breaking.
+namespace {
+
+struct Cycle {
+  Chart c;
+  SplitGraph g;
+  StateId a{ INVALID }, b{ INVALID }, d{ INVALID };
+  TransId back{ INVALID };
+};
+
+Cycle three_state_cycle() {
+  Cycle out;
+  SubmachineId const root{ build_chart(out.c, "t", {}) };
+  out.a = build_state(out.c, root, "A", StateKind::Normal, {});
+  out.b = build_state(out.c, root, "B", StateKind::Normal, {});
+  out.d = build_state(out.c, root, "C", StateKind::Normal, {});
+  build_trans(out.c, out.a, out.b, TransKind::External, {});
+  build_trans(out.c, out.b, out.d, TransKind::External, {});
+  out.back = build_trans(out.c, out.d, out.a, TransKind::External, {});
+  out.g = decompose(out.c);
+  return out;
+}
+
+uint32_t bends_of(SubmachineOrders const &o) {
+  uint32_t n{ 0 };
+  for (OrderNode const &nd : o.nodes) {
+    n += (nd.kind == OrderKind::Bend) ? 1U : 0U;
+  }
+  return n;
+}
+
+// The cut naming a transition's only leg.
+SearchPins cut_of(Cycle const &z, uint32_t leg = 0) {
+  return { .cuts = { { .trans = z.back, .leg = leg } } };
+}
+
+}  // namespace
+
+TEST_CASE("order: the back edge of a cycle chains, and a cut leaves it long") {
+  Cycle const z{ three_state_cycle() };
+  SubmachineOrders const plain{ order_submachines(z.c, z.g, {}, profile()) };
+  REQUIRE(bends_of(plain) == 1);
+
+  SubmachineOrders const freed{
+    order_submachines(z.c, z.g, {}, profile(), 0, cut_of(z))
+  };
+  CHECK(bends_of(freed) == 0);
+
+  // The edge survives, spanning more than one rank -- which is the whole point:
+  // it reaches the router as one net with no waypoint between its ends.
+  uint32_t spanning{ 0 };
+  for (OrderEdge const &e : freed.edges) {
+    uint32_t const from{ freed.nodes[e.src].rank };
+    uint32_t const to{ freed.nodes[e.dst].rank };
+    spanning += ((to - from) > 1) ? 1U : 0U;
+  }
+  CHECK(spanning == 1);
+  CHECK(freed.edges.size() == (plain.edges.size() - 1));  // the chain was two
+}
+
+TEST_CASE("order: a cut is undone by dropping it, and the orders come back") {
+  Cycle const z{ three_state_cycle() };
+  SubmachineOrders const plain{ order_submachines(z.c, z.g, {}, profile()) };
+  SubmachineOrders const freed{
+    order_submachines(z.c, z.g, {}, profile(), 0, cut_of(z))
+  };
+  REQUIRE(freed.nodes != plain.nodes);  // the cut did something
+  SubmachineOrders const back{ order_submachines(z.c, z.g, {}, profile(), 0, {}) };
+  CHECK(back.nodes == plain.nodes);
+  CHECK(back.edges == plain.edges);
+}
+
+TEST_CASE("order: a cut naming nothing this chart has is ignored, not applied") {
+  Cycle const z{ three_state_cycle() };
+  SubmachineOrders const plain{ order_submachines(z.c, z.g, {}, profile()) };
+  // A leg the transition does not have, a transition past the end, and INVALID.
+  // Every one of them must leave the orders exactly as they were.
+  for (SearchPins const &pins : { cut_of(z, 1),
+                                  cut_of(z, 99),
+                                  SearchPins{ .cuts = { { .trans = TransId{ 4096 },
+                                                          .leg = 0 } } },
+                                  SearchPins{ .cuts = { {} } } }) {
+    SubmachineOrders const same{ order_submachines(z.c, z.g, {}, profile(), 0, pins) };
+    CHECK(same.nodes == plain.nodes);
+    CHECK(same.edges == plain.edges);
+  }
+}
+
+TEST_CASE("order: cutting an edge that never chained changes nothing") {
+  Cycle const z{ three_state_cycle() };
+  SubmachineOrders const plain{ order_submachines(z.c, z.g, {}, profile()) };
+  // Transition 0 is A -> B, adjacent ranks, so it has no bend to drop.
+  SearchPins const pins{ .cuts = { { .trans = TransId{ 0 }, .leg = 0 } } };
+  SubmachineOrders const same{ order_submachines(z.c, z.g, {}, profile(), 0, pins) };
+  CHECK(same.nodes == plain.nodes);
+  CHECK(same.edges == plain.edges);
+}
+
+TEST_CASE("order: cuts and rank pins compose, and neither disables the other") {
+  Cycle const z{ three_state_cycle() };
+  SubmachineOrders const plain{ order_submachines(z.c, z.g, {}, profile()) };
+  uint32_t const was{ plain.nodes[plain.state_node[z.d.v]].rank };
+
+  SearchPins both{ cut_of(z) };
+  both.ranks.push_back({ .state = z.d, .rank = 0 });
+  SubmachineOrders const o{ order_submachines(z.c, z.g, {}, profile(), 0, both) };
+  CHECK(bends_of(o) == 0);                              // the cut held
+  CHECK(o.nodes[o.state_node[z.d.v]].rank != was);      // and so did the pin
+  CHECK(o.nodes[o.state_node[z.d.v]].rank == 0);
 }

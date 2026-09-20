@@ -1566,6 +1566,33 @@ What the review did find is that `ortho_spread_attachments` did not do what its 
 
 **An improvement loop owes a counted statistic, not a diagnostic** (§6): sweeps used, moves accepted, and the frames that hit the cap while still improving. A cap reached is the normal end of a loop that was working, and diagnostics are part of the golden artifact, so a code for it would fire on well-behaved charts and rebase every golden on each calibration pass. The cap is still a profile field, still fixed, and still stated.
 
+### 11.10b Chaining is a choice, and it is where the kinks are
+
+**Measured over the corpus, on the shipped pick.** 58 of 257 transitions carry a phase-1 bend as a router waypoint, and those 58 hold **295 of the drawing's 421 kinks — 70% of them.** A waypointed transition averages 5.1 kinks; every other transition averages 0.63. Narrowed to the class a reader actually complains about — two boxes directly facing each other across enough clear space to seat a straight line, bending anyway — **24 transitions carry 92 kinks, and 18 of those 24 are waypointed and carry 79 of the 92.** Nothing else in the drawing concentrates like this.
+
+**A bend's position is not the free variable. Its existence is.** Ranks run in +x (§11.3), so a bend's x *is* its rank's x, and its rank is forced — it is an intervening rank the chain has to pass through. The only free choice left is the bend's position within that rank, and that moves y alone. On `estop` the bend chaining the reversed `Latched → Clear` sits at x 2,823, which is `Tripped`'s left edge, while both of the edge's real endpoints lie between x 1,338 and 2,657 with 388 units of clear facing overlap: **no y at that x draws a zero-kink route.** So in-rank position is not the dimension and `minimize_crossings` was never going to reach this. Whether the segment is chained at all is.
+
+**An unchained segment contributes no bend nodes**, so phase 3 plans it as a net with no waypoints and the router draws it against the frame's obstacles like any other. Four consequences, all of them already handled:
+
+- *Crossings undercount.* An edge with no representation in the ranks it spans contributes no inversions there, so `total_crossings` reads low for it. `minimize_crossings` is a surrogate that the exact `Cost` overrules anyway (§11.6), and a candidate is kept only on `Cost`.
+- *Lane reservation is untouched.* `rank_derived` charges the two boundaries an edge **turns** in, and it charges them from the original edge *before* chaining, so the reserved corridor is the same either way (§11.9.5).
+- *A freed route may cut a box.* Tier 0 forbids `through_box`, so the candidate loses on `t0_violations` and is never kept. The escape hatch prices itself.
+- *A freed route may fail outright* and degrade to a straight line, which is a `RouteDegraded` finding and a Tier 0 violation for the same reason.
+
+**Keyed by `{TransId, leg}`, never by segment index.** A segment ordinal is stable within a run but a caller holding only the model cannot name one, and the re-derivation contract (§11.10a) is the whole reason these are public. `leg` is the index into the transition's own run of segments. This is the `RankPin` lesson restated: an index into an internal array is not a name.
+
+**It is a Level 1 move and nothing more.** The sweep gains a second dimension beside (state, rank): for each segment that would chain, try it unchained. Same greedy pass, same strictly-improving test on exact `Cost`, same refusal of a candidate that only fits once spacing inflated.
+
+**The two dimensions may not share one budget, and finding that out cost a regression.** Sharing `portfolio_k` between them looks obvious and is wrong: the sweep that runs first consumes candidates the other used to get, and the greedy walk is simply cut short. Measured with cuts ahead of placements on one shared 24, **`axis` went from 11,780 to 12,702** — every individual move still strictly improving, and the *search* worse anyway. A dimension bounded by the graph has no business drawing on a budget that exists to bound an unbounded one, so each sweep carries its own counter capped at `portfolio_k`. With that, `axis` reads **9,940**: better than the shared budget and better than before the dimension existed.
+
+**What it bought, measured both ways** (§5's two scales, never mixed). On the **no-space goldens**: corpus Tier 2 **277,329 → 262,560, −5.3%**, bends **413 → 384**, and no chart worse — `estop` and `led` halve, `axis` −16%, `vac` −20%. On **real text**: Tier 2 **346,827 → 335,803, −3.2%**, bends **374 → 353**, again no chart worse, with `axis` −22%, `toolchanger` −10% and `vac` −15%. Corpus kinks **421 → 397**. The audit moves **59 → 60**, the one being `bottler`'s sixth route flush along a box, which is the tripwire in `layout_tests` raised with its reason rather than quietly.
+
+**`estop`'s own kinks are not among what it fixed, and the trace says exactly why.** The cut for `Latched → Clear` is generated, is Tier-0 clean, and loses: **−512 bends, −31 crossings, −12 excess, −73 area, against +767 `label` and +264 `aspect`** for a net +403 on a 3,073 incumbent. Freeing the edge saves one bend and costs one label collision — and `w_label` is 768 against `w_bends`'s 512, so the objective is being exactly as consistent as it was fitted to be — plus an aspect swing from 1.39 to 0.73 against a DAR of 1.60. **So the residue here is a weights and label-placement question, not a search question**, and it is the first time this phase has had a defect narrowed that precisely. Held open rather than acted on: changing `w_label` to buy this back would be tuning against one chart.
+
+**What it must not become is a rule.** "Free every edge whose endpoints face each other" is the prohibit-without-providing failure this phase has already paid for three times (§11.9.3, §11.9.5, §11.10a): it would free edges whose direct route cuts a box, and the search is what tells the difference. A heuristic here has no way to know, because knowing means routing it.
+
+**So `pins` becomes a pair and the two travel together.** `SearchPins` carries §11.10a's `RankPin` rows and this section's `ChainCut` rows, because a drawing is a function of its tuple and *both*, and a caller re-deriving one needs them in one object rather than in a growing argument list.
+
 ### 11.11 One algorithm, stable by construction
 
 **There is no `quick` mode and no `polish` mode.** Layout runs one algorithm, always, and is a pure function of `(model, spaces, profile)`. No warm start, no prior layout, no incremental dirty-region path, no persisted cache.

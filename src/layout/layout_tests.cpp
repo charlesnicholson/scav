@@ -1237,7 +1237,11 @@ TEST_CASE("layout: no corpus chart runs a route flush along a box") {
   // one more segment along a box, taken because the same move takes the
   // corpus's audit from 60 defects to 57 and its canvas down a fifth. A
   // tripwire that fires on a net improvement is raised with its reason.
-  CHECK(lines <= 5);
+  //
+  // **Six since 11.10b's unchain move**: `bottler` t29, on the chart that move
+  // takes from 62,817 to 58,887. Corpus-wide the same move is -5.3% of Tier 2
+  // and 29 fewer bends, and no chart is worse.
+  CHECK(lines <= 6);
 }
 
 TEST_CASE("layout: Tier 0 at the scale target, and where the grid gives out") {
@@ -2548,3 +2552,5 @@ TEST_CASE("layout: fuzzed charts and spaces either lay out or diagnose") {
     }
   }
 }
+
+

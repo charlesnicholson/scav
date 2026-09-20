@@ -26,6 +26,7 @@ char const *kind_name(TraceKind k) {
     case TraceKind::LaneAssigned: return "lane_assigned";
     case TraceKind::RouteDegraded: return "route_degraded";
     case TraceKind::CandidateScored: return "candidate_scored";
+    case TraceKind::CandidateTerms: return "candidate_terms";
     case TraceKind::None: break;
   }
   return "none";
@@ -184,8 +185,21 @@ void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out)
           j.kstate(c, e.score.state);
           j.kv("rank", e.score.rank);
         }
+        if (e.score.trans != INVALID) {
+          j.kv("trans", e.score.trans);
+          j.kv("leg", e.score.leg);
+        }
         j.kv("t0", e.score.t0);
         j.kv("t2", e.score.t2);
+        break;
+      case TraceKind::CandidateTerms:
+        j.key("share");
+        j.raw("[");
+        for (uint32_t k = 0; k < TIER2_TERMS; ++k) {
+          if (k != 0) { j.raw(","); }
+          j.num(e.terms.share[k]);
+        }
+        j.raw("]");
         break;
       case TraceKind::None: break;
     }

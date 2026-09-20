@@ -229,14 +229,15 @@ void assign_ranks(Frame &f) {
 
 // A bend per intervening rank, so every emitted edge spans exactly one. The
 // chain keeps the original edge's segment and reversal, which is what lets
-// phase 3 walk it back into one polyline.
-void chain_long_edges(Frame &f) {
+// phase 3 walk it back into one polyline. A segment `cut` names keeps its long
+// edge instead, and reaches the router with no waypoints (11.10b).
+void chain_long_edges(Frame &f, std::vector<uint8_t> const &cut) {
   std::vector<OrderEdge> out;
   out.reserve(f.edges.size());
   for (OrderEdge const &e : f.edges) {
     uint32_t const from{ f.nodes[e.src].rank };
     uint32_t const to{ f.nodes[e.dst].rank };
-    if ((to - from) <= 1) {
+    if (((to - from) <= 1) || ((e.segment < cut.size()) && (cut[e.segment] != 0))) {
       out.push_back(e);
       continue;
     }
@@ -419,6 +420,7 @@ void squeeze_ranks(Frame &f) {
 void rank_derived(Frame &f,
                   std::vector<int32_t> &gaps,
                   std::vector<int32_t> const &seg_label,
+                  std::vector<uint8_t> const &cut,
                   scav_profile const &p,
                   FrameScratch &sc) {
   // Charged before chaining, while an edge still knows the whole span its
@@ -473,7 +475,7 @@ void rank_derived(Frame &f,
     if (to > (from + 1)) { turn(to - 1, of); }
   }
 
-  chain_long_edges(f);
+  chain_long_edges(f, cut);
   bucket_ranks(f);
   minimize_crossings(f, static_cast<uint32_t>(p.sweep_count));
 }
@@ -483,7 +485,7 @@ SubmachineOrders order_submachines(Chart const &c,
                                    scav_spaces const &s,
                                    scav_profile const &p,
                                    uint32_t threads,
-                                   std::vector<RankPin> const &pins) {
+                                   SearchPins const &pins) {
   SubmachineOrders o;
   o.sub_nodes.assign(c.submachines.size(), Span{});
   o.sub_edges.assign(c.submachines.size(), Span{});
@@ -519,6 +521,21 @@ SubmachineOrders order_submachines(Chart const &c,
     Span const segs{ g.trans_segments[box.subject] };
     if (segs.len == 0) { continue; }
     seg_label[segs.off + (segs.len / 2)] += box.w;
+  }
+
+  // `{trans, leg}` resolved to segment ordinals once, so the frame workers read
+  // a flat table rather than searching the cut list per edge (11.10b).
+  std::vector<uint8_t> cut;
+  if (!pins.cuts.empty()) {
+    cut.assign(g.segments.size(), 0);
+    for (ChainCut const &cc : pins.cuts) {
+      if ((cc.trans.v == INVALID) || (cc.trans.v >= g.trans_segments.size())) {
+        continue;
+      }
+      Span const segs{ g.trans_segments[cc.trans.v] };
+      if (cc.leg >= segs.len) { continue; }  // a leg this transition does not have
+      cut[segs.off + cc.leg] = 1;
+    }
   }
 
   std::vector<FrameOrder> frames(c.submachines.size());
@@ -592,9 +609,9 @@ SubmachineOrders order_submachines(Chart const &c,
     // is the one place a rank is a free choice rather than a consequence.
     // `first` is where this frame's nodes will sit in the merged array, and a
     // pin names them there so a caller never has to know the merge order.
-    if (!pins.empty()) {
+    if (!pins.ranks.empty()) {
       bool moved{ false };
-      for (RankPin const &pin : pins) {
+      for (RankPin const &pin : pins.ranks) {
         if ((pin.state.v == INVALID) || (pin.state.v >= sc.state_local.size())) {
           continue;
         }
@@ -609,7 +626,7 @@ SubmachineOrders order_submachines(Chart const &c,
       // the ranks are renumbered onto the ones that still hold a node.
       if (moved) { squeeze_ranks(f); }
     }
-    rank_derived(f, frames[m].gaps, seg_label, p, sc);
+    rank_derived(f, frames[m].gaps, seg_label, cut, p, sc);
 
     for (uint32_t k = 0; k < kids.len; ++k) {
       sc.state_local[c.state_ids[kids.off + k].v] = INVALID;

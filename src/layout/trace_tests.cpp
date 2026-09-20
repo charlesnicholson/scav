@@ -295,7 +295,8 @@ TEST_CASE("trace: the search re-orders per move, and every move states its verdi
   for (TraceEvent const &e : t.events) {
     if (e.kind != TraceKind::CandidateScored) { continue; }
     CHECK(e.pass <= static_cast<uint16_t>(MoveVerdict::NotBetter));
-    CHECK(e.score.state != INVALID);
+    // A move is a placement or an unchaining, never both and never neither.
+    CHECK((e.score.state == INVALID) != (e.score.trans == INVALID));
     taken += (e.pass == static_cast<uint16_t>(MoveVerdict::Taken)) ? 1U : 0U;
   }
   CHECK(scored > 0);
@@ -312,4 +313,91 @@ TEST_CASE("trace: the search re-orders per move, and every move states its verdi
     if ((e.kind != TraceKind::NetPlanned) || (e.net.waypoints == 0)) { continue; }
     CHECK(e.net.trans == back.v);
   }
+}
+
+TEST_CASE("trace: the search scores unchain moves beside placement moves") {
+  // 11.10b's dimension, seen through the trace: the back edge of a cycle is
+  // the one segment phase 1 chains, so it is the one a cut can free, and the
+  // sweep must offer it before it starts moving states between ranks.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, d, TransKind::External, {});
+  TransId const back{ build_trans(c, d, a, TransKind::External, {}) };
+
+  LayoutTrace t;
+  scav_layout_opts opts{};
+  REQUIRE(profile_named("readable", opts.profile));
+  opts.threads = 1;
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  {
+    Attached const held{ t };
+    REQUIRE(layout_run(c, {}, opts, placed, diags, nullptr, nullptr, 0));
+  }
+
+  // Exactly one cut is offered -- the back edge -- and it comes before every
+  // placement move, because the unchain sweep runs first.
+  uint32_t cuts{ 0 };
+  bool seen_pin{ false };
+  bool cut_after_pin{ false };
+  for (TraceEvent const &e : t.events) {
+    if (e.kind != TraceKind::CandidateScored) { continue; }
+    if (e.score.trans == INVALID) {
+      seen_pin = true;
+      continue;
+    }
+    ++cuts;
+    CHECK(e.score.trans == back.v);
+    CHECK(e.score.leg == 0);
+    CHECK(e.score.state == INVALID);  // a cut names no state
+    cut_after_pin = cut_after_pin || seen_pin;
+  }
+  CHECK(cuts == 1);
+  CHECK(seen_pin);
+  CHECK(!cut_after_pin);
+
+  // Every scored move states which term rejected it.
+  CHECK(count_kind(t, TraceKind::CandidateTerms) > 0);
+}
+
+TEST_CASE("trace: what a run reports as taken re-derives the run") {
+  // The whole re-derivation contract, over a chart whose search has both
+  // dimensions to choose from: tuple plus pins, and nothing left to search.
+  Chart searched;
+  Chart rederived;
+  for (Chart *c : { &searched, &rederived }) {
+    SubmachineId const root{ build_chart(*c, "t", {}) };
+    StateId const a{ build_state(*c, root, "A", StateKind::Normal, {}) };
+    StateId const b{ build_state(*c, root, "B", StateKind::Normal, {}) };
+    StateId const d{ build_state(*c, root, "C", StateKind::Normal, {}) };
+    StateId const e{ build_state(*c, root, "D", StateKind::Normal, {}) };
+    build_trans(*c, a, b, TransKind::External, {});
+    build_trans(*c, b, d, TransKind::External, {});
+    build_trans(*c, d, e, TransKind::External, {});
+    build_trans(*c, e, a, TransKind::External, {});
+    build_trans(*c, d, a, TransKind::External, {});
+  }
+
+  scav_layout_opts opts{};
+  REQUIRE(profile_named("readable", opts.profile));
+  std::vector<scav_placed> pa;
+  std::vector<scav_placed> pb;
+  std::vector<Diagnostic> da;
+  std::vector<Diagnostic> db;
+  uint32_t tuple{ INVALID };
+  SearchPins taken;
+  REQUIRE(layout_run(searched, {}, opts, pa, da, nullptr, &tuple, INVALID, nullptr,
+                     &taken));
+
+  scav_layout_opts again{ opts };
+  again.profile.portfolio_k = 0;  // the pins already hold what Level 1 found
+  REQUIRE(layout_run(rederived, {}, again, pb, db, nullptr, nullptr, tuple, nullptr,
+                     nullptr, &taken));
+
+  CHECK(layout_structural_hash(searched) == layout_structural_hash(rederived));
+  CHECK(layout_coordinate_hash(searched) == layout_coordinate_hash(rederived));
 }

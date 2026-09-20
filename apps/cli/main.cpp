@@ -18,9 +18,11 @@ constexpr std::string_view USAGE{
   "  fmt [--check] <file>...      canonical print, in place; --check gates\n"
   "  check <file>                 structural validation, exit 1 on a finding\n"
   "  deps [--target NAME] <file>  the document network as a depfile\n"
-  "  dump [--hash|--json] [--layout] [--portfolio-row N] [--trace] <file>  the "
-  "model; --layout adds geometry, --trace its decisions\n"
-  "  render [-o FILE] [--embed-font] [--profile NAME] [--portfolio-row N] <file>"
+  "  dump [--hash|--json] [--layout] [--portfolio-row N] [--trace "
+  "[--trace-search]] <file>  the model; --layout adds geometry, --trace its "
+  "decisions, --cut T:L leaves one segment unchained\n"
+  "  render [-o FILE] [--embed-font] [--profile NAME] [--portfolio-row N] "
+  "[--cut T:L] <file>"
   "   chart -> SVG\n"
   "  selftest [--against FILE]   recompute the layout hashes on this toolchain "
   "and diff against the goldens\n"
@@ -40,7 +42,9 @@ int dispatch(int argc, char **argv) {
     bool json{ false };
     bool layout{ false };
     bool trace{ false };
+    bool trace_search{ false };
     uint32_t row{ INVALID };
+    std::vector<ChainCut> cuts;
     for (int i = 2; i < argc; ++i) {
       std::string_view const arg{ argv[i] };
       bool *flag{ nullptr };
@@ -53,6 +57,12 @@ int dispatch(int argc, char **argv) {
         if (!portfolio_row(argv[i], row)) { return usage(); }
         continue;
       }
+      if (arg == "--cut") {
+        if ((i + 1) >= argc) { return usage(); }
+        ++i;
+        if (!chain_cut(argv[i], cuts)) { return usage(); }
+        continue;
+      }
       if (arg == "--hash") {
         flag = &hash;
       } else if (arg == "--json") {
@@ -61,6 +71,8 @@ int dispatch(int argc, char **argv) {
         flag = &layout;
       } else if (arg == "--trace") {
         flag = &trace;
+      } else if (arg == "--trace-search") {
+        flag = &trace_search;
       }
       if (flag != nullptr) {
         if (*flag) { return usage(); }
@@ -75,11 +87,12 @@ int dispatch(int argc, char **argv) {
     // the model's: `--hash` and a bare dump have nothing to point at.
     // `--trace` is layout's, like `--portfolio-row`: it prints the decisions
     // one run made and there are none without a run (11.16).
-    if ((path == nullptr) || (hash && (json || layout)) ||
-        (((row != INVALID) || trace) && !layout)) {
+    // `--trace-search` is a mode of `--trace`, not a second flag beside it.
+    if ((path == nullptr) || (hash && (json || layout)) || (trace_search && !trace) ||
+        (((row != INVALID) || trace || !cuts.empty()) && !layout)) {
       return usage();
     }
-    return run_dump(path, hash, json, layout, row, trace);
+    return run_dump(path, hash, json, layout, row, trace, trace_search, cuts);
   }
 
   if (verb == "render") {
@@ -87,6 +100,7 @@ int dispatch(int argc, char **argv) {
     char const *profile{ "readable" };
     bool embed{ false };
     uint32_t row{ INVALID };
+    std::vector<ChainCut> cuts;
     for (int i = 2; i < argc; ++i) {
       std::string_view const arg{ argv[i] };
       if (arg == "--portfolio-row") {
@@ -96,6 +110,10 @@ int dispatch(int argc, char **argv) {
         if (((i + 1) >= argc) || (row != INVALID)) { return usage(); }
         ++i;
         if (!portfolio_row(argv[i], row)) { return usage(); }
+      } else if (arg == "--cut") {
+        if ((i + 1) >= argc) { return usage(); }
+        ++i;
+        if (!chain_cut(argv[i], cuts)) { return usage(); }
       } else if (arg == "-o") {
         if (((i + 1) >= argc) || (out != nullptr)) { return usage(); }
         out = argv[++i];
@@ -112,7 +130,7 @@ int dispatch(int argc, char **argv) {
       }
     }
     if (path == nullptr) { return usage(); }
-    return run_render(path, out, embed, profile, row);
+    return run_render(path, out, embed, profile, row, cuts);
   }
 
   if (verb == "selftest") {

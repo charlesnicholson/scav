@@ -41,6 +41,30 @@ bool portfolio_row(char const *text, uint32_t &out) {
   return true;
 }
 
+// `TRANS:LEG`, appended. Names a segment for phase 1 to leave unchained, so a
+// reader can see the drawing the objective declined (11.10b), the way
+// `--portfolio-row` shows the tuple it declined. False on anything else.
+bool chain_cut(char const *text, std::vector<ChainCut> &out) {
+  std::string_view const arg{ text };
+  size_t const colon{ arg.find(':') };
+  if ((colon == std::string_view::npos) || (colon == 0) ||
+      (colon + 1 == arg.size())) {
+    return false;
+  }
+  uint32_t trans{ 0 };
+  uint32_t leg{ 0 };
+  std::from_chars_result const a{
+    std::from_chars(arg.data(), arg.data() + colon, trans)
+  };
+  std::from_chars_result const b{
+    std::from_chars(arg.data() + colon + 1, arg.data() + arg.size(), leg)
+  };
+  if ((a.ec != std::errc{}) || (a.ptr != (arg.data() + colon))) { return false; }
+  if ((b.ec != std::errc{}) || (b.ptr != (arg.data() + arg.size()))) { return false; }
+  out.push_back({ .trans = TransId{ trans }, .leg = leg });
+  return true;
+}
+
 void load_and_report(char const *path, bool validate, Loaded &out) {
   std::string failed;
   bool const loaded{ load_file(path, out.loader, out.chart, out.diags, failed) };

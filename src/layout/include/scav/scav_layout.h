@@ -106,6 +106,26 @@ struct RankPin {
   uint32_t rank{ 0 };
 };
 
+// A segment phase 1 leaves unchained, so it reaches the router as a net with no
+// waypoints and is drawn against the frame's obstacles rather than through the
+// corridor the layering would have sent it down (11.10b).
+//
+// **Keyed by transition and leg, never by segment ordinal**, for the reason
+// above: an index into an internal array is not a name a caller can produce.
+// `leg` indexes the transition's own run of segments, which phase 0 splits it
+// into (11.1), and is 0 for a transition that crosses no boundary.
+struct ChainCut {
+  TransId trans{ INVALID };
+  uint32_t leg{ 0 };
+};
+
+// Everything besides the tuple that a drawing is a function of, so re-deriving
+// one is two arguments and not five (11.10a, 11.10b).
+struct SearchPins {
+  std::vector<RankPin> ranks;
+  std::vector<ChainCut> cuts;
+};
+
 // Rows in the fixed table of chart-global phase-2 tuples Level 2 chooses
 // between: the box packer, compaction, where a frame's desired ratio comes
 // from, and whether its rank run folds (11.10, 11.10a). The bound on
@@ -128,10 +148,10 @@ inline constexpr uint32_t LAYOUT_SEARCH_ROWS{ 16 };
 // bounds it -- `INVALID` searches, and anything else must be below
 // `LAYOUT_SEARCH_ROWS`.
 //
-// `pins` seeds phase 1 with placements a previous run's `taken` reported, which
-// is the other half of re-deriving a drawing from the model: with the tuple in
-// `row` and `portfolio_k` at zero it reproduces that run exactly, searching
-// nothing. Level 1 continues from them when it has budget.
+// `pins` seeds phase 1 with what a previous run's `taken` reported, which is the
+// other half of re-deriving a drawing from the model: with the tuple in `row`
+// and `portfolio_k` at zero it reproduces that run exactly, searching nothing.
+// Level 1 continues from them when it has budget.
 bool layout_run(Chart &c,
                 scav_spaces const &s,
                 scav_layout_opts const &o,
@@ -141,8 +161,8 @@ bool layout_run(Chart &c,
                 uint32_t *tuple = nullptr,
                 uint32_t row = INVALID,
                 uint32_t *moves = nullptr,
-                std::vector<RankPin> *taken = nullptr,
-                std::vector<RankPin> const *pins = nullptr);
+                SearchPins *taken = nullptr,
+                SearchPins const *pins = nullptr);
 
 // The decisions behind the drawing that ships, as JSON in `out` (11.16).
 // Debug-only: the trace is not a geometry column, is not hashed, and no builder
@@ -154,13 +174,20 @@ bool layout_run(Chart &c,
 // drawing with the sink attached and nothing searching. `threads` is one for
 // the traced run, so event order is the algorithm's and not the scheduler's.
 // The geometry is the searched run's, byte for byte.
+// `Shipped` traces the drawing that won and nothing else. `Search` traces the
+// search itself, every rejected candidate included, which is what answers "why
+// was that move not taken" -- at the price that the stream holds drawings
+// nobody sees and no marker says which of them shipped.
+enum class TraceScope : uint32_t { Shipped, Search };
+
 bool layout_trace_json(Chart &c,
                        scav_spaces const &s,
                        scav_layout_opts const &o,
                        std::vector<scav_placed> &placed,
                        std::vector<Diagnostic> &diags,
                        std::vector<char> &out,
-                       uint32_t row = INVALID);
+                       uint32_t row = INVALID,
+                       TraceScope scope = TraceScope::Shipped);
 
 
 // Split so a pure translation moves the coordinate hash and not the structural

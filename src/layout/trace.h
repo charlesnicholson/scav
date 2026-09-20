@@ -5,6 +5,7 @@
 // not hashed, not serialized with a chart, consumed by no builder.
 
 #include "scav/scav_core.h"
+#include "scav/scav_layout.h"
 
 #include <cstdint>
 #include <vector>
@@ -25,6 +26,7 @@ enum class TraceKind : uint16_t {
   LaneAssigned,    // nudging put a run in a corridor lane
   RouteDegraded,   // a transition fell back to a straight line
   CandidateScored, // one row of 11.10's table, or one Level 1 move
+  CandidateTerms,  // the nine Tier-2 shares behind the score above
 };
 
 // Which of 11.5's seating passes moved a seat; `SeatMoved.pass`.
@@ -45,7 +47,10 @@ struct TraceNet { uint32_t seg, trans, waypoints; int32_t sx, sy, dx, dy; };
 struct TracePoint { int32_t x, y; };
 struct TraceSeat { uint32_t net, end; int32_t from_x, from_y, to_x, to_y; };
 struct TraceLane { uint32_t net, lane; int32_t at; };
-struct TraceScore { uint32_t row, state, rank; int32_t t0; int64_t t2; };
+struct TraceScore { uint32_t row, state, rank, trans, leg; int32_t t0; int64_t t2; };
+// Basis points of the scored sum, in CostTerms order, so a rejected move says
+// which term rejected it without the event carrying nine 64-bit quantities.
+struct TraceTerms { int32_t share[TIER2_TERMS]; };
 
 struct TraceEvent {
   TraceKind kind{ TraceKind::None };
@@ -62,6 +67,7 @@ struct TraceEvent {
     TraceSeat seat;
     TraceLane lane;
     TraceScore score;
+    TraceTerms terms;
   };
 };
 
