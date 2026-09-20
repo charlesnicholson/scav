@@ -69,6 +69,18 @@ scav_profile readable() {
   return p;
 }
 
+// The 2k shapes with the move sweep off. What one thread count has to agree
+// with another about *in the search* is covered on the corpus below, at the
+// shipped depth and on every chart; what the scale targets are here for is the
+// sharded phases, and a blind sweep over a 2k neighbourhood multiplies those by
+// thousands of layouts that test nothing new (11.10).
+scav_profile scale_readable() {
+  scav_profile p{ readable() };
+  p.portfolio_k = 0;
+  p.portfolio_m = 1;
+  return p;
+}
+
 void load_corpus(char const *name, Chart &c) {
   std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
   path += name;
@@ -195,7 +207,7 @@ Chart tied_chart() {
 }
 
 int64_t timed(Chart &c, uint32_t threads) {
-  scav_layout_opts const o{ .profile = readable(), .router = 0, .threads = threads };
+  scav_layout_opts const o{ .profile = scale_readable(), .router = 0, .threads = threads };
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
   auto const t0{ std::chrono::steady_clock::now() };
@@ -215,6 +227,11 @@ TEST_CASE("determinism: the corpus lays out to one answer at every thread count"
   // holds unshipped -- a row nothing runs is a row nothing proves determinate.
   scav_profile p{ readable() };
   p.portfolio_m = 4;
+  // **Not the shipped move budget.** What this case covers is breadth -- every
+  // chart, every worker count, every row of the table -- and the sweep is a
+  // multiplier on all three. The search's own thread-invariance is the case
+  // below, at the depth that ships, on the charts that move the most (11.10).
+  p.portfolio_k = 24;
   REQUIRE(profile_validate(p));
   std::string shards;
   for (char const *name : CORPUS) {
@@ -235,15 +252,36 @@ TEST_CASE("determinism: the corpus lays out to one answer at every thread count"
   MESSAGE("corpus shard counts: ", shards);
 }
 
-TEST_CASE("determinism: the scale targets lay out to one answer at every thread count") {
+TEST_CASE("determinism: a searched drawing is the same drawing at every thread count") {
+  // The depth that ships, on the three charts whose search takes the most
+  // moves. **This is the case that matters now that candidates are scored in
+  // parallel** (11.10c): a round is enumerated, fanned out and reduced in
+  // enumeration order, and if that reduction were order-dependent it is here it
+  // would show. Breadth is the case above; this one is depth.
   scav_profile const p{ readable() };
+  for (char const *name : { "mill.scav", "bottler.scav", "vac.scav" }) {
+    CAPTURE(name);
+    Chart first;
+    load_corpus(name, first);
+    Snapshot const want{ lay_out(first, p, 1) };
+    for (uint32_t const threads : { 2U, 8U, 16U }) {
+      CAPTURE(threads);
+      Chart c;
+      load_corpus(name, c);
+      check_same(lay_out(c, p, threads), want);
+    }
+  }
+}
+
+TEST_CASE("determinism: the scale targets lay out to one answer at every thread count") {
+  scav_profile const p{ scale_readable() };
   SUBCASE("nested") { check_scale_chart("nested 2k", nested_2k_chart, p, true); }
   SUBCASE("flat") { check_scale_chart("flat 2k", flat_2k_chart, p, false); }
 }
 
 TEST_CASE("determinism: the scheduling-delay injector moves nothing at scale") {
   DelayGuard const guard;
-  scav_profile const p{ readable() };
+  scav_profile const p{ scale_readable() };
   Chart reference{ nested_2k_chart() };
   Snapshot const want{ lay_out(reference, p, 1) };
 
@@ -260,7 +298,7 @@ TEST_CASE("determinism: the scheduling-delay injector moves nothing at scale") {
 
 TEST_CASE("determinism: the flat target survives the injector too") {
   DelayGuard const guard;
-  scav_profile const p{ readable() };
+  scav_profile const p{ scale_readable() };
   Chart reference{ flat_2k_chart() };
   Snapshot const want{ lay_out(reference, p, 1) };
 

@@ -1425,6 +1425,32 @@ So the residue is still a *grouping* question rather than a spacing one, and the
 
 ### 11.10 Search
 
+**The engine is a search, and everything else exists to serve it.** Stated 2026-09-20. The goal is not to arrive at one good drawing cheaply and not to avoid searching — it is to run a **massively optimised search that uses every core the host has, and returns a near-optimal drawing**. A phase is not an answer; it is a candidate generator. A cost is not a report; it is the objective. Latency is not a requirement the search must fit inside; it is the budget the optimisation work buys back, and every optimisation in §11.10c is spent on depth rather than banked.
+
+**This is why the two size shifts were deleted rather than tuned** (§11.10c): a rule that searches a big chart *less* is the design conceding the goal. And it is why the measurement that matters most about any stage is not "is this fast" but "does searching it harder produce a better drawing". Measured on the corpus when the move budget went from 24 to convergence: Tier 2 **−36.7%** on the no-space goldens and **−27.4%** on real text, bends **384 → 239** and **353 → 260**, no chart worse on either scale. A design whose quality is that responsive to depth is one to search harder, not one to replace.
+
+**What depth bought, and what it exposed. Measured 2026-09-20.** The move budget went from 24 to **1,024** (`profile_version` 9). Every corpus chart *converges* by 8,192 — identical at 65,536 and 262,144 — so the shipped value is two thirds of the way to the greedy's own fixed point, and the rest is held back only by what a candidate costs.
+
+| | at 24 | at 1,024 | at convergence |
+|---|---|---|---|
+| Tier 2, no-space goldens | 262,560 | 196,226 | 166,328 |
+| Tier 2, real text | 335,803 | — | 243,642 |
+| bends, no-space | 384 | — | 239 |
+| **reader-visible audit defects** | **60** | **46** | — |
+| route segments drawn | 654 | 568 | — |
+
+The audit is the answer to "is the Cost drop reader-visible": lanes closer than a line of text **36 → 26**, routes sharing a run **4 → 1**, labels over a state box **6 → 5**, texts overprinting **3 → 2**.
+
+**And a deeper search amplifies whatever the objective fails to price.** Three reader-visible properties got *worse* at 1,024 while `Cost` fell 25%: `gauntlet/fork`'s branches leave through a 64-unit bar cap again (2, having been 0 — §11.5's face rule, which nothing prices), routes flush along a box went 6 → 10 in the no-space tripwire and 7 → 8 on the corpus (§11.5's separator channel, which nothing prices), and `gauntlet/regions` doubles back three times rather than two at `compact` (§11.8's unrouted middle segment, which nothing prices). **A shallow search was accidentally protecting these**; it stopped at an arrangement that happened to avoid them. None of the three is an argument against depth, and none is a number to tune the budget against — each is a term the objective is missing, and depth is what made that visible.
+
+**Guided, fast and wide — and only one of the three is started.** Near-optimal is not reachable by enumerating harder; it is reachable by proposing the *right* candidates, evaluating them at the rate a modern processor allows, and keeping enough of them alive to escape a local optimum.
+
+- **Guided** is the one not built. The move sweep is blind: every (state, rank) pair and every chained segment, in ordinal order. `Cost` already knows which routes carry the bends, which labels collide and which frames are the expensive ones — that attribution should choose the moves, so a candidate is a hypothesis about a named defect rather than the next index. This is the highest-value unbuilt item in the section.
+- **Wide** is started: a round of candidates is scored across every core and reduced in enumeration order, and Level 2's rows run the same way (§11.10c). It is not yet wide in the sense that matters — one incumbent at a time, so the width is within a round rather than across a frontier.
+- **Fast** is started: a candidate reuses every frame its move did not touch, which is 19 of 20 on `mill`. Phase 2 is the remaining hot phase.
+
+**What is built today is the shallow end of that, and is described as such below.** Nothing backtracks and nothing maximises globally; the levels are a fixed table and a greedy hill climb that stops at the first local optimum. That is a starting point with a measured slope, not the destination.
+
 **Nothing here backtracks and nothing maximises globally, and a sub-optimal drawing is the expected output rather than a defect.** Stated plainly 2026-09-19, after a review of the side-by-side page read the corpus as "lots of unnecessary and indirect polyline routing and bizarre state placement choices compared to PlantUML" — which is correct, and is what this section describes. Every stage is greedy and produces one answer:
 
 | | chosen by | searched |

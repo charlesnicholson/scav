@@ -180,6 +180,38 @@ bool ortho_blocks_v(scav_rect const &r, int32_t x, int32_t y0, int32_t y1) {
   return (r.h > 0) && (x > r.x) && (x < (r.x + r.w)) && (y0 < (r.y + r.h)) && (y1 > r.y);
 }
 
+// First index with `v[i] > key`, and first with `v[i] >= key`, over a sorted
+// unique array. A box blocks only the cells it covers, so these bound the
+// blocking loops instead of every cell being tested against every box -- which
+// was O(boxes * nx * ny), and nx and ny are each O(boxes) (11.10c).
+uint32_t ortho_after(std::vector<int32_t> const &v, int32_t key) {
+  uint32_t lo{ 0 };
+  uint32_t hi{ static_cast<uint32_t>(v.size()) };
+  while (lo < hi) {
+    uint32_t const mid{ lo + ((hi - lo) / 2) };
+    if (v[mid] > key) {
+      hi = mid;
+    } else {
+      lo = mid + 1;
+    }
+  }
+  return lo;
+}
+
+uint32_t ortho_from(std::vector<int32_t> const &v, int32_t key) {
+  uint32_t lo{ 0 };
+  uint32_t hi{ static_cast<uint32_t>(v.size()) };
+  while (lo < hi) {
+    uint32_t const mid{ lo + ((hi - lo) / 2) };
+    if (v[mid] >= key) {
+      hi = mid;
+    } else {
+      lo = mid + 1;
+    }
+  }
+  return lo;
+}
+
 void ortho_sort_unique(std::vector<int32_t> &v) {
   scav_stable_sort(v, [](int32_t a, int32_t b) { return a < b; });
   uint32_t kept{ 0 };
@@ -734,20 +766,31 @@ bool ortho_grid(scav_rect const &region,
   out.pass_v.assign(static_cast<size_t>(out.ny() - 1) * out.nx(), 1);
   for (scav_rect const &box : obstacles) {
     // Blocking against the bumper makes "no closer than `clear` to a box" a
-    // property of the graph.
+    // property of the graph. The bounds below are `ortho_blocks_h` and
+    // `ortho_blocks_v` solved for their index ranges rather than evaluated per
+    // cell; the predicates stay as the statement of what is blocked.
     scav_rect const r{ grow(box, clear) };
-    for (uint32_t iy = 0; iy < out.ny(); ++iy) {
-      for (uint32_t ix = 0; (ix + 1) < out.nx(); ++ix) {
-        if (ortho_blocks_h(r, out.ys[iy], out.xs[ix], out.xs[ix + 1])) {
-          out.pass_h[(iy * (out.nx() - 1)) + ix] = 0;
-        }
+    if (r.w > 0) {
+      // y strictly inside the box, and the cell [xs[ix], xs[ix+1]] overlapping it.
+      uint32_t const iy0{ ortho_after(out.ys, r.y) };
+      uint32_t const iy1{ ortho_from(out.ys, r.y + r.h) };
+      uint32_t const after_x{ ortho_after(out.xs, r.x) };
+      uint32_t const ix0{ (after_x == 0) ? 0U : (after_x - 1U) };
+      uint32_t const ix1{ imin(ortho_from(out.xs, r.x + r.w), out.nx() - 1) };
+      for (uint32_t iy = iy0; iy < iy1; ++iy) {
+        uint8_t *const row{ out.pass_h.data() + (static_cast<size_t>(iy) * (out.nx() - 1)) };
+        for (uint32_t ix = ix0; ix < ix1; ++ix) { row[ix] = 0; }
       }
     }
-    for (uint32_t iy = 0; (iy + 1) < out.ny(); ++iy) {
-      for (uint32_t ix = 0; ix < out.nx(); ++ix) {
-        if (ortho_blocks_v(r, out.xs[ix], out.ys[iy], out.ys[iy + 1])) {
-          out.pass_v[(iy * out.nx()) + ix] = 0;
-        }
+    if (r.h > 0) {
+      uint32_t const ix0{ ortho_after(out.xs, r.x) };
+      uint32_t const ix1{ ortho_from(out.xs, r.x + r.w) };
+      uint32_t const after_y{ ortho_after(out.ys, r.y) };
+      uint32_t const iy0{ (after_y == 0) ? 0U : (after_y - 1U) };
+      uint32_t const iy1{ imin(ortho_from(out.ys, r.y + r.h), out.ny() - 1) };
+      for (uint32_t iy = iy0; iy < iy1; ++iy) {
+        uint8_t *const row{ out.pass_v.data() + (static_cast<size_t>(iy) * out.nx()) };
+        for (uint32_t ix = ix0; ix < ix1; ++ix) { row[ix] = 0; }
       }
     }
   }

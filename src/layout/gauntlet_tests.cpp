@@ -711,11 +711,13 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     CHECK(shipped_through == 0);
     CHECK(cost_columns(shipped.c, shipped.g, p).through_box == 0);
     // The other half of the hole: the route still leaves and returns along one
-    // line. Four at both profiles until 11.9.5's reservation, three at `compact`
-    // since, and two at both once a placement move could put the two regions
-    // somewhere the long way round is shorter -- the arrangement moving, not
-    // the hole closing. 11.8's to close.
-    CHECK(shipped_back == ((p.profile_id == compact().profile_id) ? 2U : 4U));
+    // line. Four at both profiles until 11.9.5's reservation, three at
+    // `compact` since, two at both once a placement move could reach an
+    // arrangement where the long way round is shorter -- and **three at both
+    // since the budget went to 1,024** (11.10). The arrangement is moving, not
+    // the hole closing, and a deeper search trading one of these for a cheaper
+    // `Cost` is the objective not pricing a doubling-back leg. 11.8's to close.
+    CHECK(shipped_back == 3);
 
     // 11.5's face rule, which picks a face by how far the target lies outside
     // the box on each axis rather than by the distance to a point on it. A
@@ -730,14 +732,18 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     Laid fork_zero;
     lay("fork.scav", one_row(p), fork_zero);
     CHECK(capped_branches(fork_zero) == 2);
-    // And what ships: zero at both profiles since 11.10a's placement move. The
-    // rule is still the defect -- row 0 above still reads two -- but a move puts
-    // the branch beside the bar rather than below it, so the y separation stops
-    // dominating and nothing leaves through the bar's own cap. That is the
-    // first thing in the tree to fix this by choosing a better arrangement
-    // rather than by excusing the rule.
+    // And what ships: zero at both profiles from 11.10a's placement move until
+    // the budget went to 1,024, **two at `readable` since** (11.10). A shallow
+    // search
+    // stopped at an arrangement that happened to put the branch beside the bar;
+    // a deeper one keeps going to a cheaper `Cost` that puts it back below.
+    // Nothing prices leaving through a 64-unit cap when a 960-unit face is
+    // free, so depth cannot be expected to preserve it -- **a deeper search
+    // amplifies what the objective fails to price**, which is the finding here
+    // and the reason 11.5's face rule is the fix rather than the budget.
     Laid fork_shipped;
     lay("fork.scav", p, fork_shipped);
-    CHECK(capped_branches(fork_shipped) == 0);
+    CHECK(capped_branches(fork_shipped) ==
+          ((p.profile_id == compact().profile_id) ? 0U : 2U));
   }
 }

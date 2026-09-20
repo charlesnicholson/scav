@@ -178,7 +178,13 @@ TEST_CASE("bench: every registered router scores the corpus, term by term") {
 }
 
 TEST_CASE("bench: every registered router is timed over the corpus and at scale") {
-  scav_profile const p{ readable() };
+  // **One layout per chart, not a search.** The floors below are written to
+  // catch a router that arrives quadratic, and a move sweep multiplies every
+  // one of them by thousands of layouts -- which measures the search rather
+  // than the router and buries the signal this case exists for (11.10c).
+  scav_profile p{ readable() };
+  p.portfolio_k = 0;
+  p.portfolio_m = 1;
   Chart nested{ nested_2k_chart() };
   Chart flat{ flat_2k_chart() };
   REQUIRE(nested.states.size() >= 2000);
