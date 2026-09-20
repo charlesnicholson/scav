@@ -16,6 +16,7 @@
 #include "doctest.h"
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace {
@@ -813,5 +814,90 @@ TEST_CASE("route: nets join only where one ends exactly where the next begins") 
     CHECK((r.points[1] == meet));
     CHECK((r.points[2] == scav_point{ .x = meet.x + ScriptedRouter::STRAY,
                                       .y = meet.y + ScriptedRouter::STRAY }));
+  }
+}
+
+namespace {
+
+// Every corpus chart, by the bare name, so the reuse below is held to real
+// frames rather than to hand-built ones.
+constexpr char const *CORPUS[]{ "axis.scav",  "bottler.scav",     "brew.scav",
+                                "dock.scav",  "estop.scav",       "led.scav",
+                                "mill.scav",  "ota.scav",         "tcp.scav",
+                                "toolchanger.scav", "vac.scav" };
+
+void load_corpus_chart(char const *name, Chart &c) {
+  std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
+  path += name;
+  Loader loader;
+  std::vector<Diagnostic> diags;
+  std::string failed;
+  REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
+}
+
+bool same_routes(Routes const &a, Routes const &b) {
+  return same_rows(a.points, b.points) && same_rows(a.route, b.route) &&
+         same_rows(a.port, b.port) && same_rows(a.slots, b.slots) &&
+         same_rows(a.placed, b.placed) && (a.failed == b.failed) &&
+         (a.outside_region == b.outside_region) && (a.unreachable == b.unreachable) &&
+         (a.too_large == b.too_large) && (a.reseated == b.reseated) &&
+         (a.unplaced == b.unplaced);
+}
+
+}  // namespace
+
+TEST_CASE("route: a reused frame answers exactly what routing it again would") {
+  // 11.10c's whole bet. A Level 1 move leaves every frame but one translated,
+  // and a translated frame is answered by translating its answer -- but only if
+  // that is the same answer, which is what this pins on real geometry.
+  scav_profile p{};
+  REQUIRE(profile_named("readable", p));
+  Router const *const router{ router_at(0) };
+  REQUIRE(router != nullptr);
+
+  for (char const *name : CORPUS) {
+    CAPTURE(name);
+    Chart c;
+    load_corpus_chart(name, c);
+    SplitGraph const g{ decompose(c) };
+    SubmachineOrders const base_o{ order_submachines(c, g, {}, p, 1, {}) };
+    SizedLayout base_z;
+    std::vector<Diagnostic> diags;
+    REQUIRE(size_layout(c, g, base_o, {}, p, base_z, diags));
+    RouteCache base;
+    Routes const base_r{
+      route_transitions(c, g, base_o, base_z, {}, p, *router, 1, nullptr, &base)
+    };
+
+    // Every single-state move the chart admits, capped so the suite stays a
+    // suite; each one is a fresh layout the cache has never seen.
+    uint32_t tried{ 0 };
+    for (uint32_t st = 0; (st < c.states.size()) && (tried < 12); ++st) {
+      if ((c.states[st].live == 0) || (base_o.state_node[st] == INVALID)) { continue; }
+      uint32_t const frame{ c.states[st].parent.v };
+      if (frame >= base_o.sub_ranks.size()) { continue; }
+      uint32_t const ranks{ base_o.sub_ranks[frame] };
+      uint32_t const at{ base_o.nodes[base_o.state_node[st]].rank };
+      for (uint32_t r = 0; (r < ranks) && (tried < 12); ++r) {
+        if (r == at) { continue; }
+        ++tried;
+        CAPTURE(st);
+        CAPTURE(r);
+        SearchPins const pins{ .ranks = { { .state = StateId{ st }, .rank = r } } };
+        SubmachineOrders const o{ order_submachines(c, g, {}, p, 1, pins) };
+        SizedLayout z;
+        std::vector<Diagnostic> spilled;
+        if (!size_layout(c, g, o, {}, p, z, spilled)) { continue; }
+        Routes const cold{ route_transitions(c, g, o, z, {}, p, *router, 1) };
+        Routes const warm{ route_transitions(c, g, o, z, {}, p, *router, 1, &base) };
+        CHECK(same_routes(cold, warm));
+      }
+    }
+    CHECK(tried > 0);
+    // And the base itself: routing with its own cache is routing it again.
+    Routes const again{
+      route_transitions(c, g, base_o, base_z, {}, p, *router, 1, &base)
+    };
+    CHECK(same_routes(base_r, again));
   }
 }

@@ -1411,6 +1411,7 @@ namespace scav {
 // shipping build keeps them internal.
 bool inflation_done(uint32_t fewest, uint32_t degraded, uint32_t unreachable, bool &keep);
 uint32_t search_tuple_count(scav_profile const &p, uint32_t entity_count);
+uint32_t search_move_budget(scav_profile const &p, uint32_t entity_count);
 void search_tuple(scav_profile &p,
                   DarSource &dar,
                   Compaction &pack,
@@ -1496,51 +1497,43 @@ TEST_CASE("layout: the table's first row is the profile as given") {
   }
 }
 
-TEST_CASE("layout: how many tuples a chart runs is closed form and model-derived") {
-  // M halves for every doubling of the entity count past 512, so a chart under
-  // 1,024 entities gets the whole of M and either 2k shape gets one row. Eight
-  // is the whole table and the largest M the validator admits.
+TEST_CASE("layout: how much a chart is searched does not depend on how big it is") {
+  // **This used to halve for every doubling of the entity count past 512**, so
+  // a 2k chart ran one row and a 16k one scored no moves at all. Quality comes
+  // before latency, so what a big chart gets is the whole of M and the whole of
+  // K, and the cost of a candidate is what was fixed instead (11.10c).
   scav_profile p{ readable() };
-  struct Row {
-    uint32_t entities;
-    uint32_t at_one, at_four, at_eight;
-  };
-  for (Row const &row :
-       { Row{ .entities = 0, .at_one = 1, .at_four = 4, .at_eight = 8 },
-         Row{ .entities = 1, .at_one = 1, .at_four = 4, .at_eight = 8 },
-         Row{ .entities = 1023, .at_one = 1, .at_four = 4, .at_eight = 8 },
-         Row{ .entities = 1024, .at_one = 1, .at_four = 2, .at_eight = 4 },
-         Row{ .entities = 2047, .at_one = 1, .at_four = 2, .at_eight = 4 },
-         Row{ .entities = 2048, .at_one = 1, .at_four = 1, .at_eight = 2 },
-         Row{ .entities = 6000, .at_one = 1, .at_four = 1, .at_eight = 1 } }) {
-    CAPTURE(row.entities);
-    p.portfolio_m = 1;
-    CHECK(search_tuple_count(p, row.entities) == row.at_one);
-    p.portfolio_m = 4;
-    CHECK(search_tuple_count(p, row.entities) == row.at_four);
-    p.portfolio_m = 8;
-    CHECK(search_tuple_count(p, row.entities) == row.at_eight);
-    CHECK(profile_validate(p));
+  for (uint32_t entities : { 0U, 1U, 1023U, 1024U, 2048U, 6000U, 1U << 12U,
+                             0xFFFF'FFFFU }) {
+    CAPTURE(entities);
+    for (int32_t m : { 1, 4, 8 }) {
+      p.portfolio_m = m;
+      CHECK(search_tuple_count(p, entities) == static_cast<uint32_t>(m));
+      CHECK(profile_validate(p));
+    }
+    for (int32_t k : { 0, 1, 24, 64 }) {
+      p.portfolio_k = k;
+      CHECK(search_move_budget(p, entities) == static_cast<uint32_t>(k));
+    }
   }
-
-  // Past 4,096 entities the shift bites into the largest M the validator
-  // admits, and the floor is what answers.
-  p.portfolio_m = 8;
-  CHECK(search_tuple_count(p, 1U << 12U) == 1);
-  CHECK(search_tuple_count(p, 0xFFFF'FFFFU) == 1);
 
   // A profile this never saw validated is held inside the table all the same:
   // a row index past its last row would repeat a tuple already run.
   p.portfolio_m = 64;
   CHECK(!profile_validate(p));
   CHECK(search_tuple_count(p, 1) == LAYOUT_SEARCH_ROWS);
+  // And a negative in either field is floored rather than wrapped.
+  p.portfolio_m = -1;
+  CHECK(search_tuple_count(p, 1) == 1);
+  p.portfolio_k = -1;
+  CHECK(search_move_budget(p, 1) == 0);
 
-  // Both 2k shapes, which is the claim the rule is written for.
+  // Both 2k shapes get the whole table, which is the claim the change is about.
   Chart nested{ nested_2k_chart() };
   Chart flat{ flat_2k_chart() };
   p.portfolio_m = 4;
-  CHECK(search_tuple_count(p, layout_entity_count(nested)) == 1);
-  CHECK(search_tuple_count(p, layout_entity_count(flat)) == 1);
+  CHECK(search_tuple_count(p, layout_entity_count(nested)) == 4);
+  CHECK(search_tuple_count(p, layout_entity_count(flat)) == 4);
 }
 
 TEST_CASE("layout: the portfolio reduces in index order and a tie keeps the lower row") {

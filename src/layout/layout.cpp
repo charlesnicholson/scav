@@ -235,12 +235,15 @@ Candidate search_candidate(Chart const &c,
                            Fold fold,
                            Router const &router,
                            uint32_t threads,
-                           std::vector<Diagnostic> &diags) {
+                           std::vector<Diagnostic> &diags,
+                           RouteCache const *reuse = nullptr,
+                           RouteCache *fill = nullptr) {
   Candidate out;
   if (!size_layout(c, g, orders, s, knobs, out.sized, diags, dar, pack, fold)) {
     return out;
   }
-  out.routes = route_transitions(c, g, orders, out.sized, s, knobs, router, threads);
+  out.routes = route_transitions(c, g, orders, out.sized, s, knobs, router, threads,
+                                 reuse, fill);
 
   // `out` carries the best attempt so far, and `done` is set from that one
   // rather than from whichever attempt was just made.
@@ -257,7 +260,8 @@ Candidate search_candidate(Chart const &c,
     if (!size_layout(c, g, orders, s, wider, next_sized, spilled, dar, pack, fold)) {
       break;
     }
-    Routes next{ route_transitions(c, g, orders, next_sized, s, wider, router, threads) };
+    Routes next{ route_transitions(c, g, orders, next_sized, s, wider, router,
+                                   threads) };
     bool keep{ false };
     done = inflation_done(fewest, next.degraded(), next.unreachable, keep);
     if (keep) {
@@ -352,13 +356,13 @@ Scored score_move(Chart const &c,
                   Compaction pack,
                   Fold fold,
                   Router const &router,
-                  SearchPins const &pins) {
+                  SearchPins const &pins,
+                  RouteCache const *reuse) {
   Scored out;
   SubmachineOrders const moved{ order_submachines(c, g, s, objective, 1, pins) };
   std::vector<Diagnostic> spilled;
-  Candidate const cand{
-    search_candidate(c, g, moved, s, knobs, dar, pack, fold, router, 1, spilled)
-  };
+  Candidate const cand{ search_candidate(c, g, moved, s, knobs, dar, pack, fold, router,
+                                         1, spilled, reuse) };
   if (!cand.viable) { return out; }
   out.viable = true;
   if (cand.inflations != 0) {
@@ -404,13 +408,23 @@ Improved search_moves(Chart const &c,
   held = seed;
   SubmachineOrders here{ order_submachines(c, g, s, objective, threads, held) };
 
-  auto const with = [](SearchPins base, Move const &m) {
+  // The incumbent every candidate of a round is one frame away from. Read by
+  // all of them at once and written only here, between rounds (11.10c).
+  RouteCache base;
+  {
+    std::vector<Diagnostic> spilled;
+    Candidate first{ search_candidate(c, g, here, s, knobs, dar, pack, fold, router,
+                                      threads, spilled, nullptr, &base) };
+    out.best = std::move(first);
+  }
+
+  auto const with = [](SearchPins base_pins, Move const &m) {
     if (m.cut) {
-      base.cuts.push_back(m.leg);
+      base_pins.cuts.push_back(m.leg);
     } else {
-      base.ranks.push_back(m.pin);
+      base_pins.ranks.push_back(m.pin);
     }
-    return base;
+    return base_pins;
   };
 
   // One counter per dimension, each capped at the budget. Shared, the sweep
@@ -471,7 +485,7 @@ Improved search_moves(Chart const &c,
     got.assign(round.size(), {});
     parallel_for(static_cast<uint32_t>(round.size()), threads, [&](uint32_t i) {
       got[i] = score_move(c, g, s, objective, knobs, dar, pack, fold, router,
-                          with(held, round[i]));
+                          with(held, round[i]), &base);
     });
     out.scored += static_cast<uint32_t>(round.size());
 
@@ -526,37 +540,30 @@ Improved search_moves(Chart const &c,
     // re-run is a round's cost divided by its width.
     std::vector<Diagnostic> spilled;
     out.best = search_candidate(c, g, here, s, knobs, dar, pack, fold, router, threads,
-                                spilled);
+                                spilled, nullptr, &base);
     out.cost = best;
     ++out.took;
   }
   return out;
 }
 
-// How many of the table's rows this chart runs: `portfolio_m`, halved for every
-// doubling of the entity count past 512, floored at one row. So a chart under
-// 1,024 entities gets the whole of M and either 2k shape gets one -- the
-// largest chart is searched least, which is backwards for quality and right
-// for latency (11.10). `ilog2` of a `uint32_t` is at most 31, so the shift is
-// at most 22, and the cap holds the row index inside the table for a profile
-// this never saw validated -- the validator itself rejects a larger M.
-uint32_t search_tuple_count(scav_profile const &p, uint32_t entity_count) {
-  uint32_t const scale{ (entity_count == 0) ? 0U : ilog2(entity_count) };
-  uint32_t const shift{ (scale > 9U) ? (scale - 9U) : 0U };
-  uint32_t const rows{ static_cast<uint32_t>(imax(p.portfolio_m, 1)) >> shift };
-  return imin(imax(rows, 1U), LAYOUT_SEARCH_ROWS);
+// How many of the table's rows this chart runs, and how many bounded moves it
+// scores: all of `portfolio_m` and all of `portfolio_k`, whatever its size.
+//
+// **Both used to halve for every doubling of the entity count past 512**, which
+// answered an expensive candidate by searching less and, past 16k entities, set
+// the move budget to zero and switched Level 1 off entirely. That is quality
+// paying for latency, and the cost of a candidate is the thing to fix instead
+// (11.10c): a round of them now runs at once, and a candidate reuses every
+// frame its move did not touch. The entity count is kept in the signature
+// because what should bound a big chart is the work a candidate actually does,
+// which is the next thing to measure rather than a closed form over size.
+uint32_t search_tuple_count(scav_profile const &p, uint32_t /*entity_count*/) {
+  return imin(static_cast<uint32_t>(imax(p.portfolio_m, 1)), LAYOUT_SEARCH_ROWS);
 }
 
-// How many bounded moves this chart scores, by the same closed form the row
-// count uses (above): a move costs a whole phase 1 to 3, so what a chart can
-// afford shrinks as its own runs get dearer. Halved for every doubling of the
-// entity count past 512, and **floored at zero rather than one** -- a chart big
-// enough is one this cannot pay for at all, which is the honest answer and is
-// what keeps a 2k target costing what it costs today (11.10a).
-uint32_t search_move_budget(scav_profile const &p, uint32_t entity_count) {
-  uint32_t const scale{ (entity_count == 0) ? 0U : ilog2(entity_count) };
-  uint32_t const shift{ (scale > 9U) ? (scale - 9U) : 0U };
-  return static_cast<uint32_t>(imax(p.portfolio_k, 0)) >> shift;
+uint32_t search_move_budget(scav_profile const &p, uint32_t /*entity_count*/) {
+  return static_cast<uint32_t>(imax(p.portfolio_k, 0));
 }
 
 // Row `index` of the fixed table, as a delta from the profile as given: bit 0
@@ -657,13 +664,16 @@ bool layout_run(Chart &c,
   std::vector<Candidate> candidates(rows);
   std::vector<Cost> cost(rows);
   std::vector<uint8_t> viable(rows, 0);
-  for (uint32_t i = 0; i < rows; ++i) {
+  // Rows are whole independent layouts of one chart, so they run at once and
+  // are reduced afterwards in index order (11.10c). Each runs its own phases on
+  // one thread, since `parallel_for` is fork-join.
+  std::vector<std::vector<Diagnostic>> spilled(rows);
+  parallel_for(rows, (rows > 1) ? o.threads : 1U, [&](uint32_t i) {
     scav_profile knobs{ p };
     DarSource dar{ DarSource::Profile };
     Compaction pack{ Compaction::Off };
     Fold fold{ Fold::Scale };
     search_tuple(knobs, dar, pack, fold, pinned ? row : i);
-    std::vector<Diagnostic> spilled;
     candidates[i] = search_candidate(c,
                                      g,
                                      orders,
@@ -673,25 +683,29 @@ bool layout_run(Chart &c,
                                      pack,
                                      fold,
                                      *router,
-                                     o.threads,
-                                     (i == 0) ? diags : spilled);
-    // A tuple that leaves the coordinate domain is no candidate, and the
-    // caller's own tuple leaving it is the run's failure, as it was before
-    // anything else was tried.
-    if ((i == 0) && !candidates[0].viable) { return false; }
+                                     (rows > 1) ? 1U : o.threads,
+                                     spilled[i]);
     viable[i] = candidates[i].viable ? 1U : 0U;
     // One row has nothing to rank, so it is not scored: `argmin` over one
-    // candidate is that candidate, and this is what leaves a chart the scaling
-    // rule gives one row costing exactly what it did before. The objective is
-    // the caller's profile and not the tuple's copy, so two rows are compared
-    // on one scale even where one of them inflated.
+    // candidate is that candidate. The objective is the caller's profile and
+    // not the tuple's copy, so two rows are compared on one scale even where
+    // one of them inflated.
     if ((rows > 1) && (viable[i] != 0)) {
       CostTerms const t{
         cost_terms(c, g, candidates[i].sized, candidates[i].routes, s, p)
       };
       cost[i] = cost_of(t, p);
     }
-  }
+  });
+  // Row 0 is the caller's own tuple, so its findings are the run's and every
+  // other row's are a candidate's business. Merged here rather than in the
+  // worker, where the order would be the scheduler's.
+  diags.insert(diags.end(), spilled[0].begin(), spilled[0].end());
+  // A tuple that leaves the coordinate domain is no candidate, and the caller's
+  // own tuple leaving it is the run's failure, as it was before anything else
+  // was tried.
+  if (!candidates[0].viable) { return false; }
+
   uint32_t best{ search_argmin(cost, viable) };
 
   // Level 1: bounded moves off the row Level 2 picked, each one a whole phase 1

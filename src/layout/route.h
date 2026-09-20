@@ -42,6 +42,28 @@ struct Routes {
   uint32_t unplaced{ 0 };
 };
 
+// Per frame, the exact question the router and the nudger were asked and the
+// answer they gave. A Level 1 move changes one frame and leaves every other one
+// translated -- measured at 19 of 20 on `mill` -- so a frame whose question only
+// moved is answered by moving its answer, which is what makes a candidate cost
+// the change rather than the chart (11.10c).
+struct RouteFrameCache {
+  RouteInput in;
+  scav_rect frame{};  // what the nudger bounds this frame's lanes by
+  std::vector<scav_point> points;
+  std::vector<scav_span> net_points;
+  std::vector<RouteMetrics> metrics;
+  NudgeStats nudged;
+  uint8_t valid{ 0 };
+};
+
+// Parallel to submachines. `reuse` is read by every candidate of a round at
+// once and never written; `fill` is written by the one run that establishes the
+// incumbent.
+struct RouteCache {
+  std::vector<RouteFrameCache> frame;
+};
+
 // One net per segment, routed in that segment's frame, laid end to end. The
 // planning is the router's input, so two routers see the same problem. Frames
 // are sharded across `threads` workers and merged in frame order, so the
@@ -53,7 +75,9 @@ Routes route_transitions(Chart const &c,
                          scav_spaces const &s,
                          scav_profile const &p,
                          Router const &router,
-                         uint32_t threads = 0);
+                         uint32_t threads = 0,
+                         RouteCache const *reuse = nullptr,
+                         RouteCache *fill = nullptr);
 
 }  // namespace scav
 

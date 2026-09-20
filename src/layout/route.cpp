@@ -21,6 +21,7 @@
 #include "scav_thread.h"
 
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 namespace scav {
@@ -54,6 +55,51 @@ struct Planned {
 
 // One frame's answer, written by the shard that owns the frame and read back
 // in frame order.
+// True when `b` is `a` with every coordinate moved by one delta, which it
+// writes to `dx`/`dy`. Compares exactly what the router and the nudger read, so
+// the only thing left to assume is that the router answers a shifted question
+// with a shifted answer -- which `router_orthogonal_tests` pins directly
+// (11.10c).
+bool same_but_shifted(RouteFrameCache const &a,
+                      RouteInput const &b,
+                      scav_rect const &frame,
+                      int32_t &dx,
+                      int32_t &dy) {
+  RouteInput const &x{ a.in };
+  if ((x.obstacles.size() != b.obstacles.size()) || (x.nets.size() != b.nets.size()) ||
+      (x.waypoints.size() != b.waypoints.size()) ||
+      (x.inscribed != b.inscribed) || (x.corner != b.corner)) {
+    return false;
+  }
+  if ((x.region.w != b.region.w) || (x.region.h != b.region.h)) { return false; }
+  if (std::memcmp(&x.profile, &b.profile, sizeof(scav_profile)) != 0) { return false; }
+  dx = b.region.x - x.region.x;
+  dy = b.region.y - x.region.y;
+  auto const moved_pt = [dx, dy](scav_point const &p, scav_point const &q) {
+    return ((q.x - p.x) == dx) && ((q.y - p.y) == dy);
+  };
+  auto const moved_rect = [&](scav_rect const &p, scav_rect const &q) {
+    return (p.w == q.w) && (p.h == q.h) && ((q.x - p.x) == dx) && ((q.y - p.y) == dy);
+  };
+  if (!moved_rect(a.frame, frame)) { return false; }
+  for (uint32_t i = 0; i < x.obstacles.size(); ++i) {
+    if (!moved_rect(x.obstacles[i], b.obstacles[i])) { return false; }
+  }
+  for (uint32_t i = 0; i < x.waypoints.size(); ++i) {
+    if (!moved_pt(x.waypoints[i], b.waypoints[i])) { return false; }
+  }
+  for (uint32_t i = 0; i < x.nets.size(); ++i) {
+    RouteNet const &p{ x.nets[i] };
+    RouteNet const &q{ b.nets[i] };
+    if ((p.src_obstacle != q.src_obstacle) || (p.dst_obstacle != q.dst_obstacle) ||
+        (p.waypoint_off != q.waypoint_off) || (p.waypoint_len != q.waypoint_len) ||
+        !moved_pt(p.src, q.src) || !moved_pt(p.dst, q.dst)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 struct FrameRoutes {
   std::vector<scav_point> points;
   std::vector<scav_span> net_points;  // -> points, parallel to the frame's nets
@@ -87,8 +133,11 @@ Routes route_transitions(Chart const &c,
                          scav_spaces const &s,
                          scav_profile const &p,
                          Router const &router,
-                         uint32_t threads) {
+                         uint32_t threads,
+                         RouteCache const *reuse,
+                         RouteCache *fill) {
   Routes out;
+  if (fill != nullptr) { fill->frame.assign(c.submachines.size(), {}); }
   uint32_t const n{ static_cast<uint32_t>(c.transitions.size()) };
   out.route.assign(n, {});
   out.port.assign(n, {});
@@ -305,11 +354,38 @@ Routes route_transitions(Chart const &c,
       }
       in.nets.push_back(net);
     }
+    scav_rect const frame{ (owner.v == INVALID) ? region : z.state[owner.v] };
+
+    // A frame whose question only moved is answered by moving its answer. The
+    // comparison costs one walk of an input the gather above already built.
+    int32_t dx{ 0 };
+    int32_t dy{ 0 };
+    if ((reuse != nullptr) && (m < reuse->frame.size()) &&
+        (reuse->frame[m].valid != 0) &&
+        same_but_shifted(reuse->frame[m], in, frame, dx, dy)) {
+      RouteFrameCache const &had{ reuse->frame[m] };
+      frames[m].points = had.points;
+      for (scav_point &q : frames[m].points) {
+        q.x += dx;
+        q.y += dy;
+      }
+      frames[m].net_points = had.net_points;
+      frames[m].metrics = had.metrics;
+      frames[m].nudged = had.nudged;
+      if (fill != nullptr) {
+        fill->frame[m] = had;
+        fill->frame[m].in = in;
+        fill->frame[m].frame = frame;
+        fill->frame[m].points = frames[m].points;
+      }
+      for (uint32_t const st : sc.obstacle_states) { sc.obstacle_index[st] = INVALID; }
+      return;
+    }
+
     router.route(in, ro);
 
     // Nudged per frame, while the frame's obstacles are in hand.
     if (margin > 0) {
-      scav_rect const frame{ (owner.v == INVALID) ? region : z.state[owner.v] };
       // The pitch is a line of text, not the router's clearance (11.9.5), and
       // it is the grouping tolerance too, so what is spread apart by it is
       // exactly what was too close by it.
@@ -327,6 +403,15 @@ Routes route_transitions(Chart const &c,
     frames[m].points = ro.points;
     frames[m].net_points = ro.net_points;
     frames[m].metrics = ro.metrics;
+    if (fill != nullptr) {
+      fill->frame[m] = { .in = in,
+                         .frame = frame,
+                         .points = ro.points,
+                         .net_points = ro.net_points,
+                         .metrics = ro.metrics,
+                         .nudged = frames[m].nudged,
+                         .valid = 1 };
+    }
     for (uint32_t const st : sc.obstacle_states) { sc.obstacle_index[st] = INVALID; }
   };
 

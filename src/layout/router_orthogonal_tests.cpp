@@ -1799,3 +1799,100 @@ TEST_CASE("ortho: a glyph inscribed in its box is met at the middle of a face") 
   CHECK((at[0] == pt(100, 50)));
   CHECK((at[2] == pt(100, 50)));
 }
+
+namespace {
+
+// Every coordinate of an input moved by the same delta. 11.10c's reuse rests on
+// the router treating this as the same question, so the shift is applied here
+// rather than described in a comment.
+RouteInput shifted(RouteInput const &in, int32_t dx, int32_t dy) {
+  RouteInput out{ in };
+  out.region.x += dx;
+  out.region.y += dy;
+  for (scav_rect &r : out.obstacles) {
+    r.x += dx;
+    r.y += dy;
+  }
+  for (RouteNet &n : out.nets) {
+    n.src.x += dx;
+    n.src.y += dy;
+    n.dst.x += dx;
+    n.dst.y += dy;
+  }
+  for (scav_point &w : out.waypoints) {
+    w.x += dx;
+    w.y += dy;
+  }
+  return out;
+}
+
+// A frame with the shapes the reuse has to survive: two boxes facing each
+// other, a third in the way, an inscribed glyph, a corner arc, a waypoint, and
+// two nets that share a box so the seating passes all have something to do.
+RouteInput busy_frame() {
+  RouteInput in;
+  in.profile = profile();
+  in.region = rect(0, 0, 4000, 3000);
+  in.obstacles = { rect(400, 400, 800, 600),
+                   rect(2400, 400, 800, 600),
+                   rect(1400, 1600, 900, 600),
+                   rect(3000, 1800, 400, 400) };
+  in.inscribed = { 0, 0, 0, 1 };
+  in.corner = { 75, 75, 75, 0 };
+  in.waypoints = { pt(2800, 1300) };
+  in.nets = { { .src = pt(800, 700), .dst = pt(2800, 700), .src_obstacle = 0,
+                .dst_obstacle = 1 },
+              { .src = pt(2800, 700), .dst = pt(1850, 1900), .src_obstacle = 1,
+                .dst_obstacle = 2, .waypoint_off = 0, .waypoint_len = 1 },
+              { .src = pt(1850, 1900), .dst = pt(800, 700), .src_obstacle = 2,
+                .dst_obstacle = 0 },
+              { .src = pt(3200, 2000), .dst = pt(2800, 700), .src_obstacle = 3,
+                .dst_obstacle = 1 } };
+  return in;
+}
+
+}  // namespace
+
+TEST_CASE("ortho: routing is the same question shifted, which is what reuse rests on") {
+  RouteInput const base{ busy_frame() };
+  RouteOutput want;
+  ORTHO.route(base, want);
+  REQUIRE(want.net_points.size() == base.nets.size());
+  // Not a trivial answer: the frame has to actually make the router work.
+  uint32_t bends{ 0 };
+  for (RouteMetrics const &m : want.metrics) {
+    REQUIRE(m.failed == RouteFailure::None);
+    bends += static_cast<uint32_t>(m.bends);
+  }
+  REQUIRE(bends > 0);
+
+  for (auto const [dx, dy] : { std::pair<int32_t, int32_t>{ 1, 0 },
+                               { 0, 1 },
+                               { 17, 0 },
+                               { 0, 17 },
+                               { 96, 96 },
+                               { 1000, 2000 },
+                               { 5, 7 },
+                               { 100000, 100000 } }) {
+    CAPTURE(dx);
+    CAPTURE(dy);
+    RouteOutput got;
+    ORTHO.route(shifted(base, dx, dy), got);
+    REQUIRE(got.points.size() == want.points.size());
+    REQUIRE(got.net_points.size() == want.net_points.size());
+    for (uint32_t i = 0; i < want.points.size(); ++i) {
+      CAPTURE(i);
+      CHECK(got.points[i].x == (want.points[i].x + dx));
+      CHECK(got.points[i].y == (want.points[i].y + dy));
+    }
+    for (uint32_t n = 0; n < want.net_points.size(); ++n) {
+      CAPTURE(n);
+      CHECK(got.net_points[n].off == want.net_points[n].off);
+      CHECK(got.net_points[n].len == want.net_points[n].len);
+      CHECK(got.metrics[n].bends == want.metrics[n].bends);
+      CHECK(got.metrics[n].length == want.metrics[n].length);
+      CHECK(got.metrics[n].reseated == want.metrics[n].reseated);
+      CHECK(got.metrics[n].failed == want.metrics[n].failed);
+    }
+  }
+}
