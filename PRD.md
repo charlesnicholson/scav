@@ -1667,6 +1667,22 @@ Profile load **validates every bound and rejects out of range** — weight ceili
 
 Named profiles ship as data: `compact`, `readable`. There is no `print` profile — fit-to-page would need the top-down layout §11.4 rejects.
 
+### 11.16 Trace — why a drawing came out the way it did
+
+**Every column this project writes is an output, and none of them is a reason.** `scav.geom.*` (§11.7a) says where a route's vertices ended up and says nothing about which phase put them there. Root-causing a bad route therefore means patching `fprintf` into a phase and rebuilding, which does not survive the session and cannot be asserted on. The measurement that named this section: `estop`'s `Latched -> Clear` draws three kinks between two boxes that directly face each other across 388 clear units, and finding out why took a scratch build of `route.cpp`. Corpus-wide, **24 of 257 transitions whose endpoints face each other with a seatable straight line are kinked anyway, carrying 92 of the 421 kinks.**
+
+**A trace is a `std::vector` of fixed-size POD events, and it is not a column.** It is developer-facing: not in the geometry ABI, not hashed, not serialized with a chart, not consumed by a builder. Events carry a `TraceKind` tag and a union payload, so appending one is a store and a bump, and a reader switches on the tag. Entities are named by `StateId`, `TransId` and `SubmachineId` — **never by node index**, which is an artefact of how a frame was built and changes under chaining, the exact confusion that let a pin test pass by doing nothing (§11.10a).
+
+**A sink forces `threads = 1`.** Phase 1 and phase 3 shard across workers and merge in frame order (§11.5), so a concurrently appended trace would order events by thread scheduling and two runs would not compare. Serialising the run is free here because nothing traces in production, and it makes event order a function of the algorithm alone — which is the property a diff between two traces needs.
+
+**It searches first and traces what won.** §11.10's Level 2 runs up to `portfolio_m` rows and Level 1 takes up to `portfolio_k` moves on top, so a sink attached across a search records every candidate the search threw away with no way to tell which one shipped — measured on `estop`, where the last ordering in the stream puts the bend at 2,599 and the drawing that ships puts it at 2,823. Pinning `row` is not the answer either: it fixes the Level 2 tuple and Level 1 still re-orders once per move it scores. So `layout_trace_json` runs normally, takes the winning tuple **and pins** back out, and re-derives that one drawing with the sink attached, `portfolio_k` at zero and nothing left to search.
+
+**Which makes `pins` an input to `layout_run` and not only an output.** §11.10a already says a drawing is a function of its tuple and its pins, and `RankPin` is public so a caller can re-derive one; until now no argument let it. `taken` becomes what the drawing rests on rather than what the run added, so a run handed pins and given no budget reports the pins it was handed. The property this buys is testable and tested: **all eleven corpus charts give the same structural and coordinate hash traced as untraced**, which is the only thing that makes a trace worth reading.
+
+**The event set is the decisions that determine a route's shape**, which is what the class above needs and no more: rank assigned, rank pinned, edge reversed by cycle-breaking, edge chained through a bend and at what rank, node placed, spacing inflated, net planned with its waypoint count, each waypoint, a seat moved by each of §11.5's five seating passes, a lane assigned by nudging, a route degraded to a straight line, and a candidate scored. Phases grow their own events as they grow questions; the union is internal, so adding one is not an ABI change.
+
+**Public surface is one function and the union is not in it.** `layout_trace_json` runs one row with a sink attached and hands back the events as text, which is what `scav dump --trace` prints. Tests link the testable target, include `trace.h`, and assert on typed events rather than on parsed text — a trace nothing asserts on rots.
+
 ## 12. `DrawList` and rendering
 
 **`DrawList` is the render IR and the one drawing contract.** A builder produces it from model columns; a backend consumes it. Neither knows about the other, and neither is required to be scav's.

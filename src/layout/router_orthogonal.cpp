@@ -8,6 +8,7 @@
 #include "scav/scav_layout.h"
 #include "scav_int.h"
 #include "scav_stable_sort.h"
+#include "layout/trace.h"
 
 #include <array>
 #include <cstdint>
@@ -964,11 +965,34 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
                                             arc(net.dst_obstacle))
                          : before;
   }
+  // Diffed at the call site rather than emitted inside each pass: what a reader
+  // wants is which pass moved a seat, and only here sees all five (11.16).
+  std::vector<scav_point> was{ toward };
+  auto const moved = [&](SeatPass pass) {
+    if (trace_sink() == nullptr) { return; }
+    for (uint32_t i = 0; i < seat.size(); ++i) {
+      if ((seat[i].x == was[i].x) && (seat[i].y == was[i].y)) { continue; }
+      trace_emit({ .kind = TraceKind::SeatMoved,
+                   .pass = static_cast<uint16_t>(pass),
+                   .seat = { .net = i / 2,
+                             .end = i % 2,
+                             .from_x = was[i].x,
+                             .from_y = was[i].y,
+                             .to_x = seat[i].x,
+                             .to_y = seat[i].y } });
+    }
+    was = seat;
+  };
+  moved(SeatPass::Attach);
+
   // Faces first, since a glyph moved onto another face is a different line for
   // the two passes below to line up and pull apart.
   ortho_reface_attachments(in.nets, in.obstacles, in.inscribed, toward, seat);
+  moved(SeatPass::Reface);
   ortho_align_attachments(in.nets, in.obstacles, in.inscribed, in.corner, seat);
+  moved(SeatPass::Align);
   ortho_spread_attachments(in.nets, in.obstacles, in.inscribed, in.corner, clear, seat);
+  moved(SeatPass::Spread);
   // Last, because it is the only pass that compares two boxes: what it moves is
   // what the three above have already settled on their own faces (11.10a).
   ortho_separate_attachments(in.nets,
@@ -978,6 +1002,7 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
                              clear,
                              label_line_height(in.profile),
                              seat);
+  moved(SeatPass::Separate);
 
   for (uint32_t n = 0; n < in.nets.size(); ++n) {
     RouteNet const &net{ in.nets[n] };

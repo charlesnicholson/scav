@@ -9,6 +9,7 @@
 #include "layout/router.h"
 #include "layout/shard.h"
 #include "layout/size.h"
+#include "layout/trace.h"
 #include "layout/wire.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
@@ -263,6 +264,8 @@ Candidate search_candidate(Chart const &c,
       out.sized = std::move(next_sized);
       out.routes = std::move(next);
       out.inflations = static_cast<uint32_t>(k) + 1;
+      trace_emit({ .kind = TraceKind::SpacingInflated,
+                   .inflate = { .node_sep = wider.node_sep, .rank_sep = wider.rank_sep } });
     }
   }
 
@@ -337,10 +340,14 @@ Improved search_moves(Chart const &c,
                       Router const &router,
                       uint32_t threads,
                       uint32_t budget,
-                      Cost from) {
+                      Cost from,
+                      std::vector<RankPin> const &seed) {
   Improved out;
   out.cost = from;
+  // Continued from, not restarted: `taken` reports every pin the drawing rests
+  // on, so a caller handing them back gets the moves it already has plus more.
   std::vector<RankPin> &held{ out.held };
+  held = seed;
   SubmachineOrders here{ order_submachines(c, g, s, objective, threads, held) };
 
   while (out.scored < budget) {
@@ -375,15 +382,34 @@ Improved search_moves(Chart const &c,
                                          threads,
                                          spilled) };
         ++out.scored;
-        if (!cand.viable) { continue; }
+        auto const verdict = [&](MoveVerdict v, Cost const &sc) {
+          trace_emit({ .kind = TraceKind::CandidateScored,
+                       .pass = static_cast<uint16_t>(v),
+                       .score = { .row = INVALID,
+                                  .state = st,
+                                  .rank = r,
+                                  .t0 = sc.t0_violations,
+                                  .t2 = sc.t2 } });
+        };
+        if (!cand.viable) {
+          verdict(MoveVerdict::NotViable, Cost{});
+          continue;
+        }
         // A move that only fits once the whole chart's spacing was widened is
         // not a better placement, it is a bigger drawing -- and it is one no
         // caller can re-derive from the pins alone, because the geometry
         // belongs to a profile the pins do not name.
-        if (cand.inflations != 0) { continue; }
+        if (cand.inflations != 0) {
+          verdict(MoveVerdict::Inflated, Cost{});
+          continue;
+        }
         Cost const scored{ cost_of(cost_terms(c, g, cand.sized, cand.routes, s, objective),
                                    objective) };
-        if (!cost_less(scored, best)) { continue; }
+        if (!cost_less(scored, best)) {
+          verdict(MoveVerdict::NotBetter, scored);
+          continue;
+        }
+        verdict(MoveVerdict::Taken, scored);
         best = scored;
         take = { .state = StateId{ st }, .rank = r };
         kept = std::move(cand);
@@ -474,7 +500,8 @@ bool layout_run(Chart &c,
                 uint32_t *tuple,
                 uint32_t row,
                 uint32_t *moves,
-                std::vector<RankPin> *taken) {
+                std::vector<RankPin> *taken,
+                std::vector<RankPin> const *pins) {
   if (inflations != nullptr) { *inflations = 0; }
   if (tuple != nullptr) { *tuple = 0; }
   scav_profile const &p{ o.profile };
@@ -507,7 +534,9 @@ bool layout_run(Chart &c,
   SplitGraph const g{ decompose(c) };
   // Once for every attempt below: phase 1 reads `sweep_count` and no extent, so
   // the inflated copies the retry loop makes order to the same rows.
-  SubmachineOrders const orders{ order_submachines(c, g, s, p, o.threads) };
+  std::vector<RankPin> const seed{ (pins != nullptr) ? *pins
+                                                     : std::vector<RankPin>{} };
+  SubmachineOrders const orders{ order_submachines(c, g, s, p, o.threads, seed) };
 
   // Level 2: every row of the table this chart's size admits, each its own
   // whole phase 2 and 3, collected rather than folded into a best-so-far, and
@@ -571,7 +600,9 @@ bool layout_run(Chart &c,
   // Written whichever way the branch below goes: a count nobody set is worse
   // than a zero, and zero is the honest answer for a run with no budget.
   if (moves != nullptr) { *moves = 0; }
-  if (taken != nullptr) { taken->clear(); }
+  // What the drawing rests on, not what this run added: a run with no budget
+  // still stands on the pins it was handed.
+  if (taken != nullptr) { *taken = seed; }
   if ((budget != 0) && (viable[best] != 0)) {
     scav_profile knobs{ p };
     DarSource dar{ DarSource::Profile };
@@ -589,7 +620,8 @@ bool layout_run(Chart &c,
                                       *router,
                                       o.threads,
                                       budget,
-                                      cost[best]) };
+                                      cost[best],
+                                      seed) };
     if (done.took != 0) {
       candidates[best] = std::move(done.best);
       cost[best] = done.cost;
@@ -673,6 +705,39 @@ uint32_t layout_coordinate_hash(Chart const &c) {
     append_i32(b, sl.y);
   }
   return xxhash32(b.data(), b.size(), 0);
+}
+
+bool layout_trace_json(Chart &c,
+                       scav_spaces const &s,
+                       scav_layout_opts const &o,
+                       std::vector<scav_placed> &placed,
+                       std::vector<Diagnostic> &diags,
+                       std::vector<char> &out,
+                       uint32_t row) {
+  // Search first and keep what won, so the trace below is of the one drawing
+  // that ships rather than of every candidate the search threw away (11.16).
+  uint32_t won{ 0 };
+  std::vector<RankPin> pins;
+  if (!layout_run(c, s, o, placed, diags, nullptr, &won, row, nullptr, &pins)) {
+    trace_to_json({}, c, out);
+    return false;
+  }
+
+  // The tuple and the pins together name that drawing, so nothing is left to
+  // search: one thread for a deterministic event order, no moves to score.
+  scav_layout_opts serial{ o };
+  serial.threads = 1;
+  serial.profile.portfolio_k = 0;
+  LayoutTrace t;
+  trace_sink_set(&t);
+  std::vector<Diagnostic> again;
+  bool const laid{
+    layout_run(c, s, serial, placed, again, nullptr, nullptr, won, nullptr, nullptr,
+               &pins)
+  };
+  trace_sink_set(nullptr);
+  trace_to_json(t, c, out);
+  return laid;
 }
 
 uint32_t layout_structural_hash(Chart const &c) {

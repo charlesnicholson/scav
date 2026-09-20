@@ -759,7 +759,8 @@ int run_dump(char const *path,
              bool hash_only,
              bool as_json,
              bool with_layout,
-             uint32_t row) {
+             uint32_t row,
+             bool trace) {
   Loaded net;
   load_and_report(path, true, net);
   if (net.code == EXIT_UNUSABLE) { return EXIT_UNUSABLE; }
@@ -781,9 +782,16 @@ int run_dump(char const *path,
       return EXIT_UNUSABLE;
     }
     std::vector<Diagnostic> diags;
+    std::vector<char> events;
     bool const laid{
-      layout_run(net.chart, as_spaces(spaces), opts, placed, diags, nullptr, nullptr, row)
+      trace ? layout_trace_json(net.chart, as_spaces(spaces), opts, placed, diags, events,
+                                row)
+            : layout_run(net.chart, as_spaces(spaces), opts, placed, diags, nullptr,
+                         nullptr, row)
     };
+    // To stdout, ahead of the model: the trace is the answer `--trace` asked
+    // for and the dump is the context it is read against.
+    if (trace) { write_stream(std::string{ events.begin(), events.end() }, stdout); }
     if (!diags.empty()) {
       std::string err;
       for (Diagnostic const &d : diags) { diag_append(err, net.chart, d, path); }

@@ -18,8 +18,8 @@ constexpr std::string_view USAGE{
   "  fmt [--check] <file>...      canonical print, in place; --check gates\n"
   "  check <file>                 structural validation, exit 1 on a finding\n"
   "  deps [--target NAME] <file>  the document network as a depfile\n"
-  "  dump [--hash|--json] [--layout] [--portfolio-row N] <file>  the model; "
-  "--layout adds geometry\n"
+  "  dump [--hash|--json] [--layout] [--portfolio-row N] [--trace] <file>  the "
+  "model; --layout adds geometry, --trace its decisions\n"
   "  render [-o FILE] [--embed-font] [--profile NAME] [--portfolio-row N] <file>"
   "   chart -> SVG\n"
   "  selftest [--against FILE]   recompute the layout hashes on this toolchain "
@@ -39,6 +39,7 @@ int dispatch(int argc, char **argv) {
     bool hash{ false };
     bool json{ false };
     bool layout{ false };
+    bool trace{ false };
     uint32_t row{ INVALID };
     for (int i = 2; i < argc; ++i) {
       std::string_view const arg{ argv[i] };
@@ -58,6 +59,8 @@ int dispatch(int argc, char **argv) {
         flag = &json;
       } else if (arg == "--layout") {
         flag = &layout;
+      } else if (arg == "--trace") {
+        flag = &trace;
       }
       if (flag != nullptr) {
         if (*flag) { return usage(); }
@@ -70,10 +73,13 @@ int dispatch(int argc, char **argv) {
     }
     // A pinned row only reaches layout, so it is the geometry's flag and not
     // the model's: `--hash` and a bare dump have nothing to point at.
-    if ((path == nullptr) || (hash && (json || layout)) || ((row != INVALID) && !layout)) {
+    // `--trace` is layout's, like `--portfolio-row`: it prints the decisions
+    // one run made and there are none without a run (11.16).
+    if ((path == nullptr) || (hash && (json || layout)) ||
+        (((row != INVALID) || trace) && !layout)) {
       return usage();
     }
-    return run_dump(path, hash, json, layout, row);
+    return run_dump(path, hash, json, layout, row, trace);
   }
 
   if (verb == "render") {

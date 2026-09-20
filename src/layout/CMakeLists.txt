@@ -38,6 +38,7 @@ scav_static_library(scavlayout
   pack.cpp
   size.cpp
   route.cpp
+  trace.cpp
   nudge.cpp
   label.cpp
   cost.cpp
@@ -78,6 +79,7 @@ if(SCAV_BUILD_TESTS)
     geom_tests.cpp
     pack_tests.cpp
     size_tests.cpp
+    trace_tests.cpp
     route_tests.cpp
     nudge_tests.cpp
     label_tests.cpp

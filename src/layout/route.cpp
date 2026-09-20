@@ -12,6 +12,7 @@
 #include "layout/router.h"
 #include "layout/shard.h"
 #include "layout/size.h"
+#include "layout/trace.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 #include "scav_int.h"
@@ -224,6 +225,7 @@ Routes route_transitions(Chart const &c,
   // Reads the model, the orders, the geometry and the plan; writes `frames[m]`
   // and the caller's own scratch, so two frames share nothing.
   auto const route_frame = [&](uint32_t m, FrameScratch &sc) {
+    TraceFrame const traced{ SubmachineId{ m } };
     RouteInput &in{ sc.in };
     RouteOutput &ro{ sc.ro };
     in.obstacles.clear();
@@ -289,6 +291,18 @@ Routes route_transitions(Chart const &c,
         in.waypoints.push_back(z.node[bend]);
       }
       net.waypoint_len = static_cast<uint32_t>(in.waypoints.size()) - net.waypoint_off;
+      trace_emit({ .kind = TraceKind::NetPlanned,
+                   .net = { .seg = pn.seg,
+                            .trans = g.segments[pn.seg].trans.v,
+                            .waypoints = net.waypoint_len,
+                            .sx = net.src.x,
+                            .sy = net.src.y,
+                            .dx = net.dst.x,
+                            .dy = net.dst.y } });
+      for (uint32_t w = 0; w < net.waypoint_len; ++w) {
+        scav_point const &at{ in.waypoints[net.waypoint_off + w] };
+        trace_emit({ .kind = TraceKind::NetWaypoint, .point = { .x = at.x, .y = at.y } });
+      }
       in.nets.push_back(net);
     }
     router.route(in, ro);
@@ -345,6 +359,9 @@ Routes route_transitions(Chart const &c,
         out.reseated += static_cast<uint32_t>(fr.metrics[j].reseated);
         if (fr.metrics[j].failed != RouteFailure::None) {
           out.failed[g.segments[planned[by_frame[m][j]].seg].trans.v] = 1;
+          trace_emit({ .kind = TraceKind::RouteDegraded,
+                       .frame = m,
+                       .seg = { .seg = planned[by_frame[m][j]].seg } });
         }
         switch (fr.metrics[j].failed) {
           case RouteFailure::OutsideRegion: ++out.outside_region; break;

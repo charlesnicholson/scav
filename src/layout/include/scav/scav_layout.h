@@ -127,6 +127,11 @@ inline constexpr uint32_t LAYOUT_SEARCH_ROWS{ 16 };
 // shipping passes it, `portfolio_m` is unread when it is set, and the caller
 // bounds it -- `INVALID` searches, and anything else must be below
 // `LAYOUT_SEARCH_ROWS`.
+//
+// `pins` seeds phase 1 with placements a previous run's `taken` reported, which
+// is the other half of re-deriving a drawing from the model: with the tuple in
+// `row` and `portfolio_k` at zero it reproduces that run exactly, searching
+// nothing. Level 1 continues from them when it has budget.
 bool layout_run(Chart &c,
                 scav_spaces const &s,
                 scav_layout_opts const &o,
@@ -136,7 +141,27 @@ bool layout_run(Chart &c,
                 uint32_t *tuple = nullptr,
                 uint32_t row = INVALID,
                 uint32_t *moves = nullptr,
-                std::vector<RankPin> *taken = nullptr);
+                std::vector<RankPin> *taken = nullptr,
+                std::vector<RankPin> const *pins = nullptr);
+
+// The decisions behind the drawing that ships, as JSON in `out` (11.16).
+// Debug-only: the trace is not a geometry column, is not hashed, and no builder
+// reads it.
+//
+// **Searches first, then traces what won.** Tracing the search itself records
+// every candidate it rejected and leaves no way to tell which one shipped, so
+// this runs normally, takes the winning tuple and pins, and re-derives that one
+// drawing with the sink attached and nothing searching. `threads` is one for
+// the traced run, so event order is the algorithm's and not the scheduler's.
+// The geometry is the searched run's, byte for byte.
+bool layout_trace_json(Chart &c,
+                       scav_spaces const &s,
+                       scav_layout_opts const &o,
+                       std::vector<scav_placed> &placed,
+                       std::vector<Diagnostic> &diags,
+                       std::vector<char> &out,
+                       uint32_t row = INVALID);
+
 
 // Split so a pure translation moves the coordinate hash and not the structural
 // one: structure is sides, depths and turn tokens; coordinates are the rest.

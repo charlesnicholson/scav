@@ -47,7 +47,8 @@ int run_dump(char const *path,
              bool hash_only,
              bool as_json,
              bool with_layout,
-             uint32_t row);
+             uint32_t row,
+             bool trace);
 int run_render(char const *path,
                char const *out_path,
                bool embed_font,

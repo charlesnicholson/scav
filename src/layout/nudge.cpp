@@ -7,6 +7,7 @@
 #include "layout/partition.h"
 #include "scav_int.h"
 #include "scav_stable_sort.h"
+#include "layout/trace.h"
 
 #include <array>
 #include <cstdint>
@@ -507,6 +508,11 @@ void nudge_lanes(scav_rect const &region,
             points[m.point].x += m.offset;
             points[m.point + 1].x += m.offset;
           }
+          trace_emit({ .kind = TraceKind::LaneAssigned,
+                       .lane = { .net = m.net,
+                                 .lane = b,
+                                 .at = horizontal ? points[m.point].y
+                                                  : points[m.point].x } });
           ++stats.moved;
         }
       }

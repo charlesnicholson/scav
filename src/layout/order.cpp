@@ -8,6 +8,7 @@
 #include "layout/decompose.h"
 #include "layout/partition.h"
 #include "layout/shard.h"
+#include "layout/trace.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
@@ -140,6 +141,7 @@ void orient_acyclic(Frame &f) {
       OrderEdge &e{ f.edges[out.edge[stack.back().next++]] };
       if (color[e.dst] == Gray) {
         e.reversed = 1;
+        trace_emit({ .kind = TraceKind::EdgeReversed, .seg = { .seg = e.segment } });
         uint32_t const swap{ e.src };
         e.src = e.dst;
         e.dst = swap;
@@ -217,6 +219,12 @@ void assign_ranks(Frame &f) {
     next += used[r];
   }
   for (OrderNode &nd : f.nodes) { nd.rank = renumber[nd.rank]; }
+
+  for (OrderNode const &nd : f.nodes) {
+    if (nd.kind != OrderKind::State) { continue; }
+    trace_emit({ .kind = TraceKind::RankAssigned,
+                 .rank = { .state = nd.subject, .rank = nd.rank } });
+  }
 }
 
 // A bend per intervening rank, so every emitted edge spans exactly one. The
@@ -234,6 +242,11 @@ void chain_long_edges(Frame &f) {
     }
     uint32_t prev{ e.src };
     for (uint32_t r = from + 1; r < to; ++r) {
+      trace_emit({ .kind = TraceKind::EdgeChained,
+                   .chain = { .seg = e.segment,
+                              .rank = r,
+                              .index = r - from,
+                              .count = to - from - 1 } });
       uint32_t const bend{ static_cast<uint32_t>(f.nodes.size()) };
       f.nodes.push_back(
           { .kind = OrderKind::Bend, .subject = e.segment, .rank = r, .pos = 0 });
@@ -513,6 +526,7 @@ SubmachineOrders order_submachines(Chart const &c,
   // Reads the model, the split and the label charges; writes `frames[m]` and
   // the caller's own scratch, so two frames share nothing.
   auto const order_frame = [&](uint32_t m, FrameScratch &sc) {
+    TraceFrame const traced{ SubmachineId{ m } };
     Frame &f{ frames[m].f };
     std::vector<SegPort> &seg_ports{ frames[m].seg_ports };
 
@@ -588,6 +602,8 @@ SubmachineOrders order_submachines(Chart const &c,
         if (at >= f.nodes.size()) { continue; }  // not a state this frame holds
         f.nodes[at].rank = pin.rank;
         moved = true;
+        trace_emit({ .kind = TraceKind::RankPinned,
+                     .rank = { .state = pin.state.v, .rank = pin.rank } });
       }
       // A rank a move emptied would size a phantom gap in phase 2 (11.10), so
       // the ranks are renumbered onto the ones that still hold a node.

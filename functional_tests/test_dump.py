@@ -382,6 +382,55 @@ class TestDump(unittest.TestCase):
             "^" + re.escape(chart.as_posix())
             + r":\d+:\d+: composed geometry exceeds the coordinate domain\n$")
 
+    # Trace (11.16) ==========================================================
+
+    def split_trace(self, out: str) -> tuple[list[dict], dict]:
+        """The two documents `--trace --json` writes to one stream. The event
+        array ends at the first bare bracket line, which the model never has."""
+        end = out.index("\n]\n") + 3
+        return json.loads(out[:end]), json.loads(out[end:])
+
+    def test_a_traced_run_draws_what_an_untraced_one_draws(self) -> None:
+        """The trace re-derives the drawing the search picked, so it may not
+        move it. A debug facility that changes the answer is worth nothing."""
+        charts = sorted((self.cfg.repo_root / "test_data/charts").glob("*.scav"))
+        self.assertTrue(charts)
+        for chart in charts:
+            with self.subTest(chart=chart.name):
+                plain = self.run_dump("--json", "--layout", chart.as_posix())
+                self.assertEqual(0, plain.returncode, plain.stderr)
+                traced = self.run_dump("--json", "--layout", "--trace",
+                                       chart.as_posix())
+                self.assertEqual(0, traced.returncode, traced.stderr)
+                events, model = self.split_trace(traced.stdout)
+                want = json.loads(plain.stdout)["geometry"]
+                got = model["geometry"]
+                for key in ("structural_hash", "coordinate_hash", "state", "route",
+                            "point" if "point" in want else "chart"):
+                    self.assertEqual(want[key], got[key], key)
+                self.assertTrue(events)
+
+    def test_every_event_names_its_kind_and_its_frame(self) -> None:
+        traced = self.run_dump("--json", "--layout", "--trace", NETWORK.as_posix())
+        self.assertEqual(0, traced.returncode, traced.stderr)
+        events, model = self.split_trace(traced.stdout)
+        frames = len(model["submachines"])
+        kinds = set()
+        for i, e in enumerate(events):
+            self.assertEqual(i, e["i"])  # dense and in order
+            self.assertNotEqual("none", e["kind"])
+            kinds.add(e["kind"])
+            if "frame" in e:
+                self.assertLess(e["frame"], frames)
+        # The decisions a route's shape comes from, all present on a real chart.
+        self.assertLessEqual({"rank_assigned", "node_placed", "net_planned",
+                              "seat_moved"}, kinds)
+
+    def test_trace_needs_a_layout_to_trace(self) -> None:
+        result = self.run_dump("--trace", NETWORK.as_posix())
+        self.assertEqual(2, result.returncode)
+        self.assertTrue(result.stderr.startswith("usage: scav <verb>"))
+
     # Usage =================================================================
 
     def test_bad_arguments_are_refused(self) -> None:
@@ -390,6 +439,8 @@ class TestDump(unittest.TestCase):
                      ["dump", "--json"],
                      ["dump", "--hash"],
                      ["dump", "--layout"],
+                     ["dump", "--trace", chart],
+                     ["dump", "--layout", "--trace", "--trace", chart],
                      ["dump", "--json", "--json", chart],
                      ["dump", "--layout", "--layout", chart],
                      ["dump", "--hash", "--hash", chart],
