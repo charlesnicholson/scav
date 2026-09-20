@@ -7,6 +7,7 @@
 #endif
 
 #include <pthread.h>
+#include <unistd.h>
 #ifdef SCAV_TESTING
 #  include <sched.h>
 #endif
@@ -65,8 +66,13 @@ void *worker_main(void *arg) {
 
 }  // namespace
 
+uint32_t thread_concurrency() {
+  int64_t const online{ sysconf(_SC_NPROCESSORS_ONLN) };
+  return (online > 1) ? static_cast<uint32_t>(online) : 1U;
+}
+
 void parallel_for(uint32_t shards, uint32_t threads, ShardFn fn, void *ctx) {
-  uint32_t const requested{ (threads == 0U) ? 1U : threads };
+  uint32_t const requested{ (threads == 0U) ? thread_concurrency() : threads };
   uint32_t const workers{ imin(requested, shards) };
   if (workers <= 1U) {
     run_stripe(shards, 1U, 0U, fn, ctx);

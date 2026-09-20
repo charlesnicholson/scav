@@ -136,8 +136,9 @@ typedef struct {
 typedef struct {
   scav_profile profile;
   scav_router_id router;
-  /* Workers over the sharded phases; 0 means 1, any value is legal, and none
-   * of them reaches the output. */
+  /* Workers over the sharded phases and over the search's candidates; 0 is as
+   * many as the host runs at once, any value is legal, and none of them
+   * reaches the output -- the count buys wall clock and nothing else (6). */
   uint32_t threads;
 } scav_layout_opts;
 

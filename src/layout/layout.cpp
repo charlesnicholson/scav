@@ -16,6 +16,7 @@
 #include "scav/scav_layout_c.h"
 #include "scav_int.h"
 #include "scav_internal.h"
+#include "scav_thread.h"
 #include "scav_xxhash.h"
 
 #include <array>
@@ -328,6 +329,51 @@ struct Move {
   bool cut{ false };
 };
 
+// What scoring one move yields, and all of it: the geometry is deliberately
+// not here, so a round in flight costs a `Cost` per candidate rather than a
+// layout per candidate (11.10c).
+struct Scored {
+  Cost cost{};
+  std::array<int32_t, TIER2_TERMS> share{};
+  bool viable{ false };
+  bool inflated{ false };
+};
+
+// Phases 1 to 3 for one set of pins, then the exact objective over the result.
+// Pure: reads the model, the split, the tables and its arguments, writes
+// nothing either of its callers can see, which is what lets a round of them run
+// at once (11.10c).
+Scored score_move(Chart const &c,
+                  SplitGraph const &g,
+                  scav_spaces const &s,
+                  scav_profile const &objective,
+                  scav_profile const &knobs,
+                  DarSource dar,
+                  Compaction pack,
+                  Fold fold,
+                  Router const &router,
+                  SearchPins const &pins) {
+  Scored out;
+  SubmachineOrders const moved{ order_submachines(c, g, s, objective, 1, pins) };
+  std::vector<Diagnostic> spilled;
+  Candidate const cand{
+    search_candidate(c, g, moved, s, knobs, dar, pack, fold, router, 1, spilled)
+  };
+  if (!cand.viable) { return out; }
+  out.viable = true;
+  if (cand.inflations != 0) {
+    out.inflated = true;
+    return out;
+  }
+  CostTerms const terms{ cost_terms(c, g, cand.sized, cand.routes, s, objective) };
+  out.cost = cost_of(terms, objective);
+  std::array<int64_t, TIER2_TERMS> const share{ cost_shares(terms, objective) };
+  for (uint32_t k = 0; k < TIER2_TERMS; ++k) {
+    out.share[k] = static_cast<int32_t>(share[k]);
+  }
+  return out;
+}
+
 // Level 1: hold one state at a rank longest path did not give it, re-derive
 // phase 1 from that, and run phases 2 and 3 whole. Greedy and strictly
 // improving on the exact objective, in state order then rank order, so the pass
@@ -373,80 +419,19 @@ Improved search_moves(Chart const &c,
   // improving and the walk simply cut short (11.10b).
   uint32_t cut_scored{ 0 };
   uint32_t pin_scored{ 0 };
+  std::vector<Move> round;
+  std::vector<Scored> got;
+  std::vector<uint8_t> chained;
   while ((cut_scored < budget) || (pin_scored < budget)) {
-    Move take{};
-    Candidate kept;
-    Cost best{ out.cost };
-    bool found{ false };
+    // Enumerated first, scored second, reduced third. The scan used to do all
+    // three at once, which made it sequential for no reason: a candidate is a
+    // pure function of the model, the tuple and the pins, and nothing it
+    // computes is read by the next one (11.10c).
+    round.clear();
 
-    // Scores one move and keeps it if it strictly improves. Both sweeps below
-    // go through here, so the two dimensions cannot drift on what "better" is.
-    auto const consider = [&](Move const &m) {
-      SubmachineOrders const moved{
-        order_submachines(c, g, s, objective, threads, with(held, m))
-      };
-      std::vector<Diagnostic> spilled;
-      Candidate cand{ search_candidate(c,
-                                       g,
-                                       moved,
-                                       s,
-                                       knobs,
-                                       dar,
-                                       pack,
-                                       fold,
-                                       router,
-                                       threads,
-                                       spilled) };
-      ++out.scored;
-      auto const verdict = [&](MoveVerdict v, Cost const &sc) {
-        trace_emit({ .kind = TraceKind::CandidateScored,
-                     .pass = static_cast<uint16_t>(v),
-                     .score = { .row = INVALID,
-                                .state = m.cut ? INVALID : m.pin.state.v,
-                                .rank = m.cut ? 0 : m.pin.rank,
-                                .trans = m.cut ? m.leg.trans.v : INVALID,
-                                .leg = m.cut ? m.leg.leg : 0,
-                                .t0 = sc.t0_violations,
-                                .t2 = sc.t2 } });
-      };
-      if (!cand.viable) {
-        verdict(MoveVerdict::NotViable, Cost{});
-        return;
-      }
-      // A move that only fits once the whole chart's spacing was widened is
-      // not a better placement, it is a bigger drawing -- and it is one no
-      // caller can re-derive from the pins alone, because the geometry
-      // belongs to a profile the pins do not name.
-      if (cand.inflations != 0) {
-        verdict(MoveVerdict::Inflated, Cost{});
-        return;
-      }
-      CostTerms const terms{ cost_terms(c, g, cand.sized, cand.routes, s, objective) };
-      Cost const scored{ cost_of(terms, objective) };
-      // Beside the score, so a rejected move says which term rejected it.
-      if (trace_sink() != nullptr) {
-        TraceEvent e{ .kind = TraceKind::CandidateTerms, .terms = {} };
-        std::array<int64_t, TIER2_TERMS> const share{ cost_shares(terms, objective) };
-        for (uint32_t k = 0; k < TIER2_TERMS; ++k) {
-          e.terms.share[k] = static_cast<int32_t>(share[k]);
-        }
-        trace_emit(e);
-      }
-      if (!cost_less(scored, best)) {
-        verdict(MoveVerdict::NotBetter, scored);
-        return;
-      }
-      verdict(MoveVerdict::Taken, scored);
-      best = scored;
-      take = m;
-      kept = std::move(cand);
-      found = true;
-    };
-
-    // Unchaining first: it is the dimension carrying most of the kinks and the
-    // budget is shared (11.10b). The segments a cut can free are exactly the
-    // ones phase 1 chained, which the bends it created name.
-    std::vector<uint8_t> chained(g.segments.size(), 0);
+    // Unchaining first: the segments a cut can free are exactly the ones phase
+    // 1 chained, which the bends it created name (11.10b).
+    chained.assign(g.segments.size(), 0);
     for (OrderNode const &nd : here.nodes) {
       if ((nd.kind == OrderKind::Bend) && (nd.subject < chained.size())) {
         chained[nd.subject] = 1;
@@ -462,8 +447,8 @@ Improved search_moves(Chart const &c,
       TransId const t{ g.segments[seg].trans };
       if ((t.v == INVALID) || (t.v >= g.trans_segments.size())) { continue; }
       ++cut_scored;
-      consider({ .leg = { .trans = t, .leg = seg - g.trans_segments[t.v].off },
-                 .cut = true });
+      round.push_back({ .leg = { .trans = t, .leg = seg - g.trans_segments[t.v].off },
+                        .cut = true });
     }
 
     for (uint32_t st = 0; (st < c.states.size()) && (pin_scored < budget); ++st) {
@@ -475,14 +460,73 @@ Improved search_moves(Chart const &c,
       for (uint32_t r = 0; (r < ranks) && (pin_scored < budget); ++r) {
         if (r == at) { continue; }
         ++pin_scored;
-        consider({ .pin = { .state = StateId{ st }, .rank = r } });
+        round.push_back({ .pin = { .state = StateId{ st }, .rank = r } });
+      }
+    }
+    if (round.empty()) { break; }
+
+    // Each worker runs its candidate's phases on one thread: `parallel_for` is
+    // fork-join, so sharding frames underneath sharded candidates would
+    // oversubscribe every core it already has work on.
+    got.assign(round.size(), {});
+    parallel_for(static_cast<uint32_t>(round.size()), threads, [&](uint32_t i) {
+      got[i] = score_move(c, g, s, objective, knobs, dar, pack, fold, router,
+                          with(held, round[i]));
+    });
+    out.scored += static_cast<uint32_t>(round.size());
+
+    // Reduced in enumeration order, so the pass is a function of the model and
+    // not of which worker finished first (6). The trace is emitted here for the
+    // same reason -- a worker writing it would order it by the scheduler.
+    Move take{};
+    Cost best{ out.cost };
+    bool found{ false };
+    for (uint32_t i = 0; i < round.size(); ++i) {
+      Move const &m{ round[i] };
+      Scored const &sc{ got[i] };
+      MoveVerdict verdict{ MoveVerdict::NotBetter };
+      if (!sc.viable) {
+        verdict = MoveVerdict::NotViable;
+      } else if (sc.inflated) {
+        // A move that only fits once the whole chart's spacing was widened is
+        // not a better placement, it is a bigger drawing -- and it is one no
+        // caller can re-derive from the pins alone, because the geometry
+        // belongs to a profile the pins do not name.
+        verdict = MoveVerdict::Inflated;
+      } else if (cost_less(sc.cost, best)) {
+        verdict = MoveVerdict::Taken;
+        best = sc.cost;
+        take = m;
+        found = true;
+      }
+      trace_emit({ .kind = TraceKind::CandidateScored,
+                   .pass = static_cast<uint16_t>(verdict),
+                   .score = { .row = INVALID,
+                              .state = m.cut ? INVALID : m.pin.state.v,
+                              .rank = m.cut ? 0 : m.pin.rank,
+                              .trans = m.cut ? m.leg.trans.v : INVALID,
+                              .leg = m.cut ? m.leg.leg : 0,
+                              .t0 = sc.viable ? sc.cost.t0_violations : 0,
+                              .t2 = sc.viable ? sc.cost.t2 : 0 } });
+      // Beside the score, so a rejected move says which term rejected it.
+      if ((trace_sink() != nullptr) && sc.viable) {
+        TraceEvent e{ .kind = TraceKind::CandidateTerms, .terms = {} };
+        for (uint32_t k = 0; k < TIER2_TERMS; ++k) {
+          e.terms.share[k] = sc.share[k];
+        }
+        trace_emit(e);
       }
     }
 
     if (!found) { break; }
     held = with(held, take);
     here = order_submachines(c, g, s, objective, threads, held);
-    out.best = std::move(kept);
+    // Recomputed rather than carried out of the scan: keeping every
+    // candidate's geometry in flight is a whole layout per candidate, and one
+    // re-run is a round's cost divided by its width.
+    std::vector<Diagnostic> spilled;
+    out.best = search_candidate(c, g, here, s, knobs, dar, pack, fold, router, threads,
+                                spilled);
     out.cost = best;
     ++out.took;
   }

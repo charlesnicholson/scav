@@ -1593,6 +1593,28 @@ What the review did find is that `ortho_spread_attachments` did not do what its 
 
 **So `pins` becomes a pair and the two travel together.** `SearchPins` carries §11.10a's `RankPin` rows and this section's `ChainCut` rows, because a drawing is a function of its tuple and *both*, and a caller re-deriving one needs them in one object rather than in a growing argument list.
 
+### 11.10c Making the search cheap, so it can be deep
+
+**Quality comes before latency, so a budget that shrinks with chart size is the wrong instrument.** `search_move_budget` and `search_tuple_count` both halve for every doubling of the entity count past 512. That exists because a candidate is expensive, and it answers an expensive candidate by searching less — which is backwards. The answer is to make a candidate cost what the change is worth, and then let the budget be a quality knob.
+
+**What a candidate costs today, measured** (release, this Mac, one thread, `readable`, no space requests): one candidate is `estop` 250 µs, `vac` 350 µs, `mill` 875 µs, split roughly order 15%, size 30%, route 45%, cost 10%. Turning Level 1 on costs 8x to 20x a plain run at a budget of only 24 candidates — `vac` 1.5 ms to 30 ms, `mill` 5.9 ms to 54 ms. At the 2k scale routing alone is 2.4 s nested and 30 s flat, so **one candidate there is thirty seconds**, which is the whole reason the shift exists.
+
+**A round of candidates is embarrassingly parallel and was being run one at a time.** A candidate is a pure function of the model, the split, the tables, the tuple and the pins; nothing it computes is read by the next one. The scan used to enumerate, score and reduce in one pass, which forced it sequential for no reason. It now enumerates the round, scores it through `parallel_for`, and **reduces in enumeration order** — so the pass stays a function of the model and not of which worker finished first (§6). The trace is emitted in the reduce for the same reason.
+
+**Each candidate runs its own phases on one thread.** `parallel_for` is fork-join, so sharding frames underneath sharded candidates would oversubscribe every core that already has work on it. Frame-level sharding remains for the single layout outside the search.
+
+**A round holds a `Cost` per candidate, not a layout per candidate**, and the winner is recomputed once at the end of the round. Carrying geometry out of the scan is a whole `SizedLayout` and `Routes` per candidate in flight; one extra evaluation is a round's cost divided by its width.
+
+**`threads` of 0 now means as many workers as the host runs at once, and it used to mean one.** Nothing shipping ever passed a count, so every phase that says it shards has in fact been running serial since it was written. This is safe as a default for exactly one reason: §6 already requires and tests that the worker count never reaches the output, so the count buys wall clock and nothing else. Measured on 12 logical cores: `estop` 2.1x, `vac` 2.7x, `mill` 2.5x, Amdahl-limited by the per-round serial work — re-deriving phase 1 from the accepted pins, and recomputing the winner.
+
+**[OWED] The rest of the plan, in the order the steps enable each other.** Parallelism is a constant factor; the next two are asymptotic.
+
+1. **A candidate is incremental.** A Level 1 move changes exactly one frame — the one holding the moved state, or the one owning the cut segment — and every other frame's ordering, size and internal routing is unchanged. Phase 1 re-orders one frame; phase 2 re-sizes that frame and its ancestors, since extents compose upward and never sideways; phase 3 re-routes only frames whose own geometry moved, and translates the rest. Cost keeps per-frame partial sums. All three phases already compute per frame and merge, so the boundary exists. **The correctness guard is a property test, not an argument**: incremental must equal full recompute byte for byte, over the corpus and the element suite, for every single-move perturbation. One caveat is known — under `DarSource::OwnerHole` a changed size changes a hole ratio, which changes the desired ratio of frames *below* it, so dirtiness propagates down as well as up; that tuple takes the full path until it is shown not to need it.
+2. **Then delete the size shifts.** Once a candidate costs one frame rather than one chart, the budget stops being a latency dial. It should grow with chart size, not shrink, and the stopping rule should be "no improving move exists" with a cap that only bounds pathological input.
+3. **Then generate better candidates, not only more.** The sweep is blind — every (state, rank) pair and every chained segment. `Cost` already attributes: which routes carry the bends, which labels collide. Proposing moves against the worst-scoring frames first finds the same gain in fewer candidates, which multiplies everything above.
+4. **Then the surrogate** (§11.6, P9e, gated): rank cheaply, verify the top few exactly. Last, not first — an approximate score on top of an incremental exact score is a small win, where on top of a full rebuild it papers over step 1.
+5. **Then a search worth the name.** Hill climbing with no backtracking is what Level 1 is. Once a candidate is cheap, a beam, restarts, or accepting an occasional worsening move become affordable, and that is where global optimisation actually starts.
+
 ### 11.11 One algorithm, stable by construction
 
 **There is no `quick` mode and no `polish` mode.** Layout runs one algorithm, always, and is a pure function of `(model, spaces, profile)`. No warm start, no prior layout, no incremental dirty-region path, no persisted cache.
