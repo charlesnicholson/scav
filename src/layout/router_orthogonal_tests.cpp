@@ -1896,3 +1896,67 @@ TEST_CASE("ortho: routing is the same question shifted, which is what reuse rest
     }
   }
 }
+
+TEST_CASE("ortho: a named face is the face, wherever the other end lies") {
+  // 11.10e's whole point: the separation rule picks a face from a point, and a
+  // pin overrules it. The position *along* the face is still the projection.
+  scav_rect const r{ rect(1000, 1000, 800, 600) };
+  int32_t const clear{ 96 };
+  for (scav_point const aim : { pt(5000, 1200), pt(-5000, 1200), pt(1400, 5000),
+                                pt(1400, -5000), pt(1400, 1300) }) {
+    CAPTURE(aim.x);
+    CAPTURE(aim.y);
+    CHECK(ortho_attach_face(aim, r, clear, false, 0, 0).x == 1000);          // left
+    CHECK(ortho_attach_face(aim, r, clear, false, 0, 1).x == 1800);          // right
+    CHECK(ortho_attach_face(aim, r, clear, false, 0, 2).y == 1000);          // top
+    CHECK(ortho_attach_face(aim, r, clear, false, 0, 3).y == 1600);          // bottom
+    // Along the face, the projection held off both corners.
+    scav_point const left{ ortho_attach_face(aim, r, clear, false, 0, 0) };
+    CHECK(left.y >= (1000 + clear));
+    CHECK(left.y <= (1600 - clear));
+    scav_point const top{ ortho_attach_face(aim, r, clear, false, 0, 2) };
+    CHECK(top.x >= (1000 + clear));
+    CHECK(top.x <= (1800 - clear));
+  }
+  // A corner arc insets further than the clearance does, and an inscribed
+  // glyph takes the face midpoint whatever it was aimed at.
+  CHECK(ortho_attach_face(pt(5000, 1010), r, clear, false, 200, 0).y == 1200);
+  CHECK(ortho_attach_face(pt(5000, 1010), r, clear, true, 0, 0).y == 1300);
+  CHECK(ortho_attach_face(pt(5000, 1010), r, clear, true, 0, 2).x == 1400);
+}
+
+TEST_CASE("ortho: a pinned face moves the seat and nothing else about the net") {
+  RouteInput in{ busy_frame() };
+  RouteOutput loose;
+  ORTHO.route(in, loose);
+  REQUIRE(loose.net_points.size() == in.nets.size());
+
+  // Net 0 runs between the two facing boxes; pin its departure to each face in
+  // turn and the seat lands there every time.
+  for (uint32_t face = 0; face < 4; ++face) {
+    CAPTURE(face);
+    RouteInput pinned{ in };
+    pinned.nets[0].src_face = face;
+    RouteOutput out;
+    ORTHO.route(pinned, out);
+    REQUIRE(out.net_points[0].len >= 2);
+    scav_point const seat{ out.points[out.net_points[0].off] };
+    scav_rect const &box{ in.obstacles[in.nets[0].src_obstacle] };
+    switch (face) {
+      case 0: CHECK(seat.x == box.x); break;
+      case 1: CHECK(seat.x == (box.x + box.w)); break;
+      case 2: CHECK(seat.y == box.y); break;
+      default: CHECK(seat.y == (box.y + box.h)); break;
+    }
+  }
+  // INVALID is the router's own choice, which is what it did unpinned.
+  RouteInput same{ in };
+  same.nets[0].src_face = INVALID;
+  RouteOutput again;
+  ORTHO.route(same, again);
+  REQUIRE(again.points.size() == loose.points.size());
+  for (uint32_t i = 0; i < loose.points.size(); ++i) {
+    CHECK(again.points[i].x == loose.points[i].x);
+    CHECK(again.points[i].y == loose.points[i].y);
+  }
+}

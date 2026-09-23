@@ -45,6 +45,8 @@ int dispatch(int argc, char **argv) {
     bool trace_search{ false };
     uint32_t row{ INVALID };
     std::vector<ChainCut> cuts;
+    std::vector<ReversePin> reverses;
+    std::vector<FacePin> faces;
     for (int i = 2; i < argc; ++i) {
       std::string_view const arg{ argv[i] };
       bool *flag{ nullptr };
@@ -61,6 +63,18 @@ int dispatch(int argc, char **argv) {
         if ((i + 1) >= argc) { return usage(); }
         ++i;
         if (!chain_cut(argv[i], cuts)) { return usage(); }
+        continue;
+      }
+      if (arg == "--reverse") {
+        if ((i + 1) >= argc) { return usage(); }
+        ++i;
+        if (!reverse_pin(argv[i], reverses)) { return usage(); }
+        continue;
+      }
+      if (arg == "--face") {
+        if ((i + 1) >= argc) { return usage(); }
+        ++i;
+        if (!face_pin(argv[i], faces)) { return usage(); }
         continue;
       }
       if (arg == "--hash") {
@@ -89,10 +103,10 @@ int dispatch(int argc, char **argv) {
     // one run made and there are none without a run (11.16).
     // `--trace-search` is a mode of `--trace`, not a second flag beside it.
     if ((path == nullptr) || (hash && (json || layout)) || (trace_search && !trace) ||
-        (((row != INVALID) || trace || !cuts.empty()) && !layout)) {
+        (((row != INVALID) || trace || !cuts.empty() || !reverses.empty() || !faces.empty()) && !layout)) {
       return usage();
     }
-    return run_dump(path, hash, json, layout, row, trace, trace_search, cuts);
+    return run_dump(path, hash, json, layout, row, trace, trace_search, cuts, reverses, faces);
   }
 
   if (verb == "render") {
@@ -101,6 +115,8 @@ int dispatch(int argc, char **argv) {
     bool embed{ false };
     uint32_t row{ INVALID };
     std::vector<ChainCut> cuts;
+    std::vector<ReversePin> reverses;
+    std::vector<FacePin> faces;
     for (int i = 2; i < argc; ++i) {
       std::string_view const arg{ argv[i] };
       if (arg == "--portfolio-row") {
@@ -114,6 +130,14 @@ int dispatch(int argc, char **argv) {
         if ((i + 1) >= argc) { return usage(); }
         ++i;
         if (!chain_cut(argv[i], cuts)) { return usage(); }
+      } else if (arg == "--reverse") {
+        if ((i + 1) >= argc) { return usage(); }
+        ++i;
+        if (!reverse_pin(argv[i], reverses)) { return usage(); }
+      } else if (arg == "--face") {
+        if ((i + 1) >= argc) { return usage(); }
+        ++i;
+        if (!face_pin(argv[i], faces)) { return usage(); }
       } else if (arg == "-o") {
         if (((i + 1) >= argc) || (out != nullptr)) { return usage(); }
         out = argv[++i];
@@ -130,7 +154,7 @@ int dispatch(int argc, char **argv) {
       }
     }
     if (path == nullptr) { return usage(); }
-    return run_render(path, out, embed, profile, row, cuts);
+    return run_render(path, out, embed, profile, row, cuts, reverses, faces);
   }
 
   if (verb == "selftest") {

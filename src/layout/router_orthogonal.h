@@ -72,6 +72,16 @@ scav_point ortho_escape_box(scav_point at, scav_point toward, scav_rect const &r
 // off the face's two corners.
 // `inscribed` is `RouteInput`'s: the face's midpoint and nothing else, because
 // that is where an axis-aligned route meets a disc or a diamond.
+// `ortho_attach_box` onto a named face -- 0 left, 1 right, 2 top, 3 bottom --
+// rather than the one the separation rule picks. The position along the face is
+// still `toward`'s projection, held off the corners the same way (11.10e).
+scav_point ortho_attach_face(scav_point toward,
+                             scav_rect const &r,
+                             int32_t clear,
+                             bool inscribed,
+                             int32_t corner,
+                             uint32_t face);
+
 scav_point ortho_attach_box(scav_point toward,
                             scav_rect const &r,
                             int32_t clear,

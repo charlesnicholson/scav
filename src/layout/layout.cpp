@@ -150,7 +150,7 @@ void write_rows(Chart &c, ColumnId id, std::vector<T> const &rows) {
   }
 }
 
-static_assert(sizeof(scav_profile) == 48 * sizeof(int32_t),
+static_assert(sizeof(scav_profile) == 49 * sizeof(int32_t),
               "the profile must stay a flat block of int32 with no padding, or the "
               "inputs digest below would hash bytes whose values are unspecified");
 
@@ -159,7 +159,7 @@ static_assert(sizeof(scav_profile) == 48 * sizeof(int32_t),
 uint32_t inputs_digest(scav_spaces const &s, scav_layout_opts const &o) {
   std::vector<scav_byte> b;
   // Padding is what forbids hashing a struct's bytes, and the assert above
-  // proves there is none, so the copy reads all 48 knobs and nothing else.
+  // proves there is none, so the copy reads all 49 knobs and nothing else.
   std::array<int32_t, sizeof(scav_profile) / sizeof(int32_t)> profile{};
   std::memcpy(profile.data(), &o.profile, sizeof(scav_profile));
   for (int32_t const field : profile) { append_i32(b, field); }
@@ -237,13 +237,14 @@ Candidate search_candidate(Chart const &c,
                            uint32_t threads,
                            std::vector<Diagnostic> &diags,
                            RouteCache const *reuse = nullptr,
-                           RouteCache *fill = nullptr) {
+                           RouteCache *fill = nullptr,
+                           SearchPins const *pins = nullptr) {
   Candidate out;
   if (!size_layout(c, g, orders, s, knobs, out.sized, diags, dar, pack, fold)) {
     return out;
   }
   out.routes = route_transitions(c, g, orders, out.sized, s, knobs, router, threads,
-                                 reuse, fill);
+                                 reuse, fill, pins);
 
   // `out` carries the best attempt so far, and `done` is set from that one
   // rather than from whichever attempt was just made.
@@ -327,10 +328,18 @@ struct Improved {
 
 // One Level 1 move: a state held at a rank it was not given (11.10a), or a
 // segment left unchained (11.10b). `cut` names which of the two.
+// One Level 1 move. Exactly one of the three is set.
+enum class MoveKind : uint32_t { Rank, Cut, Reverse, Face };
+static_assert((static_cast<uint16_t>(MoveKind::Rank) == TRACE_MOVE_RANK) &&
+                  (static_cast<uint16_t>(MoveKind::Cut) == TRACE_MOVE_CUT) &&
+                  (static_cast<uint16_t>(MoveKind::Reverse) == TRACE_MOVE_REVERSE) &&
+                  (static_cast<uint16_t>(MoveKind::Face) == TRACE_MOVE_FACE),
+              "the trace names a move by this enum's ordinal");
 struct Move {
   RankPin pin{};
   ChainCut leg{};
-  bool cut{ false };
+  FacePin face{};
+  MoveKind kind{ MoveKind::Rank };
 };
 
 // What scoring one move yields, and all of it: the geometry is deliberately
@@ -362,7 +371,7 @@ Scored score_move(Chart const &c,
   SubmachineOrders const moved{ order_submachines(c, g, s, objective, 1, pins) };
   std::vector<Diagnostic> spilled;
   Candidate const cand{ search_candidate(c, g, moved, s, knobs, dar, pack, fold, router,
-                                         1, spilled, reuse) };
+                                         1, spilled, reuse, nullptr, &pins) };
   if (!cand.viable) { return out; }
   out.viable = true;
   if (cand.inflations != 0) {
@@ -414,15 +423,18 @@ Improved search_moves(Chart const &c,
   {
     std::vector<Diagnostic> spilled;
     Candidate first{ search_candidate(c, g, here, s, knobs, dar, pack, fold, router,
-                                      threads, spilled, nullptr, &base) };
+                                      threads, spilled, nullptr, &base, &held) };
     out.best = std::move(first);
   }
 
   auto const with = [](SearchPins base_pins, Move const &m) {
-    if (m.cut) {
-      base_pins.cuts.push_back(m.leg);
-    } else {
-      base_pins.ranks.push_back(m.pin);
+    switch (m.kind) {
+      case MoveKind::Cut: base_pins.cuts.push_back(m.leg); break;
+      case MoveKind::Reverse:
+        base_pins.reverses.push_back({ .trans = m.leg.trans, .leg = m.leg.leg });
+        break;
+      case MoveKind::Face: base_pins.faces.push_back(m.face); break;
+      case MoveKind::Rank: base_pins.ranks.push_back(m.pin); break;
     }
     return base_pins;
   };
@@ -432,11 +444,14 @@ Improved search_moves(Chart const &c,
   // one shared 24 took `axis` from 11,780 to 12,702, every move still strictly
   // improving and the walk simply cut short (11.10b).
   uint32_t cut_scored{ 0 };
+  uint32_t rev_scored{ 0 };
+  uint32_t face_scored{ 0 };
   uint32_t pin_scored{ 0 };
   std::vector<Move> round;
   std::vector<Scored> got;
   std::vector<uint8_t> chained;
-  while ((cut_scored < budget) || (pin_scored < budget)) {
+  while ((cut_scored < budget) || (rev_scored < budget) ||
+         (face_scored < budget) || (pin_scored < budget)) {
     // Enumerated first, scored second, reduced third. The scan used to do all
     // three at once, which made it sequential for no reason: a candidate is a
     // pure function of the model, the tuple and the pins, and nothing it
@@ -462,7 +477,46 @@ Improved search_moves(Chart const &c,
       if ((t.v == INVALID) || (t.v >= g.trans_segments.size())) { continue; }
       ++cut_scored;
       round.push_back({ .leg = { .trans = t, .leg = seg - g.trans_segments[t.v].off },
-                        .cut = true });
+                        .kind = MoveKind::Cut });
+    }
+
+    // Which edge of a cycle carries the reversal. Cycle-breaking walks in node
+    // order and turns around whichever edge closes the walk, so the choice is
+    // declaration order and nothing scores it (11.10d). Every segment not
+    // already turned around is a candidate: an edge on no cycle only makes one
+    // the walk then breaks, which `Cost` prices like any other candidate.
+    for (uint32_t seg = 0; (seg < g.segments.size()) && (rev_scored < budget); ++seg) {
+      TransId const t{ g.segments[seg].trans };
+      if ((t.v == INVALID) || (t.v >= g.trans_segments.size())) { continue; }
+      uint32_t const leg{ seg - g.trans_segments[t.v].off };
+      bool already{ false };
+      for (ReversePin const &had : held.reverses) {
+        already = already || ((had.trans.v == t.v) && (had.leg == leg));
+      }
+      if (already) { continue; }
+      ++rev_scored;
+      round.push_back({ .leg = { .trans = t, .leg = leg }, .kind = MoveKind::Reverse });
+    }
+
+    // Which face each end of a segment leaves by. Four per end, and a face
+    // already pinned is not re-offered (11.10e).
+    for (uint32_t seg = 0; (seg < g.segments.size()) && (face_scored < budget); ++seg) {
+      TransId const t{ g.segments[seg].trans };
+      if ((t.v == INVALID) || (t.v >= g.trans_segments.size())) { continue; }
+      uint32_t const leg{ seg - g.trans_segments[t.v].off };
+      for (uint32_t end = 0; (end < 2) && (face_scored < budget); ++end) {
+        bool already{ false };
+        for (FacePin const &had : held.faces) {
+          already = already || ((had.trans.v == t.v) && (had.leg == leg) &&
+                                (had.end == end));
+        }
+        if (already) { continue; }
+        for (uint32_t f = 0; (f < 4) && (face_scored < budget); ++f) {
+          ++face_scored;
+          round.push_back({ .face = { .trans = t, .leg = leg, .end = end, .face = f },
+                            .kind = MoveKind::Face });
+        }
+      }
     }
 
     for (uint32_t st = 0; (st < c.states.size()) && (pin_scored < budget); ++st) {
@@ -516,10 +570,17 @@ Improved search_moves(Chart const &c,
       trace_emit({ .kind = TraceKind::CandidateScored,
                    .pass = static_cast<uint16_t>(verdict),
                    .score = { .row = INVALID,
-                              .state = m.cut ? INVALID : m.pin.state.v,
-                              .rank = m.cut ? 0 : m.pin.rank,
-                              .trans = m.cut ? m.leg.trans.v : INVALID,
-                              .leg = m.cut ? m.leg.leg : 0,
+                              .state = (m.kind == MoveKind::Rank) ? m.pin.state.v : INVALID,
+                              .rank = (m.kind == MoveKind::Rank) ? m.pin.rank : 0,
+                              .trans = (m.kind == MoveKind::Rank)   ? INVALID
+                                       : (m.kind == MoveKind::Face) ? m.face.trans.v
+                                                                    : m.leg.trans.v,
+                              .leg = (m.kind == MoveKind::Rank)   ? 0
+                                     : (m.kind == MoveKind::Face) ? m.face.leg
+                                                                  : m.leg.leg,
+                              .move = static_cast<uint16_t>(m.kind),
+                              .end = static_cast<uint16_t>(m.face.end),
+                              .face = m.face.face,
                               .t0 = sc.viable ? sc.cost.t0_violations : 0,
                               .t2 = sc.viable ? sc.cost.t2 : 0 } });
       // Beside the score, so a rejected move says which term rejected it.
@@ -540,7 +601,7 @@ Improved search_moves(Chart const &c,
     // re-run is a round's cost divided by its width.
     std::vector<Diagnostic> spilled;
     out.best = search_candidate(c, g, here, s, knobs, dar, pack, fold, router, threads,
-                                spilled, nullptr, &base);
+                                spilled, nullptr, &base, &held);
     out.cost = best;
     ++out.took;
   }
@@ -684,7 +745,10 @@ bool layout_run(Chart &c,
                                      fold,
                                      *router,
                                      (rows > 1) ? 1U : o.threads,
-                                     spilled[i]);
+                                     spilled[i],
+                                     nullptr,
+                                     nullptr,
+                                     &seed);
     viable[i] = candidates[i].viable ? 1U : 0U;
     // One row has nothing to rank, so it is not scored: `argmin` over one
     // candidate is that candidate. The objective is the caller's profile and

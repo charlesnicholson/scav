@@ -30,7 +30,7 @@ TEST_CASE("profile: both shipped profiles load and pass their own validation") {
     CAPTURE(name);
     scav_profile const p{ named(name) };
     CHECK(profile_validate(p));
-    CHECK(p.profile_version == 9);
+    CHECK(p.profile_version == 10);
     // The whole table (11.10). Two shipped while the objective mis-ranked
     // five charts of eleven and more candidates made worse picks; fitted, the
     // corpus reads 71 defects against 78 at two and a floor of 70.
@@ -106,6 +106,10 @@ TEST_CASE("profile: every bound rejects out of range") {
           .bad_high = 1025 },
     Poke{ .what = "w_label_near",
           .field = &scav_profile::w_label_near,
+          .bad_low = -1,
+          .bad_high = 1025 },
+    Poke{ .what = "w_crowding",
+          .field = &scav_profile::w_crowding,
           .bad_low = -1,
           .bad_high = 1025 },
     Poke{ .what = "w_area",

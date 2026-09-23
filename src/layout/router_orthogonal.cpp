@@ -250,6 +250,32 @@ scav_point ortho_escape_box(scav_point at, scav_point toward, scav_rect const &r
   return { .x = at.x, .y = top ? r.y : (r.y + r.h) };
 }
 
+scav_point ortho_attach_face(scav_point toward,
+                             scav_rect const &r,
+                             int32_t clear,
+                             bool inscribed,
+                             int32_t corner,
+                             uint32_t face) {
+  // **A face with no room to put a seat on is not a face.** `onto_face` holds a
+  // seat off both corners, so a face shorter than twice that inset clamps every
+  // seat on it to one point -- and a fork's bar, wide and thin, has two of
+  // them. Pinning one stacks every branch on a single seat, which is a thing
+  // nothing in `Cost` prices, so the pin is declined rather than honoured
+  // (11.10e). The rule below then answers, which is what an unpinned end does.
+  int32_t const len{ (face < 2) ? r.h : r.w };
+  if (!inscribed && (len <= (2 * imin(imax(clear, corner), len / 2)))) {
+    return ortho_attach_box(toward, r, clear, inscribed, corner);
+  }
+  if (face < 2) {  // left or right: the position along it is a y
+    int32_t const y{ inscribed ? (r.y + (r.h / 2))
+                               : onto_face(toward.y, r.y, r.h, clear, corner) };
+    return { .x = (face == 0) ? r.x : (r.x + r.w), .y = y };
+  }
+  int32_t const x{ inscribed ? (r.x + (r.w / 2))
+                             : onto_face(toward.x, r.x, r.w, clear, corner) };
+  return { .x = x, .y = (face == 2) ? r.y : (r.y + r.h) };
+}
+
 scav_point ortho_attach_box(scav_point toward,
                             scav_rect const &r,
                             int32_t clear,
@@ -993,19 +1019,19 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
     uint32_t const dst_slot{ src_slot + 1 };
     toward[src_slot] = after;
     toward[dst_slot] = before;
+    // A named face overrules the separation rule, which is what makes the
+    // choice searchable rather than ruled (11.10e).
+    auto const attach = [&](scav_point aim, uint32_t box, uint32_t face) {
+      return (face < 4) ? ortho_attach_face(aim, in.obstacles[box], clear, glyph(box),
+                                            arc(box), face)
+                        : ortho_attach_box(aim, in.obstacles[box], clear, glyph(box),
+                                           arc(box));
+    };
     seat[src_slot] = (net.src_obstacle < in.obstacles.size())
-                         ? ortho_attach_box(after,
-                                            in.obstacles[net.src_obstacle],
-                                            clear,
-                                            glyph(net.src_obstacle),
-                                            arc(net.src_obstacle))
+                         ? attach(after, net.src_obstacle, net.src_face)
                          : after;
     seat[dst_slot] = (net.dst_obstacle < in.obstacles.size())
-                         ? ortho_attach_box(before,
-                                            in.obstacles[net.dst_obstacle],
-                                            clear,
-                                            glyph(net.dst_obstacle),
-                                            arc(net.dst_obstacle))
+                         ? attach(before, net.dst_obstacle, net.dst_face)
                          : before;
   }
   // Diffed at the call site rather than emitted inside each pass: what a reader

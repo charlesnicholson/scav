@@ -295,8 +295,11 @@ TEST_CASE("trace: the search re-orders per move, and every move states its verdi
   for (TraceEvent const &e : t.events) {
     if (e.kind != TraceKind::CandidateScored) { continue; }
     CHECK(e.pass <= static_cast<uint16_t>(MoveVerdict::NotBetter));
-    // A move is a placement or an unchaining, never both and never neither.
-    CHECK((e.score.state == INVALID) != (e.score.trans == INVALID));
+    // A placement names a state and nothing else; every other move names a
+    // transition and no state.
+    CHECK(e.score.move <= TRACE_MOVE_FACE);
+    CHECK((e.score.state == INVALID) == (e.score.move != TRACE_MOVE_RANK));
+    CHECK((e.score.trans == INVALID) == (e.score.move == TRACE_MOVE_RANK));
     taken += (e.pass == static_cast<uint16_t>(MoveVerdict::Taken)) ? 1U : 0U;
   }
   CHECK(scored > 0);
@@ -307,12 +310,21 @@ TEST_CASE("trace: the search re-orders per move, and every move states its verdi
   // are `layout_run`'s own and the one the search enters holding.
   CHECK(count_kind(t, TraceKind::EdgeReversed) == scored + taken + 2);
 
-  // The back edge is the one carrying a waypoint in every ordering, however
-  // many the search ran.
+  // A three-cycle leaves at most one edge spanning two ranks, so no ordering
+  // hands more than one net a waypoint -- and *which* net is the search's
+  // choice, since a reversal turns a different edge around (11.10d), while a
+  // cut removes the bend and leaves none (11.10b). At most one, and some.
+  (void)back;
+  uint32_t planned{ 0 };
+  uint32_t carrying{ 0 };
   for (TraceEvent const &e : t.events) {
-    if ((e.kind != TraceKind::NetPlanned) || (e.net.waypoints == 0)) { continue; }
-    CHECK(e.net.trans == back.v);
+    if (e.kind != TraceKind::NetPlanned) { continue; }
+    ++planned;
+    carrying += (e.net.waypoints != 0) ? 1U : 0U;
   }
+  CHECK(planned > 0);
+  CHECK(carrying > 0);
+  CHECK(carrying * 3 <= planned);  // three nets an ordering, at most one bent
 }
 
 TEST_CASE("trace: the search scores unchain moves beside placement moves") {
@@ -339,17 +351,20 @@ TEST_CASE("trace: the search scores unchain moves beside placement moves") {
     REQUIRE(layout_run(c, {}, opts, placed, diags, nullptr, nullptr, 0));
   }
 
-  // Exactly one cut is offered -- the back edge -- and it comes before every
-  // placement move, because the unchain sweep runs first.
+  // Exactly one cut is offered -- the back edge, the one segment phase 1
+  // chained -- and every cut comes before every placement move. The other
+  // transition-naming moves are reversals and faces (11.10d, 11.10e), told
+  // apart by the event's `move` rather than by which fields are set.
   uint32_t cuts{ 0 };
   bool seen_pin{ false };
   bool cut_after_pin{ false };
   for (TraceEvent const &e : t.events) {
     if (e.kind != TraceKind::CandidateScored) { continue; }
-    if (e.score.trans == INVALID) {
+    if (e.score.move == TRACE_MOVE_RANK) {
       seen_pin = true;
       continue;
     }
+    if (e.score.move != TRACE_MOVE_CUT) { continue; }
     ++cuts;
     CHECK(e.score.trans == back.v);
     CHECK(e.score.leg == 0);

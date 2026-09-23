@@ -486,8 +486,12 @@ TEST_CASE("layout: a placed box rides a leg of its own route, clear of every oth
 
   Near const own{ nearest(2) };
   REQUIRE(own.away >= 0);
-  // A strip is a whole box height off the leg, and there are five of them.
-  CHECK((own.away % placed[0].h) == 0);
+  // Within the leader of its own polyline, which is 11.9.4's anchored rule. It
+  // used to be a whole number of box heights off the leg, the strips that rule
+  // replaced; that held here only while the route's nearest leg was the one the
+  // strips were cut against, and a route reshaped by the face search (11.10e)
+  // puts a different leg of the same route nearest.
+  CHECK(own.away <= label_leader(readable()));
   CHECK(own.away < (5 * placed[0].h));
   // Beside the leg's run rather than off one of its ends, which is what makes
   // the gap above the perpendicular one the strips are cut on.
@@ -1807,6 +1811,40 @@ TEST_CASE("layout: only a kept inflation attempt ends the retry loop") {
   CHECK(!keep);
 }
 
+TEST_CASE("layout: the search routes a sealed channel by its face, not by widening") {
+  // The same chart the inflation cases below seal, with the move sweep on. A
+  // face move finds a way into the composite that does not cross the fork's
+  // bar, so the route needs no clearance the spacing has to be widened for --
+  // the whole chart stays the size it was drawn at, which is what inflating
+  // it three times gave up (11.10e).
+  Chart searched{ sealed_chart() };
+  scav_profile p{ sealed_profile(readable()) };
+  p.portfolio_k = readable().portfolio_k;
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  uint32_t inflations{ 99 };
+  uint32_t moves{ 0 };
+  SearchPins taken;
+  REQUIRE(layout_run(searched, {}, opts(p), placed, diags, &inflations, nullptr, INVALID,
+                     &moves, &taken));
+  CHECK(inflations == 0);
+  CHECK(diags.empty());
+  CHECK(moves >= 1);
+  CHECK(!taken.faces.empty());
+
+  // And it is smaller than what the retry draws, because it was never widened.
+  Chart widened{ sealed_chart() };
+  std::vector<scav_placed> wide_placed;
+  std::vector<Diagnostic> wide_diags;
+  uint32_t wide_inflations{ 0 };
+  REQUIRE(layout_run(widened, {}, opts(sealed_profile(readable())), wide_placed, wide_diags,
+                     &wide_inflations));
+  REQUIRE(wide_inflations == 3);
+  scav_rect const a{ row_of<scav_rect>(searched, "scav.geom.chart", 0) };
+  scav_rect const b{ row_of<scav_rect>(widened, "scav.geom.chart", 0) };
+  CHECK((Wide{ a.w } * a.h) < (Wide{ b.w } * b.h));
+}
+
 TEST_CASE("layout: a sealed channel is opened by inflating the spacing") {
   Chart c{ sealed_chart() };
   scav_profile const p{ sealed_profile(readable()) };
@@ -2565,5 +2603,7 @@ TEST_CASE("layout: fuzzed charts and spaces either lay out or diagnose") {
     }
   }
 }
+
+
 
 

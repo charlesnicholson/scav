@@ -282,16 +282,16 @@ void append_rect(std::string &out, scav_rect r) {
   append_i32v(out, r.h);
 }
 
-// The nine Tier-2 terms in CostTerms order, which is the order `cost_shares`
+// The Tier-2 terms in CostTerms order, which is the order `cost_shares`
 // answers in, so a name and a share never come apart.
 constexpr std::array<char const *, TIER2_TERMS> TERMS{
   "bends", "corridor",   "crossings", "excess_len", "adjacency",
-  "label", "label_near", "aspect",    "area"
+  "label", "label_near", "aspect",    "area",       "crowding"
 };
 
 std::array<int64_t, TIER2_TERMS> term_values(CostTerms const &t) {
   return { t.bends, t.corridor,   t.crossings, t.excess_len, t.adjacency,
-           t.label, t.label_near, t.aspect,    t.area };
+           t.label, t.label_near, t.aspect,    t.area,       t.crowding };
 }
 
 void append_geometry_text(std::string &out,
@@ -762,7 +762,9 @@ int run_dump(char const *path,
              uint32_t row,
              bool trace,
              bool trace_search,
-             std::vector<ChainCut> const &cuts) {
+             std::vector<ChainCut> const &cuts,
+             std::vector<ReversePin> const &reverses,
+             std::vector<FacePin> const &faces) {
   Loaded net;
   load_and_report(path, true, net);
   if (net.code == EXIT_UNUSABLE) { return EXIT_UNUSABLE; }
@@ -785,7 +787,7 @@ int run_dump(char const *path,
     }
     std::vector<Diagnostic> diags;
     std::vector<char> events;
-    SearchPins const pins{ .cuts = cuts };
+    SearchPins const pins{ .cuts = cuts, .reverses = reverses, .faces = faces };
     bool const laid{
       trace ? layout_trace_json(net.chart, as_spaces(spaces), opts, placed, diags, events,
                                 row,

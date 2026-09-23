@@ -41,6 +41,7 @@ int32_t cost_through_boxes(Chart const &c,
                            std::vector<Piece> const &pieces);
 int64_t cost_crossings(std::vector<Piece> const &pieces, std::vector<uint32_t> &per_trans);
 Wide cost_corridor(Routes const &r, std::vector<Piece> const &pieces);
+Wide cost_crowding(std::vector<Piece> const &pieces, int32_t em);
 SCAV_INTERNAL_END
 
 namespace {
@@ -555,6 +556,55 @@ Wide cost_corridor(Routes const &r, std::vector<Piece> const &pieces) {
   return total;
 }
 
+// Crowding is `corridor`'s near neighbour: two segments of different
+// transitions on one axis, overlapping along it, closer than an em but not on
+// one line. Each pair is charged its overlap scaled by the shortfall, summed
+// before the one division so no pair's charge is truncated away (11.6).
+//
+// Sorted by (axis, coordinate), so the lanes within an em of one another are a
+// window rather than every pair -- the term runs inside every candidate the
+// search scores, and an all-pairs sweep is what `cost_crossings` still is.
+Wide cost_crowding(std::vector<Piece> const &pieces, int32_t em) {
+  if (em <= 0) { return 0; }
+  struct Lane {
+    uint32_t axis;
+    int32_t at;
+    int32_t lo, hi;  // the extent along the axis
+    uint32_t trans;
+  };
+  std::vector<Lane> lanes;
+  lanes.reserve(pieces.size());
+  for (Piece const &pc : pieces) {
+    int32_t at{ 0 };
+    uint32_t const axis{ piece_axis(pc, at) };
+    if (axis >= 2) { continue; }
+    int32_t const a{ (axis == 0) ? pc.a.x : pc.a.y };
+    int32_t const b{ (axis == 0) ? pc.b.x : pc.b.y };
+    lanes.push_back(
+        { .axis = axis, .at = at, .lo = imin(a, b), .hi = imax(a, b), .trans = pc.trans });
+  }
+  scav_stable_sort(lanes, [](Lane const &x, Lane const &y) {
+    return (x.axis != y.axis) ? (x.axis < y.axis) : (x.at < y.at);
+  });
+
+  Wide scaled{ 0 };
+  for (uint32_t i = 0; i < lanes.size(); ++i) {
+    Lane const &u{ lanes[i] };
+    for (uint32_t j = i + 1; j < lanes.size(); ++j) {
+      Lane const &v{ lanes[j] };
+      if (v.axis != u.axis) { break; }
+      Wide const apart{ Wide{ v.at } - u.at };
+      if (apart >= em) { break; }        // sorted, so every later lane is further
+      if (apart == 0) { continue; }      // on one line: `corridor`'s, not this
+      if (u.trans == v.trans) { continue; }
+      Wide const along{ imin(Wide{ u.hi }, Wide{ v.hi }) - imax(Wide{ u.lo }, Wide{ v.lo }) };
+      if (along <= 0) { continue; }
+      scaled += along * (Wide{ em } - apart);
+    }
+  }
+  return scaled / em;
+}
+
 SCAV_INTERNAL_END
 
 CostTerms cost_terms(Chart const &c,
@@ -588,8 +638,15 @@ CostTerms cost_terms(Chart const &c,
       }
     }
   }
+  for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {
+    if ((tr < g.trans_segments.size()) && (g.trans_segments[tr].len != 0) &&
+        (r.route[tr].len < 2)) {
+      ++t.vanished;
+    }
+  }
   t.crossings = cost_crossings(pieces, crossings_of);
   t.corridor = cost_corridor(r, pieces);
+  t.crowding = cost_crowding(pieces, p.font_size_grid);
 
   // `min_len` is the direct distance between the endpoints, or the boxes the
   // route has to carry if those are longer; only the excess is charged, since
@@ -758,7 +815,8 @@ std::array<Wide, TIER2_TERMS> weighted_terms(CostTerms const &t, scav_profile co
            Wide{ p.w_label } * t.label,
            Wide{ p.w_label_near } * ceil_div(t.label_near, em),
            Wide{ p.w_aspect } * ceil_div(t.aspect, em),
-           Wide{ p.w_area } * ceil_div(t.area, em2) };
+           Wide{ p.w_area } * ceil_div(t.area, em2),
+           Wide{ p.w_crowding } * ceil_div(t.crowding, em) };
 }
 
 }  // namespace
@@ -772,7 +830,7 @@ CostTerms layout_cost(Chart const &c,
 
 Cost cost_of(CostTerms const &t, scav_profile const &p) {
   Cost out;
-  out.t0_violations = t.through_box + t.box_overlap;
+  out.t0_violations = t.through_box + t.box_overlap + t.vanished;
   // Area is the largest term at (2 * COORD_MAX)^2 < 2^40, its em^2 only divides
   // it down, and nine of those under a weight capped at 2^10 stay below 2^54.
   for (Wide const term : weighted_terms(t, p)) { out.t2 += term; }

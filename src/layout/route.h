@@ -10,6 +10,7 @@
 #include "layout/router.h"
 #include "layout/size.h"
 #include "scav/scav_core.h"
+#include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
 
 #include <cstdint>
@@ -77,7 +78,8 @@ Routes route_transitions(Chart const &c,
                          Router const &router,
                          uint32_t threads = 0,
                          RouteCache const *reuse = nullptr,
-                         RouteCache *fill = nullptr);
+                         RouteCache *fill = nullptr,
+                         SearchPins const *pins = nullptr);
 
 }  // namespace scav
 

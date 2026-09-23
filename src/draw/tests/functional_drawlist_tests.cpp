@@ -261,7 +261,9 @@ TEST_CASE("drawlist gauntlet: what crowd's tighter packing costs its labels") {
   // own leg, 442 under the anchor, 490 under the reservation, and 346 once the
   // weights were fitted and the search ran the whole table (11.6): the term
   // rises where every reader-visible class falls, so the pick it argues for is
-  // one P9d's fit moved away from.
+  // one P9d's fit moved away from. **77 once crowding is priced** (11.6): the
+  // lanes a label sits between now cost what they look like when they close in,
+  // so they spread, and the label's own line is left nearest it.
   Metrics const m{ bundled() };
   scav_profile const p{ readable() };
   Run const r{ run_pipeline("gauntlet/crowd.scav", m, p) };
@@ -269,7 +271,7 @@ TEST_CASE("drawlist gauntlet: what crowd's tighter packing costs its labels") {
     cost_columns(r.chart, decompose(r.chart), p, as_spaces(r.spaces), r.placed)
   };
   CHECK(t.label == 0);
-  CHECK(t.label_near == 346);
+  CHECK(t.label_near == 77);
 }
 
 TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back") {

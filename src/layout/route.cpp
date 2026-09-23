@@ -20,6 +20,7 @@
 #include "scav_stable_sort.h"
 #include "scav_thread.h"
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -93,6 +94,7 @@ bool same_but_shifted(RouteFrameCache const &a,
     RouteNet const &q{ b.nets[i] };
     if ((p.src_obstacle != q.src_obstacle) || (p.dst_obstacle != q.dst_obstacle) ||
         (p.waypoint_off != q.waypoint_off) || (p.waypoint_len != q.waypoint_len) ||
+        (p.src_face != q.src_face) || (p.dst_face != q.dst_face) ||
         !moved_pt(p.src, q.src) || !moved_pt(p.dst, q.dst)) {
       return false;
     }
@@ -135,8 +137,24 @@ Routes route_transitions(Chart const &c,
                          Router const &router,
                          uint32_t threads,
                          RouteCache const *reuse,
-                         RouteCache *fill) {
+                         RouteCache *fill,
+                         SearchPins const *pins) {
   Routes out;
+  // `{trans, leg, end}` resolved to a face per segment end once, so the frame
+  // workers read a flat table rather than searching the pin list per net.
+  std::array<std::vector<uint32_t>, 2> faces;
+  if ((pins != nullptr) && !pins->faces.empty()) {
+    for (std::vector<uint32_t> &side : faces) { side.assign(g.segments.size(), INVALID); }
+    for (FacePin const &fp : pins->faces) {
+      if ((fp.trans.v == INVALID) || (fp.trans.v >= g.trans_segments.size()) ||
+          (fp.end > 1) || (fp.face > 3)) {
+        continue;
+      }
+      Span const segs{ g.trans_segments[fp.trans.v] };
+      if (fp.leg >= segs.len) { continue; }
+      faces[fp.end][segs.off + fp.leg] = fp.face;
+    }
+  }
   if (fill != nullptr) { fill->frame.assign(c.submachines.size(), {}); }
   uint32_t const n{ static_cast<uint32_t>(c.transitions.size()) };
   out.route.assign(n, {});
@@ -340,6 +358,10 @@ Routes route_transitions(Chart const &c,
         in.waypoints.push_back(z.node[bend]);
       }
       net.waypoint_len = static_cast<uint32_t>(in.waypoints.size()) - net.waypoint_off;
+      if (!faces[0].empty()) {
+        net.src_face = faces[0][pn.seg];
+        net.dst_face = faces[1][pn.seg];
+      }
       trace_emit({ .kind = TraceKind::NetPlanned,
                    .net = { .seg = pn.seg,
                             .trans = g.segments[pn.seg].trans.v,

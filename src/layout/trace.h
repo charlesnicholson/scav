@@ -7,6 +7,7 @@
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -47,10 +48,25 @@ struct TraceNet { uint32_t seg, trans, waypoints; int32_t sx, sy, dx, dy; };
 struct TracePoint { int32_t x, y; };
 struct TraceSeat { uint32_t net, end; int32_t from_x, from_y, to_x, to_y; };
 struct TraceLane { uint32_t net, lane; int32_t at; };
-struct TraceScore { uint32_t row, state, rank, trans, leg; int32_t t0; int64_t t2; };
+// `move` is which dimension a Level 1 candidate moved along (11.10): 0 a rank,
+// 1 a chain cut, 2 a reversal, 3 a face -- whose `end` and `face` then say
+// which. A row of Level 2 has `row` set and no move.
+struct TraceScore {
+  uint32_t row, state, rank, trans, leg;
+  uint16_t move, end;
+  uint32_t face;
+  int32_t t0;
+  int64_t t2;
+};
+inline constexpr uint16_t TRACE_MOVE_RANK{ 0 };
+inline constexpr uint16_t TRACE_MOVE_CUT{ 1 };
+inline constexpr uint16_t TRACE_MOVE_REVERSE{ 2 };
+inline constexpr uint16_t TRACE_MOVE_FACE{ 3 };
 // Basis points of the scored sum, in CostTerms order, so a rejected move says
 // which term rejected it without the event carrying nine 64-bit quantities.
-struct TraceTerms { int32_t share[TIER2_TERMS]; };
+struct TraceTerms {
+  std::array<int32_t, TIER2_TERMS> share;
+};
 
 struct TraceEvent {
   TraceKind kind{ TraceKind::None };

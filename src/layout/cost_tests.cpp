@@ -38,6 +38,7 @@ int32_t cost_through_boxes(Chart const &c,
                            std::vector<Piece> const &pieces);
 int64_t cost_crossings(std::vector<Piece> const &pieces, std::vector<uint32_t> &per_trans);
 Wide cost_corridor(Routes const &r, std::vector<Piece> const &pieces);
+Wide cost_crowding(std::vector<Piece> const &pieces, int32_t em);
 
 }  // namespace scav
 
@@ -1353,4 +1354,103 @@ TEST_CASE("cost: collinear pieces meet in one bucket, and a trunk empties it") {
                                    { { { .x = 0, .y = 0 }, { .x = 150, .y = 0 } },
                                      { { .x = 50, .y = -40 }, { .x = 50, .y = 40 } } }) };
   CHECK(cost_corridor(crossing, pieces_of(crossing)) == 0);
+}
+
+namespace {
+
+Piece seg(int32_t x0, int32_t y0, int32_t x1, int32_t y1, uint32_t trans) {
+  return { .a = { .x = x0, .y = y0 }, .b = { .x = x1, .y = y1 }, .trans = trans, .k = 0 };
+}
+
+}  // namespace
+
+TEST_CASE("cost: crowding charges two tight lanes their overlap scaled by the shortfall") {
+  int32_t const em{ 192 };
+  // Two horizontals of different transitions, 1000 overlapped, half an em apart:
+  // half the overlap.
+  CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(0, 96, 1000, 96, 1) }, em) == 500);
+  // Just inside an em apart charges almost nothing; an em apart, nothing at all.
+  CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(0, 191, 1000, 191, 1) }, em) == 5);
+  CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(0, 192, 1000, 192, 1) }, em) == 0);
+  // Verticals are the same question on the other axis.
+  CHECK(cost_crowding({ seg(0, 0, 0, 1000, 0), seg(48, 0, 48, 1000, 1) }, em) == 750);
+  // The overlap is what is charged, not either length.
+  CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(600, 96, 3000, 96, 1) }, em) == 200);
+}
+
+TEST_CASE("cost: crowding leaves what is not a tight lane to the terms that price it") {
+  int32_t const em{ 192 };
+  // Collinear is `corridor`'s, so the two terms never charge one pair twice.
+  CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(0, 0, 1000, 0, 1) }, em) == 0);
+  // One transition's own two legs are one route, not two lanes.
+  CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(0, 96, 1000, 96, 0) }, em) == 0);
+  // Perpendicular is a crossing or nothing.
+  CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(500, 50, 500, 900, 1) }, em) == 0);
+  // Parallel and tight but not alongside: end to end, or merely touching.
+  CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(2000, 96, 3000, 96, 1) }, em) == 0);
+  CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(1000, 96, 3000, 96, 1) }, em) == 0);
+  // A degenerate piece has no axis; a zero em prices nothing rather than dividing.
+  CHECK(cost_crowding({ seg(5, 5, 5, 5, 0), seg(5, 50, 900, 50, 1) }, em) == 0);
+  CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(0, 96, 1000, 96, 1) }, 0) == 0);
+}
+
+TEST_CASE("cost: crowding is continuous with corridor at the line they share") {
+  // The design claim of 11.6, pinned: as two lanes close to one line, crowding
+  // approaches the shared length `corridor` would charge them at zero.
+  int32_t const em{ 192 };
+  Wide last{ 0 };
+  for (int32_t apart = 191; apart >= 1; --apart) {
+    Wide const now{ cost_crowding({ seg(0, 0, 1000, 0, 0), seg(0, apart, 1000, apart, 1) }, em) };
+    CHECK(now >= last);  // closer never charges less
+    last = now;
+  }
+  CHECK(last == 994);  // one unit apart: 1000 * 191 / 192, a hair short of 1000
+}
+
+TEST_CASE("cost: crowding sums every tight pair, and order does not matter") {
+  int32_t const em{ 192 };
+  // Three lanes 64 apart: pairs at 64, 64 and 128, all tight.
+  std::vector<Piece> three{ seg(0, 0, 1000, 0, 0), seg(0, 64, 1000, 64, 1),
+                            seg(0, 128, 1000, 128, 2) };
+  Wide const want{ ((1000 * 128) + (1000 * 128) + (1000 * 64)) / 192 };
+  CHECK(cost_crowding(three, em) == want);
+  std::vector<Piece> shuffled{ three[2], three[0], three[1] };
+  CHECK(cost_crowding(shuffled, em) == want);
+}
+
+TEST_CASE("cost: a transition whose route vanished is a Tier 0 violation") {
+  // Every Tier-2 term scores an undrawn route perfect -- no bends, no length, no
+  // excess, no crowding -- so a search that can reach one prefers it. Seen:
+  // a composite's transition to its own child, collapsed onto one point by an
+  // arrangement that put the child flush against the composite's wall (11.6).
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, a, TransKind::External, {});
+
+  SizedLayout z{ blank(c) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
+  z.state[b.v] = { .x = 300, .y = 0, .w = 100, .h = 40 };
+  z.chart = { .x = 0, .y = 0, .w = 400, .h = 40 };
+  scav_profile const p{ profile() };
+
+  // Drawn: two points each.
+  Routes const drawn{ routes_of(c, { { { .x = 100, .y = 10 }, { .x = 300, .y = 10 } },
+                                     { { .x = 300, .y = 30 }, { .x = 100, .y = 30 } } }) };
+  CHECK(cost_terms(c, decompose(c), z, drawn, {}, p).vanished == 0);
+
+  // One collapsed to a single point: it scores nothing in Tier 2, which is the
+  // trap, and Tier 0 is what refuses it.
+  Routes const collapsed{ routes_of(c, { { { .x = 100, .y = 10 }, { .x = 300, .y = 10 } },
+                                         { { .x = 300, .y = 30 } } }) };
+  CostTerms const t{ cost_terms(c, decompose(c), z, collapsed, {}, p) };
+  CHECK(t.vanished == 1);
+  CHECK(cost_of(t, p).t0_violations == 1);
+  CHECK(cost_less(cost_of(cost_terms(c, decompose(c), z, drawn, {}, p), p), cost_of(t, p)));
+
+  // And none at all is the same defect.
+  Routes const empty{ routes_of(c, { { { .x = 100, .y = 10 }, { .x = 300, .y = 10 } }, {} }) };
+  CHECK(cost_terms(c, decompose(c), z, empty, {}, p).vanished == 1);
 }

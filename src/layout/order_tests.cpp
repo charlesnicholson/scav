@@ -11,7 +11,9 @@
 
 #include "doctest.h"
 
+#include <algorithm>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace {
@@ -536,3 +538,61 @@ TEST_CASE("order: cuts and rank pins compose, and neither disables the other") {
   CHECK(o.nodes[o.state_node[z.d.v]].rank != was);      // and so did the pin
   CHECK(o.nodes[o.state_node[z.d.v]].rank == 0);
 }
+
+TEST_CASE("order: a reversal pin turns the named edge, and the walk turns no other") {
+  // 11.10d: which edge of a cycle is turned around decides everything
+  // downstream -- ranks, what spans two of them, what carries a bend -- and
+  // cycle-breaking chose it by walking in node order, which is declaration
+  // order. The pin names the edge instead.
+  Cycle const z{ three_state_cycle() };
+  SubmachineOrders const plain{ order_submachines(z.c, z.g, {}, profile()) };
+  auto const reversed_segs = [](SubmachineOrders const &o) {
+    std::vector<uint32_t> segs;
+    for (OrderEdge const &e : o.edges) {
+      if ((e.reversed != 0) &&
+          (std::find(segs.begin(), segs.end(), e.segment) == segs.end())) {
+        segs.push_back(e.segment);
+      }
+    }
+    return segs;
+  };
+  // Left alone, the walk turns the edge that closes it: the back edge.
+  CHECK(reversed_segs(plain) == std::vector<uint32_t>{ 2 });
+
+  // Pinned, it is the pinned one and nothing else -- the walk finds the cycle
+  // already broken. A bare three-cycle still leaves one edge spanning two
+  // ranks whichever is turned, so the bend count does not move; what moves is
+  // *which* edge carries it, and on a chart with an entry state that is the
+  // difference between a bend and none (11.10d).
+  for (uint32_t t = 0; t < 3; ++t) {
+    CAPTURE(t);
+    SearchPins const pin{ .reverses = { { .trans = TransId{ t }, .leg = 0 } } };
+    SubmachineOrders const turned{ order_submachines(z.c, z.g, {}, profile(), 0, pin) };
+    CHECK(reversed_segs(turned) == std::vector<uint32_t>{ t });
+    CHECK(bends_of(turned) == 1);
+    if (t != 2) { CHECK(turned.nodes != plain.nodes); }
+  }
+}
+
+TEST_CASE("order: a reversal pin naming nothing this chart has is ignored") {
+  Cycle const z{ three_state_cycle() };
+  SubmachineOrders const plain{ order_submachines(z.c, z.g, {}, profile()) };
+  for (SearchPins const &pins :
+       { SearchPins{ .reverses = { { .trans = TransId{ 4096 }, .leg = 0 } } },
+         SearchPins{ .reverses = { { .trans = z.back, .leg = 7 } } },
+         SearchPins{ .reverses = { {} } } }) {
+    SubmachineOrders const same{ order_submachines(z.c, z.g, {}, profile(), 0, pins) };
+    CHECK(same.nodes == plain.nodes);
+    CHECK(same.edges == plain.edges);
+  }
+}
+
+TEST_CASE("order: turning an edge the walk would turn anyway changes nothing") {
+  Cycle const z{ three_state_cycle() };
+  SubmachineOrders const plain{ order_submachines(z.c, z.g, {}, profile()) };
+  SearchPins const pin{ .reverses = { { .trans = z.back, .leg = 0 } } };
+  SubmachineOrders const same{ order_submachines(z.c, z.g, {}, profile(), 0, pin) };
+  CHECK(same.nodes == plain.nodes);
+  CHECK(same.edges == plain.edges);
+}
+

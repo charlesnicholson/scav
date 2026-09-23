@@ -19,6 +19,10 @@ struct RouteNet {
   scav_point src{}, dst{};
   uint32_t src_obstacle{ INVALID }, dst_obstacle{ INVALID };  // -> obstacles
   uint32_t waypoint_off{ 0 }, waypoint_len{ 0 };  // -> waypoints, phase 1's corridor
+  // Which face this end leaves by -- 0 left, 1 right, 2 top, 3 bottom -- or
+  // INVALID to let the router choose. A caller sets these when the choice is
+  // being searched rather than ruled (11.10e).
+  uint32_t src_face{ INVALID }, dst_face{ INVALID };
 };
 
 struct RouteInput {

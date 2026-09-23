@@ -6,6 +6,7 @@
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 
+#include <array>
 #include <charconv>
 #include <cstdint>
 #include <cstdio>
@@ -62,6 +63,38 @@ bool chain_cut(char const *text, std::vector<ChainCut> &out) {
   if ((a.ec != std::errc{}) || (a.ptr != (arg.data() + colon))) { return false; }
   if ((b.ec != std::errc{}) || (b.ptr != (arg.data() + arg.size()))) { return false; }
   out.push_back({ .trans = TransId{ trans }, .leg = leg });
+  return true;
+}
+
+bool face_pin(char const *text, std::vector<FacePin> &out) {
+  std::string_view arg{ text };
+  std::array<uint32_t, 4> field{};
+  for (uint32_t i = 0; i < field.size(); ++i) {
+    size_t const at{ arg.find(':') };
+    std::string_view const head{ (i + 1 == field.size()) ? arg : arg.substr(0, at) };
+    if (head.empty() || ((i + 1 < field.size()) && (at == std::string_view::npos))) {
+      return false;
+    }
+    std::from_chars_result const got{
+      std::from_chars(head.data(), head.data() + head.size(), field[i])
+    };
+    if ((got.ec != std::errc{}) || (got.ptr != (head.data() + head.size()))) {
+      return false;
+    }
+    if (i + 1 < field.size()) { arg.remove_prefix(at + 1); }
+  }
+  if ((field[2] > 1) || (field[3] > 3)) { return false; }
+  out.push_back({ .trans = TransId{ field[0] },
+                  .leg = field[1],
+                  .end = field[2],
+                  .face = field[3] });
+  return true;
+}
+
+bool reverse_pin(char const *text, std::vector<ReversePin> &out) {
+  std::vector<ChainCut> one;
+  if (!chain_cut(text, one)) { return false; }
+  out.push_back({ .trans = one.back().trans, .leg = one.back().leg });
   return true;
 }
 

@@ -101,7 +101,7 @@ typedef struct {
   int32_t trybox;      /* 1 = evaluate the box packer alongside; [0, 1] */
   int32_t sm_tiebreak; /* 0 = area then aspect, 1 = reversed; [0, 1] */
 
-  /* Tier-2 weights, highest to lowest; each [0, 1024], which keeps the summed
+  /* Tier-2 weights, in CostTerms order; each [0, 1024], which keeps the summed
    * cost inside int64. */
   int32_t w_bends;
   int32_t w_corridor;
@@ -112,8 +112,9 @@ typedef struct {
   int32_t w_label_near; /* [0, 1024] */
   int32_t w_aspect;
   int32_t w_area;
+  int32_t w_crowding; /* lanes closer than one em, not on one line; [0, 1024] */
 
-  int32_t portfolio_k;                 /* bounded moves scored; [0, 64] */
+  int32_t portfolio_k;                 /* bounded moves scored; [0, 2^20] */
   int32_t portfolio_m;                 /* chart-global phase-2 tuples; [1, 16] */
   int32_t sweep_count;                 /* [0, 1024] */
   int32_t congestion_iterations;       /* [0, 1024] */

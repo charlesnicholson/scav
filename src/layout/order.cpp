@@ -116,7 +116,18 @@ uint64_t inversions(std::vector<uint32_t> const &v) {
 // Cycle breaking by iterative depth-first search in node order: an edge that
 // closes back onto the current path is the one reversed, so the frame becomes
 // a DAG without any node moving.
-void orient_acyclic(Frame &f) {
+void orient_acyclic(Frame &f, std::vector<uint8_t> const &pre) {
+  // Turned around before the walk, so the walk finds the cycle already broken
+  // and leaves some other edge alone -- which is the whole choice (11.10d).
+  for (OrderEdge &e : f.edges) {
+    if ((e.segment >= pre.size()) || (pre[e.segment] == 0)) { continue; }
+    uint32_t const swap{ e.src };
+    e.src = e.dst;
+    e.dst = swap;
+    e.reversed = 1;
+    trace_emit({ .kind = TraceKind::EdgeReversed, .seg = { .seg = e.segment } });
+  }
+
   uint32_t const n{ static_cast<uint32_t>(f.nodes.size()) };
   Adjacency const out{ adjacency_of(f.edges, n, true) };
 
@@ -525,18 +536,22 @@ SubmachineOrders order_submachines(Chart const &c,
 
   // `{trans, leg}` resolved to segment ordinals once, so the frame workers read
   // a flat table rather than searching the cut list per edge (11.10b).
-  std::vector<uint8_t> cut;
-  if (!pins.cuts.empty()) {
-    cut.assign(g.segments.size(), 0);
-    for (ChainCut const &cc : pins.cuts) {
-      if ((cc.trans.v == INVALID) || (cc.trans.v >= g.trans_segments.size())) {
+  auto const resolve_pins = [&g](auto const &rows, std::vector<uint8_t> &table) {
+    if (rows.empty()) { return; }
+    table.assign(g.segments.size(), 0);
+    for (auto const &row : rows) {
+      if ((row.trans.v == INVALID) || (row.trans.v >= g.trans_segments.size())) {
         continue;
       }
-      Span const segs{ g.trans_segments[cc.trans.v] };
-      if (cc.leg >= segs.len) { continue; }  // a leg this transition does not have
-      cut[segs.off + cc.leg] = 1;
+      Span const segs{ g.trans_segments[row.trans.v] };
+      if (row.leg >= segs.len) { continue; }  // a leg this transition does not have
+      table[segs.off + row.leg] = 1;
     }
-  }
+  };
+  std::vector<uint8_t> cut;
+  std::vector<uint8_t> pre_reversed;
+  resolve_pins(pins.cuts, cut);
+  resolve_pins(pins.reverses, pre_reversed);
 
   std::vector<FrameOrder> frames(c.submachines.size());
 
@@ -602,7 +617,7 @@ SubmachineOrders order_submachines(Chart const &c,
       f.edges.push_back({ .src = src, .dst = dst, .segment = seg, .reversed = 0 });
     }
 
-    orient_acyclic(f);
+    orient_acyclic(f, pre_reversed);
     assign_ranks(f);
 
     // The pins land between the ranking and everything derived from it, which

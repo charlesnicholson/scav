@@ -119,11 +119,44 @@ struct ChainCut {
   uint32_t leg{ 0 };
 };
 
+// A segment phase 1 turns around before it breaks cycles, so some other edge of
+// the cycle carries the reversal (11.10d).
+//
+// **Which edge of a cycle is reversed decides the whole drawing, and nothing
+// chose it.** Cycle-breaking is a depth-first walk in node order, so the edge
+// that happens to close the walk is the one turned around -- an artefact of
+// declaration order. On `estop`, a three-state cycle, reversing `Tripped ->
+// Latched` instead of `Latched -> Clear` leaves no edge spanning two ranks, so
+// nothing is chained, nothing carries a bend waypoint, and Tier 2 falls from
+// 3,073 to 1,502 with bends 5 to 2.
+struct ReversePin {
+  TransId trans{ INVALID };
+  uint32_t leg{ 0 };
+};
+
+// The face one end of a segment leaves its box by: 0 left, 1 right, 2 top, 3
+// bottom, and `end` 0 is the departure and 1 the arrival (11.10e).
+//
+// **Which face a transition leaves by decides how many times it turns**, and
+// the router picks it by which separation to the other end is larger -- a rule
+// handed one point and one box, so it cannot see the turn it is buying. On
+// `estop`, `Tripped -> Latched` leaves the left face and turns twice where the
+// bottom face turns once. A better rule was measured and is not the answer
+// (11.5); the choice is small, discrete, and belongs to the search.
+struct FacePin {
+  TransId trans{ INVALID };
+  uint32_t leg{ 0 };
+  uint32_t end{ 0 };
+  uint32_t face{ 0 };
+};
+
 // Everything besides the tuple that a drawing is a function of, so re-deriving
-// one is two arguments and not five (11.10a, 11.10b).
+// one is two arguments and not seven (11.10a, 11.10b, 11.10d, 11.10e).
 struct SearchPins {
   std::vector<RankPin> ranks;
   std::vector<ChainCut> cuts;
+  std::vector<ReversePin> reverses;
+  std::vector<FacePin> faces;
 };
 
 // Rows in the fixed table of chart-global phase-2 tuples Level 2 chooses
@@ -203,9 +236,9 @@ uint32_t layout_inputs_digest(Chart const &c);
 
 // Cost ======================================================================
 
-inline constexpr uint32_t TIER2_TERMS{ 9 };
+inline constexpr uint32_t TIER2_TERMS{ 10 };
 
-// The nine Tier-2 quantities before weighting, so a test reads one of them
+// The ten Tier-2 quantities before weighting, so a test reads one of them
 // rather than a sum.
 struct CostTerms {
   int64_t bends{ 0 };       // direction changes at a route's interior vertices
@@ -221,11 +254,21 @@ struct CostTerms {
   int64_t label_near{ 0 };
   int64_t aspect{ 0 };  // |w * dar_den - h * dar_num|
   int64_t area{ 0 };    // the root bounding box
+  // Per pair of different transitions' segments on one axis, overlapping along
+  // it and closer than an em but not collinear: the overlap scaled by the
+  // shortfall, `along * (em - apart) / em`. Continuous with `corridor` at
+  // `apart = 0` (11.6).
+  int64_t crowding{ 0 };
 
   // Tier 0, forbidden rather than priced: the obstacle set makes these
   // unrepresentable, and the count survives as a net (11.6).
   int32_t through_box{ 0 };
   int32_t box_overlap{ 0 };
+  // Transitions with a segment to draw whose route came out as fewer than two
+  // points, so nothing is drawn. **Forbidden because every Tier-2 term scores it
+  // perfect** -- no bends, no length, no excess, no crowding -- and a search that
+  // can reach one will prefer it (11.6).
+  int32_t vanished{ 0 };
 };
 
 // Compared lexicographically, in this order.

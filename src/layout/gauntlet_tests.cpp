@@ -144,10 +144,12 @@ void lay(char const *name, scav_profile const &p, Laid &out) {
   search_tuple(knobs, dar, pack, fold, out.tuple);
   out.g = decompose(out.c);
   // The drawing is the tuple's *and* the pins' (11.10a), so re-deriving it
-  // needs both or this measures a layout nobody was shown.
+  // needs both or this measures a layout nobody was shown. The pins reach
+  // phase 3 as well as phase 1: a face pin is the router's (11.10e).
   out.o = order_submachines(out.c, out.g, {}, knobs, 0, pins);
   REQUIRE(size_layout(out.c, out.g, out.o, {}, knobs, out.z, diags, dar, pack, fold));
-  out.r = route_transitions(out.c, out.g, out.o, out.z, {}, knobs, *router_at(id));
+  out.r = route_transitions(out.c, out.g, out.o, out.z, {}, knobs, *router_at(id), 0,
+                            nullptr, nullptr, &pins);
   column_holds(out.c, "scav.geom.state", out.z.state);
   column_holds(out.c, "scav.geom.sub", out.z.sub);
   column_holds(out.c, "scav.geom.point", out.r.points);
@@ -710,14 +712,18 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     shape_counts(shipped, shipped_through, shipped_back);
     CHECK(shipped_through == 0);
     CHECK(cost_columns(shipped.c, shipped.g, p).through_box == 0);
-    // The other half of the hole: the route still leaves and returns along one
-    // line. Four at both profiles until 11.9.5's reservation, three at
-    // `compact` since, two at both once a placement move could reach an
-    // arrangement where the long way round is shorter -- and **three at both
-    // since the budget went to 1,024** (11.10). The arrangement is moving, not
-    // the hole closing, and a deeper search trading one of these for a cheaper
-    // `Cost` is the objective not pricing a doubling-back leg. 11.8's to close.
-    CHECK(shipped_back == 3);
+    // The other half of the hole, and it is **closed at both profiles** since
+    // the face a transition leaves by became a search dimension (11.10e). Four
+    // at both profiles until 11.9.5's reservation, three at `compact` since,
+    // two once a placement move could reach an arrangement where the long way
+    // round was shorter, three again at a budget of 1,024 -- every one of those
+    // the arrangement moving rather than the hole closing. This one is the hole
+    // closing: the route doubled back because it left by the face the
+    // separation rule picked, and choosing the face instead lets it leave by
+    // one it need not come back across. **11.8's shape is still unrouted** --
+    // `through_box` above is what holds that -- so this is a zero to watch
+    // rather than a section to delete.
+    CHECK(shipped_back == 0);
 
     // 11.5's face rule, which picks a face by how far the target lies outside
     // the box on each axis rather than by the distance to a point on it. A
@@ -732,18 +738,17 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     Laid fork_zero;
     lay("fork.scav", one_row(p), fork_zero);
     CHECK(capped_branches(fork_zero) == 2);
-    // And what ships: zero at both profiles from 11.10a's placement move until
-    // the budget went to 1,024, **two at `readable` since** (11.10). A shallow
-    // search
-    // stopped at an arrangement that happened to put the branch beside the bar;
-    // a deeper one keeps going to a cheaper `Cost` that puts it back below.
-    // Nothing prices leaving through a 64-unit cap when a 960-unit face is
-    // free, so depth cannot be expected to preserve it -- **a deeper search
-    // amplifies what the objective fails to price**, which is the finding here
-    // and the reason 11.5's face rule is the fix rather than the budget.
+    // And what ships: zero at both profiles from 11.10a's placement move, two at
+    // `readable` once the budget went to 1,024 (11.10) -- a shallow search had
+    // stopped at an arrangement that happened to put the branch beside the bar,
+    // and a deeper one kept going to a cheaper `Cost` that put it back below,
+    // because nothing priced leaving through a 64-unit cap. **One since crowding
+    // is priced** (11.6): branches stacked through one cap run as tight lanes,
+    // and those now cost what they look like. Still the face rule's defect and
+    // still not zero.
     Laid fork_shipped;
     lay("fork.scav", p, fork_shipped);
     CHECK(capped_branches(fork_shipped) ==
-          ((p.profile_id == compact().profile_id) ? 0U : 2U));
+          ((p.profile_id == compact().profile_id) ? 0U : 1U));
   }
 }

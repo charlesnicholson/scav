@@ -64,6 +64,11 @@ scav_profile sealed_profile(scav_profile const &base) {
   p.pad = 16;
   p.rank_sep = 0;
   p.node_sep = 576;
+  // The move sweep off, because every caller is about the inflation retry and
+  // the sweep now routes this chart without one: a face move finds a way in
+  // that does not cross the bar, so nothing is sealed (11.10e). That is pinned
+  // in its own case; here the channel has to stay shut to test opening it.
+  p.portfolio_k = 0;
   return p;
 }
 

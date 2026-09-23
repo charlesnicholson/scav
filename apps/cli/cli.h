@@ -49,6 +49,14 @@ bool portfolio_row(char const *text, uint32_t &out);
 // that is not a pair of ordinals.
 bool chain_cut(char const *text, std::vector<ChainCut> &out);
 
+// `TRANS:LEG` appended: a segment phase 1 turns around before it breaks cycles,
+// so the drawing a different reversal gives can be looked at (11.10d).
+bool reverse_pin(char const *text, std::vector<ReversePin> &out);
+
+// `TRANS:LEG:END:FACE` appended -- end 0 departure, 1 arrival; face 0 left, 1
+// right, 2 top, 3 bottom (11.10e).
+bool face_pin(char const *text, std::vector<FacePin> &out);
+
 int run_dump(char const *path,
              bool hash_only,
              bool as_json,
@@ -56,13 +64,17 @@ int run_dump(char const *path,
              uint32_t row,
              bool trace,
              bool trace_search,
-             std::vector<ChainCut> const &cuts);
+             std::vector<ChainCut> const &cuts,
+             std::vector<ReversePin> const &reverses,
+             std::vector<FacePin> const &faces);
 int run_render(char const *path,
                char const *out_path,
                bool embed_font,
                char const *profile_name,
                uint32_t row,
-               std::vector<ChainCut> const &cuts);
+               std::vector<ChainCut> const &cuts,
+               std::vector<ReversePin> const &reverses,
+             std::vector<FacePin> const &faces);
 int run_fmt(std::vector<char const *> const &paths, bool check_only);
 int run_deps(char const *path, char const *target);
 int run_selftest(char const *against_path);
