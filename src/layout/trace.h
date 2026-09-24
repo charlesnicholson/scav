@@ -15,19 +15,19 @@ namespace scav {
 
 enum class TraceKind : uint16_t {
   None = 0,
-  RankAssigned,    // longest-path gave a state its rank
-  RankPinned,      // 11.10a's placement move overrode one
-  EdgeReversed,    // cycle-breaking flipped a segment
-  EdgeChained,     // a multi-rank segment got a bend node at a rank
-  NodePlaced,      // phase 2 fixed a node's cross coordinate
-  SpacingInflated, // 11.6's retry widened the chart
-  NetPlanned,      // a segment became a net with seats and waypoints
-  NetWaypoint,     // one waypoint of the net last planned
-  SeatMoved,       // one of 11.5's seating passes moved an attachment
-  LaneAssigned,    // nudging put a run in a corridor lane
-  RouteDegraded,   // a transition fell back to a straight line
-  CandidateScored, // one row of 11.10's table, or one Level 1 move
-  CandidateTerms,  // the nine Tier-2 shares behind the score above
+  RankAssigned,     // longest-path gave a state its rank
+  RankPinned,       // 11.10a's placement move overrode one
+  EdgeReversed,     // cycle-breaking flipped a segment
+  EdgeChained,      // a multi-rank segment got a bend node at a rank
+  NodePlaced,       // phase 2 fixed a node's cross coordinate
+  SpacingInflated,  // 11.6's retry widened the chart
+  NetPlanned,       // a segment became a net with seats and waypoints
+  NetWaypoint,      // one waypoint of the net last planned
+  SeatMoved,        // one of 11.5's seating passes moved an attachment
+  LaneAssigned,     // nudging put a run in a corridor lane
+  RouteDegraded,    // a transition fell back to a straight line
+  CandidateScored,  // one row of 11.10's table, or one Level 1 move
+  CandidateTerms,   // the nine Tier-2 shares behind the score above
 };
 
 // Which of 11.5's seating passes moved a seat; `SeatMoved.pass`.
@@ -39,15 +39,37 @@ enum class MoveVerdict : uint16_t { Taken, NotViable, Inflated, NotBetter };
 // Payloads are POD and name entities by id, never by node index -- an index is
 // an artefact of how a frame was built and chaining appends bends to it. Named
 // rather than anonymous because a nested anonymous type is a C++ extension.
-struct TraceRank { uint32_t state, rank; };
-struct TraceChain { uint32_t seg, rank, index, count; };
-struct TraceSeg { uint32_t seg; };
-struct TracePlace { uint32_t state, seg; int32_t x, y; };  // a bend sets seg, not state
-struct TraceInflate { int32_t node_sep, rank_sep; };
-struct TraceNet { uint32_t seg, trans, waypoints; int32_t sx, sy, dx, dy; };
-struct TracePoint { int32_t x, y; };
-struct TraceSeat { uint32_t net, end; int32_t from_x, from_y, to_x, to_y; };
-struct TraceLane { uint32_t net, lane; int32_t at; };
+struct TraceRank {
+  uint32_t state, rank;
+};
+struct TraceChain {
+  uint32_t seg, rank, index, count;
+};
+struct TraceSeg {
+  uint32_t seg;
+};
+struct TracePlace {
+  uint32_t state, seg;
+  int32_t x, y;
+};  // a bend sets seg, not state
+struct TraceInflate {
+  int32_t node_sep, rank_sep;
+};
+struct TraceNet {
+  uint32_t seg, trans, waypoints;
+  int32_t sx, sy, dx, dy;
+};
+struct TracePoint {
+  int32_t x, y;
+};
+struct TraceSeat {
+  uint32_t net, end;
+  int32_t from_x, from_y, to_x, to_y;
+};
+struct TraceLane {
+  uint32_t net, lane;
+  int32_t at;
+};
 // `move` is which dimension a Level 1 candidate moved along (11.10): 0 a rank,
 // 1 a chain cut, 2 a reversal, 3 a face -- whose `end` and `face` then say
 // which. A row of Level 2 has `row` set and no move.

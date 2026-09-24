@@ -18,6 +18,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -96,6 +97,17 @@ Run run_pipeline(char const *name, Metrics const &m, scav_profile const &p) {
   return r;
 }
 
+// The pipeline over one chart at `readable` with the bundled font, once per
+// process. Six cases read the same corpus drawings, and at the shipped search
+// depth one pass over them is minutes.
+Run const &laid_pipeline(char const *name) {
+  static std::map<std::string, Run> laid;
+  auto const found{ laid.find(name) };
+  if (found != laid.end()) { return found->second; }
+  Metrics const m{ bundled() };
+  return laid.emplace(name, run_pipeline(name, m, readable())).first->second;
+}
+
 // The column's rows, memcpy'd out so nothing reads padding in place.
 template <typename T>
 std::vector<T> rows(Chart const &c, char const *name) {
@@ -112,12 +124,11 @@ std::vector<T> rows(Chart const &c, char const *name) {
 
 TEST_CASE("drawlist corpus: every chart builds and hashes to the committed golden") {
   Metrics const m{ bundled() };
-  scav_profile const p{ readable() };
 
   std::string actual;
   for (char const *name : CORPUS) {
     CAPTURE(name);
-    Run const r{ run_pipeline(name, m, p) };
+    Run const &r{ laid_pipeline(name) };
     actual += name;
     actual += ' ';
     string_append_hex32(actual, drawlist_digest(r.list, m));
@@ -144,12 +155,11 @@ TEST_CASE("drawlist corpus: the layout hashes under the reference measurement") 
   // measurement rather than no requests at all. It lives here because layout
   // cannot depend on draw, so its own suite has no way to measure anything.
   Metrics const m{ bundled() };
-  scav_profile const p{ readable() };
 
   std::string actual;
   for (char const *name : CORPUS) {
     CAPTURE(name);
-    Run const r{ run_pipeline(name, m, p) };
+    Run const &r{ laid_pipeline(name) };
     actual += name;
     actual += ' ';
     string_append_hex32(actual, layout_inputs_digest(r.chart));
@@ -187,7 +197,7 @@ TEST_CASE("drawlist corpus: the cost terms on the rendered scale") {
   int64_t scoring_us{ 0 };
   for (char const *name : CORPUS) {
     CAPTURE(name);
-    Run const r{ run_pipeline(name, m, p) };
+    Run const &r{ laid_pipeline(name) };
     SplitGraph const g{ decompose(r.chart) };
     auto const t0{ std::chrono::steady_clock::now() };
     CostTerms const t{ cost_columns(r.chart, g, p, as_spaces(r.spaces), r.placed) };
@@ -263,7 +273,9 @@ TEST_CASE("drawlist gauntlet: what crowd's tighter packing costs its labels") {
   // rises where every reader-visible class falls, so the pick it argues for is
   // one P9d's fit moved away from. **77 once crowding is priced** (11.6): the
   // lanes a label sits between now cost what they look like when they close in,
-  // so they spread, and the label's own line is left nearest it.
+  // so they spread, and the label's own line is left nearest it. **Zero once
+  // every row is searched and the winner kicked** (11.10f): what that reaches
+  // leaves every label nearest its own leg.
   Metrics const m{ bundled() };
   scav_profile const p{ readable() };
   Run const r{ run_pipeline("gauntlet/crowd.scav", m, p) };
@@ -271,7 +283,7 @@ TEST_CASE("drawlist gauntlet: what crowd's tighter packing costs its labels") {
     cost_columns(r.chart, decompose(r.chart), p, as_spaces(r.spaces), r.placed)
   };
   CHECK(t.label == 0);
-  CHECK(t.label_near == 77);
+  CHECK(t.label_near == 0);
 }
 
 TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back") {
@@ -285,7 +297,7 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
   uint32_t boxes{ 0 };
   for (char const *name : CORPUS) {
     CAPTURE(name);
-    Run const r{ run_pipeline(name, m, p) };
+    Run const &r{ laid_pipeline(name) };
     SizedLayout z;
     z.state = rows<scav_rect>(r.chart, "scav.geom.state");
     z.before = rows<scav_rect>(r.chart, "scav.geom.state_before");
@@ -414,8 +426,7 @@ TEST_CASE("drawlist corpus: a second font is a second picture at the same layout
   Metrics doppelganger{ bundled() };
   doppelganger.identity ^= 0xFFFFU;  // same tables, a different identity
 
-  scav_profile const p{ readable() };
-  Run const r{ run_pipeline("vac.scav", m, p) };
+  Run const &r{ laid_pipeline("vac.scav") };
   CHECK(drawlist_digest(r.list, m) != drawlist_digest(r.list, doppelganger));
 }
 
@@ -475,7 +486,7 @@ TEST_CASE("drawlist corpus: tcp's long hierarchical edges reach the drawlist") {
   // The chart the whole project exists for: transitions out of a nested
   // concurrent submachine to a top-level state. Every one of them has to draw.
   Metrics const m{ bundled() };
-  Run const r{ run_pipeline("tcp.scav", m, readable()) };
+  Run const &r{ laid_pipeline("tcp.scav") };
 
   uint32_t live{ 0 };
   for (Transition const &t : r.chart.transitions) {

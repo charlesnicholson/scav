@@ -594,10 +594,11 @@ Wide cost_crowding(std::vector<Piece> const &pieces, int32_t em) {
       Lane const &v{ lanes[j] };
       if (v.axis != u.axis) { break; }
       Wide const apart{ Wide{ v.at } - u.at };
-      if (apart >= em) { break; }        // sorted, so every later lane is further
-      if (apart == 0) { continue; }      // on one line: `corridor`'s, not this
+      if (apart >= em) { break; }    // sorted, so every later lane is further
+      if (apart == 0) { continue; }  // on one line: `corridor`'s, not this
       if (u.trans == v.trans) { continue; }
-      Wide const along{ imin(Wide{ u.hi }, Wide{ v.hi }) - imax(Wide{ u.lo }, Wide{ v.lo }) };
+      Wide const along{ imin(Wide{ u.hi }, Wide{ v.hi }) -
+                        imax(Wide{ u.lo }, Wide{ v.lo }) };
       if (along <= 0) { continue; }
       scaled += along * (Wide{ em } - apart);
     }

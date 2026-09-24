@@ -540,12 +540,13 @@ bool size_pass(Chart const &c,
       OrderNode const &nd{ o.nodes[span.off + k] };
       // Root-absolute and after the descent, so a bend reads as the coordinate
       // the router will be handed rather than a frame-local one (11.16).
-      trace_emit({ .kind = TraceKind::NodePlaced,
-                   .frame = at.sub,
-                   .place = { .state = (nd.kind == OrderKind::State) ? nd.subject : INVALID,
-                              .seg = (nd.kind == OrderKind::State) ? INVALID : nd.subject,
-                              .x = out.node[span.off + k].x,
-                              .y = out.node[span.off + k].y } });
+      trace_emit(
+          { .kind = TraceKind::NodePlaced,
+            .frame = at.sub,
+            .place = { .state = (nd.kind == OrderKind::State) ? nd.subject : INVALID,
+                       .seg = (nd.kind == OrderKind::State) ? INVALID : nd.subject,
+                       .x = out.node[span.off + k].x,
+                       .y = out.node[span.off + k].y } });
       if (nd.kind != OrderKind::State) { continue; }
       uint32_t const i{ nd.subject };
       scav_rect &r{ out.state[i] };

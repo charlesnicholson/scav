@@ -788,13 +788,26 @@ int run_dump(char const *path,
     std::vector<Diagnostic> diags;
     std::vector<char> events;
     SearchPins const pins{ .cuts = cuts, .reverses = reverses, .faces = faces };
-    bool const laid{
-      trace ? layout_trace_json(net.chart, as_spaces(spaces), opts, placed, diags, events,
-                                row,
-                                trace_search ? TraceScope::Search : TraceScope::Shipped)
-            : layout_run(net.chart, as_spaces(spaces), opts, placed, diags, nullptr,
-                         nullptr, row, nullptr, nullptr, &pins)
-    };
+    bool const laid{ trace ? layout_trace_json(
+                                 net.chart,
+                                 as_spaces(spaces),
+                                 opts,
+                                 placed,
+                                 diags,
+                                 events,
+                                 row,
+                                 trace_search ? TraceScope::Search : TraceScope::Shipped)
+                           : layout_run(net.chart,
+                                        as_spaces(spaces),
+                                        opts,
+                                        placed,
+                                        diags,
+                                        nullptr,
+                                        nullptr,
+                                        row,
+                                        nullptr,
+                                        nullptr,
+                                        &pins) };
     // To stdout, ahead of the model: the trace is the answer `--trace` asked
     // for and the dump is the context it is read against.
     if (trace) { write_stream(std::string{ events.begin(), events.end() }, stdout); }

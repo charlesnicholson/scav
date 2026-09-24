@@ -103,10 +103,21 @@ int dispatch(int argc, char **argv) {
     // one run made and there are none without a run (11.16).
     // `--trace-search` is a mode of `--trace`, not a second flag beside it.
     if ((path == nullptr) || (hash && (json || layout)) || (trace_search && !trace) ||
-        (((row != INVALID) || trace || !cuts.empty() || !reverses.empty() || !faces.empty()) && !layout)) {
+        (((row != INVALID) || trace || !cuts.empty() || !reverses.empty() ||
+          !faces.empty()) &&
+         !layout)) {
       return usage();
     }
-    return run_dump(path, hash, json, layout, row, trace, trace_search, cuts, reverses, faces);
+    return run_dump(path,
+                    hash,
+                    json,
+                    layout,
+                    row,
+                    trace,
+                    trace_search,
+                    cuts,
+                    reverses,
+                    faces);
   }
 
   if (verb == "render") {

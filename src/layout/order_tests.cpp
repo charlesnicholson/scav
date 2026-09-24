@@ -345,7 +345,8 @@ TEST_CASE("order: a pin that asks for the rank a node already has changes nothin
   SubmachineOrders const plain{ order_submachines(c, g, {}, profile()) };
   SearchPins same;
   for (StateId const st : { a, b, d }) {
-    same.ranks.push_back({ .state = st, .rank = plain.nodes[plain.state_node[st.v]].rank });
+    same.ranks.push_back(
+        { .state = st, .rank = plain.nodes[plain.state_node[st.v]].rank });
   }
   SubmachineOrders const pinned{ order_submachines(c, g, {}, profile(), 0, same) };
   CHECK(pinned.nodes == plain.nodes);
@@ -453,9 +454,7 @@ Cycle three_state_cycle() {
 
 uint32_t bends_of(SubmachineOrders const &o) {
   uint32_t n{ 0 };
-  for (OrderNode const &nd : o.nodes) {
-    n += (nd.kind == OrderKind::Bend) ? 1U : 0U;
-  }
+  for (OrderNode const &nd : o.nodes) { n += (nd.kind == OrderKind::Bend) ? 1U : 0U; }
   return n;
 }
 
@@ -471,9 +470,7 @@ TEST_CASE("order: the back edge of a cycle chains, and a cut leaves it long") {
   SubmachineOrders const plain{ order_submachines(z.c, z.g, {}, profile()) };
   REQUIRE(bends_of(plain) == 1);
 
-  SubmachineOrders const freed{
-    order_submachines(z.c, z.g, {}, profile(), 0, cut_of(z))
-  };
+  SubmachineOrders const freed{ order_submachines(z.c, z.g, {}, profile(), 0, cut_of(z)) };
   CHECK(bends_of(freed) == 0);
 
   // The edge survives, spanning more than one rank -- which is the whole point:
@@ -491,9 +488,7 @@ TEST_CASE("order: the back edge of a cycle chains, and a cut leaves it long") {
 TEST_CASE("order: a cut is undone by dropping it, and the orders come back") {
   Cycle const z{ three_state_cycle() };
   SubmachineOrders const plain{ order_submachines(z.c, z.g, {}, profile()) };
-  SubmachineOrders const freed{
-    order_submachines(z.c, z.g, {}, profile(), 0, cut_of(z))
-  };
+  SubmachineOrders const freed{ order_submachines(z.c, z.g, {}, profile(), 0, cut_of(z)) };
   REQUIRE(freed.nodes != plain.nodes);  // the cut did something
   SubmachineOrders const back{ order_submachines(z.c, z.g, {}, profile(), 0, {}) };
   CHECK(back.nodes == plain.nodes);
@@ -505,11 +500,11 @@ TEST_CASE("order: a cut naming nothing this chart has is ignored, not applied") 
   SubmachineOrders const plain{ order_submachines(z.c, z.g, {}, profile()) };
   // A leg the transition does not have, a transition past the end, and INVALID.
   // Every one of them must leave the orders exactly as they were.
-  for (SearchPins const &pins : { cut_of(z, 1),
-                                  cut_of(z, 99),
-                                  SearchPins{ .cuts = { { .trans = TransId{ 4096 },
-                                                          .leg = 0 } } },
-                                  SearchPins{ .cuts = { {} } } }) {
+  for (SearchPins const &pins :
+       { cut_of(z, 1),
+         cut_of(z, 99),
+         SearchPins{ .cuts = { { .trans = TransId{ 4096 }, .leg = 0 } } },
+         SearchPins{ .cuts = { {} } } }) {
     SubmachineOrders const same{ order_submachines(z.c, z.g, {}, profile(), 0, pins) };
     CHECK(same.nodes == plain.nodes);
     CHECK(same.edges == plain.edges);
@@ -534,8 +529,8 @@ TEST_CASE("order: cuts and rank pins compose, and neither disables the other") {
   SearchPins both{ cut_of(z) };
   both.ranks.push_back({ .state = z.d, .rank = 0 });
   SubmachineOrders const o{ order_submachines(z.c, z.g, {}, profile(), 0, both) };
-  CHECK(bends_of(o) == 0);                              // the cut held
-  CHECK(o.nodes[o.state_node[z.d.v]].rank != was);      // and so did the pin
+  CHECK(bends_of(o) == 0);                          // the cut held
+  CHECK(o.nodes[o.state_node[z.d.v]].rank != was);  // and so did the pin
   CHECK(o.nodes[o.state_node[z.d.v]].rank == 0);
 }
 
@@ -596,3 +591,64 @@ TEST_CASE("order: turning an edge the walk would turn anyway changes nothing") {
   CHECK(same.edges == plain.edges);
 }
 
+TEST_CASE("order: a segment on a cycle is reported, and one on none is not") {
+  // What 11.10f's reversals are drawn from: an edge whose two ends share a
+  // strongly connected component of the frame's graph as drawn, before any edge
+  // is turned around -- so which edge the walk turns does not change the answer.
+  Cycle const z{ three_state_cycle() };
+  SubmachineOrders const plain{ order_submachines(z.c, z.g, {}, profile()) };
+  for (uint32_t seg = 0; seg < 3; ++seg) { CHECK(plain.seg_cyclic[seg] == 1); }
+  for (uint32_t t = 0; t < 3; ++t) {
+    SearchPins const pin{ .reverses = { { .trans = TransId{ t }, .leg = 0 } } };
+    SubmachineOrders const turned{ order_submachines(z.c, z.g, {}, profile(), 0, pin) };
+    CHECK(turned.seg_cyclic == plain.seg_cyclic);
+  }
+
+  // An entry into the cycle is on no cycle, and neither is a chain.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
+  StateId const e{ build_state(c, root, "D", StateKind::Normal, {}) };
+  build_trans(c, e, a, TransKind::External, {});  // into the cycle
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, d, TransKind::External, {});
+  build_trans(c, d, a, TransKind::External, {});
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ order_submachines(c, g, {}, profile()) };
+  CHECK(o.seg_cyclic[0] == 0);
+  CHECK(o.seg_cyclic[1] == 1);
+  CHECK(o.seg_cyclic[2] == 1);
+  CHECK(o.seg_cyclic[3] == 1);
+
+  Chart chain;
+  SubmachineId const r2{ build_chart(chain, "t", {}) };
+  StateId const x{ build_state(chain, r2, "X", StateKind::Normal, {}) };
+  StateId const y{ build_state(chain, r2, "Y", StateKind::Normal, {}) };
+  StateId const w{ build_state(chain, r2, "W", StateKind::Normal, {}) };
+  build_trans(chain, x, y, TransKind::External, {});
+  build_trans(chain, y, w, TransKind::External, {});
+  SplitGraph const cg{ decompose(chain) };
+  SubmachineOrders const co{ order_submachines(chain, cg, {}, profile()) };
+  CHECK(co.seg_cyclic == std::vector<uint8_t>{ 0, 0 });
+}
+
+TEST_CASE("order: cycle detection survives a frame deep enough to overflow recursion") {
+  // One ring of 4,096 states: every edge on the one cycle. A recursive walk
+  // would be 4,096 frames deep; this one is a loop.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  std::vector<StateId> ring;
+  for (uint32_t i = 0; i < 4096; ++i) {
+    ring.push_back(build_state(c, root, {}, StateKind::Normal, {}));
+  }
+  for (uint32_t i = 0; i < ring.size(); ++i) {
+    build_trans(c, ring[i], ring[(i + 1) % ring.size()], TransKind::External, {});
+  }
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ order_submachines(c, g, {}, profile()) };
+  uint32_t on{ 0 };
+  for (uint8_t const flag : o.seg_cyclic) { on += flag; }
+  CHECK(on == 4096);
+}

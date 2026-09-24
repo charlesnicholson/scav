@@ -71,11 +71,14 @@ struct Laid {
   uint32_t tuple{ INVALID };  // the portfolio row the run kept
 };
 
-// The profile with the portfolio switched off, so one row lays out and it is
-// row 0 -- the caller's own tuple, and the pipeline as it ran before Level 2.
+// The profile with the portfolio and the move sweep switched off, so one row
+// lays out and it is row 0 unsearched -- the caller's own tuple, and the
+// pipeline as it ran before Level 2. The sweep is off too because a reversal
+// kick from row 0 now reaches what the table's other rows did (11.10f).
 scav_profile one_row(scav_profile const &p) {
   scav_profile out{ p };
   out.portfolio_m = 1;
+  out.portfolio_k = 0;
   return out;
 }
 
@@ -148,8 +151,17 @@ void lay(char const *name, scav_profile const &p, Laid &out) {
   // phase 3 as well as phase 1: a face pin is the router's (11.10e).
   out.o = order_submachines(out.c, out.g, {}, knobs, 0, pins);
   REQUIRE(size_layout(out.c, out.g, out.o, {}, knobs, out.z, diags, dar, pack, fold));
-  out.r = route_transitions(out.c, out.g, out.o, out.z, {}, knobs, *router_at(id), 0,
-                            nullptr, nullptr, &pins);
+  out.r = route_transitions(out.c,
+                            out.g,
+                            out.o,
+                            out.z,
+                            {},
+                            knobs,
+                            *router_at(id),
+                            0,
+                            nullptr,
+                            nullptr,
+                            &pins);
   column_holds(out.c, "scav.geom.state", out.z.state);
   column_holds(out.c, "scav.geom.sub", out.z.sub);
   column_holds(out.c, "scav.geom.point", out.r.points);

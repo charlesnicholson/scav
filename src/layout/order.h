@@ -55,6 +55,11 @@ struct SubmachineOrders {
   // The port a boundary node stands for, so a slot can go on the crossed state's
   // border. INVALID when it is an endpoint on an inner face, not a crossing (11.14).
   std::vector<uint32_t> seg_port;
+
+  // Parallel to segments: 1 where the segment lies on a cycle of its frame's
+  // graph as drawn, before any edge is turned around -- the edges a reversal
+  // can move (11.10f).
+  std::vector<uint8_t> seg_cyclic;
 };
 
 // Ranks by longest path, multi-rank edges chained through bends, then

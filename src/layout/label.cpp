@@ -176,6 +176,7 @@ uint32_t place_labels(Chart const &c,
   };
 
   std::vector<scav_rect> blocked;
+  RectGrid grid;
   std::vector<scav_rect> foreign;
   std::vector<scav_rect> nearby;
   std::vector<scav_rect> own;
@@ -277,6 +278,7 @@ uint32_t place_labels(Chart const &c,
           foreign.push_back(piece.at);
         }
       }
+      grid_build(grid, region, blocked, box.w, box.h);
 
       for (uint32_t k = chained ? prior_seg : 0U; (k + 1) < r.len; ++k) {
         scav_point const a{ points[r.off + k] };
@@ -355,14 +357,7 @@ uint32_t place_labels(Chart const &c,
                 lax_key = here;
                 lax = cand;
               }
-              bool clear{ true };
-              for (scav_rect const &obstacle : blocked) {
-                if (overlaps(cand, obstacle)) {
-                  clear = false;
-                  break;
-                }
-              }
-              if (!clear) { continue; }
+              if (grid_hits(grid, blocked, cand)) { continue; }
               key = here;
               best = cand;
             }

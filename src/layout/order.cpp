@@ -74,6 +74,7 @@ struct FrameOrder {
   Frame f;
   std::vector<int32_t> gaps;
   std::vector<SegPort> seg_ports;
+  std::vector<uint32_t> cyclic;  // -> segments, those on a cycle of this frame
 };
 
 // Allocated once per shard and reused across that shard's frames. Both maps
@@ -111,6 +112,72 @@ uint64_t inversions(std::vector<uint32_t> const &v) {
     for (uint32_t i = x + 1; i < tree.size(); i += i & (~i + 1U)) { ++tree[i]; }
   }
   return total;
+}
+
+// The segments on a cycle of the frame's graph as drawn -- an edge whose two
+// ends share a strongly connected component. Tarjan's, iteratively, because a
+// flat frame of a few thousand states is deep enough to overflow recursion.
+std::vector<uint32_t> cyclic_segments(Frame const &f) {
+  uint32_t const n{ static_cast<uint32_t>(f.nodes.size()) };
+  Adjacency const out{ adjacency_of(f.edges, n, true) };
+  std::vector<uint32_t> index(n, INVALID);
+  std::vector<uint32_t> low(n, 0);
+  std::vector<uint32_t> comp(n, INVALID);
+  std::vector<uint8_t> on_stack(n, 0);
+  std::vector<uint32_t> held;
+  struct Visit {
+    uint32_t node;
+    uint32_t next;  // -> out.edge, the edge to try when this frame resumes
+  };
+  std::vector<Visit> call;
+  uint32_t counter{ 0 };
+  uint32_t comps{ 0 };
+  for (uint32_t root = 0; root < n; ++root) {
+    if (index[root] != INVALID) { continue; }
+    index[root] = counter;
+    low[root] = counter;
+    ++counter;
+    held.push_back(root);
+    on_stack[root] = 1;
+    call.push_back({ .node = root, .next = out.off[root] });
+    while (!call.empty()) {
+      uint32_t const v{ call.back().node };
+      if (call.back().next < out.off[v + 1]) {
+        uint32_t const w{ f.edges[out.edge[call.back().next++]].dst };
+        if (index[w] == INVALID) {
+          index[w] = counter;
+          low[w] = counter;
+          ++counter;
+          held.push_back(w);
+          on_stack[w] = 1;
+          call.push_back({ .node = w, .next = out.off[w] });
+        } else if (on_stack[w] != 0) {
+          low[v] = imin(low[v], index[w]);
+        }
+        continue;
+      }
+      if (low[v] == index[v]) {
+        uint32_t w{ INVALID };
+        do {
+          w = held.back();
+          held.pop_back();
+          on_stack[w] = 0;
+          comp[w] = comps;
+        } while (w != v);
+        ++comps;
+      }
+      call.pop_back();
+      if (!call.empty()) {
+        uint32_t const u{ call.back().node };
+        low[u] = imin(low[u], low[v]);
+      }
+    }
+  }
+  std::vector<uint32_t> segs;
+  for (OrderEdge const &e : f.edges) {
+    if ((e.src != e.dst) && (comp[e.src] == comp[e.dst])) { segs.push_back(e.segment); }
+  }
+  return segs;
 }
 
 // Cycle breaking by iterative depth-first search in node order: an edge that
@@ -505,6 +572,7 @@ SubmachineOrders order_submachines(Chart const &c,
   o.state_node.assign(c.states.size(), INVALID);
   o.seg_node.assign(g.segments.size(), INVALID);
   o.seg_port.assign(g.segments.size(), INVALID);
+  o.seg_cyclic.assign(g.segments.size(), 0);
 
   // Which segments each frame routes, gathered once: a segment names its frame
   // but a frame does not name its segments.
@@ -617,6 +685,7 @@ SubmachineOrders order_submachines(Chart const &c,
       f.edges.push_back({ .src = src, .dst = dst, .segment = seg, .reversed = 0 });
     }
 
+    frames[m].cyclic = cyclic_segments(f);
     orient_acyclic(f, pre_reversed);
     assign_ranks(f);
 
@@ -699,6 +768,7 @@ SubmachineOrders order_submachines(Chart const &c,
       }
     }
     for (SegPort const &sp : frames[m].seg_ports) { o.seg_port[sp.seg] = sp.port; }
+    for (uint32_t const seg : frames[m].cyclic) { o.seg_cyclic[seg] = 1; }
 
     o.sub_nodes[m] =
         make_span(node_base, static_cast<uint32_t>(o.nodes.size()) - node_base);

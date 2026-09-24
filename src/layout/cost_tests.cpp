@@ -1400,7 +1400,8 @@ TEST_CASE("cost: crowding is continuous with corridor at the line they share") {
   int32_t const em{ 192 };
   Wide last{ 0 };
   for (int32_t apart = 191; apart >= 1; --apart) {
-    Wide const now{ cost_crowding({ seg(0, 0, 1000, 0, 0), seg(0, apart, 1000, apart, 1) }, em) };
+    Wide const now{ cost_crowding({ seg(0, 0, 1000, 0, 0), seg(0, apart, 1000, apart, 1) },
+                                  em) };
     CHECK(now >= last);  // closer never charges less
     last = now;
   }
@@ -1410,7 +1411,8 @@ TEST_CASE("cost: crowding is continuous with corridor at the line they share") {
 TEST_CASE("cost: crowding sums every tight pair, and order does not matter") {
   int32_t const em{ 192 };
   // Three lanes 64 apart: pairs at 64, 64 and 128, all tight.
-  std::vector<Piece> three{ seg(0, 0, 1000, 0, 0), seg(0, 64, 1000, 64, 1),
+  std::vector<Piece> three{ seg(0, 0, 1000, 0, 0),
+                            seg(0, 64, 1000, 64, 1),
                             seg(0, 128, 1000, 128, 2) };
   Wide const want{ ((1000 * 128) + (1000 * 128) + (1000 * 64)) / 192 };
   CHECK(cost_crowding(three, em) == want);
@@ -1437,20 +1439,25 @@ TEST_CASE("cost: a transition whose route vanished is a Tier 0 violation") {
   scav_profile const p{ profile() };
 
   // Drawn: two points each.
-  Routes const drawn{ routes_of(c, { { { .x = 100, .y = 10 }, { .x = 300, .y = 10 } },
-                                     { { .x = 300, .y = 30 }, { .x = 100, .y = 30 } } }) };
+  Routes const drawn{ routes_of(c,
+                                { { { .x = 100, .y = 10 }, { .x = 300, .y = 10 } },
+                                  { { .x = 300, .y = 30 }, { .x = 100, .y = 30 } } }) };
   CHECK(cost_terms(c, decompose(c), z, drawn, {}, p).vanished == 0);
 
   // One collapsed to a single point: it scores nothing in Tier 2, which is the
   // trap, and Tier 0 is what refuses it.
-  Routes const collapsed{ routes_of(c, { { { .x = 100, .y = 10 }, { .x = 300, .y = 10 } },
-                                         { { .x = 300, .y = 30 } } }) };
+  Routes const collapsed{ routes_of(
+      c,
+      { { { .x = 100, .y = 10 }, { .x = 300, .y = 10 } }, { { .x = 300, .y = 30 } } }) };
   CostTerms const t{ cost_terms(c, decompose(c), z, collapsed, {}, p) };
   CHECK(t.vanished == 1);
   CHECK(cost_of(t, p).t0_violations == 1);
-  CHECK(cost_less(cost_of(cost_terms(c, decompose(c), z, drawn, {}, p), p), cost_of(t, p)));
+  CHECK(
+      cost_less(cost_of(cost_terms(c, decompose(c), z, drawn, {}, p), p), cost_of(t, p)));
 
   // And none at all is the same defect.
-  Routes const empty{ routes_of(c, { { { .x = 100, .y = 10 }, { .x = 300, .y = 10 } }, {} }) };
+  Routes const empty{
+    routes_of(c, { { { .x = 100, .y = 10 }, { .x = 300, .y = 10 } }, {} })
+  };
   CHECK(cost_terms(c, decompose(c), z, empty, {}, p).vanished == 1);
 }

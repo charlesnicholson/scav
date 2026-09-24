@@ -48,15 +48,12 @@ bool portfolio_row(char const *text, uint32_t &out) {
 bool chain_cut(char const *text, std::vector<ChainCut> &out) {
   std::string_view const arg{ text };
   size_t const colon{ arg.find(':') };
-  if ((colon == std::string_view::npos) || (colon == 0) ||
-      (colon + 1 == arg.size())) {
+  if ((colon == std::string_view::npos) || (colon == 0) || (colon + 1 == arg.size())) {
     return false;
   }
   uint32_t trans{ 0 };
   uint32_t leg{ 0 };
-  std::from_chars_result const a{
-    std::from_chars(arg.data(), arg.data() + colon, trans)
-  };
+  std::from_chars_result const a{ std::from_chars(arg.data(), arg.data() + colon, trans) };
   std::from_chars_result const b{
     std::from_chars(arg.data() + colon + 1, arg.data() + arg.size(), leg)
   };

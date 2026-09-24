@@ -25,6 +25,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -117,6 +118,34 @@ void load_corpus(char const *name, Chart &c) {
   std::vector<Diagnostic> diags;
   std::string failed;
   REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
+}
+
+// A corpus chart laid out at `readable` with no space requests, once per
+// process. Five cases read the same eleven layouts, and at the shipped search
+// depth one pass over them is minutes; each case copies the chart it reads.
+struct CorpusRun {
+  Chart c;
+  std::vector<Diagnostic> diags;
+  uint32_t inflations{ 0 };
+  bool ok{ false };
+};
+
+CorpusRun const &laid_corpus(char const *name) {
+  static std::map<std::string, CorpusRun> laid;
+  auto const found{ laid.find(name) };
+  if (found != laid.end()) { return found->second; }
+  CorpusRun r;
+  load_corpus(name, r.c);
+  std::vector<scav_placed> placed;
+  r.ok = layout_run(r.c, {}, opts(readable()), placed, r.diags, &r.inflations);
+  return laid.emplace(name, std::move(r)).first->second;
+}
+
+// The laid chart, required to have laid out.
+Chart corpus_chart(char const *name) {
+  CorpusRun const &r{ laid_corpus(name) };
+  REQUIRE(r.ok);
+  return r.c;
 }
 
 // The profile's 48 knobs as a block, so a test can say which of them moved.
@@ -1091,7 +1120,13 @@ TEST_CASE("layout: geometry invariants hold across topologies and spaces") {
     }
   }
 
-  SUBCASE("with no space requests") { run(c, {}, readable()); }
+  // A bounded search, not none: what this checks holds at any depth and every
+  // stage still runs -- rows, finishes, kicks -- but a graph whose every pair
+  // is joined puts nearly every segment on a cycle, so the depth that ships
+  // spends twenty minutes on one layout here and tests nothing more for it.
+  scav_profile bounded{ readable() };
+  bounded.portfolio_k = 24;
+  SUBCASE("with no space requests") { run(c, {}, bounded); }
   SUBCASE("with fabricated measurement") {
     // A pure integer function of the model, the way a real app measures.
     std::vector<scav_box_space> boxes(c.states.size());
@@ -1105,7 +1140,7 @@ TEST_CASE("layout: geometry invariants hold across topologies and spaces") {
                          .n_box_state = static_cast<uint32_t>(boxes.size()),
                          .path_clear = clears.data(),
                          .n_path_clear = static_cast<uint32_t>(clears.size()) };
-    run(c, s, readable());
+    run(c, s, bounded);
   }
   check_geometry(c);
 }
@@ -1189,14 +1224,8 @@ TEST_CASE("layout: no corpus chart runs a route flush along a box") {
                             "toolchanger.scav",
                             "vac.scav" }) {
     CAPTURE(name);
-    std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
-    path += name;
-    Loader loader;
-    Chart c;
+    Chart const c{ corpus_chart(name) };
     std::vector<Diagnostic> diags;
-    std::string failed;
-    REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
-    run(c, {}, p);
     SplitGraph const g{ decompose(c) };
     SubmachineOrders const o{ order_submachines(c, g, {}, p) };
     SizedLayout z;
@@ -1527,8 +1556,8 @@ TEST_CASE("layout: how much a chart is searched does not depend on how big it is
   // before latency, so what a big chart gets is the whole of M and the whole of
   // K, and the cost of a candidate is what was fixed instead (11.10c).
   scav_profile p{ readable() };
-  for (uint32_t entities : { 0U, 1U, 1023U, 1024U, 2048U, 6000U, 1U << 12U,
-                             0xFFFF'FFFFU }) {
+  for (uint32_t entities :
+       { 0U, 1U, 1023U, 1024U, 2048U, 6000U, 1U << 12U, 0xFFFF'FFFFU }) {
     CAPTURE(entities);
     for (int32_t m : { 1, 4, 8 }) {
       p.portfolio_m = m;
@@ -1633,12 +1662,17 @@ TEST_CASE("layout: the pick is the row exact Cost ranks first over the whole tab
   CHECK(cost_less(cost[picked], cost[0]) == (picked != 0));
 }
 
-TEST_CASE("layout: a pinned row runs that row and no search") {
+TEST_CASE("layout: a pinned row runs that row, and searches from it") {
   // Calibration's one knob: a row the objective would never pick, laid out and
   // written anyway, so its drawing can be scored beside the row that ships
-  // (11.10, 11.12). Every row of the table is held to the phases driven at its
-  // own tuple, which is the same check the argmin test makes of the pick.
-  scav_profile const p{ readable() };
+  // (11.10, 11.12). With the move budget off, every row of the table is held to
+  // the phases driven at its own tuple, which is the same check the argmin test
+  // makes of the pick. **It used to hold with the budget on too**, because a
+  // pinned row was left unscored and Level 1 then started from a cost of zero
+  // that no move could beat -- so "render row 3" silently skipped the search
+  // every other row gets (11.10f). The second half below is that fix.
+  scav_profile p{ readable() };
+  p.portfolio_k = 0;
   Chart reference;
   load_corpus("axis.scav", reference);
   SplitGraph const g{ decompose(reference) };
@@ -1687,6 +1721,40 @@ TEST_CASE("layout: a pinned row runs that row and no search") {
   CHECK(at_four == 3);
   CHECK(at_one == 3);
   CHECK(layout_coordinate_hash(pinned_at_four) == layout_coordinate_hash(pinned_at_one));
+
+  // With the budget the profile ships, a pinned row is searched from, and the
+  // drawing it writes costs no more than the row did before any move.
+  scav_profile const shipped{ readable() };
+  for (uint32_t const pin : { 0U, 4U }) {
+    CAPTURE(pin);
+    Chart bare;
+    load_corpus("axis.scav", bare);
+    std::vector<scav_placed> bare_placed;
+    std::vector<Diagnostic> bare_diags;
+    REQUIRE(layout_run(bare, {}, opts(p), bare_placed, bare_diags, nullptr, nullptr, pin));
+    Chart searched;
+    load_corpus("axis.scav", searched);
+    std::vector<scav_placed> searched_placed;
+    std::vector<Diagnostic> searched_diags;
+    uint32_t moves{ 0 };
+    uint32_t at{ INVALID };
+    REQUIRE(layout_run(searched,
+                       {},
+                       opts(shipped),
+                       searched_placed,
+                       searched_diags,
+                       nullptr,
+                       &at,
+                       pin,
+                       &moves));
+    CHECK(at == pin);
+    CHECK(moves > 0);
+    Cost const before{ cost_of(cost_columns(bare, decompose(bare), shipped), shipped) };
+    Cost const after{ cost_of(cost_columns(searched, decompose(searched), shipped),
+                              shipped) };
+    CHECK(!cost_less(before, after));
+    CHECK(cost_less(after, before));
+  }
 
   // And an unpinned run of the shipped profile is still the search: row 5 is
   // what `axis` picks, so the pin above reached a row the argmin does not.
@@ -1825,8 +1893,16 @@ TEST_CASE("layout: the search routes a sealed channel by its face, not by wideni
   uint32_t inflations{ 99 };
   uint32_t moves{ 0 };
   SearchPins taken;
-  REQUIRE(layout_run(searched, {}, opts(p), placed, diags, &inflations, nullptr, INVALID,
-                     &moves, &taken));
+  REQUIRE(layout_run(searched,
+                     {},
+                     opts(p),
+                     placed,
+                     diags,
+                     &inflations,
+                     nullptr,
+                     INVALID,
+                     &moves,
+                     &taken));
   CHECK(inflations == 0);
   CHECK(diags.empty());
   CHECK(moves >= 1);
@@ -1837,7 +1913,11 @@ TEST_CASE("layout: the search routes a sealed channel by its face, not by wideni
   std::vector<scav_placed> wide_placed;
   std::vector<Diagnostic> wide_diags;
   uint32_t wide_inflations{ 0 };
-  REQUIRE(layout_run(widened, {}, opts(sealed_profile(readable())), wide_placed, wide_diags,
+  REQUIRE(layout_run(widened,
+                     {},
+                     opts(sealed_profile(readable())),
+                     wide_placed,
+                     wide_diags,
                      &wide_inflations));
   REQUIRE(wide_inflations == 3);
   scav_rect const a{ row_of<scav_rect>(searched, "scav.geom.chart", 0) };
@@ -2083,7 +2163,12 @@ TEST_CASE("layout: a graph past the router's budget is not a spacing problem") {
     build_trans(c, all[i], all[(i + 13) % all.size()], TransKind::External, {});
   }
 
-  scav_profile const p{ readable() };
+  // The move sweep off, because a reversal kick finds an order whose frame the
+  // router takes, and then nothing is refused: at 24 moves a dimension every
+  // transition routes (11.10f). Here the grid has to stay too large to test
+  // what a refusal reports.
+  scav_profile p{ readable() };
+  p.portfolio_k = 0;
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const o{ order_submachines(c, g, {}, p) };
   SizedLayout z;
@@ -2157,19 +2242,10 @@ TEST_CASE("layout: nothing in the corpus or at the scale target inflates") {
                             "toolchanger.scav",
                             "vac.scav" }) {
     CAPTURE(name);
-    std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
-    path += name;
-    Loader loader;
-    Chart c;
-    std::vector<Diagnostic> diags;
-    std::string failed;
-    REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
-    std::vector<scav_placed> placed;
-    std::vector<Diagnostic> laid;
-    uint32_t inflations{ 1 };
-    REQUIRE(layout_run(c, {}, opts(p), placed, laid, &inflations));
-    CHECK(inflations == 0);
-    CHECK(laid.empty());
+    CorpusRun const &r{ laid_corpus(name) };
+    REQUIRE(r.ok);
+    CHECK(r.inflations == 0);
+    CHECK(r.diags.empty());
   }
 
   Chart nested{ nested_2k_chart() };
@@ -2279,14 +2355,7 @@ TEST_CASE("layout: corpus charts hash to the committed golden") {
                             "toolchanger.scav",
                             "vac.scav" }) {
     CAPTURE(name);
-    std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
-    path += name;
-    Loader loader;
-    Chart c;
-    std::vector<Diagnostic> diags;
-    std::string failed;
-    REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
-    run(c, {}, readable());
+    Chart const c{ corpus_chart(name) };
     check_geometry(c);  // the invariants, over real charts and not only fuzz
     actual += name;
     actual += ' ';
@@ -2336,9 +2405,7 @@ TEST_CASE("layout: the corpus cost vector is committed, term by term and by shar
                             "toolchanger.scav",
                             "vac.scav" }) {
     CAPTURE(name);
-    Chart c;
-    load_corpus(name, c);
-    run(c, {}, p);
+    Chart const c{ corpus_chart(name) };
     CostTerms const t{ cost_columns(c, decompose(c), p) };
     Cost const scored{ cost_of(t, p) };
 
@@ -2437,7 +2504,6 @@ bool gate_ancestor(Chart const &c, StateId maybe, StateId of) {
 TEST_CASE("layout: no corpus chart routes an edge through a box") {
   // P7's gate, and the precondition for blind review (11.12): both incumbents sit
   // at zero, so one violation settles the comparison on the first tier.
-  scav_profile const p{ readable() };
   std::string report;
   uint32_t uturns{ 0 };
   uint32_t collapsed{ 0 };
@@ -2453,14 +2519,7 @@ TEST_CASE("layout: no corpus chart routes an edge through a box") {
                             "toolchanger.scav",
                             "vac.scav" }) {
     CAPTURE(name);
-    std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
-    path += name;
-    Loader loader;
-    Chart c;
-    std::vector<Diagnostic> diags;
-    std::string failed;
-    REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
-    run(c, {}, p);
+    Chart const c{ corpus_chart(name) };
 
     for (uint32_t t = 0; t < c.transitions.size(); ++t) {
       scav_span const route{ row_of<scav_span>(c, "scav.geom.route", t) };
@@ -2603,7 +2662,3 @@ TEST_CASE("layout: fuzzed charts and spaces either lay out or diagnose") {
     }
   }
 }
-
-
-
-

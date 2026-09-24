@@ -5,10 +5,10 @@
 
 #include "layout/geom.h"
 #include "layout/router.h"
+#include "layout/trace.h"
 #include "scav/scav_layout.h"
 #include "scav_int.h"
 #include "scav_stable_sort.h"
-#include "layout/trace.h"
 
 #include <array>
 #include <cstdint>
@@ -804,7 +804,8 @@ bool ortho_grid(scav_rect const &region,
       uint32_t const ix0{ (after_x == 0) ? 0U : (after_x - 1U) };
       uint32_t const ix1{ imin(ortho_from(out.xs, r.x + r.w), out.nx() - 1) };
       for (uint32_t iy = iy0; iy < iy1; ++iy) {
-        uint8_t *const row{ out.pass_h.data() + (static_cast<size_t>(iy) * (out.nx() - 1)) };
+        uint8_t *const row{ out.pass_h.data() +
+                            (static_cast<size_t>(iy) * (out.nx() - 1)) };
         for (uint32_t ix = ix0; ix < ix1; ++ix) { row[ix] = 0; }
       }
     }
@@ -1022,10 +1023,14 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
     // A named face overrules the separation rule, which is what makes the
     // choice searchable rather than ruled (11.10e).
     auto const attach = [&](scav_point aim, uint32_t box, uint32_t face) {
-      return (face < 4) ? ortho_attach_face(aim, in.obstacles[box], clear, glyph(box),
-                                            arc(box), face)
-                        : ortho_attach_box(aim, in.obstacles[box], clear, glyph(box),
-                                           arc(box));
+      return (face < 4)
+                 ? ortho_attach_face(aim,
+                                     in.obstacles[box],
+                                     clear,
+                                     glyph(box),
+                                     arc(box),
+                                     face)
+                 : ortho_attach_box(aim, in.obstacles[box], clear, glyph(box), arc(box));
     };
     seat[src_slot] = (net.src_obstacle < in.obstacles.size())
                          ? attach(after, net.src_obstacle, net.src_face)

@@ -74,7 +74,7 @@ int run_render(char const *path,
                uint32_t row,
                std::vector<ChainCut> const &cuts,
                std::vector<ReversePin> const &reverses,
-             std::vector<FacePin> const &faces);
+               std::vector<FacePin> const &faces);
 int run_fmt(std::vector<char const *> const &paths, bool check_only);
 int run_deps(char const *path, char const *target);
 int run_selftest(char const *against_path);

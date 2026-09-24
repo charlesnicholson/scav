@@ -253,13 +253,16 @@ TEST_CASE("determinism: the corpus lays out to one answer at every thread count"
 }
 
 TEST_CASE("determinism: a searched drawing is the same drawing at every thread count") {
-  // The depth that ships, on the three charts whose search takes the most
-  // moves. **This is the case that matters now that candidates are scored in
-  // parallel** (11.10c): a round is enumerated, fanned out and reduced in
-  // enumeration order, and if that reduction were order-dependent it is here it
-  // would show. Breadth is the case above; this one is depth.
+  // The depth that ships. **This is the case that matters now that candidates
+  // are scored in parallel** (11.10c) and rows, finishes and kicks run side by
+  // side (11.10f): every one of them is fanned out and reduced in enumeration
+  // order, and if a reduction were order-dependent it is here it would show.
+  // Breadth is the case above; this one is depth. Small charts, because
+  // single-threaded `mill` at the depth that ships is over twelve minutes and
+  // these exercise every stage: `estop` and `led` accept a reversal kick,
+  // `dock` and `brew` finish more than one row.
   scav_profile const p{ readable() };
-  for (char const *name : { "mill.scav", "bottler.scav", "vac.scav" }) {
+  for (char const *name : { "estop.scav", "led.scav", "dock.scav", "brew.scav" }) {
     CAPTURE(name);
     Chart first;
     load_corpus(name, first);

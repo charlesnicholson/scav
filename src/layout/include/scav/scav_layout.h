@@ -222,7 +222,6 @@ bool layout_trace_json(Chart &c,
                        uint32_t row = INVALID,
                        TraceScope scope = TraceScope::Shipped);
 
-
 // Split so a pure translation moves the coordinate hash and not the structural
 // one: structure is sides, depths and turn tokens; coordinates are the rest.
 // The structural hash is seeded with the model's structural digest (6).

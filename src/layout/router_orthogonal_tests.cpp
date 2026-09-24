@@ -1840,14 +1840,17 @@ RouteInput busy_frame() {
   in.inscribed = { 0, 0, 0, 1 };
   in.corner = { 75, 75, 75, 0 };
   in.waypoints = { pt(2800, 1300) };
-  in.nets = { { .src = pt(800, 700), .dst = pt(2800, 700), .src_obstacle = 0,
-                .dst_obstacle = 1 },
-              { .src = pt(2800, 700), .dst = pt(1850, 1900), .src_obstacle = 1,
-                .dst_obstacle = 2, .waypoint_off = 0, .waypoint_len = 1 },
-              { .src = pt(1850, 1900), .dst = pt(800, 700), .src_obstacle = 2,
-                .dst_obstacle = 0 },
-              { .src = pt(3200, 2000), .dst = pt(2800, 700), .src_obstacle = 3,
-                .dst_obstacle = 1 } };
+  in.nets = {
+    { .src = pt(800, 700), .dst = pt(2800, 700), .src_obstacle = 0, .dst_obstacle = 1 },
+    { .src = pt(2800, 700),
+      .dst = pt(1850, 1900),
+      .src_obstacle = 1,
+      .dst_obstacle = 2,
+      .waypoint_off = 0,
+      .waypoint_len = 1 },
+    { .src = pt(1850, 1900), .dst = pt(800, 700), .src_obstacle = 2, .dst_obstacle = 0 },
+    { .src = pt(3200, 2000), .dst = pt(2800, 700), .src_obstacle = 3, .dst_obstacle = 1 }
+  };
   return in;
 }
 
@@ -1902,14 +1905,17 @@ TEST_CASE("ortho: a named face is the face, wherever the other end lies") {
   // pin overrules it. The position *along* the face is still the projection.
   scav_rect const r{ rect(1000, 1000, 800, 600) };
   int32_t const clear{ 96 };
-  for (scav_point const aim : { pt(5000, 1200), pt(-5000, 1200), pt(1400, 5000),
-                                pt(1400, -5000), pt(1400, 1300) }) {
+  for (scav_point const aim : { pt(5000, 1200),
+                                pt(-5000, 1200),
+                                pt(1400, 5000),
+                                pt(1400, -5000),
+                                pt(1400, 1300) }) {
     CAPTURE(aim.x);
     CAPTURE(aim.y);
-    CHECK(ortho_attach_face(aim, r, clear, false, 0, 0).x == 1000);          // left
-    CHECK(ortho_attach_face(aim, r, clear, false, 0, 1).x == 1800);          // right
-    CHECK(ortho_attach_face(aim, r, clear, false, 0, 2).y == 1000);          // top
-    CHECK(ortho_attach_face(aim, r, clear, false, 0, 3).y == 1600);          // bottom
+    CHECK(ortho_attach_face(aim, r, clear, false, 0, 0).x == 1000);  // left
+    CHECK(ortho_attach_face(aim, r, clear, false, 0, 1).x == 1800);  // right
+    CHECK(ortho_attach_face(aim, r, clear, false, 0, 2).y == 1000);  // top
+    CHECK(ortho_attach_face(aim, r, clear, false, 0, 3).y == 1600);  // bottom
     // Along the face, the projection held off both corners.
     scav_point const left{ ortho_attach_face(aim, r, clear, false, 0, 0) };
     CHECK(left.y >= (1000 + clear));

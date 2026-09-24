@@ -107,7 +107,8 @@ struct Json {
       raw("null");
       return;
     }
-    auto const n{ chart_string(c, c.states[v].name) };  // core's view; layout may not name it
+    auto const n{ chart_string(c,
+                               c.states[v].name) };  // core's view; layout may not name it
     raw("\"");
     if (n.empty()) {
       raw("#");
@@ -191,8 +192,10 @@ void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out)
           j.kv("leg", e.score.leg);
         }
         if (e.score.row == INVALID) {
-          static constexpr std::array<char const *, 4> MOVE{ "rank", "cut", "reverse",
-                                                              "face" };
+          static constexpr std::array<char const *, 4> MOVE{ "rank",
+                                                             "cut",
+                                                             "reverse",
+                                                             "face" };
           j.ks("move", (e.score.move < MOVE.size()) ? MOVE[e.score.move] : "?");
           if (e.score.move == TRACE_MOVE_FACE) {
             j.ks("end", (e.score.end == 0) ? "src" : "dst");

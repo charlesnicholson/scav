@@ -41,6 +41,39 @@ uint32_t count_kind(LayoutTrace const &t, TraceKind k) {
   return n;
 }
 
+// One round of Level 1 as the trace shows it. A round runs every move's phase 1
+// before it emits any verdict, so it is a maximal run of scores, and
+// `orderings` counts the reversals since the round before -- one per ordering
+// on a chart whose every ordering breaks one cycle.
+struct Round {
+  uint32_t orderings{ 0 };
+  uint32_t scored{ 0 };
+  uint32_t first{ 0 };  // event index of its first score
+  uint32_t end{ 0 };
+};
+
+std::vector<Round> rounds_of(LayoutTrace const &t) {
+  std::vector<Round> out;
+  uint32_t orderings{ 0 };
+  bool open{ false };
+  for (uint32_t i = 0; i < t.events.size(); ++i) {
+    TraceEvent const &e{ t.events[i] };
+    if ((e.kind != TraceKind::CandidateScored) && (e.kind != TraceKind::CandidateTerms)) {
+      open = false;
+      orderings += (e.kind == TraceKind::EdgeReversed) ? 1U : 0U;
+      continue;
+    }
+    if (!open) {
+      out.push_back({ .orderings = orderings, .scored = 0, .first = i, .end = i });
+      orderings = 0;
+      open = true;
+    }
+    out.back().end = i + 1;
+    out.back().scored += (e.kind == TraceKind::CandidateScored) ? 1U : 0U;
+  }
+  return out;
+}
+
 }  // namespace
 
 TEST_CASE("trace: no sink is the shipped state, and emitting into one is a no-op") {
@@ -129,14 +162,10 @@ TEST_CASE("trace: every payload shape serializes its own fields") {
                                 .dx = 1344,
                                 .dy = 509 } });
   t.events.push_back({ .kind = TraceKind::NetWaypoint, .point = { .x = -8, .y = 1489 } });
-  t.events.push_back({ .kind = TraceKind::SeatMoved,
-                       .pass = static_cast<uint16_t>(SeatPass::Separate),
-                       .seat = { .net = 2,
-                                 .end = 1,
-                                 .from_x = 1,
-                                 .from_y = 2,
-                                 .to_x = 3,
-                                 .to_y = 4 } });
+  t.events.push_back(
+      { .kind = TraceKind::SeatMoved,
+        .pass = static_cast<uint16_t>(SeatPass::Separate),
+        .seat = { .net = 2, .end = 1, .from_x = 1, .from_y = 2, .to_x = 3, .to_y = 4 } });
   t.events.push_back(
       { .kind = TraceKind::LaneAssigned, .lane = { .net = 5, .lane = 1, .at = 96 } });
   t.events.push_back({ .kind = TraceKind::CandidateScored,
@@ -305,10 +334,17 @@ TEST_CASE("trace: the search re-orders per move, and every move states its verdi
   CHECK(scored > 0);
   CHECK(taken < scored);  // a greedy pass rejects more than it takes
 
-  // One ordering per move scored, one more per move taken -- a take rebuilds
-  // the orders the next sweep reads -- and two before the sweep begins, which
-  // are `layout_run`'s own and the one the search enters holding.
-  CHECK(count_kind(t, TraceKind::EdgeReversed) == scored + taken + 2);
+  // One ordering per move scored, and one more before each round: the take
+  // that rebuilt the orders it reads, or the start of the search it opens.
+  // Level 1 is several searches -- the row's, then a kick's from each edge of
+  // the cycle (11.10f) -- so this holds per round rather than per run. The
+  // first round follows `layout_run`'s own ordering as well.
+  std::vector<Round> const rounds{ rounds_of(t) };
+  REQUIRE(!rounds.empty());
+  for (uint32_t k = 0; k < rounds.size(); ++k) {
+    CAPTURE(k);
+    CHECK(rounds[k].orderings >= (rounds[k].scored + ((k == 0) ? 2U : 1U)));
+  }
 
   // A three-cycle leaves at most one edge spanning two ranks, so no ordering
   // hands more than one net a waypoint -- and *which* net is the search's
@@ -351,29 +387,42 @@ TEST_CASE("trace: the search scores unchain moves beside placement moves") {
     REQUIRE(layout_run(c, {}, opts, placed, diags, nullptr, nullptr, 0));
   }
 
-  // Exactly one cut is offered -- the back edge, the one segment phase 1
-  // chained -- and every cut comes before every placement move. The other
-  // transition-naming moves are reversals and faces (11.10d, 11.10e), told
-  // apart by the event's `move` rather than by which fields are set.
-  uint32_t cuts{ 0 };
+  // Exactly one cut in the first round -- the back edge, the one segment
+  // phase 1 chained -- and in every round every cut comes before every
+  // placement move. Only the first round is pinned to the back edge: later
+  // ones include kicks (11.10f), which turn another edge of the cycle around
+  // and so chain that one instead. The other transition-naming moves are
+  // reversals and faces (11.10d, 11.10e), told apart by the event's `move`
+  // rather than by which fields are set.
+  std::vector<Round> const rounds{ rounds_of(t) };
+  REQUIRE(!rounds.empty());
   bool seen_pin{ false };
-  bool cut_after_pin{ false };
-  for (TraceEvent const &e : t.events) {
-    if (e.kind != TraceKind::CandidateScored) { continue; }
-    if (e.score.move == TRACE_MOVE_RANK) {
-      seen_pin = true;
-      continue;
+  for (uint32_t k = 0; k < rounds.size(); ++k) {
+    CAPTURE(k);
+    uint32_t cuts{ 0 };
+    bool pinned{ false };
+    bool cut_after_pin{ false };
+    for (uint32_t i = rounds[k].first; i < rounds[k].end; ++i) {
+      TraceEvent const &e{ t.events[i] };
+      if (e.kind != TraceKind::CandidateScored) { continue; }
+      if (e.score.move == TRACE_MOVE_RANK) {
+        pinned = true;
+        continue;
+      }
+      if (e.score.move != TRACE_MOVE_CUT) { continue; }
+      ++cuts;
+      CHECK(e.score.state == INVALID);  // a cut names no state
+      if (k == 0) {
+        CHECK(e.score.trans == back.v);
+        CHECK(e.score.leg == 0);
+      }
+      cut_after_pin = cut_after_pin || pinned;
     }
-    if (e.score.move != TRACE_MOVE_CUT) { continue; }
-    ++cuts;
-    CHECK(e.score.trans == back.v);
-    CHECK(e.score.leg == 0);
-    CHECK(e.score.state == INVALID);  // a cut names no state
-    cut_after_pin = cut_after_pin || seen_pin;
+    if (k == 0) { CHECK(cuts == 1); }
+    CHECK(!cut_after_pin);
+    seen_pin = seen_pin || pinned;
   }
-  CHECK(cuts == 1);
   CHECK(seen_pin);
-  CHECK(!cut_after_pin);
 
   // Every scored move states which term rejected it.
   CHECK(count_kind(t, TraceKind::CandidateTerms) > 0);
@@ -405,13 +454,22 @@ TEST_CASE("trace: what a run reports as taken re-derives the run") {
   std::vector<Diagnostic> db;
   uint32_t tuple{ INVALID };
   SearchPins taken;
-  REQUIRE(layout_run(searched, {}, opts, pa, da, nullptr, &tuple, INVALID, nullptr,
-                     &taken));
+  REQUIRE(
+      layout_run(searched, {}, opts, pa, da, nullptr, &tuple, INVALID, nullptr, &taken));
 
   scav_layout_opts again{ opts };
   again.profile.portfolio_k = 0;  // the pins already hold what Level 1 found
-  REQUIRE(layout_run(rederived, {}, again, pb, db, nullptr, nullptr, tuple, nullptr,
-                     nullptr, &taken));
+  REQUIRE(layout_run(rederived,
+                     {},
+                     again,
+                     pb,
+                     db,
+                     nullptr,
+                     nullptr,
+                     tuple,
+                     nullptr,
+                     nullptr,
+                     &taken));
 
   CHECK(layout_structural_hash(searched) == layout_structural_hash(rederived));
   CHECK(layout_coordinate_hash(searched) == layout_coordinate_hash(rederived));

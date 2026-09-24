@@ -68,8 +68,8 @@ bool same_but_shifted(RouteFrameCache const &a,
                       int32_t &dy) {
   RouteInput const &x{ a.in };
   if ((x.obstacles.size() != b.obstacles.size()) || (x.nets.size() != b.nets.size()) ||
-      (x.waypoints.size() != b.waypoints.size()) ||
-      (x.inscribed != b.inscribed) || (x.corner != b.corner)) {
+      (x.waypoints.size() != b.waypoints.size()) || (x.inscribed != b.inscribed) ||
+      (x.corner != b.corner)) {
     return false;
   }
   if ((x.region.w != b.region.w) || (x.region.h != b.region.h)) { return false; }
@@ -382,8 +382,7 @@ Routes route_transitions(Chart const &c,
     // comparison costs one walk of an input the gather above already built.
     int32_t dx{ 0 };
     int32_t dy{ 0 };
-    if ((reuse != nullptr) && (m < reuse->frame.size()) &&
-        (reuse->frame[m].valid != 0) &&
+    if ((reuse != nullptr) && (m < reuse->frame.size()) && (reuse->frame[m].valid != 0) &&
         same_but_shifted(reuse->frame[m], in, frame, dx, dy)) {
       RouteFrameCache const &had{ reuse->frame[m] };
       frames[m].points = had.points;

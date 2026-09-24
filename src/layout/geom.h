@@ -9,6 +9,9 @@
 #include "scav/scav_types.h"
 #include "scav_int.h"
 
+#include <cstdint>
+#include <vector>
+
 namespace scav {
 
 // Whether this kind's glyph is drawn inside its box rather than filling it: a
@@ -74,6 +77,89 @@ constexpr int32_t chebyshev_gap(scav_rect const &a, scav_rect const &b) {
   int32_t const dx{ imax(imax(b.x - (a.x + a.w), a.x - (b.x + b.w)), 0) };
   int32_t const dy{ imax(imax(b.y - (a.y + a.h), a.y - (b.y + b.h)), 0) };
   return imax(dx, dy);
+}
+
+// Rects bucketed into a uniform grid over a region, so asking whether a rect
+// overlaps any of them visits only the cells it covers (11.10f). A rect and a
+// query both take their cells from inclusive ranges, and the cell of a
+// coordinate is monotone in it, so two rects that overlap share a cell -- a
+// zero-width route piece included -- and the answer is a linear scan's.
+struct RectGrid {
+  int32_t x0{ 0 }, y0{ 0 };
+  Wide cw{ 1 }, ch{ 1 };
+  uint32_t nx{ 1 }, ny{ 1 };
+  std::vector<uint32_t> off;   // nx * ny + 1, into `item`
+  std::vector<uint32_t> item;  // -> the rects the grid was built over
+};
+
+// At most this many cells a side, so a long route's region and a small box do
+// not allocate a cell per box height.
+inline constexpr uint32_t GRID_SIDE{ 64 };
+
+inline uint32_t grid_cell(Wide v, int32_t lo, Wide size, uint32_t n) {
+  Wide const at{ floor_div(v - lo, size) };
+  if (at < 0) { return 0; }
+  return (at >= n) ? (n - 1) : static_cast<uint32_t>(at);
+}
+
+inline void grid_build(RectGrid &g,
+                       scav_rect const &region,
+                       std::vector<scav_rect> const &rects,
+                       int32_t cell_w,
+                       int32_t cell_h) {
+  g.x0 = region.x;
+  g.y0 = region.y;
+  g.cw = imax(Wide{ imax(cell_w, 1) }, ceil_div(Wide{ region.w } + 1, Wide{ GRID_SIDE }));
+  g.ch = imax(Wide{ imax(cell_h, 1) }, ceil_div(Wide{ region.h } + 1, Wide{ GRID_SIDE }));
+  g.nx = static_cast<uint32_t>(imax(ceil_div(Wide{ region.w } + 1, g.cw), Wide{ 1 }));
+  g.ny = static_cast<uint32_t>(imax(ceil_div(Wide{ region.h } + 1, g.ch), Wide{ 1 }));
+  g.off.assign((static_cast<size_t>(g.nx) * g.ny) + 1, 0);
+  auto const span =
+      [&g](scav_rect const &r, uint32_t &c0, uint32_t &c1, uint32_t &r0, uint32_t &r1) {
+        c0 = grid_cell(r.x, g.x0, g.cw, g.nx);
+        c1 = grid_cell(Wide{ r.x } + r.w, g.x0, g.cw, g.nx);
+        r0 = grid_cell(r.y, g.y0, g.ch, g.ny);
+        r1 = grid_cell(Wide{ r.y } + r.h, g.y0, g.ch, g.ny);
+      };
+  for (scav_rect const &r : rects) {
+    uint32_t c0{ 0 }, c1{ 0 }, r0{ 0 }, r1{ 0 };
+    span(r, c0, c1, r0, r1);
+    for (uint32_t y = r0; y <= r1; ++y) {
+      for (uint32_t x = c0; x <= c1; ++x) {
+        ++g.off[(static_cast<size_t>(y) * g.nx) + x + 1];
+      }
+    }
+  }
+  for (size_t i = 1; i < g.off.size(); ++i) { g.off[i] += g.off[i - 1]; }
+  g.item.assign(g.off.back(), 0);
+  std::vector<uint32_t> fill(g.off.begin(), g.off.end() - 1);
+  for (uint32_t k = 0; k < rects.size(); ++k) {
+    uint32_t c0{ 0 }, c1{ 0 }, r0{ 0 }, r1{ 0 };
+    span(rects[k], c0, c1, r0, r1);
+    for (uint32_t y = r0; y <= r1; ++y) {
+      for (uint32_t x = c0; x <= c1; ++x) {
+        g.item[fill[(static_cast<size_t>(y) * g.nx) + x]++] = k;
+      }
+    }
+  }
+}
+
+inline bool grid_hits(RectGrid const &g,
+                      std::vector<scav_rect> const &rects,
+                      scav_rect const &cand) {
+  uint32_t const c0{ grid_cell(cand.x, g.x0, g.cw, g.nx) };
+  uint32_t const c1{ grid_cell(Wide{ cand.x } + cand.w, g.x0, g.cw, g.nx) };
+  uint32_t const r0{ grid_cell(cand.y, g.y0, g.ch, g.ny) };
+  uint32_t const r1{ grid_cell(Wide{ cand.y } + cand.h, g.y0, g.ch, g.ny) };
+  for (uint32_t y = r0; y <= r1; ++y) {
+    for (uint32_t x = c0; x <= c1; ++x) {
+      size_t const cell{ (static_cast<size_t>(y) * g.nx) + x };
+      for (uint32_t k = g.off[cell]; k < g.off[cell + 1]; ++k) {
+        if (overlaps(cand, rects[g.item[k]])) { return true; }
+      }
+    }
+  }
+  return false;
 }
 
 }  // namespace scav

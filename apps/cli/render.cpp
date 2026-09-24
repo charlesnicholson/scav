@@ -63,10 +63,17 @@ int run_render(char const *path,
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
   SearchPins const pins{ .cuts = cuts, .reverses = reverses, .faces = faces };
-  bool const laid{
-    layout_run(net.chart, as_spaces(spaces), opts, placed, diags, nullptr, nullptr, row,
-               nullptr, nullptr, &pins)
-  };
+  bool const laid{ layout_run(net.chart,
+                              as_spaces(spaces),
+                              opts,
+                              placed,
+                              diags,
+                              nullptr,
+                              nullptr,
+                              row,
+                              nullptr,
+                              nullptr,
+                              &pins) };
   if (!diags.empty()) {
     std::string err;
     for (Diagnostic const &d : diags) { diag_append(err, net.chart, d, path); }
