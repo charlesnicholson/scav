@@ -1,28 +1,28 @@
 -- scav's toolchain and package manifest, and envy's root marker.
 
 -- @envy schema "1"
--- @envy version "0.2.5"
+-- @envy version "0.4.10"
 -- @envy bin "bin"
 -- @envy cache-local "out/.envy"
 -- @envy deploy "true"
 
 BUNDLES = {
   ["envy"] = {
-    identity = "envy.package-specs@r2",
+    identity = "envy.package-specs@r9",
     source = "https://github.com/envy-package-manager/package-specs.git",
-    ref = "4abc43074b424400f7d518ef925f8ab8d4624060",
+    ref = "21ed35ea163297b4cb6041698483b51d8f4d75e0",
   },
 }
 
 PACKAGES = {
-  { spec = "envy.cmake@r0", bundle = "envy", options = { version = "4.4.0" } },
+  { spec = "envy.cmake@r1", bundle = "envy", options = { version = "4.4.3" } },
 
   { spec = "envy.ninja@r0", bundle = "envy", options = { version = "1.13.2" } },
 
   { spec = "envy.doctest-cpp@r0", bundle = "envy", options = { version = "2.5.3" } },
 
-  { spec = "envy.python@r1", bundle = "envy",
-    options = { version = "3.14.6", release = "20260623",
+  { spec = "envy.python@r3", bundle = "envy",
+    options = { version = "3.14.7", release = "20260901",
                 provide_python = true, provide_python3 = true } },
 }
 

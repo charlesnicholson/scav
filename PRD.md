@@ -288,7 +288,7 @@ envy's own default is a user-wide cache; naming a project tree is what opts out.
 
 Precedence, identical in every reader: `ENVY_CACHE_ROOT` (absolute only) > marker > `@envy cache-mode` > `@envy cache-local` > user-wide. `build.sh` prints the resolved root, so a 540 MB per-checkout copy is never silent.
 
-**Sharing one cache is safe, and measured rather than assumed.** Packages are keyed by content fingerprint, so an override is usually a partial hit on arrival — scav's `envy.cmake@r0` is the same build another project already fetched. Three simultaneous `envy sync` runs against one fresh cache all succeed. Parallel agents in separate worktrees can share one cache without a lock of our own.
+**Sharing one cache is safe, and measured rather than assumed.** Packages are keyed by content fingerprint, so an override is usually a partial hit on arrival — scav's `envy.cmake@r1` is the same build another project already fetched. Three simultaneous `envy sync` runs against one fresh cache all succeed. Parallel agents in separate worktrees can share one cache without a lock of our own.
 
 **Not a CMake preset**, which is the obvious place to look: envy resolves the cache and hands back absolute paths to cmake, ninja and python before CMake is invoked at all.
 
