@@ -5,6 +5,7 @@
 #include "layout/tests/pod_eq.h"
 
 #include "layout/decompose.h"
+#include "layout/geom.h"
 #include "layout/label.h"
 #include "layout/order.h"
 #include "layout/router.h"
@@ -160,6 +161,54 @@ TEST_CASE("route: a crossing puts its slot on the crossed border") {
   CHECK(slot.boundary_depth == 0);
   REQUIRE(r.route[0].len == 3);
   CHECK((r.points[1] == scav_point{ .x = slot.x, .y = slot.y }));
+}
+
+TEST_CASE("route: a route entering a composite leaves its border square, never along it") {
+  // The port sits on the composite's border at the height its boundary node
+  // came out at, and the state it enters is lower. Nothing in the inner frame
+  // blocked the border line itself, so the route went down along it before
+  // turning in: a run a reader cannot tell from the border (11.10g).
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
+  StateId const s{ build_state(c, inner, "S", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  build_trans(c, d, s, TransKind::External, {});
+
+  SplitGraph const g{ decompose(c) };
+  REQUIRE(g.trans_segments[0].len == 2);
+  SubmachineOrders o{ empty_orders(c, g) };
+  // The entry's boundary node, at the inner frame's leading edge.
+  o.nodes = { { .kind = OrderKind::Boundary, .subject = 1, .rank = 0, .pos = 0 } };
+  o.seg_node[1] = 0;
+  o.seg_port[1] = 0;
+  o.sub_nodes[inner.v] = make_span(0, 1);
+  o.edges = { { .src = 0, .dst = 0, .segment = 1, .reversed = 0 } };
+  SizedLayout z{ blank(c, o) };
+  z.state[comp.v] = { .x = 0, .y = 0, .w = 400, .h = 400 };
+  z.state[s.v] = { .x = 200, .y = 250, .w = 120, .h = 60 };
+  z.state[d.v] = { .x = -600, .y = 20, .w = 120, .h = 60 };
+  z.sub[root.v] = { .x = -600, .y = 0, .w = 1000, .h = 400 };
+  z.sub[inner.v] = { .x = 16, .y = 16, .w = 368, .h = 368 };
+  z.node[0] = { .x = 16, .y = 50 };
+
+  OrthogonalRouter const ortho;
+  Routes const r{ route_transitions(c, g, o, z, {}, profile(), ortho) };
+  REQUIRE(r.failed[0] == 0);
+  scav_span const route{ r.route[0] };
+  REQUIRE(route.len >= 2);
+  REQUIRE(r.port[0].len == 1);
+  scav_point const slot{ .x = r.slots[r.port[0].off].x, .y = r.slots[r.port[0].off].y };
+  CHECK(slot.x == z.state[comp.v].x);
+  for (uint32_t k = 0; (k + 1) < route.len; ++k) {
+    CAPTURE(k);
+    scav_point const a{ r.points[route.off + k] };
+    scav_point const b{ r.points[route.off + k + 1] };
+    CHECK_FALSE(along_border(a, b, z.state[comp.v]));
+    // The leg out of the slot is square to the border it crosses.
+    if (same(a, slot)) { CHECK(a.y == b.y); }
+  }
 }
 
 TEST_CASE("route: the slot side follows the route's direction, not the packing") {

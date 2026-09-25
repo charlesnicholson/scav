@@ -41,6 +41,10 @@ struct RouteInput {
   std::vector<RouteNet> nets;  // in (transition, ordinal) order
   std::vector<scav_point> waypoints;
   scav_profile profile{};
+  // The box the frame's routes are drawn inside, or zero-sized for the root:
+  // a route keeps off its border rather than running along it, and an end on
+  // that border -- a port -- leaves it square (11.10g).
+  scav_rect enclosure{};
 };
 
 enum class RouteFailure : int32_t {

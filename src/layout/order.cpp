@@ -473,6 +473,32 @@ uint64_t rank_crossings(std::vector<uint32_t> const &south_positions) {
   return inversions(south_positions);
 }
 
+// Every initial pseudostate one rank before the nearest state it enters, which
+// `assign_ranks` gives it and a pin on that state can take away. Where the
+// state is at rank 0, everything else moves up one to make the room.
+void seat_initials(Chart const &c, Frame &f) {
+  for (uint32_t v = 0; v < f.nodes.size(); ++v) {
+    OrderNode const &nd{ f.nodes[v] };
+    if ((nd.kind != OrderKind::State) ||
+        (c.states[nd.subject].kind != StateKind::Initial)) {
+      continue;
+    }
+    uint32_t nearest{ INVALID };
+    for (OrderEdge const &e : f.edges) {
+      if ((e.src == v) && (e.dst != v)) { nearest = imin(nearest, f.nodes[e.dst].rank); }
+      if ((e.dst == v) && (e.src != v)) { nearest = imin(nearest, f.nodes[e.src].rank); }
+    }
+    if (nearest == INVALID) { continue; }
+    if (nearest == 0) {
+      for (uint32_t u = 0; u < f.nodes.size(); ++u) {
+        if (u != v) { ++f.nodes[u].rank; }
+      }
+      nearest = 1;
+    }
+    f.nodes[v].rank = nearest - 1;
+  }
+}
+
 // Ranks renumbered onto the ones that still hold a node, keeping their order. A
 // move can empty the rank it left, and phase 2 sizes a rank gap whether or not
 // anything is in it (11.10).
@@ -701,14 +727,18 @@ SubmachineOrders order_submachines(Chart const &c,
         }
         uint32_t const at{ sc.state_local[pin.state.v] };
         if (at >= f.nodes.size()) { continue; }  // not a state this frame holds
+        if (c.states[pin.state.v].kind == StateKind::Initial) { continue; }
         f.nodes[at].rank = pin.rank;
         moved = true;
         trace_emit({ .kind = TraceKind::RankPinned,
                      .rank = { .state = pin.state.v, .rank = pin.rank } });
       }
-      // A rank a move emptied would size a phantom gap in phase 2 (11.10), so
-      // the ranks are renumbered onto the ones that still hold a node.
-      if (moved) { squeeze_ranks(f); }
+      if (moved) {
+        seat_initials(c, f);
+        // A rank a move emptied would size a phantom gap in phase 2 (11.10), so
+        // the ranks are renumbered onto the ones that still hold a node.
+        squeeze_ranks(f);
+      }
     }
     rank_derived(f, frames[m].gaps, seg_label, cut, p, sc);
 

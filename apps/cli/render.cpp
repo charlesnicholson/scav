@@ -38,10 +38,7 @@ int run_render(char const *path,
                char const *out_path,
                bool embed_font,
                char const *profile_name,
-               uint32_t row,
-               std::vector<ChainCut> const &cuts,
-               std::vector<ReversePin> const &reverses,
-               std::vector<FacePin> const &faces) {
+               LayoutArgs const &args) {
   Loaded net;
   load_and_report(path, true, net);
   if (net.code == EXIT_UNUSABLE) { return EXIT_UNUSABLE; }
@@ -51,6 +48,7 @@ int run_render(char const *path,
     write_error("no such profile", profile_name);
     return EXIT_UNUSABLE;
   }
+  if (args.no_search) { opts.profile.portfolio_k = 0; }
 
   Metrics metrics;
   Spaces spaces;
@@ -62,7 +60,6 @@ int run_render(char const *path,
 
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
-  SearchPins const pins{ .cuts = cuts, .reverses = reverses, .faces = faces };
   bool const laid{ layout_run(net.chart,
                               as_spaces(spaces),
                               opts,
@@ -70,10 +67,10 @@ int run_render(char const *path,
                               diags,
                               nullptr,
                               nullptr,
-                              row,
+                              args.row,
                               nullptr,
                               nullptr,
-                              &pins) };
+                              &args.pins) };
   if (!diags.empty()) {
     std::string err;
     for (Diagnostic const &d : diags) { diag_append(err, net.chart, d, path); }

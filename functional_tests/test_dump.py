@@ -99,6 +99,29 @@ class TestDump(unittest.TestCase):
         self.assertEqual([], json.loads(
             self.run_dump("--json", NETWORK.as_posix()).stdout)["columns"])
 
+    def test_the_flags_a_layout_rests_on_lay_it_out_again_unsearched(self) -> None:
+        # The counterfactual harness's premise (11.10g): the row and pins a run
+        # prints, handed back with `--no-search`, are that drawing exactly, so
+        # an edited copy of them is scored on the same objective.
+        shipped = self.run_dump("--layout", CHART.as_posix())
+        self.assertEqual(0, shipped.returncode)
+        rests = [ln for ln in shipped.stdout.splitlines() if ln.startswith("  rests on ")]
+        self.assertEqual(1, len(rests))
+        flags = rests[0][len("  rests on "):].split()
+        self.assertEqual("--portfolio-row", flags[0])
+        again = self.run_dump("--layout", "--no-search", *flags, CHART.as_posix())
+        self.assertEqual(0, again.returncode)
+        geometry = [ln for ln in shipped.stdout.splitlines() if ln.startswith("geometry ")]
+        self.assertEqual(geometry,
+                         [ln for ln in again.stdout.splitlines() if ln.startswith("geometry ")])
+
+    def test_a_malformed_pin_is_a_usage_error(self) -> None:
+        for bad in (["--rank", "1"], ["--cut", "a:b"], ["--face", "1:0:2:0"],
+                    ["--portfolio-row", "99"], ["--no-search", "--no-search"]):
+            with self.subTest(bad=bad):
+                result = self.run_dump("--layout", *bad, CHART.as_posix())
+                self.assertEqual(2, result.returncode)
+
     def test_hash_refuses_layout_and_json(self) -> None:
         result = self.run_dump("--hash", "--layout", NETWORK.as_posix())
         self.assertEqual(2, result.returncode)

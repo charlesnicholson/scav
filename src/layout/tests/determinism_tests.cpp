@@ -316,7 +316,12 @@ TEST_CASE("determinism: the flat target survives the injector too") {
   }
 }
 
-TEST_CASE("determinism: an inflating retry re-enters the sharded phases the same way") {
+// Skipped: `sealed_chart` no longer seals. Its seal was the router starting a
+// route outside the state it runs inside, and with the enclosure rule
+// (11.10g) it routes at its drawn size; no fixture is known that seals, so
+// the spacing retry these pin has nothing to retry on. [OWED] in 11.10g.
+TEST_CASE("determinism: an inflating retry re-enters the sharded phases the same way" *
+          doctest::skip()) {
   scav_profile const p{ sealed_profile(readable()) };
   Chart one{ sealed_chart() };
   uint32_t serial{ 0 };

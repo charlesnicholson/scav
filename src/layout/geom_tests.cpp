@@ -49,6 +49,23 @@ TEST_CASE("geom: an intersection is empty rather than negative") {
                  intersection(rect(0, 0, 10, 10), rect(50, 50, 10, 10))));
 }
 
+TEST_CASE("geom: a run along a border is on the border line and longer than a point") {
+  scav_rect const box{ rect(0, 0, 100, 50) };
+  // Along each of the four edges, for part of the edge and past its end.
+  CHECK(along_border({ .x = 10, .y = 0 }, { .x = 60, .y = 0 }, box));
+  CHECK(along_border({ .x = -40, .y = 50 }, { .x = 20, .y = 50 }, box));
+  CHECK(along_border({ .x = 0, .y = 10 }, { .x = 0, .y = 30 }, box));
+  CHECK(along_border({ .x = 100, .y = 60 }, { .x = 100, .y = 40 }, box));
+  // Leaving square from a face, meeting only a corner, or parallel one unit off.
+  CHECK_FALSE(along_border({ .x = 100, .y = 20 }, { .x = 200, .y = 20 }, box));
+  CHECK_FALSE(along_border({ .x = 100, .y = 0 }, { .x = 200, .y = 0 }, box));
+  CHECK_FALSE(along_border({ .x = 10, .y = -1 }, { .x = 60, .y = -1 }, box));
+  // Through the interior is `enters`' question, not this one.
+  CHECK_FALSE(along_border({ .x = 10, .y = 25 }, { .x = 60, .y = 25 }, box));
+  // A box with no extent has no border to run along.
+  CHECK_FALSE(along_border({ .x = 0, .y = 0 }, { .x = 10, .y = 0 }, rect(0, 0, 0, 50)));
+}
+
 TEST_CASE("geom: a bumper grows both sides and a negative one shrinks") {
   CHECK((grow(rect(10, 20, 30, 40), 5) == rect(5, 15, 40, 50)));
   CHECK((grow(rect(10, 20, 30, 40), 0) == rect(10, 20, 30, 40)));

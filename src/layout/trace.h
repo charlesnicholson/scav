@@ -15,20 +15,26 @@ namespace scav {
 
 enum class TraceKind : uint16_t {
   None = 0,
-  RankAssigned,     // longest-path gave a state its rank
-  RankPinned,       // 11.10a's placement move overrode one
-  EdgeReversed,     // cycle-breaking flipped a segment
-  EdgeChained,      // a multi-rank segment got a bend node at a rank
-  NodePlaced,       // phase 2 fixed a node's cross coordinate
-  SpacingInflated,  // 11.6's retry widened the chart
-  NetPlanned,       // a segment became a net with seats and waypoints
-  NetWaypoint,      // one waypoint of the net last planned
-  SeatMoved,        // one of 11.5's seating passes moved an attachment
-  LaneAssigned,     // nudging put a run in a corridor lane
-  RouteDegraded,    // a transition fell back to a straight line
-  CandidateScored,  // one row of 11.10's table, or one Level 1 move
-  CandidateTerms,   // the nine Tier-2 shares behind the score above
+  RankAssigned,       // longest-path gave a state its rank
+  RankPinned,         // 11.10a's placement move overrode one
+  EdgeReversed,       // cycle-breaking flipped a segment
+  EdgeChained,        // a multi-rank segment got a bend node at a rank
+  NodePlaced,         // phase 2 fixed a node's cross coordinate
+  SpacingInflated,    // 11.6's retry widened the chart
+  NetPlanned,         // a segment became a net with seats and waypoints
+  NetWaypoint,        // one waypoint of the net last planned
+  SeatMoved,          // one of 11.5's seating passes moved an attachment
+  LaneAssigned,       // nudging put a run in a corridor lane
+  RouteDegraded,      // a transition fell back to a straight line
+  CandidateScored,    // one row of 11.10's table, or one Level 1 move
+  CandidateTerms,     // the nine Tier-2 shares behind the score above
+  FoldCut,            // a folded rank run started a piece here, or was refused
+  PseudostateSeated,  // an initial or final was set beside the state it joins
+  PortTurned,         // a port was turned to face the far end of its route
 };
+
+// What seating an initial or final pseudostate did; `PseudostateSeated.pass`.
+enum class SeatHow : uint16_t { Moved, Levelled, Declined };
 
 // Which of 11.5's seating passes moved a seat; `SeatMoved.pass`.
 enum class SeatPass : uint16_t { Attach, Reface, Align, Spread, Separate, Nudge };
@@ -47,6 +53,14 @@ struct TraceChain {
 };
 struct TraceSeg {
   uint32_t seg;
+};
+// `rank` is the frame's rank a piece starts at; `refused` is set where a cut
+// there would have separated a pseudostate from the state it joins.
+struct TraceFold {
+  uint32_t rank, refused;
+};
+struct TracePort {
+  uint32_t seg, trans, leg;
 };
 struct TracePlace {
   uint32_t state, seg;
@@ -106,6 +120,8 @@ struct TraceEvent {
     TraceLane lane;
     TraceScore score;
     TraceTerms terms;
+    TraceFold fold;
+    TracePort port;
   };
 };
 

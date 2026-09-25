@@ -73,6 +73,11 @@ bool same_but_shifted(RouteFrameCache const &a,
     return false;
   }
   if ((x.region.w != b.region.w) || (x.region.h != b.region.h)) { return false; }
+  if ((x.enclosure.w != b.enclosure.w) || (x.enclosure.h != b.enclosure.h) ||
+      ((b.enclosure.x - x.enclosure.x) != (b.region.x - x.region.x)) ||
+      ((b.enclosure.y - x.enclosure.y) != (b.region.y - x.region.y))) {
+    return false;
+  }
   if (std::memcmp(&x.profile, &b.profile, sizeof(scav_profile)) != 0) { return false; }
   dx = b.region.x - x.region.x;
   dy = b.region.y - x.region.y;
@@ -229,12 +234,22 @@ Routes route_transitions(Chart const &c,
     uint32_t const first_slot{ static_cast<uint32_t>(out.slots.size()) };
 
     if (tr.src == tr.dst) {
-      // The external self-loop: out the trailing side and back.
+      // The external self-loop: out the trailing side and back, and no further
+      // than the state it is drawn inside lets it, which keeps a route off
+      // that state's border (11.10g).
       scav_rect const r{ z.state[tr.src.v] };
       scav_point const lip{ .x = r.x + r.w, .y = r.y + floor_div(r.h, 2) };
-      planned.push_back({ .frame = g.segments[segs.off].frame.v,
+      uint32_t const frame{ g.segments[segs.off].frame.v };
+      StateId const around{ (frame < c.submachines.size()) ? c.submachines[frame].owner
+                                                           : StateId{ INVALID } };
+      int32_t reach{ lip.x + (2 * p.pad) };
+      if (around.v != INVALID) {
+        scav_rect const box{ z.state[around.v] };
+        reach = imax(imin(reach, (box.x + box.w) - imax(p.pad / 2, 1) - 1), lip.x + 1);
+      }
+      planned.push_back({ .frame = frame,
                           .src = lip,
-                          .dst = { .x = lip.x + (2 * p.pad), .y = lip.y },
+                          .dst = { .x = reach, .y = lip.y },
                           .src_state = INVALID,
                           .dst_state = INVALID,
                           .seg = segs.off });
@@ -263,7 +278,18 @@ Routes route_transitions(Chart const &c,
           end = centre(z.state[tr.dst.v]);
           end_state = tr.dst.v;
         }
-        planned.push_back({ .frame = g.segments[seg].frame.v,
+        // The channel between two concurrent regions of one state is routed
+        // inside that state, in the source region's frame: in the frame the
+        // state sits in, the state is an obstacle walling the route out of
+        // the space between its own regions, and it went the long way round
+        // outside them (11.8).
+        uint32_t frame{ g.segments[seg].frame.v };
+        uint32_t const from_port{ g.segments[seg].src_port };
+        if ((g.segments[seg].separator != 0) && (from_port < g.ports.size()) &&
+            (g.ports[from_port].sub.v < c.submachines.size())) {
+          frame = g.ports[from_port].sub.v;
+        }
+        planned.push_back({ .frame = frame,
                             .src = at,
                             .dst = end,
                             .src_state = at_state,
@@ -348,6 +374,9 @@ Routes route_transitions(Chart const &c,
                                               z.state[st],
                                               z.before[st].x - z.state[st].x));
     }
+    // The state the frame's routes are drawn inside, so none runs along its
+    // border and a port on it leaves square (11.10g).
+    in.enclosure = (owner.v == INVALID) ? scav_rect{} : z.state[owner.v];
     for (uint32_t const i : by_frame[m]) {
       Planned const &pn{ planned[i] };
       RouteNet net{ .src = pn.src, .dst = pn.dst };

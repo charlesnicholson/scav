@@ -18,14 +18,16 @@ constexpr std::string_view USAGE{
   "  fmt [--check] <file>...      canonical print, in place; --check gates\n"
   "  check <file>                 structural validation, exit 1 on a finding\n"
   "  deps [--target NAME] <file>  the document network as a depfile\n"
-  "  dump [--hash|--json] [--layout] [--portfolio-row N] [--trace "
-  "[--trace-search]] <file>  the model; --layout adds geometry, --trace its "
-  "decisions, --cut T:L leaves one segment unchained\n"
-  "  render [-o FILE] [--embed-font] [--profile NAME] [--portfolio-row N] "
-  "[--cut T:L] <file>"
+  "  dump [--hash|--json] [--layout [LAYOUT...]] [--trace [--trace-search]] <file>"
+  "  the model; --layout adds geometry and the flags it rests on, --trace its "
+  "decisions\n"
+  "  render [-o FILE] [--embed-font] [--profile NAME] [LAYOUT...] <file>"
   "   chart -> SVG\n"
   "  selftest [--against FILE]   recompute the layout hashes on this toolchain "
   "and diff against the goldens\n"
+  "\n"
+  "  LAYOUT: --portfolio-row N, --rank S:R, --cut T:L, --reverse T:L, "
+  "--face T:L:E:F, --no-search\n"
 };
 
 int usage() {
@@ -43,40 +45,13 @@ int dispatch(int argc, char **argv) {
     bool layout{ false };
     bool trace{ false };
     bool trace_search{ false };
-    uint32_t row{ INVALID };
-    std::vector<ChainCut> cuts;
-    std::vector<ReversePin> reverses;
-    std::vector<FacePin> faces;
+    LayoutArgs args;
     for (int i = 2; i < argc; ++i) {
+      ArgRead const read{ read_layout_arg(argc, argv, i, args) };
+      if (read == ArgRead::Malformed) { return usage(); }
+      if (read == ArgRead::Taken) { continue; }
       std::string_view const arg{ argv[i] };
       bool *flag{ nullptr };
-      if (arg == "--portfolio-row") {
-        // The increment is its own statement: clang-tidy's
-        // bugprone-inc-dec-in-conditions is right that `++i` inside a compound
-        // condition depends on an evaluation order a reader has to reconstruct.
-        if (((i + 1) >= argc) || (row != INVALID)) { return usage(); }
-        ++i;
-        if (!portfolio_row(argv[i], row)) { return usage(); }
-        continue;
-      }
-      if (arg == "--cut") {
-        if ((i + 1) >= argc) { return usage(); }
-        ++i;
-        if (!chain_cut(argv[i], cuts)) { return usage(); }
-        continue;
-      }
-      if (arg == "--reverse") {
-        if ((i + 1) >= argc) { return usage(); }
-        ++i;
-        if (!reverse_pin(argv[i], reverses)) { return usage(); }
-        continue;
-      }
-      if (arg == "--face") {
-        if ((i + 1) >= argc) { return usage(); }
-        ++i;
-        if (!face_pin(argv[i], faces)) { return usage(); }
-        continue;
-      }
       if (arg == "--hash") {
         flag = &hash;
       } else if (arg == "--json") {
@@ -103,53 +78,23 @@ int dispatch(int argc, char **argv) {
     // one run made and there are none without a run (11.16).
     // `--trace-search` is a mode of `--trace`, not a second flag beside it.
     if ((path == nullptr) || (hash && (json || layout)) || (trace_search && !trace) ||
-        (((row != INVALID) || trace || !cuts.empty() || !reverses.empty() ||
-          !faces.empty()) &&
-         !layout)) {
+        ((args.given || trace) && !layout)) {
       return usage();
     }
-    return run_dump(path,
-                    hash,
-                    json,
-                    layout,
-                    row,
-                    trace,
-                    trace_search,
-                    cuts,
-                    reverses,
-                    faces);
+    return run_dump(path, hash, json, layout, trace, trace_search, args);
   }
 
   if (verb == "render") {
     char const *out{ nullptr };
     char const *profile{ "readable" };
     bool embed{ false };
-    uint32_t row{ INVALID };
-    std::vector<ChainCut> cuts;
-    std::vector<ReversePin> reverses;
-    std::vector<FacePin> faces;
+    LayoutArgs args;
     for (int i = 2; i < argc; ++i) {
+      ArgRead const read{ read_layout_arg(argc, argv, i, args) };
+      if (read == ArgRead::Malformed) { return usage(); }
+      if (read == ArgRead::Taken) { continue; }
       std::string_view const arg{ argv[i] };
-      if (arg == "--portfolio-row") {
-        // The increment is its own statement: clang-tidy's
-        // bugprone-inc-dec-in-conditions is right that `++i` inside a compound
-        // condition depends on an evaluation order a reader has to reconstruct.
-        if (((i + 1) >= argc) || (row != INVALID)) { return usage(); }
-        ++i;
-        if (!portfolio_row(argv[i], row)) { return usage(); }
-      } else if (arg == "--cut") {
-        if ((i + 1) >= argc) { return usage(); }
-        ++i;
-        if (!chain_cut(argv[i], cuts)) { return usage(); }
-      } else if (arg == "--reverse") {
-        if ((i + 1) >= argc) { return usage(); }
-        ++i;
-        if (!reverse_pin(argv[i], reverses)) { return usage(); }
-      } else if (arg == "--face") {
-        if ((i + 1) >= argc) { return usage(); }
-        ++i;
-        if (!face_pin(argv[i], faces)) { return usage(); }
-      } else if (arg == "-o") {
+      if (arg == "-o") {
         if (((i + 1) >= argc) || (out != nullptr)) { return usage(); }
         out = argv[++i];
       } else if (arg == "--profile") {
@@ -165,7 +110,7 @@ int dispatch(int argc, char **argv) {
       }
     }
     if (path == nullptr) { return usage(); }
-    return run_render(path, out, embed, profile, row, cuts, reverses, faces);
+    return run_render(path, out, embed, profile, args);
   }
 
   if (verb == "selftest") {

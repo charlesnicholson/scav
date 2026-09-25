@@ -275,7 +275,11 @@ TEST_CASE("drawlist gauntlet: what crowd's tighter packing costs its labels") {
   // lanes a label sits between now cost what they look like when they close in,
   // so they spread, and the label's own line is left nearest it. **Zero once
   // every row is searched and the winner kicked** (11.10f): what that reaches
-  // leaves every label nearest its own leg.
+  // leaves every label nearest its own leg. **346 once `Ready` sits over
+  // `Running`** (11.10g): the pair is two straight lines, and the spread seats
+  // them `clear` apart, under the em that crowding and this term both read.
+  // Row 0 still reads zero, at a Tier 2 of 1,980 against 1,904, with both
+  // routes bent and 18% more area. Carved out to 11.10g's label rules.
   Metrics const m{ bundled() };
   scav_profile const p{ readable() };
   Run const r{ run_pipeline("gauntlet/crowd.scav", m, p) };
@@ -283,7 +287,7 @@ TEST_CASE("drawlist gauntlet: what crowd's tighter packing costs its labels") {
     cost_columns(r.chart, decompose(r.chart), p, as_spaces(r.spaces), r.placed)
   };
   CHECK(t.label == 0);
-  CHECK(t.label_near == 0);
+  CHECK(t.label_near == 346);
 }
 
 TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back") {

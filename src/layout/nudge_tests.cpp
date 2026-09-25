@@ -3,6 +3,8 @@
 
 #include "layout/nudge.h"
 
+#include "layout/geom.h"
+
 #include "scav_int.h"
 
 #include "doctest.h"
@@ -204,6 +206,27 @@ TEST_CASE("nudge: clearance is kept, so a displacement never ends up flush") {
   for (uint32_t net = 0; net < 2; ++net) { CHECK(lane_y(l, net) >= 88); }
 }
 
+TEST_CASE("nudge: a displacement never drags a leg onto a box's border") {
+  // The box's left side is the line the lane's right legs run down. Moving the
+  // upper member up by half the pitch would stretch its leg alongside that
+  // side for 18 units, which no interior test sees: a leg on a border line
+  // touches the box rather than overlapping it (11.10g).
+  Lane l{ two_over(100) };
+  std::vector<scav_rect> const wall{ rect(200, 30, 100, 40) };
+  NudgeStats s;
+  nudge_lanes(OPEN, bounds_of(OPEN, l.nets), wall, 96, 0, l.nets, l.points, s);
+
+  CHECK(lane_y(l, 0) != lane_y(l, 1));
+  for (uint32_t net = 0; net < 2; ++net) {
+    scav_span const at{ l.nets[net] };
+    for (uint32_t k = 0; (k + 1) < at.len; ++k) {
+      CAPTURE(net);
+      CAPTURE(k);
+      CHECK_FALSE(along_border(l.points[at.off + k], l.points[at.off + k + 1], wall[0]));
+    }
+  }
+}
+
 TEST_CASE("nudge: the step shrinks to the room rather than being refused") {
   // 20 units either side and two members: the widest centred step that fits is
   // 40, well under the 480 asked for.
@@ -387,9 +410,10 @@ TEST_CASE("nudge: a vertical lane is measured after the horizontal one has moved
   CHECK(points[1].y == 76);
   CHECK(points[7].y == 124);
   // Extents read before the horizontal move stop the lane at y=100, short of the
-  // box, and take this member 4 inside it.
-  CHECK(points[2].x == 272);
-  CHECK(points[8].x == 320);
+  // box, and take this member 4 inside it -- then one unit short of the box's
+  // left side rather than on it, which would run the leg along that border.
+  CHECK(points[2].x == 271);
+  CHECK(points[8].x == 319);
 }
 
 TEST_CASE("nudge: a displacement onto another net's segment is refused") {
@@ -852,8 +876,9 @@ TEST_CASE("nudge: a box the lane already runs through does not bound it") {
               beside.points,
               t);
   CHECK(t.spread == 1);
-  CHECK(lane_y(beside, 0) == 62);
-  CHECK(lane_y(beside, 1) == 110);
+  // One unit short of the box's top, which is a border a lane may not run on.
+  CHECK(lane_y(beside, 0) == 61);
+  CHECK(lane_y(beside, 1) == 109);
 }
 
 TEST_CASE("nudge: a leg outside the region is refused before a box is consulted") {

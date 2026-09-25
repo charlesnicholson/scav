@@ -268,6 +268,14 @@ struct CostTerms {
   // perfect** -- no bends, no length, no excess, no crowding -- and a search that
   // can reach one will prefer it (11.6).
   int32_t vanished{ 0 };
+  // Route segments running along a state's border. A reader cannot tell a
+  // route on a border from the border, and nothing in Tier 2 sees it (11.10g).
+  int32_t flush{ 0 };
+  // Route segments entering a region neither end lies in: a concurrent
+  // sibling of an endpoint's own region, or any region of a state the route
+  // only leaves or reaches. `through_box` sees the states; this sees the
+  // regions inside a state a route is allowed to be in (11.10g).
+  int32_t through_region{ 0 };
 };
 
 // Compared lexicographically, in this order.

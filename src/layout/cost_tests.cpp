@@ -385,6 +385,80 @@ TEST_CASE("cost: an edge through a stranger's box counts, through its own does n
   CHECK(cost_terms(c, decompose(c), z, r, {}, profile()).through_box == 0);
 }
 
+TEST_CASE(
+    "cost: a route along a state's border is a Tier-0 violation, square off it is not") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const other{ build_state(c, root, "X", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+
+  SizedLayout z{ blank(c) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
+  z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 40 };
+  z.state[other.v] = { .x = 200, .y = 20, .w = 100, .h = 100 };
+  // Along the stranger's top edge: nothing enters it, so only this sees it.
+  Routes const along{ routes_of(c, { { { .x = 100, .y = 20 }, { .x = 400, .y = 20 } } }) };
+  CostTerms const t{ cost_terms(c, decompose(c), z, along, {}, profile()) };
+  CHECK(t.through_box == 0);
+  CHECK(t.flush == 1);
+  CHECK(cost_of(t, profile()).t0_violations == 1);
+
+  // Clear of it by one unit, and leaving and reaching both ends square.
+  Routes const clear{ routes_of(c, { { { .x = 100, .y = 19 }, { .x = 400, .y = 19 } } }) };
+  CHECK(cost_terms(c, decompose(c), z, clear, {}, profile()).flush == 0);
+
+  // Along its own endpoint's border counts as well: a reader sees the border.
+  Routes const own{ routes_of(c,
+                              { { { .x = 50, .y = 0 },
+                                  { .x = 100, .y = 0 },
+                                  { .x = 150, .y = 0 },
+                                  { .x = 150, .y = 19 },
+                                  { .x = 400, .y = 19 } } }) };
+  CHECK(cost_terms(c, decompose(c), z, own, {}, profile()).flush == 1);
+}
+
+TEST_CASE("cost: a route through a region neither end is in is a Tier-0 violation") {
+  // `On` holds two concurrent regions side by side, and a transition leaves
+  // `Ready` in the left one for `X` outside. Crossing the right region is
+  // crossing a state nobody is in; `through_box` excuses it because `On` is
+  // an ancestor of the source.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const on{ build_state(c, root, "On", StateKind::Normal, {}) };
+  SubmachineId const main_sub{ build_submachine(c, on, "main", {}) };
+  SubmachineId const aux_sub{ build_submachine(c, on, "aux", {}) };
+  StateId const ready{ build_state(c, main_sub, "Ready", StateKind::Normal, {}) };
+  StateId const idle{ build_state(c, aux_sub, "Idle", StateKind::Normal, {}) };
+  StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
+  build_trans(c, ready, x, TransKind::External, {});
+
+  SizedLayout z{ blank(c) };
+  z.state[on.v] = { .x = 0, .y = 0, .w = 400, .h = 200 };
+  z.sub[main_sub.v] = { .x = 10, .y = 10, .w = 180, .h = 180 };
+  z.sub[aux_sub.v] = { .x = 210, .y = 10, .w = 180, .h = 180 };
+  z.state[ready.v] = { .x = 40, .y = 60, .w = 100, .h = 40 };
+  z.state[idle.v] = { .x = 240, .y = 140, .w = 100, .h = 40 };
+  z.state[x.v] = { .x = 600, .y = 60, .w = 100, .h = 40 };
+
+  // Straight out through `aux`, missing `Idle` itself.
+  Routes const through{ routes_of(c,
+                                  { { { .x = 140, .y = 80 }, { .x = 600, .y = 80 } } }) };
+  CostTerms const t{ cost_terms(c, decompose(c), z, through, {}, profile()) };
+  CHECK(t.through_box == 0);
+  CHECK(t.through_region == 1);
+  CHECK(cost_of(t, profile()).t0_violations == 1);
+
+  // Out of `main` downward and round below `On`: its own region, then outside.
+  Routes const round{ routes_of(c,
+                                { { { .x = 90, .y = 100 },
+                                    { .x = 90, .y = 260 },
+                                    { .x = 650, .y = 260 },
+                                    { .x = 650, .y = 100 } } }) };
+  CHECK(cost_terms(c, decompose(c), z, round, {}, profile()).through_region == 0);
+}
+
 TEST_CASE("cost: a placed box over a state neither endpoint is under costs") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };

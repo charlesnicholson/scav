@@ -20,6 +20,7 @@
 #include "scav_thread.h"
 #include "scav_xxhash.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -222,7 +223,53 @@ struct Candidate {
   Routes routes;
   uint32_t inflations{ 0 };
   bool viable{ false };
+  // The pins the drawing was laid out with: the caller's, with the ports the
+  // facing pass turned. Re-deriving from these finds nothing left to turn.
+  SearchPins laid;
 };
+
+// The legs whose port faces away from where its transition goes, from one
+// sizing. A port's side is its in-frame edge's direction -- a route leaving a
+// frame leaves by the trailing edge -- so a route to something on the other
+// side left the wrong way and came back past the frame's contents. Turning
+// that one edge round puts the port on the side facing the far end, which is
+// the whole of the fix (11.10g).
+std::vector<ReversePin> facing_flips(Chart const &c,
+                                     SplitGraph const &g,
+                                     SubmachineOrders const &o,
+                                     SizedLayout const &z) {
+  std::vector<ReversePin> out;
+  for (uint32_t m = 0; m < c.submachines.size(); ++m) {
+    if ((m >= o.sub_nodes.size()) || (m >= z.sub.size())) { continue; }
+    Span const span{ o.sub_nodes[m] };
+    scav_rect const frame{ z.sub[m] };
+    for (uint32_t k = 0; k < span.len; ++k) {
+      uint32_t const at{ span.off + k };
+      OrderNode const &nd{ o.nodes[at] };
+      if (nd.kind != OrderKind::Boundary) { continue; }
+      uint32_t const seg{ nd.subject };
+      if ((seg >= g.segments.size()) || (o.seg_port[seg] == INVALID)) { continue; }
+      TransId const t{ g.segments[seg].trans };
+      if ((t.v >= c.transitions.size()) || (t.v >= g.trans_segments.size())) { continue; }
+      Transition const &tr{ c.transitions[t.v] };
+      // Leaving through the port or entering by it, and so which end is far.
+      bool const leaves{ g.segments[seg].dst_port == o.seg_port[seg] };
+      StateId const far{ leaves ? tr.dst : tr.src };
+      if (far.v >= z.state.size()) { continue; }
+      scav_rect const &r{ z.state[far.v] };
+      Wide const far_x{ Wide{ r.x } + (r.w / 2) };
+      Wide const mid_x{ Wide{ frame.x } + (frame.w / 2) };
+      bool const on_left{ z.node[at].x == frame.x };
+      bool const wants_left{ far_x < mid_x };
+      if (on_left == wants_left) { continue; }
+      out.push_back({ .trans = t, .leg = seg - g.trans_segments[t.v].off });
+      trace_emit({ .kind = TraceKind::PortTurned,
+                   .frame = m,
+                   .port = { .seg = seg, .trans = t.v, .leg = out.back().leg } });
+    }
+  }
+  return out;
+}
 
 // Phases 2 and 3 for one tuple, with the spacing-inflation retry exactly as a
 // lone run has it. `knobs` is the caller's profile with the tuple applied.
@@ -244,9 +291,41 @@ Candidate search_candidate(Chart const &c,
   if (!size_layout(c, g, orders, s, knobs, out.sized, diags, dar, pack, fold)) {
     return out;
   }
+  // Ports turned to face where their routes go, and the frames laid out again
+  // with them. A function of the tuple and the pins like everything else, so
+  // re-deriving the drawing derives the same turns.
+  SubmachineOrders facing;
+  SubmachineOrders const *use{ &orders };
+  SearchPins &turned{ out.laid };
+  turned = (pins != nullptr) ? *pins : SearchPins{};
+  {
+    std::vector<ReversePin> const flips{ facing_flips(c, g, orders, out.sized) };
+    if (!flips.empty()) {
+      for (ReversePin const &f : flips) {
+        auto const had{ std::find_if(turned.reverses.begin(),
+                                     turned.reverses.end(),
+                                     [&f](ReversePin const &r) {
+                                       return (r.trans == f.trans) && (r.leg == f.leg);
+                                     }) };
+        if (had != turned.reverses.end()) {
+          turned.reverses.erase(had);
+        } else {
+          turned.reverses.push_back(f);
+        }
+      }
+      facing = order_submachines(c, g, s, knobs, threads, turned);
+      SizedLayout again;
+      std::vector<Diagnostic> spilled;
+      if (size_layout(c, g, facing, s, knobs, again, spilled, dar, pack, fold)) {
+        use = &facing;
+        out.sized = std::move(again);
+      }
+    }
+  }
+  SubmachineOrders const &laid{ *use };
   out.routes = route_transitions(c,
                                  g,
-                                 orders,
+                                 laid,
                                  out.sized,
                                  s,
                                  knobs,
@@ -268,10 +347,10 @@ Candidate search_candidate(Chart const &c,
     if (!inflate(wider, knobs.spacing_inflation_increment)) { break; }
     SizedLayout next_sized;
     std::vector<Diagnostic> spilled;
-    if (!size_layout(c, g, orders, s, wider, next_sized, spilled, dar, pack, fold)) {
+    if (!size_layout(c, g, laid, s, wider, next_sized, spilled, dar, pack, fold)) {
       break;
     }
-    Routes next{ route_transitions(c, g, orders, next_sized, s, wider, router, threads) };
+    Routes next{ route_transitions(c, g, laid, next_sized, s, wider, router, threads) };
     bool keep{ false };
     done = inflation_done(fewest, next.degraded(), next.unreachable, keep);
     if (keep) {
@@ -429,7 +508,6 @@ Improved search_moves(Chart const &c,
                       uint32_t threads,
                       uint32_t budget,
                       SearchPins const &seed,
-                      uint32_t max_rounds = INVALID,
                       std::vector<uint8_t> const *scope = nullptr) {
   Improved out;
   // `scope` is per submachine and null for all of them: a move is offered only
@@ -496,11 +574,8 @@ Improved search_moves(Chart const &c,
   std::vector<Move> round;
   std::vector<Scored> got;
   std::vector<uint8_t> chained;
-  uint32_t rounds{ 0 };
-  while (((cut_scored < budget) || (rev_scored < budget) || (face_scored < budget) ||
-          (pin_scored < budget)) &&
-         (rounds < max_rounds)) {
-    ++rounds;
+  while ((cut_scored < budget) || (rev_scored < budget) || (face_scored < budget) ||
+         (pin_scored < budget)) {
     // Enumerated first, scored second, reduced third. The scan used to do all
     // three at once, which made it sequential for no reason: a candidate is a
     // pure function of the model, the tuple and the pins, and nothing it
@@ -531,11 +606,12 @@ Improved search_moves(Chart const &c,
 
     // Which edge of a cycle carries the reversal. Cycle-breaking walks in node
     // order and turns around whichever edge closes the walk, so the choice is
-    // declaration order and nothing scores it (11.10d). Every segment not
-    // already turned around is a candidate: an edge on no cycle only makes one
-    // the walk then breaks, which `Cost` prices like any other candidate.
+    // declaration order and nothing scores it (11.10d). Only a segment on a
+    // cycle is offered: turning one on none makes a cycle for the walk to break
+    // somewhere else, and on `dock` that ran the initial arrow backwards, which
+    // `Cost` does not price (11.10g).
     for (uint32_t seg = 0; (seg < g.segments.size()) && (rev_scored < budget); ++seg) {
-      if (!in_scope(g.segments[seg].frame.v)) { continue; }
+      if ((here.seg_cyclic[seg] == 0) || !in_scope(g.segments[seg].frame.v)) { continue; }
       TransId const t{ g.segments[seg].trans };
       if ((t.v == INVALID) || (t.v >= g.trans_segments.size())) { continue; }
       uint32_t const leg{ seg - g.trans_segments[t.v].off };
@@ -570,8 +646,13 @@ Improved search_moves(Chart const &c,
       }
     }
 
+    // An initial pseudostate is not offered: phase 1 seats it before whatever
+    // state it enters, wherever that state is moved (11.10g).
     for (uint32_t st = 0; (st < c.states.size()) && (pin_scored < budget); ++st) {
-      if ((c.states[st].live == 0) || (here.state_node[st] == INVALID)) { continue; }
+      if ((c.states[st].live == 0) || (here.state_node[st] == INVALID) ||
+          (c.states[st].kind == StateKind::Initial)) {
+        continue;
+      }
       uint32_t const at{ here.nodes[here.state_node[st]].rank };
       uint32_t const frame{ c.states[st].parent.v };
       if ((frame >= here.sub_ranks.size()) || !in_scope(frame)) { continue; }
@@ -676,11 +757,6 @@ Improved search_moves(Chart const &c,
   }
   return out;
 }
-
-// How far a row is searched before rows are ranked, and how many are then
-// searched to convergence (11.10f).
-constexpr uint32_t SEARCH_SCREEN_ROUNDS{ 2 };
-constexpr uint32_t SEARCH_FINISH{ 2 };
 
 // How many of the table's rows this chart runs, and how many bounded moves it
 // scores: all of `portfolio_m` and all of `portfolio_k`, whatever its size.
@@ -863,9 +939,9 @@ bool layout_run(Chart &c,
   // multiplied (11.10c).
   uint32_t const host{ (o.threads == 0) ? thread_concurrency() : o.threads };
   auto const each = [host](uint32_t n) { return (n > 1) ? imax(host / n, 1U) : host; };
-  // Searches the rows `which` names from the pins they hold, at most `cap`
-  // rounds each, and keeps what each reached.
-  auto const search_rows = [&](std::vector<uint8_t> const &which, uint32_t cap) {
+  // Searches the rows `which` names from the pins they hold, and keeps what
+  // each reached.
+  auto const search_rows = [&](std::vector<uint8_t> const &which) {
     std::vector<uint32_t> active;
     for (uint32_t i = 0; i < rows; ++i) {
       if ((viable[i] != 0) && (which[i] != 0)) { active.push_back(i); }
@@ -889,8 +965,7 @@ bool layout_run(Chart &c,
                              *router,
                              each(n),
                              budget,
-                             held[active[k]],
-                             cap);
+                             held[active[k]]);
     });
     for (uint32_t k = 0; k < n; ++k) {
       if (!done[k].viable) { continue; }
@@ -901,48 +976,12 @@ bool layout_run(Chart &c,
     }
   };
 
-  // **Screen every row, then finish the best.** Ranking rows before any search
-  // picks the wrong basin (above), and converging all of them is the whole
-  // Level 1 eight times over; a short search from each ranks them far better
-  // than none does. The finish is the best `SEARCH_FINISH` by screened cost,
-  // distinct in cost -- two rows the compaction bit leaves identical rank as
-  // one -- plus the row the unsearched table would have picked, so nothing is
-  // worse than before rows were searched at all (11.10f).
-  uint32_t const unsearched{ search_argmin(cost, viable) };
-  std::vector<uint8_t> finished(rows, 0);
-  if (budget != 0) {
-    // A lone row is its own finish, and screening it first only restarts it.
-    if (rows > 1) {
-      search_rows(std::vector<uint8_t>(rows, 1), SEARCH_SCREEN_ROUNDS);
-      std::vector<uint32_t> order;
-      for (uint32_t i = 0; i < rows; ++i) {
-        if (viable[i] != 0) { order.push_back(i); }
-      }
-      scav_stable_sort(order, [&cost](uint32_t a, uint32_t b) {
-        return cost_less(cost[a], cost[b]);
-      });
-      uint32_t kept{ 0 };
-      for (uint32_t k = 0; (k < order.size()) && (kept < SEARCH_FINISH); ++k) {
-        bool repeat{ false };
-        for (uint32_t j = 0; j < k; ++j) {
-          repeat = repeat || ((finished[order[j]] != 0) &&
-                              !cost_less(cost[order[j]], cost[order[k]]) &&
-                              !cost_less(cost[order[k]], cost[order[j]]));
-        }
-        if (repeat) { continue; }
-        finished[order[k]] = 1;
-        ++kept;
-      }
-    }
-    if (unsearched < rows) { finished[unsearched] = 1; }
-    search_rows(finished, INVALID);
-  }
-  // Only finished rows are ranked: a screened row's cost is not what it
-  // converges to, so the two are not compared.
-  std::vector<uint8_t> eligible(rows, 0);
-  for (uint32_t i = 0; i < rows; ++i) {
-    eligible[i] = ((viable[i] != 0) && ((budget == 0) || (finished[i] != 0))) ? 1U : 0U;
-  }
+  // **Every viable row is searched to convergence** and the rows ranked by
+  // what they reach. A shorter search from each ranked them better than none
+  // did, but not well enough to cut on: on `brew` the two-round screen dropped
+  // the row that converges to a canvas 38% smaller (11.10g).
+  if (budget != 0) { search_rows(std::vector<uint8_t>(rows, 1)); }
+  std::vector<uint8_t> const &eligible{ viable };
   uint32_t const best{ search_argmin(cost, eligible) };
 
   // Iterated local search on the winner (11.10f). A reversal scores worse on
@@ -1038,7 +1077,6 @@ bool layout_run(Chart &c,
                                 each(static_cast<uint32_t>(kicks.size())),
                                 budget,
                                 start,
-                                INVALID,
                                 &redo);
       });
 
@@ -1082,7 +1120,6 @@ bool layout_run(Chart &c,
                                         host,
                                         budget,
                                         start,
-                                        INVALID,
                                         &redo) };
         if (together.viable && cost_less(together.cost, tried[single].cost)) {
           take(std::move(together));
@@ -1119,7 +1156,12 @@ bool layout_run(Chart &c,
     uint32_t const had{ count(seed) };
     *moves = (now > had) ? (now - had) : 0U;
   }
-  if (taken != nullptr) { *taken = held[best]; }
+  // With the ports the winning drawing turned, so what is handed back re-derives
+  // it with nothing left to turn.
+  if (taken != nullptr) {
+    *taken = held[best];
+    taken->reverses = candidates[best].laid.reverses;
+  }
 
   SizedLayout sized{ std::move(candidates[best].sized) };
   Routes routes{ std::move(candidates[best].routes) };

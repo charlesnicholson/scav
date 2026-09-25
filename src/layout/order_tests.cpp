@@ -12,6 +12,7 @@
 #include "doctest.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -411,6 +412,40 @@ TEST_CASE("order: undoing a move is running with the pins one held before it") {
   CHECK(back.nodes == plain.nodes);
   CHECK(back.edges == plain.edges);
   CHECK(back.gaps == plain.gaps);
+}
+
+TEST_CASE("order: an initial pseudostate is ranked just before the state it enters") {
+  // A pin can move the target anywhere; the initial follows it, and a pin on
+  // the initial itself is not a choice anyone gets to make (11.10g).
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const start{ build_state(c, root, {}, StateKind::Initial, {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  build_trans(c, start, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, d, TransKind::External, {});
+  SplitGraph const g{ decompose(c) };
+
+  auto const ranks = [&](SearchPins const &pins) {
+    SubmachineOrders const o{ order_submachines(c, g, {}, profile(), 0, pins) };
+    return std::array<uint32_t, 3>{ node_of(o, start).rank,
+                                    node_of(o, b).rank,
+                                    node_of(o, d).rank };
+  };
+  // Unpinned: longest path already pulls it next to `B`.
+  std::array<uint32_t, 3> const plain{ ranks({}) };
+  CHECK(plain[0] + 1 == plain[1]);
+  // `B` pinned two ranks further on: the initial is re-seated beside it.
+  std::array<uint32_t, 3> const moved{ ranks({ .ranks = { { .state = b, .rank = 3 } } }) };
+  CHECK(moved[0] + 1 == moved[1]);
+  // `B` pinned to rank 0: everything else makes room, and it still leads.
+  std::array<uint32_t, 3> const first{ ranks({ .ranks = { { .state = b, .rank = 0 } } }) };
+  CHECK(first[0] == 0);
+  CHECK(first[1] == 1);
+  // A pin on the initial is ignored.
+  CHECK(ranks({ .ranks = { { .state = start, .rank = 2 } } }) == plain);
 }
 
 TEST_CASE("order: a dead submachine gets an empty span and no nodes") {

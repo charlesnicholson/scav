@@ -764,6 +764,40 @@ CostTerms cost_terms(Chart const &c,
   ChildGrid const grid{ cost_child_grid(c, z) };
   t.box_overlap = cost_box_overlaps(c, z, grid);
   t.through_box = cost_through_boxes(c, z, an, grid, pieces);
+  for (Piece const &piece : pieces) {
+    for (uint32_t st = 0; st < c.states.size(); ++st) {
+      if ((c.states[st].live != 0) && along_border(piece.a, piece.b, z.state[st])) {
+        ++t.flush;
+        break;
+      }
+    }
+  }
+  // Whether state `s` lies inside region `m`, by walking up from it.
+  auto const within = [&c](StateId state, uint32_t m) {
+    for (StateId at{ state }; (at.v != INVALID) && (at.v < c.states.size());) {
+      SubmachineId const up{ c.states[at.v].parent };
+      if (up.v == m) { return true; }
+      if (up.v >= c.submachines.size()) { return false; }
+      at = c.submachines[up.v].owner;
+    }
+    return false;
+  };
+  for (Piece const &piece : pieces) {
+    Transition const &trans{ c.transitions[piece.trans] };
+    scav_rect const reach{ span_rect(piece.a, piece.b) };
+    for (uint32_t m = 0; m < c.submachines.size(); ++m) {
+      if ((c.submachines[m].live == 0) || (c.submachines[m].owner.v == INVALID)) {
+        continue;
+      }
+      scav_rect const &region{ z.sub[m] };
+      if (!overlaps(reach, grow(region, 1)) || !enters(piece.a, piece.b, region)) {
+        continue;
+      }
+      if (within(trans.src, m) || within(trans.dst, m)) { continue; }
+      ++t.through_region;
+      break;
+    }
+  }
   return t;
 }
 
@@ -831,7 +865,8 @@ CostTerms layout_cost(Chart const &c,
 
 Cost cost_of(CostTerms const &t, scav_profile const &p) {
   Cost out;
-  out.t0_violations = t.through_box + t.box_overlap + t.vanished;
+  out.t0_violations =
+      t.through_box + t.box_overlap + t.vanished + t.flush + t.through_region;
   // Area is the largest term at (2 * COORD_MAX)^2 < 2^40, its em^2 only divides
   // it down, and nine of those under a weight capped at 2^10 stay below 2^54.
   for (Wide const term : weighted_terms(t, p)) { out.t2 += term; }

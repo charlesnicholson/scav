@@ -38,43 +38,45 @@ struct Loaded {
 // rendering; the two decisions here are which stream and which exit code.
 void load_and_report(char const *path, bool validate, Loaded &out);
 
-// `--portfolio-row N`: a row of 11.10's table in place of the search, so
-// `render` and `dump` can both be pointed at one candidate and the drawing and
-// the geometry come from the same one. False on anything that is not a row.
-// `INVALID` is the search, which is what every verb does unasked.
-bool portfolio_row(char const *text, uint32_t &out);
+// What `render` and `dump --layout` hand layout besides the chart: a row of
+// 11.10's table, or `INVALID` for the search; the pins to start from; and
+// whether to search from them at all. A run's own row and pins with
+// `--no-search` lay that drawing out again exactly, so an edited copy of them
+// is a counterfactual scored on the shipped objective (11.10g).
+struct LayoutArgs {
+  uint32_t row{ INVALID };
+  SearchPins pins;
+  bool no_search{ false };
+  bool given{ false };  // any of the flags below appeared
+};
 
-// `TRANS:LEG` appended to `out`: a segment phase 1 leaves unchained, so the
-// drawing the objective declined can be looked at (11.10b). False on anything
-// that is not a pair of ordinals.
-bool chain_cut(char const *text, std::vector<ChainCut> &out);
+enum class ArgRead : uint32_t { NotOurs, Taken, Malformed };
 
-// `TRANS:LEG` appended: a segment phase 1 turns around before it breaks cycles,
-// so the drawing a different reversal gives can be looked at (11.10d).
-bool reverse_pin(char const *text, std::vector<ReversePin> &out);
+// One of these at `argv[i]`, with `i` advanced past its value:
+//   --portfolio-row N    a row in place of the search
+//   --rank S:R           state S held at rank R of its frame (11.10a)
+//   --cut T:L            leg L of transition T left unchained (11.10b)
+//   --reverse T:L        that leg turned round before cycles break (11.10d)
+//   --face T:L:E:F       end E (0 departs, 1 arrives) leaves by face F: 0 left,
+//                        1 right, 2 top, 3 bottom (11.10e)
+//   --no-search          lay out the row and pins given, and move nothing
+ArgRead read_layout_arg(int argc, char **argv, int &i, LayoutArgs &out);
 
-// `TRANS:LEG:END:FACE` appended -- end 0 departure, 1 arrival; face 0 left, 1
-// right, 2 top, 3 bottom (11.10e).
-bool face_pin(char const *text, std::vector<FacePin> &out);
+// The flags above that lay out a run's drawing again: its row and every pin.
+void append_layout_args(std::string &out, uint32_t row, SearchPins const &pins);
 
 int run_dump(char const *path,
              bool hash_only,
              bool as_json,
              bool with_layout,
-             uint32_t row,
              bool trace,
              bool trace_search,
-             std::vector<ChainCut> const &cuts,
-             std::vector<ReversePin> const &reverses,
-             std::vector<FacePin> const &faces);
+             LayoutArgs const &args);
 int run_render(char const *path,
                char const *out_path,
                bool embed_font,
                char const *profile_name,
-               uint32_t row,
-               std::vector<ChainCut> const &cuts,
-               std::vector<ReversePin> const &reverses,
-               std::vector<FacePin> const &faces);
+               LayoutArgs const &args);
 int run_fmt(std::vector<char const *> const &paths, bool check_only);
 int run_deps(char const *path, char const *target);
 int run_selftest(char const *against_path);

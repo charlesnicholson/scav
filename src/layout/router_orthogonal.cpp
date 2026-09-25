@@ -749,11 +749,39 @@ void ortho_simplify(std::vector<scav_point> const &from, std::vector<scav_point>
   }
 }
 
+std::vector<scav_rect> ortho_enclosure_walls(scav_rect const &region,
+                                             scav_rect const &enclosure,
+                                             int32_t inset) {
+  std::vector<scav_rect> out;
+  if ((enclosure.w <= 0) || (enclosure.h <= 0)) { return out; }
+  Wide const rx0{ region.x };
+  Wide const ry0{ region.y };
+  Wide const rx1{ Wide{ region.x } + region.w };
+  Wide const ry1{ Wide{ region.y } + region.h };
+  Wide const ex0{ Wide{ enclosure.x } + inset };
+  Wide const ey0{ Wide{ enclosure.y } + inset };
+  Wide const ex1{ (Wide{ enclosure.x } + enclosure.w) - inset };
+  Wide const ey1{ (Wide{ enclosure.y } + enclosure.h) - inset };
+  auto const wall = [&out](Wide x0, Wide y0, Wide x1, Wide y1) {
+    if ((x1 <= x0) || (y1 <= y0)) { return; }
+    out.push_back({ .x = static_cast<int32_t>(x0),
+                    .y = static_cast<int32_t>(y0),
+                    .w = static_cast<int32_t>(x1 - x0),
+                    .h = static_cast<int32_t>(y1 - y0) });
+  };
+  wall(rx0, ry0, ex0, ry1);
+  wall(ex1, ry0, rx1, ry1);
+  wall(ex0, ry0, ex1, ey0);
+  wall(ex0, ey1, ex1, ry1);
+  return out;
+}
+
 bool ortho_grid(scav_rect const &region,
                 std::vector<scav_rect> const &obstacles,
                 std::vector<scav_point> const &anchors,
                 int32_t clear,
-                OrthoGrid &out) {
+                OrthoGrid &out,
+                std::vector<scav_rect> const *fixed) {
   int32_t const lo_x{ region.x };
   int32_t const hi_x{ region.x + region.w };
   int32_t const lo_y{ region.y };
@@ -777,6 +805,16 @@ bool ortho_grid(scav_rect const &region,
       if ((at > lo_y) && (at < hi_y)) { out.ys.push_back(at); }
     }
   }
+  if (fixed != nullptr) {
+    for (scav_rect const &r : *fixed) {
+      for (int32_t const at : { r.x, r.x + r.w }) {
+        if ((at > lo_x) && (at < hi_x)) { out.xs.push_back(at); }
+      }
+      for (int32_t const at : { r.y, r.y + r.h }) {
+        if ((at > lo_y) && (at < hi_y)) { out.ys.push_back(at); }
+      }
+    }
+  }
   for (scav_point const &at : anchors) {
     // Both coordinates or neither: an anchor outside the region is rejected
     // anyway and should not seed half a crossing inside it.
@@ -790,12 +828,7 @@ bool ortho_grid(scav_rect const &region,
 
   out.pass_h.assign(static_cast<size_t>(out.ny()) * (out.nx() - 1), 1);
   out.pass_v.assign(static_cast<size_t>(out.ny() - 1) * out.nx(), 1);
-  for (scav_rect const &box : obstacles) {
-    // Blocking against the bumper makes "no closer than `clear` to a box" a
-    // property of the graph. The bounds below are `ortho_blocks_h` and
-    // `ortho_blocks_v` solved for their index ranges rather than evaluated per
-    // cell; the predicates stay as the statement of what is blocked.
-    scav_rect const r{ grow(box, clear) };
+  auto const block = [&out](scav_rect const &r) {
     if (r.w > 0) {
       // y strictly inside the box, and the cell [xs[ix], xs[ix+1]] overlapping it.
       uint32_t const iy0{ ortho_after(out.ys, r.y) };
@@ -820,6 +853,14 @@ bool ortho_grid(scav_rect const &region,
         for (uint32_t ix = ix0; ix < ix1; ++ix) { row[ix] = 0; }
       }
     }
+  };
+  // Blocking against the bumper makes "no closer than `clear` to a box" a
+  // property of the graph. The bounds in `block` are `ortho_blocks_h` and
+  // `ortho_blocks_v` solved for their index ranges rather than evaluated per
+  // cell; the predicates stay as the statement of what is blocked.
+  for (scav_rect const &box : obstacles) { block(grow(box, clear)); }
+  if (fixed != nullptr) {
+    for (scav_rect const &r : *fixed) { block(r); }
   }
   return true;
 }
@@ -944,6 +985,33 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
 
   Wide const bend{ ortho_bend_penalty(in.profile) };
   int32_t const clear{ ortho_clearance(in.profile) };
+  // How far inside its enclosure a route keeps: half the ring a box's contents
+  // sit inside, so a child at `pad` keeps its own bumper and no route can run
+  // on the enclosure's border.
+  int32_t const inset{ imax(imin(clear, in.profile.pad) / 2, 1) };
+  std::vector<scav_rect> const walls{
+    ortho_enclosure_walls(in.region, in.enclosure, inset)
+  };
+  scav_rect const &enc{ in.enclosure };
+  // Which border of the enclosure an end lies in the band of -- on it, as a
+  // port does, or inside it by less than `inset`, as an inner face does -- by
+  // the nearest: 0 left, 1 right, 2 top, 3 bottom, INVALID for none.
+  auto const band_side = [&enc, inset](scav_point at) {
+    if ((enc.w <= 0) || (enc.h <= 0)) { return INVALID; }
+    if ((at.x < enc.x) || (at.x > (enc.x + enc.w)) || (at.y < enc.y) ||
+        (at.y > (enc.y + enc.h))) {
+      return INVALID;
+    }
+    std::array<Wide, 4> const gap{ Wide{ at.x } - enc.x,
+                                   (Wide{ enc.x } + enc.w) - at.x,
+                                   Wide{ at.y } - enc.y,
+                                   (Wide{ enc.y } + enc.h) - at.y };
+    uint32_t side{ 0 };
+    for (uint32_t k = 1; k < 4; ++k) {
+      if (gap[k] < gap[side]) { side = k; }
+    }
+    return (gap[side] < inset) ? side : INVALID;
+  };
 
   // A route never leaves the region, which makes "avoid this frame's obstacles"
   // mean "avoid every box". An anchor outside it degrades that one net.
@@ -978,7 +1046,23 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
         lead.push_back(exact);
         attach = moved;
       }
-      box = ortho_box_at(attach, in.obstacles);
+      // An end in the enclosure's band is the enclosure's, even where a box
+      // outside it touches the border there too: a port on the border, or an
+      // inner face just inside it. The stub is square to that border and
+      // reaches the band's inner edge, where the search begins.
+      uint32_t const side{ band_side(attach) };
+      box = (side != INVALID) ? INVALID : ortho_box_at(attach, in.obstacles);
+      if (side != INVALID) {
+        lead.push_back(attach);
+        scav_point stub{ attach };
+        switch (side) {
+          case 0: stub.x = enc.x + inset; break;
+          case 1: stub.x = (enc.x + enc.w) - inset; break;
+          case 2: stub.y = enc.y + inset; break;
+          default: stub.y = (enc.y + enc.h) - inset; break;
+        }
+        return stub;
+      }
     }
     scav_point at{ attach };
     if (box < in.obstacles.size()) {
@@ -989,6 +1073,9 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
       ring.y = imin(imax(ring.y, lo_y), hi_y);
       bool ok{ (ring.x != attach.x) || (ring.y != attach.y) };
       for (scav_rect const &r : in.obstacles) {
+        if (inside(ring, r)) { ok = false; }
+      }
+      for (scav_rect const &r : walls) {
         if (inside(ring, r)) { ok = false; }
       }
       if (ok) {
@@ -1099,7 +1186,7 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
   }
 
   OrthoGrid g;
-  bool const affordable{ ortho_grid(in.region, in.obstacles, anchors, clear, g) };
+  bool const affordable{ ortho_grid(in.region, in.obstacles, anchors, clear, g, &walls) };
 
   // 11.5's re-seat, built only when needed: the same graph without bumpers. Two
   // boxes closer than twice the clearance seal the channel between them.
@@ -1164,7 +1251,7 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
     if ((why == RouteFailure::None) && !ok) {
       if (!tight_built) {
         tight_built = true;
-        tight_ok = ortho_grid(in.region, in.obstacles, anchors, 0, tight);
+        tight_ok = ortho_grid(in.region, in.obstacles, anchors, 0, tight, &walls);
       }
       ok = tight_ok && attempt(tight);
       if (ok) { reseated = 1; }

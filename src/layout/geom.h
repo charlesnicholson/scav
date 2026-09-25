@@ -31,6 +31,22 @@ constexpr bool overlaps(scav_rect const &a, scav_rect const &b) {
          (b.y < (a.y + a.h));
 }
 
+// Whether the axis-aligned segment `a`-`b` runs along one of `r`'s own edges
+// for some length: on the border line, and overlapping the edge strictly, so
+// a leg that only meets a corner or attaches at a point is not a run.
+constexpr bool along_border(scav_point a, scav_point b, scav_rect const &r) {
+  if ((r.w <= 0) || (r.h <= 0)) { return false; }
+  if (a.y == b.y) {
+    return ((a.y == r.y) || (a.y == (r.y + r.h))) && (imin(a.x, b.x) < (r.x + r.w)) &&
+           (imax(a.x, b.x) > r.x);
+  }
+  if (a.x == b.x) {
+    return ((a.x == r.x) || (a.x == (r.x + r.w))) && (imin(a.y, b.y) < (r.y + r.h)) &&
+           (imax(a.y, b.y) > r.y);
+  }
+  return false;
+}
+
 constexpr bool inside(scav_point p, scav_rect const &r) {
   return (p.x > r.x) && (p.x < (r.x + r.w)) && (p.y > r.y) && (p.y < (r.y + r.h));
 }

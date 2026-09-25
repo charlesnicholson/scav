@@ -28,6 +28,9 @@ char const *kind_name(TraceKind k) {
     case TraceKind::RouteDegraded: return "route_degraded";
     case TraceKind::CandidateScored: return "candidate_scored";
     case TraceKind::CandidateTerms: return "candidate_terms";
+    case TraceKind::FoldCut: return "fold_cut";
+    case TraceKind::PseudostateSeated: return "pseudostate_seated";
+    case TraceKind::PortTurned: return "port_turned";
     case TraceKind::None: break;
   }
   return "none";
@@ -213,6 +216,23 @@ void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out)
           j.num(e.terms.share[k]);
         }
         j.raw("]");
+        break;
+      case TraceKind::FoldCut:
+        j.kv("rank", e.fold.rank);
+        j.kv("refused", e.fold.refused);
+        break;
+      case TraceKind::PseudostateSeated: {
+        static constexpr std::array<char const *, 3> HOW{ "moved",
+                                                          "levelled",
+                                                          "declined" };
+        j.kstate(c, e.rank.state);
+        j.ks("how", (e.pass < HOW.size()) ? HOW[e.pass] : "?");
+        break;
+      }
+      case TraceKind::PortTurned:
+        j.kv("seg", e.port.seg);
+        j.kv("trans", e.port.trans);
+        j.kv("leg", e.port.leg);
         break;
       case TraceKind::None: break;
     }

@@ -6,6 +6,7 @@
 #include "layout/trace.h"
 
 #include "layout/coords.h"
+#include "layout/geom.h"
 #include "layout/pack.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
@@ -13,6 +14,7 @@
 #include "scav_internal.h"
 
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace scav {
@@ -264,7 +266,33 @@ bool size_pass(Chart const &c,
         std::vector<scav_point> at;
         Wide w{ 0 }, h{ 0 };
         bool ok{ true };
+        // For the trace, of the shape that is kept: where pieces started and
+        // where a cut was refused, and what seating each pseudostate got.
+        std::vector<TraceFold> cuts;
+        std::vector<std::pair<uint32_t, SeatHow>> seated;
       };
+      // A cut before a layer is refused where it would separate an initial
+      // pseudostate from the state it enters in that layer, or a final one in
+      // that layer from the state it leaves: the fold packs its pieces apart,
+      // and the pseudostate would be drawn as a piece of its own, away from
+      // the state it joins (11.10g).
+      std::vector<uint8_t> glued(layers, 0);
+      for (uint32_t k = 0; k < espan.len; ++k) {
+        OrderEdge const &e{ o.edges[espan.off + k] };
+        uint32_t const a{ e.src - span.off };
+        uint32_t const b{ e.dst - span.off };
+        for (uint32_t const end : { a, b }) {
+          OrderNode const &nd{ o.nodes[span.off + end] };
+          if (nd.kind != OrderKind::State) { continue; }
+          StateKind const kind{ c.states[nd.subject].kind };
+          if ((kind != StateKind::Initial) && (kind != StateKind::Final)) { continue; }
+          uint32_t const other{ (end == a) ? b : a };
+          uint32_t const ra{ local_rank[end] };
+          uint32_t const rb{ local_rank[other] };
+          if ((ra == INVALID) || (rb == INVALID) || (ra == rb)) { continue; }
+          glued[imax(ra, rb)] = 1;
+        }
+      }
       auto const lay_out = [&](Wide wrap_at) {
         Shape shape;
         shape.at.assign(nodes.size(), scav_point{});
@@ -275,7 +303,12 @@ bool size_pass(Chart const &c,
           Wide const step{ (r == 0)
                                ? Wide{ layer_w[r] }
                                : (Wide{ layer_w[r] } + p.rank_sep + boundary_gap(r - 1)) };
-          if ((r > 0) && ((run + step) > wrap_at)) {
+          bool const wants_cut{ (r > 0) && ((run + step) > wrap_at) };
+          if (wants_cut && (glued[r] != 0)) {
+            shape.cuts.push_back({ .rank = global_rank[r], .refused = 1 });
+          }
+          if (wants_cut && (glued[r] == 0)) {
+            shape.cuts.push_back({ .rank = global_rank[r], .refused = 0 });
             chunks.push_back(r);
             run = layer_w[r];
           } else {
@@ -307,11 +340,24 @@ bool size_pass(Chart const &c,
           }
           for (uint32_t k = 0; k < espan.len; ++k) {
             OrderEdge const &e{ o.edges[espan.off + k] };
-            uint32_t const from{ index[e.src - span.off] };
-            uint32_t const to{ index[e.dst - span.off] };
+            uint32_t from{ index[e.src - span.off] };
+            uint32_t to{ index[e.dst - span.off] };
             if ((from == INVALID) || (to == INVALID)) { continue; }
             if ((chunk_index[from] == INVALID) || (chunk_index[to] == INVALID)) {
               continue;
+            }
+            // Brandes-Kopf reads a segment between consecutive layers, earlier
+            // end first. A rank pin can leave an edge within one layer or
+            // pointing back, and a cut leaves one spanning several; aligned, a
+            // flat edge's two ends became one block at one coordinate, which
+            // drew `ota`'s `Writing` over `Fetching` (11.10g).
+            uint32_t const rf{ local_rank[nodes[from]] };
+            uint32_t const rt{ local_rank[nodes[to]] };
+            if ((rf + 1) != rt) {
+              if ((rt + 1) != rf) { continue; }
+              uint32_t const swap{ from };
+              from = to;
+              to = swap;
             }
             cg.edges.push_back({ .from = chunk_index[from],
                                  .to = chunk_index[to],
@@ -348,11 +394,102 @@ bool size_pass(Chart const &c,
           }
           for (uint32_t i = 0; i < chunk_nodes.size(); ++i) {
             uint32_t const at{ chunk_nodes[i] };
+            uint32_t const r{ local_rank[nodes[at]] };
+            // An initial pseudostate is ranked just before the state it enters,
+            // so it sits flush against its layer's trailing edge: left-aligned
+            // in a layer as wide as its widest member, its arrow would run that
+            // whole width.
+            OrderNode const &nd{ o.nodes[span.off + nodes[at]] };
+            Wide const flush{ ((nd.kind == OrderKind::State) &&
+                               (c.states[nd.subject].kind == StateKind::Initial))
+                                  ? Wide{ layer_w[r] } - out.state[nd.subject].w
+                                  : Wide{ 0 } };
             // Local to the piece; the packing below decides where the piece
             // itself goes.
-            shape.at[at] = { .x = static_cast<int32_t>(
-                                 layer_x[local_rank[nodes[at]] - first]),
+            shape.at[at] = { .x = static_cast<int32_t>(layer_x[r - first] + flush),
                              .y = static_cast<int32_t>(centre[i]) };
+          }
+
+          // An initial or final pseudostate with one neighbour in this piece is
+          // level with it and `rank_sep` from it -- before it for an initial,
+          // after it for a final -- rather than wherever its layer's edge falls,
+          // which is past the widest member of the layer between. Each only
+          // where the box it moves to is clear of every other node here and
+          // inside the piece (11.10g).
+          auto const box_of_node = [&](uint32_t i, Wide x, Wide y) {
+            OrderNode const &nd{ o.nodes[span.off + nodes[chunk_nodes[i]]] };
+            Wide const w{ (nd.kind == OrderKind::State) ? Wide{ out.state[nd.subject].w }
+                                                        : Wide{ 0 } };
+            Wide const h{ cg.extent[i] };
+            return scav_rect{ .x = static_cast<int32_t>(x),
+                              .y = static_cast<int32_t>(y - (h / 2)),
+                              .w = static_cast<int32_t>(w),
+                              .h = static_cast<int32_t>(h) };
+          };
+          for (uint32_t i = 0; i < chunk_nodes.size(); ++i) {
+            uint32_t const at{ chunk_nodes[i] };
+            OrderNode const &nd{ o.nodes[span.off + nodes[at]] };
+            if (nd.kind != OrderKind::State) { continue; }
+            StateKind const kind{ c.states[nd.subject].kind };
+            if ((kind != StateKind::Initial) && (kind != StateKind::Final)) { continue; }
+            uint32_t other{ INVALID };
+            bool alone{ true };
+            for (uint32_t k = 0; k < espan.len; ++k) {
+              OrderEdge const &e{ o.edges[espan.off + k] };
+              uint32_t const a{ index[e.src - span.off] };
+              uint32_t const b{ index[e.dst - span.off] };
+              uint32_t const far{ (a == at) ? b : ((b == at) ? a : INVALID) };
+              if ((far == INVALID) || (far == at)) { continue; }
+              if ((far >= chunk_index.size()) || (chunk_index[far] == INVALID)) {
+                alone = false;
+                continue;
+              }
+              if ((other != INVALID) && (other != chunk_index[far])) { alone = false; }
+              other = chunk_index[far];
+            }
+            if (!alone || (other == INVALID)) { continue; }
+            uint32_t const r{ local_rank[nodes[at]] };
+            uint32_t const rn{ local_rank[nodes[chunk_nodes[other]]] };
+            OrderNode const &nn{ o.nodes[span.off + nodes[chunk_nodes[other]]] };
+            Wide const nw{ (nn.kind == OrderKind::State) ? Wide{ out.state[nn.subject].w }
+                                                         : Wide{ 0 } };
+            Wide const nx{ shape.at[chunk_nodes[other]].x };
+            // `rank_sep` from the state it joins, not a whole rank gap: the gap
+            // also holds room other transitions' labels were charged.
+            Wide x{ shape.at[at].x };
+            if ((kind == StateKind::Final) && (r == (rn + 1))) {
+              x = nx + nw + p.rank_sep;
+            }
+            if ((kind == StateKind::Initial) && (rn == (r + 1))) {
+              x = nx - p.rank_sep - out.state[nd.subject].w;
+            }
+            Wide const y{ shape.at[chunk_nodes[other]].y };
+            auto const clear = [&](Wide cx, Wide cy) {
+              scav_rect const want{ box_of_node(i, cx, cy) };
+              if ((want.x < 0) || (want.y < 0) || ((Wide{ want.x } + want.w) > chunk_w) ||
+                  ((Wide{ want.y } + want.h) > chunk_h)) {
+                return false;
+              }
+              scav_rect const room{ grow(want, p.node_sep / 2) };
+              for (uint32_t j = 0; j < chunk_nodes.size(); ++j) {
+                if (j == i) { continue; }
+                scav_rect const there{
+                  box_of_node(j, shape.at[chunk_nodes[j]].x, shape.at[chunk_nodes[j]].y)
+                };
+                if (overlaps(room, there)) { return false; }
+              }
+              return true;
+            };
+            if (clear(x, y)) {
+              shape.at[at] = { .x = static_cast<int32_t>(x),
+                               .y = static_cast<int32_t>(y) };
+              shape.seated.emplace_back(nd.subject, SeatHow::Moved);
+            } else if (clear(shape.at[at].x, y)) {
+              shape.at[at].y = static_cast<int32_t>(y);
+              shape.seated.emplace_back(nd.subject, SeatHow::Levelled);
+            } else {
+              shape.seated.emplace_back(nd.subject, SeatHow::Declined);
+            }
           }
           pieces_fit = pieces_fit && (chunk_w <= COORD_MAX) && (chunk_h <= COORD_MAX);
           if (!pieces_fit) { break; }
@@ -409,6 +546,15 @@ bool size_pass(Chart const &c,
                                                  dar.den,
                                                  p.sm_tiebreak != 0))) };
       if (swap) { best = folded; }
+      for (TraceFold const &cut : best.cuts) {
+        trace_emit({ .kind = TraceKind::FoldCut, .frame = m, .fold = cut });
+      }
+      for (auto const &[state, how] : best.seated) {
+        trace_emit({ .kind = TraceKind::PseudostateSeated,
+                     .pass = static_cast<uint16_t>(how),
+                     .frame = m,
+                     .rank = { .state = state, .rank = 0 } });
+      }
       if (!best.ok) {
         overflow(diags, ElemKind::Submachine, m);
         ok = false;

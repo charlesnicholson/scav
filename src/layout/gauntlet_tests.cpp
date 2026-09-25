@@ -688,31 +688,27 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     CAPTURE(p.profile_id);
 
     // 11.8, and the corpus has no chart carrying the shape. A transition
-    // between two concurrent submachines of one state is routed in the frame
-    // that state itself sits in -- the two submachines are siblings under it
-    // and their common frame is one level further out than the state -- so the
-    // state is an obstacle walling the route out of the space between its own
-    // two regions, and the route goes the long way round it: through whatever
-    // else that frame holds, and back along the line it arrived on.
-    //
-    // The portfolio routes around that hole rather than closing it: at the
-    // shipped M the packer choice puts the two regions where the long way round
-    // clips nothing, which is why the property above now holds on this chart
-    // too. So the count stays visible against the row that produces it -- row 0
-    // alone, the profile's own tuple -- until 11.8 is built and it is zero
-    // whichever row lays out.
+    // between two concurrent submachines of one state was routed in the frame
+    // that state itself sits in, where the state is an obstacle walling the
+    // route out of the space between its own two regions, and it went the long
+    // way round: through whatever else that frame held, and back along the line
+    // it arrived on. **Closed since the channel is routed inside the state**
+    // (11.10g). Row 0 alone -- the profile's own tuple, unsearched -- was the
+    // count that kept the hole visible while the portfolio routed around it;
+    // it reads zero through a box at both profiles now, and one route still
+    // doubles back at `compact`.
     Laid row_zero;
     lay("regions.scav", one_row(p), row_zero);
     REQUIRE(row_zero.tuple == 0);
     uint32_t through{ 0 };
     uint32_t back{ 0 };
     shape_counts(row_zero, through, back);
-    CHECK(through == 2);
-    CHECK(back == 2);
+    CHECK(through == 0);
+    CHECK(back == ((p.profile_id == compact().profile_id) ? 1U : 0U));
     // The scorer from the other end, over the columns that run wrote: 11.6's
     // descent and the predicate above are two implementations of one question,
     // and a carve-out is worth more when both answer it.
-    CHECK(cost_columns(row_zero.c, row_zero.g, p).through_box == 2);
+    CHECK(cost_columns(row_zero.c, row_zero.g, p).through_box == 0);
 
     // What ships, scored both ways: the shape is still there and the drawing no
     // longer shows it, which is why the properties above hold on this chart.
@@ -732,9 +728,9 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     // the arrangement moving rather than the hole closing. This one is the hole
     // closing: the route doubled back because it left by the face the
     // separation rule picked, and choosing the face instead lets it leave by
-    // one it need not come back across. **11.8's shape is still unrouted** --
-    // `through_box` above is what holds that -- so this is a zero to watch
-    // rather than a section to delete.
+    // one it need not come back across. It went back to two when this chart's
+    // search took a different path, and **is zero again since 11.8's channel is
+    // routed inside `Running`** (11.10g).
     CHECK(shipped_back == 0);
 
     // 11.5's face rule, which picks a face by how far the target lies outside

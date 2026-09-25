@@ -363,6 +363,43 @@ TEST_CASE("trace: the search re-orders per move, and every move states its verdi
   CHECK(carrying * 3 <= planned);  // three nets an ordering, at most one bent
 }
 
+TEST_CASE("trace: a reversal is offered only on a segment that lies on a cycle") {
+  // A cycle `A -> B -> C -> A` with a tail `C -> D`. Turning the tail round
+  // makes a cycle for the walk to break somewhere else, which is how `dock`'s
+  // initial arrow came to run backwards (11.10g); only the three cycle edges
+  // choose anything.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
+  StateId const tail{ build_state(c, root, "D", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, d, TransKind::External, {});
+  build_trans(c, d, a, TransKind::External, {});
+  TransId const off{ build_trans(c, d, tail, TransKind::External, {}) };
+
+  LayoutTrace t;
+  scav_layout_opts opts{};
+  REQUIRE(profile_named("readable", opts.profile));
+  opts.threads = 1;
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  {
+    Attached const held{ t };
+    REQUIRE(layout_run(c, {}, opts, placed, diags, nullptr, nullptr, 0));
+  }
+  uint32_t reversals{ 0 };
+  for (TraceEvent const &e : t.events) {
+    if ((e.kind != TraceKind::CandidateScored) || (e.score.move != TRACE_MOVE_REVERSE)) {
+      continue;
+    }
+    ++reversals;
+    CHECK(e.score.trans != off.v);
+  }
+  CHECK(reversals > 0);
+}
+
 TEST_CASE("trace: the search scores unchain moves beside placement moves") {
   // 11.10b's dimension, seen through the trace: the back edge of a cycle is
   // the one segment phase 1 chains, so it is the one a cut can free, and the

@@ -232,6 +232,10 @@ void nudge_lanes(scav_rect const &region,
         for (uint32_t r = 0; r < now.size(); ++r) {
           ok = ok && (overlaps(was[r], raw) || !overlaps(now[r], raw));
           ok = ok && (overlaps(was[r], box) || !overlaps(now[r], box));
+          // A leg on a border line has no interior overlap to catch above,
+          // and a reader cannot tell it from the border.
+          ok = ok && (along_border(then[r], then[r + 1], raw) ||
+                      !along_border(way[r], way[r + 1], raw));
         }
       }
       // A leg may keep only a shared run it already had, so the lane a member
@@ -436,15 +440,20 @@ void nudge_lanes(scav_rect const &region,
         int32_t const span_hi{ horizontal ? (box.x + box.w) : (box.y + box.h) };
         if ((span_hi <= lo) || (span_lo >= hi)) { continue; }  // not beside this lane
         // Sided against the raw rect but limited by the grown one, so a lane
-        // inside the bumper is left no room at all towards the box.
+        // inside the bumper is left no room at all towards the box. With no
+        // bumper the grown edge is the border itself, and the room stops one
+        // unit short of it: a lane on it runs along the border, which a reader
+        // cannot tell from the border (11.10g).
         int32_t const raw_lo{ horizontal ? raw.y : raw.x };
         int32_t const raw_hi{ horizontal ? (raw.y + raw.h) : (raw.x + raw.w) };
+        Wide const short_of{ (clear > 0) ? 0 : 1 };
         if (raw_hi <= at) {
-          room_up =
-              imin(room_up, Wide{ at } - (horizontal ? (box.y + box.h) : (box.x + box.w)));
+          room_up = imin(
+              room_up,
+              Wide{ at } - (horizontal ? (box.y + box.h) : (box.x + box.w)) - short_of);
         }
         if (raw_lo >= at) {
-          room_down = imin(room_down, Wide{ horizontal ? box.y : box.x } - at);
+          room_down = imin(room_down, Wide{ horizontal ? box.y : box.x } - at - short_of);
         }
       }
 
