@@ -135,21 +135,26 @@ void align_vertical(CoordGraph const &g,
       uint32_t const d{ v.up_off[node + 1] - v.up_off[node] };
       if (d == 0) { continue; }
       std::array<uint32_t, 2> const medians{ (d - 1) / 2, d / 2 };
-      for (uint32_t const m : medians) {
-        if (align[node] != node) { continue; }
-        uint32_t const edge{ v.up_edge[v.up_off[node] + m] };
-        uint32_t const up{ upper_of(g.edges[edge], upward) };
-        if ((mark[edge] != 0) || ((reached != INVALID) && (reached >= v.pos[up]))) {
-          continue;
+      // The strong medians first, then the weak ones, so a weak edge anchors
+      // its lower end only where nothing else can.
+      for (uint32_t const round : { 0U, 1U }) {
+        for (uint32_t const m : medians) {
+          if (align[node] != node) { continue; }
+          uint32_t const edge{ v.up_edge[v.up_off[node] + m] };
+          uint32_t const up{ upper_of(g.edges[edge], upward) };
+          if ((g.edges[edge].weak != round) || (mark[edge] != 0) ||
+              ((reached != INVALID) && (reached >= v.pos[up]))) {
+            continue;
+          }
+          CoordGraph::Edge const &e{ g.edges[edge] };
+          int64_t const up_at{ upward ? e.to_at : e.from_at };
+          int64_t const node_at{ upward ? e.from_at : e.to_at };
+          align[up] = node;
+          root[node] = root[up];
+          align[node] = root[node];
+          offset[node] = offset[up] + (sign * (up_at - node_at));
+          reached = v.pos[up];
         }
-        CoordGraph::Edge const &e{ g.edges[edge] };
-        int64_t const up_at{ upward ? e.to_at : e.from_at };
-        int64_t const node_at{ upward ? e.from_at : e.to_at };
-        align[up] = node;
-        root[node] = root[up];
-        align[node] = root[node];
-        offset[node] = offset[up] + (sign * (up_at - node_at));
-        reached = v.pos[up];
       }
     }
   }

@@ -33,6 +33,7 @@ char const *kind_name(TraceKind k) {
     case TraceKind::PortTurned: return "port_turned";
     case TraceKind::PortAttached: return "port_attached";
     case TraceKind::ColumnCentred: return "column_centred";
+    case TraceKind::PiecePacked: return "piece_packed";
     case TraceKind::None: break;
   }
   return "none";
@@ -222,6 +223,7 @@ void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out)
       case TraceKind::FoldCut:
         j.kv("rank", e.fold.rank);
         j.kv("refused", e.fold.refused);
+        j.kv("carried", e.fold.carried);
         break;
       case TraceKind::PseudostateSeated: {
         static constexpr std::array<char const *, 3> HOW{ "moved",
@@ -244,6 +246,12 @@ void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out)
       case TraceKind::ColumnCentred:
         j.kstate(c, e.shift.state);
         j.kv("by", e.shift.by);
+        break;
+      case TraceKind::PiecePacked:
+        j.kv("rank", e.piece.rank);
+        j.kxy("at", e.piece.x, e.piece.y);
+        j.kxy("size", e.piece.w, e.piece.h);
+        j.kv("carried", e.piece.carried);
         break;
       case TraceKind::None: break;
     }

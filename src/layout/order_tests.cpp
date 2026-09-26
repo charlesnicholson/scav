@@ -384,6 +384,41 @@ TEST_CASE("order: a pin moves a node's rank and the ranks stay contiguous") {
   for (uint32_t const n : held) { CHECK(n > 0); }
 }
 
+TEST_CASE("order: a labelled edge inside one rank charges no rank boundary") {
+  // A pin can leave both ends of a labelled edge in one rank. Its leg runs
+  // down the column and its label sits beside it there, so the boundary after
+  // that rank has nothing of it to hold; charged there, it widened `dock`'s
+  // `On` by the label's width of nothing (11.10g).
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, d, TransKind::External, {});
+  std::vector<scav_path_box> const boxes{
+    { .subject = 0, .w = 5000, .h = 200, .order = 0 }
+  };
+  scav_spaces const s{ .path_box = boxes.data(), .n_path_box = 1 };
+  SplitGraph const g{ decompose(c) };
+
+  // The fixture does what it is for: across ranks, the label is charged.
+  SubmachineOrders const plain{ order_submachines(c, g, s, profile()) };
+  Span const plain_gaps{ plain.sub_gaps[root.v] };
+  REQUIRE(plain_gaps.len > 0);
+  CHECK(plain.gaps[plain_gaps.off] >= 5000);
+
+  SearchPins const flat{ .ranks = { { .state = b, .rank = 0 } } };
+  SubmachineOrders const pinned{ order_submachines(c, g, s, profile(), 0, flat) };
+  REQUIRE(pinned.nodes[pinned.state_node[a.v]].rank ==
+          pinned.nodes[pinned.state_node[b.v]].rank);
+  Span const gaps{ pinned.sub_gaps[root.v] };
+  for (uint32_t k = 0; k < gaps.len; ++k) {
+    CAPTURE(k);
+    CHECK(pinned.gaps[gaps.off + k] < 5000);
+  }
+}
+
 TEST_CASE("order: undoing a move is running with the pins one held before it") {
   // What makes a search loop possible at all: a move is not a mutation, so
   // there is nothing to roll back and no state to get wrong. Applying the

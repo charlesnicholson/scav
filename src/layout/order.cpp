@@ -528,13 +528,16 @@ void rank_derived(Frame &f,
                   scav_profile const &p,
                   FrameScratch &sc) {
   // Charged before chaining, while an edge still knows the whole span its
-  // label sits in the middle of and how many boundaries it crosses.
+  // label sits in the middle of and how many boundaries it crosses. An edge
+  // inside one rank crosses none: its leg runs down its column and its label
+  // sits beside it there, so charging the boundary after it widened `dock`'s
+  // `On` by a label's width of nothing (11.10g). Phase 2 sizes the column.
   uint32_t top{ 0 };
   for (OrderNode const &nd : f.nodes) { top = imax(top, nd.rank); }
   gaps.assign(top, 0);
   for (OrderEdge const &e : f.edges) {
     int32_t const label{ seg_label[e.segment] };
-    if (label == 0) { continue; }
+    if ((label == 0) || (f.nodes[e.src].rank == f.nodes[e.dst].rank)) { continue; }
     uint32_t const from{ imin(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
     uint32_t const to{ imax(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
     uint32_t const at{ from + ((to - from) / 2) };
@@ -574,6 +577,7 @@ void rank_derived(Frame &f,
   for (OrderEdge const &e : f.edges) {
     uint32_t const from{ imin(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
     uint32_t const to{ imax(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
+    if (from == to) { continue; }  // turns in no boundary, as above
     uint32_t const of{ dense[part.root(e.src)] };
     turn(from, of);
     if (to > (from + 1)) { turn(to - 1, of); }

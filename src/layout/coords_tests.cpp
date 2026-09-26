@@ -147,6 +147,32 @@ TEST_CASE("coords: an edge met off its ends' centres aligns where it meets them"
   CHECK(leading(g, c, 2) - trailing(g, c, 1) >= SEP);
 }
 
+TEST_CASE("coords: a weak edge anchors its lower end only where nothing else can") {
+  // An initial pseudostate is seated beside its target after alignment, so
+  // aligning the target onto it wastes the one alignment the target gets;
+  // its edge is weak (11.10g). `2` takes `1` over the weak median `0`; `3`,
+  // whose strong median `0` is taken by `2` below it, falls back to its weak
+  // one rather than to nothing.
+  CoordGraph const g{ uniform(4,
+                              { { 0, 1 }, { 2, 3 } },
+                              { { .from = 0, .to = 2, .inner = 0, .weak = 1 },
+                                { .from = 1, .to = 2, .inner = 0 },
+                                { .from = 1, .to = 3, .inner = 0, .weak = 1 } }) };
+  std::vector<uint8_t> const mark(g.edges.size(), 0);
+  std::vector<int64_t> const x{ coords_one_pass(g, mark, false, false) };
+  CHECK(x[2] == x[1]);
+  CHECK(x[2] != x[0]);
+
+  CoordGraph const blocked{ uniform(4,
+                                    { { 0, 1 }, { 2, 3 } },
+                                    { { .from = 0, .to = 2, .inner = 0 },
+                                      { .from = 0, .to = 3, .inner = 0 },
+                                      { .from = 1, .to = 3, .inner = 0, .weak = 1 } }) };
+  std::vector<int64_t> const y{ coords_one_pass(blocked, mark, false, false) };
+  CHECK(y[2] == y[0]);
+  CHECK(y[3] == y[1]);
+}
+
 TEST_CASE("coords: adjacent nodes keep their separation, mixed extents") {
   // A fan that forces every layer to hold several nodes at once, with extents
   // chosen odd so the halving in the separation formula is exercised.

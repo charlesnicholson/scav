@@ -6,6 +6,7 @@
 #include "layout/geom.h"
 #include "layout/order.h"
 #include "layout/route.h"
+#include "layout/router.h"
 #include "layout/shard.h"
 #include "layout/size.h"
 #include "layout/tests/pod_eq.h"
@@ -1265,12 +1266,13 @@ TEST_CASE("layout: no corpus chart runs a route flush along a box") {
       }
     }
   }
-  // Seven nets gave up their clearance, 5 on `bottler` and 2 on `vac`. On this
-  // unsearched layout their only path at full clearance ran through the
-  // margin outside the state they are routed inside, which the enclosure
-  // rule forbids (11.10g); they route inside it, closer to a box. Pinned so
-  // it cannot grow unnoticed.
-  CHECK(reseated == 7);
+  // One net gives up its clearance. On this unsearched layout its only path at
+  // full clearance runs through the margin outside the state it is routed
+  // inside, which the enclosure rule forbids (11.10g); it routes inside it,
+  // closer to a box. Seven, then twelve, while folds still stacked edges into
+  // composites and packed the pieces tight around them. Pinned so it cannot
+  // grow unnoticed.
+  CHECK(reseated == 1);
   MESSAGE("routes flush against a box:\n", report);
   // All four are separator ports: such a port sits on a submachine rect flush
   // with a child's border and lays a lane there. Same cause as the stubs below,
@@ -1392,21 +1394,25 @@ constexpr std::array<char const *, 2> SCALE_ROUTERS{ "orthogonal", "straight" };
 // These charts request no space, so only the corridor half of it reaches them.
 // And when Brandes-Kopf began aligning a segment where it meets each end and a
 // fold that packs back into one row stopped being taken (11.10g): nested
-// `aspect` -72%, and the straight router's `through_box` -11% and -4%.
+// `aspect` -72%, and the straight router's `through_box` -11% and -4%. And
+// when a fold's label room went only where the packing puts a piece beside
+// another and a scale-chosen fold stopped stacking edges into composites
+// (11.10g): nested `area` -48% and -60%, and `crossings` to zero, on the
+// orthogonal rows.
 //
-// Rows 6 and 7 are one row, and that is a router cliff, not a reservation:
+// Rows 6 and 7 were one row, and that was a router cliff, not a reservation:
 // `ORTHO_VERTEX_BUDGET` bounds `nx * ny`, and a squarer 2k frame spends more
-// vertices than the same area as a strip. Flat at `compact` falls to the
-// straight router for it, `through_box` 0 -> 2,019. The lever is the budget.
+// vertices than the same area as a strip, so flat at `compact` fell to the
+// straight router. It fits the budget since the last change above.
 constexpr std::array<std::array<int64_t, 11>, 8> SCALE_PINNED{
-  { { 0, 0, 5048, 565024, 1264, 39071480, 0, 0, 0, 841896, 135339913728 },
-    { 9640, 0, 3464, 0, 47536, 775725136, 0, 0, 0, 841896, 135339913728 },
-    { 0, 0, 5368, 238832, 1248, 20127752, 0, 0, 0, 142096, 47129764096 },
-    { 8936, 0, 3576, 0, 72936, 1056099232, 0, 0, 0, 142096, 47129764096 },
-    { 0, 0, 1172, 0, 71, 2484742, 0, 0, 0, 33184, 3869256960 },
-    { 2039, 0, 319, 0, 265, 7627654, 0, 0, 0, 33184, 3869256960 },
-    { 2019, 0, 324, 0, 268, 5814774, 0, 0, 0, 6672, 1693255680 },
-    { 2019, 0, 324, 0, 268, 5814774, 0, 0, 0, 6672, 1693255680 } }
+  { { 0, 0, 2936, 0, 0, 2200952, 0, 0, 0, 2816688, 70933787392 },
+    { 21136, 0, 3072, 60406592, 52784, 71508160, 0, 0, 0, 2816688, 70933787392 },
+    { 0, 0, 2824, 0, 0, 1252176, 0, 0, 0, 901408, 18900262400 },
+    { 22600, 0, 3072, 41312768, 52888, 45540280, 0, 0, 0, 901408, 18900262400 },
+    { 0, 0, 1172, 0, 71, 2484742, 0, 0, 0, 35684, 3856700960 },
+    { 2040, 0, 319, 0, 265, 7627654, 0, 0, 0, 35684, 3856700960 },
+    { 0, 0, 1188, 264667, 97, 2792629, 0, 0, 0, 7296, 1685667840 },
+    { 2018, 0, 324, 0, 268, 5814774, 0, 0, 0, 7296, 1685667840 } }
 };
 
 }  // namespace
@@ -1777,13 +1783,13 @@ TEST_CASE("layout: a pinned row runs that row, and searches from it") {
     CHECK(cost_less(after, before));
   }
 
-  // And an unpinned run of the shipped profile is still the search: row 5 is
-  // what `axis` picks, so the pin above reached a row the argmin does not.
+  // And an unpinned run of the shipped profile is still the search: row 4 is
+  // what `axis` picks, so the pin at 0 above reached a row the argmin does not.
   Chart searched;
   load_corpus("axis.scav", searched);
   uint32_t picked{ INVALID };
   REQUIRE(layout_run(searched, {}, opts(p), placed, diags, nullptr, &picked));
-  CHECK(picked == 5);
+  CHECK(picked == 4);
 }
 
 TEST_CASE("layout: no budget is the run it was, and a budget only improves") {
@@ -2050,6 +2056,79 @@ TEST_CASE("layout: a transition into a composite runs straight to the port it en
     CAPTURE(k);
     CHECK(row_of<scav_point>(c, "scav.geom.point", route.off + k).y == slot.y);
   }
+}
+
+TEST_CASE("layout: an initial and one other arrival meet their target at two heights") {
+  // `X -> S` enters `P` beside `S`'s own initial, both on `S`'s left face.
+  // By centres the target lined up with the initial and the other route
+  // jogged to its port; level, the initial's dot would sit on that route. The
+  // two take their own heights on the face and both run straight (11.10g).
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
+  StateId const outer{ build_state(c, root, "P", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, outer, {}, {}) };
+  StateId const target{ build_state(c, inner, "S", StateKind::Normal, {}) };
+  StateId const dot{ build_state(c, inner, {}, StateKind::Initial, {}) };
+  TransId const start{ build_trans(c, dot, target, TransKind::External, {}) };
+  TransId const into{ build_trans(c, x, target, TransKind::External, {}) };
+
+  // Wide, so `X` and `P` are laid out side by side rather than folded one
+  // over the other.
+  scav_profile p{ readable() };
+  p.portfolio_k = 0;
+  p.portfolio_m = 1;
+  p.dar_num = 1024;
+  p.dar_den = 1;
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  REQUIRE(layout_run(c, {}, opts(p), placed, diags));
+  CHECK(diags.empty());
+  auto const level = [&c](TransId t) {
+    scav_span const route{ row_of<scav_span>(c, "scav.geom.route", t.v) };
+    REQUIRE(route.len >= 2);
+    int32_t const y{ row_of<scav_point>(c, "scav.geom.point", route.off).y };
+    for (uint32_t k = 1; k < route.len; ++k) {
+      CAPTURE(k);
+      CHECK(row_of<scav_point>(c, "scav.geom.point", route.off + k).y == y);
+    }
+    return y;
+  };
+  int32_t const at_start{ level(start) };
+  int32_t const at_into{ level(into) };
+  int32_t const apart{ imax(at_start - at_into, at_into - at_start) };
+  CHECK(apart >= (state_rect(c, dot).h / 2) + route_clearance(p));
+}
+
+TEST_CASE("layout: a label inside one of two regions stays inside that region") {
+  // The divider between two regions of one state ran through `brew`'s `at
+  // temperature`, which the state bounding it let stray across (11.10g). A
+  // wide label on a short leg beside the divider is kept on its own side.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const owner{ build_state(c, root, "R", StateKind::Normal, {}) };
+  SubmachineId const left{ build_submachine(c, owner, "left", {}) };
+  SubmachineId const right{ build_submachine(c, owner, "right", {}) };
+  StateId const h{ build_state(c, left, "H", StateKind::Normal, {}) };
+  StateId const q{ build_state(c, left, "Q", StateKind::Normal, {}) };
+  StateId const g{ build_state(c, right, "G", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, right, "D", StateKind::Normal, {}) };
+  TransId const labelled{ build_trans(c, h, q, TransKind::External, {}) };
+  build_trans(c, g, d, TransKind::External, {});
+
+  std::vector<scav_path_box> const boxes{
+    { .subject = labelled.v, .w = 1500, .h = 200, .order = 0 }
+  };
+  scav_spaces const s{ .path_box = boxes.data(), .n_path_box = 1 };
+  scav_profile p{ readable() };
+  p.portfolio_k = 0;
+  std::vector<scav_placed> const placed{ run(c, s, p) };
+  REQUIRE(placed.size() == 1);
+  scav_rect const region{ row_of<scav_rect>(c, "scav.geom.sub", left.v) };
+  CHECK(placed[0].x >= region.x);
+  CHECK(placed[0].y >= region.y);
+  CHECK((placed[0].x + placed[0].w) <= (region.x + region.w));
+  CHECK((placed[0].y + placed[0].h) <= (region.y + region.h));
 }
 
 TEST_CASE("layout: a channel a fork bar touches routes at its drawn size") {

@@ -1783,6 +1783,19 @@ One more thing this found: **`--portfolio-row N` silently disables Level 1.** Pi
 
    **What it measured, as tripwires** (11.10): Tier 2 with no space requests 118,787 → **102,551** (−13.7%), no chart worse; under real text 176,098 → **165,057** (−6.3%), `ota` +10.7% the one worse by more than a point -- its pair now reads, and the search found a different arrangement for the bars.
 
+   **Read again on 2026-09-26**: `brew`'s `Pumping` and `dock`'s `Charging` a label's width right of the state they join, `dock`'s `On` far wider than its states, `vac`'s `battery low` three kinks where one line would do. Each rule below has its isolated test:
+   - **A cut's label room goes on the new piece's leading edge only where the packing puts that piece beside the one before.** Stacked, the leg runs down the gap the two ends' reserve already opened, and the room was what pushed `Pumping` and `Charging` away. A fold also offers its pieces stacked at the leading edge, and the scale measure picks between the two arrangements.
+   - **A labelled edge inside one rank charges no rank boundary**: its leg runs down the column, and charging the boundary after it was `On`'s empty width. A label beside a leg that runs down a column or down the gap between stacked pieces gets its own width on one side inside the frame; a labelled pair gets it on both.
+   - **A fold never cuts a boundary node away from the node it joins.** A piece of its own is packed below, the port with it: `battery low`'s port sat a state's height under `Ready`.
+   - **An initial and one other arrival on its target's face take two heights on it**, and the initial's edge is weak in Brandes–Köpf: it anchors the target only where the other cannot. By centres the target lined up with the initial, which the seating moves anyway, and `battery low` jogged into `Seated`.
+   - **A label between two states of one region, where the region shares its state with another, stays inside the region**: the divider ran through `brew`'s `at temperature`.
+   - **A fold the scale measure chooses may not stack an edge into a composite**, which enters by a side port and goes round when stacked (`vac`'s `full`); rows that always fold keep such a fold, so `Cost` weighs it against the area it saves.
+   - **The trace**: `piece_packed` for each piece's rect and carried room, and `fold_cut` names the room it carried.
+
+   **As tripwires**: Tier 2 with no space requests 102,551 → **71,379** (−30.4%), `axis` +29.9% and `brew` +4.8% the two worse; under real text 165,057 → **140,639** (−14.8%), `axis` +17.0% the one worse by more than a point. The 2k nested scale target's orthogonal rows halve in area and lose every crossing, and flat at `compact` now fits the orthogonal router's budget. `vac`'s `battery low` and `full` are one segment each, and `dock`'s `On` is as wide as its states and one label.
+
+   **`axis` ships an all-straight strip because the kicks run on one row.** The iterated local search kicks the row that converged cheapest before kicking; row 0 kicked reaches Tier 2 4,489 under real text against the 6,039 that ships. Kicking every viable row finds it, at a multiple of `mill`'s 90 seconds, so it is a decision for the search's budget rather than a rule.
+
    **What the page still shows, for the steps after this one:**
    - **Alignment across fold pieces.** A column's centre line reaches only the states joined inside it. A state in one piece and its neighbour in the piece stacked on it are not aligned, so `brew`'s `ok` bends into `Standby` from `SelfCheck`'s vertex.
    - **Regions stacked one above the other.** A divider port sits on a region frame's left or right edge because ports sit only there, which is right for regions side by side and wrong for a stack: the route goes round to the frame's edge, beside the owner's border. Step 6's top and bottom ports own it; `retrace` and the band keep the search off the worst of it.

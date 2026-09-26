@@ -695,8 +695,13 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     // it arrived on. **Closed since the channel is routed inside the state**
     // (11.10g). Row 0 alone -- the profile's own tuple, unsearched -- was the
     // count that kept the hole visible while the portfolio routed around it;
-    // it reads zero through a box at both profiles now, and one route still
-    // doubles back at `compact`.
+    // it reads zero through a box at both profiles now. Routes still double
+    // back on it, two at `readable` and four at `compact`, since a fold that
+    // stacks an edge into a composite stopped being a scale-measure choice:
+    // unsearched, this row lays the whole chart out flat, and divider ports on
+    // the regions' sides send routes round. Owed to 11.10g's top and bottom
+    // ports; `retrace` keeps the search off them, and what ships reads zero
+    // below.
     Laid row_zero;
     lay("regions.scav", one_row(p), row_zero);
     REQUIRE(row_zero.tuple == 0);
@@ -704,17 +709,16 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     uint32_t back{ 0 };
     shape_counts(row_zero, through, back);
     CHECK(through == 0);
-    CHECK(back == ((p.profile_id == compact().profile_id) ? 1U : 0U));
+    CHECK(back == ((p.profile_id == compact().profile_id) ? 4U : 2U));
     // The scorer from the other end, over the columns that run wrote: 11.6's
     // descent and the predicate above are two implementations of one question,
     // and a carve-out is worth more when both answer it.
     CHECK(cost_columns(row_zero.c, row_zero.g, p).through_box == 0);
 
-    // What ships, scored both ways: the shape is still there and the drawing no
-    // longer shows it, which is why the properties above hold on this chart.
+    // What ships, scored both ways: the properties above hold on the drawing a
+    // reader gets, whichever row the search ends on.
     Laid shipped;
     lay("regions.scav", p, shipped);
-    CHECK(shipped.tuple != 0);
     uint32_t shipped_through{ 0 };
     uint32_t shipped_back{ 0 };
     shape_counts(shipped, shipped_through, shipped_back);
@@ -743,20 +747,22 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     // Two since 11.9.5's reservation, where it was one: room beside a labelled
     // leg pushes the branch further below the bar, so y dominates on both. The
     // rule is the defect; the reservation only found it more targets.
+    //
+    // One since 11.10g's label room moved to where the packing puts a piece.
     Laid fork_zero;
     lay("fork.scav", one_row(p), fork_zero);
-    CHECK(capped_branches(fork_zero) == 2);
+    CHECK(capped_branches(fork_zero) == 1);
     // And what ships: zero at both profiles from 11.10a's placement move, two at
     // `readable` once the budget went to 1,024 (11.10) -- a shallow search had
     // stopped at an arrangement that happened to put the branch beside the bar,
     // and a deeper one kept going to a cheaper `Cost` that put it back below,
     // because nothing priced leaving through a 64-unit cap. **One since crowding
     // is priced** (11.6): branches stacked through one cap run as tight lanes,
-    // and those now cost what they look like. Still the face rule's defect and
-    // still not zero.
+    // and those now cost what they look like. Zero at both profiles since
+    // 11.10g's second round; the face rule's defect is still there in the row
+    // above.
     Laid fork_shipped;
     lay("fork.scav", p, fork_shipped);
-    CHECK(capped_branches(fork_shipped) ==
-          ((p.profile_id == compact().profile_id) ? 0U : 1U));
+    CHECK(capped_branches(fork_shipped) == 0);
   }
 }

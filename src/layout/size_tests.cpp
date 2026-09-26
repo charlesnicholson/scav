@@ -315,8 +315,9 @@ TEST_CASE("size: states joined inside one column share the widest one's centre l
 TEST_CASE("size: two labelled edges inside one column widen it for a label either side") {
   // `ota`'s `chunk ready` and `chunk written` run as a pair down one centre
   // line with a label outside each leg, and a column as wide as `Writing`
-  // left the second label nowhere but over `Writing` (11.10g). One label takes
-  // whichever side has room, so it reserves nothing.
+  // left the second label nowhere but over `Writing` (11.10g). One label
+  // needs the room on one side only, and takes the trailing one when the
+  // leading side is short of it.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -357,7 +358,172 @@ TEST_CASE("size: two labelled edges inside one column widen it for a label eithe
 
   SizedLayout one;
   REQUIRE(sized(1, one));
-  CHECK(one.sub[root.v].w == one.state[a.v].w);
+  scav_rect const &oa{ one.state[a.v] };
+  int32_t const room{ label_leader(p) + LABEL_W + (p.node_sep / 2) };
+  CHECK(oa.x == one.state[b.v].x);  // one column, nothing to centre
+  CHECK(one.sub[root.v].w == (oa.w / 2) + room);
+}
+
+namespace {
+
+// A tall hole, so every fold stacks its pieces one above the other, with the
+// profile's own spacing kept for the labels to need room against.
+scav_profile tall() {
+  scav_profile p{ profile() };
+  p.dar_num = 1;
+  p.dar_den = 1024;
+  return p;
+}
+
+}  // namespace
+
+TEST_CASE("size: a fold that stacks its pieces carries no label room onto the second") {
+  // The room a cut's label was charged goes on the new piece's leading edge
+  // only where the packing puts that piece beside the one before: stacked,
+  // the leg runs down the gap the two ends' own reserve opened, and the room
+  // pushed `brew`'s `Pumping` and `dock`'s `Charging` a label's width from
+  // the state they join (11.10g). `B` starts at the frame's leading edge.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  std::vector<scav_path_box> const labels{
+    { .subject = 0, .w = 1500, .h = 200, .order = 0 }
+  };
+  scav_spaces const s{ .path_box = labels.data(), .n_path_box = 1 };
+  scav_profile const p{ tall() };
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  LayoutTrace t;
+  trace_sink_set(&t);
+  bool const sized{ size_layout(
+      c,
+      decompose(c),
+      one_frame(c,
+                root,
+                { state_node(a.v, 0, 0), state_node(b.v, 1, 0) },
+                { { .src = 0, .dst = 1, .segment = 0, .reversed = 0 } },
+                { 1500 }),
+      s,
+      p,
+      z,
+      diags,
+      DarSource::Profile,
+      Compaction::Off,
+      Fold::Always) };
+  trace_sink_set(nullptr);
+  REQUIRE(sized);
+  bool cut{ false };
+  for (TraceEvent const &e : t.events) {
+    if ((e.kind == TraceKind::FoldCut) && (e.fold.refused == 0)) {
+      cut = true;
+      CHECK(e.fold.carried == 0);
+    }
+  }
+  REQUIRE(cut);  // the fixture does what it is for
+  CHECK(z.state[b.v].y > z.state[a.v].y + z.state[a.v].h);  // stacked
+  CHECK(z.state[b.v].x == z.state[a.v].x);
+}
+
+TEST_CASE("size: a fold never cuts a boundary node away from the node it joins") {
+  // A boundary node is the point a route crosses its frame's border at, and a
+  // piece of its own is packed below the node it joins, taking the port with
+  // it: `vac`'s `battery low` left `Ready` a whole state's height low
+  // (11.10g). So the cut before its rank is refused, and it stays level.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  std::vector<scav_box_space> boxes(c.states.size(), scav_box_space{});
+  boxes[a.v].min_w = 3000;
+  boxes[b.v].min_w = 3000;
+  scav_spaces const s{ .box_state = boxes.data(),
+                       .n_box_state = static_cast<uint32_t>(boxes.size()),
+                       .box_state_stride = sizeof(scav_box_space) };
+  scav_profile const p{ tall() };
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  LayoutTrace t;
+  trace_sink_set(&t);
+  bool const sized{ size_layout(
+      c,
+      depths({ 0, 0 }),
+      one_frame(c,
+                root,
+                { state_node(a.v, 0, 0),
+                  state_node(b.v, 1, 0),
+                  { .kind = OrderKind::Boundary, .subject = 1, .rank = 2, .pos = 0 } },
+                { { .src = 0, .dst = 1, .segment = 0, .reversed = 0 },
+                  { .src = 1, .dst = 2, .segment = 1, .reversed = 0 } },
+                { 0, 0 }),
+      s,
+      p,
+      z,
+      diags,
+      DarSource::Profile,
+      Compaction::Off,
+      Fold::Always) };
+  trace_sink_set(nullptr);
+  REQUIRE(sized);
+  bool refused{ false };
+  for (TraceEvent const &e : t.events) {
+    refused = refused || ((e.kind == TraceKind::FoldCut) && (e.fold.rank == 2) &&
+                          (e.fold.refused != 0));
+  }
+  CHECK(refused);
+  CHECK(z.node[2].y == z.state[b.v].y + (z.state[b.v].h / 2));
+}
+
+TEST_CASE("size: a labelled pair a fold stacks has room for a label either side") {
+  // Two labelled edges between one pair, their ends in two stacked pieces,
+  // run as a pair of legs down the gap with a label outside each; room on one
+  // side each left `ota`'s pair printing over both its states (11.10g).
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, a, TransKind::External, {});
+  constexpr int32_t LABEL_W{ 1500 };
+  std::vector<scav_path_box> const labels{
+    { .subject = 0, .w = LABEL_W, .h = 200, .order = 0 },
+    { .subject = 1, .w = LABEL_W, .h = 200, .order = 0 }
+  };
+  scav_spaces const s{ .path_box = labels.data(), .n_path_box = 2 };
+  scav_profile const p{ tall() };
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c,
+                      decompose(c),
+                      one_frame(c,
+                                root,
+                                { state_node(a.v, 0, 0), state_node(b.v, 1, 0) },
+                                { { .src = 0, .dst = 1, .segment = 0, .reversed = 0 },
+                                  { .src = 1, .dst = 0, .segment = 1, .reversed = 0 } },
+                                { 1500 }),
+                      s,
+                      p,
+                      z,
+                      diags,
+                      DarSource::Profile,
+                      Compaction::Off,
+                      Fold::Always));
+  scav_rect const &ra{ z.state[a.v] };
+  scav_rect const &rb{ z.state[b.v] };
+  REQUIRE(rb.y > ra.y + ra.h);  // stacked
+  int32_t const lo{ imax(ra.x, rb.x) };
+  int32_t const hi{ imin(ra.x + ra.w, rb.x + rb.w) };
+  REQUIRE(hi > lo);
+  int32_t const leg{ lo + ((hi - lo) / 2) };
+  int32_t const room{ label_leader(p) + LABEL_W + (p.node_sep / 2) };
+  scav_rect const &frame{ z.sub[root.v] };
+  CHECK(leg - frame.x >= room);
+  CHECK((frame.x + frame.w) - leg >= room);
 }
 
 TEST_CASE("size: an edge pointing back a rank still aligns its ends") {
