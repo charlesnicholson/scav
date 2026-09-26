@@ -139,14 +139,47 @@ bool size_pass(Chart const &c,
   // The label's height, on the middle segment 11.3 charges its width to, so one
   // label reserves in one frame.
   std::vector<int32_t> seg_label_h(g.segments.size(), 0);
+  std::vector<int32_t> seg_label_w(g.segments.size(), 0);
   for (uint32_t i = 0; i < s.n_path_box; ++i) {
     scav_path_box const &box{ s.path_box[i] };
     if (box.subject >= g.trans_segments.size()) { continue; }
     Span const segs{ g.trans_segments[box.subject] };
     if (segs.len == 0) { continue; }
-    int32_t &at{ seg_label_h[segs.off + (segs.len / 2)] };
-    at = imax(at, box.h);
+    uint32_t const mid{ segs.off + (segs.len / 2) };
+    seg_label_h[mid] = imax(seg_label_h[mid], box.h);
+    seg_label_w[mid] = imax(seg_label_w[mid], box.w);
   }
+
+  // Per port, the segment on the border's inner side, whose boundary node is
+  // where the router seats that port's slot.
+  std::vector<uint32_t> port_seg(g.ports.size(), INVALID);
+  for (uint32_t seg = 0; seg < o.seg_port.size(); ++seg) {
+    if (o.seg_port[seg] < port_seg.size()) { port_seg[o.seg_port[seg]] = seg; }
+  }
+  // Where `seg` meets `state`, from the state's centre along the cross axis:
+  // the height of the boundary node inside it for a port on its border, which
+  // is sized by now because a state is sized before the frame it sits in.
+  // Zero where the segment meets the state's box rather than a port.
+  auto const attach_at = [&](uint32_t seg, uint32_t state) -> int32_t {
+    if (seg >= g.segments.size()) { return 0; }  // a hand-built frame
+    SplitSegment const &sg{ g.segments[seg] };
+    for (uint32_t const port : { sg.src_port, sg.dst_port }) {
+      if ((port >= g.ports.size()) || (g.ports[port].state.v != state)) { continue; }
+      uint32_t const inner{ port_seg[port] };
+      if ((inner == INVALID) || (inner >= o.seg_node.size())) { continue; }
+      uint32_t const node{ o.seg_node[inner] };
+      uint32_t const frame{ g.segments[inner].frame.v };
+      if ((node >= out.node.size()) || (frame >= c.submachines.size()) ||
+          (c.submachines[frame].owner.v != state)) {
+        continue;
+      }
+      scav_box_space const b{ box_of(s.box_state, s.n_box_state, state) };
+      Wide const pad{ bare_pseudostate(c, out.sub, b, state) ? 0 : p.pad };
+      Wide const y{ pad + b.h_before + sub_local[frame].y + out.node[node].y };
+      return static_cast<int32_t>(y - (out.state[state].h / 2));
+    }
+    return 0;
+  };
 
   // A frame's graph need not be connected, and unconnected states all rank 0, so
   // one graph would stack them in a column. Components are laid out and packed.
@@ -176,6 +209,19 @@ bool size_pass(Chart const &c,
       uint32_t const dst{ e.dst - span.off };
       reserve[src] = imax(reserve[src], leader + box_h);
       reserve[dst] = imax(reserve[dst], leader + box_h);
+    }
+
+    for (uint32_t k = 0; k < espan.len; ++k) {
+      OrderEdge const &e{ o.edges[espan.off + k] };
+      for (uint32_t const end : { e.src, e.dst }) {
+        if (o.nodes[end].kind != OrderKind::State) { continue; }
+        int32_t const at{ attach_at(e.segment, o.nodes[end].subject) };
+        if (at == 0) { continue; }
+        trace_emit(
+            { .kind = TraceKind::PortAttached,
+              .frame = m,
+              .shift = { .state = o.nodes[end].subject, .seg = e.segment, .by = at } });
+      }
     }
 
     std::vector<uint32_t> adj_count(span.len, 0);
@@ -254,6 +300,83 @@ bool size_pass(Chart const &c,
             imin(Wide{ extent[i] } + reserve[nodes[i]], Wide{ COORD_MAX }));
         layer_h[r] += extent[i] + p.node_sep;
       }
+      // States joined by an edge inside one column share one centre line, so
+      // the route between any two runs straight down the overlap of their
+      // faces; left-aligned, the narrower one's own width at the column's
+      // leading edge was the only face they shared. The line is the centre of
+      // the widest of them, or of the room a label on one of those edges
+      // needs beside its leg on either side, whichever is wider, and the
+      // column grows to hold that room. Initial and final pseudostates are
+      // seated beside the state they join below; a bar keeps the leading
+      // edge, because a route to a state stacked on it would leave through its
+      // cap rather than its length (11.10g).
+      std::vector<uint32_t> group(nodes.size(), 0);
+      for (uint32_t i = 0; i < group.size(); ++i) { group[i] = i; }
+      auto const find = [&group](uint32_t i) {
+        while (group[i] != i) { i = group[i] = group[group[i]]; }
+        return i;
+      };
+      auto const columnar = [&](uint32_t i) {
+        OrderNode const &nd{ o.nodes[span.off + nodes[i]] };
+        if (nd.kind != OrderKind::State) { return false; }
+        StateKind const kind{ c.states[nd.subject].kind };
+        return (kind != StateKind::Initial) && (kind != StateKind::Final) &&
+               (kind != StateKind::Fork) && (kind != StateKind::Join);
+      };
+      auto const flat = [&](OrderEdge const &e, uint32_t &a, uint32_t &b) {
+        a = index[e.src - span.off];
+        b = index[e.dst - span.off];
+        return (a != INVALID) && (b != INVALID) &&
+               (local_rank[nodes[a]] == local_rank[nodes[b]]) && columnar(a) &&
+               columnar(b);
+      };
+      for (uint32_t k = 0; k < espan.len; ++k) {
+        uint32_t a{ 0 };
+        uint32_t b{ 0 };
+        if (!flat(o.edges[espan.off + k], a, b)) { continue; }
+        uint32_t const ga{ find(a) };
+        uint32_t const gb{ find(b) };
+        if (ga != gb) { group[imax(ga, gb)] = imin(ga, gb); }
+      }
+      // A group with two labelled edges has a label either side of its line,
+      // so each side needs the widest one's room; one label takes whichever
+      // side has it.
+      std::vector<uint32_t> labelled(nodes.size(), 0);
+      std::vector<int32_t> widest_label(nodes.size(), 0);
+      for (uint32_t k = 0; k < espan.len; ++k) {
+        OrderEdge const &e{ o.edges[espan.off + k] };
+        uint32_t a{ 0 };
+        uint32_t b{ 0 };
+        if (!flat(e, a, b) || (e.segment >= seg_label_w.size()) ||
+            (seg_label_w[e.segment] == 0)) {
+          continue;
+        }
+        ++labelled[find(a)];
+        widest_label[find(a)] = imax(widest_label[find(a)], seg_label_w[e.segment]);
+      }
+      std::vector<int32_t> group_w(nodes.size(), 0);
+      std::vector<uint32_t> grouped(nodes.size(), 0);
+      for (uint32_t i = 0; i < nodes.size(); ++i) {
+        if (!columnar(i)) { continue; }
+        uint32_t const root_of{ find(i) };
+        ++grouped[root_of];
+        group_w[root_of] =
+            imax(group_w[root_of], out.state[o.nodes[span.off + nodes[i]].subject].w);
+        if (labelled[root_of] >= 2) {
+          group_w[root_of] =
+              imax(group_w[root_of], (2 * (leader + widest_label[root_of])) + p.node_sep);
+        }
+      }
+      // Parallel to `nodes`: the width whose centre a grouped state sits on,
+      // zero for one in no group.
+      std::vector<int32_t> line(nodes.size(), 0);
+      for (uint32_t i = 0; i < nodes.size(); ++i) {
+        uint32_t const root_of{ columnar(i) ? find(i) : INVALID };
+        if ((root_of == INVALID) || (grouped[root_of] < 2)) { continue; }
+        line[i] = group_w[root_of];
+        uint32_t const r{ local_rank[nodes[i]] };
+        layer_w[r] = imax(layer_w[r], group_w[root_of]);
+      }
       auto const boundary_gap = [&](uint32_t r) {
         return (global_rank[r] < gspan.len) ? Wide{ o.gaps[gspan.off + global_rank[r]] }
                                             : Wide{ 0 };
@@ -270,6 +393,9 @@ bool size_pass(Chart const &c,
         // where a cut was refused, and what seating each pseudostate got.
         std::vector<TraceFold> cuts;
         std::vector<std::pair<uint32_t, SeatHow>> seated;
+        std::vector<std::pair<uint32_t, int32_t>> centred;
+        // Some piece is packed other than beside the one before it.
+        bool wraps{ false };
       };
       // A cut before a layer is refused where it would separate an initial
       // pseudostate from the state it enters in that layer, or a final one in
@@ -353,18 +479,29 @@ bool size_pass(Chart const &c,
             // drew `ota`'s `Writing` over `Fetching` (11.10g).
             uint32_t const rf{ local_rank[nodes[from]] };
             uint32_t const rt{ local_rank[nodes[to]] };
+            auto const at_end = [&](uint32_t node) {
+              OrderNode const &nd{ o.nodes[node] };
+              return (nd.kind == OrderKind::State) ? attach_at(e.segment, nd.subject) : 0;
+            };
+            int32_t from_at{ at_end(e.src) };
+            int32_t to_at{ at_end(e.dst) };
             if ((rf + 1) != rt) {
               if ((rt + 1) != rf) { continue; }
               uint32_t const swap{ from };
               from = to;
               to = swap;
+              int32_t const swap_at{ from_at };
+              from_at = to_at;
+              to_at = swap_at;
             }
             cg.edges.push_back({ .from = chunk_index[from],
                                  .to = chunk_index[to],
                                  .inner = ((o.nodes[e.src].kind == OrderKind::Bend) &&
                                            (o.nodes[e.dst].kind == OrderKind::Bend))
                                               ? 1U
-                                              : 0U });
+                                              : 0U,
+                                 .from_at = from_at,
+                                 .to_at = to_at });
           }
           cg.sep = p.node_sep;
           std::vector<int32_t> const centre{ cross_coordinates(cg) };
@@ -404,9 +541,16 @@ bool size_pass(Chart const &c,
                                (c.states[nd.subject].kind == StateKind::Initial))
                                   ? Wide{ layer_w[r] } - out.state[nd.subject].w
                                   : Wide{ 0 } };
+            // On its group's centre line, where it has one.
+            Wide const along{ (line[at] == 0)
+                                  ? flush
+                                  : ((Wide{ line[at] } - out.state[nd.subject].w) / 2) };
+            if (along != flush) {
+              shape.centred.emplace_back(nd.subject, static_cast<int32_t>(along));
+            }
             // Local to the piece; the packing below decides where the piece
             // itself goes.
-            shape.at[at] = { .x = static_cast<int32_t>(layer_x[r - first] + flush),
+            shape.at[at] = { .x = static_cast<int32_t>(layer_x[r - first] + along),
                              .y = static_cast<int32_t>(centre[i]) };
           }
 
@@ -509,6 +653,10 @@ bool size_pass(Chart const &c,
         shape.w = packed.w;
         shape.h = packed.h;
         shape.ok = fits(packed);
+        for (uint32_t k = 1; k < packed.at.size(); ++k) {
+          shape.wraps = shape.wraps || (packed.at[k].y != packed.at[0].y) ||
+                        (packed.at[k].x <= packed.at[k - 1].x);
+        }
         // A saturated position would leave int32 when the offset below added
         // to it, and no caller reads a shape this phase goes on to diagnose.
         if (!shape.ok) { return shape; }
@@ -533,21 +681,30 @@ bool size_pass(Chart const &c,
       Shape best{ lay_out(Wide{ COORD_MAX } * 2) };
       Shape const folded{ lay_out(target) };
       // `Always` takes the folded shape wherever it laid out, so what chose is
-      // `Cost` over the row rather than the scale measure inside the frame.
+      // `Cost` over the row rather than the scale measure inside the frame. A
+      // fold whose pieces pack back into one row in their own order is the
+      // run unfolded at `node_sep` rather than `rank_sep`, with every edge the
+      // cuts cross dropped from the alignment, so it is no candidate.
       bool const swap{ folded.ok &&
-                       ((fold == Fold::Always) ||
-                        (!best.ok || pack_better({ .at = {},
-                                                   .w = static_cast<int32_t>(folded.w),
-                                                   .h = static_cast<int32_t>(folded.h) },
-                                                 { .at = {},
-                                                   .w = static_cast<int32_t>(best.w),
-                                                   .h = static_cast<int32_t>(best.h) },
-                                                 dar.num,
-                                                 dar.den,
-                                                 p.sm_tiebreak != 0))) };
+                       (!best.ok || (folded.wraps &&
+                                     ((fold == Fold::Always) ||
+                                      pack_better({ .at = {},
+                                                    .w = static_cast<int32_t>(folded.w),
+                                                    .h = static_cast<int32_t>(folded.h) },
+                                                  { .at = {},
+                                                    .w = static_cast<int32_t>(best.w),
+                                                    .h = static_cast<int32_t>(best.h) },
+                                                  dar.num,
+                                                  dar.den,
+                                                  p.sm_tiebreak != 0)))) };
       if (swap) { best = folded; }
       for (TraceFold const &cut : best.cuts) {
         trace_emit({ .kind = TraceKind::FoldCut, .frame = m, .fold = cut });
+      }
+      for (auto const &[state, by] : best.centred) {
+        trace_emit({ .kind = TraceKind::ColumnCentred,
+                     .frame = m,
+                     .shift = { .state = state, .seg = INVALID, .by = by } });
       }
       for (auto const &[state, how] : best.seated) {
         trace_emit({ .kind = TraceKind::PseudostateSeated,

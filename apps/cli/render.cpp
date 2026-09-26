@@ -53,7 +53,7 @@ int run_render(char const *path,
   Metrics metrics;
   Spaces spaces;
   if (!metrics_create(nullptr, 0, metrics) ||
-      !measure_chart(net.chart, metrics, opts.profile, spaces)) {
+      (!args.no_text && !measure_chart(net.chart, metrics, opts.profile, spaces))) {
     write_error("cannot measure the chart with the bundled font", path);
     return EXIT_UNUSABLE;
   }

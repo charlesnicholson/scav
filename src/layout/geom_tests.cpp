@@ -64,6 +64,11 @@ TEST_CASE("geom: a run along a border is on the border line and longer than a po
   CHECK_FALSE(along_border({ .x = 10, .y = 25 }, { .x = 60, .y = 25 }, box));
   // A box with no extent has no border to run along.
   CHECK_FALSE(along_border({ .x = 0, .y = 0 }, { .x = 10, .y = 0 }, rect(0, 0, 0, 50)));
+  // Within `near` of the line counts, either side of it; past it does not.
+  CHECK(along_border({ .x = 10, .y = -3 }, { .x = 60, .y = -3 }, box, 3));
+  CHECK(along_border({ .x = 97, .y = 10 }, { .x = 97, .y = 30 }, box, 3));
+  CHECK_FALSE(along_border({ .x = 10, .y = -4 }, { .x = 60, .y = -4 }, box, 3));
+  CHECK_FALSE(along_border({ .x = 103, .y = 60 }, { .x = 103, .y = 40 }, box, 2));
 }
 
 TEST_CASE("geom: a bumper grows both sides and a negative one shrinks") {

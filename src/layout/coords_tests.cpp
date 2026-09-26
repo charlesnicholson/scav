@@ -126,6 +126,27 @@ TEST_CASE("coords: a chain through three layers comes out straight") {
   CHECK(c[1] == c[2]);
 }
 
+TEST_CASE("coords: an edge met off its ends' centres aligns where it meets them") {
+  // A port sits on a composite's border at the height of what it leads to,
+  // not at the composite's centre, so the segment into it is straight only
+  // when the point it meets each end at is one coordinate (11.10g). `2`
+  // follows `1` in its layer and keeps its separation from wherever `1` went.
+  CoordGraph const g{ uniform(
+      3,
+      { { 0 }, { 1, 2 } },
+      { { .from = 0, .to = 1, .inner = 0, .from_at = 10, .to_at = -230 } }) };
+  std::vector<uint8_t> const mark(g.edges.size(), 0);
+  for (uint32_t k = 0; k < 4; ++k) {
+    CAPTURE(k);
+    std::vector<int64_t> const x{ coords_one_pass(g, mark, (k & 2U) != 0, (k & 1U) != 0) };
+    CHECK(x[0] + 10 == x[1] - 230);
+    CHECK(x[2] - x[1] >= EXT + SEP);
+  }
+  std::vector<int32_t> const c{ cross_coordinates(g) };
+  CHECK(c[0] + 10 == c[1] - 230);
+  CHECK(leading(g, c, 2) - trailing(g, c, 1) >= SEP);
+}
+
 TEST_CASE("coords: adjacent nodes keep their separation, mixed extents") {
   // A fan that forces every layer to hold several nodes at once, with extents
   // chosen odd so the halving in the separation formula is exercised.

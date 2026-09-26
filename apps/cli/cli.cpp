@@ -103,14 +103,15 @@ bool read_value(std::string_view flag, std::string_view value, LayoutArgs &out) 
 
 ArgRead read_layout_arg(int argc, char **argv, int &i, LayoutArgs &out) {
   std::string_view const arg{ argv[i] };
-  if (arg == "--no-search") {
-    if (out.no_search) { return ArgRead::Malformed; }
-    out.no_search = true;
+  if ((arg == "--no-search") || (arg == "--no-text")) {
+    bool &flag{ (arg == "--no-search") ? out.no_search : out.no_text };
+    if (flag) { return ArgRead::Malformed; }
+    flag = true;
     out.given = true;
     return ArgRead::Taken;
   }
-  if ((arg != "--portfolio-row") && (arg != "--rank") && (arg != "--cut") &&
-      (arg != "--reverse") && (arg != "--face")) {
+  if ((arg != "--profile") && (arg != "--portfolio-row") && (arg != "--rank") &&
+      (arg != "--cut") && (arg != "--reverse") && (arg != "--face")) {
     return ArgRead::NotOurs;
   }
   // The increment is its own statement: clang-tidy's
@@ -119,10 +120,17 @@ ArgRead read_layout_arg(int argc, char **argv, int &i, LayoutArgs &out) {
   if ((i + 1) >= argc) { return ArgRead::Malformed; }
   ++i;
   out.given = true;
+  if (arg == "--profile") {
+    out.profile = argv[i];
+    return ArgRead::Taken;
+  }
   return read_value(arg, argv[i], out) ? ArgRead::Taken : ArgRead::Malformed;
 }
 
-void append_layout_args(std::string &out, uint32_t row, SearchPins const &pins) {
+void append_layout_args(std::string &out,
+                        LayoutArgs const &args,
+                        uint32_t row,
+                        SearchPins const &pins) {
   auto const pair = [&out](char const *flag, uint32_t a, uint32_t b) {
     out += ' ';
     out += flag;
@@ -131,6 +139,12 @@ void append_layout_args(std::string &out, uint32_t row, SearchPins const &pins) 
     out += ':';
     string_append_u32(out, b);
   };
+  if (std::string_view{ args.profile } != "readable") {
+    out += "--profile ";
+    out += args.profile;
+    out += ' ';
+  }
+  if (args.no_text) { out += "--no-text "; }
   out += "--portfolio-row ";
   string_append_u32(out, row);
   for (RankPin const &r : pins.ranks) { pair("--rank", r.state.v, r.rank); }

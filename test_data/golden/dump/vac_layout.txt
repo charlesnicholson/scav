@@ -62,84 +62,84 @@ chart vac "robot vacuum" (test_data/charts/vac.scav:3)
   include dock "dock.scav" -> test_data/charts/dock.scav (test_data/charts/vac.scav:4)
   include lamp "./led.scav" -> test_data/charts/led.scav (test_data/charts/vac.scav:7)
   include lamp "led.scav" -> test_data/charts/led.scav (test_data/charts/dock.scav:4)
-geometry structural ceed5233 coordinate 09fd0b12
-  chart 0,0 10792x12453
-  rests on --portfolio-row 4 --rank 7:1 --rank 14:2 --rank 3:0 --rank 2:0 --rank 17:0 --cut 4:2 --reverse 10:0 --reverse 17:0 --reverse 11:0 --reverse 8:2 --face 15:0:0:3 --face 4:3:1:3 --face 18:0:0:2 --face 10:0:1:1 --face 10:0:0:1
-  cost t0 0 t2 13138
-    tier0 through_box 0 box_overlap 0 flush 0 through_region 0
-    bends 16 share 6235bp
+geometry structural 16d5e964 coordinate 7f9f8462
+  chart 0,0 15952x9366
+  rests on --portfolio-row 5 --rank 11:1 --rank 12:0 --rank 1:1 --rank 4:1 --rank 15:1 --cut 19:0 --reverse 18:0 --reverse 14:0 --reverse 17:0 --face 15:0:0:3 --face 19:0:1:2
+  cost t0 0 t2 8699
+    tier0 through_box 0 box_overlap 0 flush 0 through_region 0 retrace 0
+    bends 5 share 2942bp
     corridor 0 share 0bp
     crossings 0 share 0bp
-    excess_len 14286 share 228bp
+    excess_len 2291 share 55bp
     adjacency 0 share 0bp
-    label 0 share 0bp
-    label_near 38 share 36bp
-    aspect 91328 share 724bp
-    area 134392776 share 2775bp
-    crowding 0 share 0bp
+    label 1 share 882bp
+    label_near 387 share 165bp
+    aspect 9664 share 117bp
+    area 149406432 share 4659bp
+    crowding 230 share 1177bp
   label leader 96
-    placed t1 1353,1007 1050x269
-    placed t4 3587,6770 1396x269
-    placed t7 6881,7281 1856x269
-    placed t8 10075,8517 589x269
-    placed t10 8199,4530 1626x269
-    placed t11 7504,5027 1396x269
-    placed t13 3076,1628 1050x269
-    placed t14 5009,765 935x269
-    placed t15 4788,2110 1050x269
-    placed t17 5920,10698 1050x269
-    placed t18 7726,10469 935x269
-    placed t19 7610,9931 1050x269
-  state dock 5031,3265 5761x9188 before 5159,3393 5505x397 after 5159,12325 5505x0
-  state lamp 2616,0 4628x2977 before 2744,128 4372x397 after 2744,2849 4372x0
-  state Off 800,183 896x653 before 928,311 640x397 after 928,708 640x0
-  state Booting 800,1489 1319x653 before 928,1617 1063x397 after 928,2014 1063x0
-  state PreConfig 7741,0 2842x1050 before 7869,128 2586x794 after 7869,922 2586x0
-  state On 0,3265 3981x2708 before 128,3393 3725x397 after 128,5845 3725x0
-  state On:main/Idle 928,3790 973x653 before 1056,3918 717x397 after 1056,4315 717x0
-  state On:main/Ready 2189,3790 1664x922 before 2317,3918 1408x397 after 2317,4315 1408x269
-  state On:aux/Idle 928,5192 973x653 before 1056,5320 717x397 after 1056,5717 717x0
-  state dock/lamp 5460,9166 5204x2977 before 5588,9294 4948x397 after 5588,12015 4948x0
-  state dock/Empty 6497,3973 1088x653 before 6625,4101 832x397 after 6625,4498 832x0
-  state dock/On 6497,5536 3834x2977 before 6625,5664 3578x397 after 6625,8385 3578x0
-  state dock/On/Seated 7963,6244 1204x653 before 8091,6372 948x397 after 8091,6769 948x0
-  state dock/On/Charging 8193,7550 1434x653 before 8321,7678 1178x397 after 8321,8075 1178x0
-  state lamp/Off 3544,2014 896x653 before 3672,2142 640x397 after 3672,2539 640x0
-  state lamp/Blinking 3544,708 1434x653 before 3672,836 1178x397 after 3672,1233 1178x0
-  state lamp/Solid 6028,708 1088x653 before 6156,836 832x397 after 6156,1233 832x0
-  state dock/lamp/Off 6388,9874 896x653 before 6516,10002 640x397 after 6516,10399 640x0
-  state dock/lamp/Blinking 6388,11180 1434x653 before 6516,11308 1178x397 after 6516,11705 1178x0
-  state dock/lamp/Solid 8872,9874 1088x653 before 9000,10002 832x397 after 9000,10399 832x0
-  state $initial 0,397 224x224 before 0,397 224x0 after 0,397 224x0
-  state On:main/$initial 128,4004 224x224 before 128,4004 224x0 after 128,4004 224x0
-  state On:aux/$initial 128,5406 224x224 before 128,5406 224x0 after 128,5406 224x0
-  state dock/On/$initial 7163,6458 224x224 before 7163,6458 224x0 after 7163,6458 224x0
-  state dock/$initial 5697,4187 224x224 before 5697,4187 224x0 after 5697,4187 224x0
-  state lamp/$initial 2744,2228 224x224 before 2744,2228 224x0 after 2744,2228 224x0
-  state dock/lamp/$initial 5588,10088 224x224 before 5588,10088 224x0 after 5588,10088 224x0
-  sub 0 0,0 10792x12453
-  sub 1 128,3790 3725x1210
-  sub 2 128,5192 3725x653
-  sub 3 5159,3790 5505x8535
-  sub 4 6625,6061 3578x2324
-  sub 5 2744,525 4372x2324
-  sub 6 5588,9691 4948x2324
-  route $initial -> Off (224,509) (704,509)
-  route Off -> Booting (1353,836) (1353,1393)
-  route On:main/$initial -> On:main/Idle (352,4116) (832,4116)
-  route On:main/Ready -> dock/On/Seated (3738,4712) (3738,5000) (3981,5000) (4077,5000) (4077,4882) (5031,4882) (5079,4882) (5079,6770) (6497,6770) (6545,6770) (6545,6993) (8059,6993) (8059,6945) port s1 d0 port s0 d0 port s0 d1
-  route On:aux/$initial -> On:aux/Idle (352,5518) (832,5518)
-  route dock/On/$initial -> dock/On/Seated (7387,6570) (7867,6570)
-  route dock/On/Seated -> dock/On/Charging (8737,6897) (8737,7454)
-  route dock/On/Charging -> dock/lamp/Solid (9627,7876) (10331,7876) (10665,7876) (10665,3694) (10760,3694) (10760,10200) (10664,10200) (10056,10200) port s1 d1 port s1 d1
-  route dock/$initial -> dock/Empty (5921,4299) (6401,4299)
-  route dock/Empty -> dock/On (7585,4530) (10427,4530) (10427,5664) (10379,5664)
-  route dock/On -> dock/Empty (7504,5536) (7504,4722)
-  route lamp/$initial -> lamp/Off (2968,2340) (3448,2340)
-  route lamp/Off -> lamp/Blinking (4126,2014) (4126,1457)
-  route lamp/Blinking -> lamp/Solid (4978,1034) (5932,1034)
-  route lamp/Solid -> lamp/Off (6124,1361) (6124,2110) (4536,2110)
-  route dock/lamp/$initial -> dock/lamp/Off (5812,10200) (6292,10200)
-  route dock/lamp/Off -> dock/lamp/Blinking (6970,10527) (6970,11084)
-  route dock/lamp/Blinking -> dock/lamp/Solid (7726,11180) (7726,10431) (8776,10431)
-  route dock/lamp/Solid -> dock/lamp/Off (8872,10200) (7380,10200)
+    placed t1 1334,7396 1050x269
+    placed t4 3075,2539 1396x269
+    placed t7 6900,2374 1856x269
+    placed t8 9579,3336 589x269
+    placed t10 6894,4240 1626x269
+    placed t11 5402,4144 1396x269
+    placed t13 6894,7942 1050x269
+    placed t14 5996,7423 935x269
+    placed t15 5601,8499 1050x269
+    placed t17 13511,4600 1050x269
+    placed t18 12335,3930 935x269
+    placed t19 13277,3567 1050x269
+  state dock 2605,0 13347x6101 before 2733,128 13091x397 after 2733,5973 13091x0
+  state lamp 4385,6389 4404x2977 before 4513,6517 4148x397 after 4513,9238 4148x0
+  state Off 800,6572 896x653 before 928,6700 640x397 after 928,7097 640x0
+  state Booting 762,7878 1319x653 before 890,8006 1063x397 after 890,8403 1063x0
+  state PreConfig 11093,6389 2842x1050 before 11221,6517 2586x794 after 11221,7311 2586x0
+  state On 0,804 2029x3649 before 128,932 1773x397 after 128,4325 1773x0
+  state On:main/Idle 928,2827 973x653 before 1056,2955 717x397 after 1056,3352 717x0
+  state On:main/Ready 128,1329 1664x922 before 256,1457 1408x397 after 256,1854 1408x269
+  state On:aux/Idle 928,3672 973x653 before 1056,3800 717x397 after 1056,4197 717x0
+  state dock/lamp 10965,2302 4859x3489 before 11093,2430 4603x397 after 11093,5663 4603x0
+  state dock/Empty 6302,4626 1088x653 before 6430,4754 832x397 after 6430,5151 832x0
+  state dock/On 4929,708 3834x3265 before 5057,836 3578x397 after 5057,3845 3578x0
+  state dock/On/Seated 5857,1416 1204x653 before 5985,1544 948x397 after 5985,1941 948x0
+  state dock/On/Charging 6625,3010 1434x653 before 6753,3138 1178x397 after 6753,3535 1178x0
+  state lamp/Off 7496,8403 896x653 before 7624,8531 640x397 after 7624,8928 640x0
+  state lamp/Blinking 7227,7097 1434x653 before 7355,7225 1178x397 after 7355,7622 1178x0
+  state lamp/Solid 4513,7097 1088x653 before 4641,7225 832x397 after 4641,7622 832x0
+  state dock/lamp/Off 14800,4771 896x653 before 14928,4899 640x397 after 14928,5296 640x0
+  state dock/lamp/Blinking 11740,4316 1434x653 before 11868,4444 1178x397 after 11868,4841 1178x0
+  state dock/lamp/Solid 11669,3010 1088x653 before 11797,3138 832x397 after 11797,3535 832x0
+  state $initial 0,6786 224x224 before 0,6786 224x0 after 0,6786 224x0
+  state On:main/$initial 128,3041 224x224 before 128,3041 224x0 after 128,3041 224x0
+  state On:aux/$initial 128,3886 224x224 before 128,3886 224x0 after 128,3886 224x0
+  state dock/On/$initial 5057,1630 224x224 before 5057,1630 224x0 after 5057,1630 224x0
+  state dock/$initial 5502,4840 224x224 before 5502,4840 224x0 after 5502,4840 224x0
+  state lamp/$initial 6696,8617 224x224 before 6696,8617 224x0 after 6696,8617 224x0
+  state dock/lamp/$initial 14000,4985 224x224 before 14000,4985 224x0 after 14000,4985 224x0
+  sub 0 0,0 15952x9366
+  sub 1 128,1329 1773x2151
+  sub 2 128,3672 1773x653
+  sub 3 2733,525 13091x5448
+  sub 4 5057,1233 3578x2612
+  sub 5 4513,6914 4148x2324
+  sub 6 11093,2827 4603x2836
+  route $initial -> Off (224,6898) (704,6898)
+  route Off -> Booting (1334,7225) (1334,7782)
+  route On:main/$initial -> On:main/Idle (352,3153) (832,3153)
+  route On:main/Ready -> dock/On/Seated (1677,2251) (1677,2539) (2029,2539) (2605,2539) (4929,2539) (4977,2539) (4977,1973) (5761,1973) port s1 d0 port s0 d0 port s0 d1
+  route On:aux/$initial -> On:aux/Idle (352,3998) (832,3998)
+  route dock/On/$initial -> dock/On/Seated (5281,1742) (5761,1742)
+  route dock/On/Seated -> dock/On/Charging (6900,2069) (6900,2914)
+  route dock/On/Charging -> dock/lamp/Solid (8059,3336) (8763,3336) (10965,3336) (11573,3336) port s1 d1 port s0 d1
+  route dock/$initial -> dock/Empty (5726,4952) (6206,4952)
+  route dock/Empty -> dock/On (6894,4626) (6894,4069)
+  route dock/On -> dock/Empty (6798,3973) (6798,4530)
+  route lamp/$initial -> lamp/Off (6920,8729) (7400,8729)
+  route lamp/Off -> lamp/Blinking (7944,8403) (7944,7846)
+  route lamp/Blinking -> lamp/Solid (7227,7423) (5697,7423)
+  route lamp/Solid -> lamp/Off (5505,7750) (5505,8499) (7400,8499)
+  route dock/lamp/$initial -> dock/lamp/Off (14224,5097) (14704,5097)
+  route dock/lamp/Off -> dock/lamp/Blinking (14800,4869) (13270,4869)
+  route dock/lamp/Blinking -> dock/lamp/Solid (12335,4316) (12335,3759)
+  route dock/lamp/Solid -> dock/lamp/Off (12757,3567) (14896,3567) (14896,4675)

@@ -970,7 +970,7 @@ Wide ortho_bend_penalty(scav_profile const &p) {
   return imax(Wide{ p.rank_sep }, Wide{ 1 });
 }
 
-int32_t ortho_clearance(scav_profile const &p) { return imax(p.node_sep / 3, 1); }
+int32_t ortho_clearance(scav_profile const &p) { return route_clearance(p); }
 
 int32_t OrthogonalRouter::margin(scav_profile const &p) const {
   return ortho_clearance(p);
@@ -985,10 +985,7 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
 
   Wide const bend{ ortho_bend_penalty(in.profile) };
   int32_t const clear{ ortho_clearance(in.profile) };
-  // How far inside its enclosure a route keeps: half the ring a box's contents
-  // sit inside, so a child at `pad` keeps its own bumper and no route can run
-  // on the enclosure's border.
-  int32_t const inset{ imax(imin(clear, in.profile.pad) / 2, 1) };
+  int32_t const inset{ border_band(in.profile) };
   std::vector<scav_rect> const walls{
     ortho_enclosure_walls(in.region, in.enclosure, inset)
   };

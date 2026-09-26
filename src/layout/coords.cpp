@@ -106,20 +106,26 @@ View view_of(CoordGraph const &g, bool upward, bool rightward) {
 
 // Each node tries its median upper neighbour and then the other median,
 // taking the first that is neither a marked segment nor a crossing of what
-// this layer has already aligned.
+// this layer has already aligned. `offset` is each node's centre from its
+// block's root, which puts the aligned segment's two ends at one coordinate;
+// a mirrored run reads the ends' offsets mirrored too.
 void align_vertical(CoordGraph const &g,
                     View const &v,
                     std::vector<uint8_t> const &mark,
                     bool upward,
+                    bool rightward,
                     std::vector<uint32_t> &root,
-                    std::vector<uint32_t> &align) {
+                    std::vector<uint32_t> &align,
+                    std::vector<int64_t> &offset) {
   uint32_t const n{ static_cast<uint32_t>(g.extent.size()) };
   root.assign(n, 0);
   align.assign(n, 0);
+  offset.assign(n, 0);
   for (uint32_t i = 0; i < n; ++i) {
     root[i] = i;
     align[i] = i;
   }
+  int64_t const sign{ rightward ? -1 : 1 };
   for (std::vector<uint32_t> const &lay : v.layers) {
     // The rightmost upper neighbour this layer has already aligned onto, which
     // is what keeps two alignments in one layer from crossing. INVALID rather
@@ -136,9 +142,13 @@ void align_vertical(CoordGraph const &g,
         if ((mark[edge] != 0) || ((reached != INVALID) && (reached >= v.pos[up]))) {
           continue;
         }
+        CoordGraph::Edge const &e{ g.edges[edge] };
+        int64_t const up_at{ upward ? e.to_at : e.from_at };
+        int64_t const node_at{ upward ? e.from_at : e.to_at };
         align[up] = node;
         root[node] = root[up];
         align[node] = root[node];
+        offset[node] = offset[up] + (sign * (up_at - node_at));
         reached = v.pos[up];
       }
     }
@@ -198,7 +208,8 @@ int32_t sep_between(CoordGraph const &g, uint32_t left, uint32_t right) {
 std::vector<int64_t> compact(CoordGraph const &g,
                              View const &v,
                              std::vector<uint32_t> const &root,
-                             std::vector<uint32_t> const &align) {
+                             std::vector<uint32_t> const &align,
+                             std::vector<int64_t> const &offset) {
   uint32_t const n{ static_cast<uint32_t>(g.extent.size()) };
   std::vector<int64_t> x(n, 0);
   std::vector<uint32_t> sink(n, 0);
@@ -209,6 +220,8 @@ std::vector<int64_t> compact(CoordGraph const &g,
     return (v.pos[node] == 0) ? INVALID : v.layers[v.layer[node]][v.pos[node] - 1];
   };
 
+  // `x[block]` is the root's centre and a member sits `offset` from it, so a
+  // left neighbour's own centre is what a member is separated from.
   for (uint32_t const block : block_order(v, root, n)) {
     uint32_t w{ block };
     do {
@@ -217,7 +230,7 @@ std::vector<int64_t> compact(CoordGraph const &g,
         uint32_t const u{ root[left] };
         if (sink[block] == block) { sink[block] = sink[u]; }
         if (sink[block] == sink[u]) {
-          x[block] = imax(x[block], x[u] + sep_between(g, left, w));
+          x[block] = imax(x[block], (x[left] + sep_between(g, left, w)) - offset[w]);
         }
       }
       w = align[w];
@@ -226,7 +239,7 @@ std::vector<int64_t> compact(CoordGraph const &g,
     // class here, so the last pass below adds an offset exactly once.
     while (align[w] != block) {
       w = align[w];
-      x[w] = x[block];
+      x[w] = x[block] + offset[w];
       sink[w] = sink[block];
     }
   }
@@ -310,8 +323,9 @@ std::vector<int64_t> coords_one_pass(CoordGraph const &g,
   View const v{ view_of(g, upward, rightward) };
   std::vector<uint32_t> root;
   std::vector<uint32_t> align;
-  align_vertical(g, v, mark, upward, root, align);
-  std::vector<int64_t> x{ compact(g, v, root, align) };
+  std::vector<int64_t> offset;
+  align_vertical(g, v, mark, upward, rightward, root, align, offset);
+  std::vector<int64_t> x{ compact(g, v, root, align, offset) };
   // A rightward run was computed mirrored, so its coordinates come back into
   // the graph's own frame here rather than at every reader.
   if (rightward) {

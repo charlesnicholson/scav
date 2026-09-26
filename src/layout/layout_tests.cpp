@@ -1390,16 +1390,19 @@ constexpr std::array<char const *, 2> SCALE_ROUTERS{ "orthogonal", "straight" };
 // (11.10a): nested at `compact` reads `crossings` -10% and `excess_len` -17%,
 // a lane no per-frame pass ever had both members of.
 // These charts request no space, so only the corridor half of it reaches them.
+// And when Brandes-Kopf began aligning a segment where it meets each end and a
+// fold that packs back into one row stopped being taken (11.10g): nested
+// `aspect` -72%, and the straight router's `through_box` -11% and -4%.
 //
 // Rows 6 and 7 are one row, and that is a router cliff, not a reservation:
 // `ORTHO_VERTEX_BUDGET` bounds `nx * ny`, and a squarer 2k frame spends more
 // vertices than the same area as a strip. Flat at `compact` falls to the
 // straight router for it, `through_box` 0 -> 2,019. The lever is the budget.
 constexpr std::array<std::array<int64_t, 11>, 8> SCALE_PINNED{
-  { { 0, 0, 4960, 565024, 1264, 38820928, 0, 0, 0, 2984776, 134823986304 },
-    { 10808, 0, 3464, 0, 71464, 917243432, 0, 0, 0, 2984776, 134823986304 },
-    { 0, 0, 5384, 238832, 1248, 20108632, 0, 0, 0, 145264, 46911586048 },
-    { 9312, 0, 3576, 0, 83896, 1110858824, 0, 0, 0, 145264, 46911586048 },
+  { { 0, 0, 5048, 565024, 1264, 39071480, 0, 0, 0, 841896, 135339913728 },
+    { 9640, 0, 3464, 0, 47536, 775725136, 0, 0, 0, 841896, 135339913728 },
+    { 0, 0, 5368, 238832, 1248, 20127752, 0, 0, 0, 142096, 47129764096 },
+    { 8936, 0, 3576, 0, 72936, 1056099232, 0, 0, 0, 142096, 47129764096 },
     { 0, 0, 1172, 0, 71, 2484742, 0, 0, 0, 33184, 3869256960 },
     { 2039, 0, 319, 0, 265, 7627654, 0, 0, 0, 33184, 3869256960 },
     { 2019, 0, 324, 0, 268, 5814774, 0, 0, 0, 6672, 1693255680 },
@@ -1413,6 +1416,10 @@ TEST_CASE("layout: both scale targets score to pinned terms, profile by router")
   // what changes underneath these: a chart deep enough for a hierarchy walk to
   // get wrong, and one flat enough for it to have nothing to walk.
   uint32_t row{ 0 };
+  // The table as this run scored it, in the constant's own shape, for a
+  // mismatch to print whole rather than one cell at a time.
+  std::string actual;
+  bool pinned{ true };
   for (char const *chart : SCALE_CHARTS) {
     Chart const built{ (std::string_view{ chart } == "nested") ? nested_2k_chart()
                                                                : flat_2k_chart() };
@@ -1440,15 +1447,20 @@ TEST_CASE("layout: both scale targets score to pinned terms, profile by router")
                                            t.adjacency,   t.label,       t.label_near,
                                            t.aspect,      t.area };
         REQUIRE(row < SCALE_PINNED.size());
+        actual += "    { ";
         for (uint32_t i = 0; i < got.size(); ++i) {
           CAPTURE(i);
           CHECK(got[i] == SCALE_PINNED[row][i]);
+          pinned = pinned && (got[i] == SCALE_PINNED[row][i]);
+          actual += std::to_string(got[i]);
+          actual += ((i + 1) < got.size()) ? ", " : " },\n";
         }
         ++row;
       }
     }
   }
   CHECK(row == SCALE_PINNED.size());
+  if (!pinned) { MESSAGE("scored as:\n", actual); }
 }
 
 namespace {
@@ -1992,6 +2004,51 @@ TEST_CASE("layout: a port faces the far end of its route") {
   for (uint32_t k = 0; k < route.len; ++k) {
     CAPTURE(k);
     CHECK(row_of<scav_point>(c, "scav.geom.point", route.off + k).x <= box.x + box.w);
+  }
+}
+
+TEST_CASE("layout: a transition into a composite runs straight to the port it enters by") {
+  // `D` is the last of three states stacked inside `P`, so the port `X -> D`
+  // crosses `P`'s border by sits well off `P`'s centre. Aligned by centres,
+  // `X` sat level with `P`'s middle and the route jogged to reach the port;
+  // aligned by where the segment meets each end, it is one line (11.10g).
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
+  StateId const outer{ build_state(c, root, "P", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, outer, {}, {}) };
+  StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, inner, "D", StateKind::Normal, {}) };
+  for (char const *name : { "B", "C" }) {
+    build_trans(c,
+                a,
+                build_state(c, inner, name, StateKind::Normal, {}),
+                TransKind::External,
+                {});
+  }
+  build_trans(c, a, d, TransKind::External, {});
+  TransId const into{ build_trans(c, x, d, TransKind::External, {}) };
+
+  scav_profile p{ readable() };
+  p.portfolio_k = 0;
+  p.portfolio_m = 1;
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  REQUIRE(layout_run(c, {}, opts(p), placed, diags));
+  CHECK(diags.empty());
+  scav_span const slots{ row_of<scav_span>(c, "scav.geom.port", into.v) };
+  REQUIRE(slots.len == 1);
+  scav_port_slot const slot{ row_of<scav_port_slot>(c, "scav.geom.portslot", slots.off) };
+  scav_rect const box{ state_rect(c, outer) };
+  // The fixture does what it is for: the port is further off `P`'s centre
+  // than half of `X`, so no seat on `X`'s face reaches it from there.
+  int32_t const off{ slot.y - (box.y + (box.h / 2)) };
+  REQUIRE(imax(off, -off) > (state_rect(c, x).h / 2));
+  scav_span const route{ row_of<scav_span>(c, "scav.geom.route", into.v) };
+  REQUIRE(route.len >= 2);
+  for (uint32_t k = 0; k < route.len; ++k) {  // the slot itself is one of the points
+    CAPTURE(k);
+    CHECK(row_of<scav_point>(c, "scav.geom.point", route.off + k).y == slot.y);
   }
 }
 

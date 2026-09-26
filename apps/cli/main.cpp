@@ -21,13 +21,13 @@ constexpr std::string_view USAGE{
   "  dump [--hash|--json] [--layout [LAYOUT...]] [--trace [--trace-search]] <file>"
   "  the model; --layout adds geometry and the flags it rests on, --trace its "
   "decisions\n"
-  "  render [-o FILE] [--embed-font] [--profile NAME] [LAYOUT...] <file>"
+  "  render [-o FILE] [--embed-font] [LAYOUT...] <file>"
   "   chart -> SVG\n"
   "  selftest [--against FILE]   recompute the layout hashes on this toolchain "
   "and diff against the goldens\n"
   "\n"
-  "  LAYOUT: --portfolio-row N, --rank S:R, --cut T:L, --reverse T:L, "
-  "--face T:L:E:F, --no-search\n"
+  "  LAYOUT: --profile NAME, --portfolio-row N, --rank S:R, --cut T:L, "
+  "--reverse T:L, --face T:L:E:F, --no-search, --no-text\n"
 };
 
 int usage() {
@@ -86,7 +86,6 @@ int dispatch(int argc, char **argv) {
 
   if (verb == "render") {
     char const *out{ nullptr };
-    char const *profile{ "readable" };
     bool embed{ false };
     LayoutArgs args;
     for (int i = 2; i < argc; ++i) {
@@ -97,9 +96,6 @@ int dispatch(int argc, char **argv) {
       if (arg == "-o") {
         if (((i + 1) >= argc) || (out != nullptr)) { return usage(); }
         out = argv[++i];
-      } else if (arg == "--profile") {
-        if ((i + 1) >= argc) { return usage(); }
-        profile = argv[++i];
       } else if (arg == "--embed-font") {
         if (embed) { return usage(); }
         embed = true;
@@ -110,7 +106,7 @@ int dispatch(int argc, char **argv) {
       }
     }
     if (path == nullptr) { return usage(); }
-    return run_render(path, out, embed, profile, args);
+    return run_render(path, out, embed, args.profile, args);
   }
 
   if (verb == "selftest") {

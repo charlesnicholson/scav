@@ -7,6 +7,7 @@
 #include "layout/decompose.h"
 #include "layout/order.h"
 #include "layout/route.h"
+#include "layout/router.h"
 #include "layout/size.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
@@ -405,18 +406,60 @@ TEST_CASE(
   CHECK(t.flush == 1);
   CHECK(cost_of(t, profile()).t0_violations == 1);
 
-  // Clear of it by one unit, and leaving and reaching both ends square.
-  Routes const clear{ routes_of(c, { { { .x = 100, .y = 19 }, { .x = 400, .y = 19 } } }) };
+  // Clear of it by the band a route keeps inside a state is clear; one unit
+  // nearer is on it, because a reader cannot tell a line a unit off a border
+  // from the border (11.10g).
+  int32_t const band{ border_band(profile()) };
+  REQUIRE(band > 1);
+  Routes const clear{
+    routes_of(c, { { { .x = 100, .y = 20 - band }, { .x = 400, .y = 20 - band } } })
+  };
   CHECK(cost_terms(c, decompose(c), z, clear, {}, profile()).flush == 0);
+  Routes const near{
+    routes_of(c, { { { .x = 100, .y = 21 - band }, { .x = 400, .y = 21 - band } } })
+  };
+  CHECK(cost_terms(c, decompose(c), z, near, {}, profile()).flush == 1);
 
   // Along its own endpoint's border counts as well: a reader sees the border.
   Routes const own{ routes_of(c,
                               { { { .x = 50, .y = 0 },
                                   { .x = 100, .y = 0 },
                                   { .x = 150, .y = 0 },
-                                  { .x = 150, .y = 19 },
-                                  { .x = 400, .y = 19 } } }) };
+                                  { .x = 150, .y = 20 - band },
+                                  { .x = 400, .y = 20 - band } } }) };
   CHECK(cost_terms(c, decompose(c), z, own, {}, profile()).flush == 1);
+}
+
+TEST_CASE("cost: a route that turns straight back along itself is a Tier-0 violation") {
+  // Down to a port and back up the same line reads as two routes meeting, not
+  // one turning; a square turn and a U through a jog are both still turns.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  SizedLayout z{ blank(c) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
+  z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 40 };
+
+  Routes const back{ routes_of(c,
+                               { { { .x = 100, .y = 20 },
+                                   { .x = 250, .y = 20 },
+                                   { .x = 250, .y = 300 },
+                                   { .x = 250, .y = 200 },
+                                   { .x = 400, .y = 200 } } }) };
+  CostTerms const t{ cost_terms(c, decompose(c), z, back, {}, profile()) };
+  CHECK(t.retrace == 1);
+  CHECK(cost_of(t, profile()).t0_violations == 1);
+
+  Routes const turns{ routes_of(c,
+                                { { { .x = 100, .y = 20 },
+                                    { .x = 250, .y = 20 },
+                                    { .x = 250, .y = 300 },
+                                    { .x = 200, .y = 300 },
+                                    { .x = 200, .y = 200 },
+                                    { .x = 400, .y = 200 } } }) };
+  CHECK(cost_terms(c, decompose(c), z, turns, {}, profile()).retrace == 0);
 }
 
 TEST_CASE("cost: a route through a region neither end is in is a Tier-0 violation") {

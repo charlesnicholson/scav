@@ -16,9 +16,13 @@ namespace scav {
 struct CoordGraph {
   // One segment between consecutive layers. `inner` marks a segment whose
   // both ends are dummies, which is the one a type-1 conflict protects.
+  // `from_at` and `to_at` are where the segment meets each end, from that
+  // end's centre along the cross axis: an aligned pair puts those two points
+  // at one coordinate, not the two centres.
   struct Edge {
     uint32_t from, to;
     uint32_t inner;
+    int32_t from_at{ 0 }, to_at{ 0 };
   };
 
   std::vector<int32_t> extent;                // indexed by node

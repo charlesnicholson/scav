@@ -276,6 +276,11 @@ struct CostTerms {
   // only leaves or reaches. `through_box` sees the states; this sees the
   // regions inside a state a route is allowed to be in (11.10g).
   int32_t through_region{ 0 };
+  // Route vertices where an axis-aligned segment turns straight back along the
+  // one before it. The run is drawn twice over one line, so a reader sees a
+  // route that stops and another that starts rather than one that turns
+  // (11.10g).
+  int32_t retrace{ 0 };
 };
 
 // Compared lexicographically, in this order.

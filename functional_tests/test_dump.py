@@ -102,22 +102,35 @@ class TestDump(unittest.TestCase):
     def test_the_flags_a_layout_rests_on_lay_it_out_again_unsearched(self) -> None:
         # The counterfactual harness's premise (11.10g): the row and pins a run
         # prints, handed back with `--no-search`, are that drawing exactly, so
-        # an edited copy of them is scored on the same objective.
-        shipped = self.run_dump("--layout", CHART.as_posix())
-        self.assertEqual(0, shipped.returncode)
-        rests = [ln for ln in shipped.stdout.splitlines() if ln.startswith("  rests on ")]
-        self.assertEqual(1, len(rests))
-        flags = rests[0][len("  rests on "):].split()
-        self.assertEqual("--portfolio-row", flags[0])
-        again = self.run_dump("--layout", "--no-search", *flags, CHART.as_posix())
-        self.assertEqual(0, again.returncode)
-        geometry = [ln for ln in shipped.stdout.splitlines() if ln.startswith("geometry ")]
-        self.assertEqual(geometry,
-                         [ln for ln in again.stdout.splitlines() if ln.startswith("geometry ")])
+        # an edited copy of them is scored on the same objective. A profile
+        # other than the default and the no-text scale are part of what it
+        # rests on, and print first.
+        for given, lead in (([], "--portfolio-row"),
+                            (["--profile", "compact", "--no-text"], "--profile")):
+            with self.subTest(given=given):
+                shipped = self.run_dump("--layout", *given, CHART.as_posix())
+                self.assertEqual(0, shipped.returncode)
+                rests = [ln for ln in shipped.stdout.splitlines()
+                         if ln.startswith("  rests on ")]
+                self.assertEqual(1, len(rests))
+                flags = rests[0][len("  rests on "):].split()
+                self.assertEqual(lead, flags[0])
+                again = self.run_dump("--layout", "--no-search", *flags, CHART.as_posix())
+                self.assertEqual(0, again.returncode)
+                geometry = [ln for ln in shipped.stdout.splitlines()
+                            if ln.startswith("geometry ")]
+                self.assertEqual(geometry, [ln for ln in again.stdout.splitlines()
+                                            if ln.startswith("geometry ")])
+
+    def test_an_unknown_profile_is_refused(self) -> None:
+        result = self.run_dump("--layout", "--profile", "nonesuch", CHART.as_posix())
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("no such profile", result.stderr)
 
     def test_a_malformed_pin_is_a_usage_error(self) -> None:
         for bad in (["--rank", "1"], ["--cut", "a:b"], ["--face", "1:0:2:0"],
-                    ["--portfolio-row", "99"], ["--no-search", "--no-search"]):
+                    ["--portfolio-row", "99"], ["--no-search", "--no-search"],
+                    ["--no-text", "--no-text"], ["--profile"]):
             with self.subTest(bad=bad):
                 result = self.run_dump("--layout", *bad, CHART.as_posix())
                 self.assertEqual(2, result.returncode)

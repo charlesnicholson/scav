@@ -44,15 +44,18 @@ void load_and_report(char const *path, bool validate, Loaded &out);
 // `--no-search` lay that drawing out again exactly, so an edited copy of them
 // is a counterfactual scored on the shipped objective (11.10g).
 struct LayoutArgs {
+  char const *profile{ "readable" };
   uint32_t row{ INVALID };
   SearchPins pins;
   bool no_search{ false };
+  bool no_text{ false };
   bool given{ false };  // any of the flags below appeared
 };
 
 enum class ArgRead : uint32_t { NotOurs, Taken, Malformed };
 
 // One of these at `argv[i]`, with `i` advanced past its value:
+//   --profile NAME       a shipped profile in place of `readable`
 //   --portfolio-row N    a row in place of the search
 //   --rank S:R           state S held at rank R of its frame (11.10a)
 //   --cut T:L            leg L of transition T left unchained (11.10b)
@@ -60,10 +63,17 @@ enum class ArgRead : uint32_t { NotOurs, Taken, Malformed };
 //   --face T:L:E:F       end E (0 departs, 1 arrives) leaves by face F: 0 left,
 //                        1 right, 2 top, 3 bottom (11.10e)
 //   --no-search          lay out the row and pins given, and move nothing
+//   --no-text            lay out with no space requests, the scale the layout
+//                        goldens are stated at
 ArgRead read_layout_arg(int argc, char **argv, int &i, LayoutArgs &out);
 
-// The flags above that lay out a run's drawing again: its row and every pin.
-void append_layout_args(std::string &out, uint32_t row, SearchPins const &pins);
+// The flags above that lay out a run's drawing again: its profile where it is
+// not the default and its scale where it is not real text, from `args`; its
+// row and every pin, from the run.
+void append_layout_args(std::string &out,
+                        LayoutArgs const &args,
+                        uint32_t row,
+                        SearchPins const &pins);
 
 int run_dump(char const *path,
              bool hash_only,

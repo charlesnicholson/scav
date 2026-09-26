@@ -632,10 +632,14 @@ CostTerms cost_terms(Chart const &c,
                          .trans = tr,
                          .k = k });
       if ((k + 2) < route.len) {
-        if (direction(r.points[route.off + k], r.points[route.off + k + 1]) !=
-            direction(r.points[route.off + k + 1], r.points[route.off + k + 2])) {
-          ++t.bends;
-        }
+        uint32_t const in{ direction(r.points[route.off + k],
+                                     r.points[route.off + k + 1]) };
+        uint32_t const out{ direction(r.points[route.off + k + 1],
+                                      r.points[route.off + k + 2]) };
+        if (in != out) { ++t.bends; }
+        // `direction` is three steps per axis with the middle one still, so
+        // the reverse of `in` is `8 - in`; odd codes are the axis-aligned ones.
+        if (((in % 2) == 1) && (out == (8 - in))) { ++t.retrace; }
       }
     }
   }
@@ -766,7 +770,8 @@ CostTerms cost_terms(Chart const &c,
   t.through_box = cost_through_boxes(c, z, an, grid, pieces);
   for (Piece const &piece : pieces) {
     for (uint32_t st = 0; st < c.states.size(); ++st) {
-      if ((c.states[st].live != 0) && along_border(piece.a, piece.b, z.state[st])) {
+      if ((c.states[st].live != 0) &&
+          along_border(piece.a, piece.b, z.state[st], border_band(p) - 1)) {
         ++t.flush;
         break;
       }
@@ -866,7 +871,7 @@ CostTerms layout_cost(Chart const &c,
 Cost cost_of(CostTerms const &t, scav_profile const &p) {
   Cost out;
   out.t0_violations =
-      t.through_box + t.box_overlap + t.vanished + t.flush + t.through_region;
+      t.through_box + t.box_overlap + t.vanished + t.flush + t.through_region + t.retrace;
   // Area is the largest term at (2 * COORD_MAX)^2 < 2^40, its em^2 only divides
   // it down, and nine of those under a weight capped at 2^10 stay below 2^54.
   for (Wide const term : weighted_terms(t, p)) { out.t2 += term; }

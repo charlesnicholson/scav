@@ -7,11 +7,25 @@
 #include "scav/scav_core.h"
 #include "scav/scav_layout_c.h"
 #include "scav/scav_types.h"
+#include "scav_int.h"
 
 #include <cstdint>
 #include <vector>
 
 namespace scav {
+
+// The room a route keeps from a box it passes.
+constexpr int32_t route_clearance(scav_profile const &p) {
+  return imax(p.node_sep / 3, 1);
+}
+
+// How far inside the state it is drawn in a route keeps: half the ring a box's
+// contents sit inside, capped by the clearance, so a child at `pad` keeps its
+// own bumper. A segment parallel to a border and nearer than this reads as
+// the border itself (11.10g).
+constexpr int32_t border_band(scav_profile const &p) {
+  return imax(imin(route_clearance(p), p.pad) / 2, 1);
+}
 
 // An end at a box centre names that box, so a router can move the point onto
 // its border instead.

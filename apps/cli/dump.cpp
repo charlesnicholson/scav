@@ -297,6 +297,7 @@ std::array<int64_t, TIER2_TERMS> term_values(CostTerms const &t) {
 void append_geometry_text(std::string &out,
                           Chart const &c,
                           CostTerms const &terms,
+                          LayoutArgs const &args,
                           scav_profile const &p,
                           std::vector<scav_placed> const &placed,
                           scav_spaces const &s,
@@ -320,7 +321,7 @@ void append_geometry_text(std::string &out,
   out += '\n';
   if (row != INVALID) {
     out += "  rests on ";
-    append_layout_args(out, row, pins);
+    append_layout_args(out, args, row, pins);
     out += '\n';
   }
 
@@ -341,6 +342,8 @@ void append_geometry_text(std::string &out,
   append_i32v(out, terms.flush);
   out += " through_region ";
   append_i32v(out, terms.through_region);
+  out += " retrace ";
+  append_i32v(out, terms.retrace);
   out += '\n';
   for (uint32_t i = 0; i < TIER2_TERMS; ++i) {
     out += "    ";
@@ -563,6 +566,7 @@ void append_json_rect(std::string &out, scav_rect r) {
 void append_geometry_json(std::string &out,
                           Chart const &c,
                           CostTerms const &terms,
+                          LayoutArgs const &args,
                           scav_profile const &p,
                           std::vector<scav_placed> const &placed,
                           scav_spaces const &s,
@@ -578,7 +582,7 @@ void append_geometry_json(std::string &out,
   append_json_rect(out, geom_rows<scav_rect>(c, "scav.geom.chart")[0]);
   if (row != INVALID) {
     out += ",\n    \"rests_on\": \"";
-    append_layout_args(out, row, pins);
+    append_layout_args(out, args, row, pins);
     out += '"';
   }
 
@@ -599,6 +603,8 @@ void append_geometry_json(std::string &out,
   append_i32v(out, terms.flush);
   out += ",\n      \"through_region\": ";
   append_i32v(out, terms.through_region);
+  out += ",\n      \"retrace\": ";
+  append_i32v(out, terms.retrace);
   for (uint32_t i = 0; i < TIER2_TERMS; ++i) {
     out += ",\n      ";
     append_json_string(out, TERMS[i]);
@@ -789,7 +795,10 @@ int run_dump(char const *path,
   if (net.code == EXIT_UNUSABLE) { return EXIT_UNUSABLE; }
 
   scav_layout_opts opts{};
-  profile_named("readable", opts.profile);
+  if (!profile_named(args.profile, opts.profile)) {
+    write_error("no such profile", args.profile);
+    return EXIT_UNUSABLE;
+  }
   if (args.no_search) { opts.profile.portfolio_k = 0; }
   CostTerms cost{};
   // What the drawing rests on, for the line that lays it out again. Unknown
@@ -804,8 +813,8 @@ int run_dump(char const *path,
     // The reference builder's measurement pass, which is the policy every
     // corpus golden is stated against.
     Metrics metrics;
-    if (!metrics_create(nullptr, 0, metrics) ||
-        !measure_chart(net.chart, metrics, opts.profile, spaces)) {
+    if (!args.no_text && (!metrics_create(nullptr, 0, metrics) ||
+                          !measure_chart(net.chart, metrics, opts.profile, spaces))) {
       write_error("cannot measure the chart with the bundled font", path);
       return EXIT_UNUSABLE;
     }
@@ -856,6 +865,7 @@ int run_dump(char const *path,
       append_geometry_json(out,
                            net.chart,
                            cost,
+                           args,
                            opts.profile,
                            placed,
                            as_spaces(spaces),
@@ -869,6 +879,7 @@ int run_dump(char const *path,
       append_geometry_text(out,
                            net.chart,
                            cost,
+                           args,
                            opts.profile,
                            placed,
                            as_spaces(spaces),
