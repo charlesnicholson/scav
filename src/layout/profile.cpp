@@ -59,12 +59,10 @@ constexpr scav_profile READABLE{
   .w_area = 1,
   .w_crowding = 512,
   .portfolio_k = 1024,
-  // Rows {as given, trybox}, which is every row the corpus picks that improved
-  // a picture. Rows 2 and 3 turn compaction on and 4 through 7 hand a frame its
-  // owner's hole: both are built, tested and measured, and neither ships until
-  // 11.6's label weights are fitted and can price what they cost a reader
-  // (11.10, 17 P9d).
-  .portfolio_m = 8,
+  // The whole table: the packer, compaction, a frame's owner's hole, and a
+  // frame that always folds, each row searched and kicked to convergence. Row 8
+  // onward is where `axis`'s regions stack into columns (11.10g).
+  .portfolio_m = 16,
   .sweep_count = 8,
   .congestion_iterations = 8,
   .ripup_cap = 16,
@@ -117,12 +115,10 @@ constexpr scav_profile COMPACT{
   .w_area = 1,
   .w_crowding = 512,
   .portfolio_k = 1024,
-  // Rows {as given, trybox}, which is every row the corpus picks that improved
-  // a picture. Rows 2 and 3 turn compaction on and 4 through 7 hand a frame its
-  // owner's hole: both are built, tested and measured, and neither ships until
-  // 11.6's label weights are fitted and can price what they cost a reader
-  // (11.10, 17 P9d).
-  .portfolio_m = 8,
+  // The whole table: the packer, compaction, a frame's owner's hole, and a
+  // frame that always folds, each row searched and kicked to convergence. Row 8
+  // onward is where `axis`'s regions stack into columns (11.10g).
+  .portfolio_m = 16,
   .sweep_count = 8,
   .congestion_iterations = 8,
   .ripup_cap = 16,

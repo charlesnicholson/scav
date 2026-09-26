@@ -31,10 +31,9 @@ TEST_CASE("profile: both shipped profiles load and pass their own validation") {
     scav_profile const p{ named(name) };
     CHECK(profile_validate(p));
     CHECK(p.profile_version == 10);
-    // The whole table (11.10). Two shipped while the objective mis-ranked
-    // five charts of eleven and more candidates made worse picks; fitted, the
-    // corpus reads 71 defects against 78 at two and a floor of 70.
-    CHECK(p.portfolio_m == 8);
+    // The whole table (11.10, 11.10g): every row searched and kicked, which is
+    // where `axis`'s compact drawing is.
+    CHECK(p.portfolio_m == 16);
   }
   CHECK(named("compact").profile_id != named("readable").profile_id);
 }

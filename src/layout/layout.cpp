@@ -4,6 +4,7 @@
 
 #include "layout/cost.h"
 #include "layout/decompose.h"
+#include "layout/geom.h"
 #include "layout/order.h"
 #include "layout/route.h"
 #include "layout/router.h"
@@ -982,9 +983,11 @@ bool layout_run(Chart &c,
   // the row that converges to a canvas 38% smaller (11.10g).
   if (budget != 0) { search_rows(std::vector<uint8_t>(rows, 1)); }
   std::vector<uint8_t> const &eligible{ viable };
-  uint32_t const best{ search_argmin(cost, eligible) };
 
-  // Iterated local search on the winner (11.10f). A reversal scores worse on
+  // Iterated local search on every viable row, and the rows ranked by what it
+  // reaches (11.10f, 11.10g): the row cheapest before its kicks is not the
+  // cheapest after them, and kicking only that one shipped `axis` as a strip
+  // half again the cost of what row 0 kicks to. A reversal scores worse on
   // its own than the incumbent it would replace, so no strictly improving pass
   // takes it; each edge on a cycle and not already turned is tried as a start
   // instead and searched to convergence, and kept when it converges below the
@@ -998,7 +1001,7 @@ bool layout_run(Chart &c,
   // combination is kept when it beats the best of them alone. `mill`'s six
   // copies of `estop` would otherwise take six rounds for six independent
   // choices.
-  if ((budget != 0) && (viable[best] != 0)) {
+  auto const kick = [&](uint32_t best) {
     scav_profile knobs{};
     DarSource dar{ DarSource::Profile };
     Compaction pack{ Compaction::Off };
@@ -1141,7 +1144,46 @@ bool layout_run(Chart &c,
         take(std::move(settled));
       }
     }
+  };
+  // Row by row, each kicking with the whole host, so the order the rows finish
+  // in is the table's and not the scheduler's. A row that converged to the
+  // drawing an earlier row did is not kicked again: its kicks start from that
+  // drawing, and the table's rows differ by knobs that often move nothing.
+  auto const same_drawing = [&](uint32_t a, uint32_t b) {
+    SizedLayout const &za{ candidates[a].sized };
+    SizedLayout const &zb{ candidates[b].sized };
+    if (!(cost[a].t0_violations == cost[b].t0_violations) || (cost[a].t2 != cost[b].t2) ||
+        (za.state.size() != zb.state.size()) ||
+        (candidates[a].routes.points.size() != candidates[b].routes.points.size())) {
+      return false;
+    }
+    for (uint32_t k = 0; k < za.state.size(); ++k) {
+      scav_rect const &ra{ za.state[k] };
+      scav_rect const &rb{ zb.state[k] };
+      if ((ra.x != rb.x) || (ra.y != rb.y) || (ra.w != rb.w) || (ra.h != rb.h)) {
+        return false;
+      }
+    }
+    for (uint32_t k = 0; k < candidates[a].routes.points.size(); ++k) {
+      if (!same(candidates[a].routes.points[k], candidates[b].routes.points[k])) {
+        return false;
+      }
+    }
+    return true;
+  };
+  if (budget != 0) {
+    // Decided before any kick, which replaces a row's drawing.
+    std::vector<uint8_t> repeat(rows, 0);
+    for (uint32_t i = 0; i < rows; ++i) {
+      for (uint32_t j = 0; (j < i) && (viable[i] != 0) && (repeat[i] == 0); ++j) {
+        if ((viable[j] != 0) && (repeat[j] == 0) && same_drawing(i, j)) { repeat[i] = 1; }
+      }
+    }
+    for (uint32_t i = 0; i < rows; ++i) {
+      if ((viable[i] != 0) && (repeat[i] == 0)) { kick(i); }
+    }
   }
+  uint32_t const best{ search_argmin(cost, eligible) };
   // Written whichever way the branches above went: what the drawing rests on,
   // not what this run added, so a run with no budget stands on its seed. The
   // move count is the pins beyond the seed rather than a sum of what each

@@ -1792,6 +1792,32 @@ TEST_CASE("layout: a pinned row runs that row, and searches from it") {
   CHECK(picked == 4);
 }
 
+TEST_CASE("layout: what ships is the cheapest row searched and kicked on its own") {
+  // A pinned row is that row searched and kicked to convergence, so the run
+  // over the whole table can do no worse than any of them. Kicking only the
+  // row that converged cheapest before its kicks shipped `axis` at Tier 2
+  // 3,024 against the 2,815 row 12 kicks to (11.10g).
+  scav_profile const p{ readable() };
+  REQUIRE(p.portfolio_m == static_cast<int32_t>(LAYOUT_SEARCH_ROWS));
+  auto const scored = [&](uint32_t row) {
+    Chart c;
+    load_corpus("axis.scav", c);
+    std::vector<scav_placed> placed;
+    std::vector<Diagnostic> diags;
+    REQUIRE(layout_run(c, {}, opts(p), placed, diags, nullptr, nullptr, row));
+    return cost_of(cost_columns(c, decompose(c), p), p);
+  };
+  Cost const shipped{ scored(INVALID) };
+  Cost least{ shipped };
+  for (uint32_t row = 0; row < LAYOUT_SEARCH_ROWS; ++row) {
+    CAPTURE(row);
+    Cost const one{ scored(row) };
+    CHECK(!cost_less(one, shipped));
+    if (cost_less(one, least)) { least = one; }
+  }
+  CHECK(least.t2 == shipped.t2);
+}
+
 TEST_CASE("layout: no budget is the run it was, and a budget only improves") {
   // The loop 11.10a's moves run in, tested before any move goes through it. At
   // `portfolio_k` of zero nothing is scored and the drawing is byte-identical
