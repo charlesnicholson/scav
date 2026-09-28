@@ -5,6 +5,7 @@
 #include "layout/cost.h"
 #include "layout/decompose.h"
 #include "layout/geom.h"
+#include "layout/memo.h"
 #include "layout/order.h"
 #include "layout/route.h"
 #include "layout/router.h"
@@ -30,6 +31,13 @@
 
 namespace scav {
 
+#ifdef SCAV_TESTING
+void layout_test_search_memo(bool on);
+void layout_test_search_memo_verify(bool on);
+uint32_t layout_test_search_memo_hits();
+uint32_t layout_test_search_memo_mismatches();
+#endif
+
 SCAV_INTERNAL_BEGIN
 // The inflation loop's decision and the portfolio's three pure parts,
 // bracketed so a test reaches cases no chart does. The prototypes a test uses
@@ -43,6 +51,18 @@ void search_tuple(scav_profile &p,
                   Fold &fold,
                   uint32_t index);
 uint32_t search_argmin(std::vector<Cost> const &cost, std::vector<uint8_t> const &viable);
+// Everything a Level 1 search's result is a function of, as words: the
+// objective, the row's tuple, the budget, the pins it starts from in their
+// order, and the frames it may move in.
+void search_key(scav_profile const &objective,
+                scav_profile const &knobs,
+                DarSource dar,
+                Compaction pack,
+                Fold fold,
+                uint32_t budget,
+                SearchPins const &seed,
+                std::vector<uint8_t> const *scope,
+                std::vector<uint32_t> &key);
 SCAV_INTERNAL_END
 
 namespace {
@@ -504,19 +524,19 @@ Scored score_move(Chart const &c,
 // **A move is a pin and pins compose**, so accepting one is appending to the
 // list the next round re-derives from, and rejecting one is not appending. No
 // geometry is ever mutated and nothing has to be rolled back (11.10a).
-Improved search_moves(Chart const &c,
-                      SplitGraph const &g,
-                      scav_spaces const &s,
-                      scav_profile const &objective,
-                      scav_profile const &knobs,
-                      DarSource dar,
-                      Compaction pack,
-                      Fold fold,
-                      Router const &router,
-                      uint32_t threads,
-                      uint32_t budget,
-                      SearchPins const &seed,
-                      std::vector<uint8_t> const *scope = nullptr) {
+Improved run_search(Chart const &c,
+                    SplitGraph const &g,
+                    scav_spaces const &s,
+                    scav_profile const &objective,
+                    scav_profile const &knobs,
+                    DarSource dar,
+                    Compaction pack,
+                    Fold fold,
+                    Router const &router,
+                    uint32_t threads,
+                    uint32_t budget,
+                    SearchPins const &seed,
+                    std::vector<uint8_t> const *scope) {
   Improved out;
   // `scope` is per submachine and null for all of them: a move is offered only
   // in a frame it names. A kick changes one frame and the rest are converged,
@@ -770,6 +790,222 @@ Improved search_moves(Chart const &c,
   return out;
 }
 
+void put_pins(SearchPins const &p, std::vector<uint32_t> &w) {
+  w.push_back(static_cast<uint32_t>(p.ranks.size()));
+  for (RankPin const &r : p.ranks) { w.insert(w.end(), { r.state.v, r.rank }); }
+  w.push_back(static_cast<uint32_t>(p.cuts.size()));
+  for (ChainCut const &k : p.cuts) { w.insert(w.end(), { k.trans.v, k.leg }); }
+  w.push_back(static_cast<uint32_t>(p.reverses.size()));
+  for (ReversePin const &r : p.reverses) { w.insert(w.end(), { r.trans.v, r.leg }); }
+  w.push_back(static_cast<uint32_t>(p.faces.size()));
+  for (FacePin const &f : p.faces) {
+    w.insert(w.end(), { f.trans.v, f.leg, f.end, f.face });
+  }
+  w.push_back(static_cast<uint32_t>(p.orients.size()));
+  for (OrientPin const &o : p.orients) { w.push_back(o.frame.v); }
+}
+
+// The inverse of `put_pins`, reading from `at` and advancing it.
+SearchPins get_pins(int32_t const *w, uint32_t &at) {
+  auto const next = [&]() { return static_cast<uint32_t>(w[at++]); };
+  SearchPins p;
+  p.ranks.resize(next());
+  for (RankPin &r : p.ranks) { r = { .state = StateId{ next() }, .rank = next() }; }
+  p.cuts.resize(next());
+  for (ChainCut &k : p.cuts) { k = { .trans = TransId{ next() }, .leg = next() }; }
+  p.reverses.resize(next());
+  for (ReversePin &r : p.reverses) { r = { .trans = TransId{ next() }, .leg = next() }; }
+  p.faces.resize(next());
+  for (FacePin &f : p.faces) {
+    f = { .trans = TransId{ next() }, .leg = next(), .end = next(), .face = next() };
+  }
+  p.orients.resize(next());
+  for (OrientPin &o : p.orients) { o = { .frame = SubmachineId{ next() } }; }
+  return p;
+}
+
+// Every search a layout has run, by `search_key`. One started again from all
+// of that ends where the first did, and the second kick schedule and the
+// settling passes start most of theirs where an earlier search already did.
+// Shared by the pool's threads and held only around a lookup or an insert.
+struct SearchMemo {
+  Mutex lock;
+  Memo table{ size_t{ 1 } << 24 };
+  uint32_t hits{ 0 };        // under `lock`
+  uint32_t mismatches{ 0 };  // under `lock`
+};
+
+#ifdef SCAV_TESTING
+// Whether a layout runs its searches through a memo, how many it answered from
+// one last time, and whether every answer is checked against running the
+// search anyway: most answers are searches that lose, so a wrong one would not
+// reach the drawing a test can see.
+bool test_search_memo{ true };
+bool test_search_memo_verify{ false };
+uint32_t test_search_memo_hits{ 0 };
+uint32_t test_search_memo_mismatches{ 0 };
+
+bool same_pins(SearchPins const &a, SearchPins const &b) {
+  std::vector<uint32_t> wa;
+  std::vector<uint32_t> wb;
+  put_pins(a, wa);
+  put_pins(b, wb);
+  return wa == wb;
+}
+
+bool same_result(Improved const &a, Improved const &b) {
+  if ((a.viable != b.viable) || (a.cost.t0_violations != b.cost.t0_violations) ||
+      (a.cost.t1_hints != b.cost.t1_hints) || (a.cost.t2 != b.cost.t2) ||
+      !same_pins(a.held, b.held) || !same_pins(a.best.laid, b.best.laid) ||
+      (a.best.sized.state.size() != b.best.sized.state.size()) ||
+      (a.best.routes.points.size() != b.best.routes.points.size())) {
+    return false;
+  }
+  for (uint32_t k = 0; k < a.best.sized.state.size(); ++k) {
+    scav_rect const &ra{ a.best.sized.state[k] };
+    scav_rect const &rb{ b.best.sized.state[k] };
+    if ((ra.x != rb.x) || (ra.y != rb.y) || (ra.w != rb.w) || (ra.h != rb.h)) {
+      return false;
+    }
+  }
+  for (uint32_t k = 0; k < a.best.routes.points.size(); ++k) {
+    if (!same(a.best.routes.points[k], b.best.routes.points[k])) { return false; }
+  }
+  return true;
+}
+#endif
+
+// `run_search` from the memo where it holds the start. A hit keeps the pins
+// and cost the search reached and re-derives the drawing from the pins, as the
+// search's own last step did. A traced run searches, since a hit emits nothing.
+Improved search_moves(Chart const &c,
+                      SplitGraph const &g,
+                      scav_spaces const &s,
+                      scav_profile const &objective,
+                      scav_profile const &knobs,
+                      DarSource dar,
+                      Compaction pack,
+                      Fold fold,
+                      Router const &router,
+                      uint32_t threads,
+                      uint32_t budget,
+                      SearchPins const &seed,
+                      std::vector<uint8_t> const *scope,
+                      SearchMemo *memo) {
+  if ((memo == nullptr) || (trace_sink() != nullptr)) {
+    return run_search(c,
+                      g,
+                      s,
+                      objective,
+                      knobs,
+                      dar,
+                      pack,
+                      fold,
+                      router,
+                      threads,
+                      budget,
+                      seed,
+                      scope);
+  }
+  std::vector<uint32_t> key;
+  search_key(objective, knobs, dar, pack, fold, budget, seed, scope, key);
+  std::vector<int32_t> value;
+  bool hit{ false };
+  {
+    ScopedLock const held{ memo->lock };
+    int32_t const *at{ nullptr };
+    uint32_t len{ 0 };
+    hit = memo->table.find(key, at, len);
+    if (hit) {
+      value.assign(at, at + len);
+      ++memo->hits;
+    }
+  }
+  if (hit) {
+    Improved out;
+    uint32_t at{ 0 };
+    out.viable = value[at++] != 0;
+    out.cost.t0_violations = value[at++];
+    uint32_t const t1_hi{ static_cast<uint32_t>(value[at++]) };
+    uint32_t const t1_lo{ static_cast<uint32_t>(value[at++]) };
+    uint32_t const t2_hi{ static_cast<uint32_t>(value[at++]) };
+    uint32_t const t2_lo{ static_cast<uint32_t>(value[at++]) };
+    out.cost.t1_hints = static_cast<int64_t>((uint64_t{ t1_hi } << 32U) | t1_lo);
+    out.cost.t2 = static_cast<int64_t>((uint64_t{ t2_hi } << 32U) | t2_lo);
+    out.held = get_pins(value.data(), at);
+    SubmachineOrders const here{
+      order_submachines(c, g, s, objective, threads, out.held)
+    };
+    std::vector<Diagnostic> spilled;
+    out.best = search_candidate(c,
+                                g,
+                                here,
+                                s,
+                                knobs,
+                                dar,
+                                pack,
+                                fold,
+                                router,
+                                threads,
+                                spilled,
+                                nullptr,
+                                nullptr,
+                                &out.held);
+#ifdef SCAV_TESTING
+    if (test_search_memo_verify) {
+      Improved const fresh{ run_search(c,
+                                       g,
+                                       s,
+                                       objective,
+                                       knobs,
+                                       dar,
+                                       pack,
+                                       fold,
+                                       router,
+                                       threads,
+                                       budget,
+                                       seed,
+                                       scope) };
+      if (!same_result(out, fresh)) {
+        ScopedLock const held{ memo->lock };
+        ++memo->mismatches;
+      }
+    }
+#endif
+    return out;
+  }
+  Improved out{ run_search(c,
+                           g,
+                           s,
+                           objective,
+                           knobs,
+                           dar,
+                           pack,
+                           fold,
+                           router,
+                           threads,
+                           budget,
+                           seed,
+                           scope) };
+  std::vector<uint32_t> words{
+    out.viable ? 1U : 0U,
+    static_cast<uint32_t>(out.cost.t0_violations),
+    static_cast<uint32_t>(static_cast<uint64_t>(out.cost.t1_hints) >> 32U),
+    static_cast<uint32_t>(static_cast<uint64_t>(out.cost.t1_hints)),
+    static_cast<uint32_t>(static_cast<uint64_t>(out.cost.t2) >> 32U),
+    static_cast<uint32_t>(static_cast<uint64_t>(out.cost.t2))
+  };
+  put_pins(out.held, words);
+  value.assign(words.begin(), words.end());
+  {
+    ScopedLock const held{ memo->lock };
+    int32_t const *at{ nullptr };
+    uint32_t len{ 0 };
+    if (!memo->table.find(key, at, len)) { memo->table.insert(key, value); }
+  }
+  return out;
+}
+
 }  // namespace
 
 SCAV_INTERNAL_BEGIN
@@ -828,6 +1064,35 @@ uint32_t search_argmin(std::vector<Cost> const &cost, std::vector<uint8_t> const
     }
   }
   return best;
+}
+
+void search_key(scav_profile const &objective,
+                scav_profile const &knobs,
+                DarSource dar,
+                Compaction pack,
+                Fold fold,
+                uint32_t budget,
+                SearchPins const &seed,
+                std::vector<uint8_t> const *scope,
+                std::vector<uint32_t> &key) {
+  static_assert((sizeof(scav_profile) % sizeof(uint32_t)) == 0);
+  std::array<uint32_t, sizeof(scav_profile) / sizeof(uint32_t)> words{};
+  key.clear();
+  for (scav_profile const *const at : { &objective, &knobs }) {
+    std::memcpy(words.data(), at, sizeof(scav_profile));
+    key.insert(key.end(), words.begin(), words.end());
+  }
+  key.insert(key.end(),
+             { static_cast<uint32_t>(dar),
+               static_cast<uint32_t>(pack),
+               static_cast<uint32_t>(fold),
+               budget });
+  put_pins(seed, key);
+  key.push_back((scope == nullptr) ? 0U : 1U);
+  if (scope != nullptr) {
+    key.push_back(static_cast<uint32_t>(scope->size()));
+    for (uint8_t const f : *scope) { key.push_back(f); }
+  }
 }
 
 SCAV_INTERNAL_END
@@ -950,6 +1215,11 @@ bool layout_run(Chart &c,
         search_tuple(knobs, dar, pack, fold, pinned ? row : i);
       };
   std::vector<SearchPins> held(rows, seed);
+  SearchMemo memo;
+  SearchMemo *memo_at{ &memo };
+#ifdef SCAV_TESTING
+  if (!test_search_memo) { memo_at = nullptr; }
+#endif
   // Searches the rows `which` names from the pins they hold, and keeps what
   // each reached.
   auto const search_rows = [&](std::vector<uint8_t> const &which) {
@@ -976,7 +1246,9 @@ bool layout_run(Chart &c,
                              *router,
                              o.threads,
                              budget,
-                             held[active[k]]);
+                             held[active[k]],
+                             nullptr,
+                             memo_at);
     });
     for (uint32_t k = 0; k < n; ++k) {
       if (!done[k].viable) { continue; }
@@ -1123,7 +1395,8 @@ bool layout_run(Chart &c,
                                   o.threads,
                                   budget,
                                   start,
-                                  &redo);
+                                  &redo,
+                                  memo_at);
         });
 
         // The best improving kick of each frame, and the best of those, in
@@ -1167,7 +1440,8 @@ bool layout_run(Chart &c,
                                           o.threads,
                                           budget,
                                           start,
-                                          &redo) };
+                                          &redo,
+                                          memo_at) };
           if (together.viable && cost_less(together.cost, tried[single].cost)) {
             take(std::move(together));
             kicked = true;
@@ -1206,7 +1480,8 @@ bool layout_run(Chart &c,
                                       o.threads,
                                       budget,
                                       start,
-                                      &redo) };
+                                      &redo,
+                                      memo_at) };
           if (more.viable && cost_less(more.cost, cost[best])) { take(std::move(more)); }
         }
       }
@@ -1225,7 +1500,9 @@ bool layout_run(Chart &c,
                                        *router,
                                        o.threads,
                                        budget,
-                                       held[best]) };
+                                       held[best],
+                                       nullptr,
+                                       memo_at) };
         if (settled.viable && cost_less(settled.cost, cost[best])) {
           take(std::move(settled));
         }
@@ -1295,6 +1572,10 @@ bool layout_run(Chart &c,
     });
   }
   uint32_t const best{ search_argmin(cost, eligible) };
+#ifdef SCAV_TESTING
+  test_search_memo_hits = memo.hits;
+  test_search_memo_mismatches = memo.mismatches;
+#endif
   // Written whichever way the branches above went: what the drawing rests on,
   // not what this run added, so a run with no budget stands on its seed. The
   // move count is the pins beyond the seed rather than a sum of what each
@@ -1453,5 +1734,12 @@ uint32_t layout_structural_hash(Chart const &c) {
   }
   return xxhash32(b.data(), b.size(), chart_structural_hash(c));
 }
+
+#ifdef SCAV_TESTING
+void layout_test_search_memo(bool on) { test_search_memo = on; }
+void layout_test_search_memo_verify(bool on) { test_search_memo_verify = on; }
+uint32_t layout_test_search_memo_hits() { return test_search_memo_hits; }
+uint32_t layout_test_search_memo_mismatches() { return test_search_memo_mismatches; }
+#endif
 
 }  // namespace scav

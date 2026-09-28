@@ -9,6 +9,11 @@ void thread_test_spawn_limit(uint32_t limit);
 void thread_test_delay_seed(uint64_t seed);
 #endif
 
+Mutex::Mutex() = default;
+Mutex::~Mutex() = default;
+void Mutex::lock() {}
+void Mutex::unlock() {}
+
 uint32_t thread_concurrency() { return 1U; }
 
 void parallel_for(uint32_t shards, uint32_t /*threads*/, ShardFn fn, void *ctx) {

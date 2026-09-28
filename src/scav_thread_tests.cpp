@@ -386,3 +386,25 @@ TEST_CASE("thread: two callers on threads of their own share the pool") {
   CHECK(count_of(a, 8U) == PER_CALL);
   CHECK(count_of(b, 8U) == PER_CALL);
 }
+
+TEST_CASE("thread: a mutex lets one holder in at a time") {
+  // Each holder counts itself in, dwells, and counts itself out; a second
+  // holder inside at once would see the count above one.
+  Mutex m;
+  std::atomic<uint32_t> inside{ 0 };
+  std::atomic<uint32_t> overlaps{ 0 };
+  uint64_t total{ 0 };
+  constexpr uint32_t HOLDS{ 2000 };
+  parallel_for(16U, 0U, [&](uint32_t /*shard*/) {
+    for (uint32_t i = 0; i < HOLDS; ++i) {
+      ScopedLock const held{ m };
+      if (inside.fetch_add(1U) != 0U) { overlaps.fetch_add(1U); }
+      uint32_t volatile dwell{ 0 };
+      for (uint32_t k = 0; k < 64U; ++k) { dwell = dwell + 1U; }
+      ++total;
+      inside.fetch_sub(1U);
+    }
+  });
+  CHECK(overlaps.load() == 0U);
+  CHECK(total == uint64_t{ 16 } * HOLDS);
+}

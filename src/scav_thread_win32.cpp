@@ -64,6 +64,11 @@ DWORD WINAPI worker_main(LPVOID arg) {
 
 }  // namespace
 
+Mutex::Mutex() : impl(new SRWLOCK) { InitializeSRWLock(static_cast<SRWLOCK *>(impl)); }
+Mutex::~Mutex() { delete static_cast<SRWLOCK *>(impl); }
+void Mutex::lock() { AcquireSRWLockExclusive(static_cast<SRWLOCK *>(impl)); }
+void Mutex::unlock() { ReleaseSRWLockExclusive(static_cast<SRWLOCK *>(impl)); }
+
 uint32_t thread_concurrency() {
   DWORD const active{ GetActiveProcessorCount(ALL_PROCESSOR_GROUPS) };
   return (active > 1) ? static_cast<uint32_t>(active) : 1U;
