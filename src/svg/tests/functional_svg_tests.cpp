@@ -14,6 +14,7 @@
 
 #include <array>
 #include <cstdint>
+#include <map>
 #include <ostream>
 #include <string>
 #include <string_view>
@@ -77,6 +78,17 @@ Rendered render(char const *name, Metrics const &m, scav_profile const &p) {
   return r;
 }
 
+// One chart rendered at `readable` with the bundled font, once per process.
+// Five cases read the corpus documents, and at the shipped search depth one
+// pass over them is minutes.
+Rendered const &rendered(char const *name) {
+  static std::map<std::string, Rendered> done;
+  auto const found{ done.find(name) };
+  if (found != done.end()) { return found->second; }
+  Metrics const m{ bundled() };
+  return done.emplace(name, render(name, m, readable())).first->second;
+}
+
 uint32_t count_of(std::string_view doc, std::string_view needle) {
   uint32_t n{ 0 };
   for (size_t at = doc.find(needle); at != std::string_view::npos;
@@ -89,16 +101,13 @@ uint32_t count_of(std::string_view doc, std::string_view needle) {
 }  // namespace
 
 TEST_CASE("svg corpus: every chart renders to the committed golden") {
-  Metrics const m{ bundled() };
-  scav_profile const p{ readable() };
-
   // A hash and a byte count, not the documents: an SVG change should move one
   // line per chart in review, and the documents themselves live in svg/ only
   // for the one chart a human reads.
   std::string actual;
   for (char const *name : CORPUS) {
     CAPTURE(name);
-    Rendered const r{ render(name, m, p) };
+    Rendered const &r{ rendered(name) };
     actual += name;
     actual += ' ';
     string_append_hex32(
@@ -122,8 +131,7 @@ TEST_CASE("svg corpus: every chart renders to the committed golden") {
 }
 
 TEST_CASE("svg corpus: vac's document is committed whole, for a human to read") {
-  Metrics const m{ bundled() };
-  Rendered const r{ render("vac.scav", m, readable()) };
+  Rendered const &r{ rendered("vac.scav") };
 
   std::vector<scav_byte> golden;
   REQUIRE(read_file(SCAV_TEST_DATA_DIR "/golden/svg/vac.svg", golden));
@@ -142,7 +150,7 @@ TEST_CASE("svg corpus: builder and backend agree on every box") {
   // primitive's textLength has to be the width the builder measured when it
   // decided where to put that text, or the diagram lies about its own contents.
   Metrics const m{ bundled() };
-  Rendered const r{ render("vac.scav", m, readable()) };
+  Rendered const &r{ rendered("vac.scav") };
 
   uint32_t checked{ 0 };
   for (scav_prim const &p : r.list.prims) {
@@ -168,8 +176,7 @@ TEST_CASE("svg corpus: builder and backend agree on every box") {
 }
 
 TEST_CASE("svg corpus: every drawn primitive reaches the document") {
-  Metrics const m{ bundled() };
-  Rendered const r{ render("tcp.scav", m, readable()) };
+  Rendered const &r{ rendered("tcp.scav") };
 
   uint32_t rects{ 0 };
   uint32_t polylines{ 0 };
@@ -188,14 +195,15 @@ TEST_CASE("svg corpus: every drawn primitive reaches the document") {
 }
 
 TEST_CASE("svg corpus: the document is stable across repeated renders") {
+  // Against the render the cases above read, so the second is the only one
+  // this case pays for.
   Metrics const m{ bundled() };
-  scav_profile const p{ readable() };
-  CHECK(render("mill.scav", m, p).doc == render("mill.scav", m, p).doc);
+  CHECK(rendered("mill.scav").doc == render("mill.scav", m, readable()).doc);
 }
 
 TEST_CASE("svg corpus: an embedded font is the only thing --embed-font adds") {
   Metrics const m{ bundled() };
-  Rendered const r{ render("led.scav", m, readable()) };
+  Rendered const &r{ rendered("led.scav") };
 
   std::string embedded;
   uint32_t bad{ 0 };

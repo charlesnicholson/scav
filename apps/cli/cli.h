@@ -5,6 +5,7 @@
 // two output streams, and one entry point apiece.
 
 #include "scav/scav_core.h"
+#include "scav/scav_layout.h"
 
 #include <cstdint>
 #include <cstdio>
@@ -37,22 +38,56 @@ struct Loaded {
 // rendering; the two decisions here are which stream and which exit code.
 void load_and_report(char const *path, bool validate, Loaded &out);
 
-// `--portfolio-row N`: a row of 11.10's table in place of the search, so
-// `render` and `dump` can both be pointed at one candidate and the drawing and
-// the geometry come from the same one. False on anything that is not a row.
-// `INVALID` is the search, which is what every verb does unasked.
-bool portfolio_row(char const *text, uint32_t &out);
+// What `render` and `dump --layout` hand layout besides the chart: a row of
+// 11.10's table, or `INVALID` for the search; the pins to start from; and
+// whether to search from them at all. A run's own row and pins with
+// `--no-search` lay that drawing out again exactly, so an edited copy of them
+// is a counterfactual scored on the shipped objective (11.10g).
+struct LayoutArgs {
+  char const *profile{ "readable" };
+  uint32_t row{ INVALID };
+  SearchPins pins;
+  bool no_search{ false };
+  bool no_text{ false };
+  bool given{ false };  // any of the flags below appeared
+};
+
+enum class ArgRead : uint32_t { NotOurs, Taken, Malformed };
+
+// One of these at `argv[i]`, with `i` advanced past its value:
+//   --profile NAME       a shipped profile in place of `readable`
+//   --portfolio-row N    a row in place of the search
+//   --rank S:R           state S held at rank R of its frame (11.10a)
+//   --cut T:L            leg L of transition T left unchained (11.10b)
+//   --reverse T:L        that leg turned round before cycles break (11.10d)
+//   --face T:L:E:F       end E (0 departs, 1 arrives) leaves by face F: 0 left,
+//                        1 right, 2 top, 3 bottom (11.10e)
+//   --orient F           submachine F's ranks run down the page (11.10g)
+//   --no-search          lay out the row and pins given, and move nothing
+//   --no-text            lay out with no space requests, the scale the layout
+//                        goldens are stated at
+ArgRead read_layout_arg(int argc, char **argv, int &i, LayoutArgs &out);
+
+// The flags above that lay out a run's drawing again: its profile where it is
+// not the default and its scale where it is not real text, from `args`; its
+// row and every pin, from the run.
+void append_layout_args(std::string &out,
+                        LayoutArgs const &args,
+                        uint32_t row,
+                        SearchPins const &pins);
 
 int run_dump(char const *path,
              bool hash_only,
              bool as_json,
              bool with_layout,
-             uint32_t row);
+             bool trace,
+             bool trace_search,
+             LayoutArgs const &args);
 int run_render(char const *path,
                char const *out_path,
                bool embed_font,
                char const *profile_name,
-               uint32_t row);
+               LayoutArgs const &args);
 int run_fmt(std::vector<char const *> const &paths, bool check_only);
 int run_deps(char const *path, char const *target);
 int run_selftest(char const *against_path);

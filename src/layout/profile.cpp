@@ -16,7 +16,7 @@ constexpr int32_t PT{ 16 };  // grid units are 1/16 pt
 // One of the two shipped profiles scav_profile_named hands out by name.
 constexpr scav_profile READABLE{
   .profile_id = 2,
-  .profile_version = 7,
+  .profile_version = 11,
   .pad = 8 * PT,
   .rank_sep = 36 * PT,
   .node_sep = 18 * PT,
@@ -51,19 +51,18 @@ constexpr scav_profile READABLE{
   .w_bends = 512,
   .w_corridor = 48,
   .w_crossings = 32,
-  .w_excess_len = 0,
+  .w_excess_len = 4,
   .w_adjacency = 16,
   .w_label = 768,
   .w_label_near = 48,
   .w_aspect = 2,
   .w_area = 1,
-  .portfolio_k = 4,
-  // Rows {as given, trybox}, which is every row the corpus picks that improved
-  // a picture. Rows 2 and 3 turn compaction on and 4 through 7 hand a frame its
-  // owner's hole: both are built, tested and measured, and neither ships until
-  // 11.6's label weights are fitted and can price what they cost a reader
-  // (11.10, 17 P9d).
-  .portfolio_m = 8,
+  .w_crowding = 512,
+  .portfolio_k = 1024,
+  // The whole table: the packer, compaction, a frame's owner's hole, and a
+  // frame that always folds, each row searched and kicked to convergence. Row 8
+  // onward is where `axis`'s regions stack into columns (11.10g).
+  .portfolio_m = 16,
   .sweep_count = 8,
   .congestion_iterations = 8,
   .ripup_cap = 16,
@@ -75,7 +74,7 @@ constexpr scav_profile READABLE{
 // The other shipped profile: tighter spacing and type for dense charts.
 constexpr scav_profile COMPACT{
   .profile_id = 1,
-  .profile_version = 7,
+  .profile_version = 11,
   .pad = 4 * PT,
   .rank_sep = 22 * PT,
   .node_sep = 11 * PT,
@@ -108,19 +107,18 @@ constexpr scav_profile COMPACT{
   .w_bends = 512,
   .w_corridor = 48,
   .w_crossings = 32,
-  .w_excess_len = 0,
+  .w_excess_len = 4,
   .w_adjacency = 16,
   .w_label = 768,
   .w_label_near = 48,
   .w_aspect = 2,
   .w_area = 1,
-  .portfolio_k = 4,
-  // Rows {as given, trybox}, which is every row the corpus picks that improved
-  // a picture. Rows 2 and 3 turn compaction on and 4 through 7 hand a frame its
-  // owner's hole: both are built, tested and measured, and neither ships until
-  // 11.6's label weights are fitted and can price what they cost a reader
-  // (11.10, 17 P9d).
-  .portfolio_m = 8,
+  .w_crowding = 512,
+  .portfolio_k = 1024,
+  // The whole table: the packer, compaction, a frame's owner's hole, and a
+  // frame that always folds, each row searched and kicked to convergence. Row 8
+  // onward is where `axis`'s regions stack into columns (11.10g).
+  .portfolio_m = 16,
   .sweep_count = 8,
   .congestion_iterations = 8,
   .ripup_cap = 16,
@@ -160,7 +158,7 @@ bool profile_validate(scav_profile const &p) {
            in_range(p.w_excess_len, 0, 1024) && in_range(p.w_adjacency, 0, 1024) &&
            in_range(p.w_label, 0, 1024) && in_range(p.w_label_near, 0, 1024) &&
            in_range(p.w_aspect, 0, 1024) && in_range(p.w_area, 0, 1024) &&
-           in_range(p.portfolio_k, 1, 64) &&
+           in_range(p.w_crowding, 0, 1024) && in_range(p.portfolio_k, 0, 1 << 20) &&
            in_range(p.portfolio_m, 1, static_cast<int32_t>(LAYOUT_SEARCH_ROWS)) &&
            in_range(p.sweep_count, 0, 1024) &&
            in_range(p.congestion_iterations, 0, 1024) && in_range(p.ripup_cap, 0, 1024) &&

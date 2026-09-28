@@ -41,6 +41,7 @@ int32_t cost_through_boxes(Chart const &c,
                            std::vector<Piece> const &pieces);
 int64_t cost_crossings(std::vector<Piece> const &pieces, std::vector<uint32_t> &per_trans);
 Wide cost_corridor(Routes const &r, std::vector<Piece> const &pieces);
+Wide cost_crowding(std::vector<Piece> const &pieces, int32_t em);
 SCAV_INTERNAL_END
 
 namespace {
@@ -555,6 +556,56 @@ Wide cost_corridor(Routes const &r, std::vector<Piece> const &pieces) {
   return total;
 }
 
+// Crowding is `corridor`'s near neighbour: two segments of different
+// transitions on one axis, overlapping along it, closer than an em but not on
+// one line. Each pair is charged its overlap scaled by the shortfall, summed
+// before the one division so no pair's charge is truncated away (11.6).
+//
+// Sorted by (axis, coordinate), so the lanes within an em of one another are a
+// window rather than every pair -- the term runs inside every candidate the
+// search scores, and an all-pairs sweep is what `cost_crossings` still is.
+Wide cost_crowding(std::vector<Piece> const &pieces, int32_t em) {
+  if (em <= 0) { return 0; }
+  struct Lane {
+    uint32_t axis;
+    int32_t at;
+    int32_t lo, hi;  // the extent along the axis
+    uint32_t trans;
+  };
+  std::vector<Lane> lanes;
+  lanes.reserve(pieces.size());
+  for (Piece const &pc : pieces) {
+    int32_t at{ 0 };
+    uint32_t const axis{ piece_axis(pc, at) };
+    if (axis >= 2) { continue; }
+    int32_t const a{ (axis == 0) ? pc.a.x : pc.a.y };
+    int32_t const b{ (axis == 0) ? pc.b.x : pc.b.y };
+    lanes.push_back(
+        { .axis = axis, .at = at, .lo = imin(a, b), .hi = imax(a, b), .trans = pc.trans });
+  }
+  scav_stable_sort(lanes, [](Lane const &x, Lane const &y) {
+    return (x.axis != y.axis) ? (x.axis < y.axis) : (x.at < y.at);
+  });
+
+  Wide scaled{ 0 };
+  for (uint32_t i = 0; i < lanes.size(); ++i) {
+    Lane const &u{ lanes[i] };
+    for (uint32_t j = i + 1; j < lanes.size(); ++j) {
+      Lane const &v{ lanes[j] };
+      if (v.axis != u.axis) { break; }
+      Wide const apart{ Wide{ v.at } - u.at };
+      if (apart >= em) { break; }    // sorted, so every later lane is further
+      if (apart == 0) { continue; }  // on one line: `corridor`'s, not this
+      if (u.trans == v.trans) { continue; }
+      Wide const along{ imin(Wide{ u.hi }, Wide{ v.hi }) -
+                        imax(Wide{ u.lo }, Wide{ v.lo }) };
+      if (along <= 0) { continue; }
+      scaled += along * (Wide{ em } - apart);
+    }
+  }
+  return scaled / em;
+}
+
 SCAV_INTERNAL_END
 
 CostTerms cost_terms(Chart const &c,
@@ -581,15 +632,26 @@ CostTerms cost_terms(Chart const &c,
                          .trans = tr,
                          .k = k });
       if ((k + 2) < route.len) {
-        if (direction(r.points[route.off + k], r.points[route.off + k + 1]) !=
-            direction(r.points[route.off + k + 1], r.points[route.off + k + 2])) {
-          ++t.bends;
-        }
+        uint32_t const in{ direction(r.points[route.off + k],
+                                     r.points[route.off + k + 1]) };
+        uint32_t const out{ direction(r.points[route.off + k + 1],
+                                      r.points[route.off + k + 2]) };
+        if (in != out) { ++t.bends; }
+        // `direction` is three steps per axis with the middle one still, so
+        // the reverse of `in` is `8 - in`; odd codes are the axis-aligned ones.
+        if (((in % 2) == 1) && (out == (8 - in))) { ++t.retrace; }
       }
+    }
+  }
+  for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {
+    if ((tr < g.trans_segments.size()) && (g.trans_segments[tr].len != 0) &&
+        (r.route[tr].len < 2)) {
+      ++t.vanished;
     }
   }
   t.crossings = cost_crossings(pieces, crossings_of);
   t.corridor = cost_corridor(r, pieces);
+  t.crowding = cost_crowding(pieces, p.font_size_grid);
 
   // `min_len` is the direct distance between the endpoints, or the boxes the
   // route has to carry if those are longer; only the excess is charged, since
@@ -706,6 +768,41 @@ CostTerms cost_terms(Chart const &c,
   ChildGrid const grid{ cost_child_grid(c, z) };
   t.box_overlap = cost_box_overlaps(c, z, grid);
   t.through_box = cost_through_boxes(c, z, an, grid, pieces);
+  for (Piece const &piece : pieces) {
+    for (uint32_t st = 0; st < c.states.size(); ++st) {
+      if ((c.states[st].live != 0) &&
+          along_border(piece.a, piece.b, z.state[st], border_band(p) - 1)) {
+        ++t.flush;
+        break;
+      }
+    }
+  }
+  // Whether state `s` lies inside region `m`, by walking up from it.
+  auto const within = [&c](StateId state, uint32_t m) {
+    for (StateId at{ state }; (at.v != INVALID) && (at.v < c.states.size());) {
+      SubmachineId const up{ c.states[at.v].parent };
+      if (up.v == m) { return true; }
+      if (up.v >= c.submachines.size()) { return false; }
+      at = c.submachines[up.v].owner;
+    }
+    return false;
+  };
+  for (Piece const &piece : pieces) {
+    Transition const &trans{ c.transitions[piece.trans] };
+    scav_rect const reach{ span_rect(piece.a, piece.b) };
+    for (uint32_t m = 0; m < c.submachines.size(); ++m) {
+      if ((c.submachines[m].live == 0) || (c.submachines[m].owner.v == INVALID)) {
+        continue;
+      }
+      scav_rect const &region{ z.sub[m] };
+      if (!overlaps(reach, grow(region, 1)) || !enters(piece.a, piece.b, region)) {
+        continue;
+      }
+      if (within(trans.src, m) || within(trans.dst, m)) { continue; }
+      ++t.through_region;
+      break;
+    }
+  }
   return t;
 }
 
@@ -758,7 +855,8 @@ std::array<Wide, TIER2_TERMS> weighted_terms(CostTerms const &t, scav_profile co
            Wide{ p.w_label } * t.label,
            Wide{ p.w_label_near } * ceil_div(t.label_near, em),
            Wide{ p.w_aspect } * ceil_div(t.aspect, em),
-           Wide{ p.w_area } * ceil_div(t.area, em2) };
+           Wide{ p.w_area } * ceil_div(t.area, em2),
+           Wide{ p.w_crowding } * ceil_div(t.crowding, em) };
 }
 
 }  // namespace
@@ -772,7 +870,8 @@ CostTerms layout_cost(Chart const &c,
 
 Cost cost_of(CostTerms const &t, scav_profile const &p) {
   Cost out;
-  out.t0_violations = t.through_box + t.box_overlap;
+  out.t0_violations =
+      t.through_box + t.box_overlap + t.vanished + t.flush + t.through_region + t.retrace;
   // Area is the largest term at (2 * COORD_MAX)^2 < 2^40, its em^2 only divides
   // it down, and nine of those under a weight capped at 2^10 stay below 2^54.
   for (Wide const term : weighted_terms(t, p)) { out.t2 += term; }

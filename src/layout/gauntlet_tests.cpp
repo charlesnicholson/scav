@@ -71,11 +71,14 @@ struct Laid {
   uint32_t tuple{ INVALID };  // the portfolio row the run kept
 };
 
-// The profile with the portfolio switched off, so one row lays out and it is
-// row 0 -- the caller's own tuple, and the pipeline as it ran before Level 2.
+// The profile with the portfolio and the move sweep switched off, so one row
+// lays out and it is row 0 unsearched -- the caller's own tuple, and the
+// pipeline as it ran before Level 2. The sweep is off too because a reversal
+// kick from row 0 now reaches what the table's other rows did (11.10f).
 scav_profile one_row(scav_profile const &p) {
   scav_profile out{ p };
   out.portfolio_m = 1;
+  out.portfolio_k = 0;
   return out;
 }
 
@@ -122,7 +125,17 @@ void lay(char const *name, scav_profile const &p, Laid &out) {
 
   std::vector<scav_placed> placed;
   scav_layout_opts const o{ .profile = p, .router = id, .threads = 0 };
-  REQUIRE(layout_run(out.c, {}, o, placed, diags, nullptr, &out.tuple));
+  SearchPins pins;
+  REQUIRE(layout_run(out.c,
+                     {},
+                     o,
+                     placed,
+                     diags,
+                     nullptr,
+                     &out.tuple,
+                     INVALID,
+                     nullptr,
+                     &pins));
   // Nothing here is a shape the router has to give up on, so a RouteDegraded
   // is a failure rather than a documented fallback.
   CHECK(diags.empty());
@@ -133,9 +146,22 @@ void lay(char const *name, scav_profile const &p, Laid &out) {
   Fold fold{ Fold::Scale };
   search_tuple(knobs, dar, pack, fold, out.tuple);
   out.g = decompose(out.c);
-  out.o = order_submachines(out.c, out.g, {}, knobs);
+  // The drawing is the tuple's *and* the pins' (11.10a), so re-deriving it
+  // needs both or this measures a layout nobody was shown. The pins reach
+  // phase 3 as well as phase 1: a face pin is the router's (11.10e).
+  out.o = order_submachines(out.c, out.g, {}, knobs, 0, pins);
   REQUIRE(size_layout(out.c, out.g, out.o, {}, knobs, out.z, diags, dar, pack, fold));
-  out.r = route_transitions(out.c, out.g, out.o, out.z, {}, knobs, *router_at(id));
+  out.r = route_transitions(out.c,
+                            out.g,
+                            out.o,
+                            out.z,
+                            {},
+                            knobs,
+                            *router_at(id),
+                            0,
+                            nullptr,
+                            nullptr,
+                            &pins);
   column_holds(out.c, "scav.geom.state", out.z.state);
   column_holds(out.c, "scav.geom.sub", out.z.sub);
   column_holds(out.c, "scav.geom.point", out.r.points);
@@ -545,10 +571,10 @@ TEST_CASE("gauntlet: a fan-in's arrivals are four arrows, none inside another") 
       if (chart_string(l.c, l.c.states[st].name) == "Fault") { fault = st; }
     }
     REQUIRE(fault != INVALID);
-    // Two refusals before 11.9.5's reservation and one after; the chart-wide
-    // pass asks a second time on the composed polyline, and at `readable` the
-    // fan's own trunk refuses it again. A refusal is the bundle winning.
-    CHECK(l.r.nudged.refused == ((p.profile_id == compact().profile_id) ? 0U : 2U));
+    // Two refusals before 11.9.5's reservation, one after, and none since
+    // 11.10a's placement move: what the fan was refusing was room, and a move
+    // is how a frame gets room rather than asks for it.
+    CHECK(l.r.nudged.refused == 0);
     std::vector<uint32_t> into;
     for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
       if ((l.r.route[t].len >= 2) && (l.c.transitions[t].dst.v == fault)) {
@@ -662,46 +688,54 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     CAPTURE(p.profile_id);
 
     // 11.8, and the corpus has no chart carrying the shape. A transition
-    // between two concurrent submachines of one state is routed in the frame
-    // that state itself sits in -- the two submachines are siblings under it
-    // and their common frame is one level further out than the state -- so the
-    // state is an obstacle walling the route out of the space between its own
-    // two regions, and the route goes the long way round it: through whatever
-    // else that frame holds, and back along the line it arrived on.
-    //
-    // The portfolio routes around that hole rather than closing it: at the
-    // shipped M the packer choice puts the two regions where the long way round
-    // clips nothing, which is why the property above now holds on this chart
-    // too. So the count stays visible against the row that produces it -- row 0
-    // alone, the profile's own tuple -- until 11.8 is built and it is zero
-    // whichever row lays out.
+    // between two concurrent submachines of one state was routed in the frame
+    // that state itself sits in, where the state is an obstacle walling the
+    // route out of the space between its own two regions, and it went the long
+    // way round: through whatever else that frame held, and back along the line
+    // it arrived on. **Closed since the channel is routed inside the state**
+    // (11.10g). Row 0 alone -- the profile's own tuple, unsearched -- was the
+    // count that kept the hole visible while the portfolio routed around it;
+    // it reads zero through a box at both profiles now. Routes still double
+    // back on it, two at `readable` and four at `compact`, since a fold that
+    // stacks an edge into a composite stopped being a scale-measure choice:
+    // unsearched, this row lays the whole chart out flat, and divider ports on
+    // the regions' sides send routes round. Owed to 11.10g's top and bottom
+    // ports; `retrace` keeps the search off them, and what ships reads zero
+    // below.
     Laid row_zero;
     lay("regions.scav", one_row(p), row_zero);
     REQUIRE(row_zero.tuple == 0);
     uint32_t through{ 0 };
     uint32_t back{ 0 };
     shape_counts(row_zero, through, back);
-    CHECK(through == 2);
-    CHECK(back == 2);
+    CHECK(through == 0);
+    CHECK(back == ((p.profile_id == compact().profile_id) ? 4U : 2U));
     // The scorer from the other end, over the columns that run wrote: 11.6's
     // descent and the predicate above are two implementations of one question,
     // and a carve-out is worth more when both answer it.
-    CHECK(cost_columns(row_zero.c, row_zero.g, p).through_box == 2);
+    CHECK(cost_columns(row_zero.c, row_zero.g, p).through_box == 0);
 
-    // What ships, scored both ways: the shape is still there and the drawing no
-    // longer shows it, which is why the properties above hold on this chart.
+    // What ships, scored both ways: the properties above hold on the drawing a
+    // reader gets, whichever row the search ends on.
     Laid shipped;
     lay("regions.scav", p, shipped);
-    CHECK(shipped.tuple != 0);
     uint32_t shipped_through{ 0 };
     uint32_t shipped_back{ 0 };
     shape_counts(shipped, shipped_through, shipped_back);
     CHECK(shipped_through == 0);
     CHECK(cost_columns(shipped.c, shipped.g, p).through_box == 0);
-    // The other half of the hole: the route still leaves and returns along one
-    // line. Four at both profiles until 11.9.5's reservation, three at `compact`
-    // since -- the arrangement moving, not the hole closing. 11.8's to close.
-    CHECK(shipped_back == ((p.profile_id == compact().profile_id) ? 3U : 4U));
+    // The other half of the hole, and it is **closed at both profiles** since
+    // the face a transition leaves by became a search dimension (11.10e). Four
+    // at both profiles until 11.9.5's reservation, three at `compact` since,
+    // two once a placement move could reach an arrangement where the long way
+    // round was shorter, three again at a budget of 1,024 -- every one of those
+    // the arrangement moving rather than the hole closing. This one is the hole
+    // closing: the route doubled back because it left by the face the
+    // separation rule picked, and choosing the face instead lets it leave by
+    // one it need not come back across. It went back to two when this chart's
+    // search took a different path, and **is zero again since 11.8's channel is
+    // routed inside `Running`** (11.10g).
+    CHECK(shipped_back == 0);
 
     // 11.5's face rule, which picks a face by how far the target lies outside
     // the box on each axis rather than by the distance to a point on it. A
@@ -713,15 +747,22 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     // Two since 11.9.5's reservation, where it was one: room beside a labelled
     // leg pushes the branch further below the bar, so y dominates on both. The
     // rule is the defect; the reservation only found it more targets.
+    //
+    // One since 11.10g's label room moved to where the packing puts a piece.
     Laid fork_zero;
     lay("fork.scav", one_row(p), fork_zero);
-    CHECK(capped_branches(fork_zero) == 2);
-    // And what ships, which used to differ by profile -- `readable` stacked the
-    // branch beside the bar and read zero where `compact` read one. Under the
-    // reservation both branches sit below the bar at both profiles and both
-    // read two, so the packer no longer hides the rule from one of them.
+    CHECK(capped_branches(fork_zero) == 1);
+    // And what ships: zero at both profiles from 11.10a's placement move, two at
+    // `readable` once the budget went to 1,024 (11.10) -- a shallow search had
+    // stopped at an arrangement that happened to put the branch beside the bar,
+    // and a deeper one kept going to a cheaper `Cost` that put it back below,
+    // because nothing priced leaving through a 64-unit cap. **One since crowding
+    // is priced** (11.6): branches stacked through one cap run as tight lanes,
+    // and those now cost what they look like. Zero at both profiles since
+    // 11.10g's second round; the face rule's defect is still there in the row
+    // above.
     Laid fork_shipped;
     lay("fork.scav", p, fork_shipped);
-    CHECK(capped_branches(fork_shipped) == 2);
+    CHECK(capped_branches(fork_shipped) == 0);
   }
 }

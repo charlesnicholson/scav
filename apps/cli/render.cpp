@@ -38,7 +38,7 @@ int run_render(char const *path,
                char const *out_path,
                bool embed_font,
                char const *profile_name,
-               uint32_t row) {
+               LayoutArgs const &args) {
   Loaded net;
   load_and_report(path, true, net);
   if (net.code == EXIT_UNUSABLE) { return EXIT_UNUSABLE; }
@@ -48,20 +48,29 @@ int run_render(char const *path,
     write_error("no such profile", profile_name);
     return EXIT_UNUSABLE;
   }
+  if (args.no_search) { opts.profile.portfolio_k = 0; }
 
   Metrics metrics;
   Spaces spaces;
   if (!metrics_create(nullptr, 0, metrics) ||
-      !measure_chart(net.chart, metrics, opts.profile, spaces)) {
+      (!args.no_text && !measure_chart(net.chart, metrics, opts.profile, spaces))) {
     write_error("cannot measure the chart with the bundled font", path);
     return EXIT_UNUSABLE;
   }
 
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
-  bool const laid{
-    layout_run(net.chart, as_spaces(spaces), opts, placed, diags, nullptr, nullptr, row)
-  };
+  bool const laid{ layout_run(net.chart,
+                              as_spaces(spaces),
+                              opts,
+                              placed,
+                              diags,
+                              nullptr,
+                              nullptr,
+                              args.row,
+                              nullptr,
+                              nullptr,
+                              &args.pins) };
   if (!diags.empty()) {
     std::string err;
     for (Diagnostic const &d : diags) { diag_append(err, net.chart, d, path); }

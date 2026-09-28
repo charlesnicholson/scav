@@ -131,7 +131,7 @@ into new workspaces. Every build prints the resolved root.
 Worth knowing before sharing:
 
 - **Mostly free.** Packages are keyed by content fingerprint, so scav's
-  `envy.cmake@r0` is the same `darwin-arm64-blake3-49a9b2620de8c380` build any
+  `envy.cmake@r1` is the same `darwin-arm64-blake3-1e9a3007a09c00fd` build any
   other envy project already fetched. Measured: three of four packages hit
   immediately, a 58 MB python fetch, ~499 MB saved per extra worktree.
 - **Concurrent access is safe.** Three simultaneous `envy sync` runs against one

@@ -282,24 +282,27 @@ void append_rect(std::string &out, scav_rect r) {
   append_i32v(out, r.h);
 }
 
-// The nine Tier-2 terms in CostTerms order, which is the order `cost_shares`
+// The Tier-2 terms in CostTerms order, which is the order `cost_shares`
 // answers in, so a name and a share never come apart.
 constexpr std::array<char const *, TIER2_TERMS> TERMS{
   "bends", "corridor",   "crossings", "excess_len", "adjacency",
-  "label", "label_near", "aspect",    "area"
+  "label", "label_near", "aspect",    "area",       "crowding"
 };
 
 std::array<int64_t, TIER2_TERMS> term_values(CostTerms const &t) {
   return { t.bends, t.corridor,   t.crossings, t.excess_len, t.adjacency,
-           t.label, t.label_near, t.aspect,    t.area };
+           t.label, t.label_near, t.aspect,    t.area,       t.crowding };
 }
 
 void append_geometry_text(std::string &out,
                           Chart const &c,
                           CostTerms const &terms,
+                          LayoutArgs const &args,
                           scav_profile const &p,
                           std::vector<scav_placed> const &placed,
-                          scav_spaces const &s) {
+                          scav_spaces const &s,
+                          uint32_t row,
+                          SearchPins const &pins) {
   auto const state{ geom_rows<scav_rect>(c, "scav.geom.state") };
   auto const before{ geom_rows<scav_rect>(c, "scav.geom.state_before") };
   auto const after{ geom_rows<scav_rect>(c, "scav.geom.state_after") };
@@ -316,6 +319,11 @@ void append_geometry_text(std::string &out,
   out += "\n  chart ";
   append_rect(out, geom_rows<scav_rect>(c, "scav.geom.chart")[0]);
   out += '\n';
+  if (row != INVALID) {
+    out += "  rests on ";
+    append_layout_args(out, args, row, pins);
+    out += '\n';
+  }
 
   // The objective over those columns, so a candidate carries the number that
   // ranked it beside the geometry it ranked (11.6, 11.10).
@@ -330,6 +338,12 @@ void append_geometry_text(std::string &out,
   append_i32v(out, terms.through_box);
   out += " box_overlap ";
   append_i32v(out, terms.box_overlap);
+  out += " flush ";
+  append_i32v(out, terms.flush);
+  out += " through_region ";
+  append_i32v(out, terms.through_region);
+  out += " retrace ";
+  append_i32v(out, terms.retrace);
   out += '\n';
   for (uint32_t i = 0; i < TIER2_TERMS; ++i) {
     out += "    ";
@@ -552,9 +566,12 @@ void append_json_rect(std::string &out, scav_rect r) {
 void append_geometry_json(std::string &out,
                           Chart const &c,
                           CostTerms const &terms,
+                          LayoutArgs const &args,
                           scav_profile const &p,
                           std::vector<scav_placed> const &placed,
-                          scav_spaces const &s) {
+                          scav_spaces const &s,
+                          uint32_t row,
+                          SearchPins const &pins) {
   out += ",\n  \"geometry\": {\n    \"gen\": ";
   string_append_u32(out, geom_rows<uint32_t>(c, "scav.geom.gen")[0]);
   out += ",\n    \"structural_hash\": ";
@@ -563,6 +580,11 @@ void append_geometry_json(std::string &out,
   string_append_u32(out, layout_coordinate_hash(c));
   out += ",\n    \"chart\": ";
   append_json_rect(out, geom_rows<scav_rect>(c, "scav.geom.chart")[0]);
+  if (row != INVALID) {
+    out += ",\n    \"rests_on\": \"";
+    append_layout_args(out, args, row, pins);
+    out += '"';
+  }
 
   // The objective over those columns, so a candidate carries the number that
   // ranked it beside the geometry it ranked (11.6, 11.10).
@@ -577,6 +599,12 @@ void append_geometry_json(std::string &out,
   append_i32v(out, terms.through_box);
   out += ",\n      \"box_overlap\": ";
   append_i32v(out, terms.box_overlap);
+  out += ",\n      \"flush\": ";
+  append_i32v(out, terms.flush);
+  out += ",\n      \"through_region\": ";
+  append_i32v(out, terms.through_region);
+  out += ",\n      \"retrace\": ";
+  append_i32v(out, terms.retrace);
   for (uint32_t i = 0; i < TIER2_TERMS; ++i) {
     out += ",\n      ";
     append_json_string(out, TERMS[i]);
@@ -759,14 +787,24 @@ int run_dump(char const *path,
              bool hash_only,
              bool as_json,
              bool with_layout,
-             uint32_t row) {
+             bool trace,
+             bool trace_search,
+             LayoutArgs const &args) {
   Loaded net;
   load_and_report(path, true, net);
   if (net.code == EXIT_UNUSABLE) { return EXIT_UNUSABLE; }
 
   scav_layout_opts opts{};
-  profile_named("readable", opts.profile);
+  if (!profile_named(args.profile, opts.profile)) {
+    write_error("no such profile", args.profile);
+    return EXIT_UNUSABLE;
+  }
+  if (args.no_search) { opts.profile.portfolio_k = 0; }
   CostTerms cost{};
+  // What the drawing rests on, for the line that lays it out again. Unknown
+  // under `--trace`, which runs its own two layouts.
+  uint32_t won{ INVALID };
+  SearchPins taken;
   // Hoisted for the emitters: the anchor invariant holds on these boxes and
   // nowhere else, so the dump is where it becomes checkable (11.9.4).
   std::vector<scav_placed> placed;
@@ -775,15 +813,36 @@ int run_dump(char const *path,
     // The reference builder's measurement pass, which is the policy every
     // corpus golden is stated against.
     Metrics metrics;
-    if (!metrics_create(nullptr, 0, metrics) ||
-        !measure_chart(net.chart, metrics, opts.profile, spaces)) {
+    if (!args.no_text && (!metrics_create(nullptr, 0, metrics) ||
+                          !measure_chart(net.chart, metrics, opts.profile, spaces))) {
       write_error("cannot measure the chart with the bundled font", path);
       return EXIT_UNUSABLE;
     }
     std::vector<Diagnostic> diags;
-    bool const laid{
-      layout_run(net.chart, as_spaces(spaces), opts, placed, diags, nullptr, nullptr, row)
-    };
+    std::vector<char> events;
+    bool const laid{ trace ? layout_trace_json(
+                                 net.chart,
+                                 as_spaces(spaces),
+                                 opts,
+                                 placed,
+                                 diags,
+                                 events,
+                                 args.row,
+                                 trace_search ? TraceScope::Search : TraceScope::Shipped)
+                           : layout_run(net.chart,
+                                        as_spaces(spaces),
+                                        opts,
+                                        placed,
+                                        diags,
+                                        nullptr,
+                                        &won,
+                                        args.row,
+                                        nullptr,
+                                        &taken,
+                                        &args.pins) };
+    // To stdout, ahead of the model: the trace is the answer `--trace` asked
+    // for and the dump is the context it is read against.
+    if (trace) { write_stream(std::string{ events.begin(), events.end() }, stdout); }
     if (!diags.empty()) {
       std::string err;
       for (Diagnostic const &d : diags) { diag_append(err, net.chart, d, path); }
@@ -803,13 +862,29 @@ int run_dump(char const *path,
   } else if (as_json) {
     append_json(out, net.chart);
     if (with_layout) {
-      append_geometry_json(out, net.chart, cost, opts.profile, placed, as_spaces(spaces));
+      append_geometry_json(out,
+                           net.chart,
+                           cost,
+                           args,
+                           opts.profile,
+                           placed,
+                           as_spaces(spaces),
+                           won,
+                           taken);
     }
     out += "\n}\n";
   } else {
     append_model(out, net.chart);
     if (with_layout) {
-      append_geometry_text(out, net.chart, cost, opts.profile, placed, as_spaces(spaces));
+      append_geometry_text(out,
+                           net.chart,
+                           cost,
+                           args,
+                           opts.profile,
+                           placed,
+                           as_spaces(spaces),
+                           won,
+                           taken);
     }
   }
   write_stream(out, stdout);

@@ -7,6 +7,9 @@
 
 #include "scav/scav_layout_c.h"
 
+#include <cstdint>
+#include <vector>
+
 namespace scav {
 
 constexpr bool operator==(scav_rect const &a, scav_rect const &b) {
@@ -15,6 +18,27 @@ constexpr bool operator==(scav_rect const &a, scav_rect const &b) {
 
 constexpr bool operator==(scav_point const &a, scav_point const &b) {
   return (a.x == b.x) && (a.y == b.y);
+}
+
+constexpr bool operator==(scav_span const &a, scav_span const &b) {
+  return (a.off == b.off) && (a.len == b.len);
+}
+
+constexpr bool operator==(scav_port_slot const &a, scav_port_slot const &b) {
+  return (a.x == b.x) && (a.y == b.y) && (a.side == b.side) &&
+         (a.boundary_depth == b.boundary_depth);
+}
+
+// Element-wise, because the operators above are `scav`'s and the structs are
+// the C ABI's: argument-dependent lookup from inside `std` looks in the global
+// namespace and does not find them, so `vector == vector` will not compile.
+template <typename T>
+bool same_rows(std::vector<T> const &a, std::vector<T> const &b) {
+  if (a.size() != b.size()) { return false; }
+  for (uint32_t i = 0; i < a.size(); ++i) {
+    if (!(a[i] == b[i])) { return false; }
+  }
+  return true;
 }
 
 }  // namespace scav

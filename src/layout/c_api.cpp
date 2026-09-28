@@ -16,7 +16,7 @@
 static_assert(sizeof(scav_box_space) == 12);
 static_assert(sizeof(scav_path_clear) == 8);
 static_assert(sizeof(scav_path_box) == 16);
-static_assert(sizeof(scav_profile) == 48 * sizeof(int32_t));
+static_assert(sizeof(scav_profile) == 49 * sizeof(int32_t));
 // Four {pointer, count, stride} triples and nothing else: the strides landed in
 // the padding the pointer-and-count pairs left, so a hole here would mean one of
 // them moved.

@@ -49,6 +49,28 @@ TEST_CASE("geom: an intersection is empty rather than negative") {
                  intersection(rect(0, 0, 10, 10), rect(50, 50, 10, 10))));
 }
 
+TEST_CASE("geom: a run along a border is on the border line and longer than a point") {
+  scav_rect const box{ rect(0, 0, 100, 50) };
+  // Along each of the four edges, for part of the edge and past its end.
+  CHECK(along_border({ .x = 10, .y = 0 }, { .x = 60, .y = 0 }, box));
+  CHECK(along_border({ .x = -40, .y = 50 }, { .x = 20, .y = 50 }, box));
+  CHECK(along_border({ .x = 0, .y = 10 }, { .x = 0, .y = 30 }, box));
+  CHECK(along_border({ .x = 100, .y = 60 }, { .x = 100, .y = 40 }, box));
+  // Leaving square from a face, meeting only a corner, or parallel one unit off.
+  CHECK_FALSE(along_border({ .x = 100, .y = 20 }, { .x = 200, .y = 20 }, box));
+  CHECK_FALSE(along_border({ .x = 100, .y = 0 }, { .x = 200, .y = 0 }, box));
+  CHECK_FALSE(along_border({ .x = 10, .y = -1 }, { .x = 60, .y = -1 }, box));
+  // Through the interior is `enters`' question, not this one.
+  CHECK_FALSE(along_border({ .x = 10, .y = 25 }, { .x = 60, .y = 25 }, box));
+  // A box with no extent has no border to run along.
+  CHECK_FALSE(along_border({ .x = 0, .y = 0 }, { .x = 10, .y = 0 }, rect(0, 0, 0, 50)));
+  // Within `near` of the line counts, either side of it; past it does not.
+  CHECK(along_border({ .x = 10, .y = -3 }, { .x = 60, .y = -3 }, box, 3));
+  CHECK(along_border({ .x = 97, .y = 10 }, { .x = 97, .y = 30 }, box, 3));
+  CHECK_FALSE(along_border({ .x = 10, .y = -4 }, { .x = 60, .y = -4 }, box, 3));
+  CHECK_FALSE(along_border({ .x = 103, .y = 60 }, { .x = 103, .y = 40 }, box, 2));
+}
+
 TEST_CASE("geom: a bumper grows both sides and a negative one shrinks") {
   CHECK((grow(rect(10, 20, 30, 40), 5) == rect(5, 15, 40, 50)));
   CHECK((grow(rect(10, 20, 30, 40), 0) == rect(10, 20, 30, 40)));
@@ -90,6 +112,78 @@ TEST_CASE("partition: reset clears whatever it was") {
   CHECK(p.of.size() == 2);
   CHECK(p.leads(0));
   CHECK(p.leads(1));
+}
+
+}  // namespace scav
+
+namespace scav {
+
+namespace {
+
+bool scan_hits(std::vector<scav_rect> const &rects, scav_rect const &cand) {
+  for (scav_rect const &r : rects) {
+    if (overlaps(cand, r)) { return true; }
+  }
+  return false;
+}
+
+// A small deterministic generator: the property is over many shapes, and a
+// test that reads different numbers each run finds nothing twice.
+uint32_t next(uint64_t &state) {
+  state = (state * 6364136223846793005ULL) + 1442695040888963407ULL;
+  return static_cast<uint32_t>(state >> 33U);
+}
+
+}  // namespace
+
+TEST_CASE("geom: a rect grid answers exactly what scanning every rect does") {
+  // 11.10f's label speed-up rests on this: the grid may only visit fewer rects,
+  // never answer differently. Zero-width and zero-height rects are route
+  // pieces, which `overlaps` counts only strictly inside the other's span.
+  uint64_t seed{ 1 };
+  scav_rect const region{ .x = -3000, .y = -2000, .w = 12000, .h = 7000 };
+  for (uint32_t trial = 0; trial < 200; ++trial) {
+    std::vector<scav_rect> rects;
+    uint32_t const n{ next(seed) % 60 };
+    for (uint32_t i = 0; i < n; ++i) {
+      int32_t const x{ region.x + static_cast<int32_t>(next(seed) % 12000) };
+      int32_t const y{ region.y + static_cast<int32_t>(next(seed) % 7000) };
+      uint32_t const shape{ next(seed) % 4 };
+      int32_t const w{ (shape == 0) ? 0 : static_cast<int32_t>(next(seed) % 2500) };
+      int32_t const h{ (shape == 1) ? 0 : static_cast<int32_t>(next(seed) % 1500) };
+      rects.push_back({ .x = x, .y = y, .w = w, .h = h });
+    }
+    RectGrid g;
+    int32_t const cw{ 1 + static_cast<int32_t>(next(seed) % 900) };
+    int32_t const ch{ 1 + static_cast<int32_t>(next(seed) % 300) };
+    grid_build(g, region, rects, cw, ch);
+    for (uint32_t q = 0; q < 200; ++q) {
+      // Some candidates reach past the region, which the grid clamps into its
+      // edge cells; the answer must not change there either.
+      scav_rect const cand{ .x = region.x - 800 + static_cast<int32_t>(next(seed) % 13600),
+                            .y = region.y - 800 + static_cast<int32_t>(next(seed) % 8600),
+                            .w = static_cast<int32_t>(next(seed) % 1200),
+                            .h = static_cast<int32_t>(next(seed) % 400) };
+      CAPTURE(trial);
+      CAPTURE(q);
+      CHECK(grid_hits(g, rects, cand) == scan_hits(rects, cand));
+    }
+  }
+}
+
+TEST_CASE("geom: a rect grid caps its cells, however small it is asked to make them") {
+  RectGrid g;
+  scav_rect const region{ .x = 0, .y = 0, .w = 1'000'000, .h = 1'000'000 };
+  grid_build(g, region, { { .x = 10, .y = 10, .w = 5, .h = 5 } }, 1, 1);
+  CHECK(g.nx <= GRID_SIDE);
+  CHECK(g.ny <= GRID_SIDE);
+  CHECK(grid_hits(g,
+                  { { .x = 10, .y = 10, .w = 5, .h = 5 } },
+                  { .x = 12, .y = 12, .w = 1, .h = 1 }));
+  // An empty set of rects hits nothing, and a degenerate region still builds.
+  RectGrid none;
+  grid_build(none, { .x = 5, .y = 5, .w = 0, .h = 0 }, {}, 10, 10);
+  CHECK(!grid_hits(none, {}, { .x = 0, .y = 0, .w = 100, .h = 100 }));
 }
 
 }  // namespace scav

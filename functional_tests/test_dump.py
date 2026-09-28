@@ -99,6 +99,51 @@ class TestDump(unittest.TestCase):
         self.assertEqual([], json.loads(
             self.run_dump("--json", NETWORK.as_posix()).stdout)["columns"])
 
+    def test_the_flags_a_layout_rests_on_lay_it_out_again_unsearched(self) -> None:
+        # The counterfactual harness's premise (11.10g): the row and pins a run
+        # prints, handed back with `--no-search`, are that drawing exactly, so
+        # an edited copy of them is scored on the same objective. A profile
+        # other than the default and the no-text scale are part of what it
+        # rests on, and print first.
+        for given, lead in (([], "--portfolio-row"),
+                            (["--profile", "compact", "--no-text"], "--profile")):
+            with self.subTest(given=given):
+                shipped = self.run_dump("--layout", *given, CHART.as_posix())
+                self.assertEqual(0, shipped.returncode)
+                rests = [ln for ln in shipped.stdout.splitlines()
+                         if ln.startswith("  rests on ")]
+                self.assertEqual(1, len(rests))
+                flags = rests[0][len("  rests on "):].split()
+                self.assertEqual(lead, flags[0])
+                again = self.run_dump("--layout", "--no-search", *flags, CHART.as_posix())
+                self.assertEqual(0, again.returncode)
+                geometry = [ln for ln in shipped.stdout.splitlines()
+                            if ln.startswith("geometry ")]
+                self.assertEqual(geometry, [ln for ln in again.stdout.splitlines()
+                                            if ln.startswith("geometry ")])
+
+    def test_a_frame_turned_down_is_part_of_what_a_layout_rests_on(self) -> None:
+        # `--orient F` is a pin like the others: given, it is reported, and the
+        # drawing it lays out is laid out again from what was reported.
+        shipped = self.run_dump("--layout", "--no-search", "--orient", "0", CHART.as_posix())
+        self.assertEqual(0, shipped.returncode)
+        rests = [ln for ln in shipped.stdout.splitlines() if ln.startswith("  rests on ")]
+        self.assertEqual(1, len(rests))
+        self.assertIn("--orient 0", rests[0])
+
+    def test_an_unknown_profile_is_refused(self) -> None:
+        result = self.run_dump("--layout", "--profile", "nonesuch", CHART.as_posix())
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("no such profile", result.stderr)
+
+    def test_a_malformed_pin_is_a_usage_error(self) -> None:
+        for bad in (["--rank", "1"], ["--cut", "a:b"], ["--face", "1:0:2:0"],
+                    ["--portfolio-row", "99"], ["--no-search", "--no-search"],
+                    ["--no-text", "--no-text"], ["--profile"], ["--orient", "x"]):
+            with self.subTest(bad=bad):
+                result = self.run_dump("--layout", *bad, CHART.as_posix())
+                self.assertEqual(2, result.returncode)
+
     def test_hash_refuses_layout_and_json(self) -> None:
         result = self.run_dump("--hash", "--layout", NETWORK.as_posix())
         self.assertEqual(2, result.returncode)
@@ -382,6 +427,55 @@ class TestDump(unittest.TestCase):
             "^" + re.escape(chart.as_posix())
             + r":\d+:\d+: composed geometry exceeds the coordinate domain\n$")
 
+    # Trace (11.16) ==========================================================
+
+    def split_trace(self, out: str) -> tuple[list[dict], dict]:
+        """The two documents `--trace --json` writes to one stream. The event
+        array ends at the first bare bracket line, which the model never has."""
+        end = out.index("\n]\n") + 3
+        return json.loads(out[:end]), json.loads(out[end:])
+
+    def test_a_traced_run_draws_what_an_untraced_one_draws(self) -> None:
+        """The trace re-derives the drawing the search picked, so it may not
+        move it. A debug facility that changes the answer is worth nothing."""
+        charts = sorted((self.cfg.repo_root / "test_data/charts").glob("*.scav"))
+        self.assertTrue(charts)
+        for chart in charts:
+            with self.subTest(chart=chart.name):
+                plain = self.run_dump("--json", "--layout", chart.as_posix())
+                self.assertEqual(0, plain.returncode, plain.stderr)
+                traced = self.run_dump("--json", "--layout", "--trace",
+                                       chart.as_posix())
+                self.assertEqual(0, traced.returncode, traced.stderr)
+                events, model = self.split_trace(traced.stdout)
+                want = json.loads(plain.stdout)["geometry"]
+                got = model["geometry"]
+                for key in ("structural_hash", "coordinate_hash", "state", "route",
+                            "point" if "point" in want else "chart"):
+                    self.assertEqual(want[key], got[key], key)
+                self.assertTrue(events)
+
+    def test_every_event_names_its_kind_and_its_frame(self) -> None:
+        traced = self.run_dump("--json", "--layout", "--trace", NETWORK.as_posix())
+        self.assertEqual(0, traced.returncode, traced.stderr)
+        events, model = self.split_trace(traced.stdout)
+        frames = len(model["submachines"])
+        kinds = set()
+        for i, e in enumerate(events):
+            self.assertEqual(i, e["i"])  # dense and in order
+            self.assertNotEqual("none", e["kind"])
+            kinds.add(e["kind"])
+            if "frame" in e:
+                self.assertLess(e["frame"], frames)
+        # The decisions a route's shape comes from, all present on a real chart.
+        self.assertLessEqual({"rank_assigned", "node_placed", "net_planned",
+                              "seat_moved"}, kinds)
+
+    def test_trace_needs_a_layout_to_trace(self) -> None:
+        result = self.run_dump("--trace", NETWORK.as_posix())
+        self.assertEqual(2, result.returncode)
+        self.assertTrue(result.stderr.startswith("usage: scav <verb>"))
+
     # Usage =================================================================
 
     def test_bad_arguments_are_refused(self) -> None:
@@ -390,6 +484,8 @@ class TestDump(unittest.TestCase):
                      ["dump", "--json"],
                      ["dump", "--hash"],
                      ["dump", "--layout"],
+                     ["dump", "--trace", chart],
+                     ["dump", "--layout", "--trace", "--trace", chart],
                      ["dump", "--json", "--json", chart],
                      ["dump", "--layout", "--layout", chart],
                      ["dump", "--hash", "--hash", chart],

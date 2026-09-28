@@ -4,7 +4,9 @@
 #include "layout/size.h"
 
 #include "layout/decompose.h"
+#include "layout/label.h"
 #include "layout/order.h"
+#include "layout/trace.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
@@ -218,6 +220,658 @@ TEST_CASE("size: two nodes in one rank stack node_sep apart") {
       diags));
   CHECK(z.state[b.v].x == z.state[d.v].x);
   CHECK(z.state[d.v].y == z.state[b.v].y + z.state[b.v].h + p.node_sep);
+}
+
+TEST_CASE("size: an edge within one rank stacks its ends rather than aligning them") {
+  // A rank pin can leave both ends of an edge in one rank. Brandes-Kopf reads
+  // an edge as joining consecutive layers, and handed this one it made the two
+  // ends one block at one coordinate: `ota`'s `Writing` drawn over `Fetching`.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, a, TransKind::External, {});
+  scav_profile const p{ unfolded() };
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c,
+                      depths({ 0, 0 }),
+                      one_frame(c,
+                                root,
+                                { state_node(a.v, 0, 0), state_node(b.v, 0, 1) },
+                                { { .src = 0, .dst = 1, .segment = 0, .reversed = 0 },
+                                  { .src = 1, .dst = 0, .segment = 1, .reversed = 0 } },
+                                { 0 }),
+                      {},
+                      p,
+                      z,
+                      diags));
+  CHECK(z.state[a.v].x == z.state[b.v].x);
+  CHECK(z.state[b.v].y == z.state[a.v].y + z.state[a.v].h + p.node_sep);
+}
+
+TEST_CASE("size: states joined inside one column share the widest one's centre line") {
+  // Left-aligned in one column, the only face a narrow state shares with a
+  // wide one above it is the narrow one's own width at the column's leading
+  // edge, and `dock`'s `vacuum docked` went round `On`'s far side instead; on
+  // one centre line both routes between them run straight down the overlap
+  // (11.10g). `F`, a bar, would be met through its cap, so it keeps the
+  // column's leading edge.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const wide{ build_state(c, root, "W", StateKind::Normal, {}) };
+  StateId const narrow{ build_state(c, root, "N", StateKind::Normal, {}) };
+  StateId const bar{ build_state(c, root, "F", StateKind::Fork, {}) };
+  build_trans(c, narrow, wide, TransKind::External, {});
+  build_trans(c, wide, narrow, TransKind::External, {});
+  build_trans(c, wide, bar, TransKind::External, {});
+  scav_profile const p{ unfolded() };
+  std::vector<scav_box_space> boxes(c.states.size(), scav_box_space{});
+  boxes[wide.v].min_w = 2000;
+  scav_spaces const s{ .box_state = boxes.data(),
+                       .n_box_state = static_cast<uint32_t>(boxes.size()),
+                       .box_state_stride = sizeof(scav_box_space) };
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  LayoutTrace t;
+  trace_sink_set(&t);
+  bool const sized{ size_layout(
+      c,
+      depths({ 0, 0, 0 }),
+      one_frame(c,
+                root,
+                { state_node(wide.v, 0, 0),
+                  state_node(narrow.v, 0, 1),
+                  state_node(bar.v, 0, 2) },
+                { { .src = 1, .dst = 0, .segment = 0, .reversed = 0 },
+                  { .src = 0, .dst = 1, .segment = 1, .reversed = 0 },
+                  { .src = 0, .dst = 2, .segment = 2, .reversed = 0 } },
+                { 0 }),
+      s,
+      p,
+      z,
+      diags) };
+  trace_sink_set(nullptr);
+  REQUIRE(sized);
+  scav_rect const &w{ z.state[wide.v] };
+  scav_rect const &n{ z.state[narrow.v] };
+  REQUIRE(w.w > (2 * n.w));  // the column really is wider than `N`
+  CHECK(n.x + (n.w / 2) == w.x + (w.w / 2));
+  CHECK(z.state[bar.v].x == w.x);
+  // The trace says who moved, and by how much.
+  uint32_t centred{ 0 };
+  for (TraceEvent const &e : t.events) {
+    if (e.kind != TraceKind::ColumnCentred) { continue; }
+    ++centred;
+    CHECK(e.shift.state == narrow.v);
+    CHECK(e.shift.by == n.x - w.x);
+  }
+  CHECK(centred == 1);
+}
+
+TEST_CASE("size: two labelled edges inside one column widen it for a label either side") {
+  // `ota`'s `chunk ready` and `chunk written` run as a pair down one centre
+  // line with a label outside each leg, and a column as wide as `Writing`
+  // left the second label nowhere but over `Writing` (11.10g). One label
+  // needs the room on one side only, and takes the trailing one when the
+  // leading side is short of it.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, a, TransKind::External, {});
+  SplitGraph const g{ decompose(c) };
+  scav_profile const p{ unfolded() };
+  constexpr int32_t LABEL_W{ 1500 };
+  std::vector<scav_path_box> boxes{ { .subject = 0, .w = LABEL_W, .h = 200, .order = 0 },
+                                    { .subject = 1, .w = LABEL_W, .h = 200, .order = 0 } };
+  auto const sized = [&](uint32_t labels, SizedLayout &z) {
+    scav_spaces const s{ .path_box = boxes.data(), .n_path_box = labels };
+    std::vector<Diagnostic> diags;
+    return size_layout(c,
+                       g,
+                       one_frame(c,
+                                 root,
+                                 { state_node(a.v, 0, 0), state_node(b.v, 0, 1) },
+                                 { { .src = 0, .dst = 1, .segment = 0, .reversed = 0 },
+                                   { .src = 1, .dst = 0, .segment = 1, .reversed = 0 } },
+                                 { 0 }),
+                       s,
+                       p,
+                       z,
+                       diags);
+  };
+
+  SizedLayout pair;
+  REQUIRE(sized(2, pair));
+  int32_t const line{ (2 * (label_leader(p) + LABEL_W)) + p.node_sep };
+  scav_rect const &pa{ pair.state[a.v] };
+  REQUIRE(line > (2 * pa.w));  // the room really is wider than the states
+  CHECK(pair.sub[root.v].w >= line);
+  CHECK(pa.x + (pa.w / 2) == pair.state[b.v].x + (pair.state[b.v].w / 2));
+  int32_t const off{ (pa.x + (pa.w / 2)) - (line / 2) };
+  CHECK(imax(off, -off) <= 1);
+
+  SizedLayout one;
+  REQUIRE(sized(1, one));
+  scav_rect const &oa{ one.state[a.v] };
+  int32_t const room{ label_leader(p) + LABEL_W + (p.node_sep / 2) };
+  CHECK(oa.x == one.state[b.v].x);  // one column, nothing to centre
+  CHECK(one.sub[root.v].w == (oa.w / 2) + room);
+}
+
+namespace {
+
+// A tall hole, so every fold stacks its pieces one above the other, with the
+// profile's own spacing kept for the labels to need room against.
+scav_profile tall() {
+  scav_profile p{ profile() };
+  p.dar_num = 1;
+  p.dar_den = 1024;
+  return p;
+}
+
+}  // namespace
+
+TEST_CASE("size: a fold that stacks its pieces carries no label room onto the second") {
+  // The room a cut's label was charged goes on the new piece's leading edge
+  // only where the packing puts that piece beside the one before: stacked,
+  // the leg runs down the gap the two ends' own reserve opened, and the room
+  // pushed `brew`'s `Pumping` and `dock`'s `Charging` a label's width from
+  // the state they join (11.10g). `B` starts at the frame's leading edge.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  std::vector<scav_path_box> const labels{
+    { .subject = 0, .w = 1500, .h = 200, .order = 0 }
+  };
+  scav_spaces const s{ .path_box = labels.data(), .n_path_box = 1 };
+  scav_profile const p{ tall() };
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  LayoutTrace t;
+  trace_sink_set(&t);
+  bool const sized{ size_layout(
+      c,
+      decompose(c),
+      one_frame(c,
+                root,
+                { state_node(a.v, 0, 0), state_node(b.v, 1, 0) },
+                { { .src = 0, .dst = 1, .segment = 0, .reversed = 0 } },
+                { 1500 }),
+      s,
+      p,
+      z,
+      diags,
+      DarSource::Profile,
+      Compaction::Off,
+      Fold::Always) };
+  trace_sink_set(nullptr);
+  REQUIRE(sized);
+  bool cut{ false };
+  for (TraceEvent const &e : t.events) {
+    if ((e.kind == TraceKind::FoldCut) && (e.fold.refused == 0)) {
+      cut = true;
+      CHECK(e.fold.carried == 0);
+    }
+  }
+  REQUIRE(cut);  // the fixture does what it is for
+  CHECK(z.state[b.v].y > z.state[a.v].y + z.state[a.v].h);  // stacked
+  CHECK(z.state[b.v].x == z.state[a.v].x);
+}
+
+TEST_CASE("size: a fold never cuts a boundary node away from the node it joins") {
+  // A boundary node is the point a route crosses its frame's border at, and a
+  // piece of its own is packed below the node it joins, taking the port with
+  // it: `vac`'s `battery low` left `Ready` a whole state's height low
+  // (11.10g). So the cut before its rank is refused, and it stays level.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  std::vector<scav_box_space> boxes(c.states.size(), scav_box_space{});
+  boxes[a.v].min_w = 3000;
+  boxes[b.v].min_w = 3000;
+  scav_spaces const s{ .box_state = boxes.data(),
+                       .n_box_state = static_cast<uint32_t>(boxes.size()),
+                       .box_state_stride = sizeof(scav_box_space) };
+  scav_profile const p{ tall() };
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  LayoutTrace t;
+  trace_sink_set(&t);
+  bool const sized{ size_layout(
+      c,
+      depths({ 0, 0 }),
+      one_frame(c,
+                root,
+                { state_node(a.v, 0, 0),
+                  state_node(b.v, 1, 0),
+                  { .kind = OrderKind::Boundary, .subject = 1, .rank = 2, .pos = 0 } },
+                { { .src = 0, .dst = 1, .segment = 0, .reversed = 0 },
+                  { .src = 1, .dst = 2, .segment = 1, .reversed = 0 } },
+                { 0, 0 }),
+      s,
+      p,
+      z,
+      diags,
+      DarSource::Profile,
+      Compaction::Off,
+      Fold::Always) };
+  trace_sink_set(nullptr);
+  REQUIRE(sized);
+  bool refused{ false };
+  for (TraceEvent const &e : t.events) {
+    refused = refused || ((e.kind == TraceKind::FoldCut) && (e.fold.rank == 2) &&
+                          (e.fold.refused != 0));
+  }
+  CHECK(refused);
+  CHECK(z.node[2].y == z.state[b.v].y + (z.state[b.v].h / 2));
+}
+
+TEST_CASE("size: a labelled pair a fold stacks has room for a label either side") {
+  // Two labelled edges between one pair, their ends in two stacked pieces,
+  // run as a pair of legs down the gap with a label outside each; room on one
+  // side each left `ota`'s pair printing over both its states (11.10g).
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, a, TransKind::External, {});
+  constexpr int32_t LABEL_W{ 1500 };
+  std::vector<scav_path_box> const labels{
+    { .subject = 0, .w = LABEL_W, .h = 200, .order = 0 },
+    { .subject = 1, .w = LABEL_W, .h = 200, .order = 0 }
+  };
+  scav_spaces const s{ .path_box = labels.data(), .n_path_box = 2 };
+  scav_profile const p{ tall() };
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c,
+                      decompose(c),
+                      one_frame(c,
+                                root,
+                                { state_node(a.v, 0, 0), state_node(b.v, 1, 0) },
+                                { { .src = 0, .dst = 1, .segment = 0, .reversed = 0 },
+                                  { .src = 1, .dst = 0, .segment = 1, .reversed = 0 } },
+                                { 1500 }),
+                      s,
+                      p,
+                      z,
+                      diags,
+                      DarSource::Profile,
+                      Compaction::Off,
+                      Fold::Always));
+  scav_rect const &ra{ z.state[a.v] };
+  scav_rect const &rb{ z.state[b.v] };
+  REQUIRE(rb.y > ra.y + ra.h);  // stacked
+  int32_t const lo{ imax(ra.x, rb.x) };
+  int32_t const hi{ imin(ra.x + ra.w, rb.x + rb.w) };
+  REQUIRE(hi > lo);
+  int32_t const leg{ lo + ((hi - lo) / 2) };
+  int32_t const room{ label_leader(p) + LABEL_W + (p.node_sep / 2) };
+  scav_rect const &frame{ z.sub[root.v] };
+  CHECK(leg - frame.x >= room);
+  CHECK((frame.x + frame.w) - leg >= room);
+}
+
+TEST_CASE("size: a frame turned down runs its ranks top to bottom, and never folds") {
+  // A column of states in sequence is one frame's choice (11.10g). Turned
+  // down, each rank is a row: `B` under `A` and `C` under `B` on one centre
+  // line, the initial above the state it enters, and a hole wide enough to
+  // fold an across run into two rows still leaves the column one column.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const start{ build_state(c, root, {}, StateKind::Initial, {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
+  build_trans(c, start, a, TransKind::External, {});
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, d, TransKind::External, {});
+  scav_profile p{ profile() };
+  p.dar_num = 1024;  // wide: an across run this long would not fold either
+  p.dar_den = 1;
+  SubmachineOrders o{ one_frame(c,
+                                root,
+                                { state_node(start.v, 0, 0),
+                                  state_node(a.v, 1, 0),
+                                  state_node(b.v, 2, 0),
+                                  state_node(d.v, 3, 0) },
+                                { { .src = 0, .dst = 1, .segment = 0, .reversed = 0 },
+                                  { .src = 1, .dst = 2, .segment = 1, .reversed = 0 },
+                                  { .src = 2, .dst = 3, .segment = 2, .reversed = 0 } },
+                                { 0, 0, 0 }) };
+  o.sub_down.assign(c.submachines.size(), 0);
+  o.sub_down[root.v] = 1;
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c,
+                      depths({ 0, 0, 0, 0 }),
+                      o,
+                      {},
+                      p,
+                      z,
+                      diags,
+                      DarSource::Profile,
+                      Compaction::Off,
+                      Fold::Always));
+  scav_rect const &dot{ z.state[start.v] };
+  scav_rect const &ra{ z.state[a.v] };
+  scav_rect const &rb{ z.state[b.v] };
+  scav_rect const &rd{ z.state[d.v] };
+  CHECK(dot.y + dot.h < ra.y);
+  CHECK(ra.y + ra.h < rb.y);
+  CHECK(rb.y + rb.h < rd.y);
+  CHECK(dot.x + (dot.w / 2) == ra.x + (ra.w / 2));
+  CHECK(ra.x + (ra.w / 2) == rb.x + (rb.w / 2));
+  CHECK(rb.x + (rb.w / 2) == rd.x + (rd.w / 2));
+  CHECK(rb.y - (ra.y + ra.h) == p.rank_sep);
+  CHECK(z.sub[root.v].h > (3 * z.sub[root.v].w));  // one column, not wrapped
+}
+
+TEST_CASE("size: a bar lies down in a frame running down") {
+  // A bar is thin across the axis the flow crosses it on. Stood up in a
+  // frame running down, its long faces are beside the flow and every branch
+  // leaves through a cap, which put four of `fork`'s through them (11.10g).
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const bar{ build_state(c, root, "F", StateKind::Fork, {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  build_trans(c, bar, a, TransKind::External, {});
+  scav_profile const p{ unfolded() };
+  auto const sized = [&](bool down) {
+    SubmachineOrders o{ one_frame(c,
+                                  root,
+                                  { state_node(bar.v, 0, 0), state_node(a.v, 1, 0) },
+                                  { { .src = 0, .dst = 1, .segment = 0, .reversed = 0 } },
+                                  { 0 }) };
+    o.sub_down.assign(c.submachines.size(), down ? 1 : 0);
+    SizedLayout z;
+    std::vector<Diagnostic> diags;
+    REQUIRE(size_layout(c, depths({ 0, 0 }), o, {}, p, z, diags));
+    return z.state[bar.v];
+  };
+  scav_rect const across{ sized(false) };
+  scav_rect const down{ sized(true) };
+  REQUIRE(across.h > across.w);  // stood up for a frame running across
+  CHECK(down.w == across.h);
+  CHECK(down.h == across.w);
+}
+
+TEST_CASE("size: a label beside a leg between two ranks has its room on one side") {
+  // The reserve gives each side of a node half a label's room across the
+  // ranks; running down, that is half a label's width beside a vertical leg,
+  // and `axis`'s `approaching target` printed over `Decelerating` (11.10g). A
+  // node alone in its row takes no reserve, and the frame grows on the
+  // trailing side until one side of the leg holds the whole label.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  constexpr int32_t LABEL_W{ 3000 };
+  std::vector<scav_path_box> const labels{
+    { .subject = 0, .w = LABEL_W, .h = 200, .order = 0 }
+  };
+  scav_spaces const s{ .path_box = labels.data(), .n_path_box = 1 };
+  scav_profile const p{ unfolded() };
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders o{ one_frame(c,
+                                root,
+                                { state_node(a.v, 0, 0), state_node(b.v, 1, 0) },
+                                { { .src = 0, .dst = 1, .segment = 0, .reversed = 0 } },
+                                { 200 }) };
+  o.sub_down.assign(c.submachines.size(), 0);
+  o.sub_down[root.v] = 1;
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c, g, o, s, p, z, diags));
+  scav_rect const &ra{ z.state[a.v] };
+  scav_rect const &frame{ z.sub[root.v] };
+  int32_t const leg{ ra.x + (ra.w / 2) };
+  int32_t const room{ label_leader(p) + LABEL_W + (p.node_sep / 2) };
+  CHECK(ra.x == frame.x);  // no reserve beside a node alone in its row
+  CHECK((frame.x + frame.w) - leg >= room);
+  CHECK((frame.x + frame.w) - leg < room + ra.w);  // one side, not both
+}
+
+TEST_CASE("size: an edge pointing back a rank still aligns its ends") {
+  // The other thing a pin leaves: an edge from a later rank to an earlier one,
+  // which is the same pair of layers read the other way round.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  build_trans(c, b, a, TransKind::External, {});
+  build_trans(c, d, a, TransKind::External, {});
+  scav_profile const p{ unfolded() };
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(
+      c,
+      depths({ 0, 0, 0 }),
+      one_frame(c,
+                root,
+                { state_node(a.v, 0, 0), state_node(b.v, 1, 0), state_node(d.v, 1, 1) },
+                { { .src = 1, .dst = 0, .segment = 0, .reversed = 0 },
+                  { .src = 2, .dst = 0, .segment = 1, .reversed = 0 } },
+                { 0 }),
+      {},
+      p,
+      z,
+      diags));
+  // `A` sits between its two upper neighbours, as it would with the edges
+  // written forward, rather than wherever an ignored edge leaves it.
+  int32_t const mid_a{ z.state[a.v].y + (z.state[a.v].h / 2) };
+  int32_t const mid_b{ z.state[b.v].y + (z.state[b.v].h / 2) };
+  int32_t const mid_d{ z.state[d.v].y + (z.state[d.v].h / 2) };
+  CHECK(mid_a >= mid_b);
+  CHECK(mid_a <= mid_d);
+  CHECK(z.state[b.v].y + z.state[b.v].h + p.node_sep <= z.state[d.v].y);
+}
+
+TEST_CASE("size: an initial pseudostate sits against its layer's trailing edge") {
+  // Left-aligned in a layer as wide as its widest member, the arrow out of it
+  // would run that whole width; beside its target it runs one rank gap.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const start{ build_state(c, root, {}, StateKind::Initial, {}) };
+  StateId const wide{ build_state(c, root, "W", StateKind::Normal, {}) };
+  StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
+  build_trans(c, start, x, TransKind::External, {});
+  build_trans(c, wide, x, TransKind::External, {});
+  scav_profile const p{ unfolded() };
+  std::vector<scav_box_space> boxes(c.states.size(), scav_box_space{});
+  boxes[wide.v].min_w = 2000;
+  scav_spaces const s{ .box_state = boxes.data(),
+                       .n_box_state = static_cast<uint32_t>(boxes.size()),
+                       .box_state_stride = sizeof(scav_box_space) };
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(
+      c,
+      depths({ 0, 0, 0 }),
+      one_frame(
+          c,
+          root,
+          { state_node(start.v, 0, 0), state_node(wide.v, 0, 1), state_node(x.v, 1, 0) },
+          { { .src = 0, .dst = 2, .segment = 0, .reversed = 0 },
+            { .src = 1, .dst = 2, .segment = 1, .reversed = 0 } },
+          { 0 }),
+      s,
+      p,
+      z,
+      diags));
+  scav_rect const &dot{ z.state[start.v] };
+  scav_rect const &w{ z.state[wide.v] };
+  CHECK(w.w > (10 * dot.w));  // the layer really is wide
+  CHECK(dot.x + dot.w == w.x + w.w);
+  CHECK(z.state[x.v].x - (dot.x + dot.w) == p.rank_sep);
+}
+
+TEST_CASE("size: an initial pseudostate is level with its target where there is room") {
+  // `X` has two successors and a second predecessor's successor below it, so
+  // Brandes-Kopf's balanced median leaves it between its neighbours and the
+  // arrow into it with a jog. The initial is alone in its rank, so nothing
+  // stops it moving to `X`'s height (11.10g).
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const start{ build_state(c, root, {}, StateKind::Initial, {}) };
+  StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
+  StateId const v{ build_state(c, root, "V", StateKind::Normal, {}) };
+  StateId const y{ build_state(c, root, "Y", StateKind::Normal, {}) };
+  StateId const z2{ build_state(c, root, "Z", StateKind::Normal, {}) };
+  build_trans(c, start, x, TransKind::External, {});
+  build_trans(c, x, y, TransKind::External, {});
+  build_trans(c, x, z2, TransKind::External, {});
+  build_trans(c, v, z2, TransKind::External, {});
+  scav_profile const p{ unfolded() };
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c,
+                      depths({ 0, 0, 0, 0, 0 }),
+                      one_frame(c,
+                                root,
+                                { state_node(start.v, 0, 0),
+                                  state_node(x.v, 1, 0),
+                                  state_node(v.v, 1, 1),
+                                  state_node(y.v, 2, 0),
+                                  state_node(z2.v, 2, 1) },
+                                { { .src = 0, .dst = 1, .segment = 0, .reversed = 0 },
+                                  { .src = 1, .dst = 3, .segment = 1, .reversed = 0 },
+                                  { .src = 1, .dst = 4, .segment = 2, .reversed = 0 },
+                                  { .src = 2, .dst = 4, .segment = 3, .reversed = 0 } },
+                                { 0, 0 }),
+                      {},
+                      p,
+                      z,
+                      diags));
+  scav_rect const &dot{ z.state[start.v] };
+  CHECK(dot.y + (dot.h / 2) == z.state[x.v].y + (z.state[x.v].h / 2));
+}
+
+TEST_CASE("size: a final pseudostate sits rank_sep after its source, level with it") {
+  // The mirror of the initial: in the layer after a wide one it would sit past
+  // that whole width, however narrow the state it leaves.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
+  StateId const wide{ build_state(c, root, "W", StateKind::Normal, {}) };
+  StateId const done{ build_state(c, root, {}, StateKind::Final, {}) };
+  StateId const y{ build_state(c, root, "Y", StateKind::Normal, {}) };
+  build_trans(c, x, done, TransKind::External, {});
+  build_trans(c, wide, y, TransKind::External, {});
+  scav_profile const p{ unfolded() };
+  std::vector<scav_box_space> boxes(c.states.size(), scav_box_space{});
+  boxes[wide.v].min_w = 2000;
+  scav_spaces const s{ .box_state = boxes.data(),
+                       .n_box_state = static_cast<uint32_t>(boxes.size()),
+                       .box_state_stride = sizeof(scav_box_space) };
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c,
+                      depths({ 0, 0, 0, 0 }),
+                      one_frame(c,
+                                root,
+                                { state_node(x.v, 0, 0),
+                                  state_node(wide.v, 0, 1),
+                                  state_node(done.v, 1, 0),
+                                  state_node(y.v, 1, 1) },
+                                { { .src = 0, .dst = 2, .segment = 0, .reversed = 0 },
+                                  { .src = 1, .dst = 3, .segment = 1, .reversed = 0 } },
+                                { 0 }),
+                      s,
+                      p,
+                      z,
+                      diags));
+  scav_rect const &from{ z.state[x.v] };
+  scav_rect const &dot{ z.state[done.v] };
+  CHECK(z.state[wide.v].w > (2 * from.w));  // the layer really is wide
+  CHECK(dot.x == from.x + from.w + p.rank_sep);
+  CHECK(dot.y + (dot.h / 2) == from.y + (from.h / 2));
+}
+
+TEST_CASE("size: a fold never cuts between an initial pseudostate and its target") {
+  // `A` is wide enough that the run wants to wrap before it, which would pack
+  // the initial as a piece of its own; the cut moves on instead (11.10g).
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const start{ build_state(c, root, {}, StateKind::Initial, {}) };
+  std::vector<StateId> chain;
+  chain.reserve(6);
+  for (uint32_t i = 0; i < 6; ++i) {
+    chain.push_back(build_state(c, root, "S" + std::to_string(i), StateKind::Normal, {}));
+  }
+  build_trans(c, start, chain[0], TransKind::External, {});
+  std::vector<OrderNode> nodes{ state_node(start.v, 0, 0) };
+  std::vector<OrderEdge> edges{ { .src = 0, .dst = 1, .segment = 0, .reversed = 0 } };
+  for (uint32_t i = 0; i < chain.size(); ++i) {
+    nodes.push_back(state_node(chain[i].v, i + 1, 0));
+    if (i + 1 < chain.size()) {
+      build_trans(c, chain[i], chain[i + 1], TransKind::External, {});
+      edges.push_back({ .src = i + 1, .dst = i + 2, .segment = i + 1, .reversed = 0 });
+    }
+  }
+  std::vector<scav_box_space> boxes(c.states.size(), scav_box_space{});
+  boxes[chain[0].v].min_w = 3000;
+  scav_spaces const s{ .box_state = boxes.data(),
+                       .n_box_state = static_cast<uint32_t>(boxes.size()),
+                       .box_state_stride = sizeof(scav_box_space) };
+  scav_profile p{ profile() };
+  p.dar_num = 1;
+  p.dar_den = 1;
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  LayoutTrace t;
+  trace_sink_set(&t);
+  bool const sized{ size_layout(
+      c,
+      depths(std::vector<uint32_t>(c.states.size(), 0)),
+      one_frame(c, root, nodes, edges, std::vector<int32_t>(7, 0)),
+      s,
+      p,
+      z,
+      diags,
+      DarSource::Profile,
+      Compaction::Off,
+      Fold::Always) };
+  trace_sink_set(nullptr);
+  REQUIRE(sized);
+  // The fixture does what it is for: the fold wanted to cut before `A`.
+  bool refused{ false };
+  for (TraceEvent const &e : t.events) {
+    refused = refused || ((e.kind == TraceKind::FoldCut) && (e.fold.rank == 1) &&
+                          (e.fold.refused != 0));
+  }
+  CHECK(refused);
+  scav_rect const &dot{ z.state[start.v] };
+  scav_rect const &a{ z.state[chain[0].v] };
+  // The run did fold somewhere: not every state is on one row.
+  bool folded{ false };
+  for (StateId const st : chain) { folded = folded || (z.state[st.v].y != a.y); }
+  CHECK(folded);
+  CHECK(a.x - (dot.x + dot.w) == p.rank_sep);
+  CHECK(dot.y + (dot.h / 2) == a.y + (a.h / 2));
 }
 
 TEST_CASE("size: unconnected states are separate components and pack") {
@@ -896,11 +1550,12 @@ TEST_CASE("size: a row of fold pieces that leaves the domain keeps the column") 
   CHECK(column.sub[root.v].h == z.sub[root.v].h);
 }
 
-TEST_CASE("size: a column of fold pieces that leaves the domain takes the row") {
+TEST_CASE("size: a fold whose pieces pack back into a row is the flat run") {
   // Five ranks of one tall state each. The fold cuts every rank into its own
-  // piece; stacked they are five times the domain's height, in a row they are
-  // the flat run less the four rank gaps the cuts removed -- the narrower
-  // shape, so the fold is taken rather than dropped.
+  // piece; stacked they are five times the domain's height, and in a row they
+  // are the flat run less the four rank gaps the cuts removed, with every edge
+  // a cut crosses dropped from the alignment. That is no fold, so the flat run
+  // is kept (11.10g).
   scav_profile p{ profile() };
   p.pad = 0;
   p.node_sep = 0;
@@ -922,12 +1577,12 @@ TEST_CASE("size: a column of fold pieces that leaves the domain takes the row") 
                       z,
                       diags));
   CHECK(diags.empty());
-  CHECK(z.sub[root.v].w == (5 * p.kind_min_w[0]));
+  CHECK(z.sub[root.v].w == ((5 * p.kind_min_w[0]) + (4 * p.rank_sep)));
   CHECK(z.sub[root.v].h == SPACE_MAX);
   CHECK((5 * SPACE_MAX) > COORD_MAX);
 
   // With no box packer the stack is all the fold has, it leaves the domain,
-  // and the fold is dropped for the flat run -- four rank gaps wider.
+  // and the fold is dropped for the flat run the same way.
   p.trybox = 0;
   SizedLayout flat;
   diags.clear();

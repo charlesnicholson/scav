@@ -19,6 +19,32 @@ namespace scav {
 
 namespace {
 
+// A submachine whose owner holds another live one beside it, so a divider runs
+// between them.
+bool shared_region(Chart const &c, SubmachineId m) {
+  StateId const owner{ c.submachines[m.v].owner };
+  if (owner.v == INVALID) { return false; }
+  Span const subs{ c.states[owner.v].submachines };
+  uint32_t live{ 0 };
+  for (uint32_t k = 0; k < subs.len; ++k) {
+    live += (c.submachines[c.submachine_ids[subs.off + k].v].live != 0) ? 1U : 0U;
+  }
+  return live > 1;
+}
+
+// `s` sits in `m` or in something nested inside it. The climb stops after one
+// step per state, as `ancestor_or_self`'s does.
+bool lies_in(Chart const &c, StateId s, SubmachineId m) {
+  StateId at{ s };
+  for (size_t up = 0; (up < c.states.size()) && (at.v < c.states.size()); ++up) {
+    SubmachineId const parent{ c.states[at.v].parent };
+    if (parent.v == m.v) { return true; }
+    if (parent.v >= c.submachines.size()) { return false; }
+    at = c.submachines[parent.v].owner;
+  }
+  return false;
+}
+
 // The eight points of the label's own rectangle the leader may attach to: its
 // four corners, then the midpoints of its four sides. Corners because a
 // polyline is kinked -- a label hung off a bend belongs on the diagonal, and an
@@ -176,6 +202,7 @@ uint32_t place_labels(Chart const &c,
   };
 
   std::vector<scav_rect> blocked;
+  RectGrid grid;
   std::vector<scav_rect> foreign;
   std::vector<scav_rect> nearby;
   std::vector<scav_rect> own;
@@ -255,6 +282,16 @@ uint32_t place_labels(Chart const &c,
         if ((c.states[st].live == 0) || (encloses[st] != 2)) { continue; }
         holder = intersection(holder, z.state[st]);
       }
+      // And by the region both endpoints lie in, where that region shares its
+      // state with another: the divider between them runs through a label
+      // that strays across it, and `brew`'s `at temperature` did (11.10g).
+      if (box.subject < c.transitions.size()) {
+        Transition const &tr{ c.transitions[box.subject] };
+        SubmachineId const m{ c.states[tr.src.v].parent };
+        if ((m.v < c.submachines.size()) && shared_region(c, m) && lies_in(c, tr.dst, m)) {
+          holder = intersection(holder, z.sub[m.v]);
+        }
+      }
       for (uint32_t st = 0; st < c.states.size(); ++st) {
         if (c.states[st].live == 0) { continue; }
         // A state enclosing both endpoints holds the label legitimately; the
@@ -277,6 +314,7 @@ uint32_t place_labels(Chart const &c,
           foreign.push_back(piece.at);
         }
       }
+      grid_build(grid, region, blocked, box.w, box.h);
 
       for (uint32_t k = chained ? prior_seg : 0U; (k + 1) < r.len; ++k) {
         scav_point const a{ points[r.off + k] };
@@ -355,14 +393,7 @@ uint32_t place_labels(Chart const &c,
                 lax_key = here;
                 lax = cand;
               }
-              bool clear{ true };
-              for (scav_rect const &obstacle : blocked) {
-                if (overlaps(cand, obstacle)) {
-                  clear = false;
-                  break;
-                }
-              }
-              if (!clear) { continue; }
+              if (grid_hits(grid, blocked, cand)) { continue; }
               key = here;
               best = cand;
             }

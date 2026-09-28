@@ -7,11 +7,25 @@
 #include "scav/scav_core.h"
 #include "scav/scav_layout_c.h"
 #include "scav/scav_types.h"
+#include "scav_int.h"
 
 #include <cstdint>
 #include <vector>
 
 namespace scav {
+
+// The room a route keeps from a box it passes.
+constexpr int32_t route_clearance(scav_profile const &p) {
+  return imax(p.node_sep / 3, 1);
+}
+
+// How far inside the state it is drawn in a route keeps: half the ring a box's
+// contents sit inside, capped by the clearance, so a child at `pad` keeps its
+// own bumper. A segment parallel to a border and nearer than this reads as
+// the border itself (11.10g).
+constexpr int32_t border_band(scav_profile const &p) {
+  return imax(imin(route_clearance(p), p.pad) / 2, 1);
+}
 
 // An end at a box centre names that box, so a router can move the point onto
 // its border instead.
@@ -19,6 +33,10 @@ struct RouteNet {
   scav_point src{}, dst{};
   uint32_t src_obstacle{ INVALID }, dst_obstacle{ INVALID };  // -> obstacles
   uint32_t waypoint_off{ 0 }, waypoint_len{ 0 };  // -> waypoints, phase 1's corridor
+  // Which face this end leaves by -- 0 left, 1 right, 2 top, 3 bottom -- or
+  // INVALID to let the router choose. A caller sets these when the choice is
+  // being searched rather than ruled (11.10e).
+  uint32_t src_face{ INVALID }, dst_face{ INVALID };
 };
 
 struct RouteInput {
@@ -37,6 +55,10 @@ struct RouteInput {
   std::vector<RouteNet> nets;  // in (transition, ordinal) order
   std::vector<scav_point> waypoints;
   scav_profile profile{};
+  // The box the frame's routes are drawn inside, or zero-sized for the root:
+  // a route keeps off its border rather than running along it, and an end on
+  // that border -- a port -- leaves it square (11.10g).
+  scav_rect enclosure{};
 };
 
 enum class RouteFailure : int32_t {

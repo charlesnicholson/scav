@@ -654,6 +654,52 @@ TEST_CASE("ortho: a fan's far ends are not pushed apart") {
   for (uint32_t i = 0; i < at.size(); ++i) { CHECK((at[i] == held[i])); }
 }
 
+TEST_CASE("ortho: separating a pair at one box moves whole nets, not seats") {
+  // The spread's own claim: "a pair seated apart at one box is seated the same
+  // way apart at the other and stays two straight lines". Moving the near seat
+  // alone bends both instead, by half the clearance, which is what `brew`'s
+  // 2,000-unit run between two facing boxes used to read.
+  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 400), rect(900, 0, 100, 400) };
+  std::vector<RouteNet> const nets{
+    { .src = pt(50, 200), .dst = pt(950, 200), .src_obstacle = 0, .dst_obstacle = 1 },
+    { .src = pt(950, 200), .dst = pt(50, 200), .src_obstacle = 1, .dst_obstacle = 0 },
+  };
+  // Both nets aligned on y = 200, so each is one straight segment and the two
+  // sit on top of each other at both boxes.
+  std::vector<scav_point> at{ pt(100, 200), pt(900, 200), pt(900, 200), pt(100, 200) };
+  ortho_spread_attachments(nets, boxes, {}, {}, 8, at);
+
+  // Separated at both boxes...
+  CHECK(at[0].y != at[3].y);
+  CHECK(at[1].y != at[2].y);
+  // ...and still one straight segment each, which is the property.
+  CHECK(at[0].y == at[1].y);
+  CHECK(at[2].y == at[3].y);
+  // Each stayed on its own face.
+  CHECK(at[0].x == 100);
+  CHECK(at[3].x == 100);
+  CHECK(at[1].x == 900);
+  CHECK(at[2].x == 900);
+}
+
+TEST_CASE("ortho: a far end that cannot follow keeps its seat and takes the bend") {
+  // A choice diamond seats at one point per face, so two transitions at it
+  // cannot both be straight once they are separated at the other end. `brew`'s
+  // `Off <-> SelfCheck` is exactly this, and the bend there is not a defect.
+  std::vector<scav_rect> const boxes{ rect(0, 0, 100, 400), rect(900, 0, 100, 400) };
+  std::vector<uint8_t> const glyph{ 0, 1 };
+  std::vector<RouteNet> const nets{
+    { .src = pt(50, 200), .dst = pt(950, 200), .src_obstacle = 0, .dst_obstacle = 1 },
+    { .src = pt(950, 200), .dst = pt(50, 200), .src_obstacle = 1, .dst_obstacle = 0 },
+  };
+  std::vector<scav_point> at{ pt(100, 200), pt(900, 200), pt(900, 200), pt(100, 200) };
+  ortho_spread_attachments(nets, boxes, glyph, {}, 8, at);
+
+  CHECK(at[0].y != at[3].y);  // separated at the box that can
+  CHECK(at[1].y == at[2].y);  // and the glyph keeps its one seat
+  CHECK(at[1].y == 200);
+}
+
 TEST_CASE("ortho: ends of one direction sharing a seat are a trunk and keep it") {
   // Everything arriving at one point is a fan-in and everything leaving is a
   // fan-out: each is one line a reader wants whole, which is the shape 11.5's
@@ -1752,4 +1798,171 @@ TEST_CASE("ortho: a glyph inscribed in its box is met at the middle of a face") 
   ortho_spread_attachments(nets, boxes, inscribed, {}, 8, at);
   CHECK((at[0] == pt(100, 50)));
   CHECK((at[2] == pt(100, 50)));
+}
+
+namespace {
+
+// Every coordinate of an input moved by the same delta. 11.10c's reuse rests on
+// the router treating this as the same question, so the shift is applied here
+// rather than described in a comment.
+RouteInput shifted(RouteInput const &in, int32_t dx, int32_t dy) {
+  RouteInput out{ in };
+  out.region.x += dx;
+  out.region.y += dy;
+  for (scav_rect &r : out.obstacles) {
+    r.x += dx;
+    r.y += dy;
+  }
+  for (RouteNet &n : out.nets) {
+    n.src.x += dx;
+    n.src.y += dy;
+    n.dst.x += dx;
+    n.dst.y += dy;
+  }
+  for (scav_point &w : out.waypoints) {
+    w.x += dx;
+    w.y += dy;
+  }
+  return out;
+}
+
+// A frame with the shapes the reuse has to survive: two boxes facing each
+// other, a third in the way, an inscribed glyph, a corner arc, a waypoint, and
+// two nets that share a box so the seating passes all have something to do.
+RouteInput busy_frame() {
+  RouteInput in;
+  in.profile = profile();
+  in.region = rect(0, 0, 4000, 3000);
+  in.obstacles = { rect(400, 400, 800, 600),
+                   rect(2400, 400, 800, 600),
+                   rect(1400, 1600, 900, 600),
+                   rect(3000, 1800, 400, 400) };
+  in.inscribed = { 0, 0, 0, 1 };
+  in.corner = { 75, 75, 75, 0 };
+  in.waypoints = { pt(2800, 1300) };
+  in.nets = {
+    { .src = pt(800, 700), .dst = pt(2800, 700), .src_obstacle = 0, .dst_obstacle = 1 },
+    { .src = pt(2800, 700),
+      .dst = pt(1850, 1900),
+      .src_obstacle = 1,
+      .dst_obstacle = 2,
+      .waypoint_off = 0,
+      .waypoint_len = 1 },
+    { .src = pt(1850, 1900), .dst = pt(800, 700), .src_obstacle = 2, .dst_obstacle = 0 },
+    { .src = pt(3200, 2000), .dst = pt(2800, 700), .src_obstacle = 3, .dst_obstacle = 1 }
+  };
+  return in;
+}
+
+}  // namespace
+
+TEST_CASE("ortho: routing is the same question shifted, which is what reuse rests on") {
+  RouteInput const base{ busy_frame() };
+  RouteOutput want;
+  ORTHO.route(base, want);
+  REQUIRE(want.net_points.size() == base.nets.size());
+  // Not a trivial answer: the frame has to actually make the router work.
+  uint32_t bends{ 0 };
+  for (RouteMetrics const &m : want.metrics) {
+    REQUIRE(m.failed == RouteFailure::None);
+    bends += static_cast<uint32_t>(m.bends);
+  }
+  REQUIRE(bends > 0);
+
+  for (auto const [dx, dy] : { std::pair<int32_t, int32_t>{ 1, 0 },
+                               { 0, 1 },
+                               { 17, 0 },
+                               { 0, 17 },
+                               { 96, 96 },
+                               { 1000, 2000 },
+                               { 5, 7 },
+                               { 100000, 100000 } }) {
+    CAPTURE(dx);
+    CAPTURE(dy);
+    RouteOutput got;
+    ORTHO.route(shifted(base, dx, dy), got);
+    REQUIRE(got.points.size() == want.points.size());
+    REQUIRE(got.net_points.size() == want.net_points.size());
+    for (uint32_t i = 0; i < want.points.size(); ++i) {
+      CAPTURE(i);
+      CHECK(got.points[i].x == (want.points[i].x + dx));
+      CHECK(got.points[i].y == (want.points[i].y + dy));
+    }
+    for (uint32_t n = 0; n < want.net_points.size(); ++n) {
+      CAPTURE(n);
+      CHECK(got.net_points[n].off == want.net_points[n].off);
+      CHECK(got.net_points[n].len == want.net_points[n].len);
+      CHECK(got.metrics[n].bends == want.metrics[n].bends);
+      CHECK(got.metrics[n].length == want.metrics[n].length);
+      CHECK(got.metrics[n].reseated == want.metrics[n].reseated);
+      CHECK(got.metrics[n].failed == want.metrics[n].failed);
+    }
+  }
+}
+
+TEST_CASE("ortho: a named face is the face, wherever the other end lies") {
+  // 11.10e's whole point: the separation rule picks a face from a point, and a
+  // pin overrules it. The position *along* the face is still the projection.
+  scav_rect const r{ rect(1000, 1000, 800, 600) };
+  int32_t const clear{ 96 };
+  for (scav_point const aim : { pt(5000, 1200),
+                                pt(-5000, 1200),
+                                pt(1400, 5000),
+                                pt(1400, -5000),
+                                pt(1400, 1300) }) {
+    CAPTURE(aim.x);
+    CAPTURE(aim.y);
+    CHECK(ortho_attach_face(aim, r, clear, false, 0, 0).x == 1000);  // left
+    CHECK(ortho_attach_face(aim, r, clear, false, 0, 1).x == 1800);  // right
+    CHECK(ortho_attach_face(aim, r, clear, false, 0, 2).y == 1000);  // top
+    CHECK(ortho_attach_face(aim, r, clear, false, 0, 3).y == 1600);  // bottom
+    // Along the face, the projection held off both corners.
+    scav_point const left{ ortho_attach_face(aim, r, clear, false, 0, 0) };
+    CHECK(left.y >= (1000 + clear));
+    CHECK(left.y <= (1600 - clear));
+    scav_point const top{ ortho_attach_face(aim, r, clear, false, 0, 2) };
+    CHECK(top.x >= (1000 + clear));
+    CHECK(top.x <= (1800 - clear));
+  }
+  // A corner arc insets further than the clearance does, and an inscribed
+  // glyph takes the face midpoint whatever it was aimed at.
+  CHECK(ortho_attach_face(pt(5000, 1010), r, clear, false, 200, 0).y == 1200);
+  CHECK(ortho_attach_face(pt(5000, 1010), r, clear, true, 0, 0).y == 1300);
+  CHECK(ortho_attach_face(pt(5000, 1010), r, clear, true, 0, 2).x == 1400);
+}
+
+TEST_CASE("ortho: a pinned face moves the seat and nothing else about the net") {
+  RouteInput in{ busy_frame() };
+  RouteOutput loose;
+  ORTHO.route(in, loose);
+  REQUIRE(loose.net_points.size() == in.nets.size());
+
+  // Net 0 runs between the two facing boxes; pin its departure to each face in
+  // turn and the seat lands there every time.
+  for (uint32_t face = 0; face < 4; ++face) {
+    CAPTURE(face);
+    RouteInput pinned{ in };
+    pinned.nets[0].src_face = face;
+    RouteOutput out;
+    ORTHO.route(pinned, out);
+    REQUIRE(out.net_points[0].len >= 2);
+    scav_point const seat{ out.points[out.net_points[0].off] };
+    scav_rect const &box{ in.obstacles[in.nets[0].src_obstacle] };
+    switch (face) {
+      case 0: CHECK(seat.x == box.x); break;
+      case 1: CHECK(seat.x == (box.x + box.w)); break;
+      case 2: CHECK(seat.y == box.y); break;
+      default: CHECK(seat.y == (box.y + box.h)); break;
+    }
+  }
+  // INVALID is the router's own choice, which is what it did unpinned.
+  RouteInput same{ in };
+  same.nets[0].src_face = INVALID;
+  RouteOutput again;
+  ORTHO.route(same, again);
+  REQUIRE(again.points.size() == loose.points.size());
+  for (uint32_t i = 0; i < loose.points.size(); ++i) {
+    CHECK(again.points[i].x == loose.points[i].x);
+    CHECK(again.points[i].y == loose.points[i].y);
+  }
 }

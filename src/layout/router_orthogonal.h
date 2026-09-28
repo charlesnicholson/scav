@@ -72,6 +72,16 @@ scav_point ortho_escape_box(scav_point at, scav_point toward, scav_rect const &r
 // off the face's two corners.
 // `inscribed` is `RouteInput`'s: the face's midpoint and nothing else, because
 // that is where an axis-aligned route meets a disc or a diamond.
+// `ortho_attach_box` onto a named face -- 0 left, 1 right, 2 top, 3 bottom --
+// rather than the one the separation rule picks. The position along the face is
+// still `toward`'s projection, held off the corners the same way (11.10e).
+scav_point ortho_attach_face(scav_point toward,
+                             scav_rect const &r,
+                             int32_t clear,
+                             bool inscribed,
+                             int32_t corner,
+                             uint32_t face);
+
 scav_point ortho_attach_box(scav_point toward,
                             scav_rect const &r,
                             int32_t clear,
@@ -145,12 +155,20 @@ scav_point ortho_ring(scav_point at, scav_rect const &r, int32_t clear);
 void ortho_simplify(std::vector<scav_point> const &from, std::vector<scav_point> &to);
 
 // Lines from the region's sides, obstacles grown by `clear`, and every anchor.
-// Blocks against the grown rect; `clear` of 0 is 11.5's re-seat.
+// Blocks against the grown rect; `clear` of 0 is 11.5's re-seat. `fixed` rects
+// block as given, whatever `clear` is: the band an enclosure keeps routes out of.
 bool ortho_grid(scav_rect const &region,
                 std::vector<scav_rect> const &obstacles,
                 std::vector<scav_point> const &anchors,
                 int32_t clear,
-                OrthoGrid &out);
+                OrthoGrid &out,
+                std::vector<scav_rect> const *fixed = nullptr);
+
+// The enclosure's band as four rects filling `region` outside the box shrunk by
+// `inset`, empty for a zero-sized enclosure.
+std::vector<scav_rect> ortho_enclosure_walls(scav_rect const &region,
+                                             scav_rect const &enclosure,
+                                             int32_t inset);
 
 // A* over the plane-split graph. False when unreachable or past the expansion
 // budget. The key `(f, g, node)` is total, so equal-cost paths break the same.

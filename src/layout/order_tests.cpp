@@ -11,7 +11,10 @@
 
 #include "doctest.h"
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace {
@@ -327,6 +330,183 @@ TEST_CASE("order: widened separations order to the same rows") {
   CHECK(a.seg_port == b.seg_port);
 }
 
+TEST_CASE("order: a pin that asks for the rank a node already has changes nothing") {
+  // The spine 11.10a's placement move stands on. A pin is a re-derivation and
+  // not an edit, so pinning what longest path already chose has to be the
+  // identity -- if it is not, the move is not measuring the move.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, d, TransKind::External, {});
+
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const plain{ order_submachines(c, g, {}, profile()) };
+  SearchPins same;
+  for (StateId const st : { a, b, d }) {
+    same.ranks.push_back(
+        { .state = st, .rank = plain.nodes[plain.state_node[st.v]].rank });
+  }
+  SubmachineOrders const pinned{ order_submachines(c, g, {}, profile(), 0, same) };
+  CHECK(pinned.nodes == plain.nodes);
+  CHECK(pinned.edges == plain.edges);
+  CHECK(pinned.gaps == plain.gaps);
+  CHECK(pinned.sub_ranks == plain.sub_ranks);
+}
+
+TEST_CASE("order: a pin moves a node's rank and the ranks stay contiguous") {
+  // A -> B -> D ranks 0, 1, 2. Pinning D onto B's rank empties rank 2, and a
+  // rank nothing sits in would still be sized a gap in phase 2 (11.10), so the
+  // squeeze renumbers onto the ranks that kept a node.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, d, TransKind::External, {});
+
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const plain{ order_submachines(c, g, {}, profile()) };
+  CHECK(plain.sub_ranks[root.v] == 3);
+  CHECK(plain.nodes[plain.state_node[d.v]].rank == 2);
+
+  SearchPins const onto_one{ .ranks = { { .state = d, .rank = 1 } } };
+  SubmachineOrders const moved{ order_submachines(c, g, {}, profile(), 0, onto_one) };
+  CHECK(moved.nodes[moved.state_node[d.v]].rank == 1);
+  CHECK(moved.sub_ranks[root.v] == 2);
+  // Every rank below the top holds at least one node.
+  std::vector<uint32_t> held(moved.sub_ranks[root.v], 0);
+  Span const sp{ moved.sub_nodes[root.v] };
+  for (uint32_t i = 0; i < sp.len; ++i) { ++held[moved.nodes[sp.off + i].rank]; }
+  for (uint32_t const n : held) { CHECK(n > 0); }
+}
+
+TEST_CASE("order: a labelled edge inside one rank charges no rank boundary") {
+  // A pin can leave both ends of a labelled edge in one rank. Its leg runs
+  // down the column and its label sits beside it there, so the boundary after
+  // that rank has nothing of it to hold; charged there, it widened `dock`'s
+  // `On` by the label's width of nothing (11.10g).
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, d, TransKind::External, {});
+  std::vector<scav_path_box> const boxes{
+    { .subject = 0, .w = 5000, .h = 200, .order = 0 }
+  };
+  scav_spaces const s{ .path_box = boxes.data(), .n_path_box = 1 };
+  SplitGraph const g{ decompose(c) };
+
+  // The fixture does what it is for: across ranks, the label is charged.
+  SubmachineOrders const plain{ order_submachines(c, g, s, profile()) };
+  Span const plain_gaps{ plain.sub_gaps[root.v] };
+  REQUIRE(plain_gaps.len > 0);
+  CHECK(plain.gaps[plain_gaps.off] >= 5000);
+
+  SearchPins const flat{ .ranks = { { .state = b, .rank = 0 } } };
+  SubmachineOrders const pinned{ order_submachines(c, g, s, profile(), 0, flat) };
+  REQUIRE(pinned.nodes[pinned.state_node[a.v]].rank ==
+          pinned.nodes[pinned.state_node[b.v]].rank);
+  Span const gaps{ pinned.sub_gaps[root.v] };
+  for (uint32_t k = 0; k < gaps.len; ++k) {
+    CAPTURE(k);
+    CHECK(pinned.gaps[gaps.off + k] < 5000);
+  }
+}
+
+TEST_CASE("order: a frame turned down charges a label's height to its rank gap") {
+  // Running down, a rank gap is vertical and a label sits beside the leg
+  // crossing it, so what the gap holds is the label's height (11.10g).
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  std::vector<scav_path_box> const boxes{
+    { .subject = 0, .w = 5000, .h = 300, .order = 0 }
+  };
+  scav_spaces const s{ .path_box = boxes.data(), .n_path_box = 1 };
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const across{ order_submachines(c, g, s, profile()) };
+  SearchPins const turned{ .orients = { { .frame = root } } };
+  SubmachineOrders const down{ order_submachines(c, g, s, profile(), 0, turned) };
+  REQUIRE(down.sub_down[root.v] == 1);
+  REQUIRE(across.sub_gaps[root.v].len == 1);
+  REQUIRE(down.sub_gaps[root.v].len == 1);
+  CHECK(across.gaps[across.sub_gaps[root.v].off] >= 5000);
+  CHECK(down.gaps[down.sub_gaps[root.v].off] >= 300);
+  CHECK(down.gaps[down.sub_gaps[root.v].off] < 5000);
+}
+
+TEST_CASE("order: undoing a move is running with the pins one held before it") {
+  // What makes a search loop possible at all: a move is not a mutation, so
+  // there is nothing to roll back and no state to get wrong. Applying the
+  // ranks a run produced reproduces that run exactly.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, d, TransKind::External, {});
+  build_trans(c, a, d, TransKind::External, {});
+
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const plain{ order_submachines(c, g, {}, profile()) };
+  SearchPins before;
+  for (StateId const st : { a, b, d }) {
+    before.ranks.push_back(
+        { .state = st, .rank = plain.nodes[plain.state_node[st.v]].rank });
+  }
+  SearchPins const away{ .ranks = { { .state = d, .rank = 1 } } };
+
+  SubmachineOrders const gone{ order_submachines(c, g, {}, profile(), 0, away) };
+  CHECK(gone.nodes != plain.nodes);  // the move did something
+  SubmachineOrders const back{ order_submachines(c, g, {}, profile(), 0, before) };
+  CHECK(back.nodes == plain.nodes);
+  CHECK(back.edges == plain.edges);
+  CHECK(back.gaps == plain.gaps);
+}
+
+TEST_CASE("order: an initial pseudostate is ranked just before the state it enters") {
+  // A pin can move the target anywhere; the initial follows it, and a pin on
+  // the initial itself is not a choice anyone gets to make (11.10g).
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const start{ build_state(c, root, {}, StateKind::Initial, {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  build_trans(c, start, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, d, TransKind::External, {});
+  SplitGraph const g{ decompose(c) };
+
+  auto const ranks = [&](SearchPins const &pins) {
+    SubmachineOrders const o{ order_submachines(c, g, {}, profile(), 0, pins) };
+    return std::array<uint32_t, 3>{ node_of(o, start).rank,
+                                    node_of(o, b).rank,
+                                    node_of(o, d).rank };
+  };
+  // Unpinned: longest path already pulls it next to `B`.
+  std::array<uint32_t, 3> const plain{ ranks({}) };
+  CHECK(plain[0] + 1 == plain[1]);
+  // `B` pinned two ranks further on: the initial is re-seated beside it.
+  std::array<uint32_t, 3> const moved{ ranks({ .ranks = { { .state = b, .rank = 3 } } }) };
+  CHECK(moved[0] + 1 == moved[1]);
+  // `B` pinned to rank 0: everything else makes room, and it still leads.
+  std::array<uint32_t, 3> const first{ ranks({ .ranks = { { .state = b, .rank = 0 } } }) };
+  CHECK(first[0] == 0);
+  CHECK(first[1] == 1);
+  // A pin on the initial is ignored.
+  CHECK(ranks({ .ranks = { { .state = start, .rank = 2 } } }) == plain);
+}
+
 TEST_CASE("order: a dead submachine gets an empty span and no nodes") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
@@ -339,4 +519,230 @@ TEST_CASE("order: a dead submachine gets an empty span and no nodes") {
   CHECK(o.sub_nodes[inner.v].len == 0);
   CHECK(o.sub_ranks[inner.v] == 0);
   CHECK(frame_nodes(o, root).size() == 1);
+}
+
+// 11.10b: a cut drops a segment's bends, so phase 3 gets a net with no
+// waypoints. The chart is estop's shape -- a three-state cycle whose back edge
+// spans two ranks after cycle-breaking.
+namespace {
+
+struct Cycle {
+  Chart c;
+  SplitGraph g;
+  StateId a{ INVALID }, b{ INVALID }, d{ INVALID };
+  TransId back{ INVALID };
+};
+
+Cycle three_state_cycle() {
+  Cycle out;
+  SubmachineId const root{ build_chart(out.c, "t", {}) };
+  out.a = build_state(out.c, root, "A", StateKind::Normal, {});
+  out.b = build_state(out.c, root, "B", StateKind::Normal, {});
+  out.d = build_state(out.c, root, "C", StateKind::Normal, {});
+  build_trans(out.c, out.a, out.b, TransKind::External, {});
+  build_trans(out.c, out.b, out.d, TransKind::External, {});
+  out.back = build_trans(out.c, out.d, out.a, TransKind::External, {});
+  out.g = decompose(out.c);
+  return out;
+}
+
+uint32_t bends_of(SubmachineOrders const &o) {
+  uint32_t n{ 0 };
+  for (OrderNode const &nd : o.nodes) { n += (nd.kind == OrderKind::Bend) ? 1U : 0U; }
+  return n;
+}
+
+// The cut naming a transition's only leg.
+SearchPins cut_of(Cycle const &z, uint32_t leg = 0) {
+  return { .cuts = { { .trans = z.back, .leg = leg } } };
+}
+
+}  // namespace
+
+TEST_CASE("order: the back edge of a cycle chains, and a cut leaves it long") {
+  Cycle const z{ three_state_cycle() };
+  SubmachineOrders const plain{ order_submachines(z.c, z.g, {}, profile()) };
+  REQUIRE(bends_of(plain) == 1);
+
+  SubmachineOrders const freed{ order_submachines(z.c, z.g, {}, profile(), 0, cut_of(z)) };
+  CHECK(bends_of(freed) == 0);
+
+  // The edge survives, spanning more than one rank -- which is the whole point:
+  // it reaches the router as one net with no waypoint between its ends.
+  uint32_t spanning{ 0 };
+  for (OrderEdge const &e : freed.edges) {
+    uint32_t const from{ freed.nodes[e.src].rank };
+    uint32_t const to{ freed.nodes[e.dst].rank };
+    spanning += ((to - from) > 1) ? 1U : 0U;
+  }
+  CHECK(spanning == 1);
+  CHECK(freed.edges.size() == (plain.edges.size() - 1));  // the chain was two
+}
+
+TEST_CASE("order: a cut is undone by dropping it, and the orders come back") {
+  Cycle const z{ three_state_cycle() };
+  SubmachineOrders const plain{ order_submachines(z.c, z.g, {}, profile()) };
+  SubmachineOrders const freed{ order_submachines(z.c, z.g, {}, profile(), 0, cut_of(z)) };
+  REQUIRE(freed.nodes != plain.nodes);  // the cut did something
+  SubmachineOrders const back{ order_submachines(z.c, z.g, {}, profile(), 0, {}) };
+  CHECK(back.nodes == plain.nodes);
+  CHECK(back.edges == plain.edges);
+}
+
+TEST_CASE("order: a cut naming nothing this chart has is ignored, not applied") {
+  Cycle const z{ three_state_cycle() };
+  SubmachineOrders const plain{ order_submachines(z.c, z.g, {}, profile()) };
+  // A leg the transition does not have, a transition past the end, and INVALID.
+  // Every one of them must leave the orders exactly as they were.
+  for (SearchPins const &pins :
+       { cut_of(z, 1),
+         cut_of(z, 99),
+         SearchPins{ .cuts = { { .trans = TransId{ 4096 }, .leg = 0 } } },
+         SearchPins{ .cuts = { {} } } }) {
+    SubmachineOrders const same{ order_submachines(z.c, z.g, {}, profile(), 0, pins) };
+    CHECK(same.nodes == plain.nodes);
+    CHECK(same.edges == plain.edges);
+  }
+}
+
+TEST_CASE("order: cutting an edge that never chained changes nothing") {
+  Cycle const z{ three_state_cycle() };
+  SubmachineOrders const plain{ order_submachines(z.c, z.g, {}, profile()) };
+  // Transition 0 is A -> B, adjacent ranks, so it has no bend to drop.
+  SearchPins const pins{ .cuts = { { .trans = TransId{ 0 }, .leg = 0 } } };
+  SubmachineOrders const same{ order_submachines(z.c, z.g, {}, profile(), 0, pins) };
+  CHECK(same.nodes == plain.nodes);
+  CHECK(same.edges == plain.edges);
+}
+
+TEST_CASE("order: cuts and rank pins compose, and neither disables the other") {
+  Cycle const z{ three_state_cycle() };
+  SubmachineOrders const plain{ order_submachines(z.c, z.g, {}, profile()) };
+  uint32_t const was{ plain.nodes[plain.state_node[z.d.v]].rank };
+
+  SearchPins both{ cut_of(z) };
+  both.ranks.push_back({ .state = z.d, .rank = 0 });
+  SubmachineOrders const o{ order_submachines(z.c, z.g, {}, profile(), 0, both) };
+  CHECK(bends_of(o) == 0);                          // the cut held
+  CHECK(o.nodes[o.state_node[z.d.v]].rank != was);  // and so did the pin
+  CHECK(o.nodes[o.state_node[z.d.v]].rank == 0);
+}
+
+TEST_CASE("order: a reversal pin turns the named edge, and the walk turns no other") {
+  // 11.10d: which edge of a cycle is turned around decides everything
+  // downstream -- ranks, what spans two of them, what carries a bend -- and
+  // cycle-breaking chose it by walking in node order, which is declaration
+  // order. The pin names the edge instead.
+  Cycle const z{ three_state_cycle() };
+  SubmachineOrders const plain{ order_submachines(z.c, z.g, {}, profile()) };
+  auto const reversed_segs = [](SubmachineOrders const &o) {
+    std::vector<uint32_t> segs;
+    for (OrderEdge const &e : o.edges) {
+      if ((e.reversed != 0) && (std::ranges::find(segs, e.segment) == segs.end())) {
+        segs.push_back(e.segment);
+      }
+    }
+    return segs;
+  };
+  // Left alone, the walk turns the edge that closes it: the back edge.
+  CHECK(reversed_segs(plain) == std::vector<uint32_t>{ 2 });
+
+  // Pinned, it is the pinned one and nothing else -- the walk finds the cycle
+  // already broken. A bare three-cycle still leaves one edge spanning two
+  // ranks whichever is turned, so the bend count does not move; what moves is
+  // *which* edge carries it, and on a chart with an entry state that is the
+  // difference between a bend and none (11.10d).
+  for (uint32_t t = 0; t < 3; ++t) {
+    CAPTURE(t);
+    SearchPins const pin{ .reverses = { { .trans = TransId{ t }, .leg = 0 } } };
+    SubmachineOrders const turned{ order_submachines(z.c, z.g, {}, profile(), 0, pin) };
+    CHECK(reversed_segs(turned) == std::vector<uint32_t>{ t });
+    CHECK(bends_of(turned) == 1);
+    if (t != 2) { CHECK(turned.nodes != plain.nodes); }
+  }
+}
+
+TEST_CASE("order: a reversal pin naming nothing this chart has is ignored") {
+  Cycle const z{ three_state_cycle() };
+  SubmachineOrders const plain{ order_submachines(z.c, z.g, {}, profile()) };
+  for (SearchPins const &pins :
+       { SearchPins{ .reverses = { { .trans = TransId{ 4096 }, .leg = 0 } } },
+         SearchPins{ .reverses = { { .trans = z.back, .leg = 7 } } },
+         SearchPins{ .reverses = { {} } } }) {
+    SubmachineOrders const same{ order_submachines(z.c, z.g, {}, profile(), 0, pins) };
+    CHECK(same.nodes == plain.nodes);
+    CHECK(same.edges == plain.edges);
+  }
+}
+
+TEST_CASE("order: turning an edge the walk would turn anyway changes nothing") {
+  Cycle const z{ three_state_cycle() };
+  SubmachineOrders const plain{ order_submachines(z.c, z.g, {}, profile()) };
+  SearchPins const pin{ .reverses = { { .trans = z.back, .leg = 0 } } };
+  SubmachineOrders const same{ order_submachines(z.c, z.g, {}, profile(), 0, pin) };
+  CHECK(same.nodes == plain.nodes);
+  CHECK(same.edges == plain.edges);
+}
+
+TEST_CASE("order: a segment on a cycle is reported, and one on none is not") {
+  // What 11.10f's reversals are drawn from: an edge whose two ends share a
+  // strongly connected component of the frame's graph as drawn, before any edge
+  // is turned around -- so which edge the walk turns does not change the answer.
+  Cycle const z{ three_state_cycle() };
+  SubmachineOrders const plain{ order_submachines(z.c, z.g, {}, profile()) };
+  for (uint32_t seg = 0; seg < 3; ++seg) { CHECK(plain.seg_cyclic[seg] == 1); }
+  for (uint32_t t = 0; t < 3; ++t) {
+    SearchPins const pin{ .reverses = { { .trans = TransId{ t }, .leg = 0 } } };
+    SubmachineOrders const turned{ order_submachines(z.c, z.g, {}, profile(), 0, pin) };
+    CHECK(turned.seg_cyclic == plain.seg_cyclic);
+  }
+
+  // An entry into the cycle is on no cycle, and neither is a chain.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
+  StateId const e{ build_state(c, root, "D", StateKind::Normal, {}) };
+  build_trans(c, e, a, TransKind::External, {});  // into the cycle
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, d, TransKind::External, {});
+  build_trans(c, d, a, TransKind::External, {});
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ order_submachines(c, g, {}, profile()) };
+  CHECK(o.seg_cyclic[0] == 0);
+  CHECK(o.seg_cyclic[1] == 1);
+  CHECK(o.seg_cyclic[2] == 1);
+  CHECK(o.seg_cyclic[3] == 1);
+
+  Chart chain;
+  SubmachineId const r2{ build_chart(chain, "t", {}) };
+  StateId const x{ build_state(chain, r2, "X", StateKind::Normal, {}) };
+  StateId const y{ build_state(chain, r2, "Y", StateKind::Normal, {}) };
+  StateId const w{ build_state(chain, r2, "W", StateKind::Normal, {}) };
+  build_trans(chain, x, y, TransKind::External, {});
+  build_trans(chain, y, w, TransKind::External, {});
+  SplitGraph const cg{ decompose(chain) };
+  SubmachineOrders const co{ order_submachines(chain, cg, {}, profile()) };
+  CHECK(co.seg_cyclic == std::vector<uint8_t>{ 0, 0 });
+}
+
+TEST_CASE("order: cycle detection survives a frame deep enough to overflow recursion") {
+  // One ring of 4,096 states: every edge on the one cycle. A recursive walk
+  // would be 4,096 frames deep; this one is a loop.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  std::vector<StateId> ring;
+  ring.reserve(4096);
+  for (uint32_t i = 0; i < 4096; ++i) {
+    ring.push_back(build_state(c, root, {}, StateKind::Normal, {}));
+  }
+  for (uint32_t i = 0; i < ring.size(); ++i) {
+    build_trans(c, ring[i], ring[(i + 1) % ring.size()], TransKind::External, {});
+  }
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ order_submachines(c, g, {}, profile()) };
+  uint32_t on{ 0 };
+  for (uint8_t const flag : o.seg_cyclic) { on += flag; }
+  CHECK(on == 4096);
 }

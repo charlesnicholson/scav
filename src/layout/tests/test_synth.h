@@ -22,7 +22,7 @@ Chart flat_2k_chart();
 Chart sealed_chart();
 
 // Clearance is a third of `node_sep`, so this asks for 192 grid units of it
-// across a rank boundary nothing wide.
+// across a rank boundary nothing wide. The move sweep is off: see the .cpp.
 scav_profile sealed_profile(scav_profile const &base);
 
 }  // namespace scav

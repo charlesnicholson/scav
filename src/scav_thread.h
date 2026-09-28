@@ -11,8 +11,14 @@ namespace scav {
 
 using ShardFn = void (*)(void *ctx, uint32_t shard);
 
+// How many workers this host can run at once, at least 1. The null backend
+// says 1, because it is the backend that has no second thread to offer.
+uint32_t thread_concurrency();
+
 // Runs fn(ctx, s) once for every s in [0, shards) and returns once the last has
-// finished. `threads` <= 1 runs them all on the caller in index order.
+// finished. `threads` of 1 runs them all on the caller in index order, and 0 is
+// `thread_concurrency()` -- safe as a default because the count never reaches
+// any result (6), so it buys wall clock and nothing else.
 void parallel_for(uint32_t shards, uint32_t threads, ShardFn fn, void *ctx);
 
 // The same over a functor, erased to the overload above by a capture-free

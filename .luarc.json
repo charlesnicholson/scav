@@ -15,9 +15,9 @@
   ],
   "runtime.version": "Lua 5.4",
   "workspace.library": [
-    "out\/.envy\/envy\/0.2.5",
-    "~\/Library\/Caches\/envy\/envy\/0.2.5",
-    "~\/.cache\/envy\/envy\/0.2.5",
-    "${env:USERPROFILE}\/AppData\/Local\/envy\/envy\/0.2.5"
+    "out\/.envy\/envy\/0.4.10",
+    "~\/Library\/Caches\/envy\/envy\/0.4.10",
+    "~\/.cache\/envy\/envy\/0.4.10",
+    "${env:USERPROFILE}\/AppData\/Local\/envy\/envy\/0.4.10"
   ]
 }

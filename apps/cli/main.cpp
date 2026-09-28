@@ -18,12 +18,16 @@ constexpr std::string_view USAGE{
   "  fmt [--check] <file>...      canonical print, in place; --check gates\n"
   "  check <file>                 structural validation, exit 1 on a finding\n"
   "  deps [--target NAME] <file>  the document network as a depfile\n"
-  "  dump [--hash|--json] [--layout] [--portfolio-row N] <file>  the model; "
-  "--layout adds geometry\n"
-  "  render [-o FILE] [--embed-font] [--profile NAME] [--portfolio-row N] <file>"
+  "  dump [--hash|--json] [--layout [LAYOUT...]] [--trace [--trace-search]] <file>"
+  "  the model; --layout adds geometry and the flags it rests on, --trace its "
+  "decisions\n"
+  "  render [-o FILE] [--embed-font] [LAYOUT...] <file>"
   "   chart -> SVG\n"
   "  selftest [--against FILE]   recompute the layout hashes on this toolchain "
   "and diff against the goldens\n"
+  "\n"
+  "  LAYOUT: --profile NAME, --portfolio-row N, --rank S:R, --cut T:L, "
+  "--reverse T:L, --face T:L:E:F, --orient F, --no-search, --no-text\n"
 };
 
 int usage() {
@@ -39,25 +43,25 @@ int dispatch(int argc, char **argv) {
     bool hash{ false };
     bool json{ false };
     bool layout{ false };
-    uint32_t row{ INVALID };
+    bool trace{ false };
+    bool trace_search{ false };
+    LayoutArgs args;
     for (int i = 2; i < argc; ++i) {
+      ArgRead const read{ read_layout_arg(argc, argv, i, args) };
+      if (read == ArgRead::Malformed) { return usage(); }
+      if (read == ArgRead::Taken) { continue; }
       std::string_view const arg{ argv[i] };
       bool *flag{ nullptr };
-      if (arg == "--portfolio-row") {
-        // The increment is its own statement: clang-tidy's
-        // bugprone-inc-dec-in-conditions is right that `++i` inside a compound
-        // condition depends on an evaluation order a reader has to reconstruct.
-        if (((i + 1) >= argc) || (row != INVALID)) { return usage(); }
-        ++i;
-        if (!portfolio_row(argv[i], row)) { return usage(); }
-        continue;
-      }
       if (arg == "--hash") {
         flag = &hash;
       } else if (arg == "--json") {
         flag = &json;
       } else if (arg == "--layout") {
         flag = &layout;
+      } else if (arg == "--trace") {
+        flag = &trace;
+      } else if (arg == "--trace-search") {
+        flag = &trace_search;
       }
       if (flag != nullptr) {
         if (*flag) { return usage(); }
@@ -70,32 +74,28 @@ int dispatch(int argc, char **argv) {
     }
     // A pinned row only reaches layout, so it is the geometry's flag and not
     // the model's: `--hash` and a bare dump have nothing to point at.
-    if ((path == nullptr) || (hash && (json || layout)) || ((row != INVALID) && !layout)) {
+    // `--trace` is layout's, like `--portfolio-row`: it prints the decisions
+    // one run made and there are none without a run (11.16).
+    // `--trace-search` is a mode of `--trace`, not a second flag beside it.
+    if ((path == nullptr) || (hash && (json || layout)) || (trace_search && !trace) ||
+        ((args.given || trace) && !layout)) {
       return usage();
     }
-    return run_dump(path, hash, json, layout, row);
+    return run_dump(path, hash, json, layout, trace, trace_search, args);
   }
 
   if (verb == "render") {
     char const *out{ nullptr };
-    char const *profile{ "readable" };
     bool embed{ false };
-    uint32_t row{ INVALID };
+    LayoutArgs args;
     for (int i = 2; i < argc; ++i) {
+      ArgRead const read{ read_layout_arg(argc, argv, i, args) };
+      if (read == ArgRead::Malformed) { return usage(); }
+      if (read == ArgRead::Taken) { continue; }
       std::string_view const arg{ argv[i] };
-      if (arg == "--portfolio-row") {
-        // The increment is its own statement: clang-tidy's
-        // bugprone-inc-dec-in-conditions is right that `++i` inside a compound
-        // condition depends on an evaluation order a reader has to reconstruct.
-        if (((i + 1) >= argc) || (row != INVALID)) { return usage(); }
-        ++i;
-        if (!portfolio_row(argv[i], row)) { return usage(); }
-      } else if (arg == "-o") {
+      if (arg == "-o") {
         if (((i + 1) >= argc) || (out != nullptr)) { return usage(); }
         out = argv[++i];
-      } else if (arg == "--profile") {
-        if ((i + 1) >= argc) { return usage(); }
-        profile = argv[++i];
       } else if (arg == "--embed-font") {
         if (embed) { return usage(); }
         embed = true;
@@ -106,7 +106,7 @@ int dispatch(int argc, char **argv) {
       }
     }
     if (path == nullptr) { return usage(); }
-    return run_render(path, out, embed, profile, row);
+    return run_render(path, out, embed, args.profile, args);
   }
 
   if (verb == "selftest") {

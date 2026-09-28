@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """libscavlayout may reach a documented standard-library subset and nothing
 else, so "bring your own compiler" cannot quietly mean "bring your own
-conforming <algorithm>". Enforced from the day the directory exists -- the
+conforming sort". <algorithm> is in it for its queries, and the algorithms
+that decide an order are banned by name. Enforced from the day the directory exists -- the
 check is green while src/layout/ is empty, and the first file lands under it.
 
 Quoted includes are held to the -Isrc boundary at the same time: layout may
@@ -28,10 +29,18 @@ import scavtest  # noqa: E402
 # the thing under test is worth nothing.
 ALLOWED_SYSTEM = {
     "cstdint", "bit", "limits", "vector", "array", "utility", "type_traits",
-    "cstring",
+    "cstring", "algorithm",
     # The C spelling of cstdint, for the header that must compile as C.
     "stdint.h",
 }
+
+# `<algorithm>` for its queries -- `find_if`, `any_of`, `count_if` -- and never
+# for what decides an order. A standard library's sort and partition are free
+# to break ties its own way, and an order that reaches output is scav's own.
+BANNED_IN_LAYOUT = re.compile(
+    r"\bstd::(sort|stable_sort|partial_sort|partial_sort_copy|nth_element|partition|"
+    r"stable_partition|unique|unique_copy|shuffle|random_shuffle|next_permutation|"
+    r"prev_permutation|make_heap|push_heap|pop_heap|sort_heap)\b")
 
 # Own subsystem headers, public vocabulary, and the src/-root primitives that
 # exist precisely to be the vetted channel for anything wider.
@@ -80,11 +89,15 @@ class TestLayoutIncludeSubset(unittest.TestCase):
         for path in sources:
             if path.suffix not in (".h", ".cpp") or path.stem.endswith("_tests"):
                 continue
+            in_block = False
             for number, line in enumerate(
                     path.read_text(encoding="utf-8").splitlines(), start=1):
+                where = f"{path.relative_to(layout.parent.parent)}:{number}"
+                code, in_block = strip_comments(line, in_block)
+                if (banned := BANNED_IN_LAYOUT.search(code)) is not None:
+                    offences.append(f"{where}: {banned.group(0)}")
                 if not (m := INCLUDE.match(line)):
                     continue
-                where = f"{path.relative_to(layout.parent.parent)}:{number}"
                 if (system := m.group(1)) is not None:
                     if system not in ALLOWED_SYSTEM:
                         offences.append(f"{where}: <{system}>")

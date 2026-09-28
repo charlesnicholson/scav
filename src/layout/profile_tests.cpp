@@ -30,11 +30,10 @@ TEST_CASE("profile: both shipped profiles load and pass their own validation") {
     CAPTURE(name);
     scav_profile const p{ named(name) };
     CHECK(profile_validate(p));
-    CHECK(p.profile_version == 7);
-    // The whole table (11.10). Two shipped while the objective mis-ranked
-    // five charts of eleven and more candidates made worse picks; fitted, the
-    // corpus reads 71 defects against 78 at two and a floor of 70.
-    CHECK(p.portfolio_m == 8);
+    CHECK(p.profile_version == 11);
+    // The whole table (11.10, 11.10g): every row searched and kicked, which is
+    // where `axis`'s compact drawing is.
+    CHECK(p.portfolio_m == 16);
   }
   CHECK(named("compact").profile_id != named("readable").profile_id);
 }
@@ -108,14 +107,21 @@ TEST_CASE("profile: every bound rejects out of range") {
           .field = &scav_profile::w_label_near,
           .bad_low = -1,
           .bad_high = 1025 },
+    Poke{ .what = "w_crowding",
+          .field = &scav_profile::w_crowding,
+          .bad_low = -1,
+          .bad_high = 1025 },
     Poke{ .what = "w_area",
           .field = &scav_profile::w_area,
           .bad_low = -1,
           .bad_high = 1025 },
+    // Zero is legal and means no bounded moves, which is what ships (11.10a).
+    // A million candidates is the ceiling, not 64: the budget is what a search
+    // is allowed to spend and the shipped value is already 1,024 (11.10).
     Poke{ .what = "portfolio_k",
           .field = &scav_profile::portfolio_k,
-          .bad_low = 0,
-          .bad_high = 65 },
+          .bad_low = -1,
+          .bad_high = (1 << 20) + 1 },
     // The table Level 2 chooses over has eight rows, so nine is out of range
     // rather than silently capped (11.10, 11.15).
     Poke{ .what = "portfolio_m",

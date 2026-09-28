@@ -6,6 +6,7 @@
 
 #include "layout/decompose.h"
 #include "scav/scav_core.h"
+#include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
 
 #include <cstdint>
@@ -42,6 +43,9 @@ struct SubmachineOrders {
   std::vector<Span> sub_nodes;      // parallel to submachines -> nodes
   std::vector<Span> sub_edges;      // parallel to submachines -> edges
   std::vector<uint32_t> sub_ranks;  // parallel to submachines; layer count
+  // Parallel to submachines: 1 where the ranks run down (+y) rather than
+  // across (+x), from the pins (11.10g).
+  std::vector<uint8_t> sub_down;
 
   // The extra width each rank boundary must carry beyond `rank_sep`, one row
   // per boundary, so `len` is one less than the frame's rank count.
@@ -54,6 +58,11 @@ struct SubmachineOrders {
   // The port a boundary node stands for, so a slot can go on the crossed state's
   // border. INVALID when it is an endpoint on an inner face, not a crossing (11.14).
   std::vector<uint32_t> seg_port;
+
+  // Parallel to segments: 1 where the segment lies on a cycle of its frame's
+  // graph as drawn, before any edge is turned around -- the edges a reversal
+  // can move (11.10f).
+  std::vector<uint8_t> seg_cyclic;
 };
 
 // Ranks by longest path, multi-rank edges chained through bends, then
@@ -61,11 +70,21 @@ struct SubmachineOrders {
 // a path box's, so it runs before anything is sized. Submachines are sharded
 // across `threads` workers and emitted in submachine order, so the result is
 // one value at every worker count (6).
+
+// `SearchPins` is `scav_layout.h`'s. **A pin is a re-derivation, not an edit**:
+// ranks feed the boundary charges, the chaining of multi-rank edges, the
+// buckets and the crossing sweeps, so a moved state changes all four and
+// pinning re-runs them rather than patching the answer. Undoing a move is
+// running with the pins one held before it. A `ChainCut` is the same shape one
+// step later: it drops a segment's bends, so the buckets and the sweeps are
+// re-run over a graph that no longer holds them.
+
 SubmachineOrders order_submachines(Chart const &c,
                                    SplitGraph const &g,
                                    scav_spaces const &s,
                                    scav_profile const &p,
-                                   uint32_t threads = 0);
+                                   uint32_t threads = 0,
+                                   SearchPins const &pins = {});
 
 // Crossings between two adjacent ranks by inversion counting. Exposed because
 // it is what the ordering minimizes and what a test measures against.

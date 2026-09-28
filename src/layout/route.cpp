@@ -12,6 +12,7 @@
 #include "layout/router.h"
 #include "layout/shard.h"
 #include "layout/size.h"
+#include "layout/trace.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 #include "scav_int.h"
@@ -19,7 +20,9 @@
 #include "scav_stable_sort.h"
 #include "scav_thread.h"
 
+#include <array>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 namespace scav {
@@ -53,6 +56,57 @@ struct Planned {
 
 // One frame's answer, written by the shard that owns the frame and read back
 // in frame order.
+// True when `b` is `a` with every coordinate moved by one delta, which it
+// writes to `dx`/`dy`. Compares exactly what the router and the nudger read, so
+// the only thing left to assume is that the router answers a shifted question
+// with a shifted answer -- which `router_orthogonal_tests` pins directly
+// (11.10c).
+bool same_but_shifted(RouteFrameCache const &a,
+                      RouteInput const &b,
+                      scav_rect const &frame,
+                      int32_t &dx,
+                      int32_t &dy) {
+  RouteInput const &x{ a.in };
+  if ((x.obstacles.size() != b.obstacles.size()) || (x.nets.size() != b.nets.size()) ||
+      (x.waypoints.size() != b.waypoints.size()) || (x.inscribed != b.inscribed) ||
+      (x.corner != b.corner)) {
+    return false;
+  }
+  if ((x.region.w != b.region.w) || (x.region.h != b.region.h)) { return false; }
+  if ((x.enclosure.w != b.enclosure.w) || (x.enclosure.h != b.enclosure.h) ||
+      ((b.enclosure.x - x.enclosure.x) != (b.region.x - x.region.x)) ||
+      ((b.enclosure.y - x.enclosure.y) != (b.region.y - x.region.y))) {
+    return false;
+  }
+  if (std::memcmp(&x.profile, &b.profile, sizeof(scav_profile)) != 0) { return false; }
+  dx = b.region.x - x.region.x;
+  dy = b.region.y - x.region.y;
+  auto const moved_pt = [dx, dy](scav_point const &p, scav_point const &q) {
+    return ((q.x - p.x) == dx) && ((q.y - p.y) == dy);
+  };
+  auto const moved_rect = [&](scav_rect const &p, scav_rect const &q) {
+    return (p.w == q.w) && (p.h == q.h) && ((q.x - p.x) == dx) && ((q.y - p.y) == dy);
+  };
+  if (!moved_rect(a.frame, frame)) { return false; }
+  for (uint32_t i = 0; i < x.obstacles.size(); ++i) {
+    if (!moved_rect(x.obstacles[i], b.obstacles[i])) { return false; }
+  }
+  for (uint32_t i = 0; i < x.waypoints.size(); ++i) {
+    if (!moved_pt(x.waypoints[i], b.waypoints[i])) { return false; }
+  }
+  for (uint32_t i = 0; i < x.nets.size(); ++i) {
+    RouteNet const &p{ x.nets[i] };
+    RouteNet const &q{ b.nets[i] };
+    if ((p.src_obstacle != q.src_obstacle) || (p.dst_obstacle != q.dst_obstacle) ||
+        (p.waypoint_off != q.waypoint_off) || (p.waypoint_len != q.waypoint_len) ||
+        (p.src_face != q.src_face) || (p.dst_face != q.dst_face) ||
+        !moved_pt(p.src, q.src) || !moved_pt(p.dst, q.dst)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 struct FrameRoutes {
   std::vector<scav_point> points;
   std::vector<scav_span> net_points;  // -> points, parallel to the frame's nets
@@ -86,8 +140,27 @@ Routes route_transitions(Chart const &c,
                          scav_spaces const &s,
                          scav_profile const &p,
                          Router const &router,
-                         uint32_t threads) {
+                         uint32_t threads,
+                         RouteCache const *reuse,
+                         RouteCache *fill,
+                         SearchPins const *pins) {
   Routes out;
+  // `{trans, leg, end}` resolved to a face per segment end once, so the frame
+  // workers read a flat table rather than searching the pin list per net.
+  std::array<std::vector<uint32_t>, 2> faces;
+  if ((pins != nullptr) && !pins->faces.empty()) {
+    for (std::vector<uint32_t> &side : faces) { side.assign(g.segments.size(), INVALID); }
+    for (FacePin const &fp : pins->faces) {
+      if ((fp.trans.v == INVALID) || (fp.trans.v >= g.trans_segments.size()) ||
+          (fp.end > 1) || (fp.face > 3)) {
+        continue;
+      }
+      Span const segs{ g.trans_segments[fp.trans.v] };
+      if (fp.leg >= segs.len) { continue; }
+      faces[fp.end][segs.off + fp.leg] = fp.face;
+    }
+  }
+  if (fill != nullptr) { fill->frame.assign(c.submachines.size(), {}); }
   uint32_t const n{ static_cast<uint32_t>(c.transitions.size()) };
   out.route.assign(n, {});
   out.port.assign(n, {});
@@ -143,6 +216,15 @@ Routes route_transitions(Chart const &c,
       return scav_port_slot{ .x = at.x, .y = at.y, .side = 0, .boundary_depth = depth };
     }
     bool const leading{ source_node[node] != 0 };
+    // On the border the frame's ranks start and end at: left and right for a
+    // frame running across, top and bottom for one running down (11.10g).
+    uint32_t const frame{ g.segments[seg].frame.v };
+    if ((frame < o.sub_down.size()) && (o.sub_down[frame] != 0)) {
+      return scav_port_slot{ .x = z.node[node].x,
+                             .y = leading ? box.y : (box.y + box.h),
+                             .side = leading ? 2U : 3U,
+                             .boundary_depth = depth };
+    }
     return scav_port_slot{ .x = leading ? box.x : (box.x + box.w),
                            .y = z.node[node].y,
                            .side = leading ? 0U : 1U,
@@ -161,12 +243,22 @@ Routes route_transitions(Chart const &c,
     uint32_t const first_slot{ static_cast<uint32_t>(out.slots.size()) };
 
     if (tr.src == tr.dst) {
-      // The external self-loop: out the trailing side and back.
+      // The external self-loop: out the trailing side and back, and no further
+      // than the state it is drawn inside lets it, which keeps a route off
+      // that state's border (11.10g).
       scav_rect const r{ z.state[tr.src.v] };
       scav_point const lip{ .x = r.x + r.w, .y = r.y + floor_div(r.h, 2) };
-      planned.push_back({ .frame = g.segments[segs.off].frame.v,
+      uint32_t const frame{ g.segments[segs.off].frame.v };
+      StateId const around{ (frame < c.submachines.size()) ? c.submachines[frame].owner
+                                                           : StateId{ INVALID } };
+      int32_t reach{ lip.x + (2 * p.pad) };
+      if (around.v != INVALID) {
+        scav_rect const box{ z.state[around.v] };
+        reach = imax(imin(reach, (box.x + box.w) - imax(p.pad / 2, 1) - 1), lip.x + 1);
+      }
+      planned.push_back({ .frame = frame,
                           .src = lip,
-                          .dst = { .x = lip.x + (2 * p.pad), .y = lip.y },
+                          .dst = { .x = reach, .y = lip.y },
                           .src_state = INVALID,
                           .dst_state = INVALID,
                           .seg = segs.off });
@@ -195,7 +287,18 @@ Routes route_transitions(Chart const &c,
           end = centre(z.state[tr.dst.v]);
           end_state = tr.dst.v;
         }
-        planned.push_back({ .frame = g.segments[seg].frame.v,
+        // The channel between two concurrent regions of one state is routed
+        // inside that state, in the source region's frame: in the frame the
+        // state sits in, the state is an obstacle walling the route out of
+        // the space between its own regions, and it went the long way round
+        // outside them (11.8).
+        uint32_t frame{ g.segments[seg].frame.v };
+        uint32_t const from_port{ g.segments[seg].src_port };
+        if ((g.segments[seg].separator != 0) && (from_port < g.ports.size()) &&
+            (g.ports[from_port].sub.v < c.submachines.size())) {
+          frame = g.ports[from_port].sub.v;
+        }
+        planned.push_back({ .frame = frame,
                             .src = at,
                             .dst = end,
                             .src_state = at_state,
@@ -224,6 +327,7 @@ Routes route_transitions(Chart const &c,
   // Reads the model, the orders, the geometry and the plan; writes `frames[m]`
   // and the caller's own scratch, so two frames share nothing.
   auto const route_frame = [&](uint32_t m, FrameScratch &sc) {
+    TraceFrame const traced{ SubmachineId{ m } };
     RouteInput &in{ sc.in };
     RouteOutput &ro{ sc.ro };
     in.obstacles.clear();
@@ -279,6 +383,9 @@ Routes route_transitions(Chart const &c,
                                               z.state[st],
                                               z.before[st].x - z.state[st].x));
     }
+    // The state the frame's routes are drawn inside, so none runs along its
+    // border and a port on it leaves square (11.10g).
+    in.enclosure = (owner.v == INVALID) ? scav_rect{} : z.state[owner.v];
     for (uint32_t const i : by_frame[m]) {
       Planned const &pn{ planned[i] };
       RouteNet net{ .src = pn.src, .dst = pn.dst };
@@ -289,13 +396,55 @@ Routes route_transitions(Chart const &c,
         in.waypoints.push_back(z.node[bend]);
       }
       net.waypoint_len = static_cast<uint32_t>(in.waypoints.size()) - net.waypoint_off;
+      if (!faces[0].empty()) {
+        net.src_face = faces[0][pn.seg];
+        net.dst_face = faces[1][pn.seg];
+      }
+      trace_emit({ .kind = TraceKind::NetPlanned,
+                   .net = { .seg = pn.seg,
+                            .trans = g.segments[pn.seg].trans.v,
+                            .waypoints = net.waypoint_len,
+                            .sx = net.src.x,
+                            .sy = net.src.y,
+                            .dx = net.dst.x,
+                            .dy = net.dst.y } });
+      for (uint32_t w = 0; w < net.waypoint_len; ++w) {
+        scav_point const &at{ in.waypoints[net.waypoint_off + w] };
+        trace_emit({ .kind = TraceKind::NetWaypoint, .point = { .x = at.x, .y = at.y } });
+      }
       in.nets.push_back(net);
     }
+    scav_rect const frame{ (owner.v == INVALID) ? region : z.state[owner.v] };
+
+    // A frame whose question only moved is answered by moving its answer. The
+    // comparison costs one walk of an input the gather above already built.
+    int32_t dx{ 0 };
+    int32_t dy{ 0 };
+    if ((reuse != nullptr) && (m < reuse->frame.size()) && (reuse->frame[m].valid != 0) &&
+        same_but_shifted(reuse->frame[m], in, frame, dx, dy)) {
+      RouteFrameCache const &had{ reuse->frame[m] };
+      frames[m].points = had.points;
+      for (scav_point &q : frames[m].points) {
+        q.x += dx;
+        q.y += dy;
+      }
+      frames[m].net_points = had.net_points;
+      frames[m].metrics = had.metrics;
+      frames[m].nudged = had.nudged;
+      if (fill != nullptr) {
+        fill->frame[m] = had;
+        fill->frame[m].in = in;
+        fill->frame[m].frame = frame;
+        fill->frame[m].points = frames[m].points;
+      }
+      for (uint32_t const st : sc.obstacle_states) { sc.obstacle_index[st] = INVALID; }
+      return;
+    }
+
     router.route(in, ro);
 
     // Nudged per frame, while the frame's obstacles are in hand.
     if (margin > 0) {
-      scav_rect const frame{ (owner.v == INVALID) ? region : z.state[owner.v] };
       // The pitch is a line of text, not the router's clearance (11.9.5), and
       // it is the grouping tolerance too, so what is spread apart by it is
       // exactly what was too close by it.
@@ -313,6 +462,15 @@ Routes route_transitions(Chart const &c,
     frames[m].points = ro.points;
     frames[m].net_points = ro.net_points;
     frames[m].metrics = ro.metrics;
+    if (fill != nullptr) {
+      fill->frame[m] = { .in = in,
+                         .frame = frame,
+                         .points = ro.points,
+                         .net_points = ro.net_points,
+                         .metrics = ro.metrics,
+                         .nudged = frames[m].nudged,
+                         .valid = 1 };
+    }
     for (uint32_t const st : sc.obstacle_states) { sc.obstacle_index[st] = INVALID; }
   };
 
@@ -345,6 +503,9 @@ Routes route_transitions(Chart const &c,
         out.reseated += static_cast<uint32_t>(fr.metrics[j].reseated);
         if (fr.metrics[j].failed != RouteFailure::None) {
           out.failed[g.segments[planned[by_frame[m][j]].seg].trans.v] = 1;
+          trace_emit({ .kind = TraceKind::RouteDegraded,
+                       .frame = m,
+                       .seg = { .seg = planned[by_frame[m][j]].seg } });
         }
         switch (fr.metrics[j].failed) {
           case RouteFailure::OutsideRegion: ++out.outside_region; break;
