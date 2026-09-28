@@ -8,6 +8,7 @@
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
 #include "scav_int.h"
+#include "scav_thread.h"
 
 #include "doctest.h"
 
@@ -745,4 +746,58 @@ TEST_CASE("order: cycle detection survives a frame deep enough to overflow recur
   uint32_t on{ 0 };
   for (uint8_t const flag : o.seg_cyclic) { on += flag; }
   CHECK(on == 4096);
+}
+
+TEST_CASE("order: a call nested on a thread waiting in another is each its own") {
+  // A thread waiting on an ordering's frame shards runs any job as deep, and a
+  // search's round -- candidates each ordering whole -- sits at that depth, so
+  // one call can start on a thread before another on it has finished. Each
+  // outer shard here makes both at one depth: a call sharded on the pool, and
+  // a job of calls made whole. mill shards its frames four ways.
+  std::string path{ SCAV_TEST_DATA_DIR "/charts/mill.scav" };
+  Loader loader;
+  Chart c;
+  std::vector<Diagnostic> diags;
+  std::string failed;
+  REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
+  scav_profile p{};
+  REQUIRE(profile_named("readable", p));
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const base{ order_submachines(c, g, {}, p, 1, {}) };
+  constexpr uint32_t OUTER{ 12 };
+  constexpr uint32_t INNER{ 3 };
+  constexpr uint32_t CALLS{ OUTER * (1 + INNER) };
+  std::vector<SearchPins> pins(CALLS);
+  uint32_t k{ 0 };
+  for (uint32_t st = 0; (st < c.states.size()) && (k < CALLS); ++st) {
+    if ((c.states[st].live == 0) || (base.state_node[st] == INVALID)) { continue; }
+    uint32_t const frame{ c.states[st].parent.v };
+    if ((frame >= base.sub_ranks.size()) || (base.sub_ranks[frame] < 2)) { continue; }
+    pins[k].ranks.push_back({ .state = StateId{ st }, .rank = 1 });
+    ++k;
+  }
+  REQUIRE(k == CALLS);
+  std::vector<SubmachineOrders> want(CALLS);
+  for (uint32_t i = 0; i < CALLS; ++i) {
+    want[i] = order_submachines(c, g, {}, p, 1, pins[i]);
+  }
+  std::vector<SubmachineOrders> got(CALLS);
+  for (uint32_t trial = 0; trial < 24; ++trial) {
+    parallel_for(OUTER, 0U, [&](uint32_t o) {
+      uint32_t const first{ o * (1 + INNER) };
+      got[first] = order_submachines(c, g, {}, p, 0, pins[first]);
+      parallel_for(INNER, 0U, [&, first](uint32_t i) {
+        got[first + 1 + i] = order_submachines(c, g, {}, p, 1, pins[first + 1 + i]);
+      });
+    });
+    bool same{ true };
+    for (uint32_t i = 0; i < CALLS; ++i) {
+      same = same && (got[i].nodes == want[i].nodes) && (got[i].edges == want[i].edges) &&
+             (got[i].sub_nodes == want[i].sub_nodes) && (got[i].gaps == want[i].gaps) &&
+             (got[i].state_node == want[i].state_node) &&
+             (got[i].seg_cyclic == want[i].seg_cyclic);
+    }
+    CAPTURE(trial);
+    CHECK(same);
+  }
 }

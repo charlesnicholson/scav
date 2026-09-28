@@ -101,6 +101,55 @@ struct FrameScratch {
   std::vector<uint32_t> lanes;        // boundaries x components, row-major
 };
 
+// A shard's frame scratch, kept per thread: both maps are all INVALID again
+// after every frame, and a shard never waits on the pool, so no two shards
+// share one at once.
+FrameScratch &frame_scratch(Chart const &c, SplitGraph const &g) {
+  thread_local FrameScratch sc;
+  if (sc.state_local.size() != c.states.size()) {
+    sc.state_local.assign(c.states.size(), INVALID);
+  }
+  if (sc.seg_local.size() != g.segments.size()) {
+    sc.seg_local.assign(g.segments.size(), INVALID);
+  }
+  return sc;
+}
+
+// What one call builds and discards, kept per thread and by how deeply calls
+// nest on it: a call waiting on its shards may run another candidate's, which
+// orders on the same thread before the first call is done with its own.
+struct CallScratch {
+  std::vector<uint32_t> seg_count, seg_off, frame_segs, fill, global;
+  std::vector<int32_t> seg_label;
+  std::vector<uint8_t> cut, pre_reversed;
+  std::vector<FrameOrder> frames;
+};
+
+class CallScope {
+ public:
+  CallScope() {
+    if (depth() == stack().size()) { stack().push_back(new CallScratch); }
+    at = stack()[depth()];
+    ++depth();
+  }
+  ~CallScope() { --depth(); }
+  CallScope(CallScope const &) = delete;
+  CallScope &operator=(CallScope const &) = delete;
+  [[nodiscard]] CallScratch &scratch() const { return *at; }
+
+ private:
+  // Never freed: a pool thread lives as long as the process.
+  static std::vector<CallScratch *> &stack() {
+    thread_local std::vector<CallScratch *> s;
+    return s;
+  }
+  static size_t &depth() {
+    thread_local size_t d{ 0 };
+    return d;
+  }
+  CallScratch *at{ nullptr };
+};
+
 // The endpoint state of a segment's src or dst end when that end carries no
 // port: the transition's own src or dst.
 StateId endpoint_state(Chart const &c, SplitSegment const &seg, bool is_src) {
@@ -626,27 +675,35 @@ SubmachineOrders order_submachines(Chart const &c,
   o.seg_port.assign(g.segments.size(), INVALID);
   o.seg_cyclic.assign(g.segments.size(), 0);
 
+  CallScope const scope;
+  CallScratch &cs{ scope.scratch() };
+
   // Which segments each frame routes, gathered once: a segment names its frame
   // but a frame does not name its segments.
-  std::vector<uint32_t> seg_count(c.submachines.size(), 0);
+  std::vector<uint32_t> &seg_count{ cs.seg_count };
+  seg_count.assign(c.submachines.size(), 0);
   for (SplitSegment const &seg : g.segments) {
     if (seg.frame.v != INVALID) { ++seg_count[seg.frame.v]; }
   }
-  std::vector<uint32_t> const seg_off{ offsets_of(seg_count) };
-  std::vector<uint32_t> frame_segs(g.segments.size(), 0);
-  {
-    std::vector<uint32_t> fill(seg_off.begin(), seg_off.end() - 1);
-    for (uint32_t i = 0; i < g.segments.size(); ++i) {
-      SubmachineId const frame{ g.segments[i].frame };
-      if (frame.v != INVALID) { frame_segs[fill[frame.v]++] = i; }
-    }
+  std::vector<uint32_t> &seg_off{ cs.seg_off };
+  seg_off.assign(seg_count.size() + 1, 0);
+  for (uint32_t i = 0; i < seg_count.size(); ++i) {
+    seg_off[i + 1] = seg_off[i] + seg_count[i];
+  }
+  std::vector<uint32_t> &frame_segs{ cs.frame_segs };
+  frame_segs.assign(g.segments.size(), 0);
+  cs.fill.assign(seg_off.begin(), seg_off.end() - 1);
+  for (uint32_t i = 0; i < g.segments.size(); ++i) {
+    SubmachineId const frame{ g.segments[i].frame };
+    if (frame.v != INVALID) { frame_segs[cs.fill[frame.v]++] = i; }
   }
 
   // A label is charged to one rank boundary in one frame -- the middle of the
   // route, which is where a builder draws it -- so a hierarchy-crossing
   // transition does not widen every frame it passes through. Its extent along
   // the frame's ranks: its width across the page, its height down it.
-  std::vector<int32_t> seg_label(g.segments.size(), 0);
+  std::vector<int32_t> &seg_label{ cs.seg_label };
+  seg_label.assign(g.segments.size(), 0);
   for (uint32_t i = 0; i < s.n_path_box; ++i) {
     scav_path_box const &box{ s.path_box[i] };
     if (box.subject >= g.trans_segments.size()) { continue; }
@@ -661,6 +718,7 @@ SubmachineOrders order_submachines(Chart const &c,
   // `{trans, leg}` resolved to segment ordinals once, so the frame workers read
   // a flat table rather than searching the cut list per edge (11.10b).
   auto const resolve_pins = [&g](auto const &rows, std::vector<uint8_t> &table) {
+    table.clear();
     if (rows.empty()) { return; }
     table.assign(g.segments.size(), 0);
     for (auto const &row : rows) {
@@ -672,12 +730,13 @@ SubmachineOrders order_submachines(Chart const &c,
       table[segs.off + row.leg] = 1;
     }
   };
-  std::vector<uint8_t> cut;
-  std::vector<uint8_t> pre_reversed;
+  std::vector<uint8_t> &cut{ cs.cut };
+  std::vector<uint8_t> &pre_reversed{ cs.pre_reversed };
   resolve_pins(pins.cuts, cut);
   resolve_pins(pins.reverses, pre_reversed);
 
-  std::vector<FrameOrder> frames(c.submachines.size());
+  std::vector<FrameOrder> &frames{ cs.frames };
+  frames.resize(c.submachines.size());
 
   // Reads the model, the split and the label charges; writes `frames[m]` and
   // the caller's own scratch, so two frames share nothing.
@@ -685,6 +744,9 @@ SubmachineOrders order_submachines(Chart const &c,
     TraceFrame const traced{ SubmachineId{ m } };
     Frame &f{ frames[m].f };
     std::vector<SegPort> &seg_ports{ frames[m].seg_ports };
+    f.nodes.clear();
+    f.edges.clear();
+    seg_ports.clear();
 
     Span const kids{ c.submachines[m].children };
     for (uint32_t k = 0; k < kids.len; ++k) {
@@ -881,9 +943,7 @@ SubmachineOrders order_submachines(Chart const &c,
       shard_range(shard, shards, static_cast<uint32_t>(c.submachines.size()))
     };
     if (mine.len == 0) { return; }
-    FrameScratch sc;
-    sc.state_local.assign(c.states.size(), INVALID);
-    sc.seg_local.assign(g.segments.size(), INVALID);
+    FrameScratch &sc{ frame_scratch(c, g) };
     for (uint32_t k = 0; k < mine.len; ++k) {
       uint32_t const m{ mine.off + k };
       if (c.submachines[m].live != 0) { order_frame(m, sc); }
@@ -902,7 +962,8 @@ SubmachineOrders order_submachines(Chart const &c,
     uint32_t const gap_base{ static_cast<uint32_t>(o.gaps.size()) };
     // Emitted in (rank, pos) order, so a consumer walking one frame's nodes
     // walks its diagram left to right and top to bottom.
-    std::vector<uint32_t> global(f.nodes.size(), INVALID);
+    std::vector<uint32_t> &global{ cs.global };
+    global.assign(f.nodes.size(), INVALID);
     for (std::vector<uint32_t> const &bucket : f.ranks) {
       for (uint32_t const v : bucket) {
         global[v] = static_cast<uint32_t>(o.nodes.size());
