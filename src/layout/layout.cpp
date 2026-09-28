@@ -409,6 +409,10 @@ bool inflation_done(uint32_t fewest, uint32_t degraded, uint32_t unreachable, bo
   return keep && (unreachable == 0);
 }
 
+SCAV_INTERNAL_END
+
+namespace {
+
 // What a bounded-move pass kept, so the caller replaces its candidate only when
 // something was taken (11.10a).
 struct Improved {
@@ -765,6 +769,10 @@ Improved search_moves(Chart const &c,
   }
   return out;
 }
+
+}  // namespace
+
+SCAV_INTERNAL_BEGIN
 
 // How many of the table's rows this chart runs, and how many bounded moves it
 // scores: all of `portfolio_m` and all of `portfolio_k`, whatever its size.
