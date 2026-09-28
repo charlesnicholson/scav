@@ -41,10 +41,6 @@ struct Routes {
   // Path boxes that found no strip clear of everything and took the centred
   // placement instead (11.9).
   uint32_t unplaced{ 0 };
-
-  // Two per segment, its source end then its destination: 1 where the router
-  // reads a face pinned there. Elsewhere a face pin changes nothing it draws.
-  std::vector<uint8_t> faceable;
 };
 
 // Per frame, the exact question the router and the nudger were asked and the
@@ -67,6 +63,9 @@ struct RouteFrameCache {
 // incumbent.
 struct RouteCache {
   std::vector<RouteFrameCache> frame;
+  // Two per segment, its source end then its destination: the router's
+  // `effective_faces` there. A face pin outside it changes nothing drawn.
+  std::vector<uint8_t> faceable;
 };
 
 // One net per segment, routed in that segment's frame, laid end to end. The

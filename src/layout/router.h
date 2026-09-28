@@ -108,10 +108,15 @@ class Router {
   // by exactly this. A box on the frame's own edge has no room otherwise.
   [[nodiscard]] virtual int32_t margin(scav_profile const & /*p*/) const { return 0; }
 
-  // Whether a net's `src_face` or `dst_face` can change what this router
-  // returns. One that reads them reads a face only at an end naming an
-  // obstacle; phase 3 records which ends those were (`Routes::faceable`).
-  [[nodiscard]] virtual bool reads_faces() const { return false; }
+  // Bit f where naming face f at end `end` of `in.nets[net]` -- 0 its source,
+  // 1 its destination -- can change what this router returns for `in`. At a
+  // face whose bit is clear, the net routes exactly as with no face named.
+  // Reads `in` but not that end's own face.
+  [[nodiscard]] virtual uint32_t effective_faces(RouteInput const & /*in*/,
+                                                 uint32_t /*net*/,
+                                                 uint32_t /*end*/) const {
+    return 0;
+  }
 
   // Pure in `in`, reentrant, no global state, must not unwind.
   //
@@ -144,7 +149,9 @@ class OrthogonalRouter final : public Router {
   }
   [[nodiscard]] uint32_t version() const override { return 1; }
   [[nodiscard]] int32_t margin(scav_profile const &p) const override;
-  [[nodiscard]] bool reads_faces() const override { return true; }
+  [[nodiscard]] uint32_t effective_faces(RouteInput const &in,
+                                         uint32_t net,
+                                         uint32_t end) const override;
   void route(RouteInput const &in, RouteOutput &out) const override;
 };
 

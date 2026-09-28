@@ -1017,7 +1017,51 @@ RouteScratch &route_scratch() {
   return s;
 }
 
+// What an end is aimed at: the first corridor point it runs through, or the
+// other end where there is none.
+scav_point aim_of(RouteInput const &in, RouteNet const &net, uint32_t end) {
+  if (net.waypoint_len == 0) { return (end == 0) ? net.dst : net.src; }
+  return in.waypoints[net.waypoint_off + ((end == 0) ? 0 : (net.waypoint_len - 1))];
+}
+
+// Where an end is seated before the passes that line seats up and pull them
+// apart: on `face` where one is named, INVALID for the separation rule's own,
+// and at the aim itself for an end naming no box.
+scav_point seat_of(RouteInput const &in,
+                   RouteNet const &net,
+                   uint32_t end,
+                   uint32_t face,
+                   int32_t clear) {
+  scav_point const aim{ aim_of(in, net, end) };
+  uint32_t const box{ (end == 0) ? net.src_obstacle : net.dst_obstacle };
+  if (box >= in.obstacles.size()) { return aim; }
+  bool const glyph{ (box < in.inscribed.size()) && (in.inscribed[box] != 0) };
+  int32_t const arc{ (box < in.corner.size()) ? in.corner[box] : 0 };
+  // A named face overrules the separation rule, which is what makes the
+  // choice searchable rather than ruled (11.10e).
+  if (face < 4) {
+    return ortho_attach_face(aim, in.obstacles[box], clear, glyph, arc, face);
+  }
+  return ortho_attach_box(aim, in.obstacles[box], clear, glyph, arc);
+}
+
 }  // namespace
+
+uint32_t OrthogonalRouter::effective_faces(RouteInput const &in,
+                                           uint32_t net,
+                                           uint32_t end) const {
+  RouteNet const &nt{ in.nets[net] };
+  if (((end == 0) ? nt.src_obstacle : nt.dst_obstacle) >= in.obstacles.size()) {
+    return 0;
+  }
+  int32_t const clear{ ortho_clearance(in.profile) };
+  scav_point const ruled{ seat_of(in, nt, end, INVALID, clear) };
+  uint32_t out{ 0 };
+  for (uint32_t face = 0; face < 4; ++face) {
+    if (!same(seat_of(in, nt, end, face, clear), ruled)) { out |= 1U << face; }
+  }
+  return out;
+}
 
 void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
   out.points.clear();
@@ -1139,39 +1183,11 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
   toward.assign(2 * in.nets.size(), scav_point{});
   for (uint32_t n = 0; n < in.nets.size(); ++n) {
     RouteNet const &net{ in.nets[n] };
-    scav_point const after{ (net.waypoint_len != 0) ? in.waypoints[net.waypoint_off]
-                                                    : net.dst };
-    scav_point const before{ (net.waypoint_len != 0)
-                                 ? in.waypoints[net.waypoint_off + net.waypoint_len - 1]
-                                 : net.src };
-    auto const glyph = [&in](uint32_t box) {
-      return (box < in.inscribed.size()) && (in.inscribed[box] != 0);
-    };
-    auto const arc = [&in](uint32_t box) {
-      return (box < in.corner.size()) ? in.corner[box] : 0;
-    };
     uint32_t const src_slot{ 2 * n };
-    uint32_t const dst_slot{ src_slot + 1 };
-    toward[src_slot] = after;
-    toward[dst_slot] = before;
-    // A named face overrules the separation rule, which is what makes the
-    // choice searchable rather than ruled (11.10e).
-    auto const attach = [&](scav_point aim, uint32_t box, uint32_t face) {
-      return (face < 4)
-                 ? ortho_attach_face(aim,
-                                     in.obstacles[box],
-                                     clear,
-                                     glyph(box),
-                                     arc(box),
-                                     face)
-                 : ortho_attach_box(aim, in.obstacles[box], clear, glyph(box), arc(box));
-    };
-    seat[src_slot] = (net.src_obstacle < in.obstacles.size())
-                         ? attach(after, net.src_obstacle, net.src_face)
-                         : after;
-    seat[dst_slot] = (net.dst_obstacle < in.obstacles.size())
-                         ? attach(before, net.dst_obstacle, net.dst_face)
-                         : before;
+    toward[src_slot] = aim_of(in, net, 0);
+    toward[src_slot + 1] = aim_of(in, net, 1);
+    seat[src_slot] = seat_of(in, net, 0, net.src_face, clear);
+    seat[src_slot + 1] = seat_of(in, net, 1, net.dst_face, clear);
   }
   // Diffed at the call site rather than emitted inside each pass: what a reader
   // wants is which pass moved a seat, and only here sees all five (11.16).

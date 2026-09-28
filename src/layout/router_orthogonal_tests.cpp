@@ -2041,3 +2041,60 @@ TEST_CASE("ortho: a pinned face moves the seat and nothing else about the net") 
     CHECK(again.points[i].y == loose.points[i].y);
   }
 }
+
+TEST_CASE("ortho: a face with no effect routes exactly as no face does") {
+  // The search leaves such a face unscored on the strength of this. Every end
+  // naming a box has one -- the face the rule seats it on anyway -- and the
+  // mark is not simply every face: busy_frame has faces that do move a seat.
+  RouteInput const in{ busy_frame() };
+  RouteOutput loose;
+  ORTHO.route(in, loose);
+  uint32_t idle{ 0 };
+  uint32_t effective{ 0 };
+  for (uint32_t n = 0; n < in.nets.size(); ++n) {
+    for (uint32_t end = 0; end < 2; ++end) {
+      CAPTURE(n);
+      CAPTURE(end);
+      uint32_t const mask{ ORTHO.effective_faces(in, n, end) };
+      CHECK(mask < 16U);
+      CHECK(mask != 15U);
+      for (uint32_t face = 0; face < 4; ++face) {
+        if (((mask >> face) & 1U) != 0) {
+          ++effective;
+          continue;
+        }
+        CAPTURE(face);
+        RouteInput pinned{ in };
+        ((end == 0) ? pinned.nets[n].src_face : pinned.nets[n].dst_face) = face;
+        RouteOutput out;
+        ORTHO.route(pinned, out);
+        REQUIRE(out.points.size() == loose.points.size());
+        bool same{ true };
+        for (uint32_t i = 0; i < out.points.size(); ++i) {
+          same = same && (out.points[i] == loose.points[i]);
+        }
+        CHECK(same);
+        ++idle;
+      }
+    }
+  }
+  CHECK(idle >= (2 * in.nets.size()));
+  CHECK(effective > 0);
+}
+
+TEST_CASE("ortho: a face too short to seat on, or an end naming no box, has no effect") {
+  // A bar wide and thin: its left and right faces are declined, so the only
+  // faces a pin could move a departure to are the top and bottom.
+  RouteInput in;
+  in.profile = profile();
+  int32_t const clear{ ortho_clearance(in.profile) };
+  in.region = rect(0, 0, 8000, 4000);
+  in.obstacles = { rect(1000, 2000, 800, clear) };
+  in.nets = { { .src = pt(1400, 2000 + (clear / 2)),
+                .dst = pt(6000, 2000 + (clear / 2)),
+                .src_obstacle = 0 } };
+  CHECK(ORTHO.effective_faces(in, 0, 0) == 0b1100U);
+  CHECK(ORTHO.effective_faces(in, 0, 1) == 0U);
+  StraightRouter const straight;
+  CHECK(straight.effective_faces(in, 0, 0) == 0U);
+}

@@ -1004,18 +1004,19 @@ TEST_CASE("route: a cache filled by a run that reused one answers like routing a
   }
 }
 
-TEST_CASE("route: a face at an end the router does not read changes nothing it draws") {
-  // The search leaves a face at such an end unscored, on the strength of this:
-  // pinned there, every face routes exactly as no pin does. And at an end the
-  // router does read, some face does change the route, so the mark is not
-  // simply every end.
+TEST_CASE("route: a face with no effect at an end changes nothing it draws") {
+  // The search leaves such a face unscored on the strength of this: pinned
+  // there, it routes exactly as no pin does. Both kinds occur -- every face at
+  // an end the router reads none at, and at one it does read, the face it
+  // seats the end on anyway -- and some face with an effect does change the
+  // route, so the mark is not simply every face.
   scav_profile p{};
   REQUIRE(profile_named("readable", p));
   Router const *const router{ router_at(0) };
   REQUIRE(router != nullptr);
-  REQUIRE(router->reads_faces());
   uint32_t unread{ 0 };
-  uint32_t read_moved{ 0 };
+  uint32_t seated{ 0 };
+  uint32_t moved{ 0 };
   for (char const *name : CORPUS) {
     CAPTURE(name);
     Chart c;
@@ -1025,14 +1026,17 @@ TEST_CASE("route: a face at an end the router does not read changes nothing it d
     SizedLayout z;
     std::vector<Diagnostic> diags;
     REQUIRE(size_layout(c, g, o, {}, p, z, diags));
-    Routes const plain{ route_transitions(c, g, o, z, {}, p, *router, 1) };
-    REQUIRE(plain.faceable.size() == 2 * g.segments.size());
+    RouteCache marks;
+    Routes const plain{
+      route_transitions(c, g, o, z, {}, p, *router, 1, nullptr, &marks)
+    };
+    REQUIRE(marks.faceable.size() == 2 * g.segments.size());
     for (uint32_t seg = 0; seg < g.segments.size(); ++seg) {
       TransId const t{ g.segments[seg].trans };
       if (t.v == INVALID) { continue; }
       uint32_t const leg{ seg - g.trans_segments[t.v].off };
       for (uint32_t end = 0; end < 2; ++end) {
-        bool const read{ plain.faceable[(2 * seg) + end] != 0 };
+        uint32_t const mask{ marks.faceable[(2 * seg) + end] };
         for (uint32_t face = 0; face < 4; ++face) {
           SearchPins const pins{
             .faces = { { .trans = t, .leg = leg, .end = end, .face = face } }
@@ -1040,27 +1044,28 @@ TEST_CASE("route: a face at an end the router does not read changes nothing it d
           Routes const pinned{
             route_transitions(c, g, o, z, {}, p, *router, 1, nullptr, nullptr, &pins)
           };
-          if (!read) {
+          if (((mask >> face) & 1U) == 0) {
             CAPTURE(seg);
             CAPTURE(end);
+            CAPTURE(face);
             CHECK(same_routes(plain, pinned));
-            ++unread;
+            ++((mask == 0) ? unread : seated);
           } else if (!same_routes(plain, pinned)) {
-            ++read_moved;
+            ++moved;
           }
         }
       }
     }
   }
   CHECK(unread > 0);
-  CHECK(read_moved > 0);
+  CHECK(seated > 0);
+  CHECK(moved > 0);
 }
 
 TEST_CASE("route: a router that reads no faces marks no end") {
   scav_profile p{};
   REQUIRE(profile_named("readable", p));
   StraightRouter const straight;
-  CHECK_FALSE(straight.reads_faces());
   Chart c;
   load_corpus_chart("tcp.scav", c);
   SplitGraph const g{ decompose(c) };
@@ -1068,8 +1073,10 @@ TEST_CASE("route: a router that reads no faces marks no end") {
   SizedLayout z;
   std::vector<Diagnostic> diags;
   REQUIRE(size_layout(c, g, o, {}, p, z, diags));
-  Routes const r{ route_transitions(c, g, o, z, {}, p, straight, 1) };
+  RouteCache marks;
+  Routes const r{ route_transitions(c, g, o, z, {}, p, straight, 1, nullptr, &marks) };
+  REQUIRE(marks.faceable.size() == 2 * g.segments.size());
   bool none{ true };
-  for (uint8_t const f : r.faceable) { none = none && (f == 0); }
+  for (uint8_t const f : marks.faceable) { none = none && (f == 0); }
   CHECK(none);
 }

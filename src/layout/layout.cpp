@@ -36,8 +36,8 @@ void layout_test_prefix_shortcut(bool on);
 void layout_test_prefix_verify(bool on);
 uint64_t layout_test_prefix_used();
 uint64_t layout_test_prefix_mismatches();
-void layout_test_skip_unread_faces(bool on);
-uint64_t layout_test_unread_faces();
+void layout_test_skip_noop_faces(bool on);
+uint64_t layout_test_noop_faces();
 void layout_test_search_memo(bool on);
 void layout_test_search_memo_verify(bool on);
 uint32_t layout_test_search_memo_hits();
@@ -645,19 +645,19 @@ Scored score_move(Chart const &c,
 }
 
 #ifdef SCAV_TESTING
-// Whether a search leaves unread faces unscored, and how many it has left:
+// Whether a search leaves no-op faces unscored, and how many it has left:
 // a test compares a layout with it on against one with it off.
-bool test_skip_unread_faces{ true };
-Mutex test_unread_lock;
-uint64_t test_unread_faces{ 0 };
+bool test_skip_noop_faces{ true };
+Mutex test_noop_lock;
+uint64_t test_noop_faces{ 0 };
 #endif
 
-// True where the search may leave a face at an unread end unscored.
-bool skipping_unread_faces() {
+// True where the search may leave a face with no effect unscored.
+bool skipping_noop_faces() {
 #ifdef SCAV_TESTING
-  if (!test_skip_unread_faces) { return false; }
-  ScopedLock const held{ test_unread_lock };
-  ++test_unread_faces;
+  if (!test_skip_noop_faces) { return false; }
+  ScopedLock const held{ test_noop_lock };
+  ++test_noop_faces;
 #endif
   return true;
 }
@@ -804,12 +804,14 @@ Improved run_search(Chart const &c,
     }
 
     // Which face each end of a segment leaves by. Four per end, and a face
-    // already pinned is not re-offered (11.10e). At an end the router does not
-    // read a face at, a pin draws the incumbent exactly, so it cannot improve
-    // on it: charged to the budget as though scored, and not scored. A traced
-    // search scores it, since its trace records every move offered.
-    std::vector<uint8_t> const &faceable{ out.best.routes.faceable };
-    bool const skip_unread{ trace_sink() == nullptr };
+    // already pinned is not re-offered (11.10e). A face the router gives no
+    // effect at that end -- every face at an end it reads none at, and at one
+    // it does, the face it seats the end on anyway -- draws the incumbent
+    // exactly, so it cannot improve on it: charged to the budget as though
+    // scored, and not scored. A traced search scores it, since its trace
+    // records every move offered.
+    std::vector<uint8_t> const &faceable{ base.faceable };
+    bool const skip_noop{ trace_sink() == nullptr };
     for (uint32_t seg = 0; (seg < g.segments.size()) && (face_scored < budget); ++seg) {
       if (!in_scope(g.segments[seg].frame.v)) { continue; }
       TransId const t{ g.segments[seg].trans };
@@ -823,10 +825,12 @@ Improved run_search(Chart const &c,
         }
         if (already) { continue; }
         size_t const at{ (size_t{ 2 } * seg) + end };
-        bool const unread{ skip_unread && (at < faceable.size()) && (faceable[at] == 0) };
+        uint32_t const effective{ (skip_noop && (at < faceable.size()))
+                                      ? uint32_t{ faceable[at] }
+                                      : 0xFU };
         for (uint32_t f = 0; (f < 4) && (face_scored < budget); ++f) {
           ++face_scored;
-          if (unread && skipping_unread_faces()) { continue; }
+          if ((((effective >> f) & 1U) == 0) && skipping_noop_faces()) { continue; }
           round.push_back({ .face = { .trans = t, .leg = leg, .end = end, .face = f },
                             .kind = MoveKind::Face });
         }
@@ -1924,14 +1928,14 @@ uint64_t layout_test_prefix_mismatches() {
   ScopedLock const held{ test_prefix_lock };
   return test_prefix_mismatches;
 }
-void layout_test_skip_unread_faces(bool on) {
-  test_skip_unread_faces = on;
-  ScopedLock const held{ test_unread_lock };
-  test_unread_faces = 0;
+void layout_test_skip_noop_faces(bool on) {
+  test_skip_noop_faces = on;
+  ScopedLock const held{ test_noop_lock };
+  test_noop_faces = 0;
 }
-uint64_t layout_test_unread_faces() {
-  ScopedLock const held{ test_unread_lock };
-  return test_unread_faces;
+uint64_t layout_test_noop_faces() {
+  ScopedLock const held{ test_noop_lock };
+  return test_noop_faces;
 }
 void layout_test_search_memo(bool on) { test_search_memo = on; }
 void layout_test_search_memo_verify(bool on) { test_search_memo_verify = on; }

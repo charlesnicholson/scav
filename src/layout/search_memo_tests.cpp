@@ -1,6 +1,6 @@
 // What a Level 1 search leaves undone and still finds the same: the memo of
 // whole searches, whose key tells apart every input a search is a function
-// of; the faces at ends the router does not read, left unscored; and a face
+// of; the faces a pin has no effect at, left unscored; and a face
 // move scored from the incumbent's phases 1 and 2. Each is compared against a
 // layout that does the work, with the shortcut taken.
 
@@ -33,8 +33,8 @@ void layout_test_prefix_shortcut(bool on);
 void layout_test_prefix_verify(bool on);
 uint64_t layout_test_prefix_used();
 uint64_t layout_test_prefix_mismatches();
-void layout_test_skip_unread_faces(bool on);
-uint64_t layout_test_unread_faces();
+void layout_test_skip_noop_faces(bool on);
+uint64_t layout_test_noop_faces();
 void layout_test_search_memo(bool on);
 void layout_test_search_memo_verify(bool on);
 uint32_t layout_test_search_memo_hits();
@@ -202,12 +202,12 @@ TEST_CASE("search memo: every search it answers is the search run afresh") {
 }
 
 TEST_CASE(
-    "search: faces left unscored at unread ends find the layout scoring them finds") {
+    "search: faces with no effect, left unscored, find the layout scoring them finds") {
   struct Restore {
     Restore() = default;
     Restore(Restore const &) = delete;
     Restore &operator=(Restore const &) = delete;
-    ~Restore() { layout_test_skip_unread_faces(true); }
+    ~Restore() { layout_test_skip_noop_faces(true); }
   } const restore;
   constexpr std::array<char const *, 5> CHARTS{ "axis.scav",
                                                 "brew.scav",
@@ -217,12 +217,12 @@ TEST_CASE(
   uint64_t skipped{ 0 };
   for (char const *name : CHARTS) {
     CAPTURE(name);
-    layout_test_skip_unread_faces(true);
+    layout_test_skip_noop_faces(true);
     Laid const with{ lay_out(name) };
-    skipped += layout_test_unread_faces();
-    layout_test_skip_unread_faces(false);
+    skipped += layout_test_noop_faces();
+    layout_test_skip_noop_faces(false);
     Laid const without{ lay_out(name) };
-    CHECK(layout_test_unread_faces() == 0);
+    CHECK(layout_test_noop_faces() == 0);
     REQUIRE(with.ok);
     REQUIRE(without.ok);
     CHECK(with.structural == without.structural);
