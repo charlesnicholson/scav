@@ -130,10 +130,10 @@ struct Sizer {
 
   // Every packing inside one state's interior fills the same hole, so the state
   // carries the ratio and its frames read their owner's.
-  FrameDar dar_of(uint32_t state) const {
+  [[nodiscard]] FrameDar dar_of(uint32_t state) const {
     return ((state < hole.size()) && (hole[state].num != 0)) ? hole[state] : profile_dar;
   }
-  FrameDar owner_dar(uint32_t m) const {
+  [[nodiscard]] FrameDar owner_dar(uint32_t m) const {
     StateId const owner{ c.submachines[m].owner };
     return (owner.v == INVALID) ? profile_dar : dar_of(owner.v);
   }
@@ -141,10 +141,10 @@ struct Sizer {
   // the ranks and across them, and only placed as x and y at the end: across
   // is y and along is x for a frame that runs across, and the reverse for one
   // that runs down (11.10g).
-  bool runs_down(uint32_t m) const {
+  [[nodiscard]] bool runs_down(uint32_t m) const {
     return (m < o.sub_down.size()) && (o.sub_down[m] != 0);
   }
-  int32_t attach_at(uint32_t seg, uint32_t state, bool down) const;
+  [[nodiscard]] int32_t attach_at(uint32_t seg, uint32_t state, bool down) const;
   void trace_ports(uint32_t m, bool down) const;
   void lay_out_sub(uint32_t m);
   void place_sub(uint32_t m,
