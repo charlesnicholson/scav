@@ -5,6 +5,7 @@
 #include "layout/cost.h"
 
 #include "layout/decompose.h"
+#include "layout/geom.h"
 #include "layout/order.h"
 #include "layout/route.h"
 #include "layout/router.h"
@@ -17,6 +18,7 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace scav {
@@ -1577,4 +1579,776 @@ TEST_CASE("cost: a transition whose route vanished is a Tier 0 violation") {
     routes_of(c, { { { .x = 100, .y = 10 }, { .x = 300, .y = 10 } }, {} })
   };
   CHECK(cost_terms(c, decompose(c), z, empty, {}, p).vanished == 1);
+}
+
+namespace {
+
+// Every term the direct way, the oracle the indexed scorer is held to: each
+// scan over everything it could meet, each sweep over every pair, the descent
+// over every child of a frame, and the chart's constants built for the call.
+// It shares only the predicates that define a term -- `overlaps`,
+// `along_border`, `chebyshev_gap` and the containment walk -- and has its own
+// copy of the rest.
+namespace reference {
+
+Wide orient2d(scav_point a, scav_point b, scav_point c) {
+  return ((Wide{ b.x } - a.x) * (Wide{ c.y } - a.y)) -
+         ((Wide{ b.y } - a.y) * (Wide{ c.x } - a.x));
+}
+
+bool crosses(scav_point a, scav_point b, scav_point c, scav_point d) {
+  Wide const d1{ orient2d(a, b, c) };
+  Wide const d2{ orient2d(a, b, d) };
+  Wide const d3{ orient2d(c, d, a) };
+  Wide const d4{ orient2d(c, d, b) };
+  if ((d1 == 0) || (d2 == 0) || (d3 == 0) || (d4 == 0)) { return false; }
+  return ((d1 > 0) != (d2 > 0)) && ((d3 > 0) != (d4 > 0));
+}
+
+bool enters(scav_point a, scav_point b, scav_rect const &r) {
+  if (inside(a, r) || inside(b, r)) { return true; }
+  scav_point const tl{ .x = r.x, .y = r.y };
+  scav_point const tr{ .x = r.x + r.w, .y = r.y };
+  scav_point const bl{ .x = r.x, .y = r.y + r.h };
+  scav_point const br{ .x = r.x + r.w, .y = r.y + r.h };
+  return crosses(a, b, tl, tr) || crosses(a, b, bl, br) || crosses(a, b, tl, bl) ||
+         crosses(a, b, tr, br);
+}
+
+bool adjacent(scav_rect const &a, scav_rect const &b, int32_t sep) {
+  bool const x_over{ (a.x < (b.x + b.w)) && (b.x < (a.x + a.w)) };
+  bool const y_over{ (a.y < (b.y + b.h)) && (b.y < (a.y + a.h)) };
+  int32_t const x_gap{ (a.x < b.x) ? (b.x - (a.x + a.w)) : (a.x - (b.x + b.w)) };
+  int32_t const y_gap{ (a.y < b.y) ? (b.y - (a.y + a.h)) : (a.y - (b.y + b.h)) };
+  return (y_over && (x_gap <= sep)) || (x_over && (y_gap <= sep));
+}
+
+Wide length_of(scav_point a, scav_point b) {
+  Wide const dx{ Wide{ b.x } - a.x };
+  Wide const dy{ Wide{ b.y } - a.y };
+  return static_cast<Wide>(isqrt(static_cast<uint64_t>((dx * dx) + (dy * dy))));
+}
+
+Wide shared_run(scav_point a, scav_point b, scav_point c, scav_point d) {
+  bool const flat{ (a.y == b.y) && (c.y == d.y) && (a.y == c.y) };
+  bool const upright{ (a.x == b.x) && (c.x == d.x) && (a.x == c.x) };
+  if (!(flat || upright)) { return 0; }
+  Wide const alo{ flat ? imin(a.x, b.x) : imin(a.y, b.y) };
+  Wide const ahi{ flat ? imax(a.x, b.x) : imax(a.y, b.y) };
+  Wide const clo{ flat ? imin(c.x, d.x) : imin(c.y, d.y) };
+  Wide const chi{ flat ? imax(c.x, d.x) : imax(c.y, d.y) };
+  return imax(Wide{ 0 }, imin(ahi, chi) - imax(alo, clo));
+}
+
+// 0 horizontal, 1 vertical, 2 neither; `at` the line's coordinate.
+uint32_t axis_of(Piece const &p, int32_t &at) {
+  if ((p.a.y == p.b.y) && (p.a.x != p.b.x)) {
+    at = p.a.y;
+    return 0;
+  }
+  if ((p.a.x == p.b.x) && (p.a.y != p.b.y)) {
+    at = p.a.x;
+    return 1;
+  }
+  return 2;
+}
+
+struct Trunk {
+  uint32_t tail{ 0 };
+  bool merged_tail{ false };
+};
+
+Trunk trunk_of(std::vector<scav_point> const &pts, scav_span a, scav_span b) {
+  Trunk out;
+  uint32_t const shortest{ imin(imin(a.len, b.len), 2U) };
+  while ((out.tail < shortest) &&
+         same(pts[(a.off + a.len - 1) - out.tail], pts[(b.off + b.len - 1) - out.tail])) {
+    ++out.tail;
+  }
+  if ((out.tail > 0) && (out.tail < a.len) && (out.tail < b.len)) {
+    uint32_t const i{ (a.off + a.len - 1) - out.tail };
+    uint32_t const j{ (b.off + b.len - 1) - out.tail };
+    out.merged_tail = shared_run(pts[i], pts[i + 1], pts[j], pts[j + 1]) > 0;
+  }
+  return out;
+}
+
+bool trunk_piece(Trunk const &t, uint32_t len, uint32_t k) {
+  return ((k + t.tail) >= len) || (t.merged_tail && ((k + t.tail + 1) == len));
+}
+
+uint32_t direction(scav_point a, scav_point b) {
+  auto const axis = [](int32_t from, int32_t to) {
+    if (to > from) { return 2U; }
+    return (to < from) ? 0U : 1U;
+  };
+  return (axis(a.x, b.x) * 3U) + axis(a.y, b.y);
+}
+
+bool geometry_complete(Chart const &c, SizedLayout const &z, Routes const &r) {
+  if ((z.state.size() < c.states.size()) || (z.before.size() < c.states.size()) ||
+      (z.after.size() < c.states.size()) || (z.sub.size() < c.submachines.size()) ||
+      (r.route.size() < c.transitions.size())) {
+    return false;
+  }
+  for (scav_span const &span : r.route) {
+    if ((Wide{ span.off } + span.len) > static_cast<Wide>(r.points.size())) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool within(Chart const &c, StateId state, uint32_t m) {
+  for (StateId at{ state }; (at.v != INVALID) && (at.v < c.states.size());) {
+    SubmachineId const up{ c.states[at.v].parent };
+    if (up.v == m) { return true; }
+    if (up.v >= c.submachines.size()) { return false; }
+    at = c.submachines[up.v].owner;
+  }
+  return false;
+}
+
+int64_t crossings(std::vector<Piece> const &pieces, std::vector<uint32_t> &per_trans) {
+  int64_t total{ 0 };
+  for (uint32_t i = 0; i < pieces.size(); ++i) {
+    for (uint32_t j = i + 1; j < pieces.size(); ++j) {
+      if (pieces[i].trans == pieces[j].trans) { continue; }
+      if (!crosses(pieces[i].a, pieces[i].b, pieces[j].a, pieces[j].b)) { continue; }
+      ++total;
+      ++per_trans[pieces[i].trans];
+      ++per_trans[pieces[j].trans];
+    }
+  }
+  return total;
+}
+
+Wide corridor(Routes const &r, std::vector<Piece> const &pieces) {
+  Wide total{ 0 };
+  for (uint32_t i = 0; i < pieces.size(); ++i) {
+    for (uint32_t j = i + 1; j < pieces.size(); ++j) {
+      Piece const &u{ pieces[i] };
+      Piece const &v{ pieces[j] };
+      if (u.trans == v.trans) { continue; }
+      Wide const shared{ shared_run(u.a, u.b, v.a, v.b) };
+      if (shared <= 0) { continue; }
+      Trunk const pair{ trunk_of(r.points, r.route[u.trans], r.route[v.trans]) };
+      if (trunk_piece(pair, r.route[u.trans].len, u.k) &&
+          trunk_piece(pair, r.route[v.trans].len, v.k)) {
+        continue;
+      }
+      total += shared;
+    }
+  }
+  return total;
+}
+
+Wide crowding(std::vector<Piece> const &pieces, int32_t em) {
+  if (em <= 0) { return 0; }
+  Wide scaled{ 0 };
+  for (uint32_t i = 0; i < pieces.size(); ++i) {
+    for (uint32_t j = i + 1; j < pieces.size(); ++j) {
+      Piece const &u{ pieces[i] };
+      Piece const &v{ pieces[j] };
+      int32_t u_at{ 0 };
+      int32_t v_at{ 0 };
+      uint32_t const axis{ axis_of(u, u_at) };
+      if ((axis >= 2) || (axis_of(v, v_at) != axis) || (u.trans == v.trans)) { continue; }
+      Wide const apart{ imax(Wide{ u_at } - v_at, Wide{ v_at } - u_at) };
+      if ((apart == 0) || (apart >= em)) { continue; }
+      Wide const u_lo{ (axis == 0) ? imin(u.a.x, u.b.x) : imin(u.a.y, u.b.y) };
+      Wide const u_hi{ (axis == 0) ? imax(u.a.x, u.b.x) : imax(u.a.y, u.b.y) };
+      Wide const v_lo{ (axis == 0) ? imin(v.a.x, v.b.x) : imin(v.a.y, v.b.y) };
+      Wide const v_hi{ (axis == 0) ? imax(v.a.x, v.b.x) : imax(v.a.y, v.b.y) };
+      Wide const along{ imin(u_hi, v_hi) - imax(u_lo, v_lo) };
+      if (along <= 0) { continue; }
+      scaled += along * (Wide{ em } - apart);
+    }
+  }
+  return scaled / em;
+}
+
+// A frame's children with a rect, live, in span order.
+std::vector<uint32_t> children_of(Chart const &c, SizedLayout const &z, uint32_t m) {
+  std::vector<uint32_t> out;
+  Span const kids{ c.submachines[m].children };
+  for (uint32_t i = 0; i < kids.len; ++i) {
+    uint32_t const st{ c.state_ids[kids.off + i].v };
+    if ((st < z.state.size()) && (c.states[st].live != 0)) { out.push_back(st); }
+  }
+  return out;
+}
+
+int32_t box_overlaps(Chart const &c, SizedLayout const &z) {
+  int32_t total{ 0 };
+  for (uint32_t m = 0; m < c.submachines.size(); ++m) {
+    if (c.submachines[m].live == 0) { continue; }
+    std::vector<uint32_t> const kids{ children_of(c, z, m) };
+    for (uint32_t i = 0; i < kids.size(); ++i) {
+      for (uint32_t j = i + 1; j < kids.size(); ++j) {
+        if (overlaps(z.state[kids[i]], z.state[kids[j]])) { ++total; }
+      }
+    }
+  }
+  return total;
+}
+
+int32_t through_boxes(Chart const &c,
+                      SizedLayout const &z,
+                      Ancestry const &an,
+                      std::vector<Piece> const &pieces) {
+  int32_t total{ 0 };
+  for (Piece const &piece : pieces) {
+    Transition const &tr{ c.transitions[piece.trans] };
+    scav_rect const reach{ span_rect(piece.a, piece.b) };
+    auto const charge = [&](uint32_t st) {
+      if (enters(piece.a, piece.b, z.state[st]) && !cost_ancestor(c, an, { st }, tr.src) &&
+          !cost_ancestor(c, an, { st }, tr.dst)) {
+        ++total;
+      }
+    };
+    for (uint32_t const st : an.detached) { charge(st); }
+    std::vector<uint32_t> stack;
+    for (uint32_t m = 0; m < c.submachines.size(); ++m) {
+      if (c.submachines[m].owner.v == INVALID) { stack.push_back(m); }
+    }
+    while (!stack.empty()) {
+      uint32_t const frame{ stack.back() };
+      stack.pop_back();
+      if (frame >= c.submachines.size()) { continue; }
+      for (uint32_t const st : children_of(c, z, frame)) {
+        if (!overlaps(reach, z.state[st])) { continue; }
+        charge(st);
+        Span const subs{ c.states[st].submachines };
+        for (uint32_t i = 0; i < subs.len; ++i) {
+          stack.push_back(c.submachine_ids[subs.off + i].v);
+        }
+      }
+    }
+  }
+  return total;
+}
+
+CostTerms terms(Chart const &c,
+                SplitGraph const &g,
+                SizedLayout const &z,
+                Routes const &r,
+                scav_spaces const &s,
+                scav_profile const &p) {
+  CostTerms t;
+  if (!geometry_complete(c, z, r)) { return t; }
+  t.aspect = (Wide{ z.chart.w } * p.dar_den) - (Wide{ z.chart.h } * p.dar_num);
+  if (t.aspect < 0) { t.aspect = -t.aspect; }
+  t.area = Wide{ z.chart.w } * z.chart.h;
+
+  std::vector<Piece> pieces;
+  std::vector<uint32_t> crossings_of(c.transitions.size(), 0);
+  for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {
+    scav_span const route{ r.route[tr] };
+    for (uint32_t k = 0; (k + 1) < route.len; ++k) {
+      pieces.push_back({ .a = r.points[route.off + k],
+                         .b = r.points[route.off + k + 1],
+                         .trans = tr,
+                         .k = k });
+      if ((k + 2) < route.len) {
+        uint32_t const in{ direction(r.points[route.off + k],
+                                     r.points[route.off + k + 1]) };
+        uint32_t const out{ direction(r.points[route.off + k + 1],
+                                      r.points[route.off + k + 2]) };
+        if (in != out) { ++t.bends; }
+        if (((in % 2) == 1) && (out == (8 - in))) { ++t.retrace; }
+      }
+    }
+  }
+  for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {
+    if ((tr < g.trans_segments.size()) && (g.trans_segments[tr].len != 0) &&
+        (r.route[tr].len < 2)) {
+      ++t.vanished;
+    }
+  }
+  t.crossings = crossings(pieces, crossings_of);
+  t.corridor = corridor(r, pieces);
+  t.crowding = crowding(pieces, p.font_size_grid);
+
+  for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {
+    scav_span const route{ r.route[tr] };
+    if (route.len < 2) { continue; }
+    Wide actual{ 0 };
+    for (uint32_t k = 0; (k + 1) < route.len; ++k) {
+      actual += length_of(r.points[route.off + k], r.points[route.off + k + 1]);
+    }
+    Wide boxes{ 0 };
+    for (uint32_t i = 0; i < s.n_path_box; ++i) {
+      if (s.path_box[i].subject == tr) { boxes += s.path_box[i].w; }
+    }
+    Wide const direct{ length_of(r.points[route.off],
+                                 r.points[route.off + route.len - 1]) };
+    Wide const excess{ actual - imax(direct, boxes) };
+    if (excess > 0) { t.excess_len += excess * (1 + crossings_of[tr]); }
+  }
+
+  std::vector<uint8_t> encloses(c.states.size(), 0);
+  auto const mark = [&](StateId of, uint8_t v) {
+    StateId at{ enclosing_state(c, of) };
+    for (size_t step = 0; (step < c.states.size()) && (at.v != INVALID); ++step) {
+      encloses[at.v] = v;
+      at = enclosing_state(c, at);
+    }
+  };
+  for (uint32_t i = 0; i < r.placed.size(); ++i) {
+    for (uint32_t j = i + 1; j < r.placed.size(); ++j) {
+      if (overlaps(r.placed[i], r.placed[j])) { ++t.label; }
+    }
+    uint32_t subject{ INVALID };
+    Wide height{ 0 };
+    if ((s.path_box != nullptr) && (i < s.n_path_box) &&
+        (s.path_box[i].subject < c.transitions.size())) {
+      subject = s.path_box[i].subject;
+      height = s.path_box[i].h;
+      mark(c.transitions[subject].src, 1);
+      StateId up{ enclosing_state(c, c.transitions[subject].dst) };
+      for (size_t step = 0; (step < c.states.size()) && (up.v != INVALID); ++step) {
+        if (encloses[up.v] == 1) { encloses[up.v] = 2; }
+        up = enclosing_state(c, up);
+      }
+    }
+    for (uint32_t st = 0; st < c.states.size(); ++st) {
+      if (c.states[st].live == 0) { continue; }
+      if (encloses[st] == 2) {
+        if (overlaps(r.placed[i], z.before[st]) || overlaps(r.placed[i], z.after[st])) {
+          ++t.label;
+        }
+      } else if (overlaps(r.placed[i], z.state[st])) {
+        ++t.label;
+      }
+    }
+    Wide own{ -1 };
+    Wide other{ -1 };
+    for (Piece const &piece : pieces) {
+      scav_rect const seg{ span_rect(piece.a, piece.b) };
+      Wide const away{ chebyshev_gap(r.placed[i], seg) };
+      if (piece.trans == subject) {
+        own = (own < 0) ? away : imin(own, away);
+        continue;
+      }
+      other = (other < 0) ? away : imin(other, away);
+      if (overlaps(r.placed[i], seg)) { ++t.label; }
+    }
+    if ((own >= 0) && (other >= 0)) {
+      Wide const shortfall{ (own + height) - other };
+      if (shortfall > 0) { t.label_near += shortfall; }
+    }
+    if (subject != INVALID) { mark(c.transitions[subject].src, 0); }
+  }
+
+  for (SplitSegment const &seg : g.segments) {
+    if (seg.separator == 0) { continue; }
+    Transition const &tr{ c.transitions[seg.trans.v] };
+    StateKind const src_kind{ c.states[tr.src.v].kind };
+    StateKind const dst_kind{ c.states[tr.dst.v].kind };
+    if ((src_kind == StateKind::Fork) || (src_kind == StateKind::Join) ||
+        (dst_kind == StateKind::Fork) || (dst_kind == StateKind::Join)) {
+      continue;
+    }
+    SubmachineId const from{ g.ports[seg.src_port].sub };
+    SubmachineId const to{ g.ports[seg.dst_port].sub };
+    if ((from.v == INVALID) || (to.v == INVALID)) { continue; }
+    if (!adjacent(z.sub[from.v], z.sub[to.v], p.sub_sep)) { ++t.adjacency; }
+  }
+
+  Ancestry const an{ cost_flatten_ancestry(c) };
+  t.box_overlap = box_overlaps(c, z);
+  t.through_box = through_boxes(c, z, an, pieces);
+  for (Piece const &piece : pieces) {
+    for (uint32_t st = 0; st < c.states.size(); ++st) {
+      if ((c.states[st].live != 0) &&
+          along_border(piece.a, piece.b, z.state[st], border_band(p) - 1)) {
+        ++t.flush;
+        break;
+      }
+    }
+  }
+  for (Piece const &piece : pieces) {
+    Transition const &trans{ c.transitions[piece.trans] };
+    scav_rect const reach{ span_rect(piece.a, piece.b) };
+    for (uint32_t m = 0; m < c.submachines.size(); ++m) {
+      if ((c.submachines[m].live == 0) || (c.submachines[m].owner.v == INVALID)) {
+        continue;
+      }
+      scav_rect const &region{ z.sub[m] };
+      if (!overlaps(reach, grow(region, 1)) || !enters(piece.a, piece.b, region)) {
+        continue;
+      }
+      if (within(c, trans.src, m) || within(c, trans.dst, m)) { continue; }
+      ++t.through_region;
+      break;
+    }
+  }
+  return t;
+}
+
+}  // namespace reference
+
+constexpr uint32_t TERMS{ 15 };
+
+std::array<int64_t, TERMS> terms_of(CostTerms const &t) {
+  return { t.bends,       t.corridor,    t.crossings, t.excess_len, t.adjacency,
+           t.label,       t.label_near,  t.aspect,    t.area,       t.crowding,
+           t.through_box, t.box_overlap, t.vanished,  t.flush,      t.through_region };
+}
+
+// Which of `terms_of`'s entries a diff names, so a failure says what moved.
+constexpr std::array<char const *, TERMS> TERM_NAMES{
+  "bends",       "corridor",    "crossings", "excess_len", "adjacency",
+  "label",       "label_near",  "aspect",    "area",       "crowding",
+  "through_box", "box_overlap", "vanished",  "flush",      "through_region"
+};
+
+// The first term the two disagree on, or empty.
+std::string first_difference(CostTerms const &got, CostTerms const &want) {
+  std::array<int64_t, TERMS> const a{ terms_of(got) };
+  std::array<int64_t, TERMS> const b{ terms_of(want) };
+  for (uint32_t i = 0; i < TERMS; ++i) {
+    if (a[i] != b[i]) { return TERM_NAMES[i]; }
+  }
+  if (got.retrace != want.retrace) { return "retrace"; }
+  return {};
+}
+
+// Coordinates on a lattice of five with the odd unit nudge, so shared borders,
+// touching rects, collinear legs and pieces along a border are common rather
+// than rare, and negative ones so a key that sorted them as unsigned would
+// show.
+struct Lattice {
+  uint64_t s;
+  uint32_t next(uint32_t n) {
+    s = (s * 6364136223846793005ULL) + 1442695040888963407ULL;
+    return static_cast<uint32_t>((s >> 33U) % n);
+  }
+  int32_t coord() {
+    int32_t const nudge{ (next(4) == 0) ? (static_cast<int32_t>(next(5)) - 2) : 0 };
+    return (5 * (static_cast<int32_t>(next(25)) - 12)) + nudge;
+  }
+  int32_t extent() { return 5 * static_cast<int32_t>(next(9)); }  // zero included
+  scav_rect rect() { return { .x = coord(), .y = coord(), .w = extent(), .h = extent() }; }
+  // One step of a route: along an axis mostly, diagonal or nowhere sometimes.
+  scav_point step(scav_point at) {
+    int32_t const d{ 5 * (static_cast<int32_t>(next(9)) - 4) };
+    switch (next(8)) {
+      case 0: return { .x = at.x + d, .y = at.y + d };
+      case 1: return at;
+      default:
+        return (next(2) == 0) ? scav_point{ .x = at.x + d, .y = at.y }
+                              : scav_point{ .x = at.x, .y = at.y + d };
+    }
+  }
+};
+
+// Nested states, some with two concurrent regions, pseudostates among them,
+// sometimes one frame wider than the scan threshold so its grid answers, and
+// tombstones among the states and the regions.
+Chart random_chart(Lattice &r) {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  std::vector<SubmachineId> frames{ root };
+  std::vector<StateId> states;
+  constexpr std::array<StateKind, 4> ODD{ StateKind::Initial,
+                                          StateKind::Choice,
+                                          StateKind::Fork,
+                                          StateKind::Join };
+  uint32_t const n{ 2 + r.next(20) };
+  for (uint32_t i = 0; i < n; ++i) {
+    SubmachineId const in{ frames[r.next(static_cast<uint32_t>(frames.size()))] };
+    StateKind const kind{ (r.next(6) == 0) ? ODD[r.next(4)] : StateKind::Normal };
+    StateId const st{ build_state(c, in, "S", kind, {}) };
+    states.push_back(st);
+    if (r.next(3) == 0) {
+      frames.push_back(build_submachine(c, st, "m", {}));
+      if (r.next(2) == 0) { frames.push_back(build_submachine(c, st, "n", {})); }
+    }
+  }
+  if (r.next(3) == 0) {
+    SubmachineId const in{ frames[r.next(static_cast<uint32_t>(frames.size()))] };
+    uint32_t const wide{ 14 + r.next(30) };
+    for (uint32_t i = 0; i < wide; ++i) {
+      states.push_back(build_state(c, in, "W", StateKind::Normal, {}));
+    }
+  }
+  std::vector<uint8_t> dead(c.states.size(), 0);
+  for (StateId const st : states) { dead[st.v] = (r.next(10) == 0) ? 1U : 0U; }
+  std::vector<StateId> alive;
+  for (StateId const st : states) {
+    if (dead[st.v] == 0) { alive.push_back(st); }
+  }
+  uint32_t const trans{ alive.empty() ? 0U : r.next((2 * n) + 1) };
+  for (uint32_t i = 0; i < trans; ++i) {
+    StateId const src{ alive[r.next(static_cast<uint32_t>(alive.size()))] };
+    StateId const dst{ alive[r.next(static_cast<uint32_t>(alive.size()))] };
+    build_trans(c, src, dst, TransKind::External, {});
+  }
+  for (StateId const st : states) {
+    if (dead[st.v] != 0) { c.states[st.v].live = 0; }
+  }
+  for (uint32_t m = 1; m < c.submachines.size(); ++m) {
+    if (r.next(12) == 0) { c.submachines[m].live = 0; }
+  }
+  return c;
+}
+
+// One candidate's geometry over `c`: every rect, route, placed box and space
+// request drawn at random, with routes that end on another's last points often
+// enough that trunks come up.
+struct Candidate {
+  SizedLayout z;
+  Routes r;
+  std::vector<scav_path_box> boxes;
+  [[nodiscard]] scav_spaces spaces() const {
+    return { .path_box = boxes.empty() ? nullptr : boxes.data(),
+             .n_path_box = static_cast<uint32_t>(boxes.size()) };
+  }
+};
+
+Candidate random_candidate(Chart const &c, Lattice &r) {
+  Candidate out;
+  SizedLayout &z{ out.z };
+  z = blank(c);
+  for (uint32_t st = 0; st < c.states.size(); ++st) {
+    z.state[st] = r.rect();
+    if (r.next(2) == 0) { z.before[st] = r.rect(); }
+    if (r.next(2) == 0) { z.after[st] = r.rect(); }
+  }
+  for (scav_rect &sub : z.sub) { sub = r.rect(); }
+  z.chart = r.rect();
+
+  std::vector<std::vector<scav_point>> lines(c.transitions.size());
+  for (uint32_t t = 0; t < lines.size(); ++t) {
+    uint32_t const len{ r.next(7) };
+    if (len == 0) { continue; }
+    scav_point at{ .x = r.coord(), .y = r.coord() };
+    lines[t].push_back(at);
+    for (uint32_t k = 1; k < len; ++k) {
+      at = r.step(at);
+      lines[t].push_back(at);
+    }
+    if ((t > 0) && (r.next(4) == 0)) {
+      std::vector<scav_point> const &into{ lines[r.next(t)] };
+      if (!into.empty()) {
+        lines[t].push_back(into[into.size() - 1]);
+        if ((into.size() > 1) && (r.next(2) == 0)) {
+          lines[t].back() = into[into.size() - 2];
+          lines[t].push_back(into[into.size() - 1]);
+        }
+      }
+    }
+  }
+  out.r = routes_of(c, lines);
+
+  uint32_t const trans{ static_cast<uint32_t>(c.transitions.size()) };
+  uint32_t const placed{ r.next(trans + 3) };
+  for (uint32_t i = 0; i < placed; ++i) { out.r.placed.push_back(r.rect()); }
+  uint32_t const named{ (r.next(4) == 0) ? r.next(placed + 1) : placed };
+  for (uint32_t i = 0; i < named; ++i) {
+    out.boxes.push_back({ .subject = r.next(trans + 2),
+                          .w = r.extent() * 4,
+                          .h = r.extent(),
+                          .order = 0 });
+  }
+  return out;
+}
+
+// The readable profile with the three knobs the terms read moved about: the
+// em crowding and the weights divide by, the band `flush` reads through
+// `node_sep` and `pad`, and the separation `adjacency` allows.
+scav_profile random_profile(Lattice &r) {
+  scav_profile p{ profile() };
+  constexpr std::array<int32_t, 5> EM{ 0, 1, 5, 12, 20 };
+  constexpr std::array<int32_t, 3> SEP{ 3, 15, 30 };
+  constexpr std::array<int32_t, 3> PAD{ 0, 5, 12 };
+  p.font_size_grid = EM[r.next(5)];
+  p.node_sep = SEP[r.next(3)];
+  p.pad = PAD[r.next(3)];
+  p.sub_sep = 5 * static_cast<int32_t>(r.next(3));
+  return p;
+}
+
+}  // namespace
+
+TEST_CASE("cost: the indexed terms are the direct scans' over seeded random charts") {
+  // Each chart scored three ways over several candidates: through a context
+  // built once for it, through one built per call, and by the reference. The
+  // tallies say each term was nonzero somewhere, so no term agrees by never
+  // being exercised.
+  Lattice r{ 20260928 };
+  std::array<uint32_t, TERMS> seen{};
+  uint32_t mismatches{ 0 };
+  for (uint32_t trial = 0; (trial < 600) && (mismatches == 0); ++trial) {
+    Chart const c{ random_chart(r) };
+    SplitGraph const g{ decompose(c) };
+    CostContext const ctx{ cost_context(c) };
+    for (uint32_t cand = 0; cand < 4; ++cand) {
+      Candidate const k{ random_candidate(c, r) };
+      scav_profile const p{ random_profile(r) };
+      scav_spaces const s{ k.spaces() };
+      CostTerms const want{ reference::terms(c, g, k.z, k.r, s, p) };
+      std::string const held{ first_difference(cost_terms(ctx, c, g, k.z, k.r, s, p),
+                                               want) };
+      std::string const fresh{ first_difference(cost_terms(c, g, k.z, k.r, s, p), want) };
+      if (!held.empty() || !fresh.empty()) {
+        CAPTURE(trial);
+        CAPTURE(cand);
+        CHECK(held == "");
+        CHECK(fresh == "");
+        ++mismatches;
+        break;
+      }
+      std::array<int64_t, TERMS> const got{ terms_of(want) };
+      for (uint32_t i = 0; i < TERMS; ++i) { seen[i] += (got[i] != 0) ? 1U : 0U; }
+    }
+  }
+  CHECK(mismatches == 0);
+  for (uint32_t i = 0; i < TERMS; ++i) {
+    CAPTURE(TERM_NAMES[i]);
+    CHECK(seen[i] > 0);
+  }
+}
+
+TEST_CASE("cost: the indexed terms are the direct scans' at the edges") {
+  // One composite holding two siblings and a region, and one state outside it,
+  // so a label can sit in the composite both ends share.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const outer{ build_state(c, root, "Outer", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, outer, "main", {}) };
+  StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, inner, "B", StateKind::Normal, {}) };
+  StateId const far{ build_state(c, root, "Far", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, far, TransKind::External, {});
+  SplitGraph const g{ decompose(c) };
+  CostContext const ctx{ cost_context(c) };
+  // A band of five and an em of twenty, so the geometry below reads in units.
+  scav_profile p{ profile() };
+  p.node_sep = 30;
+  p.pad = 12;
+  p.font_size_grid = 20;
+  int32_t const near{ border_band(p) - 1 };
+  REQUIRE(near == 4);
+
+  SizedLayout z{ blank(c) };
+  z.state[outer.v] = { .x = 0, .y = 0, .w = 400, .h = 200 };
+  z.before[outer.v] = { .x = 0, .y = 0, .w = 400, .h = 20 };
+  z.after[outer.v] = { .x = 0, .y = 180, .w = 400, .h = 20 };
+  z.sub[inner.v] = { .x = 10, .y = 20, .w = 380, .h = 160 };
+  z.state[a.v] = { .x = 40, .y = 60, .w = 100, .h = 60 };
+  z.state[b.v] = { .x = 140, .y = 60, .w = 100, .h = 60 };  // touching A, not over it
+  z.state[far.v] = { .x = 600, .y = 60, .w = 0, .h = 0 };   // zero-size
+  z.chart = { .x = 0, .y = 0, .w = 600, .h = 200 };
+
+  auto const agree = [&](Routes const &r, scav_spaces const &s) {
+    CostTerms const want{ reference::terms(c, g, z, r, s, p) };
+    CHECK(first_difference(cost_terms(ctx, c, g, z, r, s, p), want) == "");
+    CHECK(first_difference(cost_terms(c, g, z, r, s, p), want) == "");
+    return want;
+  };
+
+  // No routes at all, then one point each: two vanished, and nothing to scan.
+  CHECK(agree(routes_of(c, {}), {}).vanished == 2);
+  CHECK(agree(routes_of(c, { { { .x = 90, .y = 90 } }, { { .x = 190, .y = 90 } } }), {})
+            .vanished == 2);
+
+  // Along A's top border, at the band's edge, just past it, and a lone point
+  // on the border: the grid holds the states grown by the band, so each of
+  // these sits on a cell edge of its own.
+  for (int32_t const off : { 0, near, near + 1, -near, -(near + 1) }) {
+    CAPTURE(off);
+    Routes const along{ routes_of(
+        c,
+        { { { .x = 50, .y = 60 + off }, { .x = 130, .y = 60 + off } },
+          { { .x = 240, .y = 70 }, { .x = 600, .y = 70 } } }) };
+    CHECK(agree(along, {}).flush == ((imax(off, -off) <= near) ? 1 : 0));
+  }
+  Routes const point{ routes_of(c,
+                                { { { .x = 90, .y = 60 }, { .x = 90, .y = 60 } },
+                                  { { .x = 200, .y = 60 }, { .x = 200, .y = 60 } } }) };
+  CHECK(agree(point, {}).flush == 2);
+  // Down the composite's left border and along the chart's far edge, at the
+  // clamped end of every grid.
+  Routes const rim{ routes_of(c,
+                              { { { .x = 0, .y = 0 }, { .x = 0, .y = 200 } },
+                                { { .x = 600, .y = -500 }, { .x = 600, .y = 900 } } }) };
+  agree(rim, {});
+
+  // A label over its own route, over the other one, against B, touching A,
+  // and a zero-size one; with their space requests, one naming no transition.
+  Routes r{ routes_of(c,
+                      { { { .x = 140, .y = 150 }, { .x = 300, .y = 150 } },
+                        { { .x = 300, .y = 140 }, { .x = 600, .y = 140 } } }) };
+  r.placed = { { .x = 150, .y = 140, .w = 60, .h = 20 },
+               { .x = 280, .y = 130, .w = 60, .h = 20 },
+               { .x = 200, .y = 100, .w = 60, .h = 30 },
+               { .x = 0, .y = 60, .w = 40, .h = 20 },
+               { .x = 360, .y = 150, .w = 0, .h = 0 } };
+  std::vector<scav_path_box> const boxes{
+    { .subject = 0, .w = 60, .h = 20, .order = 0 },
+    { .subject = 1, .w = 60, .h = 20, .order = 0 },
+    { .subject = 0, .w = 60, .h = 30, .order = 1 },
+    { .subject = 7, .w = 40, .h = 20, .order = 0 },
+  };
+  scav_spaces const s{ .path_box = boxes.data(),
+                       .n_path_box = static_cast<uint32_t>(boxes.size()) };
+  CostTerms const labelled{ agree(r, s) };
+  CHECK(labelled.label > 0);
+  CHECK(labelled.label_near > 0);
+
+  // The box's own route 40 above it and its height 20, so a foreign route is
+  // charged nearer than 60: one short of that is a shortfall of one, and at it
+  // there is none -- the margin's last unit.
+  for (int32_t const gap : { 59, 60 }) {
+    CAPTURE(gap);
+    Routes lone{ routes_of(
+        c,
+        { { { .x = 150, .y = 100 }, { .x = 300, .y = 100 } },
+          { { .x = 150, .y = 160 + gap }, { .x = 300, .y = 160 + gap } } }) };
+    lone.placed = { { .x = 200, .y = 140, .w = 40, .h = 20 } };
+    scav_path_box const box{ .subject = 0, .w = 40, .h = 20, .order = 0 };
+    CHECK(agree(lone, { .path_box = &box, .n_path_box = 1 }).label_near ==
+          ((gap < 60) ? 1 : 0));
+  }
+}
+
+TEST_CASE("cost: a context built once scores every candidate as one built for it") {
+  // One chart, one context, many candidates: the context is read-only across
+  // all of them, so each score matches one taken through a context built
+  // fresh, and the context itself comes out as it went in.
+  Lattice r{ 7 };
+  for (uint32_t trial = 0; trial < 40; ++trial) {
+    CAPTURE(trial);
+    Chart const c{ random_chart(r) };
+    SplitGraph const g{ decompose(c) };
+    CostContext const ctx{ cost_context(c) };
+    bool agree{ true };
+    for (uint32_t cand = 0; cand < 12; ++cand) {
+      Candidate const k{ random_candidate(c, r) };
+      scav_profile const p{ random_profile(r) };
+      scav_spaces const s{ k.spaces() };
+      CostTerms const held{ cost_terms(ctx, c, g, k.z, k.r, s, p) };
+      CostTerms const fresh{ cost_terms(cost_context(c), c, g, k.z, k.r, s, p) };
+      agree = agree && first_difference(held, fresh).empty();
+    }
+    CHECK(agree);
+    CostContext const again{ cost_context(c) };
+    CHECK(ctx.an.tin == again.an.tin);
+    CHECK(ctx.an.tout == again.an.tout);
+    CHECK(ctx.an.detached == again.an.detached);
+    CHECK(ctx.grid.child == again.grid.child);
+    CHECK(ctx.grid.bucket_off == again.grid.bucket_off);
+    CHECK(ctx.grid.bucket_at.empty());
+    REQUIRE(ctx.grid.frame.size() == again.grid.frame.size());
+    for (uint32_t m = 0; m < ctx.grid.frame.size(); ++m) {
+      CHECK(ctx.grid.frame[m].children.off == again.grid.frame[m].children.off);
+      CHECK(ctx.grid.frame[m].children.len == again.grid.frame[m].children.len);
+      CHECK(ctx.grid.frame[m].side == again.grid.frame[m].side);
+      CHECK(ctx.grid.frame[m].bucket == again.grid.frame[m].bucket);
+    }
+  }
 }

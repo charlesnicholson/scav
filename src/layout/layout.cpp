@@ -476,6 +476,7 @@ struct Scored {
 // at once (11.10c).
 Scored score_move(Chart const &c,
                   SplitGraph const &g,
+                  CostContext const &scoring,
                   scav_spaces const &s,
                   scav_profile const &objective,
                   scav_profile const &knobs,
@@ -508,7 +509,9 @@ Scored score_move(Chart const &c,
     out.inflated = true;
     return out;
   }
-  CostTerms const terms{ cost_terms(c, g, cand.sized, cand.routes, s, objective) };
+  CostTerms const terms{
+    cost_terms(scoring, c, g, cand.sized, cand.routes, s, objective)
+  };
   out.cost = cost_of(terms, objective);
   std::array<int64_t, TIER2_TERMS> const share{ cost_shares(terms, objective) };
   for (uint32_t k = 0; k < TIER2_TERMS; ++k) {
@@ -596,8 +599,10 @@ Improved run_search(Chart const &c,
   // has scored, and an incumbent left at zero is one no move can beat (11.10f).
   out.viable = out.best.viable;
   if (!out.viable) { return out; }
+  CostContext const scoring{ cost_context(c) };
   out.cost =
-      cost_of(cost_terms(c, g, out.best.sized, out.best.routes, s, objective), objective);
+      cost_of(cost_terms(scoring, c, g, out.best.sized, out.best.routes, s, objective),
+              objective);
 
   auto const with = [](SearchPins base_pins, Move const &m) {
     switch (m.kind) {
@@ -727,6 +732,7 @@ Improved run_search(Chart const &c,
     parallel_for(static_cast<uint32_t>(round.size()), threads, [&](uint32_t i) {
       got[i] = score_move(c,
                           g,
+                          scoring,
                           s,
                           objective,
                           knobs,
@@ -1192,6 +1198,7 @@ bool layout_run(Chart &c,
   // are reduced afterwards in index order (11.10c). Each runs its own phases on
   // one thread, since a row is already the unit a free thread takes.
   std::vector<std::vector<Diagnostic>> spilled(rows);
+  CostContext const scoring{ cost_context(c) };
   parallel_for(rows, (rows > 1) ? o.threads : 1U, [&](uint32_t i) {
     scav_profile knobs{ p };
     DarSource dar{ DarSource::Profile };
@@ -1219,7 +1226,7 @@ bool layout_run(Chart &c,
     // one of them inflated.
     if (viable[i] != 0) {
       CostTerms const t{
-        cost_terms(c, g, candidates[i].sized, candidates[i].routes, s, p)
+        cost_terms(scoring, c, g, candidates[i].sized, candidates[i].routes, s, p)
       };
       cost[i] = cost_of(t, p);
     }

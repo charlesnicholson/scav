@@ -61,6 +61,26 @@ struct GridQuery {
   std::vector<uint32_t> hit;  // -> ChildGrid::child
 };
 
+// What scoring reads of the chart alone: the containment intervals, and each
+// frame's live children with the cells their count fixes. Built once, then read
+// by every candidate scored against that chart, at once if need be.
+struct CostContext {
+  Ancestry an;
+  ChildGrid grid;  // no cell holds a child yet; a candidate fills its own copy
+};
+
+CostContext cost_context(Chart const &c);
+
+// `ctx` is `cost_context(c)`, built however many candidates ago.
+CostTerms cost_terms(CostContext const &ctx,
+                     Chart const &c,
+                     SplitGraph const &g,
+                     SizedLayout const &z,
+                     Routes const &r,
+                     scav_spaces const &s,
+                     scav_profile const &p);
+
+// The same with a context built for this one call.
 CostTerms cost_terms(Chart const &c,
                      SplitGraph const &g,
                      SizedLayout const &z,
