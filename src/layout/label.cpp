@@ -682,7 +682,7 @@ uint64_t label_hash(std::vector<uint32_t> const &key) {
 // of 8.1M. Per thread, so no lookup waits on another, and bounded, since a
 // pool thread and what it keeps here last as long as the process.
 Memo &memo() {
-  thread_local Memo m{ size_t{ 1 } << 22, label_hash };
+  thread_local Memo m{ size_t{ 1 } << 20, label_hash };
   return m;
 }
 
