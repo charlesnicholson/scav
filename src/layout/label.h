@@ -17,6 +17,13 @@
 
 namespace scav {
 
+// How a box's candidates are searched. Every one keys and tests every
+// candidate; `Pruned` skips the ones that provably cannot win; `Memoized` is
+// `Pruned` behind a per-thread table of the boxes this thread has placed.
+// Nothing shipping passes anything but `Memoized`: the other two are what a
+// test weighs it against.
+enum class LabelSearch : uint32_t { Exhaustive, Pruned, Memoized };
+
 // Fills `out` parallel to `s.path_box`; returns the boxes that found no
 // feasible candidate and took the centred placement instead.
 uint32_t place_labels(Chart const &c,
