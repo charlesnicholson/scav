@@ -417,7 +417,7 @@ Outcome exhaustive(Local const &l, Scratch &s) {
 struct Walk {
   Local const &l;
   Scratch &s;
-  std::array<scav_point, LEADS * ATTACH> const &offset;
+  std::array<scav_point, size_t{ LEADS } * ATTACH> const &offset;
   scav_point at;
   int32_t step;
   bool strict;
@@ -600,7 +600,7 @@ Outcome pruned(Local const &l, Scratch &s) {
 
   // Each lead and attachment as one offset from the point on the leg to the
   // box's origin.
-  std::array<scav_point, LEADS * ATTACH> offset{};
+  std::array<scav_point, size_t{ LEADS } * ATTACH> offset{};
   for (uint32_t lead = 0; lead < LEADS; ++lead) {
     scav_point const away{ lead_by(lead, l.leader) };
     for (uint32_t which = 0; which < ATTACH; ++which) {
