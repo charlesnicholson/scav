@@ -347,3 +347,42 @@ TEST_CASE("thread: run_stripe walks one worker's shards in index order") {
   run_stripe(UINT32_MAX, UINT32_MAX - 1U, UINT32_MAX - 2U, visit, &visited);
   CHECK(visited == std::vector<uint32_t>{ UINT32_MAX - 2U });
 }
+
+TEST_CASE("thread: calls nested three deep finish with one worker to share") {
+  // Every level waits on the one below while the pool has a single worker, so
+  // each waiter has to run shards itself rather than block on them.
+  HookGuard const guard;
+  thread_test_spawn_limit(1U);
+  uint32_t const outer{ 4 };
+  uint32_t const middle{ 3 };
+  uint32_t const inner{ 5 };
+  std::vector<uint32_t> hits(size_t{ outer } * middle * inner, 0);
+  auto body = [&](uint32_t o) {
+    parallel_for(middle, 0U, [&, o](uint32_t m) {
+      parallel_for(inner, 0U, [&, o, m](uint32_t i) {
+        hits[(((o * middle) + m) * inner) + i] += 1U;
+      });
+    });
+  };
+  parallel_for(outer, 0U, body);
+  CHECK(count_of(hits, 1U) == hits.size());
+}
+
+TEST_CASE("thread: two callers on threads of their own share the pool") {
+  // Two layouts from two host threads push jobs at once; each waits on its own
+  // and every shard of both runs exactly once.
+  constexpr uint32_t PER_CALL{ 512 };
+  std::vector<uint32_t> a(PER_CALL, 0);
+  std::vector<uint32_t> b(PER_CALL, 0);
+  auto run = [](std::vector<uint32_t> &hits) {
+    for (uint32_t round = 0; round < 8; ++round) {
+      parallel_for(PER_CALL, 0U, [&hits](uint32_t s) { hits[s] += 1U; });
+    }
+  };
+  std::thread first([&] { run(a); });
+  std::thread second([&] { run(b); });
+  first.join();
+  second.join();
+  CHECK(count_of(a, 8U) == PER_CALL);
+  CHECK(count_of(b, 8U) == PER_CALL);
+}

@@ -1180,8 +1180,9 @@ void Sizer::size_sub(uint32_t m) {
 
   // What it writes: the frame's extent, each node's place, and each state's.
   Memo &memo{ frame_memo() };
+  int32_t const *hit{ nullptr };
   uint32_t len{ 0 };
-  if (int32_t const *const hit{ memo.find(key, len) }) {
+  if (memo.find(key, hit, len)) {
     out.sub[m].w = hit[0];
     out.sub[m].h = hit[1];
     uint32_t at{ 2 };

@@ -8,9 +8,7 @@
 
 namespace scav {
 
-namespace {
-
-uint64_t hash_of(std::vector<uint32_t> const &key) {
+uint64_t memo_hash(std::vector<uint32_t> const &key) {
   uint64_t h{ 0 };
   for (uint32_t const w : key) {
     h = (h ^ w) * UINT64_C(0x9E37'79B9'7F4A'7C15);
@@ -18,8 +16,6 @@ uint64_t hash_of(std::vector<uint32_t> const &key) {
   }
   return h;
 }
-
-}  // namespace
 
 // The slot holding `key`, or the empty one it would go in; the table is never
 // more than half full, so the probe ends.
@@ -51,12 +47,13 @@ void Memo::grow() {
   }
 }
 
-int32_t const *Memo::find(std::vector<uint32_t> const &key, uint32_t &len) {
-  if (slots.empty() || key.empty()) { return nullptr; }
+bool Memo::find(std::vector<uint32_t> const &key, int32_t const *&at, uint32_t &len) {
+  if (slots.empty() || key.empty()) { return false; }
   Slot const &slot{ slot_of(hash_of(key), key) };
-  if (slot.key_len == 0) { return nullptr; }
+  if (slot.key_len == 0) { return false; }
+  at = values.data() + slot.value_off;
   len = slot.value_len;
-  return values.data() + slot.value_off;
+  return true;
 }
 
 void Memo::insert(std::vector<uint32_t> const &key, std::vector<int32_t> const &value) {

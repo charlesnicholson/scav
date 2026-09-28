@@ -12,14 +12,23 @@
 
 namespace scav {
 
+// The hash a table probes by. Only where a key starts looking is up to it; a
+// hit is still the whole key compared, so any function is correct and a
+// constant one makes every key collide, which is how a test reaches probing.
+using MemoHash = uint64_t (*)(std::vector<uint32_t> const &key);
+uint64_t memo_hash(std::vector<uint32_t> const &key);
+
 class Memo {
  public:
   // `words` is what both arenas may hold together before the table empties
   // and starts again, which bounds it without an eviction order.
-  explicit Memo(size_t words) : budget(words) {}
+  explicit Memo(size_t words, MemoHash hash = memo_hash) : budget(words), hash_of(hash) {}
 
-  // The value stored under `key`, or null. Valid until the next `insert`.
-  [[nodiscard]] int32_t const *find(std::vector<uint32_t> const &key, uint32_t &len);
+  // Whether `key` is stored, and where its value is when it is: `at` and `len`,
+  // valid until the next `insert`. An empty value is found with `len` 0.
+  [[nodiscard]] bool find(std::vector<uint32_t> const &key,
+                          int32_t const *&at,
+                          uint32_t &len);
 
   // Stores `value` under `key`, which must not be present.
   void insert(std::vector<uint32_t> const &key, std::vector<int32_t> const &value);
@@ -34,6 +43,7 @@ class Memo {
   void grow();
 
   size_t budget;
+  MemoHash hash_of;
   std::vector<uint32_t> keys;
   std::vector<int32_t> values;
   std::vector<Slot> slots;

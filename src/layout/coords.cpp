@@ -28,6 +28,8 @@ std::vector<int64_t> coords_one_pass(CoordGraph const &g,
                                      std::vector<uint8_t> const &mark,
                                      bool upward,
                                      bool rightward);
+// What `cross_coordinates` returns, computed rather than remembered.
+std::vector<int32_t> coords_place(CoordGraph const &g);
 SCAV_INTERNAL_END
 
 namespace {
@@ -408,11 +410,7 @@ SCAV_INTERNAL_BEGIN
   return x;
 }
 
-SCAV_INTERNAL_END
-
-namespace {
-
-std::vector<int32_t> place(CoordGraph const &g) {
+std::vector<int32_t> coords_place(CoordGraph const &g) {
   uint32_t const n{ static_cast<uint32_t>(g.extent.size()) };
   std::vector<int32_t> out(n, 0);
   if (n == 0) { return out; }
@@ -477,15 +475,16 @@ std::vector<int32_t> place(CoordGraph const &g) {
   return out;
 }
 
-}  // namespace
+SCAV_INTERNAL_END
 
 std::vector<int32_t> cross_coordinates(CoordGraph const &g) {
   thread_local std::vector<uint32_t> key;
   key_of(g, key);
   Memo &m{ memo() };
+  int32_t const *hit{ nullptr };
   uint32_t len{ 0 };
-  if (int32_t const *const hit{ m.find(key, len) }) { return { hit, hit + len }; }
-  std::vector<int32_t> out{ place(g) };
+  if (m.find(key, hit, len)) { return { hit, hit + len }; }
+  std::vector<int32_t> out{ coords_place(g) };
   m.insert(key, out);
   return out;
 }

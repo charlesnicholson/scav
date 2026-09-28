@@ -782,9 +782,9 @@ SubmachineOrders order_submachines(Chart const &c,
       }
     }
     Memo &memo{ frame_memo() };
+    int32_t const *hit{ nullptr };
     uint32_t len{ 0 };
-    int32_t const *const hit{ tracing ? nullptr : memo.find(key, len) };
-    if (hit != nullptr) {
+    if (!tracing && memo.find(key, hit, len)) {
       auto word = [&, at = uint32_t{ 0 }]() mutable {
         return static_cast<uint32_t>(hit[at++]);
       };

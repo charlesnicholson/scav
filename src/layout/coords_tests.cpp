@@ -7,6 +7,7 @@
 #include "doctest.h"
 
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace scav {
@@ -18,6 +19,7 @@ std::vector<int64_t> coords_one_pass(CoordGraph const &g,
                                      std::vector<uint8_t> const &mark,
                                      bool upward,
                                      bool rightward);
+std::vector<int32_t> coords_place(CoordGraph const &g);
 
 }  // namespace scav
 
@@ -242,4 +244,103 @@ TEST_CASE("coords: all four passes agree on separation on their own") {
 TEST_CASE("coords: two runs over one graph agree") {
   CoordGraph const g{ crossing_graph() };
   CHECK(cross_coordinates(g) == cross_coordinates(g));
+}
+
+namespace {
+
+// A layered graph of up to five layers of up to four nodes, every lower node
+// joined to one or two in the layer above, from a seeded generator.
+struct Lcg {
+  uint64_t s;
+  uint32_t next(uint32_t n) {
+    s = (s * 6364136223846793005ULL) + 1442695040888963407ULL;
+    return static_cast<uint32_t>((s >> 33U) % n);
+  }
+};
+
+CoordGraph random_graph(Lcg &r) {
+  CoordGraph g;
+  g.sep = 10 + static_cast<int32_t>(r.next(30));
+  uint32_t const layers{ 2 + r.next(4) };
+  for (uint32_t l = 0; l < layers; ++l) {
+    std::vector<uint32_t> lay;
+    uint32_t const width{ 1 + r.next(4) };
+    for (uint32_t k = 0; k < width; ++k) {
+      lay.push_back(static_cast<uint32_t>(g.extent.size()));
+      g.extent.push_back(20 + static_cast<int32_t>(r.next(180)));
+    }
+    if (l > 0) {
+      std::vector<uint32_t> const &up{ g.layers.back() };
+      for (uint32_t const node : lay) {
+        uint32_t const fan{ 1 + r.next(2) };
+        for (uint32_t f = 0; f < fan; ++f) {
+          g.edges.push_back({ .from = up[r.next(static_cast<uint32_t>(up.size()))],
+                              .to = node,
+                              .inner = r.next(4) == 0 ? 1U : 0U,
+                              .from_at = static_cast<int32_t>(r.next(61)) - 30,
+                              .to_at = static_cast<int32_t>(r.next(61)) - 30,
+                              .weak = r.next(5) == 0 ? 1U : 0U });
+        }
+      }
+    }
+    g.layers.push_back(std::move(lay));
+  }
+  return g;
+}
+
+// One field of the graph changed, which the key has to tell apart.
+CoordGraph mutated(CoordGraph g, uint32_t kind, Lcg &r) {
+  auto const edge = [&]() -> CoordGraph::Edge & {
+    return g.edges[r.next(static_cast<uint32_t>(g.edges.size()))];
+  };
+  switch (kind) {
+    case 0: g.sep += 7; break;
+    case 1: g.extent[r.next(static_cast<uint32_t>(g.extent.size()))] += 40; break;
+    case 2: {
+      std::vector<uint32_t> &lay{
+        g.layers[r.next(static_cast<uint32_t>(g.layers.size()))]
+      };
+      if (lay.size() > 1) { std::swap(lay[0], lay[lay.size() - 1]); }
+      break;
+    }
+    case 3: edge().inner ^= 1U; break;
+    case 4: edge().from_at += 25; break;
+    case 5: edge().to_at -= 25; break;
+    case 6: edge().weak ^= 1U; break;
+    default: g.edges.pop_back(); break;
+  }
+  return g;
+}
+
+}  // namespace
+
+TEST_CASE("coords: a remembered placement is the placement of that graph") {
+  // Every graph is placed once so the memo holds it, then each field is
+  // changed in turn: a key missing a field would hand back the unchanged
+  // graph's answer, and differ from placing the changed graph afresh.
+  Lcg r{ 12345 };
+  constexpr uint32_t KINDS{ 8 };
+  std::vector<uint32_t> moved(KINDS, 0);
+  bool agree{ true };
+  for (uint32_t trial = 0; trial < 400; ++trial) {
+    CoordGraph const g{ random_graph(r) };
+    if (g.edges.empty()) { continue; }
+    std::vector<int32_t> const first{ cross_coordinates(g) };
+    agree = agree && (first == coords_place(g));
+    for (uint32_t kind = 0; kind < KINDS; ++kind) {
+      CoordGraph const h{ mutated(g, kind, r) };
+      std::vector<int32_t> const got{ cross_coordinates(h) };
+      std::vector<int32_t> const want{ coords_place(h) };
+      agree = agree && (got == want);
+      if ((h.extent.size() == g.extent.size()) && (want != first)) { ++moved[kind]; }
+    }
+    agree = agree && (cross_coordinates(g) == first);
+  }
+  CHECK(agree);
+  // Each kind of change moved some placement, so each was a case the key had
+  // to distinguish rather than one it could have ignored.
+  for (uint32_t kind = 0; kind < KINDS; ++kind) {
+    CAPTURE(kind);
+    CHECK(moved[kind] > 0);
+  }
 }
