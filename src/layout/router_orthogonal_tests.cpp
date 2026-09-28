@@ -7,6 +7,7 @@
 #include "layout/router.h"
 #include "scav/scav_layout.h"
 #include "scav_int.h"
+#include "scav_stable_sort.h"
 
 #include "doctest.h"
 
@@ -451,6 +452,36 @@ TEST_CASE("ortho: condensing sorts, deduplicates, and keeps negatives") {
   std::vector<int32_t> reversed{ 9, 8, 7, 6, 5 };
   ortho_sort_unique(reversed);
   CHECK(reversed == std::vector<int32_t>{ 5, 6, 7, 8, 9 });
+}
+
+TEST_CASE("ortho: condensing a long list is the stable sort's order, deduplicated") {
+  // Long enough to take the radix passes, with values spanning the sign bit
+  // and every byte, runs of repeats, and lists whose low bytes all agree so a
+  // pass is skipped.
+  uint64_t s{ 17 };
+  auto const next = [&s]() {
+    s = (s * 6364136223846793005ULL) + 1442695040888963407ULL;
+    return static_cast<uint32_t>(s >> 32U);
+  };
+  for (uint32_t trial = 0; trial < 200; ++trial) {
+    CAPTURE(trial);
+    uint32_t const n{ 33 + (next() % 400) };
+    uint32_t const shift{ (trial % 4) * 8 };
+    std::vector<int32_t> got;
+    for (uint32_t i = 0; i < n; ++i) {
+      uint32_t const raw{ (trial % 3 == 0) ? (next() % 50U) : next() };
+      got.push_back(static_cast<int32_t>(raw << shift));
+    }
+    std::vector<int32_t> want{ got };
+    scav_stable_sort(want, [](int32_t a, int32_t b) { return a < b; });
+    uint32_t kept{ 0 };
+    for (uint32_t i = 0; i < want.size(); ++i) {
+      if ((kept == 0) || (want[i] != want[kept - 1])) { want[kept++] = want[i]; }
+    }
+    want.resize(kept);
+    ortho_sort_unique(got);
+    CHECK(got == want);
+  }
 }
 
 TEST_CASE("ortho: the line lookup finds every value it was given") {

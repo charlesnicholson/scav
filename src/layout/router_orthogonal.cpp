@@ -190,7 +190,49 @@ uint32_t ortho_from(std::vector<int32_t> const &v, int32_t key) {
 }  // namespace
 
 void ortho_sort_unique(std::vector<int32_t> &v) {
-  scav_stable_sort(v, [](int32_t a, int32_t b) { return a < b; });
+  // Ascending by the value's bits offset to unsigned, least significant byte
+  // first, each pass a counting scatter into a buffer kept per thread and
+  // back; a byte every value holds the same leaves the order as it was, so
+  // its pass is skipped. Equal values need no stable order, since only one of
+  // each is kept. Nothing here waits on the pool, so no second call on this
+  // thread starts while one is using the buffer.
+  size_t const n{ v.size() };
+  if (n <= SCAV_SORT_SMALL) {
+    scav_insertion_sort(v.data(), v.data() + n, [](int32_t a, int32_t b) {
+      return a < b;
+    });
+  } else {
+    constexpr uint32_t DIGITS{ 4 };
+    constexpr uint32_t RADIX{ 256 };
+    thread_local std::vector<int32_t> spare;
+    spare.resize(n);
+    auto const digit = [](int32_t x, uint32_t d) {
+      return ((static_cast<uint32_t>(x) ^ 0x8000'0000U) >> (8U * d)) & 0xFFU;
+    };
+    std::array<std::array<uint32_t, RADIX>, DIGITS> count{};
+    for (int32_t const x : v) {
+      for (uint32_t d = 0; d < DIGITS; ++d) { ++count[d][digit(x, d)]; }
+    }
+    int32_t *src{ v.data() };
+    int32_t *dst{ spare.data() };
+    for (uint32_t d = 0; d < DIGITS; ++d) {
+      std::array<uint32_t, RADIX> &at{ count[d] };
+      if (at[digit(src[0], d)] == n) { continue; }
+      uint32_t sum{ 0 };
+      for (uint32_t &slot : at) {
+        uint32_t const here{ slot };
+        slot = sum;
+        sum += here;
+      }
+      for (size_t i = 0; i < n; ++i) { dst[at[digit(src[i], d)]++] = src[i]; }
+      int32_t *const was{ src };
+      src = dst;
+      dst = was;
+    }
+    if (src != v.data()) {
+      for (size_t i = 0; i < n; ++i) { v[i] = src[i]; }
+    }
+  }
   uint32_t kept{ 0 };
   for (uint32_t i = 0; i < v.size(); ++i) {
     if ((kept == 0) || (v[i] != v[kept - 1])) { v[kept++] = v[i]; }
