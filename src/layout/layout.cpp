@@ -311,6 +311,7 @@ struct Prefix {
   SubmachineOrders laid;
   SizedLayout sized;
   SearchPins turned;
+  Routes routes;  // as phase 3 first routes it, over `sized`
   bool ok{ false };
 };
 
@@ -392,7 +393,9 @@ Candidate search_candidate(Chart const &c,
                                  threads,
                                  reuse,
                                  fill,
-                                 pins);
+                                 pins,
+                                 (from != nullptr) ? &from->routes : nullptr);
+  if (prefix != nullptr) { prefix->routes = out.routes; }
 
   // `out` carries the best attempt so far, and `done` is set from that one
   // rather than from whichever attempt was just made.
@@ -634,6 +637,13 @@ Scored score_move(Chart const &c,
     }
     for (uint32_t k = 0; same && (k < full.routes.points.size()); ++k) {
       same = scav::same(full.routes.points[k], cand.routes.points[k]);
+    }
+    same = same && (full.routes.placed.size() == cand.routes.placed.size()) &&
+           (full.routes.unplaced == cand.routes.unplaced);
+    for (uint32_t k = 0; same && (k < full.routes.placed.size()); ++k) {
+      scav_rect const &a{ full.routes.placed[k] };
+      scav_rect const &b{ cand.routes.placed[k] };
+      same = (a.x == b.x) && (a.y == b.y) && (a.w == b.w) && (a.h == b.h);
     }
     if (!same) {
       ScopedLock const held{ test_prefix_lock };

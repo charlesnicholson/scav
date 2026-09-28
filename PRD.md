@@ -1825,6 +1825,7 @@ One more thing this found: **`--portfolio-row N` silently disables Level 1.** Pi
      - **`cost_terms` through grids and one chart context**, about 3x per candidate, against an oracle that computes every term the direct way.
      - **Labels from a memo of each box's local problem and a pruned search** that returns the exhaustive loop's answer, against that loop kept as the reference.
      - **A face move is scored on the incumbent's phases 1 and 2.** They and the facing pass read no face pin, and face moves are two thirds of what a search scores, so the incumbent's state as phase 3 first routes it is kept and a face move routes and scores from there; a test mode scores every such move the whole way too.
+     - **A face move keeps the incumbent's labels wherever nothing a box reads changed.** Its sizing is the incumbent's, so a box whose own route is the one it had, and whose region no moved leg and no box that settled elsewhere reaches, poses the incumbent's problem: 92% of a face move's boxes on `mill`, and the 8% left are mostly new problems the memo has not seen. `mill` with real text goes 442 -> 403 s of CPU.
      - **Scratch kept per thread** in ordering, routing and the router, the ordering's by nesting depth, since a thread waiting on a call's shards may run a candidate that orders on it; a test nests calls that way and fails if they share.
      - **Every memo releases its storage when the last layout ends**, bounded at 4 MB per memo per thread while one runs.
      - **A faster memo hash**, and the Win32 pool (§6).

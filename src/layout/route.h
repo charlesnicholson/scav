@@ -5,6 +5,7 @@
 // and the path boxes slid onto the finished routes.
 
 #include "layout/decompose.h"
+#include "layout/label.h"
 #include "layout/nudge.h"
 #include "layout/order.h"
 #include "layout/router.h"
@@ -23,6 +24,7 @@ struct Routes {
   std::vector<scav_port_slot> slots;
   std::vector<scav_span> route, port;  // parallel to transitions
   std::vector<scav_rect> placed;       // parallel to the path boxes
+  std::vector<LabelSettle> settled;    // parallel to `placed`
 
   // Nets the router fell back on, by cause. A fallback is a straight line, and a
   // straight line is what Tier 0 counts.
@@ -71,7 +73,9 @@ struct RouteCache {
 // One net per segment, routed in that segment's frame, laid end to end. The
 // planning is the router's input, so two routers see the same problem. Frames
 // are sharded across `threads` workers and merged in frame order, so the
-// result is one value at every worker count (6).
+// result is one value at every worker count (6). `was`, where given, is a
+// routing over this same sizing, whose labels are kept wherever nothing a
+// box reads has changed.
 Routes route_transitions(Chart const &c,
                          SplitGraph const &g,
                          SubmachineOrders const &o,
@@ -82,7 +86,8 @@ Routes route_transitions(Chart const &c,
                          uint32_t threads = 0,
                          RouteCache const *reuse = nullptr,
                          RouteCache *fill = nullptr,
-                         SearchPins const *pins = nullptr);
+                         SearchPins const *pins = nullptr,
+                         Routes const *was = nullptr);
 
 }  // namespace scav
 

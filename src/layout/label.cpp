@@ -735,20 +735,51 @@ Outcome remembered(Local const &l, Scratch &s) {
   return out;
 }
 
-}  // namespace
-
-SCAV_INTERNAL_BEGIN
-
-uint32_t place_labels_by(Chart const &c,
-                         SizedLayout const &z,
-                         scav_spaces const &s,
-                         std::vector<scav_span> const &route,
-                         std::vector<scav_point> const &points,
-                         scav_profile const &p,
-                         LabelSearch search,
-                         std::vector<scav_rect> &out) {
+uint32_t place_labels_from(Chart const &c,
+                           SizedLayout const &z,
+                           scav_spaces const &s,
+                           std::vector<scav_span> const &route,
+                           std::vector<scav_point> const &points,
+                           scav_profile const &p,
+                           LabelSearch search,
+                           std::vector<scav_rect> &out,
+                           std::vector<LabelSettle> &how,
+                           LabelBase const *was) {
   out.assign(s.n_path_box, {});
+  how.assign(s.n_path_box, {});
   if ((s.path_box == nullptr) || (s.n_path_box == 0)) { return 0; }
+
+  // Against a base: which routes moved, and the rects a box must not reach to
+  // be the problem it was -- the legs of a moved route as they were and as
+  // they are, then each box that settled elsewhere, where it was and where it
+  // is. A problem reads a rect only where it overlaps the box's region.
+  bool const based{ (was != nullptr) && (was->route != nullptr) &&
+                    (was->points != nullptr) && (was->placed != nullptr) &&
+                    (was->settled != nullptr) && (was->route->size() == route.size()) &&
+                    (was->placed->size() == s.n_path_box) &&
+                    (was->settled->size() == s.n_path_box) };
+  std::vector<uint8_t> moved;
+  std::vector<scav_rect> dirty;
+  if (based) {
+    moved.assign(route.size(), 0);
+    for (uint32_t t = 0; t < route.size(); ++t) {
+      scav_span const now{ route[t] };
+      scav_span const had{ (*was->route)[t] };
+      bool kept{ now.len == had.len };
+      for (uint32_t k = 0; kept && (k < now.len); ++k) {
+        kept = same(points[now.off + k], (*was->points)[had.off + k]);
+      }
+      if (kept) { continue; }
+      moved[t] = 1;
+      for (uint32_t k = 0; (k + 1) < had.len; ++k) {
+        dirty.push_back(
+            span_rect((*was->points)[had.off + k], (*was->points)[had.off + k + 1]));
+      }
+      for (uint32_t k = 0; (k + 1) < now.len; ++k) {
+        dirty.push_back(span_rect(points[now.off + k], points[now.off + k + 1]));
+      }
+    }
+  }
 
   std::vector<Piece> pieces;
   for (uint32_t t = 0; t < route.size(); ++t) {
@@ -792,6 +823,9 @@ uint32_t place_labels_by(Chart const &c,
   uint32_t prior_seg{ 0 };
   int32_t prior_mid{ 0 };
   bool chained{ false };
+  // Every earlier box of the current transition settled as it did in the
+  // base, so this one is chained exactly as it was.
+  bool chain_kept{ true };
   int32_t const leader{ label_leader(p) };
   // Relative coordinates and a holder cut down to the candidates' region are
   // what let one problem recur; the exhaustive search takes the chart's own.
@@ -803,8 +837,10 @@ uint32_t place_labels_by(Chart const &c,
     if (box.subject != prior_subject) {
       prior_subject = box.subject;
       chained = false;
+      chain_kept = true;
     }
     Outcome got{};
+    bool kept{ false };
 
     if (r.len >= 2) {
       scav_point const origin{ relative ? points[r.off] : scav_point{} };
@@ -824,93 +860,110 @@ uint32_t place_labels_by(Chart const &c,
                               .y = local_region.y + origin.y,
                               .w = local_region.w,
                               .h = local_region.h };
-
-      if (box.subject < c.transitions.size()) {
-        // Both ends, not either: a state enclosing one endpoint does not have
-        // to hold the label -- the label belongs on the ancestral side of that
-        // crossing -- so only a state enclosing *both* is exempt from its own
-        // rect. `2` is the intersection; `1` is src's chain alone, which the
-        // reset below clears along with it (11.9.3).
-        mark(c.transitions[box.subject].src, 1);
-        StateId above{ enclosing_state(c, c.transitions[box.subject].dst) };
-        for (size_t up = 0; (up < c.states.size()) && (above.v != INVALID); ++up) {
-          if (encloses[above.v] == 1) { encloses[above.v] = 2; }
-          above = enclosing_state(c, above);
-        }
+      kept =
+          based && chain_kept && (box.subject < moved.size()) && (moved[box.subject] == 0);
+      for (uint32_t k = 0; kept && (k < dirty.size()); ++k) {
+        kept = !overlaps(region, dirty[k]);
       }
-      // I3 as a test: a label inside a composite is bounded by it, not by the
-      // chart. Enclosing states nest, so intersecting them all is the innermost
-      // without having to order them by depth (11.9.3).
-      scav_rect holder{ z.chart };
-      for (uint32_t st = 0; st < c.states.size(); ++st) {
-        if ((c.states[st].live == 0) || (encloses[st] != 2)) { continue; }
-        holder = intersection(holder, z.state[st]);
-      }
-      // And by the region both endpoints lie in, where that region shares its
-      // state with another: the divider between them runs through a label
-      // that strays across it, and `brew`'s `at temperature` did (11.10g).
-      if (box.subject < c.transitions.size()) {
-        Transition const &tr{ c.transitions[box.subject] };
-        SubmachineId const m{ c.states[tr.src.v].parent };
-        if ((m.v < c.submachines.size()) && shared_region(c, m) && lies_in(c, tr.dst, m)) {
-          holder = intersection(holder, z.sub[m.v]);
-        }
-      }
-      // A box of positive extent lies strictly inside the region wherever it
-      // goes, so what lies outside it is never overlapped, never nearest, and
-      // never what a candidate is held in: cut down to the region, a wall, a
-      // leg or a holder that reaches further is the one it was.
-      bool const clip{ relative && (box.w > 0) && (box.h > 0) };
-      auto const local_rect = [&](scav_rect const &at) {
-        scav_rect const moved{ relative_to(at, origin) };
-        return clip ? intersection(moved, local_region) : moved;
-      };
-      l.holder = relative_to(holder, origin);
-      if (clip) {
-        // Unclamped, so a holder the region misses refuses every candidate, as
-        // it would uncut.
-        int32_t const x0{ imax(l.holder.x, local_region.x) };
-        int32_t const y0{ imax(l.holder.y, local_region.y) };
-        int32_t const x1{ imin(l.holder.x + l.holder.w, local_region.x + local_region.w) };
-        int32_t const y1{ imin(l.holder.y + l.holder.h, local_region.y + local_region.h) };
-        l.holder = { .x = x0, .y = y0, .w = x1 - x0, .h = y1 - y0 };
-      }
-
-      l.walls.clear();
-      for (uint32_t st = 0; st < c.states.size(); ++st) {
-        if (c.states[st].live == 0) { continue; }
-        // A state enclosing both endpoints holds the label legitimately; the
-        // bands it reserved for its own text do not.
-        if (encloses[st] == 2) {
-          if (overlaps(region, z.before[st])) {
-            l.walls.push_back(local_rect(z.before[st]));
+      if (kept) {
+        LabelSettle const &had{ (*was->settled)[i] };
+        got = { .found = had.found != 0,
+                .at = (*was->placed)[i],
+                .seg = had.seg,
+                .mid = had.mid };
+      } else {
+        if (box.subject < c.transitions.size()) {
+          // Both ends, not either: a state enclosing one endpoint does not have
+          // to hold the label -- the label belongs on the ancestral side of that
+          // crossing -- so only a state enclosing *both* is exempt from its own
+          // rect. `2` is the intersection; `1` is src's chain alone, which the
+          // reset below clears along with it (11.9.3).
+          mark(c.transitions[box.subject].src, 1);
+          StateId above{ enclosing_state(c, c.transitions[box.subject].dst) };
+          for (size_t up = 0; (up < c.states.size()) && (above.v != INVALID); ++up) {
+            if (encloses[above.v] == 1) { encloses[above.v] = 2; }
+            above = enclosing_state(c, above);
           }
-          if (overlaps(region, z.after[st])) {
-            l.walls.push_back(local_rect(z.after[st]));
-          }
-        } else if (overlaps(region, z.state[st])) {
-          l.walls.push_back(local_rect(z.state[st]));
         }
-      }
-      for (uint32_t const j : settled) {
-        if (overlaps(region, out[j])) { l.walls.push_back(local_rect(out[j])); }
-      }
-      l.foreign.clear();
-      for (Piece const &piece : pieces) {
-        if (piece.trans == box.subject) { continue; }
-        if (overlaps(region, piece.at)) { l.foreign.push_back(local_rect(piece.at)); }
-      }
-      if (box.subject < c.transitions.size()) { mark(c.transitions[box.subject].src, 0); }
+        // I3 as a test: a label inside a composite is bounded by it, not by the
+        // chart. Enclosing states nest, so intersecting them all is the innermost
+        // without having to order them by depth (11.9.3).
+        scav_rect holder{ z.chart };
+        for (uint32_t st = 0; st < c.states.size(); ++st) {
+          if ((c.states[st].live == 0) || (encloses[st] != 2)) { continue; }
+          holder = intersection(holder, z.state[st]);
+        }
+        // And by the region both endpoints lie in, where that region shares its
+        // state with another: the divider between them runs through a label
+        // that strays across it, and `brew`'s `at temperature` did (11.10g).
+        if (box.subject < c.transitions.size()) {
+          Transition const &tr{ c.transitions[box.subject] };
+          SubmachineId const m{ c.states[tr.src.v].parent };
+          if ((m.v < c.submachines.size()) && shared_region(c, m) &&
+              lies_in(c, tr.dst, m)) {
+            holder = intersection(holder, z.sub[m.v]);
+          }
+        }
+        // A box of positive extent lies strictly inside the region wherever it
+        // goes, so what lies outside it is never overlapped, never nearest, and
+        // never what a candidate is held in: cut down to the region, a wall, a
+        // leg or a holder that reaches further is the one it was.
+        bool const clip{ relative && (box.w > 0) && (box.h > 0) };
+        auto const local_rect = [&](scav_rect const &at) {
+          scav_rect const shifted{ relative_to(at, origin) };
+          return clip ? intersection(shifted, local_region) : shifted;
+        };
+        l.holder = relative_to(holder, origin);
+        if (clip) {
+          // Unclamped, so a holder the region misses refuses every candidate, as
+          // it would uncut.
+          int32_t const x0{ imax(l.holder.x, local_region.x) };
+          int32_t const y0{ imax(l.holder.y, local_region.y) };
+          int32_t const x1{ imin(l.holder.x + l.holder.w,
+                                 local_region.x + local_region.w) };
+          int32_t const y1{ imin(l.holder.y + l.holder.h,
+                                 local_region.y + local_region.h) };
+          l.holder = { .x = x0, .y = y0, .w = x1 - x0, .h = y1 - y0 };
+        }
 
-      switch (search) {
-        case LabelSearch::Exhaustive: got = exhaustive(l, scratch); break;
-        case LabelSearch::Pruned: got = pruned(l, scratch); break;
-        case LabelSearch::Memoized: got = remembered(l, scratch); break;
-      }
-      if (got.found) {
-        got.at.x += origin.x;
-        got.at.y += origin.y;
-        got.mid += along(points, r, got.seg, origin);
+        l.walls.clear();
+        for (uint32_t st = 0; st < c.states.size(); ++st) {
+          if (c.states[st].live == 0) { continue; }
+          // A state enclosing both endpoints holds the label legitimately; the
+          // bands it reserved for its own text do not.
+          if (encloses[st] == 2) {
+            if (overlaps(region, z.before[st])) {
+              l.walls.push_back(local_rect(z.before[st]));
+            }
+            if (overlaps(region, z.after[st])) {
+              l.walls.push_back(local_rect(z.after[st]));
+            }
+          } else if (overlaps(region, z.state[st])) {
+            l.walls.push_back(local_rect(z.state[st]));
+          }
+        }
+        for (uint32_t const j : settled) {
+          if (overlaps(region, out[j])) { l.walls.push_back(local_rect(out[j])); }
+        }
+        l.foreign.clear();
+        for (Piece const &piece : pieces) {
+          if (piece.trans == box.subject) { continue; }
+          if (overlaps(region, piece.at)) { l.foreign.push_back(local_rect(piece.at)); }
+        }
+        if (box.subject < c.transitions.size()) {
+          mark(c.transitions[box.subject].src, 0);
+        }
+
+        switch (search) {
+          case LabelSearch::Exhaustive: got = exhaustive(l, scratch); break;
+          case LabelSearch::Pruned: got = pruned(l, scratch); break;
+          case LabelSearch::Memoized: got = remembered(l, scratch); break;
+        }
+        if (got.found) {
+          got.at.x += origin.x;
+          got.at.y += origin.y;
+          got.mid += along(points, r, got.seg, origin);
+        }
       }
     }
 
@@ -919,13 +972,43 @@ uint32_t place_labels_by(Chart const &c,
       prior_mid = got.mid;
       chained = true;
       out[i] = got.at;
+      how[i] = { .seg = got.seg, .mid = got.mid, .found = 1 };
     } else {
       ++fallbacks;
       out[i] = centred(anchor_of(points, r), box, z.chart);
     }
+    if (based && !kept) {
+      LabelSettle const &had{ (*was->settled)[i] };
+      scav_rect const &was_at{ (*was->placed)[i] };
+      bool const same_box{ (how[i].found == had.found) && (how[i].seg == had.seg) &&
+                           (how[i].mid == had.mid) && (out[i].x == was_at.x) &&
+                           (out[i].y == was_at.y) && (out[i].w == was_at.w) &&
+                           (out[i].h == was_at.h) };
+      if (!same_box) {
+        dirty.push_back(was_at);
+        dirty.push_back(out[i]);
+        chain_kept = false;
+      }
+    }
     settled.push_back(i);
   }
   return fallbacks;
+}
+
+}  // namespace
+
+SCAV_INTERNAL_BEGIN
+
+uint32_t place_labels_by(Chart const &c,
+                         SizedLayout const &z,
+                         scav_spaces const &s,
+                         std::vector<scav_span> const &route,
+                         std::vector<scav_point> const &points,
+                         scav_profile const &p,
+                         LabelSearch search,
+                         std::vector<scav_rect> &out) {
+  std::vector<LabelSettle> how;
+  return place_labels_from(c, z, s, route, points, p, search, out, how, nullptr);
 }
 
 SCAV_INTERNAL_END
@@ -938,6 +1021,27 @@ uint32_t place_labels(Chart const &c,
                       scav_profile const &p,
                       std::vector<scav_rect> &out) {
   return place_labels_by(c, z, s, route, points, p, LabelSearch::Memoized, out);
+}
+
+uint32_t place_labels(Chart const &c,
+                      SizedLayout const &z,
+                      scav_spaces const &s,
+                      std::vector<scav_span> const &route,
+                      std::vector<scav_point> const &points,
+                      scav_profile const &p,
+                      std::vector<scav_rect> &out,
+                      std::vector<LabelSettle> &how,
+                      LabelBase const *was) {
+  return place_labels_from(c,
+                           z,
+                           s,
+                           route,
+                           points,
+                           p,
+                           LabelSearch::Memoized,
+                           out,
+                           how,
+                           was);
 }
 
 }  // namespace scav

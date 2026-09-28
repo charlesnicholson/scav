@@ -183,7 +183,8 @@ Routes route_transitions(Chart const &c,
                          uint32_t threads,
                          RouteCache const *reuse,
                          RouteCache *fill,
-                         SearchPins const *pins) {
+                         SearchPins const *pins,
+                         Routes const *was) {
   Routes out;
   std::vector<CallScratch> &stack{ call_stack() };
   CallScratch cs;
@@ -673,7 +674,19 @@ Routes route_transitions(Chart const &c,
                 out.nudged);
   }
 
-  out.unplaced = place_labels(c, z, s, out.route, out.points, p, out.placed);
+  LabelBase const base{ .route = (was != nullptr) ? &was->route : nullptr,
+                        .points = (was != nullptr) ? &was->points : nullptr,
+                        .placed = (was != nullptr) ? &was->placed : nullptr,
+                        .settled = (was != nullptr) ? &was->settled : nullptr };
+  out.unplaced = place_labels(c,
+                              z,
+                              s,
+                              out.route,
+                              out.points,
+                              p,
+                              out.placed,
+                              out.settled,
+                              (was != nullptr) ? &base : nullptr);
   stack.push_back(std::move(cs));
   return out;
 }
