@@ -2,18 +2,34 @@
 
 #include "scav_int.h"
 
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <vector>
 
 namespace scav {
 
+// Four lanes over two words at a time, then the lanes and the tail folded into
+// one: the lanes are independent, so the multiplies overlap rather than each
+// waiting on the last, which is most of what a long key costs.
 uint64_t memo_hash(std::vector<uint32_t> const &key) {
-  uint64_t h{ 0 };
-  for (uint32_t const w : key) {
-    h = (h ^ w) * UINT64_C(0x9E37'79B9'7F4A'7C15);
-    h ^= h >> 29U;
+  constexpr uint64_t K{ UINT64_C(0x9E37'79B9'7F4A'7C15) };
+  auto const mix = [](uint64_t h, uint64_t w) {
+    h = (h ^ w) * K;
+    return h ^ (h >> 29U);
+  };
+  std::array<uint64_t, 4> lane{ 1, 2, 3, 4 };
+  size_t const n{ key.size() };
+  size_t i{ 0 };
+  for (; (i + 8) <= n; i += 8) {
+    for (size_t l = 0; l < lane.size(); ++l) {
+      uint64_t const w{ (uint64_t{ key[i + (2 * l)] } << 32U) | key[i + (2 * l) + 1] };
+      lane[l] = mix(lane[l], w);
+    }
   }
+  uint64_t h{ n };
+  for (uint64_t const l : lane) { h = mix(h, l); }
+  for (; i < n; ++i) { h = mix(h, key[i]); }
   return h;
 }
 

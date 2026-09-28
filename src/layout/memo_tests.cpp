@@ -121,3 +121,29 @@ TEST_CASE("memo: an empty key is never stored, and an empty value is") {
   REQUIRE(lookup(m, { 5 }, got));
   CHECK(got.empty());
 }
+
+TEST_CASE("memo: the hash reads every word of a key") {
+  // A hash that skipped a word would still be correct, since a hit compares
+  // the key whole, but every key differing only there would share one probe
+  // run. Changing any one word of keys of every length up to 40 changes it.
+  uint64_t s{ 99 };
+  auto const next = [&s]() {
+    s = (s * 6364136223846793005ULL) + 1442695040888963407ULL;
+    return static_cast<uint32_t>(s >> 32U);
+  };
+  bool all{ true };
+  for (uint32_t len = 1; len <= 40; ++len) {
+    std::vector<uint32_t> key(len);
+    for (uint32_t &w : key) { w = next(); }
+    uint64_t const h{ memo_hash(key) };
+    for (uint32_t k = 0; k < len; ++k) {
+      std::vector<uint32_t> other{ key };
+      other[k] ^= 1U;
+      all = all && (memo_hash(other) != h);
+    }
+    std::vector<uint32_t> longer{ key };
+    longer.push_back(0);
+    all = all && (memo_hash(longer) != h);
+  }
+  CHECK(all);
+}
