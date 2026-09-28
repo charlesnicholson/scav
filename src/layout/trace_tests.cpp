@@ -9,6 +9,7 @@
 
 #include "doctest.h"
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -250,7 +251,7 @@ TEST_CASE("trace: a back edge's kinks are one chained bend, and the trace says s
   CHECK(count_kind(t, TraceKind::CandidateScored) == 0);
 
   // Ranked in a row, so the back edge is the only multi-rank one.
-  uint32_t ranks[3]{ INVALID, INVALID, INVALID };
+  std::array<uint32_t, 3> ranks{ INVALID, INVALID, INVALID };
   for (TraceEvent const &e : t.events) {
     if (e.kind != TraceKind::RankAssigned) { continue; }
     for (uint32_t i = 0; i < 3; ++i) {

@@ -817,6 +817,7 @@ TEST_CASE("size: a fold never cuts between an initial pseudostate and its target
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const start{ build_state(c, root, {}, StateKind::Initial, {}) };
   std::vector<StateId> chain;
+  chain.reserve(6);
   for (uint32_t i = 0; i < 6; ++i) {
     chain.push_back(build_state(c, root, "S" + std::to_string(i), StateKind::Normal, {}));
   }

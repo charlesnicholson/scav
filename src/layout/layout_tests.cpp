@@ -2118,8 +2118,8 @@ TEST_CASE("layout: an initial and one other arrival meet their target at two hei
   StateId const outer{ build_state(c, root, "P", StateKind::Normal, {}) };
   SubmachineId const inner{ build_submachine(c, outer, {}, {}) };
   StateId const target{ build_state(c, inner, "S", StateKind::Normal, {}) };
-  StateId const dot{ build_state(c, inner, {}, StateKind::Initial, {}) };
-  TransId const start{ build_trans(c, dot, target, TransKind::External, {}) };
+  StateId const initial{ build_state(c, inner, {}, StateKind::Initial, {}) };
+  TransId const start{ build_trans(c, initial, target, TransKind::External, {}) };
   TransId const into{ build_trans(c, x, target, TransKind::External, {}) };
 
   // Wide, so `X` and `P` are laid out side by side rather than folded one
@@ -2146,7 +2146,7 @@ TEST_CASE("layout: an initial and one other arrival meet their target at two hei
   int32_t const at_start{ level(start) };
   int32_t const at_into{ level(into) };
   int32_t const apart{ imax(at_start - at_into, at_into - at_start) };
-  CHECK(apart >= (state_rect(c, dot).h / 2) + route_clearance(p));
+  CHECK(apart >= (state_rect(c, initial).h / 2) + route_clearance(p));
 }
 
 TEST_CASE("layout: a label inside one of two regions stays inside that region") {

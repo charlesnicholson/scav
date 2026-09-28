@@ -638,8 +638,7 @@ TEST_CASE("order: a reversal pin turns the named edge, and the walk turns no oth
   auto const reversed_segs = [](SubmachineOrders const &o) {
     std::vector<uint32_t> segs;
     for (OrderEdge const &e : o.edges) {
-      if ((e.reversed != 0) &&
-          (std::find(segs.begin(), segs.end(), e.segment) == segs.end())) {
+      if ((e.reversed != 0) && (std::ranges::find(segs, e.segment) == segs.end())) {
         segs.push_back(e.segment);
       }
     }
@@ -734,6 +733,7 @@ TEST_CASE("order: cycle detection survives a frame deep enough to overflow recur
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   std::vector<StateId> ring;
+  ring.reserve(4096);
   for (uint32_t i = 0; i < 4096; ++i) {
     ring.push_back(build_state(c, root, {}, StateKind::Normal, {}));
   }
