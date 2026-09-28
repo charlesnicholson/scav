@@ -1,7 +1,8 @@
 // What a Level 1 search leaves undone and still finds the same: the memo of
 // whole searches, whose key tells apart every input a search is a function
-// of, and the faces at ends the router does not read, left unscored. Each is
-// compared against a layout that does the work, with the shortcut taken.
+// of; the faces at ends the router does not read, left unscored; and a face
+// move scored from the incumbent's phases 1 and 2. Each is compared against a
+// layout that does the work, with the shortcut taken.
 
 #include "layout/pack.h"
 #include "layout/size.h"
@@ -28,6 +29,10 @@ void search_key(scav_profile const &objective,
                 SearchPins const &seed,
                 std::vector<uint8_t> const *scope,
                 std::vector<uint32_t> &key);
+void layout_test_prefix_shortcut(bool on);
+void layout_test_prefix_verify(bool on);
+uint64_t layout_test_prefix_used();
+uint64_t layout_test_prefix_mismatches();
 void layout_test_skip_unread_faces(bool on);
 uint64_t layout_test_unread_faces();
 void layout_test_search_memo(bool on);
@@ -224,4 +229,65 @@ TEST_CASE(
     CHECK(with.coordinate == without.coordinate);
   }
   CHECK(skipped > 0);
+}
+
+namespace {
+
+struct PrefixGuard {
+  PrefixGuard() = default;
+  PrefixGuard(PrefixGuard const &) = delete;
+  PrefixGuard &operator=(PrefixGuard const &) = delete;
+  ~PrefixGuard() {
+    layout_test_prefix_shortcut(true);
+    layout_test_prefix_verify(false);
+  }
+};
+
+}  // namespace
+
+TEST_CASE(
+    "search: face moves scored from the incumbent's prefix find what scoring them whole "
+    "finds") {
+  PrefixGuard const guard;
+  constexpr std::array<char const *, 5> CHARTS{ "axis.scav",
+                                                "brew.scav",
+                                                "ota.scav",
+                                                "tcp.scav",
+                                                "vac.scav" };
+  uint64_t used{ 0 };
+  for (char const *name : CHARTS) {
+    CAPTURE(name);
+    layout_test_prefix_shortcut(true);
+    Laid const with{ lay_out(name) };
+    used += layout_test_prefix_used();
+    layout_test_prefix_shortcut(false);
+    Laid const without{ lay_out(name) };
+    CHECK(layout_test_prefix_used() == 0);
+    REQUIRE(with.ok);
+    REQUIRE(without.ok);
+    CHECK(with.structural == without.structural);
+    CHECK(with.coordinate == without.coordinate);
+  }
+  CHECK(used > 0);
+}
+
+TEST_CASE("search: every face move scored from the prefix scores as the whole way does") {
+  // Each shortcut is scored the whole way as well and the two compared -- the
+  // score, its shares, the drawing and the pins it was laid with -- including
+  // the many moves that lose, whose score no drawing would show.
+  PrefixGuard const guard;
+  layout_test_prefix_verify(true);
+  constexpr std::array<char const *, 4> CHARTS{ "axis.scav",
+                                                "ota.scav",
+                                                "tcp.scav",
+                                                "vac.scav" };
+  uint64_t used{ 0 };
+  for (char const *name : CHARTS) {
+    CAPTURE(name);
+    layout_test_prefix_verify(true);
+    REQUIRE(lay_out(name).ok);
+    used += layout_test_prefix_used();
+    CHECK(layout_test_prefix_mismatches() == 0);
+  }
+  CHECK(used > 0);
 }

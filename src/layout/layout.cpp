@@ -32,6 +32,10 @@
 namespace scav {
 
 #ifdef SCAV_TESTING
+void layout_test_prefix_shortcut(bool on);
+void layout_test_prefix_verify(bool on);
+uint64_t layout_test_prefix_used();
+uint64_t layout_test_prefix_mismatches();
 void layout_test_skip_unread_faces(bool on);
 uint64_t layout_test_unread_faces();
 void layout_test_search_memo(bool on);
@@ -299,8 +303,22 @@ std::vector<ReversePin> facing_flips(Chart const &c,
   return out;
 }
 
+// A candidate as it stands when phase 3 first routes it: the orders it is laid
+// out by, its sizing, and its pins with the facing pass's turns. Phases 1 and
+// 2 and the facing pass read no face pin, so a candidate whose pins differ
+// from another's only in faces has that one's prefix, with the faces added.
+struct Prefix {
+  SubmachineOrders laid;
+  SizedLayout sized;
+  SearchPins turned;
+  bool ok{ false };
+};
+
 // Phases 2 and 3 for one tuple, with the spacing-inflation retry exactly as a
 // lone run has it. `knobs` is the caller's profile with the tuple applied.
+// `prefix`, where given, is filled with the candidate's prefix. `from`, where
+// given, is the prefix of a candidate whose pins are `pins` less some faces:
+// phases 1 and 2 are taken from it rather than run, and `orders` is not read.
 Candidate search_candidate(Chart const &c,
                            SplitGraph const &g,
                            SubmachineOrders const &orders,
@@ -314,19 +332,28 @@ Candidate search_candidate(Chart const &c,
                            std::vector<Diagnostic> &diags,
                            RouteCache const *reuse = nullptr,
                            RouteCache *fill = nullptr,
-                           SearchPins const *pins = nullptr) {
+                           SearchPins const *pins = nullptr,
+                           Prefix *prefix = nullptr,
+                           Prefix const *from = nullptr) {
   Candidate out;
-  if (!size_layout(c, g, orders, s, knobs, out.sized, diags, dar, pack, fold)) {
-    return out;
-  }
-  // Ports turned to face where their routes go, and the frames laid out again
-  // with them. A function of the tuple and the pins like everything else, so
-  // re-deriving the drawing derives the same turns.
   SubmachineOrders facing;
   SubmachineOrders const *use{ &orders };
-  SearchPins &turned{ out.laid };
-  turned = (pins != nullptr) ? *pins : SearchPins{};
-  {
+  if (from != nullptr) {
+    if (!from->ok) { return out; }
+    out.sized = from->sized;
+    out.laid = from->turned;
+    if (pins != nullptr) { out.laid.faces = pins->faces; }
+    use = &from->laid;
+  } else {
+    if (!size_layout(c, g, orders, s, knobs, out.sized, diags, dar, pack, fold)) {
+      if (prefix != nullptr) { prefix->ok = false; }
+      return out;
+    }
+    // Ports turned to face where their routes go, and the frames laid out
+    // again with them. A function of the tuple and the pins like everything
+    // else, so re-deriving the drawing derives the same turns.
+    SearchPins &turned{ out.laid };
+    turned = (pins != nullptr) ? *pins : SearchPins{};
     std::vector<ReversePin> const flips{ facing_flips(c, g, orders, out.sized) };
     if (!flips.empty()) {
       for (ReversePin const &f : flips) {
@@ -346,6 +373,12 @@ Candidate search_candidate(Chart const &c,
         use = &facing;
         out.sized = std::move(again);
       }
+    }
+    if (prefix != nullptr) {
+      prefix->laid = *use;
+      prefix->sized = out.sized;
+      prefix->turned = out.laid;
+      prefix->ok = true;
     }
   }
   SubmachineOrders const &laid{ *use };
@@ -474,35 +507,24 @@ struct Scored {
 // Pure: reads the model, the split, the tables and its arguments, writes
 // nothing either of its callers can see, which is what lets a round of them run
 // at once (11.10c).
-Scored score_move(Chart const &c,
-                  SplitGraph const &g,
-                  CostContext const &scoring,
-                  scav_spaces const &s,
-                  scav_profile const &objective,
-                  scav_profile const &knobs,
-                  DarSource dar,
-                  Compaction pack,
-                  Fold fold,
-                  Router const &router,
-                  SearchPins const &pins,
-                  RouteCache const *reuse) {
+#ifdef SCAV_TESTING
+// Whether a face move is scored from the incumbent's prefix, and whether each
+// one is also scored the whole way to compare; a test runs a layout both ways
+// and counts what disagreed.
+bool test_prefix_shortcut{ true };
+bool test_prefix_verify{ false };
+Mutex test_prefix_lock;
+uint64_t test_prefix_used{ 0 };
+uint64_t test_prefix_mismatches{ 0 };
+#endif
+
+Scored scored_of(Chart const &c,
+                 SplitGraph const &g,
+                 CostContext const &scoring,
+                 scav_spaces const &s,
+                 scav_profile const &objective,
+                 Candidate const &cand) {
   Scored out;
-  SubmachineOrders const moved{ order_submachines(c, g, s, objective, 1, pins) };
-  std::vector<Diagnostic> spilled;
-  Candidate const cand{ search_candidate(c,
-                                         g,
-                                         moved,
-                                         s,
-                                         knobs,
-                                         dar,
-                                         pack,
-                                         fold,
-                                         router,
-                                         1,
-                                         spilled,
-                                         reuse,
-                                         nullptr,
-                                         &pins) };
   if (!cand.viable) { return out; }
   out.viable = true;
   if (cand.inflations != 0) {
@@ -517,6 +539,108 @@ Scored score_move(Chart const &c,
   for (uint32_t k = 0; k < TIER2_TERMS; ++k) {
     out.share[k] = static_cast<int32_t>(share[k]);
   }
+  return out;
+}
+
+// `from`, where given, is the incumbent's prefix and `pins` the incumbent's
+// with one face more: the candidate's phases 1 and 2 are the incumbent's.
+Scored score_move(Chart const &c,
+                  SplitGraph const &g,
+                  CostContext const &scoring,
+                  scav_spaces const &s,
+                  scav_profile const &objective,
+                  scav_profile const &knobs,
+                  DarSource dar,
+                  Compaction pack,
+                  Fold fold,
+                  Router const &router,
+                  SearchPins const &pins,
+                  RouteCache const *reuse,
+                  Prefix const *from) {
+  auto const whole = [&]() {
+    SubmachineOrders const moved{ order_submachines(c, g, s, objective, 1, pins) };
+    std::vector<Diagnostic> spilled;
+    return search_candidate(c,
+                            g,
+                            moved,
+                            s,
+                            knobs,
+                            dar,
+                            pack,
+                            fold,
+                            router,
+                            1,
+                            spilled,
+                            reuse,
+                            nullptr,
+                            &pins);
+  };
+  // A traced search scores every move the whole way, since its trace records
+  // each move's phases.
+  bool shortcut{ (from != nullptr) && (trace_sink() == nullptr) };
+#ifdef SCAV_TESTING
+  shortcut = shortcut && test_prefix_shortcut;
+#endif
+  if (!shortcut) { return scored_of(c, g, scoring, s, objective, whole()); }
+  std::vector<Diagnostic> spilled;
+  Candidate const cand{ search_candidate(c,
+                                         g,
+                                         from->laid,
+                                         s,
+                                         knobs,
+                                         dar,
+                                         pack,
+                                         fold,
+                                         router,
+                                         1,
+                                         spilled,
+                                         reuse,
+                                         nullptr,
+                                         &pins,
+                                         nullptr,
+                                         from) };
+  Scored const out{ scored_of(c, g, scoring, s, objective, cand) };
+#ifdef SCAV_TESTING
+  {
+    ScopedLock const held{ test_prefix_lock };
+    ++test_prefix_used;
+  }
+  if (test_prefix_verify) {
+    Candidate const full{ whole() };
+    Scored const want{ scored_of(c, g, scoring, s, objective, full) };
+    bool same{ (want.viable == out.viable) && (want.inflated == out.inflated) &&
+               (want.cost.t0_violations == out.cost.t0_violations) &&
+               (want.cost.t1_hints == out.cost.t1_hints) &&
+               (want.cost.t2 == out.cost.t2) && (want.share == out.share) &&
+               (full.inflations == cand.inflations) &&
+               (full.sized.state.size() == cand.sized.state.size()) &&
+               (full.routes.points.size() == cand.routes.points.size()) &&
+               (full.laid.faces.size() == cand.laid.faces.size()) &&
+               (full.laid.reverses.size() == cand.laid.reverses.size()) };
+    for (uint32_t k = 0; same && (k < full.laid.faces.size()); ++k) {
+      FacePin const &a{ full.laid.faces[k] };
+      FacePin const &b{ cand.laid.faces[k] };
+      same = (a.trans == b.trans) && (a.leg == b.leg) && (a.end == b.end) &&
+             (a.face == b.face);
+    }
+    for (uint32_t k = 0; same && (k < full.laid.reverses.size()); ++k) {
+      same = (full.laid.reverses[k].trans == cand.laid.reverses[k].trans) &&
+             (full.laid.reverses[k].leg == cand.laid.reverses[k].leg);
+    }
+    for (uint32_t k = 0; same && (k < full.sized.state.size()); ++k) {
+      scav_rect const &a{ full.sized.state[k] };
+      scav_rect const &b{ cand.sized.state[k] };
+      same = (a.x == b.x) && (a.y == b.y) && (a.w == b.w) && (a.h == b.h);
+    }
+    for (uint32_t k = 0; same && (k < full.routes.points.size()); ++k) {
+      same = scav::same(full.routes.points[k], cand.routes.points[k]);
+    }
+    if (!same) {
+      ScopedLock const held{ test_prefix_lock };
+      ++test_prefix_mismatches;
+    }
+  }
+#endif
   return out;
 }
 
@@ -576,6 +700,7 @@ Improved run_search(Chart const &c,
   // The incumbent every candidate of a round is one frame away from. Read by
   // all of them at once and written only here, between rounds (11.10c).
   RouteCache base;
+  Prefix incumbent;
   {
     std::vector<Diagnostic> spilled;
     Candidate first{ search_candidate(c,
@@ -591,7 +716,8 @@ Improved run_search(Chart const &c,
                                       spilled,
                                       nullptr,
                                       &base,
-                                      &held) };
+                                      &held,
+                                      &incumbent) };
     out.best = std::move(first);
   }
   // Scored here rather than handed in, so a start is judged by what it is and
@@ -741,7 +867,8 @@ Improved run_search(Chart const &c,
                           fold,
                           router,
                           with(held, round[i]),
-                          &base);
+                          &base,
+                          (round[i].kind == MoveKind::Face) ? &incumbent : nullptr);
     });
 
     // Reduced in enumeration order, so the pass is a function of the model and
@@ -822,7 +949,8 @@ Improved run_search(Chart const &c,
                                 spilled,
                                 &was,
                                 &base,
-                                &held);
+                                &held,
+                                &incumbent);
     out.cost = best;
   }
   return out;
@@ -1776,6 +1904,26 @@ uint32_t layout_structural_hash(Chart const &c) {
 }
 
 #ifdef SCAV_TESTING
+void layout_test_prefix_shortcut(bool on) {
+  test_prefix_shortcut = on;
+  ScopedLock const held{ test_prefix_lock };
+  test_prefix_used = 0;
+  test_prefix_mismatches = 0;
+}
+void layout_test_prefix_verify(bool on) {
+  test_prefix_verify = on;
+  ScopedLock const held{ test_prefix_lock };
+  test_prefix_used = 0;
+  test_prefix_mismatches = 0;
+}
+uint64_t layout_test_prefix_used() {
+  ScopedLock const held{ test_prefix_lock };
+  return test_prefix_used;
+}
+uint64_t layout_test_prefix_mismatches() {
+  ScopedLock const held{ test_prefix_lock };
+  return test_prefix_mismatches;
+}
 void layout_test_skip_unread_faces(bool on) {
   test_skip_unread_faces = on;
   ScopedLock const held{ test_unread_lock };
