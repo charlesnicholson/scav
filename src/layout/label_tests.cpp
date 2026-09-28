@@ -271,6 +271,41 @@ TEST_CASE("label: a box takes the side clear of another transition's route") {
   CHECK(placed[0].y >= 150);
 }
 
+TEST_CASE("label: another route's leg counts wherever along that route it lies") {
+  // The stranger's first leg runs beside the box's and its last lies out of
+  // the box's reach, so a route passed over by where it ends would leave the
+  // box on the side the first leg strikes through.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, a, TransKind::External, {});
+
+  SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 1200, .h = 800 }) };
+  z.state[a.v] = { .x = 0, .y = 100, .w = 100, .h = 100 };
+  z.state[b.v] = { .x = 400, .y = 100, .w = 100, .h = 100 };
+  Lines const l{ lines_of(
+      { { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } },
+        { { .x = 100, .y = 140 }, { .x = 1100, .y = 140 }, { .x = 1100, .y = 700 } } }) };
+  std::vector<scav_path_box> const boxes{ { .subject = 0, .w = 60, .h = 20, .order = 0 } };
+
+  for (LabelSearch const search :
+       { LabelSearch::Exhaustive, LabelSearch::Pruned, LabelSearch::Memoized }) {
+    std::vector<scav_rect> placed;
+    CHECK(place_labels_by(c,
+                          z,
+                          boxes_of(boxes),
+                          l.route,
+                          l.points,
+                          tiny(),
+                          search,
+                          placed) == 0);
+    CHECK(placed_well(placed[0], poly_of(l, 0)));
+    CHECK(placed[0].y >= 150);
+  }
+}
+
 TEST_CASE("label: a box crosses to the far side of its own leg to keep its distance") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };

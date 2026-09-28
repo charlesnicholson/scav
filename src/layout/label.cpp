@@ -108,9 +108,11 @@ scav_point lead_by(uint32_t lead, int32_t len) {
   }
 }
 
-struct Piece {
-  scav_rect at;
-  uint32_t trans;
+// One route's legs, `first` onward in the list of every route's, and the box
+// they all lie in: a region that misses the box overlaps none of them.
+struct Pieces {
+  scav_rect bounds;
+  uint32_t first, count;
 };
 
 // A candidate's whole identity, so the winner is a lexicographic minimum over
@@ -217,8 +219,38 @@ struct Outcome {
 // the slide: `centre` is the slide that would put the box's centre nearest the
 // anchor, and `near` the least anchor distance any of them has.
 struct Group {
-  uint32_t k, offset;
+  uint32_t k, offset, band;
   Wide centre, near;
+};
+
+// Per leg, the groups whose candidates share one line across it, and those of
+// the leg's nearby segments that may lie within one of their reaches, in the
+// leg's order. A segment left out is one no candidate of the band has nearer
+// than its reach, so it is never the nearest and never ends a scan.
+struct Band {
+  bool built{ false };
+  std::vector<scav_rect> near;
+};
+
+// A leg's bands: across it a lead is back, none or forward, and an attachment
+// sits at 0, half the box or all of it.
+constexpr uint32_t BANDS{ 9 };
+
+// The band of offset `o`, from `lead_by` and `attach_at` read across the leg:
+// two offsets with one band are one line across it.
+uint32_t band_of_offset(uint32_t o, bool flat) {
+  constexpr std::array<uint32_t, LEADS> LEAD_Y{ 0, 1, 2, 2 };
+  constexpr std::array<uint32_t, LEADS> LEAD_X{ 0, 0, 1, 2 };
+  constexpr std::array<uint32_t, ATTACH> IN_Y{ 0, 1, 2, 2, 1, 1, 0, 0 };
+  constexpr std::array<uint32_t, ATTACH> IN_X{ 0, 0, 1, 2, 2, 1, 2, 1 };
+  uint32_t const lead{ o / ATTACH };
+  uint32_t const which{ o % ATTACH };
+  return flat ? ((LEAD_Y[lead] * 3) + IN_Y[which]) : ((LEAD_X[lead] * 3) + IN_X[which]);
+}
+
+// A blocked rect's inclusive range of grid cells.
+struct Cells {
+  uint32_t c0, c1, r0, r1;
 };
 
 // One leg's groups, which start at `first`, and the least anchor distance any
@@ -229,15 +261,65 @@ struct Leg {
 };
 
 // A search's working vectors, kept across the boxes of one call. `nearby` is
-// per leg.
+// per leg, and `bands` holds `BANDS` a leg. The pruned search builds the grid over
+// `blocked` only once a candidate first reaches it, and `gridded` says whether
+// it has for this box.
 struct Scratch {
   std::vector<scav_rect> own;
   std::vector<scav_rect> blocked;
   std::vector<std::vector<scav_rect>> nearby;
   std::vector<Group> groups;
   std::vector<Leg> legs;
+  std::vector<Band> bands;
   RectGrid grid;
+  std::vector<Cells> cells;
+  std::vector<uint32_t> fill;
+  scav_rect region{};
+  bool gridded{ false };
 };
+
+// `grid_build` over the scratch's own vectors, so a box allocates nothing once
+// the first few have grown them, and with each rect's cells found once for
+// both the count and the fill. The cells, and so the grid, are `grid_build`'s.
+RectGrid const &grid_of(Scratch &s, int32_t cell_w, int32_t cell_h) {
+  RectGrid &g{ s.grid };
+  if (s.gridded) { return g; }
+  s.gridded = true;
+  scav_rect const &region{ s.region };
+  g.x0 = region.x;
+  g.y0 = region.y;
+  g.cw = imax(Wide{ imax(cell_w, 1) }, ceil_div(Wide{ region.w } + 1, Wide{ GRID_SIDE }));
+  g.ch = imax(Wide{ imax(cell_h, 1) }, ceil_div(Wide{ region.h } + 1, Wide{ GRID_SIDE }));
+  g.nx = static_cast<uint32_t>(imax(ceil_div(Wide{ region.w } + 1, g.cw), Wide{ 1 }));
+  g.ny = static_cast<uint32_t>(imax(ceil_div(Wide{ region.h } + 1, g.ch), Wide{ 1 }));
+  g.off.assign((static_cast<size_t>(g.nx) * g.ny) + 1, 0);
+  s.cells.resize(s.blocked.size());
+  for (uint32_t k = 0; k < s.blocked.size(); ++k) {
+    scav_rect const &r{ s.blocked[k] };
+    Cells const at{ .c0 = grid_cell(r.x, g.x0, g.cw, g.nx),
+                    .c1 = grid_cell(Wide{ r.x } + r.w, g.x0, g.cw, g.nx),
+                    .r0 = grid_cell(r.y, g.y0, g.ch, g.ny),
+                    .r1 = grid_cell(Wide{ r.y } + r.h, g.y0, g.ch, g.ny) };
+    s.cells[k] = at;
+    for (uint32_t y = at.r0; y <= at.r1; ++y) {
+      for (uint32_t x = at.c0; x <= at.c1; ++x) {
+        ++g.off[(static_cast<size_t>(y) * g.nx) + x + 1];
+      }
+    }
+  }
+  for (size_t i = 1; i < g.off.size(); ++i) { g.off[i] += g.off[i - 1]; }
+  g.item.resize(g.off.back());
+  s.fill.assign(g.off.begin(), g.off.end() - 1);
+  for (uint32_t k = 0; k < s.blocked.size(); ++k) {
+    Cells const &at{ s.cells[k] };
+    for (uint32_t y = at.r0; y <= at.r1; ++y) {
+      for (uint32_t x = at.c0; x <= at.c1; ++x) {
+        g.item[s.fill[(static_cast<size_t>(y) * g.nx) + x]++] = k;
+      }
+    }
+  }
+  return g;
+}
 
 // The coordinate a slide along leg `k` is measured in: x on a horizontal leg,
 // y on any other.
@@ -277,8 +359,8 @@ scav_rect region_of(std::vector<scav_point> const &route,
            .h = (y1 - y0) + (2 * reach_y) };
 }
 
-// The route's legs, the walls and foreign legs in one list, and the grid over
-// them, which is what both searches start from.
+// The route's legs, and the walls and foreign legs in one list, which is what
+// both searches start from.
 void prepare(Local const &l, Scratch &s) {
   uint32_t const n{ static_cast<uint32_t>(l.route.size()) };
   s.own.assign(n - 1, {});
@@ -288,7 +370,8 @@ void prepare(Local const &l, Scratch &s) {
   if (s.nearby.size() < s.own.size()) { s.nearby.resize(s.own.size()); }
   s.blocked.assign(l.walls.begin(), l.walls.end());
   s.blocked.insert(s.blocked.end(), l.foreign.begin(), l.foreign.end());
-  grid_build(s.grid, region_of(l.route, l.w, l.h, l.leader), s.blocked, l.w, l.h);
+  s.region = region_of(l.route, l.w, l.h, l.leader);
+  s.gridded = false;
 }
 
 // The foreign legs within the leader plus the box of leg `k`, which is as far
@@ -308,6 +391,7 @@ std::vector<scav_rect> const &nearby_of(Local const &l, Scratch &s, uint32_t k) 
 Outcome exhaustive(Local const &l, Scratch &s) {
   uint32_t const len{ static_cast<uint32_t>(l.route.size()) };
   prepare(l, s);
+  grid_build(s.grid, s.region, s.blocked, l.w, l.h);
   scav_point const at{ anchor_of(l.route, { .off = 0, .len = len }) };
   // Half the label's height, so the anchor slides finer than the box it
   // carries; the floor is one grid unit, which is 1/16 pt (11.9.4).
@@ -430,8 +514,52 @@ struct Walk {
     return (key.dist >= 0) && (key.shortfall == 0) && (dist > key.dist);
   }
 
+  Band const &band_of(Group const &g);
   void group(Group const &g);
 };
+
+// Every candidate of the band lies in one rect: across the leg the band's
+// line, and along it from the least start to the greatest end any lead and
+// attachment put a candidate at. A candidate's gap to its own leg is at most
+// the leader, since its attachment point is a leader from a point on the leg,
+// so its reach is at most the leader plus its height, and a segment at least
+// that far from the rect is at least that far from every candidate.
+Band const &Walk::band_of(Group const &g) {
+  Band &b{ s.bands[g.band] };
+  if (b.built) { return b; }
+  b.built = true;
+  b.near.clear();
+  uint32_t const k{ g.k };
+  scav_point const a{ l.route[k] };
+  scav_point const e{ l.route[k + 1] };
+  bool const flat{ a.y == e.y };
+  scav_point const d{ offset[g.offset] };
+  // Along the leg an offset is a lead of 0 or the leader either way, less an
+  // attachment at 0, half the box or all of it.
+  int32_t const size{ flat ? l.w : l.h };
+  Wide const lead_most{ imax(Wide{ l.leader }, -Wide{ l.leader }) };
+  Wide const in_least{ imin(imin(0, size / 2), size) };
+  Wide const in_most{ imax(imax(0, size / 2), size) };
+  Wide const across_lo{ flat ? (Wide{ a.y } + d.y) : (Wide{ a.x } + d.x) };
+  Wide const across_hi{ across_lo + (flat ? l.h : l.w) };
+  Wide const along_lo{ (Wide{ flat ? imin(a.x, e.x) : imin(a.y, e.y) } - lead_most) -
+                       in_most };
+  Wide const along_hi{
+    ((Wide{ flat ? imax(a.x, e.x) : imax(a.y, e.y) } + lead_most) - in_least) + size
+  };
+  Wide const reach{ lead_most + l.h };
+  for (scav_rect const &seg : s.nearby[k]) {
+    Wide const ac_lo{ flat ? seg.y : seg.x };
+    Wide const ac_hi{ ac_lo + (flat ? seg.h : seg.w) };
+    Wide const al_lo{ flat ? seg.x : seg.y };
+    Wide const al_hi{ al_lo + (flat ? seg.w : seg.h) };
+    Wide const gap{ imax(imax(imax(ac_lo - across_hi, across_lo - ac_hi),
+                              imax(al_lo - along_hi, along_lo - al_hi)),
+                         Wide{ 0 }) };
+    if (gap < reach) { b.near.push_back(seg); }
+  }
+  return b;
+}
 
 // A group's candidates differ only in the slide, so each test is an interval
 // of slides: across the leg a candidate never moves, and along it one that
@@ -448,7 +576,6 @@ void Walk::group(Group const &g) {
   bool const ascending{ flat ? (a.x < b.x) : (a.y < b.y) };
   int32_t const dir{ ascending ? 1 : -1 };
   bool const bounded{ (l.chained != 0) && (k == l.prior_seg) };
-  std::vector<scav_rect> const &nearby{ s.nearby[k] };
   scav_point const d{ offset[g.offset] };
   uint32_t const lead{ g.offset / ATTACH };
   uint32_t const which{ g.offset % ATTACH };
@@ -522,12 +649,13 @@ void Walk::group(Group const &g) {
       if ((last != INVALID) && overlaps(cand, s.blocked[last])) {
         return past(s.blocked[last], n, sign);
       }
-      uint32_t const hit{ grid_hit(s.grid, s.blocked, cand) };
+      uint32_t const hit{ grid_hit(grid_of(s, l.w, l.h), s.blocked, cand) };
       if (hit != INVALID) {
         last = hit;
         return past(s.blocked[hit], n, sign);
       }
     }
+    std::vector<scav_rect> const &nearby{ band_of(g).near };
     if (!nearby.empty()) {
       uint32_t nearest{ INVALID };
       here.shortfall = shortfall_of(cand,
@@ -622,6 +750,9 @@ Outcome pruned(Local const &l, Scratch &s) {
     Wide const lo{ flat ? imin(a.x, b.x) : imin(a.y, b.y) };
     Wide const hi{ flat ? imax(a.x, b.x) : imax(a.y, b.y) };
     Leg leg{ .first = static_cast<uint32_t>(s.groups.size()), .near = NO_LIMIT };
+    uint32_t const bands{ static_cast<uint32_t>(s.legs.size()) * BANDS };
+    if (s.bands.size() < (bands + BANDS)) { s.bands.resize(bands + BANDS); }
+    for (uint32_t j = 0; j < BANDS; ++j) { s.bands[bands + j].built = false; }
     for (uint32_t o = 0; o < (LEADS * ATTACH); ++o) {
       scav_point const d{ offset[o] };
       Wide const across{ flat ? ((Wide{ a.y } + d.y + half_h) - at.y)
@@ -630,7 +761,11 @@ Outcome pruned(Local const &l, Scratch &s) {
                               : ((Wide{ at.y } - d.y) - half_h) };
       Wide const gap{ imin(imax(centre, lo), hi) - centre };
       Wide const near{ imax(across, -across) + imax(gap, -gap) };
-      s.groups.push_back({ .k = k, .offset = o, .centre = centre, .near = near });
+      s.groups.push_back({ .k = k,
+                           .offset = o,
+                           .band = bands + band_of_offset(o, flat),
+                           .centre = centre,
+                           .near = near });
       leg.near = imin(leg.near, near);
     }
     s.legs.push_back(leg);
@@ -689,8 +824,9 @@ Memo &memo() {
 // Every field of `l`, counts before contents, so two problems with one key
 // are one problem.
 void key_of(Local const &l, std::vector<uint32_t> &key) {
-  key.clear();
-  auto const word = [&key](int32_t v) { key.push_back(static_cast<uint32_t>(v)); };
+  key.resize(13 + (2 * l.route.size()) + (4 * l.walls.size()) + (4 * l.foreign.size()));
+  uint32_t *at{ key.data() };
+  auto const word = [&at](int32_t v) { *at++ = static_cast<uint32_t>(v); };
   auto const rect = [&word](scav_rect const &r) {
     word(r.x);
     word(r.y);
@@ -700,18 +836,18 @@ void key_of(Local const &l, std::vector<uint32_t> &key) {
   word(l.w);
   word(l.h);
   word(l.leader);
-  key.push_back(l.chained);
-  key.push_back(l.prior_seg);
+  *at++ = l.chained;
+  *at++ = l.prior_seg;
   word(l.prior_mid);
   rect(l.holder);
-  key.push_back(static_cast<uint32_t>(l.route.size()));
+  *at++ = static_cast<uint32_t>(l.route.size());
   for (scav_point const &pt : l.route) {
     word(pt.x);
     word(pt.y);
   }
-  key.push_back(static_cast<uint32_t>(l.walls.size()));
+  *at++ = static_cast<uint32_t>(l.walls.size());
   for (scav_rect const &r : l.walls) { rect(r); }
-  key.push_back(static_cast<uint32_t>(l.foreign.size()));
+  *at++ = static_cast<uint32_t>(l.foreign.size());
   for (scav_rect const &r : l.foreign) { rect(r); }
 }
 
@@ -781,13 +917,31 @@ uint32_t place_labels_from(Chart const &c,
     }
   }
 
-  std::vector<Piece> pieces;
+  std::vector<scav_rect> pieces;
+  std::vector<Pieces> by_route(route.size(), Pieces{});
   for (uint32_t t = 0; t < route.size(); ++t) {
+    Pieces &of{ by_route[t] };
+    of.first = static_cast<uint32_t>(pieces.size());
     for (uint32_t k = 0; (k + 1) < route[t].len; ++k) {
-      pieces.push_back(
-          { .at = span_rect(points[route[t].off + k], points[route[t].off + k + 1]),
-            .trans = t });
+      scav_rect const at{ span_rect(points[route[t].off + k],
+                                    points[route[t].off + k + 1]) };
+      pieces.push_back(at);
+      if (k == 0) {
+        of.bounds = at;
+        continue;
+      }
+      int32_t const x0{ imin(of.bounds.x, at.x) };
+      int32_t const y0{ imin(of.bounds.y, at.y) };
+      int32_t const x1{ imax(of.bounds.x + of.bounds.w, at.x + at.w) };
+      int32_t const y1{ imax(of.bounds.y + of.bounds.h, at.y + at.h) };
+      of.bounds = { .x = x0, .y = y0, .w = x1 - x0, .h = y1 - y0 };
     }
+    of.count = static_cast<uint32_t>(pieces.size()) - of.first;
+  }
+  // The live states, so a box's sweep reads nothing of a tombstone.
+  std::vector<uint32_t> live;
+  for (uint32_t st = 0; st < c.states.size(); ++st) {
+    if (c.states[st].live != 0) { live.push_back(st); }
   }
 
   // Transitions ascending, then `order`, which is what makes a later box of one
@@ -816,7 +970,9 @@ uint32_t place_labels_from(Chart const &c,
   };
 
   Local l;
-  Scratch scratch;
+  // Per thread, as the memo is, so a call starts from the capacity the last
+  // one grew; every search resets what it reads before reading it.
+  thread_local Scratch scratch;
   std::vector<uint32_t> settled;
   uint32_t fallbacks{ 0 };
   uint32_t prior_subject{ INVALID };
@@ -889,9 +1045,8 @@ uint32_t place_labels_from(Chart const &c,
         // chart. Enclosing states nest, so intersecting them all is the innermost
         // without having to order them by depth (11.9.3).
         scav_rect holder{ z.chart };
-        for (uint32_t st = 0; st < c.states.size(); ++st) {
-          if ((c.states[st].live == 0) || (encloses[st] != 2)) { continue; }
-          holder = intersection(holder, z.state[st]);
+        for (uint32_t const st : live) {
+          if (encloses[st] == 2) { holder = intersection(holder, z.state[st]); }
         }
         // And by the region both endpoints lie in, where that region shares its
         // state with another: the divider between them runs through a label
@@ -927,8 +1082,7 @@ uint32_t place_labels_from(Chart const &c,
         }
 
         l.walls.clear();
-        for (uint32_t st = 0; st < c.states.size(); ++st) {
-          if (c.states[st].live == 0) { continue; }
+        for (uint32_t const st : live) {
           // A state enclosing both endpoints holds the label legitimately; the
           // bands it reserved for its own text do not.
           if (encloses[st] == 2) {
@@ -946,9 +1100,16 @@ uint32_t place_labels_from(Chart const &c,
           if (overlaps(region, out[j])) { l.walls.push_back(local_rect(out[j])); }
         }
         l.foreign.clear();
-        for (Piece const &piece : pieces) {
-          if (piece.trans == box.subject) { continue; }
-          if (overlaps(region, piece.at)) { l.foreign.push_back(local_rect(piece.at)); }
+        for (uint32_t t = 0; t < by_route.size(); ++t) {
+          Pieces const &of{ by_route[t] };
+          if ((t == box.subject) || (of.count == 0) || !overlaps(region, of.bounds)) {
+            continue;
+          }
+          for (uint32_t k = of.first; k < (of.first + of.count); ++k) {
+            if (overlaps(region, pieces[k])) {
+              l.foreign.push_back(local_rect(pieces[k]));
+            }
+          }
         }
         if (box.subject < c.transitions.size()) {
           mark(c.transitions[box.subject].src, 0);
