@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -2037,4 +2038,136 @@ TEST_CASE("size: whitespace elimination grows a sibling submachine's own rect") 
   // Extent-neutral: the owner's box is the packing's own extents plus its ring.
   CHECK(z.state[owner.v].w == (1984 + (2 * p.pad)));
   CHECK(z.state[owner.v].h == (1728 + (2 * p.pad)));
+}
+
+namespace {
+
+// A corpus chart with a band on every state and a label box on every
+// transition, and its orders, so sizing has bands and label room to lay out.
+struct Sample {
+  Chart c;
+  std::vector<scav_box_space> box;
+  std::vector<scav_path_box> path;
+  SplitGraph g;
+  SubmachineOrders o;
+  [[nodiscard]] scav_spaces spaces() const {
+    return { .box_state = box.data(),
+             .n_box_state = static_cast<uint32_t>(box.size()),
+             .box_state_stride = sizeof(scav_box_space),
+             .path_box = path.data(),
+             .n_path_box = static_cast<uint32_t>(path.size()),
+             .path_box_stride = sizeof(scav_path_box) };
+  }
+};
+
+Sample sample(char const *name, scav_profile const &p) {
+  Sample x;
+  std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
+  path += name;
+  Loader loader;
+  std::vector<Diagnostic> diags;
+  std::string failed;
+  REQUIRE(load_file(path.c_str(), loader, x.c, diags, failed));
+  for (uint32_t i = 0; i < x.c.states.size(); ++i) {
+    x.box.push_back({ .min_w = 40 + static_cast<int32_t>((i % 5U) * 10U),
+                      .h_before = static_cast<int32_t>((i % 3U) * 8U),
+                      .h_after = static_cast<int32_t>((i % 2U) * 6U) });
+  }
+  for (uint32_t t = 0; t < x.c.transitions.size(); ++t) {
+    if (x.c.transitions[t].live == 0) { continue; }
+    x.path.push_back({ .subject = t,
+                       .w = 30 + static_cast<int32_t>((t % 4U) * 12U),
+                       .h = 12 + static_cast<int32_t>((t % 3U) * 4U),
+                       .order = 0 });
+  }
+  x.g = decompose(x.c);
+  x.o = order_submachines(x.c, x.g, x.spaces(), p, 1, {});
+  return x;
+}
+
+uint32_t largest_frame(Sample const &x) {
+  uint32_t most{ 0 };
+  for (Span const &s : x.o.sub_nodes) { most = (s.len > most) ? s.len : most; }
+  return most;
+}
+
+// A sizing and its trace. Traced, every frame is laid out rather than read
+// back from the frame memo, so each one runs on whatever this thread left.
+struct Traced {
+  SizedLayout z;
+  std::vector<char> trace;
+  bool ok{ false };
+};
+
+Traced traced(Sample const &x, scav_profile const &p, Fold fold) {
+  Traced out;
+  LayoutTrace t;
+  trace_sink_set(&t);
+  std::vector<Diagnostic> diags;
+  out.ok = size_layout(x.c,
+                       x.g,
+                       x.o,
+                       x.spaces(),
+                       p,
+                       out.z,
+                       diags,
+                       DarSource::OwnerHole,
+                       Compaction::On,
+                       fold);
+  trace_sink_set(nullptr);
+  trace_to_json(t, x.c, out.trace);
+  return out;
+}
+
+bool same(Traced const &a, Traced const &b) {
+  auto const rects = [](std::vector<scav_rect> const &u, std::vector<scav_rect> const &v) {
+    if (u.size() != v.size()) { return false; }
+    for (uint32_t i = 0; i < u.size(); ++i) {
+      if (!(u[i] == v[i])) { return false; }
+    }
+    return true;
+  };
+  if (a.z.node.size() != b.z.node.size()) { return false; }
+  for (uint32_t i = 0; i < a.z.node.size(); ++i) {
+    if ((a.z.node[i].x != b.z.node[i].x) || (a.z.node[i].y != b.z.node[i].y)) {
+      return false;
+    }
+  }
+  return (a.ok == b.ok) && rects(a.z.state, b.z.state) && rects(a.z.before, b.z.before) &&
+         rects(a.z.after, b.z.after) && rects(a.z.sub, b.z.sub) &&
+         (a.z.chart == b.z.chart) && (a.trace == b.trace);
+}
+
+}  // namespace
+
+// Each fresh result is the first sizing on a new thread, so nothing an earlier
+// sizing left on that thread can reach it.
+TEST_CASE("size: a sizing is the same whatever its thread sized before") {
+  scav_profile const p{ profile() };
+  Sample const small{ sample("led.scav", p) };
+  Sample const large{ sample("bottler.scav", p) };
+  REQUIRE(largest_frame(large) > largest_frame(small));
+  for (Fold const fold : { Fold::Scale, Fold::Always }) {
+    CAPTURE(static_cast<uint32_t>(fold));
+    auto const fresh = [&](Sample const &x) {
+      Traced out;
+      std::thread([&] { out = traced(x, p, fold); }).join();
+      return out;
+    };
+    Traced const small_fresh{ fresh(small) };
+    Traced const large_fresh{ fresh(large) };
+    REQUIRE(small_fresh.ok);
+    REQUIRE(large_fresh.ok);
+    Traced small_first;
+    Traced large_after;
+    Traced small_after;
+    std::thread([&] {
+      small_first = traced(small, p, fold);
+      large_after = traced(large, p, fold);
+      small_after = traced(small, p, fold);
+    }).join();
+    CHECK(same(small_first, small_fresh));
+    CHECK(same(large_after, large_fresh));
+    CHECK(same(small_after, small_fresh));
+  }
 }
