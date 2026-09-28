@@ -13,12 +13,14 @@
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 #include "scav_int.h"
+#include "scav_stable_sort.h"
 
 #include "doctest.h"
 
 #include <array>
 #include <cstdint>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace scav {
@@ -2156,6 +2158,28 @@ Candidate random_candidate(Chart const &c, Lattice &r) {
   return out;
 }
 
+// `k` with every rect and point moved by `by` on both axes. The lattice's
+// coordinates straddle zero, so every high byte of a lane key differs somewhere;
+// moved off it, those bytes agree and the lane sort takes another number of
+// passes.
+Candidate shifted(Candidate k, int32_t by) {
+  auto const rect = [by](scav_rect &x) {
+    x.x += by;
+    x.y += by;
+  };
+  for (scav_rect &x : k.z.state) { rect(x); }
+  for (scav_rect &x : k.z.before) { rect(x); }
+  for (scav_rect &x : k.z.after) { rect(x); }
+  for (scav_rect &x : k.z.sub) { rect(x); }
+  rect(k.z.chart);
+  for (scav_rect &x : k.r.placed) { rect(x); }
+  for (scav_point &pt : k.r.points) {
+    pt.x += by;
+    pt.y += by;
+  }
+  return k;
+}
+
 // The readable profile with the three knobs the terms read moved about: the
 // em crowding and the weights divide by, the band `flush` reads through
 // `node_sep` and `pad`, and the separation `adjacency` allows.
@@ -2181,14 +2205,19 @@ TEST_CASE("cost: the indexed terms are the direct scans' over seeded random char
   Lattice r{ 20260928 };
   std::array<uint32_t, TERMS> seen{};
   uint32_t mismatches{ 0 };
+  // Candidates with more pieces than an insertion sort takes, so the lane
+  // sort's byte passes are what ordered them.
+  uint32_t long_sorts{ 0 };
   for (uint32_t trial = 0; (trial < 600) && (mismatches == 0); ++trial) {
     Chart const c{ random_chart(r) };
     SplitGraph const g{ decompose(c) };
     CostContext const ctx{ cost_context(c) };
     for (uint32_t cand = 0; cand < 4; ++cand) {
-      Candidate const k{ random_candidate(c, r) };
+      constexpr std::array<int32_t, 4> MOVE{ 0, 1000, 0, -1000 };
+      Candidate const k{ shifted(random_candidate(c, r), MOVE[cand]) };
       scav_profile const p{ random_profile(r) };
       scav_spaces const s{ k.spaces() };
+      long_sorts += (pieces_of(k.r).size() > SCAV_SORT_SMALL) ? 1U : 0U;
       CostTerms const want{ reference::terms(c, g, k.z, k.r, s, p) };
       std::string const held{ first_difference(cost_terms(ctx, c, g, k.z, k.r, s, p),
                                                want) };
@@ -2206,6 +2235,7 @@ TEST_CASE("cost: the indexed terms are the direct scans' over seeded random char
     }
   }
   CHECK(mismatches == 0);
+  CHECK(long_sorts > 0);
   for (uint32_t i = 0; i < TERMS; ++i) {
     CAPTURE(TERM_NAMES[i]);
     CHECK(seen[i] > 0);
@@ -2314,6 +2344,50 @@ TEST_CASE("cost: the indexed terms are the direct scans' at the edges") {
     CHECK(agree(lone, { .path_box = &box, .n_path_box = 1 }).label_near ==
           ((gap < 60) ? 1 : 0));
   }
+}
+
+TEST_CASE("cost: a thread's kept buffers carry nothing from one chart to the next") {
+  // A, then B, then A again, all on this thread, each against the score a
+  // thread that never scored anything gives. The pairs are drawn at random, so
+  // B is sometimes the larger and sometimes the smaller and every buffer is
+  // both grown and shrunk between two calls.
+  auto const fresh =
+      [](Chart const &c, SplitGraph const &g, Candidate const &k, scav_profile const &p) {
+        CostTerms out;
+        std::thread([&] { out = cost_terms(c, g, k.z, k.r, k.spaces(), p); }).join();
+        return out;
+      };
+  Lattice r{ 41 };
+  uint32_t mismatches{ 0 };
+  for (uint32_t trial = 0; (trial < 150) && (mismatches == 0); ++trial) {
+    Chart const a{ random_chart(r) };
+    Chart const b{ random_chart(r) };
+    SplitGraph const ga{ decompose(a) };
+    SplitGraph const gb{ decompose(b) };
+    Candidate const ka{ random_candidate(a, r) };
+    Candidate const kb{ random_candidate(b, r) };
+    scav_profile const pa{ random_profile(r) };
+    scav_profile const pb{ random_profile(r) };
+    CostTerms const want_a{ fresh(a, ga, ka, pa) };
+    CostTerms const want_b{ fresh(b, gb, kb, pb) };
+    std::string const first{
+      first_difference(cost_terms(a, ga, ka.z, ka.r, ka.spaces(), pa), want_a)
+    };
+    std::string const between{
+      first_difference(cost_terms(b, gb, kb.z, kb.r, kb.spaces(), pb), want_b)
+    };
+    std::string const again{
+      first_difference(cost_terms(a, ga, ka.z, ka.r, ka.spaces(), pa), want_a)
+    };
+    if (!first.empty() || !between.empty() || !again.empty()) {
+      CAPTURE(trial);
+      CHECK(first == "");
+      CHECK(between == "");
+      CHECK(again == "");
+      ++mismatches;
+    }
+  }
+  CHECK(mismatches == 0);
 }
 
 TEST_CASE("cost: a context built once scores every candidate as one built for it") {

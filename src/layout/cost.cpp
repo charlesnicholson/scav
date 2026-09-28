@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <cstring>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace scav {
@@ -212,17 +213,59 @@ struct Lane {
   uint32_t piece;
 };
 
+// Ascending, least significant byte first, each pass a counting scatter into
+// `spare` and back. A byte every key holds the same value in leaves the order
+// as it was, so its pass is skipped. The keys are distinct, so this is the one
+// order any sort gives them.
+void sort_keys(std::vector<uint64_t> &key, std::vector<uint64_t> &spare) {
+  size_t const n{ key.size() };
+  if (n <= SCAV_SORT_SMALL) {
+    scav_insertion_sort(key.data(), key.data() + n, [](uint64_t x, uint64_t y) {
+      return x < y;
+    });
+    return;
+  }
+  constexpr uint32_t DIGITS{ 8 };
+  constexpr uint32_t RADIX{ 256 };
+  std::array<std::array<uint32_t, RADIX>, DIGITS> count{};
+  for (uint64_t const k : key) {
+    for (uint32_t d = 0; d < DIGITS; ++d) { ++count[d][(k >> (8U * d)) & 0xFFU]; }
+  }
+  spare.resize(n);
+  uint64_t *src{ key.data() };
+  uint64_t *dst{ spare.data() };
+  for (uint32_t d = 0; d < DIGITS; ++d) {
+    std::array<uint32_t, RADIX> &at{ count[d] };
+    if (at[(src[0] >> (8U * d)) & 0xFFU] == n) { continue; }
+    uint32_t sum{ 0 };
+    for (uint32_t &slot : at) {
+      uint32_t const here{ slot };
+      slot = sum;
+      sum += here;
+    }
+    for (size_t i = 0; i < n; ++i) {
+      uint64_t const k{ src[i] };
+      dst[at[(k >> (8U * d)) & 0xFFU]++] = k;
+    }
+    std::swap(src, dst);
+  }
+  if (src != key.data()) { std::memcpy(key.data(), src, n * sizeof(uint64_t)); }
+}
+
 // Every piece with an axis, stably sorted by (axis, coordinate) over piece
 // order. The horizontals come first in ascending y, which is the band
 // `crossings_over` searches; a run of one (axis, coordinate) is corridor's
 // bucket; and the lanes within an em of one another are crowding's window.
 //
 // Sorted as one integer per lane: the axis, then the coordinate offset to
-// unsigned, then the piece, so ties fall in piece order.
-std::vector<Lane> lanes_of(std::vector<Piece> const &pieces) {
+// unsigned, then the piece, so ties fall in piece order. `key` and `spare`
+// are the sort's buffers.
+void lanes_of(std::vector<Piece> const &pieces,
+              std::vector<uint64_t> &key,
+              std::vector<uint64_t> &spare,
+              std::vector<Lane> &lanes) {
   constexpr uint32_t PIECE_BITS{ 31 };
-  std::vector<uint64_t> key;
-  key.reserve(pieces.size());
+  key.clear();
   for (uint32_t i = 0; i < pieces.size(); ++i) {
     int32_t at{ 0 };
     uint64_t const axis{ piece_axis(pieces[i], at) };
@@ -230,9 +273,8 @@ std::vector<Lane> lanes_of(std::vector<Piece> const &pieces) {
     uint64_t const line{ static_cast<uint32_t>(at) ^ 0x8000'0000U };
     key.push_back((axis << 63U) | (line << PIECE_BITS) | i);
   }
-  scav_stable_sort(key, [](uint64_t x, uint64_t y) { return x < y; });
-  std::vector<Lane> lanes;
-  lanes.reserve(key.size());
+  sort_keys(key, spare);
+  lanes.clear();
   for (uint64_t const k : key) {
     uint32_t const i{ static_cast<uint32_t>(k & ((uint64_t{ 1 } << PIECE_BITS) - 1)) };
     Piece const &pc{ pieces[i] };
@@ -245,6 +287,14 @@ std::vector<Lane> lanes_of(std::vector<Piece> const &pieces) {
                       .hi = imax(a, b),
                       .piece = i });
   }
+}
+
+// `lanes_of` into buffers of its own, for the sweeps' single-sort forms.
+[[maybe_unused]] std::vector<Lane> lanes_of(std::vector<Piece> const &pieces) {
+  std::vector<uint64_t> key;
+  std::vector<uint64_t> spare;
+  std::vector<Lane> lanes;
+  lanes_of(pieces, key, spare, lanes);
   return lanes;
 }
 
@@ -254,10 +304,11 @@ std::vector<Lane> lanes_of(std::vector<Piece> const &pieces) {
 // degraded net's diagonal is in neither set and goes against everything.
 int64_t crossings_over(std::vector<Piece> const &pieces,
                        std::vector<Lane> const &lanes,
-                       std::vector<uint32_t> &per_trans) {
+                       std::vector<uint32_t> &per_trans,
+                       std::vector<uint8_t> &is_loose) {
   uint32_t flat{ 0 };
   while ((flat < lanes.size()) && (lanes[flat].axis == 0)) { ++flat; }
-  std::vector<uint8_t> is_loose(pieces.size(), 1);
+  is_loose.assign(pieces.size(), 1);
   for (Lane const &lane : lanes) { is_loose[lane.piece] = 0; }
 
   int64_t total{ 0 };
@@ -398,18 +449,28 @@ void child_grid_frames(Chart const &c, size_t known, uint32_t scan_max, ChildGri
   g.bucket_at.clear();
 }
 
-// Each frame's cells laid over its children's bounds in `z`, and the children
-// bucketed into them.
-void child_grid_fill(ChildGrid &g, SizedLayout const &z) {
+// Each child's rect in `z`, in `g.child` order, so a frame's children are one
+// run of rects.
+void child_rects(ChildGrid const &g, SizedLayout const &z, std::vector<scav_rect> &kid) {
+  kid.resize(g.child.size());
+  for (size_t i = 0; i < g.child.size(); ++i) { kid[i] = z.state[g.child[i]]; }
+}
+
+// Each frame's cells laid over its children's bounds, `kid` holding their
+// rects as `child_rects` gives them, and the children bucketed into them.
+// `cursor` is the placing pass's buffer.
+void child_grid_fill(ChildGrid &g,
+                     std::vector<scav_rect> const &kid,
+                     std::vector<uint32_t> &cursor) {
   for (ChildGrid::Frame &f : g.frame) {
     if (f.side == 0) { continue; }
-    scav_rect const r0{ z.state[g.child[f.children.off]] };
+    scav_rect const r0{ kid[f.children.off] };
     Wide x0{ r0.x };
     Wide y0{ r0.y };
     Wide x1{ Wide{ r0.x } + r0.w };
     Wide y1{ Wide{ r0.y } + r0.h };
     for (uint32_t i = 1; i < f.children.len; ++i) {
-      scav_rect const r{ z.state[g.child[f.children.off + i]] };
+      scav_rect const r{ kid[f.children.off + i] };
       x0 = imin(x0, Wide{ r.x });
       y0 = imin(y0, Wide{ r.y });
       x1 = imax(x1, Wide{ r.x } + r.w);
@@ -424,11 +485,11 @@ void child_grid_fill(ChildGrid &g, SizedLayout const &z) {
   // Count into the cell after each, prefix-sum, then place through a cursor
   // copy: the usual two passes, so a child spanning cells is stored in each.
   g.bucket_off.assign(g.bucket_off.size(), 0);
-  auto const spread = [&g, &z](auto step) {
+  auto const spread = [&g, &kid](auto step) {
     for (ChildGrid::Frame const &f : g.frame) {
       if (f.side == 0) { continue; }
       for (uint32_t i = 0; i < f.children.len; ++i) {
-        scav_rect const r{ z.state[g.child[f.children.off + i]] };
+        scav_rect const r{ kid[f.children.off + i] };
         uint32_t const cx0{ cell_of(r.x, f.x0, f.cell_w, f.side) };
         uint32_t const cx1{ cell_of(Wide{ r.x } + r.w, f.x0, f.cell_w, f.side) };
         uint32_t const cy0{ cell_of(r.y, f.y0, f.cell_h, f.side) };
@@ -446,7 +507,7 @@ void child_grid_fill(ChildGrid &g, SizedLayout const &z) {
     g.bucket_off[i] += g.bucket_off[i - 1];
   }
   g.bucket_at.assign(g.bucket_off.back(), 0);
-  std::vector<uint32_t> cursor{ g.bucket_off };
+  cursor.assign(g.bucket_off.begin(), g.bucket_off.end());
   spread([&g, &cursor](uint32_t cell, uint32_t child) {
     g.bucket_at[cursor[cell]] = child;
     ++cursor[cell];
@@ -471,8 +532,46 @@ struct Seen {
   uint32_t epoch{ 0 };
 };
 
+// `grid_build`'s grid, placing through `cursor` rather than a buffer of its
+// own, so a grid rebuilt over a kept one allocates nothing.
+void grid_build_into(RectGrid &g,
+                     scav_rect const &region,
+                     std::vector<scav_rect> const &rects,
+                     int32_t cell_w,
+                     int32_t cell_h,
+                     std::vector<uint32_t> &cursor) {
+  g.x0 = region.x;
+  g.y0 = region.y;
+  g.cw = imax(Wide{ imax(cell_w, 1) }, ceil_div(Wide{ region.w } + 1, Wide{ GRID_SIDE }));
+  g.ch = imax(Wide{ imax(cell_h, 1) }, ceil_div(Wide{ region.h } + 1, Wide{ GRID_SIDE }));
+  g.nx = static_cast<uint32_t>(imax(ceil_div(Wide{ region.w } + 1, g.cw), Wide{ 1 }));
+  g.ny = static_cast<uint32_t>(imax(ceil_div(Wide{ region.h } + 1, g.ch), Wide{ 1 }));
+  g.off.assign((static_cast<size_t>(g.nx) * g.ny) + 1, 0);
+  auto const spread = [&g, &rects](auto step) {
+    for (uint32_t k = 0; k < rects.size(); ++k) {
+      scav_rect const &r{ rects[k] };
+      uint32_t const c0{ grid_cell(r.x, g.x0, g.cw, g.nx) };
+      uint32_t const c1{ grid_cell(Wide{ r.x } + r.w, g.x0, g.cw, g.nx) };
+      uint32_t const r0{ grid_cell(r.y, g.y0, g.ch, g.ny) };
+      uint32_t const r1{ grid_cell(Wide{ r.y } + r.h, g.y0, g.ch, g.ny) };
+      for (uint32_t y = r0; y <= r1; ++y) {
+        for (uint32_t x = c0; x <= c1; ++x) {
+          step((static_cast<size_t>(y) * g.nx) + x, k);
+        }
+      }
+    }
+  };
+  spread([&g](size_t cell, uint32_t) { ++g.off[cell + 1]; });
+  for (size_t i = 1; i < g.off.size(); ++i) { g.off[i] += g.off[i - 1]; }
+  g.item.resize(g.off.back());
+  cursor.assign(g.off.begin(), g.off.end() - 1);
+  spread([&g, &cursor](size_t cell, uint32_t k) { g.item[cursor[cell]++] = k; });
+}
+
 // About one cell per rect, over the rects' own bounds.
-void grid_over(RectGrid &g, std::vector<scav_rect> const &rects) {
+void grid_over(RectGrid &g,
+               std::vector<scav_rect> const &rects,
+               std::vector<uint32_t> &cursor) {
   Wide x0{ 0 };
   Wide y0{ 0 };
   Wide x1{ 0 };
@@ -489,11 +588,12 @@ void grid_over(RectGrid &g, std::vector<scav_rect> const &rects) {
                           .w = static_cast<int32_t>(imax(x1 - x0, Wide{ 0 })),
                           .h = static_cast<int32_t>(imax(y1 - y0, Wide{ 0 })) };
   Wide const side{ grid_side(static_cast<uint32_t>(rects.size())) };
-  grid_build(g,
-             bounds,
-             rects,
-             static_cast<int32_t>(ceil_div(Wide{ bounds.w } + 1, side)),
-             static_cast<int32_t>(ceil_div(Wide{ bounds.h } + 1, side)));
+  grid_build_into(g,
+                  bounds,
+                  rects,
+                  static_cast<int32_t>(ceil_div(Wide{ bounds.w } + 1, side)),
+                  static_cast<int32_t>(ceil_div(Wide{ bounds.h } + 1, side)),
+                  cursor);
 }
 
 // Whether `hit` holds for any rect sharing a cell with `q`, asking each cell's
@@ -540,6 +640,134 @@ void grid_each(RectGrid const &g,
       }
     }
   }
+}
+
+// `cost_box_overlaps` over `kid`, the frame children's rects as
+// `child_rects` gives them, with `q` the grid queries' buffer.
+int32_t box_overlaps_over(Chart const &c,
+                          ChildGrid const &g,
+                          std::vector<scav_rect> const &kid,
+                          GridQuery &q) {
+  int32_t total{ 0 };
+  for (uint32_t m = 0; m < c.submachines.size(); ++m) {
+    if (c.submachines[m].live == 0) { continue; }
+    Span const kids{ g.frame[m].children };
+    if (kids.len <= SCAN_MAX) {
+      for (uint32_t i = 0; i < kids.len; ++i) {
+        scav_rect const &a{ kid[kids.off + i] };
+        for (uint32_t j = i + 1; j < kids.len; ++j) {
+          if (overlaps(a, kid[kids.off + j])) { ++total; }
+        }
+      }
+      continue;
+    }
+    for (uint32_t i = 0; i < kids.len; ++i) {
+      scav_rect const &a{ kid[kids.off + i] };
+      cost_grid_query(g, m, a, q);
+      for (uint32_t const at : q.hit) {
+        // Span order inside a frame, so a pair is charged from its first
+        // member alone however many cells the two share.
+        if (at <= (kids.off + i)) { continue; }
+        if (overlaps(a, kid[at])) { ++total; }
+      }
+    }
+  }
+  return total;
+}
+
+// What the Tier-0 descent reuses from one piece to the next.
+struct Descent {
+  std::vector<uint32_t> roots, stack;
+  GridQuery q;
+};
+
+// `cost_through_boxes` over `kid`, as `box_overlaps_over` takes it.
+int32_t through_boxes_over(Chart const &c,
+                           SizedLayout const &z,
+                           Ancestry const &an,
+                           ChildGrid const &g,
+                           std::vector<scav_rect> const &kid,
+                           std::vector<Piece> const &pieces,
+                           Descent &d) {
+  d.roots.clear();
+  for (uint32_t m = 0; m < c.submachines.size(); ++m) {
+    if (c.submachines[m].owner.v == INVALID) { d.roots.push_back(m); }
+  }
+
+  int32_t total{ 0 };
+  for (Piece const &piece : pieces) {
+    Transition const &tr{ c.transitions[piece.trans] };
+    scav_rect const reach{ span_rect(piece.a, piece.b) };
+    // An edge may occupy the interior of a state it is an endpoint of or a
+    // descendant of, and only that one: 11.14's carve-out.
+    auto const charge = [&](uint32_t st, scav_rect const &box) {
+      if (!cost_ancestor(c, an, { st }, tr.src) && !cost_ancestor(c, an, { st }, tr.dst) &&
+          enters(piece.a, piece.b, box)) {
+        ++total;
+      }
+    };
+    for (uint32_t const st : an.detached) { charge(st, z.state[st]); }
+
+    auto const visit = [&](uint32_t at) {
+      if (!overlaps(reach, kid[at])) { return; }
+      uint32_t const st{ g.child[at] };
+      charge(st, kid[at]);
+      Span const subs{ c.states[st].submachines };
+      for (uint32_t i = 0; i < subs.len; ++i) {
+        d.stack.push_back(c.submachine_ids[subs.off + i].v);
+      }
+    };
+    d.stack.assign(d.roots.begin(), d.roots.end());
+    while (!d.stack.empty()) {
+      uint32_t const frame{ d.stack.back() };
+      d.stack.pop_back();
+      if (frame >= g.frame.size()) { continue; }
+      Span const kids{ g.frame[frame].children };
+      if (kids.len <= SCAN_MAX) {
+        for (uint32_t at = kids.off; at < (kids.off + kids.len); ++at) { visit(at); }
+        continue;
+      }
+      cost_grid_query(g, frame, reach, d.q);
+      for (uint32_t const at : d.q.hit) { visit(at); }
+    }
+  }
+  return total;
+}
+
+// Every buffer one `cost_terms` call uses, kept per thread and reassigned in
+// place, so a call allocates only where a chart outgrows the last one this
+// thread scored. Nothing `cost_terms` calls runs a `parallel_for`, so no
+// second call can start on this thread while one is using it.
+struct Scratch {
+  std::vector<Piece> pieces;
+  std::vector<uint32_t> first, crossings_of;
+  std::vector<uint64_t> key, spare;
+  std::vector<Lane> lanes;
+  std::vector<uint8_t> is_loose;
+  std::vector<Wide> carried;
+  std::vector<scav_rect> state_box, state_rect;  // grown, and as placed
+  std::vector<uint32_t> state_of;
+  std::vector<scav_rect> seg_box, region_box;
+  std::vector<uint32_t> region_of;
+  RectGrid states, segs, placed, regions;
+  std::vector<uint32_t> cursor;  // every grid build's placing pass
+  Seen seen_seg, seen_placed, seen_state;
+  std::vector<uint8_t> encloses;
+  std::vector<uint32_t> common;
+  ChildGrid grid;  // `CostContext::grid`, filled for the candidate
+  std::vector<scav_rect> kid;
+  Descent descent;
+};
+
+Scratch &scratch() {
+  thread_local Scratch s;
+  return s;
+}
+
+// `seen` ready for queries over `n` rects, no stamp at its epoch.
+void seen_reset(Seen &seen, size_t n) {
+  seen.stamp.assign(n, 0);
+  seen.epoch = 0;
 }
 
 }  // namespace
@@ -610,12 +838,16 @@ bool cost_ancestor(Chart const &c, Ancestry const &an, StateId ancestor, StateId
   return (an.tin[ancestor.v] <= an.tin[of.v]) && (an.tout[of.v] <= an.tout[ancestor.v]);
 }
 
-// Only a test calls this and the three sweeps' single-sort forms below, so a
-// build without one has no caller of any of them.
+// Only a test calls this, the two Tier-0 counts and the three sweeps'
+// single-sort forms below, so a build without one has no caller of any of
+// them.
 [[maybe_unused]] ChildGrid cost_child_grid(Chart const &c, SizedLayout const &z) {
   ChildGrid g;
   child_grid_frames(c, z.state.size(), 0, g);
-  child_grid_fill(g, z);
+  std::vector<scav_rect> kid;
+  std::vector<uint32_t> cursor;
+  child_rects(g, z, kid);
+  child_grid_fill(g, kid, cursor);
   return g;
 }
 
@@ -648,96 +880,36 @@ void cost_grid_query(ChildGrid const &g,
 
 // Siblings may not overlap; a nested box legitimately does, so the pairs are
 // taken within one submachine's children and through that frame's own grid.
-int32_t cost_box_overlaps(Chart const &c, SizedLayout const &z, ChildGrid const &g) {
-  int32_t total{ 0 };
+[[maybe_unused]] int32_t cost_box_overlaps(Chart const &c,
+                                           SizedLayout const &z,
+                                           ChildGrid const &g) {
+  std::vector<scav_rect> kid;
+  child_rects(g, z, kid);
   GridQuery q;
-  for (uint32_t m = 0; m < c.submachines.size(); ++m) {
-    if (c.submachines[m].live == 0) { continue; }
-    Span const kids{ g.frame[m].children };
-    if (kids.len <= SCAN_MAX) {
-      for (uint32_t i = 0; i < kids.len; ++i) {
-        scav_rect const &a{ z.state[g.child[kids.off + i]] };
-        for (uint32_t j = i + 1; j < kids.len; ++j) {
-          if (overlaps(a, z.state[g.child[kids.off + j]])) { ++total; }
-        }
-      }
-      continue;
-    }
-    for (uint32_t i = 0; i < kids.len; ++i) {
-      uint32_t const a{ g.child[kids.off + i] };
-      cost_grid_query(g, m, z.state[a], q);
-      for (uint32_t const at : q.hit) {
-        // Span order inside a frame, so a pair is charged from its first
-        // member alone however many cells the two share.
-        if (at <= (kids.off + i)) { continue; }
-        if (overlaps(z.state[a], z.state[g.child[at]])) { ++total; }
-      }
-    }
-  }
-  return total;
+  return box_overlaps_over(c, g, kid, q);
 }
 
 // Tier 0, top down. A piece meets a box's interior only if it meets every box
 // enclosing it, so a frame whose child the piece misses prunes that child's
 // whole subtree; the test that prunes is the piece's bounding box against the
 // rect, which unlike `enters` cannot answer false for an enclosing box.
-int32_t cost_through_boxes(Chart const &c,
-                           SizedLayout const &z,
-                           Ancestry const &an,
-                           ChildGrid const &g,
-                           std::vector<Piece> const &pieces) {
-  std::vector<uint32_t> roots;
-  for (uint32_t m = 0; m < c.submachines.size(); ++m) {
-    if (c.submachines[m].owner.v == INVALID) { roots.push_back(m); }
-  }
-
-  int32_t total{ 0 };
-  GridQuery q;
-  std::vector<uint32_t> stack;
-  for (Piece const &piece : pieces) {
-    Transition const &tr{ c.transitions[piece.trans] };
-    scav_rect const reach{ span_rect(piece.a, piece.b) };
-    // An edge may occupy the interior of a state it is an endpoint of or a
-    // descendant of, and only that one: 11.14's carve-out.
-    auto const charge = [&](uint32_t st) {
-      if (!cost_ancestor(c, an, { st }, tr.src) && !cost_ancestor(c, an, { st }, tr.dst) &&
-          enters(piece.a, piece.b, z.state[st])) {
-        ++total;
-      }
-    };
-    for (uint32_t const st : an.detached) { charge(st); }
-
-    auto const visit = [&](uint32_t at) {
-      uint32_t const st{ g.child[at] };
-      if (!overlaps(reach, z.state[st])) { return; }
-      charge(st);
-      Span const subs{ c.states[st].submachines };
-      for (uint32_t i = 0; i < subs.len; ++i) {
-        stack.push_back(c.submachine_ids[subs.off + i].v);
-      }
-    };
-    stack.assign(roots.begin(), roots.end());
-    while (!stack.empty()) {
-      uint32_t const frame{ stack.back() };
-      stack.pop_back();
-      if (frame >= g.frame.size()) { continue; }
-      Span const kids{ g.frame[frame].children };
-      if (kids.len <= SCAN_MAX) {
-        for (uint32_t at = kids.off; at < (kids.off + kids.len); ++at) { visit(at); }
-        continue;
-      }
-      cost_grid_query(g, frame, reach, q);
-      for (uint32_t const at : q.hit) { visit(at); }
-    }
-  }
-  return total;
+[[maybe_unused]] int32_t cost_through_boxes(Chart const &c,
+                                            SizedLayout const &z,
+                                            Ancestry const &an,
+                                            ChildGrid const &g,
+                                            std::vector<Piece> const &pieces) {
+  std::vector<scav_rect> kid;
+  child_rects(g, z, kid);
+  Descent d;
+  return through_boxes_over(c, z, an, g, kid, pieces, d);
 }
 
 // Each of the three sweeps over a sort of its own, so a test can hand one a
 // list of pieces; `cost_terms` sorts once and runs all three over that.
 [[maybe_unused]] int64_t cost_crossings(std::vector<Piece> const &pieces,
                                         std::vector<uint32_t> &per_trans) {
-  return crossings_over(pieces, lanes_of(pieces), per_trans);
+  std::vector<uint8_t> is_loose;
+  return crossings_over(pieces, lanes_of(pieces), per_trans, is_loose);
 }
 
 [[maybe_unused]] Wide cost_corridor(Routes const &r, std::vector<Piece> const &pieces) {
@@ -778,10 +950,13 @@ CostTerms cost_terms(CostContext const &ctx,
   // Every route segment once, with the transition it belongs to, so the
   // sweeps below are over one flat list. A transition's pieces are contiguous,
   // from `first[tr]` to `first[tr + 1]`.
-  std::vector<Piece> pieces;
-  pieces.reserve(r.points.size());
-  std::vector<uint32_t> first(c.transitions.size() + 1, 0);
-  std::vector<uint32_t> crossings_of(c.transitions.size(), 0);
+  Scratch &sc{ scratch() };
+  std::vector<Piece> &pieces{ sc.pieces };
+  pieces.clear();
+  std::vector<uint32_t> &first{ sc.first };
+  first.assign(c.transitions.size() + 1, 0);
+  std::vector<uint32_t> &crossings_of{ sc.crossings_of };
+  crossings_of.assign(c.transitions.size(), 0);
   for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {
     first[tr] = static_cast<uint32_t>(pieces.size());
     scav_span const route{ r.route[tr] };
@@ -809,15 +984,17 @@ CostTerms cost_terms(CostContext const &ctx,
       ++t.vanished;
     }
   }
-  std::vector<Lane> const lanes{ lanes_of(pieces) };
-  t.crossings = crossings_over(pieces, lanes, crossings_of);
+  lanes_of(pieces, sc.key, sc.spare, sc.lanes);
+  std::vector<Lane> const &lanes{ sc.lanes };
+  t.crossings = crossings_over(pieces, lanes, crossings_of, sc.is_loose);
   t.corridor = corridor_over(r, pieces, lanes);
   t.crowding = crowding_over(pieces, lanes, p.font_size_grid);
 
   // `min_len` is the direct distance between the endpoints, or the boxes the
   // route has to carry if those are longer; only the excess is charged, since
   // charging raw length makes the optimiser fight the constraint (11.9).
-  std::vector<Wide> carried(c.transitions.size(), 0);
+  std::vector<Wide> &carried{ sc.carried };
+  carried.assign(c.transitions.size(), 0);
   if (s.path_box != nullptr) {
     for (uint32_t i = 0; i < s.n_path_box; ++i) {
       if (s.path_box[i].subject < carried.size()) {
@@ -841,15 +1018,20 @@ CostTerms cost_terms(CostContext const &ctx,
   // The live states, each grown by the band `flush` reads, so one grid answers
   // both a route along a border and a placed box over a state.
   int32_t const near{ border_band(p) - 1 };
-  std::vector<scav_rect> state_box;
-  std::vector<uint32_t> state_of;
+  std::vector<scav_rect> &state_box{ sc.state_box };
+  std::vector<scav_rect> &state_rect{ sc.state_rect };
+  std::vector<uint32_t> &state_of{ sc.state_of };
+  state_box.clear();
+  state_rect.clear();
+  state_of.clear();
   for (uint32_t st = 0; st < c.states.size(); ++st) {
     if (c.states[st].live == 0) { continue; }
     state_box.push_back(grow(z.state[st], imax(near, 0)));
+    state_rect.push_back(z.state[st]);
     state_of.push_back(st);
   }
-  RectGrid states;
-  grid_over(states, state_box);
+  RectGrid &states{ sc.states };
+  grid_over(states, state_box, sc.cursor);
 
   // Placed boxes against each other, against the states, and against the routes
   // they do not belong to. A state enclosing an endpoint is the composite the
@@ -862,19 +1044,23 @@ CostTerms cost_terms(CostContext const &ctx,
   // rect and left `label` blind to a label lying over the very box it names:
   // 3 of 203 on the corpus against 26 once the walk starts one level up.
   if (!r.placed.empty()) {
-    std::vector<scav_rect> seg_box;
-    seg_box.reserve(pieces.size());
+    std::vector<scav_rect> &seg_box{ sc.seg_box };
+    seg_box.clear();
     for (Piece const &piece : pieces) { seg_box.push_back(span_rect(piece.a, piece.b)); }
-    RectGrid segs;
-    grid_over(segs, seg_box);
-    RectGrid placed;
-    grid_over(placed, r.placed);
-    Seen seen_seg{ .stamp = std::vector<uint32_t>(seg_box.size(), 0) };
-    Seen seen_placed{ .stamp = std::vector<uint32_t>(r.placed.size(), 0) };
-    Seen seen_state{ .stamp = std::vector<uint32_t>(state_box.size(), 0) };
+    RectGrid &segs{ sc.segs };
+    grid_over(segs, seg_box, sc.cursor);
+    RectGrid &placed{ sc.placed };
+    grid_over(placed, r.placed, sc.cursor);
+    Seen &seen_seg{ sc.seen_seg };
+    Seen &seen_placed{ sc.seen_placed };
+    Seen &seen_state{ sc.seen_state };
+    seen_reset(seen_seg, seg_box.size());
+    seen_reset(seen_placed, r.placed.size());
+    seen_reset(seen_state, state_box.size());
 
-    std::vector<uint8_t> encloses(c.states.size(), 0);
-    std::vector<uint32_t> common;  // the states `encloses` holds at 2
+    std::vector<uint8_t> &encloses{ sc.encloses };
+    encloses.assign(c.states.size(), 0);
+    std::vector<uint32_t> &common{ sc.common };  // the states `encloses` holds at 2
     auto const mark = [&](StateId of, uint8_t v) {
       StateId at{ enclosing_state(c, of) };
       for (size_t step = 0; (step < c.states.size()) && (at.v != INVALID); ++step) {
@@ -913,7 +1099,7 @@ CostTerms cost_terms(CostContext const &ctx,
       // left out of the grid's answer, which is the rest.
       grid_each(states, box, 0, seen_state, [&](uint32_t at) {
         uint32_t const st{ state_of[at] };
-        if ((encloses[st] != 2) && overlaps(box, z.state[st])) { ++t.label; }
+        if ((encloses[st] != 2) && overlaps(box, state_rect[at])) { ++t.label; }
       });
       for (uint32_t const st : common) {
         if ((c.states[st].live != 0) &&
@@ -970,24 +1156,30 @@ CostTerms cost_terms(CostContext const &ctx,
 
   // Tier 0, both counts off one flattening of the containment forest and one
   // grid per frame over it.
-  ChildGrid grid{ ctx.grid };
-  child_grid_fill(grid, z);
-  t.box_overlap = cost_box_overlaps(c, z, grid);
-  t.through_box = cost_through_boxes(c, z, ctx.an, grid, pieces);
+  ChildGrid &grid{ sc.grid };
+  grid.frame = ctx.grid.frame;
+  grid.child = ctx.grid.child;
+  grid.bucket_off.resize(ctx.grid.bucket_off.size());
+  child_rects(grid, z, sc.kid);
+  child_grid_fill(grid, sc.kid, sc.cursor);
+  t.box_overlap = box_overlaps_over(c, grid, sc.kid, sc.descent.q);
+  t.through_box = through_boxes_over(c, z, ctx.an, grid, sc.kid, pieces, sc.descent);
 
   // A diagonal runs along no border, and a leg that does lies within `near`
   // of the state, so inside the grown rect the grid holds for it.
   for (Piece const &piece : pieces) {
     if ((piece.a.y != piece.b.y) && (piece.a.x != piece.b.x)) { continue; }
     if (grid_any(states, span_rect(piece.a, piece.b), [&](uint32_t at) {
-          return along_border(piece.a, piece.b, z.state[state_of[at]], near);
+          return along_border(piece.a, piece.b, state_rect[at], near);
         })) {
       ++t.flush;
     }
   }
 
-  std::vector<scav_rect> region_box;
-  std::vector<uint32_t> region_of;
+  std::vector<scav_rect> &region_box{ sc.region_box };
+  std::vector<uint32_t> &region_of{ sc.region_of };
+  region_box.clear();
+  region_of.clear();
   for (uint32_t m = 0; m < c.submachines.size(); ++m) {
     if ((c.submachines[m].live == 0) || (c.submachines[m].owner.v == INVALID)) {
       continue;
@@ -995,8 +1187,8 @@ CostTerms cost_terms(CostContext const &ctx,
     region_box.push_back(grow(z.sub[m], 1));
     region_of.push_back(m);
   }
-  RectGrid regions;
-  grid_over(regions, region_box);
+  RectGrid &regions{ sc.regions };
+  grid_over(regions, region_box, sc.cursor);
   for (Piece const &piece : pieces) {
     Transition const &trans{ c.transitions[piece.trans] };
     scav_rect const reach{ span_rect(piece.a, piece.b) };

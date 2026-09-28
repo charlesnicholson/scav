@@ -66,7 +66,7 @@ struct GridQuery {
 // by every candidate scored against that chart, at once if need be.
 struct CostContext {
   Ancestry an;
-  ChildGrid grid;  // no cell holds a child yet; a candidate fills its own copy
+  ChildGrid grid;  // no cell holds a child yet; a candidate fills a per-thread copy
 };
 
 CostContext cost_context(Chart const &c);
