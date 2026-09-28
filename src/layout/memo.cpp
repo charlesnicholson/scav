@@ -45,8 +45,8 @@ struct Registry {
 };
 
 Registry &registry() {
-  static Registry *const r{ new Registry };
-  return *r;
+  static Registry *const INSTANCE{ new Registry };
+  return *INSTANCE;
 }
 
 }  // namespace
