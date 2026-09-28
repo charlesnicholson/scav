@@ -1,6 +1,7 @@
 #include "layout/memo.h"
 
 #include "scav_int.h"
+#include "scav_thread.h"
 
 #include <array>
 #include <cstdint>
@@ -31,6 +32,61 @@ uint64_t memo_hash(std::vector<uint32_t> const &key) {
   for (uint64_t const l : lane) { h = mix(h, l); }
   for (; i < n; ++i) { h = mix(h, key[i]); }
   return h;
+}
+
+namespace {
+
+// Every memo alive, and how many layouts are open. Never destroyed: a pool
+// thread's memos outlive static destruction and deregister as they go.
+struct Registry {
+  Mutex lock;
+  std::vector<Memo *> memos;
+  uint32_t open{ 0 };
+};
+
+Registry &registry() {
+  static Registry *const r{ new Registry };
+  return *r;
+}
+
+}  // namespace
+
+Memo::Memo(size_t words, MemoHash hash) : budget(words), hash_of(hash) {
+  Registry &r{ registry() };
+  ScopedLock const held{ r.lock };
+  r.memos.push_back(this);
+}
+
+Memo::~Memo() {
+  Registry &r{ registry() };
+  ScopedLock const held{ r.lock };
+  for (size_t k = 0; k < r.memos.size(); ++k) {
+    if (r.memos[k] == this) {
+      r.memos[k] = r.memos.back();
+      r.memos.pop_back();
+      break;
+    }
+  }
+}
+
+void Memo::release() {
+  std::vector<uint32_t>{}.swap(keys);
+  std::vector<int32_t>{}.swap(values);
+  std::vector<Slot>{}.swap(slots);
+  used = 0;
+}
+
+MemoRun::MemoRun() {
+  Registry &r{ registry() };
+  ScopedLock const held{ r.lock };
+  ++r.open;
+}
+
+MemoRun::~MemoRun() {
+  Registry &r{ registry() };
+  ScopedLock const held{ r.lock };
+  if (--r.open != 0) { return; }
+  for (Memo *const m : r.memos) { m->release(); }
 }
 
 // The slot holding `key`, or the empty one it would go in; the table is never

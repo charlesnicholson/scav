@@ -1146,6 +1146,7 @@ bool layout_run(Chart &c,
                 uint32_t *moves,
                 SearchPins *taken,
                 SearchPins const *pins) {
+  MemoRun const scope;
   if (inflations != nullptr) { *inflations = 0; }
   if (tuple != nullptr) { *tuple = 0; }
   scav_profile const &p{ o.profile };

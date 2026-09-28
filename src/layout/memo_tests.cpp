@@ -147,3 +147,22 @@ TEST_CASE("memo: the hash reads every word of a key") {
   }
   CHECK(all);
 }
+
+TEST_CASE("memo: every memo gives back its storage when the last layout ends") {
+  Memo m{ 1024 };
+  for (uint32_t i = 0; i < 100; ++i) { m.insert({ i + 1 }, value_for(i)); }
+  std::vector<int32_t> got;
+  {
+    MemoRun const outer;
+    { MemoRun const inner; }
+    // One layout still open: nothing is released under it.
+    REQUIRE(lookup(m, { 1 }, got));
+    CHECK(m.held() > 0);
+  }
+  CHECK_FALSE(lookup(m, { 1 }, got));
+  CHECK(m.held() == 0);
+  // Released, it fills again like a new one.
+  m.insert({ 7 }, value_for(7));
+  REQUIRE(lookup(m, { 7 }, got));
+  CHECK(got == value_for(7));
+}

@@ -22,7 +22,10 @@ class Memo {
  public:
   // `words` is what both arenas may hold together before the table empties
   // and starts again, which bounds it without an eviction order.
-  explicit Memo(size_t words, MemoHash hash = memo_hash) : budget(words), hash_of(hash) {}
+  explicit Memo(size_t words, MemoHash hash = memo_hash);
+  ~Memo();
+  Memo(Memo const &) = delete;
+  Memo &operator=(Memo const &) = delete;
 
   // Whether `key` is stored, and where its value is when it is: `at` and `len`,
   // valid until the next `insert`. An empty value is found with `len` 0.
@@ -32,6 +35,14 @@ class Memo {
 
   // Stores `value` under `key`, which must not be present.
   void insert(std::vector<uint32_t> const &key, std::vector<int32_t> const &value);
+
+  // Drops every entry and the storage the arenas and slots took.
+  void release();
+
+  // The words the arenas and slots have claimed, whether or not in use.
+  [[nodiscard]] size_t held() const {
+    return keys.capacity() + values.capacity() + (slots.capacity() * (sizeof(Slot) / 4));
+  }
 
  private:
   struct Slot {
@@ -48,6 +59,18 @@ class Memo {
   std::vector<int32_t> values;
   std::vector<Slot> slots;
   uint32_t used{ 0 };
+};
+
+// Held for the length of a layout. When the last one open ends, every memo in
+// the process releases what it holds, so a host keeps nothing between layouts
+// however long its pool threads live: no thread is in a layout then, and one
+// starting a layout waits on the same lock until the release is done.
+class MemoRun {
+ public:
+  MemoRun();
+  ~MemoRun();
+  MemoRun(MemoRun const &) = delete;
+  MemoRun &operator=(MemoRun const &) = delete;
 };
 
 }  // namespace scav
