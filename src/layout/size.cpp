@@ -101,6 +101,1172 @@ bool bare_pseudostate(Chart const &c,
   return true;
 }
 
+// The inputs one sizing pass shares between its frames and states, and what
+// it has sized so far: each of `size_pass`'s steps is a member, so the frame
+// and state layouts read the same names they read as the pass's own locals.
+struct Sizer {
+  Chart const &c;
+  SplitGraph const &g;
+  SubmachineOrders const &o;
+  scav_spaces const &s;
+  scav_profile const &p;
+  std::vector<FrameDar> const &hole;
+  Compaction compaction;
+  Fold fold;
+  SizedLayout &out;
+  std::vector<Diagnostic> &diags;
+  FrameDar profile_dar{ .num = p.dar_num, .den = p.dar_den };
+  // Where each submachine sits inside its owner's packed area, which the
+  // descent at the end turns into an absolute origin.
+  std::vector<scav_point> sub_local;
+  // The label's extent across its frame's ranks and along them, on the middle
+  // segment 11.3 charges it to, so one label reserves in one frame.
+  std::vector<int32_t> seg_label_h;
+  std::vector<int32_t> seg_label_w;
+  // Per port, the segment on the border's inner side, whose boundary node is
+  // where the router seats that port's slot.
+  std::vector<uint32_t> port_seg;
+  bool ok{ true };
+
+  // Every packing inside one state's interior fills the same hole, so the state
+  // carries the ratio and its frames read their owner's.
+  FrameDar dar_of(uint32_t state) const {
+    return ((state < hole.size()) && (hole[state].num != 0)) ? hole[state] : profile_dar;
+  }
+  FrameDar owner_dar(uint32_t m) const {
+    StateId const owner{ c.submachines[m].owner };
+    return (owner.v == INVALID) ? profile_dar : dar_of(owner.v);
+  }
+  // Whether a frame's ranks run down the page. Its layout is computed along
+  // the ranks and across them, and only placed as x and y at the end: across
+  // is y and along is x for a frame that runs across, and the reverse for one
+  // that runs down (11.10g).
+  bool runs_down(uint32_t m) const {
+    return (m < o.sub_down.size()) && (o.sub_down[m] != 0);
+  }
+  int32_t attach_at(uint32_t seg, uint32_t state, bool down) const;
+  void trace_ports(uint32_t m, bool down) const;
+  void lay_out_sub(uint32_t m);
+  void place_sub(uint32_t m,
+                 bool down,
+                 FrameDar dar,
+                 std::vector<scav_rect> const &boxes,
+                 std::vector<uint32_t> const &component,
+                 std::vector<scav_point> const &local);
+  void size_sub(uint32_t m);
+  void size_state(uint32_t i);
+};
+
+// Where `seg` meets `state`, from the state's centre across the ranks of the
+// frame `state` sits in: where the boundary node inside it stands for a port
+// on its border, which is sized by now because a state is sized before the
+// frame it sits in. Zero where the segment meets the state's box rather than
+// a port, and where the frame inside runs the other way, whose ports are on
+// the faces this frame's edges do not arrive at.
+int32_t Sizer::attach_at(uint32_t seg, uint32_t state, bool down) const {
+  if (seg >= g.segments.size()) { return 0; }  // a hand-built frame
+  SplitSegment const &sg{ g.segments[seg] };
+  for (uint32_t const port : { sg.src_port, sg.dst_port }) {
+    if ((port >= g.ports.size()) || (g.ports[port].state.v != state)) { continue; }
+    uint32_t const inner{ port_seg[port] };
+    if ((inner == INVALID) || (inner >= o.seg_node.size())) { continue; }
+    uint32_t const node{ o.seg_node[inner] };
+    uint32_t const frame{ g.segments[inner].frame.v };
+    if ((node >= out.node.size()) || (frame >= c.submachines.size()) ||
+        (c.submachines[frame].owner.v != state)) {
+      continue;
+    }
+    if (runs_down(frame) != down) { continue; }
+    scav_box_space const b{ box_of(s.box_state, s.n_box_state, state) };
+    Wide const pad{ bare_pseudostate(c, out.sub, b, state) ? 0 : p.pad };
+    if (down) {
+      Wide const x{ pad + sub_local[frame].x + out.node[node].x };
+      return static_cast<int32_t>(x - (out.state[state].w / 2));
+    }
+    Wide const y{ pad + b.h_before + sub_local[frame].y + out.node[node].y };
+    return static_cast<int32_t>(y - (out.state[state].h / 2));
+  }
+  return 0;
+}
+
+// Each edge end that meets a composite at a port off its centre.
+void Sizer::trace_ports(uint32_t m, bool down) const {
+  Span const espan{ o.sub_edges[m] };
+  for (uint32_t k = 0; k < espan.len; ++k) {
+    OrderEdge const &e{ o.edges[espan.off + k] };
+    for (uint32_t const end : { e.src, e.dst }) {
+      if (o.nodes[end].kind != OrderKind::State) { continue; }
+      int32_t const at{ attach_at(e.segment, o.nodes[end].subject, down) };
+      if (at == 0) { continue; }
+      trace_emit(
+          { .kind = TraceKind::PortAttached,
+            .frame = m,
+            .shift = { .state = o.nodes[end].subject, .seg = e.segment, .by = at } });
+    }
+  }
+}
+
+// A frame's graph need not be connected, and unconnected states all rank 0, so
+// one graph would stack them in a column. Components are laid out and packed.
+void Sizer::lay_out_sub(uint32_t m) {
+  Span const span{ o.sub_nodes[m] };
+  uint32_t const ranks{ o.sub_ranks[m] };
+  if ((span.len == 0) || (ranks == 0)) { return; }
+  // Everything below is along the ranks and across them, placed as x and y
+  // at the end, so a frame running down aims at its hole's ratio inverted.
+  bool const down{ runs_down(m) };
+  FrameDar const hole_dar{ owner_dar(m) };
+  FrameDar const dar{ down ? FrameDar{ .num = hole_dar.den, .den = hole_dar.num }
+                           : hole_dar };
+  auto const along = [&](uint32_t st) { return down ? out.state[st].h : out.state[st].w; };
+  auto const across = [&](uint32_t st) {
+    return down ? out.state[st].w : out.state[st].h;
+  };
+  Span const espan{ o.sub_edges[m] };
+  Span const gspan{ o.sub_gaps[m] };
+
+  // An anchored label needs `leader + box height` beside its leg, and phase 3
+  // has only the cross-axis room phase 2 left (11.9.5). Carried on the extent
+  // of both ends -- the slot `cross_coordinates` separates by, not the drawn
+  // rect -- so half lands each side and the pair opens the whole distance.
+  //
+  // The whole distance, not its shortfall against `node_sep`: the leg leaves
+  // its node's *centre*, and the shortfall opens the gap between node *edges*.
+  int32_t const leader{ label_leader(p) };
+  std::vector<int32_t> reserve(span.len, 0);
+  for (uint32_t k = 0; k < espan.len; ++k) {
+    OrderEdge const &e{ o.edges[espan.off + k] };
+    if (e.segment >= seg_label_h.size()) { continue; }  // a hand-built frame
+    int32_t const box_h{ seg_label_h[e.segment] };
+    if (box_h == 0) { continue; }
+    uint32_t const src{ e.src - span.off };
+    uint32_t const dst{ e.dst - span.off };
+    reserve[src] = imax(reserve[src], leader + box_h);
+    reserve[dst] = imax(reserve[dst], leader + box_h);
+  }
+
+  trace_ports(m, down);
+
+  std::vector<uint32_t> adj_count(span.len, 0);
+  for (uint32_t k = 0; k < espan.len; ++k) {
+    OrderEdge const &e{ o.edges[espan.off + k] };
+    ++adj_count[e.src - span.off];
+    ++adj_count[e.dst - span.off];
+  }
+  std::vector<uint32_t> adj_off(size_t{ span.len } + 1, 0);
+  for (uint32_t k = 0; k < span.len; ++k) { adj_off[k + 1] = adj_off[k] + adj_count[k]; }
+  std::vector<uint32_t> adj(adj_off[span.len], 0);
+  {
+    std::vector<uint32_t> fill(adj_off.begin(), adj_off.end() - 1);
+    for (uint32_t k = 0; k < espan.len; ++k) {
+      OrderEdge const &e{ o.edges[espan.off + k] };
+      adj[fill[e.src - span.off]++] = e.dst - span.off;
+      adj[fill[e.dst - span.off]++] = e.src - span.off;
+    }
+  }
+
+  // Components in first-node order, and nodes within a component in
+  // (rank, pos) order, so both are the reading order the frame was emitted in.
+  std::vector<uint32_t> component(span.len, INVALID);
+  std::vector<std::vector<uint32_t>> members;
+  std::vector<uint32_t> queue;
+  for (uint32_t seed = 0; seed < span.len; ++seed) {
+    if (component[seed] != INVALID) { continue; }
+    uint32_t const id{ static_cast<uint32_t>(members.size()) };
+    members.emplace_back();
+    component[seed] = id;
+    queue.assign(1, seed);
+    for (uint32_t at = 0; at < queue.size(); ++at) {
+      uint32_t const node{ queue[at] };
+      for (uint32_t k = adj_off[node]; k < adj_off[node + 1]; ++k) {
+        if (component[adj[k]] == INVALID) {
+          component[adj[k]] = id;
+          queue.push_back(adj[k]);
+        }
+      }
+    }
+    for (uint32_t k = 0; k < span.len; ++k) {
+      if (component[k] == id) { members[id].push_back(k); }
+    }
+  }
+
+  std::vector<scav_point> local(span.len, scav_point{});
+  std::vector<scav_rect> boxes(members.size(), scav_rect{});
+  for (uint32_t id = 0; id < members.size(); ++id) {
+    std::vector<uint32_t> const &nodes{ members[id] };
+
+    // Ranks renumbered from zero, with the frame's rank kept alongside so a label's
+    // gap still lands where it was charged.
+    std::vector<uint32_t> global_rank;
+    std::vector<uint32_t> local_rank(span.len, INVALID);
+    for (uint32_t const k : nodes) {
+      uint32_t const rank{ o.nodes[span.off + k].rank };
+      if (global_rank.empty() || (global_rank.back() != rank)) {
+        global_rank.push_back(rank);
+      }
+      local_rank[k] = static_cast<uint32_t>(global_rank.size()) - 1;
+    }
+    uint32_t const layers{ static_cast<uint32_t>(global_rank.size()) };
+    std::vector<uint32_t> index(span.len, INVALID);
+    std::vector<int32_t> extent(nodes.size(), 0);
+    std::vector<int32_t> layer_w(layers, 0);
+    std::vector<Wide> layer_h(layers, 0);
+    // The reserve keeps a label clear of the node beside its end in the same
+    // layer. A frame running down puts a label's width beside its leg, so a
+    // node alone in its layer there takes none: the room from its frame's
+    // edge is taken on one side of the leg below, and the half the reserve
+    // put on the other side was empty (11.10g). Across, a label's height is
+    // small and the reserve is also the gap a fold's stacked pieces keep.
+    std::vector<uint32_t> in_layer(layers, 0);
+    for (uint32_t const k : nodes) { ++in_layer[local_rank[k]]; }
+    for (uint32_t i = 0; i < nodes.size(); ++i) {
+      index[nodes[i]] = i;
+      OrderNode const &nd{ o.nodes[span.off + nodes[i]] };
+      uint32_t const r{ local_rank[nodes[i]] };
+      if (nd.kind == OrderKind::State) {
+        extent[i] = across(nd.subject);
+        layer_w[r] = imax(layer_w[r], along(nd.subject));
+      }
+      Wide const room{ (!down || (in_layer[r] > 1)) ? Wide{ reserve[nodes[i]] }
+                                                    : Wide{ 0 } };
+      extent[i] = static_cast<int32_t>(imin(Wide{ extent[i] } + room, Wide{ COORD_MAX }));
+      layer_h[r] += extent[i] + p.node_sep;
+    }
+    // States joined by an edge inside one column share one centre line, so
+    // the route between any two runs straight down the overlap of their
+    // faces; left-aligned, the narrower one's own width at the column's
+    // leading edge was the only face they shared. The line is the centre of
+    // the widest of them, or of the room a label on one of those edges
+    // needs beside its leg on either side, whichever is wider, and the
+    // column grows to hold that room. Initial and final pseudostates are
+    // seated beside the state they join below; a bar keeps the leading
+    // edge, because a route to a state stacked on it would leave through its
+    // cap rather than its length (11.10g).
+    std::vector<uint32_t> group(nodes.size(), 0);
+    for (uint32_t i = 0; i < group.size(); ++i) { group[i] = i; }
+    auto const find = [&group](uint32_t i) {
+      while (group[i] != i) { i = group[i] = group[group[i]]; }
+      return i;
+    };
+    auto const columnar = [&](uint32_t i) {
+      OrderNode const &nd{ o.nodes[span.off + nodes[i]] };
+      if (nd.kind != OrderKind::State) { return false; }
+      StateKind const kind{ c.states[nd.subject].kind };
+      return (kind != StateKind::Initial) && (kind != StateKind::Final) &&
+             (kind != StateKind::Fork) && (kind != StateKind::Join);
+    };
+    auto const flat = [&](OrderEdge const &e, uint32_t &a, uint32_t &b) {
+      a = index[e.src - span.off];
+      b = index[e.dst - span.off];
+      return (a != INVALID) && (b != INVALID) &&
+             (local_rank[nodes[a]] == local_rank[nodes[b]]) && columnar(a) && columnar(b);
+    };
+    for (uint32_t k = 0; k < espan.len; ++k) {
+      uint32_t a{ 0 };
+      uint32_t b{ 0 };
+      if (!flat(o.edges[espan.off + k], a, b)) { continue; }
+      uint32_t const ga{ find(a) };
+      uint32_t const gb{ find(b) };
+      if (ga != gb) { group[imax(ga, gb)] = imin(ga, gb); }
+    }
+    // A group with two labelled edges has a label either side of its line,
+    // so each side needs the widest one's room; one label takes whichever
+    // side has it.
+    std::vector<uint32_t> labelled(nodes.size(), 0);
+    std::vector<int32_t> widest_label(nodes.size(), 0);
+    for (uint32_t k = 0; k < espan.len; ++k) {
+      OrderEdge const &e{ o.edges[espan.off + k] };
+      uint32_t a{ 0 };
+      uint32_t b{ 0 };
+      if (!flat(e, a, b) || (e.segment >= seg_label_w.size()) ||
+          (seg_label_w[e.segment] == 0)) {
+        continue;
+      }
+      ++labelled[find(a)];
+      widest_label[find(a)] = imax(widest_label[find(a)], seg_label_w[e.segment]);
+    }
+    std::vector<int32_t> group_w(nodes.size(), 0);
+    std::vector<uint32_t> grouped(nodes.size(), 0);
+    for (uint32_t i = 0; i < nodes.size(); ++i) {
+      if (!columnar(i)) { continue; }
+      uint32_t const root_of{ find(i) };
+      ++grouped[root_of];
+      group_w[root_of] =
+          imax(group_w[root_of], along(o.nodes[span.off + nodes[i]].subject));
+      if (labelled[root_of] >= 2) {
+        group_w[root_of] =
+            imax(group_w[root_of], (2 * (leader + widest_label[root_of])) + p.node_sep);
+      }
+    }
+    // Parallel to `nodes`: the width whose centre a grouped state sits on,
+    // zero for one in no group.
+    std::vector<int32_t> line(nodes.size(), 0);
+    for (uint32_t i = 0; i < nodes.size(); ++i) {
+      uint32_t const root_of{ columnar(i) ? find(i) : INVALID };
+      if ((root_of == INVALID) || (grouped[root_of] < 2)) { continue; }
+      line[i] = group_w[root_of];
+      uint32_t const r{ local_rank[nodes[i]] };
+      layer_w[r] = imax(layer_w[r], group_w[root_of]);
+    }
+    auto const boundary_gap = [&](uint32_t r) {
+      return (global_rank[r] < gspan.len) ? Wide{ o.gaps[gspan.off + global_rank[r]] }
+                                          : Wide{ 0 };
+    };
+
+    // A rank run grows unbounded along one axis and nesting multiplies it by depth.
+    // Cutting helps only sometimes -- at two ranks it worsens the aspect -- so both
+    // shapes are laid out and the scale measure picks, as `trybox` picks a packer.
+    struct Shape {
+      std::vector<scav_point> at;
+      Wide w{ 0 }, h{ 0 };
+      bool ok{ true };
+      // For the trace, of the shape that is kept: where pieces started and
+      // where a cut was refused, and what seating each pseudostate got.
+      std::vector<TraceFold> cuts;
+      std::vector<std::pair<uint32_t, SeatHow>> seated;
+      std::vector<std::pair<uint32_t, int32_t>> centred;
+      std::vector<TracePiece> packed;
+      // Some piece is packed other than beside the one before it.
+      bool wraps{ false };
+      // Every edge a cut crosses between stacked pieces joins two plain nodes.
+      bool drawable{ true };
+    };
+    // A cut before a layer is refused where it would separate an initial
+    // pseudostate from the state it enters in that layer, or a final one in
+    // that layer from the state it leaves: the fold packs its pieces apart,
+    // and the pseudostate would be drawn as a piece of its own, away from
+    // the state it joins. Likewise a boundary node, the point a route
+    // crosses the frame's border at: a piece of its own is packed below the
+    // node it joins, and the port with it, which dropped `vac`'s `battery
+    // low` a whole state's height off `Ready` (11.10g).
+    std::vector<uint8_t> glued(layers, 0);
+    for (uint32_t k = 0; k < espan.len; ++k) {
+      OrderEdge const &e{ o.edges[espan.off + k] };
+      uint32_t const a{ e.src - span.off };
+      uint32_t const b{ e.dst - span.off };
+      for (uint32_t const end : { a, b }) {
+        OrderNode const &nd{ o.nodes[span.off + end] };
+        bool const pseudostate{ (nd.kind == OrderKind::State) &&
+                                ((c.states[nd.subject].kind == StateKind::Initial) ||
+                                 (c.states[nd.subject].kind == StateKind::Final)) };
+        if (!pseudostate && (nd.kind != OrderKind::Boundary)) { continue; }
+        uint32_t const other{ (end == a) ? b : a };
+        uint32_t const ra{ local_rank[end] };
+        uint32_t const rb{ local_rank[other] };
+        if ((ra == INVALID) || (rb == INVALID) || (ra == rb)) { continue; }
+        glued[imax(ra, rb)] = 1;
+      }
+    }
+    // Where `e`'s leg runs when it runs down the overlap of its two ends at
+    // `xa` and `xb`, or -1 where they do not overlap and there is no straight
+    // leg; and the room a label on it needs beside it. Zero room for an
+    // unlabelled edge.
+    auto const width_of_node = [&](uint32_t i) {
+      OrderNode const &nd{ o.nodes[span.off + nodes[i]] };
+      return (nd.kind == OrderKind::State) ? Wide{ along(nd.subject) } : Wide{ 0 };
+    };
+    auto const leg_of = [&](Wide xa, Wide xb, uint32_t a, uint32_t b) {
+      Wide const lo{ imax(xa, xb) };
+      Wide const hi{ imin(xa + width_of_node(a), xb + width_of_node(b)) };
+      return (hi <= lo) ? Wide{ -1 } : (lo + ((hi - lo) / 2));
+    };
+    auto const room_of = [&](OrderEdge const &e) {
+      bool const has{ (e.segment < seg_label_w.size()) && (seg_label_w[e.segment] != 0) };
+      return has ? (Wide{ leader } + seg_label_w[e.segment] + (p.node_sep / 2))
+                 : Wide{ 0 };
+    };
+    // How wide a piece or a stack must be for `e`'s label to sit beside its
+    // leg: the leg plus the room where the leading side has too little of
+    // it, else zero.
+    auto const beside_leg =
+        [&](OrderEdge const &e, Wide xa, Wide xb, uint32_t a, uint32_t b) {
+          Wide const leg{ leg_of(xa, xb, a, b) };
+          Wide const need{ room_of(e) };
+          return ((need == 0) || (leg < 0) || (leg >= need)) ? Wide{ 0 } : (leg + need);
+        };
+    auto const lay_out = [&](Wide wrap_at, bool stack) {
+      Shape shape;
+      shape.at.assign(nodes.size(), scav_point{});
+      std::vector<uint32_t> chunk_of(layers, 0);
+      std::vector<uint32_t> chunks{ 0 };
+      Wide run{ 0 };
+      for (uint32_t r = 0; r < layers; ++r) {
+        Wide const step{ (r == 0)
+                             ? Wide{ layer_w[r] }
+                             : (Wide{ layer_w[r] } + p.rank_sep + boundary_gap(r - 1)) };
+        bool const wants_cut{ (r > 0) && ((run + step) > wrap_at) };
+        if (wants_cut && (glued[r] != 0)) {
+          shape.cuts.push_back({ .rank = global_rank[r], .refused = 1, .carried = 0 });
+        }
+        if (wants_cut && (glued[r] == 0)) {
+          shape.cuts.push_back({ .rank = global_rank[r], .refused = 0, .carried = 0 });
+          chunks.push_back(r);
+          run = layer_w[r];
+        } else {
+          run += step;
+        }
+        chunk_of[r] = static_cast<uint32_t>(chunks.size()) - 1;
+      }
+
+      std::vector<scav_rect> pieces(chunks.size(), scav_rect{});
+      std::vector<Wide> carry(chunks.size(), 0);
+      bool pieces_fit{ true };
+      for (uint32_t chunk = 0; chunk < chunks.size(); ++chunk) {
+        uint32_t const first{ chunks[chunk] };
+        uint32_t const last{ ((chunk + 1) < chunks.size()) ? chunks[chunk + 1] : layers };
+
+        // Only this chunk's nodes and the edges wholly inside it: an edge the cut
+        // crosses has its ends in two pieces, as a wrapped line's does.
+        CoordGraph cg;
+        cg.layers.assign(last - first, {});
+        std::vector<uint32_t> chunk_index(nodes.size(), INVALID);
+        std::vector<uint32_t> chunk_nodes;
+        for (uint32_t i = 0; i < nodes.size(); ++i) {
+          uint32_t const r{ local_rank[nodes[i]] };
+          if (chunk_of[r] != chunk) { continue; }
+          chunk_index[i] = static_cast<uint32_t>(chunk_nodes.size());
+          chunk_nodes.push_back(i);
+          cg.extent.push_back(extent[i]);
+          cg.layers[r - first].push_back(chunk_index[i]);
+        }
+        // An initial's target that one other edge enters by the same face
+        // gives the two their own heights on it. By centres, the target
+        // lined up with the initial -- which the seating below moves anyway
+        // -- and the other route jogged to reach it, as `vac`'s `battery
+        // low` did into `Seated`; level, the initial's dot would sit on that
+        // route. So the other edge meets the target `half` off its centre and
+        // the initial `half` the other way, where it is seated, and the
+        // initial's edge is weak: it anchors the target only where the other
+        // cannot, as in `estop`, where a pinned rank takes `Latched` from
+        // `Clear` (11.10g). A composite is met at its ports, whose heights
+        // are its own.
+        std::vector<int32_t> seat_at(chunk_nodes.size(), 0);
+        std::vector<int32_t> enter_at(chunk_nodes.size(), 0);
+        std::vector<uint8_t> apart(espan.len, 0);
+        auto const in_chunk = [&](uint32_t node) {
+          uint32_t const i{ index[node - span.off] };
+          return ((i != INVALID) && (chunk_index[i] != INVALID)) ? i : INVALID;
+        };
+        auto const initial = [&](uint32_t node) {
+          OrderNode const &nd{ o.nodes[node] };
+          return (nd.kind == OrderKind::State) &&
+                 (c.states[nd.subject].kind == StateKind::Initial);
+        };
+        // Per node, what enters its leading face other than an initial, and
+        // the position of the nearest of those in the layer before.
+        std::vector<uint32_t> arrivals(chunk_nodes.size(), 0);
+        std::vector<uint32_t> nearest(chunk_nodes.size(), INVALID);
+        for (uint32_t k = 0; k < espan.len; ++k) {
+          OrderEdge const &e{ o.edges[espan.off + k] };
+          uint32_t const a{ in_chunk(e.src) };
+          uint32_t const b{ in_chunk(e.dst) };
+          if ((a == INVALID) || (b == INVALID)) { continue; }
+          bool const forward{ local_rank[nodes[b]] == (local_rank[nodes[a]] + 1) };
+          bool const back{ local_rank[nodes[a]] == (local_rank[nodes[b]] + 1) };
+          if (!forward && !back) { continue; }
+          uint32_t const later{ forward ? b : a };
+          uint32_t const earlier{ forward ? a : b };
+          if (initial(span.off + nodes[earlier])) { continue; }
+          ++arrivals[chunk_index[later]];
+          uint32_t &near{ nearest[chunk_index[later]] };
+          near = imin(near, o.nodes[span.off + nodes[earlier]].pos);
+        }
+        for (uint32_t k = 0; k < espan.len; ++k) {
+          OrderEdge const &e{ o.edges[espan.off + k] };
+          uint32_t const dot{ in_chunk(e.src) };
+          uint32_t const target{ in_chunk(e.dst) };
+          if ((dot == INVALID) || (target == INVALID) || !initial(e.src)) { continue; }
+          OrderNode const &nd{ o.nodes[e.src] };
+          OrderNode const &nt{ o.nodes[e.dst] };
+          if ((nt.kind != OrderKind::State) ||
+              (c.states[nt.subject].submachines.len != 0) ||
+              (local_rank[nodes[target]] != (local_rank[nodes[dot]] + 1))) {
+            continue;
+          }
+          uint32_t const others{ arrivals[chunk_index[target]] };
+          int32_t const half{ ceil_div((across(nd.subject) / 2) + route_clearance(p), 2) };
+          // One other arrival: with more, the initial is the median the
+          // alignment keeps the target steady on.
+          if ((others != 1) || ((4 * half) > across(nt.subject))) { continue; }
+          bool const above{ nd.pos < nearest[chunk_index[target]] };
+          seat_at[chunk_index[dot]] = above ? -half : half;
+          enter_at[chunk_index[target]] = above ? half : -half;
+          apart[k] = 1;
+        }
+        for (uint32_t k = 0; k < espan.len; ++k) {
+          OrderEdge const &e{ o.edges[espan.off + k] };
+          uint32_t from{ index[e.src - span.off] };
+          uint32_t to{ index[e.dst - span.off] };
+          if ((from == INVALID) || (to == INVALID)) { continue; }
+          if ((chunk_index[from] == INVALID) || (chunk_index[to] == INVALID)) { continue; }
+          // Brandes-Kopf reads a segment between consecutive layers, earlier
+          // end first. A rank pin can leave an edge within one layer or
+          // pointing back, and a cut leaves one spanning several; aligned, a
+          // flat edge's two ends became one block at one coordinate, which
+          // drew `ota`'s `Writing` over `Fetching` (11.10g).
+          uint32_t const rf{ local_rank[nodes[from]] };
+          uint32_t const rt{ local_rank[nodes[to]] };
+          auto const at_end = [&](uint32_t node) {
+            OrderNode const &nd{ o.nodes[node] };
+            return (nd.kind == OrderKind::State) ? attach_at(e.segment, nd.subject, down)
+                                                 : 0;
+          };
+          int32_t from_at{ at_end(e.src) };
+          int32_t to_at{ at_end(e.dst) };
+          if ((rf + 1) != rt) {
+            if ((rt + 1) != rf) { continue; }
+            uint32_t const swap{ from };
+            from = to;
+            to = swap;
+            int32_t const swap_at{ from_at };
+            from_at = to_at;
+            to_at = swap_at;
+          }
+          // The initial's own edge meets the target at the initial's height.
+          to_at +=
+              (apart[k] != 0) ? seat_at[chunk_index[from]] : enter_at[chunk_index[to]];
+          cg.edges.push_back({ .from = chunk_index[from],
+                               .to = chunk_index[to],
+                               .inner = ((o.nodes[e.src].kind == OrderKind::Bend) &&
+                                         (o.nodes[e.dst].kind == OrderKind::Bend))
+                                            ? 1U
+                                            : 0U,
+                               .from_at = from_at,
+                               .to_at = to_at,
+                               .weak = apart[k] });
+        }
+        cg.sep = p.node_sep;
+        std::vector<int32_t> const centre{ cross_coordinates(cg) };
+
+        // The gap a label was charged to the boundary this cut falls on, less
+        // what the packing between two pieces already gives it. Inside a
+        // chunk the charge is `rank_sep + boundary_gap`; across a cut the
+        // packer separates by `node_sep` alone and the charge was being
+        // dropped, which is why `estop` draws a 384-wide label across a
+        // 288-unit gap (11.9.3). Held back until the packing says where the
+        // piece went: see below.
+        carry[chunk] = (first == 0)
+                           ? Wide{ 0 }
+                           : imax(boundary_gap(first - 1) - p.node_sep, Wide{ 0 });
+        std::vector<Wide> layer_x(last - first, 0);
+        for (uint32_t r = first + 1; r < last; ++r) {
+          layer_x[r - first] =
+              layer_x[r - first - 1] + layer_w[r - 1] + p.rank_sep + boundary_gap(r - 1);
+        }
+        Wide chunk_w{ layer_x[last - first - 1] + layer_w[last - 1] };
+        Wide chunk_h{ 0 };
+        for (uint32_t i = 0; i < chunk_nodes.size(); ++i) {
+          // A node's trailing edge, not its centre plus half its extent: an odd extent
+          // halves down, so the box would not contain its own rects.
+          chunk_h = imax(chunk_h, (Wide{ centre[i] } - (cg.extent[i] / 2)) + cg.extent[i]);
+        }
+        for (uint32_t i = 0; i < chunk_nodes.size(); ++i) {
+          uint32_t const at{ chunk_nodes[i] };
+          uint32_t const r{ local_rank[nodes[at]] };
+          // An initial pseudostate is ranked just before the state it enters,
+          // so it sits flush against its layer's trailing edge: left-aligned
+          // in a layer as wide as its widest member, its arrow would run that
+          // whole width.
+          OrderNode const &nd{ o.nodes[span.off + nodes[at]] };
+          Wide const flush{ ((nd.kind == OrderKind::State) &&
+                             (c.states[nd.subject].kind == StateKind::Initial))
+                                ? Wide{ layer_w[r] } - along(nd.subject)
+                                : Wide{ 0 } };
+          // On its group's centre line, where it has one.
+          Wide const inset{ (line[at] == 0)
+                                ? flush
+                                : ((Wide{ line[at] } - along(nd.subject)) / 2) };
+          if (inset != flush) {
+            shape.centred.emplace_back(nd.subject, static_cast<int32_t>(inset));
+          }
+          // Local to the piece; the packing below decides where the piece
+          // itself goes.
+          shape.at[at] = { .x = static_cast<int32_t>(layer_x[r - first] + inset),
+                           .y = static_cast<int32_t>(centre[i]) };
+        }
+
+        // An initial or final pseudostate with one neighbour in this piece is
+        // level with it and `rank_sep` from it -- before it for an initial,
+        // after it for a final -- rather than wherever its layer's edge falls,
+        // which is past the widest member of the layer between. Each only
+        // where the box it moves to is clear of every other node here and
+        // inside the piece (11.10g).
+        auto const box_of_node = [&](uint32_t i, Wide x, Wide y) {
+          OrderNode const &nd{ o.nodes[span.off + nodes[chunk_nodes[i]]] };
+          Wide const w{ (nd.kind == OrderKind::State) ? Wide{ along(nd.subject) }
+                                                      : Wide{ 0 } };
+          Wide const h{ cg.extent[i] };
+          return scav_rect{ .x = static_cast<int32_t>(x),
+                            .y = static_cast<int32_t>(y - (h / 2)),
+                            .w = static_cast<int32_t>(w),
+                            .h = static_cast<int32_t>(h) };
+        };
+        for (uint32_t i = 0; i < chunk_nodes.size(); ++i) {
+          uint32_t const at{ chunk_nodes[i] };
+          OrderNode const &nd{ o.nodes[span.off + nodes[at]] };
+          if (nd.kind != OrderKind::State) { continue; }
+          StateKind const kind{ c.states[nd.subject].kind };
+          if ((kind != StateKind::Initial) && (kind != StateKind::Final)) { continue; }
+          uint32_t other{ INVALID };
+          bool alone{ true };
+          for (uint32_t k = 0; k < espan.len; ++k) {
+            OrderEdge const &e{ o.edges[espan.off + k] };
+            uint32_t const a{ index[e.src - span.off] };
+            uint32_t const b{ index[e.dst - span.off] };
+            uint32_t far{ INVALID };
+            if (a == at) {
+              far = b;
+            } else if (b == at) {
+              far = a;
+            }
+            if ((far == INVALID) || (far == at)) { continue; }
+            if ((far >= chunk_index.size()) || (chunk_index[far] == INVALID)) {
+              alone = false;
+              continue;
+            }
+            if ((other != INVALID) && (other != chunk_index[far])) { alone = false; }
+            other = chunk_index[far];
+          }
+          if (!alone || (other == INVALID)) { continue; }
+          uint32_t const r{ local_rank[nodes[at]] };
+          uint32_t const near_rank{ local_rank[nodes[chunk_nodes[other]]] };
+          OrderNode const &nn{ o.nodes[span.off + nodes[chunk_nodes[other]]] };
+          Wide const nw{ (nn.kind == OrderKind::State) ? Wide{ along(nn.subject) }
+                                                       : Wide{ 0 } };
+          Wide const nx{ shape.at[chunk_nodes[other]].x };
+          // `rank_sep` from the state it joins, not a whole rank gap: the gap
+          // also holds room other transitions' labels were charged.
+          Wide x{ shape.at[at].x };
+          if ((kind == StateKind::Final) && (r == (near_rank + 1))) {
+            x = nx + nw + p.rank_sep;
+          }
+          if ((kind == StateKind::Initial) && (near_rank == (r + 1))) {
+            x = nx - p.rank_sep - along(nd.subject);
+          }
+          Wide const y{ Wide{ shape.at[chunk_nodes[other]].y } + seat_at[i] };
+          auto const clear = [&](Wide cx, Wide cy) {
+            scav_rect const want{ box_of_node(i, cx, cy) };
+            if ((want.x < 0) || (want.y < 0) || ((Wide{ want.x } + want.w) > chunk_w) ||
+                ((Wide{ want.y } + want.h) > chunk_h)) {
+              return false;
+            }
+            scav_rect const room{ grow(want, p.node_sep / 2) };
+            for (uint32_t j = 0; j < chunk_nodes.size(); ++j) {
+              if (j == i) { continue; }
+              scav_rect const there{
+                box_of_node(j, shape.at[chunk_nodes[j]].x, shape.at[chunk_nodes[j]].y)
+              };
+              if (overlaps(room, there)) { return false; }
+            }
+            return true;
+          };
+          if (clear(x, y)) {
+            shape.at[at] = { .x = static_cast<int32_t>(x), .y = static_cast<int32_t>(y) };
+            shape.seated.emplace_back(nd.subject, SeatHow::Moved);
+          } else if (clear(shape.at[at].x, y)) {
+            shape.at[at].y = static_cast<int32_t>(y);
+            shape.seated.emplace_back(nd.subject, SeatHow::Levelled);
+          } else {
+            shape.seated.emplace_back(nd.subject, SeatHow::Declined);
+          }
+        }
+        // A label beside an edge inside one column, whose leg runs down it,
+        // needs its own width and leader on one side of the leg inside the
+        // piece; where neither side has it the piece grows on its trailing
+        // side, as `dock`'s `contacts closed` needed once `On` stopped
+        // carrying the label as a rank gap (11.10g).
+        for (uint32_t k = 0; k < espan.len; ++k) {
+          OrderEdge const &e{ o.edges[espan.off + k] };
+          uint32_t const a{ in_chunk(e.src) };
+          uint32_t const b{ in_chunk(e.dst) };
+          if ((a == INVALID) || (b == INVALID) ||
+              (local_rank[nodes[a]] != local_rank[nodes[b]])) {
+            continue;
+          }
+          chunk_w = imax(chunk_w, beside_leg(e, shape.at[a].x, shape.at[b].x, a, b));
+        }
+        // Across the ranks the same: a label beside a leg between two ranks
+        // needs its extent across them and the leader on one side of the
+        // leg. The reserve above gives each side half of it, which holds a
+        // label's height beside a leg running across and not a label's width
+        // beside one running down, so where neither side has the whole the
+        // piece grows on its trailing side (11.10g).
+        for (uint32_t k = 0; k < espan.len; ++k) {
+          OrderEdge const &e{ o.edges[espan.off + k] };
+          uint32_t const a{ in_chunk(e.src) };
+          uint32_t const b{ in_chunk(e.dst) };
+          if ((a == INVALID) || (b == INVALID) ||
+              (local_rank[nodes[a]] == local_rank[nodes[b]]) ||
+              (e.segment >= seg_label_h.size()) || (seg_label_h[e.segment] == 0)) {
+            continue;
+          }
+          auto const span_of = [&](uint32_t i, Wide &lo, Wide &hi) {
+            OrderNode const &nd{ o.nodes[span.off + nodes[i]] };
+            Wide const half{ (nd.kind == OrderKind::State) ? Wide{ across(nd.subject) / 2 }
+                                                           : Wide{ 0 } };
+            lo = Wide{ shape.at[i].y } - half;
+            hi = Wide{ shape.at[i].y } + half;
+          };
+          Wide alo{ 0 };
+          Wide ahi{ 0 };
+          Wide blo{ 0 };
+          Wide bhi{ 0 };
+          span_of(a, alo, ahi);
+          span_of(b, blo, bhi);
+          Wide const lo{ imax(alo, blo) };
+          Wide const hi{ imin(ahi, bhi) };
+          if (hi < lo) { continue; }
+          Wide const leg{ lo + ((hi - lo) / 2) };
+          Wide const need{ Wide{ leader } + seg_label_h[e.segment] + (p.node_sep / 2) };
+          if ((leg < need) && ((chunk_h - leg) < need)) { chunk_h = leg + need; }
+        }
+        pieces_fit = pieces_fit && (chunk_w <= COORD_MAX) && (chunk_h <= COORD_MAX);
+        if (!pieces_fit) { break; }
+        pieces[chunk] = { .x = 0,
+                          .y = 0,
+                          .w = static_cast<int32_t>(chunk_w),
+                          .h = static_cast<int32_t>(chunk_h) };
+      }
+      if (!pieces_fit) {
+        shape.ok = false;
+        return shape;
+      }
+
+      // Packed, not stacked: stacking left-aligned gives every piece the width of the
+      // widest. They are rectangles sharing an area, which is `pack_lr`'s job (11.4).
+      // `stack` is the other candidate: each piece under the one before at
+      // the leading edge, like a wrapped line. It needs none of the room
+      // below, and a piece narrower than the one it follows sits under it
+      // rather than past a label's width to its right.
+      Packing packed;
+      if (stack) {
+        Wide y{ 0 };
+        Wide w{ 0 };
+        for (scav_rect const &piece : pieces) {
+          packed.at.push_back({ .x = 0,
+                                .y = static_cast<int32_t>(imin(y, Wide{ PACK_SATURATED })),
+                                .w = piece.w,
+                                .h = piece.h });
+          w = imax(w, Wide{ piece.w });
+          y += Wide{ piece.h } + p.node_sep;
+        }
+        packed.w = static_cast<int32_t>(imin(w, Wide{ PACK_SATURATED }));
+        packed.h = static_cast<int32_t>(imin(y - p.node_sep, Wide{ PACK_SATURATED }));
+      } else {
+        packed = pack_best(pieces, p.node_sep, p, dar, compaction);
+      }
+      // A cut's label room goes on the new piece's leading edge only where the
+      // packing puts that piece beside the one before it, so the leg between
+      // them runs across the gap. Stacked, the leg runs down the gap the two
+      // ends' own reserve already opened, and the room pushed the piece away
+      // from the state it joins: `brew`'s `Pumping`, `dock`'s `Charging`.
+      std::vector<Wide> applied(chunks.size(), 0);
+      for (uint32_t k = 1; (k < chunks.size()) && !stack; ++k) {
+        scav_rect const &here{ packed.at[k] };
+        scav_rect const &before{ packed.at[k - 1] };
+        bool const beside{ (here.y < (before.y + before.h)) &&
+                           (before.y < (here.y + here.h)) };
+        if (!beside || (carry[k] == 0)) { continue; }
+        applied[k] = carry[k];
+        pieces[k].w =
+            static_cast<int32_t>(imin(Wide{ pieces[k].w } + carry[k], Wide{ COORD_MAX }));
+        for (uint32_t i = 0; i < nodes.size(); ++i) {
+          if (chunk_of[local_rank[nodes[i]]] == k) {
+            shape.at[i].x = static_cast<int32_t>(Wide{ shape.at[i].x } + carry[k]);
+          }
+        }
+        for (TraceFold &cut : shape.cuts) {
+          if ((cut.refused == 0) && (cut.rank == global_rank[chunks[k]])) {
+            cut.carried = static_cast<int32_t>(carry[k]);
+          }
+        }
+      }
+      bool widened{ false };
+      for (Wide const room : applied) { widened = widened || (room != 0); }
+      if (widened) { packed = pack_best(pieces, p.node_sep, p, dar, compaction); }
+      // Room for a label on an edge a cut crosses where the packing put its
+      // two pieces one above the other, so its leg runs down the gap between
+      // them. Two labelled edges between one pair run as a pair of legs with
+      // a label outside each, so they need the room on both sides, and the
+      // leading side is made by moving every piece along: one side each left
+      // `ota`'s pair printing over both its states (11.10g).
+      auto const node_x = [&](uint32_t i) {
+        return Wide{ shape.at[i].x } + packed.at[chunk_of[local_rank[nodes[i]]]].x;
+      };
+      auto const cut_ends = [&](OrderEdge const &e, uint32_t &a, uint32_t &b) {
+        a = index[e.src - span.off];
+        b = index[e.dst - span.off];
+        if ((a == INVALID) || (b == INVALID) || (room_of(e) == 0)) { return false; }
+        uint32_t const ca{ chunk_of[local_rank[nodes[a]]] };
+        uint32_t const cb{ chunk_of[local_rank[nodes[b]]] };
+        scav_rect const &pa{ packed.at[ca] };
+        scav_rect const &pb{ packed.at[cb] };
+        return (ca != cb) && ((pa.y >= (pb.y + pb.h)) || (pb.y >= (pa.y + pa.h)));
+      };
+      std::vector<uint8_t> paired(espan.len, 0);
+      for (uint32_t k = 0; k < espan.len; ++k) {
+        uint32_t a{ 0 };
+        uint32_t b{ 0 };
+        if (!cut_ends(o.edges[espan.off + k], a, b)) { continue; }
+        for (uint32_t q = k + 1; q < espan.len; ++q) {
+          uint32_t fa{ 0 };
+          uint32_t fb{ 0 };
+          if (!cut_ends(o.edges[espan.off + q], fa, fb) || ((fa != a) && (fa != b)) ||
+              ((fb != a) && (fb != b))) {
+            continue;
+          }
+          paired[k] = 1;
+          paired[q] = 1;
+        }
+      }
+      Wide lead{ 0 };
+      for (uint32_t k = 0; k < espan.len; ++k) {
+        OrderEdge const &e{ o.edges[espan.off + k] };
+        uint32_t a{ 0 };
+        uint32_t b{ 0 };
+        if ((paired[k] == 0) || !cut_ends(e, a, b)) { continue; }
+        Wide const leg{ leg_of(node_x(a), node_x(b), a, b) };
+        if (leg >= 0) { lead = imax(lead, room_of(e) - leg); }
+      }
+      Wide stack_w{ Wide{ packed.w } + lead };
+      for (uint32_t k = 0; k < espan.len; ++k) {
+        OrderEdge const &e{ o.edges[espan.off + k] };
+        uint32_t a{ 0 };
+        uint32_t b{ 0 };
+        if (!cut_ends(e, a, b)) { continue; }
+        Wide const leg{ lead + leg_of(node_x(a), node_x(b), a, b) };
+        if (leg < lead) { continue; }
+        bool const leading{ (paired[k] == 0) && (leg >= room_of(e)) };
+        if (!leading) { stack_w = imax(stack_w, leg + room_of(e)); }
+      }
+      for (scav_rect &at : packed.at) { at.x = static_cast<int32_t>(Wide{ at.x } + lead); }
+      packed.w = static_cast<int32_t>(imin(stack_w, Wide{ PACK_SATURATED }));
+      // A fold is drawable only where every edge a cut crosses between two
+      // stacked pieces joins two plain nodes: an edge into a composite enters
+      // by a port on its left or right border, and stacked it goes round to
+      // reach it, as `vac`'s `full` did once `dock`'s `lamp` sat under `On`
+      // (11.10g). The scale measure cannot weigh that against the area the
+      // fold saves, so where it chooses such a fold is no candidate; where
+      // the row always folds, `Cost` over the whole chart does the weighing.
+      for (uint32_t k = 0; k < espan.len; ++k) {
+        OrderEdge const &e{ o.edges[espan.off + k] };
+        uint32_t const a{ index[e.src - span.off] };
+        uint32_t const b{ index[e.dst - span.off] };
+        if ((a == INVALID) || (b == INVALID)) { continue; }
+        scav_rect const &pa{ packed.at[chunk_of[local_rank[nodes[a]]]] };
+        scav_rect const &pb{ packed.at[chunk_of[local_rank[nodes[b]]]] };
+        bool const stacked{ (pa.y >= (pb.y + pb.h)) || (pb.y >= (pa.y + pa.h)) };
+        if (!stacked) { continue; }
+        for (uint32_t const end : { e.src, e.dst }) {
+          OrderNode const &nd{ o.nodes[end] };
+          if ((nd.kind != OrderKind::State) ||
+              (c.states[nd.subject].submachines.len != 0)) {
+            shape.drawable = false;
+          }
+        }
+      }
+      for (uint32_t k = 0; (k < chunks.size()) && (chunks.size() > 1); ++k) {
+        shape.packed.push_back({ .rank = global_rank[chunks[k]],
+                                 .x = packed.at[k].x,
+                                 .y = packed.at[k].y,
+                                 .w = packed.at[k].w,
+                                 .h = packed.at[k].h,
+                                 .carried = static_cast<int32_t>(applied[k]) });
+      }
+      shape.w = packed.w;
+      shape.h = packed.h;
+      shape.ok = fits(packed);
+      for (uint32_t k = 1; k < packed.at.size(); ++k) {
+        shape.wraps = shape.wraps || (packed.at[k].y != packed.at[0].y) ||
+                      (packed.at[k].x <= packed.at[k - 1].x);
+      }
+      // A saturated position would leave int32 when the offset below added
+      // to it, and no caller reads a shape this phase goes on to diagnose.
+      if (!shape.ok) { return shape; }
+      for (uint32_t i = 0; i < nodes.size(); ++i) {
+        scav_rect const &at{ packed.at[chunk_of[local_rank[nodes[i]]]] };
+        shape.at[i].x += at.x;
+        shape.at[i].y += at.y;
+      }
+      return shape;
+    };
+
+    Wide area{ 0 };
+    int32_t widest{ 0 };
+    for (uint32_t r = 0; r < layers; ++r) {
+      area += (Wide{ layer_w[r] } + p.rank_sep + boundary_gap(r)) * layer_h[r];
+      widest = imax(widest, layer_w[r]);
+    }
+    Wide const target{ imax(Wide{ widest },
+                            static_cast<Wide>(isqrt(static_cast<uint64_t>(
+                                floor_div(area * dar.num, Wide{ dar.den }))))) };
+
+    auto const better = [&](Shape const &a, Shape const &b) {
+      return pack_better(
+          { .at = {}, .w = static_cast<int32_t>(a.w), .h = static_cast<int32_t>(a.h) },
+          { .at = {}, .w = static_cast<int32_t>(b.w), .h = static_cast<int32_t>(b.h) },
+          dar.num,
+          dar.den,
+          p.sm_tiebreak != 0);
+    };
+    // A frame turned to run down is one column, which is what turning it was
+    // for: folded, its run wraps back into columns side by side, the drawing
+    // the frame running across already offers.
+    Wide const unwrapped{ Wide{ COORD_MAX } * 2 };
+    Shape best{ lay_out(unwrapped, false) };
+    Shape folded{ lay_out(down ? unwrapped : target, false) };
+    Shape stacked{ lay_out(down ? unwrapped : target, true) };
+    // The two folds are one cut in two arrangements, so the scale measure
+    // picks between them before either is weighed against the flat run.
+    bool const always{ fold == Fold::Always };
+    auto const usable = [always](Shape const &f) {
+      return f.ok && f.wraps && (f.drawable || always);
+    };
+    if (usable(stacked) &&
+        (!usable(folded) || (stacked.drawable && !folded.drawable) ||
+         ((stacked.drawable == folded.drawable) && better(stacked, folded)))) {
+      folded = stacked;
+    }
+    // `Always` takes the folded shape wherever it laid out, so what chose is
+    // `Cost` over the row rather than the scale measure inside the frame. A
+    // fold whose pieces pack back into one row in their own order is the
+    // run unfolded at `node_sep` rather than `rank_sep`, with every edge the
+    // cuts cross dropped from the alignment, so it is no candidate.
+    bool const swap{
+      folded.ok &&
+      (!best.ok || (folded.wraps && (always || (folded.drawable && better(folded, best)))))
+    };
+    if (swap) { best = folded; }
+    for (TraceFold const &cut : best.cuts) {
+      trace_emit({ .kind = TraceKind::FoldCut, .frame = m, .fold = cut });
+    }
+    for (TracePiece const &piece : best.packed) {
+      trace_emit({ .kind = TraceKind::PiecePacked, .frame = m, .piece = piece });
+    }
+    for (auto const &[state, by] : best.centred) {
+      trace_emit({ .kind = TraceKind::ColumnCentred,
+                   .frame = m,
+                   .shift = { .state = state, .seg = INVALID, .by = by } });
+    }
+    for (auto const &[state, how] : best.seated) {
+      trace_emit({ .kind = TraceKind::PseudostateSeated,
+                   .pass = static_cast<uint16_t>(how),
+                   .frame = m,
+                   .rank = { .state = state, .rank = 0 } });
+    }
+    if (!best.ok) {
+      overflow(diags, ElemKind::Submachine, m);
+      ok = false;
+      return;
+    }
+    boxes[id] = { .x = 0,
+                  .y = 0,
+                  .w = static_cast<int32_t>(best.w),
+                  .h = static_cast<int32_t>(best.h) };
+    for (uint32_t i = 0; i < nodes.size(); ++i) { local[nodes[i]] = best.at[i]; }
+  }
+
+  place_sub(m, down, dar, boxes, component, local);
+}
+
+// The frame's packing of its pieces, and each node's and state's place in it
+// along the ranks and across them, as x and y.
+void Sizer::place_sub(uint32_t m,
+                      bool down,
+                      FrameDar dar,
+                      std::vector<scav_rect> const &boxes,
+                      std::vector<uint32_t> const &component,
+                      std::vector<scav_point> const &local) {
+  Span const span{ o.sub_nodes[m] };
+  Span const espan{ o.sub_edges[m] };
+  Packing const packed{ pack_best(boxes, p.node_sep, p, dar, compaction) };
+  if (!fits(packed)) {
+    overflow(diags, ElemKind::Submachine, m);
+    ok = false;
+    return;
+  }
+  out.sub[m].w = down ? packed.h : packed.w;
+  out.sub[m].h = down ? packed.w : packed.h;
+
+  // A boundary node's rank puts it on the frame's border, and the folding and
+  // the two packings above leave a piece's own edges mid-frame, so its place
+  // along the ranks comes from the frame: sources where a route arrives,
+  // sinks where one leaves.
+  std::vector<uint32_t> out_deg(span.len, 0);
+  for (uint32_t k = 0; k < espan.len; ++k) {
+    ++out_deg[o.edges[espan.off + k].src - span.off];
+  }
+
+  for (uint32_t k = 0; k < span.len; ++k) {
+    scav_rect const &at{ packed.at[component[k]] };
+    OrderNode const &nd{ o.nodes[span.off + k] };
+    int32_t lead{ local[k].x + at.x };  // along the ranks
+    if (nd.kind == OrderKind::Boundary) {
+      // The frame's edge, not the piece's: sources where a route arrives,
+      // sinks where one leaves.
+      lead = (out_deg[k] != 0) ? 0 : packed.w;
+    }
+    int32_t const cross{ local[k].y + at.y };  // across them, a centre
+    out.node[span.off + k] =
+        down ? scav_point{ .x = cross, .y = lead } : scav_point{ .x = lead, .y = cross };
+    if (nd.kind == OrderKind::State) {
+      scav_rect &box{ out.state[nd.subject] };
+      box.x = down ? (cross - (box.w / 2)) : lead;
+      box.y = down ? lead : (cross - (box.h / 2));
+    }
+  }
+}
+
+// `lay_out_sub` from the memo where it has seen the frame's inputs before.
+// The key is every value it reads -- the frame's nodes and edges, the sizes
+// and kinds of the states in it, where each edge meets a composite's port,
+// its labels, gaps, ratio, and the whole profile -- so a hit is the layout it
+// would compute. Node indices in the key are the frame's own, since where a
+// frame starts in the merged arrays moves whenever a frame before it changes.
+// A traced run lays every frame out, since a hit would emit nothing.
+void Sizer::size_sub(uint32_t m) {
+  if (trace_sink() != nullptr) {
+    lay_out_sub(m);
+    return;
+  }
+  Span const span{ o.sub_nodes[m] };
+  Span const espan{ o.sub_edges[m] };
+  Span const gspan{ o.sub_gaps[m] };
+  bool const down{ runs_down(m) };
+  FrameDar const dar{ owner_dar(m) };
+  thread_local std::vector<uint32_t> key;
+  thread_local std::vector<int32_t> value;
+  key.clear();
+  auto const put = [](int32_t v) { key.push_back(static_cast<uint32_t>(v)); };
+  key.push_back(span.len);
+  key.push_back(o.sub_ranks[m]);
+  key.push_back(down ? 1U : 0U);
+  put(dar.num);
+  put(dar.den);
+  key.push_back(static_cast<uint32_t>(compaction));
+  key.push_back(static_cast<uint32_t>(fold));
+  std::array<uint32_t, sizeof(scav_profile) / sizeof(uint32_t)> knobs{};
+  std::memcpy(knobs.data(), &p, sizeof(scav_profile));
+  key.insert(key.end(), knobs.begin(), knobs.end());
+  for (uint32_t k = 0; k < span.len; ++k) {
+    OrderNode const &nd{ o.nodes[span.off + k] };
+    key.push_back(static_cast<uint32_t>(nd.kind));
+    key.push_back(nd.subject);
+    key.push_back(nd.rank);
+    key.push_back(nd.pos);
+    if (nd.kind != OrderKind::State) { continue; }
+    put(out.state[nd.subject].w);
+    put(out.state[nd.subject].h);
+    key.push_back(static_cast<uint32_t>(c.states[nd.subject].kind));
+    key.push_back(c.states[nd.subject].submachines.len);
+  }
+  key.push_back(espan.len);
+  for (uint32_t k = 0; k < espan.len; ++k) {
+    OrderEdge const &e{ o.edges[espan.off + k] };
+    key.push_back(e.src - span.off);
+    key.push_back(e.dst - span.off);
+    key.push_back(e.segment);
+    key.push_back(e.reversed);
+    bool const has{ e.segment < seg_label_h.size() };
+    put(has ? seg_label_h[e.segment] : 0);
+    put(has ? seg_label_w[e.segment] : 0);
+    for (uint32_t const end : { e.src, e.dst }) {
+      OrderNode const &nd{ o.nodes[end] };
+      put((nd.kind == OrderKind::State) ? attach_at(e.segment, nd.subject, down) : 0);
+    }
+  }
+  key.push_back(gspan.len);
+  for (uint32_t k = 0; k < gspan.len; ++k) { put(o.gaps[gspan.off + k]); }
+
+  // What it writes: the frame's extent, each node's place, and each state's.
+  Memo &memo{ frame_memo() };
+  uint32_t len{ 0 };
+  if (int32_t const *const hit{ memo.find(key, len) }) {
+    out.sub[m].w = hit[0];
+    out.sub[m].h = hit[1];
+    uint32_t at{ 2 };
+    for (uint32_t k = 0; k < span.len; ++k) {
+      OrderNode const &nd{ o.nodes[span.off + k] };
+      out.node[span.off + k] = { .x = hit[at], .y = hit[at + 1] };
+      at += 2;
+      if (nd.kind != OrderKind::State) { continue; }
+      out.state[nd.subject].x = hit[at];
+      out.state[nd.subject].y = hit[at + 1];
+      at += 2;
+    }
+    return;
+  }
+  bool const was{ ok };
+  lay_out_sub(m);
+  if (!was || !ok) { return; }
+  value.clear();
+  value.push_back(out.sub[m].w);
+  value.push_back(out.sub[m].h);
+  for (uint32_t k = 0; k < span.len; ++k) {
+    OrderNode const &nd{ o.nodes[span.off + k] };
+    value.push_back(out.node[span.off + k].x);
+    value.push_back(out.node[span.off + k].y);
+    if (nd.kind != OrderKind::State) { continue; }
+    value.push_back(out.state[nd.subject].x);
+    value.push_back(out.state[nd.subject].y);
+  }
+  memo.insert(key, value);
+}
+
+void Sizer::size_state(uint32_t i) {
+  std::vector<scav_rect> kids;
+  std::vector<uint32_t> ids;
+  Span const subs{ c.states[i].submachines };
+  for (uint32_t k = 0; k < subs.len; ++k) {
+    uint32_t const m{ c.submachine_ids[subs.off + k].v };
+    if (c.submachines[m].live == 0) { continue; }
+    kids.push_back(out.sub[m]);
+    ids.push_back(m);
+  }
+  Packing packed;
+  if (!kids.empty()) {
+    packed = pack_best(kids, p.sub_sep, p, dar_of(i), compaction);
+    for (uint32_t k = 0; k < ids.size(); ++k) {
+      uint32_t const m{ ids[k] };
+      sub_local[m] = { .x = packed.at[k].x, .y = packed.at[k].y };
+      // Whitespace elimination grew the frame to fill its row, and this is
+      // the one packing whose rect is a box a reader sees. A sink boundary
+      // node sits on the frame's trailing edge, so the growth moves it; a
+      // source sits at zero and does not.
+      Span const span{ o.sub_nodes[m] };
+      for (uint32_t u = 0; u < span.len; ++u) {
+        if (o.nodes[span.off + u].kind != OrderKind::Boundary) { continue; }
+        scav_point &at{ out.node[span.off + u] };
+        if (runs_down(m) && (at.y == out.sub[m].h)) { at.y = packed.at[k].h; }
+        if (!runs_down(m) && (at.x == out.sub[m].w)) { at.x = packed.at[k].w; }
+      }
+      out.sub[m].w = packed.at[k].w;
+      out.sub[m].h = packed.at[k].h;
+    }
+  }
+
+  scav_box_space const b{ box_of(s.box_state, s.n_box_state, i) };
+  uint32_t const kind{ static_cast<uint32_t>(c.states[i].kind) };
+  // A bar is thin across the axis the flow crosses it on, which for a frame
+  // running down is the other one, so it lies down there (11.10g).
+  StateKind const sk{ c.states[i].kind };
+  bool const lies{ ((sk == StateKind::Fork) || (sk == StateKind::Join)) &&
+                   runs_down(c.states[i].parent.v) };
+  int32_t const min_w{ lies ? p.kind_min_h[kind] : p.kind_min_w[kind] };
+  int32_t const min_h{ lies ? p.kind_min_w[kind] : p.kind_min_h[kind] };
+  Wide const ring{ bare_pseudostate(c, out.sub, b, i) ? Wide{ 0 }
+                                                      : (2 * static_cast<Wide>(p.pad)) };
+  Wide const w{ imax(imax(Wide{ b.min_w }, Wide{ packed.w }), Wide{ min_w }) + ring };
+  Wide const h{ imax(Wide{ b.h_before } + packed.h + b.h_after, Wide{ min_h }) + ring };
+  if ((w > COORD_MAX) || (h > COORD_MAX)) {
+    overflow(diags, ElemKind::State, i);
+    ok = false;
+    return;
+  }
+  out.state[i].w = static_cast<int32_t>(w);
+  out.state[i].h = static_cast<int32_t>(h);
+}
+
 // One whole sizing. `hole` is parallel to states -- the ratio every packing
 // inside that state's interior aims at, a `num` of 0 or a short vector falling
 // back to the profile's.
@@ -114,27 +1280,24 @@ bool size_pass(Chart const &c,
                Fold fold,
                SizedLayout &out,
                std::vector<Diagnostic> &diags) {
-  FrameDar const profile_dar{ .num = p.dar_num, .den = p.dar_den };
-  // Every packing inside one state's interior fills the same hole, so the state
-  // carries the ratio and its frames read their owner's.
-  auto const dar_of = [&](uint32_t state) {
-    return ((state < hole.size()) && (hole[state].num != 0)) ? hole[state] : profile_dar;
-  };
-  auto const owner_dar = [&](uint32_t m) {
-    StateId const owner{ c.submachines[m].owner };
-    return (owner.v == INVALID) ? profile_dar : dar_of(owner.v);
-  };
-
+  Sizer x{ .c = c,
+           .g = g,
+           .o = o,
+           .s = s,
+           .p = p,
+           .hole = hole,
+           .compaction = compaction,
+           .fold = fold,
+           .out = out,
+           .diags = diags };
   out.state.assign(c.states.size(), {});
   out.before.assign(c.states.size(), {});
   out.after.assign(c.states.size(), {});
   out.sub.assign(c.submachines.size(), {});
   out.node.assign(o.nodes.size(), {});
   out.chart = {};
-
-  // Where each submachine sits inside its owner's packed area, which the
-  // descent at the end turns into an absolute origin.
-  std::vector<scav_point> sub_local(c.submachines.size(), scav_point{});
+  std::vector<scav_point> &sub_local{ x.sub_local };
+  sub_local.assign(c.submachines.size(), scav_point{});
 
   uint32_t max_depth{ 0 };
   for (uint32_t const d : g.state_depth) { max_depth = imax(max_depth, d); }
@@ -149,1152 +1312,32 @@ bool size_pass(Chart const &c,
     subs_at[(owner.v == INVALID) ? 0 : g.state_depth[owner.v] + 1].push_back(m);
   }
 
-  bool ok{ true };
-
-  // Whether a frame's ranks run down the page. Its layout is computed along
-  // the ranks and across them, and only placed as x and y at the end: across
-  // is y and along is x for a frame that runs across, and the reverse for one
-  // that runs down (11.10g).
-  auto const runs_down = [&o](uint32_t m) {
-    return (m < o.sub_down.size()) && (o.sub_down[m] != 0);
-  };
-
-  // The label's extent across its frame's ranks and along them, on the middle
-  // segment 11.3 charges it to, so one label reserves in one frame.
-  std::vector<int32_t> seg_label_h(g.segments.size(), 0);
-  std::vector<int32_t> seg_label_w(g.segments.size(), 0);
+  x.seg_label_h.assign(g.segments.size(), 0);
+  x.seg_label_w.assign(g.segments.size(), 0);
   for (uint32_t i = 0; i < s.n_path_box; ++i) {
     scav_path_box const &box{ s.path_box[i] };
     if (box.subject >= g.trans_segments.size()) { continue; }
     Span const segs{ g.trans_segments[box.subject] };
     if (segs.len == 0) { continue; }
     uint32_t const mid{ segs.off + (segs.len / 2) };
-    bool const down{ runs_down(g.segments[mid].frame.v) };
-    seg_label_h[mid] = imax(seg_label_h[mid], down ? box.w : box.h);
-    seg_label_w[mid] = imax(seg_label_w[mid], down ? box.h : box.w);
+    bool const down{ x.runs_down(g.segments[mid].frame.v) };
+    x.seg_label_h[mid] = imax(x.seg_label_h[mid], down ? box.w : box.h);
+    x.seg_label_w[mid] = imax(x.seg_label_w[mid], down ? box.h : box.w);
   }
-
-  // Per port, the segment on the border's inner side, whose boundary node is
-  // where the router seats that port's slot.
-  std::vector<uint32_t> port_seg(g.ports.size(), INVALID);
+  x.port_seg.assign(g.ports.size(), INVALID);
   for (uint32_t seg = 0; seg < o.seg_port.size(); ++seg) {
-    if (o.seg_port[seg] < port_seg.size()) { port_seg[o.seg_port[seg]] = seg; }
+    if (o.seg_port[seg] < x.port_seg.size()) { x.port_seg[o.seg_port[seg]] = seg; }
   }
-  // Where `seg` meets `state`, from the state's centre across the ranks of the
-  // frame `state` sits in: where the boundary node inside it stands for a port
-  // on its border, which is sized by now because a state is sized before the
-  // frame it sits in. Zero where the segment meets the state's box rather than
-  // a port, and where the frame inside runs the other way, whose ports are on
-  // the faces this frame's edges do not arrive at.
-  auto const attach_at = [&](uint32_t seg, uint32_t state, bool down) -> int32_t {
-    if (seg >= g.segments.size()) { return 0; }  // a hand-built frame
-    SplitSegment const &sg{ g.segments[seg] };
-    for (uint32_t const port : { sg.src_port, sg.dst_port }) {
-      if ((port >= g.ports.size()) || (g.ports[port].state.v != state)) { continue; }
-      uint32_t const inner{ port_seg[port] };
-      if ((inner == INVALID) || (inner >= o.seg_node.size())) { continue; }
-      uint32_t const node{ o.seg_node[inner] };
-      uint32_t const frame{ g.segments[inner].frame.v };
-      if ((node >= out.node.size()) || (frame >= c.submachines.size()) ||
-          (c.submachines[frame].owner.v != state)) {
-        continue;
-      }
-      if (runs_down(frame) != down) { continue; }
-      scav_box_space const b{ box_of(s.box_state, s.n_box_state, state) };
-      Wide const pad{ bare_pseudostate(c, out.sub, b, state) ? 0 : p.pad };
-      if (down) {
-        Wide const x{ pad + sub_local[frame].x + out.node[node].x };
-        return static_cast<int32_t>(x - (out.state[state].w / 2));
-      }
-      Wide const y{ pad + b.h_before + sub_local[frame].y + out.node[node].y };
-      return static_cast<int32_t>(y - (out.state[state].h / 2));
-    }
-    return 0;
-  };
-
-  // A frame's graph need not be connected, and unconnected states all rank 0, so
-  // one graph would stack them in a column. Components are laid out and packed.
-  auto const lay_out_sub = [&](uint32_t m) {
-    Span const span{ o.sub_nodes[m] };
-    uint32_t const ranks{ o.sub_ranks[m] };
-    if ((span.len == 0) || (ranks == 0)) { return; }
-    // Everything below is along the ranks and across them, placed as x and y
-    // at the end, so a frame running down aims at its hole's ratio inverted.
-    bool const down{ runs_down(m) };
-    FrameDar const hole_dar{ owner_dar(m) };
-    FrameDar const dar{ down ? FrameDar{ .num = hole_dar.den, .den = hole_dar.num }
-                             : hole_dar };
-    auto const along = [&](uint32_t st) {
-      return down ? out.state[st].h : out.state[st].w;
-    };
-    auto const across = [&](uint32_t st) {
-      return down ? out.state[st].w : out.state[st].h;
-    };
-    Span const espan{ o.sub_edges[m] };
-    Span const gspan{ o.sub_gaps[m] };
-
-    // An anchored label needs `leader + box height` beside its leg, and phase 3
-    // has only the cross-axis room phase 2 left (11.9.5). Carried on the extent
-    // of both ends -- the slot `cross_coordinates` separates by, not the drawn
-    // rect -- so half lands each side and the pair opens the whole distance.
-    //
-    // The whole distance, not its shortfall against `node_sep`: the leg leaves
-    // its node's *centre*, and the shortfall opens the gap between node *edges*.
-    int32_t const leader{ label_leader(p) };
-    std::vector<int32_t> reserve(span.len, 0);
-    for (uint32_t k = 0; k < espan.len; ++k) {
-      OrderEdge const &e{ o.edges[espan.off + k] };
-      if (e.segment >= seg_label_h.size()) { continue; }  // a hand-built frame
-      int32_t const box_h{ seg_label_h[e.segment] };
-      if (box_h == 0) { continue; }
-      uint32_t const src{ e.src - span.off };
-      uint32_t const dst{ e.dst - span.off };
-      reserve[src] = imax(reserve[src], leader + box_h);
-      reserve[dst] = imax(reserve[dst], leader + box_h);
-    }
-
-    for (uint32_t k = 0; k < espan.len; ++k) {
-      OrderEdge const &e{ o.edges[espan.off + k] };
-      for (uint32_t const end : { e.src, e.dst }) {
-        if (o.nodes[end].kind != OrderKind::State) { continue; }
-        int32_t const at{ attach_at(e.segment, o.nodes[end].subject, down) };
-        if (at == 0) { continue; }
-        trace_emit(
-            { .kind = TraceKind::PortAttached,
-              .frame = m,
-              .shift = { .state = o.nodes[end].subject, .seg = e.segment, .by = at } });
-      }
-    }
-
-    std::vector<uint32_t> adj_count(span.len, 0);
-    for (uint32_t k = 0; k < espan.len; ++k) {
-      OrderEdge const &e{ o.edges[espan.off + k] };
-      ++adj_count[e.src - span.off];
-      ++adj_count[e.dst - span.off];
-    }
-    std::vector<uint32_t> adj_off(size_t{ span.len } + 1, 0);
-    for (uint32_t k = 0; k < span.len; ++k) { adj_off[k + 1] = adj_off[k] + adj_count[k]; }
-    std::vector<uint32_t> adj(adj_off[span.len], 0);
-    {
-      std::vector<uint32_t> fill(adj_off.begin(), adj_off.end() - 1);
-      for (uint32_t k = 0; k < espan.len; ++k) {
-        OrderEdge const &e{ o.edges[espan.off + k] };
-        adj[fill[e.src - span.off]++] = e.dst - span.off;
-        adj[fill[e.dst - span.off]++] = e.src - span.off;
-      }
-    }
-
-    // Components in first-node order, and nodes within a component in
-    // (rank, pos) order, so both are the reading order the frame was emitted in.
-    std::vector<uint32_t> component(span.len, INVALID);
-    std::vector<std::vector<uint32_t>> members;
-    std::vector<uint32_t> queue;
-    for (uint32_t seed = 0; seed < span.len; ++seed) {
-      if (component[seed] != INVALID) { continue; }
-      uint32_t const id{ static_cast<uint32_t>(members.size()) };
-      members.emplace_back();
-      component[seed] = id;
-      queue.assign(1, seed);
-      for (uint32_t at = 0; at < queue.size(); ++at) {
-        uint32_t const node{ queue[at] };
-        for (uint32_t k = adj_off[node]; k < adj_off[node + 1]; ++k) {
-          if (component[adj[k]] == INVALID) {
-            component[adj[k]] = id;
-            queue.push_back(adj[k]);
-          }
-        }
-      }
-      for (uint32_t k = 0; k < span.len; ++k) {
-        if (component[k] == id) { members[id].push_back(k); }
-      }
-    }
-
-    std::vector<scav_point> local(span.len, scav_point{});
-    std::vector<scav_rect> boxes(members.size(), scav_rect{});
-    for (uint32_t id = 0; id < members.size(); ++id) {
-      std::vector<uint32_t> const &nodes{ members[id] };
-
-      // Ranks renumbered from zero, with the frame's rank kept alongside so a label's
-      // gap still lands where it was charged.
-      std::vector<uint32_t> global_rank;
-      std::vector<uint32_t> local_rank(span.len, INVALID);
-      for (uint32_t const k : nodes) {
-        uint32_t const rank{ o.nodes[span.off + k].rank };
-        if (global_rank.empty() || (global_rank.back() != rank)) {
-          global_rank.push_back(rank);
-        }
-        local_rank[k] = static_cast<uint32_t>(global_rank.size()) - 1;
-      }
-      uint32_t const layers{ static_cast<uint32_t>(global_rank.size()) };
-      std::vector<uint32_t> index(span.len, INVALID);
-      std::vector<int32_t> extent(nodes.size(), 0);
-      std::vector<int32_t> layer_w(layers, 0);
-      std::vector<Wide> layer_h(layers, 0);
-      // The reserve keeps a label clear of the node beside its end in the same
-      // layer. A frame running down puts a label's width beside its leg, so a
-      // node alone in its layer there takes none: the room from its frame's
-      // edge is taken on one side of the leg below, and the half the reserve
-      // put on the other side was empty (11.10g). Across, a label's height is
-      // small and the reserve is also the gap a fold's stacked pieces keep.
-      std::vector<uint32_t> in_layer(layers, 0);
-      for (uint32_t const k : nodes) { ++in_layer[local_rank[k]]; }
-      for (uint32_t i = 0; i < nodes.size(); ++i) {
-        index[nodes[i]] = i;
-        OrderNode const &nd{ o.nodes[span.off + nodes[i]] };
-        uint32_t const r{ local_rank[nodes[i]] };
-        if (nd.kind == OrderKind::State) {
-          extent[i] = across(nd.subject);
-          layer_w[r] = imax(layer_w[r], along(nd.subject));
-        }
-        Wide const room{ (!down || (in_layer[r] > 1)) ? Wide{ reserve[nodes[i]] }
-                                                      : Wide{ 0 } };
-        extent[i] =
-            static_cast<int32_t>(imin(Wide{ extent[i] } + room, Wide{ COORD_MAX }));
-        layer_h[r] += extent[i] + p.node_sep;
-      }
-      // States joined by an edge inside one column share one centre line, so
-      // the route between any two runs straight down the overlap of their
-      // faces; left-aligned, the narrower one's own width at the column's
-      // leading edge was the only face they shared. The line is the centre of
-      // the widest of them, or of the room a label on one of those edges
-      // needs beside its leg on either side, whichever is wider, and the
-      // column grows to hold that room. Initial and final pseudostates are
-      // seated beside the state they join below; a bar keeps the leading
-      // edge, because a route to a state stacked on it would leave through its
-      // cap rather than its length (11.10g).
-      std::vector<uint32_t> group(nodes.size(), 0);
-      for (uint32_t i = 0; i < group.size(); ++i) { group[i] = i; }
-      auto const find = [&group](uint32_t i) {
-        while (group[i] != i) { i = group[i] = group[group[i]]; }
-        return i;
-      };
-      auto const columnar = [&](uint32_t i) {
-        OrderNode const &nd{ o.nodes[span.off + nodes[i]] };
-        if (nd.kind != OrderKind::State) { return false; }
-        StateKind const kind{ c.states[nd.subject].kind };
-        return (kind != StateKind::Initial) && (kind != StateKind::Final) &&
-               (kind != StateKind::Fork) && (kind != StateKind::Join);
-      };
-      auto const flat = [&](OrderEdge const &e, uint32_t &a, uint32_t &b) {
-        a = index[e.src - span.off];
-        b = index[e.dst - span.off];
-        return (a != INVALID) && (b != INVALID) &&
-               (local_rank[nodes[a]] == local_rank[nodes[b]]) && columnar(a) &&
-               columnar(b);
-      };
-      for (uint32_t k = 0; k < espan.len; ++k) {
-        uint32_t a{ 0 };
-        uint32_t b{ 0 };
-        if (!flat(o.edges[espan.off + k], a, b)) { continue; }
-        uint32_t const ga{ find(a) };
-        uint32_t const gb{ find(b) };
-        if (ga != gb) { group[imax(ga, gb)] = imin(ga, gb); }
-      }
-      // A group with two labelled edges has a label either side of its line,
-      // so each side needs the widest one's room; one label takes whichever
-      // side has it.
-      std::vector<uint32_t> labelled(nodes.size(), 0);
-      std::vector<int32_t> widest_label(nodes.size(), 0);
-      for (uint32_t k = 0; k < espan.len; ++k) {
-        OrderEdge const &e{ o.edges[espan.off + k] };
-        uint32_t a{ 0 };
-        uint32_t b{ 0 };
-        if (!flat(e, a, b) || (e.segment >= seg_label_w.size()) ||
-            (seg_label_w[e.segment] == 0)) {
-          continue;
-        }
-        ++labelled[find(a)];
-        widest_label[find(a)] = imax(widest_label[find(a)], seg_label_w[e.segment]);
-      }
-      std::vector<int32_t> group_w(nodes.size(), 0);
-      std::vector<uint32_t> grouped(nodes.size(), 0);
-      for (uint32_t i = 0; i < nodes.size(); ++i) {
-        if (!columnar(i)) { continue; }
-        uint32_t const root_of{ find(i) };
-        ++grouped[root_of];
-        group_w[root_of] =
-            imax(group_w[root_of], along(o.nodes[span.off + nodes[i]].subject));
-        if (labelled[root_of] >= 2) {
-          group_w[root_of] =
-              imax(group_w[root_of], (2 * (leader + widest_label[root_of])) + p.node_sep);
-        }
-      }
-      // Parallel to `nodes`: the width whose centre a grouped state sits on,
-      // zero for one in no group.
-      std::vector<int32_t> line(nodes.size(), 0);
-      for (uint32_t i = 0; i < nodes.size(); ++i) {
-        uint32_t const root_of{ columnar(i) ? find(i) : INVALID };
-        if ((root_of == INVALID) || (grouped[root_of] < 2)) { continue; }
-        line[i] = group_w[root_of];
-        uint32_t const r{ local_rank[nodes[i]] };
-        layer_w[r] = imax(layer_w[r], group_w[root_of]);
-      }
-      auto const boundary_gap = [&](uint32_t r) {
-        return (global_rank[r] < gspan.len) ? Wide{ o.gaps[gspan.off + global_rank[r]] }
-                                            : Wide{ 0 };
-      };
-
-      // A rank run grows unbounded along one axis and nesting multiplies it by depth.
-      // Cutting helps only sometimes -- at two ranks it worsens the aspect -- so both
-      // shapes are laid out and the scale measure picks, as `trybox` picks a packer.
-      struct Shape {
-        std::vector<scav_point> at;
-        Wide w{ 0 }, h{ 0 };
-        bool ok{ true };
-        // For the trace, of the shape that is kept: where pieces started and
-        // where a cut was refused, and what seating each pseudostate got.
-        std::vector<TraceFold> cuts;
-        std::vector<std::pair<uint32_t, SeatHow>> seated;
-        std::vector<std::pair<uint32_t, int32_t>> centred;
-        std::vector<TracePiece> packed;
-        // Some piece is packed other than beside the one before it.
-        bool wraps{ false };
-        // Every edge a cut crosses between stacked pieces joins two plain nodes.
-        bool drawable{ true };
-      };
-      // A cut before a layer is refused where it would separate an initial
-      // pseudostate from the state it enters in that layer, or a final one in
-      // that layer from the state it leaves: the fold packs its pieces apart,
-      // and the pseudostate would be drawn as a piece of its own, away from
-      // the state it joins. Likewise a boundary node, the point a route
-      // crosses the frame's border at: a piece of its own is packed below the
-      // node it joins, and the port with it, which dropped `vac`'s `battery
-      // low` a whole state's height off `Ready` (11.10g).
-      std::vector<uint8_t> glued(layers, 0);
-      for (uint32_t k = 0; k < espan.len; ++k) {
-        OrderEdge const &e{ o.edges[espan.off + k] };
-        uint32_t const a{ e.src - span.off };
-        uint32_t const b{ e.dst - span.off };
-        for (uint32_t const end : { a, b }) {
-          OrderNode const &nd{ o.nodes[span.off + end] };
-          bool const pseudostate{ (nd.kind == OrderKind::State) &&
-                                  ((c.states[nd.subject].kind == StateKind::Initial) ||
-                                   (c.states[nd.subject].kind == StateKind::Final)) };
-          if (!pseudostate && (nd.kind != OrderKind::Boundary)) { continue; }
-          uint32_t const other{ (end == a) ? b : a };
-          uint32_t const ra{ local_rank[end] };
-          uint32_t const rb{ local_rank[other] };
-          if ((ra == INVALID) || (rb == INVALID) || (ra == rb)) { continue; }
-          glued[imax(ra, rb)] = 1;
-        }
-      }
-      // Where `e`'s leg runs when it runs down the overlap of its two ends at
-      // `xa` and `xb`, or -1 where they do not overlap and there is no straight
-      // leg; and the room a label on it needs beside it. Zero room for an
-      // unlabelled edge.
-      auto const width_of_node = [&](uint32_t i) {
-        OrderNode const &nd{ o.nodes[span.off + nodes[i]] };
-        return (nd.kind == OrderKind::State) ? Wide{ along(nd.subject) } : Wide{ 0 };
-      };
-      auto const leg_of = [&](Wide xa, Wide xb, uint32_t a, uint32_t b) {
-        Wide const lo{ imax(xa, xb) };
-        Wide const hi{ imin(xa + width_of_node(a), xb + width_of_node(b)) };
-        return (hi <= lo) ? Wide{ -1 } : (lo + ((hi - lo) / 2));
-      };
-      auto const room_of = [&](OrderEdge const &e) {
-        bool const has{ (e.segment < seg_label_w.size()) &&
-                        (seg_label_w[e.segment] != 0) };
-        return has ? (Wide{ leader } + seg_label_w[e.segment] + (p.node_sep / 2))
-                   : Wide{ 0 };
-      };
-      // How wide a piece or a stack must be for `e`'s label to sit beside its
-      // leg: the leg plus the room where the leading side has too little of
-      // it, else zero.
-      auto const beside_leg =
-          [&](OrderEdge const &e, Wide xa, Wide xb, uint32_t a, uint32_t b) {
-            Wide const leg{ leg_of(xa, xb, a, b) };
-            Wide const need{ room_of(e) };
-            return ((need == 0) || (leg < 0) || (leg >= need)) ? Wide{ 0 } : (leg + need);
-          };
-      auto const lay_out = [&](Wide wrap_at, bool stack) {
-        Shape shape;
-        shape.at.assign(nodes.size(), scav_point{});
-        std::vector<uint32_t> chunk_of(layers, 0);
-        std::vector<uint32_t> chunks{ 0 };
-        Wide run{ 0 };
-        for (uint32_t r = 0; r < layers; ++r) {
-          Wide const step{ (r == 0)
-                               ? Wide{ layer_w[r] }
-                               : (Wide{ layer_w[r] } + p.rank_sep + boundary_gap(r - 1)) };
-          bool const wants_cut{ (r > 0) && ((run + step) > wrap_at) };
-          if (wants_cut && (glued[r] != 0)) {
-            shape.cuts.push_back({ .rank = global_rank[r], .refused = 1, .carried = 0 });
-          }
-          if (wants_cut && (glued[r] == 0)) {
-            shape.cuts.push_back({ .rank = global_rank[r], .refused = 0, .carried = 0 });
-            chunks.push_back(r);
-            run = layer_w[r];
-          } else {
-            run += step;
-          }
-          chunk_of[r] = static_cast<uint32_t>(chunks.size()) - 1;
-        }
-
-        std::vector<scav_rect> pieces(chunks.size(), scav_rect{});
-        std::vector<Wide> carry(chunks.size(), 0);
-        bool pieces_fit{ true };
-        for (uint32_t chunk = 0; chunk < chunks.size(); ++chunk) {
-          uint32_t const first{ chunks[chunk] };
-          uint32_t const last{ ((chunk + 1) < chunks.size()) ? chunks[chunk + 1]
-                                                             : layers };
-
-          // Only this chunk's nodes and the edges wholly inside it: an edge the cut
-          // crosses has its ends in two pieces, as a wrapped line's does.
-          CoordGraph cg;
-          cg.layers.assign(last - first, {});
-          std::vector<uint32_t> chunk_index(nodes.size(), INVALID);
-          std::vector<uint32_t> chunk_nodes;
-          for (uint32_t i = 0; i < nodes.size(); ++i) {
-            uint32_t const r{ local_rank[nodes[i]] };
-            if (chunk_of[r] != chunk) { continue; }
-            chunk_index[i] = static_cast<uint32_t>(chunk_nodes.size());
-            chunk_nodes.push_back(i);
-            cg.extent.push_back(extent[i]);
-            cg.layers[r - first].push_back(chunk_index[i]);
-          }
-          // An initial's target that one other edge enters by the same face
-          // gives the two their own heights on it. By centres, the target
-          // lined up with the initial -- which the seating below moves anyway
-          // -- and the other route jogged to reach it, as `vac`'s `battery
-          // low` did into `Seated`; level, the initial's dot would sit on that
-          // route. So the other edge meets the target `half` off its centre and
-          // the initial `half` the other way, where it is seated, and the
-          // initial's edge is weak: it anchors the target only where the other
-          // cannot, as in `estop`, where a pinned rank takes `Latched` from
-          // `Clear` (11.10g). A composite is met at its ports, whose heights
-          // are its own.
-          std::vector<int32_t> seat_at(chunk_nodes.size(), 0);
-          std::vector<int32_t> enter_at(chunk_nodes.size(), 0);
-          std::vector<uint8_t> apart(espan.len, 0);
-          auto const in_chunk = [&](uint32_t node) {
-            uint32_t const i{ index[node - span.off] };
-            return ((i != INVALID) && (chunk_index[i] != INVALID)) ? i : INVALID;
-          };
-          auto const initial = [&](uint32_t node) {
-            OrderNode const &nd{ o.nodes[node] };
-            return (nd.kind == OrderKind::State) &&
-                   (c.states[nd.subject].kind == StateKind::Initial);
-          };
-          // Per node, what enters its leading face other than an initial, and
-          // the position of the nearest of those in the layer before.
-          std::vector<uint32_t> arrivals(chunk_nodes.size(), 0);
-          std::vector<uint32_t> nearest(chunk_nodes.size(), INVALID);
-          for (uint32_t k = 0; k < espan.len; ++k) {
-            OrderEdge const &e{ o.edges[espan.off + k] };
-            uint32_t const a{ in_chunk(e.src) };
-            uint32_t const b{ in_chunk(e.dst) };
-            if ((a == INVALID) || (b == INVALID)) { continue; }
-            bool const forward{ local_rank[nodes[b]] == (local_rank[nodes[a]] + 1) };
-            bool const back{ local_rank[nodes[a]] == (local_rank[nodes[b]] + 1) };
-            if (!forward && !back) { continue; }
-            uint32_t const later{ forward ? b : a };
-            uint32_t const earlier{ forward ? a : b };
-            if (initial(span.off + nodes[earlier])) { continue; }
-            ++arrivals[chunk_index[later]];
-            uint32_t &near{ nearest[chunk_index[later]] };
-            near = imin(near, o.nodes[span.off + nodes[earlier]].pos);
-          }
-          for (uint32_t k = 0; k < espan.len; ++k) {
-            OrderEdge const &e{ o.edges[espan.off + k] };
-            uint32_t const dot{ in_chunk(e.src) };
-            uint32_t const target{ in_chunk(e.dst) };
-            if ((dot == INVALID) || (target == INVALID) || !initial(e.src)) { continue; }
-            OrderNode const &nd{ o.nodes[e.src] };
-            OrderNode const &nt{ o.nodes[e.dst] };
-            if ((nt.kind != OrderKind::State) ||
-                (c.states[nt.subject].submachines.len != 0) ||
-                (local_rank[nodes[target]] != (local_rank[nodes[dot]] + 1))) {
-              continue;
-            }
-            uint32_t const others{ arrivals[chunk_index[target]] };
-            int32_t const half{ ceil_div((across(nd.subject) / 2) + route_clearance(p),
-                                         2) };
-            // One other arrival: with more, the initial is the median the
-            // alignment keeps the target steady on.
-            if ((others != 1) || ((4 * half) > across(nt.subject))) { continue; }
-            bool const above{ nd.pos < nearest[chunk_index[target]] };
-            seat_at[chunk_index[dot]] = above ? -half : half;
-            enter_at[chunk_index[target]] = above ? half : -half;
-            apart[k] = 1;
-          }
-          for (uint32_t k = 0; k < espan.len; ++k) {
-            OrderEdge const &e{ o.edges[espan.off + k] };
-            uint32_t from{ index[e.src - span.off] };
-            uint32_t to{ index[e.dst - span.off] };
-            if ((from == INVALID) || (to == INVALID)) { continue; }
-            if ((chunk_index[from] == INVALID) || (chunk_index[to] == INVALID)) {
-              continue;
-            }
-            // Brandes-Kopf reads a segment between consecutive layers, earlier
-            // end first. A rank pin can leave an edge within one layer or
-            // pointing back, and a cut leaves one spanning several; aligned, a
-            // flat edge's two ends became one block at one coordinate, which
-            // drew `ota`'s `Writing` over `Fetching` (11.10g).
-            uint32_t const rf{ local_rank[nodes[from]] };
-            uint32_t const rt{ local_rank[nodes[to]] };
-            auto const at_end = [&](uint32_t node) {
-              OrderNode const &nd{ o.nodes[node] };
-              return (nd.kind == OrderKind::State) ? attach_at(e.segment, nd.subject, down)
-                                                   : 0;
-            };
-            int32_t from_at{ at_end(e.src) };
-            int32_t to_at{ at_end(e.dst) };
-            if ((rf + 1) != rt) {
-              if ((rt + 1) != rf) { continue; }
-              uint32_t const swap{ from };
-              from = to;
-              to = swap;
-              int32_t const swap_at{ from_at };
-              from_at = to_at;
-              to_at = swap_at;
-            }
-            // The initial's own edge meets the target at the initial's height.
-            to_at +=
-                (apart[k] != 0) ? seat_at[chunk_index[from]] : enter_at[chunk_index[to]];
-            cg.edges.push_back({ .from = chunk_index[from],
-                                 .to = chunk_index[to],
-                                 .inner = ((o.nodes[e.src].kind == OrderKind::Bend) &&
-                                           (o.nodes[e.dst].kind == OrderKind::Bend))
-                                              ? 1U
-                                              : 0U,
-                                 .from_at = from_at,
-                                 .to_at = to_at,
-                                 .weak = apart[k] });
-          }
-          cg.sep = p.node_sep;
-          std::vector<int32_t> const centre{ cross_coordinates(cg) };
-
-          // The gap a label was charged to the boundary this cut falls on, less
-          // what the packing between two pieces already gives it. Inside a
-          // chunk the charge is `rank_sep + boundary_gap`; across a cut the
-          // packer separates by `node_sep` alone and the charge was being
-          // dropped, which is why `estop` draws a 384-wide label across a
-          // 288-unit gap (11.9.3). Held back until the packing says where the
-          // piece went: see below.
-          carry[chunk] = (first == 0)
-                             ? Wide{ 0 }
-                             : imax(boundary_gap(first - 1) - p.node_sep, Wide{ 0 });
-          std::vector<Wide> layer_x(last - first, 0);
-          for (uint32_t r = first + 1; r < last; ++r) {
-            layer_x[r - first] =
-                layer_x[r - first - 1] + layer_w[r - 1] + p.rank_sep + boundary_gap(r - 1);
-          }
-          Wide chunk_w{ layer_x[last - first - 1] + layer_w[last - 1] };
-          Wide chunk_h{ 0 };
-          for (uint32_t i = 0; i < chunk_nodes.size(); ++i) {
-            // A node's trailing edge, not its centre plus half its extent: an odd extent
-            // halves down, so the box would not contain its own rects.
-            chunk_h =
-                imax(chunk_h, (Wide{ centre[i] } - (cg.extent[i] / 2)) + cg.extent[i]);
-          }
-          for (uint32_t i = 0; i < chunk_nodes.size(); ++i) {
-            uint32_t const at{ chunk_nodes[i] };
-            uint32_t const r{ local_rank[nodes[at]] };
-            // An initial pseudostate is ranked just before the state it enters,
-            // so it sits flush against its layer's trailing edge: left-aligned
-            // in a layer as wide as its widest member, its arrow would run that
-            // whole width.
-            OrderNode const &nd{ o.nodes[span.off + nodes[at]] };
-            Wide const flush{ ((nd.kind == OrderKind::State) &&
-                               (c.states[nd.subject].kind == StateKind::Initial))
-                                  ? Wide{ layer_w[r] } - along(nd.subject)
-                                  : Wide{ 0 } };
-            // On its group's centre line, where it has one.
-            Wide const inset{ (line[at] == 0)
-                                  ? flush
-                                  : ((Wide{ line[at] } - along(nd.subject)) / 2) };
-            if (inset != flush) {
-              shape.centred.emplace_back(nd.subject, static_cast<int32_t>(inset));
-            }
-            // Local to the piece; the packing below decides where the piece
-            // itself goes.
-            shape.at[at] = { .x = static_cast<int32_t>(layer_x[r - first] + inset),
-                             .y = static_cast<int32_t>(centre[i]) };
-          }
-
-          // An initial or final pseudostate with one neighbour in this piece is
-          // level with it and `rank_sep` from it -- before it for an initial,
-          // after it for a final -- rather than wherever its layer's edge falls,
-          // which is past the widest member of the layer between. Each only
-          // where the box it moves to is clear of every other node here and
-          // inside the piece (11.10g).
-          auto const box_of_node = [&](uint32_t i, Wide x, Wide y) {
-            OrderNode const &nd{ o.nodes[span.off + nodes[chunk_nodes[i]]] };
-            Wide const w{ (nd.kind == OrderKind::State) ? Wide{ along(nd.subject) }
-                                                        : Wide{ 0 } };
-            Wide const h{ cg.extent[i] };
-            return scav_rect{ .x = static_cast<int32_t>(x),
-                              .y = static_cast<int32_t>(y - (h / 2)),
-                              .w = static_cast<int32_t>(w),
-                              .h = static_cast<int32_t>(h) };
-          };
-          for (uint32_t i = 0; i < chunk_nodes.size(); ++i) {
-            uint32_t const at{ chunk_nodes[i] };
-            OrderNode const &nd{ o.nodes[span.off + nodes[at]] };
-            if (nd.kind != OrderKind::State) { continue; }
-            StateKind const kind{ c.states[nd.subject].kind };
-            if ((kind != StateKind::Initial) && (kind != StateKind::Final)) { continue; }
-            uint32_t other{ INVALID };
-            bool alone{ true };
-            for (uint32_t k = 0; k < espan.len; ++k) {
-              OrderEdge const &e{ o.edges[espan.off + k] };
-              uint32_t const a{ index[e.src - span.off] };
-              uint32_t const b{ index[e.dst - span.off] };
-              uint32_t far{ INVALID };
-              if (a == at) {
-                far = b;
-              } else if (b == at) {
-                far = a;
-              }
-              if ((far == INVALID) || (far == at)) { continue; }
-              if ((far >= chunk_index.size()) || (chunk_index[far] == INVALID)) {
-                alone = false;
-                continue;
-              }
-              if ((other != INVALID) && (other != chunk_index[far])) { alone = false; }
-              other = chunk_index[far];
-            }
-            if (!alone || (other == INVALID)) { continue; }
-            uint32_t const r{ local_rank[nodes[at]] };
-            uint32_t const near_rank{ local_rank[nodes[chunk_nodes[other]]] };
-            OrderNode const &nn{ o.nodes[span.off + nodes[chunk_nodes[other]]] };
-            Wide const nw{ (nn.kind == OrderKind::State) ? Wide{ along(nn.subject) }
-                                                         : Wide{ 0 } };
-            Wide const nx{ shape.at[chunk_nodes[other]].x };
-            // `rank_sep` from the state it joins, not a whole rank gap: the gap
-            // also holds room other transitions' labels were charged.
-            Wide x{ shape.at[at].x };
-            if ((kind == StateKind::Final) && (r == (near_rank + 1))) {
-              x = nx + nw + p.rank_sep;
-            }
-            if ((kind == StateKind::Initial) && (near_rank == (r + 1))) {
-              x = nx - p.rank_sep - along(nd.subject);
-            }
-            Wide const y{ Wide{ shape.at[chunk_nodes[other]].y } + seat_at[i] };
-            auto const clear = [&](Wide cx, Wide cy) {
-              scav_rect const want{ box_of_node(i, cx, cy) };
-              if ((want.x < 0) || (want.y < 0) || ((Wide{ want.x } + want.w) > chunk_w) ||
-                  ((Wide{ want.y } + want.h) > chunk_h)) {
-                return false;
-              }
-              scav_rect const room{ grow(want, p.node_sep / 2) };
-              for (uint32_t j = 0; j < chunk_nodes.size(); ++j) {
-                if (j == i) { continue; }
-                scav_rect const there{
-                  box_of_node(j, shape.at[chunk_nodes[j]].x, shape.at[chunk_nodes[j]].y)
-                };
-                if (overlaps(room, there)) { return false; }
-              }
-              return true;
-            };
-            if (clear(x, y)) {
-              shape.at[at] = { .x = static_cast<int32_t>(x),
-                               .y = static_cast<int32_t>(y) };
-              shape.seated.emplace_back(nd.subject, SeatHow::Moved);
-            } else if (clear(shape.at[at].x, y)) {
-              shape.at[at].y = static_cast<int32_t>(y);
-              shape.seated.emplace_back(nd.subject, SeatHow::Levelled);
-            } else {
-              shape.seated.emplace_back(nd.subject, SeatHow::Declined);
-            }
-          }
-          // A label beside an edge inside one column, whose leg runs down it,
-          // needs its own width and leader on one side of the leg inside the
-          // piece; where neither side has it the piece grows on its trailing
-          // side, as `dock`'s `contacts closed` needed once `On` stopped
-          // carrying the label as a rank gap (11.10g).
-          for (uint32_t k = 0; k < espan.len; ++k) {
-            OrderEdge const &e{ o.edges[espan.off + k] };
-            uint32_t const a{ in_chunk(e.src) };
-            uint32_t const b{ in_chunk(e.dst) };
-            if ((a == INVALID) || (b == INVALID) ||
-                (local_rank[nodes[a]] != local_rank[nodes[b]])) {
-              continue;
-            }
-            chunk_w = imax(chunk_w, beside_leg(e, shape.at[a].x, shape.at[b].x, a, b));
-          }
-          // Across the ranks the same: a label beside a leg between two ranks
-          // needs its extent across them and the leader on one side of the
-          // leg. The reserve above gives each side half of it, which holds a
-          // label's height beside a leg running across and not a label's width
-          // beside one running down, so where neither side has the whole the
-          // piece grows on its trailing side (11.10g).
-          for (uint32_t k = 0; k < espan.len; ++k) {
-            OrderEdge const &e{ o.edges[espan.off + k] };
-            uint32_t const a{ in_chunk(e.src) };
-            uint32_t const b{ in_chunk(e.dst) };
-            if ((a == INVALID) || (b == INVALID) ||
-                (local_rank[nodes[a]] == local_rank[nodes[b]]) ||
-                (e.segment >= seg_label_h.size()) || (seg_label_h[e.segment] == 0)) {
-              continue;
-            }
-            auto const span_of = [&](uint32_t i, Wide &lo, Wide &hi) {
-              OrderNode const &nd{ o.nodes[span.off + nodes[i]] };
-              Wide const half{ (nd.kind == OrderKind::State)
-                                   ? Wide{ across(nd.subject) / 2 }
-                                   : Wide{ 0 } };
-              lo = Wide{ shape.at[i].y } - half;
-              hi = Wide{ shape.at[i].y } + half;
-            };
-            Wide alo{ 0 };
-            Wide ahi{ 0 };
-            Wide blo{ 0 };
-            Wide bhi{ 0 };
-            span_of(a, alo, ahi);
-            span_of(b, blo, bhi);
-            Wide const lo{ imax(alo, blo) };
-            Wide const hi{ imin(ahi, bhi) };
-            if (hi < lo) { continue; }
-            Wide const leg{ lo + ((hi - lo) / 2) };
-            Wide const need{ Wide{ leader } + seg_label_h[e.segment] + (p.node_sep / 2) };
-            if ((leg < need) && ((chunk_h - leg) < need)) { chunk_h = leg + need; }
-          }
-          pieces_fit = pieces_fit && (chunk_w <= COORD_MAX) && (chunk_h <= COORD_MAX);
-          if (!pieces_fit) { break; }
-          pieces[chunk] = { .x = 0,
-                            .y = 0,
-                            .w = static_cast<int32_t>(chunk_w),
-                            .h = static_cast<int32_t>(chunk_h) };
-        }
-        if (!pieces_fit) {
-          shape.ok = false;
-          return shape;
-        }
-
-        // Packed, not stacked: stacking left-aligned gives every piece the width of the
-        // widest. They are rectangles sharing an area, which is `pack_lr`'s job (11.4).
-        // `stack` is the other candidate: each piece under the one before at
-        // the leading edge, like a wrapped line. It needs none of the room
-        // below, and a piece narrower than the one it follows sits under it
-        // rather than past a label's width to its right.
-        Packing packed;
-        if (stack) {
-          Wide y{ 0 };
-          Wide w{ 0 };
-          for (scav_rect const &piece : pieces) {
-            packed.at.push_back(
-                { .x = 0,
-                  .y = static_cast<int32_t>(imin(y, Wide{ PACK_SATURATED })),
-                  .w = piece.w,
-                  .h = piece.h });
-            w = imax(w, Wide{ piece.w });
-            y += Wide{ piece.h } + p.node_sep;
-          }
-          packed.w = static_cast<int32_t>(imin(w, Wide{ PACK_SATURATED }));
-          packed.h = static_cast<int32_t>(imin(y - p.node_sep, Wide{ PACK_SATURATED }));
-        } else {
-          packed = pack_best(pieces, p.node_sep, p, dar, compaction);
-        }
-        // A cut's label room goes on the new piece's leading edge only where the
-        // packing puts that piece beside the one before it, so the leg between
-        // them runs across the gap. Stacked, the leg runs down the gap the two
-        // ends' own reserve already opened, and the room pushed the piece away
-        // from the state it joins: `brew`'s `Pumping`, `dock`'s `Charging`.
-        std::vector<Wide> applied(chunks.size(), 0);
-        for (uint32_t k = 1; (k < chunks.size()) && !stack; ++k) {
-          scav_rect const &here{ packed.at[k] };
-          scav_rect const &before{ packed.at[k - 1] };
-          bool const beside{ (here.y < (before.y + before.h)) &&
-                             (before.y < (here.y + here.h)) };
-          if (!beside || (carry[k] == 0)) { continue; }
-          applied[k] = carry[k];
-          pieces[k].w = static_cast<int32_t>(
-              imin(Wide{ pieces[k].w } + carry[k], Wide{ COORD_MAX }));
-          for (uint32_t i = 0; i < nodes.size(); ++i) {
-            if (chunk_of[local_rank[nodes[i]]] == k) {
-              shape.at[i].x = static_cast<int32_t>(Wide{ shape.at[i].x } + carry[k]);
-            }
-          }
-          for (TraceFold &cut : shape.cuts) {
-            if ((cut.refused == 0) && (cut.rank == global_rank[chunks[k]])) {
-              cut.carried = static_cast<int32_t>(carry[k]);
-            }
-          }
-        }
-        bool widened{ false };
-        for (Wide const room : applied) { widened = widened || (room != 0); }
-        if (widened) { packed = pack_best(pieces, p.node_sep, p, dar, compaction); }
-        // Room for a label on an edge a cut crosses where the packing put its
-        // two pieces one above the other, so its leg runs down the gap between
-        // them. Two labelled edges between one pair run as a pair of legs with
-        // a label outside each, so they need the room on both sides, and the
-        // leading side is made by moving every piece along: one side each left
-        // `ota`'s pair printing over both its states (11.10g).
-        auto const node_x = [&](uint32_t i) {
-          return Wide{ shape.at[i].x } + packed.at[chunk_of[local_rank[nodes[i]]]].x;
-        };
-        auto const cut_ends = [&](OrderEdge const &e, uint32_t &a, uint32_t &b) {
-          a = index[e.src - span.off];
-          b = index[e.dst - span.off];
-          if ((a == INVALID) || (b == INVALID) || (room_of(e) == 0)) { return false; }
-          uint32_t const ca{ chunk_of[local_rank[nodes[a]]] };
-          uint32_t const cb{ chunk_of[local_rank[nodes[b]]] };
-          scav_rect const &pa{ packed.at[ca] };
-          scav_rect const &pb{ packed.at[cb] };
-          return (ca != cb) && ((pa.y >= (pb.y + pb.h)) || (pb.y >= (pa.y + pa.h)));
-        };
-        std::vector<uint8_t> paired(espan.len, 0);
-        for (uint32_t k = 0; k < espan.len; ++k) {
-          uint32_t a{ 0 };
-          uint32_t b{ 0 };
-          if (!cut_ends(o.edges[espan.off + k], a, b)) { continue; }
-          for (uint32_t q = k + 1; q < espan.len; ++q) {
-            uint32_t fa{ 0 };
-            uint32_t fb{ 0 };
-            if (!cut_ends(o.edges[espan.off + q], fa, fb) || ((fa != a) && (fa != b)) ||
-                ((fb != a) && (fb != b))) {
-              continue;
-            }
-            paired[k] = 1;
-            paired[q] = 1;
-          }
-        }
-        Wide lead{ 0 };
-        for (uint32_t k = 0; k < espan.len; ++k) {
-          OrderEdge const &e{ o.edges[espan.off + k] };
-          uint32_t a{ 0 };
-          uint32_t b{ 0 };
-          if ((paired[k] == 0) || !cut_ends(e, a, b)) { continue; }
-          Wide const leg{ leg_of(node_x(a), node_x(b), a, b) };
-          if (leg >= 0) { lead = imax(lead, room_of(e) - leg); }
-        }
-        Wide stack_w{ Wide{ packed.w } + lead };
-        for (uint32_t k = 0; k < espan.len; ++k) {
-          OrderEdge const &e{ o.edges[espan.off + k] };
-          uint32_t a{ 0 };
-          uint32_t b{ 0 };
-          if (!cut_ends(e, a, b)) { continue; }
-          Wide const leg{ lead + leg_of(node_x(a), node_x(b), a, b) };
-          if (leg < lead) { continue; }
-          bool const leading{ (paired[k] == 0) && (leg >= room_of(e)) };
-          if (!leading) { stack_w = imax(stack_w, leg + room_of(e)); }
-        }
-        for (scav_rect &at : packed.at) {
-          at.x = static_cast<int32_t>(Wide{ at.x } + lead);
-        }
-        packed.w = static_cast<int32_t>(imin(stack_w, Wide{ PACK_SATURATED }));
-        // A fold is drawable only where every edge a cut crosses between two
-        // stacked pieces joins two plain nodes: an edge into a composite enters
-        // by a port on its left or right border, and stacked it goes round to
-        // reach it, as `vac`'s `full` did once `dock`'s `lamp` sat under `On`
-        // (11.10g). The scale measure cannot weigh that against the area the
-        // fold saves, so where it chooses such a fold is no candidate; where
-        // the row always folds, `Cost` over the whole chart does the weighing.
-        for (uint32_t k = 0; k < espan.len; ++k) {
-          OrderEdge const &e{ o.edges[espan.off + k] };
-          uint32_t const a{ index[e.src - span.off] };
-          uint32_t const b{ index[e.dst - span.off] };
-          if ((a == INVALID) || (b == INVALID)) { continue; }
-          scav_rect const &pa{ packed.at[chunk_of[local_rank[nodes[a]]]] };
-          scav_rect const &pb{ packed.at[chunk_of[local_rank[nodes[b]]]] };
-          bool const stacked{ (pa.y >= (pb.y + pb.h)) || (pb.y >= (pa.y + pa.h)) };
-          if (!stacked) { continue; }
-          for (uint32_t const end : { e.src, e.dst }) {
-            OrderNode const &nd{ o.nodes[end] };
-            if ((nd.kind != OrderKind::State) ||
-                (c.states[nd.subject].submachines.len != 0)) {
-              shape.drawable = false;
-            }
-          }
-        }
-        for (uint32_t k = 0; (k < chunks.size()) && (chunks.size() > 1); ++k) {
-          shape.packed.push_back({ .rank = global_rank[chunks[k]],
-                                   .x = packed.at[k].x,
-                                   .y = packed.at[k].y,
-                                   .w = packed.at[k].w,
-                                   .h = packed.at[k].h,
-                                   .carried = static_cast<int32_t>(applied[k]) });
-        }
-        shape.w = packed.w;
-        shape.h = packed.h;
-        shape.ok = fits(packed);
-        for (uint32_t k = 1; k < packed.at.size(); ++k) {
-          shape.wraps = shape.wraps || (packed.at[k].y != packed.at[0].y) ||
-                        (packed.at[k].x <= packed.at[k - 1].x);
-        }
-        // A saturated position would leave int32 when the offset below added
-        // to it, and no caller reads a shape this phase goes on to diagnose.
-        if (!shape.ok) { return shape; }
-        for (uint32_t i = 0; i < nodes.size(); ++i) {
-          scav_rect const &at{ packed.at[chunk_of[local_rank[nodes[i]]]] };
-          shape.at[i].x += at.x;
-          shape.at[i].y += at.y;
-        }
-        return shape;
-      };
-
-      Wide area{ 0 };
-      int32_t widest{ 0 };
-      for (uint32_t r = 0; r < layers; ++r) {
-        area += (Wide{ layer_w[r] } + p.rank_sep + boundary_gap(r)) * layer_h[r];
-        widest = imax(widest, layer_w[r]);
-      }
-      Wide const target{ imax(Wide{ widest },
-                              static_cast<Wide>(isqrt(static_cast<uint64_t>(
-                                  floor_div(area * dar.num, Wide{ dar.den }))))) };
-
-      auto const better = [&](Shape const &a, Shape const &b) {
-        return pack_better(
-            { .at = {}, .w = static_cast<int32_t>(a.w), .h = static_cast<int32_t>(a.h) },
-            { .at = {}, .w = static_cast<int32_t>(b.w), .h = static_cast<int32_t>(b.h) },
-            dar.num,
-            dar.den,
-            p.sm_tiebreak != 0);
-      };
-      // A frame turned to run down is one column, which is what turning it was
-      // for: folded, its run wraps back into columns side by side, the drawing
-      // the frame running across already offers.
-      Wide const unwrapped{ Wide{ COORD_MAX } * 2 };
-      Shape best{ lay_out(unwrapped, false) };
-      Shape folded{ lay_out(down ? unwrapped : target, false) };
-      Shape stacked{ lay_out(down ? unwrapped : target, true) };
-      // The two folds are one cut in two arrangements, so the scale measure
-      // picks between them before either is weighed against the flat run.
-      bool const always{ fold == Fold::Always };
-      auto const usable = [always](Shape const &f) {
-        return f.ok && f.wraps && (f.drawable || always);
-      };
-      if (usable(stacked) &&
-          (!usable(folded) || (stacked.drawable && !folded.drawable) ||
-           ((stacked.drawable == folded.drawable) && better(stacked, folded)))) {
-        folded = stacked;
-      }
-      // `Always` takes the folded shape wherever it laid out, so what chose is
-      // `Cost` over the row rather than the scale measure inside the frame. A
-      // fold whose pieces pack back into one row in their own order is the
-      // run unfolded at `node_sep` rather than `rank_sep`, with every edge the
-      // cuts cross dropped from the alignment, so it is no candidate.
-      bool const swap{
-        folded.ok && (!best.ok || (folded.wraps &&
-                                   (always || (folded.drawable && better(folded, best)))))
-      };
-      if (swap) { best = folded; }
-      for (TraceFold const &cut : best.cuts) {
-        trace_emit({ .kind = TraceKind::FoldCut, .frame = m, .fold = cut });
-      }
-      for (TracePiece const &piece : best.packed) {
-        trace_emit({ .kind = TraceKind::PiecePacked, .frame = m, .piece = piece });
-      }
-      for (auto const &[state, by] : best.centred) {
-        trace_emit({ .kind = TraceKind::ColumnCentred,
-                     .frame = m,
-                     .shift = { .state = state, .seg = INVALID, .by = by } });
-      }
-      for (auto const &[state, how] : best.seated) {
-        trace_emit({ .kind = TraceKind::PseudostateSeated,
-                     .pass = static_cast<uint16_t>(how),
-                     .frame = m,
-                     .rank = { .state = state, .rank = 0 } });
-      }
-      if (!best.ok) {
-        overflow(diags, ElemKind::Submachine, m);
-        ok = false;
-        return;
-      }
-      boxes[id] = { .x = 0,
-                    .y = 0,
-                    .w = static_cast<int32_t>(best.w),
-                    .h = static_cast<int32_t>(best.h) };
-      for (uint32_t i = 0; i < nodes.size(); ++i) { local[nodes[i]] = best.at[i]; }
-    }
-
-    Packing const packed{ pack_best(boxes, p.node_sep, p, dar, compaction) };
-    if (!fits(packed)) {
-      overflow(diags, ElemKind::Submachine, m);
-      ok = false;
-      return;
-    }
-    out.sub[m].w = down ? packed.h : packed.w;
-    out.sub[m].h = down ? packed.w : packed.h;
-
-    // A boundary node's rank puts it on the frame's border, and the folding and
-    // the two packings above leave a piece's own edges mid-frame, so its place
-    // along the ranks comes from the frame: sources where a route arrives,
-    // sinks where one leaves.
-    std::vector<uint32_t> out_deg(span.len, 0);
-    for (uint32_t k = 0; k < espan.len; ++k) {
-      ++out_deg[o.edges[espan.off + k].src - span.off];
-    }
-
-    for (uint32_t k = 0; k < span.len; ++k) {
-      scav_rect const &at{ packed.at[component[k]] };
-      OrderNode const &nd{ o.nodes[span.off + k] };
-      int32_t lead{ local[k].x + at.x };  // along the ranks
-      if (nd.kind == OrderKind::Boundary) {
-        // The frame's edge, not the piece's: sources where a route arrives,
-        // sinks where one leaves.
-        lead = (out_deg[k] != 0) ? 0 : packed.w;
-      }
-      int32_t const cross{ local[k].y + at.y };  // across them, a centre
-      out.node[span.off + k] =
-          down ? scav_point{ .x = cross, .y = lead } : scav_point{ .x = lead, .y = cross };
-      if (nd.kind == OrderKind::State) {
-        scav_rect &box{ out.state[nd.subject] };
-        box.x = down ? (cross - (box.w / 2)) : lead;
-        box.y = down ? lead : (cross - (box.h / 2));
-      }
-    }
-  };
-
-  // `lay_out_sub` from the memo where it has seen the frame's inputs before.
-  // The key is every value it reads -- the frame's nodes and edges, the sizes
-  // and kinds of the states in it, where each edge meets a composite's port,
-  // its labels, gaps, ratio, and the whole profile -- so a hit is the layout it
-  // would compute. Node indices in the key are the frame's own, since where a
-  // frame starts in the merged arrays moves whenever a frame before it changes.
-  // A traced run lays every frame out, since a hit would emit nothing.
-  auto const size_sub = [&](uint32_t m) {
-    if (trace_sink() != nullptr) {
-      lay_out_sub(m);
-      return;
-    }
-    Span const span{ o.sub_nodes[m] };
-    Span const espan{ o.sub_edges[m] };
-    Span const gspan{ o.sub_gaps[m] };
-    bool const down{ runs_down(m) };
-    FrameDar const dar{ owner_dar(m) };
-    thread_local std::vector<uint32_t> key;
-    thread_local std::vector<int32_t> value;
-    key.clear();
-    auto const put = [](int32_t v) { key.push_back(static_cast<uint32_t>(v)); };
-    key.push_back(span.len);
-    key.push_back(o.sub_ranks[m]);
-    key.push_back(down ? 1U : 0U);
-    put(dar.num);
-    put(dar.den);
-    key.push_back(static_cast<uint32_t>(compaction));
-    key.push_back(static_cast<uint32_t>(fold));
-    std::array<uint32_t, sizeof(scav_profile) / sizeof(uint32_t)> knobs{};
-    std::memcpy(knobs.data(), &p, sizeof(scav_profile));
-    key.insert(key.end(), knobs.begin(), knobs.end());
-    for (uint32_t k = 0; k < span.len; ++k) {
-      OrderNode const &nd{ o.nodes[span.off + k] };
-      key.push_back(static_cast<uint32_t>(nd.kind));
-      key.push_back(nd.subject);
-      key.push_back(nd.rank);
-      key.push_back(nd.pos);
-      if (nd.kind != OrderKind::State) { continue; }
-      put(out.state[nd.subject].w);
-      put(out.state[nd.subject].h);
-      key.push_back(static_cast<uint32_t>(c.states[nd.subject].kind));
-      key.push_back(c.states[nd.subject].submachines.len);
-    }
-    key.push_back(espan.len);
-    for (uint32_t k = 0; k < espan.len; ++k) {
-      OrderEdge const &e{ o.edges[espan.off + k] };
-      key.push_back(e.src - span.off);
-      key.push_back(e.dst - span.off);
-      key.push_back(e.segment);
-      key.push_back(e.reversed);
-      bool const has{ e.segment < seg_label_h.size() };
-      put(has ? seg_label_h[e.segment] : 0);
-      put(has ? seg_label_w[e.segment] : 0);
-      for (uint32_t const end : { e.src, e.dst }) {
-        OrderNode const &nd{ o.nodes[end] };
-        put((nd.kind == OrderKind::State) ? attach_at(e.segment, nd.subject, down) : 0);
-      }
-    }
-    key.push_back(gspan.len);
-    for (uint32_t k = 0; k < gspan.len; ++k) { put(o.gaps[gspan.off + k]); }
-
-    // What it writes: the frame's extent, each node's place, and each state's.
-    Memo &memo{ frame_memo() };
-    uint32_t len{ 0 };
-    if (int32_t const *const hit{ memo.find(key, len) }) {
-      out.sub[m].w = hit[0];
-      out.sub[m].h = hit[1];
-      uint32_t at{ 2 };
-      for (uint32_t k = 0; k < span.len; ++k) {
-        OrderNode const &nd{ o.nodes[span.off + k] };
-        out.node[span.off + k] = { .x = hit[at], .y = hit[at + 1] };
-        at += 2;
-        if (nd.kind != OrderKind::State) { continue; }
-        out.state[nd.subject].x = hit[at];
-        out.state[nd.subject].y = hit[at + 1];
-        at += 2;
-      }
-      return;
-    }
-    bool const was{ ok };
-    lay_out_sub(m);
-    if (!was || !ok) { return; }
-    value.clear();
-    value.push_back(out.sub[m].w);
-    value.push_back(out.sub[m].h);
-    for (uint32_t k = 0; k < span.len; ++k) {
-      OrderNode const &nd{ o.nodes[span.off + k] };
-      value.push_back(out.node[span.off + k].x);
-      value.push_back(out.node[span.off + k].y);
-      if (nd.kind != OrderKind::State) { continue; }
-      value.push_back(out.state[nd.subject].x);
-      value.push_back(out.state[nd.subject].y);
-    }
-    memo.insert(key, value);
-  };
-
-  auto const size_state = [&](uint32_t i) {
-    std::vector<scav_rect> kids;
-    std::vector<uint32_t> ids;
-    Span const subs{ c.states[i].submachines };
-    for (uint32_t k = 0; k < subs.len; ++k) {
-      uint32_t const m{ c.submachine_ids[subs.off + k].v };
-      if (c.submachines[m].live == 0) { continue; }
-      kids.push_back(out.sub[m]);
-      ids.push_back(m);
-    }
-    Packing packed;
-    if (!kids.empty()) {
-      packed = pack_best(kids, p.sub_sep, p, dar_of(i), compaction);
-      for (uint32_t k = 0; k < ids.size(); ++k) {
-        uint32_t const m{ ids[k] };
-        sub_local[m] = { .x = packed.at[k].x, .y = packed.at[k].y };
-        // Whitespace elimination grew the frame to fill its row, and this is
-        // the one packing whose rect is a box a reader sees. A sink boundary
-        // node sits on the frame's trailing edge, so the growth moves it; a
-        // source sits at zero and does not.
-        Span const span{ o.sub_nodes[m] };
-        for (uint32_t u = 0; u < span.len; ++u) {
-          if (o.nodes[span.off + u].kind != OrderKind::Boundary) { continue; }
-          scav_point &at{ out.node[span.off + u] };
-          if (runs_down(m) && (at.y == out.sub[m].h)) { at.y = packed.at[k].h; }
-          if (!runs_down(m) && (at.x == out.sub[m].w)) { at.x = packed.at[k].w; }
-        }
-        out.sub[m].w = packed.at[k].w;
-        out.sub[m].h = packed.at[k].h;
-      }
-    }
-
-    scav_box_space const b{ box_of(s.box_state, s.n_box_state, i) };
-    uint32_t const kind{ static_cast<uint32_t>(c.states[i].kind) };
-    // A bar is thin across the axis the flow crosses it on, which for a frame
-    // running down is the other one, so it lies down there (11.10g).
-    StateKind const sk{ c.states[i].kind };
-    bool const lies{ ((sk == StateKind::Fork) || (sk == StateKind::Join)) &&
-                     runs_down(c.states[i].parent.v) };
-    int32_t const min_w{ lies ? p.kind_min_h[kind] : p.kind_min_w[kind] };
-    int32_t const min_h{ lies ? p.kind_min_w[kind] : p.kind_min_h[kind] };
-    Wide const ring{ bare_pseudostate(c, out.sub, b, i) ? Wide{ 0 }
-                                                        : (2 * static_cast<Wide>(p.pad)) };
-    Wide const w{ imax(imax(Wide{ b.min_w }, Wide{ packed.w }), Wide{ min_w }) + ring };
-    Wide const h{ imax(Wide{ b.h_before } + packed.h + b.h_after, Wide{ min_h }) + ring };
-    if ((w > COORD_MAX) || (h > COORD_MAX)) {
-      overflow(diags, ElemKind::State, i);
-      ok = false;
-      return;
-    }
-    out.state[i].w = static_cast<int32_t>(w);
-    out.state[i].h = static_cast<int32_t>(h);
-  };
 
   // Levels interleave: the submachines whose children sit at this depth, then
   // the states one level up that wrap them; level 0 sizes the document roots.
   for (uint32_t level = max_depth + 2; level-- > 0;) {
-    for (uint32_t const m : subs_at[level]) { size_sub(m); }
+    for (uint32_t const m : subs_at[level]) { x.size_sub(m); }
     if (level > 0) {
-      for (uint32_t const i : states_at[level - 1]) { size_state(i); }
+      for (uint32_t const i : states_at[level - 1]) { x.size_state(i); }
     }
   }
-  if (!ok) { return false; }
+  if (!x.ok) { return false; }
 
   // One descent from the root, adding each frame's origin. Everything stays inside
   // the sized extents, so int32 cannot leave the domain here.
