@@ -18,83 +18,56 @@ namespace scav {
 
 namespace {
 
-// `f`, then `g`, then node. `node` carries vertex and plane, so no two states
-// compare equal and the pop order cannot depend on the push order.
-bool frontier_before(Wide fa, Wide ga, uint32_t na, Wide fb, Wide gb, uint32_t nb) {
-  if (fa != fb) { return fa < fb; }
-  if (ga != gb) { return ga < gb; }
-  return na < nb;
+// `f`, then `g`, then node. `node` carries vertex and plane, and a node's `g`
+// only falls, so no two entries compare equal and the pop order cannot depend
+// on the push order or on the heap's shape.
+bool frontier_before(OrthoFrontierEntry const &a, OrthoFrontierEntry const &b) {
+  if (a.f != b.f) { return a.f < b.f; }
+  if (a.g != b.g) { return a.g < b.g; }
+  return a.node < b.node;
 }
 
-void heap_swap(OrthoScratch &s, uint32_t a, uint32_t b) {
-  Wide const f{ s.heap_f[a] };
-  Wide const g{ s.heap_g[a] };
-  uint32_t const node{ s.heap_node[a] };
-  s.heap_f[a] = s.heap_f[b];
-  s.heap_g[a] = s.heap_g[b];
-  s.heap_node[a] = s.heap_node[b];
-  s.heap_f[b] = f;
-  s.heap_g[b] = g;
-  s.heap_node[b] = node;
-}
+// A 4-ary heap: children of `i` are `4i+1 .. 4i+4`. Both directions move a
+// hole and write the travelling entry once. `<algorithm>` is outside this
+// library's header subset (6).
+constexpr uint32_t HEAP_ARITY{ 4 };
 
-// `<algorithm>` is outside this library's header subset (6).
-void heap_push(OrthoScratch &s, Wide f, Wide g, uint32_t node) {
-  s.heap_f.push_back(f);
-  s.heap_g.push_back(g);
-  s.heap_node.push_back(node);
-  uint32_t i{ static_cast<uint32_t>(s.heap_node.size()) - 1 };
+void heap_push(std::vector<OrthoFrontierEntry> &heap, OrthoFrontierEntry const &item) {
+  heap.push_back(item);
+  uint32_t i{ static_cast<uint32_t>(heap.size()) - 1 };
   while (i > 0) {
-    uint32_t const parent{ (i - 1) / 2 };
-    if (!frontier_before(s.heap_f[i],
-                         s.heap_g[i],
-                         s.heap_node[i],
-                         s.heap_f[parent],
-                         s.heap_g[parent],
-                         s.heap_node[parent])) {
-      break;
-    }
-    heap_swap(s, i, parent);
-    i = parent;
+    uint32_t const up{ (i - 1) / HEAP_ARITY };
+    if (!frontier_before(item, heap[up])) { break; }
+    heap[i] = heap[up];
+    i = up;
   }
+  heap[i] = item;
 }
 
-void heap_pop(OrthoScratch &s, Wide &f, Wide &g, uint32_t &node) {
-  f = s.heap_f[0];
-  g = s.heap_g[0];
-  node = s.heap_node[0];
-  s.heap_f[0] = s.heap_f.back();
-  s.heap_g[0] = s.heap_g.back();
-  s.heap_node[0] = s.heap_node.back();
-  s.heap_f.pop_back();
-  s.heap_g.pop_back();
-  s.heap_node.pop_back();
+OrthoFrontierEntry heap_pop(std::vector<OrthoFrontierEntry> &heap) {
+  OrthoFrontierEntry const top{ heap[0] };
+  OrthoFrontierEntry const last{ heap.back() };
+  heap.pop_back();
+  auto const n{ static_cast<uint32_t>(heap.size()) };
+  if (n == 0) { return top; }
   uint32_t i{ 0 };
-  auto const n{ static_cast<uint32_t>(s.heap_node.size()) };
   for (;;) {
-    uint32_t const left{ (2 * i) + 1 };
-    uint32_t best{ i };
-    if ((left < n) && frontier_before(s.heap_f[left],
-                                      s.heap_g[left],
-                                      s.heap_node[left],
-                                      s.heap_f[best],
-                                      s.heap_g[best],
-                                      s.heap_node[best])) {
-      best = left;
+    uint32_t const first{ (HEAP_ARITY * i) + 1 };
+    if (first >= n) { break; }
+    uint32_t const end{ imin(first + HEAP_ARITY, n) };
+    uint32_t least{ first };
+    for (uint32_t c = first + 1; c < end; ++c) {
+      if (frontier_before(heap[c], heap[least])) { least = c; }
     }
-    if (((left + 1) < n) && frontier_before(s.heap_f[left + 1],
-                                            s.heap_g[left + 1],
-                                            s.heap_node[left + 1],
-                                            s.heap_f[best],
-                                            s.heap_g[best],
-                                            s.heap_node[best])) {
-      best = left + 1;
-    }
-    if (best == i) { break; }
-    heap_swap(s, i, best);
-    i = best;
+    if (!frontier_before(heap[least], last)) { break; }
+    heap[i] = heap[least];
+    i = least;
   }
+  heap[i] = last;
+  return top;
 }
+
+Wide distance(int32_t a, int32_t b) { return (a < b) ? (Wide{ b } - a) : (Wide{ a } - b); }
 
 // How far outside `[lo, lo + len]` a coordinate lies, zero anywhere inside it.
 // Measured from the span rather than from a border point, so a face's length
@@ -892,90 +865,107 @@ bool ortho_search(OrthoGrid const &g,
   if ((vertices == 0) || (from >= vertices) || (to >= vertices)) { return false; }
   if (g.pass_h.empty() && (g.nx() > 1)) { return false; }
   uint32_t const nodes{ vertices * 2 };
-  if (s.stamp.size() != nodes) {
-    s.stamp.assign(nodes, 0);
-    s.best.assign(nodes, 0);
-    s.parent.assign(nodes, INVALID);
-    s.generation = 0;
+  // Only grown: entries past `nodes` are left alone, and every stamp in the
+  // vector is from an earlier generation than the one this search takes.
+  if (s.state.size() < nodes) {
+    s.state.resize(nodes, OrthoNodeState{ .stamp = 0, .parent = INVALID, .best = 0 });
   }
   // A stamp from a search before the counter wrapped would read as this one's.
   if (++s.generation == 0) {
-    s.stamp.assign(nodes, 0);
+    for (OrthoNodeState &n : s.state) { n.stamp = 0; }
     s.generation = 1;
   }
   uint32_t const gen{ s.generation };
+  OrthoNodeState *const state{ s.state.data() };
+  std::vector<OrthoFrontierEntry> &heap{ s.heap };
+  uint32_t const nx{ g.nx() };
+  uint32_t const ny{ g.ny() };
+  int32_t const *const xs{ g.xs.data() };
+  int32_t const *const ys{ g.ys.data() };
+  uint8_t const *const pass_h{ g.pass_h.data() };
+  uint8_t const *const pass_v{ g.pass_v.data() };
   scav_point const goal{ g.point(to) };
 
   // Manhattan plus one bend for an axis this plane cannot cover alone. Both are
-  // lower bounds, so the sum admits.
-  auto const heuristic = [&](uint32_t node) {
-    scav_point const at{ g.point(node / 2) };
-    Wide const dx{ (at.x < goal.x) ? (Wide{ goal.x } - at.x) : (Wide{ at.x } - goal.x) };
-    Wide const dy{ (at.y < goal.y) ? (Wide{ goal.y } - at.y) : (Wide{ at.y } - goal.y) };
-    bool const turn{ ((node % 2) == 0) ? (dy != 0) : (dx != 0) };
+  // lower bounds, so the sum admits. `dx` and `dy` are the node's own distances
+  // to the goal on each axis, taken from the line indices each move knows.
+  auto const heuristic = [bend](Wide dx, Wide dy, uint32_t plane) {
+    bool const turn{ (plane == 0) ? (dy != 0) : (dx != 0) };
     return dx + dy + (turn ? bend : Wide{ 0 });
   };
 
-  s.heap_f.clear();
-  s.heap_g.clear();
-  s.heap_node.clear();
-  for (uint32_t plane = 0; plane < 2; ++plane) {
-    uint32_t const node{ (from * 2) + plane };
-    s.stamp[node] = gen;
-    s.best[node] = 0;
-    s.parent[node] = INVALID;
-    heap_push(s, heuristic(node), 0, node);
+  heap.clear();
+  {
+    Wide const dx{ distance(xs[from % nx], goal.x) };
+    Wide const dy{ distance(ys[from / nx], goal.y) };
+    for (uint32_t plane = 0; plane < 2; ++plane) {
+      uint32_t const node{ (from * 2) + plane };
+      state[node] = { .stamp = gen, .parent = INVALID, .best = 0 };
+      heap_push(heap, { .f = heuristic(dx, dy, plane), .g = 0, .node = node });
+    }
   }
 
   uint32_t expansions{ 0 };
   uint32_t reached{ INVALID };
-  while (!s.heap_node.empty()) {
-    Wide top_f{ 0 };
-    Wide top_g{ 0 };
-    uint32_t node{ 0 };
-    heap_pop(s, top_f, top_g, node);
-    if ((s.stamp[node] != gen) || (top_g != s.best[node])) { continue; }
-    if ((node / 2) == to) {
+  while (!heap.empty()) {
+    OrthoFrontierEntry const top{ heap_pop(heap) };
+    uint32_t const node{ top.node };
+    OrthoNodeState const &here{ state[node] };
+    if ((here.stamp != gen) || (top.g != here.best)) { continue; }
+    uint32_t const v{ node / 2 };
+    if (v == to) {
       reached = node;
       break;
     }
     if (++expansions > ORTHO_EXPANSION_BUDGET) { return false; }
 
-    uint32_t const v{ node / 2 };
     uint32_t const plane{ node % 2 };
-    uint32_t const ix{ v % g.nx() };
-    uint32_t const iy{ v / g.nx() };
+    uint32_t const iy{ v / nx };
+    uint32_t const ix{ v - (iy * nx) };
+    Wide const top_g{ top.g };
+    Wide const dx{ distance(xs[ix], goal.x) };
+    Wide const dy{ distance(ys[iy], goal.y) };
 
-    auto const relax = [&](uint32_t next, Wide step) {
+    auto const relax = [&](uint32_t next, Wide step, Wide h) {
       Wide const g_next{ top_g + step };
-      if ((s.stamp[next] == gen) && (s.best[next] <= g_next)) { return; }
-      s.stamp[next] = gen;
-      s.best[next] = g_next;
-      s.parent[next] = node;
-      heap_push(s, g_next + heuristic(next), g_next, next);
+      OrthoNodeState &there{ state[next] };
+      if ((there.stamp == gen) && (there.best <= g_next)) { return; }
+      there = { .stamp = gen, .parent = node, .best = g_next };
+      heap_push(heap, { .f = g_next + h, .g = g_next, .node = next });
     };
 
-    relax((v * 2) + (1 - plane), bend);  // the turn, then this plane's moves
+    // The turn, then this plane's moves.
+    relax(node ^ 1U, bend, heuristic(dx, dy, 1 - plane));
     if (plane == 0) {
-      if (((ix + 1) < g.nx()) && (g.pass_h[(iy * (g.nx() - 1)) + ix] != 0)) {
-        relax(g.vertex(ix + 1, iy) * 2, Wide{ g.xs[ix + 1] } - g.xs[ix]);
+      uint8_t const *const row{ pass_h + (static_cast<size_t>(iy) * (nx - 1)) };
+      if (((ix + 1) < nx) && (row[ix] != 0)) {
+        relax(node + 2,
+              Wide{ xs[ix + 1] } - xs[ix],
+              heuristic(distance(xs[ix + 1], goal.x), dy, 0));
       }
-      if ((ix > 0) && (g.pass_h[(iy * (g.nx() - 1)) + (ix - 1)] != 0)) {
-        relax(g.vertex(ix - 1, iy) * 2, Wide{ g.xs[ix] } - g.xs[ix - 1]);
+      if ((ix > 0) && (row[ix - 1] != 0)) {
+        relax(node - 2,
+              Wide{ xs[ix] } - xs[ix - 1],
+              heuristic(distance(xs[ix - 1], goal.x), dy, 0));
       }
     } else {
-      if (((iy + 1) < g.ny()) && (g.pass_v[(iy * g.nx()) + ix] != 0)) {
-        relax((g.vertex(ix, iy + 1) * 2) + 1, Wide{ g.ys[iy + 1] } - g.ys[iy]);
+      uint32_t const down{ 2 * nx };
+      if (((iy + 1) < ny) && (pass_v[(static_cast<size_t>(iy) * nx) + ix] != 0)) {
+        relax(node + down,
+              Wide{ ys[iy + 1] } - ys[iy],
+              heuristic(dx, distance(ys[iy + 1], goal.y), 1));
       }
-      if ((iy > 0) && (g.pass_v[((iy - 1) * g.nx()) + ix] != 0)) {
-        relax((g.vertex(ix, iy - 1) * 2) + 1, Wide{ g.ys[iy] } - g.ys[iy - 1]);
+      if ((iy > 0) && (pass_v[(static_cast<size_t>(iy - 1) * nx) + ix] != 0)) {
+        relax(node - down,
+              Wide{ ys[iy] } - ys[iy - 1],
+              heuristic(dx, distance(ys[iy - 1], goal.y), 1));
       }
     }
   }
   if (reached == INVALID) { return false; }
 
   s.path.clear();
-  for (uint32_t node = reached; node != INVALID; node = s.parent[node]) {
+  for (uint32_t node = reached; node != INVALID; node = state[node].parent) {
     s.path.push_back(node / 2);
   }
   for (auto i = static_cast<uint32_t>(s.path.size()); i-- > 0;) {

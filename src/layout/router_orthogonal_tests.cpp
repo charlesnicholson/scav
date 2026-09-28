@@ -173,6 +173,186 @@ uint32_t mix(uint32_t x) {
   return x;
 }
 
+// A second A* over the same graph and the same `(f, g, node)` order, written
+// with parallel per-node arrays, three parallel heap keys and a binary heap.
+// The order is total, so its paths must be `ortho_search`'s node for node,
+// and its expansion count too.
+struct ReferenceSearch {
+  std::vector<Wide> best;
+  std::vector<uint32_t> parent, stamp;
+  std::vector<Wide> heap_f, heap_g;
+  std::vector<uint32_t> heap_node;
+  uint32_t generation{ 0 };
+  uint32_t expansions{ 0 };
+  // Pops whose `f` the next entry shares, and whose `f` and `g` it shares, so
+  // that only the node decided which came first.
+  uint32_t tied_f{ 0 };
+  uint32_t tied_fg{ 0 };
+
+  [[nodiscard]] bool before(uint32_t a, uint32_t b) const {
+    if (heap_f[a] != heap_f[b]) { return heap_f[a] < heap_f[b]; }
+    if (heap_g[a] != heap_g[b]) { return heap_g[a] < heap_g[b]; }
+    return heap_node[a] < heap_node[b];
+  }
+
+  void swap_entries(uint32_t a, uint32_t b) {
+    std::swap(heap_f[a], heap_f[b]);
+    std::swap(heap_g[a], heap_g[b]);
+    std::swap(heap_node[a], heap_node[b]);
+  }
+
+  void push(Wide f, Wide g, uint32_t node) {
+    heap_f.push_back(f);
+    heap_g.push_back(g);
+    heap_node.push_back(node);
+    uint32_t i{ static_cast<uint32_t>(heap_node.size()) - 1 };
+    while ((i > 0) && before(i, (i - 1) / 2)) {
+      swap_entries(i, (i - 1) / 2);
+      i = (i - 1) / 2;
+    }
+  }
+
+  void pop(Wide &f, Wide &g, uint32_t &node) {
+    f = heap_f[0];
+    g = heap_g[0];
+    node = heap_node[0];
+    heap_f[0] = heap_f.back();
+    heap_g[0] = heap_g.back();
+    heap_node[0] = heap_node.back();
+    heap_f.pop_back();
+    heap_g.pop_back();
+    heap_node.pop_back();
+    auto const n{ static_cast<uint32_t>(heap_node.size()) };
+    uint32_t i{ 0 };
+    for (;;) {
+      uint32_t const left{ (2 * i) + 1 };
+      uint32_t least{ i };
+      if ((left < n) && before(left, least)) { least = left; }
+      if (((left + 1) < n) && before(left + 1, least)) { least = left + 1; }
+      if (least == i) { break; }
+      swap_entries(i, least);
+      i = least;
+    }
+    if ((n > 0) && (heap_f[0] == f)) {
+      ++tied_f;
+      if (heap_g[0] == g) { ++tied_fg; }
+    }
+  }
+
+  bool search(OrthoGrid const &g,
+              uint32_t from,
+              uint32_t to,
+              Wide bend,
+              uint32_t budget,
+              std::vector<uint32_t> &out) {
+    out.clear();
+    uint32_t const vertices{ g.nx() * g.ny() };
+    if ((vertices == 0) || (from >= vertices) || (to >= vertices)) { return false; }
+    if (g.pass_h.empty() && (g.nx() > 1)) { return false; }
+    uint32_t const nodes{ vertices * 2 };
+    if (stamp.size() != nodes) {
+      stamp.assign(nodes, 0);
+      best.assign(nodes, 0);
+      parent.assign(nodes, INVALID);
+      generation = 0;
+    }
+    uint32_t const gen{ ++generation };
+    scav_point const goal{ g.point(to) };
+    auto const heuristic = [&](uint32_t node) {
+      scav_point const at{ g.point(node / 2) };
+      Wide const dx{ (at.x < goal.x) ? (Wide{ goal.x } - at.x) : (Wide{ at.x } - goal.x) };
+      Wide const dy{ (at.y < goal.y) ? (Wide{ goal.y } - at.y) : (Wide{ at.y } - goal.y) };
+      bool const turn{ ((node % 2) == 0) ? (dy != 0) : (dx != 0) };
+      return dx + dy + (turn ? bend : Wide{ 0 });
+    };
+    heap_f.clear();
+    heap_g.clear();
+    heap_node.clear();
+    for (uint32_t plane = 0; plane < 2; ++plane) {
+      uint32_t const node{ (from * 2) + plane };
+      stamp[node] = gen;
+      best[node] = 0;
+      parent[node] = INVALID;
+      push(heuristic(node), 0, node);
+    }
+    expansions = 0;
+    uint32_t reached{ INVALID };
+    while (!heap_node.empty()) {
+      Wide top_f{ 0 };
+      Wide top_g{ 0 };
+      uint32_t node{ 0 };
+      pop(top_f, top_g, node);
+      if ((stamp[node] != gen) || (top_g != best[node])) { continue; }
+      if ((node / 2) == to) {
+        reached = node;
+        break;
+      }
+      if (++expansions > budget) { return false; }
+      uint32_t const v{ node / 2 };
+      uint32_t const plane{ node % 2 };
+      uint32_t const ix{ v % g.nx() };
+      uint32_t const iy{ v / g.nx() };
+      auto const relax = [&](uint32_t next, Wide step) {
+        Wide const g_next{ top_g + step };
+        if ((stamp[next] == gen) && (best[next] <= g_next)) { return; }
+        stamp[next] = gen;
+        best[next] = g_next;
+        parent[next] = node;
+        push(g_next + heuristic(next), g_next, next);
+      };
+      relax((v * 2) + (1 - plane), bend);
+      if (plane == 0) {
+        if (((ix + 1) < g.nx()) && (g.pass_h[(iy * (g.nx() - 1)) + ix] != 0)) {
+          relax(g.vertex(ix + 1, iy) * 2, Wide{ g.xs[ix + 1] } - g.xs[ix]);
+        }
+        if ((ix > 0) && (g.pass_h[(iy * (g.nx() - 1)) + (ix - 1)] != 0)) {
+          relax(g.vertex(ix - 1, iy) * 2, Wide{ g.xs[ix] } - g.xs[ix - 1]);
+        }
+      } else {
+        if (((iy + 1) < g.ny()) && (g.pass_v[(iy * g.nx()) + ix] != 0)) {
+          relax((g.vertex(ix, iy + 1) * 2) + 1, Wide{ g.ys[iy + 1] } - g.ys[iy]);
+        }
+        if ((iy > 0) && (g.pass_v[((iy - 1) * g.nx()) + ix] != 0)) {
+          relax((g.vertex(ix, iy - 1) * 2) + 1, Wide{ g.ys[iy] } - g.ys[iy - 1]);
+        }
+      }
+    }
+    if (reached == INVALID) { return false; }
+    std::vector<uint32_t> back;
+    for (uint32_t node = reached; node != INVALID; node = parent[node]) {
+      back.push_back(node / 2);
+    }
+    for (auto i = static_cast<uint32_t>(back.size()); i-- > 0;) {
+      if (out.empty() || (out.back() != back[i])) { out.push_back(back[i]); }
+    }
+    return true;
+  }
+};
+
+// A hand-built grid: `nx` by `ny` lines `pitch` apart, or at random gaps where
+// `pitch` is 0, and each edge open with probability `open` in 256. Even
+// spacing is what makes many paths tie on `f` and on `g` at once.
+OrthoGrid lattice(uint32_t seed, uint32_t nx, uint32_t ny, int32_t pitch, uint32_t open) {
+  OrthoGrid g;
+  int32_t at{ 0 };
+  for (uint32_t i = 0; i < nx; ++i) {
+    g.xs.push_back(at);
+    at += (pitch > 0) ? pitch : static_cast<int32_t>(1 + (mix((seed * 977U) + i) % 9U));
+  }
+  at = 0;
+  for (uint32_t i = 0; i < ny; ++i) {
+    g.ys.push_back(at);
+    at += (pitch > 0) ? pitch : static_cast<int32_t>(1 + (mix((seed * 983U) + i) % 9U));
+  }
+  uint32_t k{ 0 };
+  auto const coin = [&]() {
+    return static_cast<uint8_t>((mix((seed * 7919U) + (k++)) % 256U) < open);
+  };
+  for (uint32_t i = 0; i < (ny * (nx - 1)); ++i) { g.pass_h.push_back(coin()); }
+  for (uint32_t i = 0; i < ((ny - 1) * nx); ++i) { g.pass_v.push_back(coin()); }
+  return g;
+}
+
 }  // namespace
 
 // --- The blocking predicates ---
@@ -1165,6 +1345,81 @@ TEST_CASE("ortho: the search returns an optimal path, checked against Dijkstra")
       }
     }
   }
+}
+
+TEST_CASE("ortho: the search returns the reference search's path node for node") {
+  // One scratch across every grid, so reuse over grids of different sizes is
+  // compared too. Even pitches with a bend of 0 or of one pitch tie on `f`
+  // and `g` at every step; uneven gaps and grids from boxes break fewer ties.
+  OrthoScratch shared;
+  ReferenceSearch reference;
+  uint32_t compared{ 0 };
+  auto const compare = [&](OrthoGrid const &g, uint32_t seed, Wide bend) {
+    uint32_t const vertices{ g.nx() * g.ny() };
+    for (uint32_t trial = 0; trial < 8; ++trial) {
+      uint32_t const from{ mix((seed * 11U) + trial) % vertices };
+      uint32_t const to{ mix((seed * 17U) + trial + 5U) % vertices };
+      CAPTURE(from);
+      CAPTURE(to);
+      std::vector<uint32_t> want;
+      std::vector<uint32_t> got;
+      OrthoScratch fresh;
+      std::vector<uint32_t> alone;
+      bool const a{ reference.search(g, from, to, bend, ORTHO_EXPANSION_BUDGET, want) };
+      bool const b{ ortho_search(g, from, to, bend, shared, got) };
+      bool const c{ ortho_search(g, from, to, bend, fresh, alone) };
+      CHECK(a == b);
+      CHECK(a == c);
+      CHECK(got == want);
+      CHECK(alone == want);
+      if (a) { CHECK(path_cost(g, got, bend) == reference_cost(g, from, to, bend)); }
+      ++compared;
+    }
+  };
+  for (uint32_t seed = 0; seed < 120; ++seed) {
+    CAPTURE(seed);
+    uint32_t const r{ mix(seed + 424242U) };
+    uint32_t const nx{ 1 + (r % 13U) };
+    uint32_t const ny{ 1 + ((r >> 8U) % 13U) };
+    // Every fourth grid spans most of int32, where only wide arithmetic holds.
+    int32_t pitch{ ((seed % 3U) == 2U) ? 0 : 10 };
+    if ((seed % 4U) == 3U) { pitch = INT32_C(1) << 27U; }
+    uint32_t const open{ 150 + ((r >> 16U) % 107U) };
+    OrthoGrid const g{ lattice(seed, nx, ny, pitch, open) };
+    CAPTURE(nx);
+    CAPTURE(ny);
+    CAPTURE(pitch);
+    for (Wide const bend :
+         { Wide{ 0 }, Wide{ 10 }, Wide{ 20 }, Wide{ 3 }, Wide{ 1000 } }) {
+      CAPTURE(bend);
+      compare(g, seed, bend);
+    }
+  }
+  for (uint32_t seed = 0; seed < 40; ++seed) {
+    CAPTURE(seed);
+    std::vector<scav_rect> boxes;
+    std::vector<scav_point> anchors;
+    uint32_t const count{ 1 + (mix(seed + 77U) % 6U) };
+    for (uint32_t i = 0; i < count; ++i) {
+      uint32_t const q{ mix((seed * 37U) + i + 9000U) };
+      // Multiples of 10, so lanes land evenly spaced and ties survive the boxes.
+      boxes.push_back(rect(static_cast<int32_t>(10 * (1 + (q % 14U))),
+                           static_cast<int32_t>(10 * (1 + ((q >> 8U) % 14U))),
+                           static_cast<int32_t>(10 * (1 + ((q >> 16U) % 3U))),
+                           static_cast<int32_t>(10 * (1 + ((q >> 24U) % 3U)))));
+      anchors.push_back(pt(static_cast<int32_t>(10 * ((q >> 4U) % 16U)),
+                           static_cast<int32_t>(10 * ((q >> 12U) % 16U))));
+    }
+    OrthoGrid g;
+    REQUIRE(ortho_grid(rect(0, 0, 160, 160), boxes, anchors, 10, g));
+    for (Wide const bend : { Wide{ 0 }, Wide{ 10 }, Wide{ 500 } }) {
+      CAPTURE(bend);
+      compare(g, seed + 1000U, bend);
+    }
+  }
+  CHECK(compared > 5000);
+  CHECK(reference.tied_f > 10000);
+  CHECK(reference.tied_fg > 1000);
 }
 
 TEST_CASE("ortho: the bend penalty is what decides between two equal detours") {

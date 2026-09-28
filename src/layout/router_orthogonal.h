@@ -32,14 +32,26 @@ struct OrthoGrid {
   }
 };
 
+// One search node's state, live only while `stamp` is the scratch's generation.
+struct OrthoNodeState {
+  uint32_t stamp;
+  uint32_t parent;
+  Wide best;
+};
+
+// One open-list entry, ordered by `f`, then `g`, then node.
+struct OrthoFrontierEntry {
+  Wide f;
+  Wide g;
+  uint32_t node;
+};
+
 // Reused across searches, so one allocates nothing once the grid settles.
 // Carrying it over must not change an answer, which is its own test.
 struct OrthoScratch {
-  std::vector<Wide> best;
-  std::vector<uint32_t> parent, stamp;
+  std::vector<OrthoNodeState> state;
   std::vector<uint32_t> path;
-  std::vector<Wide> heap_f, heap_g;
-  std::vector<uint32_t> heap_node;
+  std::vector<OrthoFrontierEntry> heap;
   uint32_t generation{ 0 };
 };
 
