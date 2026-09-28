@@ -769,7 +769,11 @@ Improved run_search(Chart const &c,
     here = order_submachines(c, g, s, objective, threads, held);
     // Recomputed rather than carried out of the scan: keeping every
     // candidate's geometry in flight is a whole layout per candidate, and one
-    // re-run is a round's cost divided by its width.
+    // re-run is a round's cost divided by its width. It is the run the taken
+    // candidate was scored by, so it reuses what that one reused: every frame
+    // the move left where it was, or only moved.
+    RouteCache const was{ std::move(base) };
+    base = RouteCache{};
     std::vector<Diagnostic> spilled;
     out.best = search_candidate(c,
                                 g,
@@ -782,7 +786,7 @@ Improved run_search(Chart const &c,
                                 router,
                                 threads,
                                 spilled,
-                                nullptr,
+                                &was,
                                 &base,
                                 &held);
     out.cost = best;

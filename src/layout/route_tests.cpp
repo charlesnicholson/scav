@@ -19,6 +19,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -949,5 +950,56 @@ TEST_CASE("route: a reused frame answers exactly what routing it again would") {
       route_transitions(c, g, base_o, base_z, {}, p, *router, 1, &base)
     };
     CHECK(same_routes(base_r, again));
+  }
+}
+
+TEST_CASE("route: a cache filled by a run that reused one answers like routing afresh") {
+  // A search's incumbent after a taken move is routed through the cache the
+  // move was scored with, and fills the one the next round reads. Along a
+  // chain of moves, each routed through what the one before filled, every
+  // answer is the fresh one.
+  scav_profile p{};
+  REQUIRE(profile_named("readable", p));
+  Router const *const router{ router_at(0) };
+  REQUIRE(router != nullptr);
+
+  for (char const *name : CORPUS) {
+    CAPTURE(name);
+    Chart c;
+    load_corpus_chart(name, c);
+    SplitGraph const g{ decompose(c) };
+    SubmachineOrders const base_o{ order_submachines(c, g, {}, p, 1, {}) };
+    SizedLayout base_z;
+    std::vector<Diagnostic> diags;
+    REQUIRE(size_layout(c, g, base_o, {}, p, base_z, diags));
+    RouteCache cache;
+    route_transitions(c, g, base_o, base_z, {}, p, *router, 1, nullptr, &cache);
+
+    SearchPins pins;
+    uint32_t chained{ 0 };
+    for (uint32_t st = 0; (st < c.states.size()) && (chained < 6); ++st) {
+      if ((c.states[st].live == 0) || (base_o.state_node[st] == INVALID)) { continue; }
+      uint32_t const frame{ c.states[st].parent.v };
+      if ((frame >= base_o.sub_ranks.size()) || (base_o.sub_ranks[frame] < 2)) {
+        continue;
+      }
+      uint32_t const at{ base_o.nodes[base_o.state_node[st]].rank };
+      pins.ranks.push_back({ .state = StateId{ st }, .rank = (at == 0) ? 1U : 0U });
+      SubmachineOrders const o{ order_submachines(c, g, {}, p, 1, pins) };
+      SizedLayout z;
+      std::vector<Diagnostic> spilled;
+      if (!size_layout(c, g, o, {}, p, z, spilled)) {
+        pins.ranks.pop_back();
+        continue;
+      }
+      CAPTURE(st);
+      RouteCache next;
+      Routes const warm{ route_transitions(c, g, o, z, {}, p, *router, 1, &cache, &next) };
+      Routes const cold{ route_transitions(c, g, o, z, {}, p, *router, 1) };
+      CHECK(same_routes(cold, warm));
+      cache = std::move(next);
+      ++chained;
+    }
+    CHECK(chained > 0);
   }
 }
