@@ -41,6 +41,10 @@ struct Routes {
   // Path boxes that found no strip clear of everything and took the centred
   // placement instead (11.9).
   uint32_t unplaced{ 0 };
+
+  // Two per segment, its source end then its destination: 1 where the router
+  // reads a face pinned there. Elsewhere a face pin changes nothing it draws.
+  std::vector<uint8_t> faceable;
 };
 
 // Per frame, the exact question the router and the nudger were asked and the

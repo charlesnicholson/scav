@@ -165,6 +165,7 @@ Routes route_transitions(Chart const &c,
   out.route.assign(n, {});
   out.port.assign(n, {});
   out.failed.assign(n, 0);
+  out.faceable.assign(size_t{ 2 } * g.segments.size(), 0);
 
   // The segment each port's boundary node belongs to, and the bends each
   // segment was chained through, both gathered once.
@@ -391,6 +392,10 @@ Routes route_transitions(Chart const &c,
       RouteNet net{ .src = pn.src, .dst = pn.dst };
       if (pn.src_state != INVALID) { net.src_obstacle = sc.obstacle_index[pn.src_state]; }
       if (pn.dst_state != INVALID) { net.dst_obstacle = sc.obstacle_index[pn.dst_state]; }
+      if (router.reads_faces()) {
+        out.faceable[size_t{ 2 } * pn.seg] = (net.src_obstacle != INVALID) ? 1U : 0U;
+        out.faceable[(size_t{ 2 } * pn.seg) + 1] = (net.dst_obstacle != INVALID) ? 1U : 0U;
+      }
       net.waypoint_off = static_cast<uint32_t>(in.waypoints.size());
       for (uint32_t const bend : seg_bends[pn.seg]) {
         in.waypoints.push_back(z.node[bend]);

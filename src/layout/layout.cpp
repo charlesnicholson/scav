@@ -32,6 +32,8 @@
 namespace scav {
 
 #ifdef SCAV_TESTING
+void layout_test_skip_unread_faces(bool on);
+uint64_t layout_test_unread_faces();
 void layout_test_search_memo(bool on);
 void layout_test_search_memo_verify(bool on);
 uint32_t layout_test_search_memo_hits();
@@ -515,6 +517,24 @@ Scored score_move(Chart const &c,
   return out;
 }
 
+#ifdef SCAV_TESTING
+// Whether a search leaves unread faces unscored, and how many it has left:
+// a test compares a layout with it on against one with it off.
+bool test_skip_unread_faces{ true };
+Mutex test_unread_lock;
+uint64_t test_unread_faces{ 0 };
+#endif
+
+// True where the search may leave a face at an unread end unscored.
+bool skipping_unread_faces() {
+#ifdef SCAV_TESTING
+  if (!test_skip_unread_faces) { return false; }
+  ScopedLock const held{ test_unread_lock };
+  ++test_unread_faces;
+#endif
+  return true;
+}
+
 // Level 1: hold one state at a rank longest path did not give it, re-derive
 // phase 1 from that, and run phases 2 and 3 whole. Greedy and strictly
 // improving on the exact objective, in state order then rank order, so the pass
@@ -653,7 +673,12 @@ Improved run_search(Chart const &c,
     }
 
     // Which face each end of a segment leaves by. Four per end, and a face
-    // already pinned is not re-offered (11.10e).
+    // already pinned is not re-offered (11.10e). At an end the router does not
+    // read a face at, a pin draws the incumbent exactly, so it cannot improve
+    // on it: charged to the budget as though scored, and not scored. A traced
+    // search scores it, since its trace records every move offered.
+    std::vector<uint8_t> const &faceable{ out.best.routes.faceable };
+    bool const skip_unread{ trace_sink() == nullptr };
     for (uint32_t seg = 0; (seg < g.segments.size()) && (face_scored < budget); ++seg) {
       if (!in_scope(g.segments[seg].frame.v)) { continue; }
       TransId const t{ g.segments[seg].trans };
@@ -666,8 +691,11 @@ Improved run_search(Chart const &c,
               already || ((had.trans.v == t.v) && (had.leg == leg) && (had.end == end));
         }
         if (already) { continue; }
+        size_t const at{ (size_t{ 2 } * seg) + end };
+        bool const unread{ skip_unread && (at < faceable.size()) && (faceable[at] == 0) };
         for (uint32_t f = 0; (f < 4) && (face_scored < budget); ++f) {
           ++face_scored;
+          if (unread && skipping_unread_faces()) { continue; }
           round.push_back({ .face = { .trans = t, .leg = leg, .end = end, .face = f },
                             .kind = MoveKind::Face });
         }
@@ -1740,6 +1768,15 @@ uint32_t layout_structural_hash(Chart const &c) {
 }
 
 #ifdef SCAV_TESTING
+void layout_test_skip_unread_faces(bool on) {
+  test_skip_unread_faces = on;
+  ScopedLock const held{ test_unread_lock };
+  test_unread_faces = 0;
+}
+uint64_t layout_test_unread_faces() {
+  ScopedLock const held{ test_unread_lock };
+  return test_unread_faces;
+}
 void layout_test_search_memo(bool on) { test_search_memo = on; }
 void layout_test_search_memo_verify(bool on) { test_search_memo_verify = on; }
 uint32_t layout_test_search_memo_hits() { return test_search_memo_hits; }
