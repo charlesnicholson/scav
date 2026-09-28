@@ -419,6 +419,30 @@ TEST_CASE("order: a labelled edge inside one rank charges no rank boundary") {
   }
 }
 
+TEST_CASE("order: a frame turned down charges a label's height to its rank gap") {
+  // Running down, a rank gap is vertical and a label sits beside the leg
+  // crossing it, so what the gap holds is the label's height (11.10g).
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  std::vector<scav_path_box> const boxes{
+    { .subject = 0, .w = 5000, .h = 300, .order = 0 }
+  };
+  scav_spaces const s{ .path_box = boxes.data(), .n_path_box = 1 };
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const across{ order_submachines(c, g, s, profile()) };
+  SearchPins const turned{ .orients = { { .frame = root } } };
+  SubmachineOrders const down{ order_submachines(c, g, s, profile(), 0, turned) };
+  REQUIRE(down.sub_down[root.v] == 1);
+  REQUIRE(across.sub_gaps[root.v].len == 1);
+  REQUIRE(down.sub_gaps[root.v].len == 1);
+  CHECK(across.gaps[across.sub_gaps[root.v].off] >= 5000);
+  CHECK(down.gaps[down.sub_gaps[root.v].off] >= 300);
+  CHECK(down.gaps[down.sub_gaps[root.v].off] < 5000);
+}
+
 TEST_CASE("order: undoing a move is running with the pins one held before it") {
   // What makes a search loop possible at all: a move is not a mutation, so
   // there is nothing to roll back and no state to get wrong. Applying the

@@ -7,6 +7,7 @@
 
 #include "layout/coords.h"
 #include "layout/geom.h"
+#include "layout/memo.h"
 #include "layout/pack.h"
 #include "layout/router.h"
 #include "scav/scav_core.h"
@@ -14,7 +15,9 @@
 #include "scav_int.h"
 #include "scav_internal.h"
 
+#include <array>
 #include <cstdint>
+#include <cstring>
 #include <utility>
 #include <vector>
 
@@ -32,6 +35,17 @@ namespace {
 scav_box_space box_of(scav_box_space const *rows, uint32_t count, uint32_t i) {
   return ((rows != nullptr) && (i < count)) ? rows[i] : scav_box_space{};
 }
+
+// Every frame this thread has laid out, by what laying it out read. A search's
+// candidates differ in one frame and the frames that hold it, so nearly every
+// other frame a candidate sizes is one an earlier candidate already sized.
+Memo &frame_memo() {
+  thread_local Memo m{ size_t{ 1 } << 20 };
+  return m;
+}
+
+// The profile is read whole into a key, so it has to be words and no padding.
+static_assert((sizeof(scav_profile) % sizeof(uint32_t)) == 0);
 
 // Inside the coordinate domain on both axes. A row or a column whose sum
 // overflowed saturates at `PACK_SATURATED`, which is far past `COORD_MAX`.
@@ -137,8 +151,16 @@ bool size_pass(Chart const &c,
 
   bool ok{ true };
 
-  // The label's height, on the middle segment 11.3 charges its width to, so one
-  // label reserves in one frame.
+  // Whether a frame's ranks run down the page. Its layout is computed along
+  // the ranks and across them, and only placed as x and y at the end: across
+  // is y and along is x for a frame that runs across, and the reverse for one
+  // that runs down (11.10g).
+  auto const runs_down = [&o](uint32_t m) {
+    return (m < o.sub_down.size()) && (o.sub_down[m] != 0);
+  };
+
+  // The label's extent across its frame's ranks and along them, on the middle
+  // segment 11.3 charges it to, so one label reserves in one frame.
   std::vector<int32_t> seg_label_h(g.segments.size(), 0);
   std::vector<int32_t> seg_label_w(g.segments.size(), 0);
   for (uint32_t i = 0; i < s.n_path_box; ++i) {
@@ -147,8 +169,9 @@ bool size_pass(Chart const &c,
     Span const segs{ g.trans_segments[box.subject] };
     if (segs.len == 0) { continue; }
     uint32_t const mid{ segs.off + (segs.len / 2) };
-    seg_label_h[mid] = imax(seg_label_h[mid], box.h);
-    seg_label_w[mid] = imax(seg_label_w[mid], box.w);
+    bool const down{ runs_down(g.segments[mid].frame.v) };
+    seg_label_h[mid] = imax(seg_label_h[mid], down ? box.w : box.h);
+    seg_label_w[mid] = imax(seg_label_w[mid], down ? box.h : box.w);
   }
 
   // Per port, the segment on the border's inner side, whose boundary node is
@@ -157,11 +180,13 @@ bool size_pass(Chart const &c,
   for (uint32_t seg = 0; seg < o.seg_port.size(); ++seg) {
     if (o.seg_port[seg] < port_seg.size()) { port_seg[o.seg_port[seg]] = seg; }
   }
-  // Where `seg` meets `state`, from the state's centre along the cross axis:
-  // the height of the boundary node inside it for a port on its border, which
-  // is sized by now because a state is sized before the frame it sits in.
-  // Zero where the segment meets the state's box rather than a port.
-  auto const attach_at = [&](uint32_t seg, uint32_t state) -> int32_t {
+  // Where `seg` meets `state`, from the state's centre across the ranks of the
+  // frame `state` sits in: where the boundary node inside it stands for a port
+  // on its border, which is sized by now because a state is sized before the
+  // frame it sits in. Zero where the segment meets the state's box rather than
+  // a port, and where the frame inside runs the other way, whose ports are on
+  // the faces this frame's edges do not arrive at.
+  auto const attach_at = [&](uint32_t seg, uint32_t state, bool down) -> int32_t {
     if (seg >= g.segments.size()) { return 0; }  // a hand-built frame
     SplitSegment const &sg{ g.segments[seg] };
     for (uint32_t const port : { sg.src_port, sg.dst_port }) {
@@ -174,8 +199,13 @@ bool size_pass(Chart const &c,
           (c.submachines[frame].owner.v != state)) {
         continue;
       }
+      if (runs_down(frame) != down) { continue; }
       scav_box_space const b{ box_of(s.box_state, s.n_box_state, state) };
       Wide const pad{ bare_pseudostate(c, out.sub, b, state) ? 0 : p.pad };
+      if (down) {
+        Wide const x{ pad + sub_local[frame].x + out.node[node].x };
+        return static_cast<int32_t>(x - (out.state[state].w / 2));
+      }
       Wide const y{ pad + b.h_before + sub_local[frame].y + out.node[node].y };
       return static_cast<int32_t>(y - (out.state[state].h / 2));
     }
@@ -184,11 +214,22 @@ bool size_pass(Chart const &c,
 
   // A frame's graph need not be connected, and unconnected states all rank 0, so
   // one graph would stack them in a column. Components are laid out and packed.
-  auto const size_sub = [&](uint32_t m) {
+  auto const lay_out_sub = [&](uint32_t m) {
     Span const span{ o.sub_nodes[m] };
     uint32_t const ranks{ o.sub_ranks[m] };
     if ((span.len == 0) || (ranks == 0)) { return; }
-    FrameDar const dar{ owner_dar(m) };
+    // Everything below is along the ranks and across them, placed as x and y
+    // at the end, so a frame running down aims at its hole's ratio inverted.
+    bool const down{ runs_down(m) };
+    FrameDar const hole_dar{ owner_dar(m) };
+    FrameDar const dar{ down ? FrameDar{ .num = hole_dar.den, .den = hole_dar.num }
+                             : hole_dar };
+    auto const along = [&](uint32_t st) {
+      return down ? out.state[st].h : out.state[st].w;
+    };
+    auto const across = [&](uint32_t st) {
+      return down ? out.state[st].w : out.state[st].h;
+    };
     Span const espan{ o.sub_edges[m] };
     Span const gspan{ o.sub_gaps[m] };
 
@@ -216,7 +257,7 @@ bool size_pass(Chart const &c,
       OrderEdge const &e{ o.edges[espan.off + k] };
       for (uint32_t const end : { e.src, e.dst }) {
         if (o.nodes[end].kind != OrderKind::State) { continue; }
-        int32_t const at{ attach_at(e.segment, o.nodes[end].subject) };
+        int32_t const at{ attach_at(e.segment, o.nodes[end].subject, down) };
         if (at == 0) { continue; }
         trace_emit(
             { .kind = TraceKind::PortAttached,
@@ -289,16 +330,26 @@ bool size_pass(Chart const &c,
       std::vector<int32_t> extent(nodes.size(), 0);
       std::vector<int32_t> layer_w(layers, 0);
       std::vector<Wide> layer_h(layers, 0);
+      // The reserve keeps a label clear of the node beside its end in the same
+      // layer. A frame running down puts a label's width beside its leg, so a
+      // node alone in its layer there takes none: the room from its frame's
+      // edge is taken on one side of the leg below, and the half the reserve
+      // put on the other side was empty (11.10g). Across, a label's height is
+      // small and the reserve is also the gap a fold's stacked pieces keep.
+      std::vector<uint32_t> in_layer(layers, 0);
+      for (uint32_t const k : nodes) { ++in_layer[local_rank[k]]; }
       for (uint32_t i = 0; i < nodes.size(); ++i) {
         index[nodes[i]] = i;
         OrderNode const &nd{ o.nodes[span.off + nodes[i]] };
         uint32_t const r{ local_rank[nodes[i]] };
         if (nd.kind == OrderKind::State) {
-          extent[i] = out.state[nd.subject].h;
-          layer_w[r] = imax(layer_w[r], out.state[nd.subject].w);
+          extent[i] = across(nd.subject);
+          layer_w[r] = imax(layer_w[r], along(nd.subject));
         }
-        extent[i] = static_cast<int32_t>(
-            imin(Wide{ extent[i] } + reserve[nodes[i]], Wide{ COORD_MAX }));
+        Wide const room{ (!down || (in_layer[r] > 1)) ? Wide{ reserve[nodes[i]] }
+                                                      : Wide{ 0 } };
+        extent[i] =
+            static_cast<int32_t>(imin(Wide{ extent[i] } + room, Wide{ COORD_MAX }));
         layer_h[r] += extent[i] + p.node_sep;
       }
       // States joined by an edge inside one column share one centre line, so
@@ -362,7 +413,7 @@ bool size_pass(Chart const &c,
         uint32_t const root_of{ find(i) };
         ++grouped[root_of];
         group_w[root_of] =
-            imax(group_w[root_of], out.state[o.nodes[span.off + nodes[i]].subject].w);
+            imax(group_w[root_of], along(o.nodes[span.off + nodes[i]].subject));
         if (labelled[root_of] >= 2) {
           group_w[root_of] =
               imax(group_w[root_of], (2 * (leader + widest_label[root_of])) + p.node_sep);
@@ -433,7 +484,7 @@ bool size_pass(Chart const &c,
       // unlabelled edge.
       auto const width_of_node = [&](uint32_t i) {
         OrderNode const &nd{ o.nodes[span.off + nodes[i]] };
-        return (nd.kind == OrderKind::State) ? Wide{ out.state[nd.subject].w } : Wide{ 0 };
+        return (nd.kind == OrderKind::State) ? Wide{ along(nd.subject) } : Wide{ 0 };
       };
       auto const leg_of = [&](Wide xa, Wide xb, uint32_t a, uint32_t b) {
         Wide const lo{ imax(xa, xb) };
@@ -556,12 +607,11 @@ bool size_pass(Chart const &c,
               continue;
             }
             uint32_t const others{ arrivals[chunk_index[target]] };
-            int32_t const half{
-              ceil_div((out.state[nd.subject].h / 2) + route_clearance(p), 2)
-            };
+            int32_t const half{ ceil_div((across(nd.subject) / 2) + route_clearance(p),
+                                         2) };
             // One other arrival: with more, the initial is the median the
             // alignment keeps the target steady on.
-            if ((others != 1) || ((4 * half) > out.state[nt.subject].h)) { continue; }
+            if ((others != 1) || ((4 * half) > across(nt.subject))) { continue; }
             bool const above{ nd.pos < nearest[chunk_index[target]] };
             seat_at[chunk_index[dot]] = above ? -half : half;
             enter_at[chunk_index[target]] = above ? half : -half;
@@ -584,7 +634,8 @@ bool size_pass(Chart const &c,
             uint32_t const rt{ local_rank[nodes[to]] };
             auto const at_end = [&](uint32_t node) {
               OrderNode const &nd{ o.nodes[node] };
-              return (nd.kind == OrderKind::State) ? attach_at(e.segment, nd.subject) : 0;
+              return (nd.kind == OrderKind::State) ? attach_at(e.segment, nd.subject, down)
+                                                   : 0;
             };
             int32_t from_at{ at_end(e.src) };
             int32_t to_at{ at_end(e.dst) };
@@ -646,18 +697,18 @@ bool size_pass(Chart const &c,
             OrderNode const &nd{ o.nodes[span.off + nodes[at]] };
             Wide const flush{ ((nd.kind == OrderKind::State) &&
                                (c.states[nd.subject].kind == StateKind::Initial))
-                                  ? Wide{ layer_w[r] } - out.state[nd.subject].w
+                                  ? Wide{ layer_w[r] } - along(nd.subject)
                                   : Wide{ 0 } };
             // On its group's centre line, where it has one.
-            Wide const along{ (line[at] == 0)
+            Wide const inset{ (line[at] == 0)
                                   ? flush
-                                  : ((Wide{ line[at] } - out.state[nd.subject].w) / 2) };
-            if (along != flush) {
-              shape.centred.emplace_back(nd.subject, static_cast<int32_t>(along));
+                                  : ((Wide{ line[at] } - along(nd.subject)) / 2) };
+            if (inset != flush) {
+              shape.centred.emplace_back(nd.subject, static_cast<int32_t>(inset));
             }
             // Local to the piece; the packing below decides where the piece
             // itself goes.
-            shape.at[at] = { .x = static_cast<int32_t>(layer_x[r - first] + along),
+            shape.at[at] = { .x = static_cast<int32_t>(layer_x[r - first] + inset),
                              .y = static_cast<int32_t>(centre[i]) };
           }
 
@@ -669,7 +720,7 @@ bool size_pass(Chart const &c,
           // inside the piece (11.10g).
           auto const box_of_node = [&](uint32_t i, Wide x, Wide y) {
             OrderNode const &nd{ o.nodes[span.off + nodes[chunk_nodes[i]]] };
-            Wide const w{ (nd.kind == OrderKind::State) ? Wide{ out.state[nd.subject].w }
+            Wide const w{ (nd.kind == OrderKind::State) ? Wide{ along(nd.subject) }
                                                         : Wide{ 0 } };
             Wide const h{ cg.extent[i] };
             return scav_rect{ .x = static_cast<int32_t>(x),
@@ -702,7 +753,7 @@ bool size_pass(Chart const &c,
             uint32_t const r{ local_rank[nodes[at]] };
             uint32_t const rn{ local_rank[nodes[chunk_nodes[other]]] };
             OrderNode const &nn{ o.nodes[span.off + nodes[chunk_nodes[other]]] };
-            Wide const nw{ (nn.kind == OrderKind::State) ? Wide{ out.state[nn.subject].w }
+            Wide const nw{ (nn.kind == OrderKind::State) ? Wide{ along(nn.subject) }
                                                          : Wide{ 0 } };
             Wide const nx{ shape.at[chunk_nodes[other]].x };
             // `rank_sep` from the state it joins, not a whole rank gap: the gap
@@ -712,7 +763,7 @@ bool size_pass(Chart const &c,
               x = nx + nw + p.rank_sep;
             }
             if ((kind == StateKind::Initial) && (rn == (r + 1))) {
-              x = nx - p.rank_sep - out.state[nd.subject].w;
+              x = nx - p.rank_sep - along(nd.subject);
             }
             Wide const y{ Wide{ shape.at[chunk_nodes[other]].y } + seat_at[i] };
             auto const clear = [&](Wide cx, Wide cy) {
@@ -756,6 +807,42 @@ bool size_pass(Chart const &c,
               continue;
             }
             chunk_w = imax(chunk_w, beside_leg(e, shape.at[a].x, shape.at[b].x, a, b));
+          }
+          // Across the ranks the same: a label beside a leg between two ranks
+          // needs its extent across them and the leader on one side of the
+          // leg. The reserve above gives each side half of it, which holds a
+          // label's height beside a leg running across and not a label's width
+          // beside one running down, so where neither side has the whole the
+          // piece grows on its trailing side (11.10g).
+          for (uint32_t k = 0; k < espan.len; ++k) {
+            OrderEdge const &e{ o.edges[espan.off + k] };
+            uint32_t const a{ in_chunk(e.src) };
+            uint32_t const b{ in_chunk(e.dst) };
+            if ((a == INVALID) || (b == INVALID) ||
+                (local_rank[nodes[a]] == local_rank[nodes[b]]) ||
+                (e.segment >= seg_label_h.size()) || (seg_label_h[e.segment] == 0)) {
+              continue;
+            }
+            auto const span_of = [&](uint32_t i, Wide &lo, Wide &hi) {
+              OrderNode const &nd{ o.nodes[span.off + nodes[i]] };
+              Wide const half{ (nd.kind == OrderKind::State)
+                                   ? Wide{ across(nd.subject) / 2 }
+                                   : Wide{ 0 } };
+              lo = Wide{ shape.at[i].y } - half;
+              hi = Wide{ shape.at[i].y } + half;
+            };
+            Wide alo{ 0 };
+            Wide ahi{ 0 };
+            Wide blo{ 0 };
+            Wide bhi{ 0 };
+            span_of(a, alo, ahi);
+            span_of(b, blo, bhi);
+            Wide const lo{ imax(alo, blo) };
+            Wide const hi{ imin(ahi, bhi) };
+            if (hi < lo) { continue; }
+            Wide const leg{ lo + ((hi - lo) / 2) };
+            Wide const need{ Wide{ leader } + seg_label_h[e.segment] + (p.node_sep / 2) };
+            if ((leg < need) && ((chunk_h - leg) < need)) { chunk_h = leg + need; }
           }
           pieces_fit = pieces_fit && (chunk_w <= COORD_MAX) && (chunk_h <= COORD_MAX);
           if (!pieces_fit) { break; }
@@ -949,9 +1036,13 @@ bool size_pass(Chart const &c,
             dar.den,
             p.sm_tiebreak != 0);
       };
-      Shape best{ lay_out(Wide{ COORD_MAX } * 2, false) };
-      Shape folded{ lay_out(target, false) };
-      Shape stacked{ lay_out(target, true) };
+      // A frame turned to run down is one column, which is what turning it was
+      // for: folded, its run wraps back into columns side by side, the drawing
+      // the frame running across already offers.
+      Wide const unwrapped{ Wide{ COORD_MAX } * 2 };
+      Shape best{ lay_out(unwrapped, false) };
+      Shape folded{ lay_out(down ? unwrapped : target, false) };
+      Shape stacked{ lay_out(down ? unwrapped : target, true) };
       // The two folds are one cut in two arrangements, so the scale measure
       // picks between them before either is weighed against the flat run.
       bool const always{ fold == Fold::Always };
@@ -1008,12 +1099,13 @@ bool size_pass(Chart const &c,
       ok = false;
       return;
     }
-    out.sub[m].w = packed.w;
-    out.sub[m].h = packed.h;
+    out.sub[m].w = down ? packed.h : packed.w;
+    out.sub[m].h = down ? packed.w : packed.h;
 
     // A boundary node's rank puts it on the frame's border, and the folding and
-    // the two packings above leave a piece's own edges mid-frame, so its x comes
-    // from the frame: sources where a route arrives, sinks where one leaves.
+    // the two packings above leave a piece's own edges mid-frame, so its place
+    // along the ranks comes from the frame: sources where a route arrives,
+    // sinks where one leaves.
     std::vector<uint32_t> out_deg(span.len, 0);
     for (uint32_t k = 0; k < espan.len; ++k) {
       ++out_deg[o.edges[espan.off + k].src - span.off];
@@ -1022,19 +1114,117 @@ bool size_pass(Chart const &c,
     for (uint32_t k = 0; k < span.len; ++k) {
       scav_rect const &at{ packed.at[component[k]] };
       OrderNode const &nd{ o.nodes[span.off + k] };
-      int32_t x{ local[k].x + at.x };
+      int32_t lead{ local[k].x + at.x };  // along the ranks
       if (nd.kind == OrderKind::Boundary) {
         // The frame's edge, not the piece's: sources where a route arrives,
         // sinks where one leaves.
-        x = (out_deg[k] != 0) ? 0 : out.sub[m].w;
+        lead = (out_deg[k] != 0) ? 0 : packed.w;
       }
-      int32_t const y{ local[k].y + at.y };
-      out.node[span.off + k] = { .x = x, .y = y };
+      int32_t const cross{ local[k].y + at.y };  // across them, a centre
+      out.node[span.off + k] =
+          down ? scav_point{ .x = cross, .y = lead } : scav_point{ .x = lead, .y = cross };
       if (nd.kind == OrderKind::State) {
-        out.state[nd.subject].x = x;
-        out.state[nd.subject].y = y - (out.state[nd.subject].h / 2);
+        scav_rect &box{ out.state[nd.subject] };
+        box.x = down ? (cross - (box.w / 2)) : lead;
+        box.y = down ? lead : (cross - (box.h / 2));
       }
     }
+  };
+
+  // `lay_out_sub` from the memo where it has seen the frame's inputs before.
+  // The key is every value it reads -- the frame's nodes and edges, the sizes
+  // and kinds of the states in it, where each edge meets a composite's port,
+  // its labels, gaps, ratio, and the whole profile -- so a hit is the layout it
+  // would compute. Node indices in the key are the frame's own, since where a
+  // frame starts in the merged arrays moves whenever a frame before it changes.
+  // A traced run lays every frame out, since a hit would emit nothing.
+  auto const size_sub = [&](uint32_t m) {
+    if (trace_sink() != nullptr) {
+      lay_out_sub(m);
+      return;
+    }
+    Span const span{ o.sub_nodes[m] };
+    Span const espan{ o.sub_edges[m] };
+    Span const gspan{ o.sub_gaps[m] };
+    bool const down{ runs_down(m) };
+    FrameDar const dar{ owner_dar(m) };
+    thread_local std::vector<uint32_t> key;
+    thread_local std::vector<int32_t> value;
+    key.clear();
+    auto const put = [](int32_t v) { key.push_back(static_cast<uint32_t>(v)); };
+    key.push_back(span.len);
+    key.push_back(o.sub_ranks[m]);
+    key.push_back(down ? 1U : 0U);
+    put(dar.num);
+    put(dar.den);
+    key.push_back(static_cast<uint32_t>(compaction));
+    key.push_back(static_cast<uint32_t>(fold));
+    std::array<uint32_t, sizeof(scav_profile) / sizeof(uint32_t)> knobs{};
+    std::memcpy(knobs.data(), &p, sizeof(scav_profile));
+    key.insert(key.end(), knobs.begin(), knobs.end());
+    for (uint32_t k = 0; k < span.len; ++k) {
+      OrderNode const &nd{ o.nodes[span.off + k] };
+      key.push_back(static_cast<uint32_t>(nd.kind));
+      key.push_back(nd.subject);
+      key.push_back(nd.rank);
+      key.push_back(nd.pos);
+      if (nd.kind != OrderKind::State) { continue; }
+      put(out.state[nd.subject].w);
+      put(out.state[nd.subject].h);
+      key.push_back(static_cast<uint32_t>(c.states[nd.subject].kind));
+      key.push_back(c.states[nd.subject].submachines.len);
+    }
+    key.push_back(espan.len);
+    for (uint32_t k = 0; k < espan.len; ++k) {
+      OrderEdge const &e{ o.edges[espan.off + k] };
+      key.push_back(e.src - span.off);
+      key.push_back(e.dst - span.off);
+      key.push_back(e.segment);
+      key.push_back(e.reversed);
+      bool const has{ e.segment < seg_label_h.size() };
+      put(has ? seg_label_h[e.segment] : 0);
+      put(has ? seg_label_w[e.segment] : 0);
+      for (uint32_t const end : { e.src, e.dst }) {
+        OrderNode const &nd{ o.nodes[end] };
+        put((nd.kind == OrderKind::State) ? attach_at(e.segment, nd.subject, down) : 0);
+      }
+    }
+    key.push_back(gspan.len);
+    for (uint32_t k = 0; k < gspan.len; ++k) { put(o.gaps[gspan.off + k]); }
+
+    // What it writes: the frame's extent, each node's place, and each state's.
+    Memo &memo{ frame_memo() };
+    uint32_t len{ 0 };
+    if (int32_t const *const hit{ memo.find(key, len) }) {
+      out.sub[m].w = hit[0];
+      out.sub[m].h = hit[1];
+      uint32_t at{ 2 };
+      for (uint32_t k = 0; k < span.len; ++k) {
+        OrderNode const &nd{ o.nodes[span.off + k] };
+        out.node[span.off + k] = { .x = hit[at], .y = hit[at + 1] };
+        at += 2;
+        if (nd.kind != OrderKind::State) { continue; }
+        out.state[nd.subject].x = hit[at];
+        out.state[nd.subject].y = hit[at + 1];
+        at += 2;
+      }
+      return;
+    }
+    bool const was{ ok };
+    lay_out_sub(m);
+    if (!was || !ok) { return; }
+    value.clear();
+    value.push_back(out.sub[m].w);
+    value.push_back(out.sub[m].h);
+    for (uint32_t k = 0; k < span.len; ++k) {
+      OrderNode const &nd{ o.nodes[span.off + k] };
+      value.push_back(out.node[span.off + k].x);
+      value.push_back(out.node[span.off + k].y);
+      if (nd.kind != OrderKind::State) { continue; }
+      value.push_back(out.state[nd.subject].x);
+      value.push_back(out.state[nd.subject].y);
+    }
+    memo.insert(key, value);
   };
 
   auto const size_state = [&](uint32_t i) {
@@ -1059,10 +1249,10 @@ bool size_pass(Chart const &c,
         // source sits at zero and does not.
         Span const span{ o.sub_nodes[m] };
         for (uint32_t u = 0; u < span.len; ++u) {
-          if ((o.nodes[span.off + u].kind == OrderKind::Boundary) &&
-              (out.node[span.off + u].x == out.sub[m].w)) {
-            out.node[span.off + u].x = packed.at[k].w;
-          }
+          if (o.nodes[span.off + u].kind != OrderKind::Boundary) { continue; }
+          scav_point &at{ out.node[span.off + u] };
+          if (runs_down(m) && (at.y == out.sub[m].h)) { at.y = packed.at[k].h; }
+          if (!runs_down(m) && (at.x == out.sub[m].w)) { at.x = packed.at[k].w; }
         }
         out.sub[m].w = packed.at[k].w;
         out.sub[m].h = packed.at[k].h;
@@ -1071,14 +1261,17 @@ bool size_pass(Chart const &c,
 
     scav_box_space const b{ box_of(s.box_state, s.n_box_state, i) };
     uint32_t const kind{ static_cast<uint32_t>(c.states[i].kind) };
+    // A bar is thin across the axis the flow crosses it on, which for a frame
+    // running down is the other one, so it lies down there (11.10g).
+    StateKind const sk{ c.states[i].kind };
+    bool const lies{ ((sk == StateKind::Fork) || (sk == StateKind::Join)) &&
+                     runs_down(c.states[i].parent.v) };
+    int32_t const min_w{ lies ? p.kind_min_h[kind] : p.kind_min_w[kind] };
+    int32_t const min_h{ lies ? p.kind_min_w[kind] : p.kind_min_h[kind] };
     Wide const ring{ bare_pseudostate(c, out.sub, b, i) ? Wide{ 0 }
                                                         : (2 * static_cast<Wide>(p.pad)) };
-    Wide const w{
-      imax(imax(Wide{ b.min_w }, Wide{ packed.w }), Wide{ p.kind_min_w[kind] }) + ring
-    };
-    Wide const h{
-      imax(Wide{ b.h_before } + packed.h + b.h_after, Wide{ p.kind_min_h[kind] }) + ring
-    };
+    Wide const w{ imax(imax(Wide{ b.min_w }, Wide{ packed.w }), Wide{ min_w }) + ring };
+    Wide const h{ imax(Wide{ b.h_before } + packed.h + b.h_after, Wide{ min_h }) + ring };
     if ((w > COORD_MAX) || (h > COORD_MAX)) {
       overflow(diags, ElemKind::State, i);
       ok = false;

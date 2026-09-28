@@ -258,11 +258,16 @@ std::vector<ReversePin> facing_flips(Chart const &c,
       StateId const far{ leaves ? tr.dst : tr.src };
       if (far.v >= z.state.size()) { continue; }
       scav_rect const &r{ z.state[far.v] };
-      Wide const far_x{ Wide{ r.x } + (r.w / 2) };
-      Wide const mid_x{ Wide{ frame.x } + (frame.w / 2) };
-      bool const on_left{ z.node[at].x == frame.x };
-      bool const wants_left{ far_x < mid_x };
-      if (on_left == wants_left) { continue; }
+      // Along the frame's ranks: across the page for most, down it for a
+      // frame whose ranks run down, whose ports are on its top and bottom.
+      bool const down{ (m < o.sub_down.size()) && (o.sub_down[m] != 0) };
+      Wide const far_at{ down ? (Wide{ r.y } + (r.h / 2)) : (Wide{ r.x } + (r.w / 2)) };
+      Wide const mid_at{ down ? (Wide{ frame.y } + (frame.h / 2))
+                              : (Wide{ frame.x } + (frame.w / 2)) };
+      bool const on_leading{ down ? (z.node[at].y == frame.y)
+                                  : (z.node[at].x == frame.x) };
+      bool const wants_leading{ far_at < mid_at };
+      if (on_leading == wants_leading) { continue; }
       out.push_back({ .trans = t, .leg = seg - g.trans_segments[t.v].off });
       trace_emit({ .kind = TraceKind::PortTurned,
                    .frame = m,
@@ -666,9 +671,8 @@ Improved search_moves(Chart const &c,
     }
     if (round.empty()) { break; }
 
-    // Each worker runs its candidate's phases on one thread: `parallel_for` is
-    // fork-join, so sharding frames underneath sharded candidates would
-    // oversubscribe every core it already has work on.
+    // A candidate runs its phases on one thread: it is already the unit a free
+    // thread takes, and sharding its frames too would only add claims.
     got.assign(round.size(), {});
     parallel_for(static_cast<uint32_t>(round.size()), threads, [&](uint32_t i) {
       got[i] = score_move(c,
@@ -878,7 +882,7 @@ bool layout_run(Chart &c,
   std::vector<uint8_t> viable(rows, 0);
   // Rows are whole independent layouts of one chart, so they run at once and
   // are reduced afterwards in index order (11.10c). Each runs its own phases on
-  // one thread, since `parallel_for` is fork-join.
+  // one thread, since a row is already the unit a free thread takes.
   std::vector<std::vector<Diagnostic>> spilled(rows);
   parallel_for(rows, (rows > 1) ? o.threads : 1U, [&](uint32_t i) {
     scav_profile knobs{ p };
@@ -935,11 +939,6 @@ bool layout_run(Chart &c,
         search_tuple(knobs, dar, pack, fold, pinned ? row : i);
       };
   std::vector<SearchPins> held(rows, seed);
-  // Workers a lone search may use, and how many a set of `n` gets each when
-  // they run side by side: nested fork-join, with the host divided rather than
-  // multiplied (11.10c).
-  uint32_t const host{ (o.threads == 0) ? thread_concurrency() : o.threads };
-  auto const each = [host](uint32_t n) { return (n > 1) ? imax(host / n, 1U) : host; };
   // Searches the rows `which` names from the pins they hold, and keeps what
   // each reached.
   auto const search_rows = [&](std::vector<uint8_t> const &which) {
@@ -949,7 +948,7 @@ bool layout_run(Chart &c,
     }
     std::vector<Improved> done(active.size());
     uint32_t const n{ static_cast<uint32_t>(active.size()) };
-    parallel_for(n, imin(n, host), [&](uint32_t k) {
+    parallel_for(n, o.threads, [&](uint32_t k) {
       scav_profile knobs{};
       DarSource dar{ DarSource::Profile };
       Compaction pack{ Compaction::Off };
@@ -964,7 +963,7 @@ bool layout_run(Chart &c,
                              pack,
                              fold,
                              *router,
-                             each(n),
+                             o.threads,
                              budget,
                              held[active[k]]);
     });
@@ -998,9 +997,10 @@ bool layout_run(Chart &c,
   // every reversal kept: other frames are already converged and have nothing
   // to rediscover. And **kicks in different frames are taken together**: the
   // best improving kick of each frame is combined and searched once, and the
-  // combination is kept when it beats the best of them alone. `mill`'s six
-  // copies of `estop` would otherwise take six rounds for six independent
-  // choices.
+  // combination is kept when it beats the best of them alone; where it does
+  // not, the best is taken and each other frame's is tried on top of it in
+  // turn. `mill`'s six copies of `estop` would otherwise take six rounds for
+  // six independent choices.
   auto const kick = [&](uint32_t best) {
     scav_profile knobs{};
     DarSource dar{ DarSource::Profile };
@@ -1015,11 +1015,12 @@ bool layout_run(Chart &c,
     auto const outside = [&](uint32_t frame, std::vector<uint8_t> const &redo) {
       return (frame >= redo.size()) || (redo[frame] == 0);
     };
-    // The incumbent's pins with every non-reversal pin in a re-decided frame
-    // dropped.
+    // The incumbent's pins with every rank, cut and face pin in a re-decided
+    // frame dropped: which way a frame runs is kept, as its reversals are.
     auto const warm = [&](SearchPins const &from, std::vector<uint8_t> const &redo) {
       SearchPins out;
       out.reverses = from.reverses;
+      out.orients = from.orients;
       for (RankPin const &r : from.ranks) {
         uint32_t const f{ (r.state.v < c.states.size()) ? c.states[r.state.v].parent.v
                                                         : INVALID };
@@ -1033,122 +1034,217 @@ bool layout_run(Chart &c,
       }
       return out;
     };
-    bool kicked{ false };
-    // Kicks draw from the budget like every other dimension. On a graph whose
-    // every pair is joined almost every segment lies on a cycle, and one round
-    // would try hundreds of whole searches -- the input the budget bounds.
-    uint32_t kick_scored{ 0 };
     auto const take = [&](Improved &&won) {
       candidates[best] = std::move(won.best);
       cost[best] = won.cost;
       held[best] = std::move(won.held);
     };
-    for (;;) {
-      SubmachineOrders const here{ order_submachines(c, g, s, p, o.threads, held[best]) };
-      std::vector<uint8_t> turned(g.segments.size(), 0);
-      for (OrderEdge const &e : here.edges) {
-        if ((e.reversed != 0) && (e.segment < turned.size())) { turned[e.segment] = 1; }
-      }
-      std::vector<ReversePin> kicks;
-      std::vector<uint32_t> kick_frame;
-      for (uint32_t seg = 0; seg < g.segments.size(); ++seg) {
-        if ((here.seg_cyclic[seg] == 0) || (turned[seg] != 0)) { continue; }
-        TransId const t{ g.segments[seg].trans };
-        if ((t.v == INVALID) || (t.v >= g.trans_segments.size())) { continue; }
-        if (kick_scored >= budget) { break; }
-        ++kick_scored;
-        kicks.push_back({ .trans = t, .leg = seg - g.trans_segments[t.v].off });
-        kick_frame.push_back(g.segments[seg].frame.v);
-      }
-      if (kicks.empty()) { break; }
-
-      std::vector<Improved> tried(kicks.size());
-      parallel_for(static_cast<uint32_t>(kicks.size()), o.threads, [&](uint32_t j) {
-        std::vector<uint8_t> redo(c.submachines.size(), 0);
-        if (kick_frame[j] < redo.size()) { redo[kick_frame[j]] = 1; }
-        SearchPins start{ warm(held[best], redo) };
-        start.reverses.push_back(kicks[j]);
-        tried[j] = search_moves(c,
-                                g,
-                                s,
-                                p,
-                                knobs,
-                                dar,
-                                pack,
-                                fold,
-                                *router,
-                                each(static_cast<uint32_t>(kicks.size())),
-                                budget,
-                                start,
-                                &redo);
-      });
-
-      // The best improving kick of each frame, and the best of those, in
-      // enumeration order so the pick is the model's and not the scheduler's.
-      std::vector<uint32_t> in_frame(c.submachines.size(), INVALID);
-      uint32_t single{ INVALID };
-      for (uint32_t j = 0; j < tried.size(); ++j) {
-        if (!tried[j].viable || !cost_less(tried[j].cost, cost[best])) { continue; }
-        uint32_t const f{ kick_frame[j] };
-        if ((f < in_frame.size()) && ((in_frame[f] == INVALID) ||
-                                      cost_less(tried[j].cost, tried[in_frame[f]].cost))) {
-          in_frame[f] = j;
+    // Rounds of kicks until none improves, then one settling pass. `turns`
+    // adds a frame turned to run down to the reversals a round tries.
+    auto const kick_rounds = [&](bool turns) {
+      bool kicked{ false };
+      // Kicks draw from the budget like every other dimension. On a graph whose
+      // every pair is joined almost every segment lies on a cycle, and one round
+      // would try hundreds of whole searches -- the input the budget bounds.
+      uint32_t kick_scored{ 0 };
+      for (;;) {
+        SubmachineOrders const here{
+          order_submachines(c, g, s, p, o.threads, held[best])
+        };
+        std::vector<uint8_t> turned(g.segments.size(), 0);
+        for (OrderEdge const &e : here.edges) {
+          if ((e.reversed != 0) && (e.segment < turned.size())) { turned[e.segment] = 1; }
         }
-        if ((single == INVALID) || cost_less(tried[j].cost, tried[single].cost)) {
-          single = j;
+        // A kick is a reversal, or a frame turned to run down. **Turning a frame is
+        // a kick rather than a move**: taken greedily, the first turn to improve
+        // led `ota`'s search to a basin 18% dearer than the one it reached with
+        // no turns at all, and a kick is kept only where what it converges to
+        // beats the incumbent (11.10g).
+        struct Kick {
+          ReversePin reverse{};
+          OrientPin orient{};
+        };
+        std::vector<Kick> kicks;
+        std::vector<uint32_t> kick_frame;
+        for (uint32_t seg = 0; seg < g.segments.size(); ++seg) {
+          if ((here.seg_cyclic[seg] == 0) || (turned[seg] != 0)) { continue; }
+          TransId const t{ g.segments[seg].trans };
+          if ((t.v == INVALID) || (t.v >= g.trans_segments.size())) { continue; }
+          if (kick_scored >= budget) { break; }
+          ++kick_scored;
+          kicks.push_back(
+              { .reverse = { .trans = t, .leg = seg - g.trans_segments[t.v].off } });
+          kick_frame.push_back(g.segments[seg].frame.v);
         }
-      }
-      if (single == INVALID) { break; }
+        for (uint32_t m = 0; turns && (m < here.sub_ranks.size()); ++m) {
+          if ((c.submachines[m].live == 0) || (here.sub_ranks[m] < 2) ||
+              (here.sub_down[m] != 0) || (kick_scored >= budget)) {
+            continue;
+          }
+          ++kick_scored;
+          kicks.push_back({ .orient = { .frame = SubmachineId{ m } } });
+          kick_frame.push_back(m);
+        }
+        if (kicks.empty()) { break; }
+        auto const with_kick = [](SearchPins &into, Kick const &k) {
+          if (k.orient.frame.v != INVALID) {
+            into.orients.push_back(k.orient);
+          } else {
+            into.reverses.push_back(k.reverse);
+          }
+        };
 
-      std::vector<uint32_t> winners;
-      for (uint32_t const j : in_frame) {
-        if (j != INVALID) { winners.push_back(j); }
-      }
-      if (winners.size() > 1) {
-        std::vector<uint8_t> redo(c.submachines.size(), 0);
-        for (uint32_t const j : winners) {
+        std::vector<Improved> tried(kicks.size());
+        parallel_for(static_cast<uint32_t>(kicks.size()), o.threads, [&](uint32_t j) {
+          std::vector<uint8_t> redo(c.submachines.size(), 0);
           if (kick_frame[j] < redo.size()) { redo[kick_frame[j]] = 1; }
+          SearchPins start{ warm(held[best], redo) };
+          with_kick(start, kicks[j]);
+          tried[j] = search_moves(c,
+                                  g,
+                                  s,
+                                  p,
+                                  knobs,
+                                  dar,
+                                  pack,
+                                  fold,
+                                  *router,
+                                  o.threads,
+                                  budget,
+                                  start,
+                                  &redo);
+        });
+
+        // The best improving kick of each frame, and the best of those, in
+        // enumeration order so the pick is the model's and not the scheduler's.
+        std::vector<uint32_t> in_frame(c.submachines.size(), INVALID);
+        uint32_t single{ INVALID };
+        for (uint32_t j = 0; j < tried.size(); ++j) {
+          if (!tried[j].viable || !cost_less(tried[j].cost, cost[best])) { continue; }
+          uint32_t const f{ kick_frame[j] };
+          if ((f < in_frame.size()) &&
+              ((in_frame[f] == INVALID) ||
+               cost_less(tried[j].cost, tried[in_frame[f]].cost))) {
+            in_frame[f] = j;
+          }
+          if ((single == INVALID) || cost_less(tried[j].cost, tried[single].cost)) {
+            single = j;
+          }
         }
-        SearchPins start{ warm(held[best], redo) };
-        for (uint32_t const j : winners) { start.reverses.push_back(kicks[j]); }
-        Improved together{ search_moves(c,
-                                        g,
-                                        s,
-                                        p,
-                                        knobs,
-                                        dar,
-                                        pack,
-                                        fold,
-                                        *router,
-                                        host,
-                                        budget,
-                                        start,
-                                        &redo) };
-        if (together.viable && cost_less(together.cost, tried[single].cost)) {
-          take(std::move(together));
-          kicked = true;
-          continue;
+        if (single == INVALID) { break; }
+
+        std::vector<uint32_t> winners;
+        for (uint32_t const j : in_frame) {
+          if (j != INVALID) { winners.push_back(j); }
+        }
+        if (winners.size() > 1) {
+          std::vector<uint8_t> redo(c.submachines.size(), 0);
+          for (uint32_t const j : winners) {
+            if (kick_frame[j] < redo.size()) { redo[kick_frame[j]] = 1; }
+          }
+          SearchPins start{ warm(held[best], redo) };
+          for (uint32_t const j : winners) { with_kick(start, kicks[j]); }
+          Improved together{ search_moves(c,
+                                          g,
+                                          s,
+                                          p,
+                                          knobs,
+                                          dar,
+                                          pack,
+                                          fold,
+                                          *router,
+                                          o.threads,
+                                          budget,
+                                          start,
+                                          &redo) };
+          if (together.viable && cost_less(together.cost, tried[single].cost)) {
+            take(std::move(together));
+            kicked = true;
+            continue;
+          }
+        }
+        take(std::move(tried[single]));
+        kicked = true;
+        // The other frames' best kicks, cheapest first, each searched on top of
+        // what the round has taken so far and kept where it still improves: a
+        // round lands every independent choice it can for one search apiece,
+        // where taking one per round re-scored every kick for each of them.
+        std::vector<uint32_t> rest;
+        for (uint32_t const j : winners) {
+          if (j != single) { rest.push_back(j); }
+        }
+        scav_insertion_sort(rest.data(),
+                            rest.data() + rest.size(),
+                            [&](uint32_t a, uint32_t b) {
+                              return cost_less(tried[a].cost, tried[b].cost);
+                            });
+        for (uint32_t const j : rest) {
+          std::vector<uint8_t> redo(c.submachines.size(), 0);
+          if (kick_frame[j] < redo.size()) { redo[kick_frame[j]] = 1; }
+          SearchPins start{ warm(held[best], redo) };
+          with_kick(start, kicks[j]);
+          Improved more{ search_moves(c,
+                                      g,
+                                      s,
+                                      p,
+                                      knobs,
+                                      dar,
+                                      pack,
+                                      fold,
+                                      *router,
+                                      o.threads,
+                                      budget,
+                                      start,
+                                      &redo) };
+          if (more.viable && cost_less(more.cost, cost[best])) { take(std::move(more)); }
         }
       }
-      take(std::move(tried[single]));
-      kicked = true;
-    }
-    // A kick searched one frame and the others stood still, but a frame that
-    // changed size moves its siblings' packing, so one unscoped pass from what
-    // the kicks reached picks up whatever that opened.
-    if (kicked) {
-      Improved settled{
-        search_moves(c, g, s, p, knobs, dar, pack, fold, *router, host, budget, held[best])
-      };
-      if (settled.viable && cost_less(settled.cost, cost[best])) {
-        take(std::move(settled));
+      // A kick searched one frame and the others stood still, but a frame that
+      // changed size moves its siblings' packing, so one unscoped pass from what
+      // the kicks reached picks up whatever that opened.
+      if (kicked) {
+        Improved settled{ search_moves(c,
+                                       g,
+                                       s,
+                                       p,
+                                       knobs,
+                                       dar,
+                                       pack,
+                                       fold,
+                                       *router,
+                                       o.threads,
+                                       budget,
+                                       held[best]) };
+        if (settled.viable && cost_less(settled.cost, cost[best])) {
+          take(std::move(settled));
+        }
       }
-    }
+    };
+    // **Two schedules from one start, and the cheaper kept.** With turns in
+    // every round, the turn that improved most led `ota` to a basin a third
+    // dearer than the one reversals alone reach; with turns only once
+    // reversals converge, `toolchanger` misses the turn that takes it 3% lower.
+    // So both run from the row's converged drawing, and ties keep the first.
+    Candidate const from_candidate{ candidates[best] };
+    Cost const from_cost{ cost[best] };
+    SearchPins const from_held{ held[best] };
+    kick_rounds(true);
+    Improved mixed{ .best = std::move(candidates[best]),
+                    .cost = cost[best],
+                    .held = std::move(held[best]),
+                    .viable = true };
+    candidates[best] = from_candidate;
+    cost[best] = from_cost;
+    held[best] = from_held;
+    kick_rounds(false);
+    kick_rounds(true);
+    if (!cost_less(cost[best], mixed.cost)) { take(std::move(mixed)); }
   };
-  // Row by row, each kicking with the whole host, so the order the rows finish
-  // in is the table's and not the scheduler's. A row that converged to the
-  // drawing an earlier row did is not kicked again: its kicks start from that
-  // drawing, and the table's rows differ by knobs that often move nothing.
+  // Every row kicks at once: a row's kicks read and write that row's slots and
+  // nothing else, so the order they finish in reaches nothing. A row that
+  // converged to the drawing an earlier row did is not kicked again: its kicks
+  // start from that drawing, and the table's rows differ by knobs that often
+  // move nothing.
   auto const same_drawing = [&](uint32_t a, uint32_t b) {
     SizedLayout const &za{ candidates[a].sized };
     SizedLayout const &zb{ candidates[b].sized };
@@ -1179,9 +1275,13 @@ bool layout_run(Chart &c,
         if ((viable[j] != 0) && (repeat[j] == 0) && same_drawing(i, j)) { repeat[i] = 1; }
       }
     }
+    std::vector<uint32_t> kicking;
     for (uint32_t i = 0; i < rows; ++i) {
-      if ((viable[i] != 0) && (repeat[i] == 0)) { kick(i); }
+      if ((viable[i] != 0) && (repeat[i] == 0)) { kicking.push_back(i); }
     }
+    parallel_for(static_cast<uint32_t>(kicking.size()), o.threads, [&](uint32_t k) {
+      kick(kicking[k]);
+    });
   }
   uint32_t const best{ search_argmin(cost, eligible) };
   // Written whichever way the branches above went: what the drawing rests on,
@@ -1192,7 +1292,7 @@ bool layout_run(Chart &c,
   if (moves != nullptr) {
     auto const count = [](SearchPins const &q) {
       return static_cast<uint32_t>(q.ranks.size() + q.cuts.size() + q.reverses.size() +
-                                   q.faces.size());
+                                   q.faces.size() + q.orients.size());
     };
     uint32_t const now{ count(held[best]) };
     uint32_t const had{ count(seed) };

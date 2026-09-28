@@ -1792,6 +1792,29 @@ TEST_CASE("layout: a pinned row runs that row, and searches from it") {
   CHECK(picked == 4);
 }
 
+TEST_CASE("layout: the search turns a frame down where that converges cheaper") {
+  // `axis`'s `monitor` region is two states in sequence, and turned to run
+  // down it is a column beside `travel` rather than a row across `Moving`
+  // (11.10g). The drawing that ships rests on the turn.
+  scav_profile const p{ readable() };
+  Chart c;
+  load_corpus("axis.scav", c);
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  SearchPins taken;
+  REQUIRE(layout_run(c,
+                     {},
+                     opts(p),
+                     placed,
+                     diags,
+                     nullptr,
+                     nullptr,
+                     INVALID,
+                     nullptr,
+                     &taken));
+  CHECK(!taken.orients.empty());
+}
+
 TEST_CASE("layout: what ships is the cheapest row searched and kicked on its own") {
   // A pinned row is that row searched and kicked to convergence, so the run
   // over the whole table can do no worse than any of them. Kicking only the
@@ -2155,6 +2178,51 @@ TEST_CASE("layout: a label inside one of two regions stays inside that region") 
   CHECK(placed[0].y >= region.y);
   CHECK((placed[0].x + placed[0].w) <= (region.x + region.w));
   CHECK((placed[0].y + placed[0].h) <= (region.y + region.h));
+}
+
+TEST_CASE("layout: a composite running down is entered through its top") {
+  // `P`'s inside turned down puts its ports on its top and bottom borders, in
+  // line with the state each leads to, and a port faces where its route comes
+  // from: the chart running down too puts `X` above `P` (11.10g).
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
+  StateId const outer{ build_state(c, root, "P", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, outer, {}, {}) };
+  StateId const s1{ build_state(c, inner, "S", StateKind::Normal, {}) };
+  StateId const s2{ build_state(c, inner, "T", StateKind::Normal, {}) };
+  build_trans(c, s1, s2, TransKind::External, {});
+  TransId const into{ build_trans(c, x, s1, TransKind::External, {}) };
+
+  scav_profile p{ readable() };
+  p.portfolio_k = 0;
+  p.portfolio_m = 1;
+  SearchPins const turned{ .orients = { { .frame = root }, { .frame = inner } } };
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  REQUIRE(layout_run(c,
+                     {},
+                     opts(p),
+                     placed,
+                     diags,
+                     nullptr,
+                     nullptr,
+                     INVALID,
+                     nullptr,
+                     nullptr,
+                     &turned));
+  CHECK(diags.empty());
+  scav_rect const box{ state_rect(c, outer) };
+  scav_rect const &first{ state_rect(c, s1) };
+  scav_rect const &second{ state_rect(c, s2) };
+  CHECK(first.y + first.h < second.y);                     // the inside runs down
+  CHECK(state_rect(c, x).y + state_rect(c, x).h < box.y);  // and the chart too
+  scav_span const slots{ row_of<scav_span>(c, "scav.geom.port", into.v) };
+  REQUIRE(slots.len == 1);
+  scav_port_slot const slot{ row_of<scav_port_slot>(c, "scav.geom.portslot", slots.off) };
+  CHECK(slot.side == 2U);
+  CHECK(slot.y == box.y);
+  CHECK(slot.x == first.x + (first.w / 2));
 }
 
 TEST_CASE("layout: a channel a fork bar touches routes at its drawn size") {

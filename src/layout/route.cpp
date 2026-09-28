@@ -216,6 +216,15 @@ Routes route_transitions(Chart const &c,
       return scav_port_slot{ .x = at.x, .y = at.y, .side = 0, .boundary_depth = depth };
     }
     bool const leading{ source_node[node] != 0 };
+    // On the border the frame's ranks start and end at: left and right for a
+    // frame running across, top and bottom for one running down (11.10g).
+    uint32_t const frame{ g.segments[seg].frame.v };
+    if ((frame < o.sub_down.size()) && (o.sub_down[frame] != 0)) {
+      return scav_port_slot{ .x = z.node[node].x,
+                             .y = leading ? box.y : (box.y + box.h),
+                             .side = leading ? 2U : 3U,
+                             .boundary_depth = depth };
+    }
     return scav_port_slot{ .x = leading ? box.x : (box.x + box.w),
                            .y = z.node[node].y,
                            .side = leading ? 0U : 1U,

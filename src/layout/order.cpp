@@ -6,6 +6,7 @@
 #include "layout/order.h"
 
 #include "layout/decompose.h"
+#include "layout/memo.h"
 #include "layout/partition.h"
 #include "layout/shard.h"
 #include "layout/trace.h"
@@ -17,12 +18,25 @@
 #include "scav_stable_sort.h"
 #include "scav_thread.h"
 
+#include <array>
 #include <cstdint>
+#include <cstring>
 #include <vector>
 
 namespace scav {
 
 namespace {
+
+// Every frame this thread has ordered, by what ordering it read. A search's
+// candidates differ in one frame, so every other frame a candidate orders is
+// one an earlier candidate ordered from the same inputs.
+Memo &frame_memo() {
+  thread_local Memo m{ size_t{ 1 } << 20 };
+  return m;
+}
+
+// The profile is read whole into a key, so it has to be words and no padding.
+static_assert((sizeof(scav_profile) % sizeof(uint32_t)) == 0);
 
 // Prefix sums over `count`, so a per-key bucket is a slice of one array rather
 // than a vector of vectors. `out[i]..out[i+1]` is key i's run.
@@ -598,6 +612,10 @@ SubmachineOrders order_submachines(Chart const &c,
   o.sub_nodes.assign(c.submachines.size(), Span{});
   o.sub_edges.assign(c.submachines.size(), Span{});
   o.sub_ranks.assign(c.submachines.size(), 0);
+  o.sub_down.assign(c.submachines.size(), 0);
+  for (OrientPin const &pin : pins.orients) {
+    if (pin.frame.v < o.sub_down.size()) { o.sub_down[pin.frame.v] = 1; }
+  }
   o.sub_gaps.assign(c.submachines.size(), Span{});
   o.state_node.assign(c.states.size(), INVALID);
   o.seg_node.assign(g.segments.size(), INVALID);
@@ -622,14 +640,18 @@ SubmachineOrders order_submachines(Chart const &c,
 
   // A label is charged to one rank boundary in one frame -- the middle of the
   // route, which is where a builder draws it -- so a hierarchy-crossing
-  // transition does not widen every frame it passes through.
+  // transition does not widen every frame it passes through. Its extent along
+  // the frame's ranks: its width across the page, its height down it.
   std::vector<int32_t> seg_label(g.segments.size(), 0);
   for (uint32_t i = 0; i < s.n_path_box; ++i) {
     scav_path_box const &box{ s.path_box[i] };
     if (box.subject >= g.trans_segments.size()) { continue; }
     Span const segs{ g.trans_segments[box.subject] };
     if (segs.len == 0) { continue; }
-    seg_label[segs.off + (segs.len / 2)] += box.w;
+    uint32_t const mid{ segs.off + (segs.len / 2) };
+    uint32_t const frame{ g.segments[mid].frame.v };
+    bool const down{ (frame < o.sub_down.size()) && (o.sub_down[frame] != 0) };
+    seg_label[mid] += down ? box.h : box.w;
   }
 
   // `{trans, leg}` resolved to segment ordinals once, so the frame workers read
@@ -715,36 +737,133 @@ SubmachineOrders order_submachines(Chart const &c,
       f.edges.push_back({ .src = src, .dst = dst, .segment = seg, .reversed = 0 });
     }
 
-    frames[m].cyclic = cyclic_segments(f);
-    orient_acyclic(f, pre_reversed);
-    assign_ranks(f);
-
-    // The pins land between the ranking and everything derived from it, which
-    // is the one place a rank is a free choice rather than a consequence.
-    // `first` is where this frame's nodes will sit in the merged array, and a
-    // pin names them there so a caller never has to know the merge order.
-    if (!pins.ranks.empty()) {
-      bool moved{ false };
+    // Everything below reads the frame as built, the reversal and cut tables
+    // at its segments, the rank pins that land in it, which of its states are
+    // initials, its label charges and the profile -- and those are the key, so
+    // a hit is the ordering the steps below would derive. A traced run derives
+    // every frame, since a hit would emit nothing.
+    bool const tracing{ trace_sink() != nullptr };
+    thread_local std::vector<uint32_t> key;
+    thread_local std::vector<int32_t> value;
+    key.clear();
+    if (!tracing) {
+      std::array<uint32_t, sizeof(scav_profile) / sizeof(uint32_t)> knobs{};
+      std::memcpy(knobs.data(), &p, sizeof(scav_profile));
+      key.insert(key.end(), knobs.begin(), knobs.end());
+      key.push_back(static_cast<uint32_t>(f.nodes.size()));
+      for (OrderNode const &nd : f.nodes) {
+        key.push_back(static_cast<uint32_t>(nd.kind));
+        key.push_back(nd.subject);
+        key.push_back((nd.kind == OrderKind::State)
+                          ? static_cast<uint32_t>(c.states[nd.subject].kind)
+                          : 0U);
+      }
+      key.push_back(static_cast<uint32_t>(f.edges.size()));
+      for (OrderEdge const &e : f.edges) {
+        key.push_back(e.src);
+        key.push_back(e.dst);
+        key.push_back(e.segment);
+        key.push_back(pre_reversed.empty() ? 0U : pre_reversed[e.segment]);
+        key.push_back(cut.empty() ? 0U : cut[e.segment]);
+        key.push_back(static_cast<uint32_t>(seg_label[e.segment]));
+      }
       for (RankPin const &pin : pins.ranks) {
         if ((pin.state.v == INVALID) || (pin.state.v >= sc.state_local.size())) {
           continue;
         }
         uint32_t const at{ sc.state_local[pin.state.v] };
-        if (at >= f.nodes.size()) { continue; }  // not a state this frame holds
-        if (c.states[pin.state.v].kind == StateKind::Initial) { continue; }
-        f.nodes[at].rank = pin.rank;
-        moved = true;
-        trace_emit({ .kind = TraceKind::RankPinned,
-                     .rank = { .state = pin.state.v, .rank = pin.rank } });
-      }
-      if (moved) {
-        seat_initials(c, f);
-        // A rank a move emptied would size a phantom gap in phase 2 (11.10), so
-        // the ranks are renumbered onto the ones that still hold a node.
-        squeeze_ranks(f);
+        if (at >= f.nodes.size()) { continue; }
+        key.push_back(at);
+        key.push_back(pin.rank);
       }
     }
-    rank_derived(f, frames[m].gaps, seg_label, cut, p, sc);
+    Memo &memo{ frame_memo() };
+    uint32_t len{ 0 };
+    int32_t const *const hit{ tracing ? nullptr : memo.find(key, len) };
+    if (hit != nullptr) {
+      auto word = [&, at = uint32_t{ 0 }]() mutable {
+        return static_cast<uint32_t>(hit[at++]);
+      };
+      f.nodes.resize(word());
+      for (OrderNode &nd : f.nodes) {
+        nd = { .kind = static_cast<OrderKind>(word()),
+               .subject = word(),
+               .rank = word(),
+               .pos = word() };
+      }
+      f.edges.resize(word());
+      for (OrderEdge &e : f.edges) {
+        e = { .src = word(), .dst = word(), .segment = word(), .reversed = word() };
+      }
+      f.ranks.resize(word());
+      for (std::vector<uint32_t> &bucket : f.ranks) {
+        bucket.resize(word());
+        for (uint32_t &v : bucket) { v = word(); }
+      }
+      frames[m].gaps.resize(word());
+      for (int32_t &gap : frames[m].gaps) { gap = static_cast<int32_t>(word()); }
+      frames[m].cyclic.resize(word());
+      for (uint32_t &seg : frames[m].cyclic) { seg = word(); }
+    } else {
+      frames[m].cyclic = cyclic_segments(f);
+      orient_acyclic(f, pre_reversed);
+      assign_ranks(f);
+
+      // The pins land between the ranking and everything derived from it, which
+      // is the one place a rank is a free choice rather than a consequence.
+      // `first` is where this frame's nodes will sit in the merged array, and a
+      // pin names them there so a caller never has to know the merge order.
+      if (!pins.ranks.empty()) {
+        bool moved{ false };
+        for (RankPin const &pin : pins.ranks) {
+          if ((pin.state.v == INVALID) || (pin.state.v >= sc.state_local.size())) {
+            continue;
+          }
+          uint32_t const at{ sc.state_local[pin.state.v] };
+          if (at >= f.nodes.size()) { continue; }  // not a state this frame holds
+          if (c.states[pin.state.v].kind == StateKind::Initial) { continue; }
+          f.nodes[at].rank = pin.rank;
+          moved = true;
+          trace_emit({ .kind = TraceKind::RankPinned,
+                       .rank = { .state = pin.state.v, .rank = pin.rank } });
+        }
+        if (moved) {
+          seat_initials(c, f);
+          // A rank a move emptied would size a phantom gap in phase 2 (11.10), so
+          // the ranks are renumbered onto the ones that still hold a node.
+          squeeze_ranks(f);
+        }
+      }
+      rank_derived(f, frames[m].gaps, seg_label, cut, p, sc);
+      if (!tracing) {
+        value.clear();
+        auto const put = [](uint32_t w) { value.push_back(static_cast<int32_t>(w)); };
+        put(static_cast<uint32_t>(f.nodes.size()));
+        for (OrderNode const &nd : f.nodes) {
+          put(static_cast<uint32_t>(nd.kind));
+          put(nd.subject);
+          put(nd.rank);
+          put(nd.pos);
+        }
+        put(static_cast<uint32_t>(f.edges.size()));
+        for (OrderEdge const &e : f.edges) {
+          put(e.src);
+          put(e.dst);
+          put(e.segment);
+          put(e.reversed);
+        }
+        put(static_cast<uint32_t>(f.ranks.size()));
+        for (std::vector<uint32_t> const &bucket : f.ranks) {
+          put(static_cast<uint32_t>(bucket.size()));
+          for (uint32_t const v : bucket) { put(v); }
+        }
+        put(static_cast<uint32_t>(frames[m].gaps.size()));
+        for (int32_t const gap : frames[m].gaps) { value.push_back(gap); }
+        put(static_cast<uint32_t>(frames[m].cyclic.size()));
+        for (uint32_t const seg : frames[m].cyclic) { put(seg); }
+        memo.insert(key, value);
+      }
+    }
 
     for (uint32_t k = 0; k < kids.len; ++k) {
       sc.state_local[c.state_ids[kids.off + k].v] = INVALID;

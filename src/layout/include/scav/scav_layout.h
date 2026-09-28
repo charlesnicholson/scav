@@ -150,6 +150,14 @@ struct FacePin {
   uint32_t face{ 0 };
 };
 
+// A frame whose ranks run down the page rather than across it: layers are rows,
+// the cross axis is horizontal, and its ports sit on its top and bottom
+// borders (11.10g). A column of states in sequence is one frame's choice, and
+// `axis`'s `Moving` wants both of its regions that way.
+struct OrientPin {
+  SubmachineId frame{ INVALID };
+};
+
 // Everything besides the tuple that a drawing is a function of, so re-deriving
 // one is two arguments and not seven (11.10a, 11.10b, 11.10d, 11.10e).
 struct SearchPins {
@@ -157,6 +165,7 @@ struct SearchPins {
   std::vector<ChainCut> cuts;
   std::vector<ReversePin> reverses;
   std::vector<FacePin> faces;
+  std::vector<OrientPin> orients;
 };
 
 // Rows in the fixed table of chart-global phase-2 tuples Level 2 chooses

@@ -43,6 +43,9 @@ struct SubmachineOrders {
   std::vector<Span> sub_nodes;      // parallel to submachines -> nodes
   std::vector<Span> sub_edges;      // parallel to submachines -> edges
   std::vector<uint32_t> sub_ranks;  // parallel to submachines; layer count
+  // Parallel to submachines: 1 where the ranks run down (+y) rather than
+  // across (+x), from the pins (11.10g).
+  std::vector<uint8_t> sub_down;
 
   // The extra width each rank boundary must carry beyond `rank_sep`, one row
   // per boundary, so `len` is one less than the frame's rank count.

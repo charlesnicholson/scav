@@ -35,6 +35,7 @@ scav_static_library(scavlayout
   decompose.cpp
   order.cpp
   coords.cpp
+  memo.cpp
   pack.cpp
   size.cpp
   route.cpp

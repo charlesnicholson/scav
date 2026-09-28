@@ -79,6 +79,16 @@ bool read_value(std::string_view flag, std::string_view value, LayoutArgs &out) 
     out.row = a;
     return true;
   }
+  if (flag == "--orient") {
+    std::from_chars_result const got{
+      std::from_chars(value.data(), value.data() + value.size(), a)
+    };
+    if ((got.ec != std::errc{}) || (got.ptr != (value.data() + value.size()))) {
+      return false;
+    }
+    out.pins.orients.push_back({ .frame = SubmachineId{ a } });
+    return true;
+  }
   if (flag == "--face") {
     std::array<uint32_t, 4> field{};
     if (!face_fields(value, field)) { return false; }
@@ -111,7 +121,8 @@ ArgRead read_layout_arg(int argc, char **argv, int &i, LayoutArgs &out) {
     return ArgRead::Taken;
   }
   if ((arg != "--profile") && (arg != "--portfolio-row") && (arg != "--rank") &&
-      (arg != "--cut") && (arg != "--reverse") && (arg != "--face")) {
+      (arg != "--cut") && (arg != "--reverse") && (arg != "--face") &&
+      (arg != "--orient")) {
     return ArgRead::NotOurs;
   }
   // The increment is its own statement: clang-tidy's
@@ -156,6 +167,10 @@ void append_layout_args(std::string &out,
     string_append_u32(out, f.end);
     out += ':';
     string_append_u32(out, f.face);
+  }
+  for (OrientPin const &o : pins.orients) {
+    out += " --orient ";
+    string_append_u32(out, o.frame.v);
   }
 }
 

@@ -526,6 +526,129 @@ TEST_CASE("size: a labelled pair a fold stacks has room for a label either side"
   CHECK((frame.x + frame.w) - leg >= room);
 }
 
+TEST_CASE("size: a frame turned down runs its ranks top to bottom, and never folds") {
+  // A column of states in sequence is one frame's choice (11.10g). Turned
+  // down, each rank is a row: `B` under `A` and `C` under `B` on one centre
+  // line, the initial above the state it enters, and a hole wide enough to
+  // fold an across run into two rows still leaves the column one column.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const start{ build_state(c, root, {}, StateKind::Initial, {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
+  build_trans(c, start, a, TransKind::External, {});
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, d, TransKind::External, {});
+  scav_profile p{ profile() };
+  p.dar_num = 1024;  // wide: an across run this long would not fold either
+  p.dar_den = 1;
+  SubmachineOrders o{ one_frame(c,
+                                root,
+                                { state_node(start.v, 0, 0),
+                                  state_node(a.v, 1, 0),
+                                  state_node(b.v, 2, 0),
+                                  state_node(d.v, 3, 0) },
+                                { { .src = 0, .dst = 1, .segment = 0, .reversed = 0 },
+                                  { .src = 1, .dst = 2, .segment = 1, .reversed = 0 },
+                                  { .src = 2, .dst = 3, .segment = 2, .reversed = 0 } },
+                                { 0, 0, 0 }) };
+  o.sub_down.assign(c.submachines.size(), 0);
+  o.sub_down[root.v] = 1;
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c,
+                      depths({ 0, 0, 0, 0 }),
+                      o,
+                      {},
+                      p,
+                      z,
+                      diags,
+                      DarSource::Profile,
+                      Compaction::Off,
+                      Fold::Always));
+  scav_rect const &dot{ z.state[start.v] };
+  scav_rect const &ra{ z.state[a.v] };
+  scav_rect const &rb{ z.state[b.v] };
+  scav_rect const &rd{ z.state[d.v] };
+  CHECK(dot.y + dot.h < ra.y);
+  CHECK(ra.y + ra.h < rb.y);
+  CHECK(rb.y + rb.h < rd.y);
+  CHECK(dot.x + (dot.w / 2) == ra.x + (ra.w / 2));
+  CHECK(ra.x + (ra.w / 2) == rb.x + (rb.w / 2));
+  CHECK(rb.x + (rb.w / 2) == rd.x + (rd.w / 2));
+  CHECK(rb.y - (ra.y + ra.h) == p.rank_sep);
+  CHECK(z.sub[root.v].h > (3 * z.sub[root.v].w));  // one column, not wrapped
+}
+
+TEST_CASE("size: a bar lies down in a frame running down") {
+  // A bar is thin across the axis the flow crosses it on. Stood up in a
+  // frame running down, its long faces are beside the flow and every branch
+  // leaves through a cap, which put four of `fork`'s through them (11.10g).
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const bar{ build_state(c, root, "F", StateKind::Fork, {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  build_trans(c, bar, a, TransKind::External, {});
+  scav_profile const p{ unfolded() };
+  auto const sized = [&](bool down) {
+    SubmachineOrders o{ one_frame(c,
+                                  root,
+                                  { state_node(bar.v, 0, 0), state_node(a.v, 1, 0) },
+                                  { { .src = 0, .dst = 1, .segment = 0, .reversed = 0 } },
+                                  { 0 }) };
+    o.sub_down.assign(c.submachines.size(), down ? 1 : 0);
+    SizedLayout z;
+    std::vector<Diagnostic> diags;
+    REQUIRE(size_layout(c, depths({ 0, 0 }), o, {}, p, z, diags));
+    return z.state[bar.v];
+  };
+  scav_rect const across{ sized(false) };
+  scav_rect const down{ sized(true) };
+  REQUIRE(across.h > across.w);  // stood up for a frame running across
+  CHECK(down.w == across.h);
+  CHECK(down.h == across.w);
+}
+
+TEST_CASE("size: a label beside a leg between two ranks has its room on one side") {
+  // The reserve gives each side of a node half a label's room across the
+  // ranks; running down, that is half a label's width beside a vertical leg,
+  // and `axis`'s `approaching target` printed over `Decelerating` (11.10g). A
+  // node alone in its row takes no reserve, and the frame grows on the
+  // trailing side until one side of the leg holds the whole label.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  constexpr int32_t LABEL_W{ 3000 };
+  std::vector<scav_path_box> const labels{
+    { .subject = 0, .w = LABEL_W, .h = 200, .order = 0 }
+  };
+  scav_spaces const s{ .path_box = labels.data(), .n_path_box = 1 };
+  scav_profile const p{ unfolded() };
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders o{ one_frame(c,
+                                root,
+                                { state_node(a.v, 0, 0), state_node(b.v, 1, 0) },
+                                { { .src = 0, .dst = 1, .segment = 0, .reversed = 0 } },
+                                { 200 }) };
+  o.sub_down.assign(c.submachines.size(), 0);
+  o.sub_down[root.v] = 1;
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c, g, o, s, p, z, diags));
+  scav_rect const &ra{ z.state[a.v] };
+  scav_rect const &frame{ z.sub[root.v] };
+  int32_t const leg{ ra.x + (ra.w / 2) };
+  int32_t const room{ label_leader(p) + LABEL_W + (p.node_sep / 2) };
+  CHECK(ra.x == frame.x);  // no reserve beside a node alone in its row
+  CHECK((frame.x + frame.w) - leg >= room);
+  CHECK((frame.x + frame.w) - leg < room + ra.w);  // one side, not both
+}
+
 TEST_CASE("size: an edge pointing back a rank still aligns its ends") {
   // The other thing a pin leaves: an edge from a later rank to an earlier one,
   // which is the same pair of layers read the other way round.

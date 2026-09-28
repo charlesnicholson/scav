@@ -169,8 +169,8 @@ TEST_CASE("thread: asking for more threads than shards still runs every shard") 
   HookGuard const guard;
   for (uint32_t shards : { 3U, 8U, 16U }) {
     CAPTURE(shards);
-    // The shim attempts workers 1..shards-1, so a limit of shards-2 refuses the
-    // last one and its stripe comes back to the caller.
+    // A limit of shards-2 leaves out a worker the call could have used, and
+    // the shards it would have taken go to the threads that remain.
     thread_test_spawn_limit(shards - 2U);
     std::vector<uint32_t> const hits{ run_hits(shards, 64U) };
     CHECK(count_of(hits, 1U) == shards);
@@ -221,8 +221,8 @@ TEST_CASE("thread: a worker that cannot be spawned runs on the caller") {
   HookGuard const guard;
   uint32_t const shards{ 40 };
 
-  // One spawn allowed of the seven the shim attempts, so six stripes come back
-  // to the caller.
+  // One worker allowed besides the caller, so the shards the rest would have
+  // taken come back to those two.
   thread_test_spawn_limit(1U);
   CHECK(count_of(run_hits(shards, 8U), 1U) == shards);
 

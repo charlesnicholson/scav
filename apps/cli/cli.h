@@ -62,6 +62,7 @@ enum class ArgRead : uint32_t { NotOurs, Taken, Malformed };
 //   --reverse T:L        that leg turned round before cycles break (11.10d)
 //   --face T:L:E:F       end E (0 departs, 1 arrives) leaves by face F: 0 left,
 //                        1 right, 2 top, 3 bottom (11.10e)
+//   --orient F           submachine F's ranks run down the page (11.10g)
 //   --no-search          lay out the row and pins given, and move nothing
 //   --no-text            lay out with no space requests, the scale the layout
 //                        goldens are stated at
