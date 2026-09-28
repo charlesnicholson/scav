@@ -38,9 +38,13 @@ bool ordinal_pair(std::string_view arg, uint32_t &a, uint32_t &b) {
   if ((colon == std::string_view::npos) || (colon == 0) || (colon + 1 == arg.size())) {
     return false;
   }
-  std::from_chars_result const x{ std::from_chars(arg.data(), arg.data() + colon, a) };
+  std::string_view const head{ arg.substr(0, colon) };
+  std::string_view const tail{ arg.substr(colon + 1) };
+  std::from_chars_result const x{
+    std::from_chars(head.data(), head.data() + head.size(), a)
+  };
   std::from_chars_result const y{
-    std::from_chars(arg.data() + colon + 1, arg.data() + arg.size(), b)
+    std::from_chars(tail.data(), tail.data() + tail.size(), b)
   };
   return (x.ec == std::errc{}) && (x.ptr == (arg.data() + colon)) &&
          (y.ec == std::errc{}) && (y.ptr == (arg.data() + arg.size()));

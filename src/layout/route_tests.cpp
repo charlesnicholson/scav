@@ -16,6 +16,7 @@
 
 #include "doctest.h"
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -870,9 +871,10 @@ namespace {
 
 // Every corpus chart, by the bare name, so the reuse below is held to real
 // frames rather than to hand-built ones.
-constexpr char const *CORPUS[]{ "axis.scav",  "bottler.scav",     "brew.scav", "dock.scav",
-                                "estop.scav", "led.scav",         "mill.scav", "ota.scav",
-                                "tcp.scav",   "toolchanger.scav", "vac.scav" };
+constexpr std::array<char const *, 11> CORPUS{
+  "axis.scav", "bottler.scav", "brew.scav", "dock.scav",        "estop.scav", "led.scav",
+  "mill.scav", "ota.scav",     "tcp.scav",  "toolchanger.scav", "vac.scav"
+};
 
 void load_corpus_chart(char const *name, Chart &c) {
   std::string path{ SCAV_TEST_DATA_DIR "/charts/" };

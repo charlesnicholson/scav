@@ -487,6 +487,8 @@ uint64_t rank_crossings(std::vector<uint32_t> const &south_positions) {
   return inversions(south_positions);
 }
 
+namespace {
+
 // Every initial pseudostate one rank before the nearest state it enters, which
 // `assign_ranks` gives it and a pin on that state can take away. Where the
 // state is at rank 0, everything else moves up one to make the room.
@@ -601,6 +603,8 @@ void rank_derived(Frame &f,
   bucket_ranks(f);
   minimize_crossings(f, static_cast<uint32_t>(p.sweep_count));
 }
+
+}  // namespace
 
 SubmachineOrders order_submachines(Chart const &c,
                                    SplitGraph const &g,

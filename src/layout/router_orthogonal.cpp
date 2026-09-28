@@ -180,6 +180,8 @@ bool ortho_blocks_v(scav_rect const &r, int32_t x, int32_t y0, int32_t y1) {
   return (r.h > 0) && (x > r.x) && (x < (r.x + r.w)) && (y0 < (r.y + r.h)) && (y1 > r.y);
 }
 
+namespace {
+
 // First index with `v[i] > key`, and first with `v[i] >= key`, over a sorted
 // unique array. A box blocks only the cells it covers, so these bound the
 // blocking loops instead of every cell being tested against every box -- which
@@ -211,6 +213,8 @@ uint32_t ortho_from(std::vector<int32_t> const &v, int32_t key) {
   }
   return lo;
 }
+
+}  // namespace
 
 void ortho_sort_unique(std::vector<int32_t> &v) {
   scav_stable_sort(v, [](int32_t a, int32_t b) { return a < b; });

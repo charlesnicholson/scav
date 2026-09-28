@@ -70,7 +70,7 @@ struct Json {
   void raw(char const *s) { raw(s, strlen(s)); }
 
   void num(int64_t v) {
-    char buf[24];
+    std::array<char, 24> buf{};
     size_t n{ 0 };
     uint64_t mag{ (v < 0) ? (~static_cast<uint64_t>(v) + 1U) : static_cast<uint64_t>(v) };
     do {

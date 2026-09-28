@@ -308,11 +308,9 @@ Candidate search_candidate(Chart const &c,
     std::vector<ReversePin> const flips{ facing_flips(c, g, orders, out.sized) };
     if (!flips.empty()) {
       for (ReversePin const &f : flips) {
-        auto const had{ std::find_if(turned.reverses.begin(),
-                                     turned.reverses.end(),
-                                     [&f](ReversePin const &r) {
-                                       return (r.trans == f.trans) && (r.leg == f.leg);
-                                     }) };
+        auto const had{ std::ranges::find_if(turned.reverses, [&f](ReversePin const &r) {
+          return (r.trans == f.trans) && (r.leg == f.leg);
+        }) };
         if (had != turned.reverses.end()) {
           turned.reverses.erase(had);
         } else {
@@ -712,18 +710,23 @@ Improved search_moves(Chart const &c,
         take = m;
         found = true;
       }
+      uint32_t moved_trans{ INVALID };
+      uint32_t moved_leg{ 0 };
+      if (m.kind == MoveKind::Face) {
+        moved_trans = m.face.trans.v;
+        moved_leg = m.face.leg;
+      } else if (m.kind != MoveKind::Rank) {
+        moved_trans = m.leg.trans.v;
+        moved_leg = m.leg.leg;
+      }
       trace_emit(
           { .kind = TraceKind::CandidateScored,
             .pass = static_cast<uint16_t>(verdict),
             .score = { .row = INVALID,
                        .state = (m.kind == MoveKind::Rank) ? m.pin.state.v : INVALID,
                        .rank = (m.kind == MoveKind::Rank) ? m.pin.rank : 0,
-                       .trans = (m.kind == MoveKind::Rank)   ? INVALID
-                                : (m.kind == MoveKind::Face) ? m.face.trans.v
-                                                             : m.leg.trans.v,
-                       .leg = (m.kind == MoveKind::Rank)   ? 0
-                              : (m.kind == MoveKind::Face) ? m.face.leg
-                                                           : m.leg.leg,
+                       .trans = moved_trans,
+                       .leg = moved_leg,
                        .move = static_cast<uint16_t>(m.kind),
                        .end = static_cast<uint16_t>(m.face.end),
                        .face = m.face.face,

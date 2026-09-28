@@ -740,7 +740,12 @@ bool size_pass(Chart const &c,
               OrderEdge const &e{ o.edges[espan.off + k] };
               uint32_t const a{ index[e.src - span.off] };
               uint32_t const b{ index[e.dst - span.off] };
-              uint32_t const far{ (a == at) ? b : ((b == at) ? a : INVALID) };
+              uint32_t far{ INVALID };
+              if (a == at) {
+                far = b;
+              } else if (b == at) {
+                far = a;
+              }
               if ((far == INVALID) || (far == at)) { continue; }
               if ((far >= chunk_index.size()) || (chunk_index[far] == INVALID)) {
                 alone = false;
@@ -751,7 +756,7 @@ bool size_pass(Chart const &c,
             }
             if (!alone || (other == INVALID)) { continue; }
             uint32_t const r{ local_rank[nodes[at]] };
-            uint32_t const rn{ local_rank[nodes[chunk_nodes[other]]] };
+            uint32_t const near_rank{ local_rank[nodes[chunk_nodes[other]]] };
             OrderNode const &nn{ o.nodes[span.off + nodes[chunk_nodes[other]]] };
             Wide const nw{ (nn.kind == OrderKind::State) ? Wide{ along(nn.subject) }
                                                          : Wide{ 0 } };
@@ -759,10 +764,10 @@ bool size_pass(Chart const &c,
             // `rank_sep` from the state it joins, not a whole rank gap: the gap
             // also holds room other transitions' labels were charged.
             Wide x{ shape.at[at].x };
-            if ((kind == StateKind::Final) && (r == (rn + 1))) {
+            if ((kind == StateKind::Final) && (r == (near_rank + 1))) {
               x = nx + nw + p.rank_sep;
             }
-            if ((kind == StateKind::Initial) && (rn == (r + 1))) {
+            if ((kind == StateKind::Initial) && (near_rank == (r + 1))) {
               x = nx - p.rank_sep - along(nd.subject);
             }
             Wide const y{ Wide{ shape.at[chunk_nodes[other]].y } + seat_at[i] };
@@ -926,7 +931,7 @@ bool size_pass(Chart const &c,
           uint32_t const cb{ chunk_of[local_rank[nodes[b]]] };
           scav_rect const &pa{ packed.at[ca] };
           scav_rect const &pb{ packed.at[cb] };
-          return (ca != cb) && !((pa.y < (pb.y + pb.h)) && (pb.y < (pa.y + pa.h)));
+          return (ca != cb) && ((pa.y >= (pb.y + pb.h)) || (pb.y >= (pa.y + pa.h)));
         };
         std::vector<uint8_t> paired(espan.len, 0);
         for (uint32_t k = 0; k < espan.len; ++k) {
@@ -982,7 +987,7 @@ bool size_pass(Chart const &c,
           if ((a == INVALID) || (b == INVALID)) { continue; }
           scav_rect const &pa{ packed.at[chunk_of[local_rank[nodes[a]]]] };
           scav_rect const &pb{ packed.at[chunk_of[local_rank[nodes[b]]]] };
-          bool const stacked{ !((pa.y < (pb.y + pb.h)) && (pb.y < (pa.y + pa.h))) };
+          bool const stacked{ (pa.y >= (pb.y + pb.h)) || (pb.y >= (pa.y + pa.h)) };
           if (!stacked) { continue; }
           for (uint32_t const end : { e.src, e.dst }) {
             OrderNode const &nd{ o.nodes[end] };
