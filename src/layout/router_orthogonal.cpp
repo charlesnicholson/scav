@@ -306,7 +306,8 @@ void ortho_reface_attachments(std::vector<RouteNet> const &nets,
                               std::vector<uint8_t> const &inscribed,
                               std::vector<scav_point> const &toward,
                               std::vector<scav_point> &at) {
-  std::vector<Seat> seats;
+  thread_local std::vector<Seat> seats;
+  seats.clear();
   for (uint32_t n = 0; n < nets.size(); ++n) {
     for (uint32_t end = 0; end < 2; ++end) {
       uint32_t const box{ (end == 0) ? nets[n].src_obstacle : nets[n].dst_obstacle };
@@ -468,7 +469,8 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
     return (box < corner.size()) ? corner[box] : 0;
   };
   if (clear <= 0) { return; }
-  std::vector<Seat> seats;
+  thread_local std::vector<Seat> seats;
+  seats.clear();
   for (uint32_t n = 0; n < nets.size(); ++n) {
     for (uint32_t end = 0; end < 2; ++end) {
       uint32_t const box{ (end == 0) ? nets[n].src_obstacle : nets[n].dst_obstacle };
@@ -597,7 +599,8 @@ void ortho_separate_attachments(std::vector<RouteNet> const &nets,
     uint32_t box, face, slot, net;
     int32_t pos, lo, hi;
   };
-  std::vector<Leg> legs;
+  thread_local std::vector<Leg> legs;
+  legs.clear();
   for (uint32_t n = 0; n < nets.size(); ++n) {
     for (uint32_t end = 0; end < 2; ++end) {
       uint32_t const box{ (end == 0) ? nets[n].src_obstacle : nets[n].dst_obstacle };
@@ -625,11 +628,12 @@ void ortho_separate_attachments(std::vector<RouteNet> const &nets,
   // coordinate, and a horizontal leg beside a vertical one is a crossing rather
   // than a lane.
   auto const sweep = [&](bool along_y) {
-    std::vector<uint32_t> here;
+    thread_local std::vector<uint32_t> here;
+    here.clear();
     for (uint32_t i = 0; i < legs.size(); ++i) {
       if ((legs[i].face < 2) == along_y) { here.push_back(i); }
     }
-    scav_stable_sort(here, [&legs](uint32_t a, uint32_t b) {
+    scav_stable_sort(here, [](uint32_t a, uint32_t b) {
       if (legs[a].pos != legs[b].pos) { return legs[a].pos < legs[b].pos; }
       return legs[a].slot < legs[b].slot;
     });
@@ -757,7 +761,16 @@ std::vector<scav_rect> ortho_enclosure_walls(scav_rect const &region,
                                              scav_rect const &enclosure,
                                              int32_t inset) {
   std::vector<scav_rect> out;
-  if ((enclosure.w <= 0) || (enclosure.h <= 0)) { return out; }
+  ortho_enclosure_walls(region, enclosure, inset, out);
+  return out;
+}
+
+void ortho_enclosure_walls(scav_rect const &region,
+                           scav_rect const &enclosure,
+                           int32_t inset,
+                           std::vector<scav_rect> &out) {
+  out.clear();
+  if ((enclosure.w <= 0) || (enclosure.h <= 0)) { return; }
   Wide const rx0{ region.x };
   Wide const ry0{ region.y };
   Wide const rx1{ Wide{ region.x } + region.w };
@@ -777,7 +790,6 @@ std::vector<scav_rect> ortho_enclosure_walls(scav_rect const &region,
   wall(ex1, ry0, rx1, ry1);
   wall(ex0, ry0, ex1, ey0);
   wall(ex0, ey1, ex1, ry1);
-  return out;
 }
 
 bool ortho_grid(scav_rect const &region,
@@ -886,7 +898,11 @@ bool ortho_search(OrthoGrid const &g,
     s.parent.assign(nodes, INVALID);
     s.generation = 0;
   }
-  ++s.generation;
+  // A stamp from a search before the counter wrapped would read as this one's.
+  if (++s.generation == 0) {
+    s.stamp.assign(nodes, 0);
+    s.generation = 1;
+  }
   uint32_t const gen{ s.generation };
   scav_point const goal{ g.point(to) };
 
@@ -980,6 +996,29 @@ int32_t OrthogonalRouter::margin(scav_profile const &p) const {
   return ortho_clearance(p);
 }
 
+namespace {
+
+// Every buffer one `route` call uses, kept per thread and reassigned in place,
+// so a call after the first allocates only what outgrows the calls before it.
+// `route` never waits on the pool, so no second call on this thread can start
+// while one is using these.
+struct RouteScratch {
+  std::vector<scav_rect> walls;
+  std::vector<scav_point> lead, anchors, seat, toward, was;
+  std::vector<scav_span> net_anchors, net_lead, net_tail;
+  OrthoGrid g, tight;
+  OrthoScratch search;
+  std::vector<uint32_t> hop;
+  std::vector<scav_point> piece, shape;
+};
+
+RouteScratch &route_scratch() {
+  thread_local RouteScratch s;
+  return s;
+}
+
+}  // namespace
+
 void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
   out.points.clear();
   out.net_points.clear();
@@ -990,9 +1029,9 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
   Wide const bend{ ortho_bend_penalty(in.profile) };
   int32_t const clear{ ortho_clearance(in.profile) };
   int32_t const inset{ border_band(in.profile) };
-  std::vector<scav_rect> const walls{
-    ortho_enclosure_walls(in.region, in.enclosure, inset)
-  };
+  RouteScratch &sc{ route_scratch() };
+  std::vector<scav_rect> &walls{ sc.walls };
+  ortho_enclosure_walls(in.region, in.enclosure, inset, walls);
   scav_rect const &enc{ in.enclosure };
   // Which border of the enclosure an end lies in the band of -- on it, as a
   // port does, or inside it by less than `inset`, as an inner face does -- by
@@ -1026,11 +1065,16 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
 
   // Each end is up to three points: the caller's, the border it attaches to, and
   // the ring `clear` out. Only the ring is searched, so that leg is square.
-  std::vector<scav_point> lead;
-  std::vector<scav_point> anchors;
-  std::vector<scav_span> net_anchors(in.nets.size(), scav_span{});
-  std::vector<scav_span> net_lead(in.nets.size(), scav_span{});
-  std::vector<scav_span> net_tail(in.nets.size(), scav_span{});
+  std::vector<scav_point> &lead{ sc.lead };
+  std::vector<scav_point> &anchors{ sc.anchors };
+  std::vector<scav_span> &net_anchors{ sc.net_anchors };
+  std::vector<scav_span> &net_lead{ sc.net_lead };
+  std::vector<scav_span> &net_tail{ sc.net_tail };
+  lead.clear();
+  anchors.clear();
+  net_anchors.assign(in.nets.size(), scav_span{});
+  net_lead.assign(in.nets.size(), scav_span{});
+  net_tail.assign(in.nets.size(), scav_span{});
 
   auto const approach = [&](scav_point exact, uint32_t named, scav_point seated) {
     uint32_t box{ named };
@@ -1089,8 +1133,10 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
 
   // Every end's seat is chosen before any net is approached, because two ends
   // wanting one seat is a question about the pair and not about either.
-  std::vector<scav_point> seat(2 * in.nets.size(), scav_point{});
-  std::vector<scav_point> toward(2 * in.nets.size(), scav_point{});
+  std::vector<scav_point> &seat{ sc.seat };
+  std::vector<scav_point> &toward{ sc.toward };
+  seat.assign(2 * in.nets.size(), scav_point{});
+  toward.assign(2 * in.nets.size(), scav_point{});
   for (uint32_t n = 0; n < in.nets.size(); ++n) {
     RouteNet const &net{ in.nets[n] };
     scav_point const after{ (net.waypoint_len != 0) ? in.waypoints[net.waypoint_off]
@@ -1129,7 +1175,8 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
   }
   // Diffed at the call site rather than emitted inside each pass: what a reader
   // wants is which pass moved a seat, and only here sees all five (11.16).
-  std::vector<scav_point> was{ toward };
+  std::vector<scav_point> &was{ sc.was };
+  was = toward;
   auto const moved = [&](SeatPass pass) {
     if (trace_sink() == nullptr) { return; }
     for (uint32_t i = 0; i < seat.size(); ++i) {
@@ -1186,19 +1233,19 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
     net_anchors[n] = { .off = off, .len = static_cast<uint32_t>(anchors.size()) - off };
   }
 
-  OrthoGrid g;
+  OrthoGrid &g{ sc.g };
   bool const affordable{ ortho_grid(in.region, in.obstacles, anchors, clear, g, &walls) };
 
   // 11.5's re-seat, built only when needed: the same graph without bumpers. Two
   // boxes closer than twice the clearance seal the channel between them.
-  OrthoGrid tight;
+  OrthoGrid &tight{ sc.tight };
   bool tight_built{ false };
   bool tight_ok{ false };
 
-  OrthoScratch scratch;
-  std::vector<uint32_t> hop;
-  std::vector<scav_point> piece;
-  std::vector<scav_point> shape;
+  OrthoScratch &scratch{ sc.search };
+  std::vector<uint32_t> &hop{ sc.hop };
+  std::vector<scav_point> &piece{ sc.piece };
+  std::vector<scav_point> &shape{ sc.shape };
   for (uint32_t n = 0; n < in.nets.size(); ++n) {
     RouteNet const &net{ in.nets[n] };
     scav_span const at{ net_anchors[n] };

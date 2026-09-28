@@ -23,6 +23,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <utility>
 #include <vector>
 
 namespace scav {
@@ -114,13 +115,52 @@ struct FrameRoutes {
   NudgeStats nudged;
 };
 
-// Allocated once per shard and reused across that shard's frames.
+// Kept per thread and reused across every frame that thread routes. A shard
+// never waits on the pool, so no second shard on this thread can start while
+// one is using it.
 struct FrameScratch {
   RouteInput in;
   RouteOutput ro;
   std::vector<uint32_t> obstacle_index;  // -> in.obstacles; INVALID off this frame
   std::vector<uint32_t> obstacle_states;
+  std::vector<scav_rect> own;
 };
+
+FrameScratch &frame_scratch() {
+  thread_local FrameScratch s;
+  return s;
+}
+
+// Every buffer one call holds across its `parallel_for`, reassigned in place.
+struct CallScratch {
+  std::array<std::vector<uint32_t>, 2> faces;
+  std::vector<uint32_t> port_seg, seg_reversed;
+  std::vector<std::vector<uint32_t>> seg_bends;
+  std::vector<uint8_t> source_node;
+  std::vector<Planned> planned;
+  std::vector<Span> trans_nets;
+  std::vector<std::vector<uint32_t>> by_frame;
+  std::vector<FrameRoutes> frames;
+  std::vector<scav_point> routed;
+  std::vector<scav_span> net_span;
+  std::vector<scav_rect> walls, held;
+  std::vector<uint8_t> up;
+};
+
+// A thread waiting in `parallel_for` runs other shards, and one of those can
+// route another candidate on this thread before the first call returns. So a
+// call moves a scratch off this thread's stack for its whole run and moves it
+// back on return, and a call nested inside it takes the next one down.
+std::vector<CallScratch> &call_stack() {
+  thread_local std::vector<CallScratch> s;
+  return s;
+}
+
+// `v` resized to `n` empty lists, each keeping the capacity it had.
+void reset_lists(std::vector<std::vector<uint32_t>> &v, size_t n) {
+  v.resize(n);
+  for (std::vector<uint32_t> &list : v) { list.clear(); }
+}
 
 void merge_nudged(NudgeStats &into, NudgeStats const &from) {
   into.lanes += from.lanes;
@@ -145,9 +185,16 @@ Routes route_transitions(Chart const &c,
                          RouteCache *fill,
                          SearchPins const *pins) {
   Routes out;
+  std::vector<CallScratch> &stack{ call_stack() };
+  CallScratch cs;
+  if (!stack.empty()) {
+    cs = std::move(stack.back());
+    stack.pop_back();
+  }
   // `{trans, leg, end}` resolved to a face per segment end once, so the frame
   // workers read a flat table rather than searching the pin list per net.
-  std::array<std::vector<uint32_t>, 2> faces;
+  std::array<std::vector<uint32_t>, 2> &faces{ cs.faces };
+  for (std::vector<uint32_t> &side : faces) { side.clear(); }
   if ((pins != nullptr) && !pins->faces.empty()) {
     for (std::vector<uint32_t> &side : faces) { side.assign(g.segments.size(), INVALID); }
     for (FacePin const &fp : pins->faces) {
@@ -169,13 +216,16 @@ Routes route_transitions(Chart const &c,
 
   // The segment each port's boundary node belongs to, and the bends each
   // segment was chained through, both gathered once.
-  std::vector<uint32_t> port_seg(g.ports.size(), INVALID);
+  std::vector<uint32_t> &port_seg{ cs.port_seg };
+  port_seg.assign(g.ports.size(), INVALID);
   for (uint32_t seg = 0; seg < g.segments.size(); ++seg) {
     if (o.seg_port[seg] != INVALID) { port_seg[o.seg_port[seg]] = seg; }
   }
-  std::vector<uint32_t> seg_reversed(g.segments.size(), 0);
+  std::vector<uint32_t> &seg_reversed{ cs.seg_reversed };
+  seg_reversed.assign(g.segments.size(), 0);
   for (OrderEdge const &e : o.edges) { seg_reversed[e.segment] = e.reversed; }
-  std::vector<std::vector<uint32_t>> seg_bends(g.segments.size());
+  std::vector<std::vector<uint32_t>> &seg_bends{ cs.seg_bends };
+  reset_lists(seg_bends, g.segments.size());
   for (uint32_t node = 0; node < o.nodes.size(); ++node) {
     if (o.nodes[node].kind == OrderKind::Bend) {
       seg_bends[o.nodes[node].subject].push_back(node);
@@ -199,7 +249,8 @@ Routes route_transitions(Chart const &c,
 
   // Whether a route arrives at a boundary or leaves through one. Read from the
   // node's direction, not its absolute x, which carries the packer's offset.
-  std::vector<uint8_t> source_node(o.nodes.size(), 0);
+  std::vector<uint8_t> &source_node{ cs.source_node };
+  source_node.assign(o.nodes.size(), 0);
   for (OrderEdge const &e : o.edges) { source_node[e.src] = 1; }
 
   // A slot sits on the crossed box's own border, at the height its boundary
@@ -234,8 +285,10 @@ Routes route_transitions(Chart const &c,
 
   // Plan every net before routing any, so the port slots come out in
   // transition order however the frames are then visited.
-  std::vector<Planned> planned;
-  std::vector<Span> trans_nets(n, Span{});
+  std::vector<Planned> &planned{ cs.planned };
+  planned.clear();
+  std::vector<Span> &trans_nets{ cs.trans_nets };
+  trans_nets.assign(n, Span{});
   for (uint32_t t = 0; t < n; ++t) {
     Span const segs{ g.trans_segments[t] };
     if (segs.len == 0) { continue; }
@@ -317,13 +370,21 @@ Routes route_transitions(Chart const &c,
 
   // One batch per frame, in submachine order. A frame's nets keep the order
   // they were planned in, which is `(transition, ordinal)`.
-  std::vector<std::vector<uint32_t>> by_frame(c.submachines.size());
+  std::vector<std::vector<uint32_t>> &by_frame{ cs.by_frame };
+  reset_lists(by_frame, c.submachines.size());
   for (uint32_t i = 0; i < planned.size(); ++i) {
     if (planned[i].frame < by_frame.size()) { by_frame[planned[i].frame].push_back(i); }
   }
 
   int32_t const margin{ router.margin(p) };
-  std::vector<FrameRoutes> frames(by_frame.size());
+  std::vector<FrameRoutes> &frames{ cs.frames };
+  frames.resize(by_frame.size());
+  for (FrameRoutes &fr : frames) {
+    fr.points.clear();
+    fr.net_points.clear();
+    fr.metrics.clear();
+    fr.nudged = {};
+  }
 
   // Reads the model, the orders, the geometry and the plan; writes `frames[m]`
   // and the caller's own scratch, so two frames share nothing.
@@ -453,9 +514,9 @@ Routes route_transitions(Chart const &c,
       // The pitch is a line of text, not the router's clearance (11.9.5), and
       // it is the grouping tolerance too, so what is spread apart by it is
       // exactly what was too close by it.
-      std::vector<scav_rect> const own(ro.net_points.size(), frame);
+      sc.own.assign(ro.net_points.size(), frame);
       nudge_lanes(region,
-                  own,
+                  sc.own,
                   in.obstacles,
                   imax(margin, p.font_size_grid),
                   margin,
@@ -485,7 +546,7 @@ Routes route_transitions(Chart const &c,
       shard_range(shard, shards, static_cast<uint32_t>(by_frame.size()))
     };
     if (mine.len == 0) { return; }
-    FrameScratch sc;
+    FrameScratch &sc{ frame_scratch() };
     sc.in.profile = p;
     sc.obstacle_index.assign(c.states.size(), INVALID);
     for (uint32_t k = 0; k < mine.len; ++k) {
@@ -497,8 +558,10 @@ Routes route_transitions(Chart const &c,
 
   // Merged in frame order, which is what makes the totals and the point array
   // the same at every worker count (6).
-  std::vector<scav_point> routed;
-  std::vector<scav_span> net_span(planned.size(), scav_span{});
+  std::vector<scav_point> &routed{ cs.routed };
+  routed.clear();
+  std::vector<scav_span> &net_span{ cs.net_span };
+  net_span.assign(planned.size(), scav_span{});
   for (uint32_t m = 0; m < by_frame.size(); ++m) {
     FrameRoutes const &fr{ frames[m] };
     merge_nudged(out.nudged, fr.nudged);
@@ -561,7 +624,8 @@ Routes route_transitions(Chart const &c,
   // `Solid -> Off` runs up, 1,777 units of it in opposite directions, and the
   // down leg is the last segment of its own three-point net.
   if (margin > 0) {
-    std::vector<scav_rect> walls;
+    std::vector<scav_rect> &walls{ cs.walls };
+    walls.clear();
     for (uint32_t st = 0; st < c.states.size(); ++st) {
       if ((c.states[st].live != 0) && (z.state[st].w != 0) && (z.state[st].h != 0)) {
         walls.push_back(z.state[st]);
@@ -572,8 +636,10 @@ Routes route_transitions(Chart const &c,
     // none. A hierarchy-crossing transition is bounded by the ancestor it
     // crosses inside, which is what lets its pieces leave the child frames;
     // one wholly inside a composite may not leave that composite.
-    std::vector<scav_rect> held(out.route.size(), z.chart);
-    std::vector<uint8_t> up(c.states.size(), 0);
+    std::vector<scav_rect> &held{ cs.held };
+    held.assign(out.route.size(), z.chart);
+    std::vector<uint8_t> &up{ cs.up };
+    up.assign(c.states.size(), 0);
     for (uint32_t t = 0; t < out.route.size(); ++t) {
       if (t >= c.transitions.size()) { continue; }
       for (StateId a{ enclosing_state(c, c.transitions[t].src) }; a.v != INVALID;
@@ -603,6 +669,7 @@ Routes route_transitions(Chart const &c,
   }
 
   out.unplaced = place_labels(c, z, s, out.route, out.points, p, out.placed);
+  stack.push_back(std::move(cs));
   return out;
 }
 

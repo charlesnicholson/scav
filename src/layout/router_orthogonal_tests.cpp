@@ -1602,6 +1602,81 @@ TEST_CASE("ortho: the same frame routed twice comes out identical") {
   }
 }
 
+TEST_CASE("ortho: a larger frame routed in between leaves no trace in the next answer") {
+  // The router keeps its buffers per thread, so the frame between the two
+  // routes of `small` is larger on every axis: more nets, boxes, waypoints and
+  // grid lines, and an enclosure whose band crosses all of `small`'s region.
+  RouteInput small;
+  small.profile = profile();
+  small.region = rect(0, 0, 800, 600);
+  small.enclosure = rect(20, 20, 760, 560);
+  small.obstacles = { rect(100, 100, 150, 100), rect(500, 350, 160, 120) };
+  small.inscribed = { 0, 1 };
+  small.corner = { 12, 0 };
+  small.waypoints = { pt(400, 300) };
+  small.nets.push_back(
+      { .src = pt(175, 150), .dst = pt(580, 410), .src_obstacle = 0, .dst_obstacle = 1 });
+  small.nets.push_back({ .src = pt(20, 500),
+                         .dst = pt(175, 150),
+                         .dst_obstacle = 0,
+                         .waypoint_off = 0,
+                         .waypoint_len = 1 });
+
+  RouteInput large;
+  large.profile = small.profile;
+  large.region = rect(-200, -200, 2400, 2400);
+  large.enclosure = rect(1000, 1000, 900, 900);
+  for (uint32_t i = 0; i < 9; ++i) {
+    uint32_t const q{ mix(i + 40U) };
+    large.obstacles.push_back(rect(static_cast<int32_t>(1050 + ((i % 3U) * 280U)),
+                                   static_cast<int32_t>(1050 + ((i / 3U) * 280U)),
+                                   static_cast<int32_t>(80 + (q % 60U)),
+                                   static_cast<int32_t>(80 + ((q >> 8U) % 60U))));
+    large.inscribed.push_back(static_cast<uint8_t>(i % 2U));
+    large.corner.push_back(static_cast<int32_t>((q >> 16U) % 20U));
+    large.waypoints.push_back(pt(static_cast<int32_t>(1030 + (i * 90U)), 1900 - 40));
+  }
+  for (uint32_t i = 0; i < 16; ++i) {
+    uint32_t const q{ mix(i + 90U) };
+    uint32_t const from{ q % 9U };
+    uint32_t const to{ (q >> 8U) % 9U };
+    scav_rect const &a{ large.obstacles[from] };
+    scav_rect const &b{ large.obstacles[to] };
+    large.nets.push_back({ .src = pt(a.x + (a.w / 2), a.y + (a.h / 2)),
+                           .dst = pt(b.x + (b.w / 2), b.y + (b.h / 2)),
+                           .src_obstacle = from,
+                           .dst_obstacle = to,
+                           .waypoint_off = i % 9U,
+                           .waypoint_len = ((i % 4U) == 0) ? 1U : 0U });
+  }
+
+  RouteOutput first;
+  RouteOutput between;
+  RouteOutput again;
+  ORTHO.route(small, first);
+  ORTHO.route(large, between);
+  ORTHO.route(small, again);
+
+  REQUIRE(between.net_points.size() == large.nets.size());
+  REQUIRE(first.points.size() == again.points.size());
+  for (uint32_t i = 0; i < first.points.size(); ++i) {
+    CAPTURE(i);
+    CHECK(first.points[i] == again.points[i]);
+  }
+  REQUIRE(first.net_points.size() == small.nets.size());
+  REQUIRE(again.net_points.size() == small.nets.size());
+  for (uint32_t n = 0; n < small.nets.size(); ++n) {
+    CAPTURE(n);
+    CHECK(first.net_points[n].off == again.net_points[n].off);
+    CHECK(first.net_points[n].len == again.net_points[n].len);
+    CHECK(first.metrics[n].bends == again.metrics[n].bends);
+    CHECK(first.metrics[n].length == again.metrics[n].length);
+    CHECK(first.metrics[n].failed == again.metrics[n].failed);
+    CHECK(first.metrics[n].reseated == again.metrics[n].reseated);
+    CHECK(first.metrics[n].failed == RouteFailure::None);
+  }
+}
+
 TEST_CASE("ortho: no generated frame routes a segment through a box") {
   // The invariant the phase exists for, over frames the cases above do not
   // describe: rows of boxes with lanes between, nets between arbitrary pairs.

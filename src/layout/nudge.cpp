@@ -108,6 +108,30 @@ bool bundled(std::vector<scav_point> const &points,
   return head;
 }
 
+// Every buffer one call uses, kept per thread and reassigned in place, so a
+// call after the first allocates only what outgrows the calls before it.
+// Nothing here waits on the pool, so no second call on this thread can start
+// while one is using these.
+struct NudgeScratch {
+  std::vector<Member> members;
+  std::vector<uint32_t> lane;
+  Partition link;              // -> members, the lanes of one axis
+  Partition parent;            // -> lane, the bundles of one lane
+  std::vector<uint32_t> slot;  // -> lane, the bundle it ended up in
+  std::vector<uint32_t> sizes;
+  std::vector<uint32_t> group;
+  std::vector<uint32_t> kin;
+  std::vector<int32_t> votes;  // groups x groups, antisymmetric; see below
+  std::vector<uint32_t> degree;
+  std::vector<uint32_t> order;
+  std::vector<uint32_t> rank;  // -> order, inverted
+};
+
+NudgeScratch &nudge_scratch() {
+  thread_local NudgeScratch s;
+  return s;
+}
+
 }  // namespace
 
 void nudge_lanes(scav_rect const &region,
@@ -121,18 +145,20 @@ void nudge_lanes(scav_rect const &region,
   if (gap <= 0) { return; }
   uint32_t const net_count{ static_cast<uint32_t>(nets.size()) };
 
-  std::vector<Member> members;
-  std::vector<uint32_t> lane;
-  Partition link;              // -> members, the lanes of one axis
-  Partition parent;            // -> lane, the bundles of one lane
-  std::vector<uint32_t> slot;  // -> lane, the bundle it ended up in
-  std::vector<uint32_t> sizes;
-  std::vector<uint32_t> group;
-  std::vector<uint32_t> kin;
-  std::vector<int32_t> votes;  // groups x groups, antisymmetric; see below
-  std::vector<uint32_t> degree;
-  std::vector<uint32_t> order;
-  std::vector<uint32_t> rank;  // -> order, inverted
+  NudgeScratch &sc{ nudge_scratch() };
+  std::vector<Member> &members{ sc.members };
+  std::vector<uint32_t> &lane{ sc.lane };
+  Partition &link{ sc.link };
+  Partition &parent{ sc.parent };
+  std::vector<uint32_t> &slot{ sc.slot };
+  std::vector<uint32_t> &sizes{ sc.sizes };
+  std::vector<uint32_t> &group{ sc.group };
+  std::vector<uint32_t> &kin{ sc.kin };
+  std::vector<int32_t> &votes{ sc.votes };
+  std::vector<uint32_t> &degree{ sc.degree };
+  std::vector<uint32_t> &order{ sc.order };
+  std::vector<uint32_t> &rank{ sc.rank };
+  kin.clear();
   for (uint32_t axis = 0; axis < 2; ++axis) {
     bool const horizontal{ axis == 0 };
     // Rebuilt from the live points per axis: a horizontal displacement drags the

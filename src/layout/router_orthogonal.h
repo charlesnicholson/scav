@@ -170,6 +170,12 @@ std::vector<scav_rect> ortho_enclosure_walls(scav_rect const &region,
                                              scav_rect const &enclosure,
                                              int32_t inset);
 
+// The same, written into `out` in place.
+void ortho_enclosure_walls(scav_rect const &region,
+                           scav_rect const &enclosure,
+                           int32_t inset,
+                           std::vector<scav_rect> &out);
+
 // A* over the plane-split graph. False when unreachable or past the expansion
 // budget. The key `(f, g, node)` is total, so equal-cost paths break the same.
 bool ortho_search(OrthoGrid const &g,
