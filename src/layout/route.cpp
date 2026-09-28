@@ -21,6 +21,7 @@
 #include "scav_thread.h"
 
 #include <array>
+#include <bit>
 #include <cstdint>
 #include <cstring>
 #include <utility>
@@ -124,6 +125,9 @@ struct FrameScratch {
   std::vector<uint32_t> obstacle_index;  // -> in.obstacles; INVALID off this frame
   std::vector<uint32_t> obstacle_states;
   std::vector<scav_rect> own;
+  std::vector<uint8_t> in_chain;  // parallel to states; 1 on the frame owner's chain
+  std::vector<uint32_t> chain;    // -> states, the owner and its enclosing states
+  std::vector<uint64_t> pick;     // one bit per state, the gather's candidates
 };
 
 FrameScratch &frame_scratch() {
@@ -145,6 +149,10 @@ struct CallScratch {
   std::vector<scav_span> net_span;
   std::vector<scav_rect> walls, held;
   std::vector<uint8_t> up;
+  std::vector<uint32_t> enclosing;  // parallel to states: `enclosing_state` of each
+  // The live states each state encloses, as lists threaded through `kid_next`
+  // from `kid_head`, and the live states a gather must always visit.
+  std::vector<uint32_t> kid_head, kid_next, loose;
 };
 
 // A thread waiting in `parallel_for` runs other shards, and one of those can
@@ -389,6 +397,35 @@ Routes route_transitions(Chart const &c,
     fr.nudged = {};
   }
 
+  // A state inside its enclosing state's box overlaps a region only where that
+  // box does too, and then the box shields it unless the box is the frame
+  // owner's or one enclosing it. So every obstacle of a frame is either loose
+  // -- enclosed by no state, or not inside its enclosing state's box -- or
+  // enclosed by a state on the owner's chain.
+  uint32_t const state_count{ static_cast<uint32_t>(c.states.size()) };
+  std::vector<uint32_t> &enclosing{ cs.enclosing };
+  enclosing.resize(state_count);
+  for (uint32_t st = 0; st < state_count; ++st) {
+    enclosing[st] = enclosing_state(c, { st }).v;
+  }
+  std::vector<uint32_t> &kid_head{ cs.kid_head };
+  std::vector<uint32_t> &kid_next{ cs.kid_next };
+  std::vector<uint32_t> &loose{ cs.loose };
+  kid_head.assign(state_count, INVALID);
+  kid_next.resize(state_count);
+  loose.clear();
+  for (uint32_t st = 0; st < state_count; ++st) {
+    if (c.states[st].live == 0) { continue; }
+    uint32_t const up{ enclosing[st] };
+    if (up >= state_count) {
+      loose.push_back(st);
+      continue;
+    }
+    kid_next[st] = kid_head[up];
+    kid_head[up] = st;
+    if (!contains(z.state[up], z.state[st])) { loose.push_back(st); }
+  }
+
   // Reads the model, the orders, the geometry and the plan; writes `frames[m]`
   // and the caller's own scratch, so two frames share nothing.
   auto const route_frame = [&](uint32_t m, FrameScratch &sc) {
@@ -431,23 +468,47 @@ Routes route_transitions(Chart const &c,
 
     // Every live box overlapping the region except those enclosing it, and of those
     // only the outermost -- a box already blocks its own descendants (11.14).
+    // The chain is walked as `ancestor_or_self` walks it, so a state is on it
+    // exactly where that would answer true. The candidates are visited in
+    // ascending state order off one bit each.
     StateId const owner{ c.submachines[m].owner };
-    auto const shields = [&](uint32_t st) {
-      StateId const up{ c.submachines[c.states[st].parent.v].owner };
-      if (up.v == INVALID) { return false; }
-      return !ancestor_or_self(c, up, owner) && overlaps(region, z.state[up.v]);
-    };
-    for (uint32_t st = 0; st < c.states.size(); ++st) {
-      if ((c.states[st].live == 0) || !overlaps(region, z.state[st])) { continue; }
-      if (ancestor_or_self(c, { st }, owner) || shields(st)) { continue; }
-      sc.obstacle_index[st] = static_cast<uint32_t>(in.obstacles.size());
-      sc.obstacle_states.push_back(st);
-      in.obstacles.push_back(z.state[st]);
-      in.inscribed.push_back(kind_inscribed(c.states[st].kind) ? 1U : 0U);
-      in.corner.push_back(state_corner_radius(c.states[st].kind,
-                                              z.state[st],
-                                              z.before[st].x - z.state[st].x));
+    sc.chain.clear();
+    uint32_t link{ owner.v };
+    for (uint32_t step = 0; (step < state_count) && (link != INVALID); ++step) {
+      sc.chain.push_back(link);
+      sc.in_chain[link] = 1;
+      link = enclosing[link];
     }
+    auto const pick = [&sc](uint32_t st) {
+      sc.pick[st / 64U] |= uint64_t{ 1 } << (st % 64U);
+    };
+    for (uint32_t const st : loose) { pick(st); }
+    for (uint32_t const a : sc.chain) {
+      for (uint32_t k{ kid_head[a] }; k != INVALID; k = kid_next[k]) { pick(k); }
+    }
+    auto const shields = [&](uint32_t st) {
+      uint32_t const up{ enclosing[st] };
+      if (up == INVALID) { return false; }
+      return (sc.in_chain[up] == 0) && overlaps(region, z.state[up]);
+    };
+    for (uint32_t w = 0; w < sc.pick.size(); ++w) {
+      uint64_t bits{ sc.pick[w] };
+      sc.pick[w] = 0;
+      while (bits != 0) {
+        uint32_t const st{ (w * 64U) + static_cast<uint32_t>(std::countr_zero(bits)) };
+        bits &= bits - 1;
+        if ((c.states[st].live == 0) || !overlaps(region, z.state[st])) { continue; }
+        if ((sc.in_chain[st] != 0) || shields(st)) { continue; }
+        sc.obstacle_index[st] = static_cast<uint32_t>(in.obstacles.size());
+        sc.obstacle_states.push_back(st);
+        in.obstacles.push_back(z.state[st]);
+        in.inscribed.push_back(kind_inscribed(c.states[st].kind) ? 1U : 0U);
+        in.corner.push_back(state_corner_radius(c.states[st].kind,
+                                                z.state[st],
+                                                z.before[st].x - z.state[st].x));
+      }
+    }
+    for (uint32_t const a : sc.chain) { sc.in_chain[a] = 0; }
     // The state the frame's routes are drawn inside, so none runs along its
     // border and a port on it leaves square (11.10g).
     in.enclosure = (owner.v == INVALID) ? scav_rect{} : z.state[owner.v];
@@ -555,6 +616,8 @@ Routes route_transitions(Chart const &c,
     FrameScratch &sc{ frame_scratch() };
     sc.in.profile = p;
     sc.obstacle_index.assign(c.states.size(), INVALID);
+    sc.in_chain.assign(c.states.size(), 0);
+    sc.pick.assign((size_t{ state_count } + 63) / 64, 0);
     for (uint32_t k = 0; k < mine.len; ++k) {
       uint32_t const m{ mine.off + k };
       if (!by_frame[m].empty()) { route_frame(m, sc); }
@@ -599,6 +662,7 @@ Routes route_transitions(Chart const &c,
   // it. Matched against that point rather than against the net's ordinal, so a
   // router that began somewhere else leaves the break in the polyline instead
   // of having a leg spliced over it.
+  out.points.reserve(routed.size());
   for (uint32_t t = 0; t < n; ++t) {
     Span const nets{ trans_nets[t] };
     if (nets.len == 0) { continue; }
@@ -646,22 +710,22 @@ Routes route_transitions(Chart const &c,
     held.assign(out.route.size(), z.chart);
     std::vector<uint8_t> &up{ cs.up };
     up.assign(c.states.size(), 0);
+    auto const above = [&enclosing](StateId of) {
+      return (of.v == INVALID) ? INVALID : enclosing[of.v];
+    };
     for (uint32_t t = 0; t < out.route.size(); ++t) {
       if (t >= c.transitions.size()) { continue; }
-      for (StateId a{ enclosing_state(c, c.transitions[t].src) }; a.v != INVALID;
-           a = enclosing_state(c, a)) {
-        up[a.v] = 1;
+      for (uint32_t a{ above(c.transitions[t].src) }; a != INVALID; a = enclosing[a]) {
+        up[a] = 1;
       }
-      for (StateId b{ enclosing_state(c, c.transitions[t].dst) }; b.v != INVALID;
-           b = enclosing_state(c, b)) {
-        if (up[b.v] != 0) {
-          held[t] = z.state[b.v];
+      for (uint32_t b{ above(c.transitions[t].dst) }; b != INVALID; b = enclosing[b]) {
+        if (up[b] != 0) {
+          held[t] = z.state[b];
           break;
         }
       }
-      for (StateId a{ enclosing_state(c, c.transitions[t].src) }; a.v != INVALID;
-           a = enclosing_state(c, a)) {
-        up[a.v] = 0;
+      for (uint32_t a{ above(c.transitions[t].src) }; a != INVALID; a = enclosing[a]) {
+        up[a] = 0;
       }
     }
     nudge_lanes(z.chart,

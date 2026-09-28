@@ -125,6 +125,8 @@ struct NudgeScratch {
   std::vector<uint32_t> degree;
   std::vector<uint32_t> order;
   std::vector<uint32_t> rank;  // -> order, inverted
+  // -> members: the next of each one's lane, and the last so far of each root's.
+  std::vector<uint32_t> next_member, last_member;
 };
 
 NudgeScratch &nudge_scratch() {
@@ -158,6 +160,8 @@ void nudge_lanes(scav_rect const &region,
   std::vector<uint32_t> &degree{ sc.degree };
   std::vector<uint32_t> &order{ sc.order };
   std::vector<uint32_t> &rank{ sc.rank };
+  std::vector<uint32_t> &next_member{ sc.next_member };
+  std::vector<uint32_t> &last_member{ sc.last_member };
   kin.clear();
   for (uint32_t axis = 0; axis < 2; ++axis) {
     bool const horizontal{ axis == 0 };
@@ -301,13 +305,21 @@ void nudge_lanes(scav_rect const &region,
         }
       }
     }
+    // Each lane's members threaded in ascending order from its root, which is
+    // its least member and so the first of them this reaches.
+    next_member.assign(members.size(), INVALID);
+    last_member.resize(members.size());
+    for (uint32_t i = 0; i < members.size(); ++i) {
+      uint32_t const root{ link.root(i) };
+      if (root != i) { next_member[last_member[root]] = i; }
+      last_member[root] = i;
+    }
     for (uint32_t first = 0; first < members.size(); ++first) {
       if (!link.leads(first)) { continue; }
       lane.clear();
       int32_t reach{ members[first].hi };
       int32_t least{ members[first].lo };
-      for (uint32_t i = first; i < members.size(); ++i) {
-        if (link.root(i) != first) { continue; }
+      for (uint32_t i = first; i != INVALID; i = next_member[i]) {
         lane.push_back(i);
         reach = imax(reach, members[i].hi);
         least = imin(least, members[i].lo);

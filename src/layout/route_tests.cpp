@@ -1080,3 +1080,146 @@ TEST_CASE("route: a router that reads no faces marks no end") {
   for (uint8_t const f : marks.faceable) { none = none && (f == 0); }
   CHECK(none);
 }
+
+namespace {
+
+// A frame's obstacles as a walk over every state in order finds them: live,
+// overlapping the region, not the owner or enclosing it, and not inside an
+// overlapping box that is neither. The gather is held to this rather than to a
+// second copy of its own shortcut.
+struct Gathered {
+  std::vector<scav_rect> obstacles;
+  std::vector<uint8_t> inscribed;
+  std::vector<int32_t> corner;
+};
+
+Gathered gather_every_state(Chart const &c,
+                            SizedLayout const &z,
+                            uint32_t m,
+                            scav_rect const &region) {
+  Gathered out;
+  StateId const owner{ c.submachines[m].owner };
+  auto const shields = [&](uint32_t st) {
+    StateId const up{ c.submachines[c.states[st].parent.v].owner };
+    if (up.v == INVALID) { return false; }
+    return !ancestor_or_self(c, up, owner) && overlaps(region, z.state[up.v]);
+  };
+  for (uint32_t st = 0; st < c.states.size(); ++st) {
+    if ((c.states[st].live == 0) || !overlaps(region, z.state[st])) { continue; }
+    if (ancestor_or_self(c, { st }, owner) || shields(st)) { continue; }
+    out.obstacles.push_back(z.state[st]);
+    out.inscribed.push_back(kind_inscribed(c.states[st].kind) ? 1U : 0U);
+    out.corner.push_back(state_corner_radius(c.states[st].kind,
+                                             z.state[st],
+                                             z.before[st].x - z.state[st].x));
+  }
+  return out;
+}
+
+// Every frame a filled cache holds, against that walk; how many were compared.
+uint32_t frames_gathered_as_every_state(Chart const &c,
+                                        SizedLayout const &z,
+                                        RouteCache const &cache) {
+  uint32_t compared{ 0 };
+  for (uint32_t m = 0; m < cache.frame.size(); ++m) {
+    RouteFrameCache const &f{ cache.frame[m] };
+    if (f.valid == 0) { continue; }
+    CAPTURE(m);
+    Gathered const want{ gather_every_state(c, z, m, f.in.region) };
+    CHECK(same_rows(f.in.obstacles, want.obstacles));
+    CHECK((f.in.inscribed == want.inscribed));
+    CHECK((f.in.corner == want.corner));
+    ++compared;
+  }
+  return compared;
+}
+
+}  // namespace
+
+TEST_CASE("route: a frame's obstacles are the ones a walk over every state finds") {
+  scav_profile p{};
+  REQUIRE(profile_named("readable", p));
+  Router const *const router{ router_at(0) };
+  REQUIRE(router != nullptr);
+
+  for (char const *name : CORPUS) {
+    CAPTURE(name);
+    Chart c;
+    load_corpus_chart(name, c);
+    SplitGraph const g{ decompose(c) };
+    SubmachineOrders const base_o{ order_submachines(c, g, {}, p, 1, {}) };
+    SizedLayout base_z;
+    std::vector<Diagnostic> diags;
+    REQUIRE(size_layout(c, g, base_o, {}, p, base_z, diags));
+    RouteCache base;
+    route_transitions(c, g, base_o, base_z, {}, p, *router, 1, nullptr, &base);
+    uint32_t compared{ frames_gathered_as_every_state(c, base_z, base) };
+
+    // Moved layouts too, each gathered afresh while the cache answers.
+    uint32_t tried{ 0 };
+    for (uint32_t st = 0; (st < c.states.size()) && (tried < 4); ++st) {
+      if ((c.states[st].live == 0) || (base_o.state_node[st] == INVALID)) { continue; }
+      uint32_t const frame{ c.states[st].parent.v };
+      if ((frame >= base_o.sub_ranks.size()) || (base_o.sub_ranks[frame] < 2)) {
+        continue;
+      }
+      uint32_t const at{ base_o.nodes[base_o.state_node[st]].rank };
+      SearchPins const pins{ .ranks = { { .state = StateId{ st },
+                                          .rank = (at == 0) ? 1U : 0U } } };
+      SubmachineOrders const o{ order_submachines(c, g, {}, p, 1, pins) };
+      SizedLayout z;
+      std::vector<Diagnostic> spilled;
+      if (!size_layout(c, g, o, {}, p, z, spilled)) { continue; }
+      CAPTURE(st);
+      RouteCache moved;
+      route_transitions(c, g, o, z, {}, p, *router, 1, &base, &moved);
+      compared += frames_gathered_as_every_state(c, z, moved);
+      ++tried;
+    }
+    CHECK(compared > 0);
+  }
+}
+
+TEST_CASE("route: a state outside its composite's box is an obstacle where it lies") {
+  // `S` belongs to `A` but was laid inside `D`, where `A`'s own box is not, so
+  // no box shields it from `D`'s route. Built last, so it sorts after the
+  // frame's own states and the obstacles come out in state order all the same.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  SubmachineId const in_d{ build_submachine(c, d, {}, {}) };
+  StateId const x{ build_state(c, in_d, "X", StateKind::Normal, {}) };
+  SubmachineId const in_x{ build_submachine(c, x, {}, {}) };
+  StateId const w{ build_state(c, in_x, "W", StateKind::Normal, {}) };
+  StateId const y{ build_state(c, in_d, "Y", StateKind::Normal, {}) };
+  SubmachineId const in_a{ build_submachine(c, a, {}, {}) };
+  StateId const s{ build_state(c, in_a, "S", StateKind::Normal, {}) };
+  build_trans(c, x, y, TransKind::External, {});
+
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ empty_orders(c, g) };
+  SizedLayout z{ blank(c, o) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 100 };
+  z.state[d.v] = { .x = 400, .y = 0, .w = 300, .h = 200 };
+  z.state[x.v] = { .x = 420, .y = 100, .w = 60, .h = 60 };
+  z.state[w.v] = { .x = 430, .y = 110, .w = 20, .h = 20 };  // inside X, so X shields it
+  z.state[y.v] = { .x = 620, .y = 100, .w = 60, .h = 60 };
+  z.state[s.v] = { .x = 500, .y = 20, .w = 40, .h = 40 };  // inside D, outside A
+  z.sub[root.v] = { .x = 0, .y = 0, .w = 700, .h = 200 };
+  z.sub[in_d.v] = { .x = 410, .y = 10, .w = 280, .h = 180 };
+  z.sub[in_x.v] = { .x = 425, .y = 105, .w = 50, .h = 50 };
+  z.sub[in_a.v] = { .x = 10, .y = 10, .w = 80, .h = 80 };
+  z.chart = { .x = 0, .y = 0, .w = 700, .h = 200 };
+
+  RouteCache cache;
+  route_transitions(c, g, o, z, {}, profile(), STRAIGHT, 1, nullptr, &cache);
+  REQUIRE(cache.frame.size() == c.submachines.size());
+  RouteFrameCache const &f{ cache.frame[in_d.v] };
+  REQUIRE(f.valid != 0);
+  REQUIRE(f.in.obstacles.size() == 3);
+  CHECK((f.in.obstacles[0] == z.state[x.v]));
+  CHECK((f.in.obstacles[1] == z.state[y.v]));
+  CHECK((f.in.obstacles[2] == z.state[s.v]));
+  CHECK(frames_gathered_as_every_state(c, z, cache) == 1);
+}
