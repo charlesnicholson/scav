@@ -30,7 +30,7 @@ TEST_CASE("profile: both shipped profiles load and pass their own validation") {
     CAPTURE(name);
     scav_profile const p{ named(name) };
     CHECK(profile_validate(p));
-    CHECK(p.profile_version == 12);
+    CHECK(p.profile_version == 13);
     // The whole table (11.10, 11.10g): every row searched and kicked, which is
     // where `axis`'s compact drawing is.
     CHECK(p.portfolio_m == 16);
