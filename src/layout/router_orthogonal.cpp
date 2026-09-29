@@ -732,9 +732,8 @@ void ortho_separate_attachments(std::vector<RouteNet> const &nets,
         scav_rect const &r{ boxes[leg.box] };
         int32_t const face_lo{ (leg.face < 2) ? r.y : r.x };
         int32_t const len{ (leg.face < 2) ? r.h : r.w };
-        int32_t const share{ fixed[1 - which]
-                                 ? want
-                                 : ((which == 0) ? (want / 2) : (want - (want / 2))) };
+        int32_t share{ (which == 0) ? (want / 2) : (want - (want / 2)) };
+        if (fixed[1 - which]) { share = want; }
         int32_t const aim{ leg.pos + ((which == 0) ? -share : share) };
         got[which] = onto_face(aim, face_lo, len, clear, arc(leg.box));
       }
