@@ -60,7 +60,7 @@ constexpr std::array GAUNTLET{ "chain.scav",     "crossing.scav", "crowd.scav",
                                "enclosing.scav", "fanin.scav",    "fork.scav",
                                "lane.scav",      "long.scav",     "loop.scav",
                                "marks.scav",     "mutual.scav",   "regions.scav",
-                               "stretch.scav" };
+                               "roundtrip.scav", "stretch.scav" };
 
 // One chart, laid out: the pieces every property below reads.
 struct Laid {
@@ -553,6 +553,46 @@ TEST_CASE("gauntlet: two states each other's target are two lines") {
     // nudging ran once over the composed polylines** (11.10a) -- the run was
     // between two segments the per-frame pass never had in hand at once.
     CHECK(shared == 0);
+  }
+}
+
+TEST_CASE("gauntlet: a transition and its return are two straight legs an em apart") {
+  // Both project onto one point of each facing face, and the spread seats them
+  // apart. Closer than an em is what the score calls crowded, and the search
+  // then buys its way out with a detour through the far faces of both boxes.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Laid l;
+    lay("roundtrip.scav", p, l);
+    uint32_t there{ INVALID };
+    uint32_t back{ INVALID };
+    for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+      Transition const &tr{ l.c.transitions[t] };
+      if (l.c.states[tr.src.v].name.len == 0) { continue; }
+      std::string_view const from{ chart_string(l.c, l.c.states[tr.src.v].name) };
+      std::string_view const to{ chart_string(l.c, l.c.states[tr.dst.v].name) };
+      if ((from == "Ready") && (to == "Busy")) { there = t; }
+      if ((from == "Busy") && (to == "Ready")) { back = t; }
+    }
+    REQUIRE(there != INVALID);
+    REQUIRE(back != INVALID);
+    scav_span const a{ l.r.route[there] };
+    scav_span const b{ l.r.route[back] };
+    // One segment each, which is no bend.
+    REQUIRE(a.len == 2);
+    REQUIRE(b.len == 2);
+    scav_point const a0{ l.r.points[a.off] };
+    scav_point const a1{ l.r.points[a.off + 1] };
+    scav_point const b0{ l.r.points[b.off] };
+    scav_point const b1{ l.r.points[b.off + 1] };
+    // Parallel, and an em apart across the axis they run along.
+    bool const vertical{ a0.x == a1.x };
+    CHECK(vertical == (b0.x == b1.x));
+    Wide const gap{ vertical ? (Wide{ b0.x } - a0.x) : (Wide{ b0.y } - a0.y) };
+    Wide const apart{ (gap < 0) ? -gap : gap };
+    CAPTURE(apart);
+    CHECK(apart >= p.font_size_grid);
+    CHECK(cost_columns(l.c, l.g, p).crowding == 0);
   }
 }
 

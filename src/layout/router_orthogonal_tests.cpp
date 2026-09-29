@@ -602,7 +602,7 @@ TEST_CASE("ortho: two ends wanting one seat are pushed apart along the face") {
     { .src = pt(450, 50), .dst = pt(50, 50), .src_obstacle = 1, .dst_obstacle = 0 },
   };
   std::vector<scav_point> at{ pt(100, 50), pt(400, 50), pt(400, 50), pt(100, 50) };
-  ortho_spread_attachments(nets, boxes, {}, {}, 8, at);
+  ortho_spread_attachments(nets, boxes, {}, {}, 8, 0, at);
 
   // The seat is by the direction the net runs through the face, not by which of
   // its ends this is: net 0 runs + through both, so it takes the lower seat at
@@ -628,7 +628,7 @@ TEST_CASE("ortho: a seat the spread lands on a third is separated in its turn") 
   // exactly where the pair's arrival is sent.
   std::vector<scav_point> at{ pt(100, 150), pt(900, 10),  pt(900, 20),
                               pt(100, 150), pt(100, 154), pt(900, 30) };
-  ortho_spread_attachments(nets, boxes, {}, {}, 8, at);
+  ortho_spread_attachments(nets, boxes, {}, {}, 8, 0, at);
   CHECK((at[0] == pt(100, 146)));  // the pair's departure, one half-step down
   CHECK((at[3] == pt(100, 158)));  // its arrival, moved on again by the second sweep
   CHECK((at[4] == pt(100, 150)));  // and the third seat, moved down out of its way
@@ -878,7 +878,7 @@ TEST_CASE("ortho: separating a pair at one box moves whole nets, not seats") {
   // Both nets aligned on y = 200, so each is one straight segment and the two
   // sit on top of each other at both boxes.
   std::vector<scav_point> at{ pt(100, 200), pt(900, 200), pt(900, 200), pt(100, 200) };
-  ortho_spread_attachments(nets, boxes, {}, {}, 8, at);
+  ortho_spread_attachments(nets, boxes, {}, {}, 8, 0, at);
 
   // Separated at both boxes...
   CHECK(at[0].y != at[3].y);
@@ -904,7 +904,7 @@ TEST_CASE("ortho: a far end that cannot follow keeps its seat and takes the bend
     { .src = pt(950, 200), .dst = pt(50, 200), .src_obstacle = 1, .dst_obstacle = 0 },
   };
   std::vector<scav_point> at{ pt(100, 200), pt(900, 200), pt(900, 200), pt(100, 200) };
-  ortho_spread_attachments(nets, boxes, glyph, {}, 8, at);
+  ortho_spread_attachments(nets, boxes, glyph, {}, 8, 0, at);
 
   CHECK(at[0].y != at[3].y);  // separated at the box that can
   CHECK(at[1].y == at[2].y);  // and the glyph keeps its one seat
@@ -923,7 +923,7 @@ TEST_CASE("ortho: ends of one direction sharing a seat are a trunk and keep it")
   };
   std::vector<scav_point> at{ pt(-900, 10), pt(0, 50),    pt(-900, 90),
                               pt(0, 50),    pt(-900, 50), pt(0, 50) };
-  ortho_spread_attachments(nets, boxes, {}, {}, 8, at);
+  ortho_spread_attachments(nets, boxes, {}, {}, 8, 0, at);
   CHECK((at[1] == pt(0, 50)));
   CHECK((at[3] == pt(0, 50)));
   CHECK((at[5] == pt(0, 50)));
@@ -941,7 +941,7 @@ TEST_CASE("ortho: a face with no room for the seats leaves them where they are")
       { .src = pt(900, h), .dst = pt(2, h / 2), .dst_obstacle = 0 },
     };
     std::vector<scav_point> at{ pt(4, h / 2), pt(900, 0), pt(900, h), pt(4, h / 2) };
-    ortho_spread_attachments(nets, boxes, {}, {}, clear, at);
+    ortho_spread_attachments(nets, boxes, {}, {}, clear, 0, at);
     return std::pair<scav_point, scav_point>{ at[0], at[3] };
   };
 
@@ -956,6 +956,52 @@ TEST_CASE("ortho: a face with no room for the seats leaves them where they are")
   // makes the two above a property of the face and not of the pair.
   CHECK((run(64, 8).first == pt(4, 28)));
   CHECK((run(64, 8).second == pt(4, 36)));
+}
+
+TEST_CASE("ortho: seats are spread a pitch apart where the face has room for one") {
+  // Two facing boxes and a net each way, aligned on one line at both. The
+  // clearance is far below the pitch, so a spread by the clearance alone seats
+  // the two legs closer than the pitch. A face whose seatable run -- its length
+  // less the clearance at each end -- is shorter than the pitch spreads them
+  // as it always did, and one too short for a step at all keeps them stacked.
+  auto const run = [](int32_t h, int32_t pitch) {
+    std::vector<scav_rect> const boxes{ rect(0, 0, 100, h), rect(900, 0, 100, h) };
+    std::vector<RouteNet> const nets{
+      { .src = pt(50, h / 2),
+        .dst = pt(950, h / 2),
+        .src_obstacle = 0,
+        .dst_obstacle = 1 },
+      { .src = pt(950, h / 2),
+        .dst = pt(50, h / 2),
+        .src_obstacle = 1,
+        .dst_obstacle = 0 },
+    };
+    std::vector<scav_point> at{ pt(100, h / 2),
+                                pt(900, h / 2),
+                                pt(900, h / 2),
+                                pt(100, h / 2) };
+    ortho_spread_attachments(nets, boxes, {}, {}, 8, pitch, at);
+    // Each net is still one straight segment, so what the two ends show is the
+    // two legs' separation.
+    CHECK(at[0].y == at[1].y);
+    CHECK(at[2].y == at[3].y);
+    return std::pair<int32_t, int32_t>{ at[0].y, at[3].y };
+  };
+
+  // Room: the two sit a pitch apart about the line they shared.
+  CHECK((run(600, 192) == std::pair<int32_t, int32_t>{ 204, 396 }));
+  // A pitch below the clearance is the clearance, which is the spread with no
+  // pitch asked for.
+  CHECK((run(600, 0) == std::pair<int32_t, int32_t>{ 296, 304 }));
+  // Just room: a 208-unit face seats on 8 .. 200, which is one pitch exactly.
+  CHECK((run(208, 192) == std::pair<int32_t, int32_t>{ 8, 200 }));
+  // One unit short of it, and a face a good deal shorter: the clearance, as
+  // with no pitch at all.
+  CHECK((run(207, 192) == std::pair<int32_t, int32_t>{ 99, 107 }));
+  CHECK((run(207, 192) == run(207, 0)));
+  CHECK((run(150, 192) == run(150, 0)));
+  // And a two-unit face has no step to take, whatever the pitch.
+  CHECK((run(2, 192) == std::pair<int32_t, int32_t>{ 1, 1 }));
 }
 
 TEST_CASE("ortho: seats do not depend on the order the nets arrive in") {
@@ -976,10 +1022,10 @@ TEST_CASE("ortho: seats do not depend on the order the nets arrive in") {
       std::vector<scav_point> const back{ at[6], at[7], at[4], at[5],
                                           at[2], at[3], at[0], at[1] };
       at = back;
-      ortho_spread_attachments(nets, boxes, {}, {}, 8, at);
+      ortho_spread_attachments(nets, boxes, {}, {}, 8, 0, at);
       return std::vector<int32_t>{ at[6].y, at[5].y, at[2].y, at[1].y };
     }
-    ortho_spread_attachments(nets, boxes, {}, {}, 8, at);
+    ortho_spread_attachments(nets, boxes, {}, {}, 8, 0, at);
     return std::vector<int32_t>{ at[0].y, at[3].y, at[4].y, at[7].y };
   };
   std::vector<int32_t> const a{ run(false) };
@@ -2156,7 +2202,7 @@ TEST_CASE("ortho: a glyph inscribed in its box is met at the middle of a face") 
     { .src = pt(50, 50), .dst = pt(900, 90), .src_obstacle = 0 },
   };
   std::vector<scav_point> at{ pt(100, 50), pt(900, 10), pt(100, 50), pt(900, 90) };
-  ortho_spread_attachments(nets, boxes, inscribed, {}, 8, at);
+  ortho_spread_attachments(nets, boxes, inscribed, {}, 8, 0, at);
   CHECK((at[0] == pt(100, 50)));
   CHECK((at[2] == pt(100, 50)));
 }

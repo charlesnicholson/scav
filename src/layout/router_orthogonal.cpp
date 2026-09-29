@@ -478,12 +478,14 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
                               std::vector<uint8_t> const &inscribed,
                               std::vector<int32_t> const &corner,
                               int32_t clear,
+                              int32_t pitch,
                               std::vector<scav_point> &at) {
   // Empty for zero throughout, the way `inscribed` is.
   auto const arc = [&corner](uint32_t box) {
     return (box < corner.size()) ? corner[box] : 0;
   };
   if (clear <= 0) { return; }
+  int32_t const apart{ imax(clear, pitch) };
   thread_local std::vector<Seat> seats;
   seats.clear();
   for (uint32_t n = 0; n < nets.size(); ++n) {
@@ -533,9 +535,11 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
       bool const along_y{ seats[first].face < 2 };
       int32_t const lo{ along_y ? r.y : r.x };
       int32_t const len{ along_y ? r.h : r.w };
-      // Sized to the face, so a mark too small to seat both leaves them stacked
+      // `apart` where the run `onto_face` seats on holds it; otherwise sized
+      // to the face, so a mark too small to seat both leaves them stacked
       // rather than sliding one off its own border.
-      int32_t const step{ imin(clear, len / 3) };
+      int32_t const inset{ imin(imax(clear, arc(seats[first].box)), len / 2) };
+      int32_t const step{ ((len - (2 * inset)) >= apart) ? apart : imin(clear, len / 3) };
       if (step <= 0) { continue; }
       for (uint32_t i = first; i < end; ++i) {
         Seat const &seat{ seats[i] };
@@ -1248,7 +1252,14 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
   moved(SeatPass::Reface);
   ortho_align_attachments(in.nets, in.obstacles, in.inscribed, in.corner, seat);
   moved(SeatPass::Align);
-  ortho_spread_attachments(in.nets, in.obstacles, in.inscribed, in.corner, clear, seat);
+  int32_t const pitch{ label_line_height(in.profile) };
+  ortho_spread_attachments(in.nets,
+                           in.obstacles,
+                           in.inscribed,
+                           in.corner,
+                           clear,
+                           pitch,
+                           seat);
   moved(SeatPass::Spread);
   // Last, because it is the only pass that compares two boxes: what it moves is
   // what the three above have already settled on their own faces (11.10a).
@@ -1257,7 +1268,7 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
                              in.inscribed,
                              in.corner,
                              clear,
-                             label_line_height(in.profile),
+                             pitch,
                              seat);
   moved(SeatPass::Separate);
 

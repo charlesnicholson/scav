@@ -126,13 +126,16 @@ void ortho_align_attachments(std::vector<RouteNet> const &nets,
                              std::vector<scav_point> &at);
 
 // The attachments one face still lands on one point -- two states each other's
-// target project onto the same place -- pushed `clear` apart along that face and
-// clamped back onto it.
+// target project onto the same place -- pushed apart along that face and
+// clamped back onto it: by the larger of `clear` and `pitch` where the run the
+// face seats on holds that, and otherwise by `clear` or a third of the face,
+// whichever is less.
 void ortho_spread_attachments(std::vector<RouteNet> const &nets,
                               std::vector<scav_rect> const &boxes,
                               std::vector<uint8_t> const &inscribed,
                               std::vector<int32_t> const &corner,
                               int32_t clear,
+                              int32_t pitch,
                               std::vector<scav_point> &at);
 
 // Seats on *different* boxes whose legs run alongside closer than `pitch`,
