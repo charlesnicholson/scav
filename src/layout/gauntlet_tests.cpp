@@ -60,7 +60,8 @@ constexpr std::array GAUNTLET{ "above.scav",   "chain.scav",     "crossing.scav"
                                "crowd.scav",   "enclosing.scav", "fanin.scav",
                                "fork.scav",    "lane.scav",      "long.scav",
                                "loop.scav",    "marks.scav",     "mutual.scav",
-                               "regions.scav", "roundtrip.scav", "stretch.scav" };
+                               "regions.scav", "roundtrip.scav", "stretch.scav",
+                               "through.scav" };
 
 // One chart, laid out: the pieces every property below reads.
 struct Laid {
@@ -937,6 +938,65 @@ TEST_CASE(
       CAPTURE(k);
       CHECK(l.r.points[route.off + k].x == first.x);
     }
+  }
+}
+
+TEST_CASE("gauntlet: a route through two nested borders crosses both at one height") {
+  // `toolchanger`'s `extend`, into a state two composites down. Both frames run
+  // down and both ports sit on a left border, so each is a port on a cross
+  // border, placed along its frame's ranks. The outer one sat level with
+  // `Inner`'s centre and the inner one level with `Target`, so the leg between
+  // the two borders jogged; level with the port it continues through, the
+  // route is one line from `Source` to `Target`. No search (11.10g).
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Laid bare;
+    lay("through.scav", one_row(p), bare);
+    uint32_t const source{ state_named(bare.c, "Source") };
+    uint32_t const outer{ state_named(bare.c, "Outer") };
+    uint32_t const inner{ state_named(bare.c, "Inner") };
+    uint32_t const target{ state_named(bare.c, "Target") };
+    REQUIRE(source != INVALID);
+    REQUIRE(outer != INVALID);
+    REQUIRE(inner != INVALID);
+    REQUIRE(target != INVALID);
+    uint32_t reach{ INVALID };
+    for (uint32_t t = 0; t < bare.c.transitions.size(); ++t) {
+      if (bare.c.transitions[t].src.v == source) { reach = t; }
+    }
+    REQUIRE(reach != INVALID);
+    auto const frame_of = [&](uint32_t st) {
+      return bare.c.submachine_ids[bare.c.states[st].submachines.off];
+    };
+    SearchPins const seed{
+      .orients = { { .frame = frame_of(outer) }, { .frame = frame_of(inner) } },
+      .sides = { { .trans = TransId{ reach }, .leg = 1, .end = 0, .side = 0 },
+                 { .trans = TransId{ reach }, .leg = 2, .end = 0, .side = 0 } }
+    };
+    Laid l;
+    lay("through.scav", one_row(p), l, {}, &seed);
+    REQUIRE(l.o.sub_down[frame_of(outer).v] == 1);
+    REQUIRE(l.o.sub_down[frame_of(inner).v] == 1);
+    REQUIRE(l.r.port[reach].len == 2);
+    for (uint32_t k = 0; k < 2; ++k) {
+      CAPTURE(k);
+      CHECK(l.r.slots[l.r.port[reach].off + k].side == 0);
+    }
+    // `Target` is below `Inner`'s centre, so its port is off that centre too.
+    scav_rect const in{ l.z.state[inner] };
+    scav_rect const to{ l.z.state[target] };
+    REQUIRE((to.y + (to.h / 2)) != (in.y + (in.h / 2)));
+
+    scav_span const route{ l.r.route[reach] };
+    REQUIRE(route.len >= 2);
+    scav_point const first{ l.r.points[route.off] };
+    scav_point const last{ l.r.points[route.off + route.len - 1] };
+    for (uint32_t k = 0; k < route.len; ++k) {
+      CAPTURE(k);
+      CHECK(l.r.points[route.off + k].y == first.y);
+    }
+    CHECK(on_border(first, l.z.state[source]));
+    CHECK(on_border(last, to));
   }
 }
 

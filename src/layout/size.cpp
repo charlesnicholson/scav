@@ -1278,7 +1278,8 @@ void Sizer::place_sub(uint32_t m,
   }
 
   // A port on a cross border sits on the frame's edge across the ranks, and
-  // along them level with the centre of the state its flat edge joins.
+  // along them level with where its flat edge meets the state it joins: the
+  // state's centre, or the port on its border the edge continues through.
   for (uint32_t k = 0; k < espan.len; ++k) {
     OrderEdge const &e{ o.edges[espan.off + k] };
     bool const at_src{ on_cross_border(e.src) };
@@ -1289,6 +1290,7 @@ void Sizer::place_sub(uint32_t m,
     Wide along_at{ down ? out.node[other].y : out.node[other].x };
     if (nn.kind == OrderKind::State) {
       along_at += (down ? out.state[nn.subject].h : out.state[nn.subject].w) / 2;
+      along_at += attach_at(e.segment, nn.subject, !down);
     }
     int32_t const lead{ static_cast<int32_t>(along_at) };
     int32_t const cross{ (cross_of(o.nodes[port].subject) == 1) ? 0 : packed.h };
@@ -1354,6 +1356,7 @@ void Sizer::size_sub(uint32_t m) {
     for (uint32_t const end : { e.src, e.dst }) {
       OrderNode const &nd{ o.nodes[end] };
       put((nd.kind == OrderKind::State) ? attach_at(e.segment, nd.subject, down) : 0);
+      put((nd.kind == OrderKind::State) ? attach_at(e.segment, nd.subject, !down) : 0);
     }
   }
   key.push_back(gspan.len);
