@@ -99,6 +99,7 @@ struct FrameScratch {
   Partition part;                     // -> nodes, the frame's components
   std::vector<uint32_t> dense;        // -> nodes; a component root's ordinal
   std::vector<uint32_t> lanes;        // boundaries x components, row-major
+  std::vector<uint32_t> spanning;     // -> edges, labelled across several boundaries
 };
 
 // A shard's frame scratch, kept per thread: both maps are all INVALID again
@@ -592,25 +593,31 @@ void rank_derived(Frame &f,
                   std::vector<uint8_t> const &cut,
                   scav_profile const &p,
                   FrameScratch &sc) {
-  // Charged before chaining, while an edge still knows the whole span its
-  // label sits in the middle of and how many boundaries it crosses. An edge
-  // inside one rank crosses none: its leg runs down its column and its label
-  // sits beside it there, so charging the boundary after it widened `dock`'s
-  // `On` by a label's width of nothing (11.10g). Phase 2 sizes the column.
+  // Charged before chaining, while an edge still knows the whole span it
+  // crosses. An edge inside one rank crosses none: its leg runs down its
+  // column and its label sits beside it there, so charging the boundary after
+  // it widened `dock`'s `On` by a label's width of nothing (11.10g). Phase 2
+  // sizes the column. An edge across one boundary has only that one to hold
+  // its label, so it is charged there first.
   uint32_t top{ 0 };
   for (OrderNode const &nd : f.nodes) { top = imax(top, nd.rank); }
   gaps.assign(top, 0);
-  for (OrderEdge const &e : f.edges) {
+  std::vector<uint32_t> &spanning{ sc.spanning };
+  spanning.clear();
+  for (uint32_t i = 0; i < f.edges.size(); ++i) {
+    OrderEdge const &e{ f.edges[i] };
     int32_t const label{ seg_label[e.segment] };
     if ((label == 0) || (f.nodes[e.src].rank == f.nodes[e.dst].rank)) { continue; }
     uint32_t const from{ imin(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
     uint32_t const to{ imax(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
-    uint32_t const at{ from + ((to - from) / 2) };
-    if (at >= gaps.size()) { continue; }
-    gaps[at] = imax(gaps[at], label);
+    if ((to - from) > 1) {
+      spanning.push_back(i);
+      continue;
+    }
+    gaps[from] = imax(gaps[from], label);
     trace_emit({ .kind = TraceKind::GapCharged,
                  .pass = static_cast<uint16_t>(GapCause::Label),
-                 .gap = { .boundary = at, .seg = e.segment, .width = label } });
+                 .gap = { .boundary = from, .seg = e.segment, .width = label } });
   }
 
   // An edge turning in a boundary needs a lane of its own, and two lanes
@@ -654,6 +661,34 @@ void rank_derived(Frame &f,
     uint32_t const of{ dense[part.root(e.src)] };
     turn(from, of, e.segment);
     if (to > (from + 1)) { turn(to - 1, of, e.segment); }
+  }
+
+  // An edge across several boundaries runs through every one of them, and its
+  // label needs the room of one: a boundary it crosses whose charge is already
+  // the label's width holds it, and costs nothing. Only where none does is one
+  // charged -- the widest it crosses, so the frame grows least, and nearest
+  // the middle of the span among equals. Widest label first, so a narrower one
+  // across the same boundary finds it already wide enough.
+  scav_stable_sort(spanning, [&](uint32_t a, uint32_t b) {
+    return seg_label[f.edges[a].segment] > seg_label[f.edges[b].segment];
+  });
+  for (uint32_t const i : spanning) {
+    OrderEdge const &e{ f.edges[i] };
+    int32_t const label{ seg_label[e.segment] };
+    uint32_t const from{ imin(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
+    uint32_t const to{ imax(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
+    uint32_t const middle{ from + ((to - from) / 2) };
+    uint32_t at{ middle };
+    for (uint32_t b = from; b < to; ++b) {
+      uint32_t const off{ (b > middle) ? (b - middle) : (middle - b) };
+      uint32_t const best{ (at > middle) ? (at - middle) : (middle - at) };
+      if ((gaps[b] > gaps[at]) || ((gaps[b] == gaps[at]) && (off < best))) { at = b; }
+    }
+    bool const held{ gaps[at] >= label };
+    gaps[at] = imax(gaps[at], label);
+    trace_emit({ .kind = TraceKind::GapCharged,
+                 .pass = static_cast<uint16_t>(held ? GapCause::Held : GapCause::Label),
+                 .gap = { .boundary = at, .seg = e.segment, .width = label } });
   }
 
   chain_long_edges(f, cut);

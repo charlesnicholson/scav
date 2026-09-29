@@ -86,6 +86,9 @@ def describe(e, model):
         return f"    must pass through {tuple(e['at'])}"
     if k == "route_degraded":
         return "  FELL BACK to a straight line"
+    if k == "gap_charged" and e["cause"] == "held":
+        return (f"  segment {e['seg']}'s label ({e['width']}) is held by frame "
+                f"{e['frame']}'s rank boundary {e['boundary']}, charging nothing")
     if k == "gap_charged":
         return (f"  segment {e['seg']} asked frame {e['frame']}'s rank boundary "
                 f"{e['boundary']} for {e['width']} ({e['cause']})")

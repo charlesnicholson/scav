@@ -37,8 +37,9 @@ enum class TraceKind : uint16_t {
   GapCharged,         // phase 1 asked a rank boundary for width beyond rank_sep
 };
 
-// What a rank boundary's charge is for; `GapCharged.pass`.
-enum class GapCause : uint16_t { Label, Lanes };
+// What a rank boundary's charge is for; `GapCharged.pass`. `Held` charges
+// nothing: it names the boundary whose charge already holds a label's width.
+enum class GapCause : uint16_t { Label, Lanes, Held };
 
 // What seating an initial or final pseudostate did; `PseudostateSeated.pass`.
 enum class SeatHow : uint16_t { Moved, Levelled, Declined };

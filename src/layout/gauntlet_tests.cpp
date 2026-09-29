@@ -58,8 +58,9 @@ scav_profile compact() {
 // broke rather than which index did.
 constexpr std::array GAUNTLET{ "chain.scav",     "crossing.scav", "crowd.scav",
                                "enclosing.scav", "fanin.scav",    "fork.scav",
-                               "lane.scav",      "loop.scav",     "marks.scav",
-                               "mutual.scav",    "regions.scav",  "stretch.scav" };
+                               "lane.scav",      "long.scav",     "loop.scav",
+                               "marks.scav",     "mutual.scav",   "regions.scav",
+                               "stretch.scav" };
 
 // One chart, laid out: the pieces every property below reads.
 struct Laid {
@@ -724,6 +725,64 @@ TEST_CASE(
     REQUIRE(inner_gap >= 0);  // the piece inside `Right`
     CHECK(held_gap <= label_leader(p));
     CHECK(held_gap < inner_gap);
+  }
+}
+
+TEST_CASE("gauntlet: a long edge's label widens no boundary another already widened") {
+  // `ota`'s `timeout`, across three boundaries beside `all chunks received` on
+  // the first of them. Charged to the middle of its span, it widened a second
+  // boundary by its own width while the first already held it, and pushed
+  // everything after that boundary right. Row 0 unsearched, whose ranks are
+  // the chain's own, so the three boundaries are the ones named here; what
+  // ships is held to placing the label clear.
+  for (scav_profile const &p :
+       { readable(), compact(), one_row(readable()), one_row(compact()) }) {
+    CAPTURE(p.profile_id);
+    CAPTURE(p.portfolio_m);
+    Laid bare;
+    lay("long.scav", p, bare);
+    std::array<uint32_t, 2> labelled{ INVALID, INVALID };
+    uint32_t found{ 0 };
+    for (uint32_t k = 0; (k < bare.c.transitions.size()) && (found < 2); ++k) {
+      if (bare.c.transitions[k].label.len != 0) { labelled[found++] = k; }
+    }
+    REQUIRE(found == 2);
+    int32_t const wide{ 3000 };
+    int32_t const along{ 1500 };
+    std::array<scav_path_box, 2> const boxes{
+      scav_path_box{ .subject = labelled[0], .w = wide, .h = 269, .order = 0 },
+      scav_path_box{ .subject = labelled[1], .w = along, .h = 269, .order = 0 },
+    };
+    scav_spaces const spaces{ .path_box = boxes.data(), .n_path_box = 2 };
+    Laid l;
+    lay("long.scav", p, l, spaces);
+    CHECK(l.r.unplaced == 0);
+    REQUIRE(l.r.placed.size() == 2);
+    for (scav_rect const &at : l.r.placed) {
+      for (uint32_t const st : live_of(l.c)) {
+        CAPTURE(st);
+        CHECK_FALSE(overlaps(at, l.z.state[st]));
+      }
+    }
+    CHECK_FALSE(overlaps(l.r.placed[0], l.r.placed[1]));
+    if (p.portfolio_m != 1) { continue; }
+
+    Transition const &first{ l.c.transitions[labelled[0]] };
+    Transition const &across{ l.c.transitions[labelled[1]] };
+    REQUIRE(first.src == across.src);
+    uint32_t const from{ l.o.nodes[l.o.state_node[across.src.v]].rank };
+    uint32_t const to{ l.o.nodes[l.o.state_node[across.dst.v]].rank };
+    REQUIRE(l.o.nodes[l.o.state_node[first.dst.v]].rank == (from + 1));
+    REQUIRE(to == (from + 3));
+    Span const gaps{ l.o.sub_gaps[l.c.root_submachine.v] };
+    REQUIRE(gaps.len >= to);
+    CHECK(l.o.gaps[gaps.off + from] >= wide);
+    // Past the first boundary the chain's edges need a lane or two and no
+    // label, so neither boundary grows to the long label's width.
+    for (uint32_t b = from + 1; b < to; ++b) {
+      CAPTURE(b);
+      CHECK(l.o.gaps[gaps.off + b] < along);
+    }
   }
 }
 

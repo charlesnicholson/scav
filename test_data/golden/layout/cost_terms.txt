@@ -27,6 +27,7 @@ readable orthogonal gauntlet/enclosing.scav 0 6 0 0 9821 0 0 0 64852 13873176
 readable orthogonal gauntlet/fanin.scav 0 12 0 0 1514 0 0 0 73556 18739776
 readable orthogonal gauntlet/fork.scav 0 13 576 9 15423 0 0 0 21754 14283360
 readable orthogonal gauntlet/lane.scav 0 12 0 1 3319 0 0 0 82648 24592128
+readable orthogonal gauntlet/long.scav 0 4 0 0 160 0 0 0 56776 6785472
 readable orthogonal gauntlet/loop.scav 0 4 0 2 666 0 0 0 8128 2659328
 readable orthogonal gauntlet/marks.scav 0 8 96 0 518 0 0 0 69132 6253056
 readable orthogonal gauntlet/mutual.scav 0 8 0 0 430 0 0 0 42572 7804992
@@ -39,6 +40,7 @@ readable straight gauntlet/enclosing.scav 1 2 0 1 22112 0 0 0 64852 13873176
 readable straight gauntlet/fanin.scav 0 4 0 0 227 0 0 0 73556 18739776
 readable straight gauntlet/fork.scav 1 0 0 3 0 0 0 0 21754 14283360
 readable straight gauntlet/lane.scav 0 6 0 1 597 0 0 0 82648 24592128
+readable straight gauntlet/long.scav 0 2 0 0 47 0 0 0 56776 6785472
 readable straight gauntlet/loop.scav 0 0 0 0 0 0 0 0 8128 2659328
 readable straight gauntlet/marks.scav 0 1 0 0 7 0 0 0 69132 6253056
 readable straight gauntlet/mutual.scav 0 1 0 0 37 0 0 0 42572 7804992
@@ -51,6 +53,7 @@ compact orthogonal gauntlet/enclosing.scav 0 6 0 0 6583 0 0 0 14456 5928640
 compact orthogonal gauntlet/fanin.scav 0 12 0 0 890 0 0 0 16608 8146944
 compact orthogonal gauntlet/fork.scav 0 13 894 7 7891 0 0 0 2352 6634752
 compact orthogonal gauntlet/lane.scav 0 12 0 1 2051 0 0 0 18528 10475520
+compact orthogonal gauntlet/long.scav 0 4 0 0 84 0 0 0 12352 2996224
 compact orthogonal gauntlet/loop.scav 0 4 0 2 258 0 0 0 480 1193472
 compact orthogonal gauntlet/marks.scav 0 8 58 0 392 0 0 0 14528 3334144
 compact orthogonal gauntlet/mutual.scav 0 8 0 0 214 0 0 0 9760 3456000
@@ -63,6 +66,7 @@ compact straight gauntlet/enclosing.scav 1 2 0 1 15238 0 0 0 14456 5928640
 compact straight gauntlet/fanin.scav 0 4 0 0 129 0 0 0 16608 8146944
 compact straight gauntlet/fork.scav 1 0 0 3 0 0 0 0 2352 6634752
 compact straight gauntlet/lane.scav 0 6 0 1 348 0 0 0 18528 10475520
+compact straight gauntlet/long.scav 0 2 0 0 27 0 0 0 12352 2996224
 compact straight gauntlet/loop.scav 0 0 0 0 0 0 0 0 480 1193472
 compact straight gauntlet/marks.scav 0 1 0 0 6 0 0 0 14528 3334144
 compact straight gauntlet/mutual.scav 0 1 0 0 20 0 0 0 9760 3456000

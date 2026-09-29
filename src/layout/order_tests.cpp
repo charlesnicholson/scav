@@ -217,6 +217,47 @@ TEST_CASE("order: a path box widens the rank boundary its label crosses") {
   CHECK(o.gaps[1] == 700);
 }
 
+TEST_CASE("order: a label across several boundaries is charged where none holds it") {
+  // A -> B -> C -> D and A -> D across all three boundaries. A -> D turns in
+  // the first and the last, beside A -> B and C -> D, so those two carry two
+  // lanes, 538 at `readable`; the middle carries one and nothing.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
+  StateId const e{ build_state(c, root, "D", StateKind::Normal, {}) };
+  TransId const first{ build_trans(c, a, b, TransKind::External, {}) };
+  build_trans(c, b, d, TransKind::External, {});
+  build_trans(c, d, e, TransKind::External, {});
+  TransId const across{ build_trans(c, a, e, TransKind::External, {}) };
+
+  auto const gaps_for = [&](int32_t first_w, int32_t across_w) {
+    std::array<scav_path_box, 2> const boxes{
+      scav_path_box{ .subject = first.v, .w = first_w, .h = 40, .order = 0 },
+      scav_path_box{ .subject = across.v, .w = across_w, .h = 40, .order = 0 },
+    };
+    scav_spaces const s{ .path_box = boxes.data(),
+                         .n_path_box = (first_w == 0) ? 0U : 2U };
+    scav_spaces const alone{ .path_box = boxes.data() + 1, .n_path_box = 1 };
+    SubmachineOrders const o{ order_of(c, (first_w == 0) ? alone : s) };
+    Span const sp{ o.sub_gaps[root.v] };
+    return std::vector<int32_t>{ o.gaps.begin() + sp.off,
+                                 o.gaps.begin() + sp.off + sp.len };
+  };
+  // The first boundary is already 700 wide for A -> B and A -> D runs through
+  // it, so A -> D's 500 is held there. At the middle of its span it made the
+  // middle boundary 500 wide for a label that never needed it.
+  CHECK(gaps_for(700, 500) == std::vector<int32_t>{ 700, 0, 538 });
+  // Nothing it crosses is 900 wide, so the widest boundary it crosses grows,
+  // which is the least the frame can grow by.
+  CHECK(gaps_for(700, 900) == std::vector<int32_t>{ 900, 0, 538 });
+  // Equal widths either side of the middle: the first of them.
+  CHECK(gaps_for(0, 600) == std::vector<int32_t>{ 600, 0, 538 });
+  // The lanes already hold a label no wider than them.
+  CHECK(gaps_for(0, 538) == std::vector<int32_t>{ 538, 0, 538 });
+}
+
 TEST_CASE("order: a label on a hierarchy-crossing route widens one frame only") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };

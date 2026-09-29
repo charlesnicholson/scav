@@ -255,8 +255,11 @@ void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out)
         j.kv("carried", e.piece.carried);
         break;
       case TraceKind::GapCharged:
-        j.ks("cause",
-             (static_cast<GapCause>(e.pass) == GapCause::Label) ? "label" : "lanes");
+        switch (static_cast<GapCause>(e.pass)) {
+          case GapCause::Label: j.ks("cause", "label"); break;
+          case GapCause::Lanes: j.ks("cause", "lanes"); break;
+          case GapCause::Held: j.ks("cause", "held"); break;
+        }
         j.kv("boundary", e.gap.boundary);
         j.kv("seg", e.gap.seg);
         j.kv("width", e.gap.width);
