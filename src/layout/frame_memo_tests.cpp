@@ -451,3 +451,86 @@ TEST_CASE("size memo: a remembered frame is the layout those inputs size to") {
     CHECK(moved[k] > 0);
   }
 }
+
+TEST_CASE("size memo: a port on a cross border keys on the port it continues through") {
+  // `gauntlet/through` twice, the second with `reach` into `Top` in place of
+  // `Target`: every state and segment keeps its id and `Inner` its size, so
+  // `Outer`'s frame differs only in where `Inner`'s port sits along its ranks.
+  scav_profile const p{ readable() };
+  std::vector<scav_byte> bytes;
+  REQUIRE(read_file(SCAV_TEST_DATA_DIR "/charts/gauntlet/through.scav", bytes));
+  std::string const text{ reinterpret_cast<char const *>(bytes.data()), bytes.size() };
+  std::string moved_text{ text };
+  std::string const into{ "Outer/Inner/Target" };
+  size_t const at{ moved_text.find(into) };
+  REQUIRE(at != std::string::npos);
+  moved_text.replace(at, into.size(), "Outer/Inner/Top");
+
+  std::array<Chart, 2> charts;
+  std::array<std::string const *, 2> const texts{ &text, &moved_text };
+  for (uint32_t k = 0; k < 2; ++k) {
+    Loader loader;
+    REQUIRE(load_add(loader,
+                     reinterpret_cast<scav_byte const *>(texts[k]->data()),
+                     texts[k]->size(),
+                     "through.scav"));
+    REQUIRE(load_pending(loader).empty());
+    std::vector<Diagnostic> diags;
+    REQUIRE(load_finish(loader, charts[k], diags));
+  }
+  auto const named = [](Chart const &c, std::string const &name) {
+    for (uint32_t st = 0; st < c.states.size(); ++st) {
+      if (chart_string(c, c.states[st].name) == name) { return st; }
+    }
+    return INVALID;
+  };
+  Chart const &c{ charts[0] };
+  uint32_t const outer{ named(c, "Outer") };
+  uint32_t const inner{ named(c, "Inner") };
+  REQUIRE(outer != INVALID);
+  REQUIRE(inner != INVALID);
+  TransId const reach{ static_cast<uint32_t>(c.transitions.size()) - 1 };
+  SubmachineId const outer_frame{ c.submachine_ids[c.states[outer].submachines.off] };
+  SubmachineId const inner_frame{ c.submachine_ids[c.states[inner].submachines.off] };
+  SearchPins const pins{ .orients = { { .frame = outer_frame }, { .frame = inner_frame } },
+                         .sides = { { .trans = reach, .leg = 1, .end = 0, .side = 0 },
+                                    { .trans = reach, .leg = 2, .end = 0, .side = 0 } } };
+
+  std::array<SplitGraph, 2> const g{ decompose(charts[0]), decompose(charts[1]) };
+  std::array<SubmachineOrders, 2> const o{
+    order_submachines(charts[0], g[0], {}, p, 1, pins),
+    order_submachines(charts[1], g[1], {}, p, 1, pins),
+  };
+  Sized const warm{ sized(charts[0],
+                          g[0],
+                          o[0],
+                          {},
+                          p,
+                          DarSource::Profile,
+                          Compaction::Off,
+                          Fold::Scale,
+                          false) };
+  REQUIRE(warm.ok);
+  Sized const got{ sized(charts[1],
+                         g[1],
+                         o[1],
+                         {},
+                         p,
+                         DarSource::Profile,
+                         Compaction::Off,
+                         Fold::Scale,
+                         false) };
+  Sized const want{ sized(charts[1],
+                          g[1],
+                          o[1],
+                          {},
+                          p,
+                          DarSource::Profile,
+                          Compaction::Off,
+                          Fold::Scale,
+                          true) };
+  REQUIRE(want.ok);
+  CHECK(got.ok);
+  CHECK(same(got.z, want.z));
+  CHECK_FALSE(same(want.z, warm.z));
+}
