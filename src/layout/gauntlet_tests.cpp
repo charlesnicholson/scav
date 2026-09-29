@@ -57,11 +57,11 @@ scav_profile compact() {
 // Every chart in test_data/charts/gauntlet, named so a failure says which shape
 // broke rather than which index did.
 constexpr std::array GAUNTLET{ "above.scav",   "chain.scav",     "crossing.scav",
-                               "crowd.scav",   "enclosing.scav", "fanin.scav",
-                               "fork.scav",    "lane.scav",      "long.scav",
-                               "loop.scav",    "marks.scav",     "mutual.scav",
-                               "regions.scav", "roundtrip.scav", "stretch.scav",
-                               "through.scav", "transit.scav" };
+                               "crowd.scav",   "enclosing.scav", "entered.scav",
+                               "fanin.scav",   "fork.scav",      "lane.scav",
+                               "long.scav",    "loop.scav",      "marks.scav",
+                               "mutual.scav",  "regions.scav",   "roundtrip.scav",
+                               "stretch.scav", "through.scav",   "transit.scav" };
 
 // One chart, laid out: the pieces every property below reads.
 struct Laid {
@@ -997,6 +997,51 @@ TEST_CASE("gauntlet: a route through two nested borders crosses both at one heig
     }
     CHECK(on_border(first, l.z.state[source]));
     CHECK(on_border(last, to));
+  }
+}
+
+TEST_CASE("gauntlet: a composite entered straight holds its first state a clearance in") {
+  // `Outside -> Box/First` crosses `Box`'s leading border and runs straight to
+  // `First`. The port is a point on that border rather than a column of `Box`'s
+  // own, and the route turns nowhere, so `First` sits no further inside `Box`'s
+  // ring than a route keeps from a box. A rank gap there, and a lane for the
+  // route, were 1,338 units of `vac`'s `dock` (11.9.5). Row 0 unsearched keeps
+  // the frame running across, so the port is on the border its ranks start at;
+  // what ships is held to the same bound.
+  for (scav_profile const &p :
+       { readable(), compact(), one_row(readable()), one_row(compact()) }) {
+    CAPTURE(p.profile_id);
+    CAPTURE(p.portfolio_m);
+    Laid l;
+    lay("entered.scav", p, l);
+    uint32_t const outside{ state_named(l.c, "Outside") };
+    uint32_t const box{ state_named(l.c, "Box") };
+    uint32_t const first{ state_named(l.c, "First") };
+    REQUIRE(outside != INVALID);
+    REQUIRE(box != INVALID);
+    REQUIRE(first != INVALID);
+    scav_rect const outer{ l.z.state[box] };
+    scav_rect const in{ l.z.state[first] };
+    CHECK(in.x >= (outer.x + p.pad));
+    CHECK((in.x - (outer.x + p.pad)) <= route_clearance(p));
+
+    uint32_t t{ INVALID };
+    for (uint32_t k = 0; k < l.c.transitions.size(); ++k) {
+      Transition const &tr{ l.c.transitions[k] };
+      if ((tr.src.v == outside) && (tr.dst.v == first)) { t = k; }
+    }
+    REQUIRE(t != INVALID);
+    // One straight line, whichever face of `Box` the search put the port on.
+    scav_span const route{ l.r.route[t] };
+    REQUIRE(route.len >= 2);
+    scav_point const from{ l.r.points[route.off] };
+    bool across{ true };
+    bool down{ true };
+    for (uint32_t k = 1; k < route.len; ++k) {
+      across = across && (l.r.points[route.off + k].y == from.y);
+      down = down && (l.r.points[route.off + k].x == from.x);
+    }
+    CHECK((across || down));
   }
 }
 

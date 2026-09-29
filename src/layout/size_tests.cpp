@@ -6,6 +6,7 @@
 #include "layout/decompose.h"
 #include "layout/label.h"
 #include "layout/order.h"
+#include "layout/router.h"
 #include "layout/trace.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
@@ -947,6 +948,133 @@ TEST_CASE("size: a boundary node lands on its frame's leading or trailing edge")
       diags));
   CHECK(in.node[0].x == 0);
   CHECK(in.state[a.v].x > 0);
+}
+
+TEST_CASE("size: a layer of boundary nodes keeps a route's clearance, not a rank gap") {
+  // A route arrives at the frame's leading edge, runs through `A` and `B`, and
+  // leaves by the trailing edge. Each boundary node is a point on the frame's
+  // edge rather than a column, so `A` sits the room a route keeps from a box
+  // past the leading edge and the frame ends as far past `B` (11.9.5).
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  scav_profile const p{ unfolded() };
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(
+      c,
+      depths({ 0, 0 }),
+      one_frame(c,
+                root,
+                { { .kind = OrderKind::Boundary, .subject = 0, .rank = 0, .pos = 0 },
+                  state_node(a.v, 1, 0),
+                  state_node(b.v, 2, 0),
+                  { .kind = OrderKind::Boundary, .subject = 2, .rank = 3, .pos = 0 } },
+                { { .src = 0, .dst = 1, .segment = 0, .reversed = 0 },
+                  { .src = 1, .dst = 2, .segment = 1, .reversed = 0 },
+                  { .src = 2, .dst = 3, .segment = 2, .reversed = 0 } },
+                { 0, 0, 0 }),
+      {},
+      p,
+      z,
+      diags));
+  CHECK(z.node[0].x == 0);
+  CHECK(z.state[a.v].x == route_clearance(p));
+  CHECK(z.state[b.v].x == (z.state[a.v].x + z.state[a.v].w + p.rank_sep));
+  CHECK(z.sub[root.v].w == (z.state[b.v].x + z.state[b.v].w + route_clearance(p)));
+  CHECK(z.node[3].x == z.sub[root.v].w);
+}
+
+TEST_CASE("size: a boundary holds a lane for each edge that turns in it, and no other") {
+  // Two states into one tall bar meet its long face straight across and take
+  // no lane. Three into one state meet it at one height: the middle one runs
+  // straight and the two either side turn, so the boundary holds two lanes a
+  // line of type apart (11.9.5). Phase 1 would have charged every one of them.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  std::vector<StateId> ids;
+  ids.reserve(5);
+  for (uint32_t i = 0; i < 5; ++i) {
+    ids.push_back(build_state(c, root, "S", StateKind::Normal, {}));
+  }
+  StateId const bar{ build_state(c, root, "F", StateKind::Fork, {}) };
+  scav_profile const p{ unfolded() };
+  auto const x_of = [&](std::vector<OrderNode> const &nodes,
+                        std::vector<OrderEdge> const &edges,
+                        uint32_t st) {
+    SizedLayout z;
+    std::vector<Diagnostic> diags;
+    REQUIRE(size_layout(c,
+                        depths(std::vector<uint32_t>(6, 0)),
+                        one_frame(c, root, nodes, edges, { 0 }),
+                        {},
+                        p,
+                        z,
+                        diags));
+    return z.state[st].x - (z.state[ids[0].v].x + z.state[ids[0].v].w);
+  };
+  std::vector<OrderNode> const pair{ state_node(ids[0].v, 0, 0),
+                                     state_node(ids[1].v, 0, 1),
+                                     state_node(bar.v, 1, 0) };
+  CHECK(x_of(pair,
+             { { .src = 0, .dst = 2, .segment = 0, .reversed = 0 },
+               { .src = 1, .dst = 2, .segment = 1, .reversed = 0 } },
+             bar.v) == p.rank_sep);
+  std::vector<OrderNode> const fan{ state_node(ids[0].v, 0, 0),
+                                    state_node(ids[1].v, 0, 1),
+                                    state_node(ids[4].v, 0, 2),
+                                    state_node(ids[2].v, 1, 0) };
+  CHECK(x_of(fan,
+             { { .src = 0, .dst = 3, .segment = 0, .reversed = 0 },
+               { .src = 1, .dst = 3, .segment = 1, .reversed = 0 },
+               { .src = 2, .dst = 3, .segment = 2, .reversed = 0 } },
+             ids[2].v) == (p.rank_sep + (2 * label_line_height(p))));
+}
+
+TEST_CASE(
+    "size: a start state seated inside its target's column takes no room in its own") {
+  // `T` and the wide `W` share one column by the edge between them, so `T` is
+  // centred on it with room to spare either side. The start state is moved to
+  // `rank_sep` before `T`, which is inside that column, so its own layer holds
+  // nothing and the column keeps a route's clearance from the frame's edge
+  // rather than a dot and a rank gap. Without the room, it keeps its layer.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const start{ build_state(c, root, {}, StateKind::Initial, {}) };
+  StateId const t{ build_state(c, root, "T", StateKind::Normal, {}) };
+  StateId const w{ build_state(c, root, "W", StateKind::Normal, {}) };
+  scav_profile const p{ unfolded() };
+  for (int32_t const wide : { 3000, 0 }) {
+    CAPTURE(wide);
+    std::vector<scav_box_space> boxes(c.states.size(), scav_box_space{});
+    boxes[w.v].min_w = wide;
+    scav_spaces const s{ .box_state = boxes.data(),
+                         .n_box_state = static_cast<uint32_t>(boxes.size()),
+                         .box_state_stride = sizeof(scav_box_space) };
+    SizedLayout z;
+    std::vector<Diagnostic> diags;
+    REQUIRE(size_layout(
+        c,
+        depths({ 0, 0, 0 }),
+        one_frame(
+            c,
+            root,
+            { state_node(start.v, 0, 0), state_node(t.v, 1, 0), state_node(w.v, 1, 1) },
+            { { .src = 0, .dst = 1, .segment = 0, .reversed = 0 },
+              { .src = 1, .dst = 2, .segment = 1, .reversed = 0 } },
+            { 0 }),
+        s,
+        p,
+        z,
+        diags));
+    scav_rect const &dot{ z.state[start.v] };
+    scav_rect const &at{ z.state[t.v] };
+    CHECK(dot.y + (dot.h / 2) == at.y + (at.h / 2));
+    CHECK(at.x - (dot.x + dot.w) == p.rank_sep);
+    int32_t const column{ imin(at.x, z.state[w.v].x) };
+    CHECK(column == ((wide != 0) ? route_clearance(p) : (dot.w + p.rank_sep)));
+  }
 }
 
 TEST_CASE("size: a port on a cross border sits on the frame's edge over its neighbour") {

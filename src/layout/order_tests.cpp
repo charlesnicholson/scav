@@ -365,6 +365,47 @@ TEST_CASE("order: a label across several boundaries is charged where none holds 
   CHECK(gaps_for(0, 538) == std::vector<int32_t>{ 538, 0, 538 });
 }
 
+TEST_CASE("order: the label row holds every label where it was charged, and no lane") {
+  // The chain and the long edge above. `gaps` carries the two lanes phase 1
+  // cannot rule out at the first boundary and the last, which is what the fold
+  // reads; `labels` carries the labels alone, each where it went, which is what
+  // phase 2 places by -- the long label included where the lanes held it.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
+  StateId const e{ build_state(c, root, "D", StateKind::Normal, {}) };
+  TransId const first{ build_trans(c, a, b, TransKind::External, {}) };
+  build_trans(c, b, d, TransKind::External, {});
+  build_trans(c, d, e, TransKind::External, {});
+  TransId const across{ build_trans(c, a, e, TransKind::External, {}) };
+
+  auto const rows_for =
+      [&](int32_t first_w, int32_t across_w, std::vector<int32_t> &gaps) {
+        std::array<scav_path_box, 2> const boxes{
+          scav_path_box{ .subject = first.v, .w = first_w, .h = 40, .order = 0 },
+          scav_path_box{ .subject = across.v, .w = across_w, .h = 40, .order = 0 },
+        };
+        scav_spaces const s{ .path_box = boxes.data(),
+                             .n_path_box = (first_w == 0) ? 0U : 2U };
+        scav_spaces const alone{ .path_box = boxes.data() + 1, .n_path_box = 1 };
+        SubmachineOrders const o{ order_of(c, (first_w == 0) ? alone : s) };
+        REQUIRE(o.labels.size() == o.gaps.size());
+        Span const sp{ o.sub_gaps[root.v] };
+        gaps.assign(o.gaps.begin() + sp.off, o.gaps.begin() + sp.off + sp.len);
+        return std::vector<int32_t>{ o.labels.begin() + sp.off,
+                                     o.labels.begin() + sp.off + sp.len };
+      };
+  std::vector<int32_t> gaps;
+  CHECK(rows_for(700, 500, gaps) == std::vector<int32_t>{ 700, 0, 0 });
+  CHECK(gaps == std::vector<int32_t>{ 700, 0, 538 });
+  CHECK(rows_for(0, 538, gaps) == std::vector<int32_t>{ 538, 0, 0 });
+  CHECK(gaps == std::vector<int32_t>{ 538, 0, 538 });
+  CHECK(rows_for(0, 0, gaps) == std::vector<int32_t>{ 0, 0, 0 });
+  CHECK(gaps == std::vector<int32_t>{ 538, 0, 538 });
+}
+
 TEST_CASE("order: a label on a hierarchy-crossing route widens one frame only") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
