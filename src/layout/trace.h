@@ -70,8 +70,9 @@ struct TraceFold {
   uint32_t rank, refused;
   int32_t carried;
 };
+// `side` is the border the port was turned onto: 0 left, 1 right, 2 top, 3 bottom.
 struct TracePort {
-  uint32_t seg, trans, leg;
+  uint32_t seg, trans, leg, side;
 };
 // `rank` is the frame's rank the piece starts at, the rect is frame-local and
 // what the packing placed, and `carried` the label room on its leading edge.
@@ -128,6 +129,7 @@ inline constexpr uint16_t TRACE_MOVE_RANK{ 0 };
 inline constexpr uint16_t TRACE_MOVE_CUT{ 1 };
 inline constexpr uint16_t TRACE_MOVE_REVERSE{ 2 };
 inline constexpr uint16_t TRACE_MOVE_FACE{ 3 };
+inline constexpr uint16_t TRACE_MOVE_SIDE{ 4 };  // `face` holds the side
 // Basis points of the scored sum, in CostTerms order, so a rejected move says
 // which term rejected it without the event carrying nine 64-bit quantities.
 struct TraceTerms {

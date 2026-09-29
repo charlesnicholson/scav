@@ -945,6 +945,44 @@ TEST_CASE("size: a boundary node lands on its frame's leading or trailing edge")
   CHECK(in.state[a.v].x > 0);
 }
 
+TEST_CASE("size: a port on a cross border sits on the frame's edge over its neighbour") {
+  // `A -> B` across two ranks, and a port in `B`'s rank on the top or bottom
+  // border by a flat edge. It is on the frame's edge across the ranks, level
+  // along them with `B`'s centre, and takes no room in `B`'s rank: `B` stays
+  // level with `A` rather than a node gap below the port.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  scav_profile const p{ unfolded() };
+  for (uint8_t const cross : { uint8_t{ 1 }, uint8_t{ 2 } }) {
+    CAPTURE(static_cast<uint32_t>(cross));
+    uint32_t const at{ (cross == 1) ? 1U : 2U };
+    std::vector<OrderNode> nodes{ state_node(a.v, 0, 0), state_node(b.v, 1, 0) };
+    nodes.insert(nodes.begin() + at,
+                 { .kind = OrderKind::Boundary, .subject = 1, .rank = 1, .pos = 0 });
+    nodes[2].pos = 1;
+    uint32_t const mate{ (cross == 1) ? 2U : 1U };
+    SubmachineOrders o{ one_frame(
+        c,
+        root,
+        nodes,
+        { { .src = 0, .dst = mate, .segment = 0, .reversed = 0 },
+          { .src = at, .dst = mate, .segment = 1, .reversed = 0 } },
+        { 0 }) };
+    o.seg_cross = { 0, cross };
+    SizedLayout z;
+    std::vector<Diagnostic> diags;
+    REQUIRE(size_layout(c, depths({ 0, 0 }), o, {}, p, z, diags));
+    scav_rect const box{ z.state[b.v] };
+    CHECK(z.node[at].x == (box.x + (box.w / 2)));
+    CHECK(z.node[at].y == ((cross == 1) ? 0 : z.sub[root.v].h));
+    CHECK(box.y == z.state[a.v].y);
+    CHECK(box.y == 0);
+    CHECK(z.sub[root.v].h == box.h);
+  }
+}
+
 TEST_CASE("size: a folded rank run packs its pieces rather than stacking them") {
   // Stacking gives every piece the width of the widest. One huge rank among small
   // ones is where that shows: each small piece gets a row as wide as the huge one.

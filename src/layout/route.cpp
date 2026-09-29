@@ -280,9 +280,25 @@ Routes route_transitions(Chart const &c,
     }
     bool const leading{ source_node[node] != 0 };
     // On the border the frame's ranks start and end at: left and right for a
-    // frame running across, top and bottom for one running down (11.10g).
+    // frame running across, top and bottom for one running down (11.10g). A
+    // node on a cross border is on one of the other two.
     uint32_t const frame{ g.segments[seg].frame.v };
-    if ((frame < o.sub_down.size()) && (o.sub_down[frame] != 0)) {
+    bool const down{ (frame < o.sub_down.size()) && (o.sub_down[frame] != 0) };
+    uint8_t const cross{ (seg < o.seg_cross.size()) ? o.seg_cross[seg] : uint8_t{ 0 } };
+    if (cross != 0) {
+      bool const first{ cross == 1 };
+      if (down) {
+        return scav_port_slot{ .x = first ? box.x : (box.x + box.w),
+                               .y = z.node[node].y,
+                               .side = first ? 0U : 1U,
+                               .boundary_depth = depth };
+      }
+      return scav_port_slot{ .x = z.node[node].x,
+                             .y = first ? box.y : (box.y + box.h),
+                             .side = first ? 2U : 3U,
+                             .boundary_depth = depth };
+    }
+    if (down) {
       return scav_port_slot{ .x = z.node[node].x,
                              .y = leading ? box.y : (box.y + box.h),
                              .side = leading ? 2U : 3U,

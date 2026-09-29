@@ -158,6 +158,22 @@ struct OrientPin {
   SubmachineId frame{ INVALID };
 };
 
+// The side of its state's border the port at one end of a leg sits on: 0 left,
+// 1 right, 2 top, 3 bottom, and `end` 0 the leg's departure and 1 its arrival,
+// as a face pin names them (11.3, 11.10g). Each port is where two legs meet, so
+// either names it. On the two sides a frame's ranks start and end at, the port's
+// in-frame edge is turned to put it there; on the other two it shares its
+// neighbour's rank. A port on a region's border takes none.
+//
+// **Every side of a state is a candidate**, and the facing pass's choice of one
+// is only the default a leg with no pin gets: the search offers the other three.
+struct SidePin {
+  TransId trans{ INVALID };
+  uint32_t leg{ 0 };
+  uint32_t end{ 0 };
+  uint32_t side{ 0 };
+};
+
 // Everything besides the tuple that a drawing is a function of, so re-deriving
 // one is two arguments and not seven (11.10a, 11.10b, 11.10d, 11.10e).
 struct SearchPins {
@@ -166,6 +182,7 @@ struct SearchPins {
   std::vector<ReversePin> reverses;
   std::vector<FacePin> faces;
   std::vector<OrientPin> orients;
+  std::vector<SidePin> sides;
 };
 
 // Rows in the fixed table of chart-global phase-2 tuples Level 2 chooses

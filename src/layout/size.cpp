@@ -250,6 +250,15 @@ struct Sizer {
   [[nodiscard]] bool runs_down(uint32_t m) const {
     return (m < o.sub_down.size()) && (o.sub_down[m] != 0);
   }
+  // `seg_cross` at a segment, and whether a node is a boundary node on a cross
+  // border. Hand-built orders carry no column.
+  [[nodiscard]] uint8_t cross_of(uint32_t seg) const {
+    return (seg < o.seg_cross.size()) ? o.seg_cross[seg] : uint8_t{ 0 };
+  }
+  [[nodiscard]] bool on_cross_border(uint32_t node) const {
+    return (o.nodes[node].kind == OrderKind::Boundary) &&
+           (cross_of(o.nodes[node].subject) != 0);
+  }
   [[nodiscard]] int32_t attach_at(uint32_t seg, uint32_t state, bool down) const;
   void trace_ports(uint32_t m, bool down) const;
   [[nodiscard]] uint32_t connected_components(Span span, Span espan);
@@ -283,7 +292,10 @@ int32_t Sizer::attach_at(uint32_t seg, uint32_t state, bool down) const {
         (c.submachines[frame].owner.v != state)) {
       continue;
     }
-    if (runs_down(frame) != down) { continue; }
+    // On the top or bottom border where the frame inside runs down and the port
+    // sits where its rank puts it, or runs across and it sits on a cross border.
+    bool const top_or_bottom{ runs_down(frame) != (cross_of(inner) != 0) };
+    if (top_or_bottom != down) { continue; }
     scav_box_space const b{ box_of(s.box_state, s.n_box_state, state) };
     Wide const pad{ bare_pseudostate(c, out.sub, b, state) ? 0 : p.pad };
     if (down) {
@@ -418,7 +430,12 @@ void Sizer::lay_out_sub(uint32_t m) {
   std::vector<scav_rect> &boxes{ sc.boxes };
   boxes.assign(components, scav_rect{});
   for (uint32_t id = 0; id < components; ++id) {
-    sc.nodes.assign(member.begin() + member_off[id], member.begin() + member_off[id + 1]);
+    // A port on a cross border is placed on the frame's edge by `place_sub`
+    // and takes no room in its rank.
+    sc.nodes.clear();
+    for (uint32_t k = member_off[id]; k < member_off[id + 1]; ++k) {
+      if (!on_cross_border(span.off + member[k])) { sc.nodes.push_back(member[k]); }
+    }
     std::vector<uint32_t> const &nodes{ sc.nodes };
 
     // Ranks renumbered from zero, with the frame's rank kept alongside so a label's
@@ -1259,6 +1276,25 @@ void Sizer::place_sub(uint32_t m,
       box.y = down ? lead : (cross - (box.h / 2));
     }
   }
+
+  // A port on a cross border sits on the frame's edge across the ranks, and
+  // along them level with the centre of the state its flat edge joins.
+  for (uint32_t k = 0; k < espan.len; ++k) {
+    OrderEdge const &e{ o.edges[espan.off + k] };
+    bool const at_src{ on_cross_border(e.src) };
+    uint32_t const port{ at_src ? e.src : e.dst };
+    if (!on_cross_border(port)) { continue; }
+    uint32_t const other{ at_src ? e.dst : e.src };
+    OrderNode const &nn{ o.nodes[other] };
+    Wide along_at{ down ? out.node[other].y : out.node[other].x };
+    if (nn.kind == OrderKind::State) {
+      along_at += (down ? out.state[nn.subject].h : out.state[nn.subject].w) / 2;
+    }
+    int32_t const lead{ static_cast<int32_t>(along_at) };
+    int32_t const cross{ (cross_of(o.nodes[port].subject) == 1) ? 0 : packed.h };
+    out.node[port] =
+        down ? scav_point{ .x = cross, .y = lead } : scav_point{ .x = lead, .y = cross };
+  }
 }
 
 // `lay_out_sub` from the memo where it has seen the frame's inputs before.
@@ -1298,6 +1334,7 @@ void Sizer::size_sub(uint32_t m) {
     key.push_back(nd.subject);
     key.push_back(nd.rank);
     key.push_back(nd.pos);
+    if (nd.kind == OrderKind::Boundary) { key.push_back(cross_of(nd.subject)); }
     if (nd.kind != OrderKind::State) { continue; }
     put(out.state[nd.subject].w);
     put(out.state[nd.subject].h);
@@ -1380,12 +1417,16 @@ void Sizer::size_state(uint32_t i) {
       // the one packing whose rect is a box a reader sees. A sink boundary
       // node sits on the frame's trailing edge, so the growth moves it; a
       // source sits at zero and does not.
+      // One on the trailing cross border moves with it the other way.
       Span const span{ o.sub_nodes[m] };
       for (uint32_t u = 0; u < span.len; ++u) {
         if (o.nodes[span.off + u].kind != OrderKind::Boundary) { continue; }
         scav_point &at{ out.node[span.off + u] };
-        if (runs_down(m) && (at.y == out.sub[m].h)) { at.y = packed.at[k].h; }
-        if (!runs_down(m) && (at.x == out.sub[m].w)) { at.x = packed.at[k].w; }
+        uint8_t const cross{ cross_of(o.nodes[span.off + u].subject) };
+        bool const by_y{ runs_down(m) != (cross != 0) };
+        if (cross == 1) { continue; }
+        if (by_y && (at.y == out.sub[m].h)) { at.y = packed.at[k].h; }
+        if (!by_y && (at.x == out.sub[m].w)) { at.x = packed.at[k].w; }
       }
       out.sub[m].w = packed.at[k].w;
       out.sub[m].h = packed.at[k].h;

@@ -251,6 +251,62 @@ TEST_CASE("route: the slot side follows the route's direction, not the packing")
   CHECK(r.slots[0].y == 80);
 }
 
+TEST_CASE("route: a port on a cross border puts its slot on the top or bottom border") {
+  // The boundary node sits on the inner frame's top or bottom edge, level with
+  // the state it joins, so the slot is on the composite's own top or bottom
+  // border at the node's x; turned down, on its left or right at the node's y.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
+  StateId const s{ build_state(c, inner, "S", StateKind::Normal, {}) };
+  build_trans(c, d, s, TransKind::External, {});
+
+  SplitGraph const g{ decompose(c) };
+  REQUIRE(g.trans_segments[0].len == 2);
+  uint32_t const enter{ g.trans_segments[0].off + 1 };
+  for (uint8_t const cross : { uint8_t{ 1 }, uint8_t{ 2 } }) {
+    for (bool const down : { false, true }) {
+      CAPTURE(static_cast<uint32_t>(cross));
+      CAPTURE(down);
+      SubmachineOrders o{ empty_orders(c, g) };
+      o.nodes = { { .kind = OrderKind::Boundary, .subject = enter, .rank = 0, .pos = 0 },
+                  { .kind = OrderKind::State, .subject = s.v, .rank = 0, .pos = 1 } };
+      o.edges = { { .src = 0, .dst = 1, .segment = enter, .reversed = 0 } };
+      o.seg_node[enter] = 0;
+      o.seg_port[enter] = 0;
+      o.seg_cross.assign(g.segments.size(), 0);
+      o.seg_cross[enter] = cross;
+      o.sub_down.assign(c.submachines.size(), 0);
+      o.sub_down[inner.v] = down ? 1 : 0;
+      o.sub_nodes[inner.v] = make_span(0, 2);
+      SizedLayout z{ blank(c, o) };
+      z.state[d.v] = { .x = 480, .y = -400, .w = 100, .h = 40 };
+      z.state[comp.v] = { .x = 400, .y = 0, .w = 200, .h = 200 };
+      z.state[s.v] = { .x = 480, .y = 60, .w = 100, .h = 40 };
+      z.sub[root.v] = { .x = 0, .y = -400, .w = 600, .h = 600 };
+      z.sub[inner.v] = { .x = 410, .y = 10, .w = 180, .h = 180 };
+      z.node[0] = down ? scav_point{ .x = (cross == 1) ? 410 : 590, .y = 80 }
+                       : scav_point{ .x = 530, .y = (cross == 1) ? 10 : 190 };
+
+      Routes const r{ route_transitions(c, g, o, z, {}, profile(), STRAIGHT) };
+      REQUIRE(r.port[0].len == 1);
+      scav_port_slot const slot{ r.slots[0] };
+      scav_rect const box{ z.state[comp.v] };
+      if (down) {
+        CHECK(slot.side == ((cross == 1) ? 0U : 1U));
+        CHECK(slot.x == ((cross == 1) ? box.x : (box.x + box.w)));
+        CHECK(slot.y == 80);
+      } else {
+        CHECK(slot.side == ((cross == 1) ? 2U : 3U));
+        CHECK(slot.x == 530);
+        CHECK(slot.y == ((cross == 1) ? box.y : (box.y + box.h)));
+      }
+    }
+  }
+}
+
 TEST_CASE("route: an internal transition starts on the source's inner face") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };

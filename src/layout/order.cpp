@@ -100,6 +100,9 @@ struct FrameScratch {
   std::vector<uint32_t> dense;        // -> nodes; a component root's ordinal
   std::vector<uint32_t> lanes;        // boundaries x components, row-major
   std::vector<uint32_t> spanning;     // -> edges, labelled across several boundaries
+  std::vector<OrderEdge> flat;        // edges into a cross-border port, held out
+  std::vector<uint8_t> fixed;         // -> edges; turned by a side pin
+  std::vector<uint8_t> extreme;       // -> nodes; 1 first in its rank, 2 last
 };
 
 // A shard's frame scratch, kept per thread: both maps are all INVALID again
@@ -122,7 +125,7 @@ FrameScratch &frame_scratch(Chart const &c, SplitGraph const &g) {
 struct CallScratch {
   std::vector<uint32_t> seg_count, seg_off, frame_segs, fill, global;
   std::vector<int32_t> seg_label;
-  std::vector<uint8_t> cut, pre_reversed;
+  std::vector<uint8_t> cut, pre_reversed, sided;
   std::vector<FrameOrder> frames;
 };
 
@@ -247,11 +250,16 @@ std::vector<uint32_t> cyclic_segments(Frame const &f) {
 // Cycle breaking by iterative depth-first search in node order: an edge that
 // closes back onto the current path is the one reversed, so the frame becomes
 // a DAG without any node moving.
-void orient_acyclic(Frame &f, std::vector<uint8_t> const &pre) {
+void orient_acyclic(Frame &f,
+                    std::vector<uint8_t> const &pre,
+                    std::vector<uint8_t> const &fixed) {
   // Turned around before the walk, so the walk finds the cycle already broken
-  // and leaves some other edge alone -- which is the whole choice (11.10d).
-  for (OrderEdge &e : f.edges) {
+  // and leaves some other edge alone -- which is the whole choice (11.10d). An
+  // edge `fixed` marks already points the way a side pin wants.
+  for (uint32_t k = 0; k < f.edges.size(); ++k) {
+    OrderEdge &e{ f.edges[k] };
     if ((e.segment >= pre.size()) || (pre[e.segment] == 0)) { continue; }
+    if ((k < fixed.size()) && (fixed[k] != 0)) { continue; }
     uint32_t const swap{ e.src };
     e.src = e.dst;
     e.dst = swap;
@@ -406,8 +414,10 @@ void chain_long_edges(Frame &f, std::vector<uint8_t> const &cut) {
 }
 
 // Rank buckets in node order, which is document order for the frame's states
-// and route order for everything the split contributed.
-void bucket_ranks(Frame &f) {
+// and route order for everything the split contributed. A node `extreme` marks
+// 1 goes first in its rank and one it marks 2 last; with no edge in the sweeps
+// it has no median, so neither sweep moves it.
+void bucket_ranks(Frame &f, std::vector<uint8_t> const &extreme) {
   if (f.nodes.empty()) {
     f.ranks.clear();
     return;
@@ -415,7 +425,12 @@ void bucket_ranks(Frame &f) {
   uint32_t top{ 0 };
   for (OrderNode const &nd : f.nodes) { top = imax(top, nd.rank); }
   f.ranks.assign(static_cast<size_t>(top) + 1, {});
-  for (uint32_t v = 0; v < f.nodes.size(); ++v) { f.ranks[f.nodes[v].rank].push_back(v); }
+  for (uint8_t const want : { uint8_t{ 1 }, uint8_t{ 0 }, uint8_t{ 2 } }) {
+    for (uint32_t v = 0; v < f.nodes.size(); ++v) {
+      uint8_t const at{ (v < extreme.size()) ? extreme[v] : uint8_t{ 0 } };
+      if (at == want) { f.ranks[f.nodes[v].rank].push_back(v); }
+    }
+  }
   for (std::vector<uint32_t> const &bucket : f.ranks) {
     for (uint32_t i = 0; i < bucket.size(); ++i) { f.nodes[bucket[i]].pos = i; }
   }
@@ -591,6 +606,7 @@ void rank_derived(Frame &f,
                   std::vector<int32_t> &gaps,
                   std::vector<int32_t> const &seg_label,
                   std::vector<uint8_t> const &cut,
+                  std::vector<uint8_t> const &extreme,
                   scav_profile const &p,
                   FrameScratch &sc) {
   // Charged before chaining, while an edge still knows the whole span it
@@ -692,7 +708,7 @@ void rank_derived(Frame &f,
   }
 
   chain_long_edges(f, cut);
-  bucket_ranks(f);
+  bucket_ranks(f, extreme);
   minimize_crossings(f, static_cast<uint32_t>(p.sweep_count));
 }
 
@@ -767,6 +783,8 @@ SubmachineOrders order_submachines(Chart const &c,
   o.state_node.assign(c.states.size(), INVALID);
   o.seg_node.assign(g.segments.size(), INVALID);
   o.seg_port.assign(g.segments.size(), INVALID);
+  o.seg_cross.assign(g.segments.size(), 0);
+  o.seg_sided.assign(g.segments.size(), 0);
   o.seg_cyclic.assign(g.segments.size(), 0);
 
   CallScope const scope;
@@ -827,6 +845,48 @@ SubmachineOrders order_submachines(Chart const &c,
   std::vector<uint8_t> &pre_reversed{ cs.pre_reversed };
   resolve_pins(pins.cuts, cut);
   resolve_pins(pins.reverses, pre_reversed);
+  // A side pin resolved to the leg inside the border its port is on, whose
+  // boundary node stands for it: one plus the side, 0 for none.
+  std::vector<uint8_t> &sided{ cs.sided };
+  sided.clear();
+  for (SidePin const &pin : pins.sides) {
+    if ((pin.trans.v == INVALID) || (pin.trans.v >= g.trans_segments.size()) ||
+        (pin.end > 1) || (pin.side > 3)) {
+      continue;
+    }
+    Span const segs{ g.trans_segments[pin.trans.v] };
+    if (pin.leg >= segs.len) { continue; }
+    uint32_t const at{ segs.off + pin.leg };
+    uint32_t const port{ (pin.end == 0) ? g.segments[at].src_port
+                                        : g.segments[at].dst_port };
+    if ((port >= g.ports.size()) || (g.ports[port].state.v == INVALID)) { continue; }
+    // On a child's border the port is the next leg's, inside that child.
+    bool const own{ c.states[g.ports[port].state.v].parent != g.segments[at].frame };
+    if (!own && (((pin.end == 0) && (pin.leg == 0)) ||
+                 ((pin.end == 1) && ((pin.leg + 1) == segs.len)))) {
+      continue;
+    }
+    uint32_t seg{ at };
+    if (!own) { seg = (pin.end == 0) ? (at - 1) : (at + 1); }
+    if (sided.empty()) { sided.assign(g.segments.size(), 0); }
+    sided[seg] = static_cast<uint8_t>(pin.side + 1);
+  }
+  // A pinned side against the frame: 1 or 2 for the leading or trailing cross
+  // border, and for the border a rank starts or ends at, 1 or 2 in `lead`.
+  auto const cross_side = [&](uint32_t seg, uint32_t m) -> uint8_t {
+    if (sided.empty() || (sided[seg] == 0)) { return 0; }
+    uint32_t const first{ (o.sub_down[m] != 0) ? 0U : 2U };
+    uint32_t const side{ sided[seg] - 1U };
+    if (side == first) { return 1; }
+    return (side == (first + 1)) ? 2 : 0;
+  };
+  auto const lead_side = [&](uint32_t seg, uint32_t m) -> uint8_t {
+    if (sided.empty() || (sided[seg] == 0)) { return 0; }
+    uint32_t const first{ (o.sub_down[m] != 0) ? 2U : 0U };
+    uint32_t const side{ sided[seg] - 1U };
+    if (side == first) { return 1; }
+    return (side == (first + 1)) ? 2 : 0;
+  };
 
   std::vector<FrameOrder> &frames{ cs.frames };
   frames.resize(c.submachines.size());
@@ -895,6 +955,23 @@ SubmachineOrders order_submachines(Chart const &c,
       if ((src == INVALID) || (dst == INVALID) || (src == dst)) { continue; }
       f.edges.push_back({ .src = src, .dst = dst, .segment = seg, .reversed = 0 });
     }
+    // Whether a side pin holds an edge's port: only a boundary node standing for
+    // a port on a state's border takes one.
+    auto const pinned = [&](OrderEdge const &e) {
+      if (sided.empty() || (sided[e.segment] == 0)) { return false; }
+      for (SegPort const &sp : seg_ports) {
+        if (sp.seg == e.segment) {
+          return (sp.port != INVALID) && (g.ports[sp.port].state.v != INVALID);
+        }
+      }
+      return false;
+    };
+    auto const cross_of = [&](OrderEdge const &e) -> uint8_t {
+      return pinned(e) ? cross_side(e.segment, m) : uint8_t{ 0 };
+    };
+    auto const lead_of = [&](OrderEdge const &e) -> uint8_t {
+      return pinned(e) ? lead_side(e.segment, m) : uint8_t{ 0 };
+    };
 
     // Everything below reads the frame as built, the reversal and cut tables
     // at its segments, the rank pins that land in it, which of its states are
@@ -924,6 +1001,8 @@ SubmachineOrders order_submachines(Chart const &c,
         key.push_back(e.segment);
         key.push_back(pre_reversed.empty() ? 0U : pre_reversed[e.segment]);
         key.push_back(cut.empty() ? 0U : cut[e.segment]);
+        key.push_back(cross_of(e));
+        key.push_back(lead_of(e));
         key.push_back(static_cast<uint32_t>(seg_label[e.segment]));
       }
       for (RankPin const &pin : pins.ranks) {
@@ -965,7 +1044,39 @@ SubmachineOrders order_submachines(Chart const &c,
       for (uint32_t &seg : frames[m].cyclic) { seg = word(); }
     } else {
       frames[m].cyclic = cyclic_segments(f);
-      orient_acyclic(f, pre_reversed);
+      // An edge into a port on a cross border is flat, so it is ranked, broken
+      // and swept without: its port takes its neighbour's rank afterwards. One
+      // into a port pinned where a rank starts or ends is turned so the port is
+      // its source or its sink, and no reversal pin turns it back.
+      std::vector<OrderEdge> &flat{ sc.flat };
+      flat.clear();
+      std::vector<uint8_t> &fixed{ sc.fixed };
+      fixed.clear();
+      if (!sided.empty()) {
+        uint32_t kept{ 0 };
+        for (OrderEdge const &e : f.edges) {
+          if (cross_of(e) != 0) {
+            flat.push_back(e);
+          } else {
+            f.edges[kept++] = e;
+          }
+        }
+        f.edges.resize(kept);
+        fixed.assign(f.edges.size(), 0);
+        for (uint32_t k = 0; k < f.edges.size(); ++k) {
+          OrderEdge &e{ f.edges[k] };
+          uint8_t const lead{ lead_of(e) };
+          if (lead == 0) { continue; }
+          fixed[k] = 1;
+          if ((f.nodes[e.src].kind == OrderKind::Boundary) != (lead == 1)) {
+            uint32_t const swap{ e.src };
+            e.src = e.dst;
+            e.dst = swap;
+            e.reversed = 1;
+          }
+        }
+      }
+      orient_acyclic(f, pre_reversed, fixed);
       assign_ranks(f);
 
       // The pins land between the ranking and everything derived from it, which
@@ -993,7 +1104,20 @@ SubmachineOrders order_submachines(Chart const &c,
           squeeze_ranks(f);
         }
       }
-      rank_derived(f, frames[m].gaps, seg_label, cut, p, sc);
+      std::vector<uint8_t> &extreme{ sc.extreme };
+      extreme.clear();
+      if (!flat.empty()) {
+        extreme.assign(f.nodes.size(), 0);
+        for (OrderEdge const &e : flat) {
+          bool const at_src{ f.nodes[e.src].kind == OrderKind::Boundary };
+          uint32_t const port{ at_src ? e.src : e.dst };
+          f.nodes[port].rank = f.nodes[at_src ? e.dst : e.src].rank;
+          extreme[port] = cross_of(e);
+        }
+        squeeze_ranks(f);
+      }
+      rank_derived(f, frames[m].gaps, seg_label, cut, extreme, p, sc);
+      f.edges.insert(f.edges.end(), flat.begin(), flat.end());
       if (!tracing) {
         value.clear();
         auto const put = [](uint32_t w) { value.push_back(static_cast<int32_t>(w)); };
@@ -1078,7 +1202,14 @@ SubmachineOrders order_submachines(Chart const &c,
         o.seg_node[nd.subject] = global[v];
       }
     }
-    for (SegPort const &sp : frames[m].seg_ports) { o.seg_port[sp.seg] = sp.port; }
+    for (SegPort const &sp : frames[m].seg_ports) {
+      o.seg_port[sp.seg] = sp.port;
+      if ((sp.port != INVALID) && (g.ports[sp.port].state.v != INVALID) &&
+          !sided.empty() && (sided[sp.seg] != 0)) {
+        o.seg_cross[sp.seg] = cross_side(sp.seg, m);
+        o.seg_sided[sp.seg] = 1;
+      }
+    }
     for (uint32_t const seg : frames[m].cyclic) { o.seg_cyclic[seg] = 1; }
 
     o.sub_nodes[m] =

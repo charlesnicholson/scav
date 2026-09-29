@@ -157,6 +157,113 @@ TEST_CASE("order: a boundary node stands for the port on the frame's own border"
   CHECK(node_of(o, d).rank == 1);
 }
 
+TEST_CASE(
+    "order: a port on a cross border shares its neighbour's rank, at one end of it") {
+  // A side pin puts a port on the top or bottom border of a frame running
+  // across. Its edge is flat, and held out of the ranking and the sweeps, so the
+  // port sits first or last in the rank of the state it joins and no sweep moves
+  // it: here the sweep swaps `B` and `Y` to uncross `A -> Y` and `Q -> B`.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
+  StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
+  StateId const q{ build_state(c, inner, "Q", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, inner, "B", StateKind::Normal, {}) };
+  StateId const y{ build_state(c, inner, "Y", StateKind::Normal, {}) };
+  build_trans(c, a, y, TransKind::External, {});
+  build_trans(c, q, b, TransKind::External, {});
+  TransId const drop{ build_trans(c, d, b, TransKind::External, {}) };
+  SplitGraph const g{ decompose(c) };
+  REQUIRE(g.trans_segments[drop.v].len == 2);
+  uint32_t const seg{ g.trans_segments[drop.v].off + 1 };
+  REQUIRE(g.segments[seg].frame == inner);
+
+  // Left alone, the port is a source on the leading border, a rank before `B`.
+  SubmachineOrders const plain{ order_submachines(c, g, {}, profile()) };
+  CHECK(plain.seg_cross[seg] == 0);
+  CHECK((plain.nodes[plain.seg_node[seg]].rank + 1) == node_of(plain, b).rank);
+
+  for (uint32_t const side : { 2U, 3U }) {
+    CAPTURE(side);
+    SearchPins const pin{ .sides = { { .trans = drop, .leg = 1, .side = side } } };
+    SubmachineOrders const o{ order_submachines(c, g, {}, profile(), 0, pin) };
+    CHECK(o.seg_cross[seg] == ((side == 2) ? 1 : 2));
+    OrderNode const port{ o.nodes[o.seg_node[seg]] };
+    OrderNode const mate{ node_of(o, b) };
+    CHECK(port.rank == mate.rank);
+    uint32_t in_rank{ 0 };
+    for (OrderNode const &nd : frame_nodes(o, inner)) {
+      in_rank += (nd.rank == mate.rank) ? 1U : 0U;
+    }
+    CHECK(in_rank == 3);
+    CHECK(port.pos == ((side == 2) ? 0U : (in_rank - 1)));
+    CHECK(node_of(o, y).pos < mate.pos);
+    CHECK(node_of(o, a).rank == node_of(o, q).rank);
+    CHECK(o.sub_ranks[inner.v] == 2);
+    uint32_t flat{ 0 };
+    for (OrderEdge const &e : o.edges) {
+      if (e.segment != seg) { continue; }
+      ++flat;
+      CHECK(o.nodes[e.src].rank == o.nodes[e.dst].rank);
+    }
+    CHECK(flat == 1);
+  }
+
+  // Either leg meeting at the port names it: here the outer leg's arrival.
+  SearchPins const outer{ .sides = { { .trans = drop, .leg = 0, .end = 1, .side = 2 } } };
+  SubmachineOrders const named{ order_submachines(c, g, {}, profile(), 0, outer) };
+  CHECK(named.seg_cross[seg] == 1);
+  CHECK(named.seg_sided[seg] == 1);
+
+  // Turned down, left is one of the frame's cross borders.
+  SearchPins const turned{ .orients = { { .frame = inner } },
+                           .sides = { { .trans = drop, .leg = 1, .side = 0 } } };
+  SubmachineOrders const down{ order_submachines(c, g, {}, profile(), 0, turned) };
+  CHECK(down.seg_cross[seg] == 1);
+  CHECK(down.nodes[down.seg_node[seg]].rank == node_of(down, b).rank);
+}
+
+TEST_CASE("order: a port pinned where its frame's ranks start or end turns its edge") {
+  // Left is where an entering port already is, so that pin changes nothing,
+  // and no reversal pin turns it round past the side pin; right makes it a
+  // sink on the last rank, the edge turned against the way it was authored.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
+  StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, inner, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  TransId const drop{ build_trans(c, d, b, TransKind::External, {}) };
+  SplitGraph const g{ decompose(c) };
+  uint32_t const seg{ g.trans_segments[drop.v].off + 1 };
+  SubmachineOrders const plain{ order_submachines(c, g, {}, profile()) };
+  CHECK(plain.nodes[plain.seg_node[seg]].rank == 0);
+
+  SearchPins const left{ .reverses = { { .trans = drop, .leg = 1 } },
+                         .sides = { { .trans = drop, .leg = 1, .side = 0 } } };
+  SubmachineOrders const same{ order_submachines(c, g, {}, profile(), 0, left) };
+  CHECK(same.nodes == plain.nodes);
+  CHECK(same.edges == plain.edges);
+  CHECK(same.seg_cross[seg] == 0);
+  CHECK(same.seg_sided[seg] == 1);
+
+  SearchPins const right{ .sides = { { .trans = drop, .leg = 1, .side = 1 } } };
+  SubmachineOrders const o{ order_submachines(c, g, {}, profile(), 0, right) };
+  CHECK(o.seg_cross[seg] == 0);
+  CHECK((o.nodes[o.seg_node[seg]].rank + 1) == o.sub_ranks[inner.v]);
+  CHECK(node_of(o, b).rank < o.nodes[o.seg_node[seg]].rank);
+  CHECK(node_of(o, a).rank == 0);
+  for (OrderEdge const &e : o.edges) {
+    if (e.segment != seg) { continue; }
+    CHECK(e.dst == o.seg_node[seg]);
+    CHECK(e.reversed == 1);
+  }
+}
+
 TEST_CASE("order: an internal transition into a descendant anchors on the source border") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };

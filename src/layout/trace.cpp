@@ -199,14 +199,19 @@ void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out)
           j.kv("leg", e.score.leg);
         }
         if (e.score.row == INVALID) {
-          static constexpr std::array<char const *, 4> MOVE{ "rank",
+          static constexpr std::array<char const *, 5> MOVE{ "rank",
                                                              "cut",
                                                              "reverse",
-                                                             "face" };
+                                                             "face",
+                                                             "side" };
           j.ks("move", (e.score.move < MOVE.size()) ? MOVE[e.score.move] : "?");
           if (e.score.move == TRACE_MOVE_FACE) {
             j.ks("end", (e.score.end == 0) ? "src" : "dst");
             j.kv("face", e.score.face);
+          }
+          if (e.score.move == TRACE_MOVE_SIDE) {
+            j.ks("end", (e.score.end == 0) ? "src" : "dst");
+            j.kv("side", e.score.face);
           }
         }
         j.kv("t0", e.score.t0);
@@ -238,6 +243,7 @@ void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out)
         j.kv("seg", e.port.seg);
         j.kv("trans", e.port.trans);
         j.kv("leg", e.port.leg);
+        j.kv("side", e.port.side);
         break;
       case TraceKind::PortAttached:
         j.kstate(c, e.shift.state);

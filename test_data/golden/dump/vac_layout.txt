@@ -64,7 +64,7 @@ chart vac "robot vacuum" (test_data/charts/vac.scav:3)
   include lamp "led.scav" -> test_data/charts/led.scav (test_data/charts/dock.scav:4)
 geometry structural 51836e15 coordinate 219b35ad
   chart 0,0 16387x8931
-  rests on --portfolio-row 1 --rank 2:0 --rank 12:2 --rank 6:0 --rank 7:2 --rank 18:2 --rank 15:1 --rank 11:1 --cut 1:0 --reverse 10:0 --reverse 14:0 --reverse 18:0 --reverse 11:0 --face 15:0:0:3 --face 19:0:0:3
+  rests on --portfolio-row 1 --rank 11:1 --rank 2:0 --rank 12:2 --rank 6:0 --rank 7:2 --rank 18:2 --rank 15:1 --cut 1:0 --reverse 18:0 --reverse 14:0 --face 19:0:0:3 --face 15:0:0:3
   cost t0 0 t2 6211
     tier0 through_box 0 box_overlap 0 flush 0 through_region 0 retrace 0
     bends 2 share 1648bp

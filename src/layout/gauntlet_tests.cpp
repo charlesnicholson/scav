@@ -56,11 +56,11 @@ scav_profile compact() {
 
 // Every chart in test_data/charts/gauntlet, named so a failure says which shape
 // broke rather than which index did.
-constexpr std::array GAUNTLET{ "chain.scav",     "crossing.scav", "crowd.scav",
-                               "enclosing.scav", "fanin.scav",    "fork.scav",
-                               "lane.scav",      "long.scav",     "loop.scav",
-                               "marks.scav",     "mutual.scav",   "regions.scav",
-                               "roundtrip.scav", "stretch.scav" };
+constexpr std::array GAUNTLET{ "above.scav",   "chain.scav",     "crossing.scav",
+                               "crowd.scav",   "enclosing.scav", "fanin.scav",
+                               "fork.scav",    "lane.scav",      "long.scav",
+                               "loop.scav",    "marks.scav",     "mutual.scav",
+                               "regions.scav", "roundtrip.scav", "stretch.scav" };
 
 // One chart, laid out: the pieces every property below reads.
 struct Laid {
@@ -69,6 +69,7 @@ struct Laid {
   SubmachineOrders o;
   SizedLayout z;
   Routes r;
+  SearchPins pins;            // what the drawing rests on
   uint32_t tuple{ INVALID };  // the portfolio row the run kept
 };
 
@@ -112,8 +113,14 @@ void column_holds(Chart const &c, char const *name, std::vector<T> const &rows) 
 // have no column of their own, and every column they came with is held to the
 // one the run wrote -- so the properties below read the drawing that ships and
 // not a candidate nobody drew. `s` is no space requests unless a property is
-// about a label, which is placed only where a path box asks for room.
-void lay(char const *name, scav_profile const &p, Laid &out, scav_spaces const &s = {}) {
+// about a label, which is placed only where a path box asks for room. `seed`
+// is pins the run starts from, which is how a property puts a frame the way
+// its shape needs it.
+void lay(char const *name,
+         scav_profile const &p,
+         Laid &out,
+         scav_spaces const &s = {},
+         SearchPins const *seed = nullptr) {
   // The router these properties are about, by the name it crosses every other
   // boundary under rather than by its position in the registry.
   scav_router_id id{};
@@ -127,7 +134,7 @@ void lay(char const *name, scav_profile const &p, Laid &out, scav_spaces const &
 
   std::vector<scav_placed> placed;
   scav_layout_opts const o{ .profile = p, .router = id, .threads = 0 };
-  SearchPins pins;
+  SearchPins &pins{ out.pins };
   REQUIRE(layout_run(out.c,
                      s,
                      o,
@@ -137,7 +144,8 @@ void lay(char const *name, scav_profile const &p, Laid &out, scav_spaces const &
                      &out.tuple,
                      INVALID,
                      nullptr,
-                     &pins));
+                     &pins,
+                     seed));
   // Nothing here is a shape the router has to give up on, so a RouteDegraded
   // is a failure rather than a documented fallback.
   CHECK(diags.empty());
@@ -247,6 +255,13 @@ Wide run_shared(scav_point a, scav_point b, scav_point c, scav_point d) {
 // The two counts the regions carve-out is about: route segments entering a box
 // 11.14 does not carve out, and legs that fold a polyline back over itself.
 void shape_counts(Laid const &l, uint32_t &through, uint32_t &back);
+
+uint32_t state_named(Chart const &c, std::string_view name) {
+  for (uint32_t st = 0; st < c.states.size(); ++st) {
+    if (chart_string(c, c.states[st].name) == name) { return st; }
+  }
+  return INVALID;
+}
 
 // Live boxes, which is what a route may not enter and what its ends sit on.
 std::vector<uint32_t> live_of(Chart const &c) {
@@ -841,6 +856,86 @@ TEST_CASE("gauntlet: a chain of states turns only where the fold cuts it") {
       // (11.4), so an edge the cut crosses steps between two rows and turns
       // twice. Nothing here needs a third turn, and a lane is work invented.
       CHECK(l.r.route[t].len <= 4);
+    }
+  }
+}
+
+TEST_CASE(
+    "gauntlet: a composite is entered by one straight line from where it is entered") {
+  // `drop` runs from `Source` into `Box`'s `Middle`, and however the search lays
+  // the two out, it is one straight line from a face of `Source` to a face of
+  // `Middle`.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Laid l;
+    lay("above.scav", p, l);
+    uint32_t const source{ state_named(l.c, "Source") };
+    uint32_t const middle{ state_named(l.c, "Middle") };
+    REQUIRE(source != INVALID);
+    REQUIRE(middle != INVALID);
+    uint32_t drop{ INVALID };
+    for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+      if (l.c.transitions[t].src.v == source) { drop = t; }
+    }
+    REQUIRE(drop != INVALID);
+    scav_span const route{ l.r.route[drop] };
+    REQUIRE(route.len >= 2);
+    scav_point const first{ l.r.points[route.off] };
+    scav_point const last{ l.r.points[route.off + route.len - 1] };
+    bool const vertical{ first.x == last.x };
+    for (uint32_t k = 0; k < route.len; ++k) {
+      scav_point const at{ l.r.points[route.off + k] };
+      CAPTURE(k);
+      CHECK((vertical ? (at.x == first.x) : (at.y == first.y)));
+    }
+    CHECK(on_border(first, l.z.state[source]));
+    CHECK(on_border(last, l.z.state[middle]));
+  }
+}
+
+TEST_CASE(
+    "gauntlet: entered from directly above, a composite running across is entered on "
+    "top") {
+  // The root turned to run down puts `Source` over `Box`, whose own frame runs
+  // across. A port sat only on the left or right border of a frame running
+  // across, so `drop` came down beside `Box` and in from the side; on the top
+  // border it is one vertical line from `Source`'s bottom face to `Middle`'s
+  // top face. No search: this is the facing pass alone (11.3, 11.10g).
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    SearchPins const seed{ .orients = { { .frame = SubmachineId{ 0 } } } };
+    Laid l;
+    lay("above.scav", one_row(p), l, {}, &seed);
+    uint32_t const source{ state_named(l.c, "Source") };
+    uint32_t const middle{ state_named(l.c, "Middle") };
+    REQUIRE(source != INVALID);
+    REQUIRE(middle != INVALID);
+    REQUIRE(l.o.sub_down[0] == 1);
+    REQUIRE(l.o.sub_down[l.c.states[middle].parent.v] == 0);
+    uint32_t drop{ INVALID };
+    for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+      if (l.c.transitions[t].src.v == source) { drop = t; }
+    }
+    REQUIRE(drop != INVALID);
+    REQUIRE(l.pins.sides.size() == 1);
+    CHECK(l.pins.sides[0].trans.v == drop);
+    CHECK(l.pins.sides[0].leg == 1);
+    CHECK(l.pins.sides[0].end == 0);
+    CHECK(l.pins.sides[0].side == 2);
+    REQUIRE(l.r.port[drop].len == 1);
+    CHECK(l.r.slots[l.r.port[drop].off].side == 2);
+
+    scav_span const route{ l.r.route[drop] };
+    REQUIRE(route.len >= 2);
+    scav_rect const from{ l.z.state[source] };
+    scav_rect const to{ l.z.state[middle] };
+    scav_point const first{ l.r.points[route.off] };
+    scav_point const last{ l.r.points[route.off + route.len - 1] };
+    CHECK(first.y == (from.y + from.h));
+    CHECK(last.y == to.y);
+    for (uint32_t k = 0; k < route.len; ++k) {
+      CAPTURE(k);
+      CHECK(l.r.points[route.off + k].x == first.x);
     }
   }
 }

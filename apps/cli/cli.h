@@ -63,6 +63,8 @@ enum class ArgRead : uint32_t { NotOurs, Taken, Malformed };
 //   --face T:L:E:F       end E (0 departs, 1 arrives) leaves by face F: 0 left,
 //                        1 right, 2 top, 3 bottom (11.10e)
 //   --orient F           submachine F's ranks run down the page (11.10g)
+//   --side T:L:E:S       the port at end E crosses its state's border on side S,
+//                        numbered as a face (11.3)
 //   --no-search          lay out the row and pins given, and move nothing
 //   --no-text            lay out with no space requests, the scale the layout
 //                        goldens are stated at

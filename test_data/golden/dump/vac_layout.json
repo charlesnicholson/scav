@@ -96,7 +96,7 @@
     "structural_hash": 1367567893,
     "coordinate_hash": 563819949,
     "chart": [0, 0, 16387, 8931],
-    "rests_on": "--portfolio-row 1 --rank 2:0 --rank 12:2 --rank 6:0 --rank 7:2 --rank 18:2 --rank 15:1 --rank 11:1 --cut 1:0 --reverse 10:0 --reverse 14:0 --reverse 18:0 --reverse 11:0 --face 15:0:0:3 --face 19:0:0:3",
+    "rests_on": "--portfolio-row 1 --rank 11:1 --rank 2:0 --rank 12:2 --rank 6:0 --rank 7:2 --rank 18:2 --rank 15:1 --cut 1:0 --reverse 18:0 --reverse 14:0 --face 19:0:0:3 --face 15:0:0:3",
     "cost": {
       "t0_violations": 0,
       "t2": 6211,

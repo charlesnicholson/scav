@@ -60,6 +60,16 @@ struct SubmachineOrders {
   // border. INVALID when it is an endpoint on an inner face, not a crossing (11.14).
   std::vector<uint32_t> seg_port;
 
+  // Parallel to segments: 1 where the segment's boundary node sits on its
+  // frame's leading cross border -- top for a frame running across, left for
+  // one running down -- 2 on the trailing one, and 0 on the border its rank
+  // puts it on. A node on a cross border shares its neighbour's rank, first or
+  // last in it, and its edge is the flat one it joins that neighbour by.
+  std::vector<uint8_t> seg_cross;
+  // Parallel to segments: 1 where a side pin decided which border the
+  // segment's boundary node is on.
+  std::vector<uint8_t> seg_sided;
+
   // Parallel to segments: 1 where the segment lies on a cycle of its frame's
   // graph as drawn, before any edge is turned around -- the edges a reversal
   // can move (11.10f).
