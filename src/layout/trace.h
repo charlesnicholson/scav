@@ -34,7 +34,11 @@ enum class TraceKind : uint16_t {
   PortAttached,       // a segment meets a composite at its port, off its centre
   ColumnCentred,      // a state moved along its column onto a joined state's centre
   PiecePacked,        // where the packing put one piece of a component's rank run
+  GapCharged,         // phase 1 asked a rank boundary for width beyond rank_sep
 };
+
+// What a rank boundary's charge is for; `GapCharged.pass`.
+enum class GapCause : uint16_t { Label, Lanes };
 
 // What seating an initial or final pseudostate did; `PseudostateSeated.pass`.
 enum class SeatHow : uint16_t { Moved, Levelled, Declined };
@@ -73,6 +77,12 @@ struct TracePort {
 struct TracePiece {
   uint32_t rank;
   int32_t x, y, w, h, carried;
+};
+// `boundary` is the frame's rank boundary, the one after rank `boundary`;
+// `seg` the segment whose edge asked for `width` there.
+struct TraceGap {
+  uint32_t boundary, seg;
+  int32_t width;
 };
 // `by` is the port's height from the state's centre for `PortAttached`, and
 // how far along its column the state moved for `ColumnCentred`, whose `seg` is
@@ -125,7 +135,7 @@ struct TraceTerms {
 
 struct TraceEvent {
   TraceKind kind{ TraceKind::None };
-  uint16_t pass{ 0 };         // SeatPass / MoveVerdict, else 0
+  uint16_t pass{ 0 };         // SeatPass / MoveVerdict / GapCause, else 0
   uint32_t frame{ INVALID };  // stamped by the sink unless the site names one
   union {
     TraceRank rank;
@@ -143,6 +153,7 @@ struct TraceEvent {
     TracePort port;
     TraceShift shift;
     TracePiece piece;
+    TraceGap gap;
   };
 };
 

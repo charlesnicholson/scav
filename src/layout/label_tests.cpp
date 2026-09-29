@@ -193,6 +193,105 @@ TEST_CASE("label: a box sits beside its route's longest horizontal leg") {
   CHECK((placed[0].y + placed[0].h) <= 150);
 }
 
+namespace {
+
+// `L` beside a composite `R` holding `T`, one transition `L -> R/T`, and
+// `strangers` after them in the root: the route's first legs lie in the root,
+// which is the lowest submachine holding both ends, and its last inside `R`.
+struct Crossing {
+  Chart c;
+  StateId l, r, t;
+};
+
+void crossing(Crossing &out, uint32_t strangers) {
+  SubmachineId const root{ build_chart(out.c, "t", {}) };
+  out.l = build_state(out.c, root, "L", StateKind::Normal, {});
+  out.r = build_state(out.c, root, "R", StateKind::Normal, {});
+  SubmachineId const inner{ build_submachine(out.c, out.r, {}, {}) };
+  out.t = build_state(out.c, inner, "T", StateKind::Normal, {});
+  for (uint32_t i = 0; i < strangers; ++i) {
+    build_state(out.c, root, "S" + std::to_string(i), StateKind::Normal, {});
+  }
+  build_trans(out.c, out.l, out.t, TransKind::External, {});
+}
+
+constexpr std::array SEARCHES{ LabelSearch::Exhaustive,
+                               LabelSearch::Pruned,
+                               LabelSearch::Memoized };
+
+}  // namespace
+
+TEST_CASE("label: an out-of-machine box is anchored on the leg the root holds") {
+  // The leg inside `R` is the route's longest, and the anchor is the middle of
+  // the longest leg, so an anchor taken over every leg sits inside `R`: the
+  // box, refused `R`, went to the end of the root's leg nearest it, flush
+  // against `R`'s border. Over the root's legs alone it is centred there.
+  Crossing x;
+  crossing(x, 0);
+  SizedLayout z{ blank(x.c, { .x = 0, .y = -200, .w = 2000, .h = 600 }) };
+  z.state[x.l.v] = { .x = 0, .y = 0, .w = 100, .h = 100 };
+  z.state[x.r.v] = { .x = 300, .y = -100, .w = 800, .h = 300 };
+  z.state[x.t.v] = { .x = 1000, .y = 30, .w = 100, .h = 40 };
+  z.sub[1] = { .x = 310, .y = -90, .w = 780, .h = 280 };
+  Lines const l{ lines_of(
+      { { { .x = 100, .y = 50 }, { .x = 300, .y = 50 }, { .x = 1000, .y = 50 } } }) };
+  std::vector<scav_path_box> const boxes{ LABEL };
+  for (LabelSearch const search : SEARCHES) {
+    CAPTURE(static_cast<uint32_t>(search));
+    std::vector<scav_rect> placed;
+    CHECK(place_labels_by(x.c,
+                          z,
+                          boxes_of(boxes),
+                          l.route,
+                          l.points,
+                          tiny(),
+                          search,
+                          placed) == 0);
+    CHECK(placed_well(placed[0], poly_of(l, 0)));
+    CHECK(nearest_leg(placed[0], poly_of(l, 0)) == 0);
+    // Centred on the root's leg to within one slide, half the box's height.
+    CHECK(imax(placed[0].x + (placed[0].w / 2) - 200,
+               200 - placed[0].x - (placed[0].w / 2)) <= (LABEL.h / 2));
+  }
+}
+
+TEST_CASE("label: the fallback keeps an out-of-machine box out of the state it enters") {
+  // The root's leg runs just under `R`, with a stranger just under it, so no
+  // candidate is clear and the fallback tier chooses. Its first choice, the box
+  // above the leg, lies inside `R`, which holds only one end; below it, over
+  // the stranger, the box is in the root, which holds both.
+  Crossing x;
+  crossing(x, 1);
+  StateId const s{ 3 };
+  SizedLayout z{ blank(x.c, { .x = 0, .y = 0, .w = 2000, .h = 1000 }) };
+  z.state[x.l.v] = { .x = 0, .y = 280, .w = 100, .h = 30 };
+  z.state[x.r.v] = { .x = 100, .y = 0, .w = 1100, .h = 290 };
+  z.state[x.t.v] = { .x = 850, .y = 180, .w = 100, .h = 40 };
+  z.sub[1] = { .x = 110, .y = 10, .w = 1080, .h = 270 };
+  z.state[s.v] = { .x = 100, .y = 300, .w = 1100, .h = 300 };
+  Lines const l{ lines_of({ { { .x = 100, .y = 295 },
+                              { .x = 900, .y = 295 },
+                              { .x = 900, .y = 290 },
+                              { .x = 900, .y = 220 } } }) };
+  std::vector<scav_path_box> const boxes{ LABEL };
+  for (LabelSearch const search : SEARCHES) {
+    CAPTURE(static_cast<uint32_t>(search));
+    std::vector<scav_rect> placed;
+    CHECK(place_labels_by(x.c,
+                          z,
+                          boxes_of(boxes),
+                          l.route,
+                          l.points,
+                          tiny(),
+                          search,
+                          placed) == 0);
+    CHECK(placed_well(placed[0], poly_of(l, 0)));
+    CHECK_FALSE(overlaps(placed[0], z.state[x.r.v]));
+    CHECK_FALSE(overlaps(placed[0], z.state[x.l.v]));
+    CHECK(overlaps(placed[0], z.state[s.v]));  // the collision the fallback accepts
+  }
+}
+
 TEST_CASE("label: a box slides along its leg to clear a state it is not under") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };

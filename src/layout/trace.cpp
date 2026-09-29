@@ -34,6 +34,7 @@ char const *kind_name(TraceKind k) {
     case TraceKind::PortAttached: return "port_attached";
     case TraceKind::ColumnCentred: return "column_centred";
     case TraceKind::PiecePacked: return "piece_packed";
+    case TraceKind::GapCharged: return "gap_charged";
     case TraceKind::None: break;
   }
   return "none";
@@ -252,6 +253,13 @@ void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out)
         j.kxy("at", e.piece.x, e.piece.y);
         j.kxy("size", e.piece.w, e.piece.h);
         j.kv("carried", e.piece.carried);
+        break;
+      case TraceKind::GapCharged:
+        j.ks("cause",
+             (static_cast<GapCause>(e.pass) == GapCause::Label) ? "label" : "lanes");
+        j.kv("boundary", e.gap.boundary);
+        j.kv("seg", e.gap.seg);
+        j.kv("width", e.gap.width);
         break;
       case TraceKind::None: break;
     }

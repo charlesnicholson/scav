@@ -246,6 +246,72 @@ TEST_CASE("order: a label on a hierarchy-crossing route widens one frame only") 
   CHECK(per == std::vector<int32_t>{ 500, 538 });
 }
 
+TEST_CASE("order: a label into a composite is charged to the frame holding both ends") {
+  // D -> C/T lies in two pieces: in the root from D to C's border, then inside
+  // C from that border to T. Only the root holds both ends, so the label is
+  // charged there, between D's rank and C's, and C's own frame nothing, though
+  // the piece inside C is the middle of the route.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
+  StateId const t{ build_state(c, inner, "T", StateKind::Normal, {}) };
+  TransId const into{ build_trans(c, d, t, TransKind::External, {}) };
+
+  SplitGraph const g{ decompose(c) };
+  Span const segs{ g.trans_segments[into.v] };
+  REQUIRE(segs.len == 2);
+  REQUIRE(g.segments[segs.off].frame == root);
+  CHECK(label_segment(c, g, into.v) == segs.off);
+
+  scav_path_box const box{ .subject = into.v, .w = 700, .h = 40, .order = 0 };
+  scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
+  SubmachineOrders const o{ order_submachines(c, g, s, profile()) };
+  Span const outer{ o.sub_gaps[root.v] };
+  REQUIRE(outer.len == 1);
+  CHECK(o.gaps[outer.off] == 700);
+  Span const within{ o.sub_gaps[inner.v] };
+  for (uint32_t k = 0; k < within.len; ++k) { CHECK(o.gaps[within.off + k] == 0); }
+}
+
+TEST_CASE("order: the lowest common ancestor of every shape of two ends") {
+  // Root: A, B, and P with two regions R1 and R2. A holds A1, which holds A2.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  SubmachineId const a_sub{ build_submachine(c, a, {}, {}) };
+  StateId const a1{ build_state(c, a_sub, "A1", StateKind::Normal, {}) };
+  SubmachineId const a1_sub{ build_submachine(c, a1, {}, {}) };
+  StateId const a2{ build_state(c, a1_sub, "A2", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const pst{ build_state(c, root, "P", StateKind::Normal, {}) };
+  SubmachineId const r1{ build_submachine(c, pst, {}, {}) };
+  SubmachineId const r2{ build_submachine(c, pst, {}, {}) };
+  StateId const x{ build_state(c, r1, "X", StateKind::Normal, {}) };
+  StateId const y{ build_state(c, r2, "Y", StateKind::Normal, {}) };
+  StateId const none{ INVALID };
+
+  auto const holds =
+      [&](StateId src, StateId dst, SubmachineId frame, StateId from, StateId to) {
+        CommonAncestor const got{ lowest_common_ancestor(c, src, dst) };
+        CAPTURE(src.v);
+        CAPTURE(dst.v);
+        CHECK(got.frame == frame);
+        CHECK(got.child[0] == from);
+        CHECK(got.child[1] == to);
+      };
+  holds(a, b, root, a, b);          // siblings
+  holds(a2, b, root, a, b);         // out of two composites
+  holds(b, a2, root, b, a);         // into two
+  holds(a, a2, a_sub, none, a1);    // a composite to its own descendant
+  holds(a2, a, a_sub, a1, none);    // and back
+  holds(a2, a1, a1_sub, a2, none);  // to the composite holding it
+  holds(a1, a1, a_sub, a1, a1);     // a self-transition
+  holds(x, y, { INVALID }, x, y);   // two regions of one state
+  holds(x, b, root, pst, b);        // out of a region
+}
+
 TEST_CASE("order: a sweep removes a crossing document order would have left") {
   // Two sources and two sinks wired across, so the authored order crosses and
   // the median sweep has somewhere better to put them.

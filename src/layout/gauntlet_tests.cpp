@@ -56,10 +56,10 @@ scav_profile compact() {
 
 // Every chart in test_data/charts/gauntlet, named so a failure says which shape
 // broke rather than which index did.
-constexpr std::array GAUNTLET{ "chain.scav",  "crowd.scav", "enclosing.scav",
-                               "fanin.scav",  "fork.scav",  "lane.scav",
-                               "loop.scav",   "marks.scav", "mutual.scav",
-                               "regions.scav" };
+constexpr std::array GAUNTLET{ "chain.scav",     "crossing.scav", "crowd.scav",
+                               "enclosing.scav", "fanin.scav",    "fork.scav",
+                               "lane.scav",      "loop.scav",     "marks.scav",
+                               "mutual.scav",    "regions.scav" };
 
 // One chart, laid out: the pieces every property below reads.
 struct Laid {
@@ -110,8 +110,9 @@ void column_holds(Chart const &c, char const *name, std::vector<T> const &rows) 
 // same row, because the nudge statistics and the per-transition fallback flag
 // have no column of their own, and every column they came with is held to the
 // one the run wrote -- so the properties below read the drawing that ships and
-// not a candidate nobody drew.
-void lay(char const *name, scav_profile const &p, Laid &out) {
+// not a candidate nobody drew. `s` is no space requests unless a property is
+// about a label, which is placed only where a path box asks for room.
+void lay(char const *name, scav_profile const &p, Laid &out, scav_spaces const &s = {}) {
   // The router these properties are about, by the name it crosses every other
   // boundary under rather than by its position in the registry.
   scav_router_id id{};
@@ -127,7 +128,7 @@ void lay(char const *name, scav_profile const &p, Laid &out) {
   scav_layout_opts const o{ .profile = p, .router = id, .threads = 0 };
   SearchPins pins;
   REQUIRE(layout_run(out.c,
-                     {},
+                     s,
                      o,
                      placed,
                      diags,
@@ -149,13 +150,13 @@ void lay(char const *name, scav_profile const &p, Laid &out) {
   // The drawing is the tuple's *and* the pins' (11.10a), so re-deriving it
   // needs both or this measures a layout nobody was shown. The pins reach
   // phase 3 as well as phase 1: a face pin is the router's (11.10e).
-  out.o = order_submachines(out.c, out.g, {}, knobs, 0, pins);
-  REQUIRE(size_layout(out.c, out.g, out.o, {}, knobs, out.z, diags, dar, pack, fold));
+  out.o = order_submachines(out.c, out.g, s, knobs, 0, pins);
+  REQUIRE(size_layout(out.c, out.g, out.o, s, knobs, out.z, diags, dar, pack, fold));
   out.r = route_transitions(out.c,
                             out.g,
                             out.o,
                             out.z,
-                            {},
+                            s,
                             knobs,
                             *router_at(id),
                             0,
@@ -656,6 +657,73 @@ TEST_CASE("gauntlet: an endpoint that is also a crossing is one point, not two")
         }
       }
     }
+  }
+}
+
+TEST_CASE(
+    "gauntlet: an out-of-machine label is drawn in the submachine holding both ends") {
+  // `axis`'s `limit switch`, out of one composite and into a state inside
+  // another. Only the root holds both ends, so the label is the root's: its
+  // width is room in the root's rank gap between the two composites, and the
+  // box hangs off the leg that gap holds. Charged to the middle of the route,
+  // it went to the target composite's frame instead, the gap stayed
+  // `rank_sep`, and the box straddled the target composite's border. What
+  // ships, and row 0 unsearched, whose arrangement is the one the charge sized
+  // rather than one the search found around it.
+  for (scav_profile const &p :
+       { readable(), compact(), one_row(readable()), one_row(compact()) }) {
+    CAPTURE(p.profile_id);
+    CAPTURE(p.portfolio_m);
+    Laid bare;
+    lay("crossing.scav", p, bare);
+    uint32_t t{ INVALID };
+    for (uint32_t k = 0; k < bare.c.transitions.size(); ++k) {
+      if (bare.c.transitions[k].label.len != 0) { t = k; }
+    }
+    REQUIRE(t != INVALID);
+    // `limit switch` under real text at `readable`: wider than `rank_sep` at
+    // either profile, so the gap holds it only if the gap is charged with it.
+    scav_path_box const box{ .subject = t, .w = 1511, .h = 269, .order = 0 };
+    scav_spaces const spaces{ .path_box = &box, .n_path_box = 1 };
+    Laid l;
+    lay("crossing.scav", p, l, spaces);
+    REQUIRE(l.r.placed.size() == 1);
+    CHECK(l.r.unplaced == 0);
+    scav_rect const at{ l.r.placed[0] };
+
+    Transition const &tr{ l.c.transitions[t] };
+    CommonAncestor const lca{ lowest_common_ancestor(l.c, tr.src, tr.dst) };
+    REQUIRE(lca.frame == l.c.root_submachine);
+    CHECK(contains(l.z.sub[lca.frame.v], at));
+    // No state encloses the root, so the box is clear of every one: both
+    // composites and everything inside them.
+    for (uint32_t const st : live_of(l.c)) {
+      CAPTURE(st);
+      CHECK_FALSE(overlaps(at, l.z.state[st]));
+    }
+    // Within a leader of a leg the root holds -- one whose midpoint lies inside
+    // neither composite -- and nearer it than any piece inside them.
+    scav_span const route{ l.r.route[t] };
+    REQUIRE(route.len >= 2);
+    Wide held_gap{ -1 };
+    Wide inner_gap{ -1 };
+    for (uint32_t k = 0; (k + 1) < route.len; ++k) {
+      scav_point const a{ l.r.points[route.off + k] };
+      scav_point const b{ l.r.points[route.off + k + 1] };
+      scav_point const mid{ .x = a.x + floor_div(b.x - a.x, 2),
+                            .y = a.y + floor_div(b.y - a.y, 2) };
+      bool held{ true };
+      for (StateId const side : lca.child) {
+        if ((side.v != INVALID) && inside(mid, l.z.state[side.v])) { held = false; }
+      }
+      Wide const gap{ chebyshev_gap(at, span_rect(a, b)) };
+      Wide &into{ held ? held_gap : inner_gap };
+      into = (into < 0) ? gap : imin(into, gap);
+    }
+    REQUIRE(held_gap >= 0);
+    REQUIRE(inner_gap >= 0);  // the piece inside `Right`
+    CHECK(held_gap <= label_leader(p));
+    CHECK(held_gap < inner_gap);
   }
 }
 

@@ -9,6 +9,7 @@
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -89,6 +90,23 @@ SubmachineOrders order_submachines(Chart const &c,
 // Crossings between two adjacent ranks by inversion counting. Exposed because
 // it is what the ordering minimizes and what a test measures against.
 uint64_t rank_crossings(std::vector<uint32_t> const &south_positions);
+
+// The lowest submachine holding both ends of a transition, and on each end's
+// chain the state that submachine holds directly: INVALID for an end that
+// encloses the other, the endpoint itself twice for a self-transition. `frame`
+// is INVALID where the ends lie in two regions of one state, which no one
+// submachine holds; `child` then names the state each region holds.
+struct CommonAncestor {
+  SubmachineId frame{ INVALID };
+  std::array<StateId, 2> child{ StateId{ INVALID }, StateId{ INVALID } };
+};
+
+CommonAncestor lowest_common_ancestor(Chart const &c, StateId src, StateId dst);
+
+// The segment of transition `t` routed in its lowest common ancestor, which is
+// the one its label is charged to and placed beside; the middle segment where
+// no one submachine holds both ends. INVALID for a transition with no route.
+uint32_t label_segment(Chart const &c, SplitGraph const &g, uint32_t t);
 
 }  // namespace scav
 

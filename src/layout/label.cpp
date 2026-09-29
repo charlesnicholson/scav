@@ -7,6 +7,7 @@
 #include "layout/decompose.h"
 #include "layout/geom.h"
 #include "layout/memo.h"
+#include "layout/order.h"
 #include "layout/size.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
@@ -53,17 +54,37 @@ bool shared_region(Chart const &c, SubmachineId m) {
   return live > 1;
 }
 
-// `s` sits in `m` or in something nested inside it. The climb stops after one
-// step per state, as `ancestor_or_self`'s does.
-bool lies_in(Chart const &c, StateId s, SubmachineId m) {
-  StateId at{ s };
-  for (size_t up = 0; (up < c.states.size()) && (at.v < c.states.size()); ++up) {
-    SubmachineId const parent{ c.states[at.v].parent };
-    if (parent.v == m.v) { return true; }
-    if (parent.v >= c.submachines.size()) { return false; }
-    at = c.submachines[parent.v].owner;
-  }
-  return false;
+// The legs `first` up to `last` of a route: those routed in the lowest common
+// ancestor, past the ones inside the state the route leaves it by and short of
+// the ones inside the state it enters it by. A leg is inside a state where its
+// midpoint lies strictly inside the state's rect, so one along a border is the
+// outer frame's. Every leg where no one submachine holds both ends or where
+// nothing would be left.
+struct Legs {
+  uint32_t first, last;
+};
+
+Legs legs_in(SizedLayout const &z,
+             CommonAncestor const &lca,
+             std::vector<scav_point> const &points,
+             scav_span r) {
+  uint32_t const legs{ (r.len >= 2) ? (r.len - 1) : 0U };
+  auto const inside = [&](uint32_t k, StateId st) {
+    if (st.v >= z.state.size()) { return false; }
+    scav_rect const &box{ z.state[st.v] };
+    scav_point const a{ points[r.off + k] };
+    scav_point const b{ points[r.off + k + 1] };
+    Wide const x2{ Wide{ a.x } + b.x };
+    Wide const y2{ Wide{ a.y } + b.y };
+    return (x2 > (Wide{ 2 } * box.x)) && (x2 < (Wide{ 2 } * (Wide{ box.x } + box.w))) &&
+           (y2 > (Wide{ 2 } * box.y)) && (y2 < (Wide{ 2 } * (Wide{ box.y } + box.h)));
+  };
+  uint32_t first{ 0 };
+  while ((first < legs) && inside(first, lca.child[0])) { ++first; }
+  uint32_t last{ legs };
+  while ((last > first) && inside(last - 1, lca.child[1])) { --last; }
+  if ((lca.frame.v == INVALID) || (first >= last)) { return { .first = 0, .last = legs }; }
+  return { .first = first, .last = last };
 }
 
 // The eight points of the label's own rectangle the leader may attach to: its
@@ -200,10 +221,14 @@ struct Local {
   int32_t w{ 0 }, h{ 0 }, leader{ 0 };
   uint32_t chained{ 0 }, prior_seg{ 0 };
   int32_t prior_mid{ 0 };
+  // The legs `first` up to `last` are the ones routed in the lowest common
+  // ancestor, and the only ones a candidate rides.
+  uint32_t first{ 0 }, last{ 0 };
   scav_rect holder{};
   std::vector<scav_point> route;
   std::vector<scav_rect> walls;    // states, bands and settled boxes
   std::vector<scav_rect> foreign;  // other transitions' legs
+  std::vector<scav_rect> below;    // the states the route leaves and enters by
 };
 
 // What a search settles: the box, and the leg and slide a later box of its
@@ -392,7 +417,8 @@ Outcome exhaustive(Local const &l, Scratch &s) {
   uint32_t const len{ static_cast<uint32_t>(l.route.size()) };
   prepare(l, s);
   grid_build(s.grid, s.region, s.blocked, l.w, l.h);
-  scav_point const at{ anchor_of(l.route, { .off = 0, .len = len }) };
+  scav_point const at{ anchor_of(l.route,
+                                 { .off = l.first, .len = (l.last - l.first) + 1 }) };
   // Half the label's height, so the anchor slides finer than the box it
   // carries; the floor is one grid unit, which is 1/16 pt (11.9.4).
   int32_t const step{ imax(l.h / 2, 1) };
@@ -408,7 +434,9 @@ Outcome exhaustive(Local const &l, Scratch &s) {
   scav_rect lax{};
   Key lax_key{ .shortfall = 0, .dist = -1, .seg = 0, .attach = 0, .lead = 0, .mid = 0 };
 
-  for (uint32_t k = chained ? l.prior_seg : 0U; (k + 1) < len; ++k) {
+  for (uint32_t k = imax(chained ? l.prior_seg : 0U, l.first);
+       (k < l.last) && ((k + 1) < len);
+       ++k) {
     scav_point const a{ l.route[k] };
     scav_point const b{ l.route[k + 1] };
     bool const flat{ a.y == b.y };
@@ -474,6 +502,11 @@ Outcome exhaustive(Local const &l, Scratch &s) {
           bool uncut{ true };
           for (uint32_t j = 0; uncut && (j < s.own.size()); ++j) {
             if (overlaps(cand, s.own[j])) { uncut = false; }
+          }
+          // Nor may either tier put it inside the states its route leaves and
+          // enters by: it is drawn in the submachine holding both ends.
+          for (uint32_t j = 0; uncut && (j < l.below.size()); ++j) {
+            if (overlaps(cand, l.below[j])) { uncut = false; }
           }
           if (!uncut) { continue; }
           if ((lax_key.dist < 0) || better(here, lax_key)) {
@@ -645,6 +678,9 @@ void Walk::group(Group const &g) {
     for (scav_rect const &leg : s.own) {
       if (overlaps(cand, leg)) { return past(leg, n, sign); }
     }
+    for (scav_rect const &inner : l.below) {
+      if (overlaps(cand, inner)) { return past(inner, n, sign); }
+    }
     if (strict) {
       if ((last != INVALID) && overlaps(cand, s.blocked[last])) {
         return past(s.blocked[last], n, sign);
@@ -722,7 +758,8 @@ void Walk::group(Group const &g) {
 Outcome pruned(Local const &l, Scratch &s) {
   uint32_t const len{ static_cast<uint32_t>(l.route.size()) };
   prepare(l, s);
-  scav_point const at{ anchor_of(l.route, { .off = 0, .len = len }) };
+  scav_point const at{ anchor_of(l.route,
+                                 { .off = l.first, .len = (l.last - l.first) + 1 }) };
   Wide const half_w{ floor_div(l.w, 2) };
   Wide const half_h{ floor_div(l.h, 2) };
 
@@ -741,7 +778,9 @@ Outcome pruned(Local const &l, Scratch &s) {
   // fixed.
   s.groups.clear();
   s.legs.clear();
-  for (uint32_t k = (l.chained != 0) ? l.prior_seg : 0U; (k + 1) < len; ++k) {
+  for (uint32_t k = imax((l.chained != 0) ? l.prior_seg : 0U, l.first);
+       (k < l.last) && ((k + 1) < len);
+       ++k) {
     scav_point const a{ l.route[k] };
     scav_point const b{ l.route[k + 1] };
     bool const flat{ a.y == b.y };
@@ -824,7 +863,8 @@ Memo &memo() {
 // Every field of `l`, counts before contents, so two problems with one key
 // are one problem.
 void key_of(Local const &l, std::vector<uint32_t> &key) {
-  key.resize(13 + (2 * l.route.size()) + (4 * l.walls.size()) + (4 * l.foreign.size()));
+  key.resize(16 + (2 * l.route.size()) + (4 * l.walls.size()) + (4 * l.foreign.size()) +
+             (4 * l.below.size()));
   uint32_t *at{ key.data() };
   auto const word = [&at](int32_t v) { *at++ = static_cast<uint32_t>(v); };
   auto const rect = [&word](scav_rect const &r) {
@@ -839,6 +879,8 @@ void key_of(Local const &l, std::vector<uint32_t> &key) {
   *at++ = l.chained;
   *at++ = l.prior_seg;
   word(l.prior_mid);
+  *at++ = l.first;
+  *at++ = l.last;
   rect(l.holder);
   *at++ = static_cast<uint32_t>(l.route.size());
   for (scav_point const &pt : l.route) {
@@ -849,6 +891,8 @@ void key_of(Local const &l, std::vector<uint32_t> &key) {
   for (scav_rect const &r : l.walls) { rect(r); }
   *at++ = static_cast<uint32_t>(l.foreign.size());
   for (scav_rect const &r : l.foreign) { rect(r); }
+  *at++ = static_cast<uint32_t>(l.below.size());
+  for (scav_rect const &r : l.below) { rect(r); }
 }
 
 Outcome remembered(Local const &l, Scratch &s) {
@@ -955,14 +999,13 @@ uint32_t place_labels_from(Chart const &c,
     return s.path_box[a].order < s.path_box[b].order;
   });
 
-  // The walk starts above the endpoint, not at it: a state *enclosing* an
-  // endpoint is the composite the label lives inside, and charging it there
-  // would make zero unreachable, but an endpoint encloses nothing. Marking the
-  // endpoint let a candidate lying over the very box its transition names read
-  // as feasible, so the placer chose one (11.9.3).
+  // The states a label may lie inside: the one owning the lowest submachine
+  // that holds both ends, and every state enclosing that one. An endpoint is
+  // among them only where it encloses the other end, so a label never lies
+  // over the box its transition names (11.9.3).
   std::vector<uint8_t> encloses(c.states.size(), 0);
-  auto const mark = [&](StateId of, uint8_t v) {
-    StateId at{ enclosing_state(c, of) };
+  auto const mark = [&](StateId from, uint8_t v) {
+    StateId at{ from };
     for (size_t step = 0; (step < c.states.size()) && (at.v != INVALID); ++step) {
       encloses[at.v] = v;
       at = enclosing_state(c, at);
@@ -997,6 +1040,16 @@ uint32_t place_labels_from(Chart const &c,
     }
     Outcome got{};
     bool kept{ false };
+    CommonAncestor const lca{ (box.subject < c.transitions.size())
+                                  ? lowest_common_ancestor(c,
+                                                           c.transitions[box.subject].src,
+                                                           c.transitions[box.subject].dst)
+                                  : CommonAncestor{} };
+    Legs const legs{ legs_in(z, lca, points, r) };
+    scav_span const anchored{ (r.len >= 2)
+                                  ? scav_span{ .off = r.off + legs.first,
+                                               .len = (legs.last - legs.first) + 1 }
+                                  : r };
 
     if (r.len >= 2) {
       scav_point const origin{ relative ? points[r.off] : scav_point{} };
@@ -1006,6 +1059,8 @@ uint32_t place_labels_from(Chart const &c,
       l.chained = chained ? 1U : 0U;
       l.prior_seg = chained ? prior_seg : 0U;
       l.prior_mid = chained ? (prior_mid - along(points, r, prior_seg, origin)) : 0;
+      l.first = legs.first;
+      l.last = legs.last;
       l.route.clear();
       for (uint32_t k = 0; k < r.len; ++k) {
         l.route.push_back(
@@ -1028,36 +1083,24 @@ uint32_t place_labels_from(Chart const &c,
                 .seg = had.seg,
                 .mid = had.mid };
       } else {
-        if (box.subject < c.transitions.size()) {
-          // Both ends, not either: a state enclosing one endpoint does not have
-          // to hold the label -- the label belongs on the ancestral side of that
-          // crossing -- so only a state enclosing *both* is exempt from its own
-          // rect. `2` is the intersection; `1` is src's chain alone, which the
-          // reset below clears along with it (11.9.3).
-          mark(c.transitions[box.subject].src, 1);
-          StateId above{ enclosing_state(c, c.transitions[box.subject].dst) };
-          for (size_t up = 0; (up < c.states.size()) && (above.v != INVALID); ++up) {
-            if (encloses[above.v] == 1) { encloses[above.v] = 2; }
-            above = enclosing_state(c, above);
-          }
-        }
+        // Two regions of one state have no submachine holding both, so there
+        // it is the state holding the two.
+        StateId const within{ (lca.frame.v != INVALID)
+                                  ? c.submachines[lca.frame.v].owner
+                                  : enclosing_state(c, lca.child[0]) };
+        mark(within, 1);
         // I3 as a test: a label inside a composite is bounded by it, not by the
         // chart. Enclosing states nest, so intersecting them all is the innermost
         // without having to order them by depth (11.9.3).
         scav_rect holder{ z.chart };
         for (uint32_t const st : live) {
-          if (encloses[st] == 2) { holder = intersection(holder, z.state[st]); }
+          if (encloses[st] != 0) { holder = intersection(holder, z.state[st]); }
         }
         // And by the region both endpoints lie in, where that region shares its
         // state with another: the divider between them runs through a label
         // that strays across it, and `brew`'s `at temperature` did (11.10g).
-        if (box.subject < c.transitions.size()) {
-          Transition const &tr{ c.transitions[box.subject] };
-          SubmachineId const m{ c.states[tr.src.v].parent };
-          if ((m.v < c.submachines.size()) && shared_region(c, m) &&
-              lies_in(c, tr.dst, m)) {
-            holder = intersection(holder, z.sub[m.v]);
-          }
+        if ((lca.frame.v < c.submachines.size()) && shared_region(c, lca.frame)) {
+          holder = intersection(holder, z.sub[lca.frame.v]);
         }
         // A box of positive extent lies strictly inside the region wherever it
         // goes, so what lies outside it is never overlapped, never nearest, and
@@ -1085,7 +1128,7 @@ uint32_t place_labels_from(Chart const &c,
         for (uint32_t const st : live) {
           // A state enclosing both endpoints holds the label legitimately; the
           // bands it reserved for its own text do not.
-          if (encloses[st] == 2) {
+          if (encloses[st] != 0) {
             if (overlaps(region, z.before[st])) {
               l.walls.push_back(local_rect(z.before[st]));
             }
@@ -1111,8 +1154,16 @@ uint32_t place_labels_from(Chart const &c,
             }
           }
         }
-        if (box.subject < c.transitions.size()) {
-          mark(c.transitions[box.subject].src, 0);
+        mark(within, 0);
+        l.below.clear();
+        if (lca.frame.v != INVALID) {
+          for (uint32_t k = 0; k < lca.child.size(); ++k) {
+            StateId const st{ lca.child[k] };
+            if ((st.v == INVALID) || ((k == 1) && (st == lca.child[0]))) { continue; }
+            if (overlaps(region, z.state[st.v])) {
+              l.below.push_back(local_rect(z.state[st.v]));
+            }
+          }
         }
 
         switch (search) {
@@ -1136,7 +1187,7 @@ uint32_t place_labels_from(Chart const &c,
       how[i] = { .seg = got.seg, .mid = got.mid, .found = 1 };
     } else {
       ++fallbacks;
-      out[i] = centred(anchor_of(points, r), box, z.chart);
+      out[i] = centred(anchor_of(points, anchored), box, z.chart);
     }
     if (based && !kept) {
       LabelSettle const &had{ (*was->settled)[i] };

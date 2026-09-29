@@ -606,7 +606,11 @@ void rank_derived(Frame &f,
     uint32_t const from{ imin(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
     uint32_t const to{ imax(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
     uint32_t const at{ from + ((to - from) / 2) };
-    if (at < gaps.size()) { gaps[at] = imax(gaps[at], label); }
+    if (at >= gaps.size()) { continue; }
+    gaps[at] = imax(gaps[at], label);
+    trace_emit({ .kind = TraceKind::GapCharged,
+                 .pass = static_cast<uint16_t>(GapCause::Label),
+                 .gap = { .boundary = at, .seg = e.segment, .width = label } });
   }
 
   // An edge turning in a boundary needs a lane of its own, and two lanes
@@ -631,21 +635,25 @@ void rank_derived(Frame &f,
   std::vector<uint32_t> &lanes{ sc.lanes };
   lanes.assign(gaps.size() * parts, 0);
   int32_t const pitch{ label_line_height(p) };
-  auto const turn = [&](uint32_t b, uint32_t of) {
+  auto const turn = [&](uint32_t b, uint32_t of, uint32_t seg) {
     if (b >= gaps.size()) { return; }
     uint32_t &here{ lanes[(static_cast<size_t>(b) * parts) + of] };
     ++here;
     if (here < 2) { return; }
-    gaps[b] =
-        imax(gaps[b], static_cast<int32_t>(imin(Wide{ here } * pitch, Wide{ SPACE_MAX })));
+    int32_t const need{ static_cast<int32_t>(
+        imin(Wide{ here } * pitch, Wide{ SPACE_MAX })) };
+    gaps[b] = imax(gaps[b], need);
+    trace_emit({ .kind = TraceKind::GapCharged,
+                 .pass = static_cast<uint16_t>(GapCause::Lanes),
+                 .gap = { .boundary = b, .seg = seg, .width = need } });
   };
   for (OrderEdge const &e : f.edges) {
     uint32_t const from{ imin(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
     uint32_t const to{ imax(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
     if (from == to) { continue; }  // turns in no boundary, as above
     uint32_t const of{ dense[part.root(e.src)] };
-    turn(from, of);
-    if (to > (from + 1)) { turn(to - 1, of); }
+    turn(from, of, e.segment);
+    if (to > (from + 1)) { turn(to - 1, of, e.segment); }
   }
 
   chain_long_edges(f, cut);
@@ -654,6 +662,57 @@ void rank_derived(Frame &f,
 }
 
 }  // namespace
+
+CommonAncestor lowest_common_ancestor(Chart const &c, StateId src, StateId dst) {
+  CommonAncestor out;
+  if ((src.v >= c.states.size()) || (dst.v >= c.states.size())) { return out; }
+  if (src == dst) {
+    out.frame = c.states[src.v].parent;
+    out.child = { src, src };
+    return out;
+  }
+  // The innermost state that is or encloses both ends, INVALID where only a
+  // document root holds them.
+  StateId common{ src };
+  for (size_t up = 0; (up < c.states.size()) && (common.v != INVALID) &&
+                      !ancestor_or_self(c, common, dst);
+       ++up) {
+    common = enclosing_state(c, common);
+  }
+  auto const child_of = [&](StateId end) {
+    if (end == common) { return StateId{ INVALID }; }
+    StateId at{ end };
+    for (size_t up = 0; (up < c.states.size()) && (at.v != INVALID); ++up) {
+      StateId const next{ enclosing_state(c, at) };
+      if (next == common) { return at; }
+      at = next;
+    }
+    return StateId{ INVALID };
+  };
+  out.child = { child_of(src), child_of(dst) };
+  SubmachineId const a{ (out.child[0].v != INVALID) ? c.states[out.child[0].v].parent
+                                                    : SubmachineId{ INVALID } };
+  SubmachineId const b{ (out.child[1].v != INVALID) ? c.states[out.child[1].v].parent
+                                                    : SubmachineId{ INVALID } };
+  if (a.v == INVALID) {
+    out.frame = b;
+  } else if ((b.v == INVALID) || (a == b)) {
+    out.frame = a;
+  }
+  return out;
+}
+
+uint32_t label_segment(Chart const &c, SplitGraph const &g, uint32_t t) {
+  if ((t >= g.trans_segments.size()) || (t >= c.transitions.size())) { return INVALID; }
+  Span const segs{ g.trans_segments[t] };
+  if (segs.len == 0) { return INVALID; }
+  Transition const &tr{ c.transitions[t] };
+  SubmachineId const frame{ lowest_common_ancestor(c, tr.src, tr.dst).frame };
+  for (uint32_t k = 0; (frame.v != INVALID) && (k < segs.len); ++k) {
+    if (g.segments[segs.off + k].frame == frame) { return segs.off + k; }
+  }
+  return segs.off + (segs.len / 2);
+}
 
 SubmachineOrders order_submachines(Chart const &c,
                                    SplitGraph const &g,
@@ -698,21 +757,20 @@ SubmachineOrders order_submachines(Chart const &c,
     if (frame.v != INVALID) { frame_segs[cs.fill[frame.v]++] = i; }
   }
 
-  // A label is charged to one rank boundary in one frame -- the middle of the
-  // route, which is where a builder draws it -- so a hierarchy-crossing
-  // transition does not widen every frame it passes through. Its extent along
-  // the frame's ranks: its width across the page, its height down it.
+  // A label is charged to one rank boundary in one frame -- the segment routed
+  // in the lowest submachine holding both ends, which is where it is placed --
+  // so a hierarchy-crossing transition widens the frame its label sits in and
+  // no other. Its extent along the frame's ranks: its width across the page,
+  // its height down it.
   std::vector<int32_t> &seg_label{ cs.seg_label };
   seg_label.assign(g.segments.size(), 0);
   for (uint32_t i = 0; i < s.n_path_box; ++i) {
     scav_path_box const &box{ s.path_box[i] };
-    if (box.subject >= g.trans_segments.size()) { continue; }
-    Span const segs{ g.trans_segments[box.subject] };
-    if (segs.len == 0) { continue; }
-    uint32_t const mid{ segs.off + (segs.len / 2) };
-    uint32_t const frame{ g.segments[mid].frame.v };
+    uint32_t const at{ label_segment(c, g, box.subject) };
+    if (at == INVALID) { continue; }
+    uint32_t const frame{ g.segments[at].frame.v };
     bool const down{ (frame < o.sub_down.size()) && (o.sub_down[frame] != 0) };
-    seg_label[mid] += down ? box.h : box.w;
+    seg_label[at] += down ? box.h : box.w;
   }
 
   // `{trans, leg}` resolved to segment ordinals once, so the frame workers read

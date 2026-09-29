@@ -1,0 +1,11 @@
+// One labelled transition out of a composite and into a state inside another,
+// `axis`'s `limit switch`. Neither composite holds both ends, so the label
+// belongs to the root: on the leg between the two composites, clear of both
+// borders, although two of the route's three pieces lie inside them.
+chart crossing "a label between two composites" {
+  state Left { state Busy, trans * -> Busy },
+  state Right { state Idle, state Tripped, trans * -> Idle, trans Idle -> Tripped },
+
+  trans * -> Left,
+  trans Left -> Right/Tripped "limit switch",
+}

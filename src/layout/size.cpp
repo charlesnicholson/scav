@@ -1465,13 +1465,11 @@ bool size_pass(Chart const &c,
   x.seg_label_w.assign(g.segments.size(), 0);
   for (uint32_t i = 0; i < s.n_path_box; ++i) {
     scav_path_box const &box{ s.path_box[i] };
-    if (box.subject >= g.trans_segments.size()) { continue; }
-    Span const segs{ g.trans_segments[box.subject] };
-    if (segs.len == 0) { continue; }
-    uint32_t const mid{ segs.off + (segs.len / 2) };
-    bool const down{ x.runs_down(g.segments[mid].frame.v) };
-    x.seg_label_h[mid] = imax(x.seg_label_h[mid], down ? box.w : box.h);
-    x.seg_label_w[mid] = imax(x.seg_label_w[mid], down ? box.h : box.w);
+    uint32_t const at{ label_segment(c, g, box.subject) };
+    if (at == INVALID) { continue; }
+    bool const down{ x.runs_down(g.segments[at].frame.v) };
+    x.seg_label_h[at] = imax(x.seg_label_h[at], down ? box.w : box.h);
+    x.seg_label_w[at] = imax(x.seg_label_w[at], down ? box.h : box.w);
   }
   x.port_seg.assign(g.ports.size(), INVALID);
   for (uint32_t seg = 0; seg < o.seg_port.size(); ++seg) {

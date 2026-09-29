@@ -21,6 +21,7 @@ compact straight tcp.scav 2 3 0 2 172 0 0 0 24432 14348544
 compact straight toolchanger.scav 2 9 0 2 969 0 0 0 61728 84188160
 compact straight vac.scav 1 4 2096 2 230 0 0 0 14644 50171296
 readable orthogonal gauntlet/chain.scav 0 4 0 0 388 0 0 0 16256 5910528
+readable orthogonal gauntlet/crossing.scav 0 2 0 0 80 0 0 0 54216 11773312
 readable orthogonal gauntlet/crowd.scav 0 4 0 0 162 0 0 0 52036 14814528
 readable orthogonal gauntlet/enclosing.scav 0 6 0 0 9821 0 0 0 64852 13873176
 readable orthogonal gauntlet/fanin.scav 0 12 0 0 1514 0 0 0 73556 18739776
@@ -31,6 +32,7 @@ readable orthogonal gauntlet/marks.scav 0 8 96 0 518 0 0 0 69132 6253056
 readable orthogonal gauntlet/mutual.scav 0 8 0 0 430 0 0 0 42572 7804992
 readable orthogonal gauntlet/regions.scav 0 12 0 2 32498 0 0 0 25416 22073392
 readable straight gauntlet/chain.scav 0 0 0 0 0 0 0 0 16256 5910528
+readable straight gauntlet/crossing.scav 3 1 1136 0 10 0 0 0 54216 11773312
 readable straight gauntlet/crowd.scav 0 0 3482 2 0 0 0 0 52036 14814528
 readable straight gauntlet/enclosing.scav 1 2 0 1 22112 0 0 0 64852 13873176
 readable straight gauntlet/fanin.scav 0 4 0 0 227 0 0 0 73556 18739776
@@ -41,6 +43,7 @@ readable straight gauntlet/marks.scav 0 1 0 0 7 0 0 0 69132 6253056
 readable straight gauntlet/mutual.scav 0 1 0 0 37 0 0 0 42572 7804992
 readable straight gauntlet/regions.scav 2 5 0 6 74010 0 0 0 25416 22073392
 compact orthogonal gauntlet/chain.scav 0 4 0 0 206 0 0 0 1504 2611200
+compact orthogonal gauntlet/crossing.scav 0 2 0 0 42 0 0 0 12128 4899840
 compact orthogonal gauntlet/crowd.scav 0 4 0 0 38 0 0 0 12064 6288896
 compact orthogonal gauntlet/enclosing.scav 0 6 0 0 6583 0 0 0 14456 5928640
 compact orthogonal gauntlet/fanin.scav 0 12 0 0 890 0 0 0 16608 8146944
@@ -51,6 +54,7 @@ compact orthogonal gauntlet/marks.scav 0 8 58 0 392 0 0 0 14528 3334144
 compact orthogonal gauntlet/mutual.scav 0 8 0 0 214 0 0 0 9760 3456000
 compact orthogonal gauntlet/regions.scav 0 12 0 2 21892 0 0 0 7224 9493440
 compact straight gauntlet/chain.scav 0 0 0 0 0 0 0 0 1504 2611200
+compact straight gauntlet/crossing.scav 3 1 768 0 6 0 0 0 12128 4899840
 compact straight gauntlet/crowd.scav 0 0 2368 2 0 0 0 0 12064 6288896
 compact straight gauntlet/enclosing.scav 1 2 0 1 15238 0 0 0 14456 5928640
 compact straight gauntlet/fanin.scav 0 4 0 0 129 0 0 0 16608 8146944

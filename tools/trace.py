@@ -56,7 +56,8 @@ def chain_for(events, trans, model):
     out, nets = [], set()
     for e in events:
         k = e["kind"]
-        if k in ("edge_reversed", "route_degraded", "edge_chained") and e["seg"] in segs:
+        if (k in ("edge_reversed", "route_degraded", "edge_chained", "gap_charged")
+                and e["seg"] in segs):
             out.append(e)
         elif k == "node_placed" and e.get("bend_of_seg") in segs:
             out.append(e)
@@ -85,6 +86,9 @@ def describe(e, model):
         return f"    must pass through {tuple(e['at'])}"
     if k == "route_degraded":
         return "  FELL BACK to a straight line"
+    if k == "gap_charged":
+        return (f"  segment {e['seg']} asked frame {e['frame']}'s rank boundary "
+                f"{e['boundary']} for {e['width']} ({e['cause']})")
     return f"  {k}"
 
 
