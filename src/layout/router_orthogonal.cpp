@@ -460,9 +460,10 @@ void ortho_align_attachments(std::vector<RouteNet> const &nets,
     if (lo > hi) { continue; }  // no coordinate both faces can seat
 
     // Halfway between the two centres, which is symmetric in the pair, so a net
-    // and its reverse land on the same line rather than on two a step apart.
+    // and its reverse land on the same line rather than on two a step apart;
+    // or, for a net that leans, the lower end of the run both faces seat.
     int32_t const want{ static_cast<int32_t>(floor_div(centres, Wide{ 2 })) };
-    int32_t const got{ imin(imax(want, lo), hi) };
+    int32_t const got{ (net.lean != 0) ? lo : imin(imax(want, lo), hi) };
     if (along_y) {
       at[src_slot].y = got;
       at[dst_slot].y = got;

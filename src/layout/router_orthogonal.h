@@ -118,7 +118,8 @@ void ortho_reface_attachments(std::vector<RouteNet> const &nets,
 // The two ends of one net, seated on one coordinate where that makes the net one
 // straight segment: each was the other box's *centre* projected onto its own
 // face, so two parallel faces a shared run apart still produce two coordinates
-// and a jog between them. Skipped where phase 1 asked for a corridor.
+// and a jog between them. Skipped where phase 1 asked for a corridor. A net
+// that leans takes the lower end of the run both faces seat.
 void ortho_align_attachments(std::vector<RouteNet> const &nets,
                              std::vector<scav_rect> const &boxes,
                              std::vector<uint8_t> const &inscribed,

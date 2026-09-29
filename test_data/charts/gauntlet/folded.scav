@@ -1,0 +1,16 @@
+// A composite whose run folds after its first state, with a label on the edge
+// the cut crosses. The second piece started at the frame's leading edge, so the
+// state it holds sat a rank gap left of the one entering it, and the label's
+// room was reserved from a leg halfway along the two faces' overlap.
+chart folded "a folded frame's second piece, under the state that enters it" {
+  state Box {
+    state First,
+    state Second,
+    trans * -> First,
+    trans First -> Second "contacts closed",
+  },
+  state Out,
+
+  trans * -> Box,
+  trans Box/Second -> Out "full",
+}

@@ -929,6 +929,42 @@ TEST_CASE("ortho: ends of one direction sharing a seat are a trunk and keep it")
   CHECK((at[5] == pt(0, 50)));
 }
 
+TEST_CASE("ortho: a leaning net seats its leg at the lower end of the shared run") {
+  // `dock`'s `Seated -> Charging`: two boxes stacked, the lower one starting
+  // under the upper, and phase 2 reserving the label's room on the higher side
+  // of a leg at the run's lower end. Between the centres the leg sat 578 past
+  // that and the label ran out of the frame by as much.
+  std::vector<scav_rect> const boxes{ rect(800, 0, 1204, 653),
+                                      rect(800, 1306, 1434, 653) };
+  std::vector<int32_t> const arcs{ 81, 81 };
+  RouteNet const down{ .src = pt(1402, 326),
+                       .dst = pt(1517, 1632),
+                       .src_obstacle = 0,
+                       .dst_obstacle = 1 };
+  RouteNet leaning{ down };
+  leaning.lean = 1;
+  auto const seat = [&](RouteNet const &net) {
+    std::vector<scav_point> at{ pt(1402, 653), pt(1517, 1306) };
+    ortho_align_attachments({ net }, boxes, {}, arcs, at);
+    CHECK(at[0].x == at[1].x);
+    return at[0].x;
+  };
+  CHECK(seat(down) == 1459);    // halfway between the centres
+  CHECK(seat(leaning) == 881);  // one arc past both boxes' leading corners
+
+  // The reverse net leans to the same end: the run is the pair's, not the
+  // direction's.
+  RouteNet up{ .src = pt(1517, 1632),
+               .dst = pt(1402, 326),
+               .src_obstacle = 1,
+               .dst_obstacle = 0 };
+  up.lean = 1;
+  std::vector<scav_point> back{ pt(1517, 1306), pt(1402, 653) };
+  ortho_align_attachments({ up }, boxes, {}, arcs, back);
+  CHECK((back[0] == pt(881, 1306)));
+  CHECK((back[1] == pt(881, 653)));
+}
+
 TEST_CASE("ortho: a face with no room for the seats leaves them where they are") {
   // A mark too small to seat an arrival apart from a departure keeps them
   // stacked rather than sliding one off its own border, and it is stopped twice

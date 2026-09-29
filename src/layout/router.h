@@ -37,6 +37,10 @@ struct RouteNet {
   // INVALID to let the router choose. A caller sets these when the choice is
   // being searched rather than ruled (11.10e).
   uint32_t src_face{ INVALID }, dst_face{ INVALID };
+  // 1 where a straight leg between two parallel faces is seated at the lower
+  // end of the run both faces can seat rather than between their centres:
+  // phase 2 reserved its label's room on the leg's higher side from there.
+  uint32_t lean{ 0 };
 };
 
 struct RouteInput {

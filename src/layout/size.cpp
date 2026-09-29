@@ -117,10 +117,14 @@ struct Shape {
   bool wraps{ false };
   // Every edge a cut crosses between stacked pieces joins two plain nodes.
   bool drawable{ true };
+  // Parallel to the frame's edges: `SizedLayout::lean` for each.
+  std::vector<uint8_t> lean;
 
-  // A default shape of `n` nodes, reusing every buffer's storage.
-  void reset(size_t n) {
+  // A default shape of `n` nodes and `edges` edges, reusing every buffer's
+  // storage.
+  void reset(size_t n, size_t edges) {
     at.assign(n, scav_point{});
+    lean.assign(edges, 0);
     w = 0;
     h = 0;
     ok = true;
@@ -970,7 +974,7 @@ void Sizer::lay_out_sub(uint32_t m) {
     // Cutting helps only sometimes -- at two ranks it worsens the aspect -- so both
     // shapes are laid out and the scale measure picks, as `trybox` picks a packer.
     auto const lay_out = [&](Shape &shape, Wide wrap_at, bool stack) {
-      shape.reset(nodes.size());
+      shape.reset(nodes.size(), espan.len);
       std::vector<uint32_t> &chunk_of{ sc.chunk_of };
       chunk_of.assign(layers, 0);
       std::vector<uint32_t> &chunks{ sc.chunks };
@@ -1441,6 +1445,83 @@ void Sizer::lay_out_sub(uint32_t m) {
           paired[q] = 1;
         }
       }
+      // How far along a state's face along the ranks the run the router can
+      // seat a straight leg on starts: the corner arc and at least one unit,
+      // or half the face to the one midpoint of an inscribed glyph. Zero for
+      // any other node, which has no face.
+      auto const seat_inset = [&](uint32_t i) {
+        OrderNode const &nd{ o.nodes[span.off + nodes[i]] };
+        if (nd.kind != OrderKind::State) { return Wide{ 0 }; }
+        StateKind const kind{ c.states[nd.subject].kind };
+        Wide const len{ along(nd.subject) };
+        Wide const arc{ state_corner_radius(kind, out.state[nd.subject], p.pad) };
+        return kind_inscribed(kind) ? (len / 2) : imin(imax(arc, Wide{ 1 }), len / 2);
+      };
+      auto const seat_run = [&](uint32_t i, Wide &lo, Wide &hi) {
+        OrderNode const &nd{ o.nodes[span.off + nodes[i]] };
+        if (nd.kind != OrderKind::State) { return false; }
+        lo = node_x(i) + seat_inset(i);
+        hi = kind_inscribed(c.states[nd.subject].kind)
+                 ? lo
+                 : ((node_x(i) + along(nd.subject)) - seat_inset(i));
+        return true;
+      };
+      // A piece wholly below the one before it moves forward so that the end
+      // in it of the first edge joining two states across that cut begins
+      // under the end above, at the piece's own width rather than the one the
+      // packing grew it to. It moves at most until its trailing edge meets the
+      // frame's: the widest piece's, or where that edge's lone label ends on
+      // the trailing side of a leg at the leading end of the two faces' run,
+      // as below. A piece that would come within `node_sep` of another stays
+      // where it was packed. In order, so a piece under a moved one reads
+      // where that one went.
+      for (uint32_t k = 1; k < chunks.size(); ++k) {
+        scav_rect &here{ packed.at[k] };
+        scav_rect const &before{ packed.at[k - 1] };
+        if (Wide{ here.y } < (Wide{ before.y } + before.h)) { continue; }
+        uint32_t cut{ INVALID };
+        uint32_t above{ INVALID };
+        uint32_t below{ INVALID };
+        for (uint32_t q = 0; (q < espan.len) && (cut == INVALID); ++q) {
+          OrderEdge const &e{ o.edges[espan.off + q] };
+          uint32_t const a{ index[e.src - span.off] };
+          uint32_t const b{ index[e.dst - span.off] };
+          if ((a == INVALID) || (b == INVALID) ||
+              (o.nodes[e.src].kind != OrderKind::State) ||
+              (o.nodes[e.dst].kind != OrderKind::State)) {
+            continue;
+          }
+          uint32_t const ca{ chunk_of[local_rank[nodes[a]]] };
+          uint32_t const cb{ chunk_of[local_rank[nodes[b]]] };
+          if ((imin(ca, cb) != (k - 1)) || (imax(ca, cb) != k)) { continue; }
+          cut = q;
+          above = (ca < cb) ? a : b;
+          below = (ca < cb) ? b : a;
+        }
+        if (cut == INVALID) { continue; }
+        OrderEdge const &e{ o.edges[espan.off + cut] };
+        Wide const x{ node_x(above) };
+        Wide reach{ packed.w };
+        Wide const mid{ x + (imin(width_of_node(above), width_of_node(below)) / 2) };
+        if ((paired[cut] == 0) && (room_of(e) != 0) && (mid < room_of(e))) {
+          reach = imax(reach, x + imax(seat_inset(above), seat_inset(below)) + room_of(e));
+        }
+        Wide const want{ imin(x - shape.at[below].x, reach - pieces[k].w) };
+        if ((want <= here.x) || ((want + pieces[k].w) > COORD_MAX)) { continue; }
+        scav_rect const moved{ .x = static_cast<int32_t>(want),
+                               .y = here.y,
+                               .w = pieces[k].w,
+                               .h = here.h };
+        bool clear{ true };
+        for (uint32_t j = 0; j < chunks.size(); ++j) {
+          clear = clear && ((j == k) || !overlaps(grow(moved, p.node_sep), packed.at[j]));
+        }
+        if (!clear) { continue; }
+        here = moved;
+        packed.w =
+            static_cast<int32_t>(imin(imax(Wide{ packed.w }, Wide{ moved.x } + moved.w),
+                                      Wide{ PACK_SATURATED }));
+      }
       Wide lead{ 0 };
       for (uint32_t k = 0; k < espan.len; ++k) {
         OrderEdge const &e{ o.edges[espan.off + k] };
@@ -1459,7 +1540,21 @@ void Sizer::lay_out_sub(uint32_t m) {
         Wide const leg{ lead + leg_of(node_x(a), node_x(b), a, b) };
         if (leg < lead) { continue; }
         bool const leading{ (paired[k] == 0) && (leg >= room_of(e)) };
-        if (!leading) { stack_w = imax(stack_w, leg + room_of(e)); }
+        if (leading) { continue; }
+        // A lone label on the trailing side takes its room from the leading
+        // end of the run both faces can seat, where `lean` has the router
+        // seat the leg, wherever that is short of the overlap's middle.
+        Wide seat{ leg };
+        Wide alo{ 0 };
+        Wide ahi{ 0 };
+        Wide blo{ 0 };
+        Wide bhi{ 0 };
+        if ((paired[k] == 0) && seat_run(a, alo, ahi) && seat_run(b, blo, bhi) &&
+            (imax(alo, blo) <= imin(ahi, bhi)) && ((lead + imax(alo, blo)) < leg)) {
+          seat = lead + imax(alo, blo);
+          shape.lean[k] = 1;
+        }
+        stack_w = imax(stack_w, seat + room_of(e));
       }
       for (scav_rect &at : packed.at) { at.x = static_cast<int32_t>(Wide{ at.x } + lead); }
       packed.w = static_cast<int32_t>(imin(stack_w, Wide{ PACK_SATURATED }));
@@ -1594,6 +1689,10 @@ void Sizer::lay_out_sub(uint32_t m) {
                   .w = static_cast<int32_t>(best.w),
                   .h = static_cast<int32_t>(best.h) };
     for (uint32_t i = 0; i < nodes.size(); ++i) { local[nodes[i]] = best.at[i]; }
+    for (uint32_t k = 0; k < espan.len; ++k) {
+      uint32_t const seg{ o.edges[espan.off + k].segment };
+      if ((best.lean[k] != 0) && (seg < out.lean.size())) { out.lean[seg] = 1; }
+    }
   }
 
   place_sub(m, down, dar, boxes, sc.component, local);
@@ -1732,10 +1831,12 @@ void Sizer::size_sub(uint32_t m) {
   key.push_back(gspan.len);
   for (uint32_t k = 0; k < gspan.len; ++k) { put(o.gaps[gspan.off + k]); }
 
-  // What it writes: the frame's extent, each node's place, and each state's.
+  // What it writes: the frame's extent, each node's place, each state's, and
+  // each edge's lean.
   Memo &memo{ frame_memo() };
   int32_t const *hit{ nullptr };
   uint32_t len{ 0 };
+  auto const seg_of = [&](uint32_t k) { return o.edges[espan.off + k].segment; };
   if (memo.find(key, hit, len)) {
     out.sub[m].w = hit[0];
     out.sub[m].h = hit[1];
@@ -1748,6 +1849,9 @@ void Sizer::size_sub(uint32_t m) {
       out.state[nd.subject].x = hit[at];
       out.state[nd.subject].y = hit[at + 1];
       at += 2;
+    }
+    for (uint32_t k = 0; k < espan.len; ++k) {
+      if ((hit[at + k] != 0) && (seg_of(k) < out.lean.size())) { out.lean[seg_of(k)] = 1; }
     }
     return;
   }
@@ -1764,6 +1868,9 @@ void Sizer::size_sub(uint32_t m) {
     if (nd.kind != OrderKind::State) { continue; }
     value.push_back(out.state[nd.subject].x);
     value.push_back(out.state[nd.subject].y);
+  }
+  for (uint32_t k = 0; k < espan.len; ++k) {
+    value.push_back((seg_of(k) < out.lean.size()) ? out.lean[seg_of(k)] : 0);
   }
   memo.insert(key, value);
 }
@@ -1856,6 +1963,7 @@ bool size_pass(Chart const &c,
   out.after.assign(c.states.size(), {});
   out.sub.assign(c.submachines.size(), {});
   out.node.assign(o.nodes.size(), {});
+  out.lean.assign(g.segments.size(), 0);
   out.chart = {};
   std::vector<scav_point> &sub_local{ x.sub_local };
   sub_local.assign(c.submachines.size(), scav_point{});

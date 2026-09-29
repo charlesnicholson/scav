@@ -56,12 +56,12 @@ scav_profile compact() {
 
 // Every chart in test_data/charts/gauntlet, named so a failure says which shape
 // broke rather than which index did.
-constexpr std::array GAUNTLET{ "above.scav",   "chain.scav",     "crossing.scav",
-                               "crowd.scav",   "enclosing.scav", "entered.scav",
-                               "fanin.scav",   "fork.scav",      "lane.scav",
-                               "long.scav",    "loop.scav",      "marks.scav",
-                               "mutual.scav",  "regions.scav",   "roundtrip.scav",
-                               "stretch.scav", "through.scav",   "transit.scav" };
+constexpr std::array GAUNTLET{
+  "above.scav",     "chain.scav",   "crossing.scav", "crowd.scav",  "enclosing.scav",
+  "entered.scav",   "fanin.scav",   "folded.scav",   "fork.scav",   "lane.scav",
+  "long.scav",      "loop.scav",    "marks.scav",    "mutual.scav", "regions.scav",
+  "roundtrip.scav", "stretch.scav", "through.scav",  "transit.scav"
+};
 
 // One chart, laid out: the pieces every property below reads.
 struct Laid {
@@ -858,6 +858,73 @@ TEST_CASE("gauntlet: a chain of states turns only where the fold cuts it") {
       // twice. Nothing here needs a third turn, and a lane is work invented.
       CHECK(l.r.route[t].len <= 4);
     }
+  }
+}
+
+TEST_CASE("gauntlet: a folded frame's second piece starts under the state entering it") {
+  // `dock`'s `On`: `First -> Second` crosses the cut, and its label is real
+  // text's `contacts closed`. The piece holding `Second` started at the frame's
+  // leading edge, a rank gap left of `First`, and the router seated the leg
+  // between the two centres while phase 2 had reserved the label's room from
+  // the middle of their overlap. Row 0 unsearched, whose fold is the one the
+  // scale measure takes.
+  for (scav_profile const &p : { one_row(readable()), one_row(compact()) }) {
+    CAPTURE(p.profile_id);
+    Laid bare;
+    lay("folded.scav", p, bare);
+    uint32_t const first{ state_named(bare.c, "First") };
+    uint32_t const second{ state_named(bare.c, "Second") };
+    uint32_t const box{ state_named(bare.c, "Box") };
+    REQUIRE(first != INVALID);
+    REQUIRE(second != INVALID);
+    REQUIRE(box != INVALID);
+    uint32_t t{ INVALID };
+    for (uint32_t k = 0; k < bare.c.transitions.size(); ++k) {
+      if ((bare.c.transitions[k].src.v == first) &&
+          (bare.c.transitions[k].dst.v == second)) {
+        t = k;
+      }
+    }
+    REQUIRE(t != INVALID);
+    // Real text's title band on every state that draws one, which is what
+    // makes the run long enough to fold.
+    std::vector<scav_box_space> titles(bare.c.states.size(), scav_box_space{});
+    for (uint32_t st = 0; st < titles.size(); ++st) {
+      if (bare.c.states[st].kind == StateKind::Normal) {
+        titles[st] = { .min_w = 832, .h_before = 397, .h_after = 0 };
+      }
+    }
+    scav_path_box const label{ .subject = t, .w = 1856, .h = 269, .order = 0 };
+    scav_spaces const spaces{ .box_state = titles.data(),
+                              .n_box_state = static_cast<uint32_t>(titles.size()),
+                              .path_box = &label,
+                              .n_path_box = 1 };
+    Laid l;
+    lay("folded.scav", p, l, spaces);
+    scav_rect const &above{ l.z.state[first] };
+    scav_rect const &below{ l.z.state[second] };
+    REQUIRE(below.y >= (above.y + above.h));  // the fold this chart is about
+    CHECK(below.x == above.x);
+
+    // One straight leg down, one arc in from both leading corners.
+    scav_span const route{ l.r.route[t] };
+    REQUIRE(route.len == 2);
+    scav_point const from{ l.r.points[route.off] };
+    scav_point const to{ l.r.points[route.off + 1] };
+    CHECK(from.x == to.x);
+    int32_t const arc{ imax(imax(state_corner_radius(StateKind::Normal, above, p.pad),
+                                 state_corner_radius(StateKind::Normal, below, p.pad)),
+                            1) };
+    CHECK(from.x == (below.x + arc));
+
+    // The label beside it on its trailing side and inside the frame, which is
+    // the room phase 2 reserved for it there.
+    REQUIRE(l.r.placed.size() == 1);
+    CHECK(l.r.unplaced == 0);
+    scav_rect const at{ l.r.placed[0] };
+    CHECK(at.x >= from.x);
+    uint32_t const frame{ l.c.submachine_ids[l.c.states[box].submachines.off].v };
+    CHECK(contains(l.z.sub[frame], at));
   }
 }
 

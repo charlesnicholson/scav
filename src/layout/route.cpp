@@ -101,7 +101,7 @@ bool same_but_shifted(RouteFrameCache const &a,
     RouteNet const &q{ b.nets[i] };
     if ((p.src_obstacle != q.src_obstacle) || (p.dst_obstacle != q.dst_obstacle) ||
         (p.waypoint_off != q.waypoint_off) || (p.waypoint_len != q.waypoint_len) ||
-        (p.src_face != q.src_face) || (p.dst_face != q.dst_face) ||
+        (p.src_face != q.src_face) || (p.dst_face != q.dst_face) || (p.lean != q.lean) ||
         !moved_pt(p.src, q.src) || !moved_pt(p.dst, q.dst)) {
       return false;
     }
@@ -542,6 +542,7 @@ Routes route_transitions(Chart const &c,
         net.src_face = faces[0][pn.seg];
         net.dst_face = faces[1][pn.seg];
       }
+      if (pn.seg < z.lean.size()) { net.lean = z.lean[pn.seg]; }
       trace_emit({ .kind = TraceKind::NetPlanned,
                    .net = { .seg = pn.seg,
                             .trans = g.segments[pn.seg].trans.v,

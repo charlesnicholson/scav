@@ -1415,10 +1415,10 @@ constexpr std::array<std::array<int64_t, 11>, 8> SCALE_PINNED{
     { 21616, 0, 3072, 46595888, 52856, 95493944, 0, 0, 0, 2760164, 36376973376 },
     { 0, 0, 2528, 0, 0, 1224016, 0, 0, 0, 640498, 14443223840 },
     { 22224, 0, 3072, 31574176, 52456, 57418576, 0, 0, 0, 640498, 14443223840 },
-    { 0, 0, 1224, 0, 80, 2592310, 0, 0, 0, 73344, 3667557376 },
-    { 2089, 0, 319, 0, 265, 7295649, 0, 0, 0, 73344, 3667557376 },
-    { 0, 0, 1206, 402435, 95, 2706344, 0, 0, 0, 13056, 1615626240 },
-    { 1994, 0, 324, 0, 268, 5555694, 0, 0, 0, 13056, 1615626240 } }
+    { 0, 0, 1220, 0, 80, 2591782, 0, 0, 0, 73344, 3667557376 },
+    { 2088, 0, 319, 0, 265, 7295646, 0, 0, 0, 73344, 3667557376 },
+    { 0, 0, 1176, 162960, 91, 2319881, 0, 0, 0, 13056, 1615626240 },
+    { 1986, 0, 324, 0, 266, 5555577, 0, 0, 0, 13056, 1615626240 } }
 };
 
 }  // namespace
@@ -1789,13 +1789,13 @@ TEST_CASE("layout: a pinned row runs that row, and searches from it") {
     CHECK(cost_less(after, before));
   }
 
-  // And an unpinned run of the shipped profile is still the search: row 4 is
+  // And an unpinned run of the shipped profile is still the search: row 5 is
   // what `axis` picks, so the pin at 0 above reached a row the argmin does not.
   Chart searched;
   load_corpus("axis.scav", searched);
   uint32_t picked{ INVALID };
   REQUIRE(layout_run(searched, {}, opts(p), placed, diags, nullptr, &picked));
-  CHECK(picked == 4);
+  CHECK(picked == 5);
 }
 
 TEST_CASE("layout: the search turns a frame down where that converges cheaper") {
