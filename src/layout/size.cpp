@@ -148,7 +148,7 @@ struct ChunkView {
   uint32_t first, last;
   std::vector<uint32_t> const &nodes, &index, &local_rank, &global_rank;
   std::vector<uint32_t> const &chunk_index, &chunk_nodes;
-  std::vector<int32_t> const &line, &centre, &seat_at;
+  std::vector<int32_t> const &line, &inset, &centre, &seat_at;
   CoordGraph const &cg;
 };
 
@@ -183,7 +183,7 @@ struct SizeScratch {
   // One component, and one layout of it.
   std::vector<uint32_t> nodes, global_rank, local_rank, index, in_layer;
   std::vector<uint32_t> group, labelled, grouped, chunk_of, chunks;
-  std::vector<int32_t> extent, layer_w, widest_label, group_w, line;
+  std::vector<int32_t> extent, layer_w, widest_label, group_w, line, inset;
   std::vector<Wide> layer_h, carry, applied;
   std::vector<uint8_t> glued, paired, bare;
   std::vector<scav_rect> pieces;
@@ -281,6 +281,15 @@ struct Sizer {
            (cross_of(o.nodes[node].subject) != 0);
   }
   [[nodiscard]] int32_t attach_at(uint32_t seg, uint32_t state, bool down) const;
+  [[nodiscard]] bool port_at(uint32_t seg, uint32_t state, bool down, int32_t &at) const;
+  // Whether `seg` meets `state` at a port on its border, on any face.
+  [[nodiscard]] bool ported(uint32_t seg, uint32_t state) const {
+    if (seg >= g.segments.size()) { return false; }
+    for (uint32_t const port : { g.segments[seg].src_port, g.segments[seg].dst_port }) {
+      if ((port < g.ports.size()) && (g.ports[port].state.v == state)) { return true; }
+    }
+    return false;
+  }
   void trace_ports(uint32_t m, bool down) const;
   [[nodiscard]] uint32_t connected_components(Span span, Span espan);
   void count_turns(ChunkView const &v);
@@ -292,6 +301,7 @@ struct Sizer {
                  std::vector<scav_rect> const &boxes,
                  std::vector<uint32_t> const &component,
                  std::vector<scav_point> const &local);
+  void level_rank_ports(uint32_t m, bool down);
   void size_sub(uint32_t m);
   void size_state(uint32_t i);
 };
@@ -303,7 +313,16 @@ struct Sizer {
 // a port, and where the frame inside runs the other way, whose ports are on
 // the faces this frame's edges do not arrive at.
 int32_t Sizer::attach_at(uint32_t seg, uint32_t state, bool down) const {
-  if (seg >= g.segments.size()) { return 0; }  // a hand-built frame
+  int32_t at{ 0 };
+  static_cast<void>(port_at(seg, state, down, at));
+  return at;
+}
+
+// `attach_at`, and whether `seg` meets `state` at a port on the faces this
+// frame's edges arrive at, rather than at its box.
+bool Sizer::port_at(uint32_t seg, uint32_t state, bool down, int32_t &at) const {
+  at = 0;
+  if (seg >= g.segments.size()) { return false; }  // a hand-built frame
   SplitSegment const &sg{ g.segments[seg] };
   for (uint32_t const port : { sg.src_port, sg.dst_port }) {
     if ((port >= g.ports.size()) || (g.ports[port].state.v != state)) { continue; }
@@ -323,12 +342,14 @@ int32_t Sizer::attach_at(uint32_t seg, uint32_t state, bool down) const {
     Wide const pad{ bare_pseudostate(c, out.sub, b, state) ? 0 : p.pad };
     if (down) {
       Wide const x{ pad + sub_local[frame].x + out.node[node].x };
-      return static_cast<int32_t>(x - (out.state[state].w / 2));
+      at = static_cast<int32_t>(x - (out.state[state].w / 2));
+      return true;
     }
     Wide const y{ pad + b.h_before + sub_local[frame].y + out.node[node].y };
-    return static_cast<int32_t>(y - (out.state[state].h / 2));
+    at = static_cast<int32_t>(y - (out.state[state].h / 2));
+    return true;
   }
-  return 0;
+  return false;
 }
 
 // Each edge end that meets a composite at a port off its centre.
@@ -608,8 +629,7 @@ void Sizer::step_layers(ChunkView const &v, std::vector<TraceGap> &lanes) {
   }
 
   auto const inset_of = [&](uint32_t i) {
-    return (v.line[i] == 0) ? Wide{ 0 }
-                            : ((Wide{ v.line[i] } - along(node_of(i).subject)) / 2);
+    return (v.line[i] == 0) ? Wide{ 0 } : Wide{ v.inset[i] };
   };
   std::vector<uint32_t> const &seat_to{ sc.seat_to };
   std::vector<uint8_t> &left{ sc.left };
@@ -889,6 +909,41 @@ void Sizer::lay_out_sub(uint32_t m) {
       uint32_t const r{ local_rank[nodes[i]] };
       layer_w[r] = imax(layer_w[r], group_w[root_of]);
     }
+    // Parallel to `nodes`: where a grouped state starts along its column, on
+    // the line's centre. A state holding no regions joined in its group to a
+    // composite at a port on the composite's face across the ranks is
+    // centred on that port instead, as far as the line's width holds it, so
+    // the leg between them runs straight.
+    std::vector<int32_t> &inset{ sc.inset };
+    inset.assign(nodes.size(), 0);
+    for (uint32_t i = 0; i < nodes.size(); ++i) {
+      if (line[i] == 0) { continue; }
+      inset[i] = (line[i] - along(o.nodes[span.off + nodes[i]].subject)) / 2;
+    }
+    for (uint32_t i = 0; i < nodes.size(); ++i) {
+      uint32_t const st{ o.nodes[span.off + nodes[i]].subject };
+      if ((line[i] == 0) || (c.states[st].submachines.len != 0)) { continue; }
+      uint32_t ports{ 0 };
+      Wide want{ 0 };
+      for (uint32_t k = 0; k < espan.len; ++k) {
+        OrderEdge const &e{ o.edges[espan.off + k] };
+        uint32_t a{ 0 };
+        uint32_t b{ 0 };
+        if (!flat(e, a, b) || ((a != i) && (b != i))) { continue; }
+        uint32_t const other{ (a == i) ? b : a };
+        uint32_t const composite{ o.nodes[span.off + nodes[other]].subject };
+        int32_t at{ 0 };
+        if ((c.states[composite].submachines.len == 0) ||
+            !port_at(e.segment, composite, !down, at)) {
+          continue;
+        }
+        ++ports;
+        want = Wide{ inset[other] } + (along(composite) / 2) + at - (along(st) / 2);
+      }
+      if (ports != 1) { continue; }
+      inset[i] =
+          static_cast<int32_t>(imin(imax(want, Wide{ 0 }), Wide{ line[i] } - along(st)));
+    }
     auto const boundary_gap = [&](uint32_t r) {
       return (global_rank[r] < gspan.len) ? Wide{ o.gaps[gspan.off + global_rank[r]] }
                                           : Wide{ 0 };
@@ -1152,6 +1207,7 @@ void Sizer::lay_out_sub(uint32_t m) {
                               .chunk_index = chunk_index,
                               .chunk_nodes = chunk_nodes,
                               .line = line,
+                              .inset = inset,
                               .centre = centre,
                               .seat_at = seat_at,
                               .cg = cg };
@@ -1190,15 +1246,13 @@ void Sizer::lay_out_sub(uint32_t m) {
                                 ? imax(kept_w[r - first] - along(nd.subject), Wide{ 0 })
                                 : Wide{ 0 } };
           // On its group's centre line, where it has one.
-          Wide const inset{ (line[at] == 0)
-                                ? flush
-                                : ((Wide{ line[at] } - along(nd.subject)) / 2) };
-          if (inset != flush) {
-            shape.centred.emplace_back(nd.subject, static_cast<int32_t>(inset));
+          Wide const from_edge{ (line[at] == 0) ? flush : Wide{ inset[at] } };
+          if (from_edge != flush) {
+            shape.centred.emplace_back(nd.subject, static_cast<int32_t>(from_edge));
           }
           // Local to the piece; the packing below decides where the piece
           // itself goes.
-          shape.at[at] = { .x = static_cast<int32_t>(layer_x[r - first] + inset),
+          shape.at[at] = { .x = static_cast<int32_t>(layer_x[r - first] + from_edge),
                            .y = static_cast<int32_t>(centre[i]) };
         }
 
@@ -1745,6 +1799,7 @@ void Sizer::place_sub(uint32_t m,
       box.y = down ? lead : (cross - (box.h / 2));
     }
   }
+  level_rank_ports(m, down);
 
   // A port on a cross border sits on the frame's edge across the ranks, and
   // along them level with where its flat edge meets the state it joins: the
@@ -1765,6 +1820,99 @@ void Sizer::place_sub(uint32_t m,
     int32_t const cross{ (cross_of(o.nodes[port].subject) == 1) ? 0 : packed.h };
     out.node[port] =
         down ? scav_point{ .x = cross, .y = lead } : scav_point{ .x = lead, .y = cross };
+  }
+}
+
+// A port on a border the ranks start or end at sits, across the ranks, level
+// with where its route meets the state at the far end of its chain: the seat
+// the router gives a route aimed at that state's face from the port's height,
+// which is that height held a corner's inset in from the face's ends; a
+// glyph's centre; or the port on the state's border the route continues
+// through. The port and its chain's bends move there only through a band no
+// other node between the border and that state is in, a state kept the room a
+// route keeps from a box and a bend or another port a pitch, so the move
+// passes nothing a route could meet.
+void Sizer::level_rank_ports(uint32_t m, bool down) {
+  Span const span{ o.sub_nodes[m] };
+  Span const espan{ o.sub_edges[m] };
+  Wide const clear{ route_clearance(p) };
+  Wide const pitch{ label_line_height(p) };
+  auto const lead = [&](uint32_t n) {
+    return Wide{ down ? out.node[n].y : out.node[n].x };
+  };
+  auto const cross = [&](uint32_t n) -> int32_t & {
+    return down ? out.node[n].x : out.node[n].y;
+  };
+  auto const chained = [&](uint32_t n, uint32_t seg) {
+    return (o.nodes[n].kind == OrderKind::Bend) && (o.nodes[n].subject == seg);
+  };
+  for (uint32_t b = span.off; b < (span.off + span.len); ++b) {
+    if ((o.nodes[b].kind != OrderKind::Boundary) || on_cross_border(b)) { continue; }
+    uint32_t const seg{ o.nodes[b].subject };
+    uint32_t far{ INVALID };
+    for (uint32_t k = 0; k < espan.len; ++k) {
+      OrderEdge const &e{ o.edges[espan.off + k] };
+      if (e.segment != seg) { continue; }
+      for (uint32_t const end : { e.src, e.dst }) {
+        if (o.nodes[end].kind == OrderKind::State) { far = end; }
+      }
+    }
+    if (far == INVALID) { continue; }
+    uint32_t const st{ o.nodes[far].subject };
+    scav_rect const &box{ out.state[st] };
+    Wide const lo{ down ? box.x : box.y };
+    Wide const len{ down ? box.w : box.h };
+    StateKind const kind{ c.states[st].kind };
+    Wide const was{ cross(b) };
+    Wide to{ lo + (len / 2) };
+    if (ported(seg, st)) {
+      int32_t at{ 0 };
+      if (!port_at(seg, st, down, at)) { continue; }
+      to += at;
+    } else if (!kind_inscribed(kind)) {
+      Wide const inset{ imin(imax(clear, Wide{ state_corner_radius(kind, box, p.pad) }),
+                             len / 2) };
+      to = imin(imax(was, lo + inset), (lo + len) - inset);
+    }
+
+    // Along the ranks, the stretch between the border and the state's near
+    // face; across them, what the port and its bends sweep through.
+    bool const leading{ lead(b) <= lead(far) };
+    Wide const near{ leading ? lead(far) : (lead(far) + (down ? box.h : box.w)) };
+    Wide const from_a{ imin(lead(b), near) };
+    Wide const to_a{ imax(lead(b), near) };
+    Wide band_lo{ imin(was, to) };
+    Wide band_hi{ imax(was, to) };
+    bool inside{ true };
+    for (uint32_t n = span.off; n < (span.off + span.len); ++n) {
+      if (!chained(n, seg)) { continue; }
+      band_lo = imin(band_lo, Wide{ cross(n) });
+      band_hi = imax(band_hi, Wide{ cross(n) });
+      inside = inside && (lead(n) >= from_a) && (lead(n) <= to_a);
+    }
+    if (!inside || (band_lo == band_hi)) { continue; }
+    bool free{ true };
+    for (uint32_t n = span.off; free && (n < (span.off + span.len)); ++n) {
+      OrderNode const &nd{ o.nodes[n] };
+      if ((n == b) || (n == far) || chained(n, seg) || on_cross_border(n)) { continue; }
+      if (nd.kind == OrderKind::State) {
+        scav_rect const &r{ out.state[nd.subject] };
+        Wide const a{ down ? r.y : r.x };
+        Wide const a_len{ down ? r.h : r.w };
+        Wide const cr{ down ? r.x : r.y };
+        Wide const cr_len{ down ? r.w : r.h };
+        free = ((a + a_len) <= from_a) || (a >= to_a) ||
+               ((cr + cr_len + clear) <= band_lo) || ((cr - clear) >= band_hi);
+        continue;
+      }
+      Wide const at{ cross(n) };
+      free = (lead(n) < from_a) || (lead(n) > to_a) || ((at + pitch) <= band_lo) ||
+             ((at - pitch) >= band_hi);
+    }
+    if (!free) { continue; }
+    for (uint32_t n = span.off; n < (span.off + span.len); ++n) {
+      if ((n == b) || chained(n, seg)) { cross(n) = static_cast<int32_t>(to); }
+    }
   }
 }
 
@@ -1824,8 +1972,15 @@ void Sizer::size_sub(uint32_t m) {
     put(has ? seg_label_w[e.segment] : 0);
     for (uint32_t const end : { e.src, e.dst }) {
       OrderNode const &nd{ o.nodes[end] };
-      put((nd.kind == OrderKind::State) ? attach_at(e.segment, nd.subject, down) : 0);
-      put((nd.kind == OrderKind::State) ? attach_at(e.segment, nd.subject, !down) : 0);
+      bool const state{ nd.kind == OrderKind::State };
+      int32_t at{ 0 };
+      int32_t across_at{ 0 };
+      bool const faced{ state && port_at(e.segment, nd.subject, down, at) };
+      bool const flat_faced{ state && port_at(e.segment, nd.subject, !down, across_at) };
+      key.push_back((state && ported(e.segment, nd.subject)) ? 1U : 0U);
+      key.push_back((faced ? 1U : 0U) | (flat_faced ? 2U : 0U));
+      put(at);
+      put(across_at);
     }
   }
   key.push_back(gspan.len);

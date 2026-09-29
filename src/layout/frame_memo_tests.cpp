@@ -534,3 +534,97 @@ TEST_CASE("size memo: a port on a cross border keys on the port it continues thr
   CHECK(same(got.z, want.z));
   CHECK_FALSE(same(want.z, warm.z));
 }
+
+TEST_CASE("size memo: a port on a rank border keys on the port it continues through") {
+  // Two charts alike but for which of `Up` and `Down` the route reaches. The
+  // ordering puts the one reached below the other, and `Up` is the taller, so
+  // every state and segment keeps its id and `Box` its size while `Box`'s port
+  // sits at another height across its ranks: `Outer`'s frame differs only in
+  // that, which is where the port on `Outer`'s leading border is levelled to.
+  scav_profile const p{ readable() };
+  std::string const text{
+    "chart nest \"a route through two rank borders\" {\n"
+    "  state Source,\n"
+    "  state Outer {\n"
+    "    state Box {\n"
+    "      state First, state Up, state Down,\n"
+    "      trans * -> First, trans First -> Up, trans First -> Down,\n"
+    "    },\n"
+    "    trans * -> Box,\n"
+    "  },\n"
+    "  trans * -> Source,\n"
+    "  trans Source -> Outer/Box/Up,\n"
+    "}\n"
+  };
+  std::string moved_text{ text };
+  std::string const into{ "Outer/Box/Up" };
+  size_t const at{ moved_text.find(into) };
+  REQUIRE(at != std::string::npos);
+  moved_text.replace(at, into.size(), "Outer/Box/Down");
+  std::array<std::string, 2> const texts{ text, moved_text };
+  std::array<Chart, 2> charts;
+  for (uint32_t k = 0; k < 2; ++k) {
+    Loader loader;
+    REQUIRE(load_add(loader,
+                     reinterpret_cast<scav_byte const *>(texts[k].data()),
+                     texts[k].size(),
+                     "nest.scav"));
+    REQUIRE(load_pending(loader).empty());
+    std::vector<Diagnostic> diags;
+    REQUIRE(load_finish(loader, charts[k], diags));
+  }
+  auto const named = [&](std::string const &name) {
+    for (uint32_t st = 0; st < charts[0].states.size(); ++st) {
+      if (chart_string(charts[0], charts[0].states[st].name) == name) { return st; }
+    }
+    return INVALID;
+  };
+  uint32_t const box{ named("Box") };
+  uint32_t const up{ named("Up") };
+  REQUIRE(box != INVALID);
+  REQUIRE(up != INVALID);
+  Requests req;
+  for (uint32_t st = 0; st < charts[0].states.size(); ++st) {
+    req.box.push_back({ .min_w = 0, .h_before = (st == up) ? 400 : 0, .h_after = 0 });
+  }
+  scav_spaces const s{ req.view() };
+  std::array<SplitGraph, 2> const g{ decompose(charts[0]), decompose(charts[1]) };
+  std::array<SubmachineOrders, 2> const o{
+    order_submachines(charts[0], g[0], s, p, 1, {}),
+    order_submachines(charts[1], g[1], s, p, 1, {}),
+  };
+  auto const sized_as = [&](uint32_t k, bool traced) {
+    return sized(charts[k],
+                 g[k],
+                 o[k],
+                 s,
+                 p,
+                 DarSource::Profile,
+                 Compaction::Off,
+                 Fold::Scale,
+                 traced);
+  };
+  Sized const warm{ sized_as(0, false) };
+  REQUIRE(warm.ok);
+  Sized const got{ sized_as(1, false) };
+  Sized const want{ sized_as(1, true) };
+  REQUIRE(want.ok);
+  REQUIRE(want.z.state[box].w == warm.z.state[box].w);
+  REQUIRE(want.z.state[box].h == warm.z.state[box].h);
+  uint32_t const outer{ named("Outer") };
+  REQUIRE(outer != INVALID);
+  uint32_t const frame{
+    charts[1].submachine_ids[charts[1].states[outer].submachines.off].v
+  };
+  Span const nodes{ o[1].sub_nodes[frame] };
+  REQUIRE(o[0].sub_nodes[frame] == nodes);
+  bool moved{ false };
+  for (uint32_t k = nodes.off; k < (nodes.off + nodes.len); ++k) {
+    moved = moved || (want.z.node[k].x != warm.z.node[k].x) ||
+            (want.z.node[k].y != warm.z.node[k].y);
+  }
+  REQUIRE(moved);
+  CHECK(got.ok);
+  CHECK(same(got.z, want.z));
+  CHECK_FALSE(same(want.z, warm.z));
+}

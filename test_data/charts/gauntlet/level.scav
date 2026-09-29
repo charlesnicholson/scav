@@ -1,0 +1,12 @@
+// A route into a composite's second rank, through a port on the border its
+// ranks start at. Coordinate assignment set the port below `First`, the way it
+// sets a bend, and `Target`'s face ended above it, so the route crossed the
+// border and jogged up to reach `Target`, as `mill`'s `tool change` did into
+// `tool/arm/Ready`.
+chart level "a route through a rank border, level with the state it joins" {
+  state Source,
+  state Box { state First, state Target, trans * -> First, trans First -> Target },
+
+  trans * -> Source,
+  trans Source -> Box/Target "reach",
+}

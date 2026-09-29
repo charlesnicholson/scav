@@ -57,10 +57,11 @@ scav_profile compact() {
 // Every chart in test_data/charts/gauntlet, named so a failure says which shape
 // broke rather than which index did.
 constexpr std::array GAUNTLET{
-  "above.scav",   "chain.scav",     "crossing.scav", "crowd.scav",   "enclosing.scav",
-  "entered.scav", "fanin.scav",     "folded.scav",   "fork.scav",    "lane.scav",
-  "long.scav",    "loop.scav",      "marks.scav",    "mutual.scav",  "ported.scav",
-  "regions.scav", "roundtrip.scav", "stretch.scav",  "through.scav", "transit.scav"
+  "above.scav",   "chain.scav",   "crossing.scav",  "crowd.scav",   "enclosing.scav",
+  "entered.scav", "fanin.scav",   "folded.scav",    "fork.scav",    "lane.scav",
+  "level.scav",   "long.scav",    "loop.scav",      "marks.scav",   "mutual.scav",
+  "ported.scav",  "regions.scav", "roundtrip.scav", "stretch.scav", "through.scav",
+  "transit.scav", "under.scav"
 };
 
 // One chart, laid out: the pieces every property below reads.
@@ -1119,7 +1120,8 @@ TEST_CASE("gauntlet: a composite entered straight holds its first state a cleara
   // ring than a route keeps from a box. A rank gap there, and a lane for the
   // route, were 1,338 units of `vac`'s `dock` (11.9.5). Row 0 unsearched keeps
   // the frame running across, so the port is on the border its ranks start at;
-  // what ships is held to the same bound.
+  // what ships is held to the same bound on whichever border the search put
+  // the port on.
   for (scav_profile const &p :
        { readable(), compact(), one_row(readable()), one_row(compact()) }) {
     CAPTURE(p.profile_id);
@@ -1133,9 +1135,8 @@ TEST_CASE("gauntlet: a composite entered straight holds its first state a cleara
     REQUIRE(box != INVALID);
     REQUIRE(first != INVALID);
     scav_rect const outer{ l.z.state[box] };
+    scav_rect const band{ l.z.before[box] };
     scav_rect const in{ l.z.state[first] };
-    CHECK(in.x >= (outer.x + p.pad));
-    CHECK((in.x - (outer.x + p.pad)) <= route_clearance(p));
 
     uint32_t t{ INVALID };
     for (uint32_t k = 0; k < l.c.transitions.size(); ++k) {
@@ -1154,6 +1155,98 @@ TEST_CASE("gauntlet: a composite entered straight holds its first state a cleara
       down = down && (l.r.points[route.off + k].x == from.x);
     }
     CHECK((across || down));
+
+    // From the inside of the border the route crosses to `First`.
+    Wide gap{ 0 };
+    if (from.x < outer.x) {
+      gap = Wide{ in.x } - (outer.x + p.pad);
+    } else if (from.x >= (outer.x + outer.w)) {
+      gap = (Wide{ outer.x } + outer.w - p.pad) - (Wide{ in.x } + in.w);
+    } else if (from.y < outer.y) {
+      gap = Wide{ in.y } - (Wide{ band.y } + band.h);
+    } else {
+      gap = (Wide{ outer.y } + outer.h - p.pad) - (Wide{ in.y } + in.h);
+    }
+    CHECK(gap >= 0);
+    CHECK(gap <= route_clearance(p));
+  }
+}
+
+namespace {
+
+// The route of the one transition leaving `from`, held to one straight line
+// from `from`'s border to `to`'s.
+void straight_from(Laid const &l, uint32_t from, uint32_t to) {
+  uint32_t t{ INVALID };
+  for (uint32_t k = 0; k < l.c.transitions.size(); ++k) {
+    if (l.c.transitions[k].src.v == from) { t = k; }
+  }
+  REQUIRE(t != INVALID);
+  scav_span const route{ l.r.route[t] };
+  REQUIRE(route.len >= 2);
+  scav_point const first{ l.r.points[route.off] };
+  scav_point const last{ l.r.points[route.off + route.len - 1] };
+  bool across{ true };
+  bool down{ true };
+  for (uint32_t k = 1; k < route.len; ++k) {
+    across = across && (l.r.points[route.off + k].y == first.y);
+    down = down && (l.r.points[route.off + k].x == first.x);
+  }
+  CHECK((across || down));
+  CHECK(on_border(first, l.z.state[from]));
+  CHECK(on_border(last, l.z.state[to]));
+}
+
+}  // namespace
+
+TEST_CASE("gauntlet: a port on a rank border sits level with the state it joins") {
+  // `Source -> Box/Target` crosses `Box`'s leading border into its second rank
+  // through a bend beside `First`. Coordinate assignment set the port and the
+  // bend below `First`, past the end of `Target`'s face, and the route jogged
+  // up inside `Box` to reach it. Both sit where the route meets that face, so
+  // it is one straight line; row 0 unsearched is the shape, and what ships is
+  // held to the same line.
+  for (scav_profile const &p :
+       { readable(), compact(), one_row(readable()), one_row(compact()) }) {
+    CAPTURE(p.profile_id);
+    CAPTURE(p.portfolio_m);
+    Laid l;
+    lay("level.scav", p, l);
+    uint32_t const source{ state_named(l.c, "Source") };
+    uint32_t const target{ state_named(l.c, "Target") };
+    REQUIRE(source != INVALID);
+    REQUIRE(target != INVALID);
+    straight_from(l, source, target);
+  }
+}
+
+TEST_CASE("gauntlet: a state beside a composite is centred on the port it enters") {
+  // Ranked with `Box`, `Source` is joined to `Box/Target` through a port on
+  // `Box`'s bottom border, which sits level with `Target`, off `Box`'s centre.
+  // On the column's centre line with `Box`, `Source`'s leg to that port
+  // jogged; centred on the port, the route runs straight up into `Target`.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Laid bare;
+    lay("under.scav", one_row(p), bare);
+    uint32_t const source{ state_named(bare.c, "Source") };
+    uint32_t const box{ state_named(bare.c, "Box") };
+    uint32_t const target{ state_named(bare.c, "Target") };
+    REQUIRE(source != INVALID);
+    REQUIRE(box != INVALID);
+    REQUIRE(target != INVALID);
+    uint32_t const rank{ bare.o.nodes[bare.o.state_node[box]].rank };
+    SearchPins const seed{ .ranks = { { .state = StateId{ source }, .rank = rank } } };
+    Laid l;
+    lay("under.scav", one_row(p), l, {}, &seed);
+    REQUIRE(l.o.nodes[l.o.state_node[source]].rank == l.o.nodes[l.o.state_node[box]].rank);
+    scav_rect const from{ l.z.state[source] };
+    scav_rect const to{ l.z.state[target] };
+    scav_rect const around{ l.z.state[box] };
+    REQUIRE(from.y >= (around.y + around.h));
+    // `Target` is off `Box`'s centre, so its port is too.
+    REQUIRE((to.x + (to.w / 2)) != (around.x + (around.w / 2)));
+    straight_from(l, source, target);
   }
 }
 

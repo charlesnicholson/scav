@@ -1,0 +1,12 @@
+// A state ranked beside a composite and joined to a state inside it through a
+// port on the composite's bottom border. The two shared the column's centre
+// line, and the port sits level with `Target`, off that centre, so the leg
+// between `Source` and the border jogged, as `mill`'s `extend` did from
+// `tool/Gripping` into `tool/arm`.
+chart under "a state beside a composite, centred on the port it enters" {
+  state Box { state Left, state Target, trans * -> Left, trans Left -> Target },
+  state Source,
+
+  trans * -> Box,
+  trans Source -> Box/Target,
+}
