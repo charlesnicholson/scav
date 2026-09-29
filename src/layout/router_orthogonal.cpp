@@ -501,12 +501,37 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
     }
   }
 
+  // The box at a seat's far end, which is past `boxes` for an end naming none.
+  auto const far_box = [&](Seat const &seat) {
+    RouteNet const &net{ nets[seat.slot / 2] };
+    return (seat.end == 0) ? net.dst_obstacle : net.src_obstacle;
+  };
+  // Whether a seat's far end names no box and lies level with it, so the net
+  // is one straight leg that only the seat moving can bend: a port's. The far
+  // end is the net's own point there, since an end naming no box is seated on
+  // what it is aimed at.
+  auto const level = [&](Seat const &seat) {
+    RouteNet const &net{ nets[seat.slot / 2] };
+    scav_point const there{ (seat.end == 0) ? net.dst : net.src };
+    return (far_box(seat) >= boxes.size()) &&
+           (((seat.face < 2) ? there.y : there.x) == seat.pos);
+  };
+  auto const glyph_far = [&](Seat const &seat) {
+    uint32_t const box{ far_box(seat) };
+    return (box < inscribed.size()) && (inscribed[box] != 0);
+  };
+
   // One sweep of the face: everything arriving at a point is one fan-in and
   // everything leaving it is one fan-out, each a trunk a reader wants whole and
   // 11.5's bundles exist to keep. What no trunk explains is an arrival and a
   // departure on one point, where the head is inked along the other route's own
   // first leg -- so the run seats by direction and the members of a direction
   // keep the point they share.
+  //
+  // A point holding a `level` seat keeps that seat there and moves the rest
+  // the whole step instead of half each: every seat of the other direction,
+  // and every seat of the level one's own whose far end is an inscribed
+  // glyph's one point.
   auto const sweep = [&]() {
     for (Seat &seat : seats) {
       seat.pos = (seat.face < 2) ? at[seat.slot].y : at[seat.slot].x;
@@ -530,8 +555,12 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
       uint32_t const count{ end - first };
       start = end;
       if (count < 2) { continue; }
+      uint32_t keep{ INVALID };  // the direction of the first level seat
+      for (uint32_t i = first; (i < end) && (keep == INVALID); ++i) {
+        if (level(seats[i])) { keep = seats[i].end; }
+      }
       uint32_t const split{ seats[end - 1].end - seats[first].end };
-      if (split == 0) { continue; }
+      if ((split == 0) && (keep == INVALID)) { continue; }
       scav_rect const &r{ boxes[seats[first].box] };
       bool const along_y{ seats[first].face < 2 };
       int32_t const lo{ along_y ? r.y : r.x };
@@ -544,6 +573,10 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
       if (step <= 0) { continue; }
       for (uint32_t i = first; i < end; ++i) {
         Seat const &seat{ seats[i] };
+        if ((keep != INVALID) &&
+            (level(seat) || ((seat.end == keep) && !glyph_far(seat)))) {
+          continue;
+        }
         // Which way the net travels through the face rather than which end of
         // it this is: out through a right or a bottom face runs +, and in
         // through a left or a top face runs + as well. The one running + takes
@@ -552,7 +585,9 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
         // lines; at any one face this is still exactly arrival against
         // departure, so a fan-in and a fan-out each keep their one point.
         bool const forward{ (seat.end == 0) == ((seat.face == 1) || (seat.face == 3)) };
-        int32_t const want{ seat.pos + (forward ? -(step / 2) : (step - (step / 2))) };
+        int32_t const down_by{ (keep == INVALID) ? (step / 2) : step };
+        int32_t const up_by{ (keep == INVALID) ? (step - (step / 2)) : step };
+        int32_t const want{ seat.pos + (forward ? -down_by : up_by) };
         int32_t const got{ onto_face(want, lo, len, clear, arc(seat.box)) };
         int32_t &held{ along_y ? at[seat.slot].y : at[seat.slot].x };
         if (held == got) { continue; }
@@ -621,6 +656,16 @@ void ortho_separate_attachments(std::vector<RouteNet> const &nets,
   };
   thread_local std::vector<Leg> legs;
   legs.clear();
+  // Whether a leg's far end names no box and lies level with its seat, so the
+  // net is one straight leg that only the seat moving can bend: a port's. The
+  // far end is the net's own point there, as in the spread above.
+  auto const level = [&](Leg const &leg) {
+    RouteNet const &net{ nets[leg.net] };
+    bool const from_src{ (leg.slot % 2) == 0 };
+    uint32_t const far{ from_src ? net.dst_obstacle : net.src_obstacle };
+    scav_point const there{ from_src ? net.dst : net.src };
+    return (far >= boxes.size()) && (((leg.face < 2) ? there.y : there.x) == leg.pos);
+  };
   for (uint32_t n = 0; n < nets.size(); ++n) {
     for (uint32_t end = 0; end < 2; ++end) {
       uint32_t const box{ (end == 0) ? nets[n].src_obstacle : nets[n].dst_obstacle };
@@ -674,16 +719,23 @@ void ortho_separate_attachments(std::vector<RouteNet> const &nets,
       if ((apart <= 0) || (apart >= pitch)) { continue; }
       if ((low.hi <= high.lo) || (high.hi <= low.lo)) { continue; }  // never alongside
       // Half the shortfall each, so neither moves further than it has to and the
-      // pair is symmetric whichever order the sweep reached it in.
+      // pair is symmetric whichever order the sweep reached it in; or all of it
+      // to the one whose partner is a level leg, which stays.
       //
       int32_t const want{ pitch - apart };
+      std::array<bool, 2> const fixed{ level(low), level(high) };
+      if (fixed[0] && fixed[1]) { continue; }
       std::array<int32_t, 2> got{ low.pos, high.pos };
       for (uint32_t which = 0; which < 2; ++which) {
         Leg const &leg{ (which == 0) ? low : high };
+        if (fixed[which]) { continue; }
         scav_rect const &r{ boxes[leg.box] };
         int32_t const face_lo{ (leg.face < 2) ? r.y : r.x };
         int32_t const len{ (leg.face < 2) ? r.h : r.w };
-        int32_t const aim{ leg.pos + ((which == 0) ? -(want / 2) : (want - (want / 2))) };
+        int32_t const share{ fixed[1 - which]
+                                 ? want
+                                 : ((which == 0) ? (want / 2) : (want - (want / 2))) };
+        int32_t const aim{ leg.pos + ((which == 0) ? -share : share) };
         got[which] = onto_face(aim, face_lo, len, clear, arc(leg.box));
       }
       for (uint32_t which = 0; which < 2; ++which) {

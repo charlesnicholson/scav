@@ -965,6 +965,73 @@ TEST_CASE("ortho: a leaning net seats its leg at the lower end of the shared run
   CHECK((back[1] == pt(881, 653)));
 }
 
+TEST_CASE("ortho: a port's level seat keeps its point and a pseudostate's moves off it") {
+  // `mill`'s `reset` and `Clear`'s initial both arrive on `Clear`'s leading
+  // face. The two arrivals are one direction, which the spread keeps as a
+  // trunk; but the port's leg is straight only where it is, and the initial's
+  // far end is a dot's one point, so the dot's arrival is what moves -- the
+  // whole step, since the port's does not take half.
+  // An end naming no box is seated on what it is aimed at, so the port's own
+  // point is the net's `src` and not its seat.
+  std::vector<scav_rect> const boxes{ rect(1000, 0, 400, 400), rect(500, 150, 100, 100) };
+  std::vector<uint8_t> const glyph{ 0, 1 };
+  auto const spread = [&](int32_t port_y) {
+    std::vector<RouteNet> const nets{
+      { .src = pt(0, port_y), .dst = pt(1200, 200), .dst_obstacle = 0 },
+      { .src = pt(550, 200), .dst = pt(1200, 200), .src_obstacle = 1, .dst_obstacle = 0 },
+    };
+    std::vector<scav_point> at{ pt(1200, 200),
+                                pt(1000, 200),
+                                pt(600, 200),
+                                pt(1000, 200) };
+    ortho_spread_attachments(nets, boxes, glyph, {}, 8, 100, at);
+    return at;
+  };
+  std::vector<scav_point> const level{ spread(200) };
+  CHECK((level[1] == pt(1000, 200)));  // level with the port still
+  CHECK((level[3] == pt(1000, 100)));  // a whole pitch off it
+  CHECK((level[2] == pt(600, 200)));   // and the dot keeps its one seat
+
+  // A port not level with its seat is no straight leg to keep, so the two
+  // arrivals are the trunk they always were.
+  std::vector<scav_point> const off{ spread(50) };
+  CHECK((off[1] == pt(1000, 200)));
+  CHECK((off[3] == pt(1000, 200)));
+}
+
+TEST_CASE("ortho: a departure on a port's level seat takes the whole step") {
+  // An arrival from a port and a departure to a box share a point: the spread
+  // separates the two directions, and half each bent the port's straight leg.
+  std::vector<scav_rect> const boxes{ rect(1000, 0, 400, 400), rect(0, 600, 400, 400) };
+  std::vector<RouteNet> const nets{
+    { .src = pt(-500, 200), .dst = pt(1200, 200), .dst_obstacle = 0 },
+    { .src = pt(1200, 200), .dst = pt(200, 800), .src_obstacle = 0, .dst_obstacle = 1 },
+  };
+  std::vector<scav_point> at{ pt(1200, 200), pt(1000, 200), pt(1000, 200), pt(200, 600) };
+  ortho_spread_attachments(nets, boxes, {}, {}, 8, 100, at);
+  CHECK((at[1] == pt(1000, 200)));
+  CHECK((at[2] == pt(1000, 300)));
+}
+
+TEST_CASE("ortho: a port's level leg stays and the leg beside it takes the shortfall") {
+  // A port's leg into one box and a leg between two others passing under it a
+  // hair apart: half each moved the port's seat off the port and bent a leg
+  // that was one straight line. The port end is seated on what it is aimed at,
+  // so its leg runs from the face to its own box's centre.
+  std::vector<scav_rect> const boxes{ rect(900, 0, 100, 400),
+                                      rect(1100, 500, 100, 400),
+                                      rect(0, 500, 100, 400) };
+  std::vector<RouteNet> const nets{
+    { .src = pt(-500, 390), .dst = pt(950, 200), .dst_obstacle = 0 },
+    { .src = pt(50, 700), .dst = pt(1150, 700), .src_obstacle = 2, .dst_obstacle = 1 },
+  };
+  std::vector<scav_point> at{ pt(950, 200), pt(900, 390), pt(100, 510), pt(1100, 510) };
+  ortho_separate_attachments(nets, boxes, {}, {}, 8, 200, at);
+  CHECK(at[1].y == 390);
+  CHECK(at[3].y == 590);
+  CHECK(at[2].y == at[3].y);  // and the other still one straight line
+}
+
 TEST_CASE("ortho: a face with no room for the seats leaves them where they are") {
   // A mark too small to seat an arrival apart from a departure keeps them
   // stacked rather than sliding one off its own border, and it is stopped twice

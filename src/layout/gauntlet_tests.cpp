@@ -57,10 +57,10 @@ scav_profile compact() {
 // Every chart in test_data/charts/gauntlet, named so a failure says which shape
 // broke rather than which index did.
 constexpr std::array GAUNTLET{
-  "above.scav",     "chain.scav",   "crossing.scav", "crowd.scav",  "enclosing.scav",
-  "entered.scav",   "fanin.scav",   "folded.scav",   "fork.scav",   "lane.scav",
-  "long.scav",      "loop.scav",    "marks.scav",    "mutual.scav", "regions.scav",
-  "roundtrip.scav", "stretch.scav", "through.scav",  "transit.scav"
+  "above.scav",   "chain.scav",     "crossing.scav", "crowd.scav",   "enclosing.scav",
+  "entered.scav", "fanin.scav",     "folded.scav",   "fork.scav",    "lane.scav",
+  "long.scav",    "loop.scav",      "marks.scav",    "mutual.scav",  "ported.scav",
+  "regions.scav", "roundtrip.scav", "stretch.scav",  "through.scav", "transit.scav"
 };
 
 // One chart, laid out: the pieces every property below reads.
@@ -925,6 +925,51 @@ TEST_CASE("gauntlet: a folded frame's second piece starts under the state enteri
     CHECK(at.x >= from.x);
     uint32_t const frame{ l.c.submachine_ids[l.c.states[box].submachines.off].v };
     CHECK(contains(l.z.sub[frame], at));
+  }
+}
+
+TEST_CASE("gauntlet: a port level with a child keeps its seat, and the initial's moves") {
+  // `Above -> Box/First` comes through a port level with `First`, whose
+  // initial's dot is seated level with it too, so both arrive at one point on
+  // `First`'s leading face. Two arrivals are one direction, which the spread
+  // kept as a trunk, and the dot's arrowhead was drawn over the port's. Row 0
+  // unsearched, whose alignment is the one described.
+  for (scav_profile const &p : { one_row(readable()), one_row(compact()) }) {
+    CAPTURE(p.profile_id);
+    Laid l;
+    lay("ported.scav", p, l);
+    uint32_t const first{ state_named(l.c, "First") };
+    uint32_t const above{ state_named(l.c, "Above") };
+    REQUIRE(first != INVALID);
+    REQUIRE(above != INVALID);
+    uint32_t dot{ INVALID };
+    uint32_t ported{ INVALID };
+    std::vector<uint32_t> into;
+    for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+      Transition const &tr{ l.c.transitions[t] };
+      if (tr.dst.v != first) { continue; }
+      into.push_back(t);
+      if (l.c.states[tr.src.v].kind == StateKind::Initial) { dot = t; }
+      if (tr.src.v == above) { ported = t; }
+    }
+    REQUIRE(into.size() == 3);
+    REQUIRE(dot != INVALID);
+    REQUIRE(ported != INVALID);
+    auto const last = [&](uint32_t t) {
+      scav_span const route{ l.r.route[t] };
+      REQUIRE(route.len >= 2);
+      return l.r.points[route.off + route.len - 1];
+    };
+    // The port's leg into `First` is level with where it crossed `Box`'s border.
+    REQUIRE(l.r.port[ported].len == 1);
+    scav_port_slot const &slot{ l.r.slots[l.r.port[ported].off] };
+    CHECK(last(ported).y == slot.y);
+    // And no other arrival shares the point it arrives at.
+    for (uint32_t const t : into) {
+      if (t == ported) { continue; }
+      CAPTURE(t);
+      CHECK_FALSE(same(last(t), last(ported)));
+    }
   }
 }
 
