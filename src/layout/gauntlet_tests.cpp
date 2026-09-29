@@ -1092,9 +1092,10 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     // back on it, two at `readable` and four at `compact`, since a fold that
     // stacks an edge into a composite stopped being a scale-measure choice:
     // unsearched, this row lays the whole chart out flat, and divider ports on
-    // the regions' sides send routes round. Owed to 11.10g's top and bottom
-    // ports; `retrace` keeps the search off them, and what ships reads zero
-    // below.
+    // the regions' sides send routes round. Three at both since phase 2 counts
+    // only the lanes that turn (11.9.5), which is the arrangement moving. Owed
+    // to 11.10g's top and bottom ports; `retrace` keeps the search off them,
+    // and what ships reads zero below.
     Laid row_zero;
     lay("regions.scav", one_row(p), row_zero);
     REQUIRE(row_zero.tuple == 0);
@@ -1102,7 +1103,7 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     uint32_t back{ 0 };
     shape_counts(row_zero, through, back);
     CHECK(through == 0);
-    CHECK(back == ((p.profile_id == compact().profile_id) ? 4U : 2U));
+    CHECK(back == 3);
     // The scorer from the other end, over the columns that run wrote: 11.6's
     // descent and the predicate above are two implementations of one question,
     // and a carve-out is worth more when both answer it.

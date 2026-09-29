@@ -112,6 +112,7 @@ struct Shape {
   std::vector<std::pair<uint32_t, SeatHow>> seated;
   std::vector<std::pair<uint32_t, int32_t>> centred;
   std::vector<TracePiece> packed;
+  std::vector<TraceGap> lanes;
   // Some piece is packed other than beside the one before it.
   bool wraps{ false };
   // Every edge a cut crosses between stacked pieces joins two plain nodes.
@@ -127,9 +128,24 @@ struct Shape {
     seated.clear();
     centred.clear();
     packed.clear();
+    lanes.clear();
     wraps = false;
     drawable = true;
   }
+};
+
+// One chunk of one component as `lay_out_sub` holds it, for the steps along
+// its ranks: `nodes` is the component in frame-local indices, `index` a frame
+// node's place in it, and `chunk_index` a component node's place in the
+// chunk, whose `centre`, `seat_at` and layers these are.
+struct ChunkView {
+  Span span, espan, gspan;
+  bool down;
+  uint32_t first, last;
+  std::vector<uint32_t> const &nodes, &index, &local_rank, &global_rank;
+  std::vector<uint32_t> const &chunk_index, &chunk_nodes;
+  std::vector<int32_t> const &line, &centre, &seat_at;
+  CoordGraph const &cg;
 };
 
 // A frame the descent has yet to visit, and its root-absolute origin.
@@ -165,7 +181,7 @@ struct SizeScratch {
   std::vector<uint32_t> group, labelled, grouped, chunk_of, chunks;
   std::vector<int32_t> extent, layer_w, widest_label, group_w, line;
   std::vector<Wide> layer_h, carry, applied;
-  std::vector<uint8_t> glued, paired;
+  std::vector<uint8_t> glued, paired, bare;
   std::vector<scav_rect> pieces;
   Packing packed;
   Shape best, folded, stacked;
@@ -174,8 +190,9 @@ struct SizeScratch {
   std::vector<std::vector<uint32_t>> spare_layers;
   std::vector<uint32_t> chunk_index, chunk_nodes, arrivals, nearest;
   std::vector<int32_t> seat_at, enter_at;
-  std::vector<uint8_t> apart;
-  std::vector<Wide> layer_x;
+  std::vector<uint8_t> apart, open, left;
+  std::vector<uint32_t> mate, turning, turned_by, seat_to, fan;
+  std::vector<Wide> layer_x, kept_w;
 };
 
 SizeScratch &size_scratch() {
@@ -262,6 +279,8 @@ struct Sizer {
   [[nodiscard]] int32_t attach_at(uint32_t seg, uint32_t state, bool down) const;
   void trace_ports(uint32_t m, bool down) const;
   [[nodiscard]] uint32_t connected_components(Span span, Span espan);
+  void count_turns(ChunkView const &v);
+  void step_layers(ChunkView const &v, std::vector<TraceGap> &lanes);
   void lay_out_sub(uint32_t m);
   void place_sub(uint32_t m,
                  bool down,
@@ -378,6 +397,308 @@ uint32_t Sizer::connected_components(Span span, Span espan) {
   fill.assign(member_off.begin(), member_off.end() - 1);
   for (uint32_t k = 0; k < span.len; ++k) { member[fill[component[k]]++] = k; }
   return components;
+}
+
+// The lanes the alignment leaves turning in each boundary of the chunk, into
+// `turning` and `turned_by`. An edge whose two ends meet across the ranks runs
+// straight through its boundary and takes no lane there: an end is its port
+// where the edge meets a composite at one, the mark's centre on a glyph reached
+// at the middle of a face, and the straight zone of the face on any other box.
+// A point holds one straight edge a side, and a face whose seats are spread
+// across it meets a point at no height it can be sure of, so an end shared with
+// another edge on that side runs straight only between two faces. A
+// pseudostate whose every edge here joins one neighbour is levelled with it by
+// the seating, so its edge runs straight, and it sits in the corridor beside
+// that neighbour, so every other edge on that side of the neighbour goes round
+// it. An edge across several layers turns in its first boundary and its last,
+// as phase 1 counts it.
+void Sizer::count_turns(ChunkView const &v) {
+  auto const across = [&](uint32_t st) {
+    return v.down ? out.state[st].w : out.state[st].h;
+  };
+  auto const node_of = [&](uint32_t i) -> OrderNode const & {
+    return o.nodes[v.span.off + v.nodes[i]];
+  };
+  auto const in_chunk = [&](uint32_t node) {
+    uint32_t const i{ v.index[node - v.span.off] };
+    return ((i != INVALID) && (v.chunk_index[i] != INVALID)) ? i : INVALID;
+  };
+  size_t const n{ v.chunk_nodes.size() };
+
+  // Per chunk node, the one node every edge here joins it to, or `many`.
+  uint32_t const many{ INVALID - 1 };
+  std::vector<uint32_t> &mate{ sc.mate };
+  mate.assign(n, INVALID);
+  for (uint32_t k = 0; k < v.espan.len; ++k) {
+    OrderEdge const &e{ o.edges[v.espan.off + k] };
+    uint32_t const a{ v.index[e.src - v.span.off] };
+    uint32_t const b{ v.index[e.dst - v.span.off] };
+    if ((a == INVALID) || (b == INVALID) || (a == b)) { continue; }
+    for (uint32_t const end : { a, b }) {
+      if (v.chunk_index[end] == INVALID) { continue; }
+      uint32_t const there{ v.chunk_index[(end == a) ? b : a] };
+      uint32_t &one{ mate[v.chunk_index[end]] };
+      one = ((one == INVALID) || (one == there)) ? there : many;
+      if (there == INVALID) { one = many; }
+    }
+  }
+  auto const levelled = [&](uint32_t i, uint32_t with) {
+    OrderNode const &nd{ node_of(i) };
+    if (nd.kind != OrderKind::State) { return false; }
+    StateKind const kind{ c.states[nd.subject].kind };
+    return ((kind == StateKind::Initial) || (kind == StateKind::Final)) &&
+           (mate[v.chunk_index[i]] == v.chunk_index[with]);
+  };
+
+  // Per chunk node, the node the seating moves it beside, or INVALID: an
+  // initial before the one node it joins in the next layer, a final after the
+  // one it joins in the layer before, wherever the box lies inside the piece.
+  Wide chunk_h{ 0 };
+  for (uint32_t i = 0; i < n; ++i) {
+    chunk_h = imax(chunk_h, (Wide{ v.centre[i] } - (v.cg.extent[i] / 2)) + v.cg.extent[i]);
+  }
+  std::vector<uint32_t> &seat_to{ sc.seat_to };
+  seat_to.assign(n, INVALID);
+  for (uint32_t i = 0; i < n; ++i) {
+    OrderNode const &nd{ node_of(v.chunk_nodes[i]) };
+    uint32_t const one{ mate[i] };
+    if ((nd.kind != OrderKind::State) || (one >= n)) { continue; }
+    StateKind const kind{ c.states[nd.subject].kind };
+    uint32_t const r{ v.local_rank[v.nodes[v.chunk_nodes[i]]] };
+    uint32_t const nr{ v.local_rank[v.nodes[v.chunk_nodes[one]]] };
+    bool const toward{ ((kind == StateKind::Initial) && (nr == (r + 1))) ||
+                       ((kind == StateKind::Final) && ((nr + 1) == r)) };
+    Wide const y{ Wide{ v.centre[one] } + v.seat_at[i] - (v.cg.extent[i] / 2) };
+    bool const inside{ (y >= 0) && ((y + v.cg.extent[i]) <= chunk_h) };
+    if (toward && inside && (node_of(v.chunk_nodes[one]).kind == OrderKind::State)) {
+      seat_to[i] = one;
+    }
+  }
+  auto const passes = [&](uint32_t end, uint32_t far) {
+    uint32_t const rf{ v.local_rank[v.nodes[far]] };
+    for (uint32_t const q : v.cg.layers[rf - v.first]) {
+      if ((q != v.chunk_index[far]) && (seat_to[q] == v.chunk_index[end])) { return true; }
+    }
+    return false;
+  };
+
+  enum class End : uint8_t { Face, Point, Port };
+  auto const reach = [&](OrderEdge const &e, uint32_t i, Wide &lo, Wide &hi) {
+    OrderNode const &nd{ node_of(i) };
+    lo = v.centre[v.chunk_index[i]];
+    hi = lo;
+    if (nd.kind != OrderKind::State) { return End::Point; }
+    bool ported{ false };
+    if (e.segment < g.segments.size()) {
+      for (uint32_t const port :
+           { g.segments[e.segment].src_port, g.segments[e.segment].dst_port }) {
+        ported =
+            ported || ((port < g.ports.size()) && (g.ports[port].state.v == nd.subject));
+      }
+    }
+    StateKind const kind{ c.states[nd.subject].kind };
+    if (ported) {
+      lo += attach_at(e.segment, nd.subject, v.down);
+      hi = lo;
+      return End::Port;
+    }
+    if (kind_inscribed(kind)) { return End::Point; }
+    Wide const half{ (across(nd.subject) / 2) -
+                     state_corner_radius(kind, out.state[nd.subject], p.pad) };
+    lo -= half;
+    hi += half;
+    return End::Face;
+  };
+  // Per chunk node, its edges toward the layer before and toward the one after.
+  std::vector<uint32_t> &fan{ sc.fan };
+  fan.assign(2 * n, 0);
+  auto const side = [&](uint32_t i, uint32_t toward) {
+    uint32_t const r{ v.local_rank[v.nodes[i]] };
+    uint32_t const t{ v.local_rank[v.nodes[toward]] };
+    return (2 * static_cast<size_t>(v.chunk_index[i])) + ((t > r) ? 1U : 0U);
+  };
+  for (uint32_t k = 0; k < v.espan.len; ++k) {
+    OrderEdge const &e{ o.edges[v.espan.off + k] };
+    uint32_t const a{ in_chunk(e.src) };
+    uint32_t const b{ in_chunk(e.dst) };
+    if ((a == INVALID) || (b == INVALID) ||
+        (v.local_rank[v.nodes[a]] == v.local_rank[v.nodes[b]])) {
+      continue;
+    }
+    ++fan[side(a, b)];
+    ++fan[side(b, a)];
+  }
+
+  std::vector<uint32_t> &turning{ sc.turning };
+  turning.assign(v.last - v.first, 0);
+  std::vector<uint32_t> &turned_by{ sc.turned_by };
+  turned_by.assign(v.last - v.first, INVALID);
+  for (uint32_t k = 0; k < v.espan.len; ++k) {
+    OrderEdge const &e{ o.edges[v.espan.off + k] };
+    uint32_t const a{ in_chunk(e.src) };
+    uint32_t const b{ in_chunk(e.dst) };
+    if ((a == INVALID) || (b == INVALID)) { continue; }
+    uint32_t const ra{ v.local_rank[v.nodes[a]] };
+    uint32_t const rb{ v.local_rank[v.nodes[b]] };
+    if (ra == rb) { continue; }
+    Wide alo{ 0 };
+    Wide ahi{ 0 };
+    Wide blo{ 0 };
+    Wide bhi{ 0 };
+    End const ea{ reach(e, a, alo, ahi) };
+    End const eb{ reach(e, b, blo, bhi) };
+    bool const alone{ ((ea == End::Port) || (fan[side(a, b)] == 1)) &&
+                      ((eb == End::Port) || (fan[side(b, a)] == 1)) };
+    bool const faces{ (ea == End::Face) && (eb == End::Face) };
+    bool const straight{ levelled(a, b) || levelled(b, a) ||
+                         ((imax(alo, blo) <= imin(ahi, bhi)) && (faces || alone) &&
+                          !passes(a, b) && !passes(b, a)) };
+    if (straight) { continue; }
+    uint32_t const lo{ imin(ra, rb) - v.first };
+    uint32_t const hi{ imax(ra, rb) - v.first };
+    ++turning[lo];
+    turned_by[lo] = e.segment;
+    if (hi > (lo + 1)) {
+      ++turning[hi - 1];
+      turned_by[hi - 1] = e.segment;
+    }
+  }
+}
+
+// Each layer's place along the ranks inside the chunk, into `layer_x`, and the
+// room each keeps, into `kept_w`, after `count_turns`. A boundary is given its
+// labels, or its turning lanes a line of type apart where two or more turn
+// there; the lanes it holds go to `lanes` for the trace.
+//
+// A pseudostate the seating moves beside its neighbour goes `rank_sep` before
+// it, or after it for a final. Where that box, grown by half `node_sep`, lies
+// inside the neighbour's own layer, nothing is left of the pseudostate in its
+// own and the layer is sized without it; a layer left holding only boundary
+// nodes is open, as `sep_after` has it. Otherwise it keeps its own layer's
+// room, and the step to its neighbour's layer grows until the box clears every
+// node of its own layer at the height it moves to.
+void Sizer::step_layers(ChunkView const &v, std::vector<TraceGap> &lanes) {
+  auto const along = [&](uint32_t st) {
+    return v.down ? out.state[st].h : out.state[st].w;
+  };
+  auto const node_of = [&](uint32_t i) -> OrderNode const & {
+    return o.nodes[v.span.off + v.nodes[i]];
+  };
+  std::vector<int32_t> const &label_row{ (o.labels.size() == o.gaps.size()) ? o.labels
+                                                                            : o.gaps };
+  auto const label_gap = [&](uint32_t r) {
+    uint32_t const b{ v.global_rank[r] };
+    return (b < v.gspan.len) ? Wide{ label_row[v.gspan.off + b] } : Wide{ 0 };
+  };
+  std::vector<uint32_t> const &turning{ sc.turning };
+  int32_t const pitch{ label_line_height(p) };
+  auto const lanes_at = [&](uint32_t r) {
+    uint32_t const n{ turning[r - v.first] };
+    return (n < 2) ? Wide{ 0 } : imin(Wide{ n } * pitch, Wide{ SPACE_MAX });
+  };
+  for (uint32_t r = v.first; (r + 1) < v.last; ++r) {
+    if (turning[r - v.first] < 2) { continue; }
+    lanes.push_back({ .boundary = v.global_rank[r],
+                      .seg = sc.turned_by[r - v.first],
+                      .width = static_cast<int32_t>(lanes_at(r)) });
+  }
+
+  auto const inset_of = [&](uint32_t i) {
+    return (v.line[i] == 0) ? Wide{ 0 }
+                            : ((Wide{ v.line[i] } - along(node_of(i).subject)) / 2);
+  };
+  std::vector<uint32_t> const &seat_to{ sc.seat_to };
+  std::vector<uint8_t> &left{ sc.left };
+  left.assign(v.chunk_nodes.size(), 0);
+  std::vector<Wide> &kept_w{ sc.kept_w };
+  kept_w.assign(v.last - v.first, 0);
+  for (uint32_t r = v.first; r < v.last; ++r) {
+    for (uint32_t const i : v.cg.layers[r - v.first]) {
+      OrderNode const &nd{ node_of(v.chunk_nodes[i]) };
+      if (nd.kind != OrderKind::State) { continue; }
+      uint32_t const one{ seat_to[i] };
+      if (one != INVALID) {
+        uint32_t const near{ v.chunk_nodes[one] };
+        uint32_t const nr{ v.local_rank[v.nodes[near]] };
+        Wide const need{ Wide{ p.rank_sep } + along(nd.subject) + (p.node_sep / 2) };
+        Wide const room{ (nr > r) ? inset_of(near)
+                                  : (kept_w[nr - v.first] - inset_of(near) -
+                                     along(node_of(near).subject)) };
+        left[i] = (room >= need) ? 1U : 0U;
+      }
+      if (left[i] != 0) { continue; }
+      kept_w[r - v.first] =
+          imax(kept_w[r - v.first],
+               imax(Wide{ along(nd.subject) }, Wide{ v.line[v.chunk_nodes[i]] }));
+    }
+  }
+  std::vector<uint8_t> &open{ sc.open };
+  open.assign(v.last - v.first, 1);
+  for (uint32_t r = v.first; r < v.last; ++r) {
+    for (uint32_t const i : v.cg.layers[r - v.first]) {
+      if ((node_of(v.chunk_nodes[i]).kind != OrderKind::Boundary) && (left[i] == 0)) {
+        open[r - v.first] = 0;
+      }
+    }
+  }
+  auto const sep_in = [&](uint32_t r) {
+    bool const clear{ (open[r - v.first] != 0) || (open[r + 1 - v.first] != 0) };
+    return (clear && (label_gap(r) == 0)) ? Wide{ route_clearance(p) }
+                                          : Wide{ p.rank_sep };
+  };
+  // Where a node of the chunk sits across its layer, and how wide it is.
+  auto const x_in_layer = [&](uint32_t q) {
+    OrderNode const &nd{ node_of(v.chunk_nodes[q]) };
+    bool const dot{ (nd.kind == OrderKind::State) &&
+                    (c.states[nd.subject].kind == StateKind::Initial) };
+    uint32_t const r{ v.local_rank[v.nodes[v.chunk_nodes[q]]] };
+    return dot ? (kept_w[r - v.first] - along(nd.subject)) : inset_of(v.chunk_nodes[q]);
+  };
+  auto const w_of = [&](uint32_t q) {
+    OrderNode const &nd{ node_of(v.chunk_nodes[q]) };
+    return (nd.kind == OrderKind::State) ? Wide{ along(nd.subject) } : Wide{ 0 };
+  };
+  // Whether `q`, of the seated pseudostate `i`'s layer, shares the height its
+  // box moves to, by the test the seating makes.
+  auto const in_way = [&](uint32_t i, uint32_t q) {
+    if ((q == i) || (left[q] != 0) ||
+        (node_of(v.chunk_nodes[q]).kind == OrderKind::Boundary)) {
+      return false;
+    }
+    Wide const lo{ Wide{ v.centre[seat_to[i]] } + v.seat_at[i] - (v.cg.extent[i] / 2) -
+                   (p.node_sep / 2) };
+    Wide const hi{ lo + v.cg.extent[i] + p.node_sep };
+    Wide const qlo{ Wide{ v.centre[q] } - (v.cg.extent[q] / 2) };
+    return (lo < (qlo + v.cg.extent[q])) && (qlo < hi);
+  };
+  std::vector<Wide> &layer_x{ sc.layer_x };
+  layer_x.assign(v.last - v.first, 0);
+  for (uint32_t r = v.first + 1; r < v.last; ++r) {
+    Wide const before{ layer_x[r - v.first - 1] };
+    Wide x{ before + kept_w[r - v.first - 1] + sep_in(r - 1) +
+            imax(label_gap(r - 1), lanes_at(r - 1)) };
+    for (uint32_t const i : v.cg.layers[r - v.first - 1]) {
+      if ((seat_to[i] == INVALID) || (left[i] != 0) ||
+          (v.local_rank[v.nodes[v.chunk_nodes[seat_to[i]]]] != r)) {
+        continue;
+      }
+      Wide const past{ Wide{ p.rank_sep } + w_of(i) + (p.node_sep / 2) -
+                       inset_of(v.chunk_nodes[seat_to[i]]) };
+      for (uint32_t const q : v.cg.layers[r - v.first - 1]) {
+        if (in_way(i, q)) { x = imax(x, before + x_in_layer(q) + w_of(q) + past); }
+      }
+    }
+    for (uint32_t const i : v.cg.layers[r - v.first]) {
+      if ((seat_to[i] == INVALID) || (left[i] != 0)) { continue; }
+      uint32_t const src{ seat_to[i] };
+      Wide const end{ before + inset_of(v.chunk_nodes[src]) + w_of(src) + p.rank_sep +
+                      w_of(i) + (p.node_sep / 2) };
+      for (uint32_t const q : v.cg.layers[r - v.first]) {
+        if (in_way(i, q)) { x = imax(x, end - x_in_layer(q)); }
+      }
+    }
+    layer_x[r - v.first] = x;
+  }
 }
 
 // A frame's graph need not be connected, and unconnected states all rank 0, so
@@ -568,6 +889,28 @@ void Sizer::lay_out_sub(uint32_t m) {
       return (global_rank[r] < gspan.len) ? Wide{ o.gaps[gspan.off + global_rank[r]] }
                                           : Wide{ 0 };
     };
+    // Hand-built orders carry no label row, and their gaps are all labels.
+    std::vector<int32_t> const &label_row{ (o.labels.size() == o.gaps.size()) ? o.labels
+                                                                              : o.gaps };
+    auto const label_gap = [&](uint32_t r) {
+      return (global_rank[r] < gspan.len) ? Wide{ label_row[gspan.off + global_rank[r]] }
+                                          : Wide{ 0 };
+    };
+    // A layer of boundary nodes alone takes no room along the ranks: each is
+    // the point a route crosses the frame's border at, drawn on the frame's
+    // edge rather than in the layer. The layer beside it keeps the room a
+    // route keeps from a box, which also holds one turn, rather than
+    // `rank_sep`; a label charged between them keeps `rank_sep`.
+    std::vector<uint8_t> &bare{ sc.bare };
+    bare.assign(layers, 1);
+    for (uint32_t const k : nodes) {
+      if (o.nodes[span.off + k].kind != OrderKind::Boundary) { bare[local_rank[k]] = 0; }
+    }
+    auto const sep_after = [&](uint32_t r) {
+      bool const open{ (bare[r] != 0) || (bare[r + 1] != 0) };
+      return (open && (label_gap(r) == 0)) ? Wide{ route_clearance(p) }
+                                           : Wide{ p.rank_sep };
+    };
 
     // A cut before a layer is refused where it would separate an initial
     // pseudostate from the state it enters in that layer, or a final one in
@@ -634,9 +977,9 @@ void Sizer::lay_out_sub(uint32_t m) {
       chunks.assign(1, 0);
       Wide run{ 0 };
       for (uint32_t r = 0; r < layers; ++r) {
-        Wide const step{ (r == 0)
-                             ? Wide{ layer_w[r] }
-                             : (Wide{ layer_w[r] } + p.rank_sep + boundary_gap(r - 1)) };
+        Wide const step{ (r == 0) ? Wide{ layer_w[r] }
+                                  : (Wide{ layer_w[r] } + sep_after(r - 1) +
+                                     boundary_gap(r - 1)) };
         bool const wants_cut{ (r > 0) && ((run + step) > wrap_at) };
         if (wants_cut && (glued[r] != 0)) {
           shape.cuts.push_back({ .rank = global_rank[r], .refused = 1, .carried = 0 });
@@ -792,6 +1135,24 @@ void Sizer::lay_out_sub(uint32_t m) {
         cg.sep = p.node_sep;
         std::vector<int32_t> const centre{ cross_coordinates(cg) };
 
+        ChunkView const view{ .span = span,
+                              .espan = espan,
+                              .gspan = gspan,
+                              .down = down,
+                              .first = first,
+                              .last = last,
+                              .nodes = nodes,
+                              .index = index,
+                              .local_rank = local_rank,
+                              .global_rank = global_rank,
+                              .chunk_index = chunk_index,
+                              .chunk_nodes = chunk_nodes,
+                              .line = line,
+                              .centre = centre,
+                              .seat_at = seat_at,
+                              .cg = cg };
+        count_turns(view);
+
         // The gap a label was charged to the boundary this cut falls on, less
         // what the packing between two pieces already gives it. Inside a
         // chunk the charge is `rank_sep + boundary_gap`; across a cut the
@@ -802,13 +1163,10 @@ void Sizer::lay_out_sub(uint32_t m) {
         carry[chunk] = (first == 0)
                            ? Wide{ 0 }
                            : imax(boundary_gap(first - 1) - p.node_sep, Wide{ 0 });
-        std::vector<Wide> &layer_x{ sc.layer_x };
-        layer_x.assign(last - first, 0);
-        for (uint32_t r = first + 1; r < last; ++r) {
-          layer_x[r - first] =
-              layer_x[r - first - 1] + layer_w[r - 1] + p.rank_sep + boundary_gap(r - 1);
-        }
-        Wide chunk_w{ layer_x[last - first - 1] + layer_w[last - 1] };
+        step_layers(view, shape.lanes);
+        std::vector<Wide> const &kept_w{ sc.kept_w };
+        std::vector<Wide> const &layer_x{ sc.layer_x };
+        Wide chunk_w{ layer_x[last - first - 1] + kept_w[last - first - 1] };
         Wide chunk_h{ 0 };
         for (uint32_t i = 0; i < chunk_nodes.size(); ++i) {
           // A node's trailing edge, not its centre plus half its extent: an odd extent
@@ -825,7 +1183,7 @@ void Sizer::lay_out_sub(uint32_t m) {
           OrderNode const &nd{ o.nodes[span.off + nodes[at]] };
           Wide const flush{ ((nd.kind == OrderKind::State) &&
                              (c.states[nd.subject].kind == StateKind::Initial))
-                                ? Wide{ layer_w[r] } - along(nd.subject)
+                                ? imax(kept_w[r - first] - along(nd.subject), Wide{ 0 })
                                 : Wide{ 0 } };
           // On its group's centre line, where it has one.
           Wide const inset{ (line[at] == 0)
@@ -905,9 +1263,15 @@ void Sizer::lay_out_sub(uint32_t m) {
                 ((Wide{ want.y } + want.h) > chunk_h)) {
               return false;
             }
+            // A boundary node is drawn on the frame's edge, not where its
+            // layer puts it, and the bounds above already keep the box off
+            // that edge.
             scav_rect const room{ grow(want, p.node_sep / 2) };
             for (uint32_t j = 0; j < chunk_nodes.size(); ++j) {
-              if (j == i) { continue; }
+              if ((j == i) || (o.nodes[span.off + nodes[chunk_nodes[j]]].kind ==
+                               OrderKind::Boundary)) {
+                continue;
+              }
               scav_rect const there{
                 box_of_node(j, shape.at[chunk_nodes[j]].x, shape.at[chunk_nodes[j]].y)
               };
@@ -1213,6 +1577,12 @@ void Sizer::lay_out_sub(uint32_t m) {
                    .pass = static_cast<uint16_t>(how),
                    .frame = m,
                    .rank = { .state = state, .rank = 0 } });
+    }
+    for (TraceGap const &gap : best.lanes) {
+      trace_emit({ .kind = TraceKind::GapCharged,
+                   .pass = static_cast<uint16_t>(GapCause::Lanes),
+                   .frame = m,
+                   .gap = gap });
     }
     if (!best.ok) {
       overflow(diags, ElemKind::Submachine, m);

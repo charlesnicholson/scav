@@ -1404,15 +1404,21 @@ constexpr std::array<char const *, 2> SCALE_ROUTERS{ "orthogonal", "straight" };
 // `ORTHO_VERTEX_BUDGET` bounds `nx * ny`, and a squarer 2k frame spends more
 // vertices than the same area as a strip, so flat at `compact` fell to the
 // straight router. It fits the budget since the last change above.
+//
+// And when phase 2 began counting only the lanes its alignment leaves turning,
+// and a layer of boundary nodes or of pseudostates seated elsewhere stopped
+// taking a rank gap (11.9.5): nested `area` -49% and -24%, flat -5% and -4%;
+// flat `aspect` doubles at both profiles, and its `corridor` at `compact`
+// rises 52%.
 constexpr std::array<std::array<int64_t, 11>, 8> SCALE_PINNED{
-  { { 0, 0, 2936, 0, 0, 2200952, 0, 0, 0, 2816688, 70933787392 },
-    { 21136, 0, 3072, 60406592, 52784, 71508160, 0, 0, 0, 2816688, 70933787392 },
-    { 0, 0, 2824, 0, 0, 1252176, 0, 0, 0, 901408, 18900262400 },
-    { 22600, 0, 3072, 41312768, 52888, 45540280, 0, 0, 0, 901408, 18900262400 },
-    { 0, 0, 1224, 0, 80, 2716118, 0, 0, 0, 35684, 3856700960 },
-    { 2040, 0, 319, 0, 265, 7627654, 0, 0, 0, 35684, 3856700960 },
-    { 0, 0, 1188, 264655, 97, 2792640, 0, 0, 0, 7296, 1685667840 },
-    { 2018, 0, 324, 0, 268, 5814774, 0, 0, 0, 7296, 1685667840 } }
+  { { 0, 0, 2528, 0, 0, 1990112, 0, 0, 0, 2760164, 36376973376 },
+    { 21616, 0, 3072, 46595888, 52856, 95493944, 0, 0, 0, 2760164, 36376973376 },
+    { 0, 0, 2528, 0, 0, 1224016, 0, 0, 0, 640498, 14443223840 },
+    { 22224, 0, 3072, 31574176, 52456, 57418576, 0, 0, 0, 640498, 14443223840 },
+    { 0, 0, 1224, 0, 80, 2592310, 0, 0, 0, 73344, 3667557376 },
+    { 2089, 0, 319, 0, 265, 7295649, 0, 0, 0, 73344, 3667557376 },
+    { 0, 0, 1206, 402435, 95, 2706344, 0, 0, 0, 13056, 1615626240 },
+    { 1994, 0, 324, 0, 268, 5555694, 0, 0, 0, 13056, 1615626240 } }
 };
 
 }  // namespace

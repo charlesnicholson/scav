@@ -86,7 +86,7 @@ struct SegPort {
 // submachine order.
 struct FrameOrder {
   Frame f;
-  std::vector<int32_t> gaps;
+  std::vector<int32_t> gaps, labels;
   std::vector<SegPort> seg_ports;
   std::vector<uint32_t> cyclic;  // -> segments, those on a cycle of this frame
 };
@@ -604,6 +604,7 @@ void squeeze_ranks(Frame &f) {
 // before the first.
 void rank_derived(Frame &f,
                   std::vector<int32_t> &gaps,
+                  std::vector<int32_t> &labels,
                   std::vector<int32_t> const &seg_label,
                   std::vector<uint8_t> const &cut,
                   std::vector<uint8_t> const &extreme,
@@ -618,6 +619,7 @@ void rank_derived(Frame &f,
   uint32_t top{ 0 };
   for (OrderNode const &nd : f.nodes) { top = imax(top, nd.rank); }
   gaps.assign(top, 0);
+  labels.assign(top, 0);
   std::vector<uint32_t> &spanning{ sc.spanning };
   spanning.clear();
   for (uint32_t i = 0; i < f.edges.size(); ++i) {
@@ -631,6 +633,7 @@ void rank_derived(Frame &f,
       continue;
     }
     gaps[from] = imax(gaps[from], label);
+    labels[from] = imax(labels[from], label);
     trace_emit({ .kind = TraceKind::GapCharged,
                  .pass = static_cast<uint16_t>(GapCause::Label),
                  .gap = { .boundary = from, .seg = e.segment, .width = label } });
@@ -640,10 +643,13 @@ void rank_derived(Frame &f,
   // carrying type may not sit closer than a line of it (11.9.5). Phase 3
   // spreads into the width phase 2 left, so only phase 2 can reserve it.
   //
-  // The two boundaries an edge *turns* in, not every one it crosses: between
-  // them it runs straight and wants cross-axis room. Per component, because
-  // components are laid out separately and never share a corridor. Max rather
-  // than sum against the label charge: both size the same corridor.
+  // The two boundaries an edge *can* turn in, not every one it crosses:
+  // between them it runs straight and wants cross-axis room. Without cross
+  // positions every edge might turn in both, so this is the most the lanes can
+  // need, which is what phase 2 folds a run by; it places by `labels` and the
+  // lanes its alignment leaves turning. Per component, because components are
+  // laid out separately and never share a corridor. Max rather than sum
+  // against the label charge: both size the same corridor.
   Partition &part{ sc.part };
   part.reset(f.nodes.size());
   for (OrderEdge const &e : f.edges) { part.join(e.src, e.dst); }
@@ -658,25 +664,21 @@ void rank_derived(Frame &f,
   std::vector<uint32_t> &lanes{ sc.lanes };
   lanes.assign(gaps.size() * parts, 0);
   int32_t const pitch{ label_line_height(p) };
-  auto const turn = [&](uint32_t b, uint32_t of, uint32_t seg) {
+  auto const turn = [&](uint32_t b, uint32_t of) {
     if (b >= gaps.size()) { return; }
     uint32_t &here{ lanes[(static_cast<size_t>(b) * parts) + of] };
     ++here;
     if (here < 2) { return; }
-    int32_t const need{ static_cast<int32_t>(
-        imin(Wide{ here } * pitch, Wide{ SPACE_MAX })) };
-    gaps[b] = imax(gaps[b], need);
-    trace_emit({ .kind = TraceKind::GapCharged,
-                 .pass = static_cast<uint16_t>(GapCause::Lanes),
-                 .gap = { .boundary = b, .seg = seg, .width = need } });
+    gaps[b] =
+        imax(gaps[b], static_cast<int32_t>(imin(Wide{ here } * pitch, Wide{ SPACE_MAX })));
   };
   for (OrderEdge const &e : f.edges) {
     uint32_t const from{ imin(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
     uint32_t const to{ imax(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
     if (from == to) { continue; }  // turns in no boundary, as above
     uint32_t const of{ dense[part.root(e.src)] };
-    turn(from, of, e.segment);
-    if (to > (from + 1)) { turn(to - 1, of, e.segment); }
+    turn(from, of);
+    if (to > (from + 1)) { turn(to - 1, of); }
   }
 
   // An edge across several boundaries runs through every one of them, and its
@@ -702,6 +704,7 @@ void rank_derived(Frame &f,
     }
     bool const held{ gaps[at] >= label };
     gaps[at] = imax(gaps[at], label);
+    labels[at] = imax(labels[at], label);
     trace_emit({ .kind = TraceKind::GapCharged,
                  .pass = static_cast<uint16_t>(held ? GapCause::Held : GapCause::Label),
                  .gap = { .boundary = at, .seg = e.segment, .width = label } });
@@ -1040,6 +1043,8 @@ SubmachineOrders order_submachines(Chart const &c,
       }
       frames[m].gaps.resize(word());
       for (int32_t &gap : frames[m].gaps) { gap = static_cast<int32_t>(word()); }
+      frames[m].labels.resize(frames[m].gaps.size());
+      for (int32_t &label : frames[m].labels) { label = static_cast<int32_t>(word()); }
       frames[m].cyclic.resize(word());
       for (uint32_t &seg : frames[m].cyclic) { seg = word(); }
     } else {
@@ -1116,7 +1121,7 @@ SubmachineOrders order_submachines(Chart const &c,
         }
         squeeze_ranks(f);
       }
-      rank_derived(f, frames[m].gaps, seg_label, cut, extreme, p, sc);
+      rank_derived(f, frames[m].gaps, frames[m].labels, seg_label, cut, extreme, p, sc);
       f.edges.insert(f.edges.end(), flat.begin(), flat.end());
       if (!tracing) {
         value.clear();
@@ -1142,6 +1147,7 @@ SubmachineOrders order_submachines(Chart const &c,
         }
         put(static_cast<uint32_t>(frames[m].gaps.size()));
         for (int32_t const gap : frames[m].gaps) { value.push_back(gap); }
+        for (int32_t const label : frames[m].labels) { value.push_back(label); }
         put(static_cast<uint32_t>(frames[m].cyclic.size()));
         for (uint32_t const seg : frames[m].cyclic) { put(seg); }
         memo.insert(key, value);
@@ -1194,6 +1200,7 @@ SubmachineOrders order_submachines(Chart const &c,
                           .reversed = e.reversed });
     }
     for (int32_t const gap : frames[m].gaps) { o.gaps.push_back(gap); }
+    for (int32_t const label : frames[m].labels) { o.labels.push_back(label); }
     for (uint32_t v = 0; v < f.nodes.size(); ++v) {
       OrderNode const &nd{ f.nodes[v] };
       if (nd.kind == OrderKind::State) {

@@ -50,8 +50,13 @@ struct SubmachineOrders {
 
   // The extra width each rank boundary must carry beyond `rank_sep`, one row
   // per boundary, so `len` is one less than the frame's rank count.
-  std::vector<Span> sub_gaps;  // parallel to submachines -> gaps
+  std::vector<Span> sub_gaps;  // parallel to submachines -> gaps, labels
   std::vector<int32_t> gaps;
+  // Parallel to `gaps`: the part of each a label charged, without the lanes.
+  // `gaps` counts a lane for every edge that could turn in a boundary, which is
+  // what phase 2 folds by; it places by `labels` and the lanes its alignment
+  // says turn (11.9.5).
+  std::vector<int32_t> labels;
 
   std::vector<uint32_t> state_node;  // parallel to states -> nodes; INVALID if dead
   std::vector<uint32_t> seg_node;    // parallel to segments -> its boundary node

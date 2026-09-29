@@ -687,9 +687,11 @@ TEST_CASE("size: an edge pointing back a rank still aligns its ends") {
   CHECK(z.state[b.v].y + z.state[b.v].h + p.node_sep <= z.state[d.v].y);
 }
 
-TEST_CASE("size: an initial pseudostate sits against its layer's trailing edge") {
+TEST_CASE("size: an initial pseudostate sits one rank gap before its target") {
   // Left-aligned in a layer as wide as its widest member, the arrow out of it
-  // would run that whole width; beside its target it runs one rank gap.
+  // would run that whole width; beside its target it runs one rank gap. At
+  // `X`'s height, which `W` shares, it clears `W` by half a `node_sep`, and the
+  // step to `X`'s layer grows to hold that (11.9.5).
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const start{ build_state(c, root, {}, StateKind::Initial, {}) };
@@ -723,7 +725,9 @@ TEST_CASE("size: an initial pseudostate sits against its layer's trailing edge")
   scav_rect const &dot{ z.state[start.v] };
   scav_rect const &w{ z.state[wide.v] };
   CHECK(w.w > (10 * dot.w));  // the layer really is wide
-  CHECK(dot.x + dot.w == w.x + w.w);
+  CHECK(dot.y > z.state[x.v].y);
+  CHECK((dot.y + dot.h) < (z.state[x.v].y + z.state[x.v].h));
+  CHECK(dot.x == w.x + w.w + (p.node_sep / 2));
   CHECK(z.state[x.v].x - (dot.x + dot.w) == p.rank_sep);
 }
 
@@ -1341,14 +1345,21 @@ TEST_CASE("size: a fold whose pieces will not pack is dropped for the flat run")
                       diags));
   CHECK(diags.empty());
 
-  // Four ranks end to end, each one rank_sep past the last, which is the flat
-  // run rather than any arrangement of pieces.
+  // Four ranks end to end, each at least rank_sep past the last, which is the
+  // flat run rather than any arrangement of pieces. Past it only by the lanes
+  // of edges that turn there: two tall states cannot both meet a short one
+  // straight.
   int32_t const tall_w{ p.kind_min_w[0] + (2 * p.pad) };
   int32_t const wide_w{ SPACE_MAX + (2 * p.pad) };
+  int32_t const two{ 2 * label_line_height(p) };
   CHECK(z.state[ids[0].v].x == 0);
-  CHECK(z.state[ids[2].v].x == (tall_w + p.rank_sep));
-  CHECK(z.state[ids[3].v].x == (z.state[ids[2].v].x + wide_w + p.rank_sep));
-  CHECK(z.state[ids[5].v].x == (z.state[ids[3].v].x + tall_w + p.rank_sep));
+  int32_t const at2{ z.state[ids[2].v].x - (tall_w + p.rank_sep) };
+  int32_t const at3{ z.state[ids[3].v].x - (z.state[ids[2].v].x + wide_w + p.rank_sep) };
+  int32_t const at5{ z.state[ids[5].v].x - (z.state[ids[3].v].x + tall_w + p.rank_sep) };
+  for (int32_t const lanes : { at2, at3, at5 }) {
+    CAPTURE(lanes);
+    CHECK(((lanes == 0) || (lanes == two)));
+  }
   CHECK(z.sub[root.v].w == (z.state[ids[5].v].x + wide_w));
   CHECK(z.sub[root.v].w <= COORD_MAX);
   CHECK(z.sub[root.v].h <= COORD_MAX);
