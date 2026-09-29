@@ -244,9 +244,9 @@ uint32_t layout_inputs_digest(Chart const &c);
 
 // Cost ======================================================================
 
-inline constexpr uint32_t TIER2_TERMS{ 10 };
+inline constexpr uint32_t TIER2_TERMS{ 11 };
 
-// The ten Tier-2 quantities before weighting, so a test reads one of them
+// The eleven Tier-2 quantities before weighting, so a test reads one of them
 // rather than a sum.
 struct CostTerms {
   int64_t bends{ 0 };       // direction changes at a route's interior vertices
@@ -267,6 +267,7 @@ struct CostTerms {
   // shortfall, `along * (em - apart) / em`. Continuous with `corridor` at
   // `apart = 0` (11.6).
   int64_t crowding{ 0 };
+  int64_t length{ 0 };  // every route's polyline, end to end, summed
 
   // Tier 0, forbidden rather than priced: the obstacle set makes these
   // unrepresentable, and the count survives as a net (11.6).

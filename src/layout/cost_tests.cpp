@@ -97,7 +97,7 @@ std::vector<Piece> pieces_of(Routes const &r) {
 
 }  // namespace
 
-TEST_CASE("cost: a straight route between two boxes costs nothing but the chart") {
+TEST_CASE("cost: a straight route between two boxes costs its length and the chart") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -114,6 +114,7 @@ TEST_CASE("cost: a straight route between two boxes costs nothing but the chart"
   CHECK(t.bends == 0);
   CHECK(t.crossings == 0);
   CHECK(t.excess_len == 0);
+  CHECK(t.length == 200);
   CHECK(t.through_box == 0);
   CHECK(t.box_overlap == 0);
   CHECK(t.area == 400LL * 40);
@@ -353,6 +354,29 @@ TEST_CASE("cost: only the excess over the direct distance is charged") {
   };
   CostTerms const t{ cost_terms(c, decompose(c), z, around, {}, profile()) };
   CHECK(t.excess_len == ((2 * 180) - 300));  // isqrt(150^2 + 100^2) is 180
+}
+
+TEST_CASE("cost: length is every route end to end, once, crossed or not") {
+  Chart const c{ edges(2) };
+  SizedLayout const z{ blank(c) };
+  // A straight 300 is its direct distance and no excess, and still 300 long.
+  Routes const one{ routes_of(c, { { { .x = 0, .y = 0 }, { .x = 300, .y = 0 } } }) };
+  CostTerms const alone{ cost_terms(c, decompose(c), z, one, {}, profile()) };
+  CHECK(alone.excess_len == 0);
+  CHECK(alone.length == 300);
+
+  // A second route of three legs crosses the first. Its detour is charged per
+  // crossing; its length is the legs summed and nothing more.
+  Routes const two{ routes_of(c,
+                              { { { .x = 0, .y = 0 }, { .x = 300, .y = 0 } },
+                                { { .x = 100, .y = -100 },
+                                  { .x = 100, .y = 100 },
+                                  { .x = 200, .y = 100 },
+                                  { .x = 200, .y = 50 } } }) };
+  CostTerms const both{ cost_terms(c, decompose(c), z, two, {}, profile()) };
+  REQUIRE(both.crossings == 1);
+  CHECK(both.excess_len == 2 * ((200 + 100 + 50) - 180));  // isqrt(100^2 + 150^2)
+  CHECK(both.length == 300 + (200 + 100 + 50));
 }
 
 TEST_CASE("cost: overlapping siblings are a Tier-0 violation") {
@@ -746,10 +770,14 @@ TEST_CASE("cost: every Tier-2 term is scored in the unit the profile names it") 
   CHECK(only(&CostTerms::label_near, 1) == int64_t{ p.w_label_near });
   CHECK(only(&CostTerms::aspect, 1) == int64_t{ p.w_aspect });
   CHECK(only(&CostTerms::area, 1) == int64_t{ p.w_area });
+  CHECK(only(&CostTerms::crowding, 1) == int64_t{ p.w_crowding });
+  CHECK(only(&CostTerms::length, 1) == int64_t{ p.w_length });
 
   // A whole unit each way, and one grid unit past it.
   CHECK(only(&CostTerms::corridor, em) == int64_t{ p.w_corridor });
   CHECK(only(&CostTerms::corridor, em + 1) == (2 * int64_t{ p.w_corridor }));
+  CHECK(only(&CostTerms::length, em) == int64_t{ p.w_length });
+  CHECK(only(&CostTerms::length, em + 1) == (2 * int64_t{ p.w_length }));
   CHECK(only(&CostTerms::area, em * em) == int64_t{ p.w_area });
   CHECK(only(&CostTerms::area, (em * em) + 1) == (2 * int64_t{ p.w_area }));
 
@@ -772,13 +800,14 @@ TEST_CASE("cost: the shipped weights sum a hand-built term vector") {
   t.label_near = 300;  // 2
   t.aspect = 500;      // 3
   t.area = 100000;     // 3 em squared
+  t.length = 2000;     // 11
   CHECK(cost_of(t, p).t2 ==
         ((int64_t{ p.w_bends } * 3) + (int64_t{ p.w_corridor } * 3) +
          (int64_t{ p.w_crossings } * 5) + (int64_t{ p.w_excess_len } * 6) +
          (int64_t{ p.w_adjacency } * 2) + (int64_t{ p.w_label } * 4) +
          (int64_t{ p.w_label_near } * 2) + (int64_t{ p.w_aspect } * 3) +
-         (int64_t{ p.w_area } * 3)));
-  CHECK(cost_of(t, p).t2 == 5073);
+         (int64_t{ p.w_area } * 3) + (int64_t{ p.w_length } * 11)));
+  CHECK(cost_of(t, p).t2 == 5073 + (int64_t{ p.w_length } * 11));
 }
 
 TEST_CASE("cost: an em of one grid unit leaves every length where it stood") {
@@ -794,10 +823,11 @@ TEST_CASE("cost: an em of one grid unit leaves every length where it stood") {
   t.label_near = 300;
   t.aspect = 500;
   t.area = 100000;
+  t.length = 2000;
   CHECK(cost_of(t, p).t2 ==
         ((int64_t{ p.w_corridor } * 400) + (int64_t{ p.w_excess_len } * 1000) +
          (int64_t{ p.w_label_near } * 300) + (int64_t{ p.w_aspect } * 500) +
-         (int64_t{ p.w_area } * 100000)));
+         (int64_t{ p.w_area } * 100000) + (int64_t{ p.w_length } * 2000)));
 }
 
 TEST_CASE("cost: the shares divide the sum into floored basis points") {
@@ -1879,6 +1909,7 @@ CostTerms terms(Chart const &c,
     for (uint32_t k = 0; (k + 1) < route.len; ++k) {
       actual += length_of(r.points[route.off + k], r.points[route.off + k + 1]);
     }
+    t.length += actual;
     Wide boxes{ 0 };
     for (uint32_t i = 0; i < s.n_path_box; ++i) {
       if (s.path_box[i].subject == tr) { boxes += s.path_box[i].w; }
@@ -1991,19 +2022,20 @@ CostTerms terms(Chart const &c,
 
 }  // namespace reference
 
-constexpr uint32_t TERMS{ 15 };
+constexpr uint32_t TERMS{ 16 };
 
 std::array<int64_t, TERMS> terms_of(CostTerms const &t) {
-  return { t.bends,       t.corridor,    t.crossings, t.excess_len, t.adjacency,
-           t.label,       t.label_near,  t.aspect,    t.area,       t.crowding,
-           t.through_box, t.box_overlap, t.vanished,  t.flush,      t.through_region };
+  return { t.bends,       t.corridor, t.crossings,  t.excess_len,
+           t.adjacency,   t.label,    t.label_near, t.aspect,
+           t.area,        t.crowding, t.length,     t.through_box,
+           t.box_overlap, t.vanished, t.flush,      t.through_region };
 }
 
 // Which of `terms_of`'s entries a diff names, so a failure says what moved.
 constexpr std::array<char const *, TERMS> TERM_NAMES{
-  "bends",       "corridor",    "crossings", "excess_len", "adjacency",
-  "label",       "label_near",  "aspect",    "area",       "crowding",
-  "through_box", "box_overlap", "vanished",  "flush",      "through_region"
+  "bends",       "corridor", "crossings", "excess_len",    "adjacency", "label",
+  "label_near",  "aspect",   "area",      "crowding",      "length",    "through_box",
+  "box_overlap", "vanished", "flush",     "through_region"
 };
 
 // The first term the two disagree on, or empty.

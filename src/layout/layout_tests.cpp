@@ -2788,6 +2788,7 @@ TEST_CASE("layout: the corpus cost vector is committed, term by term and by shar
                                 t.label_near,
                                 t.aspect,
                                 t.area,
+                                t.length,
                                 scored.t2 }) {
       actual += ' ';
       actual += std::to_string(term);

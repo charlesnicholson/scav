@@ -285,13 +285,13 @@ void append_rect(std::string &out, scav_rect r) {
 // The Tier-2 terms in CostTerms order, which is the order `cost_shares`
 // answers in, so a name and a share never come apart.
 constexpr std::array<char const *, TIER2_TERMS> TERMS{
-  "bends", "corridor",   "crossings", "excess_len", "adjacency",
-  "label", "label_near", "aspect",    "area",       "crowding"
+  "bends",      "corridor", "crossings", "excess_len", "adjacency", "label",
+  "label_near", "aspect",   "area",      "crowding",   "length"
 };
 
 std::array<int64_t, TIER2_TERMS> term_values(CostTerms const &t) {
-  return { t.bends, t.corridor,   t.crossings, t.excess_len, t.adjacency,
-           t.label, t.label_near, t.aspect,    t.area,       t.crowding };
+  return { t.bends,      t.corridor, t.crossings, t.excess_len, t.adjacency, t.label,
+           t.label_near, t.aspect,   t.area,      t.crowding,   t.length };
 }
 
 void append_geometry_text(std::string &out,

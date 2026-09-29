@@ -991,8 +991,8 @@ CostTerms cost_terms(CostContext const &ctx,
   t.crowding = crowding_over(pieces, lanes, p.font_size_grid);
 
   // `min_len` is the direct distance between the endpoints, or the boxes the
-  // route has to carry if those are longer; only the excess is charged, since
-  // charging raw length makes the optimiser fight the constraint (11.9).
+  // route has to carry if those are longer. `excess_len` is what a route runs
+  // past it, per crossing on the edge; `length` is the whole route, once.
   std::vector<Wide> &carried{ sc.carried };
   carried.assign(c.transitions.size(), 0);
   if (s.path_box != nullptr) {
@@ -1009,6 +1009,7 @@ CostTerms cost_terms(CostContext const &ctx,
     for (uint32_t k = 0; (k + 1) < route.len; ++k) {
       actual += length_of(r.points[route.off + k], r.points[route.off + k + 1]);
     }
+    t.length += actual;
     Wide const direct{ length_of(r.points[route.off],
                                  r.points[route.off + route.len - 1]) };
     Wide const excess{ actual - imax(direct, carried[tr]) };
@@ -1262,7 +1263,8 @@ std::array<Wide, TIER2_TERMS> weighted_terms(CostTerms const &t, scav_profile co
            Wide{ p.w_label_near } * ceil_div(t.label_near, em),
            Wide{ p.w_aspect } * ceil_div(t.aspect, em),
            Wide{ p.w_area } * ceil_div(t.area, em2),
-           Wide{ p.w_crowding } * ceil_div(t.crowding, em) };
+           Wide{ p.w_crowding } * ceil_div(t.crowding, em),
+           Wide{ p.w_length } * ceil_div(t.length, em) };
 }
 
 }  // namespace
@@ -1279,7 +1281,7 @@ Cost cost_of(CostTerms const &t, scav_profile const &p) {
   out.t0_violations =
       t.through_box + t.box_overlap + t.vanished + t.flush + t.through_region + t.retrace;
   // Area is the largest term at (2 * COORD_MAX)^2 < 2^40, its em^2 only divides
-  // it down, and nine of those under a weight capped at 2^10 stay below 2^54.
+  // it down, and eleven of those under a weight capped at 2^10 stay below 2^54.
   for (Wide const term : weighted_terms(t, p)) { out.t2 += term; }
   return out;
 }

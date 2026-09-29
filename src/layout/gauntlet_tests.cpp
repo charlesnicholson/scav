@@ -59,7 +59,7 @@ scav_profile compact() {
 constexpr std::array GAUNTLET{ "chain.scav",     "crossing.scav", "crowd.scav",
                                "enclosing.scav", "fanin.scav",    "fork.scav",
                                "lane.scav",      "loop.scav",     "marks.scav",
-                               "mutual.scav",    "regions.scav" };
+                               "mutual.scav",    "regions.scav",  "stretch.scav" };
 
 // One chart, laid out: the pieces every property below reads.
 struct Laid {
@@ -746,6 +746,32 @@ TEST_CASE("gauntlet: a chain of states turns only where the fold cuts it") {
   }
 }
 
+TEST_CASE("gauntlet: a run's arrows each span one gap, not the drawing") {
+  // Every transition here joins two states the layering puts side by side, so
+  // each arrow is one gap long wherever the fold sends the run. Moving a state
+  // a rank along squares the drawing up and stretches one arrow across it, and
+  // that arrow is straight: only the route's own length prices it.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Laid l;
+    lay("stretch.scav", p, l);
+    int32_t widest{ 0 };
+    for (uint32_t const st : live_of(l.c)) { widest = imax(widest, l.z.state[st].w); }
+    for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+      scav_span const rt{ l.r.route[t] };
+      Wide length{ 0 };
+      for (uint32_t k = 0; (k + 1) < rt.len; ++k) {
+        scav_point const a{ l.r.points[rt.off + k] };
+        scav_point const b{ l.r.points[rt.off + k + 1] };
+        length +=
+            Wide{ imax(a.x, b.x) - imin(a.x, b.x) } + (imax(a.y, b.y) - imin(a.y, b.y));
+      }
+      CAPTURE(t);
+      CHECK(length <= (Wide{ widest } + p.rank_sep));
+    }
+  }
+}
+
 TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
   // A property above that cannot hold on one of these charts carves it out, and
   // a carve-out with no number on it is an excuse. Each count is what the tree
@@ -828,9 +854,12 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     // is priced** (11.6): branches stacked through one cap run as tight lanes,
     // and those now cost what they look like. Zero at both profiles since
     // 11.10g's second round; the face rule's defect is still there in the row
-    // above.
+    // above. **One at both profiles since route length is priced** (11.6):
+    // any nonzero `w_length` walks the search to a four-bend arrangement that
+    // already scored lower without it, and one arrival there enters the join
+    // through its cap.
     Laid fork_shipped;
     lay("fork.scav", p, fork_shipped);
-    CHECK(capped_branches(fork_shipped) == 0);
+    CHECK(capped_branches(fork_shipped) == 1);
   }
 }

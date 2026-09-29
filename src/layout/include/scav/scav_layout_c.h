@@ -113,6 +113,7 @@ typedef struct {
   int32_t w_aspect;
   int32_t w_area;
   int32_t w_crowding; /* lanes closer than one em, not on one line; [0, 1024] */
+  int32_t w_length;   /* every route's whole length; [0, 1024] */
 
   int32_t portfolio_k;                 /* bounded moves scored; [0, 2^20] */
   int32_t portfolio_m;                 /* chart-global phase-2 tuples; [1, 16] */
