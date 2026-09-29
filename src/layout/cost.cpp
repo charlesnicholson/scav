@@ -6,6 +6,7 @@
 
 #include "layout/decompose.h"
 #include "layout/geom.h"
+#include "layout/order.h"
 #include "layout/route.h"
 #include "layout/size.h"
 #include "scav/scav_core.h"
@@ -525,6 +526,32 @@ bool within(Chart const &c, StateId state, uint32_t m) {
   return false;
 }
 
+// Whether bend `at` of `tr` lies in a state its route only passes through.
+// Each end with a `top` is walked up to it, innermost first, and the first
+// state strictly holding the bend decides: the end or the state enclosing it
+// is that end's own machine, anything above is passed through.
+bool in_transit(Chart const &c,
+                SizedLayout const &z,
+                Transition const &tr,
+                std::array<uint32_t, 2> const &top,
+                scav_point at) {
+  std::array<StateId, 2> const ends{ tr.src, tr.dst };
+  for (uint32_t i = 0; i < 2; ++i) {
+    if (top[i] == INVALID) { continue; }
+    StateId const own{ enclosing_state(c, ends[i]) };
+    StateId st{ ends[i] };
+    for (size_t step = 0; (step < c.states.size()) && (st.v != INVALID); ++step) {
+      if (inside(at, z.state[st.v])) {
+        if ((st != ends[i]) && (st != own)) { return true; }
+        break;
+      }
+      if (st.v == top[i]) { break; }
+      st = enclosing_state(c, st);
+    }
+  }
+  return false;
+}
+
 // Marks an item the running query already visited, so a rect covering several
 // cells is visited once.
 struct Seen {
@@ -926,6 +953,19 @@ CostContext cost_context(Chart const &c) {
   CostContext k;
   k.an = cost_flatten_ancestry(c);
   child_grid_frames(c, c.states.size(), SCAN_MAX, k.grid);
+  k.transit_top.assign(c.transitions.size(), { INVALID, INVALID });
+  for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {
+    Transition const &trans{ c.transitions[tr] };
+    CommonAncestor const lca{ lowest_common_ancestor(c, trans.src, trans.dst) };
+    std::array<StateId, 2> const ends{ trans.src, trans.dst };
+    for (uint32_t i = 0; i < 2; ++i) {
+      StateId const top{ lca.child[i] };
+      StateId const own{ enclosing_state(c, ends[i]) };
+      if ((top.v != INVALID) && (own.v != INVALID) && (top != ends[i]) && (top != own)) {
+        k.transit_top[tr][i] = top.v;
+      }
+    }
+  }
   return k;
 }
 
@@ -960,6 +1000,10 @@ CostTerms cost_terms(CostContext const &ctx,
   for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {
     first[tr] = static_cast<uint32_t>(pieces.size());
     scav_span const route{ r.route[tr] };
+    std::array<uint32_t, 2> const top{ (tr < ctx.transit_top.size())
+                                           ? ctx.transit_top[tr]
+                                           : std::array<uint32_t, 2>{ INVALID, INVALID } };
+    bool const crosses_through{ (top[0] != INVALID) || (top[1] != INVALID) };
     for (uint32_t k = 0; (k + 1) < route.len; ++k) {
       pieces.push_back({ .a = r.points[route.off + k],
                          .b = r.points[route.off + k + 1],
@@ -970,7 +1014,13 @@ CostTerms cost_terms(CostContext const &ctx,
                                      r.points[route.off + k + 1]) };
         uint32_t const out{ direction(r.points[route.off + k + 1],
                                       r.points[route.off + k + 2]) };
-        if (in != out) { ++t.bends; }
+        if (in != out) {
+          ++t.bends;
+          if (crosses_through &&
+              in_transit(c, z, c.transitions[tr], top, r.points[route.off + k + 1])) {
+            ++t.transit_bends;
+          }
+        }
         // `direction` is three steps per axis with the middle one still, so
         // the reverse of `in` is `8 - in`; odd codes are the axis-aligned ones.
         if (((in % 2) == 1) && (out == (8 - in))) { ++t.retrace; }
@@ -1264,7 +1314,8 @@ std::array<Wide, TIER2_TERMS> weighted_terms(CostTerms const &t, scav_profile co
            Wide{ p.w_aspect } * ceil_div(t.aspect, em),
            Wide{ p.w_area } * ceil_div(t.area, em2),
            Wide{ p.w_crowding } * ceil_div(t.crowding, em),
-           Wide{ p.w_length } * ceil_div(t.length, em) };
+           Wide{ p.w_length } * ceil_div(t.length, em),
+           Wide{ p.w_transit_bends } * t.transit_bends };
 }
 
 }  // namespace
@@ -1281,7 +1332,7 @@ Cost cost_of(CostTerms const &t, scav_profile const &p) {
   out.t0_violations =
       t.through_box + t.box_overlap + t.vanished + t.flush + t.through_region + t.retrace;
   // Area is the largest term at (2 * COORD_MAX)^2 < 2^40, its em^2 only divides
-  // it down, and eleven of those under a weight capped at 2^10 stay below 2^54.
+  // it down, and twelve of those under a weight capped at 2^10 stay below 2^54.
   for (Wide const term : weighted_terms(t, p)) { out.t2 += term; }
   return out;
 }

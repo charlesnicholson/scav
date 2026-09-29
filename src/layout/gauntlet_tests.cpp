@@ -61,7 +61,7 @@ constexpr std::array GAUNTLET{ "above.scav",   "chain.scav",     "crossing.scav"
                                "fork.scav",    "lane.scav",      "long.scav",
                                "loop.scav",    "marks.scav",     "mutual.scav",
                                "regions.scav", "roundtrip.scav", "stretch.scav",
-                               "through.scav" };
+                               "through.scav", "transit.scav" };
 
 // One chart, laid out: the pieces every property below reads.
 struct Laid {
@@ -1022,6 +1022,51 @@ TEST_CASE("gauntlet: a run's arrows each span one gap, not the drawing") {
       }
       CAPTURE(t);
       CHECK(length <= (Wide{ widest } + p.rank_sep));
+    }
+  }
+}
+
+TEST_CASE("gauntlet: a route passing through a composite bends outside it") {
+  // `extend` runs from the root into a region of `Moving` inside `Arm`, so a
+  // bend strictly inside `Arm` and outside `Moving` is one in a state the route
+  // only passes through. The port seated level with the one it continues
+  // through leaves the leg across `Arm` straight whether or not such a bend is
+  // priced, so neither weight bends there; what the weight itself charges is
+  // held by the cost tests' hand-built routes.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    for (int32_t const weight : { 0, p.w_transit_bends }) {
+      CAPTURE(weight);
+      scav_profile priced{ p };
+      priced.w_transit_bends = weight;
+      Laid l;
+      lay("transit.scav", priced, l);
+      uint32_t const gripping{ state_named(l.c, "Gripping") };
+      uint32_t const arm{ state_named(l.c, "Arm") };
+      uint32_t const moving{ state_named(l.c, "Moving") };
+      REQUIRE(gripping != INVALID);
+      REQUIRE(arm != INVALID);
+      REQUIRE(moving != INVALID);
+      uint32_t extend{ INVALID };
+      for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+        if (l.c.transitions[t].src.v == gripping) { extend = t; }
+      }
+      REQUIRE(extend != INVALID);
+      scav_span const route{ l.r.route[extend] };
+      REQUIRE(route.len >= 2);
+      uint32_t in_arm{ 0 };
+      for (uint32_t k = 1; (k + 1) < route.len; ++k) {
+        scav_point const a{ l.r.points[route.off + k - 1] };
+        scav_point const b{ l.r.points[route.off + k] };
+        scav_point const c{ l.r.points[route.off + k + 1] };
+        bool const straight{ ((a.x == b.x) && (b.x == c.x)) ||
+                             ((a.y == b.y) && (b.y == c.y)) };
+        if (!straight && strictly_inside(b, l.z.state[arm]) &&
+            !strictly_inside(b, l.z.state[moving])) {
+          ++in_arm;
+        }
+      }
+      CHECK(in_arm == 0U);
     }
   }
 }

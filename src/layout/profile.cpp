@@ -16,7 +16,7 @@ constexpr int32_t PT{ 16 };  // grid units are 1/16 pt
 // One of the two shipped profiles scav_profile_named hands out by name.
 constexpr scav_profile READABLE{
   .profile_id = 2,
-  .profile_version = 13,
+  .profile_version = 14,
   .pad = 8 * PT,
   .rank_sep = 36 * PT,
   .node_sep = 18 * PT,
@@ -59,6 +59,7 @@ constexpr scav_profile READABLE{
   .w_area = 1,
   .w_crowding = 512,
   .w_length = 8,
+  .w_transit_bends = 768,
   .portfolio_k = 1024,
   // The whole table: the packer, compaction, a frame's owner's hole, and a
   // frame that always folds, each row searched and kicked to convergence. Row 8
@@ -75,7 +76,7 @@ constexpr scav_profile READABLE{
 // The other shipped profile: tighter spacing and type for dense charts.
 constexpr scav_profile COMPACT{
   .profile_id = 1,
-  .profile_version = 13,
+  .profile_version = 14,
   .pad = 4 * PT,
   .rank_sep = 22 * PT,
   .node_sep = 11 * PT,
@@ -116,6 +117,7 @@ constexpr scav_profile COMPACT{
   .w_area = 1,
   .w_crowding = 512,
   .w_length = 8,
+  .w_transit_bends = 768,
   .portfolio_k = 1024,
   // The whole table: the packer, compaction, a frame's owner's hole, and a
   // frame that always folds, each row searched and kicked to convergence. Row 8
@@ -161,7 +163,7 @@ bool profile_validate(scav_profile const &p) {
            in_range(p.w_label, 0, 1024) && in_range(p.w_label_near, 0, 1024) &&
            in_range(p.w_aspect, 0, 1024) && in_range(p.w_area, 0, 1024) &&
            in_range(p.w_crowding, 0, 1024) && in_range(p.w_length, 0, 1024) &&
-           in_range(p.portfolio_k, 0, 1 << 20) &&
+           in_range(p.w_transit_bends, 0, 1024) && in_range(p.portfolio_k, 0, 1 << 20) &&
            in_range(p.portfolio_m, 1, static_cast<int32_t>(LAYOUT_SEARCH_ROWS)) &&
            in_range(p.sweep_count, 0, 1024) &&
            in_range(p.congestion_iterations, 0, 1024) && in_range(p.ripup_cap, 0, 1024) &&

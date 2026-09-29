@@ -30,7 +30,7 @@ TEST_CASE("profile: both shipped profiles load and pass their own validation") {
     CAPTURE(name);
     scav_profile const p{ named(name) };
     CHECK(profile_validate(p));
-    CHECK(p.profile_version == 13);
+    CHECK(p.profile_version == 14);
     // The whole table (11.10, 11.10g): every row searched and kicked, which is
     // where `axis`'s compact drawing is.
     CHECK(p.portfolio_m == 16);
@@ -113,6 +113,10 @@ TEST_CASE("profile: every bound rejects out of range") {
           .bad_high = 1025 },
     Poke{ .what = "w_length",
           .field = &scav_profile::w_length,
+          .bad_low = -1,
+          .bad_high = 1025 },
+    Poke{ .what = "w_transit_bends",
+          .field = &scav_profile::w_transit_bends,
           .bad_low = -1,
           .bad_high = 1025 },
     Poke{ .what = "w_area",

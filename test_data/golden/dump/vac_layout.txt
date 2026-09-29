@@ -78,6 +78,7 @@ geometry structural 51836e15 coordinate 219b35ad
     area 146352297 share 6393bp
     crowding 0 share 0bp
     length 23154 share 1558bp
+    transit_bends 0 share 0bp
   label leader 96
     placed t1 953,1007 1050x269
     placed t4 2774,6600 1396x269

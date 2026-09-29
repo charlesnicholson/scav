@@ -67,6 +67,10 @@ struct GridQuery {
 struct CostContext {
   Ancestry an;
   ChildGrid grid;  // no cell holds a child yet; a candidate fills a per-thread copy
+  // Per transition, src end then dst: the state its lowest common ancestor
+  // holds on that end's chain, where some state lies between that one and the
+  // state directly enclosing the end; INVALID where none does.
+  std::vector<std::array<uint32_t, 2>> transit_top;
 };
 
 CostContext cost_context(Chart const &c);

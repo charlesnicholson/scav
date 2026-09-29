@@ -141,6 +141,106 @@ TEST_CASE("cost: a corner in a polyline is one bend") {
   CHECK(cost_terms(c, decompose(c), z, straight, {}, profile()).bends == 0);
 }
 
+namespace {
+
+// toolchanger's `extend` in miniature: Src in the root, Dst two composites
+// down, so Arm is the one state its route only passes through. Src -> Dst,
+// then the same pair the other way round, then Src -> Arm, which crosses
+// nothing it does not end at.
+struct Transit {
+  Chart c;
+  StateId src, arm, moving, dst;
+  SizedLayout z;
+};
+
+Transit transit_chart() {
+  Transit out;
+  Chart &c{ out.c };
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  out.src = build_state(c, root, "Src", StateKind::Normal, {});
+  out.arm = build_state(c, root, "Arm", StateKind::Normal, {});
+  SubmachineId const arm_m{ build_submachine(c, out.arm, "arm", {}) };
+  out.moving = build_state(c, arm_m, "Moving", StateKind::Normal, {});
+  SubmachineId const travel{ build_submachine(c, out.moving, "travel", {}) };
+  out.dst = build_state(c, travel, "Dst", StateKind::Normal, {});
+  build_trans(c, out.src, out.dst, TransKind::External, {});
+  build_trans(c, out.dst, out.src, TransKind::External, {});
+  build_trans(c, out.src, out.arm, TransKind::External, {});
+  out.z = blank(c);
+  out.z.state[out.src.v] = { .x = 0, .y = 100, .w = 100, .h = 60 };
+  out.z.state[out.arm.v] = { .x = 200, .y = 0, .w = 600, .h = 400 };
+  out.z.state[out.moving.v] = { .x = 300, .y = 50, .w = 400, .h = 300 };
+  out.z.state[out.dst.v] = { .x = 400, .y = 200, .w = 100, .h = 60 };
+  out.z.chart = { .x = 0, .y = 0, .w = 800, .h = 400 };
+  return out;
+}
+
+// Src's right side to Dst's left, jogging down at `x`: two bends there.
+std::vector<scav_point> jog_at(int32_t x) {
+  return { { .x = 100, .y = 130 },
+           { .x = x, .y = 130 },
+           { .x = x, .y = 230 },
+           { .x = 400, .y = 230 } };
+}
+
+CostTerms transit_terms(Transit const &k,
+                        std::vector<std::vector<scav_point>> const &lines) {
+  return cost_terms(k.c, decompose(k.c), k.z, routes_of(k.c, lines), {}, profile());
+}
+
+}  // namespace
+
+TEST_CASE("cost: a crossing route's bend in the common ancestor costs nothing extra") {
+  Transit const k{ transit_chart() };
+  CostTerms const t{ transit_terms(k, { jog_at(150) }) };
+  CHECK(t.bends == 2);
+  CHECK(t.transit_bends == 0);
+  // On Arm's border is not inside it.
+  CHECK(transit_terms(k, { jog_at(200) }).transit_bends == 0);
+}
+
+TEST_CASE("cost: a crossing route's bend in a state it only passes through costs") {
+  Transit const k{ transit_chart() };
+  CostTerms const t{ transit_terms(k, { jog_at(250) }) };
+  CHECK(t.bends == 2);
+  CHECK(t.transit_bends == 2);
+  // Scored on top of the bends themselves.
+  scav_profile const p{ profile() };
+  CHECK((cost_of(t, p).t2 - cost_of(transit_terms(k, { jog_at(150) }), p).t2) ==
+        (2 * int64_t{ p.w_transit_bends }));
+
+  // The same from the source's end: Dst -> Src along the route reversed.
+  auto const reversed = [](std::vector<scav_point> const &line) {
+    return std::vector<scav_point>{ line.rbegin(), line.rend() };
+  };
+  CHECK(transit_terms(k, { {}, reversed(jog_at(250)) }).transit_bends == 2);
+  CHECK(transit_terms(k, { {}, reversed(jog_at(150)) }).transit_bends == 0);
+}
+
+TEST_CASE("cost: a crossing route's bend in an end's own machine costs nothing extra") {
+  Transit const k{ transit_chart() };
+  CostTerms const t{ transit_terms(k, { jog_at(350) }) };
+  CHECK(t.bends == 2);
+  CHECK(t.transit_bends == 0);
+  // Inside the end itself.
+  CHECK(transit_terms(k,
+                      { { { .x = 100, .y = 130 },
+                          { .x = 450, .y = 130 },
+                          { .x = 450, .y = 230 },
+                          { .x = 400, .y = 230 } } })
+            .transit_bends == 0);
+  // Src -> Arm ends at the state the other routes pass through, so inside it
+  // is inside its own end.
+  CHECK(transit_terms(k,
+                      { {},
+                        {},
+                        { { .x = 100, .y = 130 },
+                          { .x = 250, .y = 130 },
+                          { .x = 250, .y = 20 },
+                          { .x = 260, .y = 20 } } })
+            .transit_bends == 0);
+}
+
 TEST_CASE("cost: two routes that properly cross count once") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
@@ -772,6 +872,7 @@ TEST_CASE("cost: every Tier-2 term is scored in the unit the profile names it") 
   CHECK(only(&CostTerms::area, 1) == int64_t{ p.w_area });
   CHECK(only(&CostTerms::crowding, 1) == int64_t{ p.w_crowding });
   CHECK(only(&CostTerms::length, 1) == int64_t{ p.w_length });
+  CHECK(only(&CostTerms::transit_bends, 1) == int64_t{ p.w_transit_bends });
 
   // A whole unit each way, and one grid unit past it.
   CHECK(only(&CostTerms::corridor, em) == int64_t{ p.w_corridor });
@@ -801,13 +902,16 @@ TEST_CASE("cost: the shipped weights sum a hand-built term vector") {
   t.aspect = 500;      // 3
   t.area = 100000;     // 3 em squared
   t.length = 2000;     // 11
+  t.transit_bends = 2;
   CHECK(cost_of(t, p).t2 ==
         ((int64_t{ p.w_bends } * 3) + (int64_t{ p.w_corridor } * 3) +
          (int64_t{ p.w_crossings } * 5) + (int64_t{ p.w_excess_len } * 6) +
          (int64_t{ p.w_adjacency } * 2) + (int64_t{ p.w_label } * 4) +
          (int64_t{ p.w_label_near } * 2) + (int64_t{ p.w_aspect } * 3) +
-         (int64_t{ p.w_area } * 3) + (int64_t{ p.w_length } * 11)));
-  CHECK(cost_of(t, p).t2 == 7473 + (int64_t{ p.w_length } * 11));
+         (int64_t{ p.w_area } * 3) + (int64_t{ p.w_length } * 11) +
+         (int64_t{ p.w_transit_bends } * 2)));
+  CHECK(cost_of(t, p).t2 ==
+        7473 + (int64_t{ p.w_length } * 11) + (int64_t{ p.w_transit_bends } * 2));
 }
 
 TEST_CASE("cost: an em of one grid unit leaves every length where it stood") {
@@ -1861,6 +1965,50 @@ int32_t through_boxes(Chart const &c,
   return total;
 }
 
+// `s` and every state enclosing it, `s` first.
+std::vector<StateId> chain_up(Chart const &c, StateId s) {
+  std::vector<StateId> out;
+  for (StateId at{ s }; (at.v != INVALID) && (out.size() < c.states.size());
+       at = enclosing_state(c, at)) {
+    out.push_back(at);
+  }
+  return out;
+}
+
+// Each end's chain, the end first, cut where it meets the other's: the states
+// between that end and the innermost state holding both.
+std::array<std::vector<StateId>, 2> below_common(Chart const &c,
+                                                 StateId src,
+                                                 StateId dst) {
+  std::array<std::vector<StateId>, 2> out{ chain_up(c, src), chain_up(c, dst) };
+  for (size_t i = 0; i < out[0].size(); ++i) {
+    for (size_t j = 0; j < out[1].size(); ++j) {
+      if (out[0][i] == out[1][j]) {
+        out[0].resize(i);
+        out[1].resize(j);
+        return out;
+      }
+    }
+  }
+  return out;
+}
+
+// A bend in a state passed through: on one end's chain, neither the end nor
+// the state enclosing it holds the point, and a state above those does.
+bool transit_bend(Chart const &c,
+                  SizedLayout const &z,
+                  Transition const &tr,
+                  scav_point at) {
+  for (std::vector<StateId> const &chain : below_common(c, tr.src, tr.dst)) {
+    if (chain.size() < 3) { continue; }
+    if (inside(at, z.state[chain[0].v]) || inside(at, z.state[chain[1].v])) { continue; }
+    for (size_t k = 2; k < chain.size(); ++k) {
+      if (inside(at, z.state[chain[k].v])) { return true; }
+    }
+  }
+  return false;
+}
+
 CostTerms terms(Chart const &c,
                 SplitGraph const &g,
                 SizedLayout const &z,
@@ -1888,6 +2036,10 @@ CostTerms terms(Chart const &c,
         uint32_t const out{ direction(r.points[route.off + k + 1],
                                       r.points[route.off + k + 2]) };
         if (in != out) { ++t.bends; }
+        if ((in != out) &&
+            transit_bend(c, z, c.transitions[tr], r.points[route.off + k + 1])) {
+          ++t.transit_bends;
+        }
         if (((in % 2) == 1) && (out == (8 - in))) { ++t.retrace; }
       }
     }
@@ -2022,20 +2174,21 @@ CostTerms terms(Chart const &c,
 
 }  // namespace reference
 
-constexpr uint32_t TERMS{ 16 };
+constexpr uint32_t TERMS{ 17 };
 
 std::array<int64_t, TERMS> terms_of(CostTerms const &t) {
-  return { t.bends,       t.corridor, t.crossings,  t.excess_len,
-           t.adjacency,   t.label,    t.label_near, t.aspect,
-           t.area,        t.crowding, t.length,     t.through_box,
-           t.box_overlap, t.vanished, t.flush,      t.through_region };
+  return { t.bends,  t.corridor,      t.crossings,   t.excess_len,  t.adjacency,
+           t.label,  t.label_near,    t.aspect,      t.area,        t.crowding,
+           t.length, t.transit_bends, t.through_box, t.box_overlap, t.vanished,
+           t.flush,  t.through_region };
 }
 
 // Which of `terms_of`'s entries a diff names, so a failure says what moved.
 constexpr std::array<char const *, TERMS> TERM_NAMES{
-  "bends",       "corridor", "crossings", "excess_len",    "adjacency", "label",
-  "label_near",  "aspect",   "area",      "crowding",      "length",    "through_box",
-  "box_overlap", "vanished", "flush",     "through_region"
+  "bends",  "corridor",      "crossings",   "excess_len",  "adjacency",
+  "label",  "label_near",    "aspect",      "area",        "crowding",
+  "length", "transit_bends", "through_box", "box_overlap", "vanished",
+  "flush",  "through_region"
 };
 
 // The first term the two disagree on, or empty.
@@ -2446,6 +2599,7 @@ TEST_CASE("cost: a context built once scores every candidate as one built for it
     CHECK(ctx.an.tin == again.an.tin);
     CHECK(ctx.an.tout == again.an.tout);
     CHECK(ctx.an.detached == again.an.detached);
+    CHECK(ctx.transit_top == again.transit_top);
     CHECK(ctx.grid.child == again.grid.child);
     CHECK(ctx.grid.bucket_off == again.grid.bucket_off);
     CHECK(ctx.grid.bucket_at.empty());
