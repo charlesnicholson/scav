@@ -377,12 +377,11 @@ SvgStatus svg_write(DrawList const &d,
       "  <style>text { font-family: \"JetBrains Mono\", monospace;"
       " font-kerning: none; }</style>\n";
   if (o.embed_font) {
-    uint32_t len{ 0 };
-    scav_byte const *ttf{ bundled_font(len) };
+    std::vector<scav_byte> const ttf{ bundled_font() };
     doc +=
         "  <defs><style>@font-face { font-family: \"JetBrains Mono\";"
         " src: url(data:font/ttf;base64,";
-    put_base64(doc, ttf, len);
+    put_base64(doc, ttf.data(), static_cast<uint32_t>(ttf.size()));
     doc += ") format(\"truetype\"); }</style></defs>\n";
   }
   doc += body;

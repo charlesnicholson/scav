@@ -34,8 +34,9 @@ struct Metrics {
 };
 
 // The bundled font, embedded in the library because it is a hashed input and
-// must travel with the code.
-scav_byte const *bundled_font(uint32_t &len);
+// must travel with the code. Stored gzipped and inflated per call; empty only if
+// the embedded bytes fail to inflate.
+std::vector<scav_byte> bundled_font();
 
 // Empty `ttf` selects the bundled font. False on a font missing a table the
 // measurement needs, or one whose tables do not agree with each other.

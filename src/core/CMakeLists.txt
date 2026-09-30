@@ -1,8 +1,9 @@
 # Three subsystems: `lang` is bytes to statements and knows nothing about
 # entities, `model` is the entity arrays, `load` composes the two.
 scav_static_library(scavcore
-  # A src/-root primitive belonging to no library; core compiles it because core
-  # is its only consumer, and anything linking core reaches it.
+  # src/-root primitives belonging to no library; core compiles them, so anything
+  # linking core reaches them.
+  ../scav_inflate.cpp
   ../scav_xxhash.cpp
   # Core-wide, owned by no subsystem: every layer below produces diagnostics,
   # and c_api.cpp is the C projection of the whole public header.
@@ -96,6 +97,7 @@ if(SCAV_BUILD_TESTS)
     # belong to no subsystem, so their tests sit beside them.
     ../scav_int_tests.cpp
     ../scav_hash_map_tests.cpp
+    ../scav_inflate_tests.cpp
     ../scav_stable_sort_tests.cpp
     ../scav_xxhash_tests.cpp
   )

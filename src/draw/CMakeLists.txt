@@ -2,10 +2,10 @@
 # the reference builder. No dependency on layout -- a builder reads geometry
 # columns by name and does not care who wrote them.
 
-# The bundled font is embedded rather than loaded from a path: it is a hashed
-# input, so it has to travel with the code.
+# The bundled font is embedded, gzipped, rather than loaded from a path: it is a
+# hashed input, so it has to travel with the code.
 scav_embed_bytes("${PROJECT_SOURCE_DIR}/assets/font/JetBrainsMono-Regular.ttf"
-  bundled_ttf font_source)
+  bundled_ttf_gz font_source GZIP)
 
 scav_static_library(scavdraw
   c_api.cpp
@@ -47,4 +47,5 @@ if(SCAV_BUILD_TESTS)
     tests/functional_drawlist_tests.cpp
   )
   target_link_libraries(scav_draw_tests PRIVATE scavdraw_testable scavlayout_testable)
+  target_include_directories(scav_draw_tests PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 endif()

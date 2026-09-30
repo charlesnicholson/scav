@@ -4,14 +4,16 @@
 
 #include "scav/scav_draw.h"
 
-#include "scav_embed_bundled_ttf.h"
+#include "scav_embed_bundled_ttf_gz.h"
 
 #include "scav/scav_types.h"
+#include "scav_inflate.h"
 #include "scav_int.h"
 #include "scav_xxhash.h"
 
 #include <array>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace scav {
@@ -219,10 +221,25 @@ bool decode_utf8(scav_byte const *s, uint32_t len, uint32_t &at, uint32_t &cp) {
 
 }  // namespace
 
-scav_byte const *bundled_font(uint32_t &len) { return bundled_ttf_bytes(len); }
+std::vector<scav_byte> bundled_font() {
+  uint32_t len{ 0 };
+  scav_byte const *const gz{ bundled_ttf_gz_bytes(len) };
+  uint32_t size{ 0 };
+  std::vector<scav_byte> ttf;
+  if (!gzip_size(gz, len, size)) { return ttf; }
+  ttf.resize(size);
+  uint32_t n{ 0 };
+  if (gunzip(gz, len, ttf.data(), size, n) != InflateStatus::Ok) { ttf.clear(); }
+  return ttf;
+}
 
 bool metrics_create(scav_byte const *ttf, uint32_t len, Metrics &out) {
-  if ((ttf == nullptr) || (len == 0U)) { ttf = bundled_font(len); }
+  std::vector<scav_byte> bundled;
+  if ((ttf == nullptr) || (len == 0U)) {
+    bundled = bundled_font();
+    ttf = bundled.data();
+    len = static_cast<uint32_t>(bundled.size());
+  }
   Reader const r{ .bytes = ttf, .len = len };
 
   Span head{};
@@ -255,7 +272,11 @@ bool metrics_create(scav_byte const *ttf, uint32_t len, Metrics &out) {
   CmapPick pick{};
   if (!pick_cmap(r, cmap, pick)) { return false; }
 
-  out.ttf.assign(ttf, ttf + len);
+  if (bundled.empty()) {
+    out.ttf.assign(ttf, ttf + len);
+  } else {
+    out.ttf = std::move(bundled);
+  }
   out.identity = xxhash32(out.ttf.data(), out.ttf.size(), 0);
   out.units_per_em = upem;
   out.num_glyphs = glyphs;

@@ -4,8 +4,12 @@
 
 #include "scav/scav_draw.h"
 
+#include "scav_embed_bundled_ttf_gz.h"
+
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
+#include "scav_inflate.h"
+#include "scav_xxhash.h"
 
 #include "doctest.h"
 
@@ -256,10 +260,9 @@ TEST_CASE("metrics: the bundled font is the one the design names") {
   CHECK(m.cmap_format == 12);
   CHECK(m.identity != 0);
 
-  uint32_t len{ 0 };
-  scav_byte const *bytes{ bundled_font(len) };
-  CHECK(len == 273900);
-  REQUIRE(bytes != nullptr);
+  std::vector<scav_byte> const bytes{ bundled_font() };
+  CHECK(bytes.size() == 273900);
+  REQUIRE(bytes.size() > 1U);
   CHECK(bytes[0] == 0x00);  // sfntVersion 1.0, not an OpenType CFF font
   CHECK(bytes[1] == 0x01);
 }
@@ -488,8 +491,9 @@ TEST_CASE("metrics: tables that contradict each other are refused") {
 }
 
 TEST_CASE("metrics: truncating the bundled font at every length never crashes") {
-  uint32_t len{ 0 };
-  scav_byte const *bytes{ bundled_font(len) };
+  std::vector<scav_byte> const font{ bundled_font() };
+  scav_byte const *const bytes{ font.data() };
+  auto const len{ static_cast<uint32_t>(font.size()) };
   // Powers of two plus a prime stride: every table boundary gets crossed
   // somewhere, and a bounds check missed anywhere reads off the end.
   for (uint32_t cut = 0; cut < len; cut += 997) {
@@ -500,6 +504,39 @@ TEST_CASE("metrics: truncating the bundled font at every length never crashes") 
       (void)measure(m, "Idle", 16, e);
       for (uint32_t g = 0; g < m.num_glyphs; g += 61) { (void)metrics_advance(m, g); }
     }
+  }
+}
+
+TEST_CASE("metrics: the embedded font inflates to the committed TTF byte for byte") {
+  std::vector<scav_byte> committed;
+  REQUIRE(read_file(SCAV_TEST_DATA_DIR "/../assets/font/JetBrainsMono-Regular.ttf",
+                    committed));
+  CHECK(bundled_font() == committed);
+  Metrics const m{ bundled() };
+  CHECK(m.ttf == committed);
+  CHECK(m.identity == xxhash32(committed.data(), committed.size(), 0));
+}
+
+TEST_CASE("metrics: the embedded gzip refuses every sampled truncation and bit flip") {
+  uint32_t len{ 0 };
+  scav_byte const *const gz{ bundled_ttf_gz_bytes(len) };
+  std::vector<scav_byte> const want{ bundled_font() };
+  auto const cap{ static_cast<uint32_t>(want.size()) };
+  std::vector<scav_byte> out(cap);
+  uint32_t n{ 0 };
+  REQUIRE(gunzip(gz, len, out.data(), cap, n) == InflateStatus::Ok);
+  CHECK(gunzip(gz, len, out.data(), cap - 1U, n) == InflateStatus::OutputFull);
+  for (uint32_t cut = 0; cut < len; cut += (cut < 2048U) ? 1U : 4099U) {
+    CAPTURE(cut);
+    CHECK(gunzip(gz, cut, out.data(), cap, n) != InflateStatus::Ok);
+  }
+  std::vector<scav_byte> flipped{ gz, gz + len };
+  for (uint32_t bit = 0; bit < (8U * len); bit += 8191U) {
+    flipped[bit / 8U] = static_cast<scav_byte>(flipped[bit / 8U] ^ (1U << (bit % 8U)));
+    CAPTURE(bit);
+    CHECK(gunzip(flipped.data(), len, out.data(), cap, n) != InflateStatus::Ok);
+    CHECK(n <= cap);
+    flipped[bit / 8U] = gz[bit / 8U];
   }
 }
 

@@ -360,9 +360,8 @@ TEST_CASE("svg: --embed-font base64s the bundled TTF whole") {
   CHECK(has(embedded.doc, "format(\"truetype\")"));
 
   // Whole, not subsetted: base64 is four characters per three bytes.
-  uint32_t len{ 0 };
-  (void)bundled_font(len);
-  CHECK(embedded.doc.size() > (bare.doc.size() + (size_t{ len / 3U } * 4U)));
+  size_t const len{ bundled_font().size() };
+  CHECK(embedded.doc.size() > (bare.doc.size() + ((len / 3U) * 4U)));
   // And never converted to paths, which would discard selection.
   CHECK(!has(embedded.doc, "<path"));
 }
