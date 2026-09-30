@@ -124,11 +124,13 @@ void ortho_align_attachments(std::vector<RouteNet> const &nets,
                              std::vector<scav_point> &at);
 
 // Attachments sharing a point on one face, pushed apart along it by `max(clear, pitch)`
-// where the face holds that and by `min(clear, len / 3)` where not. A port's leg stays.
+// where the face holds that and by `min(clear, len / 3)` where not. A port's leg stays
+// where it runs level to its aim, which `toward` holds as the reface above takes it.
 void ortho_spread_attachments(std::vector<RouteNet> const &nets,
                               std::vector<scav_rect> const &boxes,
                               std::vector<uint8_t> const &inscribed,
                               std::vector<int32_t> const &corner,
+                              std::vector<scav_point> const &toward,
                               int32_t clear,
                               int32_t pitch,
                               std::vector<scav_point> &at);
@@ -139,6 +141,7 @@ void ortho_separate_attachments(std::vector<RouteNet> const &nets,
                                 std::vector<scav_rect> const &boxes,
                                 std::vector<uint8_t> const &inscribed,
                                 std::vector<int32_t> const &corner,
+                                std::vector<scav_point> const &toward,
                                 int32_t clear,
                                 int32_t pitch,
                                 std::vector<scav_point> &at);

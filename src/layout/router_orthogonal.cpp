@@ -469,6 +469,7 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
                               std::vector<scav_rect> const &boxes,
                               std::vector<uint8_t> const &inscribed,
                               std::vector<int32_t> const &corner,
+                              std::vector<scav_point> const &toward,
                               int32_t clear,
                               int32_t pitch,
                               std::vector<scav_point> &at) {
@@ -497,13 +498,12 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
     RouteNet const &net{ nets[seat.slot / 2] };
     return (seat.end == 0) ? net.dst_obstacle : net.src_obstacle;
   };
-  // Whether a seat's far end names no box and lies level with it: a port's
-  // straight leg. Such an end's point is the net's `src` or `dst`, not its seat.
+  // Whether a seat's far end names no box and its aim lies level with it: a port's
+  // straight leg, to the port or to the waypoint before it.
   auto const level = [&](Seat const &seat) {
-    RouteNet const &net{ nets[seat.slot / 2] };
-    scav_point const there{ (seat.end == 0) ? net.dst : net.src };
+    scav_point const aim{ toward[seat.slot] };
     return (far_box(seat) >= boxes.size()) &&
-           (((seat.face < 2) ? there.y : there.x) == seat.pos);
+           (((seat.face < 2) ? aim.y : aim.x) == seat.pos);
   };
   auto const glyph_far = [&](Seat const &seat) {
     uint32_t const box{ far_box(seat) };
@@ -611,6 +611,7 @@ void ortho_separate_attachments(std::vector<RouteNet> const &nets,
                                 std::vector<scav_rect> const &boxes,
                                 std::vector<uint8_t> const &inscribed,
                                 std::vector<int32_t> const &corner,
+                                std::vector<scav_point> const &toward,
                                 int32_t clear,
                                 int32_t pitch,
                                 std::vector<scav_point> &at) {
@@ -629,14 +630,13 @@ void ortho_separate_attachments(std::vector<RouteNet> const &nets,
   };
   thread_local std::vector<Leg> legs;
   legs.clear();
-  // Whether a leg's far end names no box and lies level with its seat: a port's
+  // Whether a leg's far end names no box and its aim lies level with its seat: a port's
   // straight leg, as in the spread above.
   auto const level = [&](Leg const &leg) {
     RouteNet const &net{ nets[leg.net] };
-    bool const from_src{ (leg.slot % 2) == 0 };
-    uint32_t const far{ from_src ? net.dst_obstacle : net.src_obstacle };
-    scav_point const there{ from_src ? net.dst : net.src };
-    return (far >= boxes.size()) && (((leg.face < 2) ? there.y : there.x) == leg.pos);
+    uint32_t const far{ ((leg.slot % 2) == 0) ? net.dst_obstacle : net.src_obstacle };
+    scav_point const aim{ toward[leg.slot] };
+    return (far >= boxes.size()) && (((leg.face < 2) ? aim.y : aim.x) == leg.pos);
   };
   for (uint32_t n = 0; n < nets.size(); ++n) {
     for (uint32_t end = 0; end < 2; ++end) {
@@ -1292,6 +1292,7 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
                            in.obstacles,
                            in.inscribed,
                            in.corner,
+                           toward,
                            clear,
                            pitch,
                            seat);
@@ -1301,6 +1302,7 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
                              in.obstacles,
                              in.inscribed,
                              in.corner,
+                             toward,
                              clear,
                              pitch,
                              seat);
