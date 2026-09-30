@@ -134,9 +134,8 @@ TEST_CASE("nudge: a lane is every member that overlaps, not a run that stops") {
 }
 
 TEST_CASE("nudge: two lanes interleaved by coordinate keep every member of each") {
-  // Sorted by coordinate the members alternate between a lane on the left and
-  // one on the right, so neither lane's members sit together. Each leg leaves
-  // its lane on the side that lets the key's order stand.
+  // Sorted by coordinate the members alternate between a lane on the left and one on the
+  // right; each leg leaves its lane on the side that lets the key's order stand.
   Frame f{ frame_of({ { pt(0, 600), pt(0, 100), pt(200, 100), pt(200, -500) },
                       { pt(900, 600), pt(900, 102), pt(1100, 102), pt(1100, -500) },
                       { pt(20, 600), pt(20, 104), pt(220, 104), pt(220, -500) },

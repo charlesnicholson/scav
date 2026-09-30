@@ -105,9 +105,8 @@ struct FrameScratch {
   std::vector<uint8_t> extreme;       // -> nodes; 1 first in its rank, 2 last
 };
 
-// A shard's frame scratch, kept per thread: both maps are all INVALID again
-// after every frame, and a shard never waits on the pool, so no two shards
-// share one at once.
+// A shard's frame scratch. Per-thread; both maps return to all INVALID after every frame,
+// and a shard never waits on the pool.
 FrameScratch &frame_scratch(Chart const &c, SplitGraph const &g) {
   thread_local FrameScratch sc;
   if (sc.state_local.size() != c.states.size()) {
@@ -119,9 +118,8 @@ FrameScratch &frame_scratch(Chart const &c, SplitGraph const &g) {
   return sc;
 }
 
-// What one call builds and discards, kept per thread and by how deeply calls
-// nest on it: a call waiting on its shards may run another candidate's, which
-// orders on the same thread before the first call is done with its own.
+// What one call builds and discards, per thread and nesting depth: a call waiting on its
+// shards may run another call's on the same thread.
 struct CallScratch {
   std::vector<uint32_t> seg_count, seg_off, frame_segs, fill, global;
   std::vector<int32_t> seg_label;
@@ -253,9 +251,8 @@ std::vector<uint32_t> cyclic_segments(Frame const &f) {
 void orient_acyclic(Frame &f,
                     std::vector<uint8_t> const &pre,
                     std::vector<uint8_t> const &fixed) {
-  // Turned around before the walk, so the walk finds the cycle already broken
-  // and leaves some other edge alone -- which is the whole choice (11.10d). An
-  // edge `fixed` marks already points the way a side pin wants.
+  // Turned before the walk, which then finds those cycles already broken. An edge `fixed`
+  // marks already points the way a side pin wants.
   for (uint32_t k = 0; k < f.edges.size(); ++k) {
     OrderEdge &e{ f.edges[k] };
     if ((e.segment >= pre.size()) || (pre[e.segment] == 0)) { continue; }
@@ -413,10 +410,8 @@ void chain_long_edges(Frame &f, std::vector<uint8_t> const &cut) {
   f.in = adjacency_of(f.edges, static_cast<uint32_t>(f.nodes.size()), false);
 }
 
-// Rank buckets in node order, which is document order for the frame's states
-// and route order for everything the split contributed. A node `extreme` marks
-// 1 goes first in its rank and one it marks 2 last; with no edge in the sweeps
-// it has no median, so neither sweep moves it.
+// Rank buckets in node order; an `extreme` node goes first (1) or last (2) and no sweep
+// moves it.
 void bucket_ranks(Frame &f, std::vector<uint8_t> const &extreme) {
   if (f.nodes.empty()) {
     f.ranks.clear();
@@ -610,12 +605,8 @@ void rank_derived(Frame &f,
                   std::vector<uint8_t> const &extreme,
                   scav_profile const &p,
                   FrameScratch &sc) {
-  // Charged before chaining, while an edge still knows the whole span it
-  // crosses. An edge inside one rank crosses none: its leg runs down its
-  // column and its label sits beside it there, so charging the boundary after
-  // it widened `dock`'s `On` by a label's width of nothing (11.10g). Phase 2
-  // sizes the column. An edge across one boundary has only that one to hold
-  // its label, so it is charged there first.
+  // Charged before chaining, while each edge still spans its whole rank range. An edge
+  // across one boundary is charged there first.
   uint32_t top{ 0 };
   for (OrderNode const &nd : f.nodes) { top = imax(top, nd.rank); }
   gaps.assign(top, 0);
@@ -639,17 +630,8 @@ void rank_derived(Frame &f,
                  .gap = { .boundary = from, .seg = e.segment, .width = label } });
   }
 
-  // An edge turning in a boundary needs a lane of its own, and two lanes
-  // carrying type may not sit closer than a line of it (11.9.5). Phase 3
-  // spreads into the width phase 2 left, so only phase 2 can reserve it.
-  //
-  // The two boundaries an edge *can* turn in, not every one it crosses:
-  // between them it runs straight and wants cross-axis room. Without cross
-  // positions every edge might turn in both, so this is the most the lanes can
-  // need, which is what phase 2 folds a run by; it places by `labels` and the
-  // lanes its alignment leaves turning. Per component, because components are
-  // laid out separately and never share a corridor. Max rather than sum
-  // against the label charge: both size the same corridor.
+  // Lanes per component: an edge can turn in its first and last boundary, and two or more
+  // lanes in one boundary sit a line of type apart. This is the most the lanes can need.
   Partition &part{ sc.part };
   part.reset(f.nodes.size());
   for (OrderEdge const &e : f.edges) { part.join(e.src, e.dst); }
@@ -681,12 +663,8 @@ void rank_derived(Frame &f,
     if (to > (from + 1)) { turn(to - 1, of); }
   }
 
-  // An edge across several boundaries runs through every one of them, and its
-  // label needs the room of one: a boundary it crosses whose charge is already
-  // the label's width holds it, and costs nothing. Only where none does is one
-  // charged -- the widest it crosses, so the frame grows least, and nearest
-  // the middle of the span among equals. Widest label first, so a narrower one
-  // across the same boundary finds it already wide enough.
+  // A spanning edge's label takes the widest boundary it crosses, nearest the middle among
+  // equals, widest label first; where that boundary already holds it, it costs nothing.
   scav_stable_sort(spanning, [&](uint32_t a, uint32_t b) {
     return seg_label[f.edges[a].segment] > seg_label[f.edges[b].segment];
   });
@@ -813,11 +791,8 @@ SubmachineOrders order_submachines(Chart const &c,
     if (frame.v != INVALID) { frame_segs[cs.fill[frame.v]++] = i; }
   }
 
-  // A label is charged to one rank boundary in one frame -- the segment routed
-  // in the lowest submachine holding both ends, which is where it is placed --
-  // so a hierarchy-crossing transition widens the frame its label sits in and
-  // no other. Its extent along the frame's ranks: its width across the page,
-  // its height down it.
+  // A label is charged to one rank boundary in its `label_segment`'s frame, by its extent
+  // along that frame's ranks: its width across the page, its height down it.
   std::vector<int32_t> &seg_label{ cs.seg_label };
   seg_label.assign(g.segments.size(), 0);
   for (uint32_t i = 0; i < s.n_path_box; ++i) {
@@ -829,8 +804,7 @@ SubmachineOrders order_submachines(Chart const &c,
     seg_label[at] += down ? box.h : box.w;
   }
 
-  // `{trans, leg}` resolved to segment ordinals once, so the frame workers read
-  // a flat table rather than searching the cut list per edge (11.10b).
+  // `{trans, leg}` resolved to segment ordinals once, as a flat table.
   auto const resolve_pins = [&g](auto const &rows, std::vector<uint8_t> &table) {
     table.clear();
     if (rows.empty()) { return; }
@@ -874,8 +848,8 @@ SubmachineOrders order_submachines(Chart const &c,
     if (sided.empty()) { sided.assign(g.segments.size(), 0); }
     sided[seg] = static_cast<uint8_t>(pin.side + 1);
   }
-  // A pinned side against the frame: 1 or 2 for the leading or trailing cross
-  // border, and for the border a rank starts or ends at, 1 or 2 in `lead`.
+  // A pinned side against the frame: 1 or 2 for the leading or trailing cross border, and
+  // likewise for a rank border in `lead_side`.
   auto const cross_side = [&](uint32_t seg, uint32_t m) -> uint8_t {
     if (sided.empty() || (sided[seg] == 0)) { return 0; }
     uint32_t const first{ (o.sub_down[m] != 0) ? 0U : 2U };
@@ -913,9 +887,8 @@ SubmachineOrders order_submachines(Chart const &c,
           { .kind = OrderKind::State, .subject = child, .rank = 0, .pos = 0 });
     }
 
-    // A port on a child's border is that child; a port on the frame's own
-    // border is a node of its own, and there is at most one such end per
-    // segment because consecutive crossings always change frame.
+    // A port on a child's border is that child; one on the frame's own border is a node,
+    // at most one per segment.
     auto const boundary_node = [&](uint32_t seg, uint32_t port) {
       if (sc.seg_local[seg] == INVALID) {
         sc.seg_local[seg] = static_cast<uint32_t>(f.nodes.size());
@@ -1049,10 +1022,8 @@ SubmachineOrders order_submachines(Chart const &c,
       for (uint32_t &seg : frames[m].cyclic) { seg = word(); }
     } else {
       frames[m].cyclic = cyclic_segments(f);
-      // An edge into a port on a cross border is flat, so it is ranked, broken
-      // and swept without: its port takes its neighbour's rank afterwards. One
-      // into a port pinned where a rank starts or ends is turned so the port is
-      // its source or its sink, and no reversal pin turns it back.
+      // An edge into a cross-border port is held out of ranking and takes its mate's rank;
+      // one into a port pinned to a rank border is turned and `fixed`.
       std::vector<OrderEdge> &flat{ sc.flat };
       flat.clear();
       std::vector<uint8_t> &fixed{ sc.fixed };
@@ -1084,10 +1055,8 @@ SubmachineOrders order_submachines(Chart const &c,
       orient_acyclic(f, pre_reversed, fixed);
       assign_ranks(f);
 
-      // The pins land between the ranking and everything derived from it, which
-      // is the one place a rank is a free choice rather than a consequence.
-      // `first` is where this frame's nodes will sit in the merged array, and a
-      // pin names them there so a caller never has to know the merge order.
+      // Pins apply between ranking and everything derived from it, naming nodes by their
+      // merged index from `first`.
       if (!pins.ranks.empty()) {
         bool moved{ false };
         for (RankPin const &pin : pins.ranks) {
@@ -1104,8 +1073,7 @@ SubmachineOrders order_submachines(Chart const &c,
         }
         if (moved) {
           seat_initials(c, f);
-          // A rank a move emptied would size a phantom gap in phase 2 (11.10), so
-          // the ranks are renumbered onto the ones that still hold a node.
+          // Ranks renumbered onto those that still hold a node.
           squeeze_ranks(f);
         }
       }

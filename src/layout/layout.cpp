@@ -57,9 +57,8 @@ void search_tuple(scav_profile &p,
                   Fold &fold,
                   uint32_t index);
 uint32_t search_argmin(std::vector<Cost> const &cost, std::vector<uint8_t> const &viable);
-// Everything a Level 1 search's result is a function of, as words: the
-// objective, the row's tuple, the budget, the pins it starts from in their
-// order, and the frames it may move in.
+// Every input a Level 1 search's result depends on, as words: the objective, the tuple,
+// the budget, the seed pins in order, and the frames it may move in.
 void search_key(scav_profile const &objective,
                 scav_profile const &knobs,
                 DarSource dar,
@@ -262,17 +261,8 @@ struct Facing {
   std::vector<SidePin> sides;
 };
 
-// The legs whose port faces away from where its transition goes, from one
-// sizing. A port's side is its in-frame edge's direction -- a route leaving a
-// frame leaves by the trailing edge -- so a route to something on the other
-// side left the wrong way and came back past the frame's contents. Turning
-// that one edge round puts the port on the side facing the far end (11.10g).
-//
-// Of the four sides, the far end's is the one it lies furthest beyond the
-// frame past. A port on a state's border takes a cross border only into or out
-// of the transition's own state, where nothing else in the frame stands between
-// that state and the border, and one port per side of it. A port a side pin
-// holds is left alone.
+// Legs whose port faces away from its far end. A port on its state's border moves onto a
+// cross border the state sees unobstructed, one per side; others turn their edge round.
 Facing facing_flips(Chart const &c,
                     SplitGraph const &g,
                     SubmachineOrders const &o,
@@ -371,8 +361,7 @@ Facing facing_flips(Chart const &c,
       };
       Wide const beyond_at{ beyond(far_at, mid_at, down ? frame.h : frame.w) };
       Wide const beyond_across{ beyond(far_across, mid_across, down ? frame.w : frame.h) };
-      // The other end must be the transition's own state, met at its box: a port
-      // on a child's border has a side and an offset of its own.
+      // The other end must be the transition's own state, met at its box.
       bool const on_state{ g.ports[o.seg_port[seg]].state.v != INVALID };
       uint32_t const other{ leaves ? g.segments[seg].src_port : g.segments[seg].dst_port };
       bool const direct{ on_state && (other == INVALID) };
@@ -403,10 +392,8 @@ Facing facing_flips(Chart const &c,
   return out;
 }
 
-// A candidate as it stands when phase 3 first routes it: the orders it is laid
-// out by, its sizing, and its pins with the facing pass's turns. Phases 1 and
-// 2 and the facing pass read no face pin, so a candidate whose pins differ
-// from another's only in faces has that one's prefix, with the faces added.
+// A candidate as phase 3 first routes it. Phases 1 and 2 and the facing pass read no
+// face pin, so candidates differing only in faces share a prefix.
 struct Prefix {
   SubmachineOrders laid;
   SizedLayout sized;
@@ -415,11 +402,8 @@ struct Prefix {
   bool ok{ false };
 };
 
-// Phases 2 and 3 for one tuple, with the spacing-inflation retry exactly as a
-// lone run has it. `knobs` is the caller's profile with the tuple applied.
-// `prefix`, where given, is filled with the candidate's prefix. `from`, where
-// given, is the prefix of a candidate whose pins are `pins` less some faces:
-// phases 1 and 2 are taken from it rather than run, and `orders` is not read.
+// Phases 2 and 3 for one tuple, `knobs` holding it. `prefix` receives the prefix; `from`,
+// one differing from `pins` only in faces, supplies phases 1 and 2 in place of `orders`.
 Candidate search_candidate(Chart const &c,
                            SplitGraph const &g,
                            SubmachineOrders const &orders,
@@ -450,9 +434,8 @@ Candidate search_candidate(Chart const &c,
       if (prefix != nullptr) { prefix->ok = false; }
       return out;
     }
-    // Ports turned to face where their routes go, and the frames laid out
-    // again with them. A function of the tuple and the pins like everything
-    // else, so re-deriving the drawing derives the same turns.
+    // Ports turned to face where their routes go, and the frames laid out again with
+    // them; a function of the tuple and pins, so re-deriving the drawing repeats it.
     SearchPins &turned{ out.laid };
     turned = (pins != nullptr) ? *pins : SearchPins{};
     Facing const flips{ facing_flips(c, g, orders, out.sized) };
@@ -498,8 +481,8 @@ Candidate search_candidate(Chart const &c,
                                  (from != nullptr) ? &from->routes : nullptr);
   if (prefix != nullptr) { prefix->routes = out.routes; }
 
-  // `out` carries the best attempt so far, and `done` is set from that one
-  // rather than from whichever attempt was just made.
+  // `out` holds the best attempt so far; `done` reads from it, not from the latest
+  // attempt.
   scav_profile wider{ knobs };
   uint32_t fewest{ out.routes.degraded() };
   bool done{ out.routes.unreachable == 0 };
@@ -599,9 +582,7 @@ struct Move {
   MoveKind kind{ MoveKind::Rank };
 };
 
-// What scoring one move yields, and all of it: the geometry is deliberately
-// not here, so a round in flight costs a `Cost` per candidate rather than a
-// layout per candidate (11.10c).
+// What scoring one move yields: its cost and shares, without its geometry.
 struct Scored {
   Cost cost{};
   std::array<int32_t, TIER2_TERMS> share{};
@@ -609,14 +590,10 @@ struct Scored {
   bool inflated{ false };
 };
 
-// Phases 1 to 3 for one set of pins, then the exact objective over the result.
-// Pure: reads the model, the split, the tables and its arguments, writes
-// nothing either of its callers can see, which is what lets a round of them run
-// at once (11.10c).
+// Phases 1 to 3 for one set of pins, then the exact objective; pure in its arguments.
 #ifdef SCAV_TESTING
-// Whether a face move is scored from the incumbent's prefix, and whether each
-// one is also scored the whole way to compare; a test runs a layout both ways
-// and counts what disagreed.
+// Whether a face move is scored from the incumbent's prefix, and whether each is also
+// scored whole and compared; the counters tally uses and disagreements.
 bool test_prefix_shortcut{ true };
 bool test_prefix_verify{ false };
 Mutex test_prefix_lock;
@@ -681,8 +658,7 @@ Scored score_move(Chart const &c,
                             nullptr,
                             &pins);
   };
-  // A traced search scores every move the whole way, since its trace records
-  // each move's phases.
+  // A traced search scores every move whole, its trace recording each move's phases.
   bool shortcut{ (from != nullptr) && (trace_sink() == nullptr) };
 #ifdef SCAV_TESTING
   shortcut = shortcut && test_prefix_shortcut;
@@ -765,8 +741,7 @@ Scored score_move(Chart const &c,
 }
 
 #ifdef SCAV_TESTING
-// Whether a search leaves no-op faces unscored, and how many it has left:
-// a test compares a layout with it on against one with it off.
+// Whether a search leaves no-op faces unscored, and how many it has left.
 bool test_skip_noop_faces{ true };
 Mutex test_noop_lock;
 uint64_t test_noop_faces{ 0 };
@@ -782,15 +757,8 @@ bool skipping_noop_faces() {
   return true;
 }
 
-// Level 1: hold one state at a rank longest path did not give it, re-derive
-// phase 1 from that, and run phases 2 and 3 whole. Greedy and strictly
-// improving on the exact objective, in state order then rank order, so the pass
-// is a function of the model rather than of the order candidates happened to be
-// enumerated in (6).
-//
-// **A move is a pin and pins compose**, so accepting one is appending to the
-// list the next round re-derives from, and rejecting one is not appending. No
-// geometry is ever mutated and nothing has to be rolled back (11.10a).
+// Level 1: greedy, strictly improving moves in enumeration order. A move is a pin, so
+// taking one appends to the pins the next round re-derives from.
 Improved run_search(Chart const &c,
                     SplitGraph const &g,
                     scav_spaces const &s,
@@ -805,9 +773,7 @@ Improved run_search(Chart const &c,
                     SearchPins const &seed,
                     std::vector<uint8_t> const *scope) {
   Improved out;
-  // `scope` is per submachine and null for all of them: a move is offered only
-  // in a frame it names. A kick changes one frame and the rest are converged,
-  // so its search has nothing to find outside that frame (11.10f).
+  // `scope` is per submachine, null for all: a move is offered only in a frame it names.
   auto const in_scope = [scope](uint32_t frame) {
     return (scope == nullptr) || ((frame < scope->size()) && ((*scope)[frame] != 0));
   };
@@ -817,8 +783,8 @@ Improved run_search(Chart const &c,
   held = seed;
   SubmachineOrders here{ order_submachines(c, g, s, objective, threads, held) };
 
-  // The incumbent every candidate of a round is one frame away from. Read by
-  // all of them at once and written only here, between rounds (11.10c).
+  // The incumbent's route cache: read by every candidate of a round, written between
+  // rounds.
   RouteCache base;
   Prefix incumbent;
   {
@@ -840,9 +806,7 @@ Improved run_search(Chart const &c,
                                       &incumbent) };
     out.best = std::move(first);
   }
-  // Scored here rather than handed in, so a start is judged by what it is and
-  // not by what the caller last saw: a reversal kick starts somewhere no caller
-  // has scored, and an incumbent left at zero is one no move can beat (11.10f).
+  // The start is scored here, as it stands.
   out.viable = out.best.viable;
   if (!out.viable) { return out; }
   CostContext const scoring{ cost_context(c) };
@@ -863,10 +827,7 @@ Improved run_search(Chart const &c,
     return base_pins;
   };
 
-  // One counter per dimension, each capped at the budget. Shared, the sweep
-  // that runs first starves the other -- measured: cuts ahead of placements on
-  // one shared 24 took `axis` from 11,780 to 12,702, every move still strictly
-  // improving and the walk simply cut short (11.10b).
+  // One counter per move kind, each capped at the budget.
   uint32_t cut_scored{ 0 };
   uint32_t rev_scored{ 0 };
   uint32_t face_scored{ 0 };
@@ -884,8 +845,7 @@ Improved run_search(Chart const &c,
     // computes is read by the next one (11.10c).
     round.clear();
 
-    // Unchaining first: the segments a cut can free are exactly the ones phase
-    // 1 chained, which the bends it created name (11.10b).
+    // Cuts first: the segments phase 1 chained, named by the bends it created.
     chained.assign(g.segments.size(), 0);
     for (OrderNode const &nd : here.nodes) {
       if ((nd.kind == OrderKind::Bend) && (nd.subject < chained.size())) {
@@ -906,12 +866,7 @@ Improved run_search(Chart const &c,
                         .kind = MoveKind::Cut });
     }
 
-    // Which edge of a cycle carries the reversal. Cycle-breaking walks in node
-    // order and turns around whichever edge closes the walk, so the choice is
-    // declaration order and nothing scores it (11.10d). Only a segment on a
-    // cycle is offered: turning one on none makes a cycle for the walk to break
-    // somewhere else, and on `dock` that ran the initial arrow backwards, which
-    // `Cost` does not price (11.10g).
+    // Which edge of a cycle carries the reversal; only a segment on a cycle is offered.
     for (uint32_t seg = 0; (seg < g.segments.size()) && (rev_scored < budget); ++seg) {
       if ((here.seg_cyclic[seg] == 0) || !in_scope(g.segments[seg].frame.v)) { continue; }
       TransId const t{ g.segments[seg].trans };
@@ -926,13 +881,8 @@ Improved run_search(Chart const &c,
       round.push_back({ .leg = { .trans = t, .leg = leg }, .kind = MoveKind::Reverse });
     }
 
-    // Which face each end of a segment leaves by. Four per end, and a face
-    // already pinned is not re-offered (11.10e). A face the router gives no
-    // effect at that end -- every face at an end it reads none at, and at one
-    // it does, the face it seats the end on anyway -- draws the incumbent
-    // exactly, so it cannot improve on it: charged to the budget as though
-    // scored, and not scored. A traced search scores it, since its trace
-    // records every move offered.
+    // Four faces per segment end, less any pinned. A face the router gives no effect
+    // draws the incumbent exactly, so it is charged to the budget unscored unless traced.
     std::vector<uint8_t> const &faceable{ base.faceable };
     bool const skip_noop{ trace_sink() == nullptr };
     for (uint32_t seg = 0; (seg < g.segments.size()) && (face_scored < budget); ++seg) {
@@ -960,9 +910,8 @@ Improved run_search(Chart const &c,
       }
     }
 
-    // Which side of its state's border each port crosses on: every side but
-    // the one the incumbent drew it on, and a port already pinned is not
-    // re-offered (11.3, 11.10g).
+    // Every side of its state's border a port may cross but the incumbent's; a port
+    // already pinned is not re-offered.
     SubmachineOrders const &laid{ incumbent.laid };
     source.assign(laid.nodes.size(), 0);
     for (OrderEdge const &e : laid.edges) { source[e.src] = 1; }
@@ -999,8 +948,7 @@ Improved run_search(Chart const &c,
       }
     }
 
-    // An initial pseudostate is not offered: phase 1 seats it before whatever
-    // state it enters, wherever that state is moved (11.10g).
+    // An initial pseudostate is not offered: phase 1 seats it before the state it enters.
     for (uint32_t st = 0; (st < c.states.size()) && (pin_scored < budget); ++st) {
       if ((c.states[st].live == 0) || (here.state_node[st] == INVALID) ||
           (c.states[st].kind == StateKind::Initial)) {
@@ -1037,9 +985,7 @@ Improved run_search(Chart const &c,
                           (round[i].kind == MoveKind::Face) ? &incumbent : nullptr);
     });
 
-    // Reduced in enumeration order, so the pass is a function of the model and
-    // not of which worker finished first (6). The trace is emitted here for the
-    // same reason -- a worker writing it would order it by the scheduler.
+    // Reduced in enumeration order, with the trace emitted here in that order.
     Move take{};
     Cost best{ out.cost };
     bool found{ false };
@@ -1050,10 +996,8 @@ Improved run_search(Chart const &c,
       if (!sc.viable) {
         verdict = MoveVerdict::NotViable;
       } else if (sc.inflated) {
-        // A move that only fits once the whole chart's spacing was widened is
-        // not a better placement, it is a bigger drawing -- and it is one no
-        // caller can re-derive from the pins alone, because the geometry
-        // belongs to a profile the pins do not name.
+        // Inflated spacing belongs to a profile the pins do not name, so such a move is
+        // never taken.
         verdict = MoveVerdict::Inflated;
       } else if (cost_less(sc.cost, best)) {
         verdict = MoveVerdict::Taken;
@@ -1098,11 +1042,8 @@ Improved run_search(Chart const &c,
     if (!found) { break; }
     held = with(held, take);
     here = order_submachines(c, g, s, objective, threads, held);
-    // Recomputed rather than carried out of the scan: keeping every
-    // candidate's geometry in flight is a whole layout per candidate, and one
-    // re-run is a round's cost divided by its width. It is the run the taken
-    // candidate was scored by, so it reuses what that one reused: every frame
-    // the move left where it was, or only moved.
+    // Re-derived as the taken candidate was scored, reusing every frame the move left or
+    // shifted.
     RouteCache const was{ std::move(base) };
     base = RouteCache{};
     std::vector<Diagnostic> spilled;
@@ -1168,10 +1109,8 @@ SearchPins get_pins(int32_t const *w, uint32_t &at) {
   return p;
 }
 
-// Every search a layout has run, by `search_key`. One started again from all
-// of that ends where the first did, and the second kick schedule and the
-// settling passes start most of theirs where an earlier search already did.
-// Shared by the pool's threads and held only around a lookup or an insert.
+// Every search a layout has run, by `search_key`. Shared by the pool's threads and
+// locked only around a lookup or an insert.
 struct SearchMemo {
   Mutex lock;
   Memo table{ size_t{ 1 } << 24 };
@@ -1180,10 +1119,8 @@ struct SearchMemo {
 };
 
 #ifdef SCAV_TESTING
-// Whether a layout runs its searches through a memo, how many it answered from
-// one last time, and whether every answer is checked against running the
-// search anyway: most answers are searches that lose, so a wrong one would not
-// reach the drawing a test can see.
+// Whether a layout runs its searches through a memo, how many it answered from one,
+// and whether every answer is checked against running the search anyway.
 bool test_search_memo{ true };
 bool test_search_memo_verify{ false };
 uint32_t test_search_memo_hits{ 0 };
@@ -1219,9 +1156,8 @@ bool same_result(Improved const &a, Improved const &b) {
 }
 #endif
 
-// `run_search` from the memo where it holds the start. A hit keeps the pins
-// and cost the search reached and re-derives the drawing from the pins, as the
-// search's own last step did. A traced run searches, since a hit emits nothing.
+// `run_search` through the memo: a hit keeps the reached pins and cost and re-derives
+// the drawing from the pins. A traced run always searches.
 Improved search_moves(Chart const &c,
                       SplitGraph const &g,
                       scav_spaces const &s,
@@ -1354,17 +1290,8 @@ Improved search_moves(Chart const &c,
 
 SCAV_INTERNAL_BEGIN
 
-// How many of the table's rows this chart runs, and how many bounded moves it
-// scores: all of `portfolio_m` and all of `portfolio_k`, whatever its size.
-//
-// **Both used to halve for every doubling of the entity count past 512**, which
-// answered an expensive candidate by searching less and, past 16k entities, set
-// the move budget to zero and switched Level 1 off entirely. That is quality
-// paying for latency, and the cost of a candidate is the thing to fix instead
-// (11.10c): a round of them now runs at once, and a candidate reuses every
-// frame its move did not touch. The entity count is kept in the signature
-// because what should bound a big chart is the work a candidate actually does,
-// which is the next thing to measure rather than a closed form over size.
+// The table rows and bounded moves this chart runs: all of `portfolio_m` and
+// `portfolio_k`.
 uint32_t search_tuple_count(scav_profile const &p, uint32_t /*entity_count*/) {
   return imin(static_cast<uint32_t>(imax(p.portfolio_m, 1)), LAYOUT_SEARCH_ROWS);
 }
@@ -1373,15 +1300,8 @@ uint32_t search_move_budget(scav_profile const &p, uint32_t /*entity_count*/) {
   return static_cast<uint32_t>(imax(p.portfolio_k, 0));
 }
 
-// Row `index` of the fixed table, as a delta from the profile as given: bit 0
-// flips the box packer, bit 1 turns compaction on, bit 2 hands each frame its
-// owner's hole. Row 0 is therefore the caller's own tuple, and `portfolio_m` of
-// 1 is the pipeline as it ran before the portfolio existed. The packer is bit 0
-// because it is the knob that moves a chart: every pick the corpus makes on
-// either scale is row 1. **`sm_tiebreak` is no longer a row**: it won on no
-// chart at either scale, so the table spent a bit on a knob that decided
-// nothing, and compaction — which does move charts, in both directions — took
-// it. The field stays a profile knob a caller may set; no row flips it.
+// Row `index` as a delta from the profile: bit 0 flips the box packer, bit 1 compaction,
+// bit 2 the owner's hole, bit 3 the fold; row 0 is the caller's own tuple.
 void search_tuple(scav_profile &p,
                   DarSource &dar,
                   Compaction &pack,
@@ -1393,10 +1313,7 @@ void search_tuple(scav_profile &p,
   fold = (((index >> 3U) & 1U) != 0) ? Fold::Always : Fold::Scale;
 }
 
-// `argmin(Cost, index)` over the candidates, in index order: the combine is
-// associative and not commutative, so the order is what makes it one value (6).
-// `viable` is parallel to `cost`, and row 0 answers for a set with nothing in
-// it -- the caller's own tuple, whose failure it was already told about.
+// `argmin(Cost, index)` in index order; row 0 answers for a set with nothing viable.
 uint32_t search_argmin(std::vector<Cost> const &cost, std::vector<uint8_t> const &viable) {
   uint32_t best{ 0 };
   bool found{ false };
@@ -1488,22 +1405,14 @@ bool layout_run(Chart &c,
   SearchPins const seed{ (pins != nullptr) ? *pins : SearchPins{} };
   SubmachineOrders const orders{ order_submachines(c, g, s, p, o.threads, seed) };
 
-  // Level 2: every row of the table this chart's size admits, each its own
-  // whole phase 2 and 3, collected rather than folded into a best-so-far, and
-  // reduced in index order afterwards (6, 11.10). Row 0 is the profile as
-  // given, so it is what a failure is reported for and what M of 1 runs alone.
-  //
-  // A pinned row is a table of one, so it is slot 0 of everything below: the
-  // row a failure is reported for, the row nothing is ranked against, and the
-  // row `tuple` comes back as.
+  // Level 2: every admitted row laid out whole and reduced in index order; a pinned row is
+  // a table of one.
   bool const pinned{ row != INVALID };
   uint32_t const rows{ pinned ? 1U : search_tuple_count(p, layout_entity_count(c)) };
   std::vector<Candidate> candidates(rows);
   std::vector<Cost> cost(rows);
   std::vector<uint8_t> viable(rows, 0);
-  // Rows are whole independent layouts of one chart, so they run at once and
-  // are reduced afterwards in index order (11.10c). Each runs its own phases on
-  // one thread, since a row is already the unit a free thread takes.
+  // Rows run at once, each on one thread, and are reduced in index order.
   std::vector<std::vector<Diagnostic>> spilled(rows);
   CostContext const scoring{ cost_context(c) };
   parallel_for(rows, (rows > 1) ? o.threads : 1U, [&](uint32_t i) {
@@ -1527,10 +1436,8 @@ bool layout_run(Chart &c,
                                      nullptr,
                                      &seed);
     viable[i] = candidates[i].viable ? 1U : 0U;
-    // One row has nothing to rank, so it is not scored: `argmin` over one
-    // candidate is that candidate. The objective is the caller's profile and
-    // not the tuple's copy, so two rows are compared on one scale even where
-    // one of them inflated.
+    // A single row is not scored; rows are compared under the caller's profile, not the
+    // tuple's copy.
     if (viable[i] != 0) {
       CostTerms const t{
         cost_terms(scoring, c, g, candidates[i].sized, candidates[i].routes, s, p)
@@ -1542,15 +1449,11 @@ bool layout_run(Chart &c,
   // other row's are a candidate's business. Merged here rather than in the
   // worker, where the order would be the scheduler's.
   diags.insert(diags.end(), spilled[0].begin(), spilled[0].end());
-  // A tuple that leaves the coordinate domain is no candidate, and the caller's
-  // own tuple leaving it is the run's failure, as it was before anything else
-  // was tried.
+  // A tuple leaving the coordinate domain is no candidate; row 0 leaving it fails the run.
   if (!candidates[0].viable) { return false; }
 
-  // Level 1 from every viable row, and the rows ranked by what they converge
-  // to rather than by where they start (11.10f). The best start is not the best
-  // basin: on `bottler` a row 19% better before search finished 51% worse.
-  // Rows run at once, one thread each, and a lone row takes the caller's.
+  // Level 1 from every viable row, ranked by what each converges to; rows run at once, and
+  // a lone row takes the caller's threads.
   uint32_t const budget{ search_move_budget(p, layout_entity_count(c)) };
   auto const tuple_of =
       [&](uint32_t i, scav_profile &knobs, DarSource &dar, Compaction &pack, Fold &fold) {
@@ -1612,24 +1515,8 @@ bool layout_run(Chart &c,
   if (budget != 0) { search_rows(std::vector<uint8_t>(rows, 1)); }
   std::vector<uint8_t> const &eligible{ viable };
 
-  // Iterated local search on every viable row, and the rows ranked by what it
-  // reaches (11.10f, 11.10g): the row cheapest before its kicks is not the
-  // cheapest after them, and kicking only that one shipped `axis` as a strip
-  // half again the cost of what row 0 kicks to. A reversal scores worse on
-  // its own than the incumbent it would replace, so no strictly improving pass
-  // takes it; each edge on a cycle and not already turned is tried as a start
-  // instead and searched to convergence, and kept when it converges below the
-  // incumbent. Strictly decreasing and bounded below, so the rounds end.
-  //
-  // **A kick starts warm.** A reversal changes one frame, so the start is the
-  // incumbent's pins less the rank, cut and face pins *in that frame*, with
-  // every reversal kept: other frames are already converged and have nothing
-  // to rediscover. And **kicks in different frames are taken together**: the
-  // best improving kick of each frame is combined and searched once, and the
-  // combination is kept when it beats the best of them alone; where it does
-  // not, the best is taken and each other frame's is tried on top of it in
-  // turn. `mill`'s six copies of `estop` would otherwise take six rounds for
-  // six independent choices.
+  // Iterated local search on every viable row: each unturned cycle edge starts a search,
+  // kept where it converges below the incumbent; kicks in distinct frames combine.
   auto const kick = [&](uint32_t best) {
     scav_profile knobs{};
     DarSource dar{ DarSource::Profile };
@@ -1644,9 +1531,8 @@ bool layout_run(Chart &c,
     auto const outside = [&](uint32_t frame, std::vector<uint8_t> const &redo) {
       return (frame >= redo.size()) || (redo[frame] == 0);
     };
-    // The incumbent's pins with every rank, cut, face and side pin in a
-    // re-decided frame dropped: which way a frame runs is kept, as its
-    // reversals are.
+    // The incumbent's pins less every rank, cut, face and side pin in a re-decided
+    // frame; orientations and reversals are kept.
     auto const warm = [&](SearchPins const &from, std::vector<uint8_t> const &redo) {
       SearchPins out;
       out.reverses = from.reverses;
@@ -1676,9 +1562,7 @@ bool layout_run(Chart &c,
     // adds a frame turned to run down to the reversals a round tries.
     auto const kick_rounds = [&](bool turns) {
       bool kicked{ false };
-      // Kicks draw from the budget like every other dimension. On a graph whose
-      // every pair is joined almost every segment lies on a cycle, and one round
-      // would try hundreds of whole searches -- the input the budget bounds.
+      // Kicks draw from the move budget.
       uint32_t kick_scored{ 0 };
       for (;;) {
         SubmachineOrders const here{
@@ -1688,11 +1572,8 @@ bool layout_run(Chart &c,
         for (OrderEdge const &e : here.edges) {
           if ((e.reversed != 0) && (e.segment < turned.size())) { turned[e.segment] = 1; }
         }
-        // A kick is a reversal, or a frame turned to run down. **Turning a frame is
-        // a kick rather than a move**: taken greedily, the first turn to improve
-        // led `ota`'s search to a basin 18% dearer than the one it reached with
-        // no turns at all, and a kick is kept only where what it converges to
-        // beats the incumbent (11.10g).
+        // A kick is a reversal or a frame turned to run down, kept only where it converges
+        // cheaper.
         struct Kick {
           ReversePin reverse{};
           OrientPin orient{};
@@ -1835,9 +1716,8 @@ bool layout_run(Chart &c,
           if (more.viable && cost_less(more.cost, cost[best])) { take(std::move(more)); }
         }
       }
-      // A kick searched one frame and the others stood still, but a frame that
-      // changed size moves its siblings' packing, so one unscoped pass from what
-      // the kicks reached picks up whatever that opened.
+      // One unscoped pass from what the kicks reached takes up what a frame's new size
+      // opened.
       if (kicked) {
         Improved settled{ search_moves(c,
                                        g,
@@ -1858,11 +1738,8 @@ bool layout_run(Chart &c,
         }
       }
     };
-    // **Two schedules from one start, and the cheaper kept.** With turns in
-    // every round, the turn that improved most led `ota` to a basin a third
-    // dearer than the one reversals alone reach; with turns only once
-    // reversals converge, `toolchanger` misses the turn that takes it 3% lower.
-    // So both run from the row's converged drawing, and ties keep the first.
+    // Two schedules from the row's converged drawing, turns every round and turns after
+    // reversals converge; the cheaper is kept, ties to the first.
     Candidate const from_candidate{ candidates[best] };
     Cost const from_cost{ cost[best] };
     SearchPins const from_held{ held[best] };
@@ -1878,11 +1755,8 @@ bool layout_run(Chart &c,
     kick_rounds(true);
     if (!cost_less(cost[best], mixed.cost)) { take(std::move(mixed)); }
   };
-  // Every row kicks at once: a row's kicks read and write that row's slots and
-  // nothing else, so the order they finish in reaches nothing. A row that
-  // converged to the drawing an earlier row did is not kicked again: its kicks
-  // start from that drawing, and the table's rows differ by knobs that often
-  // move nothing.
+  // Every row kicks at once, touching only its own slots; a row that converged to an
+  // earlier row's drawing is not kicked again.
   auto const same_drawing = [&](uint32_t a, uint32_t b) {
     SizedLayout const &za{ candidates[a].sized };
     SizedLayout const &zb{ candidates[b].sized };

@@ -689,10 +689,8 @@ TEST_CASE("size: an edge pointing back a rank still aligns its ends") {
 }
 
 TEST_CASE("size: an initial pseudostate sits one rank gap before its target") {
-  // Left-aligned in a layer as wide as its widest member, the arrow out of it
-  // would run that whole width; beside its target it runs one rank gap. At
-  // `X`'s height, which `W` shares, it clears `W` by half a `node_sep`, and the
-  // step to `X`'s layer grows to hold that (11.9.5).
+  // `W` shares `X`'s height, so the dot clears `W` by half a `node_sep` and the step to
+  // `X`'s layer grows to hold it.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const start{ build_state(c, root, {}, StateKind::Initial, {}) };
@@ -951,10 +949,7 @@ TEST_CASE("size: a boundary node lands on its frame's leading or trailing edge")
 }
 
 TEST_CASE("size: a layer of boundary nodes keeps a route's clearance, not a rank gap") {
-  // A route arrives at the frame's leading edge, runs through `A` and `B`, and
-  // leaves by the trailing edge. Each boundary node is a point on the frame's
-  // edge rather than a column, so `A` sits the room a route keeps from a box
-  // past the leading edge and the frame ends as far past `B` (11.9.5).
+  // Boundary nodes at ranks 0 and 3 carry one route through `A` and `B`.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -987,10 +982,8 @@ TEST_CASE("size: a layer of boundary nodes keeps a route's clearance, not a rank
 }
 
 TEST_CASE("size: a boundary holds a lane for each edge that turns in it, and no other") {
-  // Two states into one tall bar meet its long face straight across and take
-  // no lane. Three into one state meet it at one height: the middle one runs
-  // straight and the two either side turn, so the boundary holds two lanes a
-  // line of type apart (11.9.5). Phase 1 would have charged every one of them.
+  // Two states meet the bar's long face straight and take no lane. Of three into one
+  // state, the middle runs straight and the two either side turn, holding two lanes.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   std::vector<StateId> ids;
@@ -1034,11 +1027,8 @@ TEST_CASE("size: a boundary holds a lane for each edge that turns in it, and no 
 
 TEST_CASE(
     "size: a start state seated inside its target's column takes no room in its own") {
-  // `T` and the wide `W` share one column by the edge between them, so `T` is
-  // centred on it with room to spare either side. The start state is moved to
-  // `rank_sep` before `T`, which is inside that column, so its own layer holds
-  // nothing and the column keeps a route's clearance from the frame's edge
-  // rather than a dot and a rank gap. Without the room, it keeps its layer.
+  // `T` centres in its column beside the wide `W`, and its dot `rank_sep` before it lies
+  // in that column.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const start{ build_state(c, root, {}, StateKind::Initial, {}) };
@@ -1078,10 +1068,8 @@ TEST_CASE(
 }
 
 TEST_CASE("size: a port on a cross border sits on the frame's edge over its neighbour") {
-  // `A -> B` across two ranks, and a port in `B`'s rank on the top or bottom
-  // border by a flat edge. It is on the frame's edge across the ranks, level
-  // along them with `B`'s centre, and takes no room in `B`'s rank: `B` stays
-  // level with `A` rather than a node gap below the port.
+  // `A -> B` across two ranks, and a port in `B`'s rank on the top or bottom border,
+  // joined to `B` by a flat edge.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -1473,10 +1461,8 @@ TEST_CASE("size: a fold whose pieces will not pack is dropped for the flat run")
                       diags));
   CHECK(diags.empty());
 
-  // Four ranks end to end, each at least rank_sep past the last, which is the
-  // flat run rather than any arrangement of pieces. Past it only by the lanes
-  // of edges that turn there: two tall states cannot both meet a short one
-  // straight.
+  // Four ranks end to end, the flat run: each `rank_sep` past the last, plus two lanes
+  // where two tall states cannot both meet a short one straight.
   int32_t const tall_w{ p.kind_min_w[0] + (2 * p.pad) };
   int32_t const wide_w{ SPACE_MAX + (2 * p.pad) };
   int32_t const two{ 2 * label_line_height(p) };
@@ -1497,9 +1483,8 @@ TEST_CASE("size: a fold whose pieces will not pack is dropped for the flat run")
 }
 
 TEST_CASE("size: a row that leaves the domain does not displace the column that fits") {
-  // Two unconnected states, each half the domain wide and half of it tall. The
-  // column of the two fits; the row the box packer offers scales larger and
-  // does not, so it is no candidate and the frame is measured on the column.
+  // Two unconnected states, each half the domain wide and tall: the column fits and the
+  // packer's row does not, so the frame takes the column.
   scav_profile p{ profile() };
   p.pad = 130800;
   Chart c;
@@ -2219,8 +2204,8 @@ TEST_CASE("size: whitespace elimination grows a sibling submachine's own rect") 
 
 namespace {
 
-// A corpus chart with a band on every state and a label box on every
-// transition, and its orders, so sizing has bands and label room to lay out.
+// A corpus chart with a band on every state, a label box on every transition, and its
+// orders.
 struct Sample {
   Chart c;
   std::vector<scav_box_space> box;
@@ -2268,8 +2253,7 @@ uint32_t largest_frame(Sample const &x) {
   return most;
 }
 
-// A sizing and its trace. Traced, every frame is laid out rather than read
-// back from the frame memo, so each one runs on whatever this thread left.
+// A sizing and its trace. Traced, every frame is laid out rather than read from the memo.
 struct Traced {
   SizedLayout z;
   std::vector<char> trace;
@@ -2317,8 +2301,7 @@ bool same(Traced const &a, Traced const &b) {
 
 }  // namespace
 
-// Each fresh result is the first sizing on a new thread, so nothing an earlier
-// sizing left on that thread can reach it.
+// Each fresh result is the first sizing on a new thread.
 TEST_CASE("size: a sizing is the same whatever its thread sized before") {
   scav_profile const p{ profile() };
   Sample const small{ sample("led.scav", p) };

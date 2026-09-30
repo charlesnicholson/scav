@@ -1,8 +1,5 @@
-// A composite entered through its leading border by two routes into one child
-// that an initial pseudostate also enters. With two other arrivals the initial
-// is the median the alignment keeps the child on, so a port level with the
-// child and the initial's dot seated level with it arrive at one point on the
-// child's face, and the dot's arrowhead was drawn over the port's.
+// Two routes through a composite's leading border into a child its initial also
+// enters: the port's leg stays straight, and no other arrival shares its point.
 chart ported "a port level with a child its initial also enters" {
   state Above,
   state Below,

@@ -73,9 +73,8 @@ struct RouteCache {
 // One net per segment, routed in that segment's frame, laid end to end. The
 // planning is the router's input, so two routers see the same problem. Frames
 // are sharded across `threads` workers and merged in frame order, so the
-// result is one value at every worker count (6). `was`, where given, is a
-// routing over this same sizing, whose labels are kept wherever nothing a
-// box reads has changed.
+// result is one value at every worker count. `was`, where given, is a routing
+// over this same sizing; its labels are kept where nothing a box reads changed.
 Routes route_transitions(Chart const &c,
                          SplitGraph const &g,
                          SubmachineOrders const &o,

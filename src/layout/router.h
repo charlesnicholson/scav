@@ -37,9 +37,8 @@ struct RouteNet {
   // INVALID to let the router choose. A caller sets these when the choice is
   // being searched rather than ruled (11.10e).
   uint32_t src_face{ INVALID }, dst_face{ INVALID };
-  // 1 where a straight leg between two parallel faces is seated at the lower
-  // end of the run both faces can seat rather than between their centres:
-  // phase 2 reserved its label's room on the leg's higher side from there.
+  // 1 seats a straight leg between two parallel faces at the lower end of the
+  // run both faces can seat, not between their centres.
   uint32_t lean{ 0 };
 };
 
@@ -112,24 +111,16 @@ class Router {
   // by exactly this. A box on the frame's own edge has no room otherwise.
   [[nodiscard]] virtual int32_t margin(scav_profile const & /*p*/) const { return 0; }
 
-  // Bit f where naming face f at end `end` of `in.nets[net]` -- 0 its source,
-  // 1 its destination -- can change what this router returns for `in`. At a
-  // face whose bit is clear, the net routes exactly as with no face named.
-  // Reads `in` but not that end's own face.
+  // Bit f where naming face f at end `end` (0 source, 1 destination) of
+  // `in.nets[net]` can change the route. Reads `in` but not that end's own face.
   [[nodiscard]] virtual uint32_t effective_faces(RouteInput const & /*in*/,
                                                  uint32_t /*net*/,
                                                  uint32_t /*end*/) const {
     return 0;
   }
 
-  // Pure in `in`, reentrant, no global state, must not unwind.
-  //
-  // One polyline per net, in `in.nets` order, at least two points each. A
-  // polyline runs from `net.src` to `net.dst`; at an end naming an obstacle it
-  // runs from or to a point on that box's border instead, the caller having
-  // put the named end at the box's centre. Phase 3 lays a transition's nets
-  // end to end on that: consecutive nets are handed the same shared point and
-  // it appears once in the joined route.
+  // Pure in `in` and reentrant. One polyline per net in `in.nets` order, from `src` to
+  // `dst` or a named box's border; consecutive nets share their joining point.
   virtual void route(RouteInput const &in, RouteOutput &out) const = 0;
 };
 

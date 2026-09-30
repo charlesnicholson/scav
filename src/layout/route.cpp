@@ -116,9 +116,8 @@ struct FrameRoutes {
   NudgeStats nudged;
 };
 
-// Kept per thread and reused across every frame that thread routes. A shard
-// never waits on the pool, so no second shard on this thread can start while
-// one is using it.
+// Per-thread, reused across every frame the thread routes. A shard never waits on the
+// pool, so no second shard on this thread starts while one uses it.
 struct FrameScratch {
   RouteInput in;
   RouteOutput ro;
@@ -155,10 +154,8 @@ struct CallScratch {
   std::vector<uint32_t> kid_head, kid_next, loose;
 };
 
-// A thread waiting in `parallel_for` runs other shards, and one of those can
-// route another candidate on this thread before the first call returns. So a
-// call moves a scratch off this thread's stack for its whole run and moves it
-// back on return, and a call nested inside it takes the next one down.
+// A thread waiting in `parallel_for` can route another candidate before its call returns,
+// so each call takes the next scratch down this stack for its whole run.
 std::vector<CallScratch> &call_stack() {
   thread_local std::vector<CallScratch> s;
   return s;
@@ -279,9 +276,8 @@ Routes route_transitions(Chart const &c,
       return scav_port_slot{ .x = at.x, .y = at.y, .side = 0, .boundary_depth = depth };
     }
     bool const leading{ source_node[node] != 0 };
-    // On the border the frame's ranks start and end at: left and right for a
-    // frame running across, top and bottom for one running down (11.10g). A
-    // node on a cross border is on one of the other two.
+    // On the border the frame's ranks start and end at: left and right for a frame running
+    // across, top and bottom for one running down; a cross-border node is on the others.
     uint32_t const frame{ g.segments[seg].frame.v };
     bool const down{ (frame < o.sub_down.size()) && (o.sub_down[frame] != 0) };
     uint8_t const cross{ (seg < o.seg_cross.size()) ? o.seg_cross[seg] : uint8_t{ 0 } };
@@ -413,11 +409,8 @@ Routes route_transitions(Chart const &c,
     fr.nudged = {};
   }
 
-  // A state inside its enclosing state's box overlaps a region only where that
-  // box does too, and then the box shields it unless the box is the frame
-  // owner's or one enclosing it. So every obstacle of a frame is either loose
-  // -- enclosed by no state, or not inside its enclosing state's box -- or
-  // enclosed by a state on the owner's chain.
+  // Every obstacle of a frame is loose or enclosed by a state on the owner's chain. A
+  // loose state has no enclosing state, or lies outside its enclosing state's box.
   uint32_t const state_count{ static_cast<uint32_t>(c.states.size()) };
   std::vector<uint32_t> &enclosing{ cs.enclosing };
   enclosing.resize(state_count);
@@ -482,11 +475,8 @@ Routes route_transitions(Chart const &c,
     region.h += 2 * margin;
     in.region = region;
 
-    // Every live box overlapping the region except those enclosing it, and of those
-    // only the outermost -- a box already blocks its own descendants (11.14).
-    // The chain is walked as `ancestor_or_self` walks it, so a state is on it
-    // exactly where that would answer true. The candidates are visited in
-    // ascending state order off one bit each.
+    // Every live box overlapping the region except those enclosing it, and of those only
+    // the outermost. The chain matches `ancestor_or_self`; candidates go in state order.
     StateId const owner{ c.submachines[m].owner };
     sc.chain.clear();
     uint32_t link{ owner.v };
@@ -525,8 +515,7 @@ Routes route_transitions(Chart const &c,
       }
     }
     for (uint32_t const a : sc.chain) { sc.in_chain[a] = 0; }
-    // The state the frame's routes are drawn inside, so none runs along its
-    // border and a port on it leaves square (11.10g).
+    // The state the frame's routes are drawn inside.
     in.enclosure = (owner.v == INVALID) ? scav_rect{} : z.state[owner.v];
     for (uint32_t const i : by_frame[m]) {
       Planned const &pn{ planned[i] };

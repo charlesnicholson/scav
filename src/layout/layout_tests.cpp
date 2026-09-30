@@ -1374,42 +1374,8 @@ constexpr std::array<char const *, 2> SCALE_CHARTS{ "nested", "flat" };
 constexpr std::array<char const *, 2> SCALE_PROFILES{ "readable", "compact" };
 constexpr std::array<char const *, 2> SCALE_ROUTERS{ "orthogonal", "straight" };
 
-// One row per cell, chart-major then profile then router, each holding
-// `CostTerms` in declaration order with the Tier-0 pair moved to the front:
-// through_box, box_overlap, bends, corridor, crossings, excess_len, adjacency,
-// label, label_near, aspect, area.
-// Moved by the corner inset (a seat off an arc is a longer route), then by the
-// trunk exemption narrowing to a common destination (11.9.3; both 2k shapes are
-// largely fan-out), then three times by 11.9.5 -- the lane pitch, the corridor
-// reservation, and offsets becoming lane positions.
-//
-// `area` is 1.51x and 1.43x nested, 1.04x and 1.07x flat: the reservation
-// itself, the same boxes in frames whose boundaries now hold a lane apiece.
-// They moved once more when seats on two different boxes began being pushed
-// apart (11.10a): `corridor` -40% on nested at `compact`, and `bends` up on the
-// orthogonal rows, which is what separating a pair costs the leg that moves.
-// And again when nudging began running once over the composed polylines
-// (11.10a): nested at `compact` reads `crossings` -10% and `excess_len` -17%,
-// a lane no per-frame pass ever had both members of.
-// These charts request no space, so only the corridor half of it reaches them.
-// And when Brandes-Kopf began aligning a segment where it meets each end and a
-// fold that packs back into one row stopped being taken (11.10g): nested
-// `aspect` -72%, and the straight router's `through_box` -11% and -4%. And
-// when a fold's label room went only where the packing puts a piece beside
-// another and a scale-chosen fold stopped stacking edges into composites
-// (11.10g): nested `area` -48% and -60%, and `crossings` to zero, on the
-// orthogonal rows.
-//
-// Rows 6 and 7 were one row, and that was a router cliff, not a reservation:
-// `ORTHO_VERTEX_BUDGET` bounds `nx * ny`, and a squarer 2k frame spends more
-// vertices than the same area as a strip, so flat at `compact` fell to the
-// straight router. It fits the budget since the last change above.
-//
-// And when phase 2 began counting only the lanes its alignment leaves turning,
-// and a layer of boundary nodes or of pseudostates seated elsewhere stopped
-// taking a rank gap (11.9.5): nested `area` -49% and -24%, flat -5% and -4%;
-// flat `aspect` doubles at both profiles, and its `corridor` at `compact`
-// rises 52%.
+// One row per cell, chart-major then profile then router: through_box, box_overlap,
+// bends, corridor, crossings, excess_len, adjacency, label, label_near, aspect, area.
 constexpr std::array<std::array<int64_t, 11>, 8> SCALE_PINNED{
   { { 0, 0, 2528, 0, 0, 1990112, 0, 0, 0, 2760164, 36376973376 },
     { 21616, 0, 3072, 46595888, 52856, 95493944, 0, 0, 0, 2760164, 36376973376 },
@@ -1789,8 +1755,7 @@ TEST_CASE("layout: a pinned row runs that row, and searches from it") {
     CHECK(cost_less(after, before));
   }
 
-  // And an unpinned run of the shipped profile is still the search: row 5 is
-  // what `axis` picks, so the pin at 0 above reached a row the argmin does not.
+  // Unpinned, the search picks row 5, so the pin at 0 above is not the argmin's row.
   Chart searched;
   load_corpus("axis.scav", searched);
   uint32_t picked{ INVALID };
@@ -1822,10 +1787,8 @@ TEST_CASE("layout: the search turns a frame down where that converges cheaper") 
 }
 
 TEST_CASE("layout: what ships is the cheapest row searched and kicked on its own") {
-  // A pinned row is that row searched and kicked to convergence, so the run
-  // over the whole table can do no worse than any of them. Kicking only the
-  // row that converged cheapest before its kicks shipped `axis` at Tier 2
-  // 3,024 against the 2,815 row 12 kicks to (11.10g).
+  // A pinned row is that row searched and kicked to convergence, so the whole table does
+  // no worse than any one row.
   scav_profile const p{ readable() };
   REQUIRE(p.portfolio_m == static_cast<int32_t>(LAYOUT_SEARCH_ROWS));
   auto const scored = [&](uint32_t row) {

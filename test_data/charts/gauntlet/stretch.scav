@@ -1,7 +1,5 @@
-// A run long enough to fold, where moving one state a rank along squares the
-// drawing up by a few units of aspect and pays for it with one arrow across the
-// whole width. Nothing else in the cost vector sees that arrow: it is straight,
-// so it has no bends and no excess over its own direct distance.
+// A run long enough to fold. Moving one state a rank along squares the drawing
+// up and stretches one straight arrow across it, which only route length prices.
 chart stretch "six in a row" {
   state A,
   state B,

@@ -349,8 +349,7 @@ TEST_CASE("thread: run_stripe walks one worker's shards in index order") {
 }
 
 TEST_CASE("thread: calls nested three deep finish with one worker to share") {
-  // Every level waits on the one below while the pool has a single worker, so
-  // each waiter has to run shards itself rather than block on them.
+  // With one worker, each level's waiter runs the level below's shards itself.
   HookGuard const guard;
   thread_test_spawn_limit(1U);
   uint32_t const outer{ 4 };
@@ -369,8 +368,6 @@ TEST_CASE("thread: calls nested three deep finish with one worker to share") {
 }
 
 TEST_CASE("thread: two callers on threads of their own share the pool") {
-  // Two layouts from two host threads push jobs at once; each waits on its own
-  // and every shard of both runs exactly once.
   constexpr uint32_t PER_CALL{ 512 };
   std::vector<uint32_t> a(PER_CALL, 0);
   std::vector<uint32_t> b(PER_CALL, 0);
@@ -388,8 +385,7 @@ TEST_CASE("thread: two callers on threads of their own share the pool") {
 }
 
 TEST_CASE("thread: a mutex lets one holder in at a time") {
-  // Each holder counts itself in, dwells, and counts itself out; a second
-  // holder inside at once would see the count above one.
+  // A holder that enters while another is inside finds `inside` nonzero.
   Mutex m;
   std::atomic<uint32_t> inside{ 0 };
   std::atomic<uint32_t> overlaps{ 0 };

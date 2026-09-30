@@ -115,23 +115,16 @@ void ortho_reface_attachments(std::vector<RouteNet> const &nets,
                               std::vector<scav_point> const &toward,
                               std::vector<scav_point> &at);
 
-// The two ends of one net, seated on one coordinate where that makes the net one
-// straight segment: each was the other box's *centre* projected onto its own
-// face, so two parallel faces a shared run apart still produce two coordinates
-// and a jog between them. Skipped where phase 1 asked for a corridor. A net
-// that leans takes the lower end of the run both faces seat.
+// Seats both ends of a net on one coordinate where that makes it one straight
+// segment unless phase 1 asked for a corridor; a leaning net takes the run's lower end.
 void ortho_align_attachments(std::vector<RouteNet> const &nets,
                              std::vector<scav_rect> const &boxes,
                              std::vector<uint8_t> const &inscribed,
                              std::vector<int32_t> const &corner,
                              std::vector<scav_point> &at);
 
-// The attachments one face still lands on one point -- two states each other's
-// target project onto the same place -- pushed apart along that face and
-// clamped back onto it: by the larger of `clear` and `pitch` where the run the
-// face seats on holds that, and otherwise by `clear` or a third of the face,
-// whichever is less. A seat whose far end names no box and lies level with it
-// keeps its point, and what moves off that point moves the whole step.
+// Attachments sharing a point on one face, pushed apart along it by `max(clear, pitch)`
+// where the face holds that and by `min(clear, len / 3)` where not. A port's leg stays.
 void ortho_spread_attachments(std::vector<RouteNet> const &nets,
                               std::vector<scav_rect> const &boxes,
                               std::vector<uint8_t> const &inscribed,
@@ -140,14 +133,8 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
                               int32_t pitch,
                               std::vector<scav_point> &at);
 
-// Seats on *different* boxes whose legs run alongside closer than `pitch`,
-// pushed apart along their own faces. The pass above separates seats sharing
-// one face, and alignment straightens one net's own two ends; neither ever
-// compares a seat on one box with a seat on another, which is where 34 of the
-// corpus's 41 crowded pairs live (11.10a). Seats sharing a box and face are
-// left alone -- a fan-in's shared arrival is a trunk 11.5 keeps whole. A leg
-// whose far end names no box and lies level with it stays, and the other of
-// its pair takes the whole shortfall.
+// Seats on different boxes whose legs run alongside closer than `pitch`, pushed apart
+// along their faces; a fan sharing a box is left alone, and a port's leg stays.
 void ortho_separate_attachments(std::vector<RouteNet> const &nets,
                                 std::vector<scav_rect> const &boxes,
                                 std::vector<uint8_t> const &inscribed,

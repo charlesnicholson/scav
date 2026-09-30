@@ -108,10 +108,8 @@ bool bundled(std::vector<scav_point> const &points,
   return head;
 }
 
-// Every buffer one call uses, kept per thread and reassigned in place, so a
-// call after the first allocates only what outgrows the calls before it.
-// Nothing here waits on the pool, so no second call on this thread can start
-// while one is using these.
+// Every buffer one call uses, per-thread and reassigned in place. Nothing here waits on
+// the pool, so no second call on this thread starts while one uses these.
 struct NudgeScratch {
   std::vector<Member> members;
   std::vector<uint32_t> lane;

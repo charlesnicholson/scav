@@ -174,10 +174,8 @@ uint32_t mix(uint32_t x) {
   return x;
 }
 
-// A second A* over the same graph and the same `(f, g, node)` order, written
-// with parallel per-node arrays, three parallel heap keys and a binary heap.
-// The order is total, so its paths must be `ortho_search`'s node for node,
-// and its expansion count too.
+// A second A* in the same `(f, g, node)` order over parallel arrays and a binary heap.
+// The order is total, so its paths and expansion count must match `ortho_search`'s.
 struct ReferenceSearch {
   std::vector<Wide> best;
   std::vector<uint32_t> parent, stamp;
@@ -185,8 +183,7 @@ struct ReferenceSearch {
   std::vector<uint32_t> heap_node;
   uint32_t generation{ 0 };
   uint32_t expansions{ 0 };
-  // Pops whose `f` the next entry shares, and whose `f` and `g` it shares, so
-  // that only the node decided which came first.
+  // Pops tied with the next entry on `f`, and on both `f` and `g`.
   uint32_t tied_f{ 0 };
   uint32_t tied_fg{ 0 };
 
@@ -331,8 +328,7 @@ struct ReferenceSearch {
 };
 
 // A hand-built grid: `nx` by `ny` lines `pitch` apart, or at random gaps where
-// `pitch` is 0, and each edge open with probability `open` in 256. Even
-// spacing is what makes many paths tie on `f` and on `g` at once.
+// `pitch` is 0, and each edge open with probability `open` in 256.
 OrthoGrid lattice(uint32_t seed, uint32_t nx, uint32_t ny, int32_t pitch, uint32_t open) {
   OrthoGrid g;
   int32_t at{ 0 };
@@ -455,9 +451,8 @@ TEST_CASE("ortho: condensing sorts, deduplicates, and keeps negatives") {
 }
 
 TEST_CASE("ortho: condensing a long list is the stable sort's order, deduplicated") {
-  // Long enough to take the radix passes, with values spanning the sign bit
-  // and every byte, runs of repeats, and lists whose low bytes all agree so a
-  // pass is skipped.
+  // Long enough for the radix passes: values spanning the sign bit and every byte,
+  // runs of repeats, and lists whose low bytes all agree.
   uint64_t s{ 17 };
   auto const next = [&s]() {
     s = (s * 6364136223846793005ULL) + 1442695040888963407ULL;
@@ -930,10 +925,7 @@ TEST_CASE("ortho: ends of one direction sharing a seat are a trunk and keep it")
 }
 
 TEST_CASE("ortho: a leaning net seats its leg at the lower end of the shared run") {
-  // `dock`'s `Seated -> Charging`: two boxes stacked, the lower one starting
-  // under the upper, and phase 2 reserving the label's room on the higher side
-  // of a leg at the run's lower end. Between the centres the leg sat 578 past
-  // that and the label ran out of the frame by as much.
+  // Two boxes stacked, the lower one starting under the upper.
   std::vector<scav_rect> const boxes{ rect(800, 0, 1204, 653),
                                       rect(800, 1306, 1434, 653) };
   std::vector<int32_t> const arcs{ 81, 81 };
@@ -952,8 +944,7 @@ TEST_CASE("ortho: a leaning net seats its leg at the lower end of the shared run
   CHECK(seat(down) == 1459);    // halfway between the centres
   CHECK(seat(leaning) == 881);  // one arc past both boxes' leading corners
 
-  // The reverse net leans to the same end: the run is the pair's, not the
-  // direction's.
+  // The reverse net leans to the same end.
   RouteNet up{ .src = pt(1517, 1632),
                .dst = pt(1402, 326),
                .src_obstacle = 1,
@@ -966,13 +957,8 @@ TEST_CASE("ortho: a leaning net seats its leg at the lower end of the shared run
 }
 
 TEST_CASE("ortho: a port's level seat keeps its point and a pseudostate's moves off it") {
-  // `mill`'s `reset` and `Clear`'s initial both arrive on `Clear`'s leading
-  // face. The two arrivals are one direction, which the spread keeps as a
-  // trunk; but the port's leg is straight only where it is, and the initial's
-  // far end is a dot's one point, so the dot's arrival is what moves -- the
-  // whole step, since the port's does not take half.
-  // An end naming no box is seated on what it is aimed at, so the port's own
-  // point is the net's `src` and not its seat.
+  // A port's arrival and an initial dot's share one point of box 0's leading face.
+  // The port's own point is the net's `src`; its seat is its aim.
   std::vector<scav_rect> const boxes{ rect(1000, 0, 400, 400), rect(500, 150, 100, 100) };
   std::vector<uint8_t> const glyph{ 0, 1 };
   auto const spread = [&](int32_t port_y) {
@@ -988,20 +974,18 @@ TEST_CASE("ortho: a port's level seat keeps its point and a pseudostate's moves 
     return at;
   };
   std::vector<scav_point> const level{ spread(200) };
-  CHECK((level[1] == pt(1000, 200)));  // level with the port still
-  CHECK((level[3] == pt(1000, 100)));  // a whole pitch off it
-  CHECK((level[2] == pt(600, 200)));   // and the dot keeps its one seat
+  CHECK((level[1] == pt(1000, 200)));
+  CHECK((level[3] == pt(1000, 100)));  // a whole pitch off the port
+  CHECK((level[2] == pt(600, 200)));
 
-  // A port not level with its seat is no straight leg to keep, so the two
-  // arrivals are the trunk they always were.
+  // A port not level with its seat leaves the two arrivals one trunk.
   std::vector<scav_point> const off{ spread(50) };
   CHECK((off[1] == pt(1000, 200)));
   CHECK((off[3] == pt(1000, 200)));
 }
 
 TEST_CASE("ortho: a departure on a port's level seat takes the whole step") {
-  // An arrival from a port and a departure to a box share a point: the spread
-  // separates the two directions, and half each bent the port's straight leg.
+  // An arrival from a port and a departure to a box share a point.
   std::vector<scav_rect> const boxes{ rect(1000, 0, 400, 400), rect(0, 600, 400, 400) };
   std::vector<RouteNet> const nets{
     { .src = pt(-500, 200), .dst = pt(1200, 200), .dst_obstacle = 0 },
@@ -1014,10 +998,8 @@ TEST_CASE("ortho: a departure on a port's level seat takes the whole step") {
 }
 
 TEST_CASE("ortho: a port's level leg stays and the leg beside it takes the shortfall") {
-  // A port's leg into one box and a leg between two others passing under it a
-  // hair apart: half each moved the port's seat off the port and bent a leg
-  // that was one straight line. The port end is seated on what it is aimed at,
-  // so its leg runs from the face to its own box's centre.
+  // A port's leg into one box and a leg between two others passing a hair under
+  // it. The port end is seated on its aim, so its leg runs to its box's centre.
   std::vector<scav_rect> const boxes{ rect(900, 0, 100, 400),
                                       rect(1100, 500, 100, 400),
                                       rect(0, 500, 100, 400) };
@@ -1029,14 +1011,12 @@ TEST_CASE("ortho: a port's level leg stays and the leg beside it takes the short
   ortho_separate_attachments(nets, boxes, {}, {}, 8, 200, at);
   CHECK(at[1].y == 390);
   CHECK(at[3].y == 590);
-  CHECK(at[2].y == at[3].y);  // and the other still one straight line
+  CHECK(at[2].y == at[3].y);
 }
 
 TEST_CASE("ortho: a face with no room for the seats leaves them where they are") {
-  // A mark too small to seat an arrival apart from a departure keeps them
-  // stacked rather than sliding one off its own border, and it is stopped twice
-  // over: once where the face is too short for a step at all, and once where
-  // the step is a unit but the corner inset pulls both back to the middle.
+  // A mark too small to seat an arrival apart from a departure keeps them stacked: its
+  // face is too short for a step, or the corner inset pulls both back to the middle.
   auto const run = [](int32_t h, int32_t clear) {
     std::vector<scav_rect> const boxes{ rect(0, 0, 4, h) };
     std::vector<RouteNet> const nets{
@@ -1062,11 +1042,8 @@ TEST_CASE("ortho: a face with no room for the seats leaves them where they are")
 }
 
 TEST_CASE("ortho: seats are spread a pitch apart where the face has room for one") {
-  // Two facing boxes and a net each way, aligned on one line at both. The
-  // clearance is far below the pitch, so a spread by the clearance alone seats
-  // the two legs closer than the pitch. A face whose seatable run -- its length
-  // less the clearance at each end -- is shorter than the pitch spreads them
-  // as it always did, and one too short for a step at all keeps them stacked.
+  // Two facing boxes and a net each way, aligned on one line at both, with the
+  // clearance far below the pitch.
   auto const run = [](int32_t h, int32_t pitch) {
     std::vector<scav_rect> const boxes{ rect(0, 0, 100, h), rect(900, 0, 100, h) };
     std::vector<RouteNet> const nets{
@@ -1084,26 +1061,22 @@ TEST_CASE("ortho: seats are spread a pitch apart where the face has room for one
                                 pt(900, h / 2),
                                 pt(100, h / 2) };
     ortho_spread_attachments(nets, boxes, {}, {}, 8, pitch, at);
-    // Each net is still one straight segment, so what the two ends show is the
-    // two legs' separation.
     CHECK(at[0].y == at[1].y);
     CHECK(at[2].y == at[3].y);
     return std::pair<int32_t, int32_t>{ at[0].y, at[3].y };
   };
 
-  // Room: the two sit a pitch apart about the line they shared.
+  // Room: a pitch apart about the shared line.
   CHECK((run(600, 192) == std::pair<int32_t, int32_t>{ 204, 396 }));
-  // A pitch below the clearance is the clearance, which is the spread with no
-  // pitch asked for.
+  // A pitch below the clearance spreads by the clearance.
   CHECK((run(600, 0) == std::pair<int32_t, int32_t>{ 296, 304 }));
   // Just room: a 208-unit face seats on 8 .. 200, which is one pitch exactly.
   CHECK((run(208, 192) == std::pair<int32_t, int32_t>{ 8, 200 }));
-  // One unit short of it, and a face a good deal shorter: the clearance, as
-  // with no pitch at all.
+  // One unit short, and shorter still: the clearance, as with no pitch.
   CHECK((run(207, 192) == std::pair<int32_t, int32_t>{ 99, 107 }));
   CHECK((run(207, 192) == run(207, 0)));
   CHECK((run(150, 192) == run(150, 0)));
-  // And a two-unit face has no step to take, whatever the pitch.
+  // A two-unit face has no step to take, whatever the pitch.
   CHECK((run(2, 192) == std::pair<int32_t, int32_t>{ 1, 1 }));
 }
 
@@ -1528,9 +1501,8 @@ TEST_CASE("ortho: the search returns an optimal path, checked against Dijkstra")
 }
 
 TEST_CASE("ortho: the search returns the reference search's path node for node") {
-  // One scratch across every grid, so reuse over grids of different sizes is
-  // compared too. Even pitches with a bend of 0 or of one pitch tie on `f`
-  // and `g` at every step; uneven gaps and grids from boxes break fewer ties.
+  // One scratch across grids of every size. Even pitches with a bend of 0 or of
+  // one pitch tie on `f` and `g` at every step.
   OrthoScratch shared;
   ReferenceSearch reference;
   uint32_t compared{ 0 };
@@ -1561,7 +1533,7 @@ TEST_CASE("ortho: the search returns the reference search's path node for node")
     uint32_t const r{ mix(seed + 424242U) };
     uint32_t const nx{ 1 + (r % 13U) };
     uint32_t const ny{ 1 + ((r >> 8U) % 13U) };
-    // Every fourth grid spans most of int32, where only wide arithmetic holds.
+    // Every fourth grid spans most of int32.
     int32_t pitch{ ((seed % 3U) == 2U) ? 0 : 10 };
     if ((seed % 4U) == 3U) { pitch = INT32_C(1) << 27U; }
     uint32_t const open{ 150 + ((r >> 16U) % 107U) };
@@ -1582,7 +1554,7 @@ TEST_CASE("ortho: the search returns the reference search's path node for node")
     uint32_t const count{ 1 + (mix(seed + 77U) % 6U) };
     for (uint32_t i = 0; i < count; ++i) {
       uint32_t const q{ mix((seed * 37U) + i + 9000U) };
-      // Multiples of 10, so lanes land evenly spaced and ties survive the boxes.
+      // Multiples of 10, so lanes land evenly spaced.
       boxes.push_back(rect(static_cast<int32_t>(10 * (1 + (q % 14U))),
                            static_cast<int32_t>(10 * (1 + ((q >> 8U) % 14U))),
                            static_cast<int32_t>(10 * (1 + ((q >> 16U) % 3U))),
@@ -2038,9 +2010,8 @@ TEST_CASE("ortho: the same frame routed twice comes out identical") {
 }
 
 TEST_CASE("ortho: a larger frame routed in between leaves no trace in the next answer") {
-  // The router keeps its buffers per thread, so the frame between the two
-  // routes of `small` is larger on every axis: more nets, boxes, waypoints and
-  // grid lines, and an enclosure whose band crosses all of `small`'s region.
+  // The frame between the two routes of `small` is larger on every axis, and its
+  // enclosure's band crosses all of `small`'s region.
   RouteInput small;
   small.profile = profile();
   small.region = rect(0, 0, 800, 600);
@@ -2478,9 +2449,8 @@ TEST_CASE("ortho: a pinned face moves the seat and nothing else about the net") 
 }
 
 TEST_CASE("ortho: a face with no effect routes exactly as no face does") {
-  // The search leaves such a face unscored on the strength of this. Every end
-  // naming a box has one -- the face the rule seats it on anyway -- and the
-  // mark is not simply every face: busy_frame has faces that do move a seat.
+  // Every end naming a box has one such face, the one the rule seats it on anyway;
+  // busy_frame also has faces that do move a seat.
   RouteInput const in{ busy_frame() };
   RouteOutput loose;
   ORTHO.route(in, loose);
@@ -2518,8 +2488,8 @@ TEST_CASE("ortho: a face with no effect routes exactly as no face does") {
 }
 
 TEST_CASE("ortho: a face too short to seat on, or an end naming no box, has no effect") {
-  // A bar wide and thin: its left and right faces are declined, so the only
-  // faces a pin could move a departure to are the top and bottom.
+  // A bar wide and thin: its left and right faces are declined, leaving top and
+  // bottom as the only faces a pin could move a departure to.
   RouteInput in;
   in.profile = profile();
   int32_t const clear{ ortho_clearance(in.profile) };

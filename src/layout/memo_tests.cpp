@@ -1,6 +1,4 @@
-// The memo table on its own: a hit is the value stored under the whole key,
-// probing survives every key colliding, growth keeps every entry, and the
-// budget empties the table rather than serving what it held.
+// The memo table on its own.
 
 #include "layout/memo.h"
 
@@ -15,7 +13,7 @@ using namespace scav;
 
 uint64_t colliding(std::vector<uint32_t> const & /*key*/) { return 7; }
 
-// The value `find` names, copied out, so a check compares contents.
+// `find`, with the value copied out.
 bool lookup(Memo &m, std::vector<uint32_t> const &key, std::vector<int32_t> &value) {
   int32_t const *at{ nullptr };
   uint32_t len{ 0 };
@@ -64,8 +62,7 @@ TEST_CASE("memo: keys differing in one word or in length are different keys") {
 }
 
 TEST_CASE("memo: every key colliding, each is still found by its whole key") {
-  // One hash for every key, so every lookup walks one probe run and only the
-  // key comparison tells the entries apart, through several doublings.
+  // One hash for every key: each lookup walks one probe run, through several doublings.
   Memo m{ size_t{ 1 } << 20, colliding };
   constexpr uint32_t N{ 3000 };
   for (uint32_t i = 0; i < N; ++i) { m.insert({ i, i ^ 0x5555U }, value_for(i)); }
@@ -102,7 +99,6 @@ TEST_CASE("memo: past its budget it empties and starts again") {
   CHECK_FALSE(lookup(m, { 10 }, got));
   REQUIRE(lookup(m, { 100 }, got));
   CHECK(got == value_for(100));
-  // Filled again after the reset, what it holds is what went in since.
   for (uint32_t i = 200; i < 205; ++i) { m.insert({ i }, value_for(i)); }
   bool all{ true };
   for (uint32_t i = 200; i < 205; ++i) {
@@ -123,9 +119,7 @@ TEST_CASE("memo: an empty key is never stored, and an empty value is") {
 }
 
 TEST_CASE("memo: the hash reads every word of a key") {
-  // A hash that skipped a word would still be correct, since a hit compares
-  // the key whole, but every key differing only there would share one probe
-  // run. Changing any one word of keys of every length up to 40 changes it.
+  // Flipping any one word, or appending one, changes the hash at every length up to 40.
   uint64_t s{ 99 };
   auto const next = [&s]() {
     s = (s * 6364136223846793005ULL) + 1442695040888963407ULL;

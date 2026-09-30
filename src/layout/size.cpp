@@ -106,8 +106,7 @@ struct Shape {
   std::vector<scav_point> at;
   Wide w{ 0 }, h{ 0 };
   bool ok{ true };
-  // For the trace, of the shape that is kept: where pieces started and
-  // where a cut was refused, and what seating each pseudostate got.
+  // Trace records of the kept shape: piece starts, refused cuts and pseudostate seats.
   std::vector<TraceFold> cuts;
   std::vector<std::pair<uint32_t, SeatHow>> seated;
   std::vector<std::pair<uint32_t, int32_t>> centred;
@@ -117,11 +116,9 @@ struct Shape {
   bool wraps{ false };
   // Every edge a cut crosses between stacked pieces joins two plain nodes.
   bool drawable{ true };
-  // Parallel to the frame's edges: `SizedLayout::lean` for each.
-  std::vector<uint8_t> lean;
+  std::vector<uint8_t> lean;  // `SizedLayout::lean`, per frame edge
 
-  // A default shape of `n` nodes and `edges` edges, reusing every buffer's
-  // storage.
+  // A default shape of `n` nodes and `edges` edges, keeping each buffer's storage.
   void reset(size_t n, size_t edges) {
     at.assign(n, scav_point{});
     lean.assign(edges, 0);
@@ -138,10 +135,8 @@ struct Shape {
   }
 };
 
-// One chunk of one component as `lay_out_sub` holds it, for the steps along
-// its ranks: `nodes` is the component in frame-local indices, `index` a frame
-// node's place in it, and `chunk_index` a component node's place in the
-// chunk, whose `centre`, `seat_at` and layers these are.
+// One chunk of one component. `index` maps a frame node into `nodes`, and `chunk_index` a
+// component node into the chunk, which indexes `centre`, `seat_at` and the layers.
 struct ChunkView {
   Span span, espan, gspan;
   bool down;
@@ -158,11 +153,8 @@ struct Frame {
   int32_t x, y;
 };
 
-// Every buffer a sizing pass uses, kept per thread and reassigned in place, so
-// a pass after the first allocates only its result and what outgrows the
-// passes before it. Sizing never waits on the pool and lays out one frame at a
-// time, so no second pass or frame on this thread can start while one is
-// using these.
+// Every buffer a sizing pass uses, reassigned in place. Per-thread; sizing never waits on
+// the pool and lays out one frame at a time.
 struct SizeScratch {
   // The pass, and the states it sizes.
   std::vector<scav_point> sub_local;
@@ -189,9 +181,9 @@ struct SizeScratch {
   std::vector<scav_rect> pieces;
   Packing packed;
   Shape best, folded, stacked;
-  // One chunk. `spare_layers` holds the layers a smaller chunk dropped.
+  // One chunk.
   CoordGraph cg;
-  std::vector<std::vector<uint32_t>> spare_layers;
+  std::vector<std::vector<uint32_t>> spare_layers;  // the layers a smaller chunk dropped
   std::vector<uint32_t> chunk_index, chunk_nodes, arrivals, nearest;
   std::vector<int32_t> seat_at, enter_at;
   std::vector<uint8_t> apart, open, left;
@@ -210,8 +202,7 @@ void clear_buckets(std::vector<std::vector<uint32_t>> &buckets, size_t n) {
   for (std::vector<uint32_t> &b : buckets) { b.clear(); }
 }
 
-// Exactly `n` empty layers, moving storage to and from `spare` rather than
-// freeing it.
+// Exactly `n` empty layers, moving storage to and from `spare`.
 void clear_layers(std::vector<std::vector<uint32_t>> &layers,
                   std::vector<std::vector<uint32_t>> &spare,
                   size_t n) {
@@ -227,9 +218,7 @@ void clear_layers(std::vector<std::vector<uint32_t>> &layers,
   for (std::vector<uint32_t> &l : layers) { l.clear(); }
 }
 
-// The inputs one sizing pass shares between its frames and states, and what
-// it has sized so far: each of `size_pass`'s steps is a member, so the frame
-// and state layouts read the same names they read as the pass's own locals.
+// One sizing pass: what its frames and states share, and what it has sized so far.
 struct Sizer {
   Chart const &c;
   SplitGraph const &g;
@@ -306,12 +295,8 @@ struct Sizer {
   void size_state(uint32_t i);
 };
 
-// Where `seg` meets `state`, from the state's centre across the ranks of the
-// frame `state` sits in: where the boundary node inside it stands for a port
-// on its border, which is sized by now because a state is sized before the
-// frame it sits in. Zero where the segment meets the state's box rather than
-// a port, and where the frame inside runs the other way, whose ports are on
-// the faces this frame's edges do not arrive at.
+// Where `seg` meets `state`, across the ranks from its centre: its port's boundary node,
+// or zero for the box itself or a frame inside running the other way.
 int32_t Sizer::attach_at(uint32_t seg, uint32_t state, bool down) const {
   int32_t at{ 0 };
   static_cast<void>(port_at(seg, state, down, at));
@@ -370,8 +355,7 @@ void Sizer::trace_ports(uint32_t m, bool down) const {
   }
 }
 
-// Components in first-node order, and nodes within a component in (rank, pos)
-// order, so both are the reading order the frame was emitted in: `component`
+// Components in first-node order, and nodes within one in (rank, pos) order: `component`
 // per node, and component `id`'s nodes from `member[member_off[id]]`.
 uint32_t Sizer::connected_components(Span span, Span espan) {
   std::vector<uint32_t> &adj_count{ sc.adj_count };
@@ -424,19 +408,8 @@ uint32_t Sizer::connected_components(Span span, Span espan) {
   return components;
 }
 
-// The lanes the alignment leaves turning in each boundary of the chunk, into
-// `turning` and `turned_by`. An edge whose two ends meet across the ranks runs
-// straight through its boundary and takes no lane there: an end is its port
-// where the edge meets a composite at one, the mark's centre on a glyph reached
-// at the middle of a face, and the straight zone of the face on any other box.
-// A point holds one straight edge a side, and a face whose seats are spread
-// across it meets a point at no height it can be sure of, so an end shared with
-// another edge on that side runs straight only between two faces. A
-// pseudostate whose every edge here joins one neighbour is levelled with it by
-// the seating, so its edge runs straight, and it sits in the corridor beside
-// that neighbour, so every other edge on that side of the neighbour goes round
-// it. An edge across several layers turns in its first boundary and its last,
-// as phase 1 counts it.
+// The lanes turning in each boundary of the chunk, into `turning` and `turned_by`. An edge
+// whose two ends overlap across the ranks runs straight and takes no lane.
 void Sizer::count_turns(ChunkView const &v) {
   auto const across = [&](uint32_t st) {
     return v.down ? out.state[st].w : out.state[st].h;
@@ -475,9 +448,8 @@ void Sizer::count_turns(ChunkView const &v) {
            (mate[v.chunk_index[i]] == v.chunk_index[with]);
   };
 
-  // Per chunk node, the node the seating moves it beside, or INVALID: an
-  // initial before the one node it joins in the next layer, a final after the
-  // one it joins in the layer before, wherever the box lies inside the piece.
+  // Per chunk node, the mate the seating moves it beside, or INVALID: an initial's in the
+  // next layer or a final's in the one before, where the moved box stays inside the chunk.
   Wide chunk_h{ 0 };
   for (uint32_t i = 0; i < n; ++i) {
     chunk_h = imax(chunk_h, (Wide{ v.centre[i] } - (v.cg.extent[i] / 2)) + v.cg.extent[i]);
@@ -590,18 +562,8 @@ void Sizer::count_turns(ChunkView const &v) {
   }
 }
 
-// Each layer's place along the ranks inside the chunk, into `layer_x`, and the
-// room each keeps, into `kept_w`, after `count_turns`. A boundary is given its
-// labels, or its turning lanes a line of type apart where two or more turn
-// there; the lanes it holds go to `lanes` for the trace.
-//
-// A pseudostate the seating moves beside its neighbour goes `rank_sep` before
-// it, or after it for a final. Where that box, grown by half `node_sep`, lies
-// inside the neighbour's own layer, nothing is left of the pseudostate in its
-// own and the layer is sized without it; a layer left holding only boundary
-// nodes is open, as `sep_after` has it. Otherwise it keeps its own layer's
-// room, and the step to its neighbour's layer grows until the box clears every
-// node of its own layer at the height it moves to.
+// Each layer's place along the ranks into `layer_x`, and its room into `kept_w`. A seated
+// pseudostate that fits inside its neighbour's layer takes no room in its own.
 void Sizer::step_layers(ChunkView const &v, std::vector<TraceGap> &lanes) {
   auto const along = [&](uint32_t st) {
     return v.down ? out.state[st].h : out.state[st].w;
@@ -744,13 +706,8 @@ void Sizer::lay_out_sub(uint32_t m) {
   Span const espan{ o.sub_edges[m] };
   Span const gspan{ o.sub_gaps[m] };
 
-  // An anchored label needs `leader + box height` beside its leg, and phase 3
-  // has only the cross-axis room phase 2 left (11.9.5). Carried on the extent
-  // of both ends -- the slot `cross_coordinates` separates by, not the drawn
-  // rect -- so half lands each side and the pair opens the whole distance.
-  //
-  // The whole distance, not its shortfall against `node_sep`: the leg leaves
-  // its node's *centre*, and the shortfall opens the gap between node *edges*.
+  // Each end's extent carries the label's `leader + box height`, half on each side of the
+  // leg.
   int32_t const leader{ label_leader(p) };
   std::vector<int32_t> &reserve{ sc.reserve };
   reserve.assign(span.len, 0);
@@ -783,8 +740,8 @@ void Sizer::lay_out_sub(uint32_t m) {
     }
     std::vector<uint32_t> const &nodes{ sc.nodes };
 
-    // Ranks renumbered from zero, with the frame's rank kept alongside so a label's
-    // gap still lands where it was charged.
+    // Ranks renumbered from zero; `global_rank` keeps the frame's rank for the gap
+    // charges.
     std::vector<uint32_t> &global_rank{ sc.global_rank };
     global_rank.clear();
     std::vector<uint32_t> &local_rank{ sc.local_rank };
@@ -805,12 +762,8 @@ void Sizer::lay_out_sub(uint32_t m) {
     layer_w.assign(layers, 0);
     std::vector<Wide> &layer_h{ sc.layer_h };
     layer_h.assign(layers, 0);
-    // The reserve keeps a label clear of the node beside its end in the same
-    // layer. A frame running down puts a label's width beside its leg, so a
-    // node alone in its layer there takes none: the room from its frame's
-    // edge is taken on one side of the leg below, and the half the reserve
-    // put on the other side was empty (11.10g). Across, a label's height is
-    // small and the reserve is also the gap a fold's stacked pieces keep.
+    // The reserve keeps a label clear of the node beside its end; running down, a node
+    // alone in its layer takes none.
     std::vector<uint32_t> &in_layer{ sc.in_layer };
     in_layer.assign(layers, 0);
     for (uint32_t const k : nodes) { ++in_layer[local_rank[k]]; }
@@ -827,16 +780,8 @@ void Sizer::lay_out_sub(uint32_t m) {
       extent[i] = static_cast<int32_t>(imin(Wide{ extent[i] } + room, Wide{ COORD_MAX }));
       layer_h[r] += extent[i] + p.node_sep;
     }
-    // States joined by an edge inside one column share one centre line, so
-    // the route between any two runs straight down the overlap of their
-    // faces; left-aligned, the narrower one's own width at the column's
-    // leading edge was the only face they shared. The line is the centre of
-    // the widest of them, or of the room a label on one of those edges
-    // needs beside its leg on either side, whichever is wider, and the
-    // column grows to hold that room. Initial and final pseudostates are
-    // seated beside the state they join below; a bar keeps the leading
-    // edge, because a route to a state stacked on it would leave through its
-    // cap rather than its length (11.10g).
+    // States joined inside one column share a centre line: the widest member's, or its
+    // label room's; pseudostates seat beside their state and a bar keeps the leading edge.
     std::vector<uint32_t> &group{ sc.group };
     group.assign(nodes.size(), 0);
     for (uint32_t i = 0; i < group.size(); ++i) { group[i] = i; }
@@ -909,11 +854,8 @@ void Sizer::lay_out_sub(uint32_t m) {
       uint32_t const r{ local_rank[nodes[i]] };
       layer_w[r] = imax(layer_w[r], group_w[root_of]);
     }
-    // Parallel to `nodes`: where a grouped state starts along its column, on
-    // the line's centre. A state holding no regions joined in its group to a
-    // composite at a port on the composite's face across the ranks is
-    // centred on that port instead, as far as the line's width holds it, so
-    // the leg between them runs straight.
+    // Per node, where a grouped state starts along its column; a state meeting a
+    // composite's port centres on that port, clamped to the line.
     std::vector<int32_t> &inset{ sc.inset };
     inset.assign(nodes.size(), 0);
     for (uint32_t i = 0; i < nodes.size(); ++i) {
@@ -955,11 +897,8 @@ void Sizer::lay_out_sub(uint32_t m) {
       return (global_rank[r] < gspan.len) ? Wide{ label_row[gspan.off + global_rank[r]] }
                                           : Wide{ 0 };
     };
-    // A layer of boundary nodes alone takes no room along the ranks: each is
-    // the point a route crosses the frame's border at, drawn on the frame's
-    // edge rather than in the layer. The layer beside it keeps the room a
-    // route keeps from a box, which also holds one turn, rather than
-    // `rank_sep`; a label charged between them keeps `rank_sep`.
+    // A layer of boundary nodes alone is open: it has no width, and the steps beside it
+    // keep `route_clearance` rather than `rank_sep` unless a label sits between.
     std::vector<uint8_t> &bare{ sc.bare };
     bare.assign(layers, 1);
     for (uint32_t const k : nodes) {
@@ -971,14 +910,8 @@ void Sizer::lay_out_sub(uint32_t m) {
                                            : Wide{ p.rank_sep };
     };
 
-    // A cut before a layer is refused where it would separate an initial
-    // pseudostate from the state it enters in that layer, or a final one in
-    // that layer from the state it leaves: the fold packs its pieces apart,
-    // and the pseudostate would be drawn as a piece of its own, away from
-    // the state it joins. Likewise a boundary node, the point a route
-    // crosses the frame's border at: a piece of its own is packed below the
-    // node it joins, and the port with it, which dropped `vac`'s `battery
-    // low` a whole state's height off `Ready` (11.10g).
+    // A cut is refused where it would part a pseudostate or a boundary node from the state
+    // it joins in the next layer.
     std::vector<uint8_t> &glued{ sc.glued };
     glued.assign(layers, 0);
     for (uint32_t k = 0; k < espan.len; ++k) {
@@ -998,10 +931,8 @@ void Sizer::lay_out_sub(uint32_t m) {
         glued[imax(ra, rb)] = 1;
       }
     }
-    // Where `e`'s leg runs when it runs down the overlap of its two ends at
-    // `xa` and `xb`, or -1 where they do not overlap and there is no straight
-    // leg; and the room a label on it needs beside it. Zero room for an
-    // unlabelled edge.
+    // A leg's position down the overlap of its two ends, or -1 with no overlap, and the
+    // room its label needs beside it.
     auto const width_of_node = [&](uint32_t i) {
       OrderNode const &nd{ o.nodes[span.off + nodes[i]] };
       return (nd.kind == OrderKind::State) ? Wide{ along(nd.subject) } : Wide{ 0 };
@@ -1016,18 +947,15 @@ void Sizer::lay_out_sub(uint32_t m) {
       return has ? (Wide{ leader } + seg_label_w[e.segment] + (p.node_sep / 2))
                  : Wide{ 0 };
     };
-    // How wide a piece or a stack must be for `e`'s label to sit beside its
-    // leg: the leg plus the room where the leading side has too little of
-    // it, else zero.
+    // The width a piece needs for `e`'s label beside its leg, or zero where the leading
+    // side holds it.
     auto const beside_leg =
         [&](OrderEdge const &e, Wide xa, Wide xb, uint32_t a, uint32_t b) {
           Wide const leg{ leg_of(xa, xb, a, b) };
           Wide const need{ room_of(e) };
           return ((need == 0) || (leg < 0) || (leg >= need)) ? Wide{ 0 } : (leg + need);
         };
-    // A rank run grows unbounded along one axis and nesting multiplies it by depth.
-    // Cutting helps only sometimes -- at two ranks it worsens the aspect -- so both
-    // shapes are laid out and the scale measure picks, as `trybox` picks a packer.
+    // Both the straight run and its fold are laid out; the scale measure picks.
     auto const lay_out = [&](Shape &shape, Wide wrap_at, bool stack) {
       shape.reset(nodes.size(), espan.len);
       std::vector<uint32_t> &chunk_of{ sc.chunk_of };
@@ -1080,17 +1008,8 @@ void Sizer::lay_out_sub(uint32_t m) {
           cg.extent.push_back(extent[i]);
           cg.layers[r - first].push_back(chunk_index[i]);
         }
-        // An initial's target that one other edge enters by the same face
-        // gives the two their own heights on it. By centres, the target
-        // lined up with the initial -- which the seating below moves anyway
-        // -- and the other route jogged to reach it, as `vac`'s `battery
-        // low` did into `Seated`; level, the initial's dot would sit on that
-        // route. So the other edge meets the target `half` off its centre and
-        // the initial `half` the other way, where it is seated, and the
-        // initial's edge is weak: it anchors the target only where the other
-        // cannot, as in `estop`, where a pinned rank takes `Latched` from
-        // `Clear` (11.10g). A composite is met at its ports, whose heights
-        // are its own.
+        // An initial and one other edge into the same face each meet it `half` off centre;
+        // the initial's edge is weak.
         std::vector<int32_t> &seat_at{ sc.seat_at };
         seat_at.assign(chunk_nodes.size(), 0);
         std::vector<int32_t> &enter_at{ sc.enter_at };
@@ -1236,10 +1155,8 @@ void Sizer::lay_out_sub(uint32_t m) {
         for (uint32_t i = 0; i < chunk_nodes.size(); ++i) {
           uint32_t const at{ chunk_nodes[i] };
           uint32_t const r{ local_rank[nodes[at]] };
-          // An initial pseudostate is ranked just before the state it enters,
-          // so it sits flush against its layer's trailing edge: left-aligned
-          // in a layer as wide as its widest member, its arrow would run that
-          // whole width.
+          // An initial sits flush against its layer's trailing edge, beside the state it
+          // enters.
           OrderNode const &nd{ o.nodes[span.off + nodes[at]] };
           Wide const flush{ ((nd.kind == OrderKind::State) &&
                              (c.states[nd.subject].kind == StateKind::Initial))
@@ -1256,12 +1173,8 @@ void Sizer::lay_out_sub(uint32_t m) {
                            .y = static_cast<int32_t>(centre[i]) };
         }
 
-        // An initial or final pseudostate with one neighbour in this piece is
-        // level with it and `rank_sep` from it -- before it for an initial,
-        // after it for a final -- rather than wherever its layer's edge falls,
-        // which is past the widest member of the layer between. Each only
-        // where the box it moves to is clear of every other node here and
-        // inside the piece (11.10g).
+        // A pseudostate with one neighbour here sits level with it and `rank_sep` away,
+        // where its box is clear of every other node and inside the piece.
         auto const box_of_node = [&](uint32_t i, Wide x, Wide y) {
           OrderNode const &nd{ o.nodes[span.off + nodes[chunk_nodes[i]]] };
           Wide const w{ (nd.kind == OrderKind::State) ? Wide{ along(nd.subject) }
@@ -1321,9 +1234,7 @@ void Sizer::lay_out_sub(uint32_t m) {
                 ((Wide{ want.y } + want.h) > chunk_h)) {
               return false;
             }
-            // A boundary node is drawn on the frame's edge, not where its
-            // layer puts it, and the bounds above already keep the box off
-            // that edge.
+            // Boundary nodes sit on the frame's edge, which the bounds above clear.
             scav_rect const room{ grow(want, p.node_sep / 2) };
             for (uint32_t j = 0; j < chunk_nodes.size(); ++j) {
               if ((j == i) || (o.nodes[span.off + nodes[chunk_nodes[j]]].kind ==
@@ -1362,12 +1273,8 @@ void Sizer::lay_out_sub(uint32_t m) {
           }
           chunk_w = imax(chunk_w, beside_leg(e, shape.at[a].x, shape.at[b].x, a, b));
         }
-        // Across the ranks the same: a label beside a leg between two ranks
-        // needs its extent across them and the leader on one side of the
-        // leg. The reserve above gives each side half of it, which holds a
-        // label's height beside a leg running across and not a label's width
-        // beside one running down, so where neither side has the whole the
-        // piece grows on its trailing side (11.10g).
+        // A label beside a leg between ranks needs the leader on one side; where neither
+        // side holds it, the piece grows on its trailing side.
         for (uint32_t k = 0; k < espan.len; ++k) {
           OrderEdge const &e{ o.edges[espan.off + k] };
           uint32_t const a{ in_chunk(e.src) };
@@ -1409,12 +1316,8 @@ void Sizer::lay_out_sub(uint32_t m) {
         return;
       }
 
-      // Packed, not stacked: stacking left-aligned gives every piece the width of the
-      // widest. They are rectangles sharing an area, which is `pack_lr`'s job (11.4).
-      // `stack` is the other candidate: each piece under the one before at
-      // the leading edge, like a wrapped line. It needs none of the room
-      // below, and a piece narrower than the one it follows sits under it
-      // rather than past a label's width to its right.
+      // Pieces are packed by `pack_lr`; `stack` is the other candidate, each piece under
+      // the one before at the leading edge.
       Packing &packed{ sc.packed };
       if (stack) {
         packed.at.clear();
@@ -1499,10 +1402,8 @@ void Sizer::lay_out_sub(uint32_t m) {
           paired[q] = 1;
         }
       }
-      // How far along a state's face along the ranks the run the router can
-      // seat a straight leg on starts: the corner arc and at least one unit,
-      // or half the face to the one midpoint of an inscribed glyph. Zero for
-      // any other node, which has no face.
+      // How far in from a state's leading end along the ranks a straight leg can seat: the
+      // corner arc and at least one unit, or half the face for an inscribed glyph.
       auto const seat_inset = [&](uint32_t i) {
         OrderNode const &nd{ o.nodes[span.off + nodes[i]] };
         if (nd.kind != OrderKind::State) { return Wide{ 0 }; }
@@ -1520,15 +1421,8 @@ void Sizer::lay_out_sub(uint32_t m) {
                  : ((node_x(i) + along(nd.subject)) - seat_inset(i));
         return true;
       };
-      // A piece wholly below the one before it moves forward so that the end
-      // in it of the first edge joining two states across that cut begins
-      // under the end above, at the piece's own width rather than the one the
-      // packing grew it to. It moves at most until its trailing edge meets the
-      // frame's: the widest piece's, or where that edge's lone label ends on
-      // the trailing side of a leg at the leading end of the two faces' run,
-      // as below. A piece that would come within `node_sep` of another stays
-      // where it was packed. In order, so a piece under a moved one reads
-      // where that one went.
+      // A piece below the one before moves forward to start the first cut edge's target
+      // under its source, within `reach` and `node_sep` clear of other pieces.
       for (uint32_t k = 1; k < chunks.size(); ++k) {
         scav_rect &here{ packed.at[k] };
         scav_rect const &before{ packed.at[k - 1] };
@@ -1595,9 +1489,8 @@ void Sizer::lay_out_sub(uint32_t m) {
         if (leg < lead) { continue; }
         bool const leading{ (paired[k] == 0) && (leg >= room_of(e)) };
         if (leading) { continue; }
-        // A lone label on the trailing side takes its room from the leading
-        // end of the run both faces can seat, where `lean` has the router
-        // seat the leg, wherever that is short of the overlap's middle.
+        // A lone trailing label takes its room from the leading end of the run both faces
+        // can seat, where `lean` has the router seat the leg.
         Wide seat{ leg };
         Wide alo{ 0 };
         Wide ahi{ 0 };
@@ -1612,13 +1505,8 @@ void Sizer::lay_out_sub(uint32_t m) {
       }
       for (scav_rect &at : packed.at) { at.x = static_cast<int32_t>(Wide{ at.x } + lead); }
       packed.w = static_cast<int32_t>(imin(stack_w, Wide{ PACK_SATURATED }));
-      // A fold is drawable only where every edge a cut crosses between two
-      // stacked pieces joins two plain nodes: an edge into a composite enters
-      // by a port on its left or right border, and stacked it goes round to
-      // reach it, as `vac`'s `full` did once `dock`'s `lamp` sat under `On`
-      // (11.10g). The scale measure cannot weigh that against the area the
-      // fold saves, so where it chooses such a fold is no candidate; where
-      // the row always folds, `Cost` over the whole chart does the weighing.
+      // A fold is drawable only where each edge across a cut joins two plain nodes;
+      // otherwise the scale measure's fold is no candidate and `Always` defers to `Cost`.
       for (uint32_t k = 0; k < espan.len; ++k) {
         OrderEdge const &e{ o.edges[espan.off + k] };
         uint32_t const a{ index[e.src - span.off] };
@@ -1679,9 +1567,7 @@ void Sizer::lay_out_sub(uint32_t m) {
           dar.den,
           p.sm_tiebreak != 0);
     };
-    // A frame turned to run down is one column, which is what turning it was
-    // for: folded, its run wraps back into columns side by side, the drawing
-    // the frame running across already offers.
+    // A frame running down never folds.
     Wide const unwrapped{ Wide{ COORD_MAX } * 2 };
     Shape &best{ sc.best };
     Shape &folded{ sc.folded };
@@ -1700,11 +1586,8 @@ void Sizer::lay_out_sub(uint32_t m) {
          ((stacked.drawable == folded.drawable) && better(stacked, folded)))) {
       std::swap(folded, stacked);
     }
-    // `Always` takes the folded shape wherever it laid out, so what chose is
-    // `Cost` over the row rather than the scale measure inside the frame. A
-    // fold whose pieces pack back into one row in their own order is the
-    // run unfolded at `node_sep` rather than `rank_sep`, with every edge the
-    // cuts cross dropped from the alignment, so it is no candidate.
+    // `Always` takes the folded shape; a fold whose pieces repack into one row is the run
+    // unfolded, so it is no candidate.
     bool const swap{
       folded.ok &&
       (!best.ok || (folded.wraps && (always || (folded.drawable && better(folded, best)))))
@@ -1801,9 +1684,8 @@ void Sizer::place_sub(uint32_t m,
   }
   level_rank_ports(m, down);
 
-  // A port on a cross border sits on the frame's edge across the ranks, and
-  // along them level with where its flat edge meets the state it joins: the
-  // state's centre, or the port on its border the edge continues through.
+  // A port on a cross border sits on the frame's edge across the ranks, and along them
+  // level with where its flat edge meets the state it joins.
   for (uint32_t k = 0; k < espan.len; ++k) {
     OrderEdge const &e{ o.edges[espan.off + k] };
     bool const at_src{ on_cross_border(e.src) };
@@ -1823,15 +1705,8 @@ void Sizer::place_sub(uint32_t m,
   }
 }
 
-// A port on a border the ranks start or end at sits, across the ranks, level
-// with where its route meets the state at the far end of its chain: the seat
-// the router gives a route aimed at that state's face from the port's height,
-// which is that height held a corner's inset in from the face's ends; a
-// glyph's centre; or the port on the state's border the route continues
-// through. The port and its chain's bends move there only through a band no
-// other node between the border and that state is in, a state kept the room a
-// route keeps from a box and a bend or another port a pitch, so the move
-// passes nothing a route could meet.
+// Moves a rank-border port and its chain's bends across the ranks to where its route meets
+// the far state, where no other node lies in the band it sweeps.
 void Sizer::level_rank_ports(uint32_t m, bool down) {
   Span const span{ o.sub_nodes[m] };
   Span const espan{ o.sub_edges[m] };
@@ -1916,13 +1791,8 @@ void Sizer::level_rank_ports(uint32_t m, bool down) {
   }
 }
 
-// `lay_out_sub` from the memo where it has seen the frame's inputs before.
-// The key is every value it reads -- the frame's nodes and edges, the sizes
-// and kinds of the states in it, where each edge meets a composite's port,
-// its labels, gaps, ratio, and the whole profile -- so a hit is the layout it
-// would compute. Node indices in the key are the frame's own, since where a
-// frame starts in the merged arrays moves whenever a frame before it changes.
-// A traced run lays every frame out, since a hit would emit nothing.
+// `lay_out_sub` through a memo keyed on every value it reads, with frame-local node
+// indices; a traced run lays every frame out.
 void Sizer::size_sub(uint32_t m) {
   if (trace_sink() != nullptr) {
     lay_out_sub(m);
@@ -2181,8 +2051,7 @@ bool size_pass(Chart const &c,
       out.node[span.off + k].x += at.x;
       out.node[span.off + k].y += at.y;
       OrderNode const &nd{ o.nodes[span.off + k] };
-      // Root-absolute and after the descent, so a bend reads as the coordinate
-      // the router will be handed rather than a frame-local one (11.16).
+      // Root-absolute, as the router receives it.
       trace_emit(
           { .kind = TraceKind::NodePlaced,
             .frame = at.sub,
@@ -2275,9 +2144,7 @@ bool size_layout(Chart const &c,
   if (dar == DarSource::Profile) {
     return size_pass(c, g, o, s, p, {}, compaction, fold, out, diags);
   }
-  // A hole is only knowable once its owner is sized, and sizing is bottom-up,
-  // so the ratios come off a first pass at the profile's own ratio. That pass
-  // packs the same way, or the holes would be a different packer's.
+  // Owner holes come off a first pass at the profile's ratio, packed the same way.
   SizedLayout &first{ size_scratch().first };
   if (!size_pass(c, g, o, s, p, {}, compaction, fold, first, diags)) { return false; }
   return size_pass(c,

@@ -301,9 +301,8 @@ TEST_CASE("trace: a back edge's kinks are one chained bend, and the trace says s
 }
 
 TEST_CASE("trace: a label's charge names its frame, its boundary and its segment") {
-  // D -> C/T in two pieces, the first in the root and the second inside C. The
-  // label is the root's, so the one label charge is the root's boundary
-  // between D and C, asked for by the first piece, at the box's width.
+  // D -> C/T in two pieces, the first in the root. The root's label charge is at the
+  // boundary between D and C, asked for by the first piece at the box's width.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };

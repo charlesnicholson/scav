@@ -22,12 +22,8 @@
 
 namespace scav {
 
-// Bracketed with the search switchable, so a test can run all three over one
-// input and require one answer; nothing shipping passes anything but
-// `LabelSearch::Memoized`. Prototyped here because gcc's
-// -Werror=missing-declarations refuses a namespace-scope definition with no
-// declaration above it, which is what an internal function is under
-// SCAV_TESTING. The prototype a test uses is its own; see scav_internal.h.
+// All three searches settle one answer; shipping code passes `LabelSearch::Memoized`.
+// Declared for gcc's -Wmissing-declarations; a test declares its own prototype.
 SCAV_INTERNAL_BEGIN
 uint32_t place_labels_by(Chart const &c,
                          SizedLayout const &z,
@@ -54,12 +50,8 @@ bool shared_region(Chart const &c, SubmachineId m) {
   return live > 1;
 }
 
-// The legs `first` up to `last` of a route: those routed in the lowest common
-// ancestor, past the ones inside the state the route leaves it by and short of
-// the ones inside the state it enters it by. A leg is inside a state where its
-// midpoint lies strictly inside the state's rect, so one along a border is the
-// outer frame's. Every leg where no one submachine holds both ends or where
-// nothing would be left.
+// The legs `first` up to `last` of a route that lie in the lowest common ancestor. A leg
+// is inside a state when its midpoint lies strictly inside the state's rect.
 struct Legs {
   uint32_t first, last;
 };
@@ -87,10 +79,7 @@ Legs legs_in(SizedLayout const &z,
   return { .first = first, .last = last };
 }
 
-// The eight points of the label's own rectangle the leader may attach to: its
-// four corners, then the midpoints of its four sides. Corners because a
-// polyline is kinked -- a label hung off a bend belongs on the diagonal, and an
-// axis-aligned leader reaches a diagonal position only through a corner.
+// The eight points of the label's rectangle a leader may attach to: sides and corners.
 constexpr uint32_t ATTACH{ 8 };
 
 // The four directions the leader runs in, so its length is exact in integers:
@@ -129,8 +118,7 @@ scav_point lead_by(uint32_t lead, int32_t len) {
   }
 }
 
-// One route's legs, `first` onward in the list of every route's, and the box
-// they all lie in: a region that misses the box overlaps none of them.
+// One route's legs, `first` onward in the list of every route's, and their bounding box.
 struct Pieces {
   scav_rect bounds;
   uint32_t first, count;
@@ -156,11 +144,8 @@ bool better(Key const &a, Key const &b) {
 
 constexpr Wide NO_LIMIT{ std::numeric_limits<Wide>::max() };
 
-// How far inside `reach` the nearest foreign segment lies, `reach` being the
-// candidate's gap to its own leg plus one line of its own text (11.6), and
-// through `at` which segment that is, INVALID where none lies inside. The scan
-// stops once the shortfall passes `stop`, since it only grows as the scan goes
-// on; what it returns then is known only to be more than `stop`.
+// How far inside `reach` the nearest foreign segment lies, and through `at` which one,
+// INVALID where none does. Past `stop` the scan ends, returning only a bound above it.
 Wide shortfall_of(scav_rect const &cand,
                   Wide reach,
                   std::vector<scav_rect> const &foreign,
@@ -179,8 +164,7 @@ Wide shortfall_of(scav_rect const &cand,
   return reach - nearest;
 }
 
-// The midpoint of the longest horizontal leg, else of the longest leg: phase 1
-// widened a rank boundary by this box (11.3) and the leg crossing it is long.
+// The midpoint of the longest horizontal leg, else of the longest leg.
 scav_point anchor_of(std::vector<scav_point> const &points, scav_span route) {
   scav_point mid{};
   Wide longest{ -1 };
@@ -211,19 +195,13 @@ scav_rect centred(scav_point mid, scav_path_box const &box, scav_rect const &cha
   return { .x = x, .y = y, .w = box.w, .h = box.h };
 }
 
-// Everything one box's search reads, so what it settles is a function of this
-// and of nothing else, and the memo's key is this written out. For the pruned
-// and memoized searches coordinates are relative to the route's first point
-// and every rect is cut down to the region the candidates can reach, so a box
-// whose surroundings moved together, or changed only out of its reach, is the
-// box it was; the exhaustive search takes the chart's own.
+// Everything one box's search reads; the memo's key is this written out. The pruned and
+// memoized searches take it relative to the route's first point, clipped to its region.
 struct Local {
   int32_t w{ 0 }, h{ 0 }, leader{ 0 };
   uint32_t chained{ 0 }, prior_seg{ 0 };
   int32_t prior_mid{ 0 };
-  // The legs `first` up to `last` are the ones routed in the lowest common
-  // ancestor, and the only ones a candidate rides.
-  uint32_t first{ 0 }, last{ 0 };
+  uint32_t first{ 0 }, last{ 0 };  // the legs a candidate rides, from `legs_in`
   scav_rect holder{};
   std::vector<scav_point> route;
   std::vector<scav_rect> walls;    // states, bands and settled boxes
@@ -231,8 +209,7 @@ struct Local {
   std::vector<scav_rect> below;    // the states the route leaves and enters by
 };
 
-// What a search settles: the box, and the leg and slide a later box of its
-// transition goes past. Nothing found leaves the box to the centred fallback.
+// The box, and the leg and slide a later box of its transition must pass.
 struct Outcome {
   bool found{ false };
   scav_rect at{};
@@ -240,18 +217,15 @@ struct Outcome {
   int32_t mid{ 0 };
 };
 
-// The candidates of one leg and one lead and attachment, which differ only in
-// the slide: `centre` is the slide that would put the box's centre nearest the
-// anchor, and `near` the least anchor distance any of them has.
+// The candidates of one leg, lead and attachment, which differ only in the slide.
+// `centre` is the slide nearest the anchor; `near` is the least anchor distance of any.
 struct Group {
   uint32_t k, offset, band;
   Wide centre, near;
 };
 
-// Per leg, the groups whose candidates share one line across it, and those of
-// the leg's nearby segments that may lie within one of their reaches, in the
-// leg's order. A segment left out is one no candidate of the band has nearer
-// than its reach, so it is never the nearest and never ends a scan.
+// The groups of a leg that share one line across it, and the leg's nearby segments
+// within reach of any of their candidates, in the leg's order.
 struct Band {
   bool built{ false };
   std::vector<scav_rect> near;
@@ -278,17 +252,14 @@ struct Cells {
   uint32_t c0, c1, r0, r1;
 };
 
-// One leg's groups, which start at `first`, and the least anchor distance any
-// of them has.
+// One leg's groups, from `first`, and the least anchor distance of any of them.
 struct Leg {
   uint32_t first;
   Wide near;
 };
 
-// A search's working vectors, kept across the boxes of one call. `nearby` is
-// per leg, and `bands` holds `BANDS` a leg. The pruned search builds the grid over
-// `blocked` only once a candidate first reaches it, and `gridded` says whether
-// it has for this box.
+// Working vectors kept across one call's boxes; `bands` holds `BANDS` per leg. The grid
+// over `blocked` is built on first use, and `gridded` records that it has been.
 struct Scratch {
   std::vector<scav_rect> own;
   std::vector<scav_rect> blocked;
@@ -303,9 +274,8 @@ struct Scratch {
   bool gridded{ false };
 };
 
-// `grid_build` over the scratch's own vectors, so a box allocates nothing once
-// the first few have grown them, and with each rect's cells found once for
-// both the count and the fill. The cells, and so the grid, are `grid_build`'s.
+// `grid_build` into the scratch's reused vectors, each rect's cells found once for both
+// the count and the fill; the grid it builds is `grid_build`'s.
 RectGrid const &grid_of(Scratch &s, int32_t cell_w, int32_t cell_h) {
   RectGrid &g{ s.grid };
   if (s.gridded) { return g; }
@@ -384,8 +354,7 @@ scav_rect region_of(std::vector<scav_point> const &route,
            .h = (y1 - y0) + (2 * reach_y) };
 }
 
-// The route's legs, and the walls and foreign legs in one list, which is what
-// both searches start from.
+// The route's legs, and the walls and foreign legs in one list.
 void prepare(Local const &l, Scratch &s) {
   uint32_t const n{ static_cast<uint32_t>(l.route.size()) };
   s.own.assign(n - 1, {});
@@ -399,8 +368,8 @@ void prepare(Local const &l, Scratch &s) {
   s.gridded = false;
 }
 
-// The foreign legs within the leader plus the box of leg `k`, which is as far
-// as any of its candidates reaches, so the distance prefilter runs once per leg.
+// The foreign legs within the leader plus the box of leg `k`, the furthest any of its
+// candidates reaches.
 std::vector<scav_rect> const &nearby_of(Local const &l, Scratch &s, uint32_t k) {
   std::vector<scav_rect> &out{ s.nearby[k] };
   out.clear();
@@ -410,27 +379,20 @@ std::vector<scav_rect> const &nearby_of(Local const &l, Scratch &s, uint32_t k) 
   return out;
 }
 
-// Every candidate of every leg keyed and tested in turn, the strict tier and
-// the fallback's together: the placement as 11.9.4 states it, which the pruned
-// search reproduces.
+// Every candidate of every leg keyed and tested in turn, both tiers together; the pruned
+// search reproduces its answer.
 Outcome exhaustive(Local const &l, Scratch &s) {
   uint32_t const len{ static_cast<uint32_t>(l.route.size()) };
   prepare(l, s);
   grid_build(s.grid, s.region, s.blocked, l.w, l.h);
   scav_point const at{ anchor_of(l.route,
                                  { .off = l.first, .len = (l.last - l.first) + 1 }) };
-  // Half the label's height, so the anchor slides finer than the box it
-  // carries; the floor is one grid unit, which is 1/16 pt (11.9.4).
+  // The anchor's step: half the label's height, at least one grid unit.
   int32_t const step{ imax(l.h / 2, 1) };
   bool const chained{ l.chained != 0 };
   scav_rect best{};
   Key key{ .shortfall = 0, .dist = -1, .seg = 0, .attach = 0, .lead = 0, .mid = 0 };
-  // **The fallback keeps the anchor and accepts a collision** (11.9.4). What
-  // it used to keep is the centred placement, which sits *on* the leg -- so
-  // every box with no clear candidate was a sliced label by construction, and
-  // the slice count and the fallback count were one number. An anchored box
-  // is a leader away from its own line and cannot be cut by it; a box over a
-  // state still reads as its transition's, and a detached one does not.
+  // The fallback keeps the anchor and accepts a collision.
   scav_rect lax{};
   Key lax_key{ .shortfall = 0, .dist = -1, .seg = 0, .attach = 0, .lead = 0, .mid = 0 };
 
@@ -478,11 +440,8 @@ Outcome exhaustive(Local const &l, Scratch &s) {
                     .attach = which,
                     .lead = lead,
                     .mid = mid };
-          // Keyed before tested, and zero is the floor of any shortfall: one
-          // test with it standing in, then the real one, then the sweep.
-          // Against the *strict* tier, which is the weaker bound: the loose
-          // one holds the best of a superset, so pruning by it would drop
-          // candidates the strict tier still wants.
+          // Keyed before tested; pruned against the strict tier's incumbent, the weaker
+          // bound.
           if ((key.dist >= 0) && !better(here, key)) { continue; }
           if (!nearby.empty()) {
             uint32_t nearest{ INVALID };
@@ -494,17 +453,12 @@ Outcome exhaustive(Local const &l, Scratch &s) {
             if ((key.dist >= 0) && !better(here, key)) { continue; }
           }
           if (!contains(l.holder, cand)) { continue; }
-          // Every leg of its own route, this one included: an axis-aligned
-          // leader off a corner can still put the label across the line it
-          // is anchored to, which is the slice the anchor exists to stop
-          // and is not structural (11.9.4). This one holds in both tiers --
-          // a fallback that accepts a collision still may not be cut.
+          // No leg of its own route may cut the label, in either tier.
           bool uncut{ true };
           for (uint32_t j = 0; uncut && (j < s.own.size()); ++j) {
             if (overlaps(cand, s.own[j])) { uncut = false; }
           }
-          // Nor may either tier put it inside the states its route leaves and
-          // enters by: it is drawn in the submachine holding both ends.
+          // Nor inside the states its route leaves and enters by, in either tier.
           for (uint32_t j = 0; uncut && (j < l.below.size()); ++j) {
             if (overlaps(cand, l.below[j])) { uncut = false; }
           }
@@ -528,9 +482,8 @@ Outcome exhaustive(Local const &l, Scratch &s) {
   return { .found = key.dist >= 0, .at = best, .seg = key.seg, .mid = key.mid };
 }
 
-// One tier of the pruned search over one box: what the box fixes, and the
-// incumbent. `last` is the wall that refused a candidate most recently, which
-// the next is tried against before the grid.
+// One tier of the pruned search over one box, and its incumbent. `last` is the wall that
+// most recently refused a candidate, tried before the grid.
 struct Walk {
   Local const &l;
   Scratch &s;
@@ -551,12 +504,8 @@ struct Walk {
   void group(Group const &g);
 };
 
-// Every candidate of the band lies in one rect: across the leg the band's
-// line, and along it from the least start to the greatest end any lead and
-// attachment put a candidate at. A candidate's gap to its own leg is at most
-// the leader, since its attachment point is a leader from a point on the leg,
-// so its reach is at most the leader plus its height, and a segment at least
-// that far from the rect is at least that far from every candidate.
+// Every candidate of the band lies in one rect and reaches at most the leader plus its
+// height, so a segment that far from the rect is out of every candidate's reach.
 Band const &Walk::band_of(Group const &g) {
   Band &b{ s.bands[g.band] };
   if (b.built) { return b; }
@@ -594,11 +543,8 @@ Band const &Walk::band_of(Group const &g) {
   return b;
 }
 
-// A group's candidates differ only in the slide, so each test is an interval
-// of slides: across the leg a candidate never moves, and along it one that
-// overlaps a rect keeps overlapping it until it has slid past the rect's far
-// side. A refused slide is left by jumping to the first one past what refused
-// it, and the walk ends where the rest of its side cannot win.
+// Each test refuses an interval of slides, so a refused slide jumps to the first one past
+// what refused it; the walk ends where the rest of its side cannot win.
 void Walk::group(Group const &g) {
   uint32_t const k{ g.k };
   scav_point const a{ l.route[k] };
@@ -700,9 +646,8 @@ void Walk::group(Group const &g) {
                                     (key.dist >= 0) ? key.shortfall : NO_LIMIT,
                                     nearest);
       if ((key.dist >= 0) && !better(here, key)) {
-        // A segment nearer than the least reach less the incumbent's shortfall
-        // puts every slide that near it past the incumbent too, as a wall does
-        // once it is grown by that much.
+        // A segment nearer than the least reach less the incumbent's shortfall refuses
+        // every slide that near it, as a wall grown by that much.
         Wide const within{ least_reach - key.shortfall };
         if ((here.shortfall > key.shortfall) && (nearest != INVALID) && (within > 0) &&
             (chebyshev_gap(cand, nearby[nearest]) < within)) {
@@ -716,15 +661,12 @@ void Walk::group(Group const &g) {
     return n + sign;
   };
 
-  // The slide at or below `centre`, clamped onto the leg: the slides above it
-  // lie further from `centre` as they go up, and it and those below it as they
-  // go down.
+  // The slide at or below `centre`, clamped onto the leg; the anchor distance grows
+  // outward from it both ways.
   int32_t const first{ static_cast<int32_t>(
       imin(imax(floor_div(g.centre - lo, Wide{ step }), Wide{ 0 }), Wide{ runs } + 1)) };
-  // A box straddling its own leg's line is cut by the leg wherever the two
-  // overlap along it, and one of positive extent clears it only past the end
-  // its lead and attachment put it beyond, if either: from `from` up, or up to
-  // `to`.
+  // A box straddling its own leg's line clears the leg only past the end its lead and
+  // attachment put it beyond: from `from` up, or up to `to`.
   int32_t from{ 0 };
   int32_t to{ runs + 1 };
   if ((size > 0) && (lead_across < 0) && ((lead_across + (flat ? l.h : l.w)) > 0)) {
@@ -742,19 +684,8 @@ void Walk::group(Group const &g) {
   for (int32_t n = imin(first, to); n >= from;) { n = visit(n, -1); }
 }
 
-// The exhaustive search's answer with most of its candidates never keyed. Its
-// winner is the least key over a set, so the order candidates are met in is
-// free, and so is skipping any that cannot win:
-//
-// - The tiers run one after the other, the fallback's only when the strict one
-//   finds nothing, since its answer is used only then.
-// - A candidate is tested cheapest first, and its shortfall is measured last
-//   and only as far as can still beat the incumbent's.
-// - The candidates are met in groups, legs nearest the anchor first, and each
-//   group is walked outward from the slide nearest `centre`, along which the
-//   anchor distance only grows. Once the incumbent's shortfall is zero, a
-//   candidate further from the anchor than it cannot win, so neither can the
-//   rest of its walk, nor a group or a leg whose nearest is further.
+// The exhaustive search's answer with most candidates never keyed: the fallback tier runs
+// only if the strict one finds nothing, and legs and groups go nearest the anchor first.
 Outcome pruned(Local const &l, Scratch &s) {
   uint32_t const len{ static_cast<uint32_t>(l.route.size()) };
   prepare(l, s);
@@ -833,8 +764,7 @@ Outcome pruned(Local const &l, Scratch &s) {
   return strict.found ? strict : tier(false);
 }
 
-// `memo_hash`'s round taken two words at a time: a box's key runs to a hundred
-// words and more, and every box a search places hashes one.
+// `memo_hash`'s round taken two words at a time.
 uint64_t label_hash(std::vector<uint32_t> const &key) {
   uint64_t h{ 0 };
   size_t k{ 0 };
@@ -850,18 +780,13 @@ uint64_t label_hash(std::vector<uint32_t> const &key) {
   return h;
 }
 
-// Every box this thread has placed, by its whole problem. A search's
-// candidates differ in one frame, so nearly every box one of them places
-// another placed first, relative to its route -- on bottler, 0.93M distinct
-// of 8.1M. Per thread, so no lookup waits on another, and bounded, since a
-// pool thread and what it keeps here last as long as the process.
+// Every box this thread has placed, keyed by its whole problem. Per-thread and bounded.
 Memo &memo() {
   thread_local Memo m{ size_t{ 1 } << 20, label_hash };
   return m;
 }
 
-// Every field of `l`, counts before contents, so two problems with one key
-// are one problem.
+// Every field of `l`, counts before contents, so one key names one problem.
 void key_of(Local const &l, std::vector<uint32_t> &key) {
   key.resize(16 + (2 * l.route.size()) + (4 * l.walls.size()) + (4 * l.foreign.size()) +
              (4 * l.below.size()));
@@ -929,10 +854,8 @@ uint32_t place_labels_from(Chart const &c,
   how.assign(s.n_path_box, {});
   if ((s.path_box == nullptr) || (s.n_path_box == 0)) { return 0; }
 
-  // Against a base: which routes moved, and the rects a box must not reach to
-  // be the problem it was -- the legs of a moved route as they were and as
-  // they are, then each box that settled elsewhere, where it was and where it
-  // is. A problem reads a rect only where it overlaps the box's region.
+  // Against a base, the routes that moved and the rects a kept box's region must miss: a
+  // moved route's old and new legs, then each resettled box's old and new place.
   bool const based{ (was != nullptr) && (was->route != nullptr) &&
                     (was->points != nullptr) && (was->placed != nullptr) &&
                     (was->settled != nullptr) && (was->route->size() == route.size()) &&
@@ -982,7 +905,6 @@ uint32_t place_labels_from(Chart const &c,
     }
     of.count = static_cast<uint32_t>(pieces.size()) - of.first;
   }
-  // The live states, so a box's sweep reads nothing of a tombstone.
   std::vector<uint32_t> live;
   for (uint32_t st = 0; st < c.states.size(); ++st) {
     if (c.states[st].live != 0) { live.push_back(st); }
@@ -999,10 +921,8 @@ uint32_t place_labels_from(Chart const &c,
     return s.path_box[a].order < s.path_box[b].order;
   });
 
-  // The states a label may lie inside: the one owning the lowest submachine
-  // that holds both ends, and every state enclosing that one. An endpoint is
-  // among them only where it encloses the other end, so a label never lies
-  // over the box its transition names (11.9.3).
+  // The states a label may lie inside: the owner of the lowest submachine holding both
+  // ends, and every state enclosing it.
   std::vector<uint8_t> encloses(c.states.size(), 0);
   auto const mark = [&](StateId from, uint8_t v) {
     StateId at{ from };
@@ -1013,21 +933,15 @@ uint32_t place_labels_from(Chart const &c,
   };
 
   Local l;
-  // Per thread, as the memo is, so a call starts from the capacity the last
-  // one grew; every search resets what it reads before reading it.
-  thread_local Scratch scratch;
+  thread_local Scratch scratch;  // every search resets what it reads first
   std::vector<uint32_t> settled;
   uint32_t fallbacks{ 0 };
   uint32_t prior_subject{ INVALID };
   uint32_t prior_seg{ 0 };
   int32_t prior_mid{ 0 };
   bool chained{ false };
-  // Every earlier box of the current transition settled as it did in the
-  // base, so this one is chained exactly as it was.
-  bool chain_kept{ true };
+  bool chain_kept{ true };  // every earlier box of this transition settled as in the base
   int32_t const leader{ label_leader(p) };
-  // Relative coordinates and a holder cut down to the candidates' region are
-  // what let one problem recur; the exhaustive search takes the chart's own.
   bool const relative{ search != LabelSearch::Exhaustive };
 
   for (uint32_t const i : queue) {
@@ -1083,29 +997,23 @@ uint32_t place_labels_from(Chart const &c,
                 .seg = had.seg,
                 .mid = had.mid };
       } else {
-        // Two regions of one state have no submachine holding both, so there
-        // it is the state holding the two.
+        // Ends in two regions of one state share no submachine; that state holds them.
         StateId const within{ (lca.frame.v != INVALID)
                                   ? c.submachines[lca.frame.v].owner
                                   : enclosing_state(c, lca.child[0]) };
         mark(within, 1);
-        // I3 as a test: a label inside a composite is bounded by it, not by the
-        // chart. Enclosing states nest, so intersecting them all is the innermost
-        // without having to order them by depth (11.9.3).
+        // A label inside a composite is bounded by it: the intersection of every state
+        // enclosing both endpoints.
         scav_rect holder{ z.chart };
         for (uint32_t const st : live) {
           if (encloses[st] != 0) { holder = intersection(holder, z.state[st]); }
         }
-        // And by the region both endpoints lie in, where that region shares its
-        // state with another: the divider between them runs through a label
-        // that strays across it, and `brew`'s `at temperature` did (11.10g).
+        // And by the region both endpoints lie in, where its state holds another region.
         if ((lca.frame.v < c.submachines.size()) && shared_region(c, lca.frame)) {
           holder = intersection(holder, z.sub[lca.frame.v]);
         }
-        // A box of positive extent lies strictly inside the region wherever it
-        // goes, so what lies outside it is never overlapped, never nearest, and
-        // never what a candidate is held in: cut down to the region, a wall, a
-        // leg or a holder that reaches further is the one it was.
+        // A box of positive extent lies strictly inside the region, so clipping a rect to
+        // the region changes no test on it.
         bool const clip{ relative && (box.w > 0) && (box.h > 0) };
         auto const local_rect = [&](scav_rect const &at) {
           scav_rect const shifted{ relative_to(at, origin) };
@@ -1113,8 +1021,7 @@ uint32_t place_labels_from(Chart const &c,
         };
         l.holder = relative_to(holder, origin);
         if (clip) {
-          // Unclamped, so a holder the region misses refuses every candidate, as
-          // it would uncut.
+          // Unclamped, so a holder the region misses still refuses every candidate.
           int32_t const x0{ imax(l.holder.x, local_region.x) };
           int32_t const y0{ imax(l.holder.y, local_region.y) };
           int32_t const x1{ imin(l.holder.x + l.holder.w,

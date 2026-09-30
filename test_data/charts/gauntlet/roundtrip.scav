@@ -1,7 +1,5 @@
-// A transition and its return between two states. Both project onto one point
-// of each facing face, and the spread seats them apart. Closer than an em is
-// what the score calls crowded, and a search charged for that buys its way out
-// with a detour through the far face of each box.
+// A transition and its return between two states: two parallel straight legs
+// an em apart between the facing faces.
 chart roundtrip "there and back" {
   state Ready,
   state Busy,

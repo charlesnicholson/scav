@@ -28,7 +28,7 @@ std::vector<int64_t> coords_one_pass(CoordGraph const &g,
                                      std::vector<uint8_t> const &mark,
                                      bool upward,
                                      bool rightward);
-// What `cross_coordinates` returns, computed rather than remembered.
+// `cross_coordinates` without the memo.
 std::vector<int32_t> coords_place(CoordGraph const &g);
 SCAV_INTERNAL_END
 

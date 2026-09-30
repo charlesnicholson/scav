@@ -159,10 +159,8 @@ TEST_CASE("order: a boundary node stands for the port on the frame's own border"
 
 TEST_CASE(
     "order: a port on a cross border shares its neighbour's rank, at one end of it") {
-  // A side pin puts a port on the top or bottom border of a frame running
-  // across. Its edge is flat, and held out of the ranking and the sweeps, so the
-  // port sits first or last in the rank of the state it joins and no sweep moves
-  // it: here the sweep swaps `B` and `Y` to uncross `A -> Y` and `Q -> B`.
+  // A side pin puts the port on the top or bottom border. The sweep swaps `B` and `Y` to
+  // uncross `A -> Y` and `Q -> B`, and the port stays at one end of `B`'s rank.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
@@ -226,9 +224,8 @@ TEST_CASE(
 }
 
 TEST_CASE("order: a port pinned where its frame's ranks start or end turns its edge") {
-  // Left is where an entering port already is, so that pin changes nothing,
-  // and no reversal pin turns it round past the side pin; right makes it a
-  // sink on the last rank, the edge turned against the way it was authored.
+  // Left, where an entering port already is, changes nothing, even against a reversal pin;
+  // right makes the port a sink on the last rank and turns its edge.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
@@ -325,9 +322,8 @@ TEST_CASE("order: a path box widens the rank boundary its label crosses") {
 }
 
 TEST_CASE("order: a label across several boundaries is charged where none holds it") {
-  // A -> B -> C -> D and A -> D across all three boundaries. A -> D turns in
-  // the first and the last, beside A -> B and C -> D, so those two carry two
-  // lanes, 538 at `readable`; the middle carries one and nothing.
+  // A -> B -> C -> D and A -> D. The first and last boundaries carry two turning lanes,
+  // 538 at `readable`; the middle carries none.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -352,12 +348,9 @@ TEST_CASE("order: a label across several boundaries is charged where none holds 
     return std::vector<int32_t>{ o.gaps.begin() + sp.off,
                                  o.gaps.begin() + sp.off + sp.len };
   };
-  // The first boundary is already 700 wide for A -> B and A -> D runs through
-  // it, so A -> D's 500 is held there. At the middle of its span it made the
-  // middle boundary 500 wide for a label that never needed it.
+  // The first boundary is already 700 wide for A -> B, so it holds A -> D's 500.
   CHECK(gaps_for(700, 500) == std::vector<int32_t>{ 700, 0, 538 });
-  // Nothing it crosses is 900 wide, so the widest boundary it crosses grows,
-  // which is the least the frame can grow by.
+  // Nothing it crosses is 900 wide, so the widest boundary it crosses grows.
   CHECK(gaps_for(700, 900) == std::vector<int32_t>{ 900, 0, 538 });
   // Equal widths either side of the middle: the first of them.
   CHECK(gaps_for(0, 600) == std::vector<int32_t>{ 600, 0, 538 });
@@ -366,10 +359,8 @@ TEST_CASE("order: a label across several boundaries is charged where none holds 
 }
 
 TEST_CASE("order: the label row holds every label where it was charged, and no lane") {
-  // The chain and the long edge above. `gaps` carries the two lanes phase 1
-  // cannot rule out at the first boundary and the last, which is what the fold
-  // reads; `labels` carries the labels alone, each where it went, which is what
-  // phase 2 places by -- the long label included where the lanes held it.
+  // The chain and long edge above. `gaps` carries the two possible lanes at the first and
+  // last boundaries; `labels` carries the labels alone, the held long label included.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -436,10 +427,8 @@ TEST_CASE("order: a label on a hierarchy-crossing route widens one frame only") 
 }
 
 TEST_CASE("order: a label into a composite is charged to the frame holding both ends") {
-  // D -> C/T lies in two pieces: in the root from D to C's border, then inside
-  // C from that border to T. Only the root holds both ends, so the label is
-  // charged there, between D's rank and C's, and C's own frame nothing, though
-  // the piece inside C is the middle of the route.
+  // D -> C/T lies in the root from D to C's border, then in C from there to T. The label
+  // is charged in the root, which holds both ends, though C holds the middle segment.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
@@ -1004,11 +993,8 @@ TEST_CASE("order: cycle detection survives a frame deep enough to overflow recur
 }
 
 TEST_CASE("order: a call nested on a thread waiting in another is each its own") {
-  // A thread waiting on an ordering's frame shards runs any job as deep, and a
-  // search's round -- candidates each ordering whole -- sits at that depth, so
-  // one call can start on a thread before another on it has finished. Each
-  // outer shard here makes both at one depth: a call sharded on the pool, and
-  // a job of calls made whole. mill shards its frames four ways.
+  // Each outer shard runs a call sharded on the pool and a job of whole calls, so one call
+  // can start on a thread while another there waits on its shards.
   std::string path{ SCAV_TEST_DATA_DIR "/charts/mill.scav" };
   Loader loader;
   Chart c;

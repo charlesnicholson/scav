@@ -1,7 +1,5 @@
-// A composite entered through its leading border by a route that runs straight
-// to the first state inside. The route's port is a point on the border, not a
-// column of the composite's own, so the state sits the room a route keeps from
-// a box inside the border, not a rank gap and a lane further on.
+// A composite entered through its leading border by a route straight to its
+// first state, which sits at most a route clearance inside the border.
 chart entered "a composite entered straight through its leading border" {
   state Outside,
   state Box { state First, state Second, trans First -> Second },

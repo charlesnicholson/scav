@@ -25,8 +25,7 @@ void thread_test_delay_seed(uint64_t seed);
 namespace {
 
 #ifdef SCAV_TESTING
-// Atomic because a parked worker reads them while a test changes them between
-// calls; relaxed, since neither orders anything but itself.
+// Relaxed: a parked worker reads them as a test sets them; neither orders other memory.
 std::atomic<uint32_t> test_spawn_limit{ 0 };
 std::atomic<uint64_t> test_delay_seed{ 0 };
 
@@ -43,8 +42,8 @@ void delay(uint32_t shard) {
 }
 #endif
 
-// One call's shards, on the stack of the thread that called: it returns only
-// once `done` reaches `shards`, so no thread holds a job past its lifetime.
+// One call's shards, on the caller's stack. The caller returns only once `done`
+// reaches `shards`, so no thread holds a job past its lifetime.
 struct Job {
   ShardFn fn;
   void *ctx;
@@ -54,9 +53,8 @@ struct Job {
   uint32_t done{ 0 };  // under `mu`
 };
 
-// One pool for the process, started on the first call that has work for it.
-// Every thread, worker or caller, takes the next unclaimed shard of an open
-// job, so a slow shard holds up only the thread running it.
+// One pool for the process, started by the first call with work for it. Every
+// thread, worker or caller, takes the next unclaimed shard of an open job.
 struct Pool {
   SRWLOCK mu;
   CONDITION_VARIABLE cv;    // a job was pushed, or a job's last shard finished
@@ -70,8 +68,7 @@ INIT_ONCE g_once = INIT_ONCE_STATIC_INIT;
 // The depth of the job whose shard this thread is running, 0 outside one.
 thread_local uint32_t t_depth{ 0 };
 
-// The deepest open job at `floor` or deeper, the oldest of equals, so work a
-// job has started finishes before a shallower job starts more of its own.
+// The deepest open job at `floor` or deeper, the oldest of equals.
 Job *pick(Pool &p, uint32_t floor) {
   Job *best{ nullptr };
   for (Job *const j : p.open) {
@@ -132,10 +129,8 @@ DWORD WINAPI worker_main(LPVOID arg) {
   }
 }
 
-// Never destroyed: a worker parks in `SleepConditionVariableSRW` for the life
-// of the process, and a static destructor would tear the lock out from under
-// it. A worker that will not start leaves the pool smaller, and a pool of none
-// runs everything on the caller, so a spawn failure degrades and never fails.
+// Never destroyed, as workers park on its lock for the life of the process. A
+// worker that fails to start leaves the pool smaller; a pool of none runs on the caller.
 BOOL CALLBACK start_pool(PINIT_ONCE /*once*/, PVOID /*param*/, PVOID * /*context*/) {
   Pool *const p{ new Pool };
   InitializeSRWLock(&p->mu);
@@ -179,10 +174,8 @@ void parallel_for(uint32_t shards, uint32_t threads, ShardFn fn, void *ctx) {
     return;
   }
 
-  // The caller works its own job first, and then any job as deep as its own,
-  // which is the work its job is waiting on or work no larger than it. A job
-  // shallower than its own could be a whole search the caller would have to
-  // finish before it noticed its own job was done.
+  // The caller runs its own job's shards first, then any job at least as deep as
+  // its own, never a shallower one.
   Job j{ .fn = fn, .ctx = ctx, .shards = shards, .depth = t_depth + 1U };
   AcquireSRWLockExclusive(&p.mu);
   p.open.push_back(&j);

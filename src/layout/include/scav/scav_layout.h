@@ -158,15 +158,8 @@ struct OrientPin {
   SubmachineId frame{ INVALID };
 };
 
-// The side of its state's border the port at one end of a leg sits on: 0 left,
-// 1 right, 2 top, 3 bottom, and `end` 0 the leg's departure and 1 its arrival,
-// as a face pin names them (11.3, 11.10g). Each port is where two legs meet, so
-// either names it. On the two sides a frame's ranks start and end at, the port's
-// in-frame edge is turned to put it there; on the other two it shares its
-// neighbour's rank. A port on a region's border takes none.
-//
-// **Every side of a state is a candidate**, and the facing pass's choice of one
-// is only the default a leg with no pin gets: the search offers the other three.
+// The side of its state's border a leg end's port sits on: 0 left, 1 right, 2 top,
+// 3 bottom, with `end` as a face pin has it. A port on a region's border takes none.
 struct SidePin {
   TransId trans{ INVALID };
   uint32_t leg{ 0 };
@@ -174,8 +167,7 @@ struct SidePin {
   uint32_t side{ 0 };
 };
 
-// Everything besides the tuple that a drawing is a function of, so re-deriving
-// one is two arguments and not seven (11.10a, 11.10b, 11.10d, 11.10e).
+// Everything besides the tuple that a drawing is a function of.
 struct SearchPins {
   std::vector<RankPin> ranks;
   std::vector<ChainCut> cuts;
@@ -263,8 +255,7 @@ uint32_t layout_inputs_digest(Chart const &c);
 
 inline constexpr uint32_t TIER2_TERMS{ 12 };
 
-// The twelve Tier-2 quantities before weighting, so a test reads one of them
-// rather than a sum.
+// The twelve Tier-2 quantities before weighting, and the Tier-0 counts.
 struct CostTerms {
   int64_t bends{ 0 };       // direction changes at a route's interior vertices
   int64_t corridor{ 0 };    // length two routes' segments run collinear over
@@ -285,22 +276,18 @@ struct CostTerms {
   // `apart = 0` (11.6).
   int64_t crowding{ 0 };
   int64_t length{ 0 };  // every route's polyline, end to end, summed
-  // Bends of a route crossing boundaries that lie in a state it only passes
-  // through: on one end's chain below the lowest common ancestor, the innermost
-  // state holding the vertex is neither that end nor the state enclosing it.
+  // Bends in a state the route only passes through: below the lowest common ancestor
+  // on one end's chain, and inside neither that end nor its enclosing state.
   int64_t transit_bends{ 0 };
 
   // Tier 0, forbidden rather than priced: the obstacle set makes these
   // unrepresentable, and the count survives as a net (11.6).
   int32_t through_box{ 0 };
   int32_t box_overlap{ 0 };
-  // Transitions with a segment to draw whose route came out as fewer than two
-  // points, so nothing is drawn. **Forbidden because every Tier-2 term scores it
-  // perfect** -- no bends, no length, no excess, no crowding -- and a search that
-  // can reach one will prefer it (11.6).
+  // Transitions with a segment to draw and a route of fewer than two points; Tier 0, since
+  // every Tier-2 term scores one perfect.
   int32_t vanished{ 0 };
-  // Route segments running along a state's border. A reader cannot tell a
-  // route on a border from the border, and nothing in Tier 2 sees it (11.10g).
+  // Route segments running along a state's border.
   int32_t flush{ 0 };
   // Route segments entering a region neither end lies in: a concurrent
   // sibling of an endpoint's own region, or any region of a state the route

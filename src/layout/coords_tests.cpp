@@ -248,8 +248,6 @@ TEST_CASE("coords: two runs over one graph agree") {
 
 namespace {
 
-// A layered graph of up to five layers of up to four nodes, every lower node
-// joined to one or two in the layer above, from a seeded generator.
 struct Lcg {
   uint64_t s;
   uint32_t next(uint32_t n) {
@@ -288,7 +286,6 @@ CoordGraph random_graph(Lcg &r) {
   return g;
 }
 
-// One field of the graph changed, which the key has to tell apart.
 CoordGraph mutated(CoordGraph g, uint32_t kind, Lcg &r) {
   auto const edge = [&]() -> CoordGraph::Edge & {
     return g.edges[r.next(static_cast<uint32_t>(g.edges.size()))];
@@ -315,9 +312,8 @@ CoordGraph mutated(CoordGraph g, uint32_t kind, Lcg &r) {
 }  // namespace
 
 TEST_CASE("coords: a remembered placement is the placement of that graph") {
-  // Every graph is placed once so the memo holds it, then each field is
-  // changed in turn: a key missing a field would hand back the unchanged
-  // graph's answer, and differ from placing the changed graph afresh.
+  // Each graph is placed once to fill the memo, then each field is changed in turn and
+  // placed both through the memo and afresh.
   Lcg r{ 12345 };
   constexpr uint32_t KINDS{ 8 };
   std::vector<uint32_t> moved(KINDS, 0);
@@ -337,8 +333,7 @@ TEST_CASE("coords: a remembered placement is the placement of that graph") {
     agree = agree && (cross_coordinates(g) == first);
   }
   CHECK(agree);
-  // Each kind of change moved some placement, so each was a case the key had
-  // to distinguish rather than one it could have ignored.
+  // Every kind of change moves some placement.
   for (uint32_t kind = 0; kind < KINDS; ++kind) {
     CAPTURE(kind);
     CHECK(moved[kind] > 0);

@@ -1,7 +1,5 @@
-// A labelled edge across three rank boundaries, `ota`'s `timeout`, beside a
-// wider label on the first of them. The long edge runs through that boundary
-// too, so its label has room beside it there, and no other boundary it
-// crosses has to grow for it.
+// A labelled edge across three rank boundaries, beside a wider label on the first:
+// its label fits in that boundary, and no other boundary it crosses grows for it.
 chart long "a long edge's label in a gap already wide enough" {
   state Offered,
   state Fetching,

@@ -1,9 +1,5 @@
-// toolchanger's `extend` on its own: from Gripping in the root into Cruising,
-// in one of Moving's regions inside Arm, so Arm is a state the route only
-// passes through. Unpriced, the search keeps a drawing where Arm's port sits
-// level with Gripping and Moving's level with Cruising, and the route jogs
-// between the two inside Arm; it can reach one where the route turns in the
-// root or not at all.
+// A route from Gripping into Cruising, in a region of Moving inside Arm, so Arm
+// is a state the route only passes through; the leg across Arm is straight.
 chart transit "a crossing route passing through a composite" {
   state Rotating,
   state Gripping,

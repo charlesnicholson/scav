@@ -12,9 +12,8 @@
 
 namespace scav {
 
-// The hash a table probes by. Only where a key starts looking is up to it; a
-// hit is still the whole key compared, so any function is correct and a
-// constant one makes every key collide, which is how a test reaches probing.
+// The hash a table probes by. A hit compares the whole key, so any function is correct;
+// a constant one makes every key collide.
 using MemoHash = uint64_t (*)(std::vector<uint32_t> const &key);
 uint64_t memo_hash(std::vector<uint32_t> const &key);
 
@@ -61,10 +60,8 @@ class Memo {
   uint32_t used{ 0 };
 };
 
-// Held for the length of a layout. When the last one open ends, every memo in
-// the process releases what it holds, so a host keeps nothing between layouts
-// however long its pool threads live: no thread is in a layout then, and one
-// starting a layout waits on the same lock until the release is done.
+// Held for the length of a layout. When the last open one ends, every memo in the
+// process releases its storage, under the lock a starting layout waits on.
 class MemoRun {
  public:
   MemoRun();

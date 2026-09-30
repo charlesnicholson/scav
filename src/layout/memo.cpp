@@ -10,9 +10,8 @@
 
 namespace scav {
 
-// Four lanes over two words at a time, then the lanes and the tail folded into
-// one: the lanes are independent, so the multiplies overlap rather than each
-// waiting on the last, which is most of what a long key costs.
+// Four independent lanes over two words at a time, so their multiplies overlap; then
+// the lanes and the tail fold into one.
 uint64_t memo_hash(std::vector<uint32_t> const &key) {
   constexpr uint64_t K{ UINT64_C(0x9E37'79B9'7F4A'7C15) };
   auto const mix = [](uint64_t h, uint64_t w) {

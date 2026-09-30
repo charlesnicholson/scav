@@ -18,9 +18,8 @@ namespace scav {
 
 namespace {
 
-// `f`, then `g`, then node. `node` carries vertex and plane, and a node's `g`
-// only falls, so no two entries compare equal and the pop order cannot depend
-// on the push order or on the heap's shape.
+// `f`, then `g`, then node. No two entries compare equal: `node` carries vertex
+// and plane, and a node's `g` only falls.
 bool frontier_before(OrthoFrontierEntry const &a, OrthoFrontierEntry const &b) {
   if (a.f != b.f) { return a.f < b.f; }
   if (a.g != b.g) { return a.g < b.g; }
@@ -28,8 +27,7 @@ bool frontier_before(OrthoFrontierEntry const &a, OrthoFrontierEntry const &b) {
 }
 
 // A 4-ary heap: children of `i` are `4i+1 .. 4i+4`. Both directions move a
-// hole and write the travelling entry once. `<algorithm>` is outside this
-// library's header subset (6).
+// hole and write the travelling entry once.
 constexpr uint32_t HEAP_ARITY{ 4 };
 
 void heap_push(std::vector<OrthoFrontierEntry> &heap, OrthoFrontierEntry const &item) {
@@ -69,9 +67,7 @@ OrthoFrontierEntry heap_pop(std::vector<OrthoFrontierEntry> &heap) {
 
 Wide distance(int32_t a, int32_t b) { return (a < b) ? (Wide{ b } - a) : (Wide{ a } - b); }
 
-// How far outside `[lo, lo + len]` a coordinate lies, zero anywhere inside it.
-// Measured from the span rather than from a border point, so a face's length
-// does not count against its own perpendicular exit (11.5).
+// How far outside `[lo, lo + len]` a coordinate lies, zero inside it.
 Wide beyond(int32_t v, int32_t lo, int32_t len) {
   Wide const hi{ Wide{ lo } + len };
   if (v < lo) { return Wide{ lo } - v; }
@@ -190,12 +186,8 @@ uint32_t ortho_from(std::vector<int32_t> const &v, int32_t key) {
 }  // namespace
 
 void ortho_sort_unique(std::vector<int32_t> &v) {
-  // Ascending by the value's bits offset to unsigned, least significant byte
-  // first, each pass a counting scatter into a buffer kept per thread and
-  // back; a byte every value holds the same leaves the order as it was, so
-  // its pass is skipped. Equal values need no stable order, since only one of
-  // each is kept. Nothing here waits on the pool, so no second call on this
-  // thread starts while one is using the buffer.
+  // LSD radix on the bits offset to unsigned, through a per-thread buffer, with
+  // a byte every value shares skipped. Nothing here waits on the pool.
   size_t const n{ v.size() };
   if (n <= SCAV_SORT_SMALL) {
     scav_insertion_sort(v.data(), v.data() + n, [](int32_t a, int32_t b) {
@@ -459,9 +451,8 @@ void ortho_align_attachments(std::vector<RouteNet> const &nets,
     }
     if (lo > hi) { continue; }  // no coordinate both faces can seat
 
-    // Halfway between the two centres, which is symmetric in the pair, so a net
-    // and its reverse land on the same line rather than on two a step apart;
-    // or, for a net that leans, the lower end of the run both faces seat.
+    // Halfway between the two centres, which is symmetric in the pair; a net that
+    // leans takes the lower end of the run both faces seat.
     int32_t const want{ static_cast<int32_t>(floor_div(centres, Wide{ 2 })) };
     int32_t const got{ (net.lean != 0) ? lo : imin(imax(want, lo), hi) };
     if (along_y) {
@@ -506,10 +497,8 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
     RouteNet const &net{ nets[seat.slot / 2] };
     return (seat.end == 0) ? net.dst_obstacle : net.src_obstacle;
   };
-  // Whether a seat's far end names no box and lies level with it, so the net
-  // is one straight leg that only the seat moving can bend: a port's. The far
-  // end is the net's own point there, since an end naming no box is seated on
-  // what it is aimed at.
+  // Whether a seat's far end names no box and lies level with it: a port's
+  // straight leg. Such an end's point is the net's `src` or `dst`, not its seat.
   auto const level = [&](Seat const &seat) {
     RouteNet const &net{ nets[seat.slot / 2] };
     scav_point const there{ (seat.end == 0) ? net.dst : net.src };
@@ -521,17 +510,8 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
     return (box < inscribed.size()) && (inscribed[box] != 0);
   };
 
-  // One sweep of the face: everything arriving at a point is one fan-in and
-  // everything leaving it is one fan-out, each a trunk a reader wants whole and
-  // 11.5's bundles exist to keep. What no trunk explains is an arrival and a
-  // departure on one point, where the head is inked along the other route's own
-  // first leg -- so the run seats by direction and the members of a direction
-  // keep the point they share.
-  //
-  // A point holding a `level` seat keeps that seat there and moves the rest
-  // the whole step instead of half each: every seat of the other direction,
-  // and every seat of the level one's own whose far end is an inscribed
-  // glyph's one point.
+  // One sweep of the face: seats on one point part by direction. At a `level` seat,
+  // its direction stays put, bar seats aimed at a glyph, and the rest move a whole step.
   auto const sweep = [&]() {
     for (Seat &seat : seats) {
       seat.pos = (seat.face < 2) ? at[seat.slot].y : at[seat.slot].x;
@@ -565,9 +545,8 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
       bool const along_y{ seats[first].face < 2 };
       int32_t const lo{ along_y ? r.y : r.x };
       int32_t const len{ along_y ? r.h : r.w };
-      // `apart` where the run `onto_face` seats on holds it; otherwise sized
-      // to the face, so a mark too small to seat both leaves them stacked
-      // rather than sliding one off its own border.
+      // `apart` where the run `onto_face` seats on holds it; otherwise sized to
+      // the face, so a mark too small to seat both leaves them stacked.
       int32_t const inset{ imin(imax(clear, arc(seats[first].box)), len / 2) };
       int32_t const step{ ((len - (2 * inset)) >= apart) ? apart : imin(clear, len / 3) };
       if (step <= 0) { continue; }
@@ -577,13 +556,8 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
             (level(seat) || ((seat.end == keep) && !glyph_far(seat)))) {
           continue;
         }
-        // Which way the net travels through the face rather than which end of
-        // it this is: out through a right or a bottom face runs +, and in
-        // through a left or a top face runs + as well. The one running + takes
-        // the lower seat at both of its ends, so a pair seated apart at one box
-        // is seated the same way apart at the other and stays two straight
-        // lines; at any one face this is still exactly arrival against
-        // departure, so a fan-in and a fan-out each keep their one point.
+        // The net's direction through the face: the one running + takes the lower seat at
+        // both ends, so a pair apart at one box is apart the same way at the other.
         bool const forward{ (seat.end == 0) == ((seat.face == 1) || (seat.face == 3)) };
         int32_t const down_by{ (keep == INVALID) ? (step / 2) : step };
         int32_t const up_by{ (keep == INVALID) ? (step - (step / 2)) : step };
@@ -594,13 +568,8 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
         held = got;
         moved = true;
 
-        // **The net moves, not the seat.** The comment above is what this pass
-        // intends and moving one end is not it: alignment had put both ends of
-        // `brew`'s `Off -> SelfCheck` on one coordinate and separating the two
-        // seats on `Off`'s face alone bent a 2,000-unit straight run by
-        // `clear / 2`. The far end takes the same displacement where its own
-        // face can seat it exactly; where the face would clamp, the far end
-        // stays and the bend is the price of separating the near one.
+        // The net moves, not the seat: the far end takes the same displacement where its
+        // face can seat it exactly, and stays where the face would clamp.
         uint32_t const net{ seat.slot / 2 };
         uint32_t const twin{ (2 * net) + (1 - seat.end) };
         uint32_t const box{ (seat.end == 0) ? nets[net].dst_obstacle
@@ -656,9 +625,8 @@ void ortho_separate_attachments(std::vector<RouteNet> const &nets,
   };
   thread_local std::vector<Leg> legs;
   legs.clear();
-  // Whether a leg's far end names no box and lies level with its seat, so the
-  // net is one straight leg that only the seat moving can bend: a port's. The
-  // far end is the net's own point there, as in the spread above.
+  // Whether a leg's far end names no box and lies level with its seat: a port's
+  // straight leg, as in the spread above.
   auto const level = [&](Leg const &leg) {
     RouteNet const &net{ nets[leg.net] };
     bool const from_src{ (leg.slot % 2) == 0 };
@@ -689,9 +657,7 @@ void ortho_separate_attachments(std::vector<RouteNet> const &nets,
     }
   }
 
-  // One axis at a time: two legs a reader confuses run at the same kind of
-  // coordinate, and a horizontal leg beside a vertical one is a crossing rather
-  // than a lane.
+  // One axis at a time: only legs of one orientation can crowd each other.
   auto const sweep = [&](bool along_y) {
     thread_local std::vector<uint32_t> here;
     here.clear();
@@ -718,10 +684,7 @@ void ortho_separate_attachments(std::vector<RouteNet> const &nets,
       int32_t const apart{ high.pos - low.pos };
       if ((apart <= 0) || (apart >= pitch)) { continue; }
       if ((low.hi <= high.lo) || (high.hi <= low.lo)) { continue; }  // never alongside
-      // Half the shortfall each, so neither moves further than it has to and the
-      // pair is symmetric whichever order the sweep reached it in; or all of it
-      // to the one whose partner is a level leg, which stays.
-      //
+      // Half the shortfall each, or all of it to the partner of a level leg.
       int32_t const want{ pitch - apart };
       std::array<bool, 2> const fixed{ level(low), level(high) };
       if (fixed[0] && fixed[1]) { continue; }
@@ -963,12 +926,10 @@ bool ortho_search(OrthoGrid const &g,
   if ((vertices == 0) || (from >= vertices) || (to >= vertices)) { return false; }
   if (g.pass_h.empty() && (g.nx() > 1)) { return false; }
   uint32_t const nodes{ vertices * 2 };
-  // Only grown: entries past `nodes` are left alone, and every stamp in the
-  // vector is from an earlier generation than the one this search takes.
+  // Only grown; every stamp in it predates this search's generation.
   if (s.state.size() < nodes) {
     s.state.resize(nodes, OrthoNodeState{ .stamp = 0, .parent = INVALID, .best = 0 });
   }
-  // A stamp from a search before the counter wrapped would read as this one's.
   if (++s.generation == 0) {
     for (OrthoNodeState &n : s.state) { n.stamp = 0; }
     s.generation = 1;
@@ -984,9 +945,8 @@ bool ortho_search(OrthoGrid const &g,
   uint8_t const *const pass_v{ g.pass_v.data() };
   scav_point const goal{ g.point(to) };
 
-  // Manhattan plus one bend for an axis this plane cannot cover alone. Both are
-  // lower bounds, so the sum admits. `dx` and `dy` are the node's own distances
-  // to the goal on each axis, taken from the line indices each move knows.
+  // Manhattan plus one bend for an axis this plane cannot cover alone: both lower
+  // bounds, so the sum admits. `dx` and `dy` are the node's distances to the goal.
   auto const heuristic = [bend](Wide dx, Wide dy, uint32_t plane) {
     bool const turn{ (plane == 0) ? (dy != 0) : (dx != 0) };
     return dx + dy + (turn ? bend : Wide{ 0 });
@@ -1086,10 +1046,8 @@ int32_t OrthogonalRouter::margin(scav_profile const &p) const {
 
 namespace {
 
-// Every buffer one `route` call uses, kept per thread and reassigned in place,
-// so a call after the first allocates only what outgrows the calls before it.
-// `route` never waits on the pool, so no second call on this thread can start
-// while one is using these.
+// Every buffer one `route` call uses, kept per thread and reassigned in place.
+// `route` never waits on the pool, so a thread runs one call at a time.
 struct RouteScratch {
   std::vector<scav_rect> walls;
   std::vector<scav_point> lead, anchors, seat, toward, was;
@@ -1112,9 +1070,8 @@ scav_point aim_of(RouteInput const &in, RouteNet const &net, uint32_t end) {
   return in.waypoints[net.waypoint_off + ((end == 0) ? 0 : (net.waypoint_len - 1))];
 }
 
-// Where an end is seated before the passes that line seats up and pull them
-// apart: on `face` where one is named, INVALID for the separation rule's own,
-// and at the aim itself for an end naming no box.
+// An end's seat before alignment and spreading: on `face` where one is named
+// (INVALID for the separation rule's), and at the aim for an end naming no box.
 scav_point seat_of(RouteInput const &in,
                    RouteNet const &net,
                    uint32_t end,
@@ -1125,8 +1082,6 @@ scav_point seat_of(RouteInput const &in,
   if (box >= in.obstacles.size()) { return aim; }
   bool const glyph{ (box < in.inscribed.size()) && (in.inscribed[box] != 0) };
   int32_t const arc{ (box < in.corner.size()) ? in.corner[box] : 0 };
-  // A named face overrules the separation rule, which is what makes the
-  // choice searchable rather than ruled (11.10e).
   if (face < 4) {
     return ortho_attach_face(aim, in.obstacles[box], clear, glyph, arc, face);
   }
@@ -1165,9 +1120,8 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
   std::vector<scav_rect> &walls{ sc.walls };
   ortho_enclosure_walls(in.region, in.enclosure, inset, walls);
   scav_rect const &enc{ in.enclosure };
-  // Which border of the enclosure an end lies in the band of -- on it, as a
-  // port does, or inside it by less than `inset`, as an inner face does -- by
-  // the nearest: 0 left, 1 right, 2 top, 3 bottom, INVALID for none.
+  // The enclosure border whose band holds an end: 0 left, 1 right, 2 top, 3 bottom,
+  // INVALID for none.
   auto const band_side = [&enc, inset](scav_point at) {
     if ((enc.w <= 0) || (enc.h <= 0)) { return INVALID; }
     if ((at.x < enc.x) || (at.x > (enc.x + enc.w)) || (at.y < enc.y) ||
@@ -1313,8 +1267,7 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
                            pitch,
                            seat);
   moved(SeatPass::Spread);
-  // Last, because it is the only pass that compares two boxes: what it moves is
-  // what the three above have already settled on their own faces (11.10a).
+  // Last: the only pass that compares two boxes, over seats the passes above settled.
   ortho_separate_attachments(in.nets,
                              in.obstacles,
                              in.inscribed,

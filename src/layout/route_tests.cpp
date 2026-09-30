@@ -252,9 +252,8 @@ TEST_CASE("route: the slot side follows the route's direction, not the packing")
 }
 
 TEST_CASE("route: a port on a cross border puts its slot on the top or bottom border") {
-  // The boundary node sits on the inner frame's top or bottom edge, level with
-  // the state it joins, so the slot is on the composite's own top or bottom
-  // border at the node's x; turned down, on its left or right at the node's y.
+  // The boundary node sits on the inner frame's top or bottom edge, so the slot is on the
+  // composite's top or bottom border at the node's x; turned down, a side at its y.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
@@ -1010,10 +1009,7 @@ TEST_CASE("route: a reused frame answers exactly what routing it again would") {
 }
 
 TEST_CASE("route: a cache filled by a run that reused one answers like routing afresh") {
-  // A search's incumbent after a taken move is routed through the cache the
-  // move was scored with, and fills the one the next round reads. Along a
-  // chain of moves, each routed through what the one before filled, every
-  // answer is the fresh one.
+  // A chain of moves, each routed through the cache the one before filled.
   scav_profile p{};
   REQUIRE(profile_named("readable", p));
   Router const *const router{ router_at(0) };
@@ -1061,11 +1057,8 @@ TEST_CASE("route: a cache filled by a run that reused one answers like routing a
 }
 
 TEST_CASE("route: a face with no effect at an end changes nothing it draws") {
-  // The search leaves such a face unscored on the strength of this: pinned
-  // there, it routes exactly as no pin does. Both kinds occur -- every face at
-  // an end the router reads none at, and at one it does read, the face it
-  // seats the end on anyway -- and some face with an effect does change the
-  // route, so the mark is not simply every face.
+  // Both kinds of unmarked face occur, at an end the router reads no face at and the face
+  // it seats an end on anyway, and some marked face changes the route.
   scav_profile p{};
   REQUIRE(profile_named("readable", p));
   Router const *const router{ router_at(0) };
@@ -1139,10 +1132,8 @@ TEST_CASE("route: a router that reads no faces marks no end") {
 
 namespace {
 
-// A frame's obstacles as a walk over every state in order finds them: live,
-// overlapping the region, not the owner or enclosing it, and not inside an
-// overlapping box that is neither. The gather is held to this rather than to a
-// second copy of its own shortcut.
+// A frame's obstacles as a walk over every state finds them: live, overlapping the region,
+// not the owner or enclosing it, and not inside an overlapping box that is neither.
 struct Gathered {
   std::vector<scav_rect> obstacles;
   std::vector<uint8_t> inscribed;
@@ -1237,9 +1228,8 @@ TEST_CASE("route: a frame's obstacles are the ones a walk over every state finds
 }
 
 TEST_CASE("route: a state outside its composite's box is an obstacle where it lies") {
-  // `S` belongs to `A` but was laid inside `D`, where `A`'s own box is not, so
-  // no box shields it from `D`'s route. Built last, so it sorts after the
-  // frame's own states and the obstacles come out in state order all the same.
+  // `S` belongs to `A` but lies inside `D`, outside `A`'s box. Built last, it sorts after
+  // the frame's own states.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };

@@ -1,9 +1,5 @@
-// The per-frame memos of ordering and sizing against the steps they stand in
-// for. A traced run derives every frame and remembers nothing, so the same call
-// with a sink attached is the uncached answer. Each case warms a memo on one
-// input, changes one thing its key must cover, and requires the remembered
-// answer to be the computed one: a key missing that input would hand back the
-// frame as it was before the change.
+// The per-frame memos of ordering and sizing against the steps they stand in for. A traced
+// run derives every frame and remembers nothing, which gives the uncached answer.
 
 #include "layout/decompose.h"
 #include "layout/order.h"
@@ -42,8 +38,7 @@ void load(char const *name, Chart &c) {
   REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
 }
 
-// Space requests on every state and a label box on every transition, so the
-// sizes and label extents the keys carry have values to change.
+// Space requests on every state and a label box on every transition.
 struct Requests {
   std::vector<scav_box_space> box;
   std::vector<scav_path_box> path;
@@ -124,9 +119,8 @@ Sized sized(Chart const &c,
   return out;
 }
 
-// The first live state with a parent frame of two ranks or more, a cyclic
-// segment's transition and leg, and a frame of two ranks, so each pin names
-// something the ordering can act on.
+// What each pin names: the first live non-initial state, a cyclic leg, a chained leg, and
+// the first frame of two ranks or more.
 struct Targets {
   StateId state{ INVALID };
   TransId trans{ INVALID };
@@ -157,8 +151,7 @@ Targets targets_of(Chart const &c, SplitGraph const &g, SubmachineOrders const &
     t.leg = seg - g.trans_segments[tr.v].off;
     break;
   }
-  // A segment the ordering chained through a bend, which is the only kind a
-  // cut acts on.
+  // A segment chained through a bend, the only kind a cut acts on.
   for (OrderNode const &nd : o.nodes) {
     if ((nd.kind != OrderKind::Bend) || (nd.subject >= g.segments.size())) { continue; }
     TransId const tr{ g.segments[nd.subject].trans };
@@ -170,8 +163,7 @@ Targets targets_of(Chart const &c, SplitGraph const &g, SubmachineOrders const &
   return t;
 }
 
-// Disconnected states of seeded sizes in one frame: each its own component,
-// so the frame's packing of them is the step compaction changes.
+// Disconnected states of seeded sizes in one frame, each its own component.
 struct Scatter {
   Chart c;
   Requests req;
@@ -195,9 +187,8 @@ Scatter scattered(uint32_t seed) {
   return out;
 }
 
-// pack_tests' late arrival -- a fourth rect with nowhere but a row of its own
-// until compaction takes it back into the hole under the third -- scaled from
-// a separation of 10 to the profile's, as four disconnected states.
+// pack_tests' late arrival as four disconnected states, scaled from a separation of 10: a
+// fourth rect that compaction takes into the hole under the third.
 Scatter late_arrival(scav_profile const &p) {
   Scatter out;
   SubmachineId const root{ build_chart(out.c, "late", {}) };
@@ -274,8 +265,7 @@ TEST_CASE("order memo: a remembered frame is the frame those inputs order to") {
     }
     CHECK(same(ordered(c, g, s, p, {}, false), base));
   }
-  // Each variant reordered some chart, so each was a case the key had to tell
-  // apart rather than one it could have ignored.
+  // Every variant reorders some chart.
   for (uint32_t k = 0; k < VARIANTS; ++k) {
     CAPTURE(k);
     CHECK(moved[k] > 0);
@@ -308,8 +298,8 @@ TEST_CASE("size memo: a remembered frame is the layout those inputs size to") {
     REQUIRE(base.ok);
     Targets const t{ targets_of(c, g, o) };
 
-    // Orders that differ in one frame's ranks or direction, so the frames
-    // around the changed one hit and the changed one must not.
+    // Orders that differ in one frame's ranks or direction: the frames around it hit, and
+    // it must not.
     SearchPins turned;
     if (t.frame.v != INVALID) { turned.orients.push_back({ .frame = t.frame }); }
     SearchPins pinned;
@@ -453,8 +443,7 @@ TEST_CASE("size memo: a remembered frame is the layout those inputs size to") {
 }
 
 TEST_CASE("size memo: a port on a cross border keys on the port it continues through") {
-  // `gauntlet/through` twice, the second with `reach` into `Top` in place of
-  // `Target`: every state and segment keeps its id and `Inner` its size, so
+  // `gauntlet/through` twice, the second with `reach` into `Top` in place of `Target`:
   // `Outer`'s frame differs only in where `Inner`'s port sits along its ranks.
   scav_profile const p{ readable() };
   std::vector<scav_byte> bytes;
@@ -536,11 +525,8 @@ TEST_CASE("size memo: a port on a cross border keys on the port it continues thr
 }
 
 TEST_CASE("size memo: a port on a rank border keys on the port it continues through") {
-  // Two charts alike but for which of `Up` and `Down` the route reaches. The
-  // ordering puts the one reached below the other, and `Up` is the taller, so
-  // every state and segment keeps its id and `Box` its size while `Box`'s port
-  // sits at another height across its ranks: `Outer`'s frame differs only in
-  // that, which is where the port on `Outer`'s leading border is levelled to.
+  // Two charts differing only in whether the route reaches `Up` or `Down`, so only the
+  // height of `Box`'s port, and `Outer`'s leading port level with it, differ.
   scav_profile const p{ readable() };
   std::string const text{
     "chart nest \"a route through two rank borders\" {\n"

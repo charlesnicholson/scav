@@ -17,11 +17,8 @@
 
 namespace scav {
 
-// How a box's candidates are searched. Every one keys and tests every
-// candidate; `Pruned` skips the ones that provably cannot win; `Memoized` is
-// `Pruned` behind a per-thread table of the boxes this thread has placed.
-// Nothing shipping passes anything but `Memoized`: the other two are what a
-// test weighs it against.
+// How a box's candidates are searched; all three settle one answer. `Pruned` skips those
+// that cannot win, and `Memoized` is `Pruned` behind a per-thread table of placed boxes.
 enum class LabelSearch : uint32_t { Exhaustive, Pruned, Memoized };
 
 // Fills `out` parallel to `s.path_box`; returns the boxes that found no
@@ -34,17 +31,15 @@ uint32_t place_labels(Chart const &c,
                       scav_profile const &p,
                       std::vector<scav_rect> &out);
 
-// How a box settled beyond where it went: whether the search found it a
-// place, and the leg and the slide along it, in the chart's coordinates, that
-// the next box of its transition goes past.
+// Whether the search found a box a place, and the leg and slide, in chart coordinates,
+// that the next box of its transition must pass.
 struct LabelSettle {
   uint32_t seg{ 0 };
   int32_t mid{ 0 };
   uint8_t found{ 0 };
 };
 
-// A placement over the same chart, sizing, path boxes and profile as the one
-// to be made, with the routes it was made over.
+// An earlier placement over the same chart, sizing, boxes and profile, and its routes.
 struct LabelBase {
   std::vector<scav_span> const *route{ nullptr };
   std::vector<scav_point> const *points{ nullptr };
@@ -52,10 +47,8 @@ struct LabelBase {
   std::vector<LabelSettle> const *settled{ nullptr };
 };
 
-// `place_labels`, filling `how` parallel to `out` as well. A box whose own
-// route is the one it had in `was`, and whose region no leg that moved and no
-// box that settled elsewhere reaches, is the problem it was there, so it keeps
-// where it went without being searched.
+// `place_labels`, also filling `how` parallel to `out`. A box whose route is as in `was`,
+// and whose region nothing that moved reaches, keeps its place unsearched.
 uint32_t place_labels(Chart const &c,
                       SizedLayout const &z,
                       scav_spaces const &s,

@@ -56,8 +56,8 @@ struct Extent {
   Wide w{ 0 }, h{ 0 };
 };
 
-// The spot list one packing works in, kept per thread and reassigned in place.
-// Packing calls nothing that packs, so one list serves every call on a thread.
+// The spot list a packing works in, reassigned in place. Per-thread; packing calls
+// nothing that packs.
 std::vector<Spot> &spot_scratch() {
   thread_local std::vector<Spot> s;
   return s;

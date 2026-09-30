@@ -1,9 +1,8 @@
 #ifndef SCAV_THREAD_H_INCLUDED
 #define SCAV_THREAD_H_INCLUDED
 
-// The threading shim, one backend chosen at build time: pthreads, Win32, or
-// null. Shards are the work items, and which thread runs one never reaches a
-// result: a shard writes only its own slot.
+// The threading shim, one backend chosen at build time: pthreads, Win32, or null.
+// A shard writes only its own slot, so which thread runs it never reaches a result.
 
 #include <cstdint>
 #include <type_traits>
@@ -34,9 +33,8 @@ void parallel_for(uint32_t shards, uint32_t threads, F &&fn) {
       &fn);
 }
 
-// Excludes every other holder while held: for state the pool's shards share,
-// held around a lookup or an insert and never around a shard's own work. Not
-// recursive. The null backend's does nothing, as it has one thread.
+// Excludes every other holder while held, around a lookup or insert into state shards
+// share, never around a shard's own work. Not recursive; a no-op in the null backend.
 class Mutex {
  public:
   Mutex();

@@ -22,10 +22,8 @@ struct SizedLayout {
   std::vector<scav_rect> state, before, after;  // parallel to states
   std::vector<scav_rect> sub;                   // parallel to submachines
   std::vector<scav_point> node;                 // parallel to the orders' nodes
-  // Parallel to the segments, or empty for none: 1 where the room for the
-  // segment's label was reserved on the trailing side of a straight leg seated
-  // at the leading end of its two ends' overlap, which is where the router
-  // seats it.
+  // Parallel to the segments, or empty: 1 where a straight leg seats at the leading end of
+  // its ends' overlap, with its label's room on the trailing side.
   std::vector<uint8_t> lean;
   scav_rect chart{};
 };

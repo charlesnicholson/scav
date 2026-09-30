@@ -1,8 +1,5 @@
-// What a Level 1 search leaves undone and still finds the same: the memo of
-// whole searches, whose key tells apart every input a search is a function
-// of; the faces a pin has no effect at, left unscored; and a face
-// move scored from the incumbent's phases 1 and 2. Each is compared against a
-// layout that does the work, with the shortcut taken.
+// Level 1 search shortcuts, each against a layout that does the work: the search memo,
+// unscored no-op faces, and face moves scored from the incumbent's prefix.
 
 #include "layout/pack.h"
 #include "layout/size.h"
@@ -177,14 +174,11 @@ TEST_CASE("search memo: a layout searched through it is the one searched without
     CHECK(with.structural == without.structural);
     CHECK(with.coordinate == without.coordinate);
   }
-  // The memo answered searches, so the equality above held across real hits.
   CHECK(hits > 0);
 }
 
 TEST_CASE("search memo: every search it answers is the search run afresh") {
-  // Each answer is checked against running that search anyway -- the pins it
-  // reached, its cost, and the drawing re-derived from them -- including the
-  // many answers to searches whose result is not taken.
+  // Each answer is checked against the search run anyway, including those not taken.
   MemoGuard const guard;
   layout_test_search_memo_verify(true);
   constexpr std::array<char const *, 4> CHARTS{ "axis.scav",
@@ -272,9 +266,7 @@ TEST_CASE(
 }
 
 TEST_CASE("search: every face move scored from the prefix scores as the whole way does") {
-  // Each shortcut is scored the whole way as well and the two compared -- the
-  // score, its shares, the drawing and the pins it was laid with -- including
-  // the many moves that lose, whose score no drawing would show.
+  // Each shortcut is also scored whole and compared, including moves that lose.
   PrefixGuard const guard;
   layout_test_prefix_verify(true);
   constexpr std::array<char const *, 4> CHARTS{ "axis.scav",

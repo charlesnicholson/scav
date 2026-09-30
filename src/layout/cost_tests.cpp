@@ -143,10 +143,8 @@ TEST_CASE("cost: a corner in a polyline is one bend") {
 
 namespace {
 
-// toolchanger's `extend` in miniature: Src in the root, Dst two composites
-// down, so Arm is the one state its route only passes through. Src -> Dst,
-// then the same pair the other way round, then Src -> Arm, which crosses
-// nothing it does not end at.
+// Src in the root and Dst two composites down, so Src -> Dst only passes through Arm;
+// then Dst -> Src, and Src -> Arm, which ends at Arm.
 struct Transit {
   Chart c;
   StateId src, arm, moving, dst;
@@ -459,14 +457,12 @@ TEST_CASE("cost: only the excess over the direct distance is charged") {
 TEST_CASE("cost: length is every route end to end, once, crossed or not") {
   Chart const c{ edges(2) };
   SizedLayout const z{ blank(c) };
-  // A straight 300 is its direct distance and no excess, and still 300 long.
   Routes const one{ routes_of(c, { { { .x = 0, .y = 0 }, { .x = 300, .y = 0 } } }) };
   CostTerms const alone{ cost_terms(c, decompose(c), z, one, {}, profile()) };
   CHECK(alone.excess_len == 0);
   CHECK(alone.length == 300);
 
-  // A second route of three legs crosses the first. Its detour is charged per
-  // crossing; its length is the legs summed and nothing more.
+  // A second route of three legs, crossing the first.
   Routes const two{ routes_of(c,
                               { { { .x = 0, .y = 0 }, { .x = 300, .y = 0 } },
                                 { { .x = 100, .y = -100 },
@@ -1719,12 +1715,8 @@ TEST_CASE("cost: a transition whose route vanished is a Tier 0 violation") {
 
 namespace {
 
-// Every term the direct way, the oracle the indexed scorer is held to: each
-// scan over everything it could meet, each sweep over every pair, the descent
-// over every child of a frame, and the chart's constants built for the call.
-// It shares only the predicates that define a term -- `overlaps`,
-// `along_border`, `chebyshev_gap` and the containment walk -- and has its own
-// copy of the rest.
+// Every term by brute force over every pair, the oracle for the indexed scorer. It
+// shares only `overlaps`, `along_border`, `chebyshev_gap` and the containment walk.
 namespace reference {
 
 Wide orient2d(scav_point a, scav_point b, scav_point c) {
@@ -2183,7 +2175,6 @@ std::array<int64_t, TERMS> terms_of(CostTerms const &t) {
            t.flush,  t.through_region };
 }
 
-// Which of `terms_of`'s entries a diff names, so a failure says what moved.
 constexpr std::array<char const *, TERMS> TERM_NAMES{
   "bends",  "corridor",      "crossings",   "excess_len",  "adjacency",
   "label",  "label_near",    "aspect",      "area",        "crowding",
@@ -2202,10 +2193,8 @@ std::string first_difference(CostTerms const &got, CostTerms const &want) {
   return {};
 }
 
-// Coordinates on a lattice of five with the odd unit nudge, so shared borders,
-// touching rects, collinear legs and pieces along a border are common rather
-// than rare, and negative ones so a key that sorted them as unsigned would
-// show.
+// Coordinates on a lattice of five with an occasional unit nudge, straddling zero, so
+// shared borders, collinear legs and negative lane keys are common.
 struct Lattice {
   uint64_t s;
   uint32_t next(uint32_t n) {
@@ -2231,9 +2220,8 @@ struct Lattice {
   }
 };
 
-// Nested states, some with two concurrent regions, pseudostates among them,
-// sometimes one frame wider than the scan threshold so its grid answers, and
-// tombstones among the states and the regions.
+// Nested states, some with two regions, pseudostates, sometimes one frame wider than
+// the scan threshold, and tombstones among the states and regions.
 Chart random_chart(Lattice &r) {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
@@ -2282,9 +2270,8 @@ Chart random_chart(Lattice &r) {
   return c;
 }
 
-// One candidate's geometry over `c`: every rect, route, placed box and space
-// request drawn at random, with routes that end on another's last points often
-// enough that trunks come up.
+// One candidate's geometry over `c`, all drawn at random; some routes end on another's
+// last points, so trunks come up.
 struct Candidate {
   SizedLayout z;
   Routes r;
@@ -2343,10 +2330,8 @@ Candidate random_candidate(Chart const &c, Lattice &r) {
   return out;
 }
 
-// `k` with every rect and point moved by `by` on both axes. The lattice's
-// coordinates straddle zero, so every high byte of a lane key differs somewhere;
-// moved off it, those bytes agree and the lane sort takes another number of
-// passes.
+// `k` moved by `by` on both axes. The lattice straddles zero, so a shift changes which
+// lane-key bytes agree and so which sort passes run.
 Candidate shifted(Candidate k, int32_t by) {
   auto const rect = [by](scav_rect &x) {
     x.x += by;
@@ -2365,9 +2350,8 @@ Candidate shifted(Candidate k, int32_t by) {
   return k;
 }
 
-// The readable profile with the three knobs the terms read moved about: the
-// em crowding and the weights divide by, the band `flush` reads through
-// `node_sep` and `pad`, and the separation `adjacency` allows.
+// The readable profile with the knobs the terms read drawn at random: the em, the
+// `flush` band through `node_sep` and `pad`, and `sub_sep`.
 scav_profile random_profile(Lattice &r) {
   scav_profile p{ profile() };
   constexpr std::array<int32_t, 5> EM{ 0, 1, 5, 12, 20 };
@@ -2383,16 +2367,12 @@ scav_profile random_profile(Lattice &r) {
 }  // namespace
 
 TEST_CASE("cost: the indexed terms are the direct scans' over seeded random charts") {
-  // Each chart scored three ways over several candidates: through a context
-  // built once for it, through one built per call, and by the reference. The
-  // tallies say each term was nonzero somewhere, so no term agrees by never
-  // being exercised.
+  // Each candidate scored through a kept context, a per-call one, and the reference;
+  // `seen` tallies each term nonzero somewhere.
   Lattice r{ 20260928 };
   std::array<uint32_t, TERMS> seen{};
   uint32_t mismatches{ 0 };
-  // Candidates with more pieces than an insertion sort takes, so the lane
-  // sort's byte passes are what ordered them.
-  uint32_t long_sorts{ 0 };
+  uint32_t long_sorts{ 0 };  // candidates past the insertion sort's cutoff
   for (uint32_t trial = 0; (trial < 600) && (mismatches == 0); ++trial) {
     Chart const c{ random_chart(r) };
     SplitGraph const g{ decompose(c) };
@@ -2441,7 +2421,7 @@ TEST_CASE("cost: the indexed terms are the direct scans' at the edges") {
   build_trans(c, b, far, TransKind::External, {});
   SplitGraph const g{ decompose(c) };
   CostContext const ctx{ cost_context(c) };
-  // A band of five and an em of twenty, so the geometry below reads in units.
+  // A band of five and an em of twenty.
   scav_profile p{ profile() };
   p.node_sep = 30;
   p.pad = 12;
@@ -2466,14 +2446,13 @@ TEST_CASE("cost: the indexed terms are the direct scans' at the edges") {
     return want;
   };
 
-  // No routes at all, then one point each: two vanished, and nothing to scan.
+  // No routes, then one point each.
   CHECK(agree(routes_of(c, {}), {}).vanished == 2);
   CHECK(agree(routes_of(c, { { { .x = 90, .y = 90 } }, { { .x = 190, .y = 90 } } }), {})
             .vanished == 2);
 
-  // Along A's top border, at the band's edge, just past it, and a lone point
-  // on the border: the grid holds the states grown by the band, so each of
-  // these sits on a cell edge of its own.
+  // Along A's top border out to just past the band, each on a cell edge of the grid of
+  // grown states; then a lone point on the border.
   for (int32_t const off : { 0, near, near + 1, -near, -(near + 1) }) {
     CAPTURE(off);
     Routes const along{ routes_of(
@@ -2515,9 +2494,8 @@ TEST_CASE("cost: the indexed terms are the direct scans' at the edges") {
   CHECK(labelled.label > 0);
   CHECK(labelled.label_near > 0);
 
-  // The box's own route 40 above it and its height 20, so a foreign route is
-  // charged nearer than 60: one short of that is a shortfall of one, and at it
-  // there is none -- the margin's last unit.
+  // The box's own route is 40 above it and its height 20, so a foreign route nearer
+  // than 60 is a shortfall: 59 charges one, 60 none.
   for (int32_t const gap : { 59, 60 }) {
     CAPTURE(gap);
     Routes lone{ routes_of(
@@ -2532,10 +2510,8 @@ TEST_CASE("cost: the indexed terms are the direct scans' at the edges") {
 }
 
 TEST_CASE("cost: a thread's kept buffers carry nothing from one chart to the next") {
-  // A, then B, then A again, all on this thread, each against the score a
-  // thread that never scored anything gives. The pairs are drawn at random, so
-  // B is sometimes the larger and sometimes the smaller and every buffer is
-  // both grown and shrunk between two calls.
+  // A, then B, then A on this thread, each against a fresh thread's score; the random
+  // pairs grow and shrink every buffer between calls.
   auto const fresh =
       [](Chart const &c, SplitGraph const &g, Candidate const &k, scav_profile const &p) {
         CostTerms out;
@@ -2576,9 +2552,7 @@ TEST_CASE("cost: a thread's kept buffers carry nothing from one chart to the nex
 }
 
 TEST_CASE("cost: a context built once scores every candidate as one built for it") {
-  // One chart, one context, many candidates: the context is read-only across
-  // all of them, so each score matches one taken through a context built
-  // fresh, and the context itself comes out as it went in.
+  // The context also comes out as it went in.
   Lattice r{ 7 };
   for (uint32_t trial = 0; trial < 40; ++trial) {
     CAPTURE(trial);

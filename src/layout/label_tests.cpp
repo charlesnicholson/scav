@@ -1,7 +1,5 @@
-// Placement against hand-written geometry: a few rects and one polyline are
-// enough, since the candidates come from the route and nothing else. Then the
-// pruned and memoized searches against the exhaustive one, over seeded scenes
-// crowded enough that most candidates are refused.
+// Placement against hand-written geometry, then the pruned and memoized searches against
+// the exhaustive one over seeded, crowded scenes.
 
 #include "layout/label.h"
 #include "layout/tests/pod_eq.h"
@@ -21,9 +19,7 @@
 
 namespace scav {
 
-// The placement with its search switchable, which `label.cpp` brackets with
-// SCAV_INTERNAL so these tests can hold the pruned and memoized searches to
-// the exhaustive one.
+// The placement with its search selectable, internal to `label.cpp`.
 uint32_t place_labels_by(Chart const &c,
                          SizedLayout const &z,
                          scav_spaces const &s,
@@ -37,10 +33,7 @@ uint32_t place_labels_by(Chart const &c,
 
 namespace {
 
-// A profile scaled to these tests' geometry rather than a shipped one: the
-// only field `place_labels` reads is `font_size_grid`, and 20 makes the leader
-// 10, half the height of the 20-unit boxes below. At `readable`'s 192 the
-// leader alone would be a third of the 600 by 400 chart.
+// A profile scaled to these tests' geometry: `font_size_grid` 20 gives a leader of 10.
 scav_profile tiny() {
   scav_profile out{};
   out.font_size_grid = 20;
@@ -195,9 +188,8 @@ TEST_CASE("label: a box sits beside its route's longest horizontal leg") {
 
 namespace {
 
-// `L` beside a composite `R` holding `T`, one transition `L -> R/T`, and
-// `strangers` after them in the root: the route's first legs lie in the root,
-// which is the lowest submachine holding both ends, and its last inside `R`.
+// `L` beside a composite `R` holding `T`, one transition `L -> R/T`, and `strangers` in
+// the root: the route's first legs lie in the root and its last inside `R`.
 struct Crossing {
   Chart c;
   StateId l, r, t;
@@ -222,10 +214,8 @@ constexpr std::array SEARCHES{ LabelSearch::Exhaustive,
 }  // namespace
 
 TEST_CASE("label: an out-of-machine box is anchored on the leg the root holds") {
-  // The leg inside `R` is the route's longest, and the anchor is the middle of
-  // the longest leg, so an anchor taken over every leg sits inside `R`: the
-  // box, refused `R`, went to the end of the root's leg nearest it, flush
-  // against `R`'s border. Over the root's legs alone it is centred there.
+  // The leg inside `R` is the route's longest; the anchor, taken over the root's legs
+  // alone, centres the box on the root's leg.
   Crossing x;
   crossing(x, 0);
   SizedLayout z{ blank(x.c, { .x = 0, .y = -200, .w = 2000, .h = 600 }) };
@@ -256,10 +246,8 @@ TEST_CASE("label: an out-of-machine box is anchored on the leg the root holds") 
 }
 
 TEST_CASE("label: the fallback keeps an out-of-machine box out of the state it enters") {
-  // The root's leg runs just under `R`, with a stranger just under it, so no
-  // candidate is clear and the fallback tier chooses. Its first choice, the box
-  // above the leg, lies inside `R`, which holds only one end; below it, over
-  // the stranger, the box is in the root, which holds both.
+  // The root's leg runs between `R` and a stranger, so no candidate is clear and the
+  // fallback tier chooses; above the leg lies `R`, below it the stranger in the root.
   Crossing x;
   crossing(x, 1);
   StateId const s{ 3 };
@@ -371,9 +359,8 @@ TEST_CASE("label: a box takes the side clear of another transition's route") {
 }
 
 TEST_CASE("label: another route's leg counts wherever along that route it lies") {
-  // The stranger's first leg runs beside the box's and its last lies out of
-  // the box's reach, so a route passed over by where it ends would leave the
-  // box on the side the first leg strikes through.
+  // The stranger's first leg runs beside the box's and its last lies out of the box's
+  // reach.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -1123,20 +1110,14 @@ TEST_CASE("label: two thousand boxes place, and quickly") {
 
 namespace {
 
-// A small deterministic generator, as geom_tests has: the property is over
-// many shapes, and a test that reads different numbers each run finds nothing
-// twice.
+// A deterministic LCG, as in geom_tests.
 uint32_t next(uint64_t &state) {
   state = (state * 6364136223846793005ULL) + 1442695040888963407ULL;
   return static_cast<uint32_t>(state >> 33U);
 }
 
-// A seeded chart laid out by hand: composites of one or two regions holding
-// states, with bands, plain states around them, orthogonal routes with the odd
-// diagonal, degenerate, lone-point or missing one, and up to three label boxes
-// a transition, some of no width or no height. `crowd` 0 is sparse and 2 packs
-// it all into a canvas a few labels wide, where most candidates are refused
-// and some boxes find nothing clear.
+// A seeded hand-laid scene: banded composites of one or two regions, plain states, mixed
+// routes and up to three boxes a transition. `crowd` 2 refuses most candidates.
 struct Scene {
   Chart c;
   SizedLayout z;
@@ -1235,7 +1216,7 @@ Scene scene_of(uint64_t seed, uint32_t crowd) {
       z.state[s.v] = rect_in(z.sub[parent.v], 500, 300);
     }
   }
-  // A tombstoned state keeps its rect, which must stop mattering.
+  // A tombstoned state keeps its rect.
   if (pick(5) == 0) { c.states[all[pick(static_cast<uint32_t>(all.size()))].v].live = 0; }
 
   std::vector<std::vector<scav_point>> polys;
@@ -1283,7 +1264,7 @@ Scene scene_of(uint64_t seed, uint32_t crowd) {
     out.boxes.push_back(
         { .subject = static_cast<uint32_t>(polys.size()), .w = 60, .h = 20, .order = 0 });
   }
-  // Rows out of placement order, which the placer sorts back.
+  // Rows out of placement order.
   for (uint32_t i = 1; i < out.boxes.size(); ++i) {
     uint32_t const j{ pick(i + 1) };
     scav_path_box const swap{ out.boxes[i] };
@@ -1293,8 +1274,7 @@ Scene scene_of(uint64_t seed, uint32_t crowd) {
   return out;
 }
 
-// Every coordinate of a scene moved by one offset, which no placement's
-// answer may depend on beyond moving with it.
+// Every coordinate of a scene moved by one offset.
 Scene translated(Scene const &sc, int32_t dx, int32_t dy) {
   Scene out{ sc };
   auto const move = [dx, dy](scav_rect &r) {
@@ -1335,8 +1315,7 @@ bool same(Placed const &a, Placed const &b) {
   return (a.fell == b.fell) && same_rows(a.at, b.at);
 }
 
-// Whether a placed box overlaps a leg of another transition's route, which
-// only a box that found no clear candidate does.
+// Whether a placed box overlaps a leg of another transition's route.
 bool over_foreign(Scene const &sc, Placed const &got) {
   for (uint32_t i = 0; i < sc.boxes.size(); ++i) {
     for (uint32_t t = 0; t < sc.l.route.size(); ++t) {
@@ -1360,11 +1339,7 @@ constexpr uint32_t CROWDS{ 3 };
 
 TEST_CASE(
     "label: the pruned and memoized searches place every box as the exhaustive one") {
-  // The exhaustive search is the placement as 11.9.4 states it, every
-  // candidate keyed and tested; the pruned one reorders and skips, and the
-  // memoized one remembers, and neither may change a single rect or the
-  // fallback count. The memoized search runs twice, so the second answers
-  // from the table the first filled.
+  // The memoized search runs twice, so the second answers from the table the first filled.
   uint32_t fell{ 0 };
   uint32_t refused{ 0 };
   uint32_t boxes{ 0 };
@@ -1388,16 +1363,13 @@ TEST_CASE(
           " fell back, ",
           refused,
           " scenes with a box over a foreign leg");
-  // The scenes reach every tier: boxes that found no candidate at all, and
-  // boxes whose only candidates collided.
+  // The scenes reach both the centred fallback and the colliding tier.
   CHECK(fell > 0);
   CHECK(refused > 0);
 }
 
 TEST_CASE("label: the searches agree on boxes of no width and of no height") {
-  // The region a box can reach is where the pruned search cuts its rects
-  // down, and a box of no extent can sit on that region's edge, so it is
-  // placed from the rects as they are.
+  // A box of no extent can sit on the edge of the region the pruned search clips to.
   std::vector<scav_point> const leg{ { .x = 100, .y = 150 }, { .x = 400, .y = 150 } };
   scav_rect const wall{ .x = 180, .y = 40, .w = 80, .h = 220 };
   for (scav_path_box const box :
@@ -1435,9 +1407,8 @@ TEST_CASE("label: the searches agree on boxes of no width and of no height") {
 
 TEST_CASE(
     "label: the searches agree where the step divides the leg and where it does not") {
-  // The last slide is clamped to the leg's far end, so a leg a whole number of
-  // steps long visits its end twice and one that is not visits it once; a leg
-  // shorter than a step has only its two ends.
+  // The last slide is clamped to the leg's far end, which a leg a whole number of steps
+  // long visits twice; a leg shorter than a step has only its two ends.
   for (int32_t const length : { 300, 295, 7, 0 }) {
     for (int32_t const offset : { -35, 0, 35 }) {
       CAPTURE(length);
@@ -1484,12 +1455,8 @@ TEST_CASE(
 }
 
 TEST_CASE("label memo: a remembered box is the box its inputs place") {
-  // Each variant changes one input a box's key has to cover, after the memo
-  // has placed the scene as it was: a key missing that input hands back the
-  // box as it was placed before. The uncached pruned search is the answer
-  // each has to match, and each variant has to move some box, so each is a
-  // case the key had to tell apart. The last two change nothing a box can
-  // see except by moving with it, which the key must not tell apart.
+  // Each variant changes one input the key must cover, after the memo placed the base; the
+  // last two change nothing a box sees except by moving with it.
   constexpr uint32_t VARIANTS{ 11 };
   std::array<uint32_t, VARIANTS> moved{};
   for (uint32_t crowd = 0; crowd < CROWDS; ++crowd) {
@@ -1503,8 +1470,7 @@ TEST_CASE("label memo: a remembered box is the box its inputs place") {
       for (scav_path_box &b : variants[0].boxes) { b.w += 37; }
       for (scav_path_box &b : variants[1].boxes) { b.h += 23; }
       variants[2].p.font_size_grid += 30;
-      // One point of each route moved, which changes the route's own shape
-      // as the first point, which the key is relative to, stays.
+      // Each route's second point moved: its shape changes and its origin stays.
       for (scav_span const r : variants[3].l.route) {
         if (r.len >= 2) { variants[3].l.points[r.off + 1].y += 25; }
       }
@@ -1515,7 +1481,7 @@ TEST_CASE("label memo: a remembered box is the box its inputs place") {
           variants[4].z.state[st].y -= 17;
         }
       }
-      // The bands of every composite, which a box inside it may not cover.
+      // The bands of every composite.
       for (scav_rect &band : variants[5].z.before) {
         band.y += 19;
         band.h += 7;
@@ -1540,8 +1506,8 @@ TEST_CASE("label memo: a remembered box is the box its inputs place") {
           variants[7].l.points[r.off + k].y += 29;
         }
       }
-      // A transition's first box resized, which moves where it settles and so
-      // the walls and the slide its later boxes start from.
+      // A transition's first box resized, which moves the walls and slide its later boxes
+      // see.
       for (scav_path_box &b : variants[8].boxes) {
         if (b.order == 0) { b.w += 51; }
       }
@@ -1570,9 +1536,7 @@ TEST_CASE("label memo: a remembered box is the box its inputs place") {
 
 namespace {
 
-// `sc` with some routes moved and the rest as they were, which is what a face
-// move does to the drawing labels are placed over: a route translated, one
-// given another leg, and on some seeds none moved at all.
+// `sc` with up to two routes translated or extended by a leg.
 Scene with_routes_moved(Scene const &sc, uint64_t seed) {
   uint64_t state{ seed };
   auto const pick = [&state](uint32_t n) { return next(state) % n; };
@@ -1625,10 +1589,8 @@ Settled settled_over(Scene const &sc, LabelBase const *was) {
 }  // namespace
 
 TEST_CASE("label: a placement kept from a base is the placement made afresh") {
-  // Each box the base keeps is one whose problem nothing changed, so placing
-  // over the moved routes with the base must give every rect, every settle
-  // and the fallback count that placing afresh does. Both kinds of box occur:
-  // ones that stay where they were and ones a moved route sends elsewhere.
+  // Both kinds of box occur: ones that stay where they were and ones a moved route sends
+  // elsewhere.
   uint32_t stayed{ 0 };
   uint32_t went{ 0 };
   for (uint32_t crowd = 0; crowd < CROWDS; ++crowd) {

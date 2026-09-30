@@ -1,7 +1,5 @@
-// A composite whose frame runs across, entered from a state above one of its
-// children. A port sat only on the border its frame's ranks start or end at, so
-// the route came down beside the composite and in through its far side; on the
-// border facing the source, it is one straight line down to the child.
+// A composite whose frame runs across, entered from a state above a child: the
+// port sits on the border facing the source, one straight line down to the child.
 chart above "a composite entered from above" {
   state Source,
   state Box {

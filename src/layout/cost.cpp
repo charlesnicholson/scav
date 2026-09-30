@@ -52,8 +52,7 @@ namespace {
 // children shares cells rather than growing one.
 constexpr uint32_t GRID_SIDE_MAX{ 64 };
 
-// A frame of at most this many children is scanned rather than queried, and
-// its grid has no cells.
+// A frame of at most this many children is scanned and has no grid cells.
 constexpr uint32_t SCAN_MAX{ 16 };
 
 Wide orient2d(scav_point a, scav_point b, scav_point c) {
@@ -94,8 +93,6 @@ bool adjacent(scav_rect const &a, scav_rect const &b, int32_t sep) {
   return (y_over && (x_gap <= sep)) || (x_over && (y_gap <= sep));
 }
 
-// An axis-aligned leg's length is the one delta that is not zero, which is
-// what the root of its square comes to.
 Wide length_of(scav_point a, scav_point b) {
   Wide const dx{ Wide{ b.x } - a.x };
   Wide const dy{ Wide{ b.y } - a.y };
@@ -205,8 +202,7 @@ bool geometry_complete(Chart const &c, SizedLayout const &z, Routes const &r) {
   return true;
 }
 
-// A piece that lies along a line: `axis` and `at` as `piece_axis` gives them,
-// and its extent along that line.
+// A piece along a line: `axis` and `at` as `piece_axis` gives them, and its extent.
 struct Lane {
   uint32_t axis;
   int32_t at;
@@ -214,10 +210,8 @@ struct Lane {
   uint32_t piece;
 };
 
-// Ascending, least significant byte first, each pass a counting scatter into
-// `spare` and back. A byte every key holds the same value in leaves the order
-// as it was, so its pass is skipped. The keys are distinct, so this is the one
-// order any sort gives them.
+// Ascending LSD radix sort, one counting scatter per byte through `spare`; a byte
+// every key shares skips its pass. The keys are distinct, so the order is unique.
 void sort_keys(std::vector<uint64_t> &key, std::vector<uint64_t> &spare) {
   size_t const n{ key.size() };
   if (n <= SCAV_SORT_SMALL) {
@@ -253,14 +247,8 @@ void sort_keys(std::vector<uint64_t> &key, std::vector<uint64_t> &spare) {
   if (src != key.data()) { std::memcpy(key.data(), src, n * sizeof(uint64_t)); }
 }
 
-// Every piece with an axis, stably sorted by (axis, coordinate) over piece
-// order. The horizontals come first in ascending y, which is the band
-// `crossings_over` searches; a run of one (axis, coordinate) is corridor's
-// bucket; and the lanes within an em of one another are crowding's window.
-//
-// Sorted as one integer per lane: the axis, then the coordinate offset to
-// unsigned, then the piece, so ties fall in piece order. `key` and `spare`
-// are the sort's buffers.
+// Every axial piece, horizontals first, sorted by (axis, coordinate, piece) packed
+// into one integer each. `key` and `spare` are the sort's buffers.
 void lanes_of(std::vector<Piece> const &pieces,
               std::vector<uint64_t> &key,
               std::vector<uint64_t> &spare,
@@ -290,7 +278,6 @@ void lanes_of(std::vector<Piece> const &pieces,
   }
 }
 
-// `lanes_of` into buffers of its own, for the sweeps' single-sort forms.
 [[maybe_unused]] std::vector<Lane> lanes_of(std::vector<Piece> const &pieces) {
   std::vector<uint64_t> key;
   std::vector<uint64_t> spare;
@@ -299,10 +286,8 @@ void lanes_of(std::vector<Piece> const &pieces,
   return lanes;
 }
 
-// Two axis-parallel segments are collinear or never meet, so neither pair of
-// horizontals nor pair of verticals can cross: the sweep is each vertical
-// against the band of horizontals whose y lies strictly inside its span. A
-// degraded net's diagonal is in neither set and goes against everything.
+// Each vertical against the band of horizontals strictly inside its span; a diagonal goes
+// against everything.
 int64_t crossings_over(std::vector<Piece> const &pieces,
                        std::vector<Lane> const &lanes,
                        std::vector<uint32_t> &per_trans,
@@ -333,10 +318,8 @@ int64_t crossings_over(std::vector<Piece> const &pieces,
         high = mid;
       }
     }
-    // Inside the band the horizontal's y is strictly within the vertical's
-    // span, so of `crosses`' four orientations only the two about the vertical
-    // are left, and those are the vertical's x strictly inside the
-    // horizontal's extent.
+    // Inside the band the y test already holds, so `crosses` reduces to the
+    // vertical's x lying strictly inside the horizontal's extent.
     for (uint32_t at = low; (at < flat) && (lanes[at].at < lv.hi); ++at) {
       Lane const &lh{ lanes[at] };
       if (pieces[lh.piece].trans == pieces[lv.piece].trans) { continue; }
@@ -357,10 +340,8 @@ int64_t crossings_over(std::vector<Piece> const &pieces,
   return total;
 }
 
-// Corridor is the length one pair shares along one line, so a run three nets
-// lie on is charged over its three pairs. A shared run implies collinearity,
-// so the pairs are taken inside a bucket keyed by the line's axis and
-// coordinate. Two routes fanning into one trunk are not that run.
+// The length each pair shares on one line, per `(axis, coordinate)` bucket, less the
+// trunks.
 Wide corridor_over(Routes const &r,
                    std::vector<Piece> const &pieces,
                    std::vector<Lane> const &lanes) {
@@ -391,12 +372,8 @@ Wide corridor_over(Routes const &r,
   return total;
 }
 
-// Crowding is `corridor`'s near neighbour: two segments of different
-// transitions on one axis, overlapping along it, closer than an em but not on
-// one line. Each pair is charged its overlap scaled by the shortfall, summed
-// before the one division so no pair's charge is truncated away (11.6).
-//
-// The lanes within an em of one another are a window of the sort.
+// Each pair of lanes of different transitions on one axis, overlapping and under an em
+// apart but not collinear: overlap times shortfall, summed, then divided once by `em`.
 Wide crowding_over(std::vector<Piece> const &pieces,
                    std::vector<Lane> const &lanes,
                    int32_t em) {
@@ -420,11 +397,8 @@ Wide crowding_over(std::vector<Piece> const &pieces,
   return scaled / em;
 }
 
-// Everything of the child grid but where its cells lie: each frame's live
-// children in span order, and for a frame of more than `scan_max` of them the
-// side their count fixes and where its cells start. Any other frame has no
-// cells, and no query may be put to it. A child past `known` has no rect and
-// is left out.
+// The child grid without cell bounds: each frame's live children below `known` in span
+// order, and cells only for a frame of more than `scan_max`; no other frame is queried.
 void child_grid_frames(Chart const &c, size_t known, uint32_t scan_max, ChildGrid &g) {
   g.frame.assign(c.submachines.size(), ChildGrid::Frame{});
   g.child.clear();
@@ -450,16 +424,13 @@ void child_grid_frames(Chart const &c, size_t known, uint32_t scan_max, ChildGri
   g.bucket_at.clear();
 }
 
-// Each child's rect in `z`, in `g.child` order, so a frame's children are one
-// run of rects.
 void child_rects(ChildGrid const &g, SizedLayout const &z, std::vector<scav_rect> &kid) {
   kid.resize(g.child.size());
   for (size_t i = 0; i < g.child.size(); ++i) { kid[i] = z.state[g.child[i]]; }
 }
 
-// Each frame's cells laid over its children's bounds, `kid` holding their
-// rects as `child_rects` gives them, and the children bucketed into them.
-// `cursor` is the placing pass's buffer.
+// Lays each gridded frame's cells over its children's bounds and buckets the children;
+// `kid` is `child_rects`' output and `cursor` the placing pass's buffer.
 void child_grid_fill(ChildGrid &g,
                      std::vector<scav_rect> const &kid,
                      std::vector<uint32_t> &cursor) {
@@ -526,10 +497,8 @@ bool within(Chart const &c, StateId state, uint32_t m) {
   return false;
 }
 
-// Whether bend `at` of `tr` lies in a state its route only passes through.
-// Each end with a `top` is walked up to it, innermost first, and the first
-// state strictly holding the bend decides: the end or the state enclosing it
-// is that end's own machine, anything above is passed through.
+// Whether bend `at` lies in a state `tr` only passes through. Each end climbs to `top`;
+// the first state holding `at` is transit unless it is the end or its enclosing state.
 bool in_transit(Chart const &c,
                 SizedLayout const &z,
                 Transition const &tr,
@@ -552,15 +521,13 @@ bool in_transit(Chart const &c,
   return false;
 }
 
-// Marks an item the running query already visited, so a rect covering several
-// cells is visited once.
+// Per-query visit stamps, so an item over several cells is visited once.
 struct Seen {
   std::vector<uint32_t> stamp;  // parallel to the rects the grid was built over
   uint32_t epoch{ 0 };
 };
 
-// `grid_build`'s grid, placing through `cursor` rather than a buffer of its
-// own, so a grid rebuilt over a kept one allocates nothing.
+// `grid_build` into kept storage, placing through the caller's `cursor`.
 void grid_build_into(RectGrid &g,
                      scav_rect const &region,
                      std::vector<scav_rect> const &rects,
@@ -623,8 +590,8 @@ void grid_over(RectGrid &g,
                   cursor);
 }
 
-// Whether `hit` holds for any rect sharing a cell with `q`, asking each cell's
-// rects in turn; a rect over several cells may be asked more than once.
+// Whether `hit` holds for any rect sharing a cell with `q`; a rect over several
+// cells may be asked more than once.
 template <typename Hit>
 bool grid_any(RectGrid const &g, scav_rect const &q, Hit hit) {
   uint32_t const c0{ grid_cell(q.x, g.x0, g.cw, g.nx) };
@@ -642,9 +609,8 @@ bool grid_any(RectGrid const &g, scav_rect const &q, Hit hit) {
   return false;
 }
 
-// Every rect sharing a cell with `q` grown by `margin` on each side, once
-// each. The cells come from inclusive ranges, so a rect whose closed extent
-// comes within `margin` of `q`'s is among them.
+// Visits once each rect sharing a cell with `q` grown by `margin`, which includes
+// every rect whose closed extent comes within `margin` of `q`'s.
 template <typename Visit>
 void grid_each(RectGrid const &g,
                scav_rect const &q,
@@ -669,8 +635,7 @@ void grid_each(RectGrid const &g,
   }
 }
 
-// `cost_box_overlaps` over `kid`, the frame children's rects as
-// `child_rects` gives them, with `q` the grid queries' buffer.
+// `cost_box_overlaps` over `kid` from `child_rects`, with `q` the query buffer.
 int32_t box_overlaps_over(Chart const &c,
                           ChildGrid const &g,
                           std::vector<scav_rect> const &kid,
@@ -761,10 +726,8 @@ int32_t through_boxes_over(Chart const &c,
   return total;
 }
 
-// Every buffer one `cost_terms` call uses, kept per thread and reassigned in
-// place, so a call allocates only where a chart outgrows the last one this
-// thread scored. Nothing `cost_terms` calls runs a `parallel_for`, so no
-// second call can start on this thread while one is using it.
+// Every buffer one `cost_terms` call uses, per thread and reassigned in place.
+// Nothing `cost_terms` calls waits on the pool, so no second call starts on this thread.
 struct Scratch {
   std::vector<Piece> pieces;
   std::vector<uint32_t> first, crossings_of;
@@ -791,7 +754,6 @@ Scratch &scratch() {
   return s;
 }
 
-// `seen` ready for queries over `n` rects, no stamp at its epoch.
 void seen_reset(Seen &seen, size_t n) {
   seen.stamp.assign(n, 0);
   seen.epoch = 0;
@@ -865,9 +827,7 @@ bool cost_ancestor(Chart const &c, Ancestry const &an, StateId ancestor, StateId
   return (an.tin[ancestor.v] <= an.tin[of.v]) && (an.tout[of.v] <= an.tout[ancestor.v]);
 }
 
-// Only a test calls this, the two Tier-0 counts and the three sweeps'
-// single-sort forms below, so a build without one has no caller of any of
-// them.
+// This and every `[[maybe_unused]]` entry below are called only by tests.
 [[maybe_unused]] ChildGrid cost_child_grid(Chart const &c, SizedLayout const &z) {
   ChildGrid g;
   child_grid_frames(c, z.state.size(), 0, g);
@@ -931,8 +891,7 @@ void cost_grid_query(ChildGrid const &g,
   return through_boxes_over(c, z, an, g, kid, pieces, d);
 }
 
-// Each of the three sweeps over a sort of its own, so a test can hand one a
-// list of pieces; `cost_terms` sorts once and runs all three over that.
+// Each sweep over a sort of its own; `cost_terms` sorts once and runs all three.
 [[maybe_unused]] int64_t cost_crossings(std::vector<Piece> const &pieces,
                                         std::vector<uint32_t> &per_trans) {
   std::vector<uint8_t> is_loose;
@@ -969,11 +928,8 @@ CostContext cost_context(Chart const &c) {
   return k;
 }
 
-// Each pairing of one kind against another -- pieces against states and
-// regions, placed boxes against boxes, states and pieces -- goes through a grid
-// over the second kind. A grid yields a superset of what can meet the query and
-// the term's own predicate decides each, so a count is the one a scan over
-// every pair makes.
+// Each pairing of two kinds is a grid over the second kind. The grid yields a superset
+// and each term's own predicate decides, so every count equals an all-pairs scan's.
 CostTerms cost_terms(CostContext const &ctx,
                      Chart const &c,
                      SplitGraph const &g,
@@ -987,9 +943,8 @@ CostTerms cost_terms(CostContext const &ctx,
   if (t.aspect < 0) { t.aspect = -t.aspect; }
   t.area = Wide{ z.chart.w } * z.chart.h;
 
-  // Every route segment once, with the transition it belongs to, so the
-  // sweeps below are over one flat list. A transition's pieces are contiguous,
-  // from `first[tr]` to `first[tr + 1]`.
+  // Every route segment once, tagged with its transition; transition `tr`'s pieces
+  // run from `first[tr]` to `first[tr + 1]`.
   Scratch &sc{ scratch() };
   std::vector<Piece> &pieces{ sc.pieces };
   pieces.clear();
@@ -1040,9 +995,8 @@ CostTerms cost_terms(CostContext const &ctx,
   t.corridor = corridor_over(r, pieces, lanes);
   t.crowding = crowding_over(pieces, lanes, p.font_size_grid);
 
-  // `min_len` is the direct distance between the endpoints, or the boxes the
-  // route has to carry if those are longer. `excess_len` is what a route runs
-  // past it, per crossing on the edge; `length` is the whole route, once.
+  // `excess_len` is what a route runs past the larger of its direct distance and its
+  // carried boxes, times one plus its crossings; `length` sums every route.
   std::vector<Wide> &carried{ sc.carried };
   carried.assign(c.transitions.size(), 0);
   if (s.path_box != nullptr) {
@@ -1084,16 +1038,8 @@ CostTerms cost_terms(CostContext const &ctx,
   RectGrid &states{ sc.states };
   grid_over(states, state_box, sc.cursor);
 
-  // Placed boxes against each other, against the states, and against the routes
-  // they do not belong to. A state enclosing an endpoint is the composite the
-  // label lives inside, so only the text bands it reserved are out of bounds.
-  //
-  // **The walk starts above the endpoint, not at it.** An endpoint encloses
-  // nothing, so the carve-out's own reason -- a label inside the composite its
-  // transition runs in is where it belongs, and charging it there makes zero
-  // unreachable -- does not reach it. Marking the endpoint exempted its whole
-  // rect and left `label` blind to a label lying over the very box it names:
-  // 3 of 203 on the corpus against 26 once the walk starts one level up.
+  // Placed boxes against each other, the states and foreign routes; a state enclosing both
+  // endpoints, walked from above them, bars only its text bands.
   if (!r.placed.empty()) {
     std::vector<scav_rect> &seg_box{ sc.seg_box };
     seg_box.clear();
@@ -1131,11 +1077,8 @@ CostTerms cost_terms(CostContext const &ctx,
           (s.path_box[i].subject < c.transitions.size())) {
         subject = s.path_box[i].subject;
         height = s.path_box[i].h;
-        // Both ends, not either: a state enclosing one endpoint does not have
-        // to hold the label -- the label belongs on the ancestral side of that
-        // crossing -- so only a state enclosing *both* is exempt from its own
-        // rect. `2` is the intersection; `1` is src's chain alone, which the
-        // reset below clears along with it (11.9.3).
+        // Only a state enclosing both ends is exempt from its own rect: `2` marks
+        // the intersection, `1` src's chain alone, and the reset below clears both.
         mark(c.transitions[subject].src, 1);
         StateId up{ enclosing_state(c, c.transitions[subject].dst) };
         for (size_t step = 0; (step < c.states.size()) && (up.v != INVALID); ++step) {
@@ -1146,8 +1089,7 @@ CostTerms cost_terms(CostContext const &ctx,
           up = enclosing_state(c, up);
         }
       }
-      // A state at 2 is charged for its bands wherever the box lies, and is
-      // left out of the grid's answer, which is the rest.
+      // The grid charges every state's rect but those at 2, which pay for their bands.
       grid_each(states, box, 0, seen_state, [&](uint32_t at) {
         uint32_t const st{ state_of[at] };
         if ((encloses[st] != 2) && overlaps(box, state_rect[at])) { ++t.label; }
@@ -1167,10 +1109,8 @@ CostTerms cost_terms(CostContext const &ctx,
           own = (own < 0) ? away : imin(own, away);
         }
       }
-      // Only a foreign leg nearer than `own + height` makes a shortfall, and
-      // every such leg's closed extent comes within `own + height - 1` of the
-      // box's, so that margin finds the nearest wherever it matters. With no
-      // own leg the margin is zero and finds the legs the box overlaps.
+      // A shortfall needs a foreign leg within `own + height - 1`, so that margin
+      // finds the nearest one that counts; with no own leg it is zero and finds overlaps.
       Wide const reach{ (own < 0) ? Wide{ 0 } : imax((own + height) - 1, Wide{ 0 }) };
       Wide other{ -1 };
       grid_each(segs, box, reach, seen_seg, [&](uint32_t j) {
@@ -1187,9 +1127,8 @@ CostTerms cost_terms(CostContext const &ctx,
     }
   }
 
-  // A direct arrow between two concurrent submachines wants them adjacent;
-  // fork and join fan-outs are excluded, because adjacency above two is not
-  // achievable and pricing an unsatisfiable constraint distorts the rest.
+  // A direct arrow between concurrent submachines wants them adjacent; fork and join fans
+  // are exempt.
   for (SplitSegment const &seg : g.segments) {
     if (seg.separator == 0) { continue; }
     Transition const &tr{ c.transitions[seg.trans.v] };
@@ -1216,8 +1155,8 @@ CostTerms cost_terms(CostContext const &ctx,
   t.box_overlap = box_overlaps_over(c, grid, sc.kid, sc.descent.q);
   t.through_box = through_boxes_over(c, z, ctx.an, grid, sc.kid, pieces, sc.descent);
 
-  // A diagonal runs along no border, and a leg that does lies within `near`
-  // of the state, so inside the grown rect the grid holds for it.
+  // A diagonal runs along no border; an axial leg along one lies within `near` of the
+  // state, so the grid of grown rects finds it.
   for (Piece const &piece : pieces) {
     if ((piece.a.y != piece.b.y) && (piece.a.x != piece.b.x)) { continue; }
     if (grid_any(states, span_rect(piece.a, piece.b), [&](uint32_t at) {
@@ -1296,11 +1235,8 @@ CostTerms cost_columns(Chart const &c,
 
 namespace {
 
-// Each term in the unit the profile already names it in, then weighted: counts
-// stay counts, lengths become ems of `font_size_grid`, area ems squared. The
-// division is ceiling, so a term nonzero in grid units is nonzero here (11.6),
-// and the em is floored at 1 because a profile the validator never saw could
-// carry a zero the bound [1, SPACE_MAX] forbids.
+// Each term in the profile's unit, then weighted: lengths in ems, area in ems squared, by
+// ceiling; the em is floored at 1.
 std::array<Wide, TIER2_TERMS> weighted_terms(CostTerms const &t, scav_profile const &p) {
   Wide const em{ imax(Wide{ p.font_size_grid }, Wide{ 1 }) };
   Wide const em2{ em * em };
