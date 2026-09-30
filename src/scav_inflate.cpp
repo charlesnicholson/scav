@@ -212,10 +212,8 @@ InflateStatus codes(Bits &b,
     scav_byte const *const from{ to - back };
     if (back >= length) {
       std::copy_n(from, length, to);
-    } else {
-      for (uint32_t i = 0; i < length; ++i) {
-        to[i] = from[i];
-      }  // overlap repeats the run
+    } else {  // overlapping, so a byte written here may be read again
+      for (uint32_t i = 0; i < length; ++i) { to[i] = from[i]; }
     }
     out_len += length;
   }

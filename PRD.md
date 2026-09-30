@@ -2317,7 +2317,7 @@ Editor commands do not cross the C boundary as objects; that layer's API is opco
 
 - **Generated, not hand-written.** ABI JSON (§16) → generated low-level layer, plus a thin hand-written idiomatic wrapper per language. The generated half never drifts.
 - **Prebuilt binaries**: macOS arm64/x86_64, Linux x86_64/aarch64 (manylinux), Windows x64, plus wasm. No compiler required to `pip install`.
-- **Self-contained**, because there are no runtime dependencies. The bundled font is **embedded in the library**, not loaded from a path — it is a layout-hash input and must travel with the code.
+- **Self-contained**, because there are no runtime dependencies. The bundled font is **embedded in the library**, not loaded from a path — it is a layout-hash input and must travel with the code. It is stored as a level-9 gzip member (128 KB for the 268 KB TTF) and inflated by scav's own decoder, `src/scav_inflate.h`, when metrics are created, so the bytes hashed and embedded are the TTF's own.
 
 **One hazard:** Python makes §8.1's integer purity easy to violate (`/` yields float), so setters reject non-integers and range-check, and space-computation helpers live in the shared library. Handle lifecycle was the other, and §16 now specifies it; the rules bind from **P3**, and each handle inherits them as it lands.
 

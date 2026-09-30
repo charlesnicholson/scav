@@ -31,7 +31,7 @@ std::vector<std::string> fields(std::string const &line) {
 
 int main(int argc, char **argv) {
   if (argc != 2) {
-    std::fputs("usage: scav_inflate_driver <manifest>\n", stderr);
+    (void)std::fputs("usage: scav_inflate_driver <manifest>\n", stderr);
     return 2;
   }
   std::ifstream manifest{ argv[1] };
@@ -40,7 +40,7 @@ int main(int argc, char **argv) {
     std::vector<std::string> const f{ fields(line) };
     std::vector<scav_byte> in;
     if ((f.size() != 4U) || !scav::read_file(f[2].c_str(), in)) {
-      std::fprintf(stderr, "bad manifest line: %s\n", line.c_str());
+      (void)std::fprintf(stderr, "bad manifest line: %s\n", line.c_str());
       return 2;
     }
     auto const cap{ static_cast<uint32_t>(std::stoul(f[1])) };
