@@ -139,6 +139,12 @@ scav_add_functional_test(selftest
           "$<TARGET_FILE:scav>"
   TARGETS scav
 )
+# The decoder against Python's zlib at every level and strategy.
+scav_add_functional_test(inflate
+  DEPENDS "${PROJECT_SOURCE_DIR}/assets/font/JetBrainsMono-Regular.ttf"
+          "$<TARGET_FILE:scav_inflate_driver>"
+  TARGETS scav_inflate_driver
+)
 scav_add_functional_test(deps
   DEPENDS "${PROJECT_SOURCE_DIR}/test_data/charts/vac.scav"
           "${PROJECT_SOURCE_DIR}/test_data/charts/dock.scav"

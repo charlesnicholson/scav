@@ -102,6 +102,11 @@ if(SCAV_BUILD_TESTS)
     ../scav_xxhash_tests.cpp
   )
   target_link_libraries(scav_core_tests PRIVATE scavcore_testable)
+
+  # Decodes reference-encoder streams for functional_tests/test_inflate.py.
+  add_executable(scav_inflate_driver ../scav_inflate_driver.cpp)
+  scav_settings(scav_inflate_driver)
+  target_link_libraries(scav_inflate_driver PRIVATE scavcore)
   # A harness reporting nothing looks identical to one where all is well.
   scav_expect_test_failure(scav_core_tests "*deliberate failure*")
 
