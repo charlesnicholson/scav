@@ -27,6 +27,35 @@ function(scav_settings target)
     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
   )
   target_compile_features(${target} PUBLIC cxx_std_20)
+  if(CMAKE_EXECUTABLE_FORMAT STREQUAL "ELF")
+    # One section per function and datum, which --gc-sections drops individually.
+    target_compile_options(${target} PRIVATE
+      "$<$<CONFIG:Release>:-ffunction-sections;-fdata-sections>")
+  endif()
+endfunction()
+
+# scav_optimize_for_size(<target>) -- on GCC and Clang front ends, Release compiles
+# <target> and a library's _testable twin at -Os, overriding the configuration's -O.
+function(scav_optimize_for_size target)
+  if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    return()
+  endif()
+  foreach(variant ${target} ${target}_testable)
+    if(TARGET ${variant})
+      target_compile_options(${variant} PRIVATE "$<$<CONFIG:Release>:-Os>")
+    endif()
+  endforeach()
+endfunction()
+
+# scav_dead_code_strip(<executable>) -- a Release link drops unreferenced code and,
+# on Mach-O, exports nothing. MSVC links Release with /OPT:REF,ICF by default.
+function(scav_dead_code_strip target)
+  if(CMAKE_EXECUTABLE_FORMAT STREQUAL "MACHO")
+    target_link_options(${target} PRIVATE
+      "$<$<CONFIG:Release>:LINKER:-dead_strip,-no_exported_symbols>")
+  elseif(CMAKE_EXECUTABLE_FORMAT STREQUAL "ELF")
+    target_link_options(${target} PRIVATE "$<$<CONFIG:Release>:LINKER:--gc-sections>")
+  endif()
 endfunction()
 
 # scav_static_library(<name> <source>...) -- two archives from one source list.

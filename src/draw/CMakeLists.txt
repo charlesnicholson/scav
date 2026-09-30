@@ -21,6 +21,7 @@ foreach(target scavdraw scavdraw_testable)
 endforeach()
 
 scav_install_library(scavdraw draw)
+scav_optimize_for_size(scavdraw)
 target_link_libraries(scavdraw PUBLIC scavcore)
 target_link_libraries(scavdraw_testable PUBLIC scavcore_testable)
 

@@ -26,6 +26,7 @@ scav_static_library(scavcore
   model/validate.cpp
 )
 scav_install_library(scavcore core)
+scav_optimize_for_size(scavcore)
 
 # The redistributable: one shared object, with the static archives a build-time
 # decomposition. Each later library contributes its own c_api.cpp.

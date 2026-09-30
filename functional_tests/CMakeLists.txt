@@ -63,9 +63,10 @@ endforeach()
 
 scav_add_functional_test(install_consumer
   DEPENDS ${scav_installed_files}
+          "$<TARGET_FILE:scav>"
           "${CMAKE_CURRENT_SOURCE_DIR}/consumer/CMakeLists.txt"
           "${CMAKE_CURRENT_SOURCE_DIR}/consumer/main.cpp"
-  TARGETS ${scav_all_libraries} ${scav_all_test_exes}
+  TARGETS ${scav_all_libraries} ${scav_all_test_exes} scav
 )
 scav_add_functional_test(dump
   DEPENDS ${scav_corpus_charts}

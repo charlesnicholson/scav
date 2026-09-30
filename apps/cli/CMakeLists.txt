@@ -99,3 +99,8 @@ target_include_directories(scav PRIVATE
 # core PUBLIC. Naming an archive that also arrives transitively repeats it on the
 # link line.
 target_link_libraries(scav PRIVATE scavlayout scavsvg)
+scav_optimize_for_size(scav)
+scav_dead_code_strip(scav)
+
+# The build tree keeps its symbols; `cmake --install --strip` removes them.
+install(TARGETS scav RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
