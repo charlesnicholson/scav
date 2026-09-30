@@ -67,7 +67,7 @@ struct CostContext {
   Ancestry an;
   ChildGrid grid;  // no cell holds a child yet; a candidate fills a per-thread copy
   // Per transition, src end then dst: the lowest common ancestor's child on that end's
-  // chain where a state lies between it and the end's enclosing state, else INVALID.
+  // chain where it lies strictly above the end's enclosing state, else INVALID.
   std::vector<std::array<uint32_t, 2>> transit_top;
 };
 

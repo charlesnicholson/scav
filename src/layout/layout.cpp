@@ -191,7 +191,7 @@ static_assert(sizeof(scav_profile) == 52 * sizeof(int32_t),
 uint32_t inputs_digest(scav_spaces const &s, scav_layout_opts const &o) {
   std::vector<scav_byte> b;
   // Padding is what forbids hashing a struct's bytes, and the assert above
-  // proves there is none, so the copy reads all 49 knobs and nothing else.
+  // proves there is none, so the copy reads every knob and nothing else.
   std::array<int32_t, sizeof(scav_profile) / sizeof(int32_t)> profile{};
   std::memcpy(profile.data(), &o.profile, sizeof(scav_profile));
   for (int32_t const field : profile) { append_i32(b, field); }
