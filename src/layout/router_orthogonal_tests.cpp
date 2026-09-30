@@ -1038,6 +1038,20 @@ TEST_CASE("ortho: a departure on a port's level seat takes the whole step") {
   CHECK((at[2] == pt(1000, 300)));
 }
 
+TEST_CASE("ortho: a step past the face's corner off a port's level seat goes the other way") {
+  // The shared point is the left face's last seat, so the departure's own direction
+  // clamps back onto it.
+  std::vector<scav_rect> const boxes{ rect(1000, 0, 400, 400) };
+  std::vector<RouteNet> const nets{
+    { .src = pt(-500, 392), .dst = pt(1200, 200), .dst_obstacle = 0 },
+    { .src = pt(1200, 200), .dst = pt(-500, 900), .src_obstacle = 0 },
+  };
+  std::vector<scav_point> at{ pt(-500, 392), pt(1000, 392), pt(1000, 392), pt(-500, 900) };
+  ortho_spread_attachments(nets, boxes, {}, {}, 8, 100, at);
+  CHECK((at[1] == pt(1000, 392)));
+  CHECK((at[2] == pt(1000, 292)));
+}
+
 TEST_CASE("ortho: a port's level leg stays and the leg beside it takes the shortfall") {
   // A port's leg into one box and a leg between two others passing a hair under
   // it. The port end is seated on its aim, so its leg runs to its box's centre.

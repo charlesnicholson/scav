@@ -511,7 +511,8 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
   };
 
   // One sweep of the face: seats on one point part by direction. At a `level` seat,
-  // its direction stays put, bar seats aimed at a glyph, and the rest move a whole step.
+  // its direction stays put, bar seats aimed at a glyph, and the rest move a whole step,
+  // the other way where a corner holds them.
   auto const sweep = [&]() {
     for (Seat &seat : seats) {
       seat.pos = (seat.face < 2) ? at[seat.slot].y : at[seat.slot].x;
@@ -561,8 +562,11 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
         bool const forward{ (seat.end == 0) == ((seat.face == 1) || (seat.face == 3)) };
         int32_t const down_by{ (keep == INVALID) ? (step / 2) : step };
         int32_t const up_by{ (keep == INVALID) ? (step - (step / 2)) : step };
-        int32_t const want{ seat.pos + (forward ? -down_by : up_by) };
-        int32_t const got{ onto_face(want, lo, len, clear, arc(seat.box)) };
+        int32_t const by{ forward ? -down_by : up_by };
+        int32_t got{ onto_face(seat.pos + by, lo, len, clear, arc(seat.box)) };
+        if ((keep != INVALID) && (got == seat.pos)) {  // a corner holds it: the other way
+          got = onto_face(seat.pos - by, lo, len, clear, arc(seat.box));
+        }
         int32_t &held{ along_y ? at[seat.slot].y : at[seat.slot].x };
         if (held == got) { continue; }
         held = got;
