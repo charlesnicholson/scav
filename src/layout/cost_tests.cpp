@@ -2382,7 +2382,11 @@ TEST_CASE("cost: the indexed terms are the direct scans' over seeded random char
       Candidate const k{ shifted(random_candidate(c, r), MOVE[cand]) };
       scav_profile const p{ random_profile(r) };
       scav_spaces const s{ k.spaces() };
-      long_sorts += (pieces_of(k.r).size() > SCAV_SORT_SMALL) ? 1U : 0U;
+      uint32_t keys{ 0 };  // the lane sort's: one per axis-aligned piece of nonzero length
+      for (Piece const &pc : pieces_of(k.r)) {
+        keys += ((pc.a.x == pc.b.x) != (pc.a.y == pc.b.y)) ? 1U : 0U;
+      }
+      long_sorts += (keys > SCAV_SORT_SMALL) ? 1U : 0U;
       CostTerms const want{ reference::terms(c, g, k.z, k.r, s, p) };
       std::string const held{ first_difference(cost_terms(ctx, c, g, k.z, k.r, s, p),
                                                want) };

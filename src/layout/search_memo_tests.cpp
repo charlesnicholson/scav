@@ -118,9 +118,10 @@ TEST_CASE("search memo: the key tells apart every input a search is a function o
   base.seed.ranks.push_back({ .state = StateId{ 3 }, .rank = 1 });
   base.seed.ranks.push_back({ .state = StateId{ 5 }, .rank = 2 });
   base.seed.faces.push_back({ .trans = TransId{ 2 }, .leg = 0, .end = 1, .face = 3 });
+  base.seed.sides.push_back({ .trans = TransId{ 2 }, .leg = 0, .end = 0, .side = 1 });
   base.scope.assign(4, 0);
 
-  std::vector<Inputs> variants(16, base);
+  std::vector<Inputs> variants(18, base);
   variants[0].objective.node_sep += 1;
   variants[1].knobs.node_sep += 1;
   variants[2].dar = DarSource::OwnerHole;
@@ -140,6 +141,9 @@ TEST_CASE("search memo: the key tells apart every input a search is a function o
   variants[14].scoped = true;
   variants[14].scope[3] = 1;
   variants[15].seed.ranks.pop_back();
+  variants[16].seed.sides.push_back(
+      { .trans = TransId{ 1 }, .leg = 0, .end = 1, .side = 0 });
+  variants[17].seed.sides[0].side = 2;
 
   std::vector<std::vector<uint32_t>> keys{ key_of(base) };
   for (Inputs const &v : variants) { keys.push_back(key_of(v)); }

@@ -29,6 +29,8 @@ uint32_t place_labels_by(Chart const &c,
                          LabelSearch search,
                          std::vector<scav_rect> &out);
 
+uint64_t label_test_kept();  // boxes the calling thread has kept from a base
+
 }  // namespace scav
 
 namespace {
@@ -1593,6 +1595,7 @@ TEST_CASE("label: a placement kept from a base is the placement made afresh") {
   // elsewhere.
   uint32_t stayed{ 0 };
   uint32_t went{ 0 };
+  uint64_t const kept_before{ label_test_kept() };
   for (uint32_t crowd = 0; crowd < CROWDS; ++crowd) {
     for (uint32_t seed = 1; seed <= SEEDS; ++seed) {
       CAPTURE(crowd);
@@ -1625,4 +1628,5 @@ TEST_CASE("label: a placement kept from a base is the placement made afresh") {
   }
   CHECK(stayed > 0);
   CHECK(went > 0);
+  CHECK(label_test_kept() > kept_before);
 }

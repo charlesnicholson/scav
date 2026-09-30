@@ -13,6 +13,7 @@
 
 #include "doctest.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <string>
@@ -274,7 +275,7 @@ TEST_CASE("order memo: a remembered frame is the frame those inputs order to") {
 
 TEST_CASE("size memo: a remembered frame is the layout those inputs size to") {
   scav_profile const p{ readable() };
-  constexpr uint32_t VARIANTS{ 13 };
+  constexpr uint32_t VARIANTS{ 14 };
   std::vector<uint32_t> moved(VARIANTS, 0);
   std::vector<Scatter> charts;
   for (char const *name : CHARTS) {
@@ -306,6 +307,8 @@ TEST_CASE("size memo: a remembered frame is the layout those inputs size to") {
     if (t.state.v != INVALID) { pinned.ranks.push_back({ .state = t.state, .rank = 2 }); }
     SubmachineOrders const o_turned{ order_submachines(c, g, s, p, 1, turned) };
     SubmachineOrders const o_pinned{ order_submachines(c, g, s, p, 1, pinned) };
+    SubmachineOrders unlabelled{ o };  // the same gaps, charged to lanes alone
+    std::fill(unlabelled.labels.begin(), unlabelled.labels.end(), 0);
 
     scav_profile node_sep{ p };
     node_sep.node_sep += 9;
@@ -419,6 +422,12 @@ TEST_CASE("size memo: a remembered frame is the layout those inputs size to") {
           .dar = DarSource::Profile,
           .pack = Compaction::Off,
           .fold = Fold::Always },
+        { .o = &unlabelled,
+          .p = &p,
+          .req = &req,
+          .dar = DarSource::Profile,
+          .pack = Compaction::Off,
+          .fold = Fold::Scale },
     } };
     for (uint32_t k = 0; k < VARIANTS; ++k) {
       CAPTURE(k);

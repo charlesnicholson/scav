@@ -57,11 +57,11 @@ scav_profile compact() {
 // Every chart in test_data/charts/gauntlet, named so a failure says which shape
 // broke rather than which index did.
 constexpr std::array GAUNTLET{
-  "above.scav",   "chain.scav",   "crossing.scav",  "crowd.scav",   "enclosing.scav",
-  "entered.scav", "fanin.scav",   "folded.scav",    "fork.scav",    "lane.scav",
-  "level.scav",   "long.scav",    "loop.scav",      "marks.scav",   "mutual.scav",
-  "ported.scav",  "regions.scav", "roundtrip.scav", "stretch.scav", "through.scav",
-  "transit.scav", "under.scav"
+  "above.scav",   "chain.scav",   "crossing.scav", "crowd.scav",     "enclosing.scav",
+  "entered.scav", "fanin.scav",   "folded.scav",   "fork.scav",      "lane.scav",
+  "level.scav",   "long.scav",    "loop.scav",     "marks.scav",     "mutual.scav",
+  "ported.scav",  "pulled.scav",  "regions.scav",  "roundtrip.scav", "seated.scav",
+  "stretch.scav", "through.scav", "transit.scav",  "under.scav"
 };
 
 // One chart, laid out: the pieces every property below reads.
@@ -1169,6 +1169,39 @@ TEST_CASE("gauntlet: a state beside a composite is centred on the port it enters
     REQUIRE(from.y >= (around.y + around.h));
     REQUIRE((to.x + (to.w / 2)) != (around.x + (around.w / 2)));
     straight_from(l, source, target);
+  }
+}
+
+TEST_CASE("gauntlet: every state lies inside the frame it is drawn in") {
+  for (char const *name : GAUNTLET) {
+    for (scav_profile const &p :
+         { readable(), compact(), one_row(readable()), one_row(compact()) }) {
+      CAPTURE(name);
+      CAPTURE(p.profile_id);
+      CAPTURE(p.portfolio_m);
+      Laid l;
+      lay(name, p, l);
+      for (uint32_t const st : live_of(l.c)) {
+        CAPTURE(chart_string(l.c, l.c.states[st].name));
+        CHECK(contains(l.z.sub[l.c.states[st].parent.v], l.z.state[st]));
+      }
+    }
+  }
+}
+
+TEST_CASE("gauntlet: a pseudostate seated in a layer leaves the layers before it alone") {
+  // `* -> T` seats beside `T`, so `B` is one rank gap past `A` however wide `T` is.
+  for (scav_profile const &p : { one_row(readable()), one_row(compact()) }) {
+    CAPTURE(p.profile_id);
+    Laid l;
+    lay("pulled.scav", p, l);
+    uint32_t const a{ state_named(l.c, "A") };
+    uint32_t const b{ state_named(l.c, "B") };
+    REQUIRE(a != INVALID);
+    REQUIRE(b != INVALID);
+    scav_rect const from{ l.z.state[a] };
+    scav_rect const to{ l.z.state[b] };
+    CHECK(to.x <= (from.x + from.w + p.rank_sep));
   }
 }
 

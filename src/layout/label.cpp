@@ -35,7 +35,15 @@ uint32_t place_labels_by(Chart const &c,
                          std::vector<scav_rect> &out);
 SCAV_INTERNAL_END
 
+#ifdef SCAV_TESTING
+uint64_t label_test_kept();
+#endif
+
 namespace {
+
+#ifdef SCAV_TESTING
+thread_local uint64_t test_kept{ 0 };  // boxes this thread kept from a base
+#endif
 
 // A submachine whose owner holds another live one beside it, so a divider runs
 // between them.
@@ -991,6 +999,9 @@ uint32_t place_labels_from(Chart const &c,
         kept = !overlaps(region, dirty[k]);
       }
       if (kept) {
+#ifdef SCAV_TESTING
+        ++test_kept;
+#endif
         LabelSettle const &had{ (*was->settled)[i] };
         got = { .found = had.found != 0,
                 .at = (*was->placed)[i],
@@ -1115,6 +1126,10 @@ uint32_t place_labels_from(Chart const &c,
 }
 
 }  // namespace
+
+#ifdef SCAV_TESTING
+uint64_t label_test_kept() { return test_kept; }
+#endif
 
 SCAV_INTERNAL_BEGIN
 

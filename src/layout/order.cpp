@@ -21,6 +21,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <vector>
 
 namespace scav {
@@ -130,8 +131,8 @@ struct CallScratch {
 class CallScope {
  public:
   CallScope() {
-    if (depth() == stack().size()) { stack().push_back(new CallScratch); }
-    at = stack()[depth()];
+    if (depth() == stack().size()) { stack().push_back(std::make_unique<CallScratch>()); }
+    at = stack()[depth()].get();
     ++depth();
   }
   ~CallScope() { --depth(); }
@@ -140,9 +141,8 @@ class CallScope {
   [[nodiscard]] CallScratch &scratch() const { return *at; }
 
  private:
-  // Never freed: a pool thread lives as long as the process.
-  static std::vector<CallScratch *> &stack() {
-    thread_local std::vector<CallScratch *> s;
+  static std::vector<std::unique_ptr<CallScratch>> &stack() {
+    thread_local std::vector<std::unique_ptr<CallScratch>> s;
     return s;
   }
   static size_t &depth() {

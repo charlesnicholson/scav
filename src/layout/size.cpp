@@ -601,18 +601,25 @@ void Sizer::step_layers(ChunkView const &v, std::vector<TraceGap> &lanes) {
   for (uint32_t r = v.first; r < v.last; ++r) {
     for (uint32_t const i : v.cg.layers[r - v.first]) {
       OrderNode const &nd{ node_of(v.chunk_nodes[i]) };
-      if (nd.kind != OrderKind::State) { continue; }
       uint32_t const one{ seat_to[i] };
-      if (one != INVALID) {
-        uint32_t const near{ v.chunk_nodes[one] };
-        uint32_t const nr{ v.local_rank[v.nodes[near]] };
-        Wide const need{ Wide{ p.rank_sep } + along(nd.subject) + (p.node_sep / 2) };
-        Wide const room{ (nr > r) ? inset_of(near)
-                                  : (kept_w[nr - v.first] - inset_of(near) -
-                                     along(node_of(near).subject)) };
-        left[i] = (room >= need) ? 1U : 0U;
+      if ((nd.kind != OrderKind::State) || (one == INVALID)) { continue; }
+      uint32_t const near{ v.chunk_nodes[one] };
+      uint32_t const nr{ v.local_rank[v.nodes[near]] };
+      Wide const need{ Wide{ p.rank_sep } + along(nd.subject) + (p.node_sep / 2) };
+      Wide const room{ (nr > r) ? inset_of(near)
+                                : (kept_w[nr - v.first] - inset_of(near) -
+                                   along(node_of(near).subject)) };
+      left[i] = (room >= need) ? 1U : 0U;
+    }
+    // The seating takes the lowest-indexed pseudostate beside each neighbour.
+    for (uint32_t const i : v.cg.layers[r - v.first]) {
+      for (uint32_t const j : v.cg.layers[r - v.first]) {
+        if ((j < i) && (left[j] != 0) && (seat_to[j] == seat_to[i])) { left[i] = 0; }
       }
-      if (left[i] != 0) { continue; }
+    }
+    for (uint32_t const i : v.cg.layers[r - v.first]) {
+      OrderNode const &nd{ node_of(v.chunk_nodes[i]) };
+      if ((nd.kind != OrderKind::State) || (left[i] != 0)) { continue; }
       kept_w[r - v.first] =
           imax(kept_w[r - v.first],
                imax(Wide{ along(nd.subject) }, Wide{ v.line[v.chunk_nodes[i]] }));
@@ -675,7 +682,10 @@ void Sizer::step_layers(ChunkView const &v, std::vector<TraceGap> &lanes) {
       }
     }
     for (uint32_t const i : v.cg.layers[r - v.first]) {
-      if ((seat_to[i] == INVALID) || (left[i] != 0)) { continue; }
+      if ((seat_to[i] == INVALID) || (left[i] != 0) ||
+          ((v.local_rank[v.nodes[v.chunk_nodes[seat_to[i]]]] + 1) != r)) {
+        continue;
+      }
       uint32_t const src{ seat_to[i] };
       Wide const end{ before + inset_of(v.chunk_nodes[src]) + w_of(src) + p.rank_sep +
                       w_of(i) + (p.node_sep / 2) };
@@ -1854,7 +1864,11 @@ void Sizer::size_sub(uint32_t m) {
     }
   }
   key.push_back(gspan.len);
-  for (uint32_t k = 0; k < gspan.len; ++k) { put(o.gaps[gspan.off + k]); }
+  bool const labelled{ o.labels.size() == o.gaps.size() };
+  for (uint32_t k = 0; k < gspan.len; ++k) {
+    put(o.gaps[gspan.off + k]);
+    put(labelled ? o.labels[gspan.off + k] : o.gaps[gspan.off + k]);
+  }
 
   // What it writes: the frame's extent, each node's place, each state's, and
   // each edge's lean.
