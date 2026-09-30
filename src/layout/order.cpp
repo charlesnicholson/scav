@@ -21,7 +21,6 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
-#include <memory>
 #include <vector>
 
 namespace scav {
@@ -128,11 +127,25 @@ struct CallScratch {
   std::vector<FrameOrder> frames;
 };
 
+// One scratch per depth, each at a fixed address, deleted when the thread exits.
+struct CallStack {
+  std::vector<CallScratch *> at;
+  CallStack() = default;
+  CallStack(CallStack const &) = delete;
+  CallStack(CallStack &&) = delete;
+  CallStack &operator=(CallStack const &) = delete;
+  CallStack &operator=(CallStack &&) = delete;
+  ~CallStack() {
+    for (CallScratch *const sc : at) { delete sc; }
+  }
+};
+
 class CallScope {
  public:
   CallScope() {
-    if (depth() == stack().size()) { stack().push_back(std::make_unique<CallScratch>()); }
-    at = stack()[depth()].get();
+    std::vector<CallScratch *> &s{ stack().at };
+    if (depth() == s.size()) { s.push_back(new CallScratch); }
+    at = s[depth()];
     ++depth();
   }
   ~CallScope() { --depth(); }
@@ -141,8 +154,8 @@ class CallScope {
   [[nodiscard]] CallScratch &scratch() const { return *at; }
 
  private:
-  static std::vector<std::unique_ptr<CallScratch>> &stack() {
-    thread_local std::vector<std::unique_ptr<CallScratch>> s;
+  static CallStack &stack() {
+    thread_local CallStack s;
     return s;
   }
   static size_t &depth() {
