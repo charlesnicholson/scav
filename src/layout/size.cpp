@@ -292,6 +292,14 @@ struct Sizer {
   [[nodiscard]] uint32_t connected_components(Span span, Span espan);
   void count_turns(ChunkView const &v);
   void step_layers(ChunkView const &v, std::vector<TraceGap> &lanes);
+  void glue_layers(Span span,
+                   Span espan,
+                   std::vector<uint32_t> const &local_rank,
+                   uint32_t layers);
+  void seat_pseudostates(ChunkView const &v, Shape &shape, Wide chunk_w, Wide chunk_h);
+  [[nodiscard]] Wide leg_label_room(ChunkView const &v,
+                                    Shape const &shape,
+                                    Wide chunk_h) const;
   void lay_out_sub(uint32_t m);
   void place_sub(uint32_t m,
                  bool down,
@@ -706,6 +714,166 @@ void Sizer::step_layers(ChunkView const &v, std::vector<TraceGap> &lanes) {
   }
 }
 
+// A pseudostate with one neighbour here sits level with it and `rank_sep` away, where its
+// box is clear of every other node and inside the piece.
+void Sizer::seat_pseudostates(ChunkView const &v,
+                              Shape &shape,
+                              Wide chunk_w,
+                              Wide chunk_h) {
+  auto const along = [&](uint32_t st) {
+    return v.down ? out.state[st].h : out.state[st].w;
+  };
+  auto const box_of_node = [&](uint32_t i, Wide x, Wide y) {
+    OrderNode const &nd{ o.nodes[v.span.off + v.nodes[v.chunk_nodes[i]]] };
+    Wide const w{ (nd.kind == OrderKind::State) ? Wide{ along(nd.subject) } : Wide{ 0 } };
+    Wide const h{ v.cg.extent[i] };
+    return scav_rect{ .x = static_cast<int32_t>(x),
+                      .y = static_cast<int32_t>(y - (h / 2)),
+                      .w = static_cast<int32_t>(w),
+                      .h = static_cast<int32_t>(h) };
+  };
+  for (uint32_t i = 0; i < v.chunk_nodes.size(); ++i) {
+    uint32_t const at{ v.chunk_nodes[i] };
+    OrderNode const &nd{ o.nodes[v.span.off + v.nodes[at]] };
+    if (nd.kind != OrderKind::State) { continue; }
+    StateKind const kind{ c.states[nd.subject].kind };
+    if ((kind != StateKind::Initial) && (kind != StateKind::Final)) { continue; }
+    uint32_t other{ INVALID };
+    bool alone{ true };
+    for (uint32_t k = 0; k < v.espan.len; ++k) {
+      OrderEdge const &e{ o.edges[v.espan.off + k] };
+      uint32_t const a{ v.index[e.src - v.span.off] };
+      uint32_t const b{ v.index[e.dst - v.span.off] };
+      uint32_t far{ INVALID };
+      if (a == at) {
+        far = b;
+      } else if (b == at) {
+        far = a;
+      }
+      if ((far == INVALID) || (far == at)) { continue; }
+      if ((far >= v.chunk_index.size()) || (v.chunk_index[far] == INVALID)) {
+        alone = false;
+        continue;
+      }
+      if ((other != INVALID) && (other != v.chunk_index[far])) { alone = false; }
+      other = v.chunk_index[far];
+    }
+    if (!alone || (other == INVALID)) { continue; }
+    uint32_t const r{ v.local_rank[v.nodes[at]] };
+    uint32_t const near_rank{ v.local_rank[v.nodes[v.chunk_nodes[other]]] };
+    OrderNode const &nn{ o.nodes[v.span.off + v.nodes[v.chunk_nodes[other]]] };
+    Wide const nw{ (nn.kind == OrderKind::State) ? Wide{ along(nn.subject) } : Wide{ 0 } };
+    Wide const nx{ shape.at[v.chunk_nodes[other]].x };
+    // `rank_sep` from the state it joins, not a whole rank gap: the gap
+    // also holds room other transitions' labels were charged.
+    Wide x{ shape.at[at].x };
+    if ((kind == StateKind::Final) && (r == (near_rank + 1))) { x = nx + nw + p.rank_sep; }
+    if ((kind == StateKind::Initial) && (near_rank == (r + 1))) {
+      x = nx - p.rank_sep - along(nd.subject);
+    }
+    Wide const y{ Wide{ shape.at[v.chunk_nodes[other]].y } + v.seat_at[i] };
+    auto const clear = [&](Wide cx, Wide cy) {
+      scav_rect const want{ box_of_node(i, cx, cy) };
+      if ((want.x < 0) || (want.y < 0) || ((Wide{ want.x } + want.w) > chunk_w) ||
+          ((Wide{ want.y } + want.h) > chunk_h)) {
+        return false;
+      }
+      // Boundary nodes sit on the frame's edge, which the bounds above clear.
+      scav_rect const room{ grow(want, p.node_sep / 2) };
+      for (uint32_t j = 0; j < v.chunk_nodes.size(); ++j) {
+        if ((j == i) || (o.nodes[v.span.off + v.nodes[v.chunk_nodes[j]]].kind ==
+                         OrderKind::Boundary)) {
+          continue;
+        }
+        scav_rect const there{
+          box_of_node(j, shape.at[v.chunk_nodes[j]].x, shape.at[v.chunk_nodes[j]].y)
+        };
+        if (overlaps(room, there)) { return false; }
+      }
+      return true;
+    };
+    if (clear(x, y)) {
+      shape.at[at] = { .x = static_cast<int32_t>(x), .y = static_cast<int32_t>(y) };
+      shape.seated.emplace_back(nd.subject, SeatHow::Moved);
+    } else if (clear(shape.at[at].x, y)) {
+      shape.at[at].y = static_cast<int32_t>(y);
+      shape.seated.emplace_back(nd.subject, SeatHow::Levelled);
+    } else {
+      shape.seated.emplace_back(nd.subject, SeatHow::Declined);
+    }
+  }
+}
+
+// A label beside a leg between ranks needs the leader on one side; where neither side
+// holds it, the piece grows on its trailing side.
+Wide Sizer::leg_label_room(ChunkView const &v, Shape const &shape, Wide chunk_h) const {
+  auto const across = [&](uint32_t st) {
+    return v.down ? out.state[st].w : out.state[st].h;
+  };
+  auto const in_chunk = [&](uint32_t node) {
+    uint32_t const i{ v.index[node - v.span.off] };
+    return ((i != INVALID) && (v.chunk_index[i] != INVALID)) ? i : INVALID;
+  };
+  int32_t const leader{ label_leader(p) };
+  for (uint32_t k = 0; k < v.espan.len; ++k) {
+    OrderEdge const &e{ o.edges[v.espan.off + k] };
+    uint32_t const a{ in_chunk(e.src) };
+    uint32_t const b{ in_chunk(e.dst) };
+    if ((a == INVALID) || (b == INVALID) ||
+        (v.local_rank[v.nodes[a]] == v.local_rank[v.nodes[b]]) ||
+        (e.segment >= seg_label_h.size()) || (seg_label_h[e.segment] == 0)) {
+      continue;
+    }
+    auto const span_of = [&](uint32_t i, Wide &lo, Wide &hi) {
+      OrderNode const &nd{ o.nodes[v.span.off + v.nodes[i]] };
+      Wide const half{ (nd.kind == OrderKind::State) ? Wide{ across(nd.subject) / 2 }
+                                                     : Wide{ 0 } };
+      lo = Wide{ shape.at[i].y } - half;
+      hi = Wide{ shape.at[i].y } + half;
+    };
+    Wide alo{ 0 };
+    Wide ahi{ 0 };
+    Wide blo{ 0 };
+    Wide bhi{ 0 };
+    span_of(a, alo, ahi);
+    span_of(b, blo, bhi);
+    Wide const lo{ imax(alo, blo) };
+    Wide const hi{ imin(ahi, bhi) };
+    if (hi < lo) { continue; }
+    Wide const leg{ lo + ((hi - lo) / 2) };
+    Wide const need{ Wide{ leader } + seg_label_h[e.segment] + (p.node_sep / 2) };
+    if ((leg < need) && ((chunk_h - leg) < need)) { chunk_h = leg + need; }
+  }
+  return chunk_h;
+}
+
+// A cut is refused where it would part a pseudostate or a boundary node from the state it
+// joins in the next layer: `glued` marks the later layer.
+void Sizer::glue_layers(Span span,
+                        Span espan,
+                        std::vector<uint32_t> const &local_rank,
+                        uint32_t layers) {
+  std::vector<uint8_t> &glued{ sc.glued };
+  glued.assign(layers, 0);
+  for (uint32_t k = 0; k < espan.len; ++k) {
+    OrderEdge const &e{ o.edges[espan.off + k] };
+    uint32_t const a{ e.src - span.off };
+    uint32_t const b{ e.dst - span.off };
+    for (uint32_t const end : { a, b }) {
+      OrderNode const &nd{ o.nodes[span.off + end] };
+      bool const pseudostate{ (nd.kind == OrderKind::State) &&
+                              ((c.states[nd.subject].kind == StateKind::Initial) ||
+                               (c.states[nd.subject].kind == StateKind::Final)) };
+      if (!pseudostate && (nd.kind != OrderKind::Boundary)) { continue; }
+      uint32_t const other{ (end == a) ? b : a };
+      uint32_t const ra{ local_rank[end] };
+      uint32_t const rb{ local_rank[other] };
+      if ((ra == INVALID) || (rb == INVALID) || (ra == rb)) { continue; }
+      glued[imax(ra, rb)] = 1;
+    }
+  }
+}
+
 // A frame's graph need not be connected, and unconnected states all rank 0, so
 // one graph would stack them in a column. Components are laid out and packed.
 void Sizer::lay_out_sub(uint32_t m) {
@@ -929,27 +1097,8 @@ void Sizer::lay_out_sub(uint32_t m) {
                                            : Wide{ p.rank_sep };
     };
 
-    // A cut is refused where it would part a pseudostate or a boundary node from the state
-    // it joins in the next layer.
-    std::vector<uint8_t> &glued{ sc.glued };
-    glued.assign(layers, 0);
-    for (uint32_t k = 0; k < espan.len; ++k) {
-      OrderEdge const &e{ o.edges[espan.off + k] };
-      uint32_t const a{ e.src - span.off };
-      uint32_t const b{ e.dst - span.off };
-      for (uint32_t const end : { a, b }) {
-        OrderNode const &nd{ o.nodes[span.off + end] };
-        bool const pseudostate{ (nd.kind == OrderKind::State) &&
-                                ((c.states[nd.subject].kind == StateKind::Initial) ||
-                                 (c.states[nd.subject].kind == StateKind::Final)) };
-        if (!pseudostate && (nd.kind != OrderKind::Boundary)) { continue; }
-        uint32_t const other{ (end == a) ? b : a };
-        uint32_t const ra{ local_rank[end] };
-        uint32_t const rb{ local_rank[other] };
-        if ((ra == INVALID) || (rb == INVALID) || (ra == rb)) { continue; }
-        glued[imax(ra, rb)] = 1;
-      }
-    }
+    glue_layers(span, espan, local_rank, layers);
+    std::vector<uint8_t> const &glued{ sc.glued };
     // A leg's position down the overlap of its two ends, or -1 with no overlap, and the
     // room its label needs beside it.
     auto const width_of_node = [&](uint32_t i) {
@@ -1192,91 +1341,7 @@ void Sizer::lay_out_sub(uint32_t m) {
                            .y = static_cast<int32_t>(centre[i]) };
         }
 
-        // A pseudostate with one neighbour here sits level with it and `rank_sep` away,
-        // where its box is clear of every other node and inside the piece.
-        auto const box_of_node = [&](uint32_t i, Wide x, Wide y) {
-          OrderNode const &nd{ o.nodes[span.off + nodes[chunk_nodes[i]]] };
-          Wide const w{ (nd.kind == OrderKind::State) ? Wide{ along(nd.subject) }
-                                                      : Wide{ 0 } };
-          Wide const h{ cg.extent[i] };
-          return scav_rect{ .x = static_cast<int32_t>(x),
-                            .y = static_cast<int32_t>(y - (h / 2)),
-                            .w = static_cast<int32_t>(w),
-                            .h = static_cast<int32_t>(h) };
-        };
-        for (uint32_t i = 0; i < chunk_nodes.size(); ++i) {
-          uint32_t const at{ chunk_nodes[i] };
-          OrderNode const &nd{ o.nodes[span.off + nodes[at]] };
-          if (nd.kind != OrderKind::State) { continue; }
-          StateKind const kind{ c.states[nd.subject].kind };
-          if ((kind != StateKind::Initial) && (kind != StateKind::Final)) { continue; }
-          uint32_t other{ INVALID };
-          bool alone{ true };
-          for (uint32_t k = 0; k < espan.len; ++k) {
-            OrderEdge const &e{ o.edges[espan.off + k] };
-            uint32_t const a{ index[e.src - span.off] };
-            uint32_t const b{ index[e.dst - span.off] };
-            uint32_t far{ INVALID };
-            if (a == at) {
-              far = b;
-            } else if (b == at) {
-              far = a;
-            }
-            if ((far == INVALID) || (far == at)) { continue; }
-            if ((far >= chunk_index.size()) || (chunk_index[far] == INVALID)) {
-              alone = false;
-              continue;
-            }
-            if ((other != INVALID) && (other != chunk_index[far])) { alone = false; }
-            other = chunk_index[far];
-          }
-          if (!alone || (other == INVALID)) { continue; }
-          uint32_t const r{ local_rank[nodes[at]] };
-          uint32_t const near_rank{ local_rank[nodes[chunk_nodes[other]]] };
-          OrderNode const &nn{ o.nodes[span.off + nodes[chunk_nodes[other]]] };
-          Wide const nw{ (nn.kind == OrderKind::State) ? Wide{ along(nn.subject) }
-                                                       : Wide{ 0 } };
-          Wide const nx{ shape.at[chunk_nodes[other]].x };
-          // `rank_sep` from the state it joins, not a whole rank gap: the gap
-          // also holds room other transitions' labels were charged.
-          Wide x{ shape.at[at].x };
-          if ((kind == StateKind::Final) && (r == (near_rank + 1))) {
-            x = nx + nw + p.rank_sep;
-          }
-          if ((kind == StateKind::Initial) && (near_rank == (r + 1))) {
-            x = nx - p.rank_sep - along(nd.subject);
-          }
-          Wide const y{ Wide{ shape.at[chunk_nodes[other]].y } + seat_at[i] };
-          auto const clear = [&](Wide cx, Wide cy) {
-            scav_rect const want{ box_of_node(i, cx, cy) };
-            if ((want.x < 0) || (want.y < 0) || ((Wide{ want.x } + want.w) > chunk_w) ||
-                ((Wide{ want.y } + want.h) > chunk_h)) {
-              return false;
-            }
-            // Boundary nodes sit on the frame's edge, which the bounds above clear.
-            scav_rect const room{ grow(want, p.node_sep / 2) };
-            for (uint32_t j = 0; j < chunk_nodes.size(); ++j) {
-              if ((j == i) || (o.nodes[span.off + nodes[chunk_nodes[j]]].kind ==
-                               OrderKind::Boundary)) {
-                continue;
-              }
-              scav_rect const there{
-                box_of_node(j, shape.at[chunk_nodes[j]].x, shape.at[chunk_nodes[j]].y)
-              };
-              if (overlaps(room, there)) { return false; }
-            }
-            return true;
-          };
-          if (clear(x, y)) {
-            shape.at[at] = { .x = static_cast<int32_t>(x), .y = static_cast<int32_t>(y) };
-            shape.seated.emplace_back(nd.subject, SeatHow::Moved);
-          } else if (clear(shape.at[at].x, y)) {
-            shape.at[at].y = static_cast<int32_t>(y);
-            shape.seated.emplace_back(nd.subject, SeatHow::Levelled);
-          } else {
-            shape.seated.emplace_back(nd.subject, SeatHow::Declined);
-          }
-        }
+        seat_pseudostates(view, shape, chunk_w, chunk_h);
         // A label beside an edge inside one column, whose leg runs down it,
         // needs its own width and leader on one side of the leg inside the
         // piece; where neither side has it the piece grows on its trailing
@@ -1292,37 +1357,7 @@ void Sizer::lay_out_sub(uint32_t m) {
           }
           chunk_w = imax(chunk_w, beside_leg(e, shape.at[a].x, shape.at[b].x, a, b));
         }
-        // A label beside a leg between ranks needs the leader on one side; where neither
-        // side holds it, the piece grows on its trailing side.
-        for (uint32_t k = 0; k < espan.len; ++k) {
-          OrderEdge const &e{ o.edges[espan.off + k] };
-          uint32_t const a{ in_chunk(e.src) };
-          uint32_t const b{ in_chunk(e.dst) };
-          if ((a == INVALID) || (b == INVALID) ||
-              (local_rank[nodes[a]] == local_rank[nodes[b]]) ||
-              (e.segment >= seg_label_h.size()) || (seg_label_h[e.segment] == 0)) {
-            continue;
-          }
-          auto const span_of = [&](uint32_t i, Wide &lo, Wide &hi) {
-            OrderNode const &nd{ o.nodes[span.off + nodes[i]] };
-            Wide const half{ (nd.kind == OrderKind::State) ? Wide{ across(nd.subject) / 2 }
-                                                           : Wide{ 0 } };
-            lo = Wide{ shape.at[i].y } - half;
-            hi = Wide{ shape.at[i].y } + half;
-          };
-          Wide alo{ 0 };
-          Wide ahi{ 0 };
-          Wide blo{ 0 };
-          Wide bhi{ 0 };
-          span_of(a, alo, ahi);
-          span_of(b, blo, bhi);
-          Wide const lo{ imax(alo, blo) };
-          Wide const hi{ imin(ahi, bhi) };
-          if (hi < lo) { continue; }
-          Wide const leg{ lo + ((hi - lo) / 2) };
-          Wide const need{ Wide{ leader } + seg_label_h[e.segment] + (p.node_sep / 2) };
-          if ((leg < need) && ((chunk_h - leg) < need)) { chunk_h = leg + need; }
-        }
+        chunk_h = leg_label_room(view, shape, chunk_h);
         pieces_fit = pieces_fit && (chunk_w <= COORD_MAX) && (chunk_h <= COORD_MAX);
         if (!pieces_fit) { break; }
         pieces[chunk] = { .x = 0,

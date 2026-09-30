@@ -308,7 +308,7 @@ TEST_CASE("size memo: a remembered frame is the layout those inputs size to") {
     SubmachineOrders const o_turned{ order_submachines(c, g, s, p, 1, turned) };
     SubmachineOrders const o_pinned{ order_submachines(c, g, s, p, 1, pinned) };
     SubmachineOrders unlabelled{ o };  // the same gaps, charged to lanes alone
-    std::fill(unlabelled.labels.begin(), unlabelled.labels.end(), 0);
+    std::ranges::fill(unlabelled.labels, 0);
     // One frame's fold pinned: the first folded frame unfolded, the first frame folded.
     SearchPins unfolded;
     for (uint32_t m = 0; (m < base.z.folded.size()) && unfolded.folds.empty(); ++m) {
