@@ -227,6 +227,58 @@ TEST_CASE("trace: a traced run writes the geometry an untraced one does") {
   CHECK(trace_sink() == nullptr);  // cleared even though the run succeeded
 }
 
+TEST_CASE("trace: a fold pin names the frame it decides and the mode it takes") {
+  // Five states in a run, which the scale measure folds; pinned never, it is one row.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  std::vector<StateId> run;
+  for (char const *name : { "A", "B", "C", "D", "E" }) {
+    run.push_back(build_state(c, root, name, StateKind::Normal, {}));
+  }
+  for (uint32_t k = 0; (k + 1) < run.size(); ++k) {
+    build_trans(c, run[k], run[k + 1], TransKind::External, {});
+  }
+  scav_layout_opts opts{};
+  REQUIRE(profile_named("readable", opts.profile));
+  opts.profile.portfolio_k = 0;
+  opts.threads = 1;
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  LayoutTrace bare;
+  {
+    Attached const held{ bare };
+    REQUIRE(layout_run(c, {}, opts, placed, diags, nullptr, nullptr, 0));
+  }
+  CHECK(count_kind(bare, TraceKind::FoldCut) > 0);
+  CHECK(count_kind(bare, TraceKind::FoldPinned) == 0);
+
+  SearchPins const pins{ .folds = { { .frame = root, .mode = FOLD_NEVER } } };
+  LayoutTrace t;
+  {
+    Attached const held{ t };
+    REQUIRE(layout_run(c,
+                       {},
+                       opts,
+                       placed,
+                       diags,
+                       nullptr,
+                       nullptr,
+                       0,
+                       nullptr,
+                       nullptr,
+                       &pins));
+  }
+  CHECK(count_kind(t, TraceKind::FoldCut) == 0);
+  REQUIRE(count_kind(t, TraceKind::FoldPinned) == 1);
+  for (TraceEvent const &e : t.events) {
+    if (e.kind != TraceKind::FoldPinned) { continue; }
+    CHECK(e.frame == root.v);
+    CHECK(e.pass == FOLD_NEVER);
+  }
+  CHECK(json_of(t, c).find("\"kind\":\"fold_pinned\",\"frame\":0,\"mode\":\"never\"") !=
+        std::string::npos);
+}
+
 TEST_CASE("trace: a back edge's kinks are one chained bend, and the trace says so") {
   // 11.16's measurement, as a chart: A -> B -> C -> A ranks the three in a row
   // and the back edge spans two, so it chains through a bend in B's rank and

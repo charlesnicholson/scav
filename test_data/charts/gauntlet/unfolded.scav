@@ -1,0 +1,30 @@
+// Two regions whose runs the scale measure folds. Laid straight, `Busy` is shorter and
+// the chart smaller, and the search pins each run unfolded.
+chart unfolded "two regions whose runs lie straight in a short state" {
+  state Idle,
+  state Busy {
+    submachine work {
+      state One,
+      state Two,
+      state Three,
+      state Four,
+      trans * -> One,
+      trans One -> Two,
+      trans Two -> Three,
+      trans Three -> Four,
+    },
+    submachine watch {
+      state Fine,
+      state Late,
+      state Lost,
+      trans * -> Fine,
+      trans Fine -> Late,
+      trans Late -> Lost,
+    },
+  },
+  state Done,
+
+  trans * -> Idle,
+  trans Idle -> Busy,
+  trans Busy -> Done,
+}

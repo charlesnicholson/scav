@@ -260,6 +260,15 @@ struct Sizer {
   [[nodiscard]] bool runs_down(uint32_t m) const {
     return (m < o.sub_down.size()) && (o.sub_down[m] != 0);
   }
+  // The row's rule, or the frame's fold pin where it has one.
+  static_assert((static_cast<uint32_t>(Fold::Scale) == FOLD_SCALE) &&
+                (static_cast<uint32_t>(Fold::Always) == FOLD_ALWAYS) &&
+                (static_cast<uint32_t>(Fold::Never) == FOLD_NEVER));
+  [[nodiscard]] Fold fold_of(uint32_t m) const {
+    return ((m < o.sub_fold.size()) && (o.sub_fold[m] != 0))
+               ? static_cast<Fold>(o.sub_fold[m] - 1U)
+               : fold;
+  }
   // `seg_cross` at a segment, and whether a node is a boundary node on a cross
   // border. Hand-built orders carry no column.
   [[nodiscard]] uint8_t cross_of(uint32_t seg) const {
@@ -1582,16 +1591,24 @@ void Sizer::lay_out_sub(uint32_t m) {
     Shape &best{ sc.best };
     Shape &folded{ sc.folded };
     Shape &stacked{ sc.stacked };
+    Fold const rule{ fold_of(m) };
+    bool const always{ rule == Fold::Always };
+    if ((id == 0) && (m < o.sub_fold.size()) && (o.sub_fold[m] != 0)) {
+      trace_emit({ .kind = TraceKind::FoldPinned,
+                   .pass = static_cast<uint16_t>(rule),
+                   .frame = m });
+    }
     lay_out(best, unwrapped, false);
-    lay_out(folded, down ? unwrapped : target, false);
-    lay_out(stacked, down ? unwrapped : target, true);
+    if (rule != Fold::Never) {
+      lay_out(folded, down ? unwrapped : target, false);
+      lay_out(stacked, down ? unwrapped : target, true);
+    }
     // The two folds are one cut in two arrangements, so the scale measure
     // picks between them before either is weighed against the flat run.
-    bool const always{ fold == Fold::Always };
     auto const usable = [always](Shape const &f) {
       return f.ok && f.wraps && (f.drawable || always);
     };
-    if (usable(stacked) &&
+    if ((rule != Fold::Never) && usable(stacked) &&
         (!usable(folded) || (stacked.drawable && !folded.drawable) ||
          ((stacked.drawable == folded.drawable) && better(stacked, folded)))) {
       std::swap(folded, stacked);
@@ -1599,10 +1616,11 @@ void Sizer::lay_out_sub(uint32_t m) {
     // `Always` takes the folded shape; a fold whose pieces repack into one row is the run
     // unfolded, so it is no candidate.
     bool const swap{
-      folded.ok &&
+      (rule != Fold::Never) && folded.ok &&
       (!best.ok || (folded.wraps && (always || (folded.drawable && better(folded, best)))))
     };
     if (swap) { std::swap(best, folded); }
+    if (best.wraps) { out.folded[m] = 1; }
     for (TraceFold const &cut : best.cuts) {
       trace_emit({ .kind = TraceKind::FoldCut, .frame = m, .fold = cut });
     }
@@ -1823,7 +1841,7 @@ void Sizer::size_sub(uint32_t m) {
   put(dar.num);
   put(dar.den);
   key.push_back(static_cast<uint32_t>(compaction));
-  key.push_back(static_cast<uint32_t>(fold));
+  key.push_back(static_cast<uint32_t>(fold_of(m)));
   std::array<uint32_t, sizeof(scav_profile) / sizeof(uint32_t)> knobs{};
   std::memcpy(knobs.data(), &p, sizeof(scav_profile));
   key.insert(key.end(), knobs.begin(), knobs.end());
@@ -1870,8 +1888,8 @@ void Sizer::size_sub(uint32_t m) {
     put(labelled ? o.labels[gspan.off + k] : o.gaps[gspan.off + k]);
   }
 
-  // What it writes: the frame's extent, each node's place, each state's, and
-  // each edge's lean.
+  // What it writes: the frame's extent, whether it folded, each node's place, each
+  // state's, and each edge's lean.
   Memo &memo{ frame_memo() };
   int32_t const *hit{ nullptr };
   uint32_t len{ 0 };
@@ -1879,7 +1897,8 @@ void Sizer::size_sub(uint32_t m) {
   if (memo.find(key, hit, len)) {
     out.sub[m].w = hit[0];
     out.sub[m].h = hit[1];
-    uint32_t at{ 2 };
+    out.folded[m] = static_cast<uint8_t>(hit[2]);
+    uint32_t at{ 3 };
     for (uint32_t k = 0; k < span.len; ++k) {
       OrderNode const &nd{ o.nodes[span.off + k] };
       out.node[span.off + k] = { .x = hit[at], .y = hit[at + 1] };
@@ -1900,6 +1919,7 @@ void Sizer::size_sub(uint32_t m) {
   value.clear();
   value.push_back(out.sub[m].w);
   value.push_back(out.sub[m].h);
+  value.push_back(out.folded[m]);
   for (uint32_t k = 0; k < span.len; ++k) {
     OrderNode const &nd{ o.nodes[span.off + k] };
     value.push_back(out.node[span.off + k].x);
@@ -2003,6 +2023,7 @@ bool size_pass(Chart const &c,
   out.sub.assign(c.submachines.size(), {});
   out.node.assign(o.nodes.size(), {});
   out.lean.assign(g.segments.size(), 0);
+  out.folded.assign(c.submachines.size(), 0);
   out.chart = {};
   std::vector<scav_point> &sub_local{ x.sub_local };
   sub_local.assign(c.submachines.size(), scav_point{});

@@ -25,6 +25,7 @@ struct SizedLayout {
   // Parallel to the segments, or empty: 1 where a straight leg seats at the leading end of
   // its ends' overlap, with its label's room on the trailing side.
   std::vector<uint8_t> lean;
+  std::vector<uint8_t> folded;  // parallel to submachines: 1 where a frame's run wraps
   scav_rect chart{};
 };
 
@@ -46,8 +47,8 @@ enum class DarSource : uint32_t { Profile, OwnerHole };
 // unwrapped and once cut at the aspect target, and `Scale` keeps whichever the
 // scale measure prefers -- a local ratio that cannot see area. `Always` hands
 // `Cost` the folded shape instead, so the choice is scored rather than
-// arbitrated (11.10a).
-enum class Fold : uint32_t { Scale, Always };
+// arbitrated (11.10a). `Never` keeps the run unwrapped; a fold pin names one frame's.
+enum class Fold : uint32_t { Scale, Always, Never };
 
 // False on an extent that would leave the coordinate domain, with one
 // diagnostic per offending entity and `out` left partly written. `dar` and

@@ -17,6 +17,7 @@
 
 #include "doctest.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -61,7 +62,8 @@ constexpr std::array GAUNTLET{
   "entered.scav", "fanin.scav",   "folded.scav",   "fork.scav",      "lane.scav",
   "level.scav",   "long.scav",    "loop.scav",     "marks.scav",     "mutual.scav",
   "ported.scav",  "pulled.scav",  "regions.scav",  "roundtrip.scav", "seated.scav",
-  "stretch.scav", "through.scav", "tight.scav",    "transit.scav",   "under.scav"
+  "stretch.scav", "through.scav", "tight.scav",    "transit.scav",   "under.scav",
+  "unfolded.scav"
 };
 
 // One chart, laid out: the pieces every property below reads.
@@ -880,6 +882,37 @@ TEST_CASE("gauntlet: a folded frame's second piece starts under the state enteri
     CHECK(at.x >= from.x);
     uint32_t const frame{ l.c.submachine_ids[l.c.states[box].submachines.off].v };
     CHECK(contains(l.z.sub[frame], at));
+  }
+}
+
+TEST_CASE(
+    "gauntlet: a run the scale measure folds is laid straight where that is smaller") {
+  // Row 0 unsearched folds `watch`; at `readable` the search pins it unfolded, its states
+  // on one row. At `compact` it turns both regions down instead.
+  for (scav_profile const &p : { readable() }) {
+    CAPTURE(p.profile_id);
+    Laid bare;
+    lay("unfolded.scav", one_row(p), bare);
+    uint32_t const busy{ state_named(bare.c, "Busy") };
+    REQUIRE(busy != INVALID);
+    REQUIRE(bare.c.states[busy].submachines.len == 2);
+    uint32_t const watch{
+      bare.c.submachine_ids[bare.c.states[busy].submachines.off + 1].v
+    };
+    REQUIRE(bare.z.folded[watch] != 0);
+
+    Laid l;
+    lay("unfolded.scav", p, l);
+    CHECK(l.z.folded[watch] == 0);
+    CHECK(std::ranges::any_of(l.pins.folds, [watch](FoldPin const &f) {
+      return (f.frame.v == watch) && (f.mode == FOLD_NEVER);
+    }));
+    int32_t const row{ l.z.state[state_named(l.c, "Fine")].y };
+    for (char const *name : { "Late", "Lost" }) {
+      CAPTURE(name);
+      CHECK(l.z.state[state_named(l.c, name)].y == row);
+    }
+    CHECK((Wide{ l.z.chart.w } * l.z.chart.h) < (Wide{ bare.z.chart.w } * bare.z.chart.h));
   }
 }
 

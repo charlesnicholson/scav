@@ -35,6 +35,7 @@ char const *kind_name(TraceKind k) {
     case TraceKind::ColumnCentred: return "column_centred";
     case TraceKind::PiecePacked: return "piece_packed";
     case TraceKind::GapCharged: return "gap_charged";
+    case TraceKind::FoldPinned: return "fold_pinned";
     case TraceKind::None: break;
   }
   return "none";
@@ -270,6 +271,11 @@ void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out)
         j.kv("seg", e.gap.seg);
         j.kv("width", e.gap.width);
         break;
+      case TraceKind::FoldPinned: {
+        static constexpr std::array<char const *, 3> MODE{ "scale", "always", "never" };
+        j.ks("mode", (e.pass < MODE.size()) ? MODE[e.pass] : "?");
+        break;
+      }
       case TraceKind::None: break;
     }
     j.raw((i + 1 == t.events.size()) ? "}\n" : "},\n");

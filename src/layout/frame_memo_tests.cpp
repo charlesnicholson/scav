@@ -81,7 +81,7 @@ bool same(SubmachineOrders const &a, SubmachineOrders const &b) {
 bool same(SizedLayout const &a, SizedLayout const &b) {
   return same_rows(a.state, b.state) && same_rows(a.before, b.before) &&
          same_rows(a.after, b.after) && same_rows(a.sub, b.sub) &&
-         same_rows(a.node, b.node) && (a.chart == b.chart);
+         same_rows(a.node, b.node) && (a.folded == b.folded) && (a.chart == b.chart);
 }
 
 SubmachineOrders ordered(Chart const &c,
@@ -275,7 +275,7 @@ TEST_CASE("order memo: a remembered frame is the frame those inputs order to") {
 
 TEST_CASE("size memo: a remembered frame is the layout those inputs size to") {
   scav_profile const p{ readable() };
-  constexpr uint32_t VARIANTS{ 14 };
+  constexpr uint32_t VARIANTS{ 16 };
   std::vector<uint32_t> moved(VARIANTS, 0);
   std::vector<Scatter> charts;
   for (char const *name : CHARTS) {
@@ -309,6 +309,19 @@ TEST_CASE("size memo: a remembered frame is the layout those inputs size to") {
     SubmachineOrders const o_pinned{ order_submachines(c, g, s, p, 1, pinned) };
     SubmachineOrders unlabelled{ o };  // the same gaps, charged to lanes alone
     std::fill(unlabelled.labels.begin(), unlabelled.labels.end(), 0);
+    // One frame's fold pinned: the first folded frame unfolded, the first frame folded.
+    SearchPins unfolded;
+    for (uint32_t m = 0; (m < base.z.folded.size()) && unfolded.folds.empty(); ++m) {
+      if (base.z.folded[m] != 0) {
+        unfolded.folds.push_back({ .frame = SubmachineId{ m }, .mode = FOLD_NEVER });
+      }
+    }
+    SearchPins folded;
+    if (t.frame.v != INVALID) {
+      folded.folds.push_back({ .frame = t.frame, .mode = FOLD_ALWAYS });
+    }
+    SubmachineOrders const o_unfolded{ order_submachines(c, g, s, p, 1, unfolded) };
+    SubmachineOrders const o_folded{ order_submachines(c, g, s, p, 1, folded) };
 
     scav_profile node_sep{ p };
     node_sep.node_sep += 9;
@@ -423,6 +436,18 @@ TEST_CASE("size memo: a remembered frame is the layout those inputs size to") {
           .pack = Compaction::Off,
           .fold = Fold::Always },
         { .o = &unlabelled,
+          .p = &p,
+          .req = &req,
+          .dar = DarSource::Profile,
+          .pack = Compaction::Off,
+          .fold = Fold::Scale },
+        { .o = &o_unfolded,
+          .p = &p,
+          .req = &req,
+          .dar = DarSource::Profile,
+          .pack = Compaction::Off,
+          .fold = Fold::Scale },
+        { .o = &o_folded,
           .p = &p,
           .req = &req,
           .dar = DarSource::Profile,

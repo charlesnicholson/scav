@@ -114,7 +114,10 @@ bool read_value(std::string_view flag, std::string_view value, LayoutArgs &out) 
     return true;
   }
   if (!ordinal_pair(value, a, b)) { return false; }
-  if (flag == "--rank") {
+  if (flag == "--fold") {
+    if (b > FOLD_NEVER) { return false; }
+    out.pins.folds.push_back({ .frame = SubmachineId{ a }, .mode = b });
+  } else if (flag == "--rank") {
     out.pins.ranks.push_back({ .state = StateId{ a }, .rank = b });
   } else if (flag == "--cut") {
     out.pins.cuts.push_back({ .trans = TransId{ a }, .leg = b });
@@ -137,7 +140,7 @@ ArgRead read_layout_arg(int argc, char **argv, int &i, LayoutArgs &out) {
   }
   if ((arg != "--profile") && (arg != "--portfolio-row") && (arg != "--rank") &&
       (arg != "--cut") && (arg != "--reverse") && (arg != "--face") &&
-      (arg != "--orient") && (arg != "--side")) {
+      (arg != "--orient") && (arg != "--side") && (arg != "--fold")) {
     return ArgRead::NotOurs;
   }
   // The increment is its own statement: clang-tidy's
@@ -194,6 +197,7 @@ void append_layout_args(std::string &out,
     out += ':';
     string_append_u32(out, sp.side);
   }
+  for (FoldPin const &f : pins.folds) { pair("--fold", f.frame.v, f.mode); }
 }
 
 void load_and_report(char const *path, bool validate, Loaded &out) {

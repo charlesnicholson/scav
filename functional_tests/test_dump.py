@@ -131,6 +131,14 @@ class TestDump(unittest.TestCase):
         self.assertEqual(1, len(rests))
         self.assertIn("--orient 0", rests[0])
 
+    def test_a_frame_fold_is_part_of_what_a_layout_rests_on(self) -> None:
+        # `--fold F:M` is a pin like the others: given, it is reported.
+        shipped = self.run_dump("--layout", "--no-search", "--fold", "0:2", CHART.as_posix())
+        self.assertEqual(0, shipped.returncode)
+        rests = [ln for ln in shipped.stdout.splitlines() if ln.startswith("  rests on ")]
+        self.assertEqual(1, len(rests))
+        self.assertIn("--fold 0:2", rests[0])
+
     def test_an_unknown_profile_is_refused(self) -> None:
         result = self.run_dump("--layout", "--profile", "nonesuch", CHART.as_posix())
         self.assertNotEqual(0, result.returncode)
@@ -139,7 +147,8 @@ class TestDump(unittest.TestCase):
     def test_a_malformed_pin_is_a_usage_error(self) -> None:
         for bad in (["--rank", "1"], ["--cut", "a:b"], ["--face", "1:0:2:0"],
                     ["--portfolio-row", "99"], ["--no-search", "--no-search"],
-                    ["--no-text", "--no-text"], ["--profile"], ["--orient", "x"]):
+                    ["--no-text", "--no-text"], ["--profile"], ["--orient", "x"],
+                    ["--fold", "0:3"], ["--fold", "0"]):
             with self.subTest(bad=bad):
                 result = self.run_dump("--layout", *bad, CHART.as_posix())
                 self.assertEqual(2, result.returncode)

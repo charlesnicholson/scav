@@ -27,7 +27,8 @@ constexpr std::string_view USAGE{
   "and diff against the goldens\n"
   "\n"
   "  LAYOUT: --profile NAME, --portfolio-row N, --rank S:R, --cut T:L, "
-  "--reverse T:L, --face T:L:E:F, --orient F, --side T:L:E:S, --no-search, --no-text\n"
+  "--reverse T:L, --face T:L:E:F, --orient F, --side T:L:E:S, --fold F:M, --no-search, "
+  "--no-text\n"
 };
 
 int usage() {

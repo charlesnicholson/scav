@@ -1084,6 +1084,8 @@ void put_pins(SearchPins const &p, std::vector<uint32_t> &w) {
   for (SidePin const &sp : p.sides) {
     w.insert(w.end(), { sp.trans.v, sp.leg, sp.end, sp.side });
   }
+  w.push_back(static_cast<uint32_t>(p.folds.size()));
+  for (FoldPin const &f : p.folds) { w.insert(w.end(), { f.frame.v, f.mode }); }
 }
 
 // The inverse of `put_pins`, reading from `at` and advancing it.
@@ -1106,6 +1108,8 @@ SearchPins get_pins(int32_t const *w, uint32_t &at) {
   for (SidePin &sp : p.sides) {
     sp = { .trans = TransId{ next() }, .leg = next(), .end = next(), .side = next() };
   }
+  p.folds.resize(next());
+  for (FoldPin &f : p.folds) { f = { .frame = SubmachineId{ next() }, .mode = next() }; }
   return p;
 }
 
@@ -1531,7 +1535,7 @@ bool layout_run(Chart &c,
     auto const outside = [&](uint32_t frame, std::vector<uint8_t> const &redo) {
       return (frame >= redo.size()) || (redo[frame] == 0);
     };
-    // The incumbent's pins less every rank, cut, face and side pin in a re-decided
+    // The incumbent's pins less every rank, cut, face, side and fold pin in a re-decided
     // frame; orientations and reversals are kept.
     auto const warm = [&](SearchPins const &from, std::vector<uint8_t> const &redo) {
       SearchPins out;
@@ -1551,6 +1555,9 @@ bool layout_run(Chart &c,
       for (FacePin const &fp : from.faces) {
         if (outside(frame_of_leg(fp.trans, fp.leg), redo)) { out.faces.push_back(fp); }
       }
+      for (FoldPin const &fp : from.folds) {
+        if (outside(fp.frame.v, redo)) { out.folds.push_back(fp); }
+      }
       return out;
     };
     auto const take = [&](Improved &&won) {
@@ -1559,7 +1566,7 @@ bool layout_run(Chart &c,
       held[best] = std::move(won.held);
     };
     // Rounds of kicks until none improves, then one settling pass. `turns`
-    // adds a frame turned to run down to the reversals a round tries.
+    // adds a frame turned to run down, and one refolded, to the reversals a round tries.
     auto const kick_rounds = [&](bool turns) {
       bool kicked{ false };
       // Kicks draw from the move budget.
@@ -1572,11 +1579,12 @@ bool layout_run(Chart &c,
         for (OrderEdge const &e : here.edges) {
           if ((e.reversed != 0) && (e.segment < turned.size())) { turned[e.segment] = 1; }
         }
-        // A kick is a reversal or a frame turned to run down, kept only where it converges
-        // cheaper.
+        // A kick is a reversal, a frame turned to run down or a frame refolded, kept only
+        // where it converges cheaper.
         struct Kick {
           ReversePin reverse{};
           OrientPin orient{};
+          FoldPin fold{};
         };
         std::vector<Kick> kicks;
         std::vector<uint32_t> kick_frame;
@@ -1599,9 +1607,27 @@ bool layout_run(Chart &c,
           kicks.push_back({ .orient = { .frame = SubmachineId{ m } } });
           kick_frame.push_back(m);
         }
+        // A frame across the page with no fold pin, kicked to the fold it does not draw.
+        std::vector<uint8_t> const &folded{ candidates[best].sized.folded };
+        for (uint32_t m = 0; turns && (m < here.sub_ranks.size()); ++m) {
+          bool const fold_pinned{ std::ranges::any_of(
+              held[best].folds,
+              [m](FoldPin const &had) { return had.frame.v == m; }) };
+          if ((c.submachines[m].live == 0) || (here.sub_ranks[m] < 2) ||
+              (here.sub_down[m] != 0) || (m >= folded.size()) || fold_pinned ||
+              (kick_scored >= budget)) {
+            continue;
+          }
+          ++kick_scored;
+          uint32_t const mode{ (folded[m] != 0) ? FOLD_NEVER : FOLD_ALWAYS };
+          kicks.push_back({ .fold = { .frame = SubmachineId{ m }, .mode = mode } });
+          kick_frame.push_back(m);
+        }
         if (kicks.empty()) { break; }
         auto const with_kick = [](SearchPins &into, Kick const &k) {
-          if (k.orient.frame.v != INVALID) {
+          if (k.fold.frame.v != INVALID) {
+            into.folds.push_back(k.fold);
+          } else if (k.orient.frame.v != INVALID) {
             into.orients.push_back(k.orient);
           } else {
             into.reverses.push_back(k.reverse);
@@ -1808,7 +1834,8 @@ bool layout_run(Chart &c,
   if (moves != nullptr) {
     auto const count = [](SearchPins const &q) {
       return static_cast<uint32_t>(q.ranks.size() + q.cuts.size() + q.reverses.size() +
-                                   q.faces.size() + q.orients.size() + q.sides.size());
+                                   q.faces.size() + q.orients.size() + q.sides.size() +
+                                   q.folds.size());
     };
     uint32_t const now{ count(held[best]) };
     uint32_t const had{ count(seed) };

@@ -35,6 +35,7 @@ enum class TraceKind : uint16_t {
   ColumnCentred,      // a state moved along its column onto a joined state's centre
   PiecePacked,        // where the packing put one piece of a component's rank run
   GapCharged,         // phase 1 asked a rank boundary for width beyond rank_sep
+  FoldPinned,         // a fold pin decided a frame's fold; `pass` is its mode
 };
 
 // What a rank boundary's charge is for; `GapCharged.pass`. `Held` charges

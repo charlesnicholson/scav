@@ -167,6 +167,16 @@ struct SidePin {
   uint32_t side{ 0 };
 };
 
+// Whether a frame's rank run folds, in place of its row's rule: `mode` 0 as the scale
+// measure picks, 1 always, 2 never. A frame running down never folds.
+inline constexpr uint32_t FOLD_SCALE{ 0 };
+inline constexpr uint32_t FOLD_ALWAYS{ 1 };
+inline constexpr uint32_t FOLD_NEVER{ 2 };
+struct FoldPin {
+  SubmachineId frame{ INVALID };
+  uint32_t mode{ FOLD_SCALE };
+};
+
 // Everything besides the tuple that a drawing is a function of.
 struct SearchPins {
   std::vector<RankPin> ranks;
@@ -175,6 +185,7 @@ struct SearchPins {
   std::vector<FacePin> faces;
   std::vector<OrientPin> orients;
   std::vector<SidePin> sides;
+  std::vector<FoldPin> folds;  // the last pin naming a frame decides it
 };
 
 // Rows in the fixed table of chart-global phase-2 tuples Level 2 chooses

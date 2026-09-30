@@ -45,6 +45,7 @@ readable orthogonal gauntlet/through.scav 0 0 0 0 0 0 0 0 44224 9830912
 readable orthogonal gauntlet/tight.scav 0 0 0 0 0 0 0 0 65664 11197440
 readable orthogonal gauntlet/transit.scav 0 19 96 1 4672 0 0 0 162588 103487200
 readable orthogonal gauntlet/under.scav 0 2 0 0 309 0 0 0 32480 6632640
+readable orthogonal gauntlet/unfolded.scav 0 4 0 0 162 0 0 0 45248 24569856
 readable straight gauntlet/above.scav 0 1 0 0 7 0 0 0 50944 9289728
 readable straight gauntlet/chain.scav 0 0 0 0 0 0 0 0 16256 5910528
 readable straight gauntlet/crossing.scav 3 1 1136 0 8 0 0 0 44736 9614848
@@ -70,6 +71,7 @@ readable straight gauntlet/through.scav 1 1 0 0 8 0 0 0 44224 9830912
 readable straight gauntlet/tight.scav 2 1 0 0 19 0 0 0 65664 11197440
 readable straight gauntlet/transit.scav 3 6 0 3 1214 0 0 0 162588 103487200
 readable straight gauntlet/under.scav 2 2 0 0 104 0 0 0 32480 6632640
+readable straight gauntlet/unfolded.scav 4 0 2944 0 0 0 0 0 45248 24569856
 compact orthogonal gauntlet/above.scav 0 0 0 0 0 0 0 0 11208 3971904
 compact orthogonal gauntlet/chain.scav 0 2 0 0 19 0 0 0 1504 2611200
 compact orthogonal gauntlet/crossing.scav 0 0 0 0 0 0 0 0 9992 3997632
@@ -95,6 +97,7 @@ compact orthogonal gauntlet/through.scav 0 0 0 0 0 0 0 0 9992 3997632
 compact orthogonal gauntlet/tight.scav 0 2 0 0 20 0 0 0 7208 6063232
 compact orthogonal gauntlet/transit.scav 0 19 58 1 2803 0 0 0 36352 43756544
 compact orthogonal gauntlet/under.scav 0 2 0 0 203 0 0 0 7420 2957352
+compact orthogonal gauntlet/unfolded.scav 0 4 0 0 38 0 0 0 10704 10146816
 compact straight gauntlet/above.scav 0 1 0 0 4 0 0 0 11208 3971904
 compact straight gauntlet/chain.scav 0 0 0 0 0 0 0 0 1504 2611200
 compact straight gauntlet/crossing.scav 3 1 768 0 5 0 0 0 9992 3997632
@@ -120,3 +123,4 @@ compact straight gauntlet/through.scav 1 1 0 0 5 0 0 0 9992 3997632
 compact straight gauntlet/tight.scav 1 1 0 1 13 0 0 0 7208 6063232
 compact straight gauntlet/transit.scav 3 6 0 3 713 0 0 0 36352 43756544
 compact straight gauntlet/under.scav 2 2 0 0 67 0 0 0 7420 2957352
+compact straight gauntlet/unfolded.scav 5 0 1808 0 0 0 0 0 10704 10146816

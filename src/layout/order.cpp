@@ -760,6 +760,12 @@ SubmachineOrders order_submachines(Chart const &c,
   for (OrientPin const &pin : pins.orients) {
     if (pin.frame.v < o.sub_down.size()) { o.sub_down[pin.frame.v] = 1; }
   }
+  o.sub_fold.assign(c.submachines.size(), 0);
+  for (FoldPin const &pin : pins.folds) {
+    if ((pin.frame.v < o.sub_fold.size()) && (pin.mode <= FOLD_NEVER)) {
+      o.sub_fold[pin.frame.v] = static_cast<uint8_t>(pin.mode + 1);
+    }
+  }
   o.sub_gaps.assign(c.submachines.size(), Span{});
   o.state_node.assign(c.states.size(), INVALID);
   o.seg_node.assign(g.segments.size(), INVALID);
