@@ -34,9 +34,10 @@ function(scav_settings target)
   endif()
 endfunction()
 
-# scav_optimize_for_size(<target> [SOURCES <file>...]) -- on GCC and Clang front ends,
-# Release compiles <target> and a library's _testable twin at -Os, overriding the
-# configuration's -O. With SOURCES, only those files, in every target of <target>'s directory.
+# scav_optimize_for_size(<target> [SOURCES <file>...]) -- on GCC and Clang front
+# ends, Release compiles <target> and a library's _testable twin at -Os, overriding
+# the configuration's -O. With SOURCES, only those files, in every target of
+# <target>'s directory.
 function(scav_optimize_for_size target)
   cmake_parse_arguments(PARSE_ARGV 1 arg "" "" "SOURCES")
   if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
@@ -54,8 +55,8 @@ function(scav_optimize_for_size target)
   endforeach()
 endfunction()
 
-# scav_dead_code_strip(<target>) -- a Release link drops unreferenced code and, for
-# a Mach-O executable, exports nothing. MSVC links Release with /OPT:REF,ICF by default.
+# scav_dead_code_strip(<target>) -- a Release link drops unreferenced code and, for a
+# Mach-O executable, exports nothing. MSVC links Release with /OPT:REF,ICF by default.
 function(scav_dead_code_strip target)
   if(CMAKE_EXECUTABLE_FORMAT STREQUAL "MACHO")
     set(flags "-dead_strip")
@@ -70,7 +71,7 @@ function(scav_dead_code_strip target)
 endfunction()
 
 # scav_export_c_abi(<shared library> <abi json>) -- exports exactly the golden's
-# functions: a .def on Windows, an exported-symbols list on Mach-O, a version script on ELF.
+# functions: a .def on Windows, an export list on Mach-O, a version script on ELF.
 function(scav_export_c_abi target abi_json)
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${abi_json}")
   file(READ "${abi_json}" abi)
@@ -107,7 +108,8 @@ function(scav_export_c_abi target abi_json)
     target_link_options(${target} PRIVATE "LINKER:--version-script=${base}.map")
     set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS "${base}.map")
   else()
-    message(FATAL_ERROR "scav_export_c_abi: no export list for ${CMAKE_EXECUTABLE_FORMAT}")
+    message(FATAL_ERROR
+      "scav_export_c_abi: no export list for ${CMAKE_EXECUTABLE_FORMAT}")
   endif()
 endfunction()
 
