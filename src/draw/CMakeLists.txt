@@ -2,7 +2,7 @@
 # the reference builder. No dependency on layout -- a builder reads geometry
 # columns by name and does not care who wrote them.
 
-# The bundled font's metrics are bundled_font_table.inc, generated from the TTF by
+# The bundled font's metrics are bundled_font_table.h, generated from the TTF by
 # gen_font_table.py; the TTF itself is installed beside the CLI, not compiled in.
 scav_static_library(scavdraw
   c_api.cpp

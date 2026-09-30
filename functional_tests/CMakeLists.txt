@@ -104,7 +104,7 @@ scav_add_functional_test(render
           "${PROJECT_SOURCE_DIR}/tools/baseline.py"
           "${PROJECT_SOURCE_DIR}/assets/font/JetBrainsMono-Regular.ttf"
           "${PROJECT_SOURCE_DIR}/src/draw/gen_font_table.py"
-          "${PROJECT_SOURCE_DIR}/src/draw/bundled_font_table.inc"
+          "${PROJECT_SOURCE_DIR}/src/draw/bundled_font_table.h"
           "$<TARGET_FILE:scav>"
   TARGETS scav
 )

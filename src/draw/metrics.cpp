@@ -4,6 +4,7 @@
 
 #include "scav/scav_draw.h"
 
+#include "draw/bundled_font_table.h"
 #include "scav/scav_types.h"
 #include "scav_int.h"
 #include "scav_xxhash.h"
@@ -16,8 +17,6 @@
 namespace scav {
 
 namespace {
-
-#include "draw/bundled_font_table.inc"  // NOLINT(bugprone-suspicious-include)
 
 // Bounds-checked big-endian reads. A font is untrusted input, so every read
 // returns false past the end rather than trusting a length in the file.
