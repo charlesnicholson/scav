@@ -42,9 +42,11 @@ set_target_properties(scav_shared PROPERTIES
   # OUTPUT_NAME would land this on the scav executable's own PDB, and the two
   # links race for the write. The PDB alone keeps the target name.
   PDB_NAME scav_shared
-  # MSVC exports nothing without either a .def file or this.
-  WINDOWS_EXPORT_ALL_SYMBOLS TRUE
 )
+scav_export_c_abi(scav_shared "${PROJECT_SOURCE_DIR}/abi/scav_abi.json")
+scav_dead_code_strip(scav_shared)
+# The build tree keeps its symbols; `cmake --install --strip` removes them.
+install(TARGETS scav_shared)
 
 # Not in ALL and not a dependency of unicode_nfc.cpp: the .inc files are
 # committed, so a build needs neither the network nor Python.

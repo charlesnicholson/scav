@@ -45,6 +45,17 @@ scav_static_library(scavlayout
   cost.cpp
 )
 scav_install_library(scavlayout layout)
+# Off the search's hot path; the rest of layout stays at -O3.
+scav_optimize_for_size(scavlayout SOURCES
+  "../scav_thread_${scav_thread_backend_file}.cpp"
+  c_api.cpp
+  layout.cpp
+  profile.cpp
+  router.cpp
+  router_straight.cpp
+  spaces.cpp
+  trace.cpp
+)
 target_link_libraries(scavlayout PUBLIC scavcore)
 target_link_libraries(scavlayout_testable PUBLIC scavcore_testable)
 

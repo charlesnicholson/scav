@@ -77,6 +77,9 @@ class TestInstallAndConsume(unittest.TestCase):
         self.assertTrue(list((self.prefix / "lib").glob("*scavlayout*")), "no layout archive")
         self.assertTrue(list((self.prefix / "lib").glob("*scavdraw*")), "no draw archive")
         self.assertTrue(list((self.prefix / "lib").glob("*scavsvg*")), "no svg archive")
+        self.assertTrue(any((self.prefix / rel).is_file() for rel in
+                            ("lib/libscav.dylib", "lib/libscav.so", "bin/scav.dll")),
+                        "no shared library")
 
     def test_every_installed_header_is_a_public_one(self) -> None:
         """The public/private split is a directory layout, so it is only real if
