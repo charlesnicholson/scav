@@ -10,6 +10,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <ostream>
@@ -403,4 +404,47 @@ TEST_CASE("thread: a mutex lets one holder in at a time") {
   });
   CHECK(overlaps.load() == 0U);
   CHECK(total == uint64_t{ 16 } * HOLDS);
+}
+
+// Host threads rather than pool workers, so the null backend's lock is contended too.
+TEST_CASE("thread: a mutex lets one host thread in at a time") {
+  Mutex m;
+  std::atomic<uint32_t> inside{ 0 };
+  std::atomic<uint32_t> overlaps{ 0 };
+  uint64_t total{ 0 };
+  constexpr uint32_t HOLDS{ 20000 };
+  auto const hold = [&] {
+    for (uint32_t i = 0; i < HOLDS; ++i) {
+      ScopedLock const held{ m };
+      if (inside.fetch_add(1U) != 0U) { overlaps.fetch_add(1U); }
+      uint32_t volatile dwell{ 0 };
+      for (uint32_t k = 0; k < 64U; ++k) { dwell = dwell + 1U; }
+      ++total;
+      inside.fetch_sub(1U);
+    }
+  };
+  std::thread first(hold);
+  std::thread second(hold);
+  first.join();
+  second.join();
+  CHECK(overlaps.load() == 0U);
+  CHECK(total == uint64_t{ 2 } * HOLDS);
+}
+
+TEST_CASE("thread: a mutex held on one host thread keeps another out until released") {
+  Mutex m;
+  std::atomic<bool> trying{ false };
+  std::atomic<bool> entered{ false };
+  m.lock();
+  std::thread other([&] {
+    trying.store(true);
+    ScopedLock const held{ m };
+    entered.store(true);
+  });
+  while (!trying.load()) { std::this_thread::yield(); }
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  CHECK_FALSE(entered.load());
+  m.unlock();
+  other.join();
+  CHECK(entered.load());
 }

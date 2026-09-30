@@ -34,7 +34,7 @@ void parallel_for(uint32_t shards, uint32_t threads, F &&fn) {
 }
 
 // Excludes every other holder while held, around a lookup or insert into state shards
-// share, never around a shard's own work. Not recursive; a no-op in the null backend.
+// share, never around a shard's own work. Not recursive; a spin lock in the null backend.
 class Mutex {
  public:
   Mutex();

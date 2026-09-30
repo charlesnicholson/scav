@@ -154,6 +154,23 @@ class TestDump(unittest.TestCase):
         other = self.run_dump("--layout", "--no-search", "--fold", "0:1:3", CHART.as_posix())
         self.assertNotEqual(shipped.stdout, other.stdout)
 
+    def test_a_port_side_is_part_of_what_a_layout_rests_on(self) -> None:
+        # `--side T:L:E:S` is reported field for field, and lays out again from it.
+        chart = "test_data/charts/toolchanger.scav"
+        shipped = self.run_dump("--layout", "--no-search", "--side", "6:1:0:2", chart)
+        self.assertEqual(0, shipped.returncode)
+        rests = [ln for ln in shipped.stdout.splitlines() if ln.startswith("  rests on ")]
+        self.assertEqual(1, len(rests))
+        self.assertIn(" --side 6:1:0:2", rests[0])
+        again = self.run_dump("--layout", "--no-search", *rests[0].split()[2:], chart)
+        self.assertEqual(0, again.returncode)
+        self.assertEqual(shipped.stdout, again.stdout)
+        other = self.run_dump("--layout", "--no-search", "--side", "6:1:0:3", chart)
+        self.assertEqual(0, other.returncode)
+        geometry = [ln for ln in shipped.stdout.splitlines() if ln.startswith("geometry ")]
+        self.assertNotEqual(geometry, [ln for ln in other.stdout.splitlines()
+                                       if ln.startswith("geometry ")])
+
     def test_toolchanger_keeps_travel_whole_and_extend_straight(self) -> None:
         # At real text the search leaves `travel` unfolded, and `extend` runs straight
         # into `Cruising`.
@@ -178,7 +195,9 @@ class TestDump(unittest.TestCase):
                     ["--portfolio-row", "99"], ["--no-search", "--no-search"],
                     ["--no-text", "--no-text"], ["--profile"], ["--orient", "x"],
                     ["--fold", "0:3"], ["--fold", "0"], ["--fold", "0:3:1"],
-                    ["--fold", "0:1:x"], ["--fold", "0:1:"]):
+                    ["--fold", "0:1:x"], ["--fold", "0:1:"], ["--side"],
+                    ["--side", "6:1:0"], ["--side", "6:1:2:0"], ["--side", "6:1:0:4"],
+                    ["--side", "6:1:0:x"], ["--side", "6:1:0:"], ["--side", "6:1:0:2:1"]):
             with self.subTest(bad=bad):
                 result = self.run_dump("--layout", *bad, CHART.as_posix())
                 self.assertEqual(2, result.returncode)
