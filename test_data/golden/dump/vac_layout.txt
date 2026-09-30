@@ -79,6 +79,7 @@ geometry structural 928ff0f9 coordinate 6301c7e4
     crowding 0 share 0bp
     length 20536 share 1645bp
     transit_bends 0 share 0bp
+    whitespace 42871510 share 0bp
   label leader 96
     placed t1 881,1007 1050x269
     placed t4 2307,5121 1396x269

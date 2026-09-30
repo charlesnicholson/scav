@@ -217,6 +217,7 @@ TEST_CASE("drawlist corpus: the cost terms on the rendered scale") {
                                 t.area,
                                 t.length,
                                 t.transit_bends,
+                                t.whitespace,
                                 scored.t2 }) {
       actual += ' ';
       actual += std::to_string(term);

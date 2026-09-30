@@ -269,6 +269,7 @@ class scav_profile(ctypes.Structure):
         ("w_crowding", ctypes.c_int32),
         ("w_length", ctypes.c_int32),
         ("w_transit_bends", ctypes.c_int32),
+        ("w_whitespace", ctypes.c_int32),
         ("portfolio_k", ctypes.c_int32),
         ("portfolio_m", ctypes.c_int32),
         ("sweep_count", ctypes.c_int32),
@@ -279,7 +280,7 @@ class scav_profile(ctypes.Structure):
         ("print_columns", ctypes.c_int32),
     ]
 
-assert ctypes.sizeof(scav_profile) == 204, "scav_profile is not 204 bytes"
+assert ctypes.sizeof(scav_profile) == 208, "scav_profile is not 208 bytes"
 assert ctypes.alignment(scav_profile) == 4
 assert getattr(scav_profile, "profile_id").offset == 0
 assert getattr(scav_profile, "profile_version").offset == 4
@@ -308,14 +309,15 @@ assert getattr(scav_profile, "w_area").offset == 156
 assert getattr(scav_profile, "w_crowding").offset == 160
 assert getattr(scav_profile, "w_length").offset == 164
 assert getattr(scav_profile, "w_transit_bends").offset == 168
-assert getattr(scav_profile, "portfolio_k").offset == 172
-assert getattr(scav_profile, "portfolio_m").offset == 176
-assert getattr(scav_profile, "sweep_count").offset == 180
-assert getattr(scav_profile, "congestion_iterations").offset == 184
-assert getattr(scav_profile, "ripup_cap").offset == 188
-assert getattr(scav_profile, "spacing_inflation_cap").offset == 192
-assert getattr(scav_profile, "spacing_inflation_increment").offset == 196
-assert getattr(scav_profile, "print_columns").offset == 200
+assert getattr(scav_profile, "w_whitespace").offset == 172
+assert getattr(scav_profile, "portfolio_k").offset == 176
+assert getattr(scav_profile, "portfolio_m").offset == 180
+assert getattr(scav_profile, "sweep_count").offset == 184
+assert getattr(scav_profile, "congestion_iterations").offset == 188
+assert getattr(scav_profile, "ripup_cap").offset == 192
+assert getattr(scav_profile, "spacing_inflation_cap").offset == 196
+assert getattr(scav_profile, "spacing_inflation_increment").offset == 200
+assert getattr(scav_profile, "print_columns").offset == 204
 
 class scav_port_slot(ctypes.Structure):
     _fields_ = [
@@ -339,11 +341,11 @@ class scav_layout_opts(ctypes.Structure):
         ("threads", ctypes.c_uint32),
     ]
 
-assert ctypes.sizeof(scav_layout_opts) == 212, "scav_layout_opts is not 212 bytes"
+assert ctypes.sizeof(scav_layout_opts) == 216, "scav_layout_opts is not 216 bytes"
 assert ctypes.alignment(scav_layout_opts) == 4
 assert getattr(scav_layout_opts, "profile").offset == 0
-assert getattr(scav_layout_opts, "router").offset == 204
-assert getattr(scav_layout_opts, "threads").offset == 208
+assert getattr(scav_layout_opts, "router").offset == 208
+assert getattr(scav_layout_opts, "threads").offset == 212
 
 class scav_style(ctypes.Structure):
     _fields_ = [

@@ -869,6 +869,7 @@ TEST_CASE("cost: every Tier-2 term is scored in the unit the profile names it") 
   CHECK(only(&CostTerms::crowding, 1) == int64_t{ p.w_crowding });
   CHECK(only(&CostTerms::length, 1) == int64_t{ p.w_length });
   CHECK(only(&CostTerms::transit_bends, 1) == int64_t{ p.w_transit_bends });
+  CHECK(only(&CostTerms::whitespace, 1) == int64_t{ p.w_whitespace });
 
   // A whole unit each way, and one grid unit past it.
   CHECK(only(&CostTerms::corridor, em) == int64_t{ p.w_corridor });
@@ -877,6 +878,17 @@ TEST_CASE("cost: every Tier-2 term is scored in the unit the profile names it") 
   CHECK(only(&CostTerms::length, em + 1) == (2 * int64_t{ p.w_length }));
   CHECK(only(&CostTerms::area, em * em) == int64_t{ p.w_area });
   CHECK(only(&CostTerms::area, (em * em) + 1) == (2 * int64_t{ p.w_area }));
+  // Whitespace ships unpriced, so its unit is read at a weight of its own.
+  scav_profile priced{ p };
+  priced.w_whitespace = 3;
+  auto const whitespace = [&priced](int64_t v) {
+    CostTerms t;
+    t.whitespace = v;
+    return cost_of(t, priced).t2;
+  };
+  CHECK(whitespace(1) == 3);
+  CHECK(whitespace(em * em) == 3);
+  CHECK(whitespace((em * em) + 1) == 6);
 
   // Nothing scored is still nothing, which is what makes an unlaid chart zero.
   CHECK(cost_of(CostTerms{}, p).t2 == 0);
@@ -899,15 +911,17 @@ TEST_CASE("cost: the shipped weights sum a hand-built term vector") {
   t.area = 100000;     // 3 em squared
   t.length = 2000;     // 11
   t.transit_bends = 2;
+  t.whitespace = 40000;  // 2 em squared
   CHECK(cost_of(t, p).t2 ==
         ((int64_t{ p.w_bends } * 3) + (int64_t{ p.w_corridor } * 3) +
          (int64_t{ p.w_crossings } * 5) + (int64_t{ p.w_excess_len } * 6) +
          (int64_t{ p.w_adjacency } * 2) + (int64_t{ p.w_label } * 4) +
          (int64_t{ p.w_label_near } * 2) + (int64_t{ p.w_aspect } * 3) +
          (int64_t{ p.w_area } * 3) + (int64_t{ p.w_length } * 11) +
-         (int64_t{ p.w_transit_bends } * 2)));
-  CHECK(cost_of(t, p).t2 ==
-        7473 + (int64_t{ p.w_length } * 11) + (int64_t{ p.w_transit_bends } * 2));
+         (int64_t{ p.w_transit_bends } * 2) + (int64_t{ p.w_whitespace } * 2)));
+  CHECK(cost_of(t, p).t2 == 7473 + (int64_t{ p.w_length } * 11) +
+                                (int64_t{ p.w_transit_bends } * 2) +
+                                (int64_t{ p.w_whitespace } * 2));
 }
 
 TEST_CASE("cost: an em of one grid unit leaves every length where it stood") {
@@ -924,10 +938,12 @@ TEST_CASE("cost: an em of one grid unit leaves every length where it stood") {
   t.aspect = 500;
   t.area = 100000;
   t.length = 2000;
+  t.whitespace = 40000;
   CHECK(cost_of(t, p).t2 ==
         ((int64_t{ p.w_corridor } * 400) + (int64_t{ p.w_excess_len } * 1000) +
          (int64_t{ p.w_label_near } * 300) + (int64_t{ p.w_aspect } * 500) +
-         (int64_t{ p.w_area } * 100000) + (int64_t{ p.w_length } * 2000)));
+         (int64_t{ p.w_area } * 100000) + (int64_t{ p.w_length } * 2000) +
+         (int64_t{ p.w_whitespace } * 40000)));
 }
 
 TEST_CASE("cost: the shares divide the sum into floored basis points") {
@@ -1298,6 +1314,89 @@ TEST_CASE("cost: a chart already at the desired ratio pays no aspect") {
   int64_t const em{ p.font_size_grid };
   CHECK(cost_of(off, p).t2 == ((int64_t{ p.w_aspect } * ceil_div(off.aspect, em)) +
                                (int64_t{ p.w_area } * ceil_div(off.area, em * em))));
+}
+
+namespace {
+
+// Outer holds A and B in one region; Leaf sits beside it in the root.
+struct Composite {
+  Chart c;
+  StateId outer, a, b, leaf;
+  SubmachineId inner;
+};
+
+Composite composite_chart() {
+  Composite k;
+  SubmachineId const root{ build_chart(k.c, "t", {}) };
+  k.outer = build_state(k.c, root, "Outer", StateKind::Normal, {});
+  k.inner = build_submachine(k.c, k.outer, "main", {});
+  k.a = build_state(k.c, k.inner, "A", StateKind::Normal, {});
+  k.b = build_state(k.c, k.inner, "B", StateKind::Normal, {});
+  k.leaf = build_state(k.c, root, "Leaf", StateKind::Normal, {});
+  build_trans(k.c, k.a, k.b, TransKind::External, {});
+  return k;
+}
+
+// Outer `w` by `h` at the origin: a ring of 10, bands of 40 and 10, A and B 20 apart at
+// the hole's top left, in a chart at the desired ratio whatever Outer's size.
+SizedLayout composite_sizing(Composite const &k, int32_t w, int32_t h) {
+  SizedLayout z{ blank(k.c) };
+  z.state[k.outer.v] = { .x = 0, .y = 0, .w = w, .h = h };
+  z.before[k.outer.v] = { .x = 10, .y = 10, .w = w - 20, .h = 40 };
+  z.after[k.outer.v] = { .x = 10, .y = h - 20, .w = w - 20, .h = 10 };
+  z.sub[k.inner.v] = { .x = 10, .y = 50, .w = w - 20, .h = h - 70 };
+  z.state[k.a.v] = { .x = 10, .y = 50, .w = 100, .h = 60 };
+  z.state[k.b.v] = { .x = 130, .y = 50, .w = 100, .h = 60 };
+  z.state[k.leaf.v] = { .x = 1400, .y = 0, .w = 100, .h = 60 };
+  z.chart = { .x = 0, .y = 0, .w = 1600, .h = 1000 };
+  return z;
+}
+
+CostTerms composite_terms(Composite const &k,
+                          SizedLayout const &z,
+                          scav_profile const &p) {
+  Routes const r{ routes_of(k.c, { { { .x = 110, .y = 80 }, { .x = 130, .y = 80 } } }) };
+  return cost_terms(k.c, decompose(k.c), z, r, {}, p);
+}
+
+}  // namespace
+
+TEST_CASE("cost: whitespace is a composite's hole less its children's rects") {
+  Composite k{ composite_chart() };
+  scav_profile const p{ profile() };
+  // Tight: the hole is 220 by 60 and all of it but the gap between A and B is theirs.
+  CHECK(composite_terms(k, composite_sizing(k, 240, 130), p).whitespace == 20 * 60);
+  CHECK(composite_terms(k, composite_sizing(k, 440, 330), p).whitespace ==
+        (420 * 260) - (2 * 100 * 60));
+
+  // A tombstone holds nothing, and a state with no live region is no composite.
+  SizedLayout const tight{ composite_sizing(k, 240, 130) };
+  k.c.states[k.b.v].live = 0;
+  CHECK(composite_terms(k, tight, p).whitespace == (20 * 60) + (100 * 60));
+  k.c.states[k.b.v].live = 1;
+  k.c.submachines[k.inner.v].live = 0;
+  CHECK(composite_terms(k, tight, p).whitespace == 0);
+  k.c.submachines[k.inner.v].live = 1;
+
+  // Disjoint inside the chart when Tier 0 holds, so capped at its area.
+  SizedLayout small{ tight };
+  small.chart = { .x = 0, .y = 0, .w = 10, .h = 10 };
+  CHECK(composite_terms(k, small, p).whitespace == 100);
+}
+
+TEST_CASE("cost: a padded composite costs more than the same composite tight") {
+  Composite const k{ composite_chart() };
+  scav_profile p{ profile() };
+  REQUIRE(p.font_size_grid == 192);  // the ceilings below are read against it
+  p.w_whitespace = 1;
+  CostTerms const tight{ composite_terms(k, composite_sizing(k, 240, 130), p) };
+  CostTerms const padded{ composite_terms(k, composite_sizing(k, 440, 330), p) };
+  CHECK(padded.whitespace > tight.whitespace);
+  REQUIRE(padded.area == tight.area);
+  REQUIRE(padded.aspect == tight.aspect);
+  // One chart either way, so the whole difference is whitespace: 1 em squared against 3.
+  CHECK(cost_of(tight, p).t2 < cost_of(padded, p).t2);
+  CHECK((cost_of(padded, p).t2 - cost_of(tight, p).t2) == 2);
 }
 
 TEST_CASE("cost: the containment walk nests a descendant's interval in its own") {
@@ -2013,6 +2112,32 @@ CostTerms terms(Chart const &c,
   if (t.aspect < 0) { t.aspect = -t.aspect; }
   t.area = Wide{ z.chart.w } * z.chart.h;
 
+  // Each live state's rect charged to its region's owner by the parent link; a composite
+  // is a live owner of a live region.
+  std::vector<Wide> held(c.states.size(), 0);
+  std::vector<uint8_t> composite(c.states.size(), 0);
+  for (Submachine const &m : c.submachines) {
+    if ((m.live != 0) && (m.owner.v != INVALID)) { composite[m.owner.v] = 1; }
+  }
+  for (uint32_t st = 0; st < c.states.size(); ++st) {
+    SubmachineId const up{ c.states[st].parent };
+    if ((c.states[st].live == 0) || (up.v >= c.submachines.size()) ||
+        (c.submachines[up.v].live == 0) || (c.submachines[up.v].owner.v == INVALID)) {
+      continue;
+    }
+    held[c.submachines[up.v].owner.v] += Wide{ z.state[st].w } * z.state[st].h;
+  }
+  for (uint32_t st = 0; st < c.states.size(); ++st) {
+    if ((c.states[st].live == 0) || (composite[st] == 0)) { continue; }
+    scav_rect const &box{ z.state[st] };
+    scav_rect const &b{ z.before[st] };
+    Wide const top{ Wide{ b.y } + b.h };
+    Wide const bottom{ (Wide{ box.y } + box.h) - (Wide{ b.y } - box.y) - z.after[st].h };
+    Wide const hole{ Wide{ b.w } * imax(bottom - top, Wide{ 0 }) };
+    t.whitespace += imax(hole - held[st], Wide{ 0 });
+  }
+  t.whitespace = imin(t.whitespace, t.area);
+
   std::vector<Piece> pieces;
   std::vector<uint32_t> crossings_of(c.transitions.size(), 0);
   for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {
@@ -2166,20 +2291,19 @@ CostTerms terms(Chart const &c,
 
 }  // namespace reference
 
-constexpr uint32_t TERMS{ 17 };
+constexpr uint32_t TERMS{ 18 };
 
 std::array<int64_t, TERMS> terms_of(CostTerms const &t) {
-  return { t.bends,  t.corridor,      t.crossings,   t.excess_len,  t.adjacency,
-           t.label,  t.label_near,    t.aspect,      t.area,        t.crowding,
-           t.length, t.transit_bends, t.through_box, t.box_overlap, t.vanished,
-           t.flush,  t.through_region };
+  return { t.bends,    t.corridor,      t.crossings,     t.excess_len,  t.adjacency,
+           t.label,    t.label_near,    t.aspect,        t.area,        t.crowding,
+           t.length,   t.transit_bends, t.whitespace,    t.through_box, t.box_overlap,
+           t.vanished, t.flush,         t.through_region };
 }
 
 constexpr std::array<char const *, TERMS> TERM_NAMES{
-  "bends",  "corridor",      "crossings",   "excess_len",  "adjacency",
-  "label",  "label_near",    "aspect",      "area",        "crowding",
-  "length", "transit_bends", "through_box", "box_overlap", "vanished",
-  "flush",  "through_region"
+  "bends",      "corridor",    "crossings",   "excess_len", "adjacency", "label",
+  "label_near", "aspect",      "area",        "crowding",   "length",    "transit_bends",
+  "whitespace", "through_box", "box_overlap", "vanished",   "flush",     "through_region"
 };
 
 // The first term the two disagree on, or empty.

@@ -521,6 +521,39 @@ bool in_transit(Chart const &c,
   return false;
 }
 
+Wide area_of(scav_rect const &r) { return Wide{ r.w } * r.h; }
+
+// Per live composite, the hole between its text bands inside its padding less its live
+// children's rects, floored at zero; the sum capped at `chart`, its bound under Tier 0.
+Wide whitespace_of(Chart const &c, SizedLayout const &z, Wide chart) {
+  Wide total{ 0 };
+  for (uint32_t st = 0; st < c.states.size(); ++st) {
+    if (c.states[st].live == 0) { continue; }
+    bool composite{ false };
+    Wide held{ 0 };
+    Span const subs{ c.states[st].submachines };
+    for (uint32_t k = 0; k < subs.len; ++k) {
+      uint32_t const sub{ c.submachine_ids[subs.off + k].v };
+      if ((sub >= c.submachines.size()) || (c.submachines[sub].live == 0)) { continue; }
+      composite = true;
+      Span const kids{ c.submachines[sub].children };
+      for (uint32_t i = 0; i < kids.len; ++i) {
+        uint32_t const kid{ c.state_ids[kids.off + i].v };
+        if ((kid < c.states.size()) && (c.states[kid].live != 0)) {
+          held += area_of(z.state[kid]);
+        }
+      }
+    }
+    if (!composite) { continue; }
+    scav_rect const &r{ z.state[st] };
+    scav_rect const &b{ z.before[st] };
+    Wide const pad{ Wide{ b.y } - r.y };
+    Wide const h{ Wide{ r.h } - (2 * pad) - b.h - z.after[st].h };
+    total += imax((Wide{ b.w } * imax(h, Wide{ 0 })) - held, Wide{ 0 });
+  }
+  return imin(total, chart);
+}
+
 // Per-query visit stamps, so an item over several cells is visited once.
 struct Seen {
   std::vector<uint32_t> stamp;  // parallel to the rects the grid was built over
@@ -941,7 +974,8 @@ CostTerms cost_terms(CostContext const &ctx,
   if (!geometry_complete(c, z, r)) { return t; }
   t.aspect = (Wide{ z.chart.w } * p.dar_den) - (Wide{ z.chart.h } * p.dar_num);
   if (t.aspect < 0) { t.aspect = -t.aspect; }
-  t.area = Wide{ z.chart.w } * z.chart.h;
+  t.area = area_of(z.chart);
+  t.whitespace = whitespace_of(c, z, t.area);
 
   // Every route segment once, tagged with its transition; transition `tr`'s pieces
   // run from `first[tr]` to `first[tr + 1]`.
@@ -1251,7 +1285,8 @@ std::array<Wide, TIER2_TERMS> weighted_terms(CostTerms const &t, scav_profile co
            Wide{ p.w_area } * ceil_div(t.area, em2),
            Wide{ p.w_crowding } * ceil_div(t.crowding, em),
            Wide{ p.w_length } * ceil_div(t.length, em),
-           Wide{ p.w_transit_bends } * t.transit_bends };
+           Wide{ p.w_transit_bends } * t.transit_bends,
+           Wide{ p.w_whitespace } * ceil_div(t.whitespace, em2) };
 }
 
 }  // namespace
@@ -1268,7 +1303,7 @@ Cost cost_of(CostTerms const &t, scav_profile const &p) {
   out.t0_violations =
       t.through_box + t.box_overlap + t.vanished + t.flush + t.through_region + t.retrace;
   // Area is the largest term at (2 * COORD_MAX)^2 < 2^40, its em^2 only divides
-  // it down, and twelve of those under a weight capped at 2^10 stay below 2^54.
+  // it down, and thirteen of those under a weight capped at 2^10 stay below 2^54.
   for (Wide const term : weighted_terms(t, p)) { out.t2 += term; }
   return out;
 }

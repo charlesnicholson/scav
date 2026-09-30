@@ -42,6 +42,7 @@ readable orthogonal gauntlet/roundtrip.scav 0 0 0 0 0 0 0 0 8128 2659328
 readable orthogonal gauntlet/seated.scav 0 6 96 0 649 0 0 0 4160 13708800
 readable orthogonal gauntlet/stretch.scav 0 4 0 0 614 0 0 0 8256 7907328
 readable orthogonal gauntlet/through.scav 0 0 0 0 0 0 0 0 44224 9830912
+readable orthogonal gauntlet/tight.scav 0 0 0 0 0 0 0 0 65664 11197440
 readable orthogonal gauntlet/transit.scav 0 19 96 1 4672 0 0 0 162588 103487200
 readable orthogonal gauntlet/under.scav 0 2 0 0 309 0 0 0 32480 6632640
 readable straight gauntlet/above.scav 0 1 0 0 7 0 0 0 50944 9289728
@@ -66,6 +67,7 @@ readable straight gauntlet/roundtrip.scav 0 0 928 0 0 0 0 0 8128 2659328
 readable straight gauntlet/seated.scav 1 0 1136 0 0 0 0 0 4160 13708800
 readable straight gauntlet/stretch.scav 0 0 0 0 0 0 0 0 8256 7907328
 readable straight gauntlet/through.scav 1 1 0 0 8 0 0 0 44224 9830912
+readable straight gauntlet/tight.scav 2 1 0 0 19 0 0 0 65664 11197440
 readable straight gauntlet/transit.scav 3 6 0 3 1214 0 0 0 162588 103487200
 readable straight gauntlet/under.scav 2 2 0 0 104 0 0 0 32480 6632640
 compact orthogonal gauntlet/above.scav 0 0 0 0 0 0 0 0 11208 3971904
@@ -90,6 +92,7 @@ compact orthogonal gauntlet/roundtrip.scav 0 0 0 0 0 0 0 0 480 1193472
 compact orthogonal gauntlet/seated.scav 0 6 58 0 390 0 0 0 2200 5874752
 compact orthogonal gauntlet/stretch.scav 0 4 0 0 374 0 0 0 128 3481600
 compact orthogonal gauntlet/through.scav 0 0 0 0 0 0 0 0 9992 3997632
+compact orthogonal gauntlet/tight.scav 0 2 0 0 20 0 0 0 7208 6063232
 compact orthogonal gauntlet/transit.scav 0 19 58 1 2803 0 0 0 36352 43756544
 compact orthogonal gauntlet/under.scav 0 2 0 0 203 0 0 0 7420 2957352
 compact straight gauntlet/above.scav 0 1 0 0 4 0 0 0 11208 3971904
@@ -114,5 +117,6 @@ compact straight gauntlet/roundtrip.scav 0 0 592 0 0 0 0 0 480 1193472
 compact straight gauntlet/seated.scav 2 0 768 0 0 0 0 0 2200 5874752
 compact straight gauntlet/stretch.scav 0 0 0 0 0 0 0 0 128 3481600
 compact straight gauntlet/through.scav 1 1 0 0 5 0 0 0 9992 3997632
+compact straight gauntlet/tight.scav 1 1 0 1 13 0 0 0 7208 6063232
 compact straight gauntlet/transit.scav 3 6 0 3 713 0 0 0 36352 43756544
 compact straight gauntlet/under.scav 2 2 0 0 67 0 0 0 7420 2957352

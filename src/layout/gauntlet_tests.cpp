@@ -61,7 +61,7 @@ constexpr std::array GAUNTLET{
   "entered.scav", "fanin.scav",   "folded.scav",   "fork.scav",      "lane.scav",
   "level.scav",   "long.scav",    "loop.scav",     "marks.scav",     "mutual.scav",
   "ported.scav",  "pulled.scav",  "regions.scav",  "roundtrip.scav", "seated.scav",
-  "stretch.scav", "through.scav", "transit.scav",  "under.scav"
+  "stretch.scav", "through.scav", "tight.scav",    "transit.scav",   "under.scav"
 };
 
 // One chart, laid out: the pieces every property below reads.
@@ -1267,6 +1267,27 @@ TEST_CASE("gauntlet: a route passing through a composite bends outside it") {
       }
       CHECK(in_arm == 0U);
     }
+  }
+}
+
+TEST_CASE("gauntlet: priced whitespace takes the composite drawn tighter") {
+  // Box's chain runs loose or tight; priced, the search keeps the drawing that leaves
+  // less of Box empty, and neither drawing bends or crosses.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    std::array<int64_t, 2> empty{};
+    for (int32_t const weight : { 0, 1 }) {
+      CAPTURE(weight);
+      scav_profile priced{ p };
+      priced.w_whitespace = weight;
+      Laid l;
+      lay("tight.scav", priced, l);
+      CostTerms const t{ cost_terms(l.c, l.g, l.z, l.r, {}, priced) };
+      CHECK(t.bends == 0);
+      CHECK(t.crossings == 0);
+      empty[static_cast<uint32_t>(weight)] = t.whitespace;
+    }
+    CHECK(empty[1] < empty[0]);
   }
 }
 

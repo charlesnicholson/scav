@@ -253,9 +253,9 @@ uint32_t layout_inputs_digest(Chart const &c);
 
 // Cost ======================================================================
 
-inline constexpr uint32_t TIER2_TERMS{ 12 };
+inline constexpr uint32_t TIER2_TERMS{ 13 };
 
-// The twelve Tier-2 quantities before weighting, and the Tier-0 counts.
+// The thirteen Tier-2 quantities before weighting, and the Tier-0 counts.
 struct CostTerms {
   int64_t bends{ 0 };       // direction changes at a route's interior vertices
   int64_t corridor{ 0 };    // length two routes' segments run collinear over
@@ -279,6 +279,9 @@ struct CostTerms {
   // Bends in a state the route only passes through: below the lowest common ancestor
   // on one end's chain, and inside neither that end nor its enclosing state.
   int64_t transit_bends{ 0 };
+  // Per composite: the rect between its text bands inside its padding, less its
+  // live children's rects.
+  int64_t whitespace{ 0 };
 
   // Tier 0, forbidden rather than priced: the obstacle set makes these
   // unrepresentable, and the count survives as a net (11.6).

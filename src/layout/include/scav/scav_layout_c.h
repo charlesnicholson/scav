@@ -115,6 +115,7 @@ typedef struct {
   int32_t w_crowding;      /* lanes closer than one em, not on one line; [0, 1024] */
   int32_t w_length;        /* every route's whole length; [0, 1024] */
   int32_t w_transit_bends; /* bends in a state a route only passes through; [0, 1024] */
+  int32_t w_whitespace;    /* a composite's interior its children leave empty; [0, 1024] */
 
   int32_t portfolio_k;                 /* bounded moves scored; [0, 2^20] */
   int32_t portfolio_m;                 /* chart-global phase-2 tuples; [1, 16] */
