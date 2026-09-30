@@ -353,6 +353,17 @@ class TestGeneratedBindings(unittest.TestCase):
             drawlist = scav.DrawList.build(chart, metrics, spaces, placed)
             drawlist.canonicalize()
             self.assertEqual(cli.stdout, drawlist.svg(metrics, margin=prof.pad))
+
+            embedded = subprocess.run(
+                [str(cfg.build_dir / "bin" / name), "render", "--embed-font",
+                 str(chart_path)], capture_output=True, text=True, check=False)
+            self.assertEqual(0, embedded.returncode, embedded.stderr)
+            ttf = scav.bundled_font()
+            self.assertEqual(embedded.stdout,
+                             drawlist.svg(metrics, embed_font=ttf, margin=prof.pad))
+            with self.assertRaises(scav.ScavError) as refused:
+                drawlist.svg(metrics, embed_font=ttf[:-1], margin=prof.pad)
+            self.assertEqual(scav._abi.SCAV_E_FONT, refused.exception.code)
             drawlist.close()
         chart.close()
 

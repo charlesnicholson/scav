@@ -2,23 +2,15 @@
 # the reference builder. No dependency on layout -- a builder reads geometry
 # columns by name and does not care who wrote them.
 
-# The bundled font is embedded, gzipped, rather than loaded from a path: it is a
-# hashed input, so it has to travel with the code.
-scav_embed_bytes("${PROJECT_SOURCE_DIR}/assets/font/JetBrainsMono-Regular.ttf"
-  bundled_ttf_gz font_source GZIP)
-
+# The bundled font's metrics are bundled_font_table.inc, generated from the TTF by
+# gen_font_table.py; the TTF itself is installed beside the CLI, not compiled in.
 scav_static_library(scavdraw
   c_api.cpp
   metrics.cpp
   drawlist.cpp
   helpers.cpp
   builder.cpp
-  "${font_source}"
 )
-# The generated font header sits in the build tree beside its source.
-foreach(target scavdraw scavdraw_testable)
-  target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
-endforeach()
 
 scav_install_library(scavdraw draw)
 scav_optimize_for_size(scavdraw)
@@ -35,7 +27,7 @@ endforeach()
 # The redistributable carries every library's C surface. The archive arrives
 # transitively -- svg links draw PUBLIC, and a direct link here would repeat it
 # on the link line.
-target_sources(scav_shared PRIVATE c_api.cpp "${font_source}")
+target_sources(scav_shared PRIVATE c_api.cpp)
 
 if(SCAV_BUILD_TESTS)
   scav_tests(scav_draw_tests
@@ -47,5 +39,4 @@ if(SCAV_BUILD_TESTS)
     tests/functional_drawlist_tests.cpp
   )
   target_link_libraries(scav_draw_tests PRIVATE scavdraw_testable scavlayout_testable)
-  target_include_directories(scav_draw_tests PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 endif()

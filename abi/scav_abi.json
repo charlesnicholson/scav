@@ -3489,11 +3489,21 @@
             {
               "name": "embed_font",
               "type": {
-                "name": "int32_t",
+                "name": "scav_byte",
+                "pointer": 1,
+                "const": true
+              },
+              "offset": 0,
+              "size": 8
+            },
+            {
+              "name": "embed_font_len",
+              "type": {
+                "name": "uint32_t",
                 "pointer": 0,
                 "const": false
               },
-              "offset": 0,
+              "offset": 8,
               "size": 4
             },
             {
@@ -3503,12 +3513,12 @@
                 "pointer": 0,
                 "const": false
               },
-              "offset": 4,
+              "offset": 12,
               "size": 4
             }
           ],
-          "size": 8,
-          "align": 4,
+          "size": 16,
+          "align": 8,
           "padding": 0
         }
       ],

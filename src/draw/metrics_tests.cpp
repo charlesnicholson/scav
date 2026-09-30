@@ -4,11 +4,8 @@
 
 #include "scav/scav_draw.h"
 
-#include "scav_embed_bundled_ttf_gz.h"
-
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
-#include "scav_inflate.h"
 #include "scav_xxhash.h"
 
 #include "doctest.h"
@@ -157,6 +154,23 @@ Metrics bundled() {
   return m;
 }
 
+// The TTF the bundled table was generated from, as committed; empty if unreadable.
+std::vector<scav_byte> const &committed_ttf() {
+  static std::vector<scav_byte> const bytes{ [] {
+    std::vector<scav_byte> out;
+    (void)read_file(SCAV_TEST_DATA_DIR "/../assets/font/JetBrainsMono-Regular.ttf", out);
+    return out;
+  }() };
+  return bytes;
+}
+
+Metrics parsed() {
+  Metrics m;
+  std::vector<scav_byte> const &ttf{ committed_ttf() };
+  REQUIRE(metrics_create(ttf.data(), static_cast<uint32_t>(ttf.size()), m));
+  return m;
+}
+
 // One cmap table wrapping one subtable under a platform and encoding the caller
 // chooses: those two are all the picker ranks a subtable by.
 std::vector<scav_byte> cmap_wrap(uint32_t platform,
@@ -252,15 +266,17 @@ MeasureStatus measure(Metrics const &m, std::string_view s, int32_t fs, scav_ext
 
 TEST_CASE("metrics: the bundled font is the one the design names") {
   Metrics const m{ bundled() };
+  CHECK(m.bundled);
+  CHECK(m.ttf.empty());
   CHECK(m.units_per_em == 1000);
   CHECK(m.num_glyphs == 1743);
   // The bundled font carries a full hmtx, so its own tail rule never fires --
   // which is why the rule gets a synthetic font of its own below.
   CHECK(m.num_h_metrics == m.num_glyphs);
-  CHECK(m.cmap_format == 12);
+  CHECK(parsed().cmap_format == 12);
   CHECK(m.identity != 0);
 
-  std::vector<scav_byte> const bytes{ bundled_font() };
+  std::vector<scav_byte> const &bytes{ committed_ttf() };
   CHECK(bytes.size() == 273900);
   REQUIRE(bytes.size() > 1U);
   CHECK(bytes[0] == 0x00);  // sfntVersion 1.0, not an OpenType CFF font
@@ -491,7 +507,7 @@ TEST_CASE("metrics: tables that contradict each other are refused") {
 }
 
 TEST_CASE("metrics: truncating the bundled font at every length never crashes") {
-  std::vector<scav_byte> const font{ bundled_font() };
+  std::vector<scav_byte> const &font{ committed_ttf() };
   scav_byte const *const bytes{ font.data() };
   auto const len{ static_cast<uint32_t>(font.size()) };
   // Powers of two plus a prime stride: every table boundary gets crossed
@@ -507,42 +523,33 @@ TEST_CASE("metrics: truncating the bundled font at every length never crashes") 
   }
 }
 
-TEST_CASE("metrics: the embedded font inflates to the committed TTF byte for byte") {
-  std::vector<scav_byte> committed;
-  REQUIRE(read_file(SCAV_TEST_DATA_DIR "/../assets/font/JetBrainsMono-Regular.ttf",
-                    committed));
-  CHECK(bundled_font() == committed);
-  Metrics const m{ bundled() };
-  CHECK(m.ttf == committed);
-  CHECK(m.identity == xxhash32(committed.data(), committed.size(), 0));
-}
-
-TEST_CASE(
-    "metrics: the embedded gzip refuses every sampled truncation, and every sampled bit "
-    "flip that changes the font") {
-  uint32_t len{ 0 };
-  scav_byte const *const gz{ bundled_ttf_gz_bytes(len) };
-  std::vector<scav_byte> const want{ bundled_font() };
-  auto const cap{ static_cast<uint32_t>(want.size()) };
-  std::vector<scav_byte> out(cap);
-  uint32_t n{ 0 };
-  REQUIRE(gunzip(gz, len, out.data(), cap, n) == InflateStatus::Ok);
-  CHECK(gunzip(gz, len, out.data(), cap - 1U, n) == InflateStatus::OutputFull);
-  for (uint32_t cut = 0; cut < len; cut += (cut < 2048U) ? 1U : 4099U) {
-    CAPTURE(cut);
-    CHECK(gunzip(gz, cut, out.data(), cap, n) != InflateStatus::Ok);
+TEST_CASE("metrics: the bundled table is the committed TTF, codepoint by codepoint") {
+  Metrics const table{ bundled() };
+  Metrics const ttf{ parsed() };
+  std::vector<scav_byte> const &bytes{ committed_ttf() };
+  CHECK(table.identity == xxhash32(bytes.data(), bytes.size(), 0));
+  CHECK(bundled_font_identity() == table.identity);
+  CHECK(table.identity == ttf.identity);
+  CHECK(table.units_per_em == ttf.units_per_em);
+  CHECK(table.num_glyphs == ttf.num_glyphs);
+  CHECK(table.num_h_metrics == ttf.num_h_metrics);
+  uint32_t glyph_mismatches{ 0 };
+  uint32_t mapped{ 0 };
+  for (uint32_t cp = 0; cp <= 0x10FFFFU; ++cp) {
+    uint32_t const g{ metrics_glyph(table, cp) };
+    glyph_mismatches += (g == metrics_glyph(ttf, cp)) ? 0U : 1U;
+    mapped += (g != 0U) ? 1U : 0U;
   }
-  std::vector<scav_byte> flipped{ gz, gz + len };
-  for (uint32_t bit = 0; bit < (8U * len); bit += 8191U) {
-    flipped[bit / 8U] = static_cast<scav_byte>(flipped[bit / 8U] ^ (1U << (bit % 8U)));
-    CAPTURE(bit);
-    InflateStatus const st{ gunzip(flipped.data(), len, out.data(), cap, n) };
-    bool const refused_or_same{ (st != InflateStatus::Ok) ||
-                                ((n == cap) && (out == want)) };
-    CHECK(refused_or_same);
-    CHECK(n <= cap);
-    flipped[bit / 8U] = gz[bit / 8U];
+  CHECK(glyph_mismatches == 0);
+  CHECK(mapped == 1363);
+  uint32_t advance_mismatches{ 0 };
+  for (uint32_t g = 0; g < (ttf.num_glyphs + 8U); ++g) {
+    advance_mismatches += (metrics_advance(table, g) == metrics_advance(ttf, g)) ? 0U : 1U;
   }
+  CHECK(advance_mismatches == 0);
+  CHECK(metrics_advance(table, 0) == 600);
+  CHECK(metrics_advance(table, metrics_glyph(table, 0x0300U)) == 0);
+  CHECK(metrics_advance(table, metrics_glyph(table, 0xFEFFU)) == 0);
 }
 
 TEST_CASE("metrics: an empty buffer selects the bundled font") {
@@ -900,7 +907,7 @@ TEST_CASE("metrics: format 4 maps through an idRangeOffset, or through nothing")
 TEST_CASE("metrics: the bundled font's own format 4 subtable agrees with format 12") {
   // The picker passes over format 4 wherever a font offers format 12, so the
   // bundled font's format 4 table is reached by pointing a Metrics at it.
-  Metrics const twelve{ bundled() };
+  Metrics const twelve{ parsed() };
   REQUIRE(twelve.cmap_format == 12);
 
   uint32_t cmap_off{ 0 };
@@ -1002,7 +1009,7 @@ TEST_CASE("metrics: a codepoint in a gap between groups is missing, not mapped")
 TEST_CASE("metrics: an hmtx that points past the font reads back no advance") {
   // Reachable only by hand: metrics_create refuses a font whose hmtx cannot
   // hold the records hhea claims, which is what makes the read safe.
-  Metrics m{ bundled() };
+  Metrics m{ parsed() };
   m.hmtx.off = static_cast<uint32_t>(m.ttf.size());
   CHECK(metrics_advance(m, 0) == 0);
 }

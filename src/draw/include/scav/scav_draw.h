@@ -20,25 +20,24 @@ namespace scav {
 
 // Font metrics ==============================================================
 
-// Parsed table offsets plus a copy of the bytes they index. Immutable once
-// created, which is what lets one instance serve every thread.
+// Parsed table offsets plus a copy of the bytes they index, or the bundled
+// font's compiled-in table. Immutable once created, so one instance serves every thread.
 struct Metrics {
-  std::vector<scav_byte> ttf;
-  uint32_t identity{ 0 };  // xxh32 of `ttf`: the font's identity and version
+  std::vector<scav_byte> ttf;  // empty for the bundled font
+  uint32_t identity{ 0 };      // xxh32 of the TTF: the font's identity and version
   uint32_t units_per_em{ 0 };
   uint32_t num_glyphs{ 0 };
   uint32_t num_h_metrics{ 0 };
   Span hmtx{};                // into `ttf`
   Span cmap_sub{};            // the chosen subtable, into `ttf`
   uint32_t cmap_format{ 0 };  // 4 or 12
+  bool bundled{ false };      // glyphs and advances come from the compiled-in table
 };
 
-// The bundled font, embedded in the library because it is a hashed input and
-// must travel with the code. Stored gzipped and inflated per call; empty only if
-// the embedded bytes fail to inflate.
-std::vector<scav_byte> bundled_font();
+// xxh32 of assets/font/JetBrainsMono-Regular.ttf, which the library does not carry.
+uint32_t bundled_font_identity();
 
-// Empty `ttf` selects the bundled font. False on a font missing a table the
+// Empty `ttf` selects the bundled font's table. False on a font missing a table the
 // measurement needs, or one whose tables do not agree with each other.
 bool metrics_create(scav_byte const *ttf, uint32_t len, Metrics &out);
 

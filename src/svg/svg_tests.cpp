@@ -35,6 +35,13 @@ Metrics bundled() {
   return m;
 }
 
+// The bundled font's TTF as committed; the library does not carry it.
+std::vector<scav_byte> committed_ttf() {
+  std::vector<scav_byte> out;
+  REQUIRE(read_file(SCAV_TEST_DATA_DIR "/../assets/font/JetBrainsMono-Regular.ttf", out));
+  return out;
+}
+
 scav_style shape(uint32_t stroke, uint32_t fill) {
   return { .stroke_rgba = stroke,
            .fill_rgba = fill,
@@ -84,7 +91,7 @@ TEST_CASE("svg: no float is printed, ever") {
   uint32_t const s{ drawlist_style(d, shape(0x112233FFU, 0xFFFFFFFFU)) };
   push_rrect(d, 0, s, { .x = -37, .y = 5, .w = 100, .h = 41 }, 7, state(0));
   push_text(d, 0, drawlist_style(d, glyphs(160)), { .x = 1, .y = 2 }, "Idle", state(0));
-  Written const w{ write(d, { .embed_font = false, .margin = 13 }) };
+  Written const w{ write(d, { .margin = 13 }) };
   REQUIRE(w.status == SvgStatus::Ok);
 
   // No digit in the body is followed by a decimal point and another digit, and
@@ -114,7 +121,7 @@ TEST_CASE("svg: the viewBox carries the extent and the frame is whole points") {
   CHECK(has(w.doc, "height=\"6\""));
 
   // A margin widens both, and the origin moves back by it.
-  Written const margined{ write(d, { .embed_font = false, .margin = 8 }) };
+  Written const margined{ write(d, { .margin = 8 }) };
   REQUIRE(margined.status == SvgStatus::Ok);
   CHECK(has(margined.doc, "viewBox=\"24 8 176 112\""));
   CHECK(has(margined.doc, "width=\"11\""));
@@ -350,8 +357,10 @@ TEST_CASE("svg: every element kind carries its class") {
 TEST_CASE("svg: --embed-font base64s the bundled TTF whole") {
   DrawList d;
   push_text(d, 0, drawlist_style(d, glyphs(160)), { .x = 0, .y = 0 }, "x", NONE);
+  std::vector<scav_byte> const ttf{ committed_ttf() };
+  auto const len{ static_cast<uint32_t>(ttf.size()) };
   Written const bare{ write(d) };
-  Written const embedded{ write(d, { .embed_font = true, .margin = 0 }) };
+  Written const embedded{ write(d, { .embed_font = ttf.data(), .embed_font_len = len }) };
   REQUIRE(bare.status == SvgStatus::Ok);
   REQUIRE(embedded.status == SvgStatus::Ok);
   CHECK(!has(bare.doc, "@font-face"));
@@ -360,10 +369,25 @@ TEST_CASE("svg: --embed-font base64s the bundled TTF whole") {
   CHECK(has(embedded.doc, "format(\"truetype\")"));
 
   // Whole, not subsetted: base64 is four characters per three bytes.
-  size_t const len{ bundled_font().size() };
   CHECK(embedded.doc.size() > (bare.doc.size() + ((len / 3U) * 4U)));
   // And never converted to paths, which would discard selection.
   CHECK(!has(embedded.doc, "<path"));
+}
+
+TEST_CASE("svg: font bytes that are not the measured font are refused") {
+  DrawList d;
+  push_text(d, 0, drawlist_style(d, glyphs(160)), { .x = 0, .y = 0 }, "x", NONE);
+  std::vector<scav_byte> ttf{ committed_ttf() };
+  REQUIRE(ttf.size() > 1U);
+  auto const len{ static_cast<uint32_t>(ttf.size()) };
+  CHECK(write(d, { .embed_font = ttf.data(), .embed_font_len = len - 1U }).status ==
+        SvgStatus::FontMismatch);
+  CHECK(write(d, { .embed_font = ttf.data(), .embed_font_len = 0 }).status ==
+        SvgStatus::FontMismatch);
+  ttf[len / 2U] ^= 1U;
+  Written const flipped{ write(d, { .embed_font = ttf.data(), .embed_font_len = len }) };
+  CHECK(flipped.status == SvgStatus::FontMismatch);
+  CHECK(flipped.doc.empty());
 }
 
 TEST_CASE("svg: an image goes inline with the mime it was registered under") {
@@ -609,15 +633,19 @@ TEST_CASE("svg: the C surface queries then writes, and refuses nulls") {
   CHECK(doc.starts_with("<?xml"));
   CHECK(has(doc, "scav-id-3"));
 
-  scav_svg_options opts{ .embed_font = 1, .margin = 4 };
+  std::vector<scav_byte> ttf{ committed_ttf() };
+  auto const len{ static_cast<uint32_t>(ttf.size()) };
+  scav_svg_options opts{ .embed_font = ttf.data(), .embed_font_len = len, .margin = 4 };
   REQUIRE(
       scav_svg_write(list, metrics, nullptr, &opts, OPTIONS_SIZE, nullptr, 0, &again) ==
       SCAV_OK);
   CHECK(again > count);
-  opts.embed_font = 2;
+  ttf[0] ^= 1U;
+  CHECK(scav_svg_write(list, metrics, nullptr, &opts, OPTIONS_SIZE, nullptr, 0, &again) ==
+        SCAV_E_FONT);
+  opts = { .embed_font = nullptr, .embed_font_len = len, .margin = 4 };
   CHECK(scav_svg_write(list, metrics, nullptr, &opts, OPTIONS_SIZE, nullptr, 0, &again) ==
         SCAV_E_INVALID_ARG);
-  opts.embed_font = 1;
 
   scav_rect bounds{};
   REQUIRE(scav_svg_bounds(list, &bounds, RECT_SIZE) == SCAV_OK);

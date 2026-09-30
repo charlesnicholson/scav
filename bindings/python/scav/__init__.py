@@ -49,7 +49,7 @@ from ._abi import (
 
 __all__ = [
     "Chart", "DrawList", "Images", "Loader", "Metrics", "ScavError", "Spaces",
-    "abi_version", "library", "load_network", "profile", "SCAV_PRIM_TEXT",
+    "abi_version", "bundled_font", "library", "load_network", "profile", "SCAV_PRIM_TEXT",
 ]
 
 _LIB: ctypes.CDLL | None = None
@@ -65,6 +65,18 @@ def library(path: str | Path | None = None) -> ctypes.CDLL:
 
 def abi_version() -> int:
     return int(library().scav_abi_version())
+
+
+_FONT_FILE = "JetBrainsMono-Regular.ttf"
+
+
+def bundled_font() -> bytes:
+    """The bundled font's TTF: package data beside this file, else the source tree's."""
+    here = Path(__file__).resolve().parent
+    for candidate in (here / _FONT_FILE, here.parents[2] / "assets/font" / _FONT_FILE):
+        if candidate.is_file():
+            return candidate.read_bytes()
+    raise FileNotFoundError(f"{_FONT_FILE} is neither package data nor in a source tree")
 
 
 def _bytes(text: str | bytes) -> bytes:
@@ -554,12 +566,16 @@ class DrawList(_Handle):
                 yield prim, self.payload(prim)
 
     def svg(self, metrics: Metrics, images: Images | None = None,
-            embed_font: bool = False, margin: int = 0) -> str:
+            embed_font: bytes | None = None, margin: int = 0) -> str:
         """The reference backend. Count first, then write: the protocol every
-        span accessor here follows."""
+        span accessor here follows. `embed_font` is the measured font's TTF,
+        such as `bundled_font()`, to base64 into the document."""
         lib = library()
-        options = _abi.scav_svg_options(embed_font=1 if embed_font else 0,
-                                        margin=_integer(margin, "margin"))
+        options = _abi.scav_svg_options(margin=_integer(margin, "margin"))
+        if embed_font is not None:
+            font = (ctypes.c_ubyte * len(embed_font)).from_buffer_copy(embed_font)
+            options.embed_font = ctypes.cast(font, ctypes.POINTER(_abi.scav_byte))
+            options.embed_font_len = len(embed_font)
         size = ctypes.c_uint32(0)
         check(lib.scav_svg_write(self.pointer, metrics.pointer,
                                  images.pointer if images else None,

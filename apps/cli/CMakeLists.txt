@@ -102,5 +102,17 @@ target_link_libraries(scav PRIVATE scavlayout scavsvg)
 scav_optimize_for_size(scav)
 scav_dead_code_strip(scav)
 
+# `--embed-font` reads the TTF installed here, or the source tree's in a build tree.
+set(scav_font_file "JetBrainsMono-Regular.ttf")
+file(RELATIVE_PATH scav_font_from_bin "${CMAKE_INSTALL_FULL_BINDIR}"
+  "${CMAKE_INSTALL_FULL_DATADIR}/scav/${scav_font_file}")
+target_compile_definitions(scav PRIVATE
+  "SCAV_FONT_FILE=\"${scav_font_file}\""
+  "SCAV_FONT_FROM_BIN=\"${scav_font_from_bin}\""
+  "SCAV_FONT_IN_SOURCE=\"${PROJECT_SOURCE_DIR}/assets/font/${scav_font_file}\""
+)
+install(FILES "${PROJECT_SOURCE_DIR}/assets/font/${scav_font_file}"
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/scav")
+
 # The build tree keeps its symbols; `cmake --install --strip` removes them.
 install(TARGETS scav RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")

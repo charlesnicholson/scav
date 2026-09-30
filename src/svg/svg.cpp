@@ -7,6 +7,7 @@
 #include "scav/scav_draw.h"
 #include "scav/scav_types.h"
 #include "scav_int.h"
+#include "scav_xxhash.h"
 
 #include <cstdint>
 #include <string>
@@ -219,6 +220,10 @@ SvgStatus svg_write(DrawList const &d,
                     std::string &out,
                     uint32_t &bad) {
   bad = INVALID;
+  if ((o.embed_font != nullptr) &&
+      (xxhash32(o.embed_font, o.embed_font_len, 0) != m.identity)) {
+    return SvgStatus::FontMismatch;
+  }
   if (!drawlist_validate(d, bad)) { return SvgStatus::InvalidDrawList; }
 
   // Refuse before writing anything, so a failure never leaves half a document
@@ -376,12 +381,11 @@ SvgStatus svg_write(DrawList const &d,
   doc +=
       "  <style>text { font-family: \"JetBrains Mono\", monospace;"
       " font-kerning: none; }</style>\n";
-  if (o.embed_font) {
-    std::vector<scav_byte> const ttf{ bundled_font() };
+  if (o.embed_font != nullptr) {
     doc +=
         "  <defs><style>@font-face { font-family: \"JetBrains Mono\";"
         " src: url(data:font/ttf;base64,";
-    put_base64(doc, ttf.data(), static_cast<uint32_t>(ttf.size()));
+    put_base64(doc, o.embed_font, o.embed_font_len);
     doc += ") format(\"truetype\"); }</style></defs>\n";
   }
   doc += body;

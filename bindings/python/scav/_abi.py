@@ -393,14 +393,16 @@ assert getattr(scav_prim, "b").offset == 44
 
 class scav_svg_options(ctypes.Structure):
     _fields_ = [
-        ("embed_font", ctypes.c_int32),
+        ("embed_font", ctypes.POINTER(scav_byte)),
+        ("embed_font_len", ctypes.c_uint32),
         ("margin", ctypes.c_int32),
     ]
 
-assert ctypes.sizeof(scav_svg_options) == 8, "scav_svg_options is not 8 bytes"
-assert ctypes.alignment(scav_svg_options) == 4
+assert ctypes.sizeof(scav_svg_options) == 16, "scav_svg_options is not 16 bytes"
+assert ctypes.alignment(scav_svg_options) == 8
 assert getattr(scav_svg_options, "embed_font").offset == 0
-assert getattr(scav_svg_options, "margin").offset == 4
+assert getattr(scav_svg_options, "embed_font_len").offset == 8
+assert getattr(scav_svg_options, "margin").offset == 12
 
 scav_placed = scav_rect
 

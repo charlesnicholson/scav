@@ -1,24 +1,23 @@
-// Advance widths from `hmtx`, codepoints to glyphs through `cmap`, and the one
-// scaling formula. Advances never come from `glyf` or `CFF`, and no float is
-// involved anywhere.
+// Advance widths from `hmtx`, codepoints to glyphs through `cmap` or the bundled
+// font's generated table, and the one scaling formula. Advances never come from
+// `glyf` or `CFF`, and no float is involved anywhere.
 
 #include "scav/scav_draw.h"
 
-#include "scav_embed_bundled_ttf_gz.h"
-
 #include "scav/scav_types.h"
-#include "scav_inflate.h"
 #include "scav_int.h"
 #include "scav_xxhash.h"
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
-#include <utility>
-#include <vector>
 
 namespace scav {
 
 namespace {
+
+#include "draw/bundled_font_table.inc"  // NOLINT(bugprone-suspicious-include)
 
 // Bounds-checked big-endian reads. A font is untrusted input, so every read
 // returns false past the end rather than trusting a length in the file.
@@ -219,26 +218,38 @@ bool decode_utf8(scav_byte const *s, uint32_t len, uint32_t &at, uint32_t &cp) {
   return true;
 }
 
-}  // namespace
-
-std::vector<scav_byte> bundled_font() {
-  uint32_t len{ 0 };
-  scav_byte const *const gz{ bundled_ttf_gz_bytes(len) };
-  uint32_t size{ 0 };
-  std::vector<scav_byte> ttf;
-  if (!gzip_size(gz, len, size)) { return ttf; }
-  ttf.resize(size);
-  uint32_t n{ 0 };
-  if (gunzip(gz, len, ttf.data(), size, n) != InflateStatus::Ok) { ttf.clear(); }
-  return ttf;
+// The last run starting at or below `cp`, then the glyph at its offset.
+uint32_t bundled_glyph(uint32_t cp) {
+  auto const run{
+    std::upper_bound(BUNDLED_RUN_FIRST.begin(), BUNDLED_RUN_FIRST.end(), cp)
+  };
+  if (run == BUNDLED_RUN_FIRST.begin()) { return 0U; }
+  auto const i{ static_cast<size_t>(run - BUNDLED_RUN_FIRST.begin()) - 1U };
+  uint32_t const offset{ cp - BUNDLED_RUN_FIRST[i] };
+  if (offset >= BUNDLED_RUN_COUNT[i]) { return 0U; }
+  return BUNDLED_GLYPHS[BUNDLED_RUN_INDEX[i] + offset];
 }
 
+// Step 0 is glyph 0, so the step found is never before the first.
+uint32_t bundled_advance(uint32_t row) {
+  auto const step{
+    std::upper_bound(BUNDLED_STEP_GLYPH.begin(), BUNDLED_STEP_GLYPH.end(), row)
+  };
+  return BUNDLED_STEP_ADVANCE[static_cast<size_t>(step - BUNDLED_STEP_GLYPH.begin()) - 1U];
+}
+
+}  // namespace
+
+uint32_t bundled_font_identity() { return BUNDLED_IDENTITY; }
+
 bool metrics_create(scav_byte const *ttf, uint32_t len, Metrics &out) {
-  std::vector<scav_byte> bundled;
   if ((ttf == nullptr) || (len == 0U)) {
-    bundled = bundled_font();
-    ttf = bundled.data();
-    len = static_cast<uint32_t>(bundled.size());
+    out = { .identity = BUNDLED_IDENTITY,
+            .units_per_em = BUNDLED_UNITS_PER_EM,
+            .num_glyphs = BUNDLED_NUM_GLYPHS,
+            .num_h_metrics = BUNDLED_NUM_H_METRICS,
+            .bundled = true };
+    return true;
   }
   Reader const r{ .bytes = ttf, .len = len };
 
@@ -272,11 +283,8 @@ bool metrics_create(scav_byte const *ttf, uint32_t len, Metrics &out) {
   CmapPick pick{};
   if (!pick_cmap(r, cmap, pick)) { return false; }
 
-  if (bundled.empty()) {
-    out.ttf.assign(ttf, ttf + len);
-  } else {
-    out.ttf = std::move(bundled);
-  }
+  out = {};
+  out.ttf.assign(ttf, ttf + len);
   out.identity = xxhash32(out.ttf.data(), out.ttf.size(), 0);
   out.units_per_em = upem;
   out.num_glyphs = glyphs;
@@ -288,6 +296,7 @@ bool metrics_create(scav_byte const *ttf, uint32_t len, Metrics &out) {
 }
 
 uint32_t metrics_glyph(Metrics const &m, uint32_t codepoint) {
+  if (m.bundled) { return bundled_glyph(codepoint); }
   Reader const r{ .bytes = m.ttf.data(), .len = static_cast<uint32_t>(m.ttf.size()) };
   uint32_t const glyph{ (m.cmap_format == 12U)
                             ? lookup_format12(r, m.cmap_sub.off, codepoint)
@@ -299,6 +308,7 @@ uint32_t metrics_advance(Metrics const &m, uint32_t glyph) {
   // The tail rule: past the last record, that record's advance applies to every
   // remaining glyph. Missing it breaks monospaced fonts specifically.
   uint32_t const row{ imin(glyph, m.num_h_metrics - 1U) };
+  if (m.bundled) { return bundled_advance(row); }
   Reader const r{ .bytes = m.ttf.data(), .len = static_cast<uint32_t>(m.ttf.size()) };
   uint32_t advance{ 0 };
   if (!read_u16(r, m.hmtx.off + (4U * row), advance)) { return 0U; }
