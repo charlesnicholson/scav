@@ -30,10 +30,8 @@ enum class SvgStatus : uint32_t {
 };
 
 struct SvgOptions {
-  // A TTF to base64 whole into <defs><style>@font-face, or null. Its xxh32 must be
-  // the metrics' identity. The only exact renderer-metrics agreement that keeps
-  // text selectable, and whole rather than subsetted because a subsetter is the
-  // expensive half of a PDF backend.
+  // A TTF to base64 whole into <defs><style>@font-face, or null; its xxh32 must be
+  // the metrics' identity.
   scav_byte const *embed_font{ nullptr };
   uint32_t embed_font_len{ 0 };
   int32_t margin{ 0 };  // grid units of clear space around the content
