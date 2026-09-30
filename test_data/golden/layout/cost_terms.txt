@@ -21,6 +21,7 @@ compact straight tcp.scav 3 3 0 2 191 0 0 0 22128 13251840
 compact straight toolchanger.scav 2 9 0 2 979 0 0 0 51360 72576000
 compact straight vac.scav 1 4 1328 2 359 0 0 0 8308 40517344
 readable orthogonal gauntlet/above.scav 0 0 0 0 0 0 0 0 50944 9289728
+readable orthogonal gauntlet/carried.scav 0 0 0 0 0 0 0 0 65664 11197440
 readable orthogonal gauntlet/chain.scav 0 2 0 0 81 0 0 0 16256 5910528
 readable orthogonal gauntlet/crossing.scav 0 0 0 0 0 0 0 0 44736 9614848
 readable orthogonal gauntlet/crowd.scav 0 0 0 0 0 0 0 0 46656 13833216
@@ -47,6 +48,7 @@ readable orthogonal gauntlet/transit.scav 0 19 96 1 4672 0 0 0 162588 103487200
 readable orthogonal gauntlet/under.scav 0 2 0 0 309 0 0 0 32480 6632640
 readable orthogonal gauntlet/unfolded.scav 0 4 0 0 162 0 0 0 45248 24569856
 readable straight gauntlet/above.scav 0 1 0 0 7 0 0 0 50944 9289728
+readable straight gauntlet/carried.scav 0 1 0 0 9 0 0 0 65664 11197440
 readable straight gauntlet/chain.scav 0 0 0 0 0 0 0 0 16256 5910528
 readable straight gauntlet/crossing.scav 3 1 1136 0 8 0 0 0 44736 9614848
 readable straight gauntlet/crowd.scav 0 0 2944 2 0 0 0 0 46656 13833216
@@ -73,6 +75,7 @@ readable straight gauntlet/transit.scav 3 6 0 3 1214 0 0 0 162588 103487200
 readable straight gauntlet/under.scav 2 2 0 0 104 0 0 0 32480 6632640
 readable straight gauntlet/unfolded.scav 4 0 2944 0 0 0 0 0 45248 24569856
 compact orthogonal gauntlet/above.scav 0 0 0 0 0 0 0 0 11208 3971904
+compact orthogonal gauntlet/carried.scav 0 0 0 0 0 0 0 0 14184 4787328
 compact orthogonal gauntlet/chain.scav 0 2 0 0 19 0 0 0 1504 2611200
 compact orthogonal gauntlet/crossing.scav 0 0 0 0 0 0 0 0 9992 3997632
 compact orthogonal gauntlet/crowd.scav 0 0 0 0 0 0 0 0 10912 5852672
@@ -99,6 +102,7 @@ compact orthogonal gauntlet/transit.scav 0 19 58 1 2803 0 0 0 36352 43756544
 compact orthogonal gauntlet/under.scav 0 2 0 0 203 0 0 0 7420 2957352
 compact orthogonal gauntlet/unfolded.scav 0 4 0 0 38 0 0 0 10704 10146816
 compact straight gauntlet/above.scav 0 1 0 0 4 0 0 0 11208 3971904
+compact straight gauntlet/carried.scav 0 1 0 0 5 0 0 0 14184 4787328
 compact straight gauntlet/chain.scav 0 0 0 0 0 0 0 0 1504 2611200
 compact straight gauntlet/crossing.scav 3 1 768 0 5 0 0 0 9992 3997632
 compact straight gauntlet/crowd.scav 0 0 1984 2 0 0 0 0 10912 5852672

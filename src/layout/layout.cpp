@@ -42,6 +42,9 @@ void layout_test_search_memo(bool on);
 void layout_test_search_memo_verify(bool on);
 uint32_t layout_test_search_memo_hits();
 uint32_t layout_test_search_memo_mismatches();
+std::vector<Cost> const &layout_test_schedule_first();
+std::vector<Cost> const &layout_test_schedule_second();
+std::vector<Cost> const &layout_test_schedule_kept();
 #endif
 
 SCAV_INTERNAL_BEGIN
@@ -65,6 +68,7 @@ void search_key(scav_profile const &objective,
                 Compaction pack,
                 Fold fold,
                 uint32_t budget,
+                bool refold,
                 SearchPins const &seed,
                 std::vector<uint8_t> const *scope,
                 std::vector<uint32_t> &key);
@@ -564,21 +568,21 @@ struct Improved {
   bool viable{ false };  // the start laid out at all
 };
 
-// One Level 1 move: a state held at a rank it was not given (11.10a), or a
-// segment left unchained (11.10b). `cut` names which of the two.
-// One Level 1 move. Exactly one of the three is set.
-enum class MoveKind : uint32_t { Rank, Cut, Reverse, Face, Side };
+// One Level 1 move; `kind` names which of its pins is set.
+enum class MoveKind : uint32_t { Rank, Cut, Reverse, Face, Side, Fold };
 static_assert((static_cast<uint16_t>(MoveKind::Rank) == TRACE_MOVE_RANK) &&
                   (static_cast<uint16_t>(MoveKind::Cut) == TRACE_MOVE_CUT) &&
                   (static_cast<uint16_t>(MoveKind::Reverse) == TRACE_MOVE_REVERSE) &&
                   (static_cast<uint16_t>(MoveKind::Face) == TRACE_MOVE_FACE) &&
-                  (static_cast<uint16_t>(MoveKind::Side) == TRACE_MOVE_SIDE),
+                  (static_cast<uint16_t>(MoveKind::Side) == TRACE_MOVE_SIDE) &&
+                  (static_cast<uint16_t>(MoveKind::Fold) == TRACE_MOVE_FOLD),
               "the trace names a move by this enum's ordinal");
 struct Move {
   RankPin pin{};
   ChainCut leg{};
   FacePin face{};
   SidePin side{};
+  FoldPin fold{};
   MoveKind kind{ MoveKind::Rank };
 };
 
@@ -770,6 +774,7 @@ Improved run_search(Chart const &c,
                     Router const &router,
                     uint32_t threads,
                     uint32_t budget,
+                    bool refold,
                     SearchPins const &seed,
                     std::vector<uint8_t> const *scope) {
   Improved out;
@@ -822,6 +827,7 @@ Improved run_search(Chart const &c,
         break;
       case MoveKind::Face: base_pins.faces.push_back(m.face); break;
       case MoveKind::Side: base_pins.sides.push_back(m.side); break;
+      case MoveKind::Fold: base_pins.folds.push_back(m.fold); break;
       case MoveKind::Rank: base_pins.ranks.push_back(m.pin); break;
     }
     return base_pins;
@@ -833,12 +839,14 @@ Improved run_search(Chart const &c,
   uint32_t face_scored{ 0 };
   uint32_t side_scored{ 0 };
   uint32_t pin_scored{ 0 };
+  uint32_t fold_scored{ 0 };
   std::vector<Move> round;
   std::vector<Scored> got;
   std::vector<uint8_t> chained;
   std::vector<uint8_t> source;
   while ((cut_scored < budget) || (rev_scored < budget) || (face_scored < budget) ||
-         (side_scored < budget) || (pin_scored < budget)) {
+         (side_scored < budget) || (pin_scored < budget) ||
+         (refold && (fold_scored < budget))) {
     // Enumerated first, scored second, reduced third. The scan used to do all
     // three at once, which made it sequential for no reason: a candidate is a
     // pure function of the model, the tuple and the pins, and nothing it
@@ -964,6 +972,22 @@ Improved run_search(Chart const &c,
         round.push_back({ .pin = { .state = StateId{ st }, .rank = r } });
       }
     }
+    // Under `refold`, a frame drawn folded moves its cut before each other rank.
+    std::vector<uint8_t> const &drawn_folded{ out.best.sized.folded };
+    for (uint32_t m = 0; refold && (m < here.sub_ranks.size()); ++m) {
+      if ((c.submachines[m].live == 0) || (here.sub_down[m] != 0) ||
+          (m >= drawn_folded.size()) || (drawn_folded[m] == 0) || !in_scope(m)) {
+        continue;
+      }
+      uint32_t const now{ here.sub_fold_cut[m] };
+      for (uint32_t r = 1; (r < here.sub_ranks[m]) && (fold_scored < budget); ++r) {
+        if (r == now) { continue; }
+        ++fold_scored;
+        round.push_back(
+            { .fold = { .frame = SubmachineId{ m }, .mode = FOLD_ALWAYS, .layer = r },
+              .kind = MoveKind::Fold });
+      }
+    }
     if (round.empty()) { break; }
 
     // A candidate runs its phases on one thread: it is already the unit a free
@@ -1017,12 +1041,16 @@ Improved run_search(Chart const &c,
         moved_trans = m.leg.trans.v;
         moved_leg = m.leg.leg;
       }
+      bool const refolded{ m.kind == MoveKind::Fold };
+      uint32_t moved_rank{ refolded ? m.fold.layer : 0U };
+      if (m.kind == MoveKind::Rank) { moved_rank = m.pin.rank; }
       trace_emit(
           { .kind = TraceKind::CandidateScored,
             .pass = static_cast<uint16_t>(verdict),
+            .frame = refolded ? m.fold.frame.v : INVALID,
             .score = { .row = INVALID,
                        .state = (m.kind == MoveKind::Rank) ? m.pin.state.v : INVALID,
-                       .rank = (m.kind == MoveKind::Rank) ? m.pin.rank : 0,
+                       .rank = moved_rank,
                        .trans = moved_trans,
                        .leg = moved_leg,
                        .move = static_cast<uint16_t>(m.kind),
@@ -1085,7 +1113,7 @@ void put_pins(SearchPins const &p, std::vector<uint32_t> &w) {
     w.insert(w.end(), { sp.trans.v, sp.leg, sp.end, sp.side });
   }
   w.push_back(static_cast<uint32_t>(p.folds.size()));
-  for (FoldPin const &f : p.folds) { w.insert(w.end(), { f.frame.v, f.mode }); }
+  for (FoldPin const &f : p.folds) { w.insert(w.end(), { f.frame.v, f.mode, f.layer }); }
 }
 
 // The inverse of `put_pins`, reading from `at` and advancing it.
@@ -1109,7 +1137,9 @@ SearchPins get_pins(int32_t const *w, uint32_t &at) {
     sp = { .trans = TransId{ next() }, .leg = next(), .end = next(), .side = next() };
   }
   p.folds.resize(next());
-  for (FoldPin &f : p.folds) { f = { .frame = SubmachineId{ next() }, .mode = next() }; }
+  for (FoldPin &f : p.folds) {
+    f = { .frame = SubmachineId{ next() }, .mode = next(), .layer = next() };
+  }
   return p;
 }
 
@@ -1129,6 +1159,8 @@ bool test_search_memo{ true };
 bool test_search_memo_verify{ false };
 uint32_t test_search_memo_hits{ 0 };
 uint32_t test_search_memo_mismatches{ 0 };
+// Per row of the last searched layout: each schedule's cost, and the one kept.
+std::vector<Cost> test_schedule_first, test_schedule_second, test_schedule_kept;
 
 bool same_pins(SearchPins const &a, SearchPins const &b) {
   std::vector<uint32_t> wa;
@@ -1173,6 +1205,7 @@ Improved search_moves(Chart const &c,
                       Router const &router,
                       uint32_t threads,
                       uint32_t budget,
+                      bool refold,
                       SearchPins const &seed,
                       std::vector<uint8_t> const *scope,
                       SearchMemo *memo) {
@@ -1188,11 +1221,12 @@ Improved search_moves(Chart const &c,
                       router,
                       threads,
                       budget,
+                      refold,
                       seed,
                       scope);
   }
   std::vector<uint32_t> key;
-  search_key(objective, knobs, dar, pack, fold, budget, seed, scope, key);
+  search_key(objective, knobs, dar, pack, fold, budget, refold, seed, scope, key);
   std::vector<int32_t> value;
   bool hit{ false };
   {
@@ -1248,6 +1282,7 @@ Improved search_moves(Chart const &c,
                                        router,
                                        threads,
                                        budget,
+                                       refold,
                                        seed,
                                        scope) };
       if (!same_result(out, fresh)) {
@@ -1269,6 +1304,7 @@ Improved search_moves(Chart const &c,
                            router,
                            threads,
                            budget,
+                           refold,
                            seed,
                            scope) };
   std::vector<uint32_t> words{
@@ -1337,6 +1373,7 @@ void search_key(scav_profile const &objective,
                 Compaction pack,
                 Fold fold,
                 uint32_t budget,
+                bool refold,
                 SearchPins const &seed,
                 std::vector<uint8_t> const *scope,
                 std::vector<uint32_t> &key) {
@@ -1351,7 +1388,8 @@ void search_key(scav_profile const &objective,
              { static_cast<uint32_t>(dar),
                static_cast<uint32_t>(pack),
                static_cast<uint32_t>(fold),
-               budget });
+               budget,
+               refold ? 1U : 0U });
   put_pins(seed, key);
   key.push_back((scope == nullptr) ? 0U : 1U);
   if (scope != nullptr) {
@@ -1475,7 +1513,7 @@ bool layout_run(Chart &c,
 #endif
   // Searches the rows `which` names from the pins they hold, and keeps what
   // each reached.
-  auto const search_rows = [&](std::vector<uint8_t> const &which) {
+  auto const search_rows = [&](std::vector<uint8_t> const &which, bool refold) {
     std::vector<uint32_t> active;
     for (uint32_t i = 0; i < rows; ++i) {
       if ((viable[i] != 0) && (which[i] != 0)) { active.push_back(i); }
@@ -1499,6 +1537,7 @@ bool layout_run(Chart &c,
                              *router,
                              o.threads,
                              budget,
+                             refold,
                              held[active[k]],
                              nullptr,
                              memo_at);
@@ -1516,7 +1555,7 @@ bool layout_run(Chart &c,
   // what they reach. A shorter search from each ranked them better than none
   // did, but not well enough to cut on: on `brew` the two-round screen dropped
   // the row that converges to a canvas 38% smaller (11.10g).
-  if (budget != 0) { search_rows(std::vector<uint8_t>(rows, 1)); }
+  if (budget != 0) { search_rows(std::vector<uint8_t>(rows, 1), false); }
   std::vector<uint8_t> const &eligible{ viable };
 
   // Iterated local search on every viable row: each unturned cycle edge starts a search,
@@ -1651,6 +1690,7 @@ bool layout_run(Chart &c,
                                   *router,
                                   o.threads,
                                   budget,
+                                  false,
                                   start,
                                   &redo,
                                   memo_at);
@@ -1696,6 +1736,7 @@ bool layout_run(Chart &c,
                                           *router,
                                           o.threads,
                                           budget,
+                                          false,
                                           start,
                                           &redo,
                                           memo_at) };
@@ -1736,6 +1777,7 @@ bool layout_run(Chart &c,
                                       *router,
                                       o.threads,
                                       budget,
+                                      false,
                                       start,
                                       &redo,
                                       memo_at) };
@@ -1756,6 +1798,7 @@ bool layout_run(Chart &c,
                                        *router,
                                        o.threads,
                                        budget,
+                                       false,
                                        held[best],
                                        nullptr,
                                        memo_at) };
@@ -1820,6 +1863,25 @@ bool layout_run(Chart &c,
     parallel_for(static_cast<uint32_t>(kicking.size()), o.threads, [&](uint32_t k) {
       kick(kicking[k]);
     });
+    // A second search from each row's converged pins adds the fold moves; the cheaper is
+    // kept, ties to the first.
+    std::vector<Candidate> first{ candidates };
+    std::vector<Cost> const first_cost{ cost };
+    std::vector<SearchPins> first_held{ held };
+    search_rows(std::vector<uint8_t>(rows, 1), true);
+#ifdef SCAV_TESTING
+    test_schedule_first = first_cost;
+    test_schedule_second = cost;
+#endif
+    for (uint32_t i = 0; i < rows; ++i) {
+      if ((viable[i] == 0) || cost_less(cost[i], first_cost[i])) { continue; }
+      candidates[i] = std::move(first[i]);
+      cost[i] = first_cost[i];
+      held[i] = std::move(first_held[i]);
+    }
+#ifdef SCAV_TESTING
+    test_schedule_kept = cost;
+#endif
   }
   uint32_t const best{ search_argmin(cost, eligible) };
 #ifdef SCAV_TESTING
@@ -2021,6 +2083,9 @@ void layout_test_search_memo(bool on) { test_search_memo = on; }
 void layout_test_search_memo_verify(bool on) { test_search_memo_verify = on; }
 uint32_t layout_test_search_memo_hits() { return test_search_memo_hits; }
 uint32_t layout_test_search_memo_mismatches() { return test_search_memo_mismatches; }
+std::vector<Cost> const &layout_test_schedule_first() { return test_schedule_first; }
+std::vector<Cost> const &layout_test_schedule_second() { return test_schedule_second; }
+std::vector<Cost> const &layout_test_schedule_kept() { return test_schedule_kept; }
 #endif
 
 }  // namespace scav

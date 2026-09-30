@@ -139,6 +139,29 @@ class TestDump(unittest.TestCase):
         self.assertEqual(1, len(rests))
         self.assertIn("--fold 0:2", rests[0])
 
+    def test_a_fold_cut_layer_is_part_of_what_a_layout_rests_on(self) -> None:
+        # `--fold F:M:L` names the one rank the cut falls before, and lays out again from it.
+        args = ("--layout", "--no-search", "--fold", "0:1:2", CHART.as_posix())
+        shipped = self.run_dump(*args)
+        self.assertEqual(0, shipped.returncode)
+        rests = [ln for ln in shipped.stdout.splitlines() if ln.startswith("  rests on ")]
+        self.assertEqual(1, len(rests))
+        self.assertIn("--fold 0:1:2", rests[0])
+        again = self.run_dump("--layout", "--no-search", *rests[0].split()[2:],
+                              CHART.as_posix())
+        self.assertEqual(0, again.returncode)
+        self.assertEqual(shipped.stdout, again.stdout)
+        other = self.run_dump("--layout", "--no-search", "--fold", "0:1:3", CHART.as_posix())
+        self.assertNotEqual(shipped.stdout, other.stdout)
+
+    def test_toolchanger_cuts_moving_before_the_state_extend_enters(self) -> None:
+        # At real text the search folds `travel` before `Cruising`, so `extend` enters short.
+        shipped = self.run_dump("--layout", "test_data/charts/toolchanger.scav")
+        self.assertEqual(0, shipped.returncode)
+        rests = [ln for ln in shipped.stdout.splitlines() if ln.startswith("  rests on ")]
+        self.assertEqual(1, len(rests))
+        self.assertIn(" --fold 2:1:2", rests[0])
+
     def test_an_unknown_profile_is_refused(self) -> None:
         result = self.run_dump("--layout", "--profile", "nonesuch", CHART.as_posix())
         self.assertNotEqual(0, result.returncode)
@@ -148,7 +171,8 @@ class TestDump(unittest.TestCase):
         for bad in (["--rank", "1"], ["--cut", "a:b"], ["--face", "1:0:2:0"],
                     ["--portfolio-row", "99"], ["--no-search", "--no-search"],
                     ["--no-text", "--no-text"], ["--profile"], ["--orient", "x"],
-                    ["--fold", "0:3"], ["--fold", "0"]):
+                    ["--fold", "0:3"], ["--fold", "0"], ["--fold", "0:3:1"],
+                    ["--fold", "0:1:x"], ["--fold", "0:1:"]):
             with self.subTest(bad=bad):
                 result = self.run_dump("--layout", *bad, CHART.as_posix())
                 self.assertEqual(2, result.returncode)

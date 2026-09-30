@@ -6,6 +6,7 @@
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cstdint>
@@ -113,6 +114,13 @@ bool read_value(std::string_view flag, std::string_view value, LayoutArgs &out) 
     }
     return true;
   }
+  if ((flag == "--fold") && (std::ranges::count(value, ':') == 2)) {
+    std::array<uint32_t, 3> field{};
+    if (!ordinal_fields(value, field) || (field[1] > FOLD_NEVER)) { return false; }
+    out.pins.folds.push_back(
+        { .frame = SubmachineId{ field[0] }, .mode = field[1], .layer = field[2] });
+    return true;
+  }
   if (!ordinal_pair(value, a, b)) { return false; }
   if (flag == "--fold") {
     if (b > FOLD_NEVER) { return false; }
@@ -197,7 +205,13 @@ void append_layout_args(std::string &out,
     out += ':';
     string_append_u32(out, sp.side);
   }
-  for (FoldPin const &f : pins.folds) { pair("--fold", f.frame.v, f.mode); }
+  for (FoldPin const &f : pins.folds) {
+    pair("--fold", f.frame.v, f.mode);
+    if (f.layer != 0) {
+      out += ':';
+      string_append_u32(out, f.layer);
+    }
+  }
 }
 
 void load_and_report(char const *path, bool validate, Loaded &out) {

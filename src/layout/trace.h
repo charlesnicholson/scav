@@ -36,6 +36,7 @@ enum class TraceKind : uint16_t {
   PiecePacked,        // where the packing put one piece of a component's rank run
   GapCharged,         // phase 1 asked a rank boundary for width beyond rank_sep
   FoldPinned,         // a fold pin decided a frame's fold; `pass` is its mode
+  BoundaryCarried,    // a fold cut took a boundary node into its neighbour's piece
 };
 
 // What a rank boundary's charge is for; `GapCharged.pass`. `Held` charges
@@ -77,6 +78,10 @@ struct TracePort {
 };
 // `rank` is the frame's rank the piece starts at, the rect is frame-local and
 // what the packing placed, and `carried` the label room on its leading edge.
+// `seg` is the boundary node's segment and `rank` the frame rank its piece starts at.
+struct TraceCarry {
+  uint32_t seg, rank;
+};
 struct TracePiece {
   uint32_t rank;
   int32_t x, y, w, h, carried;
@@ -131,6 +136,7 @@ inline constexpr uint16_t TRACE_MOVE_CUT{ 1 };
 inline constexpr uint16_t TRACE_MOVE_REVERSE{ 2 };
 inline constexpr uint16_t TRACE_MOVE_FACE{ 3 };
 inline constexpr uint16_t TRACE_MOVE_SIDE{ 4 };  // `face` holds the side
+inline constexpr uint16_t TRACE_MOVE_FOLD{ 5 };  // `rank` holds the cut's layer
 // Basis points of the scored sum, in CostTerms order, so a rejected move says
 // which term rejected it without the event carrying nine 64-bit quantities.
 struct TraceTerms {
@@ -158,6 +164,7 @@ struct TraceEvent {
     TraceShift shift;
     TracePiece piece;
     TraceGap gap;
+    TraceCarry carry;
   };
 };
 

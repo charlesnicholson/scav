@@ -167,14 +167,15 @@ struct SidePin {
   uint32_t side{ 0 };
 };
 
-// Whether a frame's rank run folds, in place of its row's rule: `mode` 0 as the scale
-// measure picks, 1 always, 2 never. A frame running down never folds.
+// Whether a frame's run folds, in place of its row's rule: `mode` 0 as the scale measure
+// picks, 1 always, 2 never, and a nonzero `layer` the one rank it cuts before.
 inline constexpr uint32_t FOLD_SCALE{ 0 };
 inline constexpr uint32_t FOLD_ALWAYS{ 1 };
 inline constexpr uint32_t FOLD_NEVER{ 2 };
 struct FoldPin {
   SubmachineId frame{ INVALID };
   uint32_t mode{ FOLD_SCALE };
+  uint32_t layer{ 0 };
 };
 
 // Everything besides the tuple that a drawing is a function of.

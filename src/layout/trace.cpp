@@ -36,6 +36,7 @@ char const *kind_name(TraceKind k) {
     case TraceKind::PiecePacked: return "piece_packed";
     case TraceKind::GapCharged: return "gap_charged";
     case TraceKind::FoldPinned: return "fold_pinned";
+    case TraceKind::BoundaryCarried: return "boundary_carried";
     case TraceKind::None: break;
   }
   return "none";
@@ -200,11 +201,8 @@ void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out)
           j.kv("leg", e.score.leg);
         }
         if (e.score.row == INVALID) {
-          static constexpr std::array<char const *, 5> MOVE{ "rank",
-                                                             "cut",
-                                                             "reverse",
-                                                             "face",
-                                                             "side" };
+          static constexpr std::array<char const *, 6> MOVE{ "rank", "cut",  "reverse",
+                                                             "face", "side", "fold" };
           j.ks("move", (e.score.move < MOVE.size()) ? MOVE[e.score.move] : "?");
           if (e.score.move == TRACE_MOVE_FACE) {
             j.ks("end", (e.score.end == 0) ? "src" : "dst");
@@ -214,6 +212,7 @@ void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out)
             j.ks("end", (e.score.end == 0) ? "src" : "dst");
             j.kv("side", e.score.face);
           }
+          if (e.score.move == TRACE_MOVE_FOLD) { j.kv("layer", e.score.rank); }
         }
         j.kv("t0", e.score.t0);
         j.kv("t2", e.score.t2);
@@ -274,8 +273,13 @@ void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out)
       case TraceKind::FoldPinned: {
         static constexpr std::array<char const *, 3> MODE{ "scale", "always", "never" };
         j.ks("mode", (e.pass < MODE.size()) ? MODE[e.pass] : "?");
+        j.kv("layer", e.fold.rank);
         break;
       }
+      case TraceKind::BoundaryCarried:
+        j.kv("seg", e.carry.seg);
+        j.kv("rank", e.carry.rank);
+        break;
       case TraceKind::None: break;
     }
     j.raw((i + 1 == t.events.size()) ? "}\n" : "},\n");

@@ -23,6 +23,7 @@ void search_key(scav_profile const &objective,
                 Compaction pack,
                 Fold fold,
                 uint32_t budget,
+                bool refold,
                 SearchPins const &seed,
                 std::vector<uint8_t> const *scope,
                 std::vector<uint32_t> &key);
@@ -36,6 +37,9 @@ void layout_test_search_memo(bool on);
 void layout_test_search_memo_verify(bool on);
 uint32_t layout_test_search_memo_hits();
 uint32_t layout_test_search_memo_mismatches();
+std::vector<Cost> const &layout_test_schedule_first();
+std::vector<Cost> const &layout_test_schedule_second();
+std::vector<Cost> const &layout_test_schedule_kept();
 
 }  // namespace scav
 
@@ -56,6 +60,7 @@ struct Inputs {
   Compaction pack{ Compaction::Off };
   Fold fold{ Fold::Scale };
   uint32_t budget{ 64 };
+  bool refold{ false };
   SearchPins seed;
   std::vector<uint8_t> scope;
   bool scoped{ false };
@@ -69,6 +74,7 @@ std::vector<uint32_t> key_of(Inputs const &in) {
              in.pack,
              in.fold,
              in.budget,
+             in.refold,
              in.seed,
              in.scoped ? &in.scope : nullptr,
              key);
@@ -121,7 +127,7 @@ TEST_CASE("search memo: the key tells apart every input a search is a function o
   base.seed.sides.push_back({ .trans = TransId{ 2 }, .leg = 0, .end = 0, .side = 1 });
   base.scope.assign(4, 0);
 
-  std::vector<Inputs> variants(20, base);
+  std::vector<Inputs> variants(22, base);
   variants[0].objective.node_sep += 1;
   variants[1].knobs.node_sep += 1;
   variants[2].dar = DarSource::OwnerHole;
@@ -146,6 +152,9 @@ TEST_CASE("search memo: the key tells apart every input a search is a function o
   variants[17].seed.sides[0].side = 2;
   variants[18].seed.folds.push_back({ .frame = SubmachineId{ 2 }, .mode = FOLD_NEVER });
   variants[19].seed.folds.push_back({ .frame = SubmachineId{ 2 }, .mode = FOLD_ALWAYS });
+  variants[20].seed.folds.push_back(
+      { .frame = SubmachineId{ 2 }, .mode = FOLD_ALWAYS, .layer = 2 });
+  variants[21].refold = true;
 
   std::vector<std::vector<uint32_t>> keys{ key_of(base) };
   for (Inputs const &v : variants) { keys.push_back(key_of(v)); }
@@ -288,4 +297,34 @@ TEST_CASE("search: every face move scored from the prefix scores as the whole wa
     CHECK(layout_test_prefix_mismatches() == 0);
   }
   CHECK(used > 0);
+}
+
+TEST_CASE("search schedules: each row keeps the cheaper of its two searches") {
+  constexpr std::array<char const *, 6> CHARTS{ "axis.scav", "brew.scav",
+                                                "ota.scav",  "tcp.scav",
+                                                "vac.scav",  "gauntlet/carried.scav" };
+  uint32_t won_somewhere{ 0 };  // charts where some row took the second search
+  uint32_t won_nowhere{ 0 };    // charts where every row kept the first
+  for (char const *name : CHARTS) {
+    CAPTURE(name);
+    REQUIRE(lay_out(name).ok);
+    std::vector<Cost> const &first{ layout_test_schedule_first() };
+    std::vector<Cost> const &second{ layout_test_schedule_second() };
+    std::vector<Cost> const &kept{ layout_test_schedule_kept() };
+    REQUIRE(first.size() == kept.size());
+    REQUIRE(second.size() == kept.size());
+    uint32_t wins{ 0 };
+    for (uint32_t i = 0; i < kept.size(); ++i) {
+      CAPTURE(i);
+      bool const won{ cost_less(second[i], first[i]) };
+      Cost const &want{ won ? second[i] : first[i] };
+      CHECK(kept[i].t0_violations == want.t0_violations);
+      CHECK(kept[i].t2 == want.t2);
+      CHECK_FALSE(cost_less(first[i], kept[i]));
+      wins += won ? 1U : 0U;
+    }
+    ++((wins != 0) ? won_somewhere : won_nowhere);
+  }
+  CHECK(won_somewhere > 0);
+  CHECK(won_nowhere > 0);
 }

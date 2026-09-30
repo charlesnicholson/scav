@@ -761,9 +761,11 @@ SubmachineOrders order_submachines(Chart const &c,
     if (pin.frame.v < o.sub_down.size()) { o.sub_down[pin.frame.v] = 1; }
   }
   o.sub_fold.assign(c.submachines.size(), 0);
+  o.sub_fold_cut.assign(c.submachines.size(), 0);
   for (FoldPin const &pin : pins.folds) {
     if ((pin.frame.v < o.sub_fold.size()) && (pin.mode <= FOLD_NEVER)) {
       o.sub_fold[pin.frame.v] = static_cast<uint8_t>(pin.mode + 1);
+      o.sub_fold_cut[pin.frame.v] = pin.layer;
     }
   }
   o.sub_gaps.assign(c.submachines.size(), Span{});

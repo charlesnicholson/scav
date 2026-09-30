@@ -4,7 +4,7 @@ brew.scav 0bec6ad2 a0f23b02 57ff5653
 dock.scav 0bec6ad2 df214ef6 121a3304
 estop.scav 0bec6ad2 54fe3996 19f815d2
 led.scav 0bec6ad2 c5553683 19f815d2
-mill.scav 0bec6ad2 9714cf22 c3628089
+mill.scav 0bec6ad2 a6bf7bd4 3a3f0c30
 ota.scav 0bec6ad2 0b1d25d7 a80a2634
 tcp.scav 0bec6ad2 f7080eeb 08f37d7e
 toolchanger.scav 0bec6ad2 675e052a 9c3a4d48

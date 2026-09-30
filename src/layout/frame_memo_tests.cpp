@@ -275,7 +275,7 @@ TEST_CASE("order memo: a remembered frame is the frame those inputs order to") {
 
 TEST_CASE("size memo: a remembered frame is the layout those inputs size to") {
   scav_profile const p{ readable() };
-  constexpr uint32_t VARIANTS{ 16 };
+  constexpr uint32_t VARIANTS{ 17 };
   std::vector<uint32_t> moved(VARIANTS, 0);
   std::vector<Scatter> charts;
   for (char const *name : CHARTS) {
@@ -320,6 +320,14 @@ TEST_CASE("size memo: a remembered frame is the layout those inputs size to") {
     if (t.frame.v != INVALID) {
       folded.folds.push_back({ .frame = t.frame, .mode = FOLD_ALWAYS });
     }
+    SearchPins recut;  // the first folded frame cut before its rank 1 alone
+    for (uint32_t m = 0; (m < base.z.folded.size()) && recut.folds.empty(); ++m) {
+      if (base.z.folded[m] != 0) {
+        recut.folds.push_back(
+            { .frame = SubmachineId{ m }, .mode = FOLD_ALWAYS, .layer = 1 });
+      }
+    }
+    SubmachineOrders const o_recut{ order_submachines(c, g, s, p, 1, recut) };
     SubmachineOrders const o_unfolded{ order_submachines(c, g, s, p, 1, unfolded) };
     SubmachineOrders const o_folded{ order_submachines(c, g, s, p, 1, folded) };
 
@@ -448,6 +456,12 @@ TEST_CASE("size memo: a remembered frame is the layout those inputs size to") {
           .pack = Compaction::Off,
           .fold = Fold::Scale },
         { .o = &o_folded,
+          .p = &p,
+          .req = &req,
+          .dar = DarSource::Profile,
+          .pack = Compaction::Off,
+          .fold = Fold::Scale },
+        { .o = &o_recut,
           .p = &p,
           .req = &req,
           .dar = DarSource::Profile,
