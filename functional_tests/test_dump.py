@@ -154,13 +154,19 @@ class TestDump(unittest.TestCase):
         other = self.run_dump("--layout", "--no-search", "--fold", "0:1:3", CHART.as_posix())
         self.assertNotEqual(shipped.stdout, other.stdout)
 
-    def test_toolchanger_cuts_moving_before_the_state_extend_enters(self) -> None:
-        # At real text the search folds `travel` before `Cruising`, so `extend` enters short.
+    def test_toolchanger_keeps_travel_whole_and_extend_straight(self) -> None:
+        # At real text the search leaves `travel` unfolded, and `extend` runs straight
+        # into `Cruising`.
         shipped = self.run_dump("--layout", "test_data/charts/toolchanger.scav")
         self.assertEqual(0, shipped.returncode)
         rests = [ln for ln in shipped.stdout.splitlines() if ln.startswith("  rests on ")]
         self.assertEqual(1, len(rests))
-        self.assertIn(" --fold 2:1:2", rests[0])
+        self.assertIn(" --fold 2:2", rests[0])
+        extend = [ln for ln in shipped.stdout.splitlines()
+                  if ln.startswith("  route Gripping -> arm/Moving:travel/Cruising ")]
+        self.assertEqual(1, len(extend))
+        ys = {int(y) for y in re.findall(r"\(-?\d+,(-?\d+)\)", extend[0])}
+        self.assertEqual(1, len(ys))
 
     def test_an_unknown_profile_is_refused(self) -> None:
         result = self.run_dump("--layout", "--profile", "nonesuch", CHART.as_posix())

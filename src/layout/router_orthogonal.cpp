@@ -920,7 +920,9 @@ bool ortho_search(OrthoGrid const &g,
                   uint32_t to,
                   Wide bend,
                   OrthoScratch &s,
-                  std::vector<uint32_t> &out) {
+                  std::vector<uint32_t> &out,
+                  uint32_t from_plane,
+                  uint32_t to_plane) {
   out.clear();
   uint32_t const vertices{ g.nx() * g.ny() };
   if ((vertices == 0) || (from >= vertices) || (to >= vertices)) { return false; }
@@ -945,18 +947,30 @@ bool ortho_search(OrthoGrid const &g,
   uint8_t const *const pass_v{ g.pass_v.data() };
   scav_point const goal{ g.point(to) };
 
-  // Manhattan plus one bend for an axis this plane cannot cover alone: both lower
-  // bounds, so the sum admits. `dx` and `dy` are the node's distances to the goal.
-  auto const heuristic = [bend](Wide dx, Wide dy, uint32_t plane) {
+  // Weights in quarters: an end's turn is a bend less one, so of two paths equal in
+  // length and bends the one turning at its ends wins, and no other pair swaps.
+  constexpr Wide QUARTERS{ 4 };
+  Wide const turn_w{ QUARTERS * bend };
+  Wide const end_turn_w{ (bend > 0) ? (turn_w - 1) : turn_w };
+
+  // Manhattan to the goal, a turn for an axis this plane cannot cover alone, and an
+  // end turn to finish in a fixed goal plane: lower bounds, so the sum admits.
+  bool const fixed_goal{ to_plane < 2 };
+  auto const heuristic = [&](Wide dx, Wide dy, uint32_t plane) {
     bool const turn{ (plane == 0) ? (dy != 0) : (dx != 0) };
-    return dx + dy + (turn ? bend : Wide{ 0 });
+    uint32_t const last{ turn ? (1U - plane) : plane };
+    bool const settle{ fixed_goal && (last != to_plane) };
+    return (QUARTERS * (dx + dy)) + (turn ? turn_w : Wide{ 0 }) +
+           (settle ? end_turn_w : Wide{ 0 });
   };
 
   heap.clear();
   {
     Wide const dx{ distance(xs[from % nx], goal.x) };
     Wide const dy{ distance(ys[from / nx], goal.y) };
+    // A fixed start seeds its lead's plane alone; the turn reaches the other.
     for (uint32_t plane = 0; plane < 2; ++plane) {
+      if ((from_plane < 2) && (plane != from_plane)) { continue; }
       uint32_t const node{ (from * 2) + plane };
       state[node] = { .stamp = gen, .parent = INVALID, .best = 0 };
       heap_push(heap, { .f = heuristic(dx, dy, plane), .g = 0, .node = node });
@@ -971,13 +985,13 @@ bool ortho_search(OrthoGrid const &g,
     OrthoNodeState const &here{ state[node] };
     if ((here.stamp != gen) || (top.g != here.best)) { continue; }
     uint32_t const v{ node / 2 };
-    if (v == to) {
+    uint32_t const plane{ node % 2 };
+    if ((v == to) && (!fixed_goal || (plane == to_plane))) {
       reached = node;
       break;
     }
     if (++expansions > ORTHO_EXPANSION_BUDGET) { return false; }
 
-    uint32_t const plane{ node % 2 };
     uint32_t const iy{ v / nx };
     uint32_t const ix{ v - (iy * nx) };
     Wide const top_g{ top.g };
@@ -992,30 +1006,33 @@ bool ortho_search(OrthoGrid const &g,
       heap_push(heap, { .f = g_next + h, .g = g_next, .node = next });
     };
 
-    // The turn, then this plane's moves.
-    relax(node ^ 1U, bend, heuristic(dx, dy, 1 - plane));
+    // The turn, an end's where it leaves a fixed start or settles into the goal's
+    // plane, then this plane's moves.
+    bool const end_turn{ ((v == from) && (plane == from_plane)) ||
+                         ((v == to) && fixed_goal) };
+    relax(node ^ 1U, end_turn ? end_turn_w : turn_w, heuristic(dx, dy, 1 - plane));
     if (plane == 0) {
       uint8_t const *const row{ pass_h + (static_cast<size_t>(iy) * (nx - 1)) };
       if (((ix + 1) < nx) && (row[ix] != 0)) {
         relax(node + 2,
-              Wide{ xs[ix + 1] } - xs[ix],
+              QUARTERS * (Wide{ xs[ix + 1] } - xs[ix]),
               heuristic(distance(xs[ix + 1], goal.x), dy, 0));
       }
       if ((ix > 0) && (row[ix - 1] != 0)) {
         relax(node - 2,
-              Wide{ xs[ix] } - xs[ix - 1],
+              QUARTERS * (Wide{ xs[ix] } - xs[ix - 1]),
               heuristic(distance(xs[ix - 1], goal.x), dy, 0));
       }
     } else {
       uint32_t const down{ 2 * nx };
       if (((iy + 1) < ny) && (pass_v[(static_cast<size_t>(iy) * nx) + ix] != 0)) {
         relax(node + down,
-              Wide{ ys[iy + 1] } - ys[iy],
+              QUARTERS * (Wide{ ys[iy + 1] } - ys[iy]),
               heuristic(dx, distance(ys[iy + 1], goal.y), 1));
       }
       if ((iy > 0) && (pass_v[(static_cast<size_t>(iy - 1) * nx) + ix] != 0)) {
         relax(node - down,
-              Wide{ ys[iy] } - ys[iy - 1],
+              QUARTERS * (Wide{ ys[iy] } - ys[iy - 1]),
               heuristic(dx, distance(ys[iy - 1], goal.y), 1));
       }
     }
@@ -1061,6 +1078,14 @@ struct RouteScratch {
 RouteScratch &route_scratch() {
   thread_local RouteScratch s;
   return s;
+}
+
+// The search plane a leg from `a` to `b` runs in: 0 horizontal, 1 vertical,
+// INVALID for a point or a diagonal.
+uint32_t leg_plane(scav_point a, scav_point b) {
+  if ((a.y == b.y) && (a.x != b.x)) { return 0; }
+  if ((a.x == b.x) && (a.y != b.y)) { return 1; }
+  return INVALID;
 }
 
 // What an end is aimed at: the first corridor point it runs through, or the
@@ -1324,6 +1349,18 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
       if (!in_region(lead[net_tail[n].off + k])) { why = RouteFailure::OutsideRegion; }
     }
 
+    // The plane each end's lead or stub runs in, which a net with no corridor
+    // leaves and arrives in; a corridor's legs keep both ends free.
+    bool const direct{ at.len == 2 };
+    uint32_t const src_plane{ (direct && (net_lead[n].len > 0))
+                                  ? leg_plane(lead[net_lead[n].off + net_lead[n].len - 1],
+                                              anchors[at.off])
+                                  : INVALID };
+    uint32_t const dst_plane{ (direct && (net_tail[n].len > 0))
+                                  ? leg_plane(anchors[at.off + 1],
+                                              lead[net_tail[n].off + net_tail[n].len - 1])
+                                  : INVALID };
+
     auto const attempt = [&](OrthoGrid const &use) {
       // Through the simplifier like every other run, so a net whose ends resolve to
       // one place emits one point: a zero-length segment has no direction.
@@ -1341,7 +1378,7 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
                                           ortho_index_of(use.ys, a.y)) };
         uint32_t const v_to{ use.vertex(ortho_index_of(use.xs, b.x),
                                         ortho_index_of(use.ys, b.y)) };
-        if (!ortho_search(use, v_from, v_to, bend, scratch, hop)) {
+        if (!ortho_search(use, v_from, v_to, bend, scratch, hop, src_plane, dst_plane)) {
           shape.clear();
           return false;
         }

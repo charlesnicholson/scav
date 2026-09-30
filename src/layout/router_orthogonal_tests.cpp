@@ -61,13 +61,22 @@ bool enters_box(scav_point a, scav_point b, scav_rect const &r) {
 }
 
 // Shortest path over the same plane-split graph by an O(V^2) scan: no
-// heuristic, no heap, no tie-break. -1 when the target is unreachable.
-Wide reference_cost(OrthoGrid const &g, uint32_t from, uint32_t to, Wide bend) {
+// heuristic, no heap, no tie-break. -1 when the target is unreachable. A plane
+// below 2 is the only one the path may leave `from` or reach `to` in.
+Wide reference_cost(OrthoGrid const &g,
+                    uint32_t from,
+                    uint32_t to,
+                    Wide bend,
+                    uint32_t from_plane = INVALID,
+                    uint32_t to_plane = INVALID) {
   size_t const nodes{ size_t{ g.nx() } * g.ny() * 2 };
   std::vector<Wide> dist(nodes, -1);
   std::vector<uint8_t> done(nodes, 0);
-  dist[size_t{ from } * 2] = 0;
-  dist[(size_t{ from } * 2) + 1] = 0;
+  for (uint32_t plane = 0; plane < 2; ++plane) {
+    if ((from_plane >= 2) || (plane == from_plane)) {
+      dist[(size_t{ from } * 2) + plane] = 0;
+    }
+  }
   for (;;) {
     uint32_t at{ INVALID };
     Wide best{ -1 };
@@ -106,16 +115,21 @@ Wide reference_cost(OrthoGrid const &g, uint32_t from, uint32_t to, Wide bend) {
   }
   Wide const a{ dist[size_t{ to } * 2] };
   Wide const b{ dist[(size_t{ to } * 2) + 1] };
+  if (to_plane < 2) { return (to_plane == 0) ? a : b; }
   if (a < 0) { return b; }
   if (b < 0) { return a; }
   return imin(a, b);
 }
 
-// Length plus one bend per direction change, over a vertex path. Starting in
-// either plane is free, so the first leg never charges a bend.
-Wide path_cost(OrthoGrid const &g, std::vector<uint32_t> const &path, Wide bend) {
+// Length plus one bend per direction change, over a vertex path, and one more
+// at each end whose fixed plane its first or last leg does not run in.
+Wide path_cost(OrthoGrid const &g,
+               std::vector<uint32_t> const &path,
+               Wide bend,
+               uint32_t from_plane = INVALID,
+               uint32_t to_plane = INVALID) {
   Wide total{ 0 };
-  uint32_t previous{ 9 };
+  uint32_t previous{ from_plane };
   for (uint32_t k = 0; (k + 1) < path.size(); ++k) {
     scav_point const a{ g.point(path[k]) };
     scav_point const b{ g.point(path[k + 1]) };
@@ -123,10 +137,20 @@ Wide path_cost(OrthoGrid const &g, std::vector<uint32_t> const &path, Wide bend)
     Wide const dy{ (a.y < b.y) ? (Wide{ b.y } - a.y) : (Wide{ a.y } - b.y) };
     total += dx + dy;
     uint32_t const axis{ (a.x == b.x) ? 1U : 0U };
-    if ((k > 0) && (axis != previous)) { total += bend; }
+    if ((previous < 2) && (axis != previous)) { total += bend; }
     previous = axis;
   }
+  if ((to_plane < 2) && (previous < 2) && (previous != to_plane)) { total += bend; }
   return total;
+}
+
+// The turns a vertex path draws, each fixed end's counted.
+Wide bends_of(OrthoGrid const &g,
+              std::vector<uint32_t> const &path,
+              uint32_t from_plane,
+              uint32_t to_plane) {
+  return path_cost(g, path, 1, from_plane, to_plane) -
+         path_cost(g, path, 0, from_plane, to_plane);
 }
 
 // Every step is one grid edge, in bounds, and passable.
@@ -173,6 +197,9 @@ uint32_t mix(uint32_t x) {
   x ^= x >> 16U;
   return x;
 }
+
+// 0 and 1 as the search's two planes, and 2 as a free end.
+constexpr uint32_t plane_of(uint32_t k) { return (k < 2) ? k : INVALID; }
 
 // A second A* in the same `(f, g, node)` order over parallel arrays and a binary heap.
 // The order is total, so its paths and expansion count must match `ortho_search`'s.
@@ -242,7 +269,9 @@ struct ReferenceSearch {
               uint32_t to,
               Wide bend,
               uint32_t budget,
-              std::vector<uint32_t> &out) {
+              std::vector<uint32_t> &out,
+              uint32_t from_plane = INVALID,
+              uint32_t to_plane = INVALID) {
     out.clear();
     uint32_t const vertices{ g.nx() * g.ny() };
     if ((vertices == 0) || (from >= vertices) || (to >= vertices)) { return false; }
@@ -256,17 +285,27 @@ struct ReferenceSearch {
     }
     uint32_t const gen{ ++generation };
     scav_point const goal{ g.point(to) };
+    // Quarter units, an end's turn one quarter under a bend.
+    Wide const turn_w{ 4 * bend };
+    Wide const end_w{ (bend > 0) ? (turn_w - 1) : turn_w };
     auto const heuristic = [&](uint32_t node) {
       scav_point const at{ g.point(node / 2) };
       Wide const dx{ (at.x < goal.x) ? (Wide{ goal.x } - at.x) : (Wide{ at.x } - goal.x) };
       Wide const dy{ (at.y < goal.y) ? (Wide{ goal.y } - at.y) : (Wide{ at.y } - goal.y) };
-      bool const turn{ ((node % 2) == 0) ? (dy != 0) : (dx != 0) };
-      return dx + dy + (turn ? bend : Wide{ 0 });
+      // Covered in this plane, the path owes only an end turn into a fixed goal plane;
+      // otherwise a turn, and that end turn where the new plane is not the goal's.
+      uint32_t const plane{ node % 2 };
+      Wide const run{ 4 * (dx + dy) };
+      if (((plane == 0) ? dy : dx) == 0) {
+        return run + (((to_plane >= 2) || (plane == to_plane)) ? 0 : end_w);
+      }
+      return run + turn_w + (((to_plane >= 2) || ((1 - plane) == to_plane)) ? 0 : end_w);
     };
     heap_f.clear();
     heap_g.clear();
     heap_node.clear();
     for (uint32_t plane = 0; plane < 2; ++plane) {
+      if ((from_plane < 2) && (plane != from_plane)) { continue; }
       uint32_t const node{ (from * 2) + plane };
       stamp[node] = gen;
       best[node] = 0;
@@ -281,7 +320,7 @@ struct ReferenceSearch {
       uint32_t node{ 0 };
       pop(top_f, top_g, node);
       if ((stamp[node] != gen) || (top_g != best[node])) { continue; }
-      if ((node / 2) == to) {
+      if (((node / 2) == to) && ((to_plane >= 2) || ((node % 2) == to_plane))) {
         reached = node;
         break;
       }
@@ -298,20 +337,22 @@ struct ReferenceSearch {
         parent[next] = node;
         push(g_next + heuristic(next), g_next, next);
       };
-      relax((v * 2) + (1 - plane), bend);
+      bool const at_end{ ((v == from) && (plane == from_plane)) ||
+                         ((v == to) && (to_plane < 2)) };
+      relax((v * 2) + (1 - plane), at_end ? end_w : turn_w);
       if (plane == 0) {
         if (((ix + 1) < g.nx()) && (g.pass_h[(iy * (g.nx() - 1)) + ix] != 0)) {
-          relax(g.vertex(ix + 1, iy) * 2, Wide{ g.xs[ix + 1] } - g.xs[ix]);
+          relax(g.vertex(ix + 1, iy) * 2, 4 * (Wide{ g.xs[ix + 1] } - g.xs[ix]));
         }
         if ((ix > 0) && (g.pass_h[(iy * (g.nx() - 1)) + (ix - 1)] != 0)) {
-          relax(g.vertex(ix - 1, iy) * 2, Wide{ g.xs[ix] } - g.xs[ix - 1]);
+          relax(g.vertex(ix - 1, iy) * 2, 4 * (Wide{ g.xs[ix] } - g.xs[ix - 1]));
         }
       } else {
         if (((iy + 1) < g.ny()) && (g.pass_v[(iy * g.nx()) + ix] != 0)) {
-          relax((g.vertex(ix, iy + 1) * 2) + 1, Wide{ g.ys[iy + 1] } - g.ys[iy]);
+          relax((g.vertex(ix, iy + 1) * 2) + 1, 4 * (Wide{ g.ys[iy + 1] } - g.ys[iy]));
         }
         if ((iy > 0) && (g.pass_v[((iy - 1) * g.nx()) + ix] != 0)) {
-          relax((g.vertex(ix, iy - 1) * 2) + 1, Wide{ g.ys[iy] } - g.ys[iy - 1]);
+          relax((g.vertex(ix, iy - 1) * 2) + 1, 4 * (Wide{ g.ys[iy] } - g.ys[iy - 1]));
         }
       }
     }
@@ -1480,19 +1521,30 @@ TEST_CASE("ortho: the search returns an optimal path, checked against Dijkstra")
         uint32_t const to{ mix((seed * 13U) + trial + 1U) % vertices };
         CAPTURE(from);
         CAPTURE(to);
-        std::vector<uint32_t> path;
-        OrthoScratch s;
-        bool const found{ ortho_search(g, from, to, bend, s, path) };
-        Wide const want{ reference_cost(g, from, to, bend) };
-        CHECK(found == (want >= 0));
-        if (!found) { continue; }
-        check_path_is_walkable(g, path);
-        CHECK(path.front() == from);
-        CHECK(path.back() == to);
-        CHECK(path_cost(g, path, bend) == want);
-        for (uint32_t k = 0; (k + 1) < path.size(); ++k) {
-          for (scav_rect const &box : boxes) {
-            CHECK(!enters_box(g.point(path[k]), g.point(path[k + 1]), box));
+        // Both ends free, then one of the nine plane pairs.
+        uint32_t const pair{ mix((seed * 23U) + trial) % 9U };
+        for (std::pair<uint32_t, uint32_t> const planes :
+             { std::pair{ INVALID, INVALID },
+               std::pair{ plane_of(pair / 3), plane_of(pair % 3) } }) {
+          auto const [from_plane, to_plane] = planes;
+          CAPTURE(from_plane);
+          CAPTURE(to_plane);
+          std::vector<uint32_t> path;
+          OrthoScratch s;
+          bool const found{
+            ortho_search(g, from, to, bend, s, path, from_plane, to_plane)
+          };
+          Wide const want{ reference_cost(g, from, to, bend, from_plane, to_plane) };
+          CHECK(found == (want >= 0));
+          if (!found) { continue; }
+          check_path_is_walkable(g, path);
+          CHECK(path.front() == from);
+          CHECK(path.back() == to);
+          CHECK(path_cost(g, path, bend, from_plane, to_plane) == want);
+          for (uint32_t k = 0; (k + 1) < path.size(); ++k) {
+            for (scav_rect const &box : boxes) {
+              CHECK(!enters_box(g.point(path[k]), g.point(path[k + 1]), box));
+            }
           }
         }
       }
@@ -1513,18 +1565,30 @@ TEST_CASE("ortho: the search returns the reference search's path node for node")
       uint32_t const to{ mix((seed * 17U) + trial + 5U) % vertices };
       CAPTURE(from);
       CAPTURE(to);
+      // Every third trial fixes one of the nine plane pairs.
+      uint32_t const pair{ mix((seed * 29U) + trial) % 9U };
+      uint32_t const from_plane{ ((trial % 3U) != 2U) ? INVALID : plane_of(pair / 3) };
+      uint32_t const to_plane{ ((trial % 3U) != 2U) ? INVALID : plane_of(pair % 3) };
+      CAPTURE(from_plane);
+      CAPTURE(to_plane);
       std::vector<uint32_t> want;
       std::vector<uint32_t> got;
       OrthoScratch fresh;
       std::vector<uint32_t> alone;
-      bool const a{ reference.search(g, from, to, bend, ORTHO_EXPANSION_BUDGET, want) };
-      bool const b{ ortho_search(g, from, to, bend, shared, got) };
-      bool const c{ ortho_search(g, from, to, bend, fresh, alone) };
+      bool const a{
+        reference
+            .search(g, from, to, bend, ORTHO_EXPANSION_BUDGET, want, from_plane, to_plane)
+      };
+      bool const b{ ortho_search(g, from, to, bend, shared, got, from_plane, to_plane) };
+      bool const c{ ortho_search(g, from, to, bend, fresh, alone, from_plane, to_plane) };
       CHECK(a == b);
       CHECK(a == c);
       CHECK(got == want);
       CHECK(alone == want);
-      if (a) { CHECK(path_cost(g, got, bend) == reference_cost(g, from, to, bend)); }
+      if (a) {
+        CHECK(path_cost(g, got, bend, from_plane, to_plane) ==
+              reference_cost(g, from, to, bend, from_plane, to_plane));
+      }
       ++compared;
     }
   };
@@ -1589,6 +1653,133 @@ TEST_CASE("ortho: the bend penalty is what decides between two equal detours") {
 
   CHECK(path_cost(g, cheap, 0) <= path_cost(g, dear, 0));
   CHECK(path_cost(g, dear, 100000) <= path_cost(g, cheap, 100000));
+}
+
+TEST_CASE("ortho: a lead and a stub at right angles take the one path that bends once") {
+  // Two equal L-paths join opposite corners. Leaving along the lead and arriving
+  // along the stub turns once; the other path turns at each end as well.
+  OrthoGrid g;
+  REQUIRE(ortho_grid(rect(0, 0, 100, 100), {}, {}, 5, g));
+  REQUIRE(g.nx() == 2);
+  REQUIRE(g.ny() == 2);
+  OrthoScratch s;
+  std::vector<uint32_t> path;
+  uint32_t const from{ g.vertex(0, 0) };
+  uint32_t const to{ g.vertex(1, 1) };
+
+  REQUIRE(ortho_search(g, from, to, 500, s, path, 0, 1));
+  CHECK(path == std::vector<uint32_t>{ from, g.vertex(1, 0), to });
+  CHECK(bends_of(g, path, 0, 1) == 1);
+  CHECK(path_cost(g, path, 500, 0, 1) == 700);
+
+  REQUIRE(ortho_search(g, from, to, 500, s, path, 1, 0));
+  CHECK(path == std::vector<uint32_t>{ from, g.vertex(0, 1), to });
+  CHECK(bends_of(g, path, 1, 0) == 1);
+  CHECK(path_cost(g, path, 500, 1, 0) == 700);
+}
+
+TEST_CASE("ortho: of equal paths, the one turning at a fixed end is taken") {
+  // A horizontal lead and stub a row apart: a jog in any column draws two bends
+  // over one length, and the jog is at the lead's column or the stub's.
+  OrthoGrid g;
+  REQUIRE(ortho_grid(rect(0, 0, 1000, 100), {}, { pt(10, 0) }, 5, g));
+  REQUIRE(g.nx() == 3);
+  REQUIRE(g.ny() == 2);
+  OrthoScratch s;
+  std::vector<uint32_t> path;
+  REQUIRE(ortho_search(g, g.vertex(0, 0), g.vertex(2, 1), 500, s, path, 0, 0));
+  CHECK(path_cost(g, path, 500, 0, 0) == 2100);
+  uint32_t jog{ INVALID };
+  for (uint32_t k = 0; (k + 1) < path.size(); ++k) {
+    if ((path[k] % g.nx()) == (path[k + 1] % g.nx())) { jog = path[k] % g.nx(); }
+  }
+  CHECK(((jog == 0) || (jog == 2)));
+}
+
+TEST_CASE("ortho: a lead and a stub facing on one line take the straight run") {
+  for (uint32_t const plane : { 0U, 1U }) {
+    CAPTURE(plane);
+    scav_point const a{ (plane == 0) ? pt(0, 50) : pt(50, 0) };
+    scav_point const b{ (plane == 0) ? pt(200, 50) : pt(50, 200) };
+    OrthoGrid g;
+    REQUIRE(ortho_grid(rect(0, 0, 200, 200), {}, { a, b }, 5, g));
+    OrthoScratch s;
+    std::vector<uint32_t> path;
+    uint32_t const from{ g.vertex(ortho_index_of(g.xs, a.x), ortho_index_of(g.ys, a.y)) };
+    uint32_t const to{ g.vertex(ortho_index_of(g.xs, b.x), ortho_index_of(g.ys, b.y)) };
+    REQUIRE(ortho_search(g, from, to, 500, s, path, plane, plane));
+    CHECK(bends_of(g, path, plane, plane) == 0);
+    CHECK(path_cost(g, path, 500, plane, plane) == 200);
+  }
+}
+
+TEST_CASE(
+    "ortho: a fixed start plane alone, or a fixed goal plane alone, picks the corner") {
+  OrthoGrid g;
+  REQUIRE(ortho_grid(rect(0, 0, 100, 100), {}, {}, 5, g));
+  OrthoScratch s;
+  std::vector<uint32_t> path;
+  uint32_t const from{ g.vertex(0, 0) };
+  uint32_t const to{ g.vertex(1, 1) };
+  std::vector<uint32_t> const across{ from, g.vertex(1, 0), to };  // horizontal, then down
+  std::vector<uint32_t> const down{ from, g.vertex(0, 1), to };    // vertical, then across
+
+  // The start's plane is the first leg's; the goal takes the other.
+  REQUIRE(ortho_search(g, from, to, 500, s, path, 0, INVALID));
+  CHECK(path == across);
+  REQUIRE(ortho_search(g, from, to, 500, s, path, 1, INVALID));
+  CHECK(path == down);
+
+  // The goal's plane is the last leg's; the start takes the other.
+  REQUIRE(ortho_search(g, from, to, 500, s, path, INVALID, 1));
+  CHECK(path == across);
+  REQUIRE(ortho_search(g, from, to, 500, s, path, INVALID, 0));
+  CHECK(path == down);
+  CHECK(path_cost(g, path, 500, INVALID, 0) == 700);
+
+  // One vertex whose two ends disagree is the turn alone.
+  REQUIRE(ortho_search(g, from, from, 500, s, path, 0, 1));
+  CHECK(path == std::vector<uint32_t>{ from });
+  CHECK(path_cost(g, path, 500, 0, 1) == 500);
+}
+
+TEST_CASE("ortho: an end with no fixed plane is searched as it was") {
+  // A free corner takes the heap order's path, down then across, and a free end
+  // costs the cheapest of the fixed pairs.
+  OrthoGrid corner;
+  REQUIRE(ortho_grid(rect(0, 0, 100, 100), {}, {}, 5, corner));
+  OrthoScratch s;
+  std::vector<uint32_t> path;
+  REQUIRE(ortho_search(corner, corner.vertex(0, 0), corner.vertex(1, 1), 500, s, path));
+  CHECK(path == std::vector<uint32_t>{ corner.vertex(0, 0),
+                                       corner.vertex(0, 1),
+                                       corner.vertex(1, 1) });
+
+  OrthoGrid g;
+  REQUIRE(ortho_grid(rect(0, 0, 120, 120),
+                     { rect(30, 30, 20, 40), rect(70, 20, 30, 30) },
+                     {},
+                     4,
+                     g));
+  uint32_t const vertices{ g.nx() * g.ny() };
+  for (uint32_t trial = 0; trial < 40; ++trial) {
+    CAPTURE(trial);
+    uint32_t const from{ mix(trial + 31U) % vertices };
+    uint32_t const to{ mix(trial + 7777U) % vertices };
+    std::vector<uint32_t> implicit;
+    std::vector<uint32_t> named;
+    bool const a{ ortho_search(g, from, to, 300, s, implicit) };
+    bool const b{ ortho_search(g, from, to, 300, s, named, INVALID, INVALID) };
+    CHECK(a == b);
+    CHECK(implicit == named);
+    if (!a) { continue; }
+    Wide cheapest{ -1 };
+    for (uint32_t pair = 0; pair < 4; ++pair) {
+      Wide const c{ reference_cost(g, from, to, 300, pair / 2, pair % 2) };
+      if ((c >= 0) && ((cheapest < 0) || (c < cheapest))) { cheapest = c; }
+    }
+    CHECK(path_cost(g, implicit, 300) == cheapest);
+  }
 }
 
 TEST_CASE("ortho: no passable edge comes within a clearance of any box") {

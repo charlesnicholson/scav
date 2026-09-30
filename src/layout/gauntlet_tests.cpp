@@ -59,12 +59,12 @@ scav_profile compact() {
 // Every chart in test_data/charts/gauntlet, named so a failure says which shape
 // broke rather than which index did.
 constexpr std::array GAUNTLET{
-  "above.scav",     "carried.scav", "chain.scav",   "crossing.scav", "crowd.scav",
-  "enclosing.scav", "entered.scav", "fanin.scav",   "folded.scav",   "fork.scav",
-  "lane.scav",      "level.scav",   "long.scav",    "loop.scav",     "marks.scav",
-  "mutual.scav",    "ported.scav",  "pulled.scav",  "regions.scav",  "roundtrip.scav",
-  "seated.scav",    "stretch.scav", "through.scav", "tight.scav",    "transit.scav",
-  "under.scav",     "unfolded.scav"
+  "above.scav",     "carried.scav",   "chain.scav",   "corner.scav",  "crossing.scav",
+  "crowd.scav",     "enclosing.scav", "entered.scav", "fanin.scav",   "folded.scav",
+  "fork.scav",      "lane.scav",      "level.scav",   "long.scav",    "loop.scav",
+  "marks.scav",     "mutual.scav",    "ported.scav",  "pulled.scav",  "regions.scav",
+  "roundtrip.scav", "seated.scav",    "stretch.scav", "through.scav", "tight.scav",
+  "transit.scav",   "under.scav",     "unfolded.scav"
 };
 
 // One chart, laid out: the pieces every property below reads.
@@ -1412,6 +1412,43 @@ TEST_CASE("gauntlet: priced whitespace takes the composite drawn tighter") {
       empty[static_cast<uint32_t>(weight)] = t.whitespace;
     }
     CHECK(empty[1] < empty[0]);
+  }
+}
+
+TEST_CASE("gauntlet: a route leaving a composite turns one corner into its target") {
+  // Second's route leaves Box along its port's lead and turns once, onto the
+  // vertical leg that enters Fault's top or bottom face.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Laid l;
+    lay("corner.scav", p, l);
+    uint32_t const second{ state_named(l.c, "Second") };
+    uint32_t const fault{ state_named(l.c, "Fault") };
+    REQUIRE(second != INVALID);
+    REQUIRE(fault != INVALID);
+    uint32_t leaving{ INVALID };
+    for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+      Transition const &tr{ l.c.transitions[t] };
+      if ((tr.src.v == second) && (tr.dst.v == fault)) { leaving = t; }
+    }
+    REQUIRE(leaving != INVALID);
+    scav_span const route{ l.r.route[leaving] };
+    REQUIRE(route.len >= 2);
+    uint32_t turns{ 0 };
+    for (uint32_t k = 1; (k + 1) < route.len; ++k) {
+      scav_point const a{ l.r.points[route.off + k - 1] };
+      scav_point const b{ l.r.points[route.off + k] };
+      scav_point const c{ l.r.points[route.off + k + 1] };
+      bool const straight{ ((a.x == b.x) && (b.x == c.x)) ||
+                           ((a.y == b.y) && (b.y == c.y)) };
+      turns += straight ? 0U : 1U;
+    }
+    CHECK(turns == 1U);
+    scav_point const last{ l.r.points[route.off + route.len - 1] };
+    scav_point const before{ l.r.points[route.off + route.len - 2] };
+    scav_rect const box{ l.z.state[fault] };
+    CHECK(before.x == last.x);
+    CHECK(((last.y == box.y) || (last.y == (box.y + box.h))));
   }
 }
 

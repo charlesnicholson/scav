@@ -184,12 +184,16 @@ void ortho_enclosure_walls(scav_rect const &region,
 
 // A* over the plane-split graph. False when unreachable or past the expansion
 // budget. The key `(f, g, node)` is total, so equal-cost paths break the same.
+// A plane of 0 or 1 fixes the one the path leaves `from` or reaches `to` in, so
+// a turn onto or off an end's lead costs a bend; INVALID leaves that end free.
 bool ortho_search(OrthoGrid const &g,
                   uint32_t from,
                   uint32_t to,
                   Wide bend,
                   OrthoScratch &s,
-                  std::vector<uint32_t> &out);
+                  std::vector<uint32_t> &out,
+                  uint32_t from_plane = INVALID,
+                  uint32_t to_plane = INVALID);
 
 // A bend is worth one rank separation of length; the clearance is a third of
 // the node separation. Named here so a test states them rather than derives.
