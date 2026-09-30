@@ -13,6 +13,7 @@
 #include "scav_int.h"
 #include "scav_internal.h"
 #include "scav_stable_sort.h"
+#include "scav_vec.h"
 
 #include <array>
 #include <cstdint>
@@ -226,7 +227,7 @@ void sort_keys(std::vector<uint64_t> &key, std::vector<uint64_t> &spare) {
   for (uint64_t const k : key) {
     for (uint32_t d = 0; d < DIGITS; ++d) { ++count[d][(k >> (8U * d)) & 0xFFU]; }
   }
-  spare.resize(n);
+  vec_resize(spare, n);
   uint64_t *src{ key.data() };
   uint64_t *dst{ spare.data() };
   for (uint32_t d = 0; d < DIGITS; ++d) {
@@ -260,7 +261,7 @@ void lanes_of(std::vector<Piece> const &pieces,
     uint64_t const axis{ piece_axis(pieces[i], at) };
     if (axis >= 2) { continue; }
     uint64_t const line{ static_cast<uint32_t>(at) ^ 0x8000'0000U };
-    key.push_back((axis << 63U) | (line << PIECE_BITS) | i);
+    vec_push_back(key, (axis << 63U) | (line << PIECE_BITS) | i);
   }
   sort_keys(key, spare);
   lanes.clear();
@@ -270,11 +271,12 @@ void lanes_of(std::vector<Piece> const &pieces,
     uint32_t const axis{ static_cast<uint32_t>(k >> 63U) };
     int32_t const a{ (axis == 0) ? pc.a.x : pc.a.y };
     int32_t const b{ (axis == 0) ? pc.b.x : pc.b.y };
-    lanes.push_back({ .axis = axis,
-                      .at = (axis == 0) ? pc.a.y : pc.a.x,
-                      .lo = imin(a, b),
-                      .hi = imax(a, b),
-                      .piece = i });
+    vec_push_back(lanes,
+                  { .axis = axis,
+                    .at = (axis == 0) ? pc.a.y : pc.a.x,
+                    .lo = imin(a, b),
+                    .hi = imax(a, b),
+                    .piece = i });
   }
 }
 
@@ -294,7 +296,7 @@ int64_t crossings_over(std::vector<Piece> const &pieces,
                        std::vector<uint8_t> &is_loose) {
   uint32_t flat{ 0 };
   while ((flat < lanes.size()) && (lanes[flat].axis == 0)) { ++flat; }
-  is_loose.assign(pieces.size(), 1);
+  vec_assign(is_loose, pieces.size(), 1);
   for (Lane const &lane : lanes) { is_loose[lane.piece] = 0; }
 
   int64_t total{ 0 };
@@ -400,7 +402,7 @@ Wide crowding_over(std::vector<Piece> const &pieces,
 // The child grid without cell bounds: each frame's live children below `known` in span
 // order, and cells only for a frame of more than `scan_max`; no other frame is queried.
 void child_grid_frames(Chart const &c, size_t known, uint32_t scan_max, ChildGrid &g) {
-  g.frame.assign(c.submachines.size(), ChildGrid::Frame{});
+  vec_assign(g.frame, c.submachines.size(), ChildGrid::Frame{});
   g.child.clear();
   uint32_t cells{ 0 };
   for (uint32_t m = 0; m < c.submachines.size(); ++m) {
@@ -412,7 +414,7 @@ void child_grid_frames(Chart const &c, size_t known, uint32_t scan_max, ChildGri
       if ((st >= known) || (st >= c.states.size()) || (c.states[st].live == 0)) {
         continue;
       }
-      g.child.push_back(st);
+      vec_push_back(g.child, st);
     }
     f.children = make_span(first, static_cast<uint32_t>(g.child.size()) - first);
     if (f.children.len <= scan_max) { continue; }
@@ -420,12 +422,12 @@ void child_grid_frames(Chart const &c, size_t known, uint32_t scan_max, ChildGri
     f.bucket = cells;
     cells += f.side * f.side;
   }
-  g.bucket_off.assign(cells + 1, 0);
+  vec_assign(g.bucket_off, cells + 1, 0);
   g.bucket_at.clear();
 }
 
 void child_rects(ChildGrid const &g, SizedLayout const &z, std::vector<scav_rect> &kid) {
-  kid.resize(g.child.size());
+  vec_resize(kid, g.child.size());
   for (size_t i = 0; i < g.child.size(); ++i) { kid[i] = z.state[g.child[i]]; }
 }
 
@@ -456,7 +458,7 @@ void child_grid_fill(ChildGrid &g,
 
   // Count into the cell after each, prefix-sum, then place through a cursor
   // copy: the usual two passes, so a child spanning cells is stored in each.
-  g.bucket_off.assign(g.bucket_off.size(), 0);
+  vec_assign(g.bucket_off, g.bucket_off.size(), 0);
   auto const spread = [&g, &kid](auto step) {
     for (ChildGrid::Frame const &f : g.frame) {
       if (f.side == 0) { continue; }
@@ -478,8 +480,8 @@ void child_grid_fill(ChildGrid &g,
   for (uint32_t i = 1; i < g.bucket_off.size(); ++i) {
     g.bucket_off[i] += g.bucket_off[i - 1];
   }
-  g.bucket_at.assign(g.bucket_off.back(), 0);
-  cursor.assign(g.bucket_off.begin(), g.bucket_off.end());
+  vec_assign(g.bucket_at, g.bucket_off.back(), 0);
+  vec_assign(cursor, g.bucket_off.begin(), g.bucket_off.end());
   spread([&g, &cursor](uint32_t cell, uint32_t child) {
     g.bucket_at[cursor[cell]] = child;
     ++cursor[cell];
@@ -573,7 +575,7 @@ void grid_build_into(RectGrid &g,
   g.ch = imax(Wide{ imax(cell_h, 1) }, ceil_div(Wide{ region.h } + 1, Wide{ GRID_SIDE }));
   g.nx = static_cast<uint32_t>(imax(ceil_div(Wide{ region.w } + 1, g.cw), Wide{ 1 }));
   g.ny = static_cast<uint32_t>(imax(ceil_div(Wide{ region.h } + 1, g.ch), Wide{ 1 }));
-  g.off.assign((static_cast<size_t>(g.nx) * g.ny) + 1, 0);
+  vec_assign(g.off, (static_cast<size_t>(g.nx) * g.ny) + 1, 0);
   auto const spread = [&g, &rects](auto step) {
     for (uint32_t k = 0; k < rects.size(); ++k) {
       scav_rect const &r{ rects[k] };
@@ -590,8 +592,8 @@ void grid_build_into(RectGrid &g,
   };
   spread([&g](size_t cell, uint32_t) { ++g.off[cell + 1]; });
   for (size_t i = 1; i < g.off.size(); ++i) { g.off[i] += g.off[i - 1]; }
-  g.item.resize(g.off.back());
-  cursor.assign(g.off.begin(), g.off.end() - 1);
+  vec_resize(g.item, g.off.back());
+  vec_assign(cursor, g.off.begin(), g.off.end() - 1);
   spread([&g, &cursor](size_t cell, uint32_t k) { g.item[cursor[cell]++] = k; });
 }
 
@@ -716,7 +718,7 @@ int32_t through_boxes_over(Chart const &c,
                            Descent &d) {
   d.roots.clear();
   for (uint32_t m = 0; m < c.submachines.size(); ++m) {
-    if (c.submachines[m].owner.v == INVALID) { d.roots.push_back(m); }
+    if (c.submachines[m].owner.v == INVALID) { vec_push_back(d.roots, m); }
   }
 
   int32_t total{ 0 };
@@ -739,10 +741,10 @@ int32_t through_boxes_over(Chart const &c,
       charge(st, kid[at]);
       Span const subs{ c.states[st].submachines };
       for (uint32_t i = 0; i < subs.len; ++i) {
-        d.stack.push_back(c.submachine_ids[subs.off + i].v);
+        vec_push_back(d.stack, c.submachine_ids[subs.off + i].v);
       }
     };
-    d.stack.assign(d.roots.begin(), d.roots.end());
+    vec_assign(d.stack, d.roots.begin(), d.roots.end());
     while (!d.stack.empty()) {
       uint32_t const frame{ d.stack.back() };
       d.stack.pop_back();
@@ -788,7 +790,7 @@ Scratch &scratch() {
 }
 
 void seen_reset(Seen &seen, size_t n) {
-  seen.stamp.assign(n, 0);
+  vec_assign(seen.stamp, n, 0);
   seen.epoch = 0;
 }
 
@@ -798,8 +800,8 @@ SCAV_INTERNAL_BEGIN
 
 Ancestry cost_flatten_ancestry(Chart const &c) {
   Ancestry out;
-  out.tin.assign(c.states.size(), 0);
-  out.tout.assign(c.states.size(), 0);
+  vec_assign(out.tin, c.states.size(), 0);
+  vec_assign(out.tout, c.states.size(), 0);
   std::vector<uint8_t> buried(c.states.size(), 0);
 
   // `open` 0 is the exit marker, pushed under a state's own children so `tout`
@@ -811,8 +813,8 @@ Ancestry cost_flatten_ancestry(Chart const &c) {
   auto const push_children = [&c, &stack](uint32_t sub, uint32_t under) {
     Span const kids{ c.submachines[sub].children };
     for (uint32_t i = kids.len; i-- > 0;) {
-      stack.push_back(
-          { .state = c.state_ids[kids.off + i].v, .open = 1, .buried = under });
+      vec_push_back(stack,
+                    { .state = c.state_ids[kids.off + i].v, .open = 1, .buried = under });
     }
   };
   // A submachine no state owns is a document root; the forest is its children
@@ -834,7 +836,7 @@ Ancestry cost_flatten_ancestry(Chart const &c) {
     ++clock;
     out.tin[at.state] = clock;
     buried[at.state] = static_cast<uint8_t>(at.buried);
-    stack.push_back({ .state = at.state, .open = 0, .buried = 0 });
+    vec_push_back(stack, { .state = at.state, .open = 0, .buried = 0 });
     uint32_t const under{ ((at.buried != 0) || (c.states[at.state].live == 0)) ? 1U : 0U };
     Span const subs{ c.states[at.state].submachines };
     for (uint32_t i = subs.len; i-- > 0;) {
@@ -844,7 +846,7 @@ Ancestry cost_flatten_ancestry(Chart const &c) {
 
   for (uint32_t s = 0; s < c.states.size(); ++s) {
     if ((c.states[s].live != 0) && ((out.tin[s] == 0) || (buried[s] != 0))) {
-      out.detached.push_back(s);
+      vec_push_back(out.detached, s);
     }
   }
   return out;
@@ -879,7 +881,7 @@ void cost_grid_query(ChildGrid const &g,
   if (frame >= g.frame.size()) { return; }
   ChildGrid::Frame const &f{ g.frame[frame] };
   if (f.children.len == 0) { return; }
-  if (out.stamp.size() < g.child.size()) { out.stamp.assign(g.child.size(), 0); }
+  if (out.stamp.size() < g.child.size()) { vec_assign(out.stamp, g.child.size(), 0); }
   ++out.epoch;
   uint32_t const cx0{ cell_of(q.x, f.x0, f.cell_w, f.side) };
   uint32_t const cx1{ cell_of(Wide{ q.x } + q.w, f.x0, f.cell_w, f.side) };
@@ -892,7 +894,7 @@ void cost_grid_query(ChildGrid const &g,
         uint32_t const child{ g.bucket_at[at] };
         if (out.stamp[child] == out.epoch) { continue; }
         out.stamp[child] = out.epoch;
-        out.hit.push_back(child);
+        vec_push_back(out.hit, child);
       }
     }
   }
@@ -945,7 +947,7 @@ CostContext cost_context(Chart const &c) {
   CostContext k;
   k.an = cost_flatten_ancestry(c);
   child_grid_frames(c, c.states.size(), SCAN_MAX, k.grid);
-  k.transit_top.assign(c.transitions.size(), { INVALID, INVALID });
+  vec_assign(k.transit_top, c.transitions.size(), { INVALID, INVALID });
   for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {
     Transition const &trans{ c.transitions[tr] };
     CommonAncestor const lca{ lowest_common_ancestor(c, trans.src, trans.dst) };
@@ -983,9 +985,9 @@ CostTerms cost_terms(CostContext const &ctx,
   std::vector<Piece> &pieces{ sc.pieces };
   pieces.clear();
   std::vector<uint32_t> &first{ sc.first };
-  first.assign(c.transitions.size() + 1, 0);
+  vec_assign(first, c.transitions.size() + 1, 0);
   std::vector<uint32_t> &crossings_of{ sc.crossings_of };
-  crossings_of.assign(c.transitions.size(), 0);
+  vec_assign(crossings_of, c.transitions.size(), 0);
   for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {
     first[tr] = static_cast<uint32_t>(pieces.size());
     scav_span const route{ r.route[tr] };
@@ -994,10 +996,11 @@ CostTerms cost_terms(CostContext const &ctx,
                                            : std::array<uint32_t, 2>{ INVALID, INVALID } };
     bool const crosses_through{ (top[0] != INVALID) || (top[1] != INVALID) };
     for (uint32_t k = 0; (k + 1) < route.len; ++k) {
-      pieces.push_back({ .a = r.points[route.off + k],
-                         .b = r.points[route.off + k + 1],
-                         .trans = tr,
-                         .k = k });
+      vec_push_back(pieces,
+                    { .a = r.points[route.off + k],
+                      .b = r.points[route.off + k + 1],
+                      .trans = tr,
+                      .k = k });
       if ((k + 2) < route.len) {
         uint32_t const in{ direction(r.points[route.off + k],
                                      r.points[route.off + k + 1]) };
@@ -1032,7 +1035,7 @@ CostTerms cost_terms(CostContext const &ctx,
   // `excess_len` is what a route runs past the larger of its direct distance and its
   // carried boxes, times one plus its crossings; `length` sums every route.
   std::vector<Wide> &carried{ sc.carried };
-  carried.assign(c.transitions.size(), 0);
+  vec_assign(carried, c.transitions.size(), 0);
   if (s.path_box != nullptr) {
     for (uint32_t i = 0; i < s.n_path_box; ++i) {
       if (s.path_box[i].subject < carried.size()) {
@@ -1065,9 +1068,9 @@ CostTerms cost_terms(CostContext const &ctx,
   state_of.clear();
   for (uint32_t st = 0; st < c.states.size(); ++st) {
     if (c.states[st].live == 0) { continue; }
-    state_box.push_back(grow(z.state[st], imax(near, 0)));
-    state_rect.push_back(z.state[st]);
-    state_of.push_back(st);
+    vec_push_back(state_box, grow(z.state[st], imax(near, 0)));
+    vec_push_back(state_rect, z.state[st]);
+    vec_push_back(state_of, st);
   }
   RectGrid &states{ sc.states };
   grid_over(states, state_box, sc.cursor);
@@ -1077,7 +1080,9 @@ CostTerms cost_terms(CostContext const &ctx,
   if (!r.placed.empty()) {
     std::vector<scav_rect> &seg_box{ sc.seg_box };
     seg_box.clear();
-    for (Piece const &piece : pieces) { seg_box.push_back(span_rect(piece.a, piece.b)); }
+    for (Piece const &piece : pieces) {
+      vec_push_back(seg_box, span_rect(piece.a, piece.b));
+    }
     RectGrid &segs{ sc.segs };
     grid_over(segs, seg_box, sc.cursor);
     RectGrid &placed{ sc.placed };
@@ -1090,7 +1095,7 @@ CostTerms cost_terms(CostContext const &ctx,
     seen_reset(seen_state, state_box.size());
 
     std::vector<uint8_t> &encloses{ sc.encloses };
-    encloses.assign(c.states.size(), 0);
+    vec_assign(encloses, c.states.size(), 0);
     std::vector<uint32_t> &common{ sc.common };  // the states `encloses` holds at 2
     auto const mark = [&](StateId of, uint8_t v) {
       StateId at{ enclosing_state(c, of) };
@@ -1118,7 +1123,7 @@ CostTerms cost_terms(CostContext const &ctx,
         for (size_t step = 0; (step < c.states.size()) && (up.v != INVALID); ++step) {
           if (encloses[up.v] == 1) {
             encloses[up.v] = 2;
-            common.push_back(up.v);
+            vec_push_back(common, up.v);
           }
           up = enclosing_state(c, up);
         }
@@ -1183,7 +1188,7 @@ CostTerms cost_terms(CostContext const &ctx,
   ChildGrid &grid{ sc.grid };
   grid.frame = ctx.grid.frame;
   grid.child = ctx.grid.child;
-  grid.bucket_off.resize(ctx.grid.bucket_off.size());
+  vec_resize(grid.bucket_off, ctx.grid.bucket_off.size());
   child_rects(grid, z, sc.kid);
   child_grid_fill(grid, sc.kid, sc.cursor);
   t.box_overlap = box_overlaps_over(c, grid, sc.kid, sc.descent.q);
@@ -1208,8 +1213,8 @@ CostTerms cost_terms(CostContext const &ctx,
     if ((c.submachines[m].live == 0) || (c.submachines[m].owner.v == INVALID)) {
       continue;
     }
-    region_box.push_back(grow(z.sub[m], 1));
-    region_of.push_back(m);
+    vec_push_back(region_box, grow(z.sub[m], 1));
+    vec_push_back(region_of, m);
   }
   RectGrid &regions{ sc.regions };
   grid_over(regions, region_box, sc.cursor);
@@ -1244,7 +1249,7 @@ CostTerms cost_columns(Chart const &c,
   auto const rows = [&c](char const *name, auto &out) {
     ColumnId const id{ column_find(c, name) };
     if (id.v == INVALID) { return; }
-    out.resize(column_count(c, id));
+    vec_resize(out, column_count(c, id));
     if (!out.empty()) {
       std::memcpy(out.data(),
                   column_data(c, id),
@@ -1262,7 +1267,7 @@ CostTerms cost_columns(Chart const &c,
   Routes r;
   rows("scav.geom.point", r.points);
   rows("scav.geom.route", r.route);
-  r.route.resize(c.transitions.size());
+  vec_resize(r.route, c.transitions.size());
   r.placed = placed;
   return cost_terms(c, g, z, r, s, p);
 }

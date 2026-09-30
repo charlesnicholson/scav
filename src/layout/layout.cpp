@@ -20,6 +20,7 @@
 #include "scav_internal.h"
 #include "scav_stable_sort.h"
 #include "scav_thread.h"
+#include "scav_vec.h"
 #include "scav_xxhash.h"
 
 #include <algorithm>
@@ -201,7 +202,7 @@ uint32_t inputs_digest(scav_spaces const &s, scav_layout_opts const &o) {
   uint32_t version{ 0 };
   if (router_name(o.router, name, name_len) && router_version(o.router, version)) {
     append_u32(b, name_len);
-    b.insert(b.end(), name, name + name_len);
+    vec_insert(b, b.end(), name, name + name_len);
     append_u32(b, version);
   }
   // The font reaches layout only as the integers it measured, so its identity
@@ -333,7 +334,7 @@ Facing facing_flips(Chart const &c,
       }
       uint32_t const node{ joined(nd.subject) };
       uint32_t const side{ (down ? 0U : 2U) + ((o.seg_cross[nd.subject] == 1) ? 0U : 1U) };
-      if (node != INVALID) { taken.push_back({ .node = node, .side = side }); }
+      if (node != INVALID) { vec_push_back(taken, { .node = node, .side = side }); }
     }
     for (uint32_t k = 0; k < span.len; ++k) {
       uint32_t const at{ span.off + k };
@@ -374,9 +375,9 @@ Facing facing_flips(Chart const &c,
       uint32_t const side{ (node != INVALID) ? seen(node, far_across < mid_across)
                                              : INVALID };
       if (side != INVALID) {
-        taken.push_back({ .node = node, .side = side });
-        out.sides.push_back(
-            { .trans = t, .leg = leg, .end = leaves ? 1U : 0U, .side = side });
+        vec_push_back(taken, { .node = node, .side = side });
+        vec_push_back(out.sides,
+                      { .trans = t, .leg = leg, .end = leaves ? 1U : 0U, .side = side });
         trace_emit({ .kind = TraceKind::PortTurned,
                      .frame = m,
                      .port = { .seg = seg, .trans = t.v, .leg = leg, .side = side } });
@@ -386,7 +387,7 @@ Facing facing_flips(Chart const &c,
                                   : (z.node[at].x == frame.x) };
       bool const wants_leading{ far_at < mid_at };
       if (on_leading == wants_leading) { continue; }
-      out.reverses.push_back({ .trans = t, .leg = leg });
+      vec_push_back(out.reverses, { .trans = t, .leg = leg });
       uint32_t const along{ (down ? 2U : 0U) + (wants_leading ? 0U : 1U) };
       trace_emit({ .kind = TraceKind::PortTurned,
                    .frame = m,
@@ -451,10 +452,10 @@ Candidate search_candidate(Chart const &c,
         if (had != turned.reverses.end()) {
           turned.reverses.erase(had);
         } else {
-          turned.reverses.push_back(f);
+          vec_push_back(turned.reverses, f);
         }
       }
-      turned.sides.insert(turned.sides.end(), flips.sides.begin(), flips.sides.end());
+      vec_insert(turned.sides, turned.sides.end(), flips.sides.begin(), flips.sides.end());
       facing = order_submachines(c, g, s, knobs, threads, turned);
       SizedLayout again;
       std::vector<Diagnostic> spilled;
@@ -821,14 +822,14 @@ Improved run_search(Chart const &c,
 
   auto const with = [](SearchPins base_pins, Move const &m) {
     switch (m.kind) {
-      case MoveKind::Cut: base_pins.cuts.push_back(m.leg); break;
+      case MoveKind::Cut: vec_push_back(base_pins.cuts, m.leg); break;
       case MoveKind::Reverse:
-        base_pins.reverses.push_back({ .trans = m.leg.trans, .leg = m.leg.leg });
+        vec_push_back(base_pins.reverses, { .trans = m.leg.trans, .leg = m.leg.leg });
         break;
-      case MoveKind::Face: base_pins.faces.push_back(m.face); break;
-      case MoveKind::Side: base_pins.sides.push_back(m.side); break;
-      case MoveKind::Fold: base_pins.folds.push_back(m.fold); break;
-      case MoveKind::Rank: base_pins.ranks.push_back(m.pin); break;
+      case MoveKind::Face: vec_push_back(base_pins.faces, m.face); break;
+      case MoveKind::Side: vec_push_back(base_pins.sides, m.side); break;
+      case MoveKind::Fold: vec_push_back(base_pins.folds, m.fold); break;
+      case MoveKind::Rank: vec_push_back(base_pins.ranks, m.pin); break;
     }
     return base_pins;
   };
@@ -854,7 +855,7 @@ Improved run_search(Chart const &c,
     round.clear();
 
     // Cuts first: the segments phase 1 chained, named by the bends it created.
-    chained.assign(g.segments.size(), 0);
+    vec_assign(chained, g.segments.size(), 0);
     for (OrderNode const &nd : here.nodes) {
       if ((nd.kind == OrderKind::Bend) && (nd.subject < chained.size())) {
         chained[nd.subject] = 1;
@@ -870,8 +871,9 @@ Improved run_search(Chart const &c,
       TransId const t{ g.segments[seg].trans };
       if ((t.v == INVALID) || (t.v >= g.trans_segments.size())) { continue; }
       ++cut_scored;
-      round.push_back({ .leg = { .trans = t, .leg = seg - g.trans_segments[t.v].off },
-                        .kind = MoveKind::Cut });
+      vec_push_back(round,
+                    { .leg = { .trans = t, .leg = seg - g.trans_segments[t.v].off },
+                      .kind = MoveKind::Cut });
     }
 
     // Which edge of a cycle carries the reversal; only a segment on a cycle is offered.
@@ -886,7 +888,8 @@ Improved run_search(Chart const &c,
       }
       if (already) { continue; }
       ++rev_scored;
-      round.push_back({ .leg = { .trans = t, .leg = leg }, .kind = MoveKind::Reverse });
+      vec_push_back(round,
+                    { .leg = { .trans = t, .leg = leg }, .kind = MoveKind::Reverse });
     }
 
     // Four faces per segment end, less any pinned. A face the router gives no effect
@@ -912,8 +915,9 @@ Improved run_search(Chart const &c,
         for (uint32_t f = 0; (f < 4) && (face_scored < budget); ++f) {
           ++face_scored;
           if ((((effective >> f) & 1U) == 0) && skipping_noop_faces()) { continue; }
-          round.push_back({ .face = { .trans = t, .leg = leg, .end = end, .face = f },
-                            .kind = MoveKind::Face });
+          vec_push_back(round,
+                        { .face = { .trans = t, .leg = leg, .end = end, .face = f },
+                          .kind = MoveKind::Face });
         }
       }
     }
@@ -921,7 +925,7 @@ Improved run_search(Chart const &c,
     // Every side of its state's border a port may cross but the incumbent's; a port
     // already pinned is not re-offered.
     SubmachineOrders const &laid{ incumbent.laid };
-    source.assign(laid.nodes.size(), 0);
+    vec_assign(source, laid.nodes.size(), 0);
     for (OrderEdge const &e : laid.edges) { source[e.src] = 1; }
     for (uint32_t seg = 0;
          incumbent.ok && (seg < g.segments.size()) && (side_scored < budget);
@@ -951,8 +955,9 @@ Improved run_search(Chart const &c,
       for (uint32_t side = 0; (side < 4) && (side_scored < budget); ++side) {
         if (side == now) { continue; }
         ++side_scored;
-        round.push_back({ .side = { .trans = t, .leg = leg, .end = end, .side = side },
-                          .kind = MoveKind::Side });
+        vec_push_back(round,
+                      { .side = { .trans = t, .leg = leg, .end = end, .side = side },
+                        .kind = MoveKind::Side });
       }
     }
 
@@ -969,7 +974,7 @@ Improved run_search(Chart const &c,
       for (uint32_t r = 0; (r < ranks) && (pin_scored < budget); ++r) {
         if (r == at) { continue; }
         ++pin_scored;
-        round.push_back({ .pin = { .state = StateId{ st }, .rank = r } });
+        vec_push_back(round, { .pin = { .state = StateId{ st }, .rank = r } });
       }
     }
     // Under `refold`, a frame drawn folded moves its cut before each other rank.
@@ -983,7 +988,8 @@ Improved run_search(Chart const &c,
       for (uint32_t r = 1; (r < here.sub_ranks[m]) && (fold_scored < budget); ++r) {
         if (r == now) { continue; }
         ++fold_scored;
-        round.push_back(
+        vec_push_back(
+            round,
             { .fold = { .frame = SubmachineId{ m }, .mode = FOLD_ALWAYS, .layer = r },
               .kind = MoveKind::Fold });
       }
@@ -992,7 +998,7 @@ Improved run_search(Chart const &c,
 
     // A candidate runs its phases on one thread: it is already the unit a free
     // thread takes, and sharding its frames too would only add claims.
-    got.assign(round.size(), {});
+    vec_assign(got, round.size(), {});
     parallel_for(static_cast<uint32_t>(round.size()), threads, [&](uint32_t i) {
       got[i] = score_move(c,
                           g,
@@ -1096,47 +1102,49 @@ Improved run_search(Chart const &c,
 }
 
 void put_pins(SearchPins const &p, std::vector<uint32_t> &w) {
-  w.push_back(static_cast<uint32_t>(p.ranks.size()));
-  for (RankPin const &r : p.ranks) { w.insert(w.end(), { r.state.v, r.rank }); }
-  w.push_back(static_cast<uint32_t>(p.cuts.size()));
-  for (ChainCut const &k : p.cuts) { w.insert(w.end(), { k.trans.v, k.leg }); }
-  w.push_back(static_cast<uint32_t>(p.reverses.size()));
-  for (ReversePin const &r : p.reverses) { w.insert(w.end(), { r.trans.v, r.leg }); }
-  w.push_back(static_cast<uint32_t>(p.faces.size()));
+  vec_push_back(w, static_cast<uint32_t>(p.ranks.size()));
+  for (RankPin const &r : p.ranks) { vec_insert(w, w.end(), { r.state.v, r.rank }); }
+  vec_push_back(w, static_cast<uint32_t>(p.cuts.size()));
+  for (ChainCut const &k : p.cuts) { vec_insert(w, w.end(), { k.trans.v, k.leg }); }
+  vec_push_back(w, static_cast<uint32_t>(p.reverses.size()));
+  for (ReversePin const &r : p.reverses) { vec_insert(w, w.end(), { r.trans.v, r.leg }); }
+  vec_push_back(w, static_cast<uint32_t>(p.faces.size()));
   for (FacePin const &f : p.faces) {
-    w.insert(w.end(), { f.trans.v, f.leg, f.end, f.face });
+    vec_insert(w, w.end(), { f.trans.v, f.leg, f.end, f.face });
   }
-  w.push_back(static_cast<uint32_t>(p.orients.size()));
-  for (OrientPin const &o : p.orients) { w.push_back(o.frame.v); }
-  w.push_back(static_cast<uint32_t>(p.sides.size()));
+  vec_push_back(w, static_cast<uint32_t>(p.orients.size()));
+  for (OrientPin const &o : p.orients) { vec_push_back(w, o.frame.v); }
+  vec_push_back(w, static_cast<uint32_t>(p.sides.size()));
   for (SidePin const &sp : p.sides) {
-    w.insert(w.end(), { sp.trans.v, sp.leg, sp.end, sp.side });
+    vec_insert(w, w.end(), { sp.trans.v, sp.leg, sp.end, sp.side });
   }
-  w.push_back(static_cast<uint32_t>(p.folds.size()));
-  for (FoldPin const &f : p.folds) { w.insert(w.end(), { f.frame.v, f.mode, f.layer }); }
+  vec_push_back(w, static_cast<uint32_t>(p.folds.size()));
+  for (FoldPin const &f : p.folds) {
+    vec_insert(w, w.end(), { f.frame.v, f.mode, f.layer });
+  }
 }
 
 // The inverse of `put_pins`, reading from `at` and advancing it.
 SearchPins get_pins(int32_t const *w, uint32_t &at) {
   auto const next = [&]() { return static_cast<uint32_t>(w[at++]); };
   SearchPins p;
-  p.ranks.resize(next());
+  vec_resize(p.ranks, next());
   for (RankPin &r : p.ranks) { r = { .state = StateId{ next() }, .rank = next() }; }
-  p.cuts.resize(next());
+  vec_resize(p.cuts, next());
   for (ChainCut &k : p.cuts) { k = { .trans = TransId{ next() }, .leg = next() }; }
-  p.reverses.resize(next());
+  vec_resize(p.reverses, next());
   for (ReversePin &r : p.reverses) { r = { .trans = TransId{ next() }, .leg = next() }; }
-  p.faces.resize(next());
+  vec_resize(p.faces, next());
   for (FacePin &f : p.faces) {
     f = { .trans = TransId{ next() }, .leg = next(), .end = next(), .face = next() };
   }
-  p.orients.resize(next());
+  vec_resize(p.orients, next());
   for (OrientPin &o : p.orients) { o = { .frame = SubmachineId{ next() } }; }
-  p.sides.resize(next());
+  vec_resize(p.sides, next());
   for (SidePin &sp : p.sides) {
     sp = { .trans = TransId{ next() }, .leg = next(), .end = next(), .side = next() };
   }
-  p.folds.resize(next());
+  vec_resize(p.folds, next());
   for (FoldPin &f : p.folds) {
     f = { .frame = SubmachineId{ next() }, .mode = next(), .layer = next() };
   }
@@ -1240,7 +1248,7 @@ Improved search_moves(Chart const &c,
     uint32_t len{ 0 };
     hit = memo->table.find(key, at, len);
     if (hit) {
-      value.assign(at, at + len);
+      vec_assign(value, at, at + len);
       ++memo->hits;
     }
   }
@@ -1321,7 +1329,7 @@ Improved search_moves(Chart const &c,
     static_cast<uint32_t>(static_cast<uint64_t>(out.cost.t2))
   };
   put_pins(out.held, words);
-  value.assign(words.begin(), words.end());
+  vec_assign(value, words.begin(), words.end());
   {
     ScopedLock const held{ memo->lock };
     int32_t const *at{ nullptr };
@@ -1387,19 +1395,20 @@ void search_key(scav_profile const &objective,
   key.clear();
   for (scav_profile const *const at : { &objective, &knobs }) {
     std::memcpy(words.data(), at, sizeof(scav_profile));
-    key.insert(key.end(), words.begin(), words.end());
+    vec_insert(key, key.end(), words.begin(), words.end());
   }
-  key.insert(key.end(),
+  vec_insert(key,
+             key.end(),
              { static_cast<uint32_t>(dar),
                static_cast<uint32_t>(pack),
                static_cast<uint32_t>(fold),
                budget,
                refold ? 1U : 0U });
   put_pins(seed, key);
-  key.push_back((scope == nullptr) ? 0U : 1U);
+  vec_push_back(key, (scope == nullptr) ? 0U : 1U);
   if (scope != nullptr) {
-    key.push_back(static_cast<uint32_t>(scope->size()));
-    for (uint8_t const f : *scope) { key.push_back(f); }
+    vec_push_back(key, static_cast<uint32_t>(scope->size()));
+    for (uint8_t const f : *scope) { vec_push_back(key, f); }
   }
 }
 
@@ -1421,28 +1430,31 @@ bool layout_run(Chart &c,
   if (tuple != nullptr) { *tuple = 0; }
   scav_profile const &p{ o.profile };
   if (!profile_validate(p)) {
-    diags.push_back({ .code = DiagCode::ProfileOutOfRange,
-                      .subject = { .kind = ElemKind::Chart, .ordinal = 0 },
-                      .doc = { INVALID },
-                      .src = {} });
+    vec_push_back(diags,
+                  { .code = DiagCode::ProfileOutOfRange,
+                    .subject = { .kind = ElemKind::Chart, .ordinal = 0 },
+                    .doc = { INVALID },
+                    .src = {} });
     return false;
   }
   if (!spaces_validate(c, s, diags)) { return false; }
 
   if (geom_column_clash(c) != GeomCount) {
-    diags.push_back({ .code = DiagCode::GeometryColumnClash,
-                      .subject = { .kind = ElemKind::Chart, .ordinal = 0 },
-                      .doc = { INVALID },
-                      .src = {} });
+    vec_push_back(diags,
+                  { .code = DiagCode::GeometryColumnClash,
+                    .subject = { .kind = ElemKind::Chart, .ordinal = 0 },
+                    .doc = { INVALID },
+                    .src = {} });
     return false;
   }
 
   Router const *const router{ router_at(o.router) };
   if (router == nullptr) {
-    diags.push_back({ .code = DiagCode::RouterUnknown,
-                      .subject = { .kind = ElemKind::Chart, .ordinal = 0 },
-                      .doc = { INVALID },
-                      .src = {} });
+    vec_push_back(diags,
+                  { .code = DiagCode::RouterUnknown,
+                    .subject = { .kind = ElemKind::Chart, .ordinal = 0 },
+                    .doc = { INVALID },
+                    .src = {} });
     return false;
   }
 
@@ -1495,7 +1507,7 @@ bool layout_run(Chart &c,
   // Row 0 is the caller's own tuple, so its findings are the run's and every
   // other row's are a candidate's business. Merged here rather than in the
   // worker, where the order would be the scheduler's.
-  diags.insert(diags.end(), spilled[0].begin(), spilled[0].end());
+  vec_insert(diags, diags.end(), spilled[0].begin(), spilled[0].end());
   // A tuple leaving the coordinate domain is no candidate; row 0 leaving it fails the run.
   if (!candidates[0].viable) { return false; }
 
@@ -1521,7 +1533,7 @@ bool layout_run(Chart &c,
   auto const search_rows = [&](std::vector<uint8_t> const &which, bool refold) {
     std::vector<uint32_t> active;
     for (uint32_t i = 0; i < rows; ++i) {
-      if ((viable[i] != 0) && (which[i] != 0)) { active.push_back(i); }
+      if ((viable[i] != 0) && (which[i] != 0)) { vec_push_back(active, i); }
     }
     std::vector<Improved> done(active.size());
     uint32_t const n{ static_cast<uint32_t>(active.size()) };
@@ -1586,21 +1598,25 @@ bool layout_run(Chart &c,
       out.reverses = from.reverses;
       out.orients = from.orients;
       for (SidePin const &sp : from.sides) {
-        if (outside(frame_of_leg(sp.trans, sp.leg), redo)) { out.sides.push_back(sp); }
+        if (outside(frame_of_leg(sp.trans, sp.leg), redo)) {
+          vec_push_back(out.sides, sp);
+        }
       }
       for (RankPin const &r : from.ranks) {
         uint32_t const f{ (r.state.v < c.states.size()) ? c.states[r.state.v].parent.v
                                                         : INVALID };
-        if (outside(f, redo)) { out.ranks.push_back(r); }
+        if (outside(f, redo)) { vec_push_back(out.ranks, r); }
       }
       for (ChainCut const &k : from.cuts) {
-        if (outside(frame_of_leg(k.trans, k.leg), redo)) { out.cuts.push_back(k); }
+        if (outside(frame_of_leg(k.trans, k.leg), redo)) { vec_push_back(out.cuts, k); }
       }
       for (FacePin const &fp : from.faces) {
-        if (outside(frame_of_leg(fp.trans, fp.leg), redo)) { out.faces.push_back(fp); }
+        if (outside(frame_of_leg(fp.trans, fp.leg), redo)) {
+          vec_push_back(out.faces, fp);
+        }
       }
       for (FoldPin const &fp : from.folds) {
-        if (outside(fp.frame.v, redo)) { out.folds.push_back(fp); }
+        if (outside(fp.frame.v, redo)) { vec_push_back(out.folds, fp); }
       }
       return out;
     };
@@ -1638,9 +1654,10 @@ bool layout_run(Chart &c,
           if ((t.v == INVALID) || (t.v >= g.trans_segments.size())) { continue; }
           if (kick_scored >= budget) { break; }
           ++kick_scored;
-          kicks.push_back(
+          vec_push_back(
+              kicks,
               { .reverse = { .trans = t, .leg = seg - g.trans_segments[t.v].off } });
-          kick_frame.push_back(g.segments[seg].frame.v);
+          vec_push_back(kick_frame, g.segments[seg].frame.v);
         }
         for (uint32_t m = 0; turns && (m < here.sub_ranks.size()); ++m) {
           if ((c.submachines[m].live == 0) || (here.sub_ranks[m] < 2) ||
@@ -1648,8 +1665,8 @@ bool layout_run(Chart &c,
             continue;
           }
           ++kick_scored;
-          kicks.push_back({ .orient = { .frame = SubmachineId{ m } } });
-          kick_frame.push_back(m);
+          vec_push_back(kicks, { .orient = { .frame = SubmachineId{ m } } });
+          vec_push_back(kick_frame, m);
         }
         // A frame across the page with no fold pin, kicked to the fold it does not draw.
         std::vector<uint8_t> const &folded{ candidates[best].sized.folded };
@@ -1664,17 +1681,17 @@ bool layout_run(Chart &c,
           }
           ++kick_scored;
           uint32_t const mode{ (folded[m] != 0) ? FOLD_NEVER : FOLD_ALWAYS };
-          kicks.push_back({ .fold = { .frame = SubmachineId{ m }, .mode = mode } });
-          kick_frame.push_back(m);
+          vec_push_back(kicks, { .fold = { .frame = SubmachineId{ m }, .mode = mode } });
+          vec_push_back(kick_frame, m);
         }
         if (kicks.empty()) { break; }
         auto const with_kick = [](SearchPins &into, Kick const &k) {
           if (k.fold.frame.v != INVALID) {
-            into.folds.push_back(k.fold);
+            vec_push_back(into.folds, k.fold);
           } else if (k.orient.frame.v != INVALID) {
-            into.orients.push_back(k.orient);
+            vec_push_back(into.orients, k.orient);
           } else {
-            into.reverses.push_back(k.reverse);
+            vec_push_back(into.reverses, k.reverse);
           }
         };
 
@@ -1721,7 +1738,7 @@ bool layout_run(Chart &c,
 
         std::vector<uint32_t> winners;
         for (uint32_t const j : in_frame) {
-          if (j != INVALID) { winners.push_back(j); }
+          if (j != INVALID) { vec_push_back(winners, j); }
         }
         if (winners.size() > 1) {
           std::vector<uint8_t> redo(c.submachines.size(), 0);
@@ -1759,7 +1776,7 @@ bool layout_run(Chart &c,
         // where taking one per round re-scored every kick for each of them.
         std::vector<uint32_t> rest;
         for (uint32_t const j : winners) {
-          if (j != single) { rest.push_back(j); }
+          if (j != single) { vec_push_back(rest, j); }
         }
         scav_insertion_sort(rest.data(),
                             rest.data() + rest.size(),
@@ -1863,7 +1880,7 @@ bool layout_run(Chart &c,
     }
     std::vector<uint32_t> kicking;
     for (uint32_t i = 0; i < rows; ++i) {
-      if ((viable[i] != 0) && (repeat[i] == 0)) { kicking.push_back(i); }
+      if ((viable[i] != 0) && (repeat[i] == 0)) { vec_push_back(kicking, i); }
     }
     parallel_for(static_cast<uint32_t>(kicking.size()), o.threads, [&](uint32_t k) {
       kick(kicking[k]);
@@ -1926,10 +1943,11 @@ bool layout_run(Chart &c,
   // ordinal order.
   for (uint32_t t = 0; t < routes.failed.size(); ++t) {
     if (routes.failed[t] == 0) { continue; }
-    diags.push_back({ .code = DiagCode::RouteDegraded,
-                      .subject = { .kind = ElemKind::Transition, .ordinal = t },
-                      .doc = { INVALID },
-                      .src = {} });
+    vec_push_back(diags,
+                  { .code = DiagCode::RouteDegraded,
+                    .subject = { .kind = ElemKind::Transition, .ordinal = t },
+                    .doc = { INVALID },
+                    .src = {} });
   }
 
   write_columns(c, sized, routes, inputs_digest(s, o));

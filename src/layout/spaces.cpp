@@ -6,6 +6,7 @@
 #include "scav/scav_layout.h"
 #include "scav/scav_types.h"
 #include "scav_stable_sort.h"
+#include "scav_vec.h"
 #include "scav_xxhash.h"
 
 #include <cstdint>
@@ -18,7 +19,8 @@ namespace {
 bool in_domain(int32_t v) { return (v >= 0) && (v <= SPACE_MAX); }
 
 void report(std::vector<Diagnostic> &out, DiagCode code, ElemKind kind, uint32_t ordinal) {
-  out.push_back({ .code = code,
+  vec_push_back(out,
+                { .code = code,
                   .subject = { .kind = kind, .ordinal = ordinal },
                   .doc = { INVALID },
                   .src = {} });
@@ -136,7 +138,7 @@ bool spaces_validate(Chart const &c,
   });
 
   bool const clean{ found.empty() };
-  diags.insert(diags.end(), found.begin(), found.end());
+  vec_insert(diags, diags.end(), found.begin(), found.end());
   return clean;
 }
 
@@ -144,8 +146,9 @@ uint32_t spaces_digest(scav_spaces const &s) {
   // Field by field, never a struct's bytes, with each table's count prefixed
   // so two adjacent tables cannot spell one.
   std::vector<scav_byte> bytes;
-  bytes.reserve(16 + (12ULL * (s.n_box_state + s.n_box_sub)) + (8ULL * s.n_path_clear) +
-                (16ULL * s.n_path_box));
+  vec_reserve(bytes,
+              16 + (12ULL * (s.n_box_state + s.n_box_sub)) + (8ULL * s.n_path_clear) +
+                  (16ULL * s.n_path_box));
   append_u32(bytes, s.n_box_state);
   for (uint32_t i = 0; i < s.n_box_state; ++i) {
     append_i32(bytes, s.box_state[i].min_w);

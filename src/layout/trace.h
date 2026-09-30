@@ -6,6 +6,7 @@
 
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
+#include "scav_vec.h"
 
 #include <array>
 #include <cstdint>
@@ -185,7 +186,7 @@ inline void trace_emit(TraceEvent e) {
   LayoutTrace *const t{ trace_sink() };
   if (t == nullptr) { return; }
   if (e.frame == INVALID) { e.frame = t->frame; }  // an explicit frame wins
-  t->events.push_back(e);
+  vec_push_back(t->events, e);
 }
 
 // Scopes the frame stamp, so a phase that recurses restores its caller's.

@@ -1,6 +1,7 @@
 // The trace sink and its JSON serialization (11.16).
 
 #include "layout/trace.h"
+#include "scav_vec.h"
 
 #include <array>
 #include <cstring>
@@ -69,7 +70,7 @@ char const *verdict_name(uint16_t v) {
 struct Json {
   std::vector<char> &out;
 
-  void raw(char const *s, size_t n) { out.insert(out.end(), s, s + n); }
+  void raw(char const *s, size_t n) { vec_insert(out, out.end(), s, s + n); }
   void raw(char const *s) { raw(s, strlen(s)); }
 
   void num(int64_t v) {
@@ -80,8 +81,8 @@ struct Json {
       buf[n++] = static_cast<char>('0' + (mag % 10U));
       mag /= 10U;
     } while (mag != 0U);
-    if (v < 0) { out.push_back('-'); }
-    while (n != 0) { out.push_back(buf[--n]); }
+    if (v < 0) { vec_push_back(out, '-'); }
+    while (n != 0) { vec_push_back(out, buf[--n]); }
   }
 
   void key(char const *k) {

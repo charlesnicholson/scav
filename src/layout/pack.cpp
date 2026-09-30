@@ -9,6 +9,7 @@
 
 #include "scav_int.h"
 #include "scav_internal.h"
+#include "scav_vec.h"
 
 #include <cstdint>
 #include <vector>
@@ -164,7 +165,7 @@ void place(std::vector<scav_rect> const &rects,
            int32_t sep,
            Wide target,
            std::vector<Spot> &spot) {
-  spot.assign(rects.size(), Spot::Row);
+  vec_assign(spot, rects.size(), Spot::Row);
   Cursor at{ seeded(rects[0], sep) };
   for (uint32_t i = 1; i < rects.size(); ++i) {
     Wide const w{ rects[i].w };
@@ -367,7 +368,7 @@ Packing pack_box(std::vector<scav_rect> const &rects, int32_t sep) {
   // One row, one block, one subrow, which is the spot list of every rect
   // following its predecessor. Expansion then levels their heights.
   std::vector<Spot> &spot{ spot_scratch() };
-  spot.assign(rects.size(), Spot::Right);
+  vec_assign(spot, rects.size(), Spot::Right);
   Extent const e{ lay(rects, spot, sep, out.at) };
   out.w = narrow(e.w);
   out.h = narrow(e.h);

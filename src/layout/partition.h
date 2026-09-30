@@ -5,6 +5,7 @@
 // a different one of.
 
 #include "scav_int.h"
+#include "scav_vec.h"
 
 #include <cstdint>
 #include <vector>
@@ -20,7 +21,7 @@ struct Partition {
   std::vector<uint32_t> of;
 
   void reset(size_t n) {
-    of.resize(n);
+    vec_resize(of, n);
     for (uint32_t i = 0; i < of.size(); ++i) { of[i] = i; }
   }
 

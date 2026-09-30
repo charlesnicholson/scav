@@ -4,6 +4,7 @@
 #include "layout/decompose.h"
 
 #include "scav/scav_core.h"
+#include "scav_vec.h"
 
 #include <cstdint>
 #include <vector>
@@ -18,7 +19,7 @@ void chain_of(Chart const &c, StateId s, std::vector<StateId> &out) {
   out.clear();
   for (StateId x{ s }; (x.v != INVALID) && (out.size() < c.states.size());
        x = enclosing_state(c, x)) {
-    out.push_back(x);
+    vec_push_back(out, x);
   }
 }
 
@@ -52,13 +53,13 @@ SplitGraph decompose(Chart const &c) {
   std::vector<StateId> chain_dst;
   std::vector<Crossing> route;
 
-  g.state_depth.assign(c.states.size(), 0);
+  vec_assign(g.state_depth, c.states.size(), 0);
   for (uint32_t s = 0; s < c.states.size(); ++s) {
     chain_of(c, { s }, chain_src);
     g.state_depth[s] = static_cast<uint32_t>(chain_src.size() - 1);
   }
-  g.state_crossings.assign(c.states.size(), 0);
-  g.trans_segments.assign(c.transitions.size(), Span{});
+  vec_assign(g.state_crossings, c.states.size(), 0);
+  vec_assign(g.trans_segments, c.transitions.size(), Span{});
 
   for (uint32_t t = 0; t < c.transitions.size(); ++t) {
     Transition const &tr{ c.transitions[t] };
@@ -87,11 +88,11 @@ SplitGraph decompose(Chart const &c) {
       if (i == 0) {  // src encloses dst; its border splits only when external
         src_inner = tr.kind != TransKind::External;
         if (!src_inner) {
-          route.push_back({ .kind = Crossing::Enter, .state = tr.src, .sub = {} });
+          vec_push_back(route, { .kind = Crossing::Enter, .state = tr.src, .sub = {} });
         }
       }
       for (size_t k = 1; k < i; ++k) {
-        route.push_back({ .kind = Crossing::Exit, .state = chain_src[k], .sub = {} });
+        vec_push_back(route, { .kind = Crossing::Exit, .state = chain_src[k], .sub = {} });
       }
       if ((i > 0) && (j > 0) && (i < chain_src.size())) {
         // The chains meet at a state; entering through two of its submachines
@@ -99,12 +100,13 @@ SplitGraph decompose(Chart const &c) {
         SubmachineId const sub_src{ c.states[chain_src[i - 1].v].parent };
         SubmachineId const sub_dst{ c.states[chain_dst[j - 1].v].parent };
         if (sub_src != sub_dst) {
-          route.push_back({ .kind = Crossing::SepSrc, .state = {}, .sub = sub_src });
-          route.push_back({ .kind = Crossing::SepDst, .state = {}, .sub = sub_dst });
+          vec_push_back(route, { .kind = Crossing::SepSrc, .state = {}, .sub = sub_src });
+          vec_push_back(route, { .kind = Crossing::SepDst, .state = {}, .sub = sub_dst });
         }
       }
       for (size_t k = j; k-- > 1;) {
-        route.push_back({ .kind = Crossing::Enter, .state = chain_dst[k], .sub = {} });
+        vec_push_back(route,
+                      { .kind = Crossing::Enter, .state = chain_dst[k], .sub = {} });
       }
       // The target chain ran out first, so dst is one of src's ancestors and
       // the last frame is a submachine of dst: the route arrives inside it
@@ -126,23 +128,24 @@ SplitGraph decompose(Chart const &c) {
     for (size_t k = 0; k < route.size(); ++k) {
       Crossing const &x{ route[k] };
       uint32_t const port{ static_cast<uint32_t>(g.ports.size()) };
-      g.ports.push_back(
-          { .state = (x.kind == Crossing::Exit) || (x.kind == Crossing::Enter)
-                         ? x.state
-                         : StateId{ INVALID },
-            .sub = (x.kind == Crossing::SepSrc) || (x.kind == Crossing::SepDst)
-                       ? x.sub
-                       : SubmachineId{ INVALID },
-            .trans = { t },
-            .crossing = static_cast<uint32_t>(k) });
-      g.segments.push_back({ .trans = { t },
-                             .ordinal = static_cast<uint32_t>(k),
-                             .frame = frame,
-                             .src_port = prev,
-                             .dst_port = port,
-                             .separator = (x.kind == Crossing::SepDst) ? 1U : 0U,
-                             .src_inner = ((k == 0) && src_inner) ? 1U : 0U,
-                             .dst_inner = 0 });
+      vec_push_back(g.ports,
+                    { .state = (x.kind == Crossing::Exit) || (x.kind == Crossing::Enter)
+                                   ? x.state
+                                   : StateId{ INVALID },
+                      .sub = (x.kind == Crossing::SepSrc) || (x.kind == Crossing::SepDst)
+                                 ? x.sub
+                                 : SubmachineId{ INVALID },
+                      .trans = { t },
+                      .crossing = static_cast<uint32_t>(k) });
+      vec_push_back(g.segments,
+                    { .trans = { t },
+                      .ordinal = static_cast<uint32_t>(k),
+                      .frame = frame,
+                      .src_port = prev,
+                      .dst_port = port,
+                      .separator = (x.kind == Crossing::SepDst) ? 1U : 0U,
+                      .src_inner = ((k == 0) && src_inner) ? 1U : 0U,
+                      .dst_inner = 0 });
       switch (x.kind) {
         case Crossing::Exit:
           frame = c.states[x.state.v].parent;
@@ -160,14 +163,15 @@ SplitGraph decompose(Chart const &c) {
       }
       prev = port;
     }
-    g.segments.push_back({ .trans = { t },
-                           .ordinal = static_cast<uint32_t>(route.size()),
-                           .frame = frame,
-                           .src_port = prev,
-                           .dst_port = INVALID,
-                           .separator = 0,
-                           .src_inner = (route.empty() && src_inner) ? 1U : 0U,
-                           .dst_inner = dst_inner ? 1U : 0U });
+    vec_push_back(g.segments,
+                  { .trans = { t },
+                    .ordinal = static_cast<uint32_t>(route.size()),
+                    .frame = frame,
+                    .src_port = prev,
+                    .dst_port = INVALID,
+                    .separator = 0,
+                    .src_inner = (route.empty() && src_inner) ? 1U : 0U,
+                    .dst_inner = dst_inner ? 1U : 0U });
 
     g.trans_segments[t] =
         make_span(first_segment, static_cast<uint32_t>(g.segments.size()) - first_segment);

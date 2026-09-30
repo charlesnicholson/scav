@@ -2,6 +2,7 @@
 
 #include "scav_int.h"
 #include "scav_thread.h"
+#include "scav_vec.h"
 
 #include <array>
 #include <cstdint>
@@ -53,7 +54,7 @@ Registry &registry() {
 Memo::Memo(size_t words, MemoHash hash) : budget(words), hash_of(hash) {
   Registry &r{ registry() };
   ScopedLock const held{ r.lock };
-  r.memos.push_back(this);
+  vec_push_back(r.memos, this);
 }
 
 Memo::~Memo() {
@@ -108,7 +109,7 @@ Memo::Slot &Memo::slot_of(uint64_t hash, std::vector<uint32_t> const &key) {
 void Memo::grow() {
   std::vector<Slot> old;
   old.swap(slots);
-  slots.assign(imax(old.size() * 2, size_t{ 1024 }), Slot{});
+  vec_assign(slots, imax(old.size() * 2, size_t{ 1024 }), Slot{});
   size_t const mask{ slots.size() - 1 };
   for (Slot const &slot : old) {
     if (slot.key_len == 0) { continue; }
@@ -132,7 +133,7 @@ void Memo::insert(std::vector<uint32_t> const &key, std::vector<int32_t> const &
   if ((keys.size() + key.size() + values.size() + value.size()) > budget) {
     keys.clear();
     values.clear();
-    slots.assign(slots.size(), Slot{});
+    vec_assign(slots, slots.size(), Slot{});
     used = 0;
   }
   if (((size_t{ used } + 1) * 2) > slots.size()) { grow(); }
@@ -143,8 +144,8 @@ void Memo::insert(std::vector<uint32_t> const &key, std::vector<int32_t> const &
            .key_len = static_cast<uint32_t>(key.size()),
            .value_off = static_cast<uint32_t>(values.size()),
            .value_len = static_cast<uint32_t>(value.size()) };
-  keys.insert(keys.end(), key.begin(), key.end());
-  values.insert(values.end(), value.begin(), value.end());
+  vec_insert(keys, keys.end(), key.begin(), key.end());
+  vec_insert(values, values.end(), value.begin(), value.end());
   ++used;
 }
 

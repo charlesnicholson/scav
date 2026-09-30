@@ -14,6 +14,7 @@
 #include "scav_int.h"
 #include "scav_internal.h"
 #include "scav_stable_sort.h"
+#include "scav_vec.h"
 
 #include <array>
 #include <cstdint>
@@ -295,8 +296,8 @@ RectGrid const &grid_of(Scratch &s, int32_t cell_w, int32_t cell_h) {
   g.ch = imax(Wide{ imax(cell_h, 1) }, ceil_div(Wide{ region.h } + 1, Wide{ GRID_SIDE }));
   g.nx = static_cast<uint32_t>(imax(ceil_div(Wide{ region.w } + 1, g.cw), Wide{ 1 }));
   g.ny = static_cast<uint32_t>(imax(ceil_div(Wide{ region.h } + 1, g.ch), Wide{ 1 }));
-  g.off.assign((static_cast<size_t>(g.nx) * g.ny) + 1, 0);
-  s.cells.resize(s.blocked.size());
+  vec_assign(g.off, (static_cast<size_t>(g.nx) * g.ny) + 1, 0);
+  vec_resize(s.cells, s.blocked.size());
   for (uint32_t k = 0; k < s.blocked.size(); ++k) {
     scav_rect const &r{ s.blocked[k] };
     Cells const at{ .c0 = grid_cell(r.x, g.x0, g.cw, g.nx),
@@ -311,8 +312,8 @@ RectGrid const &grid_of(Scratch &s, int32_t cell_w, int32_t cell_h) {
     }
   }
   for (size_t i = 1; i < g.off.size(); ++i) { g.off[i] += g.off[i - 1]; }
-  g.item.resize(g.off.back());
-  s.fill.assign(g.off.begin(), g.off.end() - 1);
+  vec_resize(g.item, g.off.back());
+  vec_assign(s.fill, g.off.begin(), g.off.end() - 1);
   for (uint32_t k = 0; k < s.blocked.size(); ++k) {
     Cells const &at{ s.cells[k] };
     for (uint32_t y = at.r0; y <= at.r1; ++y) {
@@ -365,13 +366,13 @@ scav_rect region_of(std::vector<scav_point> const &route,
 // The route's legs, and the walls and foreign legs in one list.
 void prepare(Local const &l, Scratch &s) {
   uint32_t const n{ static_cast<uint32_t>(l.route.size()) };
-  s.own.assign(n - 1, {});
+  vec_assign(s.own, n - 1, {});
   for (uint32_t k = 0; (k + 1) < n; ++k) {
     s.own[k] = span_rect(l.route[k], l.route[k + 1]);
   }
-  if (s.nearby.size() < s.own.size()) { s.nearby.resize(s.own.size()); }
-  s.blocked.assign(l.walls.begin(), l.walls.end());
-  s.blocked.insert(s.blocked.end(), l.foreign.begin(), l.foreign.end());
+  if (s.nearby.size() < s.own.size()) { vec_resize(s.nearby, s.own.size()); }
+  vec_assign(s.blocked, l.walls.begin(), l.walls.end());
+  vec_insert(s.blocked, s.blocked.end(), l.foreign.begin(), l.foreign.end());
   s.region = region_of(l.route, l.w, l.h, l.leader);
   s.gridded = false;
 }
@@ -382,7 +383,9 @@ std::vector<scav_rect> const &nearby_of(Local const &l, Scratch &s, uint32_t k) 
   std::vector<scav_rect> &out{ s.nearby[k] };
   out.clear();
   for (scav_rect const &seg : l.foreign) {
-    if (chebyshev_gap(s.own[k], seg) <= (l.leader + l.w + l.h)) { out.push_back(seg); }
+    if (chebyshev_gap(s.own[k], seg) <= (l.leader + l.w + l.h)) {
+      vec_push_back(out, seg);
+    }
   }
   return out;
 }
@@ -546,7 +549,7 @@ Band const &Walk::band_of(Group const &g) {
     Wide const gap{ imax(imax(imax(ac_lo - across_hi, across_lo - ac_hi),
                               imax(al_lo - along_hi, along_lo - al_hi)),
                          Wide{ 0 }) };
-    if (gap < reach) { b.near.push_back(seg); }
+    if (gap < reach) { vec_push_back(b.near, seg); }
   }
   return b;
 }
@@ -729,7 +732,7 @@ Outcome pruned(Local const &l, Scratch &s) {
     Wide const hi{ flat ? imax(a.x, b.x) : imax(a.y, b.y) };
     Leg leg{ .first = static_cast<uint32_t>(s.groups.size()), .near = NO_LIMIT };
     uint32_t const bands{ static_cast<uint32_t>(s.legs.size()) * BANDS };
-    if (s.bands.size() < (bands + BANDS)) { s.bands.resize(bands + BANDS); }
+    if (s.bands.size() < (bands + BANDS)) { vec_resize(s.bands, bands + BANDS); }
     for (uint32_t j = 0; j < BANDS; ++j) { s.bands[bands + j].built = false; }
     for (uint32_t o = 0; o < (LEADS * ATTACH); ++o) {
       scav_point const d{ offset[o] };
@@ -739,14 +742,15 @@ Outcome pruned(Local const &l, Scratch &s) {
                               : ((Wide{ at.y } - d.y) - half_h) };
       Wide const gap{ imin(imax(centre, lo), hi) - centre };
       Wide const near{ imax(across, -across) + imax(gap, -gap) };
-      s.groups.push_back({ .k = k,
-                           .offset = o,
-                           .band = bands + band_of_offset(o, flat),
-                           .centre = centre,
-                           .near = near });
+      vec_push_back(s.groups,
+                    { .k = k,
+                      .offset = o,
+                      .band = bands + band_of_offset(o, flat),
+                      .centre = centre,
+                      .near = near });
       leg.near = imin(leg.near, near);
     }
-    s.legs.push_back(leg);
+    vec_push_back(s.legs, leg);
   }
   scav_insertion_sort(s.legs.data(),
                       s.legs.data() + s.legs.size(),
@@ -796,8 +800,9 @@ Memo &memo() {
 
 // Every field of `l`, counts before contents, so one key names one problem.
 void key_of(Local const &l, std::vector<uint32_t> &key) {
-  key.resize(16 + (2 * l.route.size()) + (4 * l.walls.size()) + (4 * l.foreign.size()) +
-             (4 * l.below.size()));
+  vec_resize(key,
+             16 + (2 * l.route.size()) + (4 * l.walls.size()) + (4 * l.foreign.size()) +
+                 (4 * l.below.size()));
   uint32_t *at{ key.data() };
   auto const word = [&at](int32_t v) { *at++ = static_cast<uint32_t>(v); };
   auto const rect = [&word](scav_rect const &r) {
@@ -842,7 +847,8 @@ Outcome remembered(Local const &l, Scratch &s) {
              .mid = hit[4] };
   }
   Outcome const out{ pruned(l, s) };
-  value.assign(
+  vec_assign(
+      value,
       { out.found ? 1 : 0, out.at.x, out.at.y, static_cast<int32_t>(out.seg), out.mid });
   m.insert(key, value);
   return out;
@@ -858,8 +864,8 @@ uint32_t place_labels_from(Chart const &c,
                            std::vector<scav_rect> &out,
                            std::vector<LabelSettle> &how,
                            LabelBase const *was) {
-  out.assign(s.n_path_box, {});
-  how.assign(s.n_path_box, {});
+  vec_assign(out, s.n_path_box, {});
+  vec_assign(how, s.n_path_box, {});
   if ((s.path_box == nullptr) || (s.n_path_box == 0)) { return 0; }
 
   // Against a base, the routes that moved and the rects a kept box's region must miss: a
@@ -872,7 +878,7 @@ uint32_t place_labels_from(Chart const &c,
   std::vector<uint8_t> moved;
   std::vector<scav_rect> dirty;
   if (based) {
-    moved.assign(route.size(), 0);
+    vec_assign(moved, route.size(), 0);
     for (uint32_t t = 0; t < route.size(); ++t) {
       scav_span const now{ route[t] };
       scav_span const had{ (*was->route)[t] };
@@ -883,11 +889,12 @@ uint32_t place_labels_from(Chart const &c,
       if (kept) { continue; }
       moved[t] = 1;
       for (uint32_t k = 0; (k + 1) < had.len; ++k) {
-        dirty.push_back(
+        vec_push_back(
+            dirty,
             span_rect((*was->points)[had.off + k], (*was->points)[had.off + k + 1]));
       }
       for (uint32_t k = 0; (k + 1) < now.len; ++k) {
-        dirty.push_back(span_rect(points[now.off + k], points[now.off + k + 1]));
+        vec_push_back(dirty, span_rect(points[now.off + k], points[now.off + k + 1]));
       }
     }
   }
@@ -900,7 +907,7 @@ uint32_t place_labels_from(Chart const &c,
     for (uint32_t k = 0; (k + 1) < route[t].len; ++k) {
       scav_rect const at{ span_rect(points[route[t].off + k],
                                     points[route[t].off + k + 1]) };
-      pieces.push_back(at);
+      vec_push_back(pieces, at);
       if (k == 0) {
         of.bounds = at;
         continue;
@@ -915,7 +922,7 @@ uint32_t place_labels_from(Chart const &c,
   }
   std::vector<uint32_t> live;
   for (uint32_t st = 0; st < c.states.size(); ++st) {
-    if (c.states[st].live != 0) { live.push_back(st); }
+    if (c.states[st].live != 0) { vec_push_back(live, st); }
   }
 
   // Transitions ascending, then `order`, which is what makes a later box of one
@@ -985,7 +992,8 @@ uint32_t place_labels_from(Chart const &c,
       l.last = legs.last;
       l.route.clear();
       for (uint32_t k = 0; k < r.len; ++k) {
-        l.route.push_back(
+        vec_push_back(
+            l.route,
             { .x = points[r.off + k].x - origin.x, .y = points[r.off + k].y - origin.y });
       }
       scav_rect const local_region{ region_of(l.route, box.w, box.h, leader) };
@@ -1048,17 +1056,17 @@ uint32_t place_labels_from(Chart const &c,
           // bands it reserved for its own text do not.
           if (encloses[st] != 0) {
             if (overlaps(region, z.before[st])) {
-              l.walls.push_back(local_rect(z.before[st]));
+              vec_push_back(l.walls, local_rect(z.before[st]));
             }
             if (overlaps(region, z.after[st])) {
-              l.walls.push_back(local_rect(z.after[st]));
+              vec_push_back(l.walls, local_rect(z.after[st]));
             }
           } else if (overlaps(region, z.state[st])) {
-            l.walls.push_back(local_rect(z.state[st]));
+            vec_push_back(l.walls, local_rect(z.state[st]));
           }
         }
         for (uint32_t const j : settled) {
-          if (overlaps(region, out[j])) { l.walls.push_back(local_rect(out[j])); }
+          if (overlaps(region, out[j])) { vec_push_back(l.walls, local_rect(out[j])); }
         }
         l.foreign.clear();
         for (uint32_t t = 0; t < by_route.size(); ++t) {
@@ -1068,7 +1076,7 @@ uint32_t place_labels_from(Chart const &c,
           }
           for (uint32_t k = of.first; k < (of.first + of.count); ++k) {
             if (overlaps(region, pieces[k])) {
-              l.foreign.push_back(local_rect(pieces[k]));
+              vec_push_back(l.foreign, local_rect(pieces[k]));
             }
           }
         }
@@ -1079,7 +1087,7 @@ uint32_t place_labels_from(Chart const &c,
             StateId const st{ lca.child[k] };
             if ((st.v == INVALID) || ((k == 1) && (st == lca.child[0]))) { continue; }
             if (overlaps(region, z.state[st.v])) {
-              l.below.push_back(local_rect(z.state[st.v]));
+              vec_push_back(l.below, local_rect(z.state[st.v]));
             }
           }
         }
@@ -1115,12 +1123,12 @@ uint32_t place_labels_from(Chart const &c,
                            (out[i].y == was_at.y) && (out[i].w == was_at.w) &&
                            (out[i].h == was_at.h) };
       if (!same_box) {
-        dirty.push_back(was_at);
-        dirty.push_back(out[i]);
+        vec_push_back(dirty, was_at);
+        vec_push_back(dirty, out[i]);
         chain_kept = false;
       }
     }
-    settled.push_back(i);
+    vec_push_back(settled, i);
   }
   return fallbacks;
 }

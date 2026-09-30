@@ -104,6 +104,7 @@ if(SCAV_BUILD_TESTS)
     ../scav_rnd_tests.cpp
     ../scav_shard_tests.cpp
     ../scav_thread_tests.cpp
+    ../scav_vec_tests.cpp
   )
   target_link_libraries(scav_layout_tests PRIVATE scavlayout_testable)
   # A floor is asserted only where the number means anything: never under

@@ -19,6 +19,7 @@
 #include "scav_shard.h"
 #include "scav_stable_sort.h"
 #include "scav_thread.h"
+#include "scav_vec.h"
 
 #include <array>
 #include <bit>
@@ -163,7 +164,7 @@ std::vector<CallScratch> &call_stack() {
 
 // `v` resized to `n` empty lists, each keeping the capacity it had.
 void reset_lists(std::vector<std::vector<uint32_t>> &v, size_t n) {
-  v.resize(n);
+  vec_resize(v, n);
   for (std::vector<uint32_t> &list : v) { list.clear(); }
 }
 
@@ -202,7 +203,9 @@ Routes route_transitions(Chart const &c,
   std::array<std::vector<uint32_t>, 2> &faces{ cs.faces };
   for (std::vector<uint32_t> &side : faces) { side.clear(); }
   if ((pins != nullptr) && !pins->faces.empty()) {
-    for (std::vector<uint32_t> &side : faces) { side.assign(g.segments.size(), INVALID); }
+    for (std::vector<uint32_t> &side : faces) {
+      vec_assign(side, g.segments.size(), INVALID);
+    }
     for (FacePin const &fp : pins->faces) {
       if ((fp.trans.v == INVALID) || (fp.trans.v >= g.trans_segments.size()) ||
           (fp.end > 1) || (fp.face > 3)) {
@@ -214,29 +217,29 @@ Routes route_transitions(Chart const &c,
     }
   }
   if (fill != nullptr) {
-    fill->frame.assign(c.submachines.size(), {});
-    fill->faceable.assign(size_t{ 2 } * g.segments.size(), 0);
+    vec_assign(fill->frame, c.submachines.size(), {});
+    vec_assign(fill->faceable, size_t{ 2 } * g.segments.size(), 0);
   }
   uint32_t const n{ static_cast<uint32_t>(c.transitions.size()) };
-  out.route.assign(n, {});
-  out.port.assign(n, {});
-  out.failed.assign(n, 0);
+  vec_assign(out.route, n, {});
+  vec_assign(out.port, n, {});
+  vec_assign(out.failed, n, 0);
 
   // The segment each port's boundary node belongs to, and the bends each
   // segment was chained through, both gathered once.
   std::vector<uint32_t> &port_seg{ cs.port_seg };
-  port_seg.assign(g.ports.size(), INVALID);
+  vec_assign(port_seg, g.ports.size(), INVALID);
   for (uint32_t seg = 0; seg < g.segments.size(); ++seg) {
     if (o.seg_port[seg] != INVALID) { port_seg[o.seg_port[seg]] = seg; }
   }
   std::vector<uint32_t> &seg_reversed{ cs.seg_reversed };
-  seg_reversed.assign(g.segments.size(), 0);
+  vec_assign(seg_reversed, g.segments.size(), 0);
   for (OrderEdge const &e : o.edges) { seg_reversed[e.segment] = e.reversed; }
   std::vector<std::vector<uint32_t>> &seg_bends{ cs.seg_bends };
   reset_lists(seg_bends, g.segments.size());
   for (uint32_t node = 0; node < o.nodes.size(); ++node) {
     if (o.nodes[node].kind == OrderKind::Bend) {
-      seg_bends[o.nodes[node].subject].push_back(node);
+      vec_push_back(seg_bends[o.nodes[node].subject], node);
     }
   }
   for (uint32_t seg = 0; seg < seg_bends.size(); ++seg) {
@@ -258,7 +261,7 @@ Routes route_transitions(Chart const &c,
   // Whether a route arrives at a boundary or leaves through one. Read from the
   // node's direction, not its absolute x, which carries the packer's offset.
   std::vector<uint8_t> &source_node{ cs.source_node };
-  source_node.assign(o.nodes.size(), 0);
+  vec_assign(source_node, o.nodes.size(), 0);
   for (OrderEdge const &e : o.edges) { source_node[e.src] = 1; }
 
   // A slot sits on the crossed box's own border, at the height its boundary
@@ -311,7 +314,7 @@ Routes route_transitions(Chart const &c,
   std::vector<Planned> &planned{ cs.planned };
   planned.clear();
   std::vector<Span> &trans_nets{ cs.trans_nets };
-  trans_nets.assign(n, Span{});
+  vec_assign(trans_nets, n, Span{});
   for (uint32_t t = 0; t < n; ++t) {
     Span const segs{ g.trans_segments[t] };
     if (segs.len == 0) { continue; }
@@ -333,12 +336,13 @@ Routes route_transitions(Chart const &c,
         scav_rect const box{ z.state[around.v] };
         reach = imax(imin(reach, (box.x + box.w) - imax(p.pad / 2, 1) - 1), lip.x + 1);
       }
-      planned.push_back({ .frame = frame,
-                          .src = lip,
-                          .dst = { .x = reach, .y = lip.y },
-                          .src_state = INVALID,
-                          .dst_state = INVALID,
-                          .seg = segs.off });
+      vec_push_back(planned,
+                    { .frame = frame,
+                      .src = lip,
+                      .dst = { .x = reach, .y = lip.y },
+                      .src_state = INVALID,
+                      .dst_state = INVALID,
+                      .seg = segs.off });
     } else {
       // An endpoint that encloses its end of the route is met on that state's
       // inner face, which is where phase 1 put the segment's boundary node.
@@ -356,7 +360,7 @@ Routes route_transitions(Chart const &c,
         uint32_t end_state{ INVALID };
         if (port != INVALID) {
           scav_port_slot const slot{ slot_of(port) };
-          out.slots.push_back(slot);
+          vec_push_back(out.slots, slot);
           end = { .x = slot.x, .y = slot.y };
         } else if (tail_inner) {
           end = z.node[tail];
@@ -375,12 +379,13 @@ Routes route_transitions(Chart const &c,
             (g.ports[from_port].sub.v < c.submachines.size())) {
           frame = g.ports[from_port].sub.v;
         }
-        planned.push_back({ .frame = frame,
-                            .src = at,
-                            .dst = end,
-                            .src_state = at_state,
-                            .dst_state = end_state,
-                            .seg = seg });
+        vec_push_back(planned,
+                      { .frame = frame,
+                        .src = at,
+                        .dst = end,
+                        .src_state = at_state,
+                        .dst_state = end_state,
+                        .seg = seg });
         at = end;
         at_state = end_state;
       }
@@ -396,12 +401,14 @@ Routes route_transitions(Chart const &c,
   std::vector<std::vector<uint32_t>> &by_frame{ cs.by_frame };
   reset_lists(by_frame, c.submachines.size());
   for (uint32_t i = 0; i < planned.size(); ++i) {
-    if (planned[i].frame < by_frame.size()) { by_frame[planned[i].frame].push_back(i); }
+    if (planned[i].frame < by_frame.size()) {
+      vec_push_back(by_frame[planned[i].frame], i);
+    }
   }
 
   int32_t const margin{ router.margin(p) };
   std::vector<FrameRoutes> &frames{ cs.frames };
-  frames.resize(by_frame.size());
+  vec_resize(frames, by_frame.size());
   for (FrameRoutes &fr : frames) {
     fr.points.clear();
     fr.net_points.clear();
@@ -413,26 +420,26 @@ Routes route_transitions(Chart const &c,
   // loose state has no enclosing state, or lies outside its enclosing state's box.
   uint32_t const state_count{ static_cast<uint32_t>(c.states.size()) };
   std::vector<uint32_t> &enclosing{ cs.enclosing };
-  enclosing.resize(state_count);
+  vec_resize(enclosing, state_count);
   for (uint32_t st = 0; st < state_count; ++st) {
     enclosing[st] = enclosing_state(c, { st }).v;
   }
   std::vector<uint32_t> &kid_head{ cs.kid_head };
   std::vector<uint32_t> &kid_next{ cs.kid_next };
   std::vector<uint32_t> &loose{ cs.loose };
-  kid_head.assign(state_count, INVALID);
-  kid_next.resize(state_count);
+  vec_assign(kid_head, state_count, INVALID);
+  vec_resize(kid_next, state_count);
   loose.clear();
   for (uint32_t st = 0; st < state_count; ++st) {
     if (c.states[st].live == 0) { continue; }
     uint32_t const up{ enclosing[st] };
     if (up >= state_count) {
-      loose.push_back(st);
+      vec_push_back(loose, st);
       continue;
     }
     kid_next[st] = kid_head[up];
     kid_head[up] = st;
-    if (!contains(z.state[up], z.state[st])) { loose.push_back(st); }
+    if (!contains(z.state[up], z.state[st])) { vec_push_back(loose, st); }
   }
 
   // Reads the model, the orders, the geometry and the plan; writes `frames[m]`
@@ -481,7 +488,7 @@ Routes route_transitions(Chart const &c,
     sc.chain.clear();
     uint32_t link{ owner.v };
     for (uint32_t step = 0; (step < state_count) && (link != INVALID); ++step) {
-      sc.chain.push_back(link);
+      vec_push_back(sc.chain, link);
       sc.in_chain[link] = 1;
       link = enclosing[link];
     }
@@ -506,12 +513,13 @@ Routes route_transitions(Chart const &c,
         if ((c.states[st].live == 0) || !overlaps(region, z.state[st])) { continue; }
         if ((sc.in_chain[st] != 0) || shields(st)) { continue; }
         sc.obstacle_index[st] = static_cast<uint32_t>(in.obstacles.size());
-        sc.obstacle_states.push_back(st);
-        in.obstacles.push_back(z.state[st]);
-        in.inscribed.push_back(kind_inscribed(c.states[st].kind) ? 1U : 0U);
-        in.corner.push_back(state_corner_radius(c.states[st].kind,
-                                                z.state[st],
-                                                z.before[st].x - z.state[st].x));
+        vec_push_back(sc.obstacle_states, st);
+        vec_push_back(in.obstacles, z.state[st]);
+        vec_push_back(in.inscribed, kind_inscribed(c.states[st].kind) ? 1U : 0U);
+        vec_push_back(in.corner,
+                      state_corner_radius(c.states[st].kind,
+                                          z.state[st],
+                                          z.before[st].x - z.state[st].x));
       }
     }
     for (uint32_t const a : sc.chain) { sc.in_chain[a] = 0; }
@@ -524,7 +532,7 @@ Routes route_transitions(Chart const &c,
       if (pn.dst_state != INVALID) { net.dst_obstacle = sc.obstacle_index[pn.dst_state]; }
       net.waypoint_off = static_cast<uint32_t>(in.waypoints.size());
       for (uint32_t const bend : seg_bends[pn.seg]) {
-        in.waypoints.push_back(z.node[bend]);
+        vec_push_back(in.waypoints, z.node[bend]);
       }
       net.waypoint_len = static_cast<uint32_t>(in.waypoints.size()) - net.waypoint_off;
       if (!faces[0].empty()) {
@@ -544,7 +552,7 @@ Routes route_transitions(Chart const &c,
         scav_point const &at{ in.waypoints[net.waypoint_off + w] };
         trace_emit({ .kind = TraceKind::NetWaypoint, .point = { .x = at.x, .y = at.y } });
       }
-      in.nets.push_back(net);
+      vec_push_back(in.nets, net);
       if (fill != nullptr) {
         auto const at{ static_cast<uint32_t>(in.nets.size() - 1) };
         for (uint32_t end = 0; end < 2; ++end) {
@@ -587,7 +595,7 @@ Routes route_transitions(Chart const &c,
       // The pitch is a line of text, not the router's clearance (11.9.5), and
       // it is the grouping tolerance too, so what is spread apart by it is
       // exactly what was too close by it.
-      sc.own.assign(ro.net_points.size(), frame);
+      vec_assign(sc.own, ro.net_points.size(), frame);
       nudge_lanes(region,
                   sc.own,
                   in.obstacles,
@@ -621,9 +629,9 @@ Routes route_transitions(Chart const &c,
     if (mine.len == 0) { return; }
     FrameScratch &sc{ frame_scratch() };
     sc.in.profile = p;
-    sc.obstacle_index.assign(c.states.size(), INVALID);
-    sc.in_chain.assign(c.states.size(), 0);
-    sc.pick.assign((size_t{ state_count } + 63) / 64, 0);
+    vec_assign(sc.obstacle_index, c.states.size(), INVALID);
+    vec_assign(sc.in_chain, c.states.size(), 0);
+    vec_assign(sc.pick, (size_t{ state_count } + 63) / 64, 0);
     for (uint32_t k = 0; k < mine.len; ++k) {
       uint32_t const m{ mine.off + k };
       if (!by_frame[m].empty()) { route_frame(m, sc); }
@@ -636,7 +644,7 @@ Routes route_transitions(Chart const &c,
   std::vector<scav_point> &routed{ cs.routed };
   routed.clear();
   std::vector<scav_span> &net_span{ cs.net_span };
-  net_span.assign(planned.size(), scav_span{});
+  vec_assign(net_span, planned.size(), scav_span{});
   for (uint32_t m = 0; m < by_frame.size(); ++m) {
     FrameRoutes const &fr{ frames[m] };
     merge_nudged(out.nudged, fr.nudged);
@@ -658,7 +666,9 @@ Routes route_transitions(Chart const &c,
         }
       }
       uint32_t const off{ static_cast<uint32_t>(routed.size()) };
-      for (uint32_t k = 0; k < at.len; ++k) { routed.push_back(fr.points[at.off + k]); }
+      for (uint32_t k = 0; k < at.len; ++k) {
+        vec_push_back(routed, fr.points[at.off + k]);
+      }
       net_span[by_frame[m][j]] = { .off = off, .len = at.len };
     }
   }
@@ -668,7 +678,7 @@ Routes route_transitions(Chart const &c,
   // it. Matched against that point rather than against the net's ordinal, so a
   // router that began somewhere else leaves the break in the polyline instead
   // of having a leg spliced over it.
-  out.points.reserve(routed.size());
+  vec_reserve(out.points, routed.size());
   for (uint32_t t = 0; t < n; ++t) {
     Span const nets{ trans_nets[t] };
     if (nets.len == 0) { continue; }
@@ -679,7 +689,7 @@ Routes route_transitions(Chart const &c,
       bool const joined{ (out.points.size() > first_point) &&
                          same(out.points.back(), routed[at.off]) };
       for (uint32_t k = (joined ? 1U : 0U); k < at.len; ++k) {
-        out.points.push_back(routed[at.off + k]);
+        vec_push_back(out.points, routed[at.off + k]);
       }
     }
     uint32_t const count{ static_cast<uint32_t>(out.points.size()) - first_point };
@@ -704,7 +714,7 @@ Routes route_transitions(Chart const &c,
     walls.clear();
     for (uint32_t st = 0; st < c.states.size(); ++st) {
       if ((c.states[st].live != 0) && (z.state[st].w != 0) && (z.state[st].h != 0)) {
-        walls.push_back(z.state[st]);
+        vec_push_back(walls, z.state[st]);
       }
     }
     // Each transition is bounded by the innermost state enclosing *both* its
@@ -713,9 +723,9 @@ Routes route_transitions(Chart const &c,
     // crosses inside, which is what lets its pieces leave the child frames;
     // one wholly inside a composite may not leave that composite.
     std::vector<scav_rect> &held{ cs.held };
-    held.assign(out.route.size(), z.chart);
+    vec_assign(held, out.route.size(), z.chart);
     std::vector<uint8_t> &up{ cs.up };
-    up.assign(c.states.size(), 0);
+    vec_assign(up, c.states.size(), 0);
     auto const above = [&enclosing](StateId of) {
       return (of.v == INVALID) ? INVALID : enclosing[of.v];
     };
@@ -757,7 +767,7 @@ Routes route_transitions(Chart const &c,
                               out.placed,
                               out.settled,
                               (was != nullptr) ? &base : nullptr);
-  stack.push_back(std::move(cs));
+  vec_push_back(stack, std::move(cs));
   return out;
 }
 

@@ -11,6 +11,7 @@
 #include "scav_int.h"
 #include "scav_internal.h"
 #include "scav_stable_sort.h"
+#include "scav_vec.h"
 
 #include <array>
 #include <cstdint>
@@ -77,22 +78,22 @@ Memo &memo() {
 // with one key are one graph.
 void key_of(CoordGraph const &g, std::vector<uint32_t> &key) {
   key.clear();
-  key.push_back(static_cast<uint32_t>(g.sep));
-  key.push_back(static_cast<uint32_t>(g.extent.size()));
-  for (int32_t const e : g.extent) { key.push_back(static_cast<uint32_t>(e)); }
-  key.push_back(static_cast<uint32_t>(g.layers.size()));
+  vec_push_back(key, static_cast<uint32_t>(g.sep));
+  vec_push_back(key, static_cast<uint32_t>(g.extent.size()));
+  for (int32_t const e : g.extent) { vec_push_back(key, static_cast<uint32_t>(e)); }
+  vec_push_back(key, static_cast<uint32_t>(g.layers.size()));
   for (std::vector<uint32_t> const &lay : g.layers) {
-    key.push_back(static_cast<uint32_t>(lay.size()));
-    key.insert(key.end(), lay.begin(), lay.end());
+    vec_push_back(key, static_cast<uint32_t>(lay.size()));
+    vec_insert(key, key.end(), lay.begin(), lay.end());
   }
-  key.push_back(static_cast<uint32_t>(g.edges.size()));
+  vec_push_back(key, static_cast<uint32_t>(g.edges.size()));
   for (CoordGraph::Edge const &e : g.edges) {
-    key.push_back(e.from);
-    key.push_back(e.to);
-    key.push_back(e.inner);
-    key.push_back(static_cast<uint32_t>(e.from_at));
-    key.push_back(static_cast<uint32_t>(e.to_at));
-    key.push_back(e.weak);
+    vec_push_back(key, e.from);
+    vec_push_back(key, e.to);
+    vec_push_back(key, e.inner);
+    vec_push_back(key, static_cast<uint32_t>(e.from_at));
+    vec_push_back(key, static_cast<uint32_t>(e.to_at));
+    vec_push_back(key, e.weak);
   }
 }
 
@@ -123,8 +124,8 @@ void view_of(CoordGraph const &g, bool upward, bool rightward, Scratch &sc) {
       }
     }
   }
-  v.pos.assign(n, 0);
-  v.layer.assign(n, INVALID);
+  vec_assign(v.pos, n, 0);
+  vec_assign(v.layer, n, INVALID);
   for (uint32_t i = 0; i < v.layers.size(); ++i) {
     for (uint32_t k = 0; k < v.layers[i].size(); ++k) {
       v.pos[v.layers[i][k]] = k;
@@ -132,12 +133,12 @@ void view_of(CoordGraph const &g, bool upward, bool rightward, Scratch &sc) {
     }
   }
 
-  sc.count.assign(n, 0);
+  vec_assign(sc.count, n, 0);
   for (CoordGraph::Edge const &e : g.edges) { ++sc.count[lower_of(e, upward)]; }
-  v.up_off.assign(size_t{ n } + 1, 0);
+  vec_assign(v.up_off, size_t{ n } + 1, 0);
   for (uint32_t i = 0; i < n; ++i) { v.up_off[i + 1] = v.up_off[i] + sc.count[i]; }
-  v.up_edge.assign(g.edges.size(), 0);
-  sc.fill.assign(v.up_off.begin(), v.up_off.end() - 1);
+  vec_assign(v.up_edge, g.edges.size(), 0);
+  vec_assign(sc.fill, v.up_off.begin(), v.up_off.end() - 1);
   for (uint32_t i = 0; i < g.edges.size(); ++i) {
     v.up_edge[sc.fill[lower_of(g.edges[i], upward)]++] = i;
   }
@@ -169,9 +170,9 @@ void align_vertical(CoordGraph const &g,
                     std::vector<uint32_t> &align,
                     std::vector<int64_t> &offset) {
   uint32_t const n{ static_cast<uint32_t>(g.extent.size()) };
-  root.assign(n, 0);
-  align.assign(n, 0);
-  offset.assign(n, 0);
+  vec_assign(root, n, 0);
+  vec_assign(align, n, 0);
+  vec_assign(offset, n, 0);
   for (uint32_t i = 0; i < n; ++i) {
     root[i] = i;
     align[i] = i;
@@ -221,15 +222,15 @@ std::vector<uint32_t> const &block_order(Scratch &sc, uint32_t n) {
   std::vector<uint32_t> &pending{ sc.pending };
   std::vector<uint32_t> &succ_off{ sc.succ_off };
   std::vector<uint32_t> &succ{ sc.succ };
-  pending.assign(n, 0);
-  sc.succ_count.assign(n, 0);
+  vec_assign(pending, n, 0);
+  vec_assign(sc.succ_count, n, 0);
   for (std::vector<uint32_t> const &lay : v.layers) {
     for (uint32_t k = 1; k < lay.size(); ++k) { ++sc.succ_count[root[lay[k - 1]]]; }
   }
-  succ_off.assign(size_t{ n } + 1, 0);
+  vec_assign(succ_off, size_t{ n } + 1, 0);
   for (uint32_t i = 0; i < n; ++i) { succ_off[i + 1] = succ_off[i] + sc.succ_count[i]; }
-  succ.assign(succ_off[n], 0);
-  sc.fill.assign(succ_off.begin(), succ_off.end() - 1);
+  vec_assign(succ, succ_off[n], 0);
+  vec_assign(sc.fill, succ_off.begin(), succ_off.end() - 1);
   for (std::vector<uint32_t> const &lay : v.layers) {
     for (uint32_t k = 1; k < lay.size(); ++k) {
       succ[sc.fill[root[lay[k - 1]]]++] = root[lay[k]];
@@ -240,18 +241,18 @@ std::vector<uint32_t> const &block_order(Scratch &sc, uint32_t n) {
   std::vector<uint32_t> &order{ sc.order };
   order.clear();
   for (uint32_t i = 0; i < n; ++i) {
-    if ((root[i] == i) && (pending[i] == 0)) { order.push_back(i); }
+    if ((root[i] == i) && (pending[i] == 0)) { vec_push_back(order, i); }
   }
   for (uint32_t at = 0; at < order.size(); ++at) {
     uint32_t const block{ order[at] };
     for (uint32_t k = succ_off[block]; k < succ_off[block + 1]; ++k) {
-      if (--pending[succ[k]] == 0) { order.push_back(succ[k]); }
+      if (--pending[succ[k]] == 0) { vec_push_back(order, succ[k]); }
     }
   }
   // A leftover would mean the block relation is not the DAG it is proven to
   // be; place it anyway rather than dropping nodes out of the drawing.
   for (uint32_t i = 0; i < n; ++i) {
-    if ((root[i] == i) && (pending[i] != 0)) { order.push_back(i); }
+    if ((root[i] == i) && (pending[i] != 0)) { vec_push_back(order, i); }
   }
   return order;
 }
@@ -270,9 +271,9 @@ void compact(CoordGraph const &g, Scratch &sc, std::vector<int64_t> &x) {
   std::vector<int64_t> const &offset{ sc.offset };
   std::vector<uint32_t> &sink{ sc.sink };
   std::vector<int64_t> &shift{ sc.shift };
-  x.assign(n, 0);
-  sink.assign(n, 0);
-  shift.assign(n, SHIFT_INF);
+  vec_assign(x, n, 0);
+  vec_assign(sink, n, 0);
+  vec_assign(shift, n, SHIFT_INF);
   for (uint32_t i = 0; i < n; ++i) { sink[i] = i; }
 
   auto const pred_of = [&](uint32_t node) {
@@ -308,12 +309,12 @@ void compact(CoordGraph const &g, Scratch &sc, std::vector<int64_t> &x) {
   // Classes stack diagonally, so the class a pair's right member belongs to is
   // always finished before that pair is read.
   std::vector<std::vector<std::pair<uint32_t, uint32_t>>> &neighborings{ sc.neighborings };
-  neighborings.resize(v.layers.size());
+  vec_resize(neighborings, v.layers.size());
   for (std::vector<std::pair<uint32_t, uint32_t>> &at : neighborings) { at.clear(); }
   for (std::vector<uint32_t> const &lay : v.layers) {
     for (auto k = static_cast<uint32_t>(lay.size()); k-- > 1;) {
       if (sink[lay[k - 1]] != sink[lay[k]]) {
-        neighborings[v.layer[sink[lay[k]]]].emplace_back(lay[k - 1], lay[k]);
+        vec_emplace_back(neighborings[v.layer[sink[lay[k]]]], lay[k - 1], lay[k]);
       }
     }
   }
@@ -337,7 +338,7 @@ void compact(CoordGraph const &g, Scratch &sc, std::vector<int64_t> &x) {
 
 void mark_type1(CoordGraph const &g, Scratch &sc) {
   std::vector<uint8_t> &mark{ sc.mark };
-  mark.assign(g.edges.size(), 0);
+  vec_assign(mark, g.edges.size(), 0);
   view_of(g, false, false, sc);
   View const &v{ sc.v };
   uint32_t const h{ static_cast<uint32_t>(g.layers.size()) };
@@ -423,7 +424,7 @@ std::vector<int32_t> coords_place(CoordGraph const &g) {
   }
 
   std::vector<uint8_t> &placed{ sc.placed };
-  placed.assign(n, 0);
+  vec_assign(placed, n, 0);
   for (std::vector<uint32_t> const &lay : g.layers) {
     for (uint32_t const node : lay) { placed[node] = 1; }
   }

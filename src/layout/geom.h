@@ -8,6 +8,7 @@
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 #include "scav_int.h"
+#include "scav_vec.h"
 
 #include <cstdint>
 #include <vector>
@@ -136,7 +137,7 @@ inline void grid_build(RectGrid &g,
   g.ch = imax(Wide{ imax(cell_h, 1) }, ceil_div(Wide{ region.h } + 1, Wide{ GRID_SIDE }));
   g.nx = static_cast<uint32_t>(imax(ceil_div(Wide{ region.w } + 1, g.cw), Wide{ 1 }));
   g.ny = static_cast<uint32_t>(imax(ceil_div(Wide{ region.h } + 1, g.ch), Wide{ 1 }));
-  g.off.assign((static_cast<size_t>(g.nx) * g.ny) + 1, 0);
+  vec_assign(g.off, (static_cast<size_t>(g.nx) * g.ny) + 1, 0);
   auto const span =
       [&g](scav_rect const &r, uint32_t &c0, uint32_t &c1, uint32_t &r0, uint32_t &r1) {
         c0 = grid_cell(r.x, g.x0, g.cw, g.nx);
@@ -157,7 +158,7 @@ inline void grid_build(RectGrid &g,
     }
   }
   for (size_t i = 1; i < g.off.size(); ++i) { g.off[i] += g.off[i - 1]; }
-  g.item.assign(g.off.back(), 0);
+  vec_assign(g.item, g.off.back(), 0);
   std::vector<uint32_t> fill(g.off.begin(), g.off.end() - 1);
   for (uint32_t k = 0; k < rects.size(); ++k) {
     uint32_t c0{ 0 };
