@@ -81,7 +81,8 @@ bool same(SubmachineOrders const &a, SubmachineOrders const &b) {
 bool same(SizedLayout const &a, SizedLayout const &b) {
   return same_rows(a.state, b.state) && same_rows(a.before, b.before) &&
          same_rows(a.after, b.after) && same_rows(a.sub, b.sub) &&
-         same_rows(a.node, b.node) && (a.folded == b.folded) && (a.chart == b.chart);
+         same_rows(a.node, b.node) && (a.lean == b.lean) && (a.folded == b.folded) &&
+         (a.chart == b.chart);
 }
 
 SubmachineOrders ordered(Chart const &c,

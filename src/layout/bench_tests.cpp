@@ -272,7 +272,11 @@ TEST_CASE("bench: the cells corpus_routers.txt leaves unscored, term by term") {
                                 t.label,
                                 t.label_near,
                                 t.aspect,
-                                t.area }) {
+                                t.area,
+                                t.crowding,
+                                t.length,
+                                t.transit_bends,
+                                t.whitespace }) {
       actual += ' ';
       actual += std::to_string(term);
     }

@@ -1174,19 +1174,24 @@ bool same_result(Improved const &a, Improved const &b) {
   if ((a.viable != b.viable) || (a.cost.t0_violations != b.cost.t0_violations) ||
       (a.cost.t1_hints != b.cost.t1_hints) || (a.cost.t2 != b.cost.t2) ||
       !same_pins(a.held, b.held) || !same_pins(a.best.laid, b.best.laid) ||
+      (a.best.inflations != b.best.inflations) ||
+      (a.best.routes.unplaced != b.best.routes.unplaced) ||
       (a.best.sized.state.size() != b.best.sized.state.size()) ||
-      (a.best.routes.points.size() != b.best.routes.points.size())) {
+      (a.best.routes.points.size() != b.best.routes.points.size()) ||
+      (a.best.routes.placed.size() != b.best.routes.placed.size())) {
     return false;
   }
+  auto const same_rect{ [](scav_rect const &ra, scav_rect const &rb) {
+    return (ra.x == rb.x) && (ra.y == rb.y) && (ra.w == rb.w) && (ra.h == rb.h);
+  } };
   for (uint32_t k = 0; k < a.best.sized.state.size(); ++k) {
-    scav_rect const &ra{ a.best.sized.state[k] };
-    scav_rect const &rb{ b.best.sized.state[k] };
-    if ((ra.x != rb.x) || (ra.y != rb.y) || (ra.w != rb.w) || (ra.h != rb.h)) {
-      return false;
-    }
+    if (!same_rect(a.best.sized.state[k], b.best.sized.state[k])) { return false; }
   }
   for (uint32_t k = 0; k < a.best.routes.points.size(); ++k) {
     if (!same(a.best.routes.points[k], b.best.routes.points[k])) { return false; }
+  }
+  for (uint32_t k = 0; k < a.best.routes.placed.size(); ++k) {
+    if (!same_rect(a.best.routes.placed[k], b.best.routes.placed[k])) { return false; }
   }
   return true;
 }

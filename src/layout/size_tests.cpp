@@ -2296,6 +2296,7 @@ bool same(Traced const &a, Traced const &b) {
   }
   return (a.ok == b.ok) && rects(a.z.state, b.z.state) && rects(a.z.before, b.z.before) &&
          rects(a.z.after, b.z.after) && rects(a.z.sub, b.z.sub) &&
+         (a.z.lean == b.z.lean) && (a.z.folded == b.z.folded) &&
          (a.z.chart == b.z.chart) && (a.trace == b.trace);
 }
 

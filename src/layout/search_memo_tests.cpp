@@ -98,7 +98,8 @@ struct Laid {
   bool ok{ false };
 };
 
-Laid lay_out(char const *name) {
+// With `labelled`, a path box for every routed transition, so a layout places labels.
+Laid lay_out(char const *name, bool labelled = false) {
   std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
   path += name;
   Loader loader;
@@ -106,10 +107,22 @@ Laid lay_out(char const *name) {
   std::vector<Diagnostic> diags;
   std::string failed;
   REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
+  std::vector<scav_path_box> boxes;
+  for (uint32_t t = 0; labelled && (t < c.transitions.size()); ++t) {
+    Transition const &tr{ c.transitions[t] };
+    if ((tr.live == 0) || ((tr.src == tr.dst) && (tr.kind != TransKind::External))) {
+      continue;
+    }
+    boxes.push_back({ .subject = t, .w = 40, .h = 12, .order = 0 });
+  }
+  scav_spaces const s{ .box_state_stride = sizeof(scav_box_space),
+                       .path_box = boxes.data(),
+                       .n_path_box = static_cast<uint32_t>(boxes.size()),
+                       .path_box_stride = sizeof(scav_path_box) };
   std::vector<scav_placed> placed;
   scav_layout_opts const opts{ .profile = readable(), .router = 0, .threads = 0 };
   Laid out;
-  out.ok = layout_run(c, {}, opts, placed, diags);
+  out.ok = layout_run(c, s, opts, placed, diags);
   out.structural = layout_structural_hash(c);
   out.coordinate = layout_coordinate_hash(c);
   return out;
@@ -201,11 +214,14 @@ TEST_CASE("search memo: every search it answers is the search run afresh") {
                                                 "tcp.scav",
                                                 "vac.scav" };
   uint32_t hits{ 0 };
-  for (char const *name : CHARTS) {
-    CAPTURE(name);
-    REQUIRE(lay_out(name).ok);
-    hits += layout_test_search_memo_hits();
-    CHECK(layout_test_search_memo_mismatches() == 0);
+  for (bool const labelled : { false, true }) {
+    for (char const *name : CHARTS) {
+      CAPTURE(labelled);
+      CAPTURE(name);
+      REQUIRE(lay_out(name, labelled).ok);
+      hits += layout_test_search_memo_hits();
+      CHECK(layout_test_search_memo_mismatches() == 0);
+    }
   }
   CHECK(hits > 0);
 }

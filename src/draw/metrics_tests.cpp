@@ -517,7 +517,9 @@ TEST_CASE("metrics: the embedded font inflates to the committed TTF byte for byt
   CHECK(m.identity == xxhash32(committed.data(), committed.size(), 0));
 }
 
-TEST_CASE("metrics: the embedded gzip refuses every sampled truncation and bit flip") {
+TEST_CASE(
+    "metrics: the embedded gzip refuses every sampled truncation, and every sampled bit "
+    "flip that changes the font") {
   uint32_t len{ 0 };
   scav_byte const *const gz{ bundled_ttf_gz_bytes(len) };
   std::vector<scav_byte> const want{ bundled_font() };
@@ -534,7 +536,10 @@ TEST_CASE("metrics: the embedded gzip refuses every sampled truncation and bit f
   for (uint32_t bit = 0; bit < (8U * len); bit += 8191U) {
     flipped[bit / 8U] = static_cast<scav_byte>(flipped[bit / 8U] ^ (1U << (bit % 8U)));
     CAPTURE(bit);
-    CHECK(gunzip(flipped.data(), len, out.data(), cap, n) != InflateStatus::Ok);
+    InflateStatus const st{ gunzip(flipped.data(), len, out.data(), cap, n) };
+    bool const refused_or_same{ (st != InflateStatus::Ok) ||
+                                ((n == cap) && (out == want)) };
+    CHECK(refused_or_same);
     CHECK(n <= cap);
     flipped[bit / 8U] = gz[bit / 8U];
   }

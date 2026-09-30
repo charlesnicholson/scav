@@ -1488,12 +1488,12 @@ TEST_CASE("cost: a live state a tombstone stands over is still an obstacle") {
 
 namespace {
 
-// Nine boxes on a diagonal and one over all of them, so the frame's grid is
+// `n` boxes on a diagonal and one over all of them, so the frame's grid is
 // more than one cell and one child sits in every cell of it.
-Chart diagonal_chart(SizedLayout &z, std::vector<StateId> &all, StateId &bar) {
+Chart diagonal_chart(uint32_t n, SizedLayout &z, std::vector<StateId> &all, StateId &bar) {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
-  for (uint32_t i = 0; i < 9; ++i) {
+  for (uint32_t i = 0; i < n; ++i) {
     all.push_back(build_state(c, root, "n", StateKind::Normal, {}));
   }
   bar = build_state(c, root, "bar", StateKind::Normal, {});
@@ -1504,7 +1504,8 @@ Chart diagonal_chart(SizedLayout &z, std::vector<StateId> &all, StateId &bar) {
                           .w = 40,
                           .h = 40 };
   }
-  z.state[bar.v] = { .x = 0, .y = 0, .w = 900, .h = 900 };
+  int32_t const span{ static_cast<int32_t>(100 * n) };
+  z.state[bar.v] = { .x = 0, .y = 0, .w = span, .h = span };
   return c;
 }
 
@@ -1514,7 +1515,7 @@ TEST_CASE("cost: a grid query yields a child once, whatever cells it spans") {
   SizedLayout z;
   std::vector<StateId> all;
   StateId bar{ INVALID };
-  Chart const c{ diagonal_chart(z, all, bar) };
+  Chart const c{ diagonal_chart(9, z, all, bar) };
   ChildGrid const g{ cost_child_grid(c, z) };
   REQUIRE(g.frame.size() == 1);
   CHECK(g.frame[0].children.len == 10);
@@ -1539,10 +1540,21 @@ TEST_CASE("cost: overlapping siblings come out of the frame's grid, once a pair"
   SizedLayout z;
   std::vector<StateId> all;
   StateId bar{ INVALID };
-  Chart const c{ diagonal_chart(z, all, bar) };
+  Chart const c{ diagonal_chart(24, z, all, bar) };  // too many children to scan
+  CHECK(cost_box_overlaps(c, z, cost_child_grid(c, z)) == 24);
+
+  // Moved off them, `bar` meets nothing, and the others never meet each other.
+  z.state[bar.v] = { .x = 5000, .y = 5000, .w = 40, .h = 40 };
+  CHECK(cost_box_overlaps(c, z, cost_child_grid(c, z)) == 0);
+}
+
+TEST_CASE("cost: overlapping siblings of a small frame are scanned, once a pair") {
+  SizedLayout z;
+  std::vector<StateId> all;
+  StateId bar{ INVALID };
+  Chart const c{ diagonal_chart(9, z, all, bar) };
   CHECK(cost_box_overlaps(c, z, cost_child_grid(c, z)) == 9);
 
-  // Moved off them, `bar` meets nothing, and the nine never meet each other.
   z.state[bar.v] = { .x = 5000, .y = 5000, .w = 40, .h = 40 };
   CHECK(cost_box_overlaps(c, z, cost_child_grid(c, z)) == 0);
 }
