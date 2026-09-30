@@ -358,6 +358,28 @@ TEST_CASE("inflate: a block without end-of-block is truncated") {
   CHECK(run(w.bytes).status == InflateStatus::Truncated);
 }
 
+TEST_CASE("inflate: a header cut after BFINAL, or after BTYPE, is truncated") {
+  Code const lit{ fixed_lit() };
+  BitWriter after_final;  // 3 + 4 * 9 + 7 bits end at bit 6, leaving BFINAL one bit
+  block_header(after_final, 0, 1);
+  for (int i = 0; i < 4; ++i) { lit.put(after_final, 0xE9); }
+  lit.put(after_final, 256);
+  block_header(after_final, 1, 2);
+  after_final.bytes.resize(6);
+  CHECK(run(after_final.bytes).status == InflateStatus::Truncated);
+
+  BitWriter after_type;  // 3 + 8 + 7 bits end at bit 2, leaving HLIT three bits
+  block_header(after_type, 0, 1);
+  lit.put(after_type, 'a');
+  lit.put(after_type, 256);
+  block_header(after_type, 1, 2);
+  after_type.put(0, 16);
+  after_type.bytes.resize(3);
+  Result const r{ run(after_type.bytes) };
+  CHECK(r.status == InflateStatus::Truncated);
+  CHECK(r.out == text("a"));
+}
+
 TEST_CASE(
     "inflate: output past the caller's bound is refused, and nothing past it written") {
   Bytes const s{ fixed_literals("abcdef") };
