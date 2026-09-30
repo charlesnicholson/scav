@@ -3,7 +3,6 @@
 scav_static_library(scavcore
   # src/-root primitives belonging to no library; core compiles them, so anything
   # linking core reaches them.
-  ../scav_inflate.cpp
   ../scav_xxhash.cpp
   # Core-wide, owned by no subsystem: every layer below produces diagnostics,
   # and c_api.cpp is the C projection of the whole public header.
@@ -99,6 +98,7 @@ if(SCAV_BUILD_TESTS)
     # belong to no subsystem, so their tests sit beside them.
     ../scav_int_tests.cpp
     ../scav_hash_map_tests.cpp
+    ../scav_inflate.cpp  # compiled into its tests and the CLI; no library carries it
     ../scav_inflate_tests.cpp
     ../scav_stable_sort_tests.cpp
     ../scav_xxhash_tests.cpp
@@ -106,7 +106,7 @@ if(SCAV_BUILD_TESTS)
   target_link_libraries(scav_core_tests PRIVATE scavcore_testable)
 
   # Decodes reference-encoder streams for functional_tests/test_inflate.py.
-  add_executable(scav_inflate_driver ../scav_inflate_driver.cpp)
+  add_executable(scav_inflate_driver ../scav_inflate_driver.cpp ../scav_inflate.cpp)
   scav_settings(scav_inflate_driver)
   target_link_libraries(scav_inflate_driver PRIVATE scavcore)
   # A harness reporting nothing looks identical to one where all is well.

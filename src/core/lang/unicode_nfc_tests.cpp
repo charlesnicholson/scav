@@ -6,6 +6,7 @@
 
 #include "doctest.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <ostream>
@@ -16,7 +17,13 @@ namespace {
 
 using namespace scav;
 
+#include "core/lang/unicode_nfc_reference_tables.inc"  // NOLINT(bugprone-suspicious-include)
 #include "core/lang/unicode_nfc_test_vectors.inc"  // NOLINT(bugprone-suspicious-include)
+
+template <typename V, typename A>
+bool same(V const &got, A const &want) {
+  return std::equal(got.begin(), got.end(), want.begin(), want.end());
+}
 
 std::vector<uint32_t> cps(std::vector<uint32_t> const &v) { return v; }
 
@@ -45,6 +52,21 @@ std::string describe(std::vector<uint32_t> const &v) {
 }
 
 }  // namespace
+
+TEST_CASE("nfc: the packed tables decode to the reference tables element for element") {
+  NfcTables const &t{ unicode_nfc_tables() };
+  CHECK(&t == &unicode_nfc_tables());
+  CHECK(same(t.unsafe_lo, NFC_UNSAFE_LO));
+  CHECK(same(t.unsafe_hi, NFC_UNSAFE_HI));
+  CHECK(same(t.ccc_keys, CCC_KEYS));
+  CHECK(same(t.ccc_values, CCC_VALUES));
+  CHECK(same(t.decomp_keys, DECOMP_KEYS));
+  CHECK(same(t.decomp_offsets, DECOMP_OFFSETS));
+  CHECK(same(t.decomp_lengths, DECOMP_LENGTHS));
+  CHECK(same(t.decomp_data, DECOMP_DATA));
+  CHECK(same(t.compose_keys, COMPOSE_KEYS));
+  CHECK(same(t.compose_values, COMPOSE_VALUES));
+}
 
 TEST_CASE("nfc: ASCII needs no work and normalizes to itself") {
   for (uint32_t cp = 0; cp < 0x80; ++cp) { CHECK_FALSE(unicode_nfc_needs_work(cp)); }

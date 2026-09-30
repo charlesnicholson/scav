@@ -3,8 +3,8 @@
 #include "core/core_internal.h"
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
+#include "scav_int.h"
 
-#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -30,12 +30,11 @@ bool is_hangul_syllable(uint32_t cp) {
   return (cp >= HANGUL_S_BASE) && (cp < HANGUL_S_BASE + HANGUL_S_COUNT);
 }
 
-// Every table is sorted by key, so a lookup is a binary search. The bound comes
-// from the array's own type, since identical bodies fold together.
-template <size_t N>
-uint32_t lower_bound_u32(std::array<uint32_t, N> const &keys, uint32_t key) {
+// Every table is sorted by key, so a lookup is a binary search.
+template <typename T>
+uint32_t lower_bound_key(std::vector<T> const &keys, T key) {
   uint32_t lo{ 0 };
-  uint32_t hi{ narrow_clamp<uint32_t>(N) };
+  uint32_t hi{ narrow_clamp<uint32_t>(keys.size()) };
   while (lo < hi) {
     uint32_t const mid{ lo + ((hi - lo) / 2) };
     if (keys[mid] < key) {
@@ -47,19 +46,93 @@ uint32_t lower_bound_u32(std::array<uint32_t, N> const &keys, uint32_t key) {
   return lo;
 }
 
-template <size_t N>
-uint32_t lower_bound_u64(std::array<uint64_t, N> const &keys, uint64_t key) {
-  uint32_t lo{ 0 };
-  uint32_t hi{ narrow_clamp<uint32_t>(N) };
-  while (lo < hi) {
-    uint32_t const mid{ lo + ((hi - lo) / 2) };
-    if (keys[mid] < key) {
-      lo = mid + 1;
-    } else {
-      hi = mid;
-    }
+// A cursor over NFC_PACKED; past the end every read is zero.
+struct Packed {
+  uint32_t at{ 0 };
+
+  uint32_t byte() {
+    if (at >= NFC_PACKED.size()) { return 0; }
+    return NFC_PACKED[at++];
   }
-  return lo;
+
+  uint32_t uvarint() {
+    uint32_t value{ 0 };
+    for (uint32_t shift = 0; shift < 32U; shift += 7U) {
+      uint32_t const b{ byte() };
+      value |= (b & 0x7FU) << shift;
+      if ((b & 0x80U) == 0) { break; }
+    }
+    return value;
+  }
+
+  // Zigzag: even is non-negative, odd is negative.
+  uint32_t delta_from(uint32_t base) {
+    uint32_t const z{ uvarint() };
+    return ((z & 1U) == 0) ? (base + (z >> 1U)) : (base - ((z >> 1U) + 1U));
+  }
+};
+
+NfcTables decode() {
+  NfcTables t;
+  Packed in;
+  t.unsafe_lo.reserve(NFC_UNSAFE_COUNT);
+  t.unsafe_hi.reserve(NFC_UNSAFE_COUNT);
+  uint32_t next{ 0 };
+  for (uint32_t i = 0; i < NFC_UNSAFE_COUNT; ++i) {
+    uint32_t const lo{ next + in.uvarint() };
+    uint32_t const hi{ lo + in.uvarint() };
+    t.unsafe_lo.push_back(lo);
+    t.unsafe_hi.push_back(hi);
+    next = hi + 1U;
+  }
+
+  t.ccc_keys.reserve(NFC_CCC_COUNT);
+  t.ccc_values.reserve(NFC_CCC_COUNT);
+  next = 0;
+  for (uint32_t i = 0; i < NFC_CCC_RUNS; ++i) {
+    uint32_t const lo{ next + in.uvarint() };
+    uint32_t const hi{ lo + in.uvarint() };
+    auto const klass{ static_cast<scav_byte>(in.byte()) };
+    for (uint32_t cp = lo; (cp <= hi) && (t.ccc_keys.size() < NFC_CCC_COUNT); ++cp) {
+      t.ccc_keys.push_back(cp);
+      t.ccc_values.push_back(klass);
+    }
+    next = hi + 1U;
+  }
+
+  t.decomp_keys.reserve(NFC_DECOMP_COUNT);
+  t.decomp_offsets.reserve(NFC_DECOMP_COUNT);
+  t.decomp_lengths.reserve(NFC_DECOMP_COUNT);
+  t.decomp_data.reserve(NFC_DECOMP_DATA_COUNT);
+  next = 0;
+  for (uint32_t i = 0; i < NFC_DECOMP_COUNT; ++i) {
+    uint32_t const key{ next + in.uvarint() };
+    uint32_t const len{ imin(in.uvarint(), 0xFFU) };
+    t.decomp_keys.push_back(key);
+    t.decomp_offsets.push_back(narrow_clamp<uint32_t>(t.decomp_data.size()));
+    t.decomp_lengths.push_back(static_cast<scav_byte>(len));
+    uint32_t cp{ key };
+    for (uint32_t k = 0; k < len; ++k) {
+      cp = in.delta_from(cp);
+      t.decomp_data.push_back(cp);
+    }
+    next = key + 1U;
+  }
+
+  t.compose_keys.reserve(NFC_COMPOSE_COUNT);
+  t.compose_values.reserve(NFC_COMPOSE_COUNT);
+  uint32_t starter{ 0 };
+  uint32_t combining{ 0 };
+  for (uint32_t i = 0; i < NFC_COMPOSE_COUNT; ++i) {
+    if (uint32_t const step{ in.uvarint() }; step != 0) {
+      starter += step;
+      combining = 0;
+    }
+    combining += in.uvarint();
+    t.compose_keys.push_back((static_cast<uint64_t>(starter) << 32U) | combining);
+    t.compose_values.push_back(in.delta_from(starter));
+  }
+  return t;
 }
 
 uint32_t compose_pair(uint32_t starter, uint32_t combining) {
@@ -75,10 +148,11 @@ uint32_t compose_pair(uint32_t starter, uint32_t combining) {
     return starter + (combining - HANGUL_T_BASE);
   }
 
+  NfcTables const &t{ unicode_nfc_tables() };
   uint64_t const key{ (static_cast<uint64_t>(starter) << 32U) | combining };
-  uint32_t const at{ lower_bound_u64(COMPOSE_KEYS, key) };
-  if ((at >= COMPOSE_KEYS.size()) || (COMPOSE_KEYS[at] != key)) { return 0; }
-  return COMPOSE_VALUES[at];
+  uint32_t const at{ lower_bound_key(t.compose_keys, key) };
+  if ((at >= t.compose_keys.size()) || (t.compose_keys[at] != key)) { return 0; }
+  return t.compose_values[at];
 }
 
 void append_decomposition(uint32_t cp, std::vector<uint32_t> &out) {
@@ -92,16 +166,17 @@ void append_decomposition(uint32_t cp, std::vector<uint32_t> &out) {
     return;
   }
 
-  uint32_t const at{ lower_bound_u32(DECOMP_KEYS, cp) };
-  if ((at >= DECOMP_KEYS.size()) || (DECOMP_KEYS[at] != cp)) {
+  NfcTables const &t{ unicode_nfc_tables() };
+  uint32_t const at{ lower_bound_key(t.decomp_keys, cp) };
+  if ((at >= t.decomp_keys.size()) || (t.decomp_keys[at] != cp)) {
     out.push_back(cp);
     return;
   }
   // Already fully expanded by the generator, so this is one copy and no loop to
   // a fixed point.
-  uint32_t const off{ DECOMP_OFFSETS[at] };
-  uint32_t const len{ DECOMP_LENGTHS[at] };
-  for (uint32_t i = 0; i < len; ++i) { out.push_back(DECOMP_DATA[off + i]); }
+  uint32_t const off{ t.decomp_offsets[at] };
+  uint32_t const len{ t.decomp_lengths[at] };
+  for (uint32_t i = 0; i < len; ++i) { out.push_back(t.decomp_data[off + i]); }
 }
 
 // Insertion sort over each run of non-starters -- which is what canonical
@@ -123,29 +198,36 @@ void canonical_order(std::vector<uint32_t> &v) {
 
 }  // namespace
 
+NfcTables const &unicode_nfc_tables() {
+  static NfcTables const tables{ decode() };
+  return tables;
+}
+
 bool unicode_nfc_needs_work(uint32_t cp) {
   if (cp < 0x300) { return false; }  // the first unsafe codepoint is U+0300
   // Ranges ascend and do not overlap, so the last one starting at or below `cp`
   // is the only candidate.
+  NfcTables const &t{ unicode_nfc_tables() };
   uint32_t lo{ 0 };
-  uint32_t hi{ narrow_clamp<uint32_t>(NFC_UNSAFE_LO.size()) };
+  uint32_t hi{ narrow_clamp<uint32_t>(t.unsafe_lo.size()) };
   while (lo < hi) {
     uint32_t const mid{ lo + ((hi - lo) / 2) };
-    if (NFC_UNSAFE_LO[mid] <= cp) {
+    if (t.unsafe_lo[mid] <= cp) {
       lo = mid + 1;
     } else {
       hi = mid;
     }
   }
   if (lo == 0) { return false; }
-  return cp <= NFC_UNSAFE_HI[lo - 1];
+  return cp <= t.unsafe_hi[lo - 1];
 }
 
 uint32_t unicode_nfc_combining_class(uint32_t cp) {
   if (cp < 0x300) { return 0; }
-  uint32_t const at{ lower_bound_u32(CCC_KEYS, cp) };
-  if ((at >= CCC_KEYS.size()) || (CCC_KEYS[at] != cp)) { return 0; }
-  return CCC_VALUES[at];
+  NfcTables const &t{ unicode_nfc_tables() };
+  uint32_t const at{ lower_bound_key(t.ccc_keys, cp) };
+  if ((at >= t.ccc_keys.size()) || (t.ccc_keys[at] != cp)) { return 0; }
+  return t.ccc_values[at];
 }
 
 bool unicode_nfc_normalize(std::vector<uint32_t> const &in, std::vector<uint32_t> &out) {
