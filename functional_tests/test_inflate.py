@@ -90,6 +90,9 @@ class TestInflate(unittest.TestCase):
             written = (self.scratch / f"{i}.out").read_bytes()
             self.assertEqual(count, len(written))
             out.append((status, written))
+        for i in range(len(cases)):  # tens of megabytes otherwise
+            (self.scratch / f"{i}.in").unlink()
+            (self.scratch / f"{i}.out").unlink(missing_ok=True)
         return out
 
     def check(self, cases: list[tuple[str, str, bytes, int]], plains: list[bytes]) -> None:
