@@ -1,10 +1,10 @@
 # The scav executable, a repo tool. One file per verb: they share loading and
 # nothing else.
 
-# Embedded for selftest: the golden's first column names the charts, and every
-# chart under test_data/charts is added so each network's includes resolve.
+# Embedded gzipped for selftest: the golden's first column names the charts, and
+# every chart under test_data/charts is added so each network's includes resolve.
 set(scav_corpus_golden "${PROJECT_SOURCE_DIR}/test_data/golden/layout/corpus_hashes.txt")
-scav_embed_bytes("${scav_corpus_golden}" corpus_hashes scav_corpus_sources)
+scav_embed_bytes("${scav_corpus_golden}" corpus_hashes scav_corpus_sources GZIP)
 
 file(STRINGS "${scav_corpus_golden}" scav_golden_lines)
 set(scav_corpus_names "")
@@ -29,7 +29,7 @@ set(scav_corpus_entries "")
 foreach(name IN LISTS scav_corpus_names)
   cmake_path(GET name STEM stem)
   scav_embed_bytes("${PROJECT_SOURCE_DIR}/test_data/charts/${name}"
-    "chart_${stem}" chart_source)
+    "chart_${stem}" chart_source GZIP)
   list(APPEND scav_corpus_sources "${chart_source}")
   string(APPEND scav_corpus_includes "#include \"scav_embed_chart_${stem}.h\"\n")
   string(APPEND scav_corpus_entries
@@ -43,8 +43,10 @@ file(CONFIGURE OUTPUT "${scav_corpus_table}" CONTENT
 #include \"selftest_corpus.h\"
 
 ${scav_corpus_includes}#include \"scav_embed_corpus_hashes.h\"
+#include \"scav_inflate.h\"
 
 #include <cstdint>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -52,10 +54,21 @@ namespace cli {
 
 namespace {
 
-CorpusChart entry(std::string_view name, scav_byte const *(*fetch)(uint32_t &)) {
+// Empty when the embedded member does not inflate to its own CRC and size.
+std::vector<scav_byte> inflated(scav_byte const *(*fetch)(uint32_t &)) {
   uint32_t len{ 0 };
-  scav_byte const *const bytes{ fetch(len) };
-  return { .name = name, .bytes = bytes, .len = len };
+  scav_byte const *const gz{ fetch(len) };
+  uint32_t size{ 0 };
+  std::vector<scav_byte> out;
+  if (!scav::gzip_size(gz, len, size)) { return out; }
+  out.resize(size);
+  uint32_t n{ 0 };
+  if (scav::gunzip(gz, len, out.data(), size, n) != scav::InflateStatus::Ok) { out.clear(); }
+  return out;
+}
+
+CorpusChart entry(std::string_view name, scav_byte const *(*fetch)(uint32_t &)) {
+  return { .name = name, .bytes = inflated(fetch) };
 }
 
 }  // namespace
@@ -66,10 +79,9 @@ std::vector<CorpusChart> corpus_charts() {
 ${scav_corpus_entries}  return out;
 }
 
-std::string_view corpus_golden() {
-  uint32_t len{ 0 };
-  scav_byte const *const bytes{ scav::corpus_hashes_bytes(len) };
-  return { reinterpret_cast<char const *>(bytes), len };
+std::string corpus_golden() {
+  std::vector<scav_byte> const bytes{ inflated(scav::corpus_hashes_bytes) };
+  return { bytes.begin(), bytes.end() };
 }
 
 }  // namespace cli
@@ -87,6 +99,7 @@ add_executable(scav
   selftest.cpp
   "${scav_corpus_table}"
   ${scav_corpus_sources}
+  "${PROJECT_SOURCE_DIR}/src/scav_inflate.cpp"
 )
 scav_settings(scav)
 # The generated table sits in the build tree and includes this directory's own

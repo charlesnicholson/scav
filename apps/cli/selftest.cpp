@@ -84,7 +84,7 @@ Load load_embedded(std::vector<CorpusChart> const &table,
                    Chart &chart,
                    std::vector<Diagnostic> &diags,
                    std::string &missing) {
-  bool adding{ load_add(loader, root.bytes, root.len, root.name) };
+  bool adding{ load_add(loader, root.bytes.data(), root.bytes.size(), root.name) };
   // The pending view dies on the next add, so each round copies out first.
   std::vector<std::string> wanted;
   while (adding) {
@@ -99,7 +99,7 @@ Load load_embedded(std::vector<CorpusChart> const &table,
         missing = want;
         return Load::Unsatisfiable;
       }
-      adding = load_add(loader, doc->bytes, doc->len, want);
+      adding = load_add(loader, doc->bytes.data(), doc->bytes.size(), want);
       if (!adding) { break; }
     }
   }
@@ -196,15 +196,20 @@ std::string fail_line(std::string_view name) {
 int run_selftest(char const *against_path) {
   std::vector<scav_byte> bytes;
   std::string against;
-  std::string_view golden{ corpus_golden() };
-  if (against_path != nullptr) {
+  if (against_path == nullptr) {
+    against = corpus_golden();
+    if (against.empty()) {
+      write_error("the embedded golden does not inflate", "corpus_hashes.txt");
+      return EXIT_UNUSABLE;
+    }
+  } else {
     if (!read_file(against_path, bytes)) {
       write_error("cannot read", against_path);
       return EXIT_UNUSABLE;
     }
     against.assign(bytes.begin(), bytes.end());
-    golden = against;
   }
+  std::string_view const golden{ against };
 
   scav_layout_opts opts{};
   if (!profile_named("readable", opts.profile)) {
@@ -247,6 +252,13 @@ int run_selftest(char const *against_path) {
     if (root == nullptr) {
       std::string bad{ fail_line(name) };
       bad += " no such chart in this build";
+      report(bad);
+      ++failures;
+      continue;
+    }
+    if (root->bytes.empty()) {
+      std::string bad{ fail_line(name) };
+      bad += " the embedded copy does not inflate";
       report(bad);
       ++failures;
       continue;

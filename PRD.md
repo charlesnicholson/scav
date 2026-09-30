@@ -122,7 +122,7 @@ It is also the end-to-end exercise of the load path over a real filesystem — p
 | `check` | structural validation (§10) as a PR gate |
 | `deps` | the document network as a `make`/`ninja` depfile. Chart A includes B; without this, editing B either leaves A's diagram stale or forces a full re-render. `gcc -M`, and the need follows from includes existing |
 | `dump` | `--json` for non-C++ consumers and `jq`; `--layout` runs layout first and includes the geometry columns; `--hash` prints the structural digest alone, which is how two transports of one network are compared without a golden |
-| `selftest` | lay the embedded corpus out on this toolchain at every thread count in §6's matrix and diff all three hashes against the embedded goldens. Charts and goldens are compiled in, so it takes no paths and an installed binary checks the claim from anywhere; `--against FILE` substitutes a golden |
+| `selftest` | lay the embedded corpus out on this toolchain at every thread count in §6's matrix and diff all three hashes against the embedded goldens. Charts and goldens are compiled in, gzipped and inflated on use, so it takes no paths and an installed binary checks the claim from anywhere; `--against FILE` substitutes a golden |
 
 **No `gen`.** Synthetic chart generation is test tooling (PB, P0) and lives in the harness; shipping it as a verb would imply a user need nobody has. Same reasoning retired a separate `layout` verb — dumping geometry is `dump --layout`, not a second command.
 
