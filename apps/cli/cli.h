@@ -57,12 +57,16 @@ enum class ArgRead : uint32_t { NotOurs, Taken, Malformed };
 // One of these at `argv[i]`, with `i` advanced past its value:
 //   --profile NAME       a shipped profile in place of `readable`
 //   --portfolio-row N    a row in place of the search
-//   --rank S:R           state S held at rank R of its frame (11.10a)
-//   --cut T:L            leg L of transition T left unchained (11.10b)
-//   --reverse T:L        that leg turned round before cycles break (11.10d)
+//   --rank S:R           state S held at rank R of its frame
+//   --cut T:L            leg L of transition T left unchained
+//   --reverse T:L        that leg turned round before cycles break
 //   --face T:L:E:F       end E (0 departs, 1 arrives) leaves by face F: 0 left,
-//                        1 right, 2 top, 3 bottom (11.10e)
-//   --orient F           submachine F's ranks run down the page (11.10g)
+//                        1 right, 2 top, 3 bottom
+//   --orient F           submachine F's ranks run down the page
+//   --side T:L:E:S       end E's port crosses its state's border on side S, as a face
+//   --fold F:M[:L]       submachine F's run folds as the scale measure picks (M 0),
+//                        always (1), or never (2); a nonzero L is the one rank
+//                        the fold cuts before
 //   --no-search          lay out the row and pins given, and move nothing
 //   --no-text            lay out with no space requests, the scale the layout
 //                        goldens are stated at

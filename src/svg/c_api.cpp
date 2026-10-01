@@ -13,7 +13,8 @@
 #include <cstring>
 #include <string>
 
-static_assert(sizeof(scav_svg_options) == 2 * sizeof(int32_t));
+static_assert(sizeof(scav_svg_options) ==
+              sizeof(scav_byte const *) + (2 * sizeof(int32_t)));
 
 extern "C" {
 
@@ -32,22 +33,24 @@ scav_result scav_svg_write(scav_drawlist const *list,
   scav::Images const none{};
   scav::SvgOptions opts{};
   if (options != nullptr) {
-    if ((options->embed_font != 0) && (options->embed_font != 1)) {
+    if ((options->embed_font == nullptr) && (options->embed_font_len != 0)) {
       return SCAV_E_INVALID_ARG;
     }
-    opts = { .embed_font = options->embed_font != 0, .margin = options->margin };
+    opts = { .embed_font = options->embed_font,
+             .embed_font_len = options->embed_font_len,
+             .margin = options->margin };
   }
 
   std::string doc;
   uint32_t bad{ 0 };
-  if (scav::svg_write(list->list,
-                      metrics->metrics,
-                      (images != nullptr) ? images->images : none,
-                      opts,
-                      doc,
-                      bad) != scav::SvgStatus::Ok) {
-    return SCAV_E_DRAWLIST;
-  }
+  scav::SvgStatus const st{ scav::svg_write(list->list,
+                                            metrics->metrics,
+                                            (images != nullptr) ? images->images : none,
+                                            opts,
+                                            doc,
+                                            bad) };
+  if (st == scav::SvgStatus::FontMismatch) { return SCAV_E_FONT; }
+  if (st != scav::SvgStatus::Ok) { return SCAV_E_DRAWLIST; }
 
   *out_count = static_cast<uint32_t>(doc.size());
   if (cap == 0) { return SCAV_OK; /* count query */ }

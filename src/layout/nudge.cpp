@@ -8,6 +8,7 @@
 #include "layout/trace.h"
 #include "scav_int.h"
 #include "scav_stable_sort.h"
+#include "scav_vec.h"
 
 #include <array>
 #include <cstdint>
@@ -108,6 +109,30 @@ bool bundled(std::vector<scav_point> const &points,
   return head;
 }
 
+// Every buffer one call uses, per-thread and reassigned in place. Nothing here waits on
+// the pool, so no second call on this thread starts while one uses these.
+struct NudgeScratch {
+  std::vector<Member> members;
+  std::vector<uint32_t> lane;
+  Partition link;              // -> members, the lanes of one axis
+  Partition parent;            // -> lane, the bundles of one lane
+  std::vector<uint32_t> slot;  // -> lane, the bundle it ended up in
+  std::vector<uint32_t> sizes;
+  std::vector<uint32_t> group;
+  std::vector<uint32_t> kin;
+  std::vector<int32_t> votes;  // groups x groups, antisymmetric; see below
+  std::vector<uint32_t> degree;
+  std::vector<uint32_t> order;
+  std::vector<uint32_t> rank;  // -> order, inverted
+  // -> members: the next of each one's lane, and the last so far of each root's.
+  std::vector<uint32_t> next_member, last_member;
+};
+
+NudgeScratch &nudge_scratch() {
+  thread_local NudgeScratch s;
+  return s;
+}
+
 }  // namespace
 
 void nudge_lanes(scav_rect const &region,
@@ -121,18 +146,22 @@ void nudge_lanes(scav_rect const &region,
   if (gap <= 0) { return; }
   uint32_t const net_count{ static_cast<uint32_t>(nets.size()) };
 
-  std::vector<Member> members;
-  std::vector<uint32_t> lane;
-  Partition link;              // -> members, the lanes of one axis
-  Partition parent;            // -> lane, the bundles of one lane
-  std::vector<uint32_t> slot;  // -> lane, the bundle it ended up in
-  std::vector<uint32_t> sizes;
-  std::vector<uint32_t> group;
-  std::vector<uint32_t> kin;
-  std::vector<int32_t> votes;  // groups x groups, antisymmetric; see below
-  std::vector<uint32_t> degree;
-  std::vector<uint32_t> order;
-  std::vector<uint32_t> rank;  // -> order, inverted
+  NudgeScratch &sc{ nudge_scratch() };
+  std::vector<Member> &members{ sc.members };
+  std::vector<uint32_t> &lane{ sc.lane };
+  Partition &link{ sc.link };
+  Partition &parent{ sc.parent };
+  std::vector<uint32_t> &slot{ sc.slot };
+  std::vector<uint32_t> &sizes{ sc.sizes };
+  std::vector<uint32_t> &group{ sc.group };
+  std::vector<uint32_t> &kin{ sc.kin };
+  std::vector<int32_t> &votes{ sc.votes };
+  std::vector<uint32_t> &degree{ sc.degree };
+  std::vector<uint32_t> &order{ sc.order };
+  std::vector<uint32_t> &rank{ sc.rank };
+  std::vector<uint32_t> &next_member{ sc.next_member };
+  std::vector<uint32_t> &last_member{ sc.last_member };
+  kin.clear();
   for (uint32_t axis = 0; axis < 2; ++axis) {
     bool const horizontal{ axis == 0 };
     // Rebuilt from the live points per axis: a horizontal displacement drags the
@@ -175,7 +204,7 @@ void nudge_lanes(scav_rect const &region,
         if (v <= 0) { m.up = imin(m.up, -v - 1); }
         m.up = imax(m.up, Wide{ 0 });
         m.down = imax(m.down, Wide{ 0 });
-        members.push_back(m);
+        vec_push_back(members, m);
       }
     }
     if (members.size() < 2) { continue; }
@@ -275,14 +304,22 @@ void nudge_lanes(scav_rect const &region,
         }
       }
     }
+    // Each lane's members threaded in ascending order from its root, which is
+    // its least member and so the first of them this reaches.
+    vec_assign(next_member, members.size(), INVALID);
+    vec_resize(last_member, members.size());
+    for (uint32_t i = 0; i < members.size(); ++i) {
+      uint32_t const root{ link.root(i) };
+      if (root != i) { next_member[last_member[root]] = i; }
+      last_member[root] = i;
+    }
     for (uint32_t first = 0; first < members.size(); ++first) {
       if (!link.leads(first)) { continue; }
       lane.clear();
       int32_t reach{ members[first].hi };
       int32_t least{ members[first].lo };
-      for (uint32_t i = first; i < members.size(); ++i) {
-        if (link.root(i) != first) { continue; }
-        lane.push_back(i);
+      for (uint32_t i = first; i != INVALID; i = next_member[i]) {
+        vec_push_back(lane, i);
         reach = imax(reach, members[i].hi);
         least = imin(least, members[i].lo);
       }
@@ -308,7 +345,7 @@ void nudge_lanes(scav_rect const &region,
           }
         }
       }
-      slot.resize(count);
+      vec_resize(slot, count);
       uint32_t groups{ 0 };
       for (uint32_t j = 0; j < count; ++j) {
         if (!parent.leads(j)) { continue; }
@@ -316,7 +353,7 @@ void nudge_lanes(scav_rect const &region,
         ++groups;
       }
       for (uint32_t j = 0; j < count; ++j) { slot[j] = slot[parent.root(j)]; }
-      sizes.assign(groups, 0);
+      vec_assign(sizes, groups, 0);
       for (uint32_t j = 0; j < count; ++j) { ++sizes[slot[j]]; }
       for (uint32_t const n : sizes) { stats.bundles += (n > 1) ? 1 : 0; }
       if (groups < 2) { continue; }
@@ -328,7 +365,7 @@ void nudge_lanes(scav_rect const &region,
       // legs are read into one pair, which is what makes the matrix
       // antisymmetric and the pair's answer independent of which end asked.
       uint32_t const cells{ groups * groups };
-      votes.assign(cells, 0);
+      vec_assign(votes, cells, 0);
       for (uint32_t j = 0; j < count; ++j) {
         for (uint32_t q = 0; q < count; ++q) {
           if (slot[j] == slot[q]) { continue; }
@@ -348,7 +385,7 @@ void nudge_lanes(scav_rect const &region,
       // lowest key of the bundles nothing left precedes. That is a linear
       // extension of the votes, so it contradicts none of them, and it is the
       // key's own order on a lane with no incidences at all.
-      degree.assign(groups, 0);
+      vec_assign(degree, groups, 0);
       for (uint32_t u = 0; u < groups; ++u) {
         for (uint32_t v = 0; v < groups; ++v) {
           if (votes[(u * groups) + v] > 0) { ++degree[v]; }
@@ -361,7 +398,7 @@ void nudge_lanes(scav_rect const &region,
           if (degree[b] == 0) { next = b; }
         }
         if (next == groups) { break; }  // every bundle left is preceded by another
-        order.push_back(next);
+        vec_push_back(order, next);
         degree[next] = PLACED;
         for (uint32_t v = 0; v < groups; ++v) {
           if (votes[(next * groups) + v] > 0) { --degree[v]; }
@@ -388,14 +425,14 @@ void nudge_lanes(scav_rect const &region,
               best = at;
             }
           }
-          order.push_back(b);
+          vec_push_back(order, b);
           for (uint32_t k = static_cast<uint32_t>(order.size()) - 1; k > best; --k) {
             order[k] = order[k - 1];
           }
           order[best] = b;
         }
       }
-      rank.assign(groups, 0);
+      vec_assign(rank, groups, 0);
       bool keyed{ true };
       for (uint32_t i = 0; i < groups; ++i) {
         rank[order[i]] = i;
@@ -491,7 +528,7 @@ void nudge_lanes(scav_rect const &region,
       for (uint32_t b = 0; b < groups; ++b) {
         group.clear();
         for (uint32_t j = 0; j < count; ++j) {
-          if (slot[j] == b) { group.push_back(lane[j]); }
+          if (slot[j] == b) { vec_push_back(group, lane[j]); }
         }
         if (members[group[0]].offset == 0) { continue; }
         // Every member is asked before any of them moves, so each is checked
@@ -500,7 +537,7 @@ void nudge_lanes(scav_rect const &region,
         for (uint32_t const i : group) {
           kin.clear();
           for (uint32_t const other : group) {
-            if (other != i) { kin.push_back(members[other].point); }
+            if (other != i) { vec_push_back(kin, members[other].point); }
           }
           ok = ok && known_good(members[i]);
         }

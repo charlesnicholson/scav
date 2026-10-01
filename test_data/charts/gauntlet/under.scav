@@ -1,0 +1,9 @@
+// A state ranked beside a composite, joined to a child through a port on the
+// composite's bottom border: `Source` centres on the port, so the leg is straight.
+chart under "a state beside a composite, centred on the port it enters" {
+  state Box { state Left, state Target, trans * -> Left, trans Left -> Target },
+  state Source,
+
+  trans * -> Box,
+  trans Source -> Box/Target,
+}

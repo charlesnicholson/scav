@@ -8,6 +8,7 @@
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
 #include "scav_int.h"
+#include "scav_thread.h"
 
 #include "doctest.h"
 
@@ -156,6 +157,110 @@ TEST_CASE("order: a boundary node stands for the port on the frame's own border"
   CHECK(node_of(o, d).rank == 1);
 }
 
+TEST_CASE(
+    "order: a port on a cross border shares its neighbour's rank, at one end of it") {
+  // A side pin puts the port on the top or bottom border. The sweep swaps `B` and `Y` to
+  // uncross `A -> Y` and `Q -> B`, and the port stays at one end of `B`'s rank.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
+  StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
+  StateId const q{ build_state(c, inner, "Q", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, inner, "B", StateKind::Normal, {}) };
+  StateId const y{ build_state(c, inner, "Y", StateKind::Normal, {}) };
+  build_trans(c, a, y, TransKind::External, {});
+  build_trans(c, q, b, TransKind::External, {});
+  TransId const drop{ build_trans(c, d, b, TransKind::External, {}) };
+  SplitGraph const g{ decompose(c) };
+  REQUIRE(g.trans_segments[drop.v].len == 2);
+  uint32_t const seg{ g.trans_segments[drop.v].off + 1 };
+  REQUIRE(g.segments[seg].frame == inner);
+
+  // Left alone, the port is a source on the leading border, a rank before `B`.
+  SubmachineOrders const plain{ order_submachines(c, g, {}, profile()) };
+  CHECK(plain.seg_cross[seg] == 0);
+  CHECK((plain.nodes[plain.seg_node[seg]].rank + 1) == node_of(plain, b).rank);
+
+  for (uint32_t const side : { 2U, 3U }) {
+    CAPTURE(side);
+    SearchPins const pin{ .sides = { { .trans = drop, .leg = 1, .side = side } } };
+    SubmachineOrders const o{ order_submachines(c, g, {}, profile(), 0, pin) };
+    CHECK(o.seg_cross[seg] == ((side == 2) ? 1 : 2));
+    OrderNode const port{ o.nodes[o.seg_node[seg]] };
+    OrderNode const mate{ node_of(o, b) };
+    CHECK(port.rank == mate.rank);
+    uint32_t in_rank{ 0 };
+    for (OrderNode const &nd : frame_nodes(o, inner)) {
+      in_rank += (nd.rank == mate.rank) ? 1U : 0U;
+    }
+    CHECK(in_rank == 3);
+    CHECK(port.pos == ((side == 2) ? 0U : (in_rank - 1)));
+    CHECK(node_of(o, y).pos < mate.pos);
+    CHECK(node_of(o, a).rank == node_of(o, q).rank);
+    CHECK(o.sub_ranks[inner.v] == 2);
+    uint32_t flat{ 0 };
+    for (OrderEdge const &e : o.edges) {
+      if (e.segment != seg) { continue; }
+      ++flat;
+      CHECK(o.nodes[e.src].rank == o.nodes[e.dst].rank);
+    }
+    CHECK(flat == 1);
+  }
+
+  // Either leg meeting at the port names it: here the outer leg's arrival.
+  SearchPins const outer{ .sides = { { .trans = drop, .leg = 0, .end = 1, .side = 2 } } };
+  SubmachineOrders const named{ order_submachines(c, g, {}, profile(), 0, outer) };
+  CHECK(named.seg_cross[seg] == 1);
+  CHECK(named.seg_sided[seg] == 1);
+
+  // Turned down, left is one of the frame's cross borders.
+  SearchPins const turned{ .orients = { { .frame = inner } },
+                           .sides = { { .trans = drop, .leg = 1, .side = 0 } } };
+  SubmachineOrders const down{ order_submachines(c, g, {}, profile(), 0, turned) };
+  CHECK(down.seg_cross[seg] == 1);
+  CHECK(down.nodes[down.seg_node[seg]].rank == node_of(down, b).rank);
+}
+
+TEST_CASE("order: a port pinned where its frame's ranks start or end turns its edge") {
+  // Left, where an entering port already is, changes nothing, even against a reversal pin;
+  // right makes the port a sink on the last rank and turns its edge.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
+  StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, inner, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  TransId const drop{ build_trans(c, d, b, TransKind::External, {}) };
+  SplitGraph const g{ decompose(c) };
+  uint32_t const seg{ g.trans_segments[drop.v].off + 1 };
+  SubmachineOrders const plain{ order_submachines(c, g, {}, profile()) };
+  CHECK(plain.nodes[plain.seg_node[seg]].rank == 0);
+
+  SearchPins const left{ .reverses = { { .trans = drop, .leg = 1 } },
+                         .sides = { { .trans = drop, .leg = 1, .side = 0 } } };
+  SubmachineOrders const same{ order_submachines(c, g, {}, profile(), 0, left) };
+  CHECK(same.nodes == plain.nodes);
+  CHECK(same.edges == plain.edges);
+  CHECK(same.seg_cross[seg] == 0);
+  CHECK(same.seg_sided[seg] == 1);
+
+  SearchPins const right{ .sides = { { .trans = drop, .leg = 1, .side = 1 } } };
+  SubmachineOrders const o{ order_submachines(c, g, {}, profile(), 0, right) };
+  CHECK(o.seg_cross[seg] == 0);
+  CHECK((o.nodes[o.seg_node[seg]].rank + 1) == o.sub_ranks[inner.v]);
+  CHECK(node_of(o, b).rank < o.nodes[o.seg_node[seg]].rank);
+  CHECK(node_of(o, a).rank == 0);
+  for (OrderEdge const &e : o.edges) {
+    if (e.segment != seg) { continue; }
+    CHECK(e.dst == o.seg_node[seg]);
+    CHECK(e.reversed == 1);
+  }
+}
+
 TEST_CASE("order: an internal transition into a descendant anchors on the source border") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
@@ -216,6 +321,82 @@ TEST_CASE("order: a path box widens the rank boundary its label crosses") {
   CHECK(o.gaps[1] == 700);
 }
 
+TEST_CASE("order: a label across several boundaries is charged where none holds it") {
+  // A -> B -> C -> D and A -> D. The first and last boundaries carry two turning lanes,
+  // 538 at `readable`; the middle carries none.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
+  StateId const e{ build_state(c, root, "D", StateKind::Normal, {}) };
+  TransId const first{ build_trans(c, a, b, TransKind::External, {}) };
+  build_trans(c, b, d, TransKind::External, {});
+  build_trans(c, d, e, TransKind::External, {});
+  TransId const across{ build_trans(c, a, e, TransKind::External, {}) };
+
+  auto const gaps_for = [&](int32_t first_w, int32_t across_w) {
+    std::array<scav_path_box, 2> const boxes{
+      scav_path_box{ .subject = first.v, .w = first_w, .h = 40, .order = 0 },
+      scav_path_box{ .subject = across.v, .w = across_w, .h = 40, .order = 0 },
+    };
+    scav_spaces const s{ .path_box = boxes.data(),
+                         .n_path_box = (first_w == 0) ? 0U : 2U };
+    scav_spaces const alone{ .path_box = boxes.data() + 1, .n_path_box = 1 };
+    SubmachineOrders const o{ order_of(c, (first_w == 0) ? alone : s) };
+    Span const sp{ o.sub_gaps[root.v] };
+    return std::vector<int32_t>{ o.gaps.begin() + sp.off,
+                                 o.gaps.begin() + sp.off + sp.len };
+  };
+  // The first boundary is already 700 wide for A -> B, so it holds A -> D's 500.
+  CHECK(gaps_for(700, 500) == std::vector<int32_t>{ 700, 0, 538 });
+  // Nothing it crosses is 900 wide, so the widest boundary it crosses grows.
+  CHECK(gaps_for(700, 900) == std::vector<int32_t>{ 900, 0, 538 });
+  // Equal widths either side of the middle: the first of them.
+  CHECK(gaps_for(0, 600) == std::vector<int32_t>{ 600, 0, 538 });
+  // The lanes already hold a label no wider than them.
+  CHECK(gaps_for(0, 538) == std::vector<int32_t>{ 538, 0, 538 });
+}
+
+TEST_CASE("order: the label row holds every label where it was charged, and no lane") {
+  // The chain and long edge above. `gaps` carries the two possible lanes at the first and
+  // last boundaries; `labels` carries the labels alone, the held long label included.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
+  StateId const e{ build_state(c, root, "D", StateKind::Normal, {}) };
+  TransId const first{ build_trans(c, a, b, TransKind::External, {}) };
+  build_trans(c, b, d, TransKind::External, {});
+  build_trans(c, d, e, TransKind::External, {});
+  TransId const across{ build_trans(c, a, e, TransKind::External, {}) };
+
+  auto const rows_for =
+      [&](int32_t first_w, int32_t across_w, std::vector<int32_t> &gaps) {
+        std::array<scav_path_box, 2> const boxes{
+          scav_path_box{ .subject = first.v, .w = first_w, .h = 40, .order = 0 },
+          scav_path_box{ .subject = across.v, .w = across_w, .h = 40, .order = 0 },
+        };
+        scav_spaces const s{ .path_box = boxes.data(),
+                             .n_path_box = (first_w == 0) ? 0U : 2U };
+        scav_spaces const alone{ .path_box = boxes.data() + 1, .n_path_box = 1 };
+        SubmachineOrders const o{ order_of(c, (first_w == 0) ? alone : s) };
+        REQUIRE(o.labels.size() == o.gaps.size());
+        Span const sp{ o.sub_gaps[root.v] };
+        gaps.assign(o.gaps.begin() + sp.off, o.gaps.begin() + sp.off + sp.len);
+        return std::vector<int32_t>{ o.labels.begin() + sp.off,
+                                     o.labels.begin() + sp.off + sp.len };
+      };
+  std::vector<int32_t> gaps;
+  CHECK(rows_for(700, 500, gaps) == std::vector<int32_t>{ 700, 0, 0 });
+  CHECK(gaps == std::vector<int32_t>{ 700, 0, 538 });
+  CHECK(rows_for(0, 538, gaps) == std::vector<int32_t>{ 538, 0, 0 });
+  CHECK(gaps == std::vector<int32_t>{ 538, 0, 538 });
+  CHECK(rows_for(0, 0, gaps) == std::vector<int32_t>{ 0, 0, 0 });
+  CHECK(gaps == std::vector<int32_t>{ 538, 0, 538 });
+}
+
 TEST_CASE("order: a label on a hierarchy-crossing route widens one frame only") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
@@ -243,6 +424,70 @@ TEST_CASE("order: a label on a hierarchy-crossing route widens one frame only") 
     per.push_back(most);
   }
   CHECK(per == std::vector<int32_t>{ 500, 538 });
+}
+
+TEST_CASE("order: a label into a composite is charged to the frame holding both ends") {
+  // D -> C/T lies in the root from D to C's border, then in C from there to T. The label
+  // is charged in the root, which holds both ends, though C holds the middle segment.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
+  StateId const t{ build_state(c, inner, "T", StateKind::Normal, {}) };
+  TransId const into{ build_trans(c, d, t, TransKind::External, {}) };
+
+  SplitGraph const g{ decompose(c) };
+  Span const segs{ g.trans_segments[into.v] };
+  REQUIRE(segs.len == 2);
+  REQUIRE(g.segments[segs.off].frame == root);
+  CHECK(label_segment(c, g, into.v) == segs.off);
+
+  scav_path_box const box{ .subject = into.v, .w = 700, .h = 40, .order = 0 };
+  scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
+  SubmachineOrders const o{ order_submachines(c, g, s, profile()) };
+  Span const outer{ o.sub_gaps[root.v] };
+  REQUIRE(outer.len == 1);
+  CHECK(o.gaps[outer.off] == 700);
+  Span const within{ o.sub_gaps[inner.v] };
+  for (uint32_t k = 0; k < within.len; ++k) { CHECK(o.gaps[within.off + k] == 0); }
+}
+
+TEST_CASE("order: the lowest common ancestor of every shape of two ends") {
+  // Root: A, B, and P with two regions R1 and R2. A holds A1, which holds A2.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  SubmachineId const a_sub{ build_submachine(c, a, {}, {}) };
+  StateId const a1{ build_state(c, a_sub, "A1", StateKind::Normal, {}) };
+  SubmachineId const a1_sub{ build_submachine(c, a1, {}, {}) };
+  StateId const a2{ build_state(c, a1_sub, "A2", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const pst{ build_state(c, root, "P", StateKind::Normal, {}) };
+  SubmachineId const r1{ build_submachine(c, pst, {}, {}) };
+  SubmachineId const r2{ build_submachine(c, pst, {}, {}) };
+  StateId const x{ build_state(c, r1, "X", StateKind::Normal, {}) };
+  StateId const y{ build_state(c, r2, "Y", StateKind::Normal, {}) };
+  StateId const none{ INVALID };
+
+  auto const holds =
+      [&](StateId src, StateId dst, SubmachineId frame, StateId from, StateId to) {
+        CommonAncestor const got{ lowest_common_ancestor(c, src, dst) };
+        CAPTURE(src.v);
+        CAPTURE(dst.v);
+        CHECK(got.frame == frame);
+        CHECK(got.child[0] == from);
+        CHECK(got.child[1] == to);
+      };
+  holds(a, b, root, a, b);          // siblings
+  holds(a2, b, root, a, b);         // out of two composites
+  holds(b, a2, root, b, a);         // into two
+  holds(a, a2, a_sub, none, a1);    // a composite to its own descendant
+  holds(a2, a, a_sub, a1, none);    // and back
+  holds(a2, a1, a1_sub, a2, none);  // to the composite holding it
+  holds(a1, a1, a_sub, a1, a1);     // a self-transition
+  holds(x, y, { INVALID }, x, y);   // two regions of one state
+  holds(x, b, root, pst, b);        // out of a region
 }
 
 TEST_CASE("order: a sweep removes a crossing document order would have left") {
@@ -745,4 +990,55 @@ TEST_CASE("order: cycle detection survives a frame deep enough to overflow recur
   uint32_t on{ 0 };
   for (uint8_t const flag : o.seg_cyclic) { on += flag; }
   CHECK(on == 4096);
+}
+
+TEST_CASE("order: a call nested on a thread waiting in another is each its own") {
+  // Each outer shard runs a call sharded on the pool and a job of whole calls, so one call
+  // can start on a thread while another there waits on its shards.
+  std::string path{ SCAV_TEST_DATA_DIR "/charts/mill.scav" };
+  Loader loader;
+  Chart c;
+  std::vector<Diagnostic> diags;
+  std::string failed;
+  REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
+  scav_profile p{};
+  REQUIRE(profile_named("readable", p));
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const base{ order_submachines(c, g, {}, p, 1, {}) };
+  constexpr uint32_t OUTER{ 12 };
+  constexpr uint32_t INNER{ 3 };
+  constexpr uint32_t CALLS{ OUTER * (1 + INNER) };
+  std::vector<SearchPins> pins(CALLS);
+  uint32_t k{ 0 };
+  for (uint32_t st = 0; (st < c.states.size()) && (k < CALLS); ++st) {
+    if ((c.states[st].live == 0) || (base.state_node[st] == INVALID)) { continue; }
+    uint32_t const frame{ c.states[st].parent.v };
+    if ((frame >= base.sub_ranks.size()) || (base.sub_ranks[frame] < 2)) { continue; }
+    pins[k].ranks.push_back({ .state = StateId{ st }, .rank = 1 });
+    ++k;
+  }
+  REQUIRE(k == CALLS);
+  std::vector<SubmachineOrders> want(CALLS);
+  for (uint32_t i = 0; i < CALLS; ++i) {
+    want[i] = order_submachines(c, g, {}, p, 1, pins[i]);
+  }
+  std::vector<SubmachineOrders> got(CALLS);
+  for (uint32_t trial = 0; trial < 24; ++trial) {
+    parallel_for(OUTER, 0U, [&](uint32_t o) {
+      uint32_t const first{ o * (1 + INNER) };
+      got[first] = order_submachines(c, g, {}, p, 0, pins[first]);
+      parallel_for(INNER, 0U, [&, first](uint32_t i) {
+        got[first + 1 + i] = order_submachines(c, g, {}, p, 1, pins[first + 1 + i]);
+      });
+    });
+    bool same{ true };
+    for (uint32_t i = 0; i < CALLS; ++i) {
+      same = same && (got[i].nodes == want[i].nodes) && (got[i].edges == want[i].edges) &&
+             (got[i].sub_nodes == want[i].sub_nodes) && (got[i].gaps == want[i].gaps) &&
+             (got[i].state_node == want[i].state_node) &&
+             (got[i].seg_cyclic == want[i].seg_cyclic);
+    }
+    CAPTURE(trial);
+    CHECK(same);
+  }
 }

@@ -133,6 +133,28 @@ TEST_CASE("nudge: a lane is every member that overlaps, not a run that stops") {
   CHECK(net_pt(f, 1, 1).y == 104);
 }
 
+TEST_CASE("nudge: two lanes interleaved by coordinate keep every member of each") {
+  // Sorted by coordinate the members alternate between a lane on the left and one on the
+  // right; each leg leaves its lane on the side that lets the key's order stand.
+  Frame f{ frame_of({ { pt(0, 600), pt(0, 100), pt(200, 100), pt(200, -500) },
+                      { pt(900, 600), pt(900, 102), pt(1100, 102), pt(1100, -500) },
+                      { pt(20, 600), pt(20, 104), pt(220, 104), pt(220, -500) },
+                      { pt(920, 600), pt(920, 106), pt(1120, 106), pt(1120, -500) },
+                      { pt(40, 600), pt(40, 108), pt(240, 108), pt(240, -500) } }) };
+  NudgeStats s;
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 160, 0, f.nets, f.points, s);
+
+  CHECK(s.lanes == 2);
+  CHECK(s.spread == 2);
+  CHECK(s.moved == 5);
+  // Three bundles a pitch apart about the lane's lowest coordinate, and two.
+  CHECK(net_pt(f, 0, 1).y == -60);
+  CHECK(net_pt(f, 2, 1).y == 100);
+  CHECK(net_pt(f, 4, 1).y == 260);
+  CHECK(net_pt(f, 1, 1).y == 22);
+  CHECK(net_pt(f, 3, 1).y == 182);
+}
+
 TEST_CASE("nudge: a run's one-sided reach does not bundle disjoint extents") {
   // `lo < reach` against a running union joined members whose extents never
   // met. These two overlap nothing, so neither is a lane and neither moves.

@@ -1,0 +1,10 @@
+// A transition and its return between two states: two parallel straight legs
+// an em apart between the facing faces.
+chart roundtrip "there and back" {
+  state Ready,
+  state Busy,
+
+  trans * -> Ready,
+  trans Ready -> Busy "start",
+  trans Busy -> Ready "done",
+}

@@ -1,0 +1,12 @@
+// Two routes through a composite's leading border into a child its initial also
+// enters: the port's leg stays straight, and no other arrival shares its point.
+chart ported "a port level with a child its initial also enters" {
+  state Above,
+  state Below,
+  state Box { state First, state Second, trans * -> First, trans First -> Second },
+
+  trans * -> Above,
+  trans Above -> Below,
+  trans Above -> Box/First,
+  trans Below -> Box/First,
+}

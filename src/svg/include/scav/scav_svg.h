@@ -26,13 +26,14 @@ enum class SvgStatus : uint32_t {
   UnknownImage,     // an image primitive naming nothing in the registry
   MissingGlyph,     // textLength needs the advance sum, so the font must have it
   ExtentOverflow,   // the content does not fit an integer viewBox
+  FontMismatch,     // the bytes to embed are not the font the metrics measured with
 };
 
 struct SvgOptions {
-  // Base64 the bundled TTF whole into <defs><style>@font-face. The only exact
-  // renderer-metrics agreement that keeps text selectable, and whole rather
-  // than subsetted because a subsetter is the expensive half of a PDF backend.
-  bool embed_font{ false };
+  // A TTF to base64 whole into <defs><style>@font-face, or null; its xxh32 must be
+  // the metrics' identity.
+  scav_byte const *embed_font{ nullptr };
+  uint32_t embed_font_len{ 0 };
   int32_t margin{ 0 };  // grid units of clear space around the content
 };
 

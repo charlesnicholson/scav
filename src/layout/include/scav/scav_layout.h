@@ -158,14 +158,35 @@ struct OrientPin {
   SubmachineId frame{ INVALID };
 };
 
-// Everything besides the tuple that a drawing is a function of, so re-deriving
-// one is two arguments and not seven (11.10a, 11.10b, 11.10d, 11.10e).
+// The side of its state's border a leg end's port sits on: 0 left, 1 right, 2 top,
+// 3 bottom, with `end` as a face pin has it. A port on a region's border takes none.
+struct SidePin {
+  TransId trans{ INVALID };
+  uint32_t leg{ 0 };
+  uint32_t end{ 0 };
+  uint32_t side{ 0 };
+};
+
+// Whether a frame's run folds, in place of its row's rule: `mode` 0 as the scale measure
+// picks, 1 always, 2 never, and a nonzero `layer` the one rank it cuts before.
+inline constexpr uint32_t FOLD_SCALE{ 0 };
+inline constexpr uint32_t FOLD_ALWAYS{ 1 };
+inline constexpr uint32_t FOLD_NEVER{ 2 };
+struct FoldPin {
+  SubmachineId frame{ INVALID };
+  uint32_t mode{ FOLD_SCALE };
+  uint32_t layer{ 0 };
+};
+
+// Everything besides the tuple that a drawing is a function of.
 struct SearchPins {
   std::vector<RankPin> ranks;
   std::vector<ChainCut> cuts;
   std::vector<ReversePin> reverses;
   std::vector<FacePin> faces;
   std::vector<OrientPin> orients;
+  std::vector<SidePin> sides;
+  std::vector<FoldPin> folds;  // the last pin naming a frame decides it
 };
 
 // Rows in the fixed table of chart-global phase-2 tuples Level 2 chooses
@@ -244,10 +265,9 @@ uint32_t layout_inputs_digest(Chart const &c);
 
 // Cost ======================================================================
 
-inline constexpr uint32_t TIER2_TERMS{ 10 };
+inline constexpr uint32_t TIER2_TERMS{ 13 };
 
-// The ten Tier-2 quantities before weighting, so a test reads one of them
-// rather than a sum.
+// The thirteen Tier-2 quantities before weighting, and the Tier-0 counts.
 struct CostTerms {
   int64_t bends{ 0 };       // direction changes at a route's interior vertices
   int64_t corridor{ 0 };    // length two routes' segments run collinear over
@@ -267,18 +287,22 @@ struct CostTerms {
   // shortfall, `along * (em - apart) / em`. Continuous with `corridor` at
   // `apart = 0` (11.6).
   int64_t crowding{ 0 };
+  int64_t length{ 0 };  // every route's polyline, end to end, summed
+  // Bends in a state the route only passes through: below the lowest common ancestor
+  // on one end's chain, and inside neither that end nor its enclosing state.
+  int64_t transit_bends{ 0 };
+  // Per composite: the rect between its text bands inside its padding, less its
+  // live children's rects.
+  int64_t whitespace{ 0 };
 
   // Tier 0, forbidden rather than priced: the obstacle set makes these
   // unrepresentable, and the count survives as a net (11.6).
   int32_t through_box{ 0 };
   int32_t box_overlap{ 0 };
-  // Transitions with a segment to draw whose route came out as fewer than two
-  // points, so nothing is drawn. **Forbidden because every Tier-2 term scores it
-  // perfect** -- no bends, no length, no excess, no crowding -- and a search that
-  // can reach one will prefer it (11.6).
+  // Transitions with a segment to draw and a route of fewer than two points; Tier 0, since
+  // every Tier-2 term scores one perfect.
   int32_t vanished{ 0 };
-  // Route segments running along a state's border. A reader cannot tell a
-  // route on a border from the border, and nothing in Tier 2 sees it (11.10g).
+  // Route segments running along a state's border.
   int32_t flush{ 0 };
   // Route segments entering a region neither end lies in: a concurrent
   // sibling of an endpoint's own region, or any region of a state the route

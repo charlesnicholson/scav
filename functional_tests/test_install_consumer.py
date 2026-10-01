@@ -2,6 +2,9 @@
 """A separate project links an installed scav, which is how the CMake package stays
 honest: plenty of projects ship one they never consume."""
 
+import os
+import shutil
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -73,10 +76,32 @@ class TestInstallAndConsume(unittest.TestCase):
                     "lib/cmake/scav/scav-targets.cmake"):
             with self.subTest(path=rel):
                 self.assertTrue((self.prefix / rel).is_file(), f"{rel} not installed")
+        font = self.prefix / "share/scav/JetBrainsMono-Regular.ttf"
+        self.assertEqual((self.cfg.repo_root / "assets/font" / font.name).read_bytes(),
+                         font.read_bytes())
         self.assertTrue(list((self.prefix / "lib").glob("*scavcore*")), "no archive")
         self.assertTrue(list((self.prefix / "lib").glob("*scavlayout*")), "no layout archive")
         self.assertTrue(list((self.prefix / "lib").glob("*scavdraw*")), "no draw archive")
         self.assertTrue(list((self.prefix / "lib").glob("*scavsvg*")), "no svg archive")
+        self.assertTrue(any((self.prefix / rel).is_file() for rel in
+                            ("lib/libscav.dylib", "lib/libscav.so", "bin/scav.dll")),
+                        "no shared library")
+
+    def test_the_installed_cli_embeds_the_font_installed_beside_it(self) -> None:
+        """A copy of the tree whose font is wrong: refused, so that copy is the one read."""
+        name = "scav.exe" if os.name == "nt" else "scav"
+        chart = self.cfg.repo_root / "test_data/charts/led.scav"
+        ok = scavtest.run([self.prefix / "bin" / name, "render", "--embed-font", chart])
+        self.assertEqual(0, ok.returncode)
+        moved = scavtest.fresh_dir(self.cfg.scratch_dir / "consumer/moved")
+        (moved / "bin").mkdir()
+        (moved / "share/scav").mkdir(parents=True)
+        shutil.copy2(self.prefix / "bin" / name, moved / "bin" / name)
+        (moved / "share/scav/JetBrainsMono-Regular.ttf").write_bytes(b"not the font")
+        wrong = subprocess.run([str(moved / "bin" / name), "render", "--embed-font",
+                                str(chart)], capture_output=True, text=True, check=False)
+        self.assertEqual(2, wrong.returncode)
+        self.assertIn("not the bundled font", wrong.stderr)
 
     def test_every_installed_header_is_a_public_one(self) -> None:
         """The public/private split is a directory layout, so it is only real if

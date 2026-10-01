@@ -176,6 +176,9 @@ TEST_CASE("trace: every payload shape serializes its own fields") {
                                   .rank = 0,
                                   .t0 = 0,
                                   .t2 = 4294967296 } });
+  t.events.push_back({ .kind = TraceKind::GapCharged,
+                       .pass = static_cast<uint16_t>(GapCause::Lanes),
+                       .gap = { .boundary = 2, .seg = 7, .width = 538 } });
 
   std::string const out{ json_of(t, c) };
   CHECK(out.find("\"seg\":3,\"rank\":2,\"index\":1,\"count\":1") != std::string::npos);
@@ -189,6 +192,8 @@ TEST_CASE("trace: every payload shape serializes its own fields") {
   // Past 32 bits, and a row nothing named is omitted rather than printed as -1.
   CHECK(out.find("\"t2\":4294967296") != std::string::npos);
   CHECK(out.find("\"verdict\":\"not_better\",\"row\":4294967295") != std::string::npos);
+  CHECK(out.find("\"cause\":\"lanes\",\"boundary\":2,\"seg\":7,\"width\":538") !=
+        std::string::npos);
   // One object per event and a comma between each pair, never a trailing one.
   CHECK(out.find("},\n]") == std::string::npos);
 }
@@ -220,6 +225,58 @@ TEST_CASE("trace: a traced run writes the geometry an untraced one does") {
   CHECK(layout_coordinate_hash(traced) == layout_coordinate_hash(plain));
   CHECK(!events.empty());
   CHECK(trace_sink() == nullptr);  // cleared even though the run succeeded
+}
+
+TEST_CASE("trace: a fold pin names the frame it decides and the mode it takes") {
+  // Five states in a run, which the scale measure folds; pinned never, it is one row.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  std::vector<StateId> run;
+  for (char const *name : { "A", "B", "C", "D", "E" }) {
+    run.push_back(build_state(c, root, name, StateKind::Normal, {}));
+  }
+  for (uint32_t k = 0; (k + 1) < run.size(); ++k) {
+    build_trans(c, run[k], run[k + 1], TransKind::External, {});
+  }
+  scav_layout_opts opts{};
+  REQUIRE(profile_named("readable", opts.profile));
+  opts.profile.portfolio_k = 0;
+  opts.threads = 1;
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  LayoutTrace bare;
+  {
+    Attached const held{ bare };
+    REQUIRE(layout_run(c, {}, opts, placed, diags, nullptr, nullptr, 0));
+  }
+  CHECK(count_kind(bare, TraceKind::FoldCut) > 0);
+  CHECK(count_kind(bare, TraceKind::FoldPinned) == 0);
+
+  SearchPins const pins{ .folds = { { .frame = root, .mode = FOLD_NEVER } } };
+  LayoutTrace t;
+  {
+    Attached const held{ t };
+    REQUIRE(layout_run(c,
+                       {},
+                       opts,
+                       placed,
+                       diags,
+                       nullptr,
+                       nullptr,
+                       0,
+                       nullptr,
+                       nullptr,
+                       &pins));
+  }
+  CHECK(count_kind(t, TraceKind::FoldCut) == 0);
+  REQUIRE(count_kind(t, TraceKind::FoldPinned) == 1);
+  for (TraceEvent const &e : t.events) {
+    if (e.kind != TraceKind::FoldPinned) { continue; }
+    CHECK(e.frame == root.v);
+    CHECK(e.pass == FOLD_NEVER);
+  }
+  CHECK(json_of(t, c).find("\"kind\":\"fold_pinned\",\"frame\":0,\"mode\":\"never\"") !=
+        std::string::npos);
 }
 
 TEST_CASE("trace: a back edge's kinks are one chained bend, and the trace says so") {
@@ -293,6 +350,46 @@ TEST_CASE("trace: a back edge's kinks are one chained bend, and the trace says s
     CHECK(e.point.x == bend.x);
     CHECK(e.point.y == bend.y);
   }
+}
+
+TEST_CASE("trace: a label's charge names its frame, its boundary and its segment") {
+  // D -> C/T in two pieces, the first in the root. The root's label charge is at the
+  // boundary between D and C, asked for by the first piece at the box's width.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
+  StateId const t{ build_state(c, inner, "T", StateKind::Normal, {}) };
+  TransId const into{ build_trans(c, d, t, TransKind::External, {}) };
+  scav_path_box const box{ .subject = into.v, .w = 1511, .h = 269, .order = 0 };
+  scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
+
+  LayoutTrace trace;
+  scav_layout_opts opts{};
+  REQUIRE(profile_named("readable", opts.profile));
+  opts.threads = 1;
+  opts.profile.portfolio_k = 0;
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  {
+    Attached const held{ trace };
+    REQUIRE(layout_run(c, s, opts, placed, diags, nullptr, nullptr, 0));
+  }
+  uint32_t labels{ 0 };
+  for (TraceEvent const &e : trace.events) {
+    if ((e.kind != TraceKind::GapCharged) ||
+        (static_cast<GapCause>(e.pass) != GapCause::Label)) {
+      continue;
+    }
+    ++labels;
+    CHECK(e.frame == root.v);
+    CHECK(e.gap.boundary == 0);
+    CHECK(e.gap.seg == 0);  // the transition's first segment, the root's
+    CHECK(e.gap.width == 1511);
+  }
+  // One per phase-1 run, and a run with the search off orders once per row.
+  CHECK(labels >= 1);
 }
 
 TEST_CASE("trace: the search re-orders per move, and every move states its verdict") {

@@ -45,9 +45,13 @@ scav_profile compact() {
 // Every chart in test_data/charts/gauntlet, by the bare name the element suite
 // next door names it by, so one functional test holds both arrays to the
 // directory.
-constexpr std::array<char const *, 10> GAUNTLET{
-  "chain.scav", "crowd.scav", "enclosing.scav", "fanin.scav",  "fork.scav",
-  "lane.scav",  "loop.scav",  "marks.scav",     "mutual.scav", "regions.scav"
+constexpr std::array<char const *, 28> GAUNTLET{
+  "above.scav",     "carried.scav",   "chain.scav",   "corner.scav",  "crossing.scav",
+  "crowd.scav",     "enclosing.scav", "entered.scav", "fanin.scav",   "folded.scav",
+  "fork.scav",      "lane.scav",      "level.scav",   "long.scav",    "loop.scav",
+  "marks.scav",     "mutual.scav",    "ported.scav",  "pulled.scav",  "regions.scav",
+  "roundtrip.scav", "seated.scav",    "stretch.scav", "through.scav", "tight.scav",
+  "transit.scav",   "under.scav",     "unfolded.scav"
 };
 
 std::string router_label(uint32_t index) {
@@ -268,7 +272,11 @@ TEST_CASE("bench: the cells corpus_routers.txt leaves unscored, term by term") {
                                 t.label,
                                 t.label_near,
                                 t.aspect,
-                                t.area }) {
+                                t.area,
+                                t.crowding,
+                                t.length,
+                                t.transit_bends,
+                                t.whitespace }) {
       actual += ' ';
       actual += std::to_string(term);
     }

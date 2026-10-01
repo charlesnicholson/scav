@@ -22,8 +22,9 @@ Inputs (all from the same UCD release):
     NormalizationTest.txt          the conformance suite
 
 Outputs, written next to this script:
-    unicode_nfc_tables.inc         production tables
-    unicode_nfc_test_vectors.inc   test-only conformance vectors
+    unicode_nfc_tables.inc            production tables, packed
+    unicode_nfc_reference_tables.inc  test-only: the same tables unpacked
+    unicode_nfc_test_vectors.inc      test-only conformance vectors
 """
 
 from __future__ import annotations
@@ -149,6 +150,82 @@ def emit_array(name: str, ctype: str, values: list[str], per_line: int) -> str:
             f"{body}\n}};\n")
 
 
+def uvarint(out: bytearray, value: int) -> None:
+    """LEB128: seven bits a byte, least significant first, high bit = more."""
+    while value >= 0x80:
+        out.append((value & 0x7F) | 0x80)
+        value >>= 7
+    out.append(value)
+
+
+def zigzag(value: int) -> int:
+    return (value << 1) if value >= 0 else ((-value << 1) - 1)
+
+
+def build_packed(ccc: dict[int, int],
+                 decomp: dict[int, list[int]],
+                 qc_not_yes: set[int],
+                 excluded: set[int]) -> str:
+    """build_tables' arrays as one uvarint stream: unsafe ranges (gap, span), ccc runs
+    (gap, span, class byte), decompositions (gap, length, zigzag deltas chained from
+    the key), composites (starter delta, combining delta, zigzag from the starter)."""
+    unsafe = to_ranges(set(qc_not_yes) | set(ccc))
+    runs: list[list[int]] = []
+    for cp in sorted(ccc):
+        if runs and runs[-1][1] == cp - 1 and runs[-1][2] == ccc[cp]:
+            runs[-1][1] = cp
+        else:
+            runs.append([cp, cp, ccc[cp]])
+    decomp_keys = sorted(decomp)
+    pairs = sorted((decomp[cp][0], decomp[cp][1], cp) for cp in decomp_keys
+                   if len(decomp[cp]) == 2 and cp not in excluded)
+
+    out = bytearray()
+    prev = 0
+    for lo, hi in unsafe:
+        uvarint(out, lo - prev)
+        uvarint(out, hi - lo)
+        prev = hi + 1
+    prev = 0
+    for lo, hi, klass in runs:
+        uvarint(out, lo - prev)
+        uvarint(out, hi - lo)
+        out.append(klass)
+        prev = hi + 1
+    prev = 0
+    flat = 0
+    for cp in decomp_keys:
+        seq = full_decompose(cp, decomp)
+        uvarint(out, cp - prev)
+        uvarint(out, len(seq))
+        ref = cp
+        for part in seq:
+            uvarint(out, zigzag(part - ref))
+            ref = part
+        prev = cp + 1
+        flat += len(seq)
+    starter = 0
+    combining = 0
+    for a, b, c in pairs:
+        uvarint(out, a - starter)
+        if a != starter:
+            starter, combining = a, 0
+        uvarint(out, b - combining)
+        combining = b
+        uvarint(out, zigzag(c - a))
+
+    text = [BANNER, "\n"]
+    text.append(f"constexpr uint32_t NFC_UNSAFE_COUNT{{ {len(unsafe)} }};\n")
+    text.append(f"constexpr uint32_t NFC_CCC_RUNS{{ {len(runs)} }};\n")
+    text.append(f"constexpr uint32_t NFC_CCC_COUNT{{ {len(ccc)} }};\n")
+    text.append(f"constexpr uint32_t NFC_DECOMP_COUNT{{ {len(decomp_keys)} }};\n")
+    text.append(f"constexpr uint32_t NFC_DECOMP_DATA_COUNT{{ {flat} }};\n")
+    text.append(f"constexpr uint32_t NFC_COMPOSE_COUNT{{ {len(pairs)} }};\n\n")
+    text.append("// See gen_unicode_tables.py's build_packed for the layout.\n")
+    text.append(emit_array("NFC_PACKED", "scav_byte", [str(b) for b in out], 24))
+    return "".join(text)
+
+
 def build_tables(ccc: dict[int, int],
                  decomp: dict[int, list[int]],
                  qc_not_yes: set[int],
@@ -177,7 +254,9 @@ def build_tables(ccc: dict[int, int],
             pairs.append((seq[0], seq[1], cp))
     pairs.sort()
 
-    out = [BANNER, "\n"]
+    out = [BANNER.replace("unicode_nfc.cpp, which owns the algorithm; this file is data only",
+                          "unicode_nfc_tests.cpp, against the decode of the packed tables"),
+           "\n"]
     out.append("// Codepoints that may need work: NFC_QC != Yes, or a non-zero\n"
                "// combining class. Everything outside these ranges is already NFC.\n")
     out.append(emit_array("NFC_UNSAFE_LO", "uint32_t",
@@ -318,13 +397,16 @@ def main() -> int:
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
     tables = args.out_dir / "unicode_nfc_tables.inc"
+    reference = args.out_dir / "unicode_nfc_reference_tables.inc"
     vectors = args.out_dir / "unicode_nfc_test_vectors.inc"
-    tables.write_text(build_tables(ccc, decomp, qc_not_yes, excluded),
+    tables.write_text(build_packed(ccc, decomp, qc_not_yes, excluded),
                       encoding="utf-8", newline="\n")
+    reference.write_text(build_tables(ccc, decomp, qc_not_yes, excluded),
+                         encoding="utf-8", newline="\n")
     vectors.write_text(build_vectors(ucd["NormalizationTest.txt"]),
                        encoding="utf-8", newline="\n")
-    print(f"wrote {tables} ({tables.stat().st_size} bytes)")
-    print(f"wrote {vectors} ({vectors.stat().st_size} bytes)")
+    for path in (tables, reference, vectors):
+        print(f"wrote {path} ({path.stat().st_size} bytes)")
     return 0
 
 

@@ -8,6 +8,7 @@
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
 #include "scav_int.h"
+#include "scav_vec.h"
 
 #include <cstdint>
 #include <vector>
@@ -136,7 +137,7 @@ inline void grid_build(RectGrid &g,
   g.ch = imax(Wide{ imax(cell_h, 1) }, ceil_div(Wide{ region.h } + 1, Wide{ GRID_SIDE }));
   g.nx = static_cast<uint32_t>(imax(ceil_div(Wide{ region.w } + 1, g.cw), Wide{ 1 }));
   g.ny = static_cast<uint32_t>(imax(ceil_div(Wide{ region.h } + 1, g.ch), Wide{ 1 }));
-  g.off.assign((static_cast<size_t>(g.nx) * g.ny) + 1, 0);
+  vec_assign(g.off, (static_cast<size_t>(g.nx) * g.ny) + 1, 0);
   auto const span =
       [&g](scav_rect const &r, uint32_t &c0, uint32_t &c1, uint32_t &r0, uint32_t &r1) {
         c0 = grid_cell(r.x, g.x0, g.cw, g.nx);
@@ -157,7 +158,7 @@ inline void grid_build(RectGrid &g,
     }
   }
   for (size_t i = 1; i < g.off.size(); ++i) { g.off[i] += g.off[i - 1]; }
-  g.item.assign(g.off.back(), 0);
+  vec_assign(g.item, g.off.back(), 0);
   std::vector<uint32_t> fill(g.off.begin(), g.off.end() - 1);
   for (uint32_t k = 0; k < rects.size(); ++k) {
     uint32_t c0{ 0 };
@@ -173,9 +174,10 @@ inline void grid_build(RectGrid &g,
   }
 }
 
-inline bool grid_hits(RectGrid const &g,
-                      std::vector<scav_rect> const &rects,
-                      scav_rect const &cand) {
+// The index of a rect `cand` overlaps, or INVALID where it overlaps none.
+inline uint32_t grid_hit(RectGrid const &g,
+                         std::vector<scav_rect> const &rects,
+                         scav_rect const &cand) {
   uint32_t const c0{ grid_cell(cand.x, g.x0, g.cw, g.nx) };
   uint32_t const c1{ grid_cell(Wide{ cand.x } + cand.w, g.x0, g.cw, g.nx) };
   uint32_t const r0{ grid_cell(cand.y, g.y0, g.ch, g.ny) };
@@ -184,11 +186,17 @@ inline bool grid_hits(RectGrid const &g,
     for (uint32_t x = c0; x <= c1; ++x) {
       size_t const cell{ (static_cast<size_t>(y) * g.nx) + x };
       for (uint32_t k = g.off[cell]; k < g.off[cell + 1]; ++k) {
-        if (overlaps(cand, rects[g.item[k]])) { return true; }
+        if (overlaps(cand, rects[g.item[k]])) { return g.item[k]; }
       }
     }
   }
-  return false;
+  return INVALID;
+}
+
+inline bool grid_hits(RectGrid const &g,
+                      std::vector<scav_rect> const &rects,
+                      scav_rect const &cand) {
+  return grid_hit(g, rects, cand) != INVALID;
 }
 
 }  // namespace scav

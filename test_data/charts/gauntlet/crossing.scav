@@ -1,0 +1,9 @@
+// A labelled transition out of one composite into a child of another: the root
+// owns the label, which sits on the leg between the two, clear of both borders.
+chart crossing "a label between two composites" {
+  state Left { state Busy, trans * -> Busy },
+  state Right { state Idle, state Tripped, trans * -> Idle, trans Idle -> Tripped },
+
+  trans * -> Left,
+  trans Left -> Right/Tripped "limit switch",
+}

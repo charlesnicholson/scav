@@ -1,0 +1,17 @@
+// Two finals seated beside one state, in a layer a wide composite leaves slack in.
+chart seated "two finals seated beside one state" {
+  state Idle,
+  state Run {
+    state First,
+    state Second,
+    state Third,
+    trans First -> Second,
+    trans Second -> Third,
+  },
+  state Check,
+
+  trans Idle -> Run,
+  trans Idle -> Check,
+  trans Check -> * "ok",
+  trans Check -> * "fail",
+}

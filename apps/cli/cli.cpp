@@ -6,6 +6,7 @@
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 
+#include <algorithm>
 #include <array>
 #include <charconv>
 #include <cstdint>
@@ -50,7 +51,9 @@ bool ordinal_pair(std::string_view arg, uint32_t &a, uint32_t &b) {
          (y.ec == std::errc{}) && (y.ptr == (arg.data() + arg.size()));
 }
 
-bool face_fields(std::string_view arg, std::array<uint32_t, 4> &field) {
+// `N` ordinals separated by colons, the whole of `arg`.
+template <size_t N>
+bool ordinal_fields(std::string_view arg, std::array<uint32_t, N> &field) {
   for (uint32_t i = 0; i < field.size(); ++i) {
     size_t const at{ arg.find(':') };
     std::string_view const head{ (i + 1 == field.size()) ? arg : arg.substr(0, at) };
@@ -65,7 +68,7 @@ bool face_fields(std::string_view arg, std::array<uint32_t, 4> &field) {
     }
     if (i + 1 < field.size()) { arg.remove_prefix(at + 1); }
   }
-  return (field[2] <= 1) && (field[3] <= 3);
+  return true;
 }
 
 // `value` is the flag's argument, parsed into `out`; false if it is malformed.
@@ -93,17 +96,36 @@ bool read_value(std::string_view flag, std::string_view value, LayoutArgs &out) 
     out.pins.orients.push_back({ .frame = SubmachineId{ a } });
     return true;
   }
-  if (flag == "--face") {
+  if ((flag == "--face") || (flag == "--side")) {
     std::array<uint32_t, 4> field{};
-    if (!face_fields(value, field)) { return false; }
-    out.pins.faces.push_back({ .trans = TransId{ field[0] },
-                               .leg = field[1],
-                               .end = field[2],
-                               .face = field[3] });
+    if (!ordinal_fields(value, field) || (field[2] > 1) || (field[3] > 3)) {
+      return false;
+    }
+    if (flag == "--face") {
+      out.pins.faces.push_back({ .trans = TransId{ field[0] },
+                                 .leg = field[1],
+                                 .end = field[2],
+                                 .face = field[3] });
+    } else {
+      out.pins.sides.push_back({ .trans = TransId{ field[0] },
+                                 .leg = field[1],
+                                 .end = field[2],
+                                 .side = field[3] });
+    }
+    return true;
+  }
+  if ((flag == "--fold") && (std::ranges::count(value, ':') == 2)) {
+    std::array<uint32_t, 3> field{};
+    if (!ordinal_fields(value, field) || (field[1] > FOLD_NEVER)) { return false; }
+    out.pins.folds.push_back(
+        { .frame = SubmachineId{ field[0] }, .mode = field[1], .layer = field[2] });
     return true;
   }
   if (!ordinal_pair(value, a, b)) { return false; }
-  if (flag == "--rank") {
+  if (flag == "--fold") {
+    if (b > FOLD_NEVER) { return false; }
+    out.pins.folds.push_back({ .frame = SubmachineId{ a }, .mode = b });
+  } else if (flag == "--rank") {
     out.pins.ranks.push_back({ .state = StateId{ a }, .rank = b });
   } else if (flag == "--cut") {
     out.pins.cuts.push_back({ .trans = TransId{ a }, .leg = b });
@@ -126,7 +148,7 @@ ArgRead read_layout_arg(int argc, char **argv, int &i, LayoutArgs &out) {
   }
   if ((arg != "--profile") && (arg != "--portfolio-row") && (arg != "--rank") &&
       (arg != "--cut") && (arg != "--reverse") && (arg != "--face") &&
-      (arg != "--orient")) {
+      (arg != "--orient") && (arg != "--side") && (arg != "--fold")) {
     return ArgRead::NotOurs;
   }
   // The increment is its own statement: clang-tidy's
@@ -175,6 +197,20 @@ void append_layout_args(std::string &out,
   for (OrientPin const &o : pins.orients) {
     out += " --orient ";
     string_append_u32(out, o.frame.v);
+  }
+  for (SidePin const &sp : pins.sides) {
+    pair("--side", sp.trans.v, sp.leg);
+    out += ':';
+    string_append_u32(out, sp.end);
+    out += ':';
+    string_append_u32(out, sp.side);
+  }
+  for (FoldPin const &f : pins.folds) {
+    pair("--fold", f.frame.v, f.mode);
+    if (f.layer != 0) {
+      out += ':';
+      string_append_u32(out, f.layer);
+    }
   }
 }
 

@@ -27,6 +27,90 @@ function(scav_settings target)
     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
   )
   target_compile_features(${target} PUBLIC cxx_std_20)
+  if(CMAKE_EXECUTABLE_FORMAT STREQUAL "ELF")
+    # One section per function and datum, which --gc-sections drops individually.
+    target_compile_options(${target} PRIVATE
+      "$<$<CONFIG:Release>:-ffunction-sections;-fdata-sections>")
+  endif()
+endfunction()
+
+# scav_optimize_for_size(<target> [SOURCES <file>...]) -- on GCC and Clang front
+# ends, Release compiles <target> and a library's _testable twin at -Os, overriding
+# the configuration's -O. With SOURCES, only those files, in every target of
+# <target>'s directory.
+function(scav_optimize_for_size target)
+  cmake_parse_arguments(PARSE_ARGV 1 arg "" "" "SOURCES")
+  if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+    return()
+  endif()
+  if(arg_SOURCES)
+    set_source_files_properties(${arg_SOURCES} TARGET_DIRECTORY ${target} PROPERTIES
+      COMPILE_OPTIONS "$<$<CONFIG:Release>:-Os>")
+    return()
+  endif()
+  foreach(variant ${target} ${target}_testable)
+    if(TARGET ${variant})
+      target_compile_options(${variant} PRIVATE "$<$<CONFIG:Release>:-Os>")
+    endif()
+  endforeach()
+endfunction()
+
+# scav_dead_code_strip(<target>) -- a Release link drops unreferenced code and, for a
+# Mach-O executable, exports nothing. MSVC links Release with /OPT:REF,ICF by default.
+function(scav_dead_code_strip target)
+  if(CMAKE_EXECUTABLE_FORMAT STREQUAL "MACHO")
+    set(flags "-dead_strip")
+    get_target_property(type ${target} TYPE)
+    if(type STREQUAL "EXECUTABLE")
+      string(APPEND flags ",-no_exported_symbols")
+    endif()
+    target_link_options(${target} PRIVATE "$<$<CONFIG:Release>:LINKER:${flags}>")
+  elseif(CMAKE_EXECUTABLE_FORMAT STREQUAL "ELF")
+    target_link_options(${target} PRIVATE "$<$<CONFIG:Release>:LINKER:--gc-sections>")
+  endif()
+endfunction()
+
+# scav_export_c_abi(<shared library> <abi json>) -- exports exactly the golden's
+# functions: a .def on Windows, an export list on Mach-O, a version script on ELF.
+function(scav_export_c_abi target abi_json)
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${abi_json}")
+  file(READ "${abi_json}" abi)
+  set(names "")
+  string(JSON header_count LENGTH "${abi}" headers)
+  math(EXPR header_last "${header_count} - 1")
+  foreach(h RANGE ${header_last})
+    string(JSON function_count LENGTH "${abi}" headers ${h} functions)
+    if(function_count EQUAL 0)
+      continue()
+    endif()
+    math(EXPR function_last "${function_count} - 1")
+    foreach(f RANGE ${function_last})
+      string(JSON name GET "${abi}" headers ${h} functions ${f} name)
+      list(APPEND names "${name}")
+    endforeach()
+  endforeach()
+
+  set(base "${CMAKE_CURRENT_BINARY_DIR}/${target}_exports")
+  if(WIN32)
+    list(JOIN names "\n  " body)
+    file(CONFIGURE OUTPUT "${base}.def" CONTENT "EXPORTS\n  ${body}\n" @ONLY)
+    target_sources(${target} PRIVATE "${base}.def")
+  elseif(CMAKE_EXECUTABLE_FORMAT STREQUAL "MACHO")
+    list(TRANSFORM names PREPEND "_")
+    list(JOIN names "\n" body)
+    file(CONFIGURE OUTPUT "${base}.txt" CONTENT "${body}\n" @ONLY)
+    target_link_options(${target} PRIVATE "LINKER:-exported_symbols_list,${base}.txt")
+    set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS "${base}.txt")
+  elseif(CMAKE_EXECUTABLE_FORMAT STREQUAL "ELF")
+    list(JOIN names ";\n    " body)
+    file(CONFIGURE OUTPUT "${base}.map"
+      CONTENT "{\n  global:\n    ${body};\n  local: *;\n};\n" @ONLY)
+    target_link_options(${target} PRIVATE "LINKER:--version-script=${base}.map")
+    set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS "${base}.map")
+  else()
+    message(FATAL_ERROR
+      "scav_export_c_abi: no export list for ${CMAKE_EXECUTABLE_FORMAT}")
+  endif()
 endfunction()
 
 # scav_static_library(<name> <source>...) -- two archives from one source list.

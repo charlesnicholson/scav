@@ -40,7 +40,7 @@ std::vector<scav::Diagnostic> const &diags_of(scav_load const *loader) {
 
 extern "C" {
 
-uint32_t scav_abi_version(void) { return 5; }
+uint32_t scav_abi_version(void) { return 6; }
 
 scav_result scav_load_begin(scav_load **out) {
   if (out == nullptr) { return SCAV_E_INVALID_ARG; }

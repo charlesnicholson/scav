@@ -1,8 +1,8 @@
 # Three subsystems: `lang` is bytes to statements and knows nothing about
 # entities, `model` is the entity arrays, `load` composes the two.
 scav_static_library(scavcore
-  # A src/-root primitive belonging to no library; core compiles it because core
-  # is its only consumer, and anything linking core reaches it.
+  # src/-root primitives belonging to no library; core compiles them, so anything
+  # linking core reaches them.
   ../scav_xxhash.cpp
   # Core-wide, owned by no subsystem: every layer below produces diagnostics,
   # and c_api.cpp is the C projection of the whole public header.
@@ -26,6 +26,7 @@ scav_static_library(scavcore
   model/validate.cpp
 )
 scav_install_library(scavcore core)
+scav_optimize_for_size(scavcore)
 
 # The redistributable: one shared object, with the static archives a build-time
 # decomposition. Each later library contributes its own c_api.cpp.
@@ -40,9 +41,11 @@ set_target_properties(scav_shared PROPERTIES
   # OUTPUT_NAME would land this on the scav executable's own PDB, and the two
   # links race for the write. The PDB alone keeps the target name.
   PDB_NAME scav_shared
-  # MSVC exports nothing without either a .def file or this.
-  WINDOWS_EXPORT_ALL_SYMBOLS TRUE
 )
+scav_export_c_abi(scav_shared "${PROJECT_SOURCE_DIR}/abi/scav_abi.json")
+scav_dead_code_strip(scav_shared)
+# The build tree keeps its symbols; `cmake --install --strip` removes them.
+install(TARGETS scav_shared)
 
 # Not in ALL and not a dependency of unicode_nfc.cpp: the .inc files are
 # committed, so a build needs neither the network nor Python.
@@ -95,10 +98,17 @@ if(SCAV_BUILD_TESTS)
     # belong to no subsystem, so their tests sit beside them.
     ../scav_int_tests.cpp
     ../scav_hash_map_tests.cpp
+    ../scav_inflate.cpp  # compiled into its tests and the CLI; no library carries it
+    ../scav_inflate_tests.cpp
     ../scav_stable_sort_tests.cpp
     ../scav_xxhash_tests.cpp
   )
   target_link_libraries(scav_core_tests PRIVATE scavcore_testable)
+
+  # Decodes reference-encoder streams for functional_tests/test_inflate.py.
+  add_executable(scav_inflate_driver ../scav_inflate_driver.cpp ../scav_inflate.cpp)
+  scav_settings(scav_inflate_driver)
+  target_link_libraries(scav_inflate_driver PRIVATE scavcore)
   # A harness reporting nothing looks identical to one where all is well.
   scav_expect_test_failure(scav_core_tests "*deliberate failure*")
 

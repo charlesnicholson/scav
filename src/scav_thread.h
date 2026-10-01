@@ -1,8 +1,8 @@
 #ifndef SCAV_THREAD_H_INCLUDED
 #define SCAV_THREAD_H_INCLUDED
 
-// The threading shim, one backend chosen at build time: pthreads, Win32, or
-// null. Shards are the work items, assigned to workers before any of them runs.
+// The threading shim, one backend chosen at build time: pthreads, Win32, or null.
+// A shard writes only its own slot, so which thread runs it never reaches a result.
 
 #include <cstdint>
 #include <type_traits>
@@ -32,6 +32,33 @@ void parallel_for(uint32_t shards, uint32_t threads, F &&fn) {
       [](void *ctx, uint32_t shard) { (*static_cast<Fn *>(ctx))(shard); },
       &fn);
 }
+
+// Excludes every other holder while held, around a lookup or insert into state shards
+// share, never around a shard's own work. Not recursive; a spin lock in the null backend.
+class Mutex {
+ public:
+  Mutex();
+  ~Mutex();
+  Mutex(Mutex const &) = delete;
+  Mutex &operator=(Mutex const &) = delete;
+  void lock();
+  void unlock();
+
+ private:
+  void *impl{ nullptr };  // the backend's lock
+};
+
+// Holds a Mutex for the scope it is declared in.
+class ScopedLock {
+ public:
+  explicit ScopedLock(Mutex &m) : held(m) { held.lock(); }
+  ~ScopedLock() { held.unlock(); }
+  ScopedLock(ScopedLock const &) = delete;
+  ScopedLock &operator=(ScopedLock const &) = delete;
+
+ private:
+  Mutex &held;
+};
 
 // Worker `first` of `workers` takes shards first, first + workers, ...
 inline void run_stripe(uint32_t shards,

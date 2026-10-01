@@ -6,6 +6,7 @@ scav_static_library(scavsvg
   svg.cpp
 )
 scav_install_library(scavsvg svg)
+scav_optimize_for_size(scavsvg)
 target_link_libraries(scavsvg PUBLIC scavdraw)
 target_link_libraries(scavsvg_testable PUBLIC scavdraw_testable)
 

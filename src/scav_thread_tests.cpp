@@ -10,6 +10,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <ostream>
@@ -346,4 +347,104 @@ TEST_CASE("thread: run_stripe walks one worker's shards in index order") {
   visited.clear();
   run_stripe(UINT32_MAX, UINT32_MAX - 1U, UINT32_MAX - 2U, visit, &visited);
   CHECK(visited == std::vector<uint32_t>{ UINT32_MAX - 2U });
+}
+
+TEST_CASE("thread: calls nested three deep finish with one worker to share") {
+  // With one worker, each level's waiter runs the level below's shards itself.
+  HookGuard const guard;
+  thread_test_spawn_limit(1U);
+  uint32_t const outer{ 4 };
+  uint32_t const middle{ 3 };
+  uint32_t const inner{ 5 };
+  std::vector<uint32_t> hits(size_t{ outer } * middle * inner, 0);
+  auto body = [&](uint32_t o) {
+    parallel_for(middle, 0U, [&, o](uint32_t m) {
+      parallel_for(inner, 0U, [&, o, m](uint32_t i) {
+        hits[(((o * middle) + m) * inner) + i] += 1U;
+      });
+    });
+  };
+  parallel_for(outer, 0U, body);
+  CHECK(count_of(hits, 1U) == hits.size());
+}
+
+TEST_CASE("thread: two callers on threads of their own share the pool") {
+  constexpr uint32_t PER_CALL{ 512 };
+  std::vector<uint32_t> a(PER_CALL, 0);
+  std::vector<uint32_t> b(PER_CALL, 0);
+  auto run = [](std::vector<uint32_t> &hits) {
+    for (uint32_t round = 0; round < 8; ++round) {
+      parallel_for(PER_CALL, 0U, [&hits](uint32_t s) { hits[s] += 1U; });
+    }
+  };
+  std::thread first([&] { run(a); });
+  std::thread second([&] { run(b); });
+  first.join();
+  second.join();
+  CHECK(count_of(a, 8U) == PER_CALL);
+  CHECK(count_of(b, 8U) == PER_CALL);
+}
+
+TEST_CASE("thread: a mutex lets one holder in at a time") {
+  // A holder that enters while another is inside finds `inside` nonzero.
+  Mutex m;
+  std::atomic<uint32_t> inside{ 0 };
+  std::atomic<uint32_t> overlaps{ 0 };
+  uint64_t total{ 0 };
+  constexpr uint32_t HOLDS{ 2000 };
+  parallel_for(16U, 0U, [&](uint32_t /*shard*/) {
+    for (uint32_t i = 0; i < HOLDS; ++i) {
+      ScopedLock const held{ m };
+      if (inside.fetch_add(1U) != 0U) { overlaps.fetch_add(1U); }
+      uint32_t volatile dwell{ 0 };
+      for (uint32_t k = 0; k < 64U; ++k) { dwell = dwell + 1U; }
+      ++total;
+      inside.fetch_sub(1U);
+    }
+  });
+  CHECK(overlaps.load() == 0U);
+  CHECK(total == uint64_t{ 16 } * HOLDS);
+}
+
+// Host threads rather than pool workers, so the null backend's lock is contended too.
+TEST_CASE("thread: a mutex lets one host thread in at a time") {
+  Mutex m;
+  std::atomic<uint32_t> inside{ 0 };
+  std::atomic<uint32_t> overlaps{ 0 };
+  uint64_t total{ 0 };
+  constexpr uint32_t HOLDS{ 20000 };
+  auto const hold = [&] {
+    for (uint32_t i = 0; i < HOLDS; ++i) {
+      ScopedLock const held{ m };
+      if (inside.fetch_add(1U) != 0U) { overlaps.fetch_add(1U); }
+      uint32_t volatile dwell{ 0 };
+      for (uint32_t k = 0; k < 64U; ++k) { dwell = dwell + 1U; }
+      ++total;
+      inside.fetch_sub(1U);
+    }
+  };
+  std::thread first(hold);
+  std::thread second(hold);
+  first.join();
+  second.join();
+  CHECK(overlaps.load() == 0U);
+  CHECK(total == uint64_t{ 2 } * HOLDS);
+}
+
+TEST_CASE("thread: a mutex held on one host thread keeps another out until released") {
+  Mutex m;
+  std::atomic<bool> trying{ false };
+  std::atomic<bool> entered{ false };
+  m.lock();
+  std::thread other([&] {
+    trying.store(true);
+    ScopedLock const held{ m };
+    entered.store(true);
+  });
+  while (!trying.load()) { std::this_thread::yield(); }
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  CHECK_FALSE(entered.load());
+  m.unlock();
+  other.join();
+  CHECK(entered.load());
 }

@@ -1,0 +1,50 @@
+// A route from Gripping into Cruising, in a region of Moving inside Arm, so Arm
+// is a state the route only passes through; the leg across Arm is straight.
+chart transit "a crossing route passing through a composite" {
+  state Rotating,
+  state Gripping,
+  state Arm {
+    state Idle,
+    state Homing,
+    state Ready,
+    state Reached choice,
+    state Moving {
+      submachine travel {
+        state Accelerating,
+        state Cruising,
+        state Decelerating,
+        trans * -> Accelerating,
+        trans Accelerating -> Cruising,
+        trans Cruising -> Decelerating,
+      },
+      submachine monitor {
+        state Nominal,
+        state Excessive,
+        trans * -> Nominal,
+        trans internal Nominal -> Nominal,
+        trans Nominal -> Excessive,
+      },
+    },
+    state Halt {
+      state Clear,
+      state Tripped,
+      state Latched,
+      trans * -> Clear,
+      trans Clear -> Tripped,
+      trans Tripped -> Latched,
+      trans Latched -> Clear,
+    },
+    trans * -> Idle,
+    trans Idle -> Homing,
+    trans Homing -> Ready,
+    trans Ready -> Moving,
+    trans Moving -> Reached,
+    trans Reached -> Ready,
+    trans Reached -> Idle,
+    trans Moving -> Halt/Tripped,
+  },
+  trans * -> Rotating,
+  trans Rotating -> Gripping,
+  trans Rotating -> Arm/Homing,
+  trans Gripping -> Arm/Moving:travel/Cruising "extend",
+}

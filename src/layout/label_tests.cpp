@@ -1,5 +1,5 @@
-// Placement against hand-written geometry: a few rects and one polyline are
-// enough, since the candidates come from the route and nothing else.
+// Placement against hand-written geometry, then the pruned and memoized searches against
+// the exhaustive one over seeded, crowded scenes.
 
 #include "layout/label.h"
 #include "layout/tests/pod_eq.h"
@@ -11,17 +11,31 @@
 
 #include "doctest.h"
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <string>
 #include <vector>
 
+namespace scav {
+
+// The placement with its search selectable, internal to `label.cpp`.
+uint32_t place_labels_by(Chart const &c,
+                         SizedLayout const &z,
+                         scav_spaces const &s,
+                         std::vector<scav_span> const &route,
+                         std::vector<scav_point> const &points,
+                         scav_profile const &p,
+                         LabelSearch search,
+                         std::vector<scav_rect> &out);
+
+uint64_t label_test_kept();  // boxes the calling thread has kept from a base
+
+}  // namespace scav
+
 namespace {
 
-// A profile scaled to these tests' geometry rather than a shipped one: the
-// only field `place_labels` reads is `font_size_grid`, and 20 makes the leader
-// 10, half the height of the 20-unit boxes below. At `readable`'s 192 the
-// leader alone would be a third of the 600 by 400 chart.
+// A profile scaled to these tests' geometry: `font_size_grid` 20 gives a leader of 10.
 scav_profile tiny() {
   scav_profile out{};
   out.font_size_grid = 20;
@@ -174,6 +188,100 @@ TEST_CASE("label: a box sits beside its route's longest horizontal leg") {
   CHECK((placed[0].y + placed[0].h) <= 150);
 }
 
+namespace {
+
+// `L` beside a composite `R` holding `T`, one transition `L -> R/T`, and `strangers` in
+// the root: the route's first legs lie in the root and its last inside `R`.
+struct Crossing {
+  Chart c;
+  StateId l, r, t;
+};
+
+void crossing(Crossing &out, uint32_t strangers) {
+  SubmachineId const root{ build_chart(out.c, "t", {}) };
+  out.l = build_state(out.c, root, "L", StateKind::Normal, {});
+  out.r = build_state(out.c, root, "R", StateKind::Normal, {});
+  SubmachineId const inner{ build_submachine(out.c, out.r, {}, {}) };
+  out.t = build_state(out.c, inner, "T", StateKind::Normal, {});
+  for (uint32_t i = 0; i < strangers; ++i) {
+    build_state(out.c, root, "S" + std::to_string(i), StateKind::Normal, {});
+  }
+  build_trans(out.c, out.l, out.t, TransKind::External, {});
+}
+
+constexpr std::array SEARCHES{ LabelSearch::Exhaustive,
+                               LabelSearch::Pruned,
+                               LabelSearch::Memoized };
+
+}  // namespace
+
+TEST_CASE("label: an out-of-machine box is anchored on the leg the root holds") {
+  // The leg inside `R` is the route's longest; the anchor, taken over the root's legs
+  // alone, centres the box on the root's leg.
+  Crossing x;
+  crossing(x, 0);
+  SizedLayout z{ blank(x.c, { .x = 0, .y = -200, .w = 2000, .h = 600 }) };
+  z.state[x.l.v] = { .x = 0, .y = 0, .w = 100, .h = 100 };
+  z.state[x.r.v] = { .x = 300, .y = -100, .w = 800, .h = 300 };
+  z.state[x.t.v] = { .x = 1000, .y = 30, .w = 100, .h = 40 };
+  z.sub[1] = { .x = 310, .y = -90, .w = 780, .h = 280 };
+  Lines const l{ lines_of(
+      { { { .x = 100, .y = 50 }, { .x = 300, .y = 50 }, { .x = 1000, .y = 50 } } }) };
+  std::vector<scav_path_box> const boxes{ LABEL };
+  for (LabelSearch const search : SEARCHES) {
+    CAPTURE(static_cast<uint32_t>(search));
+    std::vector<scav_rect> placed;
+    CHECK(place_labels_by(x.c,
+                          z,
+                          boxes_of(boxes),
+                          l.route,
+                          l.points,
+                          tiny(),
+                          search,
+                          placed) == 0);
+    CHECK(placed_well(placed[0], poly_of(l, 0)));
+    CHECK(nearest_leg(placed[0], poly_of(l, 0)) == 0);
+    // Centred on the root's leg to within one slide, half the box's height.
+    CHECK(imax(placed[0].x + (placed[0].w / 2) - 200,
+               200 - placed[0].x - (placed[0].w / 2)) <= (LABEL.h / 2));
+  }
+}
+
+TEST_CASE("label: the fallback keeps an out-of-machine box out of the state it enters") {
+  // The root's leg runs between `R` and a stranger, so no candidate is clear and the
+  // fallback tier chooses; above the leg lies `R`, below it the stranger in the root.
+  Crossing x;
+  crossing(x, 1);
+  StateId const s{ 3 };
+  SizedLayout z{ blank(x.c, { .x = 0, .y = 0, .w = 2000, .h = 1000 }) };
+  z.state[x.l.v] = { .x = 0, .y = 280, .w = 100, .h = 30 };
+  z.state[x.r.v] = { .x = 100, .y = 0, .w = 1100, .h = 290 };
+  z.state[x.t.v] = { .x = 850, .y = 180, .w = 100, .h = 40 };
+  z.sub[1] = { .x = 110, .y = 10, .w = 1080, .h = 270 };
+  z.state[s.v] = { .x = 100, .y = 300, .w = 1100, .h = 300 };
+  Lines const l{ lines_of({ { { .x = 100, .y = 295 },
+                              { .x = 900, .y = 295 },
+                              { .x = 900, .y = 290 },
+                              { .x = 900, .y = 220 } } }) };
+  std::vector<scav_path_box> const boxes{ LABEL };
+  for (LabelSearch const search : SEARCHES) {
+    CAPTURE(static_cast<uint32_t>(search));
+    std::vector<scav_rect> placed;
+    CHECK(place_labels_by(x.c,
+                          z,
+                          boxes_of(boxes),
+                          l.route,
+                          l.points,
+                          tiny(),
+                          search,
+                          placed) == 0);
+    CHECK(placed_well(placed[0], poly_of(l, 0)));
+    CHECK_FALSE(overlaps(placed[0], z.state[x.r.v]));
+    CHECK_FALSE(overlaps(placed[0], z.state[x.l.v]));
+    CHECK(overlaps(placed[0], z.state[s.v]));  // the collision the fallback accepts
+  }
+}
+
 TEST_CASE("label: a box slides along its leg to clear a state it is not under") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
@@ -250,6 +358,40 @@ TEST_CASE("label: a box takes the side clear of another transition's route") {
   CHECK(placed_well(placed[0], poly_of(l, 0)));
   // The side clear of the stranger, which here is the low one.
   CHECK(placed[0].y >= 150);
+}
+
+TEST_CASE("label: another route's leg counts wherever along that route it lies") {
+  // The stranger's first leg runs beside the box's and its last lies out of the box's
+  // reach.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, b, a, TransKind::External, {});
+
+  SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 1200, .h = 800 }) };
+  z.state[a.v] = { .x = 0, .y = 100, .w = 100, .h = 100 };
+  z.state[b.v] = { .x = 400, .y = 100, .w = 100, .h = 100 };
+  Lines const l{ lines_of(
+      { { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } },
+        { { .x = 100, .y = 140 }, { .x = 1100, .y = 140 }, { .x = 1100, .y = 700 } } }) };
+  std::vector<scav_path_box> const boxes{ { .subject = 0, .w = 60, .h = 20, .order = 0 } };
+
+  for (LabelSearch const search :
+       { LabelSearch::Exhaustive, LabelSearch::Pruned, LabelSearch::Memoized }) {
+    std::vector<scav_rect> placed;
+    CHECK(place_labels_by(c,
+                          z,
+                          boxes_of(boxes),
+                          l.route,
+                          l.points,
+                          tiny(),
+                          search,
+                          placed) == 0);
+    CHECK(placed_well(placed[0], poly_of(l, 0)));
+    CHECK(placed[0].y >= 150);
+  }
 }
 
 TEST_CASE("label: a box crosses to the far side of its own leg to keep its distance") {
@@ -966,4 +1108,525 @@ TEST_CASE("label: two thousand boxes place, and quickly") {
   // what catches it becoming linear in candidates too.
   CHECK(us < 200000);
 #endif
+}
+
+namespace {
+
+// A deterministic LCG, as in geom_tests.
+uint32_t next(uint64_t &state) {
+  state = (state * 6364136223846793005ULL) + 1442695040888963407ULL;
+  return static_cast<uint32_t>(state >> 33U);
+}
+
+// A seeded hand-laid scene: banded composites of one or two regions, plain states, mixed
+// routes and up to three boxes a transition. `crowd` 2 refuses most candidates.
+struct Scene {
+  Chart c;
+  SizedLayout z;
+  Lines l;
+  std::vector<scav_path_box> boxes;
+  scav_profile p{};
+};
+
+Scene scene_of(uint64_t seed, uint32_t crowd) {
+  Scene out;
+  uint64_t state{ seed };
+  auto const pick = [&state](uint32_t n) { return next(state) % n; };
+  auto const upto = [&pick](int32_t n) {
+    return static_cast<int32_t>(pick(static_cast<uint32_t>(n)));
+  };
+  int32_t const cw{ 6000 - (2000 * static_cast<int32_t>(crowd)) };
+  int32_t const ch{ 4500 - (1500 * static_cast<int32_t>(crowd)) };
+  out.p.font_size_grid = 8 + upto(200);
+
+  Chart &c{ out.c };
+  SubmachineId const root{ build_chart(c, "scene", {}) };
+  std::vector<StateId> all;
+  std::vector<StateId> composites;
+  uint32_t const n_comp{ pick(4) };
+  for (uint32_t i = 0; i < n_comp; ++i) {
+    StateId const comp{
+      build_state(c, root, "C" + std::to_string(i), StateKind::Normal, {})
+    };
+    composites.push_back(comp);
+    all.push_back(comp);
+    uint32_t const regions{ 1 + pick(2) };
+    for (uint32_t m = 0; m < regions; ++m) {
+      SubmachineId const sub{ build_submachine(c, comp, "r" + std::to_string(m), {}) };
+      uint32_t const kids{ 1 + pick(4) };
+      for (uint32_t k = 0; k < kids; ++k) {
+        all.push_back(build_state(
+            c,
+            sub,
+            "K" + std::to_string(i) + "_" + std::to_string(m) + "_" + std::to_string(k),
+            StateKind::Normal,
+            {}));
+      }
+    }
+  }
+  uint32_t const n_plain{ 2 + pick(7) };
+  for (uint32_t i = 0; i < n_plain; ++i) {
+    all.push_back(build_state(c, root, "P" + std::to_string(i), StateKind::Normal, {}));
+  }
+  uint32_t const n_trans{ 3 + pick(6 + (8 * crowd)) };
+  for (uint32_t t = 0; t < n_trans; ++t) {
+    build_trans(c,
+                all[pick(static_cast<uint32_t>(all.size()))],
+                all[pick(static_cast<uint32_t>(all.size()))],
+                TransKind::External,
+                {});
+  }
+
+  out.z = blank(c, { .x = 0, .y = 0, .w = cw, .h = ch });
+  SizedLayout &z{ out.z };
+  auto const rect_in = [&](scav_rect const &in, int32_t max_w, int32_t max_h) {
+    int32_t const w{ imin(in.w, 40 + upto(max_w)) };
+    int32_t const h{ imin(in.h, 30 + upto(max_h)) };
+    return scav_rect{ .x = in.x + upto(imax(in.w - w, 0) + 1),
+                      .y = in.y + upto(imax(in.h - h, 0) + 1),
+                      .w = w,
+                      .h = h };
+  };
+  for (StateId const comp : composites) {
+    scav_rect const at{ rect_in(z.chart, 2500, 2000) };
+    z.state[comp.v] = at;
+    int32_t const band{ imin(at.h / 4, 20 + upto(200)) };
+    z.before[comp.v] = { .x = at.x + 10, .y = at.y + 10, .w = at.w - 20, .h = band };
+    z.after[comp.v] = { .x = at.x + 10,
+                        .y = (at.y + at.h) - 10 - band,
+                        .w = at.w - 20,
+                        .h = band };
+    Span const subs{ c.states[comp.v].submachines };
+    int32_t const inner_y{ at.y + 20 + band };
+    int32_t const inner_h{ imax(at.h - (2 * (band + 20)), 1) };
+    int32_t const each{ at.w / static_cast<int32_t>(subs.len) };
+    for (uint32_t m = 0; m < subs.len; ++m) {
+      SubmachineId const sub{ c.submachine_ids[subs.off + m] };
+      z.sub[sub.v] = { .x = at.x + (static_cast<int32_t>(m) * each),
+                       .y = inner_y,
+                       .w = each,
+                       .h = inner_h };
+    }
+  }
+  for (StateId const s : all) {
+    SubmachineId const parent{ c.states[s.v].parent };
+    if (parent.v == root.v) {
+      if (c.states[s.v].submachines.len == 0) {
+        z.state[s.v] = rect_in(z.chart, 500, 300);
+      }
+    } else {
+      z.state[s.v] = rect_in(z.sub[parent.v], 500, 300);
+    }
+  }
+  // A tombstoned state keeps its rect.
+  if (pick(5) == 0) { c.states[all[pick(static_cast<uint32_t>(all.size()))].v].live = 0; }
+
+  std::vector<std::vector<scav_point>> polys;
+  for (uint32_t t = 0; t < n_trans; ++t) {
+    std::vector<scav_point> poly;
+    uint32_t const shape{ pick(20) };
+    scav_rect const from{ z.state[c.transitions[t].src.v] };
+    scav_point at{ .x = from.x + upto(imax(from.w, 1)),
+                   .y = from.y + upto(imax(from.h, 1)) };
+    if (shape != 0) { poly.push_back(at); }
+    uint32_t const legs{ (shape <= 1) ? 0U : 1 + pick(5) };
+    bool across{ pick(2) == 0 };
+    for (uint32_t k = 0; k < legs; ++k) {
+      int32_t const run{ (upto(2) == 0 ? -1 : 1) *
+                         (40 + upto(1400 - (400 * static_cast<int32_t>(crowd)))) };
+      uint32_t const kind{ pick(12) };
+      if (kind == 0) {
+        at = { .x = at.x + run, .y = at.y + (run / 2) };  // diagonal
+      } else if (kind != 1) {  // 1 is degenerate: the point repeats
+        at = across ? scav_point{ .x = at.x + run, .y = at.y }
+                    : scav_point{ .x = at.x, .y = at.y + run };
+      }
+      across = !across;
+      poly.push_back(at);
+    }
+    polys.push_back(poly);
+  }
+  // A route past the transition table, which a box may still ride.
+  if (pick(4) == 0) {
+    polys.push_back({ { .x = 100, .y = ch / 2 }, { .x = cw - 100, .y = ch / 2 } });
+  }
+  out.l = lines_of(polys);
+
+  for (uint32_t t = 0; t < polys.size(); ++t) {
+    uint32_t const count{ pick(4) };
+    for (uint32_t j = 0; j < count; ++j) {
+      out.boxes.push_back({ .subject = t,
+                            .w = (pick(10) == 0) ? 0 : (30 + upto(900)),
+                            .h = (pick(12) == 0) ? 0 : (10 + upto(300)),
+                            .order = j });
+    }
+  }
+  // And a subject with no route at all.
+  if (pick(6) == 0) {
+    out.boxes.push_back(
+        { .subject = static_cast<uint32_t>(polys.size()), .w = 60, .h = 20, .order = 0 });
+  }
+  // Rows out of placement order.
+  for (uint32_t i = 1; i < out.boxes.size(); ++i) {
+    uint32_t const j{ pick(i + 1) };
+    scav_path_box const swap{ out.boxes[i] };
+    out.boxes[i] = out.boxes[j];
+    out.boxes[j] = swap;
+  }
+  return out;
+}
+
+// Every coordinate of a scene moved by one offset.
+Scene translated(Scene const &sc, int32_t dx, int32_t dy) {
+  Scene out{ sc };
+  auto const move = [dx, dy](scav_rect &r) {
+    r.x += dx;
+    r.y += dy;
+  };
+  for (scav_rect &r : out.z.state) { move(r); }
+  for (scav_rect &r : out.z.before) { move(r); }
+  for (scav_rect &r : out.z.after) { move(r); }
+  for (scav_rect &r : out.z.sub) { move(r); }
+  move(out.z.chart);
+  for (scav_point &pt : out.l.points) {
+    pt.x += dx;
+    pt.y += dy;
+  }
+  return out;
+}
+
+struct Placed {
+  std::vector<scav_rect> at;
+  uint32_t fell{ 0 };
+};
+
+Placed placed_by(Scene const &sc, LabelSearch search) {
+  Placed out;
+  out.fell = place_labels_by(sc.c,
+                             sc.z,
+                             boxes_of(sc.boxes),
+                             sc.l.route,
+                             sc.l.points,
+                             sc.p,
+                             search,
+                             out.at);
+  return out;
+}
+
+bool same(Placed const &a, Placed const &b) {
+  return (a.fell == b.fell) && same_rows(a.at, b.at);
+}
+
+// Whether a placed box overlaps a leg of another transition's route.
+bool over_foreign(Scene const &sc, Placed const &got) {
+  for (uint32_t i = 0; i < sc.boxes.size(); ++i) {
+    for (uint32_t t = 0; t < sc.l.route.size(); ++t) {
+      if (t == sc.boxes[i].subject) { continue; }
+      scav_span const r{ sc.l.route[t] };
+      for (uint32_t k = 0; (k + 1) < r.len; ++k) {
+        if (overlaps(got.at[i],
+                     span_rect(sc.l.points[r.off + k], sc.l.points[r.off + k + 1]))) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+constexpr uint32_t SEEDS{ 160 };
+constexpr uint32_t CROWDS{ 3 };
+
+}  // namespace
+
+TEST_CASE(
+    "label: the pruned and memoized searches place every box as the exhaustive one") {
+  // The memoized search runs twice, so the second answers from the table the first filled.
+  uint32_t fell{ 0 };
+  uint32_t refused{ 0 };
+  uint32_t boxes{ 0 };
+  for (uint32_t crowd = 0; crowd < CROWDS; ++crowd) {
+    for (uint32_t seed = 1; seed <= SEEDS; ++seed) {
+      CAPTURE(crowd);
+      CAPTURE(seed);
+      Scene const sc{ scene_of((uint64_t{ crowd } << 32U) | seed, crowd) };
+      Placed const want{ placed_by(sc, LabelSearch::Exhaustive) };
+      CHECK(same(placed_by(sc, LabelSearch::Pruned), want));
+      CHECK(same(placed_by(sc, LabelSearch::Memoized), want));
+      CHECK(same(placed_by(sc, LabelSearch::Memoized), want));
+      fell += want.fell;
+      refused += over_foreign(sc, want) ? 1U : 0U;
+      boxes += static_cast<uint32_t>(sc.boxes.size());
+    }
+  }
+  MESSAGE(boxes,
+          " boxes, ",
+          fell,
+          " fell back, ",
+          refused,
+          " scenes with a box over a foreign leg");
+  // The scenes reach both the centred fallback and the colliding tier.
+  CHECK(fell > 0);
+  CHECK(refused > 0);
+}
+
+TEST_CASE("label: the searches agree on boxes of no width and of no height") {
+  // A box of no extent can sit on the edge of the region the pruned search clips to.
+  std::vector<scav_point> const leg{ { .x = 100, .y = 150 }, { .x = 400, .y = 150 } };
+  scav_rect const wall{ .x = 180, .y = 40, .w = 80, .h = 220 };
+  for (scav_path_box const box :
+       { scav_path_box{ .subject = 0, .w = 0, .h = 20, .order = 0 },
+         scav_path_box{ .subject = 0, .w = 60, .h = 0, .order = 0 },
+         scav_path_box{ .subject = 0, .w = 0, .h = 0, .order = 0 } }) {
+    Chart c;
+    SubmachineId const root{ build_chart(c, "t", {}) };
+    StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+    StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+    StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
+    build_trans(c, a, b, TransKind::External, {});
+    SizedLayout z{ blank(c, CHART) };
+    z.state[x.v] = wall;
+    Lines const l{ lines_of({ leg }) };
+    std::vector<scav_path_box> const boxes{ box };
+    std::vector<scav_rect> want;
+    std::vector<scav_rect> got;
+    uint32_t const fell{ place_labels_by(c,
+                                         z,
+                                         boxes_of(boxes),
+                                         l.route,
+                                         l.points,
+                                         tiny(),
+                                         LabelSearch::Exhaustive,
+                                         want) };
+    for (LabelSearch const search : { LabelSearch::Pruned, LabelSearch::Memoized }) {
+      CHECK(
+          place_labels_by(c, z, boxes_of(boxes), l.route, l.points, tiny(), search, got) ==
+          fell);
+      CHECK(same_rows(got, want));
+    }
+  }
+}
+
+TEST_CASE(
+    "label: the searches agree where the step divides the leg and where it does not") {
+  // The last slide is clamped to the leg's far end, which a leg a whole number of steps
+  // long visits twice; a leg shorter than a step has only its two ends.
+  for (int32_t const length : { 300, 295, 7, 0 }) {
+    for (int32_t const offset : { -35, 0, 35 }) {
+      CAPTURE(length);
+      CAPTURE(offset);
+      std::vector<scav_point> const leg{ { .x = 100, .y = 150 },
+                                         { .x = 100 + length, .y = 150 } };
+      std::vector<scav_rect> const strangers{
+        { .x = 150 + offset, .y = 100, .w = 60, .h = 100 }
+      };
+      Chart c;
+      SubmachineId const root{ build_chart(c, "t", {}) };
+      StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+      StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+      StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
+      build_trans(c, a, b, TransKind::External, {});
+      SizedLayout z{ blank(c, CHART) };
+      z.state[x.v] = strangers[0];
+      Lines const l{ lines_of({ leg }) };
+      std::vector<scav_path_box> const boxes{
+        LABEL,
+        { .subject = 0, .w = 60, .h = 20, .order = 1 }
+      };
+      std::vector<scav_rect> want;
+      std::vector<scav_rect> got;
+      uint32_t const fell{ place_labels_by(c,
+                                           z,
+                                           boxes_of(boxes),
+                                           l.route,
+                                           l.points,
+                                           tiny(),
+                                           LabelSearch::Exhaustive,
+                                           want) };
+      CHECK(place_labels_by(c,
+                            z,
+                            boxes_of(boxes),
+                            l.route,
+                            l.points,
+                            tiny(),
+                            LabelSearch::Pruned,
+                            got) == fell);
+      CHECK(same_rows(got, want));
+    }
+  }
+}
+
+TEST_CASE("label memo: a remembered box is the box its inputs place") {
+  // Each variant changes one input the key must cover, after the memo placed the base; the
+  // last two change nothing a box sees except by moving with it.
+  constexpr uint32_t VARIANTS{ 11 };
+  std::array<uint32_t, VARIANTS> moved{};
+  for (uint32_t crowd = 0; crowd < CROWDS; ++crowd) {
+    for (uint32_t seed = 1; seed <= (SEEDS / 2); ++seed) {
+      CAPTURE(crowd);
+      CAPTURE(seed);
+      Scene const base{ scene_of((uint64_t{ crowd + 7 } << 32U) | seed, crowd) };
+      Placed const before{ placed_by(base, LabelSearch::Pruned) };
+      std::array<Scene, VARIANTS> variants{};
+      variants.fill(base);
+      for (scav_path_box &b : variants[0].boxes) { b.w += 37; }
+      for (scav_path_box &b : variants[1].boxes) { b.h += 23; }
+      variants[2].p.font_size_grid += 30;
+      // Each route's second point moved: its shape changes and its origin stays.
+      for (scav_span const r : variants[3].l.route) {
+        if (r.len >= 2) { variants[3].l.points[r.off + 1].y += 25; }
+      }
+      // The strangers moved: every state that holds no other.
+      for (uint32_t st = 0; st < base.c.states.size(); ++st) {
+        if (base.c.states[st].submachines.len == 0) {
+          variants[4].z.state[st].x += 31;
+          variants[4].z.state[st].y -= 17;
+        }
+      }
+      // The bands of every composite.
+      for (scav_rect &band : variants[5].z.before) {
+        band.y += 19;
+        band.h += 7;
+      }
+      // What holds a box: the composites and the chart, narrowed.
+      for (uint32_t st = 0; st < base.c.states.size(); ++st) {
+        if (base.c.states[st].submachines.len != 0) {
+          variants[6].z.state[st] = grow(base.z.state[st], -15);
+        }
+      }
+      variants[6].z.chart = grow(base.z.chart, -60);
+      // Other transitions' legs only: the routes no box rides.
+      std::vector<uint8_t> ridden(base.l.route.size(), 0);
+      for (scav_path_box const &b : base.boxes) {
+        if (b.subject < ridden.size()) { ridden[b.subject] = 1; }
+      }
+      for (uint32_t t = 0; t < base.l.route.size(); ++t) {
+        if (ridden[t] != 0) { continue; }
+        scav_span const r{ base.l.route[t] };
+        for (uint32_t k = 0; k < r.len; ++k) {
+          variants[7].l.points[r.off + k].x += 13;
+          variants[7].l.points[r.off + k].y += 29;
+        }
+      }
+      // A transition's first box resized, which moves the walls and slide its later boxes
+      // see.
+      for (scav_path_box &b : variants[8].boxes) {
+        if (b.order == 0) { b.w += 51; }
+      }
+      variants[9] = translated(base, 1234, -567);
+      // A composite reaching much further than any box can see.
+      for (uint32_t st = 0; st < base.c.states.size(); ++st) {
+        if (base.c.states[st].submachines.len != 0) { variants[10].z.state[st].w += 3000; }
+      }
+
+      (void)placed_by(base, LabelSearch::Memoized);
+      for (uint32_t k = 0; k < VARIANTS; ++k) {
+        CAPTURE(k);
+        Placed const want{ placed_by(variants[k], LabelSearch::Pruned) };
+        CHECK(same(placed_by(variants[k], LabelSearch::Memoized), want));
+        if (!same(want, before)) { ++moved[k]; }
+      }
+      CHECK(same(placed_by(base, LabelSearch::Memoized), before));
+      CHECK(same(before, placed_by(base, LabelSearch::Exhaustive)));
+    }
+  }
+  for (uint32_t k = 0; k < (VARIANTS - 2); ++k) {
+    CAPTURE(k);
+    CHECK(moved[k] > 0);
+  }
+}
+
+namespace {
+
+// `sc` with up to two routes translated or extended by a leg.
+Scene with_routes_moved(Scene const &sc, uint64_t seed) {
+  uint64_t state{ seed };
+  auto const pick = [&state](uint32_t n) { return next(state) % n; };
+  std::vector<std::vector<scav_point>> polys;
+  polys.reserve(sc.l.route.size());
+  for (scav_span const &r : sc.l.route) {
+    polys.emplace_back(sc.l.points.begin() + r.off, sc.l.points.begin() + r.off + r.len);
+  }
+  uint32_t const moves{ pick(3) };
+  for (uint32_t m = 0; (m < moves) && !polys.empty(); ++m) {
+    std::vector<scav_point> &poly{ polys[pick(static_cast<uint32_t>(polys.size()))] };
+    if (poly.empty()) { continue; }
+    if (pick(2) == 0) {
+      auto const dx{ static_cast<int32_t>(pick(600)) - 300 };
+      auto const dy{ static_cast<int32_t>(pick(600)) - 300 };
+      for (scav_point &pt : poly) {
+        pt.x += dx;
+        pt.y += dy;
+      }
+    } else {
+      scav_point const last{ poly.back() };
+      poly.push_back({ .x = last.x, .y = last.y + 200 + static_cast<int32_t>(pick(400)) });
+    }
+  }
+  Scene out{ sc };
+  out.l = lines_of(polys);
+  return out;
+}
+
+struct Settled {
+  std::vector<scav_rect> at;
+  std::vector<LabelSettle> how;
+  uint32_t fell{ 0 };
+};
+
+Settled settled_over(Scene const &sc, LabelBase const *was) {
+  Settled out;
+  out.fell = place_labels(sc.c,
+                          sc.z,
+                          boxes_of(sc.boxes),
+                          sc.l.route,
+                          sc.l.points,
+                          sc.p,
+                          out.at,
+                          out.how,
+                          was);
+  return out;
+}
+
+}  // namespace
+
+TEST_CASE("label: a placement kept from a base is the placement made afresh") {
+  // Both kinds of box occur: ones that stay where they were and ones a moved route sends
+  // elsewhere.
+  uint32_t stayed{ 0 };
+  uint32_t went{ 0 };
+  uint64_t const kept_before{ label_test_kept() };
+  for (uint32_t crowd = 0; crowd < CROWDS; ++crowd) {
+    for (uint32_t seed = 1; seed <= SEEDS; ++seed) {
+      CAPTURE(crowd);
+      CAPTURE(seed);
+      Scene const sc{ scene_of((uint64_t{ crowd } << 32U) | seed, crowd) };
+      Settled const before{ settled_over(sc, nullptr) };
+      LabelBase const base{ .route = &sc.l.route,
+                            .points = &sc.l.points,
+                            .placed = &before.at,
+                            .settled = &before.how };
+      Scene const after{ with_routes_moved(sc, (uint64_t{ seed } << 8U) | crowd) };
+      Settled const fresh{ settled_over(after, nullptr) };
+      Settled const kept{ settled_over(after, &base) };
+      CHECK(kept.fell == fresh.fell);
+      CHECK(same_rows(kept.at, fresh.at));
+      REQUIRE(kept.how.size() == fresh.how.size());
+      bool same_how{ true };
+      for (uint32_t i = 0; i < fresh.how.size(); ++i) {
+        same_how = same_how && (kept.how[i].found == fresh.how[i].found) &&
+                   (kept.how[i].seg == fresh.how[i].seg) &&
+                   (kept.how[i].mid == fresh.how[i].mid);
+      }
+      CHECK(same_how);
+      for (uint32_t i = 0; i < fresh.at.size(); ++i) {
+        bool const moved{ (fresh.at[i].x != before.at[i].x) ||
+                          (fresh.at[i].y != before.at[i].y) };
+        ++(moved ? went : stayed);
+      }
+    }
+  }
+  CHECK(stayed > 0);
+  CHECK(went > 0);
+  CHECK(label_test_kept() > kept_before);
 }

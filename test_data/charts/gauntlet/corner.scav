@@ -1,0 +1,16 @@
+// A route from Second out of Box onto Fault, which sits beside Box and off
+// Second's row: it leaves along its port's lead and turns once into Fault's cap.
+chart corner "a route leaving a composite turns one corner into its target" {
+  state Box {
+    state Inner { state First, state Second, trans * -> First, trans First -> Second },
+    state Other,
+    trans * -> Inner,
+    trans Inner -> Other,
+  },
+  state Fault,
+
+  trans * -> Box,
+  trans Box/Inner/First -> Fault,
+  trans Box/Inner/Second -> Fault,
+  trans Fault -> Box/Other,
+}

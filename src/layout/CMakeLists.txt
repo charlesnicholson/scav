@@ -45,6 +45,17 @@ scav_static_library(scavlayout
   cost.cpp
 )
 scav_install_library(scavlayout layout)
+# Off the search's hot path; the rest of layout stays at -O3.
+scav_optimize_for_size(scavlayout SOURCES
+  "../scav_thread_${scav_thread_backend_file}.cpp"
+  c_api.cpp
+  layout.cpp
+  profile.cpp
+  router.cpp
+  router_straight.cpp
+  spaces.cpp
+  trace.cpp
+)
 target_link_libraries(scavlayout PUBLIC scavcore)
 target_link_libraries(scavlayout_testable PUBLIC scavcore_testable)
 
@@ -77,6 +88,9 @@ if(SCAV_BUILD_TESTS)
     decompose_tests.cpp
     order_tests.cpp
     coords_tests.cpp
+    memo_tests.cpp
+    frame_memo_tests.cpp
+    search_memo_tests.cpp
     geom_tests.cpp
     pack_tests.cpp
     size_tests.cpp
@@ -90,6 +104,7 @@ if(SCAV_BUILD_TESTS)
     ../scav_rnd_tests.cpp
     ../scav_shard_tests.cpp
     ../scav_thread_tests.cpp
+    ../scav_vec_tests.cpp
   )
   target_link_libraries(scav_layout_tests PRIVATE scavlayout_testable)
   # A floor is asserted only where the number means anything: never under

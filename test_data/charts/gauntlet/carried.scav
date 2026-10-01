@@ -1,0 +1,18 @@
+// A composite whose chain folds, entered from a sibling at its third state: a cut before
+// that state carries the entering port into its piece, at the frame's leading edge.
+chart carried "a folded chain entered at its third state" {
+  state Left,
+  state Box {
+    state First,
+    state Second,
+    state Third,
+    state Fourth,
+    trans * -> First,
+    trans First -> Second,
+    trans Second -> Third,
+    trans Third -> Fourth,
+  },
+
+  trans * -> Left,
+  trans Left -> Box/Third,
+}

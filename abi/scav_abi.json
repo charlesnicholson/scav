@@ -1544,7 +1544,7 @@
               "size": 4
             },
             {
-              "name": "portfolio_k",
+              "name": "w_length",
               "type": {
                 "name": "int32_t",
                 "pointer": 0,
@@ -1554,7 +1554,7 @@
               "size": 4
             },
             {
-              "name": "portfolio_m",
+              "name": "w_transit_bends",
               "type": {
                 "name": "int32_t",
                 "pointer": 0,
@@ -1564,7 +1564,7 @@
               "size": 4
             },
             {
-              "name": "sweep_count",
+              "name": "w_whitespace",
               "type": {
                 "name": "int32_t",
                 "pointer": 0,
@@ -1574,7 +1574,7 @@
               "size": 4
             },
             {
-              "name": "congestion_iterations",
+              "name": "portfolio_k",
               "type": {
                 "name": "int32_t",
                 "pointer": 0,
@@ -1584,7 +1584,7 @@
               "size": 4
             },
             {
-              "name": "ripup_cap",
+              "name": "portfolio_m",
               "type": {
                 "name": "int32_t",
                 "pointer": 0,
@@ -1594,7 +1594,7 @@
               "size": 4
             },
             {
-              "name": "spacing_inflation_cap",
+              "name": "sweep_count",
               "type": {
                 "name": "int32_t",
                 "pointer": 0,
@@ -1604,7 +1604,7 @@
               "size": 4
             },
             {
-              "name": "spacing_inflation_increment",
+              "name": "congestion_iterations",
               "type": {
                 "name": "int32_t",
                 "pointer": 0,
@@ -1614,7 +1614,7 @@
               "size": 4
             },
             {
-              "name": "print_columns",
+              "name": "ripup_cap",
               "type": {
                 "name": "int32_t",
                 "pointer": 0,
@@ -1622,9 +1622,39 @@
               },
               "offset": 192,
               "size": 4
+            },
+            {
+              "name": "spacing_inflation_cap",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 196,
+              "size": 4
+            },
+            {
+              "name": "spacing_inflation_increment",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 200,
+              "size": 4
+            },
+            {
+              "name": "print_columns",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 204,
+              "size": 4
             }
           ],
-          "size": 196,
+          "size": 208,
           "align": 4,
           "padding": 0
         },
@@ -1687,7 +1717,7 @@
                 "const": false
               },
               "offset": 0,
-              "size": 196
+              "size": 208
             },
             {
               "name": "router",
@@ -1696,7 +1726,7 @@
                 "pointer": 0,
                 "const": false
               },
-              "offset": 196,
+              "offset": 208,
               "size": 4
             },
             {
@@ -1706,11 +1736,11 @@
                 "pointer": 0,
                 "const": false
               },
-              "offset": 200,
+              "offset": 212,
               "size": 4
             }
           ],
-          "size": 204,
+          "size": 216,
           "align": 4,
           "padding": 0
         }
@@ -3459,11 +3489,21 @@
             {
               "name": "embed_font",
               "type": {
-                "name": "int32_t",
+                "name": "scav_byte",
+                "pointer": 1,
+                "const": true
+              },
+              "offset": 0,
+              "size": 8
+            },
+            {
+              "name": "embed_font_len",
+              "type": {
+                "name": "uint32_t",
                 "pointer": 0,
                 "const": false
               },
-              "offset": 0,
+              "offset": 8,
               "size": 4
             },
             {
@@ -3473,12 +3513,12 @@
                 "pointer": 0,
                 "const": false
               },
-              "offset": 4,
+              "offset": 12,
               "size": 4
             }
           ],
-          "size": 8,
-          "align": 4,
+          "size": 16,
+          "align": 8,
           "padding": 0
         }
       ],

@@ -63,9 +63,10 @@ endforeach()
 
 scav_add_functional_test(install_consumer
   DEPENDS ${scav_installed_files}
+          "$<TARGET_FILE:scav>"
           "${CMAKE_CURRENT_SOURCE_DIR}/consumer/CMakeLists.txt"
           "${CMAKE_CURRENT_SOURCE_DIR}/consumer/main.cpp"
-  TARGETS ${scav_all_libraries} ${scav_all_test_exes}
+  TARGETS ${scav_all_libraries} ${scav_all_test_exes} scav
 )
 scav_add_functional_test(dump
   DEPENDS ${scav_corpus_charts}
@@ -101,6 +102,9 @@ scav_add_functional_test(layout
 scav_add_functional_test(render
   DEPENDS ${scav_corpus_charts}
           "${PROJECT_SOURCE_DIR}/tools/baseline.py"
+          "${PROJECT_SOURCE_DIR}/assets/font/JetBrainsMono-Regular.ttf"
+          "${PROJECT_SOURCE_DIR}/src/draw/gen_font_table.py"
+          "${PROJECT_SOURCE_DIR}/src/draw/bundled_font_table.h"
           "$<TARGET_FILE:scav>"
   TARGETS scav
 )
@@ -137,6 +141,12 @@ scav_add_functional_test(selftest
           "${PROJECT_SOURCE_DIR}/test_data/golden/layout/corpus_hashes.txt"
           "$<TARGET_FILE:scav>"
   TARGETS scav
+)
+# The decoder against Python's zlib at every level and strategy.
+scav_add_functional_test(inflate
+  DEPENDS "${PROJECT_SOURCE_DIR}/assets/font/JetBrainsMono-Regular.ttf"
+          "$<TARGET_FILE:scav_inflate_driver>"
+  TARGETS scav_inflate_driver
 )
 scav_add_functional_test(deps
   DEPENDS "${PROJECT_SOURCE_DIR}/test_data/charts/vac.scav"

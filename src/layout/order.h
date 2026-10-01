@@ -9,6 +9,7 @@
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -46,11 +47,17 @@ struct SubmachineOrders {
   // Parallel to submachines: 1 where the ranks run down (+y) rather than
   // across (+x), from the pins (11.10g).
   std::vector<uint8_t> sub_down;
+  // Parallel to submachines: 0 under the row's fold rule, else 1 + a fold pin's mode.
+  std::vector<uint8_t> sub_fold;
+  std::vector<uint32_t> sub_fold_cut;  // parallel to submachines: a fold pin's `layer`
 
   // The extra width each rank boundary must carry beyond `rank_sep`, one row
   // per boundary, so `len` is one less than the frame's rank count.
-  std::vector<Span> sub_gaps;  // parallel to submachines -> gaps
+  std::vector<Span> sub_gaps;  // parallel to submachines -> gaps, labels
   std::vector<int32_t> gaps;
+  // Parallel to `gaps`: the part of each a label charged, without the lanes. Sizing folds
+  // by `gaps` and places by `labels` and the lanes its alignment turns.
+  std::vector<int32_t> labels;
 
   std::vector<uint32_t> state_node;  // parallel to states -> nodes; INVALID if dead
   std::vector<uint32_t> seg_node;    // parallel to segments -> its boundary node
@@ -59,17 +66,18 @@ struct SubmachineOrders {
   // border. INVALID when it is an endpoint on an inner face, not a crossing (11.14).
   std::vector<uint32_t> seg_port;
 
-  // Parallel to segments: 1 where the segment lies on a cycle of its frame's
-  // graph as drawn, before any edge is turned around -- the edges a reversal
-  // can move (11.10f).
+  // Parallel to segments: 1 where the boundary node sits on the leading cross border, 2 on
+  // the trailing one, 0 on its rank's border. On a cross border it shares its mate's rank.
+  std::vector<uint8_t> seg_cross;
+  // Parallel to segments: 1 where a side pin chose the boundary node's border.
+  std::vector<uint8_t> seg_sided;
+
+  // Per segment, 1 where it lies on a cycle of its frame's graph before any turn.
   std::vector<uint8_t> seg_cyclic;
 };
 
-// Ranks by longest path, multi-rank edges chained through bends, then
-// `sweep_count` median sweeps keeping the fewest crossings. Reads no extent but
-// a path box's, so it runs before anything is sized. Submachines are sharded
-// across `threads` workers and emitted in submachine order, so the result is
-// one value at every worker count (6).
+// Ranks by longest path, long edges chained through bends, then `sweep_count` median
+// sweeps; sharded by submachine and merged in submachine order.
 
 // `SearchPins` is `scav_layout.h`'s. **A pin is a re-derivation, not an edit**:
 // ranks feed the boundary charges, the chaining of multi-rank edges, the
@@ -89,6 +97,19 @@ SubmachineOrders order_submachines(Chart const &c,
 // Crossings between two adjacent ranks by inversion counting. Exposed because
 // it is what the ordering minimizes and what a test measures against.
 uint64_t rank_crossings(std::vector<uint32_t> const &south_positions);
+
+// The lowest submachine holding both ends, and per end the state it holds directly:
+// INVALID for an end enclosing the other. `frame` is INVALID for two regions of one state.
+struct CommonAncestor {
+  SubmachineId frame{ INVALID };
+  std::array<StateId, 2> child{ StateId{ INVALID }, StateId{ INVALID } };
+};
+
+CommonAncestor lowest_common_ancestor(Chart const &c, StateId src, StateId dst);
+
+// The segment of `t` in its lowest common ancestor, which carries its label, or the middle
+// one where no submachine holds both ends; INVALID for no route.
+uint32_t label_segment(Chart const &c, SplitGraph const &g, uint32_t t);
 
 }  // namespace scav
 

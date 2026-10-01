@@ -1,0 +1,14 @@
+// A labelled edge across three rank boundaries, beside a wider label on the first:
+// its label fits in that boundary, and no other boundary it crosses grows for it.
+chart long "a long edge's label in a gap already wide enough" {
+  state Offered,
+  state Fetching,
+  state Checking,
+  state Done,
+
+  trans * -> Offered,
+  trans Offered -> Fetching "every chunk has been received",
+  trans Fetching -> Checking,
+  trans Checking -> Done,
+  trans Offered -> Done "timeout",
+}

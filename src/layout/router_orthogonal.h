@@ -32,14 +32,26 @@ struct OrthoGrid {
   }
 };
 
+// One search node's state, live only while `stamp` is the scratch's generation.
+struct OrthoNodeState {
+  uint32_t stamp;
+  uint32_t parent;
+  Wide best;
+};
+
+// One open-list entry, ordered by `f`, then `g`, then node.
+struct OrthoFrontierEntry {
+  Wide f;
+  Wide g;
+  uint32_t node;
+};
+
 // Reused across searches, so one allocates nothing once the grid settles.
 // Carrying it over must not change an answer, which is its own test.
 struct OrthoScratch {
-  std::vector<Wide> best;
-  std::vector<uint32_t> parent, stamp;
+  std::vector<OrthoNodeState> state;
   std::vector<uint32_t> path;
-  std::vector<Wide> heap_f, heap_g;
-  std::vector<uint32_t> heap_node;
+  std::vector<OrthoFrontierEntry> heap;
   uint32_t generation{ 0 };
 };
 
@@ -89,7 +101,7 @@ scav_point ortho_attach_box(scav_point toward,
                             int32_t corner);
 
 // `at` holds `2 * nets.size()` points below, src then dst per net, and only the
-// ends naming a box are read or written. The three run in this order.
+// ends naming a box are read or written. The four run in this order.
 
 // An inscribed glyph's face midpoint that would hold an arrival and a departure
 // together, moved a face apart. A disc or a diamond has four faces and one
@@ -103,36 +115,33 @@ void ortho_reface_attachments(std::vector<RouteNet> const &nets,
                               std::vector<scav_point> const &toward,
                               std::vector<scav_point> &at);
 
-// The two ends of one net, seated on one coordinate where that makes the net one
-// straight segment: each was the other box's *centre* projected onto its own
-// face, so two parallel faces a shared run apart still produce two coordinates
-// and a jog between them. Skipped where phase 1 asked for a corridor.
+// Seats both ends of a net on one coordinate where that makes it one straight
+// segment unless phase 1 asked for a corridor; a leaning net takes the run's lower end.
 void ortho_align_attachments(std::vector<RouteNet> const &nets,
                              std::vector<scav_rect> const &boxes,
                              std::vector<uint8_t> const &inscribed,
                              std::vector<int32_t> const &corner,
                              std::vector<scav_point> &at);
 
-// The attachments one face still lands on one point -- two states each other's
-// target project onto the same place -- pushed `clear` apart along that face and
-// clamped back onto it.
+// Attachments sharing a point on one face, pushed apart along it by `max(clear, pitch)`
+// where the face holds that and by `min(clear, len / 3)` where not. A port's leg stays
+// where it runs level to its aim, which `toward` holds as the reface above takes it.
 void ortho_spread_attachments(std::vector<RouteNet> const &nets,
                               std::vector<scav_rect> const &boxes,
                               std::vector<uint8_t> const &inscribed,
                               std::vector<int32_t> const &corner,
+                              std::vector<scav_point> const &toward,
                               int32_t clear,
+                              int32_t pitch,
                               std::vector<scav_point> &at);
 
-// Seats on *different* boxes whose legs run alongside closer than `pitch`,
-// pushed apart along their own faces. The pass above separates seats sharing
-// one face, and alignment straightens one net's own two ends; neither ever
-// compares a seat on one box with a seat on another, which is where 34 of the
-// corpus's 41 crowded pairs live (11.10a). Seats sharing a box and face are
-// left alone -- a fan-in's shared arrival is a trunk 11.5 keeps whole.
+// Seats on different boxes whose legs run alongside closer than `pitch`, pushed apart
+// along their faces; a fan sharing a box is left alone, and a port's leg stays.
 void ortho_separate_attachments(std::vector<RouteNet> const &nets,
                                 std::vector<scav_rect> const &boxes,
                                 std::vector<uint8_t> const &inscribed,
                                 std::vector<int32_t> const &corner,
+                                std::vector<scav_point> const &toward,
                                 int32_t clear,
                                 int32_t pitch,
                                 std::vector<scav_point> &at);
@@ -170,14 +179,24 @@ std::vector<scav_rect> ortho_enclosure_walls(scav_rect const &region,
                                              scav_rect const &enclosure,
                                              int32_t inset);
 
+// The same, written into `out` in place.
+void ortho_enclosure_walls(scav_rect const &region,
+                           scav_rect const &enclosure,
+                           int32_t inset,
+                           std::vector<scav_rect> &out);
+
 // A* over the plane-split graph. False when unreachable or past the expansion
 // budget. The key `(f, g, node)` is total, so equal-cost paths break the same.
+// A plane of 0 or 1 fixes the one the path leaves `from` or reaches `to` in, so
+// a turn onto or off an end's lead costs a bend; INVALID leaves that end free.
 bool ortho_search(OrthoGrid const &g,
                   uint32_t from,
                   uint32_t to,
                   Wide bend,
                   OrthoScratch &s,
-                  std::vector<uint32_t> &out);
+                  std::vector<uint32_t> &out,
+                  uint32_t from_plane = INVALID,
+                  uint32_t to_plane = INVALID);
 
 // A bend is worth one rank separation of length; the clearance is a third of
 // the node separation. Named here so a test states them rather than derives.

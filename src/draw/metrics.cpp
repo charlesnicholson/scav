@@ -1,18 +1,18 @@
-// Advance widths from `hmtx`, codepoints to glyphs through `cmap`, and the one
-// scaling formula. Advances never come from `glyf` or `CFF`, and no float is
-// involved anywhere.
+// Advance widths from `hmtx`, codepoints to glyphs through `cmap` or the bundled
+// font's generated table, and the one scaling formula. Advances never come from
+// `glyf` or `CFF`, and no float is involved anywhere.
 
 #include "scav/scav_draw.h"
 
-#include "scav_embed_bundled_ttf.h"
-
+#include "draw/bundled_font_table.h"
 #include "scav/scav_types.h"
 #include "scav_int.h"
 #include "scav_xxhash.h"
 
+#include <algorithm>
 #include <array>
+#include <cstddef>
 #include <cstdint>
-#include <vector>
 
 namespace scav {
 
@@ -217,12 +217,37 @@ bool decode_utf8(scav_byte const *s, uint32_t len, uint32_t &at, uint32_t &cp) {
   return true;
 }
 
+// The last run starting at or below `cp`, then the glyph at its offset.
+uint32_t bundled_glyph(uint32_t cp) {
+  auto const after{ static_cast<size_t>(std::ranges::upper_bound(BUNDLED_RUN_FIRST, cp) -
+                                        BUNDLED_RUN_FIRST.begin()) };
+  if (after == 0) { return 0U; }
+  size_t const i{ after - 1U };
+  uint32_t const offset{ cp - BUNDLED_RUN_FIRST[i] };
+  if (offset >= BUNDLED_RUN_COUNT[i]) { return 0U; }
+  return BUNDLED_GLYPHS[BUNDLED_RUN_INDEX[i] + offset];
+}
+
+// Step 0 is glyph 0, so the step found is never before the first.
+uint32_t bundled_advance(uint32_t row) {
+  auto const after{ static_cast<size_t>(std::ranges::upper_bound(BUNDLED_STEP_GLYPH, row) -
+                                        BUNDLED_STEP_GLYPH.begin()) };
+  return BUNDLED_STEP_ADVANCE[after - 1U];
+}
+
 }  // namespace
 
-scav_byte const *bundled_font(uint32_t &len) { return bundled_ttf_bytes(len); }
+uint32_t bundled_font_identity() { return BUNDLED_IDENTITY; }
 
 bool metrics_create(scav_byte const *ttf, uint32_t len, Metrics &out) {
-  if ((ttf == nullptr) || (len == 0U)) { ttf = bundled_font(len); }
+  if ((ttf == nullptr) || (len == 0U)) {
+    out = { .identity = BUNDLED_IDENTITY,
+            .units_per_em = BUNDLED_UNITS_PER_EM,
+            .num_glyphs = BUNDLED_NUM_GLYPHS,
+            .num_h_metrics = BUNDLED_NUM_H_METRICS,
+            .bundled = true };
+    return true;
+  }
   Reader const r{ .bytes = ttf, .len = len };
 
   Span head{};
@@ -255,6 +280,7 @@ bool metrics_create(scav_byte const *ttf, uint32_t len, Metrics &out) {
   CmapPick pick{};
   if (!pick_cmap(r, cmap, pick)) { return false; }
 
+  out = {};
   out.ttf.assign(ttf, ttf + len);
   out.identity = xxhash32(out.ttf.data(), out.ttf.size(), 0);
   out.units_per_em = upem;
@@ -267,6 +293,7 @@ bool metrics_create(scav_byte const *ttf, uint32_t len, Metrics &out) {
 }
 
 uint32_t metrics_glyph(Metrics const &m, uint32_t codepoint) {
+  if (m.bundled) { return bundled_glyph(codepoint); }
   Reader const r{ .bytes = m.ttf.data(), .len = static_cast<uint32_t>(m.ttf.size()) };
   uint32_t const glyph{ (m.cmap_format == 12U)
                             ? lookup_format12(r, m.cmap_sub.off, codepoint)
@@ -278,6 +305,7 @@ uint32_t metrics_advance(Metrics const &m, uint32_t glyph) {
   // The tail rule: past the last record, that record's advance applies to every
   // remaining glyph. Missing it breaks monospaced fonts specifically.
   uint32_t const row{ imin(glyph, m.num_h_metrics - 1U) };
+  if (m.bundled) { return bundled_advance(row); }
   Reader const r{ .bytes = m.ttf.data(), .len = static_cast<uint32_t>(m.ttf.size()) };
   uint32_t advance{ 0 };
   if (!read_u16(r, m.hmtx.off + (4U * row), advance)) { return 0U; }

@@ -1,6 +1,7 @@
 // The trace sink and its JSON serialization (11.16).
 
 #include "layout/trace.h"
+#include "scav_vec.h"
 
 #include <array>
 #include <cstring>
@@ -34,6 +35,9 @@ char const *kind_name(TraceKind k) {
     case TraceKind::PortAttached: return "port_attached";
     case TraceKind::ColumnCentred: return "column_centred";
     case TraceKind::PiecePacked: return "piece_packed";
+    case TraceKind::GapCharged: return "gap_charged";
+    case TraceKind::FoldPinned: return "fold_pinned";
+    case TraceKind::BoundaryCarried: return "boundary_carried";
     case TraceKind::None: break;
   }
   return "none";
@@ -66,7 +70,7 @@ char const *verdict_name(uint16_t v) {
 struct Json {
   std::vector<char> &out;
 
-  void raw(char const *s, size_t n) { out.insert(out.end(), s, s + n); }
+  void raw(char const *s, size_t n) { vec_insert(out, out.end(), s, s + n); }
   void raw(char const *s) { raw(s, strlen(s)); }
 
   void num(int64_t v) {
@@ -77,8 +81,8 @@ struct Json {
       buf[n++] = static_cast<char>('0' + (mag % 10U));
       mag /= 10U;
     } while (mag != 0U);
-    if (v < 0) { out.push_back('-'); }
-    while (n != 0) { out.push_back(buf[--n]); }
+    if (v < 0) { vec_push_back(out, '-'); }
+    while (n != 0) { vec_push_back(out, buf[--n]); }
   }
 
   void key(char const *k) {
@@ -198,15 +202,18 @@ void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out)
           j.kv("leg", e.score.leg);
         }
         if (e.score.row == INVALID) {
-          static constexpr std::array<char const *, 4> MOVE{ "rank",
-                                                             "cut",
-                                                             "reverse",
-                                                             "face" };
+          static constexpr std::array<char const *, 6> MOVE{ "rank", "cut",  "reverse",
+                                                             "face", "side", "fold" };
           j.ks("move", (e.score.move < MOVE.size()) ? MOVE[e.score.move] : "?");
           if (e.score.move == TRACE_MOVE_FACE) {
             j.ks("end", (e.score.end == 0) ? "src" : "dst");
             j.kv("face", e.score.face);
           }
+          if (e.score.move == TRACE_MOVE_SIDE) {
+            j.ks("end", (e.score.end == 0) ? "src" : "dst");
+            j.kv("side", e.score.face);
+          }
+          if (e.score.move == TRACE_MOVE_FOLD) { j.kv("layer", e.score.rank); }
         }
         j.kv("t0", e.score.t0);
         j.kv("t2", e.score.t2);
@@ -237,6 +244,7 @@ void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out)
         j.kv("seg", e.port.seg);
         j.kv("trans", e.port.trans);
         j.kv("leg", e.port.leg);
+        j.kv("side", e.port.side);
         break;
       case TraceKind::PortAttached:
         j.kstate(c, e.shift.state);
@@ -252,6 +260,26 @@ void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out)
         j.kxy("at", e.piece.x, e.piece.y);
         j.kxy("size", e.piece.w, e.piece.h);
         j.kv("carried", e.piece.carried);
+        break;
+      case TraceKind::GapCharged:
+        switch (static_cast<GapCause>(e.pass)) {
+          case GapCause::Label: j.ks("cause", "label"); break;
+          case GapCause::Lanes: j.ks("cause", "lanes"); break;
+          case GapCause::Held: j.ks("cause", "held"); break;
+        }
+        j.kv("boundary", e.gap.boundary);
+        j.kv("seg", e.gap.seg);
+        j.kv("width", e.gap.width);
+        break;
+      case TraceKind::FoldPinned: {
+        static constexpr std::array<char const *, 3> MODE{ "scale", "always", "never" };
+        j.ks("mode", (e.pass < MODE.size()) ? MODE[e.pass] : "?");
+        j.kv("layer", e.fold.rank);
+        break;
+      }
+      case TraceKind::BoundaryCarried:
+        j.kv("seg", e.carry.seg);
+        j.kv("rank", e.carry.rank);
         break;
       case TraceKind::None: break;
     }

@@ -9,6 +9,7 @@
 
 #include "scav_int.h"
 #include "scav_internal.h"
+#include "scav_vec.h"
 
 #include <cstdint>
 #include <vector>
@@ -55,6 +56,13 @@ struct Cursor {
 struct Extent {
   Wide w{ 0 }, h{ 0 };
 };
+
+// The spot list a packing works in, reassigned in place. Per-thread; packing calls
+// nothing that packs.
+std::vector<Spot> &spot_scratch() {
+  thread_local std::vector<Spot> s;
+  return s;
+}
 
 // Every distance here is non-negative, so one bound is the whole clamp.
 int32_t narrow(Wide v) { return static_cast<int32_t>(imin(v, Wide{ PACK_SATURATED })); }
@@ -157,7 +165,7 @@ void place(std::vector<scav_rect> const &rects,
            int32_t sep,
            Wide target,
            std::vector<Spot> &spot) {
-  spot.assign(rects.size(), Spot::Row);
+  vec_assign(spot, rects.size(), Spot::Row);
   Cursor at{ seeded(rects[0], sep) };
   for (uint32_t i = 1; i < rects.size(); ++i) {
     Wide const w{ rects[i].w };
@@ -331,7 +339,7 @@ Packing pack_rows(std::vector<scav_rect> const &rects,
   Packing out;
   out.at = rects;
   if (rects.empty()) { return out; }
-  std::vector<Spot> spot;
+  std::vector<Spot> &spot{ spot_scratch() };
   place(rects, sep, target_width(rects, sep, dar_num, dar_den), spot);
   if (compaction == Compaction::On) { compact(rects, sep, spot, out.at); }
   Extent const e{ lay(rects, spot, sep, out.at) };
@@ -359,7 +367,8 @@ Packing pack_box(std::vector<scav_rect> const &rects, int32_t sep) {
   if (rects.empty()) { return out; }
   // One row, one block, one subrow, which is the spot list of every rect
   // following its predecessor. Expansion then levels their heights.
-  std::vector<Spot> const spot(rects.size(), Spot::Right);
+  std::vector<Spot> &spot{ spot_scratch() };
+  vec_assign(spot, rects.size(), Spot::Right);
   Extent const e{ lay(rects, spot, sep, out.at) };
   out.w = narrow(e.w);
   out.h = narrow(e.h);

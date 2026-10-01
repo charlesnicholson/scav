@@ -23,8 +23,9 @@ extern "C" {
 /* NOLINTBEGIN(modernize-use-using, readability-identifier-naming) */
 
 typedef struct {
-  int32_t embed_font; /* 1 = base64 the bundled TTF into <defs>; [0, 1] */
-  int32_t margin;     /* grid units of clear space around the content */
+  scav_byte const *embed_font; /* a TTF to base64 into <defs>, or NULL */
+  uint32_t embed_font_len;     /* 0 when embed_font is NULL */
+  int32_t margin;              /* grid units of clear space around the content */
 } scav_svg_options;
 
 /* NOLINTEND(modernize-use-using, readability-identifier-naming) */
@@ -38,7 +39,8 @@ typedef struct {
  * takes the defaults -- `options_size` is checked either way. SCAV_E_DRAWLIST
  * covers every refusal -- an invalid list, a kind this backend does not render,
  * an unknown image id, a glyph the font lacks -- because each of them means the
- * DrawList and the backend disagree about what is drawable. */
+ * DrawList and the backend disagree about what is drawable. Font bytes to embed
+ * whose xxh32 is not the metrics' identity are SCAV_E_FONT. */
 scav_result scav_svg_write(scav_drawlist const *list,
                            scav_metrics const *metrics,
                            scav_images const *images,

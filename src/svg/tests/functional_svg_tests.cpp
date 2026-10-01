@@ -73,7 +73,7 @@ Rendered render(char const *name, Metrics const &m, scav_profile const &p) {
   drawlist_canonicalize(r.list);
 
   uint32_t bad{ 0 };
-  SvgOptions const svg{ .embed_font = false, .margin = p.pad };
+  SvgOptions const svg{ .margin = p.pad };
   REQUIRE_MESSAGE(svg_write(r.list, m, {}, svg, r.doc, bad) == SvgStatus::Ok, name);
   return r;
 }
@@ -205,12 +205,16 @@ TEST_CASE("svg corpus: an embedded font is the only thing --embed-font adds") {
   Metrics const m{ bundled() };
   Rendered const &r{ rendered("led.scav") };
 
+  std::vector<scav_byte> ttf;
+  REQUIRE(read_file(SCAV_TEST_DATA_DIR "/../assets/font/JetBrainsMono-Regular.ttf", ttf));
   std::string embedded;
   uint32_t bad{ 0 };
   REQUIRE(svg_write(r.list,
                     m,
                     {},
-                    { .embed_font = true, .margin = readable().pad },
+                    { .embed_font = ttf.data(),
+                      .embed_font_len = static_cast<uint32_t>(ttf.size()),
+                      .margin = readable().pad },
                     embedded,
                     bad) == SvgStatus::Ok);
   // The body is byte-identical; only the defs block differs. A reader diffing

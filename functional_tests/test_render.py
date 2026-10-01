@@ -6,6 +6,7 @@ The SVG's own bytes are pinned by a unit golden; what this checks is the parts
 only a real process can: the file lands where -o said, the document is one a
 parser accepts, and the harness runs and says what it could not compare."""
 
+import base64
 import os
 import re
 import subprocess
@@ -136,6 +137,32 @@ class TestRender(unittest.TestCase):
         # 268 KB of TTF, base64'd at four characters per three bytes.
         self.assertGreater(len(embedded) - len(bare), 350_000)
         ElementTree.fromstring(embedded)
+        found = re.search(r"base64,([A-Za-z0-9+/=]+)\)", embedded)
+        self.assertIsNotNone(found)
+        ttf = self.cfg.repo_root / "assets/font/JetBrainsMono-Regular.ttf"
+        self.assertEqual(ttf.read_bytes(), base64.b64decode(found.group(1)))
+
+    def test_embed_font_without_the_font_is_refused(self) -> None:
+        chart = self.cfg.repo_root / "test_data/charts/led.scav"
+        wrong = self.scratch / "not_the_font.ttf"
+        wrong.parent.mkdir(parents=True, exist_ok=True)
+        wrong.write_bytes(b"\x00\x01\x00\x00 not the bundled font")
+        for font, why in ((self.scratch / "absent.ttf", "cannot read the bundled font"),
+                          (wrong, "not the bundled font")):
+            with self.subTest(font=font.name):
+                result = subprocess.run(
+                    [str(self.exe), "render", "--embed-font", str(chart)],
+                    capture_output=True, text=True, cwd=self.cfg.repo_root,
+                    env={**os.environ, "SCAV_FONT": str(font)}, check=False)
+                self.assertEqual(2, result.returncode)
+                self.assertEqual("", result.stdout)
+                self.assertIn(why, result.stderr)
+
+    def test_the_bundled_font_table_regenerates_unchanged(self) -> None:
+        script = self.cfg.repo_root / "src/draw/gen_font_table.py"
+        result = subprocess.run([str(self.cfg.python), str(script), "--check"],
+                                capture_output=True, text=True, check=False)
+        self.assertEqual(0, result.returncode, result.stderr)
 
     def test_a_named_profile_changes_the_diagram(self) -> None:
         chart = self.cfg.repo_root / "test_data/charts/vac.scav"

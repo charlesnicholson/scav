@@ -1,0 +1,12 @@
+// A route into a state two composites down, through a port on each left border:
+// each port sits level with the one it continues through, one line to `Target`.
+chart through "a route through two nested borders" {
+  state Source,
+  state Outer {
+    state Inner { state Top, state Target, trans * -> Top, trans Top -> Target },
+    trans * -> Inner,
+  },
+
+  trans * -> Source,
+  trans Source -> Outer/Inner/Target "reach",
+}

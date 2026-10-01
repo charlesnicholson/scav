@@ -135,6 +135,25 @@ class TestAbiGolden(unittest.TestCase):
         # clang-cl takes the GNU branch on purpose; see is_msvc.
         self.assertFalse(abi_extract.is_msvc("clang-cl"))
 
+    def test_the_shared_library_exports_exactly_the_golden(self) -> None:
+        """The shared library's export table holds the golden's functions and
+        nothing else."""
+        import json
+        if os.name == "nt":
+            self.skipTest("the export table is read with nm")
+        abi = json.loads(ABI_JSON.read_text(encoding="utf-8"))
+        functions = {f["name"] for header in abi["headers"]
+                     for f in header["functions"]}
+        darwin = sys.platform == "darwin"
+        result = subprocess.run(
+            ["nm", *(["-gU"] if darwin else ["-D", "--defined-only"]),
+             str(shared_library())], capture_output=True, text=True, check=True)
+        exported = {line.split()[-1] for line in result.stdout.splitlines()
+                    if line.strip()}
+        if darwin:
+            exported = {name.removeprefix("_") for name in exported}
+        self.assertEqual(sorted(functions), sorted(exported))
+
     def test_the_generated_layer_is_the_one_the_golden_describes(self) -> None:
         """Generated, so it cannot drift -- which is only true if regenerating
         is a no-op."""
@@ -334,6 +353,17 @@ class TestGeneratedBindings(unittest.TestCase):
             drawlist = scav.DrawList.build(chart, metrics, spaces, placed)
             drawlist.canonicalize()
             self.assertEqual(cli.stdout, drawlist.svg(metrics, margin=prof.pad))
+
+            embedded = subprocess.run(
+                [str(cfg.build_dir / "bin" / name), "render", "--embed-font",
+                 str(chart_path)], capture_output=True, text=True, check=False)
+            self.assertEqual(0, embedded.returncode, embedded.stderr)
+            ttf = scav.bundled_font()
+            self.assertEqual(embedded.stdout,
+                             drawlist.svg(metrics, embed_font=ttf, margin=prof.pad))
+            with self.assertRaises(scav.ScavError) as refused:
+                drawlist.svg(metrics, embed_font=ttf[:-1], margin=prof.pad)
+            self.assertEqual(scav._abi.SCAV_E_FONT, refused.exception.code)
             drawlist.close()
         chart.close()
 

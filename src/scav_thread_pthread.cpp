@@ -159,6 +159,16 @@ void start_pool() {
 
 }  // namespace
 
+Mutex::Mutex() : impl(new pthread_mutex_t) {
+  pthread_mutex_init(static_cast<pthread_mutex_t *>(impl), nullptr);
+}
+Mutex::~Mutex() {
+  pthread_mutex_destroy(static_cast<pthread_mutex_t *>(impl));
+  delete static_cast<pthread_mutex_t *>(impl);
+}
+void Mutex::lock() { pthread_mutex_lock(static_cast<pthread_mutex_t *>(impl)); }
+void Mutex::unlock() { pthread_mutex_unlock(static_cast<pthread_mutex_t *>(impl)); }
+
 uint32_t thread_concurrency() {
   int64_t const online{ sysconf(_SC_NPROCESSORS_ONLN) };
   return (online > 1) ? static_cast<uint32_t>(online) : 1U;

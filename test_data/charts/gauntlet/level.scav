@@ -1,0 +1,9 @@
+// A route into a composite's second rank through a port on the border its ranks
+// start at: the port and the bend sit level with `Target`'s face, one straight line.
+chart level "a route through a rank border, level with the state it joins" {
+  state Source,
+  state Box { state First, state Target, trans * -> First, trans First -> Target },
+
+  trans * -> Source,
+  trans Source -> Box/Target "reach",
+}

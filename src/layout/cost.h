@@ -61,6 +61,28 @@ struct GridQuery {
   std::vector<uint32_t> hit;  // -> ChildGrid::child
 };
 
+// What scoring reads of the chart alone. Built once per chart; read concurrently by
+// every candidate scored against it.
+struct CostContext {
+  Ancestry an;
+  ChildGrid grid;  // no cell holds a child yet; a candidate fills a per-thread copy
+  // Per transition, src end then dst: the lowest common ancestor's child on that end's
+  // chain where it lies strictly above the end's enclosing state, else INVALID.
+  std::vector<std::array<uint32_t, 2>> transit_top;
+};
+
+CostContext cost_context(Chart const &c);
+
+// `ctx` is `cost_context(c)`.
+CostTerms cost_terms(CostContext const &ctx,
+                     Chart const &c,
+                     SplitGraph const &g,
+                     SizedLayout const &z,
+                     Routes const &r,
+                     scav_spaces const &s,
+                     scav_profile const &p);
+
+// The same with a context built for this one call.
 CostTerms cost_terms(Chart const &c,
                      SplitGraph const &g,
                      SizedLayout const &z,

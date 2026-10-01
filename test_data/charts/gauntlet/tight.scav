@@ -1,0 +1,18 @@
+// A composite whose chain can run loose or tight: priced, the search takes the
+// drawing with less of Box's interior left empty.
+chart tight "a composite drawn as tight as its children allow" {
+  state Box {
+    state First,
+    state Second,
+    state Third,
+    state Fourth,
+    trans * -> First,
+    trans First -> Second,
+    trans Second -> Third,
+    trans Third -> Fourth,
+  },
+  state Out,
+
+  trans * -> Box,
+  trans Box/Second -> Out,
+}

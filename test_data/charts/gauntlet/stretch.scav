@@ -1,0 +1,17 @@
+// A run long enough to fold. Moving one state a rank along squares the drawing
+// up and stretches one straight arrow across it, which only route length prices.
+chart stretch "six in a row" {
+  state A,
+  state B,
+  state C,
+  state D,
+  state E,
+  state F,
+
+  trans * -> A,
+  trans A -> B,
+  trans B -> C,
+  trans C -> D,
+  trans D -> E,
+  trans E -> F,
+}

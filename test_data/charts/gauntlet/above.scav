@@ -1,0 +1,16 @@
+// A composite whose frame runs across, entered from a state above a child: the
+// port sits on the border facing the source, one straight line down to the child.
+chart above "a composite entered from above" {
+  state Source,
+  state Box {
+    state Near,
+    state Middle,
+    state Far,
+    trans * -> Near,
+    trans Near -> Middle,
+    trans Middle -> Far,
+  },
+
+  trans * -> Source,
+  trans Source -> Box/Middle "drop",
+}

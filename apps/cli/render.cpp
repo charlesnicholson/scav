@@ -11,12 +11,57 @@
 #include "scav/scav_types.h"
 
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <string>
 #include <vector>
+
+#ifdef _WIN32
+#  include <windows.h>
+#elif defined(__APPLE__)
+#  include <mach-o/dyld.h>
+#else
+#  include <unistd.h>
+#endif
 
 namespace cli {
 
 namespace {
+
+// This process's executable, or empty.
+std::string executable_path() {
+  std::string path(4096, '\0');
+#ifdef _WIN32
+  DWORD const n{
+    GetModuleFileNameA(nullptr, path.data(), static_cast<DWORD>(path.size()))
+  };
+  path.resize((n < path.size()) ? n : 0U);
+#elif defined(__APPLE__)
+  auto size{ static_cast<uint32_t>(path.size()) };
+  bool const got{ _NSGetExecutablePath(path.data(), &size) == 0 };
+  path.resize(got ? std::strlen(path.c_str()) : 0U);
+#else
+  ssize_t const n{ readlink("/proc/self/exe", path.data(), path.size()) };
+  bool const got{ (n > 0) && (static_cast<size_t>(n) < path.size()) };
+  path.resize(got ? static_cast<size_t>(n) : 0U);
+#endif
+  return path;
+}
+
+// $SCAV_FONT alone when set; otherwise the installed copy relative to the
+// executable, then the source tree's for a build-tree run.
+bool read_bundled_font(std::vector<scav_byte> &out) {
+  if (char const *const forced{ std::getenv("SCAV_FONT") }; forced != nullptr) {
+    return read_file(forced, out);
+  }
+  std::string installed{ executable_path() };
+  if (size_t const slash{ installed.find_last_of("/\\") }; slash != std::string::npos) {
+    installed.resize(slash + 1U);
+    installed += SCAV_FONT_FROM_BIN;
+    if (read_file(installed.c_str(), out)) { return true; }
+  }
+  return read_file(SCAV_FONT_IN_SOURCE, out);
+}
 
 char const *why(SvgStatus status) {
   switch (status) {
@@ -28,6 +73,7 @@ char const *why(SvgStatus status) {
     case SvgStatus::UnknownImage: return "the drawlist names an unregistered image";
     case SvgStatus::MissingGlyph: return "the bundled font has no glyph for some text";
     case SvgStatus::ExtentOverflow: return "the diagram does not fit an integer viewBox";
+    case SvgStatus::FontMismatch: return "the font to embed is not the bundled font";
   }
   return "unknown";
 }
@@ -92,9 +138,16 @@ int run_render(char const *path,
   }
   drawlist_canonicalize(list);
 
+  std::vector<scav_byte> ttf;
+  if (embed_font && (!read_bundled_font(ttf) || ttf.empty())) {
+    write_error("cannot read the bundled font to embed", SCAV_FONT_FILE);
+    return EXIT_UNUSABLE;
+  }
   std::string doc;
   uint32_t bad{ 0 };
-  SvgOptions const svg{ .embed_font = embed_font, .margin = opts.profile.pad };
+  SvgOptions const svg{ .embed_font = embed_font ? ttf.data() : nullptr,
+                        .embed_font_len = static_cast<uint32_t>(ttf.size()),
+                        .margin = opts.profile.pad };
   SvgStatus const status{ svg_write(list, metrics, {}, svg, doc, bad) };
   if (status != SvgStatus::Ok) {
     write_error(why(status), path);

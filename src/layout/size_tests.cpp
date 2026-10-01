@@ -6,6 +6,7 @@
 #include "layout/decompose.h"
 #include "layout/label.h"
 #include "layout/order.h"
+#include "layout/router.h"
 #include "layout/trace.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
@@ -16,6 +17,7 @@
 
 #include <cstdint>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -686,9 +688,9 @@ TEST_CASE("size: an edge pointing back a rank still aligns its ends") {
   CHECK(z.state[b.v].y + z.state[b.v].h + p.node_sep <= z.state[d.v].y);
 }
 
-TEST_CASE("size: an initial pseudostate sits against its layer's trailing edge") {
-  // Left-aligned in a layer as wide as its widest member, the arrow out of it
-  // would run that whole width; beside its target it runs one rank gap.
+TEST_CASE("size: an initial pseudostate sits one rank gap before its target") {
+  // `W` shares `X`'s height, so the dot clears `W` by half a `node_sep` and the step to
+  // `X`'s layer grows to hold it.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const start{ build_state(c, root, {}, StateKind::Initial, {}) };
@@ -722,7 +724,9 @@ TEST_CASE("size: an initial pseudostate sits against its layer's trailing edge")
   scav_rect const &dot{ z.state[start.v] };
   scav_rect const &w{ z.state[wide.v] };
   CHECK(w.w > (10 * dot.w));  // the layer really is wide
-  CHECK(dot.x + dot.w == w.x + w.w);
+  CHECK(dot.y > z.state[x.v].y);
+  CHECK((dot.y + dot.h) < (z.state[x.v].y + z.state[x.v].h));
+  CHECK(dot.x == w.x + w.w + (p.node_sep / 2));
   CHECK(z.state[x.v].x - (dot.x + dot.w) == p.rank_sep);
 }
 
@@ -942,6 +946,161 @@ TEST_CASE("size: a boundary node lands on its frame's leading or trailing edge")
       diags));
   CHECK(in.node[0].x == 0);
   CHECK(in.state[a.v].x > 0);
+}
+
+TEST_CASE("size: a layer of boundary nodes keeps a route's clearance, not a rank gap") {
+  // Boundary nodes at ranks 0 and 3 carry one route through `A` and `B`.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  scav_profile const p{ unfolded() };
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(
+      c,
+      depths({ 0, 0 }),
+      one_frame(c,
+                root,
+                { { .kind = OrderKind::Boundary, .subject = 0, .rank = 0, .pos = 0 },
+                  state_node(a.v, 1, 0),
+                  state_node(b.v, 2, 0),
+                  { .kind = OrderKind::Boundary, .subject = 2, .rank = 3, .pos = 0 } },
+                { { .src = 0, .dst = 1, .segment = 0, .reversed = 0 },
+                  { .src = 1, .dst = 2, .segment = 1, .reversed = 0 },
+                  { .src = 2, .dst = 3, .segment = 2, .reversed = 0 } },
+                { 0, 0, 0 }),
+      {},
+      p,
+      z,
+      diags));
+  CHECK(z.node[0].x == 0);
+  CHECK(z.state[a.v].x == route_clearance(p));
+  CHECK(z.state[b.v].x == (z.state[a.v].x + z.state[a.v].w + p.rank_sep));
+  CHECK(z.sub[root.v].w == (z.state[b.v].x + z.state[b.v].w + route_clearance(p)));
+  CHECK(z.node[3].x == z.sub[root.v].w);
+}
+
+TEST_CASE("size: a boundary holds a lane for each edge that turns in it, and no other") {
+  // Two states meet the bar's long face straight and take no lane. Of three into one
+  // state, the middle runs straight and the two either side turn, holding two lanes.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  std::vector<StateId> ids;
+  ids.reserve(5);
+  for (uint32_t i = 0; i < 5; ++i) {
+    ids.push_back(build_state(c, root, "S", StateKind::Normal, {}));
+  }
+  StateId const bar{ build_state(c, root, "F", StateKind::Fork, {}) };
+  scav_profile const p{ unfolded() };
+  auto const x_of = [&](std::vector<OrderNode> const &nodes,
+                        std::vector<OrderEdge> const &edges,
+                        uint32_t st) {
+    SizedLayout z;
+    std::vector<Diagnostic> diags;
+    REQUIRE(size_layout(c,
+                        depths(std::vector<uint32_t>(6, 0)),
+                        one_frame(c, root, nodes, edges, { 0 }),
+                        {},
+                        p,
+                        z,
+                        diags));
+    return z.state[st].x - (z.state[ids[0].v].x + z.state[ids[0].v].w);
+  };
+  std::vector<OrderNode> const pair{ state_node(ids[0].v, 0, 0),
+                                     state_node(ids[1].v, 0, 1),
+                                     state_node(bar.v, 1, 0) };
+  CHECK(x_of(pair,
+             { { .src = 0, .dst = 2, .segment = 0, .reversed = 0 },
+               { .src = 1, .dst = 2, .segment = 1, .reversed = 0 } },
+             bar.v) == p.rank_sep);
+  std::vector<OrderNode> const fan{ state_node(ids[0].v, 0, 0),
+                                    state_node(ids[1].v, 0, 1),
+                                    state_node(ids[4].v, 0, 2),
+                                    state_node(ids[2].v, 1, 0) };
+  CHECK(x_of(fan,
+             { { .src = 0, .dst = 3, .segment = 0, .reversed = 0 },
+               { .src = 1, .dst = 3, .segment = 1, .reversed = 0 },
+               { .src = 2, .dst = 3, .segment = 2, .reversed = 0 } },
+             ids[2].v) == (p.rank_sep + (2 * label_line_height(p))));
+}
+
+TEST_CASE(
+    "size: a start state seated inside its target's column takes no room in its own") {
+  // `T` centres in its column beside the wide `W`, and its dot `rank_sep` before it lies
+  // in that column.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const start{ build_state(c, root, {}, StateKind::Initial, {}) };
+  StateId const t{ build_state(c, root, "T", StateKind::Normal, {}) };
+  StateId const w{ build_state(c, root, "W", StateKind::Normal, {}) };
+  scav_profile const p{ unfolded() };
+  for (int32_t const wide : { 3000, 0 }) {
+    CAPTURE(wide);
+    std::vector<scav_box_space> boxes(c.states.size(), scav_box_space{});
+    boxes[w.v].min_w = wide;
+    scav_spaces const s{ .box_state = boxes.data(),
+                         .n_box_state = static_cast<uint32_t>(boxes.size()),
+                         .box_state_stride = sizeof(scav_box_space) };
+    SizedLayout z;
+    std::vector<Diagnostic> diags;
+    REQUIRE(size_layout(
+        c,
+        depths({ 0, 0, 0 }),
+        one_frame(
+            c,
+            root,
+            { state_node(start.v, 0, 0), state_node(t.v, 1, 0), state_node(w.v, 1, 1) },
+            { { .src = 0, .dst = 1, .segment = 0, .reversed = 0 },
+              { .src = 1, .dst = 2, .segment = 1, .reversed = 0 } },
+            { 0 }),
+        s,
+        p,
+        z,
+        diags));
+    scav_rect const &dot{ z.state[start.v] };
+    scav_rect const &at{ z.state[t.v] };
+    CHECK(dot.y + (dot.h / 2) == at.y + (at.h / 2));
+    CHECK(at.x - (dot.x + dot.w) == p.rank_sep);
+    int32_t const column{ imin(at.x, z.state[w.v].x) };
+    CHECK(column == ((wide != 0) ? route_clearance(p) : (dot.w + p.rank_sep)));
+  }
+}
+
+TEST_CASE("size: a port on a cross border sits on the frame's edge over its neighbour") {
+  // `A -> B` across two ranks, and a port in `B`'s rank on the top or bottom border,
+  // joined to `B` by a flat edge.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  scav_profile const p{ unfolded() };
+  for (uint8_t const cross : { uint8_t{ 1 }, uint8_t{ 2 } }) {
+    CAPTURE(static_cast<uint32_t>(cross));
+    uint32_t const at{ (cross == 1) ? 1U : 2U };
+    std::vector<OrderNode> nodes{ state_node(a.v, 0, 0), state_node(b.v, 1, 0) };
+    nodes.insert(nodes.begin() + at,
+                 { .kind = OrderKind::Boundary, .subject = 1, .rank = 1, .pos = 0 });
+    nodes[2].pos = 1;
+    uint32_t const mate{ (cross == 1) ? 2U : 1U };
+    SubmachineOrders o{ one_frame(
+        c,
+        root,
+        nodes,
+        { { .src = 0, .dst = mate, .segment = 0, .reversed = 0 },
+          { .src = at, .dst = mate, .segment = 1, .reversed = 0 } },
+        { 0 }) };
+    o.seg_cross = { 0, cross };
+    SizedLayout z;
+    std::vector<Diagnostic> diags;
+    REQUIRE(size_layout(c, depths({ 0, 0 }), o, {}, p, z, diags));
+    scav_rect const box{ z.state[b.v] };
+    CHECK(z.node[at].x == (box.x + (box.w / 2)));
+    CHECK(z.node[at].y == ((cross == 1) ? 0 : z.sub[root.v].h));
+    CHECK(box.y == z.state[a.v].y);
+    CHECK(box.y == 0);
+    CHECK(z.sub[root.v].h == box.h);
+  }
 }
 
 TEST_CASE("size: a folded rank run packs its pieces rather than stacking them") {
@@ -1302,14 +1461,19 @@ TEST_CASE("size: a fold whose pieces will not pack is dropped for the flat run")
                       diags));
   CHECK(diags.empty());
 
-  // Four ranks end to end, each one rank_sep past the last, which is the flat
-  // run rather than any arrangement of pieces.
+  // Four ranks end to end, the flat run: each `rank_sep` past the last, plus two lanes
+  // where two tall states cannot both meet a short one straight.
   int32_t const tall_w{ p.kind_min_w[0] + (2 * p.pad) };
   int32_t const wide_w{ SPACE_MAX + (2 * p.pad) };
+  int32_t const two{ 2 * label_line_height(p) };
   CHECK(z.state[ids[0].v].x == 0);
-  CHECK(z.state[ids[2].v].x == (tall_w + p.rank_sep));
-  CHECK(z.state[ids[3].v].x == (z.state[ids[2].v].x + wide_w + p.rank_sep));
-  CHECK(z.state[ids[5].v].x == (z.state[ids[3].v].x + tall_w + p.rank_sep));
+  int32_t const at2{ z.state[ids[2].v].x - (tall_w + p.rank_sep) };
+  int32_t const at3{ z.state[ids[3].v].x - (z.state[ids[2].v].x + wide_w + p.rank_sep) };
+  int32_t const at5{ z.state[ids[5].v].x - (z.state[ids[3].v].x + tall_w + p.rank_sep) };
+  for (int32_t const lanes : { at2, at3, at5 }) {
+    CAPTURE(lanes);
+    CHECK(((lanes == 0) || (lanes == two)));
+  }
   CHECK(z.sub[root.v].w == (z.state[ids[5].v].x + wide_w));
   CHECK(z.sub[root.v].w <= COORD_MAX);
   CHECK(z.sub[root.v].h <= COORD_MAX);
@@ -1319,9 +1483,8 @@ TEST_CASE("size: a fold whose pieces will not pack is dropped for the flat run")
 }
 
 TEST_CASE("size: a row that leaves the domain does not displace the column that fits") {
-  // Two unconnected states, each half the domain wide and half of it tall. The
-  // column of the two fits; the row the box packer offers scales larger and
-  // does not, so it is no candidate and the frame is measured on the column.
+  // Two unconnected states, each half the domain wide and tall: the column fits and the
+  // packer's row does not, so the frame takes the column.
   scav_profile p{ profile() };
   p.pad = 130800;
   Chart c;
@@ -2037,4 +2200,135 @@ TEST_CASE("size: whitespace elimination grows a sibling submachine's own rect") 
   // Extent-neutral: the owner's box is the packing's own extents plus its ring.
   CHECK(z.state[owner.v].w == (1984 + (2 * p.pad)));
   CHECK(z.state[owner.v].h == (1728 + (2 * p.pad)));
+}
+
+namespace {
+
+// A corpus chart with a band on every state, a label box on every transition, and its
+// orders.
+struct Sample {
+  Chart c;
+  std::vector<scav_box_space> box;
+  std::vector<scav_path_box> path;
+  SplitGraph g;
+  SubmachineOrders o;
+  [[nodiscard]] scav_spaces spaces() const {
+    return { .box_state = box.data(),
+             .n_box_state = static_cast<uint32_t>(box.size()),
+             .box_state_stride = sizeof(scav_box_space),
+             .path_box = path.data(),
+             .n_path_box = static_cast<uint32_t>(path.size()),
+             .path_box_stride = sizeof(scav_path_box) };
+  }
+};
+
+Sample sample(char const *name, scav_profile const &p) {
+  Sample x;
+  std::string path{ SCAV_TEST_DATA_DIR "/charts/" };
+  path += name;
+  Loader loader;
+  std::vector<Diagnostic> diags;
+  std::string failed;
+  REQUIRE(load_file(path.c_str(), loader, x.c, diags, failed));
+  for (uint32_t i = 0; i < x.c.states.size(); ++i) {
+    x.box.push_back({ .min_w = 40 + static_cast<int32_t>((i % 5U) * 10U),
+                      .h_before = static_cast<int32_t>((i % 3U) * 8U),
+                      .h_after = static_cast<int32_t>((i % 2U) * 6U) });
+  }
+  for (uint32_t t = 0; t < x.c.transitions.size(); ++t) {
+    if (x.c.transitions[t].live == 0) { continue; }
+    x.path.push_back({ .subject = t,
+                       .w = 30 + static_cast<int32_t>((t % 4U) * 12U),
+                       .h = 12 + static_cast<int32_t>((t % 3U) * 4U),
+                       .order = 0 });
+  }
+  x.g = decompose(x.c);
+  x.o = order_submachines(x.c, x.g, x.spaces(), p, 1, {});
+  return x;
+}
+
+uint32_t largest_frame(Sample const &x) {
+  uint32_t most{ 0 };
+  for (Span const &s : x.o.sub_nodes) { most = (s.len > most) ? s.len : most; }
+  return most;
+}
+
+// A sizing and its trace. Traced, every frame is laid out rather than read from the memo.
+struct Traced {
+  SizedLayout z;
+  std::vector<char> trace;
+  bool ok{ false };
+};
+
+Traced traced(Sample const &x, scav_profile const &p, Fold fold) {
+  Traced out;
+  LayoutTrace t;
+  trace_sink_set(&t);
+  std::vector<Diagnostic> diags;
+  out.ok = size_layout(x.c,
+                       x.g,
+                       x.o,
+                       x.spaces(),
+                       p,
+                       out.z,
+                       diags,
+                       DarSource::OwnerHole,
+                       Compaction::On,
+                       fold);
+  trace_sink_set(nullptr);
+  trace_to_json(t, x.c, out.trace);
+  return out;
+}
+
+bool same(Traced const &a, Traced const &b) {
+  auto const rects = [](std::vector<scav_rect> const &u, std::vector<scav_rect> const &v) {
+    if (u.size() != v.size()) { return false; }
+    for (uint32_t i = 0; i < u.size(); ++i) {
+      if (!(u[i] == v[i])) { return false; }
+    }
+    return true;
+  };
+  if (a.z.node.size() != b.z.node.size()) { return false; }
+  for (uint32_t i = 0; i < a.z.node.size(); ++i) {
+    if ((a.z.node[i].x != b.z.node[i].x) || (a.z.node[i].y != b.z.node[i].y)) {
+      return false;
+    }
+  }
+  return (a.ok == b.ok) && rects(a.z.state, b.z.state) && rects(a.z.before, b.z.before) &&
+         rects(a.z.after, b.z.after) && rects(a.z.sub, b.z.sub) &&
+         (a.z.lean == b.z.lean) && (a.z.folded == b.z.folded) &&
+         (a.z.chart == b.z.chart) && (a.trace == b.trace);
+}
+
+}  // namespace
+
+// Each fresh result is the first sizing on a new thread.
+TEST_CASE("size: a sizing is the same whatever its thread sized before") {
+  scav_profile const p{ profile() };
+  Sample const small{ sample("led.scav", p) };
+  Sample const large{ sample("bottler.scav", p) };
+  REQUIRE(largest_frame(large) > largest_frame(small));
+  for (Fold const fold : { Fold::Scale, Fold::Always }) {
+    CAPTURE(static_cast<uint32_t>(fold));
+    auto const fresh = [&](Sample const &x) {
+      Traced out;
+      std::thread([&] { out = traced(x, p, fold); }).join();
+      return out;
+    };
+    Traced const small_fresh{ fresh(small) };
+    Traced const large_fresh{ fresh(large) };
+    REQUIRE(small_fresh.ok);
+    REQUIRE(large_fresh.ok);
+    Traced small_first;
+    Traced large_after;
+    Traced small_after;
+    std::thread([&] {
+      small_first = traced(small, p, fold);
+      large_after = traced(large, p, fold);
+      small_after = traced(small, p, fold);
+    }).join();
+    CHECK(same(small_first, small_fresh));
+    CHECK(same(large_after, large_fresh));
+    CHECK(same(small_after, small_fresh));
+  }
 }

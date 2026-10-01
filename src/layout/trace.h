@@ -6,6 +6,7 @@
 
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
+#include "scav_vec.h"
 
 #include <array>
 #include <cstdint>
@@ -34,7 +35,14 @@ enum class TraceKind : uint16_t {
   PortAttached,       // a segment meets a composite at its port, off its centre
   ColumnCentred,      // a state moved along its column onto a joined state's centre
   PiecePacked,        // where the packing put one piece of a component's rank run
+  GapCharged,         // phase 1 asked a rank boundary for width beyond rank_sep
+  FoldPinned,         // a fold pin decided a frame's fold; `pass` is its mode
+  BoundaryCarried,    // a fold cut took a boundary node into its neighbour's piece
 };
+
+// What a rank boundary's charge is for; `GapCharged.pass`. `Held` charges
+// nothing: it names the boundary whose charge already holds a label's width.
+enum class GapCause : uint16_t { Label, Lanes, Held };
 
 // What seating an initial or final pseudostate did; `PseudostateSeated.pass`.
 enum class SeatHow : uint16_t { Moved, Levelled, Declined };
@@ -65,14 +73,25 @@ struct TraceFold {
   uint32_t rank, refused;
   int32_t carried;
 };
+// `side` is the border the port was turned onto: 0 left, 1 right, 2 top, 3 bottom.
 struct TracePort {
-  uint32_t seg, trans, leg;
+  uint32_t seg, trans, leg, side;
 };
 // `rank` is the frame's rank the piece starts at, the rect is frame-local and
 // what the packing placed, and `carried` the label room on its leading edge.
+// `seg` is the boundary node's segment and `rank` the frame rank its piece starts at.
+struct TraceCarry {
+  uint32_t seg, rank;
+};
 struct TracePiece {
   uint32_t rank;
   int32_t x, y, w, h, carried;
+};
+// `boundary` is the frame's rank boundary, the one after rank `boundary`;
+// `seg` the segment whose edge asked for `width` there.
+struct TraceGap {
+  uint32_t boundary, seg;
+  int32_t width;
 };
 // `by` is the port's height from the state's centre for `PortAttached`, and
 // how far along its column the state moved for `ColumnCentred`, whose `seg` is
@@ -117,6 +136,8 @@ inline constexpr uint16_t TRACE_MOVE_RANK{ 0 };
 inline constexpr uint16_t TRACE_MOVE_CUT{ 1 };
 inline constexpr uint16_t TRACE_MOVE_REVERSE{ 2 };
 inline constexpr uint16_t TRACE_MOVE_FACE{ 3 };
+inline constexpr uint16_t TRACE_MOVE_SIDE{ 4 };  // `face` holds the side
+inline constexpr uint16_t TRACE_MOVE_FOLD{ 5 };  // `rank` holds the cut's layer
 // Basis points of the scored sum, in CostTerms order, so a rejected move says
 // which term rejected it without the event carrying nine 64-bit quantities.
 struct TraceTerms {
@@ -125,7 +146,7 @@ struct TraceTerms {
 
 struct TraceEvent {
   TraceKind kind{ TraceKind::None };
-  uint16_t pass{ 0 };         // SeatPass / MoveVerdict, else 0
+  uint16_t pass{ 0 };         // SeatPass / MoveVerdict / GapCause, else 0
   uint32_t frame{ INVALID };  // stamped by the sink unless the site names one
   union {
     TraceRank rank;
@@ -143,6 +164,8 @@ struct TraceEvent {
     TracePort port;
     TraceShift shift;
     TracePiece piece;
+    TraceGap gap;
+    TraceCarry carry;
   };
 };
 
@@ -163,7 +186,7 @@ inline void trace_emit(TraceEvent e) {
   LayoutTrace *const t{ trace_sink() };
   if (t == nullptr) { return; }
   if (e.frame == INVALID) { e.frame = t->frame; }  // an explicit frame wins
-  t->events.push_back(e);
+  vec_push_back(t->events, e);
 }
 
 // Scopes the frame stamp, so a phase that recurses restores its caller's.

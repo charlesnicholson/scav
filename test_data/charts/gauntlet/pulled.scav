@@ -1,0 +1,16 @@
+// An initial seated before a wide composite, ranked with the state before it.
+chart pulled "an initial seated before a wide composite" {
+  state A,
+  state B,
+  state T {
+    state First,
+    state Second,
+    state Third,
+    trans First -> Second,
+    trans Second -> Third,
+  },
+
+  trans A -> B,
+  trans B -> T,
+  trans * -> T,
+}

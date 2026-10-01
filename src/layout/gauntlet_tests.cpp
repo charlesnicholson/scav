@@ -10,6 +10,7 @@
 #include "layout/route.h"
 #include "layout/router.h"
 #include "layout/size.h"
+#include "layout/trace.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
@@ -17,9 +18,11 @@
 
 #include "doctest.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <ostream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -56,10 +59,14 @@ scav_profile compact() {
 
 // Every chart in test_data/charts/gauntlet, named so a failure says which shape
 // broke rather than which index did.
-constexpr std::array GAUNTLET{ "chain.scav",  "crowd.scav", "enclosing.scav",
-                               "fanin.scav",  "fork.scav",  "lane.scav",
-                               "loop.scav",   "marks.scav", "mutual.scav",
-                               "regions.scav" };
+constexpr std::array GAUNTLET{
+  "above.scav",     "carried.scav",   "chain.scav",   "corner.scav",  "crossing.scav",
+  "crowd.scav",     "enclosing.scav", "entered.scav", "fanin.scav",   "folded.scav",
+  "fork.scav",      "lane.scav",      "level.scav",   "long.scav",    "loop.scav",
+  "marks.scav",     "mutual.scav",    "ported.scav",  "pulled.scav",  "regions.scav",
+  "roundtrip.scav", "seated.scav",    "stretch.scav", "through.scav", "tight.scav",
+  "transit.scav",   "under.scav",     "unfolded.scav"
+};
 
 // One chart, laid out: the pieces every property below reads.
 struct Laid {
@@ -68,6 +75,7 @@ struct Laid {
   SubmachineOrders o;
   SizedLayout z;
   Routes r;
+  SearchPins pins;            // what the drawing rests on
   uint32_t tuple{ INVALID };  // the portfolio row the run kept
 };
 
@@ -105,13 +113,13 @@ void column_holds(Chart const &c, char const *name, std::vector<T> const &rows) 
   }
 }
 
-// What a reader gets: `layout_run` picks a phase-2 tuple out of the portfolio
-// and writes the geometry columns (11.10). The phases are then re-run for that
-// same row, because the nudge statistics and the per-transition fallback flag
-// have no column of their own, and every column they came with is held to the
-// one the run wrote -- so the properties below read the drawing that ships and
-// not a candidate nobody drew.
-void lay(char const *name, scav_profile const &p, Laid &out) {
+// `layout_run` on `name`, then the phases re-run for the row it kept; `s` and `seed` are
+// the run's space requests and starting pins.
+void lay(char const *name,
+         scav_profile const &p,
+         Laid &out,
+         scav_spaces const &s = {},
+         SearchPins const *seed = nullptr) {
   // The router these properties are about, by the name it crosses every other
   // boundary under rather than by its position in the registry.
   scav_router_id id{};
@@ -125,9 +133,9 @@ void lay(char const *name, scav_profile const &p, Laid &out) {
 
   std::vector<scav_placed> placed;
   scav_layout_opts const o{ .profile = p, .router = id, .threads = 0 };
-  SearchPins pins;
+  SearchPins &pins{ out.pins };
   REQUIRE(layout_run(out.c,
-                     {},
+                     s,
                      o,
                      placed,
                      diags,
@@ -135,7 +143,8 @@ void lay(char const *name, scav_profile const &p, Laid &out) {
                      &out.tuple,
                      INVALID,
                      nullptr,
-                     &pins));
+                     &pins,
+                     seed));
   // Nothing here is a shape the router has to give up on, so a RouteDegraded
   // is a failure rather than a documented fallback.
   CHECK(diags.empty());
@@ -149,13 +158,13 @@ void lay(char const *name, scav_profile const &p, Laid &out) {
   // The drawing is the tuple's *and* the pins' (11.10a), so re-deriving it
   // needs both or this measures a layout nobody was shown. The pins reach
   // phase 3 as well as phase 1: a face pin is the router's (11.10e).
-  out.o = order_submachines(out.c, out.g, {}, knobs, 0, pins);
-  REQUIRE(size_layout(out.c, out.g, out.o, {}, knobs, out.z, diags, dar, pack, fold));
+  out.o = order_submachines(out.c, out.g, s, knobs, 0, pins);
+  REQUIRE(size_layout(out.c, out.g, out.o, s, knobs, out.z, diags, dar, pack, fold));
   out.r = route_transitions(out.c,
                             out.g,
                             out.o,
                             out.z,
-                            {},
+                            s,
                             knobs,
                             *router_at(id),
                             0,
@@ -245,6 +254,13 @@ Wide run_shared(scav_point a, scav_point b, scav_point c, scav_point d) {
 // The two counts the regions carve-out is about: route segments entering a box
 // 11.14 does not carve out, and legs that fold a polyline back over itself.
 void shape_counts(Laid const &l, uint32_t &through, uint32_t &back);
+
+uint32_t state_named(Chart const &c, std::string_view name) {
+  for (uint32_t st = 0; st < c.states.size(); ++st) {
+    if (chart_string(c, c.states[st].name) == name) { return st; }
+  }
+  return INVALID;
+}
 
 // Live boxes, which is what a route may not enter and what its ends sit on.
 std::vector<uint32_t> live_of(Chart const &c) {
@@ -554,14 +570,43 @@ TEST_CASE("gauntlet: two states each other's target are two lines") {
   }
 }
 
+TEST_CASE("gauntlet: a transition and its return are two straight legs an em apart") {
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Laid l;
+    lay("roundtrip.scav", p, l);
+    uint32_t there{ INVALID };
+    uint32_t back{ INVALID };
+    for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+      Transition const &tr{ l.c.transitions[t] };
+      if (l.c.states[tr.src.v].name.len == 0) { continue; }
+      std::string_view const from{ chart_string(l.c, l.c.states[tr.src.v].name) };
+      std::string_view const to{ chart_string(l.c, l.c.states[tr.dst.v].name) };
+      if ((from == "Ready") && (to == "Busy")) { there = t; }
+      if ((from == "Busy") && (to == "Ready")) { back = t; }
+    }
+    REQUIRE(there != INVALID);
+    REQUIRE(back != INVALID);
+    scav_span const a{ l.r.route[there] };
+    scav_span const b{ l.r.route[back] };
+    REQUIRE(a.len == 2);
+    REQUIRE(b.len == 2);
+    scav_point const a0{ l.r.points[a.off] };
+    scav_point const a1{ l.r.points[a.off + 1] };
+    scav_point const b0{ l.r.points[b.off] };
+    scav_point const b1{ l.r.points[b.off + 1] };
+    bool const vertical{ a0.x == a1.x };
+    CHECK(vertical == (b0.x == b1.x));
+    Wide const gap{ vertical ? (Wide{ b0.x } - a0.x) : (Wide{ b0.y } - a0.y) };
+    Wide const apart{ (gap < 0) ? -gap : gap };
+    CAPTURE(apart);
+    CHECK(apart >= p.font_size_grid);
+    CHECK(cost_columns(l.c, l.g, p).crowding == 0);
+  }
+}
+
 TEST_CASE("gauntlet: a fan-in's arrivals are four arrows, none inside another") {
-  // The counterpart to the fork: several transitions into one state coincide
-  // near it by construction, and 11.5's bundles exist to stop nudging taking
-  // that trunk apart into four parallel lanes a gap each side. Whether they
-  // converge or arrive at seats of their own is the projection's business and
-  // measured on the corpus; what may not happen either way is one of them
-  // being drawn inside another, where a reader sees three arrows and four
-  // labels.
+  // Several transitions into one state converge near it; none may be drawn inside another.
   for (scav_profile const &p : { readable(), compact() }) {
     CAPTURE(p.profile_id);
     Laid l;
@@ -571,9 +616,7 @@ TEST_CASE("gauntlet: a fan-in's arrivals are four arrows, none inside another") 
       if (chart_string(l.c, l.c.states[st].name) == "Fault") { fault = st; }
     }
     REQUIRE(fault != INVALID);
-    // Two refusals before 11.9.5's reservation, one after, and none since
-    // 11.10a's placement move: what the fan was refusing was room, and a move
-    // is how a frame gets room rather than asks for it.
+    // The fan's lanes all find room.
     CHECK(l.r.nudged.refused == 0);
     std::vector<uint32_t> into;
     for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
@@ -659,10 +702,117 @@ TEST_CASE("gauntlet: an endpoint that is also a crossing is one point, not two")
   }
 }
 
+TEST_CASE(
+    "gauntlet: an out-of-machine label is drawn in the submachine holding both ends") {
+  // Only the root holds both ends, so the label's width is charged to the root's
+  // rank gap between the two composites and its box hangs off the leg there.
+  for (scav_profile const &p :
+       { readable(), compact(), one_row(readable()), one_row(compact()) }) {
+    CAPTURE(p.profile_id);
+    CAPTURE(p.portfolio_m);
+    Laid bare;
+    lay("crossing.scav", p, bare);
+    uint32_t t{ INVALID };
+    for (uint32_t k = 0; k < bare.c.transitions.size(); ++k) {
+      if (bare.c.transitions[k].label.len != 0) { t = k; }
+    }
+    REQUIRE(t != INVALID);
+    // Wider than `rank_sep` at either profile.
+    scav_path_box const box{ .subject = t, .w = 1511, .h = 269, .order = 0 };
+    scav_spaces const spaces{ .path_box = &box, .n_path_box = 1 };
+    Laid l;
+    lay("crossing.scav", p, l, spaces);
+    REQUIRE(l.r.placed.size() == 1);
+    CHECK(l.r.unplaced == 0);
+    scav_rect const at{ l.r.placed[0] };
+
+    Transition const &tr{ l.c.transitions[t] };
+    CommonAncestor const lca{ lowest_common_ancestor(l.c, tr.src, tr.dst) };
+    REQUIRE(lca.frame == l.c.root_submachine);
+    CHECK(contains(l.z.sub[lca.frame.v], at));
+    for (uint32_t const st : live_of(l.c)) {
+      CAPTURE(st);
+      CHECK_FALSE(overlaps(at, l.z.state[st]));
+    }
+    // A leg is the root's where its midpoint lies inside neither composite.
+    scav_span const route{ l.r.route[t] };
+    REQUIRE(route.len >= 2);
+    Wide held_gap{ -1 };
+    Wide inner_gap{ -1 };
+    for (uint32_t k = 0; (k + 1) < route.len; ++k) {
+      scav_point const a{ l.r.points[route.off + k] };
+      scav_point const b{ l.r.points[route.off + k + 1] };
+      scav_point const mid{ .x = a.x + floor_div(b.x - a.x, 2),
+                            .y = a.y + floor_div(b.y - a.y, 2) };
+      bool held{ true };
+      for (StateId const side : lca.child) {
+        if ((side.v != INVALID) && inside(mid, l.z.state[side.v])) { held = false; }
+      }
+      Wide const gap{ chebyshev_gap(at, span_rect(a, b)) };
+      Wide &into{ held ? held_gap : inner_gap };
+      into = (into < 0) ? gap : imin(into, gap);
+    }
+    REQUIRE(held_gap >= 0);
+    REQUIRE(inner_gap >= 0);  // the piece inside `Right`
+    CHECK(held_gap <= label_leader(p));
+    CHECK(held_gap < inner_gap);
+  }
+}
+
+TEST_CASE("gauntlet: a long edge's label widens no boundary another already widened") {
+  // Row 0 unsearched keeps the chain's own ranks, so only it is held to the gap
+  // widths; what ships is held to placing both labels clear.
+  for (scav_profile const &p :
+       { readable(), compact(), one_row(readable()), one_row(compact()) }) {
+    CAPTURE(p.profile_id);
+    CAPTURE(p.portfolio_m);
+    Laid bare;
+    lay("long.scav", p, bare);
+    std::array<uint32_t, 2> labelled{ INVALID, INVALID };
+    uint32_t found{ 0 };
+    for (uint32_t k = 0; (k < bare.c.transitions.size()) && (found < 2); ++k) {
+      if (bare.c.transitions[k].label.len != 0) { labelled[found++] = k; }
+    }
+    REQUIRE(found == 2);
+    int32_t const wide{ 3000 };
+    int32_t const along{ 1500 };
+    std::array<scav_path_box, 2> const boxes{
+      scav_path_box{ .subject = labelled[0], .w = wide, .h = 269, .order = 0 },
+      scav_path_box{ .subject = labelled[1], .w = along, .h = 269, .order = 0 },
+    };
+    scav_spaces const spaces{ .path_box = boxes.data(), .n_path_box = 2 };
+    Laid l;
+    lay("long.scav", p, l, spaces);
+    CHECK(l.r.unplaced == 0);
+    REQUIRE(l.r.placed.size() == 2);
+    for (scav_rect const &at : l.r.placed) {
+      for (uint32_t const st : live_of(l.c)) {
+        CAPTURE(st);
+        CHECK_FALSE(overlaps(at, l.z.state[st]));
+      }
+    }
+    CHECK_FALSE(overlaps(l.r.placed[0], l.r.placed[1]));
+    if (p.portfolio_m != 1) { continue; }
+
+    Transition const &first{ l.c.transitions[labelled[0]] };
+    Transition const &across{ l.c.transitions[labelled[1]] };
+    REQUIRE(first.src == across.src);
+    uint32_t const from{ l.o.nodes[l.o.state_node[across.src.v]].rank };
+    uint32_t const to{ l.o.nodes[l.o.state_node[across.dst.v]].rank };
+    REQUIRE(l.o.nodes[l.o.state_node[first.dst.v]].rank == (from + 1));
+    REQUIRE(to == (from + 3));
+    Span const gaps{ l.o.sub_gaps[l.c.root_submachine.v] };
+    REQUIRE(gaps.len >= to);
+    CHECK(l.o.gaps[gaps.off + from] >= wide);
+    for (uint32_t b = from + 1; b < to; ++b) {
+      CAPTURE(b);
+      CHECK(l.o.gaps[gaps.off + b] < along);
+    }
+  }
+}
+
 TEST_CASE("gauntlet: a chain of states turns only where the fold cuts it") {
-  // The trivial case nothing else here covers, and it is not as trivial as it
-  // looks: four boxes in a row fold into two rows because a strip four wide has
-  // the worse aspect, so two of the four edges step between rows.
+  // Four boxes in a row fold into two rows, so two of the edges step between rows.
   for (scav_profile const &p : { readable(), compact() }) {
     CAPTURE(p.profile_id);
     Laid l;
@@ -670,38 +820,646 @@ TEST_CASE("gauntlet: a chain of states turns only where the fold cuts it") {
     CHECK(l.r.nudged.moved == 0);
     for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
       CAPTURE(t);
-      // A four-state run folds rather than drawing a strip four boxes wide
-      // (11.4), so an edge the cut crosses steps between two rows and turns
-      // twice. Nothing here needs a third turn, and a lane is work invented.
+      // An edge across the cut turns twice at most.
       CHECK(l.r.route[t].len <= 4);
     }
   }
 }
 
+TEST_CASE("gauntlet: a folded frame's second piece starts under the state entering it") {
+  // `First -> Second` crosses the cut. Row 0 unsearched takes the scale
+  // measure's fold.
+  for (scav_profile const &p : { one_row(readable()), one_row(compact()) }) {
+    CAPTURE(p.profile_id);
+    Laid bare;
+    lay("folded.scav", p, bare);
+    uint32_t const first{ state_named(bare.c, "First") };
+    uint32_t const second{ state_named(bare.c, "Second") };
+    uint32_t const box{ state_named(bare.c, "Box") };
+    REQUIRE(first != INVALID);
+    REQUIRE(second != INVALID);
+    REQUIRE(box != INVALID);
+    uint32_t t{ INVALID };
+    for (uint32_t k = 0; k < bare.c.transitions.size(); ++k) {
+      if ((bare.c.transitions[k].src.v == first) &&
+          (bare.c.transitions[k].dst.v == second)) {
+        t = k;
+      }
+    }
+    REQUIRE(t != INVALID);
+    // A real-text title band on every state that draws one folds the run.
+    std::vector<scav_box_space> titles(bare.c.states.size(), scav_box_space{});
+    for (uint32_t st = 0; st < titles.size(); ++st) {
+      if (bare.c.states[st].kind == StateKind::Normal) {
+        titles[st] = { .min_w = 832, .h_before = 397, .h_after = 0 };
+      }
+    }
+    scav_path_box const label{ .subject = t, .w = 1856, .h = 269, .order = 0 };
+    scav_spaces const spaces{ .box_state = titles.data(),
+                              .n_box_state = static_cast<uint32_t>(titles.size()),
+                              .path_box = &label,
+                              .n_path_box = 1 };
+    Laid l;
+    lay("folded.scav", p, l, spaces);
+    scav_rect const &above{ l.z.state[first] };
+    scav_rect const &below{ l.z.state[second] };
+    REQUIRE(below.y >= (above.y + above.h));
+    CHECK(below.x == above.x);
+
+    // One straight leg down, one arc in from both leading corners.
+    scav_span const route{ l.r.route[t] };
+    REQUIRE(route.len == 2);
+    scav_point const from{ l.r.points[route.off] };
+    scav_point const to{ l.r.points[route.off + 1] };
+    CHECK(from.x == to.x);
+    int32_t const arc{ imax(imax(state_corner_radius(StateKind::Normal, above, p.pad),
+                                 state_corner_radius(StateKind::Normal, below, p.pad)),
+                            1) };
+    CHECK(from.x == (below.x + arc));
+
+    // The label sits in the room phase 2 reserved: on the leg's trailing side.
+    REQUIRE(l.r.placed.size() == 1);
+    CHECK(l.r.unplaced == 0);
+    scav_rect const at{ l.r.placed[0] };
+    CHECK(at.x >= from.x);
+    uint32_t const frame{ l.c.submachine_ids[l.c.states[box].submachines.off].v };
+    CHECK(contains(l.z.sub[frame], at));
+  }
+}
+
+TEST_CASE(
+    "gauntlet: a run the scale measure folds is laid straight where that is smaller") {
+  // Row 0 unsearched folds `watch`; at `readable` the search pins it unfolded, its states
+  // on one row. At `compact` it turns both regions down instead.
+  for (scav_profile const &p : { readable() }) {
+    CAPTURE(p.profile_id);
+    Laid bare;
+    lay("unfolded.scav", one_row(p), bare);
+    uint32_t const busy{ state_named(bare.c, "Busy") };
+    REQUIRE(busy != INVALID);
+    REQUIRE(bare.c.states[busy].submachines.len == 2);
+    uint32_t const watch{
+      bare.c.submachine_ids[bare.c.states[busy].submachines.off + 1].v
+    };
+    REQUIRE(bare.z.folded[watch] != 0);
+
+    Laid l;
+    lay("unfolded.scav", p, l);
+    CHECK(l.z.folded[watch] == 0);
+    CHECK(std::ranges::any_of(l.pins.folds, [watch](FoldPin const &f) {
+      return (f.frame.v == watch) && (f.mode == FOLD_NEVER);
+    }));
+    int32_t const row{ l.z.state[state_named(l.c, "Fine")].y };
+    for (char const *name : { "Late", "Lost" }) {
+      CAPTURE(name);
+      CHECK(l.z.state[state_named(l.c, name)].y == row);
+    }
+    CHECK((Wide{ l.z.chart.w } * l.z.chart.h) < (Wide{ bare.z.chart.w } * bare.z.chart.h));
+  }
+}
+
+TEST_CASE("gauntlet: a port level with a child keeps its seat, and the initial's moves") {
+  // Row 0 unsearched seats the port and the initial's dot level with `First`,
+  // both projecting onto one point of its leading face.
+  for (scav_profile const &p : { one_row(readable()), one_row(compact()) }) {
+    CAPTURE(p.profile_id);
+    Laid l;
+    lay("ported.scav", p, l);
+    uint32_t const first{ state_named(l.c, "First") };
+    uint32_t const above{ state_named(l.c, "Above") };
+    REQUIRE(first != INVALID);
+    REQUIRE(above != INVALID);
+    uint32_t dot{ INVALID };
+    uint32_t ported{ INVALID };
+    std::vector<uint32_t> into;
+    for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+      Transition const &tr{ l.c.transitions[t] };
+      if (tr.dst.v != first) { continue; }
+      into.push_back(t);
+      if (l.c.states[tr.src.v].kind == StateKind::Initial) { dot = t; }
+      if (tr.src.v == above) { ported = t; }
+    }
+    REQUIRE(into.size() == 3);
+    REQUIRE(dot != INVALID);
+    REQUIRE(ported != INVALID);
+    auto const last = [&](uint32_t t) {
+      scav_span const route{ l.r.route[t] };
+      REQUIRE(route.len >= 2);
+      return l.r.points[route.off + route.len - 1];
+    };
+    REQUIRE(l.r.port[ported].len == 1);
+    scav_port_slot const &slot{ l.r.slots[l.r.port[ported].off] };
+    CHECK(last(ported).y == slot.y);
+    for (uint32_t const t : into) {
+      if (t == ported) { continue; }
+      CAPTURE(t);
+      CHECK_FALSE(same(last(t), last(ported)));
+    }
+  }
+}
+
+TEST_CASE(
+    "gauntlet: a composite is entered by one straight line from where it is entered") {
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Laid l;
+    lay("above.scav", p, l);
+    uint32_t const source{ state_named(l.c, "Source") };
+    uint32_t const middle{ state_named(l.c, "Middle") };
+    REQUIRE(source != INVALID);
+    REQUIRE(middle != INVALID);
+    uint32_t drop{ INVALID };
+    for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+      if (l.c.transitions[t].src.v == source) { drop = t; }
+    }
+    REQUIRE(drop != INVALID);
+    scav_span const route{ l.r.route[drop] };
+    REQUIRE(route.len >= 2);
+    scav_point const first{ l.r.points[route.off] };
+    scav_point const last{ l.r.points[route.off + route.len - 1] };
+    bool const vertical{ first.x == last.x };
+    for (uint32_t k = 0; k < route.len; ++k) {
+      scav_point const at{ l.r.points[route.off + k] };
+      CAPTURE(k);
+      CHECK((vertical ? (at.x == first.x) : (at.y == first.y)));
+    }
+    CHECK(on_border(first, l.z.state[source]));
+    CHECK(on_border(last, l.z.state[middle]));
+  }
+}
+
+TEST_CASE(
+    "gauntlet: entered from directly above, a composite running across is entered on "
+    "top") {
+  // The root turned to run down puts `Source` over `Box`, whose own frame runs
+  // across. Unsearched, so the facing pass alone puts the port on the top border.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    SearchPins const seed{ .orients = { { .frame = SubmachineId{ 0 } } } };
+    Laid l;
+    lay("above.scav", one_row(p), l, {}, &seed);
+    uint32_t const source{ state_named(l.c, "Source") };
+    uint32_t const middle{ state_named(l.c, "Middle") };
+    REQUIRE(source != INVALID);
+    REQUIRE(middle != INVALID);
+    REQUIRE(l.o.sub_down[0] == 1);
+    REQUIRE(l.o.sub_down[l.c.states[middle].parent.v] == 0);
+    uint32_t drop{ INVALID };
+    for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+      if (l.c.transitions[t].src.v == source) { drop = t; }
+    }
+    REQUIRE(drop != INVALID);
+    REQUIRE(l.pins.sides.size() == 1);
+    CHECK(l.pins.sides[0].trans.v == drop);
+    CHECK(l.pins.sides[0].leg == 1);
+    CHECK(l.pins.sides[0].end == 0);
+    CHECK(l.pins.sides[0].side == 2);
+    REQUIRE(l.r.port[drop].len == 1);
+    CHECK(l.r.slots[l.r.port[drop].off].side == 2);
+
+    scav_span const route{ l.r.route[drop] };
+    REQUIRE(route.len >= 2);
+    scav_rect const from{ l.z.state[source] };
+    scav_rect const to{ l.z.state[middle] };
+    scav_point const first{ l.r.points[route.off] };
+    scav_point const last{ l.r.points[route.off + route.len - 1] };
+    CHECK(first.y == (from.y + from.h));
+    CHECK(last.y == to.y);
+    for (uint32_t k = 0; k < route.len; ++k) {
+      CAPTURE(k);
+      CHECK(l.r.points[route.off + k].x == first.x);
+    }
+  }
+}
+
+TEST_CASE("gauntlet: a route through two nested borders crosses both at one height") {
+  // Both frames run down and both ports sit on a left border, a cross border
+  // whose port is placed along its frame's ranks. Unsearched.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Laid bare;
+    lay("through.scav", one_row(p), bare);
+    uint32_t const source{ state_named(bare.c, "Source") };
+    uint32_t const outer{ state_named(bare.c, "Outer") };
+    uint32_t const inner{ state_named(bare.c, "Inner") };
+    uint32_t const target{ state_named(bare.c, "Target") };
+    REQUIRE(source != INVALID);
+    REQUIRE(outer != INVALID);
+    REQUIRE(inner != INVALID);
+    REQUIRE(target != INVALID);
+    uint32_t reach{ INVALID };
+    for (uint32_t t = 0; t < bare.c.transitions.size(); ++t) {
+      if (bare.c.transitions[t].src.v == source) { reach = t; }
+    }
+    REQUIRE(reach != INVALID);
+    auto const frame_of = [&](uint32_t st) {
+      return bare.c.submachine_ids[bare.c.states[st].submachines.off];
+    };
+    SearchPins const seed{
+      .orients = { { .frame = frame_of(outer) }, { .frame = frame_of(inner) } },
+      .sides = { { .trans = TransId{ reach }, .leg = 1, .end = 0, .side = 0 },
+                 { .trans = TransId{ reach }, .leg = 2, .end = 0, .side = 0 } }
+    };
+    Laid l;
+    lay("through.scav", one_row(p), l, {}, &seed);
+    REQUIRE(l.o.sub_down[frame_of(outer).v] == 1);
+    REQUIRE(l.o.sub_down[frame_of(inner).v] == 1);
+    REQUIRE(l.r.port[reach].len == 2);
+    for (uint32_t k = 0; k < 2; ++k) {
+      CAPTURE(k);
+      CHECK(l.r.slots[l.r.port[reach].off + k].side == 0);
+    }
+    scav_rect const in{ l.z.state[inner] };
+    scav_rect const to{ l.z.state[target] };
+    REQUIRE((to.y + (to.h / 2)) != (in.y + (in.h / 2)));
+
+    scav_span const route{ l.r.route[reach] };
+    REQUIRE(route.len >= 2);
+    scav_point const first{ l.r.points[route.off] };
+    scav_point const last{ l.r.points[route.off + route.len - 1] };
+    for (uint32_t k = 0; k < route.len; ++k) {
+      CAPTURE(k);
+      CHECK(l.r.points[route.off + k].y == first.y);
+    }
+    CHECK(on_border(first, l.z.state[source]));
+    CHECK(on_border(last, to));
+  }
+}
+
+namespace {
+
+// `carried.scav`'s entering route unchained, and `Box`'s run cut before `Third` alone.
+SearchPins carried_pins(Laid const &bare, uint32_t &enter) {
+  uint32_t const left{ state_named(bare.c, "Left") };
+  uint32_t const third{ state_named(bare.c, "Third") };
+  REQUIRE(left != INVALID);
+  REQUIRE(third != INVALID);
+  enter = INVALID;
+  for (uint32_t t = 0; t < bare.c.transitions.size(); ++t) {
+    if ((bare.c.transitions[t].src.v == left) && (bare.c.transitions[t].dst.v == third)) {
+      enter = t;
+    }
+  }
+  REQUIRE(enter != INVALID);
+  SearchPins pins{ .cuts = { { .trans = TransId{ enter }, .leg = 1 } } };
+  SubmachineOrders const o{ order_submachines(bare.c, bare.g, {}, readable(), 0, pins) };
+  uint32_t const frame{ bare.c.states[third].parent.v };
+  pins.folds.push_back({ .frame = SubmachineId{ frame },
+                         .mode = FOLD_ALWAYS,
+                         .layer = o.nodes[o.state_node[third]].rank });
+  return pins;
+}
+
+}  // namespace
+
+TEST_CASE("gauntlet: a pinned cut before an entered state takes the port into its piece") {
+  for (scav_profile const &p : { one_row(readable()), one_row(compact()) }) {
+    CAPTURE(p.profile_id);
+    Laid bare;
+    lay("carried.scav", p, bare);
+    uint32_t enter{ INVALID };
+    SearchPins const pins{ carried_pins(bare, enter) };
+    Laid l;
+    lay("carried.scav", p, l, {}, &pins);
+    uint32_t const first{ state_named(l.c, "First") };
+    uint32_t const third{ state_named(l.c, "Third") };
+    uint32_t const left{ state_named(l.c, "Left") };
+    uint32_t const frame{ l.c.states[third].parent.v };
+    REQUIRE(l.z.folded[frame] != 0);
+    scav_rect const &top{ l.z.state[first] };
+    scav_rect const &target{ l.z.state[third] };
+    CHECK(target.y >= (top.y + top.h));  // in the second piece
+    CHECK(target.x <= top.x);            // no further in than the frame's first state
+
+    // Straight, and no longer than the gap between the two states plus a rank gap.
+    scav_span const route{ l.r.route[enter] };
+    REQUIRE(route.len >= 2);
+    Wide len{ 0 };
+    for (uint32_t k = 1; k < route.len; ++k) {
+      scav_point const a{ l.r.points[route.off + k - 1] };
+      scav_point const b{ l.r.points[route.off + k] };
+      CHECK(a.y == b.y);
+      len += imax(Wide{ b.x } - a.x, Wide{ a.x } - b.x) +
+             imax(Wide{ b.y } - a.y, Wide{ a.y } - b.y);
+    }
+    scav_rect const &source{ l.z.state[left] };
+    CHECK(len <= ((Wide{ target.x } - (source.x + source.w)) + p.rank_sep));
+  }
+}
+
+TEST_CASE("gauntlet: a cut before a boundary-fed state is taken, and carries the port") {
+  Laid bare;
+  lay("carried.scav", one_row(readable()), bare);
+  uint32_t enter{ INVALID };
+  SearchPins const pins{ carried_pins(bare, enter) };
+  uint32_t const layer{ pins.folds[0].layer };
+  scav_layout_opts o{ .profile = one_row(readable()), .router = 0, .threads = 1 };
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  LayoutTrace t;
+  trace_sink_set(&t);
+  bool const ran{
+    layout_run(bare.c, {}, o, placed, diags, nullptr, nullptr, 0, nullptr, nullptr, &pins)
+  };
+  trace_sink_set(nullptr);
+  REQUIRE(ran);
+  uint32_t taken{ 0 };
+  uint32_t refused{ 0 };
+  uint32_t carried{ 0 };
+  for (TraceEvent const &e : t.events) {
+    if (e.frame != pins.folds[0].frame.v) { continue; }
+    if (e.kind == TraceKind::FoldCut) { ++((e.fold.refused != 0) ? refused : taken); }
+    if ((e.kind == TraceKind::BoundaryCarried) && (e.carry.rank == layer)) { ++carried; }
+  }
+  CHECK(taken == 1);
+  CHECK(refused == 0);
+  CHECK(carried == 1);
+}
+
+TEST_CASE("gauntlet: a composite entered straight holds its first state a clearance in") {
+  // The port is a point on `Box`'s border rather than a column of its own, and
+  // the route turns nowhere, so `First` sits at most a route clearance inside.
+  for (scav_profile const &p :
+       { readable(), compact(), one_row(readable()), one_row(compact()) }) {
+    CAPTURE(p.profile_id);
+    CAPTURE(p.portfolio_m);
+    Laid l;
+    lay("entered.scav", p, l);
+    uint32_t const outside{ state_named(l.c, "Outside") };
+    uint32_t const box{ state_named(l.c, "Box") };
+    uint32_t const first{ state_named(l.c, "First") };
+    REQUIRE(outside != INVALID);
+    REQUIRE(box != INVALID);
+    REQUIRE(first != INVALID);
+    scav_rect const outer{ l.z.state[box] };
+    scav_rect const band{ l.z.before[box] };
+    scav_rect const in{ l.z.state[first] };
+
+    uint32_t t{ INVALID };
+    for (uint32_t k = 0; k < l.c.transitions.size(); ++k) {
+      Transition const &tr{ l.c.transitions[k] };
+      if ((tr.src.v == outside) && (tr.dst.v == first)) { t = k; }
+    }
+    REQUIRE(t != INVALID);
+    scav_span const route{ l.r.route[t] };
+    REQUIRE(route.len >= 2);
+    scav_point const from{ l.r.points[route.off] };
+    bool across{ true };
+    bool down{ true };
+    for (uint32_t k = 1; k < route.len; ++k) {
+      across = across && (l.r.points[route.off + k].y == from.y);
+      down = down && (l.r.points[route.off + k].x == from.x);
+    }
+    CHECK((across || down));
+
+    Wide gap{ 0 };  // from the inside of the crossed border to `First`
+    if (from.x < outer.x) {
+      gap = Wide{ in.x } - (outer.x + p.pad);
+    } else if (from.x >= (outer.x + outer.w)) {
+      gap = (Wide{ outer.x } + outer.w - p.pad) - (Wide{ in.x } + in.w);
+    } else if (from.y < outer.y) {
+      gap = Wide{ in.y } - (Wide{ band.y } + band.h);
+    } else {
+      gap = (Wide{ outer.y } + outer.h - p.pad) - (Wide{ in.y } + in.h);
+    }
+    CHECK(gap >= 0);
+    CHECK(gap <= route_clearance(p));
+  }
+}
+
+namespace {
+
+// Holds the one transition leaving `from` to a straight line from its border to `to`'s.
+void straight_from(Laid const &l, uint32_t from, uint32_t to) {
+  uint32_t t{ INVALID };
+  for (uint32_t k = 0; k < l.c.transitions.size(); ++k) {
+    if (l.c.transitions[k].src.v == from) { t = k; }
+  }
+  REQUIRE(t != INVALID);
+  scav_span const route{ l.r.route[t] };
+  REQUIRE(route.len >= 2);
+  scav_point const first{ l.r.points[route.off] };
+  scav_point const last{ l.r.points[route.off + route.len - 1] };
+  bool across{ true };
+  bool down{ true };
+  for (uint32_t k = 1; k < route.len; ++k) {
+    across = across && (l.r.points[route.off + k].y == first.y);
+    down = down && (l.r.points[route.off + k].x == first.x);
+  }
+  CHECK((across || down));
+  CHECK(on_border(first, l.z.state[from]));
+  CHECK(on_border(last, l.z.state[to]));
+}
+
+}  // namespace
+
+TEST_CASE("gauntlet: a port on a rank border sits level with the state it joins") {
+  // `Source -> Box/Target` crosses `Box`'s leading border into its second rank
+  // through a bend beside `First`; the port and the bend sit level with `Target`'s face.
+  for (scav_profile const &p :
+       { readable(), compact(), one_row(readable()), one_row(compact()) }) {
+    CAPTURE(p.profile_id);
+    CAPTURE(p.portfolio_m);
+    Laid l;
+    lay("level.scav", p, l);
+    uint32_t const source{ state_named(l.c, "Source") };
+    uint32_t const target{ state_named(l.c, "Target") };
+    REQUIRE(source != INVALID);
+    REQUIRE(target != INVALID);
+    straight_from(l, source, target);
+  }
+}
+
+TEST_CASE("gauntlet: a state beside a composite is centred on the port it enters") {
+  // `Source`, ranked with `Box`, joins `Box/Target` through a port on `Box`'s
+  // bottom border that sits level with `Target`, off `Box`'s centre.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Laid bare;
+    lay("under.scav", one_row(p), bare);
+    uint32_t const source{ state_named(bare.c, "Source") };
+    uint32_t const box{ state_named(bare.c, "Box") };
+    uint32_t const target{ state_named(bare.c, "Target") };
+    REQUIRE(source != INVALID);
+    REQUIRE(box != INVALID);
+    REQUIRE(target != INVALID);
+    uint32_t const rank{ bare.o.nodes[bare.o.state_node[box]].rank };
+    SearchPins const seed{ .ranks = { { .state = StateId{ source }, .rank = rank } } };
+    Laid l;
+    lay("under.scav", one_row(p), l, {}, &seed);
+    REQUIRE(l.o.nodes[l.o.state_node[source]].rank == l.o.nodes[l.o.state_node[box]].rank);
+    scav_rect const from{ l.z.state[source] };
+    scav_rect const to{ l.z.state[target] };
+    scav_rect const around{ l.z.state[box] };
+    REQUIRE(from.y >= (around.y + around.h));
+    REQUIRE((to.x + (to.w / 2)) != (around.x + (around.w / 2)));
+    straight_from(l, source, target);
+  }
+}
+
+TEST_CASE("gauntlet: every state lies inside the frame it is drawn in") {
+  for (char const *name : GAUNTLET) {
+    for (scav_profile const &p :
+         { readable(), compact(), one_row(readable()), one_row(compact()) }) {
+      CAPTURE(name);
+      CAPTURE(p.profile_id);
+      CAPTURE(p.portfolio_m);
+      Laid l;
+      lay(name, p, l);
+      for (uint32_t const st : live_of(l.c)) {
+        CAPTURE(chart_string(l.c, l.c.states[st].name));
+        CHECK(contains(l.z.sub[l.c.states[st].parent.v], l.z.state[st]));
+      }
+    }
+  }
+}
+
+TEST_CASE("gauntlet: a pseudostate seated in a layer leaves the layers before it alone") {
+  // `* -> T` seats beside `T`, so `B` is one rank gap past `A` however wide `T` is.
+  for (scav_profile const &p : { one_row(readable()), one_row(compact()) }) {
+    CAPTURE(p.profile_id);
+    Laid l;
+    lay("pulled.scav", p, l);
+    uint32_t const a{ state_named(l.c, "A") };
+    uint32_t const b{ state_named(l.c, "B") };
+    REQUIRE(a != INVALID);
+    REQUIRE(b != INVALID);
+    scav_rect const from{ l.z.state[a] };
+    scav_rect const to{ l.z.state[b] };
+    CHECK(to.x <= (from.x + from.w + p.rank_sep));
+  }
+}
+
+TEST_CASE("gauntlet: a run's arrows each span one gap, not the drawing") {
+  // Moving a state a rank along squares the drawing up and stretches one
+  // straight arrow across it, which only the route's own length prices.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Laid l;
+    lay("stretch.scav", p, l);
+    int32_t widest{ 0 };
+    for (uint32_t const st : live_of(l.c)) { widest = imax(widest, l.z.state[st].w); }
+    for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+      scav_span const rt{ l.r.route[t] };
+      Wide length{ 0 };
+      for (uint32_t k = 0; (k + 1) < rt.len; ++k) {
+        scav_point const a{ l.r.points[rt.off + k] };
+        scav_point const b{ l.r.points[rt.off + k + 1] };
+        length +=
+            Wide{ imax(a.x, b.x) - imin(a.x, b.x) } + (imax(a.y, b.y) - imin(a.y, b.y));
+      }
+      CAPTURE(t);
+      CHECK(length <= (Wide{ widest } + p.rank_sep));
+    }
+  }
+}
+
+TEST_CASE("gauntlet: a route passing through a composite bends outside it") {
+  // A bend strictly inside `Arm` and outside `Moving` is in a state the route
+  // only passes through; the leg across `Arm` is straight at either weight.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    for (int32_t const weight : { 0, p.w_transit_bends }) {
+      CAPTURE(weight);
+      scav_profile priced{ p };
+      priced.w_transit_bends = weight;
+      Laid l;
+      lay("transit.scav", priced, l);
+      uint32_t const gripping{ state_named(l.c, "Gripping") };
+      uint32_t const arm{ state_named(l.c, "Arm") };
+      uint32_t const moving{ state_named(l.c, "Moving") };
+      REQUIRE(gripping != INVALID);
+      REQUIRE(arm != INVALID);
+      REQUIRE(moving != INVALID);
+      uint32_t extend{ INVALID };
+      for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+        if (l.c.transitions[t].src.v == gripping) { extend = t; }
+      }
+      REQUIRE(extend != INVALID);
+      scav_span const route{ l.r.route[extend] };
+      REQUIRE(route.len >= 2);
+      uint32_t in_arm{ 0 };
+      for (uint32_t k = 1; (k + 1) < route.len; ++k) {
+        scav_point const a{ l.r.points[route.off + k - 1] };
+        scav_point const b{ l.r.points[route.off + k] };
+        scav_point const c{ l.r.points[route.off + k + 1] };
+        bool const straight{ ((a.x == b.x) && (b.x == c.x)) ||
+                             ((a.y == b.y) && (b.y == c.y)) };
+        if (!straight && strictly_inside(b, l.z.state[arm]) &&
+            !strictly_inside(b, l.z.state[moving])) {
+          ++in_arm;
+        }
+      }
+      CHECK(in_arm == 0U);
+    }
+  }
+}
+
+TEST_CASE("gauntlet: priced whitespace takes the composite drawn tighter") {
+  // Box's chain runs loose or tight; priced, the search keeps the drawing that leaves
+  // less of Box empty, and neither drawing bends or crosses.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    std::array<int64_t, 2> empty{};
+    for (int32_t const weight : { 0, 1 }) {
+      CAPTURE(weight);
+      scav_profile priced{ p };
+      priced.w_whitespace = weight;
+      Laid l;
+      lay("tight.scav", priced, l);
+      CostTerms const t{ cost_terms(l.c, l.g, l.z, l.r, {}, priced) };
+      CHECK(t.bends == 0);
+      CHECK(t.crossings == 0);
+      empty[static_cast<uint32_t>(weight)] = t.whitespace;
+    }
+    CHECK(empty[1] < empty[0]);
+  }
+}
+
+TEST_CASE("gauntlet: a route leaving a composite turns one corner into its target") {
+  // Second's route leaves Box along its port's lead and turns once, onto the
+  // vertical leg that enters Fault's top or bottom face.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Laid l;
+    lay("corner.scav", p, l);
+    uint32_t const second{ state_named(l.c, "Second") };
+    uint32_t const fault{ state_named(l.c, "Fault") };
+    REQUIRE(second != INVALID);
+    REQUIRE(fault != INVALID);
+    uint32_t leaving{ INVALID };
+    for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+      Transition const &tr{ l.c.transitions[t] };
+      if ((tr.src.v == second) && (tr.dst.v == fault)) { leaving = t; }
+    }
+    REQUIRE(leaving != INVALID);
+    scav_span const route{ l.r.route[leaving] };
+    REQUIRE(route.len >= 2);
+    uint32_t turns{ 0 };
+    for (uint32_t k = 1; (k + 1) < route.len; ++k) {
+      scav_point const a{ l.r.points[route.off + k - 1] };
+      scav_point const b{ l.r.points[route.off + k] };
+      scav_point const c{ l.r.points[route.off + k + 1] };
+      bool const straight{ ((a.x == b.x) && (b.x == c.x)) ||
+                           ((a.y == b.y) && (b.y == c.y)) };
+      turns += straight ? 0U : 1U;
+    }
+    CHECK(turns == 1U);
+    scav_point const last{ l.r.points[route.off + route.len - 1] };
+    scav_point const before{ l.r.points[route.off + route.len - 2] };
+    scav_rect const box{ l.z.state[fault] };
+    CHECK(before.x == last.x);
+    CHECK(((last.y == box.y) || (last.y == (box.y + box.h))));
+  }
+}
+
 TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
-  // A property above that cannot hold on one of these charts carves it out, and
-  // a carve-out with no number on it is an excuse. Each count is what the tree
-  // does today with the section that owns it named; a count that grows is a
-  // regression and one that shrinks is the fix arriving, and either way the
-  // test says so.
+  // Each carve-out from the properties above, counted: a rising count is a regression.
   for (scav_profile const &p : { readable(), compact() }) {
     CAPTURE(p.profile_id);
 
-    // 11.8, and the corpus has no chart carrying the shape. A transition
-    // between two concurrent submachines of one state was routed in the frame
-    // that state itself sits in, where the state is an obstacle walling the
-    // route out of the space between its own two regions, and it went the long
-    // way round: through whatever else that frame held, and back along the line
-    // it arrived on. **Closed since the channel is routed inside the state**
-    // (11.10g). Row 0 alone -- the profile's own tuple, unsearched -- was the
-    // count that kept the hole visible while the portfolio routed around it;
-    // it reads zero through a box at both profiles now. Routes still double
-    // back on it, two at `readable` and four at `compact`, since a fold that
-    // stacks an edge into a composite stopped being a scale-measure choice:
-    // unsearched, this row lays the whole chart out flat, and divider ports on
-    // the regions' sides send routes round. Owed to 11.10g's top and bottom
-    // ports; `retrace` keeps the search off them, and what ships reads zero
-    // below.
+    // Row 0 unsearched lays the chart out flat, and divider ports on the regions'
+    // sides send three routes back on themselves; none passes through a box.
     Laid row_zero;
     lay("regions.scav", one_row(p), row_zero);
     REQUIRE(row_zero.tuple == 0);
@@ -709,10 +1467,8 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     uint32_t back{ 0 };
     shape_counts(row_zero, through, back);
     CHECK(through == 0);
-    CHECK(back == ((p.profile_id == compact().profile_id) ? 4U : 2U));
-    // The scorer from the other end, over the columns that run wrote: 11.6's
-    // descent and the predicate above are two implementations of one question,
-    // and a carve-out is worth more when both answer it.
+    CHECK(back == 3);
+    // The scorer over the run's columns answers the same question.
     CHECK(cost_columns(row_zero.c, row_zero.g, p).through_box == 0);
 
     // What ships, scored both ways: the properties above hold on the drawing a
@@ -724,45 +1480,18 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     shape_counts(shipped, shipped_through, shipped_back);
     CHECK(shipped_through == 0);
     CHECK(cost_columns(shipped.c, shipped.g, p).through_box == 0);
-    // The other half of the hole, and it is **closed at both profiles** since
-    // the face a transition leaves by became a search dimension (11.10e). Four
-    // at both profiles until 11.9.5's reservation, three at `compact` since,
-    // two once a placement move could reach an arrangement where the long way
-    // round was shorter, three again at a budget of 1,024 -- every one of those
-    // the arrangement moving rather than the hole closing. This one is the hole
-    // closing: the route doubled back because it left by the face the
-    // separation rule picked, and choosing the face instead lets it leave by
-    // one it need not come back across. It went back to two when this chart's
-    // search took a different path, and **is zero again since 11.8's channel is
-    // routed inside `Running`** (11.10g).
+    // No route doubles back at either profile.
     CHECK(shipped_back == 0);
 
-    // 11.5's face rule, which picks a face by how far the target lies outside
-    // the box on each axis rather than by the distance to a point on it. A
-    // branch whose target is stacked below the bar rather than beside it has
-    // the y separation dominate, so it leaves through the bar's own 64-unit
-    // cap while the 960-unit face beside it goes unused, and the arrow then
-    // reads as coming off the bar's end instead of off its length.
-    //
-    // Two since 11.9.5's reservation, where it was one: room beside a labelled
-    // leg pushes the branch further below the bar, so y dominates on both. The
-    // rule is the defect; the reservation only found it more targets.
-    //
-    // One since 11.10g's label room moved to where the packing puts a piece.
+    // The face rule picks by separation per axis, so a branch stacked below a bar can
+    // leave through the bar's short cap.
     Laid fork_zero;
     lay("fork.scav", one_row(p), fork_zero);
     CHECK(capped_branches(fork_zero) == 1);
-    // And what ships: zero at both profiles from 11.10a's placement move, two at
-    // `readable` once the budget went to 1,024 (11.10) -- a shallow search had
-    // stopped at an arrangement that happened to put the branch beside the bar,
-    // and a deeper one kept going to a cheaper `Cost` that put it back below,
-    // because nothing priced leaving through a 64-unit cap. **One since crowding
-    // is priced** (11.6): branches stacked through one cap run as tight lanes,
-    // and those now cost what they look like. Zero at both profiles since
-    // 11.10g's second round; the face rule's defect is still there in the row
-    // above.
+    // What ships: the search settles on a four-bend arrangement where one
+    // arrival enters the join through its cap.
     Laid fork_shipped;
     lay("fork.scav", p, fork_shipped);
-    CHECK(capped_branches(fork_shipped) == 0);
+    CHECK(capped_branches(fork_shipped) == 1);
   }
 }

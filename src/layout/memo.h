@@ -12,17 +12,36 @@
 
 namespace scav {
 
+// The hash a table probes by. A hit compares the whole key, so any function is correct;
+// a constant one makes every key collide.
+using MemoHash = uint64_t (*)(std::vector<uint32_t> const &key);
+uint64_t memo_hash(std::vector<uint32_t> const &key);
+
 class Memo {
  public:
   // `words` is what both arenas may hold together before the table empties
   // and starts again, which bounds it without an eviction order.
-  explicit Memo(size_t words) : budget(words) {}
+  explicit Memo(size_t words, MemoHash hash = memo_hash);
+  ~Memo();
+  Memo(Memo const &) = delete;
+  Memo &operator=(Memo const &) = delete;
 
-  // The value stored under `key`, or null. Valid until the next `insert`.
-  [[nodiscard]] int32_t const *find(std::vector<uint32_t> const &key, uint32_t &len);
+  // Whether `key` is stored, and where its value is when it is: `at` and `len`,
+  // valid until the next `insert`. An empty value is found with `len` 0.
+  [[nodiscard]] bool find(std::vector<uint32_t> const &key,
+                          int32_t const *&at,
+                          uint32_t &len);
 
   // Stores `value` under `key`, which must not be present.
   void insert(std::vector<uint32_t> const &key, std::vector<int32_t> const &value);
+
+  // Drops every entry and the storage the arenas and slots took.
+  void release();
+
+  // The words the arenas and slots have claimed, whether or not in use.
+  [[nodiscard]] size_t held() const {
+    return keys.capacity() + values.capacity() + (slots.capacity() * (sizeof(Slot) / 4));
+  }
 
  private:
   struct Slot {
@@ -34,10 +53,21 @@ class Memo {
   void grow();
 
   size_t budget;
+  MemoHash hash_of;
   std::vector<uint32_t> keys;
   std::vector<int32_t> values;
   std::vector<Slot> slots;
   uint32_t used{ 0 };
+};
+
+// Held for the length of a layout. When the last open one ends, every memo in the
+// process releases its storage, under the lock a starting layout waits on.
+class MemoRun {
+ public:
+  MemoRun();
+  ~MemoRun();
+  MemoRun(MemoRun const &) = delete;
+  MemoRun &operator=(MemoRun const &) = delete;
 };
 
 }  // namespace scav
