@@ -22,6 +22,14 @@
 #include <string>
 #include <vector>
 
+namespace scav {
+
+void layout_test_label_bound(bool on, bool verify);
+uint64_t layout_test_label_bound_skipped();
+uint64_t layout_test_label_bound_mismatches();
+
+}  // namespace scav
+
 namespace {
 
 using namespace scav;
@@ -121,6 +129,27 @@ std::vector<T> rows(Chart const &c, char const *name) {
 }
 
 }  // namespace
+
+TEST_CASE(
+    "drawlist corpus: under real text every bounded round picks what scoring it whole "
+    "picks") {
+  // Each round is also scored whole: the same pick at the same cost, no bound above a cost.
+  struct Restore {
+    Restore() = default;
+    Restore(Restore const &) = delete;
+    Restore &operator=(Restore const &) = delete;
+    ~Restore() { layout_test_label_bound(true, false); }
+  } const restore;
+  Metrics const m{ bundled() };
+  for (char const *name :
+       { "brew.scav", "dock.scav", "ota.scav", "vac.scav", "tcp.scav" }) {
+    CAPTURE(name);
+    layout_test_label_bound(true, true);
+    (void)run_pipeline(name, m, readable());
+    CHECK(layout_test_label_bound_skipped() > 0);
+    CHECK(layout_test_label_bound_mismatches() == 0);
+  }
+}
 
 TEST_CASE("drawlist corpus: every chart builds and hashes to the committed golden") {
   Metrics const m{ bundled() };

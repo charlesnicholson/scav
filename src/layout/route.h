@@ -75,6 +75,7 @@ struct RouteCache {
 // are sharded across `threads` workers and merged in frame order, so the
 // result is one value at every worker count. `was`, where given, is a routing
 // over this same sizing; its labels are kept where nothing a box reads changed.
+// Without `labels` the routes are final and `placed` is empty.
 Routes route_transitions(Chart const &c,
                          SplitGraph const &g,
                          SubmachineOrders const &o,
@@ -86,7 +87,8 @@ Routes route_transitions(Chart const &c,
                          RouteCache const *reuse = nullptr,
                          RouteCache *fill = nullptr,
                          SearchPins const *pins = nullptr,
-                         Routes const *was = nullptr);
+                         Routes const *was = nullptr,
+                         bool labels = true);
 
 }  // namespace scav
 

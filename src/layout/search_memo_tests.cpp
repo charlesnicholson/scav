@@ -33,6 +33,10 @@ uint64_t layout_test_prefix_used();
 uint64_t layout_test_prefix_mismatches();
 void layout_test_skip_noop_faces(bool on);
 uint64_t layout_test_noop_faces();
+void layout_test_label_bound(bool on, bool verify);
+uint64_t layout_test_label_bound_skipped();
+uint64_t layout_test_label_bound_labelled();
+uint64_t layout_test_label_bound_mismatches();
 void layout_test_search_memo(bool on);
 void layout_test_search_memo_verify(bool on);
 uint32_t layout_test_search_memo_hits();
@@ -313,6 +317,62 @@ TEST_CASE("search: every face move scored from the prefix scores as the whole wa
     CHECK(layout_test_prefix_mismatches() == 0);
   }
   CHECK(used > 0);
+}
+
+namespace {
+
+struct BoundGuard {
+  BoundGuard() = default;
+  BoundGuard(BoundGuard const &) = delete;
+  BoundGuard &operator=(BoundGuard const &) = delete;
+  ~BoundGuard() { layout_test_label_bound(true, false); }
+};
+
+}  // namespace
+
+TEST_CASE("search: a labelled round scored by bound lays out what scoring it whole does") {
+  BoundGuard const guard;
+  constexpr std::array<char const *, 3> CHARTS{ "estop.scav", "brew.scav", "dock.scav" };
+  for (char const *name : CHARTS) {
+    CAPTURE(name);
+    layout_test_label_bound(true, false);
+    Laid const with{ lay_out(name, true) };
+    uint64_t const skipped{ layout_test_label_bound_skipped() };
+    uint64_t const labelled{ layout_test_label_bound_labelled() };
+    layout_test_label_bound(false, false);
+    Laid const without{ lay_out(name, true) };
+    REQUIRE(with.ok);
+    REQUIRE(without.ok);
+    CHECK(with.structural == without.structural);
+    CHECK(with.coordinate == without.coordinate);
+    CHECK(skipped > 0);
+    CHECK(labelled > 0);
+    CHECK(layout_test_label_bound_skipped() == 0);
+  }
+}
+
+TEST_CASE("search: every bounded round picks what scoring each candidate whole picks") {
+  // Each round is also scored whole: the same pick at the same cost, no bound above a cost.
+  BoundGuard const guard;
+  constexpr std::array<char const *, 4> CHARTS{ "estop.scav",
+                                                "brew.scav",
+                                                "dock.scav",
+                                                "gauntlet/carried.scav" };
+  for (char const *name : CHARTS) {
+    CAPTURE(name);
+    layout_test_label_bound(true, true);
+    REQUIRE(lay_out(name, true).ok);
+    CHECK(layout_test_label_bound_skipped() > 0);
+    CHECK(layout_test_label_bound_mismatches() == 0);
+  }
+}
+
+TEST_CASE("search: with no path boxes nothing is bounded") {
+  BoundGuard const guard;
+  layout_test_label_bound(true, false);
+  REQUIRE(lay_out("brew.scav").ok);
+  CHECK(layout_test_label_bound_skipped() == 0);
+  CHECK(layout_test_label_bound_labelled() == 0);
 }
 
 TEST_CASE("search schedules: each row keeps the cheaper of its two searches") {

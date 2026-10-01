@@ -39,6 +39,10 @@ uint64_t layout_test_prefix_used();
 uint64_t layout_test_prefix_mismatches();
 void layout_test_skip_noop_faces(bool on);
 uint64_t layout_test_noop_faces();
+void layout_test_label_bound(bool on, bool verify);
+uint64_t layout_test_label_bound_skipped();
+uint64_t layout_test_label_bound_labelled();
+uint64_t layout_test_label_bound_mismatches();
 void layout_test_search_memo(bool on);
 void layout_test_search_memo_verify(bool on);
 uint32_t layout_test_search_memo_hits();
@@ -257,6 +261,7 @@ struct Candidate {
   // The pins the drawing was laid out with: the caller's, with the ports the
   // facing pass turned. Re-deriving from these finds nothing left to turn.
   SearchPins laid;
+  scav_rect sized_chart{};  // `sized.chart` before the routes and labels covered it
 };
 
 // What the facing pass turns: legs whose in-frame edge is turned round, and
@@ -424,7 +429,8 @@ Candidate search_candidate(Chart const &c,
                            RouteCache *fill = nullptr,
                            SearchPins const *pins = nullptr,
                            Prefix *prefix = nullptr,
-                           Prefix const *from = nullptr) {
+                           Prefix const *from = nullptr,
+                           bool labels = true) {
   Candidate out;
   SubmachineOrders facing;
   SubmachineOrders const *use{ &orders };
@@ -483,7 +489,8 @@ Candidate search_candidate(Chart const &c,
                                  reuse,
                                  fill,
                                  pins,
-                                 (from != nullptr) ? &from->routes : nullptr);
+                                 (from != nullptr) ? &from->routes : nullptr,
+                                 labels);
   if (prefix != nullptr) { prefix->routes = out.routes; }
 
   // `out` holds the best attempt so far; `done` reads from it, not from the latest
@@ -501,7 +508,19 @@ Candidate search_candidate(Chart const &c,
     if (!size_layout(c, g, laid, s, wider, next_sized, spilled, dar, pack, fold)) {
       break;
     }
-    Routes next{ route_transitions(c, g, laid, next_sized, s, wider, router, threads) };
+    Routes next{ route_transitions(c,
+                                   g,
+                                   laid,
+                                   next_sized,
+                                   s,
+                                   wider,
+                                   router,
+                                   threads,
+                                   nullptr,
+                                   nullptr,
+                                   nullptr,
+                                   nullptr,
+                                   labels) };
     bool keep{ false };
     done = inflation_done(fewest, next.degraded(), next.unreachable, keep);
     if (keep) {
@@ -528,6 +547,7 @@ Candidate search_candidate(Chart const &c,
     chart.w = right - chart.x;
     chart.h = bottom - chart.y;
   };
+  out.sized_chart = out.sized.chart;
   for (scav_point const &at : out.routes.points) { cover(at.x, at.y); }
   for (scav_rect const &at : out.routes.placed) {
     cover(at.x, at.y);
@@ -606,12 +626,23 @@ uint64_t test_prefix_used{ 0 };
 uint64_t test_prefix_mismatches{ 0 };
 #endif
 
+// Whether every path box fits the sizing's chart, which a placed box then lies inside.
+bool labels_fit(scav_spaces const &s, scav_rect const &chart) {
+  for (uint32_t i = 0; (s.path_box != nullptr) && (i < s.n_path_box); ++i) {
+    if ((s.path_box[i].w > chart.w) || (s.path_box[i].h > chart.h)) { return false; }
+  }
+  return true;
+}
+
+// Without `labelled`, a candidate routed without its labels scores a lower bound on its
+// cost: the label terms are unpriced and the chart is the least it can grow to.
 Scored scored_of(Chart const &c,
                  SplitGraph const &g,
                  CostContext const &scoring,
                  scav_spaces const &s,
                  scav_profile const &objective,
-                 Candidate const &cand) {
+                 Candidate const &cand,
+                 bool labelled = true) {
   Scored out;
   if (!cand.viable) { return out; }
   out.viable = true;
@@ -619,9 +650,9 @@ Scored scored_of(Chart const &c,
     out.inflated = true;
     return out;
   }
-  CostTerms const terms{
-    cost_terms(scoring, c, g, cand.sized, cand.routes, s, objective)
-  };
+  CostTerms terms{ cost_terms(scoring, c, g, cand.sized, cand.routes, s, objective) };
+  // Aspect may fall as the chart grows, so it bounds only where no box can grow it.
+  if (!labelled && !labels_fit(s, cand.sized_chart)) { terms.aspect = 0; }
   out.cost = cost_of(terms, objective);
   std::array<int64_t, TIER2_TERMS> const share{ cost_shares(terms, objective) };
   for (uint32_t k = 0; k < TIER2_TERMS; ++k) {
@@ -631,7 +662,8 @@ Scored scored_of(Chart const &c,
 }
 
 // `from`, where given, is the incumbent's prefix and `pins` the incumbent's
-// with one face more: the candidate's phases 1 and 2 are the incumbent's.
+// with one face more: the candidate's phases 1 and 2 are the incumbent's. Without
+// `labels` the score is `scored_of`'s bound.
 Scored score_move(Chart const &c,
                   SplitGraph const &g,
                   CostContext const &scoring,
@@ -644,7 +676,8 @@ Scored score_move(Chart const &c,
                   Router const &router,
                   SearchPins const &pins,
                   RouteCache const *reuse,
-                  Prefix const *from) {
+                  Prefix const *from,
+                  bool labels = true) {
   auto const whole = [&]() {
     SubmachineOrders const moved{ order_submachines(c, g, s, objective, 1, pins) };
     std::vector<Diagnostic> spilled;
@@ -661,14 +694,17 @@ Scored score_move(Chart const &c,
                             spilled,
                             reuse,
                             nullptr,
-                            &pins);
+                            &pins,
+                            nullptr,
+                            nullptr,
+                            labels);
   };
   // A traced search scores every move whole, its trace recording each move's phases.
   bool shortcut{ (from != nullptr) && (trace_sink() == nullptr) };
 #ifdef SCAV_TESTING
   shortcut = shortcut && test_prefix_shortcut;
 #endif
-  if (!shortcut) { return scored_of(c, g, scoring, s, objective, whole()); }
+  if (!shortcut) { return scored_of(c, g, scoring, s, objective, whole(), labels); }
   std::vector<Diagnostic> spilled;
   Candidate const cand{ search_candidate(c,
                                          g,
@@ -685,8 +721,9 @@ Scored score_move(Chart const &c,
                                          nullptr,
                                          &pins,
                                          nullptr,
-                                         from) };
-  Scored const out{ scored_of(c, g, scoring, s, objective, cand) };
+                                         from,
+                                         labels) };
+  Scored const out{ scored_of(c, g, scoring, s, objective, cand, labels) };
 #ifdef SCAV_TESTING
   {
     ScopedLock const held{ test_prefix_lock };
@@ -694,7 +731,7 @@ Scored score_move(Chart const &c,
   }
   if (test_prefix_verify) {
     Candidate const full{ whole() };
-    Scored const want{ scored_of(c, g, scoring, s, objective, full) };
+    Scored const want{ scored_of(c, g, scoring, s, objective, full, labels) };
     bool same{ (want.viable == out.viable) && (want.inflated == out.inflated) &&
                (want.cost.t0_violations == out.cost.t0_violations) &&
                (want.cost.t1_hints == out.cost.t1_hints) &&
@@ -761,6 +798,102 @@ bool skipping_noop_faces() {
 #endif
   return true;
 }
+
+#ifdef SCAV_TESTING
+// Whether a labelled round scores by bound, whether each such round is also scored whole
+// and its pick compared, and the tallies: candidates whose labels the bound skipped,
+// candidates it labelled, and rounds whose pick disagreed.
+bool test_label_bound{ true };
+bool test_label_bound_verify{ false };
+Mutex test_label_bound_lock;
+uint64_t test_label_bound_skipped{ 0 };
+uint64_t test_label_bound_labelled{ 0 };
+uint64_t test_label_bound_mismatches{ 0 };
+#endif
+
+// The index scoring every candidate whole and reducing in order would take: the least cost
+// strictly below `incumbent`, the lowest index among equals; INVALID where none is.
+// `bound(i)` scores candidate i's lower bound and `exact(i)` its cost, and only a
+// candidate whose bound can still win is scored exactly, least bound first, one at a time.
+template <typename Bound, typename Exact>
+uint32_t least_by_bound(uint32_t n,
+                        uint32_t threads,
+                        Cost const &incumbent,
+                        std::vector<Scored> &got,
+                        std::vector<uint32_t> &order,
+                        Bound const &bound,
+                        Exact const &exact) {
+  parallel_for(n, threads, [&](uint32_t i) { got[i] = bound(i); });
+  order.clear();
+  uint32_t open{ 0 };
+  for (uint32_t i = 0; i < n; ++i) {
+    if (!got[i].viable || got[i].inflated) { continue; }
+    ++open;
+    if (cost_less(got[i].cost, incumbent)) { vec_push_back(order, i); }
+  }
+  scav_stable_sort(order, [&got](uint32_t a, uint32_t b) {
+    return cost_less(got[a].cost, got[b].cost);
+  });
+  uint32_t win{ INVALID };
+  Cost best{ incumbent };
+  auto const beats = [&](uint32_t i) {
+    return cost_less(got[i].cost, best) ||
+           ((win != INVALID) && (i < win) && !cost_less(best, got[i].cost));
+  };
+  uint32_t at{ 0 };
+  for (; (at < order.size()) && beats(order[at]); ++at) {
+    got[order[at]] = exact(order[at]);
+    if (beats(order[at])) {
+      best = got[order[at]].cost;
+      win = order[at];
+    }
+  }
+#ifdef SCAV_TESTING
+  {
+    ScopedLock const held{ test_label_bound_lock };
+    test_label_bound_skipped += open - at;
+    test_label_bound_labelled += at;
+  }
+#else
+  (void)open;
+#endif
+  return win;
+}
+
+#ifdef SCAV_TESTING
+// Scores every candidate of a bounded round whole and tallies a round whose pick or its
+// cost differs, or whose bound exceeds a whole score.
+template <typename Score>
+void verify_bounded_round(uint32_t n,
+                          uint32_t threads,
+                          Cost const &incumbent,
+                          std::vector<Scored> const &got,
+                          uint32_t win,
+                          Score const &score) {
+  std::vector<Scored> full(n);
+  parallel_for(n, threads, [&](uint32_t i) { full[i] = score(i, true); });
+  uint32_t want{ INVALID };
+  Cost best{ incumbent };
+  bool same{ true };
+  for (uint32_t i = 0; i < n; ++i) {
+    same =
+        same && (full[i].viable == got[i].viable) && (full[i].inflated == got[i].inflated);
+    if (!full[i].viable || full[i].inflated) { continue; }
+    same = same && !cost_less(full[i].cost, got[i].cost);
+    if (cost_less(full[i].cost, best)) {
+      best = full[i].cost;
+      want = i;
+    }
+  }
+  same = same && (want == win);
+  same = same && ((win == INVALID) ||
+                  (!cost_less(got[win].cost, best) && !cost_less(best, got[win].cost)));
+  if (!same) {
+    ScopedLock const held{ test_label_bound_lock };
+    ++test_label_bound_mismatches;
+  }
+}
+#endif
 
 // Level 1: greedy, strictly improving moves in enumeration order. A move is a pin, so
 // taking one appends to the pins the next round re-derives from.
@@ -844,6 +977,14 @@ Improved run_search(Chart const &c,
   uint32_t fold_scored{ 0 };
   std::vector<Move> round;
   std::vector<Scored> got;
+  std::vector<uint32_t> order;
+  // A labelled round routes every candidate, then labels only those whose bound can still
+  // win; a traced round scores each whole.
+  bool bounded{ (s.path_box != nullptr) && (s.n_path_box != 0) &&
+                (trace_sink() == nullptr) };
+#ifdef SCAV_TESTING
+  bounded = bounded && test_label_bound;
+#endif
   std::vector<uint8_t> chained;
   std::vector<uint8_t> source;
   while ((cut_scored < budget) || (rev_scored < budget) || (face_scored < budget) ||
@@ -1000,28 +1141,49 @@ Improved run_search(Chart const &c,
 
     // A candidate runs its phases on one thread: it is already the unit a free
     // thread takes, and sharding its frames too would only add claims.
-    vec_assign(got, round.size(), {});
-    parallel_for(static_cast<uint32_t>(round.size()), threads, [&](uint32_t i) {
-      got[i] = score_move(c,
-                          g,
-                          scoring,
-                          s,
-                          objective,
-                          knobs,
-                          dar,
-                          pack,
-                          fold,
-                          router,
-                          with(held, round[i]),
-                          &base,
-                          (round[i].kind == MoveKind::Face) ? &incumbent : nullptr);
-    });
+    auto const score = [&](uint32_t i, bool labels) {
+      return score_move(c,
+                        g,
+                        scoring,
+                        s,
+                        objective,
+                        knobs,
+                        dar,
+                        pack,
+                        fold,
+                        router,
+                        with(held, round[i]),
+                        &base,
+                        (round[i].kind == MoveKind::Face) ? &incumbent : nullptr,
+                        labels);
+    };
+    uint32_t const n{ static_cast<uint32_t>(round.size()) };
+    vec_assign(got, n, {});
+    uint32_t win{ INVALID };
+    if (bounded) {
+      // A labelled candidate is laid out again rather than kept from its bound.
+      auto const bound = [&](uint32_t i) { return score(i, false); };
+      auto const exact = [&](uint32_t i) { return score(i, true); };
+      win = least_by_bound(n, threads, out.cost, got, order, bound, exact);
+#ifdef SCAV_TESTING
+      if (test_label_bound_verify) {
+        verify_bounded_round(n, threads, out.cost, got, win, score);
+      }
+#endif
+    } else {
+      parallel_for(n, threads, [&](uint32_t i) { got[i] = score(i, true); });
+    }
 
     // Reduced in enumeration order, with the trace emitted here in that order.
     Move take{};
     Cost best{ out.cost };
     bool found{ false };
-    for (uint32_t i = 0; i < round.size(); ++i) {
+    if (win != INVALID) {
+      take = round[win];
+      best = got[win].cost;
+      found = true;
+    }
+    for (uint32_t i = 0; !bounded && (i < n); ++i) {
       Move const &m{ round[i] };
       Scored const &sc{ got[i] };
       MoveVerdict verdict{ MoveVerdict::NotBetter };
@@ -2104,6 +2266,26 @@ void layout_test_skip_noop_faces(bool on) {
 uint64_t layout_test_noop_faces() {
   ScopedLock const held{ test_noop_lock };
   return test_noop_faces;
+}
+void layout_test_label_bound(bool on, bool verify) {
+  test_label_bound = on;
+  test_label_bound_verify = verify;
+  ScopedLock const held{ test_label_bound_lock };
+  test_label_bound_skipped = 0;
+  test_label_bound_labelled = 0;
+  test_label_bound_mismatches = 0;
+}
+uint64_t layout_test_label_bound_skipped() {
+  ScopedLock const held{ test_label_bound_lock };
+  return test_label_bound_skipped;
+}
+uint64_t layout_test_label_bound_labelled() {
+  ScopedLock const held{ test_label_bound_lock };
+  return test_label_bound_labelled;
+}
+uint64_t layout_test_label_bound_mismatches() {
+  ScopedLock const held{ test_label_bound_lock };
+  return test_label_bound_mismatches;
 }
 void layout_test_search_memo(bool on) { test_search_memo = on; }
 void layout_test_search_memo_verify(bool on) { test_search_memo_verify = on; }
