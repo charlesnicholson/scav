@@ -148,8 +148,8 @@ def enclosing(doc, state):
     11.6 exempts a state from the whole-rect test where it *encloses* the
     transition's source or target, because a label inside the composite its
     transition runs in is where it belongs and charging it there makes zero
-    unreachable. An endpoint encloses nothing, so it is not exempt -- a label
-    over `Tripped` is a label over a box a reader sees, whether or not
+    unreachable. An endpoint is exempt only where it holds the other end -- a
+    label over `Tripped` is a label over a box a reader sees, whether or not
     `Tripped` is the transition it belongs to.
     """
     seen = []
@@ -392,7 +392,10 @@ def audit(svg, every, chart, doc, verbose):
         # States enclosing *both* ends. One enclosing a single end does not have
         # to hold the label -- the label belongs on the ancestral side of that
         # crossing -- so it is not exempt from the whole-rect test.
-        under = enclosing(doc, edge["src"]) & enclosing(doc, edge["dst"])
+        src, dst = edge["src"], edge["dst"]
+        under = enclosing(doc, src) & enclosing(doc, dst)
+        # A composite end holding the other end encloses the label as well.
+        under |= {s for s, t in ((src, dst), (dst, src)) if s in enclosing(doc, t)}
         # A transition with no route is the exception, and every one of them on
         # the corpus is a self-transition: nothing placed its label and the
         # builder draws it in the `after` band its own source reserved for
