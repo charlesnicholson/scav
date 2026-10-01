@@ -193,6 +193,47 @@ Routes route_transitions(Chart const &c,
                          Routes const *was,
                          bool labels) {
   Routes out;
+  route_transitions(out,
+                    c,
+                    g,
+                    o,
+                    z,
+                    s,
+                    p,
+                    router,
+                    threads,
+                    reuse,
+                    fill,
+                    pins,
+                    was,
+                    labels);
+  return out;
+}
+
+void route_transitions(Routes &out,
+                       Chart const &c,
+                       SplitGraph const &g,
+                       SubmachineOrders const &o,
+                       SizedLayout const &z,
+                       scav_spaces const &s,
+                       scav_profile const &p,
+                       Router const &router,
+                       uint32_t threads,
+                       RouteCache const *reuse,
+                       RouteCache *fill,
+                       SearchPins const *pins,
+                       Routes const *was,
+                       bool labels) {
+  out.points.clear();
+  out.slots.clear();
+  out.placed.clear();
+  out.settled.clear();
+  out.outside_region = 0;
+  out.unreachable = 0;
+  out.too_large = 0;
+  out.reseated = 0;
+  out.nudged = {};
+  out.unplaced = 0;
   std::vector<CallScratch> &stack{ call_stack() };
   CallScratch cs;
   if (!stack.empty()) {
@@ -771,7 +812,6 @@ Routes route_transitions(Chart const &c,
                                 (was != nullptr) ? &base : nullptr);
   }
   vec_push_back(stack, std::move(cs));
-  return out;
 }
 
 }  // namespace scav

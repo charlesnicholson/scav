@@ -271,17 +271,23 @@ struct Facing {
   std::vector<SidePin> sides;
 };
 
+// A cross-border side the facing pass already gave a node.
+struct FacingTaken {
+  uint32_t node, side;
+};
+
 // Legs whose port faces away from its far end. A port on its state's border moves onto a
 // cross border the state sees unobstructed, one per side; others turn their edge round.
-Facing facing_flips(Chart const &c,
-                    SplitGraph const &g,
-                    SubmachineOrders const &o,
-                    SizedLayout const &z) {
-  Facing out;
-  struct Taken {
-    uint32_t node, side;
-  };
-  std::vector<Taken> taken;
+// Into `out`, with `taken` the caller's scratch.
+void facing_flips(Facing &out,
+                  std::vector<FacingTaken> &taken,
+                  Chart const &c,
+                  SplitGraph const &g,
+                  SubmachineOrders const &o,
+                  SizedLayout const &z) {
+  out.reverses.clear();
+  out.sides.clear();
+  taken.clear();
   for (uint32_t m = 0; m < c.submachines.size(); ++m) {
     if ((m >= o.sub_nodes.size()) || (m >= z.sub.size())) { continue; }
     Span const span{ o.sub_nodes[m] };
@@ -326,7 +332,7 @@ Facing facing_flips(Chart const &c,
         if (between && (rhi > lo) && (rlo < hi)) { return INVALID; }
       }
       uint32_t const side{ (down ? 0U : 2U) + (first ? 0U : 1U) };
-      for (Taken const &had : taken) {
+      for (FacingTaken const &had : taken) {
         if ((had.node == node) && (had.side == side)) { return INVALID; }
       }
       return side;
@@ -399,7 +405,6 @@ Facing facing_flips(Chart const &c,
                    .port = { .seg = seg, .trans = t.v, .leg = leg, .side = along } });
     }
   }
-  return out;
 }
 
 // A candidate as phase 3 first routes it. Phases 1 and 2 and the facing pass read no
@@ -412,34 +417,50 @@ struct Prefix {
   bool ok{ false };
 };
 
-// Phases 2 and 3 for one tuple, `knobs` holding it. `prefix` receives the prefix; `from`,
-// one differing from `pins` only in faces, supplies phases 1 and 2 in place of `orders`.
-// `turned_base` is `order_submachines`' `base` for the ordering after the facing pass.
-Candidate search_candidate(Chart const &c,
-                           SplitGraph const &g,
-                           SubmachineOrders const &orders,
-                           scav_spaces const &s,
-                           scav_profile const &knobs,
-                           DarSource dar,
-                           Compaction pack,
-                           Fold fold,
-                           Router const &router,
-                           uint32_t threads,
-                           std::vector<Diagnostic> &diags,
-                           RouteCache const *reuse = nullptr,
-                           RouteCache *fill = nullptr,
-                           SearchPins const *pins = nullptr,
-                           Prefix *prefix = nullptr,
-                           Prefix const *from = nullptr,
-                           bool labels = true,
-                           SubmachineOrders const *turned_base = nullptr,
-                           SubmachineOrders *facing_into = nullptr) {
-  Candidate out;
-  SubmachineOrders own;
-  SubmachineOrders &facing{ (facing_into != nullptr) ? *facing_into : own };
+// What one candidate builds and discards beside its `Candidate`.
+struct CandidateScratch {
+  SubmachineOrders facing;
+  SizedLayout again;
+  Facing flips;
+  std::vector<FacingTaken> taken;
+};
+
+// Phases 2 and 3 for one tuple, `knobs` holding it, into `out`, reusing its capacity and
+// `scratch`'s. `prefix` receives the prefix; `from`, one differing from `pins` only in
+// faces, supplies phases 1 and 2 in place of `orders`. `turned_base` is
+// `order_submachines`' `base` for the ordering after the facing pass.
+void search_candidate(Candidate &out,
+                      Chart const &c,
+                      SplitGraph const &g,
+                      SubmachineOrders const &orders,
+                      scav_spaces const &s,
+                      scav_profile const &knobs,
+                      DarSource dar,
+                      Compaction pack,
+                      Fold fold,
+                      Router const &router,
+                      uint32_t threads,
+                      std::vector<Diagnostic> &diags,
+                      RouteCache const *reuse,
+                      RouteCache *fill,
+                      SearchPins const *pins,
+                      Prefix *prefix,
+                      Prefix const *from,
+                      bool labels,
+                      SubmachineOrders const *turned_base,
+                      CandidateScratch *scratch) {
+  CandidateScratch own;
+  CandidateScratch &sc{ (scratch != nullptr) ? *scratch : own };
+  out.inflations = 0;
+  out.viable = false;
+  out.sized_chart = {};
+  SubmachineOrders &facing{ sc.facing };
   SubmachineOrders const *use{ &orders };
   if (from != nullptr) {
-    if (!from->ok) { return out; }
+    if (!from->ok) {
+      out = Candidate{};
+      return;
+    }
     out.sized = from->sized;
     out.laid = from->turned;
     if (pins != nullptr) { out.laid.faces = pins->faces; }
@@ -447,13 +468,16 @@ Candidate search_candidate(Chart const &c,
   } else {
     if (!size_layout(c, g, orders, s, knobs, out.sized, diags, dar, pack, fold)) {
       if (prefix != nullptr) { prefix->ok = false; }
-      return out;
+      out.routes = Routes{};
+      out.laid = SearchPins{};
+      return;
     }
     // Ports turned to face where their routes go, and the frames laid out again with
     // them; a function of the tuple and pins, so re-deriving the drawing repeats it.
     SearchPins &turned{ out.laid };
     turned = (pins != nullptr) ? *pins : SearchPins{};
-    Facing const flips{ facing_flips(c, g, orders, out.sized) };
+    Facing &flips{ sc.flips };
+    facing_flips(flips, sc.taken, c, g, orders, out.sized);
     if (!flips.reverses.empty() || !flips.sides.empty()) {
       for (ReversePin const &f : flips.reverses) {
         auto const had{ std::ranges::find_if(turned.reverses, [&f](ReversePin const &r) {
@@ -467,11 +491,11 @@ Candidate search_candidate(Chart const &c,
       }
       vec_insert(turned.sides, turned.sides.end(), flips.sides.begin(), flips.sides.end());
       order_submachines(facing, c, g, s, knobs, threads, turned, turned_base);
-      SizedLayout again;
+      SizedLayout &again{ sc.again };
       std::vector<Diagnostic> spilled;
       if (size_layout(c, g, facing, s, knobs, again, spilled, dar, pack, fold)) {
         use = &facing;
-        out.sized = std::move(again);
+        std::swap(out.sized, again);
       }
     }
     if (prefix != nullptr) {
@@ -482,19 +506,20 @@ Candidate search_candidate(Chart const &c,
     }
   }
   SubmachineOrders const &laid{ *use };
-  out.routes = route_transitions(c,
-                                 g,
-                                 laid,
-                                 out.sized,
-                                 s,
-                                 knobs,
-                                 router,
-                                 threads,
-                                 reuse,
-                                 fill,
-                                 pins,
-                                 (from != nullptr) ? &from->routes : nullptr,
-                                 labels);
+  route_transitions(out.routes,
+                    c,
+                    g,
+                    laid,
+                    out.sized,
+                    s,
+                    knobs,
+                    router,
+                    threads,
+                    reuse,
+                    fill,
+                    pins,
+                    (from != nullptr) ? &from->routes : nullptr,
+                    labels);
   if (prefix != nullptr) { prefix->routes = out.routes; }
 
   // `out` holds the best attempt so far; `done` reads from it, not from the latest
@@ -558,6 +583,47 @@ Candidate search_candidate(Chart const &c,
     cover(at.x + at.w, at.y + at.h);
   }
   out.viable = true;
+}
+
+Candidate search_candidate(Chart const &c,
+                           SplitGraph const &g,
+                           SubmachineOrders const &orders,
+                           scav_spaces const &s,
+                           scav_profile const &knobs,
+                           DarSource dar,
+                           Compaction pack,
+                           Fold fold,
+                           Router const &router,
+                           uint32_t threads,
+                           std::vector<Diagnostic> &diags,
+                           RouteCache const *reuse = nullptr,
+                           RouteCache *fill = nullptr,
+                           SearchPins const *pins = nullptr,
+                           Prefix *prefix = nullptr,
+                           Prefix const *from = nullptr,
+                           bool labels = true,
+                           SubmachineOrders const *turned_base = nullptr) {
+  Candidate out;
+  search_candidate(out,
+                   c,
+                   g,
+                   orders,
+                   s,
+                   knobs,
+                   dar,
+                   pack,
+                   fold,
+                   router,
+                   threads,
+                   diags,
+                   reuse,
+                   fill,
+                   pins,
+                   prefix,
+                   from,
+                   labels,
+                   turned_base,
+                   nullptr);
   return out;
 }
 
@@ -668,7 +734,10 @@ Scored scored_of(Chart const &c,
 // What one scored move orders and discards. Per thread: a move runs on one thread and
 // waits on nothing.
 struct MoveScratch {
-  SubmachineOrders moved, facing;
+  SearchPins pins;  // the move's, which its scoring reads until it returns
+  SubmachineOrders moved;
+  Candidate whole, face;
+  CandidateScratch keep;
 };
 
 MoveScratch &move_scratch() {
@@ -697,30 +766,31 @@ Scored score_move(Chart const &c,
                   bool labels = true,
                   SubmachineOrders const *held_orders = nullptr,
                   SubmachineOrders const *turned_orders = nullptr) {
-  auto const whole = [&]() {
-    MoveScratch &sc{ move_scratch() };
-    SubmachineOrders &moved{ sc.moved };
-    order_submachines(moved, c, g, s, objective, 1, pins, held_orders);
+  MoveScratch &sc{ move_scratch() };
+  auto const whole = [&]() -> Candidate const & {
+    order_submachines(sc.moved, c, g, s, objective, 1, pins, held_orders);
     std::vector<Diagnostic> spilled;
-    return search_candidate(c,
-                            g,
-                            moved,
-                            s,
-                            knobs,
-                            dar,
-                            pack,
-                            fold,
-                            router,
-                            1,
-                            spilled,
-                            reuse,
-                            nullptr,
-                            &pins,
-                            nullptr,
-                            nullptr,
-                            labels,
-                            turned_orders,
-                            &sc.facing);
+    search_candidate(sc.whole,
+                     c,
+                     g,
+                     sc.moved,
+                     s,
+                     knobs,
+                     dar,
+                     pack,
+                     fold,
+                     router,
+                     1,
+                     spilled,
+                     reuse,
+                     nullptr,
+                     &pins,
+                     nullptr,
+                     nullptr,
+                     labels,
+                     turned_orders,
+                     &sc.keep);
+    return sc.whole;
   };
   // A traced search scores every move whole, its trace recording each move's phases.
   bool shortcut{ (from != nullptr) && (trace_sink() == nullptr) };
@@ -729,23 +799,27 @@ Scored score_move(Chart const &c,
 #endif
   if (!shortcut) { return scored_of(c, g, scoring, s, objective, whole(), labels); }
   std::vector<Diagnostic> spilled;
-  Candidate const cand{ search_candidate(c,
-                                         g,
-                                         from->laid,
-                                         s,
-                                         knobs,
-                                         dar,
-                                         pack,
-                                         fold,
-                                         router,
-                                         1,
-                                         spilled,
-                                         reuse,
-                                         nullptr,
-                                         &pins,
-                                         nullptr,
-                                         from,
-                                         labels) };
+  Candidate const &cand{ sc.face };
+  search_candidate(sc.face,
+                   c,
+                   g,
+                   from->laid,
+                   s,
+                   knobs,
+                   dar,
+                   pack,
+                   fold,
+                   router,
+                   1,
+                   spilled,
+                   reuse,
+                   nullptr,
+                   &pins,
+                   nullptr,
+                   from,
+                   labels,
+                   nullptr,
+                   &sc.keep);
   Scored const out{ scored_of(c, g, scoring, s, objective, cand, labels) };
 #ifdef SCAV_TESTING
   {
@@ -977,18 +1051,35 @@ Improved run_search(Chart const &c,
       cost_terms(scoring, c, g, out.best.sized, out.best.routes, s, objective, &party),
       objective);
 
-  auto const with = [](SearchPins base_pins, Move const &m) {
+  auto const add = [](SearchPins &into, Move const &m) {
     switch (m.kind) {
-      case MoveKind::Cut: vec_push_back(base_pins.cuts, m.leg); break;
+      case MoveKind::Cut: vec_push_back(into.cuts, m.leg); break;
       case MoveKind::Reverse:
-        vec_push_back(base_pins.reverses, { .trans = m.leg.trans, .leg = m.leg.leg });
+        vec_push_back(into.reverses, { .trans = m.leg.trans, .leg = m.leg.leg });
         break;
-      case MoveKind::Face: vec_push_back(base_pins.faces, m.face); break;
-      case MoveKind::Side: vec_push_back(base_pins.sides, m.side); break;
-      case MoveKind::Fold: vec_push_back(base_pins.folds, m.fold); break;
-      case MoveKind::Rank: vec_push_back(base_pins.ranks, m.pin); break;
+      case MoveKind::Face: vec_push_back(into.faces, m.face); break;
+      case MoveKind::Side: vec_push_back(into.sides, m.side); break;
+      case MoveKind::Fold: vec_push_back(into.folds, m.fold); break;
+      case MoveKind::Rank: vec_push_back(into.ranks, m.pin); break;
     }
+  };
+  auto const with = [&add](SearchPins base_pins, Move const &m) {
+    add(base_pins, m);
     return base_pins;
+  };
+  // `with` into the scoring thread's own pins.
+  auto const with_here = [&add](SearchPins const &base_pins,
+                                Move const &m) -> SearchPins const & {
+    SearchPins &into{ move_scratch().pins };
+    vec_assign(into.ranks, base_pins.ranks.begin(), base_pins.ranks.end());
+    vec_assign(into.cuts, base_pins.cuts.begin(), base_pins.cuts.end());
+    vec_assign(into.reverses, base_pins.reverses.begin(), base_pins.reverses.end());
+    vec_assign(into.faces, base_pins.faces.begin(), base_pins.faces.end());
+    vec_assign(into.orients, base_pins.orients.begin(), base_pins.orients.end());
+    vec_assign(into.sides, base_pins.sides.begin(), base_pins.sides.end());
+    vec_assign(into.folds, base_pins.folds.begin(), base_pins.folds.end());
+    add(into, m);
+    return into;
   };
 
   // One counter per move kind, each capped at the budget.
@@ -1175,7 +1266,7 @@ Improved run_search(Chart const &c,
                         pack,
                         fold,
                         router,
-                        with(held, round[i]),
+                        with_here(held, round[i]),
                         &base,
                         (round[i].kind == MoveKind::Face) ? &incumbent : nullptr,
                         labels,

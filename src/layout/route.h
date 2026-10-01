@@ -90,6 +90,22 @@ Routes route_transitions(Chart const &c,
                          Routes const *was = nullptr,
                          bool labels = true);
 
+// The same into `out`, reusing its capacity; `was` must not be `out`.
+void route_transitions(Routes &out,
+                       Chart const &c,
+                       SplitGraph const &g,
+                       SubmachineOrders const &o,
+                       SizedLayout const &z,
+                       scav_spaces const &s,
+                       scav_profile const &p,
+                       Router const &router,
+                       uint32_t threads,
+                       RouteCache const *reuse,
+                       RouteCache *fill,
+                       SearchPins const *pins,
+                       Routes const *was,
+                       bool labels);
+
 }  // namespace scav
 
 #endif  // SCAV_LAYOUT_ROUTE_H_INCLUDED
