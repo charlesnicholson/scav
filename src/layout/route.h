@@ -106,6 +106,15 @@ void route_transitions(Routes &out,
                        Routes const *was,
                        bool labels);
 
+// The path boxes placed on `out`'s finished routes over `z`, as `route_transitions` places
+// them; `was` as there.
+void label_routes(Routes &out,
+                  Chart const &c,
+                  SizedLayout const &z,
+                  scav_spaces const &s,
+                  scav_profile const &p,
+                  Routes const *was);
+
 }  // namespace scav
 
 #endif  // SCAV_LAYOUT_ROUTE_H_INCLUDED

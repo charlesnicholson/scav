@@ -800,22 +800,29 @@ void route_transitions(Routes &out,
                 out.nudged);
   }
 
+  if (labels) { label_routes(out, c, z, s, p, was); }
+  vec_push_back(stack, std::move(cs));
+}
+
+void label_routes(Routes &out,
+                  Chart const &c,
+                  SizedLayout const &z,
+                  scav_spaces const &s,
+                  scav_profile const &p,
+                  Routes const *was) {
   LabelBase const base{ .route = (was != nullptr) ? &was->route : nullptr,
                         .points = (was != nullptr) ? &was->points : nullptr,
                         .placed = (was != nullptr) ? &was->placed : nullptr,
                         .settled = (was != nullptr) ? &was->settled : nullptr };
-  if (labels) {
-    out.unplaced = place_labels(c,
-                                z,
-                                s,
-                                out.route,
-                                out.points,
-                                p,
-                                out.placed,
-                                out.settled,
-                                (was != nullptr) ? &base : nullptr);
-  }
-  vec_push_back(stack, std::move(cs));
+  out.unplaced = place_labels(c,
+                              z,
+                              s,
+                              out.route,
+                              out.points,
+                              p,
+                              out.placed,
+                              out.settled,
+                              (was != nullptr) ? &base : nullptr);
 }
 
 }  // namespace scav

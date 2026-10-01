@@ -352,7 +352,8 @@ TEST_CASE("search: a labelled round scored by bound lays out what scoring it who
 }
 
 TEST_CASE("search: every bounded round picks what scoring each candidate whole picks") {
-  // Each round is also scored whole: the same pick at the same cost, no bound above a cost.
+  // Each round is also scored whole: the same pick at the same cost, no bound above a
+  // cost; each candidate labelled on its kept routes lays out what a full lay-out does.
   BoundGuard const guard;
   constexpr std::array<char const *, 4> CHARTS{ "estop.scav",
                                                 "brew.scav",
@@ -363,6 +364,7 @@ TEST_CASE("search: every bounded round picks what scoring each candidate whole p
     layout_test_label_bound(true, true);
     REQUIRE(lay_out(name, true).ok);
     CHECK(layout_test_label_bound_skipped() > 0);
+    CHECK(layout_test_label_bound_labelled() > 0);
     CHECK(layout_test_label_bound_mismatches() == 0);
   }
 }

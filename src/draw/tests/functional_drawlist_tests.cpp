@@ -26,6 +26,7 @@ namespace scav {
 
 void layout_test_label_bound(bool on, bool verify);
 uint64_t layout_test_label_bound_skipped();
+uint64_t layout_test_label_bound_labelled();
 uint64_t layout_test_label_bound_mismatches();
 
 }  // namespace scav
@@ -133,7 +134,8 @@ std::vector<T> rows(Chart const &c, char const *name) {
 TEST_CASE(
     "drawlist corpus: under real text every bounded round picks what scoring it whole "
     "picks") {
-  // Each round is also scored whole: the same pick at the same cost, no bound above a cost.
+  // Each round is also scored whole: the same pick at the same cost, no bound above a
+  // cost; each candidate labelled on its kept routes lays out what a full lay-out does.
   struct Restore {
     Restore() = default;
     Restore(Restore const &) = delete;
@@ -147,6 +149,7 @@ TEST_CASE(
     layout_test_label_bound(true, true);
     (void)run_pipeline(name, m, readable());
     CHECK(layout_test_label_bound_skipped() > 0);
+    CHECK(layout_test_label_bound_labelled() > 0);
     CHECK(layout_test_label_bound_mismatches() == 0);
   }
 }
