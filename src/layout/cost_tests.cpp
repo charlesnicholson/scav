@@ -331,6 +331,39 @@ TEST_CASE(
   CHECK(party[3] != 0);
 }
 
+TEST_CASE("cost: party marks every transition while the drawing breaks Tier 0") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const other{ build_state(c, root, "X", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::External, {});
+
+  SizedLayout z{ blank(c) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 20, .h = 2000 };
+  z.state[b.v] = { .x = 400, .y = 0, .w = 20, .h = 2000 };
+  z.state[other.v] = { .x = 150, .y = 950, .w = 100, .h = 100 };
+  Routes const r{ routes_of(c,
+                            { { { .x = 20, .y = 1000 }, { .x = 400, .y = 1000 } },
+                              { { .x = 20, .y = 1500 }, { .x = 400, .y = 1500 } } }) };
+  SplitGraph const g{ decompose(c) };
+  std::vector<uint8_t> party;
+  CostTerms t{ cost_terms(cost_context(c), c, g, z, r, {}, profile(), &party) };
+  CHECK(t.through_box == 1);
+  REQUIRE(party.size() == 2);
+  CHECK(party[0] != 0);
+  CHECK(party[1] != 0);
+
+  // The stranger moved clear leaves both straight, unpriced and unmarked.
+  z.state[other.v] = { .x = 150, .y = 3000, .w = 100, .h = 100 };
+  t = cost_terms(cost_context(c), c, g, z, r, {}, profile(), &party);
+  CHECK(cost_of(t, profile()).t0_violations == 0);
+  REQUIRE(party.size() == 2);
+  CHECK(party[0] == 0);
+  CHECK(party[1] == 0);
+}
+
 TEST_CASE("cost: two routes ending as one line are not charged for the run they share") {
   Chart const c{ edges(2) };
   // Both turn up onto x=500 and finish at the same point, so the 20 they share

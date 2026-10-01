@@ -805,6 +805,11 @@ void seen_reset(Seen &seen, size_t n) {
   seen.epoch = 0;
 }
 
+int32_t tier0_of(CostTerms const &t) {
+  return t.through_box + t.box_overlap + t.vanished + t.flush + t.through_region +
+         t.retrace;
+}
+
 }  // namespace
 
 SCAV_INTERNAL_BEGIN
@@ -1266,6 +1271,9 @@ CostTerms cost_terms(CostContext const &ctx,
       ++t.through_region;
     }
   }
+  if ((party != nullptr) && (tier0_of(t) != 0)) {
+    vec_assign(*party, c.transitions.size(), uint8_t{ 1 });
+  }
   return t;
 }
 
@@ -1342,8 +1350,7 @@ CostTerms layout_cost(Chart const &c,
 
 Cost cost_of(CostTerms const &t, scav_profile const &p) {
   Cost out;
-  out.t0_violations =
-      t.through_box + t.box_overlap + t.vanished + t.flush + t.through_region + t.retrace;
+  out.t0_violations = tier0_of(t);
   // Area is the largest term at (2 * COORD_MAX)^2 < 2^40, its em^2 only divides
   // it down, and thirteen of those under a weight capped at 2^10 stay below 2^54.
   for (Wide const term : weighted_terms(t, p)) { out.t2 += term; }
