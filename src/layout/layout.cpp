@@ -32,10 +32,6 @@
 
 namespace scav {
 
-// Which segment ends Level 1 offers face moves at: 0 every one, 1 those whose
-// transition is a party to a priced term or bends, 2 those whose transition bends.
-void layout_face_offer(uint32_t mode);
-
 #ifdef SCAV_TESTING
 void layout_test_prefix_shortcut(bool on);
 void layout_test_prefix_verify(bool on);
@@ -749,8 +745,6 @@ Scored score_move(Chart const &c,
   return out;
 }
 
-uint32_t face_offer{ 0 };
-
 #ifdef SCAV_TESTING
 // Whether a search leaves no-op faces unscored, and how many it has left.
 bool test_skip_noop_faces{ true };
@@ -822,15 +816,9 @@ Improved run_search(Chart const &c,
   out.viable = out.best.viable;
   if (!out.viable) { return out; }
   CostContext const scoring{ cost_context(c) };
-  // Per transition, what the incumbent's route is charged; filled only when faces are
-  // offered by it.
-  uint8_t const offer_mask{ (face_offer == 1)   ? uint8_t{ PARTY_BENT | PARTY_PRICED }
-                            : (face_offer == 2) ? PARTY_BENT
-                                                : uint8_t{ 0 } };
-  std::vector<uint8_t> party;
-  std::vector<uint8_t> *const marking{ (offer_mask != 0) ? &party : nullptr };
+  std::vector<uint8_t> party;  // set where the incumbent's route bends or is charged
   out.cost = cost_of(
-      cost_terms(scoring, c, g, out.best.sized, out.best.routes, s, objective, marking),
+      cost_terms(scoring, c, g, out.best.sized, out.best.routes, s, objective, &party),
       objective);
 
   auto const with = [](SearchPins base_pins, Move const &m) {
@@ -913,10 +901,7 @@ Improved run_search(Chart const &c,
       if (!in_scope(g.segments[seg].frame.v)) { continue; }
       TransId const t{ g.segments[seg].trans };
       if ((t.v == INVALID) || (t.v >= g.trans_segments.size())) { continue; }
-      if ((offer_mask != 0) &&
-          ((t.v >= party.size()) || ((party[t.v] & offer_mask) == 0))) {
-        continue;
-      }
+      if ((t.v >= party.size()) || (party[t.v] == 0)) { continue; }  // straight, unpriced
       uint32_t const leg{ seg - g.trans_segments[t.v].off };
       for (uint32_t end = 0; (end < 2) && (face_scored < budget); ++end) {
         bool already{ false };
@@ -1114,16 +1099,7 @@ Improved run_search(Chart const &c,
                                 &held,
                                 &incumbent);
     out.cost = best;
-    if (marking != nullptr) {
-      (void)cost_terms(scoring,
-                       c,
-                       g,
-                       out.best.sized,
-                       out.best.routes,
-                       s,
-                       objective,
-                       marking);
-    }
+    (void)cost_terms(scoring, c, g, out.best.sized, out.best.routes, s, objective, &party);
   }
   return out;
 }
@@ -2098,8 +2074,6 @@ uint32_t layout_structural_hash(Chart const &c) {
   }
   return xxhash32(b.data(), b.size(), chart_structural_hash(c));
 }
-
-void layout_face_offer(uint32_t mode) { face_offer = mode; }
 
 #ifdef SCAV_TESTING
 void layout_test_prefix_shortcut(bool on) {

@@ -498,6 +498,44 @@ TEST_CASE("trace: a reversal is offered only on a segment that lies on a cycle")
   CHECK(reversals > 0);
 }
 
+TEST_CASE("trace: a face is offered only where its transition bends or is priced") {
+  // `A -> B` is drawn straight and charged nothing. Of `C -> D -> E` and `C -> E`, one
+  // passes D, so some route of the three bends.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
+  StateId const e{ build_state(c, root, "D", StateKind::Normal, {}) };
+  StateId const f{ build_state(c, root, "E", StateKind::Normal, {}) };
+  TransId const straight{ build_trans(c, a, b, TransKind::External, {}) };
+  build_trans(c, d, e, TransKind::External, {});
+  build_trans(c, e, f, TransKind::External, {});
+  build_trans(c, d, f, TransKind::External, {});
+
+  LayoutTrace t;
+  scav_layout_opts opts{};
+  REQUIRE(profile_named("readable", opts.profile));
+  opts.threads = 1;
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  {
+    Attached const held{ t };
+    REQUIRE(layout_run(c, {}, opts, placed, diags, nullptr, nullptr, 0));
+  }
+  uint32_t faced{ 0 };
+  uint32_t ranked{ 0 };
+  for (TraceEvent const &ev : t.events) {
+    if (ev.kind != TraceKind::CandidateScored) { continue; }
+    ranked += (ev.score.move == TRACE_MOVE_RANK) ? 1U : 0U;
+    if (ev.score.move != TRACE_MOVE_FACE) { continue; }
+    CHECK(ev.score.trans != straight.v);
+    ++faced;
+  }
+  CHECK(ranked > 0);  // the search ran, offering the straight route's states other ranks
+  CHECK(faced > 0);
+}
+
 TEST_CASE("trace: the search scores unchain moves beside placement moves") {
   // 11.10b's dimension, seen through the trace: the back edge of a cycle is
   // the one segment phase 1 chains, so it is the one a cut can free, and the

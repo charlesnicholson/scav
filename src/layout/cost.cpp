@@ -345,8 +345,8 @@ int64_t crossings_over(std::vector<Piece> const &pieces,
 // Marks both transitions of a charged pair in `party`, where given.
 void blame(std::vector<uint8_t> *party, uint32_t a, uint32_t b) {
   if (party == nullptr) { return; }
-  if (a < party->size()) { (*party)[a] |= PARTY_PRICED; }
-  if (b < party->size()) { (*party)[b] |= PARTY_PRICED; }
+  if (a < party->size()) { (*party)[a] = 1; }
+  if (b < party->size()) { (*party)[b] = 1; }
 }
 
 // The length each pair shares on one line, per `(axis, coordinate)` bucket, less the
@@ -1021,7 +1021,7 @@ CostTerms cost_terms(CostContext const &ctx,
                                       r.points[route.off + k + 2]) };
         if (in != out) {
           ++t.bends;
-          if (party != nullptr) { (*party)[tr] |= PARTY_BENT; }
+          if (party != nullptr) { (*party)[tr] = 1; }
           if (crosses_through &&
               in_transit(c, z, c.transitions[tr], top, r.points[route.off + k + 1])) {
             ++t.transit_bends;
@@ -1070,7 +1070,7 @@ CostTerms cost_terms(CostContext const &ctx,
     Wide const excess{ actual - imax(direct, carried[tr]) };
     if (excess > 0) { t.excess_len += excess * (1 + crossings_of[tr]); }
     if ((party != nullptr) && ((excess > 0) || (crossings_of[tr] != 0))) {
-      (*party)[tr] |= PARTY_PRICED;
+      (*party)[tr] = 1;
     }
   }
 

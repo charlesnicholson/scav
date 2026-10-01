@@ -300,26 +300,35 @@ TEST_CASE(
   std::vector<uint8_t> party;
   CostTerms const t{ cost_terms(cost_context(c), c, g, z, r, {}, profile(), &party) };
   CHECK(t.crossings == 1);
+  CHECK(t.bends == 1);
   REQUIRE(party.size() == 4);
-  CHECK((party[0] & PARTY_BENT) != 0);
-  CHECK(party[1] == PARTY_PRICED);
-  CHECK(party[2] == PARTY_PRICED);
+  CHECK(party[0] != 0);
+  CHECK(party[1] != 0);
+  CHECK(party[2] != 0);
   CHECK(party[3] == 0);
 
-  // A shared run marks both routes on it.
-  Chart const two{ edges(2) };
+  // Straight routes on one line, then half an em apart, mark both of each pair.
+  Chart const four{ edges(4) };
   Routes const shared{ routes_of(
-      two,
-      { { { .x = 0, .y = 60 }, { .x = 500, .y = 60 }, { .x = 500, .y = 100 } },
-        { { .x = 0, .y = 80 }, { .x = 500, .y = 80 }, { .x = 500, .y = 101 } } }) };
-  SplitGraph const g2{ decompose(two) };
+      four,
+      { { { .x = 0, .y = 60 }, { .x = 500, .y = 60 } },
+        { { .x = 100, .y = 60 }, { .x = 400, .y = 60 } },
+        { { .x = 0, .y = 1000 }, { .x = 1000, .y = 1000 } },
+        { { .x = 0, .y = 1096 }, { .x = 1000, .y = 1096 } } }) };
+  SplitGraph const g4{ decompose(four) };
   CostTerms const u{
-    cost_terms(cost_context(two), two, g2, blank(two), shared, {}, profile(), &party)
+    cost_terms(cost_context(four), four, g4, blank(four), shared, {}, profile(), &party)
   };
-  CHECK(u.corridor == 20);
-  REQUIRE(party.size() == 2);
-  CHECK((party[0] & PARTY_PRICED) != 0);
-  CHECK((party[1] & PARTY_PRICED) != 0);
+  CHECK(u.bends == 0);
+  CHECK(u.crossings == 0);
+  CHECK(u.excess_len == 0);
+  CHECK(u.corridor == 300);
+  CHECK(u.crowding > 0);
+  REQUIRE(party.size() == 4);
+  CHECK(party[0] != 0);
+  CHECK(party[1] != 0);
+  CHECK(party[2] != 0);
+  CHECK(party[3] != 0);
 }
 
 TEST_CASE("cost: two routes ending as one line are not charged for the run they share") {

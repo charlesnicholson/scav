@@ -73,13 +73,8 @@ struct CostContext {
 
 CostContext cost_context(Chart const &c);
 
-// What `party` marks per transition: a route with a bend, and one charged any of
-// crossings, corridor, crowding, excess_len, label or label_near.
-inline constexpr uint8_t PARTY_BENT{ 1 };
-inline constexpr uint8_t PARTY_PRICED{ 2 };
-
-// `ctx` is `cost_context(c)`. `party`, where given, is resized to the transitions
-// and marked.
+// `ctx` is `cost_context(c)`. `party`, where given, is 1 per transition whose route bends
+// or is charged crossings, corridor, crowding, excess_len or a label, else 0.
 CostTerms cost_terms(CostContext const &ctx,
                      Chart const &c,
                      SplitGraph const &g,
