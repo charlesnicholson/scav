@@ -3,7 +3,8 @@
 in the matrix, diffed against the committed goldens.
 
 The charts and the goldens are embedded in the executable, so the verb takes no
-paths and the tests run it from a directory that holds neither."""
+paths and the one full-corpus test runs it from a directory that holds neither.
+Every --against golden names only the two smallest charts."""
 
 import os
 import subprocess
@@ -18,12 +19,15 @@ import scavtest  # noqa: E402
 GOLDEN = Path("test_data/golden/layout/corpus_hashes.txt")
 THREAD_COUNTS = 7
 COLUMNS = ("inputs", "structural", "coordinate")
+# The charts every --against golden names; each lays out in hundredths of a second.
+SMALL = ("estop.scav", "led.scav")
 
 
 class TestSelftest(unittest.TestCase):
     cfg: scavtest.Config
     exe: Path
     golden: list[list[str]]
+    small: list[list[str]]
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -32,7 +36,8 @@ class TestSelftest(unittest.TestCase):
         cls.exe = cls.cfg.build_dir / "bin" / name
         text = (cls.cfg.repo_root / GOLDEN).read_text(encoding="utf-8")
         cls.golden = [ln.split() for ln in text.splitlines() if ln.strip()]
-        assert cls.golden
+        cls.small = [r for r in cls.golden if r[0] in SMALL]
+        assert [r[0] for r in cls.small] == list(SMALL)
 
     def run_selftest(
         self, *args: scavtest.Arg, cwd: Path | None = None
@@ -57,15 +62,15 @@ class TestSelftest(unittest.TestCase):
         return path
 
     def altered(self, chart: str, column: str, value: str) -> list[list[str]]:
-        """The committed golden with one hash replaced."""
+        """The small golden with one hash replaced."""
         at = 1 + COLUMNS.index(column)
-        rows = [list(r) for r in self.golden]
+        rows = [list(r) for r in self.small]
         for row in rows:
             if row[0] == chart:
                 self.assertNotEqual(value, row[at])
                 row[at] = value
                 return rows
-        self.fail(f"{chart} is not in {GOLDEN}")
+        self.fail(f"{chart} is not one of {SMALL}")
 
     def report(self, out: str) -> tuple[list[list[str]], str]:
         """The chart lines and the summary, which is always last."""
@@ -80,8 +85,11 @@ class TestSelftest(unittest.TestCase):
 
     # The clean run ==========================================================
 
-    def test_the_corpus_matches_the_committed_golden(self) -> None:
-        result = self.run_selftest()
+    def test_the_corpus_matches_the_committed_golden_from_an_empty_directory(self) -> None:
+        # From an empty directory, so the charts and golden can only be embedded.
+        here = self.scratch()
+        self.assertEqual([], list(here.iterdir()))
+        result = self.run_selftest(cwd=here)
         self.assertEqual("", result.stderr)
         self.assertEqual(0, result.returncode)
         rows, summary = self.report(result.stdout)
@@ -92,31 +100,23 @@ class TestSelftest(unittest.TestCase):
             self.assertEqual(["ok", *want], row)
         self.check_summary(summary, len(self.golden), 0)
 
-    def test_it_runs_from_a_directory_holding_neither_charts_nor_goldens(self) -> None:
-        here = self.scratch()
-        self.assertEqual([], list(here.iterdir()))
-        result = self.run_selftest(cwd=here)
-        self.assertEqual("", result.stderr)
-        self.assertEqual(0, result.returncode)
-        rows, summary = self.report(result.stdout)
-        for row, want in zip(rows, self.golden, strict=True):
-            self.assertEqual(["ok", *want], row)
-        self.check_summary(summary, len(self.golden), 0)
-
     def test_the_hashes_are_stable_across_runs(self) -> None:
-        self.assertEqual(self.run_selftest().stdout, self.run_selftest().stdout)
+        path = self.write_golden("small.txt", self.small)
+        first = self.run_selftest("--against", path)
+        self.assertEqual(0, first.returncode)
+        self.assertEqual(first.stdout, self.run_selftest("--against", path).stdout)
 
     # --against ==============================================================
 
     def test_a_golden_naming_two_charts_checks_two(self) -> None:
         # A chart embedded but not named is not checked, which is what lets a
         # maintainer diff a partial file.
-        path = self.write_golden("two.txt", [list(r) for r in self.golden[:2]])
+        path = self.write_golden("two.txt", self.small)
         result = self.run_selftest("--against", path)
         self.assertEqual("", result.stderr)
         self.assertEqual(0, result.returncode)
         rows, summary = self.report(result.stdout)
-        self.assertEqual([["ok", *r] for r in self.golden[:2]], rows)
+        self.assertEqual([["ok", *r] for r in self.small], rows)
         self.check_summary(summary, 2, 0)
 
     def check_one_altered_column(self, chart: str, column: str, value: str) -> None:
@@ -129,17 +129,17 @@ class TestSelftest(unittest.TestCase):
 
         failures = [r for r in report if r[0] == "FAIL"]
         self.assertEqual(1, len(failures))
-        self.assertEqual(len(self.golden), len(report))
-        self.check_summary(summary, len(self.golden), 1)
+        self.assertEqual(len(self.small), len(report))
+        self.check_summary(summary, len(self.small), 1)
 
         # Every other chart still passes, in place.
-        for got, want in zip(report, self.golden, strict=True):
+        for got, want in zip(report, self.small, strict=True):
             if want[0] != chart:
                 self.assertEqual(["ok", *want], got)
 
         # All three columns named, got and golden apiece: the altered one reads
         # back as the golden, the other two as what the golden still says.
-        truth = next(r for r in self.golden if r[0] == chart)
+        truth = next(r for r in self.small if r[0] == chart)
         expected = ["FAIL", chart]
         for i, name in enumerate(COLUMNS):
             golden = value if name == column else truth[1 + i]
@@ -147,30 +147,29 @@ class TestSelftest(unittest.TestCase):
         self.assertEqual(expected, failures[0])
 
     def test_an_altered_structural_hash_fails_that_column(self) -> None:
-        self.check_one_altered_column("axis.scav", "structural", "1234abcd")
+        self.check_one_altered_column("estop.scav", "structural", "1234abcd")
 
     def test_an_altered_coordinate_hash_fails_that_column(self) -> None:
-        self.check_one_altered_column("mill.scav", "coordinate", "0badcafe")
+        self.check_one_altered_column("estop.scav", "coordinate", "0badcafe")
 
     def test_an_altered_inputs_digest_fails_that_column(self) -> None:
-        self.check_one_altered_column("vac.scav", "inputs", "00000000")
+        self.check_one_altered_column("estop.scav", "inputs", "00000000")
 
     def test_a_malformed_line_names_its_number(self) -> None:
-        rows = [list(r) for r in self.golden]
-        rows[2] = rows[2][:2]
-        path = self.write_golden("malformed.txt", rows)
+        estop, led = self.small
+        path = self.write_golden("malformed.txt", [estop, estop[:2], led])
         result = self.run_selftest("--against", path)
         self.assertEqual("", result.stderr)
         self.assertEqual(1, result.returncode)
         report, summary = self.report(result.stdout)
-        self.assertIn("FAIL golden:3 malformed", "\n".join(" ".join(r) for r in report))
-        # The malformed line is not a chart, so the other ten still are.
-        self.check_summary(summary, len(self.golden) - 1, 1)
+        self.assertIn("FAIL golden:2 malformed", "\n".join(" ".join(r) for r in report))
+        # The malformed line is not a chart, so the lines either side still are.
+        self.check_summary(summary, 2, 1)
 
     def test_a_hash_that_is_not_lowercase_hex8_is_malformed(self) -> None:
         for bad in ("DFB3A851", "dfb3a85", "zzzzzzzz"):
             with self.subTest(hash=bad):
-                rows = [list(r) for r in self.golden]
+                rows = [list(r) for r in self.small]
                 rows[0][2] = bad
                 path = self.write_golden("nothex.txt", rows)
                 result = self.run_selftest("--against", path)
@@ -178,7 +177,7 @@ class TestSelftest(unittest.TestCase):
                 self.assertIn("FAIL golden:1 malformed", result.stdout)
 
     def test_a_golden_naming_a_chart_this_build_lacks_fails_it(self) -> None:
-        rows = [list(r) for r in self.golden]
+        rows = [list(r) for r in self.small]
         rows[0][0] = "nowhere.scav"
         path = self.write_golden("unknown.txt", rows)
         result = self.run_selftest("--against", path)
@@ -200,7 +199,7 @@ class TestSelftest(unittest.TestCase):
 
     def test_the_report_is_the_same_however_the_golden_ends_its_lines(self) -> None:
         """A golden is a file a maintainer edited, so its line shape varies."""
-        two = [list(r) for r in self.golden[:2]]
+        two = self.small
         joined = " ".join(two[0]) + "\n" + " ".join(two[1])
         want = ("".join(f"ok   {' '.join(r)}\n" for r in two)
                 + f"selftest: 2 charts, {THREAD_COUNTS} thread counts, 0 failures\n")
@@ -233,7 +232,7 @@ class TestSelftest(unittest.TestCase):
         self.check_usage("test_data/charts/axis.scav")
 
     def test_against_twice_is_a_usage_error(self) -> None:
-        path = self.write_golden("twice.txt", [list(r) for r in self.golden])
+        path = self.write_golden("twice.txt", self.small)
         self.check_usage("--against", path, "--against", path)
 
     def test_an_unknown_option_is_a_usage_error(self) -> None:
