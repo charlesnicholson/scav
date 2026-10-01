@@ -16,11 +16,18 @@ on:
     paths:
       - "Dockerfile"
       - ".github/workflows/docker-image.yml"
+  # `closed` only cancels: a merged or closed PR's run joins its group and skips.
   pull_request:
+    types: [opened, synchronize, reopened, closed]
     paths:
       - "Dockerfile"
       - ".github/workflows/docker-image.yml"
   workflow_dispatch:
+
+# The newest run on a PR branch or on main supersedes the one in flight.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -32,7 +39,9 @@ env:
 jobs:
   build:
     name: build and publish
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 

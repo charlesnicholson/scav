@@ -11,7 +11,9 @@ name: ci
 on:
   push:
     branches: ["main"]
+  # `closed` only cancels: a merged or closed PR's run joins its group and every job skips.
   pull_request:
+    types: [opened, synchronize, reopened, closed]
   workflow_dispatch:
   # The full grid on main daily, whether or not anything was pushed: the toolchain
   # image is rebuilt weekly, and drift in it is what a quiet week would otherwise hide.
@@ -20,8 +22,9 @@ on:
 
 # A formatting push cancels the run that made it and starts a fresh one, which is
 # the whole mechanism: the second run finds nothing to format and proceeds.
+# One group per PR branch, and one for main's pushes and nightlies: the newest run supersedes.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 # Naming a scope drops the ones not named, so the ghcr pull needs saying too.
@@ -48,6 +51,7 @@ jobs:
     name: ${{ matrix.triple }} / ${{ matrix.config }}
     needs: format-code
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     container: ghcr.io/charlesnicholson/scav-ci:latest
     strategy:
       fail-fast: false
@@ -97,6 +101,7 @@ jobs:
     name: macos-clang-libcxx / ${{ matrix.config }}
     needs: format-code
     runs-on: macos-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -144,6 +149,7 @@ jobs:
     name: ${{ matrix.triple }} / ${{ matrix.config }}
     needs: format-code
     runs-on: windows-latest
+    timeout-minutes: 60
     env:
       SCCACHE_CACHE_SIZE: 800M
     strategy:
@@ -206,6 +212,7 @@ jobs:
     name: ${{ matrix.triple }} / ${{ matrix.sanitizer }}
     needs: format-code
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     container: ghcr.io/charlesnicholson/scav-ci:latest
     strategy:
       fail-fast: false
@@ -263,6 +270,7 @@ jobs:
     # MSan against an uninstrumented one reports false positives forever.
     name: linux-clang-libcxx / msan
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     container: ghcr.io/charlesnicholson/scav-ci:latest
     steps:
       - uses: actions/checkout@v4
@@ -312,6 +320,7 @@ jobs:
     name: macos-clang-libcxx / ${{ matrix.sanitizer }}
     needs: format-code
     runs-on: macos-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -355,6 +364,7 @@ jobs:
     name: ${{ matrix.triple }} / ${{ matrix.sanitizer }}
     needs: format-code
     runs-on: windows-latest
+    timeout-minutes: 60
     env:
       SCCACHE_CACHE_SIZE: 800M
     strategy:
@@ -418,6 +428,7 @@ jobs:
     name: coverage gate
     needs: format-code
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     container: ghcr.io/charlesnicholson/scav-ci:latest
     steps:
       - uses: actions/checkout@v4
@@ -466,7 +477,10 @@ jobs:
   # job reports the diff instead -- never silently accepts it.
   format-code:
     name: format code
+    # Every compiling job needs this one, so skipping it skips them.
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     container: ghcr.io/charlesnicholson/scav-ci:latest
     env:
       SCAV_LINT: 1
@@ -541,6 +555,7 @@ jobs:
     name: clang-tidy
     needs: format-code
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     container: ghcr.io/charlesnicholson/scav-ci:latest
     env:
       SCAV_LINT: 1  # the clang tools, which no compiling row pays for
@@ -565,11 +580,13 @@ jobs:
   # it is no more exposed to a network hiccup than any compiling row already is.
   baseline-engines:
     name: baseline engines / ${{ matrix.os }}
+    if: github.event.action != 'closed'
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     env:
       SCAV_BASELINE: 1
     steps:
@@ -635,7 +652,7 @@ jobs:
 
   all-checks-pass:
     name: all checks pass
-    if: always()
+    if: always() && github.event.action != 'closed'
     needs:
       - linux
       - macos
@@ -649,6 +666,7 @@ jobs:
       - clang-tidy
       - baseline-engines
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Report
         run: echo '${{ toJSON(needs) }}'
