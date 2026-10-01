@@ -316,6 +316,11 @@ struct Sizer {
   [[nodiscard]] Wide leg_label_room(ChunkView const &v,
                                     Shape const &shape,
                                     Wide chunk_h) const;
+  [[nodiscard]] Wide label_room(OrderEdge const &e) const;
+  [[nodiscard]] Wide column_label_room(ChunkView const &v,
+                                       Shape &shape,
+                                       uint32_t chunk,
+                                       Wide chunk_w) const;
   void lay_out_sub(uint32_t m);
   void place_sub(uint32_t m,
                  bool down,
@@ -864,6 +869,91 @@ Wide Sizer::leg_label_room(ChunkView const &v, Shape const &shape, Wide chunk_h)
   return chunk_h;
 }
 
+// A label's leader and width beside a leg, with half a node gap; zero for an unlabelled
+// edge.
+Wide Sizer::label_room(OrderEdge const &e) const {
+  bool const has{ (e.segment < seg_label_w.size()) && (seg_label_w[e.segment] != 0) };
+  return has ? (Wide{ label_leader(p) } + seg_label_w[e.segment] + (p.node_sep / 2))
+             : Wide{ 0 };
+}
+
+// A labelled edge into a later piece passes the states below its end on their leading
+// side, so that layer moves along; a label on a leg inside one column grows the trailing
+// side.
+Wide Sizer::column_label_room(ChunkView const &v,
+                              Shape &shape,
+                              uint32_t chunk,
+                              Wide chunk_w) const {
+  auto const along = [&](uint32_t st) {
+    return v.down ? out.state[st].h : out.state[st].w;
+  };
+  auto const width_of = [&](uint32_t i) {
+    OrderNode const &nd{ o.nodes[v.span.off + v.nodes[i]] };
+    return (nd.kind == OrderKind::State) ? Wide{ along(nd.subject) } : Wide{ 0 };
+  };
+  std::vector<Wide> &layer_lead{ sc.layer_lead };
+  vec_assign(layer_lead, v.last - v.first, 0);
+  for (uint32_t k = 0; k < v.espan.len; ++k) {
+    OrderEdge const &e{ o.edges[v.espan.off + k] };
+    uint32_t const ia{ v.index[e.src - v.span.off] };
+    uint32_t const ib{ v.index[e.dst - v.span.off] };
+    Wide const need{ label_room(e) };
+    if ((ia == INVALID) || (ib == INVALID) || (need == 0)) { continue; }
+    uint32_t const end{ (v.chunk_index[ia] != INVALID) ? ia : ib };
+    uint32_t const other{ (end == ia) ? ib : ia };
+    if ((v.chunk_index[end] == INVALID) || (sc.piece_of[other] <= chunk)) { continue; }
+    uint32_t const r{ v.local_rank[v.nodes[end]] };
+    bool passed{ false };
+    Wide lead{ COORD_MAX };
+    Wide trail{ 0 };
+    for (uint32_t const j : v.chunk_nodes) {
+      OrderNode const &nd{ o.nodes[v.span.off + v.nodes[j]] };
+      if (nd.kind != OrderKind::State) { continue; }
+      uint32_t const rj{ v.local_rank[v.nodes[j]] };
+      if (rj == r) {
+        lead = imin(lead, Wide{ shape.at[j].x });
+        passed = passed || ((j != end) && (shape.at[j].y > shape.at[end].y));
+      } else if (rj < r) {
+        trail = imax(trail, Wide{ shape.at[j].x } + along(nd.subject));
+      }
+    }
+    Wide const grow{ (Wide{ route_clearance(p) } + need) - (lead - trail) };
+    if (!passed || (grow <= 0)) { continue; }
+    for (uint32_t const j : v.chunk_nodes) {
+      if (Wide{ shape.at[j].x } >= lead) {
+        shape.at[j].x =
+            static_cast<int32_t>(imin(Wide{ shape.at[j].x } + grow, Wide{ COORD_MAX }));
+      }
+    }
+    chunk_w += grow;
+    for (uint32_t q = (r - v.first) + 1; q < layer_lead.size(); ++q) {
+      layer_lead[q] += (layer_lead[q] != 0) ? grow : Wide{ 0 };
+    }
+    layer_lead[r - v.first] = lead + grow;
+  }
+  for (uint32_t k = 0; k < v.espan.len; ++k) {
+    OrderEdge const &e{ o.edges[v.espan.off + k] };
+    uint32_t const a{ v.index[e.src - v.span.off] };
+    uint32_t const b{ v.index[e.dst - v.span.off] };
+    if ((a == INVALID) || (b == INVALID) || (v.chunk_index[a] == INVALID) ||
+        (v.chunk_index[b] == INVALID) ||
+        (v.local_rank[v.nodes[a]] != v.local_rank[v.nodes[b]])) {
+      continue;
+    }
+    Wide const need{ label_room(e) };
+    Wide const lead{ layer_lead[v.local_rank[v.nodes[a]] - v.first] };
+    Wide const xa{ Wide{ shape.at[a].x } - lead };
+    Wide const xb{ Wide{ shape.at[b].x } - lead };
+    Wide const lo{ imax(xa, xb) };
+    Wide const hi{ imin(xa + width_of(a), xb + width_of(b)) };
+    Wide const leg{ (hi <= lo) ? Wide{ -1 } : (lo + ((hi - lo) / 2)) };
+    if ((need != 0) && (leg >= 0) && (leg < need)) {
+      chunk_w = imax(chunk_w, lead + leg + need);
+    }
+  }
+  return chunk_w;
+}
+
 // `glued` marks a layer a cut before would part a pseudostate from its neighbour, `ridden`
 // one parting a boundary node, which a pinned cut carries across (`rides`).
 void Sizer::glue_layers(Span span,
@@ -1194,14 +1284,6 @@ void Sizer::lay_out_sub(uint32_t m) {
       return has ? (Wide{ leader } + seg_label_w[e.segment] + (p.node_sep / 2))
                  : Wide{ 0 };
     };
-    // The width a piece needs for `e`'s label beside its leg, or zero where the leading
-    // side holds it.
-    auto const beside_leg =
-        [&](OrderEdge const &e, Wide xa, Wide xb, uint32_t a, uint32_t b) {
-          Wide const leg{ leg_of(xa, xb, a, b) };
-          Wide const need{ room_of(e) };
-          return ((need == 0) || (leg < 0) || (leg >= need)) ? Wide{ 0 } : (leg + need);
-        };
     // Both the straight run and its fold are laid out; the scale measure picks. A nonzero
     // `cut_at` is the one frame rank a cut falls before, in place of `wrap_at`'s.
     auto const lay_out = [&](Shape &shape, Wide wrap_at, uint32_t cut_at, bool stack) {
@@ -1430,66 +1512,7 @@ void Sizer::lay_out_sub(uint32_t m) {
 
         seat_pseudostates(view, shape, chunk_w, chunk_h);
         seat_riders(view, shape, chunk, chunk_w);
-        // A labelled edge into a later piece passes the states below its end on their
-        // leading side; that layer moves along to seat the label there.
-        std::vector<Wide> &layer_lead{ sc.layer_lead };
-        vec_assign(layer_lead, last - first, 0);
-        for (uint32_t k = 0; k < espan.len; ++k) {
-          OrderEdge const &e{ o.edges[espan.off + k] };
-          uint32_t const ia{ index[e.src - span.off] };
-          uint32_t const ib{ index[e.dst - span.off] };
-          if ((ia == INVALID) || (ib == INVALID) || (room_of(e) == 0)) { continue; }
-          uint32_t const end{ (chunk_index[ia] != INVALID) ? ia : ib };
-          uint32_t const other{ (end == ia) ? ib : ia };
-          if ((chunk_index[end] == INVALID) || (piece_of[other] <= chunk)) { continue; }
-          uint32_t const r{ local_rank[nodes[end]] };
-          bool passed{ false };
-          Wide lead{ COORD_MAX };
-          Wide trail{ 0 };
-          for (uint32_t const j : chunk_nodes) {
-            OrderNode const &nd{ o.nodes[span.off + nodes[j]] };
-            if (nd.kind != OrderKind::State) { continue; }
-            uint32_t const rj{ local_rank[nodes[j]] };
-            if (rj == r) {
-              lead = imin(lead, Wide{ shape.at[j].x });
-              passed = passed || ((j != end) && (shape.at[j].y > shape.at[end].y));
-            } else if (rj < r) {
-              trail = imax(trail, Wide{ shape.at[j].x } + along(nd.subject));
-            }
-          }
-          Wide const grow{ (Wide{ route_clearance(p) } + room_of(e)) - (lead - trail) };
-          if (!passed || (grow <= 0)) { continue; }
-          for (uint32_t const j : chunk_nodes) {
-            if (Wide{ shape.at[j].x } >= lead) {
-              shape.at[j].x = static_cast<int32_t>(
-                  imin(Wide{ shape.at[j].x } + grow, Wide{ COORD_MAX }));
-            }
-          }
-          chunk_w += grow;
-          for (uint32_t q = (r - first) + 1; q < layer_lead.size(); ++q) {
-            layer_lead[q] += (layer_lead[q] != 0) ? grow : Wide{ 0 };
-          }
-          layer_lead[r - first] = lead + grow;
-        }
-        // A label beside an edge inside one column, whose leg runs down it,
-        // needs its own width and leader on one side of the leg inside the
-        // piece; where neither side has it the piece grows on its trailing
-        // side, as `dock`'s `contacts closed` needed once `On` stopped
-        // carrying the label as a rank gap (11.10g).
-        for (uint32_t k = 0; k < espan.len; ++k) {
-          OrderEdge const &e{ o.edges[espan.off + k] };
-          uint32_t const a{ in_chunk(e.src) };
-          uint32_t const b{ in_chunk(e.dst) };
-          if ((a == INVALID) || (b == INVALID) ||
-              (local_rank[nodes[a]] != local_rank[nodes[b]])) {
-            continue;
-          }
-          Wide const lead{ layer_lead[local_rank[nodes[a]] - first] };
-          Wide const room{
-            beside_leg(e, shape.at[a].x - lead, shape.at[b].x - lead, a, b)
-          };
-          if (room != 0) { chunk_w = imax(chunk_w, lead + room); }
-        }
+        chunk_w = column_label_room(view, shape, chunk, chunk_w);
         chunk_h = leg_label_room(view, shape, chunk_h);
         pieces_fit = pieces_fit && (chunk_w <= COORD_MAX) && (chunk_h <= COORD_MAX);
         if (!pieces_fit) { break; }
