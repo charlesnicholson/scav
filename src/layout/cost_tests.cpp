@@ -709,7 +709,7 @@ TEST_CASE("cost: a route through a region neither end is in is a Tier-0 violatio
   CHECK(cost_terms(c, decompose(c), z, round, {}, profile()).through_region == 0);
 }
 
-TEST_CASE("cost: a placed box over a state neither endpoint is under costs") {
+TEST_CASE("cost: a placed box over a state neither endpoint is under breaks Tier 0") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -725,10 +725,16 @@ TEST_CASE("cost: a placed box over a state neither endpoint is under costs") {
   r.placed = { { .x = 200, .y = -190, .w = 60, .h = 20 } };
   scav_path_box const box{ .subject = 0, .w = 60, .h = 20, .order = 0 };
   scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
-  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label == 1);
+  CostTerms const over{ cost_terms(c, decompose(c), z, r, s, profile()) };
+  CHECK(over.label_over_box == 1);
+  CHECK(over.label == 0);
+  CHECK(cost_of(over, profile()).t0_violations == 1);
 
   z.state[other.v] = { .x = 200, .y = 500, .w = 100, .h = 100 };
-  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label == 0);
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label_over_box == 0);
+
+  r.placed = { { .x = 410, .y = 10, .w = 60, .h = 20 } };  // over its own leaf endpoint
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label_over_box == 1);
 }
 
 TEST_CASE("cost: inside the composite it runs in, only the text bands cost") {
@@ -753,10 +759,46 @@ TEST_CASE("cost: inside the composite it runs in, only the text bands cost") {
   CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label == 0);
 
   r.placed = { { .x = 200, .y = 15, .w = 60, .h = 20 } };  // in Outer's title band
-  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label == 1);
+  CostTerms const band{ cost_terms(c, decompose(c), z, r, s, profile()) };
+  CHECK(band.label == 1);
+  CHECK(band.label_over_box == 0);
 }
 
-TEST_CASE("cost: a placed box over another transition's route is a label cost") {
+TEST_CASE(
+    "cost: a composite endpoint enclosing the other end holds the box, bar its bands") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const outer{ build_state(c, root, "Outer", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, outer, "main", {}) };
+  StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
+  StateId const away{ build_state(c, root, "Away", StateKind::Normal, {}) };
+  build_trans(c, outer, a, TransKind::External, {});
+  build_trans(c, a, outer, TransKind::External, {});
+  build_trans(c, outer, away, TransKind::External, {});
+
+  SizedLayout z{ blank(c) };
+  z.state[outer.v] = { .x = 0, .y = 0, .w = 600, .h = 200 };
+  z.before[outer.v] = { .x = 10, .y = 10, .w = 580, .h = 30 };
+  z.state[a.v] = { .x = 50, .y = 80, .w = 100, .h = 60 };
+  z.state[away.v] = { .x = 900, .y = 80, .w = 100, .h = 60 };
+  Routes r{ routes_of(c,
+                      { { { .x = 600, .y = 150 }, { .x = 100, .y = 150 } },
+                        { { .x = 100, .y = 80 }, { .x = 100, .y = 60 } },
+                        { { .x = 600, .y = 110 }, { .x = 900, .y = 110 } } }) };
+  auto const over = [&](uint32_t subject, scav_rect at) {
+    scav_path_box const box{ .subject = subject, .w = at.w, .h = at.h, .order = 0 };
+    scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
+    r.placed = { at };
+    return cost_terms(c, decompose(c), z, r, s, profile()).label_over_box;
+  };
+  CHECK(over(0, { .x = 300, .y = 160, .w = 60, .h = 20 }) == 0);  // inside Outer, into A
+  CHECK(over(1, { .x = 300, .y = 160, .w = 60, .h = 20 }) == 0);  // inside Outer, out of A
+  CHECK(over(0, { .x = 300, .y = 15, .w = 60, .h = 20 }) == 1);   // Outer's title band
+  CHECK(over(0, { .x = 60, .y = 100, .w = 60, .h = 20 }) == 1);   // A, a leaf endpoint
+  CHECK(over(2, { .x = 500, .y = 120, .w = 60, .h = 20 }) == 1);  // Outer, to a sibling
+}
+
+TEST_CASE("cost: a placed box over another transition's route breaks Tier 0") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -776,10 +818,16 @@ TEST_CASE("cost: a placed box over another transition's route is a label cost") 
   // Straddling its own route is free and straddling the other one is not, so
   // the two rects differ only in which line they cross.
   r.placed = { { .x = 200, .y = 40, .w = 60, .h = 20 } };
-  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label == 0);
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label_over_route == 0);
 
   r.placed = { { .x = 200, .y = 70, .w = 60, .h = 20 } };
-  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label == 1);
+  CostTerms const over{ cost_terms(c, decompose(c), z, r, s, profile()) };
+  CHECK(over.label_over_route == 1);
+  CHECK(over.label == 0);
+  CHECK(cost_of(over, profile()).t0_violations == 1);
+
+  r.placed = { { .x = 200, .y = 82, .w = 60, .h = 20 } };  // beside it, a line clear
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label_over_route == 0);
 }
 
 TEST_CASE("cost: a box nearer a foreign route than its own is charged the shortfall") {
@@ -851,15 +899,15 @@ TEST_CASE("cost: a placed box the space table does not name owns no route") {
   // Named, the line is its own and free; unnamed, it is a stranger's, and no
   // leg of its own means no nearness to price either way.
   scav_path_box const named{ .subject = 0, .w = 60, .h = 20, .order = 0 };
-  CHECK(scored({ .path_box = &named, .n_path_box = 1 }).label == 0);
-  CHECK(scored({}).label == 1);
+  CHECK(scored({ .path_box = &named, .n_path_box = 1 }).label_over_route == 0);
+  CHECK(scored({}).label_over_route == 1);
   CHECK(scored({}).label_near == 0);
 
   // A table too short to reach the box, and one naming a transition that is not
   // there, leave it a stranger's the same way.
-  CHECK(scored({ .path_box = &named, .n_path_box = 0 }).label == 1);
+  CHECK(scored({ .path_box = &named, .n_path_box = 0 }).label_over_route == 1);
   scav_path_box const past{ .subject = 7, .w = 60, .h = 20, .order = 0 };
-  CHECK(scored({ .path_box = &past, .n_path_box = 1 }).label == 1);
+  CHECK(scored({ .path_box = &past, .n_path_box = 1 }).label_over_route == 1);
 }
 
 TEST_CASE("cost: a box whose own transition has no route is charged nothing") {
@@ -1185,7 +1233,7 @@ TEST_CASE("cost: a tombstone is not a box, an obstacle or a label collision") {
   CostTerms const live{ scored() };
   CHECK(live.box_overlap == 2);  // A over Gone, and P over Q
   CHECK(live.through_box == 1);
-  CHECK(live.label == 1);
+  CHECK(live.label_over_box == 1);
 
   // A dead submachine's children are no longer siblings of each other.
   c.submachines[dropped.v].live = 0;
@@ -1196,7 +1244,7 @@ TEST_CASE("cost: a tombstone is not a box, an obstacle or a label collision") {
   CostTerms const buried{ scored() };
   CHECK(buried.box_overlap == 0);
   CHECK(buried.through_box == 0);
-  CHECK(buried.label == 0);
+  CHECK(buried.label_over_box == 0);
 }
 
 TEST_CASE("cost: a box in the composite's trailing band costs as its title does") {
@@ -2297,26 +2345,35 @@ CostTerms terms(Chart const &c,
       if (overlaps(r.placed[i], r.placed[j])) { ++t.label; }
     }
     uint32_t subject{ INVALID };
+    uint32_t host{ INVALID };
     Wide height{ 0 };
     if ((s.path_box != nullptr) && (i < s.n_path_box) &&
         (s.path_box[i].subject < c.transitions.size())) {
       subject = s.path_box[i].subject;
       height = s.path_box[i].h;
-      mark(c.transitions[subject].src, 1);
-      StateId up{ enclosing_state(c, c.transitions[subject].dst) };
+      Transition const &tr{ c.transitions[subject] };
+      mark(tr.src, 1);
+      StateId up{ enclosing_state(c, tr.dst) };
       for (size_t step = 0; (step < c.states.size()) && (up.v != INVALID); ++step) {
         if (encloses[up.v] == 1) { encloses[up.v] = 2; }
+        if (up.v == tr.src.v) { host = up.v; }
         up = enclosing_state(c, up);
+      }
+      for (StateId at{ enclosing_state(c, tr.src) }; at.v != INVALID;
+           at = enclosing_state(c, at)) {
+        if (at.v == tr.dst.v) { host = at.v; }
       }
     }
     for (uint32_t st = 0; st < c.states.size(); ++st) {
       if (c.states[st].live == 0) { continue; }
-      if (encloses[st] == 2) {
-        if (overlaps(r.placed[i], z.before[st]) || overlaps(r.placed[i], z.after[st])) {
-          ++t.label;
-        }
+      bool const bands{ overlaps(r.placed[i], z.before[st]) ||
+                        overlaps(r.placed[i], z.after[st]) };
+      if (st == host) {
+        if (bands) { ++t.label_over_box; }
+      } else if (encloses[st] == 2) {
+        if (bands) { ++t.label; }
       } else if (overlaps(r.placed[i], z.state[st])) {
-        ++t.label;
+        ++t.label_over_box;
       }
     }
     Wide own{ -1 };
@@ -2329,7 +2386,7 @@ CostTerms terms(Chart const &c,
         continue;
       }
       other = (other < 0) ? away : imin(other, away);
-      if (overlaps(r.placed[i], seg)) { ++t.label; }
+      if (overlaps(r.placed[i], seg)) { ++t.label_over_route; }
     }
     if ((own >= 0) && (other >= 0)) {
       Wide const shortfall{ (own + height) - other };
@@ -2409,6 +2466,8 @@ std::string first_difference(CostTerms const &got, CostTerms const &want) {
     if (a[i] != b[i]) { return TERM_NAMES[i]; }
   }
   if (got.retrace != want.retrace) { return "retrace"; }
+  if (got.label_over_box != want.label_over_box) { return "label_over_box"; }
+  if (got.label_over_route != want.label_over_route) { return "label_over_route"; }
   return {};
 }
 
@@ -2714,7 +2773,7 @@ TEST_CASE("cost: the indexed terms are the direct scans' at the edges") {
   scav_spaces const s{ .path_box = boxes.data(),
                        .n_path_box = static_cast<uint32_t>(boxes.size()) };
   CostTerms const labelled{ agree(r, s) };
-  CHECK(labelled.label > 0);
+  CHECK(labelled.label_over_box + labelled.label_over_route > 0);
   CHECK(labelled.label_near > 0);
 
   // The box's own route is 40 above it and its height 20, so a foreign route nearer

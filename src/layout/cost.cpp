@@ -807,7 +807,7 @@ void seen_reset(Seen &seen, size_t n) {
 
 int32_t tier0_of(CostTerms const &t) {
   return t.through_box + t.box_overlap + t.vanished + t.flush + t.through_region +
-         t.retrace;
+         t.retrace + t.label_over_box + t.label_over_route;
 }
 
 }  // namespace
@@ -1140,6 +1140,7 @@ CostTerms cost_terms(CostContext const &ctx,
         }
       });
       uint32_t subject{ INVALID };
+      uint32_t host{ INVALID };  // an endpoint enclosing the other end
       Wide height{ 0 };
       common.clear();
       if ((s.path_box != nullptr) && (i < s.n_path_box) &&
@@ -1148,24 +1149,34 @@ CostTerms cost_terms(CostContext const &ctx,
         height = s.path_box[i].h;
         // Only a state enclosing both ends is exempt from its own rect: `2` marks
         // the intersection, `1` src's chain alone, and the reset below clears both.
-        mark(c.transitions[subject].src, 1);
-        StateId up{ enclosing_state(c, c.transitions[subject].dst) };
+        StateId const src{ c.transitions[subject].src };
+        mark(src, 1);
+        StateId const dst{ c.transitions[subject].dst };
+        host = ((dst.v < encloses.size()) && (encloses[dst.v] == 1)) ? dst.v : INVALID;
+        StateId up{ enclosing_state(c, dst) };
         for (size_t step = 0; (step < c.states.size()) && (up.v != INVALID); ++step) {
           if (encloses[up.v] == 1) {
             encloses[up.v] = 2;
             vec_push_back(common, up.v);
           }
+          host = (up.v == src.v) ? src.v : host;
           up = enclosing_state(c, up);
         }
       }
-      // The grid charges every state's rect but those at 2, which pay for their bands.
+      // The grid charges every state's rect but those at 2 and the host, which pay for
+      // their bands: the host's in Tier 0.
       grid_each(states, box, 0, seen_state, [&](uint32_t at) {
         uint32_t const st{ state_of[at] };
-        if ((encloses[st] != 2) && overlaps(box, state_rect[at])) {
-          ++t.label;
+        if ((encloses[st] != 2) && (st != host) && overlaps(box, state_rect[at])) {
+          ++t.label_over_box;
           blame(party, subject, INVALID);
         }
       });
+      if ((host != INVALID) && (c.states[host].live != 0) &&
+          (overlaps(box, z.before[host]) || overlaps(box, z.after[host]))) {
+        ++t.label_over_box;
+        blame(party, subject, INVALID);
+      }
       for (uint32_t const st : common) {
         if ((c.states[st].live != 0) &&
             (overlaps(box, z.before[st]) || overlaps(box, z.after[st]))) {
@@ -1193,7 +1204,7 @@ CostTerms cost_terms(CostContext const &ctx,
         if ((other < 0) || (away < other)) { nearest = pieces[j].trans; }
         other = (other < 0) ? away : imin(other, away);
         if (overlaps(box, seg_box[j])) {
-          ++t.label;
+          ++t.label_over_route;
           blame(party, subject, pieces[j].trans);
         }
       });

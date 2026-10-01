@@ -66,7 +66,7 @@ geometry structural 928ff0f9 coordinate 6301c7e4
   chart 0,0 13750x8758
   rests on --portfolio-row 1 --rank 11:1 --rank 2:0 --rank 14:3 --rank 18:2 --cut 1:0 --reverse 18:0 --face 13:0:0:2 --face 19:0:0:3 --orient 5
   cost t0 0 t2 5203
-    tier0 through_box 0 box_overlap 0 flush 0 through_region 0 retrace 0
+    tier0 through_box 0 box_overlap 0 flush 0 through_region 0 retrace 0 label_over_box 0 label_over_route 0
     bends 2 share 1968bp
     corridor 0 share 0bp
     crossings 0 share 0bp
