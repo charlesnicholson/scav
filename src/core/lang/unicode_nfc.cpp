@@ -5,6 +5,7 @@
 #include "scav/scav_types.h"
 #include "scav_int.h"
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -199,8 +200,8 @@ void canonical_order(std::vector<uint32_t> &v) {
 }  // namespace
 
 NfcTables const &unicode_nfc_tables() {
-  static NfcTables const tables{ decode() };
-  return tables;
+  static NfcTables const TABLES{ decode() };
+  return TABLES;
 }
 
 bool unicode_nfc_needs_work(uint32_t cp) {
