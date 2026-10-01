@@ -414,6 +414,7 @@ struct Prefix {
 
 // Phases 2 and 3 for one tuple, `knobs` holding it. `prefix` receives the prefix; `from`,
 // one differing from `pins` only in faces, supplies phases 1 and 2 in place of `orders`.
+// `turned_base` is `order_submachines`' `base` for the ordering after the facing pass.
 Candidate search_candidate(Chart const &c,
                            SplitGraph const &g,
                            SubmachineOrders const &orders,
@@ -430,7 +431,8 @@ Candidate search_candidate(Chart const &c,
                            SearchPins const *pins = nullptr,
                            Prefix *prefix = nullptr,
                            Prefix const *from = nullptr,
-                           bool labels = true) {
+                           bool labels = true,
+                           SubmachineOrders const *turned_base = nullptr) {
   Candidate out;
   SubmachineOrders facing;
   SubmachineOrders const *use{ &orders };
@@ -462,7 +464,7 @@ Candidate search_candidate(Chart const &c,
         }
       }
       vec_insert(turned.sides, turned.sides.end(), flips.sides.begin(), flips.sides.end());
-      facing = order_submachines(c, g, s, knobs, threads, turned);
+      facing = order_submachines(c, g, s, knobs, threads, turned, turned_base);
       SizedLayout again;
       std::vector<Diagnostic> spilled;
       if (size_layout(c, g, facing, s, knobs, again, spilled, dar, pack, fold)) {
@@ -663,7 +665,9 @@ Scored scored_of(Chart const &c,
 
 // `from`, where given, is the incumbent's prefix and `pins` the incumbent's
 // with one face more: the candidate's phases 1 and 2 are the incumbent's. Without
-// `labels` the score is `scored_of`'s bound.
+// `labels` the score is `scored_of`'s bound. `held_orders` and `turned_orders` are the
+// incumbent's orderings before and after its facing pass, which the candidate's take
+// frames from.
 Scored score_move(Chart const &c,
                   SplitGraph const &g,
                   CostContext const &scoring,
@@ -677,9 +681,13 @@ Scored score_move(Chart const &c,
                   SearchPins const &pins,
                   RouteCache const *reuse,
                   Prefix const *from,
-                  bool labels = true) {
+                  bool labels = true,
+                  SubmachineOrders const *held_orders = nullptr,
+                  SubmachineOrders const *turned_orders = nullptr) {
   auto const whole = [&]() {
-    SubmachineOrders const moved{ order_submachines(c, g, s, objective, 1, pins) };
+    SubmachineOrders const moved{
+      order_submachines(c, g, s, objective, 1, pins, held_orders)
+    };
     std::vector<Diagnostic> spilled;
     return search_candidate(c,
                             g,
@@ -697,7 +705,8 @@ Scored score_move(Chart const &c,
                             &pins,
                             nullptr,
                             nullptr,
-                            labels);
+                            labels,
+                            turned_orders);
   };
   // A traced search scores every move whole, its trace recording each move's phases.
   bool shortcut{ (from != nullptr) && (trace_sink() == nullptr) };
@@ -1155,7 +1164,9 @@ Improved run_search(Chart const &c,
                         with(held, round[i]),
                         &base,
                         (round[i].kind == MoveKind::Face) ? &incumbent : nullptr,
-                        labels);
+                        labels,
+                        &here,
+                        &incumbent.laid);
     };
     uint32_t const n{ static_cast<uint32_t>(round.size()) };
     vec_assign(got, n, {});
@@ -1239,7 +1250,7 @@ Improved run_search(Chart const &c,
 
     if (!found) { break; }
     held = with(held, take);
-    here = order_submachines(c, g, s, objective, threads, held);
+    here = order_submachines(c, g, s, objective, threads, held, &here);
     // Re-derived as the taken candidate was scored, reusing every frame the move left or
     // shifted.
     RouteCache const was{ std::move(base) };

@@ -74,6 +74,15 @@ struct SubmachineOrders {
 
   // Per segment, 1 where it lies on a cycle of its frame's graph before any turn.
   std::vector<uint8_t> seg_cyclic;
+
+  // What a frame reads beyond its graph, so a later call can tell which frames come out
+  // as these did: the graph's serial, the profile, and per segment its reversal and cut
+  // pins and pinned side packed a byte each, and its label charge.
+  uint32_t serial{ 0 };
+  scav_profile profile{};
+  std::vector<uint32_t> seg_pins;
+  std::vector<int32_t> seg_label;
+  std::vector<uint32_t> state_pin;  // per state, the rank its last pin sets; else INVALID
 };
 
 // Ranks by longest path, long edges chained through bends, then `sweep_count` median
@@ -87,12 +96,15 @@ struct SubmachineOrders {
 // step later: it drops a segment's bends, so the buckets and the sweeps are
 // re-run over a graph that no longer holds them.
 
+// `base`, where given, is an earlier call's result: a frame whose inputs all match the
+// ones `base` recorded is copied from it rather than ordered.
 SubmachineOrders order_submachines(Chart const &c,
                                    SplitGraph const &g,
                                    scav_spaces const &s,
                                    scav_profile const &p,
                                    uint32_t threads = 0,
-                                   SearchPins const &pins = {});
+                                   SearchPins const &pins = {},
+                                   SubmachineOrders const *base = nullptr);
 
 // Crossings between two adjacent ranks by inversion counting. Exposed because
 // it is what the ordering minimizes and what a test measures against.
