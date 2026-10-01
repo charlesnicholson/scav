@@ -73,14 +73,21 @@ struct CostContext {
 
 CostContext cost_context(Chart const &c);
 
-// `ctx` is `cost_context(c)`.
+// What `party` marks per transition: a route with a bend, and one charged any of
+// crossings, corridor, crowding, excess_len, label or label_near.
+inline constexpr uint8_t PARTY_BENT{ 1 };
+inline constexpr uint8_t PARTY_PRICED{ 2 };
+
+// `ctx` is `cost_context(c)`. `party`, where given, is resized to the transitions
+// and marked.
 CostTerms cost_terms(CostContext const &ctx,
                      Chart const &c,
                      SplitGraph const &g,
                      SizedLayout const &z,
                      Routes const &r,
                      scav_spaces const &s,
-                     scav_profile const &p);
+                     scav_profile const &p,
+                     std::vector<uint8_t> *party = nullptr);
 
 // The same with a context built for this one call.
 CostTerms cost_terms(Chart const &c,

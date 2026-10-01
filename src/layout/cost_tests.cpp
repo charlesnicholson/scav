@@ -281,6 +281,47 @@ int64_t corridor_of(Chart const &c, std::vector<std::vector<scav_point>> const &
 
 }  // namespace
 
+TEST_CASE(
+    "cost: party marks a bent route, both of a crossing, and neither of a clear one") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  for (uint32_t i = 0; i < 4; ++i) { build_trans(c, a, b, TransKind::External, {}); }
+
+  SizedLayout const z{ blank(c) };
+  Routes const r{ routes_of(
+      c,
+      { { { .x = 0, .y = 0 }, { .x = 100, .y = 0 }, { .x = 100, .y = 100 } },
+        { { .x = 300, .y = 0 }, { .x = 400, .y = 100 } },
+        { { .x = 300, .y = 100 }, { .x = 400, .y = 0 } },
+        { { .x = 1000, .y = 1000 }, { .x = 1100, .y = 1000 } } }) };
+  SplitGraph const g{ decompose(c) };
+  std::vector<uint8_t> party;
+  CostTerms const t{ cost_terms(cost_context(c), c, g, z, r, {}, profile(), &party) };
+  CHECK(t.crossings == 1);
+  REQUIRE(party.size() == 4);
+  CHECK((party[0] & PARTY_BENT) != 0);
+  CHECK(party[1] == PARTY_PRICED);
+  CHECK(party[2] == PARTY_PRICED);
+  CHECK(party[3] == 0);
+
+  // A shared run marks both routes on it.
+  Chart const two{ edges(2) };
+  Routes const shared{ routes_of(
+      two,
+      { { { .x = 0, .y = 60 }, { .x = 500, .y = 60 }, { .x = 500, .y = 100 } },
+        { { .x = 0, .y = 80 }, { .x = 500, .y = 80 }, { .x = 500, .y = 101 } } }) };
+  SplitGraph const g2{ decompose(two) };
+  CostTerms const u{
+    cost_terms(cost_context(two), two, g2, blank(two), shared, {}, profile(), &party)
+  };
+  CHECK(u.corridor == 20);
+  REQUIRE(party.size() == 2);
+  CHECK((party[0] & PARTY_PRICED) != 0);
+  CHECK((party[1] & PARTY_PRICED) != 0);
+}
+
 TEST_CASE("cost: two routes ending as one line are not charged for the run they share") {
   Chart const c{ edges(2) };
   // Both turn up onto x=500 and finish at the same point, so the 20 they share

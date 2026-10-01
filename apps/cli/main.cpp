@@ -5,8 +5,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <string_view>
 #include <vector>
+
+namespace scav { void layout_face_offer(uint32_t mode); }  // namespace scav
 
 namespace {
 
@@ -171,5 +174,10 @@ int dispatch(int argc, char **argv) {
 
 int main(int argc, char **argv) {
   if (argc < 2) { return usage(); }
+  // SCAV_FACES=priced or =bent narrows where Level 1 offers face moves.
+  if (char const *const faces{ std::getenv("SCAV_FACES") }; faces != nullptr) {
+    std::string_view const mode{ faces };
+    scav::layout_face_offer((mode == "priced") ? 1U : ((mode == "bent") ? 2U : 0U));
+  }
   return dispatch(argc, argv);
 }
