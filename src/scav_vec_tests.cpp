@@ -195,7 +195,7 @@ TEST_CASE("vec: a random run of every helper matches the members") {
   std::vector<uint32_t> want;
   for (uint64_t step = 0; step < 4000; ++step) {
     uint64_t const r{ rnd(3, step) };
-    size_t const n{ static_cast<size_t>((r >> 8U) % 40U) };
+    size_t const n{ (r >> 8U) % 40U };
     auto const x{ static_cast<uint32_t>(r >> 32U) };
     switch (r % 8U) {
       case 0:

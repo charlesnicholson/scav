@@ -107,7 +107,7 @@ void vec_push_back(std::vector<T> &v, std::type_identity_t<T> &&x) {
 }
 
 template <typename T, typename It>
-SCAV_NOINLINE typename std::vector<T>::iterator vec_insert(
+SCAV_NOINLINE std::vector<T>::iterator vec_insert(
     std::vector<T> &v,
     typename std::vector<T>::const_iterator pos,
     It first,
@@ -116,10 +116,9 @@ SCAV_NOINLINE typename std::vector<T>::iterator vec_insert(
 }
 
 template <typename T>
-typename std::vector<T>::iterator vec_insert(
-    std::vector<T> &v,
-    typename std::vector<T>::const_iterator pos,
-    std::initializer_list<std::type_identity_t<T>> il) {
+std::vector<T>::iterator vec_insert(std::vector<T> &v,
+                                    typename std::vector<T>::const_iterator pos,
+                                    std::initializer_list<std::type_identity_t<T>> il) {
   return vec_insert(v, pos, il.begin(), il.end());
 }
 
