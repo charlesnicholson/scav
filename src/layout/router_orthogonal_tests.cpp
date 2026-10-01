@@ -2790,3 +2790,64 @@ TEST_CASE("ortho: a face too short to seat on, or an end naming no box, has no e
   StraightRouter const straight;
   CHECK(straight.effective_faces(in, 0, 0) == 0U);
 }
+
+TEST_CASE("ortho: the radix open list pops in the order one heap over every entry does") {
+  // Pushes between pops, some below the least popped `f`, with `f` crowded onto a few
+  // values so `g` and node decide often; the reference is a scan for the least.
+  OrthoRadixHeap h;
+  std::vector<OrthoFrontierEntry> all;
+  uint32_t wrong{ 0 };
+  uint32_t below{ 0 };
+  uint32_t node{ 0 };
+  uint32_t x{ 20'261'001 };
+  auto const next = [&x](uint32_t n) {
+    x = (x * 1'664'525U) + 1'013'904'223U;
+    return (x >> 8U) % n;
+  };
+  auto const least_of = [&all]() {
+    size_t least{ 0 };
+    for (size_t i = 1; i < all.size(); ++i) {
+      OrthoFrontierEntry const &a{ all[i] };
+      OrthoFrontierEntry const &b{ all[least] };
+      bool const less{ (a.f != b.f) ? (a.f < b.f)
+                                    : ((a.g != b.g) ? (a.g < b.g) : (a.node < b.node)) };
+      least = less ? i : least;
+    }
+    return least;
+  };
+  for (uint32_t trial = 0; trial < 200; ++trial) {
+    ortho_open_clear(h);
+    all.clear();
+    Wide floor{ static_cast<Wide>(next(64)) - 32 };
+    for (uint32_t step = 0; step < 300; ++step) {
+      uint32_t const pushes{ next(4) };
+      for (uint32_t i = 0; i < pushes; ++i) {
+        bool const low{ next(16) == 0 };
+        Wide const spread{ (next(5) == 0) ? Wide{ 1000 } : Wide{ 1 } };
+        Wide const f{ low ? (floor - 1 - static_cast<Wide>(next(3)))
+                          : (floor + (static_cast<Wide>(next(8)) * spread)) };
+        below += low ? 1U : 0U;
+        OrthoFrontierEntry const e{ .f = f,
+                                    .g = static_cast<Wide>(next(4)),
+                                    .node = node++ };
+        ortho_open_push(h, e);
+        all.push_back(e);
+      }
+      if (all.empty() || (next(3) == 0)) { continue; }
+      size_t const least{ least_of() };
+      OrthoFrontierEntry const got{ ortho_open_pop(h) };
+      wrong += (got.node != all[least].node) ? 1U : 0U;
+      floor = got.f;
+      all.erase(all.begin() + static_cast<std::ptrdiff_t>(least));
+    }
+    while (!all.empty()) {
+      CHECK(!ortho_open_empty(h));
+      size_t const least{ least_of() };
+      wrong += (ortho_open_pop(h).node != all[least].node) ? 1U : 0U;
+      all.erase(all.begin() + static_cast<std::ptrdiff_t>(least));
+    }
+    CHECK(ortho_open_empty(h));
+  }
+  CHECK(wrong == 0);
+  CHECK(below > 0);
+}

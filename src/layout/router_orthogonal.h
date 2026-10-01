@@ -10,6 +10,7 @@
 #include "scav/scav_layout_c.h"
 #include "scav_int.h"
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -46,14 +47,31 @@ struct OrthoFrontierEntry {
   uint32_t node;
 };
 
+// The open list: a radix heap on `f`, whose entries at the least `f` sit in `ties`, a
+// heap on the whole order. `bucket[b]` holds entries whose `f` first differs from
+// `last`'s at bit `b`, so it pops in the same order as one heap over every entry.
+struct OrthoRadixHeap {
+  std::array<std::vector<OrthoFrontierEntry>, 64> bucket;
+  std::vector<OrthoFrontierEntry> ties;
+  std::vector<OrthoFrontierEntry> spill;  // a re-placing pass's
+  uint64_t full{ 0 };                     // bit b set while bucket[b] holds an entry
+  uint64_t last{ 0 };                     // the least key: `f`, sign bit flipped
+};
+
 // Reused across searches, so one allocates nothing once the grid settles.
 // Carrying it over must not change an answer, which is its own test.
 struct OrthoScratch {
   std::vector<OrthoNodeState> state;
   std::vector<uint32_t> path;
-  std::vector<OrthoFrontierEntry> heap;
+  OrthoRadixHeap open;
   uint32_t generation{ 0 };
 };
+
+void ortho_open_clear(OrthoRadixHeap &h);
+void ortho_open_push(OrthoRadixHeap &h, OrthoFrontierEntry const &e);
+// The least entry by `f`, then `g`, then node; `h` holds one.
+OrthoFrontierEntry ortho_open_pop(OrthoRadixHeap &h);
+[[nodiscard]] bool ortho_open_empty(OrthoRadixHeap const &h);
 
 // The grid is the product of its two line sets. Past this the frame degrades
 // to straight lines rather than stalling; 11.5's sparse graph lifts it.
