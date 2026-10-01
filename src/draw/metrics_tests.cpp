@@ -156,12 +156,12 @@ Metrics bundled() {
 
 // The TTF the bundled table was generated from, as committed; empty if unreadable.
 std::vector<scav_byte> const &committed_ttf() {
-  static std::vector<scav_byte> const bytes{ [] {
+  static std::vector<scav_byte> const BYTES{ [] {
     std::vector<scav_byte> out;
     (void)read_file(SCAV_TEST_DATA_DIR "/../assets/font/JetBrainsMono-Regular.ttf", out);
     return out;
   }() };
-  return bytes;
+  return BYTES;
 }
 
 Metrics parsed() {

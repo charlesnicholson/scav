@@ -16,7 +16,7 @@
 #include <string>
 #include <vector>
 
-#if defined(_WIN32)
+#ifdef _WIN32
 #  include <windows.h>
 #elif defined(__APPLE__)
 #  include <mach-o/dyld.h>
@@ -31,7 +31,7 @@ namespace {
 // This process's executable, or empty.
 std::string executable_path() {
   std::string path(4096, '\0');
-#if defined(_WIN32)
+#ifdef _WIN32
   DWORD const n{
     GetModuleFileNameA(nullptr, path.data(), static_cast<DWORD>(path.size()))
   };

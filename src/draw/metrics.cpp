@@ -219,9 +219,7 @@ bool decode_utf8(scav_byte const *s, uint32_t len, uint32_t &at, uint32_t &cp) {
 
 // The last run starting at or below `cp`, then the glyph at its offset.
 uint32_t bundled_glyph(uint32_t cp) {
-  auto const run{
-    std::upper_bound(BUNDLED_RUN_FIRST.begin(), BUNDLED_RUN_FIRST.end(), cp)
-  };
+  auto const *const run{ std::ranges::upper_bound(BUNDLED_RUN_FIRST, cp) };
   if (run == BUNDLED_RUN_FIRST.begin()) { return 0U; }
   auto const i{ static_cast<size_t>(run - BUNDLED_RUN_FIRST.begin()) - 1U };
   uint32_t const offset{ cp - BUNDLED_RUN_FIRST[i] };
@@ -231,9 +229,7 @@ uint32_t bundled_glyph(uint32_t cp) {
 
 // Step 0 is glyph 0, so the step found is never before the first.
 uint32_t bundled_advance(uint32_t row) {
-  auto const step{
-    std::upper_bound(BUNDLED_STEP_GLYPH.begin(), BUNDLED_STEP_GLYPH.end(), row)
-  };
+  auto const *const step{ std::ranges::upper_bound(BUNDLED_STEP_GLYPH, row) };
   return BUNDLED_STEP_ADVANCE[static_cast<size_t>(step - BUNDLED_STEP_GLYPH.begin()) - 1U];
 }
 
