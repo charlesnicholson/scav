@@ -55,20 +55,16 @@ constexpr T imin(T a, T b) {
   return (b < a) ? b : a;
 }
 
-// Floor square root, digit by digit from the top bit pair, so no float and no
-// libm can disagree about the last bit.
+// Floor square root by integer Newton from above: every step is at least the floor
+// (AM-GM) and falls while above it, so the first step that does not fall ends on it.
 constexpr uint64_t isqrt(uint64_t x) {
-  uint64_t root{ 0 };
-  uint64_t bit{ UINT64_C(1) << 62 };
-  while (bit > x) { bit >>= 2U; }
-  while (bit != 0) {
-    if (x >= (root + bit)) {
-      x -= root + bit;
-      root = (root >> 1U) + bit;
-    } else {
-      root >>= 1U;
-    }
-    bit >>= 2U;
+  if (x < 2) { return x; }
+  uint32_t const half{ static_cast<uint32_t>(std::bit_width(x)) / 2U };
+  uint64_t root{ ((x >> half) + (UINT64_C(1) << half)) >> 1U };  // a step from 2^half
+  uint64_t next{ (root + (x / root)) >> 1U };
+  while (next < root) {
+    root = next;
+    next = (root + (x / root)) >> 1U;
   }
   return root;
 }
