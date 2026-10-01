@@ -4,6 +4,8 @@
 // scav's own stable sort, for any sort whose result reaches output. Bottom-up
 // merge over one scratch buffer, templated so the comparator inlines.
 
+#include "scav_vec.h"
+
 #include <cstddef>
 #include <vector>
 
@@ -30,8 +32,9 @@ void scav_insertion_sort(T *first, T *last, Less less) {
 // Where a merge pass would cost more in scratch than it saves in comparisons.
 inline constexpr size_t SCAV_SORT_SMALL{ 32 };
 
+// Over the caller's `scratch`, which it grows as needed and leaves unspecified.
 template <typename T, typename Less>
-void scav_stable_sort(std::vector<T> &v, Less less) {
+void scav_stable_sort(std::vector<T> &v, std::vector<T> &scratch, Less less) {
   size_t const n{ v.size() };
   if (n < 2) { return; }
   if (n <= SCAV_SORT_SMALL) {
@@ -39,7 +42,7 @@ void scav_stable_sort(std::vector<T> &v, Less less) {
     return;
   }
 
-  std::vector<T> scratch(n);
+  if (scratch.size() < n) { vec_resize(scratch, n); }
   T *src{ v.data() };
   T *dst{ scratch.data() };
 
@@ -71,6 +74,12 @@ void scav_stable_sort(std::vector<T> &v, Less less) {
   if (src != v.data()) {
     for (size_t i = 0; i < n; ++i) { v[i] = src[i]; }
   }
+}
+
+template <typename T, typename Less>
+void scav_stable_sort(std::vector<T> &v, Less less) {
+  std::vector<T> scratch;
+  scav_stable_sort(v, scratch, less);
 }
 
 }  // namespace scav

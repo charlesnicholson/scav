@@ -106,6 +106,16 @@ SubmachineOrders order_submachines(Chart const &c,
                                    SearchPins const &pins = {},
                                    SubmachineOrders const *base = nullptr);
 
+// The same into `o`, reusing its capacity; `base` must not be `o`.
+void order_submachines(SubmachineOrders &o,
+                       Chart const &c,
+                       SplitGraph const &g,
+                       scav_spaces const &s,
+                       scav_profile const &p,
+                       uint32_t threads,
+                       SearchPins const &pins,
+                       SubmachineOrders const *base);
+
 // Crossings between two adjacent ranks by inversion counting. Exposed because
 // it is what the ordering minimizes and what a test measures against.
 uint64_t rank_crossings(std::vector<uint32_t> const &south_positions);

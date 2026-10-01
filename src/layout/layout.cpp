@@ -432,9 +432,11 @@ Candidate search_candidate(Chart const &c,
                            Prefix *prefix = nullptr,
                            Prefix const *from = nullptr,
                            bool labels = true,
-                           SubmachineOrders const *turned_base = nullptr) {
+                           SubmachineOrders const *turned_base = nullptr,
+                           SubmachineOrders *facing_into = nullptr) {
   Candidate out;
-  SubmachineOrders facing;
+  SubmachineOrders own;
+  SubmachineOrders &facing{ (facing_into != nullptr) ? *facing_into : own };
   SubmachineOrders const *use{ &orders };
   if (from != nullptr) {
     if (!from->ok) { return out; }
@@ -464,7 +466,7 @@ Candidate search_candidate(Chart const &c,
         }
       }
       vec_insert(turned.sides, turned.sides.end(), flips.sides.begin(), flips.sides.end());
-      facing = order_submachines(c, g, s, knobs, threads, turned, turned_base);
+      order_submachines(facing, c, g, s, knobs, threads, turned, turned_base);
       SizedLayout again;
       std::vector<Diagnostic> spilled;
       if (size_layout(c, g, facing, s, knobs, again, spilled, dar, pack, fold)) {
@@ -663,6 +665,17 @@ Scored scored_of(Chart const &c,
   return out;
 }
 
+// What one scored move orders and discards. Per thread: a move runs on one thread and
+// waits on nothing.
+struct MoveScratch {
+  SubmachineOrders moved, facing;
+};
+
+MoveScratch &move_scratch() {
+  thread_local MoveScratch s;
+  return s;
+}
+
 // `from`, where given, is the incumbent's prefix and `pins` the incumbent's
 // with one face more: the candidate's phases 1 and 2 are the incumbent's. Without
 // `labels` the score is `scored_of`'s bound. `held_orders` and `turned_orders` are the
@@ -685,9 +698,9 @@ Scored score_move(Chart const &c,
                   SubmachineOrders const *held_orders = nullptr,
                   SubmachineOrders const *turned_orders = nullptr) {
   auto const whole = [&]() {
-    SubmachineOrders const moved{
-      order_submachines(c, g, s, objective, 1, pins, held_orders)
-    };
+    MoveScratch &sc{ move_scratch() };
+    SubmachineOrders &moved{ sc.moved };
+    order_submachines(moved, c, g, s, objective, 1, pins, held_orders);
     std::vector<Diagnostic> spilled;
     return search_candidate(c,
                             g,
@@ -706,7 +719,8 @@ Scored score_move(Chart const &c,
                             nullptr,
                             nullptr,
                             labels,
-                            turned_orders);
+                            turned_orders,
+                            &sc.facing);
   };
   // A traced search scores every move whole, its trace recording each move's phases.
   bool shortcut{ (from != nullptr) && (trace_sink() == nullptr) };
