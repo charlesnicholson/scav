@@ -860,6 +860,7 @@ struct CallBuffers {
   std::vector<scav_rect> dirty, pieces;
   std::vector<Pieces> by_route;
   std::vector<uint32_t> live, queue, merge, settled;
+  Local local;
 };
 
 CallBuffers &call_buffers() {
@@ -968,7 +969,7 @@ uint32_t place_labels_from(Chart const &c,
     }
   };
 
-  Local l;
+  Local &l{ cb.local };          // every field set per box before it is read
   thread_local Scratch scratch;  // every search resets what it reads first
   std::vector<uint32_t> &settled{ cb.settled };
   settled.clear();

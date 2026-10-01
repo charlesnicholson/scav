@@ -475,7 +475,11 @@ void search_candidate(Candidate &out,
     // Ports turned to face where their routes go, and the frames laid out again with
     // them; a function of the tuple and pins, so re-deriving the drawing repeats it.
     SearchPins &turned{ out.laid };
-    turned = (pins != nullptr) ? *pins : SearchPins{};
+    if (pins != nullptr) {
+      turned = *pins;  // copy-assigned, keeping `turned`'s storage
+    } else {
+      turned = SearchPins{};
+    }
     Facing &flips{ sc.flips };
     facing_flips(flips, sc.taken, c, g, orders, out.sized);
     if (!flips.reverses.empty() || !flips.sides.empty()) {
