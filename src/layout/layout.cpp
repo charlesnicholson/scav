@@ -412,6 +412,7 @@ void facing_flips(Facing &out,
 struct Prefix {
   SubmachineOrders laid;
   SizedLayout sized;
+  SizeRecord sized_first, sized_laid;  // the sizings of the first ordering and of `laid`
   SearchPins turned;
   Routes routes;  // as phase 3 first routes it, over `sized`
   bool ok{ false };
@@ -462,7 +463,8 @@ void label_candidate(Candidate &cand,
 // Phases 2 and 3 for one tuple, `knobs` holding it, into `out`, reusing its capacity and
 // `scratch`'s. `prefix` receives the prefix; `from`, one differing from `pins` only in
 // faces, supplies phases 1 and 2 in place of `orders`. `turned_base` is
-// `order_submachines`' `base` for the ordering after the facing pass.
+// `order_submachines`' `base` for the ordering after the facing pass, and `sized_base` and
+// `turned_sized_base` are `size_layout`'s for the sizings before and after it.
 void search_candidate(Candidate &out,
                       Chart const &c,
                       SplitGraph const &g,
@@ -482,6 +484,8 @@ void search_candidate(Candidate &out,
                       Prefix const *from,
                       bool labels,
                       SubmachineOrders const *turned_base,
+                      SizeRecord const *sized_base,
+                      SizeRecord const *turned_sized_base,
                       CandidateScratch *scratch) {
   CandidateScratch own;
   CandidateScratch &sc{ (scratch != nullptr) ? *scratch : own };
@@ -500,7 +504,18 @@ void search_candidate(Candidate &out,
     if (pins != nullptr) { out.laid.faces = pins->faces; }
     use = &from->laid;
   } else {
-    if (!size_layout(c, g, orders, s, knobs, out.sized, diags, dar, pack, fold)) {
+    if (!size_layout(c,
+                     g,
+                     orders,
+                     s,
+                     knobs,
+                     out.sized,
+                     diags,
+                     dar,
+                     pack,
+                     fold,
+                     sized_base,
+                     (prefix != nullptr) ? &prefix->sized_first : nullptr)) {
       if (prefix != nullptr) { prefix->ok = false; }
       out.routes = Routes{};
       out.laid = SearchPins{};
@@ -515,6 +530,7 @@ void search_candidate(Candidate &out,
       turned = SearchPins{};
     }
     Facing &flips{ sc.flips };
+    bool turned_sized{ false };
     facing_flips(flips, sc.taken, c, g, orders, out.sized);
     if (!flips.reverses.empty() || !flips.sides.empty()) {
       for (ReversePin const &f : flips.reverses) {
@@ -531,12 +547,25 @@ void search_candidate(Candidate &out,
       order_submachines(facing, c, g, s, knobs, threads, turned, turned_base);
       SizedLayout &again{ sc.again };
       std::vector<Diagnostic> spilled;
-      if (size_layout(c, g, facing, s, knobs, again, spilled, dar, pack, fold)) {
+      if (size_layout(c,
+                      g,
+                      facing,
+                      s,
+                      knobs,
+                      again,
+                      spilled,
+                      dar,
+                      pack,
+                      fold,
+                      turned_sized_base,
+                      (prefix != nullptr) ? &prefix->sized_laid : nullptr)) {
         use = &facing;
         std::swap(out.sized, again);
+        turned_sized = true;
       }
     }
     if (prefix != nullptr) {
+      if (!turned_sized) { prefix->sized_laid = prefix->sized_first; }
       prefix->laid = *use;
       prefix->sized = out.sized;
       prefix->turned = out.laid;
@@ -622,7 +651,9 @@ Candidate search_candidate(Chart const &c,
                            Prefix *prefix = nullptr,
                            Prefix const *from = nullptr,
                            bool labels = true,
-                           SubmachineOrders const *turned_base = nullptr) {
+                           SubmachineOrders const *turned_base = nullptr,
+                           SizeRecord const *sized_base = nullptr,
+                           SizeRecord const *turned_sized_base = nullptr) {
   Candidate out;
   search_candidate(out,
                    c,
@@ -643,6 +674,8 @@ Candidate search_candidate(Chart const &c,
                    from,
                    labels,
                    turned_base,
+                   sized_base,
+                   turned_sized_base,
                    nullptr);
   return out;
 }
@@ -783,8 +816,9 @@ MoveScratch &move_scratch() {
 // `from`, where given, is the incumbent's prefix and `pins` the incumbent's
 // with one face more: the candidate's phases 1 and 2 are the incumbent's. Without
 // `labels` the score is `scored_of`'s bound. `held_orders` and `turned_orders` are the
-// incumbent's orderings before and after its facing pass, which the candidate's take
-// frames from. `routed`, where given, receives the candidate scored.
+// incumbent's orderings before and after its facing pass, and `held_sized` and
+// `turned_sized` its sizings of them, which the candidate's take frames from. `routed`,
+// where given, receives the candidate scored.
 Scored score_move(Chart const &c,
                   SplitGraph const &g,
                   CostContext const &scoring,
@@ -801,6 +835,8 @@ Scored score_move(Chart const &c,
                   bool labels = true,
                   SubmachineOrders const *held_orders = nullptr,
                   SubmachineOrders const *turned_orders = nullptr,
+                  SizeRecord const *held_sized = nullptr,
+                  SizeRecord const *turned_sized = nullptr,
                   Routed *routed = nullptr) {
   MoveScratch &sc{ move_scratch() };
   auto const whole = [&]() -> Candidate const & {
@@ -825,6 +861,8 @@ Scored score_move(Chart const &c,
                      nullptr,
                      labels,
                      turned_orders,
+                     held_sized,
+                     turned_sized,
                      &sc.keep);
     return sc.whole;
   };
@@ -859,6 +897,8 @@ Scored score_move(Chart const &c,
                    nullptr,
                    from,
                    labels,
+                   nullptr,
+                   nullptr,
                    nullptr,
                    &sc.keep);
   Scored const out{ scored_of(c, g, scoring, s, objective, cand, labels) };
@@ -1139,6 +1179,7 @@ Improved run_search(Chart const &c,
   // rounds.
   RouteCache base;
   Prefix incumbent;
+  SizeRecord was_first, was_laid;  // the incumbent's sizings a round re-derives it from
   {
     std::vector<Diagnostic> spilled;
     Candidate first{ search_candidate(c,
@@ -1393,6 +1434,8 @@ Improved run_search(Chart const &c,
                         labels,
                         &here,
                         &incumbent.laid,
+                        &incumbent.sized_first,
+                        &incumbent.sized_laid,
                         routed);
     };
     uint32_t const n{ static_cast<uint32_t>(round.size()) };
@@ -1524,6 +1567,8 @@ Improved run_search(Chart const &c,
     // shifted.
     RouteCache const was{ std::move(base) };
     base = RouteCache{};
+    std::swap(was_first, incumbent.sized_first);
+    std::swap(was_laid, incumbent.sized_laid);
     std::vector<Diagnostic> spilled;
     out.best = search_candidate(c,
                                 g,
@@ -1539,7 +1584,12 @@ Improved run_search(Chart const &c,
                                 &was,
                                 &base,
                                 &held,
-                                &incumbent);
+                                &incumbent,
+                                nullptr,
+                                true,
+                                nullptr,
+                                &was_first,
+                                &was_laid);
     out.cost = best;
     (void)cost_terms(scoring, c, g, out.best.sized, out.best.routes, s, objective, &party);
   }

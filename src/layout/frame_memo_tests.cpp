@@ -26,6 +26,12 @@ void order_test_reuse(bool on);
 void order_test_reuse_verify(bool on);
 uint64_t order_test_reused();
 uint64_t order_test_reuse_mismatches();
+void size_test_reuse(bool on);
+void size_test_reuse_verify(bool on);
+void size_test_reuse_ignore_dar(bool on);
+uint64_t size_test_reused();
+uint64_t size_test_framed();
+uint64_t size_test_reuse_mismatches();
 
 }  // namespace scav
 
@@ -912,4 +918,207 @@ TEST_CASE("order reuse: every corpus and gauntlet chart at both scales" *
     lay_out_checked(name, false);
     lay_out_checked(name, true);
   }
+}
+
+namespace {
+
+struct SizeReuseGuard {
+  SizeReuseGuard() = default;
+  SizeReuseGuard(SizeReuseGuard const &) = delete;
+  SizeReuseGuard &operator=(SizeReuseGuard const &) = delete;
+  ~SizeReuseGuard() {
+    size_test_reuse(true);
+    size_test_reuse_ignore_dar(false);
+    size_test_reuse_verify(false);
+  }
+};
+
+// `layout_run` on a corpus or gauntlet chart with every sizing that copies a frame sized
+// again without a base and compared; the sizings that differed.
+uint64_t sized_checked(char const *name,
+                       bool labelled,
+                       uint64_t &copied,
+                       uint64_t &framed) {
+  CAPTURE(name);
+  CAPTURE(labelled);
+  Chart c;
+  load(name, c);
+  std::vector<scav_path_box> boxes;
+  for (uint32_t t = 0; labelled && (t < c.transitions.size()); ++t) {
+    Transition const &tr{ c.transitions[t] };
+    if ((tr.live == 0) || ((tr.src == tr.dst) && (tr.kind != TransKind::External))) {
+      continue;
+    }
+    boxes.push_back({ .subject = t, .w = 40, .h = 12, .order = 0 });
+  }
+  scav_spaces const s{ .box_state_stride = sizeof(scav_box_space),
+                       .path_box = boxes.data(),
+                       .n_path_box = static_cast<uint32_t>(boxes.size()),
+                       .path_box_stride = sizeof(scav_path_box) };
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  scav_layout_opts const opts{ .profile = readable(), .router = 0, .threads = 0 };
+  size_test_reuse_verify(true);
+  REQUIRE(layout_run(c, s, opts, placed, diags));
+  copied += size_test_reused();
+  framed += size_test_framed();
+  return size_test_reuse_mismatches();
+}
+
+}  // namespace
+
+TEST_CASE("size reuse: a move in one composite copies its sibling's subtree") {
+  SizeReuseGuard const guard;
+  // `A` and `B` side by side, each with a frame; a cut in `B`'s drops a bend there.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "two", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  SubmachineId const in_b{ build_submachine(c, b, {}, {}) };
+  SubmachineId const in_a{ build_submachine(c, a, {}, {}) };
+  StateId const a1{ build_state(c, in_a, "A1", StateKind::Normal, {}) };
+  StateId const a2{ build_state(c, in_a, "A2", StateKind::Normal, {}) };
+  StateId const b1{ build_state(c, in_b, "B1", StateKind::Normal, {}) };
+  StateId const b2{ build_state(c, in_b, "B2", StateKind::Normal, {}) };
+  StateId const b3{ build_state(c, in_b, "B3", StateKind::Normal, {}) };
+  build_trans(c, a1, a2, TransKind::External, {});
+  build_trans(c, b1, b2, TransKind::External, {});
+  build_trans(c, b2, b3, TransKind::External, {});
+  TransId const longest{ build_trans(c, b1, b3, TransKind::External, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  SplitGraph const g{ decompose(c) };
+  scav_profile const p{ readable() };
+  scav_spaces const s{};
+  SearchPins moved;
+  moved.cuts.push_back({ .trans = longest, .leg = 0 });
+  SubmachineOrders const was{ order_submachines(c, g, s, p, 1, {}) };
+  SubmachineOrders const now{ order_submachines(c, g, s, p, 1, moved) };
+
+  for (DarSource const dar : { DarSource::Profile, DarSource::OwnerHole }) {
+    CAPTURE(static_cast<uint32_t>(dar));
+    uint32_t const passes{ (dar == DarSource::Profile) ? 1U : 2U };
+    SizeRecord base;
+    SizedLayout first;
+    std::vector<Diagnostic> diags;
+    REQUIRE(size_layout(c, g, was, s, p, first, diags, dar, {}, {}, nullptr, &base));
+    Sized const want{ sized(c, g, now, s, p, dar, Compaction::Off, Fold::Scale, true) };
+    REQUIRE(want.ok);
+
+    size_test_reuse_verify(true);
+    SizedLayout got;
+    SizeRecord again;
+    REQUIRE(size_layout(c, g, now, s, p, got, diags, dar, {}, {}, &base, &again));
+    CHECK(size_test_reused() == passes);  // `A`'s frame, not `B`'s or the root's
+    CHECK(size_test_framed() == 3 * passes);
+    CHECK(size_test_reuse_mismatches() == 0);
+    CHECK(same(got, want.z));
+    Span const at{ now.sub_nodes[in_a.v] };
+    Span const had{ was.sub_nodes[in_a.v] };
+    REQUIRE(at.len == had.len);
+    for (uint32_t k = 0; k < at.len; ++k) {
+      scav_point const &x{ got.node[at.off + k] };
+      scav_point const &y{ first.node[had.off + k] };
+      CHECK((x.x - got.sub[in_a.v].x) == (y.x - first.sub[in_a.v].x));
+      CHECK((x.y - got.sub[in_a.v].y) == (y.y - first.sub[in_a.v].y));
+    }
+
+    // The same ordering copies every frame from the record the second sizing left.
+    size_test_reuse_verify(true);
+    SizedLayout same_again;
+    REQUIRE(size_layout(c, g, now, s, p, same_again, diags, dar, {}, {}, &again, nullptr));
+    CHECK(size_test_reused() == 3 * passes);
+    CHECK(size_test_reuse_mismatches() == 0);
+    CHECK(same(same_again, want.z));
+
+    // Another profile copies nothing.
+    scav_profile wider{ p };
+    wider.node_sep += 4;
+    size_test_reuse_verify(true);
+    SizedLayout other;
+    REQUIRE(size_layout(c, g, now, s, wider, other, diags, dar, {}, {}, &again, nullptr));
+    CHECK(size_test_reused() == 0);
+  }
+}
+
+TEST_CASE("size reuse: every frame a search copies is the frame sizing gives") {
+  SizeReuseGuard const guard;
+  constexpr std::array<char const *, 8> SMALL{ "axis.scav",
+                                               "brew.scav",
+                                               "dock.scav",
+                                               "ota.scav",
+                                               "vac.scav",
+                                               "gauntlet/carried.scav",
+                                               "gauntlet/through.scav",
+                                               "gauntlet/level.scav" };
+  uint64_t copied{ 0 };
+  uint64_t framed{ 0 };
+  for (char const *name : SMALL) {
+    CHECK(sized_checked(name, false, copied, framed) == 0);
+    CHECK(sized_checked(name, true, copied, framed) == 0);
+  }
+  CHECK(copied > 0);
+  MESSAGE("copied " << copied << " of " << framed << " frames");
+}
+
+TEST_CASE("size reuse: a comparison that leaves out the owner's ratio is caught") {
+  SizeReuseGuard const guard;
+  size_test_reuse_ignore_dar(true);
+  uint64_t copied{ 0 };
+  uint64_t framed{ 0 };
+  uint64_t wrong{ 0 };
+  for (char const *name : { "ota.scav", "vac.scav", "axis.scav" }) {
+    wrong += sized_checked(name, false, copied, framed);
+    wrong += sized_checked(name, true, copied, framed);
+  }
+  CHECK(wrong > 0);
+}
+
+TEST_CASE("size reuse: every corpus and gauntlet chart at both scales" * doctest::skip()) {
+  SizeReuseGuard const guard;
+  constexpr std::array<char const *, 39> ALL{ "axis.scav",
+                                              "bottler.scav",
+                                              "brew.scav",
+                                              "dock.scav",
+                                              "estop.scav",
+                                              "led.scav",
+                                              "mill.scav",
+                                              "ota.scav",
+                                              "tcp.scav",
+                                              "toolchanger.scav",
+                                              "vac.scav",
+                                              "gauntlet/above.scav",
+                                              "gauntlet/carried.scav",
+                                              "gauntlet/chain.scav",
+                                              "gauntlet/corner.scav",
+                                              "gauntlet/crossing.scav",
+                                              "gauntlet/crowd.scav",
+                                              "gauntlet/enclosing.scav",
+                                              "gauntlet/entered.scav",
+                                              "gauntlet/fanin.scav",
+                                              "gauntlet/folded.scav",
+                                              "gauntlet/fork.scav",
+                                              "gauntlet/lane.scav",
+                                              "gauntlet/level.scav",
+                                              "gauntlet/long.scav",
+                                              "gauntlet/loop.scav",
+                                              "gauntlet/marks.scav",
+                                              "gauntlet/mutual.scav",
+                                              "gauntlet/ported.scav",
+                                              "gauntlet/pulled.scav",
+                                              "gauntlet/regions.scav",
+                                              "gauntlet/roundtrip.scav",
+                                              "gauntlet/seated.scav",
+                                              "gauntlet/stretch.scav",
+                                              "gauntlet/through.scav",
+                                              "gauntlet/tight.scav",
+                                              "gauntlet/transit.scav",
+                                              "gauntlet/under.scav",
+                                              "gauntlet/unfolded.scav" };
+  uint64_t copied{ 0 };
+  uint64_t framed{ 0 };
+  for (char const *name : ALL) {
+    CHECK(sized_checked(name, false, copied, framed) == 0);
+    CHECK(sized_checked(name, true, copied, framed) == 0);
+  }
+  MESSAGE("copied " << copied << " of " << framed << " frames");
 }
