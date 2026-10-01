@@ -37,6 +37,9 @@ struct CoordGraph {
 // A node in no layer gets zero.
 std::vector<int32_t> cross_coordinates(CoordGraph const &g);
 
+// The same into `out`, reusing its capacity.
+void cross_coordinates(CoordGraph const &g, std::vector<int32_t> &out);
+
 }  // namespace scav
 
 #endif  // SCAV_LAYOUT_COORDS_H_INCLUDED

@@ -327,18 +327,18 @@ void expand(std::vector<Spot> const &spot,
   }
 }
 
-}  // namespace
-
-SCAV_INTERNAL_BEGIN
-Packing pack_rows(std::vector<scav_rect> const &rects,
-                  int32_t sep,
-                  int32_t dar_num,
-                  int32_t dar_den,
-                  Compaction compaction,
-                  bool expanded) {
-  Packing out;
-  out.at = rects;
-  if (rects.empty()) { return out; }
+// `pack_rows` into `out`, reusing its capacity.
+void fill_rows(Packing &out,
+               std::vector<scav_rect> const &rects,
+               int32_t sep,
+               int32_t dar_num,
+               int32_t dar_den,
+               Compaction compaction,
+               bool expanded) {
+  vec_assign(out.at, rects.begin(), rects.end());
+  out.w = 0;
+  out.h = 0;
+  if (rects.empty()) { return; }
   std::vector<Spot> &spot{ spot_scratch() };
   place(rects, sep, target_width(rects, sep, dar_num, dar_den), spot);
   if (compaction == Compaction::On) { compact(rects, sep, spot, out.at); }
@@ -349,6 +349,19 @@ Packing pack_rows(std::vector<scav_rect> const &rects,
   // it worth filling, and the extents its arithmetic would divide are sums
   // that already left int32.
   if (expanded && (out.w == e.w) && (out.h == e.h)) { expand(spot, e, out.at); }
+}
+
+}  // namespace
+
+SCAV_INTERNAL_BEGIN
+[[maybe_unused]] Packing pack_rows(std::vector<scav_rect> const &rects,
+                                   int32_t sep,
+                                   int32_t dar_num,
+                                   int32_t dar_den,
+                                   Compaction compaction,
+                                   bool expanded) {
+  Packing out;
+  fill_rows(out, rects, sep, dar_num, dar_den, compaction, expanded);
   return out;
 }
 SCAV_INTERNAL_END
@@ -358,13 +371,31 @@ Packing pack_lr(std::vector<scav_rect> const &rects,
                 int32_t dar_num,
                 int32_t dar_den,
                 Compaction compaction) {
-  return pack_rows(rects, sep, dar_num, dar_den, compaction, true);
+  Packing out;
+  fill_rows(out, rects, sep, dar_num, dar_den, compaction, true);
+  return out;
+}
+
+void pack_lr(Packing &out,
+             std::vector<scav_rect> const &rects,
+             int32_t sep,
+             int32_t dar_num,
+             int32_t dar_den,
+             Compaction compaction) {
+  fill_rows(out, rects, sep, dar_num, dar_den, compaction, true);
 }
 
 Packing pack_box(std::vector<scav_rect> const &rects, int32_t sep) {
   Packing out;
-  out.at = rects;
-  if (rects.empty()) { return out; }
+  pack_box(out, rects, sep);
+  return out;
+}
+
+void pack_box(Packing &out, std::vector<scav_rect> const &rects, int32_t sep) {
+  vec_assign(out.at, rects.begin(), rects.end());
+  out.w = 0;
+  out.h = 0;
+  if (rects.empty()) { return; }
   // One row, one block, one subrow, which is the spot list of every rect
   // following its predecessor. Expansion then levels their heights.
   std::vector<Spot> &spot{ spot_scratch() };
@@ -373,7 +404,6 @@ Packing pack_box(std::vector<scav_rect> const &rects, int32_t sep) {
   out.w = narrow(e.w);
   out.h = narrow(e.h);
   if ((out.w == e.w) && (out.h == e.h)) { expand(spot, e, out.at); }
-  return out;
 }
 
 bool pack_better(Packing const &a,

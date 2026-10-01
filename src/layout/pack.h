@@ -51,6 +51,15 @@ Packing pack_lr(std::vector<scav_rect> const &rects,
 // `trybox` catches.
 Packing pack_box(std::vector<scav_rect> const &rects, int32_t sep);
 
+// The two above into `out`, reusing its capacity.
+void pack_lr(Packing &out,
+             std::vector<scav_rect> const &rects,
+             int32_t sep,
+             int32_t dar_num,
+             int32_t dar_den,
+             Compaction compaction);
+void pack_box(Packing &out, std::vector<scav_rect> const &rects, int32_t sep);
+
 // `a` beats `b` under the scale measure `SM = min(DAR/w, 1/h)`, held as a
 // rational and compared by cross-multiplication rather than computed. Ties go
 // to the smaller area then the smaller aspect deviation, reversed when

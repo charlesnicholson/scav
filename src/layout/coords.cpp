@@ -109,19 +109,14 @@ uint32_t lower_of(CoordGraph::Edge const &e, bool upward) {
 void view_of(CoordGraph const &g, bool upward, bool rightward, Scratch &sc) {
   uint32_t const n{ static_cast<uint32_t>(g.extent.size()) };
   View &v{ sc.v };
-  v.layers = g.layers;
-  if (upward) {
-    for (uint32_t i = 0; i < (v.layers.size() / 2); ++i) {
-      v.layers[i].swap(v.layers[v.layers.size() - 1 - i]);
-    }
-  }
-  if (rightward) {
-    for (std::vector<uint32_t> &lay : v.layers) {
-      for (uint32_t i = 0; i < (lay.size() / 2); ++i) {
-        uint32_t const other{ lay[i] };
-        lay[i] = lay[lay.size() - 1 - i];
-        lay[lay.size() - 1 - i] = other;
-      }
+  size_t const count{ g.layers.size() };
+  vec_resize(v.layers, count);
+  for (size_t i = 0; i < count; ++i) {
+    std::vector<uint32_t> const &from{ g.layers[upward ? (count - 1 - i) : i] };
+    if (rightward) {
+      vec_assign(v.layers[i], from.rbegin(), from.rend());
+    } else {
+      vec_assign(v.layers[i], from.begin(), from.end());
     }
   }
   vec_assign(v.pos, n, 0);
@@ -392,29 +387,13 @@ void one_pass(CoordGraph const &g,
 
 }  // namespace
 
-// Only a test calls these, so a build without one has no caller of either.
-SCAV_INTERNAL_BEGIN
+namespace {
 
-[[maybe_unused]] std::vector<uint8_t> coords_mark_type1(CoordGraph const &g) {
-  Scratch sc;
-  mark_type1(g, sc);
-  return sc.mark;
-}
-
-[[maybe_unused]] std::vector<int64_t> coords_one_pass(CoordGraph const &g,
-                                                      std::vector<uint8_t> const &mark,
-                                                      bool upward,
-                                                      bool rightward) {
-  Scratch sc;
-  std::vector<int64_t> x;
-  one_pass(g, mark, upward, rightward, sc, x);
-  return x;
-}
-
-std::vector<int32_t> coords_place(CoordGraph const &g) {
+// `coords_place` into `out`.
+void place_into(CoordGraph const &g, std::vector<int32_t> &out) {
   uint32_t const n{ static_cast<uint32_t>(g.extent.size()) };
-  std::vector<int32_t> out(n, 0);
-  if (n == 0) { return out; }
+  vec_assign(out, n, 0);
+  if (n == 0) { return; }
 
   Scratch &sc{ scratch() };
   mark_type1(g, sc);
@@ -469,25 +448,59 @@ std::vector<int32_t> coords_place(CoordGraph const &g) {
   for (uint32_t i = 0; i < n; ++i) {
     if (placed[i] != 0) { least = imin(least, out[i] - (g.extent[i] / 2)); }
   }
-  if (least == COORD_MAX) { return out; }
+  if (least == COORD_MAX) { return; }
   for (uint32_t i = 0; i < n; ++i) {
     if (placed[i] != 0) { out[i] -= least; }
   }
+}
+
+}  // namespace
+
+// Only a test calls these, so a build without one has no caller of either.
+SCAV_INTERNAL_BEGIN
+
+[[maybe_unused]] std::vector<uint8_t> coords_mark_type1(CoordGraph const &g) {
+  Scratch sc;
+  mark_type1(g, sc);
+  return sc.mark;
+}
+
+[[maybe_unused]] std::vector<int64_t> coords_one_pass(CoordGraph const &g,
+                                                      std::vector<uint8_t> const &mark,
+                                                      bool upward,
+                                                      bool rightward) {
+  Scratch sc;
+  std::vector<int64_t> x;
+  one_pass(g, mark, upward, rightward, sc, x);
+  return x;
+}
+
+[[maybe_unused]] std::vector<int32_t> coords_place(CoordGraph const &g) {
+  std::vector<int32_t> out;
+  place_into(g, out);
   return out;
 }
 
 SCAV_INTERNAL_END
 
 std::vector<int32_t> cross_coordinates(CoordGraph const &g) {
+  std::vector<int32_t> out;
+  cross_coordinates(g, out);
+  return out;
+}
+
+void cross_coordinates(CoordGraph const &g, std::vector<int32_t> &out) {
   thread_local std::vector<uint32_t> key;
   key_of(g, key);
   Memo &m{ memo() };
   int32_t const *hit{ nullptr };
   uint32_t len{ 0 };
-  if (m.find(key, hit, len)) { return { hit, hit + len }; }
-  std::vector<int32_t> out{ coords_place(g) };
+  if (m.find(key, hit, len)) {
+    vec_assign(out, hit, hit + len);
+    return;
+  }
+  place_into(g, out);
   m.insert(key, out);
-  return out;
 }
 
 }  // namespace scav

@@ -28,6 +28,7 @@ namespace scav {
 SCAV_INTERNAL_BEGIN
 FrameDar size_hole_ratio(int32_t w, int32_t h);
 std::vector<FrameDar> size_owner_holes(Chart const &c, SizedLayout const &z);
+void size_owner_holes(Chart const &c, SizedLayout const &z, std::vector<FrameDar> &hole);
 SCAV_INTERNAL_END
 
 namespace {
@@ -53,20 +54,24 @@ bool fits(Packing const &p) { return (p.w <= COORD_MAX) && (p.h <= COORD_MAX); }
 // The ratio and the compaction knob are arguments rather than the profile's
 // fields, because a frame aims at the hole it fills and not every hole is
 // 16:10, and because compaction is a row of the portfolio's table (11.4).
-Packing pack_best(std::vector<scav_rect> const &rects,
-                  int32_t sep,
-                  scav_profile const &p,
-                  FrameDar dar,
-                  Compaction compaction) {
-  Packing packed{ pack_lr(rects, sep, dar.num, dar.den, compaction) };
+// Into `packed`, with `row` the caller's scratch for the other packer.
+void pack_best(Packing &packed,
+               Packing &row,
+               std::vector<scav_rect> const &rects,
+               int32_t sep,
+               scav_profile const &p,
+               FrameDar dar,
+               Compaction compaction) {
+  pack_lr(packed, rects, sep, dar.num, dar.den, compaction);
   if (p.trybox != 0) {
-    Packing const row{ pack_box(rects, sep) };
+    pack_box(row, rects, sep);
     if (fits(row) && (!fits(packed) ||
                       pack_better(row, packed, dar.num, dar.den, p.sm_tiebreak != 0))) {
-      packed = row;
+      vec_assign(packed.at, row.at.begin(), row.at.end());
+      packed.w = row.w;
+      packed.h = row.h;
     }
   }
-  return packed;
 }
 
 void overflow(std::vector<Diagnostic> &diags, ElemKind kind, uint32_t ordinal) {
@@ -166,6 +171,7 @@ struct SizeScratch {
   std::vector<Frame> work;
   // What an `OwnerHole` sizing's first pass sized.
   SizedLayout first;
+  std::vector<FrameDar> hole;  // `size_owner_holes` of `first`
   // One frame.
   std::vector<int32_t> reserve;
   std::vector<uint32_t> adj_count, adj_off, adj, fill, component, queue;
@@ -180,13 +186,13 @@ struct SizeScratch {
   std::vector<uint8_t> glued, ridden, paired, bare, rides;
   std::vector<uint32_t> piece_of, ride_edge;
   std::vector<scav_rect> pieces;
-  Packing packed;
+  Packing packed, row, placed;  // a frame's pieces, `pack_best`'s other, a frame's boxes
   Shape best, folded, stacked;
   // One chunk.
   CoordGraph cg;
   std::vector<std::vector<uint32_t>> spare_layers;  // the layers a smaller chunk dropped
   std::vector<uint32_t> chunk_index, chunk_nodes, arrivals, nearest;
-  std::vector<int32_t> seat_at, enter_at;
+  std::vector<int32_t> seat_at, enter_at, centre;
   std::vector<uint8_t> apart, open, left;
   std::vector<uint32_t> mate, turning, turned_by, seat_to, fan;
   std::vector<Wide> layer_x, kept_w;
@@ -1445,7 +1451,8 @@ void Sizer::lay_out_sub(uint32_t m) {
                           .weak = apart[k] });
         }
         cg.sep = p.node_sep;
-        std::vector<int32_t> const centre{ cross_coordinates(cg) };
+        std::vector<int32_t> &centre{ sc.centre };
+        cross_coordinates(cg, centre);
 
         ChunkView const view{ .span = span,
                               .espan = espan,
@@ -1542,7 +1549,7 @@ void Sizer::lay_out_sub(uint32_t m) {
         packed.w = static_cast<int32_t>(imin(w, Wide{ PACK_SATURATED }));
         packed.h = static_cast<int32_t>(imin(y - p.node_sep, Wide{ PACK_SATURATED }));
       } else {
-        packed = pack_best(pieces, p.node_sep, p, dar, compaction);
+        pack_best(packed, sc.row, pieces, p.node_sep, p, dar, compaction);
       }
       // A cut's label room goes on the new piece's leading edge only where the
       // packing puts that piece beside the one before it, so the leg between
@@ -1573,7 +1580,7 @@ void Sizer::lay_out_sub(uint32_t m) {
       }
       bool widened{ false };
       for (Wide const room : applied) { widened = widened || (room != 0); }
-      if (widened) { packed = pack_best(pieces, p.node_sep, p, dar, compaction); }
+      if (widened) { pack_best(packed, sc.row, pieces, p.node_sep, p, dar, compaction); }
       // Room for a label on an edge a cut crosses where the packing put its
       // two pieces one above the other, so its leg runs down the gap between
       // them. Two labelled edges between one pair run as a pair of legs with
@@ -1868,7 +1875,8 @@ void Sizer::place_sub(uint32_t m,
                       std::vector<scav_point> const &local) {
   Span const span{ o.sub_nodes[m] };
   Span const espan{ o.sub_edges[m] };
-  Packing const packed{ pack_best(boxes, p.node_sep, p, dar, compaction) };
+  Packing &packed{ sc.placed };
+  pack_best(packed, sc.row, boxes, p.node_sep, p, dar, compaction);
   if (!fits(packed)) {
     overflow(diags, ElemKind::Submachine, m);
     ok = false;
@@ -2143,9 +2151,12 @@ void Sizer::size_state(uint32_t i) {
     vec_push_back(kids, out.sub[m]);
     vec_push_back(ids, m);
   }
-  Packing packed;
+  Packing &packed{ sc.placed };
+  packed.at.clear();
+  packed.w = 0;
+  packed.h = 0;
   if (!kids.empty()) {
-    packed = pack_best(kids, p.sub_sep, p, dar_of(i), compaction);
+    pack_best(packed, sc.row, kids, p.sub_sep, p, dar_of(i), compaction);
     for (uint32_t k = 0; k < ids.size(); ++k) {
       uint32_t const m{ ids[k] };
       sub_local[m] = { .x = packed.at[k].x, .y = packed.at[k].y };
@@ -2342,8 +2353,15 @@ FrameDar size_hole_ratio(int32_t w, int32_t h) {
 // which is the whole of the interior where a state requests neither band and
 // includes whatever slack `kind_min_h` left. Zero for a state with no live
 // submachine, which is no hole for anything to fill.
-std::vector<FrameDar> size_owner_holes(Chart const &c, SizedLayout const &z) {
-  std::vector<FrameDar> hole(c.states.size(), FrameDar{});
+[[maybe_unused]] std::vector<FrameDar> size_owner_holes(Chart const &c,
+                                                        SizedLayout const &z) {
+  std::vector<FrameDar> hole;
+  size_owner_holes(c, z, hole);
+  return hole;
+}
+
+void size_owner_holes(Chart const &c, SizedLayout const &z, std::vector<FrameDar> &hole) {
+  vec_assign(hole, c.states.size(), FrameDar{});
   for (uint32_t i = 0; i < c.states.size(); ++i) {
     if (c.states[i].live == 0) { continue; }
     bool packed{ false };
@@ -2359,7 +2377,6 @@ std::vector<FrameDar> size_owner_holes(Chart const &c, SizedLayout const &z) {
     int32_t const bottom{ (z.state[i].y + z.state[i].h) - pad - z.after[i].h };
     hole[i] = size_hole_ratio(z.before[i].w, bottom - top);
   }
-  return hole;
 }
 
 SCAV_INTERNAL_END
@@ -2380,16 +2397,9 @@ bool size_layout(Chart const &c,
   // Owner holes come off a first pass at the profile's ratio, packed the same way.
   SizedLayout &first{ size_scratch().first };
   if (!size_pass(c, g, o, s, p, {}, compaction, fold, first, diags)) { return false; }
-  return size_pass(c,
-                   g,
-                   o,
-                   s,
-                   p,
-                   size_owner_holes(c, first),
-                   compaction,
-                   fold,
-                   out,
-                   diags);
+  std::vector<FrameDar> &hole{ size_scratch().hole };
+  size_owner_holes(c, first, hole);
+  return size_pass(c, g, o, s, p, hole, compaction, fold, out, diags);
 }
 
 }  // namespace scav
