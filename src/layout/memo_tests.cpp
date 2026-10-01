@@ -160,3 +160,30 @@ TEST_CASE("memo: every memo gives back its storage when the last layout ends") {
   REQUIRE(lookup(m, { 7 }, got));
   CHECK(got == value_for(7));
 }
+
+TEST_CASE("memo: a serial is never repeated and an interned profile is one word for it") {
+  uint32_t const a{ memo_serial() };
+  uint32_t const b{ memo_serial() };
+  CHECK(a != 0);
+  CHECK(b != 0);
+  CHECK(a != b);
+
+  scav_profile p{};
+  scav_profile q{};
+  q.sweep_count = 7;
+  uint32_t const pw{ memo_profile(p) };
+  CHECK(pw != 0);
+  CHECK(memo_profile(p) == pw);
+  CHECK(memo_profile(q) != pw);
+  CHECK(memo_profile(p) == pw);
+  // Pushed out by eight others, `p` draws a fresh word, never one another profile holds.
+  std::vector<uint32_t> words;
+  for (int32_t k = 0; k < 8; ++k) {
+    scav_profile r{};
+    r.node_sep = k + 1;
+    words.push_back(memo_profile(r));
+  }
+  uint32_t const again{ memo_profile(p) };
+  CHECK(again != pw);
+  for (uint32_t const w : words) { CHECK(again != w); }
+}

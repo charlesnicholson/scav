@@ -44,6 +44,8 @@ struct SplitGraph {
   std::vector<Span> trans_segments;       // parallel to transitions; -> segments
   std::vector<uint32_t> state_crossings;  // edges through each state's border
   std::vector<uint32_t> state_depth;      // enclosing state borders above each state
+  std::vector<uint32_t> trans_label;      // parallel to transitions: `label_segment`
+  uint32_t serial{ 0 };  // a `memo_serial` naming the graph and its chart; 0 by hand
 };
 
 // A pure function of the model: no-route transitions (internal or local

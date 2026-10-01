@@ -18,7 +18,6 @@
 
 #include <array>
 #include <cstdint>
-#include <cstring>
 #include <utility>
 #include <vector>
 
@@ -44,9 +43,6 @@ Memo &frame_memo() {
   thread_local Memo m{ size_t{ 1 } << 20 };
   return m;
 }
-
-// The profile is read whole into a key, so it has to be words and no padding.
-static_assert((sizeof(scav_profile) % sizeof(uint32_t)) == 0);
 
 // Inside the coordinate domain on both axes. A row or a column whose sum
 // overflowed saturates at `PACK_SATURATED`, which is far past `COORD_MAX`.
@@ -236,6 +232,7 @@ struct Sizer {
   SizedLayout &out;
   std::vector<Diagnostic> &diags;
   FrameDar profile_dar{ .num = p.dar_num, .den = p.dar_den };
+  uint32_t profile_word{ memo_profile(p) };
   SizeScratch &sc{ size_scratch() };
   // Where each submachine sits inside its owner's packed area, which the
   // descent at the end turns into an absolute origin.
@@ -2041,9 +2038,8 @@ void Sizer::size_sub(uint32_t m) {
   vec_push_back(key, static_cast<uint32_t>(compaction));
   vec_push_back(key, static_cast<uint32_t>(fold_of(m)));
   vec_push_back(key, cut_of(m));
-  std::array<uint32_t, sizeof(scav_profile) / sizeof(uint32_t)> knobs{};
-  std::memcpy(knobs.data(), &p, sizeof(scav_profile));
-  vec_insert(key, key.end(), knobs.begin(), knobs.end());
+  vec_push_back(key, g.serial);
+  vec_push_back(key, profile_word);
   for (uint32_t k = 0; k < span.len; ++k) {
     OrderNode const &nd{ o.nodes[span.off + k] };
     vec_push_back(key, static_cast<uint32_t>(nd.kind));
@@ -2054,6 +2050,7 @@ void Sizer::size_sub(uint32_t m) {
     if (nd.kind != OrderKind::State) { continue; }
     put(out.state[nd.subject].w);
     put(out.state[nd.subject].h);
+    if (g.serial != 0) { continue; }  // the chart a serial names fixes these two
     vec_push_back(key, static_cast<uint32_t>(c.states[nd.subject].kind));
     vec_push_back(key, c.states[nd.subject].submachines.len);
   }
@@ -2074,8 +2071,9 @@ void Sizer::size_sub(uint32_t m) {
       int32_t across_at{ 0 };
       bool const faced{ state && port_at(e.segment, nd.subject, down, at) };
       bool const flat_faced{ state && port_at(e.segment, nd.subject, !down, across_at) };
-      vec_push_back(key, (state && ported(e.segment, nd.subject)) ? 1U : 0U);
-      vec_push_back(key, (faced ? 1U : 0U) | (flat_faced ? 2U : 0U));
+      vec_push_back(key,
+                    ((state && ported(e.segment, nd.subject)) ? 1U : 0U) |
+                        (faced ? 2U : 0U) | (flat_faced ? 4U : 0U));
       put(at);
       put(across_at);
     }

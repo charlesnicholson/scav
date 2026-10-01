@@ -7,10 +7,19 @@
 // entry costs no allocation of its own and a hit reads three places. The key is
 // compared whole, so a hit returns exactly what was stored under that key.
 
+#include "scav/scav_layout.h"
+
 #include <cstdint>
 #include <vector>
 
 namespace scav {
+
+// A word no other call in this process returns; never 0.
+uint32_t memo_serial();
+
+// One word standing for `p` in a key: a `memo_serial` drawn the first time this thread
+// meets `p` among the last few it interned, so one word only ever stands for one profile.
+uint32_t memo_profile(scav_profile const &p);
 
 // The hash a table probes by. A hit compares the whole key, so any function is correct;
 // a constant one makes every key collide.

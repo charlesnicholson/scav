@@ -21,7 +21,6 @@
 
 #include <array>
 #include <cstdint>
-#include <cstring>
 #include <vector>
 
 namespace scav {
@@ -35,9 +34,6 @@ Memo &frame_memo() {
   thread_local Memo m{ size_t{ 1 } << 20 };
   return m;
 }
-
-// The profile is read whole into a key, so it has to be words and no padding.
-static_assert((sizeof(scav_profile) % sizeof(uint32_t)) == 0);
 
 // Prefix sums over `count`, so a per-key bucket is a slice of one array rather
 // than a vector of vectors. `out[i]..out[i+1]` is key i's run.
@@ -754,6 +750,7 @@ CommonAncestor lowest_common_ancestor(Chart const &c, StateId src, StateId dst) 
 }
 
 uint32_t label_segment(Chart const &c, SplitGraph const &g, uint32_t t) {
+  if (t < g.trans_label.size()) { return g.trans_label[t]; }
   if ((t >= g.trans_segments.size()) || (t >= c.transitions.size())) { return INVALID; }
   Span const segs{ g.trans_segments[t] };
   if (segs.len == 0) { return INVALID; }
@@ -894,6 +891,7 @@ SubmachineOrders order_submachines(Chart const &c,
 
   std::vector<FrameOrder> &frames{ cs.frames };
   vec_resize(frames, c.submachines.size());
+  uint32_t const profile_word{ memo_profile(p) };
 
   // Reads the model, the split and the label charges; writes `frames[m]` and
   // the caller's own scratch, so two frames share nothing.
@@ -987,27 +985,34 @@ SubmachineOrders order_submachines(Chart const &c,
     thread_local std::vector<int32_t> value;
     key.clear();
     if (!tracing) {
-      std::array<uint32_t, sizeof(scav_profile) / sizeof(uint32_t)> knobs{};
-      std::memcpy(knobs.data(), &p, sizeof(scav_profile));
-      vec_insert(key, key.end(), knobs.begin(), knobs.end());
-      vec_push_back(key, static_cast<uint32_t>(f.nodes.size()));
-      for (OrderNode const &nd : f.nodes) {
-        vec_push_back(key, static_cast<uint32_t>(nd.kind));
-        vec_push_back(key, nd.subject);
-        vec_push_back(key,
-                      (nd.kind == OrderKind::State)
-                          ? static_cast<uint32_t>(c.states[nd.subject].kind)
-                          : 0U);
+      vec_push_back(key, g.serial);
+      vec_push_back(key, profile_word);
+      if (g.serial != 0) {
+        vec_push_back(key, m);  // the frame as built is a function of the graph and `m`
+      } else {
+        vec_push_back(key, static_cast<uint32_t>(f.nodes.size()));
+        for (OrderNode const &nd : f.nodes) {
+          vec_push_back(key, static_cast<uint32_t>(nd.kind));
+          vec_push_back(key, nd.subject);
+          vec_push_back(key,
+                        (nd.kind == OrderKind::State)
+                            ? static_cast<uint32_t>(c.states[nd.subject].kind)
+                            : 0U);
+        }
+        vec_push_back(key, static_cast<uint32_t>(f.edges.size()));
       }
-      vec_push_back(key, static_cast<uint32_t>(f.edges.size()));
       for (OrderEdge const &e : f.edges) {
-        vec_push_back(key, e.src);
-        vec_push_back(key, e.dst);
-        vec_push_back(key, e.segment);
-        vec_push_back(key, pre_reversed.empty() ? 0U : pre_reversed[e.segment]);
-        vec_push_back(key, cut.empty() ? 0U : cut[e.segment]);
-        vec_push_back(key, cross_of(e));
-        vec_push_back(key, lead_of(e));
+        if (g.serial == 0) {
+          vec_push_back(key, e.src);
+          vec_push_back(key, e.dst);
+          vec_push_back(key, e.segment);
+        }
+        uint32_t const reversed{ pre_reversed.empty() ? 0U : pre_reversed[e.segment] };
+        uint32_t const cuts{ cut.empty() ? 0U : cut[e.segment] };
+        // Each a byte, so the packed word is exact.
+        vec_push_back(key,
+                      reversed | (cuts << 8U) | (uint32_t{ cross_of(e) } << 16U) |
+                          (uint32_t{ lead_of(e) } << 24U));
         vec_push_back(key, static_cast<uint32_t>(seg_label[e.segment]));
       }
       for (RankPin const &pin : pins.ranks) {
