@@ -960,6 +960,12 @@ uint64_t sized_checked(char const *name,
   scav_layout_opts const opts{ .profile = readable(), .router = 0, .threads = 0 };
   size_test_reuse_verify(true);
   REQUIRE(layout_run(c, s, opts, placed, diags));
+  uint64_t live{ 0 };
+  for (Submachine const &m : c.submachines) { live += (m.live != 0) ? 1U : 0U; }
+  std::string const what{ std::string{ name } + (labelled ? " labelled: " : " bare: ") };
+  MESSAGE(what << size_test_reused() << " of " << size_test_framed()
+               << " frames copied, over " << (size_test_framed() / live) << " passes of "
+               << live);
   copied += size_test_reused();
   framed += size_test_framed();
   return size_test_reuse_mismatches();
