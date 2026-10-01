@@ -50,6 +50,7 @@ struct View {
 // and reassigned in place, so a call after the first allocates only its result.
 struct Scratch {
   View v;
+  std::vector<std::vector<uint32_t>> spare;  // layers a smaller graph's view dropped
   std::vector<uint32_t> count, fill, root, align, sink;
   std::vector<uint32_t> pending, succ_count, succ_off, succ, order;
   std::vector<int64_t> offset, shift;
@@ -110,6 +111,14 @@ void view_of(CoordGraph const &g, bool upward, bool rightward, Scratch &sc) {
   uint32_t const n{ static_cast<uint32_t>(g.extent.size()) };
   View &v{ sc.v };
   size_t const count{ g.layers.size() };
+  while (v.layers.size() > count) {  // parks the storage in `spare`
+    vec_push_back(sc.spare, std::move(v.layers.back()));
+    v.layers.pop_back();
+  }
+  while ((v.layers.size() < count) && !sc.spare.empty()) {
+    vec_push_back(v.layers, std::move(sc.spare.back()));
+    sc.spare.pop_back();
+  }
   vec_resize(v.layers, count);
   for (size_t i = 0; i < count; ++i) {
     std::vector<uint32_t> const &from{ g.layers[upward ? (count - 1 - i) : i] };

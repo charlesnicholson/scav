@@ -854,6 +854,19 @@ Outcome remembered(Local const &l, Scratch &s) {
   return out;
 }
 
+// What one placement builds and discards, per thread: nothing inside waits on the pool.
+struct CallBuffers {
+  std::vector<uint8_t> moved, encloses;
+  std::vector<scav_rect> dirty, pieces;
+  std::vector<Pieces> by_route;
+  std::vector<uint32_t> live, queue, merge, settled;
+};
+
+CallBuffers &call_buffers() {
+  thread_local CallBuffers b;
+  return b;
+}
+
 uint32_t place_labels_from(Chart const &c,
                            SizedLayout const &z,
                            scav_spaces const &s,
@@ -875,8 +888,11 @@ uint32_t place_labels_from(Chart const &c,
                     (was->settled != nullptr) && (was->route->size() == route.size()) &&
                     (was->placed->size() == s.n_path_box) &&
                     (was->settled->size() == s.n_path_box) };
-  std::vector<uint8_t> moved;
-  std::vector<scav_rect> dirty;
+  CallBuffers &cb{ call_buffers() };
+  std::vector<uint8_t> &moved{ cb.moved };
+  moved.clear();
+  std::vector<scav_rect> &dirty{ cb.dirty };
+  dirty.clear();
   if (based) {
     vec_assign(moved, route.size(), 0);
     for (uint32_t t = 0; t < route.size(); ++t) {
@@ -899,8 +915,10 @@ uint32_t place_labels_from(Chart const &c,
     }
   }
 
-  std::vector<scav_rect> pieces;
-  std::vector<Pieces> by_route(route.size(), Pieces{});
+  std::vector<scav_rect> &pieces{ cb.pieces };
+  pieces.clear();
+  std::vector<Pieces> &by_route{ cb.by_route };
+  vec_assign(by_route, route.size(), Pieces{});
   for (uint32_t t = 0; t < route.size(); ++t) {
     Pieces &of{ by_route[t] };
     of.first = static_cast<uint32_t>(pieces.size());
@@ -920,16 +938,18 @@ uint32_t place_labels_from(Chart const &c,
     }
     of.count = static_cast<uint32_t>(pieces.size()) - of.first;
   }
-  std::vector<uint32_t> live;
+  std::vector<uint32_t> &live{ cb.live };
+  live.clear();
   for (uint32_t st = 0; st < c.states.size(); ++st) {
     if (c.states[st].live != 0) { vec_push_back(live, st); }
   }
 
   // Transitions ascending, then `order`, which is what makes a later box of one
   // transition see the earlier one already placed.
-  std::vector<uint32_t> queue(s.n_path_box);
+  std::vector<uint32_t> &queue{ cb.queue };
+  vec_resize(queue, s.n_path_box);
   for (uint32_t i = 0; i < s.n_path_box; ++i) { queue[i] = i; }
-  scav_stable_sort(queue, [&s](uint32_t a, uint32_t b) {
+  scav_stable_sort(queue, cb.merge, [&s](uint32_t a, uint32_t b) {
     if (s.path_box[a].subject != s.path_box[b].subject) {
       return s.path_box[a].subject < s.path_box[b].subject;
     }
@@ -938,7 +958,8 @@ uint32_t place_labels_from(Chart const &c,
 
   // The states a label may lie inside: the owner of the lowest submachine holding both
   // ends, and every state enclosing it.
-  std::vector<uint8_t> encloses(c.states.size(), 0);
+  std::vector<uint8_t> &encloses{ cb.encloses };
+  vec_assign(encloses, c.states.size(), 0);
   auto const mark = [&](StateId from, uint8_t v) {
     StateId at{ from };
     for (size_t step = 0; (step < c.states.size()) && (at.v != INVALID); ++step) {
@@ -949,7 +970,8 @@ uint32_t place_labels_from(Chart const &c,
 
   Local l;
   thread_local Scratch scratch;  // every search resets what it reads first
-  std::vector<uint32_t> settled;
+  std::vector<uint32_t> &settled{ cb.settled };
+  settled.clear();
   uint32_t fallbacks{ 0 };
   uint32_t prior_subject{ INVALID };
   uint32_t prior_seg{ 0 };

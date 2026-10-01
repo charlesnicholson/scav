@@ -126,6 +126,8 @@ struct NudgeScratch {
   std::vector<uint32_t> rank;  // -> order, inverted
   // -> members: the next of each one's lane, and the last so far of each root's.
   std::vector<uint32_t> next_member, last_member;
+  std::vector<Member> member_merge;  // the sorts' merge buffers
+  std::vector<uint32_t> lane_merge;
 };
 
 NudgeScratch &nudge_scratch() {
@@ -211,7 +213,7 @@ void nudge_lanes(scav_rect const &region,
 
     // Keyed so a lane's members are adjacent and in a total order the input's own
     // ordering cannot disturb.
-    scav_stable_sort(members, [](Member const &x, Member const &y) {
+    scav_stable_sort(members, sc.member_merge, [](Member const &x, Member const &y) {
       if (x.at != y.at) { return x.at < y.at; }
       if (x.lo != y.lo) { return x.lo < y.lo; }
       if (x.hi != y.hi) { return x.hi < y.hi; }
@@ -327,7 +329,7 @@ void nudge_lanes(scav_rect const &region,
       if (count < 2) { continue; }
       ++stats.lanes;
 
-      scav_stable_sort(lane, [&members](uint32_t x, uint32_t y) {
+      scav_stable_sort(lane, sc.lane_merge, [&members](uint32_t x, uint32_t y) {
         if (members[x].toward != members[y].toward) {
           return members[x].toward < members[y].toward;
         }
