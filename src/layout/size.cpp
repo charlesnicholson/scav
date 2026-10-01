@@ -180,7 +180,7 @@ struct SizeScratch {
   std::vector<uint32_t> nodes, global_rank, local_rank, index, in_layer;
   std::vector<uint32_t> group, labelled, grouped, chunk_of, chunks;
   std::vector<int32_t> extent, layer_w, widest_label, group_w, line, inset;
-  std::vector<Wide> layer_h, carry, applied;
+  std::vector<Wide> layer_h, carry, applied, layer_lead;
   std::vector<uint8_t> glued, ridden, paired, bare, rides;
   std::vector<uint32_t> piece_of, ride_edge;
   std::vector<scav_rect> pieces;
@@ -1430,6 +1430,47 @@ void Sizer::lay_out_sub(uint32_t m) {
 
         seat_pseudostates(view, shape, chunk_w, chunk_h);
         seat_riders(view, shape, chunk, chunk_w);
+        // A labelled edge into a later piece passes the states below its end on their
+        // leading side; that layer moves along to seat the label there.
+        std::vector<Wide> &layer_lead{ sc.layer_lead };
+        vec_assign(layer_lead, last - first, 0);
+        for (uint32_t k = 0; k < espan.len; ++k) {
+          OrderEdge const &e{ o.edges[espan.off + k] };
+          uint32_t const ia{ index[e.src - span.off] };
+          uint32_t const ib{ index[e.dst - span.off] };
+          if ((ia == INVALID) || (ib == INVALID) || (room_of(e) == 0)) { continue; }
+          uint32_t const end{ (chunk_index[ia] != INVALID) ? ia : ib };
+          uint32_t const other{ (end == ia) ? ib : ia };
+          if ((chunk_index[end] == INVALID) || (piece_of[other] <= chunk)) { continue; }
+          uint32_t const r{ local_rank[nodes[end]] };
+          bool passed{ false };
+          Wide lead{ COORD_MAX };
+          Wide trail{ 0 };
+          for (uint32_t const j : chunk_nodes) {
+            OrderNode const &nd{ o.nodes[span.off + nodes[j]] };
+            if (nd.kind != OrderKind::State) { continue; }
+            uint32_t const rj{ local_rank[nodes[j]] };
+            if (rj == r) {
+              lead = imin(lead, Wide{ shape.at[j].x });
+              passed = passed || ((j != end) && (shape.at[j].y > shape.at[end].y));
+            } else if (rj < r) {
+              trail = imax(trail, Wide{ shape.at[j].x } + along(nd.subject));
+            }
+          }
+          Wide const grow{ (Wide{ route_clearance(p) } + room_of(e)) - (lead - trail) };
+          if (!passed || (grow <= 0)) { continue; }
+          for (uint32_t const j : chunk_nodes) {
+            if (Wide{ shape.at[j].x } >= lead) {
+              shape.at[j].x = static_cast<int32_t>(
+                  imin(Wide{ shape.at[j].x } + grow, Wide{ COORD_MAX }));
+            }
+          }
+          chunk_w += grow;
+          for (uint32_t q = (r - first) + 1; q < layer_lead.size(); ++q) {
+            layer_lead[q] += (layer_lead[q] != 0) ? grow : Wide{ 0 };
+          }
+          layer_lead[r - first] = lead + grow;
+        }
         // A label beside an edge inside one column, whose leg runs down it,
         // needs its own width and leader on one side of the leg inside the
         // piece; where neither side has it the piece grows on its trailing
@@ -1443,7 +1484,11 @@ void Sizer::lay_out_sub(uint32_t m) {
               (local_rank[nodes[a]] != local_rank[nodes[b]])) {
             continue;
           }
-          chunk_w = imax(chunk_w, beside_leg(e, shape.at[a].x, shape.at[b].x, a, b));
+          Wide const lead{ layer_lead[local_rank[nodes[a]] - first] };
+          Wide const room{
+            beside_leg(e, shape.at[a].x - lead, shape.at[b].x - lead, a, b)
+          };
+          if (room != 0) { chunk_w = imax(chunk_w, lead + room); }
         }
         chunk_h = leg_label_room(view, shape, chunk_h);
         pieces_fit = pieces_fit && (chunk_w <= COORD_MAX) && (chunk_h <= COORD_MAX);

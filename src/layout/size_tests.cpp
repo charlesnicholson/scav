@@ -528,6 +528,66 @@ TEST_CASE("size: a labelled pair a fold stacks has room for a label either side"
   CHECK((frame.x + frame.w) - leg >= room);
 }
 
+TEST_CASE(
+    "size: a labelled leg passing a column to a stacked piece has its room beside it") {
+  // `Clear` and `Tripped` share a column and `Latched` is folded under it, so the
+  // back edge's leg runs up the column's leading side, where its label goes.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const start{ build_state(c, root, {}, StateKind::Initial, {}) };
+  StateId const clear{ build_state(c, root, "Clear", StateKind::Normal, {}) };
+  StateId const tripped{ build_state(c, root, "Tripped", StateKind::Normal, {}) };
+  StateId const latched{ build_state(c, root, "Latched", StateKind::Normal, {}) };
+  build_trans(c, start, clear, TransKind::External, {});
+  build_trans(c, clear, tripped, TransKind::External, {});
+  build_trans(c, tripped, latched, TransKind::External, {});
+  build_trans(c, latched, clear, TransKind::External, {});
+  constexpr int32_t LABEL_W{ 1500 };
+  constexpr int32_t INNER_W{ 700 };
+  std::vector<scav_path_box> const labels{
+    { .subject = 1, .w = INNER_W, .h = 200, .order = 0 },
+    { .subject = 3, .w = LABEL_W, .h = 200, .order = 0 }
+  };
+  scav_spaces const s{ .path_box = labels.data(), .n_path_box = 2 };
+  scav_profile const p{ tall() };
+
+  SizedLayout z;
+  std::vector<Diagnostic> diags;
+  REQUIRE(size_layout(c,
+                      decompose(c),
+                      one_frame(c,
+                                root,
+                                { state_node(start.v, 0, 0),
+                                  state_node(clear.v, 1, 0),
+                                  state_node(tripped.v, 1, 1),
+                                  state_node(latched.v, 2, 0) },
+                                { { .src = 0, .dst = 1, .segment = 0, .reversed = 0 },
+                                  { .src = 1, .dst = 2, .segment = 1, .reversed = 0 },
+                                  { .src = 3, .dst = 2, .segment = 2, .reversed = 1 },
+                                  { .src = 1, .dst = 3, .segment = 3, .reversed = 1 } },
+                                { 0, LABEL_W }),
+                      s,
+                      p,
+                      z,
+                      diags,
+                      DarSource::Profile,
+                      Compaction::Off,
+                      Fold::Always));
+  scav_rect const &rs{ z.state[start.v] };
+  scav_rect const &rc{ z.state[clear.v] };
+  scav_rect const &rt{ z.state[tripped.v] };
+  scav_rect const &rl{ z.state[latched.v] };
+  REQUIRE(rt.y > rc.y + rc.h);  // one column
+  REQUIRE(rl.y > rt.y + rt.h);  // stacked under it
+  int32_t const room{ route_clearance(p) + label_leader(p) + LABEL_W + (p.node_sep / 2) };
+  CHECK(imin(rc.x, rt.x) - (rs.x + rs.w) >= room);
+  // The edge inside the column keeps its label's room on the other side of its leg.
+  int32_t const lo{ imax(rc.x, rt.x) };
+  int32_t const leg{ lo + ((imin(rc.x + rc.w, rt.x + rt.w) - lo) / 2) };
+  scav_rect const &frame{ z.sub[root.v] };
+  CHECK((frame.x + frame.w) - leg >= label_leader(p) + INNER_W + (p.node_sep / 2));
+}
+
 TEST_CASE("size: a frame turned down runs its ranks top to bottom, and never folds") {
   // A column of states in sequence is one frame's choice (11.10g). Turned
   // down, each rank is a row: `B` under `A` and `C` under `B` on one centre
