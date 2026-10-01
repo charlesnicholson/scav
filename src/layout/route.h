@@ -51,13 +51,13 @@ struct Routes {
 // moved is answered by moving its answer, which is what makes a candidate cost
 // the change rather than the chart (11.10c).
 struct RouteFrameCache {
-  RouteInput in;
+  uint8_t valid{ 0 };
   scav_rect frame{};  // what the nudger bounds this frame's lanes by
+  RouteInput in;
   std::vector<scav_point> points;
   std::vector<scav_span> net_points;
   std::vector<RouteMetrics> metrics;
   NudgeStats nudged;
-  uint8_t valid{ 0 };
 };
 
 // Parallel to submachines. `reuse` is read by every candidate of a round at

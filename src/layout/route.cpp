@@ -612,19 +612,23 @@ void route_transitions(Routes &out,
     if ((reuse != nullptr) && (m < reuse->frame.size()) && (reuse->frame[m].valid != 0) &&
         same_but_shifted(reuse->frame[m], in, frame, dx, dy)) {
       RouteFrameCache const &had{ reuse->frame[m] };
-      frames[m].points = had.points;
-      for (scav_point &q : frames[m].points) {
-        q.x += dx;
-        q.y += dy;
+      std::vector<scav_point> &moved{ frames[m].points };
+      vec_resize(moved, had.points.size());
+      for (size_t k = 0; k < moved.size(); ++k) {
+        moved[k] = { .x = had.points[k].x + dx, .y = had.points[k].y + dy };
       }
-      frames[m].net_points = had.net_points;
-      frames[m].metrics = had.metrics;
+      vec_assign(frames[m].net_points, had.net_points.begin(), had.net_points.end());
+      vec_assign(frames[m].metrics, had.metrics.begin(), had.metrics.end());
       frames[m].nudged = had.nudged;
       if (fill != nullptr) {
-        fill->frame[m] = had;
-        fill->frame[m].in = in;
-        fill->frame[m].frame = frame;
-        fill->frame[m].points = frames[m].points;
+        RouteFrameCache &to{ fill->frame[m] };
+        to.valid = had.valid;
+        to.frame = frame;
+        to.in = in;
+        to.points = moved;
+        to.net_points = had.net_points;
+        to.metrics = had.metrics;
+        to.nudged = had.nudged;
       }
       for (uint32_t const st : sc.obstacle_states) { sc.obstacle_index[st] = INVALID; }
       return;
@@ -652,13 +656,13 @@ void route_transitions(Routes &out,
     frames[m].net_points = ro.net_points;
     frames[m].metrics = ro.metrics;
     if (fill != nullptr) {
-      fill->frame[m] = { .in = in,
+      fill->frame[m] = { .valid = 1,
                          .frame = frame,
+                         .in = in,
                          .points = ro.points,
                          .net_points = ro.net_points,
                          .metrics = ro.metrics,
-                         .nudged = frames[m].nudged,
-                         .valid = 1 };
+                         .nudged = frames[m].nudged };
     }
     for (uint32_t const st : sc.obstacle_states) { sc.obstacle_index[st] = INVALID; }
   };
