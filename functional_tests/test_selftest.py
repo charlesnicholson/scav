@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import scavtest  # noqa: E402
 
 GOLDEN = Path("test_data/golden/layout/corpus_hashes.txt")
-THREAD_COUNTS = 7
+PASSES = "threads=1 and pool"
 COLUMNS = ("inputs", "structural", "coordinate")
 # The charts every --against golden names; each lays out in hundredths of a second.
 SMALL = ("estop.scav", "led.scav")
@@ -80,7 +80,7 @@ class TestSelftest(unittest.TestCase):
 
     def check_summary(self, summary: str, charts: int, failures: int) -> None:
         self.assertEqual(
-            f"selftest: {charts} charts, {THREAD_COUNTS} thread counts, "
+            f"selftest: {charts} charts, {PASSES}, "
             f"{failures} failures", summary)
 
     # The clean run ==========================================================
@@ -202,7 +202,7 @@ class TestSelftest(unittest.TestCase):
         two = self.small
         joined = " ".join(two[0]) + "\n" + " ".join(two[1])
         want = ("".join(f"ok   {' '.join(r)}\n" for r in two)
-                + f"selftest: 2 charts, {THREAD_COUNTS} thread counts, 0 failures\n")
+                + f"selftest: 2 charts, {PASSES}, 0 failures\n")
         shapes = {
             "no_trailing_newline": joined,
             "crlf": joined.replace("\n", "\r\n") + "\r\n",
