@@ -2809,8 +2809,9 @@ TEST_CASE("ortho: the radix open list pops in the order one heap over every entr
     for (size_t i = 1; i < all.size(); ++i) {
       OrthoFrontierEntry const &a{ all[i] };
       OrthoFrontierEntry const &b{ all[least] };
-      bool const less{ (a.f != b.f) ? (a.f < b.f)
-                                    : ((a.g != b.g) ? (a.g < b.g) : (a.node < b.node)) };
+      bool less{ a.node < b.node };
+      if (a.g != b.g) { less = a.g < b.g; }
+      if (a.f != b.f) { less = a.f < b.f; }
       least = less ? i : least;
     }
     return least;

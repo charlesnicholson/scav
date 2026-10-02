@@ -2596,6 +2596,7 @@ bool size_pass(Chart const &c,
     static_cast<void>(taken);
 #endif
   }
+  bool const reusing{ (x.base != nullptr) && !reuse.empty() };
   if (record != nullptr) {
     record->ok = false;
     vec_assign(record->pre_node, o.nodes.size(), scav_point{});
@@ -2607,7 +2608,7 @@ bool size_pass(Chart const &c,
   // the states one level up that wrap them; level 0 sizes the document roots.
   for (uint32_t level = max_depth + 2; level-- > 0;) {
     for (uint32_t const m : subs_at[level]) {
-      if (!reuse.empty() && (reuse[m] != 0)) {
+      if (reusing && (reuse[m] != 0)) {
         x.copy_frame(m);
         continue;
       }
@@ -2616,7 +2617,7 @@ bool size_pass(Chart const &c,
     }
     if (level > 0) {
       for (uint32_t const i : states_at[level - 1]) {
-        if (!reuse.empty() && (kept[i] != 0)) {
+        if (reusing && (kept[i] != 0)) {
           x.copy_state(i);
         } else {
           x.size_state(i);

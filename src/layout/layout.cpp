@@ -1179,7 +1179,8 @@ Improved run_search(Chart const &c,
   // rounds.
   RouteCache base;
   Prefix incumbent;
-  SizeRecord was_first, was_laid;  // the incumbent's sizings a round re-derives it from
+  SizeRecord was_first;  // the incumbent's sizings a round re-derives it from
+  SizeRecord was_laid;
   {
     std::vector<Diagnostic> spilled;
     Candidate first{ search_candidate(c,
