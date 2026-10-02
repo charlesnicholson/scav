@@ -7,7 +7,9 @@ own output for a corpus chart; the algorithm figures run small, correct toy
 implementations in the page.
 
 Open `scav-explained.html` in any browser. It is one self-contained file with
-no network access, and it is committed, so reading it needs no build.
+no network access, and it is committed, so reading it needs no build. Each push to
+`main` that changes it publishes it to <https://charlesnicholson.github.io/scav/>
+(`.github/workflows/pages.yml`).
 
 [PRD.md](../../PRD.md) is the source of truth. Where the page and the PRD
 disagree, the page is wrong. The content spec the sections were first written from

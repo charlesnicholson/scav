@@ -1,7 +1,9 @@
 # scav
 
 Statechart authoring, layout, rendering. [PRD.md](PRD.md) is the normative design
-document; everything below describes what is built.
+document; everything below describes what is built. [How scav lays out a
+statechart](https://charlesnicholson.github.io/scav/) walks through the layout with
+interactive figures; its source is [docs/explainer](docs/explainer/README.md).
 
 **Status: P3 — the printer.** `libscavcore` carries the `.scav` lexer and
 parser, the model (flat entity arrays linked by ordinal ids with tombstones,
