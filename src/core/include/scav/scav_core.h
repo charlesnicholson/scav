@@ -649,7 +649,7 @@ bool parse_document(scav_byte const *bytes,
 // Canonical printing ========================================================
 
 // A parsed document back to text, reconstructed rather than echoed, so two
-// documents differing only in formatting print the same bytes. See the README.
+// documents differing only in formatting print the same bytes. See docs/development.md.
 
 // A block fitting inside the budget stays on one line.
 constexpr uint32_t PRINT_COLUMNS_MIN{ 20 };
