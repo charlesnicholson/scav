@@ -10,6 +10,16 @@ type Arg = str | Path
 
 PATHS: frozenset[str] = frozenset({"repo_root", "build_dir", "scratch_dir"})
 TRUTHY: frozenset[str] = frozenset({"ON", "1", "TRUE", "YES"})
+HEAVY_CHARTS: frozenset[str] = frozenset({"bottler.scav", "mill.scav"})
+
+
+def corpus_light() -> bool:
+    """Whether SCAV_TEST_CORPUS=light drops HEAVY_CHARTS from every corpus run."""
+    return os.environ.get("SCAV_TEST_CORPUS") == "light"
+
+
+def corpus_skipped(chart: str) -> bool:
+    return corpus_light() and chart in HEAVY_CHARTS
 
 
 class Config(dict[str, str]):

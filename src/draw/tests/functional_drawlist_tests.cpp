@@ -2,6 +2,7 @@
 // out, build, canonicalize, hash. This is where the measurement policy the
 // layout goldens are stated against finally exists.
 
+#include "core/tests/corpus.h"
 #include "layout/cost.h"
 #include "layout/decompose.h"
 #include "layout/label.h"
@@ -21,6 +22,15 @@
 #include <map>
 #include <string>
 #include <vector>
+
+namespace scav {
+
+void layout_test_label_bound(bool on, bool verify);
+uint64_t layout_test_label_bound_skipped();
+uint64_t layout_test_label_bound_labelled();
+uint64_t layout_test_label_bound_mismatches();
+
+}  // namespace scav
 
 namespace {
 
@@ -122,11 +132,35 @@ std::vector<T> rows(Chart const &c, char const *name) {
 
 }  // namespace
 
+TEST_CASE(
+    "drawlist corpus: under real text every bounded round picks what scoring it whole "
+    "picks") {
+  // Each round is also scored whole: the same pick at the same cost, no bound above a
+  // cost; each candidate labelled on its kept routes lays out what a full lay-out does.
+  struct Restore {
+    Restore() = default;
+    Restore(Restore const &) = delete;
+    Restore &operator=(Restore const &) = delete;
+    ~Restore() { layout_test_label_bound(true, false); }
+  } const restore;
+  Metrics const m{ bundled() };
+  for (char const *name :
+       { "brew.scav", "dock.scav", "ota.scav", "vac.scav", "tcp.scav" }) {
+    CAPTURE(name);
+    layout_test_label_bound(true, true);
+    (void)run_pipeline(name, m, readable());
+    CHECK(layout_test_label_bound_skipped() > 0);
+    CHECK(layout_test_label_bound_labelled() > 0);
+    CHECK(layout_test_label_bound_mismatches() == 0);
+  }
+}
+
 TEST_CASE("drawlist corpus: every chart builds and hashes to the committed golden") {
   Metrics const m{ bundled() };
 
   std::string actual;
   for (char const *name : CORPUS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     Run const &r{ laid_pipeline(name) };
     actual += name;
@@ -139,7 +173,8 @@ TEST_CASE("drawlist corpus: every chart builds and hashes to the committed golde
 
   std::vector<scav_byte> golden;
   REQUIRE(read_file(SCAV_TEST_DATA_DIR "/golden/drawlist/corpus.txt", golden));
-  std::string const want{ reinterpret_cast<char const *>(golden.data()), golden.size() };
+  std::string const want{ scav::test::corpus_golden(
+      { reinterpret_cast<char const *>(golden.data()), golden.size() }) };
   if (want != actual) {
     write_file(SCAV_TEST_OUT_DIR "/drawlist_corpus.txt",
                reinterpret_cast<scav_byte const *>(actual.data()),
@@ -158,6 +193,7 @@ TEST_CASE("drawlist corpus: the layout hashes under the reference measurement") 
 
   std::string actual;
   for (char const *name : CORPUS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     Run const &r{ laid_pipeline(name) };
     actual += name;
@@ -172,7 +208,8 @@ TEST_CASE("drawlist corpus: the layout hashes under the reference measurement") 
 
   std::vector<scav_byte> golden;
   REQUIRE(read_file(SCAV_TEST_DATA_DIR "/golden/layout/corpus_measured.txt", golden));
-  std::string const want{ reinterpret_cast<char const *>(golden.data()), golden.size() };
+  std::string const want{ scav::test::corpus_golden(
+      { reinterpret_cast<char const *>(golden.data()), golden.size() }) };
   if (want != actual) {
     write_file(SCAV_TEST_OUT_DIR "/corpus_measured.txt",
                reinterpret_cast<scav_byte const *>(actual.data()),
@@ -196,6 +233,7 @@ TEST_CASE("drawlist corpus: the cost terms on the rendered scale") {
   // have a multiplicand here and nowhere else (11.6). Timed, not asserted.
   int64_t scoring_us{ 0 };
   for (char const *name : CORPUS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     Run const &r{ laid_pipeline(name) };
     SplitGraph const g{ decompose(r.chart) };
@@ -235,7 +273,8 @@ TEST_CASE("drawlist corpus: the cost terms on the rendered scale") {
 
   std::vector<scav_byte> golden;
   REQUIRE(read_file(SCAV_TEST_DATA_DIR "/golden/layout/corpus_cost_measured.txt", golden));
-  std::string const want{ reinterpret_cast<char const *>(golden.data()), golden.size() };
+  std::string const want{ scav::test::corpus_golden(
+      { reinterpret_cast<char const *>(golden.data()), golden.size() }) };
   if (want != actual) {
     write_file(SCAV_TEST_OUT_DIR "/corpus_cost_measured.txt",
                reinterpret_cast<scav_byte const *>(actual.data()),
@@ -247,8 +286,8 @@ TEST_CASE("drawlist corpus: the cost terms on the rendered scale") {
   std::vector<scav_byte> shares_golden;
   REQUIRE(read_file(SCAV_TEST_DATA_DIR "/golden/layout/corpus_cost_shares_measured.txt",
                     shares_golden));
-  std::string const want_shares{ reinterpret_cast<char const *>(shares_golden.data()),
-                                 shares_golden.size() };
+  std::string const want_shares{ scav::test::corpus_golden(
+      { reinterpret_cast<char const *>(shares_golden.data()), shares_golden.size() }) };
   if (want_shares != shares) {
     write_file(SCAV_TEST_OUT_DIR "/corpus_cost_shares_measured.txt",
                reinterpret_cast<scav_byte const *>(shares.data()),
@@ -305,6 +344,7 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
   uint32_t anchored{ 0 };
   uint32_t boxes{ 0 };
   for (char const *name : CORPUS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     Run const &r{ laid_pipeline(name) };
     SizedLayout z;
@@ -377,7 +417,7 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
   // Every box the corpus places, without exception: the anchor is a
   // property of the model rather than of the charts it ran on.
   CHECK(anchored == boxes);
-  CHECK(boxes == 192);
+  if (!scav::test::corpus_skipped("mill.scav")) { CHECK(boxes == 192); }
   // 16 at P9c, then 7 when the placer stopped sitting on state boxes and the
   // fold stopped discarding a label's charged rank gap, then 12 when the
   // exemption narrowed to states enclosing *both* ends, and **18 under

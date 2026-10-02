@@ -1,0 +1,263 @@
+<section class="sx" id="cost" data-toc="9 · The objective">
+  <div class="kicker">What scav optimises</div>
+  <h2>The objective: three tiers, compared in order</h2>
+  <p class="lede">Every candidate drawing gets one <code>Cost</code>, and the search keeps the least, so the cost defines what "better" means.</p>
+
+  <p>A cost is a triple <code>(t0, t1, t2)</code> compared <b>lexicographically</b>: lower <code>t0</code> wins outright, then <code>t1</code>, then <code>t2</code>. There are no multipliers between tiers, because a huge weight inside one sum is a cliff that breaks local search and can overflow. Cost reads only the finished geometry. Touching never counts as overlapping, and segments cross only properly, not at a shared endpoint.</p>
+
+  <h3>Tier 0: forbidden, not priced</h3>
+  <p><code>t0</code> counts things a reader must never see; one outweighs any Tier 2 total. Most are impossible by construction, so Tier 0 is a safety net for degraded routes, trial drawings and label fallbacks. Every shipped example has <code>t0 = 0</code>.</p>
+  <table class="sx-table">
+    <tr><th>count</th><th>forbids</th></tr>
+    <tr><td><code>through_box</code></td><td>a route entering a state that neither encloses nor is one of its ends</td></tr>
+    <tr><td><code>box_overlap</code></td><td>sibling states overlapping</td></tr>
+    <tr><td><code>vanished</code></td><td>a transition that should be drawn but has no route (else every Tier 2 term would score it perfect)</td></tr>
+    <tr><td><code>flush</code></td><td>a route running along a state's border, within 47 units</td></tr>
+    <tr><td><code>through_region</code></td><td>a route entering a concurrent region neither end lies in</td></tr>
+    <tr><td><code>retrace</code></td><td>a route turning straight back along itself</td></tr>
+    <tr><td><code>label_over_box</code></td><td>a label over a state, except those enclosing both ends and the <em>host</em> (an endpoint enclosing the other), whose text bands count instead</td></tr>
+    <tr><td><code>label_over_route</code></td><td>a label over another transition's route</td></tr>
+  </table>
+
+  <h3>Tier 1: hints</h3>
+  <p><code>t1</code> is reserved for author's layout hints, which are not built; it is always 0.</p>
+
+  <h3>Tier 2: thirteen weighted terms</h3>
+  <p><code>t2</code> is an integer sum. Each term is converted to a unit first: counts stay counts, lengths are divided by the <b>em</b> (the font size, 192 units on <code>readable</code>) and areas by em², rounding up. Then it is multiplied by its weight.</p>
+  <table class="sx-table" id="cost-terms-table">
+    <tr><th>term</th><th>charges</th><th>unit</th><th class="num">weight</th></tr>
+    <tr><td><code>bends</code></td><td>each change of direction</td><td>count</td><td class="num">512</td></tr>
+    <tr><td><code>corridor</code></td><td>length two transitions share on one line, except the final leg into a common target (the <em>trunk</em>)</td><td>em</td><td class="num">48</td></tr>
+    <tr><td><code>crossings</code></td><td>each crossing between transitions</td><td>count</td><td class="num">512</td></tr>
+    <tr><td><code>excess_len</code></td><td>route length beyond its chord or label width, times (1 + its crossings)</td><td>em</td><td class="num">4</td></tr>
+    <tr><td><code>adjacency</code></td><td>a transition joining two non-adjacent regions (fork and join exempt)</td><td>count</td><td class="num">16</td></tr>
+    <tr><td><code>label</code></td><td>overlapping label pairs, and a label over an enclosing state's text bands</td><td>count</td><td class="num">768</td></tr>
+    <tr><td><code>label_near</code></td><td>a label's shortfall: nearer a foreign leg than its own</td><td>em</td><td class="num">48</td></tr>
+    <tr><td><code>aspect</code></td><td>the chart's distance from 16:10, <code>|w·10 − h·16|</code></td><td>em</td><td class="num">2</td></tr>
+    <tr><td><code>area</code></td><td>the chart's <code>w × h</code></td><td>em²</td><td class="num">1</td></tr>
+    <tr><td><code>crowding</code></td><td>parallel segments of different transitions closer than an em, falling linearly to zero at one em</td><td>em</td><td class="num">512</td></tr>
+    <tr><td><code>length</code></td><td>total route length</td><td>em</td><td class="num">8</td></tr>
+    <tr><td><code>transit_bends</code></td><td>bends inside a state the route only passes through, on top of <code>bends</code></td><td>count</td><td class="num">768</td></tr>
+    <tr><td><code>whitespace</code></td><td>empty interior of composites (measured, unweighted)</td><td>em²</td><td class="num">0</td></tr>
+  </table>
+  <p>Weights are capped at 1,024, which keeps the sum inside 64 bits.</p>
+  <div data-fig="cost-overlay"></div>
+
+  <h3>Weights are exchange rates</h3>
+  <p>With every term in its own unit, a weight says how much of one defect a reader would trade for another. On <code>readable</code>, one bend costs the same as one crossing, one em of crowded lanes, 64 em of route length, or 512 em² of canvas. Without the unit conversion, area (degree 2 in the coordinates) swamped every other term. The weights were then fitted to pick the drawing with the fewest defects a reader counts.</p>
+  <div data-fig="cost-weights"></div>
+
+  <h3>Shares</h3>
+  <p>Each term's share of <code>t2</code>, in basis points, is committed per chart beside the cost goldens, so a reviewer sees what a weight change bought and sold.</p>
+  <div data-fig="cost-shares"></div>
+
+  <div class="callout why"><span class="t">Rejected</span>Scoring per frame (routes leave their frame); a heavy <code>excess_len</code> (it rewards sprawl); a term rewarding routes for running together (the optimiser stacks them); a higher weight ceiling (the ceiling keeps the sum in 64 bits).</div>
+</section>
+<script>
+// Figure: a real chart with each term's charges drawn on it.
+window.SXcostOverlay = function (sec) {
+  var C = SXcost, rows = SX.data('rows').charts.brew;
+  var f = SX.figure(sec.querySelector('[data-fig="cost-overlay"]'), { caption: '<b>Toggle a term</b> to see what it charges and <b>hover</b> a mark for its number. <b>Switch</b> to brew before the search to see bends, crossings and labels on routes.' });
+  var src = 'shipped', on = { bends: true, crossings: true, corridor: true, crowding: true, excess_len: false, area: false, lor: true };
+  var drawings = {
+    shipped: { g: rows.rows[0].searched, name: 'brew as shipped (row 0, searched)' },
+    raw: { g: rows.rows[0].unsearched, name: 'brew row 0 before the search' }
+  };
+  var KINDS = [
+    { k: 'bends', label: 'bends', col: '--series-1' },
+    { k: 'crossings', label: 'crossings', col: '--series-2' },
+    { k: 'corridor', label: 'corridor', col: '--series-3' },
+    { k: 'crowding', label: 'crowding', col: '--series-4' },
+    { k: 'excess_len', label: 'excess length', col: '--series-5' },
+    { k: 'area', label: 'area and aspect', col: '--series-6' },
+    { k: 'lor', label: 'label over route (Tier 0)', col: '--critical' }
+  ];
+  f.ctrl.appendChild(SX.choice({ options: [{ value: 'shipped', label: 'As shipped' }, { value: 'raw', label: 'Before the search' }], value: src, onChange: function (v) { src = v; draw(); } }).el);
+  KINDS.forEach(function (K) {
+    var t = SX.toggle({ label: K.label, value: on[K.k], onChange: function (v) { on[K.k] = v; draw(); } });
+    t.el.insertBefore(SX.el('span', { class: 'swatch', style: { background: 'var(' + K.col + ')' } }), t.el.lastChild);
+    f.ctrl.appendChild(t.el);
+  });
+  var left = SX.el('div'), right = SX.el('div', { style: { overflowX: 'auto', marginTop: '8px' } });
+  f.stage.appendChild(left); f.stage.appendChild(right);
+  function fmt(n) { return SX.fmt(n); }
+  function name(g, id) { var t = g.trans[id]; return 't' + id + ' ' + t.src_path + ' → ' + t.dst_path; }
+  function draw() {
+    var D = drawings[src], g = D.g, M = C.measure(g), h = SX.chart(left, g, { maxHeight: 520, pad: 260 });
+    var u = (g.box[2] + 520) / Math.max(left.clientWidth || 600, 300), mk = M.marks;   // grid units per screen pixel
+    function col(k) { return 'var(' + KINDS.filter(function (K) { return K.k === k; })[0].col + ')'; }
+    // Marks overlap, so one listener shows the tip of every mark under the pointer.
+    function tipOn(n, html) { n._tip = html; return n; }
+    h.over.addEventListener('mousemove', function (e) {
+      var t = document.elementsFromPoint(e.clientX, e.clientY).filter(function (n) { return n._tip; }).map(function (n) { return n._tip; });
+      if (t.length) SX.tip.show(e, t.join('<br><br>')); else SX.tip.hide();
+    });
+    h.over.addEventListener('mouseleave', SX.tip.hide);
+    if (on.area) {
+      var b = g.box, r = h.rect(b, { fill: 'none', stroke: col('area'), 'stroke-width': 2 * u, 'stroke-dasharray': (8 * u) + ' ' + (5 * u) });
+      r.style.pointerEvents = 'stroke';
+      tipOn(r, '<b>area</b> ' + fmt(b[2]) + ' × ' + fmt(b[3]) + ' = ' + fmt(M.T.area) + ' units² → ' + fmt(C.cdiv(M.T.area, C.UNIT.area)) + ' em²<br><b>aspect</b> |' + fmt(b[2]) + '·10 − ' + fmt(b[3]) + '·16| = ' + fmt(M.T.aspect) + ' → ' + fmt(C.cdiv(M.T.aspect, C.EM)) + ' em × 2');
+    }
+    if (on.excess_len) mk.excess.forEach(function (e) {
+      var l = h.line(e.t.points, { stroke: col('excess_len'), 'stroke-width': 6 * u, 'stroke-opacity': 0.55, 'stroke-linejoin': 'round' });
+      l.style.pointerEvents = 'stroke';
+      tipOn(l, '<b>excess length</b>, ' + name(g, e.t.id) + '<br>length ' + fmt(e.len) + ' − max(chord ' + fmt(e.chord) + ', label ' + fmt(e.carried) + ') = ' + fmt(e.ex) + (e.x > 1 ? ' × ' + e.x + ' (it crosses)' : '') + ' units');
+    });
+    if (on.corridor) mk.corridor.forEach(function (c) {
+      var s = c.s, pts = s.axis === 0 ? [[s.lo, s.at], [s.hi, s.at]] : [[s.at, s.lo], [s.at, s.hi]];
+      var l = h.line(pts, { stroke: col('corridor'), 'stroke-width': 6 * u, 'stroke-opacity': c.exempt ? 0.3 : 0.75, 'stroke-dasharray': c.exempt ? (4 * u) + ' ' + (3 * u) : null });
+      l.style.pointerEvents = 'stroke';
+      tipOn(l, '<b>corridor</b>: t' + c.u + ' and t' + c.v + ' share ' + fmt(s.len) + ' units of one line' + (c.exempt ? '<br><span class="m">a trunk into their common destination: not charged</span>' : ''));
+    });
+    if (on.crowding) mk.crowding.forEach(function (c) {
+      var r = c.axis === 0 ? [c.lo, c.at0, c.hi - c.lo, c.apart] : [c.at0, c.lo, c.apart, c.hi - c.lo];
+      var n = h.rect(r, { fill: col('crowding'), 'fill-opacity': 0.5, stroke: col('crowding'), 'stroke-width': 1 * u });
+      tipOn(n, '<b>crowding</b>: t' + c.u + ' and t' + c.v + ' run ' + fmt(c.hi - c.lo) + ' units side by side, ' + c.apart + ' apart (an em is 192)<br>' + fmt(c.hi - c.lo) + ' × (192 − ' + c.apart + ') / 192 = ' + c.charge.toFixed(1));
+    });
+    if (on.lor) mk.lor.forEach(function (x) {
+      var b = x.t.label_box;
+      var n = h.rect(b, { fill: col('lor'), 'fill-opacity': 0.18, stroke: col('lor'), 'stroke-width': 1.5 * u });
+      tipOn(n, '<b>label over route</b> (Tier 0): the label of ' + name(g, x.t.id) + ' overlaps a segment of t' + x.p.t);
+      var l = h.line([x.p.a, x.p.b], { stroke: col('lor'), 'stroke-width': 3 * u });
+      tipOn(l, 'the segment of ' + name(g, x.p.t) + ' under the label of t' + x.t.id);
+    });
+    if (on.bends) mk.bends.forEach(function (b) {
+      var d = h.dot(b.p, 5 * u, { fill: col('bends'), stroke: 'var(--surface-1)', 'stroke-width': 1.5 * u });
+      tipOn(d, '<b>bend</b> on ' + name(g, b.t.id) + '<br>1 × 512 = 512');
+    });
+    if (on.crossings) mk.crossings.forEach(function (c) {
+      var s = 6 * u, p = c.p;
+      var n = h.line([[p[0] - s, p[1] - s], [p[0] + s, p[1] + s], [p[0], p[1]], [p[0] + s, p[1] - s], [p[0] - s, p[1] + s]], { stroke: col('crossings'), 'stroke-width': 2.5 * u });
+      var hit = h.dot(p, 9 * u, { fill: 'transparent' });
+      tipOn(hit, '<b>crossing</b>: t' + c.u + ' × t' + c.v + '<br>1 × 512 = 512');
+    });
+    table(g, M);
+  }
+  function table(g, M) {
+    var T = g.cost.terms, t = SX.el('table', { class: 'sx-table', style: { fontSize: '12.5px', margin: '0', whiteSpace: 'nowrap' } });
+    t.appendChild(SX.el('tr', null, SX.el('th', { text: 'term' }), SX.el('th', { class: 'num', text: 'raw' }), SX.el('th', { class: 'num', text: 'in units' }), SX.el('th', { class: 'num', text: '× w' }), SX.el('th', { class: 'num', text: '= part' })));
+    var sum = 0;
+    C.TERMS.forEach(function (k) {
+      var raw = T[k], units = C.cdiv(raw, C.UNIT[k]), part = C.W[k] * units; sum += part;
+      var mine = M.T[k], chk = mine == null ? '' : (mine === raw ? ' ✓' : ' ≠ ' + mine);
+      var tr = SX.el('tr', null, SX.el('td', null, SX.el('code', { text: k })), SX.el('td', { class: 'num', text: fmt(raw) + chk }),
+        SX.el('td', { class: 'num', text: fmt(units) + (C.UNIT[k] > 1 ? ' ' + C.UNAME[C.UNIT[k]] : '') }), SX.el('td', { class: 'num', text: fmt(C.W[k]) }), SX.el('td', { class: 'num', text: fmt(part) }));
+      if (!raw) tr.style.color = 'var(--text-muted)';
+      SX.tipOn(tr, mine == null ? '<b>' + k + '</b>: logged by scav' : '<b>' + k + '</b>: recomputed here ' + fmt(mine) + ', scav logged ' + fmt(raw));
+      t.appendChild(tr);
+    });
+    t.appendChild(SX.el('tr', null, SX.el('th', { text: 't2' }), SX.el('th'), SX.el('th'), SX.el('th'), SX.el('th', { class: 'num', text: fmt(sum) })));
+    var t0 = g.cost.t0, tz = Object.keys(g.cost.tier0).filter(function (k) { return g.cost.tier0[k]; });
+    right.innerHTML = '';
+    right.appendChild(SX.el('div', { class: 'note', html: 'scav logged <b>t0 ' + t0 + '</b>' + (tz.length ? ' (' + tz.map(function (k) { return k + ' ' + g.cost.tier0[k] + (k === 'label_over_route' ? ', recomputed ' + M.T.label_over_route : ''); }).join(', ') + ')' : '') + ', <b>t2 ' + fmt(g.cost.t2) + '</b>; the sum below is ' + fmt(sum) + '. ✓ marks a term recomputed here that equals scav\'s.' }));
+    right.appendChild(t);
+  }
+  draw();
+};
+</script>
+<script>
+// Figure: three real candidates rescored live as the weights move.
+window.SXcostWeights = function (sec) {
+  var C = SXcost, R = SX.data('rows').charts.brew.rows;
+  var f = SX.figure(sec.querySelector('[data-fig="cost-weights"]'), { caption: '<b>Slide a weight</b> and watch which of brew\'s three converged drawings wins. Try <code>w_bends</code> below 111 or <code>w_aspect</code> at 4.' });
+  var cands = [
+    { label: 'row 0 · shipped', g: R[0].searched, rows: '0, 2, 4, 6' },
+    { label: 'row 1', g: R[1].searched, rows: '1, 3, 5, 7, 9, 11, 13, 15' },
+    { label: 'row 8', g: R[8].searched, rows: '8, 10, 12, 14' }
+  ];
+  var LADDER = [0, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 111, 128, 192, 256, 384, 512, 768, 1024];
+  var LIVE = ['bends', 'excess_len', 'aspect', 'area', 'length', 'whitespace'];
+  var COL = { bends: '--series-1', excess_len: '--series-2', aspect: '--series-3', area: '--series-4', length: '--series-5', whitespace: '--series-6' };
+  var w = Object.assign({}, C.W), sliders = {};
+  var row = SX.el('div', { class: 'fig-row' });
+  var left = SX.el('div', { style: { flex: '1 1 300px' } }), right = SX.el('div', { style: { flex: '2.4 1 560px' } });
+  row.appendChild(left); row.appendChild(right); f.stage.appendChild(row);
+  LIVE.forEach(function (k) {
+    var s = SX.slider({ label: '', min: 0, max: LADDER.length - 1, step: 1, value: LADDER.indexOf(C.W[k]), format: function (i) { return String(LADDER[i]); }, onInput: function (i) { w[k] = LADDER[i]; update(); } });
+    s.input.style.width = '150px';
+    var lab = SX.el('span', { style: { display: 'inline-block', width: '128px' } }, SX.el('span', { class: 'swatch', style: { background: 'var(' + COL[k] + ')' } }), SX.el('code', { text: 'w_' + k }));
+    left.appendChild(SX.el('div', { class: 'ctrl', style: { margin: '2px 0' } }, lab, s.el));
+    sliders[k] = s;
+  });
+  left.appendChild(SX.el('div', { class: 'ctrl' }, SX.button('Reset to readable', function () { LIVE.forEach(function (k) { sliders[k].set(LADDER.indexOf(C.W[k])); }); })));
+  var check = SX.el('div', { class: 'note' }); left.appendChild(check);
+  var cards = cands.map(function (c) {
+    var thumb = SX.el('div', { style: { width: '190px', flex: '0 0 190px' } });
+    SX.chart(thumb, c.g, { maxHeight: 92, pad: 200, layers: { labels: false } });
+    var head = SX.el('div', { style: { fontSize: '14px' } }), bar = SX.el('div');
+    var card = SX.el('div', { style: { display: 'flex', gap: '12px', alignItems: 'center', padding: '6px 8px', margin: '4px 0', borderRadius: '8px', border: '2px solid transparent' } }, thumb, SX.el('div', { style: { flex: '1 1 auto', minWidth: 0 } }, head, bar));
+    right.appendChild(card);
+    return { c: c, card: card, head: head, bar: bar };
+  });
+  right.appendChild(SX.el('div', { class: 'legend' }, LIVE.map(function (k) { return SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(' + COL[k] + ')' } }), k); })));
+  function parts(g) { return LIVE.map(function (k) { var u = C.cdiv(g.cost.terms[k], C.UNIT[k]); return { k: k, raw: g.cost.terms[k], units: u, part: w[k] * u }; }); }
+  function update() {
+    var tot = cards.map(function (x) { return C.weighted(x.c.g.cost.terms, w); });
+    var best = 0; tot.forEach(function (t, i) { if (t < tot[best]) best = i; });   // all t0 = 0; ties to the lower row
+    var vmax = Math.max.apply(null, tot) || 1;
+    cards.forEach(function (x, i) {
+      x.card.style.borderColor = i === best ? 'var(--hl)' : 'transparent';
+      x.head.innerHTML = '<b>' + x.c.label + '</b> <span class="m" style="color:var(--text-muted)">(also rows ' + x.c.rows + ')</span> · t2 <b style="font-family:var(--mono)">' + SX.fmt(tot[i]) + '</b>' + (i === best ? ' <span class="pill">least cost: shipped under these weights</span>' : '');
+      var svg = SX.svg('svg', { viewBox: '0 0 560 22', style: { width: '100%', height: 'auto' } }), x0 = 0, hits = [];
+      parts(x.c.g).forEach(function (p) {
+        var wd = 556 * p.part / vmax; if (wd <= 0) return;
+        var r = SX.svg('rect', { x: x0, y: 3, width: Math.max(wd - 1, 0.5), height: 16, rx: 2, fill: SX.css(COL[p.k]) });
+        var hw = Math.max(wd, 6), hit = SX.svg('rect', { x: x0 + wd / 2 - hw / 2, y: 0, width: hw, height: 22, fill: 'transparent' });   // a sliver still gets 6 units to hover
+        hits.push(hit);
+        SX.tipOn(hit, '<b>' + p.k + '</b>: ' + SX.fmt(p.raw) + ' raw → ' + SX.fmt(p.units) + ' ' + C.UNAME[C.UNIT[p.k]] + ' × ' + w[p.k] + ' = <b>' + SX.fmt(p.part) + '</b>');
+        svg.appendChild(r); x0 += wd;
+      });
+      hits.sort(function (a, b) { return b.getAttribute('width') - a.getAttribute('width'); }).forEach(function (n) { svg.appendChild(n); });   // narrow on top
+      x.bar.innerHTML = ''; x.bar.appendChild(svg);
+    });
+    var shipped = cards.map(function (x) { return C.weighted(x.c.g.cost.terms) === x.c.g.cost.t2; });
+    check.innerHTML = 'Recomputed at <code>readable</code>: ' + cards.map(function (x) { return SX.fmt(C.weighted(x.c.g.cost.terms)); }).join(' · ') + '; logged ' + cards.map(function (x) { return SX.fmt(x.c.g.cost.t2); }).join(' · ') + (shipped.every(Boolean) ? ' (equal).' : ' (MISMATCH).');
+  }
+  update();
+};
+</script>
+<script>
+// Figure: each weighted term's share of t2 per corpus chart, as scav reports it.
+window.SXcostShares = function (sec) {
+  var C = SXcost, charts = SX.data('charts').charts;
+  var f = SX.figure(sec.querySelector('[data-fig="cost-shares"]'), { caption: '<b>Hover</b> a segment for its share. <b>Switch</b> to no unit conversion to see area swamp every other term.' });
+  var mode = 'em';
+  f.ctrl.appendChild(SX.choice({ options: [{ value: 'em', label: 'As scav scores it (em, em²)' }, { value: 'raw', label: 'No unit conversion' }], value: mode, onChange: function (v) { mode = v; draw(); } }).el);
+  var SHOW = ['bends', 'excess_len', 'label_near', 'aspect', 'area', 'length'];
+  var COL = SHOW.map(function (k, i) { return SX.css('--series-' + (i + 1)); });
+  var names = ['estop', 'led', 'brew', 'dock', 'tcp', 'axis', 'toolchanger', 'bottler'];
+  function draw() {
+    var W = 760, rowH = 28, m = { l: 96, r: 96, t: 4 }, H = m.t + rowH * names.length + 22;
+    var svg = SX.svg('svg', { viewBox: '0 0 ' + W + ' ' + H, style: { width: '100%', height: 'auto', font: '12.5px ' + SX.css('--sans') } });
+    [0, 25, 50, 75, 100].forEach(function (p) {
+      var x = m.l + (W - m.l - m.r) * p / 100;
+      svg.appendChild(SX.svg('line', { x1: x, x2: x, y1: m.t, y2: H - 20, stroke: SX.css('--grid'), 'stroke-width': 1 }));
+      svg.appendChild(SX.svg('text', { x: x, y: H - 6, 'text-anchor': 'middle', fill: SX.css('--text-muted'), text: p + '%' }));
+    });
+    names.forEach(function (n, r) {
+      var cost = charts[n].text.cost, terms = cost.terms, y = m.t + r * rowH;
+      var part = SHOW.map(function (k) { return mode === 'em' ? C.W[k] * C.cdiv(terms[k], C.UNIT[k]) : C.W[k] * terms[k]; });
+      var whole = 0; C.TERMS.forEach(function (k) { whole += mode === 'em' ? C.W[k] * C.cdiv(terms[k], C.UNIT[k]) : C.W[k] * terms[k]; });
+      svg.appendChild(SX.svg('text', { x: m.l - 8, y: y + rowH * 0.62, 'text-anchor': 'end', fill: SX.css('--text-secondary'), text: n }));
+      var x = m.l;
+      SHOW.forEach(function (k, i) {
+        var bp = mode === 'em' ? cost.shares_bp[k] : Math.floor(part[i] * 10000 / whole);
+        var wd = (W - m.l - m.r) * part[i] / whole; if (wd <= 0) return;
+        var rect = SX.svg('rect', { x: x, y: y + 5, width: Math.max(wd - 1, 0.6), height: rowH - 10, fill: COL[i] });
+        SX.tipOn(rect, '<b>' + n + ' · ' + k + '</b><br>' + SX.fmt(bp) + ' bp of t2 (' + (bp / 100).toFixed(2) + '%)<br>weighted ' + SX.fmt(part[i]) + ' of ' + SX.fmt(whole) + (mode === 'em' ? '<br><span class="m">scav\'s logged share</span>' : '<br><span class="m">' + SX.fmt(terms[k]) + ' raw × ' + C.W[k] + '</span>'));
+        svg.appendChild(rect); x += wd;
+      });
+      svg.appendChild(SX.svg('text', { x: W - m.r + 6, y: y + rowH * 0.62, fill: SX.css('--text-primary'), text: SX.fmt(whole) }));
+    });
+    f.stage.innerHTML = '';
+    f.stage.appendChild(SX.el('div', { class: 'legend' }, SHOW.map(function (k, i) { return SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: COL[i] } }), k); }), SX.el('span', { style: { marginLeft: 'auto' }, text: 'right: t2' })));
+    f.stage.appendChild(svg);
+  }
+  draw();
+};
+SX.register('cost', function (sec) {
+  SXcostOverlay(sec);
+  SXcostWeights(sec);
+  SXcostShares(sec);
+});
+</script>

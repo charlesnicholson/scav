@@ -1,0 +1,200 @@
+<section class="sx" id="principles" data-toc="2 · Principles">
+  <div class="kicker">Principles</div>
+  <h2>The rules everything else obeys</h2>
+  <p class="lede">A drawing is a pure function of chart, space requests and profile, computed in integers, so the same inputs give the same bytes everywhere.</p>
+
+  <h3>A pure function</h3>
+  <p>Layout reads <code>(model, space requests, profile)</code> and nothing else: no warm start from a previous layout, no persisted cache, no quick mode. scav does keep <b>memos</b>, but each is keyed on every value its step reads, so a hit returns exactly what the computation would; like the thread count, a memo changes only the wall clock.</p>
+  <p>Stability comes from construction, not memory: each stage preserves order, every tie is broken by a total order, and document order drives reading order. A small edit can still cascade; the remedy is an author's pin, not a memory of the last layout.</p>
+
+  <h3>The integer grid</h3>
+  <p>All layout arithmetic is integer, because floating point and libm differ between platforms.</p>
+  <ul>
+    <li>Coordinates are <code>int32</code> <b>grid units</b> of 1/16 pt, within <code>|x| ≤ COORD_MAX = 524,287</code>, symmetric so negation and mirroring cannot overflow; products are <code>int64</code>. Space requests and spacing fields are capped at <code>COORD_MAX / 4</code>, since the box formula adds several.</li>
+    <li>Rectangles are half-open, <code>[x0, x1) × [y0, y1)</code>.</li>
+    <li>Square roots use an integer <code>isqrt</code>, ratios are compared by cross-multiplying, and intersection tests use <code>orient2d</code> signs, never a constructed point.</li>
+  </ul>
+  <div data-fig="principles-ruler"></div>
+  <p>The 2,000-state stress chart fits about 3× inside the domain; if charts outgrow it, the grid coarsens to 1/8 pt rather than widening the integers.</p>
+
+  <h3>The determinism contract</h3>
+  <p>Any conforming C++20 toolchain must produce the same bytes; <a href="#determinism">determinism</a> shows how that is tested. Four rules make it hold:</p>
+  <ul>
+    <li><b>The thread count never reaches the output.</b> Work is cut into <b>shards</b> whose count depends only on the model. One process-wide pool runs them: the first free thread takes the lowest unclaimed shard of the deepest open job. Each shard writes its own slot, and results merge in index order.</li>
+    <li><b>Reductions are associative</b>, such as <code>argmin(value, index)</code>; saturating addition is banned because it is not.</li>
+    <li><b>Every comparator is a total order</b>, and every sort that reaches the output is stable; <code>std::sort</code> is banned.</li>
+    <li><b>No randomness</b> in layout or search. Constructs whose behaviour varies by platform are banned: variable-width integers in values, <code>std::hash</code>, iterating unordered containers, pointer keys, <code>&lt;random&gt;</code>, <code>&lt;cmath&gt;</code>, <code>/</code> and <code>%</code> on negatives, locale formatting, bitfields.</li>
+  </ul>
+  <div data-fig="principles-shards"></div>
+
+  <h3>Two measurement scales</h3>
+  <p>scav's numbers come in two scales that are never compared. <b>No-text</b> means no space requests (every state at minimum size, no labels); the cost goldens and unit tests use it. <b>Real text</b> means text measured with the bundled font; rendering and every other drawing on this page use it. Text changes sizes, label terms and the search's choices, so a number carried across scales checks nothing.</p>
+  <div data-fig="principles-scales"></div>
+
+  <div class="callout rule"><span class="t">Rule</span>What is trivially right is built in, not left to the search: a straight line beats a kinked one, a start state sits beside the state it enters, a route never runs along a border. Every rule gets an isolated test on a trivial layout.</div>
+</section>
+<script>
+SX.register('principles', function (sec) {
+  var CH = SX.data('charts').charts;
+
+  // ---- a ruler in grid units: zoom from a whole state down to single units ----
+  (function () {
+    var host = sec.querySelector('[data-fig="principles-ruler"]');
+    var f = SX.figure(host, { caption: '<b>Slide</b> the zoom down to single grid units and <b>hover</b> to read the coordinate. The box is <code>brew</code>\'s <code>Off</code> state at true size; every coordinate layout produces lies on this lattice.' });
+    var off = CH.brew.text.states[0], O = off.rect, txt = off.draw[1];
+    var W = 760, H = 230, top = 34, z0 = 0;
+    var svg = SX.svg('svg', { viewBox: '0 0 ' + W + ' ' + H, style: { width: '100%', height: 'auto', font: '12px ' + SX.css('--sans') } });
+    f.stage.appendChild(svg);
+    var read = SX.el('div', { class: 'note', style: { marginTop: '4px' } });
+    f.stage.appendChild(read);
+    function nice(span) {
+      var raw = span / 8, p = Math.pow(10, Math.floor(Math.log10(raw)));
+      return [1, 2, 5, 10].map(function (m) { return m * p; }).filter(function (v) { return v >= raw; })[0];
+    }
+    function draw(z) {
+      z0 = z;
+      var span = 3000 / Math.pow(2, z), k = W / span, x0 = O[0] - 0.3 * span, y0 = O[1] + O[3] / 2 - 0.5 * (H - top) / k;
+      var X = function (v) { return (v - x0) * k; }, Y = function (v) { return top + (v - y0) * k; };
+      svg.innerHTML = '';
+      var clip = SX.svg('clipPath', { id: 'pr-clip' }, SX.svg('rect', { x: 0, y: top, width: W, height: H - top }));
+      svg.appendChild(SX.svg('defs', null, clip));
+      var g = SX.svg('g', { 'clip-path': 'url(#pr-clip)' });
+      svg.appendChild(g);
+      if (k >= 5) {
+        for (var gx = Math.ceil(x0); gx <= x0 + span; gx++) for (var gy = Math.ceil(y0); gy <= y0 + (H - top) / k; gy++)
+          g.appendChild(SX.svg('circle', { cx: X(gx), cy: Y(gy), r: Math.min(1.6, k / 8), fill: SX.css('--axis') }));
+      }
+      // The state: stroke centred on the box edge, as scav's SVG draws it.
+      g.appendChild(SX.svg('rect', { x: X(O[0]), y: Y(O[1]), width: O[2] * k, height: O[3] * k, rx: 81 * k, fill: SX.css('--state-fill'), stroke: SX.css('--state-stroke'), 'stroke-width': 16 * k }));
+      var t = SX.svg('text', { x: X(txt.x), y: Y(txt.y), 'font-size': 192 * k, textLength: txt.textLength * k, fill: SX.css('--ink'), text: txt.text });
+      t.style.fontFamily = SX.css('--mono');
+      g.appendChild(t);
+      // The em: 192 units square, beside the name.
+      var emx = txt.x + txt.textLength + 40, emy = txt.y - 192 * 0.8;
+      g.appendChild(SX.svg('rect', { x: X(emx), y: Y(emy), width: 192 * k, height: 192 * k, fill: 'none', stroke: SX.css('--hl-2'), 'stroke-width': 1.5, 'stroke-dasharray': '4 3' }));
+      g.appendChild(SX.svg('text', { x: X(emx), y: Y(emy) + 192 * k + 13, fill: SX.css('--text-secondary'), 'font-size': 11, text: '1 em = 192 units' }));
+      // The ruler along the top.
+      var step = nice(span);
+      svg.appendChild(SX.svg('line', { x1: 0, x2: W, y1: top - 0.5, y2: top - 0.5, stroke: SX.css('--axis') }));
+      for (var v = Math.ceil(x0 / step) * step; v <= x0 + span; v += step) {
+        svg.appendChild(SX.svg('line', { x1: X(v), x2: X(v), y1: top - 8, y2: top, stroke: SX.css('--axis') }));
+        var pt = v / 16, lab = SX.fmt(v) + (step >= 8 ? ' · ' + (Number.isInteger(pt) ? SX.fmt(pt) : pt.toFixed(pt * 4 % 1 ? 3 : 2)) + ' pt' : '');
+        svg.appendChild(SX.svg('text', { x: X(v) + 3, y: top - 12, fill: SX.css('--text-muted'), 'font-size': 11, text: lab }));
+      }
+      var hit = SX.svg('rect', { x: 0, y: top, width: W, height: H - top, fill: 'transparent' });
+      svg.appendChild(hit);
+      var cross = SX.svg('g', { 'pointer-events': 'none' });   // the mark under the pointer must not take it from the hit area
+      svg.appendChild(cross);
+      hit.addEventListener('mousemove', function (e) {
+        var r = svg.getBoundingClientRect(), px = (e.clientX - r.left) / r.width * W, py = (e.clientY - r.top) / r.height * H;
+        var ux = Math.floor(x0 + px / k), uy = Math.floor(y0 + (py - top) / k);
+        cross.innerHTML = '';
+        cross.appendChild(SX.svg('rect', { x: X(ux), y: Y(uy), width: Math.max(k, 2), height: Math.max(k, 2), fill: SX.css('--hl'), opacity: 0.8 }));
+        var inside = ux >= O[0] && ux < O[0] + O[2] && uy >= O[1] && uy < O[1] + O[3];
+        SX.tip.show(e, '<b>(' + SX.fmt(ux) + ', ' + SX.fmt(uy) + ')</b> grid units<br><span class="m">= (' + (ux / 16).toFixed(4) + ', ' + (uy / 16).toFixed(4) + ') pt<br>' +
+          (inside ? 'inside <code>Off</code>: [x0, x1) × [y0, y1) holds it' : 'outside <code>Off</code>\'s half-open rect') + '</span>');
+      });
+      hit.addEventListener('mouseleave', function () { cross.innerHTML = ''; SX.tip.hide(); });
+      read.innerHTML = 'Visible width ' + SX.fmt(Math.round(span)) + ' units = ' + (span / 16).toFixed(span < 160 ? 2 : 0) + ' pt; one pixel here is ' + (1 / k < 1 ? (1 / k).toFixed(2) : (1 / k).toFixed(1)) + ' units.' +
+        ' The whole domain is ±524,287 units = ±32,767.9 pt ≈ ±11.6 m.';
+    }
+    var sl = SX.slider({ label: 'Zoom', min: 0, max: 8.5, step: 0.25, value: 0, format: function (v) { return '×' + Math.round(Math.pow(2, v) * 10) / 10; }, onInput: draw });
+    f.ctrl.appendChild(sl.el);
+    draw(0);
+  })();
+
+  // ---- shards: who runs a shard changes the wall clock, never the answer ----
+  (function () {
+    var host = sec.querySelector('[data-fig="principles-shards"]');
+    var f = SX.figure(host, { caption: '<b>Pick</b> a thread count and <b>run again</b> to reorder the shards. Shards 2 and 5 tie: reducing in index order always picks shard 2, reducing in completion order does not.' });
+    var COST = [57, 49, 41, 63, 52, 41, 70, 45], WORK = [5, 4, 6, 3, 5, 4, 6, 3];
+    var threads = 3, run = 1;
+    function mix(x) { x = (x ^ (x >>> 16)) >>> 0; x = Math.imul(x, 0x7feb352d) >>> 0; x = (x ^ (x >>> 15)) >>> 0; x = Math.imul(x, 0x846ca68b) >>> 0; return (x ^ (x >>> 16)) >>> 0; }
+    // The pool: the earliest free thread (lowest index on a tie) claims the lowest unclaimed shard.
+    function schedule() {
+      var free = []; for (var w = 0; w < threads; w++) free.push(0);
+      var out = [];
+      for (var sh = 0; sh < COST.length; sh++) {
+        var best = 0; for (var q = 1; q < threads; q++) if (free[q] < free[best]) best = q;
+        var dur = WORK[sh] + (mix(run * 977 + sh * 131 + threads) % 7);
+        out.push({ shard: sh, thread: best, start: free[best], end: free[best] + dur });
+        free[best] += dur;
+      }
+      return out;
+    }
+    var info = SX.el('div', { class: 'note', style: { marginTop: '6px' } });
+    var holder = SX.el('div');
+    f.stage.appendChild(holder); f.stage.appendChild(info);
+    var tc = SX.choice({ options: [1, 2, 3, 5, 8].map(function (n) { return { value: n, label: n + (n === 1 ? ' thread' : ' threads') }; }), value: 3, onChange: function (v) { threads = v; draw(); } });
+    f.ctrl.appendChild(tc.el);
+    f.ctrl.appendChild(SX.button('Run again', function () { run++; draw(); }));
+    function draw() {
+      var sched = schedule(), T = Math.max.apply(null, sched.map(function (x) { return x.end; }));
+      var W = 760, rowH = 22, m = { l: 74, t: 8 }, H = m.t + threads * rowH + 96;
+      var X = function (t) { return m.l + t / T * (W - m.l - 20); };
+      var svg = SX.svg('svg', { viewBox: '0 0 ' + W + ' ' + H, style: { width: '100%', height: 'auto', font: '12px ' + SX.css('--sans') } });
+      for (var w = 0; w < threads; w++) svg.appendChild(SX.svg('text', { x: m.l - 8, y: m.t + w * rowH + 15, 'text-anchor': 'end', fill: SX.css('--text-secondary'), text: 'thread ' + w }));
+      sched.forEach(function (x) {
+        var y = m.t + x.thread * rowH;
+        var r = SX.svg('rect', { x: X(x.start) + 1, y: y + 2, width: Math.max(2, X(x.end) - X(x.start) - 2), height: rowH - 4, rx: 3, fill: SX.css(x.shard === 2 || x.shard === 5 ? '--series-2' : '--series-1'), opacity: 0.85 });
+        svg.appendChild(r);
+        svg.appendChild(SX.svg('text', { x: X(x.start) + 6, y: y + 15, fill: SX.css('--surface-1'), 'font-weight': 600, 'pointer-events': 'none', text: 'shard ' + x.shard }));
+        SX.tipOn(r, '<b>shard ' + x.shard + '</b> on thread ' + x.thread + '<br>runs ' + x.start + '–' + x.end + ', writes slot ' + x.shard + ' = ' + COST[x.shard]);
+      });
+      // The result slots, in index order, each tagged with when it was written.
+      var sy = m.t + threads * rowH + 22, cw = (W - m.l - 20) / COST.length;
+      svg.appendChild(SX.svg('text', { x: m.l - 8, y: sy + 20, 'text-anchor': 'end', fill: SX.css('--text-secondary'), text: 'slots' }));
+      var byEnd = sched.slice().sort(function (a, b) { return a.end - b.end || a.shard - b.shard; });
+      var rank = {}; byEnd.forEach(function (x, k) { rank[x.shard] = k + 1; });
+      var idx = 0; COST.forEach(function (v, k) { if (v < COST[idx]) idx = k; });
+      var comp = byEnd[0].shard; byEnd.forEach(function (x) { if (COST[x.shard] < COST[comp]) comp = x.shard; });
+      COST.forEach(function (v, k) {
+        var x = m.l + k * cw;
+        var cell = SX.svg('rect', { x: x + 2, y: sy, width: cw - 4, height: 30, rx: 4, fill: SX.css('--surface-2'), stroke: k === idx ? SX.css('--hl') : SX.css('--grid'), 'stroke-width': k === idx ? 2.5 : 1 });
+        svg.appendChild(cell);
+        svg.appendChild(SX.svg('text', { x: x + cw / 2, y: sy + 20, 'text-anchor': 'middle', fill: SX.css('--text-primary'), 'font-family': SX.css('--mono'), 'pointer-events': 'none', text: k + ': ' + v }));
+        svg.appendChild(SX.svg('text', { x: x + cw / 2, y: sy + 46, 'text-anchor': 'middle', fill: SX.css('--text-muted'), 'font-size': 11, text: 'done #' + rank[k] }));
+        SX.tipOn(cell, '<b>slot ' + k + '</b>: cost ' + v + '<br><span class="m">written ' + ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth'][rank[k] - 1] + ' in this run</span>');
+      });
+      svg.appendChild(SX.svg('text', { x: m.l, y: H - 6, fill: SX.css('--text-muted'), 'font-size': 11, text: 'time →  (run ' + run + ', ' + threads + (threads === 1 ? ' thread' : ' threads') + ', wall ' + T + ' ticks)' }));
+      holder.innerHTML = ''; holder.appendChild(svg);
+      info.innerHTML = '<span class="swatch" style="background:var(--hl)"></span>Index-order <code>argmin(cost, index)</code> → <b>shard ' + idx + '</b>, every run, every thread count. ' +
+        'Completion-order, first of equals → <b>shard ' + comp + '</b>' + (comp !== idx ? ', a different answer.' : ' this time; run again.');
+    }
+    draw();
+  })();
+
+  // ---- the two scales on one chart, drawn at one scale ----
+  (function () {
+    var host = sec.querySelector('[data-fig="principles-scales"]');
+    var f = SX.figure(host, { caption: '<b>Toggle</b> between real text and no space requests, drawn at one scale. The numbers differ in every row; they never rank one scale against the other.' });
+    var name = 'brew', scale = 'text';
+    var pc = SX.choice({ options: [{ value: 'brew', label: 'brew' }, { value: 'estop', label: 'estop' }], value: name, onChange: function (v) { name = v; draw(); } });
+    var sc = SX.choice({ options: [{ value: 'text', label: 'real text' }, { value: 'notext', label: 'no space requests' }], value: scale, onChange: function (v) { scale = v; draw(); } });
+    f.ctrl.appendChild(SX.el('span', { text: 'Chart' })); f.ctrl.appendChild(pc.el);
+    f.ctrl.appendChild(SX.el('span', { text: 'Scale' })); f.ctrl.appendChild(sc.el);
+    var stage = SX.el('div'), tab = SX.el('div');
+    f.stage.appendChild(stage); f.stage.appendChild(tab);
+    function draw() {
+      var c = CH[name], g = c[scale], A = c.text.box, B = c.notext.box;
+      var h = SX.chart(stage, g, { maxHeight: 420, labelBoxes: scale === 'text' });
+      var pad = 160, w = Math.max(A[2], B[2]), hh = Math.max(A[3], B[3]);
+      h.svg.setAttribute('viewBox', [-pad, -pad, w + 2 * pad, hh + 2 * pad].join(' '));
+      h.svg.setAttribute('preserveAspectRatio', 'xMinYMin meet');
+      h.rect(g.box, { fill: 'none', stroke: 'var(--axis)', 'stroke-width': 12, 'stroke-dasharray': '50 40' });
+      var rows = [
+        ['chart rect (grid units)', function (x) { return SX.fmt(x.box[2]) + ' × ' + SX.fmt(x.box[3]); }],
+        ['in points', function (x) { return Math.round(x.box[2] / 16) + ' × ' + Math.round(x.box[3] / 16); }],
+        ['placed label boxes', function (x) { return x.trans.filter(function (t) { return t.label_box; }).length; }],
+        ['bends', function (x) { return x.cost.terms.bends; }],
+        ['Tier 2 cost', function (x) { return SX.fmt(x.cost.t2); }],
+        ['the pins the search settled on', function (x) { return '<code style="font-size:11px">' + x.pins.replace('--no-text ', '') + '</code>'; }]
+      ];
+      tab.innerHTML = '<table class="sx-table"><tr><th></th><th>real text</th><th>no space requests</th></tr>' + rows.map(function (r) {
+        return '<tr><td>' + r[0] + '</td><td class="' + (scale === 'text' ? 'num' : 'num') + '"' + (scale === 'text' ? ' style="font-weight:700"' : '') + '>' + r[1](c.text) + '</td><td class="num"' + (scale === 'notext' ? ' style="font-weight:700"' : '') + '>' + r[1](c.notext) + '</td></tr>';
+      }).join('') + '</table>';
+    }
+    draw();
+  })();
+});
+</script>

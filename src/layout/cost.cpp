@@ -342,11 +342,19 @@ int64_t crossings_over(std::vector<Piece> const &pieces,
   return total;
 }
 
+// Marks both transitions of a charged pair in `party`, where given.
+void blame(std::vector<uint8_t> *party, uint32_t a, uint32_t b) {
+  if (party == nullptr) { return; }
+  if (a < party->size()) { (*party)[a] = 1; }
+  if (b < party->size()) { (*party)[b] = 1; }
+}
+
 // The length each pair shares on one line, per `(axis, coordinate)` bucket, less the
 // trunks.
 Wide corridor_over(Routes const &r,
                    std::vector<Piece> const &pieces,
-                   std::vector<Lane> const &lanes) {
+                   std::vector<Lane> const &lanes,
+                   std::vector<uint8_t> *party) {
   Wide total{ 0 };
   for (uint32_t lo = 0; lo < lanes.size();) {
     uint32_t hi{ lo };
@@ -367,6 +375,7 @@ Wide corridor_over(Routes const &r,
           continue;
         }
         total += shared;
+        blame(party, u.trans, v.trans);
       }
     }
     lo = hi;
@@ -378,7 +387,8 @@ Wide corridor_over(Routes const &r,
 // apart but not collinear: overlap times shortfall, summed, then divided once by `em`.
 Wide crowding_over(std::vector<Piece> const &pieces,
                    std::vector<Lane> const &lanes,
-                   int32_t em) {
+                   int32_t em,
+                   std::vector<uint8_t> *party) {
   if (em <= 0) { return 0; }
   Wide scaled{ 0 };
   for (uint32_t i = 0; i < lanes.size(); ++i) {
@@ -394,6 +404,7 @@ Wide crowding_over(std::vector<Piece> const &pieces,
                         imax(Wide{ u.lo }, Wide{ v.lo }) };
       if (along <= 0) { continue; }
       scaled += along * (Wide{ em } - apart);
+      blame(party, pieces[u.piece].trans, pieces[v.piece].trans);
     }
   }
   return scaled / em;
@@ -794,6 +805,11 @@ void seen_reset(Seen &seen, size_t n) {
   seen.epoch = 0;
 }
 
+int32_t tier0_of(CostTerms const &t) {
+  return t.through_box + t.box_overlap + t.vanished + t.flush + t.through_region +
+         t.retrace + t.label_over_box + t.label_over_route;
+}
+
 }  // namespace
 
 SCAV_INTERNAL_BEGIN
@@ -934,11 +950,11 @@ void cost_grid_query(ChildGrid const &g,
 }
 
 [[maybe_unused]] Wide cost_corridor(Routes const &r, std::vector<Piece> const &pieces) {
-  return corridor_over(r, pieces, lanes_of(pieces));
+  return corridor_over(r, pieces, lanes_of(pieces), nullptr);
 }
 
 [[maybe_unused]] Wide cost_crowding(std::vector<Piece> const &pieces, int32_t em) {
-  return crowding_over(pieces, lanes_of(pieces), em);
+  return crowding_over(pieces, lanes_of(pieces), em, nullptr);
 }
 
 SCAV_INTERNAL_END
@@ -971,8 +987,10 @@ CostTerms cost_terms(CostContext const &ctx,
                      SizedLayout const &z,
                      Routes const &r,
                      scav_spaces const &s,
-                     scav_profile const &p) {
+                     scav_profile const &p,
+                     std::vector<uint8_t> *party) {
   CostTerms t;
+  if (party != nullptr) { vec_assign(*party, c.transitions.size(), 0); }
   if (!geometry_complete(c, z, r)) { return t; }
   t.aspect = (Wide{ z.chart.w } * p.dar_den) - (Wide{ z.chart.h } * p.dar_num);
   if (t.aspect < 0) { t.aspect = -t.aspect; }
@@ -1008,6 +1026,7 @@ CostTerms cost_terms(CostContext const &ctx,
                                       r.points[route.off + k + 2]) };
         if (in != out) {
           ++t.bends;
+          if (party != nullptr) { (*party)[tr] = 1; }
           if (crosses_through &&
               in_transit(c, z, c.transitions[tr], top, r.points[route.off + k + 1])) {
             ++t.transit_bends;
@@ -1029,8 +1048,8 @@ CostTerms cost_terms(CostContext const &ctx,
   lanes_of(pieces, sc.key, sc.spare, sc.lanes);
   std::vector<Lane> const &lanes{ sc.lanes };
   t.crossings = crossings_over(pieces, lanes, crossings_of, sc.is_loose);
-  t.corridor = corridor_over(r, pieces, lanes);
-  t.crowding = crowding_over(pieces, lanes, p.font_size_grid);
+  t.corridor = corridor_over(r, pieces, lanes, party);
+  t.crowding = crowding_over(pieces, lanes, p.font_size_grid, party);
 
   // `excess_len` is what a route runs past the larger of its direct distance and its
   // carried boxes, times one plus its crossings; `length` sums every route.
@@ -1055,6 +1074,9 @@ CostTerms cost_terms(CostContext const &ctx,
                                  r.points[route.off + route.len - 1]) };
     Wide const excess{ actual - imax(direct, carried[tr]) };
     if (excess > 0) { t.excess_len += excess * (1 + crossings_of[tr]); }
+    if ((party != nullptr) && ((excess > 0) || (crossings_of[tr] != 0))) {
+      (*party)[tr] = 1;
+    }
   }
 
   // The live states, each grown by the band `flush` reads, so one grid answers
@@ -1104,12 +1126,21 @@ CostTerms cost_terms(CostContext const &ctx,
         at = enclosing_state(c, at);
       }
     };
+    // A placed box's subject, INVALID where the spaces name none.
+    auto const subject_of = [&](uint32_t at) {
+      return ((s.path_box != nullptr) && (at < s.n_path_box)) ? s.path_box[at].subject
+                                                              : INVALID;
+    };
     for (uint32_t i = 0; i < r.placed.size(); ++i) {
       scav_rect const &box{ r.placed[i] };
       grid_each(placed, box, 0, seen_placed, [&](uint32_t j) {
-        if ((j > i) && overlaps(box, r.placed[j])) { ++t.label; }
+        if ((j > i) && overlaps(box, r.placed[j])) {
+          ++t.label;
+          blame(party, subject_of(i), subject_of(j));
+        }
       });
       uint32_t subject{ INVALID };
+      uint32_t host{ INVALID };  // an endpoint enclosing the other end
       Wide height{ 0 };
       common.clear();
       if ((s.path_box != nullptr) && (i < s.n_path_box) &&
@@ -1118,25 +1149,39 @@ CostTerms cost_terms(CostContext const &ctx,
         height = s.path_box[i].h;
         // Only a state enclosing both ends is exempt from its own rect: `2` marks
         // the intersection, `1` src's chain alone, and the reset below clears both.
-        mark(c.transitions[subject].src, 1);
-        StateId up{ enclosing_state(c, c.transitions[subject].dst) };
+        StateId const src{ c.transitions[subject].src };
+        mark(src, 1);
+        StateId const dst{ c.transitions[subject].dst };
+        host = ((dst.v < encloses.size()) && (encloses[dst.v] == 1)) ? dst.v : INVALID;
+        StateId up{ enclosing_state(c, dst) };
         for (size_t step = 0; (step < c.states.size()) && (up.v != INVALID); ++step) {
           if (encloses[up.v] == 1) {
             encloses[up.v] = 2;
             vec_push_back(common, up.v);
           }
+          host = (up.v == src.v) ? src.v : host;
           up = enclosing_state(c, up);
         }
       }
-      // The grid charges every state's rect but those at 2, which pay for their bands.
+      // The grid charges every state's rect but those at 2 and the host, which pay for
+      // their bands: the host's in Tier 0.
       grid_each(states, box, 0, seen_state, [&](uint32_t at) {
         uint32_t const st{ state_of[at] };
-        if ((encloses[st] != 2) && overlaps(box, state_rect[at])) { ++t.label; }
+        if ((encloses[st] != 2) && (st != host) && overlaps(box, state_rect[at])) {
+          ++t.label_over_box;
+          blame(party, subject, INVALID);
+        }
       });
+      if ((host != INVALID) && (c.states[host].live != 0) &&
+          (overlaps(box, z.before[host]) || overlaps(box, z.after[host]))) {
+        ++t.label_over_box;
+        blame(party, subject, INVALID);
+      }
       for (uint32_t const st : common) {
         if ((c.states[st].live != 0) &&
             (overlaps(box, z.before[st]) || overlaps(box, z.after[st]))) {
           ++t.label;
+          blame(party, subject, INVALID);
         }
       }
       // -1 until a leg of that kind is seen, so a routeless subject and a chart
@@ -1152,15 +1197,23 @@ CostTerms cost_terms(CostContext const &ctx,
       // finds the nearest one that counts; with no own leg it is zero and finds overlaps.
       Wide const reach{ (own < 0) ? Wide{ 0 } : imax((own + height) - 1, Wide{ 0 }) };
       Wide other{ -1 };
+      uint32_t nearest{ INVALID };
       grid_each(segs, box, reach, seen_seg, [&](uint32_t j) {
         if (pieces[j].trans == subject) { return; }
         Wide const away{ chebyshev_gap(box, seg_box[j]) };
+        if ((other < 0) || (away < other)) { nearest = pieces[j].trans; }
         other = (other < 0) ? away : imin(other, away);
-        if (overlaps(box, seg_box[j])) { ++t.label; }
+        if (overlaps(box, seg_box[j])) {
+          ++t.label_over_route;
+          blame(party, subject, pieces[j].trans);
+        }
       });
       if ((own >= 0) && (other >= 0)) {
         Wide const shortfall{ (own + height) - other };
-        if (shortfall > 0) { t.label_near += shortfall; }
+        if (shortfall > 0) {
+          t.label_near += shortfall;
+          blame(party, subject, nearest);
+        }
       }
       if (subject != INVALID) { mark(c.transitions[subject].src, 0); }
     }
@@ -1228,6 +1281,9 @@ CostTerms cost_terms(CostContext const &ctx,
         })) {
       ++t.through_region;
     }
+  }
+  if ((party != nullptr) && (tier0_of(t) != 0)) {
+    vec_assign(*party, c.transitions.size(), uint8_t{ 1 });
   }
   return t;
 }
@@ -1305,8 +1361,7 @@ CostTerms layout_cost(Chart const &c,
 
 Cost cost_of(CostTerms const &t, scav_profile const &p) {
   Cost out;
-  out.t0_violations =
-      t.through_box + t.box_overlap + t.vanished + t.flush + t.through_region + t.retrace;
+  out.t0_violations = tier0_of(t);
   // Area is the largest term at (2 * COORD_MAX)^2 < 2^40, its em^2 only divides
   // it down, and thirteen of those under a weight capped at 2^10 stay below 2^54.
   for (Wide const term : weighted_terms(t, p)) { out.t2 += term; }

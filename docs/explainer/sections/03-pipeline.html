@@ -1,0 +1,182 @@
+<section class="sx" id="pipeline" data-toc="3 · The pipeline">
+  <style>
+    .pl-info { font-size: 14px; color: var(--text-secondary); max-width: 900px; min-height: 4.5em; margin-top: 6px; }
+    .pl-info b { color: var(--text-primary); }
+    .pl-diag text { font-family: var(--sans); }
+    .pl-diag .stg { cursor: pointer; }
+    .pl-diag .stg:hover rect { stroke: var(--hl); }
+    .pl-diag .stg:focus { outline: none; }
+    .pl-diag .stg:focus-visible rect { stroke: var(--hl-2); stroke-width: 3; }
+  </style>
+  <div class="kicker">Overview</div>
+  <h2>The pipeline at a glance</h2>
+  <p class="lede">Four phases (decompose, order, size, route) turn a chart into a drawing; a search reruns the last three with different choices and keeps the cheapest.</p>
+
+  <p>Each phase hands the next a plain struct and never reads what an earlier phase computed from anywhere else, so a unit test can type a phase's input in directly.</p>
+  <table class="sx-table">
+    <tr><th>stage</th><th>produces</th></tr>
+    <tr><td><a href="#decompose">0 · decompose</a></td><td>every transition cut into segments at the borders it crosses, with a port at each crossing</td></tr>
+    <tr><td><a href="#order">1 · order</a></td><td>per frame: each node's rank and position within it; long edges chained; label room charged to the gaps</td></tr>
+    <tr><td><a href="#size">2 · size</a></td><td>every state and submachine rectangle, folded and packed bottom-up</td></tr>
+    <tr><td><a href="#route">facing pass</a></td><td>ports turned toward their route's far end; if any turned, phases 1 and 2 run again</td></tr>
+    <tr><td><a href="#route">3 · route</a></td><td>orthogonal polylines and port positions, then <a href="#labels">placed labels</a></td></tr>
+    <tr><td><a href="#cost">cover and cost</a></td><td>the chart rectangle grown over every route and label, then the <code>Cost</code></td></tr>
+  </table>
+  <p>One pass from ordering through cost, for one setting of the search's choices, is a <b>candidate</b>. Phase 1 reads no sizes from the profile, so its first run happens once per layout and is shared by all 16 Level 2 rows and every inflation retry. A candidate with a new <a href="#search">pin</a> (a choice the search fixes, such as a state's rank) re-derives only what the pin reaches and <a href="#fast">copies</a> the rest.</p>
+
+  <div data-fig="pipeline-stages"></div>
+
+  <h3>The search around it</h3>
+  <ol>
+    <li>Validate the profile, space tables and router name; reject on failure.</li>
+    <li>Decompose and order once.</li>
+    <li><b>Level 2</b>: lay out 16 rows in parallel, each a whole-chart setting of four sizing knobs.</li>
+    <li><b>Level 1</b>, from every viable row: steepest descent over pins, one move per round, until nothing improves.</li>
+    <li><b>Kicks</b>: structural changes, each searched to convergence and kept only if the result is cheaper; then a refold search.</li>
+    <li>Ship the cheapest row (ties to the lower row) with its geometry, labels and diagnostics.</li>
+  </ol>
+  <p>On <code>mill</code>, the largest example, one layout scores 1.6 to 1.9 million candidates; <a href="#search">the search</a> and <a href="#fast">making it fast</a> explain how.</p>
+
+  <h3>When routing fails</h3>
+  <p>If a net is unreachable, the <a href="#route">inflation retry</a> widens spacing and reruns phases 2 and 3, up to 8 times. Anything still unroutable is drawn as a straight line with a <code>RouteDegraded</code> diagnostic; the run still succeeds.</p>
+</section>
+<script>
+SX.register('pipeline', function (sec) {
+  var ST = SX.data('stages').brew;
+
+  (function () {
+    var host = sec.querySelector('[data-fig="pipeline-stages"]');
+    var f = SX.figure(host, { caption: '<b>Click</b> a stage to see what it contributes to <code>brew</code>, from scav\'s trace; <b>hover</b> the overlays for details.' });
+    var G = ST.geometry, FR = ST.decomposition.frames;
+    var STAGES = [
+      { key: 'decompose', n: '0', name: 'decompose', sub: 'once per chart' },
+      { key: 'order', n: '1', name: 'order', sub: 'ranks, in-rank order' },
+      { key: 'size', n: '2', name: 'size', sub: 'boxes, folds, packing' },
+      { key: 'facing', n: '', name: 'facing', sub: 'turn ports' },
+      { key: 'route', n: '3', name: 'route', sub: 'seats, A*, nudging' },
+      { key: 'labels', n: '', name: 'labels', sub: 'anchored boxes' },
+      { key: 'cost', n: '', name: 'cover + cost', sub: 'Tier 0, Tier 2' }
+    ];
+    var cur = 'decompose';
+    var diag = SX.el('div', { class: 'pl-diag' }), stage = SX.el('div'), info = SX.el('div', { class: 'pl-info' }), extra = SX.el('div');
+    f.stage.appendChild(diag); f.stage.appendChild(stage); f.stage.appendChild(info); f.stage.appendChild(extra);
+
+    function diagram() {
+      var W = 1120, H = 182, bw = 130, gap = 22, x0 = 20, y0 = 52, bh = 54;
+      var svg = SX.svg('svg', { viewBox: '0 0 ' + W + ' ' + H, style: { width: '100%', height: 'auto' } });
+      var ink = SX.css('--text-primary'), mut = SX.css('--text-muted'), ax = SX.css('--axis');
+      var defs = SX.svg('defs', null, SX.svg('marker', { id: 'pl-arr', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' }, SX.svg('path', { d: 'M0,0L10,5L0,10z', fill: ax })));
+      svg.appendChild(defs);
+      var X = function (k) { return x0 + k * (bw + gap); };
+      // The search wraps phases 1..cost; the candidate is one pass of them.
+      svg.appendChild(SX.svg('rect', { x: X(1) - 12, y: 8, width: X(6) + bw - X(1) + 24, height: H - 14, rx: 12, fill: 'none', stroke: SX.css('--hl-2'), 'stroke-width': 1.5, 'stroke-dasharray': '6 4' }));
+      svg.appendChild(SX.svg('text', { x: X(1) - 2, y: 26, fill: SX.css('--text-secondary'), 'font-size': 12.5, text: 'search: 16 Level 2 rows × Level 1 moves × kicks — each pass of this box is one candidate' }));
+      STAGES.forEach(function (st, k) {
+        var on = st.key === cur;
+        var g = SX.svg('g', { class: 'stg', role: 'button', tabindex: 0, 'aria-pressed': String(on), 'aria-label': (st.n ? st.n + ' · ' : '') + st.name + ', ' + st.sub, 'data-stage': st.key });
+        g.appendChild(SX.svg('rect', { x: X(k), y: y0, width: bw, height: bh, rx: 9, fill: on ? 'color-mix(in srgb, var(--hl) 16%, var(--surface-1))' : SX.css('--surface-2'), stroke: on ? SX.css('--hl') : SX.css('--border'), 'stroke-width': on ? 2 : 1 }));
+        g.appendChild(SX.svg('text', { x: X(k) + bw / 2, y: y0 + 23, 'text-anchor': 'middle', fill: ink, 'font-size': 14, 'font-weight': 600, text: (st.n ? st.n + ' · ' : '') + st.name }));
+        g.appendChild(SX.svg('text', { x: X(k) + bw / 2, y: y0 + 41, 'text-anchor': 'middle', fill: mut, 'font-size': 11.5, text: st.sub }));
+        g.addEventListener('click', function () { pick(st.key); });
+        g.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(st.key); } });
+        svg.appendChild(g);
+        if (k) svg.appendChild(SX.svg('line', { x1: X(k) - gap + 2, x2: X(k) - 3, y1: y0 + bh / 2, y2: y0 + bh / 2, stroke: ax, 'stroke-width': 1.5, 'marker-end': 'url(#pl-arr)' }));
+      });
+      // Facing loops back to order; the inflation retry loops route back to size.
+      var by = y0 + bh;
+      svg.appendChild(SX.svg('path', { d: 'M' + (X(3) + bw / 2) + ',' + by + ' v18 H' + (X(1) + bw / 2) + ' v-16', fill: 'none', stroke: ax, 'stroke-width': 1.5, 'marker-end': 'url(#pl-arr)' }));
+      svg.appendChild(SX.svg('text', { x: X(1) + bw / 2 - 6, y: by + 22, 'text-anchor': 'end', fill: mut, 'font-size': 11, text: 'a port turned: order and size again' }));
+      svg.appendChild(SX.svg('path', { d: 'M' + (X(4) + bw / 2 + 10) + ',' + by + ' v34 H' + (X(2) + bw / 2 + 10) + ' v-32', fill: 'none', stroke: SX.css('--hl'), 'stroke-width': 1.5, 'stroke-dasharray': '4 3', 'marker-end': 'url(#pl-arr)' }));
+      svg.appendChild(SX.svg('text', { x: X(2) + bw / 2 + 18, y: by + 50, fill: mut, 'font-size': 11, text: 'inflation retry: a net unreachable → widen spacing by 32, phases 2–3 again (≤ 8×)' }));
+      svg.appendChild(SX.svg('text', { x: X(0), y: y0 - 10, fill: mut, 'font-size': 11, text: 'once per layout' }));
+      diag.innerHTML = ''; diag.appendChild(svg);
+    }
+    function pick(key) {
+      var had = diag.contains(document.activeElement);
+      cur = key; render();
+      if (had) diag.querySelector('[data-stage="' + key + '"]').focus({ preventScroll: true });   // render() replaced the focused group
+    }
+
+    var COLS = ['--series-1', '--series-3', '--series-7'];
+    function frameName(fr) { return fr.owner == null ? 'root' : fr.owner_path + (fr.name ? ':' + fr.name : ''); }
+    function union(rs) {
+      var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      rs.forEach(function (r) { x0 = Math.min(x0, r[0]); y0 = Math.min(y0, r[1]); x1 = Math.max(x1, r[0] + r[2]); y1 = Math.max(y1, r[1] + r[3]); });
+      return [x0, y0, x1 - x0, y1 - y0];
+    }
+    function tip(n, html) { SX.tipOn(n, html); n.style.pointerEvents = 'all'; return n; }
+    function render() {
+      diagram();
+      extra.innerHTML = '';
+      var L = { subs: true, states: true, text: true, routes: true, labels: true };
+      if (cur === 'decompose' || cur === 'size' || cur === 'facing') { L.routes = false; L.labels = false; }
+      if (cur === 'order') L.labels = false;
+      if (cur === 'route') L.labels = false;
+      var h = SX.chart(stage, G, { layers: L, maxHeight: 420, labelBoxes: cur === 'labels' });
+      var u = h.unit;
+      if (cur === 'decompose') {
+        FR.forEach(function (fr, k) {
+          var col = 'var(' + COLS[k % 3] + ')';
+          tip(h.rect(fr.rect, { fill: 'color-mix(in srgb, ' + col + ' 12%, transparent)', stroke: col, 'stroke-width': u * 2.5 }),
+            '<b>frame ' + fr.id + '</b>: ' + frameName(fr) + '<br>' + fr.states.length + ' nodes; ' + ST.decomposition.segments.filter(function (sg) { return sg.frame === fr.id; }).length + ' segments' + (fr.down ? '<br><span class="m">turned to run down the page (an orient pin)</span>' : ''));
+          h.text([fr.rect[0] + u * 5, fr.rect[1] + fr.rect[3] - u * 5], 'frame ' + fr.id + ' · ' + (fr.owner == null ? 'root' : fr.name), { 'font-size': u * 11 });
+        });
+        info.innerHTML = '<b>Phase 0</b> makes one frame per submachine (three here) and ' + ST.decomposition.segments.length + ' segments. No <code>brew</code> transition crosses a border, so there are no ports; <a href="#decompose">decompose</a> shows a chart that has them.';
+      } else if (cur === 'order') {
+        var gc = [].concat.apply([], ST.ordering.map(function (o) { return o.gap_charged.map(function (g) { return '“' + G.trans[g.trans].label + '” ' + g.width; }); }));
+        ST.ordering.forEach(function (o) {
+          var col = 'var(' + COLS[o.frame % 3] + ')';
+          o.ranks.forEach(function (rk) {
+            var r = union(rk.states.map(function (id) { return G.states[id].rect; })), m = u * 6;
+            var box = [r[0] - m, r[1] - m, r[2] + 2 * m, r[3] + 2 * m];
+            tip(h.rect(box, { fill: 'color-mix(in srgb, ' + col + ' 10%, transparent)', stroke: col, 'stroke-width': u * 2, 'stroke-dasharray': (u * 8) + ' ' + (u * 5), rx: u * 6 }),
+              '<b>frame ' + o.frame + ' (' + frameName(FR[o.frame]) + '), rank ' + rk.rank + '</b><br>' + rk.paths.map(function (p) { return p.charAt(0) === '#' ? G.states[+p.slice(1)].kind : p; }).join(', ') +
+              (o.down ? '<br><span class="m">this frame runs down, so its ranks are rows</span>' : ''));
+            h.text([box[0] + u * 3, box[1] - u * 4], 'r' + rk.rank, { 'font-size': u * 15, 'font-weight': 700 });
+          });
+          o.reversed.forEach(function (rv) { h.mark('trans', rv.trans); });
+        });
+        info.innerHTML = '<b>Phase 1</b> breaks cycles (highlighted edges reversed) and ranks each frame; dashed boxes are ranks. <code>grinder</code> was turned to run down. Label charges on the gaps, in units: ' + gc.join(', ') + '.';
+      } else if (cur === 'size' || cur === 'facing') {
+        var fold = ST.sizing.passes[0].filter(function (e) { return e.kind === 'piece_packed'; });
+        var org = FR[1].rect;
+        fold.forEach(function (pc) {
+          tip(h.rect([org[0] + pc.at[0], org[1] + pc.at[1], pc.size[0], pc.size[1]], { fill: 'none', stroke: 'var(--hl)', 'stroke-width': u * 2.5, 'stroke-dasharray': (u * 8) + ' ' + (u * 5) }),
+            '<b>fold piece</b> of frame 1 (water) starting at rank ' + pc.rank + '<br>packed at (' + pc.at.join(', ') + ') in the frame, ' + pc.size.join(' × ') + ' units');
+        });
+        ST.sizing.passes[0].filter(function (e) { return e.kind === 'node_placed'; }).forEach(function (e) {
+          tip(h.dot(e.at, u * 4, { fill: 'var(--hl-2)' }), '<b>node placed</b> ' + e.state + '<br><span class="m">(rank-axis start, cross-axis centre) = (' + e.at.join(', ') + ')</span>');
+        });
+        if (cur === 'size') info.innerHTML = '<b>Phase 2</b> sizes frames bottom-up. <code>water</code> was too wide for its aspect target, so it is <b>folded</b> and its two pieces (orange) packed; blue dots are placed nodes. Chart: ' + SX.fmt(ST.sizing.box[2]) + ' × ' + SX.fmt(ST.sizing.box[3]) + ' units.';
+        else info.innerHTML = '<b>The facing pass</b> turns ports toward their route\'s far end and reruns phases 1 and 2 if any turned. <code>brew</code> has no ports, so sizing ran once.';
+      } else if (cur === 'route') {
+        var seatsAt = {}, seatOrder = [];   // seats landing on one point share one dot and one tooltip
+        ST.routing.nets.forEach(function (n) {
+          tip(h.line([n.src, n.dst], { stroke: 'var(--hl-2)', 'stroke-width': u * 2, 'stroke-dasharray': (u * 6) + ' ' + (u * 5) }), '<b>net planned</b> for “' + (G.trans[n.trans].label || G.trans[n.trans].src_path + ' → ' + G.trans[n.trans].dst_path) + '”<br><span class="m">between node centres, before seating</span>');
+          n.seats.forEach(function (st) {
+            var k = st.to.join(',');
+            if (!seatsAt[k]) { seatsAt[k] = []; seatOrder.push(k); }
+            seatsAt[k].push(st);
+          });
+        });
+        seatOrder.forEach(function (k) {
+          var list = seatsAt[k], later = list.some(function (st) { return st.pass !== 'attach'; });
+          tip(h.dot(list[0].to, u * (later ? 6 : 4), { fill: later ? 'var(--series-5)' : 'var(--hl)' }),
+            '<b>seat at (' + list[0].to.join(', ') + ')</b><br>' + list.map(function (st) { return st.pass + ' pass: ' + st.end + ' end'; }).join('<br>'));
+        });
+        info.innerHTML = '<b>Phase 3</b> plans one net per segment between centres (dashed blue), seats each end on a face (orange: first pass; pink: later passes), then finds each path with A* and nudges parallel lanes apart.';
+      } else if (cur === 'labels') {
+        ST.labels.placed.forEach(function (lb) { tip(h.rect(lb.box, { fill: 'color-mix(in srgb, var(--hl-2) 12%, transparent)', stroke: 'none' }), '<b>“' + lb.label + '”</b><br>box ' + lb.box.join(', ')); });
+        info.innerHTML = '<b>Labels</b> come last: each of the ' + ST.labels.placed.length + ' boxes hangs off its own route by a ' + ST.labels.leader + '-unit leader, clear of other boxes and routes. See <a href="#labels">labels</a>.';
+      } else {
+        var C = ST.cost, t0 = Object.keys(C.tier0).map(function (k) { return k + ' ' + C.tier0[k]; }).join(', ');
+        info.innerHTML = '<b>Cover and cost.</b> The chart grows over every route and label, then is scored: Tier 0 (' + t0 + ': all zero), then Tier 2, <b>' + SX.fmt(C.t2) + '</b>. Below, each term\'s share of Tier 2.';
+        var bars = Object.keys(C.shares_bp).filter(function (k) { return C.shares_bp[k] > 0; }).map(function (k) { return { label: k, value: C.shares_bp[k] / 100, note: 'raw term ' + SX.fmt(C.terms[k]) }; });
+        bars.sort(function (a, b) { return b.value - a.value; });
+        SX.barChart(extra, { bars: bars, unit: '%', format: function (v) { return v.toFixed(2); } });
+      }
+    }
+    render();
+  })();
+});
+</script>

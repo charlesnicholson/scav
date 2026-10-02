@@ -3,11 +3,15 @@
 
 #include "scav_thread.h"
 
+#include "scav/scav_core.h"
+#include "scav/scav_layout.h"
+#include "scav/scav_layout_c.h"
 #include "scav/scav_types.h"
 #include "scav_xxhash.h"
 
 #include "doctest.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -15,12 +19,14 @@
 #include <cstdint>
 #include <ostream>
 #include <set>
+#include <string>
 #include <thread>
 #include <vector>
 
 namespace scav {
 void thread_test_spawn_limit(uint32_t limit);
 void thread_test_delay_seed(uint64_t seed);
+uint32_t thread_test_participants();  // threads that ran a pooled shard since last asked
 }  // namespace scav
 
 namespace {
@@ -235,6 +241,36 @@ TEST_CASE("thread: a worker that cannot be spawned runs on the caller") {
   CHECK(count_of(run_hits(shards, 8U), 1U) == shards);
 }
 
+TEST_CASE("thread: a spawn limit caps the threads that claim shards") {
+  HookGuard const guard;
+  uint32_t const shards{ 64 };
+  for (uint32_t threads : { 2U, 3U, 5U }) {
+    CAPTURE(threads);
+    thread_test_spawn_limit(threads - 1U);
+    uint32_t const want{ std::min(threads, thread_concurrency()) };
+    // Every shard waits until `want` threads have arrived, so each one the cap
+    // admits arrives and any it should have kept out has time to.
+    Mutex m;
+    std::set<std::thread::id> seen;
+    std::atomic<uint32_t> arrived{ 0 };
+    auto body = [&](uint32_t /*shard*/) {
+      {
+        ScopedLock const held{ m };
+        seen.insert(std::this_thread::get_id());
+        arrived.store(static_cast<uint32_t>(seen.size()));
+      }
+      auto const deadline{ std::chrono::steady_clock::now() + std::chrono::seconds(10) };
+      while ((arrived.load() < want) && (std::chrono::steady_clock::now() < deadline)) {
+        std::this_thread::yield();
+      }
+    };
+    thread_test_participants();
+    parallel_for(shards, threads, body);
+    CHECK(seen.size() == want);
+    CHECK(thread_test_participants() == ((want > 1U) ? want : 0U));
+  }
+}
+
 TEST_CASE("thread: a spawn failure moves work between threads and nothing else") {
   HookGuard const guard;
   uint32_t const shards{ 128 };
@@ -447,4 +483,50 @@ TEST_CASE("thread: a mutex held on one host thread keeps another out until relea
   m.unlock();
   other.join();
   CHECK(entered.load());
+}
+
+TEST_CASE("thread: a chart lays out the same however many threads claim its shards") {
+  HookGuard const guard;
+  constexpr std::array<uint32_t, 4> COUNTS{ 1, 2, 3, 5 };
+  constexpr std::array<char const *, 4> CHARTS{ "estop", "led", "tcp", "brew" };
+  scav_profile p{};
+  REQUIRE(profile_named("readable", p));
+  std::array<uint32_t, COUNTS.size()> most{};  // the most participants any chart had
+  for (char const *name : CHARTS) {
+    std::string const chart{ name };
+    CAPTURE(chart);
+    std::array<uint32_t, 2> want{};
+    for (uint32_t k = 0; k < COUNTS.size(); ++k) {
+      uint32_t const threads{ COUNTS[k] };
+      CAPTURE(threads);
+      thread_test_spawn_limit(threads - 1U);  // workers beside the caller
+      std::string const path{ std::string{ SCAV_TEST_DATA_DIR "/charts/" } + name +
+                              ".scav" };
+      Loader loader;
+      Chart c;
+      std::vector<Diagnostic> diags;
+      std::string failed;
+      REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
+      scav_layout_opts const o{ .profile = p, .router = 0, .threads = threads };
+      std::vector<scav_placed> placed;
+      thread_test_participants();
+      REQUIRE(layout_run(c, {}, o, placed, diags));
+      uint32_t const participants{ thread_test_participants() };
+      CHECK(participants <= threads);
+      most[k] = std::max(most[k], participants);
+      std::array<uint32_t, 2> const got{ layout_structural_hash(c),
+                                         layout_coordinate_hash(c) };
+      if (k == 0) {
+        want = got;
+      } else {
+        CHECK(got == want);
+      }
+    }
+  }
+  std::string seen;
+  for (uint32_t const n : most) { seen += ' ' + std::to_string(n); }
+  MESSAGE("most participants at 1, 2, 3, 5 threads:", seen);
+  CHECK(most[0] == 0U);
+  if (thread_concurrency() >= 2U) { CHECK(most[1] == 2U); }
+  if (thread_concurrency() >= 3U) { CHECK(most[3] >= 3U); }
 }

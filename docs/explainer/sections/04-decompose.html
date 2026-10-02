@@ -1,0 +1,153 @@
+<section class="sx" id="decompose" data-toc="4 · Decompose">
+  <style>
+    .dc-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; font-size: 13px; }
+    .dc-list button { font: 12.5px var(--sans); padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary); cursor: pointer; }
+    .dc-list button.on { border-color: var(--hl); box-shadow: inset 0 0 0 1px var(--hl); }
+    .dc-segs { font-size: 13.5px; color: var(--text-secondary); margin-top: 6px; }
+    .dc-segs table { margin: 4px 0; }
+    .dc-segs tr.cur td { background: color-mix(in srgb, var(--hl) 14%, transparent); }
+  </style>
+  <div class="kicker">Phase 0</div>
+  <h2>Decompose: frames, segments, ports</h2>
+  <p class="lede">Every transition is cut at each border it crosses, leaving one flat graph per submachine, joined to the others only at ports.</p>
+
+  <p>A <b>frame</b> is one submachine laid out as its own layered graph: a region, a composite's submachine, or a document root. It is the unit that is ordered, sized, run in parallel and reused between candidates. In its parent's frame, a composite state is a plain node.</p>
+  <p>A transition whose ends lie in different frames is split at every border it crosses. Each piece is a <b>segment</b> in exactly one frame; each cut is a <b>port</b> on the crossed state's border. Long hierarchical edges become a matter of ordering ports along each composite's sides, and a long edge pulls on every level it passes, with no weight needed.</p>
+  <h3>How a transition is split</h3>
+  <ol>
+    <li>Skip dead transitions, and internal or local self-transitions, which have no route.</li>
+    <li>List each end's ancestors, innermost first, and strip the part they share.</li>
+    <li>If the source encloses the destination, an internal or local transition starts on the source's inner face; an external one leaves the source and re-enters it.</li>
+    <li><b>Exit</b> the source's chain, innermost first; the source itself is exited only by an external transition.</li>
+    <li>If the chains diverge into two submachines of one state, cross the separator between those regions instead of the state's border; that middle segment is routed in the source region's frame.</li>
+    <li><b>Enter</b> the destination's chain, outermost first. If the destination encloses the source, end on its inner face.</li>
+    <li>Emit one port per crossing and one segment per consecutive pair of ends, each in the frame it lies in.</li>
+  </ol>
+  <p>Each segment end is a port, an endpoint state's box, or an endpoint's inner face. In <a href="#order">ordering</a>, each port on a frame's border becomes a <b>boundary node</b>: exits on the trailing edge, entries on the leading one.</p>
+  <p>A transition's label belongs to the segment in its <b>lowest common ancestor</b> (LCA) frame, the innermost submachine holding both ends. Ports and segments have stable ids derived from the model, never from how work was split.</p>
+
+  <div data-fig="decompose-split"></div>
+
+  <div class="callout rule"><span class="t">Rule</span>Cutting at borders keeps each submachine independently orderable and keeps every long edge, which <a href="#intro">ELK's two modes</a> cannot do together. Phase 0 records what kind each segment end is; later phases never infer it.</div>
+</section>
+<script>
+SX.register('decompose', function (sec) {
+  var T = SX.data('stages').toolchanger;
+
+  (function () {
+    var host = sec.querySelector('[data-fig="decompose-split"]');
+    var f = SX.figure(host, { caption: '<b>Hover</b> or <b>click</b> a frame to see the submachine it lays out. <b>Pick</b> a split transition and <b>step</b> through its segments, coloured by frame: orange dots are ports, squares boundary nodes.' });
+    var G = T.geometry, D = T.decomposition, FR = D.frames;
+    var PAL = ['--series-1', '--series-3', '--series-7', '--series-4', '--series-5', '--series-8'];
+    var col = function (fid) { return 'var(' + PAL[fid % PAL.length] + ')'; };
+    var fname = function (fr) { return fr.owner == null ? 'root' : fr.owner_path + (fr.name ? ':' + fr.name : ''); };
+    var splits = D.split_transitions, sel = 1, step = 0, hoverFrame = null, pinFrame = null;
+    var frameChips = SX.el('div', { class: 'dc-list' }), transChips = SX.el('div', { class: 'dc-list' });
+    var stage = SX.el('div'), segs = SX.el('div', { class: 'dc-segs' });
+    f.ctrl.style.display = 'block';
+    f.ctrl.appendChild(SX.el('div', { class: 'note', text: 'Frames' })); f.ctrl.appendChild(frameChips);
+    f.ctrl.appendChild(SX.el('div', { class: 'note', text: 'Split transitions' })); f.ctrl.appendChild(transChips);
+    var stepCtl = SX.el('div');
+    f.ctrl.appendChild(stepCtl);
+    f.stage.appendChild(stage); f.stage.appendChild(segs);
+    var h = SX.chart(stage, G, { maxHeight: 560, pad: 220 });
+    var u = h.unit;
+    var fg = SX.svg('g'), hitG = SX.svg('g');
+    h.svg.insertBefore(hitG, h.over.nextSibling);
+    h.svg.insertBefore(fg, hitG.nextSibling);
+
+    // The route split at its ports: one polyline per segment, in route order.
+    function pieces(sp) {
+      var pts = G.trans[sp.trans].points, out = [[pts[0]]], pk = 0;
+      for (var k = 1; k < pts.length; k++) {
+        out[out.length - 1].push(pts[k]);
+        var p = sp.ports[pk];
+        if (p && pts[k][0] === p.at[0] && pts[k][1] === p.at[1] && k < pts.length - 1) { out.push([pts[k]]); pk++; }
+      }
+      return out;
+    }
+    FR.slice().sort(function (a, b) { return b.rect[2] * b.rect[3] - a.rect[2] * a.rect[3]; }).forEach(function (fr) {
+      var r = fr.rect, hr = SX.svg('rect', { x: r[0], y: r[1], width: r[2], height: r[3], fill: 'transparent' });
+      hr.addEventListener('mouseenter', function () { hoverFrame = fr.id; paint(); });
+      hr.addEventListener('mouseleave', function () { hoverFrame = null; paint(); SX.tip.hide(); });
+      SX.tipOn(hr, function () { return frameTip(fr); });
+      hitG.appendChild(hr);
+    });
+    function frameTip(fr) {
+      var n = D.segments.filter(function (sg) { return sg.frame === fr.id; }).length;
+      return '<b>frame ' + fr.id + '</b>: ' + fname(fr) + '<br>' + fr.states.length + ' nodes, ' + n + ' segments' + (fr.down ? '<br><span class="m">runs down the page (an orient pin)</span>' : '');
+    }
+    var fbtn = FR.map(function (fr) {
+      var b = SX.el('button', { type: 'button', html: '<span class="swatch" style="background:' + col(fr.id) + '"></span>' + fr.id + ' · ' + fname(fr) });
+      b.addEventListener('mouseenter', function () { hoverFrame = fr.id; paint(); });
+      b.addEventListener('mouseleave', function () { hoverFrame = null; paint(); });
+      b.addEventListener('click', function () { pinFrame = pinFrame === fr.id ? null : fr.id; paint(); });   // a click keeps the frame shown
+      frameChips.appendChild(b);
+      return b;
+    });
+    var tbtn = splits.map(function (sp, k) {
+      var b = SX.el('button', { type: 'button', text: '“' + G.trans[sp.trans].label + '”  ' + sp.segments.length + ' segments' });
+      b.addEventListener('click', function () { sel = k; step = 0; buildStepper(); paint(); });
+      transChips.appendChild(b);
+      return b;
+    });
+    var stp = null;
+    function buildStepper() {
+      stepCtl.innerHTML = '';
+      var sp = splits[sel];
+      stp = SX.stepper({ steps: sp.segments.length + 1, start: step, interval: 1300,
+        label: function (i) { return i === sp.segments.length ? 'all segments' : 'segment ' + (i + 1) + ' of ' + sp.segments.length; },
+        onStep: function (i) { step = i; paint(); } });
+      stepCtl.appendChild(stp.el);
+    }
+    function paint() {
+      fg.innerHTML = ''; h.unmarkAll();
+      tbtn.forEach(function (b, k) { b.classList.toggle('on', k === sel); });
+      fbtn.forEach(function (b, k) { b.classList.toggle('on', FR[k].id === pinFrame); });
+      var shownFrame = hoverFrame != null ? hoverFrame : pinFrame;
+      var sp = splits[sel], ps = pieces(sp), all = step >= sp.segments.length;
+      var keepS = [], src = null, dst = null;
+      G.states.forEach(function (st) { if (st.path === sp.src_path) src = st.id; if (st.path === sp.dst_path) dst = st.id; });
+      h.dim({ states: G.states.map(function (st) { return st.id; }).filter(function (id) {
+        var st = G.states[id];
+        return id === src || id === dst || sp.ports.some(function (p) { return p.border_of.indexOf(st.path) >= 0; }) || (shownFrame != null && FR[shownFrame].states.indexOf(id) >= 0);
+      }), trans: [sp.trans] });
+      var showF = shownFrame != null ? [shownFrame] : all ? sp.frames : [sp.frames[step]];
+      showF.forEach(function (fid) {
+        var r = FR[fid].rect;
+        fg.appendChild(SX.svg('rect', { x: r[0], y: r[1], width: r[2], height: r[3], fill: 'color-mix(in srgb, ' + col(fid) + ' 9%, transparent)', stroke: col(fid), 'stroke-width': u * 2.5, 'stroke-dasharray': (u * 8) + ' ' + (u * 5), 'pointer-events': 'none' }));
+        var tx = SX.svg('text', { x: r[0] + u * 5, y: r[1] + r[3] - u * 5, 'font-size': u * 12, 'pointer-events': 'none', text: 'frame ' + fid + ' · ' + fname(FR[fid]) });
+        tx.style.fill = 'var(--ink)'; tx.style.fontFamily = 'var(--sans)';
+        fg.appendChild(tx);
+      });
+      ps.forEach(function (pl, k) {
+        if (!all && k !== step) return;
+        var fid = sp.frames[k];
+        fg.appendChild(SX.svg('path', { d: pl.map(function (p, j) { return (j ? 'L' : 'M') + p[0] + ',' + p[1]; }).join(''), fill: 'none', stroke: col(fid), 'stroke-width': u * 7, 'stroke-linejoin': 'round', 'stroke-linecap': 'round', opacity: 0.9, 'pointer-events': 'none' }));
+      });
+      sp.ports.forEach(function (p, k) {
+        var near = all || k === step || k === step - 1;
+        var dt = SX.svg('circle', { cx: p.at[0], cy: p.at[1], r: u * (near ? 9 : 6), fill: 'var(--hl)', stroke: 'var(--surface-1)', 'stroke-width': u * 2.5, opacity: near ? 1 : 0.45 });
+        SX.tipOn(dt, '<b>port ' + (k + 1) + '</b> on <code>' + p.border_of.join(', ') + '</code>\'s border<br>side ' + p.side + ' (' + ['left', 'right', 'top', 'bottom'][p.side] + '), depth ' + p.depth + '<br><span class="m">at (' + p.at.join(', ') + ')</span>');
+        fg.appendChild(dt);
+      });
+      D.boundary_nodes.forEach(function (bn) {
+        var k = sp.segments.indexOf(bn.seg);
+        if (k < 0 || (!all && k !== step)) return;
+        var q = SX.svg('rect', { x: bn.at[0] - u * 6, y: bn.at[1] - u * 6, width: u * 12, height: u * 12, fill: col(bn.frame), stroke: 'var(--surface-1)', 'stroke-width': u * 2 });
+        SX.tipOn(q, '<b>boundary node</b> of segment ' + (k + 1) + '<br>on frame ' + bn.frame + '\'s edge at (' + bn.at.join(', ') + ')');
+        fg.appendChild(q);
+      });
+      var rows = sp.segments.map(function (sg, k) {
+        var from = k === 0 ? '<code>' + sp.src_path + '</code>' : 'port on <code>' + sp.ports[k - 1].border_of[0] + '</code>';
+        var to = k === sp.segments.length - 1 ? '<code>' + sp.dst_path + '</code>' : 'port on <code>' + sp.ports[k].border_of[0] + '</code>';
+        return '<tr' + ((!all && k === step) ? ' class="cur"' : '') + '><td class="num">' + (k + 1) + '</td><td><span class="swatch" style="background:' + col(sp.frames[k]) + '"></span>frame ' + sp.frames[k] + ' · ' + fname(FR[sp.frames[k]]) + '</td><td>' + from + ' → ' + to + '</td></tr>';
+      }).join('');
+      segs.innerHTML = '<b>“' + G.trans[sp.trans].label + '”</b>: <code>' + sp.src_path + '</code> → <code>' + sp.dst_path + '</code> crosses ' + sp.ports.length + ' border' + (sp.ports.length > 1 ? 's' : '') + ', so it is ' + sp.segments.length + ' segments.' +
+        '<table class="sx-table"><tr><th class="num">#</th><th>frame</th><th>runs from → to</th></tr>' + rows + '</table>';
+    }
+    buildStepper();
+    paint();
+  })();
+});
+</script>

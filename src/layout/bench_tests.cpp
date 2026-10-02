@@ -1,6 +1,7 @@
 // The router bench: every registered router over the corpus and the scale
 // targets, scored into a golden, timed, and joined against `straight`.
 
+#include "core/tests/corpus.h"
 #include "layout/cost.h"
 #include "layout/decompose.h"
 #include "layout/geom.h"
@@ -104,6 +105,7 @@ TEST_CASE("bench: every registered router scores the corpus, term by term") {
 
   std::vector<std::string> rows(router_count());
   for (char const *name : CORPUS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     Chart c;
     load_chart(name, c);
@@ -171,7 +173,8 @@ TEST_CASE("bench: every registered router scores the corpus, term by term") {
 
   std::vector<scav_byte> golden;
   REQUIRE(read_file(SCAV_TEST_DATA_DIR "/golden/layout/corpus_routers.txt", golden));
-  std::string const want{ reinterpret_cast<char const *>(golden.data()), golden.size() };
+  std::string const want{ scav::test::corpus_golden(
+      { reinterpret_cast<char const *>(golden.data()), golden.size() }) };
   if (want != actual) {
     write_file(SCAV_TEST_OUT_DIR "/corpus_routers.txt",
                reinterpret_cast<scav_byte const *>(actual.data()),
@@ -201,6 +204,7 @@ TEST_CASE("bench: every registered router is timed over the corpus and at scale"
 
     int64_t corpus_us{ 0 };
     for (char const *name : CORPUS) {
+      if (scav::test::corpus_skipped(name)) { continue; }
       CAPTURE(name);
       Chart c;
       load_chart(name, c);
@@ -284,7 +288,10 @@ TEST_CASE("bench: the cells corpus_routers.txt leaves unscored, term by term") {
   };
 
   for (uint32_t ri = 0; ri < router_count(); ++ri) {
-    for (char const *name : CORPUS) { row("compact", compact(), ri, "", name); }
+    for (char const *name : CORPUS) {
+      if (scav::test::corpus_skipped(name)) { continue; }
+      row("compact", compact(), ri, "", name);
+    }
   }
   for (char const *profile : { "readable", "compact" }) {
     scav_profile p{};
@@ -296,7 +303,8 @@ TEST_CASE("bench: the cells corpus_routers.txt leaves unscored, term by term") {
 
   std::vector<scav_byte> golden;
   REQUIRE(read_file(SCAV_TEST_DATA_DIR "/golden/layout/cost_terms.txt", golden));
-  std::string const want{ reinterpret_cast<char const *>(golden.data()), golden.size() };
+  std::string const want{ scav::test::corpus_golden(
+      { reinterpret_cast<char const *>(golden.data()), golden.size() }) };
   if (want != actual) {
     write_file(SCAV_TEST_OUT_DIR "/cost_terms.txt",
                reinterpret_cast<scav_byte const *>(actual.data()),
@@ -325,6 +333,7 @@ TEST_CASE("bench: the scorer is timed over the corpus and at scale") {
 
   int64_t corpus_us{ 0 };
   for (char const *name : CORPUS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     Chart c;
     load_chart(name, c);

@@ -1,0 +1,379 @@
+<section class="sx" id="intro" data-toc="1 · What scav is">
+  <style>
+    .ia-src { margin: 0; padding: 8px 0; max-height: 540px; overflow: auto; font-size: 12.5px; line-height: 1.5; border-radius: 8px; background: var(--surface-2); }
+    .ia-src .ln { display: block; padding: 0 10px 0 0; white-space: pre; border-left: 3px solid transparent; cursor: default; }
+    .ia-src .ln .no { display: inline-block; width: 3.2em; padding-right: 0.8em; text-align: right; color: var(--text-muted); user-select: none; }
+    .ia-src .ln.has { cursor: pointer; }
+    .ia-src .ln.blk { background: color-mix(in srgb, var(--hl) 6%, transparent); }
+    .ia-src .ln.on { background: color-mix(in srgb, var(--hl) 22%, transparent); border-left-color: var(--hl); }
+    .ia-src .ln .cm { color: var(--text-muted); }
+    .ia-src .ln .kw { font-weight: 700; }
+    .ia-src .ln .st { color: var(--text-secondary); }
+    .ia-parts { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 10px; }
+    .ia-parts button { font: 13px var(--sans); padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary); cursor: pointer; }
+    .ia-parts button .n { display: inline-block; min-width: 1.5em; margin-right: 4px; font-weight: 700; font-family: var(--mono); }
+    .ia-parts button.on { border-color: var(--hl); box-shadow: inset 0 0 0 1px var(--hl); }
+    .ia-parts button.absent { color: var(--text-muted); border-style: dashed; }
+    .ia-explain { min-height: 3.2em; font-size: 14px; color: var(--text-secondary); max-width: 900px; }
+    .ia-explain b { color: var(--text-primary); }
+    .ia-meta { font-size: 13px; color: var(--text-muted); margin-top: 6px; }
+  </style>
+  <div class="kicker">Introduction</div>
+  <h2>What scav is</h2>
+  <p class="lede">scav lays out and renders Harel statecharts: every state boxed, every transition routed at right angles, every label placed, identical bytes everywhere.</p>
+
+  <p>Existing tools fail on what statecharts have and flowcharts lack: transitions that cross the borders of nested states.</p>
+  <ul>
+    <li><b>ELK</b> either drops an edge that skips a containment level, or lays the whole subtree out in one run and loses each subtree's own direction and aspect.</li>
+    <li><b>PlantUML</b>, whose files scav replaces, lays each composite out alone and attaches leaving transitions afterwards, so its lines cut through boxes; it cannot express <code>tcp.scav</code> at all.</li>
+    <li>Of about twenty other tools surveyed, none publishes a statechart layout algorithm.</li>
+  </ul>
+  <p>scav's answer is <a href="#decompose">decomposition</a>: every transition is cut at each border it crosses into <b>segments</b>, joined by <b>ports</b>. Each submachine becomes a flat graph laid out on its own, and a long transition still lands in the right place because its pieces are tied to the borders.</p>
+
+  <div data-fig="intro-hero"></div>
+
+  <h3>The model</h3>
+  <ul>
+    <li>A <b>state</b> may hold <b>submachines</b> of further states. With one or more it is <b>composite</b>; with two or more it is <b>concurrent</b>, and its submachines (<b>regions</b>) run together, drawn side by side with a dashed divider.</li>
+    <li>Every kind but <code>Normal</code> is a <b>pseudostate</b>: initial, final, choice, junction, fork, join, history, deep history. <code>trans * -&gt; X</code> creates an initial and <code>trans X -&gt; *</code> a final. Layout draws a pseudostate as a small box at its kind's minimum size: on the <code>readable</code> profile, 224 × 224 <a href="#principles">grid units</a> for initial or final, 320 × 320 for a choice, 64 × 960 for a fork or join bar.</li>
+    <li>A <b>transition</b> joins any two states. If its ends lie in different submachines it is <b>hierarchy-crossing</b>. A transition between two regions of one state is drawn directly, not through the parent: scav draws topology, not execution paths.</li>
+    <li>The model is flat arrays of records, each traceable to its source statement.</li>
+  </ul>
+
+  <div data-fig="intro-anatomy"></div>
+
+  <h3>Transition kinds</h3>
+  <p>A transition's kind decides whether its arrow crosses the source's border.</p>
+  <table class="sx-table">
+    <tr><th>kind</th><th>the source's border</th><th>a self-transition</th></tr>
+    <tr><td><code>external</code> (default)</td><td>crossed</td><td>a loop outside the box</td></tr>
+    <tr><td><code>internal</code></td><td>not crossed: the route starts on its inner face</td><td>no route: drawn as text in the state's band</td></tr>
+    <tr><td><code>local</code></td><td>as <code>internal</code></td><td>no route</td></tr>
+  </table>
+  <p>When the destination encloses the source, the route ends on the destination's inner face, whatever the kind.</p>
+
+  <h3>The <code>.scav</code> format</h3>
+  <ul>
+    <li>Keyword-led, LL(1), whitespace-insensitive; commas separate items; an unnamed string after a state or transition is its label. <code>s</code>, <code>m</code> and <code>t</code> abbreviate <code>state</code>, <code>submachine</code> and <code>trans</code>.</li>
+    <li>States written directly in a state's block form an unnamed submachine; <code>submachine water { … }</code> names one region.</li>
+    <li>Paths are <code>/</code>-separated and resolve innermost-outward; <code>:name</code> picks a submachine, as in <code>Brewing:water/Heating</code>.</li>
+    <li><code>include "axis.scav" as arm</code> makes a state <code>arm</code> holding the included document; each include is an independent copy.</li>
+    <li><code>scav fmt</code> is the one canonical printer. JSON is an output, not a format.</li>
+  </ul>
+
+  <h3>Layout is a library</h3>
+  <p>scav owns the model, the layout, and what layout and drawing must agree on: the draw list, space requests and text metrics. The application owns appearance and the render loop. The interface is a flat <code>extern "C"</code> ABI with no callbacks, shipped as <code>libscav</code> with Python bindings; its main user is a build system running <code>scav render</code>, <code>scav fmt --check</code> and <code>scav check</code>.</p>
+  <p>Layout's only inputs are the model, a <b>profile</b> of 52 integer settings, and three tables of <b>space requests</b>. It never sees a font or a string.</p>
+  <ul>
+    <li><code>BoxSpace</code>, per state and submachine: the width its text needs, and the bands above and below its children.</li>
+    <li><code>PathClear</code>, per transition: how far to shorten each end for the arrowhead.</li>
+    <li><code>PathBox</code>, zero or more per transition: a <a href="#labels">label</a> box to place along the route.</li>
+  </ul>
+  <p>The application measures its text with scav's metrics, fills the tables, and calls <code>scav_layout_run</code>, which rejects bad input rather than clamping it. It draws the returned geometry with scav's SVG back end or its own.</p>
+  <div class="callout why"><span class="t">Scale</span>The design target is 2,000 states, 5,000 transitions and nesting 16 deep. The examples here are eleven hand-written charts, from the 3-state <code>estop</code> to <code>bottler</code>, nested six deep.</div>
+</section>
+<script>
+SX.register('intro', function (sec) {
+  var CH = SX.data('charts').charts;
+  var ESC = function (t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
+
+  // Statements of a .scav source with their lines: state, trans and include, in order.
+  function statements(src) {
+    var toks = [], i = 0, line = 0, n = src.length;
+    while (i < n) {
+      var c = src[i];
+      if (c === '\n') { line++; i++; continue; }
+      if (/\s/.test(c)) { i++; continue; }
+      if (c === '/' && src[i + 1] === '/') { while (i < n && src[i] !== '\n') i++; continue; }
+      if (c === '"') { var j = i + 1; while (j < n && src[j] !== '"') { if (src[j] === '\\') j++; j++; } toks.push({ t: 'str', v: src.slice(i + 1, j), line: line }); i = j + 1; continue; }
+      if (c === '-' && src[i + 1] === '>') { toks.push({ t: '->', line: line }); i += 2; continue; }
+      if (/[A-Za-z_$]/.test(c)) { var k = i; while (k < n && /[A-Za-z0-9_$]/.test(src[k])) k++; toks.push({ t: 'id', v: src.slice(i, k), line: line }); i = k; continue; }
+      toks.push({ t: c, line: line }); i++;
+    }
+    var out = { states: [], trans: [], includes: [] };
+    for (var q = 0; q < toks.length; q++) {
+      var tk = toks[q], prev = toks[q - 1];
+      if (tk.t !== 'id' || (prev && prev.t !== '{' && prev.t !== ',')) continue;
+      if (tk.v === 'state' || tk.v === 's') {
+        var nm = toks[q + 1] && toks[q + 1].v, end = tk.line;
+        // A block's extent: from its brace to the matching one.
+        for (var r = q + 2; r < toks.length && toks[r].t !== ',' && toks[r].t !== '}'; r++) {
+          if (toks[r].t === '{') { var d = 0; for (var u = r; u < toks.length; u++) { if (toks[u].t === '{') d++; else if (toks[u].t === '}' && --d === 0) { end = toks[u].line; break; } } break; }
+        }
+        out.states.push({ name: nm, line: tk.line, end: end });
+      } else if (tk.v === 'trans' || tk.v === 't') {
+        var lab = null;
+        for (var w = q + 1; w < toks.length && toks[w].t !== ',' && toks[w].t !== '}'; w++) if (toks[w].t === 'str') lab = toks[w].v;
+        out.trans.push({ line: tk.line, label: lab });
+      } else if (tk.v === 'include') {
+        var al = null;
+        for (var a = q + 1; a < q + 5 && a < toks.length; a++) if (toks[a].t === 'id' && toks[a].v === 'as') al = toks[a + 1].v;
+        out.includes.push({ alias: al, line: tk.line });
+        out.states.push({ name: al, line: tk.line, end: tk.line, include: true });
+      }
+    }
+    return out;
+  }
+
+  // Element id -> source lines, and line -> elements, from statement order.
+  function sourceMap(c) {
+    var m = c.model, st = statements(c.source);
+    var S = {}, T = {}, inc = {};
+    st.includes.forEach(function (x) { inc[x.alias] = x.line; });
+    var own = m.states.filter(function (s) { return s.inst == null && s.kind !== 'initial' && s.kind !== 'final'; });
+    own.forEach(function (s, k) { var d = st.states[k]; if (d && d.name === s.name) S[s.id] = { line: d.line, end: d.end }; });
+    var ownT = m.transitions.filter(function (t) { return t.inst == null; });
+    ownT.forEach(function (t, k) { var d = st.trans[k]; if (d && (d.label || '') === (t.label || '')) T[t.id] = { line: d.line, end: d.line }; });
+    m.transitions.forEach(function (t) {
+      if (t.inst != null) { var al = t.src_path.split('/')[0]; if (al in inc) T[t.id] = { line: inc[al], end: inc[al], via: al }; }
+    });
+    m.states.forEach(function (s) {
+      if (S[s.id]) return;
+      if (s.inst != null) { var al = s.path.split('/')[0]; if (al in inc) S[s.id] = { line: inc[al], end: inc[al], via: al }; return; }
+      // A synthesized initial or final: the line of the transition that wrote its '*'.
+      m.transitions.forEach(function (t) { if (!S[s.id] && (t.src === s.id || t.dst === s.id) && T[t.id]) S[s.id] = { line: T[t.id].line, end: T[t.id].line, star: true }; });
+    });
+    var byLine = {};
+    function add(kind, id, l) { (byLine[l] = byLine[l] || []).push({ kind: kind, id: +id }); }
+    Object.keys(S).forEach(function (id) { if (!S[id].via) add('state', id, S[id].line); });
+    Object.keys(T).forEach(function (id) { if (!T[id].via) add('trans', id, T[id].line); });
+    return { S: S, T: T, byLine: byLine };
+  }
+
+  // A line of source, lightly coloured: comments, keywords, strings.
+  function colour(text) {
+    var ci = text.indexOf('//'), code = ci >= 0 ? text.slice(0, ci) : text, cm = ci >= 0 ? text.slice(ci) : '';
+    var h = ESC(code).replace(/(&quot;|"[^"]*")/g, '<span class="st">$1</span>')
+      .replace(/\b(chart|state|submachine|trans|include|as|internal|local|external|choice|junction|fork|join|history|deep_history)\b/g, '<span class="kw">$1</span>');
+    return h + (cm ? '<span class="cm">' + ESC(cm) + '</span>' : '');
+  }
+
+  function stateTip(c, s) {
+    var g = c.text, kind = s.kind === 'normal' ? (s.submachines.length > 1 ? 'concurrent composite state' : s.submachines.length ? 'composite state' : 'state') : s.kind + ' pseudostate';
+    var r = g.states[s.id].rect;
+    return '<b>' + ESC(s.name || (s.kind === 'initial' ? 'initial' : s.kind)) + '</b> <span class="m">' + kind + '</span><br>path <code>' + ESC(s.path) + '</code>' +
+      (s.inst != null ? '<br><span class="m">from an included document</span>' : '') +
+      '<br><span class="m">box ' + SX.fmt(r[2]) + ' × ' + SX.fmt(r[3]) + ' grid units at (' + SX.fmt(r[0]) + ', ' + SX.fmt(r[1]) + ')</span>';
+  }
+  function transTip(c, t) {
+    var g = c.text.trans[t.id], ports = g.ports || [];
+    return '<b>' + ESC(t.src_path) + ' → ' + ESC(t.dst_path) + '</b>' + (t.label ? '<br>label “' + ESC(t.label) + '”' : '') +
+      '<br><span class="m">' + t.kind + (ports.length ? ', crosses ' + ports.length + ' border' + (ports.length > 1 ? 's' : '') + ' (' + ports.length + ' port' + (ports.length > 1 ? 's' : '') + ')' : '') +
+      (g.points.length ? ', ' + (g.points.length - 1) + ' leg' + (g.points.length > 2 ? 's' : '') : ', no route: drawn as text in its state') + '</span>';
+  }
+
+
+  // ---- hero: a real chart beside its source, hover either side ----
+  (function () {
+    var host = sec.querySelector('[data-fig="intro-hero"]');
+    var f = SX.figure(host, { caption: '<b>Hover</b> a state or transition to find the line that declares it, or a line to find what it draws. Every drawing on this page is scav\'s own output.' });
+    var names = ['estop', 'led', 'brew', 'tcp', 'toolchanger', 'bottler'];
+    var row = SX.el('div', { class: 'fig-row' });
+    var left = SX.el('div', { style: { flex: '1.6 1 420px' } }), right = SX.el('div', { style: { flex: '1 1 300px' } });
+    var meta = SX.el('div', { class: 'ia-meta' });
+    left.appendChild(SX.el('div')); left.appendChild(meta);
+    row.appendChild(left); row.appendChild(right);
+    f.stage.appendChild(row);
+    var pick = SX.choice({ options: names.map(function (n) { return { value: n, label: n }; }), value: 'brew', onChange: draw });
+    f.ctrl.appendChild(SX.el('span', { text: 'Chart' })); f.ctrl.appendChild(pick.el);
+
+    function draw(name) {
+      var c = CH[name], g = c.text, map = sourceMap(c), lines = c.source.replace(/\n$/, '').split('\n');
+      var pre = SX.el('pre', { class: 'ia-src' });
+      var lnEls = lines.map(function (t, k) {
+        var d = SX.el('span', { class: 'ln' + (map.byLine[k] ? ' has' : ''), html: '<span class="no">' + (k + 1) + '</span>' + colour(t) });
+        pre.appendChild(d);
+        return d;
+      });
+      right.innerHTML = ''; right.appendChild(pre);
+      var stage = left.firstChild, wide = g.box[2] / g.box[3] > 2.2;
+      left.style.flex = wide ? '1 1 100%' : '1.6 1 420px';
+      var h = SX.chart(stage, g, { maxHeight: 540, onState: function (s, e, ev) { hover('state', s.id, e, ev); }, onTrans: function (t, e, ev) { hover('trans', t.id, e, ev); } });
+      var model = { state: {}, trans: {} };
+      c.model.states.forEach(function (s) { model.state[s.id] = s; });
+      c.model.transitions.forEach(function (t) { model.trans[t.id] = t; });
+      var lit = [];
+      function clear() {
+        h.unmarkAll();
+        lit.forEach(function (d) { d.classList.remove('on'); d.classList.remove('blk'); });
+        lit = [];
+      }
+      function light(kind, id, scroll) {
+        var m = (kind === 'state' ? map.S : map.T)[id];
+        if (!m) return;
+        for (var k = m.line; k <= m.end; k++) { lnEls[k].classList.add(k === m.line ? 'on' : 'blk'); lit.push(lnEls[k]); }
+        if (scroll) {
+          var el = lnEls[m.line], top = el.getBoundingClientRect().top - pre.getBoundingClientRect().top + pre.scrollTop;
+          if (top < pre.scrollTop || top > pre.scrollTop + pre.clientHeight - 24) pre.scrollTop = Math.max(0, top - pre.clientHeight / 3);
+        }
+      }
+      function hover(kind, id, e, ev) {
+        if (ev === 'leave') { clear(); SX.tip.hide(); return; }
+        if (ev !== 'move') return;
+        clear();
+        h.mark(kind, id);
+        light(kind, id, true);
+        SX.tip.show(e, kind === 'state' ? stateTip(c, model.state[id]) : transTip(c, model.trans[id]));
+      }
+      lnEls.forEach(function (d, k) {
+        var els = map.byLine[k];
+        if (!els) return;
+        d.addEventListener('mouseenter', function () {
+          clear();
+          els.forEach(function (x) { h.mark(x.kind, x.id); light(x.kind, x.id, false); });
+        });
+        d.addEventListener('mouseleave', clear);
+      });
+      requestAnimationFrame(function () { pre.style.maxHeight = (wide ? 360 : Math.max(360, Math.round(stage.getBoundingClientRect().height))) + 'px'; });
+      var m = c.model, pseudo = m.states.filter(function (s) { return s.kind !== 'normal'; }).length;
+      var routed = g.trans.filter(function (t) { return t.points.length > 1; }).length;
+      var crossing = g.trans.filter(function (t) { return (t.ports || []).length; }).length;
+      meta.innerHTML = '<b>' + name + '</b> (“' + ESC(m.label) + '”): ' + m.states.length + ' states (' + pseudo + ' pseudostates), ' + m.submachines.length + ' submachines, ' +
+        m.transitions.length + ' transitions (' + routed + ' routed, ' + crossing + ' hierarchy-crossing). Laid out at ' + SX.fmt(g.box[2]) + ' × ' + SX.fmt(g.box[3]) + ' grid units = ' +
+        Math.round(g.box[2] / 16) + ' × ' + Math.round(g.box[3] / 16) + ' pt.';
+    }
+    draw('brew');
+  })();
+
+  // ---- anatomy: the parts of a real chart, labelled ----
+  (function () {
+    var host = sec.querySelector('[data-fig="intro-anatomy"]');
+    var f = SX.figure(host, { caption: '<b>Hover</b> or <b>click</b> a part to highlight it. Switch charts: only <code>brew</code> has a final and an internal transition, only <code>tcp</code> has ports.' });
+    var PARTS = [
+      { key: 'composite', name: 'composite state' },
+      { key: 'region', name: 'region (submachine)' },
+      { key: 'divider', name: 'region divider' },
+      { key: 'initial', name: 'initial' },
+      { key: 'choice', name: 'choice' },
+      { key: 'final', name: 'final' },
+      { key: 'port', name: 'port' },
+      { key: 'label', name: 'label' },
+      { key: 'crossing', name: 'hierarchy-crossing transition' },
+      { key: 'internal', name: 'internal transition' }
+    ];
+    var DEF = {
+      brew: {
+        composite: { states: [3], text: '<b>Composite state.</b> <code>Brewing</code> holds two submachines, so it is concurrent. Its box is its packed submachines, its text bands and a 128-unit pad.' },
+        region: { subs: [1, 2], text: '<b>Region.</b> One submachine of a concurrent state, laid out as its own <a href="#decompose">frame</a>. The renderer does not draw the dashed rectangle.' },
+        divider: { subdraw: [2], text: '<b>Region divider.</b> Drawn midway across the 192-unit gap (<code>sub_sep</code>) between sibling regions.' },
+        initial: { states: [8, 9, 10], text: '<b>Initial pseudostate.</b> Created by <code>trans * -&gt; Off</code>; seated one <code>rank_sep</code> before the state it enters, level with it.' },
+        choice: { states: [2], text: '<b>Choice pseudostate.</b> A diamond in its box; routes meet it at a face midpoint.' },
+        final: { states: [11], text: '<b>Final pseudostate.</b> <code>trans Standby -&gt; * "descale overdue"</code> creates one, drawn as a ringed disc.' },
+        label: { trans: [9], boxes: [9], text: '<b>Transition label.</b> A requested box (<code>PathBox</code>) hung off its route by a 96-unit leader. The dashed outline is the placed box.' },
+        internal: { trans: [6], text: '<b>Internal transition.</b> It never crosses <code>Pumping</code>\'s border, so it has no route; it is drawn as text in the state\'s lower band.' }
+      },
+      tcp: {
+        composite: { states: [4], text: '<b>Composite state.</b> <code>Established</code> holds <code>inbound</code> and <code>outbound</code>, which close independently, so it is concurrent.' },
+        region: { subs: [1, 2], text: '<b>Region.</b> One submachine of a concurrent state, laid out as its own <a href="#decompose">frame</a>. The renderer does not draw the dashed rectangle.' },
+        divider: { subdraw: [2], text: '<b>Region divider.</b> Drawn midway across the 192-unit gap (<code>sub_sep</code>) between sibling regions.' },
+        initial: { states: [11, 12, 13], text: '<b>Initial pseudostate.</b> One per <code>trans * -&gt; …</code>. Each region has its own, and so does the root.' },
+        choice: { states: [9], text: '<b>Choice pseudostate.</b> <code>state Closing choice</code>. Both halves of the connection arrive here from inside <code>Established</code>.' },
+        port: { ports: [11, 12], trans: [11, 12], text: '<b>Port.</b> Where a route crosses a composite\'s border; <a href="#decompose">decomposition</a> cuts the route into segments here. Reported as a slot <code>{x, y, side, depth}</code>.' },
+        label: { trans: [13], boxes: [13], text: '<b>Transition label.</b> A requested box (<code>PathBox</code>) hung off its route by a 96-unit leader. The dashed outline is the placed box.' },
+        crossing: { trans: [11, 12], text: '<b>Hierarchy-crossing transitions.</b> From both regions of <code>Established</code> to <code>Closing</code> at the root. PlantUML cannot express the one from the second region.' }
+      }
+    };
+    var which = 'brew', sticky = null, h = null, c = null, badgeG = null;
+    var pick = SX.choice({ options: [{ value: 'brew', label: 'brew' }, { value: 'tcp', label: 'tcp' }], value: which, onChange: function (v) { which = v; sticky = null; draw(); } });
+    f.ctrl.appendChild(SX.el('span', { text: 'Chart' })); f.ctrl.appendChild(pick.el);
+    var chips = SX.el('div', { class: 'ia-parts' });
+    var explain = SX.el('div', { class: 'ia-explain', html: 'Hover a part.' });
+    var stage = SX.el('div');
+    f.stage.appendChild(chips); f.stage.appendChild(stage); f.stage.appendChild(explain);
+
+    function where(key, d) {
+      var g = c.text;
+      if (d.states) { var r = g.states[d.states[0]].rect; return key === 'choice' ? [r[0] + r[2] / 4, r[1] + r[3] / 4] : key === 'composite' ? [r[0], r[1]] : [r[0] + r[2] / 2, r[1] + r[3] / 2]; }
+      if (d.subs) { var q = g.subs[d.subs[0]].rect; return [q[0], q[1]]; }
+      if (d.subdraw) { var ln = g.subs[d.subdraw[0]].draw[0]; return [ln.x1, ln.y1 + (ln.y2 - ln.y1) * 0.2]; }
+      if (d.ports) return g.trans[d.ports[0]].ports[0].at;
+      if (d.boxes) { var b = g.trans[d.boxes[0]].label_box; return [b[0], b[1]]; }
+      if (key === 'internal') { var tp = g.trans[d.trans[0]].draw[0]; return [tp.x + tp.textLength / 2, tp.y + 40]; }
+      var pts = g.trans[d.trans[0]].points, k = Math.floor((pts.length - 1) / 2);
+      return [(pts[k][0] + pts[k + 1][0]) / 2, (pts[k][1] + pts[k + 1][1]) / 2];
+    }
+    // A badge goes where it covers nothing: no state it is not inside, no label, no route, no other badge.
+    var taken = [];
+    function place(a, r) {
+      var g = c.text, obst = [];
+      g.states.forEach(function (st) { obst.push({ r: st.rect, box: st.submachines.length > 0 }); });
+      g.trans.forEach(function (t) {
+        if (t.label_box) obst.push({ r: t.label_box });
+        for (var k = 0; k + 1 < t.points.length; k++) {
+          var p0 = t.points[k], p1 = t.points[k + 1];
+          obst.push({ r: [Math.min(p0[0], p1[0]), Math.min(p0[1], p1[1]), Math.abs(p1[0] - p0[0]), Math.abs(p1[1] - p0[1])] });
+        }
+        t.draw.forEach(function (q) { if (q.el === 'text') obst.push({ r: [q.x, q.y - q['font-size'], q.textLength || 0, q['font-size'] * 1.2] }); });
+      });
+      taken.forEach(function (b) { obst.push({ r: b }); });
+      var B = g.box, dirs = [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, -1], [-1, 0], [1, 0], [0, 1]], best = null;
+      [1.6, 2.4, 3.4, 4.6].some(function (k) {
+        return dirs.some(function (dd) {
+          var n = Math.hypot(dd[0], dd[1]), cx = a[0] + dd[0] / n * k * r, cy = a[1] + dd[1] / n * k * r;
+          var bb = [cx - r * 1.15, cy - r * 1.15, r * 2.3, r * 2.3];
+          if (bb[0] < B[0] - 250 || bb[1] < B[1] - 250 || bb[0] + bb[2] > B[0] + B[2] + 250 || bb[1] + bb[3] > B[1] + B[3] + 250) return false;
+          var hit = obst.some(function (o) {
+            var q = o.r, over = bb[0] < q[0] + q[2] && q[0] < bb[0] + bb[2] && bb[1] < q[1] + q[3] && q[1] < bb[1] + bb[3];
+            if (!over) return false;
+            return !(o.box && q[0] <= bb[0] && q[1] <= bb[1] && q[0] + q[2] >= bb[0] + bb[2] && q[1] + q[3] >= bb[1] + bb[3]);
+          });
+          if (!hit) best = [cx, cy];
+          return !hit;
+        });
+      });
+      best = best || [a[0] - 1.6 * r, a[1] - 1.6 * r];
+      taken.push([best[0] - r, best[1] - r, 2 * r, 2 * r]);
+      return best;
+    }
+    function show(key, on) {
+      h.unmarkAll(); h.clear();
+      [].forEach.call(chips.children, function (b) { b.classList.toggle('on', b.getAttribute('data-k') === key && on); });
+      if (!on || !key) { explain.innerHTML = 'Hover a part.'; return; }
+      var d = DEF[which][key];
+      if (!d) { explain.innerHTML = '<b>' + key + '</b>: not in <code>' + which + '</code>. Switch charts to see one.'; return; }
+      (d.states || []).forEach(function (id) { h.mark('state', id); });
+      (d.trans || []).forEach(function (id) { h.mark('trans', id); });
+      (d.subdraw || []).forEach(function (id) { h.mark('sub', id); });
+      (d.subs || []).forEach(function (id) { h.rect(c.text.subs[id].rect, { fill: 'color-mix(in srgb, var(--hl-2) 10%, transparent)', stroke: 'var(--hl-2)', 'stroke-width': 24, 'stroke-dasharray': '90 60' }); });
+      (d.boxes || []).forEach(function (id) { h.rect(c.text.trans[id].label_box, { fill: 'none', stroke: 'var(--hl-2)', 'stroke-width': 20, 'stroke-dasharray': '60 40' }); });
+      (d.ports || []).forEach(function (id) { c.text.trans[id].ports.forEach(function (p) { h.dot(p.at, h.unit * 9, { fill: 'var(--hl)', stroke: 'var(--surface-1)', 'stroke-width': h.unit * 3 }); }); });
+      explain.innerHTML = d.text;
+    }
+    function draw() {
+      c = CH[which]; sticky = null;
+      h = SX.chart(stage, c.text, { maxHeight: 480, pad: 260,
+        onState: function (s, e, ev) { if (ev === 'move') SX.tip.show(e, stateTip(c, c.model.states[s.id])); else if (ev === 'leave') SX.tip.hide(); },
+        onTrans: function (t, e, ev) { if (ev === 'move') SX.tip.show(e, transTip(c, c.model.transitions[t.id])); else if (ev === 'leave') SX.tip.hide(); } });
+      chips.innerHTML = ''; taken = [];
+      badgeG = SX.svg('g');
+      h.svg.appendChild(badgeG);
+      var r = h.unit * 15, n = 0;
+      PARTS.forEach(function (p) {
+        var d = DEF[which][p.key];
+        var num = d ? ++n : null;
+        var b = SX.el('button', { type: 'button', 'data-k': p.key, class: d ? '' : 'absent', html: (num ? '<span class="n">' + num + '</span>' : '') + p.name + (d ? '' : ' <span class="m">(not in ' + which + ')</span>') });
+        b.addEventListener('mouseenter', function () { show(p.key, true); });
+        b.addEventListener('mouseleave', function () { show(sticky, !!sticky); });
+        b.addEventListener('click', function () { sticky = sticky === p.key ? null : p.key; show(sticky || p.key, true); });
+        chips.appendChild(b);
+        if (!d) return;
+        var anchor = where(p.key, d), at = place(anchor, r);
+        var g = SX.svg('g', { style: { cursor: 'pointer' } });
+        var dx = at[0] - anchor[0], dy = at[1] - anchor[1], dl = Math.hypot(dx, dy) || 1;
+        g.appendChild(SX.svg('line', { x1: anchor[0], y1: anchor[1], x2: at[0] - dx / dl * r, y2: at[1] - dy / dl * r, stroke: 'var(--hl)', 'stroke-width': h.unit * 2 }));
+        g.appendChild(SX.svg('circle', { cx: anchor[0], cy: anchor[1], r: h.unit * 3.5, fill: 'var(--hl)' }));
+        g.appendChild(SX.svg('circle', { cx: at[0], cy: at[1], r: r, fill: 'var(--surface-1)', stroke: 'var(--hl)', 'stroke-width': h.unit * 2.5 }));
+        var tx = SX.svg('text', { x: at[0], y: at[1] + r * 0.42, 'text-anchor': 'middle', 'font-size': r * 1.2, 'font-weight': 700, text: String(num) });
+        tx.style.fill = 'var(--ink)'; tx.style.fontFamily = 'var(--sans)';
+        g.appendChild(tx);
+        g.addEventListener('mouseenter', function () { show(p.key, true); });
+        g.addEventListener('mouseleave', function () { show(sticky, !!sticky); });
+        g.addEventListener('click', function () { sticky = sticky === p.key ? null : p.key; show(sticky || p.key, true); });
+        badgeG.appendChild(g);
+      });
+      show(null, false);
+    }
+    draw();
+  })();
+});
+</script>

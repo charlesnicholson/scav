@@ -20,15 +20,26 @@ namespace scav {
 #ifdef SCAV_TESTING
 void thread_test_spawn_limit(uint32_t limit);
 void thread_test_delay_seed(uint64_t seed);
+uint32_t thread_test_participants();
 #endif
 
 namespace {
 
 #ifdef SCAV_TESTING
 // Atomic because a parked worker reads them while a test changes them between
-// calls; relaxed, since neither orders anything but itself.
+// calls; relaxed, since none orders anything but itself.
 std::atomic<uint32_t> test_spawn_limit{ 0 };
 std::atomic<uint64_t> test_delay_seed{ 0 };
+std::atomic<uint32_t> test_epoch{ 1 };
+std::atomic<uint32_t> test_participants{ 0 };
+thread_local uint32_t t_epoch{ 0 };  // the epoch this thread last counted itself in
+
+void count_participant() {
+  uint32_t const epoch{ test_epoch.load(std::memory_order_relaxed) };
+  if (t_epoch == epoch) { return; }
+  t_epoch = epoch;
+  test_participants.fetch_add(1U, std::memory_order_relaxed);
+}
 
 // Both counts come from `rnd` at the shard's position, so one shard waits the
 // same amount every run and only the interleaving of the workers moves.
@@ -98,6 +109,7 @@ void run_next(Pool &p, Job &j) {
   uint32_t const was{ t_depth };
   t_depth = j.depth;
 #ifdef SCAV_TESTING
+  count_participant();
   delay(shard);
 #endif
   j.fn(j.ctx, shard);
@@ -211,6 +223,10 @@ void thread_test_spawn_limit(uint32_t limit) {
 }
 void thread_test_delay_seed(uint64_t seed) {
   test_delay_seed.store(seed, std::memory_order_relaxed);
+}
+uint32_t thread_test_participants() {
+  test_epoch.fetch_add(1U, std::memory_order_relaxed);
+  return test_participants.exchange(0U, std::memory_order_relaxed);
 }
 #endif
 

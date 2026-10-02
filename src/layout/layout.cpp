@@ -39,6 +39,10 @@ uint64_t layout_test_prefix_used();
 uint64_t layout_test_prefix_mismatches();
 void layout_test_skip_noop_faces(bool on);
 uint64_t layout_test_noop_faces();
+void layout_test_label_bound(bool on, bool verify);
+uint64_t layout_test_label_bound_skipped();
+uint64_t layout_test_label_bound_labelled();
+uint64_t layout_test_label_bound_mismatches();
 void layout_test_search_memo(bool on);
 void layout_test_search_memo_verify(bool on);
 uint32_t layout_test_search_memo_hits();
@@ -257,6 +261,7 @@ struct Candidate {
   // The pins the drawing was laid out with: the caller's, with the ports the
   // facing pass turned. Re-deriving from these finds nothing left to turn.
   SearchPins laid;
+  scav_rect sized_chart{};  // `sized.chart` before the routes and labels covered it
 };
 
 // What the facing pass turns: legs whose in-frame edge is turned round, and
@@ -266,17 +271,23 @@ struct Facing {
   std::vector<SidePin> sides;
 };
 
+// A cross-border side the facing pass already gave a node.
+struct FacingTaken {
+  uint32_t node, side;
+};
+
 // Legs whose port faces away from its far end. A port on its state's border moves onto a
 // cross border the state sees unobstructed, one per side; others turn their edge round.
-Facing facing_flips(Chart const &c,
-                    SplitGraph const &g,
-                    SubmachineOrders const &o,
-                    SizedLayout const &z) {
-  Facing out;
-  struct Taken {
-    uint32_t node, side;
-  };
-  std::vector<Taken> taken;
+// Into `out`, with `taken` the caller's scratch.
+void facing_flips(Facing &out,
+                  std::vector<FacingTaken> &taken,
+                  Chart const &c,
+                  SplitGraph const &g,
+                  SubmachineOrders const &o,
+                  SizedLayout const &z) {
+  out.reverses.clear();
+  out.sides.clear();
+  taken.clear();
   for (uint32_t m = 0; m < c.submachines.size(); ++m) {
     if ((m >= o.sub_nodes.size()) || (m >= z.sub.size())) { continue; }
     Span const span{ o.sub_nodes[m] };
@@ -321,7 +332,7 @@ Facing facing_flips(Chart const &c,
         if (between && (rhi > lo) && (rlo < hi)) { return INVALID; }
       }
       uint32_t const side{ (down ? 0U : 2U) + (first ? 0U : 1U) };
-      for (Taken const &had : taken) {
+      for (FacingTaken const &had : taken) {
         if ((had.node == node) && (had.side == side)) { return INVALID; }
       }
       return side;
@@ -394,7 +405,6 @@ Facing facing_flips(Chart const &c,
                    .port = { .seg = seg, .trans = t.v, .leg = leg, .side = along } });
     }
   }
-  return out;
 }
 
 // A candidate as phase 3 first routes it. Phases 1 and 2 and the facing pass read no
@@ -402,48 +412,126 @@ Facing facing_flips(Chart const &c,
 struct Prefix {
   SubmachineOrders laid;
   SizedLayout sized;
+  SizeRecord sized_first, sized_laid;  // the sizings of the first ordering and of `laid`
   SearchPins turned;
   Routes routes;  // as phase 3 first routes it, over `sized`
   bool ok{ false };
 };
 
-// Phases 2 and 3 for one tuple, `knobs` holding it. `prefix` receives the prefix; `from`,
-// one differing from `pins` only in faces, supplies phases 1 and 2 in place of `orders`.
-Candidate search_candidate(Chart const &c,
-                           SplitGraph const &g,
-                           SubmachineOrders const &orders,
-                           scav_spaces const &s,
-                           scav_profile const &knobs,
-                           DarSource dar,
-                           Compaction pack,
-                           Fold fold,
-                           Router const &router,
-                           uint32_t threads,
-                           std::vector<Diagnostic> &diags,
-                           RouteCache const *reuse = nullptr,
-                           RouteCache *fill = nullptr,
-                           SearchPins const *pins = nullptr,
-                           Prefix *prefix = nullptr,
-                           Prefix const *from = nullptr) {
-  Candidate out;
+// What one candidate builds and discards beside its `Candidate`.
+struct CandidateScratch {
   SubmachineOrders facing;
+  SizedLayout again;
+  Facing flips;
+  std::vector<FacingTaken> taken;
+};
+
+// Bounds everything laid out, not just the root submachine: a route bends into
+// a frame's padding and a path box centres on one, so both can reach past it.
+// Before the score rather than after the pick, so `area` and `aspect` price
+// the canvas that ships.
+void cover_chart(Candidate &out) {
+  auto const cover = [&out](int32_t x, int32_t y) {
+    scav_rect &chart{ out.sized.chart };
+    int32_t const right{ imax(chart.x + chart.w, x) };
+    int32_t const bottom{ imax(chart.y + chart.h, y) };
+    chart.x = imin(chart.x, x);
+    chart.y = imin(chart.y, y);
+    chart.w = right - chart.x;
+    chart.h = bottom - chart.y;
+  };
+  out.sized_chart = out.sized.chart;
+  for (scav_point const &at : out.routes.points) { cover(at.x, at.y); }
+  for (scav_rect const &at : out.routes.placed) {
+    cover(at.x, at.y);
+    cover(at.x + at.w, at.y + at.h);
+  }
+}
+
+// The labels `search_candidate` places on `cand`, onto the routes it laid out without
+// them; `was` is the routing `route_transitions` was handed.
+void label_candidate(Candidate &cand,
+                     Chart const &c,
+                     scav_spaces const &s,
+                     scav_profile const &knobs,
+                     Routes const *was) {
+  cand.sized.chart = cand.sized_chart;  // as uncovered as `route_transitions` saw it
+  label_routes(cand.routes, c, cand.sized, s, knobs, was);
+  cover_chart(cand);
+}
+
+// Phases 2 and 3 for one tuple, `knobs` holding it, into `out`, reusing its capacity and
+// `scratch`'s. `prefix` receives the prefix; `from`, one differing from `pins` only in
+// faces, supplies phases 1 and 2 in place of `orders`. `turned_base` is
+// `order_submachines`' `base` for the ordering after the facing pass, and `sized_base` and
+// `turned_sized_base` are `size_layout`'s for the sizings before and after it.
+void search_candidate(Candidate &out,
+                      Chart const &c,
+                      SplitGraph const &g,
+                      SubmachineOrders const &orders,
+                      scav_spaces const &s,
+                      scav_profile const &knobs,
+                      DarSource dar,
+                      Compaction pack,
+                      Fold fold,
+                      Router const &router,
+                      uint32_t threads,
+                      std::vector<Diagnostic> &diags,
+                      RouteCache const *reuse,
+                      RouteCache *fill,
+                      SearchPins const *pins,
+                      Prefix *prefix,
+                      Prefix const *from,
+                      bool labels,
+                      SubmachineOrders const *turned_base,
+                      SizeRecord const *sized_base,
+                      SizeRecord const *turned_sized_base,
+                      CandidateScratch *scratch) {
+  CandidateScratch own;
+  CandidateScratch &sc{ (scratch != nullptr) ? *scratch : own };
+  out.inflations = 0;
+  out.viable = false;
+  out.sized_chart = {};
+  SubmachineOrders &facing{ sc.facing };
   SubmachineOrders const *use{ &orders };
   if (from != nullptr) {
-    if (!from->ok) { return out; }
+    if (!from->ok) {
+      out = Candidate{};
+      return;
+    }
     out.sized = from->sized;
     out.laid = from->turned;
     if (pins != nullptr) { out.laid.faces = pins->faces; }
     use = &from->laid;
   } else {
-    if (!size_layout(c, g, orders, s, knobs, out.sized, diags, dar, pack, fold)) {
+    if (!size_layout(c,
+                     g,
+                     orders,
+                     s,
+                     knobs,
+                     out.sized,
+                     diags,
+                     dar,
+                     pack,
+                     fold,
+                     sized_base,
+                     (prefix != nullptr) ? &prefix->sized_first : nullptr)) {
       if (prefix != nullptr) { prefix->ok = false; }
-      return out;
+      out.routes = Routes{};
+      out.laid = SearchPins{};
+      return;
     }
     // Ports turned to face where their routes go, and the frames laid out again with
     // them; a function of the tuple and pins, so re-deriving the drawing repeats it.
     SearchPins &turned{ out.laid };
-    turned = (pins != nullptr) ? *pins : SearchPins{};
-    Facing const flips{ facing_flips(c, g, orders, out.sized) };
+    if (pins != nullptr) {
+      turned = *pins;  // copy-assigned, keeping `turned`'s storage
+    } else {
+      turned = SearchPins{};
+    }
+    Facing &flips{ sc.flips };
+    bool turned_sized{ false };
+    facing_flips(flips, sc.taken, c, g, orders, out.sized);
     if (!flips.reverses.empty() || !flips.sides.empty()) {
       for (ReversePin const &f : flips.reverses) {
         auto const had{ std::ranges::find_if(turned.reverses, [&f](ReversePin const &r) {
@@ -456,15 +544,28 @@ Candidate search_candidate(Chart const &c,
         }
       }
       vec_insert(turned.sides, turned.sides.end(), flips.sides.begin(), flips.sides.end());
-      facing = order_submachines(c, g, s, knobs, threads, turned);
-      SizedLayout again;
+      order_submachines(facing, c, g, s, knobs, threads, turned, turned_base);
+      SizedLayout &again{ sc.again };
       std::vector<Diagnostic> spilled;
-      if (size_layout(c, g, facing, s, knobs, again, spilled, dar, pack, fold)) {
+      if (size_layout(c,
+                      g,
+                      facing,
+                      s,
+                      knobs,
+                      again,
+                      spilled,
+                      dar,
+                      pack,
+                      fold,
+                      turned_sized_base,
+                      (prefix != nullptr) ? &prefix->sized_laid : nullptr)) {
         use = &facing;
-        out.sized = std::move(again);
+        std::swap(out.sized, again);
+        turned_sized = true;
       }
     }
     if (prefix != nullptr) {
+      if (!turned_sized) { prefix->sized_laid = prefix->sized_first; }
       prefix->laid = *use;
       prefix->sized = out.sized;
       prefix->turned = out.laid;
@@ -472,18 +573,20 @@ Candidate search_candidate(Chart const &c,
     }
   }
   SubmachineOrders const &laid{ *use };
-  out.routes = route_transitions(c,
-                                 g,
-                                 laid,
-                                 out.sized,
-                                 s,
-                                 knobs,
-                                 router,
-                                 threads,
-                                 reuse,
-                                 fill,
-                                 pins,
-                                 (from != nullptr) ? &from->routes : nullptr);
+  route_transitions(out.routes,
+                    c,
+                    g,
+                    laid,
+                    out.sized,
+                    s,
+                    knobs,
+                    router,
+                    threads,
+                    reuse,
+                    fill,
+                    pins,
+                    (from != nullptr) ? &from->routes : nullptr,
+                    labels);
   if (prefix != nullptr) { prefix->routes = out.routes; }
 
   // `out` holds the best attempt so far; `done` reads from it, not from the latest
@@ -501,7 +604,19 @@ Candidate search_candidate(Chart const &c,
     if (!size_layout(c, g, laid, s, wider, next_sized, spilled, dar, pack, fold)) {
       break;
     }
-    Routes next{ route_transitions(c, g, laid, next_sized, s, wider, router, threads) };
+    Routes next{ route_transitions(c,
+                                   g,
+                                   laid,
+                                   next_sized,
+                                   s,
+                                   wider,
+                                   router,
+                                   threads,
+                                   nullptr,
+                                   nullptr,
+                                   nullptr,
+                                   nullptr,
+                                   labels) };
     bool keep{ false };
     done = inflation_done(fewest, next.degraded(), next.unreachable, keep);
     if (keep) {
@@ -515,25 +630,53 @@ Candidate search_candidate(Chart const &c,
     }
   }
 
-  // Bounds everything laid out, not just the root submachine: a route bends into
-  // a frame's padding and a path box centres on one, so both can reach past it.
-  // Before the score rather than after the pick, so `area` and `aspect` price
-  // the canvas that ships.
-  auto const cover = [&out](int32_t x, int32_t y) {
-    scav_rect &chart{ out.sized.chart };
-    int32_t const right{ imax(chart.x + chart.w, x) };
-    int32_t const bottom{ imax(chart.y + chart.h, y) };
-    chart.x = imin(chart.x, x);
-    chart.y = imin(chart.y, y);
-    chart.w = right - chart.x;
-    chart.h = bottom - chart.y;
-  };
-  for (scav_point const &at : out.routes.points) { cover(at.x, at.y); }
-  for (scav_rect const &at : out.routes.placed) {
-    cover(at.x, at.y);
-    cover(at.x + at.w, at.y + at.h);
-  }
+  cover_chart(out);
   out.viable = true;
+}
+
+Candidate search_candidate(Chart const &c,
+                           SplitGraph const &g,
+                           SubmachineOrders const &orders,
+                           scav_spaces const &s,
+                           scav_profile const &knobs,
+                           DarSource dar,
+                           Compaction pack,
+                           Fold fold,
+                           Router const &router,
+                           uint32_t threads,
+                           std::vector<Diagnostic> &diags,
+                           RouteCache const *reuse = nullptr,
+                           RouteCache *fill = nullptr,
+                           SearchPins const *pins = nullptr,
+                           Prefix *prefix = nullptr,
+                           Prefix const *from = nullptr,
+                           bool labels = true,
+                           SubmachineOrders const *turned_base = nullptr,
+                           SizeRecord const *sized_base = nullptr,
+                           SizeRecord const *turned_sized_base = nullptr) {
+  Candidate out;
+  search_candidate(out,
+                   c,
+                   g,
+                   orders,
+                   s,
+                   knobs,
+                   dar,
+                   pack,
+                   fold,
+                   router,
+                   threads,
+                   diags,
+                   reuse,
+                   fill,
+                   pins,
+                   prefix,
+                   from,
+                   labels,
+                   turned_base,
+                   sized_base,
+                   turned_sized_base,
+                   nullptr);
   return out;
 }
 
@@ -606,12 +749,23 @@ uint64_t test_prefix_used{ 0 };
 uint64_t test_prefix_mismatches{ 0 };
 #endif
 
+// Whether every path box fits the sizing's chart, which a placed box then lies inside.
+bool labels_fit(scav_spaces const &s, scav_rect const &chart) {
+  for (uint32_t i = 0; (s.path_box != nullptr) && (i < s.n_path_box); ++i) {
+    if ((s.path_box[i].w > chart.w) || (s.path_box[i].h > chart.h)) { return false; }
+  }
+  return true;
+}
+
+// Without `labelled`, a candidate routed without its labels scores a lower bound on its
+// cost: the label terms are unpriced and the chart is the least it can grow to.
 Scored scored_of(Chart const &c,
                  SplitGraph const &g,
                  CostContext const &scoring,
                  scav_spaces const &s,
                  scav_profile const &objective,
-                 Candidate const &cand) {
+                 Candidate const &cand,
+                 bool labelled = true) {
   Scored out;
   if (!cand.viable) { return out; }
   out.viable = true;
@@ -619,9 +773,9 @@ Scored scored_of(Chart const &c,
     out.inflated = true;
     return out;
   }
-  CostTerms const terms{
-    cost_terms(scoring, c, g, cand.sized, cand.routes, s, objective)
-  };
+  CostTerms terms{ cost_terms(scoring, c, g, cand.sized, cand.routes, s, objective) };
+  // Aspect may fall as the chart grows, so it bounds only where no box can grow it.
+  if (!labelled && !labels_fit(s, cand.sized_chart)) { terms.aspect = 0; }
   out.cost = cost_of(terms, objective);
   std::array<int64_t, TIER2_TERMS> const share{ cost_shares(terms, objective) };
   for (uint32_t k = 0; k < TIER2_TERMS; ++k) {
@@ -630,8 +784,41 @@ Scored scored_of(Chart const &c,
   return out;
 }
 
+// The candidate a move was scored on, in the scoring thread's scratch, and the routing
+// its labels were or would be placed against.
+struct Routed {
+  Candidate *cand{ nullptr };
+  Routes const *was{ nullptr };
+};
+
+// A candidate the bound pass routed, kept for its labels, and `Routed::was` for them.
+struct KeptCandidate {
+  Candidate cand;
+  Routes const *was{ nullptr };
+  Cost bound{};
+  uint32_t index{ INVALID };
+};
+
+// What one scored move orders and discards. Per thread: a move runs on one thread and
+// waits on nothing.
+struct MoveScratch {
+  SearchPins pins;  // the move's, which its scoring reads until it returns
+  SubmachineOrders moved;
+  Candidate whole, face;
+  CandidateScratch keep;
+};
+
+MoveScratch &move_scratch() {
+  thread_local MoveScratch s;
+  return s;
+}
+
 // `from`, where given, is the incumbent's prefix and `pins` the incumbent's
-// with one face more: the candidate's phases 1 and 2 are the incumbent's.
+// with one face more: the candidate's phases 1 and 2 are the incumbent's. Without
+// `labels` the score is `scored_of`'s bound. `held_orders` and `turned_orders` are the
+// incumbent's orderings before and after its facing pass, and `held_sized` and
+// `turned_sized` its sizings of them, which the candidate's take frames from. `routed`,
+// where given, receives the candidate scored.
 Scored score_move(Chart const &c,
                   SplitGraph const &g,
                   CostContext const &scoring,
@@ -644,49 +831,77 @@ Scored score_move(Chart const &c,
                   Router const &router,
                   SearchPins const &pins,
                   RouteCache const *reuse,
-                  Prefix const *from) {
-  auto const whole = [&]() {
-    SubmachineOrders const moved{ order_submachines(c, g, s, objective, 1, pins) };
+                  Prefix const *from,
+                  bool labels = true,
+                  SubmachineOrders const *held_orders = nullptr,
+                  SubmachineOrders const *turned_orders = nullptr,
+                  SizeRecord const *held_sized = nullptr,
+                  SizeRecord const *turned_sized = nullptr,
+                  Routed *routed = nullptr) {
+  MoveScratch &sc{ move_scratch() };
+  auto const whole = [&]() -> Candidate const & {
+    order_submachines(sc.moved, c, g, s, objective, 1, pins, held_orders);
     std::vector<Diagnostic> spilled;
-    return search_candidate(c,
-                            g,
-                            moved,
-                            s,
-                            knobs,
-                            dar,
-                            pack,
-                            fold,
-                            router,
-                            1,
-                            spilled,
-                            reuse,
-                            nullptr,
-                            &pins);
+    search_candidate(sc.whole,
+                     c,
+                     g,
+                     sc.moved,
+                     s,
+                     knobs,
+                     dar,
+                     pack,
+                     fold,
+                     router,
+                     1,
+                     spilled,
+                     reuse,
+                     nullptr,
+                     &pins,
+                     nullptr,
+                     nullptr,
+                     labels,
+                     turned_orders,
+                     held_sized,
+                     turned_sized,
+                     &sc.keep);
+    return sc.whole;
   };
   // A traced search scores every move whole, its trace recording each move's phases.
   bool shortcut{ (from != nullptr) && (trace_sink() == nullptr) };
 #ifdef SCAV_TESTING
   shortcut = shortcut && test_prefix_shortcut;
 #endif
-  if (!shortcut) { return scored_of(c, g, scoring, s, objective, whole()); }
+  if (!shortcut) {
+    Scored const out{ scored_of(c, g, scoring, s, objective, whole(), labels) };
+    if (routed != nullptr) { *routed = { .cand = &sc.whole, .was = nullptr }; }
+    return out;
+  }
+  if (routed != nullptr) { *routed = { .cand = &sc.face, .was = &from->routes }; }
   std::vector<Diagnostic> spilled;
-  Candidate const cand{ search_candidate(c,
-                                         g,
-                                         from->laid,
-                                         s,
-                                         knobs,
-                                         dar,
-                                         pack,
-                                         fold,
-                                         router,
-                                         1,
-                                         spilled,
-                                         reuse,
-                                         nullptr,
-                                         &pins,
-                                         nullptr,
-                                         from) };
-  Scored const out{ scored_of(c, g, scoring, s, objective, cand) };
+  Candidate const &cand{ sc.face };
+  search_candidate(sc.face,
+                   c,
+                   g,
+                   from->laid,
+                   s,
+                   knobs,
+                   dar,
+                   pack,
+                   fold,
+                   router,
+                   1,
+                   spilled,
+                   reuse,
+                   nullptr,
+                   &pins,
+                   nullptr,
+                   from,
+                   labels,
+                   nullptr,
+                   nullptr,
+                   nullptr,
+                   &sc.keep);
+  Scored const out{ scored_of(c, g, scoring, s, objective, cand, labels) };
 #ifdef SCAV_TESTING
   {
     ScopedLock const held{ test_prefix_lock };
@@ -694,7 +909,7 @@ Scored score_move(Chart const &c,
   }
   if (test_prefix_verify) {
     Candidate const full{ whole() };
-    Scored const want{ scored_of(c, g, scoring, s, objective, full) };
+    Scored const want{ scored_of(c, g, scoring, s, objective, full, labels) };
     bool same{ (want.viable == out.viable) && (want.inflated == out.inflated) &&
                (want.cost.t0_violations == out.cost.t0_violations) &&
                (want.cost.t1_hints == out.cost.t1_hints) &&
@@ -762,6 +977,177 @@ bool skipping_noop_faces() {
   return true;
 }
 
+#ifdef SCAV_TESTING
+// Whether a labelled round scores by bound, whether each such round is also scored whole
+// and its pick compared, each candidate labelled on kept routes against a full lay-out,
+// and the tallies: candidates whose labels the bound skipped, candidates it labelled, and
+// rounds or candidates that disagreed.
+bool test_label_bound{ true };
+bool test_label_bound_verify{ false };
+Mutex test_label_bound_lock;
+uint64_t test_label_bound_skipped{ 0 };
+uint64_t test_label_bound_labelled{ 0 };
+uint64_t test_label_bound_mismatches{ 0 };
+#endif
+
+// Whether a candidate's bound is below `incumbent`, so it may yet win and be scored
+// exactly.
+bool may_win(Scored const &bound, Cost const &incumbent) {
+  return bound.viable && !bound.inflated && cost_less(bound.cost, incumbent);
+}
+
+// How many candidates of a labelled round, the first in bound order, keep their routes.
+constexpr uint32_t KEPT_ROUTES{ 128 };
+
+// `routed`, candidate `index` with bound `bound`, into `kept` while it is among the
+// `KEPT_ROUTES` least by bound then index; `kept_n` of `kept` are in use.
+void keep_least(std::vector<KeptCandidate> &kept,
+                uint32_t &kept_n,
+                uint32_t index,
+                Cost const &bound,
+                Routed const &routed) {
+  auto const before = [](Cost const &a, uint32_t ai, KeptCandidate const &b) {
+    return cost_less(a, b.bound) || (!cost_less(b.bound, a) && (ai < b.index));
+  };
+  uint32_t slot{ kept_n };
+  if (kept_n < KEPT_ROUTES) {
+    if (kept_n == kept.size()) { vec_push_back(kept, KeptCandidate{}); }
+    ++kept_n;
+  } else {
+    slot = 0;
+    for (uint32_t k = 1; k < kept_n; ++k) {
+      if (before(kept[slot].bound, kept[slot].index, kept[k])) { slot = k; }
+    }
+    if (!before(bound, index, kept[slot])) { return; }
+  }
+  KeptCandidate &k{ kept[slot] };
+  std::swap(k.cand, *routed.cand);  // the thread's scratch takes the slot's storage
+  k.was = routed.was;
+  k.bound = bound;
+  k.index = index;
+}
+
+// The index scoring every candidate whole and reducing in order would take: the least cost
+// strictly below `incumbent`, the lowest index among equals; INVALID where none is.
+// `bound(i)` scores candidate i's lower bound and `exact(i)` its cost, and only a
+// candidate whose bound can still win is scored exactly, least bound first, one at a time.
+template <typename Bound, typename Exact>
+uint32_t least_by_bound(uint32_t n,
+                        uint32_t threads,
+                        Cost const &incumbent,
+                        std::vector<Scored> &got,
+                        std::vector<uint32_t> &order,
+                        Bound const &bound,
+                        Exact const &exact) {
+  parallel_for(n, threads, [&](uint32_t i) { got[i] = bound(i); });
+  order.clear();
+  uint32_t open{ 0 };
+  for (uint32_t i = 0; i < n; ++i) {
+    if (!got[i].viable || got[i].inflated) { continue; }
+    ++open;
+    if (may_win(got[i], incumbent)) { vec_push_back(order, i); }
+  }
+  scav_stable_sort(order, [&got](uint32_t a, uint32_t b) {
+    return cost_less(got[a].cost, got[b].cost);
+  });
+  uint32_t win{ INVALID };
+  Cost best{ incumbent };
+  auto const beats = [&](uint32_t i) {
+    return cost_less(got[i].cost, best) ||
+           ((win != INVALID) && (i < win) && !cost_less(best, got[i].cost));
+  };
+  uint32_t at{ 0 };
+  for (; (at < order.size()) && beats(order[at]); ++at) {
+    got[order[at]] = exact(order[at]);
+    if (beats(order[at])) {
+      best = got[order[at]].cost;
+      win = order[at];
+    }
+  }
+#ifdef SCAV_TESTING
+  {
+    ScopedLock const held{ test_label_bound_lock };
+    test_label_bound_skipped += open - at;
+    test_label_bound_labelled += at;
+  }
+#else
+  (void)open;
+#endif
+  return win;
+}
+
+#ifdef SCAV_TESTING
+// Whether a candidate labelled on its kept routes, and its score, are a full re-layout's.
+bool same_labelled(Candidate const &kept,
+                   Scored const &got,
+                   Candidate const &full,
+                   Scored const &want) {
+  auto const same_rect = [](scav_rect const &a, scav_rect const &b) {
+    return (a.x == b.x) && (a.y == b.y) && (a.w == b.w) && (a.h == b.h);
+  };
+  bool same{ (got.viable == want.viable) && (got.inflated == want.inflated) &&
+             (got.cost.t0_violations == want.cost.t0_violations) &&
+             (got.cost.t1_hints == want.cost.t1_hints) && (got.cost.t2 == want.cost.t2) &&
+             (got.share == want.share) && (kept.viable == full.viable) &&
+             (kept.inflations == full.inflations) &&
+             same_rect(kept.sized.chart, full.sized.chart) &&
+             same_rect(kept.sized_chart, full.sized_chart) &&
+             (kept.sized.state.size() == full.sized.state.size()) &&
+             (kept.routes.unplaced == full.routes.unplaced) &&
+             (kept.routes.points.size() == full.routes.points.size()) &&
+             (kept.routes.placed.size() == full.routes.placed.size()) &&
+             (kept.routes.settled.size() == full.routes.settled.size()) };
+  for (uint32_t k = 0; same && (k < full.sized.state.size()); ++k) {
+    same = same_rect(kept.sized.state[k], full.sized.state[k]);
+  }
+  for (uint32_t k = 0; same && (k < full.routes.points.size()); ++k) {
+    same = scav::same(kept.routes.points[k], full.routes.points[k]);
+  }
+  for (uint32_t k = 0; same && (k < full.routes.placed.size()); ++k) {
+    same = same_rect(kept.routes.placed[k], full.routes.placed[k]);
+  }
+  for (uint32_t k = 0; same && (k < full.routes.settled.size()); ++k) {
+    LabelSettle const &a{ kept.routes.settled[k] };
+    LabelSettle const &b{ full.routes.settled[k] };
+    same = (a.seg == b.seg) && (a.mid == b.mid) && (a.found == b.found);
+  }
+  return same;
+}
+
+// Scores every candidate of a bounded round whole and tallies a round whose pick or its
+// cost differs, or whose bound exceeds a whole score.
+template <typename Score>
+void verify_bounded_round(uint32_t n,
+                          uint32_t threads,
+                          Cost const &incumbent,
+                          std::vector<Scored> const &got,
+                          uint32_t win,
+                          Score const &score) {
+  std::vector<Scored> full(n);
+  parallel_for(n, threads, [&](uint32_t i) { full[i] = score(i, true); });
+  uint32_t want{ INVALID };
+  Cost best{ incumbent };
+  bool same{ true };
+  for (uint32_t i = 0; i < n; ++i) {
+    same =
+        same && (full[i].viable == got[i].viable) && (full[i].inflated == got[i].inflated);
+    if (!full[i].viable || full[i].inflated) { continue; }
+    same = same && !cost_less(full[i].cost, got[i].cost);
+    if (cost_less(full[i].cost, best)) {
+      best = full[i].cost;
+      want = i;
+    }
+  }
+  same = same && (want == win);
+  same = same && ((win == INVALID) ||
+                  (!cost_less(got[win].cost, best) && !cost_less(best, got[win].cost)));
+  if (!same) {
+    ScopedLock const held{ test_label_bound_lock };
+    ++test_label_bound_mismatches;
+  }
+}
+#endif
+
 // Level 1: greedy, strictly improving moves in enumeration order. A move is a pin, so
 // taking one appends to the pins the next round re-derives from.
 Improved run_search(Chart const &c,
@@ -793,6 +1179,8 @@ Improved run_search(Chart const &c,
   // rounds.
   RouteCache base;
   Prefix incumbent;
+  SizeRecord was_first;  // the incumbent's sizings a round re-derives it from
+  SizeRecord was_laid;
   {
     std::vector<Diagnostic> spilled;
     Candidate first{ search_candidate(c,
@@ -816,22 +1204,34 @@ Improved run_search(Chart const &c,
   out.viable = out.best.viable;
   if (!out.viable) { return out; }
   CostContext const scoring{ cost_context(c) };
-  out.cost =
-      cost_of(cost_terms(scoring, c, g, out.best.sized, out.best.routes, s, objective),
-              objective);
+  std::vector<uint8_t> party;  // set where the incumbent's route bends or is charged
+  out.cost = cost_of(
+      cost_terms(scoring, c, g, out.best.sized, out.best.routes, s, objective, &party),
+      objective);
 
-  auto const with = [](SearchPins base_pins, Move const &m) {
+  auto const add = [](SearchPins &into, Move const &m) {
     switch (m.kind) {
-      case MoveKind::Cut: vec_push_back(base_pins.cuts, m.leg); break;
+      case MoveKind::Cut: vec_push_back(into.cuts, m.leg); break;
       case MoveKind::Reverse:
-        vec_push_back(base_pins.reverses, { .trans = m.leg.trans, .leg = m.leg.leg });
+        vec_push_back(into.reverses, { .trans = m.leg.trans, .leg = m.leg.leg });
         break;
-      case MoveKind::Face: vec_push_back(base_pins.faces, m.face); break;
-      case MoveKind::Side: vec_push_back(base_pins.sides, m.side); break;
-      case MoveKind::Fold: vec_push_back(base_pins.folds, m.fold); break;
-      case MoveKind::Rank: vec_push_back(base_pins.ranks, m.pin); break;
+      case MoveKind::Face: vec_push_back(into.faces, m.face); break;
+      case MoveKind::Side: vec_push_back(into.sides, m.side); break;
+      case MoveKind::Fold: vec_push_back(into.folds, m.fold); break;
+      case MoveKind::Rank: vec_push_back(into.ranks, m.pin); break;
     }
+  };
+  auto const with = [&add](SearchPins base_pins, Move const &m) {
+    add(base_pins, m);
     return base_pins;
+  };
+  // `with` into the scoring thread's own pins.
+  auto const with_here = [&add](SearchPins const &base_pins,
+                                Move const &m) -> SearchPins const & {
+    SearchPins &into{ move_scratch().pins };
+    into = base_pins;  // copy-assignment keeps each vector's storage
+    add(into, m);
+    return into;
   };
 
   // One counter per move kind, each capped at the budget.
@@ -843,6 +1243,19 @@ Improved run_search(Chart const &c,
   uint32_t fold_scored{ 0 };
   std::vector<Move> round;
   std::vector<Scored> got;
+  std::vector<uint32_t> order;
+  // A labelled round's first candidates in bound order, as their bound routed them: the
+  // first `kept_n` of `kept`.
+  std::vector<KeptCandidate> kept;
+  uint32_t kept_n{ 0 };
+  Mutex kept_lock;
+  // A labelled round routes every candidate, then labels only those whose bound can still
+  // win; a traced round scores each whole.
+  bool bounded{ (s.path_box != nullptr) && (s.n_path_box != 0) &&
+                (trace_sink() == nullptr) };
+#ifdef SCAV_TESTING
+  bounded = bounded && test_label_bound;
+#endif
   std::vector<uint8_t> chained;
   std::vector<uint8_t> source;
   while ((cut_scored < budget) || (rev_scored < budget) || (face_scored < budget) ||
@@ -893,13 +1306,13 @@ Improved run_search(Chart const &c,
     }
 
     // Four faces per segment end, less any pinned. A face the router gives no effect
-    // draws the incumbent exactly, so it is charged to the budget unscored unless traced.
+    // draws the incumbent exactly, so it is charged to the budget unscored.
     std::vector<uint8_t> const &faceable{ base.faceable };
-    bool const skip_noop{ trace_sink() == nullptr };
     for (uint32_t seg = 0; (seg < g.segments.size()) && (face_scored < budget); ++seg) {
       if (!in_scope(g.segments[seg].frame.v)) { continue; }
       TransId const t{ g.segments[seg].trans };
       if ((t.v == INVALID) || (t.v >= g.trans_segments.size())) { continue; }
+      if ((t.v >= party.size()) || (party[t.v] == 0)) { continue; }  // straight, unpriced
       uint32_t const leg{ seg - g.trans_segments[t.v].off };
       for (uint32_t end = 0; (end < 2) && (face_scored < budget); ++end) {
         bool already{ false };
@@ -909,9 +1322,8 @@ Improved run_search(Chart const &c,
         }
         if (already) { continue; }
         size_t const at{ (size_t{ 2 } * seg) + end };
-        uint32_t const effective{ (skip_noop && (at < faceable.size()))
-                                      ? uint32_t{ faceable[at] }
-                                      : 0xFU };
+        uint32_t const effective{ (at < faceable.size()) ? uint32_t{ faceable[at] }
+                                                         : 0xFU };
         for (uint32_t f = 0; (f < 4) && (face_scored < budget); ++f) {
           ++face_scored;
           if ((((effective >> f) & 1U) == 0) && skipping_noop_faces()) { continue; }
@@ -998,28 +1410,96 @@ Improved run_search(Chart const &c,
 
     // A candidate runs its phases on one thread: it is already the unit a free
     // thread takes, and sharding its frames too would only add claims.
-    vec_assign(got, round.size(), {});
-    parallel_for(static_cast<uint32_t>(round.size()), threads, [&](uint32_t i) {
-      got[i] = score_move(c,
-                          g,
-                          scoring,
-                          s,
-                          objective,
-                          knobs,
-                          dar,
-                          pack,
-                          fold,
-                          router,
-                          with(held, round[i]),
-                          &base,
-                          (round[i].kind == MoveKind::Face) ? &incumbent : nullptr);
-    });
+    auto const score = [&](uint32_t i, bool labels, Routed *routed = nullptr) {
+      return score_move(c,
+                        g,
+                        scoring,
+                        s,
+                        objective,
+                        knobs,
+                        dar,
+                        pack,
+                        fold,
+                        router,
+                        with_here(held, round[i]),
+                        &base,
+                        (round[i].kind == MoveKind::Face) ? &incumbent : nullptr,
+                        labels,
+                        &here,
+                        &incumbent.laid,
+                        &incumbent.sized_first,
+                        &incumbent.sized_laid,
+                        routed);
+    };
+    uint32_t const n{ static_cast<uint32_t>(round.size()) };
+    vec_assign(got, n, {});
+    uint32_t win{ INVALID };
+    if (bounded) {
+      // The first candidates in bound order are labelled on the routes their bound laid
+      // out; any after them are laid out again.
+#ifdef SCAV_TESTING
+      uint32_t exacts{ 0 };
+#endif
+      auto const bound = [&](uint32_t i) {
+        Routed routed;
+        Scored const scored{ score(i, false, &routed) };
+        if (may_win(scored, out.cost)) {
+          ScopedLock const lock{ kept_lock };
+          keep_least(kept, kept_n, i, scored.cost, routed);
+        }
+        return scored;
+      };
+      auto const exact = [&](uint32_t i) {
+        uint32_t k{ 0 };
+        while ((k < kept_n) && (kept[k].index != i)) { ++k; }
+        if (k == kept_n) {
+#ifdef SCAV_TESTING
+          if (exacts < KEPT_ROUTES) {
+            ScopedLock const lock{ test_label_bound_lock };
+            ++test_label_bound_mismatches;
+          }
+#endif
+          return score(i, true);
+        }
+#ifdef SCAV_TESTING
+        ++exacts;
+#endif
+        Candidate &cand{ kept[k].cand };
+        label_candidate(cand, c, s, knobs, kept[k].was);
+        Scored const scored{ scored_of(c, g, scoring, s, objective, cand) };
+#ifdef SCAV_TESTING
+        if (test_label_bound_verify) {
+          Routed full;
+          Scored const want{ score(i, true, &full) };
+          if (!same_labelled(cand, scored, *full.cand, want)) {
+            ScopedLock const lock{ test_label_bound_lock };
+            ++test_label_bound_mismatches;
+          }
+        }
+#endif
+        return scored;
+      };
+      win = least_by_bound(n, threads, out.cost, got, order, bound, exact);
+      kept_n = 0;
+#ifdef SCAV_TESTING
+      if (test_label_bound_verify) {
+        verify_bounded_round(n, threads, out.cost, got, win, score);
+      }
+#endif
+    } else {
+      parallel_for(n, threads, [&](uint32_t i) { got[i] = score(i, true); });
+    }
 
     // Reduced in enumeration order, with the trace emitted here in that order.
     Move take{};
     Cost best{ out.cost };
     bool found{ false };
-    for (uint32_t i = 0; i < round.size(); ++i) {
+    if (win != INVALID) {
+      take = round[win];
+      best = got[win].cost;
+      found = true;
+    }
+    for (uint32_t i = 0; !bounded && (i < n); ++i) {
       Move const &m{ round[i] };
       Scored const &sc{ got[i] };
       MoveVerdict verdict{ MoveVerdict::NotBetter };
@@ -1075,11 +1555,13 @@ Improved run_search(Chart const &c,
 
     if (!found) { break; }
     held = with(held, take);
-    here = order_submachines(c, g, s, objective, threads, held);
+    here = order_submachines(c, g, s, objective, threads, held, &here);
     // Re-derived as the taken candidate was scored, reusing every frame the move left or
     // shifted.
     RouteCache const was{ std::move(base) };
     base = RouteCache{};
+    std::swap(was_first, incumbent.sized_first);
+    std::swap(was_laid, incumbent.sized_laid);
     std::vector<Diagnostic> spilled;
     out.best = search_candidate(c,
                                 g,
@@ -1095,8 +1577,14 @@ Improved run_search(Chart const &c,
                                 &was,
                                 &base,
                                 &held,
-                                &incumbent);
+                                &incumbent,
+                                nullptr,
+                                true,
+                                nullptr,
+                                &was_first,
+                                &was_laid);
     out.cost = best;
+    (void)cost_terms(scoring, c, g, out.best.sized, out.best.routes, s, objective, &party);
   }
   return out;
 }
@@ -1652,11 +2140,15 @@ bool layout_run(Chart &c,
           if ((here.seg_cyclic[seg] == 0) || (turned[seg] != 0)) { continue; }
           TransId const t{ g.segments[seg].trans };
           if ((t.v == INVALID) || (t.v >= g.trans_segments.size())) { continue; }
+          uint32_t const leg{ seg - g.trans_segments[t.v].off };
+          if (std::ranges::any_of(held[best].reverses, [t, leg](ReversePin const &had) {
+                return (had.trans.v == t.v) && (had.leg == leg);
+              })) {
+            continue;  // pinned and turned back by the walk: pinning it again is a no-op
+          }
           if (kick_scored >= budget) { break; }
           ++kick_scored;
-          vec_push_back(
-              kicks,
-              { .reverse = { .trans = t, .leg = seg - g.trans_segments[t.v].off } });
+          vec_push_back(kicks, { .reverse = { .trans = t, .leg = leg } });
           vec_push_back(kick_frame, g.segments[seg].frame.v);
         }
         for (uint32_t m = 0; turns && (m < here.sub_ranks.size()); ++m) {
@@ -2101,6 +2593,26 @@ void layout_test_skip_noop_faces(bool on) {
 uint64_t layout_test_noop_faces() {
   ScopedLock const held{ test_noop_lock };
   return test_noop_faces;
+}
+void layout_test_label_bound(bool on, bool verify) {
+  test_label_bound = on;
+  test_label_bound_verify = verify;
+  ScopedLock const held{ test_label_bound_lock };
+  test_label_bound_skipped = 0;
+  test_label_bound_labelled = 0;
+  test_label_bound_mismatches = 0;
+}
+uint64_t layout_test_label_bound_skipped() {
+  ScopedLock const held{ test_label_bound_lock };
+  return test_label_bound_skipped;
+}
+uint64_t layout_test_label_bound_labelled() {
+  ScopedLock const held{ test_label_bound_lock };
+  return test_label_bound_labelled;
+}
+uint64_t layout_test_label_bound_mismatches() {
+  ScopedLock const held{ test_label_bound_lock };
+  return test_label_bound_mismatches;
 }
 void layout_test_search_memo(bool on) { test_search_memo = on; }
 void layout_test_search_memo_verify(bool on) { test_search_memo_verify = on; }

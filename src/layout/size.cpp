@@ -14,6 +14,7 @@
 #include "scav/scav_layout.h"
 #include "scav_int.h"
 #include "scav_internal.h"
+#include "scav_thread.h"
 #include "scav_vec.h"
 
 #include <array>
@@ -29,9 +30,33 @@ namespace scav {
 SCAV_INTERNAL_BEGIN
 FrameDar size_hole_ratio(int32_t w, int32_t h);
 std::vector<FrameDar> size_owner_holes(Chart const &c, SizedLayout const &z);
+void size_owner_holes(Chart const &c, SizedLayout const &z, std::vector<FrameDar> &hole);
 SCAV_INTERNAL_END
 
+#ifdef SCAV_TESTING
+void size_test_reuse(bool on);
+void size_test_reuse_verify(bool on);
+void size_test_reuse_ignore_dar(bool on);
+uint64_t size_test_reused();
+uint64_t size_test_framed();
+uint64_t size_test_reuse_mismatches();
+#endif
+
 namespace {
+
+#ifdef SCAV_TESTING
+// Whether a pass copies frames from its `base`, whether a sizing that copied any is sized
+// again without one to check it, whether the owner's ratio is left out of the comparison
+// as a planted defect, and the frames copied, the frames compared and the sizings that
+// came out different.
+bool test_reuse{ true };
+bool test_reuse_verify{ false };
+bool test_reuse_ignore_dar{ false };
+Mutex test_reuse_lock;
+uint64_t test_reused{ 0 };
+uint64_t test_framed{ 0 };
+uint64_t test_reuse_mismatches{ 0 };
+#endif
 
 scav_box_space box_of(scav_box_space const *rows, uint32_t count, uint32_t i) {
   return ((rows != nullptr) && (i < count)) ? rows[i] : scav_box_space{};
@@ -45,9 +70,6 @@ Memo &frame_memo() {
   return m;
 }
 
-// The profile is read whole into a key, so it has to be words and no padding.
-static_assert((sizeof(scav_profile) % sizeof(uint32_t)) == 0);
-
 // Inside the coordinate domain on both axes. A row or a column whose sum
 // overflowed saturates at `PACK_SATURATED`, which is far past `COORD_MAX`.
 bool fits(Packing const &p) { return (p.w <= COORD_MAX) && (p.h <= COORD_MAX); }
@@ -57,20 +79,24 @@ bool fits(Packing const &p) { return (p.w <= COORD_MAX) && (p.h <= COORD_MAX); }
 // The ratio and the compaction knob are arguments rather than the profile's
 // fields, because a frame aims at the hole it fills and not every hole is
 // 16:10, and because compaction is a row of the portfolio's table (11.4).
-Packing pack_best(std::vector<scav_rect> const &rects,
-                  int32_t sep,
-                  scav_profile const &p,
-                  FrameDar dar,
-                  Compaction compaction) {
-  Packing packed{ pack_lr(rects, sep, dar.num, dar.den, compaction) };
+// Into `packed`, with `row` the caller's scratch for the other packer.
+void pack_best(Packing &packed,
+               Packing &row,
+               std::vector<scav_rect> const &rects,
+               int32_t sep,
+               scav_profile const &p,
+               FrameDar dar,
+               Compaction compaction) {
+  pack_lr(packed, rects, sep, dar.num, dar.den, compaction);
   if (p.trybox != 0) {
-    Packing const row{ pack_box(rects, sep) };
+    pack_box(row, rects, sep);
     if (fits(row) && (!fits(packed) ||
                       pack_better(row, packed, dar.num, dar.den, p.sm_tiebreak != 0))) {
-      packed = row;
+      vec_assign(packed.at, row.at.begin(), row.at.end());
+      packed.w = row.w;
+      packed.h = row.h;
     }
   }
-  return packed;
 }
 
 void overflow(std::vector<Diagnostic> &diags, ElemKind kind, uint32_t ordinal) {
@@ -168,8 +194,10 @@ struct SizeScratch {
   std::vector<scav_rect> kids;
   std::vector<uint32_t> ids;
   std::vector<Frame> work;
+  std::vector<uint8_t> reuse, kept;  // per submachine copied from a base; per state
   // What an `OwnerHole` sizing's first pass sized.
   SizedLayout first;
+  std::vector<FrameDar> hole;  // `size_owner_holes` of `first`
   // One frame.
   std::vector<int32_t> reserve;
   std::vector<uint32_t> adj_count, adj_off, adj, fill, component, queue;
@@ -180,17 +208,17 @@ struct SizeScratch {
   std::vector<uint32_t> nodes, global_rank, local_rank, index, in_layer;
   std::vector<uint32_t> group, labelled, grouped, chunk_of, chunks;
   std::vector<int32_t> extent, layer_w, widest_label, group_w, line, inset;
-  std::vector<Wide> layer_h, carry, applied;
+  std::vector<Wide> layer_h, carry, applied, layer_lead;
   std::vector<uint8_t> glued, ridden, paired, bare, rides;
   std::vector<uint32_t> piece_of, ride_edge;
   std::vector<scav_rect> pieces;
-  Packing packed;
+  Packing packed, row, placed;  // a frame's pieces, `pack_best`'s other, a frame's boxes
   Shape best, folded, stacked;
   // One chunk.
   CoordGraph cg;
   std::vector<std::vector<uint32_t>> spare_layers;  // the layers a smaller chunk dropped
   std::vector<uint32_t> chunk_index, chunk_nodes, arrivals, nearest;
-  std::vector<int32_t> seat_at, enter_at;
+  std::vector<int32_t> seat_at, enter_at, centre;
   std::vector<uint8_t> apart, open, left;
   std::vector<uint32_t> mate, turning, turned_by, seat_to, fan;
   std::vector<Wide> layer_x, kept_w;
@@ -236,6 +264,7 @@ struct Sizer {
   SizedLayout &out;
   std::vector<Diagnostic> &diags;
   FrameDar profile_dar{ .num = p.dar_num, .den = p.dar_den };
+  uint32_t profile_word{ memo_profile(p) };
   SizeScratch &sc{ size_scratch() };
   // Where each submachine sits inside its owner's packed area, which the
   // descent at the end turns into an absolute origin.
@@ -248,6 +277,8 @@ struct Sizer {
   // where the router seats that port's slot.
   std::vector<uint32_t> &port_seg{ sc.port_seg };
   bool ok{ true };
+  SizePassRecord const *base{ nullptr };
+  SizePassRecord *record{ nullptr };
 
   // Every packing inside one state's interior fills the same hole, so the state
   // carries the ratio and its frames read their owner's.
@@ -316,6 +347,11 @@ struct Sizer {
   [[nodiscard]] Wide leg_label_room(ChunkView const &v,
                                     Shape const &shape,
                                     Wide chunk_h) const;
+  [[nodiscard]] Wide label_room(OrderEdge const &e) const;
+  [[nodiscard]] Wide column_label_room(ChunkView const &v,
+                                       Shape &shape,
+                                       uint32_t chunk,
+                                       Wide chunk_w) const;
   void lay_out_sub(uint32_t m);
   void place_sub(uint32_t m,
                  bool down,
@@ -326,6 +362,12 @@ struct Sizer {
   void level_rank_ports(uint32_t m, bool down);
   void size_sub(uint32_t m);
   void size_state(uint32_t i);
+  [[nodiscard]] bool same_frame(uint32_t m) const;
+  uint32_t mark_reuse(std::vector<std::vector<uint32_t>> const &subs_at, uint32_t levels);
+  void copy_frame(uint32_t m);
+  void copy_state(uint32_t i);
+  void note_frame(uint32_t m);
+  void note_pass();
 };
 
 // Where `seg` meets `state`, across the ranks from its centre: its port's boundary node,
@@ -864,6 +906,91 @@ Wide Sizer::leg_label_room(ChunkView const &v, Shape const &shape, Wide chunk_h)
   return chunk_h;
 }
 
+// A label's leader and width beside a leg, with half a node gap; zero for an unlabelled
+// edge.
+Wide Sizer::label_room(OrderEdge const &e) const {
+  bool const has{ (e.segment < seg_label_w.size()) && (seg_label_w[e.segment] != 0) };
+  return has ? (Wide{ label_leader(p) } + seg_label_w[e.segment] + (p.node_sep / 2))
+             : Wide{ 0 };
+}
+
+// A labelled edge into a later piece passes the states below its end on their leading
+// side, so that layer moves along; a label on a leg inside one column grows the trailing
+// side.
+Wide Sizer::column_label_room(ChunkView const &v,
+                              Shape &shape,
+                              uint32_t chunk,
+                              Wide chunk_w) const {
+  auto const along = [&](uint32_t st) {
+    return v.down ? out.state[st].h : out.state[st].w;
+  };
+  auto const width_of = [&](uint32_t i) {
+    OrderNode const &nd{ o.nodes[v.span.off + v.nodes[i]] };
+    return (nd.kind == OrderKind::State) ? Wide{ along(nd.subject) } : Wide{ 0 };
+  };
+  std::vector<Wide> &layer_lead{ sc.layer_lead };
+  vec_assign(layer_lead, v.last - v.first, 0);
+  for (uint32_t k = 0; k < v.espan.len; ++k) {
+    OrderEdge const &e{ o.edges[v.espan.off + k] };
+    uint32_t const ia{ v.index[e.src - v.span.off] };
+    uint32_t const ib{ v.index[e.dst - v.span.off] };
+    Wide const need{ label_room(e) };
+    if ((ia == INVALID) || (ib == INVALID) || (need == 0)) { continue; }
+    uint32_t const end{ (v.chunk_index[ia] != INVALID) ? ia : ib };
+    uint32_t const other{ (end == ia) ? ib : ia };
+    if ((v.chunk_index[end] == INVALID) || (sc.piece_of[other] <= chunk)) { continue; }
+    uint32_t const r{ v.local_rank[v.nodes[end]] };
+    bool passed{ false };
+    Wide lead{ COORD_MAX };
+    Wide trail{ 0 };
+    for (uint32_t const j : v.chunk_nodes) {
+      OrderNode const &nd{ o.nodes[v.span.off + v.nodes[j]] };
+      if (nd.kind != OrderKind::State) { continue; }
+      uint32_t const rj{ v.local_rank[v.nodes[j]] };
+      if (rj == r) {
+        lead = imin(lead, Wide{ shape.at[j].x });
+        passed = passed || ((j != end) && (shape.at[j].y > shape.at[end].y));
+      } else if (rj < r) {
+        trail = imax(trail, Wide{ shape.at[j].x } + along(nd.subject));
+      }
+    }
+    Wide const grow{ (Wide{ route_clearance(p) } + need) - (lead - trail) };
+    if (!passed || (grow <= 0)) { continue; }
+    for (uint32_t const j : v.chunk_nodes) {
+      if (Wide{ shape.at[j].x } >= lead) {
+        shape.at[j].x =
+            static_cast<int32_t>(imin(Wide{ shape.at[j].x } + grow, Wide{ COORD_MAX }));
+      }
+    }
+    chunk_w += grow;
+    for (uint32_t q = (r - v.first) + 1; q < layer_lead.size(); ++q) {
+      layer_lead[q] += (layer_lead[q] != 0) ? grow : Wide{ 0 };
+    }
+    layer_lead[r - v.first] = lead + grow;
+  }
+  for (uint32_t k = 0; k < v.espan.len; ++k) {
+    OrderEdge const &e{ o.edges[v.espan.off + k] };
+    uint32_t const a{ v.index[e.src - v.span.off] };
+    uint32_t const b{ v.index[e.dst - v.span.off] };
+    if ((a == INVALID) || (b == INVALID) || (v.chunk_index[a] == INVALID) ||
+        (v.chunk_index[b] == INVALID) ||
+        (v.local_rank[v.nodes[a]] != v.local_rank[v.nodes[b]])) {
+      continue;
+    }
+    Wide const need{ label_room(e) };
+    Wide const lead{ layer_lead[v.local_rank[v.nodes[a]] - v.first] };
+    Wide const xa{ Wide{ shape.at[a].x } - lead };
+    Wide const xb{ Wide{ shape.at[b].x } - lead };
+    Wide const lo{ imax(xa, xb) };
+    Wide const hi{ imin(xa + width_of(a), xb + width_of(b)) };
+    Wide const leg{ (hi <= lo) ? Wide{ -1 } : (lo + ((hi - lo) / 2)) };
+    if ((need != 0) && (leg >= 0) && (leg < need)) {
+      chunk_w = imax(chunk_w, lead + leg + need);
+    }
+  }
+  return chunk_w;
+}
+
 // `glued` marks a layer a cut before would part a pseudostate from its neighbour, `ridden`
 // one parting a boundary node, which a pinned cut carries across (`rides`).
 void Sizer::glue_layers(Span span,
@@ -1194,14 +1321,6 @@ void Sizer::lay_out_sub(uint32_t m) {
       return has ? (Wide{ leader } + seg_label_w[e.segment] + (p.node_sep / 2))
                  : Wide{ 0 };
     };
-    // The width a piece needs for `e`'s label beside its leg, or zero where the leading
-    // side holds it.
-    auto const beside_leg =
-        [&](OrderEdge const &e, Wide xa, Wide xb, uint32_t a, uint32_t b) {
-          Wide const leg{ leg_of(xa, xb, a, b) };
-          Wide const need{ room_of(e) };
-          return ((need == 0) || (leg < 0) || (leg >= need)) ? Wide{ 0 } : (leg + need);
-        };
     // Both the straight run and its fold are laid out; the scale measure picks. A nonzero
     // `cut_at` is the one frame rank a cut falls before, in place of `wrap_at`'s.
     auto const lay_out = [&](Shape &shape, Wide wrap_at, uint32_t cut_at, bool stack) {
@@ -1366,7 +1485,8 @@ void Sizer::lay_out_sub(uint32_t m) {
                           .weak = apart[k] });
         }
         cg.sep = p.node_sep;
-        std::vector<int32_t> const centre{ cross_coordinates(cg) };
+        std::vector<int32_t> &centre{ sc.centre };
+        cross_coordinates(cg, centre);
 
         ChunkView const view{ .span = span,
                               .espan = espan,
@@ -1430,21 +1550,7 @@ void Sizer::lay_out_sub(uint32_t m) {
 
         seat_pseudostates(view, shape, chunk_w, chunk_h);
         seat_riders(view, shape, chunk, chunk_w);
-        // A label beside an edge inside one column, whose leg runs down it,
-        // needs its own width and leader on one side of the leg inside the
-        // piece; where neither side has it the piece grows on its trailing
-        // side, as `dock`'s `contacts closed` needed once `On` stopped
-        // carrying the label as a rank gap (11.10g).
-        for (uint32_t k = 0; k < espan.len; ++k) {
-          OrderEdge const &e{ o.edges[espan.off + k] };
-          uint32_t const a{ in_chunk(e.src) };
-          uint32_t const b{ in_chunk(e.dst) };
-          if ((a == INVALID) || (b == INVALID) ||
-              (local_rank[nodes[a]] != local_rank[nodes[b]])) {
-            continue;
-          }
-          chunk_w = imax(chunk_w, beside_leg(e, shape.at[a].x, shape.at[b].x, a, b));
-        }
+        chunk_w = column_label_room(view, shape, chunk, chunk_w);
         chunk_h = leg_label_room(view, shape, chunk_h);
         pieces_fit = pieces_fit && (chunk_w <= COORD_MAX) && (chunk_h <= COORD_MAX);
         if (!pieces_fit) { break; }
@@ -1477,7 +1583,7 @@ void Sizer::lay_out_sub(uint32_t m) {
         packed.w = static_cast<int32_t>(imin(w, Wide{ PACK_SATURATED }));
         packed.h = static_cast<int32_t>(imin(y - p.node_sep, Wide{ PACK_SATURATED }));
       } else {
-        packed = pack_best(pieces, p.node_sep, p, dar, compaction);
+        pack_best(packed, sc.row, pieces, p.node_sep, p, dar, compaction);
       }
       // A cut's label room goes on the new piece's leading edge only where the
       // packing puts that piece beside the one before it, so the leg between
@@ -1508,7 +1614,7 @@ void Sizer::lay_out_sub(uint32_t m) {
       }
       bool widened{ false };
       for (Wide const room : applied) { widened = widened || (room != 0); }
-      if (widened) { packed = pack_best(pieces, p.node_sep, p, dar, compaction); }
+      if (widened) { pack_best(packed, sc.row, pieces, p.node_sep, p, dar, compaction); }
       // Room for a label on an edge a cut crosses where the packing put its
       // two pieces one above the other, so its leg runs down the gap between
       // them. Two labelled edges between one pair run as a pair of legs with
@@ -1803,7 +1909,8 @@ void Sizer::place_sub(uint32_t m,
                       std::vector<scav_point> const &local) {
   Span const span{ o.sub_nodes[m] };
   Span const espan{ o.sub_edges[m] };
-  Packing const packed{ pack_best(boxes, p.node_sep, p, dar, compaction) };
+  Packing &packed{ sc.placed };
+  pack_best(packed, sc.row, boxes, p.node_sep, p, dar, compaction);
   if (!fits(packed)) {
     overflow(diags, ElemKind::Submachine, m);
     ok = false;
@@ -1973,9 +2080,8 @@ void Sizer::size_sub(uint32_t m) {
   vec_push_back(key, static_cast<uint32_t>(compaction));
   vec_push_back(key, static_cast<uint32_t>(fold_of(m)));
   vec_push_back(key, cut_of(m));
-  std::array<uint32_t, sizeof(scav_profile) / sizeof(uint32_t)> knobs{};
-  std::memcpy(knobs.data(), &p, sizeof(scav_profile));
-  vec_insert(key, key.end(), knobs.begin(), knobs.end());
+  vec_push_back(key, g.serial);
+  vec_push_back(key, profile_word);
   for (uint32_t k = 0; k < span.len; ++k) {
     OrderNode const &nd{ o.nodes[span.off + k] };
     vec_push_back(key, static_cast<uint32_t>(nd.kind));
@@ -1986,6 +2092,7 @@ void Sizer::size_sub(uint32_t m) {
     if (nd.kind != OrderKind::State) { continue; }
     put(out.state[nd.subject].w);
     put(out.state[nd.subject].h);
+    if (g.serial != 0) { continue; }  // the chart a serial names fixes these two
     vec_push_back(key, static_cast<uint32_t>(c.states[nd.subject].kind));
     vec_push_back(key, c.states[nd.subject].submachines.len);
   }
@@ -2006,8 +2113,9 @@ void Sizer::size_sub(uint32_t m) {
       int32_t across_at{ 0 };
       bool const faced{ state && port_at(e.segment, nd.subject, down, at) };
       bool const flat_faced{ state && port_at(e.segment, nd.subject, !down, across_at) };
-      vec_push_back(key, (state && ported(e.segment, nd.subject)) ? 1U : 0U);
-      vec_push_back(key, (faced ? 1U : 0U) | (flat_faced ? 2U : 0U));
+      vec_push_back(key,
+                    ((state && ported(e.segment, nd.subject)) ? 1U : 0U) |
+                        (faced ? 2U : 0U) | (flat_faced ? 4U : 0U));
       put(at);
       put(across_at);
     }
@@ -2077,9 +2185,12 @@ void Sizer::size_state(uint32_t i) {
     vec_push_back(kids, out.sub[m]);
     vec_push_back(ids, m);
   }
-  Packing packed;
+  Packing &packed{ sc.placed };
+  packed.at.clear();
+  packed.w = 0;
+  packed.h = 0;
   if (!kids.empty()) {
-    packed = pack_best(kids, p.sub_sep, p, dar_of(i), compaction);
+    pack_best(packed, sc.row, kids, p.sub_sep, p, dar_of(i), compaction);
     for (uint32_t k = 0; k < ids.size(); ++k) {
       uint32_t const m{ ids[k] };
       sub_local[m] = { .x = packed.at[k].x, .y = packed.at[k].y };
@@ -2125,6 +2236,283 @@ void Sizer::size_state(uint32_t i) {
   out.state[i].h = static_cast<int32_t>(h);
 }
 
+// Whether frame `m` reads from this pass's orders and labels what it read from the
+// base's: its nodes and edges frame-locally, its gaps, ranks, orientation and fold pin.
+bool Sizer::same_frame(uint32_t m) const {
+  SubmachineOrders const &bo{ base->orders };
+  Span const a{ o.sub_nodes[m] };
+  Span const b{ bo.sub_nodes[m] };
+  Span const ea{ o.sub_edges[m] };
+  Span const eb{ bo.sub_edges[m] };
+  Span const ga{ o.sub_gaps[m] };
+  Span const gb{ bo.sub_gaps[m] };
+  if ((a.len != b.len) || (ea.len != eb.len) || (ga.len != gb.len) ||
+      (o.sub_ranks[m] != bo.sub_ranks[m]) || (o.sub_down[m] != bo.sub_down[m]) ||
+      (o.sub_fold[m] != bo.sub_fold[m]) || (o.sub_fold_cut[m] != bo.sub_fold_cut[m])) {
+    return false;
+  }
+  for (uint32_t k = 0; k < a.len; ++k) {
+    OrderNode const &x{ o.nodes[a.off + k] };
+    if (!(x == bo.nodes[b.off + k])) { return false; }
+    if ((x.kind == OrderKind::Boundary) && (x.subject < o.seg_cross.size()) &&
+        (o.seg_cross[x.subject] != bo.seg_cross[x.subject])) {
+      return false;
+    }
+  }
+  for (uint32_t k = 0; k < ea.len; ++k) {
+    OrderEdge const &x{ o.edges[ea.off + k] };
+    OrderEdge const &y{ bo.edges[eb.off + k] };
+    if (((x.src - a.off) != (y.src - b.off)) || ((x.dst - a.off) != (y.dst - b.off)) ||
+        (x.segment != y.segment) || (x.reversed != y.reversed)) {
+      return false;
+    }
+    if ((x.segment < seg_label_h.size()) &&
+        ((seg_label_h[x.segment] != base->seg_label_h[x.segment]) ||
+         (seg_label_w[x.segment] != base->seg_label_w[x.segment]))) {
+      return false;
+    }
+  }
+  bool const la{ o.labels.size() == o.gaps.size() };
+  bool const lb{ bo.labels.size() == bo.gaps.size() };
+  for (uint32_t k = 0; k < ga.len; ++k) {
+    if ((o.gaps[ga.off + k] != bo.gaps[gb.off + k]) ||
+        ((la ? o.labels[ga.off + k] : o.gaps[ga.off + k]) !=
+         (lb ? bo.labels[gb.off + k] : bo.gaps[gb.off + k]))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Into `sc.reuse`, 1 for each live frame whose inputs and every descendant's match the
+// base's, and into `sc.kept`, 1 for each state whose sizing's do; the frames marked.
+uint32_t Sizer::mark_reuse(std::vector<std::vector<uint32_t>> const &subs_at,
+                           uint32_t levels) {
+  SubmachineOrders const &bo{ base->orders };
+  std::vector<uint8_t> &dirty{ sc.reuse };  // inverted at the end
+  std::vector<uint8_t> &kept{ sc.kept };
+  vec_assign(dirty, c.submachines.size(), 0);
+  vec_assign(kept, c.states.size(), 0);
+  auto const mark = [&](uint32_t m) {
+    if (m < dirty.size()) { dirty[m] = 1; }
+  };
+  for (uint32_t m = 0; m < c.submachines.size(); ++m) {
+    if ((c.submachines[m].live != 0) && !same_frame(m)) { dirty[m] = 1; }
+  }
+  // `port_at` reads a port through its state's frame: the inner segment, its boundary
+  // node's place in its own frame and its cross border.
+  for (uint32_t port = 0; port < g.ports.size(); ++port) {
+    uint32_t const state{ g.ports[port].state.v };
+    if (state >= c.states.size()) { continue; }
+    uint32_t const inner{ port_seg[port] };
+    bool same{ inner == base->port_seg[port] };
+    if (same && (inner < g.segments.size())) {
+      uint32_t const frame{ g.segments[inner].frame.v };
+      uint32_t const at{ o.seg_node[inner] };
+      uint32_t const was{ bo.seg_node[inner] };
+      if (frame < c.submachines.size()) {
+        Span const a{ o.sub_nodes[frame] };
+        Span const b{ bo.sub_nodes[frame] };
+        bool const in_a{ (at >= a.off) && (at < (a.off + a.len)) };
+        bool const in_b{ (was >= b.off) && (was < (b.off + b.len)) };
+        same = (((at == INVALID) && (was == INVALID)) ||
+                (in_a && in_b && ((at - a.off) == (was - b.off)))) &&
+               (o.seg_cross[inner] == bo.seg_cross[inner]);
+      } else {
+        same = (at == was) && (o.seg_cross[inner] == bo.seg_cross[inner]);
+      }
+    }
+    if (!same) { mark(c.states[state].parent.v); }
+  }
+  bool ignore_dar{ false };
+#ifdef SCAV_TESTING
+  ignore_dar = test_reuse_ignore_dar;
+#endif
+  for (uint32_t i = 0; i < c.states.size(); ++i) {
+    if (c.states[i].live == 0) { continue; }
+    uint32_t const parent{ c.states[i].parent.v };
+    FrameDar const d{ dar_of(i) };
+    if (!ignore_dar && ((d.num != base->dar[i].num) || (d.den != base->dar[i].den))) {
+      Span const subs{ c.states[i].submachines };
+      for (uint32_t k = 0; k < subs.len; ++k) { mark(c.submachine_ids[subs.off + k].v); }
+    }
+    scav_box_space const b{ box_of(s.box_state, s.n_box_state, i) };
+    scav_box_space const &bb{ base->box[i] };
+    bool const boxed{ (b.min_w == bb.min_w) && (b.h_before == bb.h_before) &&
+                      (b.h_after == bb.h_after) };
+    if (!boxed) { mark(parent); }
+    kept[i] = (boxed && ((parent >= c.submachines.size()) ||
+                         (o.sub_down[parent] == bo.sub_down[parent])))
+                  ? 1
+                  : 0;
+  }
+  // Deepest first, a frame laid out again lays out its owner's frame again.
+  for (uint32_t level = levels; level-- > 0;) {
+    for (uint32_t const m : subs_at[level]) {
+      uint32_t const owner{ c.submachines[m].owner.v };
+      if ((dirty[m] != 0) && (owner < c.states.size())) { mark(c.states[owner].parent.v); }
+    }
+  }
+  for (uint32_t i = 0; i < c.states.size(); ++i) {
+    Span const subs{ c.states[i].submachines };
+    for (uint32_t k = 0; (kept[i] != 0) && (k < subs.len); ++k) {
+      uint32_t const m{ c.submachine_ids[subs.off + k].v };
+      if ((c.submachines[m].live != 0) && (dirty[m] != 0)) { kept[i] = 0; }
+    }
+  }
+  uint32_t taken{ 0 };
+  for (uint32_t m = 0; m < dirty.size(); ++m) {
+    dirty[m] = ((c.submachines[m].live != 0) && (dirty[m] == 0)) ? 1 : 0;
+    taken += dirty[m];
+  }
+  return taken;
+}
+
+// Frame `m` as the base laid it out: as its owner's packing left it where that state is
+// copied too, else as it stood before.
+void Sizer::copy_frame(uint32_t m) {
+  SubmachineOrders const &bo{ base->orders };
+  Span const a{ o.sub_nodes[m] };
+  Span const b{ bo.sub_nodes[m] };
+  Span const ea{ o.sub_edges[m] };
+  Span const eb{ bo.sub_edges[m] };
+  uint32_t const owner{ c.submachines[m].owner.v };
+  bool const packed{ (owner < c.states.size()) && (sc.kept[owner] != 0) };
+  std::vector<scav_point> const &from{ packed ? base->local.node : base->pre_node };
+  for (uint32_t k = 0; k < a.len; ++k) {
+    out.node[a.off + k] = from[b.off + k];
+    OrderNode const &nd{ o.nodes[a.off + k] };
+    if (nd.kind != OrderKind::State) { continue; }
+    out.state[nd.subject].x = base->local.state[nd.subject].x;
+    out.state[nd.subject].y = base->local.state[nd.subject].y;
+  }
+  scav_point const extent{ packed ? scav_point{ .x = base->local.sub[m].w,
+                                                .y = base->local.sub[m].h }
+                                  : base->pre_sub[m] };
+  out.sub[m].w = extent.x;
+  out.sub[m].h = extent.y;
+  out.folded[m] = base->local.folded[m];
+  for (uint32_t k = 0; k < ea.len; ++k) {
+    uint32_t const seg{ o.edges[ea.off + k].segment };
+    if ((base->edge_lean[eb.off + k] != 0) && (seg < out.lean.size())) {
+      out.lean[seg] = 1;
+    }
+  }
+  if (record == nullptr) { return; }
+  for (uint32_t k = 0; k < a.len; ++k) {
+    record->pre_node[a.off + k] = base->pre_node[b.off + k];
+  }
+  record->pre_sub[m] = base->pre_sub[m];
+  for (uint32_t k = 0; k < ea.len; ++k) {
+    record->edge_lean[ea.off + k] = base->edge_lean[eb.off + k];
+  }
+}
+
+// State `i` as the base sized it, its frames already copied as its packing left them.
+void Sizer::copy_state(uint32_t i) {
+  out.state[i].w = base->local.state[i].w;
+  out.state[i].h = base->local.state[i].h;
+  Span const subs{ c.states[i].submachines };
+  for (uint32_t k = 0; k < subs.len; ++k) {
+    uint32_t const m{ c.submachine_ids[subs.off + k].v };
+    if (c.submachines[m].live != 0) { sub_local[m] = base->sub_local[m]; }
+  }
+}
+
+// Frame `m` into the record as it stands before its owner's packing.
+void Sizer::note_frame(uint32_t m) {
+  Span const span{ o.sub_nodes[m] };
+  Span const espan{ o.sub_edges[m] };
+  for (uint32_t k = 0; k < span.len; ++k) {
+    record->pre_node[span.off + k] = out.node[span.off + k];
+  }
+  record->pre_sub[m] = { .x = out.sub[m].w, .y = out.sub[m].h };
+  for (uint32_t k = 0; k < espan.len; ++k) {
+    uint32_t const seg{ o.edges[espan.off + k].segment };
+    record->edge_lean[espan.off + k] = (seg < out.lean.size()) ? out.lean[seg] : 0;
+  }
+}
+
+// The pass's inputs and its frame-local results into the record, before the descent.
+void Sizer::note_pass() {
+  SizePassRecord &r{ *record };
+  r.ok = ok;
+  r.serial = g.serial;
+  r.profile = p;
+  r.compaction = compaction;
+  r.fold = fold;
+  SubmachineOrders &ro{ r.orders };
+  vec_assign(ro.nodes, o.nodes.begin(), o.nodes.end());
+  vec_assign(ro.edges, o.edges.begin(), o.edges.end());
+  vec_assign(ro.sub_nodes, o.sub_nodes.begin(), o.sub_nodes.end());
+  vec_assign(ro.sub_edges, o.sub_edges.begin(), o.sub_edges.end());
+  vec_assign(ro.sub_ranks, o.sub_ranks.begin(), o.sub_ranks.end());
+  vec_assign(ro.sub_down, o.sub_down.begin(), o.sub_down.end());
+  vec_assign(ro.sub_fold, o.sub_fold.begin(), o.sub_fold.end());
+  vec_assign(ro.sub_fold_cut, o.sub_fold_cut.begin(), o.sub_fold_cut.end());
+  vec_assign(ro.sub_gaps, o.sub_gaps.begin(), o.sub_gaps.end());
+  vec_assign(ro.gaps, o.gaps.begin(), o.gaps.end());
+  vec_assign(ro.labels, o.labels.begin(), o.labels.end());
+  vec_assign(ro.seg_node, o.seg_node.begin(), o.seg_node.end());
+  vec_assign(ro.seg_cross, o.seg_cross.begin(), o.seg_cross.end());
+  vec_assign(r.seg_label_h, seg_label_h.begin(), seg_label_h.end());
+  vec_assign(r.seg_label_w, seg_label_w.begin(), seg_label_w.end());
+  vec_assign(r.port_seg, port_seg.begin(), port_seg.end());
+  vec_assign(r.dar, c.states.size(), FrameDar{});
+  vec_assign(r.box, c.states.size(), scav_box_space{});
+  for (uint32_t i = 0; i < c.states.size(); ++i) {
+    r.dar[i] = dar_of(i);
+    r.box[i] = box_of(s.box_state, s.n_box_state, i);
+  }
+  vec_assign(r.sub_local, sub_local.begin(), sub_local.end());
+  vec_assign(r.local.state, out.state.begin(), out.state.end());
+  vec_assign(r.local.sub, out.sub.begin(), out.sub.end());
+  vec_assign(r.local.node, out.node.begin(), out.node.end());
+  vec_assign(r.local.lean, out.lean.begin(), out.lean.end());
+  vec_assign(r.local.folded, out.folded.begin(), out.folded.end());
+}
+
+// Whether `base` recorded a pass over this chart, graph, profile and row, with every
+// column a frame comparison reads.
+bool comparable(Chart const &c,
+                SplitGraph const &g,
+                SubmachineOrders const &o,
+                scav_profile const &p,
+                Compaction compaction,
+                Fold fold,
+                SizePassRecord const *base) {
+  if ((base == nullptr) || !base->ok || (trace_sink() != nullptr) || (g.serial == 0) ||
+      (base->serial != g.serial) || (base->compaction != compaction) ||
+      (base->fold != fold) ||
+      (std::memcmp(&base->profile, &p, sizeof(scav_profile)) != 0)) {
+    return false;
+  }
+#ifdef SCAV_TESTING
+  if (!test_reuse) { return false; }
+#endif
+  size_t const subs{ c.submachines.size() };
+  size_t const segs{ g.segments.size() };
+  size_t const states{ c.states.size() };
+  SubmachineOrders const &bo{ base->orders };
+  for (SubmachineOrders const *x : { &o, &bo }) {
+    if ((x->sub_nodes.size() != subs) || (x->sub_edges.size() != subs) ||
+        (x->sub_gaps.size() != subs) || (x->sub_ranks.size() != subs) ||
+        (x->sub_down.size() != subs) || (x->sub_fold.size() != subs) ||
+        (x->sub_fold_cut.size() != subs) || (x->seg_node.size() != segs) ||
+        (x->seg_cross.size() != segs)) {
+      return false;
+    }
+  }
+  return (base->seg_label_h.size() == segs) && (base->seg_label_w.size() == segs) &&
+         (base->port_seg.size() == g.ports.size()) && (base->dar.size() == states) &&
+         (base->box.size() == states) && (base->local.state.size() == states) &&
+         (base->local.sub.size() == subs) && (base->local.folded.size() == subs) &&
+         (base->local.lean.size() == segs) && (base->pre_sub.size() == subs) &&
+         (base->sub_local.size() == subs) && (base->pre_node.size() == bo.nodes.size()) &&
+         (base->local.node.size() == bo.nodes.size()) &&
+         (base->edge_lean.size() == bo.edges.size());
+}
+
 // One whole sizing. `hole` is parallel to states -- the ratio every packing
 // inside that state's interior aims at, a `num` of 0 or a short vector falling
 // back to the profile's.
@@ -2137,7 +2525,9 @@ bool size_pass(Chart const &c,
                Compaction compaction,
                Fold fold,
                SizedLayout &out,
-               std::vector<Diagnostic> &diags) {
+               std::vector<Diagnostic> &diags,
+               SizePassRecord const *base,
+               SizePassRecord *record) {
   Sizer x{ .c = c,
            .g = g,
            .o = o,
@@ -2147,7 +2537,9 @@ bool size_pass(Chart const &c,
            .compaction = compaction,
            .fold = fold,
            .out = out,
-           .diags = diags };
+           .diags = diags,
+           .base = comparable(c, g, o, p, compaction, fold, base) ? base : nullptr,
+           .record = record };
   vec_assign(out.state, c.states.size(), {});
   vec_assign(out.before, c.states.size(), {});
   vec_assign(out.after, c.states.size(), {});
@@ -2189,14 +2581,51 @@ bool size_pass(Chart const &c,
     if (o.seg_port[seg] < x.port_seg.size()) { x.port_seg[o.seg_port[seg]] = seg; }
   }
 
+  std::vector<uint8_t> &reuse{ x.sc.reuse };
+  std::vector<uint8_t> &kept{ x.sc.kept };
+  reuse.clear();
+  if (x.base != nullptr) {
+    uint32_t const taken{ x.mark_reuse(subs_at, max_depth + 2) };
+#ifdef SCAV_TESTING
+    uint32_t live{ 0 };
+    for (Submachine const &sm : c.submachines) { live += (sm.live != 0) ? 1U : 0U; }
+    ScopedLock const held{ test_reuse_lock };
+    test_reused += taken;
+    test_framed += live;
+#else
+    static_cast<void>(taken);
+#endif
+  }
+  bool const reusing{ (x.base != nullptr) && !reuse.empty() };
+  if (record != nullptr) {
+    record->ok = false;
+    vec_assign(record->pre_node, o.nodes.size(), scav_point{});
+    vec_assign(record->pre_sub, c.submachines.size(), scav_point{});
+    vec_assign(record->edge_lean, o.edges.size(), 0);
+  }
+
   // Levels interleave: the submachines whose children sit at this depth, then
   // the states one level up that wrap them; level 0 sizes the document roots.
   for (uint32_t level = max_depth + 2; level-- > 0;) {
-    for (uint32_t const m : subs_at[level]) { x.size_sub(m); }
+    for (uint32_t const m : subs_at[level]) {
+      if (reusing && (reuse[m] != 0)) {
+        x.copy_frame(m);
+        continue;
+      }
+      x.size_sub(m);
+      if (record != nullptr) { x.note_frame(m); }
+    }
     if (level > 0) {
-      for (uint32_t const i : states_at[level - 1]) { x.size_state(i); }
+      for (uint32_t const i : states_at[level - 1]) {
+        if (reusing && (kept[i] != 0)) {
+          x.copy_state(i);
+        } else {
+          x.size_state(i);
+        }
+      }
     }
   }
+  if (record != nullptr) { x.note_pass(); }
   if (!x.ok) { return false; }
 
   // One descent from the root, adding each frame's origin. Everything stays inside
@@ -2276,8 +2705,15 @@ FrameDar size_hole_ratio(int32_t w, int32_t h) {
 // which is the whole of the interior where a state requests neither band and
 // includes whatever slack `kind_min_h` left. Zero for a state with no live
 // submachine, which is no hole for anything to fill.
-std::vector<FrameDar> size_owner_holes(Chart const &c, SizedLayout const &z) {
-  std::vector<FrameDar> hole(c.states.size(), FrameDar{});
+[[maybe_unused]] std::vector<FrameDar> size_owner_holes(Chart const &c,
+                                                        SizedLayout const &z) {
+  std::vector<FrameDar> hole;
+  size_owner_holes(c, z, hole);
+  return hole;
+}
+
+void size_owner_holes(Chart const &c, SizedLayout const &z, std::vector<FrameDar> &hole) {
+  vec_assign(hole, c.states.size(), FrameDar{});
   for (uint32_t i = 0; i < c.states.size(); ++i) {
     if (c.states[i].live == 0) { continue; }
     bool packed{ false };
@@ -2293,10 +2729,68 @@ std::vector<FrameDar> size_owner_holes(Chart const &c, SizedLayout const &z) {
     int32_t const bottom{ (z.state[i].y + z.state[i].h) - pad - z.after[i].h };
     hole[i] = size_hole_ratio(z.before[i].w, bottom - top);
   }
-  return hole;
 }
 
 SCAV_INTERNAL_END
+
+namespace {
+
+bool size_passes(Chart const &c,
+                 SplitGraph const &g,
+                 SubmachineOrders const &o,
+                 scav_spaces const &s,
+                 scav_profile const &p,
+                 SizedLayout &out,
+                 std::vector<Diagnostic> &diags,
+                 DarSource dar,
+                 Compaction compaction,
+                 Fold fold,
+                 SizeRecord const *base,
+                 SizeRecord *record) {
+  SizePassRecord const *was{ (base != nullptr) ? base->pass.data() : nullptr };
+  SizePassRecord *now{ (record != nullptr) ? record->pass.data() : nullptr };
+  if (record != nullptr) { record->pass[1].ok = false; }
+  if (dar == DarSource::Profile) {
+    return size_pass(c, g, o, s, p, {}, compaction, fold, out, diags, was, now);
+  }
+  // Owner holes come off a first pass at the profile's ratio, packed the same way.
+  SizedLayout &first{ size_scratch().first };
+  if (!size_pass(c, g, o, s, p, {}, compaction, fold, first, diags, was, now)) {
+    return false;
+  }
+  std::vector<FrameDar> &hole{ size_scratch().hole };
+  size_owner_holes(c, first, hole);
+  return size_pass(c,
+                   g,
+                   o,
+                   s,
+                   p,
+                   hole,
+                   compaction,
+                   fold,
+                   out,
+                   diags,
+                   (was != nullptr) ? &base->pass[1] : nullptr,
+                   (now != nullptr) ? &record->pass[1] : nullptr);
+}
+
+#ifdef SCAV_TESTING
+template <typename T>
+bool same_rows(std::vector<T> const &a, std::vector<T> const &b) {
+  return (a.size() == b.size()) &&
+         (a.empty() || (std::memcmp(a.data(), b.data(), a.size() * sizeof(T)) == 0));
+}
+
+bool same_sized(SizedLayout const &a, SizedLayout const &b) {
+  return same_rows(a.state, b.state) && same_rows(a.before, b.before) &&
+         same_rows(a.after, b.after) && same_rows(a.sub, b.sub) &&
+         same_rows(a.node, b.node) && same_rows(a.lean, b.lean) &&
+         same_rows(a.folded, b.folded) &&
+         (std::memcmp(&a.chart, &b.chart, sizeof(scav_rect)) == 0);
+}
+#endif
+
+}  // namespace
 
 bool size_layout(Chart const &c,
                  SplitGraph const &g,
@@ -2307,23 +2801,52 @@ bool size_layout(Chart const &c,
                  std::vector<Diagnostic> &diags,
                  DarSource dar,
                  Compaction compaction,
-                 Fold fold) {
-  if (dar == DarSource::Profile) {
-    return size_pass(c, g, o, s, p, {}, compaction, fold, out, diags);
+                 Fold fold,
+                 SizeRecord const *base,
+                 SizeRecord *record) {
+  if (static_cast<void const *>(base) == static_cast<void const *>(record)) {
+    base = nullptr;
   }
-  // Owner holes come off a first pass at the profile's ratio, packed the same way.
-  SizedLayout &first{ size_scratch().first };
-  if (!size_pass(c, g, o, s, p, {}, compaction, fold, first, diags)) { return false; }
-  return size_pass(c,
-                   g,
-                   o,
-                   s,
-                   p,
-                   size_owner_holes(c, first),
-                   compaction,
-                   fold,
-                   out,
-                   diags);
+  bool const done{
+    size_passes(c, g, o, s, p, out, diags, dar, compaction, fold, base, record)
+  };
+#ifdef SCAV_TESTING
+  if (test_reuse_verify && (base != nullptr)) {
+    SizedLayout again;
+    std::vector<Diagnostic> spilled;
+    bool const redone{
+      size_passes(c, g, o, s, p, again, spilled, dar, compaction, fold, nullptr, nullptr)
+    };
+    bool const same{ (done == redone) && (!done || same_sized(out, again)) };
+    ScopedLock const held{ test_reuse_lock };
+    test_reuse_mismatches += same ? 0U : 1U;
+  }
+#endif
+  return done;
 }
+
+#ifdef SCAV_TESTING
+void size_test_reuse(bool on) { test_reuse = on; }
+void size_test_reuse_verify(bool on) {
+  test_reuse_verify = on;
+  ScopedLock const held{ test_reuse_lock };
+  test_reused = 0;
+  test_framed = 0;
+  test_reuse_mismatches = 0;
+}
+void size_test_reuse_ignore_dar(bool on) { test_reuse_ignore_dar = on; }
+uint64_t size_test_reused() {
+  ScopedLock const held{ test_reuse_lock };
+  return test_reused;
+}
+uint64_t size_test_framed() {
+  ScopedLock const held{ test_reuse_lock };
+  return test_framed;
+}
+uint64_t size_test_reuse_mismatches() {
+  ScopedLock const held{ test_reuse_lock };
+  return test_reuse_mismatches;
+}
+#endif
 
 }  // namespace scav

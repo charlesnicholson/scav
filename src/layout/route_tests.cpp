@@ -4,6 +4,7 @@
 #include "layout/route.h"
 #include "layout/tests/pod_eq.h"
 
+#include "core/tests/corpus.h"
 #include "layout/decompose.h"
 #include "layout/geom.h"
 #include "layout/label.h"
@@ -962,6 +963,7 @@ TEST_CASE("route: a reused frame answers exactly what routing it again would") {
   REQUIRE(router != nullptr);
 
   for (char const *name : CORPUS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     Chart c;
     load_corpus_chart(name, c);
@@ -1016,6 +1018,7 @@ TEST_CASE("route: a cache filled by a run that reused one answers like routing a
   REQUIRE(router != nullptr);
 
   for (char const *name : CORPUS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     Chart c;
     load_corpus_chart(name, c);
@@ -1067,6 +1070,7 @@ TEST_CASE("route: a face with no effect at an end changes nothing it draws") {
   uint32_t seated{ 0 };
   uint32_t moved{ 0 };
   for (char const *name : CORPUS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     Chart c;
     load_corpus_chart(name, c);
@@ -1190,6 +1194,7 @@ TEST_CASE("route: a frame's obstacles are the ones a walk over every state finds
   REQUIRE(router != nullptr);
 
   for (char const *name : CORPUS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     Chart c;
     load_corpus_chart(name, c);

@@ -42,6 +42,7 @@ struct Registry {
   Mutex lock;
   std::vector<Memo *> memos;
   uint32_t open{ 0 };
+  uint32_t serial{ 0 };
 };
 
 Registry &registry() {
@@ -74,6 +75,31 @@ void Memo::release() {
   std::vector<int32_t>{}.swap(values);
   std::vector<Slot>{}.swap(slots);
   used = 0;
+}
+
+uint32_t memo_serial() {
+  Registry &r{ registry() };
+  ScopedLock const held{ r.lock };
+  if (++r.serial == 0) { ++r.serial; }
+  return r.serial;
+}
+
+uint32_t memo_profile(scav_profile const &p) {
+  struct Entry {
+    scav_profile p;
+    uint32_t word;
+  };
+  thread_local std::array<Entry, 8> seen{};
+  thread_local uint32_t next{ 0 };
+  for (Entry const &e : seen) {
+    if ((e.word != 0) && (std::memcmp(&e.p, &p, sizeof(scav_profile)) == 0)) {
+      return e.word;
+    }
+  }
+  Entry &e{ seen[next] };
+  next = (next + 1) % seen.size();
+  e = { .p = p, .word = memo_serial() };
+  return e.word;
 }
 
 MemoRun::MemoRun() {

@@ -171,19 +171,18 @@ class TestDump(unittest.TestCase):
         self.assertNotEqual(geometry, [ln for ln in other.stdout.splitlines()
                                        if ln.startswith("geometry ")])
 
-    def test_toolchanger_keeps_travel_whole_and_extend_straight(self) -> None:
-        # At real text the search leaves `travel` unfolded, and `extend` runs straight
-        # into `Cruising`.
+    def test_toolchanger_draws_extend_and_travels_runs_straight(self) -> None:
+        # At real text `extend` and every route inside `travel` is one straight line.
         shipped = self.run_dump("--layout", "test_data/charts/toolchanger.scav")
         self.assertEqual(0, shipped.returncode)
-        rests = [ln for ln in shipped.stdout.splitlines() if ln.startswith("  rests on ")]
-        self.assertEqual(1, len(rests))
-        self.assertIn(" --fold 2:2", rests[0])
-        extend = [ln for ln in shipped.stdout.splitlines()
-                  if ln.startswith("  route Gripping -> arm/Moving:travel/Cruising ")]
-        self.assertEqual(1, len(extend))
-        ys = {int(y) for y in re.findall(r"\(-?\d+,(-?\d+)\)", extend[0])}
-        self.assertEqual(1, len(ys))
+        into = [ln for ln in shipped.stdout.splitlines()
+                if ln.startswith("  route ") and " -> arm/Moving:travel/" in ln]
+        self.assertEqual(4, len(into))
+        for route in into:
+            with self.subTest(route=route.split(" (")[0]):
+                points = re.findall(r"\((-?\d+),(-?\d+)\)", route)
+                self.assertTrue(len({x for x, _ in points}) == 1
+                                or len({y for _, y in points}) == 1)
 
     def test_an_unknown_profile_is_refused(self) -> None:
         result = self.run_dump("--layout", "--profile", "nonesuch", CHART.as_posix())
@@ -499,6 +498,8 @@ class TestDump(unittest.TestCase):
         charts = sorted((self.cfg.repo_root / "test_data/charts").glob("*.scav"))
         self.assertTrue(charts)
         for chart in charts:
+            if scavtest.corpus_skipped(chart.name):
+                continue
             with self.subTest(chart=chart.name):
                 plain = self.run_dump("--json", "--layout", chart.as_posix())
                 self.assertEqual(0, plain.returncode, plain.stderr)

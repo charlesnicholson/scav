@@ -19,6 +19,7 @@
 
 #include "doctest.h"
 
+#include "core/tests/corpus.h"
 #include "scav_int.h"
 #include "scav_xxhash.h"
 
@@ -1224,6 +1225,7 @@ TEST_CASE("layout: no corpus chart runs a route flush along a box") {
                             "tcp.scav",
                             "toolchanger.scav",
                             "vac.scav" }) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     Chart const c{ corpus_chart(name) };
     std::vector<Diagnostic> diags;
@@ -2578,6 +2580,7 @@ TEST_CASE("layout: nothing in the corpus or at the scale target inflates") {
                             "tcp.scav",
                             "toolchanger.scav",
                             "vac.scav" }) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     CorpusRun const &r{ laid_corpus(name) };
     REQUIRE(r.ok);
@@ -2691,6 +2694,7 @@ TEST_CASE("layout: corpus charts hash to the committed golden") {
                             "tcp.scav",
                             "toolchanger.scav",
                             "vac.scav" }) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     Chart const c{ corpus_chart(name) };
     check_geometry(c);  // the invariants, over real charts and not only fuzz
@@ -2706,7 +2710,8 @@ TEST_CASE("layout: corpus charts hash to the committed golden") {
 
   std::vector<scav_byte> golden;
   REQUIRE(read_file(SCAV_TEST_DATA_DIR "/golden/layout/corpus_hashes.txt", golden));
-  std::string const want{ reinterpret_cast<char const *>(golden.data()), golden.size() };
+  std::string const want{ scav::test::corpus_golden(
+      { reinterpret_cast<char const *>(golden.data()), golden.size() }) };
   if (want != actual) {
     write_file(SCAV_TEST_OUT_DIR "/corpus_hashes.txt",
                reinterpret_cast<scav_byte const *>(actual.data()),
@@ -2741,6 +2746,7 @@ TEST_CASE("layout: the corpus cost vector is committed, term by term and by shar
                             "tcp.scav",
                             "toolchanger.scav",
                             "vac.scav" }) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     Chart const c{ corpus_chart(name) };
     CostTerms const t{ cost_columns(c, decompose(c), p) };
@@ -2776,7 +2782,8 @@ TEST_CASE("layout: the corpus cost vector is committed, term by term and by shar
 
   std::vector<scav_byte> golden;
   REQUIRE(read_file(SCAV_TEST_DATA_DIR "/golden/layout/corpus_cost.txt", golden));
-  std::string const want{ reinterpret_cast<char const *>(golden.data()), golden.size() };
+  std::string const want{ scav::test::corpus_golden(
+      { reinterpret_cast<char const *>(golden.data()), golden.size() }) };
   if (want != actual) {
     write_file(SCAV_TEST_OUT_DIR "/corpus_cost.txt",
                reinterpret_cast<scav_byte const *>(actual.data()),
@@ -2788,8 +2795,8 @@ TEST_CASE("layout: the corpus cost vector is committed, term by term and by shar
   std::vector<scav_byte> shares_golden;
   REQUIRE(read_file(SCAV_TEST_DATA_DIR "/golden/layout/corpus_cost_shares.txt",
                     shares_golden));
-  std::string const want_shares{ reinterpret_cast<char const *>(shares_golden.data()),
-                                 shares_golden.size() };
+  std::string const want_shares{ scav::test::corpus_golden(
+      { reinterpret_cast<char const *>(shares_golden.data()), shares_golden.size() }) };
   if (want_shares != shares) {
     write_file(SCAV_TEST_OUT_DIR "/corpus_cost_shares.txt",
                reinterpret_cast<scav_byte const *>(shares.data()),
@@ -2857,6 +2864,7 @@ TEST_CASE("layout: no corpus chart bends the arrow out of an initial pseudostate
                             "tcp.scav",
                             "toolchanger.scav",
                             "vac.scav" }) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     std::string const chart{ name };
     CAPTURE(chart);
     Chart const c{ corpus_chart(name) };
@@ -2889,6 +2897,7 @@ TEST_CASE("layout: no corpus chart routes an edge through a box") {
                             "tcp.scav",
                             "toolchanger.scav",
                             "vac.scav" }) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     Chart const c{ corpus_chart(name) };
 

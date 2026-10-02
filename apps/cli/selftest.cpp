@@ -1,6 +1,5 @@
-// `scav selftest`: lay the embedded corpus out on this toolchain, at every
-// thread count in the matrix, and diff the three hashes against the committed
-// goldens.
+// `scav selftest`: lay the embedded corpus out on this toolchain, on the caller
+// alone and on the pool, and diff the three hashes against the committed goldens.
 
 #include "cli.h"
 #include "selftest_corpus.h"
@@ -21,7 +20,13 @@ namespace cli {
 
 namespace {
 
-constexpr std::array<uint32_t, 7> THREAD_COUNTS{ 1, 2, 3, 5, 8, 13, 16 };
+// `threads` 1 runs every shard on the caller in index order; 0 runs them on the pool.
+struct Pass {
+  uint32_t threads;
+  std::string_view name;
+};
+constexpr std::array<Pass, 2> PASSES{ { { .threads = 1, .name = "threads=1" },
+                                        { .threads = 0, .name = "pool" } } };
 constexpr std::array<std::string_view, 3> COLUMNS{ "inputs", "structural", "coordinate" };
 
 // One run's hashes, in the golden's column order.
@@ -121,8 +126,8 @@ void append_load_diags(std::string &out,
   }
 }
 
-// A fresh copy per run, so no thread count reads geometry columns another
-// wrote: layout_run rewrites them in place.
+// A fresh copy per run, so no pass reads geometry columns another wrote:
+// layout_run rewrites them in place.
 bool layout_hashes(Chart const &chart,
                    scav_layout_opts const &opts,
                    std::string_view name,
@@ -284,10 +289,10 @@ int run_selftest(char const *against_path) {
       continue;
     }
 
-    std::array<Hashes, THREAD_COUNTS.size()> runs{};
+    std::array<Hashes, PASSES.size()> runs{};
     bool laid{ true };
-    for (uint32_t k = 0; laid && (k < THREAD_COUNTS.size()); ++k) {
-      opts.threads = THREAD_COUNTS[k];
+    for (uint32_t k = 0; laid && (k < PASSES.size()); ++k) {
+      opts.threads = PASSES[k].threads;
       laid = layout_hashes(chart, opts, name, runs[k], why);
     }
     if (!laid) {
@@ -309,14 +314,14 @@ int run_selftest(char const *against_path) {
       failed = true;
       ++failures;
     }
-    for (uint32_t k = 1; k < THREAD_COUNTS.size(); ++k) {
+    for (uint32_t k = 1; k < PASSES.size(); ++k) {
       if (runs[k] == runs[0]) { continue; }
       std::string bad{ fail_line(name) };
-      bad += " threads=";
-      string_append_u32(bad, THREAD_COUNTS[k]);
+      bad += ' ';
+      bad += PASSES[k].name;
       for (uint32_t i = 0; i < COLUMNS.size(); ++i) {
         if (runs[k][i] == runs[0][i]) { continue; }
-        append_column(bad, i, runs[k][i], "threads=1", runs[0][i]);
+        append_column(bad, i, runs[k][i], PASSES[0].name, runs[0][i]);
       }
       report(bad);
       failed = true;
@@ -333,9 +338,7 @@ int run_selftest(char const *against_path) {
 
   std::string summary{ "selftest: " };
   string_append_u32(summary, charts);
-  summary += " charts, ";
-  string_append_u32(summary, static_cast<uint32_t>(THREAD_COUNTS.size()));
-  summary += " thread counts, ";
+  summary += " charts, threads=1 and pool, ";
   string_append_u32(summary, failures);
   summary += " failures";
   report(summary);

@@ -1,0 +1,705 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>scav — how a statechart gets laid out</title>
+<style>
+:root {
+  color-scheme: light;
+  --page: #f9f9f7;
+  --surface-1: #fcfcfb;
+  --surface-2: #f3f2ee;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+  --grid: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.10);
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
+  --series-8: #e34948;
+  --good: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+  --seq-100: #cde2fb;
+  --seq-250: #86b6ef;
+  --seq-450: #2a78d6;
+  --seq-650: #104281;
+  /* chart roles */
+  --state-fill: #ffffff;
+  --state-stroke: #2b2b29;
+  --sub-stroke: #8b8a84;
+  --route: #2b2b29;
+  --ink: #1d1d1b;
+  --hl: var(--series-2);
+  --hl-2: var(--series-1);
+  --hl-3: var(--series-3);
+  --mono: ui-monospace, "JetBrains Mono", SFMono-Regular, Menlo, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d;
+  --surface-1: #1a1a19;
+  --surface-2: #222220;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #898781;
+  --grid: #2c2c2a;
+  --axis: #383835;
+  --border: rgba(255, 255, 255, 0.10);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-5: #d55181;
+  --series-6: #008300;
+  --series-7: #9085e9;
+  --series-8: #e66767;
+  --seq-100: #104281;
+  --seq-250: #1c5cab;
+  --seq-450: #3987e5;
+  --seq-650: #b7d3f6;
+  --state-fill: #232321;
+  --state-stroke: #d8d7d0;
+  --sub-stroke: #8b8a84;
+  --route: #d8d7d0;
+  --ink: #f2f1ec;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  margin: 0; background: var(--page); color: var(--text-primary);
+  font: 16px/1.6 var(--sans);
+}
+a { color: var(--series-1); }
+code, kbd, pre { font-family: var(--mono); font-size: 0.9em; }
+code { background: var(--surface-2); padding: 0.05em 0.3em; border-radius: 4px; }
+pre { background: var(--surface-2); padding: 12px 14px; border-radius: 8px; overflow-x: auto; line-height: 1.45; }
+#toc {
+  position: fixed; top: 0; left: 0; bottom: 0; width: 248px; overflow-y: auto;
+  padding: 20px 14px 40px 20px; border-right: 1px solid var(--border); background: var(--surface-1);
+  font-size: 14px;
+}
+#toc h1 { font-size: 17px; margin: 0 0 4px; }
+#toc .sub { color: var(--text-muted); font-size: 12.5px; margin-bottom: 16px; }
+#toc ol { list-style: none; margin: 0; padding: 0; counter-reset: toc; }
+#toc li { margin: 1px 0; }
+#toc a { display: block; padding: 4px 8px; border-radius: 6px; color: var(--text-secondary); text-decoration: none; }
+#toc a:hover { background: var(--surface-2); color: var(--text-primary); }
+#toc a.active { background: var(--surface-2); color: var(--text-primary); font-weight: 600; }
+#toc .tools { margin-top: 18px; display: flex; gap: 8px; }
+main { margin-left: 248px; padding: 32px 48px 120px; }
+section.sx { max-width: 1180px; margin: 0 auto 88px; scroll-margin-top: 16px; }
+section.sx > h2 { font-size: 30px; line-height: 1.2; margin: 0 0 6px; letter-spacing: -0.01em; }
+section.sx > .lede { font-size: 18px; color: var(--text-secondary); margin: 0 0 24px; max-width: 760px; }
+section.sx h3 { font-size: 20px; margin: 36px 0 8px; }
+section.sx h4 { font-size: 16px; margin: 22px 0 6px; }
+section.sx p, section.sx ul, section.sx ol { max-width: 760px; }
+section.sx li { margin: 3px 0; }
+.kicker { text-transform: uppercase; letter-spacing: 0.08em; font-size: 12px; color: var(--text-muted); font-weight: 600; }
+.callout { border-left: 3px solid var(--series-1); background: var(--surface-1); padding: 10px 14px; border-radius: 0 8px 8px 0; max-width: 760px; margin: 16px 0; }
+.callout.rule { border-left-color: var(--series-2); }
+.callout.why { border-left-color: var(--series-3); }
+.callout .t { font-weight: 600; display: block; margin-bottom: 2px; }
+figure.sx-fig {
+  margin: 20px 0 28px; background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px;
+  padding: 14px 16px 12px;
+}
+figure.sx-fig figcaption { color: var(--text-secondary); font-size: 14px; margin-top: 10px; max-width: 900px; }
+figure.sx-fig figcaption b { color: var(--text-primary); }
+.fig-row { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+.fig-row > * { flex: 1 1 320px; min-width: 0; }
+.ctrl { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin: 4px 0 10px; font-size: 14px; color: var(--text-secondary); }
+.ctrl button, .btn {
+  font: 13px var(--sans); padding: 5px 11px; border-radius: 7px; border: 1px solid var(--border);
+  background: var(--surface-2); color: var(--text-primary); cursor: pointer;
+}
+.ctrl button:hover, .btn:hover { border-color: var(--axis); }
+.ctrl button.on { background: var(--series-1); color: #fff; border-color: transparent; }
+.ctrl input[type=range] { width: 200px; accent-color: var(--series-1); }
+.ctrl label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.ctrl .readout { font-family: var(--mono); font-size: 13px; color: var(--text-primary); min-width: 4ch; }
+.stage { width: 100%; overflow: hidden; }
+.stage svg { display: block; width: 100%; height: auto; }
+.note { font-size: 13.5px; color: var(--text-muted); }
+.pill { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-secondary); }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: middle; margin-right: 4px; }
+table.sx-table { border-collapse: collapse; font-size: 14px; margin: 12px 0; }
+table.sx-table th, table.sx-table td { border-bottom: 1px solid var(--grid); padding: 5px 10px; text-align: left; vertical-align: top; }
+table.sx-table th { color: var(--text-secondary); font-weight: 600; }
+table.sx-table td.num, table.sx-table th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 13px; }
+table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, transparent); }
+.sx-tip {
+  position: fixed; pointer-events: none; z-index: 50; max-width: 340px; padding: 7px 10px; border-radius: 8px;
+  background: var(--surface-1); border: 1px solid var(--border); box-shadow: 0 6px 20px rgba(0,0,0,.14);
+  font-size: 13px; line-height: 1.45; color: var(--text-primary); display: none;
+}
+.sx-tip .m { color: var(--text-secondary); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 13px; color: var(--text-secondary); margin: 6px 0; }
+/* the chart renderer */
+.scv text { font-family: var(--mono); fill: var(--ink); }
+.scv .state { fill: var(--state-fill); stroke: var(--state-stroke); }
+.scv .sub { fill: none; stroke: var(--sub-stroke); stroke-dasharray: 6 5; }
+.scv .route { fill: none; stroke: var(--route); stroke-linejoin: round; }
+.scv .glyph { fill: var(--state-stroke); stroke: var(--state-stroke); }
+.scv .lbl { fill: var(--ink); }
+.scv .hit { fill: transparent; stroke: transparent; }
+.scv .hit.click { cursor: pointer; }
+.scv .dim { opacity: 0.25; }
+.scv .hl-stroke { stroke: var(--hl) !important; }
+.scv .hl-fill { fill: color-mix(in srgb, var(--hl) 18%, var(--state-fill)) !important; }
+@media (max-width: 900px) {
+  #toc { position: static; width: auto; border-right: 0; border-bottom: 1px solid var(--border); }
+  main { margin-left: 0; padding: 20px; }
+}
+</style>
+</head>
+<body>
+<nav id="toc">
+  <h1>scav</h1>
+  <div class="sub">how a statechart gets laid out</div>
+  <ol id="toc-list"></ol>
+  <div class="tools"><button class="btn" id="theme-btn" type="button">Dark mode</button></div>
+</nav>
+<main id="content">
+<!--SECTIONS-->
+</main>
+<div class="sx-tip" id="sx-tip"></div>
+<!--DATA-->
+<script>
+(function () {
+  'use strict';
+  var NS = 'http://www.w3.org/2000/svg';
+  var SX = window.SX = {};
+  var inits = {};
+  var cache = {};
+
+  // Embedded JSON by name: <script type="application/json" id="sxdata-NAME">.
+  SX.data = function (name) {
+    if (!(name in cache)) {
+      var n = document.getElementById('sxdata-' + name);
+      cache[name] = n ? JSON.parse(n.textContent) : null;
+    }
+    return cache[name];
+  };
+
+  function apply(node, attrs, kids) {
+    if (attrs) {
+      for (var k in attrs) {
+        var v = attrs[k];
+        if (v == null || v === false) continue;
+        if (k === 'class') node.setAttribute('class', v);
+        else if (k === 'style' && typeof v === 'object') Object.assign(node.style, v);
+        else if (k.slice(0, 2) === 'on' && typeof v === 'function') node.addEventListener(k.slice(2), v);
+        else if (k === 'text') node.textContent = v;
+        else if (k === 'html') node.innerHTML = v;
+        else node.setAttribute(k, v === true ? '' : v);
+      }
+    }
+    (kids || []).forEach(function (c) {
+      if (c == null || c === false) return;
+      if (Array.isArray(c)) c.forEach(function (d) { if (d != null) node.appendChild(typeof d === 'string' ? document.createTextNode(d) : d); });
+      else node.appendChild(typeof c === 'string' || typeof c === 'number' ? document.createTextNode(String(c)) : c);
+    });
+    return node;
+  }
+  // SX.el('div', {class: 'x'}, child, ...) and SX.svg('rect', {x: 1}, ...).
+  SX.el = function (tag, attrs) { return apply(document.createElement(tag), attrs, [].slice.call(arguments, 2)); };
+  SX.svg = function (tag, attrs) { return apply(document.createElementNS(NS, tag), attrs, [].slice.call(arguments, 2)); };
+  SX.css = function (name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); };
+  SX.fmt = function (n) { return Number(n).toLocaleString('en-US'); };
+
+  // Tooltip: SX.tip.show(event, html), SX.tip.hide().
+  var tipEl;
+  SX.tip = {
+    show: function (e, html) {
+      tipEl = tipEl || document.getElementById('sx-tip');
+      tipEl.innerHTML = html; tipEl.style.display = 'block';
+      var x = e.clientX + 14, y = e.clientY + 14, r = tipEl.getBoundingClientRect();
+      if (x + r.width > innerWidth - 8) x = e.clientX - r.width - 14;
+      if (y + r.height > innerHeight - 8) y = e.clientY - r.height - 14;
+      tipEl.style.left = Math.max(8, x) + 'px'; tipEl.style.top = Math.max(8, y) + 'px';   // a tip taller than either side pins to the top
+    },
+    hide: function () { if (tipEl) tipEl.style.display = 'none'; }
+  };
+  // Attach a tooltip to an element: html is a string or a function of the event.
+  SX.tipOn = function (node, html) {
+    node.addEventListener('mousemove', function (e) { SX.tip.show(e, typeof html === 'function' ? html(e) : html); });
+    node.addEventListener('mouseleave', SX.tip.hide);
+    return node;
+  };
+
+  // A drag from a pointerdown: moves and the release are heard on the window, so the drag
+  // survives the figure redrawing (and replacing) the element it started on.
+  SX.drag = function (e, o) {
+    e.preventDefault();
+    function mv(ev) { ev.preventDefault(); o.onMove && o.onMove(ev); }
+    function up(ev) {
+      window.removeEventListener('pointermove', mv);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      o.onEnd && o.onEnd(ev);
+    }
+    window.addEventListener('pointermove', mv);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  };
+  // A pointer event's position in an SVG's user units.
+  SX.svgPoint = function (svg, e) {
+    var p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY;
+    return p.matrixTransform(svg.getScreenCTM().inverse());
+  };
+
+  // Controls. Each returns {el, set(v), get()} and calls onChange/onStep.
+  SX.button = function (label, onClick, cls) { return SX.el('button', { type: 'button', class: cls || '', onclick: onClick, text: label }); };
+  SX.slider = function (o) {
+    var out = SX.el('span', { class: 'readout' });
+    var inp = SX.el('input', { type: 'range', min: o.min, max: o.max, step: o.step || 1, value: o.value });
+    function show() { out.textContent = o.format ? o.format(+inp.value) : inp.value; }
+    inp.addEventListener('input', function () { show(); o.onInput && o.onInput(+inp.value); });
+    // The readout keeps its widest width, so the row never reflows under a dragged thumb.
+    var widest = 0, st = +o.step || 1, n = Math.round((o.max - o.min) / st);
+    for (var k = 0; k <= n; k += Math.max(1, Math.floor(n / 200))) widest = Math.max(widest, String(o.format ? o.format(o.min + k * st) : o.min + k * st).length);
+    [o.max, o.value].forEach(function (v) { widest = Math.max(widest, String(o.format ? o.format(+v) : v).length); });
+    out.style.minWidth = widest + 'ch';
+    show();
+    var el = SX.el('label', null, o.label ? SX.el('span', { text: o.label }) : null, inp, out);
+    return { el: el, input: inp, get: function () { return +inp.value; }, set: function (v) { inp.value = v; show(); o.onInput && o.onInput(+v); } };
+  };
+  SX.toggle = function (o) {
+    var inp = SX.el('input', { type: 'checkbox' });
+    inp.checked = !!o.value;
+    inp.addEventListener('change', function () { o.onChange && o.onChange(inp.checked); });
+    return { el: SX.el('label', null, inp, SX.el('span', { text: o.label })), get: function () { return inp.checked; }, set: function (v) { inp.checked = v; o.onChange && o.onChange(v); } };
+  };
+  SX.choice = function (o) {
+    // o.options: [{value, label}], o.value, o.onChange(value)
+    var wrap = SX.el('span', { class: 'ctrl', style: { margin: 0 } });
+    var btns = o.options.map(function (opt) {
+      var b = SX.button(opt.label, function () { set(opt.value); });
+      wrap.appendChild(b); return b;
+    });
+    function set(v) { o.value = v; btns.forEach(function (b, i) { b.classList.toggle('on', o.options[i].value === v); }); o.onChange && o.onChange(v); }
+    btns.forEach(function (b, i) { b.classList.toggle('on', o.options[i].value === o.value); });
+    return { el: wrap, set: set, get: function () { return o.value; } };
+  };
+  // A stepper: prev / play / next and a slider over [0, steps-1]; onStep(i) draws step i.
+  SX.stepper = function (o) {
+    var i = o.start || 0, timer = null;
+    var label = SX.el('span', { class: 'readout' });
+    var sl = SX.el('input', { type: 'range', min: 0, max: Math.max(0, o.steps - 1), value: i });
+    function go(k) {
+      i = Math.max(0, Math.min(o.steps - 1, k)); sl.value = i;
+      label.textContent = o.label ? o.label(i) : (i + 1) + ' / ' + o.steps;
+      o.onStep(i);
+    }
+    function stop() { if (timer) { clearInterval(timer); timer = null; play.textContent = 'Play'; } }
+    var play = SX.button('Play', function () {
+      if (timer) { stop(); return; }
+      if (i >= o.steps - 1) go(0);
+      play.textContent = 'Pause';
+      timer = setInterval(function () { if (!el.isConnected || i >= o.steps - 1) stop(); else go(i + 1); }, o.interval || 900);
+    });
+    sl.addEventListener('input', function () { stop(); go(+sl.value); });
+    var el = SX.el('div', { class: 'ctrl' },
+      SX.button('◀', function () { stop(); go(i - 1); }), play, SX.button('▶', function () { stop(); go(i + 1); }), sl, label);
+    // Fixed widths, so the row never reflows under the pointer as the label or Play/Pause changes.
+    var widest = 0;
+    for (var k = 0; k < o.steps; k += Math.max(1, Math.floor(o.steps / 200))) widest = Math.max(widest, (o.label ? o.label(k) : (k + 1) + ' / ' + o.steps).length);
+    if (o.steps) widest = Math.max(widest, (o.label ? o.label(o.steps - 1) : o.steps + ' / ' + o.steps).length);
+    label.style.minWidth = widest + 'ch'; play.style.minWidth = '4.8em';
+    setTimeout(function () { if (el.isConnected) go(i); }, 0);   // a stepper replaced before this runs never draws
+    return { el: el, go: go, get: function () { return i; }, stop: stop };
+  };
+
+  // A figure: SX.figure(parent, {caption}) -> {fig, ctrl, stage, caption}.
+  SX.figure = function (parent, o) {
+    o = o || {};
+    var ctrl = SX.el('div', { class: 'ctrl' });
+    var stage = SX.el('div', { class: 'stage' });
+    var cap = SX.el('figcaption', { html: o.caption || '' });
+    var fig = SX.el('figure', { class: 'sx-fig' }, ctrl, stage, cap);
+    parent.appendChild(fig);
+    return { fig: fig, ctrl: ctrl, stage: stage, caption: cap };
+  };
+
+  // ---- scav geometry renderer -------------------------------------------------------
+  // geom: the explainer's chart schema (box, states, subs, trans, cost). Units are scav grid
+  // units (1/16 pt). opts: {pad, layers: {subs, states, text, routes, labels, ports}, onState,
+  // onTrans, click, highlight: {states: [ids], trans: [ids]}, maxHeight}. Hits report clicks only with click: true.
+  SX.chart = function (container, geom, opts) {
+    opts = opts || {};
+    var L = Object.assign({ subs: true, states: true, text: true, routes: true, labels: true }, opts.layers || {});
+    var box = geom.box || [0, 0, 1000, 1000];
+    var pad = opts.pad == null ? 160 : opts.pad;
+    var vb = [box[0] - pad, box[1] - pad, box[2] + 2 * pad, box[3] + 2 * pad];
+    var svg = SX.svg('svg', { class: 'scv', viewBox: vb.join(' '), preserveAspectRatio: 'xMidYMid meet', role: 'img' });
+    if (opts.maxHeight) svg.style.maxHeight = opts.maxHeight + 'px';
+    var unit = Math.max(box[2], box[3]) / 900;
+    var sw = 16;                                          // scav's own stroke, in grid units
+    var gDraw = SX.svg('g'), gHit = SX.svg('g'), gOver = SX.svg('g');
+    svg.appendChild(gDraw); svg.appendChild(gOver); svg.appendChild(gHit);
+    var handles = { svg: svg, states: {}, trans: {}, subs: {}, over: gOver, unit: unit, sw: sw, geom: geom };
+    var byId = { state: {}, trans: {}, sub: {} };
+    (geom.states || []).forEach(function (s) { byId.state[s.id] = s; });
+    (geom.trans || []).forEach(function (t) { byId.trans[t.id] = t; });
+    (geom.subs || []).forEach(function (s) { byId.sub[s.id] = s; });
+
+    // Every paint piece in scav's own z order; a final state's ring is painted under its dot.
+    var pieces = [];
+    function collect(list, of) {
+      (list || []).forEach(function (e) {
+        var zmin = Infinity;
+        (e.draw || []).forEach(function (p) { if (p.el === 'circle') zmin = Math.min(zmin, p.z); });
+        (e.draw || []).forEach(function (p) {
+          var z = (of === 'state' && e.kind === 'final' && p.el === 'circle') ? zmin : p.z;
+          pieces.push({ p: p, e: e, of: of, z: z });
+        });
+      });
+    }
+    collect(geom.subs, 'sub'); collect(geom.states, 'state'); collect(geom.trans, 'trans');
+    pieces.forEach(function (q, k) { q.k = k; });
+    pieces.sort(function (a, b) {
+      if (a.z !== b.z) return a.z - b.z;
+      if (a.e === b.e && a.p.el === 'circle' && b.p.el === 'circle') return (b.p.r || 0) - (a.p.r || 0);
+      return a.k - b.k;
+    });
+    function paint(c, role) {
+      if (!c || c === 'none') return 'none';
+      var lc = String(c).toLowerCase();
+      if (lc === '#ffffff' || lc === '#fff' || lc === 'white') return 'var(--state-fill)';
+      if (role === 'text') return 'var(--ink)';
+      if (lc === '#1a1a1a' || lc === '#000000' || lc === '#000' || lc === 'black') return 'var(--state-stroke)';
+      return 'var(--sub-stroke)';
+    }
+    function visible(q) {
+      if (q.of === 'sub') return L.subs;
+      if (q.of === 'state') return q.p.el === 'text' ? (L.states && L.text) : L.states;
+      return q.p.el === 'text' ? L.labels : L.routes;
+    }
+    function node(q) {
+      var p = q.p, n;
+      if (p.el === 'rect') n = SX.svg('rect', { x: p.x, y: p.y, width: p.width, height: p.height, rx: p.rx || null, ry: p.rx || null });
+      else if (p.el === 'circle') n = SX.svg('circle', { cx: p.cx, cy: p.cy, r: p.r });
+      else if (p.el === 'polygon') n = SX.svg('polygon', { points: p.points.map(function (v) { return v.join(','); }).join(' ') });
+      else if (p.el === 'polyline') n = SX.svg('polyline', { points: p.points.map(function (v) { return v.join(','); }).join(' ') });
+      else if (p.el === 'line') n = SX.svg('line', { x1: p.x1, y1: p.y1, x2: p.x2, y2: p.y2 });
+      else if (p.el === 'text') n = SX.svg('text', { x: p.x, y: p.y, 'font-size': p['font-size'], textLength: p.textLength || null, lengthAdjust: p.lengthAdjust || null, text: p.text });
+      else return null;
+      if (p.el === 'text') n.style.fill = paint(p.fill || '#1a1a1a', 'text');
+      else {
+        n.style.fill = paint(p.fill, 'shape');
+        n.style.stroke = paint(p.stroke, 'shape');
+        if (p['stroke-width'] != null) n.setAttribute('stroke-width', p['stroke-width']);
+        if (p['stroke-dasharray']) n.setAttribute('stroke-dasharray', p['stroke-dasharray']);
+        n.setAttribute('stroke-linejoin', 'round');
+      }
+      return n;
+    }
+    function bucket(of, id) {
+      var m = of === 'state' ? handles.states : of === 'trans' ? handles.trans : handles.subs;
+      return m[id] || (m[id] = { nodes: [], data: byId[of][id] });
+    }
+    pieces.forEach(function (q) {
+      if (!visible(q)) return;
+      var n = node(q);
+      if (!n) return;
+      n.setAttribute('data-' + q.of, q.e.id);
+      gDraw.appendChild(n);
+      bucket(q.of, q.e.id).nodes.push({ n: n, el: q.p.el });
+    });
+
+    // Hit targets over everything, for hover and, with opts.click, click.
+    var hitEvents = opts.click ? ['mousemove', 'mouseleave', 'click'] : ['mousemove', 'mouseleave'];
+    var hitClass = opts.click ? 'hit click' : 'hit';
+    if (opts.onState) (geom.states || []).forEach(function (s) {
+      var r = s.rect, h = SX.svg('rect', { x: r[0], y: r[1], width: r[2], height: r[3], class: hitClass });
+      h.style.pointerEvents = 'fill';
+      hitEvents.forEach(function (ev) {
+        h.addEventListener(ev, function (e) { opts.onState(s, e, ev === 'mousemove' ? 'move' : ev === 'mouseleave' ? 'leave' : 'click'); });
+      });
+      gHit.appendChild(h);
+    });
+    if (opts.onTrans) (geom.trans || []).forEach(function (t) {
+      if (!t.points || t.points.length < 2) return;
+      var d = t.points.map(function (p, k) { return (k ? 'L' : 'M') + p[0] + ',' + p[1]; }).join('');
+      var h = SX.svg('path', { d: d, class: hitClass, fill: 'none', 'stroke-width': 140 });
+      h.style.pointerEvents = 'stroke';
+      hitEvents.forEach(function (ev) {
+        h.addEventListener(ev, function (e) { opts.onTrans(t, e, ev === 'mousemove' ? 'move' : ev === 'mouseleave' ? 'leave' : 'click'); });
+      });
+      gHit.appendChild(h);
+    });
+
+    // Emphasis: colour an element's strokes (and tint a state's fill), or dim everything else.
+    function mark(b, color, on) {
+      if (!b) return;
+      b.nodes.forEach(function (x) {
+        if (x.n._orig == null) x.n._orig = { fill: x.n.style.fill, stroke: x.n.style.stroke, sw: x.n.getAttribute('stroke-width') };
+        if (!on) { x.n.style.fill = x.n._orig.fill; x.n.style.stroke = x.n._orig.stroke; if (x.n._orig.sw) x.n.setAttribute('stroke-width', x.n._orig.sw); return; }
+        if (x.el === 'text') { x.n.style.fill = color; return; }
+        if (x.n._orig.stroke && x.n._orig.stroke !== 'none') { x.n.style.stroke = color; x.n.setAttribute('stroke-width', (+x.n._orig.sw || sw) * 2); }
+        if (x.n._orig.fill === 'var(--state-fill)') x.n.style.fill = 'color-mix(in srgb, ' + color + ' 16%, var(--state-fill))';
+        else if (x.n._orig.fill && x.n._orig.fill !== 'none') x.n.style.fill = color;
+      });
+    }
+    handles.mark = function (kind, id, color, on) { mark((kind === 'state' ? handles.states : kind === 'trans' ? handles.trans : handles.subs)[id], color || 'var(--hl)', on !== false); };
+    handles.unmarkAll = function () {
+      [handles.states, handles.trans, handles.subs].forEach(function (m) { Object.keys(m).forEach(function (k) { mark(m[k], null, false); }); });
+    };
+    handles.dim = function (keep) {
+      keep = keep || {};
+      var ks = keep.states || [], kt = keep.trans || [];
+      [[handles.states, ks], [handles.trans, kt], [handles.subs, null]].forEach(function (pair) {
+        Object.keys(pair[0]).forEach(function (id) {
+          var on = pair[1] == null ? true : pair[1].indexOf(+id) >= 0;
+          pair[0][id].nodes.forEach(function (x) { x.n.style.opacity = (keep.states || keep.trans) && !on ? 0.22 : ''; });
+        });
+      });
+    };
+    var hs = (opts.highlight && opts.highlight.states) || [], ht = (opts.highlight && opts.highlight.trans) || [];
+    hs.forEach(function (id) { handles.mark('state', id); });
+    ht.forEach(function (id) { handles.mark('trans', id); });
+    if (opts.labelBoxes) (geom.trans || []).forEach(function (t) {
+      if (t.label_box) gOver.appendChild(SX.svg('rect', { x: t.label_box[0], y: t.label_box[1], width: t.label_box[2], height: t.label_box[3], fill: 'none', stroke: 'var(--hl-2)', 'stroke-width': 10, 'stroke-dasharray': '30 20' }));
+    });
+
+    container.innerHTML = '';
+    container.appendChild(svg);
+    handles.rect = function (r, attrs) { var n = SX.svg('rect', Object.assign({ x: r[0], y: r[1], width: r[2], height: r[3] }, attrs || {})); gOver.appendChild(n); return n; };
+    handles.line = function (pts, attrs) { var n = SX.svg('path', Object.assign({ d: pts.map(function (p, k) { return (k ? 'L' : 'M') + p[0] + ',' + p[1]; }).join(''), fill: 'none' }, attrs || {})); gOver.appendChild(n); return n; };
+    handles.dot = function (p, rr, attrs) { var n = SX.svg('circle', Object.assign({ cx: p[0], cy: p[1], r: rr }, attrs || {})); gOver.appendChild(n); return n; };
+    handles.text = function (p, str, attrs) { var n = SX.svg('text', Object.assign({ x: p[0], y: p[1], 'font-size': 170, text: str }, attrs || {})); n.style.fill = 'var(--ink)'; gOver.appendChild(n); return n; };
+    handles.clear = function () { gOver.innerHTML = ''; };
+    return handles;
+  };
+
+  // ---- minimal charts (dataviz rules: thin marks, one axis, hover tooltips, legend >= 2 series) ----
+  // SX.lineChart(container, {series: [{name, color, points: [[x, y]...]}], xLabel, yLabel, height, yFormat, xFormat, markers})
+  SX.lineChart = function (container, o) {
+    var W = 760, H = o.height || 260, m = { l: 64, r: 24, t: o.yLabel ? 30 : 12, b: 38 };
+    var xs = [], ys = [];
+    o.series.forEach(function (s) { s.points.forEach(function (p) { xs.push(p[0]); ys.push(p[1]); }); });
+    var x0 = o.xMin != null ? o.xMin : Math.min.apply(null, xs), x1 = Math.max.apply(null, xs);
+    var y0 = o.yMin != null ? o.yMin : Math.min(0, Math.min.apply(null, ys)), y1 = Math.max.apply(null, ys) * 1.05 || 1;
+    var X = function (v) { return m.l + (v - x0) / ((x1 - x0) || 1) * (W - m.l - m.r); };
+    var Y = function (v) { return H - m.b - (v - y0) / ((y1 - y0) || 1) * (H - m.t - m.b); };
+    var yf = o.yFormat || SX.fmt, xf = o.xFormat || SX.fmt;
+    var svg = SX.svg('svg', { viewBox: '0 0 ' + W + ' ' + H, style: { width: '100%', height: 'auto', font: '12px ' + SX.css('--sans') } });
+    var step = (y1 - y0) / 4 || 1;
+    var q = ys.every(Number.isInteger) ? 1 : Math.pow(10, Math.max(0, 1 - Math.floor(Math.log10(step))));   // gridlines snap to 2 significant digits of the step, or to integers
+    for (var k = 0; k <= 4; k++) {
+      var v = Math.round((y0 + step * k) * q) / q;
+      svg.appendChild(SX.svg('line', { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: SX.css('--grid'), 'stroke-width': 1 }));
+      svg.appendChild(SX.svg('text', { x: m.l - 8, y: Y(v) + 4, 'text-anchor': 'end', fill: SX.css('--text-muted'), text: yf(v) }));
+    }
+    svg.appendChild(SX.svg('line', { x1: m.l, x2: W - m.r, y1: Y(y0), y2: Y(y0), stroke: SX.css('--axis'), 'stroke-width': 1 }));
+    var ticks = o.xTicks || [x0, x0 + (x1 - x0) / 2, x1];
+    ticks.forEach(function (t, k) { svg.appendChild(SX.svg('text', { x: X(t), y: H - m.b + 18, 'text-anchor': k === 0 && X(t) - m.l < 20 ? 'start' : (k === ticks.length - 1 && W - m.r - X(t) < 20 ? 'end' : 'middle'), fill: SX.css('--text-muted'), text: xf(Math.round(t)) })); });
+    if (o.xLabel) svg.appendChild(SX.svg('text', { x: (W + m.l) / 2, y: H - 4, 'text-anchor': 'middle', fill: SX.css('--text-secondary'), text: o.xLabel }));
+    if (o.yLabel) svg.appendChild(SX.svg('text', { x: m.l - 8, y: 14, 'text-anchor': 'start', fill: SX.css('--text-secondary'), text: o.yLabel }));
+    o.series.forEach(function (s, si) {
+      var col = s.color || SX.css('--series-' + (si + 1));
+      var d = s.points.map(function (p, k) { return (k ? 'L' : 'M') + X(p[0]) + ',' + Y(p[1]); }).join('');
+      svg.appendChild(SX.svg('path', { d: d, fill: 'none', stroke: col, 'stroke-width': 2, 'stroke-linejoin': 'round' }));
+      if (o.markers) s.points.forEach(function (p) { svg.appendChild(SX.svg('circle', { cx: X(p[0]), cy: Y(p[1]), r: 4, fill: col, stroke: SX.css('--surface-1'), 'stroke-width': 2 })); });
+    });
+    var cross = SX.svg('line', { y1: m.t, y2: H - m.b, stroke: SX.css('--axis'), 'stroke-width': 1, visibility: 'hidden' });
+    svg.appendChild(cross);
+    var hit = SX.svg('rect', { x: m.l, y: m.t, width: W - m.l - m.r, height: H - m.t - m.b, fill: 'transparent' });
+    hit.addEventListener('mousemove', function (e) {
+      var r = svg.getBoundingClientRect(), px = (e.clientX - r.left) / r.width * W;
+      var xv = x0 + (px - m.l) / (W - m.l - m.r) * (x1 - x0);
+      var rows = o.series.map(function (s, si) {
+        var best = s.points.reduce(function (a, p) { return Math.abs(p[0] - xv) < Math.abs(a[0] - xv) ? p : a; }, s.points[0]);
+        return { s: s, p: best, c: s.color || SX.css('--series-' + (si + 1)) };
+      });
+      cross.setAttribute('x1', X(rows[0].p[0])); cross.setAttribute('x2', X(rows[0].p[0])); cross.setAttribute('visibility', 'visible');
+      SX.tip.show(e, '<b>' + (o.xLabel || 'x') + ' ' + xf(rows[0].p[0]) + '</b><br>' + rows.map(function (r) {
+        return '<span class="swatch" style="background:' + r.c + '"></span>' + r.s.name + ': ' + yf(r.p[1]) + (r.p[2] ? ' <span class="m">' + r.p[2] + '</span>' : '');
+      }).join('<br>'));
+      o.onHover && o.onHover(rows[0].p);
+    });
+    hit.addEventListener('mouseleave', function () { cross.setAttribute('visibility', 'hidden'); SX.tip.hide(); });
+    svg.appendChild(hit);
+    container.innerHTML = '';
+    if (o.series.length > 1) container.appendChild(SX.el('div', { class: 'legend' }, o.series.map(function (s, si) {
+      return SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: s.color || SX.css('--series-' + (si + 1)) } }), s.name);
+    })));
+    container.appendChild(svg);
+    return { svg: svg, X: X, Y: Y };
+  };
+  // SX.barChart(container, {bars: [{label, value, note, color}], unit, format, height})  — horizontal bars.
+  SX.barChart = function (container, o) {
+    var W = 760, row = 26, m = { l: 190, r: 70, t: 6, b: 6 };
+    var H = m.t + m.b + row * o.bars.length;
+    var vmax = Math.max.apply(null, o.bars.map(function (b) { return b.value; })) || 1;
+    var f = o.format || SX.fmt;
+    var svg = SX.svg('svg', { viewBox: '0 0 ' + W + ' ' + H, style: { width: '100%', height: 'auto', font: '12.5px ' + SX.css('--sans') } });
+    o.bars.forEach(function (b, k) {
+      var y = m.t + k * row, w = Math.max(2, (W - m.l - m.r) * b.value / vmax);
+      svg.appendChild(SX.svg('text', { x: m.l - 10, y: y + row * 0.62, 'text-anchor': 'end', fill: SX.css('--text-secondary'), text: b.label }));
+      var bar = SX.svg('rect', { x: m.l, y: y + 5, width: w, height: row - 10, rx: 4, fill: b.color || SX.css('--series-1') });
+      svg.appendChild(bar);
+      svg.appendChild(SX.svg('text', { x: m.l + w + 6, y: y + row * 0.62, fill: SX.css('--text-primary'), text: f(b.value) + (o.unit || '') }));
+      var hit = SX.svg('rect', { x: 0, y: y, width: W, height: row, fill: 'transparent' });
+      SX.tipOn(hit, '<b>' + b.label + '</b><br>' + f(b.value) + (o.unit || '') + (b.note ? '<br><span class="m">' + b.note + '</span>' : ''));
+      svg.appendChild(hit);
+    });
+    container.innerHTML = ''; container.appendChild(svg);
+    return svg;
+  };
+
+  // ---- window.SXcost: cost.cpp's weights, units and term kernels ----
+  window.SXcost = (function () {
+    var TERMS = ['bends', 'corridor', 'crossings', 'excess_len', 'adjacency', 'label', 'label_near', 'aspect', 'area', 'crowding', 'length', 'transit_bends', 'whitespace'];
+    var W = { bends: 512, corridor: 48, crossings: 512, excess_len: 4, adjacency: 16, label: 768, label_near: 48, aspect: 2, area: 1, crowding: 512, length: 8, transit_bends: 768, whitespace: 0 };
+    var EM = 192;
+    var UNIT = { bends: 1, corridor: EM, crossings: 1, excess_len: EM, adjacency: 1, label: 1, label_near: EM, aspect: EM, area: EM * EM, crowding: EM, length: EM, transit_bends: 1, whitespace: EM * EM };
+    var UNAME = { 1: 'count', 192: 'em', 36864: 'em²' };
+    function cdiv(a, b) { return Math.ceil(a / b); }               // terms are non-negative
+    function weighted(terms, w) { var s = 0; TERMS.forEach(function (k) { s += (w || W)[k] * cdiv(terms[k], UNIT[k]); }); return s; }
+    function isqrt(n) { var r = Math.floor(Math.sqrt(n)); while (r * r > n) r--; while ((r + 1) * (r + 1) <= n) r++; return r; }
+    function seglen(a, b) { var dx = b[0] - a[0], dy = b[1] - a[1]; return dx === 0 ? Math.abs(dy) : dy === 0 ? Math.abs(dx) : isqrt(dx * dx + dy * dy); }
+    function dir(a, b) { function ax(f, t) { return t > f ? 2 : t < f ? 0 : 1; } return ax(a[0], b[0]) * 3 + ax(a[1], b[1]); }
+    function orient(a, b, c) { return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]); }
+    function crosses(a, b, c, d) {
+      var d1 = orient(a, b, c), d2 = orient(a, b, d), d3 = orient(c, d, a), d4 = orient(c, d, b);
+      if (!d1 || !d2 || !d3 || !d4) return false;
+      return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0));
+    }
+    function shared(a, b, c, d) {
+      var flat = a[1] === b[1] && c[1] === d[1] && a[1] === c[1], up = a[0] === b[0] && c[0] === d[0] && a[0] === c[0];
+      if (!flat && !up) return null;
+      var i = flat ? 0 : 1;
+      var lo = Math.max(Math.min(a[i], b[i]), Math.min(c[i], d[i])), hi = Math.min(Math.max(a[i], b[i]), Math.max(c[i], d[i]));
+      return hi > lo ? { lo: lo, hi: hi, len: hi - lo, axis: i, at: flat ? a[1] : a[0] } : null;
+    }
+    function same(p, q) { return p[0] === q[0] && p[1] === q[1]; }
+    function trunk(P, Q) {                                      // shared tail, capped at 2 points
+      var tail = 0, sh = Math.min(P.length, Q.length, 2);
+      while (tail < sh && same(P[P.length - 1 - tail], Q[Q.length - 1 - tail])) tail++;
+      var merged = false;
+      if (tail > 0 && tail < P.length && tail < Q.length) {
+        var i = P.length - 1 - tail, j = Q.length - 1 - tail;
+        merged = !!shared(P[i], P[i + 1], Q[j], Q[j + 1]);
+      }
+      return { tail: tail, merged: merged };
+    }
+    function inTrunk(t, len, k) { return k + t.tail >= len || (t.merged && k + t.tail + 1 === len); }
+    // Every term this figure can draw, with the marks that earn it.
+    function measure(g) {
+      var R = {}, pieces = [], m = { bends: [], crossings: [], corridor: [], crowding: [], excess: [], lor: [] };
+      var T = { bends: 0, crossings: 0, corridor: 0, crowding: 0, length: 0, excess_len: 0, label_over_route: 0 };
+      (g.trans || []).forEach(function (t) {
+        var P = t.points || []; R[t.id] = P;
+        for (var k = 0; k + 1 < P.length; k++) {
+          pieces.push({ a: P[k], b: P[k + 1], t: t.id, k: k });
+          if (k + 2 < P.length && dir(P[k], P[k + 1]) !== dir(P[k + 1], P[k + 2])) { T.bends++; m.bends.push({ p: P[k + 1], t: t }); }
+        }
+      });
+      var crossOf = {};
+      for (var i = 0; i < pieces.length; i++) for (var j = i + 1; j < pieces.length; j++) {
+        var u = pieces[i], v = pieces[j];
+        if (u.t === v.t) continue;
+        if (crosses(u.a, u.b, v.a, v.b)) {
+          T.crossings++; crossOf[u.t] = (crossOf[u.t] || 0) + 1; crossOf[v.t] = (crossOf[v.t] || 0) + 1;
+          var s = orient(u.a, u.b, v.a) / (orient(u.a, u.b, v.a) - orient(u.a, u.b, v.b));
+          m.crossings.push({ p: [v.a[0] + (v.b[0] - v.a[0]) * s, v.a[1] + (v.b[1] - v.a[1]) * s], u: u.t, v: v.t });
+        }
+        var sh = shared(u.a, u.b, v.a, v.b);
+        if (sh) {
+          var tr = trunk(R[u.t], R[v.t]);
+          var exempt = inTrunk(tr, R[u.t].length, u.k) && inTrunk(tr, R[v.t].length, v.k);
+          if (!exempt) T.corridor += sh.len;
+          m.corridor.push({ s: sh, u: u.t, v: v.t, exempt: exempt });
+        }
+      }
+      // Crowding: parallel lanes of different transitions under an em apart.
+      var lanes = pieces.map(function (p) {
+        if (p.a[1] === p.b[1] && p.a[0] !== p.b[0]) return { axis: 0, at: p.a[1], lo: Math.min(p.a[0], p.b[0]), hi: Math.max(p.a[0], p.b[0]), t: p.t };
+        if (p.a[0] === p.b[0] && p.a[1] !== p.b[1]) return { axis: 1, at: p.a[0], lo: Math.min(p.a[1], p.b[1]), hi: Math.max(p.a[1], p.b[1]), t: p.t };
+        return null;
+      }).filter(Boolean);
+      var scaled = 0;
+      for (i = 0; i < lanes.length; i++) for (j = i + 1; j < lanes.length; j++) {
+        var a = lanes[i], b = lanes[j];
+        if (a.axis !== b.axis || a.t === b.t) continue;
+        var apart = Math.abs(a.at - b.at); if (apart === 0 || apart >= EM) continue;
+        var lo = Math.max(a.lo, b.lo), hi = Math.min(a.hi, b.hi); if (hi <= lo) continue;
+        scaled += (hi - lo) * (EM - apart);
+        m.crowding.push({ axis: a.axis, lo: lo, hi: hi, at0: Math.min(a.at, b.at), at1: Math.max(a.at, b.at), apart: apart, charge: (hi - lo) * (EM - apart) / EM, u: a.t, v: b.t });
+      }
+      T.crowding = Math.floor(scaled / EM);
+      (g.trans || []).forEach(function (t) {
+        var P = t.points || []; if (P.length < 2) return;
+        var L = 0; for (var k = 0; k + 1 < P.length; k++) L += seglen(P[k], P[k + 1]);
+        T.length += L;
+        var chord = seglen(P[0], P[P.length - 1]), carried = t.label_box ? t.label_box[2] : 0, ex = L - Math.max(chord, carried);
+        if (ex > 0) { T.excess_len += ex * (1 + (crossOf[t.id] || 0)); m.excess.push({ t: t, len: L, chord: chord, carried: carried, ex: ex, x: 1 + (crossOf[t.id] || 0) }); }
+        if (t.label_box) pieces.forEach(function (p) {
+          if (p.t === t.id) return;
+          var x = Math.min(p.a[0], p.b[0]), y = Math.min(p.a[1], p.b[1]), w = Math.abs(p.a[0] - p.b[0]), h = Math.abs(p.a[1] - p.b[1]), lb = t.label_box;
+          if (lb[0] < x + w && x < lb[0] + lb[2] && lb[1] < y + h && y < lb[1] + lb[3]) { T.label_over_route++; m.lor.push({ t: t, p: p }); }
+        });
+      });
+      var bx = g.box; T.area = bx[2] * bx[3]; T.aspect = Math.abs(bx[2] * 10 - bx[3] * 16);
+      return { T: T, marks: m, crossOf: crossOf };
+    }
+    return { TERMS: TERMS, W: W, EM: EM, UNIT: UNIT, UNAME: UNAME, cdiv: cdiv, weighted: weighted, measure: measure };
+  })();
+
+  // Sections register an init; it runs once, when the section first nears the viewport.
+  SX.register = function (id, fn) { inits[id] = fn; };
+  function boot() {
+    var list = document.getElementById('toc-list');
+    var secs = [].slice.call(document.querySelectorAll('section.sx'));
+    secs.forEach(function (s) {
+      var h = s.querySelector('h2');
+      list.appendChild(SX.el('li', null, SX.el('a', { href: '#' + s.id, 'data-for': s.id, text: s.getAttribute('data-toc') || (h ? h.textContent : s.id) })));
+    });
+    var tb = document.getElementById('theme-btn');
+    function setTheme(t) { document.documentElement.setAttribute('data-theme', t); tb.textContent = t === 'dark' ? 'Light mode' : 'Dark mode'; }
+    // Figures read colour tokens when drawn, so the theme is set before the first draw.
+    if (matchMedia('(prefers-color-scheme: dark)').matches) setTheme('dark');
+    function draw(s) {
+      if (!inits[s.id]) return;
+      [].forEach.call(s.querySelectorAll('[data-fig]'), function (h) { h.innerHTML = ''; });
+      try { inits[s.id](s); } catch (err) {
+        console.error('section ' + s.id, err);
+        (s.querySelector('[data-fig]') || s).appendChild(SX.el('p', { class: 'note', text: 'This figure failed to load: ' + err.message }));
+      }
+    }
+    // Every section draws at load, so the page has its final height before anyone scrolls.
+    secs.forEach(draw);
+    // A link opened with #anchor: the browser scrolled before the figures existed.
+    if (location.hash) setTimeout(function () {
+      var t = document.getElementById(decodeURIComponent(location.hash.slice(1)));
+      if (t) t.scrollIntoView({ block: 'start', behavior: 'instant' });
+    }, 0);
+    var spy = new IntersectionObserver(function (ents) {
+      ents.forEach(function (en) {
+        if (!en.isIntersecting) return;
+        [].forEach.call(document.querySelectorAll('#toc a'), function (a) { a.classList.toggle('active', a.getAttribute('data-for') === en.target.id); });
+      });
+    }, { rootMargin: '-30% 0px -60% 0px' });
+    secs.forEach(function (s) { spy.observe(s); });
+    tb.addEventListener('click', function () {
+      setTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+      secs.forEach(draw);
+    });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
+})();
+</script>
+<!--SCRIPTS-->
+</body>
+</html>

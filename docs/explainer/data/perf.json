@@ -1,0 +1,4895 @@
+{
+ "notes": [
+  "wall_s = elapsed seconds, cpu_s = user+sys seconds, instr_G = instructions retired / 1e9, all from `/usr/bin/time -l` around one `scav dump --layout [--no-text] <chart>` on a 12-core machine; best (minimum) of the passes in that file.",
+  "corpus = the 11 charts in test_data/charts (estop led brew dock ota axis vac tcp toolchanger bottler mill); a corpus number is the sum of the per-chart best-of values.",
+  "Builds measured in different runs are only fairly compared through `main`, which every run includes: compare ratios to main within a file (same_run) rather than raw seconds across files. Instructions are the steadiest metric; wall moves with machine load.",
+  "out.txt (the 08:03 run of main vs two agent worktrees 'faces' and 'labels') is not used: its builds are agent worktrees, not commits on the branch."
+ ],
+ "builds": [
+  {
+   "id": "main",
+   "commit": "c118892",
+   "label": "main: P9e exact search (#27)",
+   "binary": "/tmp/perf/wall/scav_main (run2: florence out/ binary at 12:31)",
+   "provenance": "inferred: the 'main' rows of all three runs agree (mill text 4.44 T instructions) and c118892 is the merge base of the branch"
+  },
+  {
+   "id": "faces_labels",
+   "commit": "43de925",
+   "label": "face offers + label Tier 0",
+   "binary": "/tmp/perf/ref43/scav (built 09:10, after 43de925 at 07:55)"
+  },
+  {
+   "id": "label_bound",
+   "commit": "aaac379",
+   "label": "labelled round scored by bound",
+   "binary": "/tmp/perf/wall/scav_labelbound (built 12:31, after aaac379 at 12:29)"
+  },
+  {
+   "id": "perf_pass",
+   "commit": "e6f1fbc",
+   "label": "perf pass: frame reuse in ordering, per-thread buffers, isqrt, radix-heap A*",
+   "binary": "/tmp/perf/wall/scav_final (built 15:15, after e6f1fbc at 15:14)"
+  },
+  {
+   "id": "size_reuse",
+   "commit": "77fd1cf",
+   "label": "size reuse + kept bound geometry",
+   "binary": "/tmp/perf/wall/scav_merge2 (byte-identical to out/macos-clang-libcxx-release/bin/scav at HEAD 77fd1cf; the commits after bc09ae3 touch only PRD.md and a test)"
+  }
+ ],
+ "files": {
+  "out2.txt": {
+   "map": {
+    "main": "main",
+    "ref43": "faces_labels",
+    "bound": "label_bound"
+   },
+   "passes": 1,
+   "script": "/tmp/perf/wall/run2.sh: /usr/bin/time -l nice -n 10 <bin> dump --layout [--no-text] chart; one pass"
+  },
+  "out3.txt": {
+   "map": {
+    "main": "main",
+    "before": "label_bound",
+    "after": "perf_pass"
+   },
+   "passes": 2,
+   "script": "/tmp/perf/wall/run3.sh: /usr/bin/time -l <bin> dump --layout [--no-text] chart; three builds interleaved, two passes"
+  },
+  "out4.txt": {
+   "map": {
+    "main": "main",
+    "before": "perf_pass",
+    "after": "size_reuse"
+   },
+   "passes": 2,
+   "script": "/tmp/perf/wall/run4.sh: as run3"
+  }
+ },
+ "corpus": {
+  "main": {
+   "notext": {
+    "wall_s": 27.11,
+    "cpu_s": 295.7,
+    "instr_G": 2569.6,
+    "source": "out4.txt"
+   },
+   "text": {
+    "wall_s": 58.65,
+    "cpu_s": 642.62,
+    "instr_G": 5833.7,
+    "source": "out4.txt"
+   }
+  },
+  "faces_labels": {
+   "notext": {
+    "wall_s": 25.17,
+    "cpu_s": 269.8,
+    "instr_G": 2283.7,
+    "source": "out2.txt"
+   },
+   "text": {
+    "wall_s": 53.54,
+    "cpu_s": 562.3,
+    "instr_G": 4967.8,
+    "source": "out2.txt"
+   }
+  },
+  "label_bound": {
+   "notext": {
+    "wall_s": 24.57,
+    "cpu_s": 259.54,
+    "instr_G": 2277.6,
+    "source": "out3.txt"
+   },
+   "text": {
+    "wall_s": 35.04,
+    "cpu_s": 351.25,
+    "instr_G": 3209.5,
+    "source": "out3.txt"
+   }
+  },
+  "perf_pass": {
+   "notext": {
+    "wall_s": 19.61,
+    "cpu_s": 213.24,
+    "instr_G": 1957.5,
+    "source": "out4.txt"
+   },
+   "text": {
+    "wall_s": 27.33,
+    "cpu_s": 281.45,
+    "instr_G": 2667.2,
+    "source": "out4.txt"
+   }
+  },
+  "size_reuse": {
+   "notext": {
+    "wall_s": 18.27,
+    "cpu_s": 200.72,
+    "instr_G": 1843.0,
+    "source": "out4.txt"
+   },
+   "text": {
+    "wall_s": 24.72,
+    "cpu_s": 259.73,
+    "instr_G": 2423.4,
+    "source": "out4.txt"
+   }
+  }
+ },
+ "per_chart": {
+  "main": {
+   "notext": {
+    "estop": {
+     "wall_s": 0.01,
+     "cpu_s": 0.06,
+     "instr_G": 0.3,
+     "source": "out4.txt"
+    },
+    "led": {
+     "wall_s": 0.01,
+     "cpu_s": 0.06,
+     "instr_G": 0.3,
+     "source": "out4.txt"
+    },
+    "brew": {
+     "wall_s": 0.05,
+     "cpu_s": 0.54,
+     "instr_G": 4.1,
+     "source": "out4.txt"
+    },
+    "dock": {
+     "wall_s": 0.03,
+     "cpu_s": 0.3,
+     "instr_G": 2.2,
+     "source": "out4.txt"
+    },
+    "ota": {
+     "wall_s": 0.19,
+     "cpu_s": 2.07,
+     "instr_G": 15.9,
+     "source": "out4.txt"
+    },
+    "axis": {
+     "wall_s": 0.18,
+     "cpu_s": 1.9,
+     "instr_G": 15.4,
+     "source": "out4.txt"
+    },
+    "vac": {
+     "wall_s": 0.26,
+     "cpu_s": 2.86,
+     "instr_G": 24.7,
+     "source": "out4.txt"
+    },
+    "tcp": {
+     "wall_s": 0.47,
+     "cpu_s": 5.1,
+     "instr_G": 41.2,
+     "source": "out4.txt"
+    },
+    "toolchanger": {
+     "wall_s": 1.54,
+     "cpu_s": 16.87,
+     "instr_G": 140.0,
+     "source": "out4.txt"
+    },
+    "bottler": {
+     "wall_s": 3.93,
+     "cpu_s": 42.82,
+     "instr_G": 358.7,
+     "source": "out4.txt"
+    },
+    "mill": {
+     "wall_s": 20.44,
+     "cpu_s": 223.12,
+     "instr_G": 1966.8,
+     "source": "out4.txt"
+    }
+   },
+   "text": {
+    "estop": {
+     "wall_s": 0.01,
+     "cpu_s": 0.08,
+     "instr_G": 0.5,
+     "source": "out4.txt"
+    },
+    "led": {
+     "wall_s": 0.0,
+     "cpu_s": 0.07,
+     "instr_G": 0.4,
+     "source": "out4.txt"
+    },
+    "brew": {
+     "wall_s": 0.06,
+     "cpu_s": 0.62,
+     "instr_G": 4.7,
+     "source": "out4.txt"
+    },
+    "dock": {
+     "wall_s": 0.06,
+     "cpu_s": 0.68,
+     "instr_G": 5.2,
+     "source": "out4.txt"
+    },
+    "ota": {
+     "wall_s": 0.24,
+     "cpu_s": 2.48,
+     "instr_G": 19.7,
+     "source": "out4.txt"
+    },
+    "axis": {
+     "wall_s": 0.34,
+     "cpu_s": 3.75,
+     "instr_G": 30.9,
+     "source": "out4.txt"
+    },
+    "vac": {
+     "wall_s": 0.44,
+     "cpu_s": 4.87,
+     "instr_G": 41.8,
+     "source": "out4.txt"
+    },
+    "tcp": {
+     "wall_s": 0.73,
+     "cpu_s": 7.99,
+     "instr_G": 66.9,
+     "source": "out4.txt"
+    },
+    "toolchanger": {
+     "wall_s": 3.43,
+     "cpu_s": 37.26,
+     "instr_G": 318.8,
+     "source": "out4.txt"
+    },
+    "bottler": {
+     "wall_s": 9.02,
+     "cpu_s": 98.09,
+     "instr_G": 905.1,
+     "source": "out4.txt"
+    },
+    "mill": {
+     "wall_s": 44.32,
+     "cpu_s": 486.73,
+     "instr_G": 4439.7,
+     "source": "out4.txt"
+    }
+   }
+  },
+  "faces_labels": {
+   "notext": {
+    "estop": {
+     "wall_s": 0.01,
+     "cpu_s": 0.1,
+     "instr_G": 0.2,
+     "source": "out2.txt"
+    },
+    "led": {
+     "wall_s": 0.01,
+     "cpu_s": 0.1,
+     "instr_G": 0.2,
+     "source": "out2.txt"
+    },
+    "brew": {
+     "wall_s": 0.04,
+     "cpu_s": 0.4,
+     "instr_G": 2.8,
+     "source": "out2.txt"
+    },
+    "dock": {
+     "wall_s": 0.02,
+     "cpu_s": 0.2,
+     "instr_G": 1.6,
+     "source": "out2.txt"
+    },
+    "ota": {
+     "wall_s": 0.17,
+     "cpu_s": 1.8,
+     "instr_G": 13.2,
+     "source": "out2.txt"
+    },
+    "axis": {
+     "wall_s": 0.17,
+     "cpu_s": 1.7,
+     "instr_G": 12.3,
+     "source": "out2.txt"
+    },
+    "vac": {
+     "wall_s": 0.3,
+     "cpu_s": 2.4,
+     "instr_G": 20.2,
+     "source": "out2.txt"
+    },
+    "tcp": {
+     "wall_s": 0.45,
+     "cpu_s": 4.7,
+     "instr_G": 34.5,
+     "source": "out2.txt"
+    },
+    "toolchanger": {
+     "wall_s": 1.48,
+     "cpu_s": 15.4,
+     "instr_G": 124.2,
+     "source": "out2.txt"
+    },
+    "bottler": {
+     "wall_s": 3.79,
+     "cpu_s": 41.8,
+     "instr_G": 349.6,
+     "source": "out2.txt"
+    },
+    "mill": {
+     "wall_s": 18.73,
+     "cpu_s": 201.2,
+     "instr_G": 1724.9,
+     "source": "out2.txt"
+    }
+   },
+   "text": {
+    "estop": {
+     "wall_s": 0.01,
+     "cpu_s": 0.1,
+     "instr_G": 0.3,
+     "source": "out2.txt"
+    },
+    "led": {
+     "wall_s": 0.01,
+     "cpu_s": 0.1,
+     "instr_G": 0.3,
+     "source": "out2.txt"
+    },
+    "brew": {
+     "wall_s": 0.05,
+     "cpu_s": 0.5,
+     "instr_G": 3.8,
+     "source": "out2.txt"
+    },
+    "dock": {
+     "wall_s": 0.06,
+     "cpu_s": 0.4,
+     "instr_G": 2.8,
+     "source": "out2.txt"
+    },
+    "ota": {
+     "wall_s": 0.32,
+     "cpu_s": 3.2,
+     "instr_G": 23.9,
+     "source": "out2.txt"
+    },
+    "axis": {
+     "wall_s": 0.37,
+     "cpu_s": 3.5,
+     "instr_G": 26.8,
+     "source": "out2.txt"
+    },
+    "vac": {
+     "wall_s": 0.32,
+     "cpu_s": 3.0,
+     "instr_G": 24.1,
+     "source": "out2.txt"
+    },
+    "tcp": {
+     "wall_s": 0.7,
+     "cpu_s": 8.0,
+     "instr_G": 64.7,
+     "source": "out2.txt"
+    },
+    "toolchanger": {
+     "wall_s": 2.51,
+     "cpu_s": 26.7,
+     "instr_G": 222.0,
+     "source": "out2.txt"
+    },
+    "bottler": {
+     "wall_s": 7.35,
+     "cpu_s": 74.8,
+     "instr_G": 657.8,
+     "source": "out2.txt"
+    },
+    "mill": {
+     "wall_s": 41.84,
+     "cpu_s": 442.0,
+     "instr_G": 3941.3,
+     "source": "out2.txt"
+    }
+   }
+  },
+  "label_bound": {
+   "notext": {
+    "estop": {
+     "wall_s": 0.01,
+     "cpu_s": 0.06,
+     "instr_G": 0.2,
+     "source": "out3.txt"
+    },
+    "led": {
+     "wall_s": 0.0,
+     "cpu_s": 0.06,
+     "instr_G": 0.2,
+     "source": "out3.txt"
+    },
+    "brew": {
+     "wall_s": 0.04,
+     "cpu_s": 0.37,
+     "instr_G": 2.8,
+     "source": "out3.txt"
+    },
+    "dock": {
+     "wall_s": 0.02,
+     "cpu_s": 0.23,
+     "instr_G": 1.6,
+     "source": "out3.txt"
+    },
+    "ota": {
+     "wall_s": 0.16,
+     "cpu_s": 1.7,
+     "instr_G": 13.0,
+     "source": "out3.txt"
+    },
+    "axis": {
+     "wall_s": 0.14,
+     "cpu_s": 1.5,
+     "instr_G": 12.0,
+     "source": "out3.txt"
+    },
+    "vac": {
+     "wall_s": 0.21,
+     "cpu_s": 2.27,
+     "instr_G": 19.7,
+     "source": "out3.txt"
+    },
+    "tcp": {
+     "wall_s": 0.39,
+     "cpu_s": 4.23,
+     "instr_G": 34.0,
+     "source": "out3.txt"
+    },
+    "toolchanger": {
+     "wall_s": 1.38,
+     "cpu_s": 15.03,
+     "instr_G": 124.1,
+     "source": "out3.txt"
+    },
+    "bottler": {
+     "wall_s": 3.88,
+     "cpu_s": 40.92,
+     "instr_G": 348.9,
+     "source": "out3.txt"
+    },
+    "mill": {
+     "wall_s": 18.34,
+     "cpu_s": 193.17,
+     "instr_G": 1721.1,
+     "source": "out3.txt"
+    }
+   },
+   "text": {
+    "estop": {
+     "wall_s": 0.0,
+     "cpu_s": 0.06,
+     "instr_G": 0.2,
+     "source": "out3.txt"
+    },
+    "led": {
+     "wall_s": 0.0,
+     "cpu_s": 0.02,
+     "instr_G": 0.2,
+     "source": "out3.txt"
+    },
+    "brew": {
+     "wall_s": 0.03,
+     "cpu_s": 0.27,
+     "instr_G": 2.1,
+     "source": "out3.txt"
+    },
+    "dock": {
+     "wall_s": 0.02,
+     "cpu_s": 0.28,
+     "instr_G": 2.0,
+     "source": "out3.txt"
+    },
+    "ota": {
+     "wall_s": 0.18,
+     "cpu_s": 1.93,
+     "instr_G": 14.8,
+     "source": "out3.txt"
+    },
+    "axis": {
+     "wall_s": 0.19,
+     "cpu_s": 2.06,
+     "instr_G": 17.0,
+     "source": "out3.txt"
+    },
+    "vac": {
+     "wall_s": 0.21,
+     "cpu_s": 2.13,
+     "instr_G": 19.5,
+     "source": "out3.txt"
+    },
+    "tcp": {
+     "wall_s": 0.46,
+     "cpu_s": 4.92,
+     "instr_G": 40.0,
+     "source": "out3.txt"
+    },
+    "toolchanger": {
+     "wall_s": 1.6,
+     "cpu_s": 17.07,
+     "instr_G": 147.8,
+     "source": "out3.txt"
+    },
+    "bottler": {
+     "wall_s": 4.01,
+     "cpu_s": 42.29,
+     "instr_G": 382.7,
+     "source": "out3.txt"
+    },
+    "mill": {
+     "wall_s": 28.34,
+     "cpu_s": 280.22,
+     "instr_G": 2583.2,
+     "source": "out3.txt"
+    }
+   }
+  },
+  "perf_pass": {
+   "notext": {
+    "estop": {
+     "wall_s": 0.0,
+     "cpu_s": 0.03,
+     "instr_G": 0.2,
+     "source": "out4.txt"
+    },
+    "led": {
+     "wall_s": 0.0,
+     "cpu_s": 0.02,
+     "instr_G": 0.2,
+     "source": "out4.txt"
+    },
+    "brew": {
+     "wall_s": 0.02,
+     "cpu_s": 0.28,
+     "instr_G": 2.4,
+     "source": "out4.txt"
+    },
+    "dock": {
+     "wall_s": 0.01,
+     "cpu_s": 0.16,
+     "instr_G": 1.3,
+     "source": "out4.txt"
+    },
+    "ota": {
+     "wall_s": 0.11,
+     "cpu_s": 1.26,
+     "instr_G": 10.8,
+     "source": "out4.txt"
+    },
+    "axis": {
+     "wall_s": 0.11,
+     "cpu_s": 1.2,
+     "instr_G": 10.1,
+     "source": "out4.txt"
+    },
+    "vac": {
+     "wall_s": 0.16,
+     "cpu_s": 1.78,
+     "instr_G": 16.1,
+     "source": "out4.txt"
+    },
+    "tcp": {
+     "wall_s": 0.33,
+     "cpu_s": 3.31,
+     "instr_G": 28.7,
+     "source": "out4.txt"
+    },
+    "toolchanger": {
+     "wall_s": 1.14,
+     "cpu_s": 11.8,
+     "instr_G": 106.1,
+     "source": "out4.txt"
+    },
+    "bottler": {
+     "wall_s": 3.1,
+     "cpu_s": 34.24,
+     "instr_G": 310.6,
+     "source": "out4.txt"
+    },
+    "mill": {
+     "wall_s": 14.63,
+     "cpu_s": 159.16,
+     "instr_G": 1471.0,
+     "source": "out4.txt"
+    }
+   },
+   "text": {
+    "estop": {
+     "wall_s": 0.0,
+     "cpu_s": 0.02,
+     "instr_G": 0.2,
+     "source": "out4.txt"
+    },
+    "led": {
+     "wall_s": 0.0,
+     "cpu_s": 0.02,
+     "instr_G": 0.1,
+     "source": "out4.txt"
+    },
+    "brew": {
+     "wall_s": 0.02,
+     "cpu_s": 0.21,
+     "instr_G": 1.7,
+     "source": "out4.txt"
+    },
+    "dock": {
+     "wall_s": 0.02,
+     "cpu_s": 0.19,
+     "instr_G": 1.6,
+     "source": "out4.txt"
+    },
+    "ota": {
+     "wall_s": 0.13,
+     "cpu_s": 1.43,
+     "instr_G": 12.3,
+     "source": "out4.txt"
+    },
+    "axis": {
+     "wall_s": 0.15,
+     "cpu_s": 1.6,
+     "instr_G": 13.6,
+     "source": "out4.txt"
+    },
+    "vac": {
+     "wall_s": 0.16,
+     "cpu_s": 1.7,
+     "instr_G": 15.6,
+     "source": "out4.txt"
+    },
+    "tcp": {
+     "wall_s": 0.34,
+     "cpu_s": 3.78,
+     "instr_G": 33.4,
+     "source": "out4.txt"
+    },
+    "toolchanger": {
+     "wall_s": 1.31,
+     "cpu_s": 13.67,
+     "instr_G": 122.5,
+     "source": "out4.txt"
+    },
+    "bottler": {
+     "wall_s": 3.18,
+     "cpu_s": 35.25,
+     "instr_G": 324.2,
+     "source": "out4.txt"
+    },
+    "mill": {
+     "wall_s": 22.02,
+     "cpu_s": 223.58,
+     "instr_G": 2142.0,
+     "source": "out4.txt"
+    }
+   }
+  },
+  "size_reuse": {
+   "notext": {
+    "estop": {
+     "wall_s": 0.0,
+     "cpu_s": 0.03,
+     "instr_G": 0.2,
+     "source": "out4.txt"
+    },
+    "led": {
+     "wall_s": 0.0,
+     "cpu_s": 0.02,
+     "instr_G": 0.2,
+     "source": "out4.txt"
+    },
+    "brew": {
+     "wall_s": 0.03,
+     "cpu_s": 0.28,
+     "instr_G": 2.3,
+     "source": "out4.txt"
+    },
+    "dock": {
+     "wall_s": 0.01,
+     "cpu_s": 0.16,
+     "instr_G": 1.3,
+     "source": "out4.txt"
+    },
+    "ota": {
+     "wall_s": 0.12,
+     "cpu_s": 1.26,
+     "instr_G": 10.8,
+     "source": "out4.txt"
+    },
+    "axis": {
+     "wall_s": 0.1,
+     "cpu_s": 1.16,
+     "instr_G": 9.6,
+     "source": "out4.txt"
+    },
+    "vac": {
+     "wall_s": 0.16,
+     "cpu_s": 1.75,
+     "instr_G": 15.5,
+     "source": "out4.txt"
+    },
+    "tcp": {
+     "wall_s": 0.32,
+     "cpu_s": 3.29,
+     "instr_G": 28.5,
+     "source": "out4.txt"
+    },
+    "toolchanger": {
+     "wall_s": 1.09,
+     "cpu_s": 11.81,
+     "instr_G": 103.1,
+     "source": "out4.txt"
+    },
+    "bottler": {
+     "wall_s": 3.04,
+     "cpu_s": 33.28,
+     "instr_G": 300.7,
+     "source": "out4.txt"
+    },
+    "mill": {
+     "wall_s": 13.4,
+     "cpu_s": 147.68,
+     "instr_G": 1370.8,
+     "source": "out4.txt"
+    }
+   },
+   "text": {
+    "estop": {
+     "wall_s": 0.0,
+     "cpu_s": 0.02,
+     "instr_G": 0.2,
+     "source": "out4.txt"
+    },
+    "led": {
+     "wall_s": 0.0,
+     "cpu_s": 0.02,
+     "instr_G": 0.2,
+     "source": "out4.txt"
+    },
+    "brew": {
+     "wall_s": 0.02,
+     "cpu_s": 0.21,
+     "instr_G": 1.7,
+     "source": "out4.txt"
+    },
+    "dock": {
+     "wall_s": 0.02,
+     "cpu_s": 0.19,
+     "instr_G": 1.5,
+     "source": "out4.txt"
+    },
+    "ota": {
+     "wall_s": 0.13,
+     "cpu_s": 1.41,
+     "instr_G": 12.2,
+     "source": "out4.txt"
+    },
+    "axis": {
+     "wall_s": 0.14,
+     "cpu_s": 1.58,
+     "instr_G": 13.2,
+     "source": "out4.txt"
+    },
+    "vac": {
+     "wall_s": 0.15,
+     "cpu_s": 1.62,
+     "instr_G": 14.5,
+     "source": "out4.txt"
+    },
+    "tcp": {
+     "wall_s": 0.34,
+     "cpu_s": 3.75,
+     "instr_G": 32.7,
+     "source": "out4.txt"
+    },
+    "toolchanger": {
+     "wall_s": 1.21,
+     "cpu_s": 13.25,
+     "instr_G": 117.5,
+     "source": "out4.txt"
+    },
+    "bottler": {
+     "wall_s": 3.11,
+     "cpu_s": 33.48,
+     "instr_G": 306.7,
+     "source": "out4.txt"
+    },
+    "mill": {
+     "wall_s": 19.6,
+     "cpu_s": 204.2,
+     "instr_G": 1923.0,
+     "source": "out4.txt"
+    }
+   }
+  }
+ },
+ "same_run": [
+  {
+   "file": "out2.txt",
+   "scale": "notext",
+   "main": {
+    "wall_s": 27.67,
+    "cpu_s": 298.1,
+    "instr_G": 2571.3
+   },
+   "faces_labels": {
+    "wall_s": 25.17,
+    "cpu_s": 269.8,
+    "instr_G": 2283.7
+   },
+   "label_bound": {
+    "wall_s": 25.14,
+    "cpu_s": 268.3,
+    "instr_G": 2285.0
+   }
+  },
+  {
+   "file": "out2.txt",
+   "scale": "text",
+   "main": {
+    "wall_s": 58.84,
+    "cpu_s": 646.2,
+    "instr_G": 5840.2
+   },
+   "faces_labels": {
+    "wall_s": 53.54,
+    "cpu_s": 562.3,
+    "instr_G": 4967.8
+   },
+   "label_bound": {
+    "wall_s": 35.1,
+    "cpu_s": 360.9,
+    "instr_G": 3215.6
+   }
+  },
+  {
+   "file": "out3.txt",
+   "scale": "notext",
+   "main": {
+    "wall_s": 27.26,
+    "cpu_s": 289.03,
+    "instr_G": 2568.5
+   },
+   "label_bound": {
+    "wall_s": 24.57,
+    "cpu_s": 259.54,
+    "instr_G": 2277.6
+   },
+   "perf_pass": {
+    "wall_s": 19.9,
+    "cpu_s": 209.69,
+    "instr_G": 1975.7
+   }
+  },
+  {
+   "file": "out3.txt",
+   "scale": "text",
+   "main": {
+    "wall_s": 59.86,
+    "cpu_s": 628.46,
+    "instr_G": 5832.1
+   },
+   "label_bound": {
+    "wall_s": 35.04,
+    "cpu_s": 351.25,
+    "instr_G": 3209.5
+   },
+   "perf_pass": {
+    "wall_s": 27.26,
+    "cpu_s": 273.45,
+    "instr_G": 2662.4
+   }
+  },
+  {
+   "file": "out4.txt",
+   "scale": "notext",
+   "main": {
+    "wall_s": 27.11,
+    "cpu_s": 295.7,
+    "instr_G": 2569.6
+   },
+   "perf_pass": {
+    "wall_s": 19.61,
+    "cpu_s": 213.24,
+    "instr_G": 1957.5
+   },
+   "size_reuse": {
+    "wall_s": 18.27,
+    "cpu_s": 200.72,
+    "instr_G": 1843.0
+   }
+  },
+  {
+   "file": "out4.txt",
+   "scale": "text",
+   "main": {
+    "wall_s": 58.65,
+    "cpu_s": 642.62,
+    "instr_G": 5833.7
+   },
+   "perf_pass": {
+    "wall_s": 27.33,
+    "cpu_s": 281.45,
+    "instr_G": 2667.2
+   },
+   "size_reuse": {
+    "wall_s": 24.72,
+    "cpu_s": 259.73,
+    "instr_G": 2423.4
+   }
+  }
+ ],
+ "raw": [
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "estop",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.01,
+   "cpu_s": 0.1,
+   "instr_G": 0.3
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "estop",
+   "scale": "notext",
+   "build": "faces_labels",
+   "label_in_file": "ref43",
+   "wall_s": 0.01,
+   "cpu_s": 0.1,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "estop",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "bound",
+   "wall_s": 0.19,
+   "cpu_s": 0.1,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "estop",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.01,
+   "cpu_s": 0.1,
+   "instr_G": 0.5
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "estop",
+   "scale": "text",
+   "build": "faces_labels",
+   "label_in_file": "ref43",
+   "wall_s": 0.01,
+   "cpu_s": 0.1,
+   "instr_G": 0.3
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "estop",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "bound",
+   "wall_s": 0.01,
+   "cpu_s": 0.1,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "led",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.01,
+   "cpu_s": 0.1,
+   "instr_G": 0.3
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "led",
+   "scale": "notext",
+   "build": "faces_labels",
+   "label_in_file": "ref43",
+   "wall_s": 0.01,
+   "cpu_s": 0.1,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "led",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "bound",
+   "wall_s": 0.01,
+   "cpu_s": 0.1,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "led",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.01,
+   "cpu_s": 0.1,
+   "instr_G": 0.4
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "led",
+   "scale": "text",
+   "build": "faces_labels",
+   "label_in_file": "ref43",
+   "wall_s": 0.01,
+   "cpu_s": 0.1,
+   "instr_G": 0.3
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "led",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "bound",
+   "wall_s": 0.01,
+   "cpu_s": 0.1,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "brew",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.06,
+   "cpu_s": 0.6,
+   "instr_G": 4.1
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "brew",
+   "scale": "notext",
+   "build": "faces_labels",
+   "label_in_file": "ref43",
+   "wall_s": 0.04,
+   "cpu_s": 0.4,
+   "instr_G": 2.8
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "brew",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "bound",
+   "wall_s": 0.04,
+   "cpu_s": 0.4,
+   "instr_G": 2.8
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "brew",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.06,
+   "cpu_s": 0.6,
+   "instr_G": 4.7
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "brew",
+   "scale": "text",
+   "build": "faces_labels",
+   "label_in_file": "ref43",
+   "wall_s": 0.05,
+   "cpu_s": 0.5,
+   "instr_G": 3.8
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "brew",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "bound",
+   "wall_s": 0.03,
+   "cpu_s": 0.3,
+   "instr_G": 2.1
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "dock",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.03,
+   "cpu_s": 0.3,
+   "instr_G": 2.2
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "dock",
+   "scale": "notext",
+   "build": "faces_labels",
+   "label_in_file": "ref43",
+   "wall_s": 0.02,
+   "cpu_s": 0.2,
+   "instr_G": 1.6
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "dock",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "bound",
+   "wall_s": 0.02,
+   "cpu_s": 0.2,
+   "instr_G": 1.6
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "dock",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.08,
+   "cpu_s": 0.7,
+   "instr_G": 5.3
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "dock",
+   "scale": "text",
+   "build": "faces_labels",
+   "label_in_file": "ref43",
+   "wall_s": 0.06,
+   "cpu_s": 0.4,
+   "instr_G": 2.8
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "dock",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "bound",
+   "wall_s": 0.03,
+   "cpu_s": 0.3,
+   "instr_G": 2.0
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "ota",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.21,
+   "cpu_s": 2.1,
+   "instr_G": 15.8
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "ota",
+   "scale": "notext",
+   "build": "faces_labels",
+   "label_in_file": "ref43",
+   "wall_s": 0.17,
+   "cpu_s": 1.8,
+   "instr_G": 13.2
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "ota",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "bound",
+   "wall_s": 0.18,
+   "cpu_s": 1.8,
+   "instr_G": 13.2
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "ota",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.25,
+   "cpu_s": 2.5,
+   "instr_G": 19.9
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "ota",
+   "scale": "text",
+   "build": "faces_labels",
+   "label_in_file": "ref43",
+   "wall_s": 0.32,
+   "cpu_s": 3.2,
+   "instr_G": 23.9
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "ota",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "bound",
+   "wall_s": 0.19,
+   "cpu_s": 2.1,
+   "instr_G": 14.9
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "axis",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.2,
+   "cpu_s": 2.1,
+   "instr_G": 15.7
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "axis",
+   "scale": "notext",
+   "build": "faces_labels",
+   "label_in_file": "ref43",
+   "wall_s": 0.17,
+   "cpu_s": 1.7,
+   "instr_G": 12.3
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "axis",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "bound",
+   "wall_s": 0.19,
+   "cpu_s": 1.7,
+   "instr_G": 12.4
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "axis",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.4,
+   "cpu_s": 4.1,
+   "instr_G": 31.4
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "axis",
+   "scale": "text",
+   "build": "faces_labels",
+   "label_in_file": "ref43",
+   "wall_s": 0.37,
+   "cpu_s": 3.5,
+   "instr_G": 26.8
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "axis",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "bound",
+   "wall_s": 0.23,
+   "cpu_s": 2.2,
+   "instr_G": 17.3
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "vac",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.31,
+   "cpu_s": 3.1,
+   "instr_G": 25.0
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "vac",
+   "scale": "notext",
+   "build": "faces_labels",
+   "label_in_file": "ref43",
+   "wall_s": 0.3,
+   "cpu_s": 2.4,
+   "instr_G": 20.2
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "vac",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "bound",
+   "wall_s": 0.25,
+   "cpu_s": 2.4,
+   "instr_G": 19.9
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "vac",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.56,
+   "cpu_s": 5.3,
+   "instr_G": 42.2
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "vac",
+   "scale": "text",
+   "build": "faces_labels",
+   "label_in_file": "ref43",
+   "wall_s": 0.32,
+   "cpu_s": 3.0,
+   "instr_G": 24.1
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "vac",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "bound",
+   "wall_s": 0.23,
+   "cpu_s": 2.3,
+   "instr_G": 19.5
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "tcp",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.54,
+   "cpu_s": 5.5,
+   "instr_G": 41.6
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "tcp",
+   "scale": "notext",
+   "build": "faces_labels",
+   "label_in_file": "ref43",
+   "wall_s": 0.45,
+   "cpu_s": 4.7,
+   "instr_G": 34.5
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "tcp",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "bound",
+   "wall_s": 0.54,
+   "cpu_s": 4.7,
+   "instr_G": 34.6
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "tcp",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.78,
+   "cpu_s": 8.6,
+   "instr_G": 68.0
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "tcp",
+   "scale": "text",
+   "build": "faces_labels",
+   "label_in_file": "ref43",
+   "wall_s": 0.7,
+   "cpu_s": 8.0,
+   "instr_G": 64.7
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "tcp",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "bound",
+   "wall_s": 0.45,
+   "cpu_s": 5.1,
+   "instr_G": 40.3
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "toolchanger",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 1.59,
+   "cpu_s": 17.1,
+   "instr_G": 140.2
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "toolchanger",
+   "scale": "notext",
+   "build": "faces_labels",
+   "label_in_file": "ref43",
+   "wall_s": 1.48,
+   "cpu_s": 15.4,
+   "instr_G": 124.2
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "toolchanger",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "bound",
+   "wall_s": 1.38,
+   "cpu_s": 15.4,
+   "instr_G": 124.1
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "toolchanger",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 3.48,
+   "cpu_s": 37.8,
+   "instr_G": 318.9
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "toolchanger",
+   "scale": "text",
+   "build": "faces_labels",
+   "label_in_file": "ref43",
+   "wall_s": 2.51,
+   "cpu_s": 26.7,
+   "instr_G": 222.0
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "toolchanger",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "bound",
+   "wall_s": 1.72,
+   "cpu_s": 17.8,
+   "instr_G": 148.6
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "bottler",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 3.92,
+   "cpu_s": 42.6,
+   "instr_G": 359.0
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "bottler",
+   "scale": "notext",
+   "build": "faces_labels",
+   "label_in_file": "ref43",
+   "wall_s": 3.79,
+   "cpu_s": 41.8,
+   "instr_G": 349.6
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "bottler",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "bound",
+   "wall_s": 3.83,
+   "cpu_s": 41.9,
+   "instr_G": 350.3
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "bottler",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 8.81,
+   "cpu_s": 97.7,
+   "instr_G": 905.2
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "bottler",
+   "scale": "text",
+   "build": "faces_labels",
+   "label_in_file": "ref43",
+   "wall_s": 7.35,
+   "cpu_s": 74.8,
+   "instr_G": 657.8
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "bottler",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "bound",
+   "wall_s": 3.89,
+   "cpu_s": 43.5,
+   "instr_G": 384.1
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "mill",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 20.79,
+   "cpu_s": 224.5,
+   "instr_G": 1967.1
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "mill",
+   "scale": "notext",
+   "build": "faces_labels",
+   "label_in_file": "ref43",
+   "wall_s": 18.73,
+   "cpu_s": 201.2,
+   "instr_G": 1724.9
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "mill",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "bound",
+   "wall_s": 18.51,
+   "cpu_s": 199.6,
+   "instr_G": 1725.7
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "mill",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 44.4,
+   "cpu_s": 488.7,
+   "instr_G": 4443.7
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "mill",
+   "scale": "text",
+   "build": "faces_labels",
+   "label_in_file": "ref43",
+   "wall_s": 41.84,
+   "cpu_s": 442.0,
+   "instr_G": 3941.3
+  },
+  {
+   "file": "out2.txt",
+   "pass": 1,
+   "chart": "mill",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "bound",
+   "wall_s": 28.31,
+   "cpu_s": 287.1,
+   "instr_G": 2586.4
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "estop",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.01,
+   "cpu_s": 0.08,
+   "instr_G": 0.3
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "estop",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.01,
+   "cpu_s": 0.08,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "estop",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.0,
+   "cpu_s": 0.03,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "estop",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.01,
+   "cpu_s": 0.08,
+   "instr_G": 0.5
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "estop",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.0,
+   "cpu_s": 0.07,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "estop",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.0,
+   "cpu_s": 0.02,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "led",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.01,
+   "cpu_s": 0.08,
+   "instr_G": 0.3
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "led",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.01,
+   "cpu_s": 0.07,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "led",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.0,
+   "cpu_s": 0.03,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "led",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.01,
+   "cpu_s": 0.08,
+   "instr_G": 0.4
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "led",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.0,
+   "cpu_s": 0.07,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "led",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.0,
+   "cpu_s": 0.02,
+   "instr_G": 0.1
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "brew",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.05,
+   "cpu_s": 0.54,
+   "instr_G": 4.1
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "brew",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.04,
+   "cpu_s": 0.39,
+   "instr_G": 2.8
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "brew",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.03,
+   "cpu_s": 0.28,
+   "instr_G": 2.4
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "brew",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.05,
+   "cpu_s": 0.61,
+   "instr_G": 4.7
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "brew",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.03,
+   "cpu_s": 0.27,
+   "instr_G": 2.1
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "brew",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.02,
+   "cpu_s": 0.2,
+   "instr_G": 1.7
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "dock",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.03,
+   "cpu_s": 0.3,
+   "instr_G": 2.2
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "dock",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.02,
+   "cpu_s": 0.24,
+   "instr_G": 1.6
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "dock",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.01,
+   "cpu_s": 0.16,
+   "instr_G": 1.3
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "dock",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.07,
+   "cpu_s": 0.62,
+   "instr_G": 5.2
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "dock",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.02,
+   "cpu_s": 0.28,
+   "instr_G": 2.0
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "dock",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.02,
+   "cpu_s": 0.19,
+   "instr_G": 1.6
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "ota",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.19,
+   "cpu_s": 2.02,
+   "instr_G": 15.7
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "ota",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.17,
+   "cpu_s": 1.75,
+   "instr_G": 13.0
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "ota",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.12,
+   "cpu_s": 1.24,
+   "instr_G": 10.8
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "ota",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.22,
+   "cpu_s": 2.38,
+   "instr_G": 19.7
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "ota",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.19,
+   "cpu_s": 1.93,
+   "instr_G": 14.8
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "ota",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.13,
+   "cpu_s": 1.39,
+   "instr_G": 12.3
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "axis",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.18,
+   "cpu_s": 1.86,
+   "instr_G": 15.4
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "axis",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.14,
+   "cpu_s": 1.53,
+   "instr_G": 12.1
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "axis",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.11,
+   "cpu_s": 1.15,
+   "instr_G": 10.0
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "axis",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.4,
+   "cpu_s": 3.68,
+   "instr_G": 31.2
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "axis",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.25,
+   "cpu_s": 2.19,
+   "instr_G": 17.1
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "axis",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.19,
+   "cpu_s": 1.53,
+   "instr_G": 13.7
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "vac",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.26,
+   "cpu_s": 2.82,
+   "instr_G": 24.6
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "vac",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.21,
+   "cpu_s": 2.27,
+   "instr_G": 19.7
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "vac",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.17,
+   "cpu_s": 1.75,
+   "instr_G": 16.3
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "vac",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.44,
+   "cpu_s": 4.71,
+   "instr_G": 41.6
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "vac",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.21,
+   "cpu_s": 2.19,
+   "instr_G": 19.5
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "vac",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.16,
+   "cpu_s": 1.67,
+   "instr_G": 15.7
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "tcp",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.49,
+   "cpu_s": 5.14,
+   "instr_G": 41.3
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "tcp",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.39,
+   "cpu_s": 4.26,
+   "instr_G": 34.0
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "tcp",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.3,
+   "cpu_s": 3.28,
+   "instr_G": 28.7
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "tcp",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.75,
+   "cpu_s": 8.14,
+   "instr_G": 67.8
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "tcp",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.48,
+   "cpu_s": 5.03,
+   "instr_G": 40.1
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "tcp",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.35,
+   "cpu_s": 3.77,
+   "instr_G": 33.3
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "toolchanger",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 1.59,
+   "cpu_s": 16.85,
+   "instr_G": 140.1
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "toolchanger",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 1.38,
+   "cpu_s": 15.03,
+   "instr_G": 124.3
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "toolchanger",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 1.11,
+   "cpu_s": 11.97,
+   "instr_G": 106.1
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "toolchanger",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 3.45,
+   "cpu_s": 36.43,
+   "instr_G": 318.7
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "toolchanger",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 1.6,
+   "cpu_s": 17.08,
+   "instr_G": 147.9
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "toolchanger",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 1.29,
+   "cpu_s": 13.3,
+   "instr_G": 122.0
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "bottler",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 3.9,
+   "cpu_s": 41.82,
+   "instr_G": 358.6
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "bottler",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 3.95,
+   "cpu_s": 41.28,
+   "instr_G": 349.2
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "bottler",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 3.18,
+   "cpu_s": 33.34,
+   "instr_G": 309.9
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "bottler",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 9.2,
+   "cpu_s": 96.29,
+   "instr_G": 904.5
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "bottler",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 4.01,
+   "cpu_s": 42.99,
+   "instr_G": 384.2
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "bottler",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 3.33,
+   "cpu_s": 34.38,
+   "instr_G": 323.6
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "mill",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 22.27,
+   "cpu_s": 224.99,
+   "instr_G": 1967.5
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "mill",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 19.33,
+   "cpu_s": 199.75,
+   "instr_G": 1725.9
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "mill",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 15.22,
+   "cpu_s": 158.66,
+   "instr_G": 1490.0
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "mill",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 45.81,
+   "cpu_s": 487.2,
+   "instr_G": 4532.7
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "mill",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 28.34,
+   "cpu_s": 280.27,
+   "instr_G": 2584.1
+  },
+  {
+   "file": "out3.txt",
+   "pass": 1,
+   "chart": "mill",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 21.89,
+   "cpu_s": 218.85,
+   "instr_G": 2147.3
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "estop",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.01,
+   "cpu_s": 0.07,
+   "instr_G": 0.3
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "estop",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.01,
+   "cpu_s": 0.06,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "estop",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.0,
+   "cpu_s": 0.03,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "estop",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.01,
+   "cpu_s": 0.09,
+   "instr_G": 0.5
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "estop",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.0,
+   "cpu_s": 0.06,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "estop",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.0,
+   "cpu_s": 0.03,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "led",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.0,
+   "cpu_s": 0.05,
+   "instr_G": 0.3
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "led",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.0,
+   "cpu_s": 0.06,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "led",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.0,
+   "cpu_s": 0.03,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "led",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.01,
+   "cpu_s": 0.05,
+   "instr_G": 0.4
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "led",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.0,
+   "cpu_s": 0.02,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "led",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.0,
+   "cpu_s": 0.01,
+   "instr_G": 0.1
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "brew",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.05,
+   "cpu_s": 0.53,
+   "instr_G": 4.1
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "brew",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.04,
+   "cpu_s": 0.37,
+   "instr_G": 2.8
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "brew",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.03,
+   "cpu_s": 0.28,
+   "instr_G": 2.4
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "brew",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.06,
+   "cpu_s": 0.58,
+   "instr_G": 4.7
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "brew",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.03,
+   "cpu_s": 0.28,
+   "instr_G": 2.1
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "brew",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.02,
+   "cpu_s": 0.2,
+   "instr_G": 1.7
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "dock",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.03,
+   "cpu_s": 0.3,
+   "instr_G": 2.2
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "dock",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.02,
+   "cpu_s": 0.23,
+   "instr_G": 1.6
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "dock",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.01,
+   "cpu_s": 0.16,
+   "instr_G": 1.3
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "dock",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.07,
+   "cpu_s": 0.65,
+   "instr_G": 5.2
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "dock",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.02,
+   "cpu_s": 0.28,
+   "instr_G": 2.0
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "dock",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.02,
+   "cpu_s": 0.18,
+   "instr_G": 1.6
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "ota",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.19,
+   "cpu_s": 2.02,
+   "instr_G": 15.7
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "ota",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.16,
+   "cpu_s": 1.7,
+   "instr_G": 13.0
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "ota",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.12,
+   "cpu_s": 1.23,
+   "instr_G": 10.8
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "ota",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.22,
+   "cpu_s": 2.37,
+   "instr_G": 19.6
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "ota",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.18,
+   "cpu_s": 1.95,
+   "instr_G": 14.8
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "ota",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.13,
+   "cpu_s": 1.41,
+   "instr_G": 12.3
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "axis",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.18,
+   "cpu_s": 1.91,
+   "instr_G": 15.6
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "axis",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.14,
+   "cpu_s": 1.5,
+   "instr_G": 12.0
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "axis",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.11,
+   "cpu_s": 1.13,
+   "instr_G": 9.9
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "axis",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.35,
+   "cpu_s": 3.71,
+   "instr_G": 31.2
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "axis",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.19,
+   "cpu_s": 2.06,
+   "instr_G": 17.0
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "axis",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.15,
+   "cpu_s": 1.59,
+   "instr_G": 13.7
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "vac",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.26,
+   "cpu_s": 2.76,
+   "instr_G": 24.5
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "vac",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.21,
+   "cpu_s": 2.29,
+   "instr_G": 20.1
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "vac",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.16,
+   "cpu_s": 1.76,
+   "instr_G": 16.3
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "vac",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.45,
+   "cpu_s": 4.78,
+   "instr_G": 42.0
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "vac",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.25,
+   "cpu_s": 2.13,
+   "instr_G": 19.6
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "vac",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.16,
+   "cpu_s": 1.68,
+   "instr_G": 15.6
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "tcp",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.46,
+   "cpu_s": 5.02,
+   "instr_G": 41.2
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "tcp",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.4,
+   "cpu_s": 4.23,
+   "instr_G": 34.1
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "tcp",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.31,
+   "cpu_s": 3.29,
+   "instr_G": 28.9
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "tcp",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.83,
+   "cpu_s": 8.28,
+   "instr_G": 67.7
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "tcp",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 0.46,
+   "cpu_s": 4.92,
+   "instr_G": 40.0
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "tcp",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 0.35,
+   "cpu_s": 3.69,
+   "instr_G": 33.1
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "toolchanger",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 1.55,
+   "cpu_s": 16.54,
+   "instr_G": 139.7
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "toolchanger",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 1.43,
+   "cpu_s": 15.03,
+   "instr_G": 124.1
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "toolchanger",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 1.14,
+   "cpu_s": 11.93,
+   "instr_G": 106.0
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "toolchanger",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 3.44,
+   "cpu_s": 36.43,
+   "instr_G": 318.3
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "toolchanger",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 1.62,
+   "cpu_s": 17.07,
+   "instr_G": 147.8
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "toolchanger",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 1.3,
+   "cpu_s": 13.38,
+   "instr_G": 122.2
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "bottler",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 3.91,
+   "cpu_s": 41.69,
+   "instr_G": 359.1
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "bottler",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 3.88,
+   "cpu_s": 40.92,
+   "instr_G": 348.9
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "bottler",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 3.13,
+   "cpu_s": 33.56,
+   "instr_G": 310.5
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "bottler",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 9.18,
+   "cpu_s": 96.2,
+   "instr_G": 905.7
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "bottler",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 4.07,
+   "cpu_s": 42.29,
+   "instr_G": 382.7
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "bottler",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 3.25,
+   "cpu_s": 34.22,
+   "instr_G": 323.0
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "mill",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 20.63,
+   "cpu_s": 218.19,
+   "instr_G": 1966.5
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "mill",
+   "scale": "notext",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 18.34,
+   "cpu_s": 193.17,
+   "instr_G": 1721.1
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "mill",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 14.93,
+   "cpu_s": 156.53,
+   "instr_G": 1490.0
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "mill",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 45.34,
+   "cpu_s": 475.6,
+   "instr_G": 4438.4
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "mill",
+   "scale": "text",
+   "build": "label_bound",
+   "label_in_file": "before",
+   "wall_s": 28.52,
+   "cpu_s": 280.22,
+   "instr_G": 2583.2
+  },
+  {
+   "file": "out3.txt",
+   "pass": 2,
+   "chart": "mill",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "after",
+   "wall_s": 22.4,
+   "cpu_s": 217.24,
+   "instr_G": 2139.1
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "estop",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.18,
+   "cpu_s": 0.06,
+   "instr_G": 0.3
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "estop",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.0,
+   "cpu_s": 0.03,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "estop",
+   "scale": "notext",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.0,
+   "cpu_s": 0.03,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "estop",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.01,
+   "cpu_s": 0.08,
+   "instr_G": 0.5
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "estop",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.0,
+   "cpu_s": 0.02,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "estop",
+   "scale": "text",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.0,
+   "cpu_s": 0.02,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "led",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.01,
+   "cpu_s": 0.07,
+   "instr_G": 0.3
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "led",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.0,
+   "cpu_s": 0.02,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "led",
+   "scale": "notext",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.0,
+   "cpu_s": 0.02,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "led",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.01,
+   "cpu_s": 0.08,
+   "instr_G": 0.4
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "led",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.0,
+   "cpu_s": 0.02,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "led",
+   "scale": "text",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.0,
+   "cpu_s": 0.02,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "brew",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.06,
+   "cpu_s": 0.58,
+   "instr_G": 4.1
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "brew",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.03,
+   "cpu_s": 0.3,
+   "instr_G": 2.4
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "brew",
+   "scale": "notext",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.03,
+   "cpu_s": 0.3,
+   "instr_G": 2.4
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "brew",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.06,
+   "cpu_s": 0.64,
+   "instr_G": 4.7
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "brew",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.02,
+   "cpu_s": 0.21,
+   "instr_G": 1.7
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "brew",
+   "scale": "text",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.03,
+   "cpu_s": 0.22,
+   "instr_G": 1.7
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "dock",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.04,
+   "cpu_s": 0.34,
+   "instr_G": 2.2
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "dock",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.02,
+   "cpu_s": 0.17,
+   "instr_G": 1.3
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "dock",
+   "scale": "notext",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.02,
+   "cpu_s": 0.17,
+   "instr_G": 1.3
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "dock",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.09,
+   "cpu_s": 0.76,
+   "instr_G": 5.3
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "dock",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.02,
+   "cpu_s": 0.19,
+   "instr_G": 1.6
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "dock",
+   "scale": "text",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.02,
+   "cpu_s": 0.19,
+   "instr_G": 1.5
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "ota",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.28,
+   "cpu_s": 2.23,
+   "instr_G": 16.0
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "ota",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.15,
+   "cpu_s": 1.38,
+   "instr_G": 11.0
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "ota",
+   "scale": "notext",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.14,
+   "cpu_s": 1.37,
+   "instr_G": 10.9
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "ota",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.28,
+   "cpu_s": 2.58,
+   "instr_G": 19.8
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "ota",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.16,
+   "cpu_s": 1.57,
+   "instr_G": 12.5
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "ota",
+   "scale": "text",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.14,
+   "cpu_s": 1.5,
+   "instr_G": 12.3
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "axis",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.22,
+   "cpu_s": 2.1,
+   "instr_G": 15.7
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "axis",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.12,
+   "cpu_s": 1.23,
+   "instr_G": 10.1
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "axis",
+   "scale": "notext",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.1,
+   "cpu_s": 1.18,
+   "instr_G": 9.6
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "axis",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.47,
+   "cpu_s": 4.01,
+   "instr_G": 31.1
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "axis",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.15,
+   "cpu_s": 1.64,
+   "instr_G": 13.7
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "axis",
+   "scale": "text",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.15,
+   "cpu_s": 1.62,
+   "instr_G": 13.3
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "vac",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.28,
+   "cpu_s": 2.88,
+   "instr_G": 24.7
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "vac",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.16,
+   "cpu_s": 1.79,
+   "instr_G": 16.3
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "vac",
+   "scale": "notext",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.16,
+   "cpu_s": 1.75,
+   "instr_G": 15.5
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "vac",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.45,
+   "cpu_s": 4.92,
+   "instr_G": 41.9
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "vac",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.17,
+   "cpu_s": 1.76,
+   "instr_G": 15.8
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "vac",
+   "scale": "text",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.15,
+   "cpu_s": 1.62,
+   "instr_G": 14.5
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "tcp",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.48,
+   "cpu_s": 5.27,
+   "instr_G": 41.4
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "tcp",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.34,
+   "cpu_s": 3.45,
+   "instr_G": 28.7
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "tcp",
+   "scale": "notext",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.32,
+   "cpu_s": 3.39,
+   "instr_G": 28.5
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "tcp",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.73,
+   "cpu_s": 8.18,
+   "instr_G": 66.9
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "tcp",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.34,
+   "cpu_s": 3.86,
+   "instr_G": 33.4
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "tcp",
+   "scale": "text",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.34,
+   "cpu_s": 3.77,
+   "instr_G": 32.7
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "toolchanger",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 1.57,
+   "cpu_s": 17.19,
+   "instr_G": 140.0
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "toolchanger",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 1.14,
+   "cpu_s": 12.32,
+   "instr_G": 106.2
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "toolchanger",
+   "scale": "notext",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 1.13,
+   "cpu_s": 12.07,
+   "instr_G": 103.3
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "toolchanger",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 3.63,
+   "cpu_s": 38.4,
+   "instr_G": 320.0
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "toolchanger",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 1.39,
+   "cpu_s": 14.04,
+   "instr_G": 122.5
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "toolchanger",
+   "scale": "text",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 1.24,
+   "cpu_s": 13.38,
+   "instr_G": 117.5
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "bottler",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 3.93,
+   "cpu_s": 42.86,
+   "instr_G": 358.7
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "bottler",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 3.29,
+   "cpu_s": 35.06,
+   "instr_G": 310.9
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "bottler",
+   "scale": "notext",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 3.36,
+   "cpu_s": 34.0,
+   "instr_G": 300.7
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "bottler",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 9.84,
+   "cpu_s": 101.05,
+   "instr_G": 907.4
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "bottler",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 4.0,
+   "cpu_s": 37.36,
+   "instr_G": 325.9
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "bottler",
+   "scale": "text",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 4.37,
+   "cpu_s": 36.28,
+   "instr_G": 307.5
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "mill",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 21.35,
+   "cpu_s": 227.35,
+   "instr_G": 1967.6
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "mill",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 15.09,
+   "cpu_s": 159.52,
+   "instr_G": 1471.0
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "mill",
+   "scale": "notext",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 14.41,
+   "cpu_s": 152.76,
+   "instr_G": 1392.2
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "mill",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 44.44,
+   "cpu_s": 486.73,
+   "instr_G": 4439.7
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "mill",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 22.25,
+   "cpu_s": 223.58,
+   "instr_G": 2142.0
+  },
+  {
+   "file": "out4.txt",
+   "pass": 1,
+   "chart": "mill",
+   "scale": "text",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 19.66,
+   "cpu_s": 204.47,
+   "instr_G": 1923.9
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "estop",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.01,
+   "cpu_s": 0.08,
+   "instr_G": 0.3
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "estop",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.0,
+   "cpu_s": 0.03,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "estop",
+   "scale": "notext",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.0,
+   "cpu_s": 0.03,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "estop",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.01,
+   "cpu_s": 0.08,
+   "instr_G": 0.5
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "estop",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.0,
+   "cpu_s": 0.02,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "estop",
+   "scale": "text",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.0,
+   "cpu_s": 0.02,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "led",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.01,
+   "cpu_s": 0.06,
+   "instr_G": 0.3
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "led",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.0,
+   "cpu_s": 0.03,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "led",
+   "scale": "notext",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.0,
+   "cpu_s": 0.03,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "led",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.0,
+   "cpu_s": 0.07,
+   "instr_G": 0.4
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "led",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.0,
+   "cpu_s": 0.02,
+   "instr_G": 0.1
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "led",
+   "scale": "text",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.0,
+   "cpu_s": 0.03,
+   "instr_G": 0.2
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "brew",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.05,
+   "cpu_s": 0.54,
+   "instr_G": 4.1
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "brew",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.02,
+   "cpu_s": 0.28,
+   "instr_G": 2.4
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "brew",
+   "scale": "notext",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.03,
+   "cpu_s": 0.28,
+   "instr_G": 2.3
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "brew",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.06,
+   "cpu_s": 0.62,
+   "instr_G": 4.7
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "brew",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.02,
+   "cpu_s": 0.22,
+   "instr_G": 1.7
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "brew",
+   "scale": "text",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.02,
+   "cpu_s": 0.21,
+   "instr_G": 1.7
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "dock",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.03,
+   "cpu_s": 0.3,
+   "instr_G": 2.2
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "dock",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.01,
+   "cpu_s": 0.16,
+   "instr_G": 1.3
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "dock",
+   "scale": "notext",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.01,
+   "cpu_s": 0.16,
+   "instr_G": 1.3
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "dock",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.06,
+   "cpu_s": 0.68,
+   "instr_G": 5.2
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "dock",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.02,
+   "cpu_s": 0.19,
+   "instr_G": 1.6
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "dock",
+   "scale": "text",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.02,
+   "cpu_s": 0.19,
+   "instr_G": 1.5
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "ota",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.19,
+   "cpu_s": 2.07,
+   "instr_G": 15.9
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "ota",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.11,
+   "cpu_s": 1.26,
+   "instr_G": 10.8
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "ota",
+   "scale": "notext",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.12,
+   "cpu_s": 1.26,
+   "instr_G": 10.8
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "ota",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.24,
+   "cpu_s": 2.48,
+   "instr_G": 19.7
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "ota",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.13,
+   "cpu_s": 1.43,
+   "instr_G": 12.3
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "ota",
+   "scale": "text",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.13,
+   "cpu_s": 1.41,
+   "instr_G": 12.2
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "axis",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.18,
+   "cpu_s": 1.9,
+   "instr_G": 15.4
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "axis",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.11,
+   "cpu_s": 1.2,
+   "instr_G": 10.1
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "axis",
+   "scale": "notext",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.1,
+   "cpu_s": 1.16,
+   "instr_G": 9.7
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "axis",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.34,
+   "cpu_s": 3.75,
+   "instr_G": 30.9
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "axis",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.15,
+   "cpu_s": 1.6,
+   "instr_G": 13.6
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "axis",
+   "scale": "text",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.14,
+   "cpu_s": 1.58,
+   "instr_G": 13.2
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "vac",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.26,
+   "cpu_s": 2.86,
+   "instr_G": 24.7
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "vac",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.16,
+   "cpu_s": 1.78,
+   "instr_G": 16.1
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "vac",
+   "scale": "notext",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.16,
+   "cpu_s": 1.76,
+   "instr_G": 15.7
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "vac",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.44,
+   "cpu_s": 4.87,
+   "instr_G": 41.8
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "vac",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.16,
+   "cpu_s": 1.7,
+   "instr_G": 15.6
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "vac",
+   "scale": "text",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.16,
+   "cpu_s": 1.64,
+   "instr_G": 14.6
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "tcp",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.47,
+   "cpu_s": 5.1,
+   "instr_G": 41.2
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "tcp",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.33,
+   "cpu_s": 3.31,
+   "instr_G": 28.7
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "tcp",
+   "scale": "notext",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.32,
+   "cpu_s": 3.29,
+   "instr_G": 28.5
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "tcp",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 0.77,
+   "cpu_s": 7.99,
+   "instr_G": 66.9
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "tcp",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 0.35,
+   "cpu_s": 3.78,
+   "instr_G": 33.4
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "tcp",
+   "scale": "text",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 0.35,
+   "cpu_s": 3.75,
+   "instr_G": 32.9
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "toolchanger",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 1.54,
+   "cpu_s": 16.87,
+   "instr_G": 140.5
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "toolchanger",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 1.14,
+   "cpu_s": 11.8,
+   "instr_G": 106.1
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "toolchanger",
+   "scale": "notext",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 1.09,
+   "cpu_s": 11.81,
+   "instr_G": 103.1
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "toolchanger",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 3.43,
+   "cpu_s": 37.26,
+   "instr_G": 318.8
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "toolchanger",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 1.31,
+   "cpu_s": 13.67,
+   "instr_G": 122.5
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "toolchanger",
+   "scale": "text",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 1.21,
+   "cpu_s": 13.25,
+   "instr_G": 117.8
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "bottler",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 3.97,
+   "cpu_s": 42.82,
+   "instr_G": 359.9
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "bottler",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 3.1,
+   "cpu_s": 34.24,
+   "instr_G": 310.6
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "bottler",
+   "scale": "notext",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 3.04,
+   "cpu_s": 33.28,
+   "instr_G": 301.6
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "bottler",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 9.02,
+   "cpu_s": 98.09,
+   "instr_G": 905.1
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "bottler",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 3.18,
+   "cpu_s": 35.25,
+   "instr_G": 324.2
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "bottler",
+   "scale": "text",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 3.11,
+   "cpu_s": 33.48,
+   "instr_G": 306.7
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "mill",
+   "scale": "notext",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 20.44,
+   "cpu_s": 223.12,
+   "instr_G": 1966.8
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "mill",
+   "scale": "notext",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 14.63,
+   "cpu_s": 159.16,
+   "instr_G": 1482.6
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "mill",
+   "scale": "notext",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 13.4,
+   "cpu_s": 147.68,
+   "instr_G": 1370.8
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "mill",
+   "scale": "text",
+   "build": "main",
+   "label_in_file": "main",
+   "wall_s": 44.32,
+   "cpu_s": 487.51,
+   "instr_G": 4440.3
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "mill",
+   "scale": "text",
+   "build": "perf_pass",
+   "label_in_file": "before",
+   "wall_s": 22.02,
+   "cpu_s": 223.69,
+   "instr_G": 2142.3
+  },
+  {
+   "file": "out4.txt",
+   "pass": 2,
+   "chart": "mill",
+   "scale": "text",
+   "build": "size_reuse",
+   "label_in_file": "after",
+   "wall_s": 19.6,
+   "cpu_s": 204.2,
+   "instr_G": 1923.0
+  }
+ ],
+ "headline": [
+  {
+   "build": "main",
+   "corpus_text_wall_s": 58.65,
+   "corpus_text_instr_G": 5833.7,
+   "corpus_notext_wall_s": 27.11,
+   "corpus_notext_instr_G": 2569.6,
+   "mill_text_wall_s": 44.32,
+   "mill_text_instr_G": 4439.7,
+   "bottler_text_wall_s": 9.02
+  },
+  {
+   "build": "faces_labels",
+   "corpus_text_wall_s": 53.54,
+   "corpus_text_instr_G": 4967.8,
+   "corpus_notext_wall_s": 25.17,
+   "corpus_notext_instr_G": 2283.7,
+   "mill_text_wall_s": 41.84,
+   "mill_text_instr_G": 3941.3,
+   "bottler_text_wall_s": 7.35
+  },
+  {
+   "build": "label_bound",
+   "corpus_text_wall_s": 35.04,
+   "corpus_text_instr_G": 3209.5,
+   "corpus_notext_wall_s": 24.57,
+   "corpus_notext_instr_G": 2277.6,
+   "mill_text_wall_s": 28.34,
+   "mill_text_instr_G": 2583.2,
+   "bottler_text_wall_s": 4.01
+  },
+  {
+   "build": "perf_pass",
+   "corpus_text_wall_s": 27.33,
+   "corpus_text_instr_G": 2667.2,
+   "corpus_notext_wall_s": 19.61,
+   "corpus_notext_instr_G": 1957.5,
+   "mill_text_wall_s": 22.02,
+   "mill_text_instr_G": 2142.0,
+   "bottler_text_wall_s": 3.18
+  },
+  {
+   "build": "size_reuse",
+   "corpus_text_wall_s": 24.72,
+   "corpus_text_instr_G": 2423.4,
+   "corpus_notext_wall_s": 18.27,
+   "corpus_notext_instr_G": 1843.0,
+   "mill_text_wall_s": 19.6,
+   "mill_text_instr_G": 1923.0,
+   "bottler_text_wall_s": 3.11
+  }
+ ],
+ "profile_aaac379": {
+  "source": ".context/prof/hier.md (hierarchical profile at aaac379; mill text / mill notext / bottler text)",
+  "items": [
+   {
+    "what": "busy cores",
+    "value": "8.7-11 of 12",
+    "meaning": "the global pool keeps the machine busy; idle 3.5-4.4% when not pre-empted"
+   },
+   {
+    "what": "phase barriers",
+    "value_pct": [
+     4,
+     5
+    ],
+    "meaning": "share of wall lost waiting at phase barriers"
+   },
+   {
+    "what": "locks / pool / copies / search memo",
+    "value_pct": [
+     0.2,
+     0.04,
+     0.6,
+     0.07
+    ],
+    "meaning": "synchronisation and bookkeeping overhead, negligible"
+   },
+   {
+    "what": "kicks share of CPU",
+    "value_pct": [
+     92,
+     90.5,
+     78
+    ],
+    "per": [
+     "mill text",
+     "mill notext",
+     "bottler text"
+    ]
+   },
+   {
+    "what": "bound pass / exact pass / winner re-derivation",
+    "value_pct": [
+     81.5,
+     15,
+     3
+    ],
+    "note": "bottler: bound 89%, exact 7%"
+   },
+   {
+    "what": "per candidate",
+    "value_pct": {
+     "first size": 15,
+     "re-order after facing": 5.4,
+     "re-size after facing": 11.9,
+     "route": 39.6,
+     "labels (inside route)": 6.6,
+     "cost_terms": 19
+    }
+   },
+   {
+    "what": "by stage",
+    "value_pct": {
+     "size": 26.8,
+     "lay_out_sub (inside size)": 14.0,
+     "cost_terms": 19.1,
+     "A*": 14.1,
+     "A* heap (inside A*)": 9.9,
+     "order": 11.8,
+     "route plan/merge": 8.9,
+     "labels": 6.6,
+     "router other": 4.6,
+     "nudge": 2.8,
+     "grid": 2.6
+    }
+   },
+   {
+    "what": "non-work (mill text CPU)",
+    "value_pct": {
+     "per-frame memo plumbing for unchanged frames": 22,
+     "facing pass redone by every candidate": [
+      17.3,
+      19.6,
+      23.3
+     ],
+     "exact pass redoing order/size/route": [
+      6.3,
+      3.2
+     ],
+     "malloc/free": 4.7,
+     "memmove/memset/memcmp": 4.8,
+     "label_segment recomputed per pass": 2.2,
+     "isqrt 32-step loop": 2.1,
+     "winner re-layout": [
+      2.5,
+      2.9
+     ],
+     "trace_sink call": [
+      0.3,
+      0.4
+     ],
+     "cost_terms grid_any": 4.5,
+     "cost_terms grids rebuilt per candidate": 1.9
+    }
+   },
+   {
+    "what": "ranked fixes (estimated, mill text)",
+    "value_pct": {
+     "reuse incumbent per-frame results + intern keys": [
+      12,
+      18
+     ],
+     "seed candidates with incumbent's turned pins": [
+      10,
+      17
+     ],
+     "incremental cost_terms": [
+      5,
+      10
+     ],
+     "exact pass keeps bound geometry": 6,
+     "radix/bucket A* queue": [
+      3,
+      6
+     ],
+     "rows pipeline without barriers (wall)": [
+      4,
+      5
+     ],
+     "per-thread candidate scratch": [
+      2,
+      3
+     ],
+     "label_segment once": 2,
+     "isqrt hw sqrt": [
+      1.5,
+      2
+     ],
+     "keep round winner": 1.5,
+     "inline trace_sink": 0.4
+    },
+    "note": "e6f1fbc landed frame reuse in ordering (62a9644), per-thread buffers, integer-Newton isqrt (7ab6cb3) and the radix-heap A* (e6f1fbc); 30f0f57 kept bound geometry; bc09ae3 size reuse"
+   }
+  ]
+ },
+ "insight_43de925": {
+  "source": ".context/insight/synthesis.md (bottler, every scored candidate logged; build 7546d1d with SCAV_INSIGHT at 43de925; text / notext)",
+  "dataset": {
+   "candidates": [
+    316831,
+    321878
+   ],
+   "candidate_cpu_s": [
+    70.5,
+    40.3
+   ]
+  },
+  "facts": [
+   {
+    "fact": "a candidate's identity is its phase-1 output, not its pins",
+    "numbers": {
+     "candidates": 316000,
+     "distinct drawings": 210000
+    },
+    "meaning": "a third of all work redraws something already drawn"
+   },
+   {
+    "fact": "a third of candidates fail Tier 0 and only routing reveals it",
+    "numbers_pct": {
+     "candidates failing": [
+      26,
+      33
+     ],
+     "their CPU": [
+      39,
+      50
+     ],
+     "flush share of failures": [
+      68,
+      99
+     ],
+     "label_over_route share (text)": 48,
+     "searches starting in violation": 50,
+     "accepted moves that are repairs": [
+      17,
+      24
+     ]
+    }
+   },
+   {
+    "fact": "labels are ~44% of a text candidate and never feed back into routes",
+    "numbers_pct": {
+     "labels of a text candidate": 44
+    }
+   },
+   {
+    "fact": "sizing has no locality",
+    "numbers_pct": {
+     "move delta exactly unchanged next round": 19,
+     "saving from lazy evaluation": [
+      2,
+      3
+     ]
+    }
+   },
+   {
+    "fact": "kicks are the waste and their winners are unpredictable",
+    "numbers_pct": {
+     "tried kicks share of CPU": 60,
+     "kicks that never beat the incumbent": 48,
+     "accepted moves improving bends": 85,
+     "pure wins": 47
+    }
+   }
+  ],
+  "exact_culls_pct": [
+   {
+    "rule": "E1 cost memo on (tuple, phase-1 order vector, face/side pins)",
+    "text": 11.0,
+    "notext": 12.1
+   },
+   {
+    "rule": "E2 alias rows differing only in an inert knob (8 of 16 rows)",
+    "text": 9.8,
+    "notext": 8.8
+   },
+   {
+    "rule": "E1 + E2",
+    "text": 20.0,
+    "notext": 19.8
+   },
+   {
+    "rule": "E3 route first, label best-first by a lower bound",
+    "text": [
+     14,
+     23
+    ],
+    "notext": null,
+    "note": "up to 33-38% if the pre-label chart rect bounds area (unmeasured); built as aaac379"
+   },
+   {
+    "rule": "E4 scorer early exit when the incumbent is Tier-0 clean",
+    "text": null,
+    "notext": [
+     3,
+     6
+    ]
+   },
+   {
+    "rule": "E5 reversal canonicalisation",
+    "text": 3.9,
+    "notext": 6.4
+   },
+   {
+    "rule": "E6 abort routing once per-frame flush exceeds the incumbent's t0",
+    "text": null,
+    "notext": null,
+    "note": "unmeasured; pool 39% text / 50% notext"
+   }
+  ],
+  "exact_total": "~35-50% of search CPU at text (1.5-2x), ~25% at notext before E6"
+ }
+}

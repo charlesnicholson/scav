@@ -274,8 +274,8 @@ struct CostTerms {
   int64_t crossings{ 0 };   // properly crossing route segment pairs
   int64_t excess_len{ 0 };  // over min_len, charged per crossing on the edge
   int64_t adjacency{ 0 };   // sibling submachine pairs joined but not adjacent
-  // Per placed box: another box, another transition's route, and per state its
-  // `before`/`after` bands if it encloses an endpoint, else its whole rect.
+  // Per placed box: another box, and the `before`/`after` bands of each state enclosing
+  // both endpoints.
   int64_t label{ 0 };
   // Per placed box: how far short of its own height the box falls of being
   // nearer its own route than every other transition's.
@@ -314,6 +314,10 @@ struct CostTerms {
   // route that stops and another that starts rather than one that turns
   // (11.10g).
   int32_t retrace{ 0 };
+  // Per placed box, each state rect it overlaps but those enclosing both endpoints.
+  int32_t label_over_box{ 0 };
+  // Per placed box, each segment of another transition's route it overlaps.
+  int32_t label_over_route{ 0 };
 };
 
 // Compared lexicographically, in this order.

@@ -105,6 +105,8 @@
       "flush": 0,
       "through_region": 0,
       "retrace": 0,
+      "label_over_box": 0,
+      "label_over_route": 0,
       "bends": 2,
       "corridor": 0,
       "crossings": 0,

@@ -346,6 +346,10 @@ void append_geometry_text(std::string &out,
   append_i32v(out, terms.through_region);
   out += " retrace ";
   append_i32v(out, terms.retrace);
+  out += " label_over_box ";
+  append_i32v(out, terms.label_over_box);
+  out += " label_over_route ";
+  append_i32v(out, terms.label_over_route);
   out += '\n';
   for (uint32_t i = 0; i < TIER2_TERMS; ++i) {
     out += "    ";
@@ -607,6 +611,10 @@ void append_geometry_json(std::string &out,
   append_i32v(out, terms.through_region);
   out += ",\n      \"retrace\": ";
   append_i32v(out, terms.retrace);
+  out += ",\n      \"label_over_box\": ";
+  append_i32v(out, terms.label_over_box);
+  out += ",\n      \"label_over_route\": ";
+  append_i32v(out, terms.label_over_route);
   for (uint32_t i = 0; i < TIER2_TERMS; ++i) {
     out += ",\n      ";
     append_json_string(out, TERMS[i]);

@@ -3,10 +3,13 @@
 
 #include "layout/decompose.h"
 
+#include "layout/memo.h"
+#include "layout/order.h"
 #include "scav/scav_core.h"
 #include "scav_vec.h"
 
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace scav {
@@ -176,6 +179,12 @@ SplitGraph decompose(Chart const &c) {
     g.trans_segments[t] =
         make_span(first_segment, static_cast<uint32_t>(g.segments.size()) - first_segment);
   }
+  // Filled apart from `g`, since `label_segment` reads the table once it is there.
+  std::vector<uint32_t> label;
+  vec_assign(label, c.transitions.size(), INVALID);
+  for (uint32_t t = 0; t < label.size(); ++t) { label[t] = label_segment(c, g, t); }
+  g.trans_label = std::move(label);
+  g.serial = memo_serial();
   return g;
 }
 

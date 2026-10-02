@@ -12,6 +12,7 @@
 #include "scav_vec.h"
 
 #include <array>
+#include <bit>
 #include <cstdint>
 #include <vector>
 
@@ -65,6 +66,73 @@ OrthoFrontierEntry heap_pop(std::vector<OrthoFrontierEntry> &heap) {
   heap[i] = last;
   return top;
 }
+
+// `f` as an unsigned key in the same order.
+uint64_t radix_key(Wide f) { return static_cast<uint64_t>(f) ^ (UINT64_C(1) << 63U); }
+
+// Into `ties` at `last`, else the bucket of the highest bit it differs from `last` in.
+void radix_place(OrthoRadixHeap &h, OrthoFrontierEntry const &e) {
+  uint64_t const diff{ radix_key(e.f) ^ h.last };
+  if (diff == 0) {
+    heap_push(h.ties, e);
+    return;
+  }
+  uint32_t const b{ static_cast<uint32_t>(std::bit_width(diff)) - 1U };
+  vec_push_back(h.bucket[b], e);
+  h.full |= UINT64_C(1) << b;
+}
+
+}  // namespace
+
+void ortho_open_clear(OrthoRadixHeap &h) {
+  for (uint64_t full{ h.full }; full != 0; full &= full - 1) {
+    h.bucket[static_cast<uint32_t>(std::countr_zero(full))].clear();
+  }
+  h.ties.clear();
+  h.full = 0;
+  h.last = 0;
+}
+
+bool ortho_open_empty(OrthoRadixHeap const &h) { return h.ties.empty() && (h.full == 0); }
+
+void ortho_open_push(OrthoRadixHeap &h, OrthoFrontierEntry const &e) {
+  uint64_t const key{ radix_key(e.f) };
+  if (key < h.last) {
+    // Below the least: lower `last` and re-place everything, so each bucket's rule holds.
+    h.spill.clear();
+    for (OrthoFrontierEntry const &t : h.ties) { vec_push_back(h.spill, t); }
+    for (uint64_t full{ h.full }; full != 0; full &= full - 1) {
+      std::vector<OrthoFrontierEntry> &from{
+        h.bucket[static_cast<uint32_t>(std::countr_zero(full))]
+      };
+      for (OrthoFrontierEntry const &t : from) { vec_push_back(h.spill, t); }
+      from.clear();
+    }
+    h.ties.clear();
+    h.full = 0;
+    h.last = key;
+    for (OrthoFrontierEntry const &t : h.spill) { radix_place(h, t); }
+  }
+  radix_place(h, e);
+}
+
+OrthoFrontierEntry ortho_open_pop(OrthoRadixHeap &h) {
+  if (h.ties.empty()) {
+    // The lowest bucket holds the least `f`; it becomes `last` and the bucket re-places
+    // into lower ones and `ties`.
+    auto const b{ static_cast<uint32_t>(std::countr_zero(h.full)) };
+    std::vector<OrthoFrontierEntry> &from{ h.bucket[b] };
+    uint64_t least{ radix_key(from[0].f) };
+    for (OrthoFrontierEntry const &t : from) { least = imin(least, radix_key(t.f)); }
+    h.last = least;
+    h.full &= ~(UINT64_C(1) << b);
+    for (OrthoFrontierEntry const &t : from) { radix_place(h, t); }
+    from.clear();
+  }
+  return heap_pop(h.ties);
+}
+
+namespace {
 
 Wide distance(int32_t a, int32_t b) { return (a < b) ? (Wide{ b } - a) : (Wide{ a } - b); }
 
@@ -248,7 +316,7 @@ uint32_t ortho_index_of(std::vector<int32_t> const &v, int32_t at) {
 }
 
 bool ortho_escape_horizontal(scav_point toward, scav_rect const &r) {
-  // The dominant separation picks the axis, a tie going to the layering axis x.
+  // The dominant separation picks the axis, a tie going to x.
   return beyond(toward.x, r.x, r.w) >= beyond(toward.y, r.y, r.h);
 }
 
@@ -947,7 +1015,7 @@ bool ortho_search(OrthoGrid const &g,
   }
   uint32_t const gen{ s.generation };
   OrthoNodeState *const state{ s.state.data() };
-  std::vector<OrthoFrontierEntry> &heap{ s.heap };
+  OrthoRadixHeap &open{ s.open };
   uint32_t const nx{ g.nx() };
   uint32_t const ny{ g.ny() };
   int32_t const *const xs{ g.xs.data() };
@@ -973,7 +1041,7 @@ bool ortho_search(OrthoGrid const &g,
            (settle ? end_turn_w : Wide{ 0 });
   };
 
-  heap.clear();
+  ortho_open_clear(open);
   {
     Wide const dx{ distance(xs[from % nx], goal.x) };
     Wide const dy{ distance(ys[from / nx], goal.y) };
@@ -982,14 +1050,14 @@ bool ortho_search(OrthoGrid const &g,
       if ((from_plane < 2) && (plane != from_plane)) { continue; }
       uint32_t const node{ (from * 2) + plane };
       state[node] = { .stamp = gen, .parent = INVALID, .best = 0 };
-      heap_push(heap, { .f = heuristic(dx, dy, plane), .g = 0, .node = node });
+      ortho_open_push(open, { .f = heuristic(dx, dy, plane), .g = 0, .node = node });
     }
   }
 
   uint32_t expansions{ 0 };
   uint32_t reached{ INVALID };
-  while (!heap.empty()) {
-    OrthoFrontierEntry const top{ heap_pop(heap) };
+  while (!ortho_open_empty(open)) {
+    OrthoFrontierEntry const top{ ortho_open_pop(open) };
     uint32_t const node{ top.node };
     OrthoNodeState const &here{ state[node] };
     if ((here.stamp != gen) || (top.g != here.best)) { continue; }
@@ -1012,7 +1080,7 @@ bool ortho_search(OrthoGrid const &g,
       OrthoNodeState &there{ state[next] };
       if ((there.stamp == gen) && (there.best <= g_next)) { return; }
       there = { .stamp = gen, .parent = node, .best = g_next };
-      heap_push(heap, { .f = g_next + h, .g = g_next, .node = next });
+      ortho_open_push(open, { .f = g_next + h, .g = g_next, .node = next });
     };
 
     // The turn, an end's where it leaves a fixed start or settles into the goal's

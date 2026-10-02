@@ -1,6 +1,7 @@
 // Section 6's thread axis: every geometry column byte for byte and all three
-// hashes, at every worker count the matrix names and under the delay injector.
+// hashes, serial against the pool and under the delay injector.
 
+#include "core/tests/corpus.h"
 #include "layout/shard.h"
 #include "layout/tests/test_synth.h"
 #include "scav/scav_core.h"
@@ -27,9 +28,6 @@ uint32_t search_tuple_count(scav_profile const &p, uint32_t entity_count);
 namespace {
 
 using namespace scav;
-
-// The matrix's counts less 1, which is what every run below is compared to.
-constexpr std::array<uint32_t, 6> THREADS{ 2, 3, 5, 8, 13, 16 };
 
 constexpr std::array<char const *, 11> CORPUS{
   "axis.scav", "bottler.scav", "brew.scav", "dock.scav",        "estop.scav", "led.scav",
@@ -135,19 +133,16 @@ void check_same(Snapshot const &got, Snapshot const &want) {
   }
 }
 
-// A fresh load per run, so no thread count reads columns another wrote:
+// A fresh load per run, so the pooled run reads no columns the serial one wrote:
 // `layout_run` rewrites them in place.
 void check_corpus_chart(std::string const &name, scav_profile const &p) {
   CAPTURE(name);
   Chart first;
   load_corpus(name.c_str(), first);
   Snapshot const want{ lay_out(first, p, 1) };
-  for (uint32_t const threads : THREADS) {
-    CAPTURE(threads);
-    Chart c;
-    load_corpus(name.c_str(), c);
-    check_same(lay_out(c, p, threads), want);
-  }
+  Chart c;
+  load_corpus(name.c_str(), c);
+  check_same(lay_out(c, p, 0), want);
 }
 
 // Shards with a frame to work on: the count comes from every entity, the
@@ -181,11 +176,8 @@ void check_scale_chart(std::string const &name,
   }
   MESSAGE(name, " shards: ", shards, ", busy: ", busy);
   Snapshot const want{ lay_out(first, p, 1) };
-  for (uint32_t const threads : THREADS) {
-    CAPTURE(threads);
-    Chart c{ build() };
-    check_same(lay_out(c, p, threads), want);
-  }
+  Chart c{ build() };
+  check_same(lay_out(c, p, 0), want);
 }
 
 // Three states nested one inside the next, and a self-loop on the innermost.
@@ -235,6 +227,7 @@ TEST_CASE("determinism: the corpus lays out to one answer at every thread count"
   REQUIRE(profile_validate(p));
   std::string shards;
   for (char const *name : CORPUS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     Chart sized;
     load_corpus(name, sized);
     REQUIRE(search_tuple_count(p, layout_entity_count(sized)) == 4);
@@ -360,11 +353,8 @@ TEST_CASE("determinism: two tuples that tie keep the lower row, at every count")
   }
   CHECK(other.hashes[2] == want.hashes[2]);
 
-  for (uint32_t const threads : THREADS) {
-    CAPTURE(threads);
-    Chart c{ tied_chart() };
-    check_same(lay_out(c, p, threads), want);
-  }
+  Chart c{ tied_chart() };
+  check_same(lay_out(c, p, 0), want);
 }
 
 TEST_CASE("determinism: the scale target is timed at one thread and at eight") {

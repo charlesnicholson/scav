@@ -1,0 +1,241 @@
+<section class="sx" id="fast" data-toc="11 · Making it fast">
+  <div class="kicker">Speed without changing a drawing</div>
+  <h2>Making the search fast, exactly</h2>
+  <p class="lede">Every optimisation here is <b>exact</b>: with or without it, every drawing is byte-identical.</p>
+
+  <div class="callout rule"><span class="t">Rule</span>Each optimisation has a test mode that runs the unoptimised computation alongside and compares, with a planted defect proving the comparison can fail.</div>
+
+  <p>Every optimisation exploits one fact: <b>a candidate is the incumbent plus one pin, so almost everything it computes has been computed before.</b> Before them, one <code>bottler</code> layout ran Brandes–Köpf 19.8 million times for 69,496 distinct graphs. A general lower bound does not help, because most losing candidates land within 1% of the incumbent; the label bound below works because it bounds only the label half of the cost.</p>
+  <div data-fig="fast-perf"></div>
+
+  <h3>Frame memos</h3>
+  <p>Each thread keeps four <a href="#principles">memos</a>, each keyed on everything its step reads: Brandes–Köpf by the whole graph, each <a href="#decompose">frame</a>'s ordering and sizing by that frame's inputs and pins, and each label's placement by its box, route and nearby obstacles. Keys are interned, so a frame is named by a serial number rather than spelled out. Each memo is capped at 4 MiB per thread. Traced runs bypass the ordering and sizing memos.</p>
+
+  <h3>Ordering and sizing reuse</h3>
+  <p>Even a memo hit builds and hashes a key; reuse skips that. An ordering records what each frame read beyond the graph (its pins, label charges, orientation and the profile). A candidate compares those records with the incumbent's, orders only the frames that differ, and copies the rest. Sizing does the same, except that a frame's size depends on its children's, so every frame holding a changed one is re-sized too. Most frames are copied.</p>
+  <div data-fig="fast-reuse"></div>
+
+  <h3>The face shortcut</h3>
+  <p>Ordering, sizing and the facing pass never read a face pin, so a face candidate starts from the incumbent's sizing and only routes and scores, at about a quarter of the cost; it also keeps every label nothing it reads has changed. A face that would not move its seat draws the incumbent exactly, so it is charged but not scored, and faces are offered only where the <a href="#search">move table</a> says they are priced.</p>
+
+  <h3>The label bound</h3>
+  <p>Labels are placed last and read only the routes, so a round with labels runs in two passes:</p>
+  <ol>
+    <li>Route every candidate without labels and score a <b>lower bound</b>: label terms are zero, and area is measured on the unlabelled chart.</li>
+    <li>Visit candidates whose bound beats the incumbent, least bound first. Label and score each exactly while its bound can still beat the best so far; stop at the first that cannot.</li>
+  </ol>
+  <p>The pick is exactly what scoring every candidate whole would give, and most candidates never place their labels. The 128 most promising candidates keep their routes from the first pass, so their exact pass does not route again.</p>
+  <div data-fig="fast-bound"></div>
+
+  <h3>Smaller wins</h3>
+  <ul>
+    <li><b>No allocation</b>: every stage fills per-thread buffers reused across candidates; ordering keeps one per nesting depth, because a waiting thread may run a nested candidate.</li>
+    <li><b>Radix A* queue</b>: A* pops in a strict total order, so any exact priority queue gives the same sequence; a radix heap is faster.</li>
+    <li><b>Integer square root</b> by Newton's method from above, checked exhaustively over all 32-bit inputs.</li>
+    <li><b>One global pool</b>: nested work (rows, searches, candidate rounds) shares <a href="#principles">one pool</a>, so no call site divides the cores among its children, and the <a href="#search">search memo</a> removes repeated searches.</li>
+  </ul>
+  <div class="callout why"><span class="t">Rejected</span>Depth caps and early abandonment of kicks; budgets that shrink with chart size, since searching a big chart less concedes the goal.</div>
+</section>
+<script>
+// Figure: corpus cost per build, from perf.json.
+window.SXfastPerf = function (sec) {
+  var P = SX.data('perf');
+  var f = SX.figure(sec.querySelector('[data-fig="fast-perf"]'), { caption: '<b>Pick a metric and a chart</b>; <b>hover</b> for each build\'s numbers. Instructions are the steady metric. Each <i>vs main</i> divides by main measured in the same run, which the run column names. The faces build redraws axis, bottler, mill and toolchanger; every later build draws what faces draws.' });
+  var builds = P.builds, metric = 'instr_G', chart = 'corpus';
+  var SHORT = { main: 'main', faces_labels: 'faces', label_bound: 'label bound', perf_pass: 'perf pass', size_reuse: 'size reuse' };
+  var TICK = { main: 'main', faces_labels: 'faces', label_bound: 'bound', perf_pass: 'perf', size_reuse: 'size' };
+  var METRIC = { instr_G: { label: 'instructions (G)', fmt: function (v) { return SX.fmt(Math.round(v)) + ' G'; } }, wall_s: { label: 'wall clock (s)', fmt: function (v) { return v.toFixed(v < 10 ? 2 : 1) + ' s'; } }, cpu_s: { label: 'CPU (s)', fmt: function (v) { return v.toFixed(1) + ' s'; } } };
+  f.ctrl.appendChild(SX.choice({ options: [{ value: 'instr_G', label: 'Instructions' }, { value: 'wall_s', label: 'Wall clock' }, { value: 'cpu_s', label: 'CPU' }], value: metric, onChange: function (v) { metric = v; draw(); } }).el);
+  f.ctrl.appendChild(SX.choice({ options: [{ value: 'corpus', label: 'Corpus (11 charts)' }, { value: 'mill', label: 'mill' }, { value: 'bottler', label: 'bottler' }, { value: 'toolchanger', label: 'toolchanger' }], value: chart, onChange: function (v) { chart = v; draw(); } }).el);
+  var title = SX.el('div', { style: { fontSize: '13px', color: 'var(--text-secondary)', margin: '0 0 2px' } }); f.stage.appendChild(title);
+  var out = SX.el('div'); f.stage.appendChild(out);
+  var tab = SX.el('div'); f.stage.appendChild(tab);
+  function rec(b, scale) { return chart === 'corpus' ? P.corpus[b.id][scale] : P.per_chart[b.id][scale][chart]; }
+  function val(b, scale) { var r = rec(b, scale); return r ? r[metric] : null; }
+  // main's best pass per chart in `file`, summed as perf.json's corpus figures are.
+  function mainIn(file, scale) {
+    var best = {};
+    P.raw.forEach(function (r) {
+      if (r.file !== file || r.build !== 'main' || r.scale !== scale || (chart !== 'corpus' && r.chart !== chart)) return;
+      best[r.chart] = Math.min(best[r.chart] == null ? Infinity : best[r.chart], r[metric]);
+    });
+    return Object.keys(best).reduce(function (s, c) { return s + best[c]; }, 0);
+  }
+  function draw() {
+    var series = [{ name: 'real text', scale: 'text' }, { name: 'no text', scale: 'notext' }].map(function (s) {
+      return { name: s.name, points: builds.map(function (b, i) { return [i, val(b, s.scale), SHORT[b.id] + ' (' + b.commit + ')']; }) };
+    });
+    var M = METRIC[metric];
+    title.textContent = M.label + ', ' + (chart === 'corpus' ? 'sum over the 11 corpus charts' : chart) + ', per build';
+        SX.lineChart(out, { series: series, xLabel: 'build', markers: true, height: 250, yMin: 0, xTicks: builds.map(function (b, i) { return i; }), xFormat: function (i) { return TICK[builds[i].id] || ''; }, yFormat: function (v) { return metric === 'instr_G' ? SX.fmt(v) : String(v); } });
+    var t = SX.el('table', { class: 'sx-table', style: { fontSize: '13px' } });
+    t.appendChild(SX.el('tr', null, SX.el('th', { text: 'build' }), SX.el('th', { text: 'commit' }), SX.el('th', { text: 'what it added' }), SX.el('th', { text: 'run' }), SX.el('th', { class: 'num', text: 'real text' }), SX.el('th', { class: 'num', text: 'vs main' }), SX.el('th', { class: 'num', text: 'no text' }), SX.el('th', { class: 'num', text: 'vs main' })));
+    builds.forEach(function (b) {
+      var x = val(b, 'text'), y = val(b, 'notext'), run = rec(b, 'text').source;
+      function pct(v, scale) { return v == null || b.id === 'main' ? '' : ((v / mainIn(rec(b, scale).source, scale) - 1) * 100).toFixed(1) + '%'; }
+      t.appendChild(SX.el('tr', null, SX.el('td', { text: SHORT[b.id] }), SX.el('td', null, SX.el('code', { text: b.commit })), SX.el('td', { text: b.label.replace(/^main: /, '') }), SX.el('td', { text: run.replace(/^out(\d+)\.txt$/, '$1') }),
+        SX.el('td', { class: 'num', text: x == null ? '' : M.fmt(x) }), SX.el('td', { class: 'num', text: pct(x, 'text') }), SX.el('td', { class: 'num', text: y == null ? '' : M.fmt(y) }), SX.el('td', { class: 'num', text: pct(y, 'notext') })));
+    });
+    tab.innerHTML = ''; tab.appendChild(t);
+  }
+  draw();
+};
+</script>
+<script>
+// Figure: which of toolchanger's frames a candidate re-orders, re-sizes or copies.
+window.SXfastReuse = function (sec) {
+  var g = SX.data('charts').charts.toolchanger.text;
+  var f = SX.figure(sec.querySelector('[data-fig="fast-reuse"]'), { caption: '<b>Click a frame</b> to pin a rank in it: ordering redoes that frame, sizing also every frame holding it. A face pin skips both.' });
+  var subs = g.subs, N = subs.length, parent = {}, depth = {}, kids = {};
+  subs.forEach(function (s) { parent[s.id] = s.owner == null ? null : g.states[s.owner].parent_sub; });
+  subs.forEach(function (s) { var d = 0, p = parent[s.id]; while (p != null) { d++; p = parent[p]; } depth[s.id] = d; (kids[parent[s.id]] = kids[parent[s.id]] || []).push(s.id); });
+  function label(s) { if (s.owner == null) return 'root'; var p = g.states[s.owner].path.replace(/:[a-z]+\//g, '/'); return p + (s.name ? ' · ' + s.name : ''); }
+  // tidy layout: leaves left to right, parents centred over children
+  var pos = {}, nextX = 0;
+  (function place(id) { var c = kids[id] || []; if (!c.length) pos[id] = nextX++; else { c.forEach(place); pos[id] = (pos[c[0]] + pos[c[c.length - 1]]) / 2; } })(0);
+  var picked = 2, mode = 'rank';
+  f.ctrl.appendChild(SX.choice({ options: [{ value: 'rank', label: 'Rank pin in the clicked frame' }, { value: 'face', label: 'Face pin (any frame)' }], value: mode, onChange: function (v) { mode = v; draw(); } }).el);
+  var readout = SX.el('span', { class: 'note' }); f.ctrl.appendChild(readout);
+  function draw() {
+    var reorder = {}, resize = {};
+    if (mode === 'rank') { reorder[picked] = 1; for (var p = picked; p != null; p = parent[p]) resize[p] = 1; }
+    var maxX = nextX - 1, W = 1000, colW = W / 2, H = 260;
+    var svg = SX.svg('svg', { viewBox: '0 0 ' + W + ' ' + H, style: { width: '100%', height: 'auto', font: '12px ' + SX.css('--sans') } });
+    [['Ordering (phase 1)', reorder, '--series-2'], ['Sizing (phase 2)', resize, '--series-1']].forEach(function (pane, k) {
+      var x0 = k * colW, set = pane[1];
+      svg.appendChild(SX.svg('text', { x: x0 + 16, y: 20, fill: SX.css('--text-primary'), 'font-weight': 600, text: pane[0] }));
+      var X = function (id) { return x0 + 40 + pos[id] / Math.max(maxX, 1) * (colW - 150); }, Y = function (id) { return 56 + depth[id] * 62; };
+      subs.forEach(function (s) { if (parent[s.id] != null) svg.appendChild(SX.svg('line', { x1: X(parent[s.id]) + 30, y1: Y(parent[s.id]) + 13, x2: X(s.id) + 30, y2: Y(s.id) - 13, stroke: SX.css('--axis'), 'stroke-width': 1.5 })); });
+      subs.forEach(function (s) {
+        var on = !!set[s.id], gnode = SX.svg('g', { style: { cursor: 'pointer' } });
+        var box = SX.svg('rect', { x: X(s.id) - 22, y: Y(s.id) - 13, width: 104, height: 26, rx: 6, stroke: on ? SX.css(pane[2]) : SX.css('--axis'), 'stroke-width': s.id === picked && mode === 'rank' ? 2.5 : 1.2 });
+        box.style.fill = on ? 'color-mix(in srgb, var(' + pane[2] + ') 30%, var(--surface-1))' : 'var(--surface-2)';
+        gnode.appendChild(box);
+        gnode.appendChild(SX.svg('text', { x: X(s.id) + 30, y: Y(s.id) + 4, 'text-anchor': 'middle', fill: on ? SX.css('--text-primary') : SX.css('--text-muted'), 'font-weight': on ? 600 : 400, text: on ? 'recompute' : 'copy' }));
+        gnode.addEventListener('click', function () { picked = s.id; mode = 'rank'; draw(); });
+        SX.tipOn(gnode, '<b>frame ' + s.id + '</b>: ' + label(s) + '<br>' + s.children.length + ' children<br>' + (on ? 'recomputed' : 'copied from the incumbent'));
+        svg.appendChild(gnode);
+        svg.appendChild(SX.svg('text', { x: X(s.id) + 30, y: Y(s.id) + 27, 'text-anchor': 'middle', fill: SX.css('--text-muted'), 'font-size': 10.5, 'pointer-events': 'none', text: label(s).length > 22 ? label(s).slice(0, 21) + '…' : label(s) }));
+      });
+    });
+    var nO = Object.keys(reorder).length, nS = Object.keys(resize).length;
+    readout.textContent = mode === 'rank' ? 'rank pin in frame ' + picked + ': re-order ' + nO + ' of ' + N + ' frames, re-size ' + nS + ' of ' + N + ', copy the rest' : 'face pin: phases 1 and 2 are the incumbent\'s; only routing and scoring run';
+    f.stage.innerHTML = ''; f.stage.appendChild(svg);
+    f.stage.appendChild(SX.el('div', { class: 'legend' }, SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'color-mix(in srgb, var(--series-2) 30%, var(--surface-1))', border: '1px solid var(--series-2)' } }), 're-ordered'), SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'color-mix(in srgb, var(--series-1) 30%, var(--surface-1))', border: '1px solid var(--series-1)' } }), 're-sized'), SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--surface-2)', border: '1px solid var(--axis)' } }), 'copied')));
+  }
+  draw();
+};
+</script>
+<script>
+// Figure: least_by_bound on a real labelled round.
+window.SXfastBound = function (sec) {
+  var Sx = SX.data('search').charts.brew;
+  var f = SX.figure(sec.querySelector('[data-fig="fast-bound"]'), { caption: '<b>Step</b> through one labelled round: bounds first (bars), then exact scores in bound order until a bound cannot win. The brew rounds are real; the toy labels more than one.' });
+  var src = 'r1', st = null;
+  function rows(key) {
+    return Sx[key].candidates.map(function (c, k) { return { k: k, what: c.what.replace(/ \(0 left,1 right,2 top,3 bottom\)$/, ''), move: c.move, t0: c.t0, t2: c.t2, b0: c.bound[0], b2: c.bound[1], inside: c.inside }; });
+  }
+  var SETS = {
+    r1: { name: 'brew round 1', inc: { t0: Sx.steps[0].cost.t0, t2: Sx.steps[0].cost.t2 }, c: rows('round_1_candidates') },
+    r2: { name: 'brew round 2', inc: { t0: Sx.steps[1].cost.t0, t2: Sx.steps[1].cost.t2 }, c: rows('round_2_candidates') },
+    toy: { name: 'toy round (synthetic)', inc: { t0: 0, t2: 130 }, c: [111, 103, 120, 100, 108, 103, 135, 102, 115, 110, 140, 105, 128, 150, 118, 125].map(function (b, k) {
+      var lab = [3, 7, 4, 9, 1, 0, 5, 2, 6, 2, 8, 1, 4, 3, 2, 5][k];
+      return { k: k, what: 'toy candidate ' + k, move: 'toy', t0: 0, t2: b + lab, b0: 0, b2: b, inside: true };
+    }) }
+  };
+  f.ctrl.appendChild(SX.choice({ options: [{ value: 'r1', label: 'brew round 1' }, { value: 'r2', label: 'brew round 2' }, { value: 'toy', label: 'toy' }], value: src, onChange: function (v) { src = v; build(); } }).el);
+  var stHost = SX.el('span'); f.ctrl.appendChild(stHost);
+  var text = SX.el('div', { class: 'callout', style: { maxWidth: 'none', minHeight: '64px' } }), plot = SX.el('div');
+  f.stage.appendChild(text); f.stage.appendChild(plot);
+  function less(a0, a2, b0, b2) { return a0 !== b0 ? a0 < b0 : a2 < b2; }
+  // least_by_bound, as layout.cpp runs it, recording each step.
+  function run(S) {
+    var C = S.c, inc = S.inc, order = C.filter(function (c) { return less(c.b0, c.b2, inc.t0, inc.t2); }).map(function (c) { return c.k; });
+    order.sort(function (a, b) { return less(C[a].b0, C[a].b2, C[b].b0, C[b].b2) ? -1 : less(C[b].b0, C[b].b2, C[a].b0, C[a].b2) ? 1 : a - b; });
+    var best = { t0: inc.t0, t2: inc.t2 }, win = -1, at = 0, frames = [];
+    frames.push({ kind: 'bounds' }); frames.push({ kind: 'sorted', order: order });
+    function beats(c0, c2, k) { return less(c0, c2, best.t0, best.t2) || (win >= 0 && k < win && !less(best.t0, best.t2, c0, c2)); }
+    for (; at < order.length && beats(C[order[at]].b0, C[order[at]].b2, order[at]); at++) {
+      var c = C[order[at]], took = beats(c.t0, c.t2, c.k);
+      if (took) { best = { t0: c.t0, t2: c.t2 }; win = c.k; }
+      frames.push({ kind: 'exact', at: at, k: c.k, took: took, best: { t0: best.t0, t2: best.t2 }, win: win });
+    }
+    frames.push({ kind: 'stop', at: at, best: best, win: win, stopper: at < order.length ? order[at] : -1 });
+    return { order: order, frames: frames };
+  }
+  function build() {
+    var S = SETS[src], R = run(S), C = S.c, n = C.length;
+    var W = 1000, H = 300, m = { l: 64, r: 14, t: 16, b: 30 };
+    var vmax = Math.max.apply(null, C.map(function (c) { return c.t2; }).concat([S.inc.t2])) * 1.06;
+    var bw = (W - m.l - m.r) / n, Y = function (v) { return H - m.b - v / vmax * (H - m.t - m.b); };
+    var svg = SX.svg('svg', { viewBox: '0 0 ' + W + ' ' + H, style: { width: '100%', height: 'auto', font: '12px ' + SX.css('--sans') } });
+    for (var q = 0; q <= 4; q++) {
+      var v = vmax * q / 4;
+      svg.appendChild(SX.svg('line', { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: SX.css('--grid'), 'stroke-width': 1 }));
+      svg.appendChild(SX.svg('text', { x: m.l - 8, y: Y(v) + 4, 'text-anchor': 'end', fill: SX.css('--text-muted'), text: SX.fmt(Math.round(v)) }));
+    }
+    svg.appendChild(SX.svg('text', { x: 8, y: 12, fill: SX.css('--text-secondary'), text: 't2' }));
+    var axisLab = SX.svg('text', { x: (W + m.l) / 2, y: H - 8, 'text-anchor': 'middle', fill: SX.css('--text-muted') }); svg.appendChild(axisLab);
+    var incLine = SX.svg('line', { x1: m.l, x2: W - m.r, y1: Y(S.inc.t2), y2: Y(S.inc.t2), stroke: SX.css('--text-secondary'), 'stroke-width': 1.5, 'stroke-dasharray': '6 4' }); svg.appendChild(incLine);
+    var bestLine = SX.svg('line', { x1: m.l, x2: W - m.r, stroke: SX.css('--text-primary'), 'stroke-width': 2, visibility: 'hidden' }); svg.appendChild(bestLine);
+    var bars = C.map(function (c) {
+      var gq = SX.svg('g'); gq.style.transition = 'transform 0.7s ease';
+      var hb = H - m.b - Y(c.b2), he = Y(c.b2) - Y(c.t2);
+      var rb = SX.svg('rect', { x: 0.5, y: Y(c.b2), width: Math.max(bw - 1, 1), height: Math.max(hb, 0.5), fill: c.b0 ? 'none' : SX.css('--series-1'), stroke: SX.css('--series-1'), 'stroke-width': c.b0 ? 1 : 0 });
+      var re = SX.svg('rect', { x: 0.5, y: Y(c.t2), width: Math.max(bw - 1, 1), height: Math.max(he, 0), fill: SX.css('--series-2'), visibility: 'hidden' });
+      var hit = SX.svg('rect', { x: 0, y: m.t, width: bw, height: H - m.t - m.b, fill: 'transparent' });
+      gq.appendChild(rb); gq.appendChild(re); gq.appendChild(hit);
+      SX.tipOn(hit, function () {
+        return '<b>' + c.what + '</b><br>bound t0 ' + c.b0 + ' · t2 ' + SX.fmt(c.b2) + (c.labelled ? '<br>exact t0 ' + c.t0 + ' · t2 ' + SX.fmt(c.t2) + ' (labels +' + SX.fmt(c.t2 - c.b2) + ')' : '<br><span class="m">' + (c.out ? 'bound does not beat the incumbent: never labelled' : 'not labelled yet') + '</span>') +
+          (c.inside ? '' : '<br><span class="m">a label pokes out of the unlabelled drawing, so scav\'s bound is a little lower</span>');
+      });
+      svg.appendChild(gq);
+      return { g: gq, rb: rb, re: re, c: c };
+    });
+    plot.innerHTML = '';
+    plot.appendChild(SX.el('div', { class: 'legend' },
+      SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--series-1)' } }), 'bound (routed, no labels)'),
+      SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--series-2)' } }), 'label cost, once scored exactly'),
+      SX.el('span', null, SX.el('span', { class: 'swatch', style: { border: '1px solid var(--series-1)' } }), 'bound breaks Tier 0'),
+      SX.el('span', null, SX.el('span', { class: 'swatch', style: { borderTop: '2px dashed var(--text-secondary)', height: 0 } }), 'incumbent ' + (S.inc.t0 ? 't0 ' + S.inc.t0 + ' · ' : '') + 't2 ' + SX.fmt(S.inc.t2)),
+      SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--text-primary)', height: '2px' } }), 'best exact so far')));
+    plot.appendChild(svg);
+    var pos = {}; R.order.forEach(function (k, j) { pos[k] = j; });
+    var outs = C.filter(function (c) { return pos[c.k] == null; }).map(function (c) { return c.k; });
+    function show(fi) {
+      var fr = R.frames[fi], sorted = fi >= 1, done = {};
+      R.frames.slice(2, fi + 1).forEach(function (x) { if (x.kind === 'exact') done[x.k] = x; });
+      bars.forEach(function (b) {
+        var c = b.c, j = sorted ? (pos[c.k] != null ? pos[c.k] : R.order.length + outs.indexOf(c.k)) : c.k;
+        b.g.style.transform = 'translate(' + (m.l + j * bw) + 'px, 0)';
+        c.out = sorted && pos[c.k] == null; c.labelled = !!done[c.k];
+        var never = c.out || (fr.kind === 'stop' && !c.labelled);
+        b.g.style.opacity = never ? 0.28 : 1;
+        b.re.setAttribute('visibility', c.labelled ? 'visible' : 'hidden');
+        b.rb.setAttribute('stroke-width', fr.kind === 'stop' && c.k === fr.stopper ? 2.5 : (c.b0 ? 1 : 0));
+        b.rb.setAttribute('stroke', fr.kind === 'stop' && c.k === fr.stopper ? SX.css('--text-primary') : SX.css('--series-1'));
+        if (fr.kind === 'stop' && c.k === fr.stopper) b.g.style.opacity = 1;
+      });
+      var last = null; R.frames.slice(0, fi + 1).forEach(function (x) { if (x.best) last = x.best; });
+      if (last) { bestLine.setAttribute('y1', Y(last.t2)); bestLine.setAttribute('y2', Y(last.t2)); bestLine.setAttribute('visibility', 'visible'); } else bestLine.setAttribute('visibility', 'hidden');
+      axisLab.textContent = sorted ? 'candidates by (bound, index); dropped ones at the right' : 'candidates in enumeration order';
+      var nlab = Object.keys(done).length, msg;
+      if (fr.kind === 'bounds') msg = 'All ' + n + ' candidates routed in parallel <b>without labels</b>; each gets a lower bound.';
+      else if (fr.kind === 'sorted') msg = R.order.length + ' of ' + n + ' bounds beat the incumbent and are sorted by (bound, index); ' + (n - R.order.length) + ' can never win and drop out unlabelled.' + (S.inc.t0 ? ' The incumbent breaks Tier 0 (t0 ' + S.inc.t0 + '), so any bound with a lower t0 beats it, whatever its t2.' : '');
+      else if (fr.kind === 'exact') { var c = C[fr.k]; msg = 'Label and score #' + (fr.at + 1) + ' in bound order: <b>' + c.what + '</b>, bound ' + SX.fmt(c.b2) + ' → exact ' + (c.t0 ? 't0 ' + c.t0 + ' · ' : '') + SX.fmt(c.t2) + '. ' + (fr.took ? 'New best.' : 'Not better than ' + SX.fmt(fr.best.t2) + '.'); }
+      else msg = (fr.stopper >= 0 ? '<b>Stop.</b> The next bound, ' + SX.fmt(C[fr.stopper].b2) + ' (' + C[fr.stopper].what + '), cannot beat the best exact cost ' + SX.fmt(fr.best.t2) + ', and every later bound is larger.' : '<b>Done:</b> every candidate that could win was scored.') +
+        ' Labelled ' + nlab + ' of ' + n + '; the pick is <b>' + (fr.win >= 0 ? C[fr.win].what : 'none') + '</b>, exactly what scoring all ' + n + ' whole would pick.';
+      text.innerHTML = msg;
+    }
+    var stp = SX.stepper({ steps: R.frames.length, interval: 1500, onStep: show, label: function (i) { var k = R.frames[i].kind; return (i + 1) + ' / ' + R.frames.length + ' · ' + (k === 'bounds' ? 'bound' : k === 'sorted' ? 'sort' : k === 'exact' ? 'exact' : 'stop'); } });
+    if (st) st.stop();
+    st = stp; stHost.innerHTML = ''; stHost.appendChild(stp.el); stp.el.style.margin = '0';
+  }
+  build();
+};
+SX.register('fast', function (sec) {
+  SXfastPerf(sec);
+  SXfastReuse(sec);
+  SXfastBound(sec);
+});
+</script>

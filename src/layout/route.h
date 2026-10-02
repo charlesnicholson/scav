@@ -51,13 +51,13 @@ struct Routes {
 // moved is answered by moving its answer, which is what makes a candidate cost
 // the change rather than the chart (11.10c).
 struct RouteFrameCache {
-  RouteInput in;
+  uint8_t valid{ 0 };
   scav_rect frame{};  // what the nudger bounds this frame's lanes by
+  RouteInput in;
   std::vector<scav_point> points;
   std::vector<scav_span> net_points;
   std::vector<RouteMetrics> metrics;
   NudgeStats nudged;
-  uint8_t valid{ 0 };
 };
 
 // Parallel to submachines. `reuse` is read by every candidate of a round at
@@ -75,6 +75,7 @@ struct RouteCache {
 // are sharded across `threads` workers and merged in frame order, so the
 // result is one value at every worker count. `was`, where given, is a routing
 // over this same sizing; its labels are kept where nothing a box reads changed.
+// Without `labels` the routes are final and `placed` is empty.
 Routes route_transitions(Chart const &c,
                          SplitGraph const &g,
                          SubmachineOrders const &o,
@@ -86,7 +87,33 @@ Routes route_transitions(Chart const &c,
                          RouteCache const *reuse = nullptr,
                          RouteCache *fill = nullptr,
                          SearchPins const *pins = nullptr,
-                         Routes const *was = nullptr);
+                         Routes const *was = nullptr,
+                         bool labels = true);
+
+// The same into `out`, reusing its capacity; `was` must not be `out`.
+void route_transitions(Routes &out,
+                       Chart const &c,
+                       SplitGraph const &g,
+                       SubmachineOrders const &o,
+                       SizedLayout const &z,
+                       scav_spaces const &s,
+                       scav_profile const &p,
+                       Router const &router,
+                       uint32_t threads,
+                       RouteCache const *reuse,
+                       RouteCache *fill,
+                       SearchPins const *pins,
+                       Routes const *was,
+                       bool labels);
+
+// The path boxes placed on `out`'s finished routes over `z`, as `route_transitions` places
+// them; `was` as there.
+void label_routes(Routes &out,
+                  Chart const &c,
+                  SizedLayout const &z,
+                  scav_spaces const &s,
+                  scav_profile const &p,
+                  Routes const *was);
 
 }  // namespace scav
 

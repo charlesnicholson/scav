@@ -1,0 +1,683 @@
+<section class="sx" id="order" data-toc="5 · Ordering">
+  <div class="kicker">Phase 1</div>
+  <h2>Ordering: which rank, which slot</h2>
+  <p class="lede">Phase 1 gives every node in a frame a <b>rank</b> (its column) and a slot within that rank.</p>
+
+  <p>A <a href="#decompose">frame</a>'s graph has a <b>state node</b> per child state in document order, a <b>boundary node</b> per port or inner-face end, and the <b>bend nodes</b> chaining adds; each <a href="#decompose">segment</a> is one edge, and self-loops are dropped. Ranks run left to right, <code>rank_sep</code> (576) apart, with nodes <code>node_sep</code> (288) apart within a rank. Ordering treats the frame as one graph, disconnected components included; <a href="#size">sizing</a> splits the components and packs them.</p>
+
+  <h3>Breaking cycles</h3>
+  <p>Layering needs an acyclic graph, and statecharts are full of cycles.</p>
+  <ol>
+    <li>Tarjan's strongly connected components mark every segment on a cycle as <b>cyclic</b>; only these can be reversed by the search.</li>
+    <li>Every <b>reverse pin</b> flips its segment.</li>
+    <li>A depth-first search, roots in document order and out-edges in segment order, flips every back edge (an edge into a node still on the stack). Only edge directions change.</li>
+  </ol>
+  <div class="callout rule"><span class="t">Rule</span>Which edge of a cycle is reversed is an artefact of declaration order, so reversal is a search dimension, not a rule.</div>
+  <div data-fig="order-cycle"></div>
+
+  <h3>Ranking by longest path</h3>
+  <ol>
+    <li><b>Topological order</b> by Kahn's algorithm, sources in node order.</li>
+    <li><b>Longest path</b>: every edge <code>v → w</code> sets <code>rank[w] = max(rank[w], rank[v] + 1)</code>.</li>
+    <li><b>Pull right</b>, in reverse order: a node with fewer in-edges than out-edges moves to one rank before its nearest successor, so a source sits next to its successors rather than at rank 0.</li>
+    <li><b>Sink</b> exit boundary nodes to the last rank, then squeeze out empty ranks.</li>
+  </ol>
+  <div data-fig="order-rank"></div>
+
+  <h4>Pins</h4>
+  <ul>
+    <li>A <b>rank pin</b> overwrites one state's rank afterwards, without rerunning longest path, so edges may go flat or backward. Initials are never pinned: each is re-seated one rank before the state it enters (shifting the others if that state is at rank 0), and empty ranks are squeezed out.</li>
+    <li>A <b>side pin</b> on a top or bottom border takes the port's edge out of ranking and sweeps, placing it in its mate's rank; on a left or right border it orients the edge so the port is a source or a sink.</li>
+  </ul>
+  <div data-fig="order-pin"></div>
+
+  <h3>Charging label room</h3>
+  <p>Before chaining, each gap between ranks is charged with the room it must hold, in three passes:</p>
+  <ol>
+    <li><b>Labels across one gap</b>: an edge crossing one gap charges it its label's width.</li>
+    <li><b>Lane estimate</b>: within each connected component, every edge counts as turning in the first and last gap it crosses. A gap where two or more turn reserves one line height (269) per edge. This is an upper bound; <a href="#size">sizing</a> counts the edges that really turn.</li>
+    <li><b>Labels across several gaps</b>, widest label first: each charges the widest gap it crosses, counting the lane estimate, with ties to the middle.</li>
+  </ol>
+  <p>Each charge is a maximum, so a label no wider than its gap's label charge adds nothing. Sizing spaces the ranks by the label charges; folding also counts the lane estimate. scav widens gaps instead of adding a dummy node per label, which would double every rank.</p>
+
+  <h3>Chaining long edges</h3>
+  <p>An edge spanning several ranks becomes a chain through one <b>bend node</b> per intermediate rank. Bend nodes are ordered like any node, and the router treats them as hard waypoints. A <b>cut</b> pin leaves the edge unchained, for the router to draw freely; this matters because chained edges carry 70% of the kinks.</p>
+
+  <h3>Crossing minimisation by median sweeps</h3>
+  <p>Starting from document order (pinned-first ports, states, boundary nodes, bends, pinned-last ports), up to 8 sweeps reorder each rank by its nodes' neighbour positions, alternating down (by predecessors) and up (by successors).</p>
+  <ul>
+    <li>A node's key is the <b>upper median</b> of its neighbours' positions; a node with no neighbours on that side keeps its slot.</li>
+    <li>Adjacent nodes swap only while strictly out of order, so ties keep their order.</li>
+    <li>Crossings are recounted after each sweep (by counting inversions); the best arrangement is kept, and sweeping stops at zero.</li>
+  </ul>
+  <div data-fig="order-median"></div>
+  <p>The median has a constant-factor quality bound that the barycenter heuristic lacks. In practice every frame in the corpus ends with zero layered crossings: the crossings a reader sees come from routing.</p>
+
+  <h3>Orientation and fold pins</h3>
+  <p>An <b>orient pin</b>, applied by a <a href="#search">kick</a>, turns a frame to run down: ranks become rows. A <b>fold pin</b> passes through untouched; it tells <a href="#size">sizing</a> where to cut a long run of ranks.</p>
+
+  <h3>The real ranks</h3>
+  <p><code>brew</code>'s shipped pins include two rank pins and one reverse pin; the depth-first search reverses one more edge itself.</p>
+  <div data-fig="order-brew"></div>
+
+  <p>Most of the search's moves act here: rank, cut, reverse, side and orient pins. Position within a rank is not searched; measured, it has no slack.</p>
+  <div class="callout why"><span class="t">Rejected</span>Greedy cycle removal (the search chooses reversals); dot's edge-weight schedule; adjacent-swap refinement (<code>transpose</code>), which found nothing to improve.</div>
+</section>
+<script>
+(function () {
+  'use strict';
+  var F = (window.SXF = window.SXF || {});
+  F.order = F.order || {};
+  // Small SVG helpers shared by this section's figures; colours go through style so CSS tokens resolve.
+  F.ou = {
+    root: function (w, h) { return SX.svg('svg', { viewBox: '0 0 ' + w + ' ' + h, style: { width: '100%', height: 'auto', font: '13px ' + SX.css('--sans') } }); },
+    el: function (parent, tag, attrs, style) { var n = SX.svg(tag, attrs); if (style) Object.assign(n.style, style); parent.appendChild(n); return n; },
+    text: function (parent, x, y, s, style, attrs) {
+      var n = SX.svg('text', Object.assign({ x: x, y: y, text: s }, attrs || {}));
+      Object.assign(n.style, { fill: 'var(--text-primary)' }, style || {});
+      parent.appendChild(n); return n;
+    },
+    arrow: function (parent, x1, y1, x2, y2, color, width, dash) {
+      var g = SX.svg('g'), dx = x2 - x1, dy = y2 - y1, L = Math.sqrt(dx * dx + dy * dy) || 1, ux = dx / L, uy = dy / L, a = 9;
+      var line = SX.svg('line', { x1: x1, y1: y1, x2: x2 - ux * a * 0.8, y2: y2 - uy * a * 0.8, 'stroke-width': width || 2 });
+      line.style.stroke = color; if (dash) line.setAttribute('stroke-dasharray', dash);
+      var head = SX.svg('polygon', { points: [x2, y2, x2 - ux * a - uy * a * 0.5, y2 - uy * a + ux * a * 0.5, x2 - ux * a + uy * a * 0.5, y2 - uy * a - ux * a * 0.5].join(',') });
+      head.style.fill = color;
+      g.appendChild(line); g.appendChild(head); parent.appendChild(g); return g;
+    },
+    // Hosts a figure's body, catching a failure so one figure cannot take the section down.
+    run: function (sec, figs) {
+      Object.keys(figs).forEach(function (k) {
+        var h = sec.querySelector('[data-fig="' + k + '"]');
+        if (!h) return;
+        try { figs[k](h); } catch (err) { console.error(k, err); h.appendChild(SX.el('p', { class: 'note', text: 'This figure failed to load: ' + err.message })); }
+      });
+    }
+  };
+  SX.register('order', function (sec) { F.ou.run(sec, F.order); });
+})();
+</script>
+<script>
+(function () {
+  'use strict';
+  var F = window.SXF, U = F.ou;
+  // Graph algorithms exactly as order.cpp runs them, over {n, kind[], edges[{src,dst,seg}]}.
+  // Tarjan SCC: an edge is cyclic when both ends share a component.
+  U.cyclic = function (n, edges) {
+    var out = []; for (var v = 0; v < n; v++) out.push([]);
+    edges.forEach(function (e, k) { out[e.src].push(k); });
+    var index = [], low = [], comp = [], on = [], held = [], c = 0, comps = 0;
+    function visit(v) {
+      index[v] = low[v] = c++; held.push(v); on[v] = true;
+      out[v].forEach(function (k) { var w = edges[k].dst;
+        if (index[w] == null) { visit(w); low[v] = Math.min(low[v], low[w]); }
+        else if (on[w]) low[v] = Math.min(low[v], index[w]); });
+      if (low[v] === index[v]) { var w; do { w = held.pop(); on[w] = false; comp[w] = comps; } while (w !== v); comps++; }
+    }
+    for (var r = 0; r < n; r++) if (index[r] == null) visit(r);
+    return edges.map(function (e) { return e.src !== e.dst && comp[e.src] === comp[e.dst]; });
+  };
+  // orient_acyclic: reverse pins first, then DFS in node order, out-edges in segment order.
+  // Returns the oriented edges and every event, so a figure can step the walk.
+  U.orient = function (n, edges, pinned) {
+    var E = edges.map(function (e) { return { src: e.src, dst: e.dst, seg: e.seg, reversed: false }; });
+    var ev = [];
+    E.forEach(function (e, k) { if (pinned[k]) { var t = e.src; e.src = e.dst; e.dst = t; e.reversed = true; ev.push({ t: 'pin', k: k }); } });
+    var out = []; for (var v = 0; v < n; v++) out.push([]);
+    E.forEach(function (e, k) { out[e.src].push(k); });   // adjacency built once, after the pins, as in the code
+    var color = []; for (v = 0; v < n; v++) color.push(0);
+    for (var root = 0; root < n; root++) {
+      if (color[root]) continue;
+      color[root] = 1; var stack = [{ node: root, next: 0 }]; ev.push({ t: 'root', v: root });
+      while (stack.length) {
+        var top = stack[stack.length - 1];
+        if (top.next === out[top.node].length) { color[top.node] = 2; stack.pop(); ev.push({ t: 'done', v: top.node }); continue; }
+        var k = out[top.node][top.next++], e = E[k];
+        if (color[e.dst] === 1) { e.reversed = !e.reversed; var t2 = e.src; e.src = e.dst; e.dst = t2; ev.push({ t: 'back', k: k, v: e.src }); continue; }
+        if (color[e.dst] === 0) { color[e.dst] = 1; stack.push({ node: e.dst, next: 0 }); ev.push({ t: 'tree', k: k, v: e.dst }); }
+        else ev.push({ t: 'skip', k: k });
+      }
+    }
+    return { edges: E, events: ev };
+  };
+  // assign_ranks: Kahn order, longest path, pull right, sink boundaries last, squeeze. `log` gets each step.
+  U.ranks = function (n, kind, E, log) {
+    var ins = [], outs = [], v;
+    for (v = 0; v < n; v++) { ins.push([]); outs.push([]); }
+    E.forEach(function (e, k) { outs[e.src].push(k); ins[e.dst].push(k); });
+    var pending = ins.map(function (a) { return a.length; }), topo = [];
+    for (v = 0; v < n; v++) if (!pending[v]) topo.push(v);
+    for (var at = 0; at < topo.length; at++) outs[topo[at]].forEach(function (k) { if (--pending[E[k].dst] === 0) topo.push(E[k].dst); });
+    var rank = []; for (v = 0; v < n; v++) rank.push(0);
+    log && log({ t: 'topo', topo: topo.slice(), rank: rank.slice() });
+    topo.forEach(function (u) {
+      var moved = [];
+      outs[u].forEach(function (k) { var w = E[k].dst; if (rank[u] + 1 > rank[w]) { rank[w] = rank[u] + 1; moved.push(w); } });
+      log && log({ t: 'relax', v: u, moved: moved, rank: rank.slice() });
+    });
+    for (var i = topo.length - 1; i >= 0; i--) {
+      var u = topo[i];
+      if (kind[u] === 'boundary' || !outs[u].length || ins[u].length >= outs[u].length) continue;
+      var near = Infinity; outs[u].forEach(function (k) { near = Math.min(near, rank[E[k].dst]); });
+      var was = rank[u]; rank[u] = near - 1;
+      log && log({ t: 'pull', v: u, from: was, rank: rank.slice() });
+    }
+    var top = Math.max.apply(null, rank);
+    for (v = 0; v < n; v++) if (kind[v] === 'boundary' && !outs[v].length && rank[v] !== top) { rank[v] = top; log && log({ t: 'sink', v: v, rank: rank.slice() }); }
+    var sq = U.squeeze(rank);
+    log && log({ t: 'squeeze', rank: sq.slice(), changed: sq.join() !== rank.join() });
+    return sq;
+  };
+  U.squeeze = function (rank) {
+    var used = {}, map = {}, next = 0; rank.forEach(function (r) { used[r] = 1; });
+    Object.keys(used).map(Number).sort(function (a, b) { return a - b; }).forEach(function (r) { map[r] = next++; });
+    return rank.map(function (r) { return map[r]; });
+  };
+  // A rect node's border point on the ray from its centre toward (tx, ty).
+  U.clip = function (nd, tx, ty) {
+    var dx = tx - nd.x, dy = ty - nd.y;
+    if (nd.r) { var L = Math.sqrt(dx * dx + dy * dy) || 1; return [nd.x + dx / L * nd.r, nd.y + dy / L * nd.r]; }
+    var hw = (nd.w || 92) / 2, hh = (nd.h || 30) / 2, sx = Math.abs(dx) > 1e-9 ? hw / Math.abs(dx) : Infinity, sy = Math.abs(dy) > 1e-9 ? hh / Math.abs(dy) : Infinity, s = Math.min(sx, sy);
+    return [nd.x + dx * s, nd.y + dy * s];
+  };
+  U.node = function (g, nd, fill, stroke, sw) {
+    var n = nd.r ? U.el(g, 'circle', { cx: nd.x, cy: nd.y, r: nd.r }, { fill: fill, stroke: stroke, strokeWidth: sw || 1.5 })
+                 : U.el(g, 'rect', { x: nd.x - (nd.w || 92) / 2, y: nd.y - (nd.h || 30) / 2, width: nd.w || 92, height: nd.h || 30, rx: 6 }, { fill: fill, stroke: stroke, strokeWidth: sw || 1.5 });
+    if (!nd.r) U.text(g, nd.x, nd.y + 4.5, nd.name, { fontSize: '12.5px', textAnchor: 'middle' });
+    else U.text(g, nd.x, nd.y + nd.r + 14, nd.name, { fontSize: '11px', textAnchor: 'middle', fill: 'var(--text-secondary)' });
+    return n;
+  };
+})();
+</script>
+<script>
+(function () {
+  'use strict';
+  var F = window.SXF, U = F.ou;
+  // Toys: estop as written, the unit test's three-cycle, and brew's root frame (trace: segs 1 and 9 reversed).
+  var TOYS = {
+    estop: { label: 'estop', pins: {}, nodes: [
+      { name: 'Clear', x: 190, y: 160 }, { name: 'Tripped', x: 360, y: 70 }, { name: 'Latched', x: 360, y: 250 }, { name: 'initial', x: 50, y: 160, r: 9, init: true }],
+      edges: [{ src: 3, dst: 0, seg: 0, t: '* → Clear' }, { src: 0, dst: 1, seg: 1, t: 'Clear → Tripped' }, { src: 1, dst: 2, seg: 2, t: 'Tripped → Latched' }, { src: 2, dst: 0, seg: 3, t: 'Latched → Clear' }] },
+    abc: { label: 'A → B → C → A', pins: {}, nodes: [{ name: 'A', x: 120, y: 160 }, { name: 'B', x: 320, y: 70 }, { name: 'C', x: 320, y: 250 }],
+      edges: [{ src: 0, dst: 1, seg: 0, t: 'A → B' }, { src: 1, dst: 2, seg: 1, t: 'B → C' }, { src: 2, dst: 0, seg: 2, t: 'C → A' }] },
+    brew: { label: 'brew root (shipped pins)', pins: { 1: true }, nodes: [
+      { name: 'Off', x: 170, y: 60 }, { name: 'Standby', x: 330, y: 200 }, { name: 'SelfCheck', x: 170, y: 200 }, { name: 'Brewing', x: 480, y: 200 },
+      { name: 'initial', x: 40, y: 60, r: 9, init: true }, { name: 'final', x: 330, y: 300, r: 9 }],
+      edges: [{ src: 4, dst: 0, seg: 0, t: '* → Off' }, { src: 0, dst: 2, seg: 1, t: 'Off → SelfCheck' }, { src: 2, dst: 1, seg: 2, t: 'SelfCheck → Standby' },
+        { src: 2, dst: 0, seg: 3, t: 'SelfCheck → Off' }, { src: 1, dst: 3, seg: 8, t: 'Standby → Brewing' }, { src: 3, dst: 1, seg: 9, t: 'Brewing → Standby' }, { src: 1, dst: 5, seg: 10, t: 'Standby → *' }] }
+  };
+  F.order['order-cycle'] = function (host) {
+    var key = 'estop', pins = {}, stepper = null;
+    var f = SX.figure(host, { caption: '<b>Cycle breaking.</b> <b>Step</b> the walk: an edge into a node still on the stack (aqua) is flipped (orange). <b>Click</b> a dashed edge, one on a cycle, to pin its reversal; the right panel ranks the result.' });
+    var top = SX.el('div', { class: 'ctrl' });
+    var pick = SX.choice({ options: Object.keys(TOYS).map(function (k) { return { value: k, label: TOYS[k].label }; }), value: key,
+      onChange: function (v) { key = v; pins = Object.assign({}, TOYS[v].pins); build(); } });
+    top.appendChild(pick.el);
+    top.appendChild(SX.button('Clear pins', function () { pins = {}; build(); }));
+    f.ctrl.appendChild(top);
+    var stepHost = SX.el('div'); f.ctrl.appendChild(stepHost);
+    var row = SX.el('div', { class: 'fig-row' }); f.stage.appendChild(row);
+    var left = SX.el('div'), right = SX.el('div'); row.appendChild(left); row.appendChild(right);
+    var log = SX.el('div', { class: 'note', style: { minHeight: '2.6em', marginTop: '6px' } }); f.stage.appendChild(log);
+    pins = Object.assign({}, TOYS[key].pins);
+
+    // Edge k's name in the direction it runs: against its arrow while `flip` is set.
+    function nm(T, k, flip) { var t = T.edges[k].t; return flip ? t.split(' → ').reverse().join(' → ') : t; }
+    var BY = { pin: 'its pin', dfs: 'the walk' };
+
+    function build() {
+      var T = TOYS[key], n = T.nodes.length;
+      var cyc = U.cyclic(n, T.edges);
+      var res = U.orient(n, T.edges, pins);
+      // Snapshots: colour per node, each edge's direction and what reversed it, the edge in hand, the stack.
+      var snaps = [{ color: T.nodes.map(function () { return 0; }), flip: {}, rev: {}, cur: -1, stack: [], msg: 'Before the walk: ' + T.edges.length + ' edges, ' + cyc.filter(Boolean).length + ' of them on a cycle (dashed).' }];
+      res.events.forEach(function (e) {
+        var p = snaps[snaps.length - 1], s = { color: p.color.slice(), flip: Object.assign({}, p.flip), rev: Object.assign({}, p.rev), cur: -1, stack: p.stack.slice() };
+        var was = !!p.flip[e.k];
+        if (e.t === 'pin') { s.flip[e.k] = true; s.rev[e.k] = 'pin'; s.cur = e.k; s.msg = 'Reverse pin: ' + nm(T, e.k, false) + ' is flipped to ' + nm(T, e.k, true) + ' before the walk.'; }
+        else if (e.t === 'root') { s.color[e.v] = 1; s.stack.push(e.v); s.msg = 'Root ' + T.nodes[e.v].name + ' (the first unvisited node in document order) goes on the stack.'; }
+        else if (e.t === 'tree') { s.color[e.v] = 1; s.stack.push(e.v); s.cur = e.k; s.msg = 'Edge ' + nm(T, e.k, was) + ' reaches an unvisited node: ' + T.nodes[e.v].name + ' goes on the stack.'; }
+        else if (e.t === 'back') {
+          s.flip[e.k] = !was; if (was) delete s.rev[e.k]; else s.rev[e.k] = 'dfs'; s.cur = e.k;
+          s.msg = 'Edge ' + nm(T, e.k, was) + ' points at ' + T.nodes[e.v].name + ', still on the stack: a back edge, so it is flipped' + (was ? ' back to ' + nm(T, e.k, false) + ', its authored direction, and is not marked reversed.' : ' to ' + nm(T, e.k, true) + ' and marked reversed.');
+        }
+        else if (e.t === 'skip') { s.cur = e.k; s.msg = 'Edge ' + nm(T, e.k, was) + ' reaches a finished node: nothing to do.'; }
+        else if (e.t === 'done') { s.color[e.v] = 2; s.stack.pop(); s.msg = T.nodes[e.v].name + ' has no out-edges left: finished.'; }
+        snaps.push(s);
+      });
+      var last = snaps[snaps.length - 1];
+      last.msg = 'Done. Reversed: ' + (res.edges.map(function (e, k) { return e.reversed ? T.edges[k].t + ' (by ' + BY[last.rev[k]] + ')' : null; }).filter(Boolean).join(', ') || 'nothing') + '.';
+      drawRanks(T, res.edges);
+      stepHost.innerHTML = '';
+      if (stepper) stepper.stop();
+      stepper = SX.stepper({ steps: snaps.length, start: snaps.length - 1, interval: 800,
+        label: function (i) { return 'step ' + i + ' / ' + (snaps.length - 1); },
+        onStep: function (i) { drawWalk(T, cyc, snaps[i]); log.textContent = snaps[i].msg; } });
+      stepHost.appendChild(stepper.el);
+    }
+
+    function edgePts(T, k, flipped) {
+      var e = T.edges[k], a = T.nodes[e.src], b = T.nodes[e.dst];
+      var twin = T.edges.some(function (o, j) { return j !== k && ((o.src === e.dst && o.dst === e.src) || (o.src === e.src && o.dst === e.dst)); });
+      var dx = b.x - a.x, dy = b.y - a.y, L = Math.sqrt(dx * dx + dy * dy), ox = 0, oy = 0;
+      if (twin) { ox = -dy / L * 9; oy = dx / L * 9; }   // left of travel: opposite twins part, one each side
+      var p = U.clip(a, b.x + ox, b.y + oy), q = U.clip(b, a.x + ox, a.y + oy);
+      p = [p[0] + ox, p[1] + oy]; q = [q[0] + ox, q[1] + oy];
+      return flipped ? [q, p] : [p, q];
+    }
+    function drawWalk(T, cyc, s) {
+      var svg = U.root(540, 330), g = SX.svg('g'); svg.appendChild(g);
+      U.text(g, 10, 18, 'the walk', { fontSize: '12px', fill: 'var(--text-muted)' });
+      T.edges.forEach(function (e, k) {
+        var pts = edgePts(T, k, !!s.flip[k]);
+        var col = s.rev[k] ? 'var(--hl)' : (k === s.cur ? 'var(--hl-2)' : 'var(--text-secondary)');
+        U.arrow(g, pts[0][0], pts[0][1], pts[1][0], pts[1][1], col, k === s.cur ? 3.5 : 2, cyc[k] ? '6 4' : null);
+        var hit = U.el(g, 'line', { x1: pts[0][0], y1: pts[0][1], x2: pts[1][0], y2: pts[1][1], 'stroke-width': 14 }, { stroke: 'transparent', cursor: cyc[k] ? 'pointer' : 'default' });
+        SX.tipOn(hit, '<b>' + nm(T, k, !!s.flip[k]) + '</b> (segment ' + e.seg + (s.flip[k] ? ', authored ' + e.t : '') + ')<br>' + (cyc[k] ? 'On a cycle: click to ' + (pins[k] ? 'remove its reverse pin' : 'pin its reversal') : '<span class="m">Not on a cycle, so the search never reverses it.</span>') + (s.rev[k] ? '<br>Reversed by ' + BY[s.rev[k]] : ''));
+        if (cyc[k]) hit.addEventListener('click', function () { if (pins[k]) delete pins[k]; else pins[k] = true; SX.tip.hide(); build(); });
+        if (pins[k]) { var m = [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2]; U.text(g, m[0] + 6, m[1] - 6, 'pin', { fontSize: '11px', fill: 'var(--text-secondary)', fontWeight: 600 }); }
+      });
+      T.nodes.forEach(function (nd, v) {
+        var fill = s.color[v] === 1 ? 'color-mix(in srgb, var(--hl-3) 30%, var(--state-fill))' : s.color[v] === 2 ? 'var(--surface-2)' : 'var(--state-fill)';
+        U.node(g, nd, fill, 'var(--state-stroke)', s.stack[s.stack.length - 1] === v ? 3 : 1.5);
+      });
+      U.text(g, 10, 322, 'stack: [' + s.stack.map(function (v) { return T.nodes[v].name; }).join(', ') + ']', { fontSize: '12px', fontFamily: SX.css('--mono'), fill: 'var(--text-secondary)' });
+      left.innerHTML = ''; left.appendChild(svg);
+      left.appendChild(SX.el('div', { class: 'legend' },
+        SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'color-mix(in srgb, var(--hl-3) 30%, var(--state-fill))', border: '1px solid var(--axis)' } }), 'on the stack'),
+        SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--surface-2)', border: '1px solid var(--axis)' } }), 'finished'),
+        SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--hl-2)' } }), 'edge in hand'),
+        SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--hl)' } }), 'reversed'),
+        SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'none', borderTop: '2px dashed var(--text-secondary)', height: '0', width: '16px' } }), 'on a cycle')));
+    }
+    function drawRanks(T, E) {
+      var n = T.nodes.length, rank = U.ranks(n, T.nodes.map(function () { return 'state'; }), E);
+      var R = Math.max.apply(null, rank) + 1, cols = [], v;
+      for (var r = 0; r < R; r++) cols.push([]);
+      for (v = 0; v < n; v++) cols[rank[v]].push(v);
+      var W = 540, H = 330, cw = (W - 40) / Math.max(R, 1), pos = {};
+      var svg = U.root(W, H), g = SX.svg('g'); svg.appendChild(g);
+      U.text(g, 10, 18, 'ranked by longest path', { fontSize: '12px', fill: 'var(--text-muted)' });
+      cols.forEach(function (c, r) {
+        var x = 20 + cw * (r + 0.5);
+        U.el(g, 'rect', { x: 20 + cw * r + 4, y: 30, width: cw - 8, height: H - 60, rx: 8 }, { fill: 'var(--surface-2)', opacity: 0.6 });
+        U.text(g, x, H - 12, 'rank ' + r, { fontSize: '11.5px', textAnchor: 'middle', fill: 'var(--text-secondary)' });
+        c.forEach(function (u, i) { pos[u] = { x: x, y: 64 + i * 70 }; });
+      });
+      var bends = 0, extra = cols.map(function (c) { return c.length; });
+      E.forEach(function (e) {
+        var a = pos[e.src], b = pos[e.dst], span = rank[e.dst] - rank[e.src], pts = [[a.x, a.y]];
+        for (var r2 = rank[e.src] + 1; r2 < rank[e.dst]; r2++) { bends++; pts.push([20 + cw * (r2 + 0.5), 64 + (extra[r2]++) * 70]); }
+        pts.push([b.x, b.y]);
+        var col = e.reversed ? 'var(--hl)' : 'var(--text-secondary)';
+        for (var i = 0; i + 1 < pts.length; i++) {
+          var A = i === 0 ? U.clip(Object.assign({}, T.nodes[e.src], a), pts[1][0], pts[1][1]) : pts[i];
+          var B = i + 2 === pts.length ? U.clip(Object.assign({}, T.nodes[e.dst], b), pts[i][0], pts[i][1]) : pts[i + 1];
+          if (i + 2 === pts.length) U.arrow(g, A[0], A[1], B[0], B[1], col, 2); else U.el(g, 'line', { x1: A[0], y1: A[1], x2: B[0], y2: B[1], 'stroke-width': 2 }, { stroke: col });
+        }
+        pts.slice(1, -1).forEach(function (p) { var d = U.el(g, 'circle', { cx: p[0], cy: p[1], r: 6 }, { fill: 'var(--hl-2)' }); SX.tipOn(d, '<b>Bend node</b> at rank ' + Math.round((p[0] - 20) / cw - 0.5) + '<br>chaining ' + T.edges[E.indexOf(e)].t + ' (spans ' + span + ' ranks)'); });
+      });
+      T.nodes.forEach(function (nd, u) { U.node(g, Object.assign({}, nd, pos[u]), 'var(--state-fill)', 'var(--state-stroke)'); });
+      U.text(g, W - 10, 18, bends + (bends === 1 ? ' bend node' : ' bend nodes'), { fontSize: '12.5px', textAnchor: 'end', fontWeight: 600 });
+      right.innerHTML = ''; right.appendChild(svg);
+    }
+    build();
+  };
+})();
+</script>
+<script>
+(function () {
+  'use strict';
+  var F = window.SXF, U = F.ou;
+  // toolchanger's root frame, node order = document order; reverse pins on segments 2 and 4 as shipped.
+  U.TC = {
+    nodes: [{ name: 'arm' }, { name: 'stop' }, { name: 'Parked' }, { name: 'Rotating' }, { name: 'Gripping' }, { name: 'Releasing' }, { name: 'initial', r: 9, init: true }],
+    edges: [{ src: 6, dst: 2, seg: 0, t: '* → Parked' }, { src: 2, dst: 3, seg: 1, t: 'Parked → Rotating' }, { src: 3, dst: 4, seg: 2, t: 'Rotating → Gripping' },
+      { src: 4, dst: 5, seg: 3, t: 'Gripping → Releasing' }, { src: 5, dst: 2, seg: 4, t: 'Releasing → Parked' }, { src: 3, dst: 0, seg: 5, t: 'Rotating → arm' },
+      { src: 4, dst: 0, seg: 7, t: 'Gripping → arm' }, { src: 5, dst: 1, seg: 10, t: 'Releasing → stop' }],
+    pins: { 2: true, 4: true }
+  };
+  // Draws a frame's nodes in rank columns (in-rank order = node order) with its oriented edges.
+  U.drawColumns = function (svg, T, E, rank, o) {
+    o = o || {};
+    var W = o.W || 760, x0 = o.x0 || 20, R = Math.max(o.cols || 0, Math.max.apply(null, rank) + 1), cw = (W - x0 - 20) / R, pitch = o.pitch || 60;
+    var cols = []; for (var r = 0; r < R; r++) cols.push([]);
+    rank.forEach(function (rk, v) { cols[rk].push(v); });
+    var rows = Math.max(o.rows || 0, Math.max.apply(null, cols.map(function (c) { return c.length; })));
+    var H = o.H || Math.max(180, 84 + (rows - 1) * pitch + 40);
+    svg = svg || U.root(W, H);
+    var g = SX.svg('g'); svg.appendChild(g);
+    var pos = [];
+    cols.forEach(function (c, r) {
+      var x = x0 + cw * (r + 0.5);
+      U.el(g, 'rect', { x: x0 + cw * r + 4, y: 26, width: cw - 8, height: H - 50, rx: 8 }, { fill: c.length ? 'var(--surface-2)' : 'none', stroke: c.length ? 'none' : 'var(--axis)', strokeDasharray: '4 4', opacity: c.length ? 0.7 : 1 });
+      U.text(g, x, H - 8, (c.length ? 'rank ' : 'empty ') + r, { fontSize: '11.5px', textAnchor: 'middle', fill: 'var(--text-secondary)' });
+      c.forEach(function (v, i) { pos[v] = { x: x, y: 58 + i * pitch }; });
+    });
+    E.forEach(function (e, k) {
+      var a = Object.assign({ w: 92, h: 30 }, T.nodes[e.src], pos[e.src]), b = Object.assign({ w: 92, h: 30 }, T.nodes[e.dst], pos[e.dst]);
+      var p = U.clip(a, b.x, b.y), q = U.clip(b, a.x, a.y), d = rank[e.dst] - rank[e.src];
+      var col = o.edgeColor ? o.edgeColor(e, k, d) : (e.reversed ? 'var(--hl)' : 'var(--text-secondary)');
+      U.arrow(g, p[0], p[1], q[0], q[1], col, 2, d <= 0 ? '5 4' : null);
+    });
+    T.nodes.forEach(function (nd, v) {
+      var n = Object.assign({ w: 92, h: 30 }, nd, pos[v]);
+      var gg = SX.svg('g'); g.appendChild(gg);
+      U.node(gg, n, o.fill ? o.fill(v) : 'var(--state-fill)', 'var(--state-stroke)', o.stroke ? o.stroke(v) : 1.5);
+      if (o.badge && o.badge(v) != null) U.text(gg, n.x + (n.r ? 12 : n.w / 2 - 2), n.y - (n.r ? 10 : n.h / 2 + 4), o.badge(v), { fontSize: '11px', textAnchor: n.r ? 'start' : 'end', fill: 'var(--text-secondary)', fontFamily: SX.css('--mono') });
+      if (o.onNode) o.onNode(gg, v, n);
+    });
+    return { svg: svg, pos: pos, cw: cw, x0: x0, R: R };
+  };
+
+  F.order['order-rank'] = function (host) {
+    var T = U.TC, n = T.nodes.length, steps = [];
+    var E = U.orient(n, T.edges, T.pins).edges;
+    var topoIdx = {};
+    U.ranks(n, T.nodes.map(function () { return 'state'; }), E, function (s) { steps.push(s); });
+    steps[0].topo.forEach(function (v, i) { topoIdx[v] = i; });
+    var f = SX.figure(host, { caption: '<b>Longest path</b> on toolchanger\'s root frame. <b>Step</b> through it and watch pull-right move <code>Gripping</code>, a source with three successors, from rank 0 to rank 1.' });
+    var msg = SX.el('div', { class: 'note', style: { minHeight: '2.6em' } });
+    function nm(v) { return T.nodes[v].name; }
+    var st = SX.stepper({ steps: steps.length, interval: 900, start: 0,
+      label: function (i) { return (i + 1) + ' / ' + steps.length; },
+      onStep: function (i) {
+        var s = steps[i];
+        var hot = s.t === 'relax' || s.t === 'pull' ? s.v : -1;
+        var svg = U.drawColumns(null, T, E, s.rank, { cols: 4, rows: 7, pitch: 46,
+          fill: function (v) { return v === hot ? 'color-mix(in srgb, var(--hl-2) 22%, var(--state-fill))' : (s.moved && s.moved.indexOf(v) >= 0 ? 'color-mix(in srgb, var(--hl-3) 30%, var(--state-fill))' : 'var(--state-fill)'); },
+          stroke: function (v) { return v === hot ? 3 : 1.5; },
+          badge: function (v) { return '#' + topoIdx[v]; },
+          edgeColor: function (e) { return s.t === 'relax' && e.src === s.v ? 'var(--hl-2)' : (e.reversed ? 'var(--hl)' : 'var(--text-secondary)'); } }).svg;
+        f.stage.innerHTML = ''; f.stage.appendChild(svg);
+        if (s.t === 'topo') msg.textContent = 'Kahn\'s order, sources seeded in node order: ' + s.topo.map(nm).join(', ') + '. Every node starts at rank 0.';
+        else if (s.t === 'relax') msg.textContent = nm(s.v) + ' (rank ' + s.rank[s.v] + ') relaxes its out-edges: ' + (s.moved.length ? s.moved.map(function (w) { return nm(w) + ' → rank ' + s.rank[w]; }).join(', ') : 'no successor moves') + '.';
+        else if (s.t === 'pull') msg.textContent = 'Pull right: ' + nm(s.v) + ' has fewer in-edges than out-edges, so it moves to one rank before its nearest successor: ' + s.from + ' → ' + s.rank[s.v] + (s.from === s.rank[s.v] ? ' (already there).' : '.');
+        else if (s.t === 'squeeze') msg.textContent = 'No sink boundary nodes here, and no rank is empty, so nothing to squeeze. Final: ' + T.nodes.map(function (nd, v) { return nd.name + ' ' + s.rank[v]; }).join(', ') + '.';
+        else msg.textContent = 'Sink boundary ' + nm(s.v) + ' moves to the last rank.';
+      } });
+    f.ctrl.appendChild(st.el); f.stage.after(msg);
+  };
+
+  F.order['order-pin'] = function (host) {
+    var T = U.TC, n = T.nodes.length, kinds = T.nodes.map(function () { return 'state'; });
+    var E = U.orient(n, T.edges, T.pins).edges, base = U.ranks(n, kinds, E), pins = [];
+    var f = SX.figure(host, { caption: '<b>Rank pins.</b> <b>Drag</b> a state into another column to pin it there. Edges may go flat or backward (dashed), and re-seating can shift the node one column.' });
+    var out = SX.el('div', { class: 'note', style: { minHeight: '2.6em' } });
+    f.ctrl.appendChild(SX.button('Reset', function () { pins = []; draw(); }));
+    f.ctrl.appendChild(SX.button('The search\'s pins (Gripping → 2, Rotating → 1)', function () { pins = [{ v: 4, r: 2 }, { v: 3, r: 1 }]; draw(); }));
+    f.ctrl.appendChild(SX.button('Pin Parked → 0', function () { pins = [{ v: 2, r: 0 }]; draw(); }));
+    f.stage.after(out);
+    function apply() {
+      var rank = base.slice(), notes = [];
+      pins.forEach(function (p) { rank[p.v] = p.r; });
+      if (pins.length) {
+        T.nodes.forEach(function (nd, v) {
+          if (!nd.init) return;
+          var near = Infinity;
+          E.forEach(function (e) { if (e.src === v && e.dst !== v) near = Math.min(near, rank[e.dst]); if (e.dst === v && e.src !== v) near = Math.min(near, rank[e.src]); });
+          if (near === Infinity) return;
+          if (near === 0) { rank = rank.map(function (r, u) { return u === v ? r : r + 1; }); near = 1; notes.push('the initial\'s state sat at rank 0, so every other node moved up one'); }
+          rank[v] = near - 1;
+        });
+        var sq = U.squeeze(rank);
+        if (sq.join() !== rank.join()) notes.push('empty ranks squeezed out');
+        rank = sq;
+      }
+      return { rank: rank, notes: notes };
+    }
+    function draw() {
+      var res = apply(), rank = res.rank, svg = null, cols = Math.max.apply(null, rank) + 2;
+      var flat = 0, back = 0;
+      E.forEach(function (e) { var d = rank[e.dst] - rank[e.src]; if (d === 0) flat++; if (d < 0) back++; });
+      var lay = U.drawColumns(null, T, E, rank, { cols: cols, rows: 3,
+        badge: function (v) { var p = pins.filter(function (q) { return q.v === v; })[0]; return p ? 'pin ' + p.r : null; },
+        edgeColor: function (e, k, d) { return d < 0 ? 'var(--serious)' : d === 0 ? 'var(--warning)' : (e.reversed ? 'var(--hl)' : 'var(--text-secondary)'); },
+        onNode: function (gg, v, nd) {
+          if (T.nodes[v].init) { SX.tipOn(gg, '<b>initial</b><br><span class="m">Initials are never pinned; they are re-seated after the pins.</span>'); return; }
+          gg.style.cursor = 'grab';
+          gg.addEventListener('pointerdown', function (ev) {
+            ev.preventDefault(); gg.setPointerCapture(ev.pointerId);
+            var m = svg.getScreenCTM().inverse(), p0 = svg.createSVGPoint(); p0.x = ev.clientX; p0.y = ev.clientY; p0 = p0.matrixTransform(m);
+            function mv(e2) { var p = svg.createSVGPoint(); p.x = e2.clientX; p.y = e2.clientY; p = p.matrixTransform(m); gg.setAttribute('transform', 'translate(' + (p.x - p0.x) + ',' + (p.y - p0.y) + ')'); }
+            function up(e2) {
+              gg.removeEventListener('pointermove', mv); gg.removeEventListener('pointerup', up);
+              var p = svg.createSVGPoint(); p.x = e2.clientX; p.y = e2.clientY; p = p.matrixTransform(m);
+              var c = Math.max(0, Math.min(lay.R - 1, Math.floor((p.x - lay.x0) / lay.cw)));
+              pins = pins.filter(function (q) { return q.v !== v; }); pins.push({ v: v, r: c }); draw();
+            }
+            gg.addEventListener('pointermove', mv); gg.addEventListener('pointerup', up);
+          });
+        } });
+      svg = lay.svg;
+      f.stage.innerHTML = ''; f.stage.appendChild(svg);
+      f.stage.appendChild(SX.el('div', { class: 'legend' },
+        SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--warning)' } }), 'flat edge: ' + flat),
+        SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--serious)' } }), 'backward edge: ' + back),
+        SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--hl)' } }), 'reversed by a pin')));
+      out.textContent = pins.length ? 'Pins: ' + pins.map(function (p) { return T.nodes[p.v].name + ' → ' + p.r; }).join(', ') + '. ' + (res.notes.length ? 'Then ' + res.notes.join('; ') + '.' : 'Nothing else moved.') : 'No pins: these are the longest-path ranks. The rightmost column is empty, a place to drop a node into a new rank.';
+    }
+    draw();
+  };
+})();
+</script>
+<script>
+(function () {
+  'use strict';
+  var F = window.SXF, U = F.ou;
+  // minimize_crossings over {ranks: [[node...]], edges: [{src,dst}]}, every edge between adjacent ranks.
+  U.inversions = function (v) { var t = 0; for (var i = 0; i < v.length; i++) for (var j = i + 1; j < v.length; j++) if (v[i] > v[j]) t++; return t; };
+  U.crossings = function (ranks, edges, rankOf) {
+    var pos = {}; ranks.forEach(function (b) { b.forEach(function (v, i) { pos[v] = i; }); });
+    var total = 0, pairs = [];
+    for (var r = 0; r + 1 < ranks.length; r++) {
+      // south_of: edges leaving rank r, walked by north node then edge order, sorted by (north, south)
+      var es = [];
+      ranks[r].forEach(function (v) { edges.forEach(function (e, k) { if (e.src === v) es.push({ n: pos[e.src], s: pos[e.dst], k: k }); }); });
+      es.sort(function (a, b) { return a.n !== b.n ? a.n - b.n : a.s - b.s; });
+      total += U.inversions(es.map(function (x) { return x.s; }));
+      for (var i = 0; i < es.length; i++) for (var j = i + 1; j < es.length; j++) if (es[i].n < es[j].n && es[i].s > es[j].s) pairs.push([es[i].k, es[j].k]);
+    }
+    return { total: total, pairs: pairs };
+  };
+  U.sweeps = function (ranksIn, edges, sweepCount) {
+    var ranks = ranksIn.map(function (b) { return b.slice(); }), log = [];
+    function posOf() { var p = {}; ranks.forEach(function (b) { b.forEach(function (v, i) { p[v] = i; }); }); return p; }
+    function median(v, pred, pos) {
+      var xs = edges.filter(function (e) { return pred ? e.dst === v : e.src === v; }).map(function (e) { return pos[pred ? e.src : e.dst]; });
+      if (!xs.length) return null;
+      xs.sort(function (a, b) { return a - b; }); return xs[Math.floor(xs.length / 2)];
+    }
+    var best = ranks.map(function (b) { return b.slice(); }), bestCost = U.crossings(ranks, edges).total;
+    log.push({ t: 'start', ranks: best.map(function (b) { return b.slice(); }), cost: bestCost });
+    for (var sweep = 0; sweep < sweepCount && bestCost > 0; sweep++) {
+      var down = sweep % 2 === 0, order = [];
+      if (down) for (var r = 1; r < ranks.length; r++) order.push(r); else for (r = ranks.length - 2; r >= 0; r--) order.push(r);
+      order.forEach(function (rk) {
+        var pos = posOf(), bucket = ranks[rk], before = bucket.slice();
+        var med = bucket.map(function (v) { return median(v, down, pos); }), meds = {};
+        bucket.forEach(function (v, i) { meds[v] = med[i]; });
+        for (var pass = 0; pass < bucket.length; pass++) {
+          var moved = false;
+          for (var i = 0; i + 1 < bucket.length; i++) {
+            if (med[i] == null || med[i + 1] == null || med[i] <= med[i + 1]) continue;
+            var t = bucket[i]; bucket[i] = bucket[i + 1]; bucket[i + 1] = t;
+            t = med[i]; med[i] = med[i + 1]; med[i + 1] = t; moved = true;
+          }
+          if (!moved) break;
+        }
+        log.push({ t: 'rank', sweep: sweep, down: down, rank: rk, meds: meds, before: before, ranks: ranks.map(function (b) { return b.slice(); }) });
+      });
+      var cost = U.crossings(ranks, edges).total, kept = cost < bestCost;
+      if (kept) { bestCost = cost; best = ranks.map(function (b) { return b.slice(); }); }
+      log.push({ t: 'end', sweep: sweep, cost: cost, kept: kept, best: bestCost, ranks: ranks.map(function (b) { return b.slice(); }) });
+    }
+    log.push({ t: 'final', ranks: best, cost: bestCost });
+    return log;
+  };
+})();
+</script>
+<script>
+(function () {
+  'use strict';
+  var F = window.SXF, U = F.ou;
+  function names(prefix, k) { var a = []; for (var i = 1; i <= k; i++) a.push(prefix + i); return a; }
+  var MED = {
+    spec: { label: 'six nodes', names: ['A', 'B', 'C', 'D', 'E', 'F'], ranks: [[0, 1], [2, 3], [4, 5]],
+      edges: [{ src: 0, dst: 3 }, { src: 1, dst: 2 }, { src: 2, dst: 5 }, { src: 3, dst: 4 }] },
+    test: { label: 'unit test', names: ['A1', 'A2', 'B1', 'B2'], ranks: [[0, 1], [2, 3]], edges: [{ src: 0, dst: 3 }, { src: 1, dst: 2 }] },
+    hard: { label: 'four ranks', names: names('a', 4).concat(names('b', 4), names('c', 4), names('d', 3)), ranks: [[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11], [12, 13, 14]],
+      edges: [[0, 5], [1, 7], [2, 6], [3, 4], [3, 7], [4, 11], [4, 10], [5, 8], [6, 9], [7, 8], [7, 10], [8, 13], [8, 12], [9, 13], [10, 14], [10, 13], [11, 14]].map(function (p) { return { src: p[0], dst: p[1] }; }) }
+  };
+  F.order['order-median'] = function (host) {
+    var key = 'spec', shuffle = 0, stepper = null;
+    var f = SX.figure(host, { caption: '<b>Median sweeps.</b> <b>Step</b> through: each rank is reordered by its nodes\' upper medians (small numbers); crossing edges are orange. <b>Shuffle</b> the start to try another order.' });
+    var bar = SX.el('div', { class: 'ctrl' }); f.ctrl.appendChild(bar);
+    bar.appendChild(SX.choice({ options: Object.keys(MED).map(function (k) { return { value: k, label: MED[k].label }; }), value: key, onChange: function (v) { key = v; shuffle = 0; build(); } }).el);
+    bar.appendChild(SX.button('Shuffle start', function () { shuffle++; build(); }));
+    bar.appendChild(SX.button('Document order', function () { shuffle = 0; build(); }));
+    var stepHost = SX.el('div'); f.ctrl.appendChild(stepHost);
+    var msg = SX.el('div', { class: 'note', style: { minHeight: '2.6em' } }); f.stage.after(msg);
+    function permuted(T) {
+      if (!shuffle) return T.ranks;
+      var s = shuffle * 2654435761 % 4294967296;
+      function rnd() { s = (s * 1664525 + 1013904223) % 4294967296; return s / 4294967296; }
+      return T.ranks.map(function (b) { var a = b.slice(); for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(rnd() * (i + 1)), t = a[i]; a[i] = a[j]; a[j] = t; } return a; });
+    }
+    function build() {
+      var T = MED[key], log = U.sweeps(permuted(T), T.edges, 8);
+      var history = [];
+      log.forEach(function (s, i) { if (s.t === 'start' || s.t === 'end') history.push({ i: i, s: s }); });
+      stepHost.innerHTML = ''; if (stepper) stepper.stop();
+      stepper = SX.stepper({ steps: log.length, interval: 900, label: function (i) { return (i + 1) + ' / ' + log.length; }, onStep: function (i) { draw(T, log, i, history); } });
+      stepHost.appendChild(stepper.el);
+    }
+    function draw(T, log, i, history) {
+      var s = log[i], R = T.ranks.length, W = 760, H = 330, cw = (W - 200) / R, x0 = 20;
+      var svg = U.root(W, H), g = SX.svg('g'); svg.appendChild(g);
+      var pos = {}, P = {};
+      s.ranks.forEach(function (b, r) { b.forEach(function (v, k) { pos[v] = k; P[v] = { x: x0 + cw * (r + 0.5), y: 50 + k * 62 }; }); });
+      var cr = U.crossings(s.ranks, T.edges), hot = {};
+      cr.pairs.forEach(function (p) { hot[p[0]] = hot[p[1]] = 1; });
+      s.ranks.forEach(function (b, r) {
+        var on = s.t === 'rank' && s.rank === r;
+        U.el(g, 'rect', { x: x0 + cw * r + 6, y: 22, width: cw - 12, height: H - 48, rx: 8 }, { fill: on ? 'color-mix(in srgb, var(--hl-2) 12%, transparent)' : 'var(--surface-2)', stroke: on ? 'var(--hl-2)' : 'none', strokeWidth: 1.5 });
+        U.text(g, x0 + cw * (r + 0.5), H - 8, 'rank ' + r, { fontSize: '11.5px', textAnchor: 'middle', fill: 'var(--text-secondary)' });
+      });
+      T.edges.forEach(function (e, k) {
+        var a = P[e.src], b = P[e.dst];
+        U.el(g, 'line', { x1: a.x + 16, y1: a.y, x2: b.x - 16, y2: b.y, 'stroke-width': hot[k] ? 2.5 : 1.6 }, { stroke: hot[k] ? 'var(--hl)' : 'var(--text-secondary)' });
+      });
+      Object.keys(P).forEach(function (v) {
+        var p = P[v];
+        U.el(g, 'circle', { cx: p.x, cy: p.y, r: 16 }, { fill: 'var(--state-fill)', stroke: 'var(--state-stroke)', strokeWidth: 1.5 });
+        U.text(g, p.x, p.y + 4.5, T.names[v], { fontSize: '12px', textAnchor: 'middle' });
+        if (s.t === 'rank' && s.meds[v] !== undefined) {
+          var m = s.meds[v];
+          U.text(g, p.x + 22, p.y - 12, m == null ? '—' : String(m), { fontSize: '11.5px', fontFamily: SX.css('--mono'), fill: 'var(--hl-2)', fontWeight: 700 });
+        }
+      });
+      // The running count, sweep by sweep: kept sweeps solid, discarded ones hollow.
+      var hx = W - 165;
+      U.text(g, hx, 30, 'crossings', { fontSize: '12px', fill: 'var(--text-secondary)' });
+      U.text(g, hx, 70, String(cr.total), { fontSize: '34px', fontWeight: 700 });
+      var maxc = Math.max.apply(null, history.map(function (h) { return h.s.cost; })) || 1;
+      history.forEach(function (h, k) {
+        var done = h.i <= i, bh = 110 * h.s.cost / maxc, bx = hx + k * 17, by = 220;
+        var rect = U.el(g, 'rect', { x: bx, y: by - bh, width: 12, height: Math.max(bh, 1.5) }, { fill: !done ? 'none' : (h.s.kept === false ? 'none' : 'var(--series-1)'), stroke: done ? 'var(--series-1)' : 'var(--grid)', strokeWidth: 1.5 });
+        SX.tipOn(rect, h.s.t === 'start' ? 'start: ' + h.s.cost + ' crossings' : 'after sweep ' + h.s.sweep + ' (' + (h.s.sweep % 2 ? 'up' : 'down') + '): ' + h.s.cost + (h.s.kept ? ', best so far' : ', not better, discarded'));
+      });
+      U.el(g, 'line', { x1: hx - 3, x2: hx + history.length * 17, y1: 220, y2: 220 }, { stroke: 'var(--axis)' });
+      U.text(g, hx, 238, 'start, then each sweep', { fontSize: '11px', fill: 'var(--text-muted)' });
+      f.stage.innerHTML = ''; f.stage.appendChild(svg);
+      var nm = function (v) { return T.names[v]; };
+      if (s.t === 'start') msg.textContent = 'Start: ' + (shuffle ? 'a shuffled order' : 'document order') + ', ' + s.cost + ' crossings.' + (s.cost === 0 ? ' Already 0, so the frame is never swept.' : '');
+      else if (s.t === 'rank') msg.textContent = 'Sweep ' + s.sweep + ' (' + (s.down ? 'down: medians of predecessors' : 'up: medians of successors') + '), rank ' + s.rank + ': [' + s.before.map(nm).join(', ') + '] → [' + s.ranks[s.rank].map(nm).join(', ') + ']' + (s.before.join() === s.ranks[s.rank].join() ? ', no swap.' : '.');
+      else if (s.t === 'end') msg.textContent = 'After sweep ' + s.sweep + ': ' + s.cost + ' crossings. ' + (s.kept ? 'Best so far, kept.' : 'Not better than ' + s.best + ', so the best arrangement stays as it was.') + (s.cost === 0 ? ' Zero: stop.' : '');
+      else msg.textContent = 'Final: the best arrangement, ' + s.cost + ' crossings.';
+    }
+    build();
+  };
+})();
+</script>
+<script>
+(function () {
+  'use strict';
+  var F = window.SXF, U = F.ou;
+  var RANK_COL = ['var(--series-1)', 'var(--series-3)', 'var(--series-4)', 'var(--series-7)', 'var(--series-5)', 'var(--series-6)'];
+  F.order['order-brew'] = function (host) {
+    var S = SX.data('stages'), B = S && S.brew;
+    if (!B) { host.appendChild(SX.el('p', { class: 'note', text: 'stages.json is missing.' })); return; }
+    var geom = B.geometry, byId = {};
+    geom.states.forEach(function (s) { byId[s.id] = s; });
+    // Per frame: longest path (rank_assigned), then the pins (rank_pinned), then what the code does next
+    // and the trace does not record: initials re-seated beside their state, empty ranks squeezed.
+    var frames = B.ordering.map(function (o) {
+      var ids = Object.keys(o.assigned).map(Number), A = {}, P = {}, C = {};
+      ids.forEach(function (id) { A[id] = o.assigned[id]; P[id] = o.pinned[id] != null ? o.pinned[id] : o.assigned[id]; C[id] = P[id]; });
+      if (Object.keys(o.pinned).length) {
+        ids.forEach(function (id) {
+          if (byId[id].kind !== 'initial') return;
+          var near = Infinity;
+          geom.trans.forEach(function (t) {
+            if (t.src === t.dst) return;
+            if (t.src === id && C[t.dst] != null) near = Math.min(near, C[t.dst]);
+            if (t.dst === id && C[t.src] != null) near = Math.min(near, C[t.src]);
+          });
+          if (near === Infinity) return;
+          if (near === 0) { ids.forEach(function (u) { if (u !== id) C[u]++; }); near = 1; }
+          C[id] = near - 1;
+        });
+        var sq = U.squeeze(ids.map(function (id) { return C[id]; }));
+        ids.forEach(function (id, k) { C[id] = sq[k]; });
+      }
+      return { o: o, ids: ids, stage: [A, P, C], down: o.down };
+    });
+    var stage = 2;
+    var f = SX.figure(host, { caption: '<b>brew\'s ranks</b>, from the trace, tinted by rank. <b>Switch</b> between longest path, the rank pins and the final ranks; <b>hover</b> a state or table row for details.' });
+    f.ctrl.appendChild(SX.choice({ options: [{ value: 0, label: 'Longest path' }, { value: 1, label: '+ rank pins' }, { value: 2, label: '+ initial re-seated (final)' }], value: stage, onChange: function (v) { stage = v; draw(); } }).el);
+    var chartHost = SX.el('div'); f.stage.appendChild(chartHost);
+    var legend = SX.el('div', { class: 'legend' }); f.stage.appendChild(legend);
+    var note = SX.el('div', { class: 'note' }); f.stage.appendChild(note);
+    var table = SX.el('table', { class: 'sx-table' }); f.stage.appendChild(table);
+    var h;
+    function draw() {
+      h = SX.chart(chartHost, geom, { maxHeight: 420, onState: function (s, e, kind) {
+        if (kind === 'leave') { SX.tip.hide(); return; }
+        var fr = frames.filter(function (x) { return x.stage[0][s.id] != null; })[0];
+        if (!fr) { SX.tip.show(e, '<b>' + s.path + '</b><br><span class="m">a composite: its regions are frames of their own</span>'); return; }
+        SX.tip.show(e, '<b>' + (s.name || s.kind) + '</b> <span class="m">frame ' + fr.o.frame + (fr.down ? ', runs down' : '') + '</span><br>longest path: rank ' + fr.stage[0][s.id] + (fr.o.pinned[s.id] != null ? '<br>rank pin: ' + fr.o.pinned[s.id] : '') + '<br>final: rank ' + fr.stage[2][s.id]);
+      } });
+      frames.forEach(function (fr) {
+        fr.ids.forEach(function (id) {
+          var r = fr.stage[stage][id], s = byId[id];
+          h.mark('state', id, RANK_COL[r % RANK_COL.length]);
+          var at = s.kind === 'normal' ? [s.rect[0] + 60, s.rect[1] - 60] : [s.rect[0], s.rect[1] - 60];
+          h.text(at, 'r' + r, { 'font-size': 190, 'font-weight': 700 });
+        });
+        fr.o.reversed.forEach(function (rv) { h.mark('trans', rv.trans, 'var(--hl)'); });
+      });
+      var top = Math.max.apply(null, frames.map(function (fr) { return Math.max.apply(null, fr.ids.map(function (id) { return fr.stage[stage][id]; })); }));
+      legend.innerHTML = '';
+      for (var r = 0; r <= top; r++) legend.appendChild(SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: RANK_COL[r] } }), 'rank ' + r));
+      legend.appendChild(SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--hl)' } }), 'reversed: ' + frames[0].o.reversed.map(function (rv) { var t = geom.trans[rv.trans]; return t.src_path.replace(/^.*\//, '') + ' → ' + t.dst_path.replace(/^.*\//, ''); }).join(', ')));
+      note.innerHTML = stage === 0 ? 'Root frame by longest path: SelfCheck and the initial are sources at rank 0; Off and Standby at 1; Brewing and the final at 2.'
+        : stage === 1 ? 'The pins move Off to rank 0 (beside SelfCheck) and the final to rank 1 (beside Standby). The initial now shares rank 0 with the state it enters.'
+        : 'Off, the initial\'s state, sits at rank 0, so every other node moves up one and the initial takes rank 0 alone.';
+      table.innerHTML = '';
+      table.appendChild(SX.el('tr', null, SX.el('th', { text: 'frame' }), SX.el('th', { text: 'boundary (after rank)' }), SX.el('th', { text: 'transition' }), SX.el('th', { text: 'label' }), SX.el('th', { class: 'num', text: 'width charged' })));
+      frames.forEach(function (fr) {
+        fr.o.gap_charged.forEach(function (gc) {
+          var t = geom.trans[gc.trans];
+          var tr = SX.el('tr', null, SX.el('td', { text: fr.o.frame + (fr.down ? ' (down)' : '') }), SX.el('td', { class: 'num', text: gc.boundary }),
+            SX.el('td', { text: t.src_path.replace(/^.*\//, '') + ' → ' + t.dst_path.replace(/^.*\//, '') }), SX.el('td', { text: t.label }), SX.el('td', { class: 'num', text: SX.fmt(gc.width) }));
+          tr.addEventListener('mouseenter', function () { tr.classList.add('hl'); h.mark('trans', gc.trans, 'var(--hl-2)'); });
+          tr.addEventListener('mouseleave', function () { tr.classList.remove('hl'); h.mark('trans', gc.trans, null, false); fr.o.reversed.forEach(function (rv) { if (rv.trans === gc.trans) h.mark('trans', rv.trans, 'var(--hl)'); }); });
+          table.appendChild(tr);
+        });
+      });
+    }
+    draw();
+  };
+})();
+</script>

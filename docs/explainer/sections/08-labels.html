@@ -1,0 +1,263 @@
+<section class="sx" id="labels" data-toc="8 · Labels">
+  <style>
+    .lb-read { font-size: 13.5px; color: var(--text-secondary); margin-top: 6px; max-width: 980px; }
+    .lb-read b { color: var(--text-primary); }
+    .lb-svg .drag { cursor: grab; }
+    .lb-svg .drag:active { cursor: grabbing; }
+  </style>
+  <div class="kicker">Phase 3, last step</div>
+  <h2>Labels: measured, anchored, placed</h2>
+  <p class="lede">A label is a box the application measured; layout hangs it off its own route, inside the state holding both ends, clear of everything else.</p>
+
+  <h3>Measured with scav's metrics</h3>
+  <p>The application measures text with scav's own metrics, so measuring, building and rendering never disagree.</p>
+  <ul>
+    <li>Widths are summed in integers and rounded up, never to nearest, so a box is never smaller than its text.</li>
+    <li>Heights are the font size times a fixed ratio (269 units for 12 pt), not the font's own vertical metrics, which disagree with each other.</li>
+    <li>Kerning is ignored (erring wide), a missing glyph is an error, and there is one bundled font.</li>
+    <li>Layout never re-wraps a label, so height, width and placement need no fixpoint.</li>
+  </ul>
+  <p>A label's <i>size</i> is an input to <a href="#order">ordering</a> and sizing, which reserve room for it; its <i>position</i> is decided last, once every route is final. Both belong to the transition's <a href="#decompose">LCA segment</a>.</p>
+
+  <h3>The anchored model</h3>
+  <p>The box hangs off a point on its own route by an invisible <b>leader</b> half an em long (96 units). Candidates are every combination of:</p>
+  <ul>
+    <li>a leg of the route inside the LCA frame,</li>
+    <li>a slide position along it, every half box height, ends included,</li>
+    <li>a leader direction (up, down, left, right),</li>
+    <li>one of eight <b>attachment points</b> on the box: side midpoints first (so ties centre the box on its leg), then corners.</li>
+  </ul>
+  <div class="callout rule"><span class="t">Rules</span>Every candidate lies inside its <b>holder</b> (the states enclosing both ends), is not cut by its own route, and avoids the states its route leaves and enters. The <b>strict tier</b> also avoids every other state, text band, placed box and route; touching is not overlapping.</div>
+  <p>The winner is the lexicographic minimum of <code>(shortfall, dist, leg, attach, lead, slide)</code>:</p>
+  <ul>
+    <li><b>shortfall</b>, <code>max(0, gap to own leg + h − gap to nearest foreign leg)</code>: a box nearer a neighbour's line than its own would read as the neighbour's label.</li>
+    <li><b>dist</b>: distance from the box's centre to the <b>anchor</b>, the midpoint of the route's longest horizontal leg (else its longest leg).</li>
+  </ul>
+  <p>If no candidate passes the strict tier, the best <b>loose</b> one wins: it keeps the basic rules but may overlap. If nothing passes at all, the box is centred on the anchor and counted as unplaced. Several boxes on one transition are placed in order along the route. Candidates are pruned by the strict tier's bound; pruning by the loose one pushed boxes into the fallback.</p>
+  <div data-fig="labels-toy"></div>
+
+  <h3>Labels in the cost</h3>
+  <p>A label over a foreign state or another route is <a href="#cost">Tier 0</a>, forbidden rather than priced. If one endpoint encloses the other, the label lives inside it and only its text bands count. A label over another label or an enclosing state's bands is Tier 2 (<code>label</code>), as is the shortfall (<code>label_near</code>).</p>
+  <div data-fig="labels-real"></div>
+
+  <div class="callout why"><span class="t">Rejected</span>Boxes on fixed strips beside the line (they drifted far from their leg); rip-up-and-reroute (the loose tier made it unnecessary); "nothing between a label and its line" as a hard rule (many more fallbacks, no gain).</div>
+</section>
+<script>
+SX.register('labels', function (sec) {
+  var CH = SX.data('charts').charts;
+
+  // ---- the anchored placement, implemented as label.cpp does it, on a toy you can drag ----
+  (function () {
+    var host = sec.querySelector('[data-fig="labels-toy"]');
+    var f = SX.figure(host, { caption: '<b>Drag</b> the bend, the state <i>Other</i> or the foreign route, and <b>slide</b> the label width. Dots are candidates: green strict, yellow loose only, grey neither.' });
+    var mode = 'play', showRej = true, showOk = true;
+    var P = { bx: 150, by: 118, F: [300, 170, 130, 56], ry: 252, rx: 0, w: 132 };
+    var fm = SX.choice({ options: [{ value: 'play', label: 'playground' }, { value: 'unit', label: 'unit-test toy' }], value: mode, onChange: function (v) { mode = v; draw(); } });
+    var ws = SX.slider({ label: 'Label width', min: 40, max: 240, step: 4, value: P.w, format: function (v) { return v; }, onInput: function (v) { P.w = v; draw(); } });
+    var tr = SX.toggle({ label: 'rejected candidates', value: true, onChange: function (v) { showRej = v; draw(); } });
+    var to = SX.toggle({ label: 'passing candidates', value: true, onChange: function (v) { showOk = v; draw(); } });
+    [fm.el, ws.el, tr.el, to.el].forEach(function (e) { f.ctrl.appendChild(e); });
+    var W = 800, H = 420;
+    var svg = SX.svg('svg', { class: 'lb-svg', viewBox: '0 0 ' + W + ' ' + H, style: { width: '100%', height: 'auto', font: '13px ' + SX.css('--sans'), touchAction: 'none' } });
+    var g = SX.svg('g');
+    svg.appendChild(g);
+    var read = SX.el('div', { class: 'lb-read' });
+    f.stage.appendChild(svg); f.stage.appendChild(read);
+
+    function scene() {
+      if (mode === 'unit') return { holder: [20, 20, 760, 380], band: null, S: null, T: null, walls: [], route: [[100, 150], [400, 150]], foreign: [], w: 60, h: 20, leader: 10 };
+      var S = [80, 300, 150, 60], T = [560, 86, 150, 64];
+      var fr = [[250 + P.rx, P.ry], [520 + P.rx, P.ry]];
+      return { holder: [20, 20, 760, 380], band: [36, 36, 728, 30], S: S, T: T, walls: [P.F], route: [[P.bx, S[1]], [P.bx, P.by], [T[0], P.by]], foreign: [fr], w: P.w, h: 24, leader: 12 };
+    }
+    var seg = function (a, b) { return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])]; };
+    var over = function (a, b) { return a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3]; };
+    var inside = function (o, i) { return i[0] >= o[0] && i[1] >= o[1] && i[0] + i[2] <= o[0] + o[2] && i[1] + i[3] <= o[1] + o[3]; };
+    var cheb = function (a, b) { return Math.max(Math.max(b[0] - (a[0] + a[2]), a[0] - (b[0] + b[2]), 0), Math.max(b[1] - (a[1] + a[3]), a[1] - (b[1] + b[3]), 0)); };
+    var fdiv = function (a, b) { return Math.floor(a / b); };
+    var LEAD = function (k, n) { return [[0, -n], [0, n], [-n, 0], [n, 0]][k]; };
+    var ATT = function (k, w, h) { return [[fdiv(w, 2), h], [fdiv(w, 2), 0], [w, fdiv(h, 2)], [0, fdiv(h, 2)], [0, 0], [w, 0], [0, h], [w, h]][k]; };
+    var ATTN = ['bottom-mid', 'top-mid', 'right-mid', 'left-mid', 'top-left', 'top-right', 'bottom-left', 'bottom-right'], LEADN = ['up', 'down', 'left', 'right'];
+    function anchorOf(pts) {
+      var mid = null, longest = -1;
+      for (var pass = 0; pass < 2 && longest < 0; pass++) for (var k = 0; k + 1 < pts.length; k++) {
+        var a = pts[k], b = pts[k + 1];
+        if (pass === 0 && a[1] !== b[1]) continue;
+        var span = Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]);
+        if (span <= longest) continue;
+        longest = span; mid = [a[0] + fdiv(b[0] - a[0], 2), a[1] + fdiv(b[1] - a[1], 2)];
+      }
+      return mid || pts[0];
+    }
+    function better(a, b) {
+      var ks = ['shortfall', 'dist', 'seg', 'attach', 'lead', 'mid'];
+      for (var i = 0; i < ks.length; i++) if (a[ks[i]] !== b[ks[i]]) return a[ks[i]] < b[ks[i]];
+      return false;
+    }
+    // Every candidate, both tiers' verdicts, and each tier's least key.
+    function place(sc) {
+      var own = [], foreign = [], cands = [], best = null, lax = null;
+      for (var k = 0; k + 1 < sc.route.length; k++) own.push(seg(sc.route[k], sc.route[k + 1]));
+      sc.foreign.forEach(function (r) { for (var k = 0; k + 1 < r.length; k++) foreign.push(seg(r[k], r[k + 1])); });
+      var below = [sc.S, sc.T].filter(Boolean), walls = sc.walls.concat(sc.band ? [sc.band] : []).concat(below).concat(foreign);
+      var at = anchorOf(sc.route), step = Math.max(fdiv(sc.h, 2), 1);
+      for (var k = 0; k + 1 < sc.route.length; k++) {
+        var a = sc.route[k], b = sc.route[k + 1], flat = a[1] === b[1];
+        if (flat === (a[0] === b[0])) continue;
+        var lo = flat ? Math.min(a[0], b[0]) : Math.min(a[1], b[1]), hi = flat ? Math.max(a[0], b[0]) : Math.max(a[1], b[1]);
+        var runs = fdiv(hi - lo, step);
+        for (var n = 0; n <= runs + 1; n++) {
+          var mid = Math.min(lo + n * step, hi), on = flat ? [mid, a[1]] : [a[0], mid];
+          for (var lead = 0; lead < 4; lead++) for (var which = 0; which < 8; which++) {
+            var aw = LEAD(lead, sc.leader), ip = ATT(which, sc.w, sc.h);
+            var r = [on[0] + aw[0] - ip[0], on[1] + aw[1] - ip[1], sc.w, sc.h];
+            var reach = cheb(r, own[k]) + sc.h, nearest = reach;
+            foreign.forEach(function (fs) { nearest = Math.min(nearest, cheb(r, fs)); });
+            var key = { shortfall: reach - nearest, dist: Math.abs(r[0] + fdiv(sc.w, 2) - at[0]) + Math.abs(r[1] + fdiv(sc.h, 2) - at[1]), seg: k, attach: which, lead: lead, mid: mid, on: on, r: r };
+            var loose = inside(sc.holder, r) && !own.some(function (o) { return over(r, o); }) && !below.some(function (o) { return over(r, o); });
+            var strict = loose && !walls.some(function (o) { return over(r, o); });
+            cands.push({ r: r, loose: loose, strict: strict });
+            if (loose && (!lax || better(key, lax))) lax = key;
+            if (strict && (!best || better(key, best))) best = key;
+          }
+        }
+      }
+      return { cands: cands, best: best || lax, tier: best ? 'strict' : lax ? 'loose' : 'none', at: at, own: own };
+    }
+    var drag = null;
+    function toSvg(e) { var pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; return pt.matrixTransform(svg.getScreenCTM().inverse()); }
+    function moveTo(e) {
+      if (!drag) return;
+      var p = toSvg(e), dx = p.x - drag.x, dy = p.y - drag.y;
+      if (drag.what === 'bend') { P.bx = Math.round(Math.max(90, Math.min(220, drag.o[0] + dx))); P.by = Math.round(Math.max(94, Math.min(142, drag.o[1] + dy))); }
+      if (drag.what === 'F') { P.F = [Math.round(Math.max(20, Math.min(780 - P.F[2], drag.o[0] + dx))), Math.round(Math.max(20, Math.min(400 - P.F[3], drag.o[1] + dy))), P.F[2], P.F[3]]; }
+      if (drag.what === 'R') { P.rx = Math.round(Math.max(-220, Math.min(250, drag.o[0] + dx))); P.ry = Math.round(Math.max(30, Math.min(390, drag.o[1] + dy))); }
+      draw();
+    }
+    function grab(what, o) {
+      return function (e) {
+        var p = toSvg(e); drag = { what: what, x: p.x, y: p.y, o: o() };
+        SX.drag(e, { onMove: moveTo, onEnd: function () { drag = null; } });
+      };
+    }
+
+    function draw() {
+      var sc = scene(), res = place(sc);
+      g.innerHTML = '';
+      var ink = SX.css('--ink'), mut = SX.css('--text-muted');
+      var box = function (r, at) { return SX.svg('rect', Object.assign({ x: r[0], y: r[1], width: r[2], height: r[3] }, at)); };
+      var txt = function (x, y, t, at) { return SX.svg('text', Object.assign({ x: x, y: y, fill: ink, text: t }, at || {})); };
+      var line = function (pts, at) { return SX.svg('polyline', Object.assign({ points: pts.map(function (p) { return p.join(','); }).join(' '), fill: 'none' }, at)); };
+      var arrow = function (pts, col) {
+        var a = pts[pts.length - 2], b = pts[pts.length - 1], dx = Math.sign(b[0] - a[0]), dy = Math.sign(b[1] - a[1]);
+        return SX.svg('polygon', { points: [b, [b[0] - dx * 9 - dy * 5, b[1] - dy * 9 - dx * 5], [b[0] - dx * 9 + dy * 5, b[1] - dy * 9 + dx * 5]].map(function (p) { return p.join(','); }).join(' '), fill: col });
+      };
+      g.appendChild(box(sc.holder, { rx: 10, fill: SX.css('--state-fill'), stroke: SX.css('--state-stroke'), 'stroke-width': 1.5 }));
+      if (sc.band) { g.appendChild(box(sc.band, { fill: SX.css('--surface-2') })); g.appendChild(txt(sc.band[0] + 8, sc.band[1] + 20, 'Holder: the state enclosing both ends; its name band is a wall', { fill: mut, 'font-size': 12 })); }
+      [[sc.S, 'Source'], [sc.T, 'Target']].forEach(function (q) {
+        if (!q[0]) return;
+        g.appendChild(box(q[0], { rx: 7, fill: SX.css('--state-fill'), stroke: SX.css('--state-stroke'), 'stroke-width': 1.5 }));
+        g.appendChild(txt(q[0][0] + q[0][2] / 2, q[0][1] + q[0][3] / 2 + 5, q[1], { 'text-anchor': 'middle', 'font-family': SX.css('--mono') }));
+      });
+      var shown = 0;
+      res.cands.forEach(function (c) {
+        var ok = c.strict || c.loose;
+        if (ok ? !showOk : !showRej) return;
+        var col = c.strict ? SX.css('--good') : c.loose ? SX.css('--warning') : SX.css('--axis');
+        g.appendChild(SX.svg('circle', { cx: c.r[0] + c.r[2] / 2, cy: c.r[1] + c.r[3] / 2, r: ok ? 2.2 : 1.4, fill: col, opacity: ok ? 0.9 : 0.55, 'pointer-events': 'none' }));
+        shown++;
+      });
+      sc.walls.forEach(function (w) {
+        var n = box(w, { rx: 7, fill: SX.css('--state-fill'), stroke: SX.css('--state-stroke'), 'stroke-width': 1.5, class: 'drag' });
+        n.addEventListener('pointerdown', grab('F', function () { return [P.F[0], P.F[1]]; }));
+        g.appendChild(n);
+        g.appendChild(txt(w[0] + w[2] / 2, w[1] + w[3] / 2 + 5, 'Other', { 'text-anchor': 'middle', 'font-family': SX.css('--mono'), 'pointer-events': 'none' }));
+      });
+      sc.foreign.forEach(function (r) {
+        g.appendChild(line(r, { stroke: SX.css('--route'), 'stroke-width': 2 })); g.appendChild(arrow(r, SX.css('--route')));
+        var hit = line(r, { stroke: 'transparent', 'stroke-width': 16, class: 'drag' });
+        hit.addEventListener('pointerdown', grab('R', function () { return [P.rx, P.ry]; }));
+        g.appendChild(hit);
+        g.appendChild(txt(r[0][0], r[0][1] - 7, 'foreign route', { fill: mut, 'font-size': 11.5, 'pointer-events': 'none' }));
+      });
+      g.appendChild(line(sc.route, { stroke: SX.css('--route'), 'stroke-width': 2.5 })); g.appendChild(arrow(sc.route, SX.css('--route')));
+      // The anchor: a ring on the route.
+      g.appendChild(SX.svg('circle', { cx: res.at[0], cy: res.at[1], r: 6, fill: 'none', stroke: SX.css('--hl-2'), 'stroke-width': 2 }));
+      var B = res.best, wtxt;
+      if (B) {
+        var col = res.tier === 'strict' ? SX.css('--hl') : SX.css('--serious');
+        g.appendChild(box(B.r, { fill: 'color-mix(in srgb, ' + col + ' 18%, transparent)', stroke: col, 'stroke-width': 2 }));
+        g.appendChild(txt(B.r[0] + B.r[2] / 2, B.r[1] + B.r[3] / 2 + 5, mode === 'unit' ? 'w60' : 'label', { 'text-anchor': 'middle', 'font-family': SX.css('--mono'), 'font-size': 12 }));
+        var lp = LEAD(B.lead, sc.leader), ap = ATT(B.attach, sc.w, sc.h);
+        g.appendChild(line([B.on, [B.on[0] + lp[0], B.on[1] + lp[1]]], { stroke: col, 'stroke-width': 2, 'stroke-dasharray': '3 2' }));
+        g.appendChild(SX.svg('circle', { cx: B.on[0], cy: B.on[1], r: 3.5, fill: col }));
+        g.appendChild(SX.svg('circle', { cx: B.r[0] + ap[0], cy: B.r[1] + ap[1], r: 3, fill: SX.css('--surface-1'), stroke: col, 'stroke-width': 1.5 }));
+        wtxt = '<b>Winner (' + res.tier + ' tier):</b> box (' + B.r.join(', ') + ') on leg ' + B.seg + ', slide ' + B.mid + ', leader ' + LEADN[B.lead] + ', attached at its ' + ATTN[B.attach] + '; shortfall ' + B.shortfall + ', dist ' + B.dist + '.';
+      } else wtxt = '<b>No candidate passes either tier:</b> scav would centre the box on the anchor and count it as unplaced.';
+      if (mode === 'play') {
+        var hb = SX.svg('circle', { cx: P.bx, cy: P.by, r: 8, fill: SX.css('--hl'), stroke: SX.css('--surface-1'), 'stroke-width': 2, class: 'drag' });
+        hb.addEventListener('pointerdown', grab('bend', function () { return [P.bx, P.by]; }));
+        g.appendChild(hb);
+      }
+      var ns = res.cands.filter(function (c) { return c.strict; }).length, nl = res.cands.filter(function (c) { return c.loose && !c.strict; }).length;
+      read.innerHTML = wtxt + ' Of ' + SX.fmt(res.cands.length) + ' candidates (' + (sc.route.length - 1) + (sc.route.length > 2 ? ' legs' : ' leg') + ' × slides every ' + Math.max(fdiv(sc.h, 2), 1) + ' × 4 leads × 8 attachments), <span class="swatch" style="background:var(--good)"></span>' + ns + ' pass the strict tier and <span class="swatch" style="background:var(--warning)"></span>' + nl + ' only the loose tier. The blue ring is the anchor.' +
+        (mode === 'unit' ? ' The unit test expects (220, 130, 60, 20): ' + (B && B.r.join(',') === '220,130,60,20' ? 'matched.' : 'NOT matched.') : '');
+    }
+    draw();
+  })();
+
+  // ---- a real chart's placed boxes, with Tier 0's label checks recomputed ----
+  (function () {
+    var host = sec.querySelector('[data-fig="labels-real"]');
+    var f = SX.figure(host, { caption: '<b>Pick</b> a chart and <b>hover</b> a label box for its gaps to its own leg and the nearest foreign route. The line below re-counts the Tier 0 label checks.' });
+    var names = ['brew', 'tcp', 'axis', 'dock', 'toolchanger', 'bottler'], cur = 'toolchanger';
+    var pc = SX.choice({ options: names.map(function (n) { return { value: n, label: n }; }), value: cur, onChange: function (v) { cur = v; draw(); } });
+    f.ctrl.appendChild(SX.el('span', { text: 'Chart' })); f.ctrl.appendChild(pc.el);
+    var stage = SX.el('div'), read = SX.el('div', { class: 'lb-read' });
+    f.stage.appendChild(stage); f.stage.appendChild(read);
+    var over = function (a, b) { return a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3]; };
+    var cheb = function (a, b) { return Math.max(Math.max(b[0] - (a[0] + a[2]), a[0] - (b[0] + b[2]), 0), Math.max(b[1] - (a[1] + a[3]), a[1] - (b[1] + b[3]), 0)); };
+    var seg = function (a, b) { return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])]; };
+    function draw() {
+      var c = CH[cur], g = c.text, m = c.model;
+      var h = SX.chart(stage, g, { maxHeight: 560, labelBoxes: true });
+      // Ancestor-or-self sets, from parent submachine to owner state.
+      var anc = {};
+      m.states.forEach(function (s) {
+        var set = [s.id], sub = s.parent_sub;
+        while (sub != null) { var ow = m.submachines[sub].owner; if (ow == null) break; set.push(ow); sub = m.states[ow].parent_sub; }
+        anc[s.id] = set;
+      });
+      var legs = g.trans.map(function (t) { var out = []; for (var k = 0; k + 1 < t.points.length; k++) out.push(seg(t.points[k], t.points[k + 1])); return out; });
+      var lob = 0, lor = 0, hits = [];
+      g.trans.forEach(function (t) {
+        if (!t.label_box) return;
+        var B = t.label_box, src = t.src, dst = t.dst;
+        var common = anc[src].filter(function (x) { return anc[dst].indexOf(x) >= 0; });
+        var hostId = anc[dst].indexOf(src) >= 0 && src !== dst ? src : anc[src].indexOf(dst) >= 0 && src !== dst ? dst : null;
+        g.states.forEach(function (st) {
+          if (common.indexOf(st.id) >= 0 || st.id === hostId) return;
+          if (over(B, st.rect)) { lob++; hits.push('“' + t.label + '” over ' + st.path); }
+        });
+        if (hostId != null) { var hs = g.states[hostId]; if (over(B, hs.before) || over(B, hs.after)) { lob++; hits.push('“' + t.label + '” over its host\'s band'); } }
+        legs.forEach(function (ls, j) { if (j === t.id) return; ls.forEach(function (r) { if (over(B, r)) { lor++; hits.push('“' + t.label + '” over ' + g.trans[j].label); } }); });
+        var own = legs[t.id], bestK = 0, bestG = Infinity;
+        own.forEach(function (r, k) { var d = cheb(B, r); if (d < bestG) { bestG = d; bestK = k; } });
+        var fgap = Infinity;
+        legs.forEach(function (ls, j) { if (j !== t.id) ls.forEach(function (r) { fgap = Math.min(fgap, cheb(B, r)); }); });
+        var hit = h.rect(B, { fill: 'transparent', stroke: 'none' });
+        hit.style.pointerEvents = 'all';
+        SX.tipOn(hit, '<b>“' + t.label + '”</b> ' + t.src_path + ' → ' + t.dst_path + '<br>box ' + B[2] + ' × ' + B[3] + ' at (' + B[0] + ', ' + B[1] + ')<br><span class="m">nearest own leg: leg ' + bestK + ' of ' + own.length + ', gap ' + bestG + (bestG === 0 ? ' (flush)' : '') +
+          '<br>nearest foreign route: gap ' + (fgap === Infinity ? 'none' : SX.fmt(fgap)) + (hostId != null ? '<br>host (exempt endpoint): ' + g.states[hostId].path : '') + '</span>');
+        hit.addEventListener('mouseenter', function () { h.mark('trans', t.id); });
+        hit.addEventListener('mouseleave', function () { h.unmarkAll(); });
+      });
+      h.svg.appendChild(h.over);
+      var T0 = g.cost.tier0, nb = g.trans.filter(function (t) { return t.label_box; }).length;
+      read.innerHTML = '<b>' + cur + '</b>: ' + nb + ' placed boxes, leader ' + g.label_leader + ' units. Recounted here: <code>label_over_box</code> ' + lob + ', <code>label_over_route</code> ' + lor +
+        '. scav\'s cost: ' + T0.label_over_box + ' and ' + T0.label_over_route + (lob === T0.label_over_box && lor === T0.label_over_route ? ' (they agree)' : ' (they differ: ' + hits.join('; ') + ')') + '. Tier 2 <code>label</code> ' + g.cost.terms.label + ', <code>label_near</code> ' + g.cost.terms.label_near + '.';
+    }
+    draw();
+  })();
+});
+</script>

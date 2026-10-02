@@ -11,17 +11,16 @@ name: ci
 on:
   push:
     branches: ["main"]
+  # `closed` only cancels: a merged or closed PR's run joins its group and every job skips.
   pull_request:
+    types: [opened, synchronize, reopened, closed]
   workflow_dispatch:
-  # The full grid on main daily, whether or not anything was pushed: the toolchain
-  # image is rebuilt weekly, and drift in it is what a quiet week would otherwise hide.
-  schedule:
-    - cron: "0 6 * * *"
 
 # A formatting push cancels the run that made it and starts a fresh one, which is
 # the whole mechanism: the second run finds nothing to format and proceeds.
+# One group per PR branch, and one for main's pushes: the newest run supersedes.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
 # Naming a scope drops the ones not named, so the ghcr pull needs saying too.
@@ -48,6 +47,7 @@ jobs:
     name: ${{ matrix.triple }} / ${{ matrix.config }}
     needs: format-code
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     container: ghcr.io/charlesnicholson/scav-ci:latest
     strategy:
       fail-fast: false
@@ -55,30 +55,30 @@ jobs:
         triple: [linux-clang-libcxx, linux-clang-libstdcxx, linux-gcc-libstdcxx]
         config: [debug, release, testable]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # No restore-keys: a bundle is cached under its identity, so a manifest that
       # moves the pinned ref would keep resolving the old specs from a prefix hit.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: out/.envy
           key: envy-linux-${{ hashFiles('envy.lua') }}
 
       - name: Restore compiler cache
         id: sccache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .sccache
           key: sccache-${{ matrix.triple }}-${{ matrix.config }}-${{ github.sha }}
           restore-keys: sccache-${{ matrix.triple }}-${{ matrix.config }}-
 
-      - uses: mozilla-actions/sccache-action@v0.0.10
+      - uses: mozilla-actions/sccache-action@v0.0.11
 
       - run: ./build.sh --preset ${{ matrix.triple }}-${{ matrix.config }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
 
       - name: Save compiler cache
         id: sccache-save
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         if: always() && github.ref == 'refs/heads/main'
         with:
           path: .sccache
@@ -97,27 +97,28 @@ jobs:
     name: macos-clang-libcxx / ${{ matrix.config }}
     needs: format-code
     runs-on: macos-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         config: [debug, release, testable]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: out/.envy
           key: envy-macos-${{ hashFiles('envy.lua') }}
 
       - name: Restore compiler cache
         id: sccache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .sccache
           key: sccache-macos-clang-libcxx-${{ matrix.config }}-${{ github.sha }}
           restore-keys: sccache-macos-clang-libcxx-${{ matrix.config }}-
 
-      - uses: mozilla-actions/sccache-action@v0.0.10
+      - uses: mozilla-actions/sccache-action@v0.0.11
 
       # Deliberately no setup-python and no brew install: the image has all three,
       # and using them would fail the provisioning test, which is what it is for.
@@ -125,7 +126,7 @@ jobs:
 
       - name: Save compiler cache
         id: sccache-save
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         if: always() && github.ref == 'refs/heads/main'
         with:
           path: .sccache
@@ -144,6 +145,7 @@ jobs:
     name: ${{ matrix.triple }} / ${{ matrix.config }}
     needs: format-code
     runs-on: windows-latest
+    timeout-minutes: 60
     env:
       SCCACHE_CACHE_SIZE: 800M
     strategy:
@@ -152,22 +154,22 @@ jobs:
         triple: [windows-msvc, windows-clang]
         config: [debug, release, testable]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: out/.envy
           key: envy-windows-${{ hashFiles('envy.lua') }}
 
       - name: Restore compiler cache
         id: sccache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .sccache
           key: sccache-${{ matrix.triple }}-${{ matrix.config }}-${{ github.sha }}
           restore-keys: sccache-${{ matrix.triple }}-${{ matrix.config }}-
 
-      - uses: mozilla-actions/sccache-action@v0.0.10
+      - uses: mozilla-actions/sccache-action@v0.0.11
 
       # Dev shell and build in one step: it only changes its own process, so
       # splitting them would mean forwarding the environment. Both ship with VS.
@@ -181,7 +183,7 @@ jobs:
 
       - name: Save compiler cache
         id: sccache-save
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         if: always() && github.ref == 'refs/heads/main'
         with:
           path: .sccache
@@ -206,6 +208,7 @@ jobs:
     name: ${{ matrix.triple }} / ${{ matrix.sanitizer }}
     needs: format-code
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     container: ghcr.io/charlesnicholson/scav-ci:latest
     strategy:
       fail-fast: false
@@ -221,28 +224,28 @@ jobs:
           - { triple: linux-gcc-libstdcxx, sanitizer: ubsan }
           - { triple: linux-gcc-libstdcxx, sanitizer: tsan }
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: out/.envy
           key: envy-linux-${{ hashFiles('envy.lua') }}
 
       - name: Restore compiler cache
         id: sccache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .sccache
           key: sccache-${{ matrix.triple }}-${{ matrix.sanitizer }}-${{ github.sha }}
           restore-keys: sccache-${{ matrix.triple }}-${{ matrix.sanitizer }}-
 
-      - uses: mozilla-actions/sccache-action@v0.0.10
+      - uses: mozilla-actions/sccache-action@v0.0.11
 
       - run: ./build.sh --preset ${{ matrix.triple }}-${{ matrix.sanitizer }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
 
       - name: Save compiler cache
         id: sccache-save
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         if: always() && github.ref == 'refs/heads/main'
         with:
           path: .sccache
@@ -263,37 +266,38 @@ jobs:
     # MSan against an uninstrumented one reports false positives forever.
     name: linux-clang-libcxx / msan
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     container: ghcr.io/charlesnicholson/scav-ci:latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: out/.envy
           key: envy-linux-${{ hashFiles('envy.lua') }}
 
       # Keyed on the script, which is where the version and hash are pinned. A miss
       # costs one build; a stale hit costs a phantom finding, which is worse.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: out/msan-libcxx/prefix
           key: msan-libcxx-${{ hashFiles('tools/msan_libcxx.py') }}
 
       - name: Restore compiler cache
         id: sccache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .sccache
           key: sccache-linux-clang-libcxx-msan-${{ github.sha }}
           restore-keys: sccache-linux-clang-libcxx-msan-
 
-      - uses: mozilla-actions/sccache-action@v0.0.10
+      - uses: mozilla-actions/sccache-action@v0.0.11
 
       - run: ./build.sh --preset linux-clang-libcxx-msan -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
 
       - name: Save compiler cache
         id: sccache-save
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         if: always() && github.ref == 'refs/heads/main'
         with:
           path: .sccache
@@ -312,31 +316,32 @@ jobs:
     name: macos-clang-libcxx / ${{ matrix.sanitizer }}
     needs: format-code
     runs-on: macos-latest
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
         sanitizer: [asan, ubsan, tsan]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
         with:
           path: out/.envy
           key: envy-macos-${{ hashFiles('envy.lua') }}
       - name: Restore compiler cache
         id: sccache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .sccache
           key: sccache-macos-clang-libcxx-${{ matrix.sanitizer }}-${{ github.sha }}
           restore-keys: sccache-macos-clang-libcxx-${{ matrix.sanitizer }}-
 
-      - uses: mozilla-actions/sccache-action@v0.0.10
+      - uses: mozilla-actions/sccache-action@v0.0.11
 
       - run: ./build.sh --preset macos-clang-libcxx-${{ matrix.sanitizer }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
 
       - name: Save compiler cache
         id: sccache-save
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         if: always() && github.ref == 'refs/heads/main'
         with:
           path: .sccache
@@ -355,6 +360,7 @@ jobs:
     name: ${{ matrix.triple }} / ${{ matrix.sanitizer }}
     needs: format-code
     runs-on: windows-latest
+    timeout-minutes: 60
     env:
       SCCACHE_CACHE_SIZE: 800M
     strategy:
@@ -367,20 +373,20 @@ jobs:
           - { triple: windows-msvc, sanitizer: asan }
           - { triple: windows-clang, sanitizer: ubsan }
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
         with:
           path: out/.envy
           key: envy-windows-${{ hashFiles('envy.lua') }}
       - name: Restore compiler cache
         id: sccache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .sccache
           key: sccache-${{ matrix.triple }}-${{ matrix.sanitizer }}-${{ github.sha }}
           restore-keys: sccache-${{ matrix.triple }}-${{ matrix.sanitizer }}-
 
-      - uses: mozilla-actions/sccache-action@v0.0.10
+      - uses: mozilla-actions/sccache-action@v0.0.11
 
       # Dev shell and build in one step: it only changes its own process, so
       # splitting them would mean forwarding the environment. Both ship with VS.
@@ -394,7 +400,7 @@ jobs:
 
       - name: Save compiler cache
         id: sccache-save
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         if: always() && github.ref == 'refs/heads/main'
         with:
           path: .sccache
@@ -418,28 +424,29 @@ jobs:
     name: coverage gate
     needs: format-code
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     container: ghcr.io/charlesnicholson/scav-ci:latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
         with:
           path: out/.envy
           key: envy-linux-${{ hashFiles('envy.lua') }}
       - name: Restore compiler cache
         id: sccache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .sccache
           key: sccache-linux-clang-libcxx-coverage-${{ github.sha }}
           restore-keys: sccache-linux-clang-libcxx-coverage-
 
-      - uses: mozilla-actions/sccache-action@v0.0.10
+      - uses: mozilla-actions/sccache-action@v0.0.11
 
       - run: ./build.sh --coverage --preset linux-clang-libcxx-coverage -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
 
       - name: Save compiler cache
         id: sccache-save
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         if: always() && github.ref == 'refs/heads/main'
         with:
           path: .sccache
@@ -466,7 +473,10 @@ jobs:
   # job reports the diff instead -- never silently accepts it.
   format-code:
     name: format code
+    # Every compiling job needs this one, so skipping it skips them.
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     container: ghcr.io/charlesnicholson/scav-ci:latest
     env:
       SCAV_LINT: 1
@@ -474,12 +484,12 @@ jobs:
       HAS_PUSH_TOKEN: ${{ secrets.CI_PUSH_TOKEN != '' }}
     steps:
       # The branch, not the PR's merge commit, or the push has nothing to land on.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.head_ref || github.ref_name }}
           token: ${{ secrets.CI_PUSH_TOKEN || github.token }}
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: out/.envy
           key: envy-lint-${{ hashFiles('envy.lua', 'envy/*.lua') }}
@@ -541,12 +551,13 @@ jobs:
     name: clang-tidy
     needs: format-code
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     container: ghcr.io/charlesnicholson/scav-ci:latest
     env:
       SCAV_LINT: 1  # the clang tools, which no compiling row pays for
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
         with:
           path: out/.envy
           key: envy-lint-${{ hashFiles('envy.lua', 'envy/*.lua') }}
@@ -565,17 +576,19 @@ jobs:
   # it is no more exposed to a network hiccup than any compiling row already is.
   baseline-engines:
     name: baseline engines / ${{ matrix.os }}
+    if: github.event.action != 'closed'
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     env:
       SCAV_BASELINE: 1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: out/.envy
           key: envy-baseline-${{ runner.os }}-${{ hashFiles('envy.lua', 'envy/*.lua') }}
@@ -635,7 +648,7 @@ jobs:
 
   all-checks-pass:
     name: all checks pass
-    if: always()
+    if: always() && github.event.action != 'closed'
     needs:
       - linux
       - macos
@@ -649,6 +662,7 @@ jobs:
       - clang-tidy
       - baseline-engines
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Report
         run: echo '${{ toJSON(needs) }}'

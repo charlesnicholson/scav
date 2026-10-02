@@ -2,6 +2,7 @@
 // sequences, the kind rules, and the concurrent direct arrow.
 
 #include "layout/decompose.h"
+#include "layout/order.h"
 #include "scav/scav_core.h"
 
 #include "doctest.h"
@@ -628,4 +629,31 @@ TEST_CASE("split: containment climbs one step, or all the way, or gives up") {
   CHECK(ancestor_or_self(c, y, z));   // still found, inside the cap
   CHECK(!ancestor_or_self(c, w, z));  // W is unreachable, and the walk stops
   CHECK(decompose(c).state_depth.size() == c.states.size());
+}
+
+TEST_CASE("split: each graph has its own serial and a label segment per transition") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
+  StateId const s{ build_state(c, inner, "S", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  build_trans(c, s, d, TransKind::External, {});
+  build_trans(c, d, d, TransKind::Internal, {});
+
+  SplitGraph const g1{ decompose(c) };
+  SplitGraph const g2{ decompose(c) };
+  CHECK(g1.serial != 0);
+  CHECK(g2.serial != 0);
+  CHECK(g1.serial != g2.serial);
+
+  // The table answers what the walk computes on a graph without one.
+  SplitGraph by_hand{ g1 };
+  by_hand.trans_label.clear();
+  REQUIRE(g1.trans_label.size() == c.transitions.size());
+  for (uint32_t t = 0; t < c.transitions.size(); ++t) {
+    CHECK(g1.trans_label[t] == label_segment(c, by_hand, t));
+  }
+  CHECK(g1.trans_label[0] == segs_of(g1, 0).off + 1);  // the leg in `root`
+  CHECK(g1.trans_label[1] == INVALID);
 }

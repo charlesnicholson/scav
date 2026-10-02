@@ -190,8 +190,50 @@ Routes route_transitions(Chart const &c,
                          RouteCache const *reuse,
                          RouteCache *fill,
                          SearchPins const *pins,
-                         Routes const *was) {
+                         Routes const *was,
+                         bool labels) {
   Routes out;
+  route_transitions(out,
+                    c,
+                    g,
+                    o,
+                    z,
+                    s,
+                    p,
+                    router,
+                    threads,
+                    reuse,
+                    fill,
+                    pins,
+                    was,
+                    labels);
+  return out;
+}
+
+void route_transitions(Routes &out,
+                       Chart const &c,
+                       SplitGraph const &g,
+                       SubmachineOrders const &o,
+                       SizedLayout const &z,
+                       scav_spaces const &s,
+                       scav_profile const &p,
+                       Router const &router,
+                       uint32_t threads,
+                       RouteCache const *reuse,
+                       RouteCache *fill,
+                       SearchPins const *pins,
+                       Routes const *was,
+                       bool labels) {
+  out.points.clear();
+  out.slots.clear();
+  out.placed.clear();
+  out.settled.clear();
+  out.outside_region = 0;
+  out.unreachable = 0;
+  out.too_large = 0;
+  out.reseated = 0;
+  out.nudged = {};
+  out.unplaced = 0;
   std::vector<CallScratch> &stack{ call_stack() };
   CallScratch cs;
   if (!stack.empty()) {
@@ -248,7 +290,7 @@ Routes route_transitions(Chart const &c,
       return o.nodes[a].rank < o.nodes[b].rank;
     });
     // Ranks climb in the acyclic direction, which is the authored one only
-    // when the segment's edge was not reversed to break a cycle.
+    // when the segment's edge is not reversed.
     if (seg_reversed[seg] != 0) {
       for (uint32_t i = 0; i < (chain.size() / 2); ++i) {
         uint32_t const other{ chain[i] };
@@ -570,19 +612,23 @@ Routes route_transitions(Chart const &c,
     if ((reuse != nullptr) && (m < reuse->frame.size()) && (reuse->frame[m].valid != 0) &&
         same_but_shifted(reuse->frame[m], in, frame, dx, dy)) {
       RouteFrameCache const &had{ reuse->frame[m] };
-      frames[m].points = had.points;
-      for (scav_point &q : frames[m].points) {
-        q.x += dx;
-        q.y += dy;
+      std::vector<scav_point> &moved{ frames[m].points };
+      vec_resize(moved, had.points.size());
+      for (size_t k = 0; k < moved.size(); ++k) {
+        moved[k] = { .x = had.points[k].x + dx, .y = had.points[k].y + dy };
       }
-      frames[m].net_points = had.net_points;
-      frames[m].metrics = had.metrics;
+      vec_assign(frames[m].net_points, had.net_points.begin(), had.net_points.end());
+      vec_assign(frames[m].metrics, had.metrics.begin(), had.metrics.end());
       frames[m].nudged = had.nudged;
       if (fill != nullptr) {
-        fill->frame[m] = had;
-        fill->frame[m].in = in;
-        fill->frame[m].frame = frame;
-        fill->frame[m].points = frames[m].points;
+        RouteFrameCache &to{ fill->frame[m] };
+        to.valid = had.valid;
+        to.frame = frame;
+        to.in = in;
+        to.points = moved;
+        to.net_points = had.net_points;
+        to.metrics = had.metrics;
+        to.nudged = had.nudged;
       }
       for (uint32_t const st : sc.obstacle_states) { sc.obstacle_index[st] = INVALID; }
       return;
@@ -610,13 +656,13 @@ Routes route_transitions(Chart const &c,
     frames[m].net_points = ro.net_points;
     frames[m].metrics = ro.metrics;
     if (fill != nullptr) {
-      fill->frame[m] = { .in = in,
+      fill->frame[m] = { .valid = 1,
                          .frame = frame,
+                         .in = in,
                          .points = ro.points,
                          .net_points = ro.net_points,
                          .metrics = ro.metrics,
-                         .nudged = frames[m].nudged,
-                         .valid = 1 };
+                         .nudged = frames[m].nudged };
     }
     for (uint32_t const st : sc.obstacle_states) { sc.obstacle_index[st] = INVALID; }
   };
@@ -754,6 +800,16 @@ Routes route_transitions(Chart const &c,
                 out.nudged);
   }
 
+  if (labels) { label_routes(out, c, z, s, p, was); }
+  vec_push_back(stack, std::move(cs));
+}
+
+void label_routes(Routes &out,
+                  Chart const &c,
+                  SizedLayout const &z,
+                  scav_spaces const &s,
+                  scav_profile const &p,
+                  Routes const *was) {
   LabelBase const base{ .route = (was != nullptr) ? &was->route : nullptr,
                         .points = (was != nullptr) ? &was->points : nullptr,
                         .placed = (was != nullptr) ? &was->placed : nullptr,
@@ -767,8 +823,6 @@ Routes route_transitions(Chart const &c,
                               out.placed,
                               out.settled,
                               (was != nullptr) ? &base : nullptr);
-  vec_push_back(stack, std::move(cs));
-  return out;
 }
 
 }  // namespace scav

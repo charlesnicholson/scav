@@ -73,14 +73,17 @@ struct CostContext {
 
 CostContext cost_context(Chart const &c);
 
-// `ctx` is `cost_context(c)`.
+// `ctx` is `cost_context(c)`. `party`, where given, is 1 per transition whose route bends
+// or is charged crossings, corridor, crowding, excess_len or a label, else 0; every
+// transition is 1 while any Tier 0 count is nonzero.
 CostTerms cost_terms(CostContext const &ctx,
                      Chart const &c,
                      SplitGraph const &g,
                      SizedLayout const &z,
                      Routes const &r,
                      scav_spaces const &s,
-                     scav_profile const &p);
+                     scav_profile const &p,
+                     std::vector<uint8_t> *party = nullptr);
 
 // The same with a context built for this one call.
 CostTerms cost_terms(Chart const &c,
