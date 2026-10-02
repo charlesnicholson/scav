@@ -48,7 +48,7 @@
   <h3>The <code>.scav</code> format</h3>
   <ul>
     <li>Terse, keyword-led, LL(1) and whitespace-insensitive. Commas separate every item. The unnamed string after a state or transition is its label.</li>
-    <li><code>*</code> means initial or final depending on which side of the arrow it is on. <code>s</code>, <code>m</code> and <code>t</code> are aliases for <code>state</code>, <code>submachine</code> and <code>trans</code>, and print back in full.</li>
+    <li><code>s</code>, <code>m</code> and <code>t</code> are aliases for <code>state</code>, <code>submachine</code> and <code>trans</code>, and print back in full.</li>
     <li>States written directly inside a state's block belong to an unnamed submachine 0. A named block, <code>submachine water { … }</code>, makes one region of a concurrent state.</li>
     <li>Paths are <code>/</code>-separated and resolve innermost-outward. <code>:name</code> picks a submachine, as in <code>Brewing:water/Heating</code> or <code>arm/Moving:travel/Cruising</code>.</li>
     <li><code>include "axis.scav" as arm</code> creates one state <code>arm</code> whose submachine is the included document's root. Including a file twice gives two independent copies.</li>

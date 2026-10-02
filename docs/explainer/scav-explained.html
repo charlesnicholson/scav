@@ -220,7 +220,7 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
   <h3>The <code>.scav</code> format</h3>
   <ul>
     <li>Terse, keyword-led, LL(1) and whitespace-insensitive. Commas separate every item. The unnamed string after a state or transition is its label.</li>
-    <li><code>*</code> means initial or final depending on which side of the arrow it is on. <code>s</code>, <code>m</code> and <code>t</code> are aliases for <code>state</code>, <code>submachine</code> and <code>trans</code>, and print back in full.</li>
+    <li><code>s</code>, <code>m</code> and <code>t</code> are aliases for <code>state</code>, <code>submachine</code> and <code>trans</code>, and print back in full.</li>
     <li>States written directly inside a state's block belong to an unnamed submachine 0. A named block, <code>submachine water { … }</code>, makes one region of a concurrent state.</li>
     <li>Paths are <code>/</code>-separated and resolve innermost-outward. <code>:name</code> picks a submachine, as in <code>Brewing:water/Heating</code> or <code>arm/Moving:travel/Cruising</code>.</li>
     <li><code>include "axis.scav" as arm</code> creates one state <code>arm</code> whose submachine is the included document's root. Including a file twice gives two independent copies.</li>
@@ -284,7 +284,7 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
   </style>
   <div class="kicker">Overview</div>
   <h2>The pipeline at a glance</h2>
-  <p class="lede">Four phases, decompose, order, size and route, turn a chart into a drawing, followed by labels and a cost; a search reruns them hundreds of thousands of times with different choices and keeps the cheapest result.</p>
+  <p class="lede">Four phases, decompose, order, size and route, turn a chart into a drawing, followed by labels and a cost; a search reruns all but decomposition hundreds of thousands of times with different choices and keeps the cheapest result.</p>
 
   <p>Each phase is its own translation unit and hands the next a plain struct declared in its header; none of these crosses the ABI. A phase reads the chart for containment and liveness but never for something an earlier phase computed, so a unit test can type a phase's input in directly: a <code>SubmachineOrders</code> with three ranks is nine integers.</p>
   <table class="sx-table">
@@ -426,7 +426,7 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
     <li><b>Balance.</b> The four results are aligned to the narrowest one (forward-walked runs by their leading edge, backward ones by their trailing edge); each node then takes the average of its two median values, <code>floor((v[1] + v[2]) / 2)</code>.</li>
   </ol>
   <div data-fig="size-bk"></div>
-  <p>Then the alignment rules: states joined by an edge inside one column share a centre line; a state joined to a composite's port is centred on that port; an initial or final is seated <code>rank_sep</code> from its mate, level with it. BK was 95–96% of phase 2's time when measured, which is why it has a <a href="#fast">memo</a>. Network simplex placement was tried and not merged: optimal L1 placement without balancing did not reduce reader-visible defects and cost 1.65× per solve.</p>
+  <p>Then the alignment rules: states joined by an edge inside one column share a centre line; a state joined to a composite's port is centred on that port; an initial or final is seated <code>rank_sep</code> from its mate, level with it. BK was 95–96% of phase 2's time when measured; a per-thread <a href="#fast">memo</a> keyed on the whole graph serves repeated graphs. Network simplex placement was tried and not merged: optimal L1 placement without balancing did not reduce reader-visible defects and cost 1.65× per solve.</p>
 
   <h3>Along the ranks: gaps and label room</h3>
   <p>Each layer's x origin is the previous layer's plus its width, a separation and the larger of two charges (<code>step_layers</code>):</p>
@@ -480,7 +480,7 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
   <p>Each end of a net is <b>seated</b> on a face of its box. The <b>separation rule</b> (<code>ortho_escape_horizontal</code>) measures how far the other end lies <em>outside</em> the box on each axis: the larger separation picks the axis (a tie goes to x, the layering axis), and the nearer border picks the side. The earlier rule used the distance to a point on the border, which charged an exit for the run along its own face and sent <code>ota</code>'s fork bar out through its 4 pt end; the separation rule took the corpus's bends from 689 to 587.</p>
   <p>Where on the face: the other end's projection onto it, held off each corner by <code>min(max(clear, corner arc), len/2)</code> (<code>onto_face</code>). <b>Inscribed glyphs</b>, every kind but Normal, Fork and Join (discs, diamonds, the H), take the face's midpoint.</p>
   <div data-fig="route-face"></div>
-  <p>A <b>face pin</b> (<code>FacePin</code>) overrides the rule at one end. A pin onto a face shorter than twice the inset is declined, since every seat on it would clamp to one point. The router reports, per end, which faces would actually move the seat, so the search never scores a face move that changes nothing. Deciding both faces as a pair from the two boxes was tried: better on <code>estop</code>, but +8.8% Tier 2 over the corpus with nine of eleven charts worse. So the face is a search dimension, not a rule.</p>
+  <p>A <b>face pin</b> (<code>FacePin</code>) overrides the rule at one end. A pin onto a face shorter than twice the inset is declined, since every seat on it would clamp to one point. The router reports, per end, which faces would actually move the seat, so the search can skip a face move that changes nothing (<a href="#fast">face shortcut</a>). Deciding both faces as a pair from the two boxes was tried: better on <code>estop</code>, but +8.8% Tier 2 over the corpus with nine of eleven charts worse. So the face is a search dimension, not a rule.</p>
 
   <h3>The orthogonal router</h3>
   <p>The router searches a <b>separated orthogonal visibility graph</b> with A*.</p>
@@ -488,7 +488,7 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
     <li><b>Grid.</b> The x lines are the region's edges, each obstacle's <code>x − clear</code> and <code>x + w + clear</code>, the enclosure walls' edges and every anchor's x; the y lines likewise. Vertices are their crossings, and an edge is passable unless it cuts an obstacle grown by <code>clear</code>, or a wall. The grid is full, not sparse; the flat 2k-state chart routes in 215 ms. Over 2<sup>18</sup> vertices the router refuses the frame.</li>
     <li><b>Clearance is a bumper, not a penalty.</b> <code>clear = max(node_sep/3, 1)</code> = 96. No segment comes within <code>clear</code> of a box: that is a property of the graph, not a price.</li>
     <li><b>Separated planes.</b> Each vertex has a horizontal-plane copy and a vertical-plane copy, joined by an edge whose weight is the <b>bend penalty</b> (Wybrow et al.), so plain A* minimises length and bends together. Node = <code>2·vertex + plane</code>.</li>
-    <li><b>Costs in quarter units.</b> A move costs 4 × length; a bend 4 × <code>rank_sep</code> (the bend penalty is one <code>rank_sep</code>, 576). An <b>end turn</b>, turning onto or off a fixed lead or stub direction, costs one quarter less than a bend, so of two paths equal in length and bends, the one that turns at its ends wins.</li>
+    <li><b>Costs in quarter units.</b> A move costs 4 × length and a bend 4 × the bend penalty, one <code>rank_sep</code> (576). An <b>end turn</b>, turning onto or off a fixed lead or stub direction, costs one quarter less than a bend, so of two paths equal in length and bends, the one that turns at its ends wins.</li>
     <li><b>Heuristic</b>: 4 × Manhattan distance, plus one bend if the current plane cannot reach the goal alone, plus one end turn if the goal's plane is fixed and differs. Admissible.</li>
     <li><b>Frontier order</b>: the open list is totally ordered by <code>(f, g, node)</code>, so the pop sequence is unique whatever the <a href="#fast">queue</a>. The expansion budget is 2<sup>20</sup>.</li>
     <li><b>Ring points.</b> A seat on a box border is pushed out by <code>clear</code> to a ring point; the leg from border to ring is emitted, not searched, so it is perpendicular for free.</li>
@@ -660,7 +660,7 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
     <tr><td><b>rank</b></td><td>each live, non-initial state, × every other rank of its frame</td><td><code>RankPin</code>: hold it at that rank (emptied ranks are squeezed out)</td><td>which column a state sits in; rank moves take 68.5% of the search's gross gain</td></tr>
     <tr><td><b>fold</b> (refold search only)</td><td>each frame drawn folded</td><td><code>FoldPin</code>: which rank the single cut falls before</td><td>where a fold cuts (<code>toolchanger</code> 11,810 → 11,559)</td></tr>
   </table>
-  <p>The <b>budget</b> is one counter per move kind, each capped at <code>portfolio_k</code> = 1,024, cumulative over the whole search. The search runs while any counter is under budget. The counters are separate because one shared budget let the first-enumerated kind starve the others: on <code>axis</code>, cuts then ranks under one shared budget of 24 reached 12,702, while separate counters reached 9,940. A face move whose pin cannot change the route is charged to the budget but not scored, since it would draw the incumbent exactly.</p>
+  <p>The <b>budget</b> is one counter per move kind, each capped at <code>portfolio_k</code> = 1,024, cumulative over the whole search. The search runs while any counter is under budget. The counters are separate because one shared budget let the first-enumerated kind starve the others: on <code>axis</code>, cuts then ranks under one shared budget of 24 reached 12,702, while separate counters reached 9,940. A face move that cannot move its seat is charged to the budget but <a href="#fast">not scored</a>.</p>
   <div data-fig="search-round"></div>
 
   <h3>Kicks: iterated local search</h3>
@@ -675,7 +675,7 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
   <div data-fig="search-path"></div>
 
   <h3>Refold, argmin and the search memo</h3>
-  <p>After the kicks, a <b>refold search</b> runs Level 1 again from every viable row's pins, with fold-cut moves added. A row keeps the result only if it is strictly cheaper. The run then ships <code>argmin</code> over the rows' converged costs.</p>
+  <p>After the kicks, a <b>refold search</b> runs Level 1 again from every viable row's pins, with fold-cut moves added. A row keeps the result only if it is strictly cheaper.</p>
   <p>A Level 1 search is a function of its inputs: the objective, the row's knobs, the budget, the refold flag, the start pins in order and the scope. The <b>search memo</b> stores whole searches by exactly that key (up to 2<sup>24</sup> words, under one mutex, shared by the pool for one run). A hit returns the pins and cost the search reached, and lays the drawing out again from those pins. Traced runs bypass it.</p>
   <p>Where the gain comes from, summed over the corpus (no text / real text): the Level 2 pick before any search gives 5.2% / 2.6% of the total improvement; Level 1 from every row gives 64.6% / 68.3%; kicks and settling give 30.2% / 28.9%; the refold search gives 0.0% / 0.1% (only <code>axis</code>). CPU goes the other way: kicks take about 87–89% of it. Searching to convergence instead of a budget of 24 moves cut Tier 2 by 36.7% at no text and 27.4% at real text, and reader-visible audit defects fell from 60 to 46.</p>
 

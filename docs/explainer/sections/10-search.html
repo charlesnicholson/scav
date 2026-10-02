@@ -31,7 +31,7 @@
     <tr><td><b>rank</b></td><td>each live, non-initial state, × every other rank of its frame</td><td><code>RankPin</code>: hold it at that rank (emptied ranks are squeezed out)</td><td>which column a state sits in; rank moves take 68.5% of the search's gross gain</td></tr>
     <tr><td><b>fold</b> (refold search only)</td><td>each frame drawn folded</td><td><code>FoldPin</code>: which rank the single cut falls before</td><td>where a fold cuts (<code>toolchanger</code> 11,810 → 11,559)</td></tr>
   </table>
-  <p>The <b>budget</b> is one counter per move kind, each capped at <code>portfolio_k</code> = 1,024, cumulative over the whole search. The search runs while any counter is under budget. The counters are separate because one shared budget let the first-enumerated kind starve the others: on <code>axis</code>, cuts then ranks under one shared budget of 24 reached 12,702, while separate counters reached 9,940. A face move whose pin cannot change the route is charged to the budget but not scored, since it would draw the incumbent exactly.</p>
+  <p>The <b>budget</b> is one counter per move kind, each capped at <code>portfolio_k</code> = 1,024, cumulative over the whole search. The search runs while any counter is under budget. The counters are separate because one shared budget let the first-enumerated kind starve the others: on <code>axis</code>, cuts then ranks under one shared budget of 24 reached 12,702, while separate counters reached 9,940. A face move that cannot move its seat is charged to the budget but <a href="#fast">not scored</a>.</p>
   <div data-fig="search-round"></div>
 
   <h3>Kicks: iterated local search</h3>
@@ -46,7 +46,7 @@
   <div data-fig="search-path"></div>
 
   <h3>Refold, argmin and the search memo</h3>
-  <p>After the kicks, a <b>refold search</b> runs Level 1 again from every viable row's pins, with fold-cut moves added. A row keeps the result only if it is strictly cheaper. The run then ships <code>argmin</code> over the rows' converged costs.</p>
+  <p>After the kicks, a <b>refold search</b> runs Level 1 again from every viable row's pins, with fold-cut moves added. A row keeps the result only if it is strictly cheaper.</p>
   <p>A Level 1 search is a function of its inputs: the objective, the row's knobs, the budget, the refold flag, the start pins in order and the scope. The <b>search memo</b> stores whole searches by exactly that key (up to 2<sup>24</sup> words, under one mutex, shared by the pool for one run). A hit returns the pins and cost the search reached, and lays the drawing out again from those pins. Traced runs bypass it.</p>
   <p>Where the gain comes from, summed over the corpus (no text / real text): the Level 2 pick before any search gives 5.2% / 2.6% of the total improvement; Level 1 from every row gives 64.6% / 68.3%; kicks and settling give 30.2% / 28.9%; the refold search gives 0.0% / 0.1% (only <code>axis</code>). CPU goes the other way: kicks take about 87–89% of it. Searching to convergence instead of a budget of 24 moves cut Tier 2 by 36.7% at no text and 27.4% at real text, and reader-visible audit defects fell from 60 to 46.</p>
 

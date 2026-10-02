@@ -8,7 +8,7 @@
   </style>
   <div class="kicker">Overview</div>
   <h2>The pipeline at a glance</h2>
-  <p class="lede">Four phases, decompose, order, size and route, turn a chart into a drawing, followed by labels and a cost; a search reruns them hundreds of thousands of times with different choices and keeps the cheapest result.</p>
+  <p class="lede">Four phases, decompose, order, size and route, turn a chart into a drawing, followed by labels and a cost; a search reruns all but decomposition hundreds of thousands of times with different choices and keeps the cheapest result.</p>
 
   <p>Each phase is its own translation unit and hands the next a plain struct declared in its header; none of these crosses the ABI. A phase reads the chart for containment and liveness but never for something an earlier phase computed, so a unit test can type a phase's input in directly: a <code>SubmachineOrders</code> with three ranks is nine integers.</p>
   <table class="sx-table">

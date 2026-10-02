@@ -14,7 +14,7 @@
     <li><b>Balance.</b> The four results are aligned to the narrowest one (forward-walked runs by their leading edge, backward ones by their trailing edge); each node then takes the average of its two median values, <code>floor((v[1] + v[2]) / 2)</code>.</li>
   </ol>
   <div data-fig="size-bk"></div>
-  <p>Then the alignment rules: states joined by an edge inside one column share a centre line; a state joined to a composite's port is centred on that port; an initial or final is seated <code>rank_sep</code> from its mate, level with it. BK was 95–96% of phase 2's time when measured, which is why it has a <a href="#fast">memo</a>. Network simplex placement was tried and not merged: optimal L1 placement without balancing did not reduce reader-visible defects and cost 1.65× per solve.</p>
+  <p>Then the alignment rules: states joined by an edge inside one column share a centre line; a state joined to a composite's port is centred on that port; an initial or final is seated <code>rank_sep</code> from its mate, level with it. BK was 95–96% of phase 2's time when measured; a per-thread <a href="#fast">memo</a> keyed on the whole graph serves repeated graphs. Network simplex placement was tried and not merged: optimal L1 placement without balancing did not reduce reader-visible defects and cost 1.65× per solve.</p>
 
   <h3>Along the ranks: gaps and label room</h3>
   <p>Each layer's x origin is the previous layer's plus its width, a separation and the larger of two charges (<code>step_layers</code>):</p>
