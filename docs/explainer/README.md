@@ -47,7 +47,7 @@ trace scored. A `false` there means the narration needs reading again.
 |---|---|---|
 | `charts.json` | `extract/charts.py` | estop, led, brew, dock, tcp, axis, toolchanger, bottler: source, model, real-text geometry, and no-text geometry for estop and brew |
 | `rows.json` | `extract/rows.py` | brew and tcp, Level 2 rows 0–15, each unsearched and searched; the shipped row and the row Level 2 alone picks |
-| `search.json` | `extract/search.py` | brew's search path from its trace (row start, Level 1 moves, kick, re-search, settle), each step laid out again; tcp's Level 1 path; round summaries |
+| `search.json` | `extract/search.py` | brew's search path from its trace (row start, Level 1 moves, kick, re-search, settle), each step laid out again; tcp's Level 1 path; round summaries; for brew's rounds 1 and 2, each candidate's label bound and whether it could still win, which 11-fast draws |
 | `stages.json` | `extract/stages.py` | brew and toolchanger stage by stage, from the shipped drawing's trace |
 | `faces.json` | `extract/faces.py` | estop with no text, all four face pins at both ends of t3 and t1 |
 | `perf.json` | none | wall, CPU and instructions per commit and chart |
