@@ -9,27 +9,26 @@
   </style>
   <div class="kicker">Phase 0</div>
   <h2>Decompose: frames, segments, ports</h2>
-  <p class="lede">Before anything is placed, every transition is cut at each border it crosses, leaving one flat graph per submachine, joined to the others only at ports on the borders.</p>
+  <p class="lede">Every transition is cut at each border it crosses, leaving one flat graph per submachine, joined to the others only at ports.</p>
 
-  <p>A <b>frame</b> is one submachine laid out as its own layered graph: each region of a concurrent state, each composite's submachine, each document root. Frames are the unit that is ordered, sized, sharded across threads and reused between candidates. In its parent's frame a composite state is a plain node; its inside is another frame.</p>
-  <p>A transition whose ends lie in different frames is split at every containment border it crosses. Each piece is a <b>segment</b> in exactly one frame, and each cut is a <b>port</b> on the crossed state's border. This turns ELK's long-hierarchical-edge problem into ordering ports along each composite's sides. It also makes a long edge pull on every level it passes: with one port per crossed border, an edge from 16 levels deep to the top constrains every frame in between, with no weight needed.</p>
+  <p>A <b>frame</b> is one submachine laid out as its own layered graph: a region, a composite's submachine, or a document root. It is the unit that is ordered, sized, run in parallel and reused between candidates. In its parent's frame, a composite state is a plain node.</p>
+  <p>A transition whose ends lie in different frames is split at every border it crosses. Each piece is a <b>segment</b> in exactly one frame; each cut is a <b>port</b> on the crossed state's border. Long hierarchical edges become a matter of ordering ports along each composite's sides, and a long edge pulls on every level it passes, with no weight needed.</p>
   <h3>How a transition is split</h3>
   <ol>
-    <li>Dead transitions are skipped. An internal or local <i>self</i>-transition gets no segments at all, because it has no route.</li>
-    <li>Build each end's chain of ancestors, innermost first, and strip the part they share.</li>
-    <li>If the source encloses the destination, an internal or local transition starts on the source's inner face, and an external one leaves the source's border and re-enters it.</li>
-    <li><b>Exit</b> the source's chain from innermost to outermost. The source itself is exited only by an external transition.</li>
-    <li>If the two chains diverge into <i>different submachines of one state</i>, cross the separator between those regions instead of that state's border. That middle segment is routed inside the owning state, in the source region's frame.</li>
-    <li><b>Enter</b> the destination's chain from outermost to innermost. If the destination encloses the source, end on its inner face.</li>
-    <li>Walk the crossings: one port per crossing, and one segment per pair of consecutive ends, each in the frame it lies in.</li>
+    <li>Skip dead transitions, and internal or local self-transitions, which have no route.</li>
+    <li>List each end's ancestors, innermost first, and strip the part they share.</li>
+    <li>If the source encloses the destination, an internal or local transition starts on the source's inner face; an external one leaves the source and re-enters it.</li>
+    <li><b>Exit</b> the source's chain, innermost first; the source itself is exited only by an external transition.</li>
+    <li>If the chains diverge into two submachines of one state, cross the separator between those regions instead of the state's border; that middle segment is routed in the source region's frame.</li>
+    <li><b>Enter</b> the destination's chain, outermost first. If the destination encloses the source, end on its inner face.</li>
+    <li>Emit one port per crossing and one segment per consecutive pair of ends, each in the frame it lies in.</li>
   </ol>
-  <p>So each end of a segment is a port on a crossed border, the endpoint state's box, or the endpoint state's inner face (an internal or local source, or a destination that encloses its source). In phase 1 each port on a frame's border becomes a <b>boundary node</b> on the frame's edge: exits on the trailing border, entries on the leading one.</p>
-  <p>Each transition's label belongs to one segment: the one in its <b>lowest common ancestor</b> (LCA) frame, the innermost submachine holding both ends (for two regions of one state, the separator segment). Ids are stable: a port is <code>(compound state, side, transition, crossing depth)</code> and a segment <code>(transition, ordinal)</code>, never derived from how work was sharded.</p>
+  <p>Each segment end is a port, an endpoint state's box, or an endpoint's inner face. In <a href="#order">ordering</a>, each port on a frame's border becomes a <b>boundary node</b>: exits on the trailing edge, entries on the leading one.</p>
+  <p>A transition's label belongs to the segment in its <b>lowest common ancestor</b> (LCA) frame, the innermost submachine holding both ends. Ports and segments have stable ids derived from the model, never from how work was split.</p>
 
   <div data-fig="decompose-split"></div>
 
-  <div class="callout why"><span class="t">Why not lay out the whole tree at once</span>Cutting at borders keeps each submachine independently orderable and keeps every long edge, which <a href="#intro">ELK's two modes</a> cannot do together. The price is ports the later phases must place well. A unit test holds the extreme: an exit from 16 levels deep produces 17 segments and 32 ports.</div>
-  <div class="callout rule"><span class="t">Rule</span>A phase never infers what kind of end a segment has from another phase's tables; phase 0 records it. The one defect of that kind drew <code>Idle -&gt; On</code> from <code>On</code>'s border to its centre.</div>
+  <div class="callout rule"><span class="t">Rule</span>Cutting at borders keeps each submachine independently orderable and keeps every long edge, which <a href="#intro">ELK's two modes</a> cannot do together. Phase 0 records what kind each segment end is; later phases never infer it.</div>
 </section>
 <script>
 SX.register('decompose', function (sec) {
@@ -37,7 +36,7 @@ SX.register('decompose', function (sec) {
 
   (function () {
     var host = sec.querySelector('[data-fig="decompose-split"]');
-    var f = SX.figure(host, { caption: '<b>Hover</b> a frame, in the drawing or the list, to see the submachine it lays out; <b>click</b> one in the list to keep it shown. <b>Pick</b> a split transition and <b>step</b> through its segments, each coloured by its frame: orange dots are ports, squares are boundary nodes. The chart is <code>toolchanger</code>\'s shipped drawing, from scav\'s trace; it includes <code>axis</code> (as <code>arm</code>, which includes <code>estop</code>) and <code>estop</code> (as <code>stop</code>).' });
+    var f = SX.figure(host, { caption: '<b>Hover</b> or <b>click</b> a frame to see the submachine it lays out. <b>Pick</b> a split transition and <b>step</b> through its segments, coloured by frame: orange dots are ports, squares boundary nodes.' });
     var G = T.geometry, D = T.decomposition, FR = D.frames;
     var PAL = ['--series-1', '--series-3', '--series-7', '--series-4', '--series-5', '--series-8'];
     var col = function (fid) { return 'var(' + PAL[fid % PAL.length] + ')'; };

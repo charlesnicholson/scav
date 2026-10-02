@@ -1,53 +1,46 @@
 <section class="sx" id="fast" data-toc="11 · Making it fast">
   <div class="kicker">Speed without changing a drawing</div>
   <h2>Making the search fast, exactly</h2>
-  <p class="lede">Every optimisation here is <b>exact</b>: with or without it, every corpus chart's drawing is byte-identical at both scales.</p>
+  <p class="lede">Every optimisation here is <b>exact</b>: with or without it, every drawing is byte-identical.</p>
 
-  <div class="callout rule"><span class="t">Rule</span>Each optimisation ships with a test mode that runs the unoptimised computation alongside and compares, and a planted defect proves the comparison can fail. A memo keyed on everything a step reads returns exactly what the step would compute; a sound bound discards only candidates that could never be taken.</div>
+  <div class="callout rule"><span class="t">Rule</span>Each optimisation has a test mode that runs the unoptimised computation alongside and compares, with a planted defect proving the comparison can fail.</div>
 
-  <p>Before any of this, one no-text layout of <code>bottler</code> scored 213,768 candidates, 94% of which lost. Brandes–Köpf ran 19.8 million times for 69,496 distinct graphs, because a candidate differs from the one before it in a single frame. Sizing was 82% of the time, and 57% of samples were in the allocator. Every fix below uses one fact: <b>a candidate is the incumbent plus one pin, so almost everything it computes has been computed before.</b></p>
-  <p>A general lower bound does not help <em>inside</em> the search: area after sizing and a bend floor never reach 80% of the incumbent's Tier 2 on any candidate, while 58% of losers land within 1% of it. The label bound below works because it bounds only the label half of the cost.</p>
+  <p>Every optimisation exploits one fact: <b>a candidate is the incumbent plus one pin, so almost everything it computes has been computed before.</b> Before them, one <code>bottler</code> layout ran Brandes–Köpf 19.8 million times for 69,496 distinct graphs. A general lower bound does not help, because most losing candidates land within 1% of the incumbent; the label bound below works because it bounds only the label half of the cost.</p>
   <div data-fig="fast-perf"></div>
 
-  <h3>Frame memos and interned keys</h3>
-  <p>Each thread keeps three <a href="#principles">memos</a>: Brandes–Köpf keyed on the whole graph; each frame's <em>sizing</em>, keyed on its nodes, edges, gaps, state sizes, port offsets, labels, ratio, compaction, fold and profile; and each frame's <em>ordering</em>, keyed on the frame as built, the pins inside it, its label charges and the profile. A memo hit emits no trace, so traced runs bypass them. Each is capped at 2<sup>20</sup> words (4 MiB) per thread. The memos took no-text <code>mill</code> from 506 s to 58 s wall on 12 cores, and <code>bottler</code> from 18.4 s to 2.9 s.</p>
-  <p>The keys are <b>interned</b>. A decomposed graph carries a process-unique serial for itself and its chart, so an ordering key names a frame by (serial, index) instead of spelling the frame out. The profile is one interned word instead of 52. Each transition's label segment is a table on the graph instead of a walk up the tree per box per pass. That saved 6.7% of instructions at real text.</p>
+  <h3>Frame memos</h3>
+  <p>Each thread keeps three <a href="#principles">memos</a>, each keyed on everything its step reads: Brandes–Köpf by the whole graph, and each <a href="#decompose">frame</a>'s sizing and ordering by that frame's inputs and pins. Keys are interned, so a frame is named by a serial number rather than spelled out. Each memo is capped at 4 MiB per thread, and traced runs bypass them.</p>
 
-  <h3>Per-frame ordering and sizing reuse</h3>
-  <p>Even a memo hit has to build and hash a key. <b>Ordering reuse</b> skips that. An ordering records what each frame reads beyond the graph: the profile; each segment's reversal, cut and side pins and label charge; each state's rank pin; and each frame's orientation. A candidate compares its record to the incumbent's frame by frame, before and after the facing pass, orders only the frames that differ, and copies the rest with node indices shifted. No key is built and no memo is probed.</p>
-  <p><b>Sizing reuse</b> does the same for coordinates, except that a frame's size depends on its children's, so a candidate re-sizes every frame whose inputs differ <em>and every frame that holds it</em>, deepest first, and copies the rest. Over the corpus and gauntlet, 84.5% of frames are copied, and instructions fell 6.1% at real text.</p>
+  <h3>Ordering and sizing reuse</h3>
+  <p>Even a memo hit builds and hashes a key; reuse skips that. An ordering records what each frame read beyond the graph (its pins, label charges, orientation and the profile). A candidate compares those records with the incumbent's, orders only the frames that differ, and copies the rest. Sizing does the same, except that a frame's size depends on its children's, so every frame holding a changed one is re-sized too. Most frames are copied.</p>
   <div data-fig="fast-reuse"></div>
 
   <h3>The face shortcut</h3>
-  <p>Phases 1 and 2 and the facing pass never read a face pin, and face moves were two thirds of all scored moves. So a face candidate is routed and scored from the incumbent's kept phase-1 and phase-2 state, at about a quarter of the cost of a rank candidate (65 µs against 252 µs on <code>mill</code>). It also keeps the incumbent's labels wherever nothing a box reads has changed: 92% of a face move's boxes on <code>mill</code>.</p>
-  <p>Two refinements. <b>No-op faces are charged, not scored</b>: a face pin the router reports would not move the seat draws the incumbent exactly, so it is charged to the budget without being scored; that is about a quarter of face moves. <b>Faces are offered only where they are priced</b> (see the <a href="#search">move table</a>), a mask the incumbent's own scoring fills once per taken move, never per candidate. At real text only 48% of face candidates are scored, instructions fell 16.4%, and every drawing stayed byte-identical.</p>
+  <p>Ordering, sizing and the facing pass never read a face pin, so a face candidate starts from the incumbent's sizing and only routes and scores, at about a quarter of the cost; it also keeps every label nothing it reads has changed. A face that would not move its seat draws the incumbent exactly, so it is charged but not scored, and faces are offered only where the <a href="#search">move table</a> says they are priced.</p>
 
-  <h3>The label bound: route first, label best-first</h3>
-  <p>Labels are placed last and read only the routes, so before any label is placed, every route term, adjacency and the six route-only Tier 0 counts are already final. A round with labels runs in two passes:</p>
+  <h3>The label bound</h3>
+  <p>Labels are placed last and read only the routes, so a round with labels runs in two passes:</p>
   <ol>
-    <li>Route every candidate in parallel <b>without labels</b> and score a <b>lower bound</b>. The label terms are zero, area and whitespace are measured over the unlabelled chart, and aspect is dropped unless every label box fits inside the sized chart.</li>
-    <li>Visit the candidates whose bound beats the incumbent, <b>least bound first</b> (ties by enumeration index). Place labels and score each exactly, but only while its bound can still beat the best exact cost so far, or tie it at a lower index. Stop at the first that cannot.</li>
+    <li>Route every candidate without labels and score a <b>lower bound</b>: label terms are zero, and area is measured on the unlabelled chart.</li>
+    <li>Visit candidates whose bound beats the incumbent, least bound first. Label and score each exactly while its bound can still beat the best so far; stop at the first that cannot.</li>
   </ol>
-  <p>The pick is exactly what scoring every candidate whole would give, and a test mode scores every bounded round whole and compares. At real text, 91% of candidates never place their labels, and instructions fell 35.5% (<code>mill</code> 4,002 G → 2,613 G). Two variants lost: keeping every candidate's routes saved 5% more instructions but cost 16% more memory, and labelling 8 or 32 at once cost 5–11% <em>more</em>.</p>
+  <p>The pick is exactly what scoring every candidate whole would give, and most candidates never place their labels. The 128 most promising candidates keep their routes from the first pass, so their exact pass does not route again.</p>
   <div data-fig="fast-bound"></div>
-  <p><b>Kept bound geometry.</b> The first pass already routed each candidate, so routing it again for the exact pass is waste. A candidate whose bound is below the incumbent keeps its routes while it is among the <b>128 least</b> by (bound, index), in a per-search slot swapped with the scorer's scratch so that nothing allocates. Its exact pass restores the chart those routes saw and places labels on them instead of laying out again. On <code>mill</code>, the 128 slots cover 92% of the candidates that get labelled, and save 4.5% of instructions at the same peak memory. Keeping every candidate's routes saves 4.6% but costs 35–42% more memory.</p>
 
-  <h3>Allocation-free scratch</h3>
-  <p>Ordering, sizing and packing, scored-move pins and candidates, routes, label placement, nudging and coordinate views all fill per-thread buffers that are reused across candidates. On <code>bottler</code> at real text, heap allocations per scored candidate fell 216 → 103 → 53 → 14 → 8.7 → 4.2, and allocations over a whole run fell from 72.2 M to 1.39 M. Ordering scratch is kept <b>per nesting depth</b>, because a thread waiting on a call's shards may itself run a candidate that orders.</p>
-
-  <h3>The radix A* queue</h3>
-  <p>The router's A* pops nodes in a strict total order, <code>(f, g, node)</code>, so any exact priority queue pops the same sequence. The open list is now a radix heap over <code>f</code>, with the entries at the least <code>f</code> in a 4-ary heap on the whole order. A push below the current least lowers it and re-places every entry, because the heuristic is admissible but not consistent at the turn into a fixed end. It executes about 1% <em>more</em> instructions but takes 4–6% fewer cycles (<code>mill</code> real text 834 G → 786 G cycles). Route lengths need a square root, and hardware <code>sqrt</code> is banned for determinism; the integer square root now runs Newton's method from above, starting one shift-only step from the nearest power of two and stopping at the first step that does not fall. It is checked exhaustively over all 32-bit inputs and cut 2.5% of <code>mill</code>'s instructions.</p>
-
-  <h3>One global thread pool</h3>
-  <p>All parallel work goes to <a href="#principles">one pool</a>. Nested calls (rows, then searches, then candidate rounds) push to it, so no call site divides the host's cores among its children. One <code>bottler</code> search went from 755% to 1,085% of 12 cores; a hierarchical profile shows 8.7–11 of 12 cores busy, 3.5–4.4% idle, and 0.2% of time in locks. The <a href="#search">search memo</a> removed searches that ran again unchanged (the second kick schedule, the settling passes): <code>tcp</code> 12.9 → 6.4 s CPU.</p>
-
-  <div class="callout why"><span class="t">Where the time goes now</span>On <code>mill</code> at real text (profile at the label-bound commit) kicks take 92% of CPU. Of a candidate: routing 39.6%, cost 19%, the first sizing 15%, re-sizing after the facing pass 11.9%, re-ordering after it 5.4%. A* alone was 14.1% of CPU, 9.9 points of it the heap (before the radix queue). Rejected cuts: capping kick depth, early abandonment of kicks (at best 3.4%, and it does not transfer between scales), lazy steepest descent (2%), sizing-only bounds (0.26%), and budgets that shrink with chart size: "a rule that searches a big chart <em>less</em> is the design conceding the goal".</div>
+  <h3>Smaller wins</h3>
+  <ul>
+    <li><b>No allocation</b>: every stage fills per-thread buffers reused across candidates; ordering keeps one per nesting depth, because a waiting thread may run a nested candidate.</li>
+    <li><b>Radix A* queue</b>: A* pops in a strict total order, so any exact priority queue gives the same sequence; a radix heap is faster.</li>
+    <li><b>Integer square root</b> by Newton's method from above, checked exhaustively over all 32-bit inputs.</li>
+    <li><b>One global pool</b>: nested work (rows, searches, candidate rounds) shares <a href="#principles">one pool</a>, so no call site divides the cores among its children, and the <a href="#search">search memo</a> removes repeated searches.</li>
+  </ul>
+  <div class="callout why"><span class="t">Rejected</span>Depth caps and early abandonment of kicks; budgets that shrink with chart size, since searching a big chart less concedes the goal.</div>
 </section>
 <script>
 // Figure: corpus cost per build, from perf.json.
 window.SXfastPerf = function (sec) {
   var P = SX.data('perf');
-  var f = SX.figure(sec.querySelector('[data-fig="fast-perf"]'), { caption: '<b>Pick a metric and a chart</b>; <b>hover</b> for each build\'s numbers. Five builds in commit order, each the best of its passes of <code>scav dump --layout</code> on a 12-core machine; every build draws the same pictures. Instructions are the steady metric; wall and CPU move with machine load, and the builds were measured in three runs, so only ratios to <code>main</code> within one run are strictly fair.' });
+  var f = SX.figure(sec.querySelector('[data-fig="fast-perf"]'), { caption: '<b>Pick a metric and a chart</b>; <b>hover</b> for each build\'s numbers. Instructions are the steady metric; every build draws the same pictures.' });
   var builds = P.builds, metric = 'instr_G', chart = 'corpus';
   var SHORT = { main: 'main', faces_labels: 'faces', label_bound: 'label bound', perf_pass: 'perf pass', size_reuse: 'size reuse' };
   var TICK = { main: 'main', faces_labels: 'faces', label_bound: 'bound', perf_pass: 'perf', size_reuse: 'size' };
@@ -82,7 +75,7 @@ window.SXfastPerf = function (sec) {
 // Figure: which of toolchanger's frames a candidate re-orders, re-sizes or copies.
 window.SXfastReuse = function (sec) {
   var g = SX.data('charts').charts.toolchanger.text;
-  var f = SX.figure(sec.querySelector('[data-fig="fast-reuse"]'), { caption: '<b>Click a frame</b> to pin a state\'s rank inside it and see what the candidate recomputes: ordering redoes that frame only, sizing also every frame holding it up to the root, and the rest is copied from the incumbent. A face pin changes neither; it starts at routing. This is toolchanger\'s frame tree (6 frames; the arm and both estops are included documents).' });
+  var f = SX.figure(sec.querySelector('[data-fig="fast-reuse"]'), { caption: '<b>Click a frame</b> to pin a rank in it: ordering redoes that frame, sizing also every frame holding it. A face pin skips both.' });
   var subs = g.subs, N = subs.length, parent = {}, depth = {}, kids = {};
   subs.forEach(function (s) { parent[s.id] = s.owner == null ? null : g.states[s.owner].parent_sub; });
   subs.forEach(function (s) { var d = 0, p = parent[s.id]; while (p != null) { d++; p = parent[p]; } depth[s.id] = d; (kids[parent[s.id]] = kids[parent[s.id]] || []).push(s.id); });
@@ -131,7 +124,7 @@ window.SXfastBoundData = {"round_1_candidates":[[9535,"reverse","reverse t1 Off 
 // Figure: least_by_bound on a real labelled round.
 window.SXfastBound = function (sec) {
   var DATA = window.SXfastBoundData, Sx = SX.data('search').charts.brew;
-  var f = SX.figure(sec.querySelector('[data-fig="fast-bound"]'), { caption: '<b>Step</b> through one labelled round. Each candidate is routed without labels and given a lower bound (bars); those whose bound does not beat the incumbent drop out, and the rest are sorted by (bound, index). Each is then labelled and scored exactly (the stacked part is its label cost) while its bound can still beat the best so far; the first that cannot stops the round. The brew rounds are real: all 168 candidates were re-derived from their pins and match the trace. The bound shown is each drawing\'s cost without its label terms and label Tier 0 counts; scav measures area over the unlabelled chart, so its bound is a little lower where a label pokes out (hover says so), and the stop falls at the same place. The toy is synthetic, for a round that labels more than one.' });
+  var f = SX.figure(sec.querySelector('[data-fig="fast-bound"]'), { caption: '<b>Step</b> through one labelled round: bounds first (bars), then exact scores in bound order until a bound cannot win. The brew rounds are real; the toy labels more than one.' });
   var src = 'r1', st = null;
   function rows(key, incumbent) {
     return DATA[key].map(function (r, k) { return { k: k, what: r[2], move: r[1], t0: r[3], t2: r[4], b0: r[5], b2: r[6], inside: !!r[7] }; });

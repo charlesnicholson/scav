@@ -1,64 +1,66 @@
 <section class="sx" id="order" data-toc="5 · Ordering">
   <div class="kicker">Phase 1</div>
   <h2>Ordering: which rank, which slot</h2>
-  <p class="lede">Phase 1 gives every node in a frame a <b>rank</b>, its column, and a slot within that rank, reading only pins, label sizes, the line height and <code>sweep_count</code>.</p>
+  <p class="lede">Phase 1 gives every node in a frame a <b>rank</b> (its column) and a slot within that rank.</p>
 
-  <p>A <a href="#decompose">frame</a>'s graph has three kinds of node: a <b>state node</b> for each live child state, in document order; a <b>boundary node</b> for each segment end that is a port on the frame's border or an inner face; and the <b>bend nodes</b> chaining adds later. Each <a href="#decompose">segment</a> becomes one edge; an edge whose two ends are the same node, such as an external self-loop, is dropped. Ranks are columns running left to right, and nodes stack down within a rank; <code>rank_sep</code> (576, 36 pt) is the gap between columns and <code>node_sep</code> (288) the gap within one. Disconnected components are ordered separately and packed by phase 2; otherwise every unconnected state would sit at rank 0 in one tall column.</p>
+  <p>A <a href="#decompose">frame</a>'s graph has a <b>state node</b> per child state in document order, a <b>boundary node</b> per port or inner-face end, and the <b>bend nodes</b> chaining adds; each <a href="#decompose">segment</a> is one edge, and self-loops are dropped. Ranks run left to right, <code>rank_sep</code> (576) apart, with nodes <code>node_sep</code> (288) apart within a rank. Disconnected components are ordered separately and packed by <a href="#size">sizing</a>.</p>
 
   <h3>Breaking cycles</h3>
-  <p>Layering needs a DAG, and statecharts are full of cycles. First, Tarjan's strongly-connected-components pass (iterative, roots in node order) marks every segment whose ends share a component as <b>cyclic</b>; only cyclic segments are offered to the search's reverse move.</p>
-  <p>Then <code>orient_acyclic</code> applies every <b>reverse pin</b> (a <code>ReversePin</code> names a segment to flip) and runs an iterative depth-first search, roots in node order (document order) and each node's out-edges in segment order. An edge into a node still on the stack is a back edge: it is flipped and marked <code>reversed</code>. Only edge directions change; no node moves.</p>
-  <div class="callout rule"><span class="t">Rule</span>Which edge of a cycle is reversed is an artefact of declaration order, so the reversal is a search dimension, not a rule.</div>
+  <p>Layering needs an acyclic graph, and statecharts are full of cycles.</p>
+  <ol>
+    <li>Tarjan's strongly connected components mark every segment on a cycle as <b>cyclic</b>; only these can be reversed by the search.</li>
+    <li>Every <b>reverse pin</b> flips its segment.</li>
+    <li>A depth-first search, roots in document order and out-edges in segment order, flips every back edge (an edge into a node still on the stack). Only edge directions change.</li>
+  </ol>
+  <div class="callout rule"><span class="t">Rule</span>Which edge of a cycle is reversed is an artefact of declaration order, so reversal is a search dimension, not a rule.</div>
   <div data-fig="order-cycle"></div>
 
   <h3>Ranking by longest path</h3>
-  <p><code>assign_ranks</code> runs four steps on the DAG:</p>
   <ol>
-    <li><b>Topological order</b> by Kahn's algorithm, sources seeded in node order.</li>
-    <li><b>Longest path from the sources</b>: in topological order, every edge <code>v → w</code> sets <code>rank[w] = max(rank[w], rank[v] + 1)</code>.</li>
-    <li><b>Pull right</b>, in reverse topological order: a node that is not a boundary node and has fewer in-edges than out-edges moves to one rank before its nearest successor. A source with three successors therefore sits next to them, not at rank 0.</li>
-    <li><b>Sink boundary nodes to the last rank</b>, so exits sit on the trailing border and entries on the leading one; then <b>empty ranks are squeezed out</b>.</li>
+    <li><b>Topological order</b> by Kahn's algorithm, sources in node order.</li>
+    <li><b>Longest path</b>: every edge <code>v → w</code> sets <code>rank[w] = max(rank[w], rank[v] + 1)</code>.</li>
+    <li><b>Pull right</b>, in reverse order: a node with fewer in-edges than out-edges moves to one rank before its nearest successor, so a source sits next to its successors rather than at rank 0.</li>
+    <li><b>Sink</b> exit boundary nodes to the last rank, then squeeze out empty ranks.</li>
   </ol>
   <div data-fig="order-rank"></div>
 
-  <h4>Rank pins</h4>
-  <p>A <b>rank pin</b> (<code>RankPin{state, rank}</code>) overwrites one state's rank after ranking. Longest path does not run again, so an edge may end up flat (both ends in one rank) or pointing backward. Initials are never pinned: after the pins, each initial is re-seated one rank before the nearest state it touches, and if that state is at rank 0, every other node moves up one to make room. Then empty ranks are squeezed out. A pin to the rank longest path already chose changes nothing.</p>
-  <div data-fig="order-pin"></div>
-  <p><b>Side pins</b> act on ports. A port pinned to a <em>cross</em> border (top or bottom, in a frame running across) holds its edge out of ranking, cycle breaking and the sweeps, and takes its mate's rank, first or last in it. A port pinned to a <em>rank</em> border has its edge oriented so the boundary node is the source (leading border) or the sink (trailing border).</p>
-
-  <h3>Charges: room the gaps must hold</h3>
-  <p>Before chaining, while each edge still spans its whole rank range, <code>rank_derived</code> charges each <b>rank boundary</b> (the gap after a rank) with the room it must hold:</p>
+  <h4>Pins</h4>
   <ul>
-    <li><b>Label charge.</b> An edge crossing one boundary charges that gap its label's width (its <code>PathBox</code> width, or its height in a frame running down). An edge crossing several boundaries is placed afterwards, widest label first: it takes the widest boundary it crosses (ties go to the middle), and costs nothing if that boundary already holds it. An edge inside one rank charges nothing.</li>
-    <li><b>Lane charge.</b> Per connected component, an edge "turns" in its first boundary and, if it spans more than one, in its last. A boundary where two or more edges turn reserves <code>lanes × line height</code> (269 per lane at <code>readable</code>). This estimate only decides folding; <a href="#size">phase 2</a> recomputes the real lane room.</li>
+    <li>A <b>rank pin</b> overwrites one state's rank afterwards, without rerunning longest path, so edges may go flat or backward. Initials are never pinned: each is re-seated one rank before the state it enters (shifting the others if that state is at rank 0), and empty ranks are squeezed out.</li>
+    <li>A <b>side pin</b> on a top or bottom border takes the port's edge out of ranking and sweeps, placing it in its mate's rank; on a left or right border it orients the edge so the port is a source or a sink.</li>
   </ul>
-  <p>Textbook label placement adds a dummy node per label. scav widens the gap instead: dummy nodes would double every rank and need a frame to own each label.</p>
+  <div data-fig="order-pin"></div>
+
+  <h3>Charging label room</h3>
+  <p>Before chaining, each gap between ranks is charged with the room it must hold:</p>
+  <ul>
+    <li><b>Labels</b>: an edge crossing one gap charges it its label's width. An edge crossing several takes the widest gap it crosses (ties to the middle), and costs nothing if that gap already fits it.</li>
+    <li><b>Lanes</b>: a gap where two or more edges turn reserves one line height per lane. This estimate only decides folding; <a href="#size">sizing</a> recomputes the real lanes.</li>
+  </ul>
+  <p>scav widens gaps instead of adding a dummy node per label, which would double every rank.</p>
 
   <h3>Chaining long edges</h3>
-  <p>Every edge spanning more than one rank becomes a chain through one <b>bend node</b> per intermediate rank (<code>chain_long_edges</code>). Bends take part in the sweeps like any node, and the router treats them as hard waypoints. A <b>cut</b> (<code>ChainCut{trans, leg}</code>) leaves the segment as one long edge with no bends, which the router draws freely. Cuts matter: 58 of the corpus's 257 transitions carry a phase-1 bend, and they hold 295 of its 421 kinks (70%).</p>
+  <p>An edge spanning several ranks becomes a chain through one <b>bend node</b> per intermediate rank. Bend nodes are ordered like any node, and the router treats them as hard waypoints. A <b>cut</b> pin leaves the edge unchained, for the router to draw freely; this matters because chained edges carry 70% of the kinks.</p>
 
   <h3>Crossing minimisation by median sweeps</h3>
-  <p><code>minimize_crossings</code> starts from document order: in each rank, pinned-first ports, then states, then boundary nodes, then bends, then pinned-last ports. It runs up to <code>sweep_count</code> = 8 sweeps. Even sweeps go <b>down</b> (ranks 1 to R−1, each ordered by the median of its predecessors' positions); odd sweeps go <b>up</b> (ranks R−2 to 0, by the median of successors').</p>
+  <p>Starting from document order (pinned-first ports, states, boundary nodes, bends, pinned-last ports), up to 8 sweeps reorder each rank by its nodes' neighbour positions, alternating down (by predecessors) and up (by successors).</p>
   <ul>
-    <li><code>median_of</code> sorts the neighbours' positions and takes the <b>upper median</b>, element <code>size/2</code>. A node with no neighbour on that side has no median; it is a fixed barrier that keeps its slot.</li>
-    <li><code>reorder_rank</code> swaps adjacent nodes while <code>med[i] &gt; med[i+1]</code>, strictly, so ties keep their order.</li>
-    <li>After each sweep the frame's crossings are recounted; the best arrangement so far is kept, and sweeping <b>stops as soon as a sweep reaches 0</b>. A frame that starts at 0 is never swept.</li>
+    <li>A node's key is the <b>upper median</b> of its neighbours' positions; a node with no neighbours on that side keeps its slot.</li>
+    <li>Adjacent nodes swap only while strictly out of order, so ties keep their order.</li>
+    <li>Crossings are recounted after each sweep (by counting inversions); the best arrangement is kept, and sweeping stops at zero.</li>
   </ul>
-  <p>Crossings are counted per adjacent rank pair: sort the edges by (north position, south position) and count inversions with a Fenwick tree. Edges that share an endpoint never count as crossing.</p>
   <div data-fig="order-median"></div>
-  <div class="callout why"><span class="t">Why the median</span>The barycenter heuristic has no constant-factor bound (it can be Ω(√n) off); the median has one. Global sifting is a named lever, not built. <code>transpose</code> was built, improved nothing anywhere, and is not in the pipeline; running it inside the sweep loop took the corpus from 0 layered crossings to 7. With <code>sweep_count</code> 0 against 8, routed crossings over the corpus were 99 against 91 (no-text), though <code>axis</code> (2 against 4) and <code>mill</code> (38 against 43) did better unswept.</div>
-  <p>The sweeps leave little: all 1,154 frames over the corpus, the gauntlet and the 2k targets have <b>zero</b> layered crossings, while the routed drawings of the same charts had 87. The crossings a reader sees come from routing, not ordering.</p>
+  <p>The median has a constant-factor quality bound that the barycenter heuristic lacks. In practice every frame in the corpus ends with zero layered crossings: the crossings a reader sees come from routing.</p>
 
   <h3>Orientation and fold pins</h3>
-  <p>An <b>orient pin</b> (<code>OrientPin</code>, applied by a <a href="#search">kick</a>) turns a frame to <b>run down</b>: ranks become rows and the axes swap everywhere downstream. A <b>fold pin</b> (<code>FoldPin</code>) passes through phase 1 untouched; it names where <a href="#size">phase 2</a> cuts a long rank run.</p>
+  <p>An <b>orient pin</b>, applied by a <a href="#search">kick</a>, turns a frame to run down: ranks become rows. A <b>fold pin</b> passes through untouched; it tells <a href="#size">sizing</a> where to cut a long run of ranks.</p>
 
   <h3>The real ranks</h3>
-  <p>The figure reads <code>brew</code>'s shipped drawing from the trace. Its pins include two rank pins (<code>Off</code> to rank 0, <code>$final</code> to rank 1) and one reverse pin (<code>Off → SelfCheck</code>); the DFS flips <code>Brewing → Standby</code> itself.</p>
+  <p><code>brew</code>'s shipped pins include two rank pins and one reverse pin; the depth-first search reverses one more edge itself.</p>
   <div data-fig="order-brew"></div>
 
-  <h3>What the search can change here</h3>
-  <p>Most of the search's moves land in phase 1: rank, cut, reverse, side and orient pins. In-rank position is not searched: measured, it has no slack. A move re-orders only the frames it touches and <a href="#fast">copies</a> the rest from the incumbent.</p>
-  <div class="callout why"><span class="t">Rejected</span>Eades–Lin–Smyth greedy cycle removal: the search chooses reversals instead. dot's edge-weight schedule: deliberately not taken. A warning from scale: on a flat 2k-state chain, DFS reversal can make edges a thousand ranks long, and chaining them makes a million ordering nodes; without wrapping skips that costs seconds instead of 2 ms.</div>
+  <p>Most of the search's moves act here: rank, cut, reverse, side and orient pins. Position within a rank is not searched; measured, it has no slack.</p>
+  <div class="callout why"><span class="t">Rejected</span>Greedy cycle removal (the search chooses reversals); dot's edge-weight schedule; adjacent-swap refinement (<code>transpose</code>), which found nothing to improve.</div>
 </section>
 <script>
 (function () {
@@ -205,7 +207,7 @@
   };
   F.order['order-cycle'] = function (host) {
     var key = 'estop', pins = {}, stepper = null;
-    var f = SX.figure(host, { caption: '<b>Depth-first cycle breaking.</b> <b>Step</b> the walk: roots in document order, out-edges in segment order; an edge into a node still on the stack (aqua) is flipped (orange). <b>Click</b> a cyclic edge to pin its reversal and watch the walk find that cycle already broken. The right panel ranks the result by longest path and counts the bend nodes chaining adds.' });
+    var f = SX.figure(host, { caption: '<b>Cycle breaking.</b> <b>Step</b> the walk: an edge into a node still on the stack (aqua) is flipped (orange). <b>Click</b> a cyclic edge to pin its reversal; the right panel ranks the result.' });
     var top = SX.el('div', { class: 'ctrl' });
     var pick = SX.choice({ options: Object.keys(TOYS).map(function (k) { return { value: k, label: TOYS[k].label }; }), value: key,
       onChange: function (v) { key = v; pins = Object.assign({}, TOYS[v].pins); build(); } });
@@ -365,7 +367,7 @@
     var topoIdx = {};
     U.ranks(n, T.nodes.map(function () { return 'state'; }), E, function (s) { steps.push(s); });
     steps[0].topo.forEach(function (v, i) { topoIdx[v] = i; });
-    var f = SX.figure(host, { caption: '<b>Longest-path ranking</b> on toolchanger\'s root frame, after the shipped reverse pins (orange). <b>Step</b> through it: Kahn\'s order (the number on each node), each node pushing its successors one rank past itself, then the pull-right pass moving <code>Gripping</code>, a source with three successors, from rank 0 to rank 1. The result is exactly the trace\'s <code>rank_assigned</code> events.' });
+    var f = SX.figure(host, { caption: '<b>Longest path</b> on toolchanger\'s root frame. <b>Step</b> through it and watch pull-right move <code>Gripping</code>, a source with three successors, from rank 0 to rank 1.' });
     var msg = SX.el('div', { class: 'note', style: { minHeight: '2.6em' } });
     function nm(v) { return T.nodes[v].name; }
     var st = SX.stepper({ steps: steps.length, interval: 900, start: 0,
@@ -391,7 +393,7 @@
   F.order['order-pin'] = function (host) {
     var T = U.TC, n = T.nodes.length, kinds = T.nodes.map(function () { return 'state'; });
     var E = U.orient(n, T.edges, T.pins).edges, base = U.ranks(n, kinds, E), pins = [];
-    var f = SX.figure(host, { caption: '<b>Rank pins.</b> <b>Drag</b> a state into another column to pin it there; edges can go flat or backward (dashed). The initial is then re-seated and empty ranks squeezed out, so a node can land one column off from where you dropped it.' });
+    var f = SX.figure(host, { caption: '<b>Rank pins.</b> <b>Drag</b> a state into another column to pin it there. Edges may go flat or backward (dashed), and re-seating can shift the node one column.' });
     var out = SX.el('div', { class: 'note', style: { minHeight: '2.6em' } });
     f.ctrl.appendChild(SX.button('Reset', function () { pins = []; draw(); }));
     f.ctrl.appendChild(SX.button('The search\'s pins (Gripping → 2, Rotating → 1)', function () { pins = [{ v: 4, r: 2 }, { v: 3, r: 1 }]; draw(); }));
@@ -520,7 +522,7 @@
   };
   F.order['order-median'] = function (host) {
     var key = 'spec', shuffle = 0, stepper = null;
-    var f = SX.figure(host, { caption: '<b>Median sweeps.</b> <b>Step</b> through: each rank is reordered by its nodes\' upper medians (the small numbers, neighbour positions in the rank just fixed). Crossing edges are orange. A sweep that does not beat the best so far is discarded, and sweeping stops at 0. <b>Shuffle</b> the starting order to run the sweeps from elsewhere.' });
+    var f = SX.figure(host, { caption: '<b>Median sweeps.</b> <b>Step</b> through: each rank is reordered by its nodes\' upper medians (small numbers); crossing edges are orange. <b>Shuffle</b> the start to try another order.' });
     var bar = SX.el('div', { class: 'ctrl' }); f.ctrl.appendChild(bar);
     bar.appendChild(SX.choice({ options: Object.keys(MED).map(function (k) { return { value: k, label: MED[k].label }; }), value: key, onChange: function (v) { key = v; shuffle = 0; build(); } }).el);
     bar.appendChild(SX.button('Shuffle start', function () { shuffle++; build(); }));
@@ -623,7 +625,7 @@
       return { o: o, ids: ids, stage: [A, P, C], down: o.down };
     });
     var stage = 2;
-    var f = SX.figure(host, { caption: '<b>brew\'s ranks, read from the trace.</b> Each state is tinted by its rank in its own frame; the <code>grinder</code> region runs down, so its ranks are rows. <b>Switch</b> between longest path, the shipped rank pins, and the final ranks after the initial is re-seated. <b>Hover</b> a state for its numbers, or a row of the table to find its transition. Reversed edges are orange.' });
+    var f = SX.figure(host, { caption: '<b>brew\'s ranks</b>, from the trace, tinted by rank. <b>Switch</b> between longest path, the rank pins and the final ranks; <b>hover</b> a state or table row for details.' });
     f.ctrl.appendChild(SX.choice({ options: [{ value: 0, label: 'Longest path' }, { value: 1, label: '+ rank pins' }, { value: 2, label: '+ initial re-seated (final)' }], value: stage, onChange: function (v) { stage = v; draw(); } }).el);
     var chartHost = SX.el('div'); f.stage.appendChild(chartHost);
     var legend = SX.el('div', { class: 'legend' }); f.stage.appendChild(legend);
@@ -652,7 +654,7 @@
       legend.appendChild(SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--hl)' } }), 'reversed: ' + frames[0].o.reversed.map(function (rv) { var t = geom.trans[rv.trans]; return t.src_path.replace(/^.*\//, '') + ' → ' + t.dst_path.replace(/^.*\//, ''); }).join(', ')));
       note.innerHTML = stage === 0 ? 'Root frame by longest path: SelfCheck and the initial are sources at rank 0; Off and Standby at 1; Brewing and the final at 2.'
         : stage === 1 ? 'The pins move Off to rank 0 (beside SelfCheck) and the final to rank 1 (beside Standby). The initial now shares rank 0 with the state it enters.'
-        : 'The initial\'s state, Off, sits at rank 0, so every other node moves up one and the initial takes rank 0 alone. The label charges below confirm it: <code>SelfCheck → Standby</code> charges boundary 1, so SelfCheck is at rank 1. (stages.json\'s <code>ranks</code> list stops at the pins.)';
+        : 'Off, the initial\'s state, sits at rank 0, so every other node moves up one and the initial takes rank 0 alone.';
       table.innerHTML = '';
       table.appendChild(SX.el('tr', null, SX.el('th', { text: 'frame' }), SX.el('th', { text: 'boundary (after rank)' }), SX.el('th', { text: 'transition' }), SX.el('th', { text: 'label' }), SX.el('th', { class: 'num', text: 'width charged' })));
       frames.forEach(function (fr) {

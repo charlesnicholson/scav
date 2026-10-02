@@ -1,38 +1,35 @@
 <section class="sx" id="determinism" data-toc="12 · Determinism and tests">
   <div class="kicker">Proof it holds</div>
   <h2>Determinism: goldens, hashes and selftest</h2>
-  <p class="lede">scav checks that the same chart, profile and fonts give the same drawing, byte for byte, on any machine, compiler and thread count, using three hashes per drawing, committed goldens and a self-test every build can run.</p>
+  <p class="lede">Three hashes per drawing, committed goldens and a self-test check that the same inputs give the same bytes on every machine.</p>
 
   <h3>Three hashes</h3>
-  <p>Every laid-out chart carries three 32-bit digests, all xxHash32 implemented in-tree. Lanes are assembled byte by byte, so big-endian machines agree.</p>
+  <p>Every laid-out chart carries three 32-bit xxHash32 digests, computed byte by byte so every machine agrees:</p>
   <ul>
-    <li><b>Inputs digest</b>: everything that is not geometry: the profile (all 52 fields), the router's name and version, the packer choice, and the space-request tables. A golden is reproducible only against a stated measurement policy, and this digest names it.</li>
-    <li><b>Structural hash</b>: ranks, in-rank orders, port sides, and each route's bends as direction-turn tokens (not points). It is seeded with the model's own structural digest, so it identifies this model laid out this way. Rank and in-rank position are recovered from the rectangles (sorted distinct x per frame, then y within a column), never stored, so the hash can be recomputed from a finished drawing alone.</li>
-    <li><b>Coordinate hash</b>: every rectangle, point and port coordinate.</li>
+    <li><b>Inputs digest</b>: everything that is not geometry (the profile, the router, the packer choice, the space requests). A golden is reproducible only against a stated measurement policy, and this names it.</li>
+    <li><b>Structural hash</b>: ranks, in-rank orders, port sides and each route's turns, seeded with the model. Ranks are recovered from the rectangles, so it can be recomputed from a finished drawing.</li>
+    <li><b>Coordinate hash</b>: every rectangle, point and port.</li>
   </ul>
-  <p>The split localises a change. Translating the whole drawing moves only the coordinate hash. A remeasure that reorders nothing moves only the inputs digest and the coordinates. Seeding the geometry hashes with the inputs digest was rejected, because every remeasure would then read as a global reflow.</p>
+  <p>The split localises a change: moving the drawing changes only the coordinate hash, and remeasuring text without reordering changes only the inputs digest and coordinates.</p>
   <div data-fig="det-hashes"></div>
 
-  <h3><code>scav selftest</code> and thread counts</h3>
-  <p>The corpus and its goldens are compiled into the binary, gzipped. <code>scav selftest</code> lays every chart out at <b>1, 2, 3, 5, 8, 13 and 16 threads</b> and diffs all three hashes against the embedded goldens (<code>--against FILE</code> substitutes a golden file). A difference from the golden is a toolchain finding; a difference from the 1-thread run is a sharding defect. One thread runs serially, and the six pooled runs are different schedules of the same <a href="#principles">shards</a>, so they must agree.</p>
+  <h3>Selftest and thread counts</h3>
+  <p><code>scav selftest</code> lays every built-in chart out at 1, 2, 3, 5, 8, 13 and 16 threads and compares all three hashes with the embedded goldens. A difference from the golden is a toolchain finding; a difference between thread counts is a sharding defect, since the <a href="#principles">shards</a> and their merge order never depend on the schedule.</p>
   <div data-fig="det-threads"></div>
-  <p>The <b>determinism test class</b> checks every geometry column's bytes, all three hashes and the Level 2 row that produced them (a worker count that moved the pick would move everything under it). It covers the 11 corpus charts and two 2,000-state synthetic charts at 2, 3, 5, 8, 13 and 16 workers against 1, under a scheduling-delay injector: each shard yields <code>rnd(seed, 0, shard, 0) % 64</code> times and spins <code>rnd(seed, 1, shard, 0) % 4096</code> iterations. It also covers the inflation retry at 8 workers against 1, and a chart on which every row ties, so index-ordered reduction decides. Timing never gates a determinism claim.</p>
-  <p>The CI matrix is six toolchain triples (clang, gcc and MSVC over libc++, libstdc++ and the MSVC STL, on macOS, Linux and Windows) × {Debug, Release, testable} × the thread counts, about ten minutes per run. Odd and prime thread counts are mandatory, because they expose reduction-order bugs that powers of two hide. The <code>testable</code> build, which gives internal functions external linkage, must be byte-identical to Release: layout arithmetic is integer, so inlining cannot change a result, and a divergence means undefined behaviour.</p>
+  <p>The <b>determinism test</b> compares every geometry column's bytes, the hashes and the chosen Level 2 row across those thread counts, under a delay injector that reshuffles the schedule. It includes the inflation retry and a chart where every row ties, so index-ordered merging decides. Timing never gates a determinism claim.</p>
+  <p>CI runs six toolchains (clang, gcc and MSVC, on macOS, Linux and Windows) × Debug, Release and a <code>testable</code> build × the thread counts. Odd and prime thread counts are mandatory, because they expose merge-order bugs that powers of two hide. The <code>testable</code> build must match Release byte for byte; with integer arithmetic, any divergence means undefined behaviour.</p>
 
   <h3>Goldens</h3>
-  <p><code>test_data/golden/layout/</code> holds <code>corpus_hashes.txt</code> (three hashes per chart), <code>corpus_cost.txt</code> and <code>corpus_cost_measured.txt</code> (every cost term per chart, at no text and at real text), <code>corpus_cost_shares*.txt</code> (basis points), and <code>corpus_routers.txt</code> (every registered router over the corpus), plus draw-list, dump and SVG goldens. The cost goldens and the gauntlet are at no text and <code>corpus_cost_measured.txt</code> at real text; the <a href="#principles">two scales</a> are never compared.</p>
+  <p>Committed goldens hold the three hashes, every cost term at both <a href="#principles">scales</a>, the shares, every router's results, and draw-list, dump and SVG output.</p>
 
   <h3>How scav is tested</h3>
   <ul>
-    <li><b>Unit means unit.</b> No disk, no parsing, no earlier stage: inputs are typed in as plain structs. "A defect in rank assignment should fail one test that types in a graph, not a golden hash three stages downstream."</li>
-    <li><b>Functional</b> tests compose the pipeline over the corpus.</li>
-    <li><b>The gauntlet</b>: 28 element charts, one layout shape each, small enough to name every route, held to <b>reader-visible properties rather than a hash</b>. For example: no element routes an edge through a box; every route is axis-aligned, forward, and reaches its ends; a fork's bar is used along its length, not at one point; a transition and its return are two straight legs an em apart. A property that does not hold yet is carved out with a pinned count and the owning PRD section named. The gauntlet scores what ships (the shipped profile's full search), not a candidate nobody draws.</li>
-    <li><b>Every rule</b> gets an isolated test on a trivial layout, and <b>every fixed bug</b> leaves a test.</li>
-    <li><b>Every optimisation</b> (each memo, reuse path and bound) has a test mode with a planted defect (<a href="#fast">making it fast</a>).</li>
-    <li>Also golden, property (round trip, references resolve, zero box overlap, zero edge through a box), sanitizer (UBSan, ASan, TSan, MSan), fuzz (deserializer, resolver), binding (Python), baseline (side by side with PlantUML and elkjs) and regression tests. <b>Performance tests assert floors, not times</b>: throughput and memory ratios, never goldens.</li>
+    <li><b>Unit tests</b> type inputs in as plain structs: no disk, no parsing, no earlier stage, so a defect fails one test, not a hash three stages away.</li>
+    <li><b>The gauntlet</b>: 28 one-element charts, small enough to name every route, held to reader-visible properties (no route through a box, every route axis-aligned and reaching its ends) on what actually ships. A property that does not hold yet is carved out with a pinned count.</li>
+    <li>Every rule gets an isolated test on a trivial layout, every fixed bug leaves a test, and every optimisation has a <a href="#fast">test mode</a>.</li>
+    <li>Also golden, property, sanitizer, fuzz, Python binding and baseline tests. Performance tests assert floors, never times.</li>
   </ul>
-  <p>The <b>trace</b> is a developer-facing list of events: rank assigned, edge reversed, node placed, net planned, candidate scored with its terms, fold cut, and so on. A trace forces one thread. <code>layout_trace_json</code> searches first, then lays the winning (row, pins) out again with the trace attached. All eleven corpus charts give the same hashes traced as untraced. The search section's path and round figures read it.</p>
-  <div class="callout why"><span class="t">Rejected</span>Mocks and interface seams: tests get linkage to internals through an intrusive internal-section marker instead. A "stopped at cap" diagnostic for search loops: diagnostics are golden, so an improvement loop reports a counted statistic (sweeps, moves accepted, frames at cap) instead.</div>
+  <p>The <b>trace</b> lists layout's decisions (rank assigned, edge reversed, candidate scored and so on). It forces one thread and replays the winning (row, pins), and traced runs hash the same as untraced ones. The figures marked "from the trace" read it.</p>
 </section>
 <script>
 // led at no text, laid out by this tree's scav (hashes c5553683 / 19f815d2, as in corpus_hashes.txt).
@@ -69,7 +66,7 @@ window.SXdetHashes = function (sec) {
   var D = SXdet, estop = SX.data('charts').charts.estop.notext, led = window.SXdetLed;
   var models = { estop: SX.data('charts').charts.estop.model, led: SX.data('charts').charts.led.model };
   var GOLD = { estop: ['0bec6ad2', '54fe3996', '19f815d2'], led: ['0bec6ad2', 'c5553683', '19f815d2'] };
-  var f = SX.figure(sec.querySelector('[data-fig="det-hashes"]'), { caption: '<b>Hover</b> a hash for what it covers. Top: scav\'s committed goldens. estop and led are different three-state models with identical no-text geometry, so only their structural hashes, seeded with the model, differ. Below: <b>slide</b> the drawing sideways or <b>switch</b> the model to see which digest moves. These two are xxHash32 over this page\'s own serialisation, so their values are not scav\'s, but the split behaves the same way.' });
+  var f = SX.figure(sec.querySelector('[data-fig="det-hashes"]'), { caption: '<b>Hover</b> a hash for what it covers: estop and led share all but the structural hash. Below, <b>slide</b> the drawing or <b>switch</b> the model to see which digest moves.' });
   var WHAT = ['<b>inputs digest</b>: profile (52 fields), router name and version, packer choice, space-request tables', '<b>structural hash</b>: ranks, in-rank orders, port sides, bend direction tokens; seeded with the model\'s structural digest', '<b>coordinate hash</b>: every rectangle, point and port coordinate'];
   var NAMES = ['inputs', 'structural', 'coordinate'];
   var top = SX.el('div', { class: 'fig-row' });
@@ -143,7 +140,7 @@ window.SXdetHashes = function (sec) {
 // Figure: brew's 16 rows on the pool at each selftest thread count, under injected delays.
 window.SXdetThreads = function (sec) {
   var B = SX.data('rows').charts.brew, rows = B.rows;
-  var f = SX.figure(sec.querySelector('[data-fig="det-threads"]'), { caption: '<b>Pick a thread count</b> and <b>reseed the delays</b>. Each bar is one of brew\'s 16 Level 2 rows searched as one shard, with its real converged cost; durations follow the injector\'s rule (a base plus <code>rnd % 64</code> yields plus <code>rnd % 4096</code> spins). Rows 0, 2, 4 and 6 tie at 3,595. Keeping the first tied row to <i>finish</i> picks whichever ended first; scav reduces in row order and always picks row 0, so the row, the drawing and its hashes never move.' });
+  var f = SX.figure(sec.querySelector('[data-fig="det-threads"]'), { caption: '<b>Pick a thread count</b> and <b>reseed the delays</b>. Rows 0, 2, 4 and 6 tie: merging in row order always picks row 0, merging in finish order does not.' });
   var COUNTS = [1, 2, 3, 5, 8, 13, 16], threads = 3, seed = 1;
   var tc = SX.choice({ options: COUNTS.map(function (n) { return { value: n, label: n + (n === 1 ? ' thread' : '') }; }), value: threads, onChange: function (v) { threads = v; draw(); } });
   f.ctrl.appendChild(tc.el);

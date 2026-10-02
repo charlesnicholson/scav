@@ -1,60 +1,57 @@
 <section class="sx" id="cost" data-toc="9 · The objective">
   <div class="kicker">What scav optimises</div>
   <h2>The objective: three tiers, compared in order</h2>
-  <p class="lede">Every drawing scav considers gets one score, a <code>Cost</code>, and the search keeps the least, so the cost defines what "better" means.</p>
+  <p class="lede">Every candidate drawing gets one <code>Cost</code>, and the search keeps the least, so the cost defines what "better" means.</p>
 
-  <p>A cost is a triple <code>(t0, t1, t2)</code>, compared <b>lexicographically</b>: the lower <code>t0</code> wins; on equal <code>t0</code>, the lower <code>t1</code>; only then <code>t2</code>. There are no multipliers between tiers: a large weight inside one sum is a cost cliff that breaks local search and can overflow. Cost is computed from the finished geometry alone (state rectangles, route points, placed label boxes), never by laying the chart out again.</p>
-  <p>The geometric tests are strict. Rectangles overlap only if their interiors meet, so touching is free. A route segment has zero thickness, so a label box that only touches a leg costs nothing. Segments <em>cross</em> only properly: a shared endpoint or a collinear overlap is not a crossing.</p>
+  <p>A cost is a triple <code>(t0, t1, t2)</code> compared <b>lexicographically</b>: lower <code>t0</code> wins outright, then <code>t1</code>, then <code>t2</code>. There are no multipliers between tiers, because a huge weight inside one sum is a cliff that breaks local search and can overflow. Cost reads only the finished geometry. Touching never counts as overlapping, and segments cross only properly, not at a shared endpoint.</p>
 
   <h3>Tier 0: forbidden, not priced</h3>
-  <p><code>t0</code> is the sum of eight counts of things a reader must never see; compared first, one violation outweighs any Tier 2 total. Most are impossible by construction (the router treats states as obstacles), so Tier 0 is a safety net for degraded routes, the search's trial drawings and the label placer's fallback.</p>
+  <p><code>t0</code> counts things a reader must never see; one outweighs any Tier 2 total. Most are impossible by construction, so Tier 0 is a safety net for degraded routes, trial drawings and label fallbacks. Every shipped example has <code>t0 = 0</code>.</p>
   <table class="sx-table">
-    <tr><th>count</th><th>charged per</th><th>what it forbids</th></tr>
-    <tr><td><code>through_box</code></td><td>route segment × live state it enters, unless that state encloses the route's source or destination (or is one of them)</td><td>an edge drawn through an unrelated box</td></tr>
-    <tr><td><code>box_overlap</code></td><td>pair of sibling states (children of one submachine) whose rectangles overlap</td><td>boxes on top of each other</td></tr>
-    <tr><td><code>vanished</code></td><td>transition with a segment to draw whose route has fewer than 2 points</td><td>a missing arrow. Every Tier 2 term would score an undrawn route as perfect.</td></tr>
-    <tr><td><code>flush</code></td><td>axis-aligned segment lying along any state's border, within 47 units (just under 3 pt)</td><td>a route the reader cannot tell from a border</td></tr>
-    <tr><td><code>through_region</code></td><td>segment entering a region (a non-root submachine) that neither end lies inside</td><td>an arrow cutting through a concurrent region it has no business in</td></tr>
-    <tr><td><code>retrace</code></td><td>route vertex where an axis-aligned leg turns straight back along the one before</td><td>one run drawn twice, which reads as two routes</td></tr>
-    <tr><td><code>label_over_box</code></td><td>placed label box × state it overlaps, except states enclosing both ends and the <em>host</em> (an endpoint that encloses the other end); +1 if the box overlaps the host's text bands</td><td>a label sitting on a box</td></tr>
-    <tr><td><code>label_over_route</code></td><td>placed label box × segment of <em>another</em> transition's route it overlaps</td><td>a label sitting on someone else's line</td></tr>
+    <tr><th>count</th><th>forbids</th></tr>
+    <tr><td><code>through_box</code></td><td>a route entering a state that neither encloses nor is one of its ends</td></tr>
+    <tr><td><code>box_overlap</code></td><td>sibling states overlapping</td></tr>
+    <tr><td><code>vanished</code></td><td>a transition that should be drawn but has no route (else every Tier 2 term would score it perfect)</td></tr>
+    <tr><td><code>flush</code></td><td>a route running along a state's border, within 47 units</td></tr>
+    <tr><td><code>through_region</code></td><td>a route entering a concurrent region neither end lies in</td></tr>
+    <tr><td><code>retrace</code></td><td>a route turning straight back along itself</td></tr>
+    <tr><td><code>label_over_box</code></td><td>a label over a state, except those enclosing both ends and the <em>host</em> (an endpoint enclosing the other), whose text bands count instead</td></tr>
+    <tr><td><code>label_over_route</code></td><td>a label over another transition's route</td></tr>
   </table>
-  <p class="note">At real text, every corpus chart and all 28 gauntlet charts ship with <code>t0 = 0</code>.</p>
 
   <h3>Tier 1: hints</h3>
-  <p><code>t1</code> is reserved for an author's layout hints: a priority-weighted count of unsatisfied hints. Hints are not built, so <code>t1</code> is always 0; compared second, they will outrank all of Tier 2.</p>
+  <p><code>t1</code> is reserved for author's layout hints, which are not built; it is always 0.</p>
 
   <h3>Tier 2: thirteen weighted terms</h3>
-  <p><code>t2</code> is a plain integer sum of weighted terms. Each raw term is first converted to a unit, rounding up: counts stay counts, lengths are divided by the <b>em</b> (the font size in grid units: 192, or 12 pt, at <code>readable</code>), and areas by em² (36,864). Then it is multiplied by its weight.</p>
+  <p><code>t2</code> is an integer sum. Each term is converted to a unit first: counts stay counts, lengths are divided by the <b>em</b> (the font size, 192 units on <code>readable</code>) and areas by em², rounding up. Then it is multiplied by its weight.</p>
   <table class="sx-table" id="cost-terms-table">
-    <tr><th>#</th><th>term</th><th>raw quantity</th><th>unit</th><th class="num">weight</th></tr>
-    <tr><td>1</td><td><code>bends</code></td><td>route vertices where the direction changes</td><td>count</td><td class="num">512</td></tr>
-    <tr><td>2</td><td><code>corridor</code></td><td>length two different transitions' segments share on one line, except the <em>trunk</em>: the final leg into a common destination (and the leg merging into it)</td><td>em</td><td class="num">48</td></tr>
-    <tr><td>3</td><td><code>crossings</code></td><td>proper crossings between different transitions' segments</td><td>count</td><td class="num">512</td></tr>
-    <tr><td>4</td><td><code>excess_len</code></td><td>per route: <code>max(0, length − max(chord, its label widths)) × (1 + its crossings)</code></td><td>em</td><td class="num">4</td></tr>
-    <tr><td>5</td><td><code>adjacency</code></td><td>segments joining two concurrent regions that are not adjacent (fork and join edges exempt)</td><td>count</td><td class="num">16</td></tr>
-    <tr><td>6</td><td><code>label</code></td><td>overlapping pairs of placed label boxes, plus a box over the text bands of a state enclosing both ends</td><td>count</td><td class="num">768</td></tr>
-    <tr><td>7</td><td><code>label_near</code></td><td>per box of height h: <code>max(0, d_own + h − d_other)</code>, with d the gap to its own nearest leg and to the nearest foreign leg</td><td>em</td><td class="num">48</td></tr>
-    <tr><td>8</td><td><code>aspect</code></td><td><code>|w·10 − h·16|</code> of the chart, against 16:10</td><td>em</td><td class="num">2</td></tr>
-    <tr><td>9</td><td><code>area</code></td><td><code>w × h</code> of the chart</td><td>em²</td><td class="num">1</td></tr>
-    <tr><td>10</td><td><code>crowding</code></td><td>per pair of parallel segments of different transitions overlapping by <code>along</code>, <code>0 &lt; apart &lt; em</code>: <code>along × (em − apart) / em</code></td><td>em</td><td class="num">512</td></tr>
-    <tr><td>11</td><td><code>length</code></td><td>sum of every route's polyline length</td><td>em</td><td class="num">8</td></tr>
-    <tr><td>12</td><td><code>transit_bends</code></td><td>bends inside a state the route only passes through, charged on top of <code>bends</code></td><td>count</td><td class="num">768</td></tr>
-    <tr><td>13</td><td><code>whitespace</code></td><td>per composite: interior between its text bands, less its children's areas</td><td>em²</td><td class="num">0</td></tr>
+    <tr><th>term</th><th>charges</th><th>unit</th><th class="num">weight</th></tr>
+    <tr><td><code>bends</code></td><td>each change of direction</td><td>count</td><td class="num">512</td></tr>
+    <tr><td><code>corridor</code></td><td>length two transitions share on one line, except the final leg into a common target (the <em>trunk</em>)</td><td>em</td><td class="num">48</td></tr>
+    <tr><td><code>crossings</code></td><td>each crossing between transitions</td><td>count</td><td class="num">512</td></tr>
+    <tr><td><code>excess_len</code></td><td>route length beyond its chord or label width, times (1 + its crossings)</td><td>em</td><td class="num">4</td></tr>
+    <tr><td><code>adjacency</code></td><td>a transition joining two non-adjacent regions (fork and join exempt)</td><td>count</td><td class="num">16</td></tr>
+    <tr><td><code>label</code></td><td>overlapping label pairs, and a label over an enclosing state's text bands</td><td>count</td><td class="num">768</td></tr>
+    <tr><td><code>label_near</code></td><td>a label's shortfall: nearer a foreign leg than its own</td><td>em</td><td class="num">48</td></tr>
+    <tr><td><code>aspect</code></td><td>the chart's distance from 16:10, <code>|w·10 − h·16|</code></td><td>em</td><td class="num">2</td></tr>
+    <tr><td><code>area</code></td><td>the chart's <code>w × h</code></td><td>em²</td><td class="num">1</td></tr>
+    <tr><td><code>crowding</code></td><td>parallel segments of different transitions closer than an em, falling linearly to zero at one em</td><td>em</td><td class="num">512</td></tr>
+    <tr><td><code>length</code></td><td>total route length</td><td>em</td><td class="num">8</td></tr>
+    <tr><td><code>transit_bends</code></td><td>bends inside a state the route only passes through, on top of <code>bends</code></td><td>count</td><td class="num">768</td></tr>
+    <tr><td><code>whitespace</code></td><td>empty interior of composites (measured, unweighted)</td><td>em²</td><td class="num">0</td></tr>
   </table>
-  <p>Crowding continues where corridor stops: at <code>apart = 0</code> the segments are collinear and corridor charges them; as they separate, crowding's charge falls linearly to zero at one em. <code>whitespace</code> is measured but ships at weight 0. Every weight is capped at 1,024, which with the em scaling keeps the sum below 2<sup>54</sup>.</p>
+  <p>Weights are capped at 1,024, which keeps the sum inside 64 bits.</p>
   <div data-fig="cost-overlay"></div>
 
   <h3>Weights are exchange rates</h3>
-  <p>With each term in its own unit, a weight is an exchange rate between defects. At <code>readable</code>, one bend costs the same as one crossing, one em of two lanes touching (crowding), 64 em of route length, or 512 em² of canvas (a square about 271 pt on a side). A label overlap costs 1.5 bends, and a transit bend 2.5 bends in total.</p>
-  <p>Before the unit conversion, <code>area</code> made up 99.48% of <code>t2</code>: counts are degree 0 in the coordinates, lengths degree 1 and area degree 2, so every other term rounded to nothing, and bends could fall 15% and crossings 12% while <code>t2</code> moved 0.35%. After it, the weights were fitted to pick, from 21 charts × 8 rows, the drawing with the fewest defects a reader counts: <code>w_bends</code> went from 64 to 512, <code>w_label</code> from 24 to 768, and <code>w_area</code> was pinned at 1. <code>w_crowding</code>, <code>w_transit_bends</code>, <code>w_crossings</code> and <code>w_length</code> were set later by hand sweeps.</p>
+  <p>With every term in its own unit, a weight says how much of one defect a reader would trade for another. On <code>readable</code>, one bend costs the same as one crossing, one em of crowded lanes, 64 em of route length, or 512 em² of canvas. Without the unit conversion, area (degree 2 in the coordinates) swamped every other term. The weights were then fitted to pick the drawing with the fewest defects a reader counts.</p>
   <div data-fig="cost-weights"></div>
 
   <h3>Shares</h3>
-  <p><code>cost_shares</code> reports each weighted term's share of <code>t2</code> in basis points, rounded down, so a row sums to just under 10,000. They are committed per chart beside the cost goldens, so a reviewer sees which defects a weight change bought and sold.</p>
+  <p>Each term's share of <code>t2</code>, in basis points, is committed per chart beside the cost goldens, so a reviewer sees what a weight change bought and sold.</p>
   <div data-fig="cost-shares"></div>
 
-  <div class="callout why"><span class="t">Rejected</span>Scoring per frame: pieces leave their frame's rectangle (13 of <code>axis</code>'s 49), so the whole chart is scored at once. Penalising <code>excess_len</code> heavily: it pulls against area, so it rewards sprawl. An attraction term that rewards routes for running together: the optimiser satisfies it by drawing one edge on top of another. Raising a weight ceiling to fix a scale mismatch: the ceiling is what keeps the sum inside 64 bits.</div>
+  <div class="callout why"><span class="t">Rejected</span>Scoring per frame (routes leave their frame); a heavy <code>excess_len</code> (it rewards sprawl); a term rewarding routes for running together (the optimiser stacks them); a higher weight ceiling (the ceiling keeps the sum in 64 bits).</div>
 </section>
 <script>
 // Shared cost helpers for this section: weights, units and the term kernels of cost.cpp.
@@ -160,7 +157,7 @@ window.SXcost = (function () {
 // Figure: a real chart with each term's charges drawn on it.
 window.SXcostOverlay = function (sec) {
   var C = SXcost, rows = SX.data('rows').charts.brew;
-  var f = SX.figure(sec.querySelector('[data-fig="cost-overlay"]'), { caption: '<b>Toggle a term</b> to see what it charges; <b>hover</b> a mark for its number. <b>Switch</b> to brew before the search (row 0 as Level 2 lays it out) for 18 bends, two crossings, shared corridors, crowded lanes and four labels on foreign routes (Tier 0). The terms are recomputed here from the route points and equal the values scav logged (last column).' });
+  var f = SX.figure(sec.querySelector('[data-fig="cost-overlay"]'), { caption: '<b>Toggle a term</b> to see what it charges and <b>hover</b> a mark for its number. <b>Switch</b> to brew before the search to see bends, crossings and labels on routes.' });
   var src = 'shipped', on = { bends: true, crossings: true, corridor: true, crowding: true, excess_len: false, area: false, lor: true };
   var drawings = {
     shipped: { g: rows.rows[0].searched, name: 'brew as shipped (row 0, searched)' },
@@ -262,7 +259,7 @@ window.SXcostOverlay = function (sec) {
 // Figure: three real candidates rescored live as the weights move.
 window.SXcostWeights = function (sec) {
   var C = SXcost, R = SX.data('rows').charts.brew.rows;
-  var f = SX.figure(sec.querySelector('[data-fig="cost-weights"]'), { caption: '<b>Slide a weight</b> and watch the pick change. brew\'s 16 Level 2 rows converge to these three drawings; each <code>t2</code> is recomputed here from the logged raw terms and, at the shipped weights, equals scav\'s. Try <code>w_bends</code> below 111 (row 8 wins with one more bend but less canvas), <code>w_aspect</code> at 4 (row 1\'s near-16:10 shape wins), <code>w_area</code> at 12, or <code>w_whitespace</code> at 32. The other six terms are zero in all three drawings, so their weights cannot change the pick.' });
+  var f = SX.figure(sec.querySelector('[data-fig="cost-weights"]'), { caption: '<b>Slide a weight</b> and watch which of brew\'s three converged drawings wins. Try <code>w_bends</code> below 111 or <code>w_aspect</code> at 4.' });
   var cands = [
     { label: 'row 0 · shipped', g: R[0].searched, rows: '0, 2, 4, 6' },
     { label: 'row 1', g: R[1].searched, rows: '1, 3, 5, 7, 9, 11, 13, 15' },
@@ -323,7 +320,7 @@ window.SXcostWeights = function (sec) {
 // Figure: each weighted term's share of t2 per corpus chart, as scav reports it.
 window.SXcostShares = function (sec) {
   var C = SXcost, charts = SX.data('charts').charts;
-  var f = SX.figure(sec.querySelector('[data-fig="cost-shares"]'), { caption: '<b>Hover</b> a segment for its basis points and weighted value. <b>Switch</b> to "no unit conversion" to score the same drawings as before the em, today\'s weights times raw grid units: area swamps every other term. Each chart\'s shipped real-text drawing; the six terms not shown are zero in all eight.' });
+  var f = SX.figure(sec.querySelector('[data-fig="cost-shares"]'), { caption: '<b>Hover</b> a segment for its share. <b>Switch</b> to no unit conversion to see area swamp every other term.' });
   var mode = 'em';
   f.ctrl.appendChild(SX.choice({ options: [{ value: 'em', label: 'As scav scores it (em, em²)' }, { value: 'raw', label: 'No unit conversion' }], value: mode, onChange: function (v) { mode = v; draw(); } }).el);
   var SHOW = ['bends', 'excess_len', 'label_near', 'aspect', 'area', 'length'];

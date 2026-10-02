@@ -20,56 +20,57 @@
   </style>
   <div class="kicker">Introduction</div>
   <h2>What scav is</h2>
-  <p class="lede">scav authors, lays out and renders Harel statecharts: given a chart as text, it boxes every state, routes every transition at right angles and places every label, with the same bytes on every machine.</p>
+  <p class="lede">scav lays out and renders Harel statecharts: every state boxed, every transition routed at right angles, every label placed, identical bytes everywhere.</p>
 
-  <p>No existing tool lays statecharts out well. They fail on what a statechart has and a flowchart lacks: transitions that cross the borders of nested states. ELK's default hierarchy handling (<code>SEPARATE_CHILDREN</code>) drops an edge that skips a containment level, with no route and no warning. Its fix, <code>INCLUDE_CHILDREN</code>, lays the whole subtree out in one run and loses each subtree's own direction and aspect ratio; ELK's maintainer calls it "generally a little bit buggy". PlantUML, whose files scav replaces, has no holistic layout: it lays each composite out on its own and attaches the transitions that leave it afterwards, so its splines cut diagonally across the drawing and through submachine boxes. It cannot express a transition from any concurrent region but the first to a state outside the composite, so it refuses <code>tcp.scav</code>. Mermaid documents the limitation, itemis CREATE deleted its auto-layout, and Stately declares layout a non-goal. Of about twenty tools surveyed, none publishes a statechart layout algorithm.</p>
-  <p>scav's answer is <a href="#decompose">decomposition</a>: it cuts every transition at each border it crosses into <b>segments</b>, joined by <b>ports</b> on those borders. Each submachine is then an ordinary flat graph, ordered on its own, and a long transition still lands in the right place because its pieces are tied to the borders they cross. Earlier tools get one of these two properties, never both.</p>
+  <p>Existing tools fail on what statecharts have and flowcharts lack: transitions that cross the borders of nested states.</p>
+  <ul>
+    <li><b>ELK</b> either drops an edge that skips a containment level, or lays the whole subtree out in one run and loses each subtree's own direction and aspect.</li>
+    <li><b>PlantUML</b>, whose files scav replaces, lays each composite out alone and attaches leaving transitions afterwards, so its lines cut through boxes; it cannot express <code>tcp.scav</code> at all.</li>
+    <li>Of about twenty other tools surveyed, none publishes a statechart layout algorithm.</li>
+  </ul>
+  <p>scav's answer is <a href="#decompose">decomposition</a>: every transition is cut at each border it crosses into <b>segments</b>, joined by <b>ports</b>. Each submachine becomes a flat graph laid out on its own, and a long transition still lands in the right place because its pieces are tied to the borders.</p>
 
   <div data-fig="intro-hero"></div>
 
   <h3>The model</h3>
-  <p>A <b>state</b> may hold <b>submachines</b>, each holding more states. A state with one or more submachines is a <b>composite</b>; with two or more it is <b>concurrent</b>, and its submachines, informally <b>regions</b>, run at the same time and are drawn side by side with a dashed divider. A submachine that no state owns is a document root.</p>
-  <p>Every state has a kind: <code>Normal</code>, <code>Initial</code>, <code>Final</code>, <code>Choice</code>, <code>Junction</code>, <code>Fork</code>, <code>Join</code>, <code>History</code> or <code>DeepHistory</code>. All but <code>Normal</code> are <b>pseudostates</b>. Initial and final are written only as <code>*</code>: <code>trans * -&gt; X</code> creates an initial in <code>X</code>'s submachine, and <code>trans X -&gt; *</code> a final. Layout treats a pseudostate as a small box at the profile's minimum for its kind. On the shipped <code>readable</code> profile that is 224 × 224 <a href="#principles">grid units</a> (1/16 pt) for an initial or final, 320 × 320 for a choice, and 64 × 960 for a fork or join bar, upright because ranks run left to right.</p>
-  <p>A <b>transition</b> joins any two states in the tree. One whose ends lie in different submachines is <b>hierarchy-crossing</b>; ELK calls it a <i>short hierarchical edge</i> if it crosses one containment border and a <i>long hierarchical edge</i> if it crosses more. A transition between two regions of one concurrent state is drawn as a direct arrow, not up through the parent: scav draws topology, not execution paths.</p>
-  <p>The model is flat arrays of plain records linked by ordinal, not a graph of objects. Each record notes the statement and include it came from, so any drawn primitive traces back to its source bytes, as the figure above shows.</p>
+  <ul>
+    <li>A <b>state</b> may hold <b>submachines</b> of further states. With one or more it is <b>composite</b>; with two or more it is <b>concurrent</b>, and its submachines (<b>regions</b>) run together, drawn side by side with a dashed divider.</li>
+    <li>Every kind but <code>Normal</code> is a <b>pseudostate</b>: initial, final, choice, junction, fork, join, history, deep history. <code>trans * -&gt; X</code> creates an initial and <code>trans X -&gt; *</code> a final. Layout draws a pseudostate as a small box at its kind's minimum size: on the <code>readable</code> profile, 224 × 224 <a href="#principles">grid units</a> for initial or final, 320 × 320 for a choice, 64 × 960 for a fork or join bar.</li>
+    <li>A <b>transition</b> joins any two states. If its ends lie in different submachines it is <b>hierarchy-crossing</b>. A transition between two regions of one state is drawn directly, not through the parent: scav draws topology, not execution paths.</li>
+    <li>The model is flat arrays of records, each traceable to its source statement.</li>
+  </ul>
 
   <div data-fig="intro-anatomy"></div>
 
   <h3>Transition kinds</h3>
-  <p>A transition's kind (<code>external</code>, <code>internal</code> or <code>local</code>) is a layout input: it decides whether the arrow crosses the source's border.</p>
+  <p>A transition's kind decides whether its arrow crosses the source's border.</p>
   <table class="sx-table">
     <tr><th>kind</th><th>the source's border</th><th>a self-transition</th></tr>
-    <tr><td><code>external</code> (the default)</td><td>crossed</td><td>a loop outside the box</td></tr>
-    <tr><td><code>internal</code></td><td>not crossed: the route starts on the border's inner face</td><td>no route: the application draws it as text in room it reserves in the state's text bands, as <code>brew</code> does with <i>pressure adjust</i></td></tr>
-    <tr><td><code>local</code></td><td>as <code>internal</code> at the source</td><td>no route</td></tr>
+    <tr><td><code>external</code> (default)</td><td>crossed</td><td>a loop outside the box</td></tr>
+    <tr><td><code>internal</code></td><td>not crossed: the route starts on its inner face</td><td>no route: drawn as text in the state's band</td></tr>
+    <tr><td><code>local</code></td><td>as <code>internal</code></td><td>no route</td></tr>
   </table>
-  <p>When the destination encloses the source (<code>Idle -&gt; On</code> from inside <code>On</code>), the route ends on <code>On</code>'s inner face whatever the kind.</p>
+  <p>When the destination encloses the source, the route ends on the destination's inner face, whatever the kind.</p>
 
   <h3>The <code>.scav</code> format</h3>
   <ul>
-    <li>Terse, keyword-led, LL(1) and whitespace-insensitive. Commas separate every item. The unnamed string after a state or transition is its label.</li>
-    <li><code>s</code>, <code>m</code> and <code>t</code> are aliases for <code>state</code>, <code>submachine</code> and <code>trans</code>, and print back in full.</li>
-    <li>States written directly inside a state's block belong to an unnamed submachine 0. A named block, <code>submachine water { … }</code>, makes one region of a concurrent state.</li>
-    <li>Paths are <code>/</code>-separated and resolve innermost-outward. <code>:name</code> picks a submachine, as in <code>Brewing:water/Heating</code> or <code>arm/Moving:travel/Cruising</code>.</li>
-    <li><code>include "axis.scav" as arm</code> creates one state <code>arm</code> whose submachine is the included document's root. Including a file twice gives two independent copies.</li>
-    <li>There is one canonical printer, <code>scav fmt</code>. JSON is an output projection, not a format.</li>
+    <li>Keyword-led, LL(1), whitespace-insensitive; commas separate items; an unnamed string after a state or transition is its label. <code>s</code>, <code>m</code> and <code>t</code> abbreviate <code>state</code>, <code>submachine</code> and <code>trans</code>.</li>
+    <li>States written directly in a state's block form an unnamed submachine; <code>submachine water { … }</code> names one region.</li>
+    <li>Paths are <code>/</code>-separated and resolve innermost-outward; <code>:name</code> picks a submachine, as in <code>Brewing:water/Heating</code>.</li>
+    <li><code>include "axis.scav" as arm</code> makes a state <code>arm</code> holding the included document; each include is an independent copy.</li>
+    <li><code>scav fmt</code> is the one canonical printer. JSON is an output, not a format.</li>
   </ul>
 
   <h3>Layout is a library</h3>
-  <p>scav is a toolkit, not a framework. It owns the model, the layout, and what layout and drawing must agree on: the draw list, space requests and text metrics. It does not own appearance, composition or the render loop. Its main user is a build system: <code>scav render</code> in a docs pipeline, <code>scav fmt --check</code>, <code>scav check</code>. An editor or game tool links the same pieces and supplies its own drawing back end. The interface is a flat <code>extern "C"</code> ABI with five opaque handles, plain structs passed with their <code>sizeof</code>, no callbacks, and routers chosen by name. It ships as one shared object, <code>libscav</code>, with Python bindings generated from the extracted ABI.</p>
-  <p>Layout's only inputs are the model, three integer tables of <b>space requests</b>, and a <b>profile</b> of 52 integer settings. It never sees a font or a string. The tables are:</p>
+  <p>scav owns the model, the layout, and what layout and drawing must agree on: the draw list, space requests and text metrics. The application owns appearance and the render loop. The interface is a flat <code>extern "C"</code> ABI with no callbacks, shipped as <code>libscav</code> with Python bindings; its main user is a build system running <code>scav render</code>, <code>scav fmt --check</code> and <code>scav check</code>.</p>
+  <p>Layout's only inputs are the model, a <b>profile</b> of 52 integer settings, and three tables of <b>space requests</b>. It never sees a font or a string.</p>
   <ul>
-    <li><code>BoxSpace{min_w, h_before, h_after}</code> per state and per submachine: the width its text needs, and the bands above and below its children where the name and internal transitions go.</li>
-    <li><code>PathClear{src, dst}</code> per transition: how far to shorten each end, room for the arrowhead.</li>
-    <li><code>PathBox{subject, w, h, order}</code>, zero or more per transition: a box layout slides along the route: a <a href="#labels">label</a>.</li>
+    <li><code>BoxSpace</code>, per state and submachine: the width its text needs, and the bands above and below its children.</li>
+    <li><code>PathClear</code>, per transition: how far to shorten each end for the arrowhead.</li>
+    <li><code>PathBox</code>, zero or more per transition: a <a href="#labels">label</a> box to place along the route.</li>
   </ul>
-  <ol>
-    <li>The application measures its content with scav's text metrics and fills the three tables.</li>
-    <li><code>scav_layout_run</code> validates the profile and the tables (it rejects bad input, never clamps it), lays the chart out, and writes geometry columns (<code>scav.geom.state</code>, <code>route</code>, <code>point</code>, <code>portslot</code>, …) plus one placed rectangle per <code>PathBox</code>.</li>
-    <li>The application builds a draw list from those columns, optionally with scav's reference builder.</li>
-    <li>It renders the draw list with scav's SVG back end or its own.</li>
-  </ol>
-  <div class="callout why"><span class="t">Scale</span>The design target is 2,000 states, 5,000 transitions and nesting 16 deep. This page draws on a corpus of eleven hand-written charts, from the 3-state <code>estop</code> to <code>bottler</code>, which nests six levels and sends faults from its innermost valve straight to the root.</div>
+  <p>The application measures its text with scav's metrics, fills the tables, and calls <code>scav_layout_run</code>, which rejects bad input rather than clamping it. It draws the returned geometry with scav's SVG back end or its own.</p>
+  <div class="callout why"><span class="t">Scale</span>The design target is 2,000 states, 5,000 transitions and nesting 16 deep. The examples here are eleven hand-written charts, from the 3-state <code>estop</code> to <code>bottler</code>, nested six deep.</div>
 </section>
 <script>
 SX.register('intro', function (sec) {
@@ -165,7 +166,7 @@ SX.register('intro', function (sec) {
   // ---- hero: a real chart beside its source, hover either side ----
   (function () {
     var host = sec.querySelector('[data-fig="intro-hero"]');
-    var f = SX.figure(host, { caption: '<b>Hover</b> a state or transition to find the line that declares it, or a line to find what it draws. Shaded lines are a composite\'s block; an included state points at its <code>include</code> line, and an initial or final at the transition whose <code>*</code> created it. Every drawing is scav\'s own real-text output (<code>scav dump --layout</code>, then <code>scav render</code>).' });
+    var f = SX.figure(host, { caption: '<b>Hover</b> a state or transition to find the line that declares it, or a line to find what it draws. Every drawing on this page is scav\'s own output.' });
     var names = ['estop', 'led', 'brew', 'tcp', 'toolchanger', 'bottler'];
     var row = SX.el('div', { class: 'fig-row' });
     var left = SX.el('div', { style: { flex: '1.6 1 420px' } }), right = SX.el('div', { style: { flex: '1 1 300px' } });
@@ -237,7 +238,7 @@ SX.register('intro', function (sec) {
   // ---- anatomy: the parts of a real chart, labelled ----
   (function () {
     var host = sec.querySelector('[data-fig="intro-anatomy"]');
-    var f = SX.figure(host, { caption: '<b>Hover</b> or <b>click</b> a part or its numbered badge to highlight it and read what it is. No chart has every part: only <code>brew</code> has a final state and an internal transition, and <code>tcp</code>\'s transitions leave a concurrent region through ports. Dashed outlines are layout output the renderer does not draw: submachine rectangles and placed label boxes.' });
+    var f = SX.figure(host, { caption: '<b>Hover</b> or <b>click</b> a part to highlight it. Switch charts: only <code>brew</code> has a final and an internal transition, only <code>tcp</code> has ports.' });
     var PARTS = [
       { key: 'composite', name: 'composite state' },
       { key: 'region', name: 'region (submachine)' },
@@ -252,24 +253,24 @@ SX.register('intro', function (sec) {
     ];
     var DEF = {
       brew: {
-        composite: { states: [3], text: '<b>Composite state.</b> <code>Brewing</code> holds two submachines, <code>water</code> and <code>grinder</code>, so it is concurrent. Its box is its packed submachines, plus the bands for its name and text, plus a 128-unit pad all round.' },
-        region: { subs: [1, 2], text: '<b>Region.</b> One submachine of a concurrent state, laid out as its own <a href="#decompose">frame</a>. The dashed rectangles are layout\'s submachine rectangles (<code>scav.geom.sub</code>), which the renderer does not draw.' },
-        divider: { subdraw: [2], text: '<b>Region divider.</b> The dashed line between two regions of a concurrent state, drawn midway across the 192-unit gap (<code>sub_sep</code>) the packer leaves between sibling submachines.' },
-        initial: { states: [8, 9, 10], text: '<b>Initial pseudostate.</b> A filled disc, created by <code>trans * -&gt; Off</code>. Layout seats it one <code>rank_sep</code> (576 units) before the state it enters, level with it. <code>brew</code> has three, one per submachine with a start.' },
-        choice: { states: [2], text: '<b>Choice pseudostate.</b> <code>state SelfCheck choice</code>, a diamond inside its box. Routes meet it at the middle of a face, never along it.' },
+        composite: { states: [3], text: '<b>Composite state.</b> <code>Brewing</code> holds two submachines, so it is concurrent. Its box is its packed submachines, its text bands and a 128-unit pad.' },
+        region: { subs: [1, 2], text: '<b>Region.</b> One submachine of a concurrent state, laid out as its own <a href="#decompose">frame</a>. The renderer does not draw the dashed rectangle.' },
+        divider: { subdraw: [2], text: '<b>Region divider.</b> Drawn midway across the 192-unit gap (<code>sub_sep</code>) between sibling regions.' },
+        initial: { states: [8, 9, 10], text: '<b>Initial pseudostate.</b> Created by <code>trans * -&gt; Off</code>; seated one <code>rank_sep</code> before the state it enters, level with it.' },
+        choice: { states: [2], text: '<b>Choice pseudostate.</b> A diamond in its box; routes meet it at a face midpoint.' },
         final: { states: [11], text: '<b>Final pseudostate.</b> <code>trans Standby -&gt; * "descale overdue"</code> creates one, drawn as a ringed disc.' },
-        label: { trans: [9], boxes: [9], text: '<b>Transition label.</b> A box the application requested (a <code>PathBox</code>), hung off one leg of its route by a 96-unit leader. The dashed outline is the placed box; see <a href="#labels">labels</a>.' },
-        internal: { trans: [6], text: '<b>Internal transition.</b> <code>trans internal Pumping -&gt; Pumping "pressure adjust"</code> never crosses <code>Pumping</code>\'s border, so it has no route: it is drawn as text in the band the application reserved below the state\'s name (<code>h_after</code>).' }
+        label: { trans: [9], boxes: [9], text: '<b>Transition label.</b> A requested box (<code>PathBox</code>) hung off its route by a 96-unit leader. The dashed outline is the placed box.' },
+        internal: { trans: [6], text: '<b>Internal transition.</b> It never crosses <code>Pumping</code>\'s border, so it has no route; it is drawn as text in the state\'s lower band.' }
       },
       tcp: {
-        composite: { states: [4], text: '<b>Composite state.</b> <code>Established</code> holds <code>inbound</code> and <code>outbound</code>. The two halves of a connection close independently, so it is concurrent.' },
-        region: { subs: [1, 2], text: '<b>Region.</b> One submachine of a concurrent state, laid out as its own <a href="#decompose">frame</a>. The dashed rectangles are layout\'s submachine rectangles (<code>scav.geom.sub</code>), which the renderer does not draw.' },
-        divider: { subdraw: [2], text: '<b>Region divider.</b> The dashed line between <code>inbound</code> and <code>outbound</code>, midway across the 192-unit gap between sibling submachines.' },
+        composite: { states: [4], text: '<b>Composite state.</b> <code>Established</code> holds <code>inbound</code> and <code>outbound</code>, which close independently, so it is concurrent.' },
+        region: { subs: [1, 2], text: '<b>Region.</b> One submachine of a concurrent state, laid out as its own <a href="#decompose">frame</a>. The renderer does not draw the dashed rectangle.' },
+        divider: { subdraw: [2], text: '<b>Region divider.</b> Drawn midway across the 192-unit gap (<code>sub_sep</code>) between sibling regions.' },
         initial: { states: [11, 12, 13], text: '<b>Initial pseudostate.</b> One per <code>trans * -&gt; …</code>. Each region has its own, and so does the root.' },
         choice: { states: [9], text: '<b>Choice pseudostate.</b> <code>state Closing choice</code>. Both halves of the connection arrive here from inside <code>Established</code>.' },
-        port: { ports: [11, 12], trans: [11, 12], text: '<b>Port.</b> Where a route crosses a composite\'s border. <a href="#decompose">Phase 0</a> cuts <code>HalfClosed → Closing</code> here into two segments, one inside the <code>inbound</code> region and one in the root. Layout reports each as a port slot <code>{x, y, side, depth}</code>; these two sit on side 3 (bottom) of a depth-0 border.' },
-        label: { trans: [13], boxes: [13], text: '<b>Transition label.</b> A box the application requested (a <code>PathBox</code>), hung off one leg of its route by a 96-unit leader. The dashed outline is the placed box; see <a href="#labels">labels</a>.' },
-        crossing: { trans: [11, 12], text: '<b>Hierarchy-crossing transitions.</b> <code>HalfClosed</code> and <code>FinSent</code> sit in the two regions of <code>Established</code>, and <code>Closing</code> is at the root. <code>FinSent</code> is in the second region: this is the transition PlantUML cannot express.' }
+        port: { ports: [11, 12], trans: [11, 12], text: '<b>Port.</b> Where a route crosses a composite\'s border; <a href="#decompose">decomposition</a> cuts the route into segments here. Reported as a slot <code>{x, y, side, depth}</code>.' },
+        label: { trans: [13], boxes: [13], text: '<b>Transition label.</b> A requested box (<code>PathBox</code>) hung off its route by a 96-unit leader. The dashed outline is the placed box.' },
+        crossing: { trans: [11, 12], text: '<b>Hierarchy-crossing transitions.</b> From both regions of <code>Established</code> to <code>Closing</code> at the root. PlantUML cannot express the one from the second region.' }
       }
     };
     var which = 'brew', sticky = null, h = null, c = null, badgeG = null;
