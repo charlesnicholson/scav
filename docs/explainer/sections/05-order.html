@@ -133,7 +133,7 @@
         var top = stack[stack.length - 1];
         if (top.next === out[top.node].length) { color[top.node] = 2; stack.pop(); ev.push({ t: 'done', v: top.node }); continue; }
         var k = out[top.node][top.next++], e = E[k];
-        if (color[e.dst] === 1) { e.reversed = true; var t2 = e.src; e.src = e.dst; e.dst = t2; ev.push({ t: 'back', k: k, v: e.src }); continue; }
+        if (color[e.dst] === 1) { e.reversed = !e.reversed; var t2 = e.src; e.src = e.dst; e.dst = t2; ev.push({ t: 'back', k: k, v: e.src }); continue; }
         if (color[e.dst] === 0) { color[e.dst] = 1; stack.push({ node: e.dst, next: 0 }); ev.push({ t: 'tree', k: k, v: e.dst }); }
         else ev.push({ t: 'skip', k: k });
       }
@@ -223,7 +223,7 @@
 
     // Edge k's name in the direction it runs: against its arrow while `flip` is set.
     function nm(T, k, flip) { var t = T.edges[k].t; return flip ? t.split(' → ').reverse().join(' → ') : t; }
-    var BY = { pin: 'its pin', dfs: 'the walk', both: 'its pin, then back by the walk' };
+    var BY = { pin: 'its pin', dfs: 'the walk' };
 
     function build() {
       var T = TOYS[key], n = T.nodes.length;
@@ -238,8 +238,8 @@
         else if (e.t === 'root') { s.color[e.v] = 1; s.stack.push(e.v); s.msg = 'Root ' + T.nodes[e.v].name + ' (the first unvisited node in document order) goes on the stack.'; }
         else if (e.t === 'tree') { s.color[e.v] = 1; s.stack.push(e.v); s.cur = e.k; s.msg = 'Edge ' + nm(T, e.k, was) + ' reaches an unvisited node: ' + T.nodes[e.v].name + ' goes on the stack.'; }
         else if (e.t === 'back') {
-          s.flip[e.k] = !was; s.rev[e.k] = was ? 'both' : 'dfs'; s.cur = e.k;
-          s.msg = 'Edge ' + nm(T, e.k, was) + ' points at ' + T.nodes[e.v].name + ', still on the stack: a back edge, so it is flipped' + (was ? ' back to ' + nm(T, e.k, false) + ', its authored direction. scav still marks it reversed.' : ' to ' + nm(T, e.k, true) + ' and marked reversed.');
+          s.flip[e.k] = !was; if (was) delete s.rev[e.k]; else s.rev[e.k] = 'dfs'; s.cur = e.k;
+          s.msg = 'Edge ' + nm(T, e.k, was) + ' points at ' + T.nodes[e.v].name + ', still on the stack: a back edge, so it is flipped' + (was ? ' back to ' + nm(T, e.k, false) + ', its authored direction, and is not marked reversed.' : ' to ' + nm(T, e.k, true) + ' and marked reversed.');
         }
         else if (e.t === 'skip') { s.cur = e.k; s.msg = 'Edge ' + nm(T, e.k, was) + ' reaches a finished node: nothing to do.'; }
         else if (e.t === 'done') { s.color[e.v] = 2; s.stack.pop(); s.msg = T.nodes[e.v].name + ' has no out-edges left: finished.'; }

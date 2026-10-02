@@ -929,6 +929,84 @@ TEST_CASE("order: turning an edge the walk would turn anyway changes nothing") {
   CHECK(same.edges == plain.edges);
 }
 
+TEST_CASE("order: an edge a pin turns and the walk turns back is not marked reversed") {
+  // Turning `A -> B` closes `A -> C -> D -> B -> A`, which the walk breaks at the pinned
+  // edge.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
+  StateId const e{ build_state(c, root, "D", StateKind::Normal, {}) };
+  TransId const ab{ build_trans(c, a, b, TransKind::External, {}) };
+  build_trans(c, a, d, TransKind::External, {});
+  build_trans(c, d, e, TransKind::External, {});
+  build_trans(c, e, b, TransKind::External, {});
+  build_trans(c, b, a, TransKind::External, {});
+  SplitGraph const g{ decompose(c) };
+  SearchPins const pin{ .reverses = { { .trans = ab, .leg = 0 } } };
+  SubmachineOrders const o{ order_submachines(c, g, {}, profile(), 0, pin) };
+  REQUIRE(node_of(o, a).rank < node_of(o, b).rank);  // turned back to its authored way
+  uint32_t legs{ 0 };
+  for (OrderEdge const &oe : o.edges) {
+    if (oe.segment != g.trans_segments[ab.v].off) { continue; }
+    CHECK(oe.reversed == 0);
+    ++legs;
+  }
+  CHECK(legs == 3);  // A to B spans three ranks
+}
+
+TEST_CASE(
+    "order: an edge is marked reversed exactly where it runs against its authoring") {
+  // Every corpus chart, unpinned and with each segment on a cycle pinned turned in turn.
+  constexpr std::array<char const *, 11> CHARTS{
+    "axis.scav", "bottler.scav", "brew.scav", "dock.scav",        "estop.scav", "led.scav",
+    "mill.scav", "ota.scav",     "tcp.scav",  "toolchanger.scav", "vac.scav"
+  };
+  for (char const *name : CHARTS) {
+    std::string const chart{ name };
+    CAPTURE(chart);
+    std::string const path{ SCAV_TEST_DATA_DIR "/charts/" + chart };
+    Loader loader;
+    Chart c;
+    std::vector<Diagnostic> diags;
+    std::string failed;
+    REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
+    SplitGraph const g{ decompose(c) };
+    SubmachineOrders const plain{ order_submachines(c, g, {}, profile()) };
+    std::vector<SearchPins> runs{ SearchPins{} };
+    for (uint32_t seg = 0; seg < g.segments.size(); ++seg) {
+      if (plain.seg_cyclic[seg] == 0) { continue; }
+      TransId const t{ g.segments[seg].trans };
+      runs.push_back(
+          { .reverses = { { .trans = t, .leg = seg - g.trans_segments[t.v].off } } });
+    }
+    uint32_t checked{ 0 };
+    for (SearchPins const &pins : runs) {
+      uint32_t const turned{ pins.reverses.empty() ? INVALID : pins.reverses[0].trans.v };
+      CAPTURE(turned);
+      SubmachineOrders const o{ order_submachines(c, g, {}, profile(), 0, pins) };
+      for (OrderEdge const &oe : o.edges) {
+        SplitSegment const &sg{ g.segments[oe.segment] };
+        if ((sg.src_port != INVALID) || (sg.dst_port != INVALID) || (sg.src_inner != 0) ||
+            (sg.dst_inner != 0)) {
+          continue;
+        }
+        Transition const &t{ c.transitions[sg.trans.v] };
+        uint32_t const from{ o.state_node[t.src.v] };
+        uint32_t const to{ o.state_node[t.dst.v] };
+        if ((from == INVALID) || (to == INVALID) ||
+            (o.nodes[from].rank == o.nodes[to].rank)) {
+          continue;
+        }
+        CHECK(oe.reversed == ((o.nodes[from].rank > o.nodes[to].rank) ? 1U : 0U));
+        ++checked;
+      }
+    }
+    CHECK(checked > 0);
+  }
+}
+
 TEST_CASE("order: a segment on a cycle is reported, and one on none is not") {
   // What 11.10f's reversals are drawn from: an edge whose two ends share a
   // strongly connected component of the frame's graph as drawn, before any edge

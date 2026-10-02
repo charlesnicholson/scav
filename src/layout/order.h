@@ -30,7 +30,7 @@ struct OrderNode {
 };
 
 // Always between adjacent ranks; longer spans were chained through `Bend` first.
-// `reversed` marks an edge flipped dst-to-src to make the frame acyclic.
+// `reversed` marks an edge that runs dst-to-src, against its authoring.
 struct OrderEdge {
   uint32_t src, dst;  // -> nodes
   uint32_t segment;   // -> SplitGraph::segments

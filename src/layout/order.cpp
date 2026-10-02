@@ -345,7 +345,7 @@ void orient_acyclic(Frame &f,
       }
       OrderEdge &e{ f.edges[out.edge[stack.back().next++]] };
       if (color[e.dst] == Gray) {
-        e.reversed = 1;
+        e.reversed ^= 1U;  // an edge a pin turned and the walk turns back runs as authored
         trace_emit({ .kind = TraceKind::EdgeReversed, .seg = { .seg = e.segment } });
         uint32_t const swap{ e.src };
         e.src = e.dst;

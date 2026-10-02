@@ -290,7 +290,7 @@ void route_transitions(Routes &out,
       return o.nodes[a].rank < o.nodes[b].rank;
     });
     // Ranks climb in the acyclic direction, which is the authored one only
-    // when the segment's edge was not reversed to break a cycle.
+    // when the segment's edge is not reversed.
     if (seg_reversed[seg] != 0) {
       for (uint32_t i = 0; i < (chain.size() / 2); ++i) {
         uint32_t const other{ chain[i] };

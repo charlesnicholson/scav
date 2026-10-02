@@ -2140,11 +2140,15 @@ bool layout_run(Chart &c,
           if ((here.seg_cyclic[seg] == 0) || (turned[seg] != 0)) { continue; }
           TransId const t{ g.segments[seg].trans };
           if ((t.v == INVALID) || (t.v >= g.trans_segments.size())) { continue; }
+          uint32_t const leg{ seg - g.trans_segments[t.v].off };
+          if (std::ranges::any_of(held[best].reverses, [t, leg](ReversePin const &had) {
+                return (had.trans.v == t.v) && (had.leg == leg);
+              })) {
+            continue;  // pinned and turned back by the walk: pinning it again is a no-op
+          }
           if (kick_scored >= budget) { break; }
           ++kick_scored;
-          vec_push_back(
-              kicks,
-              { .reverse = { .trans = t, .leg = seg - g.trans_segments[t.v].off } });
+          vec_push_back(kicks, { .reverse = { .trans = t, .leg = leg } });
           vec_push_back(kick_frame, g.segments[seg].frame.v);
         }
         for (uint32_t m = 0; turns && (m < here.sub_ranks.size()); ++m) {
