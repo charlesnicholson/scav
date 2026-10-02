@@ -68,7 +68,13 @@ Chrome:
 node docs/explainer/check_interactions.mjs --jobs 6
 ```
 
-It finds every listener the page binds, cross-checked against DevTools' own list, and
+It first loads the page fresh for each section and checks that one click on its
+contents link, and a URL ending in its `#anchor`, both put the section's top at its
+16 px scroll margin. Every section draws at load, after the theme is set: a figure
+drawn later changes the page's height under a scroll already aimed, and a figure
+drawn before the theme has the wrong colours.
+
+Then it finds every listener the page binds, cross-checked against DevTools' own list, and
 every button and input. Each element is scrolled into view and hit-tested at points
 inside its own fill or stroke, so a mark that a label, overlay or another mark covers
 is reported, not tested at a point that misses it. Then it hovers (a tooltip with
@@ -80,7 +86,8 @@ ways, and types into the filter. Drags run before clicks, and whatever a click r
 (another mode's handles, a stage's overlays) is tested at once; anything an earlier action
 removed before its turn is listed as not reached. Any exception fails the interaction.
 The whole pass runs again after the theme button, which must redraw every figure once
-with the same listeners.
+with the same listeners, and a page loaded under a dark preference must draw exactly
+what the toggle drew.
 
 A drag in a figure that redraws while dragging goes through `SX.drag(e, {onMove, onEnd})`,
 which listens on the window, so replacing the dragged element does not end the drag; read

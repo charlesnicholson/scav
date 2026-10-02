@@ -132,6 +132,16 @@ function pageLib() {
     document.querySelectorAll('[data-fig]').forEach((h) => { o[h.closest('section').id + '/' + h.getAttribute('data-fig')] = h.querySelectorAll('figure.sx-fig').length; });
     return o;
   };
+  H.figPrint = () => {  // FNV-1a of each placeholder's markup
+    const o = {};
+    document.querySelectorAll('[data-fig]').forEach((h) => {
+      let x = 2166136261;
+      const t = h.innerHTML;
+      for (let i = 0; i < t.length; i++) x = Math.imul(x ^ t.charCodeAt(i), 16777619);
+      o[h.closest('section').id + '/' + h.getAttribute('data-fig')] = x >>> 0;
+    });
+    return o;
+  };
   H.failNotes = () => [].map.call(document.querySelectorAll('section.sx p.note'), (p) => p.textContent).filter((t) => /failed to load/.test(t));
   H.listenerCount = () => {
     const o = {};
@@ -313,6 +323,8 @@ const EXPECT = {
   range: 'the value follows the thumb; the drawing updates; every value draws',
   check: 'checks and unchecks; the drawing updates both ways',
   text: 'typing filters; clearing restores',
+  navigate: 'from a fresh load, one click on the contents link lands the section at the top',
+  'deep link': 'the page opened at #section shows that section at the top',
 };
 
 let cdp, errs = [];
@@ -498,13 +510,18 @@ async function one(run, sec, it, kind) {
     pass: !out.bad.length, why: out.bad.join('; '), notes: out.note.join('; ') };
   if (!row.pass) {
     if (p && p.x != null) await call('mark', p.x, p.y);
-    const png = await cdp.send('Page.captureScreenshot', { format: 'png' });
+    row.shot = await shoot();
     await call('unmark');
-    row.shot = `fail-${++shots}.png`;
-    writeFileSync(join(OUT, row.shot), Buffer.from(png.data, 'base64'));
   }
   rows.push(row);
   process.stdout.write(row.pass ? '.' : 'F');
+}
+
+async function shoot() {
+  const png = await cdp.send('Page.captureScreenshot', { format: 'png' });
+  const name = `fail-${++shots}.png`;
+  writeFileSync(join(OUT, name), Buffer.from(png.data, 'base64'));
+  return name;
 }
 
 // Per section: every hover first (they leave state alone), then clicks, drags and controls in
@@ -542,6 +559,52 @@ async function audit(run, sections) {
   }
 }
 
+// A fresh load; about:blank first, so a URL that differs only in its #anchor still loads.
+async function load(hash = '') {
+  for (const url of ['about:blank', pathToFileURL(PAGE).href + hash]) {
+    const loaded = new Promise((ok) => { const off = cdp.on((m) => { if (m.method === 'Page.loadEventFired') { ok(); if (off) off(); } }); });
+    await cdp.send('Page.navigate', { url });
+    await loaded;
+  }
+  await ev(`(${pageLib})()`);
+}
+
+// Each section reached two ways from a fresh load, by one real click on its contents link and by
+// a URL ending in its #anchor; either must put the section's top where scroll-margin-top aims it.
+async function navCheck(sections) {
+  const landed = async (id, fig, el, action, t0, e0) => {
+    let last = -1, still = 0;
+    while (Date.now() - t0 < 6000 && still < 8) {
+      await sleep(60);
+      const y = await ev('scrollY');
+      still = y === last ? still + 1 : 0; last = y;
+    }
+    const top = await ev(`Math.round(document.getElementById('${id}').getBoundingClientRect().top) + 0`);  // + 0: CDP sends -0 back as no value
+    const hash = await ev('location.hash');
+    const bad = [];
+    if (!Number.isFinite(top) || Math.abs(top - 16) > 6) bad.push(`section top at ${top} px, not 16`);
+    if (hash !== '#' + id) bad.push(`hash is "${hash}"`);
+    if (errs.length > e0) bad.push(`exception: ${errs[e0].slice(0, 160)}`);
+    rows.push({ run: 'navigation', sec: id, fig, el, key: `${id}|${action}`, action, expected: EXPECT[action],
+      actual: `top ${top} px after ${Date.now() - t0} ms`, pass: !bad.length, why: bad.join('; '), notes: '', shot: bad.length ? await shoot() : undefined });
+    process.stdout.write(bad.length ? 'F' : '.');
+  };
+  for (const id of sections) {
+    await load();
+    const e0 = errs.length;
+    const at = await ev(`(() => { const a = document.querySelector('#toc a[data-for="${id}"]'); if (!a) return null; const r = a.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2, a.textContent]; })()`);
+    if (at) {
+      const t0 = Date.now();
+      await clickAt(at[0], at[1]);
+      await landed(id, '(contents)', `a "${at[2]}"`, 'navigate', t0, e0);
+    }
+    const e1 = errs.length, t1 = Date.now();
+    await load('#' + id);
+    await landed(id, '(address)', '#' + id, 'deep link', t1, e1);
+  }
+  process.stdout.write(' navigation\n');
+}
+
 // DevTools' own listener list against the instrumented one: the inventory misses nothing.
 async function inventoryCheck() {
   const { result } = await cdp.send('Runtime.evaluate', { expression: 'document' });
@@ -556,7 +619,7 @@ function report(meta) {
   const runs = [...new Set(rows.map((r) => r.run))], secs = [...new Set(rows.map((r) => r.sec))];
   const L = ['# Explainer interaction audit', '', `page: \`${PAGE}\`  `, `viewport ${VIEW.w}×${VIEW.h}, Chrome headless, real CDP mouse and keyboard input`, ''];
   L.push(`inventory: DevTools lists ${meta.inventory.devtools} (node, type) listener pairs, the instrumentation ${meta.inventory.instrumented}${meta.inventory.match ? ' (match)' : ' (MISMATCH)'}`, '');
-  if (meta.toggle) L.push(`theme toggle: ${meta.toggle.theme}; figures per placeholder ${meta.toggle.sameFigs ? 'unchanged' : 'CHANGED'}; listeners per section ${meta.toggle.sameListeners ? 'unchanged' : 'CHANGED ' + JSON.stringify(meta.toggle.diff)}; ${meta.toggle.errors.length} exceptions`, '');
+  if (meta.toggle) L.push(`theme toggle: ${meta.toggle.theme}; figures per placeholder ${meta.toggle.sameFigs ? 'unchanged' : 'CHANGED'}; listeners per section ${meta.toggle.sameListeners ? 'unchanged' : 'CHANGED ' + JSON.stringify(meta.toggle.diff)}; ${meta.toggle.errors.length} exceptions; loaded under a dark preference ${meta.toggle.darkLoad.length ? 'DIFFERS at ' + meta.toggle.darkLoad.join(', ') : 'matches'}`, '');
   if (meta.initErrors.length || meta.failNotes.length) L.push(`init: ${meta.initErrors.length} exceptions, ${meta.failNotes.length} failed figures: ${esc([...meta.initErrors, ...meta.failNotes].join('; '))}`, '');
   L.push('| section | ' + runs.map((r) => `${r}: tested | pass | fail`).join(' | ') + ' |', '|---|' + runs.map(() => '---:|---:|---:').join('|') + '|');
   for (const s of secs) L.push(`| ${s} | ` + runs.map((r) => { const x = rows.filter((w) => w.run === r && w.sec === s); return `${x.length} | ${x.filter((w) => w.pass).length} | ${x.filter((w) => !w.pass).length}`; }).join(' | ') + ' |');
@@ -593,13 +656,12 @@ async function main() {
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: VIEW.w, height: VIEW.h, deviceScaleFactor: 1, mobile: false });
   await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'light' }] });
   await cdp.send('Page.addScriptToEvaluateOnNewDocument', { source: `(${instrument})()` });
-  const loaded = new Promise((ok) => cdp.on((m) => { if (m.method === 'Page.loadEventFired') ok(); }));
-  await cdp.send('Page.navigate', { url: pathToFileURL(PAGE).href });
-  await loaded;
-  await ev(`(${pageLib})()`);
+  await load();
   const all = await call('sections');
   const sections = ONLY.length ? all.filter((s) => ONLY.includes(s)) : all;
-  for (const s of all) { await call('scrollTo', s); await frame(); }  // each section inits as it nears the viewport
+  await navCheck(sections);
+  await load();
+  errs.length = 0;
   await frame();
   const meta = { page: PAGE, initErrors: errs.slice(), failNotes: await call('failNotes'), inventory: await inventoryCheck() };
   const figs0 = await call('figCounts'), lis0 = await call('listenerCount');
@@ -610,14 +672,20 @@ async function main() {
     const e0 = errs.length;
     const btn = await ev(`(() => { const r = document.getElementById('theme-btn').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()`);
     await clickAt(...btn); await frame(); await sleep(150); await frame();
-    const figs1 = await call('figCounts'), lis1 = await call('listenerCount');
+    const figs1 = await call('figCounts'), lis1 = await call('listenerCount'), print1 = await call('figPrint');
     const diff = Object.fromEntries(Object.keys(lis0).filter((k) => lis0[k] !== lis1[k]).map((k) => [k, [lis0[k], lis1[k]]]));
     meta.toggle = { theme: await ev(`document.documentElement.getAttribute('data-theme')`), sameFigs: JSON.stringify(figs0) === JSON.stringify(figs1),
       sameListeners: !Object.keys(diff).length, diff, errors: errs.slice(e0), failNotes: await call('failNotes') };
     console.log(`theme toggle ${JSON.stringify(meta.toggle)}`);
     await audit('after theme toggle', sections);
+    // A page loaded under a dark preference draws exactly what the toggle drew.
+    await cdp.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: 'dark' }] });
+    await load();
+    const print0 = await call('figPrint');
+    meta.toggle.darkLoad = Object.keys(print1).filter((k) => sections.includes(k.split('/')[0]) && print0[k] !== print1[k]);
+    console.log(`dark load ${meta.toggle.darkLoad.length ? 'DIFFERS at ' + meta.toggle.darkLoad.join(', ') : 'matches the toggle'}`);
   }
-  const nf = report(meta) + (meta.initErrors.length ? 1 : 0) + (meta.toggle && (!meta.toggle.sameFigs || !meta.toggle.sameListeners || meta.toggle.errors.length || meta.toggle.theme !== 'dark') ? 1 : 0);
+  const nf = report(meta) + (meta.initErrors.length ? 1 : 0) + (meta.toggle && (!meta.toggle.sameFigs || !meta.toggle.sameListeners || meta.toggle.errors.length || meta.toggle.darkLoad.length || meta.toggle.theme !== 'dark') ? 1 : 0);
   console.log(`${rows.length} interactions, ${rows.filter((r) => !r.pass).length} failures; report ${join(OUT, 'report.md')}`);
   cleanup();
   process.exit(nf ? 1 : 0);
@@ -642,7 +710,8 @@ async function sharded() {
   parts.flatMap((p) => p.rows).map((r, i) => [r, i]).sort((a, b) => order(a[0]) - order(b[0]) || a[1] - b[1]).forEach(([r]) => rows.push(r));
   const m = parts.map((p) => p.meta), meta = { page: PAGE, initErrors: m.flatMap((x) => x.initErrors), failNotes: m.flatMap((x) => x.failNotes), inventory: m[0].inventory };
   if (m[0].toggle) meta.toggle = { theme: m.every((x) => x.toggle.theme === 'dark') ? 'dark' : 'NOT dark', sameFigs: m.every((x) => x.toggle.sameFigs),
-    sameListeners: m.every((x) => x.toggle.sameListeners), diff: Object.assign({}, ...m.map((x) => x.toggle.diff)), errors: m.flatMap((x) => x.toggle.errors), failNotes: m.flatMap((x) => x.toggle.failNotes) };
+    sameListeners: m.every((x) => x.toggle.sameListeners), diff: Object.assign({}, ...m.map((x) => x.toggle.diff)), errors: m.flatMap((x) => x.toggle.errors), failNotes: m.flatMap((x) => x.toggle.failNotes),
+    darkLoad: m.flatMap((x) => x.toggle.darkLoad) };
   const nf = report(meta);
   console.log(`${rows.length} interactions, ${nf} failures over ${shards.length} browsers; report ${join(OUT, 'report.md')}`);
   process.exit(codes.some(Boolean) ? 1 : 0);

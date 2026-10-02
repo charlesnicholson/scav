@@ -97,7 +97,7 @@ pre { background: var(--surface-2); padding: 12px 14px; border-radius: 8px; over
 #toc a.active { background: var(--surface-2); color: var(--text-primary); font-weight: 600; }
 #toc .tools { margin-top: 18px; display: flex; gap: 8px; }
 main { margin-left: 248px; padding: 32px 48px 120px; }
-section.sx { max-width: 1180px; margin: 0 auto 88px; }
+section.sx { max-width: 1180px; margin: 0 auto 88px; scroll-margin-top: 16px; }
 section.sx > h2 { font-size: 30px; line-height: 1.2; margin: 0 0 6px; letter-spacing: -0.01em; }
 section.sx > .lede { font-size: 18px; color: var(--text-secondary); margin: 0 0 24px; max-width: 760px; }
 section.sx h3 { font-size: 20px; margin: 36px 0 8px; }
@@ -6131,17 +6131,25 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
       var h = s.querySelector('h2');
       list.appendChild(SX.el('li', null, SX.el('a', { href: '#' + s.id, 'data-for': s.id, text: s.getAttribute('data-toc') || (h ? h.textContent : s.id) })));
     });
-    var done = {};
-    var io = new IntersectionObserver(function (ents) {
-      ents.forEach(function (en) {
-        var id = en.target.id;
-        if (en.isIntersecting && !done[id] && inits[id]) {
-          done[id] = true;
-          try { inits[id](en.target); } catch (err) { console.error('section ' + id, err); en.target.appendChild(SX.el('p', { class: 'note', text: 'This figure failed to load: ' + err.message })); }
-        }
-      });
-    }, { rootMargin: '600px 0px' });
-    secs.forEach(function (s) { io.observe(s); });
+    var tb = document.getElementById('theme-btn');
+    function setTheme(t) { document.documentElement.setAttribute('data-theme', t); tb.textContent = t === 'dark' ? 'Light mode' : 'Dark mode'; }
+    // Figures read colour tokens when drawn, so the theme is set before the first draw.
+    if (matchMedia('(prefers-color-scheme: dark)').matches) setTheme('dark');
+    function draw(s) {
+      if (!inits[s.id]) return;
+      [].forEach.call(s.querySelectorAll('[data-fig]'), function (h) { h.innerHTML = ''; });
+      try { inits[s.id](s); } catch (err) {
+        console.error('section ' + s.id, err);
+        (s.querySelector('[data-fig]') || s).appendChild(SX.el('p', { class: 'note', text: 'This figure failed to load: ' + err.message }));
+      }
+    }
+    // Every section draws at load, so the page has its final height before anyone scrolls.
+    secs.forEach(draw);
+    // A link opened with #anchor: the browser scrolled before the figures existed.
+    if (location.hash) setTimeout(function () {
+      var t = document.getElementById(decodeURIComponent(location.hash.slice(1)));
+      if (t) t.scrollIntoView({ block: 'start', behavior: 'instant' });
+    }, 0);
     var spy = new IntersectionObserver(function (ents) {
       ents.forEach(function (en) {
         if (!en.isIntersecting) return;
@@ -6149,18 +6157,10 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
       });
     }, { rootMargin: '-30% 0px -60% 0px' });
     secs.forEach(function (s) { spy.observe(s); });
-    var tb = document.getElementById('theme-btn');
-    function setTheme(t) { document.documentElement.setAttribute('data-theme', t); tb.textContent = t === 'dark' ? 'Light mode' : 'Dark mode'; }
     tb.addEventListener('click', function () {
       setTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
-      // Figures read colour tokens when drawn, so every drawn section is emptied and drawn again.
-      Object.keys(done).forEach(function (id) {
-        var s = document.getElementById(id);
-        [].forEach.call(s.querySelectorAll('[data-fig]'), function (h) { h.innerHTML = ''; });
-        try { inits[id](s); } catch (e) { console.error(e); }
-      });
+      secs.forEach(draw);
     });
-    if (matchMedia('(prefers-color-scheme: dark)').matches) setTheme('dark');
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
 })();
