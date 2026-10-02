@@ -1,6 +1,7 @@
 // The per-frame memos of ordering and sizing against the steps they stand in for. A traced
 // run derives every frame and remembers nothing, which gives the uncached answer.
 
+#include "core/tests/corpus.h"
 #include "layout/decompose.h"
 #include "layout/order.h"
 #include "layout/pack.h"
@@ -234,6 +235,7 @@ TEST_CASE("order memo: a remembered frame is the frame those inputs order to") {
   constexpr uint32_t VARIANTS{ 6 };
   std::vector<uint32_t> moved(VARIANTS, 0);
   for (char const *name : CHARTS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     Chart c;
     load(name, c);
@@ -295,6 +297,7 @@ TEST_CASE("size memo: a remembered frame is the layout those inputs size to") {
   std::vector<uint32_t> moved(VARIANTS, 0);
   std::vector<Scatter> charts;
   for (char const *name : CHARTS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     Scatter x;
     load(name, x.c);
     x.req = requests_for(x.c);
@@ -766,6 +769,7 @@ TEST_CASE("order reuse: a frame taken from the base is the frame its inputs orde
   constexpr uint32_t VARIANTS{ 7 };
   std::vector<uint64_t> taken(VARIANTS, 0);
   for (char const *name : CHARTS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     Chart c;
     load(name, c);

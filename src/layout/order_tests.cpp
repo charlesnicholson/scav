@@ -2,6 +2,7 @@
 // inversion count on its own, then ranks, boundary nodes, bend chains, gap
 // widening, and the sweep that removes a crossing.
 
+#include "core/tests/corpus.h"
 #include "layout/decompose.h"
 #include "layout/order.h"
 #include "scav/scav_core.h"
@@ -964,6 +965,7 @@ TEST_CASE(
     "mill.scav", "ota.scav",     "tcp.scav",  "toolchanger.scav", "vac.scav"
   };
   for (char const *name : CHARTS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     std::string const chart{ name };
     CAPTURE(chart);
     std::string const path{ SCAV_TEST_DATA_DIR "/charts/" + chart };

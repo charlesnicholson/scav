@@ -42,6 +42,13 @@ function(scav_testing_init)
     DOCTEST_CONFIG_NO_EXCEPTIONS_BUT_WITH_ALL_ASSERTS
   )
 
+  set(SCAV_TEST_CORPUS "full" CACHE STRING
+    "Corpus the tests lay out: full | light (all but mill and bottler)")
+  set_property(CACHE SCAV_TEST_CORPUS PROPERTY STRINGS full light)
+  if(NOT SCAV_TEST_CORPUS MATCHES "^(full|light)$")
+    message(FATAL_ERROR "SCAV_TEST_CORPUS=${SCAV_TEST_CORPUS} is not one of full light")
+  endif()
+
   # `rm -rf out/<preset>/stamp` re-runs the suite without rebuilding anything.
   file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/stamp")
 # Tests write scratch under here; a fresh tree must not depend on which test
@@ -55,7 +62,7 @@ endfunction()
 function(scav_test_environment out_var stamp_name)
   # Bare filenames: these strings are colon-separated, so `D:/a/scav` would split
   # at the drive letter. Every test runs from the source directory already.
-  set(env "")
+  set(env "SCAV_TEST_CORPUS=${SCAV_TEST_CORPUS}")
 
   if(SCAV_SANITIZER STREQUAL "ASAN")
     set(opts "abort_on_error=1:strict_string_checks=1:detect_stack_use_after_return=1")

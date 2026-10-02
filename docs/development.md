@@ -173,6 +173,14 @@ same bytes, which is the point: worker count reaches scheduling and nothing
 else. `NULL` is what the `wasm32-wasi` target will use, and building it now is
 how that stays true.
 
+**Debug, sanitizer and coverage presets test a light corpus.** The cache
+variable `SCAV_TEST_CORPUS` is `full` or `light`, and every test reads it from
+the environment variable of the same name. `light` leaves `mill` and `bottler`,
+about 90% of the corpus's layout cost, out of every corpus loop and skips the
+full-corpus `scav selftest` run; the other charts are still compared line by
+line against the same goldens. Release and testable run the full corpus. To
+run it on a light preset, add `-- -DSCAV_TEST_CORPUS=full`.
+
 **Everything generated lives under `out/`.** Build trees, the envy package cache,
 test scratch. `rm -rf out` is a factory reset, and nothing writes to `$HOME`.
 

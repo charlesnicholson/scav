@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""`scav selftest`: the corpus laid out on this toolchain at every thread count
-in the matrix, diffed against the committed goldens.
+"""`scav selftest`: the corpus laid out on this toolchain twice, at threads=1 and
+on the pool, diffed against the committed goldens.
 
 The charts and the goldens are embedded in the executable, so the verb takes no
 paths and the one full-corpus test runs it from a directory that holds neither.
@@ -85,6 +85,8 @@ class TestSelftest(unittest.TestCase):
 
     # The clean run ==========================================================
 
+    @unittest.skipIf(scavtest.corpus_light(),
+                     "SCAV_TEST_CORPUS=light: the embedded corpus includes mill and bottler")
     def test_the_corpus_matches_the_committed_golden_from_an_empty_directory(self) -> None:
         # From an empty directory, so the charts and golden can only be embedded.
         here = self.scratch()

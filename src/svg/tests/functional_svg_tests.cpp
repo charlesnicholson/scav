@@ -8,6 +8,7 @@
 #include "scav/scav_svg.h"
 #include "scav/scav_types.h"
 
+#include "core/tests/corpus.h"
 #include "scav_xxhash.h"
 
 #include "doctest.h"
@@ -106,6 +107,7 @@ TEST_CASE("svg corpus: every chart renders to the committed golden") {
   // for the one chart a human reads.
   std::string actual;
   for (char const *name : CORPUS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     Rendered const &r{ rendered(name) };
     actual += name;
@@ -120,7 +122,8 @@ TEST_CASE("svg corpus: every chart renders to the committed golden") {
 
   std::vector<scav_byte> golden;
   REQUIRE(read_file(SCAV_TEST_DATA_DIR "/golden/svg/corpus.txt", golden));
-  std::string const want{ reinterpret_cast<char const *>(golden.data()), golden.size() };
+  std::string const want{ scav::test::corpus_golden(
+      { reinterpret_cast<char const *>(golden.data()), golden.size() }) };
   if (want != actual) {
     write_file(SCAV_TEST_OUT_DIR "/svg_corpus.txt",
                reinterpret_cast<scav_byte const *>(actual.data()),
@@ -198,7 +201,9 @@ TEST_CASE("svg corpus: the document is stable across repeated renders") {
   // Against the render the cases above read, so the second is the only one
   // this case pays for.
   Metrics const m{ bundled() };
-  CHECK(rendered("mill.scav").doc == render("mill.scav", m, readable()).doc);
+  char const *const name{ scav::test::corpus_skipped("mill.scav") ? "toolchanger.scav"
+                                                                  : "mill.scav" };
+  CHECK(rendered(name).doc == render(name, m, readable()).doc);
 }
 
 TEST_CASE("svg corpus: an embedded font is the only thing --embed-font adds") {
