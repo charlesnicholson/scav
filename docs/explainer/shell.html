@@ -237,6 +237,27 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
     return node;
   };
 
+  // A drag from a pointerdown: moves and the release are heard on the window, so the drag
+  // survives the figure redrawing (and replacing) the element it started on.
+  SX.drag = function (e, o) {
+    e.preventDefault();
+    function mv(ev) { ev.preventDefault(); o.onMove && o.onMove(ev); }
+    function up(ev) {
+      window.removeEventListener('pointermove', mv);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      o.onEnd && o.onEnd(ev);
+    }
+    window.addEventListener('pointermove', mv);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  };
+  // A pointer event's position in an SVG's user units.
+  SX.svgPoint = function (svg, e) {
+    var p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY;
+    return p.matrixTransform(svg.getScreenCTM().inverse());
+  };
+
   // Controls. Each returns {el, set(v), get()} and calls onChange/onStep.
   SX.button = function (label, onClick, cls) { return SX.el('button', { type: 'button', class: cls || '', onclick: onClick, text: label }); };
   SX.slider = function (o) {

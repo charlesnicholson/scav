@@ -111,6 +111,7 @@
     f.ctrl.appendChild(SX.choice({ options: Object.keys(BOXES).map(function (k) { return { value: k, label: BOXES[k].label }; }), value: key, onChange: function (v) { key = v; t = Object.assign({}, BOXES[v].t); draw(); } }).el);
     var out = SX.el('div', { class: 'note' });
     var VB = [-2200, -1250, 4400, 2500];
+    var current = null;
     function draw() {
       var B = BOXES[key], r = B.r, s = U.attach(t, r, B.ins, B.corner);
       var svg = U.root(760, 760 * VB[3] / VB[2]); svg.setAttribute('viewBox', VB.join(' '));
@@ -145,12 +146,14 @@
       U.text(g, lx + 70, ly + 78, 'outside on y: ' + SX.fmt(s.by), {});
       U.text(g, lx, ly + 200, 'face: ' + FACE[s.face] + '   seat (' + s.x + ', ' + s.y + ')', { fontWeight: 700 });
       knob.addEventListener('pointerdown', function (e) {
-        knob.setPointerCapture(e.pointerId);
-        function mv(ev) { var p = U.pt(svg, ev); t = { x: Math.round(Math.max(VB[0], Math.min(VB[0] + VB[2], p.x))), y: Math.round(Math.max(VB[1], Math.min(VB[1] + VB[3], p.y))) }; draw(); }
-        function up() { knob.removeEventListener('pointermove', mv); }
-        knob.addEventListener('pointermove', mv); knob.addEventListener('pointerup', up, { once: true });
+        SX.drag(e, { onMove: function (ev) {
+          var p = SX.svgPoint(current, ev);   // each move redraws, so read the live svg
+          t = { x: Math.round(Math.max(VB[0], Math.min(VB[0] + VB[2], p.x))), y: Math.round(Math.max(VB[1], Math.min(VB[1] + VB[3], p.y))) };
+          draw();
+        } });
       });
       f.stage.innerHTML = ''; f.stage.appendChild(svg); f.stage.appendChild(out);
+      current = svg;
       out.innerHTML = (s.bx >= s.by ? 'x separation ' + SX.fmt(s.bx) + ' ≥ y separation ' + SX.fmt(s.by) + (s.bx === s.by ? ' (a tie goes to x, the layering axis)' : '') + ', so the end leaves sideways' : 'y separation ' + SX.fmt(s.by) + ' > x separation ' + SX.fmt(s.bx) + ', so the end leaves up or down') + ', by the ' + FACE[s.face] + ' face. ' + (B.ins ? 'Inscribed glyph: the face midpoint.' : 'Inset off each corner: min(max(clear 96, corner ' + B.corner + '), half the face) = ' + inset + '.');
     }
     draw();

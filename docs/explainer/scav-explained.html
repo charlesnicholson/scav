@@ -5803,6 +5803,27 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
     return node;
   };
 
+  // A drag from a pointerdown: moves and the release are heard on the window, so the drag
+  // survives the figure redrawing (and replacing) the element it started on.
+  SX.drag = function (e, o) {
+    e.preventDefault();
+    function mv(ev) { ev.preventDefault(); o.onMove && o.onMove(ev); }
+    function up(ev) {
+      window.removeEventListener('pointermove', mv);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      o.onEnd && o.onEnd(ev);
+    }
+    window.addEventListener('pointermove', mv);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  };
+  // A pointer event's position in an SVG's user units.
+  SX.svgPoint = function (svg, e) {
+    var p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY;
+    return p.matrixTransform(svg.getScreenCTM().inverse());
+  };
+
   // Controls. Each returns {el, set(v), get()} and calls onChange/onStep.
   SX.button = function (label, onClick, cls) { return SX.el('button', { type: 'button', class: cls || '', onclick: onClick, text: label }); };
   SX.slider = function (o) {
@@ -6718,12 +6739,19 @@ SX.register('pipeline', function (sec) {
         if (cur === 'size') info.innerHTML = '<b>Phase 2</b> sizes frames bottom-up. <code>water</code> was too wide for its aspect target, so it is <b>folded</b> and its two pieces (orange) packed; blue dots are placed nodes. Chart: ' + SX.fmt(ST.sizing.box[2]) + ' × ' + SX.fmt(ST.sizing.box[3]) + ' units.';
         else info.innerHTML = '<b>The facing pass</b> turns ports toward their route\'s far end and reruns phases 1 and 2 if any turned. <code>brew</code> has no ports, so sizing ran once.';
       } else if (cur === 'route') {
+        var seatsAt = {}, seatOrder = [];   // seats landing on one point share one dot and one tooltip
         ST.routing.nets.forEach(function (n) {
           tip(h.line([n.src, n.dst], { stroke: 'var(--hl-2)', 'stroke-width': u * 2, 'stroke-dasharray': (u * 6) + ' ' + (u * 5) }), '<b>net planned</b> for “' + (G.trans[n.trans].label || G.trans[n.trans].src_path + ' → ' + G.trans[n.trans].dst_path) + '”<br><span class="m">between node centres, before seating</span>');
           n.seats.forEach(function (st) {
-            var col = st.pass === 'attach' ? 'var(--hl)' : 'var(--series-5)';
-            tip(h.dot(st.to, u * (st.pass === 'attach' ? 4 : 6), { fill: col }), '<b>seat, ' + st.pass + ' pass</b><br>' + st.end + ' end moved to (' + st.to.join(', ') + ')');
+            var k = st.to.join(',');
+            if (!seatsAt[k]) { seatsAt[k] = []; seatOrder.push(k); }
+            seatsAt[k].push(st);
           });
+        });
+        seatOrder.forEach(function (k) {
+          var list = seatsAt[k], later = list.some(function (st) { return st.pass !== 'attach'; });
+          tip(h.dot(list[0].to, u * (later ? 6 : 4), { fill: later ? 'var(--series-5)' : 'var(--hl)' }),
+            '<b>seat at (' + list[0].to.join(', ') + ')</b><br>' + list.map(function (st) { return st.pass + ' pass: ' + st.end + ' end'; }).join('<br>'));
         });
         info.innerHTML = '<b>Phase 3</b> plans one net per segment between centres (dashed blue), seats each end on a face (orange: first pass; pink: later passes), then finds each path with A* and nudges parallel lanes apart.';
       } else if (cur === 'labels') {
@@ -8126,6 +8154,7 @@ SX.register('decompose', function (sec) {
     f.ctrl.appendChild(SX.choice({ options: Object.keys(BOXES).map(function (k) { return { value: k, label: BOXES[k].label }; }), value: key, onChange: function (v) { key = v; t = Object.assign({}, BOXES[v].t); draw(); } }).el);
     var out = SX.el('div', { class: 'note' });
     var VB = [-2200, -1250, 4400, 2500];
+    var current = null;
     function draw() {
       var B = BOXES[key], r = B.r, s = U.attach(t, r, B.ins, B.corner);
       var svg = U.root(760, 760 * VB[3] / VB[2]); svg.setAttribute('viewBox', VB.join(' '));
@@ -8160,12 +8189,14 @@ SX.register('decompose', function (sec) {
       U.text(g, lx + 70, ly + 78, 'outside on y: ' + SX.fmt(s.by), {});
       U.text(g, lx, ly + 200, 'face: ' + FACE[s.face] + '   seat (' + s.x + ', ' + s.y + ')', { fontWeight: 700 });
       knob.addEventListener('pointerdown', function (e) {
-        knob.setPointerCapture(e.pointerId);
-        function mv(ev) { var p = U.pt(svg, ev); t = { x: Math.round(Math.max(VB[0], Math.min(VB[0] + VB[2], p.x))), y: Math.round(Math.max(VB[1], Math.min(VB[1] + VB[3], p.y))) }; draw(); }
-        function up() { knob.removeEventListener('pointermove', mv); }
-        knob.addEventListener('pointermove', mv); knob.addEventListener('pointerup', up, { once: true });
+        SX.drag(e, { onMove: function (ev) {
+          var p = SX.svgPoint(current, ev);   // each move redraws, so read the live svg
+          t = { x: Math.round(Math.max(VB[0], Math.min(VB[0] + VB[2], p.x))), y: Math.round(Math.max(VB[1], Math.min(VB[1] + VB[3], p.y))) };
+          draw();
+        } });
       });
       f.stage.innerHTML = ''; f.stage.appendChild(svg); f.stage.appendChild(out);
+      current = svg;
       out.innerHTML = (s.bx >= s.by ? 'x separation ' + SX.fmt(s.bx) + ' ≥ y separation ' + SX.fmt(s.by) + (s.bx === s.by ? ' (a tie goes to x, the layering axis)' : '') + ', so the end leaves sideways' : 'y separation ' + SX.fmt(s.by) + ' > x separation ' + SX.fmt(s.bx) + ', so the end leaves up or down') + ', by the ' + FACE[s.face] + ' face. ' + (B.ins ? 'Inscribed glyph: the face midpoint.' : 'Inset off each corner: min(max(clear 96, corner ' + B.corner + '), half the face) = ' + inset + '.');
     }
     draw();
@@ -8591,17 +8622,20 @@ SX.register('labels', function (sec) {
     }
     var drag = null;
     function toSvg(e) { var pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; return pt.matrixTransform(svg.getScreenCTM().inverse()); }
-    svg.addEventListener('pointermove', function (e) {
+    function moveTo(e) {
       if (!drag) return;
       var p = toSvg(e), dx = p.x - drag.x, dy = p.y - drag.y;
       if (drag.what === 'bend') { P.bx = Math.round(Math.max(90, Math.min(220, drag.o[0] + dx))); P.by = Math.round(Math.max(94, Math.min(142, drag.o[1] + dy))); }
       if (drag.what === 'F') { P.F = [Math.round(Math.max(20, Math.min(780 - P.F[2], drag.o[0] + dx))), Math.round(Math.max(20, Math.min(400 - P.F[3], drag.o[1] + dy))), P.F[2], P.F[3]]; }
       if (drag.what === 'R') { P.rx = Math.round(Math.max(-220, Math.min(250, drag.o[0] + dx))); P.ry = Math.round(Math.max(30, Math.min(390, drag.o[1] + dy))); }
       draw();
-    });
-    svg.addEventListener('pointerup', function () { drag = null; });
-    svg.addEventListener('pointerleave', function () { drag = null; });
-    function grab(what, o) { return function (e) { var p = toSvg(e); drag = { what: what, x: p.x, y: p.y, o: o() }; e.preventDefault(); }; }
+    }
+    function grab(what, o) {
+      return function (e) {
+        var p = toSvg(e); drag = { what: what, x: p.x, y: p.y, o: o() };
+        SX.drag(e, { onMove: moveTo, onEnd: function () { drag = null; } });
+      };
+    }
 
     function draw() {
       var sc = scene(), res = place(sc);

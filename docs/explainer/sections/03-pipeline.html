@@ -142,12 +142,19 @@ SX.register('pipeline', function (sec) {
         if (cur === 'size') info.innerHTML = '<b>Phase 2</b> sizes frames bottom-up. <code>water</code> was too wide for its aspect target, so it is <b>folded</b> and its two pieces (orange) packed; blue dots are placed nodes. Chart: ' + SX.fmt(ST.sizing.box[2]) + ' × ' + SX.fmt(ST.sizing.box[3]) + ' units.';
         else info.innerHTML = '<b>The facing pass</b> turns ports toward their route\'s far end and reruns phases 1 and 2 if any turned. <code>brew</code> has no ports, so sizing ran once.';
       } else if (cur === 'route') {
+        var seatsAt = {}, seatOrder = [];   // seats landing on one point share one dot and one tooltip
         ST.routing.nets.forEach(function (n) {
           tip(h.line([n.src, n.dst], { stroke: 'var(--hl-2)', 'stroke-width': u * 2, 'stroke-dasharray': (u * 6) + ' ' + (u * 5) }), '<b>net planned</b> for “' + (G.trans[n.trans].label || G.trans[n.trans].src_path + ' → ' + G.trans[n.trans].dst_path) + '”<br><span class="m">between node centres, before seating</span>');
           n.seats.forEach(function (st) {
-            var col = st.pass === 'attach' ? 'var(--hl)' : 'var(--series-5)';
-            tip(h.dot(st.to, u * (st.pass === 'attach' ? 4 : 6), { fill: col }), '<b>seat, ' + st.pass + ' pass</b><br>' + st.end + ' end moved to (' + st.to.join(', ') + ')');
+            var k = st.to.join(',');
+            if (!seatsAt[k]) { seatsAt[k] = []; seatOrder.push(k); }
+            seatsAt[k].push(st);
           });
+        });
+        seatOrder.forEach(function (k) {
+          var list = seatsAt[k], later = list.some(function (st) { return st.pass !== 'attach'; });
+          tip(h.dot(list[0].to, u * (later ? 6 : 4), { fill: later ? 'var(--series-5)' : 'var(--hl)' }),
+            '<b>seat at (' + list[0].to.join(', ') + ')</b><br>' + list.map(function (st) { return st.pass + ' pass: ' + st.end + ' end'; }).join('<br>'));
         });
         info.innerHTML = '<b>Phase 3</b> plans one net per segment between centres (dashed blue), seats each end on a face (orange: first pass; pink: later passes), then finds each path with A* and nudges parallel lanes apart.';
       } else if (cur === 'labels') {

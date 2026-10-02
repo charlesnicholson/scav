@@ -74,10 +74,17 @@ inside its own fill or stroke, so a mark that a label, overlay or another mark c
 is reported, not tested at a point that misses it. Then it hovers (a tooltip with
 sensible text or a highlight, gone on leave), clicks (the drawing or the control
 changes; a choice moves its `on` state; a stepper steps, plays and pauses), drags (the
-mark follows the pointer and the drawing updates), drags each slider's thumb and sets
-every value, toggles each checkbox both ways, and types into the filter. Any exception
-fails the interaction. The whole pass runs again after the theme button, which must
-redraw every figure once with the same listeners.
+mark follows the pointer through every step, not just the first, and the drawing
+updates), drags each slider's thumb and sets every value, toggles each checkbox both
+ways, and types into the filter. Drags run before clicks, and whatever a click reveals
+(another mode's handles, a stage's overlays) is tested at once; anything an earlier action
+removed before its turn is listed as not reached. Any exception fails the interaction.
+The whole pass runs again after the theme button, which must redraw every figure once
+with the same listeners.
+
+A drag in a figure that redraws while dragging goes through `SX.drag(e, {onMove, onEnd})`,
+which listens on the window, so replacing the dragged element does not end the drag; read
+pointer positions with `SX.svgPoint(svg, e)` against the svg currently on the page.
 
 It writes `report.md` (counts by section, failures with screenshots, every
 interaction) and `results.json` to `--out` (default `$TMPDIR/sx-interactions`) and exits

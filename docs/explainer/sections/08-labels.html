@@ -126,17 +126,20 @@ SX.register('labels', function (sec) {
     }
     var drag = null;
     function toSvg(e) { var pt = svg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; return pt.matrixTransform(svg.getScreenCTM().inverse()); }
-    svg.addEventListener('pointermove', function (e) {
+    function moveTo(e) {
       if (!drag) return;
       var p = toSvg(e), dx = p.x - drag.x, dy = p.y - drag.y;
       if (drag.what === 'bend') { P.bx = Math.round(Math.max(90, Math.min(220, drag.o[0] + dx))); P.by = Math.round(Math.max(94, Math.min(142, drag.o[1] + dy))); }
       if (drag.what === 'F') { P.F = [Math.round(Math.max(20, Math.min(780 - P.F[2], drag.o[0] + dx))), Math.round(Math.max(20, Math.min(400 - P.F[3], drag.o[1] + dy))), P.F[2], P.F[3]]; }
       if (drag.what === 'R') { P.rx = Math.round(Math.max(-220, Math.min(250, drag.o[0] + dx))); P.ry = Math.round(Math.max(30, Math.min(390, drag.o[1] + dy))); }
       draw();
-    });
-    svg.addEventListener('pointerup', function () { drag = null; });
-    svg.addEventListener('pointerleave', function () { drag = null; });
-    function grab(what, o) { return function (e) { var p = toSvg(e); drag = { what: what, x: p.x, y: p.y, o: o() }; e.preventDefault(); }; }
+    }
+    function grab(what, o) {
+      return function (e) {
+        var p = toSvg(e); drag = { what: what, x: p.x, y: p.y, o: o() };
+        SX.drag(e, { onMove: moveTo, onEnd: function () { drag = null; } });
+      };
+    }
 
     function draw() {
       var sc = scene(), res = place(sc);

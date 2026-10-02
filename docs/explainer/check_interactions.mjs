@@ -334,6 +334,7 @@ async function press(k, code, vk) {
   await cdp.send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code, windowsVirtualKeyCode: vk });
 }
 const errSince = (n) => errs.slice(n);
+const gone = [];   // elements an earlier action removed before their turn: reported, not silently dropped
 const pct = (a, b) => (b ? Math.round(100 * a / b) : 0);
 function blockerText(p) {
   return Object.entries(p.blockers || {}).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([d, n]) => `${d} ×${n}`).join('; ');
@@ -396,12 +397,16 @@ async function testDrag(key, p) {
     await moveTo(p.x, p.y);
     const s0 = await call('watch', key);
     await mouse('mousePressed', p.x, p.y, true); await frame();
-    for (let k = 1; k <= 6; k++) { await mouse('mouseMoved', p.x + dx * k / 6, p.y + dy * k / 6, true); await frame(); }
+    let mFirst = 0;
+    for (let k = 1; k <= 6; k++) {
+      await mouse('mouseMoved', p.x + dx * k / 6, p.y + dy * k / 6, true); await frame();
+      if (k === 1) mFirst = await call('changes');
+    }
     const mid = await call('state', key), mMid = await call('changes');
     await mouse('mouseReleased', p.x + dx, p.y + dy); await frame();
     const m = await call('changes');
     const fx = mid.gone ? null : mid.cx - s0.cx, fy = mid.gone ? null : mid.cy - s0.cy;
-    res = { dx, dy, fx, fy, mMid, m };
+    res = { dx, dy, fx, fy, mMid, m, mFirst };
     if (m) break;
     p = await call('point', key);
     if (!p || p.x == null) break;
@@ -411,6 +416,7 @@ async function testDrag(key, p) {
   let got = `pointer (${res.dx},${res.dy}) → mark (${res.fx == null ? '?' : Math.round(res.fx)},${res.fy == null ? '?' : Math.round(res.fy)}), ${res.mMid} changes mid-drag, ${res.m} total`;
   if (!res.m) bad.push('drag changed nothing in any direction');
   else if (!res.mMid) bad.push('nothing moved until release');
+  else if (res.mFirst && res.mMid === res.mFirst) bad.push('drag stalled after the first move');   // e.g. a redraw dropped the listener
   if (along != null && Math.abs(along) > 2 && Math.abs(along - want) > Math.max(6, 0.35 * Math.abs(want))) note.push('mark does not track the pointer 1:1');
   await moveTo(...NEUTRAL);
   return { bad, note, got };
@@ -473,7 +479,7 @@ async function one(run, sec, it, kind) {
   try {
     if (kind !== 'range') {
       p = await call('point', it.key);
-      if (p.gone) return;                                   // removed by an earlier action; its successor is tested
+      if (p.gone) { gone.push(`${run} ${sec} ${it.fig} ${it.desc} (${kind})`); return; }   // removed by an earlier action
       if (p.x == null) {
         const why = p.livecover && !p.hits && !Object.keys(p.blockers).length ? `covered entirely by other interactive marks`
           : p.mode === 'offscreen' || !(p.n + p.livecover) ? `no visible hit area (${p.mode}, ${it.size.join('×')} px)` : `covered: ${blockerText(p)}`;
@@ -504,6 +510,22 @@ async function one(run, sec, it, kind) {
 // Per section: every hover first (they leave state alone), then clicks, drags and controls in
 // document order. Clicks redraw, so the section is inventoried again afterwards and anything new
 // (another chart's marks, say) is tested too.
+// Whatever a click reveals (another mode's handles, say) is tested at once, before the next
+// click can take it away again.
+async function explore(run, sec, items, seen, depth) {
+  for (const it of items) if (it.kinds.includes('hover')) await one(run, sec, it, 'hover');
+  // Drags before clicks: a click can switch a figure into a mode without the dragged handles.
+  for (const it of items) if (it.kinds.includes('drag')) await one(run, sec, it, 'drag');
+  for (const it of items) for (const kind of it.kinds) {
+    if (kind === 'hover' || kind === 'drag') continue;
+    await one(run, sec, it, kind);
+    if (kind !== 'click' || depth >= 2) continue;
+    const fresh = (await call('discover', sec)).filter((x) => !seen.has(x.key + '#' + x.sig));
+    fresh.forEach((x) => seen.add(x.key + '#' + x.sig));
+    if (fresh.length) await explore(run, sec, fresh, seen, depth + 1);
+  }
+}
+
 async function audit(run, sections) {
   for (const sec of sections) {
     const t0 = Date.now();
@@ -513,8 +535,7 @@ async function audit(run, sections) {
       const items = (await call('discover', sec)).filter((it) => !seen.has(it.key + '#' + it.sig));
       if (!items.length) break;
       items.forEach((it) => seen.add(it.key + '#' + it.sig));
-      for (const it of items) if (it.kinds.includes('hover')) await one(run, sec, it, 'hover');
-      for (const it of items) for (const kind of it.kinds) if (kind !== 'hover') await one(run, sec, it, kind);
+      await explore(run, sec, items, seen, 0);
     }
     await moveTo(...NEUTRAL);
     process.stdout.write(` ${sec} ${((Date.now() - t0) / 1000).toFixed(1)}s\n`);
@@ -547,6 +568,7 @@ function report(meta) {
   const line = (r) => `| ${r.run} | ${r.sec} | ${esc(r.fig)} | ${esc(r.el)} | ${r.action} | ${esc(r.expected)} | ${esc(r.actual)} | ${r.pass ? 'pass' : `**FAIL**: ${esc(r.why)} ([shot](${r.shot}))`}${r.notes ? ` · ${esc(r.notes)}` : ''} |`;
   const fails = rows.filter((r) => !r.pass);
   L.push(`## Failures (${fails.length})`, '', head, sep, ...fails.map(line), '');
+  L.push(`## Not reached (${gone.length})`, '', 'Removed by an earlier action before their turn; a figure whose handles appear here needs its own pass.', '', ...gone.map((g) => `- ${esc(g)}`), '');
   const noted = rows.filter((r) => r.pass && r.notes);
   L.push(`## Passed with notes (${noted.length})`, '', head, sep, ...noted.map(line), '');
   L.push(`## Every interaction (${rows.length})`, '', head, sep, ...rows.map(line), '');
