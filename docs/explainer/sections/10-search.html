@@ -1,41 +1,41 @@
 <section class="sx" id="search" data-toc="10 · The search">
   <div class="kicker">How a drawing is found</div>
   <h2>The search: rows, moves and kicks</h2>
-  <p class="lede">scav does not lay a chart out once. It lays it out thousands of times, each time with slightly different inputs, and ships the cheapest drawing. The search is three nested levels, all deterministic, with no randomness anywhere.</p>
+  <p class="lede">scav lays a chart out thousands of times, each with slightly different inputs, and ships the cheapest drawing; the search is three nested levels, all deterministic, with no randomness.</p>
 
-  <p>The search rests on one fact: <b>a drawing is a pure function of (row, pins)</b>. A <b>row</b> is one setting of four whole-chart knobs for sizing. A <b>pin</b> is one recorded decision that phases 1 to 3 must honour: hold a state at a rank, or make a route leave by a given face. There are seven kinds of pin (<code>SearchPins</code>): rank, cut, reverse, face, orient, side and fold. Pins are <em>inputs</em> to layout, not patches to its output. So trying a move means laying out again with one more pin, and undoing it means laying out with the pins held before. There is no transaction and no rollback. Pins name states and transitions by id, never by node index: chaining renumbers nodes, and an undo keyed by node silently did nothing.</p>
-  <p>The same fact gives a <b>counterfactual</b>. <code>scav dump --layout</code> prints what a drawing rests on, for example <code>--portfolio-row 0 --rank 11:1 --rank 0:0 --reverse 1:0 --face 3:0:1:0 --orient 2</code> for brew. <code>--no-search</code> with those flags reproduces the drawing exactly. Edit one flag to get the drawing a reader wants, then score it on the shipped objective. If it comes out cheaper, the search lacks a move. If it comes out dearer, the objective is wrong.</p>
+  <p>A drawing is a pure function of <b>(row, pins)</b>. A <b>row</b> is one setting of four whole-chart sizing knobs. A <b>pin</b> is one recorded decision that phases 1 to 3 must honour, such as holding a state at a rank or making a route leave by a given face; there are seven kinds (<code>SearchPins</code>): rank, cut, reverse, face, orient, side and fold. Pins are inputs to layout, not patches to its output, so trying a move means laying out again with one more pin, and undoing it means laying out with the previous pins: no transaction, no rollback. Pins name states and transitions by id, never by node index, because chaining renumbers nodes; an undo keyed by node once silently did nothing.</p>
+  <p>This gives a <b>counterfactual</b>. <code>scav dump --layout</code> prints what a drawing rests on, for brew <code>--portfolio-row 0 --rank 11:1 --rank 0:0 --reverse 1:0 --face 3:0:1:0 --orient 2</code>, and <code>--no-search</code> with those flags reproduces it exactly. Edit one flag to get the drawing a reader wants and score it: if it is cheaper, the search lacks a move; if dearer, the objective is wrong.</p>
   <div data-fig="search-structure"></div>
 
   <h3>Level 2: sixteen rows</h3>
-  <p>Level 2 is a fixed table of 16 rows. Row <i>i</i> is the profile with four bits of <i>i</i> flipped:</p>
+  <p>Level 2 is a fixed table of 16 rows. Row <i>i</i> is the profile with the knobs of <i>i</i>'s set bits flipped:</p>
   <table class="sx-table">
     <tr><th>bit</th><th>knob</th><th>0</th><th>1</th><th>what it changes</th></tr>
     <tr><td class="num">0</td><td>box packer</td><td>as the profile says (<code>readable</code> also tries the one-row box packer and keeps it if it scores better)</td><td>flipped (LR-rectpacking alone)</td><td>how components, fold pieces and sibling submachines are packed</td></tr>
-    <tr><td class="num">1</td><td>compaction</td><td>off</td><td>on</td><td>LR-rectpacking's compaction step: each rectangle tries the other three spots and keeps one that does not grow the extent</td></tr>
+    <tr><td class="num">1</td><td>compaction</td><td>off</td><td>on</td><td>LR-rectpacking's <a href="#size">compaction</a> step</td></tr>
     <tr><td class="num">2</td><td>ratio source</td><td>profile (every frame packs toward 16:10)</td><td>owner's hole (each frame packs toward its owner's interior aspect)</td><td>the aspect each frame aims for</td></tr>
     <tr><td class="num">3</td><td>fold</td><td>fold where the scale measure prefers it</td><td>fold wherever a run wraps</td><td>whether long rank runs fold into pieces</td></tr>
   </table>
   <p>Row 0 is the profile as given. The 16 rows are laid out in parallel on the thread pool, each row's layout single-threaded inside it. Every row is scored under the caller's profile, so all rows compare on one scale. If row 0 is not viable, the run fails.</p>
-  <p><b>Every viable row is searched to convergence</b>, through Level 1, kicks and the refold search. The pick is <code>argmin(converged cost)</code>, with ties going to the lower row. Picking by starting cost is wrong. On <code>bottler</code>, the row with the best start (125,283) converges to 77,441. Row 0 starts worse (154,348) but converges to 51,281; the row with the best start ends 51% dearer.</p>
+  <p><b>Every viable row is searched to convergence</b> (Level 1, kicks, refold), and the pick is <code>argmin(converged cost)</code>, ties to the lower row. Picking by starting cost would be wrong: on <code>bottler</code> the row with the best start (125,283) converges to 77,441, while row 0 starts worse (154,348) and converges to 51,281.</p>
   <div data-fig="search-rows"></div>
 
   <h3>Level 1: steepest descent over pins</h3>
-  <p>The <b>incumbent</b> is the current best (row, pins) and its cost. A <b>round</b> of Level 1 lists every move the incumbent allows. Each <b>candidate</b> is the incumbent's pins plus one more, laid out through phases 1 to 3 and scored exactly. The round scores all of them in parallel, then reduces in enumeration order and takes the <b>single best strictly improving</b> move. Ties go to the earliest index. A candidate that is not viable, or that needed the spacing inflation retry, is never taken. Taking a move appends its pin and lays out the new incumbent. The search stops when a round is empty or nothing in it improves.</p>
+  <p>The <b>incumbent</b> is the current best (row, pins) and its cost. A <b>round</b> of Level 1 lists every move the incumbent allows; each <a href="#pipeline">candidate</a> is the incumbent's pins plus one more, laid out and scored exactly. The round scores all of them in parallel, reduces in enumeration order and takes the <b>single best strictly improving</b> move, ties to the earliest index. A candidate that is not viable, or that needed the <a href="#route">inflation retry</a>, is never taken. Taking a move appends its pin and lays out the new incumbent. The search stops when a round is empty or nothing in it improves.</p>
   <table class="sx-table">
     <tr><th>move</th><th>offered for</th><th>its pin</th><th>why it exists</th></tr>
-    <tr><td><b>cut</b></td><td>each segment phase 1 chained through bend nodes</td><td><code>ChainCut</code>: route it freely, not through its waypoints</td><td>58 of 257 transitions carry a phase-1 bend, and they hold 70% of all kinks</td></tr>
+    <tr><td><b>cut</b></td><td>each segment phase 1 chained through bend nodes</td><td><code>ChainCut</code>: route it freely, not through its waypoints</td><td>phase-1 bends hold 70% of the corpus's kinks (<a href="#order">ordering</a>)</td></tr>
     <tr><td><b>reverse</b></td><td>each segment on a cycle in its frame, not already pinned</td><td><code>ReversePin</code>: turn it before cycle breaking, so another edge of the cycle takes the break</td><td>which edge breaks a cycle decides ranks and chaining. On <code>estop</code> it took Tier 2 from 3,073 to 1,502 (historical objective).</td></tr>
     <tr><td><b>face</b></td><td>each leg end of a transition whose route bends or is charged crossings, corridor, crowding, excess or a label term (every end while Tier 0 is broken), × 4 faces</td><td><code>FacePin</code>: leave or enter by left, right, top or bottom</td><td>a local face rule cannot see the turn it buys</td></tr>
     <tr><td><b>side</b></td><td>each leg end whose port sits on a state's border, × the other 3 sides</td><td><code>SidePin</code></td><td>a route arriving from above can then enter from above (<code>axis</code>: 5,685 → 4,645, bends 3 → 1)</td></tr>
-    <tr><td><b>rank</b></td><td>each live, non-initial state, × every other rank of its frame</td><td><code>RankPin</code>: hold it at that rank (emptied ranks are squeezed out)</td><td>which column a state sits in. Rank moves were the first ever to change a state's rank, and they take 68.5% of the search's gross gain.</td></tr>
+    <tr><td><b>rank</b></td><td>each live, non-initial state, × every other rank of its frame</td><td><code>RankPin</code>: hold it at that rank (emptied ranks are squeezed out)</td><td>which column a state sits in; rank moves take 68.5% of the search's gross gain</td></tr>
     <tr><td><b>fold</b> (refold search only)</td><td>each frame drawn folded</td><td><code>FoldPin</code>: which rank the single cut falls before</td><td>where a fold cuts (<code>toolchanger</code> 11,810 → 11,559)</td></tr>
   </table>
   <p>The <b>budget</b> is one counter per move kind, each capped at <code>portfolio_k</code> = 1,024, cumulative over the whole search. The search runs while any counter is under budget. The counters are separate because one shared budget let the first-enumerated kind starve the others: on <code>axis</code>, cuts then ranks under one shared budget of 24 reached 12,702, while separate counters reached 9,940. A face move whose pin cannot change the route is charged to the budget but not scored, since it would draw the incumbent exactly.</p>
   <div data-fig="search-round"></div>
 
   <h3>Kicks: iterated local search</h3>
-  <p>Greedy descent stops in the first basin it finds. Some structural choices only pay off once the search has adapted to them. On <code>estop</code>, when kicks were built, the right reversal scored 3,218 alone, worse than the incumbent's 3,073, so a strictly improving pass never took it; accepted and searched on, it reached 1,502. (Those are the numbers of that day's objective; the drawing ships today at 906.) Simulated annealing's uphill moves were rejected because there is no temperature to calibrate. Instead, a <b>kick</b> applies a perturbation, searches to convergence, and keeps the result only if the <em>converged</em> cost is cheaper.</p>
+  <p>Greedy descent stops in the first basin it finds, and some structural choices pay off only once the search has adapted to them. On <code>estop</code>, under the objective of the time, the right reversal scored 3,218 alone, worse than the incumbent's 3,073, so a strictly improving pass never took it; accepted and searched on, it reached 1,502. Simulated annealing was rejected: there is no temperature to calibrate. Instead, a <b>kick</b> applies a perturbation, searches to convergence, and keeps the result only if the <em>converged</em> cost is cheaper.</p>
   <ul>
     <li><b>Kick kinds.</b> <b>Reversal</b>: reverse each cyclic segment not already reversed. <b>Orient</b>: turn a frame of two or more ranks to run down the page. <b>Fold</b>: flip whether a frame of two or more ranks is drawn folded, if it has no fold pin. Orient and fold are allowed only in rounds "with turns".</li>
     <li><b>Each kick</b> takes a <b>warm start</b>: the incumbent's pins minus the kicked frame's rank, cut, face, side and fold pins, keeping reversals and orientations. It adds the kick's pin and runs a Level 1 search scoped to that frame. All kicks of a round run in parallel.</li>
@@ -52,12 +52,12 @@
 
   <h3>What was tried and rejected</h3>
   <ul>
-    <li><b>In-rank order moves.</b> Adjacent swaps (<code>transpose</code>) improve nothing on any frame: phase-1 crossings read 0 where routed crossings read 87. Readers' crossings happen between routes, not ranks.</li>
+    <li><b>In-rank order moves.</b> Adjacent swaps (<code>transpose</code>) improve nothing: layered crossings are already zero, and readers' crossings come from routing (<a href="#order">ordering</a>).</li>
     <li><b>Screening rows</b> by a short search and finishing only the best: it dropped <code>brew</code>'s best row, whose canvas was 38% smaller. Every row is finished.</li>
     <li><b>Turns and fold flips as greedy moves</b> led into worse basins (a turn made <code>ota</code> 18% dearer; a fold took <code>tcp</code> 2,685 → 3,493). They are kicks instead.</li>
     <li><b>Kick shortcuts</b>, each measured to lose: capping a kick's depth, keeping a kicked frame's pins, screening kicks by starting cost, skipping stale kicks, folding the facing flips into the pins, deduplicating rows at the start.</li>
     <li><b>A frame-mirror move</b>: it reflected the wrong axis on folded frames, cost 15% more evaluations on <code>mill</code>, and took <code>tcp</code> to a basin 36% larger.</li>
-    <li><b>A sound lower bound inside the search</b> prunes nothing, because neighbours are near-ties. (The label bound in the next section works because it bounds only the label half.)</li>
+    <li><b>A sound lower bound inside the search</b> prunes nothing, because neighbours are near-ties (<a href="#fast">measured</a>).</li>
     <li><b>Random restarts</b> of a constructive heuristic do about 2,000× worse than guided search at equal CPU (Martí and Laguna), and generate-and-test metaheuristics manage only 6–54 candidates a second.</li>
   </ul>
 </section>
@@ -131,7 +131,7 @@ window.SXsearchStructure = function (sec) {
 // Figure: brew's 16 Level 2 rows, before and after each row's search.
 window.SXsearchRows = function (sec) {
   var H = SXsearch, B = SX.data('rows').charts.brew, rows = B.rows;
-  var f = SX.figure(sec.querySelector('[data-fig="search-rows"]'), { caption: '<b>Toggle</b> between each row as Level 2 lays it out and each row after its own full search. <b>Hover</b> a cell for its bits and cost. Columns flip the packer and compaction bits, rows of the grid flip the ratio and fold bits. The orange frame is the shipped row; "= row k" marks a row whose drawing is identical (same hashes) to an earlier row\'s. Before the search every row has t0 4; after it, every row has t0 0, and the cheapest start (row 1) is not the cheapest finish.' });
+  var f = SX.figure(sec.querySelector('[data-fig="search-rows"]'), { caption: '<b>Toggle</b> between the rows as Level 2 lays them out and after each row\'s full search; <b>hover</b> a cell for its bits and cost. Columns flip the packer and compaction bits, grid rows the ratio and fold bits. The orange frame is the shipped row; "= row k" marks a drawing identical (same hashes) to an earlier row\'s. Before the search every row has t0 4, after it t0 0, and the cheapest start (row 1) is not the cheapest finish.' });
   var mode = 'searched';
   f.ctrl.appendChild(SX.choice({ options: [{ value: 'unsearched', label: 'Unsearched (Level 2 only)' }, { value: 'searched', label: 'Searched (each row converged)' }], value: mode, onChange: function (v) { mode = v; draw(); } }).el);
   var info = SX.el('span', { class: 'note' }); f.ctrl.appendChild(info);
@@ -175,7 +175,7 @@ window.SXsearchRows = function (sec) {
 // Figure: every candidate of one Level 1 round, by move kind, and the one taken.
 window.SXsearchRound = function (sec) {
   var H = SXsearch, S = SX.data('search').charts;
-  var f = SX.figure(sec.querySelector('[data-fig="search-round"]'), { caption: '<b>Hover</b> a candidate to read its move and cost; <b>switch</b> rounds. Candidates are in enumeration order (cut, reverse, face, side, rank), each one the incumbent plus one pin. Hollow marks break Tier 0 (t0 &gt; 0) and lose to any t0 = 0 candidate whatever their t2. The step line is the running best in enumeration order, compared lexicographically: it can rise where a lower t0 takes over. The ringed mark is the move the round takes. The y-axis is logarithmic.' });
+  var f = SX.figure(sec.querySelector('[data-fig="search-round"]'), { caption: '<b>Hover</b> a candidate for its move and cost; <b>switch</b> rounds. Candidates are in enumeration order (cut, reverse, face, side, rank). Hollow marks break Tier 0 and lose to any t0 = 0 candidate whatever their t2. The step line is the running best, compared lexicographically, so it can rise where a lower t0 takes over. The ringed mark is the move taken. The y-axis is logarithmic.' });
   var R = {
     b1: { r: S.brew.round_1_candidates, inc: S.brew.steps[0].cost, name: 'brew, round 1 (from row 0 unsearched)' },
     b2: { r: S.brew.round_2_candidates, inc: S.brew.steps[1].cost, name: 'brew, round 2' },

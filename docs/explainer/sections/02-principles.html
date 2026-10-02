@@ -1,33 +1,33 @@
 <section class="sx" id="principles" data-toc="2 · Principles">
   <div class="kicker">Principles</div>
   <h2>The rules everything else obeys</h2>
-  <p class="lede">A drawing is a pure function of the chart, the space requests and the profile, computed in integers on a fixed grid. The same inputs give the same bytes, whatever the compiler, the platform or the thread count.</p>
+  <p class="lede">A drawing is a pure function of the chart, the space requests and the profile, computed in integers on a fixed grid, so the same inputs give the same bytes on any compiler, platform or thread count.</p>
 
   <h3>A pure function</h3>
-  <p>Layout is a function of <code>(model, space requests, profile)</code> and nothing else. There is no quick or polish mode, no warm start from a previous layout, no persisted cache and no hysteresis. scav does keep <b>memos</b>, but a memo is not a cache in that sense. Every memo is keyed on <i>every</i> value the step reads, compared whole, so a hit returns exactly what the computation would have returned. It changes the wall clock and nothing else, like the thread count.</p>
-  <p>Stability comes from construction, not from a cost term. Each stage preserves order, every tie is broken by a total order, and document order drives reading order. The limit is stated plainly: a one-state change can still flip a choice and cascade through the drawing. The remedy is an author's pin or hint, not a memory of the last layout. Earlier designs had a stability weight, a prior layout and dirty regions, and all were removed for this reason.</p>
+  <p>Layout reads <code>(model, space requests, profile)</code> and nothing else: no quick or polish mode, no warm start from a previous layout, no persisted cache, no hysteresis. scav does keep <b>memos</b>, but each is keyed on <i>every</i> value its step reads, compared whole, so a hit returns exactly what the computation would. Like the thread count, a memo changes only the wall clock.</p>
+  <p>Stability comes from construction, not from a cost term: each stage preserves order, every tie is broken by a total order, and document order drives reading order. A one-state change can still flip a choice and cascade through the drawing; the remedy is an author's pin or hint, not a memory of the last layout. Earlier designs had a stability weight, a prior layout and dirty regions; all were removed for this reason.</p>
 
   <h3>The integer grid</h3>
-  <p>All layout arithmetic is integer. Coordinates are in <b>grid units</b> of 1/16 pt, a compile-time constant. Coordinates are <code>int32</code> and products <code>int64</code>. The domain is symmetric, <code>|x| ≤ COORD_MAX = 2<sup>19</sup> − 1 = 524,287</code>, so negating, taking <code>abs</code> or mirroring cannot overflow. Space requests and spacing fields are capped at <code>COORD_MAX / 4</code> because the box formula adds several of them. Rectangles are half-open, <code>[x0, x1) × [y0, y1)</code>, and output is root-absolute, applied as one final pass. <code>&lt;cmath&gt;</code> is banned in layout, because libm differs between platforms. Square roots are an integer <code>isqrt</code>, ratios are compared by cross-multiplying, and an intersection test is four <code>orient2d</code> sign checks, never a constructed point.</p>
+  <p>All layout arithmetic is integer. Coordinates are <code>int32</code> <b>grid units</b> of 1/16 pt, a compile-time constant, and products are <code>int64</code>. The domain is symmetric, <code>|x| ≤ COORD_MAX = 2<sup>19</sup> − 1 = 524,287</code>, so negating, <code>abs</code> and mirroring cannot overflow. Space requests and spacing fields are capped at <code>COORD_MAX / 4</code> because the box formula adds several of them. Rectangles are half-open, <code>[x0, x1) × [y0, y1)</code>, and output is made root-absolute in one final pass. <code>&lt;cmath&gt;</code> is banned in layout because libm differs between platforms: square roots use an integer <code>isqrt</code>, ratios are compared by cross-multiplying, and an intersection test is four <code>orient2d</code> sign checks, never a constructed point.</p>
   <div data-fig="principles-ruler"></div>
   <p>The 2,000-state stress chart measures 167,194 × 109,253 grid units under the real font, about 3× inside the domain. If real charts ever outgrow it, the grid goes to 1/8 pt rather than widening the integers.</p>
 
   <h3>The determinism contract</h3>
-  <p>"Layout output is a function of the C++ abstract machine, not of any implementation." Any conforming C++20 toolchain must produce the same bytes. The evidence matrix is six toolchain triples (clang, gcc and MSVC over libc++, libstdc++ and the MSVC STL, on macOS, Linux and Windows) × Debug, Release and a test build × 1, 2, 3, 5, 8, 13 and 16 threads. Odd and prime thread counts are mandatory, because they expose reduction-order bugs that powers of two hide.</p>
+  <p>"Layout output is a function of the C++ abstract machine, not of any implementation": any conforming C++20 toolchain must produce the same bytes. <a href="#determinism">Determinism</a> describes how that is tested. The rules that make it hold:</p>
   <ul>
     <li><b>The thread count never reaches the output.</b> Work is cut into <b>shards</b> whose count depends only on the model: <code>clamp(bit_ceil(ceil_div(entities, 64)), 1, 256)</code>. One process-wide pool runs them, and the first free thread claims the lowest unclaimed shard of the deepest open job. A shard writes only its own slot, and reductions merge slots in index order, so which thread ran a shard changes only the wall clock.</li>
     <li><b>Reductions are associative</b>, though not necessarily commutative: <code>argmin(value, index)</code> and list append qualify because index order makes them well defined. Saturating addition is banned because it is not associative.</li>
-    <li><b>Every comparator is a total order</b> ending in a stable key derived from the input: "ties are forks". Any sort that reaches the output is a vendored stable merge sort; <code>std::sort</code> is banned in layout.</li>
+    <li><b>Every comparator is a total order</b>, ending in a stable key derived from the input. Any sort that reaches the output is a vendored stable merge sort; <code>std::sort</code> is banned in layout.</li>
     <li><b>Randomness</b>, where any is used, is stateless and addressed by position: <code>rnd(seed, phase, item, step)</code>. Its only consumer is a test-only delay injector. The search uses no randomness at all.</li>
     <li><b>A closed list of banned constructs</b>: types whose width varies (<code>int</code>, <code>long</code>, <code>size_t</code> in value computation), <code>std::hash</code>, iterating unordered containers (scav's <code>HashMap</code> has no <code>begin()</code>, so doing so is a compile error), pointer-keyed containers, <code>&lt;random&gt;</code>, raw <code>/</code> and <code>%</code> on possibly negative values, <code>&lt;cmath&gt;</code>, hashing structs with padding, locale-aware formatting, bitfields, out-of-range shifts and unchecked narrowing.</li>
   </ul>
   <div data-fig="principles-shards"></div>
 
   <h3>Two measurement scales</h3>
-  <p>scav's numbers come in two scales, and they are never compared across. <b>No-text</b> means no space requests at all: every state at its minimum size and no labels. The committed cost goldens (<code>corpus_cost.txt</code>) and the unit tests use it. <b>Real text</b> means text measured with the bundled font: this is what <code>scav render</code>, <code>scav dump --layout</code>, the audit tool and <code>corpus_cost_measured.txt</code> use, and what every other drawing on this page shows. The two scales lay out different problems. Text widens states and gaps, label terms are zero under no-text, and the search lands on different pins. A number carried from one scale to the other checks nothing.</p>
+  <p>scav's numbers come in two scales that are never compared. <b>No-text</b> means no space requests: every state at its minimum size, no labels. The committed cost goldens (<code>corpus_cost.txt</code>) and the unit tests use it. <b>Real text</b> means text measured with the bundled font: <code>scav render</code>, <code>scav dump --layout</code>, the audit tool and <code>corpus_cost_measured.txt</code> use it, and so does every other drawing on this page. They are different problems: text widens states and gaps, label terms are zero under no-text, and the search lands on different pins. A number carried from one scale to the other checks nothing.</p>
   <div data-fig="principles-scales"></div>
 
-  <div class="callout rule"><span class="t">Two rules from review</span>"What is trivially right is construction, not search": a straight line beats a kinked one, a start state sits beside the state it enters, and a route never runs along a border. These are built in, not left for the search to discover. And "every rule gets an isolated test on a trivial layout": each rule is held by a chart small enough to name every route.</div>
+  <div class="callout rule"><span class="t">Two rules from review</span>"What is trivially right is construction, not search": a straight line beats a kinked one, a start state sits beside the state it enters, and a route never runs along a border. These are built in, not left for the search to find. And "every rule gets an isolated test on a trivial layout": each rule is held by a chart small enough to name every route.</div>
 </section>
 <script>
 SX.register('principles', function (sec) {
@@ -36,7 +36,7 @@ SX.register('principles', function (sec) {
   // ---- a ruler in grid units: zoom from a whole state down to single units ----
   (function () {
     var host = sec.querySelector('[data-fig="principles-ruler"]');
-    var f = SX.figure(host, { caption: '<b>Slide</b> the zoom from a whole state down to single grid units, and <b>hover</b> the drawing to read the integer coordinate under the pointer. The box is <code>brew</code>\'s real <code>Off</code> state at true size: 896 × 653 units with a 16-unit stroke (1 pt), its name set at 192 units (12 pt, one em). Every coordinate layout produces lands on this lattice.' });
+    var f = SX.figure(host, { caption: '<b>Slide</b> the zoom down to single grid units and <b>hover</b> to read the integer coordinate under the pointer. The box is <code>brew</code>\'s <code>Off</code> state at true size: 896 × 653 units, a 16-unit (1 pt) stroke, its name set at 192 units (12 pt, one em). Every coordinate layout produces lies on this lattice.' });
     var off = CH.brew.text.states[0], O = off.rect, txt = off.draw[1];
     var W = 760, H = 230, top = 34, z0 = 0;
     var svg = SX.svg('svg', { viewBox: '0 0 ' + W + ' ' + H, style: { width: '100%', height: 'auto', font: '12px ' + SX.css('--sans') } });
@@ -102,7 +102,7 @@ SX.register('principles', function (sec) {
   // ---- shards: who runs a shard changes the wall clock, never the answer ----
   (function () {
     var host = sec.querySelector('[data-fig="principles-shards"]');
-    var f = SX.figure(host, { caption: '<b>Pick</b> a thread count and <b>run</b> again: each run draws new delays, so shards finish in a new order. Eight shards each score one candidate; shards 2 and 5 tie at 41. Reducing in index order (scav\'s rule) always picks shard 2. Reducing in completion order, keeping the first of equals, picks whichever tied shard happened to finish first, so the answer moves with the schedule.' });
+    var f = SX.figure(host, { caption: '<b>Pick</b> a thread count and <b>run again</b>; each run draws new delays, so shards finish in a new order. Eight shards each score one candidate, and shards 2 and 5 tie at 41. Reducing in index order, scav\'s rule, always picks shard 2. Reducing in completion order picks whichever tied shard finished first, so the answer moves with the schedule.' });
     var COST = [57, 49, 41, 63, 52, 41, 70, 45], WORK = [5, 4, 6, 3, 5, 4, 6, 3];
     var threads = 3, run = 1;
     function mix(x) { x = (x ^ (x >>> 16)) >>> 0; x = Math.imul(x, 0x7feb352d) >>> 0; x = (x ^ (x >>> 15)) >>> 0; x = Math.imul(x, 0x846ca68b) >>> 0; return (x ^ (x >>> 16)) >>> 0; }
@@ -163,7 +163,7 @@ SX.register('principles', function (sec) {
   // ---- the two scales on one chart, drawn at one scale ----
   (function () {
     var host = sec.querySelector('[data-fig="principles-scales"]');
-    var f = SX.figure(host, { caption: '<b>Toggle</b> between real text and no space requests for one chart, drawn at a common scale so the change in size is true. Only <code>brew</code> and <code>estop</code> carry both drawings here. The table holds each scale\'s own numbers; read across a row only to see that they differ, never to rank one against the other.' });
+    var f = SX.figure(host, { caption: '<b>Toggle</b> between real text and no space requests, drawn at one scale so the size change is true. Only <code>brew</code> and <code>estop</code> have both drawings here. Read across a table row only to see that the scales differ, never to rank one against the other.' });
     var name = 'brew', scale = 'text';
     var pc = SX.choice({ options: [{ value: 'brew', label: 'brew' }, { value: 'estop', label: 'estop' }], value: name, onChange: function (v) { name = v; draw(); } });
     var sc = SX.choice({ options: [{ value: 'text', label: 'real text' }, { value: 'notext', label: 'no space requests' }], value: scale, onChange: function (v) { scale = v; draw(); } });

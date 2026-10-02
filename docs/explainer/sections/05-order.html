@@ -1,64 +1,64 @@
 <section class="sx" id="order" data-toc="5 · Ordering">
   <div class="kicker">Phase 1</div>
   <h2>Ordering: which rank, which slot</h2>
-  <p class="lede">Each frame becomes a layered graph. Phase 1 decides the <b>rank</b> every node sits in (its column) and its slot within that rank. It reads only pins, label sizes, the line height and <code>sweep_count</code>, so it runs once per layout and every candidate the search scores shares it.</p>
+  <p class="lede">Phase 1 gives every node in a frame a <b>rank</b>, its column, and a slot within that rank, reading only pins, label sizes, the line height and <code>sweep_count</code>.</p>
 
-  <p>A <b>frame</b> is one submachine laid out on its own. Its graph has three kinds of node (<code>order.cpp:1030-1091</code>): a <b>state node</b> for each live child state, in document order; a <b>boundary node</b> for each segment end that is a port on this frame's border or an inner face; and the <b>bend nodes</b> that chaining adds later. Each <b>segment</b> (the part of a transition inside one frame) becomes one edge. An edge whose two ends resolve to the same node, such as an external self-loop, is dropped. Ranks are columns: they run left to right, nodes stack down within a rank, <code>rank_sep</code> (576, 36 pt) is the gap between columns and <code>node_sep</code> (288) the gap within one. Disconnected components are ordered separately and packed by phase 2; otherwise every unconnected state would sit at rank 0 in one tall column.</p>
+  <p>A <a href="#decompose">frame</a>'s graph has three kinds of node: a <b>state node</b> for each live child state, in document order; a <b>boundary node</b> for each segment end that is a port on the frame's border or an inner face; and the <b>bend nodes</b> chaining adds later. Each <a href="#decompose">segment</a> becomes one edge; an edge whose two ends are the same node, such as an external self-loop, is dropped. Ranks are columns running left to right, and nodes stack down within a rank; <code>rank_sep</code> (576, 36 pt) is the gap between columns and <code>node_sep</code> (288) the gap within one. Disconnected components are ordered separately and packed by phase 2; otherwise every unconnected state would sit at rank 0 in one tall column.</p>
 
   <h3>Breaking cycles</h3>
-  <p>Layering needs a DAG, and statecharts are full of cycles. First, Tarjan's strongly-connected-components pass (iterative, roots in node order) marks every segment whose two ends share a component as <b>cyclic</b>. Only cyclic segments are candidates for the search's reverse move (<code>order.cpp:239-304</code>).</p>
-  <p>Then <code>orient_acyclic</code> (<code>order.cpp:309-361</code>) does two things. It applies every <b>reverse pin</b> (a pin is one choice the search fixes; a <code>ReversePin</code> names a segment to flip). Then it runs an iterative depth-first search with roots in node index order (document order) and each node's out-edges in segment order. An edge into a node still on the stack is a back edge: it is flipped and marked <code>reversed</code>. No node moves; only edge directions change.</p>
-  <div class="callout rule"><span class="t">Rule</span>Which edge of a cycle is reversed is an artefact of declaration order. That is why the reversal is a search dimension rather than a rule (§11.10d).</div>
+  <p>Layering needs a DAG, and statecharts are full of cycles. First, Tarjan's strongly-connected-components pass (iterative, roots in node order) marks every segment whose ends share a component as <b>cyclic</b>; only cyclic segments are offered to the search's reverse move.</p>
+  <p>Then <code>orient_acyclic</code> applies every <b>reverse pin</b> (a <code>ReversePin</code> names a segment to flip) and runs an iterative depth-first search, roots in node order (document order) and each node's out-edges in segment order. An edge into a node still on the stack is a back edge: it is flipped and marked <code>reversed</code>. Only edge directions change; no node moves.</p>
+  <div class="callout rule"><span class="t">Rule</span>Which edge of a cycle is reversed is an artefact of declaration order, so the reversal is a search dimension, not a rule.</div>
   <div data-fig="order-cycle"></div>
 
   <h3>Ranking by longest path</h3>
-  <p><code>assign_ranks</code> (<code>order.cpp:363-437</code>) runs four steps on the DAG:</p>
+  <p><code>assign_ranks</code> runs four steps on the DAG:</p>
   <ol>
     <li><b>Topological order</b> by Kahn's algorithm, sources seeded in node order.</li>
     <li><b>Longest path from the sources</b>: in topological order, every edge <code>v → w</code> sets <code>rank[w] = max(rank[w], rank[v] + 1)</code>.</li>
-    <li><b>Pull right</b>, in reverse topological order: a node that is not a boundary node and has fewer in-edges than out-edges moves to one rank before its nearest successor. A source with three successors therefore sits next to them, not at rank 0. (The PRD does not mention this step.)</li>
+    <li><b>Pull right</b>, in reverse topological order: a node that is not a boundary node and has fewer in-edges than out-edges moves to one rank before its nearest successor. A source with three successors therefore sits next to them, not at rank 0.</li>
     <li><b>Sink boundary nodes to the last rank</b>, so exits sit on the trailing border and entries on the leading one; then <b>empty ranks are squeezed out</b>.</li>
   </ol>
   <div data-fig="order-rank"></div>
 
   <h4>Rank pins</h4>
-  <p>A <b>rank pin</b> (<code>RankPin{state, rank}</code>) sets one state's rank directly after ranking (<code>order.cpp:1226-1245</code>). Longest path does not run again, so an edge may end up flat (both ends in one rank) or pointing backward. Initial pseudostates are never pinned. After the pins, each initial is re-seated one rank before the nearest state it touches; if that state is at rank 0, every other node moves up one to make room. Then empty ranks are squeezed. A pin asking for the rank longest path already chose changes nothing (§11.10a).</p>
+  <p>A <b>rank pin</b> (<code>RankPin{state, rank}</code>) overwrites one state's rank after ranking. Longest path does not run again, so an edge may end up flat (both ends in one rank) or pointing backward. Initials are never pinned: after the pins, each initial is re-seated one rank before the nearest state it touches, and if that state is at rank 0, every other node moves up one to make room. Then empty ranks are squeezed out. A pin to the rank longest path already chose changes nothing.</p>
   <div data-fig="order-pin"></div>
-  <p><b>Side pins</b> act on ports (<code>order.cpp:1197-1257</code>). A port pinned to a <em>cross</em> border (the top or bottom of a frame that runs across) holds its edge out of ranking, cycle breaking and the sweeps; the port takes its mate's rank and sits first or last in it. A port pinned to a <em>rank</em> border has its edge oriented so the boundary node is the source (leading border) or the sink (trailing border).</p>
+  <p><b>Side pins</b> act on ports. A port pinned to a <em>cross</em> border (top or bottom, in a frame running across) holds its edge out of ranking, cycle breaking and the sweeps, and takes its mate's rank, first or last in it. A port pinned to a <em>rank</em> border has its edge oriented so the boundary node is the source (leading border) or the sink (trailing border).</p>
 
   <h3>Charges: room the gaps must hold</h3>
-  <p>Before chaining, while each edge still spans its whole rank range, <code>rank_derived</code> charges each <b>rank boundary</b> (the gap after a rank) with the room it must hold (<code>order.cpp:672-773</code>):</p>
+  <p>Before chaining, while each edge still spans its whole rank range, <code>rank_derived</code> charges each <b>rank boundary</b> (the gap after a rank) with the room it must hold:</p>
   <ul>
     <li><b>Label charge.</b> An edge crossing one boundary charges that gap its label's width (its <code>PathBox</code> width, or its height in a frame running down). An edge crossing several boundaries is placed afterwards, widest label first: it takes the widest boundary it crosses (ties go to the middle), and costs nothing if that boundary already holds it. An edge inside one rank charges nothing.</li>
-    <li><b>Lane charge.</b> Per connected component, an edge "turns" in its first boundary and, if it spans more than one, in its last. A boundary where two or more edges turn reserves <code>lanes × line height</code> (269 per lane at <code>readable</code>). This goes into the gaps that decide folding only; phase 2 recomputes the real lane room (§11.9.5).</li>
+    <li><b>Lane charge.</b> Per connected component, an edge "turns" in its first boundary and, if it spans more than one, in its last. A boundary where two or more edges turn reserves <code>lanes × line height</code> (269 per lane at <code>readable</code>). This estimate only decides folding; <a href="#size">phase 2</a> recomputes the real lane room.</li>
   </ul>
-  <p>Textbook label placement adds a dummy node per label. scav widens the gap instead: dummy nodes would double every rank and need a frame to own each label (§11.3).</p>
+  <p>Textbook label placement adds a dummy node per label. scav widens the gap instead: dummy nodes would double every rank and need a frame to own each label.</p>
 
   <h3>Chaining long edges</h3>
-  <p>Every edge spanning more than one rank becomes a chain through one <b>bend node</b> per intermediate rank (<code>chain_long_edges</code>, <code>order.cpp:439-477</code>). The bends take part in the sweeps like any node, and the router later treats them as <b>hard waypoints</b> (§11.16). A <b>cut</b> (<code>ChainCut{trans, leg}</code>) leaves the segment as one long edge with no bends, so the router draws it freely (§11.10b). That matters: 58 of the corpus's 257 transitions carry a phase-1 bend, and they hold 295 of its 421 kinks (70%).</p>
+  <p>Every edge spanning more than one rank becomes a chain through one <b>bend node</b> per intermediate rank (<code>chain_long_edges</code>). Bends take part in the sweeps like any node, and the router treats them as hard waypoints. A <b>cut</b> (<code>ChainCut{trans, leg}</code>) leaves the segment as one long edge with no bends, which the router draws freely. Cuts matter: 58 of the corpus's 257 transitions carry a phase-1 bend, and they hold 295 of its 421 kinks (70%).</p>
 
   <h3>Crossing minimisation by median sweeps</h3>
-  <p><code>minimize_crossings</code> (<code>order.cpp:587-619</code>) starts from document order: in each rank, pinned-first ports, then states, then boundary nodes, then bends, then pinned-last ports. It runs up to <code>sweep_count</code> = 8 sweeps. Even sweeps go <b>down</b> (ranks 1 to R−1, each ordered by the median of its predecessors' positions); odd sweeps go <b>up</b> (ranks R−2 to 0, by the median of successors').</p>
+  <p><code>minimize_crossings</code> starts from document order: in each rank, pinned-first ports, then states, then boundary nodes, then bends, then pinned-last ports. It runs up to <code>sweep_count</code> = 8 sweeps. Even sweeps go <b>down</b> (ranks 1 to R−1, each ordered by the median of its predecessors' positions); odd sweeps go <b>up</b> (ranks R−2 to 0, by the median of successors').</p>
   <ul>
     <li><code>median_of</code> sorts the neighbours' positions and takes the <b>upper median</b>, element <code>size/2</code>. A node with no neighbour on that side has no median; it is a fixed barrier that keeps its slot.</li>
     <li><code>reorder_rank</code> swaps adjacent nodes while <code>med[i] &gt; med[i+1]</code>, strictly, so ties keep their order.</li>
     <li>After each sweep the frame's crossings are recounted; the best arrangement so far is kept, and sweeping <b>stops as soon as a sweep reaches 0</b>. A frame that starts at 0 is never swept.</li>
   </ul>
-  <p>Crossings are counted per adjacent rank pair: sort the edges by (north position, south position) and count inversions with a Fenwick tree. Edges that share an endpoint never count as crossing (<code>order.cpp:216-234</code>, <code>500-535</code>).</p>
+  <p>Crossings are counted per adjacent rank pair: sort the edges by (north position, south position) and count inversions with a Fenwick tree. Edges that share an endpoint never count as crossing.</p>
   <div data-fig="order-median"></div>
-  <div class="callout why"><span class="t">Why the median</span>The barycenter heuristic has no constant-factor bound (it can be Ω(√n) off); the median has one. Global sifting is a named lever, not built. <code>transpose</code> was built, improved nothing anywhere, and is not in the pipeline; running it inside the sweep loop took the corpus from 0 layered crossings to 7 (§11.3, §11.10). With <code>sweep_count</code> 0 against 8, routed crossings over the corpus were 99 against 91 (no-text), though <code>axis</code> (2 against 4) and <code>mill</code> (38 against 43) did better unswept.</div>
-  <p>The sweeps leave little on the table: 1,154 frames over the corpus, the gauntlet and the 2k targets carry <b>zero</b> layered crossings, while the routed drawings of the same charts had 87 (§11.10a, §11.10). The crossings a reader sees are made by routing, not by ordering.</p>
+  <div class="callout why"><span class="t">Why the median</span>The barycenter heuristic has no constant-factor bound (it can be Ω(√n) off); the median has one. Global sifting is a named lever, not built. <code>transpose</code> was built, improved nothing anywhere, and is not in the pipeline; running it inside the sweep loop took the corpus from 0 layered crossings to 7. With <code>sweep_count</code> 0 against 8, routed crossings over the corpus were 99 against 91 (no-text), though <code>axis</code> (2 against 4) and <code>mill</code> (38 against 43) did better unswept.</div>
+  <p>The sweeps leave little: all 1,154 frames over the corpus, the gauntlet and the 2k targets have <b>zero</b> layered crossings, while the routed drawings of the same charts had 87. The crossings a reader sees come from routing, not ordering.</p>
 
-  <h3>Orientation, pseudostates and fold pins</h3>
-  <p>An <b>orient pin</b> (<code>OrientPin</code>, applied by a kick) turns a frame to <b>run down</b>: ranks become rows and the axes swap everywhere downstream (§11.10g step 6; <code>order.cpp:857-859</code>). An initial pseudostate is seated <code>rank_sep</code> before the state it enters and level with it; a final is mirrored after its source (§11.10g step 1). A <b>fold pin</b> (<code>FoldPin</code>) passes through phase 1 untouched: it names where phase 2 cuts a long rank run.</p>
+  <h3>Orientation and fold pins</h3>
+  <p>An <b>orient pin</b> (<code>OrientPin</code>, applied by a <a href="#search">kick</a>) turns a frame to <b>run down</b>: ranks become rows and the axes swap everywhere downstream. A <b>fold pin</b> (<code>FoldPin</code>) passes through phase 1 untouched; it names where <a href="#size">phase 2</a> cuts a long rank run.</p>
 
   <h3>The real ranks</h3>
-  <p>The figure below reads brew's shipped drawing from the trace. Its pins include two rank pins (<code>Off</code> to rank 0 and the final <code>$final</code> to rank 1) and one reverse pin (<code>Off → SelfCheck</code>); the DFS flips <code>Brewing → Standby</code> by itself.</p>
+  <p>The figure reads <code>brew</code>'s shipped drawing from the trace. Its pins include two rank pins (<code>Off</code> to rank 0, <code>$final</code> to rank 1) and one reverse pin (<code>Off → SelfCheck</code>); the DFS flips <code>Brewing → Standby</code> itself.</p>
   <div data-fig="order-brew"></div>
 
   <h3>What the search can change here</h3>
-  <p>Phase 1 is where most of the search's moves land: <b>rank</b> (rank pins), <b>cut</b> (chain cuts), <b>reverse</b> (reverse pins on cyclic segments), <b>side</b> (port sides) and <b>orient</b> (a kick that turns a frame). <b>Fold</b> pins pass through to phase 2. In-rank position is <b>not</b> searched: measured, it has no slack. A candidate copies every frame whose inputs match the incumbent's, so a move re-orders only the frames it touches.</p>
-  <div class="callout why"><span class="t">Rejected</span>Eades–Lin–Smyth greedy cycle removal: not adopted, because the search chooses reversals. dot's edge-weight schedule: deliberately not taken (§11.3). One warning from scale: on a flat 2k-state chain, DFS reversal can make edges a thousand ranks long, and chaining them makes a million ordering nodes; without wrapping skips that costs seconds instead of 2 ms (§11.3).</div>
+  <p>Most of the search's moves land in phase 1: rank, cut, reverse, side and orient pins. In-rank position is not searched: measured, it has no slack. A move re-orders only the frames it touches and <a href="#fast">copies</a> the rest from the incumbent.</p>
+  <div class="callout why"><span class="t">Rejected</span>Eades–Lin–Smyth greedy cycle removal: the search chooses reversals instead. dot's edge-weight schedule: deliberately not taken. A warning from scale: on a flat 2k-state chain, DFS reversal can make edges a thousand ranks long, and chaining them makes a million ordering nodes; without wrapping skips that costs seconds instead of 2 ms.</div>
 </section>
 <script>
 (function () {
@@ -391,7 +391,7 @@
   F.order['order-pin'] = function (host) {
     var T = U.TC, n = T.nodes.length, kinds = T.nodes.map(function () { return 'state'; });
     var E = U.orient(n, T.edges, T.pins).edges, base = U.ranks(n, kinds, E), pins = [];
-    var f = SX.figure(host, { caption: '<b>Rank pins.</b> <b>Drag</b> a state into another column to pin it there. The pin overwrites that one rank; nothing is re-derived by longest path, so edges can go flat or backward (dashed). Then the initial is re-seated one rank before the state it enters (if that state is at rank 0, everything else moves up one) and empty ranks are squeezed out. A pin names a rank <em>before</em> those two steps, so the node can land one column off from where you dropped it.' });
+    var f = SX.figure(host, { caption: '<b>Rank pins.</b> <b>Drag</b> a state into another column to pin it there; edges can go flat or backward (dashed). The initial is then re-seated and empty ranks squeezed out, so a node can land one column off from where you dropped it.' });
     var out = SX.el('div', { class: 'note', style: { minHeight: '2.6em' } });
     f.ctrl.appendChild(SX.button('Reset', function () { pins = []; draw(); }));
     f.ctrl.appendChild(SX.button('The search\'s pins (Gripping → 2, Rotating → 1)', function () { pins = [{ v: 4, r: 2 }, { v: 3, r: 1 }]; draw(); }));
@@ -520,7 +520,7 @@
   };
   F.order['order-median'] = function (host) {
     var key = 'spec', shuffle = 0, stepper = null;
-    var f = SX.figure(host, { caption: '<b>Median sweeps.</b> <b>Step</b> through: each rank in turn is reordered by its nodes\' upper medians (the small numbers: neighbour positions in the rank just fixed). Edges in a crossing are orange. After each sweep the count is compared with the best so far; a worse sweep is discarded and sweeping stops at 0. <b>Shuffle</b> the starting order to see the same sweeps from elsewhere.' });
+    var f = SX.figure(host, { caption: '<b>Median sweeps.</b> <b>Step</b> through: each rank is reordered by its nodes\' upper medians (the small numbers, neighbour positions in the rank just fixed). Crossing edges are orange. A sweep that does not beat the best so far is discarded, and sweeping stops at 0. <b>Shuffle</b> the starting order to run the sweeps from elsewhere.' });
     var bar = SX.el('div', { class: 'ctrl' }); f.ctrl.appendChild(bar);
     bar.appendChild(SX.choice({ options: Object.keys(MED).map(function (k) { return { value: k, label: MED[k].label }; }), value: key, onChange: function (v) { key = v; shuffle = 0; build(); } }).el);
     bar.appendChild(SX.button('Shuffle start', function () { shuffle++; build(); }));
