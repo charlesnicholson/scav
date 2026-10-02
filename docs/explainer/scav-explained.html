@@ -356,7 +356,7 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
   <h2>Ordering: which rank, which slot</h2>
   <p class="lede">Phase 1 gives every node in a frame a <b>rank</b> (its column) and a slot within that rank.</p>
 
-  <p>A <a href="#decompose">frame</a>'s graph has a <b>state node</b> per child state in document order, a <b>boundary node</b> per port or inner-face end, and the <b>bend nodes</b> chaining adds; each <a href="#decompose">segment</a> is one edge, and self-loops are dropped. Ranks run left to right, <code>rank_sep</code> (576) apart, with nodes <code>node_sep</code> (288) apart within a rank. Disconnected components are ordered separately and packed by <a href="#size">sizing</a>.</p>
+  <p>A <a href="#decompose">frame</a>'s graph has a <b>state node</b> per child state in document order, a <b>boundary node</b> per port or inner-face end, and the <b>bend nodes</b> chaining adds; each <a href="#decompose">segment</a> is one edge, and self-loops are dropped. Ranks run left to right, <code>rank_sep</code> (576) apart, with nodes <code>node_sep</code> (288) apart within a rank. Ordering treats the frame as one graph, disconnected components included; <a href="#size">sizing</a> splits the components and packs them.</p>
 
   <h3>Breaking cycles</h3>
   <p>Layering needs an acyclic graph, and statecharts are full of cycles.</p>
@@ -385,12 +385,13 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
   <div data-fig="order-pin"></div>
 
   <h3>Charging label room</h3>
-  <p>Before chaining, each gap between ranks is charged with the room it must hold:</p>
-  <ul>
-    <li><b>Labels</b>: an edge crossing one gap charges it its label's width. An edge crossing several takes the widest gap it crosses (ties to the middle), and costs nothing if that gap already fits it.</li>
-    <li><b>Lanes</b>: a gap where two or more edges turn reserves one line height per lane. This estimate only decides folding; <a href="#size">sizing</a> recomputes the real lanes.</li>
-  </ul>
-  <p>scav widens gaps instead of adding a dummy node per label, which would double every rank.</p>
+  <p>Before chaining, each gap between ranks is charged with the room it must hold, in three passes:</p>
+  <ol>
+    <li><b>Labels across one gap</b>: an edge crossing one gap charges it its label's width.</li>
+    <li><b>Lane estimate</b>: within each connected component, every edge counts as turning in the first and last gap it crosses. A gap where two or more turn reserves one line height (269) per edge. This is an upper bound; <a href="#size">sizing</a> counts the edges that really turn.</li>
+    <li><b>Labels across several gaps</b>, widest label first: each charges the widest gap it crosses, counting the lane estimate, with ties to the middle.</li>
+  </ol>
+  <p>Each charge is a maximum, so a label no wider than its gap's label charge adds nothing. Sizing spaces the ranks by the label charges; folding also counts the lane estimate. scav widens gaps instead of adding a dummy node per label, which would double every rank.</p>
 
   <h3>Chaining long edges</h3>
   <p>An edge spanning several ranks becomes a chain through one <b>bend node</b> per intermediate rank. Bend nodes are ordered like any node, and the router treats them as hard waypoints. A <b>cut</b> pin leaves the edge unchained, for the router to draw freely; this matters because chained edges carry 70% of the kinks.</p>
@@ -436,7 +437,7 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
   <h3>Along the ranks: gaps</h3>
   <p>Each layer starts where the previous one ends, plus a gap:</p>
   <p><code>gap = sep + max(label charge, lanes)</code></p>
-  <p><code>sep</code> is <code>rank_sep</code>, or only the route clearance next to a layer holding just boundary nodes or seated pseudostates. The label charge comes from <a href="#order">ordering</a>; <code>lanes</code> is one line height per edge that actually turns in the gap (an edge whose ends overlap runs straight and needs none).</p>
+  <p><code>sep</code> is <code>rank_sep</code>, or only the route clearance next to a layer holding just boundary nodes or seated pseudostates when no label is charged to the gap. The label charge comes from <a href="#order">ordering</a>. <code>lanes</code> is zero when fewer than two edges turn in the gap, otherwise one line height per turning edge. An edge whose ends overlap runs straight and does not turn.</p>
   <div data-fig="size-gap"></div>
 
   <h3>Folding long rank runs</h3>
@@ -445,7 +446,7 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
     <li>The <b>target width</b> is the square root of the run's area scaled to the desired aspect ratio (<b>DAR</b>), at least the widest layer.</li>
     <li>Cut where the running width passes the target, or at a <b>fold pin</b>, but never between a pseudostate or boundary node and the node it joins.</li>
     <li>Keep the best of three by the scale measure (unless the frame's fold rule is Always or Never): unfolded, pieces packed, or pieces stacked. A fold whose pieces pack back into one row is not taken, and a frame running down never folds.</li>
-    <li>A label charge a cut discards moves to the new piece's leading edge.</li>
+    <li>The charge on a gap a cut falls in, less <code>node_sep</code>, moves to the new piece's leading edge.</li>
   </ul>
   <div class="callout rule"><span class="t">The scale measure</span><code>SM = min(dar_num / (dar_den · w), 1 / h)</code>: how large the drawing could be scaled in a viewport of the desired aspect. Larger wins; ties go to the smaller area, then the closer aspect.</div>
   <div data-fig="size-fold"></div>
@@ -6960,7 +6961,7 @@ SX.register('decompose', function (sec) {
         var top = stack[stack.length - 1];
         if (top.next === out[top.node].length) { color[top.node] = 2; stack.pop(); ev.push({ t: 'done', v: top.node }); continue; }
         var k = out[top.node][top.next++], e = E[k];
-        if (color[e.dst] === 1) { e.reversed = true; var t2 = e.src; e.src = e.dst; e.dst = t2; ev.push({ t: 'back', k: k }); continue; }
+        if (color[e.dst] === 1) { e.reversed = true; var t2 = e.src; e.src = e.dst; e.dst = t2; ev.push({ t: 'back', k: k, v: e.src }); continue; }
         if (color[e.dst] === 0) { color[e.dst] = 1; stack.push({ node: e.dst, next: 0 }); ev.push({ t: 'tree', k: k, v: e.dst }); }
         else ev.push({ t: 'skip', k: k });
       }
@@ -7035,7 +7036,7 @@ SX.register('decompose', function (sec) {
   };
   F.order['order-cycle'] = function (host) {
     var key = 'estop', pins = {}, stepper = null;
-    var f = SX.figure(host, { caption: '<b>Cycle breaking.</b> <b>Step</b> the walk: an edge into a node still on the stack (aqua) is flipped (orange). <b>Click</b> a cyclic edge to pin its reversal; the right panel ranks the result.' });
+    var f = SX.figure(host, { caption: '<b>Cycle breaking.</b> <b>Step</b> the walk: an edge into a node still on the stack (aqua) is flipped (orange). <b>Click</b> a dashed edge, one on a cycle, to pin its reversal; the right panel ranks the result.' });
     var top = SX.el('div', { class: 'ctrl' });
     var pick = SX.choice({ options: Object.keys(TOYS).map(function (k) { return { value: k, label: TOYS[k].label }; }), value: key,
       onChange: function (v) { key = v; pins = Object.assign({}, TOYS[v].pins); build(); } });
@@ -7048,25 +7049,32 @@ SX.register('decompose', function (sec) {
     var log = SX.el('div', { class: 'note', style: { minHeight: '2.6em', marginTop: '6px' } }); f.stage.appendChild(log);
     pins = Object.assign({}, TOYS[key].pins);
 
+    // Edge k's name in the direction it runs: against its arrow while `flip` is set.
+    function nm(T, k, flip) { var t = T.edges[k].t; return flip ? t.split(' → ').reverse().join(' → ') : t; }
+    var BY = { pin: 'its pin', dfs: 'the walk', both: 'its pin, then back by the walk' };
+
     function build() {
       var T = TOYS[key], n = T.nodes.length;
       var cyc = U.cyclic(n, T.edges);
       var res = U.orient(n, T.edges, pins);
-      // Snapshots: colour per node, which edges are flipped, the edge in hand, the stack.
-      var snaps = [{ color: T.nodes.map(function () { return 0; }), rev: {}, cur: -1, stack: [], msg: 'Before the walk: ' + T.edges.length + ' edges, ' + cyc.filter(Boolean).length + ' of them on a cycle (dashed outline = cyclic).' }];
+      // Snapshots: colour per node, each edge's direction and what reversed it, the edge in hand, the stack.
+      var snaps = [{ color: T.nodes.map(function () { return 0; }), flip: {}, rev: {}, cur: -1, stack: [], msg: 'Before the walk: ' + T.edges.length + ' edges, ' + cyc.filter(Boolean).length + ' of them on a cycle (dashed).' }];
       res.events.forEach(function (e) {
-        var p = snaps[snaps.length - 1], s = { color: p.color.slice(), rev: Object.assign({}, p.rev), cur: -1, stack: p.stack.slice() };
-        var E = T.edges[e.k] || {};
-        if (e.t === 'pin') { s.rev[e.k] = 'pin'; s.cur = e.k; s.msg = 'Reverse pin: ' + E.t + ' is flipped before the walk.'; }
+        var p = snaps[snaps.length - 1], s = { color: p.color.slice(), flip: Object.assign({}, p.flip), rev: Object.assign({}, p.rev), cur: -1, stack: p.stack.slice() };
+        var was = !!p.flip[e.k];
+        if (e.t === 'pin') { s.flip[e.k] = true; s.rev[e.k] = 'pin'; s.cur = e.k; s.msg = 'Reverse pin: ' + nm(T, e.k, false) + ' is flipped to ' + nm(T, e.k, true) + ' before the walk.'; }
         else if (e.t === 'root') { s.color[e.v] = 1; s.stack.push(e.v); s.msg = 'Root ' + T.nodes[e.v].name + ' (the first unvisited node in document order) goes on the stack.'; }
-        else if (e.t === 'tree') { s.color[e.v] = 1; s.stack.push(e.v); s.cur = e.k; s.msg = 'Edge ' + E.t + ' reaches an unvisited node: ' + T.nodes[e.v].name + ' goes on the stack.'; }
-        else if (e.t === 'back') { s.rev[e.k] = 'dfs'; s.cur = e.k; s.msg = 'Edge ' + E.t + ' points at ' + T.nodes[E.dst].name + ', still on the stack: a back edge, so it is flipped and marked reversed.'; }
-        else if (e.t === 'skip') { s.cur = e.k; s.msg = 'Edge ' + E.t + ' reaches a finished node: nothing to do.'; }
+        else if (e.t === 'tree') { s.color[e.v] = 1; s.stack.push(e.v); s.cur = e.k; s.msg = 'Edge ' + nm(T, e.k, was) + ' reaches an unvisited node: ' + T.nodes[e.v].name + ' goes on the stack.'; }
+        else if (e.t === 'back') {
+          s.flip[e.k] = !was; s.rev[e.k] = was ? 'both' : 'dfs'; s.cur = e.k;
+          s.msg = 'Edge ' + nm(T, e.k, was) + ' points at ' + T.nodes[e.v].name + ', still on the stack: a back edge, so it is flipped' + (was ? ' back to ' + nm(T, e.k, false) + ', its authored direction. scav still marks it reversed.' : ' to ' + nm(T, e.k, true) + ' and marked reversed.');
+        }
+        else if (e.t === 'skip') { s.cur = e.k; s.msg = 'Edge ' + nm(T, e.k, was) + ' reaches a finished node: nothing to do.'; }
         else if (e.t === 'done') { s.color[e.v] = 2; s.stack.pop(); s.msg = T.nodes[e.v].name + ' has no out-edges left: finished.'; }
         snaps.push(s);
       });
       var last = snaps[snaps.length - 1];
-      last.msg = 'Done. Reversed: ' + (res.edges.filter(function (e) { return e.reversed; }).map(function (e, i) { return T.edges[res.edges.indexOf(e)].t; }).join(', ') || 'nothing') + '.';
+      last.msg = 'Done. Reversed: ' + (res.edges.map(function (e, k) { return e.reversed ? T.edges[k].t + ' (by ' + BY[last.rev[k]] + ')' : null; }).filter(Boolean).join(', ') || 'nothing') + '.';
       drawRanks(T, res.edges);
       stepHost.innerHTML = '';
       if (stepper) stepper.stop();
@@ -7089,11 +7097,11 @@ SX.register('decompose', function (sec) {
       var svg = U.root(540, 330), g = SX.svg('g'); svg.appendChild(g);
       U.text(g, 10, 18, 'the walk', { fontSize: '12px', fill: 'var(--text-muted)' });
       T.edges.forEach(function (e, k) {
-        var pts = edgePts(T, k, !!s.rev[k]);
+        var pts = edgePts(T, k, !!s.flip[k]);
         var col = s.rev[k] ? 'var(--hl)' : (k === s.cur ? 'var(--hl-2)' : 'var(--text-secondary)');
-        var a = U.arrow(g, pts[0][0], pts[0][1], pts[1][0], pts[1][1], col, k === s.cur ? 3.5 : 2, cyc[k] ? null : null);
+        U.arrow(g, pts[0][0], pts[0][1], pts[1][0], pts[1][1], col, k === s.cur ? 3.5 : 2, cyc[k] ? '6 4' : null);
         var hit = U.el(g, 'line', { x1: pts[0][0], y1: pts[0][1], x2: pts[1][0], y2: pts[1][1], 'stroke-width': 14 }, { stroke: 'transparent', cursor: cyc[k] ? 'pointer' : 'default' });
-        SX.tipOn(hit, '<b>' + e.t + '</b> (segment ' + e.seg + ')<br>' + (cyc[k] ? 'On a cycle: click to ' + (pins[k] ? 'remove its reverse pin' : 'pin its reversal') : '<span class="m">Not on a cycle, so the search never reverses it.</span>') + (s.rev[k] ? '<br>Reversed by ' + (s.rev[k] === 'pin' ? 'its pin' : 'the walk') : ''));
+        SX.tipOn(hit, '<b>' + nm(T, k, !!s.flip[k]) + '</b> (segment ' + e.seg + (s.flip[k] ? ', authored ' + e.t : '') + ')<br>' + (cyc[k] ? 'On a cycle: click to ' + (pins[k] ? 'remove its reverse pin' : 'pin its reversal') : '<span class="m">Not on a cycle, so the search never reverses it.</span>') + (s.rev[k] ? '<br>Reversed by ' + BY[s.rev[k]] : ''));
         if (cyc[k]) hit.addEventListener('click', function () { if (pins[k]) delete pins[k]; else pins[k] = true; SX.tip.hide(); build(); });
         if (pins[k]) { var m = [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2]; U.text(g, m[0] + 6, m[1] - 6, 'pin', { fontSize: '11px', fill: 'var(--text-secondary)', fontWeight: 600 }); }
       });
@@ -7107,7 +7115,8 @@ SX.register('decompose', function (sec) {
         SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'color-mix(in srgb, var(--hl-3) 30%, var(--state-fill))', border: '1px solid var(--axis)' } }), 'on the stack'),
         SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--surface-2)', border: '1px solid var(--axis)' } }), 'finished'),
         SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--hl-2)' } }), 'edge in hand'),
-        SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--hl)' } }), 'reversed')));
+        SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--hl)' } }), 'reversed'),
+        SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'none', borderTop: '2px dashed var(--text-secondary)', height: '0', width: '16px' } }), 'on a cycle')));
     }
     function drawRanks(T, E) {
       var n = T.nodes.length, rank = U.ranks(n, T.nodes.map(function () { return 'state'; }), E);
@@ -7703,23 +7712,28 @@ SX.register('decompose', function (sec) {
   'use strict';
   var F = window.SXF, U = F.su;
   var RS = 576, LH = 269, SW = 896, SH = 640, NS = 288;
-  // Phase 1's label charge (order.cpp rank_derived): one-boundary edges first, then spanning
-  // edges widest label first, each onto the widest boundary it crosses, ties to the middle.
-  F.su.charge = function (bounds, edges) {
-    var labels = []; for (var b = 0; b < bounds; b++) labels.push(0);
+  // Phase 1's charges (order.cpp rank_derived) for one component: one-gap labels, the lane
+  // estimate, then spanning labels widest first onto the widest gap counting the estimate.
+  F.su.charge = function (bounds, edges, pitch) {
+    var labels = [], gaps = [], turns = [], b;
+    for (b = 0; b < bounds; b++) { labels.push(0); gaps.push(0); turns.push(0); }
     var span = [], log = [];
-    edges.forEach(function (e) { if (!e.label) return; if (e.to - e.from > 1) { span.push(e); return; } labels[e.from] = Math.max(labels[e.from], e.label); log.push({ e: e, at: e.from, held: false }); });
+    edges.forEach(function (e) { if (!e.label) return; if (e.to - e.from > 1) { span.push(e); return; } labels[e.from] = gaps[e.from] = Math.max(labels[e.from], e.label); log.push({ e: e, at: e.from, before: 0 }); });
+    edges.forEach(function (e) { turns[e.from]++; if (e.to - e.from > 1) turns[e.to - 1]++; });   // first and last gap crossed
+    var lanes = turns.map(function (n) { return n < 2 ? 0 : n * pitch; });
+    lanes.forEach(function (l, b2) { gaps[b2] = Math.max(gaps[b2], l); });
     span.sort(function (a, c) { return c.label - a.label; });
     span.forEach(function (e) {
       var mid = e.from + Math.floor((e.to - e.from) / 2), at = mid;
-      for (var b2 = e.from; b2 < e.to; b2++) { if (labels[b2] > labels[at] || (labels[b2] === labels[at] && Math.abs(b2 - mid) < Math.abs(at - mid))) at = b2; }
-      var held = labels[at] >= e.label; labels[at] = Math.max(labels[at], e.label); log.push({ e: e, at: at, held: held });
+      for (var b2 = e.from; b2 < e.to; b2++) { if (gaps[b2] > gaps[at] || (gaps[b2] === gaps[at] && Math.abs(b2 - mid) < Math.abs(at - mid))) at = b2; }
+      log.push({ e: e, at: at, before: labels[at] });
+      gaps[at] = Math.max(gaps[at], e.label); labels[at] = Math.max(labels[at], e.label);
     });
-    return { labels: labels, log: log };
+    return { labels: labels, gaps: gaps, lanes: lanes, log: log };
   };
   F.size['size-gap'] = function (host) {
     var mode = 'two', label = 777, fan = false, longL = 1400, midL = 900;
-    var f = SX.figure(host, { caption: '<b>Rank gaps.</b> <b>Slide</b> the label width: the gap grows once the label is wider than the lanes. <b>Tick</b> the fan to see two turning edges reserve two lanes.' });
+    var f = SX.figure(host, { caption: '<b>Rank gaps.</b> <b>Slide</b> the label width: the gap grows once the label is wider than the lanes. <b>Tick</b> the fan to see two turning edges reserve two lanes. Under <b>Spanning label</b>, <b>slide</b> B → C to move A → D\'s label: it goes to the widest gap, counting the lane estimate.' });
     var modeC = SX.choice({ options: [{ value: 'two', label: 'Two ranks' }, { value: 'span', label: 'Spanning label' }], value: mode, onChange: function (v) { mode = v; controls(); draw(); } });
     f.ctrl.appendChild(modeC.el);
     var knobs = SX.el('div', { class: 'ctrl' }); f.ctrl.appendChild(knobs);
@@ -7769,23 +7783,25 @@ SX.register('decompose', function (sec) {
         out.innerHTML = 'B.x = 896 + 576 + ' + SX.fmt(extra) + ' = <b>' + SX.fmt(bx) + '</b>' + (fan ? ' (two of three edges turn: lanes = 2 × 269 = 538)' : '') + '. Chart width ' + SX.fmt(bx + SW) + '.';
       } else {
         var edges = [{ from: 0, to: 1, label: 400, t: 'A → B' }, { from: 1, to: 2, label: midL, t: 'B → C' }, { from: 2, to: 3, label: 300, t: 'C → D' }, { from: 0, to: 3, label: longL, t: 'A → D' }];
-        var res = U.charge(3, edges), xs = [0];
+        var res = U.charge(3, edges, LH), xs = [0];
+        // Sizing reserves no lanes here: A's and D's legs of the A → D chain each turn alone.
         for (var r = 1; r < 4; r++) xs.push(xs[r - 1] + SW + RS + res.labels[r - 1]);
-        var tot = xs[3] + SW, s2 = (W - 40) / tot, H2 = 1700 * s2 + 60;
-        svg = U.root(W, H2); g = SX.svg('g', { transform: 'translate(20,' + (900 * s2 + 20) + ')' }); svg.appendChild(g);
+        var tot = xs[3] + SW, s2 = (W - 40) / tot, H2 = 1900 * s2 + 64;
+        svg = U.root(W, H2); g = SX.svg('g', { transform: 'translate(20,' + (1100 * s2 + 24) + ')' }); svg.appendChild(g);
         ['A', 'B', 'C', 'D'].forEach(function (nm, k) { box(g, s2, xs[k], 0, SW, SH, nm); });
         for (r = 0; r < 3; r++) {
           U.el(g, 'line', { x1: (xs[r] + SW) * s2, x2: xs[r + 1] * s2, y1: SH / 2 * s2, y2: SH / 2 * s2, 'stroke-width': 1.6 }, { stroke: 'var(--route)' });
           dim(g, s2, xs[r] + SW + RS, xs[r + 1], SH + 160, res.labels[r] ? SX.fmt(res.labels[r]) : '0', 'var(--hl)');
+          if (res.lanes[r]) U.text(g, (xs[r] + SW + RS / 2) * s2, (SH + 160) * s2 + 18, 'lane estimate ' + SX.fmt(res.lanes[r]), { fontSize: '11px', textAnchor: 'middle', fill: 'var(--text-muted)' });
         }
         var longAt = res.log.filter(function (l) { return l.e.t === 'A → D'; })[0];
         U.el(g, 'polyline', { points: [[SW / 2, 0], [SW / 2, -700], [xs[3] + SW / 2, -700], [xs[3] + SW / 2, 0]].map(function (p) { return p[0] * s2 + ',' + p[1] * s2; }).join(' '), 'stroke-width': 1.6 }, { stroke: 'var(--route)', fill: 'none' });
         if (longAt && longL) {
           var lx = xs[longAt.at] + SW + RS / 2;
           U.el(g, 'rect', { x: lx * s2, y: (-700 - 96 - LH) * s2, width: longL * s2, height: LH * s2 }, { fill: 'color-mix(in srgb, var(--hl-2) 14%, transparent)', stroke: 'var(--hl-2)', strokeDasharray: '4 3' });
-          U.text(g, lx * s2, (-700 - 120 - LH) * s2, 'A → D label, charged to boundary ' + longAt.at + (longAt.held ? ' (already wide enough: costs nothing)' : ''), { fontSize: '11.5px', fill: 'var(--text-secondary)' });
+          U.text(g, lx * s2, (-700 - 120 - LH) * s2, 'A → D label, charged to gap ' + longAt.at + (longAt.before >= longL ? ' (no wider than its label charge: adds nothing)' : ''), { fontSize: '11.5px', fill: 'var(--text-secondary)' });
         }
-        out.innerHTML = 'Boundary charges: ' + res.labels.map(function (v, b) { return 'after rank ' + b + ': <b>' + SX.fmt(v) + '</b>'; }).join(', ') + '. One-boundary labels charge first (A → B 400, B → C ' + SX.fmt(midL) + ', C → D 300); A → D takes the widest boundary it crosses, ties to the middle.';
+        out.innerHTML = 'Label charges, which space the ranks: ' + res.labels.map(function (v, b) { return 'gap ' + b + ' <b>' + SX.fmt(v) + '</b>'; }).join(', ') + '. One-gap labels charge first (A → B 400, B → C ' + SX.fmt(midL) + ', C → D 300). A → D and one other edge count as turning in gaps 0 and 2, so the lane estimate reserves 2 × 269 = 538 there. ' + (longAt ? 'A → D takes the widest gap counting that estimate, ties to the middle: gap <b>' + longAt.at + '</b>.' : 'A → D has no label to charge.');
       }
       f.stage.innerHTML = ''; f.stage.appendChild(svg); f.stage.appendChild(out);
     }
@@ -7882,19 +7898,20 @@ SX.register('decompose', function (sec) {
       row = rowLast;
     }
   }
-  // Returns {at, w, h, spot, raw (before whitespace elimination), target, trail, moves}.
+  // Returns {at, w, h, spot, raw (before whitespace elimination), target, trail, moves}, and the
+  // greedy placement before compaction: {placed (its spots), placedAt, pw, ph}.
   U.packLR = function (rects, sep, num, den, compaction, expanded) {
     var target = U.target(rects, sep, num, den), trail = [], moves = [];
-    var spot = place(rects, sep, target, trail);
+    var spot = place(rects, sep, target, trail), placed = spot.slice(), placedAt = [], pe = lay(rects, placed, sep, placedAt);
     if (compaction) compact(rects, sep, spot, moves);
     var at = [], e = lay(rects, spot, sep, at), raw = at.map(function (r) { return Object.assign({}, r); });
     if (expanded !== false) expand(spot, e, at);
-    return { at: at, raw: raw, w: e.w, h: e.h, spot: spot, target: target, trail: trail, moves: moves };
+    return { at: at, raw: raw, w: e.w, h: e.h, spot: spot, target: target, trail: trail, moves: moves, placed: placed, placedAt: placedAt, pw: pe.w, ph: pe.h };
   };
   U.packBox = function (rects, sep, expanded) {
     var spot = rects.map(function () { return RIGHT; }), at = [], e = lay(rects, spot, sep, at), raw = at.map(function (r) { return Object.assign({}, r); });
     if (expanded !== false) expand(spot, e, at);
-    return { at: at, raw: raw, w: e.w, h: e.h, spot: spot };
+    return { at: at, raw: raw, w: e.w, h: e.h, spot: spot, placed: spot, placedAt: raw, pw: e.w, ph: e.h };
   };
   U.packBest = function (rects, sep, num, den, compaction, trybox, aspectFirst) {
     var lr = U.packLR(rects, sep, num, den, compaction), out = Object.assign({ by: 'LR-rectpacking' }, lr);
@@ -7981,7 +7998,7 @@ SX.register('decompose', function (sec) {
   };
   F.size['size-pack'] = function (host) {
     var key = 'up', dar = '16:10', compaction = false, white = true, packer = 'lr';
-    var f = SX.figure(host, { caption: '<b>LR-rectpacking.</b> <b>Step</b> through the placement inside the target width (dashed). <b>Toggle</b> compaction and whitespace elimination; <b>Box</b> and <b>Best</b> compare the one-row packer.' });
+    var f = SX.figure(host, { caption: '<b>LR-rectpacking.</b> <b>Step</b> through the greedy placement inside the target width (dashed); the last step applies compaction and whitespace elimination. <b>Toggle</b> those two; <b>Box</b> and <b>Best</b> compare the one-row packer.' });
     var r1 = SX.el('div', { class: 'ctrl' }), r2 = SX.el('div', { class: 'ctrl' }); f.ctrl.appendChild(r1); f.ctrl.appendChild(r2);
     r1.appendChild(SX.choice({ options: Object.keys(SETS).map(function (k) { return { value: k, label: SETS[k].label }; }), value: key, onChange: function (v) { key = v; build(); } }).el);
     r1.appendChild(SX.choice({ options: DARS.slice(0, 3), value: dar, onChange: function (v) { dar = v; build(); } }).el);
@@ -8001,21 +8018,23 @@ SX.register('decompose', function (sec) {
       stepHost.appendChild(stepper.el);
     }
     function draw(S, rects, res, tgt, step) {
-      var final = step >= rects.length, show = final ? res.at : res.raw, W = 760, H = 300;
-      var ext = Math.max(res.w, tgt) * 1.05, s = Math.min((W - 220) / ext, (H - 40) / (res.h * 1.05));
+      // Steps draw the greedy placement the trail narrates; the final step draws the result after compaction.
+      var final = step >= rects.length, show = final ? res.at : res.placedAt, spots = final ? res.spot : res.placed, W = 760, H = 300;
+      var ex = final ? { w: res.w, h: res.h } : { w: res.pw, h: res.ph };
+      var ext = Math.max(res.pw, tgt) * 1.05, s = Math.min((W - 220) / ext, (H - 40) / (res.ph * 1.05));
       var svg = U.root(W, H), g = SX.svg('g', { transform: 'translate(20,20)' }); svg.appendChild(g);
       if (packer !== 'box') { U.el(g, 'line', { x1: tgt * s, x2: tgt * s, y1: -10, y2: H - 30 }, { stroke: 'var(--hl)', strokeDasharray: '6 4', strokeWidth: 1.5 }); U.text(g, tgt * s + 4, 0, 'target ' + tgt, { fontSize: '11px', fill: 'var(--text-secondary)' }); }
-      U.el(g, 'rect', { x: 0, y: 0, width: res.w * s, height: res.h * s }, { fill: 'none', stroke: 'var(--axis)', strokeDasharray: '2 3' });
+      U.el(g, 'rect', { x: 0, y: 0, width: ex.w * s, height: ex.h * s }, { fill: 'none', stroke: 'var(--axis)', strokeDasharray: '2 3' });
       show.forEach(function (r, k) {
         if (!final && k > step) return;
         var cur = !final && k === step;
         var rc = U.el(g, 'rect', { x: r.x * s, y: r.y * s, width: r.w * s, height: r.h * s, rx: 3 }, { fill: cur ? 'color-mix(in srgb, var(--hl-2) 25%, var(--state-fill))' : 'var(--state-fill)', stroke: cur ? 'var(--hl-2)' : 'var(--state-stroke)', strokeWidth: cur ? 2.5 : 1.3 });
-        U.text(g, r.x * s + 6, r.y * s + 16, String(k + 1) + (k ? ' · ' + U.SPOTS[res.spot[k]] : ''), { fontSize: '11.5px' });
-        SX.tipOn(rc, '<b>rect ' + (k + 1) + '</b> ' + S.rects[k][0] + ' × ' + S.rects[k][1] + '<br>at (' + r.x + ', ' + r.y + ')' + (r.w !== S.rects[k][0] || r.h !== S.rects[k][1] ? ', grown to ' + r.w + ' × ' + r.h : '') + (k ? '<br>spot: ' + U.SPOTS[res.spot[k]] : ''));
+        U.text(g, r.x * s + 6, r.y * s + 16, String(k + 1) + (k ? ' · ' + U.SPOTS[spots[k]] : ''), { fontSize: '11.5px' });
+        SX.tipOn(rc, '<b>rect ' + (k + 1) + '</b> ' + S.rects[k][0] + ' × ' + S.rects[k][1] + '<br>at (' + r.x + ', ' + r.y + ')' + (r.w !== S.rects[k][0] || r.h !== S.rects[k][1] ? ', grown to ' + r.w + ' × ' + r.h : '') + (k ? '<br>spot: ' + U.SPOTS[spots[k]] : ''));
       });
       var q = ratio(dar);
-      U.text(g, W - 200, 20, 'extent ' + res.w + ' × ' + res.h, { fontSize: '12.5px', fontWeight: 600 });
-      U.text(g, W - 200, 40, 'SM ' + U.sm(res, q[0], q[1]).toExponential(3), { fontSize: '12px', fill: 'var(--text-secondary)' });
+      U.text(g, W - 200, 20, 'extent ' + ex.w + ' × ' + ex.h, { fontSize: '12.5px', fontWeight: 600 });
+      U.text(g, W - 200, 40, 'SM ' + U.sm(ex, q[0], q[1]).toExponential(3), { fontSize: '12px', fill: 'var(--text-secondary)' });
       if (res.by) U.text(g, W - 200, 60, 'Best kept: ' + res.by, { fontSize: '12px', fill: 'var(--text-secondary)' });
       f.stage.innerHTML = ''; f.stage.appendChild(svg); f.stage.appendChild(out);
       var tr = res.trail && res.trail[step - 1];
