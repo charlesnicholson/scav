@@ -72,32 +72,39 @@ node docs/explainer/check_interactions.mjs --jobs 6
 
 It first loads the page fresh for each section and checks that one click on its
 contents link, and a URL ending in its `#anchor`, both put the section's top at its
-16 px scroll margin. Every section draws at load, after the theme is set: a figure
-drawn later changes the page's height under a scroll already aimed, and a figure
-drawn before the theme has the wrong colours.
+16 px scroll margin, or above it when the page is scrolled to the top. Every section
+draws at load, after the theme is set: a figure drawn later changes the page's height
+under a scroll already aimed, and a figure drawn before the theme has the wrong colours.
 
 Then it finds every listener the page binds, cross-checked against DevTools' own list, and
-every button and input. Each element is scrolled into view and hit-tested at points
-inside its own fill or stroke, so a mark that a label, overlay or another mark covers
-is reported, not tested at a point that misses it. Then it hovers (a tooltip with
-sensible text or a highlight, gone on leave), clicks (the drawing or the control
-changes; a choice moves its `on` state; a stepper steps, plays and pauses), drags (the
-mark follows the pointer through every step, not just the first, and the drawing
-updates), drags each slider's thumb and sets every value, toggles each checkbox both
-ways, and types into the filter. Drags run before clicks, and whatever a click reveals
-(another mode's handles, a stage's overlays) is tested at once; anything an earlier action
-removed before its turn is listed as not reached. Any exception fails the interaction.
-The whole pass runs again after the theme button, which must redraw every figure once
-with the same listeners, and a page loaded under a dark preference must draw exactly
-what the toggle drew.
+every button, input and `role="button"` element. Each element is scrolled into view and
+hit-tested at points inside its own fill or stroke, so a mark that a label, overlay or
+another mark covers is reported, not tested at a point that misses it. Then it hovers (a
+tooltip with sensible text or a highlight, gone on leave), clicks (the drawing or the
+control changes; a choice moves its `on` state and redraws; a stepper steps, plays and
+pauses), drags (the mark follows the pointer through every step, not just the first, in at
+least one of four directions, since a mark may be clamped in the others, and the drawing
+updates), drags each slider's thumb, which must redraw, and sets every value, toggles each
+checkbox both ways, and types into the filter. Each `role="button"` element that is not a
+native button must be in the tab order and have a name, and Enter and Space on it must
+each redraw and leave it focused. A redraw is a change in the control's figure outside its
+control rows (`.ctrl`), so a readout or an `on` class alone does not count. Drags run
+before clicks, and whatever a click reveals (another mode's handles, a stage's overlays)
+is tested at once; anything an earlier action removed before its turn is listed as not
+reached. Any exception fails the interaction. The whole pass runs again after the theme
+button, which must redraw every figure once with the same listeners, and a page loaded
+under a dark preference must draw exactly what the toggle drew.
 
 A drag in a figure that redraws while dragging goes through `SX.drag(e, {onMove, onEnd})`,
 which listens on the window, so replacing the dragged element does not end the drag; read
 pointer positions with `SX.svgPoint(svg, e)` against the svg currently on the page.
 
 It writes `report.md` (counts by section, failures with screenshots, every
-interaction) and `results.json` to `--out` (default `$TMPDIR/sx-interactions`) and exits
-non-zero on any failure. `--only order,route` checks some sections, `--jobs N` shards
+interaction) and `results.json` to `--out` (default `$TMPDIR/sx-interactions`). It exits
+non-zero on any failed interaction and on any page failure: a listener the instrumentation
+missed (one set as `el.onclick =`, say), an exception at load, a figure that failed to
+load, a theme toggle that redraws differently, or a run that tested nothing, such as
+`--only` naming no section. `--only order,route` checks some sections, `--jobs N` shards
 the sections over N browsers, `--no-theme` skips the second pass, `--chrome BIN`
 names the browser and `--budget SECS` caps the run.
 
@@ -154,7 +161,7 @@ embedded whole and read with `SX.data('name')`, by file stem.
 | `SX.toggle({label, value, onChange})`, `SX.choice({options:[{value,label}], value, onChange})`, `SX.button(label, onClick)` | controls |
 | `SX.tip.show(e, html)`, `SX.tip.hide()`, `SX.tipOn(node, html \| fn)` | tooltip |
 | `SX.chart(stage, geom, opts)` | draws a real scav layout exactly as scav's SVG does (from each element's `draw` pieces, theme-aware). Returns handles: `states[id] / trans[id] / subs[id]` = `{nodes, data}`; `mark(kind, id, color?, on?)` colours one element (`kind` = 'state', 'trans' or 'sub'; color defaults to `var(--hl)`), `unmarkAll()`, `dim({states:[ids], trans:[ids]})` fades everything else, `rect(r, attrs)`, `line(pts, attrs)`, `dot(p, r, attrs)` and `text(p, str, attrs)` draw overlays in chart units, `clear()` removes overlays; `sw` is scav's stroke width (16). opts: `{layers:{subs,states,text,routes,labels}, highlight:{states:[], trans:[]}, onState(s,e,'move'\|'leave'\|'click'), onTrans(t,e,…), click, labelBoxes, pad, maxHeight}`; hits report `'click'`, and show a pointer, only with `click: true` |
-| `SX.lineChart(stage, {series:[{name, points:[[x,y,note]]}], xLabel, yLabel, markers, yFormat, xFormat, xTicks, onHover})` | line chart with crosshair tooltip |
+| `SX.lineChart(stage, {series:[{name, points:[[x,y,note]]}], xLabel, yLabel, markers, yFormat, xFormat, xTicks, onHover})` | line chart with crosshair tooltip; its gridlines sit at two significant digits of their spacing, or at integers when every y is one, and `yFormat` labels each with its exact value |
 | `SX.barChart(stage, {bars:[{label, value, note, color}], unit, format})` | horizontal bars with tooltips |
 | `SX.data(name)` | parsed `data/name.json` |
 | `SX.fmt(n)` | thousands separators |

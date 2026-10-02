@@ -5,6 +5,8 @@
     .pl-diag text { font-family: var(--sans); }
     .pl-diag .stg { cursor: pointer; }
     .pl-diag .stg:hover rect { stroke: var(--hl); }
+    .pl-diag .stg:focus { outline: none; }
+    .pl-diag .stg:focus-visible rect { stroke: var(--hl-2); stroke-width: 3; }
   </style>
   <div class="kicker">Overview</div>
   <h2>The pipeline at a glance</h2>
@@ -70,12 +72,13 @@ SX.register('pipeline', function (sec) {
       svg.appendChild(SX.svg('rect', { x: X(1) - 12, y: 8, width: X(6) + bw - X(1) + 24, height: H - 14, rx: 12, fill: 'none', stroke: SX.css('--hl-2'), 'stroke-width': 1.5, 'stroke-dasharray': '6 4' }));
       svg.appendChild(SX.svg('text', { x: X(1) - 2, y: 26, fill: SX.css('--text-secondary'), 'font-size': 12.5, text: 'search: 16 Level 2 rows × Level 1 moves × kicks — each pass of this box is one candidate' }));
       STAGES.forEach(function (st, k) {
-        var g = SX.svg('g', { class: 'stg' });
         var on = st.key === cur;
+        var g = SX.svg('g', { class: 'stg', role: 'button', tabindex: 0, 'aria-pressed': String(on), 'aria-label': (st.n ? st.n + ' · ' : '') + st.name + ', ' + st.sub, 'data-stage': st.key });
         g.appendChild(SX.svg('rect', { x: X(k), y: y0, width: bw, height: bh, rx: 9, fill: on ? 'color-mix(in srgb, var(--hl) 16%, var(--surface-1))' : SX.css('--surface-2'), stroke: on ? SX.css('--hl') : SX.css('--border'), 'stroke-width': on ? 2 : 1 }));
         g.appendChild(SX.svg('text', { x: X(k) + bw / 2, y: y0 + 23, 'text-anchor': 'middle', fill: ink, 'font-size': 14, 'font-weight': 600, text: (st.n ? st.n + ' · ' : '') + st.name }));
         g.appendChild(SX.svg('text', { x: X(k) + bw / 2, y: y0 + 41, 'text-anchor': 'middle', fill: mut, 'font-size': 11.5, text: st.sub }));
-        g.addEventListener('click', function () { cur = st.key; render(); });
+        g.addEventListener('click', function () { pick(st.key); });
+        g.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(st.key); } });
         svg.appendChild(g);
         if (k) svg.appendChild(SX.svg('line', { x1: X(k) - gap + 2, x2: X(k) - 3, y1: y0 + bh / 2, y2: y0 + bh / 2, stroke: ax, 'stroke-width': 1.5, 'marker-end': 'url(#pl-arr)' }));
       });
@@ -87,6 +90,11 @@ SX.register('pipeline', function (sec) {
       svg.appendChild(SX.svg('text', { x: X(2) + bw / 2 + 18, y: by + 50, fill: mut, 'font-size': 11, text: 'inflation retry: a net unreachable → widen spacing by 32, phases 2–3 again (≤ 8×)' }));
       svg.appendChild(SX.svg('text', { x: X(0), y: y0 - 10, fill: mut, 'font-size': 11, text: 'once per layout' }));
       diag.innerHTML = ''; diag.appendChild(svg);
+    }
+    function pick(key) {
+      var had = diag.contains(document.activeElement);
+      cur = key; render();
+      if (had) diag.querySelector('[data-stage="' + key + '"]').focus({ preventScroll: true });   // render() replaced the focused group
     }
 
     var COLS = ['--series-1', '--series-3', '--series-7'];

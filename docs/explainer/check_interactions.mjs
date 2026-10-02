@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Drives the built explainer in headless Chrome with real mouse and keyboard input, and checks every
-// hover, click, drag, slider, checkbox and filter box, once as loaded and once after the theme toggle.
+// hover, click, drag, slider, checkbox, filter box and role=button, once as loaded and once after the theme toggle.
 // usage: node check_interactions.mjs [--page FILE] [--out DIR] [--only ID,ID] [--jobs N] [--no-theme] [--chrome BIN] [--budget SECS]
 import { spawn } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
@@ -120,6 +120,7 @@ function pageLib() {
     if (tag === 'input') return el.type === 'range' ? ['range'] : el.type === 'checkbox' ? ['check'] : ['text'];
     if (tag === 'button') return ['click'];
     const k = [];
+    if (el.getAttribute('role') === 'button') k.push('key');
     if (t.some((x) => HOVER.includes(x))) k.push('hover');
     if (t.some((x) => CLICK.includes(x))) k.push('click');
     if (t.some((x) => DRAG.includes(x))) k.push('drag');
@@ -153,7 +154,7 @@ function pageLib() {
     const sec = document.getElementById(secId), out = [];
     sec.querySelectorAll('*').forEach((el) => {
       const tag = el.tagName.toLowerCase();
-      if (!el.__hxl && tag !== 'button' && tag !== 'input') return;
+      if (!el.__hxl && tag !== 'button' && tag !== 'input' && el.getAttribute('role') !== 'button') return;
       const k = kinds(el);
       if (!k.length) return;
       const root = rootOf(el), fig = root.getAttribute('data-fig') || '(section)';
@@ -266,16 +267,30 @@ function pageLib() {
     }
     return st;
   };
-  // Counts DOM changes in the element's section from now until H.changes().
+  // Counts DOM changes in the element's section from now until H.changes(); H.drawn() counts only
+  // those in its figure outside control rows (.ctrl) and the control (a button's group, an input's label).
   H.watch = (key) => {
     if (H.mo) H.mo.disconnect();
-    H.muts = 0;
-    const sec = document.getElementById(key.split('|')[0]);
-    H.mo = new MutationObserver((l) => { H.muts += l.length; });
+    H.muts = 0; H.draws = 0;
+    const sec = document.getElementById(key.split('|')[0]), el = H.resolve(key);
+    const fig = el ? rootOf(el) : sec, own = el && /^(BUTTON|INPUT)$/.test(el.tagName) ? el.parentNode : el;
+    const drawn = (n) => fig.contains(n) && !(own && own.contains(n)) && !n.closest('.ctrl');
+    H.tally = (l) => { H.muts += l.length; l.forEach((r) => { if (drawn(r.target.nodeType === 1 ? r.target : r.target.parentNode)) H.draws++; }); };
+    H.mo = new MutationObserver(H.tally);
     H.mo.observe(sec, { subtree: true, childList: true, attributes: true, characterData: true });
     return H.state(key);
   };
-  H.changes = () => { if (H.mo) H.muts += H.mo.takeRecords().length; return H.muts; };
+  H.changes = () => { if (H.mo) H.tally(H.mo.takeRecords()); return H.muts; };
+  H.drawn = () => { H.changes(); return H.draws; };
+  H.focus = (key) => {
+    const el = H.resolve(key);
+    if (!el) return null;
+    el.focus({ preventScroll: true });
+    return { tab: el.tabIndex, focused: document.activeElement === el, name: (el.getAttribute('aria-label') || el.textContent || '').trim() };
+  };
+  H.focused = (key) => { const el = H.resolve(key); return !!el && document.activeElement === el; };
+  // Whether an element with the key's tag, class and listeners lies under the point.
+  H.under = (key, x, y) => document.elementsFromPoint(x, y).some((n) => sig(n) === H.tags.get(key));
   H.range = (key) => {
     const el = H.resolve(key);
     el.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' });
@@ -320,6 +335,7 @@ const EXPECT = {
   hover: 'tooltip with sensible text, or a highlight; tooltip hides on leave',
   click: 'the drawing or the control changes',
   drag: 'the dragged mark follows the pointer; the drawing updates',
+  key: 'focusable, with a name; Enter and Space each change the drawing and keep focus',
   range: 'the value follows the thumb; the drawing updates; every value draws',
   check: 'checks and unchecks; the drawing updates both ways',
   text: 'typing filters; clearing restores',
@@ -373,15 +389,15 @@ async function testClick(key, p) {
   await moveTo(p.x, p.y);
   const s0 = await call('watch', key);
   await mouse('mousePressed', p.x, p.y, true); await mouse('mouseReleased', p.x, p.y); await frame();
-  const m = await call('changes'), s1 = await call('state', key), bad = [], note = [];
+  const m = await call('changes'), d = await call('drawn'), s1 = await call('state', key), bad = [], note = [];
   let got = `${m} changes`;
   if (s1.gone) { got += ', node replaced'; }
   if (s0.group && s0.group.length > 1 && s0.group.some(Boolean)) {   // a choice
     const on = s1.group || [];
-    got = `on = [${on.join('')}]`;
+    got = `on = [${on.join('')}], ${d} drawing changes`;
     const sum = on.reduce((a, b) => a + b, 0), wasOn = s0.group[s0.index] === 1;   // clicking the lit one may toggle it off
     if (!((on[s1.index] === 1 && sum === 1) || (wasOn && sum === 0))) bad.push('choice did not move its "on" state to the clicked button');
-    if (!m) bad.push('nothing redrew');
+    if (!d) bad.push('nothing redrew');
   } else if (s0.range != null && /^(◀|▶)$/.test(s0.text)) {           // stepper prev / next
     const atBound = s0.text === '◀' ? s0.range <= s0.rmin : s0.range >= s0.rmax;
     got = `step ${s0.range} → ${s1.range} (${s1.readout})`;
@@ -402,6 +418,8 @@ async function testClick(key, p) {
   return { bad, note, got };
 }
 
+// Tries each direction until the mark follows, since a clamped mark cannot. A mark the redraw
+// replaced follows if a mark with its signature lies under the pointer.
 async function testDrag(key, p) {
   const dirs = [[48, 0], [0, 40], [-48, 0], [0, -40]];
   let res = null;
@@ -415,21 +433,23 @@ async function testDrag(key, p) {
       if (k === 1) mFirst = await call('changes');
     }
     const mid = await call('state', key), mMid = await call('changes');
+    const under = mid.gone ? await call('under', key, p.x + dx, p.y + dy) : null;
     await mouse('mouseReleased', p.x + dx, p.y + dy); await frame();
     const m = await call('changes');
-    const fx = mid.gone ? null : mid.cx - s0.cx, fy = mid.gone ? null : mid.cy - s0.cy;
-    res = { dx, dy, fx, fy, mMid, m, mFirst };
-    if (m) break;
+    const fx = mid.gone ? null : mid.cx - s0.cx, fy = mid.gone ? null : mid.cy - s0.cy, tol = Math.max(6, 0.35 * Math.hypot(dx, dy));
+    const follows = fx == null ? under : Math.abs(fx - dx) <= tol && Math.abs(fy - dy) <= tol;
+    if (!res || m || !res.m) res = { dx, dy, fx, fy, mMid, m, mFirst, follows };   // the last direction that changed anything
+    if (m && follows) break;
     p = await call('point', key);
     if (!p || p.x == null) break;
   }
   const bad = [], note = [];
-  const along = res.dx ? res.fx : res.fy, want = res.dx || res.dy;
-  let got = `pointer (${res.dx},${res.dy}) → mark (${res.fx == null ? '?' : Math.round(res.fx)},${res.fy == null ? '?' : Math.round(res.fy)}), ${res.mMid} changes mid-drag, ${res.m} total`;
+  const mark = res.fx == null ? `replaced, ${res.follows ? '' : 'not '}under the pointer` : `${Math.round(res.fx)},${Math.round(res.fy)}`;
+  let got = `pointer (${res.dx},${res.dy}) → mark (${mark}), ${res.mMid} changes mid-drag, ${res.m} total`;
   if (!res.m) bad.push('drag changed nothing in any direction');
   else if (!res.mMid) bad.push('nothing moved until release');
   else if (res.mFirst && res.mMid === res.mFirst) bad.push('drag stalled after the first move');   // e.g. a redraw dropped the listener
-  if (along != null && Math.abs(along) > 2 && Math.abs(along - want) > Math.max(6, 0.35 * Math.abs(want))) note.push('mark does not track the pointer 1:1');
+  else if (!res.follows) bad.push('the mark does not follow the pointer in any direction');
   await moveTo(...NEUTRAL);
   return { bad, note, got };
 }
@@ -442,14 +462,14 @@ async function testRange(key) {
   await mouse('mouseMoved', r.x, r.y); await mouse('mousePressed', r.x, r.y, true);
   for (let k = 1; k <= 6; k++) { await mouse('mouseMoved', r.x + (to - r.x) * k / 6, r.y, true); await frame(); }
   await mouse('mouseReleased', to, r.y); await frame();
-  const m = await call('changes'), s1 = await call('state', key);
+  const d = await call('drawn'), s1 = await call('state', key);
   const lo = r.lo + 0.25 * (r.hi - r.lo), hi = r.lo + 0.75 * (r.hi - r.lo), want = to > r.x ? hi : lo;
   const tol = Math.max(+r.step || 1, (r.hi - r.lo) / 12);
-  let got = `${r.v} → ${s1.value} (aimed ~${+want.toFixed(2)}), ${m} changes`;
+  let got = `${r.v} → ${s1.value} (aimed ~${+want.toFixed(2)}), ${d} drawing changes`;
   if (r.hi === r.lo) { note.push('single value'); return { bad, note, got }; }
   if (+s1.value === r.v) bad.push('value did not move');
   else if (Math.abs(+s1.value - want) > tol) bad.push('value does not follow the thumb');
-  if (+s1.value !== r.v && m <= 1) bad.push('nothing redrew');
+  if (+s1.value !== r.v && !d) bad.push('nothing redrew');
   const before = errs.length, n = await call('sweep', key, 150);
   await frame();
   got += `; swept ${n} values`;
@@ -483,6 +503,24 @@ async function testText(key, p) {
   return { bad, note: [], got: `${m1} changes typing, ${m2} clearing` };
 }
 
+// A role=button that is not a native button: in the tab order, named, and worked by Enter and Space.
+async function testKey(key) {
+  const f = await call('focus', key), bad = [], got = [];
+  if (!f) return { bad: ['gone'], note: [], got: 'gone' };
+  if (f.tab < 0 || !f.focused) bad.push(`not focusable (tabIndex ${f.tab})`);
+  if (!f.name) bad.push('no accessible name');
+  if (!bad.length) for (const [k, code, vk] of [['Enter', 'Enter', 13], [' ', 'Space', 32]]) {
+    await call('watch', key);
+    await press(k, code, vk); await frame();
+    const d = await call('drawn'), kept = await call('focused', key);
+    got.push(`${code} ${d} drawing changes${kept ? '' : ', focus lost'}`);
+    if (!d) bad.push(`${code} changed nothing`);
+    if (!kept) bad.push(`${code} lost focus`);
+  }
+  await ev('document.activeElement && document.activeElement.blur()');
+  return { bad, note: [], got: `"${f.name.slice(0, 40)}", tabIndex ${f.tab}; ${got.join('; ')}` };
+}
+
 const rows = [];
 let shots = 0;
 async function one(run, sec, it, kind) {
@@ -498,7 +536,7 @@ async function one(run, sec, it, kind) {
         out = { bad: [`unreachable: ${why}`], note: [], got: 'no point reaches it' };
       }
     }
-    if (!out) out = await ({ hover: testHover, click: testClick, drag: testDrag, range: testRange, check: testCheck, text: testText })[kind](it.key, p);
+    if (!out) out = await ({ hover: testHover, click: testClick, drag: testDrag, range: testRange, check: testCheck, text: testText, key: testKey })[kind](it.key, p);
   } catch (e) {
     out = { bad: [`harness: ${e.message}`], note: [], got: 'error' };
   }
@@ -580,13 +618,13 @@ async function navCheck(sections) {
       still = y === last ? still + 1 : 0; last = y;
     }
     const top = await ev(`Math.round(document.getElementById('${id}').getBoundingClientRect().top) + 0`);  // + 0: CDP sends -0 back as no value
-    const hash = await ev('location.hash');
+    const hash = await ev('location.hash'), sy = await ev('scrollY');
     const bad = [];
-    if (!Number.isFinite(top) || Math.abs(top - 16) > 6) bad.push(`section top at ${top} px, not 16`);
+    if (!Number.isFinite(top) || (Math.abs(top - 16) > 6 && !(sy === 0 && top <= 16))) bad.push(`section top at ${top} px, not 16`);   // at scrollY 0 it can sit no lower
     if (hash !== '#' + id) bad.push(`hash is "${hash}"`);
     if (errs.length > e0) bad.push(`exception: ${errs[e0].slice(0, 160)}`);
     rows.push({ run: 'navigation', sec: id, fig, el, key: `${id}|${action}`, action, expected: EXPECT[action],
-      actual: `top ${top} px after ${Date.now() - t0} ms`, pass: !bad.length, why: bad.join('; '), notes: '', shot: bad.length ? await shoot() : undefined });
+      actual: `top ${top} px at scrollY ${sy} after ${Date.now() - t0} ms`, pass: !bad.length, why: bad.join('; '), notes: '', shot: bad.length ? await shoot() : undefined });
     process.stdout.write(bad.length ? 'F' : '.');
   };
   for (const id of sections) {
@@ -614,10 +652,22 @@ async function inventoryCheck() {
   return { devtools: pairs.size, instrumented: mine, match: pairs.size === mine };
 }
 
+function pageFailures(meta) {
+  const f = [], t = meta.toggle;
+  if (!rows.length) f.push(`nothing tested${ONLY.length ? `: --only ${ONLY.join(',')} names no section` : ''}`);
+  if (!meta.inventory.match) f.push(`inventory mismatch: DevTools ${meta.inventory.devtools} listener pairs, instrumentation ${meta.inventory.instrumented}`);
+  if (meta.initErrors.length) f.push(`${meta.initErrors.length} exceptions at load`);
+  if (meta.failNotes.length) f.push(`${meta.failNotes.length} figures failed to load`);
+  if (t && (!t.sameFigs || !t.sameListeners || t.errors.length || t.failNotes.length || t.darkLoad.length || t.theme !== 'dark')) f.push('the theme toggle redrew differently');
+  return f;
+}
+
 function report(meta) {
   const esc = (s) => String(s ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
   const runs = [...new Set(rows.map((r) => r.run))], secs = [...new Set(rows.map((r) => r.sec))];
+  const pf = pageFailures(meta);
   const L = ['# Explainer interaction audit', '', `page: \`${PAGE}\`  `, `viewport ${VIEW.w}×${VIEW.h}, Chrome headless, real CDP mouse and keyboard input`, ''];
+  if (pf.length) L.push(`**page failures (${pf.length})**: ${esc(pf.join('; '))}`, '');
   L.push(`inventory: DevTools lists ${meta.inventory.devtools} (node, type) listener pairs, the instrumentation ${meta.inventory.instrumented}${meta.inventory.match ? ' (match)' : ' (MISMATCH)'}`, '');
   if (meta.toggle) L.push(`theme toggle: ${meta.toggle.theme}; figures per placeholder ${meta.toggle.sameFigs ? 'unchanged' : 'CHANGED'}; listeners per section ${meta.toggle.sameListeners ? 'unchanged' : 'CHANGED ' + JSON.stringify(meta.toggle.diff)}; ${meta.toggle.errors.length} exceptions; loaded under a dark preference ${meta.toggle.darkLoad.length ? 'DIFFERS at ' + meta.toggle.darkLoad.join(', ') : 'matches'}`, '');
   if (meta.initErrors.length || meta.failNotes.length) L.push(`init: ${meta.initErrors.length} exceptions, ${meta.failNotes.length} failed figures: ${esc([...meta.initErrors, ...meta.failNotes].join('; '))}`, '');
@@ -637,7 +687,8 @@ function report(meta) {
   L.push(`## Every interaction (${rows.length})`, '', head, sep, ...rows.map(line), '');
   writeFileSync(join(OUT, 'report.md'), L.join('\n'));
   writeFileSync(join(OUT, 'results.json'), JSON.stringify({ meta, rows }, null, 1));
-  return fails.length;
+  if (pf.length) console.log(`page failures: ${pf.join('; ')}`);
+  return fails.length + pf.length;
 }
 
 async function main() {
@@ -660,8 +711,8 @@ async function main() {
   const all = await call('sections');
   const sections = ONLY.length ? all.filter((s) => ONLY.includes(s)) : all;
   await navCheck(sections);
-  await load();
   errs.length = 0;
+  await load();
   await frame();
   const meta = { page: PAGE, initErrors: errs.slice(), failNotes: await call('failNotes'), inventory: await inventoryCheck() };
   const figs0 = await call('figCounts'), lis0 = await call('listenerCount');
@@ -685,8 +736,8 @@ async function main() {
     meta.toggle.darkLoad = Object.keys(print1).filter((k) => sections.includes(k.split('/')[0]) && print0[k] !== print1[k]);
     console.log(`dark load ${meta.toggle.darkLoad.length ? 'DIFFERS at ' + meta.toggle.darkLoad.join(', ') : 'matches the toggle'}`);
   }
-  const nf = report(meta) + (meta.initErrors.length ? 1 : 0) + (meta.toggle && (!meta.toggle.sameFigs || !meta.toggle.sameListeners || meta.toggle.errors.length || meta.toggle.darkLoad.length || meta.toggle.theme !== 'dark') ? 1 : 0);
-  console.log(`${rows.length} interactions, ${rows.filter((r) => !r.pass).length} failures; report ${join(OUT, 'report.md')}`);
+  const nf = report(meta);
+  console.log(`${rows.length} interactions, ${nf} failures; report ${join(OUT, 'report.md')}`);
   cleanup();
   process.exit(nf ? 1 : 0);
 }
@@ -694,6 +745,7 @@ async function main() {
 // Shards the sections round-robin over child runs, each with its own Chrome, and merges their results.
 async function sharded() {
   const ids = [...readFileSync(PAGE, 'utf8').matchAll(/<section class="sx" id="([^"]+)"/g)].map((m) => m[1]).filter((s) => !ONLY.length || ONLY.includes(s));
+  if (!ids.length) return main();   // reports that nothing was tested
   rmSync(OUT, { recursive: true, force: true });
   mkdirSync(OUT, { recursive: true });
   const shards = Array.from({ length: Math.min(JOBS, ids.length) }, (_, k) => ids.filter((_, i) => i % JOBS === k));
@@ -708,13 +760,14 @@ async function sharded() {
   parts.forEach((p, k) => p.rows.forEach((r) => { if (r.shot) r.shot = `shard-${k}/${r.shot}`; }));
   const order = (r) => ids.indexOf(r.sec) + (r.run === 'loaded' ? 0 : 1000);
   parts.flatMap((p) => p.rows).map((r, i) => [r, i]).sort((a, b) => order(a[0]) - order(b[0]) || a[1] - b[1]).forEach(([r]) => rows.push(r));
-  const m = parts.map((p) => p.meta), meta = { page: PAGE, initErrors: m.flatMap((x) => x.initErrors), failNotes: m.flatMap((x) => x.failNotes), inventory: m[0].inventory };
+  const m = parts.map((p) => p.meta), meta = { page: PAGE, initErrors: m.flatMap((x) => x.initErrors), failNotes: m.flatMap((x) => x.failNotes),
+    inventory: { ...m[0].inventory, match: m.every((x) => x.inventory.match) } };
   if (m[0].toggle) meta.toggle = { theme: m.every((x) => x.toggle.theme === 'dark') ? 'dark' : 'NOT dark', sameFigs: m.every((x) => x.toggle.sameFigs),
     sameListeners: m.every((x) => x.toggle.sameListeners), diff: Object.assign({}, ...m.map((x) => x.toggle.diff)), errors: m.flatMap((x) => x.toggle.errors), failNotes: m.flatMap((x) => x.toggle.failNotes),
     darkLoad: m.flatMap((x) => x.toggle.darkLoad) };
   const nf = report(meta);
   console.log(`${rows.length} interactions, ${nf} failures over ${shards.length} browsers; report ${join(OUT, 'report.md')}`);
-  process.exit(codes.some(Boolean) ? 1 : 0);
+  process.exit(nf || codes.some(Boolean) ? 1 : 0);
 }
 
 (JOBS > 1 ? sharded() : main()).catch((e) => { console.error(e); cleanup(); process.exit(2); });
