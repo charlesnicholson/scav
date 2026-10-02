@@ -3,7 +3,7 @@
   <h2>Ordering: which rank, which slot</h2>
   <p class="lede">Phase 1 gives every node in a frame a <b>rank</b> (its column) and a slot within that rank.</p>
 
-  <p>A <a href="#decompose">frame</a>'s graph has a <b>state node</b> per child state in document order, a <b>boundary node</b> per port or inner-face end, and the <b>bend nodes</b> chaining adds; each <a href="#decompose">segment</a> is one edge, and self-loops are dropped. Ranks run left to right, <code>rank_sep</code> (576) apart, with nodes <code>node_sep</code> (288) apart within a rank. Disconnected components are ordered separately and packed by <a href="#size">sizing</a>.</p>
+  <p>A <a href="#decompose">frame</a>'s graph has a <b>state node</b> per child state in document order, a <b>boundary node</b> per port or inner-face end, and the <b>bend nodes</b> chaining adds; each <a href="#decompose">segment</a> is one edge, and self-loops are dropped. Ranks run left to right, <code>rank_sep</code> (576) apart, with nodes <code>node_sep</code> (288) apart within a rank. Ordering treats the frame as one graph, disconnected components included; <a href="#size">sizing</a> splits the components and packs them.</p>
 
   <h3>Breaking cycles</h3>
   <p>Layering needs an acyclic graph, and statecharts are full of cycles.</p>
@@ -32,12 +32,13 @@
   <div data-fig="order-pin"></div>
 
   <h3>Charging label room</h3>
-  <p>Before chaining, each gap between ranks is charged with the room it must hold:</p>
-  <ul>
-    <li><b>Labels</b>: an edge crossing one gap charges it its label's width. An edge crossing several takes the widest gap it crosses (ties to the middle), and costs nothing if that gap already fits it.</li>
-    <li><b>Lanes</b>: a gap where two or more edges turn reserves one line height per lane. This estimate only decides folding; <a href="#size">sizing</a> recomputes the real lanes.</li>
-  </ul>
-  <p>scav widens gaps instead of adding a dummy node per label, which would double every rank.</p>
+  <p>Before chaining, each gap between ranks is charged with the room it must hold, in three passes:</p>
+  <ol>
+    <li><b>Labels across one gap</b>: an edge crossing one gap charges it its label's width.</li>
+    <li><b>Lane estimate</b>: within each connected component, every edge counts as turning in the first and last gap it crosses. A gap where two or more turn reserves one line height (269) per edge. This is an upper bound; <a href="#size">sizing</a> counts the edges that really turn.</li>
+    <li><b>Labels across several gaps</b>, widest label first: each charges the widest gap it crosses, counting the lane estimate, with ties to the middle.</li>
+  </ol>
+  <p>Each charge is a maximum, so a label no wider than its gap's label charge adds nothing. Sizing spaces the ranks by the label charges; folding also counts the lane estimate. scav widens gaps instead of adding a dummy node per label, which would double every rank.</p>
 
   <h3>Chaining long edges</h3>
   <p>An edge spanning several ranks becomes a chain through one <b>bend node</b> per intermediate rank. Bend nodes are ordered like any node, and the router treats them as hard waypoints. A <b>cut</b> pin leaves the edge unchained, for the router to draw freely; this matters because chained edges carry 70% of the kinks.</p>
@@ -132,7 +133,7 @@
         var top = stack[stack.length - 1];
         if (top.next === out[top.node].length) { color[top.node] = 2; stack.pop(); ev.push({ t: 'done', v: top.node }); continue; }
         var k = out[top.node][top.next++], e = E[k];
-        if (color[e.dst] === 1) { e.reversed = true; var t2 = e.src; e.src = e.dst; e.dst = t2; ev.push({ t: 'back', k: k }); continue; }
+        if (color[e.dst] === 1) { e.reversed = true; var t2 = e.src; e.src = e.dst; e.dst = t2; ev.push({ t: 'back', k: k, v: e.src }); continue; }
         if (color[e.dst] === 0) { color[e.dst] = 1; stack.push({ node: e.dst, next: 0 }); ev.push({ t: 'tree', k: k, v: e.dst }); }
         else ev.push({ t: 'skip', k: k });
       }
@@ -207,7 +208,7 @@
   };
   F.order['order-cycle'] = function (host) {
     var key = 'estop', pins = {}, stepper = null;
-    var f = SX.figure(host, { caption: '<b>Cycle breaking.</b> <b>Step</b> the walk: an edge into a node still on the stack (aqua) is flipped (orange). <b>Click</b> a cyclic edge to pin its reversal; the right panel ranks the result.' });
+    var f = SX.figure(host, { caption: '<b>Cycle breaking.</b> <b>Step</b> the walk: an edge into a node still on the stack (aqua) is flipped (orange). <b>Click</b> a dashed edge, one on a cycle, to pin its reversal; the right panel ranks the result.' });
     var top = SX.el('div', { class: 'ctrl' });
     var pick = SX.choice({ options: Object.keys(TOYS).map(function (k) { return { value: k, label: TOYS[k].label }; }), value: key,
       onChange: function (v) { key = v; pins = Object.assign({}, TOYS[v].pins); build(); } });
@@ -220,25 +221,32 @@
     var log = SX.el('div', { class: 'note', style: { minHeight: '2.6em', marginTop: '6px' } }); f.stage.appendChild(log);
     pins = Object.assign({}, TOYS[key].pins);
 
+    // Edge k's name in the direction it runs: against its arrow while `flip` is set.
+    function nm(T, k, flip) { var t = T.edges[k].t; return flip ? t.split(' → ').reverse().join(' → ') : t; }
+    var BY = { pin: 'its pin', dfs: 'the walk', both: 'its pin, then back by the walk' };
+
     function build() {
       var T = TOYS[key], n = T.nodes.length;
       var cyc = U.cyclic(n, T.edges);
       var res = U.orient(n, T.edges, pins);
-      // Snapshots: colour per node, which edges are flipped, the edge in hand, the stack.
-      var snaps = [{ color: T.nodes.map(function () { return 0; }), rev: {}, cur: -1, stack: [], msg: 'Before the walk: ' + T.edges.length + ' edges, ' + cyc.filter(Boolean).length + ' of them on a cycle (dashed outline = cyclic).' }];
+      // Snapshots: colour per node, each edge's direction and what reversed it, the edge in hand, the stack.
+      var snaps = [{ color: T.nodes.map(function () { return 0; }), flip: {}, rev: {}, cur: -1, stack: [], msg: 'Before the walk: ' + T.edges.length + ' edges, ' + cyc.filter(Boolean).length + ' of them on a cycle (dashed).' }];
       res.events.forEach(function (e) {
-        var p = snaps[snaps.length - 1], s = { color: p.color.slice(), rev: Object.assign({}, p.rev), cur: -1, stack: p.stack.slice() };
-        var E = T.edges[e.k] || {};
-        if (e.t === 'pin') { s.rev[e.k] = 'pin'; s.cur = e.k; s.msg = 'Reverse pin: ' + E.t + ' is flipped before the walk.'; }
+        var p = snaps[snaps.length - 1], s = { color: p.color.slice(), flip: Object.assign({}, p.flip), rev: Object.assign({}, p.rev), cur: -1, stack: p.stack.slice() };
+        var was = !!p.flip[e.k];
+        if (e.t === 'pin') { s.flip[e.k] = true; s.rev[e.k] = 'pin'; s.cur = e.k; s.msg = 'Reverse pin: ' + nm(T, e.k, false) + ' is flipped to ' + nm(T, e.k, true) + ' before the walk.'; }
         else if (e.t === 'root') { s.color[e.v] = 1; s.stack.push(e.v); s.msg = 'Root ' + T.nodes[e.v].name + ' (the first unvisited node in document order) goes on the stack.'; }
-        else if (e.t === 'tree') { s.color[e.v] = 1; s.stack.push(e.v); s.cur = e.k; s.msg = 'Edge ' + E.t + ' reaches an unvisited node: ' + T.nodes[e.v].name + ' goes on the stack.'; }
-        else if (e.t === 'back') { s.rev[e.k] = 'dfs'; s.cur = e.k; s.msg = 'Edge ' + E.t + ' points at ' + T.nodes[E.dst].name + ', still on the stack: a back edge, so it is flipped and marked reversed.'; }
-        else if (e.t === 'skip') { s.cur = e.k; s.msg = 'Edge ' + E.t + ' reaches a finished node: nothing to do.'; }
+        else if (e.t === 'tree') { s.color[e.v] = 1; s.stack.push(e.v); s.cur = e.k; s.msg = 'Edge ' + nm(T, e.k, was) + ' reaches an unvisited node: ' + T.nodes[e.v].name + ' goes on the stack.'; }
+        else if (e.t === 'back') {
+          s.flip[e.k] = !was; s.rev[e.k] = was ? 'both' : 'dfs'; s.cur = e.k;
+          s.msg = 'Edge ' + nm(T, e.k, was) + ' points at ' + T.nodes[e.v].name + ', still on the stack: a back edge, so it is flipped' + (was ? ' back to ' + nm(T, e.k, false) + ', its authored direction. scav still marks it reversed.' : ' to ' + nm(T, e.k, true) + ' and marked reversed.');
+        }
+        else if (e.t === 'skip') { s.cur = e.k; s.msg = 'Edge ' + nm(T, e.k, was) + ' reaches a finished node: nothing to do.'; }
         else if (e.t === 'done') { s.color[e.v] = 2; s.stack.pop(); s.msg = T.nodes[e.v].name + ' has no out-edges left: finished.'; }
         snaps.push(s);
       });
       var last = snaps[snaps.length - 1];
-      last.msg = 'Done. Reversed: ' + (res.edges.filter(function (e) { return e.reversed; }).map(function (e, i) { return T.edges[res.edges.indexOf(e)].t; }).join(', ') || 'nothing') + '.';
+      last.msg = 'Done. Reversed: ' + (res.edges.map(function (e, k) { return e.reversed ? T.edges[k].t + ' (by ' + BY[last.rev[k]] + ')' : null; }).filter(Boolean).join(', ') || 'nothing') + '.';
       drawRanks(T, res.edges);
       stepHost.innerHTML = '';
       if (stepper) stepper.stop();
@@ -261,11 +269,11 @@
       var svg = U.root(540, 330), g = SX.svg('g'); svg.appendChild(g);
       U.text(g, 10, 18, 'the walk', { fontSize: '12px', fill: 'var(--text-muted)' });
       T.edges.forEach(function (e, k) {
-        var pts = edgePts(T, k, !!s.rev[k]);
+        var pts = edgePts(T, k, !!s.flip[k]);
         var col = s.rev[k] ? 'var(--hl)' : (k === s.cur ? 'var(--hl-2)' : 'var(--text-secondary)');
-        var a = U.arrow(g, pts[0][0], pts[0][1], pts[1][0], pts[1][1], col, k === s.cur ? 3.5 : 2, cyc[k] ? null : null);
+        U.arrow(g, pts[0][0], pts[0][1], pts[1][0], pts[1][1], col, k === s.cur ? 3.5 : 2, cyc[k] ? '6 4' : null);
         var hit = U.el(g, 'line', { x1: pts[0][0], y1: pts[0][1], x2: pts[1][0], y2: pts[1][1], 'stroke-width': 14 }, { stroke: 'transparent', cursor: cyc[k] ? 'pointer' : 'default' });
-        SX.tipOn(hit, '<b>' + e.t + '</b> (segment ' + e.seg + ')<br>' + (cyc[k] ? 'On a cycle: click to ' + (pins[k] ? 'remove its reverse pin' : 'pin its reversal') : '<span class="m">Not on a cycle, so the search never reverses it.</span>') + (s.rev[k] ? '<br>Reversed by ' + (s.rev[k] === 'pin' ? 'its pin' : 'the walk') : ''));
+        SX.tipOn(hit, '<b>' + nm(T, k, !!s.flip[k]) + '</b> (segment ' + e.seg + (s.flip[k] ? ', authored ' + e.t : '') + ')<br>' + (cyc[k] ? 'On a cycle: click to ' + (pins[k] ? 'remove its reverse pin' : 'pin its reversal') : '<span class="m">Not on a cycle, so the search never reverses it.</span>') + (s.rev[k] ? '<br>Reversed by ' + BY[s.rev[k]] : ''));
         if (cyc[k]) hit.addEventListener('click', function () { if (pins[k]) delete pins[k]; else pins[k] = true; SX.tip.hide(); build(); });
         if (pins[k]) { var m = [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2]; U.text(g, m[0] + 6, m[1] - 6, 'pin', { fontSize: '11px', fill: 'var(--text-secondary)', fontWeight: 600 }); }
       });
@@ -279,7 +287,8 @@
         SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'color-mix(in srgb, var(--hl-3) 30%, var(--state-fill))', border: '1px solid var(--axis)' } }), 'on the stack'),
         SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--surface-2)', border: '1px solid var(--axis)' } }), 'finished'),
         SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--hl-2)' } }), 'edge in hand'),
-        SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--hl)' } }), 'reversed')));
+        SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--hl)' } }), 'reversed'),
+        SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'none', borderTop: '2px dashed var(--text-secondary)', height: '0', width: '16px' } }), 'on a cycle')));
     }
     function drawRanks(T, E) {
       var n = T.nodes.length, rank = U.ranks(n, T.nodes.map(function () { return 'state'; }), E);
