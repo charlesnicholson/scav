@@ -22,6 +22,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <map>
 #include <ostream>
 #include <string>
 #include <string_view>
@@ -118,8 +119,8 @@ void column_holds(Chart const &c, char const *name, std::vector<T> const &rows) 
 void lay(char const *name,
          scav_profile const &p,
          Laid &out,
-         scav_spaces const &s = {},
-         SearchPins const *seed = nullptr) {
+         scav_spaces const &s,
+         SearchPins const *seed) {
   // The router these properties are about, by the name it crosses every other
   // boundary under rather than by its position in the registry.
   scav_router_id id{};
@@ -177,6 +178,21 @@ void lay(char const *name,
   column_holds(out.c, "scav.geom.route", out.r.route);
   column_holds(out.c, "scav.geom.port", out.r.port);
   column_holds(out.c, "scav.geom.portslot", out.r.slots);
+}
+
+// With no spaces or seed, each chart and profile is laid out once per process; a hit
+// copies it.
+void lay(char const *name, scav_profile const &p, Laid &out) {
+  static std::map<std::string, Laid> laid;
+  std::string key{ name };
+  key.append(reinterpret_cast<char const *>(&p), sizeof p);  // a flat POD of int32_t
+  auto it{ laid.find(key) };
+  if (it == laid.end()) {
+    Laid fresh;
+    lay(name, p, fresh, {}, nullptr);
+    it = laid.emplace(std::move(key), std::move(fresh)).first;
+  }
+  out = it->second;
 }
 
 // The Tier-0 predicate, rewritten here as it is for the corpus: a gate that
@@ -721,7 +737,7 @@ TEST_CASE(
     scav_path_box const box{ .subject = t, .w = 1511, .h = 269, .order = 0 };
     scav_spaces const spaces{ .path_box = &box, .n_path_box = 1 };
     Laid l;
-    lay("crossing.scav", p, l, spaces);
+    lay("crossing.scav", p, l, spaces, nullptr);
     REQUIRE(l.r.placed.size() == 1);
     CHECK(l.r.unplaced == 0);
     scav_rect const at{ l.r.placed[0] };
@@ -782,7 +798,7 @@ TEST_CASE("gauntlet: a long edge's label widens no boundary another already wide
     };
     scav_spaces const spaces{ .path_box = boxes.data(), .n_path_box = 2 };
     Laid l;
-    lay("long.scav", p, l, spaces);
+    lay("long.scav", p, l, spaces, nullptr);
     CHECK(l.r.unplaced == 0);
     REQUIRE(l.r.placed.size() == 2);
     for (scav_rect const &at : l.r.placed) {
@@ -860,7 +876,7 @@ TEST_CASE("gauntlet: a folded frame's second piece starts under the state enteri
                               .path_box = &label,
                               .n_path_box = 1 };
     Laid l;
-    lay("folded.scav", p, l, spaces);
+    lay("folded.scav", p, l, spaces, nullptr);
     scav_rect const &above{ l.z.state[first] };
     scav_rect const &below{ l.z.state[second] };
     REQUIRE(below.y >= (above.y + above.h));

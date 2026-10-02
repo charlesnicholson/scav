@@ -7,6 +7,7 @@
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
 
+#include "core/tests/corpus.h"
 #include "doctest.h"
 
 #include <array>
@@ -194,6 +195,7 @@ TEST_CASE("search memo: a layout searched through it is the one searched without
                                                 "vac.scav" };
   uint32_t hits{ 0 };
   for (char const *name : CHARTS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     layout_test_search_memo(true);
     Laid const with{ lay_out(name) };
@@ -220,6 +222,8 @@ TEST_CASE("search memo: every search it answers is the search run afresh") {
   uint32_t hits{ 0 };
   for (bool const labelled : { false, true }) {
     for (char const *name : CHARTS) {
+      if (scav::test::corpus_skipped(name)) { continue; }
+      if (scav::test::corpus_skipped(name)) { continue; }
       CAPTURE(labelled);
       CAPTURE(name);
       REQUIRE(lay_out(name, labelled).ok);
@@ -245,6 +249,7 @@ TEST_CASE(
                                                 "vac.scav" };
   uint64_t skipped{ 0 };
   for (char const *name : CHARTS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     layout_test_skip_noop_faces(true);
     Laid const with{ lay_out(name) };
@@ -285,6 +290,7 @@ TEST_CASE(
                                                 "vac.scav" };
   uint64_t used{ 0 };
   for (char const *name : CHARTS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     layout_test_prefix_shortcut(true);
     Laid const with{ lay_out(name) };
@@ -310,6 +316,7 @@ TEST_CASE("search: every face move scored from the prefix scores as the whole wa
                                                 "vac.scav" };
   uint64_t used{ 0 };
   for (char const *name : CHARTS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     layout_test_prefix_verify(true);
     REQUIRE(lay_out(name).ok);
@@ -334,6 +341,7 @@ TEST_CASE("search: a labelled round scored by bound lays out what scoring it who
   BoundGuard const guard;
   constexpr std::array<char const *, 3> CHARTS{ "estop.scav", "brew.scav", "dock.scav" };
   for (char const *name : CHARTS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     layout_test_label_bound(true, false);
     Laid const with{ lay_out(name, true) };
@@ -360,6 +368,7 @@ TEST_CASE("search: every bounded round picks what scoring each candidate whole p
                                                 "dock.scav",
                                                 "gauntlet/carried.scav" };
   for (char const *name : CHARTS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     layout_test_label_bound(true, true);
     REQUIRE(lay_out(name, true).ok);
@@ -384,6 +393,7 @@ TEST_CASE("search schedules: each row keeps the cheaper of its two searches") {
   uint32_t won_somewhere{ 0 };  // charts where some row took the second search
   uint32_t won_nowhere{ 0 };    // charts where every row kept the first
   for (char const *name : CHARTS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     REQUIRE(lay_out(name).ok);
     std::vector<Cost> const &first{ layout_test_schedule_first() };

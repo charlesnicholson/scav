@@ -13,7 +13,8 @@ namespace scav::test {
 inline bool corpus_skipped(std::string_view chart) {
   char const *const mode{ std::getenv("SCAV_TEST_CORPUS") };
   bool const light{ (mode != nullptr) && (std::string_view{ mode } == "light") };
-  return light && ((chart == "bottler.scav") || (chart == "mill.scav"));
+  return light && ((chart == "bottler.scav") || (chart == "mill.scav") ||
+                   (chart == "tcp.scav") || (chart == "toolchanger.scav"));
 }
 
 // `golden` less every line naming a skipped chart as one of its words.

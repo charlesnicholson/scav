@@ -58,7 +58,7 @@ SANITIZERS: dict[str, list[str]] = {
 # The gate reads llvm-cov's per-file summary, so it is clang-only.
 COVERAGE: list[str] = ["macos-clang-libcxx", "linux-clang-libcxx"]
 
-# The corpus less mill and bottler; coverage inherits it from cfg-debug.
+# The corpus less bottler, mill, tcp and toolchanger; coverage inherits it from cfg-debug.
 LIGHT: Cache = {"SCAV_TEST_CORPUS": "light"}
 
 # name -> build type, extra cache, description

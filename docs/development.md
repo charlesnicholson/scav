@@ -175,8 +175,8 @@ how that stays true.
 
 **Debug, sanitizer and coverage presets test a light corpus.** The cache
 variable `SCAV_TEST_CORPUS` is `full` or `light`, and every test reads it from
-the environment variable of the same name. `light` leaves `mill` and `bottler`,
-about 90% of the corpus's layout cost, out of every corpus loop and skips the
+the environment variable of the same name. `light` leaves `bottler`, `mill`, `tcp`
+and `toolchanger`, about 99% of the corpus's layout cost, out of every corpus loop and skips the
 full-corpus `scav selftest` run; the other charts are still compared line by
 line against the same goldens. Release and testable run the full corpus. To
 run it on a light preset, add `-- -DSCAV_TEST_CORPUS=full`.

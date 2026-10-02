@@ -201,7 +201,7 @@ TEST_CASE("svg corpus: the document is stable across repeated renders") {
   // Against the render the cases above read, so the second is the only one
   // this case pays for.
   Metrics const m{ bundled() };
-  char const *const name{ scav::test::corpus_skipped("mill.scav") ? "toolchanger.scav"
+  char const *const name{ scav::test::corpus_skipped("mill.scav") ? "axis.scav"
                                                                   : "mill.scav" };
   CHECK(rendered(name).doc == render(name, m, readable()).doc);
 }

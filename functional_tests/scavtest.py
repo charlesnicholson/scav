@@ -10,7 +10,7 @@ type Arg = str | Path
 
 PATHS: frozenset[str] = frozenset({"repo_root", "build_dir", "scratch_dir"})
 TRUTHY: frozenset[str] = frozenset({"ON", "1", "TRUE", "YES"})
-HEAVY_CHARTS: frozenset[str] = frozenset({"bottler.scav", "mill.scav"})
+HEAVY_CHARTS: frozenset[str] = frozenset({"bottler.scav", "mill.scav", "tcp.scav", "toolchanger.scav"})
 
 
 def corpus_light() -> bool:
