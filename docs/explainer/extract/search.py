@@ -22,12 +22,42 @@ KICKS_TRIED = [(4, 7, "reverse t1 leg 0 (frame 0)"), (8, 11, "reverse t9 leg 0 (
                (25, 30, "together: reverse t1 + orient frame 2")]
 
 
-def pin_of(m: dict, ids: dict) -> list | None:
+WEIGHT = {"bends": 512, "corridor": 48, "crossings": 512, "excess_len": 4, "adjacency": 16, "label": 768,
+          "label_near": 48, "aspect": 2, "area": 1, "crowding": 512, "length": 8, "transit_bends": 768,
+          "whitespace": 0}  # the default profile's w_*
+EM = 192
+PER_EM = {"corridor": 1, "excess_len": 1, "label_near": 1, "aspect": 1, "crowding": 1, "length": 1,
+          "area": 2, "whitespace": 2}  # cost.cpp weighted_terms: lengths in ems, areas in ems squared, by ceiling
+
+
+def weighted(terms: dict) -> int:
+    return sum(WEIGHT[k] * -(-terms[k] // EM ** PER_EM.get(k, 0)) for k in X.TERMS)
+
+
+def with_bound(scav: X.Scav, row: list, base: list, m: dict) -> dict:
+    """`m` laid out again on `base`, with the lower bound a labelled round scores it by
+    (layout.cpp scored_of unlabelled): no label terms, and aspect unpriced unless every label fits."""
+    g, doc = X.geometry(scav, "brew", row + base + pin_of(m), with_svg=False)
+    c, chart = doc["geometry"]["cost"], doc["geometry"]["chart"]
+    if weighted(c) != c["t2"]:
+        raise RuntimeError(f"brew {pin_of(m)}: weights give {weighted(c)}, scav {c['t2']}")
+    b = dict(c, label=0, label_near=0)
+    if not all(r[2] <= chart[2] and r[3] <= chart[3] for r in doc["geometry"]["placed"]):
+        b["aspect"] = 0
+    xs = [v for r in doc["geometry"]["state"] for v in (r[0], r[0] + r[2])]
+    xs += [q[0] for leg in doc["geometry"]["route"] for q in leg]
+    ys = [v for r in doc["geometry"]["state"] for v in (r[1], r[1] + r[3])]
+    ys += [q[1] for leg in doc["geometry"]["route"] for q in leg]
+    inside = all(r[0] >= min(xs) and r[1] >= min(ys) and r[0] + r[2] <= max(xs) and r[1] + r[3] <= max(ys)
+                 for r in doc["geometry"]["placed"])
+    return dict(m, bound=[c["t0_violations"] - c["label_over_box"] - c["label_over_route"], weighted(b)],
+                inside=inside, rederived=(g["cost"]["t0"], g["cost"]["t2"]) == (m["t0"], m["t2"]))
+
+
+def pin_of(m: dict) -> list | None:
     k = m["move"]
     if k == "rank":
-        s = m["state"]
-        sid = int(s[1:]) if s.startswith("#") else ids[s]
-        return ["--rank", f"{sid}:{m['rank']}"]
+        return ["--rank", f"{m['state_id']}:{m['rank']}"]
     e = 0 if m.get("end") == "src" else 1
     if k == "face":
         return ["--face", f"{m['trans']}:{m['leg']}:{e}:{m['face']}"]
@@ -41,12 +71,10 @@ def pin_of(m: dict, ids: dict) -> list | None:
 
 
 def describe(m: dict, model: dict) -> str:
-    st, tr = model["states"], model["transitions"]
+    tr = model["transitions"]
     paths = X.state_paths(model)
     if m["move"] == "rank":
-        s = m["state"]
-        sid = int(s[1:]) if s.startswith("#") else [i for i, x in enumerate(st) if x["name"] == s][0]
-        return f"pin {paths[sid]} to rank {m['rank']}"
+        return f"pin {paths[m['state_id']]} to rank {m['rank']}"
     if m["move"] == "fold":
         return f"refold frame {m.get('frame')} at layer {m.get('layer')}"
     t = tr[m["trans"]]
@@ -78,7 +106,6 @@ def taken_of(r: dict) -> dict:
 
 def brew(scav: X.Scav) -> dict:
     rounds, model = scav.search_rounds("brew", ["--portfolio-row", "0"])
-    ids = {s["name"]: i for i, s in enumerate(model["states"]) if s["name"]}
     row = ["--portfolio-row", "0", "--no-search"]
     steps = []
 
@@ -104,25 +131,25 @@ def brew(scav: X.Scav) -> dict:
     pins = []
     for ri in (0, 1, 2):
         m = taken_of(rounds[ri])
-        pins = pins + pin_of(m, ids)
+        pins = pins + pin_of(m)
         step(f"Level 1 round {ri + 1}: best of {len(rounds[ri]['cands'])} moves", pins, ri, m,
              expect=(m["t0"], m["t2"]))
     conv = {"trace_round": 3, "round": round_summary(rounds[3], model),
-            "note": "round 4 scores 31 moves and none is strictly better: Level 1 has converged at t2 4225"}
+            "note": f"round 4 scores {len(rounds[3]['cands'])} moves and none is strictly better: Level 1 has converged at t2 4225"}
     kick_pins = ["--reverse", "1:0"]
     step("kick: reverse t1 (Off -> SelfCheck) and re-decide frame 0", kick_pins, 4, None, kind="kick",
          expect=(2, 18261), note="frame 0's rank and face pins are dropped (warm start keeps only reversals and orientations); the reversal alone breaks tier 0 (t0 2), so the frame is searched again")
     pins = list(kick_pins)
     for ri in (4, 5, 6):
         m = taken_of(rounds[ri])
-        pins = pins + pin_of(m, ids)
+        pins = pins + pin_of(m)
         step(f"kick search round {ri - 3} in frame 0: best of {len(rounds[ri]['cands'])} moves", pins, ri, m,
              kind="kick_search", expect=(m["t0"], m["t2"]))
     step("kick: turn frame 2 (grinder) to run down, on top", pins + ["--orient", "2"], None, None, kind="kick",
          expect=(0, 3595),
          note="frame 2's best kick (alone from the Level 1 optimum it reaches 4171); the two frames' winners searched together reach only 5530 (trace rounds 25-30), so the cheaper single kick is taken and the other frame's kick is added on top")
     settle = {"trace_round": 54, "round": round_summary(rounds[54], model),
-              "note": "after a second kick round finds nothing below 3595, one unscoped settling pass scores 30 moves; none is better, so 3595 ships"}
+              "note": f"after a second kick round finds nothing below 3595, one unscoped settling pass scores {len(rounds[54]['cands'])} moves; none is better, so 3595 ships"}
     kicks_tried = [{"kick": what, "trace_rounds": [lo, hi],
                     "rounds": [round_summary(rounds[i], model) for i in range(lo, hi + 1)]}
                    for lo, hi, what in KICKS_TRIED]
@@ -134,12 +161,14 @@ def brew(scav: X.Scav) -> dict:
            "all_rounds": [round_summary(r, model) for r in rounds],
            "round_1_candidates": round_summary(rounds[0], model, full=True),
            "round_2_candidates": round_summary(rounds[1], model, full=True)}
+    for key, base in (("round_1_candidates", []), ("round_2_candidates", steps[1]["pins_added"])):
+        res[key]["candidates"] = [with_bound(scav, row, base, m) for m in res[key]["candidates"]]
 
     top = sorted([x for x in rounds[0]["cands"] if x["verdict"] != "not_viable"],
                  key=lambda x: (x["t0"], x["t2"]))[:6]
     drawn = []
     for m in top:
-        p = pin_of(m, ids)
+        p = pin_of(m)
         if p is None:
             continue
         g, _ = X.geometry(scav, "brew", row + p)
@@ -152,7 +181,6 @@ def brew(scav: X.Scav) -> dict:
 
 def tcp(scav: X.Scav) -> dict:
     rounds, model = scav.search_rounds("tcp", ["--portfolio-row", "8"])
-    ids = {s["name"]: i for i, s in enumerate(model["states"]) if s["name"]}
     row = ["--portfolio-row", "8", "--no-search"]
     g, _ = X.geometry(scav, "tcp", row)
     steps = [{"step": 0, "kind": "start", "label": "row 8 as Level 2 lays it out", "pins_added": [],
@@ -161,7 +189,7 @@ def tcp(scav: X.Scav) -> dict:
     ri = 0
     while any(x["verdict"] == "taken" for x in rounds[ri]["cands"]):
         m = taken_of(rounds[ri])
-        pins = pins + pin_of(m, ids)
+        pins = pins + pin_of(m)
         g, _ = X.geometry(scav, "tcp", row + pins)
         steps.append({"step": len(steps), "kind": "level1",
                       "label": f"Level 1 round {ri + 1}: best of {len(rounds[ri]['cands'])} moves",

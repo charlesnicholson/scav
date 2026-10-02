@@ -78,6 +78,8 @@ ATTR = re.compile(r'([a-zA-Z0-9-]+)="([^"]*)"')
 ELEM = re.compile(r'<(rect|circle|polygon|polyline|line|text)\s([^>]*?)(/>|>([^<]*)</text>)')
 NUM = {"x", "y", "width", "height", "rx", "cx", "cy", "r", "x1", "y1", "x2", "y2",
        "font-size", "textLength", "stroke-width"}
+ENTITY = re.compile(r"&(amp|lt|gt|quot|apos);")
+XML_CHAR = {"amp": "&", "lt": "<", "gt": ">", "quot": '"', "apos": "'"}  # svg.cpp put_text's five, one pass
 
 
 def pts(s: str) -> list:
@@ -105,7 +107,7 @@ def parse_svg(svg: str) -> dict:
             else:
                 p[k] = v
         if el == "text":
-            p["text"] = txt
+            p["text"] = ENTITY.sub(lambda e: XML_CHAR[e.group(1)], txt)
         prims.append(p)
     return {"size": [int(head.group(1)), int(head.group(2))],
             "viewbox": [int(head.group(i)) for i in range(3, 7)],
@@ -230,26 +232,20 @@ def geometry(scav: Scav, name: str, flags=(), scale="text", with_svg=True) -> tu
 
 def ranks_from_trace(events: list, doc: dict, down=()) -> list:
     """Per-frame ranks and in-rank order, from the shipped drawing's own trace."""
-    def sid_of(frame, name):
-        for c in doc["submachines"][frame]["children"]:  # names are unique within one frame only
-            if (doc["states"][c]["name"] or f"#{c}") == name:
-                return c
-        return None
-
     frames = {}
     for e in events:
         k = e["kind"]
         if k in ("rank_assigned", "rank_pinned"):
             f = frames.setdefault(e["frame"], {"rank_of": {}, "pinned": {}, "at": {}})
-            sid = sid_of(e["frame"], e["state"])
+            sid = e["state_id"]
             if k == "rank_assigned":
                 f["rank_of"].setdefault(sid, e["rank"])
                 f.setdefault("assigned", {})[sid] = e["rank"]
             else:
                 f["pinned"][sid] = e["rank"]
-        if k == "node_placed" and "state" in e:
+        if k == "node_placed" and "state_id" in e:
             f = frames.setdefault(e["frame"], {"rank_of": {}, "pinned": {}, "at": {}})
-            f["at"][sid_of(e["frame"], e["state"])] = e["at"]
+            f["at"][e["state_id"]] = e["at"]
     out = []
     for fr in sorted(frames):
         f = frames[fr]
