@@ -151,7 +151,8 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
 .scv .route { fill: none; stroke: var(--route); stroke-linejoin: round; }
 .scv .glyph { fill: var(--state-stroke); stroke: var(--state-stroke); }
 .scv .lbl { fill: var(--ink); }
-.scv .hit { fill: transparent; stroke: transparent; cursor: pointer; }
+.scv .hit { fill: transparent; stroke: transparent; }
+.scv .hit.click { cursor: pointer; }
 .scv .dim { opacity: 0.25; }
 .scv .hl-stroke { stroke: var(--hl) !important; }
 .scv .hl-fill { fill: color-mix(in srgb, var(--hl) 18%, var(--state-fill)) !important; }
@@ -5810,7 +5811,7 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
       var x = e.clientX + 14, y = e.clientY + 14, r = tipEl.getBoundingClientRect();
       if (x + r.width > innerWidth - 8) x = e.clientX - r.width - 14;
       if (y + r.height > innerHeight - 8) y = e.clientY - r.height - 14;
-      tipEl.style.left = x + 'px'; tipEl.style.top = y + 'px';
+      tipEl.style.left = Math.max(8, x) + 'px'; tipEl.style.top = Math.max(8, y) + 'px';   // a tip taller than either side pins to the top
     },
     hide: function () { if (tipEl) tipEl.style.display = 'none'; }
   };
@@ -5828,6 +5829,11 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
     var inp = SX.el('input', { type: 'range', min: o.min, max: o.max, step: o.step || 1, value: o.value });
     function show() { out.textContent = o.format ? o.format(+inp.value) : inp.value; }
     inp.addEventListener('input', function () { show(); o.onInput && o.onInput(+inp.value); });
+    // The readout keeps its widest width, so the row never reflows under a dragged thumb.
+    var widest = 0, st = +o.step || 1, n = Math.round((o.max - o.min) / st);
+    for (var k = 0; k <= n; k += Math.max(1, Math.floor(n / 200))) widest = Math.max(widest, String(o.format ? o.format(o.min + k * st) : o.min + k * st).length);
+    [o.max, o.value].forEach(function (v) { widest = Math.max(widest, String(o.format ? o.format(+v) : v).length); });
+    out.style.minWidth = widest + 'ch';
     show();
     var el = SX.el('label', null, o.label ? SX.el('span', { text: o.label }) : null, inp, out);
     return { el: el, input: inp, get: function () { return +inp.value; }, set: function (v) { inp.value = v; show(); o.onInput && o.onInput(+v); } };
@@ -5869,7 +5875,12 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
     sl.addEventListener('input', function () { stop(); go(+sl.value); });
     var el = SX.el('div', { class: 'ctrl' },
       SX.button('◀', function () { stop(); go(i - 1); }), play, SX.button('▶', function () { stop(); go(i + 1); }), sl, label);
-    setTimeout(function () { go(i); }, 0);
+    // Fixed widths, so the row never reflows under the pointer as the label or Play/Pause changes.
+    var widest = 0;
+    for (var k = 0; k < o.steps; k += Math.max(1, Math.floor(o.steps / 200))) widest = Math.max(widest, (o.label ? o.label(k) : (k + 1) + ' / ' + o.steps).length);
+    if (o.steps) widest = Math.max(widest, (o.label ? o.label(o.steps - 1) : o.steps + ' / ' + o.steps).length);
+    label.style.minWidth = widest + 'ch'; play.style.minWidth = '4.8em';
+    setTimeout(function () { if (el.isConnected) go(i); }, 0);   // a stepper replaced before this runs never draws
     return { el: el, go: go, get: function () { return i; }, stop: stop };
   };
 
@@ -5887,7 +5898,7 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
   // ---- scav geometry renderer -------------------------------------------------------
   // geom: the explainer's chart schema (box, states, subs, trans, cost). Units are scav grid
   // units (1/16 pt). opts: {pad, layers: {subs, states, text, routes, labels, ports}, onState,
-  // onTrans, highlight: {states: [ids], trans: [ids]}, maxHeight}.
+  // onTrans, click, highlight: {states: [ids], trans: [ids]}, maxHeight}. Hits report clicks only with click: true.
   SX.chart = function (container, geom, opts) {
     opts = opts || {};
     var L = Object.assign({ subs: true, states: true, text: true, routes: true, labels: true }, opts.layers || {});
@@ -5970,11 +5981,13 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
       bucket(q.of, q.e.id).nodes.push({ n: n, el: q.p.el });
     });
 
-    // Hit targets over everything, for hover and click.
+    // Hit targets over everything, for hover and, with opts.click, click.
+    var hitEvents = opts.click ? ['mousemove', 'mouseleave', 'click'] : ['mousemove', 'mouseleave'];
+    var hitClass = opts.click ? 'hit click' : 'hit';
     if (opts.onState) (geom.states || []).forEach(function (s) {
-      var r = s.rect, h = SX.svg('rect', { x: r[0], y: r[1], width: r[2], height: r[3], class: 'hit' });
+      var r = s.rect, h = SX.svg('rect', { x: r[0], y: r[1], width: r[2], height: r[3], class: hitClass });
       h.style.pointerEvents = 'fill';
-      ['mousemove', 'mouseleave', 'click'].forEach(function (ev) {
+      hitEvents.forEach(function (ev) {
         h.addEventListener(ev, function (e) { opts.onState(s, e, ev === 'mousemove' ? 'move' : ev === 'mouseleave' ? 'leave' : 'click'); });
       });
       gHit.appendChild(h);
@@ -5982,9 +5995,9 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
     if (opts.onTrans) (geom.trans || []).forEach(function (t) {
       if (!t.points || t.points.length < 2) return;
       var d = t.points.map(function (p, k) { return (k ? 'L' : 'M') + p[0] + ',' + p[1]; }).join('');
-      var h = SX.svg('path', { d: d, class: 'hit', fill: 'none', 'stroke-width': 140 });
+      var h = SX.svg('path', { d: d, class: hitClass, fill: 'none', 'stroke-width': 140 });
       h.style.pointerEvents = 'stroke';
-      ['mousemove', 'mouseleave', 'click'].forEach(function (ev) {
+      hitEvents.forEach(function (ev) {
         h.addEventListener(ev, function (e) { opts.onTrans(t, e, ev === 'mousemove' ? 'move' : ev === 'mouseleave' ? 'leave' : 'click'); });
       });
       gHit.appendChild(h);
@@ -6560,7 +6573,7 @@ SX.register('principles', function (sec) {
         var y = m.t + x.thread * rowH;
         var r = SX.svg('rect', { x: X(x.start) + 1, y: y + 2, width: Math.max(2, X(x.end) - X(x.start) - 2), height: rowH - 4, rx: 3, fill: SX.css(x.shard === 2 || x.shard === 5 ? '--series-2' : '--series-1'), opacity: 0.85 });
         svg.appendChild(r);
-        svg.appendChild(SX.svg('text', { x: X(x.start) + 6, y: y + 15, fill: SX.css('--surface-1'), 'font-weight': 600, text: 'shard ' + x.shard }));
+        svg.appendChild(SX.svg('text', { x: X(x.start) + 6, y: y + 15, fill: SX.css('--surface-1'), 'font-weight': 600, 'pointer-events': 'none', text: 'shard ' + x.shard }));
         SX.tipOn(r, '<b>shard ' + x.shard + '</b> on thread ' + x.thread + '<br>runs ' + x.start + '–' + x.end + ', writes slot ' + x.shard + ' = ' + COST[x.shard]);
       });
       // The result slots, in index order, each tagged with when it was written.
@@ -6574,9 +6587,9 @@ SX.register('principles', function (sec) {
         var x = m.l + k * cw;
         var cell = SX.svg('rect', { x: x + 2, y: sy, width: cw - 4, height: 30, rx: 4, fill: SX.css('--surface-2'), stroke: k === idx ? SX.css('--hl') : SX.css('--grid'), 'stroke-width': k === idx ? 2.5 : 1 });
         svg.appendChild(cell);
-        svg.appendChild(SX.svg('text', { x: x + cw / 2, y: sy + 20, 'text-anchor': 'middle', fill: SX.css('--text-primary'), 'font-family': SX.css('--mono'), text: k + ': ' + v }));
+        svg.appendChild(SX.svg('text', { x: x + cw / 2, y: sy + 20, 'text-anchor': 'middle', fill: SX.css('--text-primary'), 'font-family': SX.css('--mono'), 'pointer-events': 'none', text: k + ': ' + v }));
         svg.appendChild(SX.svg('text', { x: x + cw / 2, y: sy + 46, 'text-anchor': 'middle', fill: SX.css('--text-muted'), 'font-size': 11, text: 'done #' + rank[k] }));
-        SX.tipOn(cell, '<b>slot ' + k + '</b>: cost ' + v + '<br><span class="m">written ' + ['first', 'second', 'third'][rank[k] - 1] + (rank[k] > 3 ? 'th' : '') + ' in this run</span>');
+        SX.tipOn(cell, '<b>slot ' + k + '</b>: cost ' + v + '<br><span class="m">written ' + ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth'][rank[k] - 1] + ' in this run</span>');
       });
       svg.appendChild(SX.svg('text', { x: m.l, y: H - 6, fill: SX.css('--text-muted'), 'font-size': 11, text: 'time →  (run ' + run + ', ' + threads + (threads === 1 ? ' thread' : ' threads') + ', wall ' + T + ' ticks)' }));
       holder.innerHTML = ''; holder.appendChild(svg);
@@ -6753,12 +6766,12 @@ SX.register('decompose', function (sec) {
 
   (function () {
     var host = sec.querySelector('[data-fig="decompose-split"]');
-    var f = SX.figure(host, { caption: '<b>Hover</b> a frame (in the drawing or in the list) to see the submachine it lays out. <b>Pick</b> a split transition, then <b>step</b> through its segments: each is coloured by the frame that owns it, orange dots are ports on the crossed borders, and squares are the boundary nodes phase 1 puts on a frame\'s edge. The chart is <code>toolchanger</code>, which includes <code>axis</code> (as <code>arm</code>, itself including <code>estop</code>) and <code>estop</code> (as <code>stop</code>); this is its shipped drawing, re-derived from scav\'s trace.' });
+    var f = SX.figure(host, { caption: '<b>Hover</b> a frame (in the drawing or in the list) to see the submachine it lays out; <b>click</b> one in the list to keep it shown. <b>Pick</b> a split transition, then <b>step</b> through its segments: each is coloured by the frame that owns it, orange dots are ports on the crossed borders, and squares are the boundary nodes phase 1 puts on a frame\'s edge. The chart is <code>toolchanger</code>, which includes <code>axis</code> (as <code>arm</code>, itself including <code>estop</code>) and <code>estop</code> (as <code>stop</code>); this is its shipped drawing, re-derived from scav\'s trace.' });
     var G = T.geometry, D = T.decomposition, FR = D.frames;
     var PAL = ['--series-1', '--series-3', '--series-7', '--series-4', '--series-5', '--series-8'];
     var col = function (fid) { return 'var(' + PAL[fid % PAL.length] + ')'; };
     var fname = function (fr) { return fr.owner == null ? 'root' : fr.owner_path + (fr.name ? ':' + fr.name : ''); };
-    var splits = D.split_transitions, sel = 1, step = 0, hoverFrame = null;
+    var splits = D.split_transitions, sel = 1, step = 0, hoverFrame = null, pinFrame = null;
     var frameChips = SX.el('div', { class: 'dc-list' }), transChips = SX.el('div', { class: 'dc-list' });
     var stage = SX.el('div'), segs = SX.el('div', { class: 'dc-segs' });
     f.ctrl.style.display = 'block';
@@ -6794,11 +6807,13 @@ SX.register('decompose', function (sec) {
       var n = D.segments.filter(function (sg) { return sg.frame === fr.id; }).length;
       return '<b>frame ' + fr.id + '</b>: ' + fname(fr) + '<br>' + fr.states.length + ' nodes, ' + n + ' segments' + (fr.down ? '<br><span class="m">runs down the page (an orient pin)</span>' : '');
     }
-    FR.forEach(function (fr) {
+    var fbtn = FR.map(function (fr) {
       var b = SX.el('button', { type: 'button', html: '<span class="swatch" style="background:' + col(fr.id) + '"></span>' + fr.id + ' · ' + fname(fr) });
       b.addEventListener('mouseenter', function () { hoverFrame = fr.id; paint(); });
       b.addEventListener('mouseleave', function () { hoverFrame = null; paint(); });
+      b.addEventListener('click', function () { pinFrame = pinFrame === fr.id ? null : fr.id; paint(); });   // a click keeps the frame shown
       frameChips.appendChild(b);
+      return b;
     });
     var tbtn = splits.map(function (sp, k) {
       var b = SX.el('button', { type: 'button', text: '“' + G.trans[sp.trans].label + '”  ' + sp.segments.length + ' segments' });
@@ -6818,14 +6833,16 @@ SX.register('decompose', function (sec) {
     function paint() {
       fg.innerHTML = ''; h.unmarkAll();
       tbtn.forEach(function (b, k) { b.classList.toggle('on', k === sel); });
+      fbtn.forEach(function (b, k) { b.classList.toggle('on', FR[k].id === pinFrame); });
+      var shownFrame = hoverFrame != null ? hoverFrame : pinFrame;
       var sp = splits[sel], ps = pieces(sp), all = step >= sp.segments.length;
       var keepS = [], src = null, dst = null;
       G.states.forEach(function (st) { if (st.path === sp.src_path) src = st.id; if (st.path === sp.dst_path) dst = st.id; });
       h.dim({ states: G.states.map(function (st) { return st.id; }).filter(function (id) {
         var st = G.states[id];
-        return id === src || id === dst || sp.ports.some(function (p) { return p.border_of.indexOf(st.path) >= 0; }) || (hoverFrame != null && FR[hoverFrame].states.indexOf(id) >= 0);
+        return id === src || id === dst || sp.ports.some(function (p) { return p.border_of.indexOf(st.path) >= 0; }) || (shownFrame != null && FR[shownFrame].states.indexOf(id) >= 0);
       }), trans: [sp.trans] });
-      var showF = hoverFrame != null ? [hoverFrame] : all ? sp.frames : [sp.frames[step]];
+      var showF = shownFrame != null ? [shownFrame] : all ? sp.frames : [sp.frames[step]];
       showF.forEach(function (fid) {
         var r = FR[fid].rect;
         fg.appendChild(SX.svg('rect', { x: r[0], y: r[1], width: r[2], height: r[3], fill: 'color-mix(in srgb, ' + col(fid) + ' 9%, transparent)', stroke: col(fid), 'stroke-width': u * 2.5, 'stroke-dasharray': (u * 8) + ' ' + (u * 5), 'pointer-events': 'none' }));
@@ -7054,7 +7071,7 @@ SX.register('decompose', function (sec) {
       var e = T.edges[k], a = T.nodes[e.src], b = T.nodes[e.dst];
       var twin = T.edges.some(function (o, j) { return j !== k && ((o.src === e.dst && o.dst === e.src) || (o.src === e.src && o.dst === e.dst)); });
       var dx = b.x - a.x, dy = b.y - a.y, L = Math.sqrt(dx * dx + dy * dy), ox = 0, oy = 0;
-      if (twin) { var side = e.src < e.dst ? 1 : -1; ox = -dy / L * 9 * side; oy = dx / L * 9 * side; }
+      if (twin) { ox = -dy / L * 9; oy = dx / L * 9; }   // left of travel: opposite twins part, one each side
       var p = U.clip(a, b.x + ox, b.y + oy), q = U.clip(b, a.x + ox, a.y + oy);
       p = [p[0] + ox, p[1] + oy]; q = [q[0] + ox, q[1] + oy];
       return flipped ? [q, p] : [p, q];
@@ -8314,7 +8331,7 @@ SX.register('decompose', function (sec) {
     }
     var st = SX.stepper({ steps: PASSES.length, interval: 1300, label: function (i) { return PASSES[i]; }, onStep: function (k) {
       var h = SX.chart(host2, geom, { maxHeight: 400, layers: k < 6 ? { routes: false, labels: false } : {} });
-      var moves = [];
+      var moves = [], at = {};                         // ends at one point share the topmost dot's tooltip
       if (k < 6) nets.forEach(function (n) {
         var a = posAt(n, 'src', k), b = posAt(n, 'dst', k);
         styled(h.line([a.p, b.p], { 'stroke-width': 14, 'stroke-dasharray': '50 40' }), { stroke: 'var(--text-muted)' });
@@ -8323,9 +8340,15 @@ SX.register('decompose', function (sec) {
           if (moved) { styled(h.line([prev.p, now.p], { 'stroke-width': 26 }), { stroke: 'var(--hl)' }); moves.push(label(n) + ' ' + (end === 'src' ? 'leaving' : 'arriving') + ' end: (' + prev.p.join(', ') + ') → (' + now.p.join(', ') + ')'); }
           var d = styled(h.dot(now.p, 75, { 'stroke-width': 26 }), { fill: end === 'src' ? 'var(--surface-1)' : (moved ? 'var(--hl)' : 'var(--hl-2)'), stroke: moved ? 'var(--hl)' : 'var(--hl-2)' });
           var aim = n.seats.filter(function (s) { return s.end === end && s.pass === 'attach'; })[0];
-          d.style.cursor = 'help';
-          SX.tipOn(d, '<b>' + label(n) + '</b><br>' + (end === 'src' ? 'leaving' : 'arriving') + ' end, frame ' + n.frame + '<br>planned at (' + (end === 'src' ? n.src : n.dst).join(', ') + ')' + (aim ? '<br>aims at (' + aim.from.join(', ') + ')' : '') + '<br>after ' + PASSES[k] + ': (' + now.p.join(', ') + '), last moved by ' + now.how);
+          var key = now.p.join(','), tip = '<b>' + label(n) + '</b><br>' + (end === 'src' ? 'leaving' : 'arriving') + ' end, frame ' + n.frame + '<br>planned at (' + (end === 'src' ? n.src : n.dst).join(', ') + ')' + (aim ? '<br>aims at (' + aim.from.join(', ') + ')' : '') + '<br>after ' + PASSES[k] + ': (' + now.p.join(', ') + '), last moved by ' + now.how;
+          (at[key] = at[key] || []).push({ d: d, tip: tip });
         });
+      });
+      Object.keys(at).forEach(function (key) {
+        var q = at[key], top = q[q.length - 1].d;
+        q.forEach(function (x) { x.d.style.pointerEvents = 'none'; });
+        top.style.pointerEvents = ''; top.style.cursor = 'help';
+        SX.tipOn(top, q.map(function (x) { return x.tip; }).join('<br><br>'));
       });
       if (k === 0) log.textContent = nets.length + ' nets planned between node centres (and port points, none in brew). The internal Pumping → Pumping has no route.';
       else if (k === 6) log.textContent = 'The routed polylines, nudged, trimmed one arrowhead short of each target border, labels placed.';
@@ -8852,43 +8875,50 @@ window.SXcostOverlay = function (sec) {
     var D = drawings[src], g = D.g, M = C.measure(g), h = SX.chart(left, g, { maxHeight: 520, pad: 260 });
     var u = (g.box[2] + 520) / Math.max(left.clientWidth || 600, 300), mk = M.marks;   // grid units per screen pixel
     function col(k) { return 'var(' + KINDS.filter(function (K) { return K.k === k; })[0].col + ')'; }
+    // Marks overlap, so one listener shows the tip of every mark under the pointer.
+    function tipOn(n, html) { n._tip = html; return n; }
+    h.over.addEventListener('mousemove', function (e) {
+      var t = document.elementsFromPoint(e.clientX, e.clientY).filter(function (n) { return n._tip; }).map(function (n) { return n._tip; });
+      if (t.length) SX.tip.show(e, t.join('<br><br>')); else SX.tip.hide();
+    });
+    h.over.addEventListener('mouseleave', SX.tip.hide);
     if (on.area) {
       var b = g.box, r = h.rect(b, { fill: 'none', stroke: col('area'), 'stroke-width': 2 * u, 'stroke-dasharray': (8 * u) + ' ' + (5 * u) });
       r.style.pointerEvents = 'stroke';
-      SX.tipOn(r, '<b>area</b> ' + fmt(b[2]) + ' × ' + fmt(b[3]) + ' = ' + fmt(M.T.area) + ' units² → ' + fmt(C.cdiv(M.T.area, C.UNIT.area)) + ' em²<br><b>aspect</b> |' + fmt(b[2]) + '·10 − ' + fmt(b[3]) + '·16| = ' + fmt(M.T.aspect) + ' → ' + fmt(C.cdiv(M.T.aspect, C.EM)) + ' em × 2');
+      tipOn(r, '<b>area</b> ' + fmt(b[2]) + ' × ' + fmt(b[3]) + ' = ' + fmt(M.T.area) + ' units² → ' + fmt(C.cdiv(M.T.area, C.UNIT.area)) + ' em²<br><b>aspect</b> |' + fmt(b[2]) + '·10 − ' + fmt(b[3]) + '·16| = ' + fmt(M.T.aspect) + ' → ' + fmt(C.cdiv(M.T.aspect, C.EM)) + ' em × 2');
     }
     if (on.excess_len) mk.excess.forEach(function (e) {
       var l = h.line(e.t.points, { stroke: col('excess_len'), 'stroke-width': 6 * u, 'stroke-opacity': 0.55, 'stroke-linejoin': 'round' });
       l.style.pointerEvents = 'stroke';
-      SX.tipOn(l, '<b>excess length</b>, ' + name(g, e.t.id) + '<br>length ' + fmt(e.len) + ' − max(chord ' + fmt(e.chord) + ', label ' + fmt(e.carried) + ') = ' + fmt(e.ex) + (e.x > 1 ? ' × ' + e.x + ' (it crosses)' : '') + ' units');
+      tipOn(l, '<b>excess length</b>, ' + name(g, e.t.id) + '<br>length ' + fmt(e.len) + ' − max(chord ' + fmt(e.chord) + ', label ' + fmt(e.carried) + ') = ' + fmt(e.ex) + (e.x > 1 ? ' × ' + e.x + ' (it crosses)' : '') + ' units');
     });
     if (on.corridor) mk.corridor.forEach(function (c) {
       var s = c.s, pts = s.axis === 0 ? [[s.lo, s.at], [s.hi, s.at]] : [[s.at, s.lo], [s.at, s.hi]];
       var l = h.line(pts, { stroke: col('corridor'), 'stroke-width': 6 * u, 'stroke-opacity': c.exempt ? 0.3 : 0.75, 'stroke-dasharray': c.exempt ? (4 * u) + ' ' + (3 * u) : null });
       l.style.pointerEvents = 'stroke';
-      SX.tipOn(l, '<b>corridor</b>: t' + c.u + ' and t' + c.v + ' share ' + fmt(s.len) + ' units of one line' + (c.exempt ? '<br><span class="m">a trunk into their common destination: not charged</span>' : ''));
+      tipOn(l, '<b>corridor</b>: t' + c.u + ' and t' + c.v + ' share ' + fmt(s.len) + ' units of one line' + (c.exempt ? '<br><span class="m">a trunk into their common destination: not charged</span>' : ''));
     });
     if (on.crowding) mk.crowding.forEach(function (c) {
       var r = c.axis === 0 ? [c.lo, c.at0, c.hi - c.lo, c.apart] : [c.at0, c.lo, c.apart, c.hi - c.lo];
       var n = h.rect(r, { fill: col('crowding'), 'fill-opacity': 0.5, stroke: col('crowding'), 'stroke-width': 1 * u });
-      SX.tipOn(n, '<b>crowding</b>: t' + c.u + ' and t' + c.v + ' run ' + fmt(c.hi - c.lo) + ' units side by side, ' + c.apart + ' apart (an em is 192)<br>' + fmt(c.hi - c.lo) + ' × (192 − ' + c.apart + ') / 192 = ' + c.charge.toFixed(1));
+      tipOn(n, '<b>crowding</b>: t' + c.u + ' and t' + c.v + ' run ' + fmt(c.hi - c.lo) + ' units side by side, ' + c.apart + ' apart (an em is 192)<br>' + fmt(c.hi - c.lo) + ' × (192 − ' + c.apart + ') / 192 = ' + c.charge.toFixed(1));
     });
     if (on.lor) mk.lor.forEach(function (x) {
       var b = x.t.label_box;
       var n = h.rect(b, { fill: col('lor'), 'fill-opacity': 0.18, stroke: col('lor'), 'stroke-width': 1.5 * u });
-      SX.tipOn(n, '<b>label over route</b> (Tier 0): the label of ' + name(g, x.t.id) + ' overlaps a segment of t' + x.p.t);
+      tipOn(n, '<b>label over route</b> (Tier 0): the label of ' + name(g, x.t.id) + ' overlaps a segment of t' + x.p.t);
       var l = h.line([x.p.a, x.p.b], { stroke: col('lor'), 'stroke-width': 3 * u });
-      SX.tipOn(l, 'the segment of ' + name(g, x.p.t) + ' under the label of t' + x.t.id);
+      tipOn(l, 'the segment of ' + name(g, x.p.t) + ' under the label of t' + x.t.id);
     });
     if (on.bends) mk.bends.forEach(function (b) {
       var d = h.dot(b.p, 5 * u, { fill: col('bends'), stroke: 'var(--surface-1)', 'stroke-width': 1.5 * u });
-      SX.tipOn(d, '<b>bend</b> on ' + name(g, b.t.id) + '<br>1 × 512 = 512');
+      tipOn(d, '<b>bend</b> on ' + name(g, b.t.id) + '<br>1 × 512 = 512');
     });
     if (on.crossings) mk.crossings.forEach(function (c) {
       var s = 6 * u, p = c.p;
       var n = h.line([[p[0] - s, p[1] - s], [p[0] + s, p[1] + s], [p[0], p[1]], [p[0] + s, p[1] - s], [p[0] - s, p[1] + s]], { stroke: col('crossings'), 'stroke-width': 2.5 * u });
       var hit = h.dot(p, 9 * u, { fill: 'transparent' });
-      SX.tipOn(hit, '<b>crossing</b>: t' + c.u + ' × t' + c.v + '<br>1 × 512 = 512');
+      tipOn(hit, '<b>crossing</b>: t' + c.u + ' × t' + c.v + '<br>1 × 512 = 512');
     });
     table(g, M);
   }
@@ -8957,13 +8987,16 @@ window.SXcostWeights = function (sec) {
     cards.forEach(function (x, i) {
       x.card.style.borderColor = i === best ? 'var(--hl)' : 'transparent';
       x.head.innerHTML = '<b>' + x.c.label + '</b> <span class="m" style="color:var(--text-muted)">(also rows ' + x.c.rows + ')</span> · t2 <b style="font-family:var(--mono)">' + SX.fmt(tot[i]) + '</b>' + (i === best ? ' <span class="pill">least cost: shipped under these weights</span>' : '');
-      var svg = SX.svg('svg', { viewBox: '0 0 560 22', style: { width: '100%', height: 'auto' } }), x0 = 0;
+      var svg = SX.svg('svg', { viewBox: '0 0 560 22', style: { width: '100%', height: 'auto' } }), x0 = 0, hits = [];
       parts(x.c.g).forEach(function (p) {
         var wd = 556 * p.part / vmax; if (wd <= 0) return;
         var r = SX.svg('rect', { x: x0, y: 3, width: Math.max(wd - 1, 0.5), height: 16, rx: 2, fill: SX.css(COL[p.k]) });
-        SX.tipOn(r, '<b>' + p.k + '</b>: ' + SX.fmt(p.raw) + ' raw → ' + SX.fmt(p.units) + ' ' + C.UNAME[C.UNIT[p.k]] + ' × ' + w[p.k] + ' = <b>' + SX.fmt(p.part) + '</b>');
+        var hw = Math.max(wd, 6), hit = SX.svg('rect', { x: x0 + wd / 2 - hw / 2, y: 0, width: hw, height: 22, fill: 'transparent' });   // a sliver still gets 6 units to hover
+        hits.push(hit);
+        SX.tipOn(hit, '<b>' + p.k + '</b>: ' + SX.fmt(p.raw) + ' raw → ' + SX.fmt(p.units) + ' ' + C.UNAME[C.UNIT[p.k]] + ' × ' + w[p.k] + ' = <b>' + SX.fmt(p.part) + '</b>');
         svg.appendChild(r); x0 += wd;
       });
+      hits.sort(function (a, b) { return b.getAttribute('width') - a.getAttribute('width'); }).forEach(function (n) { svg.appendChild(n); });   // narrow on top
       x.bar.innerHTML = ''; x.bar.appendChild(svg);
     });
     var shipped = cards.map(function (x) { return C.weighted(x.c.g.cost.terms) === x.c.g.cost.t2; });

@@ -189,43 +189,50 @@ window.SXcostOverlay = function (sec) {
     var D = drawings[src], g = D.g, M = C.measure(g), h = SX.chart(left, g, { maxHeight: 520, pad: 260 });
     var u = (g.box[2] + 520) / Math.max(left.clientWidth || 600, 300), mk = M.marks;   // grid units per screen pixel
     function col(k) { return 'var(' + KINDS.filter(function (K) { return K.k === k; })[0].col + ')'; }
+    // Marks overlap, so one listener shows the tip of every mark under the pointer.
+    function tipOn(n, html) { n._tip = html; return n; }
+    h.over.addEventListener('mousemove', function (e) {
+      var t = document.elementsFromPoint(e.clientX, e.clientY).filter(function (n) { return n._tip; }).map(function (n) { return n._tip; });
+      if (t.length) SX.tip.show(e, t.join('<br><br>')); else SX.tip.hide();
+    });
+    h.over.addEventListener('mouseleave', SX.tip.hide);
     if (on.area) {
       var b = g.box, r = h.rect(b, { fill: 'none', stroke: col('area'), 'stroke-width': 2 * u, 'stroke-dasharray': (8 * u) + ' ' + (5 * u) });
       r.style.pointerEvents = 'stroke';
-      SX.tipOn(r, '<b>area</b> ' + fmt(b[2]) + ' × ' + fmt(b[3]) + ' = ' + fmt(M.T.area) + ' units² → ' + fmt(C.cdiv(M.T.area, C.UNIT.area)) + ' em²<br><b>aspect</b> |' + fmt(b[2]) + '·10 − ' + fmt(b[3]) + '·16| = ' + fmt(M.T.aspect) + ' → ' + fmt(C.cdiv(M.T.aspect, C.EM)) + ' em × 2');
+      tipOn(r, '<b>area</b> ' + fmt(b[2]) + ' × ' + fmt(b[3]) + ' = ' + fmt(M.T.area) + ' units² → ' + fmt(C.cdiv(M.T.area, C.UNIT.area)) + ' em²<br><b>aspect</b> |' + fmt(b[2]) + '·10 − ' + fmt(b[3]) + '·16| = ' + fmt(M.T.aspect) + ' → ' + fmt(C.cdiv(M.T.aspect, C.EM)) + ' em × 2');
     }
     if (on.excess_len) mk.excess.forEach(function (e) {
       var l = h.line(e.t.points, { stroke: col('excess_len'), 'stroke-width': 6 * u, 'stroke-opacity': 0.55, 'stroke-linejoin': 'round' });
       l.style.pointerEvents = 'stroke';
-      SX.tipOn(l, '<b>excess length</b>, ' + name(g, e.t.id) + '<br>length ' + fmt(e.len) + ' − max(chord ' + fmt(e.chord) + ', label ' + fmt(e.carried) + ') = ' + fmt(e.ex) + (e.x > 1 ? ' × ' + e.x + ' (it crosses)' : '') + ' units');
+      tipOn(l, '<b>excess length</b>, ' + name(g, e.t.id) + '<br>length ' + fmt(e.len) + ' − max(chord ' + fmt(e.chord) + ', label ' + fmt(e.carried) + ') = ' + fmt(e.ex) + (e.x > 1 ? ' × ' + e.x + ' (it crosses)' : '') + ' units');
     });
     if (on.corridor) mk.corridor.forEach(function (c) {
       var s = c.s, pts = s.axis === 0 ? [[s.lo, s.at], [s.hi, s.at]] : [[s.at, s.lo], [s.at, s.hi]];
       var l = h.line(pts, { stroke: col('corridor'), 'stroke-width': 6 * u, 'stroke-opacity': c.exempt ? 0.3 : 0.75, 'stroke-dasharray': c.exempt ? (4 * u) + ' ' + (3 * u) : null });
       l.style.pointerEvents = 'stroke';
-      SX.tipOn(l, '<b>corridor</b>: t' + c.u + ' and t' + c.v + ' share ' + fmt(s.len) + ' units of one line' + (c.exempt ? '<br><span class="m">a trunk into their common destination: not charged</span>' : ''));
+      tipOn(l, '<b>corridor</b>: t' + c.u + ' and t' + c.v + ' share ' + fmt(s.len) + ' units of one line' + (c.exempt ? '<br><span class="m">a trunk into their common destination: not charged</span>' : ''));
     });
     if (on.crowding) mk.crowding.forEach(function (c) {
       var r = c.axis === 0 ? [c.lo, c.at0, c.hi - c.lo, c.apart] : [c.at0, c.lo, c.apart, c.hi - c.lo];
       var n = h.rect(r, { fill: col('crowding'), 'fill-opacity': 0.5, stroke: col('crowding'), 'stroke-width': 1 * u });
-      SX.tipOn(n, '<b>crowding</b>: t' + c.u + ' and t' + c.v + ' run ' + fmt(c.hi - c.lo) + ' units side by side, ' + c.apart + ' apart (an em is 192)<br>' + fmt(c.hi - c.lo) + ' × (192 − ' + c.apart + ') / 192 = ' + c.charge.toFixed(1));
+      tipOn(n, '<b>crowding</b>: t' + c.u + ' and t' + c.v + ' run ' + fmt(c.hi - c.lo) + ' units side by side, ' + c.apart + ' apart (an em is 192)<br>' + fmt(c.hi - c.lo) + ' × (192 − ' + c.apart + ') / 192 = ' + c.charge.toFixed(1));
     });
     if (on.lor) mk.lor.forEach(function (x) {
       var b = x.t.label_box;
       var n = h.rect(b, { fill: col('lor'), 'fill-opacity': 0.18, stroke: col('lor'), 'stroke-width': 1.5 * u });
-      SX.tipOn(n, '<b>label over route</b> (Tier 0): the label of ' + name(g, x.t.id) + ' overlaps a segment of t' + x.p.t);
+      tipOn(n, '<b>label over route</b> (Tier 0): the label of ' + name(g, x.t.id) + ' overlaps a segment of t' + x.p.t);
       var l = h.line([x.p.a, x.p.b], { stroke: col('lor'), 'stroke-width': 3 * u });
-      SX.tipOn(l, 'the segment of ' + name(g, x.p.t) + ' under the label of t' + x.t.id);
+      tipOn(l, 'the segment of ' + name(g, x.p.t) + ' under the label of t' + x.t.id);
     });
     if (on.bends) mk.bends.forEach(function (b) {
       var d = h.dot(b.p, 5 * u, { fill: col('bends'), stroke: 'var(--surface-1)', 'stroke-width': 1.5 * u });
-      SX.tipOn(d, '<b>bend</b> on ' + name(g, b.t.id) + '<br>1 × 512 = 512');
+      tipOn(d, '<b>bend</b> on ' + name(g, b.t.id) + '<br>1 × 512 = 512');
     });
     if (on.crossings) mk.crossings.forEach(function (c) {
       var s = 6 * u, p = c.p;
       var n = h.line([[p[0] - s, p[1] - s], [p[0] + s, p[1] + s], [p[0], p[1]], [p[0] + s, p[1] - s], [p[0] - s, p[1] + s]], { stroke: col('crossings'), 'stroke-width': 2.5 * u });
       var hit = h.dot(p, 9 * u, { fill: 'transparent' });
-      SX.tipOn(hit, '<b>crossing</b>: t' + c.u + ' × t' + c.v + '<br>1 × 512 = 512');
+      tipOn(hit, '<b>crossing</b>: t' + c.u + ' × t' + c.v + '<br>1 × 512 = 512');
     });
     table(g, M);
   }
@@ -294,13 +301,16 @@ window.SXcostWeights = function (sec) {
     cards.forEach(function (x, i) {
       x.card.style.borderColor = i === best ? 'var(--hl)' : 'transparent';
       x.head.innerHTML = '<b>' + x.c.label + '</b> <span class="m" style="color:var(--text-muted)">(also rows ' + x.c.rows + ')</span> · t2 <b style="font-family:var(--mono)">' + SX.fmt(tot[i]) + '</b>' + (i === best ? ' <span class="pill">least cost: shipped under these weights</span>' : '');
-      var svg = SX.svg('svg', { viewBox: '0 0 560 22', style: { width: '100%', height: 'auto' } }), x0 = 0;
+      var svg = SX.svg('svg', { viewBox: '0 0 560 22', style: { width: '100%', height: 'auto' } }), x0 = 0, hits = [];
       parts(x.c.g).forEach(function (p) {
         var wd = 556 * p.part / vmax; if (wd <= 0) return;
         var r = SX.svg('rect', { x: x0, y: 3, width: Math.max(wd - 1, 0.5), height: 16, rx: 2, fill: SX.css(COL[p.k]) });
-        SX.tipOn(r, '<b>' + p.k + '</b>: ' + SX.fmt(p.raw) + ' raw → ' + SX.fmt(p.units) + ' ' + C.UNAME[C.UNIT[p.k]] + ' × ' + w[p.k] + ' = <b>' + SX.fmt(p.part) + '</b>');
+        var hw = Math.max(wd, 6), hit = SX.svg('rect', { x: x0 + wd / 2 - hw / 2, y: 0, width: hw, height: 22, fill: 'transparent' });   // a sliver still gets 6 units to hover
+        hits.push(hit);
+        SX.tipOn(hit, '<b>' + p.k + '</b>: ' + SX.fmt(p.raw) + ' raw → ' + SX.fmt(p.units) + ' ' + C.UNAME[C.UNIT[p.k]] + ' × ' + w[p.k] + ' = <b>' + SX.fmt(p.part) + '</b>');
         svg.appendChild(r); x0 += wd;
       });
+      hits.sort(function (a, b) { return b.getAttribute('width') - a.getAttribute('width'); }).forEach(function (n) { svg.appendChild(n); });   // narrow on top
       x.bar.innerHTML = ''; x.bar.appendChild(svg);
     });
     var shipped = cards.map(function (x) { return C.weighted(x.c.g.cost.terms) === x.c.g.cost.t2; });

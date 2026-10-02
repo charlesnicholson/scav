@@ -250,7 +250,7 @@
       var e = T.edges[k], a = T.nodes[e.src], b = T.nodes[e.dst];
       var twin = T.edges.some(function (o, j) { return j !== k && ((o.src === e.dst && o.dst === e.src) || (o.src === e.src && o.dst === e.dst)); });
       var dx = b.x - a.x, dy = b.y - a.y, L = Math.sqrt(dx * dx + dy * dy), ox = 0, oy = 0;
-      if (twin) { var side = e.src < e.dst ? 1 : -1; ox = -dy / L * 9 * side; oy = dx / L * 9 * side; }
+      if (twin) { ox = -dy / L * 9; oy = dx / L * 9; }   // left of travel: opposite twins part, one each side
       var p = U.clip(a, b.x + ox, b.y + oy), q = U.clip(b, a.x + ox, a.y + oy);
       p = [p[0] + ox, p[1] + oy]; q = [q[0] + ox, q[1] + oy];
       return flipped ? [q, p] : [p, q];

@@ -299,7 +299,7 @@
     }
     var st = SX.stepper({ steps: PASSES.length, interval: 1300, label: function (i) { return PASSES[i]; }, onStep: function (k) {
       var h = SX.chart(host2, geom, { maxHeight: 400, layers: k < 6 ? { routes: false, labels: false } : {} });
-      var moves = [];
+      var moves = [], at = {};                         // ends at one point share the topmost dot's tooltip
       if (k < 6) nets.forEach(function (n) {
         var a = posAt(n, 'src', k), b = posAt(n, 'dst', k);
         styled(h.line([a.p, b.p], { 'stroke-width': 14, 'stroke-dasharray': '50 40' }), { stroke: 'var(--text-muted)' });
@@ -308,9 +308,15 @@
           if (moved) { styled(h.line([prev.p, now.p], { 'stroke-width': 26 }), { stroke: 'var(--hl)' }); moves.push(label(n) + ' ' + (end === 'src' ? 'leaving' : 'arriving') + ' end: (' + prev.p.join(', ') + ') → (' + now.p.join(', ') + ')'); }
           var d = styled(h.dot(now.p, 75, { 'stroke-width': 26 }), { fill: end === 'src' ? 'var(--surface-1)' : (moved ? 'var(--hl)' : 'var(--hl-2)'), stroke: moved ? 'var(--hl)' : 'var(--hl-2)' });
           var aim = n.seats.filter(function (s) { return s.end === end && s.pass === 'attach'; })[0];
-          d.style.cursor = 'help';
-          SX.tipOn(d, '<b>' + label(n) + '</b><br>' + (end === 'src' ? 'leaving' : 'arriving') + ' end, frame ' + n.frame + '<br>planned at (' + (end === 'src' ? n.src : n.dst).join(', ') + ')' + (aim ? '<br>aims at (' + aim.from.join(', ') + ')' : '') + '<br>after ' + PASSES[k] + ': (' + now.p.join(', ') + '), last moved by ' + now.how);
+          var key = now.p.join(','), tip = '<b>' + label(n) + '</b><br>' + (end === 'src' ? 'leaving' : 'arriving') + ' end, frame ' + n.frame + '<br>planned at (' + (end === 'src' ? n.src : n.dst).join(', ') + ')' + (aim ? '<br>aims at (' + aim.from.join(', ') + ')' : '') + '<br>after ' + PASSES[k] + ': (' + now.p.join(', ') + '), last moved by ' + now.how;
+          (at[key] = at[key] || []).push({ d: d, tip: tip });
         });
+      });
+      Object.keys(at).forEach(function (key) {
+        var q = at[key], top = q[q.length - 1].d;
+        q.forEach(function (x) { x.d.style.pointerEvents = 'none'; });
+        top.style.pointerEvents = ''; top.style.cursor = 'help';
+        SX.tipOn(top, q.map(function (x) { return x.tip; }).join('<br><br>'));
       });
       if (k === 0) log.textContent = nets.length + ' nets planned between node centres (and port points, none in brew). The internal Pumping → Pumping has no route.';
       else if (k === 6) log.textContent = 'The routed polylines, nudged, trimmed one arrowhead short of each target border, labels placed.';

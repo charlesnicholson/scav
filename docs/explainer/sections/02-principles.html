@@ -134,7 +134,7 @@ SX.register('principles', function (sec) {
         var y = m.t + x.thread * rowH;
         var r = SX.svg('rect', { x: X(x.start) + 1, y: y + 2, width: Math.max(2, X(x.end) - X(x.start) - 2), height: rowH - 4, rx: 3, fill: SX.css(x.shard === 2 || x.shard === 5 ? '--series-2' : '--series-1'), opacity: 0.85 });
         svg.appendChild(r);
-        svg.appendChild(SX.svg('text', { x: X(x.start) + 6, y: y + 15, fill: SX.css('--surface-1'), 'font-weight': 600, text: 'shard ' + x.shard }));
+        svg.appendChild(SX.svg('text', { x: X(x.start) + 6, y: y + 15, fill: SX.css('--surface-1'), 'font-weight': 600, 'pointer-events': 'none', text: 'shard ' + x.shard }));
         SX.tipOn(r, '<b>shard ' + x.shard + '</b> on thread ' + x.thread + '<br>runs ' + x.start + '–' + x.end + ', writes slot ' + x.shard + ' = ' + COST[x.shard]);
       });
       // The result slots, in index order, each tagged with when it was written.
@@ -148,9 +148,9 @@ SX.register('principles', function (sec) {
         var x = m.l + k * cw;
         var cell = SX.svg('rect', { x: x + 2, y: sy, width: cw - 4, height: 30, rx: 4, fill: SX.css('--surface-2'), stroke: k === idx ? SX.css('--hl') : SX.css('--grid'), 'stroke-width': k === idx ? 2.5 : 1 });
         svg.appendChild(cell);
-        svg.appendChild(SX.svg('text', { x: x + cw / 2, y: sy + 20, 'text-anchor': 'middle', fill: SX.css('--text-primary'), 'font-family': SX.css('--mono'), text: k + ': ' + v }));
+        svg.appendChild(SX.svg('text', { x: x + cw / 2, y: sy + 20, 'text-anchor': 'middle', fill: SX.css('--text-primary'), 'font-family': SX.css('--mono'), 'pointer-events': 'none', text: k + ': ' + v }));
         svg.appendChild(SX.svg('text', { x: x + cw / 2, y: sy + 46, 'text-anchor': 'middle', fill: SX.css('--text-muted'), 'font-size': 11, text: 'done #' + rank[k] }));
-        SX.tipOn(cell, '<b>slot ' + k + '</b>: cost ' + v + '<br><span class="m">written ' + ['first', 'second', 'third'][rank[k] - 1] + (rank[k] > 3 ? 'th' : '') + ' in this run</span>');
+        SX.tipOn(cell, '<b>slot ' + k + '</b>: cost ' + v + '<br><span class="m">written ' + ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth'][rank[k] - 1] + ' in this run</span>');
       });
       svg.appendChild(SX.svg('text', { x: m.l, y: H - 6, fill: SX.css('--text-muted'), 'font-size': 11, text: 'time →  (run ' + run + ', ' + threads + (threads === 1 ? ' thread' : ' threads') + ', wall ' + T + ' ticks)' }));
       holder.innerHTML = ''; holder.appendChild(svg);

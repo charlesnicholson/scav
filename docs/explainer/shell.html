@@ -151,7 +151,8 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
 .scv .route { fill: none; stroke: var(--route); stroke-linejoin: round; }
 .scv .glyph { fill: var(--state-stroke); stroke: var(--state-stroke); }
 .scv .lbl { fill: var(--ink); }
-.scv .hit { fill: transparent; stroke: transparent; cursor: pointer; }
+.scv .hit { fill: transparent; stroke: transparent; }
+.scv .hit.click { cursor: pointer; }
 .scv .dim { opacity: 0.25; }
 .scv .hl-stroke { stroke: var(--hl) !important; }
 .scv .hl-fill { fill: color-mix(in srgb, var(--hl) 18%, var(--state-fill)) !important; }
@@ -225,7 +226,7 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
       var x = e.clientX + 14, y = e.clientY + 14, r = tipEl.getBoundingClientRect();
       if (x + r.width > innerWidth - 8) x = e.clientX - r.width - 14;
       if (y + r.height > innerHeight - 8) y = e.clientY - r.height - 14;
-      tipEl.style.left = x + 'px'; tipEl.style.top = y + 'px';
+      tipEl.style.left = Math.max(8, x) + 'px'; tipEl.style.top = Math.max(8, y) + 'px';   // a tip taller than either side pins to the top
     },
     hide: function () { if (tipEl) tipEl.style.display = 'none'; }
   };
@@ -243,6 +244,11 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
     var inp = SX.el('input', { type: 'range', min: o.min, max: o.max, step: o.step || 1, value: o.value });
     function show() { out.textContent = o.format ? o.format(+inp.value) : inp.value; }
     inp.addEventListener('input', function () { show(); o.onInput && o.onInput(+inp.value); });
+    // The readout keeps its widest width, so the row never reflows under a dragged thumb.
+    var widest = 0, st = +o.step || 1, n = Math.round((o.max - o.min) / st);
+    for (var k = 0; k <= n; k += Math.max(1, Math.floor(n / 200))) widest = Math.max(widest, String(o.format ? o.format(o.min + k * st) : o.min + k * st).length);
+    [o.max, o.value].forEach(function (v) { widest = Math.max(widest, String(o.format ? o.format(+v) : v).length); });
+    out.style.minWidth = widest + 'ch';
     show();
     var el = SX.el('label', null, o.label ? SX.el('span', { text: o.label }) : null, inp, out);
     return { el: el, input: inp, get: function () { return +inp.value; }, set: function (v) { inp.value = v; show(); o.onInput && o.onInput(+v); } };
@@ -284,7 +290,12 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
     sl.addEventListener('input', function () { stop(); go(+sl.value); });
     var el = SX.el('div', { class: 'ctrl' },
       SX.button('◀', function () { stop(); go(i - 1); }), play, SX.button('▶', function () { stop(); go(i + 1); }), sl, label);
-    setTimeout(function () { go(i); }, 0);
+    // Fixed widths, so the row never reflows under the pointer as the label or Play/Pause changes.
+    var widest = 0;
+    for (var k = 0; k < o.steps; k += Math.max(1, Math.floor(o.steps / 200))) widest = Math.max(widest, (o.label ? o.label(k) : (k + 1) + ' / ' + o.steps).length);
+    if (o.steps) widest = Math.max(widest, (o.label ? o.label(o.steps - 1) : o.steps + ' / ' + o.steps).length);
+    label.style.minWidth = widest + 'ch'; play.style.minWidth = '4.8em';
+    setTimeout(function () { if (el.isConnected) go(i); }, 0);   // a stepper replaced before this runs never draws
     return { el: el, go: go, get: function () { return i; }, stop: stop };
   };
 
@@ -302,7 +313,7 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
   // ---- scav geometry renderer -------------------------------------------------------
   // geom: the explainer's chart schema (box, states, subs, trans, cost). Units are scav grid
   // units (1/16 pt). opts: {pad, layers: {subs, states, text, routes, labels, ports}, onState,
-  // onTrans, highlight: {states: [ids], trans: [ids]}, maxHeight}.
+  // onTrans, click, highlight: {states: [ids], trans: [ids]}, maxHeight}. Hits report clicks only with click: true.
   SX.chart = function (container, geom, opts) {
     opts = opts || {};
     var L = Object.assign({ subs: true, states: true, text: true, routes: true, labels: true }, opts.layers || {});
@@ -385,11 +396,13 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
       bucket(q.of, q.e.id).nodes.push({ n: n, el: q.p.el });
     });
 
-    // Hit targets over everything, for hover and click.
+    // Hit targets over everything, for hover and, with opts.click, click.
+    var hitEvents = opts.click ? ['mousemove', 'mouseleave', 'click'] : ['mousemove', 'mouseleave'];
+    var hitClass = opts.click ? 'hit click' : 'hit';
     if (opts.onState) (geom.states || []).forEach(function (s) {
-      var r = s.rect, h = SX.svg('rect', { x: r[0], y: r[1], width: r[2], height: r[3], class: 'hit' });
+      var r = s.rect, h = SX.svg('rect', { x: r[0], y: r[1], width: r[2], height: r[3], class: hitClass });
       h.style.pointerEvents = 'fill';
-      ['mousemove', 'mouseleave', 'click'].forEach(function (ev) {
+      hitEvents.forEach(function (ev) {
         h.addEventListener(ev, function (e) { opts.onState(s, e, ev === 'mousemove' ? 'move' : ev === 'mouseleave' ? 'leave' : 'click'); });
       });
       gHit.appendChild(h);
@@ -397,9 +410,9 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
     if (opts.onTrans) (geom.trans || []).forEach(function (t) {
       if (!t.points || t.points.length < 2) return;
       var d = t.points.map(function (p, k) { return (k ? 'L' : 'M') + p[0] + ',' + p[1]; }).join('');
-      var h = SX.svg('path', { d: d, class: 'hit', fill: 'none', 'stroke-width': 140 });
+      var h = SX.svg('path', { d: d, class: hitClass, fill: 'none', 'stroke-width': 140 });
       h.style.pointerEvents = 'stroke';
-      ['mousemove', 'mouseleave', 'click'].forEach(function (ev) {
+      hitEvents.forEach(function (ev) {
         h.addEventListener(ev, function (e) { opts.onTrans(t, e, ev === 'mousemove' ? 'move' : ev === 'mouseleave' ? 'leave' : 'click'); });
       });
       gHit.appendChild(h);

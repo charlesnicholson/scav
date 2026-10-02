@@ -58,6 +58,33 @@ hierarchical profile at `aaac379` and of a per-candidate log of bottler's search
 `43de925`. Its `notes`, `builds` and `files` fields record each build, run and
 script. The binaries, logs and notes it cites were local to the measuring machine.
 
+## Checking the interactions
+
+`check_interactions.mjs` drives the built page in headless Chrome with real mouse and
+keyboard input over the DevTools protocol, using only Node (22 or later) and an installed
+Chrome:
+
+```sh
+node docs/explainer/check_interactions.mjs --jobs 6
+```
+
+It finds every listener the page binds, cross-checked against DevTools' own list, and
+every button and input. Each element is scrolled into view and hit-tested at points
+inside its own fill or stroke, so a mark that a label, overlay or another mark covers
+is reported, not tested at a point that misses it. Then it hovers (a tooltip with
+sensible text or a highlight, gone on leave), clicks (the drawing or the control
+changes; a choice moves its `on` state; a stepper steps, plays and pauses), drags (the
+mark follows the pointer and the drawing updates), drags each slider's thumb and sets
+every value, toggles each checkbox both ways, and types into the filter. Any exception
+fails the interaction. The whole pass runs again after the theme button, which must
+redraw every figure once with the same listeners.
+
+It writes `report.md` (counts by section, failures with screenshots, every
+interaction) and `results.json` to `--out` (default `$TMPDIR/sx-interactions`) and exits
+non-zero on any failure. `--only order,route` checks some sections, `--jobs N` shards
+the sections over N browsers, `--no-theme` skips the second pass, `--chrome BIN`
+names the browser and `--budget SECS` caps the run.
+
 ## Authoring a section
 
 ### The fragment
@@ -110,7 +137,7 @@ embedded whole and read with `SX.data('name')`, by file stem.
 | `SX.slider({label, min, max, step, value, format, onInput})` | → `{el, set, get}` |
 | `SX.toggle({label, value, onChange})`, `SX.choice({options:[{value,label}], value, onChange})`, `SX.button(label, onClick)` | controls |
 | `SX.tip.show(e, html)`, `SX.tip.hide()`, `SX.tipOn(node, html \| fn)` | tooltip |
-| `SX.chart(stage, geom, opts)` | draws a real scav layout exactly as scav's SVG does (from each element's `draw` pieces, theme-aware). Returns handles: `states[id] / trans[id] / subs[id]` = `{nodes, data}`; `mark(kind, id, color?, on?)` colours one element (`kind` = 'state', 'trans' or 'sub'; color defaults to `var(--hl)`), `unmarkAll()`, `dim({states:[ids], trans:[ids]})` fades everything else, `rect(r, attrs)`, `line(pts, attrs)`, `dot(p, r, attrs)` and `text(p, str, attrs)` draw overlays in chart units, `clear()` removes overlays; `sw` is scav's stroke width (16). opts: `{layers:{subs,states,text,routes,labels}, highlight:{states:[], trans:[]}, onState(s,e,'move'\|'leave'\|'click'), onTrans(t,e,…), labelBoxes, pad, maxHeight}` |
+| `SX.chart(stage, geom, opts)` | draws a real scav layout exactly as scav's SVG does (from each element's `draw` pieces, theme-aware). Returns handles: `states[id] / trans[id] / subs[id]` = `{nodes, data}`; `mark(kind, id, color?, on?)` colours one element (`kind` = 'state', 'trans' or 'sub'; color defaults to `var(--hl)`), `unmarkAll()`, `dim({states:[ids], trans:[ids]})` fades everything else, `rect(r, attrs)`, `line(pts, attrs)`, `dot(p, r, attrs)` and `text(p, str, attrs)` draw overlays in chart units, `clear()` removes overlays; `sw` is scav's stroke width (16). opts: `{layers:{subs,states,text,routes,labels}, highlight:{states:[], trans:[]}, onState(s,e,'move'\|'leave'\|'click'), onTrans(t,e,…), click, labelBoxes, pad, maxHeight}`; hits report `'click'`, and show a pointer, only with `click: true` |
 | `SX.lineChart(stage, {series:[{name, points:[[x,y,note]]}], xLabel, yLabel, markers, yFormat, xFormat, xTicks, onHover})` | line chart with crosshair tooltip |
 | `SX.barChart(stage, {bars:[{label, value, note, color}], unit, format})` | horizontal bars with tooltips |
 | `SX.data(name)` | parsed `data/name.json` |

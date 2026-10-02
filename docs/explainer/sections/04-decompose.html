@@ -37,12 +37,12 @@ SX.register('decompose', function (sec) {
 
   (function () {
     var host = sec.querySelector('[data-fig="decompose-split"]');
-    var f = SX.figure(host, { caption: '<b>Hover</b> a frame (in the drawing or in the list) to see the submachine it lays out. <b>Pick</b> a split transition, then <b>step</b> through its segments: each is coloured by the frame that owns it, orange dots are ports on the crossed borders, and squares are the boundary nodes phase 1 puts on a frame\'s edge. The chart is <code>toolchanger</code>, which includes <code>axis</code> (as <code>arm</code>, itself including <code>estop</code>) and <code>estop</code> (as <code>stop</code>); this is its shipped drawing, re-derived from scav\'s trace.' });
+    var f = SX.figure(host, { caption: '<b>Hover</b> a frame (in the drawing or in the list) to see the submachine it lays out; <b>click</b> one in the list to keep it shown. <b>Pick</b> a split transition, then <b>step</b> through its segments: each is coloured by the frame that owns it, orange dots are ports on the crossed borders, and squares are the boundary nodes phase 1 puts on a frame\'s edge. The chart is <code>toolchanger</code>, which includes <code>axis</code> (as <code>arm</code>, itself including <code>estop</code>) and <code>estop</code> (as <code>stop</code>); this is its shipped drawing, re-derived from scav\'s trace.' });
     var G = T.geometry, D = T.decomposition, FR = D.frames;
     var PAL = ['--series-1', '--series-3', '--series-7', '--series-4', '--series-5', '--series-8'];
     var col = function (fid) { return 'var(' + PAL[fid % PAL.length] + ')'; };
     var fname = function (fr) { return fr.owner == null ? 'root' : fr.owner_path + (fr.name ? ':' + fr.name : ''); };
-    var splits = D.split_transitions, sel = 1, step = 0, hoverFrame = null;
+    var splits = D.split_transitions, sel = 1, step = 0, hoverFrame = null, pinFrame = null;
     var frameChips = SX.el('div', { class: 'dc-list' }), transChips = SX.el('div', { class: 'dc-list' });
     var stage = SX.el('div'), segs = SX.el('div', { class: 'dc-segs' });
     f.ctrl.style.display = 'block';
@@ -78,11 +78,13 @@ SX.register('decompose', function (sec) {
       var n = D.segments.filter(function (sg) { return sg.frame === fr.id; }).length;
       return '<b>frame ' + fr.id + '</b>: ' + fname(fr) + '<br>' + fr.states.length + ' nodes, ' + n + ' segments' + (fr.down ? '<br><span class="m">runs down the page (an orient pin)</span>' : '');
     }
-    FR.forEach(function (fr) {
+    var fbtn = FR.map(function (fr) {
       var b = SX.el('button', { type: 'button', html: '<span class="swatch" style="background:' + col(fr.id) + '"></span>' + fr.id + ' · ' + fname(fr) });
       b.addEventListener('mouseenter', function () { hoverFrame = fr.id; paint(); });
       b.addEventListener('mouseleave', function () { hoverFrame = null; paint(); });
+      b.addEventListener('click', function () { pinFrame = pinFrame === fr.id ? null : fr.id; paint(); });   // a click keeps the frame shown
       frameChips.appendChild(b);
+      return b;
     });
     var tbtn = splits.map(function (sp, k) {
       var b = SX.el('button', { type: 'button', text: '“' + G.trans[sp.trans].label + '”  ' + sp.segments.length + ' segments' });
@@ -102,14 +104,16 @@ SX.register('decompose', function (sec) {
     function paint() {
       fg.innerHTML = ''; h.unmarkAll();
       tbtn.forEach(function (b, k) { b.classList.toggle('on', k === sel); });
+      fbtn.forEach(function (b, k) { b.classList.toggle('on', FR[k].id === pinFrame); });
+      var shownFrame = hoverFrame != null ? hoverFrame : pinFrame;
       var sp = splits[sel], ps = pieces(sp), all = step >= sp.segments.length;
       var keepS = [], src = null, dst = null;
       G.states.forEach(function (st) { if (st.path === sp.src_path) src = st.id; if (st.path === sp.dst_path) dst = st.id; });
       h.dim({ states: G.states.map(function (st) { return st.id; }).filter(function (id) {
         var st = G.states[id];
-        return id === src || id === dst || sp.ports.some(function (p) { return p.border_of.indexOf(st.path) >= 0; }) || (hoverFrame != null && FR[hoverFrame].states.indexOf(id) >= 0);
+        return id === src || id === dst || sp.ports.some(function (p) { return p.border_of.indexOf(st.path) >= 0; }) || (shownFrame != null && FR[shownFrame].states.indexOf(id) >= 0);
       }), trans: [sp.trans] });
-      var showF = hoverFrame != null ? [hoverFrame] : all ? sp.frames : [sp.frames[step]];
+      var showF = shownFrame != null ? [shownFrame] : all ? sp.frames : [sp.frames[step]];
       showF.forEach(function (fid) {
         var r = FR[fid].rect;
         fg.appendChild(SX.svg('rect', { x: r[0], y: r[1], width: r[2], height: r[3], fill: 'color-mix(in srgb, ' + col(fid) + ' 9%, transparent)', stroke: col(fid), 'stroke-width': u * 2.5, 'stroke-dasharray': (u * 8) + ' ' + (u * 5), 'pointer-events': 'none' }));
