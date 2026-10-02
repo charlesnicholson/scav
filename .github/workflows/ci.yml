@@ -15,14 +15,10 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, closed]
   workflow_dispatch:
-  # The full grid on main daily, whether or not anything was pushed: the toolchain
-  # image is rebuilt weekly, and drift in it is what a quiet week would otherwise hide.
-  schedule:
-    - cron: "0 6 * * *"
 
 # A formatting push cancels the run that made it and starts a fresh one, which is
 # the whole mechanism: the second run finds nothing to format and proceeds.
-# One group per PR branch, and one for main's pushes and nightlies: the newest run supersedes.
+# One group per PR branch, and one for main's pushes: the newest run supersedes.
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
