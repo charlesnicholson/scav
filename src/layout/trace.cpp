@@ -109,14 +109,16 @@ struct Json {
     raw("]");
   }
 
-  // A state by name, or its ordinal when the row has none -- an initial
+  // A state by id and by name, or its ordinal when the row has none -- an initial
   // pseudostate is nameless and a bend carries no state at all.
   void kstate(Chart const &c, uint32_t v) {
-    key("state");
     if ((v == INVALID) || (v >= c.states.size())) {
+      key("state");
       raw("null");
       return;
     }
+    kv("state_id", v);
+    key("state");
     auto const n{ chart_string(c,
                                c.states[v].name) };  // core's view; layout may not name it
     raw("\"");

@@ -15,6 +15,11 @@
 #include <string_view>
 #include <vector>
 
+namespace scav {
+void layout_test_skip_noop_faces(bool on);
+uint64_t layout_test_noop_faces();
+}  // namespace scav
+
 namespace {
 
 using namespace scav;
@@ -138,7 +143,8 @@ TEST_CASE("trace: a state is named, a nameless one is its ordinal, a stranger is
       { .kind = TraceKind::RankAssigned, .rank = { .state = INVALID, .rank = 0 } });
 
   std::string const out{ json_of(t, c) };
-  CHECK(out.find("\"state\":\"Alpha\",\"rank\":4") != std::string::npos);
+  CHECK(out.find("\"state_id\":" + std::to_string(a.v) +
+                 ",\"state\":\"Alpha\",\"rank\":4") != std::string::npos);
   CHECK(out.find("\"state\":\"#" + std::to_string(anon.v) + "\"") != std::string::npos);
   CHECK(out.find("\"state\":null") != std::string::npos);
   // Two of them: the out-of-range ordinal and INVALID both have no name to print.
@@ -519,10 +525,12 @@ TEST_CASE("trace: a face is offered only where its transition bends or is priced
   opts.threads = 1;
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
+  layout_test_skip_noop_faces(true);
   {
     Attached const held{ t };
     REQUIRE(layout_run(c, {}, opts, placed, diags, nullptr, nullptr, 0));
   }
+  CHECK(layout_test_noop_faces() > 0);  // a face with no effect goes unscored, traced too
   uint32_t faced{ 0 };
   uint32_t ranked{ 0 };
   for (TraceEvent const &ev : t.events) {

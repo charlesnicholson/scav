@@ -316,7 +316,7 @@ uint32_t ortho_index_of(std::vector<int32_t> const &v, int32_t at) {
 }
 
 bool ortho_escape_horizontal(scav_point toward, scav_rect const &r) {
-  // The dominant separation picks the axis, a tie going to the layering axis x.
+  // The dominant separation picks the axis, a tie going to x.
   return beyond(toward.x, r.x, r.w) >= beyond(toward.y, r.y, r.h);
 }
 

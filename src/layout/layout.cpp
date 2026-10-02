@@ -1229,13 +1229,7 @@ Improved run_search(Chart const &c,
   auto const with_here = [&add](SearchPins const &base_pins,
                                 Move const &m) -> SearchPins const & {
     SearchPins &into{ move_scratch().pins };
-    vec_assign(into.ranks, base_pins.ranks.begin(), base_pins.ranks.end());
-    vec_assign(into.cuts, base_pins.cuts.begin(), base_pins.cuts.end());
-    vec_assign(into.reverses, base_pins.reverses.begin(), base_pins.reverses.end());
-    vec_assign(into.faces, base_pins.faces.begin(), base_pins.faces.end());
-    vec_assign(into.orients, base_pins.orients.begin(), base_pins.orients.end());
-    vec_assign(into.sides, base_pins.sides.begin(), base_pins.sides.end());
-    vec_assign(into.folds, base_pins.folds.begin(), base_pins.folds.end());
+    into = base_pins;  // copy-assignment keeps each vector's storage
     add(into, m);
     return into;
   };
@@ -1312,9 +1306,8 @@ Improved run_search(Chart const &c,
     }
 
     // Four faces per segment end, less any pinned. A face the router gives no effect
-    // draws the incumbent exactly, so it is charged to the budget unscored unless traced.
+    // draws the incumbent exactly, so it is charged to the budget unscored.
     std::vector<uint8_t> const &faceable{ base.faceable };
-    bool const skip_noop{ trace_sink() == nullptr };
     for (uint32_t seg = 0; (seg < g.segments.size()) && (face_scored < budget); ++seg) {
       if (!in_scope(g.segments[seg].frame.v)) { continue; }
       TransId const t{ g.segments[seg].trans };
@@ -1329,9 +1322,8 @@ Improved run_search(Chart const &c,
         }
         if (already) { continue; }
         size_t const at{ (size_t{ 2 } * seg) + end };
-        uint32_t const effective{ (skip_noop && (at < faceable.size()))
-                                      ? uint32_t{ faceable[at] }
-                                      : 0xFU };
+        uint32_t const effective{ (at < faceable.size()) ? uint32_t{ faceable[at] }
+                                                         : 0xFU };
         for (uint32_t f = 0; (f < 4) && (face_scored < budget); ++f) {
           ++face_scored;
           if ((((effective >> f) & 1U) == 0) && skipping_noop_faces()) { continue; }
