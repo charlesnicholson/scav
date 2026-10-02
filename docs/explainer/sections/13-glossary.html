@@ -1,0 +1,110 @@
+<section class="sx" id="glossary" data-toc="13 · Glossary">
+  <style>
+    .gl { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 2px 24px; margin: 8px 0 0; max-width: 1180px; }
+    .gl-item { padding: 8px 0; border-bottom: 1px solid var(--grid); break-inside: avoid; }
+    .gl-item dt { font-weight: 600; }
+    .gl-item dd { margin: 2px 0 0; font-size: 14px; color: var(--text-secondary); }
+    .gl-item dd a { white-space: nowrap; font-size: 13px; }
+    .gl-item.hide { display: none; }
+    .gl-search { font: 15px var(--sans); padding: 7px 12px; width: min(420px, 100%); border-radius: 8px; border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary); }
+    .gl-item mark { background: color-mix(in srgb, var(--hl) 30%, transparent); color: inherit; border-radius: 2px; }
+  </style>
+  <div class="kicker">Reference</div>
+  <h2>Glossary</h2>
+  <p class="lede">Every term this page uses, in one line each, with a link to the section that explains it.</p>
+  <div data-fig="glossary-search"></div>
+  <dl class="gl">
+    <div class="gl-item" data-term="anchor (label)"><dt>Anchor (label)</dt><dd>The point a label is pulled toward: the midpoint of its route's longest horizontal leg, else of its longest leg. The Manhattan distance from the box's centre to it is the second placement key. <a href="#labels">→ labels</a></dd></div>
+    <div class="gl-item" data-term="attachment point"><dt>Attachment point</dt><dd>One of eight points on a label box (four side midpoints, then four corners) where the leader ends. <a href="#labels">→ labels</a></dd></div>
+    <div class="gl-item" data-term="bend"><dt>Bend</dt><dd>A route vertex where the direction changes. Tier 2 charges 512 per bend on <code>readable</code>. <a href="#cost">→ cost</a></dd></div>
+    <div class="gl-item" data-term="bend node"><dt>Bend node</dt><dd>A phase-1 dummy node that chains a multi-rank edge through an intermediate rank; the router treats it as a hard waypoint. <a href="#order">→ order</a></dd></div>
+    <div class="gl-item" data-term="bend penalty"><dt>Bend penalty</dt><dd>The router's cost for switching between its horizontal and vertical planes: one <code>rank_sep</code> (576 units). <a href="#route">→ route</a></dd></div>
+    <div class="gl-item" data-term="boundary node"><dt>Boundary node</dt><dd>A phase-1 node standing for a port (or an inner-face end) on its frame's edge: exits on the trailing border, entries on the leading one. <a href="#decompose">→ decompose</a></dd></div>
+    <div class="gl-item" data-term="boxspace"><dt>BoxSpace</dt><dd>The space request per state and submachine: <code>min_w</code>, <code>h_before</code>, <code>h_after</code>. <a href="#intro">→ intro</a></dd></div>
+    <div class="gl-item" data-term="brandes–köpf (bk)"><dt>Brandes–Köpf (BK)</dt><dd>Linear-time placement across the ranks: four alignment passes, compaction, and a median-average combine. scav follows the 2020 erratum. <a href="#size">→ size</a></dd></div>
+    <div class="gl-item" data-term="candidate"><dt>Candidate</dt><dd>One full evaluation, phases 1–3 plus cover and cost, for one row and one set of pins. <a href="#pipeline">→ pipeline</a></dd></div>
+    <div class="gl-item" data-term="chaining / cut"><dt>Chaining / cut</dt><dd>Replacing a multi-rank edge by a chain through bend nodes. A cut (<code>ChainCut</code>) leaves the edge unchained so the router draws it freely. <a href="#order">→ order</a></dd></div>
+    <div class="gl-item" data-term="chart cover"><dt>Chart cover</dt><dd>Growing the chart rectangle over every route point and label before scoring, so area and aspect price the canvas that ships. <a href="#pipeline">→ pipeline</a></dd></div>
+    <div class="gl-item" data-term="choice"><dt>Choice</dt><dd>A pseudostate drawn as a diamond inscribed in its box; routes meet it at a face midpoint. <a href="#intro">→ intro</a></dd></div>
+    <div class="gl-item" data-term="clearance"><dt>Clearance</dt><dd>The router's bumper around obstacles, <code>node_sep / 3</code> = 96 units: no segment comes closer to a box. <a href="#route">→ route</a></dd></div>
+    <div class="gl-item" data-term="composite state"><dt>Composite state</dt><dd>A state with at least one submachine. With two or more it is concurrent. <a href="#intro">→ intro</a></dd></div>
+    <div class="gl-item" data-term="concurrent state"><dt>Concurrent state</dt><dd>A composite with two or more submachines (regions), which run at once and are drawn side by side. <a href="#intro">→ intro</a></dd></div>
+    <div class="gl-item" data-term="corridor"><dt>Corridor</dt><dd>The collinear length two different routes share, less their common final leg (the trunk). Weight 48 per em. <a href="#cost">→ cost</a></dd></div>
+    <div class="gl-item" data-term="cost (tier 0, 1, 2)"><dt>Cost (Tier 0, 1, 2)</dt><dd>The objective, compared lexicographically: Tier 0 counts forbidden things, Tier 1 (unused) hints, Tier 2 a weighted sum of thirteen terms. <a href="#cost">→ cost</a></dd></div>
+    <div class="gl-item" data-term="crowding"><dt>Crowding</dt><dd>Two lanes of different routes closer than an em; priced continuously, falling to zero at one em apart. <a href="#cost">→ cost</a></dd></div>
+    <div class="gl-item" data-term="dar"><dt>DAR</dt><dd>Desired aspect ratio, an integer pair: 16:10 on <code>readable</code>. <a href="#size">→ size</a></dd></div>
+    <div class="gl-item" data-term="decompose (phase 0)"><dt>Decompose (phase 0)</dt><dd>Cutting every transition at the borders it crosses into segments and ports, leaving one flat graph per submachine. <a href="#decompose">→ decompose</a></dd></div>
+    <div class="gl-item" data-term="degraded route"><dt>Degraded route</dt><dd>A net the router could not route even after inflation: drawn as a straight line and reported as <code>RouteDegraded</code>. <a href="#pipeline">→ pipeline</a></dd></div>
+    <div class="gl-item" data-term="determinism contract"><dt>Determinism contract</dt><dd>Layout output is a function of the C++ abstract machine: the same bytes from any conforming toolchain, platform and thread count. <a href="#principles">→ principles</a></dd></div>
+    <div class="gl-item" data-term="em"><dt>Em</dt><dd><code>font_size_grid</code>, 192 units (12 pt) on <code>readable</code>: the unit Tier 2 lengths are scored in, and em² for areas. <a href="#cost">→ cost</a></dd></div>
+    <div class="gl-item" data-term="face (move)"><dt>Face (move)</dt><dd>Which side of a box a route end leaves or enters by; a <code>FacePin</code> fixes it. <a href="#search">→ search</a></dd></div>
+    <div class="gl-item" data-term="facing pass"><dt>Facing pass</dt><dd>After the first sizing, ports are turned to face their route's far end; if any turned, phases 1 and 2 run again. <a href="#pipeline">→ pipeline</a></dd></div>
+    <div class="gl-item" data-term="fold / piece"><dt>Fold / piece</dt><dd>Cutting a frame's long run of ranks into pieces that are packed or stacked to fit the aspect target. <a href="#size">→ size</a></dd></div>
+    <div class="gl-item" data-term="frame"><dt>Frame</dt><dd>One submachine laid out as its own layered graph: the unit of ordering, sizing, sharding and reuse. <a href="#decompose">→ decompose</a></dd></div>
+    <div class="gl-item" data-term="grid unit"><dt>Grid unit</dt><dd>1/16 pt. Every layout coordinate is an <code>int32</code> grid unit with <code>|x| ≤ COORD_MAX = 524,287</code>. <a href="#principles">→ principles</a></dd></div>
+    <div class="gl-item" data-term="hierarchy-crossing transition"><dt>Hierarchy-crossing transition</dt><dd>A transition whose ends lie in different submachines. Short if it crosses one border, long if more. <a href="#intro">→ intro</a></dd></div>
+    <div class="gl-item" data-term="holder"><dt>Holder</dt><dd>Where a label may lie: the chart intersected with every state enclosing both ends of its transition (and the region, if the LCA is one). <a href="#labels">→ labels</a></dd></div>
+    <div class="gl-item" data-term="inflation retry"><dt>Inflation retry</dt><dd>On an unreachable route, widen <code>rank_sep</code>, <code>node_sep</code> and <code>sub_sep</code> by 32 units and re-run phases 2–3, up to 8 times. <a href="#pipeline">→ pipeline</a></dd></div>
+    <div class="gl-item" data-term="initial / final"><dt>Initial / final</dt><dd>Pseudostates written with <code>*</code>: <code>trans * -&gt; X</code> creates an initial, <code>trans X -&gt; *</code> a final. <a href="#intro">→ intro</a></dd></div>
+    <div class="gl-item" data-term="inscribed glyph"><dt>Inscribed glyph</dt><dd>A pseudostate drawn as a disc, diamond or H inside its box; routes meet it at face midpoints. <a href="#route">→ route</a></dd></div>
+    <div class="gl-item" data-term="internal / local / external"><dt>Internal / local / external</dt><dd>A transition's kind: whether the arrow crosses its source's border. An internal self-transition has no route at all. <a href="#intro">→ intro</a></dd></div>
+    <div class="gl-item" data-term="kick"><dt>Kick</dt><dd>A structural perturbation (reverse a cycle edge, turn a frame, flip a fold) searched to convergence and kept only if it converges cheaper. <a href="#search">→ search</a></dd></div>
+    <div class="gl-item" data-term="lane"><dt>Lane</dt><dd>Nudging's group of nearby, overlapping parallel segments, spread apart into tracks. <a href="#route">→ route</a></dd></div>
+    <div class="gl-item" data-term="lca (frame)"><dt>LCA (frame)</dt><dd>The lowest common ancestor: the innermost submachine holding both ends of a transition. Its segment owns the label. <a href="#labels">→ labels</a></dd></div>
+    <div class="gl-item" data-term="leader"><dt>Leader</dt><dd>The invisible half-em offset (96 units) from a label's slide point on its route to an attachment point of its box. <a href="#labels">→ labels</a></dd></div>
+    <div class="gl-item" data-term="level 1"><dt>Level 1</dt><dd>Steepest-descent local search over pins: score every move in parallel, take the single best strict improvement, repeat. <a href="#search">→ search</a></dd></div>
+    <div class="gl-item" data-term="level 2"><dt>Level 2</dt><dd>The table of 16 whole-chart phase-2 settings (rows); every row is searched, and the cheapest wins. <a href="#search">→ search</a></dd></div>
+    <div class="gl-item" data-term="loose tier"><dt>Loose tier</dt><dd>The label fallback: anchored, inside its holder, uncut by its own route, but allowed over states, bands, boxes or foreign routes. <a href="#labels">→ labels</a></dd></div>
+    <div class="gl-item" data-term="memo"><dt>Memo</dt><dd>A cache keyed on every value a step reads, so a hit is exactly the computed answer and changes only the wall clock. <a href="#principles">→ principles</a></dd></div>
+    <div class="gl-item" data-term="net"><dt>Net</dt><dd>One routed piece of a transition (one segment) with its ends and waypoints. <a href="#route">→ route</a></dd></div>
+    <div class="gl-item" data-term="no-text / real text"><dt>No-text / real text</dt><dd>The two measurement scales: no space requests at all, or text measured with the bundled font. Never compared across. <a href="#principles">→ principles</a></dd></div>
+    <div class="gl-item" data-term="nudging"><dt>Nudging</dt><dd>Post-routing separation of lanes into parallel tracks, ordered to avoid crossings. <a href="#route">→ route</a></dd></div>
+    <div class="gl-item" data-term="pad"><dt>Pad</dt><dd>A box's interior ring, 128 units on <code>readable</code>. <a href="#size">→ size</a></dd></div>
+    <div class="gl-item" data-term="pathbox / pathclear / placed"><dt>PathBox / PathClear / Placed</dt><dd>The label space request; the arrowhead trim per end; the placed label rectangle layout returns. <a href="#intro">→ intro</a></dd></div>
+    <div class="gl-item" data-term="pins"><dt>Pins</dt><dd>Everything besides the row that a drawing is a function of: rank, cut, reverse, face, side, orient and fold pins. <a href="#search">→ search</a></dd></div>
+    <div class="gl-item" data-term="port / port slot"><dt>Port / port slot</dt><dd>Where a segment crosses a state's border; reported as <code>{x, y, side, depth}</code>, side 0 left, 1 right, 2 top, 3 bottom. <a href="#decompose">→ decompose</a></dd></div>
+    <div class="gl-item" data-term="profile"><dt>Profile</dt><dd>52 integer fields: spacing, type sizes, per-kind minimums, aspect, weights and search knobs (<code>readable</code>, <code>compact</code>). <a href="#intro">→ intro</a></dd></div>
+    <div class="gl-item" data-term="pseudostate"><dt>Pseudostate</dt><dd>Every state kind but Normal: initial, final, choice, junction, fork, join, history, deep history. <a href="#intro">→ intro</a></dd></div>
+    <div class="gl-item" data-term="rank / rank pin"><dt>Rank / rank pin</dt><dd>A node's column in its frame (its row, in a frame turned to run down). A <code>RankPin</code> holds a state at a chosen rank. <a href="#order">→ order</a></dd></div>
+    <div class="gl-item" data-term="region"><dt>Region</dt><dd>Informal name for one submachine of a concurrent state, drawn beside its siblings with a dashed divider. <a href="#intro">→ intro</a></dd></div>
+    <div class="gl-item" data-term="row"><dt>Row</dt><dd>One Level 2 setting of {box-packer flip, compaction, ratio source, fold}. <a href="#search">→ search</a></dd></div>
+    <div class="gl-item" data-term="scale measure (sm)"><dt>Scale measure (SM)</dt><dd><code>min(dar_num / (dar_den · w), 1 / h)</code>, compared by cross-multiplying; picks packings and folds. <a href="#size">→ size</a></dd></div>
+    <div class="gl-item" data-term="seat / seating passes"><dt>Seat / seating passes</dt><dd>Where a route end attaches on a face, settled by five passes: Attach, Reface, Align, Spread, Separate. <a href="#route">→ route</a></dd></div>
+    <div class="gl-item" data-term="segment"><dt>Segment</dt><dd>The part of a transition that lies in one frame, between two ports or a port and an endpoint. <a href="#decompose">→ decompose</a></dd></div>
+    <div class="gl-item" data-term="shard"><dt>Shard</dt><dd>A unit of parallel work whose count depends only on the model, never on the thread count; results merge in index order. <a href="#principles">→ principles</a></dd></div>
+    <div class="gl-item" data-term="shortfall"><dt>Shortfall</dt><dd><code>max(0, gap to own leg + h − gap to nearest foreign leg)</code>: the first key of a label's placement, and Tier 2's <code>label_near</code>. <a href="#labels">→ labels</a></dd></div>
+    <div class="gl-item" data-term="side (move)"><dt>Side (move)</dt><dd>Which border of its state a port sits on; a <code>SidePin</code> fixes it. <a href="#search">→ search</a></dd></div>
+    <div class="gl-item" data-term="space requests"><dt>Space requests</dt><dd>The application's three integer tables (<code>BoxSpace</code>, <code>PathClear</code>, <code>PathBox</code>): the only way content affects layout. <a href="#intro">→ intro</a></dd></div>
+    <div class="gl-item" data-term="split graph"><dt>Split graph</dt><dd>Phase 0's output: segments, ports, per-state depth and a process-unique serial. <a href="#decompose">→ decompose</a></dd></div>
+    <div class="gl-item" data-term="strict tier"><dt>Strict tier</dt><dd>A label candidate clear of every wall (foreign states, text bands, placed boxes) and every other transition's legs. <a href="#labels">→ labels</a></dd></div>
+    <div class="gl-item" data-term="submachine"><dt>Submachine</dt><dd>A child region of a state that holds states; a document's root is one. <a href="#intro">→ intro</a></dd></div>
+    <div class="gl-item" data-term="sweep"><dt>Sweep</dt><dd>One median pass over a frame's ranks, down or up; <code>sweep_count</code> = 8. <a href="#order">→ order</a></dd></div>
+    <div class="gl-item" data-term="tier 0 counts"><dt>Tier 0 counts</dt><dd>The eight forbidden counts: through-box, box-overlap, flush, through-region, retrace, vanished, label-over-box, label-over-route. <a href="#cost">→ cost</a></dd></div>
+    <div class="gl-item" data-term="transit bend"><dt>Transit bend</dt><dd>A bend inside a state the route merely passes through; charged on top of an ordinary bend. <a href="#cost">→ cost</a></dd></div>
+    <div class="gl-item" data-term="trunk"><dt>Trunk</dt><dd>The shared final leg of routes into a common destination; not charged as corridor. <a href="#cost">→ cost</a></dd></div>
+  </dl>
+</section>
+<script>
+SX.register('glossary', function (sec) {
+  var host = sec.querySelector('[data-fig="glossary-search"]');
+  var items = [].slice.call(sec.querySelectorAll('.gl-item'));
+  items.forEach(function (it) { it.classList.remove('hide'); var dt = it.querySelector('dt'); dt.innerHTML = dt.textContent; });
+  var count = SX.el('span', { class: 'note' });
+  var inp = SX.el('input', { type: 'search', class: 'gl-search', placeholder: 'Filter ' + items.length + ' terms: try “port”, “tier” or “label”', 'aria-label': 'Filter the glossary' });
+  function esc(t) { return t.replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); }
+  function run() {
+    var q = inp.value.trim().toLowerCase(), n = 0;
+    items.forEach(function (it) {
+      var dt = it.querySelector('dt'), name = dt.textContent, hit = !q || it.textContent.toLowerCase().indexOf(q) >= 0;
+      it.classList.toggle('hide', !hit);
+      var i = q ? name.toLowerCase().indexOf(q) : -1;
+      dt.innerHTML = i >= 0 ? esc(name.slice(0, i)) + '<mark>' + esc(name.slice(i, i + q.length)) + '</mark>' + esc(name.slice(i + q.length)) : esc(name);
+      if (hit) n++;
+    });
+    count.textContent = q ? n + ' of ' + items.length + ' terms' : items.length + ' terms';
+  }
+  inp.addEventListener('input', run);
+  host.appendChild(SX.el('div', { class: 'ctrl' }, inp, count));
+  run();
+});
+</script>

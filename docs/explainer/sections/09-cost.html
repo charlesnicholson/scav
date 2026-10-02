@@ -1,0 +1,356 @@
+<section class="sx" id="cost" data-toc="9 · The objective">
+  <div class="kicker">What scav optimises</div>
+  <h2>The objective: three tiers, compared in order</h2>
+  <p class="lede">Every drawing scav considers gets one score, a <code>Cost</code>. The search keeps whichever drawing has the least cost, so the cost decides what "better" means.</p>
+
+  <p>A <b>cost</b> is a triple <code>(t0, t1, t2)</code>. Two costs are compared <b>lexicographically</b>: the lower <code>t0</code> wins outright; if the two <code>t0</code> are equal, the lower <code>t1</code> wins; only then does <code>t2</code> decide. There are no multipliers between tiers. A large weight inside one sum is a cost cliff: it breaks local search, and it can overflow. Cost is computed from the finished geometry alone (state rectangles, route points, placed label boxes) and never by laying the chart out again.</p>
+  <p>The tests are strict. Two rectangles overlap only if their interiors meet, so touching does not count. A route segment's rectangle has zero thickness, so a label box that only touches a leg costs nothing. Two segments <em>cross</em> only properly: a shared endpoint or a collinear overlap is not a crossing.</p>
+
+  <h3>Tier 0: forbidden, not priced</h3>
+  <p><code>t0</code> is the sum of eight counts. Each one counts something a reader must never see. Because Tier 0 is compared first, one violation outweighs any Tier 2 total. Most of these are already impossible by construction (the router treats states as obstacles), so Tier 0 is a safety net: for degraded routes, for the search's own trial drawings, and for the label placer's fallback.</p>
+  <table class="sx-table">
+    <tr><th>count</th><th>charged per</th><th>what it forbids</th></tr>
+    <tr><td><code>through_box</code></td><td>route segment × live state it enters, unless that state encloses the route's source or destination (or is one of them)</td><td>an edge drawn through an unrelated box</td></tr>
+    <tr><td><code>box_overlap</code></td><td>pair of sibling states (children of one submachine) whose rectangles overlap</td><td>boxes on top of each other</td></tr>
+    <tr><td><code>vanished</code></td><td>transition with a segment to draw whose route has fewer than 2 points</td><td>a missing arrow. Every Tier 2 term would score an undrawn route as perfect.</td></tr>
+    <tr><td><code>flush</code></td><td>axis-aligned segment lying along any state's border, within 47 units (just under 3 pt)</td><td>a route the reader cannot tell from a border</td></tr>
+    <tr><td><code>through_region</code></td><td>segment entering a region (a non-root submachine) that neither end lies inside</td><td>an arrow cutting through a concurrent region it has no business in</td></tr>
+    <tr><td><code>retrace</code></td><td>route vertex where an axis-aligned leg turns straight back along the one before</td><td>one run drawn twice, which reads as two routes</td></tr>
+    <tr><td><code>label_over_box</code></td><td>placed label box × state it overlaps, except states enclosing both ends and the <em>host</em> (an endpoint that encloses the other end); +1 if the box overlaps the host's name band</td><td>a label sitting on a box</td></tr>
+    <tr><td><code>label_over_route</code></td><td>placed label box × segment of <em>another</em> transition's route it overlaps</td><td>a label sitting on someone else's line</td></tr>
+  </table>
+  <p class="note">The last two moved from Tier 2 into Tier 0 on this branch. At real text, every corpus chart and all 28 gauntlet charts ship with <code>t0 = 0</code>.</p>
+
+  <h3>Tier 1: hints</h3>
+  <p><code>t1</code> is meant to be an unsatisfied-hint count, weighted by priority, for an author's layout hints. Hints are not built yet, so <code>t1</code> is always 0. It is compared second, so when hints arrive they will outrank everything in Tier 2.</p>
+
+  <h3>Tier 2: thirteen weighted terms</h3>
+  <p><code>t2</code> is a plain integer sum. Each raw term is first converted to a unit. Counts stay counts. Lengths are divided by the <b>em</b>, the font size in grid units: 192 (12 pt) at the shipped <code>readable</code> profile. Areas are divided by em² (36,864). The division rounds up. Then the term is multiplied by its weight. Grid units are 1/16 pt.</p>
+  <table class="sx-table" id="cost-terms-table">
+    <tr><th>#</th><th>term</th><th>raw quantity</th><th>unit</th><th class="num">weight</th></tr>
+    <tr><td>1</td><td><code>bends</code></td><td>route vertices where the direction changes</td><td>count</td><td class="num">512</td></tr>
+    <tr><td>2</td><td><code>corridor</code></td><td>length two different transitions' segments share on one line, except the <em>trunk</em>: the final leg into a common destination (and the leg merging into it)</td><td>em</td><td class="num">48</td></tr>
+    <tr><td>3</td><td><code>crossings</code></td><td>proper crossings between different transitions' segments</td><td>count</td><td class="num">512</td></tr>
+    <tr><td>4</td><td><code>excess_len</code></td><td>per route: <code>max(0, length − max(chord, its label widths)) × (1 + its crossings)</code></td><td>em</td><td class="num">4</td></tr>
+    <tr><td>5</td><td><code>adjacency</code></td><td>segments joining two concurrent regions that are not adjacent (fork and join edges exempt)</td><td>count</td><td class="num">16</td></tr>
+    <tr><td>6</td><td><code>label</code></td><td>overlapping pairs of placed label boxes, plus a box over the name band of a state enclosing both ends</td><td>count</td><td class="num">768</td></tr>
+    <tr><td>7</td><td><code>label_near</code></td><td>per box of height h: <code>max(0, d_own + h − d_other)</code>, with d the gap to its own nearest leg and to the nearest foreign leg</td><td>em</td><td class="num">48</td></tr>
+    <tr><td>8</td><td><code>aspect</code></td><td><code>|w·10 − h·16|</code> of the chart, against 16:10</td><td>em</td><td class="num">2</td></tr>
+    <tr><td>9</td><td><code>area</code></td><td><code>w × h</code> of the chart</td><td>em²</td><td class="num">1</td></tr>
+    <tr><td>10</td><td><code>crowding</code></td><td>per pair of parallel segments of different transitions overlapping by <code>along</code>, <code>0 &lt; apart &lt; em</code>: <code>along × (em − apart) / em</code></td><td>em</td><td class="num">512</td></tr>
+    <tr><td>11</td><td><code>length</code></td><td>sum of every route's polyline length</td><td>em</td><td class="num">8</td></tr>
+    <tr><td>12</td><td><code>transit_bends</code></td><td>bends inside a state the route only passes through, charged on top of <code>bends</code></td><td>count</td><td class="num">768</td></tr>
+    <tr><td>13</td><td><code>whitespace</code></td><td>per composite: interior between its text bands, less its children's areas</td><td>em²</td><td class="num">0</td></tr>
+  </table>
+  <p>Crowding is continuous with corridor. At <code>apart = 0</code> two segments are collinear and corridor charges them. As they separate, crowding's charge falls linearly to zero at one em. <code>whitespace</code> is measured but ships at weight 0. Every weight is capped at 1,024, and with the em scaling the sum stays below 2<sup>54</sup>.</p>
+  <div data-fig="cost-overlay"></div>
+
+  <h3>Weights are exchange rates</h3>
+  <p>Because each term has its own unit, a weight says how much of one defect the reader would trade for another. At <code>readable</code>, one bend costs the same as one crossing. That equals one em of two lanes touching (crowding), 64 em of route length, and 512 em² of canvas (a square about 271 pt on a side). A label overlap costs 1.5 bends, and a transit bend costs 2.5 bends in total.</p>
+  <p>Before scav scored each term in its own unit, <code>area</code> made up 99.48% of <code>t2</code>. Counts are degree 0 in the coordinates, lengths degree 1 and area degree 2, so every other term rounded to nothing. Bends fell 15% and crossings 12% while <code>t2</code> moved only 0.35%. After the em conversion, the weights were fitted to pick, from 21 charts × 8 rows, the drawing with the fewest defects a reader counts: <code>w_bends</code> went from 64 to 512, <code>w_label</code> from 24 to 768, and <code>w_area</code> was pinned at 1. <code>w_crowding</code>, <code>w_transit_bends</code>, <code>w_crossings</code> and <code>w_length</code> were set later by hand sweeps.</p>
+  <div data-fig="cost-weights"></div>
+
+  <h3>Shares</h3>
+  <p><code>cost_shares</code> reports each weighted term's share of <code>t2</code> in basis points, rounded down, so a row sums to just under 10,000. They are committed per chart beside the cost goldens, so a reviewer sees which defects a weight change bought and sold.</p>
+  <div data-fig="cost-shares"></div>
+
+  <div class="callout why"><span class="t">Rejected</span>Scoring per frame: pieces leave their frame's rectangle (13 of <code>axis</code>'s 49), so the whole chart is scored at once. Penalising <code>excess_len</code> heavily: it pulls against area, so it rewards sprawl. An attraction term that rewards routes for running together: the optimiser satisfies it by drawing one edge on top of another. Raising a weight ceiling to fix a scale mismatch: the ceiling is what keeps the sum inside 64 bits.</div>
+</section>
+<script>
+// Shared cost helpers for this section: weights, units and the term kernels of cost.cpp.
+window.SXcost = (function () {
+  var TERMS = ['bends', 'corridor', 'crossings', 'excess_len', 'adjacency', 'label', 'label_near', 'aspect', 'area', 'crowding', 'length', 'transit_bends', 'whitespace'];
+  var W = { bends: 512, corridor: 48, crossings: 512, excess_len: 4, adjacency: 16, label: 768, label_near: 48, aspect: 2, area: 1, crowding: 512, length: 8, transit_bends: 768, whitespace: 0 };
+  var EM = 192;
+  var UNIT = { bends: 1, corridor: EM, crossings: 1, excess_len: EM, adjacency: 1, label: 1, label_near: EM, aspect: EM, area: EM * EM, crowding: EM, length: EM, transit_bends: 1, whitespace: EM * EM };
+  var UNAME = { 1: 'count', 192: 'em', 36864: 'em²' };
+  function cdiv(a, b) { return Math.ceil(a / b); }               // terms are non-negative
+  function weighted(terms, w) { var s = 0; TERMS.forEach(function (k) { s += (w || W)[k] * cdiv(terms[k], UNIT[k]); }); return s; }
+  function isqrt(n) { var r = Math.floor(Math.sqrt(n)); while (r * r > n) r--; while ((r + 1) * (r + 1) <= n) r++; return r; }
+  function seglen(a, b) { var dx = b[0] - a[0], dy = b[1] - a[1]; return dx === 0 ? Math.abs(dy) : dy === 0 ? Math.abs(dx) : isqrt(dx * dx + dy * dy); }
+  function dir(a, b) { function ax(f, t) { return t > f ? 2 : t < f ? 0 : 1; } return ax(a[0], b[0]) * 3 + ax(a[1], b[1]); }
+  function orient(a, b, c) { return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]); }
+  function crosses(a, b, c, d) {
+    var d1 = orient(a, b, c), d2 = orient(a, b, d), d3 = orient(c, d, a), d4 = orient(c, d, b);
+    if (!d1 || !d2 || !d3 || !d4) return false;
+    return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0));
+  }
+  function shared(a, b, c, d) {
+    var flat = a[1] === b[1] && c[1] === d[1] && a[1] === c[1], up = a[0] === b[0] && c[0] === d[0] && a[0] === c[0];
+    if (!flat && !up) return null;
+    var i = flat ? 0 : 1;
+    var lo = Math.max(Math.min(a[i], b[i]), Math.min(c[i], d[i])), hi = Math.min(Math.max(a[i], b[i]), Math.max(c[i], d[i]));
+    return hi > lo ? { lo: lo, hi: hi, len: hi - lo, axis: i, at: flat ? a[1] : a[0] } : null;
+  }
+  function same(p, q) { return p[0] === q[0] && p[1] === q[1]; }
+  function trunk(P, Q) {                                      // shared tail, capped at 2 points
+    var tail = 0, sh = Math.min(P.length, Q.length, 2);
+    while (tail < sh && same(P[P.length - 1 - tail], Q[Q.length - 1 - tail])) tail++;
+    var merged = false;
+    if (tail > 0 && tail < P.length && tail < Q.length) {
+      var i = P.length - 1 - tail, j = Q.length - 1 - tail;
+      merged = !!shared(P[i], P[i + 1], Q[j], Q[j + 1]);
+    }
+    return { tail: tail, merged: merged };
+  }
+  function inTrunk(t, len, k) { return k + t.tail >= len || (t.merged && k + t.tail + 1 === len); }
+  // Every term this figure can draw, with the marks that earn it.
+  function measure(g) {
+    var R = {}, pieces = [], m = { bends: [], crossings: [], corridor: [], crowding: [], excess: [], lor: [] };
+    var T = { bends: 0, crossings: 0, corridor: 0, crowding: 0, length: 0, excess_len: 0, label_over_route: 0 };
+    (g.trans || []).forEach(function (t) {
+      var P = t.points || []; R[t.id] = P;
+      for (var k = 0; k + 1 < P.length; k++) {
+        pieces.push({ a: P[k], b: P[k + 1], t: t.id, k: k });
+        if (k + 2 < P.length && dir(P[k], P[k + 1]) !== dir(P[k + 1], P[k + 2])) { T.bends++; m.bends.push({ p: P[k + 1], t: t }); }
+      }
+    });
+    var crossOf = {};
+    for (var i = 0; i < pieces.length; i++) for (var j = i + 1; j < pieces.length; j++) {
+      var u = pieces[i], v = pieces[j];
+      if (u.t === v.t) continue;
+      if (crosses(u.a, u.b, v.a, v.b)) {
+        T.crossings++; crossOf[u.t] = (crossOf[u.t] || 0) + 1; crossOf[v.t] = (crossOf[v.t] || 0) + 1;
+        var s = orient(u.a, u.b, v.a) / (orient(u.a, u.b, v.a) - orient(u.a, u.b, v.b));
+        m.crossings.push({ p: [v.a[0] + (v.b[0] - v.a[0]) * s, v.a[1] + (v.b[1] - v.a[1]) * s], u: u.t, v: v.t });
+      }
+      var sh = shared(u.a, u.b, v.a, v.b);
+      if (sh) {
+        var tr = trunk(R[u.t], R[v.t]);
+        var exempt = inTrunk(tr, R[u.t].length, u.k) && inTrunk(tr, R[v.t].length, v.k);
+        if (!exempt) T.corridor += sh.len;
+        m.corridor.push({ s: sh, u: u.t, v: v.t, exempt: exempt });
+      }
+    }
+    // Crowding: parallel lanes of different transitions under an em apart.
+    var lanes = pieces.map(function (p) {
+      if (p.a[1] === p.b[1] && p.a[0] !== p.b[0]) return { axis: 0, at: p.a[1], lo: Math.min(p.a[0], p.b[0]), hi: Math.max(p.a[0], p.b[0]), t: p.t };
+      if (p.a[0] === p.b[0] && p.a[1] !== p.b[1]) return { axis: 1, at: p.a[0], lo: Math.min(p.a[1], p.b[1]), hi: Math.max(p.a[1], p.b[1]), t: p.t };
+      return null;
+    }).filter(Boolean);
+    var scaled = 0;
+    for (i = 0; i < lanes.length; i++) for (j = i + 1; j < lanes.length; j++) {
+      var a = lanes[i], b = lanes[j];
+      if (a.axis !== b.axis || a.t === b.t) continue;
+      var apart = Math.abs(a.at - b.at); if (apart === 0 || apart >= EM) continue;
+      var lo = Math.max(a.lo, b.lo), hi = Math.min(a.hi, b.hi); if (hi <= lo) continue;
+      scaled += (hi - lo) * (EM - apart);
+      m.crowding.push({ axis: a.axis, lo: lo, hi: hi, at0: Math.min(a.at, b.at), at1: Math.max(a.at, b.at), apart: apart, charge: (hi - lo) * (EM - apart) / EM, u: a.t, v: b.t });
+    }
+    T.crowding = Math.floor(scaled / EM);
+    (g.trans || []).forEach(function (t) {
+      var P = t.points || []; if (P.length < 2) return;
+      var L = 0; for (var k = 0; k + 1 < P.length; k++) L += seglen(P[k], P[k + 1]);
+      T.length += L;
+      var chord = seglen(P[0], P[P.length - 1]), carried = t.label_box ? t.label_box[2] : 0, ex = L - Math.max(chord, carried);
+      if (ex > 0) { T.excess_len += ex * (1 + (crossOf[t.id] || 0)); m.excess.push({ t: t, len: L, chord: chord, carried: carried, ex: ex, x: 1 + (crossOf[t.id] || 0) }); }
+      if (t.label_box) pieces.forEach(function (p) {
+        if (p.t === t.id) return;
+        var x = Math.min(p.a[0], p.b[0]), y = Math.min(p.a[1], p.b[1]), w = Math.abs(p.a[0] - p.b[0]), h = Math.abs(p.a[1] - p.b[1]), lb = t.label_box;
+        if (lb[0] < x + w && x < lb[0] + lb[2] && lb[1] < y + h && y < lb[1] + lb[3]) { T.label_over_route++; m.lor.push({ t: t, p: p }); }
+      });
+    });
+    var bx = g.box; T.area = bx[2] * bx[3]; T.aspect = Math.abs(bx[2] * 10 - bx[3] * 16);
+    return { T: T, marks: m, crossOf: crossOf };
+  }
+  return { TERMS: TERMS, W: W, EM: EM, UNIT: UNIT, UNAME: UNAME, cdiv: cdiv, weighted: weighted, measure: measure };
+})();
+</script>
+<script>
+// Figure: a real chart with each term's charges drawn on it.
+window.SXcostOverlay = function (sec) {
+  var C = SXcost, rows = SX.data('rows').charts.brew;
+  var f = SX.figure(sec.querySelector('[data-fig="cost-overlay"]'), { caption: '<b>Toggle a term</b> to see what it charges on the drawing; <b>hover</b> any mark for its number. <b>Switch</b> to brew before the search: row 0 exactly as Level 2 lays it out, with 18 bends, two crossings, shared corridors, crowded lanes and four labels on foreign routes (Tier 0). The terms are recomputed in your browser from the route points; the last column is the value scav logged, and the two always agree.' });
+  var src = 'shipped', on = { bends: true, crossings: true, corridor: true, crowding: true, excess_len: false, area: false, lor: true };
+  var drawings = {
+    shipped: { g: rows.rows[0].searched, name: 'brew as shipped (row 0, searched)' },
+    raw: { g: rows.rows[0].unsearched, name: 'brew row 0 before the search' }
+  };
+  var KINDS = [
+    { k: 'bends', label: 'bends', col: '--series-1' },
+    { k: 'crossings', label: 'crossings', col: '--series-2' },
+    { k: 'corridor', label: 'corridor', col: '--series-3' },
+    { k: 'crowding', label: 'crowding', col: '--series-4' },
+    { k: 'excess_len', label: 'excess length', col: '--series-5' },
+    { k: 'area', label: 'area and aspect', col: '--series-6' },
+    { k: 'lor', label: 'label over route (Tier 0)', col: '--critical' }
+  ];
+  f.ctrl.appendChild(SX.choice({ options: [{ value: 'shipped', label: 'As shipped' }, { value: 'raw', label: 'Before the search' }], value: src, onChange: function (v) { src = v; draw(); } }).el);
+  KINDS.forEach(function (K) {
+    var t = SX.toggle({ label: K.label, value: on[K.k], onChange: function (v) { on[K.k] = v; draw(); } });
+    t.el.insertBefore(SX.el('span', { class: 'swatch', style: { background: 'var(' + K.col + ')' } }), t.el.lastChild);
+    f.ctrl.appendChild(t.el);
+  });
+  var left = SX.el('div'), right = SX.el('div', { style: { overflowX: 'auto', marginTop: '8px' } });
+  f.stage.appendChild(left); f.stage.appendChild(right);
+  function fmt(n) { return SX.fmt(n); }
+  function name(g, id) { var t = g.trans[id]; return 't' + id + ' ' + t.src_path + ' → ' + t.dst_path; }
+  function draw() {
+    var D = drawings[src], g = D.g, M = C.measure(g), h = SX.chart(left, g, { maxHeight: 520, pad: 260 });
+    var u = (g.box[2] + 520) / Math.max(left.clientWidth || 600, 300), mk = M.marks;   // grid units per screen pixel
+    function col(k) { return 'var(' + KINDS.filter(function (K) { return K.k === k; })[0].col + ')'; }
+    if (on.area) {
+      var b = g.box, r = h.rect(b, { fill: 'none', stroke: col('area'), 'stroke-width': 2 * u, 'stroke-dasharray': (8 * u) + ' ' + (5 * u) });
+      r.style.pointerEvents = 'stroke';
+      SX.tipOn(r, '<b>area</b> ' + fmt(b[2]) + ' × ' + fmt(b[3]) + ' = ' + fmt(M.T.area) + ' units² → ' + fmt(C.cdiv(M.T.area, C.UNIT.area)) + ' em²<br><b>aspect</b> |' + fmt(b[2]) + '·10 − ' + fmt(b[3]) + '·16| = ' + fmt(M.T.aspect) + ' → ' + fmt(C.cdiv(M.T.aspect, C.EM)) + ' em × 2');
+    }
+    if (on.excess_len) mk.excess.forEach(function (e) {
+      var l = h.line(e.t.points, { stroke: col('excess_len'), 'stroke-width': 6 * u, 'stroke-opacity': 0.55, 'stroke-linejoin': 'round' });
+      l.style.pointerEvents = 'stroke';
+      SX.tipOn(l, '<b>excess length</b>, ' + name(g, e.t.id) + '<br>length ' + fmt(e.len) + ' − max(chord ' + fmt(e.chord) + ', label ' + fmt(e.carried) + ') = ' + fmt(e.ex) + (e.x > 1 ? ' × ' + e.x + ' (it crosses)' : '') + ' units');
+    });
+    if (on.corridor) mk.corridor.forEach(function (c) {
+      var s = c.s, pts = s.axis === 0 ? [[s.lo, s.at], [s.hi, s.at]] : [[s.at, s.lo], [s.at, s.hi]];
+      var l = h.line(pts, { stroke: col('corridor'), 'stroke-width': 6 * u, 'stroke-opacity': c.exempt ? 0.3 : 0.75, 'stroke-dasharray': c.exempt ? (4 * u) + ' ' + (3 * u) : null });
+      l.style.pointerEvents = 'stroke';
+      SX.tipOn(l, '<b>corridor</b>: t' + c.u + ' and t' + c.v + ' share ' + fmt(s.len) + ' units of one line' + (c.exempt ? '<br><span class="m">a trunk into their common destination: not charged</span>' : ''));
+    });
+    if (on.crowding) mk.crowding.forEach(function (c) {
+      var r = c.axis === 0 ? [c.lo, c.at0, c.hi - c.lo, c.apart] : [c.at0, c.lo, c.apart, c.hi - c.lo];
+      var n = h.rect(r, { fill: col('crowding'), 'fill-opacity': 0.5, stroke: col('crowding'), 'stroke-width': 1 * u });
+      SX.tipOn(n, '<b>crowding</b>: t' + c.u + ' and t' + c.v + ' run ' + fmt(c.hi - c.lo) + ' units side by side, ' + c.apart + ' apart (an em is 192)<br>' + fmt(c.hi - c.lo) + ' × (192 − ' + c.apart + ') / 192 = ' + c.charge.toFixed(1));
+    });
+    if (on.lor) mk.lor.forEach(function (x) {
+      var b = x.t.label_box;
+      var n = h.rect(b, { fill: col('lor'), 'fill-opacity': 0.18, stroke: col('lor'), 'stroke-width': 1.5 * u });
+      SX.tipOn(n, '<b>label over route</b> (Tier 0): the label of ' + name(g, x.t.id) + ' overlaps a segment of t' + x.p.t);
+      var l = h.line([x.p.a, x.p.b], { stroke: col('lor'), 'stroke-width': 3 * u });
+      SX.tipOn(l, 'the segment of ' + name(g, x.p.t) + ' under the label of t' + x.t.id);
+    });
+    if (on.bends) mk.bends.forEach(function (b) {
+      var d = h.dot(b.p, 5 * u, { fill: col('bends'), stroke: 'var(--surface-1)', 'stroke-width': 1.5 * u });
+      SX.tipOn(d, '<b>bend</b> on ' + name(g, b.t.id) + '<br>1 × 512 = 512');
+    });
+    if (on.crossings) mk.crossings.forEach(function (c) {
+      var s = 6 * u, p = c.p;
+      var n = h.line([[p[0] - s, p[1] - s], [p[0] + s, p[1] + s], [p[0], p[1]], [p[0] + s, p[1] - s], [p[0] - s, p[1] + s]], { stroke: col('crossings'), 'stroke-width': 2.5 * u });
+      var hit = h.dot(p, 9 * u, { fill: 'transparent' });
+      SX.tipOn(hit, '<b>crossing</b>: t' + c.u + ' × t' + c.v + '<br>1 × 512 = 512');
+    });
+    table(g, M);
+  }
+  function table(g, M) {
+    var T = g.cost.terms, t = SX.el('table', { class: 'sx-table', style: { fontSize: '12.5px', margin: '0', whiteSpace: 'nowrap' } });
+    t.appendChild(SX.el('tr', null, SX.el('th', { text: 'term' }), SX.el('th', { class: 'num', text: 'raw' }), SX.el('th', { class: 'num', text: 'in units' }), SX.el('th', { class: 'num', text: '× w' }), SX.el('th', { class: 'num', text: '= part' })));
+    var sum = 0;
+    C.TERMS.forEach(function (k) {
+      var raw = T[k], units = C.cdiv(raw, C.UNIT[k]), part = C.W[k] * units; sum += part;
+      var mine = M.T[k], chk = mine == null ? '' : (mine === raw ? ' ✓' : ' ≠ ' + mine);
+      var tr = SX.el('tr', null, SX.el('td', null, SX.el('code', { text: k })), SX.el('td', { class: 'num', text: fmt(raw) + chk }),
+        SX.el('td', { class: 'num', text: fmt(units) + (C.UNIT[k] > 1 ? ' ' + C.UNAME[C.UNIT[k]] : '') }), SX.el('td', { class: 'num', text: fmt(C.W[k]) }), SX.el('td', { class: 'num', text: fmt(part) }));
+      if (!raw) tr.style.color = 'var(--text-muted)';
+      SX.tipOn(tr, mine == null ? '<b>' + k + '</b>: logged by scav' : '<b>' + k + '</b>: recomputed here ' + fmt(mine) + ', scav logged ' + fmt(raw));
+      t.appendChild(tr);
+    });
+    t.appendChild(SX.el('tr', null, SX.el('th', { text: 't2' }), SX.el('th'), SX.el('th'), SX.el('th'), SX.el('th', { class: 'num', text: fmt(sum) })));
+    var t0 = g.cost.t0, tz = Object.keys(g.cost.tier0).filter(function (k) { return g.cost.tier0[k]; });
+    right.innerHTML = '';
+    right.appendChild(SX.el('div', { class: 'note', html: 'scav logged <b>t0 ' + t0 + '</b>' + (tz.length ? ' (' + tz.map(function (k) { return k + ' ' + g.cost.tier0[k] + (k === 'label_over_route' ? ', recomputed ' + M.T.label_over_route : ''); }).join(', ') + ')' : '') + ', <b>t2 ' + fmt(g.cost.t2) + '</b>; the sum below is ' + fmt(sum) + '. ✓ marks a term recomputed here that equals scav\'s.' }));
+    right.appendChild(t);
+  }
+  draw();
+};
+</script>
+<script>
+// Figure: three real candidates rescored live as the weights move.
+window.SXcostWeights = function (sec) {
+  var C = SXcost, R = SX.data('rows').charts.brew.rows;
+  var f = SX.figure(sec.querySelector('[data-fig="cost-weights"]'), { caption: '<b>Slide a weight</b> and watch the pick change. These are brew\'s three distinct converged drawings: the 16 Level 2 rows end in only three drawings. Each <code>t2</code> is recomputed here from the logged raw terms; at the shipped weights all three equal scav\'s logged values. Try <code>w_bends</code> below 111 (row 8 wins with one more bend but less canvas), <code>w_aspect</code> at 4 (row 1\'s near-16:10 shape wins), <code>w_area</code> at 12, or <code>w_whitespace</code> at 32. The other six terms are zero in all three drawings, so their weights cannot change the pick.' });
+  var cands = [
+    { label: 'row 0 · shipped', g: R[0].searched, rows: '0, 2, 4, 6' },
+    { label: 'row 1', g: R[1].searched, rows: '1, 3, 5, 7, 9, 11, 13, 15' },
+    { label: 'row 8', g: R[8].searched, rows: '8, 10, 12, 14' }
+  ];
+  var LADDER = [0, 1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 111, 128, 192, 256, 384, 512, 768, 1024];
+  var LIVE = ['bends', 'excess_len', 'aspect', 'area', 'length', 'whitespace'];
+  var COL = { bends: '--series-1', excess_len: '--series-2', aspect: '--series-3', area: '--series-4', length: '--series-5', whitespace: '--series-6' };
+  var w = Object.assign({}, C.W), sliders = {};
+  var row = SX.el('div', { class: 'fig-row' });
+  var left = SX.el('div', { style: { flex: '1 1 300px' } }), right = SX.el('div', { style: { flex: '2.4 1 560px' } });
+  row.appendChild(left); row.appendChild(right); f.stage.appendChild(row);
+  LIVE.forEach(function (k) {
+    var s = SX.slider({ label: '', min: 0, max: LADDER.length - 1, step: 1, value: LADDER.indexOf(C.W[k]), format: function (i) { return String(LADDER[i]); }, onInput: function (i) { w[k] = LADDER[i]; update(); } });
+    s.input.style.width = '150px';
+    var lab = SX.el('span', { style: { display: 'inline-block', width: '128px' } }, SX.el('span', { class: 'swatch', style: { background: 'var(' + COL[k] + ')' } }), SX.el('code', { text: 'w_' + k }));
+    left.appendChild(SX.el('div', { class: 'ctrl', style: { margin: '2px 0' } }, lab, s.el));
+    sliders[k] = s;
+  });
+  left.appendChild(SX.el('div', { class: 'ctrl' }, SX.button('Reset to readable', function () { LIVE.forEach(function (k) { sliders[k].set(LADDER.indexOf(C.W[k])); }); })));
+  var check = SX.el('div', { class: 'note' }); left.appendChild(check);
+  var cards = cands.map(function (c) {
+    var thumb = SX.el('div', { style: { width: '190px', flex: '0 0 190px' } });
+    SX.chart(thumb, c.g, { maxHeight: 92, pad: 200, layers: { labels: false } });
+    var head = SX.el('div', { style: { fontSize: '14px' } }), bar = SX.el('div');
+    var card = SX.el('div', { style: { display: 'flex', gap: '12px', alignItems: 'center', padding: '6px 8px', margin: '4px 0', borderRadius: '8px', border: '2px solid transparent' } }, thumb, SX.el('div', { style: { flex: '1 1 auto', minWidth: 0 } }, head, bar));
+    right.appendChild(card);
+    return { c: c, card: card, head: head, bar: bar };
+  });
+  right.appendChild(SX.el('div', { class: 'legend' }, LIVE.map(function (k) { return SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(' + COL[k] + ')' } }), k); })));
+  function parts(g) { return LIVE.map(function (k) { var u = C.cdiv(g.cost.terms[k], C.UNIT[k]); return { k: k, raw: g.cost.terms[k], units: u, part: w[k] * u }; }); }
+  function update() {
+    var tot = cards.map(function (x) { return C.weighted(x.c.g.cost.terms, w); });
+    var best = 0; tot.forEach(function (t, i) { if (t < tot[best]) best = i; });   // all t0 = 0; ties to the lower row
+    var vmax = Math.max.apply(null, tot) || 1;
+    cards.forEach(function (x, i) {
+      x.card.style.borderColor = i === best ? 'var(--hl)' : 'transparent';
+      x.head.innerHTML = '<b>' + x.c.label + '</b> <span class="m" style="color:var(--text-muted)">(also rows ' + x.c.rows + ')</span> · t2 <b style="font-family:var(--mono)">' + SX.fmt(tot[i]) + '</b>' + (i === best ? ' <span class="pill">least cost: shipped under these weights</span>' : '');
+      var svg = SX.svg('svg', { viewBox: '0 0 560 22', style: { width: '100%', height: 'auto' } }), x0 = 0;
+      parts(x.c.g).forEach(function (p) {
+        var wd = 556 * p.part / vmax; if (wd <= 0) return;
+        var r = SX.svg('rect', { x: x0, y: 3, width: Math.max(wd - 1, 0.5), height: 16, rx: 2, fill: SX.css(COL[p.k]) });
+        SX.tipOn(r, '<b>' + p.k + '</b>: ' + SX.fmt(p.raw) + ' raw → ' + SX.fmt(p.units) + ' ' + C.UNAME[C.UNIT[p.k]] + ' × ' + w[p.k] + ' = <b>' + SX.fmt(p.part) + '</b>');
+        svg.appendChild(r); x0 += wd;
+      });
+      x.bar.innerHTML = ''; x.bar.appendChild(svg);
+    });
+    var shipped = cards.map(function (x) { return C.weighted(x.c.g.cost.terms) === x.c.g.cost.t2; });
+    check.innerHTML = 'Recomputed at <code>readable</code>: ' + cards.map(function (x) { return SX.fmt(C.weighted(x.c.g.cost.terms)); }).join(' · ') + '; logged ' + cards.map(function (x) { return SX.fmt(x.c.g.cost.t2); }).join(' · ') + (shipped.every(Boolean) ? ' (equal).' : ' (MISMATCH).');
+  }
+  update();
+};
+</script>
+<script>
+// Figure: each weighted term's share of t2 per corpus chart, as scav reports it.
+window.SXcostShares = function (sec) {
+  var C = SXcost, charts = SX.data('charts').charts;
+  var f = SX.figure(sec.querySelector('[data-fig="cost-shares"]'), { caption: '<b>Hover</b> a segment for its basis points and weighted value. <b>Switch</b> to "no unit conversion" to see the same drawings scored the way they were before the em: today\'s weights times raw grid units, with area swamping every other term. Real text, the shipped drawing of each chart; the six terms not shown are zero in all eight.' });
+  var mode = 'em';
+  f.ctrl.appendChild(SX.choice({ options: [{ value: 'em', label: 'As scav scores it (em, em²)' }, { value: 'raw', label: 'No unit conversion' }], value: mode, onChange: function (v) { mode = v; draw(); } }).el);
+  var SHOW = ['bends', 'excess_len', 'label_near', 'aspect', 'area', 'length'];
+  var COL = SHOW.map(function (k, i) { return SX.css('--series-' + (i + 1)); });
+  var names = ['estop', 'led', 'brew', 'dock', 'tcp', 'axis', 'toolchanger', 'bottler'];
+  function draw() {
+    var W = 760, rowH = 28, m = { l: 96, r: 96, t: 4 }, H = m.t + rowH * names.length + 22;
+    var svg = SX.svg('svg', { viewBox: '0 0 ' + W + ' ' + H, style: { width: '100%', height: 'auto', font: '12.5px ' + SX.css('--sans') } });
+    [0, 25, 50, 75, 100].forEach(function (p) {
+      var x = m.l + (W - m.l - m.r) * p / 100;
+      svg.appendChild(SX.svg('line', { x1: x, x2: x, y1: m.t, y2: H - 20, stroke: SX.css('--grid'), 'stroke-width': 1 }));
+      svg.appendChild(SX.svg('text', { x: x, y: H - 6, 'text-anchor': 'middle', fill: SX.css('--text-muted'), text: p + '%' }));
+    });
+    names.forEach(function (n, r) {
+      var cost = charts[n].text.cost, terms = cost.terms, y = m.t + r * rowH;
+      var part = SHOW.map(function (k) { return mode === 'em' ? C.W[k] * C.cdiv(terms[k], C.UNIT[k]) : C.W[k] * terms[k]; });
+      var whole = 0; C.TERMS.forEach(function (k) { whole += mode === 'em' ? C.W[k] * C.cdiv(terms[k], C.UNIT[k]) : C.W[k] * terms[k]; });
+      svg.appendChild(SX.svg('text', { x: m.l - 8, y: y + rowH * 0.62, 'text-anchor': 'end', fill: SX.css('--text-secondary'), text: n }));
+      var x = m.l;
+      SHOW.forEach(function (k, i) {
+        var bp = mode === 'em' ? cost.shares_bp[k] : Math.floor(part[i] * 10000 / whole);
+        var wd = (W - m.l - m.r) * part[i] / whole; if (wd <= 0) return;
+        var rect = SX.svg('rect', { x: x, y: y + 5, width: Math.max(wd - 1, 0.6), height: rowH - 10, fill: COL[i] });
+        SX.tipOn(rect, '<b>' + n + ' · ' + k + '</b><br>' + SX.fmt(bp) + ' bp of t2 (' + (bp / 100).toFixed(2) + '%)<br>weighted ' + SX.fmt(part[i]) + ' of ' + SX.fmt(whole) + (mode === 'em' ? '<br><span class="m">scav\'s logged share</span>' : '<br><span class="m">' + SX.fmt(terms[k]) + ' raw × ' + C.W[k] + '</span>'));
+        svg.appendChild(rect); x += wd;
+      });
+      svg.appendChild(SX.svg('text', { x: W - m.r + 6, y: y + rowH * 0.62, fill: SX.css('--text-primary'), text: SX.fmt(whole) }));
+    });
+    f.stage.innerHTML = '';
+    f.stage.appendChild(SX.el('div', { class: 'legend' }, SHOW.map(function (k, i) { return SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: COL[i] } }), k); }), SX.el('span', { style: { marginLeft: 'auto' }, text: 'right: t2' })));
+    f.stage.appendChild(svg);
+  }
+  draw();
+};
+SX.register('cost', function (sec) {
+  SXcostOverlay(sec);
+  SXcostWeights(sec);
+  SXcostShares(sec);
+});
+</script>

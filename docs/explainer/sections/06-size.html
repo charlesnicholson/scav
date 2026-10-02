@@ -1,0 +1,658 @@
+<section class="sx" id="size" data-toc="6 · Sizing">
+  <div class="kicker">Phase 2</div>
+  <h2>Sizing: coordinates, gaps, folds and packing</h2>
+  <p class="lede">Phase 2 turns ranks and slots into rectangles. It works bottom-up: the deepest frames are sized first, their owner states take the frames' sizes, and so on up to the root. Then one top-down pass makes every coordinate root-absolute.</p>
+
+  <p>The loop buckets frames by depth and sizes the deepest, then their owner states, then those states' frames, up to the root frame (<code>size.cpp:2554-2626</code>); a descent then turns submachine-local coordinates into root-absolute ones (<code>size.cpp:2630-2679</code>). Each frame goes through <code>lay_out_sub</code> (layers, Brandes–Köpf, folding, label room) and <code>place_sub</code>; each composite state through <code>size_state</code>, which packs its sibling submachines and applies the box formula. "Bottom-up sizing has no locality: a leaf growing one unit resizes every ancestor to the root" (§11.4).</p>
+
+  <h3>Across the ranks: Brandes–Köpf</h3>
+  <p>Along the ranks, each layer gets an x origin. Across them, each node needs a coordinate: its height on the page in a frame running across. scav uses <b>Brandes–Köpf</b> (BK), linear-time and balanced, once per connected component per fold piece, with <code>sep = node_sep</code> (288) between neighbours, edge to edge (<code>coords.cpp</code>). A node's extent is its cross-axis size plus a label reserve (leader plus label height) for labelled legs. Only edges between consecutive layers count, earlier end first.</p>
+  <ol>
+    <li><b>Mark type-1 conflicts.</b> A non-inner edge that crosses an inner segment (bend node to bend node) is marked, so long chains stay straight (<code>coords.cpp:343-379</code>).</li>
+    <li><b>Four alignment passes</b>: layers walked forward or backward, and each layer walked from its first node or its last (BK's down/up × left/right). In each, a node tries its median neighbour(s) in the layer just walked, positions <code>(d−1)/2</code> and <code>d/2</code>, and takes the first edge that is unmarked and does not cross an alignment already made in this layer. Aligned nodes form a <b>block</b> that shares one coordinate. Strong edges go first, then <em>weak</em> ones (an initial's edge, a scav extension). Blocks carry per-end <b>port offsets</b>, so a segment is aligned where it meets a composite's port rather than at its centre (§11.10g step 2).</li>
+    <li><b>Compaction</b>, with the <b>2020 erratum</b> (Brandes, Walter, Zink, arXiv:2008.01252; the PRD says "read the erratum", §11.2). Blocks are placed in topological order of the neighbour DAG rather than by the published recursion, each block takes its root's coordinate plus offset exactly once, and class shifts are a separate pass over adjacent class pairs, layer by layer, so a shift accumulates along a critical path (<code>coords.cpp:219-340</code>).</li>
+    <li><b>Balance.</b> The four results are aligned to the narrowest one (forward-walked runs by their leading edge, backward ones by their trailing edge); each node then takes the average of its two median values, <code>floor((v[1] + v[2]) / 2)</code> (<code>coords.cpp:414-463</code>).</li>
+  </ol>
+  <div data-fig="size-bk"></div>
+  <p>Then the alignment rules (§11.10g step 2): states joined by an edge inside one column share one centre line; a state joined to a composite's port is centred on that port; an initial or final pseudostate is seated <code>rank_sep</code> from its mate, level with it. BK was 95–96% of phase 2's time when measured; a per-thread memo keyed on the whole graph returns identical results for a repeated graph. Network simplex placement was tried on a branch and not merged: optimal L1 placement without balancing did not reduce reader-visible defects and cost 1.65× per solve.</p>
+
+  <h3>Along the ranks: gaps and label room</h3>
+  <p>Each layer's x origin is the previous layer's plus its width, a separation and the larger of two charges (<code>step_layers</code>, <code>size.cpp:640-774</code>):</p>
+  <p><code>layer_x[r] = layer_x[r−1] + width[r−1] + sep + max(label_gap, lanes)</code></p>
+  <p>Here <code>sep</code> is <code>rank_sep</code> (576), or the route clearance (96) next to a layer holding only boundary nodes or seated pseudostates; <code>label_gap</code> is phase 1's label charge; and <code>lanes</code> is <code>turning × line height</code> (269) where two or more edges actually turn at that boundary. An edge whose ends overlap across the ranks runs straight and takes no lane (<code>size.cpp:486-660</code>). Across the ranks, each end's extent grows by <code>leader + label height</code>; a labelled leg inside one column, or one passing a column to a folded piece, gets room on one side (§11.9.5).</p>
+  <div data-fig="size-gap"></div>
+
+  <h3>Folding long rank runs</h3>
+  <p>A frame's run of layers can be <b>cut into pieces</b> that are then packed or stacked like rectangles; a strip of 16 nested 15-chains would otherwise be a million units wide (§11.4; <code>size.cpp:1324-1856</code>).</p>
+  <ul>
+    <li><b>Target width</b>: <code>max(widest layer, isqrt(area · dar_num / dar_den))</code>, where area sums each layer's (width + <code>rank_sep</code> + gap) × height.</li>
+    <li><b>Cut</b> before layer <i>r</i> where the running width would pass the target, or at a pinned <code>FoldPin</code> layer. A cut is <b>refused</b> where it would part an initial or final pseudostate, or a boundary node, from the node it joins.</li>
+    <li><b>Three candidates</b>: the flat run, the folded pieces packed by <code>pack_best</code>, and the pieces stacked at the leading edge. The <b>scale measure</b> picks, unless the frame's rule is Always or Never.</li>
+  </ul>
+  <div class="callout rule"><span class="t">The scale measure</span><code>SM = min(dar_num / (dar_den · w), 1 / h)</code>: how large the drawing can be scaled inside a viewport of the desired aspect ratio (DAR). Larger is better. It is held as a rational and compared by cross-multiplication; ties go to the smaller area, then the closer aspect (<code>sm_tiebreak</code> reverses that order) (<code>pack.cpp:409-448</code>).</div>
+  <p>A fold whose pieces pack back into one row is not taken, and a frame running down never folds. Label room survives a fold: the label charge a cut discards rides the new piece's leading edge where the packing puts it beside the previous piece (§11.9.3). The cut fires on 59 of the corpus's 62 components; packing the pieces rather than stacking them took corpus Tier 2 down 5.6% and brew's area from 35.7M to 28.9M (§11.4).</p>
+  <div data-fig="size-fold"></div>
+
+  <h3>Packing sibling submachines</h3>
+  <p>Packing happens at three sites, all through <code>pack_best</code> (<code>size.cpp:77-100</code>): a frame's components (gap <code>node_sep</code>), a fold's pieces (<code>node_sep</code>) and a state's sibling submachines, the regions of a concurrent state (<code>sub_sep</code>, 192). States inside a frame are layered, never packed.</p>
+  <ul>
+    <li><b>LR-rectpacking</b> (Domrös et al., IVAPP 2021) sets a target width <code>max(widest, isqrt(Σ(w+sep)(h+sep) · num / den))</code>, then gives each rect, in order, one of four spots relative to its predecessor, the first that fits the target: <b>Level</b> (a new block at the row's top, tried only when the cursor sits in a lower subrow), <b>Right</b>, <b>Subrow</b>, <b>Row</b>. The geometry is a pure function of that spot list (<code>pack.cpp:164-184</code>). Reading order is placement order by construction.</li>
+    <li><b>Compaction</b> (Level 2 bit 1) gives each rect one chance to take one of the other three spots, kept only if neither extent grows and the result is tighter (<code>pack.cpp:196-235</code>).</li>
+    <li><b>Whitespace elimination</b> is always on: each row grows to the drawing's width, each block to its row's height, each subrow to its block's width and each rect to its subrow's height, slack floor-apportioned so the shares sum exactly. Extents do not change, so it never changes a comparison; only the sibling-submachine site writes the grown rects back (<code>pack.cpp:253-328</code>).</li>
+    <li><b><code>pack_box</code></b>, the older packer, puts everything in one row. With <b><code>trybox</code></b> = 1, every <code>pack_best</code> call also tries it and keeps it if it fits and wins on the scale measure. Level 2 bit 0 flips <code>trybox</code>.</li>
+  </ul>
+  <p>The ratio a packing aims at is the profile's DAR (16:10 at <code>readable</code>, 4:3 at <code>compact</code>) or, on Level 2 rows with bit 2 set, the <b>owner's hole</b>: the state's interior between its text bands, reduced into <code>[1, 1024]</code> (<code>size.cpp:2694-2731</code>), which sizes the chart twice. Every packing is checked against <code>COORD_MAX</code> first, so a better-scoring packing that does not fit never displaces one that does.</p>
+  <div data-fig="size-pack"></div>
+
+  <h3>Bottom-up to the root</h3>
+  <p>A composite state's box comes from its packed submachines (§11.4; <code>size.cpp:2217-2236</code>):</p>
+  <p><code>w = max(min_w, packed_subs_w, kind_min_w) + 2·pad</code><br><code>h = max(h_before + packed_subs_h + h_after, kind_min_h) + 2·pad</code></p>
+  <p><code>pad</code> (128) is the interior ring only. A bare pseudostate takes no ring ("glyph == box"), so an arrow stops on the mark, not a pad short of it. At <code>readable</code>, a plain state is at least 896 × 640, an initial or final 224 × 224, a choice 320 × 320, a fork or join bar 64 × 960 (swapped in a frame running down).</p>
+  <div data-fig="size-bottomup"></div>
+  <p>Phase 2's chart rect is the root submachine's. After routing, <code>cover_chart</code> grows it over every route point and placed label before scoring, so area and aspect price the canvas that ships (<code>layout.cpp:429-449</code>). A candidate copies every frame and state whose inputs, and whose descendants' inputs, match the incumbent's: 84.5% of frames are copied.</p>
+  <div class="callout why"><span class="t">Rejected</span>Top-down layout, which approximates sizes from above: its size approximation is unsolved and per-level scale factors break port-split continuity (§11.4). VPSC: coordinates are generated, not adjusted (§11.13). Plain rectpacking: its oversized-child special case was deleted by its own authors, so scav takes the LR variant. <code>OwnerHole</code>, compaction and fold-always are Level 2 rows, not defaults: the whole chart's cost weighs them.</div>
+  <p class="note">PRD drift: §11.4's "every node in a layer shares that layer's x origin" and "height = max Σ heights" describe the textbook composition; in code the height comes from BK's centres and the alignment rules move nodes. <code>box_sub</code> (a submachine's space request) is validated and hashed but not read by sizing.</p>
+</section>
+<script>
+(function () {
+  'use strict';
+  var F = (window.SXF = window.SXF || {});
+  F.size = F.size || {};
+  // Helpers for this section's figures (self-contained, so the section builds on its own).
+  var U = F.su = {
+    root: function (w, h) { return SX.svg('svg', { viewBox: '0 0 ' + w + ' ' + h, style: { width: '100%', height: 'auto', font: '13px ' + SX.css('--sans') } }); },
+    el: function (p, tag, a, st) { var n = SX.svg(tag, a); if (st) Object.assign(n.style, st); p.appendChild(n); return n; },
+    text: function (p, x, y, s, st, a) { var n = SX.svg('text', Object.assign({ x: x, y: y, text: s }, a || {})); Object.assign(n.style, { fill: 'var(--text-primary)' }, st || {}); p.appendChild(n); return n; },
+    isqrt: function (v) { var r = Math.floor(Math.sqrt(v)); while (r * r > v) r--; while ((r + 1) * (r + 1) <= v) r++; return r; },
+    // pack_better: true when a scales larger (SM), ties by area then aspect deviation.
+    better: function (a, b, num, den, aspectFirst) {
+      function sm(p) { var w = Math.max(p.w, 1), h = Math.max(p.h, 1); return num * h < den * w ? [num, den * w] : [1, h]; }
+      var A = sm(a), B = sm(b), aLess = A[0] * B[1] < B[0] * A[1], bLess = B[0] * A[1] < A[0] * B[1];
+      if (!aLess && !bLess) {
+        var aArea = a.w * a.h, bArea = b.w * b.h, aDev = Math.abs(a.w * den - a.h * num), bDev = Math.abs(b.w * den - b.h * num);
+        if (aspectFirst) return aDev !== bDev ? aDev < bDev : aArea < bArea;
+        return aArea !== bArea ? aArea < bArea : aDev < bDev;
+      }
+      return bLess;
+    },
+    sm: function (p, num, den) { var w = Math.max(p.w, 1), h = Math.max(p.h, 1); return Math.min(num / (den * w), 1 / h); },
+    run: function (sec, figs) {
+      Object.keys(figs).forEach(function (k) {
+        var h = sec.querySelector('[data-fig="' + k + '"]');
+        if (!h) return;
+        try { figs[k](h); } catch (err) { console.error(k, err); h.appendChild(SX.el('p', { class: 'note', text: 'This figure failed to load: ' + err.message })); }
+      });
+    }
+  };
+  SX.register('size', function (sec) { U.run(sec, F.size); });
+})();
+</script>
+<script>
+(function () {
+  'use strict';
+  var F = window.SXF, U = F.su;
+  // Brandes-Kopf as coords.cpp runs it, over g = {extent[], layers[[]], edges[{from,to,inner,from_at,to_at,weak}], sep}.
+  function view(g, up, right) {
+    var n = g.extent.length, L = g.layers.length, v = { layers: [], pos: [], layer: [], upEdges: [] };
+    for (var i = 0; i < L; i++) { var l = g.layers[up ? L - 1 - i : i].slice(); if (right) l.reverse(); v.layers.push(l); }
+    v.layers.forEach(function (l, i) { l.forEach(function (x, k) { v.pos[x] = k; v.layer[x] = i; }); });
+    for (var x = 0; x < n; x++) v.upEdges.push([]);
+    g.edges.forEach(function (e, k) { v.upEdges[up ? e.from : e.to].push(k); });
+    v.upEdges.forEach(function (a) { a.sort(function (p, q) { var P = g.edges[p], Q = g.edges[q]; return v.pos[up ? P.to : P.from] - v.pos[up ? Q.to : Q.from]; }); });
+    return v;
+  }
+  function align(g, v, mark, up, right) {
+    var n = g.extent.length, root = [], al = [], off = [], sign = right ? -1 : 1;
+    for (var i = 0; i < n; i++) { root[i] = i; al[i] = i; off[i] = 0; }
+    v.layers.forEach(function (lay) {
+      var reached = -1;
+      lay.forEach(function (node) {
+        var d = v.upEdges[node].length; if (!d) return;
+        var meds = [Math.floor((d - 1) / 2), Math.floor(d / 2)];
+        [0, 1].forEach(function (round) {
+          meds.forEach(function (m) {
+            if (al[node] !== node) return;
+            var k = v.upEdges[node][m], e = g.edges[k], upn = up ? e.to : e.from;
+            if ((e.weak || 0) !== round || mark[k] || (reached >= 0 && reached >= v.pos[upn])) return;
+            var upAt = up ? (e.to_at || 0) : (e.from_at || 0), nodeAt = up ? (e.from_at || 0) : (e.to_at || 0);
+            al[upn] = node; root[node] = root[upn]; al[node] = root[node];
+            off[node] = off[upn] + sign * (upAt - nodeAt); reached = v.pos[upn];
+          });
+        });
+      });
+    });
+    return { root: root, align: al, offset: off };
+  }
+  function sepBetween(g, a, b) { return Math.ceil((g.extent[a] + g.extent[b]) / 2) + g.sep; }
+  function compact(g, v, A) {
+    var n = g.extent.length, root = A.root, al = A.align, off = A.offset, x = [], sink = [], shift = [];
+    for (var i = 0; i < n; i++) { x[i] = 0; sink[i] = i; shift[i] = Infinity; }
+    // block order: topological over "left neighbour's block before mine"
+    var pending = [], succ = []; for (i = 0; i < n; i++) { pending[i] = 0; succ[i] = []; }
+    v.layers.forEach(function (lay) { for (var k = 1; k < lay.length; k++) { succ[root[lay[k - 1]]].push(root[lay[k]]); pending[root[lay[k]]]++; } });
+    var order = []; for (i = 0; i < n; i++) if (root[i] === i && !pending[i]) order.push(i);
+    for (var at = 0; at < order.length; at++) succ[order[at]].forEach(function (s) { if (--pending[s] === 0) order.push(s); });
+    function pred(w) { return v.pos[w] === 0 || v.pos[w] == null ? -1 : v.layers[v.layer[w]][v.pos[w] - 1]; }
+    order.forEach(function (block) {
+      var w = block;
+      do {
+        var left = pred(w);
+        if (left >= 0) {
+          var u = root[left];
+          if (sink[block] === block) sink[block] = sink[u];
+          if (sink[block] === sink[u]) x[block] = Math.max(x[block], x[left] + sepBetween(g, left, w) - off[w]);
+        }
+        w = al[w];
+      } while (w !== block);
+      while (al[w] !== block) { w = al[w]; x[w] = x[block] + off[w]; sink[w] = sink[block]; }
+    });
+    var nb = v.layers.map(function () { return []; });
+    v.layers.forEach(function (lay) { for (var k = lay.length - 1; k >= 1; k--) if (sink[lay[k - 1]] !== sink[lay[k]]) nb[v.layer[sink[lay[k]]]].push([lay[k - 1], lay[k]]); });
+    v.layers.forEach(function (lay, li) {
+      if (lay.length) { var first = sink[lay[0]]; if (shift[first] === Infinity) shift[first] = 0; }
+      nb[li].forEach(function (p) {
+        var base = shift[sink[p[1]]] === Infinity ? 0 : shift[sink[p[1]]];
+        shift[sink[p[0]]] = Math.min(shift[sink[p[0]]], base + x[p[1]] - (x[p[0]] + sepBetween(g, p[0], p[1])));
+      });
+    });
+    for (i = 0; i < n; i++) if (shift[sink[i]] !== Infinity) x[i] += shift[sink[i]];
+    return x;
+  }
+  function markType1(g) {
+    var mark = g.edges.map(function () { return 0; }), v = view(g, false, false), h = g.layers.length;
+    for (var i = 1; i + 1 < h; i++) {
+      var next = g.layers[i + 1]; if (!next.length || !g.layers[i].length) continue;
+      var k0 = 0, l = 0;
+      for (var l1 = 0; l1 < next.length; l1++) {
+        var node = next[l1], k1 = g.layers[i].length - 1, inner = false;
+        v.upEdges[node].forEach(function (k) { if (g.edges[k].inner) { inner = true; k1 = v.pos[g.edges[k].from]; } });
+        if (l1 + 1 !== next.length && !inner) continue;
+        while (l <= l1) { v.upEdges[next[l]].forEach(function (k) { var u = v.pos[g.edges[k].from]; if (u < k0 || u > k1) mark[k] = 1; }); l++; }
+        k0 = k1;
+      }
+    }
+    return mark;
+  }
+  U.bk = function (g, useMark) {
+    var mark = useMark ? markType1(g) : g.edges.map(function () { return 0; }), passes = [], aligns = [];
+    for (var k = 0; k < 4; k++) {
+      var up = !!(k & 2), right = !!(k & 1), v = view(g, up, right), A = align(g, v, mark, up, right), x = compact(g, v, A);
+      if (right) x = x.map(function (c) { return -c; });
+      passes.push(x); aligns.push(A);
+    }
+    var lo = [], hi = [], narrow = 0, n = g.extent.length;
+    for (k = 0; k < 4; k++) {
+      lo[k] = Infinity; hi[k] = -Infinity;
+      for (var i = 0; i < n; i++) { var half = Math.trunc(g.extent[i] / 2); lo[k] = Math.min(lo[k], passes[k][i] - half); hi[k] = Math.max(hi[k], passes[k][i] + half); }
+      if (hi[k] - lo[k] < hi[narrow] - lo[narrow]) narrow = k;
+    }
+    var shifted = passes.map(function (x, k) { var d = (k & 1) ? hi[narrow] - hi[k] : lo[narrow] - lo[k]; return x.map(function (c) { return c + d; }); });
+    var out = [];
+    for (i = 0; i < n; i++) { var four = shifted.map(function (x) { return x[i]; }).sort(function (a, b) { return a - b; }); out[i] = Math.floor((four[1] + four[2]) / 2); }
+    var least = Infinity; for (i = 0; i < n; i++) least = Math.min(least, out[i] - Math.trunc(g.extent[i] / 2));
+    out = out.map(function (c) { return c - least; });
+    return { mark: mark, raw: passes, passes: shifted.map(function (x) { return x.map(function (c) { return c - least; }); }), aligns: aligns, out: out, narrow: narrow };
+  };
+})();
+</script>
+<script>
+(function () {
+  'use strict';
+  var F = window.SXF, U = F.su;
+  var TOYS = {
+    t1: { label: 'type-1 toy (coords_tests)', names: ['n0', 'b1', 'n2', 'n3', 'b4', 'n5'], bend: { 1: 1, 4: 1 }, g: { extent: [100, 100, 100, 100, 100, 100], sep: 20, layers: [[0], [1, 2], [3, 4], [5]],
+      edges: [{ from: 0, to: 1 }, { from: 0, to: 2 }, { from: 1, to: 4, inner: 1 }, { from: 2, to: 3 }, { from: 4, to: 5 }] } },
+    fan: { label: 'mixed heights', names: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'], bend: {}, g: { extent: [60, 110, 60, 40, 70, 110, 40, 130, 60], sep: 24, layers: [[0, 1, 2], [3, 4, 5, 6], [7, 8]],
+      edges: [{ from: 0, to: 3 }, { from: 0, to: 4 }, { from: 1, to: 4 }, { from: 1, to: 5 }, { from: 2, to: 6 }, { from: 3, to: 7 }, { from: 4, to: 7 }, { from: 5, to: 8 }, { from: 6, to: 8 }] } }
+  };
+  var PASS = ['forward, from the top', 'forward, from the bottom', 'backward, from the top', 'backward, from the bottom'];
+  var PCOL = ['var(--series-1)', 'var(--series-3)', 'var(--series-4)', 'var(--series-7)'];
+  F.size['size-bk'] = function (host) {
+    var key = 'fan', view = 4, marking = true;
+    var f = SX.figure(host, { caption: '<b>Brandes–Köpf, four ways and balanced.</b> Ranks run across, so the coordinate BK assigns is the vertical one. <b>Pick</b> one of the four alignment passes to see its blocks (thick blue edges share one coordinate), or <b>Balanced</b> to see each node take the average of its two median values (the four coloured ticks are the passes, aligned to the narrowest). On the type-1 toy, <b>untick</b> the conflict marking and watch pass 1 bend the inner segment b1–b4.' });
+    var row1 = SX.el('div', { class: 'ctrl' }), row2 = SX.el('div', { class: 'ctrl' });
+    f.ctrl.appendChild(row1); f.ctrl.appendChild(row2);
+    row1.appendChild(SX.choice({ options: Object.keys(TOYS).map(function (k) { return { value: k, label: TOYS[k].label }; }), value: key, onChange: function (v) { key = v; draw(); } }).el);
+    row1.appendChild(SX.toggle({ label: 'mark type-1 conflicts', value: true, onChange: function (v) { marking = v; draw(); } }).el);
+    row2.appendChild(SX.choice({ options: PASS.map(function (p, k) { return { value: k, label: (k + 1) + ': ' + p }; }).concat([{ value: 4, label: 'Balanced' }]), value: view, onChange: function (v) { view = v; draw(); } }).el);
+    var table = SX.el('table', { class: 'sx-table' });
+    function draw() {
+      var T = TOYS[key], g = T.g, r = U.bk(g, marking), n = g.extent.length;
+      var coords = view === 4 ? r.out : r.passes[view];
+      var all = []; r.passes.concat([r.out]).forEach(function (x) { x.forEach(function (c, i) { all.push(c - g.extent[i] / 2, c + g.extent[i] / 2); }); });
+      var lo = Math.min.apply(null, all), hi = Math.max.apply(null, all), s = 300 / (hi - lo), top = 30;
+      var W = 760, H = 360, svg = U.root(W, H), gg = SX.svg('g'); svg.appendChild(gg);
+      var L = g.layers.length, colX = function (l) { return 110 + l * (W - 300) / Math.max(L - 1, 1); }, layerOf = {};
+      g.layers.forEach(function (lay, l) { lay.forEach(function (v) { layerOf[v] = l; }); });
+      var Y = function (c) { return top + (c - lo) * s; }, bw = 64;
+      g.layers.forEach(function (lay, l) { U.text(gg, colX(l), H - 6, 'rank ' + l, { fontSize: '11.5px', textAnchor: 'middle', fill: 'var(--text-secondary)' }); });
+      var A = view < 4 ? r.aligns[view] : null;
+      g.edges.forEach(function (e, k) {
+        var x1 = colX(layerOf[e.from]) + bw / 2, x2 = colX(layerOf[e.to]) - bw / 2, aligned = A && A.root[e.from] === A.root[e.to];
+        var ln = U.el(gg, 'line', { x1: x1, y1: Y(coords[e.from]), x2: x2, y2: Y(coords[e.to]), 'stroke-width': aligned ? 4 : 1.6 },
+          { stroke: r.mark[k] ? 'var(--critical)' : aligned ? 'var(--hl-2)' : 'var(--text-secondary)', strokeDasharray: r.mark[k] ? '6 4' : '' });
+        SX.tipOn(ln, T.names[e.from] + ' → ' + T.names[e.to] + (e.inner ? ' <span class="m">(inner: bend to bend)</span>' : '') + (r.mark[k] ? '<br>marked: crosses an inner segment, never aligned' : '') + (aligned ? '<br>aligned in this pass' : ''));
+      });
+      for (var v = 0; v < n; v++) {
+        var cx = colX(layerOf[v]), cy = Y(coords[v]), hgt = g.extent[v] * s;
+        if (view === 4) r.passes.forEach(function (p, k) { U.el(gg, 'line', { x1: cx + bw / 2 + 4 + k * 7, x2: cx + bw / 2 + 4 + k * 7, y1: Y(p[v]) - 5, y2: Y(p[v]) + 5, 'stroke-width': 3 }, { stroke: PCOL[k] }); });
+        var rect = U.el(gg, 'rect', { x: cx - bw / 2, y: cy - hgt / 2, width: bw, height: hgt, rx: T.bend[v] ? 3 : 6 }, { fill: 'var(--state-fill)', stroke: 'var(--state-stroke)', strokeWidth: 1.5, strokeDasharray: T.bend[v] ? '4 3' : '' });
+        U.text(gg, cx, cy + 4.5, T.names[v], { fontSize: '12.5px', textAnchor: 'middle' });
+        SX.tipOn(rect, '<b>' + T.names[v] + '</b>' + (T.bend[v] ? ' <span class="m">bend node</span>' : '') + '<br>extent ' + g.extent[v] + '<br>' + r.passes.map(function (p, k) { return '<span class="swatch" style="background:' + PCOL[k] + '"></span>pass ' + (k + 1) + ': ' + p[v]; }).join('<br>') + '<br><b>balanced: ' + r.out[v] + '</b>');
+      }
+      f.stage.innerHTML = ''; f.stage.appendChild(svg);
+      if (view === 4) f.stage.appendChild(SX.el('div', { class: 'legend' }, PASS.map(function (p, k) { return SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: PCOL[k] } }), 'pass ' + (k + 1) + ': ' + p + (k === r.narrow ? ' (narrowest)' : '')); })));
+      table.innerHTML = '';
+      table.appendChild(SX.el('tr', null, SX.el('th', { text: 'node' }), PASS.map(function (p, k) { return SX.el('th', { class: 'num', text: 'pass ' + (k + 1) }); }), SX.el('th', { class: 'num', text: 'balanced' })));
+      for (v = 0; v < n; v++) table.appendChild(SX.el('tr', null, SX.el('td', { text: T.names[v] }), r.passes.map(function (p) { return SX.el('td', { class: 'num', text: p[v] }); }), SX.el('td', { class: 'num', text: r.out[v] })));
+      f.stage.appendChild(table);
+    }
+    draw();
+  };
+})();
+</script>
+<script>
+(function () {
+  'use strict';
+  var F = window.SXF, U = F.su;
+  var RS = 576, LH = 269, SW = 896, SH = 640, NS = 288;
+  // Phase 1's label charge (order.cpp rank_derived): one-boundary edges first, then spanning
+  // edges widest label first, each onto the widest boundary it crosses, ties to the middle.
+  F.su.charge = function (bounds, edges) {
+    var labels = []; for (var b = 0; b < bounds; b++) labels.push(0);
+    var span = [], log = [];
+    edges.forEach(function (e) { if (!e.label) return; if (e.to - e.from > 1) { span.push(e); return; } labels[e.from] = Math.max(labels[e.from], e.label); log.push({ e: e, at: e.from, held: false }); });
+    span.sort(function (a, c) { return c.label - a.label; });
+    span.forEach(function (e) {
+      var mid = e.from + Math.floor((e.to - e.from) / 2), at = mid;
+      for (var b2 = e.from; b2 < e.to; b2++) { if (labels[b2] > labels[at] || (labels[b2] === labels[at] && Math.abs(b2 - mid) < Math.abs(at - mid))) at = b2; }
+      var held = labels[at] >= e.label; labels[at] = Math.max(labels[at], e.label); log.push({ e: e, at: at, held: held });
+    });
+    return { labels: labels, log: log };
+  };
+  F.size['size-gap'] = function (host) {
+    var mode = 'two', label = 777, fan = false, longL = 1400, midL = 900;
+    var f = SX.figure(host, { caption: '<b>Rank gaps.</b> <b>Slide</b> the label width and watch the gap after rank 0 grow once the label is wider than the lanes it competes with: <code>gap = rank_sep + max(label, lanes)</code>. Tick the fan to send three states into one; the middle edge runs straight and two turn, so the gap holds two lanes of 269 (1,114 in all, as <code>size_tests.cpp:1044</code> asserts). <b>Spanning label</b> shows where an edge crossing three boundaries is charged.' });
+    var modeC = SX.choice({ options: [{ value: 'two', label: 'Two ranks' }, { value: 'span', label: 'Spanning label' }], value: mode, onChange: function (v) { mode = v; controls(); draw(); } });
+    f.ctrl.appendChild(modeC.el);
+    var knobs = SX.el('div', { class: 'ctrl' }); f.ctrl.appendChild(knobs);
+    var out = SX.el('div', { class: 'note' });
+    function controls() {
+      knobs.innerHTML = '';
+      if (mode === 'two') {
+        knobs.appendChild(SX.slider({ label: 'label width', min: 0, max: 2400, step: 1, value: label, format: function (v) { return SX.fmt(v); }, onInput: function (v) { label = v; draw(); } }).el);
+        knobs.appendChild(SX.toggle({ label: 'fan of three into one state', value: fan, onChange: function (v) { fan = v; draw(); } }).el);
+      } else {
+        knobs.appendChild(SX.slider({ label: 'A → D label', min: 0, max: 2400, value: longL, format: function (v) { return SX.fmt(v); }, onInput: function (v) { longL = v; draw(); } }).el);
+        knobs.appendChild(SX.slider({ label: 'B → C label', min: 0, max: 2400, value: midL, format: function (v) { return SX.fmt(v); }, onInput: function (v) { midL = v; draw(); } }).el);
+      }
+    }
+    function box(g, s, x, y, w, h, name) {
+      U.el(g, 'rect', { x: x * s, y: y * s, width: w * s, height: h * s, rx: 80 * s }, { fill: 'var(--state-fill)', stroke: 'var(--state-stroke)', strokeWidth: 1.5 });
+      U.text(g, (x + w / 2) * s, (y + h / 2) * s + 4, name, { fontSize: '12px', textAnchor: 'middle' });
+    }
+    function dim(g, s, x1, x2, y, txt, col) {
+      U.el(g, 'line', { x1: x1 * s, x2: x2 * s, y1: y * s, y2: y * s, 'stroke-width': 1.5 }, { stroke: col || 'var(--axis)' });
+      [x1, x2].forEach(function (x) { U.el(g, 'line', { x1: x * s, x2: x * s, y1: y * s - 5, y2: y * s + 5, 'stroke-width': 1.5 }, { stroke: col || 'var(--axis)' }); });
+      U.text(g, (x1 + x2) / 2 * s, y * s - 6, txt, { fontSize: '11.5px', textAnchor: 'middle', fill: 'var(--text-secondary)' });
+    }
+    function draw() {
+      var W = 760, g, svg;
+      if (mode === 'two') {
+        var n = fan ? 3 : 1, colH = n * SH + (n - 1) * NS, lanes = fan ? 2 * LH : 0, extra = Math.max(label, lanes), bx = SW + RS + extra;
+        var total = bx + SW, s = (W - 40) / Math.max(total, 4400), H = (colH + 560) * s;
+        svg = U.root(W, H); g = SX.svg('g', { transform: 'translate(20,' + (480 * s) + ')' }); svg.appendChild(g);
+        var by = (colH - SH) / 2;
+        for (var i = 0; i < n; i++) {
+          var ay = i * (SH + NS); box(g, s, 0, ay, SW, SH, n > 1 ? 'A' + (i + 1) : 'A');
+          var y1 = ay + SH / 2, y2 = by + SH / 2 + (n > 1 ? (i - 1) * 140 : 0);
+          var pts = y1 === y2 ? [[SW, y1], [bx, y2]] : [[SW, y1], [SW + RS / 2 + (i === 0 ? 0 : LH), y1], [SW + RS / 2 + (i === 0 ? 0 : LH), y2], [bx, y2]];
+          U.el(g, 'polyline', { points: pts.map(function (p) { return p[0] * s + ',' + p[1] * s; }).join(' '), fill: 'none', 'stroke-width': 1.6 }, { stroke: 'var(--route)', fill: 'none' });
+        }
+        box(g, s, bx, by, SW, SH, 'B');
+        if (label > 0) {
+          var ly = by + SH / 2 - 96 - LH;
+          var lx0 = SW + (RS + extra - label) / 2;
+          U.el(g, 'rect', { x: lx0 * s, y: ly * s, width: label * s, height: LH * s }, { fill: 'color-mix(in srgb, var(--hl-2) 14%, transparent)', stroke: 'var(--hl-2)', strokeDasharray: '4 3' });
+          U.text(g, lx0 * s + 4, (ly + LH * 0.72) * s, 'label', { fontSize: '11px', fill: 'var(--text-secondary)' });
+        }
+        dim(g, s, 0, SW, -120, '896');
+        dim(g, s, SW, SW + RS, -120, 'rank_sep 576');
+        if (extra) dim(g, s, SW + RS, bx, -360, 'max(label ' + label + ', lanes ' + lanes + ') = ' + SX.fmt(extra), 'var(--hl)');
+        out.innerHTML = 'B.x = 896 + 576 + ' + SX.fmt(extra) + ' = <b>' + SX.fmt(bx) + '</b>' + (fan ? ' (two of three edges turn: lanes = 2 × 269 = 538)' : '') + '. Chart width ' + SX.fmt(bx + SW) + '.';
+      } else {
+        var edges = [{ from: 0, to: 1, label: 400, t: 'A → B' }, { from: 1, to: 2, label: midL, t: 'B → C' }, { from: 2, to: 3, label: 300, t: 'C → D' }, { from: 0, to: 3, label: longL, t: 'A → D' }];
+        var res = U.charge(3, edges), xs = [0];
+        for (var r = 1; r < 4; r++) xs.push(xs[r - 1] + SW + RS + res.labels[r - 1]);
+        var tot = xs[3] + SW, s2 = (W - 40) / tot, H2 = 1700 * s2 + 60;
+        svg = U.root(W, H2); g = SX.svg('g', { transform: 'translate(20,' + (900 * s2 + 20) + ')' }); svg.appendChild(g);
+        ['A', 'B', 'C', 'D'].forEach(function (nm, k) { box(g, s2, xs[k], 0, SW, SH, nm); });
+        for (r = 0; r < 3; r++) {
+          U.el(g, 'line', { x1: (xs[r] + SW) * s2, x2: xs[r + 1] * s2, y1: SH / 2 * s2, y2: SH / 2 * s2, 'stroke-width': 1.6 }, { stroke: 'var(--route)' });
+          dim(g, s2, xs[r] + SW + RS, xs[r + 1], SH + 160, res.labels[r] ? SX.fmt(res.labels[r]) : '0', 'var(--hl)');
+        }
+        var longAt = res.log.filter(function (l) { return l.e.t === 'A → D'; })[0];
+        U.el(g, 'polyline', { points: [[SW / 2, 0], [SW / 2, -700], [xs[3] + SW / 2, -700], [xs[3] + SW / 2, 0]].map(function (p) { return p[0] * s2 + ',' + p[1] * s2; }).join(' '), 'stroke-width': 1.6 }, { stroke: 'var(--route)', fill: 'none' });
+        if (longAt && longL) {
+          var lx = xs[longAt.at] + SW + RS / 2;
+          U.el(g, 'rect', { x: lx * s2, y: (-700 - 96 - LH) * s2, width: longL * s2, height: LH * s2 }, { fill: 'color-mix(in srgb, var(--hl-2) 14%, transparent)', stroke: 'var(--hl-2)', strokeDasharray: '4 3' });
+          U.text(g, lx * s2, (-700 - 120 - LH) * s2, 'A → D label, charged to boundary ' + longAt.at + (longAt.held ? ' (already wide enough: costs nothing)' : ''), { fontSize: '11.5px', fill: 'var(--text-secondary)' });
+        }
+        out.innerHTML = 'Boundary charges: ' + res.labels.map(function (v, b) { return 'after rank ' + b + ': <b>' + SX.fmt(v) + '</b>'; }).join(', ') + '. One-boundary labels charge first (A → B 400, B → C ' + SX.fmt(midL) + ', C → D 300); A → D takes the widest boundary it crosses, ties to the middle.';
+      }
+      f.stage.innerHTML = ''; f.stage.appendChild(svg); f.stage.appendChild(out);
+    }
+    controls(); draw();
+  };
+})();
+</script>
+<script>
+(function () {
+  'use strict';
+  var U = window.SXF.su;
+  // LR-rectpacking as pack.cpp builds it: spots Right 0, Subrow 1, Level 2, Row 3.
+  var RIGHT = 0, SUBROW = 1, LEVEL = 2, ROW = 3;
+  U.SPOTS = ['Right', 'Subrow', 'Level', 'Row'];
+  function seeded(r) { return { row_y: 0, row_h: r.h, row_right: r.w, block_x: 0, sub_y: 0, sub_h: r.h, sub_x: r.w + 0 }; }
+  function cursor(first, sep) { var c = seeded(first); c.sub_x = first.w + sep; return c; }
+  function seat(at, spot, w, h, sep) {
+    if (spot === RIGHT) at.sub_h = Math.max(at.sub_h, h);
+    else if (spot === SUBROW) { at.sub_y = at.sub_y + at.sub_h + sep; at.sub_h = h; at.sub_x = at.block_x; }
+    else if (spot === LEVEL) { at.block_x = at.row_right + sep; at.sub_y = at.row_y; at.sub_h = h; at.sub_x = at.block_x; }
+    else { at.row_y = at.row_y + at.row_h + sep; at.row_h = 0; at.row_right = 0; at.block_x = 0; at.sub_y = at.row_y; at.sub_h = h; at.sub_x = 0; }
+    var x = at.sub_x; at.sub_x = x + w + sep; at.row_right = Math.max(at.row_right, x + w); at.row_h = Math.max(at.row_h, at.sub_y - at.row_y + h);
+    return x;
+  }
+  function lay(rects, spot, sep, at) {
+    at[0] = { x: 0, y: 0, w: rects[0].w, h: rects[0].h };
+    var cur = cursor(rects[0], sep), e = { w: rects[0].w, h: rects[0].h };
+    for (var i = 1; i < rects.length; i++) {
+      var x = seat(cur, spot[i], rects[i].w, rects[i].h, sep);
+      at[i] = { x: x, y: cur.sub_y, w: rects[i].w, h: rects[i].h };
+      e.w = Math.max(e.w, x + rects[i].w); e.h = Math.max(e.h, cur.sub_y + rects[i].h);
+    }
+    return e;
+  }
+  U.target = function (rects, sep, num, den) {
+    var area = 0, widest = 0;
+    rects.forEach(function (r) { area += (r.w + sep) * (r.h + sep); widest = Math.max(widest, r.w); });
+    return Math.max(widest, U.isqrt(Math.floor(area * num / den)));
+  };
+  function place(rects, sep, target, trail) {
+    var spot = rects.map(function () { return ROW; }), at = cursor(rects[0], sep);
+    for (var i = 1; i < rects.length; i++) {
+      var w = rects[i].w, lower = at.sub_y > at.row_y, tried = [];
+      if (lower && at.row_right + sep + w <= target) spot[i] = LEVEL;
+      else if (at.sub_x + w <= target) spot[i] = RIGHT;
+      else if (at.block_x + w <= target) spot[i] = SUBROW;
+      else spot[i] = ROW;
+      trail && trail.push({ i: i, spot: spot[i], lower: lower, right: at.sub_x + w, level: at.row_right + sep + w, sub: at.block_x + w });
+      seat(at, spot[i], w, rects[i].h, sep);
+    }
+    return spot;
+  }
+  function tighter(a, b) { if (a.w * a.h !== b.w * b.h) return a.w * a.h < b.w * b.h; if (a.h !== b.h) return a.h < b.h; return a.w < b.w; }
+  function compact(rects, sep, spot, moves) {
+    var at = [], cur = lay(rects, spot, sep, at), before = cursor(rects[0], sep);
+    for (var i = 1; i < rects.length; i++) {
+      var w = rects[i].w, h = rects[i].h, chosen = spot[i], ce = cur;
+      for (var s = 0; s < 4; s++) {
+        if (s === spot[i]) continue;
+        var probe = Object.assign({}, before), x = seat(probe, s, w, h, sep);
+        if (x + w > cur.w || probe.sub_y + h > cur.h) continue;
+        var was = spot[i]; spot[i] = s; var e = lay(rects, spot, sep, []); spot[i] = was;
+        if (e.w <= cur.w && e.h <= cur.h && tighter(e, ce)) { chosen = s; ce = e; }
+      }
+      if (chosen !== spot[i]) moves && moves.push({ i: i, from: spot[i], to: chosen });
+      spot[i] = chosen; cur = ce; seat(before, chosen, w, h, sep);
+    }
+  }
+  function prefix(extra, i, parts) { return parts === 0 ? 0 : Math.floor(extra * i / parts); }
+  function runEnd(spot, at, end, level) { var next = at + 1; while (next < end && spot[next] < level) next++; return next; }
+  function expand(spot, whole, at) {
+    var n = at.length;
+    for (var row = 0; row < n;) {
+      var rowLast = runEnd(spot, row, n, ROW), rowY = at[row].y, rowW = 0, rowBottom = 0, blocks = 1;
+      for (var i = row; i < rowLast; i++) { rowW = Math.max(rowW, at[i].x + at[i].w); rowBottom = Math.max(rowBottom, at[i].y + at[i].h); blocks += (i > row && spot[i] === LEVEL) ? 1 : 0; }
+      var rowExtra = whole.w - rowW, rowH = rowBottom - rowY, bo = 0;
+      for (var block = row; block < rowLast;) {
+        var blockLast = runEnd(spot, block, rowLast, LEVEL), blockX = at[block].x, blockW = 0, blockBottom = 0, subrows = 1;
+        for (i = block; i < blockLast; i++) { blockW = Math.max(blockW, at[i].x + at[i].w - blockX); blockBottom = Math.max(blockBottom, at[i].y + at[i].h); subrows += (i > block && spot[i] === SUBROW) ? 1 : 0; }
+        var dx = prefix(rowExtra, bo, blocks), targetW = blockW + prefix(rowExtra, bo + 1, blocks) - dx, blockExtra = rowH - (blockBottom - rowY), so = 0;
+        for (var sub = block; sub < blockLast;) {
+          var subLast = runEnd(spot, sub, blockLast, SUBROW), subW = 0, subH = 0, growing = 0;
+          for (i = sub; i < subLast; i++) { subW = Math.max(subW, at[i].x + at[i].w - blockX); subH = Math.max(subH, at[i].h); growing += (at[i].w > 0 && at[i].h > 0) ? 1 : 0; }
+          var dy = prefix(blockExtra, so, subrows), grownH = subH + prefix(blockExtra, so + 1, subrows) - dy, subExtra = targetW - subW, grown = 0;
+          for (i = sub; i < subLast; i++) {
+            var gdx = prefix(subExtra, grown, growing);
+            at[i].x = at[i].x + dx + gdx; at[i].y = at[i].y + dy;
+            if (at[i].w > 0 && at[i].h > 0) { at[i].w = at[i].w + prefix(subExtra, grown + 1, growing) - gdx; at[i].h = grownH; grown++; }
+          }
+          so++; sub = subLast;
+        }
+        bo++; block = blockLast;
+      }
+      row = rowLast;
+    }
+  }
+  // Returns {at, w, h, spot, raw (before whitespace elimination), target, trail, moves}.
+  U.packLR = function (rects, sep, num, den, compaction, expanded) {
+    var target = U.target(rects, sep, num, den), trail = [], moves = [];
+    var spot = place(rects, sep, target, trail);
+    if (compaction) compact(rects, sep, spot, moves);
+    var at = [], e = lay(rects, spot, sep, at), raw = at.map(function (r) { return Object.assign({}, r); });
+    if (expanded !== false) expand(spot, e, at);
+    return { at: at, raw: raw, w: e.w, h: e.h, spot: spot, target: target, trail: trail, moves: moves };
+  };
+  U.packBox = function (rects, sep, expanded) {
+    var spot = rects.map(function () { return RIGHT; }), at = [], e = lay(rects, spot, sep, at), raw = at.map(function (r) { return Object.assign({}, r); });
+    if (expanded !== false) expand(spot, e, at);
+    return { at: at, raw: raw, w: e.w, h: e.h, spot: spot };
+  };
+  U.packBest = function (rects, sep, num, den, compaction, trybox, aspectFirst) {
+    var lr = U.packLR(rects, sep, num, den, compaction), out = Object.assign({ by: 'LR-rectpacking' }, lr);
+    if (trybox) { var row = U.packBox(rects, sep); if (U.better(row, lr, num, den, aspectFirst)) out = Object.assign({ by: 'box (one row)' }, row, { target: lr.target }); }
+    return out;
+  };
+})();
+</script>
+<script>
+(function () {
+  'use strict';
+  var F = window.SXF, U = F.su;
+  var SW = 896, SH = 640, RS = 576, NS = 288;
+  var DARS = [{ value: '16:10', label: '16:10 (readable)' }, { value: '4:3', label: '4:3 (compact)' }, { value: '1:1', label: '1:1' }, { value: '1:2', label: '1:2' }];
+  function ratio(s) { var p = s.split(':'); return [+p[0], +p[1]]; }
+  // A chain of n plain states, folded as size.cpp folds a run: cut where the running width passes the target.
+  U.foldChain = function (n, num, den, rule) {
+    var area = n * (SW + RS) * SH, target = Math.max(SW, U.isqrt(Math.floor(area * num / den)));
+    var flat = { w: n * SW + (n - 1) * RS, h: SH, pieces: [{ x: 0, y: 0, k: n }] };
+    var chunks = [[0]], run = SW;
+    for (var r = 1; r < n; r++) { var step = SW + RS; if (run + step > target) { chunks.push([r]); run = SW; } else { chunks[chunks.length - 1].push(r); run += step; } }
+    var rects = chunks.map(function (c) { return { w: c.length * SW + (c.length - 1) * RS, h: SH }; });
+    var packed = U.packBest(rects, NS, num, den, false, true, false);
+    var folded = { w: packed.w, h: packed.h, pieces: chunks.map(function (c, k) { return { x: packed.raw[k].x, y: packed.raw[k].y, k: c.length }; }), by: packed.by };
+    folded.wraps = chunks.length > 1 && folded.pieces.some(function (p) { return p.y !== folded.pieces[0].y; });
+    var sy = 0, sw = 0, stacked = { pieces: [] };
+    rects.forEach(function (rc, k) { stacked.pieces.push({ x: 0, y: sy, k: chunks[k].length }); sw = Math.max(sw, rc.w); sy += rc.h + NS; });
+    stacked.w = sw; stacked.h = sy - NS; stacked.wraps = chunks.length > 1;
+    var fold = folded, why = [];
+    if (stacked.wraps && (!folded.wraps || U.better(stacked, folded, num, den, false))) { fold = stacked; why.push('stacked beats packed'); }
+    var pick = 'flat';
+    if (rule === 'never') why.push('rule Never: the run stays flat');
+    else if (!fold.wraps) why.push(chunks.length < 2 ? 'the run fits the target: no cut' : 'the pieces pack back into one row: not a fold');
+    else if (rule === 'always') { pick = fold === stacked ? 'stacked' : 'folded'; why.push('rule Always takes the fold'); }
+    else if (U.better(fold, flat, num, den, false)) { pick = fold === stacked ? 'stacked' : 'folded'; why.push('the fold scales larger'); }
+    else why.push('the flat run scales larger');
+    return { target: target, flat: flat, folded: folded, stacked: stacked, pick: pick, why: why, cuts: chunks.length - 1 };
+  };
+  F.size['size-fold'] = function (host) {
+    var n = 8, dar = '16:10', rule = 'scale';
+    var f = SX.figure(host, { caption: '<b>Folding a long run.</b> A chain of plain states (896 × 640, <code>rank_sep</code> 576) is cut where the running width passes the target, and the pieces are packed (by <code>pack_best</code>) or stacked. <b>Slide</b> the chain\'s length, <b>change</b> the aspect ratio or the frame\'s rule, and watch the scale measure (bars: larger is better) pick among the three candidates. Each candidate is drawn to fit its cell; its size is printed above it.' });
+    f.ctrl.appendChild(SX.slider({ label: 'states', min: 2, max: 16, value: n, onInput: function (v) { n = v; draw(); } }).el);
+    f.ctrl.appendChild(SX.choice({ options: DARS, value: dar, onChange: function (v) { dar = v; draw(); } }).el);
+    f.ctrl.appendChild(SX.choice({ options: [{ value: 'scale', label: 'Scale' }, { value: 'always', label: 'Always' }, { value: 'never', label: 'Never' }], value: rule, onChange: function (v) { rule = v; draw(); } }).el);
+    var out = SX.el('div', { class: 'note' });
+    function draw() {
+      var q = ratio(dar), res = U.foldChain(n, q[0], q[1], rule), W = 760;
+      var cands = [['flat', res.flat], ['folded', res.folded], ['stacked', res.stacked]];
+      var maxW = Math.max.apply(null, cands.map(function (c) { return c[1].w; })), maxH = Math.max.apply(null, cands.map(function (c) { return c[1].h; }));
+      var cellW = 236, H = 150 + 130;
+      var svg = U.root(W, H), g = SX.svg('g'); svg.appendChild(g);
+      var sms = cands.map(function (c) { return U.sm(c[1], q[0], q[1]); }), smMax = Math.max.apply(null, sms);
+      cands.forEach(function (c, k) {
+        var x0 = 10 + k * (cellW + 16), shape = c[1], on = res.pick === c[0];
+        U.el(g, 'rect', { x: x0 - 6, y: 4, width: cellW + 4, height: H - 8, rx: 10 }, { fill: on ? 'color-mix(in srgb, var(--hl) 10%, transparent)' : 'none', stroke: on ? 'var(--hl)' : 'var(--grid)', strokeWidth: on ? 2 : 1 });
+        U.text(g, x0 + 4, 24, c[0] + (on ? '  (picked)' : ''), { fontSize: '13px', fontWeight: 600 });
+        U.text(g, x0 + 4, 40, SX.fmt(shape.w) + ' × ' + SX.fmt(shape.h) + (c[0] === 'folded' && shape.by ? ', ' + shape.by : ''), { fontSize: '11px', fill: 'var(--text-secondary)' });
+        var dx = x0 + 4, dy = 52, idx = 0, s = Math.min((cellW - 16) / shape.w, 150 / shape.h);
+        shape.pieces.forEach(function (p) {
+          for (var j = 0; j < p.k; j++) {
+            var sx = dx + (p.x + j * (SW + RS)) * s, sy = dy + p.y * s;
+            U.el(g, 'rect', { x: sx, y: sy, width: SW * s, height: SH * s, rx: 2 }, { fill: 'var(--state-fill)', stroke: 'var(--state-stroke)', strokeWidth: 1 });
+            if (j + 1 < p.k) U.el(g, 'line', { x1: sx + SW * s, x2: sx + (SW + RS) * s, y1: sy + SH * s / 2, y2: sy + SH * s / 2 }, { stroke: 'var(--route)', strokeWidth: 1 });
+            idx++;
+          }
+        });
+        var by = 52 + 150 + 22, bw = (cellW - 10) * sms[k] / smMax;
+        U.text(g, x0 + 4, by - 4, 'scale measure', { fontSize: '11px', fill: 'var(--text-muted)' });
+        var bar = U.el(g, 'rect', { x: x0 + 4, y: by, width: Math.max(bw, 2), height: 14, rx: 3 }, { fill: on ? 'var(--hl)' : 'var(--series-1)' });
+        SX.tipOn(bar, '<b>' + c[0] + '</b><br>SM = min(' + q[0] + ' / (' + q[1] + ' × ' + SX.fmt(shape.w) + '), 1 / ' + SX.fmt(shape.h) + ')<br>= ' + sms[k].toExponential(3) + (shape.wraps === false && c[0] !== 'flat' ? '<br><span class="m">not a fold: one row</span>' : ''));
+        U.text(g, x0 + 4, by + 32, (sms[k] / smMax * 100).toFixed(0) + '% of the best', { fontSize: '11px', fill: 'var(--text-secondary)' });
+      });
+      f.stage.innerHTML = ''; f.stage.appendChild(svg); f.stage.appendChild(out);
+      out.innerHTML = 'Target width ' + SX.fmt(res.target) + '; ' + res.cuts + (res.cuts === 1 ? ' cut' : ' cuts') + '. Picked <b>' + res.pick + '</b>: ' + res.why.join('; ') + '.';
+    }
+    draw();
+  };
+
+  var SETS = {
+    notch: { label: 'fills the notch', sep: 10, rects: [[100, 50], [100, 50], [50, 50]] },
+    four: { label: 'four squares', sep: 10, rects: [[100, 100], [100, 100], [100, 100], [100, 100]] },
+    up: { label: 'compaction up', sep: 10, rects: [[500, 100], [200, 400], [100, 100], [200, 400]] },
+    regions: { label: 'five regions', sep: 19, rects: [[420, 240], [300, 180], [260, 300], [380, 150], [200, 200]] }
+  };
+  F.size['size-pack'] = function (host) {
+    var key = 'up', dar = '16:10', compaction = false, white = true, packer = 'lr';
+    var f = SX.figure(host, { caption: '<b>LR-rectpacking.</b> <b>Step</b> through the placement: each rect takes the first spot (Level, Right, Subrow, Row) that keeps it inside the target width (dashed). Then <b>toggle</b> compaction (each rect may take another spot if the drawing gets tighter and neither extent grows) and whitespace elimination (rects grow to fill rows, blocks and subrows). <b>Box</b> is the one-row packer that <code>trybox</code> also tries; <b>Best</b> keeps whichever scales larger.' });
+    var r1 = SX.el('div', { class: 'ctrl' }), r2 = SX.el('div', { class: 'ctrl' }); f.ctrl.appendChild(r1); f.ctrl.appendChild(r2);
+    r1.appendChild(SX.choice({ options: Object.keys(SETS).map(function (k) { return { value: k, label: SETS[k].label }; }), value: key, onChange: function (v) { key = v; build(); } }).el);
+    r1.appendChild(SX.choice({ options: DARS.slice(0, 3), value: dar, onChange: function (v) { dar = v; build(); } }).el);
+    r2.appendChild(SX.choice({ options: [{ value: 'lr', label: 'LR-rectpacking' }, { value: 'box', label: 'Box' }, { value: 'best', label: 'Best (trybox)' }], value: packer, onChange: function (v) { packer = v; build(); } }).el);
+    r2.appendChild(SX.toggle({ label: 'compaction', value: compaction, onChange: function (v) { compaction = v; build(); } }).el);
+    r2.appendChild(SX.toggle({ label: 'whitespace elimination', value: white, onChange: function (v) { white = v; build(); } }).el);
+    var stepHost = SX.el('div'); f.ctrl.appendChild(stepHost);
+    var out = SX.el('div', { class: 'note', style: { minHeight: '2.6em' } }), stepper;
+    function build() {
+      var S = SETS[key], q = ratio(dar), rects = S.rects.map(function (r) { return { w: r[0], h: r[1] }; });
+      var res = packer === 'box' ? U.packBox(rects, S.sep, white) : packer === 'best' ? U.packBest(rects, S.sep, q[0], q[1], compaction, true, false) : U.packLR(rects, S.sep, q[0], q[1], compaction, white);
+      if (packer === 'best' && !white) res.at = res.raw;
+      var tgt = U.target(rects, S.sep, q[0], q[1]);
+      var nsteps = rects.length + 1;
+      stepHost.innerHTML = ''; if (stepper) stepper.stop();
+      stepper = SX.stepper({ steps: nsteps, start: nsteps - 1, interval: 900, label: function (i) { return i < rects.length ? 'rect ' + (i + 1) + ' / ' + rects.length : 'final'; }, onStep: function (i) { draw(S, rects, res, tgt, i); } });
+      stepHost.appendChild(stepper.el);
+    }
+    function draw(S, rects, res, tgt, step) {
+      var final = step >= rects.length, show = final ? res.at : res.raw, W = 760, H = 300;
+      var ext = Math.max(res.w, tgt) * 1.05, s = Math.min((W - 220) / ext, (H - 40) / (res.h * 1.05));
+      var svg = U.root(W, H), g = SX.svg('g', { transform: 'translate(20,20)' }); svg.appendChild(g);
+      if (packer !== 'box') { U.el(g, 'line', { x1: tgt * s, x2: tgt * s, y1: -10, y2: H - 30 }, { stroke: 'var(--hl)', strokeDasharray: '6 4', strokeWidth: 1.5 }); U.text(g, tgt * s + 4, 0, 'target ' + tgt, { fontSize: '11px', fill: 'var(--text-secondary)' }); }
+      U.el(g, 'rect', { x: 0, y: 0, width: res.w * s, height: res.h * s }, { fill: 'none', stroke: 'var(--axis)', strokeDasharray: '2 3' });
+      show.forEach(function (r, k) {
+        if (!final && k > step) return;
+        var cur = !final && k === step;
+        var rc = U.el(g, 'rect', { x: r.x * s, y: r.y * s, width: r.w * s, height: r.h * s, rx: 3 }, { fill: cur ? 'color-mix(in srgb, var(--hl-2) 25%, var(--state-fill))' : 'var(--state-fill)', stroke: cur ? 'var(--hl-2)' : 'var(--state-stroke)', strokeWidth: cur ? 2.5 : 1.3 });
+        U.text(g, r.x * s + 6, r.y * s + 16, String(k + 1) + (k ? ' · ' + U.SPOTS[res.spot[k]] : ''), { fontSize: '11.5px' });
+        SX.tipOn(rc, '<b>rect ' + (k + 1) + '</b> ' + S.rects[k][0] + ' × ' + S.rects[k][1] + '<br>at (' + r.x + ', ' + r.y + ')' + (r.w !== S.rects[k][0] || r.h !== S.rects[k][1] ? ', grown to ' + r.w + ' × ' + r.h : '') + (k ? '<br>spot: ' + U.SPOTS[res.spot[k]] : ''));
+      });
+      var q = ratio(dar);
+      U.text(g, W - 200, 20, 'extent ' + res.w + ' × ' + res.h, { fontSize: '12.5px', fontWeight: 600 });
+      U.text(g, W - 200, 40, 'SM ' + U.sm(res, q[0], q[1]).toExponential(3), { fontSize: '12px', fill: 'var(--text-secondary)' });
+      if (res.by) U.text(g, W - 200, 60, 'Best kept: ' + res.by, { fontSize: '12px', fill: 'var(--text-secondary)' });
+      f.stage.innerHTML = ''; f.stage.appendChild(svg); f.stage.appendChild(out);
+      var tr = res.trail && res.trail[step - 1];
+      if (final) out.innerHTML = 'Final: ' + res.w + ' × ' + res.h + '.' + (res.moves && res.moves.length ? ' Compaction moved ' + res.moves.map(function (m) { return 'rect ' + (m.i + 1) + ' ' + U.SPOTS[m.from] + ' → ' + U.SPOTS[m.to]; }).join(', ') + '.' : '') + (white ? ' Whitespace elimination grew the rects without changing the extent.' : '');
+      else if (step === 0) out.textContent = 'The first rect takes the origin. Target width = max(widest, isqrt(Σ(w+sep)(h+sep) · ' + dar.replace(':', ' / ') + ')) = ' + tgt + '.';
+      else if (tr) out.textContent = 'Rect ' + (step + 1) + ': ' + (tr.lower ? 'Level would end at ' + tr.level + (tr.level <= tgt ? ' (fits).' : ' (too wide); ') : 'cursor is on the row\'s top subrow, so Level is not tried; ') + (tr.spot === 2 ? '' : 'Right would end at ' + tr.right + (tr.right <= tgt ? ' (fits).' : '; Subrow at ' + tr.sub + (tr.sub <= tgt ? ' (fits).' : ', too: a new Row.'))) + ' → ' + U.SPOTS[tr.spot] + '.';
+      else out.textContent = 'The box packer puts every rect Right of its predecessor: one row.';
+    }
+    build();
+  };
+})();
+</script>
+<script>
+(function () {
+  'use strict';
+  var F = window.SXF, U = F.su, PAD = 128;
+  function describe(e, geom) {
+    var nm = function (s) { return s.replace(/^#\d+$/, 'initial'); };
+    switch (e.kind) {
+      case 'fold_pinned': return 'fold pin: rule ' + e.mode + (e.layer ? ', cut before layer ' + e.layer : '');
+      case 'fold_cut': return 'cut before rank ' + e.rank + (e.refused ? ' (refused)' : '');
+      case 'boundary_carried': return 'boundary node of segment ' + e.seg + ' carried into the piece at rank ' + e.rank;
+      case 'piece_packed': return 'piece from rank ' + e.rank + ' packed at (' + e.at.join(', ') + '), ' + e.size.join(' × ');
+      case 'pseudostate_seated': return 'initial seated beside its state (' + e.how + ')';
+      case 'column_centred': return nm(e.state) + ' centred on its column (moved ' + e.by + ')';
+      case 'port_attached': return 'port of segment ' + e.seg + ' attached on ' + e.state + ' at ' + e.at + ' from its centre';
+      default: return e.kind;
+    }
+  }
+  F.size['size-bottomup'] = function (host) {
+    var S = SX.data('stages'), T = S && S.toolchanger;
+    if (!T) { host.appendChild(SX.el('p', { class: 'note', text: 'stages.json is missing.' })); return; }
+    var geom = T.geometry, frames = T.decomposition.frames, byState = {}, steps = [];
+    geom.states.forEach(function (s) { byState[s.id] = s; });
+    var pass = T.sizing.passes[0], evByFrame = {}, frameOrder = [];
+    pass.forEach(function (e) { if (e.kind === 'node_placed') return; if (!evByFrame[e.frame]) { evByFrame[e.frame] = []; frameOrder.push(e.frame); } evByFrame[e.frame].push(e); });
+    frames.forEach(function (fr) { if (frameOrder.indexOf(fr.id) < 0) frameOrder.push(fr.id); });
+    var depth = function (fr) { var d = 0, o = fr.owner; while (o != null) { d++; var p = byState[o].parent_sub; o = frames[p] ? frames[p].owner : null; } return d; };
+    var segTrans = function (fid) { return T.decomposition.segments.filter(function (s) { return s.frame === fid; }).map(function (s) { return s.trans; }); };
+    var done = { states: [], trans: [] };
+    // Deepest first: each frame, then the owners whose frames are all sized, as size.cpp buckets them.
+    var pendingOwners = {};
+    var byDepth = frameOrder.slice().sort(function (a, b) { return depth(frames[b]) - depth(frames[a]); });
+    var maxD = depth(frames[byDepth[0]]);
+    for (var d = maxD; d >= 0; d--) {
+      byDepth.filter(function (fid) { return depth(frames[fid]) === d; }).forEach(function (fid) {
+        var fr = frames[fid];
+        done.states = done.states.concat(fr.states); done.trans = done.trans.concat(segTrans(fid));
+        steps.push({ kind: 'frame', fr: fr, ev: evByFrame[fid] || [], states: done.states.slice(), trans: done.trans.slice() });
+        if (fr.owner != null) pendingOwners[fr.owner] = (pendingOwners[fr.owner] || []).concat([fid]);
+      });
+      Object.keys(pendingOwners).forEach(function (o) {
+        var st = byState[o], subs = pendingOwners[o].map(function (fid) { return frames[fid].rect; });
+        var x0 = Math.min.apply(null, subs.map(function (r) { return r[0]; })), x1 = Math.max.apply(null, subs.map(function (r) { return r[0] + r[2]; }));
+        var y0 = Math.min.apply(null, subs.map(function (r) { return r[1]; })), y1 = Math.max.apply(null, subs.map(function (r) { return r[1] + r[3]; }));
+        steps.push({ kind: 'owner', st: st, subs: subs, pw: x1 - x0, ph: y1 - y0, hb: st.before[3], ha: st.after[3], states: done.states.slice(), trans: done.trans.slice() });
+      });
+      pendingOwners = {};
+    }
+    steps.push({ kind: 'cover', states: done.states.slice(), trans: done.trans.slice() });
+    var f = SX.figure(host, { caption: '<b>toolchanger, sized bottom-up</b>, as the trace records it. <b>Step</b> from the deepest frames (inside <code>arm/Moving</code> and <code>arm/stop</code>) to their owner states, then up to the root. Each frame step lists what sizing did there (fold pins and cuts, packed pieces, seated initials, centred columns); each owner step applies the box formula to the real numbers. Not yet sized is faded. Boxes are drawn where the final top-down pass put them.' });
+    var chartHost = SX.el('div'), log = SX.el('div', { class: 'note', style: { minHeight: '5em' } });
+    f.stage.appendChild(chartHost); f.stage.appendChild(log);
+    var h = SX.chart(chartHost, geom, { maxHeight: 520 });
+    var st = SX.stepper({ steps: steps.length, interval: 1400, label: function (i) { return (i + 1) + ' / ' + steps.length; }, onStep: function (i) {
+      var s = steps[i];
+      h.unmarkAll(); h.clear(); h.dim({ states: s.states.concat(s.kind === 'owner' ? [s.st.id] : []), trans: s.trans });
+      if (s.kind === 'frame') {
+        s.fr.states.forEach(function (id) { h.mark('state', id, 'var(--hl-2)'); });
+        h.rect(s.fr.rect, { fill: 'none', stroke: 'var(--hl-2)', 'stroke-width': 48, 'stroke-dasharray': '120 80' });
+        log.innerHTML = '<b>Frame ' + s.fr.id + '</b>: ' + (s.fr.owner_path ? 'the ' + (s.fr.name ? '<code>' + s.fr.name + '</code> region' : 'submachine') + ' of <code>' + s.fr.owner_path + '</code>' : 'the root') + (s.fr.down ? ', running down' : '') + ', sized ' + SX.fmt(s.fr.rect[2]) + ' × ' + SX.fmt(s.fr.rect[3]) + '.<br>' + (s.ev.length ? s.ev.map(function (e) { return describe(e, geom); }).join('; ') + '.' : 'No folds or alignment events: layers and Brandes–Köpf only.');
+      } else if (s.kind === 'owner') {
+        h.mark('state', s.st.id, 'var(--hl)');
+        s.subs.forEach(function (r) { h.rect(r, { fill: 'none', stroke: 'var(--hl-2)', 'stroke-width': 32, 'stroke-dasharray': '60 50' }); });
+        var w = s.pw + 2 * PAD, hh = s.hb + s.ph + s.ha + 2 * PAD;
+        log.innerHTML = '<b>' + s.st.path + '</b> takes its ' + (s.subs.length > 1 ? s.subs.length + ' packed regions (' + (s.subs[0][1] === s.subs[1][1] ? 'side by side' : 'stacked') + ', <code>sub_sep</code> 192 apart)' : 'submachine') + ': packed ' + SX.fmt(s.pw) + ' × ' + SX.fmt(s.ph) + '.<br>w = ' + SX.fmt(s.pw) + ' + 2·128 = <b>' + SX.fmt(w) + '</b>; h = ' + s.hb + ' (name band) + ' + SX.fmt(s.ph) + ' + ' + s.ha + ' + 2·128 = <b>' + SX.fmt(hh) + '</b>' + (w === s.st.rect[2] && hh === s.st.rect[3] ? ', exactly its rect.' : ' (rect ' + s.st.rect[2] + ' × ' + s.st.rect[3] + ').');
+      } else {
+        var root = T.sizing.subs['0'], box = geom.box;
+        h.rect(root, { fill: 'none', stroke: 'var(--hl-2)', 'stroke-width': 40, 'stroke-dasharray': '120 80' });
+        h.rect(box, { fill: 'none', stroke: 'var(--hl)', 'stroke-width': 40 });
+        log.innerHTML = 'Top-down, one pass turns every frame-local coordinate root-absolute. After routing, <code>cover_chart</code> grows the root rect (' + SX.fmt(root[2]) + ' × ' + SX.fmt(root[3]) + ', blue) over every route point and label: the chart that ships is ' + SX.fmt(box[2]) + ' × ' + SX.fmt(box[3]) + ' (orange)' + (box[2] === root[2] && box[3] === root[3] ? ', the same here, since nothing pokes out' : '') + '. toolchanger was sized twice (the facing pass turned a port); both passes record the same events.';
+      }
+    } });
+    f.ctrl.appendChild(st.el);
+  };
+})();
+</script>

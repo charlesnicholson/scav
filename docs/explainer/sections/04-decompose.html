@@ -1,0 +1,150 @@
+<section class="sx" id="decompose" data-toc="4 · Decompose">
+  <style>
+    .dc-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; font-size: 13px; }
+    .dc-list button { font: 12.5px var(--sans); padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text-primary); cursor: pointer; }
+    .dc-list button.on { border-color: var(--hl); box-shadow: inset 0 0 0 1px var(--hl); }
+    .dc-segs { font-size: 13.5px; color: var(--text-secondary); margin-top: 6px; }
+    .dc-segs table { margin: 4px 0; }
+    .dc-segs tr.cur td { background: color-mix(in srgb, var(--hl) 14%, transparent); }
+  </style>
+  <div class="kicker">Phase 0</div>
+  <h2>Decompose: frames, segments, ports</h2>
+  <p class="lede">Before anything is placed, every transition is cut at each border it crosses. What is left is one ordinary flat graph per submachine, and those graphs are joined only at ports on the borders.</p>
+
+  <p>A <b>frame</b> is one submachine laid out as its own layered graph: each region of a concurrent state, each composite's submachine and each document root. The frame is the unit that is ordered, sized, sharded across threads and reused between candidates. From a parent frame's point of view a composite state is a plain node; what is inside it is another frame's business.</p>
+  <p>A transition whose ends lie in different frames is split at every containment border it crosses. Each piece is a <b>segment</b> lying in exactly one frame, and each cut is a <b>port</b> on the crossed state's border. This turns ELK's long-hierarchical-edge problem into one-dimensional port ordering along each composite's sides. It is also what makes a long edge pull on every level it passes: one port per crossed border, so a state 16 levels deep with an edge to the top constrains every frame in between, with no weight needed.</p>
+  <h3>How a transition is split</h3>
+  <ol>
+    <li>Dead transitions are skipped. An internal or local <i>self</i>-transition gets no segments at all, because it has no route.</li>
+    <li>Build each end's chain of ancestors, innermost first, and strip the part they share.</li>
+    <li>If the source encloses the destination, an internal or local transition starts on the source's inner face, and an external one leaves the source's border and re-enters it.</li>
+    <li><b>Exit</b> the source's chain from innermost to outermost. The source itself is exited only by an external transition.</li>
+    <li>If the two chains diverge into <i>different submachines of one state</i>, cross the separator between those regions instead of that state's border. That middle segment is routed inside the owning state, in the source region's frame.</li>
+    <li><b>Enter</b> the destination's chain from outermost to innermost. If the destination encloses the source, end on its inner face.</li>
+    <li>Walk the crossings: one port per crossing, and one segment per pair of consecutive ends, each in the frame it lies in.</li>
+  </ol>
+  <p>Each end of a segment is therefore one of three things: a port on a crossed border, the endpoint state's box in this frame, or the endpoint state's inner face (an internal or local source, or a destination that encloses its source). In phase 1 a port that belongs to this frame becomes a <b>boundary node</b> on the frame's edge: exits sit on the trailing border and entries on the leading one.</p>
+  <p>Each transition's label belongs to one segment: the one in its <b>lowest common ancestor</b> frame, the innermost submachine holding both ends (for two regions of one state, the separator segment). Ids are stable: a port is <code>(compound state, side, transition, crossing depth)</code> and a segment <code>(transition, ordinal)</code>, never derived from how work was sharded.</p>
+
+  <div data-fig="decompose-split"></div>
+
+  <div class="callout why"><span class="t">Why not lay out the whole tree at once</span>ELK's <code>INCLUDE_CHILDREN</code> does exactly that, and loses each subtree's own direction and aspect. ELK's default instead drops edges that skip a level. Cutting at borders keeps each submachine independently orderable and keeps every long edge, at the price of ports that the later phases must place well. A unit test holds the extreme: an exit from 16 levels deep produces 17 segments and 32 ports.</div>
+  <div class="callout rule"><span class="t">Rule</span>A phase never infers what kind of end a segment has from another phase's tables; phase 0 records it. The one defect of that kind drew <code>Idle -&gt; On</code> from <code>On</code>'s border to its centre.</div>
+</section>
+<script>
+SX.register('decompose', function (sec) {
+  var T = SX.data('stages').toolchanger;
+
+  (function () {
+    var host = sec.querySelector('[data-fig="decompose-split"]');
+    var f = SX.figure(host, { caption: '<b>Hover</b> a frame (in the drawing or in the list) to see the submachine it lays out. <b>Pick</b> a split transition, then <b>step</b> through its segments: each is coloured by the frame that owns it, orange dots are ports on the crossed borders, and squares are the boundary nodes phase 1 puts on a frame\'s edge. The chart is <code>toolchanger</code>, which includes <code>axis</code> (as <code>arm</code>, itself including <code>estop</code>) and <code>estop</code> (as <code>stop</code>); this is its shipped drawing, re-derived from scav\'s trace.' });
+    var G = T.geometry, D = T.decomposition, FR = D.frames;
+    var PAL = ['--series-1', '--series-3', '--series-7', '--series-4', '--series-5', '--series-8'];
+    var col = function (fid) { return 'var(' + PAL[fid % PAL.length] + ')'; };
+    var fname = function (fr) { return fr.owner == null ? 'root' : fr.owner_path + (fr.name ? ':' + fr.name : ''); };
+    var splits = D.split_transitions, sel = 1, step = 0, hoverFrame = null;
+    var frameChips = SX.el('div', { class: 'dc-list' }), transChips = SX.el('div', { class: 'dc-list' });
+    var stage = SX.el('div'), segs = SX.el('div', { class: 'dc-segs' });
+    f.ctrl.style.display = 'block';
+    f.ctrl.appendChild(SX.el('div', { class: 'note', text: 'Frames' })); f.ctrl.appendChild(frameChips);
+    f.ctrl.appendChild(SX.el('div', { class: 'note', text: 'Split transitions' })); f.ctrl.appendChild(transChips);
+    var stepCtl = SX.el('div');
+    f.ctrl.appendChild(stepCtl);
+    f.stage.appendChild(stage); f.stage.appendChild(segs);
+    var h = SX.chart(stage, G, { maxHeight: 560, pad: 220 });
+    var u = h.unit;
+    var fg = SX.svg('g'), hitG = SX.svg('g');
+    h.svg.insertBefore(hitG, h.over.nextSibling);
+    h.svg.insertBefore(fg, hitG.nextSibling);
+
+    // The route split at its ports: one polyline per segment, in route order.
+    function pieces(sp) {
+      var pts = G.trans[sp.trans].points, out = [[pts[0]]], pk = 0;
+      for (var k = 1; k < pts.length; k++) {
+        out[out.length - 1].push(pts[k]);
+        var p = sp.ports[pk];
+        if (p && pts[k][0] === p.at[0] && pts[k][1] === p.at[1] && k < pts.length - 1) { out.push([pts[k]]); pk++; }
+      }
+      return out;
+    }
+    FR.slice().sort(function (a, b) { return b.rect[2] * b.rect[3] - a.rect[2] * a.rect[3]; }).forEach(function (fr) {
+      var r = fr.rect, hr = SX.svg('rect', { x: r[0], y: r[1], width: r[2], height: r[3], fill: 'transparent' });
+      hr.addEventListener('mouseenter', function () { hoverFrame = fr.id; paint(); });
+      hr.addEventListener('mouseleave', function () { hoverFrame = null; paint(); SX.tip.hide(); });
+      SX.tipOn(hr, function () { return frameTip(fr); });
+      hitG.appendChild(hr);
+    });
+    function frameTip(fr) {
+      var n = D.segments.filter(function (sg) { return sg.frame === fr.id; }).length;
+      return '<b>frame ' + fr.id + '</b>: ' + fname(fr) + '<br>' + fr.states.length + ' nodes, ' + n + ' segments' + (fr.down ? '<br><span class="m">runs down the page (an orient pin)</span>' : '');
+    }
+    FR.forEach(function (fr) {
+      var b = SX.el('button', { type: 'button', html: '<span class="swatch" style="background:' + col(fr.id) + '"></span>' + fr.id + ' · ' + fname(fr) });
+      b.addEventListener('mouseenter', function () { hoverFrame = fr.id; paint(); });
+      b.addEventListener('mouseleave', function () { hoverFrame = null; paint(); });
+      frameChips.appendChild(b);
+    });
+    var tbtn = splits.map(function (sp, k) {
+      var b = SX.el('button', { type: 'button', text: '“' + G.trans[sp.trans].label + '”  ' + sp.segments.length + ' segments' });
+      b.addEventListener('click', function () { sel = k; step = 0; buildStepper(); paint(); });
+      transChips.appendChild(b);
+      return b;
+    });
+    var stp = null;
+    function buildStepper() {
+      stepCtl.innerHTML = '';
+      var sp = splits[sel];
+      stp = SX.stepper({ steps: sp.segments.length + 1, start: step, interval: 1300,
+        label: function (i) { return i === sp.segments.length ? 'all segments' : 'segment ' + (i + 1) + ' of ' + sp.segments.length; },
+        onStep: function (i) { step = i; paint(); } });
+      stepCtl.appendChild(stp.el);
+    }
+    function paint() {
+      fg.innerHTML = ''; h.unmarkAll();
+      tbtn.forEach(function (b, k) { b.classList.toggle('on', k === sel); });
+      var sp = splits[sel], ps = pieces(sp), all = step >= sp.segments.length;
+      var keepS = [], src = null, dst = null;
+      G.states.forEach(function (st) { if (st.path === sp.src_path) src = st.id; if (st.path === sp.dst_path) dst = st.id; });
+      h.dim({ states: G.states.map(function (st) { return st.id; }).filter(function (id) {
+        var st = G.states[id];
+        return id === src || id === dst || sp.ports.some(function (p) { return p.border_of.indexOf(st.path) >= 0; }) || (hoverFrame != null && FR[hoverFrame].states.indexOf(id) >= 0);
+      }), trans: [sp.trans] });
+      var showF = hoverFrame != null ? [hoverFrame] : all ? sp.frames : [sp.frames[step]];
+      showF.forEach(function (fid) {
+        var r = FR[fid].rect;
+        fg.appendChild(SX.svg('rect', { x: r[0], y: r[1], width: r[2], height: r[3], fill: 'color-mix(in srgb, ' + col(fid) + ' 9%, transparent)', stroke: col(fid), 'stroke-width': u * 2.5, 'stroke-dasharray': (u * 8) + ' ' + (u * 5), 'pointer-events': 'none' }));
+        var tx = SX.svg('text', { x: r[0] + u * 5, y: r[1] + r[3] - u * 5, 'font-size': u * 12, 'pointer-events': 'none', text: 'frame ' + fid + ' · ' + fname(FR[fid]) });
+        tx.style.fill = 'var(--ink)'; tx.style.fontFamily = 'var(--sans)';
+        fg.appendChild(tx);
+      });
+      ps.forEach(function (pl, k) {
+        if (!all && k !== step) return;
+        var fid = sp.frames[k];
+        fg.appendChild(SX.svg('path', { d: pl.map(function (p, j) { return (j ? 'L' : 'M') + p[0] + ',' + p[1]; }).join(''), fill: 'none', stroke: col(fid), 'stroke-width': u * 7, 'stroke-linejoin': 'round', 'stroke-linecap': 'round', opacity: 0.9, 'pointer-events': 'none' }));
+      });
+      sp.ports.forEach(function (p, k) {
+        var near = all || k === step || k === step - 1;
+        var dt = SX.svg('circle', { cx: p.at[0], cy: p.at[1], r: u * (near ? 9 : 6), fill: 'var(--hl)', stroke: 'var(--surface-1)', 'stroke-width': u * 2.5, opacity: near ? 1 : 0.45 });
+        SX.tipOn(dt, '<b>port ' + (k + 1) + '</b> on <code>' + p.border_of.join(', ') + '</code>\'s border<br>side ' + p.side + ' (' + ['left', 'right', 'top', 'bottom'][p.side] + '), depth ' + p.depth + '<br><span class="m">at (' + p.at.join(', ') + ')</span>');
+        fg.appendChild(dt);
+      });
+      D.boundary_nodes.forEach(function (bn) {
+        var k = sp.segments.indexOf(bn.seg);
+        if (k < 0 || (!all && k !== step)) return;
+        var q = SX.svg('rect', { x: bn.at[0] - u * 6, y: bn.at[1] - u * 6, width: u * 12, height: u * 12, fill: col(bn.frame), stroke: 'var(--surface-1)', 'stroke-width': u * 2 });
+        SX.tipOn(q, '<b>boundary node</b> of segment ' + (k + 1) + '<br>on frame ' + bn.frame + '\'s edge at (' + bn.at.join(', ') + ')');
+        fg.appendChild(q);
+      });
+      var rows = sp.segments.map(function (sg, k) {
+        var from = k === 0 ? '<code>' + sp.src_path + '</code>' : 'port on <code>' + sp.ports[k - 1].border_of[0] + '</code>';
+        var to = k === sp.segments.length - 1 ? '<code>' + sp.dst_path + '</code>' : 'port on <code>' + sp.ports[k].border_of[0] + '</code>';
+        return '<tr' + ((!all && k === step) ? ' class="cur"' : '') + '><td class="num">' + (k + 1) + '</td><td><span class="swatch" style="background:' + col(sp.frames[k]) + '"></span>frame ' + sp.frames[k] + ' · ' + fname(FR[sp.frames[k]]) + '</td><td>' + from + ' → ' + to + '</td></tr>';
+      }).join('');
+      segs.innerHTML = '<b>“' + G.trans[sp.trans].label + '”</b>: <code>' + sp.src_path + '</code> → <code>' + sp.dst_path + '</code> crosses ' + sp.ports.length + ' border' + (sp.ports.length > 1 ? 's' : '') + ', so it is ' + sp.segments.length + ' segments.' +
+        '<table class="sx-table"><tr><th class="num">#</th><th>frame</th><th>runs from → to</th></tr>' + rows + '</table>';
+    }
+    buildStepper();
+    paint();
+  })();
+});
+</script>

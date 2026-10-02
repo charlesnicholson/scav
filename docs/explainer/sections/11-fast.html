@@ -1,0 +1,242 @@
+<section class="sx" id="fast" data-toc="11 · Making it fast">
+  <div class="kicker">Speed without changing a drawing</div>
+  <h2>Making the search fast, exactly</h2>
+  <p class="lede">The search scores hundreds of thousands of candidates per chart. Every optimisation here is <b>exact</b>: with or without it, every drawing comes out byte-identical, at both scales, on every corpus chart.</p>
+
+  <div class="callout rule"><span class="t">Rule</span>Each optimisation ships with a test mode. The test mode runs the unoptimised computation alongside and compares, and a planted defect proves the comparison can fail. A memo keyed on everything a step reads returns exactly what the step would compute. A sound bound discards only candidates that could never be taken.</div>
+
+  <p>Measured on <code>bottler</code> at no text before any of this: one layout scored 213,768 candidates, and 94% of them lost. Brandes–Köpf coordinate assignment ran 19.8 million times for only 69,496 distinct graphs, because a candidate differs from the one before it in a single frame. Sizing was 82% of the time, and 57% of samples were in the allocator. The fixes below all exploit the same fact: <b>a candidate is the incumbent plus one pin, so almost everything it computes has been computed before.</b></p>
+  <p>A general lower bound does not help <em>inside</em> the search. Area after sizing and a bend floor never reach 80% of the incumbent's Tier 2 on any candidate, while 58% of losers land within 1% of it. Local-search neighbours are near-ties. The label bound below works because it bounds only the label half of the cost.</p>
+  <div data-fig="fast-perf"></div>
+
+  <h3>Frame memos and interned keys</h3>
+  <p>A <b>frame</b> is one submachine laid out as its own layered graph. It is the unit of ordering, sizing and reuse. Each thread keeps three <b>memos</b> (caches keyed on every value a step reads): Brandes–Köpf keyed on the whole graph; each frame's <em>sizing</em>, keyed on its nodes, edges, gaps, state sizes, port offsets, labels, ratio, compaction, fold and profile; and each frame's <em>ordering</em>, keyed on the frame as built, the pins inside it, its label charges and the profile. A memo hit emits no trace, so traced runs bypass them. Each per-thread memo is capped at 2<sup>20</sup> words (4 MiB). The memos took <code>mill</code> from 506 s to 58 s wall at no text on 12 cores, and <code>bottler</code> from 18.4 s to 2.9 s.</p>
+  <p>The keys were later <b>interned</b>. A decomposed graph carries a process-unique serial for itself and its chart, so an ordering key names a frame by (serial, index) instead of spelling the frame out. The profile is one interned word instead of 52. Each transition's label segment is a table on the graph instead of a walk up the tree per box per pass. That saved 6.7% of instructions at real text.</p>
+
+  <h3>Per-frame ordering and sizing reuse</h3>
+  <p>Even a memo hit has to build and hash a key. <b>Ordering reuse</b> skips that. An ordering records what each frame reads beyond the graph: the profile; each segment's reversal, cut and side pins and label charge; each state's rank pin; and each frame's orientation. A candidate compares its record to the incumbent's frame by frame, before and after the facing pass, orders only the frames that differ, and copies the rest with node indices shifted. No key is built and no memo is probed.</p>
+  <p><b>Sizing reuse</b> does the same for coordinates, with one difference: sizing runs bottom-up, since a frame's size depends on its children's. So a candidate marks every frame whose inputs differ <em>and every frame that holds it</em>, deepest first, and copies the rest. Over the corpus and gauntlet, 84.5% of frames are copied, and instructions fell 6.1% at real text.</p>
+  <div data-fig="fast-reuse"></div>
+
+  <h3>The face shortcut</h3>
+  <p>Phases 1 and 2 and the facing pass never read a face pin, and face moves were two thirds of all scored moves. So a face candidate is routed and scored starting from the incumbent's kept phase-1 and phase-2 state, at about a quarter of the cost of a rank candidate (65 µs against 252 µs on <code>mill</code>). It also keeps the incumbent's labels wherever nothing a box reads has changed: 92% of a face move's boxes on <code>mill</code>.</p>
+  <p>Two refinements followed. <b>No-op faces are charged, not scored.</b> The router reports, per route end, which faces would actually move the seat. A face pin elsewhere draws the incumbent exactly, so it is charged to the budget without being scored. That is about a quarter of face moves. <b>Faces are offered only where they are priced.</b> A route end's four faces are offered only if its transition's route bends, or is charged crossings, corridor, crowding, excess length or a label term, or at every end while the incumbent breaks Tier 0. The incumbent's own scoring fills this mask, once per taken move, never per candidate. At real text every drawing stayed byte-identical, only 48% of face candidates are scored, and instructions fell 16.4%.</p>
+
+  <h3>The label bound: route first, label best-first</h3>
+  <p>Labels are placed last and read only the routes. So before any label is placed, every route term, adjacency and the six route-only Tier 0 counts are already final. A round with labels runs in two passes:</p>
+  <ol>
+    <li>Route every candidate in parallel <b>without labels</b> and score a <b>lower bound</b>. The label terms are zero, area and whitespace are measured over the unlabelled chart, and aspect is dropped unless every label box fits inside the sized chart.</li>
+    <li>Visit the candidates whose bound beats the incumbent, <b>least bound first</b> (ties by enumeration index). Place labels and score each exactly, but only while its bound can still beat the best exact cost so far, or tie it at a lower index. Stop at the first that cannot.</li>
+  </ol>
+  <p>The pick is exactly what scoring every candidate whole would give, and a test mode scores every bounded round whole and compares. At real text, 91% of candidates never place their labels, and instructions fell 35.5% (<code>mill</code> 4,002 G → 2,613 G). Two variants lost: keeping every candidate's routes saved 5% more instructions but cost 16% more memory, and labelling 8 or 32 at once cost 5–11% <em>more</em>.</p>
+  <div data-fig="fast-bound"></div>
+  <p><b>Kept bound geometry.</b> The first pass already routed each candidate, so routing it again for the exact pass is waste. A candidate whose bound is below the incumbent keeps its routes while it is among the <b>128 least</b> by (bound, index), in a per-search slot swapped with the scorer's scratch so that nothing allocates. Its exact pass restores the chart those routes saw and places labels on them instead of laying out again. On <code>mill</code>, the 128 slots cover 92% of the candidates that get labelled, and save 4.5% of instructions at the same peak memory. Keeping every candidate's routes saves 4.6% but costs 35–42% more memory.</p>
+
+  <h3>Allocation-free scratch</h3>
+  <p>Ordering, sizing and packing, scored-move pins and candidates, routes, label placement, nudging and coordinate views all fill per-thread buffers that are reused across candidates. On <code>bottler</code> at real text, heap allocations per scored candidate fell 216 → 103 → 53 → 14 → 8.7 → 4.2, and allocations over a whole run fell from 72.2 M to 1.39 M. Ordering scratch is kept <b>per nesting depth</b>, because a thread waiting on a call's shards may itself run a candidate that orders.</p>
+
+  <h3>The radix A* queue</h3>
+  <p>The router's A* pops nodes in <code>(f, g, node)</code> order, which is a strict total order. So any exact priority queue pops the same sequence. The open list is now a radix heap over <code>f</code>. Entries at the least <code>f</code> sit in a 4-ary heap on the whole order. A push below the current least lowers it and re-places every entry, because the heuristic is admissible but not consistent at the turn into a fixed end. It executes about 1% <em>more</em> instructions but takes 4–6% fewer cycles (<code>mill</code> real text 834 G → 786 G cycles). Route lengths need a square root, and hardware <code>sqrt</code> is banned for determinism. The integer square root now runs Newton's method from above, starting one shift-only step from the nearest power of two and stopping at the first step that does not fall. It is checked exhaustively over all 32-bit inputs and cut 2.5% of <code>mill</code>'s instructions.</p>
+
+  <h3>One global thread pool</h3>
+  <p>All parallel work goes to one pool. The first free thread takes the lowest unclaimed shard of the deepest open job. Nested calls (rows, then searches, then candidate rounds) push to the same pool, so no call site has to divide the host's cores among its children. One <code>bottler</code> search went from 755% to 1,085% of 12 cores. A hierarchical profile shows 8.7–11 of 12 cores busy, idle 3.5–4.4%, and 0.2% of time in locks. A memo of whole Level 1 searches (previous section), shared by the pool, removed searches that ran again unchanged (the second kick schedule, the settling passes): <code>tcp</code> 12.9 → 6.4 s CPU.</p>
+
+  <div class="callout why"><span class="t">Where the time goes now</span>On <code>mill</code> at real text (profile at the label-bound commit) kicks take 92% of CPU. Of a candidate: routing 39.6%, cost 19%, the first sizing 15%, re-sizing after the facing pass 11.9%, re-ordering after it 5.4%. A* alone was 14.1% of CPU, 9.9 points of it the heap (before the radix queue). Rejected cuts: capping kick depth, early abandonment of kicks (at best 3.4%, and it does not transfer between scales), lazy steepest descent (2%), sizing-only bounds (0.26%), and budgets that shrink with chart size: "a rule that searches a big chart <em>less</em> is the design conceding the goal".</div>
+</section>
+<script>
+// Figure: corpus cost per build, from perf.json.
+window.SXfastPerf = function (sec) {
+  var P = SX.data('perf');
+  var f = SX.figure(sec.querySelector('[data-fig="fast-perf"]'), { caption: '<b>Pick a metric and a chart</b>; <b>hover</b> for each build\'s numbers. Five builds in commit order, each the best of its passes running <code>scav dump --layout</code> on a 12-core machine. Instructions are the steady metric. Wall and CPU move with machine load, and the builds were measured in three runs, so only ratios to <code>main</code> within one run are strictly fair. Every build draws the same pictures.' });
+  var builds = P.builds, metric = 'instr_G', chart = 'corpus';
+  var SHORT = { main: 'main', faces_labels: 'faces', label_bound: 'label bound', perf_pass: 'perf pass', size_reuse: 'size reuse' };
+  var TICK = { main: 'main', faces_labels: 'faces', label_bound: 'bound', perf_pass: 'perf', size_reuse: 'size' };
+  var METRIC = { instr_G: { label: 'instructions (G)', fmt: function (v) { return SX.fmt(Math.round(v)) + ' G'; } }, wall_s: { label: 'wall clock (s)', fmt: function (v) { return v.toFixed(v < 10 ? 2 : 1) + ' s'; } }, cpu_s: { label: 'CPU (s)', fmt: function (v) { return v.toFixed(1) + ' s'; } } };
+  f.ctrl.appendChild(SX.choice({ options: [{ value: 'instr_G', label: 'Instructions' }, { value: 'wall_s', label: 'Wall clock' }, { value: 'cpu_s', label: 'CPU' }], value: metric, onChange: function (v) { metric = v; draw(); } }).el);
+  f.ctrl.appendChild(SX.choice({ options: [{ value: 'corpus', label: 'Corpus (11 charts)' }, { value: 'mill', label: 'mill' }, { value: 'bottler', label: 'bottler' }, { value: 'toolchanger', label: 'toolchanger' }], value: chart, onChange: function (v) { chart = v; draw(); } }).el);
+  var title = SX.el('div', { style: { fontSize: '13px', color: 'var(--text-secondary)', margin: '0 0 2px' } }); f.stage.appendChild(title);
+  var out = SX.el('div'); f.stage.appendChild(out);
+  var tab = SX.el('div'); f.stage.appendChild(tab);
+  function val(b, scale) { var r = chart === 'corpus' ? P.corpus[b.id][scale] : P.per_chart[b.id][scale][chart]; return r ? r[metric] : null; }
+  function draw() {
+    var series = [{ name: 'real text', scale: 'text' }, { name: 'no text', scale: 'notext' }].map(function (s) {
+      return { name: s.name, points: builds.map(function (b, i) { return [i, val(b, s.scale), SHORT[b.id] + ' (' + b.commit + ')']; }) };
+    });
+    var M = METRIC[metric];
+    title.textContent = M.label + ', ' + (chart === 'corpus' ? 'sum over the 11 corpus charts' : chart) + ', per build';
+        SX.lineChart(out, { series: series, xLabel: 'build', markers: true, height: 250, yMin: 0, xTicks: builds.map(function (b, i) { return i; }), xFormat: function (i) { return TICK[builds[i].id] || ''; }, yFormat: function (v) { return metric === 'instr_G' ? SX.fmt(v) : String(v); } });
+    var t = SX.el('table', { class: 'sx-table', style: { fontSize: '13px' } });
+    t.appendChild(SX.el('tr', null, SX.el('th', { text: 'build' }), SX.el('th', { text: 'commit' }), SX.el('th', { text: 'what it added' }), SX.el('th', { class: 'num', text: 'real text' }), SX.el('th', { class: 'num', text: 'vs main' }), SX.el('th', { class: 'num', text: 'no text' }), SX.el('th', { class: 'num', text: 'vs main' })));
+    builds.forEach(function (b) {
+      var x = val(b, 'text'), y = val(b, 'notext'), x0 = val(builds[0], 'text'), y0 = val(builds[0], 'notext');
+      function pct(v, v0) { return v == null || !v0 ? '' : (v === v0 ? '' : ((v / v0 - 1) * 100).toFixed(1) + '%'); }
+      t.appendChild(SX.el('tr', null, SX.el('td', { text: SHORT[b.id] }), SX.el('td', null, SX.el('code', { text: b.commit })), SX.el('td', { text: b.label.replace(/^main: /, '') }),
+        SX.el('td', { class: 'num', text: x == null ? '' : M.fmt(x) }), SX.el('td', { class: 'num', text: pct(x, x0) }), SX.el('td', { class: 'num', text: y == null ? '' : M.fmt(y) }), SX.el('td', { class: 'num', text: pct(y, y0) })));
+    });
+    tab.innerHTML = ''; tab.appendChild(t);
+  }
+  draw();
+};
+</script>
+<script>
+// Figure: which of toolchanger's frames a candidate re-orders, re-sizes or copies.
+window.SXfastReuse = function (sec) {
+  var g = SX.data('charts').charts.toolchanger.text;
+  var f = SX.figure(sec.querySelector('[data-fig="fast-reuse"]'), { caption: '<b>Click a frame</b> to pin a state\'s rank inside it, and see what the candidate recomputes. Ordering redoes only the frame whose record differs. Sizing is bottom-up, so it also redoes every frame holding that one, up to the root; everything else is copied from the incumbent. A face pin changes neither: the face shortcut starts at routing. This is toolchanger\'s real frame tree (6 frames; the arm and both estops are included documents).' });
+  var subs = g.subs, N = subs.length, parent = {}, depth = {}, kids = {};
+  subs.forEach(function (s) { parent[s.id] = s.owner == null ? null : g.states[s.owner].parent_sub; });
+  subs.forEach(function (s) { var d = 0, p = parent[s.id]; while (p != null) { d++; p = parent[p]; } depth[s.id] = d; (kids[parent[s.id]] = kids[parent[s.id]] || []).push(s.id); });
+  function label(s) { if (s.owner == null) return 'root'; var p = g.states[s.owner].path.replace(/:[a-z]+\//g, '/'); return p + (s.name ? ' · ' + s.name : ''); }
+  // tidy layout: leaves left to right, parents centred over children
+  var pos = {}, nextX = 0;
+  (function place(id) { var c = kids[id] || []; if (!c.length) pos[id] = nextX++; else { c.forEach(place); pos[id] = (pos[c[0]] + pos[c[c.length - 1]]) / 2; } })(0);
+  var picked = 2, mode = 'rank';
+  f.ctrl.appendChild(SX.choice({ options: [{ value: 'rank', label: 'Rank pin in the clicked frame' }, { value: 'face', label: 'Face pin (any frame)' }], value: mode, onChange: function (v) { mode = v; draw(); } }).el);
+  var readout = SX.el('span', { class: 'note' }); f.ctrl.appendChild(readout);
+  function draw() {
+    var reorder = {}, resize = {};
+    if (mode === 'rank') { reorder[picked] = 1; for (var p = picked; p != null; p = parent[p]) resize[p] = 1; }
+    var maxX = nextX - 1, W = 1000, colW = W / 2, H = 260;
+    var svg = SX.svg('svg', { viewBox: '0 0 ' + W + ' ' + H, style: { width: '100%', height: 'auto', font: '12px ' + SX.css('--sans') } });
+    [['Ordering (phase 1)', reorder, '--series-2'], ['Sizing (phase 2)', resize, '--series-1']].forEach(function (pane, k) {
+      var x0 = k * colW, set = pane[1];
+      svg.appendChild(SX.svg('text', { x: x0 + 16, y: 20, fill: SX.css('--text-primary'), 'font-weight': 600, text: pane[0] }));
+      var X = function (id) { return x0 + 40 + pos[id] / Math.max(maxX, 1) * (colW - 150); }, Y = function (id) { return 56 + depth[id] * 62; };
+      subs.forEach(function (s) { if (parent[s.id] != null) svg.appendChild(SX.svg('line', { x1: X(parent[s.id]) + 30, y1: Y(parent[s.id]) + 13, x2: X(s.id) + 30, y2: Y(s.id) - 13, stroke: SX.css('--axis'), 'stroke-width': 1.5 })); });
+      subs.forEach(function (s) {
+        var on = !!set[s.id], gnode = SX.svg('g', { style: { cursor: 'pointer' } });
+        var box = SX.svg('rect', { x: X(s.id) - 22, y: Y(s.id) - 13, width: 104, height: 26, rx: 6, stroke: on ? SX.css(pane[2]) : SX.css('--axis'), 'stroke-width': s.id === picked && mode === 'rank' ? 2.5 : 1.2 });
+        box.style.fill = on ? 'color-mix(in srgb, var(' + pane[2] + ') 30%, var(--surface-1))' : 'var(--surface-2)';
+        gnode.appendChild(box);
+        gnode.appendChild(SX.svg('text', { x: X(s.id) + 30, y: Y(s.id) + 4, 'text-anchor': 'middle', fill: on ? SX.css('--text-primary') : SX.css('--text-muted'), 'font-weight': on ? 600 : 400, text: on ? 'recompute' : 'copy' }));
+        gnode.addEventListener('click', function () { picked = s.id; mode = 'rank'; draw(); });
+        SX.tipOn(gnode, '<b>frame ' + s.id + '</b>: ' + label(s) + '<br>' + s.children.length + ' children<br>' + (on ? 'recomputed' : 'copied from the incumbent'));
+        svg.appendChild(gnode);
+        svg.appendChild(SX.svg('text', { x: X(s.id) + 30, y: Y(s.id) + 27, 'text-anchor': 'middle', fill: SX.css('--text-muted'), 'font-size': 10.5, 'pointer-events': 'none', text: label(s).length > 22 ? label(s).slice(0, 21) + '…' : label(s) }));
+      });
+    });
+    var nO = Object.keys(reorder).length, nS = Object.keys(resize).length;
+    readout.textContent = mode === 'rank' ? 'rank pin in frame ' + picked + ': re-order ' + nO + ' of ' + N + ' frames, re-size ' + nS + ' of ' + N + ', copy the rest' : 'face pin: phases 1 and 2 are the incumbent\'s; only routing and scoring run';
+    f.stage.innerHTML = ''; f.stage.appendChild(svg);
+    f.stage.appendChild(SX.el('div', { class: 'legend' }, SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'color-mix(in srgb, var(--series-2) 30%, var(--surface-1))', border: '1px solid var(--series-2)' } }), 're-ordered'), SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'color-mix(in srgb, var(--series-1) 30%, var(--surface-1))', border: '1px solid var(--series-1)' } }), 're-sized'), SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--surface-2)', border: '1px solid var(--axis)' } }), 'copied')));
+  }
+  draw();
+};
+</script>
+<script>
+// brew's two Level 1 rounds re-derived per candidate: [i, move, what, t0, t2, bound t0, bound t2, labels inside the unlabelled extent].
+window.SXfastBoundData = {"round_1_candidates":[[9535,"reverse","reverse t1 Off -> SelfCheck leg 0",2,18261,0,17301,1],[9537,"reverse","reverse t3 SelfCheck -> Off leg 0",4,16985,0,16073,1],[9539,"reverse","reverse t9 Standby -> Brewing leg 0",2,7222,0,7222,0],[9541,"reverse","reverse t10 Brewing -> Standby leg 0",4,16985,0,16073,1],[9543,"face","turn src end of t0 $initial -> Off leg 0 to face 0",4,19091,0,18179,1],[9545,"face","turn src end of t0 $initial -> Off leg 0 to face 1",4,16985,0,16073,1],[9547,"face","turn src end of t0 $initial -> Off leg 0 to face 2",4,18553,0,17641,1],[9549,"face","turn src end of t0 $initial -> Off leg 0 to face 3",4,18553,0,17641,1],[9551,"face","turn dst end of t0 $initial -> Off leg 0 to face 0",4,16985,0,16073,1],[9553,"face","turn dst end of t0 $initial -> Off leg 0 to face 1",4,19225,0,18313,1],[9555,"face","turn dst end of t0 $initial -> Off leg 0 to face 2",4,18561,0,17649,1],[9557,"face","turn dst end of t0 $initial -> Off leg 0 to face 3",4,18561,0,17649,1],[9559,"face","turn src end of t1 Off -> SelfCheck leg 0 to face 0",4,18605,0,17693,1],[9561,"face","turn src end of t1 Off -> SelfCheck leg 0 to face 1",4,16985,0,16073,1],[9563,"face","turn src end of t1 Off -> SelfCheck leg 0 to face 2",4,17533,0,16621,1],[9565,"face","turn src end of t1 Off -> SelfCheck leg 0 to face 3",4,16993,0,16081,1],[9567,"face","turn dst end of t1 Off -> SelfCheck leg 0 to face 0",4,16985,0,16073,1],[9569,"face","turn dst end of t1 Off -> SelfCheck leg 0 to face 1",4,15349,0,14437,1],[9571,"face","turn dst end of t1 Off -> SelfCheck leg 0 to face 2",4,14737,0,13825,1],[9573,"face","turn dst end of t1 Off -> SelfCheck leg 0 to face 3",4,15769,0,14857,1],[9575,"face","turn src end of t2 SelfCheck -> Standby leg 0 to face 0",4,16985,0,16073,1],[9577,"face","turn src end of t2 SelfCheck -> Standby leg 0 to face 1",4,14849,0,13985,1],[9579,"face","turn src end of t2 SelfCheck -> Standby leg 0 to face 2",4,16985,0,16073,1],[9581,"face","turn src end of t2 SelfCheck -> Standby leg 0 to face 3",4,14237,0,13373,0],[9583,"face","turn dst end of t2 SelfCheck -> Standby leg 0 to face 0",2,15239,0,14375,1],[9585,"face","turn dst end of t2 SelfCheck -> Standby leg 0 to face 1",4,16985,0,16073,1],[9587,"face","turn dst end of t2 SelfCheck -> Standby leg 0 to face 2",2,16473,0,15561,1],[9589,"face","turn dst end of t2 SelfCheck -> Standby leg 0 to face 3",3,18229,0,17317,1],[9591,"face","turn src end of t3 SelfCheck -> Off leg 0 to face 0",4,16985,0,16073,1],[9593,"face","turn src end of t3 SelfCheck -> Off leg 0 to face 1",4,14877,0,14013,1],[9595,"face","turn src end of t3 SelfCheck -> Off leg 0 to face 2",4,14237,0,13373,0],[9597,"face","turn src end of t3 SelfCheck -> Off leg 0 to face 3",4,14557,0,13693,1],[9599,"face","turn dst end of t3 SelfCheck -> Off leg 0 to face 0",4,15217,0,14353,1],[9601,"face","turn dst end of t3 SelfCheck -> Off leg 0 to face 1",4,16985,0,16073,1],[9603,"face","turn dst end of t3 SelfCheck -> Off leg 0 to face 2",4,14637,0,13773,0],[9605,"face","turn dst end of t3 SelfCheck -> Off leg 0 to face 3",4,16541,0,15677,1],[9607,"face","turn src end of t4 Brewing:water/$initial -> Brewing:water/Heating leg 0 to face 0",5,19133,1,18221,1],[9609,"face","turn src end of t4 Brewing:water/$initial -> Brewing:water/Heating leg 0 to face 1",4,16985,0,16073,1],[9611,"face","turn src end of t4 Brewing:water/$initial -> Brewing:water/Heating leg 0 to face 2",4,18553,0,17641,1],[9613,"face","turn src end of t4 Brewing:water/$initial -> Brewing:water/Heating leg 0 to face 3",4,18553,0,17641,1],[9615,"face","turn dst end of t4 Brewing:water/$initial -> Brewing:water/Heating leg 0 to face 0",4,16985,0,16073,1],[9617,"face","turn dst end of t4 Brewing:water/$initial -> Brewing:water/Heating leg 0 to face 1",4,19157,0,18245,1],[9619,"face","turn dst end of t4 Brewing:water/$initial -> Brewing:water/Heating leg 0 to face 2",4,18561,0,17649,1],[9621,"face","turn dst end of t4 Brewing:water/$initial -> Brewing:water/Heating leg 0 to face 3",4,19593,0,18681,1],[9623,"face","turn src end of t5 Brewing:water/Heating -> Brewing:water/Pumping leg 0 to face 0",4,18561,0,17649,1],[9625,"face","turn src end of t5 Brewing:water/Heating -> Brewing:water/Pumping leg 0 to face 1",4,18561,0,17649,1],[9627,"face","turn src end of t5 Brewing:water/Heating -> Brewing:water/Pumping leg 0 to face 2",4,19089,0,18177,1],[9629,"face","turn src end of t5 Brewing:water/Heating -> Brewing:water/Pumping leg 0 to face 3",4,16985,0,16073,1],[9631,"face","turn dst end of t5 Brewing:water/Heating -> Brewing:water/Pumping leg 0 to face 0",4,18593,0,17681,1],[9633,"face","turn dst end of t5 Brewing:water/Heating -> Brewing:water/Pumping leg 0 to face 1",4,18593,0,17681,1],[9635,"face","turn dst end of t5 Brewing:water/Heating -> Brewing:water/Pumping leg 0 to face 2",4,16985,0,16073,1],[9637,"face","turn dst end of t5 Brewing:water/Heating -> Brewing:water/Pumping leg 0 to face 3",4,19125,0,18213,1],[9639,"face","turn src end of t7 Brewing:grinder/$initial -> Brewing:grinder/Grinding leg 0 to face 0",4,19085,0,18173,1],[9641,"face","turn src end of t7 Brewing:grinder/$initial -> Brewing:grinder/Grinding leg 0 to face 1",4,16985,0,16073,1],[9643,"face","turn src end of t7 Brewing:grinder/$initial -> Brewing:grinder/Grinding leg 0 to face 2",4,18553,0,17641,1],[9645,"face","turn src end of t7 Brewing:grinder/$initial -> Brewing:grinder/Grinding leg 0 to face 3",4,18553,0,17641,1],[9647,"face","turn dst end of t7 Brewing:grinder/$initial -> Brewing:grinder/Grinding leg 0 to face 0",4,16985,0,16073,1],[9649,"face","turn dst end of t7 Brewing:grinder/$initial -> Brewing:grinder/Grinding leg 0 to face 1",5,19181,1,18269,1],[9651,"face","turn dst end of t7 Brewing:grinder/$initial -> Brewing:grinder/Grinding leg 0 to face 2",4,18561,0,17649,1],[9653,"face","turn dst end of t7 Brewing:grinder/$initial -> Brewing:grinder/Grinding leg 0 to face 3",4,18561,0,17649,1],[9655,"face","turn src end of t8 Brewing:grinder/Grinding -> Brewing:grinder/Dosing leg 0 to face 0",4,18581,0,17669,1],[9657,"face","turn src end of t8 Brewing:grinder/Grinding -> Brewing:grinder/Dosing leg 0 to face 1",7,19765,3,18853,1],[9659,"face","turn src end of t8 Brewing:grinder/Grinding -> Brewing:grinder/Dosing leg 0 to face 2",4,19173,0,18261,1],[9661,"face","turn src end of t8 Brewing:grinder/Grinding -> Brewing:grinder/Dosing leg 0 to face 3",4,16985,0,16073,1],[9663,"face","turn dst end of t8 Brewing:grinder/Grinding -> Brewing:grinder/Dosing leg 0 to face 0",4,18573,0,17661,1],[9665,"face","turn dst end of t8 Brewing:grinder/Grinding -> Brewing:grinder/Dosing leg 0 to face 1",4,18573,0,17661,1],[9667,"face","turn dst end of t8 Brewing:grinder/Grinding -> Brewing:grinder/Dosing leg 0 to face 2",4,16985,0,16073,1],[9669,"face","turn dst end of t8 Brewing:grinder/Grinding -> Brewing:grinder/Dosing leg 0 to face 3",4,19157,0,18245,1],[9671,"face","turn src end of t9 Standby -> Brewing leg 0 to face 0",2,15355,0,15211,1],[9673,"face","turn src end of t9 Standby -> Brewing leg 0 to face 1",4,16985,0,16073,1],[9675,"face","turn src end of t9 Standby -> Brewing leg 0 to face 2",2,14757,0,14613,1],[9677,"face","turn src end of t9 Standby -> Brewing leg 0 to face 3",2,15545,0,14585,1],[9679,"face","turn dst end of t9 Standby -> Brewing leg 0 to face 0",4,16985,0,16073,1],[9681,"face","turn dst end of t9 Standby -> Brewing leg 0 to face 1",0,15747,0,15603,1],[9683,"face","turn dst end of t9 Standby -> Brewing leg 0 to face 2",0,14845,0,14701,1],[9685,"face","turn dst end of t9 Standby -> Brewing leg 0 to face 3",0,14273,0,14129,0],[9687,"face","turn src end of t10 Brewing -> Standby leg 0 to face 0",4,16985,0,16073,1],[9689,"face","turn src end of t10 Brewing -> Standby leg 0 to face 1",0,16707,0,16515,0],[9691,"face","turn src end of t10 Brewing -> Standby leg 0 to face 2",0,18629,0,18437,1],[9693,"face","turn src end of t10 Brewing -> Standby leg 0 to face 3",0,15849,0,15657,0],[9695,"face","turn dst end of t10 Brewing -> Standby leg 0 to face 0",2,14259,0,14115,1],[9697,"face","turn dst end of t10 Brewing -> Standby leg 0 to face 1",4,16985,0,16073,1],[9699,"face","turn dst end of t10 Brewing -> Standby leg 0 to face 2",3,15593,0,14633,1],[9701,"face","turn dst end of t10 Brewing -> Standby leg 0 to face 3",2,13669,0,13525,1],[9703,"face","turn src end of t11 Standby -> $final leg 0 to face 0",0,18015,0,17823,1],[9705,"face","turn src end of t11 Standby -> $final leg 0 to face 1",4,16985,0,16073,1],[9707,"face","turn src end of t11 Standby -> $final leg 0 to face 2",0,17361,0,17169,1],[9709,"face","turn src end of t11 Standby -> $final leg 0 to face 3",0,16197,0,16101,1],[9711,"face","turn dst end of t11 Standby -> $final leg 0 to face 0",4,16985,0,16073,1],[9713,"face","turn dst end of t11 Standby -> $final leg 0 to face 1",2,18321,0,17361,1],[9715,"face","turn dst end of t11 Standby -> $final leg 0 to face 2",2,17697,0,16785,1],[9717,"face","turn dst end of t11 Standby -> $final leg 0 to face 3",1,17025,0,16113,1],[9719,"rank","pin Off to rank 0",4,16985,0,16073,1],[9721,"rank","pin Off to rank 2",2,12564,0,11700,1],[9723,"rank","pin Off to rank 3",2,18261,0,17301,1],[9725,"rank","pin Off to rank 4",2,18599,0,17687,1],[9727,"rank","pin Standby to rank 0",0,10881,0,10881,1],[9729,"rank","pin Standby to rank 1",0,14437,0,14389,0],[9731,"rank","pin Standby to rank 2",2,13440,0,12576,1],[9733,"rank","pin Standby to rank 4",0,7124,0,7124,1],[9735,"rank","pin SelfCheck to rank 0",2,16176,0,15312,1],[9737,"rank","pin SelfCheck to rank 1",2,12564,0,11700,1],[9739,"rank","pin SelfCheck to rank 3",2,13440,0,12576,1],[9741,"rank","pin SelfCheck to rank 4",4,13271,0,13175,1],[9743,"rank","pin Brewing to rank 0",2,22161,0,22065,0],[9745,"rank","pin Brewing to rank 1",2,15541,0,15493,0],[9747,"rank","pin Brewing to rank 2",2,7222,0,7222,0],[9749,"rank","pin Brewing to rank 3",2,8609,0,8513,1],[9751,"rank","pin Brewing:water/Heating to rank 0",4,16985,0,16073,1],[9753,"rank","pin Brewing:water/Heating to rank 2",2,14120,0,13256,1],[9755,"rank","pin Brewing:water/Pumping to rank 0",2,16673,0,15809,1],[9757,"rank","pin Brewing:water/Pumping to rank 1",2,14120,0,13256,1],[9759,"rank","pin Brewing:grinder/Grinding to rank 0",4,16985,0,16073,1],[9761,"rank","pin Brewing:grinder/Grinding to rank 2",4,16985,0,16073,1],[9763,"rank","pin Brewing:grinder/Dosing to rank 0",4,16945,0,16081,0],[9765,"rank","pin Brewing:grinder/Dosing to rank 1",4,16985,0,16073,1],[9767,"rank","pin $final to rank 0",0,8374,0,8374,1],[9769,"rank","pin $final to rank 1",0,8366,0,8366,1],[9771,"rank","pin $final to rank 2",0,9582,0,9582,1],[9773,"rank","pin $final to rank 3",0,6936,0,6936,1]],"round_2_candidates":[[13578,"reverse","reverse t1 Off -> SelfCheck leg 0",0,12579,0,12483,0],[13580,"reverse","reverse t3 SelfCheck -> Off leg 0",0,6936,0,6936,1],[13582,"reverse","reverse t9 Standby -> Brewing leg 0",0,6732,0,6732,1],[13584,"reverse","reverse t10 Brewing -> Standby leg 0",0,6936,0,6936,1],[13586,"face","turn src end of t1 Off -> SelfCheck leg 0 to face 0",0,8028,0,8028,1],[13588,"face","turn src end of t1 Off -> SelfCheck leg 0 to face 1",0,6936,0,6936,1],[13590,"face","turn src end of t1 Off -> SelfCheck leg 0 to face 2",0,6964,0,6964,1],[13592,"face","turn src end of t1 Off -> SelfCheck leg 0 to face 3",0,6428,0,6428,1],[13594,"face","turn dst end of t1 Off -> SelfCheck leg 0 to face 0",0,6936,0,6936,1],[13596,"face","turn dst end of t1 Off -> SelfCheck leg 0 to face 1",0,8716,0,8716,1],[13598,"face","turn dst end of t1 Off -> SelfCheck leg 0 to face 2",0,5880,0,5880,1],[13600,"face","turn dst end of t1 Off -> SelfCheck leg 0 to face 3",0,5892,0,5892,1],[13602,"face","turn src end of t3 SelfCheck -> Off leg 0 to face 0",0,6936,0,6936,1],[13604,"face","turn src end of t3 SelfCheck -> Off leg 0 to face 1",0,6544,0,6544,1],[13606,"face","turn src end of t3 SelfCheck -> Off leg 0 to face 2",0,6936,0,6936,1],[13608,"face","turn src end of t3 SelfCheck -> Off leg 0 to face 3",0,5880,0,5880,1],[13610,"face","turn dst end of t3 SelfCheck -> Off leg 0 to face 0",0,4900,0,4900,1],[13612,"face","turn dst end of t3 SelfCheck -> Off leg 0 to face 1",0,6936,0,6936,1],[13614,"face","turn dst end of t3 SelfCheck -> Off leg 0 to face 2",0,4320,0,4320,1],[13616,"face","turn dst end of t3 SelfCheck -> Off leg 0 to face 3",0,5400,0,5400,1],[13618,"rank","pin Off to rank 0",0,6936,0,6936,1],[13620,"rank","pin Off to rank 2",0,5749,0,5749,1],[13622,"rank","pin Off to rank 3",0,8759,0,8663,1],[13624,"rank","pin Off to rank 4",0,11305,0,11209,1],[13626,"rank","pin Standby to rank 0",0,14089,0,14041,0],[13628,"rank","pin Standby to rank 1",0,14421,0,14373,0],[13630,"rank","pin Standby to rank 2",2,9261,0,9213,1],[13632,"rank","pin Standby to rank 4",0,9412,0,9412,0],[13634,"rank","pin SelfCheck to rank 0",0,9370,0,9322,1],[13636,"rank","pin SelfCheck to rank 1",0,5749,0,5749,1],[13638,"rank","pin SelfCheck to rank 3",2,6857,0,6857,1],[13640,"rank","pin SelfCheck to rank 4",0,8653,0,8653,1],[13642,"rank","pin Brewing to rank 0",0,21711,0,21615,1],[13644,"rank","pin Brewing to rank 1",3,14993,0,14849,1],[13646,"rank","pin Brewing to rank 2",0,6732,0,6732,1],[13648,"rank","pin Brewing to rank 3",0,7124,0,7124,1],[13650,"rank","pin Brewing:water/Heating to rank 0",0,6936,0,6936,1],[13652,"rank","pin Brewing:water/Heating to rank 2",0,7139,0,7139,1],[13654,"rank","pin Brewing:water/Pumping to rank 0",0,9727,0,9679,1],[13656,"rank","pin Brewing:water/Pumping to rank 1",0,7139,0,7139,1],[13658,"rank","pin Brewing:grinder/Grinding to rank 0",0,6936,0,6936,1],[13660,"rank","pin Brewing:grinder/Grinding to rank 2",0,6936,0,6936,1],[13662,"rank","pin Brewing:grinder/Dosing to rank 0",0,10011,0,9963,0],[13664,"rank","pin Brewing:grinder/Dosing to rank 1",0,6936,0,6936,1],[13666,"rank","pin $final to rank 0",0,8374,0,8374,1],[13668,"rank","pin $final to rank 1",0,8366,0,8366,1],[13670,"rank","pin $final to rank 2",0,9582,0,9582,1],[13672,"rank","pin $final to rank 4",4,16985,0,16073,1]]};
+</script>
+<script>
+// Figure: least_by_bound on a real labelled round.
+window.SXfastBound = function (sec) {
+  var DATA = window.SXfastBoundData, Sx = SX.data('search').charts.brew;
+  var f = SX.figure(sec.querySelector('[data-fig="fast-bound"]'), { caption: '<b>Step</b> through one labelled round. Every candidate is first routed without labels and given a lower bound (bars). Candidates whose bound does not beat the incumbent drop out; the rest are sorted by (bound, index). Then each is labelled and scored exactly (the stacked part is its label cost) only while its bound can still beat the best so far; the first that cannot stops the round, and nothing after it is ever labelled. The brew rounds are real: each of the 168 candidates was re-derived from its pins, and its exact cost equals the trace. Its bound here is that drawing\'s cost with the label terms and label Tier 0 counts removed. scav measures area over the unlabelled chart, so where a label pokes out of the drawing (hover says so) scav\'s bound is a little lower; in both rounds the stop falls at the same place. The toy is synthetic, for a round that labels more than one.' });
+  var src = 'r1', st = null;
+  function rows(key, incumbent) {
+    return DATA[key].map(function (r, k) { return { k: k, what: r[2], move: r[1], t0: r[3], t2: r[4], b0: r[5], b2: r[6], inside: !!r[7] }; });
+  }
+  var SETS = {
+    r1: { name: 'brew round 1', inc: { t0: Sx.steps[0].cost.t0, t2: Sx.steps[0].cost.t2 }, c: rows('round_1_candidates') },
+    r2: { name: 'brew round 2', inc: { t0: Sx.steps[1].cost.t0, t2: Sx.steps[1].cost.t2 }, c: rows('round_2_candidates') },
+    toy: { name: 'toy round (synthetic)', inc: { t0: 0, t2: 130 }, c: [111, 103, 120, 100, 108, 103, 135, 102, 115, 110, 140, 105, 128, 150, 118, 125].map(function (b, k) {
+      var lab = [3, 7, 4, 9, 1, 0, 5, 2, 6, 2, 8, 1, 4, 3, 2, 5][k];
+      return { k: k, what: 'toy candidate ' + k, move: 'toy', t0: 0, t2: b + lab, b0: 0, b2: b, inside: true };
+    }) }
+  };
+  f.ctrl.appendChild(SX.choice({ options: [{ value: 'r1', label: 'brew round 1' }, { value: 'r2', label: 'brew round 2' }, { value: 'toy', label: 'toy' }], value: src, onChange: function (v) { src = v; build(); } }).el);
+  var stHost = SX.el('span'); f.ctrl.appendChild(stHost);
+  var text = SX.el('div', { class: 'callout', style: { maxWidth: 'none', minHeight: '64px' } }), plot = SX.el('div');
+  f.stage.appendChild(text); f.stage.appendChild(plot);
+  function less(a0, a2, b0, b2) { return a0 !== b0 ? a0 < b0 : a2 < b2; }
+  // least_by_bound, as layout.cpp runs it, recording each step.
+  function run(S) {
+    var C = S.c, inc = S.inc, order = C.filter(function (c) { return less(c.b0, c.b2, inc.t0, inc.t2); }).map(function (c) { return c.k; });
+    order.sort(function (a, b) { return less(C[a].b0, C[a].b2, C[b].b0, C[b].b2) ? -1 : less(C[b].b0, C[b].b2, C[a].b0, C[a].b2) ? 1 : a - b; });
+    var best = { t0: inc.t0, t2: inc.t2 }, win = -1, at = 0, frames = [];
+    frames.push({ kind: 'bounds' }); frames.push({ kind: 'sorted', order: order });
+    function beats(c0, c2, k) { return less(c0, c2, best.t0, best.t2) || (win >= 0 && k < win && !less(best.t0, best.t2, c0, c2)); }
+    for (; at < order.length && beats(C[order[at]].b0, C[order[at]].b2, order[at]); at++) {
+      var c = C[order[at]], took = beats(c.t0, c.t2, c.k);
+      if (took) { best = { t0: c.t0, t2: c.t2 }; win = c.k; }
+      frames.push({ kind: 'exact', at: at, k: c.k, took: took, best: { t0: best.t0, t2: best.t2 }, win: win });
+    }
+    frames.push({ kind: 'stop', at: at, best: best, win: win, stopper: at < order.length ? order[at] : -1 });
+    return { order: order, frames: frames };
+  }
+  function build() {
+    var S = SETS[src], R = run(S), C = S.c, n = C.length;
+    var W = 1000, H = 300, m = { l: 64, r: 14, t: 16, b: 30 };
+    var vmax = Math.max.apply(null, C.map(function (c) { return c.t2; }).concat([S.inc.t2])) * 1.06;
+    var bw = (W - m.l - m.r) / n, Y = function (v) { return H - m.b - v / vmax * (H - m.t - m.b); };
+    var svg = SX.svg('svg', { viewBox: '0 0 ' + W + ' ' + H, style: { width: '100%', height: 'auto', font: '12px ' + SX.css('--sans') } });
+    for (var q = 0; q <= 4; q++) {
+      var v = vmax * q / 4;
+      svg.appendChild(SX.svg('line', { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: SX.css('--grid'), 'stroke-width': 1 }));
+      svg.appendChild(SX.svg('text', { x: m.l - 8, y: Y(v) + 4, 'text-anchor': 'end', fill: SX.css('--text-muted'), text: SX.fmt(Math.round(v)) }));
+    }
+    svg.appendChild(SX.svg('text', { x: 8, y: 12, fill: SX.css('--text-secondary'), text: 't2' }));
+    var axisLab = SX.svg('text', { x: (W + m.l) / 2, y: H - 8, 'text-anchor': 'middle', fill: SX.css('--text-muted') }); svg.appendChild(axisLab);
+    var incLine = SX.svg('line', { x1: m.l, x2: W - m.r, y1: Y(S.inc.t2), y2: Y(S.inc.t2), stroke: SX.css('--text-secondary'), 'stroke-width': 1.5, 'stroke-dasharray': '6 4' }); svg.appendChild(incLine);
+    var bestLine = SX.svg('line', { x1: m.l, x2: W - m.r, stroke: SX.css('--text-primary'), 'stroke-width': 2, visibility: 'hidden' }); svg.appendChild(bestLine);
+    var bars = C.map(function (c) {
+      var gq = SX.svg('g'); gq.style.transition = 'transform 0.7s ease';
+      var hb = H - m.b - Y(c.b2), he = Y(c.b2) - Y(c.t2);
+      var rb = SX.svg('rect', { x: 0.5, y: Y(c.b2), width: Math.max(bw - 1, 1), height: Math.max(hb, 0.5), fill: c.b0 ? 'none' : SX.css('--series-1'), stroke: SX.css('--series-1'), 'stroke-width': c.b0 ? 1 : 0 });
+      var re = SX.svg('rect', { x: 0.5, y: Y(c.t2), width: Math.max(bw - 1, 1), height: Math.max(he, 0), fill: SX.css('--series-2'), visibility: 'hidden' });
+      var hit = SX.svg('rect', { x: 0, y: m.t, width: bw, height: H - m.t - m.b, fill: 'transparent' });
+      gq.appendChild(rb); gq.appendChild(re); gq.appendChild(hit);
+      SX.tipOn(hit, function () {
+        return '<b>' + c.what + '</b><br>bound t0 ' + c.b0 + ' · t2 ' + SX.fmt(c.b2) + (c.labelled ? '<br>exact t0 ' + c.t0 + ' · t2 ' + SX.fmt(c.t2) + ' (labels +' + SX.fmt(c.t2 - c.b2) + ')' : '<br><span class="m">' + (c.out ? 'bound does not beat the incumbent: never labelled' : 'not labelled yet') + '</span>') +
+          (c.inside ? '' : '<br><span class="m">a label pokes out of the unlabelled drawing, so scav\'s bound is a little lower</span>');
+      });
+      svg.appendChild(gq);
+      return { g: gq, rb: rb, re: re, c: c };
+    });
+    plot.innerHTML = '';
+    plot.appendChild(SX.el('div', { class: 'legend' },
+      SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--series-1)' } }), 'bound (routed, no labels)'),
+      SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--series-2)' } }), 'label cost, once scored exactly'),
+      SX.el('span', null, SX.el('span', { class: 'swatch', style: { border: '1px solid var(--series-1)' } }), 'bound breaks Tier 0'),
+      SX.el('span', null, SX.el('span', { class: 'swatch', style: { borderTop: '2px dashed var(--text-secondary)', height: 0 } }), 'incumbent ' + (S.inc.t0 ? 't0 ' + S.inc.t0 + ' · ' : '') + 't2 ' + SX.fmt(S.inc.t2)),
+      SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--text-primary)', height: '2px' } }), 'best exact so far')));
+    plot.appendChild(svg);
+    var pos = {}; R.order.forEach(function (k, j) { pos[k] = j; });
+    var outs = C.filter(function (c) { return pos[c.k] == null; }).map(function (c) { return c.k; });
+    function show(fi) {
+      var fr = R.frames[fi], sorted = fi >= 1, done = {};
+      R.frames.slice(2, fi + 1).forEach(function (x) { if (x.kind === 'exact') done[x.k] = x; });
+      bars.forEach(function (b) {
+        var c = b.c, j = sorted ? (pos[c.k] != null ? pos[c.k] : R.order.length + outs.indexOf(c.k)) : c.k;
+        b.g.style.transform = 'translate(' + (m.l + j * bw) + 'px, 0)';
+        c.out = sorted && pos[c.k] == null; c.labelled = !!done[c.k];
+        var never = c.out || (fr.kind === 'stop' && !c.labelled);
+        b.g.style.opacity = never ? 0.28 : 1;
+        b.re.setAttribute('visibility', c.labelled ? 'visible' : 'hidden');
+        b.rb.setAttribute('stroke-width', fr.kind === 'stop' && c.k === fr.stopper ? 2.5 : (c.b0 ? 1 : 0));
+        b.rb.setAttribute('stroke', fr.kind === 'stop' && c.k === fr.stopper ? SX.css('--text-primary') : SX.css('--series-1'));
+        if (fr.kind === 'stop' && c.k === fr.stopper) b.g.style.opacity = 1;
+      });
+      var last = null; R.frames.slice(0, fi + 1).forEach(function (x) { if (x.best) last = x.best; });
+      if (last) { bestLine.setAttribute('y1', Y(last.t2)); bestLine.setAttribute('y2', Y(last.t2)); bestLine.setAttribute('visibility', 'visible'); } else bestLine.setAttribute('visibility', 'hidden');
+      axisLab.textContent = sorted ? 'candidates by (bound, index); dropped ones at the right' : 'candidates in enumeration order';
+      var nlab = Object.keys(done).length, msg;
+      if (fr.kind === 'bounds') msg = 'All ' + n + ' candidates routed in parallel <b>without labels</b>; each gets a lower bound.';
+      else if (fr.kind === 'sorted') msg = R.order.length + ' of ' + n + ' bounds beat the incumbent and are sorted by (bound, index); ' + (n - R.order.length) + ' can never win and drop out unlabelled.' + (S.inc.t0 ? ' The incumbent breaks Tier 0 (t0 ' + S.inc.t0 + '), so any bound with a lower t0 beats it, whatever its t2.' : '');
+      else if (fr.kind === 'exact') { var c = C[fr.k]; msg = 'Label and score #' + (fr.at + 1) + ' in bound order: <b>' + c.what + '</b>, bound ' + SX.fmt(c.b2) + ' → exact ' + (c.t0 ? 't0 ' + c.t0 + ' · ' : '') + SX.fmt(c.t2) + '. ' + (fr.took ? 'New best.' : 'Not better than ' + SX.fmt(fr.best.t2) + '.'); }
+      else msg = (fr.stopper >= 0 ? '<b>Stop.</b> The next bound, ' + SX.fmt(C[fr.stopper].b2) + ' (' + C[fr.stopper].what + '), cannot beat the best exact cost ' + SX.fmt(fr.best.t2) + ', and every later bound is larger.' : '<b>Done:</b> every candidate that could win was scored.') +
+        ' Labelled ' + nlab + ' of ' + n + '; the pick is <b>' + (fr.win >= 0 ? C[fr.win].what : 'none') + '</b>, exactly what scoring all ' + n + ' whole would pick.';
+      text.innerHTML = msg;
+    }
+    var stp = SX.stepper({ steps: R.frames.length, interval: 1500, onStep: show, label: function (i) { var k = R.frames[i].kind; return (i + 1) + ' / ' + R.frames.length + ' · ' + (k === 'bounds' ? 'bound' : k === 'sorted' ? 'sort' : k === 'exact' ? 'exact' : 'stop'); } });
+    if (st) st.stop();
+    st = stp; stHost.innerHTML = ''; stHost.appendChild(stp.el); stp.el.style.margin = '0';
+  }
+  build();
+};
+SX.register('fast', function (sec) {
+  SXfastPerf(sec);
+  SXfastReuse(sec);
+  SXfastBound(sec);
+});
+</script>

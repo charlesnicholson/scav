@@ -1,0 +1,490 @@
+<section class="sx" id="route" data-toc="7 · Routing">
+  <div class="kicker">Phase 3</div>
+  <h2>Routing: ports, faces, A*, seats and lanes</h2>
+  <p class="lede">Phase 3 draws every segment as an axis-aligned polyline between the boxes phase 2 placed. Axis-aligned is a hard constraint and states are obstacles, so a route through a box is not penalised: it cannot be represented at all (§11.5).</p>
+
+  <p>In order (<code>route.cpp:213-805</code>): face pins become a per-segment-end table; each segment's corridor bends are gathered (phase 1's bend nodes, in route order); every <b>net</b> (one routed piece of a transition, one per segment) is planned and its port slots emitted; nets are batched by frame and the frames are <b>routed in parallel</b>, each building its region and obstacles, reusing a cached answer if the frame is unchanged (translated if it moved), else running the router and nudging that frame. The results are merged in frame order, each transition's nets are joined end to end, <code>PathClear</code> trims are applied, the composed polylines are nudged again chart-wide, and labels are placed last.</p>
+
+  <h3>Ports and the facing pass</h3>
+  <p>A <b>port slot</b> is where a route crosses a composite's border: on the crossed box's own border, at the boundary node's coordinate (<code>slot_of</code>, <code>route.cpp:309-352</code>). In a frame running across, rank-border ports sit on the left (leading, a source) or right (trailing, a sink), cross-border ports on the top or bottom; a frame running down swaps them. Sides are numbered 0 left, 1 right, 2 top, 3 bottom.</p>
+  <p>Before routing, after the first sizing, the <b>facing pass</b> (<code>layout.cpp:282-408</code>) turns ports toward where their routes go. A port whose far end lies on the frame's other side has its in-frame edge <b>reversed</b>, which moves it to the other rank border. A port on the border of the transition's own state, whose far end lies further beyond the frame across the ranks than along them, moves to the <b>cross border</b> that faces it (a side pin), if that state sees the border unobstructed and no other port has that side. If anything turned, phases 1 and 2 run again. A side pin already held is never turned.</p>
+
+  <h3>Which face an end leaves by</h3>
+  <p>Each end of a net is <b>seated</b> on a face of its box. The <b>separation rule</b> (<code>ortho_escape_horizontal</code>, <code>router_orthogonal.cpp:318-331</code>) measures how far the other end lies <em>outside</em> the box on each axis; the larger separation picks the axis (a tie goes to x, the layering axis) and the nearer border picks the side. It is not the distance to a point on the border: that charged an exit for the run along its own face, and sent <code>ota</code>'s fork bar out through its 4 pt end. Switching to the separation rule took the corpus's bends from 689 to 587 (§11.5).</p>
+  <p>Where on the face: the other end's projection onto it, held off each corner by <code>min(max(clear, corner arc), len/2)</code> (<code>onto_face</code>). <b>Inscribed glyphs</b>, every kind but Normal, Fork and Join (discs, diamonds, the H), take the face's midpoint.</p>
+  <div data-fig="route-face"></div>
+  <p>A <b>face pin</b> (<code>FacePin</code>) overrides the rule at one end. A pin onto a face shorter than twice the inset is declined, since every seat on it would clamp to one point (<code>router_orthogonal.cpp:339-348</code>). The router reports, per end, which faces would actually move the seat, so the search never scores a face move that changes nothing. Deciding both faces as a pair from the two boxes was tried: better on <code>estop</code>, but +8.8% Tier 2 over the corpus with nine of eleven charts worse, "so the face is a search dimension, not a rule" (§11.5).</p>
+
+  <h3>The orthogonal router</h3>
+  <p>The router searches a <b>separated orthogonal visibility graph</b> with A* (§11.5; <code>router_orthogonal.cpp</code>).</p>
+  <ul>
+    <li><b>Grid.</b> The x lines are the region's edges, each obstacle's <code>x − clear</code> and <code>x + w + clear</code>, the enclosure walls' edges and every anchor's x; the y lines likewise. Vertices are their crossings, and an edge is passable unless it cuts an obstacle grown by <code>clear</code>, or a wall (<code>router_orthogonal.cpp:906-991</code>). The grid is full, not sparse; the flat 2k-state chart routes in 215 ms. Over 2<sup>18</sup> vertices the router refuses the frame.</li>
+    <li><b>Clearance is a bumper, not a penalty.</b> <code>clear = max(node_sep/3, 1)</code> = 96: "no segment comes within <code>clear</code> of a box" is a property of the graph, not a price.</li>
+    <li><b>Separated planes.</b> Each vertex has a horizontal-plane copy and a vertical-plane copy, joined by an edge whose weight is the <b>bend penalty</b> (Wybrow et al.), so plain A* minimises length and bends together. Node = <code>2·vertex + plane</code>.</li>
+    <li><b>Costs in quarter units.</b> A move costs 4 × length; a bend 4 × <code>rank_sep</code> (the bend penalty is one <code>rank_sep</code>, 576). An <b>end turn</b>, turning onto or off a fixed lead or stub direction, costs one quarter less than a bend, so of two paths equal in length and bends, the one that turns at its ends wins.</li>
+    <li><b>Heuristic</b>: 4 × Manhattan distance, plus one bend if the current plane cannot reach the goal alone, plus one end turn if the goal's plane is fixed and differs. Admissible.</li>
+    <li><b>Frontier order</b>: the open list is totally ordered by <code>(f, g, node)</code>, so the pop sequence is unique; it is a radix heap on <code>f</code> with a 4-ary heap for the entries at the least <code>f</code>. The expansion budget is 2<sup>20</sup>.</li>
+    <li><b>Ring points.</b> A seat on a box border is pushed out by <code>clear</code> to a ring point; the leg from border to ring is emitted, not searched, so it is perpendicular for free.</li>
+  </ul>
+  <div data-fig="route-astar"></div>
+  <p><b>Corridors.</b> A chained segment's bend nodes are hard waypoints: the search runs leg by leg between consecutive anchors, and <code>ortho_simplify</code> then removes a doubling-back spur, which is why a polyline can appear not to touch its waypoint (§11.16). A corridor net keeps both end planes free. Each frame's <b>region</b> is its rect, covered over every planned end and bend and grown by the clearance; its <b>obstacles</b> are every live state overlapping the region except the frame owner's own enclosing chain, outermost only (a box contains its descendants). Endpoint states are obstacles too: the router moves those ends onto their borders. <b>Enclosure walls</b> keep a route inside the state it is drawn in, a band 48 units inside its border (§11.10g step 1).</p>
+
+  <h3>Seating passes</h3>
+  <p>Every end's seat is chosen before any net is searched, because two ends wanting one seat is a question about the pair. Five passes run in order (<code>router_orthogonal.cpp:1322-1382</code>):</p>
+  <ol>
+    <li><b>Attach</b>: each end is seated by the separation rule (or its face pin) at the projection of the point it aims at, the far end or the first waypoint.</li>
+    <li><b>Reface</b> (inscribed glyphs only): a face midpoint wanted by both an arrival and a departure moves the direction with more to gain to another face; ties move departures.</li>
+    <li><b>Align</b>: a net between two boxes with parallel faces gets both ends on one coordinate (halfway between the centres, clamped into both faces' runs) so one straight segment fits. A <b>leaning</b> net, whose label room phase 2 reserved at the leading end, takes the run's low end. Corridor nets are skipped.</li>
+    <li><b>Spread</b> (filled boxes): ends sharing one point on one face are split by travel direction (the net running in + takes the lower seat at both its ends), a line of text apart (269) where the face has room, else <code>min(clear, len/3)</code>; repeated until nothing moves.</li>
+    <li><b>Separate</b>: legs on <em>different</em> boxes running alongside closer than a line of text are pushed apart, half the shortfall each, along their faces (fans are exempt).</li>
+  </ol>
+  <div data-fig="route-seats"></div>
+  <p>Seating against the box centre cut arrivals meeting a departure on one point from 116 to 16; the align and spread passes then took bends from 563 to 426 (real text), shared corridor from 30,410 to 16,494, and arrowheads landing on another route's end from 16 to 0 (§11.5). The PRD lists four passes; the code runs five.</p>
+
+  <h3>Nudging lanes apart</h3>
+  <p>After routing, <b>nudging</b> (<code>nudge.cpp</code>) spreads routes that run alongside each other, once per frame and again chart-wide over the composed polylines.</p>
+  <ul>
+    <li><b>Members</b> are interior axis-aligned segments only, each with a leg on both sides to drag; horizontal members first, then vertical, re-read from the moved geometry.</li>
+    <li>A <b>lane</b> is the union of member pairs closer than <code>gap = max(clear, em)</code> = 192 whose extents overlap: a distance, not collinearity.</li>
+    <li><b>Order</b> within a lane is by where each net came from (<code>toward</code>, read from the end lower along the lane). <b>Bundles</b> (nets identical from the far point to the end, a fan-in, or from the start, a fan-out) take one offset and move whole. <b>Crossing votes</b>: a leg leaving strictly inside another member's extent votes for the order that avoids crossing it; the order is a linear extension of the votes by Kahn's algorithm (lowest key first), or, if votes form a cycle, fewest-contradictions insertion.</li>
+    <li><b>Room</b> comes from the region, each member's frame (one unit inside), obstacles' grown edges and each member's leg travel. The <b>step</b> is <code>min(gap, window/(groups − 1))</code>, centred and slid back toward the lane.</li>
+    <li><b><code>known_good</code></b>: a displacement is taken only if no leg collapses or turns round, no obstacle (or its bumper) is newly entered, no new run along a border appears, and no new shared run with another net; one refusal leaves the whole bundle where it was. "A diagram that scores well and overlaps a box is worth less than one that scores badly and does not" (§11.5).</li>
+  </ul>
+  <div data-fig="route-nudge"></div>
+  <p>Without nudging, shared corridor over the corpus (no-text) was 355,116; with it, 93,066. The crossing votes then took crossings from 104 to 85 with bends unchanged at 587 (§11.5). The nudge pitch is one em (192); seats use the line height (269).</p>
+
+  <h3>Trims, failures and the inflation retry</h3>
+  <p><code>PathClear{src, dst}</code> shortens the joined route's first and last legs to leave room for arrowheads, each capped at half its leg (<code>route.cpp:39-50</code>, <code>741-746</code>). A net can fail three ways (<code>router.h:67-72</code>): <b>OutsideRegion</b> (an anchor outside the region), <b>TooLarge</b> (the grid is over budget, failing every net in the frame) and <b>Unreachable</b>: no path on the clearance grid <em>and</em> none on a tight grid with clearance 0. Success on the tight grid is a <b>re-seat</b>, not a failure. A <b>degraded</b> net is drawn as a straight line between its raw ends (box centres) through its waypoints, with one <code>RouteDegraded</code> diagnostic per transition.</p>
+  <p>Only Unreachable triggers the <b>inflation retry</b> (<code>layout.cpp:592-631</code>): <code>rank_sep</code>, <code>node_sep</code> and <code>sub_sep</code> grow by 32 (2 pt) on a copy of the profile, cumulatively, and phases 2 and 3 run again over the same ordering, up to 8 times. The attempt that degraded least is kept (ties to the earliest), stopping at the first with nothing unreachable. The cost is always scored under the caller's profile, and Level 1 never accepts a candidate that inflated: "a move that only fits once the whole chart's spacing was widened is not a better placement, it is a bigger drawing." The corpus and both 2k shapes inflate zero times.</p>
+
+  <h3>One end, four faces</h3>
+  <p>The face is a search dimension. The figure below lays out <code>estop</code> (no text) with each of the four face pins at both ends of two transitions, each a full re-derivation of ordering, sizing and routing.</p>
+  <div data-fig="route-faces"></div>
+  <div class="callout why"><span class="t">Rejected</span>Pricing a flush lane instead of a bumper: it needs a constant tuned against the bend penalty and is only probably right. Raising the clearance to a whole em fixed 12 of 89 crowded pairs and cost containment (§11.9.3). A seat-sliding nudge for terminal legs separated none of the pairs it was for and was reverted (§11.9.5). Congestion-history routing (PathFinder) and separator channels are designed, not built: nothing measured demands them. The router is swappable by name (<code>straight</code> and <code>orthogonal</code> are registered), and the bench compares every registered router over the corpus.</div>
+</section>
+<script>
+(function () {
+  'use strict';
+  var F = (window.SXF = window.SXF || {});
+  F.route = F.route || {};
+  var U = F.ru = {
+    root: function (w, h) { return SX.svg('svg', { viewBox: '0 0 ' + w + ' ' + h, style: { width: '100%', height: 'auto', font: '13px ' + SX.css('--sans') } }); },
+    el: function (p, tag, a, st) { var n = SX.svg(tag, a); if (st) Object.assign(n.style, st); p.appendChild(n); return n; },
+    text: function (p, x, y, s, st, a) { var n = SX.svg('text', Object.assign({ x: x, y: y, text: s }, a || {})); Object.assign(n.style, { fill: 'var(--text-primary)' }, st || {}); p.appendChild(n); return n; },
+    pt: function (svg, e) { var p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY; return p.matrixTransform(svg.getScreenCTM().inverse()); },
+    run: function (sec, figs) {
+      Object.keys(figs).forEach(function (k) {
+        var h = sec.querySelector('[data-fig="' + k + '"]');
+        if (!h) return;
+        try { figs[k](h); } catch (err) { console.error(k, err); h.appendChild(SX.el('p', { class: 'note', text: 'This figure failed to load: ' + err.message })); }
+      });
+    }
+  };
+  SX.register('route', function (sec) { U.run(sec, F.route); });
+})();
+</script>
+<script>
+(function () {
+  'use strict';
+  var F = window.SXF, U = F.ru, CLEAR = 96;
+  function beyond(v, lo, len) { return v < lo ? lo - v : v > lo + len ? v - (lo + len) : 0; }
+  function ontoFace(v, lo, len, clear, corner) { var inset = Math.min(Math.max(clear, corner), Math.floor(len / 2)); return Math.min(Math.max(v, lo + inset), lo + len - inset); }
+  // ortho_attach_box: the separation rule picks the axis, the nearer border the side, the projection the place.
+  U.attach = function (t, r, inscribed, corner) {
+    var bx = beyond(t.x, r.x, r.w), by = beyond(t.y, r.y, r.h), horiz = bx >= by, p = {};
+    if (horiz) {
+      var left = (t.x - r.x) <= (r.x + r.w - t.x);
+      p = { x: left ? r.x : r.x + r.w, y: inscribed ? r.y + Math.floor(r.h / 2) : ontoFace(t.y, r.y, r.h, CLEAR, corner), face: left ? 0 : 1 };
+    } else {
+      var top = (t.y - r.y) <= (r.y + r.h - t.y);
+      p = { x: inscribed ? r.x + Math.floor(r.w / 2) : ontoFace(t.x, r.x, r.w, CLEAR, corner), y: top ? r.y : r.y + r.h, face: top ? 2 : 3 };
+    }
+    p.bx = bx; p.by = by; return p;
+  };
+  var BOXES = {
+    state: { label: 'state 896 × 640', r: { x: -448, y: -320, w: 896, h: 640 }, corner: 80, ins: false, t: { x: 1300, y: 700 } },
+    fork: { label: 'fork bar 64 × 960', r: { x: -32, y: -480, w: 64, h: 960 }, corner: 0, ins: false, t: { x: 1500, y: -880 } },
+    choice: { label: 'choice 320 × 320 (inscribed)', r: { x: -160, y: -160, w: 320, h: 320 }, corner: 0, ins: true, t: { x: 1400, y: 900 } }
+  };
+  var FACE = ['left', 'right', 'top', 'bottom'];
+  F.route['route-face'] = function (host) {
+    var key = 'state', t = Object.assign({}, BOXES[key].t);
+    var f = SX.figure(host, { caption: '<b>The separation rule.</b> <b>Drag</b> the far end (blue dot). The two bars measure how far it lies outside the box on each axis; the longer picks the axis, the nearer border picks the face (orange), and the seat sits at the far end\'s projection, held off the corners (the gaps at each end of the orange face). On the fork bar, a far end almost level with its 64-unit cap still leaves by the long face; the choice, an inscribed glyph, always takes a face midpoint.' });
+    f.ctrl.appendChild(SX.choice({ options: Object.keys(BOXES).map(function (k) { return { value: k, label: BOXES[k].label }; }), value: key, onChange: function (v) { key = v; t = Object.assign({}, BOXES[v].t); draw(); } }).el);
+    var out = SX.el('div', { class: 'note' });
+    var VB = [-2200, -1250, 4400, 2500];
+    function draw() {
+      var B = BOXES[key], r = B.r, s = U.attach(t, r, B.ins, B.corner);
+      var svg = U.root(760, 760 * VB[3] / VB[2]); svg.setAttribute('viewBox', VB.join(' '));
+      var g = SX.svg('g'); svg.appendChild(g); svg.style.font = '76px ' + SX.css('--sans'); svg.style.touchAction = 'none';
+      U.el(g, 'rect', { x: r.x - CLEAR, y: r.y - CLEAR, width: r.w + 2 * CLEAR, height: r.h + 2 * CLEAR, rx: 30 }, { fill: 'none', stroke: 'var(--axis)', strokeDasharray: '30 24', strokeWidth: 8 });
+      if (B.ins) {
+        U.el(g, 'rect', { x: r.x, y: r.y, width: r.w, height: r.h }, { fill: 'none', stroke: 'var(--grid)', strokeWidth: 8 });
+        U.el(g, 'polygon', { points: [r.x + r.w / 2, r.y, r.x + r.w, r.y + r.h / 2, r.x + r.w / 2, r.y + r.h, r.x, r.y + r.h / 2].join(',') }, { fill: 'var(--state-fill)', stroke: 'var(--state-stroke)', strokeWidth: 16 });
+      } else U.el(g, 'rect', { x: r.x, y: r.y, width: r.w, height: r.h, rx: B.corner }, { fill: B.corner ? 'var(--state-fill)' : 'var(--state-stroke)', stroke: 'var(--state-stroke)', strokeWidth: 16 });
+      // corner insets on the chosen face: seats cannot go there
+      var inset = Math.min(Math.max(CLEAR, B.corner), Math.floor((s.face < 2 ? r.h : r.w) / 2));
+      var fx1 = s.face === 1 ? r.x + r.w : r.x, fy1 = s.face === 3 ? r.y + r.h : r.y;
+      var face = s.face < 2 ? [[fx1, r.y], [fx1, r.y + r.h]] : [[r.x, fy1], [r.x + r.w, fy1]];
+      U.el(g, 'line', { x1: face[0][0], y1: face[0][1], x2: face[1][0], y2: face[1][1], 'stroke-width': 40, 'stroke-linecap': 'round' }, { stroke: 'var(--hl)' });
+      if (!B.ins) [0, 1].forEach(function (k) {
+        var a = face[k], d = k ? -1 : 1;
+        var b = s.face < 2 ? [a[0], a[1] + d * inset] : [a[0] + d * inset, a[1]];
+        U.el(g, 'line', { x1: a[0], y1: a[1], x2: b[0], y2: b[1], 'stroke-width': 40 }, { stroke: 'var(--surface-2)' });
+      });
+      // the separations
+      var cx = Math.max(r.x, Math.min(t.x, r.x + r.w)), cy = Math.max(r.y, Math.min(t.y, r.y + r.h));
+      if (s.bx) U.el(g, 'line', { x1: cx, y1: t.y, x2: t.x, y2: t.y, 'stroke-width': 22 }, { stroke: 'var(--series-1)', opacity: 0.55 });
+      if (s.by) U.el(g, 'line', { x1: t.x, y1: cy, x2: t.x, y2: t.y, 'stroke-width': 22 }, { stroke: 'var(--series-3)', opacity: 0.55 });
+      U.el(g, 'line', { x1: s.x, y1: s.y, x2: t.x, y2: t.y, 'stroke-width': 8 }, { stroke: 'var(--text-muted)', strokeDasharray: '30 24' });
+      U.el(g, 'circle', { cx: s.x, cy: s.y, r: 48 }, { fill: 'var(--hl)', stroke: 'var(--surface-1)', strokeWidth: 12 });
+      var knob = U.el(g, 'circle', { cx: t.x, cy: t.y, r: 70 }, { fill: 'var(--hl-2)', stroke: 'var(--surface-1)', strokeWidth: 14, cursor: 'grab' });
+      // readouts, top-left
+      var lx = VB[0] + 80, ly = VB[1] + 140;
+      U.el(g, 'rect', { x: lx, y: ly - 70, width: 40, height: 40 }, { fill: 'var(--series-1)' });
+      U.text(g, lx + 70, ly - 32, 'outside on x: ' + SX.fmt(s.bx), {});
+      U.el(g, 'rect', { x: lx, y: ly + 40, width: 40, height: 40 }, { fill: 'var(--series-3)' });
+      U.text(g, lx + 70, ly + 78, 'outside on y: ' + SX.fmt(s.by), {});
+      U.text(g, lx, ly + 200, 'face: ' + FACE[s.face] + '   seat (' + s.x + ', ' + s.y + ')', { fontWeight: 700 });
+      knob.addEventListener('pointerdown', function (e) {
+        knob.setPointerCapture(e.pointerId);
+        function mv(ev) { var p = U.pt(svg, ev); t = { x: Math.round(Math.max(VB[0], Math.min(VB[0] + VB[2], p.x))), y: Math.round(Math.max(VB[1], Math.min(VB[1] + VB[3], p.y))) }; draw(); }
+        function up() { knob.removeEventListener('pointermove', mv); }
+        knob.addEventListener('pointermove', mv); knob.addEventListener('pointerup', up, { once: true });
+      });
+      f.stage.innerHTML = ''; f.stage.appendChild(svg); f.stage.appendChild(out);
+      out.innerHTML = (s.bx >= s.by ? 'x separation ' + SX.fmt(s.bx) + ' ≥ y separation ' + SX.fmt(s.by) + (s.bx === s.by ? ' (a tie goes to x, the layering axis)' : '') + ', so the end leaves sideways' : 'y separation ' + SX.fmt(s.by) + ' > x separation ' + SX.fmt(s.bx) + ', so the end leaves up or down') + ', by the ' + FACE[s.face] + ' face. ' + (B.ins ? 'Inscribed glyph: the face midpoint.' : 'Inset off each corner: min(max(clear 96, corner ' + B.corner + '), half the face) = ' + inset + '.');
+    }
+    draw();
+  };
+})();
+</script>
+<script>
+(function () {
+  'use strict';
+  var U = window.SXF.ru;
+  // The separated grid and A* as router_orthogonal.cpp builds them: free end planes, costs in quarters.
+  U.grid = function (region, obstacles, anchors, clear) {
+    var xs = [region.x, region.x + region.w], ys = [region.y, region.y + region.h];
+    obstacles.forEach(function (o) { xs.push(o.x - clear, o.x + o.w + clear); ys.push(o.y - clear, o.y + o.h + clear); });
+    anchors.forEach(function (a) { xs.push(a.x); ys.push(a.y); });
+    function uniq(v) { return v.filter(function (x) { return x >= Math.min(region.x) && true; }).sort(function (a, b) { return a - b; }).filter(function (x, i, a) { return !i || a[i - 1] !== x; }); }
+    xs = uniq(xs).filter(function (x) { return x >= region.x && x <= region.x + region.w; }); ys = uniq(ys).filter(function (y) { return y >= region.y && y <= region.y + region.h; });
+    var grown = obstacles.map(function (o) { return { x0: o.x - clear, x1: o.x + o.w + clear, y0: o.y - clear, y1: o.y + o.h + clear }; });
+    function cutsH(y, xa, xb) { return grown.some(function (g) { return y > g.y0 && y < g.y1 && xa < g.x1 && xb > g.x0; }); }
+    function cutsV(x, ya, yb) { return grown.some(function (g) { return x > g.x0 && x < g.x1 && ya < g.y1 && yb > g.y0; }); }
+    var nx = xs.length, ny = ys.length, passH = [], passV = [];
+    for (var iy = 0; iy < ny; iy++) for (var ix = 0; ix + 1 < nx; ix++) passH[iy * nx + ix] = !cutsH(ys[iy], xs[ix], xs[ix + 1]);
+    for (iy = 0; iy + 1 < ny; iy++) for (ix = 0; ix < nx; ix++) passV[iy * nx + ix] = !cutsV(xs[ix], ys[iy], ys[iy + 1]);
+    return { xs: xs, ys: ys, nx: nx, ny: ny, passH: passH, passV: passV, grown: grown };
+  };
+  U.astar = function (G, from, to, bend) {
+    var nx = G.nx, Q = 4, turnW = Q * bend, best = {}, parent = {}, open = [], closed = {}, ev = [], pushed = {};
+    var goal = { x: G.xs[to % nx], y: G.ys[Math.floor(to / nx)] };
+    function h(x, y, plane) { var dx = Math.abs(x - goal.x), dy = Math.abs(y - goal.y), turn = plane === 0 ? dy !== 0 : dx !== 0; return Q * (dx + dy) + (turn ? turnW : 0); }
+    function push(node, g, f, par) { if (best[node] != null && best[node] <= g) return; best[node] = g; parent[node] = par; pushed[node] = 1; open.push({ f: f, g: g, node: node }); }
+    var fx = G.xs[from % nx], fy = G.ys[Math.floor(from / nx)];
+    [0, 1].forEach(function (pl) { push(from * 2 + pl, 0, h(fx, fy, pl), -1); });
+    var reached = -1;
+    while (open.length) {
+      open.sort(function (a, b) { return a.f !== b.f ? a.f - b.f : a.g !== b.g ? a.g - b.g : a.node - b.node; });
+      var top = open.shift();
+      if (top.g !== best[top.node]) continue;
+      var v = top.node >> 1, plane = top.node & 1, ix = v % nx, iy = Math.floor(v / nx), x = G.xs[ix], y = G.ys[iy];
+      ev.push({ node: top.node, f: top.f, g: top.g, open: open.slice(0, 7).map(function (e) { return Object.assign({}, e); }), openN: open.length, closed: Object.assign({}, closed), seen: Object.assign({}, pushed) });
+      if (v === to) { reached = top.node; break; }
+      closed[top.node] = 1;
+      push(top.node ^ 1, top.g + turnW, top.g + turnW + h(x, y, 1 - plane), top.node);
+      if (plane === 0) {
+        if (ix + 1 < nx && G.passH[iy * nx + ix]) { var x2 = G.xs[ix + 1], c = Q * (x2 - x); push(top.node + 2, top.g + c, top.g + c + h(x2, y, 0), top.node); }
+        if (ix > 0 && G.passH[iy * nx + ix - 1]) { x2 = G.xs[ix - 1]; c = Q * (x - x2); push(top.node - 2, top.g + c, top.g + c + h(x2, y, 0), top.node); }
+      } else {
+        if (iy + 1 < G.ny && G.passV[iy * nx + ix]) { var y2 = G.ys[iy + 1]; c = Q * (y2 - y); push(top.node + 2 * nx, top.g + c, top.g + c + h(x, y2, 1), top.node); }
+        if (iy > 0 && G.passV[(iy - 1) * nx + ix]) { y2 = G.ys[iy - 1]; c = Q * (y - y2); push(top.node - 2 * nx, top.g + c, top.g + c + h(x, y2, 1), top.node); }
+      }
+    }
+    var path = [];
+    for (var n = reached; n !== -1 && n != null; n = parent[n]) { var vv = n >> 1; if (!path.length || path[path.length - 1] !== vv) path.push(vv); }
+    path.reverse();
+    var pts = path.map(function (vv) { return [G.xs[vv % nx], G.ys[Math.floor(vv / nx)]]; });
+    var simple = pts.filter(function (p, i) { if (!i || i === pts.length - 1) return true; var a = pts[i - 1], b = pts[i + 1]; return !((a[0] === p[0] && p[0] === b[0]) || (a[1] === p[1] && p[1] === b[1])); });
+    var len = 0; for (var i = 1; i < pts.length; i++) len += Math.abs(pts[i][0] - pts[i - 1][0]) + Math.abs(pts[i][1] - pts[i - 1][1]);
+    return { ev: ev, pts: simple, cost: reached >= 0 ? best[reached] : null, len: len, bends: Math.max(0, simple.length - 2) };
+  };
+})();
+</script>
+<script>
+(function () {
+  'use strict';
+  var F = window.SXF, U = F.ru, CLEAR = 96;
+  F.route['route-astar'] = function (host) {
+    var region = { x: 0, y: 0, w: 3100, h: 1800 };
+    var obs = [{ x: 700, y: 300, w: 600, h: 400 }, { x: 1500, y: 900, w: 500, h: 500 }, { x: 2300, y: 200, w: 300, h: 700 }];
+    var A = { x: 200, y: 1500 }, B = { x: 1800, y: 450 }, bend = 576, stepper = null;
+    var f = SX.figure(host, { caption: '<b>A* on the separated grid.</b> Grid lines come from the region, each box grown by the clearance (dashed) and the two ends. Each vertex is drawn as a cross: its horizontal bar is the h-plane node, its vertical bar the v-plane node (blue: on the open list; grey: expanded; orange: popped now). <b>Step</b> the search, <b>slide</b> the bend penalty (one <code>rank_sep</code> = 576 ships), or <b>drag</b> either end. At 0 the search has many equal-cost paths, expands far more and may return a jog; any penalty prefers the fewest bends.' });
+    var sl = SX.slider({ label: 'bend penalty', min: 0, max: 1152, step: 16, value: bend, format: function (v) { return v + (v === 576 ? ' (rank_sep)' : ''); }, onInput: function (v) { bend = v; build(); } });
+    f.ctrl.appendChild(sl.el);
+    var stepHost = SX.el('div'); f.ctrl.appendChild(stepHost);
+    var info = SX.el('div', { class: 'note', style: { minHeight: '2.6em', fontFamily: SX.css('--mono'), fontSize: '12.5px' } });
+    var res, G;
+    function free(p) { return !obs.some(function (o) { return p.x > o.x - CLEAR && p.x < o.x + o.w + CLEAR && p.y > o.y - CLEAR && p.y < o.y + o.h + CLEAR; }); }
+    function build() {
+      G = U.grid(region, obs, [A, B], CLEAR);
+      var idx = function (p) { return G.ys.indexOf(p.y) * G.nx + G.xs.indexOf(p.x); };
+      res = U.astar(G, idx(A), idx(B), bend);
+      stepHost.innerHTML = ''; if (stepper) stepper.stop();
+      stepper = SX.stepper({ steps: res.ev.length, start: res.ev.length - 1, interval: 250, label: function (i) { return 'pop ' + (i + 1) + ' / ' + res.ev.length; }, onStep: draw });
+      stepHost.appendChild(stepper.el);
+    }
+    function draw(i) {
+      var e = res.ev[i], last = i === res.ev.length - 1, W = 760, s = (W - 20) / region.w, H = region.h * s + 20;
+      var svg = U.root(W, H), g = SX.svg('g', { transform: 'translate(10,10)' }); svg.appendChild(g); svg.style.touchAction = 'none';
+      var X = function (x) { return x * s; }, Y = function (y) { return y * s; };
+      U.el(g, 'rect', { x: 0, y: 0, width: X(region.w), height: Y(region.h) }, { fill: 'none', stroke: 'var(--axis)' });
+      G.xs.forEach(function (x) { U.el(g, 'line', { x1: X(x), x2: X(x), y1: 0, y2: Y(region.h) }, { stroke: 'var(--axis)', strokeWidth: 1, opacity: 0.7 }); });
+      G.ys.forEach(function (y) { U.el(g, 'line', { y1: Y(y), y2: Y(y), x1: 0, x2: X(region.w) }, { stroke: 'var(--axis)', strokeWidth: 1, opacity: 0.7 }); });
+      obs.forEach(function (o) {
+        U.el(g, 'rect', { x: X(o.x - CLEAR), y: Y(o.y - CLEAR), width: X(o.w + 2 * CLEAR), height: Y(o.h + 2 * CLEAR) }, { fill: 'none', stroke: 'var(--axis)', strokeDasharray: '4 3' });
+        U.el(g, 'rect', { x: X(o.x), y: Y(o.y), width: X(o.w), height: Y(o.h), rx: 5 }, { fill: 'var(--state-fill)', stroke: 'var(--state-stroke)', strokeWidth: 1.5 });
+      });
+      var openSet = {}; e.open.forEach(function (o) { openSet[o.node] = 1; });
+      // every node with a best g so far that is not closed was pushed: reconstruct "open" as seen-not-closed
+      var seen = e.seen;
+      for (var iy = 0; iy < G.ny; iy++) for (var ix = 0; ix < G.nx; ix++) {
+        var v = iy * G.nx + ix, cx = X(G.xs[ix]), cy = Y(G.ys[iy]);
+        [0, 1].forEach(function (pl) {
+          var node = v * 2 + pl, col = node === e.node ? 'var(--hl)' : e.closed[node] ? 'var(--text-muted)' : seen[node] ? 'var(--series-1)' : null;
+          if (!col) return;
+          U.el(g, 'line', pl === 0 ? { x1: cx - 6, x2: cx + 6, y1: cy, y2: cy, 'stroke-width': 3 } : { x1: cx, x2: cx, y1: cy - 6, y2: cy + 6, 'stroke-width': 3 }, { stroke: col });
+        });
+      }
+      if (last && res.pts.length) U.el(g, 'polyline', { points: res.pts.map(function (p) { return X(p[0]) + ',' + Y(p[1]); }).join(' '), 'stroke-width': 3.5, fill: 'none' }, { stroke: 'var(--hl)', fill: 'none' });
+      [[A, 'start'], [B, 'goal']].forEach(function (pair) {
+        var p = pair[0], k = U.el(g, 'circle', { cx: X(p.x), cy: Y(p.y), r: 9 }, { fill: 'var(--hl-2)', stroke: 'var(--surface-1)', strokeWidth: 2.5, cursor: 'grab' });
+        U.text(g, X(p.x) + 12, Y(p.y) - 10, pair[1], { fontSize: '12px', fill: 'var(--text-secondary)' });
+        k.addEventListener('pointerdown', function (ev) {
+          k.setPointerCapture(ev.pointerId);
+          function mv(e2) { var q = U.pt(svg, e2), np = { x: Math.round((q.x - 10) / s / 10) * 10, y: Math.round((q.y - 10) / s / 10) * 10 }; np.x = Math.max(0, Math.min(region.w, np.x)); np.y = Math.max(0, Math.min(region.h, np.y)); if (free(np)) { k.setAttribute('cx', X(np.x)); k.setAttribute('cy', Y(np.y)); k._np = np; } }
+          function up() { k.removeEventListener('pointermove', mv); if (k._np) { Object.assign(p, k._np); build(); } }
+          k.addEventListener('pointermove', mv); k.addEventListener('pointerup', up, { once: true });
+        });
+      });
+      f.stage.innerHTML = ''; f.stage.appendChild(svg); f.stage.appendChild(info);
+      var nm = function (n) { var v2 = n >> 1; return '(' + G.xs[v2 % G.nx] + ',' + G.ys[Math.floor(v2 / G.nx)] + ')' + (n & 1 ? 'v' : 'h'); };
+      info.innerHTML = 'popped ' + nm(e.node) + ' f=' + e.f + ' g=' + e.g + ' &nbsp; open list (' + e.openN + '): ' + e.open.slice(0, 5).map(function (o) { return nm(o.node) + ' f' + o.f; }).join(', ') + (e.openN > 5 ? ', …' : '') +
+        (last ? '<br><b>path: ' + res.bends + (res.bends === 1 ? ' bend' : ' bends') + ', length ' + SX.fmt(res.len) + ', cost ' + SX.fmt(res.cost) + ' quarters = 4 × (' + SX.fmt(res.len) + ' + ' + res.bends + ' × ' + bend + ')</b>, ' + res.ev.length + ' pops' : '');
+    }
+    build();
+  };
+})();
+</script>
+<script>
+(function () {
+  'use strict';
+  var F = window.SXF, U = F.ru;
+  var PASSES = ['planned', 'attach', 'reface', 'align', 'spread', 'separate', 'routed'];
+  function styled(n, st) { Object.assign(n.style, st); return n; }
+  F.route['route-seats'] = function (host) {
+    var S = SX.data('stages'), B = S && S.brew;
+    if (!B) { host.appendChild(SX.el('p', { class: 'note', text: 'stages.json is missing.' })); return; }
+    var geom = B.geometry, nets = B.routing.nets;
+    var f = SX.figure(host, { caption: '<b>brew\'s seats, pass by pass</b>, from the trace. Each net starts between the centres phase 2 planned (hollow: leaving end, filled: arriving end). <b>Step</b> through the passes: an orange dot moved in this pass, with a line from where it was. Attach puts every end on a face; Reface moves the fault arrow off the choice\'s busy face; Align straightens Heating → Pumping; Spread splits the two arrows between Standby and Brewing a line of text apart. <b>Hover</b> a dot for the numbers.' });
+    var host2 = SX.el('div'), log = SX.el('div', { class: 'note', style: { minHeight: '3.8em' } });
+    f.stage.appendChild(host2); f.stage.appendChild(log);
+    function label(n) { var t = geom.trans[n.trans]; return (t.src_path.replace(/^.*\//, '').replace('$initial', 'initial') + ' → ' + t.dst_path.replace(/^.*\//, '').replace('$final', 'final')) + (t.label ? ' "' + t.label + '"' : ''); }
+    function posAt(n, end, k) {
+      var p = end === 'src' ? n.src : n.dst, how = 'planned centre';
+      n.seats.forEach(function (s) { if (s.end === end && PASSES.indexOf(s.pass) <= k && PASSES.indexOf(s.pass) > 0) { p = s.to; how = s.pass; } });
+      return { p: p, how: how };
+    }
+    var st = SX.stepper({ steps: PASSES.length, interval: 1300, label: function (i) { return PASSES[i]; }, onStep: function (k) {
+      var h = SX.chart(host2, geom, { maxHeight: 400, layers: k < 6 ? { routes: false, labels: false } : {} });
+      var moves = [];
+      if (k < 6) nets.forEach(function (n) {
+        var a = posAt(n, 'src', k), b = posAt(n, 'dst', k);
+        styled(h.line([a.p, b.p], { 'stroke-width': 14, 'stroke-dasharray': '50 40' }), { stroke: 'var(--text-muted)' });
+        ['src', 'dst'].forEach(function (end) {
+          var now = posAt(n, end, k), prev = posAt(n, end, k - 1), moved = k > 0 && (now.p[0] !== prev.p[0] || now.p[1] !== prev.p[1]);
+          if (moved) { styled(h.line([prev.p, now.p], { 'stroke-width': 26 }), { stroke: 'var(--hl)' }); moves.push(label(n) + ' ' + (end === 'src' ? 'leaving' : 'arriving') + ' end: (' + prev.p.join(', ') + ') → (' + now.p.join(', ') + ')'); }
+          var d = styled(h.dot(now.p, 75, { 'stroke-width': 26 }), { fill: end === 'src' ? 'var(--surface-1)' : (moved ? 'var(--hl)' : 'var(--hl-2)'), stroke: moved ? 'var(--hl)' : 'var(--hl-2)' });
+          var aim = n.seats.filter(function (s) { return s.end === end && s.pass === 'attach'; })[0];
+          d.style.cursor = 'help';
+          SX.tipOn(d, '<b>' + label(n) + '</b><br>' + (end === 'src' ? 'leaving' : 'arriving') + ' end, frame ' + n.frame + '<br>planned at (' + (end === 'src' ? n.src : n.dst).join(', ') + ')' + (aim ? '<br>aims at (' + aim.from.join(', ') + ')' : '') + '<br>after ' + PASSES[k] + ': (' + now.p.join(', ') + '), last moved by ' + now.how);
+        });
+      });
+      if (k === 0) log.textContent = nets.length + ' nets planned between node centres (and port points, none in brew). The internal Pumping → Pumping has no route.';
+      else if (k === 6) log.textContent = 'The routed polylines, nudged, trimmed one arrowhead short of each target border, labels placed.';
+      else log.innerHTML = moves.length ? '<b>' + PASSES[k] + '</b> moved ' + moves.length + (moves.length === 1 ? ' end' : ' ends') + ':<br>' + moves.join('<br>') : '<b>' + PASSES[k] + '</b> moved nothing in brew.';
+    } });
+    f.ctrl.appendChild(st.el);
+  };
+
+  F.route['route-faces'] = function (host) {
+    var D = SX.data('faces');
+    if (!D) { host.appendChild(SX.el('p', { class: 'note', text: 'faces.json is missing.' })); return; }
+    var ends = [], byKey = {};
+    D.variants.forEach(function (v) { var k = v.trans + ':' + v.end; if (!byKey[k]) { byKey[k] = []; ends.push(k); } byKey[k][v.face] = v; });
+    var endKey = D.featured.trans + ':' + D.featured.end, face = null;
+    var tname = function (t) { var x = D.shipped.trans[t]; return x.src_path.replace('$initial', 'initial') + ' → ' + x.dst_path; };
+    var f = SX.figure(host, { caption: '<b>Four faces, one end.</b> estop with no text, laid out again with one face pin. <b>Choose</b> an end, then <b>click</b> a face of its box (the thick handles) to pin the route to it. Each drawing is a full re-run of ordering, sizing and routing under that pin; the bars give its Tier 2 cost (lower is better), and the table names the terms that changed. Of the four faces, the one the rule already picks is free; the others cost bends, length and sometimes a crossing.' });
+    f.ctrl.appendChild(SX.choice({ options: ends.map(function (k) { var p = k.split(':'); return { value: k, label: tname(+p[0]) + ', ' + (p[1] === '0' ? 'leaving' : 'arriving') + ' end' }; }), value: endKey, onChange: function (v) { endKey = v; face = null; draw(); } }).el);
+    var chartHost = SX.el('div'), row = SX.el('div', { class: 'fig-row' }), bars = SX.el('div'), tbl = SX.el('div');
+    f.stage.appendChild(chartHost); f.stage.appendChild(row); row.appendChild(bars); row.appendChild(tbl);
+    var FN = ['left', 'right', 'top', 'bottom'];
+    function draw() {
+      var vs = byKey[endKey], p = endKey.split(':'), t = +p[0], end = +p[1];
+      if (face == null) face = vs.filter(function (v) { return v.same_as_shipped; })[0].face;
+      var v = vs[face], geom = v.geometry, tr = geom.trans[t], sid = end === 0 ? tr.src : tr.dst, st = geom.states.filter(function (s) { return s.id === sid; })[0];
+      var h = SX.chart(chartHost, geom, { maxHeight: 360, highlight: { trans: [t] } });
+      geom.states.forEach(function (s2) { if (s2.name) h.text([s2.rect[0] + s2.rect[2] / 2, s2.rect[1] + s2.rect[3] / 2 + 55], s2.name, { 'text-anchor': 'middle', 'font-size': 150 }); });
+      var r = st.rect, sides = [[[r[0], r[1]], [r[0], r[1] + r[3]]], [[r[0] + r[2], r[1]], [r[0] + r[2], r[1] + r[3]]], [[r[0], r[1]], [r[0] + r[2], r[1]]], [[r[0], r[1] + r[3]], [r[0] + r[2], r[1] + r[3]]]];
+      sides.forEach(function (sd, k) {
+        var ln = h.line(sd, { 'stroke-width': k === face ? 90 : 60, 'stroke-linecap': 'round' });
+        styled(ln, { stroke: k === face ? 'var(--hl)' : 'var(--hl-2)', opacity: k === face ? 0.9 : 0.45, cursor: 'pointer' });
+        ln.addEventListener('click', function () { face = k; SX.tip.hide(); draw(); });
+        SX.tipOn(ln, '<b>' + FN[k] + ' face</b><br>Tier 2 ' + SX.fmt(vs[k].cost.t2) + (vs[k].same_as_shipped ? ' (what ships)' : '') + '<br><span class="m">' + vs[k].pin + '</span>');
+      });
+      SX.barChart(bars, { bars: vs.map(function (x, k) { return { label: FN[k] + (x.same_as_shipped ? ' (ships)' : ''), value: x.cost.t2, color: k === face ? SX.css('--series-2') : SX.css('--series-1'), note: x.pin }; }) });
+      var ship = D.shipped.cost.terms, terms = v.cost.terms, keys = Object.keys(terms).filter(function (k) { return terms[k] !== ship[k] || (terms[k] && k !== 'area' && k !== 'aspect' && k !== 'length'); });
+      tbl.innerHTML = '';
+      var T = SX.el('table', { class: 'sx-table' });
+      T.appendChild(SX.el('tr', null, SX.el('th', { text: FN[face] + ' face: term' }), SX.el('th', { class: 'num', text: 'pinned' }), SX.el('th', { class: 'num', text: 'shipped' })));
+      ['t2'].concat(Object.keys(terms).filter(function (k) { return terms[k] !== ship[k]; })).forEach(function (k) {
+        T.appendChild(SX.el('tr', { class: k === 't2' ? 'hl' : '' }, SX.el('td', { text: k === 't2' ? 'Tier 2 total' : k }), SX.el('td', { class: 'num', text: SX.fmt(k === 't2' ? v.cost.t2 : terms[k]) }), SX.el('td', { class: 'num', text: SX.fmt(k === 't2' ? D.shipped.cost.t2 : ship[k]) })));
+      });
+      if (v.same_as_shipped) T.appendChild(SX.el('tr', null, SX.el('td', { colspan: 3, text: 'Same drawing as the shipped one: the rule already picks this face.' })));
+      tbl.appendChild(T);
+    }
+    draw();
+  };
+})();
+</script>
+<script>
+(function () {
+  'use strict';
+  var F = window.SXF, U = F.ru, CLEAR = 96, INF = 1e9;
+  function sign(v) { return v < 0 ? -1 : v > 0 ? 1 : 0; }
+  // nudge_lanes, horizontal members only: lanes by distance, order by toward, crossing votes by Kahn, room, step.
+  U.nudgeH = function (region, obstacles, gap, nets, useVotes) {
+    var pts = nets.map(function (n) { return n.map(function (p) { return p.slice(); }); }), members = [];
+    nets.forEach(function (n, ni) {
+      for (var k = 1; k + 2 < n.length; k++) {
+        var a = n[k - 1], b = n[k], c = n[k + 1], d = n[k + 2];
+        if (b[1] !== c[1] || b[0] === c[0]) continue;
+        var fwd = b[0] < c[0], from = fwd ? a : d, to = fwd ? d : a, at = b[1];
+        var m = { net: ni, k: k, at: at, lo: Math.min(b[0], c[0]), hi: Math.max(b[0], c[0]), toward: from[1], low: sign(from[1] - at), high: sign(to[1] - at), up: INF, down: INF };
+        var u = at - a[1], v = d[1] - at;
+        if (u >= 0) m.up = Math.min(m.up, u - 1); if (u <= 0) m.down = Math.min(m.down, -u - 1);
+        if (v >= 0) m.down = Math.min(m.down, v - 1); if (v <= 0) m.up = Math.min(m.up, -v - 1);
+        m.up = Math.max(m.up, 0); m.down = Math.max(m.down, 0);
+        members.push(m);
+      }
+    });
+    members.sort(function (x, y) { return x.at - y.at || x.lo - y.lo || x.hi - y.hi || x.net - y.net; });
+    var parent = members.map(function (_, i) { return i; });
+    function root(i) { while (parent[i] !== i) i = parent[i] = parent[parent[i]]; return i; }
+    for (var i = 0; i < members.length; i++) for (var j = i + 1; j < members.length && members[j].at - members[i].at < gap; j++)
+      if (members[j].lo < members[i].hi && members[i].lo < members[j].hi) { var ri = root(i), rj = root(j); if (ri !== rj) parent[Math.max(ri, rj)] = Math.min(ri, rj); }
+    var lanes = {}; members.forEach(function (m, i) { (lanes[root(i)] = lanes[root(i)] || []).push(m); });
+    var report = [];
+    Object.keys(lanes).forEach(function (r) {
+      var lane = lanes[r]; if (lane.length < 2) return;
+      var at = lane[0].at, lo = Math.min.apply(null, lane.map(function (m) { return m.lo; })), hi = Math.max.apply(null, lane.map(function (m) { return m.hi; }));
+      lane.sort(function (x, y) { return x.toward - y.toward || x.net - y.net; });
+      var G = lane.length, votes = [];
+      for (var p = 0; p < G; p++) { votes.push([]); for (var q = 0; q < G; q++) votes[p].push(0); }
+      if (useVotes) for (p = 0; p < G; p++) for (q = 0; q < G; q++) {
+        if (p === q) continue; var m = lane[p], n = lane[q], v = 0;
+        if (m.lo > n.lo && m.lo < n.hi) v -= m.low; if (m.hi > n.lo && m.hi < n.hi) v -= m.high;
+        if (n.lo > m.lo && n.lo < m.hi) v += n.low; if (n.hi > m.lo && n.hi < m.hi) v += n.high;
+        votes[p][q] += v;
+      }
+      var deg = lane.map(function () { return 0; }), order = [];
+      for (p = 0; p < G; p++) for (q = 0; q < G; q++) if (votes[p][q] > 0) deg[q]++;
+      while (order.length < G) {
+        var next = -1; for (var b = 0; b < G && next < 0; b++) if (deg[b] === 0) next = b;
+        if (next < 0) break; order.push(next); deg[next] = INF;
+        for (q = 0; q < G; q++) if (votes[next][q] > 0) deg[q]--;
+      }
+      if (order.length < G) order = lane.map(function (_, k) { return k; });
+      var slot = []; order.forEach(function (b2, k) { slot[b2] = k; });
+      var roomDown = region.y + region.h - at - 1, roomUp = at - region.y - 1, why = [];
+      obstacles.forEach(function (o) {
+        if (at > o.y && at < o.y + o.h && hi > o.x && lo < o.x + o.w) return;
+        var g0 = o.x - CLEAR, g1 = o.x + o.w + CLEAR; if (g1 <= lo || g0 >= hi) return;
+        if (o.y + o.h <= at) { roomUp = Math.min(roomUp, at - (o.y + o.h + CLEAR)); why.push('a box above limits the room up to ' + Math.max(0, roomUp)); }
+        if (o.y >= at) { roomDown = Math.min(roomDown, o.y - CLEAR - at); why.push('a box below limits the room down'); }
+      });
+      roomUp = Math.max(roomUp, 0); roomDown = Math.max(roomDown, 0);
+      lane.forEach(function (m) { roomUp = Math.min(roomUp, m.up + (at - m.at)); roomDown = Math.min(roomDown, m.down - (at - m.at)); });
+      var win = roomUp + roomDown; if (win <= 0) { report.push({ lane: lane, order: order, slot: slot, step: 0, why: 'no room' }); return; }
+      var step = Math.min(gap, Math.floor(win / (G - 1))), spread = (G - 1) * step, lowest = Math.max(-roomUp, Math.min(-Math.floor(spread / 2), roomDown - spread));
+      lane.forEach(function (m, k) { var y = at + lowest + slot[k] * step; pts[m.net][m.k][1] = y; pts[m.net][m.k + 1][1] = y; m.to = y; });
+      report.push({ lane: lane, order: order, slot: slot, step: step, up: roomUp, down: roomDown, lowest: lowest, at: at, why: why.join('; '), votes: votes });
+    });
+    return { pts: pts, report: report, members: members };
+  };
+  U.crossCount = function (nets) {
+    var segs = [];
+    nets.forEach(function (n, ni) { for (var k = 0; k + 1 < n.length; k++) segs.push({ ni: ni, a: n[k], b: n[k + 1] }); });
+    var c = 0, at = [];
+    segs.forEach(function (s, i) { segs.forEach(function (t, j) {
+      if (j <= i || s.ni === t.ni) return;
+      var h = s.a[1] === s.b[1] ? s : t, v = h === s ? t : s;
+      if (h.a[1] !== h.b[1] || v.a[0] !== v.b[0]) return;
+      var x = v.a[0], y = h.a[1];
+      if (x > Math.min(h.a[0], h.b[0]) && x < Math.max(h.a[0], h.b[0]) && y > Math.min(v.a[1], v.b[1]) && y < Math.max(v.a[1], v.b[1])) { c++; at.push([x, y]); }
+    }); });
+    return { n: c, at: at };
+  };
+  var NETS = [
+    [[300, 150], [300, 800], [1500, 800], [1500, 1450]],
+    [[600, 150], [600, 800], [2400, 800], [2400, 1450]],
+    [[900, 1450], [900, 800], [2000, 800], [2000, 150]]
+  ];
+  var COL = ['var(--series-1)', 'var(--series-3)', 'var(--series-7)'];
+  F.route['route-nudge'] = function (host) {
+    var region = { x: 0, y: 0, w: 2800, h: 1600 }, votes = true, box = false, gap = 192, k = 3;
+    var f = SX.figure(host, { caption: '<b>Nudging one lane.</b> Three routes share y = 800. <b>Step</b> from the routed drawing to the lane, its order and the spread. The order starts from <code>toward</code> (both blue and aqua come from above) and the crossing votes then put aqua above blue, which avoids two crossings; <b>untick</b> the votes to see the key order. Purple crosses the others whichever way: its votes cancel. <b>Add the box</b> to limit the room above, and <b>slide</b> the gap.' });
+    var st = SX.stepper({ steps: 4, start: 3, interval: 1200, label: function (i) { return ['as routed', 'lane', 'order', 'spread'][i]; }, onStep: function (i) { k = i; draw(); } });
+    f.ctrl.appendChild(st.el);
+    var row = SX.el('div', { class: 'ctrl' }); f.ctrl.appendChild(row);
+    row.appendChild(SX.toggle({ label: 'crossing votes', value: votes, onChange: function (v) { votes = v; draw(); } }).el);
+    row.appendChild(SX.toggle({ label: 'box above the lane', value: box, onChange: function (v) { box = v; draw(); } }).el);
+    row.appendChild(SX.slider({ label: 'gap', min: 96, max: 400, step: 8, value: gap, format: function (v) { return v + (v === 192 ? ' (em)' : ''); }, onInput: function (v) { gap = v; draw(); } }).el);
+    var out = SX.el('div', { class: 'note', style: { minHeight: '2.6em' } });
+    function draw() {
+      var obs = box ? [{ x: 1000, y: 420, w: 600, h: 230 }] : [];
+      var res = U.nudgeH(region, obs, gap, NETS, votes), R = res.report[0];
+      var shown = k === 3 ? res.pts : NETS, cc = U.crossCount(shown);
+      var W = 760, s = (W - 20) / region.w, svg = U.root(W, region.h * s + 20), g = SX.svg('g', { transform: 'translate(10,10)' }); svg.appendChild(g);
+      var P = function (p) { return (p[0] * s) + ',' + (p[1] * s); };
+      U.el(g, 'rect', { x: 0, y: 0, width: region.w * s, height: region.h * s }, { fill: 'none', stroke: 'var(--axis)' });
+      obs.forEach(function (o) {
+        U.el(g, 'rect', { x: (o.x - CLEAR) * s, y: (o.y - CLEAR) * s, width: (o.w + 2 * CLEAR) * s, height: (o.h + 2 * CLEAR) * s }, { fill: 'none', stroke: 'var(--axis)', strokeDasharray: '4 3' });
+        U.el(g, 'rect', { x: o.x * s, y: o.y * s, width: o.w * s, height: o.h * s, rx: 5 }, { fill: 'var(--state-fill)', stroke: 'var(--state-stroke)', strokeWidth: 1.5 });
+      });
+      if ((k === 1 || k === 2) && R) {
+        var lo = Math.min.apply(null, R.lane.map(function (m) { return m.lo; })), hi = Math.max.apply(null, R.lane.map(function (m) { return m.hi; }));
+        U.el(g, 'rect', { x: lo * s, y: (R.at - gap / 2) * s, width: (hi - lo) * s, height: gap * s }, { fill: 'color-mix(in srgb, var(--hl) 12%, transparent)', stroke: 'var(--hl)', strokeDasharray: '5 4' });
+      }
+      shown.forEach(function (n, ni) {
+        U.el(g, 'polyline', { points: n.map(P).join(' '), fill: 'none', 'stroke-width': 3, 'stroke-linejoin': 'round' }, { stroke: COL[ni], fill: 'none' });
+        var e = n[n.length - 1], pr = n[n.length - 2], dy = sign(e[1] - pr[1]);
+        U.el(g, 'polygon', { points: [e[0] * s, e[1] * s, e[0] * s - 6, e[1] * s - dy * 11, e[0] * s + 6, e[1] * s - dy * 11].join(',') }, { fill: COL[ni] });
+      });
+      cc.at.forEach(function (p) { U.el(g, 'circle', { cx: p[0] * s, cy: p[1] * s, r: 7 }, { fill: 'none', stroke: 'var(--critical)', strokeWidth: 2 }); });
+      if (k === 2 && R) R.lane.forEach(function (m, j) { U.text(g, (m.lo - 60) * s, (m.at + 4) * s - 20 + R.slot[j] * 15, 'slot ' + R.slot[j], { fontSize: '11.5px', textAnchor: 'end', fill: 'var(--text-secondary)' }); });
+      f.stage.innerHTML = ''; f.stage.appendChild(svg);
+      f.stage.appendChild(SX.el('div', { class: 'legend' }, ['blue', 'aqua', 'purple'].map(function (nm, ni) { return SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: COL[ni] } }), nm + ' (from ' + (NETS[ni][0][1] < 800 ? 'above' : 'below') + ')'); }), SX.el('span', null, SX.el('span', { class: 'swatch', style: { border: '2px solid var(--critical)' } }), 'crossings: ' + cc.n)));
+      f.stage.appendChild(out);
+      var nm = ['blue', 'aqua', 'purple'], ord = R ? R.order.map(function (b) { return nm[R.lane[b].net]; }) : [];
+      out.innerHTML = k === 0 ? 'As routed: three interior segments lie on one line, drawn over each other.'
+        : k === 1 ? 'One lane: the three members are closer than the gap (' + gap + ') and their extents overlap.'
+        : k === 2 ? 'Key order by toward: ' + R.lane.map(function (m) { return nm[m.net]; }).join(', ') + '. ' + (votes ? 'Votes reorder it to ' + ord.join(', ') + ' (top to bottom).' : 'Without votes the key order stands.')
+        : 'Spread: step = min(gap ' + gap + ', window ' + (R.up + R.down) + ' / 2) = ' + R.step + '; lowest offset ' + R.lowest + ' (room up ' + R.up + ', down ' + R.down + ')' + (R.why ? '; ' + R.why : '') + '. Order top to bottom: ' + ord.join(', ') + '.';
+    }
+    draw();
+  };
+})();
+</script>

@@ -1,0 +1,168 @@
+<section class="sx" id="pipeline" data-toc="3 · The pipeline">
+  <style>
+    .pl-info { font-size: 14px; color: var(--text-secondary); max-width: 900px; min-height: 4.5em; margin-top: 6px; }
+    .pl-info b { color: var(--text-primary); }
+    .pl-diag text { font-family: var(--sans); }
+    .pl-diag .stg { cursor: pointer; }
+    .pl-diag .stg:hover rect { stroke: var(--hl); }
+  </style>
+  <div class="kicker">Overview</div>
+  <h2>The pipeline at a glance</h2>
+  <p class="lede">Four phases turn a chart into a drawing: decompose, order, size and route. Labels and a cost follow. A search wraps the whole run and evaluates hundreds of thousands of variations of it, keeping the cheapest.</p>
+
+  <p>Each phase is its own translation unit, and it hands the next phase a plain struct declared in its header. None of these intermediates crosses the ABI. Every phase also reads the chart for containment and liveness, but never for something an earlier phase computed, so a unit test can type a phase's input in directly: "a <code>SubmachineOrders</code> with three ranks is nine integers typed into a test".</p>
+  <table class="sx-table">
+    <tr><th>stage</th><th>reads</th><th>produces</th></tr>
+    <tr><td><a href="#decompose">phase 0, decompose</a></td><td>the chart</td><td>a <b>split graph</b>: every transition cut into <b>segments</b> at the borders it crosses, with a <b>port</b> at each crossing</td></tr>
+    <tr><td><a href="#order">phase 1, order</a></td><td>split graph, label sizes, <code>sweep_count</code>, pins</td><td>per <b>frame</b> (one submachine's graph): each node's <b>rank</b> (its column) and position within the rank, chained long edges, gap charges for labels</td></tr>
+    <tr><td><a href="#size">phase 2, size</a></td><td>orders, space requests, spacing, aspect target</td><td>every state, band and submachine rectangle, root-absolute, folded and packed bottom-up</td></tr>
+    <tr><td>facing pass</td><td>orders and the first sizing</td><td>ports turned to face their route's far end. If any turned, phases 1 and 2 run again</td></tr>
+    <tr><td><a href="#route">phase 3, route</a></td><td>orders, sizing, arrowhead trims, router, face pins</td><td>orthogonal polylines, port slots, then <a href="#labels">placed labels</a></td></tr>
+    <tr><td><a href="#cost">cover and cost</a></td><td>routes and sizing</td><td>the chart rectangle grown over every route point and label, then the lexicographic <code>Cost</code></td></tr>
+  </table>
+  <p>One pass from ordering through cost, for one setting of the search's choices, is one <b>candidate</b>. Phase 1 reads no extents from the profile, only <code>sweep_count</code> and the line height (and the label sizes from the space requests), so its first run is <b>hoisted</b>: it runs once per layout under the caller's profile and is shared by all sixteen whole-chart variations and every inflation retry. A <b>pin</b> is a choice the search fixes, such as which rank a state sits in or which face a route leaves by. When the search tries a pin, the candidate re-derives every phase the pin reaches, copying any frame whose inputs did not change.</p>
+
+  <div data-fig="pipeline-stages"></div>
+
+  <h3>The search around it</h3>
+  <ol>
+    <li>Validate the profile, the space tables and the router name, and reject on failure.</li>
+    <li>Decompose once, and order once.</li>
+    <li><b>Level 2</b>: 16 rows, each a whole-chart setting of four phase-2 knobs (whether the packer also tries a one-row box packing, whether packing compacts, which aspect each frame packs toward, whether long rank runs always fold). Every row runs one candidate, in parallel.</li>
+    <li><b>Level 1</b> from every viable row: steepest descent over pins, one move per round, until no move improves.</li>
+    <li><b>Kicks</b>: structural changes (reverse a cycle edge, turn a frame to run down the page, flip a fold), each searched to convergence and kept only if it ends cheaper. Then a refold search.</li>
+    <li>Take the cheapest row (ties go to the lower row), and write the geometry columns, placed labels and diagnostics.</li>
+  </ol>
+  <p>On <code>mill</code>, the largest corpus chart, one layout scores about 1.6 to 1.9 million candidates. The <a href="#search">search</a> and <a href="#fast">fast</a> sections explain how.</p>
+
+  <h3>When routing fails: the inflation retry</h3>
+  <p>The inflation retry lives inside one candidate. If routing reports a net that is <b>unreachable</b> (no path even with zero clearance), it raises <code>rank_sep</code>, <code>node_sep</code> and <code>sub_sep</code> by 32 units (2 pt) on a copy of the profile, cumulatively, and re-runs phases 2 and 3 from the same ordering, up to 8 times. It keeps the attempt that degraded least (ties to the earliest) and stops at the first attempt where everything routes. Only <i>unreachable</i> triggers it. A frame too large for the router or an end outside its region does not move with spacing, so those never trigger it. The cost is always scored under the caller's profile, and the inputs digest hashes the caller's profile, so a retry cannot move a golden. Level 1 never accepts a candidate that inflated: "a move that only fits once the whole chart's spacing was widened is not a better placement, it is a bigger drawing." Whatever still fails is drawn as a straight line and reported with one <code>RouteDegraded</code> diagnostic per transition, and the run still succeeds. The corpus and both 2,000-state stress charts inflate zero times.</p>
+  <div class="callout why"><span class="t">Where a candidate's time goes</span>On <code>mill</code> with no text, one candidate took about 145 µs at one measured commit: ordering 17, sizing 42, routing 55 and cost 30. Real text adds about 94 µs of label placement.</div>
+</section>
+<script>
+SX.register('pipeline', function (sec) {
+  var ST = SX.data('stages').brew;
+
+  (function () {
+    var host = sec.querySelector('[data-fig="pipeline-stages"]');
+    var f = SX.figure(host, { caption: '<b>Click</b> a stage to see what it contributes to <code>brew</code>, re-derived from scav\'s own trace of the shipped drawing (one thread, no search; the pins the search chose are applied as inputs). <b>Hover</b> the overlays for details.' });
+    var G = ST.geometry, FR = ST.decomposition.frames;
+    var STAGES = [
+      { key: 'decompose', n: '0', name: 'decompose', sub: 'once per chart' },
+      { key: 'order', n: '1', name: 'order', sub: 'ranks, in-rank order' },
+      { key: 'size', n: '2', name: 'size', sub: 'boxes, folds, packing' },
+      { key: 'facing', n: '', name: 'facing', sub: 'turn ports' },
+      { key: 'route', n: '3', name: 'route', sub: 'seats, A*, nudging' },
+      { key: 'labels', n: '', name: 'labels', sub: 'anchored boxes' },
+      { key: 'cost', n: '', name: 'cover + cost', sub: 'Tier 0, Tier 2' }
+    ];
+    var cur = 'decompose';
+    var diag = SX.el('div', { class: 'pl-diag' }), stage = SX.el('div'), info = SX.el('div', { class: 'pl-info' }), extra = SX.el('div');
+    f.stage.appendChild(diag); f.stage.appendChild(stage); f.stage.appendChild(info); f.stage.appendChild(extra);
+
+    function diagram() {
+      var W = 1120, H = 182, bw = 130, gap = 22, x0 = 20, y0 = 52, bh = 54;
+      var svg = SX.svg('svg', { viewBox: '0 0 ' + W + ' ' + H, style: { width: '100%', height: 'auto' } });
+      var ink = SX.css('--text-primary'), mut = SX.css('--text-muted'), ax = SX.css('--axis');
+      var defs = SX.svg('defs', null, SX.svg('marker', { id: 'pl-arr', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto-start-reverse' }, SX.svg('path', { d: 'M0,0L10,5L0,10z', fill: ax })));
+      svg.appendChild(defs);
+      var X = function (k) { return x0 + k * (bw + gap); };
+      // The search wraps phases 1..cost; the candidate is one pass of them.
+      svg.appendChild(SX.svg('rect', { x: X(1) - 12, y: 8, width: X(6) + bw - X(1) + 24, height: H - 14, rx: 12, fill: 'none', stroke: SX.css('--hl-2'), 'stroke-width': 1.5, 'stroke-dasharray': '6 4' }));
+      svg.appendChild(SX.svg('text', { x: X(1) - 2, y: 26, fill: SX.css('--text-secondary'), 'font-size': 12.5, text: 'search: 16 Level 2 rows × Level 1 moves × kicks — each pass of this box is one candidate' }));
+      STAGES.forEach(function (st, k) {
+        var g = SX.svg('g', { class: 'stg' });
+        var on = st.key === cur;
+        g.appendChild(SX.svg('rect', { x: X(k), y: y0, width: bw, height: bh, rx: 9, fill: on ? 'color-mix(in srgb, var(--hl) 16%, var(--surface-1))' : SX.css('--surface-2'), stroke: on ? SX.css('--hl') : SX.css('--border'), 'stroke-width': on ? 2 : 1 }));
+        g.appendChild(SX.svg('text', { x: X(k) + bw / 2, y: y0 + 23, 'text-anchor': 'middle', fill: ink, 'font-size': 14, 'font-weight': 600, text: (st.n ? st.n + ' · ' : '') + st.name }));
+        g.appendChild(SX.svg('text', { x: X(k) + bw / 2, y: y0 + 41, 'text-anchor': 'middle', fill: mut, 'font-size': 11.5, text: st.sub }));
+        g.addEventListener('click', function () { cur = st.key; render(); });
+        svg.appendChild(g);
+        if (k) svg.appendChild(SX.svg('line', { x1: X(k) - gap + 2, x2: X(k) - 3, y1: y0 + bh / 2, y2: y0 + bh / 2, stroke: ax, 'stroke-width': 1.5, 'marker-end': 'url(#pl-arr)' }));
+      });
+      // Facing loops back to order; the inflation retry loops route back to size.
+      var by = y0 + bh;
+      svg.appendChild(SX.svg('path', { d: 'M' + (X(3) + bw / 2) + ',' + by + ' v18 H' + (X(1) + bw / 2) + ' v-16', fill: 'none', stroke: ax, 'stroke-width': 1.5, 'marker-end': 'url(#pl-arr)' }));
+      svg.appendChild(SX.svg('text', { x: X(1) + bw / 2 - 6, y: by + 22, 'text-anchor': 'end', fill: mut, 'font-size': 11, text: 'a port turned: order and size again' }));
+      svg.appendChild(SX.svg('path', { d: 'M' + (X(4) + bw / 2 + 10) + ',' + by + ' v34 H' + (X(2) + bw / 2 + 10) + ' v-32', fill: 'none', stroke: SX.css('--hl'), 'stroke-width': 1.5, 'stroke-dasharray': '4 3', 'marker-end': 'url(#pl-arr)' }));
+      svg.appendChild(SX.svg('text', { x: X(2) + bw / 2 + 18, y: by + 50, fill: mut, 'font-size': 11, text: 'inflation retry: a net unreachable → widen spacing by 32, phases 2–3 again (≤ 8×)' }));
+      svg.appendChild(SX.svg('text', { x: X(0), y: y0 - 10, fill: mut, 'font-size': 11, text: 'once per layout' }));
+      diag.innerHTML = ''; diag.appendChild(svg);
+    }
+
+    var COLS = ['--series-1', '--series-3', '--series-7'];
+    function frameName(fr) { return fr.owner == null ? 'root' : fr.owner_path + (fr.name ? ':' + fr.name : ''); }
+    function union(rs) {
+      var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      rs.forEach(function (r) { x0 = Math.min(x0, r[0]); y0 = Math.min(y0, r[1]); x1 = Math.max(x1, r[0] + r[2]); y1 = Math.max(y1, r[1] + r[3]); });
+      return [x0, y0, x1 - x0, y1 - y0];
+    }
+    function tip(n, html) { SX.tipOn(n, html); n.style.pointerEvents = 'all'; return n; }
+    function render() {
+      diagram();
+      extra.innerHTML = '';
+      var L = { subs: true, states: true, text: true, routes: true, labels: true };
+      if (cur === 'decompose' || cur === 'size' || cur === 'facing') { L.routes = false; L.labels = false; }
+      if (cur === 'order') L.labels = false;
+      if (cur === 'route') L.labels = false;
+      var h = SX.chart(stage, G, { layers: L, maxHeight: 420, labelBoxes: cur === 'labels' });
+      var u = h.unit;
+      if (cur === 'decompose') {
+        FR.forEach(function (fr, k) {
+          var col = 'var(' + COLS[k % 3] + ')';
+          tip(h.rect(fr.rect, { fill: 'color-mix(in srgb, ' + col + ' 12%, transparent)', stroke: col, 'stroke-width': u * 2.5 }),
+            '<b>frame ' + fr.id + '</b>: ' + frameName(fr) + '<br>' + fr.states.length + ' nodes; ' + ST.decomposition.segments.filter(function (sg) { return sg.frame === fr.id; }).length + ' segments' + (fr.down ? '<br><span class="m">turned to run down the page (an orient pin)</span>' : ''));
+          h.text([fr.rect[0] + u * 5, fr.rect[1] + fr.rect[3] - u * 5], 'frame ' + fr.id + ' · ' + (fr.owner == null ? 'root' : fr.name), { 'font-size': u * 11 });
+        });
+        info.innerHTML = '<b>Phase 0</b> makes one <b>frame</b> per live submachine: <code>brew</code> has three, the root and the two regions of <code>Brewing</code>. Each transition becomes one <b>segment</b> per frame it passes through, ' + ST.decomposition.segments.length + ' in all. No <code>brew</code> transition crosses a border (<code>Standby → Brewing</code> ends on <code>Brewing</code>\'s own box), so there are no ports here; <a href="#decompose">decompose</a> shows <code>toolchanger</code>, where there are. The internal <code>Pumping → Pumping</code> gets no segment at all.';
+      } else if (cur === 'order') {
+        var gc = [].concat.apply([], ST.ordering.map(function (o) { return o.gap_charged.map(function (g) { return '“' + G.trans[g.trans].label + '” ' + g.width; }); }));
+        ST.ordering.forEach(function (o) {
+          var col = 'var(' + COLS[o.frame % 3] + ')';
+          o.ranks.forEach(function (rk) {
+            var r = union(rk.states.map(function (id) { return G.states[id].rect; })), m = u * 6;
+            var box = [r[0] - m, r[1] - m, r[2] + 2 * m, r[3] + 2 * m];
+            tip(h.rect(box, { fill: 'color-mix(in srgb, ' + col + ' 10%, transparent)', stroke: col, 'stroke-width': u * 2, 'stroke-dasharray': (u * 8) + ' ' + (u * 5), rx: u * 6 }),
+              '<b>frame ' + o.frame + ' (' + frameName(FR[o.frame]) + '), rank ' + rk.rank + '</b><br>' + rk.paths.map(function (p) { return p.charAt(0) === '#' ? G.states[+p.slice(1)].kind : p; }).join(', ') +
+              (o.down ? '<br><span class="m">this frame runs down, so its ranks are rows</span>' : ''));
+            h.text([box[0] + u * 3, box[1] - u * 4], 'r' + rk.rank, { 'font-size': u * 15, 'font-weight': 700 });
+          });
+          o.reversed.forEach(function (rv) { h.mark('trans', rv.trans); });
+        });
+        info.innerHTML = '<b>Phase 1</b> breaks cycles, gives each node a <b>rank</b> (longest path, overridden by the search\'s rank pins) and an order within its rank. Dashed boxes enclose each rank\'s members. Ranks run left to right, except in <code>grinder</code>, which the search turned to run down. The highlighted edges were reversed to break cycles (<code>Off → SelfCheck</code>, <code>Brewing → Standby</code>). Labels charge the gap they span, in units: ' + gc.join(', ') + '.';
+      } else if (cur === 'size' || cur === 'facing') {
+        var fold = ST.sizing.passes[0].filter(function (e) { return e.kind === 'piece_packed'; });
+        var org = FR[1].rect;
+        fold.forEach(function (pc) {
+          tip(h.rect([org[0] + pc.at[0], org[1] + pc.at[1], pc.size[0], pc.size[1]], { fill: 'none', stroke: 'var(--hl)', 'stroke-width': u * 2.5, 'stroke-dasharray': (u * 8) + ' ' + (u * 5) }),
+            '<b>fold piece</b> of frame 1 (water) starting at rank ' + pc.rank + '<br>packed at (' + pc.at.join(', ') + ') in the frame, ' + pc.size.join(' × ') + ' units');
+        });
+        ST.sizing.passes[0].filter(function (e) { return e.kind === 'node_placed'; }).forEach(function (e) {
+          tip(h.dot(e.at, u * 4, { fill: 'var(--hl-2)' }), '<b>node placed</b> ' + e.state + '<br><span class="m">(rank-axis start, cross-axis centre) = (' + e.at.join(', ') + ')</span>');
+        });
+        if (cur === 'size') info.innerHTML = '<b>Phase 2</b> sizes frames bottom-up, deepest first: each frame\'s layers along the ranks, Brandes–Köpf across them, then the owner state\'s box around its packed submachines. <code>water</code>\'s three ranks would be wider than its aspect target, so the run is <b>folded</b> before rank 2 and the two pieces (orange) are packed, putting <code>Pumping</code> under <code>Heating</code>. Blue dots are where each node was placed. Chart: ' + SX.fmt(ST.sizing.box[2]) + ' × ' + SX.fmt(ST.sizing.box[3]) + ' units.';
+        else info.innerHTML = '<b>The facing pass</b> turns a port whose route\'s far end lies on the frame\'s other side, by reversing its edge or moving it to a top or bottom border, and if anything turned, phases 1 and 2 run again. <code>brew</code> has no ports, so nothing turned and sizing ran once. <code>toolchanger</code>\'s trace records two sizing passes.';
+      } else if (cur === 'route') {
+        ST.routing.nets.forEach(function (n) {
+          tip(h.line([n.src, n.dst], { stroke: 'var(--hl-2)', 'stroke-width': u * 2, 'stroke-dasharray': (u * 6) + ' ' + (u * 5) }), '<b>net planned</b> for “' + (G.trans[n.trans].label || G.trans[n.trans].src_path + ' → ' + G.trans[n.trans].dst_path) + '”<br><span class="m">between node centres, before seating</span>');
+          n.seats.forEach(function (st) {
+            var col = st.pass === 'attach' ? 'var(--hl)' : 'var(--series-5)';
+            tip(h.dot(st.to, u * (st.pass === 'attach' ? 4 : 6), { fill: col }), '<b>seat, ' + st.pass + ' pass</b><br>' + st.end + ' end moved to (' + st.to.join(', ') + ')');
+          });
+        });
+        info.innerHTML = '<b>Phase 3</b> plans one <b>net</b> per segment between node centres (dashed blue), seats each end on a face (orange dots: the <i>attach</i> pass; pink: the later <i>reface</i>, <i>align</i> and <i>spread</i> passes), then finds each path with A* on an orthogonal grid and nudges parallel lanes apart. The spread pass is why <i>brew button</i> and <i>shot done</i> run a line of text apart rather than on one line.';
+      } else if (cur === 'labels') {
+        ST.labels.placed.forEach(function (lb) { tip(h.rect(lb.box, { fill: 'color-mix(in srgb, var(--hl-2) 12%, transparent)', stroke: 'none' }), '<b>“' + lb.label + '”</b><br>box ' + lb.box.join(', ')); });
+        info.innerHTML = '<b>Labels</b> come last, once every route is final. Each of the ' + ST.labels.placed.length + ' boxes hangs off a leg of its own route by a ' + ST.labels.leader + '-unit leader, inside the state that encloses both ends, clear of every other box and route. <i>pressure adjust</i> belongs to an internal transition: it has no box and is drawn inside <code>Pumping</code>. See <a href="#labels">labels</a>.';
+      } else {
+        var C = ST.cost, t0 = Object.keys(C.tier0).map(function (k) { return k + ' ' + C.tier0[k]; }).join(', ');
+        info.innerHTML = '<b>Cover and cost.</b> The chart rectangle grows over every route point and label, then the drawing is scored as <code>(Tier 0, Tier 1, Tier 2)</code>, compared in that order. Tier 0 counts forbidden things (' + t0 + ': all zero), Tier 1 is unused, and Tier 2 is a weighted sum of thirteen terms: <b>' + SX.fmt(C.t2) + '</b> for this drawing, real text. Below, each term\'s share of Tier 2.';
+        var bars = Object.keys(C.shares_bp).filter(function (k) { return C.shares_bp[k] > 0; }).map(function (k) { return { label: k, value: C.shares_bp[k] / 100, note: 'raw term ' + SX.fmt(C.terms[k]) }; });
+        bars.sort(function (a, b) { return b.value - a.value; });
+        SX.barChart(extra, { bars: bars, unit: '%', format: function (v) { return v.toFixed(2); } });
+      }
+    }
+    render();
+  })();
+});
+</script>

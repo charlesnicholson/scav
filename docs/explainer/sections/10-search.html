@@ -1,0 +1,318 @@
+<section class="sx" id="search" data-toc="10 · The search">
+  <div class="kicker">How a drawing is found</div>
+  <h2>The search: rows, moves and kicks</h2>
+  <p class="lede">scav does not lay a chart out once. It lays it out thousands of times, each time with slightly different inputs, and ships the cheapest drawing. The search is three nested levels, all deterministic, with no randomness anywhere.</p>
+
+  <p>The search rests on one fact: <b>a drawing is a pure function of (row, pins)</b>. A <b>row</b> is one setting of four whole-chart knobs for sizing. A <b>pin</b> is one recorded decision that phases 1 to 3 must honour: hold a state at a rank, or make a route leave by a given face. There are seven kinds of pin (<code>SearchPins</code>): rank, cut, reverse, face, orient, side and fold. Pins are <em>inputs</em> to layout, not patches to its output. So trying a move means laying out again with one more pin, and undoing it means laying out with the pins held before. There is no transaction and no rollback. Pins name states and transitions by id, never by node index: chaining renumbers nodes, and an undo keyed by node silently did nothing.</p>
+  <p>The same fact gives a <b>counterfactual</b>. <code>scav dump --layout</code> prints what a drawing rests on, for example <code>--portfolio-row 0 --rank 11:1 --rank 0:0 --reverse 1:0 --face 3:0:1:0 --orient 2</code> for brew. <code>--no-search</code> with those flags reproduces the drawing exactly. Edit one flag to get the drawing a reader wants, then score it on the shipped objective. If it comes out cheaper, the search lacks a move. If it comes out dearer, the objective is wrong.</p>
+  <div data-fig="search-structure"></div>
+
+  <h3>Level 2: sixteen rows</h3>
+  <p>Level 2 is a fixed table of 16 rows. Row <i>i</i> is the profile with four bits of <i>i</i> flipped:</p>
+  <table class="sx-table">
+    <tr><th>bit</th><th>knob</th><th>0</th><th>1</th><th>what it changes</th></tr>
+    <tr><td class="num">0</td><td>box packer</td><td>as the profile says (<code>readable</code> also tries the one-row box packer and keeps it if it scores better)</td><td>flipped (LR-rectpacking alone)</td><td>how components, fold pieces and sibling submachines are packed</td></tr>
+    <tr><td class="num">1</td><td>compaction</td><td>off</td><td>on</td><td>LR-rectpacking's compaction step: each rectangle tries the other three spots and keeps one that does not grow the extent</td></tr>
+    <tr><td class="num">2</td><td>ratio source</td><td>profile (every frame packs toward 16:10)</td><td>owner's hole (each frame packs toward its owner's interior aspect)</td><td>the aspect each frame aims for</td></tr>
+    <tr><td class="num">3</td><td>fold</td><td>fold where the scale measure prefers it</td><td>fold wherever a run wraps</td><td>whether long rank runs fold into pieces</td></tr>
+  </table>
+  <p>Row 0 is the profile as given. The 16 rows are laid out in parallel on the thread pool, each row's layout single-threaded inside it. Every row is scored under the caller's profile, so all rows compare on one scale. If row 0 is not viable, the run fails.</p>
+  <p><b>Every viable row is searched to convergence</b>, through Level 1, kicks and the refold search. The pick is <code>argmin(converged cost)</code>, with ties going to the lower row. Picking by starting cost is wrong. On <code>bottler</code>, the row with the best start (125,283) converges to 77,441. Row 0 starts worse (154,348) but converges to 51,281; the row with the best start ends 51% dearer.</p>
+  <div data-fig="search-rows"></div>
+
+  <h3>Level 1: steepest descent over pins</h3>
+  <p>The <b>incumbent</b> is the current best (row, pins) and its cost. A <b>round</b> of Level 1 lists every move the incumbent allows. Each <b>candidate</b> is the incumbent's pins plus one more, laid out through phases 1 to 3 and scored exactly. The round scores all of them in parallel, then reduces in enumeration order and takes the <b>single best strictly improving</b> move. Ties go to the earliest index. A candidate that is not viable, or that needed the spacing inflation retry, is never taken. Taking a move appends its pin and lays out the new incumbent. The search stops when a round is empty or nothing in it improves.</p>
+  <table class="sx-table">
+    <tr><th>move</th><th>offered for</th><th>its pin</th><th>why it exists</th></tr>
+    <tr><td><b>cut</b></td><td>each segment phase 1 chained through bend nodes</td><td><code>ChainCut</code>: route it freely, not through its waypoints</td><td>58 of 257 transitions carry a phase-1 bend, and they hold 70% of all kinks</td></tr>
+    <tr><td><b>reverse</b></td><td>each segment on a cycle in its frame, not already pinned</td><td><code>ReversePin</code>: turn it before cycle breaking, so another edge of the cycle takes the break</td><td>which edge breaks a cycle decides ranks and chaining. On <code>estop</code> it took Tier 2 from 3,073 to 1,502 (historical objective).</td></tr>
+    <tr><td><b>face</b></td><td>each leg end of a transition whose route bends or is charged crossings, corridor, crowding, excess or a label term (every end while Tier 0 is broken), × 4 faces</td><td><code>FacePin</code>: leave or enter by left, right, top or bottom</td><td>a local face rule cannot see the turn it buys</td></tr>
+    <tr><td><b>side</b></td><td>each leg end whose port sits on a state's border, × the other 3 sides</td><td><code>SidePin</code></td><td>a route arriving from above can then enter from above (<code>axis</code>: 5,685 → 4,645, bends 3 → 1)</td></tr>
+    <tr><td><b>rank</b></td><td>each live, non-initial state, × every other rank of its frame</td><td><code>RankPin</code>: hold it at that rank (emptied ranks are squeezed out)</td><td>which column a state sits in. Rank moves were the first ever to change a state's rank, and they take 68.5% of the search's gross gain.</td></tr>
+    <tr><td><b>fold</b> (refold search only)</td><td>each frame drawn folded</td><td><code>FoldPin</code>: which rank the single cut falls before</td><td>where a fold cuts (<code>toolchanger</code> 11,810 → 11,559)</td></tr>
+  </table>
+  <p>The <b>budget</b> is one counter per move kind, each capped at <code>portfolio_k</code> = 1,024, cumulative over the whole search. The search runs while any counter is under budget. The counters are separate because one shared budget let the first-enumerated kind starve the others: on <code>axis</code>, cuts then ranks under one shared budget of 24 reached 12,702, while separate counters reached 9,940. A face move whose pin cannot change the route is charged to the budget but not scored, since it would draw the incumbent exactly.</p>
+  <div data-fig="search-round"></div>
+
+  <h3>Kicks: iterated local search</h3>
+  <p>Greedy descent stops in the first basin it finds. Some structural choices only pay off once the search has adapted to them. On <code>estop</code>, when kicks were built, the right reversal scored 3,218 alone, worse than the incumbent's 3,073, so a strictly improving pass never took it; accepted and searched on, it reached 1,502. (Those are the numbers of that day's objective; the drawing ships today at 906.) Simulated annealing's uphill moves were rejected because there is no temperature to calibrate. Instead, a <b>kick</b> applies a perturbation, searches to convergence, and keeps the result only if the <em>converged</em> cost is cheaper.</p>
+  <ul>
+    <li><b>Kick kinds.</b> <b>Reversal</b>: reverse each cyclic segment not already reversed. <b>Orient</b>: turn a frame of two or more ranks to run down the page. <b>Fold</b>: flip whether a frame of two or more ranks is drawn folded, if it has no fold pin. Orient and fold are allowed only in rounds "with turns".</li>
+    <li><b>Each kick</b> takes a <b>warm start</b>: the incumbent's pins minus the kicked frame's rank, cut, face, side and fold pins, keeping reversals and orientations. It adds the kick's pin and runs a Level 1 search scoped to that frame. All kicks of a round run in parallel.</li>
+    <li><b>Round reduction.</b> For each frame, keep its best kick that strictly beats the incumbent, and note the best overall (<b>single</b>). If two or more frames have winners, <b>together</b> puts every winner on one warm start, searches the union of their frames, and is taken if it beats <i>single</i>. Otherwise <i>single</i> is taken, and then each other frame's winner, cheapest first, is <b>rested</b> on top: searched again on the new incumbent and taken if it still improves. Rounds repeat until no kick improves. One unscoped <b>settle</b> search finishes.</li>
+    <li><b>Two schedules</b> run from each row's converged drawing. <b>A</b> allows turns from the start. <b>B</b> runs reversals alone until they converge, then allows turns. B is kept only if strictly cheaper. Neither dominates: A alone shipped <code>ota</code> a third dearer, and B alone gives up <code>toolchanger</code>'s 7,824 → 7,620.</li>
+    <li><b>Which rows.</b> Every viable row kicks, in parallel, except a row whose converged drawing equals an earlier row's (same t0, t2, state rectangles and route points).</li>
+  </ul>
+  <div data-fig="search-path"></div>
+
+  <h3>Refold, argmin and the search memo</h3>
+  <p>After the kicks, a <b>refold search</b> runs Level 1 again from every viable row's pins, with fold-cut moves added. A row keeps the result only if it is strictly cheaper. The run then ships <code>argmin</code> over the rows' converged costs.</p>
+  <p>A Level 1 search is a function of its inputs: the objective, the row's knobs, the budget, the refold flag, the start pins in order and the scope. The <b>search memo</b> stores whole searches by exactly that key (up to 2<sup>24</sup> words, under one mutex, shared by the pool for one run). A hit returns the pins and cost the search reached, and lays the drawing out again from those pins. Traced runs bypass it.</p>
+  <p>Where the gain comes from, summed over the corpus (no text / real text): the Level 2 pick before any search gives 5.2% / 2.6% of the total improvement; Level 1 from every row gives 64.6% / 68.3%; kicks and settling give 30.2% / 28.9%; the refold search gives 0.0% / 0.1% (only <code>axis</code>). CPU goes the other way: kicks take about 87–89% of it. Searching to convergence instead of a budget of 24 moves cut Tier 2 by 36.7% at no text and 27.4% at real text, and reader-visible audit defects fell from 60 to 46.</p>
+
+  <h3>What was tried and rejected</h3>
+  <ul>
+    <li><b>In-rank order moves.</b> Adjacent swaps (<code>transpose</code>) improve nothing on any frame: phase-1 crossings read 0 where routed crossings read 87. Readers' crossings happen between routes, not ranks.</li>
+    <li><b>Screening rows</b> by a short search and finishing only the best: it dropped <code>brew</code>'s best row, whose canvas was 38% smaller. Every row is finished.</li>
+    <li><b>Turns and fold flips as greedy moves</b> led into worse basins (a turn made <code>ota</code> 18% dearer; a fold took <code>tcp</code> 2,685 → 3,493). They are kicks instead.</li>
+    <li><b>Kick shortcuts</b>, each measured to lose: capping a kick's depth, keeping a kicked frame's pins, screening kicks by starting cost, skipping stale kicks, folding the facing flips into the pins, deduplicating rows at the start.</li>
+    <li><b>A frame-mirror move</b>: it reflected the wrong axis on folded frames, cost 15% more evaluations on <code>mill</code>, and took <code>tcp</code> to a basin 36% larger.</li>
+    <li><b>A sound lower bound inside the search</b> prunes nothing, because neighbours are near-ties. (The label bound in the next section works because it bounds only the label half.)</li>
+    <li><b>Random restarts</b> of a constructive heuristic do about 2,000× worse than guided search at equal CPU (Martí and Laguna), and generate-and-test metaheuristics manage only 6–54 candidates a second.</li>
+  </ul>
+</section>
+<script>
+// Shared helpers for the search figures.
+window.SXsearch = (function () {
+  var KINDS = ['cut', 'reverse', 'face', 'side', 'rank', 'fold'];          // enumeration order
+  function kindColor(k) { return 'var(--series-' + (KINDS.indexOf(k) + 1) + ')'; }
+  function bits(i) { return { box: !!(i & 1), cmp: !!(i & 2), hole: !!(i & 4), fold: !!(i & 8) }; }
+  function bitText(i) {
+    var b = bits(i);
+    return [(b.box ? 'box packer flipped' : 'box packer as profile'), (b.cmp ? 'compaction on' : 'compaction off'), (b.hole ? "owner's hole ratio" : 'profile ratio 16:10'), (b.fold ? 'fold always' : 'fold to scale')].join(' · ');
+  }
+  // The element a pin names, for highlighting: {kind:'state'|'trans'|'sub', id}.
+  function pinTarget(flag, arg) {
+    var a = String(arg).split(':').map(Number);
+    if (flag === '--rank') return { kind: 'state', id: a[0] };
+    if (flag === '--face' || flag === '--reverse' || flag === '--cut' || flag === '--side') return { kind: 'trans', id: a[0] };
+    if (flag === '--orient' || flag === '--fold') return { kind: 'sub', id: a[0] };
+    return null;
+  }
+  function costText(c) { return 't0 ' + c.t0 + ' · t2 ' + SX.fmt(c.t2); }
+  return { KINDS: KINDS, kindColor: kindColor, bits: bits, bitText: bitText, pinTarget: pinTarget, costText: costText };
+})();
+</script>
+<script>
+// Figure: the whole search, stage by stage, with brew's numbers.
+window.SXsearchStructure = function (sec) {
+  var f = SX.figure(sec.querySelector('[data-fig="search-structure"]'), { caption: '<b>Click a stage</b> (or press Play) to read what it does and what it did on brew. Arrows are data flow; the dashed box runs once per viable row, in parallel across rows.' });
+  var S = [
+    { id: 'rows', x: 10, w: 150, title: 'Level 2', sub: '16 rows', body: 'Lay out all 16 rows of the table: four bits of sizing knobs. Each is a starting drawing with no pins.', brew: 'Unsearched, the 16 rows draw only 2 different drawings (t2 16,985 and 15,037), both with t0 4: four labels sit on foreign routes. Level 2 alone would pick row 1.' },
+    { id: 'l1', x: 200, w: 160, title: 'Level 1', sub: 'steepest descent', body: 'Rounds of: score every move in parallel, take the single best strictly improving one. Stop when nothing improves.', brew: 'Row 0: 16,985 (t0 4) → 6,936 → 4,320 → 4,225 in three moves (a rank pin, a face pin, a rank pin); the fourth round scores 31 moves and none improves.' },
+    { id: 'kicks', x: 400, w: 210, title: 'Kicks', sub: 'schedules A and B', body: 'Perturb one frame (reverse, orient, fold), search it to convergence, keep it only if the converged cost is cheaper. Reduce each round by single, together and rest; finish with one settle search. Keep schedule B only if strictly cheaper than A.', brew: 'First kick round: 8 kicks. Reversing t1 converges to 3,649 (single); turning the grinder down converges to 4,171. Together they reach only 5,530, so single is taken and the grinder turn is rested on top: 3,595. A second round finds nothing; settle confirms 3,595.' },
+    { id: 'refold', x: 650, w: 150, title: 'Refold', sub: 'Level 1 + fold cuts', body: 'Search again from each row\'s pins with fold-cut moves added; keep the result only if strictly cheaper.', brew: 'On brew\'s row 0 it finds nothing cheaper than 3,595.' },
+    { id: 'argmin', x: 840, w: 150, title: 'argmin', sub: 'over rows', body: 'Ship the least converged cost (t0, then t2); ties go to the lower row.', brew: 'The 16 rows converge to three drawings: 3,595 (rows 0, 2, 4, 6), 3,996 (rows 8, 10, 12, 14) and 4,025 (the odd rows). Row 0 ships.' }
+  ];
+  var W = 1000, H = 170, svg = SX.svg('svg', { viewBox: '0 0 ' + W + ' ' + H, style: { width: '100%', height: 'auto', font: '13px ' + SX.css('--sans') } });
+  var defs = SX.svg('defs', null, SX.svg('marker', { id: 'sx-arr-search', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto' }, SX.svg('path', { d: 'M0,0L10,5L0,10z', fill: SX.css('--text-secondary') })));
+  svg.appendChild(defs);
+  svg.appendChild(SX.svg('rect', { x: 185, y: 18, width: 630, height: 120, rx: 12, fill: 'none', stroke: SX.css('--axis'), 'stroke-dasharray': '5 4' }));
+  svg.appendChild(SX.svg('text', { x: 197, y: 34, fill: SX.css('--text-muted'), 'font-size': 11.5, text: 'per viable row, rows in parallel' }));
+  var boxes = {}, panel = SX.el('div', { class: 'callout', style: { minHeight: '84px' } });
+  S.forEach(function (s, i) {
+    var y = 50, h = 74;
+    var g = SX.svg('g', { style: { cursor: 'pointer' } });
+    var r = SX.svg('rect', { x: s.x, y: y, width: s.w, height: h, rx: 10, fill: SX.css('--surface-2'), stroke: SX.css('--axis'), 'stroke-width': 1.5 });
+    g.appendChild(r);
+    g.appendChild(SX.svg('text', { x: s.x + s.w / 2, y: y + 30, 'text-anchor': 'middle', fill: SX.css('--text-primary'), 'font-weight': 600, text: s.title }));
+    g.appendChild(SX.svg('text', { x: s.x + s.w / 2, y: y + 50, 'text-anchor': 'middle', fill: SX.css('--text-secondary'), 'font-size': 12, text: s.sub }));
+    if (i < S.length - 1) svg.appendChild(SX.svg('line', { x1: s.x + s.w + 2, y1: y + h / 2, x2: S[i + 1].x - 4, y2: y + h / 2, stroke: SX.css('--text-secondary'), 'stroke-width': 1.5, 'marker-end': 'url(#sx-arr-search)' }));
+    g.addEventListener('click', function () { show(i); });
+    SX.tipOn(g, '<b>' + s.title + '</b><br>' + s.body);
+    svg.appendChild(g); boxes[i] = r;
+  });
+  // kick loop arrow: kicks round repeats until none improves
+  var k = S[2];
+  svg.appendChild(SX.svg('path', { d: 'M' + (k.x + k.w - 40) + ',124 C' + (k.x + k.w - 40) + ',152 ' + (k.x + 40) + ',152 ' + (k.x + 40) + ',126', fill: 'none', stroke: SX.css('--text-secondary'), 'stroke-width': 1.5, 'marker-end': 'url(#sx-arr-search)' }));
+  svg.appendChild(SX.svg('text', { x: k.x + k.w / 2, y: 163, 'text-anchor': 'middle', fill: SX.css('--text-muted'), 'font-size': 11.5, text: 'repeat rounds until no kick improves' }));
+  var cur = -1;
+  function show(i) {
+    cur = i;
+    S.forEach(function (s, j) { boxes[j].setAttribute('stroke', j === i ? SX.css('--hl') : SX.css('--axis')); boxes[j].setAttribute('stroke-width', j === i ? 3 : 1.5); });
+    panel.innerHTML = '<span class="t">' + S[i].title + ' · ' + S[i].sub + '</span>' + S[i].body + '<br><span style="color:var(--text-secondary)"><b>On brew:</b> ' + S[i].brew + '</span>';
+  }
+  var st = SX.stepper({ steps: S.length, interval: 2600, onStep: show, label: function (i) { return (i + 1) + ' / ' + S.length + ' · ' + S[i].title; } });
+  f.ctrl.appendChild(st.el);
+  f.stage.appendChild(svg); f.stage.appendChild(panel);
+};
+</script>
+<script>
+// Figure: brew's 16 Level 2 rows, before and after each row's search.
+window.SXsearchRows = function (sec) {
+  var H = SXsearch, B = SX.data('rows').charts.brew, rows = B.rows;
+  var f = SX.figure(sec.querySelector('[data-fig="search-rows"]'), { caption: '<b>Toggle</b> between each row as Level 2 lays it out and each row after its own full search. <b>Hover</b> a cell for its bits and cost. Columns flip the packer and compaction bits, rows of the grid flip the ratio and fold bits. The orange frame is the shipped row; "= row k" marks a row whose drawing is identical (same hashes) to an earlier row\'s. Before the search every row has t0 4; after it, every row has t0 0, and the cheapest start (row 1) is not the cheapest finish.' });
+  var mode = 'searched';
+  f.ctrl.appendChild(SX.choice({ options: [{ value: 'unsearched', label: 'Unsearched (Level 2 only)' }, { value: 'searched', label: 'Searched (each row converged)' }], value: mode, onChange: function (v) { mode = v; draw(); } }).el);
+  var info = SX.el('span', { class: 'note' }); f.ctrl.appendChild(info);
+  function draw() {
+    var grid = SX.el('div', { style: { display: 'grid', gridTemplateColumns: '92px repeat(4, minmax(0, 1fr))', gap: '6px', alignItems: 'stretch' } });
+    var colHead = ['packer as profile · no compaction', 'packer flipped · no compaction', 'packer as profile · compaction', 'packer flipped · compaction'];
+    var rowHead = ['16:10 · fold to scale', "owner's hole · fold to scale", '16:10 · fold always', "owner's hole · fold always"];
+    grid.appendChild(SX.el('div'));
+    colHead.forEach(function (h) { grid.appendChild(SX.el('div', { class: 'note', style: { textAlign: 'center', fontSize: '12px' }, text: h })); });
+    var seen = {}, best = null;
+    rows.forEach(function (r) { var c = r[mode].cost; if (!best || c.t0 < best.t0 || (c.t0 === best.t0 && c.t2 < best.t2)) best = { t0: c.t0, t2: c.t2, row: r.row }; });
+    for (var gr = 0; gr < 4; gr++) {
+      grid.appendChild(SX.el('div', { class: 'note', style: { fontSize: '12px', alignSelf: 'center' }, text: rowHead[gr] }));
+      for (var gc = 0; gc < 4; gc++) {
+        var i = gr * 4 + gc, r = rows[i], g = r[mode], key = g.hash.structural + ':' + g.hash.coordinate;
+        var like = seen[key]; if (like == null) seen[key] = i;
+        var shipped = i === B.shipped_row && mode === 'searched';
+        var cell = SX.el('div', { style: { border: '2px solid ' + (shipped ? 'var(--hl)' : 'var(--border)'), borderRadius: '8px', padding: '4px 6px', background: 'var(--surface-1)', opacity: like != null ? 0.55 : 1 } });
+        var th = SX.el('div'); cell.appendChild(th);
+        SX.chart(th, g, { maxHeight: 96, pad: 220, layers: { labels: false, text: false } });
+        var c = g.cost;
+        cell.appendChild(SX.el('div', { style: { fontSize: '12px', display: 'flex', justifyContent: 'space-between', gap: '4px' } },
+          SX.el('b', { text: 'row ' + i }), SX.el('span', { style: { fontFamily: 'var(--mono)' }, text: (c.t0 ? 't0 ' + c.t0 + ' · ' : '') + SX.fmt(c.t2) })));
+        cell.appendChild(SX.el('div', { class: 'note', style: { fontSize: '11.5px', minHeight: '1.3em' }, text: (like != null ? '= row ' + like : '') + (i === best.row ? (like != null ? ' · ' : '') + 'least ' + (mode === 'searched' ? 'converged' : 'unsearched') : '') }));
+        (function (i, r, g, like) {
+          SX.tipOn(cell, '<b>row ' + i + '</b> (bits ' + (i & 1) + (i >> 1 & 1) + (i >> 2 & 1) + (i >> 3 & 1) + ')<br>' + H.bitText(i) + '<br>' + H.costText(g.cost) +
+            (g.cost.t0 ? '<br><span class="m">t0: ' + Object.keys(g.cost.tier0).filter(function (k) { return g.cost.tier0[k]; }).map(function (k) { return k + ' ' + g.cost.tier0[k]; }).join(', ') + '</span>' : '') +
+            '<br><span class="m">pins: ' + (g.pins.replace('--portfolio-row ' + i, '').trim() || 'none') + '</span>' + (like != null ? '<br>identical to row ' + like : ''));
+        })(i, r, g, like);
+        grid.appendChild(cell);
+      }
+    }
+    var distinct = Object.keys(seen).length;
+    info.textContent = distinct + ' distinct drawings among 16 rows; least: row ' + best.row + ' (' + H.costText(best) + ')';
+    f.stage.innerHTML = ''; f.stage.appendChild(grid);
+  }
+  draw();
+};
+</script>
+<script>
+// Figure: every candidate of one Level 1 round, by move kind, and the one taken.
+window.SXsearchRound = function (sec) {
+  var H = SXsearch, S = SX.data('search').charts;
+  var f = SX.figure(sec.querySelector('[data-fig="search-round"]'), { caption: '<b>Hover</b> a candidate to read its move and cost; <b>switch</b> rounds. Candidates are in enumeration order (cut, reverse, face, side, rank), each one the incumbent plus one pin. Hollow marks break Tier 0 (t0 &gt; 0) and lose to any t0 = 0 candidate whatever their t2. The step line is the running best in enumeration order, compared lexicographically: it can rise where a lower t0 takes over. The ringed mark is the move the round takes. The y-axis is logarithmic.' });
+  var R = {
+    b1: { r: S.brew.round_1_candidates, inc: S.brew.steps[0].cost, name: 'brew, round 1 (from row 0 unsearched)' },
+    b2: { r: S.brew.round_2_candidates, inc: S.brew.steps[1].cost, name: 'brew, round 2' },
+    t1: { r: S.tcp.round_1_candidates, inc: S.tcp.steps[0].cost, name: 'tcp, round 1 (from row 8 unsearched)' }
+  };
+  var cur = 'b1';
+  f.ctrl.appendChild(SX.choice({ options: [{ value: 'b1', label: 'brew round 1' }, { value: 'b2', label: 'brew round 2' }, { value: 't1', label: 'tcp round 1' }], value: cur, onChange: function (v) { cur = v; draw(); } }).el);
+  var less = function (a, b) { return a.t0 !== b.t0 ? a.t0 < b.t0 : a.t2 < b.t2; };
+  function draw() {
+    var D = R[cur], C = D.r.candidates, n = C.length, inc = D.inc;
+    var W = 1000, Hh = 340, m = { l: 64, r: 16, t: 40, b: 26 };
+    var t2s = C.map(function (c) { return c.t2; }).concat([inc.t2]);
+    var lo = Math.min.apply(null, t2s) * 0.85, hi = Math.max.apply(null, t2s) * 1.1;
+    var X = function (k) { return m.l + (k + 0.5) / n * (W - m.l - m.r); };
+    var Y = function (v) { return Hh - m.b - (Math.log(v) - Math.log(lo)) / (Math.log(hi) - Math.log(lo)) * (Hh - m.t - m.b); };
+    var svg = SX.svg('svg', { viewBox: '0 0 ' + W + ' ' + Hh, style: { width: '100%', height: 'auto', font: '12px ' + SX.css('--sans') } });
+    [2000, 3000, 5000, 7000, 10000, 15000, 20000, 30000, 50000, 70000, 100000].forEach(function (v) {
+      if (v < lo || v > hi) return;
+      svg.appendChild(SX.svg('line', { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: SX.css('--grid'), 'stroke-width': 1 }));
+      svg.appendChild(SX.svg('text', { x: m.l - 8, y: Y(v) + 4, 'text-anchor': 'end', fill: SX.css('--text-muted'), text: SX.fmt(v) }));
+    });
+    // kind bands
+    var start = 0, band = 0;
+    for (var k = 1; k <= n; k++) {
+      if (k === n || C[k].move !== C[start].move) {
+        var x0 = m.l + start / n * (W - m.l - m.r), x1 = m.l + k / n * (W - m.l - m.r);
+        if (start) svg.appendChild(SX.svg('line', { x1: x0, x2: x0, y1: m.t - 6, y2: Hh - m.b, stroke: SX.css('--axis'), 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
+        var narrow = x1 - x0 < 70; band = narrow ? band + 1 : 0;
+        svg.appendChild(SX.svg('text', { x: narrow ? x0 + 2 : (x0 + x1) / 2, y: m.t - 22 + (narrow ? (band % 2) * 12 : 0), 'text-anchor': narrow ? 'start' : 'middle', fill: SX.css('--text-secondary'), text: C[start].move + ' (' + (k - start) + ')' }));
+        start = k;
+      }
+    }
+    svg.appendChild(SX.svg('text', { x: (W + m.l) / 2, y: Hh - 6, 'text-anchor': 'middle', fill: SX.css('--text-muted'), text: 'candidate, in enumeration order; y: t2 of each candidate (log scale)' }));
+    // incumbent
+    svg.appendChild(SX.svg('line', { x1: m.l, x2: W - m.r, y1: Y(inc.t2), y2: Y(inc.t2), stroke: SX.css('--text-secondary'), 'stroke-width': 1.5, 'stroke-dasharray': '6 4' }));
+    // running best, lexicographic, in enumeration order
+    var best = { t0: inc.t0, t2: inc.t2 }, d = 'M' + m.l + ',' + Y(best.t2), taken = -1, agree = true;
+    C.forEach(function (c, k) {
+      var better = less(c, best);
+      if (better) { d += 'L' + X(k) + ',' + Y(best.t2) + 'L' + X(k) + ',' + Y(c.t2); best = { t0: c.t0, t2: c.t2 }; taken = k; }
+      if (better !== (c.verdict === 'taken')) agree = false;
+    });
+    d += 'L' + (W - m.r) + ',' + Y(best.t2);
+    svg.appendChild(SX.svg('path', { d: d, fill: 'none', stroke: SX.css('--text-primary'), 'stroke-width': 2, 'stroke-linejoin': 'round' }));
+    C.forEach(function (c, k) {
+      var col = SX.css('--series-' + (H.KINDS.indexOf(c.move) + 1));
+      var dot = SX.svg('circle', { cx: X(k), cy: Y(c.t2), r: 4.5, fill: c.t0 ? SX.css('--surface-1') : col, stroke: col, 'stroke-width': 1.8 });
+      svg.appendChild(dot);
+      SX.tipOn(dot, '<b>' + c.move + '</b>: ' + c.what + '<br>' + H.costText(c) + (c.verdict === 'taken' ? '<br><span class="m">a new running best</span>' : '') + (k === taken ? '<br><b>the move this round takes</b>' : ''));
+    });
+    if (taken >= 0) svg.appendChild(SX.svg('circle', { cx: X(taken), cy: Y(C[taken].t2), r: 10, fill: 'none', stroke: SX.css('--text-primary'), 'stroke-width': 2.5, 'pointer-events': 'none' }));
+    var kinds = H.KINDS.filter(function (k) { return C.some(function (c) { return c.move === k; }); });
+    var legend = SX.el('div', { class: 'legend' }, kinds.map(function (k) { return SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--series-' + (H.KINDS.indexOf(k) + 1) + ')' } }), k); }),
+      SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--text-primary)', height: '2px' } }), 'running best'),
+      SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'none', borderTop: '2px dashed var(--text-secondary)', height: '0' } }), 'incumbent, ' + H.costText(inc)));
+    var t = C[taken];
+    var sum = SX.el('p', { class: 'note', html: D.name + ': ' + n + ' candidates, ' + C.filter(function (c) { return c.t0; }).length + ' break Tier 0. Taken: <b>' + t.what + '</b> (' + H.costText(t) + '). ' + (agree ? 'The running best recomputed here marks exactly the candidates the trace marks <i>taken</i>.' : 'MISMATCH with the trace.') });
+    f.stage.innerHTML = ''; f.stage.appendChild(legend); f.stage.appendChild(svg); f.stage.appendChild(sum);
+  }
+  draw();
+};
+</script>
+<script>
+// Figure: brew's whole search path, one accepted move, kick or re-search per step.
+window.SXsearchPath = function (sec) {
+  var H = SXsearch, B = SX.data('search').charts.brew, steps = B.steps, C = window.SXcost;
+  var f = SX.figure(sec.querySelector('[data-fig="search-path"]'), { caption: '<b>Step</b> through brew\'s search from row 0: three Level 1 moves to convergence at 4,225, then the kick that wins (reverse <code>t1</code>, warm start at t0 2 and t2 18,261, searched back down to 3,649), then the grinder turned to run down rested on top: 3,595, which ships. The orange element is the one the step\'s pin names. Every drawing is re-derived from its pins and its cost equals the trace\'s.' });
+  var row = SX.el('div', { class: 'fig-row' });
+  var left = SX.el('div', { style: { flex: '3 1 540px' } }), right = SX.el('div', { style: { flex: '2 1 360px' } });
+  row.appendChild(left); row.appendChild(right);
+  var desc = SX.el('div', { class: 'callout', style: { maxWidth: 'none', minHeight: '96px' } });
+  var chartHost = SX.el('div', { style: { maxWidth: '900px' } }), deltaHost = SX.el('div');
+  right.appendChild(deltaHost);
+  f.stage.appendChild(desc); f.stage.appendChild(row); f.stage.appendChild(chartHost);
+  var KIND = { start: 'start', level1: 'Level 1 move', kick: 'kick', kick_search: 'search inside the kick', shipped: 'shipped' };
+  var pts = steps.map(function (s, i) { return [i, s.cost.t2, (s.cost.t0 ? 't0 ' + s.cost.t0 + ' · ' : '') + KIND[s.kind]]; });
+  chartHost.appendChild(SX.el('div', { style: { fontSize: '13px', color: 'var(--text-secondary)' }, text: 't2 at each step (hover to jump)' }));
+  var lineHost = SX.el('div'); chartHost.appendChild(lineHost);
+  var lc = SX.lineChart(lineHost, { series: [{ name: 't2', points: pts }], xLabel: 'step', markers: true, height: 200, xTicks: steps.map(function (s, i) { return i; }), onHover: function (p) { st.go(p[0]); } });
+  var curDot = SX.svg('circle', { r: 8, fill: 'none', stroke: SX.css('--hl'), 'stroke-width': 2.5, 'pointer-events': 'none' });
+  lc.svg.appendChild(curDot);
+  function words(s) {
+    if (s.kind === 'start') return 'Row 0 laid out whole with no pins. Four labels overlap other routes, so t0 is 4.';
+    if (s.what) return s.what.replace(/ \(0 left,1 right,2 top,3 bottom\)/, '').replace(/face 0$/, 'face 0 (left)').replace(/face 1$/, 'face 1 (right)').replace(/face 2$/, 'face 2 (top)').replace(/face 3$/, 'face 3 (bottom)') + '.';
+    return s.note || '';
+  }
+  function delta(a, b) {
+    var t = SX.el('table', { class: 'sx-table', style: { fontSize: '12.5px', margin: '6px 0 0' } });
+    t.appendChild(SX.el('tr', null, SX.el('th', { text: 'term (raw)' }), SX.el('th', { class: 'num', text: 'before' }), SX.el('th', { class: 'num', text: 'after' }), SX.el('th', { class: 'num', text: 'Δ t2' })));
+    var any = false;
+    C.TERMS.forEach(function (k) {
+      var x = a.cost.terms[k], y = b.cost.terms[k];
+      var dw = C.W[k] * (C.cdiv(y, C.UNIT[k]) - C.cdiv(x, C.UNIT[k]));
+      if (!dw) return; any = true;
+      t.appendChild(SX.el('tr', null, SX.el('td', null, SX.el('code', { text: k })), SX.el('td', { class: 'num', text: SX.fmt(x) }), SX.el('td', { class: 'num', text: SX.fmt(y) }), SX.el('td', { class: 'num', text: (dw > 0 ? '+' : '') + SX.fmt(dw) })));
+    });
+    Object.keys(b.cost.tier0).forEach(function (k) {
+      var x = a.cost.tier0[k], y = b.cost.tier0[k]; if (x === y) return; any = true;
+      t.appendChild(SX.el('tr', null, SX.el('td', null, SX.el('code', { text: k }), ' (Tier 0)'), SX.el('td', { class: 'num', text: x }), SX.el('td', { class: 'num', text: y }), SX.el('td', { class: 'num', text: '' })));
+    });
+    return any ? t : SX.el('p', { class: 'note', text: 'No weighted term changed.' });
+  }
+  function onStep(i) {
+    var s = steps[i], g = s.geometry, pa = s.pins_added, tgt = pa.length ? H.pinTarget(pa[pa.length - 2], pa[pa.length - 1]) : null;
+    if (s.kind === 'kick') tgt = H.pinTarget(pa[pa.length - 2], pa[pa.length - 1]);
+    var h = SX.chart(left, g, { maxHeight: 360, pad: 220 });
+    if (tgt && i > 0) h.mark(tgt.kind, tgt.id);
+    var r = s.round;
+    desc.innerHTML = '<span class="t">Step ' + i + ' · ' + s.label + '</span>' + words(s) +
+      (r && s.kind !== 'kick' ? ' <span style="color:var(--text-secondary)">(' + r.n + ' candidates: ' + Object.keys(r.by_move).map(function (k) { return r.by_move[k] + ' ' + k; }).join(', ') + ')</span>' : '') +
+      (s.kind === 'kick' && s.note ? ' <span style="color:var(--text-secondary)">' + s.note + '.</span>' : '') +
+      '<br>Cost <b>' + H.costText(s.cost) + '</b>' + (s.verified ? ' <span class="pill">re-derived from pins, equals the trace</span>' : '') +
+      '<br><span class="note">pins: <code>' + (g.pins.replace('--portfolio-row 0', '').trim() || 'none') + '</code></span>';
+    curDot.setAttribute('cx', lc.X(i)); curDot.setAttribute('cy', lc.Y(s.cost.t2));
+    deltaHost.innerHTML = '';
+    if (i > 0) { deltaHost.appendChild(SX.el('div', { class: 'note', text: 'What changed from step ' + (i - 1) + ':' })); deltaHost.appendChild(delta(steps[i - 1], s)); }
+  }
+  var st = SX.stepper({ steps: steps.length, interval: 2200, onStep: onStep, label: function (i) { return 'step ' + i + ' / ' + (steps.length - 1); } });
+  f.ctrl.appendChild(st.el);
+  // The first kick round, every kick: start -> converged, parsed from the data's own note.
+  var note = B.kick_round_1.note.split('. Kick-start')[0], items = note.slice(note.indexOf('costs:') + 6).split(/, (?=[a-z])/).map(function (x) { return x.trim().replace(/\.$/, ''); });
+  var kt = SX.el('table', { class: 'sx-table', style: { fontSize: '13px' } });
+  kt.appendChild(SX.el('tr', null, SX.el('th', { text: 'first kick round: kick' }), SX.el('th', { class: 'num', text: 'start' }), SX.el('th', { class: 'num', text: 'converged' }), SX.el('th', { text: 'outcome' })));
+  items.forEach(function (it) {
+    var m = it.match(/^(.*?) (\d+)?(?:->(\d+))?(?: \((.*)\))?$/); if (!m) return;
+    var name = m[1], s0 = m[2] ? +m[2] : null, s1 = m[3] ? +m[3] : s0;
+    var out = name === 'reverse t1' ? 'single: the cheapest kick, taken' : name === 'orient 2' ? 'rested on top of single → 3,595' : (s1 != null && s1 < 4225 ? 'beats 4,225 but not single' : 'no better than 4,225');
+    var tr = SX.el('tr', { class: (name === 'reverse t1' || name === 'orient 2') ? 'hl' : '' }, SX.el('td', { text: name.replace('refold', 'fold flip, frame').replace('orient', 'orient frame') }), SX.el('td', { class: 'num', text: s0 != null ? SX.fmt(s0) : '' }), SX.el('td', { class: 'num', text: s1 != null ? SX.fmt(s1) : '' }), SX.el('td', { text: out }));
+    kt.appendChild(tr);
+  });
+  f.stage.appendChild(SX.el('p', { class: 'note', html: 'Every kick of the first round, each searched to convergence from its warm start. Together (reverse t1 + orient frame 2) reaches only 5,530, worse than single, so single is taken and the grinder\'s turn is rested on top.' }));
+  f.stage.appendChild(kt);
+};
+SX.register('search', function (sec) {
+  SXsearchStructure(sec);
+  SXsearchRows(sec);
+  SXsearchRound(sec);
+  SXsearchPath(sec);
+});
+</script>

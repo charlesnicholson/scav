@@ -1,0 +1,200 @@
+<section class="sx" id="determinism" data-toc="12 · Determinism and tests">
+  <div class="kicker">Proof it holds</div>
+  <h2>Determinism: goldens, hashes and selftest</h2>
+  <p class="lede">The same chart, profile and fonts give the same drawing, byte for byte, on any machine, any compiler and any number of threads. scav proves this with three hashes per drawing, committed goldens, and a self-test that every build can run.</p>
+
+  <h3>Three hashes</h3>
+  <p>Every laid-out chart carries three 32-bit digests, all xxHash32 implemented in-tree. Lanes are assembled byte by byte, so big-endian machines agree.</p>
+  <ul>
+    <li><b>Inputs digest</b>: everything that is not geometry. That is the profile (all 52 fields), the router's name and version, the packer choice, and the space-request tables (the app's measured text sizes). A golden is reproducible only against a stated measurement policy, and this digest names it.</li>
+    <li><b>Structural hash</b>: ranks, in-rank orders, port sides, and each route's bends as direction-turn tokens (not points). It is seeded with the model's own structural digest, so it says "this model, laid out this way". Rank and in-rank position are recovered from the rectangles (sorted distinct x per frame, then y within a column), never stored, so it can be recomputed from a finished drawing alone.</li>
+    <li><b>Coordinate hash</b>: every rectangle, point and port coordinate.</li>
+  </ul>
+  <p>The split localises a change. Translating the whole drawing moves only the coordinate hash. A remeasure that reorders nothing moves only the inputs digest and the coordinates. Seeding the geometry hashes with the inputs digest was rejected, because every remeasure would then read as a global reflow.</p>
+  <div data-fig="det-hashes"></div>
+
+  <h3><code>scav selftest</code> and thread counts</h3>
+  <p>The corpus and its goldens are compiled into the binary, gzipped. <code>scav selftest</code> lays every chart out at <b>1, 2, 3, 5, 8, 13 and 16 threads</b> and diffs all three hashes against the embedded goldens (<code>--against FILE</code> substitutes a golden file). A difference from the golden is a toolchain finding. A difference from the 1-thread run is a sharding defect. One thread runs serially; every other count uses the one global pool, so the six pooled runs exercise different schedules of the same work. That is the point: a <b>shard</b> (a unit of parallel work) is fixed by the model, never by the thread count, and every reduction runs in index order, so the schedule cannot change the answer.</p>
+  <div data-fig="det-threads"></div>
+  <p>The <b>determinism test class</b> checks every geometry column's bytes, all three hashes and the Level 2 row that produced them. A worker count that moved the pick would move everything under it. It covers the 11 corpus charts and two 2,000-state synthetic charts at 2, 3, 5, 8, 13 and 16 workers against 1. It runs under a scheduling-delay injector: each shard yields <code>rnd(seed, 0, shard, 0) % 64</code> times and spins <code>rnd(seed, 1, shard, 0) % 4096</code> iterations. It also covers the inflation retry at 8 workers against 1, and a chart on which every row ties, so that index-ordered reduction is what decides. Timing never gates a determinism claim.</p>
+  <p>The CI matrix is six toolchain triples × {Debug, Release, testable} × the thread counts, about ten minutes per run. The <code>testable</code> build, which gives internal functions external linkage, must be byte-identical to Release. All layout arithmetic is integer, so inlining cannot change a result. A divergence means undefined behaviour.</p>
+
+  <h3>Goldens</h3>
+  <p><code>test_data/golden/layout/</code> holds <code>corpus_hashes.txt</code> (three hashes per chart), <code>corpus_cost.txt</code> and <code>corpus_cost_measured.txt</code> (every cost term per chart, at no text and at real text), <code>corpus_cost_shares*.txt</code> (basis points), and <code>corpus_routers.txt</code> (every registered router over the corpus), plus draw-list, dump and SVG goldens. The cost goldens and the gauntlet are measured at <b>no text</b> (no space requests). <code>scav render</code>, <code>dump --layout</code> and <code>corpus_cost_measured.txt</code> are at <b>real text</b>. The two scales are never compared directly.</p>
+
+  <h3>How scav is tested</h3>
+  <ul>
+    <li><b>Unit means unit.</b> No disk, no parsing, no earlier stage: inputs are typed in as plain structs. "A defect in rank assignment should fail one test that types in a graph, not a golden hash three stages downstream."</li>
+    <li><b>Functional</b> tests compose the pipeline over the corpus.</li>
+    <li><b>The gauntlet</b>: 28 element charts, one layout shape each, small enough to name every route, held to <b>reader-visible properties rather than a hash</b>. For example: no element routes an edge through a box; every route is axis-aligned, forward, and reaches its ends; a fork's bar is used along its length, not at one point; a transition and its return are two straight legs an em apart. A property that does not hold yet is carved out with a pinned count and the owning PRD section named: "a carve-out with no number on it is an excuse". The gauntlet scores what ships (the shipped profile's full search), not a candidate nobody draws.</li>
+    <li><b>Every rule</b> gets an isolated test on a trivial layout, and <b>every fixed bug</b> leaves a test.</li>
+    <li><b>Every optimisation</b> (each memo, reuse path and bound) has a test mode that re-runs the unoptimised computation and compares, plus a planted defect proving the test can fail.</li>
+    <li>Also golden, property (round trip, references resolve, zero box overlap, zero edge through a box), sanitizer (UBSan, ASan, TSan, MSan), fuzz (deserializer, resolver), binding (Python), baseline (side by side with PlantUML and elkjs) and regression tests. <b>Performance tests assert floors, not times</b>: throughput and memory ratios, never goldens.</li>
+  </ul>
+  <p>The <b>trace</b> is a developer-facing list of events: rank assigned, edge reversed, node placed, net planned, candidate scored with its terms, fold cut, and so on. A trace forces one thread. <code>layout_trace_json</code> searches first, then lays the winning (row, pins) out again with the trace attached. All eleven corpus charts give the same hashes traced as untraced. The search path and round figures in the search section are read from this trace.</p>
+  <div class="callout why"><span class="t">Rejected</span>Mocks and interface seams: tests get linkage to internals through an intrusive internal-section marker instead. A "stopped at cap" diagnostic for search loops: diagnostics are golden, so an improvement loop reports a counted statistic (sweeps, moves accepted, frames at cap) instead.</div>
+</section>
+<script>
+// led at no text, laid out by this tree's scav (hashes c5553683 / 19f815d2, as in corpus_hashes.txt).
+window.SXdetLed = {"chart":"led","scale":"notext","flags":["--no-text"],"pins":"--no-text --portfolio-row 0 --rank 0:2","pin_list":[["--no-text"],["--portfolio-row","0"],["--rank","0:2"]],"box":[0,0,3168,1568],"hash":{"structural":3310696067,"coordinate":435688914},"cost":{"t0":0,"t1":null,"t2":293,"tier0":{"through_box":0,"box_overlap":0,"flush":0,"through_region":0,"retrace":0,"label_over_box":0,"label_over_route":0},"terms":{"bends":0,"corridor":0,"crossings":0,"excess_len":0,"adjacency":0,"label":0,"label_near":0,"aspect":6592,"area":4967424,"crowding":0,"length":2016,"transit_bends":0,"whitespace":0},"shares_bp":{"bends":0,"corridor":0,"crossings":0,"excess_len":0,"adjacency":0,"label":0,"label_near":0,"aspect":2389,"area":4607,"crowding":0,"length":3003,"transit_bends":0,"whitespace":0}},"label_leader":96,"svg":{"size":[214,114],"viewbox":[-128,-128,3424,1824],"style":"text { font-family: \"JetBrains Mono\", monospace; font-kerning: none; }","unowned":[]},"states":[{"id":0,"name":"Off","label":"","path":"Off","kind":"normal","parent_sub":0,"submachines":[],"live":1,"rect":[800,928,896,640],"before":[928,1056,640,0],"after":[928,1056,640,0],"text":[],"draw":[{"el":"rect","z":0,"of":"state","id":0,"x":800,"y":928,"width":896,"height":640,"rx":80,"fill":"#ffffff","stroke":"#1a1a1a","stroke-width":16}]},{"id":1,"name":"Blinking","label":"","path":"Blinking","kind":"normal","parent_sub":0,"submachines":[],"live":1,"rect":[800,0,896,640],"before":[928,128,640,0],"after":[928,128,640,0],"text":[],"draw":[{"el":"rect","z":1,"of":"state","id":1,"x":800,"y":0,"width":896,"height":640,"rx":80,"fill":"#ffffff","stroke":"#1a1a1a","stroke-width":16}]},{"id":2,"name":"Solid","label":"","path":"Solid","kind":"normal","parent_sub":0,"submachines":[],"live":1,"rect":[2272,464,896,640],"before":[2400,592,640,0],"after":[2400,592,640,0],"text":[],"draw":[{"el":"rect","z":2,"of":"state","id":2,"x":2272,"y":464,"width":896,"height":640,"rx":80,"fill":"#ffffff","stroke":"#1a1a1a","stroke-width":16}]},{"id":3,"name":"","label":"","path":"$initial","kind":"initial","parent_sub":0,"submachines":[],"live":1,"rect":[0,1136,224,224],"before":[0,1136,224,0],"after":[0,1136,224,0],"text":[],"draw":[{"el":"circle","z":11,"of":"state","id":3,"cx":112,"cy":1248,"r":112,"fill":"#1a1a1a","stroke":"#1a1a1a","stroke-width":16}]}],"subs":[{"id":0,"name":"","label":"","owner":null,"region_index":0,"children":[0,1,2,3],"live":1,"rect":[0,0,3168,1568],"down":false,"draw":[]}],"trans":[{"id":0,"src":3,"dst":0,"src_path":"$initial","dst_path":"Off","label":"","kind":"external","live":1,"points":[[224,1248],[800,1248]],"ports":[],"label_box":null,"draw":[{"el":"polyline","z":3,"of":"trans","id":0,"points":[[224,1248],[800,1248]],"fill":"none","stroke":"#1a1a1a","stroke-width":16},{"el":"polygon","z":7,"of":"trans","id":0,"points":[[800,1248],[720,1288],[720,1208]],"fill":"#1a1a1a","stroke":"none"}]},{"id":1,"src":0,"dst":1,"src_path":"Off","dst_path":"Blinking","label":"charging","kind":"external","live":1,"points":[[1248,928],[1248,640]],"ports":[],"label_box":null,"draw":[{"el":"polyline","z":4,"of":"trans","id":1,"points":[[1248,928],[1248,640]],"fill":"none","stroke":"#1a1a1a","stroke-width":16},{"el":"polygon","z":8,"of":"trans","id":1,"points":[[1248,640],[1288,720],[1208,720]],"fill":"#1a1a1a","stroke":"none"}]},{"id":2,"src":1,"dst":2,"src_path":"Blinking","dst_path":"Solid","label":"charged","kind":"external","live":1,"points":[[1696,552],[2272,552]],"ports":[],"label_box":null,"draw":[{"el":"polyline","z":5,"of":"trans","id":2,"points":[[1696,552],[2272,552]],"fill":"none","stroke":"#1a1a1a","stroke-width":16},{"el":"polygon","z":9,"of":"trans","id":2,"points":[[2272,552],[2192,592],[2192,512]],"fill":"#1a1a1a","stroke":"none"}]},{"id":3,"src":2,"dst":0,"src_path":"Solid","dst_path":"Off","label":"undocked","kind":"external","live":1,"points":[[2272,1016],[1696,1016]],"ports":[],"label_box":null,"draw":[{"el":"polyline","z":6,"of":"trans","id":3,"points":[[2272,1016],[1696,1016]],"fill":"none","stroke":"#1a1a1a","stroke-width":16},{"el":"polygon","z":10,"of":"trans","id":3,"points":[[1696,1016],[1776,976],[1776,1056]],"fill":"#1a1a1a","stroke":"none"}]}]};
+</script>
+<script>
+// xxHash32 over little-endian int32 words, and the estop/led hash split demo.
+window.SXdet = (function () {
+  var P1 = 2654435761, P2 = 2246822519, P3 = 3266489917, P4 = 668265263, P5 = 374761393;
+  function rotl(x, r) { return ((x << r) | (x >>> (32 - r))) >>> 0; }
+  function mul(a, b) { return Math.imul(a, b) >>> 0; }
+  function xxh32(words, seed) {
+    var bytes = new Uint8Array(words.length * 4), dv = new DataView(bytes.buffer);
+    words.forEach(function (w, i) { dv.setInt32(i * 4, w | 0, true); });
+    var len = bytes.length, i = 0, h;
+    function rd(k) { return dv.getUint32(k, true); }
+    function round(acc, v) { return mul(rotl((acc + mul(v, P2)) >>> 0, 13), P1); }
+    if (len >= 16) {
+      var v1 = (seed + P1 + P2) >>> 0, v2 = (seed + P2) >>> 0, v3 = seed >>> 0, v4 = (seed - P1) >>> 0;
+      for (; i <= len - 16; i += 16) { v1 = round(v1, rd(i)); v2 = round(v2, rd(i + 4)); v3 = round(v3, rd(i + 8)); v4 = round(v4, rd(i + 12)); }
+      h = (rotl(v1, 1) + rotl(v2, 7) + rotl(v3, 12) + rotl(v4, 18)) >>> 0;
+    } else h = (seed + P5) >>> 0;
+    h = (h + len) >>> 0;
+    for (; i + 4 <= len; i += 4) h = mul(rotl((h + mul(rd(i), P3)) >>> 0, 17), P4);
+    for (; i < len; i++) h = mul(rotl((h + mul(bytes[i], P5)) >>> 0, 11), P1);
+    h ^= h >>> 15; h = mul(h, P2); h ^= h >>> 13; h = mul(h, P3); h ^= h >>> 16;
+    return h >>> 0;
+  }
+  function hex(h) { return ('0000000' + (h >>> 0).toString(16)).slice(-8); }
+  function chars(s) { return String(s).split('').map(function (c) { return c.charCodeAt(0); }); }
+  return { xxh32: xxh32, hex: hex, chars: chars };
+})();
+window.SXdetHashes = function (sec) {
+  var D = SXdet, estop = SX.data('charts').charts.estop.notext, led = window.SXdetLed;
+  var models = { estop: SX.data('charts').charts.estop.model, led: SX.data('charts').charts.led.model };
+  var GOLD = { estop: ['0bec6ad2', '54fe3996', '19f815d2'], led: ['0bec6ad2', 'c5553683', '19f815d2'] };
+  var f = SX.figure(sec.querySelector('[data-fig="det-hashes"]'), { caption: '<b>Hover</b> a hash for what it covers. Top: scav\'s committed goldens. estop and led are different three-state models with identical no-text geometry, so they share the inputs digest and the coordinate hash and differ only in the structural hash, which is seeded with the model. Below: <b>slide</b> the drawing sideways or <b>switch</b> the model and watch which digest moves. These two digests are xxHash32 over this page\'s own serialisation of the same inputs, so their values are not scav\'s, but the split behaves the same way.' });
+  var WHAT = ['<b>inputs digest</b>: profile (52 fields), router name and version, packer choice, space-request tables', '<b>structural hash</b>: ranks, in-rank orders, port sides, bend direction tokens; seeded with the model\'s structural digest', '<b>coordinate hash</b>: every rectangle, point and port coordinate'];
+  var NAMES = ['inputs', 'structural', 'coordinate'];
+  var top = SX.el('div', { class: 'fig-row' });
+  ['estop', 'led'].forEach(function (n) {
+    var g = n === 'estop' ? estop : led, box = SX.el('div'), host = SX.el('div');
+    box.appendChild(SX.el('div', { style: { fontWeight: 600 }, text: n + ' · no text (state names written in by this page)' }));
+    box.appendChild(host);
+    var h = SX.chart(host, g, { maxHeight: 170, pad: 160 });
+    g.states.forEach(function (st) {                          // a no-text drawing reserves no room for names; they are written in here
+      var nm = models[n].states[st.id] && models[n].states[st.id].name; if (!nm) return;
+      h.text([st.rect[0] + st.rect[2] / 2, st.rect[1] + st.rect[3] / 2 + 40], nm, { 'font-size': 120, 'text-anchor': 'middle' });
+    });
+    var t = SX.el('div', { style: { fontFamily: 'var(--mono)', fontSize: '13px', display: 'flex', gap: '14px', flexWrap: 'wrap' } });
+    GOLD[n].forEach(function (h, k) {
+      var same = GOLD.estop[k] === GOLD.led[k];
+      var span = SX.el('span', { style: { padding: '1px 6px', borderRadius: '5px', background: same ? 'var(--surface-2)' : 'color-mix(in srgb, var(--hl) 22%, transparent)' } }, SX.el('span', { style: { color: 'var(--text-muted)' }, text: NAMES[k] + ' ' }), h);
+      SX.tipOn(span, WHAT[k] + '<br>' + (same ? 'the same for estop and led' : 'differs between estop and led'));
+      t.appendChild(span);
+    });
+    box.appendChild(t);
+    top.appendChild(box);
+  });
+  f.stage.appendChild(top);
+  // the stand-in demo
+  var dx = 0, model = 'estop';
+  var demo = SX.el('div', { style: { marginTop: '14px', paddingTop: '10px', borderTop: '1px solid var(--border)' } });
+  var ctrl = SX.el('div', { class: 'ctrl' });
+  ctrl.appendChild(SX.slider({ label: 'translate right by', min: 0, max: 256, step: 16, value: 0, format: function (v) { return v + ' units'; }, onInput: function (v) { dx = v; calc(); } }).el);
+  ctrl.appendChild(SX.choice({ options: [{ value: 'estop', label: "estop's model" }, { value: 'led', label: "led's model" }], value: model, onChange: function (v) { model = v; calc(); } }).el);
+  var out = SX.el('div', { style: { fontFamily: 'var(--mono)', fontSize: '14px', display: 'flex', gap: '18px', flexWrap: 'wrap', margin: '6px 0' } });
+  demo.appendChild(ctrl); demo.appendChild(out); f.stage.appendChild(demo);
+  var base = { s: null, c: null };
+  function structural(g, m) {
+    var seed = D.xxh32(D.chars(JSON.stringify(m.states.map(function (s) { return s.name; })) + JSON.stringify(m.transitions.map(function (t) { return [t.src, t.dst, t.label]; }))), 0);
+    var w = [], byFrame = {};
+    g.states.forEach(function (s) { (byFrame[s.parent_sub] = byFrame[s.parent_sub] || []).push(s); });
+    Object.keys(byFrame).sort().forEach(function (fr) {
+      var ss = byFrame[fr], xs = ss.map(function (s) { return s.rect[0]; }).filter(function (x, i, a) { return a.indexOf(x) === i; }).sort(function (a, b) { return a - b; });
+      ss.forEach(function (s) {                               // rank from sorted distinct x, position by y within the column
+        var col = ss.filter(function (o) { return o.rect[0] === s.rect[0]; }).sort(function (a, b) { return a.rect[1] - b.rect[1]; });
+        w.push(s.id, xs.indexOf(s.rect[0]), col.indexOf(s));
+      });
+    });
+    g.trans.forEach(function (t) {
+      (t.ports || []).forEach(function (p) { w.push(p.side); });
+      var P = t.points || [];
+      for (var k = 0; k + 1 < P.length; k++) w.push(Math.sign(P[k + 1][0] - P[k][0]) * 3 + Math.sign(P[k + 1][1] - P[k][1]));
+    });
+    return D.xxh32(w, seed);
+  }
+  function coordinate(g, dx) {
+    var w = [];
+    g.states.forEach(function (s) { w.push(s.rect[0] + dx, s.rect[1], s.rect[2], s.rect[3]); });
+    g.trans.forEach(function (t) { (t.points || []).forEach(function (p) { w.push(p[0] + dx, p[1]); }); (t.ports || []).forEach(function (p) { w.push((p.at || 0) + (p.side < 2 ? 0 : dx), p.depth || 0); }); });
+    return D.xxh32(w, 0);
+  }
+  function calc() {
+    var g = model === 'estop' ? estop : led, s = structural(g, models[model]), c = coordinate(g, dx);
+    if (base.s == null) { base.s = s; base.c = c; }
+    out.innerHTML = '';
+    [['structural (stand-in)', s, base.s], ['coordinate (stand-in)', c, base.c]].forEach(function (x) {
+      var moved = x[1] !== x[2];
+      out.appendChild(SX.el('span', { style: { padding: '2px 8px', borderRadius: '6px', background: moved ? 'color-mix(in srgb, var(--hl) 22%, transparent)' : 'var(--surface-2)' } }, SX.el('span', { style: { color: 'var(--text-muted)' }, text: x[0] + ' ' }), D.hex(x[1]), SX.el('span', { style: { color: 'var(--text-secondary)', fontFamily: 'var(--sans)', fontSize: '12.5px' }, text: moved ? '  changed' : '  unchanged' })));
+    });
+    out.appendChild(SX.el('span', { class: 'note', style: { fontFamily: 'var(--sans)' }, text: '(compared with estop at its own position)' }));
+  }
+  calc();
+};
+</script>
+<script>
+// Figure: brew's 16 rows on the pool at each selftest thread count, under injected delays.
+window.SXdetThreads = function (sec) {
+  var B = SX.data('rows').charts.brew, rows = B.rows;
+  var f = SX.figure(sec.querySelector('[data-fig="det-threads"]'), { caption: '<b>Pick a thread count</b> and <b>reseed the delays</b>. Each bar is one of brew\'s 16 Level 2 rows, searched as one shard; its converged cost is real. Durations are simulated with the injector\'s rule (a base plus <code>rnd % 64</code> yields plus <code>rnd % 4096</code> spins), and the pool hands each free thread the lowest unclaimed shard. Rows 0, 2, 4 and 6 tie at 3,595. A reduction that keeps the first tied row to <i>finish</i> picks whichever happened to end first; scav\'s reduction runs in row order and always picks row 0, so the row, the drawing and its hashes never move.' });
+  var COUNTS = [1, 2, 3, 5, 8, 13, 16], threads = 3, seed = 1;
+  var tc = SX.choice({ options: COUNTS.map(function (n) { return { value: n, label: n + (n === 1 ? ' thread' : '') }; }), value: threads, onChange: function (v) { threads = v; draw(); } });
+  f.ctrl.appendChild(tc.el);
+  f.ctrl.appendChild(SX.button('Reseed delays', function () { seed++; draw(); }));
+  var seedOut = SX.el('span', { class: 'readout' }); f.ctrl.appendChild(seedOut);
+  var COST = rows.map(function (r) { return r.searched.cost.t2; });
+  var GROUPS = COST.filter(function (c, i, a) { return a.indexOf(c) === i; }).sort(function (a, b) { return a - b; });
+  function rnd(s, k, shard) { var x = (Math.imul(s, 0x9E3779B1) ^ Math.imul(k + 1, 0x85EBCA77) ^ Math.imul(shard + 1, 0xC2B2AE3D)) >>> 0; x ^= x >>> 16; x = Math.imul(x, 0x7FEB352D) >>> 0; x ^= x >>> 15; x = Math.imul(x, 0x846CA68B) >>> 0; x ^= x >>> 16; return x >>> 0; }
+  function schedule(n) {
+    var dur = rows.map(function (r, i) { return 60 + (rnd(seed, 0, i) % 64) + (rnd(seed, 1, i) % 4096) / 64; });
+    var free = []; for (var t = 0; t < n; t++) free.push(0);
+    var runs = [];
+    for (var i = 0; i < rows.length; i++) {                  // lowest unclaimed shard to the first free thread
+      var best = 0; for (t = 1; t < n; t++) if (free[t] < free[best]) best = t;
+      runs.push({ row: i, thread: best, start: free[best], end: free[best] + dur[i] });
+      free[best] += dur[i];
+    }
+    return runs;
+  }
+  function draw() {
+    seedOut.textContent = 'delay seed ' + seed;
+    var runs = schedule(threads), end = Math.max.apply(null, runs.map(function (r) { return r.end; }));
+    var W = 1000, laneH = threads > 8 ? 18 : 26, m = { l: 70, r: 16, t: 8, b: 26 }, H = m.t + m.b + laneH * threads;
+    var X = function (v) { return m.l + v / end * (W - m.l - m.r); };
+    var svg = SX.svg('svg', { viewBox: '0 0 ' + W + ' ' + H, style: { width: '100%', height: 'auto', font: '11.5px ' + SX.css('--sans') } });
+    for (var t = 0; t < threads; t++) svg.appendChild(SX.svg('text', { x: m.l - 8, y: m.t + t * laneH + laneH * 0.65, 'text-anchor': 'end', fill: SX.css('--text-secondary'), text: 'thread ' + (t + 1) }));
+    svg.appendChild(SX.svg('text', { x: (W + m.l) / 2, y: H - 6, 'text-anchor': 'middle', fill: SX.css('--text-muted'), text: 'simulated time →' }));
+    runs.forEach(function (r) {
+      var y = m.t + r.thread * laneH, col = SX.css('--series-' + (GROUPS.indexOf(COST[r.row]) + 1));
+      var rect = SX.svg('rect', { x: X(r.start) + 0.5, y: y + 2, width: Math.max(X(r.end) - X(r.start) - 1, 1), height: laneH - 4, rx: 3, fill: col, 'fill-opacity': 0.85 });
+      svg.appendChild(rect);
+      if (X(r.end) - X(r.start) > 22) svg.appendChild(SX.svg('text', { x: (X(r.start) + X(r.end)) / 2, y: y + laneH * 0.66, 'text-anchor': 'middle', fill: SX.css('--text-primary'), 'pointer-events': 'none', text: r.row }));
+      SX.tipOn(rect, '<b>row ' + r.row + '</b> on thread ' + (r.thread + 1) + '<br>converged t2 ' + SX.fmt(COST[r.row]) + '<br><span class="m">finished ' + (runs.filter(function (q) { return q.end < r.end; }).length + 1) + ' of 16</span>');
+    });
+    var byEnd = runs.slice().sort(function (a, b) { return a.end - b.end || a.row - b.row; });
+    var arrival = null; byEnd.forEach(function (r) { if (arrival == null || COST[r.row] < COST[arrival]) arrival = r.row; });
+    var index = 0; COST.forEach(function (c, i) { if (c < COST[index]) index = i; });
+    var g = rows[index].searched, hx = function (v) { return ('0000000' + (v >>> 0).toString(16)).slice(-8); };
+    f.stage.innerHTML = '';
+    f.stage.appendChild(SX.el('div', { class: 'legend' }, GROUPS.map(function (c, k) { return SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--series-' + (k + 1) + ')' } }), 'converges to ' + SX.fmt(c)); })));
+    f.stage.appendChild(svg);
+    var tbl = SX.el('table', { class: 'sx-table', style: { fontSize: '13.5px' } });
+    tbl.appendChild(SX.el('tr', null, SX.el('th', { text: 'reduction' }), SX.el('th', { text: 'picks' }), SX.el('th', { text: 'drawing hashes, real text (structural · coordinate)' })));
+    tbl.appendChild(SX.el('tr', { class: 'hl' }, SX.el('td', { text: 'scav: argmin in row order, ties to the lower row' }), SX.el('td', { text: 'row ' + index + ' (' + SX.fmt(COST[index]) + ')' }), SX.el('td', null, SX.el('code', { text: hx(g.hash.structural) + ' · ' + hx(g.hash.coordinate) }))));
+    tbl.appendChild(SX.el('tr', null, SX.el('td', { text: 'first least cost to finish (not scav)' }), SX.el('td', { text: 'row ' + arrival + (arrival !== index ? ' (moved with the schedule)' : '') }), SX.el('td', { class: 'note', text: 'a pick that varies with threads would fail the determinism class' })));
+    f.stage.appendChild(tbl);
+  }
+  draw();
+};
+SX.register('determinism', function (sec) {
+  SXdetHashes(sec);
+  SXdetThreads(sec);
+});
+</script>
