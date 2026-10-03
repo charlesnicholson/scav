@@ -61,7 +61,9 @@ Rendered render(char const *name, Metrics const &m, scav_profile const &p) {
   REQUIRE_MESSAGE(measure_chart(r.chart, m, p, spaces), name);
   std::vector<scav_placed> placed;
   scav_layout_opts const opts{ .profile = p, .router = 0, .threads = 0 };
-  REQUIRE_MESSAGE(layout_run(r.chart, as_spaces(spaces), opts, placed, diags), name);
+  REQUIRE_MESSAGE(
+      scav::test::corpus_layout(r.chart, name, as_spaces(spaces), opts, placed, diags),
+      name);
   REQUIRE_MESSAGE(emit_chart(r.list,
                              r.chart,
                              m,
@@ -80,8 +82,6 @@ Rendered render(char const *name, Metrics const &m, scav_profile const &p) {
 }
 
 // One chart rendered at `readable` with the bundled font, once per process.
-// Five cases read the corpus documents, and at the shipped search depth one
-// pass over them is minutes.
 Rendered const &rendered(char const *name) {
   static std::map<std::string, Rendered> done;
   auto const found{ done.find(name) };
