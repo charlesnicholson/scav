@@ -1127,7 +1127,8 @@ TEST_CASE("layout: geometry invariants hold across topologies and spaces") {
   // is joined puts nearly every segment on a cycle, so the depth that ships
   // spends twenty minutes on one layout here and tests nothing more for it.
   scav_profile bounded{ readable() };
-  bounded.portfolio_k = 24;
+  bounded.portfolio_k =
+      scav::test::corpus_light() ? 6 : 24;  // light rows run every stage briefer
   SUBCASE("with no space requests") { run(c, {}, bounded); }
   SUBCASE("with fabricated measurement") {
     // A pure integer function of the model, the way a real app measures.

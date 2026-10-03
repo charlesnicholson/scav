@@ -71,6 +71,8 @@ class TestGauntlet(unittest.TestCase):
                     self.assertEqual("", result.stdout)
                     self.assertEqual(0, result.returncode)
 
+    @unittest.skipIf(os.environ.get("SCAV_TEST_CORPUS") == "light",
+                     "light rows: the layout suite lays out every chart at both profiles")
     def test_every_chart_renders_at_both_profiles(self) -> None:
         for chart in self.charts:
             for profile in PROFILES:
