@@ -254,7 +254,7 @@ def main() -> int:
                   flush=True)
         raise SystemExit(code)
 
-    if args.coverage:
+    if args.coverage and not args.no_test:
         run(python, REPO_ROOT / "tools/coverage.py", "--build", build_dir)
 
     print(f"\nGreen: {preset}", flush=True)
