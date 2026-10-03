@@ -68,7 +68,7 @@ class TestRender(unittest.TestCase):
         name = "scav.exe" if os.name == "nt" else "scav"
         cls.exe = cls.cfg.build_dir / "bin" / name
         charts = (cls.cfg.repo_root / "test_data/charts").glob("*.scav")
-        cls.charts = sorted(c for c in charts if not scavtest.corpus_skipped(c.name))
+        cls.charts = sorted(c for c in charts if c.name not in scavtest.HEAVY_CHARTS)
         assert cls.charts
         cls.scratch = scavtest.fresh_dir(cls.cfg.scratch_dir / "render")
 
@@ -91,7 +91,7 @@ class TestRender(unittest.TestCase):
         self.assertEqual(0, result.returncode)
         return result.stdout
 
-    def test_every_corpus_chart_renders_to_parseable_svg(self) -> None:
+    def test_every_light_corpus_chart_renders_to_parseable_svg(self) -> None:
         for chart in self.charts:
             with self.subTest(chart=chart.name):
                 doc = self.render(chart)

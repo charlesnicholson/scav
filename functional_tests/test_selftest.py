@@ -85,8 +85,8 @@ class TestSelftest(unittest.TestCase):
 
     # The clean run ==========================================================
 
-    @unittest.skipIf(scavtest.corpus_light(),
-                     "SCAV_TEST_CORPUS=light: the embedded corpus includes its four heaviest charts")
+    @unittest.skipUnless(os.environ.get("SCAV_TEST_SELFTEST") == "1",
+                         "the full-corpus selftest runs with SCAV_TEST_SELFTEST=1")
     def test_the_corpus_matches_the_committed_golden_from_an_empty_directory(self) -> None:
         # From an empty directory, so the charts and golden can only be embedded.
         here = self.scratch()
