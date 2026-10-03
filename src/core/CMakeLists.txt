@@ -65,6 +65,7 @@ if(SCAV_BUILD_TESTS)
   # Unit tests pair with their subject; everything suite-level lives in tests/,
   # named by its class beside the fixtures it drives.
   scav_tests(scav_core_tests
+    TIMING "perf:*"
     c_api_tests.cpp
     diagnostics_tests.cpp
     lang/lexer_tests.cpp
