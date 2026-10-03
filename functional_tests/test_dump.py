@@ -498,6 +498,7 @@ class TestDump(unittest.TestCase):
         end = out.index("\n]\n") + 3
         return json.loads(out[:end]), json.loads(out[end:])
 
+    @scavtest.full_only
     def test_a_traced_run_draws_what_an_untraced_one_draws(self) -> None:
         """The trace re-derives the drawing the search picked, so it may not
         move it. A debug facility that changes the answer is worth nothing."""
@@ -520,6 +521,7 @@ class TestDump(unittest.TestCase):
                     self.assertEqual(want[key], got[key], key)
                 self.assertTrue(events)
 
+    @scavtest.full_only
     def test_every_event_names_its_kind_and_its_frame(self) -> None:
         traced = self.run_dump("--json", "--layout", "--trace", NETWORK.as_posix())
         self.assertEqual(0, traced.returncode, traced.stderr)

@@ -338,7 +338,8 @@ uint32_t capped_branches(Laid const &l) {
 
 }  // namespace
 
-TEST_CASE("gauntlet: no element routes an edge through a box") {
+TEST_CASE("gauntlet: no element routes an edge through a box" *
+          doctest::test_suite("full")) {
   // Every chart, `regions.scav` included: what the portfolio ships routes
   // through nothing at either profile. It carved this out while the suite
   // scored one candidate, and the count 11.8 still owns is pinned at the end
@@ -373,7 +374,8 @@ TEST_CASE("gauntlet: no element routes an edge through a box") {
   }
 }
 
-TEST_CASE("gauntlet: every route is axis-aligned, forward, and reaches its ends") {
+TEST_CASE("gauntlet: every route is axis-aligned, forward, and reaches its ends" *
+          doctest::test_suite("full")) {
   for (char const *name : GAUNTLET) {
     // The same shape and the same cause: a route round the outside of the state
     // holding both regions leaves and returns along one line.
@@ -413,7 +415,8 @@ TEST_CASE("gauntlet: every route is axis-aligned, forward, and reaches its ends"
   }
 }
 
-TEST_CASE("gauntlet: an end on an inscribed glyph is at the middle of a face") {
+TEST_CASE("gauntlet: an end on an inscribed glyph is at the middle of a face" *
+          doctest::test_suite("full")) {
   // A disc and a diamond touch their box at four points. An axis-aligned route
   // to any other point on the face stops short of the mark it is drawn to, by
   // more of the glyph the further along the face it lands.
@@ -684,7 +687,8 @@ TEST_CASE("gauntlet: a fan-in's arrivals are four arrows, none inside another") 
   }
 }
 
-TEST_CASE("gauntlet: an endpoint that is also a crossing is one point, not two") {
+TEST_CASE("gauntlet: an endpoint that is also a crossing is one point, not two" *
+          doctest::test_suite("full")) {
   // Into a composite's own child the route starts on the composite's border,
   // and the crossing it makes there is that same point; out of a child it ends
   // on it. Two points would put a leg along the border between them, which
@@ -1314,7 +1318,8 @@ TEST_CASE("gauntlet: a state beside a composite is centred on the port it enters
   }
 }
 
-TEST_CASE("gauntlet: every state lies inside the frame it is drawn in") {
+TEST_CASE("gauntlet: every state lies inside the frame it is drawn in" *
+          doctest::test_suite("full")) {
   for (char const *name : GAUNTLET) {
     for (scav_profile const &p :
          { readable(), compact(), one_row(readable()), one_row(compact()) }) {

@@ -165,6 +165,7 @@ class TestRender(unittest.TestCase):
                                 capture_output=True, text=True, check=False)
         self.assertEqual(0, result.returncode, result.stderr)
 
+    @scavtest.full_only
     def test_a_named_profile_changes_the_diagram(self) -> None:
         chart = self.cfg.repo_root / "test_data/charts/vac.scav"
         readable = self.render(chart)
@@ -292,6 +293,7 @@ class TestBaselineHarness(unittest.TestCase):
     asserted is that scav renders and that anything absent is reported rather
     than left as a silent gap."""
 
+    @scavtest.full_only
     def test_the_harness_runs_and_names_what_it_could_not_compare(self) -> None:
         cfg = scavtest.load_config()
         out = cfg.build_dir / "baseline"

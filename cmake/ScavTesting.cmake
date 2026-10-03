@@ -125,7 +125,7 @@ function(scav_stamped_test stamp_name)
     DEPENDS ${arg_DEPENDS} "${PROJECT_SOURCE_DIR}/cmake/ScavRunTest.cmake"
     WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
     COMMENT "${arg_COMMENT}"
-    USES_TERMINAL
+
     VERBATIM
   )
 
