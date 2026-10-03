@@ -77,6 +77,7 @@ scav_add_functional_test(dump
           "${PROJECT_SOURCE_DIR}/test_data/golden/dump/vac.json"
           "${PROJECT_SOURCE_DIR}/test_data/golden/dump/vac_layout.txt"
           "${PROJECT_SOURCE_DIR}/test_data/golden/dump/vac_layout.json"
+          "${PROJECT_SOURCE_DIR}/test_data/golden/layout/corpus_pins.txt"
           "$<TARGET_FILE:scav>"
   TARGETS scav
 )
@@ -102,6 +103,7 @@ scav_add_functional_test(layout
 # reports what it could not compare.
 scav_add_functional_test(render
   DEPENDS ${scav_corpus_charts}
+          "${PROJECT_SOURCE_DIR}/test_data/golden/layout/corpus_pins.txt"
           "${PROJECT_SOURCE_DIR}/tools/baseline.py"
           "${PROJECT_SOURCE_DIR}/assets/font/JetBrainsMono-Regular.ttf"
           "${PROJECT_SOURCE_DIR}/src/draw/gen_font_table.py"

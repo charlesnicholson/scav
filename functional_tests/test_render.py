@@ -94,7 +94,7 @@ class TestRender(unittest.TestCase):
     def test_every_light_corpus_chart_renders_to_parseable_svg(self) -> None:
         for chart in self.charts:
             with self.subTest(chart=chart.name):
-                doc = self.render(chart)
+                doc = self.render(chart, *scavtest.pinned(self.cfg.repo_root, chart.name))
                 # A real XML parser, not a substring check: the point is that a
                 # browser or an SVG consumer would accept it.
                 root = ElementTree.fromstring(doc)

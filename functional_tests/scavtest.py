@@ -21,6 +21,19 @@ def cli_skipped(chart: str) -> bool:
     return chart in HEAVY_CHARTS or (light and chart not in LIGHT_CHARTS)
 
 
+PINS = Path("test_data/golden/layout/corpus_pins.txt")
+
+
+def pinned(repo_root: Path, chart: str, text: bool = True) -> list[str]:
+    """The flags that lay a corpus chart out at `readable` from its committed pins,
+    `--no-search` included; `text` picks the real-text line over the --no-text one."""
+    for line in (repo_root / PINS).read_text(encoding="utf-8").splitlines():
+        name, *flags = line.split()
+        if name == chart and flags[0] == ("--portfolio-row" if text else "--no-text"):
+            return [*flags, "--no-search"]
+    raise KeyError(f"{chart} has no line in {PINS}")
+
+
 class Config(dict[str, str]):
     """The build tree under test, as CMake described it at configure time."""
 
