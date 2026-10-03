@@ -523,7 +523,8 @@ TEST_CASE("metrics: truncating the bundled font at every length never crashes") 
   }
 }
 
-TEST_CASE("metrics: the bundled table is the committed TTF, codepoint by codepoint") {
+TEST_CASE("metrics: the bundled table is the committed TTF, codepoint by codepoint" *
+          doctest::test_suite("full")) {
   Metrics const table{ bundled() };
   Metrics const ttf{ parsed() };
   std::vector<scav_byte> const &bytes{ committed_ttf() };

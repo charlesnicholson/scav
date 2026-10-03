@@ -1094,7 +1094,8 @@ void check_geometry(Chart const &c) {
 
 }  // namespace
 
-TEST_CASE("layout: geometry invariants hold across topologies and spaces") {
+TEST_CASE("layout: geometry invariants hold across topologies and spaces" *
+          doctest::test_suite("full")) {
   // The split sweep's fixture: mixed depth, concurrency, nesting in a region.
   auto fixture = [] {
     Chart c;
@@ -1132,8 +1133,7 @@ TEST_CASE("layout: geometry invariants hold across topologies and spaces") {
   // is joined puts nearly every segment on a cycle, so the depth that ships
   // spends twenty minutes on one layout here and tests nothing more for it.
   scav_profile bounded{ readable() };
-  bounded.portfolio_k =
-      scav::test::corpus_light() ? 6 : 24;  // light rows run every stage briefer
+  bounded.portfolio_k = 24;
   SUBCASE("with no space requests") { run(c, {}, bounded); }
   SUBCASE("with fabricated measurement") {
     // A pure integer function of the model, the way a real app measures.
@@ -1214,7 +1214,7 @@ TEST_CASE("layout: the flat two thousand lay out too, and quickly") {
 }
 
 TEST_CASE("layout: no corpus chart runs a route flush along a box" *
-          doctest::skip(scav::test::corpus_light())) {  // needs the larger charts
+          doctest::test_suite("full")) {
   // The router's own suite proves clearance over the graph; what it cannot see is
   // a box flush against the *frame's* edge, which has no room for a lane. Phase 3
   // owns the margin, and `brew` is where the shape occurs.
@@ -1398,7 +1398,8 @@ constexpr std::array<std::array<int64_t, 11>, 8> SCALE_PINNED{
 
 }  // namespace
 
-TEST_CASE("layout: both scale targets score to pinned terms, profile by router") {
+TEST_CASE("layout: both scale targets score to pinned terms, profile by router" *
+          doctest::test_suite("full")) {
   // Nothing else pins a `CostTerms` over 2k states, and the scorer's shape is
   // what changes underneath these: a chart deep enough for a hierarchy walk to
   // get wrong, and one flat enough for it to have nothing to walk.
@@ -1665,7 +1666,8 @@ TEST_CASE("layout: the pick is the row exact Cost ranks first over the whole tab
   CHECK(cost_less(cost[picked], cost[0]) == (picked != 0));
 }
 
-TEST_CASE("layout: a pinned row runs that row, and searches from it") {
+TEST_CASE("layout: a pinned row runs that row, and searches from it" *
+          doctest::test_suite("full")) {
   // Calibration's one knob: a row the objective would never pick, laid out and
   // written anyway, so its drawing can be scored beside the row that ships
   // (11.10, 11.12). With the move budget off, every row of the table is held to
@@ -1772,7 +1774,8 @@ TEST_CASE("layout: a pinned row runs that row, and searches from it") {
   CHECK(picked == 5);
 }
 
-TEST_CASE("layout: the search turns a frame down where that converges cheaper") {
+TEST_CASE("layout: the search turns a frame down where that converges cheaper" *
+          doctest::test_suite("full")) {
   // `axis`'s `monitor` region is two states in sequence, and turned to run
   // down it is a column beside `travel` rather than a row across `Moving`
   // (11.10g). The drawing that ships rests on the turn.
@@ -1795,7 +1798,8 @@ TEST_CASE("layout: the search turns a frame down where that converges cheaper") 
   CHECK(!taken.orients.empty());
 }
 
-TEST_CASE("layout: what ships is the cheapest row searched and kicked on its own") {
+TEST_CASE("layout: what ships is the cheapest row searched and kicked on its own" *
+          doctest::test_suite("full")) {
   // A pinned row is that row searched and kicked to convergence, so the whole table does
   // no worse than any one row.
   scav_profile const p{ readable() };
@@ -2489,7 +2493,8 @@ TEST_CASE("layout: a transition every net of which fell back is diagnosed once" 
   CHECK(diags[0].subject.ordinal == 0);
 }
 
-TEST_CASE("layout: a graph past the router's budget is not a spacing problem") {
+TEST_CASE("layout: a graph past the router's budget is not a spacing problem" *
+          doctest::test_suite("full")) {
   // Cycle breaking turns a thirteen-rank skip into a long one, and the frame that
   // holds them all is the shape whose grid the router refuses.
   Chart c;
@@ -2620,7 +2625,8 @@ TEST_CASE("layout: nothing in the corpus or at the scale target inflates") {
   CHECK(wide.empty());
 }
 
-TEST_CASE("layout: a frame full of long edges terminates, expensively") {
+TEST_CASE("layout: a frame full of long edges terminates, expensively" *
+          doctest::test_suite("full")) {
   // The shape the case above is not. Cycle breaking reverses in node order, and a
   // reversed chain edge turns a thirteen-rank skip into a thousand-rank one.
   Chart c;
@@ -2648,7 +2654,8 @@ TEST_CASE("layout: a frame full of long edges terminates, expensively") {
   CHECK((layout_run(c, {}, scale_opts(readable()), placed, diags) || !diags.empty()));
 }
 
-TEST_CASE("layout: the coordinate extent estimate holds under fat text") {
+TEST_CASE("layout: the coordinate extent estimate holds under fat text" *
+          doctest::test_suite("full")) {
   // Generous stand-ins for measured text, so the grid decision errs conservative:
   // twenty wide glyphs, two title lines, a compartment.
   int32_t lo{ 0 };
@@ -2686,7 +2693,7 @@ TEST_CASE("layout: the coordinate extent estimate holds under fat text") {
   CHECK(best.h <= COORD_MAX);
 }
 
-TEST_CASE("layout: the search reaches the committed pins on every corpus chart") {
+TEST_CASE("layout: the search reaches the committed pins on every searched corpus chart") {
   // Every other corpus case lays out from these pins with the search off.
   std::string actual;
   for (char const *name : { "axis.scav",
@@ -2700,7 +2707,10 @@ TEST_CASE("layout: the search reaches the committed pins on every corpus chart")
                             "tcp.scav",
                             "toolchanger.scav",
                             "vac.scav" }) {
-    if (scav::test::corpus_skipped(name)) { continue; }
+    if (!scav::test::corpus_searched(name)) {
+      actual += scav::test::corpus_pins_of(name, false);  // taken as committed
+      continue;
+    }
     CAPTURE(name);
     Chart c;
     load_corpus(name, c);
@@ -2721,8 +2731,8 @@ TEST_CASE("layout: the search reaches the committed pins on every corpus chart")
     actual += scav::test::corpus_pins_line(name, row, taken, false);
   }
 
-  std::string const want{ scav::test::corpus_golden(
-      scav::test::corpus_pins_at(scav::test::corpus_pins_file(), false)) };
+  std::string const want{ scav::test::corpus_pins_at(scav::test::corpus_pins_file(),
+                                                     false) };
   if (want != actual) {
     scav::test::corpus_pins_write(actual, false);
     MESSAGE("actual written to " SCAV_TEST_OUT_DIR "/corpus_pins.txt:\n", actual);

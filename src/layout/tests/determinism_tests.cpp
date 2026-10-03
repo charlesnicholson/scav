@@ -245,7 +245,8 @@ TEST_CASE("determinism: the corpus lays out to one answer at every thread count"
   MESSAGE("corpus shard counts: ", shards);
 }
 
-TEST_CASE("determinism: a searched drawing is the same drawing at every thread count") {
+TEST_CASE("determinism: a searched drawing is the same drawing at every thread count" *
+          doctest::test_suite("full")) {
   // The depth that ships. **This is the case that matters now that candidates
   // are scored in parallel** (11.10c) and rows, finishes and kicks run side by
   // side (11.10f): every one of them is fanned out and reduced in enumeration
@@ -269,13 +270,15 @@ TEST_CASE("determinism: a searched drawing is the same drawing at every thread c
   }
 }
 
-TEST_CASE("determinism: the scale targets lay out to one answer at every thread count") {
+TEST_CASE("determinism: the scale targets lay out to one answer at every thread count" *
+          doctest::test_suite("full")) {
   scav_profile const p{ scale_readable() };
   SUBCASE("nested") { check_scale_chart("nested 2k", nested_2k_chart, p, true); }
   SUBCASE("flat") { check_scale_chart("flat 2k", flat_2k_chart, p, false); }
 }
 
-TEST_CASE("determinism: the scheduling-delay injector moves nothing at scale") {
+TEST_CASE("determinism: the scheduling-delay injector moves nothing at scale" *
+          doctest::test_suite("full")) {
   DelayGuard const guard;
   scav_profile const p{ scale_readable() };
   Chart reference{ nested_2k_chart() };
@@ -292,7 +295,8 @@ TEST_CASE("determinism: the scheduling-delay injector moves nothing at scale") {
   }
 }
 
-TEST_CASE("determinism: the flat target survives the injector too") {
+TEST_CASE("determinism: the flat target survives the injector too" *
+          doctest::test_suite("full")) {
   DelayGuard const guard;
   scav_profile const p{ scale_readable() };
   Chart reference{ flat_2k_chart() };

@@ -447,7 +447,8 @@ TEST_CASE("gauntlet: an end on an inscribed glyph is at the middle of a face") {
   }
 }
 
-TEST_CASE("gauntlet: an arrowhead is never inked over another route's own end") {
+TEST_CASE("gauntlet: an arrowhead is never inked over another route's own end" *
+          doctest::test_suite("full")) {
   // Two ends on one point of one box, one arriving and one leaving: the head is
   // drawn along the other route's first leg and reads as belonging to it. Two
   // arrivals sharing a point are a fan-in and keep their one head, which is
@@ -1370,7 +1371,8 @@ TEST_CASE("gauntlet: a run's arrows each span one gap, not the drawing") {
   }
 }
 
-TEST_CASE("gauntlet: a route passing through a composite bends outside it") {
+TEST_CASE("gauntlet: a route passing through a composite bends outside it" *
+          doctest::test_suite("full")) {
   // A bend strictly inside `Arm` and outside `Moving` is in a state the route
   // only passes through; the leg across `Arm` is straight at either weight.
   for (scav_profile const &p : { readable(), compact() }) {

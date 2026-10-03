@@ -75,11 +75,11 @@ jobs:
       - uses: mozilla-actions/sccache-action@v0.0.11
 
       - name: Build
-        run: ./build.sh --no-test --preset ${{ matrix.triple }}-${{ matrix.config }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+        run: ./build.sh --no-test --preset ${{ matrix.triple }}-${{ matrix.config }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache ${{ matrix.config != 'debug' && '-DSCAV_TEST_TIER=full' || '' }}
 
       - name: Test
         timeout-minutes: 5
-        run: ./build.sh --preset ${{ matrix.triple }}-${{ matrix.config }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+        run: ./build.sh --preset ${{ matrix.triple }}-${{ matrix.config }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache ${{ matrix.config != 'debug' && '-DSCAV_TEST_TIER=full' || '' }}
 
       - name: Save compiler cache
         id: sccache-save
@@ -128,11 +128,11 @@ jobs:
       # Deliberately no setup-python and no brew install: the image has all three,
       # and using them would fail the provisioning test, which is what it is for.
       - name: Build
-        run: ./build.sh --no-test --preset macos-clang-libcxx-${{ matrix.config }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+        run: ./build.sh --no-test --preset macos-clang-libcxx-${{ matrix.config }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache ${{ matrix.config != 'debug' && '-DSCAV_TEST_TIER=full' || '' }}
 
       - name: Test
         timeout-minutes: 5
-        run: ./build.sh --preset macos-clang-libcxx-${{ matrix.config }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+        run: ./build.sh --preset macos-clang-libcxx-${{ matrix.config }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache ${{ matrix.config != 'debug' && '-DSCAV_TEST_TIER=full' || '' }}
 
       - name: Save compiler cache
         id: sccache-save
@@ -189,7 +189,7 @@ jobs:
           $vsPath = & $vswhere -latest -products * -property installationPath
           if (-not $vsPath) { throw "vswhere found no Visual Studio installation" }
           & "$vsPath\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64
-          & "$env:GITHUB_WORKSPACE\build.bat" --no-test --preset ${{ matrix.triple }}-${{ matrix.config }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
+          & "$env:GITHUB_WORKSPACE\build.bat" --no-test --preset ${{ matrix.triple }}-${{ matrix.config }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache ${{ matrix.config != 'debug' && '-DSCAV_TEST_TIER=full' || '' }} -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
 
       - name: Test
         timeout-minutes: 5
@@ -199,7 +199,7 @@ jobs:
           $vsPath = & $vswhere -latest -products * -property installationPath
           if (-not $vsPath) { throw "vswhere found no Visual Studio installation" }
           & "$vsPath\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64
-          & "$env:GITHUB_WORKSPACE\build.bat" --preset ${{ matrix.triple }}-${{ matrix.config }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
+          & "$env:GITHUB_WORKSPACE\build.bat" --preset ${{ matrix.triple }}-${{ matrix.config }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache ${{ matrix.config != 'debug' && '-DSCAV_TEST_TIER=full' || '' }} -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
 
       - name: Save compiler cache
         id: sccache-save

@@ -20,10 +20,10 @@ namespace scav { void layout_test_no_search(bool on); }  // namespace scav
 
 namespace scav::test {
 
-// Whether SCAV_TEST_CORPUS=light: the corpus is brew, dock, estop and led.
+// Whether the corpus is brew, dock, estop and led: every tier but SCAV_TEST_TIER=full.
 inline bool corpus_light() {
-  char const *const mode{ std::getenv("SCAV_TEST_CORPUS") };
-  return (mode != nullptr) && (std::string_view{ mode } == "light");
+  char const *const tier{ std::getenv("SCAV_TEST_TIER") };
+  return (tier == nullptr) || (std::string_view{ tier } != "full");
 }
 
 // Whether the light corpus drops this chart; a gauntlet chart is never dropped.
@@ -77,6 +77,24 @@ inline std::string corpus_pins_at(std::string_view golden, bool text) {
     if ((line.find(" --no-text ") == std::string_view::npos) == text) { out += line; }
   }
   return out;
+}
+
+// `chart`'s committed line at one scale, or empty.
+inline std::string corpus_pins_of(std::string_view chart, bool text) {
+  std::string const lines{ corpus_pins_at(corpus_pins_file(), text) };
+  std::string const key{ std::string{ chart } + ' ' };
+  for (size_t at = 0; at < lines.size();) {
+    size_t const eol{ lines.find('\n', at) };
+    size_t const end{ (eol == std::string::npos) ? lines.size() : eol + 1 };
+    if (lines.compare(at, key.size(), key) == 0) { return lines.substr(at, end - at); }
+    at = end;
+  }
+  return {};
+}
+
+// Whether a search-reaches-pins case searches `chart`; mill's search is `scav selftest`'s.
+inline bool corpus_searched(std::string_view chart) {
+  return !corpus_skipped(chart) && (chart != "mill.scav");
 }
 
 // `chart`'s line as `scav dump --layout` would print what a run took.

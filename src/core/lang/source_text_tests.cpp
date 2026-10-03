@@ -196,7 +196,8 @@ TEST_CASE("utf8: encodes each sequence length") {
   CHECK(encode(0x10FFFF) == "\xf4\x8f\xbf\xbf");
 }
 
-TEST_CASE("utf8: decode round-trips every non-surrogate codepoint") {
+TEST_CASE("utf8: decode round-trips every non-surrogate codepoint" *
+          doctest::test_suite("full")) {
   for (uint32_t cp = 0; cp <= 0x10FFFF; ++cp) {
     if ((cp >= 0xD800) && (cp <= 0xDFFF)) { continue; }
     std::string const bytes{ encode(cp) };

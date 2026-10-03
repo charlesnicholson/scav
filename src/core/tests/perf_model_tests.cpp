@@ -121,7 +121,7 @@ TEST_CASE(
   }
 }
 
-TEST_CASE("perf: lowering is linear in the input") {
+TEST_CASE("perf: lowering is linear in the input" * doctest::test_suite("full")) {
   SynthStats stats{};
   uint64_t const small_target{ INPUT_BYTES / 8 };
   std::string const small{ generate(small_target, stats) };
@@ -148,7 +148,7 @@ TEST_CASE("perf: lowering is linear in the input") {
   }
 }
 
-TEST_CASE("perf: validation is linear in the model") {
+TEST_CASE("perf: validation is linear in the model" * doctest::test_suite("full")) {
   SynthStats stats{};
   uint64_t const small_target{ INPUT_BYTES / 8 };
   std::string const small{ generate(small_target, stats) };
@@ -176,7 +176,8 @@ TEST_CASE("perf: validation is linear in the model") {
   }
 }
 
-TEST_CASE("perf: a wide sibling list lowers without degrading") {
+TEST_CASE("perf: a wide sibling list lowers without degrading" *
+          doctest::test_suite("full")) {
   // Every statement in one block: the shape that turns quadratic when an
   // append pays a fix-up walk over every span it did not touch.
   auto const wide = [](uint32_t count) {

@@ -154,7 +154,8 @@ TEST_CASE("perf: a deep chain loads at the throughput floor") {
   if (ASSERT_FLOOR) { CHECK(rate >= LOAD_FLOOR_MB_PER_S); }
 }
 
-TEST_CASE("perf: chain load is linear in the number of documents") {
+TEST_CASE("perf: chain load is linear in the number of documents" *
+          doctest::test_suite("full")) {
   // The machine-independent assertion. Discovery's find-by-key, the resolver's
   // include scan and the containment rebuild are all per-document scans.
   std::vector<Doc> const small{ chain(NARROW, 20) };
@@ -169,7 +170,8 @@ TEST_CASE("perf: chain load is linear in the number of documents") {
   CHECK(ratio < (2.0 * SCALING_SLACK));
 }
 
-TEST_CASE("perf: instantiation is linear in the number of instantiations") {
+TEST_CASE("perf: instantiation is linear in the number of instantiations" *
+          doctest::test_suite("full")) {
   // One document, many instances: parse-once must not be paid per instance,
   // and the span rebuilds must stay one-per-network.
   std::vector<Doc> const small{ star(NARROW, 20) };
@@ -189,7 +191,7 @@ TEST_CASE("perf: instantiation is linear in the number of instantiations") {
   CHECK(ratio < (2.0 * SCALING_SLACK));
 }
 
-TEST_CASE("perf: the digest is linear in the model") {
+TEST_CASE("perf: the digest is linear in the model" * doctest::test_suite("full")) {
   std::vector<Doc> const small{ chain(NARROW, 20) };
   std::vector<Doc> const large{ chain(WIDE, 20) };
 

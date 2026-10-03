@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import unittest
 from pathlib import Path
 
 type Arg = str | Path
@@ -14,11 +15,17 @@ HEAVY_CHARTS: frozenset[str] = frozenset({"bottler.scav", "mill.scav", "tcp.scav
 LIGHT_CHARTS: frozenset[str] = frozenset({"brew.scav", "dock.scav", "estop.scav", "led.scav"})
 
 
+def full_tier() -> bool:
+    return os.environ.get("SCAV_TEST_TIER") == "full"
+
+
+full_only = unittest.skipUnless(full_tier(), "SCAV_TEST_TIER=full only")
+
+
 def cli_skipped(chart: str) -> bool:
     """Whether the CLI's corpus loops leave a chart out: HEAVY_CHARTS always, and
-    everything but LIGHT_CHARTS under SCAV_TEST_CORPUS=light."""
-    light = os.environ.get("SCAV_TEST_CORPUS") == "light"
-    return chart in HEAVY_CHARTS or (light and chart not in LIGHT_CHARTS)
+    everything but LIGHT_CHARTS below the full tier."""
+    return chart in HEAVY_CHARTS or (not full_tier() and chart not in LIGHT_CHARTS)
 
 
 PINS = Path("test_data/golden/layout/corpus_pins.txt")

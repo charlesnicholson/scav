@@ -2644,7 +2644,8 @@ scav_profile random_profile(Lattice &r) {
 
 }  // namespace
 
-TEST_CASE("cost: the indexed terms are the direct scans' over seeded random charts") {
+TEST_CASE("cost: the indexed terms are the direct scans' over seeded random charts" *
+          doctest::test_suite("full")) {
   // Each candidate scored through a kept context, a per-call one, and the reference;
   // `seen` tallies each term nonzero somewhere.
   Lattice r{ 20260928 };

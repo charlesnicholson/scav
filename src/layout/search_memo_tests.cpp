@@ -186,7 +186,8 @@ TEST_CASE("search memo: the key tells apart every input a search is a function o
   }
 }
 
-TEST_CASE("search memo: a layout searched through it is the one searched without it") {
+TEST_CASE("search memo: a layout searched through it is the one searched without it" *
+          doctest::test_suite("full")) {
   MemoGuard const guard;
   constexpr std::array<char const *, 5> CHARTS{ "axis.scav",
                                                 "brew.scav",
@@ -211,7 +212,8 @@ TEST_CASE("search memo: a layout searched through it is the one searched without
   CHECK(hits > 0);
 }
 
-TEST_CASE("search memo: every search it answers is the search run afresh") {
+TEST_CASE("search memo: every search it answers is the search run afresh" *
+          doctest::test_suite("full")) {
   // Each answer is checked against the search run anyway, including those not taken.
   MemoGuard const guard;
   layout_test_search_memo_verify(true);
@@ -236,7 +238,8 @@ TEST_CASE("search memo: every search it answers is the search run afresh") {
 }
 
 TEST_CASE(
-    "search: faces with no effect, left unscored, find the layout scoring them finds") {
+    "search: faces with no effect, left unscored, find the layout scoring them finds" *
+    doctest::test_suite("full")) {
   struct Restore {
     Restore() = default;
     Restore(Restore const &) = delete;
@@ -282,7 +285,8 @@ struct PrefixGuard {
 
 TEST_CASE(
     "search: face moves scored from the incumbent's prefix find what scoring them whole "
-    "finds") {
+    "finds" *
+    doctest::test_suite("full")) {
   PrefixGuard const guard;
   constexpr std::array<char const *, 5> CHARTS{ "axis.scav",
                                                 "brew.scav",
@@ -339,7 +343,8 @@ struct BoundGuard {
 
 }  // namespace
 
-TEST_CASE("search: a labelled round scored by bound lays out what scoring it whole does") {
+TEST_CASE("search: a labelled round scored by bound lays out what scoring it whole does" *
+          doctest::test_suite("full")) {
   BoundGuard const guard;
   constexpr std::array<char const *, 3> CHARTS{ "estop.scav", "brew.scav", "dock.scav" };
   for (char const *name : CHARTS) {
@@ -361,7 +366,8 @@ TEST_CASE("search: a labelled round scored by bound lays out what scoring it who
   }
 }
 
-TEST_CASE("search: every bounded round picks what scoring each candidate whole picks") {
+TEST_CASE("search: every bounded round picks what scoring each candidate whole picks" *
+          doctest::test_suite("full")) {
   // Each round is also scored whole: the same pick at the same cost, no bound above a
   // cost; each candidate labelled on its kept routes lays out what a full lay-out does.
   BoundGuard const guard;
@@ -389,7 +395,7 @@ TEST_CASE("search: with no path boxes nothing is bounded") {
 }
 
 TEST_CASE("search schedules: each row keeps the cheaper of its two searches" *
-          doctest::skip(scav::test::corpus_light())) {  // needs the larger charts
+          doctest::test_suite("full")) {
   constexpr std::array<char const *, 6> CHARTS{ "axis.scav", "brew.scav",
                                                 "ota.scav",  "tcp.scav",
                                                 "vac.scav",  "gauntlet/carried.scav" };

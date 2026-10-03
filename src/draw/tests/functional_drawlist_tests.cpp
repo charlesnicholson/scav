@@ -141,7 +141,8 @@ std::vector<T> rows(Chart const &c, char const *name) {
 
 TEST_CASE(
     "drawlist corpus: under real text every bounded round picks what scoring it whole "
-    "picks") {
+    "picks" *
+    doctest::test_suite("full")) {
   // Each round is also scored whole: the same pick at the same cost, no bound above a
   // cost; each candidate labelled on its kept routes lays out what a full lay-out does.
   struct Restore {
@@ -169,7 +170,10 @@ TEST_CASE("drawlist corpus: under real text the search reaches the committed pin
   scav_profile const p{ readable() };
   std::string actual;
   for (char const *name : CORPUS) {
-    if (scav::test::corpus_skipped(name)) { continue; }
+    if (!scav::test::corpus_searched(name)) {
+      actual += scav::test::corpus_pins_of(name, true);  // taken as committed
+      continue;
+    }
     CAPTURE(name);
     Chart c{ load_corpus(name) };
     Spaces spaces;
@@ -192,8 +196,8 @@ TEST_CASE("drawlist corpus: under real text the search reaches the committed pin
     actual += scav::test::corpus_pins_line(name, row, taken, true);
   }
 
-  std::string const want{ scav::test::corpus_golden(
-      scav::test::corpus_pins_at(scav::test::corpus_pins_file(), true)) };
+  std::string const want{ scav::test::corpus_pins_at(scav::test::corpus_pins_file(),
+                                                     true) };
   if (want != actual) {
     scav::test::corpus_pins_write(actual, true);
     MESSAGE("actual written to " SCAV_TEST_OUT_DIR "/corpus_pins.txt:\n", actual);

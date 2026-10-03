@@ -42,11 +42,11 @@ function(scav_testing_init)
     DOCTEST_CONFIG_NO_EXCEPTIONS_BUT_WITH_ALL_ASSERTS
   )
 
-  set(SCAV_TEST_CORPUS "full" CACHE STRING
-    "Corpus the tests lay out: full | light (brew, dock, estop and led)")
-  set_property(CACHE SCAV_TEST_CORPUS PROPERTY STRINGS full light)
-  if(NOT SCAV_TEST_CORPUS MATCHES "^(full|light)$")
-    message(FATAL_ERROR "SCAV_TEST_CORPUS=${SCAV_TEST_CORPUS} is not one of full light")
+  set(SCAV_TEST_TIER "fast" CACHE STRING
+    "Tests a build runs: fast (seconds, four small charts) | full (everything)")
+  set_property(CACHE SCAV_TEST_TIER PROPERTY STRINGS fast full)
+  if(NOT SCAV_TEST_TIER MATCHES "^(fast|full)$")
+    message(FATAL_ERROR "SCAV_TEST_TIER=${SCAV_TEST_TIER} is not one of fast full")
   endif()
 
   # `rm -rf out/<preset>/stamp` re-runs the suite without rebuilding anything.
@@ -62,7 +62,7 @@ endfunction()
 function(scav_test_environment out_var stamp_name)
   # Bare filenames: these strings are colon-separated, so `D:/a/scav` would split
   # at the drive letter. Every test runs from the source directory already.
-  set(env "SCAV_TEST_CORPUS=${SCAV_TEST_CORPUS}")
+  set(env "SCAV_TEST_TIER=${SCAV_TEST_TIER}")
 
   if(SCAV_SANITIZER STREQUAL "ASAN")
     set(opts "abort_on_error=1:strict_string_checks=1:detect_stack_use_after_return=1")

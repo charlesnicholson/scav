@@ -58,12 +58,9 @@ SANITIZERS: dict[str, list[str]] = {
 # The gate reads llvm-cov's per-file summary, so it is clang-only.
 COVERAGE: list[str] = ["macos-clang-libcxx", "linux-clang-libcxx"]
 
-# The corpus cut to brew, dock, estop and led; coverage inherits it from cfg-debug.
-LIGHT: Cache = {"SCAV_TEST_CORPUS": "light"}
-
 # name -> build type, extra cache, description
 CONFIG_BASES: dict[str, tuple[str, Cache, str]] = {
-    "cfg-debug": ("Debug", LIGHT, "Matrix configuration 1 of 3."),
+    "cfg-debug": ("Debug", {}, "Matrix configuration 1 of 3."),
     "cfg-release": ("Release", {}, "Matrix configuration 2 of 3."),
     "cfg-testable": (
         "Release", {"SCAV_TESTING": "ON"},
@@ -73,7 +70,7 @@ CONFIG_BASES: dict[str, tuple[str, Cache, str]] = {
         "release; divergence means undefined behaviour somewhere.",
     ),
     "cfg-sanitize": (
-        "RelWithDebInfo", LIGHT,
+        "RelWithDebInfo", {},
         "Not a matrix configuration. Sanitizers are their own test class and are "
         "timing-independent, so they run at -O2 -g rather than adding a fourth "
         "configuration to the matrix.",

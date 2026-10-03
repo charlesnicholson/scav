@@ -485,7 +485,8 @@ TEST_CASE("thread: a mutex held on one host thread keeps another out until relea
   CHECK(entered.load());
 }
 
-TEST_CASE("thread: a chart lays out the same however many threads claim its shards") {
+TEST_CASE("thread: a chart lays out the same however many threads claim its shards" *
+          doctest::test_suite("full")) {
   HookGuard const guard;
   constexpr std::array<uint32_t, 4> COUNTS{ 1, 2, 3, 5 };
   constexpr std::array<char const *, 3> CHARTS{ "estop", "led", "brew" };
