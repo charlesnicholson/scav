@@ -230,7 +230,8 @@ constexpr std::array<char const *, 7> CHARTS{ "axis.scav", "bottler.scav",
 
 }  // namespace
 
-TEST_CASE("order memo: a remembered frame is the frame those inputs order to") {
+TEST_CASE("order memo: a remembered frame is the frame those inputs order to" *
+          doctest::test_suite("full")) {
   scav_profile const p{ readable() };
   constexpr uint32_t VARIANTS{ 6 };
   std::vector<uint32_t> moved(VARIANTS, 0);
@@ -291,7 +292,8 @@ TEST_CASE("order memo: a remembered frame is the frame those inputs order to") {
   }
 }
 
-TEST_CASE("size memo: a remembered frame is the layout those inputs size to") {
+TEST_CASE("size memo: a remembered frame is the layout those inputs size to" *
+          doctest::test_suite("full")) {
   scav_profile const p{ readable() };
   constexpr uint32_t VARIANTS{ 17 };
   std::vector<uint32_t> moved(VARIANTS, 0);
@@ -860,7 +862,8 @@ void lay_out_checked(char const *name, bool labelled) {
 
 }  // namespace
 
-TEST_CASE("order reuse: every frame a search takes is the frame ordering it gives") {
+TEST_CASE("order reuse: every frame a search takes is the frame ordering it gives" *
+          doctest::test_suite("full")) {
   ReuseGuard const guard;
   constexpr std::array<char const *, 8> SMALL{ "axis.scav",
                                                "brew.scav",
@@ -1050,7 +1053,8 @@ TEST_CASE("size reuse: a move in one composite copies its sibling's subtree") {
   }
 }
 
-TEST_CASE("size reuse: every frame a search copies is the frame sizing gives") {
+TEST_CASE("size reuse: every frame a search copies is the frame sizing gives" *
+          doctest::test_suite("full")) {
   SizeReuseGuard const guard;
   constexpr std::array<char const *, 8> SMALL{ "axis.scav",
                                                "brew.scav",
@@ -1070,7 +1074,8 @@ TEST_CASE("size reuse: every frame a search copies is the frame sizing gives") {
   MESSAGE("copied " << copied << " of " << framed << " frames");
 }
 
-TEST_CASE("size reuse: a comparison that leaves out the owner's ratio is caught") {
+TEST_CASE("size reuse: a comparison that leaves out the owner's ratio is caught" *
+          doctest::test_suite("full")) {
   SizeReuseGuard const guard;
   size_test_reuse_ignore_dar(true);
   uint64_t copied{ 0 };

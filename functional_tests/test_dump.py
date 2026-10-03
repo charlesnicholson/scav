@@ -65,8 +65,11 @@ class TestDump(unittest.TestCase):
     def test_dump_matches_the_golden(self) -> None:
         self.check_golden(CHART, GOLDEN)
 
+    def pinned(self, chart: Path) -> list[str]:
+        return scavtest.pinned(self.cfg.repo_root, chart.name)
+
     def test_layout_dump_matches_the_golden(self) -> None:
-        result = self.run_dump("--layout", NETWORK.as_posix())
+        result = self.run_dump("--layout", *self.pinned(NETWORK), NETWORK.as_posix())
         self.assertEqual("", result.stderr)
         self.assertEqual(0, result.returncode)
         want = (self.cfg.repo_root / LAYOUT_GOLDEN).read_text(encoding="utf-8")
@@ -77,7 +80,8 @@ class TestDump(unittest.TestCase):
             self.fail(f"golden mismatch: {self.cfg.repo_root / LAYOUT_GOLDEN} vs {actual}")
 
     def test_layout_json_parses_and_matches_the_golden(self) -> None:
-        result = self.run_dump("--layout", "--json", NETWORK.as_posix())
+        result = self.run_dump("--layout", "--json", *self.pinned(NETWORK),
+                               NETWORK.as_posix())
         self.assertEqual("", result.stderr)
         self.assertEqual(0, result.returncode)
         doc = json.loads(result.stdout)  # a consumer parses before it trusts
@@ -91,7 +95,8 @@ class TestDump(unittest.TestCase):
     def test_layout_columns_carry_only_the_kinds_this_build_registers(self) -> None:
         # A consumer switches on these two names, so the set is the contract.
         # A column of a kind not here would reach the emitter untested.
-        doc = json.loads(self.run_dump("--layout", "--json", NETWORK.as_posix()).stdout)
+        doc = json.loads(self.run_dump("--layout", "--json", *self.pinned(NETWORK),
+                                       NETWORK.as_posix()).stdout)
         self.assertEqual(
             {("state", "pod"), ("submachine", "pod"), ("transition", "span"),
              ("point", "pod"), ("chart", "pod"), ("chart", "u32")},
@@ -173,7 +178,8 @@ class TestDump(unittest.TestCase):
 
     def test_toolchanger_draws_extend_and_travels_runs_straight(self) -> None:
         # At real text `extend` and every route inside `travel` is one straight line.
-        shipped = self.run_dump("--layout", "test_data/charts/toolchanger.scav")
+        chart = Path("test_data/charts/toolchanger.scav")
+        shipped = self.run_dump("--layout", *self.pinned(chart), chart.as_posix())
         self.assertEqual(0, shipped.returncode)
         into = [ln for ln in shipped.stdout.splitlines()
                 if ln.startswith("  route ") and " -> arm/Moving:travel/" in ln]
@@ -492,13 +498,14 @@ class TestDump(unittest.TestCase):
         end = out.index("\n]\n") + 3
         return json.loads(out[:end]), json.loads(out[end:])
 
+    @scavtest.full_only
     def test_a_traced_run_draws_what_an_untraced_one_draws(self) -> None:
         """The trace re-derives the drawing the search picked, so it may not
         move it. A debug facility that changes the answer is worth nothing."""
         charts = sorted((self.cfg.repo_root / "test_data/charts").glob("*.scav"))
         self.assertTrue(charts)
         for chart in charts:
-            if scavtest.corpus_skipped(chart.name):
+            if scavtest.cli_skipped(chart.name):
                 continue
             with self.subTest(chart=chart.name):
                 plain = self.run_dump("--json", "--layout", chart.as_posix())
@@ -514,6 +521,7 @@ class TestDump(unittest.TestCase):
                     self.assertEqual(want[key], got[key], key)
                 self.assertTrue(events)
 
+    @scavtest.full_only
     def test_every_event_names_its_kind_and_its_frame(self) -> None:
         traced = self.run_dump("--json", "--layout", "--trace", NETWORK.as_posix())
         self.assertEqual(0, traced.returncode, traced.stderr)

@@ -105,6 +105,12 @@ if(SCAV_BUILD_TESTS)
     ../scav_shard_tests.cpp
     ../scav_thread_tests.cpp
     ../scav_vec_tests.cpp
+    # The last shard excludes what the others take, so every case runs once.
+    SHARDS
+      gauntlet "-tc=gauntlet:*"
+      search "-tc=search*,size reuse*,order reuse*,label*"
+      layout "-tc=layout:*"
+      rest "-tce=gauntlet:*,search*,size reuse*,order reuse*,label*,layout:*"
   )
   target_link_libraries(scav_layout_tests PRIVATE scavlayout_testable)
   # A floor is asserted only where the number means anything: never under

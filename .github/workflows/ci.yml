@@ -74,7 +74,12 @@ jobs:
 
       - uses: mozilla-actions/sccache-action@v0.0.11
 
-      - run: ./build.sh --preset ${{ matrix.triple }}-${{ matrix.config }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+      - name: Build
+        run: ./build.sh --no-test --preset ${{ matrix.triple }}-${{ matrix.config }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache ${{ matrix.config != 'debug' && '-DSCAV_TEST_TIER=full' || '' }}
+
+      - name: Test
+        timeout-minutes: 5
+        run: ./build.sh --preset ${{ matrix.triple }}-${{ matrix.config }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache ${{ matrix.config != 'debug' && '-DSCAV_TEST_TIER=full' || '' }}
 
       - name: Save compiler cache
         id: sccache-save
@@ -122,7 +127,12 @@ jobs:
 
       # Deliberately no setup-python and no brew install: the image has all three,
       # and using them would fail the provisioning test, which is what it is for.
-      - run: ./build.sh --preset macos-clang-libcxx-${{ matrix.config }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+      - name: Build
+        run: ./build.sh --no-test --preset macos-clang-libcxx-${{ matrix.config }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache ${{ matrix.config != 'debug' && '-DSCAV_TEST_TIER=full' || '' }}
+
+      - name: Test
+        timeout-minutes: 5
+        run: ./build.sh --preset macos-clang-libcxx-${{ matrix.config }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache ${{ matrix.config != 'debug' && '-DSCAV_TEST_TIER=full' || '' }}
 
       - name: Save compiler cache
         id: sccache-save
@@ -171,15 +181,25 @@ jobs:
 
       - uses: mozilla-actions/sccache-action@v0.0.11
 
-      # Dev shell and build in one step: it only changes its own process, so
-      # splitting them would mean forwarding the environment. Both ship with VS.
-      - shell: powershell
+      # Each step starts the dev shell, which changes only its own process. Both ship with VS.
+      - name: Build
+        shell: powershell
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $vsPath = & $vswhere -latest -products * -property installationPath
           if (-not $vsPath) { throw "vswhere found no Visual Studio installation" }
           & "$vsPath\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64
-          & "$env:GITHUB_WORKSPACE\build.bat" --preset ${{ matrix.triple }}-${{ matrix.config }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
+          & "$env:GITHUB_WORKSPACE\build.bat" --no-test --preset ${{ matrix.triple }}-${{ matrix.config }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache ${{ matrix.config != 'debug' && '-DSCAV_TEST_TIER=full' || '' }} -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
+
+      - name: Test
+        timeout-minutes: 5
+        shell: powershell
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -property installationPath
+          if (-not $vsPath) { throw "vswhere found no Visual Studio installation" }
+          & "$vsPath\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64
+          & "$env:GITHUB_WORKSPACE\build.bat" --preset ${{ matrix.triple }}-${{ matrix.config }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache ${{ matrix.config != 'debug' && '-DSCAV_TEST_TIER=full' || '' }} -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
 
       - name: Save compiler cache
         id: sccache-save
@@ -241,7 +261,12 @@ jobs:
 
       - uses: mozilla-actions/sccache-action@v0.0.11
 
-      - run: ./build.sh --preset ${{ matrix.triple }}-${{ matrix.sanitizer }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+      - name: Build
+        run: ./build.sh --no-test --preset ${{ matrix.triple }}-${{ matrix.sanitizer }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+
+      - name: Test
+        timeout-minutes: 5
+        run: ./build.sh --preset ${{ matrix.triple }}-${{ matrix.sanitizer }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
 
       - name: Save compiler cache
         id: sccache-save
@@ -293,7 +318,12 @@ jobs:
 
       - uses: mozilla-actions/sccache-action@v0.0.11
 
-      - run: ./build.sh --preset linux-clang-libcxx-msan -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+      - name: Build
+        run: ./build.sh --no-test --preset linux-clang-libcxx-msan -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+
+      - name: Test
+        timeout-minutes: 5
+        run: ./build.sh --preset linux-clang-libcxx-msan -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
 
       - name: Save compiler cache
         id: sccache-save
@@ -337,7 +367,12 @@ jobs:
 
       - uses: mozilla-actions/sccache-action@v0.0.11
 
-      - run: ./build.sh --preset macos-clang-libcxx-${{ matrix.sanitizer }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+      - name: Build
+        run: ./build.sh --no-test --preset macos-clang-libcxx-${{ matrix.sanitizer }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+
+      - name: Test
+        timeout-minutes: 5
+        run: ./build.sh --preset macos-clang-libcxx-${{ matrix.sanitizer }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
 
       - name: Save compiler cache
         id: sccache-save
@@ -388,9 +423,19 @@ jobs:
 
       - uses: mozilla-actions/sccache-action@v0.0.11
 
-      # Dev shell and build in one step: it only changes its own process, so
-      # splitting them would mean forwarding the environment. Both ship with VS.
-      - shell: powershell
+      # Each step starts the dev shell, which changes only its own process. Both ship with VS.
+      - name: Build
+        shell: powershell
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -property installationPath
+          if (-not $vsPath) { throw "vswhere found no Visual Studio installation" }
+          & "$vsPath\Common7\Tools\Launch-VsDevShell.ps1" -Arch amd64 -HostArch amd64
+          & "$env:GITHUB_WORKSPACE\build.bat" --no-test --preset ${{ matrix.triple }}-${{ matrix.sanitizer }} -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
+
+      - name: Test
+        timeout-minutes: 5
+        shell: powershell
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $vsPath = & $vswhere -latest -products * -property installationPath
@@ -442,7 +487,12 @@ jobs:
 
       - uses: mozilla-actions/sccache-action@v0.0.11
 
-      - run: ./build.sh --coverage --preset linux-clang-libcxx-coverage -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+      - name: Build
+        run: ./build.sh --no-test --coverage --preset linux-clang-libcxx-coverage -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+
+      - name: Test
+        timeout-minutes: 5
+        run: ./build.sh --coverage --preset linux-clang-libcxx-coverage -- -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
 
       - name: Save compiler cache
         id: sccache-save

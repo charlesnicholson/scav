@@ -45,6 +45,7 @@ uint64_t layout_test_label_bound_labelled();
 uint64_t layout_test_label_bound_mismatches();
 void layout_test_search_memo(bool on);
 void layout_test_search_memo_verify(bool on);
+void layout_test_no_search(bool on);
 uint32_t layout_test_search_memo_hits();
 uint32_t layout_test_search_memo_mismatches();
 std::vector<Cost> const &layout_test_schedule_first();
@@ -1653,6 +1654,7 @@ struct SearchMemo {
 // and whether every answer is checked against running the search anyway.
 bool test_search_memo{ true };
 bool test_search_memo_verify{ false };
+bool test_no_search{ false };  // a zero move budget whatever the profile asks
 uint32_t test_search_memo_hits{ 0 };
 uint32_t test_search_memo_mismatches{ 0 };
 // Per row of the last searched layout: each schedule's cost, and the one kept.
@@ -2001,7 +2003,10 @@ bool layout_run(Chart &c,
 
   // Level 1 from every viable row, ranked by what each converges to; rows run at once, and
   // a lone row takes the caller's threads.
-  uint32_t const budget{ search_move_budget(p, layout_entity_count(c)) };
+  uint32_t budget{ search_move_budget(p, layout_entity_count(c)) };
+#ifdef SCAV_TESTING
+  if (test_no_search) { budget = 0; }
+#endif
   auto const tuple_of =
       [&](uint32_t i, scav_profile &knobs, DarSource &dar, Compaction &pack, Fold &fold) {
         knobs = p;
@@ -2616,6 +2621,7 @@ uint64_t layout_test_label_bound_mismatches() {
 }
 void layout_test_search_memo(bool on) { test_search_memo = on; }
 void layout_test_search_memo_verify(bool on) { test_search_memo_verify = on; }
+void layout_test_no_search(bool on) { test_no_search = on; }
 uint32_t layout_test_search_memo_hits() { return test_search_memo_hits; }
 uint32_t layout_test_search_memo_mismatches() { return test_search_memo_mismatches; }
 std::vector<Cost> const &layout_test_schedule_first() { return test_schedule_first; }

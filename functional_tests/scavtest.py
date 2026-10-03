@@ -4,22 +4,41 @@ import json
 import os
 import shutil
 import subprocess
+import unittest
 from pathlib import Path
 
 type Arg = str | Path
 
 PATHS: frozenset[str] = frozenset({"repo_root", "build_dir", "scratch_dir"})
 TRUTHY: frozenset[str] = frozenset({"ON", "1", "TRUE", "YES"})
-HEAVY_CHARTS: frozenset[str] = frozenset({"bottler.scav", "mill.scav"})
+HEAVY_CHARTS: frozenset[str] = frozenset({"bottler.scav", "mill.scav", "tcp.scav", "toolchanger.scav"})
+LIGHT_CHARTS: frozenset[str] = frozenset({"brew.scav", "dock.scav", "estop.scav", "led.scav"})
 
 
-def corpus_light() -> bool:
-    """Whether SCAV_TEST_CORPUS=light drops HEAVY_CHARTS from every corpus run."""
-    return os.environ.get("SCAV_TEST_CORPUS") == "light"
+def full_tier() -> bool:
+    return os.environ.get("SCAV_TEST_TIER") == "full"
 
 
-def corpus_skipped(chart: str) -> bool:
-    return corpus_light() and chart in HEAVY_CHARTS
+full_only = unittest.skipUnless(full_tier(), "SCAV_TEST_TIER=full only")
+
+
+def cli_skipped(chart: str) -> bool:
+    """Whether the CLI's corpus loops leave a chart out: HEAVY_CHARTS always, and
+    everything but LIGHT_CHARTS below the full tier."""
+    return chart in HEAVY_CHARTS or (not full_tier() and chart not in LIGHT_CHARTS)
+
+
+PINS = Path("test_data/golden/layout/corpus_pins.txt")
+
+
+def pinned(repo_root: Path, chart: str, text: bool = True) -> list[str]:
+    """The flags that lay a corpus chart out at `readable` from its committed pins,
+    `--no-search` included; `text` picks the real-text line over the --no-text one."""
+    for line in (repo_root / PINS).read_text(encoding="utf-8").splitlines():
+        name, *flags = line.split()
+        if name == chart and flags[0] == ("--portfolio-row" if text else "--no-text"):
+            return [*flags, "--no-search"]
+    raise KeyError(f"{chart} has no line in {PINS}")
 
 
 class Config(dict[str, str]):

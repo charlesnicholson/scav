@@ -213,7 +213,7 @@ TEST_CASE("perf: peak memory is a bounded multiple of the input") {
   CHECK(parse_bytes > bytes);
 }
 
-TEST_CASE("perf: lexing is linear in the input") {
+TEST_CASE("perf: lexing is linear in the input" * doctest::test_suite("full")) {
   // The machine-independent half, and the one that actually catches an
   // accidental quadratic.
   SynthStats stats{};
@@ -240,7 +240,7 @@ TEST_CASE("perf: lexing is linear in the input") {
   }
 }
 
-TEST_CASE("perf: parsing is linear in the input") {
+TEST_CASE("perf: parsing is linear in the input" * doctest::test_suite("full")) {
   SynthStats stats{};
   uint64_t const small_target{ INPUT_BYTES / 8 };
   std::string const small{ generate(small_target, stats) };
@@ -279,7 +279,7 @@ TEST_CASE("perf: parsing is linear in the input") {
   }
 }
 
-TEST_CASE("perf: a wide sibling list does not degrade") {
+TEST_CASE("perf: a wide sibling list does not degrade" * doctest::test_suite("full")) {
   // One block with every statement in it, which is the shape a naive
   // children-span implementation turns quadratic.
   auto const wide = [](uint32_t count) {
@@ -310,7 +310,7 @@ TEST_CASE("perf: a wide sibling list does not degrade") {
   }
 }
 
-TEST_CASE("perf: a long comment run does not degrade") {
+TEST_CASE("perf: a long comment run does not degrade" * doctest::test_suite("full")) {
   // Trivia attachment walks the statement tree once and counting-sorts, so a
   // document that is almost entirely comments must stay linear.
   auto const commented = [](uint32_t count) {
@@ -348,7 +348,7 @@ TEST_CASE("perf: a long comment run does not degrade") {
   }
 }
 
-TEST_CASE("perf: deep nesting does not degrade") {
+TEST_CASE("perf: deep nesting does not degrade" * doctest::test_suite("full")) {
   // Pushing a frame is amortized constant; materializing each block's children
   // into the shared id array is where a per-close copy would show up.
   std::string const small{ synth_deep_document(60) };
@@ -382,7 +382,7 @@ TEST_CASE("perf: the generated document is what it claims to be") {
   CHECK(stmts_of(r.pd, StmtKind::Attr).size() == stats.attrs);
 }
 
-TEST_CASE("perf: print a large document") {
+TEST_CASE("perf: print a large document" * doctest::test_suite("full")) {
   SynthStats stats{};
   std::string const text{ generate(INPUT_BYTES, stats) };
   ParsedDocument const pd{ parse_for_print(text) };
@@ -399,7 +399,7 @@ TEST_CASE("perf: print a large document") {
   CHECK(printed.bytes < (text.size() * 2));
 }
 
-TEST_CASE("perf: printing is linear in the input") {
+TEST_CASE("perf: printing is linear in the input" * doctest::test_suite("full")) {
   SynthStats stats{};
   uint64_t const small_target{ INPUT_BYTES / 8 };
   ParsedDocument const small{ parse_for_print(generate(small_target, stats)) };
@@ -417,7 +417,8 @@ TEST_CASE("perf: printing is linear in the input") {
   }
 }
 
-TEST_CASE("perf: a block with many attributes does not degrade") {
+TEST_CASE("perf: a block with many attributes does not degrade" *
+          doctest::test_suite("full")) {
   // Sorting and merging attributes is where a quadratic would live: the
   // statement-to-item mapping is a lookup, not a scan.
   auto const attr_block{ [](uint32_t count) {

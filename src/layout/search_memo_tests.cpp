@@ -7,6 +7,7 @@
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
 
+#include "core/tests/corpus.h"
 #include "doctest.h"
 
 #include <array>
@@ -185,7 +186,8 @@ TEST_CASE("search memo: the key tells apart every input a search is a function o
   }
 }
 
-TEST_CASE("search memo: a layout searched through it is the one searched without it") {
+TEST_CASE("search memo: a layout searched through it is the one searched without it" *
+          doctest::test_suite("full")) {
   MemoGuard const guard;
   constexpr std::array<char const *, 5> CHARTS{ "axis.scav",
                                                 "brew.scav",
@@ -194,6 +196,7 @@ TEST_CASE("search memo: a layout searched through it is the one searched without
                                                 "vac.scav" };
   uint32_t hits{ 0 };
   for (char const *name : CHARTS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     layout_test_search_memo(true);
     Laid const with{ lay_out(name) };
@@ -209,17 +212,21 @@ TEST_CASE("search memo: a layout searched through it is the one searched without
   CHECK(hits > 0);
 }
 
-TEST_CASE("search memo: every search it answers is the search run afresh") {
+TEST_CASE("search memo: every search it answers is the search run afresh" *
+          doctest::test_suite("full")) {
   // Each answer is checked against the search run anyway, including those not taken.
   MemoGuard const guard;
   layout_test_search_memo_verify(true);
-  constexpr std::array<char const *, 4> CHARTS{ "axis.scav",
+  constexpr std::array<char const *, 5> CHARTS{ "axis.scav",
+                                                "brew.scav",
                                                 "ota.scav",
                                                 "tcp.scav",
                                                 "vac.scav" };
   uint32_t hits{ 0 };
   for (bool const labelled : { false, true }) {
     for (char const *name : CHARTS) {
+      if (scav::test::corpus_skipped(name)) { continue; }
+      if (scav::test::corpus_skipped(name)) { continue; }
       CAPTURE(labelled);
       CAPTURE(name);
       REQUIRE(lay_out(name, labelled).ok);
@@ -231,7 +238,8 @@ TEST_CASE("search memo: every search it answers is the search run afresh") {
 }
 
 TEST_CASE(
-    "search: faces with no effect, left unscored, find the layout scoring them finds") {
+    "search: faces with no effect, left unscored, find the layout scoring them finds" *
+    doctest::test_suite("full")) {
   struct Restore {
     Restore() = default;
     Restore(Restore const &) = delete;
@@ -245,6 +253,7 @@ TEST_CASE(
                                                 "vac.scav" };
   uint64_t skipped{ 0 };
   for (char const *name : CHARTS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     layout_test_skip_noop_faces(true);
     Laid const with{ lay_out(name) };
@@ -276,7 +285,8 @@ struct PrefixGuard {
 
 TEST_CASE(
     "search: face moves scored from the incumbent's prefix find what scoring them whole "
-    "finds") {
+    "finds" *
+    doctest::test_suite("full")) {
   PrefixGuard const guard;
   constexpr std::array<char const *, 5> CHARTS{ "axis.scav",
                                                 "brew.scav",
@@ -285,6 +295,7 @@ TEST_CASE(
                                                 "vac.scav" };
   uint64_t used{ 0 };
   for (char const *name : CHARTS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     layout_test_prefix_shortcut(true);
     Laid const with{ lay_out(name) };
@@ -304,12 +315,14 @@ TEST_CASE("search: every face move scored from the prefix scores as the whole wa
   // Each shortcut is also scored whole and compared, including moves that lose.
   PrefixGuard const guard;
   layout_test_prefix_verify(true);
-  constexpr std::array<char const *, 4> CHARTS{ "axis.scav",
+  constexpr std::array<char const *, 5> CHARTS{ "axis.scav",
+                                                "brew.scav",
                                                 "ota.scav",
                                                 "tcp.scav",
                                                 "vac.scav" };
   uint64_t used{ 0 };
   for (char const *name : CHARTS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     layout_test_prefix_verify(true);
     REQUIRE(lay_out(name).ok);
@@ -330,10 +343,12 @@ struct BoundGuard {
 
 }  // namespace
 
-TEST_CASE("search: a labelled round scored by bound lays out what scoring it whole does") {
+TEST_CASE("search: a labelled round scored by bound lays out what scoring it whole does" *
+          doctest::test_suite("full")) {
   BoundGuard const guard;
   constexpr std::array<char const *, 3> CHARTS{ "estop.scav", "brew.scav", "dock.scav" };
   for (char const *name : CHARTS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     layout_test_label_bound(true, false);
     Laid const with{ lay_out(name, true) };
@@ -351,7 +366,8 @@ TEST_CASE("search: a labelled round scored by bound lays out what scoring it who
   }
 }
 
-TEST_CASE("search: every bounded round picks what scoring each candidate whole picks") {
+TEST_CASE("search: every bounded round picks what scoring each candidate whole picks" *
+          doctest::test_suite("full")) {
   // Each round is also scored whole: the same pick at the same cost, no bound above a
   // cost; each candidate labelled on its kept routes lays out what a full lay-out does.
   BoundGuard const guard;
@@ -360,6 +376,7 @@ TEST_CASE("search: every bounded round picks what scoring each candidate whole p
                                                 "dock.scav",
                                                 "gauntlet/carried.scav" };
   for (char const *name : CHARTS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     layout_test_label_bound(true, true);
     REQUIRE(lay_out(name, true).ok);
@@ -377,13 +394,15 @@ TEST_CASE("search: with no path boxes nothing is bounded") {
   CHECK(layout_test_label_bound_labelled() == 0);
 }
 
-TEST_CASE("search schedules: each row keeps the cheaper of its two searches") {
+TEST_CASE("search schedules: each row keeps the cheaper of its two searches" *
+          doctest::test_suite("full")) {
   constexpr std::array<char const *, 6> CHARTS{ "axis.scav", "brew.scav",
                                                 "ota.scav",  "tcp.scav",
                                                 "vac.scav",  "gauntlet/carried.scav" };
   uint32_t won_somewhere{ 0 };  // charts where some row took the second search
   uint32_t won_nowhere{ 0 };    // charts where every row kept the first
   for (char const *name : CHARTS) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     REQUIRE(lay_out(name).ok);
     std::vector<Cost> const &first{ layout_test_schedule_first() };

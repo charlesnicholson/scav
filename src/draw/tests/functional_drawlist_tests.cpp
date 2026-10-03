@@ -80,12 +80,20 @@ struct Run {
   DrawList list;
 };
 
-Run run_pipeline(char const *name, Metrics const &m, scav_profile const &p) {
+// `pinned` lays a corpus chart out from its committed pins, with no search.
+Run run_pipeline(char const *name, Metrics const &m, scav_profile const &p, bool pinned) {
   Run r{ .chart = load_corpus(name), .spaces = {}, .placed = {}, .list = {} };
   REQUIRE_MESSAGE(measure_chart(r.chart, m, p, r.spaces), name);
   std::vector<Diagnostic> diags;
   scav_layout_opts const opts{ .profile = p, .router = 0, .threads = 0 };
-  bool const laid{ layout_run(r.chart, as_spaces(r.spaces), opts, r.placed, diags) };
+  bool const laid{ pinned
+                       ? scav::test::corpus_layout(r.chart,
+                                                   name,
+                                                   as_spaces(r.spaces),
+                                                   opts,
+                                                   r.placed,
+                                                   diags)
+                       : layout_run(r.chart, as_spaces(r.spaces), opts, r.placed, diags) };
   std::string why{ name };
   for (Diagnostic const &d : diags) {
     why += ": ";
@@ -107,15 +115,14 @@ Run run_pipeline(char const *name, Metrics const &m, scav_profile const &p) {
   return r;
 }
 
-// The pipeline over one chart at `readable` with the bundled font, once per
-// process. Six cases read the same corpus drawings, and at the shipped search
-// depth one pass over them is minutes.
+// The pipeline over one chart at `readable` with the bundled font, from its
+// committed pins, once per process.
 Run const &laid_pipeline(char const *name) {
   static std::map<std::string, Run> laid;
   auto const found{ laid.find(name) };
   if (found != laid.end()) { return found->second; }
   Metrics const m{ bundled() };
-  return laid.emplace(name, run_pipeline(name, m, readable())).first->second;
+  return laid.emplace(name, run_pipeline(name, m, readable(), true)).first->second;
 }
 
 // The column's rows, memcpy'd out so nothing reads padding in place.
@@ -134,7 +141,8 @@ std::vector<T> rows(Chart const &c, char const *name) {
 
 TEST_CASE(
     "drawlist corpus: under real text every bounded round picks what scoring it whole "
-    "picks") {
+    "picks" *
+    doctest::test_suite("full")) {
   // Each round is also scored whole: the same pick at the same cost, no bound above a
   // cost; each candidate labelled on its kept routes lays out what a full lay-out does.
   struct Restore {
@@ -146,13 +154,55 @@ TEST_CASE(
   Metrics const m{ bundled() };
   for (char const *name :
        { "brew.scav", "dock.scav", "ota.scav", "vac.scav", "tcp.scav" }) {
+    if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     layout_test_label_bound(true, true);
-    (void)run_pipeline(name, m, readable());
+    (void)run_pipeline(name, m, readable(), false);
     CHECK(layout_test_label_bound_skipped() > 0);
     CHECK(layout_test_label_bound_labelled() > 0);
     CHECK(layout_test_label_bound_mismatches() == 0);
   }
+}
+
+TEST_CASE("drawlist corpus: under real text the search reaches the committed pins") {
+  // Every other real-text corpus case lays out from these pins with the search off.
+  Metrics const m{ bundled() };
+  scav_profile const p{ readable() };
+  std::string actual;
+  for (char const *name : CORPUS) {
+    if (!scav::test::corpus_searched(name)) {
+      actual += scav::test::corpus_pins_of(name, true);  // taken as committed
+      continue;
+    }
+    CAPTURE(name);
+    Chart c{ load_corpus(name) };
+    Spaces spaces;
+    REQUIRE(measure_chart(c, m, p, spaces));
+    std::vector<scav_placed> placed;
+    std::vector<Diagnostic> diags;
+    scav_layout_opts const opts{ .profile = p, .router = 0, .threads = 0 };
+    uint32_t row{ INVALID };
+    SearchPins taken;
+    REQUIRE(layout_run(c,
+                       as_spaces(spaces),
+                       opts,
+                       placed,
+                       diags,
+                       nullptr,
+                       &row,
+                       INVALID,
+                       nullptr,
+                       &taken));
+    actual += scav::test::corpus_pins_line(name, row, taken, true);
+  }
+
+  std::string const want{ scav::test::corpus_pins_at(scav::test::corpus_pins_file(),
+                                                     true) };
+  if (want != actual) {
+    scav::test::corpus_pins_write(actual, true);
+    MESSAGE("actual written to " SCAV_TEST_OUT_DIR "/corpus_pins.txt:\n", actual);
+  }
+  CHECK(want == actual);
 }
 
 TEST_CASE("drawlist corpus: every chart builds and hashes to the committed golden") {
@@ -326,7 +376,7 @@ TEST_CASE("drawlist gauntlet: what crowd's tighter packing costs its labels") {
   // its own, one up `Ready`'s face and one down the composite's side.
   Metrics const m{ bundled() };
   scav_profile const p{ readable() };
-  Run const r{ run_pipeline("gauntlet/crowd.scav", m, p) };
+  Run const r{ run_pipeline("gauntlet/crowd.scav", m, p, false) };
   CostTerms const t{
     cost_columns(r.chart, decompose(r.chart), p, as_spaces(r.spaces), r.placed)
   };
@@ -459,8 +509,13 @@ TEST_CASE("drawlist corpus: the layout goldens' measurement policy is stated her
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
   scav_layout_opts const opts{ .profile = p, .router = 0, .threads = 0 };
-  REQUIRE(layout_run(measured, as_spaces(spaces), opts, placed, diags));
-  REQUIRE(layout_run(unmeasured, {}, opts, placed, diags));
+  REQUIRE(scav::test::corpus_layout(measured,
+                                    "vac.scav",
+                                    as_spaces(spaces),
+                                    opts,
+                                    placed,
+                                    diags));
+  REQUIRE(scav::test::corpus_layout(unmeasured, "vac.scav", {}, opts, placed, diags));
 
   CHECK(layout_inputs_digest(measured) != layout_inputs_digest(unmeasured));
   // Real text makes every box bigger, so the coordinates move.
@@ -488,7 +543,8 @@ TEST_CASE("drawlist corpus: canonical form is reached from any emission order") 
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
   scav_layout_opts const opts{ .profile = p, .router = 0, .threads = 0 };
-  REQUIRE(layout_run(c, as_spaces(spaces), opts, placed, diags));
+  REQUIRE(
+      scav::test::corpus_layout(c, "tcp.scav", as_spaces(spaces), opts, placed, diags));
 
   DrawList wrapper;
   REQUIRE(emit_chart(wrapper,

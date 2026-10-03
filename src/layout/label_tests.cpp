@@ -1339,8 +1339,8 @@ constexpr uint32_t CROWDS{ 3 };
 
 }  // namespace
 
-TEST_CASE(
-    "label: the pruned and memoized searches place every box as the exhaustive one") {
+TEST_CASE("label: the pruned and memoized searches place every box as the exhaustive one" *
+          doctest::test_suite("full")) {
   // The memoized search runs twice, so the second answers from the table the first filled.
   uint32_t fell{ 0 };
   uint32_t refused{ 0 };
@@ -1456,7 +1456,8 @@ TEST_CASE(
   }
 }
 
-TEST_CASE("label memo: a remembered box is the box its inputs place") {
+TEST_CASE("label memo: a remembered box is the box its inputs place" *
+          doctest::test_suite("full")) {
   // Each variant changes one input the key must cover, after the memo placed the base; the
   // last two change nothing a box sees except by moving with it.
   constexpr uint32_t VARIANTS{ 11 };
@@ -1590,7 +1591,8 @@ Settled settled_over(Scene const &sc, LabelBase const *was) {
 
 }  // namespace
 
-TEST_CASE("label: a placement kept from a base is the placement made afresh") {
+TEST_CASE("label: a placement kept from a base is the placement made afresh" *
+          doctest::test_suite("full")) {
   // Both kinds of box occur: ones that stay where they were and ones a moved route sends
   // elsewhere.
   uint32_t stayed{ 0 };

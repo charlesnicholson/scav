@@ -22,6 +22,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <map>
 #include <ostream>
 #include <string>
 #include <string_view>
@@ -118,8 +119,8 @@ void column_holds(Chart const &c, char const *name, std::vector<T> const &rows) 
 void lay(char const *name,
          scav_profile const &p,
          Laid &out,
-         scav_spaces const &s = {},
-         SearchPins const *seed = nullptr) {
+         scav_spaces const &s,
+         SearchPins const *seed) {
   // The router these properties are about, by the name it crosses every other
   // boundary under rather than by its position in the registry.
   scav_router_id id{};
@@ -177,6 +178,21 @@ void lay(char const *name,
   column_holds(out.c, "scav.geom.route", out.r.route);
   column_holds(out.c, "scav.geom.port", out.r.port);
   column_holds(out.c, "scav.geom.portslot", out.r.slots);
+}
+
+// With no spaces or seed, each chart and profile is laid out once per process; a hit
+// copies it.
+void lay(char const *name, scav_profile const &p, Laid &out) {
+  static std::map<std::string, Laid> laid;
+  std::string key{ name };
+  key.append(reinterpret_cast<char const *>(&p), sizeof p);  // a flat POD of int32_t
+  auto it{ laid.find(key) };
+  if (it == laid.end()) {
+    Laid fresh;
+    lay(name, p, fresh, {}, nullptr);
+    it = laid.emplace(std::move(key), std::move(fresh)).first;
+  }
+  out = it->second;
 }
 
 // The Tier-0 predicate, rewritten here as it is for the corpus: a gate that
@@ -322,7 +338,8 @@ uint32_t capped_branches(Laid const &l) {
 
 }  // namespace
 
-TEST_CASE("gauntlet: no element routes an edge through a box") {
+TEST_CASE("gauntlet: no element routes an edge through a box" *
+          doctest::test_suite("full")) {
   // Every chart, `regions.scav` included: what the portfolio ships routes
   // through nothing at either profile. It carved this out while the suite
   // scored one candidate, and the count 11.8 still owns is pinned at the end
@@ -357,7 +374,8 @@ TEST_CASE("gauntlet: no element routes an edge through a box") {
   }
 }
 
-TEST_CASE("gauntlet: every route is axis-aligned, forward, and reaches its ends") {
+TEST_CASE("gauntlet: every route is axis-aligned, forward, and reaches its ends" *
+          doctest::test_suite("full")) {
   for (char const *name : GAUNTLET) {
     // The same shape and the same cause: a route round the outside of the state
     // holding both regions leaves and returns along one line.
@@ -397,7 +415,8 @@ TEST_CASE("gauntlet: every route is axis-aligned, forward, and reaches its ends"
   }
 }
 
-TEST_CASE("gauntlet: an end on an inscribed glyph is at the middle of a face") {
+TEST_CASE("gauntlet: an end on an inscribed glyph is at the middle of a face" *
+          doctest::test_suite("full")) {
   // A disc and a diamond touch their box at four points. An axis-aligned route
   // to any other point on the face stops short of the mark it is drawn to, by
   // more of the glyph the further along the face it lands.
@@ -431,7 +450,8 @@ TEST_CASE("gauntlet: an end on an inscribed glyph is at the middle of a face") {
   }
 }
 
-TEST_CASE("gauntlet: an arrowhead is never inked over another route's own end") {
+TEST_CASE("gauntlet: an arrowhead is never inked over another route's own end" *
+          doctest::test_suite("full")) {
   // Two ends on one point of one box, one arriving and one leaving: the head is
   // drawn along the other route's first leg and reads as belonging to it. Two
   // arrivals sharing a point are a fan-in and keep their one head, which is
@@ -667,7 +687,8 @@ TEST_CASE("gauntlet: a fan-in's arrivals are four arrows, none inside another") 
   }
 }
 
-TEST_CASE("gauntlet: an endpoint that is also a crossing is one point, not two") {
+TEST_CASE("gauntlet: an endpoint that is also a crossing is one point, not two" *
+          doctest::test_suite("full")) {
   // Into a composite's own child the route starts on the composite's border,
   // and the crossing it makes there is that same point; out of a child it ends
   // on it. Two points would put a leg along the border between them, which
@@ -721,7 +742,7 @@ TEST_CASE(
     scav_path_box const box{ .subject = t, .w = 1511, .h = 269, .order = 0 };
     scav_spaces const spaces{ .path_box = &box, .n_path_box = 1 };
     Laid l;
-    lay("crossing.scav", p, l, spaces);
+    lay("crossing.scav", p, l, spaces, nullptr);
     REQUIRE(l.r.placed.size() == 1);
     CHECK(l.r.unplaced == 0);
     scav_rect const at{ l.r.placed[0] };
@@ -782,7 +803,7 @@ TEST_CASE("gauntlet: a long edge's label widens no boundary another already wide
     };
     scav_spaces const spaces{ .path_box = boxes.data(), .n_path_box = 2 };
     Laid l;
-    lay("long.scav", p, l, spaces);
+    lay("long.scav", p, l, spaces, nullptr);
     CHECK(l.r.unplaced == 0);
     REQUIRE(l.r.placed.size() == 2);
     for (scav_rect const &at : l.r.placed) {
@@ -860,7 +881,7 @@ TEST_CASE("gauntlet: a folded frame's second piece starts under the state enteri
                               .path_box = &label,
                               .n_path_box = 1 };
     Laid l;
-    lay("folded.scav", p, l, spaces);
+    lay("folded.scav", p, l, spaces, nullptr);
     scav_rect const &above{ l.z.state[first] };
     scav_rect const &below{ l.z.state[second] };
     REQUIRE(below.y >= (above.y + above.h));
@@ -1297,7 +1318,8 @@ TEST_CASE("gauntlet: a state beside a composite is centred on the port it enters
   }
 }
 
-TEST_CASE("gauntlet: every state lies inside the frame it is drawn in") {
+TEST_CASE("gauntlet: every state lies inside the frame it is drawn in" *
+          doctest::test_suite("full")) {
   for (char const *name : GAUNTLET) {
     for (scav_profile const &p :
          { readable(), compact(), one_row(readable()), one_row(compact()) }) {
@@ -1354,7 +1376,8 @@ TEST_CASE("gauntlet: a run's arrows each span one gap, not the drawing") {
   }
 }
 
-TEST_CASE("gauntlet: a route passing through a composite bends outside it") {
+TEST_CASE("gauntlet: a route passing through a composite bends outside it" *
+          doctest::test_suite("full")) {
   // A bend strictly inside `Arm` and outside `Moving` is in a state the route
   // only passes through; the leg across `Arm` is straight at either weight.
   for (scav_profile const &p : { readable(), compact() }) {

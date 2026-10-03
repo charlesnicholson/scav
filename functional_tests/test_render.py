@@ -68,7 +68,7 @@ class TestRender(unittest.TestCase):
         name = "scav.exe" if os.name == "nt" else "scav"
         cls.exe = cls.cfg.build_dir / "bin" / name
         charts = (cls.cfg.repo_root / "test_data/charts").glob("*.scav")
-        cls.charts = sorted(c for c in charts if not scavtest.corpus_skipped(c.name))
+        cls.charts = sorted(c for c in charts if not scavtest.cli_skipped(c.name))
         assert cls.charts
         cls.scratch = scavtest.fresh_dir(cls.cfg.scratch_dir / "render")
 
@@ -91,10 +91,10 @@ class TestRender(unittest.TestCase):
         self.assertEqual(0, result.returncode)
         return result.stdout
 
-    def test_every_corpus_chart_renders_to_parseable_svg(self) -> None:
+    def test_every_light_corpus_chart_renders_to_parseable_svg(self) -> None:
         for chart in self.charts:
             with self.subTest(chart=chart.name):
-                doc = self.render(chart)
+                doc = self.render(chart, *scavtest.pinned(self.cfg.repo_root, chart.name))
                 # A real XML parser, not a substring check: the point is that a
                 # browser or an SVG consumer would accept it.
                 root = ElementTree.fromstring(doc)
@@ -165,6 +165,7 @@ class TestRender(unittest.TestCase):
                                 capture_output=True, text=True, check=False)
         self.assertEqual(0, result.returncode, result.stderr)
 
+    @scavtest.full_only
     def test_a_named_profile_changes_the_diagram(self) -> None:
         chart = self.cfg.repo_root / "test_data/charts/vac.scav"
         readable = self.render(chart)
@@ -292,6 +293,7 @@ class TestBaselineHarness(unittest.TestCase):
     asserted is that scav renders and that anything absent is reported rather
     than left as a silent gap."""
 
+    @scavtest.full_only
     def test_the_harness_runs_and_names_what_it_could_not_compare(self) -> None:
         cfg = scavtest.load_config()
         out = cfg.build_dir / "baseline"

@@ -149,6 +149,7 @@ scav_check_layering()
 if(SCAV_BUILD_TESTS)
   scav_check_tests()
   add_subdirectory(functional_tests)
+  scav_timing_tests()
 endif()
 
 # The coverage gate's list of what was supposed to be tested. Written here because

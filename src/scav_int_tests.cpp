@@ -95,7 +95,8 @@ TEST_CASE("int: isqrt is the floor square root across the whole domain") {
   static_assert(isqrt(152'399'025) == 12'345);
 }
 
-TEST_CASE("int: isqrt matches the digit-by-digit root everywhere it is sampled") {
+TEST_CASE("int: isqrt matches the digit-by-digit root everywhere it is sampled" *
+          doctest::test_suite("full")) {
   uint64_t wrong{ 0 };
   for (uint64_t x = 0; x < (UINT64_C(1) << 22U); ++x) {
     wrong += (isqrt(x) != isqrt_by_digits(x)) ? 1U : 0U;

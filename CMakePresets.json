@@ -23,8 +23,7 @@
       "inherits": "base",
       "description": "Matrix configuration 1 of 3.",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "SCAV_TEST_CORPUS": "light"
+        "CMAKE_BUILD_TYPE": "Debug"
       }
     },
     {
@@ -52,8 +51,7 @@
       "inherits": "base",
       "description": "Not a matrix configuration. Sanitizers are their own test class and are timing-independent, so they run at -O2 -g rather than adding a fourth configuration to the matrix.",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "SCAV_TEST_CORPUS": "light"
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo"
       }
     },
     {

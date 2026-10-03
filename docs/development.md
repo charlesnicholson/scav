@@ -173,13 +173,39 @@ same bytes, which is the point: worker count reaches scheduling and nothing
 else. `NULL` is what the `wasm32-wasi` target will use, and building it now is
 how that stays true.
 
-**Debug, sanitizer and coverage presets test a light corpus.** The cache
-variable `SCAV_TEST_CORPUS` is `full` or `light`, and every test reads it from
-the environment variable of the same name. `light` leaves `mill` and `bottler`,
-about 90% of the corpus's layout cost, out of every corpus loop and skips the
-full-corpus `scav selftest` run; the other charts are still compared line by
-line against the same goldens. Release and testable run the full corpus. To
-run it on a light preset, add `-- -DSCAV_TEST_CORPUS=full`.
+**Tests run in two tiers.** The cache variable `SCAV_TEST_TIER` is `fast`, the
+default on every preset, or `full`; every test reads the environment variable of
+the same name, and a test binary run by hand is fast unless it is set. The fast
+tier takes seconds: corpus loops keep only `brew`, `dock`, `estop` and `led`, still
+compared line by line against the same goldens, and doctest cases tagged
+`doctest::test_suite("full")` and Python tests marked `scavtest.full_only` are
+left out. CI's release and testable rows build with `-DSCAV_TEST_TIER=full` and
+run everything in under five minutes; add the same flag locally to do so. The
+functional tests' traced-dump and render loops leave out `bottler`, `mill`, `tcp`
+and `toolchanger` in both tiers, and the full-corpus `scav selftest` run is opt-in
+with `SCAV_TEST_SELFTEST=1`.
+
+**Corpus tests lay out from committed pins.** For each corpus chart and scale,
+`test_data/golden/layout/corpus_pins.txt` holds the flags `scav dump --layout`
+prints after `rests on`: the portfolio row and every pin the search took, with
+`--no-text` on the no-text lines. Two cases search, one per scale: `layout: the
+search reaches the committed pins on every searched corpus chart` and `drawlist
+corpus: under real text the search reaches the committed pins`. They search every
+chart but `mill`, whose search alone would fill a CI row's five minutes; `scav
+selftest`, run with `SCAV_TEST_SELFTEST=1`, searches it. Every other corpus test
+passes the pins back with the search off, which draws the same bytes. When a
+search change moves them, regenerate the file before the other corpus goldens:
+
+```
+for flag in --no-text ""; do
+  for c in test_data/charts/*.scav; do
+    echo "$(basename $c) $(out/<preset>/bin/scav dump --layout $flag $c | sed -n 's/^  rests on //p')"
+  done
+done > test_data/golden/layout/corpus_pins.txt
+```
+
+On a mismatch each search case also writes `out/<preset>/test/corpus_pins.txt`,
+the golden with that scale's lines replaced.
 
 **Everything generated lives under `out/`.** Build trees, the envy package cache,
 test scratch. `rm -rf out` is a factory reset, and nothing writes to `$HOME`.

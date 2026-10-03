@@ -42,8 +42,7 @@ SANITIZERS: dict[str, set[str]] = {
     "tsan": {t for t in TRIPLES if not t.startswith("windows")},
     "msan": {"linux-clang-libcxx"},
 }
-# The rows that lay out the corpus less mill and bottler; the rest run it whole.
-LIGHT_CORPUS: frozenset[str] = frozenset({"debug", "coverage", *SANITIZERS})
+# The rows that lay out four small corpus charts; the rest run it whole.
 
 
 class TestPresets(unittest.TestCase):
@@ -132,21 +131,11 @@ class TestPresets(unittest.TestCase):
         self.assertEqual(release["CMAKE_BUILD_TYPE"], testable["CMAKE_BUILD_TYPE"])
         self.assertEqual("ON", testable["SCAV_TESTING"])
 
-    def test_only_the_unoptimised_and_instrumented_rows_run_the_light_corpus(self) -> None:
-        by_name = {p["name"]: p for p in self.doc["configurePresets"]}
-
-        def corpus(name: str) -> str | None:
-            node = by_name[name]
-            if found := node.get("cacheVariables", {}).get("SCAV_TEST_CORPUS"):
-                return found
-            parents = node.get("inherits", [])
-            parents = [parents] if isinstance(parents, str) else parents
-            return next((f for p in parents if (f := corpus(p))), None)
-
-        for name in sorted(self.names()):
-            with self.subTest(preset=name):
-                light = name.rsplit("-", 1)[-1] in LIGHT_CORPUS
-                self.assertEqual("light" if light else None, corpus(name))
+    def test_no_preset_picks_the_test_tier(self) -> None:
+        # Every build runs the fast tier; CI's release and testable rows ask for full.
+        for preset in self.doc["configurePresets"]:
+            with self.subTest(preset=preset["name"]):
+                self.assertNotIn("SCAV_TEST_TIER", preset.get("cacheVariables", {}))
 
     def test_every_configure_preset_has_a_build_preset(self) -> None:
         self.assertEqual(self.names(), self.names("buildPresets"))

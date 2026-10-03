@@ -184,7 +184,8 @@ TEST_CASE("bench: every registered router scores the corpus, term by term") {
   CHECK(want == actual);
 }
 
-TEST_CASE("bench: every registered router is timed over the corpus and at scale") {
+TEST_CASE("bench: every registered router is timed over the corpus and at scale" *
+          doctest::test_suite("full")) {
   // **One layout per chart, not a search.** The floors below are written to
   // catch a router that arrives quadratic, and a move sweep multiplies every
   // one of them by thousands of layouts -- which measures the search rather

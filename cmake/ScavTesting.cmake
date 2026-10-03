@@ -42,11 +42,11 @@ function(scav_testing_init)
     DOCTEST_CONFIG_NO_EXCEPTIONS_BUT_WITH_ALL_ASSERTS
   )
 
-  set(SCAV_TEST_CORPUS "full" CACHE STRING
-    "Corpus the tests lay out: full | light (all but mill and bottler)")
-  set_property(CACHE SCAV_TEST_CORPUS PROPERTY STRINGS full light)
-  if(NOT SCAV_TEST_CORPUS MATCHES "^(full|light)$")
-    message(FATAL_ERROR "SCAV_TEST_CORPUS=${SCAV_TEST_CORPUS} is not one of full light")
+  set(SCAV_TEST_TIER "fast" CACHE STRING
+    "Tests a build runs: fast (seconds, four small charts) | full (everything)")
+  set_property(CACHE SCAV_TEST_TIER PROPERTY STRINGS fast full)
+  if(NOT SCAV_TEST_TIER MATCHES "^(fast|full)$")
+    message(FATAL_ERROR "SCAV_TEST_TIER=${SCAV_TEST_TIER} is not one of fast full")
   endif()
 
   # `rm -rf out/<preset>/stamp` re-runs the suite without rebuilding anything.
@@ -62,7 +62,7 @@ endfunction()
 function(scav_test_environment out_var stamp_name)
   # Bare filenames: these strings are colon-separated, so `D:/a/scav` would split
   # at the drive letter. Every test runs from the source directory already.
-  set(env "SCAV_TEST_CORPUS=${SCAV_TEST_CORPUS}")
+  set(env "SCAV_TEST_TIER=${SCAV_TEST_TIER}")
 
   if(SCAV_SANITIZER STREQUAL "ASAN")
     set(opts "abort_on_error=1:strict_string_checks=1:detect_stack_use_after_return=1")
@@ -125,7 +125,7 @@ function(scav_stamped_test stamp_name)
     DEPENDS ${arg_DEPENDS} "${PROJECT_SOURCE_DIR}/cmake/ScavRunTest.cmake"
     WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
     COMMENT "${arg_COMMENT}"
-    USES_TERMINAL
+
     VERBATIM
   )
 
@@ -135,15 +135,18 @@ function(scav_stamped_test stamp_name)
     set(all_arg "")
   endif()
   add_custom_target(run.${stamp_name} ${all_arg} DEPENDS "${stamp}")
+  set_property(GLOBAL APPEND PROPERTY SCAV_TEST_STAMPS "${stamp}")
   if(arg_TARGETS)
     add_dependencies(run.${stamp_name} ${arg_TARGETS})
   endif()
 endfunction()
 
 # A doctest executable that runs as part of the build. Link what it tests
-# yourself -- usually a library's _testable archive.
+# yourself -- usually a library's _testable archive. SHARDS is label, filter pairs, each
+# its own stamp; TIMING names the cases scav_timing_tests() runs last, alone.
 function(scav_tests name)
-  add_executable(${name} ${ARGN} "${PROJECT_SOURCE_DIR}/src/doctest_main.cpp")
+  cmake_parse_arguments(arg "" "TIMING" "SHARDS" ${ARGN})
+  add_executable(${name} ${arg_UNPARSED_ARGUMENTS} "${PROJECT_SOURCE_DIR}/src/doctest_main.cpp")
   scav_settings(${name})
   target_link_libraries(${name} PRIVATE scav_doctest)
   target_compile_definitions(${name} PRIVATE
@@ -152,13 +155,59 @@ function(scav_tests name)
     "SCAV_TEST_OUT_DIR=\"${PROJECT_BINARY_DIR}/test\""
   )
 
-  scav_stamped_test(${name}
-    COMMAND "$<TARGET_FILE:${name}>" --order-by=name
-    DEPENDS "$<TARGET_FILE:${name}>"
-    TARGETS ${name}
-    COMMENT "unit ${name}"
-  )
+  set(untimed "")
+  if(arg_TIMING)
+    set(untimed "-tce=${arg_TIMING}")
+    set_property(GLOBAL APPEND PROPERTY SCAV_TIMING_RUNS "${name}" "${arg_TIMING}")
+  endif()
+  if(NOT arg_SHARDS)
+    scav_stamped_test(${name}
+      COMMAND "$<TARGET_FILE:${name}>" --order-by=name ${untimed}
+      DEPENDS "$<TARGET_FILE:${name}>"
+      TARGETS ${name}
+      COMMENT "unit ${name}"
+    )
+  else()
+    add_custom_target(run.${name})
+    list(LENGTH arg_SHARDS n)
+    math(EXPR last "${n} - 1")
+    foreach(i RANGE 0 ${last} 2)
+      math(EXPR j "${i} + 1")
+      list(GET arg_SHARDS ${i} label)
+      list(GET arg_SHARDS ${j} filter)
+      scav_stamped_test(${name}.${label}
+        COMMAND "$<TARGET_FILE:${name}>" --order-by=name "${filter}"
+        DEPENDS "$<TARGET_FILE:${name}>"
+        TARGETS ${name}
+        COMMENT "unit ${name} ${label}"
+      )
+      add_dependencies(run.${name} run.${name}.${label})
+    endforeach()
+  endif()
   set_property(GLOBAL APPEND PROPERTY SCAV_TEST_EXECUTABLES ${name})
+endfunction()
+
+# The TIMING cases of every scav_tests, each after every other stamp so nothing
+# else competes for the cores while they time. Call once, after the last test.
+function(scav_timing_tests)
+  get_property(stamps GLOBAL PROPERTY SCAV_TEST_STAMPS)
+  get_property(runs GLOBAL PROPERTY SCAV_TIMING_RUNS)
+  list(LENGTH runs n)
+  if(n EQUAL 0)
+    return()
+  endif()
+  math(EXPR last "${n} - 1")
+  foreach(i RANGE 0 ${last} 2)
+    math(EXPR j "${i} + 1")
+    list(GET runs ${i} name)
+    list(GET runs ${j} filter)
+    scav_stamped_test(${name}.timing
+      COMMAND "$<TARGET_FILE:${name}>" --order-by=name "-tc=${filter}"
+      DEPENDS "$<TARGET_FILE:${name}>" ${stamps}
+      TARGETS ${name}
+      COMMENT "unit ${name} timing"
+    )
+  endforeach()
 endfunction()
 
 # One case is written to fail. Inverting needs a script: a build step succeeds by

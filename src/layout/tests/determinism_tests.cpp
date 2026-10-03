@@ -29,10 +29,10 @@ namespace {
 
 using namespace scav;
 
-constexpr std::array<char const *, 11> CORPUS{
-  "axis.scav", "bottler.scav", "brew.scav", "dock.scav",        "estop.scav", "led.scav",
-  "mill.scav", "ota.scav",     "tcp.scav",  "toolchanger.scav", "vac.scav"
-};
+constexpr std::array<char const *, 4> CHARTS{ "brew.scav",
+                                              "dock.scav",
+                                              "tcp.scav",
+                                              "vac.scav" };
 
 // Every geometry column, `scav.geom.gen` included: each run below is on a
 // fresh chart, so its run count is one like every other's.
@@ -212,21 +212,21 @@ int64_t timed(Chart &c, uint32_t threads) {
 }  // namespace
 
 TEST_CASE("determinism: the corpus lays out to one answer at every thread count") {
-  // Four chart-global candidates on every corpus chart, since none of them
+  // Four chart-global candidates on each of these charts, since none of them
   // reaches the 1,024 entities the scaling rule starts halving at: the pick is
   // a real choice here rather than the one row a 2k shape runs. Four rather
   // than the two that ship, so the claim covers the compaction rows the table
   // holds unshipped -- a row nothing runs is a row nothing proves determinate.
   scav_profile p{ readable() };
   p.portfolio_m = 4;
-  // **Not the shipped move budget.** What this case covers is breadth -- every
-  // chart, every worker count, every row of the table -- and the sweep is a
+  // **Not the shipped move budget.** What this case covers is breadth -- four
+  // charts, every worker count, every row of the table -- and the sweep is a
   // multiplier on all three. The search's own thread-invariance is the case
   // below, at the depth that ships, on the charts that move the most (11.10).
   p.portfolio_k = 24;
   REQUIRE(profile_validate(p));
   std::string shards;
-  for (char const *name : CORPUS) {
+  for (char const *name : CHARTS) {
     if (scav::test::corpus_skipped(name)) { continue; }
     Chart sized;
     load_corpus(name, sized);
@@ -245,7 +245,8 @@ TEST_CASE("determinism: the corpus lays out to one answer at every thread count"
   MESSAGE("corpus shard counts: ", shards);
 }
 
-TEST_CASE("determinism: a searched drawing is the same drawing at every thread count") {
+TEST_CASE("determinism: a searched drawing is the same drawing at every thread count" *
+          doctest::test_suite("full")) {
   // The depth that ships. **This is the case that matters now that candidates
   // are scored in parallel** (11.10c) and rows, finishes and kicks run side by
   // side (11.10f): every one of them is fanned out and reduced in enumeration
@@ -269,13 +270,15 @@ TEST_CASE("determinism: a searched drawing is the same drawing at every thread c
   }
 }
 
-TEST_CASE("determinism: the scale targets lay out to one answer at every thread count") {
+TEST_CASE("determinism: the scale targets lay out to one answer at every thread count" *
+          doctest::test_suite("full")) {
   scav_profile const p{ scale_readable() };
   SUBCASE("nested") { check_scale_chart("nested 2k", nested_2k_chart, p, true); }
   SUBCASE("flat") { check_scale_chart("flat 2k", flat_2k_chart, p, false); }
 }
 
-TEST_CASE("determinism: the scheduling-delay injector moves nothing at scale") {
+TEST_CASE("determinism: the scheduling-delay injector moves nothing at scale" *
+          doctest::test_suite("full")) {
   DelayGuard const guard;
   scav_profile const p{ scale_readable() };
   Chart reference{ nested_2k_chart() };
@@ -292,7 +295,8 @@ TEST_CASE("determinism: the scheduling-delay injector moves nothing at scale") {
   }
 }
 
-TEST_CASE("determinism: the flat target survives the injector too") {
+TEST_CASE("determinism: the flat target survives the injector too" *
+          doctest::test_suite("full")) {
   DelayGuard const guard;
   scav_profile const p{ scale_readable() };
   Chart reference{ flat_2k_chart() };

@@ -231,6 +231,8 @@ def main() -> int:
     # Always stated, so a --no-test run cannot stick in the cache and turn
     # every later plain build into a silent test skip.
     extra.append(f"-DSCAV_RUN_TESTS={'OFF' if args.no_test else 'ON'}")
+    if not any("SCAV_TEST_TIER" in a for a in extra):
+        extra.append("-DSCAV_TEST_TIER=fast")
 
     # MSan without an instrumented libc++ reports false positives forever, and one
     # command has to cover that rather than documenting a step.
@@ -254,7 +256,7 @@ def main() -> int:
                   flush=True)
         raise SystemExit(code)
 
-    if args.coverage:
+    if args.coverage and not args.no_test:
         run(python, REPO_ROOT / "tools/coverage.py", "--build", build_dir)
 
     print(f"\nGreen: {preset}", flush=True)

@@ -71,6 +71,7 @@ class TestGauntlet(unittest.TestCase):
                     self.assertEqual("", result.stdout)
                     self.assertEqual(0, result.returncode)
 
+    @scavtest.full_only
     def test_every_chart_renders_at_both_profiles(self) -> None:
         for chart in self.charts:
             for profile in PROFILES:
@@ -83,6 +84,7 @@ class TestGauntlet(unittest.TestCase):
                     # Something was actually drawn.
                     self.assertTrue(list(root))
 
+    @scavtest.full_only
     def test_the_tools_reach_the_suite(self) -> None:
         """`--gauntlet` on both, since a switch nothing runs is a switch that
         rots. What is asserted is that they see the suite and agree on the file

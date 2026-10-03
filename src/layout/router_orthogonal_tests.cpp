@@ -1621,7 +1621,8 @@ TEST_CASE("ortho: the search returns an optimal path, checked against Dijkstra")
   }
 }
 
-TEST_CASE("ortho: the search returns the reference search's path node for node") {
+TEST_CASE("ortho: the search returns the reference search's path node for node" *
+          doctest::test_suite("full")) {
   // One scratch across grids of every size. Even pitches with a bend of 0 or of
   // one pitch tie on `f` and `g` at every step.
   OrthoScratch shared;
@@ -2791,7 +2792,8 @@ TEST_CASE("ortho: a face too short to seat on, or an end naming no box, has no e
   CHECK(straight.effective_faces(in, 0, 0) == 0U);
 }
 
-TEST_CASE("ortho: the radix open list pops in the order one heap over every entry does") {
+TEST_CASE("ortho: the radix open list pops in the order one heap over every entry does" *
+          doctest::test_suite("full")) {
   // Pushes between pops, some below the least popped `f`, with `f` crowded onto a few
   // values so `g` and node decide often; the reference is a scan for the least.
   OrthoRadixHeap h;
