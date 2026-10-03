@@ -183,6 +183,26 @@ Release and testable run the full corpus. To run it on a light preset, add
 leave out `bottler`, `mill`, `tcp` and `toolchanger` on every preset, and the full-corpus `scav selftest` run
 is opt-in with `SCAV_TEST_SELFTEST=1`.
 
+**Corpus tests lay out from committed pins.** For each corpus chart and scale,
+`test_data/golden/layout/corpus_pins.txt` holds the flags `scav dump --layout`
+prints after `rests on`: the portfolio row and every pin the search took, with
+`--no-text` on the no-text lines. Two cases search, one per scale: `layout: the
+search reaches the committed pins on every corpus chart` and `drawlist corpus:
+under real text the search reaches the committed pins`. Every other corpus test
+passes the pins back with the search off, which draws the same bytes. When a
+search change moves them, regenerate the file before the other corpus goldens:
+
+```
+for flag in --no-text ""; do
+  for c in test_data/charts/*.scav; do
+    echo "$(basename $c) $(out/<preset>/bin/scav dump --layout $flag $c | sed -n 's/^  rests on //p')"
+  done
+done > test_data/golden/layout/corpus_pins.txt
+```
+
+On a mismatch each search case also writes `out/<preset>/test/corpus_pins.txt`,
+the golden with that scale's lines replaced.
+
 **Everything generated lives under `out/`.** Build trees, the envy package cache,
 test scratch. `rm -rf out` is a factory reset, and nothing writes to `$HOME`.
 
