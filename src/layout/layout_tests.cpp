@@ -122,9 +122,8 @@ void load_corpus(char const *name, Chart &c) {
   REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
 }
 
-// A corpus chart laid out at `readable` with no space requests, once per
-// process. Five cases read the same eleven layouts, and at the shipped search
-// depth one pass over them is minutes; each case copies the chart it reads.
+// A corpus chart laid out from its committed pins at `readable` with no space
+// requests, once per process; each case copies the chart it reads.
 struct CorpusRun {
   Chart c;
   std::vector<Diagnostic> diags;
@@ -139,7 +138,13 @@ CorpusRun const &laid_corpus(char const *name) {
   CorpusRun r;
   load_corpus(name, r.c);
   std::vector<scav_placed> placed;
-  r.ok = layout_run(r.c, {}, opts(readable()), placed, r.diags, &r.inflations);
+  r.ok = scav::test::corpus_layout(r.c,
+                                   name,
+                                   {},
+                                   opts(readable()),
+                                   placed,
+                                   r.diags,
+                                   &r.inflations);
   return laid.emplace(name, std::move(r)).first->second;
 }
 
@@ -2681,6 +2686,50 @@ TEST_CASE("layout: the coordinate extent estimate holds under fat text") {
   CHECK(best.h <= COORD_MAX);
 }
 
+TEST_CASE("layout: the search reaches the committed pins on every corpus chart") {
+  // Every other corpus case lays out from these pins with the search off.
+  std::string actual;
+  for (char const *name : { "axis.scav",
+                            "bottler.scav",
+                            "brew.scav",
+                            "dock.scav",
+                            "estop.scav",
+                            "led.scav",
+                            "mill.scav",
+                            "ota.scav",
+                            "tcp.scav",
+                            "toolchanger.scav",
+                            "vac.scav" }) {
+    if (scav::test::corpus_skipped(name)) { continue; }
+    CAPTURE(name);
+    Chart c;
+    load_corpus(name, c);
+    std::vector<scav_placed> placed;
+    std::vector<Diagnostic> diags;
+    uint32_t row{ INVALID };
+    SearchPins taken;
+    REQUIRE(layout_run(c,
+                       {},
+                       opts(readable()),
+                       placed,
+                       diags,
+                       nullptr,
+                       &row,
+                       INVALID,
+                       nullptr,
+                       &taken));
+    actual += scav::test::corpus_pins_line(name, row, taken, false);
+  }
+
+  std::string const want{ scav::test::corpus_golden(
+      scav::test::corpus_pins_at(scav::test::corpus_pins_file(), false)) };
+  if (want != actual) {
+    scav::test::corpus_pins_write(actual, false);
+    MESSAGE("actual written to " SCAV_TEST_OUT_DIR "/corpus_pins.txt:\n", actual);
+  }
+  CHECK(want == actual);
+}
+
 TEST_CASE("layout: corpus charts hash to the committed golden") {
   // Three columns per chart: the inputs digest naming the measurement policy,
   // then the structural and coordinate hashes it produced.
@@ -2729,9 +2778,9 @@ TEST_CASE("layout: the corpus cost vector is committed, term by term and by shar
   // The share table beside it says how the sum divides between the nine terms,
   // which is what a weight change moves and a term column does not show.
   //
-  // Scored from the geometry columns a whole `layout_run` wrote, portfolio and
-  // all, because these two rows are what 17's phase tables say the pipeline
-  // does. A golden that claims to describe the diagram scores what ships; one
+  // Scored from the geometry columns of the drawing that ships, laid out again
+  // from its pins, because these two rows are what 17's phase tables say the
+  // pipeline does. A golden that claims to describe the diagram scores what ships; one
   // that pins a component scores the component, which is what
   // `corpus_routers.txt` and `cost_terms.txt` do next door.
   scav_profile const p{ readable() };
