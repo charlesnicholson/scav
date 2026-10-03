@@ -43,7 +43,7 @@ function(scav_testing_init)
   )
 
   set(SCAV_TEST_CORPUS "full" CACHE STRING
-    "Corpus the tests lay out: full | light (all but bottler, mill, tcp and toolchanger)")
+    "Corpus the tests lay out: full | light (brew, dock, estop and led)")
   set_property(CACHE SCAV_TEST_CORPUS PROPERTY STRINGS full light)
   if(NOT SCAV_TEST_CORPUS MATCHES "^(full|light)$")
     message(FATAL_ERROR "SCAV_TEST_CORPUS=${SCAV_TEST_CORPUS} is not one of full light")

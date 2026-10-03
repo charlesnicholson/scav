@@ -215,7 +215,8 @@ TEST_CASE("search memo: every search it answers is the search run afresh") {
   // Each answer is checked against the search run anyway, including those not taken.
   MemoGuard const guard;
   layout_test_search_memo_verify(true);
-  constexpr std::array<char const *, 4> CHARTS{ "axis.scav",
+  constexpr std::array<char const *, 5> CHARTS{ "axis.scav",
+                                                "brew.scav",
                                                 "ota.scav",
                                                 "tcp.scav",
                                                 "vac.scav" };
@@ -310,7 +311,8 @@ TEST_CASE("search: every face move scored from the prefix scores as the whole wa
   // Each shortcut is also scored whole and compared, including moves that lose.
   PrefixGuard const guard;
   layout_test_prefix_verify(true);
-  constexpr std::array<char const *, 4> CHARTS{ "axis.scav",
+  constexpr std::array<char const *, 5> CHARTS{ "axis.scav",
+                                                "brew.scav",
                                                 "ota.scav",
                                                 "tcp.scav",
                                                 "vac.scav" };
@@ -386,7 +388,8 @@ TEST_CASE("search: with no path boxes nothing is bounded") {
   CHECK(layout_test_label_bound_labelled() == 0);
 }
 
-TEST_CASE("search schedules: each row keeps the cheaper of its two searches") {
+TEST_CASE("search schedules: each row keeps the cheaper of its two searches" *
+          doctest::skip(scav::test::corpus_light())) {  // needs the larger charts
   constexpr std::array<char const *, 6> CHARTS{ "axis.scav", "brew.scav",
                                                 "ota.scav",  "tcp.scav",
                                                 "vac.scav",  "gauntlet/carried.scav" };

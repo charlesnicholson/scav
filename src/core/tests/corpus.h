@@ -9,12 +9,19 @@
 
 namespace scav::test {
 
-// Whether SCAV_TEST_CORPUS=light drops this chart.
-inline bool corpus_skipped(std::string_view chart) {
+// Whether SCAV_TEST_CORPUS=light: the corpus is brew, dock, estop and led.
+inline bool corpus_light() {
   char const *const mode{ std::getenv("SCAV_TEST_CORPUS") };
-  bool const light{ (mode != nullptr) && (std::string_view{ mode } == "light") };
-  return light && ((chart == "bottler.scav") || (chart == "mill.scav") ||
-                   (chart == "tcp.scav") || (chart == "toolchanger.scav"));
+  return (mode != nullptr) && (std::string_view{ mode } == "light");
+}
+
+// Whether the light corpus drops this chart; a gauntlet chart is never dropped.
+inline bool corpus_skipped(std::string_view chart) {
+  bool const light{ corpus_light() };
+  bool const corpus{ chart.ends_with(".scav") &&
+                     (chart.find('/') == std::string_view::npos) };
+  return light && corpus && (chart != "brew.scav") && (chart != "dock.scav") &&
+         (chart != "estop.scav") && (chart != "led.scav");
 }
 
 // `golden` less every line naming a skipped chart as one of its words.

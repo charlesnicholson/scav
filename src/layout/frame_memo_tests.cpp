@@ -230,7 +230,8 @@ constexpr std::array<char const *, 7> CHARTS{ "axis.scav", "bottler.scav",
 
 }  // namespace
 
-TEST_CASE("order memo: a remembered frame is the frame those inputs order to") {
+TEST_CASE("order memo: a remembered frame is the frame those inputs order to" *
+          doctest::skip(scav::test::corpus_light())) {  // needs the larger charts
   scav_profile const p{ readable() };
   constexpr uint32_t VARIANTS{ 6 };
   std::vector<uint32_t> moved(VARIANTS, 0);
@@ -291,7 +292,8 @@ TEST_CASE("order memo: a remembered frame is the frame those inputs order to") {
   }
 }
 
-TEST_CASE("size memo: a remembered frame is the layout those inputs size to") {
+TEST_CASE("size memo: a remembered frame is the layout those inputs size to" *
+          doctest::skip(scav::test::corpus_light())) {  // needs the larger charts
   scav_profile const p{ readable() };
   constexpr uint32_t VARIANTS{ 17 };
   std::vector<uint32_t> moved(VARIANTS, 0);

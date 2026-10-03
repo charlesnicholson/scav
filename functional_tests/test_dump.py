@@ -498,7 +498,7 @@ class TestDump(unittest.TestCase):
         charts = sorted((self.cfg.repo_root / "test_data/charts").glob("*.scav"))
         self.assertTrue(charts)
         for chart in charts:
-            if chart.name in scavtest.HEAVY_CHARTS:
+            if scavtest.cli_skipped(chart.name):
                 continue
             with self.subTest(chart=chart.name):
                 plain = self.run_dump("--json", "--layout", chart.as_posix())

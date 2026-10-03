@@ -68,7 +68,7 @@ class TestRender(unittest.TestCase):
         name = "scav.exe" if os.name == "nt" else "scav"
         cls.exe = cls.cfg.build_dir / "bin" / name
         charts = (cls.cfg.repo_root / "test_data/charts").glob("*.scav")
-        cls.charts = sorted(c for c in charts if c.name not in scavtest.HEAVY_CHARTS)
+        cls.charts = sorted(c for c in charts if not scavtest.cli_skipped(c.name))
         assert cls.charts
         cls.scratch = scavtest.fresh_dir(cls.cfg.scratch_dir / "render")
 

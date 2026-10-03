@@ -175,12 +175,12 @@ how that stays true.
 
 **Debug, sanitizer and coverage presets test a light corpus.** The cache
 variable `SCAV_TEST_CORPUS` is `full` or `light`, and every test reads it from
-the environment variable of the same name. `light` leaves `bottler`, `mill`, `tcp`
-and `toolchanger`, about 99% of the corpus's layout cost, out of every corpus loop;
-the other charts are still compared line by line against the same goldens.
+the environment variable of the same name. `light` keeps only `brew`, `dock`, `estop`
+and `led`, about 0.2% of the corpus's layout cost, in every corpus loop; they are
+still compared line by line against the same goldens.
 Release and testable run the full corpus. To run it on a light preset, add
 `-- -DSCAV_TEST_CORPUS=full`. The functional tests' traced-dump and render loops
-take the light charts on every preset, and the full-corpus `scav selftest` run
+leave out `bottler`, `mill`, `tcp` and `toolchanger` on every preset, and the full-corpus `scav selftest` run
 is opt-in with `SCAV_TEST_SELFTEST=1`.
 
 **Everything generated lives under `out/`.** Build trees, the envy package cache,

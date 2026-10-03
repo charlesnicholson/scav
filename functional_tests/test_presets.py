@@ -42,7 +42,7 @@ SANITIZERS: dict[str, set[str]] = {
     "tsan": {t for t in TRIPLES if not t.startswith("windows")},
     "msan": {"linux-clang-libcxx"},
 }
-# The rows that lay out the corpus less its four heaviest charts; the rest run it whole.
+# The rows that lay out four small corpus charts; the rest run it whole.
 LIGHT_CORPUS: frozenset[str] = frozenset({"debug", "coverage", *SANITIZERS})
 
 

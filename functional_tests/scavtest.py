@@ -11,15 +11,14 @@ type Arg = str | Path
 PATHS: frozenset[str] = frozenset({"repo_root", "build_dir", "scratch_dir"})
 TRUTHY: frozenset[str] = frozenset({"ON", "1", "TRUE", "YES"})
 HEAVY_CHARTS: frozenset[str] = frozenset({"bottler.scav", "mill.scav", "tcp.scav", "toolchanger.scav"})
+LIGHT_CHARTS: frozenset[str] = frozenset({"brew.scav", "dock.scav", "estop.scav", "led.scav"})
 
 
-def corpus_light() -> bool:
-    """Whether SCAV_TEST_CORPUS=light drops HEAVY_CHARTS from every corpus run."""
-    return os.environ.get("SCAV_TEST_CORPUS") == "light"
-
-
-def corpus_skipped(chart: str) -> bool:
-    return corpus_light() and chart in HEAVY_CHARTS
+def cli_skipped(chart: str) -> bool:
+    """Whether the CLI's corpus loops leave a chart out: HEAVY_CHARTS always, and
+    everything but LIGHT_CHARTS under SCAV_TEST_CORPUS=light."""
+    light = os.environ.get("SCAV_TEST_CORPUS") == "light"
+    return chart in HEAVY_CHARTS or (light and chart not in LIGHT_CHARTS)
 
 
 class Config(dict[str, str]):

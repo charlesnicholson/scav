@@ -1207,7 +1207,8 @@ TEST_CASE("layout: the flat two thousand lay out too, and quickly") {
 #endif
 }
 
-TEST_CASE("layout: no corpus chart runs a route flush along a box") {
+TEST_CASE("layout: no corpus chart runs a route flush along a box" *
+          doctest::skip(scav::test::corpus_light())) {  // needs the larger charts
   // The router's own suite proves clearance over the graph; what it cannot see is
   // a box flush against the *frame's* edge, which has no room for a lane. Phase 3
   // owns the margin, and `brew` is where the shape occurs.
