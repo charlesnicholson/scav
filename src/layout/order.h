@@ -70,6 +70,10 @@ struct SubmachineOrders {
   std::vector<uint8_t> seg_cross;
   // Parallel to segments: 1 where a side pin chose the boundary node's border.
   std::vector<uint8_t> seg_sided;
+  // Parallel to segments: the face 0..3 of the boundary node's border, numbered as
+  // `scav_port_slot::side`. Off a cross border, the leading rank border where its edge
+  // leaves the node, else the trailing one.
+  std::vector<uint8_t> seg_side;
 
   // Per segment, 1 where it lies on a cycle of its frame's graph before any turn.
   std::vector<uint8_t> seg_cyclic;

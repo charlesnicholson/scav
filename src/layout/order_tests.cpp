@@ -182,6 +182,7 @@ TEST_CASE(
   // Left alone, the port is a source on the leading border, a rank before `B`.
   SubmachineOrders const plain{ order_submachines(c, g, {}, profile()) };
   CHECK(plain.seg_cross[seg] == 0);
+  CHECK(plain.seg_side[seg] == 0);
   CHECK((plain.nodes[plain.seg_node[seg]].rank + 1) == node_of(plain, b).rank);
 
   for (uint32_t const side : { 2U, 3U }) {
@@ -189,6 +190,7 @@ TEST_CASE(
     SearchPins const pin{ .sides = { { .trans = drop, .leg = 1, .side = side } } };
     SubmachineOrders const o{ order_submachines(c, g, {}, profile(), 0, pin) };
     CHECK(o.seg_cross[seg] == ((side == 2) ? 1 : 2));
+    CHECK(o.seg_side[seg] == side);
     OrderNode const port{ o.nodes[o.seg_node[seg]] };
     OrderNode const mate{ node_of(o, b) };
     CHECK(port.rank == mate.rank);
@@ -215,12 +217,14 @@ TEST_CASE(
   SubmachineOrders const named{ order_submachines(c, g, {}, profile(), 0, outer) };
   CHECK(named.seg_cross[seg] == 1);
   CHECK(named.seg_sided[seg] == 1);
+  CHECK(named.seg_side[seg] == 2);
 
   // Turned down, left is one of the frame's cross borders.
   SearchPins const turned{ .orients = { { .frame = inner } },
                            .sides = { { .trans = drop, .leg = 1, .side = 0 } } };
   SubmachineOrders const down{ order_submachines(c, g, {}, profile(), 0, turned) };
   CHECK(down.seg_cross[seg] == 1);
+  CHECK(down.seg_side[seg] == 0);
   CHECK(down.nodes[down.seg_node[seg]].rank == node_of(down, b).rank);
 }
 
@@ -248,10 +252,12 @@ TEST_CASE("order: a port pinned where its frame's ranks start or end turns its e
   CHECK(same.edges == plain.edges);
   CHECK(same.seg_cross[seg] == 0);
   CHECK(same.seg_sided[seg] == 1);
+  CHECK(same.seg_side[seg] == 0);
 
   SearchPins const right{ .sides = { { .trans = drop, .leg = 1, .side = 1 } } };
   SubmachineOrders const o{ order_submachines(c, g, {}, profile(), 0, right) };
   CHECK(o.seg_cross[seg] == 0);
+  CHECK(o.seg_side[seg] == 1);  // a sink on the trailing border
   CHECK((o.nodes[o.seg_node[seg]].rank + 1) == o.sub_ranks[inner.v]);
   CHECK(node_of(o, b).rank < o.nodes[o.seg_node[seg]].rank);
   CHECK(node_of(o, a).rank == 0);

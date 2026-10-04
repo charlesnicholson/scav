@@ -366,7 +366,7 @@ void facing_flips(Facing &out,
         continue;
       }
       uint32_t const node{ joined(nd.subject) };
-      uint32_t const side{ (down ? 0U : 2U) + ((o.seg_cross[nd.subject] == 1) ? 0U : 1U) };
+      uint32_t const side{ o.seg_side[nd.subject] };
       if (node != INVALID) { vec_push_back(taken, { .node = node, .side = side }); }
     }
     for (uint32_t k = 0; k < span.len; ++k) {
@@ -378,9 +378,8 @@ void facing_flips(Facing &out,
       TransId const t{ g.segments[seg].trans };
       if ((t.v >= c.transitions.size()) || (t.v >= g.trans_segments.size())) { continue; }
       uint32_t const leg{ seg - g.trans_segments[t.v].off };
-      bool const on_leading{ down ? (z.node[at].y == frame.y)
-                                  : (z.node[at].x == frame.x) };
       uint32_t const rank_face{ down ? 2U : 0U };
+      bool const on_leading{ o.seg_side[seg] == rank_face };
       if (o.seg_port[seg] == INVALID) {
         // An inner-face end goes off a lined rank border onto the other one, if unlined.
         uint32_t const onto{ rank_face + (on_leading ? 1U : 0U) };
@@ -1215,7 +1214,6 @@ Improved run_search(Chart const &c,
   bounded = bounded && test_label_bound;
 #endif
   std::vector<uint8_t> chained;
-  std::vector<uint8_t> source;
   while ((cut_scored < budget) || (rev_scored < budget) || (face_scored < budget) ||
          (side_scored < budget) || (pin_scored < budget) ||
          (refold && (fold_scored < budget))) {
@@ -1295,8 +1293,6 @@ Improved run_search(Chart const &c,
     // Every side of its state's border a port may cross but the incumbent's; a port
     // already pinned is not re-offered.
     SubmachineOrders const &laid{ incumbent.laid };
-    vec_assign(source, laid.nodes.size(), 0);
-    for (OrderEdge const &e : laid.edges) { source[e.src] = 1; }
     for (uint32_t seg = 0;
          incumbent.ok && (seg < g.segments.size()) && (side_scored < budget);
          ++seg) {
@@ -1317,11 +1313,7 @@ Improved run_search(Chart const &c,
             already || ((had.trans.v == t.v) && (had.leg == leg) && (had.end == end));
       }
       if (already) { continue; }
-      bool const down{ laid.sub_down[frame] != 0 };
-      uint8_t const cross{ laid.seg_cross[seg] };
-      uint32_t const now{ (cross != 0)
-                              ? ((down ? 0U : 2U) + (cross - 1U))
-                              : ((down ? 2U : 0U) + ((source[node] != 0) ? 0U : 1U)) };
+      uint32_t const now{ laid.seg_side[seg] };
       for (uint32_t side = 0; (side < 4) && (side_scored < budget); ++side) {
         if ((side == now) || face_lined(s, g.ports[port].state.v, side)) { continue; }
         ++side_scored;

@@ -799,6 +799,7 @@ void order_submachines(SubmachineOrders &o,
   vec_assign(o.seg_port, g.segments.size(), INVALID);
   vec_assign(o.seg_cross, g.segments.size(), 0);
   vec_assign(o.seg_sided, g.segments.size(), 0);
+  vec_assign(o.seg_side, g.segments.size(), 0);
   vec_assign(o.seg_cyclic, g.segments.size(), 0);
 
   CallScope const scope;
@@ -1208,6 +1209,7 @@ void order_submachines(SubmachineOrders &o,
     uint32_t const edge_base{ static_cast<uint32_t>(o.edges.size()) };
     uint32_t const gap_base{ static_cast<uint32_t>(o.gaps.size()) };
     Frame const &f{ frames[m].f };
+    bool const down{ o.sub_down[m] != 0 };
 
     // Emitted in (rank, pos) order, so a consumer walking one frame's nodes
     // walks its diagram left to right and top to bottom.
@@ -1242,6 +1244,15 @@ void order_submachines(SubmachineOrders &o,
           !sided.empty() && (sided[sp.seg] != 0)) {
         o.seg_cross[sp.seg] = cross_side(sp.seg, m);
         o.seg_sided[sp.seg] = 1;
+      }
+      uint8_t const cross{ o.seg_cross[sp.seg] };
+      o.seg_side[sp.seg] = static_cast<uint8_t>(
+          (cross != 0) ? ((down ? 0U : 2U) + (cross - 1U)) : ((down ? 2U : 0U) + 1U));
+    }
+    for (OrderEdge const &e : f.edges) {
+      OrderNode const &from{ f.nodes[e.src] };
+      if ((from.kind == OrderKind::Boundary) && (o.seg_cross[from.subject] == 0)) {
+        o.seg_side[from.subject] = down ? 2U : 0U;  // the leading rank border
       }
     }
     for (uint32_t const seg : frames[m].cyclic) { o.seg_cyclic[seg] = 1; }

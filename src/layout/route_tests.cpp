@@ -48,6 +48,7 @@ SubmachineOrders empty_orders(Chart const &c, SplitGraph const &g) {
   o.state_node.assign(c.states.size(), INVALID);
   o.seg_node.assign(g.segments.size(), INVALID);
   o.seg_port.assign(g.segments.size(), INVALID);
+  o.seg_side.assign(g.segments.size(), 0);
   return o;
 }
 
@@ -230,6 +231,7 @@ TEST_CASE("route: a crossing puts its slot on the crossed border") {
   o.nodes = { { .kind = OrderKind::Boundary, .subject = 0, .rank = 1, .pos = 0 } };
   o.seg_node[0] = 0;
   o.seg_port[0] = 0;
+  o.seg_side[0] = 1;  // the right border
   o.sub_nodes[inner.v] = make_span(0, 1);
   SizedLayout z{ blank(c, o) };
   z.state[comp.v] = { .x = 0, .y = 0, .w = 200, .h = 200 };
@@ -358,10 +360,7 @@ TEST_CASE("route: a port on a cross border puts its slot on the top or bottom bo
       o.edges = { { .src = 0, .dst = 1, .segment = enter, .reversed = 0 } };
       o.seg_node[enter] = 0;
       o.seg_port[enter] = 0;
-      o.seg_cross.assign(g.segments.size(), 0);
-      o.seg_cross[enter] = cross;
-      o.sub_down.assign(c.submachines.size(), 0);
-      o.sub_down[inner.v] = down ? 1 : 0;
+      o.seg_side[enter] = static_cast<uint8_t>((down ? 0 : 2) + cross - 1);
       o.sub_nodes[inner.v] = make_span(0, 2);
       SizedLayout z{ blank(c, o) };
       z.state[d.v] = { .x = 480, .y = -400, .w = 100, .h = 40 };
@@ -981,6 +980,7 @@ TEST_CASE("route: nets join only where one ends exactly where the next begins") 
   o.nodes = { { .kind = OrderKind::Boundary, .subject = 0, .rank = 1, .pos = 0 } };
   o.seg_node[0] = 0;
   o.seg_port[0] = 0;
+  o.seg_side[0] = 1;  // the right border
   o.sub_nodes[inner.v] = make_span(0, 1);
   SizedLayout z{ blank(c, o) };
   z.state[comp.v] = { .x = 0, .y = 0, .w = 200, .h = 200 };

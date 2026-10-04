@@ -190,7 +190,6 @@ struct CallScratch {
   std::array<std::vector<uint32_t>, 2> faces;
   std::vector<uint32_t> port_seg, seg_reversed;
   std::vector<std::vector<uint32_t>> seg_bends;
-  std::vector<uint8_t> source_node;
   std::vector<Planned> planned;
   std::vector<Span> trans_nets;
   std::vector<scav_extent> loop_label;
@@ -326,12 +325,6 @@ void route_transitions(Routes &out,
     }
   }
 
-  // Whether a route arrives at a boundary or leaves through one. Read from the
-  // node's direction, not its absolute x, which carries the packer's offset.
-  std::vector<uint8_t> &source_node{ cs.source_node };
-  vec_assign(source_node, o.nodes.size(), 0);
-  for (OrderEdge const &e : o.edges) { source_node[e.src] = 1; }
-
   // A slot sits on the crossed box's own border, at the height its boundary
   // node ended up.
   auto const slot_of = [&](uint32_t port) {
@@ -346,35 +339,15 @@ void route_transitions(Routes &out,
       scav_point const at{ centre(box) };
       return scav_port_slot{ .x = at.x, .y = at.y, .side = 0, .boundary_depth = depth };
     }
-    bool const leading{ source_node[node] != 0 };
-    // On the border the frame's ranks start and end at: left and right for a frame running
-    // across, top and bottom for one running down; a cross-border node is on the others.
-    uint32_t const frame{ g.segments[seg].frame.v };
-    bool const down{ (frame < o.sub_down.size()) && (o.sub_down[frame] != 0) };
-    uint8_t const cross{ (seg < o.seg_cross.size()) ? o.seg_cross[seg] : uint8_t{ 0 } };
-    if (cross != 0) {
-      bool const first{ cross == 1 };
-      if (down) {
-        return scav_port_slot{ .x = first ? box.x : (box.x + box.w),
-                               .y = z.node[node].y,
-                               .side = first ? 0U : 1U,
-                               .boundary_depth = depth };
-      }
-      return scav_port_slot{ .x = z.node[node].x,
-                             .y = first ? box.y : (box.y + box.h),
-                             .side = first ? 2U : 3U,
-                             .boundary_depth = depth };
+    uint32_t const side{ o.seg_side[seg] };
+    scav_point at{ z.node[node] };
+    switch (side) {
+      case 0: at.x = box.x; break;
+      case 1: at.x = box.x + box.w; break;
+      case 2: at.y = box.y; break;
+      default: at.y = box.y + box.h; break;
     }
-    if (down) {
-      return scav_port_slot{ .x = z.node[node].x,
-                             .y = leading ? box.y : (box.y + box.h),
-                             .side = leading ? 2U : 3U,
-                             .boundary_depth = depth };
-    }
-    return scav_port_slot{ .x = leading ? box.x : (box.x + box.w),
-                           .y = z.node[node].y,
-                           .side = leading ? 0U : 1U,
-                           .boundary_depth = depth };
+    return scav_port_slot{ .x = at.x, .y = at.y, .side = side, .boundary_depth = depth };
   };
 
   // Plan every net before routing any, so the port slots come out in
