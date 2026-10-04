@@ -857,9 +857,9 @@ TEST_CASE("cost: a placed box over another transition's route breaks Tier 0") {
   scav_path_box const box{ .subject = 0, .w = 60, .h = 20, .order = 0 };
   scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
 
-  // Straddling its own route (y=50) is free; straddling the other (y=80) is not.
+  // Straddling either route counts: its own (y=50) or the other (y=80).
   r.placed = { { .x = 200, .y = 40, .w = 60, .h = 20 } };
-  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label_over_route == 0);
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label_over_route == 1);
 
   r.placed = { { .x = 200, .y = 70, .w = 60, .h = 20 } };
   CostTerms const over{ cost_terms(c, decompose(c), z, r, s, profile()) };
@@ -970,10 +970,10 @@ TEST_CASE("cost: a placed box the space table does not name owns no route") {
     return cost_terms(c, decompose(c), z, r, s, profile());
   };
 
-  // Named, the box owns the line and it is free; unnamed, the line is foreign.
-  // With no leg of its own, `label_near` is 0.
+  // Named or unnamed, a line through the box counts. With no leg of its own,
+  // `label_near` is 0.
   scav_path_box const named{ .subject = 0, .w = 60, .h = 20, .order = 0 };
-  CHECK(scored({ .path_box = &named, .n_path_box = 1 }).label_over_route == 0);
+  CHECK(scored({ .path_box = &named, .n_path_box = 1 }).label_over_route == 1);
   CHECK(scored({}).label_over_route == 1);
   CHECK(scored({}).label_near == 0);
 
@@ -2449,12 +2449,12 @@ CostTerms terms(Chart const &c,
     for (Piece const &piece : pieces) {
       scav_rect const seg{ span_rect(piece.a, piece.b) };
       Wide const away{ chebyshev_gap(r.placed[i], seg) };
+      if (overlaps(r.placed[i], seg)) { ++t.label_over_route; }
       if (piece.trans == subject) {
         own = (own < 0) ? away : imin(own, away);
         continue;
       }
       other = (other < 0) ? away : imin(other, away);
-      if (overlaps(r.placed[i], seg)) { ++t.label_over_route; }
     }
     if (own > label_leader(p)) { ++t.label_far; }
     if ((own >= 0) && (other >= 0)) {

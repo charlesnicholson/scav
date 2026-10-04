@@ -41,6 +41,7 @@ char const *kind_name(TraceKind k) {
     case TraceKind::LaneFound: return "lane_found";
     case TraceKind::BundleRefused: return "bundle_refused";
     case TraceKind::RouteWalled: return "route_walled";
+    case TraceKind::LabelCentred: return "label_centred";
     case TraceKind::None: break;
   }
   return "none";
@@ -157,7 +158,8 @@ void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out)
         break;
       case TraceKind::EdgeReversed:
       case TraceKind::RouteDegraded:
-      case TraceKind::RouteWalled: j.kv("seg", e.seg.seg); break;
+      case TraceKind::RouteWalled:
+      case TraceKind::LabelCentred: j.kv("seg", e.seg.seg); break;
       case TraceKind::EdgeChained:
         j.kv("seg", e.chain.seg);
         j.kv("rank", e.chain.rank);

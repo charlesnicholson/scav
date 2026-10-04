@@ -6,6 +6,7 @@
 #include "layout/geom.h"
 #include "layout/memo.h"
 #include "layout/size.h"
+#include "layout/trace.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 #include "scav_int.h"
@@ -1044,6 +1045,10 @@ uint32_t place_labels_by(Chart const &c,
     } else {
       ++fallbacks;
       out[i] = centred(anchor_of(points, anchored), box, z.chart);
+      if (box.subject < g.trans_segments.size()) {
+        trace_emit({ .kind = TraceKind::LabelCentred,
+                     .seg = { .seg = g.trans_segments[box.subject].off } });
+      }
     }
     vec_push_back(settled, i);
   }

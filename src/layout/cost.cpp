@@ -1082,6 +1082,10 @@ CostTerms cost_terms(CostContext const &ctx,
         for (uint32_t j = first[subject]; j < first[subject + 1]; ++j) {
           Wide const away{ chebyshev_gap(box, seg_box[j]) };
           own = (own < 0) ? away : imin(own, away);
+          if (overlaps(box, seg_box[j])) {  // its own line through it
+            ++t.label_over_route;
+            blame(party, subject, INVALID);
+          }
         }
       }
       if (own > label_leader(p)) {
