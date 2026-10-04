@@ -65,9 +65,9 @@ window.SXdet = (function () {
 window.SXdetHashes = function (sec) {
   var D = SXdet, estop = SX.data('charts').charts.estop.notext, led = window.SXdetLed;
   var models = { estop: SX.data('charts').charts.estop.model, led: SX.data('charts').charts.led.model };
-  var GOLD = { estop: ['0bec6ad2', '54fe3996', 'ad0c589b'], led: ['0bec6ad2', 'c5553683', 'ad0c589b'] };
+  var GOLD = { estop: ['c643417b', '54fe3996', 'ad0c589b'], led: ['c643417b', 'c5553683', 'ad0c589b'] };
   var f = SX.figure(sec.querySelector('[data-fig="det-hashes"]'), { caption: '<b>Hover</b> a hash for what it covers: estop and led share all but the structural hash. Below, <b>slide</b> the drawing or <b>switch</b> the model to see which digest moves.' });
-  var WHAT = ['<b>inputs digest</b>: profile (52 fields), router name and version, packer choice, space-request tables', '<b>structural hash</b>: ranks, in-rank orders, port sides, bend direction tokens; seeded with the model\'s structural digest', '<b>coordinate hash</b>: every rectangle, point and port coordinate'];
+  var WHAT = ['<b>inputs digest</b>: profile (49 fields), router name and version, packer choice, space-request tables', '<b>structural hash</b>: ranks, in-rank orders, port sides, bend direction tokens; seeded with the model\'s structural digest', '<b>coordinate hash</b>: every rectangle, point and port coordinate'];
   var NAMES = ['inputs', 'structural', 'coordinate'];
   var top = SX.el('div', { class: 'fig-row' });
   ['estop', 'led'].forEach(function (n) {

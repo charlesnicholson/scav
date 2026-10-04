@@ -123,12 +123,8 @@ typedef struct {
   int32_t portfolio_k;                 /* bounded moves scored; [0, 2^20] */
   int32_t portfolio_m;                 /* chart-global phase-2 tuples; [1, 16] */
   int32_t sweep_count;                 /* [0, 1024] */
-  int32_t congestion_iterations;       /* [0, 1024] */
-  int32_t ripup_cap;                   /* [0, 1024] */
   int32_t spacing_inflation_cap;       /* [0, 1024] */
   int32_t spacing_inflation_increment; /* [0, COORD_MAX/4] */
-
-  int32_t print_columns; /* the printer's line-break budget; [20, 4096] */
 } scav_profile;
 
 /* One row of the portslot geometry column: a port's coordinate, which side of

@@ -1,7 +1,5 @@
-// The shipped profiles load and validate; every bound rejects; print_columns
-// agrees with the printer's default.
+// The shipped profiles load and validate; every bound rejects.
 
-#include "scav/scav_core.h"
 #include "scav/scav_core_c.h"
 #include "scav/scav_layout.h"
 
@@ -30,7 +28,7 @@ TEST_CASE("profile: both shipped profiles load and pass their own validation") {
     CAPTURE(name);
     scav_profile const p{ named(name) };
     CHECK(profile_validate(p));
-    CHECK(p.profile_version == 15);
+    CHECK(p.profile_version == 16);
     // The whole table (11.10, 11.10g): every row searched and kicked, which is
     // where `axis`'s compact drawing is.
     CHECK(p.portfolio_m == 16);
@@ -44,13 +42,6 @@ TEST_CASE("profile: an unknown name is refused and writes nothing") {
   CHECK(!profile_named("ornate", p));
   CHECK(!profile_named(nullptr, p));
   CHECK(p.pad == 77);
-}
-
-TEST_CASE("profile: print_columns matches the printer's default") {
-  // The one field the printer reads; a shipped profile drifting from the
-  // printer's own default would print differently through layout than fmt.
-  CHECK(named("compact").print_columns == static_cast<int32_t>(DEFAULT_PRINT_COLUMNS));
-  CHECK(named("readable").print_columns == static_cast<int32_t>(DEFAULT_PRINT_COLUMNS));
 }
 
 TEST_CASE("profile: every bound rejects out of range") {
@@ -144,14 +135,6 @@ TEST_CASE("profile: every bound rejects out of range") {
           .field = &scav_profile::sweep_count,
           .bad_low = -1,
           .bad_high = 1025 },
-    Poke{ .what = "congestion_iterations",
-          .field = &scav_profile::congestion_iterations,
-          .bad_low = -1,
-          .bad_high = 1025 },
-    Poke{ .what = "ripup_cap",
-          .field = &scav_profile::ripup_cap,
-          .bad_low = -1,
-          .bad_high = 1025 },
     Poke{ .what = "spacing_inflation_cap",
           .field = &scav_profile::spacing_inflation_cap,
           .bad_low = -1,
@@ -160,10 +143,6 @@ TEST_CASE("profile: every bound rejects out of range") {
           .field = &scav_profile::spacing_inflation_increment,
           .bad_low = -1,
           .bad_high = SPACE_MAX + 1 },
-    Poke{ .what = "print_columns",
-          .field = &scav_profile::print_columns,
-          .bad_low = static_cast<int32_t>(PRINT_COLUMNS_MIN) - 1,
-          .bad_high = static_cast<int32_t>(PRINT_COLUMNS_MAX) + 1 },
   };
   for (Poke const &poke : pokes) {
     CAPTURE(poke.what);

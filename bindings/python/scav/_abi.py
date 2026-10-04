@@ -277,14 +277,11 @@ class scav_profile(ctypes.Structure):
         ("portfolio_k", ctypes.c_int32),
         ("portfolio_m", ctypes.c_int32),
         ("sweep_count", ctypes.c_int32),
-        ("congestion_iterations", ctypes.c_int32),
-        ("ripup_cap", ctypes.c_int32),
         ("spacing_inflation_cap", ctypes.c_int32),
         ("spacing_inflation_increment", ctypes.c_int32),
-        ("print_columns", ctypes.c_int32),
     ]
 
-assert ctypes.sizeof(scav_profile) == 208, "scav_profile is not 208 bytes"
+assert ctypes.sizeof(scav_profile) == 196, "scav_profile is not 196 bytes"
 assert ctypes.alignment(scav_profile) == 4
 assert getattr(scav_profile, "profile_id").offset == 0
 assert getattr(scav_profile, "profile_version").offset == 4
@@ -317,11 +314,8 @@ assert getattr(scav_profile, "w_whitespace").offset == 172
 assert getattr(scav_profile, "portfolio_k").offset == 176
 assert getattr(scav_profile, "portfolio_m").offset == 180
 assert getattr(scav_profile, "sweep_count").offset == 184
-assert getattr(scav_profile, "congestion_iterations").offset == 188
-assert getattr(scav_profile, "ripup_cap").offset == 192
-assert getattr(scav_profile, "spacing_inflation_cap").offset == 196
-assert getattr(scav_profile, "spacing_inflation_increment").offset == 200
-assert getattr(scav_profile, "print_columns").offset == 204
+assert getattr(scav_profile, "spacing_inflation_cap").offset == 188
+assert getattr(scav_profile, "spacing_inflation_increment").offset == 192
 
 class scav_port_slot(ctypes.Structure):
     _fields_ = [
@@ -345,11 +339,11 @@ class scav_layout_opts(ctypes.Structure):
         ("threads", ctypes.c_uint32),
     ]
 
-assert ctypes.sizeof(scav_layout_opts) == 216, "scav_layout_opts is not 216 bytes"
+assert ctypes.sizeof(scav_layout_opts) == 204, "scav_layout_opts is not 204 bytes"
 assert ctypes.alignment(scav_layout_opts) == 4
 assert getattr(scav_layout_opts, "profile").offset == 0
-assert getattr(scav_layout_opts, "router").offset == 208
-assert getattr(scav_layout_opts, "threads").offset == 212
+assert getattr(scav_layout_opts, "router").offset == 196
+assert getattr(scav_layout_opts, "threads").offset == 200
 
 class scav_style(ctypes.Structure):
     _fields_ = [

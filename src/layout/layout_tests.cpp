@@ -155,7 +155,7 @@ Chart corpus_chart(char const *name) {
   return r.c;
 }
 
-// The profile's 48 knobs as a block, so a test can say which of them moved.
+// The profile's knobs as a block, so a test can say which of them moved.
 // The assert layout.cpp's digest rests on is what makes the copy total.
 std::array<int32_t, sizeof(scav_profile) / sizeof(int32_t)> profile_fields(
     scav_profile const &p) {
@@ -1528,7 +1528,7 @@ TEST_CASE("layout: the table's first row is the profile as given") {
         CHECK((fold == ((row < 8) ? Fold::Scale : Fold::Always)));
         // The scale-measure tiebreak is no longer a row of the table, so no row
         // may touch it -- it won on no chart at either scale, and compaction
-        // took the bit. All 48 knobs read back to say the row moved one.
+        // took the bit. Every knob reads back to say the row moved one.
         CHECK(knobs.sm_tiebreak == given.sm_tiebreak);
         knobs.trybox = given.trybox;
         CHECK(profile_fields(knobs) == profile_fields(given));

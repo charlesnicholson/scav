@@ -1624,7 +1624,7 @@
               "size": 4
             },
             {
-              "name": "congestion_iterations",
+              "name": "spacing_inflation_cap",
               "type": {
                 "name": "int32_t",
                 "pointer": 0,
@@ -1634,7 +1634,7 @@
               "size": 4
             },
             {
-              "name": "ripup_cap",
+              "name": "spacing_inflation_increment",
               "type": {
                 "name": "int32_t",
                 "pointer": 0,
@@ -1642,39 +1642,9 @@
               },
               "offset": 192,
               "size": 4
-            },
-            {
-              "name": "spacing_inflation_cap",
-              "type": {
-                "name": "int32_t",
-                "pointer": 0,
-                "const": false
-              },
-              "offset": 196,
-              "size": 4
-            },
-            {
-              "name": "spacing_inflation_increment",
-              "type": {
-                "name": "int32_t",
-                "pointer": 0,
-                "const": false
-              },
-              "offset": 200,
-              "size": 4
-            },
-            {
-              "name": "print_columns",
-              "type": {
-                "name": "int32_t",
-                "pointer": 0,
-                "const": false
-              },
-              "offset": 204,
-              "size": 4
             }
           ],
-          "size": 208,
+          "size": 196,
           "align": 4,
           "padding": 0
         },
@@ -1737,7 +1707,7 @@
                 "const": false
               },
               "offset": 0,
-              "size": 208
+              "size": 196
             },
             {
               "name": "router",
@@ -1746,7 +1716,7 @@
                 "pointer": 0,
                 "const": false
               },
-              "offset": 208,
+              "offset": 196,
               "size": 4
             },
             {
@@ -1756,11 +1726,11 @@
                 "pointer": 0,
                 "const": false
               },
-              "offset": 212,
+              "offset": 200,
               "size": 4
             }
           ],
-          "size": 216,
+          "size": 204,
           "align": 4,
           "padding": 0
         }
