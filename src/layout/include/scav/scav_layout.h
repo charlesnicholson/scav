@@ -298,6 +298,8 @@ struct CostTerms {
   // Tier 0, forbidden rather than priced: the obstacle set makes these
   // unrepresentable, and the count survives as a net (11.6).
   int32_t through_box{ 0 };
+  // Route segments entering a band of a state they may otherwise occupy.
+  int32_t through_band{ 0 };
   int32_t box_overlap{ 0 };
   // Transitions with a segment to draw and a route of fewer than two points; Tier 0, since
   // every Tier-2 term scores one perfect.

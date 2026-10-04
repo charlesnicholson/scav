@@ -36,11 +36,12 @@ constexpr std::array<char const *, 4> CHARTS{ "brew.scav",
 
 // Every geometry column, `scav.geom.gen` included: each run below is on a
 // fresh chart, so its run count is one like every other's.
-constexpr std::array<char const *, 11> GEOM{
-  "scav.geom.state",  "scav.geom.state_before", "scav.geom.state_after",
-  "scav.geom.sub",    "scav.geom.route",        "scav.geom.port",
-  "scav.geom.point",  "scav.geom.portslot",     "scav.geom.chart",
-  "scav.geom.inputs", "scav.geom.gen"
+constexpr std::array<char const *, 13> GEOM{
+  "scav.geom.state",       "scav.geom.state_before", "scav.geom.state_after",
+  "scav.geom.state_lead",  "scav.geom.state_trail",  "scav.geom.sub",
+  "scav.geom.route",       "scav.geom.port",         "scav.geom.point",
+  "scav.geom.portslot",    "scav.geom.chart",        "scav.geom.inputs",
+  "scav.geom.gen"
 };
 
 // Restores the injector however a case leaves it, failed assertion included.

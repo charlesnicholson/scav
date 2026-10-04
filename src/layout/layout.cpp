@@ -100,6 +100,8 @@ enum GeomColumnIndex : uint32_t {
   GeomState,
   GeomBefore,
   GeomAfter,
+  GeomLead,
+  GeomTrail,
   GeomSub,
   GeomRoute,
   GeomPort,
@@ -121,6 +123,14 @@ constexpr std::array<GeomShape, GeomCount> GEOM{ {
       .kind = ValueKind::Pod,
       .elem_size = RECT },
     { .name = "scav.geom.state_after",
+      .entity = ElemKind::State,
+      .kind = ValueKind::Pod,
+      .elem_size = RECT },
+    { .name = "scav.geom.state_lead",
+      .entity = ElemKind::State,
+      .kind = ValueKind::Pod,
+      .elem_size = RECT },
+    { .name = "scav.geom.state_trail",
       .entity = ElemKind::State,
       .kind = ValueKind::Pod,
       .elem_size = RECT },
@@ -220,6 +230,8 @@ void write_columns(Chart &c, SizedLayout const &z, Routes const &r, uint32_t inp
   write_rows(c, geom_column(c, GEOM[GeomState]), z.state);
   write_rows(c, geom_column(c, GEOM[GeomBefore]), z.before);
   write_rows(c, geom_column(c, GEOM[GeomAfter]), z.after);
+  write_rows(c, geom_column(c, GEOM[GeomLead]), z.lead);
+  write_rows(c, geom_column(c, GEOM[GeomTrail]), z.trail);
   write_rows(c, geom_column(c, GEOM[GeomSub]), z.sub);
   write_rows(c, geom_column(c, GEOM[GeomRoute]), r.route);
   write_rows(c, geom_column(c, GEOM[GeomPort]), r.port);
@@ -285,7 +297,8 @@ void facing_flips(Facing &out,
                   Chart const &c,
                   SplitGraph const &g,
                   SubmachineOrders const &o,
-                  SizedLayout const &z) {
+                  SizedLayout const &z,
+                  scav_spaces const &s) {
   out.reverses.clear();
   out.sides.clear();
   taken.clear();
@@ -297,6 +310,10 @@ void facing_flips(Facing &out,
     // Along the frame's ranks: across the page for most, down it for a
     // frame whose ranks run down, whose ports are on its top and bottom.
     bool const down{ (m < o.sub_down.size()) && (o.sub_down[m] != 0) };
+    uint32_t const owner{ c.submachines[m].owner.v };
+    auto const lined = [&](uint32_t face) {
+      return (owner < c.states.size()) && face_lined(s, owner, face);
+    };
     // The state a boundary node's segment joins in this frame, past any bends.
     auto const joined = [&](uint32_t seg) {
       for (uint32_t k = 0; k < espan.len; ++k) {
@@ -333,6 +350,7 @@ void facing_flips(Facing &out,
         if (between && (rhi > lo) && (rlo < hi)) { return INVALID; }
       }
       uint32_t const side{ (down ? 0U : 2U) + (first ? 0U : 1U) };
+      if (lined(side)) { return INVALID; }
       for (FacingTaken const &had : taken) {
         if ((had.node == node) && (had.side == side)) { return INVALID; }
       }
@@ -397,8 +415,29 @@ void facing_flips(Facing &out,
       }
       bool const on_leading{ down ? (z.node[at].y == frame.y)
                                   : (z.node[at].x == frame.x) };
-      bool const wants_leading{ far_at < mid_at };
+      bool wants_leading{ far_at < mid_at };
+      uint32_t const rank_face{ down ? 2U : 0U };
+      if (on_state && lined(rank_face + (on_leading ? 0U : 1U))) {
+        // Off a lined face: the other rank border, else a cross border the joined state
+        // sees; with every face lined the port stays and the drawing pays for it.
+        uint32_t const j{ joined(seg) };
+        uint32_t cross{ INVALID };
+        for (bool const first : { true, false }) {
+          if ((cross == INVALID) && (j != INVALID)) { cross = seen(j, first); }
+        }
+        if (lined(rank_face + (on_leading ? 1U : 0U)) && (cross != INVALID)) {
+          vec_push_back(taken, { .node = j, .side = cross });
+          vec_push_back(out.sides,
+                        { .trans = t, .leg = leg, .end = leaves ? 1U : 0U, .side = cross });
+          trace_emit({ .kind = TraceKind::PortTurned,
+                       .frame = m,
+                       .port = { .seg = seg, .trans = t.v, .leg = leg, .side = cross } });
+          continue;
+        }
+        wants_leading = !on_leading;
+      }
       if (on_leading == wants_leading) { continue; }
+      if (on_state && lined(rank_face + (wants_leading ? 0U : 1U))) { continue; }
       vec_push_back(out.reverses, { .trans = t, .leg = leg });
       uint32_t const along{ (down ? 2U : 0U) + (wants_leading ? 0U : 1U) };
       trace_emit({ .kind = TraceKind::PortTurned,
@@ -532,7 +571,7 @@ void search_candidate(Candidate &out,
     }
     Facing &flips{ sc.flips };
     bool turned_sized{ false };
-    facing_flips(flips, sc.taken, c, g, orders, out.sized);
+    facing_flips(flips, sc.taken, c, g, orders, out.sized, s);
     if (!flips.reverses.empty() || !flips.sides.empty()) {
       for (ReversePin const &f : flips.reverses) {
         auto const had{ std::ranges::find_if(turned.reverses, [&f](ReversePin const &r) {
@@ -1366,7 +1405,7 @@ Improved run_search(Chart const &c,
                               ? ((down ? 0U : 2U) + (cross - 1U))
                               : ((down ? 2U : 0U) + ((source[node] != 0) ? 0U : 1U)) };
       for (uint32_t side = 0; (side < 4) && (side_scored < budget); ++side) {
-        if (side == now) { continue; }
+        if ((side == now) || face_lined(s, g.ports[port].state.v, side)) { continue; }
         ++side_scored;
         vec_push_back(round,
                       { .side = { .trans = t, .leg = leg, .end = end, .side = side },
@@ -2486,6 +2525,8 @@ uint32_t layout_coordinate_hash(Chart const &c) {
   for (char const *name : { "scav.geom.state",
                             "scav.geom.state_before",
                             "scav.geom.state_after",
+                            "scav.geom.state_lead",
+                            "scav.geom.state_trail",
                             "scav.geom.sub",
                             "scav.geom.chart" }) {
     for (scav_rect const &r : rows_of<scav_rect>(c, name)) {

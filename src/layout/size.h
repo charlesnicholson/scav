@@ -21,6 +21,8 @@ namespace scav {
 // Tombstones stay all-zero.
 struct SizedLayout {
   std::vector<scav_rect> state, before, after;  // parallel to states
+  std::vector<scav_rect> lead, trail;           // parallel to states: the side bands
+  std::vector<scav_rect> loop;                  // parallel to states: its inner loops' room
   std::vector<scav_rect> sub;                   // parallel to submachines
   std::vector<scav_point> node;                 // parallel to the orders' nodes
   // Parallel to the segments, or empty: 1 where a straight leg seats at the leading end of
@@ -75,6 +77,36 @@ struct SizePassRecord {
 struct SizeRecord {
   std::array<SizePassRecord, 2> pass;
 };
+
+// Whether a band of `state` lines `face`, 0 left, 1 right, 2 top, 3 bottom: no port sits there.
+bool face_lined(scav_spaces const &s, uint32_t state, uint32_t face);
+
+// One inner loop's row in its state's room: rows stack in transition order, the far leg
+// runs `reach` in from the room's trailing edge, and the label sits `gap` before that leg.
+struct LoopRow {
+  int32_t label_w, label_h, h;
+};
+LoopRow loop_row(scav_profile const &p, scav_extent label);
+int32_t loop_reach(scav_profile const &p);
+int32_t loop_gap(scav_profile const &p);
+int32_t loop_lane(scav_profile const &p);  // between the loop's two legs
+
+// Per transition, the extent its path boxes stack to, and per state, the room its inner
+// loops stack into: the widest row by every row's height and a `pad` between rows.
+void loop_rooms(Chart const &c,
+                scav_spaces const &s,
+                scav_profile const &p,
+                std::vector<scav_extent> &label,
+                std::vector<scav_extent> &room);
+
+// Per transition, its inner loop's row across its state's room, zero for any other; and
+// `label` as `loop_rooms` gives it.
+void loop_rows(Chart const &c,
+               SizedLayout const &z,
+               scav_spaces const &s,
+               scav_profile const &p,
+               std::vector<scav_extent> &label,
+               std::vector<scav_rect> &row);
 
 // False on an extent that would leave the coordinate domain, with one
 // diagnostic per offending entity and `out` left partly written. `dar` and

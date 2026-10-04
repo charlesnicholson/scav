@@ -40,6 +40,8 @@ struct RouteNet {
   // 1 seats a straight leg between two parallel faces at the lower end of the
   // run both faces can seat, not between their centres.
   uint32_t lean{ 0 };
+  // A self-loop's reach: its corridor runs this far out from each of its two seats.
+  int32_t loop{ 0 };
 };
 
 struct RouteInput {

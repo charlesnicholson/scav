@@ -726,7 +726,8 @@ int32_t through_boxes_over(Chart const &c,
                            ChildGrid const &g,
                            std::vector<scav_rect> const &kid,
                            std::vector<Piece> const &pieces,
-                           Descent &d) {
+                           Descent &d,
+                           int32_t *bands) {
   d.roots.clear();
   for (uint32_t m = 0; m < c.submachines.size(); ++m) {
     if (c.submachines[m].owner.v == INVALID) { vec_push_back(d.roots, m); }
@@ -739,9 +740,15 @@ int32_t through_boxes_over(Chart const &c,
     // An edge may occupy the interior of a state it is an endpoint of or a
     // descendant of, and only that one: 11.14's carve-out.
     auto const charge = [&](uint32_t st, scav_rect const &box) {
-      if (!cost_ancestor(c, an, { st }, tr.src) && !cost_ancestor(c, an, { st }, tr.dst) &&
-          enters(piece.a, piece.b, box)) {
-        ++total;
+      if (!cost_ancestor(c, an, { st }, tr.src) && !cost_ancestor(c, an, { st }, tr.dst)) {
+        if (enters(piece.a, piece.b, box)) { ++total; }
+        return;
+      }
+      // Inside a state it may occupy, its bands are the walls.
+      for (std::vector<scav_rect> const *band : { &z.before, &z.after, &z.lead, &z.trail }) {
+        if ((bands != nullptr) && (st < band->size()) && enters(piece.a, piece.b, (*band)[st])) {
+          ++*bands;
+        }
       }
     };
     for (uint32_t const st : an.detached) { charge(st, z.state[st]); }
@@ -806,7 +813,8 @@ void seen_reset(Seen &seen, size_t n) {
 }
 
 int32_t tier0_of(CostTerms const &t) {
-  return t.through_box + t.box_overlap + t.vanished + t.flush + t.through_region +
+  return t.through_box + t.through_band + t.box_overlap + t.vanished + t.flush +
+         t.through_region +
          t.retrace + t.label_over_box + t.label_over_route;
 }
 
@@ -939,7 +947,7 @@ void cost_grid_query(ChildGrid const &g,
   std::vector<scav_rect> kid;
   child_rects(g, z, kid);
   Descent d;
-  return through_boxes_over(c, z, an, g, kid, pieces, d);
+  return through_boxes_over(c, z, an, g, kid, pieces, d, nullptr);
 }
 
 // Each sweep over a sort of its own; `cost_terms` sorts once and runs all three.
@@ -1245,7 +1253,8 @@ CostTerms cost_terms(CostContext const &ctx,
   child_rects(grid, z, sc.kid);
   child_grid_fill(grid, sc.kid, sc.cursor);
   t.box_overlap = box_overlaps_over(c, grid, sc.kid, sc.descent.q);
-  t.through_box = through_boxes_over(c, z, ctx.an, grid, sc.kid, pieces, sc.descent);
+  t.through_box =
+      through_boxes_over(c, z, ctx.an, grid, sc.kid, pieces, sc.descent, &t.through_band);
 
   // A diagonal runs along no border; an axial leg along one lies within `near` of the
   // state, so the grid of grown rects finds it.
@@ -1316,6 +1325,8 @@ CostTerms cost_columns(Chart const &c,
   rows("scav.geom.state", z.state);
   rows("scav.geom.state_before", z.before);
   rows("scav.geom.state_after", z.after);
+  rows("scav.geom.state_lead", z.lead);
+  rows("scav.geom.state_trail", z.trail);
   rows("scav.geom.sub", z.sub);
   std::vector<scav_rect> chart;
   rows("scav.geom.chart", chart);

@@ -116,8 +116,10 @@ void overflow(std::vector<Diagnostic> &diags, ElemKind kind, uint32_t ordinal) {
 bool bare_pseudostate(Chart const &c,
                       std::vector<scav_rect> const &sub,
                       scav_box_space const &b,
+                      scav_extent room,
                       uint32_t i) {
-  if ((c.states[i].kind == StateKind::Normal) || (b.h_before != 0) || (b.h_after != 0)) {
+  if ((c.states[i].kind == StateKind::Normal) || (b.h_before != 0) || (b.h_after != 0) ||
+      (b.w_before != 0) || (b.w_after != 0) || (room.h != 0)) {
     return false;
   }
   Span const subs{ c.states[i].submachines };
@@ -195,6 +197,7 @@ struct SizeScratch {
   std::vector<uint32_t> ids;
   std::vector<Frame> work;
   std::vector<uint8_t> reuse, kept;  // per submachine copied from a base; per state
+  std::vector<scav_extent> loop_label, loop_room;  // `loop_rooms`
   // What an `OwnerHole` sizing's first pass sized.
   SizedLayout first;
   std::vector<FrameDar> hole;  // `size_owner_holes` of `first`
@@ -276,6 +279,8 @@ struct Sizer {
   // Per port, the segment on the border's inner side, whose boundary node is
   // where the router seats that port's slot.
   std::vector<uint32_t> &port_seg{ sc.port_seg };
+  std::vector<scav_extent> &loop_label{ sc.loop_label };
+  std::vector<scav_extent> &loop_room{ sc.loop_room };
   bool ok{ true };
   SizePassRecord const *base{ nullptr };
   SizePassRecord *record{ nullptr };
@@ -317,6 +322,12 @@ struct Sizer {
   [[nodiscard]] bool on_cross_border(uint32_t node) const {
     return (o.nodes[node].kind == OrderKind::Boundary) &&
            (cross_of(o.nodes[node].subject) != 0);
+  }
+  [[nodiscard]] scav_extent room_of(uint32_t state) const {
+    return (state < loop_room.size()) ? loop_room[state] : scav_extent{};
+  }
+  [[nodiscard]] bool bare(scav_box_space const &b, uint32_t state) const {
+    return bare_pseudostate(c, out.sub, b, room_of(state), state);
   }
   [[nodiscard]] int32_t attach_at(uint32_t seg, uint32_t state, bool down) const;
   [[nodiscard]] bool port_at(uint32_t seg, uint32_t state, bool down, int32_t &at) const;
@@ -399,9 +410,9 @@ bool Sizer::port_at(uint32_t seg, uint32_t state, bool down, int32_t &at) const 
     bool const top_or_bottom{ runs_down(frame) != (cross_of(inner) != 0) };
     if (top_or_bottom != down) { continue; }
     scav_box_space const b{ box_of(s.box_state, s.n_box_state, state) };
-    Wide const pad{ bare_pseudostate(c, out.sub, b, state) ? 0 : p.pad };
+    Wide const pad{ bare(b, state) ? 0 : p.pad };
     if (down) {
-      Wide const x{ pad + sub_local[frame].x + out.node[node].x };
+      Wide const x{ pad + b.w_before + sub_local[frame].x + out.node[node].x };
       at = static_cast<int32_t>(x - (out.state[state].w / 2));
       return true;
     }
@@ -2223,10 +2234,13 @@ void Sizer::size_state(uint32_t i) {
                    runs_down(c.states[i].parent.v) };
   int32_t const min_w{ lies ? p.kind_min_h[kind] : p.kind_min_w[kind] };
   int32_t const min_h{ lies ? p.kind_min_w[kind] : p.kind_min_h[kind] };
-  Wide const ring{ bare_pseudostate(c, out.sub, b, i) ? Wide{ 0 }
-                                                      : (2 * static_cast<Wide>(p.pad)) };
-  Wide const w{ imax(imax(Wide{ b.min_w }, Wide{ packed.w }), Wide{ min_w }) + ring };
-  Wide const h{ imax(Wide{ b.h_before } + packed.h + b.h_after, Wide{ min_h }) + ring };
+  Wide const ring{ bare(b, i) ? Wide{ 0 } : (2 * static_cast<Wide>(p.pad)) };
+  scav_extent const room{ room_of(i) };
+  Wide const centre{ Wide{ b.w_before } + imax(Wide{ packed.w }, Wide{ room.w }) + b.w_after };
+  Wide const body{ Wide{ packed.h } + room.h +
+                   (((packed.h > 0) && (room.h > 0)) ? p.sub_sep : 0) };
+  Wide const w{ imax(imax(Wide{ b.min_w }, centre), Wide{ min_w }) + ring };
+  Wide const h{ imax(Wide{ b.h_before } + body + b.h_after, Wide{ min_h }) + ring };
   if ((w > COORD_MAX) || (h > COORD_MAX)) {
     overflow(diags, ElemKind::State, i);
     ok = false;
@@ -2339,7 +2353,8 @@ uint32_t Sizer::mark_reuse(std::vector<std::vector<uint32_t>> const &subs_at,
     scav_box_space const b{ box_of(s.box_state, s.n_box_state, i) };
     scav_box_space const &bb{ base->box[i] };
     bool const boxed{ (b.min_w == bb.min_w) && (b.h_before == bb.h_before) &&
-                      (b.h_after == bb.h_after) };
+                      (b.h_after == bb.h_after) && (b.w_before == bb.w_before) &&
+                      (b.w_after == bb.w_after) };
     if (!boxed) { mark(parent); }
     kept[i] = (boxed && ((parent >= c.submachines.size()) ||
                          (o.sub_down[parent] == bo.sub_down[parent])))
@@ -2543,6 +2558,9 @@ bool size_pass(Chart const &c,
   vec_assign(out.state, c.states.size(), {});
   vec_assign(out.before, c.states.size(), {});
   vec_assign(out.after, c.states.size(), {});
+  vec_assign(out.lead, c.states.size(), {});
+  vec_assign(out.trail, c.states.size(), {});
+  vec_assign(out.loop, c.states.size(), {});
   vec_assign(out.sub, c.submachines.size(), {});
   vec_assign(out.node, o.nodes.size(), {});
   vec_assign(out.lean, g.segments.size(), 0);
@@ -2576,6 +2594,7 @@ bool size_pass(Chart const &c,
     x.seg_label_h[at] = imax(x.seg_label_h[at], down ? box.w : box.h);
     x.seg_label_w[at] = imax(x.seg_label_w[at], down ? box.h : box.w);
   }
+  loop_rooms(c, s, p, x.loop_label, x.loop_room);
   vec_assign(x.port_seg, g.ports.size(), INVALID);
   for (uint32_t seg = 0; seg < o.seg_port.size(); ++seg) {
     if (o.seg_port[seg] < x.port_seg.size()) { x.port_seg[o.seg_port[seg]] = seg; }
@@ -2661,7 +2680,7 @@ bool size_pass(Chart const &c,
       r.y += at.y;
 
       scav_box_space const b{ box_of(s.box_state, s.n_box_state, i) };
-      int32_t const pad{ bare_pseudostate(c, out.sub, b, i) ? 0 : p.pad };
+      int32_t const pad{ x.bare(b, i) ? 0 : p.pad };
       int32_t const ix{ r.x + pad };
       int32_t const iw{ r.w - (2 * pad) };
       out.before[i] = { .x = ix, .y = r.y + pad, .w = iw, .h = b.h_before };
@@ -2672,10 +2691,19 @@ bool size_pass(Chart const &c,
         uint32_t const m{ c.submachine_ids[subs.off + u].v };
         if (c.submachines[m].live == 0) { continue; }
         vec_push_back(work,
-                      { .sub = m, .x = ix + sub_local[m].x, .y = sy + sub_local[m].y });
+                      { .sub = m,
+                        .x = ix + b.w_before + sub_local[m].x,
+                        .y = sy + sub_local[m].y });
         packed_h = imax(packed_h, sub_local[m].y + out.sub[m].h);
       }
-      out.after[i] = { .x = ix, .y = sy + packed_h, .w = iw, .h = b.h_after };
+      scav_extent const room{ x.room_of(i) };
+      int32_t const room_y{ sy + packed_h + (((packed_h > 0) && (room.h > 0)) ? p.sub_sep : 0) };
+      int32_t const body{ (room.h > 0) ? ((room_y + room.h) - sy) : packed_h };
+      int32_t const centre_end{ (ix + iw) - b.w_after };
+      out.loop[i] = { .x = centre_end - room.w, .y = room_y, .w = room.w, .h = room.h };
+      out.lead[i] = { .x = ix, .y = sy, .w = b.w_before, .h = body };
+      out.trail[i] = { .x = centre_end, .y = sy, .w = b.w_after, .h = body };
+      out.after[i] = { .x = ix, .y = sy + body, .w = iw, .h = b.h_after };
     }
   }
   return true;
@@ -2726,8 +2754,11 @@ void size_owner_holes(Chart const &c, SizedLayout const &z, std::vector<FrameDar
     // rects rather than off `pad`, which a bare pseudostate does not take.
     int32_t const pad{ z.before[i].y - z.state[i].y };
     int32_t const top{ z.before[i].y + z.before[i].h };
-    int32_t const bottom{ (z.state[i].y + z.state[i].h) - pad - z.after[i].h };
-    hole[i] = size_hole_ratio(z.before[i].w, bottom - top);
+    int32_t bottom{ (z.state[i].y + z.state[i].h) - pad - z.after[i].h };
+    if ((i < z.loop.size()) && (z.loop[i].h > 0)) { bottom = z.loop[i].y; }
+    int32_t const sides{ ((i < z.lead.size()) ? z.lead[i].w : 0) +
+                         ((i < z.trail.size()) ? z.trail[i].w : 0) };
+    hole[i] = size_hole_ratio(z.before[i].w - sides, bottom - top);
   }
 }
 
@@ -2783,7 +2814,8 @@ bool same_rows(std::vector<T> const &a, std::vector<T> const &b) {
 
 bool same_sized(SizedLayout const &a, SizedLayout const &b) {
   return same_rows(a.state, b.state) && same_rows(a.before, b.before) &&
-         same_rows(a.after, b.after) && same_rows(a.sub, b.sub) &&
+         same_rows(a.after, b.after) && same_rows(a.lead, b.lead) &&
+         same_rows(a.trail, b.trail) && same_rows(a.loop, b.loop) && same_rows(a.sub, b.sub) &&
          same_rows(a.node, b.node) && same_rows(a.lean, b.lean) &&
          same_rows(a.folded, b.folded) &&
          (std::memcmp(&a.chart, &b.chart, sizeof(scav_rect)) == 0);
@@ -2791,6 +2823,76 @@ bool same_sized(SizedLayout const &a, SizedLayout const &b) {
 #endif
 
 }  // namespace
+
+namespace {
+
+// Past the domain by one at most, so a sum the box formula reads still overflows there.
+int32_t saturate(Wide v) { return static_cast<int32_t>(imin(v, Wide{ COORD_MAX } + 1)); }
+
+}  // namespace
+
+bool face_lined(scav_spaces const &s, uint32_t state, uint32_t face) {
+  scav_box_space const b{ box_of(s.box_state, s.n_box_state, state) };
+  std::array<int32_t, 4> const band{ b.w_before, b.w_after, b.h_before, b.h_after };
+  return (face < 4) && (band[face] > 0);
+}
+
+int32_t loop_reach(scav_profile const &p) { return imax(p.pad, 1); }
+
+int32_t loop_gap(scav_profile const &p) { return imax(p.pad / 2, 1); }
+
+int32_t loop_lane(scav_profile const &p) {
+  return imax(label_line_height(p), 2 * route_clearance(p));
+}
+
+LoopRow loop_row(scav_profile const &p, scav_extent label) {
+  return { .label_w = label.w, .label_h = label.h, .h = imax(label.h, loop_lane(p)) };
+}
+
+void loop_rooms(Chart const &c,
+                scav_spaces const &s,
+                scav_profile const &p,
+                std::vector<scav_extent> &label,
+                std::vector<scav_extent> &room) {
+  vec_assign(label, c.transitions.size(), scav_extent{});
+  vec_assign(room, c.states.size(), scav_extent{});
+  for (uint32_t i = 0; (s.path_box != nullptr) && (i < s.n_path_box); ++i) {
+    uint32_t const t{ s.path_box[i].subject };
+    if ((t >= c.transitions.size()) || !inner_loop(c, t)) { continue; }
+    label[t].w = imax(label[t].w, s.path_box[i].w);
+    label[t].h = saturate(Wide{ label[t].h } + s.path_box[i].h);
+  }
+  for (uint32_t t = 0; t < c.transitions.size(); ++t) {
+    if (!inner_loop(c, t)) { continue; }
+    LoopRow const row{ loop_row(p, label[t]) };
+    scav_extent &r{ room[c.transitions[t].src.v] };
+    int32_t const w{ ((row.label_w > 0) ? (row.label_w + loop_gap(p)) : 0) + loop_reach(p) };
+    r.w = imax(r.w, w);
+    r.h = saturate(Wide{ r.h } + ((r.h > 0) ? p.pad : 0) + row.h);
+  }
+}
+
+void loop_rows(Chart const &c,
+               SizedLayout const &z,
+               scav_spaces const &s,
+               scav_profile const &p,
+               std::vector<scav_extent> &label,
+               std::vector<scav_rect> &row) {
+  thread_local std::vector<scav_extent> room;
+  loop_rooms(c, s, p, label, room);
+  vec_assign(row, c.transitions.size(), scav_rect{});
+  thread_local std::vector<int32_t> cursor;
+  vec_assign(cursor, c.states.size(), 0);
+  for (uint32_t t = 0; t < c.transitions.size(); ++t) {
+    if (!inner_loop(c, t)) { continue; }
+    uint32_t const st{ c.transitions[t].src.v };
+    if (st >= z.loop.size()) { continue; }
+    scav_rect const &r{ z.loop[st] };
+    int32_t const h{ loop_row(p, label[t]).h };
+    row[t] = { .x = r.x, .y = r.y + cursor[st], .w = r.w, .h = h };
+    cursor[st] += h + p.pad;
+  }
+}
 
 bool size_layout(Chart const &c,
                  SplitGraph const &g,

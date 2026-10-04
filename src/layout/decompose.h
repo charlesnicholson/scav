@@ -48,8 +48,7 @@ struct SplitGraph {
   uint32_t serial{ 0 };  // a `memo_serial` naming the graph and its chart; 0 by hand
 };
 
-// A pure function of the model: no-route transitions (internal or local
-// self-transitions) get an empty span, tombstones are skipped.
+// A pure function of the model; tombstones are skipped.
 SplitGraph decompose(Chart const &c);
 
 // The state enclosing `s`; INVALID for a child of a document root and for
@@ -60,6 +59,9 @@ StateId enclosing_state(Chart const &c, StateId s);
 // state, so containment that has been corrupted into a cycle answers false
 // rather than spinning.
 bool ancestor_or_self(Chart const &c, StateId ancestor, StateId of);
+
+// A self-transition that stays inside its state: drawn as a loop in that state's loop room.
+bool inner_loop(Chart const &c, uint32_t t);
 
 }  // namespace scav
 

@@ -29,11 +29,14 @@ typedef uint32_t scav_router_id;
 typedef scav_rect scav_placed;
 
 /* Interior space a state or submachine box must make room for; all-zero
- * requests nothing. */
+ * requests nothing. Each band is an obstacle: no route enters it and no port
+ * sits on the face it lines. */
 typedef struct {
   int32_t min_w;    /* interior at least this wide */
   int32_t h_before; /* height reserved before the packed-submachine area */
   int32_t h_after;  /* ... after */
+  int32_t w_before; /* width reserved before it, between the two height bands */
+  int32_t w_after;  /* ... after */
 } scav_box_space;
 
 /* Route shortening at each end, for arrowheads and terminal glyphs. */

@@ -860,6 +860,8 @@ struct CallBuffers {
   std::vector<scav_rect> dirty, pieces;
   std::vector<Pieces> by_route;
   std::vector<uint32_t> live, queue, merge, settled;
+  std::vector<scav_extent> loop_label;
+  std::vector<scav_rect> loop_row;
   Local local;
 };
 
@@ -981,14 +983,33 @@ uint32_t place_labels_from(Chart const &c,
   bool chain_kept{ true };  // every earlier box of this transition settled as in the base
   int32_t const leader{ label_leader(p) };
   bool const relative{ search != LabelSearch::Exhaustive };
+  loop_rows(c, z, s, p, cb.loop_label, cb.loop_row);
+  int32_t loop_y{ 0 };  // the next box's top in the current subject's loop row
 
   for (uint32_t const i : queue) {
     scav_path_box const &box{ s.path_box[i] };
     scav_span const r{ (box.subject < route.size()) ? route[box.subject] : scav_span{} };
+    bool const looped{ (box.subject < c.transitions.size()) && inner_loop(c, box.subject) };
     if (box.subject != prior_subject) {
       prior_subject = box.subject;
       chained = false;
       chain_kept = true;
+      if (looped) {
+        scav_rect const &row{ cb.loop_row[box.subject] };
+        loop_y = row.y + floor_div(row.h - cb.loop_label[box.subject].h, 2);
+      }
+    }
+    if (looped) {
+      // Stacked in its row of the loop room, `gap` before the loop's far leg.
+      scav_rect const &row{ cb.loop_row[box.subject] };
+      out[i] = { .x = (row.x + row.w) - loop_reach(p) - loop_gap(p) - box.w,
+                 .y = loop_y,
+                 .w = box.w,
+                 .h = box.h };
+      how[i] = { .seg = 1, .mid = 0, .found = 1 };
+      loop_y += box.h;
+      vec_push_back(settled, i);
+      continue;
     }
     Outcome got{};
     bool kept{ false };
@@ -1078,11 +1099,11 @@ uint32_t place_labels_from(Chart const &c,
           // A state enclosing both endpoints holds the label legitimately; the
           // bands it reserved for its own text do not.
           if (encloses[st] != 0) {
-            if (overlaps(region, z.before[st])) {
-              vec_push_back(l.walls, local_rect(z.before[st]));
-            }
-            if (overlaps(region, z.after[st])) {
-              vec_push_back(l.walls, local_rect(z.after[st]));
+            for (std::vector<scav_rect> const *band : { &z.before, &z.after, &z.lead,
+                                                       &z.trail, &z.loop }) {
+              if ((st < band->size()) && overlaps(region, (*band)[st])) {
+                vec_push_back(l.walls, local_rect((*band)[st]));
+              }
             }
           } else if (overlaps(region, z.state[st])) {
             vec_push_back(l.walls, local_rect(z.state[st]));

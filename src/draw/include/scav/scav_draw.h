@@ -241,7 +241,6 @@ Palette palette_standard();
 
 // The measurement pass, and the policy every corpus golden is against: a title,
 // a submachine name, arrowhead room, and one path box per labelled transition.
-// A routeless self-transition's label rides its source's `h_after` instead.
 struct Spaces {
   std::vector<scav_box_space> box_state, box_sub;
   std::vector<scav_path_clear> path_clear;
@@ -254,8 +253,7 @@ bool measure_chart(Chart const &c, Metrics const &m, scav_profile const &p, Spac
 // Base pointers, counts and strides over a Spaces, for handing to layout.
 scav_spaces as_spaces(Spaces const &s);
 
-// Where `trans`'s label goes: the box layout placed, or the band its source
-// reserved when it gets no route. False when it asked for neither.
+// Where `trans`'s label goes: the box layout placed. False when it asked for none.
 bool label_box(Chart const &c,
                scav_spaces const &s,
                scav_placed const *placed,

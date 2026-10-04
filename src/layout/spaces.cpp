@@ -45,7 +45,8 @@ void check_boxes(std::vector<Diagnostic> &out,
                  ElemKind kind) {
   for (uint32_t i = 0; i < count; ++i) {
     if (!in_domain(rows[i].min_w) || !in_domain(rows[i].h_before) ||
-        !in_domain(rows[i].h_after)) {
+        !in_domain(rows[i].h_after) || !in_domain(rows[i].w_before) ||
+        !in_domain(rows[i].w_after)) {
       report(out, DiagCode::SpaceOutOfRange, kind, i);
     }
   }
@@ -85,17 +86,10 @@ bool spaces_validate(Chart const &c,
       report(found, DiagCode::SpaceCountMismatch, ElemKind::Chart, 0);
     }
   } else {
-    // A transition that gets no route -- an internal or local self-loop --
-    // has nothing to slide a box along.
-    auto const routeless = [&c](uint32_t t) {
-      return (c.transitions[t].src == c.transitions[t].dst) &&
-             (c.transitions[t].kind != TransKind::External);
-    };
     for (uint32_t i = 0; i < s.n_path_box; ++i) {
       scav_path_box const &box{ s.path_box[i] };
       uint32_t subject{ box.subject };
-      if ((subject >= transitions) || (c.transitions[subject].live == 0) ||
-          routeless(subject)) {
+      if ((subject >= transitions) || (c.transitions[subject].live == 0)) {
         report(found,
                DiagCode::SpaceSubjectInvalid,
                ElemKind::Transition,
@@ -147,19 +141,23 @@ uint32_t spaces_digest(scav_spaces const &s) {
   // so two adjacent tables cannot spell one.
   std::vector<scav_byte> bytes;
   vec_reserve(bytes,
-              16 + (12ULL * (s.n_box_state + s.n_box_sub)) + (8ULL * s.n_path_clear) +
+              16 + (20ULL * (s.n_box_state + s.n_box_sub)) + (8ULL * s.n_path_clear) +
                   (16ULL * s.n_path_box));
   append_u32(bytes, s.n_box_state);
   for (uint32_t i = 0; i < s.n_box_state; ++i) {
     append_i32(bytes, s.box_state[i].min_w);
     append_i32(bytes, s.box_state[i].h_before);
     append_i32(bytes, s.box_state[i].h_after);
+    append_i32(bytes, s.box_state[i].w_before);
+    append_i32(bytes, s.box_state[i].w_after);
   }
   append_u32(bytes, s.n_box_sub);
   for (uint32_t i = 0; i < s.n_box_sub; ++i) {
     append_i32(bytes, s.box_sub[i].min_w);
     append_i32(bytes, s.box_sub[i].h_before);
     append_i32(bytes, s.box_sub[i].h_after);
+    append_i32(bytes, s.box_sub[i].w_before);
+    append_i32(bytes, s.box_sub[i].w_after);
   }
   append_u32(bytes, s.n_path_clear);
   for (uint32_t i = 0; i < s.n_path_clear; ++i) {

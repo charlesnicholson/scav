@@ -49,35 +49,6 @@ uint32_t style_for_kind(StateKind kind) {
   return (kind == StateKind::Normal) ? SCAV_STYLE_STATE : SCAV_STYLE_PSEUDO;
 }
 
-// A self-transition that does not cross its source border gets no route, so
-// nothing can slide a box along one; its label rides the source's own band.
-bool routeless(Chart const &c, uint32_t trans) {
-  Transition const &t{ c.transitions[trans] };
-  return (t.src == t.dst) && (t.kind != TransKind::External);
-}
-
-bool claims_after(Chart const &c, uint32_t trans, uint32_t src) {
-  return (c.transitions[trans].live != 0U) && (c.transitions[trans].label.len != 0U) &&
-         routeless(c, trans) && (c.transitions[trans].src.v == src);
-}
-
-// Which line of the source's after-band a label takes, and how many were
-// reserved: one per routeless labelled transition, in transition order.
-struct AfterSlot {
-  uint32_t index, total;
-};
-
-AfterSlot after_slot(Chart const &c, uint32_t trans) {
-  uint32_t const src{ c.transitions[trans].src.v };
-  AfterSlot slot{ .index = 0, .total = 0 };
-  for (uint32_t i = 0; i < c.transitions.size(); ++i) {
-    if (!claims_after(c, i, src)) { continue; }
-    if (i < trans) { ++slot.index; }
-    ++slot.total;
-  }
-  return slot;
-}
-
 }  // namespace
 
 Palette palette_standard() {
@@ -198,15 +169,6 @@ bool measure_chart(Chart const &c, Metrics const &m, scav_profile const &p, Spac
     if (label.len == 0U) { continue; }
     scav_extent ext{};
     if (!measure(label, ext)) { return false; }
-    if (routeless(c, i)) {
-      // No route to slide along, so the source box reserves the room after its
-      // submachine area and the builder draws the label there.
-      scav_box_space &box{ out.box_state[c.transitions[i].src.v] };
-      box.min_w = imax(box.min_w, ext.w + (2 * pad));
-      box.h_after += ext.h;
-      if (!fits(box.min_w) || !fits(box.h_after)) { return false; }
-      continue;
-    }
     scav_path_box const box{ .subject = i, .w = ext.w + pad, .h = ext.h, .order = 0 };
     if (!fits(box.w) || !fits(box.h)) { return false; }
     out.path_box.push_back(box);
@@ -463,23 +425,6 @@ bool label_box(Chart const &c,
                scav_rect &out) {
   if ((trans >= c.transitions.size()) || (c.transitions[trans].live == 0U)) {
     return false;
-  }
-  if (routeless(c, trans)) {
-    // The band the source reserved, sliced into one line per label that claimed
-    // it. Nothing placed a box, because there was no route to slide one along.
-    if (c.transitions[trans].label.len == 0U) { return false; }
-    std::vector<scav_rect> const afters{ rows_of<scav_rect>(c, "scav.geom.state_after") };
-    uint32_t const src{ c.transitions[trans].src.v };
-    if ((src >= afters.size()) || (afters[src].h == 0)) { return false; }
-    AfterSlot const slot{ after_slot(c, trans) };
-    scav_rect const band{ afters[src] };
-    int32_t const each{ (slot.total > 0U) ? (band.h / static_cast<int32_t>(slot.total))
-                                          : band.h };
-    out = { .x = band.x,
-            .y = band.y + (static_cast<int32_t>(slot.index) * each),
-            .w = band.w,
-            .h = each };
-    return true;
   }
   for (uint32_t i = 0; i < s.n_path_box; ++i) {
     if (s.path_box[i].subject != trans) { continue; }

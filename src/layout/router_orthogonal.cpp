@@ -1394,6 +1394,35 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
     for (uint32_t k = 0; k < net.waypoint_len; ++k) {
       vec_push_back(anchors, in.waypoints[net.waypoint_off + k]);
     }
+    if ((net.loop > 0) && (net.src_obstacle < in.obstacles.size()) &&
+        (net.dst_obstacle < in.obstacles.size())) {
+      // A loop's corridor runs `loop` out from each seat, kept inside the region
+      // and off the enclosure's border.
+      for (uint32_t end = 0; end < 2; ++end) {
+        scav_point at{ seat[src_slot + end] };
+        uint32_t const box{ (end == 0) ? net.src_obstacle : net.dst_obstacle };
+        switch (face_of(at, in.obstacles[box])) {
+          case 0: at.x -= net.loop; break;
+          case 1: at.x += net.loop; break;
+          case 2: at.y -= net.loop; break;
+          case 3: at.y += net.loop; break;
+          default: break;
+        }
+        int32_t x0{ lo_x };
+        int32_t y0{ lo_y };
+        int32_t x1{ hi_x };
+        int32_t y1{ hi_y };
+        if ((enc.w > (2 * inset)) && (enc.h > (2 * inset))) {
+          x0 = imax(x0, enc.x + inset + 1);
+          y0 = imax(y0, enc.y + inset + 1);
+          x1 = imin(x1, (enc.x + enc.w) - inset - 1);
+          y1 = imin(y1, (enc.y + enc.h) - inset - 1);
+        }
+        at.x = imin(imax(at.x, x0), x1);
+        at.y = imin(imax(at.y, y0), y1);
+        vec_push_back(anchors, at);
+      }
+    }
     uint32_t const tail_first{ static_cast<uint32_t>(lead.size()) };
     vec_push_back(anchors, approach(net.dst, net.dst_obstacle, seat[src_slot + 1]));
     net_tail[n] = { .off = tail_first,

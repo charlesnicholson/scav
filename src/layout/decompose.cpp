@@ -41,6 +41,12 @@ StateId enclosing_state(Chart const &c, StateId s) {
   return (parent.v == INVALID) ? StateId{ INVALID } : c.submachines[parent.v].owner;
 }
 
+bool inner_loop(Chart const &c, uint32_t t) {
+  Transition const &tr{ c.transitions[t] };
+  return (tr.live != 0) && (tr.src == tr.dst) && (tr.src.v < c.states.size()) &&
+         (tr.kind != TransKind::External) && (c.states[tr.src.v].live != 0);
+}
+
 bool ancestor_or_self(Chart const &c, StateId ancestor, StateId of) {
   StateId at{ of };
   for (size_t step = 0; (step < c.states.size()) && (at.v != INVALID); ++step) {
@@ -70,10 +76,6 @@ SplitGraph decompose(Chart const &c) {
         (c.states[tr.src.v].live == 0) || (c.states[tr.dst.v].live == 0)) {
       continue;
     }
-    // An internal or local self-transition has no route: the app reserves a
-    // band and draws it inside the state's own rect.
-    if ((tr.src == tr.dst) && (tr.kind != TransKind::External)) { continue; }
-
     route.clear();
     bool src_inner{ false };  // route starts on the source border's inner face
     bool dst_inner{ false };  // route ends on the target border's inner face

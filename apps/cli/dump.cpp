@@ -308,6 +308,8 @@ void append_geometry_text(std::string &out,
   auto const state{ geom_rows<scav_rect>(c, "scav.geom.state") };
   auto const before{ geom_rows<scav_rect>(c, "scav.geom.state_before") };
   auto const after{ geom_rows<scav_rect>(c, "scav.geom.state_after") };
+  auto const lead{ geom_rows<scav_rect>(c, "scav.geom.state_lead") };
+  auto const trail{ geom_rows<scav_rect>(c, "scav.geom.state_trail") };
   auto const sub{ geom_rows<scav_rect>(c, "scav.geom.sub") };
   auto const routes{ geom_rows<scav_span>(c, "scav.geom.route") };
   auto const points{ geom_rows<scav_point>(c, "scav.geom.point") };
@@ -338,6 +340,8 @@ void append_geometry_text(std::string &out,
   append_i64v(out, scored.t2);
   out += "\n    tier0 through_box ";
   append_i32v(out, terms.through_box);
+  out += " through_band ";
+  append_i32v(out, terms.through_band);
   out += " box_overlap ";
   append_i32v(out, terms.box_overlap);
   out += " flush ";
@@ -380,6 +384,12 @@ void append_geometry_text(std::string &out,
     append_rect(out, before[i]);
     out += " after ";
     append_rect(out, after[i]);
+    if ((i < lead.size()) && (i < trail.size()) && ((lead[i].w != 0) || (trail[i].w != 0))) {
+      out += " lead ";
+      append_rect(out, lead[i]);
+      out += " trail ";
+      append_rect(out, trail[i]);
+    }
     out += '\n';
   }
   for (uint32_t m = 0; m < sub.size(); ++m) {
@@ -603,6 +613,8 @@ void append_geometry_json(std::string &out,
   append_i64v(out, scored.t2);
   out += ",\n      \"through_box\": ";
   append_i32v(out, terms.through_box);
+  out += ",\n      \"through_band\": ";
+  append_i32v(out, terms.through_band);
   out += ",\n      \"box_overlap\": ";
   append_i32v(out, terms.box_overlap);
   out += ",\n      \"flush\": ";
@@ -650,6 +662,8 @@ void append_geometry_json(std::string &out,
   for (char const *name : { "scav.geom.state",
                             "scav.geom.state_before",
                             "scav.geom.state_after",
+                            "scav.geom.state_lead",
+                            "scav.geom.state_trail",
                             "scav.geom.sub" }) {
     out += ",\n    ";
     append_json_string(out, std::string_view{ name }.substr(10));  // "state", ...
