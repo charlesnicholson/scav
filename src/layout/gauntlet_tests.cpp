@@ -1,7 +1,4 @@
-// One layout element per chart, held to the properties a reader checks. The
-// corpus next door says whether a real diagram comes out well; it cannot say
-// which element was wrong when it does not, and every property below was a
-// defect found there first and bisected back to one shape by hand.
+// One layout element per chart, held to the properties a reader checks.
 
 #include "layout/cost.h"
 #include "layout/decompose.h"
@@ -30,8 +27,7 @@
 
 namespace scav {
 
-// The portfolio's row, which `layout.cpp` brackets with SCAV_INTERNAL, declared
-// here rather than in a header so the shipping build keeps it internal.
+// Portfolio row `index` as a delta from `p`; defined in `layout.cpp` under SCAV_INTERNAL.
 Row search_row(scav_profile const &p, uint32_t index);
 
 }  // namespace scav
@@ -54,8 +50,7 @@ scav_profile compact() {
   return p;
 }
 
-// Every chart in test_data/charts/gauntlet, named so a failure says which shape
-// broke rather than which index did.
+// Every chart in test_data/charts/gauntlet, by file name.
 constexpr std::array GAUNTLET{
   "above.scav",   "carried.scav",   "chain.scav",   "corner.scav",  "crossing.scav",
   "crowd.scav",   "enclosing.scav", "entered.scav", "fanin.scav",   "folded.scav",
@@ -73,16 +68,13 @@ struct Laid {
   SubmachineOrders o;
   SizedLayout z;
   Routes r;
-  SearchPins pins;            // what the drawing rests on
+  SearchPins pins;            // the kept drawing's pins
   uint32_t tuple{ INVALID };  // the portfolio row the run kept
-  uint32_t lane_moves{ 0 };   // route points nudging moved onto a lane
+  uint32_t lane_moves{ 0 };   // segments nudging moved onto a lane
   uint32_t unplaced{ 0 };     // path boxes that took the centred placement
 };
 
-// The profile with the portfolio and the move sweep switched off, so one row
-// lays out and it is row 0 unsearched -- the caller's own tuple, and the
-// pipeline as it ran before Level 2. The sweep is off too because a reversal
-// kick from row 0 now reaches what the table's other rows did (11.10f).
+// `p` with one portfolio row and no bounded moves: row 0 unsearched, the caller's tuple.
 scav_profile one_row(scav_profile const &p) {
   scav_profile out{ p };
   out.portfolio_m = 1;
@@ -90,9 +82,8 @@ scav_profile one_row(scav_profile const &p) {
   return out;
 }
 
-// The column's rows against what the phases produced, word for word. Every
-// geometry POD is a block of int32 with no padding, so a word compare reads no
-// byte whose value is unspecified.
+// Requires column `name` to equal `rows` word for word; geometry PODs are padding-free
+// int32 blocks.
 template <typename T>
 void column_holds(Chart const &c, char const *name, std::vector<T> const &rows) {
   static_assert((sizeof(T) % sizeof(int32_t)) == 0, "geometry PODs are int32 blocks");
@@ -120,8 +111,6 @@ void lay(char const *name,
          Laid &out,
          scav_spaces const &s,
          SearchPins const *seed) {
-  // The router these properties are about, by the name it crosses every other
-  // boundary under rather than by its position in the registry.
   scav_router_id id{};
   REQUIRE(router_by_name(reinterpret_cast<scav_byte const *>("orthogonal"), 10, id));
   std::string path{ SCAV_TEST_DATA_DIR "/charts/gauntlet/" };
@@ -145,15 +134,11 @@ void lay(char const *name,
                      nullptr,
                      &pins,
                      seed));
-  // Nothing here is a shape the router has to give up on, so a RouteDegraded
-  // is a failure rather than a documented fallback.
-  CHECK(diags.empty());
+  CHECK(diags.empty());  // RouteDegraded included
 
   auto const [knobs, dar, pack, fold]{ search_row(p, out.tuple) };
   out.g = decompose(out.c);
-  // The drawing is the tuple's *and* the pins' (11.10a), so re-deriving it
-  // needs both or this measures a layout nobody was shown. The pins reach
-  // phase 3 as well as phase 1: a face pin is the router's (11.10e).
+  // Re-derives the kept drawing from its row and pins; order and route both read the pins.
   out.o = order_submachines(out.c, out.g, s, knobs, 0, pins);
   REQUIRE(size_layout(out.c, out.g, out.o, s, knobs, out.z, diags, dar, pack, fold));
   LayoutTrace routed;
@@ -199,8 +184,7 @@ void lay(char const *name, scav_profile const &p, Laid &out) {
   out = it->second;
 }
 
-// The Tier-0 predicate, rewritten here as it is for the corpus: a gate that
-// asks the scorer whether the scorer is happy is worth nothing.
+// Tier-0 geometry predicates, implemented independently of the scorer.
 Wide orient(scav_point a, scav_point b, scav_point c) {
   return ((Wide{ b.x } - a.x) * (Wide{ c.y } - a.y)) -
          ((Wide{ b.y } - a.y) * (Wide{ c.x } - a.x));
@@ -244,9 +228,7 @@ bool on_border(scav_point at, scav_rect const &r) {
                             (at.y == (r.y + r.h)));
 }
 
-// A bar is thin on one axis, so the two faces its short axis runs between are
-// its long ones. A corner belongs to the cap rather than to either long face:
-// that is the face an axis-aligned route leaves along.
+// Whether `at` is on one of `r`'s two long faces; corners belong to the caps.
 bool on_long_face(scav_point at, scav_rect const &r) {
   if (r.w < r.h) {
     return ((at.x == r.x) || (at.x == (r.x + r.w))) && (at.y > r.y) &&
@@ -271,8 +253,8 @@ Wide run_shared(scav_point a, scav_point b, scav_point c, scav_point d) {
   return 0;
 }
 
-// The two counts the regions carve-out is about: route segments entering a box
-// 11.14 does not carve out, and legs that fold a polyline back over itself.
+// `through`: segments entering a live box other than an endpoint or an ancestor of one;
+// `back`: legs collinear with and opposite to the leg before.
 void shape_counts(Laid const &l, uint32_t &through, uint32_t &back);
 
 uint32_t state_named(Chart const &c, std::string_view name) {
@@ -282,7 +264,7 @@ uint32_t state_named(Chart const &c, std::string_view name) {
   return INVALID;
 }
 
-// Live boxes, which is what a route may not enter and what its ends sit on.
+// Indices of live states: the boxes routes avoid and end on.
 std::vector<uint32_t> live_of(Chart const &c) {
   std::vector<uint32_t> live;
   for (uint32_t st = 0; st < c.states.size(); ++st) {
@@ -319,8 +301,7 @@ void shape_counts(Laid const &l, uint32_t &through, uint32_t &back) {
   }
 }
 
-// Every branch off a bar that left through one of its two short caps instead of
-// along one of the long faces 11.5's rule is about.
+// Counts route ends at a fork or join bar that are off its two long faces.
 uint32_t capped_branches(Laid const &l) {
   uint32_t capped{ 0 };
   for (uint32_t st = 0; st < l.c.states.size(); ++st) {
@@ -344,10 +325,6 @@ uint32_t capped_branches(Laid const &l) {
 
 TEST_CASE("gauntlet: no element routes an edge through a box" *
           doctest::test_suite("full")) {
-  // Every chart, `regions.scav` included: what the portfolio ships routes
-  // through nothing at either profile. It carved this out while the suite
-  // scored one candidate, and the count 11.8 still owns is pinned at the end
-  // of this file against the row that produces it.
   for (char const *name : GAUNTLET) {
     for (scav_profile const &p : { readable(), compact() }) {
       CAPTURE(name);
@@ -362,8 +339,7 @@ TEST_CASE("gauntlet: no element routes an edge through a box" *
           scav_point const a{ l.r.points[route.off + k] };
           scav_point const b{ l.r.points[route.off + k + 1] };
           for (uint32_t const st : live) {
-            // 11.14: a box enclosing either endpoint is crossed by the
-            // transition's own meaning, and so is an endpoint's own box.
+            // Endpoint boxes and their ancestors are exempt.
             if ((st == tr.src.v) || (st == tr.dst.v)) { continue; }
             if (ancestor(l.c, { st }, tr.src) || ancestor(l.c, { st }, tr.dst)) {
               continue;
@@ -381,8 +357,7 @@ TEST_CASE("gauntlet: no element routes an edge through a box" *
 TEST_CASE("gauntlet: every route is axis-aligned, forward, and reaches its ends" *
           doctest::test_suite("full")) {
   for (char const *name : GAUNTLET) {
-    // The same shape and the same cause: a route round the outside of the state
-    // holding both regions leaves and returns along one line.
+    // `regions.scav` skips the reversal check; the open-shapes test pins its count.
     bool const open{ std::string_view{ name } == "regions.scav" };
     for (scav_profile const &p : { readable(), compact() }) {
       CAPTURE(name);
@@ -391,7 +366,7 @@ TEST_CASE("gauntlet: every route is axis-aligned, forward, and reaches its ends"
       lay(name, p, l);
       for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
         CAPTURE(t);
-        CHECK(l.r.failed[t] == 0);  // `lay` holds the run's diagnostics to this
+        CHECK(l.r.failed[t] == 0);  // `lay` also checks `diags` is empty
         scav_span const route{ l.r.route[t] };
         if (l.g.trans_segments[t].len == 0) {
           CHECK(route.len == 0);
@@ -404,8 +379,7 @@ TEST_CASE("gauntlet: every route is axis-aligned, forward, and reaches its ends"
           CAPTURE(k);
           CHECK((a.x == b.x) != (a.y == b.y));  // axis-aligned and not a point
         }
-        // A leg that reverses folds the polyline back over itself, and the
-        // arrowhead then reads its direction off a line pointing both ways.
+        // Consecutive collinear legs run in the same direction.
         for (uint32_t k = 0; (!open) && ((k + 2) < route.len); ++k) {
           scav_point const a{ l.r.points[route.off + k] };
           scav_point const b{ l.r.points[route.off + k + 1] };
@@ -421,9 +395,7 @@ TEST_CASE("gauntlet: every route is axis-aligned, forward, and reaches its ends"
 
 TEST_CASE("gauntlet: an end on an inscribed glyph is at the middle of a face" *
           doctest::test_suite("full")) {
-  // A disc and a diamond touch their box at four points. An axis-aligned route
-  // to any other point on the face stops short of the mark it is drawn to, by
-  // more of the glyph the further along the face it lands.
+  // An inscribed glyph touches its box only at the four face midpoints.
   for (char const *name : GAUNTLET) {
     for (scav_profile const &p : { readable(), compact() }) {
       CAPTURE(name);
@@ -441,7 +413,7 @@ TEST_CASE("gauntlet: an end on an inscribed glyph is at the middle of a face" *
           scav_point const at{
             l.r.points[route.off + ((end == 0) ? 0 : (route.len - 1))]
           };
-          if (!on_border(at, box)) { continue; }  // an inner face, 11.14's carve-out
+          if (!on_border(at, box)) { continue; }  // an inner face, exempt
           CAPTURE(t);
           CAPTURE(end);
           bool const middle{ ((at.x == box.x) || (at.x == (box.x + box.w)))
@@ -456,12 +428,7 @@ TEST_CASE("gauntlet: an end on an inscribed glyph is at the middle of a face" *
 
 TEST_CASE("gauntlet: an arrowhead is never inked over another route's own end" *
           doctest::test_suite("full")) {
-  // Two ends on one point of one box, one arriving and one leaving: the head is
-  // drawn along the other route's first leg and reads as belonging to it. Two
-  // arrivals sharing a point are a fan-in and keep their one head, which is
-  // what gauntlet/fanin.scav is for; this is the mixed case. An inscribed glyph
-  // seats one point per face and no other, so it answers by moving a direction
-  // onto a face of its own rather than by sliding along one (11.5).
+  // No route ends where another starts; two arrivals may share a point as a fan-in.
   for (char const *name : GAUNTLET) {
     for (scav_profile const &p : { readable(), compact() }) {
       CAPTURE(name);
@@ -484,13 +451,8 @@ TEST_CASE("gauntlet: an arrowhead is never inked over another route's own end" *
 }
 
 TEST_CASE("gauntlet: a fork's bar is used along its length, not at one point") {
-  // The bar is a mark whose long face is its attachment face, and every branch
-  // off it used to be handed the box's centre: three arrows on one point of a
-  // face fifteen times as long as the bar is wide, with the incoming arrowhead
-  // inked over one of them. Two branches aimed the same way still share a
-  // point, and that is a fan-out trunk 11.5 keeps whole, so two distinct
-  // departure seats are not the property -- what may not happen is the arrival
-  // joining them, or the whole bar collapsing to one seat.
+  // Each bar's ends sit at two or more distinct points on its long faces, and no arrival
+  // shares a point with a departure.
   for (scav_profile const &p : { readable(), compact() }) {
     CAPTURE(p.profile_id);
     Laid l;
@@ -520,11 +482,7 @@ TEST_CASE("gauntlet: a fork's bar is used along its length, not at one point") {
       std::vector<scav_point> seats;
       for (std::vector<scav_point> const &side : { leaves, arrives }) {
         for (scav_point const &at : side) {
-          // On the bar rather than beside it, and on one of the two faces the
-          // bar is long along, which is what 11.5's face rule says a bar gets
-          // for free. The one branch that still leaves through a cap is
-          // counted in "the shapes still open" below rather than passed over
-          // here.
+          // Only long-face ends count as seats; the open-shapes test counts cap ends.
           CHECK(on_border(at, box));
           if (!on_long_face(at, box)) { continue; }
           bool fresh{ true };
@@ -532,15 +490,13 @@ TEST_CASE("gauntlet: a fork's bar is used along its length, not at one point") {
           if (fresh) { seats.push_back(at); }
         }
       }
-      // The whole property the bar has and a point does not.
       CHECK(seats.size() >= 2);
     }
   }
 }
 
 TEST_CASE("gauntlet: two states each other's target are two lines") {
-  // Both transitions project onto the same point of the same face at both ends,
-  // so without a seat apiece they draw as one line with a head at each end.
+  // `Up -> Down` and `Down -> Up` project onto one point of one face at each end.
   for (scav_profile const &p : { readable(), compact() }) {
     CAPTURE(p.profile_id);
     Laid l;
@@ -557,14 +513,10 @@ TEST_CASE("gauntlet: two states each other's target are two lines") {
     }
     REQUIRE(up != INVALID);
     REQUIRE(down != INVALID);
-    // Neither end is shared, which is what the seating buys and what stops one
-    // line carrying two heads.
     scav_span const a{ l.r.route[up] };
     scav_span const b{ l.r.route[down] };
     CHECK_FALSE(same(l.r.points[a.off], l.r.points[b.off + b.len - 1]));
     CHECK_FALSE(same(l.r.points[b.off], l.r.points[a.off + a.len - 1]));
-    // Nor is any interior point, so the two are two polylines and not one drawn
-    // twice over.
     for (uint32_t i = 0; i < a.len; ++i) {
       for (uint32_t j = 0; j < b.len; ++j) {
         CAPTURE(i);
@@ -572,12 +524,7 @@ TEST_CASE("gauntlet: two states each other's target are two lines") {
         CHECK_FALSE(same(l.r.points[a.off + i], l.r.points[b.off + j]));
       }
     }
-    // The middle is a different question: breaking the cycle gives one of them
-    // a corridor the long way round the frame, and where the frame is tight
-    // enough that both take the same side of it the two share a run of it that
-    // nudging has no room to take apart. 11.3's cycle-breaking heuristic is the
-    // lever, so the compact profile's run is pinned here rather than excused.
-    Wide shared{ 0 };
+    Wide shared{ 0 };  // collinear overlap of the two routes
     for (uint32_t i = 0; (i + 1) < a.len; ++i) {
       for (uint32_t j = 0; (j + 1) < b.len; ++j) {
         shared += run_shared(l.r.points[a.off + i],
@@ -586,10 +533,6 @@ TEST_CASE("gauntlet: two states each other's target are two lines") {
                              l.r.points[b.off + j + 1]);
       }
     }
-    // 652 before 11.9.5's reservation, 0 with it, 650 once offsets became lane
-    // positions rather than per-member displacements, and **0 again once
-    // nudging ran once over the composed polylines** (11.10a) -- the run was
-    // between two segments the per-frame pass never had in hand at once.
     CHECK(shared == 0);
   }
 }
@@ -630,7 +573,6 @@ TEST_CASE("gauntlet: a transition and its return are two straight legs an em apa
 }
 
 TEST_CASE("gauntlet: a fan-in's arrivals are four arrows, none inside another") {
-  // Several transitions into one state converge near it; none may be drawn inside another.
   for (scav_profile const &p : { readable(), compact() }) {
     CAPTURE(p.profile_id);
     Laid l;
@@ -651,13 +593,8 @@ TEST_CASE("gauntlet: a fan-in's arrivals are four arrows, none inside another") 
       scav_span const rt{ l.r.route[t] };
       CHECK(on_border(l.r.points[rt.off + rt.len - 1], l.z.state[fault]));
     }
-    // A shared run is the trunk and is allowed; what is not is a run one route
-    // shares with another over the whole of its own length. Measured against
-    // each other route in turn and summed over this route's own segments,
-    // since what a reader loses is the length hidden under one line rather
-    // than the worst single overlap. Each segment contributes at most its own
-    // length: two of the other route's segments may cover parts of the same
-    // one, and adding both would charge that part twice.
+    // A shared trunk is allowed; each other route covers less than a route's whole length.
+    // A segment counts at most its own length as covered.
     for (uint32_t const t : into) {
       scav_span const a{ l.r.route[t] };
       Wide own{ 0 };
@@ -691,11 +628,7 @@ TEST_CASE("gauntlet: a fan-in's arrivals are four arrows, none inside another") 
 
 TEST_CASE("gauntlet: an endpoint that is also a crossing is one point, not two" *
           doctest::test_suite("full")) {
-  // Into a composite's own child the route starts on the composite's border,
-  // and the crossing it makes there is that same point; out of a child it ends
-  // on it. Two points would put a leg along the border between them, which
-  // reads as a route running round the box it is about to enter rather than
-  // into it.
+  // A port slot on an endpoint's own border is that end's route point.
   for (char const *name : GAUNTLET) {
     for (scav_profile const &p : { readable(), compact() }) {
       CAPTURE(name);
@@ -708,8 +641,7 @@ TEST_CASE("gauntlet: an endpoint that is also a crossing is one point, not two" 
         if (route.len < 2) { continue; }
         Span const segs{ l.g.trans_segments[t] };
         Transition const &tr{ l.c.transitions[t] };
-        // One slot per crossing, in the order the segments cross them, which
-        // is how a slot is matched to its border everywhere else.
+        // One slot per crossing, in segment order.
         REQUIRE(ports.len == (segs.len - 1));
         for (uint32_t k = 0; k < ports.len; ++k) {
           StateId const on{ l.g.ports[l.g.segments[segs.off + k].dst_port].state };
@@ -727,8 +659,8 @@ TEST_CASE("gauntlet: an endpoint that is also a crossing is one point, not two" 
 
 TEST_CASE(
     "gauntlet: an out-of-machine label is drawn in the submachine holding both ends") {
-  // Only the root holds both ends, so the label's width is charged to the root's
-  // rank gap between the two composites and its box hangs off the leg there.
+  // The root alone holds both ends; the label sits within a leader of the route's root
+  // leg, nearer it than the leg inside `Right`.
   for (scav_profile const &p :
        { readable(), compact(), one_row(readable()), one_row(compact()) }) {
     CAPTURE(p.profile_id);
@@ -783,8 +715,8 @@ TEST_CASE(
 }
 
 TEST_CASE("gauntlet: a long edge's label widens no boundary another already widened") {
-  // Row 0 unsearched keeps the chain's own ranks, so only it is held to the gap
-  // widths; what ships is held to placing both labels clear.
+  // Both labels clear every state and each other; row 0 unsearched, which keeps the
+  // chain's own ranks, is also held to the gap widths.
   for (scav_profile const &p :
        { readable(), compact(), one_row(readable()), one_row(compact()) }) {
     CAPTURE(p.profile_id);
@@ -835,7 +767,7 @@ TEST_CASE("gauntlet: a long edge's label widens no boundary another already wide
 }
 
 TEST_CASE("gauntlet: a chain of states turns only where the fold cuts it") {
-  // Four boxes in a row fold into two rows, so two of the edges step between rows.
+  // Four boxes in a row fold into two rows; two of the edges step between rows.
   for (scav_profile const &p : { readable(), compact() }) {
     CAPTURE(p.profile_id);
     Laid l;
@@ -870,7 +802,7 @@ TEST_CASE("gauntlet: a folded frame's second piece starts under the state enteri
       }
     }
     REQUIRE(t != INVALID);
-    // A real-text title band on every state that draws one folds the run.
+    // A real-text title band on every normal state folds the run.
     std::vector<scav_box_space> titles(bare.c.states.size(), scav_box_space{});
     for (uint32_t st = 0; st < titles.size(); ++st) {
       if (bare.c.states[st].kind == StateKind::Normal) {
@@ -900,7 +832,7 @@ TEST_CASE("gauntlet: a folded frame's second piece starts under the state enteri
                             1) };
     CHECK(from.x == (below.x + arc));
 
-    // The label sits in the room phase 2 reserved: on the leg's trailing side.
+    // The label sits in the room sizing reserved, on the leg's trailing side.
     REQUIRE(l.r.placed.size() == 1);
     CHECK(l.unplaced == 0);
     scav_rect const at{ l.r.placed[0] };
@@ -913,7 +845,7 @@ TEST_CASE("gauntlet: a folded frame's second piece starts under the state enteri
 TEST_CASE(
     "gauntlet: a run the scale measure folds is laid straight where that is smaller") {
   // Row 0 unsearched folds `watch`; at `readable` the search pins it unfolded, its states
-  // on one row. At `compact` it turns both regions down instead.
+  // on one row. At `compact` it turns both regions down.
   for (scav_profile const &p : { readable() }) {
     CAPTURE(p.profile_id);
     Laid bare;
@@ -1014,8 +946,8 @@ TEST_CASE(
 TEST_CASE(
     "gauntlet: entered from directly above, a composite running across is entered on "
     "top") {
-  // The root turned to run down puts `Source` over `Box`, whose own frame runs
-  // across. Unsearched, so the facing pass alone puts the port on the top border.
+  // The root turned to run down puts `Source` over `Box`, whose frame runs across;
+  // unsearched, the facing pass puts the port on the top border.
   for (scav_profile const &p : { readable(), compact() }) {
     CAPTURE(p.profile_id);
     SearchPins const seed{ .orients = { { .frame = SubmachineId{ 0 } } } };
@@ -1111,7 +1043,8 @@ TEST_CASE("gauntlet: a route through two nested borders crosses both at one heig
 
 namespace {
 
-// `carried.scav`'s entering route unchained, and `Box`'s run cut before `Third` alone.
+// Pins for `carried.scav`: leg 1 of the entering route `enter` unchained, and `Box`'s run
+// folded before `Third` only.
 SearchPins carried_pins(Laid const &bare, uint32_t &enter) {
   uint32_t const left{ state_named(bare.c, "Left") };
   uint32_t const third{ state_named(bare.c, "Third") };
@@ -1154,7 +1087,7 @@ TEST_CASE("gauntlet: a pinned cut before an entered state takes the port into it
     CHECK(target.y >= (top.y + top.h));  // in the second piece
     CHECK(target.x <= top.x);            // no further in than the frame's first state
 
-    // Straight, and no longer than the gap between the two states plus a rank gap.
+    // Straight, and at most the gap between the two states plus a rank gap long.
     scav_span const route{ l.r.route[enter] };
     REQUIRE(route.len >= 2);
     Wide len{ 0 };
@@ -1200,8 +1133,6 @@ TEST_CASE("gauntlet: a cut before a boundary-fed state is taken, and carries the
 }
 
 TEST_CASE("gauntlet: a composite entered straight holds its first state a clearance in") {
-  // The port is a point on `Box`'s border rather than a column of its own, and
-  // the route turns nowhere, so `First` sits at most a route clearance inside.
   for (scav_profile const &p :
        { readable(), compact(), one_row(readable()), one_row(compact()) }) {
     CAPTURE(p.profile_id);
@@ -1252,7 +1183,7 @@ TEST_CASE("gauntlet: a composite entered straight holds its first state a cleara
 
 namespace {
 
-// Holds the one transition leaving `from` to a straight line from its border to `to`'s.
+// Checks that the transition leaving `from` runs straight from its border to `to`'s.
 void straight_from(Laid const &l, uint32_t from, uint32_t to) {
   uint32_t t{ INVALID };
   for (uint32_t k = 0; k < l.c.transitions.size(); ++k) {
@@ -1339,7 +1270,7 @@ TEST_CASE("gauntlet: every state lies inside the frame it is drawn in" *
 }
 
 TEST_CASE("gauntlet: a pseudostate seated in a layer leaves the layers before it alone") {
-  // `* -> T` seats beside `T`, so `B` is one rank gap past `A` however wide `T` is.
+  // `* -> T` seats beside `T`; `B` is at most a rank gap past `A`, however wide `T` is.
   for (scav_profile const &p : { one_row(readable()), one_row(compact()) }) {
     CAPTURE(p.profile_id);
     Laid l;
@@ -1355,8 +1286,7 @@ TEST_CASE("gauntlet: a pseudostate seated in a layer leaves the layers before it
 }
 
 TEST_CASE("gauntlet: a run's arrows each span one gap, not the drawing") {
-  // Moving a state a rank along squares the drawing up and stretches one
-  // straight arrow across it, which only the route's own length prices.
+  // Each route is at most the widest state plus `rank_sep` long.
   for (scav_profile const &p : { readable(), compact() }) {
     CAPTURE(p.profile_id);
     Laid l;
@@ -1480,7 +1410,7 @@ TEST_CASE("gauntlet: a route leaving a composite turns one corner into its targe
 
 namespace {
 
-// The chart's states, so a test can name the ones its space requests are for.
+// Gauntlet chart `name`, loaded only; tests index space requests by its states.
 Chart loaded(char const *name) {
   std::string path{ SCAV_TEST_DATA_DIR "/charts/gauntlet/" };
   path += name;
@@ -1530,8 +1460,8 @@ uint32_t from_named(Chart const &c, uint32_t src) {
 }  // namespace
 
 TEST_CASE("gauntlet: a header walls its face, so the port from above moves off it") {
-  // `above` with its root turned to run down puts Source over Box, and the facing
-  // pass put the port on Box's top; a header there sends it to another face.
+  // `above` with its root turned to run down puts Source over Box; a header on Box's top
+  // sends the port to another face.
   for (scav_profile const &p : { readable(), compact() }) {
     CAPTURE(p.profile_id);
     Chart const probe{ loaded("above.scav") };
@@ -1581,8 +1511,8 @@ TEST_CASE("gauntlet: a port takes the one face no band lines") {
 }
 
 TEST_CASE("gauntlet: a state walled on every face is still drawn, and pays for the wall") {
-  // Garbage in: no face is free, so a route into Box must cross a band. Layout
-  // succeeds, every transition is drawn, and Tier 0 counts the crossings.
+  // Every face of every composite carries a band: layout succeeds, draws every transition,
+  // and Tier 0 counts the band crossings.
   scav_router_id id{};
   REQUIRE(router_by_name(reinterpret_cast<scav_byte const *>("orthogonal"), 10, id));
   for (scav_profile const &p : { readable(), compact() }) {
@@ -1640,7 +1570,7 @@ TEST_CASE("gauntlet: with every state headed, no route enters a band" *
       for (scav_port_slot const &slot : l.r.slots) {
         CAPTURE(slot.x);
         CAPTURE(slot.y);
-        CHECK(slot.side != 2);  // every composite is headed, so no port is on a top
+        CHECK(slot.side != 2);  // a header lines every composite's top
       }
     }
   }
@@ -1709,8 +1639,8 @@ TEST_CASE("gauntlet: an internal loop stays inside its state, under its header")
 }
 
 TEST_CASE("gauntlet: an external self-loop leaves its state and returns to it outside") {
-  // `tick` is a loop off one face of Waiting: both ends on its border a clearance apart at
-  // least, square throughout, and every corner outside it.
+  // `tick` is a loop off one face of Waiting: both ends on its border at least a clearance
+  // apart, and every corner outside it.
   for (scav_profile const &p : { readable(), compact() }) {
     CAPTURE(p.profile_id);
     Laid l;
@@ -1810,8 +1740,8 @@ void inward_down(scav_profile const &p, bool footer, Laid &l, uint32_t &frame) {
 }  // namespace
 
 TEST_CASE("gauntlet: an inner-face end turns off a header onto the unlined rank face") {
-  // Box's frame runs down with its header on the leading face, so `reset` starts on the
-  // bottom.
+  // Box's frame runs down under a header: `reset` starts on Box's bottom and `restart`
+  // ends off its top.
   for (scav_profile const &p : { readable(), compact() }) {
     CAPTURE(p.profile_id);
     Laid l;
@@ -1836,8 +1766,8 @@ TEST_CASE("gauntlet: an inner-face end turns off a header onto the unlined rank 
 }
 
 TEST_CASE("gauntlet: an inner-face end on a lined face stays on its frame's edge") {
-  // A header and a footer line both rank faces of Box's down-running frame, so neither
-  // end can turn, and each stays on the frame's edge rather than crossing the band.
+  // A header and a footer line both rank faces of Box's down-running frame; each end sits
+  // on the frame's edge, off Box's border.
   for (scav_profile const &p : { readable(), compact() }) {
     CAPTURE(p.profile_id);
     Laid l;
@@ -1933,8 +1863,8 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
   for (scav_profile const &p : { readable(), compact() }) {
     CAPTURE(p.profile_id);
 
-    // Row 0 unsearched lays the chart out flat, and divider ports on the regions'
-    // sides send three routes back on themselves; none passes through a box.
+    // Row 0 unsearched lays the chart out flat; divider ports on the regions' sides make
+    // three routes double back, and none passes through a box.
     Laid row_zero;
     lay("regions.scav", one_row(p), row_zero);
     REQUIRE(row_zero.tuple == 0);
@@ -1943,11 +1873,11 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     shape_counts(row_zero, through, back);
     CHECK(through == 0);
     CHECK(back == 3);
-    // The scorer over the run's columns answers the same question.
+    // The scorer's through-box count over the run's columns agrees.
     CHECK(cost_columns(row_zero.c, row_zero.g, p).through_box == 0);
 
-    // What ships, scored both ways: the properties above hold on the drawing a
-    // reader gets, whichever row the search ends on.
+    // The shipped drawing, counted here and by the scorer: no route passes through a box
+    // or doubles back.
     Laid shipped;
     lay("regions.scav", p, shipped);
     uint32_t shipped_through{ 0 };
@@ -1955,16 +1885,14 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     shape_counts(shipped, shipped_through, shipped_back);
     CHECK(shipped_through == 0);
     CHECK(cost_columns(shipped.c, shipped.g, p).through_box == 0);
-    // No route doubles back at either profile.
     CHECK(shipped_back == 0);
 
-    // The face rule picks by separation per axis, so a branch stacked below a bar can
-    // leave through the bar's short cap.
+    // The face rule picks by per-axis separation: at row 0 one branch stacked below a bar
+    // leaves through its short cap.
     Laid fork_zero;
     lay("fork.scav", one_row(p), fork_zero);
     CHECK(capped_branches(fork_zero) == 1);
-    // What ships: the search settles on a four-bend arrangement where one
-    // arrival enters the join through its cap.
+    // Shipped, one arrival enters the join through its cap.
     Laid fork_shipped;
     lay("fork.scav", p, fork_shipped);
     CHECK(capped_branches(fork_shipped) == 1);

@@ -1,5 +1,4 @@
-// Routing against a hand-written `SizedLayout`, so the polyline and the port
-// slots are what is under test rather than whatever sizing produced.
+// Polylines and port slots, mostly routed against a hand-written `SizedLayout`.
 
 #include "layout/route.h"
 #include "layout/tests/pod_eq.h"
@@ -37,8 +36,7 @@ scav_profile profile() {
   return p;
 }
 
-// These cases pin the shape the ranks alone produce, so they name the router
-// that does nothing else rather than taking whatever index 0 is today.
+// Draws the order's corridor and nothing else; cases using it pin the rank-only shape.
 StraightRouter const STRAIGHT;
 
 SubmachineOrders empty_orders(Chart const &c, SplitGraph const &g) {
@@ -211,7 +209,7 @@ TEST_CASE("route: a reversed chain is walked the way it was authored") {
 
   Routes const r{ route_transitions(c, g, o, z, {}, profile(), STRAIGHT) };
   REQUIRE(r.route[0].len == 4);
-  // Ranks climb the acyclic way, so a reversed edge walks them back down.
+  // A reversed edge walks its ranks backwards: rank 2's node comes first.
   CHECK(r.points[1].x == 300);
   CHECK(r.points[2].x == 150);
 }
@@ -228,7 +226,7 @@ TEST_CASE("route: a crossing puts its slot on the crossed border") {
   SplitGraph const g{ decompose(c) };
   REQUIRE(g.trans_segments[0].len == 2);
   SubmachineOrders o{ empty_orders(c, g) };
-  // The exit's boundary node lives in the inner frame, at its trailing edge.
+  // The exit's boundary node sits in the inner frame, at its trailing edge.
   o.nodes = { { .kind = OrderKind::Boundary, .subject = 0, .rank = 1, .pos = 0 } };
   o.seg_node[0] = 0;
   o.seg_port[0] = 0;
@@ -244,7 +242,7 @@ TEST_CASE("route: a crossing puts its slot on the crossed border") {
   Routes const r{ route_transitions(c, g, o, z, {}, profile(), STRAIGHT) };
   REQUIRE(r.port[0].len == 1);
   scav_port_slot const slot{ r.slots[0] };
-  // The node's height, but the composite's own border, not the frame's.
+  // On the composite's own border at the node's height.
   CHECK(slot.x == z.state[comp.v].x + z.state[comp.v].w);
   CHECK(slot.y == 80);
   CHECK(slot.side == 1);
@@ -254,10 +252,8 @@ TEST_CASE("route: a crossing puts its slot on the crossed border") {
 }
 
 TEST_CASE("route: a route entering a composite leaves its border square, never along it") {
-  // The port sits on the composite's border at the height its boundary node
-  // came out at, and the state it enters is lower. Nothing in the inner frame
-  // blocked the border line itself, so the route went down along it before
-  // turning in: a run a reader cannot tell from the border (11.10g).
+  // The port sits on the composite's left border at its boundary node's height, above
+  // the state it enters.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
@@ -302,8 +298,8 @@ TEST_CASE("route: a route entering a composite leaves its border square, never a
 }
 
 TEST_CASE("route: the slot side follows the route's direction, not the packing") {
-  // An entering route: the boundary node is a source in the inner frame, so the
-  // slot belongs on the composite's leading border.
+  // An entering route's boundary node is a source in the inner frame; its slot is on the
+  // composite's leading border.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
@@ -328,8 +324,7 @@ TEST_CASE("route: the slot side follows the route's direction, not the packing")
   z.state[s.v] = { .x = 480, .y = 60, .w = 100, .h = 40 };
   z.sub[root.v] = { .x = 0, .y = 0, .w = 600, .h = 200 };
   z.sub[inner.v] = { .x = 410, .y = 10, .w = 180, .h = 180 };
-  // Nowhere near the frame's own origin, which is exactly the case a packed
-  // second component produces.
+  // Far from the frame's origin, as in a packed second component.
   z.node[0] = { .x = 560, .y = 80 };
 
   Routes const r{ route_transitions(c, g, o, z, {}, profile(), STRAIGHT) };
@@ -340,8 +335,8 @@ TEST_CASE("route: the slot side follows the route's direction, not the packing")
 }
 
 TEST_CASE("route: a port on a cross border puts its slot on the top or bottom border") {
-  // The boundary node sits on the inner frame's top or bottom edge, so the slot is on the
-  // composite's top or bottom border at the node's x; turned down, a side at its y.
+  // The slot sits on the composite's top or bottom border at the node's x; with the frame
+  // turned down, on its left or right border at the node's y.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
@@ -416,7 +411,7 @@ TEST_CASE("route: an internal transition starts on the source's inner face") {
 
   Routes const r{ route_transitions(c, g, o, z, {}, profile(), STRAIGHT) };
   REQUIRE(r.route[0].len == 2);
-  // On the composite's own border, level with the boundary node: not its centre.
+  // On the composite's own border, level with the boundary node.
   CHECK((r.points[0] == scav_point{ .x = 0, .y = 90 }));
   CHECK(r.port[0].len == 0);
 }
@@ -439,7 +434,7 @@ TEST_CASE("route: an external self-loop leaves its trailing face and returns to 
   REQUIRE(r.route[0].len == 4);
   scav_point const *const pt{ r.points.data() + r.route[0].off };
   scav_rect const &box{ z.state[a.v] };
-  // A C off the right face, its far leg the loop's reach out, its ends a line apart.
+  // A C shape off the right face.
   CHECK(pt[0].x == (box.x + box.w));
   CHECK(pt[3].x == (box.x + box.w));
   CHECK(pt[1].x == (box.x + box.w + (2 * p.pad)));
@@ -494,8 +489,7 @@ TEST_CASE("route: clears trim each end toward the other, capped at half") {
   Routes const r{ route_transitions(c, g, o, z, s, profile(), STRAIGHT) };
   REQUIRE(r.route[0].len == 2);
   CHECK(r.points[0].x == 30);
-  // The far end is capped at half of what is left after the near end moved,
-  // not half the original span: 970 remains, so 485 of the 700 is granted.
+  // The far end trims at most half of what remains after the near end's trim: 485 of 970.
   CHECK(r.points[1].x == 515);
 }
 
@@ -509,7 +503,7 @@ TEST_CASE("route: a clear against a leg of no length trims nothing") {
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const o{ empty_orders(c, g) };
   SizedLayout z{ blank(c, o) };
-  // One rect for both, so the straight line between the two centres is a point.
+  // One rect for both: the straight line between the two centres is a point.
   z.state[a.v] = { .x = 100, .y = 100, .w = 40, .h = 40 };
   z.state[b.v] = { .x = 100, .y = 100, .w = 40, .h = 40 };
   std::vector<scav_path_clear> const clears{ { .src = 30, .dst = 30 } };
@@ -535,7 +529,7 @@ TEST_CASE("route: a tombstoned state is no obstacle to the frame it sat in") {
   SizedLayout z{ blank(c, o) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 40, .h = 40 };
   z.state[b.v] = { .x = 400, .y = 0, .w = 40, .h = 40 };
-  z.state[gone.v] = { .x = 100, .y = -100, .w = 200, .h = 240 };  // right across the way
+  z.state[gone.v] = { .x = 100, .y = -100, .w = 200, .h = 240 };  // across the A-B line
   z.sub[root.v] = { .x = 0, .y = 0, .w = 440, .h = 40 };
   z.chart = { .x = -100, .y = -200, .w = 700, .h = 500 };
 
@@ -600,8 +594,7 @@ TEST_CASE("route: a path box centres on its route's middle point") {
 
   Routes const r{ route_transitions(c, g, o, z, s, profile(), STRAIGHT) };
   REQUIRE(r.placed.size() == 1);
-  // The middle of the longest leg, which is the one crossing the boundary
-  // phase 1 widened for this box -- not the middle point of the polyline.
+  // The middle of the route's longest leg.
   scav_span const at{ r.route[0] };
   Wide longest{ -1 };
   scav_point mid{};
@@ -650,16 +643,15 @@ TEST_CASE("route: a transition to an enclosing state ends on that state's inner 
     CAPTURE(router->name().bytes);
     Routes const r{ route_transitions(c, g, o, z, {}, profile(), *router) };
     REQUIRE(r.route[0].len >= 2);
-    // The head is the source's own box, not the boundary node the target end
-    // put in this same frame; the straight router takes the centre it was
-    // handed and the orthogonal one slides it onto the border.
+    // The head lies in the source's box: the straight router uses its centre and the
+    // orthogonal router moves it onto the border.
     scav_point const head{ r.points[r.route[0].off] };
     CHECK(head.x >= z.state[s.v].x);
     CHECK(head.x <= (z.state[s.v].x + z.state[s.v].w));
     CHECK(head.y >= z.state[s.v].y);
     CHECK(head.y <= (z.state[s.v].y + z.state[s.v].h));
-    // The tail is on Outer's own border level with the boundary node, and no border
-    // is crossed, so there is no slot.
+    // The tail is on Outer's own border level with the boundary node; nothing is crossed,
+    // and no slot is made.
     CHECK((r.points[(r.route[0].off + r.route[0].len) - 1] ==
            scav_point{ .x = 400, .y = 80 }));
     CHECK(r.port[0].len == 0);
@@ -669,9 +661,8 @@ TEST_CASE("route: a transition to an enclosing state ends on that state's inner 
 
 namespace {
 
-// One leg per net, from `net.src` to `net.dst`. A router built to break the
-// contract starts a step off `net.src` instead, which is the shape phase 3's
-// end-to-end join must leave visible.
+// One leg per net from `net.src` to `net.dst`; with `honour` false the leg starts `STRAY`
+// off `net.src` on each axis.
 class ScriptedRouter final : public Router {
  public:
   explicit ScriptedRouter(bool honour) : honour_src{ honour } {}
@@ -706,8 +697,7 @@ class ScriptedRouter final : public Router {
 
 namespace {
 
-// Every net routed as a straight line, with one net's index reported as a named
-// failure: the counters and `failed` are what phase 3 makes of that.
+// Routes every net as a straight line and reports net `which` as failed with `how`.
 class FailingRouter final : public Router {
  public:
   FailingRouter(uint32_t net, RouteFailure cause) : which{ net }, how{ cause } {}
@@ -736,8 +726,8 @@ class FailingRouter final : public Router {
   RouteFailure how;
 };
 
-// One elbow per net through a shared height, which is the one shape a lane is a
-// run of. `margin` is the knob phase 3 reads to decide whether to nudge at all.
+// Routes each net as an elbow through y = `LANE`; `margin` returns `wanted`, and only a
+// positive margin turns nudging on.
 class LaneRouter final : public Router {
  public:
   explicit LaneRouter(int32_t want) : wanted{ want } {}
@@ -772,8 +762,7 @@ class LaneRouter final : public Router {
 
 namespace {
 
-// A router that answers a frame with nothing at all, which is the one shape
-// phase 3 cannot read a polyline, a metric or a failure cause out of.
+// Returns no points, polylines or metrics for any frame.
 class MuteRouter final : public Router {
  public:
   [[nodiscard]] RouterName name() const override { return { .bytes = "mute", .len = 4 }; }
@@ -805,7 +794,7 @@ TEST_CASE("route: a net the router said nothing about leaves no polyline behind"
   Routes const r{ route_transitions(c, g, o, z, {}, profile(), mute) };
   CHECK(r.route[0].len == 0);
   CHECK(r.points.empty());
-  // No metric came back either, so nothing is counted as a fallback.
+  // With no metric back, nothing counts as a fallback.
   CHECK(r.degraded() == 0);
   CHECK(r.failed[0] == 0);
 }
@@ -882,7 +871,7 @@ TEST_CASE("route: the boxes placed are the ones the strip matching places") {
   scav_spaces const s{ .path_box = both.data(), .n_path_box = 2 };
   Routes const r{ route_transitions(c, g, o, z, s, profile(), STRAIGHT) };
   REQUIRE(r.placed.size() == 2);
-  // The loop's label is seated in its room and never counted as a fallback.
+  // Every box finds a candidate; the loop's label sits in its loop room.
   std::vector<scav_rect> expected;
   CHECK(place_labels(c, z, s, r.route, r.points, profile(), expected) == 0);
   CHECK(same_rows(r.placed, expected));
@@ -908,7 +897,7 @@ TEST_CASE("route: nothing is nudged for a router that asks for no margin") {
   z.sub[root.v] = { .x = 0, .y = 0, .w = 240, .h = 240 };
   z.chart = { .x = -100, .y = -100, .w = 440, .h = 440 };
 
-  // The route points nudging moves onto a lane.
+  // Segments nudging moves onto a lane.
   auto const lane_moves = [&](Router const &router) {
     LayoutTrace trace;
     trace_sink_set(&trace);
@@ -921,17 +910,15 @@ TEST_CASE("route: nothing is nudged for a router that asks for no margin") {
   LaneRouter const asks{ 16 };
   Routes const nudged{ route_transitions(c, g, o, z, {}, profile(), asks) };
   CHECK(lane_moves(asks) == 2);
-  // The root frame has no owning state, so the region is what bounds it, and the
-  // region holds every point either net touches. The pitch these two spread by
-  // is a line of the profile's text rather than the router's margin, so the
-  // 16 asked for above bounds the routing and not the spreading (11.9.5).
+  // The region bounds the root frame; the lane pitch is the larger of a line of text and
+  // the margin of 16.
   CHECK(nudged.points[nudged.route[0].off + 1].y == 56);
   CHECK(nudged.points[nudged.route[1].off + 1].y == 184);
 
   LaneRouter const silent{ 0 };
   Routes const plain{ route_transitions(c, g, o, z, {}, profile(), silent) };
   CHECK(lane_moves(silent) == 0);
-  // Untouched: both elbows still turn at the height the router put them at.
+  // Both elbows stay at the height the router chose.
   for (uint32_t t = 0; t < 2; ++t) {
     CAPTURE(t);
     scav_span const at{ plain.route[t] };
@@ -965,16 +952,13 @@ TEST_CASE("route: a nudge inside a composite is bounded by that state's own box"
   z.chart = { .x = -200, .y = -200, .w = 640, .h = 640 };
 
   LaneRouter const asks{ 16 };
-  // A box that leaves the lane all the room it wants: the two members spread by
-  // a whole line of text either side.
+  // A box with room to spare: the members spread as in the root frame.
   z.state[comp.v] = { .x = -40, .y = -40, .w = 320, .h = 320 };
   Routes const wide{ route_transitions(c, g, o, z, {}, profile(), asks) };
   CHECK(wide.points[wide.route[0].off + 1].y == 56);
   CHECK(wide.points[wide.route[1].off + 1].y == 184);
 
-  // Eight units of it, centred on the lane, and the members stop one unit inside
-  // each border. The region reaches a margin past every point either net
-  // touches, so only the owner's box can be doing this.
+  // An 8-unit box centred on the lane: the members stop one unit inside each border.
   z.state[comp.v] = { .x = -40, .y = 96, .w = 320, .h = 8 };
   Routes const tight{ route_transitions(c, g, o, z, {}, profile(), asks) };
   CHECK(tight.points[tight.route[0].off + 1].y == 97);
@@ -982,7 +966,7 @@ TEST_CASE("route: a nudge inside a composite is bounded by that state's own box"
 }
 
 TEST_CASE("route: nets join only where one ends exactly where the next begins") {
-  // One transition out of a composite, so phase 3 has two nets to lay down.
+  // One transition out of a composite: two nets, joined at the slot.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
@@ -1019,8 +1003,7 @@ TEST_CASE("route: nets join only where one ends exactly where the next begins") 
   }
 
   SUBCASE("a net that starts elsewhere keeps the point it did start at") {
-    // Dropping the second net's first point regardless would splice a leg
-    // straight from the slot to the target and hide the break.
+    // Source, slot, the second net's stray start, target.
     ScriptedRouter const scripted{ false };
     Routes const r{ route_transitions(c, g, o, z, {}, profile(), scripted) };
     REQUIRE(r.port[0].len == 1);
@@ -1034,8 +1017,7 @@ TEST_CASE("route: nets join only where one ends exactly where the next begins") 
 
 namespace {
 
-// Every corpus chart, by the bare name, so the reuse below is held to real
-// frames rather than to hand-built ones.
+// Every corpus chart, by bare file name.
 constexpr std::array<char const *, 12> CORPUS{
   "axis.scav", "bottler.scav", "brew.scav", "dock.scav", "estop.scav",       "kiln.scav",
   "led.scav",  "mill.scav",    "ota.scav",  "tcp.scav",  "toolchanger.scav", "vac.scav"
@@ -1061,9 +1043,8 @@ bool same_routes(Routes const &a, Routes const &b) {
 }  // namespace
 
 TEST_CASE("route: a reused frame answers exactly what routing it again would") {
-  // 11.10c's whole bet. A Level 1 move leaves every frame but one translated,
-  // and a translated frame is answered by translating its answer -- but only if
-  // that is the same answer, which is what this pins on real geometry.
+  // A rank move translates every frame but one; routing the moved layout through the
+  // base layout's cache matches routing it cold.
   scav_profile p{};
   REQUIRE(profile_named("readable", p));
   Router const *const router{ router_at(0) };
@@ -1084,8 +1065,7 @@ TEST_CASE("route: a reused frame answers exactly what routing it again would") {
       route_transitions(c, g, base_o, base_z, {}, p, *router, 1, nullptr, &base)
     };
 
-    // Every single-state move the chart admits, capped so the suite stays a
-    // suite; each one is a fresh layout the cache has never seen.
+    // Single-state rank moves, at most 12; each is a layout the cache has not seen.
     uint32_t tried{ 0 };
     for (uint32_t st = 0; (st < c.states.size()) && (tried < 12); ++st) {
       if ((c.states[st].live == 0) || (base_o.state_node[st] == INVALID)) { continue; }
@@ -1109,7 +1089,7 @@ TEST_CASE("route: a reused frame answers exactly what routing it again would") {
       }
     }
     CHECK(tried > 0);
-    // And the base itself: routing with its own cache is routing it again.
+    // Routing the base with its own cache matches the uncached result.
     Routes const again{
       route_transitions(c, g, base_o, base_z, {}, p, *router, 1, &base)
     };
@@ -1167,8 +1147,8 @@ TEST_CASE("route: a cache filled by a run that reused one answers like routing a
 }
 
 TEST_CASE("route: a face with no effect at an end changes nothing it draws") {
-  // Both kinds of unmarked face occur, at an end the router reads no face at and the face
-  // it seats an end on anyway, and some marked face changes the route.
+  // Unmarked faces, at ends with an empty mask and at seated ends, both occur and change
+  // nothing; some marked face changes the route.
   scav_profile p{};
   REQUIRE(profile_named("readable", p));
   Router const *const router{ router_at(0) };
@@ -1314,7 +1294,7 @@ TEST_CASE("route: a frame's obstacles are the ones a walk over every state finds
     route_transitions(c, g, base_o, base_z, {}, p, *router, 1, nullptr, &base);
     uint32_t compared{ frames_gathered_as_every_state(c, base_z, base) };
 
-    // Moved layouts too, each gathered afresh while the cache answers.
+    // Moved layouts too, routed through the base layout's cache.
     uint32_t tried{ 0 };
     for (uint32_t st = 0; (st < c.states.size()) && (tried < 4); ++st) {
       if ((c.states[st].live == 0) || (base_o.state_node[st] == INVALID)) { continue; }
@@ -1361,7 +1341,7 @@ TEST_CASE("route: a state outside its composite's box is an obstacle where it li
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 100 };
   z.state[d.v] = { .x = 400, .y = 0, .w = 300, .h = 200 };
   z.state[x.v] = { .x = 420, .y = 100, .w = 60, .h = 60 };
-  z.state[w.v] = { .x = 430, .y = 110, .w = 20, .h = 20 };  // inside X, so X shields it
+  z.state[w.v] = { .x = 430, .y = 110, .w = 20, .h = 20 };  // inside X, which shields it
   z.state[y.v] = { .x = 620, .y = 100, .w = 60, .h = 60 };
   z.state[s.v] = { .x = 500, .y = 20, .w = 40, .h = 40 };  // inside D, outside A
   z.sub[root.v] = { .x = 0, .y = 0, .w = 700, .h = 200 };
@@ -1383,8 +1363,8 @@ TEST_CASE("route: a state outside its composite's box is an obstacle where it li
 }
 
 TEST_CASE("route: a self-transition on a pseudostate loops outside its glyph") {
-  // A choice, a junction and a history have no room inside, so each of their internal
-  // and local self-transitions is drawn as an external one is.
+  // A choice, a junction and a history have no loop room: their internal and local
+  // self-transitions loop outside, as external ones do.
   Drawn d;
   draw_text(
       "chart pseudo {\n"
@@ -1415,9 +1395,8 @@ TEST_CASE("route: a self-transition on a pseudostate loops outside its glyph") {
 }
 
 TEST_CASE("route: a route inside a state goes round its loop room, never across a leg") {
-  // The port Child leaves by sits on S's bottom face, under the room of S's loop: the
-  // route to it keeps off the strip between the room and the border the legs cross.
-  // The requests are the reference builder's at this profile.
+  // Child's exit port is pinned to S's bottom border, under S's loop room. The space
+  // requests are the reference builder's at this profile.
   std::string_view const text{
     "chart roomport {\n"
     "  state S { state Child, trans * -> Child }, state B,\n"
@@ -1463,9 +1442,8 @@ TEST_CASE("route: a route inside a state goes round its loop room, never across 
 }
 
 TEST_CASE("route: a nudge leaves an outer loop's corridor and its arrowhead's leg") {
-  // The loop and the port route run under S a little apart; the chart-wide nudge spreads
-  // them, and the loop's last leg keeps the clear its arrowhead was trimmed by. The
-  // requests are the reference builder's at this profile.
+  // The loop and the port route run under S and the nudge spreads them; the loop's last
+  // leg stays longer than its `head` clear. Space requests: the reference builder's.
   scav_profile const p{ profile() };
   int32_t const head{ (3 * p.pad) / 4 };
   Drawn probe;
@@ -1513,7 +1491,7 @@ TEST_CASE("route: a nudge leaves an outer loop's corridor and its arrowhead's le
 
 TEST_CASE("route: a state lined on its trailing face loops out of its leading one") {
   // A trail band and no lead band: the room sits against the leading pad, the loop leaves
-  // the left border and returns to it, and its label stands beyond the far leg.
+  // the left border and returns to it, and its label sits beyond the far leg.
   scav_profile const p{ profile() };
   std::string_view const text{
     "chart lined {\n"
