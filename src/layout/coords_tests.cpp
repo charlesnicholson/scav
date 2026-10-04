@@ -27,6 +27,12 @@ namespace {
 
 using namespace scav;
 
+std::vector<int32_t> cross_coordinates(CoordGraph const &g) {
+  std::vector<int32_t> out;
+  scav::cross_coordinates(g, out);
+  return out;
+}
+
 constexpr int32_t EXT{ 100 };
 constexpr int32_t SEP{ 20 };
 

@@ -97,7 +97,6 @@ SplitGraph decompose(Chart const &c) {
     chain_of(c, { s }, chain_src);
     g.state_depth[s] = static_cast<uint32_t>(chain_src.size() - 1);
   }
-  vec_assign(g.state_crossings, c.states.size(), 0);
   vec_assign(g.trans_segments, c.transitions.size(), Span{});
   vec_assign(g.trans_common, c.transitions.size(), CommonAncestor{});
 
@@ -185,18 +184,12 @@ SplitGraph decompose(Chart const &c) {
                       .src_inner = ((k == 0) && src_inner) ? 1U : 0U,
                       .dst_inner = 0 });
       switch (x.kind) {
-        case Crossing::Exit:
-          frame = c.states[x.state.v].parent;
-          ++g.state_crossings[x.state.v];
-          break;
+        case Crossing::Exit: frame = c.states[x.state.v].parent; break;
         case Crossing::SepSrc:
           frame = c.states[c.submachines[x.sub.v].owner.v].parent;
           break;
         case Crossing::SepDst: frame = x.sub; break;
-        case Crossing::Enter:
-          frame = c.states[entered_next(k).v].parent;
-          ++g.state_crossings[x.state.v];
-          break;
+        case Crossing::Enter: frame = c.states[entered_next(k).v].parent; break;
         default: break;
       }
       prev = port;

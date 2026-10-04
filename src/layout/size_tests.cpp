@@ -2023,11 +2023,17 @@ namespace scav {
 // SCAV_INTERNAL, declared here rather than in a header so the shipping build
 // keeps them internal.
 FrameDar size_hole_ratio(int32_t w, int32_t h);
-std::vector<FrameDar> size_owner_holes(Chart const &c, SizedLayout const &z);
+void size_owner_holes(Chart const &c, SizedLayout const &z, std::vector<FrameDar> &hole);
 
 }  // namespace scav
 
 namespace {
+
+std::vector<FrameDar> size_owner_holes(Chart const &c, SizedLayout const &z) {
+  std::vector<FrameDar> hole;
+  scav::size_owner_holes(c, z, hole);
+  return hole;
+}
 
 // A profile whose Choice states reserve a hole a hundred thousand units tall,
 // so an owner leaves its frame a shape nothing about the frame produced.

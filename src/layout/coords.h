@@ -34,10 +34,7 @@ struct CoordGraph {
 };
 
 // One centre per node, translated so the topmost node's leading edge is zero.
-// A node in no layer gets zero.
-std::vector<int32_t> cross_coordinates(CoordGraph const &g);
-
-// The same into `out`, reusing its capacity.
+// A node in no layer gets zero. Into `out`, reusing its capacity.
 void cross_coordinates(CoordGraph const &g, std::vector<int32_t> &out);
 
 }  // namespace scav

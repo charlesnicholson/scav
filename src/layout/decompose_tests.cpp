@@ -22,6 +22,13 @@ SplitSegment const &seg(SplitGraph const &g, uint32_t t, uint32_t i) {
 }
 
 // The port a segment ends on, so a test names boundaries rather than indices.
+// The routes through `s`'s border: one port each.
+uint32_t crossings(SplitGraph const &g, StateId s) {
+  uint32_t n{ 0 };
+  for (SplitPort const &port : g.ports) { n += (port.state == s) ? 1U : 0U; }
+  return n;
+}
+
 SplitPort const &dst_port(SplitGraph const &g, uint32_t t, uint32_t i) {
   return g.ports[seg(g, t, i).dst_port];
 }
@@ -64,8 +71,8 @@ TEST_CASE("split: exiting a composite splits once at its border") {
   CHECK(seg(g, 0, 1).frame == root);
   CHECK(dst_port(g, 0, 0).state == comp);
   CHECK(dst_port(g, 0, 0).crossing == 0);
-  CHECK(g.state_crossings[comp.v] == 1);
-  CHECK(g.state_crossings[s.v] == 0);
+  CHECK(crossings(g, comp) == 1);
+  CHECK(crossings(g, s) == 0);
   CHECK(g.state_depth[s.v] == 1);
 }
 
@@ -120,7 +127,7 @@ TEST_CASE("split: kind decides whether the source border splits") {
     REQUIRE(segs_of(g, t).len == 1);
     CHECK(seg(g, t, 0).frame == inner);
   }
-  CHECK(g.state_crossings[comp.v] == 1);  // only the external row crossed
+  CHECK(crossings(g, comp) == 1);  // only the external row crossed
 }
 
 TEST_CASE("split: every self-transition is one segment in its parent frame") {
@@ -137,7 +144,7 @@ TEST_CASE("split: every self-transition is one segment in its parent frame") {
     CHECK(seg(g, t, 0).frame == root);
   }
   CHECK(g.ports.empty());
-  CHECK(g.state_crossings[a.v] == 0);
+  CHECK(crossings(g, a) == 0);
 }
 
 TEST_CASE("split: concurrent siblings get a direct arrow through the separator") {
@@ -158,7 +165,7 @@ TEST_CASE("split: concurrent siblings get a direct arrow through the separator")
   CHECK(seg(g, 0, 1).frame == root);  // the separator channel, owned upward
   CHECK(seg(g, 0, 1).separator == 1);
   CHECK(seg(g, 0, 2).frame == m2);
-  CHECK(g.state_crossings[owner.v] == 0);  // the owner's border is never crossed
+  CHECK(crossings(g, owner) == 0);  // the owner's border is never crossed
 }
 
 TEST_CASE("split: a deep exit pulls on every ancestor it crosses") {
@@ -184,7 +191,7 @@ TEST_CASE("split: a deep exit pulls on every ancestor it crosses") {
     CAPTURE(t);
     CHECK(segs_of(g, t).len == DEPTH + 1);
   }
-  for (StateId const s : ancestors) { CHECK(g.state_crossings[s.v] == 2); }
+  for (StateId const s : ancestors) { CHECK(crossings(g, s) == 2); }
   CHECK(g.ports.size() == 2 * DEPTH);
 }
 
@@ -203,7 +210,7 @@ TEST_CASE("split: a transition into an enclosing composite stops on its inner fa
   CHECK(dst_port(g, 0, 0).state == mid);
   CHECK(seg(g, 0, 0).frame == m_mid);
   CHECK(seg(g, 0, 1).frame == m_outer);
-  CHECK(g.state_crossings[outer.v] == 0);
+  CHECK(crossings(g, outer) == 0);
 }
 
 TEST_CASE("split: tombstones drop out and identical charts split identically") {
@@ -224,7 +231,6 @@ TEST_CASE("split: tombstones drop out and identical charts split identically") {
   CHECK(g1.ports == g2.ports);
   CHECK(g1.segments == g2.segments);
   CHECK(g1.trans_segments == g2.trans_segments);
-  CHECK(g1.state_crossings == g2.state_crossings);
 
   c1.transitions[1].live = 0;
   SplitGraph const g3{ decompose(c1) };
@@ -345,12 +351,6 @@ TEST_CASE("split: every endpoint pair and kind holds the route invariants") {
   for (uint32_t i = 1; i < g.ports.size(); ++i) {
     CHECK(g.ports[i - 1].trans.v <= g.ports[i].trans.v);
   }
-  // The accumulated pull is exactly the fold of the state-border ports.
-  std::vector<uint32_t> fold(c.states.size(), 0);
-  for (SplitPort const &port : g.ports) {
-    if (port.state.v != INVALID) { ++fold[port.state.v]; }
-  }
-  CHECK(fold == g.state_crossings);
 }
 
 TEST_CASE("split: intermediate borders split even when the source's does not") {
@@ -383,8 +383,8 @@ TEST_CASE("split: intermediate borders split even when the source's does not") {
     CHECK(seg(g, t, 0).frame == m);
     CHECK(seg(g, t, 1).frame == km);
   }
-  CHECK(g.state_crossings[comp.v] == 1);  // the external row alone
-  CHECK(g.state_crossings[kid.v] == 3);   // every kind exits substates
+  CHECK(crossings(g, comp) == 1);  // the external row alone
+  CHECK(crossings(g, kid) == 3);   // every kind exits substates
 }
 
 TEST_CASE("split: a shallow source enters a deep target outermost first") {
@@ -437,8 +437,8 @@ TEST_CASE("split: a nested concurrent crossing exits, crosses, and enters") {
   CHECK(seg(g, 0, 2).separator == 1);
   CHECK(seg(g, 0, 3).frame == m2);
   CHECK(seg(g, 0, 4).frame == qm);
-  CHECK(g.state_crossings[o.v] == 0);
-  CHECK(g.state_crossings[wrap.v] == 0);
+  CHECK(crossings(g, o) == 0);
+  CHECK(crossings(g, wrap) == 0);
 }
 
 TEST_CASE("split: siblings deep inside one composite meet in its region") {
@@ -458,7 +458,7 @@ TEST_CASE("split: siblings deep inside one composite meet in its region") {
   REQUIRE(segs_of(g, 0).len == 3);
   CHECK(seg(g, 0, 1).frame == nm);  // the common frame is nested, not the root
   CHECK(seg(g, 0, 1).separator == 0);
-  CHECK(g.state_crossings[n.v] == 0);
+  CHECK(crossings(g, n) == 0);
 }
 
 TEST_CASE("split: degenerate inputs are sized, empty, and skipped") {
@@ -531,7 +531,7 @@ TEST_CASE("split: a loaded network splits across its include host") {
       CHECK(segs_of(g, t).len == 1);  // the initial pseudostate is a sibling
     }
   }
-  CHECK(g.state_crossings[host.v] == 1);
+  CHECK(crossings(g, host) == 1);
   CHECK(g.state_depth[l.v] == 1);
 }
 
@@ -600,7 +600,7 @@ TEST_CASE("split: an inner end is flagged on the segment that terminates there")
   CHECK(seg(g, 5, 1).src_inner == 0);
   CHECK(seg(g, 5, 1).dst_inner == 1);
   CHECK(seg(g, 5, 1).frame == m_outer);
-  CHECK(g.state_crossings[outer.v] == 1);  // transition 1 alone
+  CHECK(crossings(g, outer) == 1);  // transition 1 alone
 }
 
 TEST_CASE("split: containment climbs one step, or all the way, or gives up") {

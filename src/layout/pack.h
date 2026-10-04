@@ -39,25 +39,17 @@ enum class Compaction : uint32_t { Off, On };
 // restricted to four positions relative to the predecessor, `compaction`, then
 // whitespace elimination, which grows every rect to fill its subrow, block and
 // row. Reading order survives: rect i is never left of and above rect j for
-// i > j, whichever steps ran.
-Packing pack_lr(std::vector<scav_rect> const &rects,
-                int32_t sep,
-                int32_t dar_num,
-                int32_t dar_den,
-                Compaction compaction);
-
-// One row, every rect side by side and grown to the tallest. The packer that
-// wins whenever the rects are all the same height, which is what the profile's
-// `trybox` catches.
-Packing pack_box(std::vector<scav_rect> const &rects, int32_t sep);
-
-// The two above into `out`, reusing its capacity.
+// i > j, whichever steps ran. Into `out`, reusing its capacity.
 void pack_lr(Packing &out,
              std::vector<scav_rect> const &rects,
              int32_t sep,
              int32_t dar_num,
              int32_t dar_den,
              Compaction compaction);
+
+// One row, every rect side by side and grown to the tallest. The packer that
+// wins whenever the rects are all the same height, which is what the profile's
+// `trybox` catches. Into `out`, reusing its capacity.
 void pack_box(Packing &out, std::vector<scav_rect> const &rects, int32_t sep);
 
 // `a` beats `b` under the scale measure `SM = min(DAR/w, 1/h)`, held as a

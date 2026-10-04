@@ -366,16 +366,6 @@ SCAV_INTERNAL_BEGIN
 }
 SCAV_INTERNAL_END
 
-Packing pack_lr(std::vector<scav_rect> const &rects,
-                int32_t sep,
-                int32_t dar_num,
-                int32_t dar_den,
-                Compaction compaction) {
-  Packing out;
-  fill_rows(out, rects, sep, dar_num, dar_den, compaction, true);
-  return out;
-}
-
 void pack_lr(Packing &out,
              std::vector<scav_rect> const &rects,
              int32_t sep,
@@ -383,12 +373,6 @@ void pack_lr(Packing &out,
              int32_t dar_den,
              Compaction compaction) {
   fill_rows(out, rects, sep, dar_num, dar_den, compaction, true);
-}
-
-Packing pack_box(std::vector<scav_rect> const &rects, int32_t sep) {
-  Packing out;
-  pack_box(out, rects, sep);
-  return out;
 }
 
 void pack_box(Packing &out, std::vector<scav_rect> const &rects, int32_t sep) {

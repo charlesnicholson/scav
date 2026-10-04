@@ -32,6 +32,22 @@ namespace {
 
 using namespace scav;
 
+Packing pack_lr(std::vector<scav_rect> const &rects,
+                int32_t sep,
+                int32_t dar_num,
+                int32_t dar_den,
+                Compaction compaction) {
+  Packing out;
+  scav::pack_lr(out, rects, sep, dar_num, dar_den, compaction);
+  return out;
+}
+
+Packing pack_box(std::vector<scav_rect> const &rects, int32_t sep) {
+  Packing out;
+  scav::pack_box(out, rects, sep);
+  return out;
+}
+
 std::vector<scav_rect> boxes(std::vector<std::pair<int32_t, int32_t>> const &wh) {
   std::vector<scav_rect> out;
   out.reserve(wh.size());

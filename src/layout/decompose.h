@@ -52,7 +52,6 @@ struct SplitGraph {
   std::vector<SplitPort> ports;              // route order within each transition
   std::vector<SplitSegment> segments;        // contiguous per transition
   std::vector<Span> trans_segments;          // parallel to transitions; -> segments
-  std::vector<uint32_t> state_crossings;     // edges through each state's border
   std::vector<uint32_t> state_depth;         // enclosing state borders above each state
   std::vector<uint32_t> trans_label;         // parallel to transitions: `label_segment`
   std::vector<CommonAncestor> trans_common;  // parallel to transitions

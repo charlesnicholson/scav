@@ -27,7 +27,6 @@ namespace scav {
 // whole chart. The prototypes a test uses are its own; see scav_internal.h.
 SCAV_INTERNAL_BEGIN
 FrameDar size_hole_ratio(int32_t w, int32_t h);
-std::vector<FrameDar> size_owner_holes(Chart const &c, SizedLayout const &z);
 void size_owner_holes(Chart const &c, SizedLayout const &z, std::vector<FrameDar> &hole);
 SCAV_INTERNAL_END
 
@@ -2383,13 +2382,6 @@ FrameDar size_hole_ratio(int32_t w, int32_t h) {
 // which is the whole of the interior where a state requests neither band and
 // includes whatever slack `kind_min_h` left. Zero for a state with no live
 // submachine, which is no hole for anything to fill.
-[[maybe_unused]] std::vector<FrameDar> size_owner_holes(Chart const &c,
-                                                        SizedLayout const &z) {
-  std::vector<FrameDar> hole;
-  size_owner_holes(c, z, hole);
-  return hole;
-}
-
 void size_owner_holes(Chart const &c, SizedLayout const &z, std::vector<FrameDar> &hole) {
   vec_assign(hole, c.states.size(), FrameDar{});
   for (uint32_t i = 0; i < c.states.size(); ++i) {

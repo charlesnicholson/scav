@@ -492,12 +492,6 @@ SCAV_INTERNAL_BEGIN
 
 SCAV_INTERNAL_END
 
-std::vector<int32_t> cross_coordinates(CoordGraph const &g) {
-  std::vector<int32_t> out;
-  cross_coordinates(g, out);
-  return out;
-}
-
 void cross_coordinates(CoordGraph const &g, std::vector<int32_t> &out) {
   thread_local std::vector<uint32_t> key;
   key_of(g, key);
