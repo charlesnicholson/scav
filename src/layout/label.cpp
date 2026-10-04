@@ -23,7 +23,7 @@
 
 namespace scav {
 
-// All three searches settle one answer; shipping code passes `LabelSearch::Memoized`.
+// Every search settles one answer; shipping code passes `LabelSearch::Memoized`.
 // Declared for gcc's -Wmissing-declarations; a test declares its own prototype.
 SCAV_INTERNAL_BEGIN
 uint32_t place_labels_by(Chart const &c,
@@ -196,8 +196,8 @@ scav_rect centred(scav_point mid, scav_path_box const &box, scav_rect const &cha
   return { .x = x, .y = y, .w = box.w, .h = box.h };
 }
 
-// Everything one box's search reads; the memo's key is this written out. The pruned and
-// memoized searches take it relative to the route's first point, clipped to its region.
+// Everything one box's search reads; the memo's key is this written out. Relative to the
+// route's first point, clipped to its region.
 struct Local {
   int32_t w{ 0 }, h{ 0 }, leader{ 0 };
   uint32_t chained{ 0 }, prior_seg{ 0 };
@@ -343,6 +343,7 @@ std::vector<scav_rect> const &nearby_of(Local const &l, Scratch &s, uint32_t k) 
   return out;
 }
 
+#ifdef SCAV_TESTING
 // Every candidate of every leg keyed and tested in turn, both tiers together; the pruned
 // search reproduces its answer.
 Outcome exhaustive(Local const &l, Scratch &s) {
@@ -448,6 +449,7 @@ Outcome exhaustive(Local const &l, Scratch &s) {
   }
   return { .found = key.dist >= 0, .at = best, .seg = key.seg, .mid = key.mid };
 }
+#endif
 
 // One tier of the pruned search over one box, and its incumbent. `last` is the wall that
 // most recently refused a candidate, tried before the grid.
@@ -907,7 +909,6 @@ uint32_t place_labels_by(Chart const &c,
   int32_t prior_mid{ 0 };
   bool chained{ false };
   int32_t const leader{ label_leader(p) };
-  bool const relative{ search != LabelSearch::Exhaustive };
   loop_rooms(c, s, p, cb.loop_label, cb.loop_room);
   int32_t loop_y{ 0 };  // the next box's top beside the current subject's loop
 
@@ -949,7 +950,7 @@ uint32_t place_labels_by(Chart const &c,
                                   : r };
 
     if (r.len >= 2) {
-      scav_point const origin{ relative ? points[r.off] : scav_point{} };
+      scav_point const origin{ points[r.off] };
       l.w = box.w;
       l.h = box.h;
       l.leader = leader;
@@ -985,7 +986,7 @@ uint32_t place_labels_by(Chart const &c,
       }
       // A box of positive extent lies strictly inside the region, so clipping a rect to
       // the region changes no test on it.
-      bool const clip{ relative && (box.w > 0) && (box.h > 0) };
+      bool const clip{ (box.w > 0) && (box.h > 0) };
       auto const local_rect = [&](scav_rect const &at) {
         scav_rect const shifted{ relative_to(at, origin) };
         return clip ? intersection(shifted, local_region) : shifted;
@@ -1042,9 +1043,11 @@ uint32_t place_labels_by(Chart const &c,
       }
 
       switch (search) {
-        case LabelSearch::Exhaustive: got = exhaustive(l, scratch); break;
         case LabelSearch::Pruned: got = pruned(l, scratch); break;
         case LabelSearch::Memoized: got = remembered(l, scratch); break;
+#ifdef SCAV_TESTING
+        case LabelSearch::Exhaustive: got = exhaustive(l, scratch); break;
+#endif
       }
       if (got.found) {
         got.at.x += origin.x;

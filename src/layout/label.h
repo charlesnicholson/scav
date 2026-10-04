@@ -17,9 +17,15 @@
 
 namespace scav {
 
-// How a box's candidates are searched; all three settle one answer. `Pruned` skips those
-// that cannot win, and `Memoized` is `Pruned` behind a per-thread table of placed boxes.
-enum class LabelSearch : uint32_t { Exhaustive, Pruned, Memoized };
+// How a box's candidates are searched; all settle one answer. `Pruned` skips those that
+// cannot win, and `Memoized` is `Pruned` behind a per-thread table of placed boxes.
+enum class LabelSearch : uint32_t {
+  Pruned,
+  Memoized,
+#ifdef SCAV_TESTING
+  Exhaustive,  // every candidate keyed and tested; the oracle for the other two
+#endif
+};
 
 // Fills `out` parallel to `s.path_box`; returns the boxes that found no
 // feasible candidate and took the centred placement instead.
