@@ -712,6 +712,11 @@ TEST_CASE("cost: a route through a region neither end is in is a Tier-0 violatio
                                     { .x = 650, .y = 260 },
                                     { .x = 650, .y = 100 } } }) };
   CHECK(cost_terms(c, decompose(c), z, round, {}, profile()).through_region == 0);
+
+  // `On` now claims to live in its own region `main`, so the climb from `Ready` runs `On`,
+  // `On` and never reaches `aux` or a root. The step cap ends it.
+  c.states[on.v].parent = main_sub;
+  CHECK(cost_terms(c, decompose(c), z, through, {}, profile()).through_region == 1);
 }
 
 TEST_CASE("cost: a placed box over a state neither endpoint is under breaks Tier 0") {

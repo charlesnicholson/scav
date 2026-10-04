@@ -486,9 +486,11 @@ void child_grid_fill(ChildGrid &g,
   });
 }
 
-// Whether `state` lies inside region `m`, by walking up from it.
+// Whether `state` lies inside region `m`, by walking up from it at most one step per
+// state.
 bool within(Chart const &c, StateId state, uint32_t m) {
-  for (StateId at{ state }; (at.v != INVALID) && (at.v < c.states.size());) {
+  StateId at{ state };
+  for (size_t step = 0; (step < c.states.size()) && (at.v < c.states.size()); ++step) {
     SubmachineId const up{ c.states[at.v].parent };
     if (up.v == m) { return true; }
     if (up.v >= c.submachines.size()) { return false; }
