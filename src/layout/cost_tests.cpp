@@ -1,6 +1,4 @@
-// Scoring against hand-written geometry: two rects and one route are enough
-// to assert a single term, with no model beyond the entities they belong to
-// and no pipeline run to produce them.
+// Cost-term tests on hand-written rects and routes over minimal charts.
 
 #include "layout/cost.h"
 
@@ -25,9 +23,7 @@
 
 namespace scav {
 
-// The containment walk, the grid and the three sweeps `cost.cpp` brackets with
-// SCAV_INTERNAL, declared here rather than in a header so the shipping build
-// keeps them internal.
+// Test-only prototypes of the SCAV_INTERNAL functions in `cost.cpp`.
 Ancestry cost_flatten_ancestry(Chart const &c);
 bool cost_ancestor(Chart const &c, Ancestry const &an, StateId ancestor, StateId of);
 ChildGrid cost_child_grid(Chart const &c, SizedLayout const &z);
@@ -79,8 +75,7 @@ Routes routes_of(Chart const &c, std::vector<std::vector<scav_point>> const &lin
   return r;
 }
 
-// The flat segment list `cost_terms` builds, so a sweep taking one can be
-// handed a route rather than a hand-numbered table.
+// Splits `r` into the flat segment list `cost_terms` builds, in transition order.
 std::vector<Piece> pieces_of(Routes const &r) {
   std::vector<Piece> out;
   for (uint32_t t = 0; t < r.route.size(); ++t) {
@@ -134,7 +129,7 @@ TEST_CASE("cost: a corner in a polyline is one bend") {
   };
   CHECK(cost_terms(c, decompose(c), z, r, {}, profile()).bends == 1);
 
-  // Three points on one line change no direction, so they are not a bend.
+  // Three collinear points make no bend.
   Routes const straight{
     routes_of(c, { { { .x = 0, .y = 0 }, { .x = 50, .y = 0 }, { .x = 100, .y = 0 } } })
   };
@@ -143,8 +138,8 @@ TEST_CASE("cost: a corner in a polyline is one bend") {
 
 namespace {
 
-// Src in the root and Dst two composites down, so Src -> Dst only passes through Arm;
-// then Dst -> Src, and Src -> Arm, which ends at Arm.
+// Src in the root, Dst inside Moving inside Arm: Src -> Dst passes through Arm only.
+// Then Dst -> Src, and Src -> Arm.
 struct Transit {
   Chart c;
   StateId src, arm, moving, dst;
@@ -193,7 +188,7 @@ TEST_CASE("cost: a crossing route's bend in the common ancestor costs nothing ex
   CostTerms const t{ transit_terms(k, { jog_at(150) }) };
   CHECK(t.bends == 2);
   CHECK(t.transit_bends == 0);
-  // On Arm's border is not inside it.
+  // A bend on Arm's border is outside Arm.
   CHECK(transit_terms(k, { jog_at(200) }).transit_bends == 0);
 }
 
@@ -202,7 +197,7 @@ TEST_CASE("cost: a crossing route's bend in a state it only passes through costs
   CostTerms const t{ transit_terms(k, { jog_at(250) }) };
   CHECK(t.bends == 2);
   CHECK(t.transit_bends == 2);
-  // Scored on top of the bends themselves.
+  // Each transit bend adds `w_transit_bends` to t2.
   scav_profile const p{ profile() };
   CHECK((cost_of(t, p).t2 - cost_of(transit_terms(k, { jog_at(150) }), p).t2) ==
         (2 * int64_t{ p.w_transit_bends }));
@@ -220,15 +215,14 @@ TEST_CASE("cost: a crossing route's bend in an end's own machine costs nothing e
   CostTerms const t{ transit_terms(k, { jog_at(350) }) };
   CHECK(t.bends == 2);
   CHECK(t.transit_bends == 0);
-  // Inside the end itself.
+  // One bend inside Dst itself.
   CHECK(transit_terms(k,
                       { { { .x = 100, .y = 130 },
                           { .x = 450, .y = 130 },
                           { .x = 450, .y = 230 },
                           { .x = 400, .y = 230 } } })
             .transit_bends == 0);
-  // Src -> Arm ends at the state the other routes pass through, so inside it
-  // is inside its own end.
+  // Src -> Arm: its bends inside Arm are inside its own end.
   CHECK(transit_terms(k,
                       { {},
                         {},
@@ -264,7 +258,7 @@ TEST_CASE("cost: two routes that properly cross count once") {
 
 namespace {
 
-// `n` transitions between two states, which is all `corridor` reads of a model.
+// `n` transitions from A to B.
 Chart edges(uint32_t n) {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
@@ -360,7 +354,7 @@ TEST_CASE("cost: party marks every transition while the drawing breaks Tier 0") 
   CHECK(party[0] != 0);
   CHECK(party[1] != 0);
 
-  // The stranger moved clear leaves both straight, unpriced and unmarked.
+  // X moved clear: no Tier-0 count, and neither route is marked.
   z.state[other.v] = { .x = 150, .y = 3000, .w = 100, .h = 100 };
   t = cost_terms(cost_context(c, g), c, g, z, r, {}, profile(), &party);
   CHECK(cost_of(t, profile()).t0_violations == 0);
@@ -371,16 +365,14 @@ TEST_CASE("cost: party marks every transition while the drawing breaks Tier 0") 
 
 TEST_CASE("cost: two routes ending as one line are not charged for the run they share") {
   Chart const c{ edges(2) };
-  // Both turn up onto x=500 and finish at the same point, so the 20 they share
-  // is one line fanning in rather than two lines side by side.
+  // Both turn onto x=500 and end at one point; the 20 they share there costs nothing.
   CHECK(corridor_of(
             c,
             { { { .x = 0, .y = 60 }, { .x = 500, .y = 60 }, { .x = 500, .y = 100 } },
               { { .x = 0, .y = 80 }, { .x = 500, .y = 80 }, { .x = 500, .y = 100 } } }) ==
         0);
 
-  // One unit short of the same point: the same 20 units of one line, now with
-  // two ends on it.
+  // The second ends one unit past the first's end; the 20 they share on x=500 is charged.
   CHECK(corridor_of(
             c,
             { { { .x = 0, .y = 60 }, { .x = 500, .y = 60 }, { .x = 500, .y = 100 } },
@@ -390,8 +382,7 @@ TEST_CASE("cost: two routes ending as one line are not charged for the run they 
 
 TEST_CASE("cost: a shared endpoint alone exempts nothing") {
   Chart const c{ edges(2) };
-  // The two reach (200,300) at right angles, so neither last leg joins the
-  // other's run and the 100 they share upstream is two lines on one line.
+  // Both end at (200,300) at right angles; the 100 they share along y=100 is charged.
   CHECK(corridor_of(
             c,
             { { { .x = 0, .y = 100 }, { .x = 200, .y = 100 }, { .x = 200, .y = 300 } },
@@ -415,7 +406,7 @@ TEST_CASE("cost: a run upstream of the merge is charged and the merge is not") {
                                                    { .x = 500, .y = 80 },
                                                    { .x = 500, .y = end_y } } };
   };
-  // 200 along y=0 before either turns off it, and 20 where they finish as one.
+  // The 200 shared along y=0 is charged; the 20 shared on x=500 only when the ends differ.
   CHECK(corridor_of(c, lines(100)) == 200);
   CHECK(corridor_of(c, lines(101)) == 220);
 }
@@ -428,9 +419,8 @@ TEST_CASE("cost: two routes leaving as one line are charged for it") {
       { { .x = start_x, .y = 0 }, { .x = 150, .y = 0 }, { .x = 150, .y = -100 } }
     };
   };
-  // A fan-out is not the exemption (11.9.3): these two leave one state and
-  // part, so sharing the start buys nothing. The run is 150 either way, where
-  // one unit of offset used to be free against charged.
+  // Routes leaving one state on one line are charged: 150 from a shared start,
+  // 149 with the starts one unit apart.
   CHECK(corridor_of(c, lines(0)) == 150);
   CHECK(corridor_of(c, lines(1)) == 149);
 }
@@ -461,13 +451,12 @@ TEST_CASE("cost: two routes with the same polyline are one trunk end to end") {
 
 TEST_CASE("cost: a route arriving as another's last leg is trunk, its head is not") {
   Chart const c{ edges(2) };
-  // A degraded net is a straight line (11.5); along another's final leg it is
-  // the arrival they share, not a second lane.
+  // The second route is the first's final leg alone: trunk, uncharged.
   CHECK(corridor_of(c,
                     { { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
                       { { .x = 200, .y = 0 }, { .x = 200, .y = 100 } } }) == 0);
-  // The head is charged now (11.9.3): two routes leaving one state as one line
-  // go somewhere ambiguous. The 200 along y=0 is that fan-out.
+  // The second route is the first's opening leg alone; the 200 they share on y=0 is
+  // charged.
   CHECK(corridor_of(c,
                     { { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
                       { { .x = 0, .y = 0 }, { .x = 200, .y = 0 } } }) == 200);
@@ -475,8 +464,8 @@ TEST_CASE("cost: a route arriving as another's last leg is trunk, its head is no
 
 TEST_CASE("cost: a run the two find again after they part is charged") {
   Chart const c{ edges(2) };
-  // 100 along y=0 out of the shared start, charged now (11.9.3), and 100 more
-  // along y=100 where they meet again -- two lanes on one line either way.
+  // The 100 shared along y=0 from the common start and the 100 shared along y=100
+  // where they meet again are both charged.
   CHECK(corridor_of(c,
                     { { { .x = 0, .y = 0 },
                         { .x = 200, .y = 0 },
@@ -492,8 +481,8 @@ TEST_CASE("cost: a run the two find again after they part is charged") {
 
 TEST_CASE("cost: a run against the trunk is charged and the trunk is not") {
   Chart const c{ edges(2) };
-  // The second crosses x=400 on its way round and joins it later; the 50 it
-  // spends on the trunk before joining it is one lane over another.
+  // The second runs 50 along the trunk at x=400 before looping round to join it;
+  // that 50 is charged.
   CHECK(
       corridor_of(c,
                   { { { .x = 300, .y = 0 }, { .x = 400, .y = 0 }, { .x = 400, .y = 100 } },
@@ -508,9 +497,7 @@ TEST_CASE("cost: a run against the trunk is charged and the trunk is not") {
 
 TEST_CASE("cost: a degraded net's diagonal is no one's merge leg") {
   Chart const c{ edges(2) };
-  // A degraded net is a straight line (11.5), so a trunk can be reached over one.
-  // The common suffix is still a trunk; the diagonals into it are not, so the
-  // 200 the two share along y=200 is charged and the 100 they share is not.
+  // Only the shared final leg on x=400 is trunk; the 200 shared along y=200 is charged.
   CHECK(corridor_of(c,
                     { { { .x = 0, .y = 200 },
                         { .x = 300, .y = 200 },
@@ -530,11 +517,11 @@ TEST_CASE("cost: only the excess over the direct distance is charged") {
   build_trans(c, a, b, TransKind::External, {});
 
   SizedLayout z{ blank(c) };
-  // Straight: length equals the direct distance, so nothing is charged.
+  // Straight: length equals the direct distance, excess 0.
   Routes const direct{ routes_of(c, { { { .x = 0, .y = 0 }, { .x = 300, .y = 0 } } }) };
   CHECK(cost_terms(c, decompose(c), z, direct, {}, profile()).excess_len == 0);
 
-  // A detour of 100 each way over a 300 span costs exactly what it added.
+  // A detour 100 off the line over a 300 span is charged its added length.
   Routes const around{
     routes_of(c, { { { .x = 0, .y = 0 }, { .x = 150, .y = 100 }, { .x = 300, .y = 0 } } })
   };
@@ -592,8 +579,7 @@ TEST_CASE("cost: an edge through a stranger's box counts, through its own does n
   Routes const r{ routes_of(c, { { { .x = 10, .y = 10 }, { .x = 410, .y = 10 } } }) };
   CHECK(cost_terms(c, decompose(c), z, r, {}, profile()).through_box == 1);
 
-  // The same route with the stranger moved out of the way, and the route
-  // still leaving its own two endpoint boxes, which are carved out (11.14).
+  // X moved clear of the route; the route's own endpoint boxes are carved out.
   z.state[other.v] = { .x = 150, .y = 500, .w = 100, .h = 100 };
   CHECK(cost_terms(c, decompose(c), z, r, {}, profile()).through_box == 0);
 }
@@ -611,16 +597,14 @@ TEST_CASE(
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
   z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 40 };
   z.state[other.v] = { .x = 200, .y = 20, .w = 100, .h = 100 };
-  // Along the stranger's top edge: nothing enters it, so only this sees it.
+  // Along X's top edge.
   Routes const along{ routes_of(c, { { { .x = 100, .y = 20 }, { .x = 400, .y = 20 } } }) };
   CostTerms const t{ cost_terms(c, decompose(c), z, along, {}, profile()) };
   CHECK(t.through_box == 0);
   CHECK(t.flush == 1);
   CHECK(cost_of(t, profile()).t0_violations == 1);
 
-  // Clear of it by the band a route keeps inside a state is clear; one unit
-  // nearer is on it, because a reader cannot tell a line a unit off a border
-  // from the border (11.10g).
+  // A route `border_band` from the border is clear; one unit nearer is flush.
   int32_t const band{ border_band(profile()) };
   REQUIRE(band > 1);
   Routes const clear{
@@ -632,7 +616,7 @@ TEST_CASE(
   };
   CHECK(cost_terms(c, decompose(c), z, near, {}, profile()).flush == 1);
 
-  // Along its own endpoint's border counts as well: a reader sees the border.
+  // A run along its own endpoint's border is flush as well.
   Routes const own{ routes_of(c,
                               { { { .x = 50, .y = 0 },
                                   { .x = 100, .y = 0 },
@@ -643,8 +627,8 @@ TEST_CASE(
 }
 
 TEST_CASE("cost: a route that turns straight back along itself is a Tier-0 violation") {
-  // Down to a port and back up the same line reads as two routes meeting, not
-  // one turning; a square turn and a U through a jog are both still turns.
+  // A leg that reverses along the previous leg is a retrace; a square turn and a U
+  // through a jog are not.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -675,10 +659,8 @@ TEST_CASE("cost: a route that turns straight back along itself is a Tier-0 viola
 }
 
 TEST_CASE("cost: a route through a region neither end is in is a Tier-0 violation") {
-  // `On` holds two concurrent regions side by side, and a transition leaves
-  // `Ready` in the left one for `X` outside. Crossing the right region is
-  // crossing a state nobody is in; `through_box` excuses it because `On` is
-  // an ancestor of the source.
+  // `On` holds regions `main` and `aux`; `Ready` in `main` goes to `X` outside.
+  // Crossing `aux` is a `through_region` violation; `through_box` skips ancestor `On`.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const on{ build_state(c, root, "On", StateKind::Normal, {}) };
@@ -713,8 +695,8 @@ TEST_CASE("cost: a route through a region neither end is in is a Tier-0 violatio
                                     { .x = 650, .y = 100 } } }) };
   CHECK(cost_terms(c, decompose(c), z, round, {}, profile()).through_region == 0);
 
-  // `On` now claims to live in its own region `main`, so the climb from `Ready` runs `On`,
-  // `On` and never reaches `aux` or a root. The step cap ends it.
+  // `On` made a child of its own region `main`: the climb from `Ready` cycles until the
+  // step cap ends it.
   c.states[on.v].parent = main_sub;
   CHECK(cost_terms(c, decompose(c), z, through, {}, profile()).through_region == 1);
 }
@@ -825,8 +807,7 @@ TEST_CASE("cost: a placed box over another transition's route breaks Tier 0") {
   scav_path_box const box{ .subject = 0, .w = 60, .h = 20, .order = 0 };
   scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
 
-  // Straddling its own route is free and straddling the other one is not, so
-  // the two rects differ only in which line they cross.
+  // Straddling its own route (y=50) is free; straddling the other (y=80) is not.
   r.placed = { { .x = 200, .y = 40, .w = 60, .h = 20 } };
   CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label_over_route == 0);
 
@@ -836,7 +817,7 @@ TEST_CASE("cost: a placed box over another transition's route breaks Tier 0") {
   CHECK(over.label == 0);
   CHECK(cost_of(over, profile()).t0_violations == 1);
 
-  r.placed = { { .x = 200, .y = 82, .w = 60, .h = 20 } };  // beside it, a line clear
+  r.placed = { { .x = 200, .y = 82, .w = 60, .h = 20 } };  // 2 units below the other route
   CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label_over_route == 0);
 }
 
@@ -853,8 +834,7 @@ TEST_CASE("cost: a box nearer a foreign route than its own is charged the shortf
   z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 200 };
   scav_path_box const box{ .subject = 0, .w = 60, .h = 20, .order = 0 };
   scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
-  // The box rides its own leg at y 150; the foreign leg's height above it is
-  // the only thing that changes between the cases.
+  // The box sits on its own leg at y=150; the cases vary only the foreign leg's y.
   auto const scored = [&](int32_t foreign_y) {
     Routes r{ routes_of(
         c,
@@ -864,12 +844,11 @@ TEST_CASE("cost: a box nearer a foreign route than its own is charged the shortf
     return cost_terms(c, decompose(c), z, r, s, profile()).label_near;
   };
 
-  CHECK(scored(120) == 10);  // half a line of text nearer the stranger than it may be
-  CHECK(scored(110) == 0);   // one whole line away, which is the margin it owes
+  CHECK(scored(120) == 10);  // foreign leg 10 above the box: shortfall 20 - 10
+  CHECK(scored(110) == 0);   // one box height away, the required margin
   CHECK(scored(90) == 0);
 
-  // Strip 1: the box's own leg is one height away, so the stranger has to be
-  // one height further out again, and here it is not.
+  // Strip 1: own leg 20 below the box, foreign leg 20 above it; shortfall 20 + 20 - 20.
   Routes strip1{ routes_of(c,
                            { { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } },
                              { { .x = 400, .y = 90 }, { .x = 100, .y = 90 } } }) };
@@ -906,15 +885,15 @@ TEST_CASE("cost: a placed box the space table does not name owns no route") {
     return cost_terms(c, decompose(c), z, r, s, profile());
   };
 
-  // Named, the line is its own and free; unnamed, it is a stranger's, and no
-  // leg of its own means no nearness to price either way.
+  // Named, the box owns the line and it is free; unnamed, the line is foreign.
+  // With no leg of its own, `label_near` is 0.
   scav_path_box const named{ .subject = 0, .w = 60, .h = 20, .order = 0 };
   CHECK(scored({ .path_box = &named, .n_path_box = 1 }).label_over_route == 0);
   CHECK(scored({}).label_over_route == 1);
   CHECK(scored({}).label_near == 0);
 
-  // A table too short to reach the box, and one naming a transition that is not
-  // there, leave it a stranger's the same way.
+  // A table too short to reach the box, or naming a missing transition, also
+  // leaves the line foreign.
   CHECK(scored({ .path_box = &named, .n_path_box = 0 }).label_over_route == 1);
   scav_path_box const past{ .subject = 7, .w = 60, .h = 20, .order = 0 };
   CHECK(scored({ .path_box = &past, .n_path_box = 1 }).label_over_route == 1);
@@ -929,14 +908,12 @@ TEST_CASE("cost: a box whose own transition has no route is charged nothing") {
   build_trans(c, a, b, TransKind::External, {});
 
   SizedLayout z{ blank(c) };
-  // The box belongs to the routeless transition and sits beside the other's
-  // line, which is exactly the arrangement the term would charge for.
+  // The box belongs to the routeless transition and sits near the other's line.
   Routes r{ routes_of(c, { {}, { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } } }) };
   r.placed = { { .x = 200, .y = 120, .w = 60, .h = 20 } };
   scav_path_box const box{ .subject = 0, .w = 60, .h = 20, .order = 0 };
   scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
 
-  // No leg of its own to be nearer than, so there is no shortfall to measure.
   CostTerms const t{ cost_terms(c, decompose(c), z, r, s, profile()) };
   CHECK(t.label_near == 0);
   CHECK(t.label == 0);
@@ -974,12 +951,10 @@ TEST_CASE("cost: the weights turn terms into one integer, compared by tier") {
   t.area = 1000;
   Cost const scored{ cost_of(t, p) };
   CHECK(scored.t0_violations == 0);
-  // A crossing is a count and 1000 square grid units is a fraction of one em
-  // squared, which ceils to one rather than away (11.6).
+  // Crossings score as a count; 1000 square grid units round up to one em squared.
   CHECK(scored.t2 == ((int64_t{ p.w_crossings } * 2) + int64_t{ p.w_area }));
 
-  // Tier 0 dominates whatever Tier 2 says, because the tiers are compared in
-  // order and never summed.
+  // Tiers compare lexicographically: one Tier-0 violation outranks any Tier-2 sum.
   CostTerms violating;
   violating.box_overlap = 1;
   Cost const bad{ cost_of(violating, p) };
@@ -996,8 +971,7 @@ TEST_CASE("cost: every Tier-2 term is scored in the unit the profile names it") 
     return cost_of(t, p).t2;
   };
 
-  // A count is already a count; a length is ems and an area ems squared, and
-  // the division ceils, so one grid unit of either still costs a whole one.
+  // Counts score as is; lengths convert to ems and areas to ems squared, rounding up.
   CHECK(only(&CostTerms::bends, 1) == int64_t{ p.w_bends });
   CHECK(only(&CostTerms::crossings, 1) == int64_t{ p.w_crossings });
   CHECK(only(&CostTerms::adjacency, 1) == int64_t{ p.w_adjacency });
@@ -1012,14 +986,14 @@ TEST_CASE("cost: every Tier-2 term is scored in the unit the profile names it") 
   CHECK(only(&CostTerms::transit_bends, 1) == int64_t{ p.w_transit_bends });
   CHECK(only(&CostTerms::whitespace, 1) == int64_t{ p.w_whitespace });
 
-  // A whole unit each way, and one grid unit past it.
+  // One em, or one em squared, costs one unit; one grid unit more costs two.
   CHECK(only(&CostTerms::corridor, em) == int64_t{ p.w_corridor });
   CHECK(only(&CostTerms::corridor, em + 1) == (2 * int64_t{ p.w_corridor }));
   CHECK(only(&CostTerms::length, em) == int64_t{ p.w_length });
   CHECK(only(&CostTerms::length, em + 1) == (2 * int64_t{ p.w_length }));
   CHECK(only(&CostTerms::area, em * em) == int64_t{ p.w_area });
   CHECK(only(&CostTerms::area, (em * em) + 1) == (2 * int64_t{ p.w_area }));
-  // Whitespace ships unpriced, so its unit is read at a weight of its own.
+  // The shipped `w_whitespace` is 0; these checks price it at 3.
   scav_profile priced{ p };
   priced.w_whitespace = 3;
   auto const whitespace = [&priced](int64_t v) {
@@ -1031,7 +1005,7 @@ TEST_CASE("cost: every Tier-2 term is scored in the unit the profile names it") 
   CHECK(whitespace(em * em) == 3);
   CHECK(whitespace((em * em) + 1) == 6);
 
-  // Nothing scored is still nothing, which is what makes an unlaid chart zero.
+  // Zero terms score zero.
   CHECK(cost_of(CostTerms{}, p).t2 == 0);
   CHECK(only(&CostTerms::corridor, 0) == 0);
   CHECK(only(&CostTerms::area, 0) == 0);
@@ -1039,7 +1013,7 @@ TEST_CASE("cost: every Tier-2 term is scored in the unit the profile names it") 
 
 TEST_CASE("cost: the shipped weights sum a hand-built term vector") {
   scav_profile const p{ profile() };
-  REQUIRE(p.font_size_grid == 192);  // the ceilings below are read against it
+  REQUIRE(p.font_size_grid == 192);  // the ceilings below divide by this em
   CostTerms t;
   t.bends = 3;
   t.corridor = 400;  // 3 ems
@@ -1066,8 +1040,7 @@ TEST_CASE("cost: the shipped weights sum a hand-built term vector") {
 }
 
 TEST_CASE("cost: an em of one grid unit leaves every length where it stood") {
-  // The smallest font_size_grid the profile's bound allows, which is also the
-  // divisor that makes the conversion an identity.
+  // font_size_grid 1, the profile's lower bound, makes the em conversion the identity.
   scav_profile p{ profile() };
   p.font_size_grid = 1;
   REQUIRE(profile_validate(p));
@@ -1096,8 +1069,7 @@ TEST_CASE("cost: the shares divide the sum into floored basis points") {
   t.area = 100000;  // three em squared at w_area against one bend at w_bends
   int64_t total{ 0 };
   for (int64_t const bp : cost_shares(t, p)) { total += bp; }
-  // Floored per term, so a row is at most the whole and short of it by under
-  // one basis point per term that scored anything.
+  // Each share floors: the sum is at most 10000, short by under one per scoring term.
   CHECK(total <= 10000);
   CHECK(total > (10000 - static_cast<int64_t>(TIER2_TERMS)));
 
@@ -1105,22 +1077,20 @@ TEST_CASE("cost: the shares divide the sum into floored basis points") {
 }
 
 TEST_CASE("cost: a hint outranks whatever Tier 2 adds up to") {
-  // Tier 1 sits between the forbidden and the priced, so the two are compared
-  // on it before either sum is looked at.
+  // Tier 1 compares after Tier 0 and before Tier 2.
   Cost const hinted{ .t0_violations = 0, .t1_hints = 1, .t2 = 1000000 };
   Cost const unhinted{ .t0_violations = 0, .t1_hints = 2, .t2 = 0 };
   CHECK(cost_less(hinted, unhinted));
   CHECK_FALSE(cost_less(unhinted, hinted));
 
-  // Equal hints and the Tier-2 sum decides after all.
+  // With equal hints, Tier 2 decides.
   Cost const same{ .t0_violations = 0, .t1_hints = 1, .t2 = 1000001 };
   CHECK(cost_less(hinted, same));
 }
 
 namespace {
 
-// Two concurrent submachines of one state joined by one transition, which is
-// the whole of what `adjacency` reads of a model (11.8).
+// Two concurrent regions of one state, joined by one transition.
 struct Regions {
   Chart c;
   SubmachineId left{ INVALID }, right{ INVALID };
@@ -1153,8 +1123,8 @@ TEST_CASE("cost: two regions an arrow joins are charged for being apart") {
   scav_profile const p{ profile() };
   scav_rect const at{ .x = 0, .y = 0, .w = 100, .h = 100 };
 
-  // Overlapping on one axis and no more than sub_sep apart on the other is the
-  // arrangement a direct arrow needs; one unit further apart is not.
+  // Regions overlapping on one axis and at most `sub_sep` apart on the other
+  // score 0; one unit further apart scores 1.
   CHECK(adjacency_of(r, at, { .x = 100 + p.sub_sep, .y = 0, .w = 100, .h = 100 }) == 0);
   CHECK(adjacency_of(r, at, { .x = 101 + p.sub_sep, .y = 0, .w = 100, .h = 100 }) == 1);
   CHECK(adjacency_of(r, at, { .x = 0, .y = 100 + p.sub_sep, .w = 100, .h = 100 }) == 0);
@@ -1164,11 +1134,10 @@ TEST_CASE("cost: two regions an arrow joins are charged for being apart") {
   CHECK(adjacency_of(r, { .x = 100 + p.sub_sep, .y = 0, .w = 100, .h = 100 }, at) == 0);
   CHECK(adjacency_of(r, { .x = 0, .y = 100 + p.sub_sep, .w = 100, .h = 100 }, at) == 0);
 
-  // Diagonal is neither: two regions meeting at a corner share no face for the
-  // arrow to cross.
+  // Regions 300 apart on both axes, overlapping on neither, score 1.
   CHECK(adjacency_of(r, at, { .x = 400, .y = 400, .w = 100, .h = 100 }) == 1);
 
-  // The one term the weights turn into a Tier-2 cost, nothing else being scored.
+  // With only `adjacency` scored, the Tier-2 cost is `w_adjacency`.
   SizedLayout z{ blank(r.c) };
   z.sub[r.left.v] = at;
   z.sub[r.right.v] = { .x = 400, .y = 400, .w = 100, .h = 100 };
@@ -1178,8 +1147,7 @@ TEST_CASE("cost: two regions an arrow joins are charged for being apart") {
 }
 
 TEST_CASE("cost: a fan-out across two regions is not charged for being apart") {
-  // Adjacency above two regions is not achievable, so a fork or a join at
-  // either end of the crossing takes the pair out of the term (11.8).
+  // A fork or join at either end of the transition exempts the pair from `adjacency`.
   scav_rect const at{ .x = 0, .y = 0, .w = 100, .h = 100 };
   scav_rect const away{ .x = 400, .y = 400, .w = 100, .h = 100 };
   CHECK(adjacency_of(regions(StateKind::Normal, StateKind::Normal), at, away) == 1);
@@ -1188,7 +1156,7 @@ TEST_CASE("cost: a fan-out across two regions is not charged for being apart") {
   CHECK(adjacency_of(regions(StateKind::Normal, StateKind::Fork), at, away) == 0);
   CHECK(adjacency_of(regions(StateKind::Normal, StateKind::Join), at, away) == 0);
 
-  // Another pseudostate is not one of the two, so its crossing is priced.
+  // Any other pseudostate end, here a choice, is charged.
   CHECK(adjacency_of(regions(StateKind::Choice, StateKind::Normal), at, away) == 1);
 }
 
@@ -1204,12 +1172,12 @@ TEST_CASE("cost: a route that leaves a box across its far side is inside it") {
   z.state[a.v] = { .x = 0, .y = 0, .w = 20, .h = 20 };
   z.state[b.v] = { .x = 400, .y = 0, .w = 20, .h = 20 };
   z.state[other.v] = { .x = 100, .y = 0, .w = 100, .h = 100 };
-  // Starting on the stranger's top border, which is not inside it, and cutting
-  // out through the right one: the only one of the four sides it crosses.
+  // Starts on X's top border and leaves through its right side, the only side it
+  // crosses.
   Routes const r{ routes_of(c, { { { .x = 150, .y = 0 }, { .x = 250, .y = 50 } } }) };
   CHECK(cost_terms(c, decompose(c), z, r, {}, profile()).through_box == 1);
 
-  // Along that same border rather than through it, which is not entry.
+  // Along X's top border.
   Routes const grazing{ routes_of(c, { { { .x = 100, .y = 0 }, { .x = 250, .y = 0 } } }) };
   CHECK(cost_terms(c, decompose(c), z, grazing, {}, profile()).through_box == 0);
 }
@@ -1228,10 +1196,9 @@ TEST_CASE("cost: a tombstone is not a box, an obstacle or a label collision") {
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 100 };
   z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 100 };
-  // Over A, over the route, and under the placed box, so one state answers all
-  // three loops at once.
+  // Gone overlaps A, the route and the placed box.
   z.state[gone.v] = { .x = 80, .y = 10, .w = 200, .h = 60 };
-  // Out of everything else's way, and over each other.
+  // P and Q overlap each other, clear of the rest.
   z.state[p.v] = { .x = 0, .y = 900, .w = 100, .h = 100 };
   z.state[q.v] = { .x = 50, .y = 950, .w = 100, .h = 100 };
   Routes r{ routes_of(c, { { { .x = 100, .y = 50 }, { .x = 400, .y = 50 } } }) };
@@ -1245,11 +1212,11 @@ TEST_CASE("cost: a tombstone is not a box, an obstacle or a label collision") {
   CHECK(live.through_box == 1);
   CHECK(live.label_over_box == 1);
 
-  // A dead submachine's children are no longer siblings of each other.
+  // A dead submachine's children are not paired as siblings.
   c.submachines[dropped.v].live = 0;
   CHECK(scored().box_overlap == 1);
 
-  // And a dead state is no box at all, first or second of its pair.
+  // With Gone dead, all three terms drop to zero.
   c.states[gone.v].live = 0;
   CostTerms const buried{ scored() };
   CHECK(buried.box_overlap == 0);
@@ -1283,9 +1250,6 @@ TEST_CASE("cost: a box in the composite's trailing band costs as its title does"
 }
 
 TEST_CASE("cost: a chart with no geometry columns scores as nothing") {
-  // The columns are what one build reads of another's output, and a chart that
-  // was never laid out has none of them: every term reads zero rather than
-  // whatever the empty vectors happen to be.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   build_state(c, root, "A", StateKind::Normal, {});
@@ -1304,8 +1268,7 @@ TEST_CASE("cost: a chart with no geometry columns scores as nothing") {
   CHECK(t.box_overlap == 0);
   CHECK(cost_of(t, profile()).t2 == 0);
 
-  // A column that is there with no row behind it reads the same way: the point
-  // column's length is its own, and a chart with no route has none.
+  // A registered point column with no rows also scores zero.
   REQUIRE(column_register(c,
                           "scav.geom.point",
                           ElemKind::Point,
@@ -1320,8 +1283,8 @@ TEST_CASE("cost: a chart with no geometry columns scores as nothing") {
   CHECK(empty.area == 0);
   CHECK(cost_of(empty, profile()).t2 == 0);
 
-  // The rect and span columns the same way, on a chart with neither a state
-  // nor a transition to have put a row in them.
+  // Registered state rect and route span columns score zero on a chart with no
+  // states or transitions.
   Chart bare;
   build_chart(bare, "t", {});
   REQUIRE(column_register(bare,
@@ -1348,9 +1311,8 @@ TEST_CASE("cost: a chart with no geometry columns scores as nothing") {
 }
 
 TEST_CASE("cost: a chart that was never laid out scores nothing") {
-  // Two siblings and a transition, and not one geometry column: the sibling
-  // pairs and the route table are both indexed by ordinal, so scoring this
-  // reads past the columns unless the geometry is answered for as a whole.
+  // Two siblings and a transition with no geometry columns; scoring returns zero
+  // terms when any column is shorter than its entities.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -1371,8 +1333,7 @@ TEST_CASE("cost: a chart that was never laid out scores nothing") {
   CHECK(unlaid.box_overlap == 0);
   CHECK(cost_of(unlaid, profile()).t2 == 0);
 
-  // Rects but no route table, which is the same gap one column over: the
-  // chart rect is there to be scored and is not, because nothing else is.
+  // Rects with no route table also score zero, the chart rect included.
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
   z.state[b.v] = { .x = 300, .y = 0, .w = 100, .h = 40 };
@@ -1383,8 +1344,7 @@ TEST_CASE("cost: a chart that was never laid out scores nothing") {
   CHECK(routeless.box_overlap == 0);
   CHECK(cost_of(routeless, profile()).t2 == 0);
 
-  // Every rect column is read by entity ordinal, so any one of them stopping
-  // short is the same gap: the geometry that scores, minus one column.
+  // Clearing any one rect column zeroes every term.
   Routes const r{ routes_of(c, { { { .x = 100, .y = 20 }, { .x = 300, .y = 20 } } }) };
   CHECK(cost_terms(c, decompose(c), z, r, {}, profile()).area == (400LL * 40));
   SizedLayout no_state{ z };
@@ -1414,8 +1374,7 @@ TEST_CASE("cost: a route reaching past the points scores nothing") {
   z.chart = { .x = 0, .y = 0, .w = 400, .h = 40 };
   Routes r{ routes_of(c, { { { .x = 100, .y = 20 }, { .x = 300, .y = 20 } } }) };
 
-  // One point more than the route was given, so the last segment would be read
-  // from past the end of the point column.
+  // The span claims one point past the end of the point column; every term reads zero.
   r.route[0].len += 1;
   CostTerms const past{ cost_terms(c, decompose(c), z, r, {}, profile()) };
   CHECK(past.bends == 0);
@@ -1423,7 +1382,7 @@ TEST_CASE("cost: a route reaching past the points scores nothing") {
   CHECK(past.aspect == 0);
   CHECK(cost_of(past, profile()).t2 == 0);
 
-  // The same geometry with the span it actually has, scored as it always was.
+  // With the correct span, the route scores normally.
   r.route[0].len -= 1;
   CostTerms const t{ cost_terms(c, decompose(c), z, r, {}, profile()) };
   CHECK(t.bends == 0);
@@ -1447,8 +1406,8 @@ TEST_CASE("cost: a chart already at the desired ratio pays no aspect") {
   CHECK(fitting.aspect == 0);
   CHECK(fitting.area == ((16LL * 40) * (10LL * 40)));
 
-  // One unit off the ratio is one unit of the term, weighted like any other --
-  // and both the deviation and the area are ems before the weight applies.
+  // One grid unit wider adds `dar_den` to `aspect`; aspect converts to ems and area to
+  // ems squared before weighting.
   z.chart.w += 1;
   CostTerms const off{ cost_terms(c, decompose(c), z, {}, {}, p) };
   CHECK(off.aspect == p.dar_den);
@@ -1505,12 +1464,13 @@ CostTerms composite_terms(Composite const &k,
 TEST_CASE("cost: whitespace is a composite's hole less its children's rects") {
   Composite k{ composite_chart() };
   scav_profile const p{ profile() };
-  // Tight: the hole is 220 by 60 and all of it but the gap between A and B is theirs.
+  // Tight: the hole is 220 by 60; A and B fill all but the 20-wide gap between them.
   CHECK(composite_terms(k, composite_sizing(k, 240, 130), p).whitespace == 20 * 60);
   CHECK(composite_terms(k, composite_sizing(k, 440, 330), p).whitespace ==
         (420 * 260) - (2 * 100 * 60));
 
-  // A tombstone holds nothing, and a state with no live region is no composite.
+  // A dead child's rect counts as whitespace; a state whose only region is dead
+  // scores no whitespace.
   SizedLayout const tight{ composite_sizing(k, 240, 130) };
   k.c.states[k.b.v].live = 0;
   CHECK(composite_terms(k, tight, p).whitespace == (20 * 60) + (100 * 60));
@@ -1519,7 +1479,7 @@ TEST_CASE("cost: whitespace is a composite's hole less its children's rects") {
   CHECK(composite_terms(k, tight, p).whitespace == 0);
   k.c.submachines[k.inner.v].live = 1;
 
-  // Disjoint inside the chart when Tier 0 holds, so capped at its area.
+  // Whitespace is capped at the chart's area.
   SizedLayout small{ tight };
   small.chart = { .x = 0, .y = 0, .w = 10, .h = 10 };
   CHECK(composite_terms(k, small, p).whitespace == 100);
@@ -1528,14 +1488,14 @@ TEST_CASE("cost: whitespace is a composite's hole less its children's rects") {
 TEST_CASE("cost: a padded composite costs more than the same composite tight") {
   Composite const k{ composite_chart() };
   scav_profile p{ profile() };
-  REQUIRE(p.font_size_grid == 192);  // the ceilings below are read against it
+  REQUIRE(p.font_size_grid == 192);  // the ceilings below divide by this em
   p.w_whitespace = 1;
   CostTerms const tight{ composite_terms(k, composite_sizing(k, 240, 130), p) };
   CostTerms const padded{ composite_terms(k, composite_sizing(k, 440, 330), p) };
   CHECK(padded.whitespace > tight.whitespace);
   REQUIRE(padded.area == tight.area);
   REQUIRE(padded.aspect == tight.aspect);
-  // One chart either way, so the whole difference is whitespace: 1 em squared against 3.
+  // Same chart rect and route: the difference is whitespace, 1 em squared against 3.
   CHECK(cost_of(tight, p).t2 < cost_of(padded, p).t2);
   CHECK((cost_of(padded, p).t2 - cost_of(tight, p).t2) == 2);
 }
@@ -1558,7 +1518,7 @@ TEST_CASE("cost: the containment walk nests a descendant's interval in its own")
   CHECK(an.tout[inner.v] <= an.tout[outer.v]);
   CHECK(an.tout[beside.v] == an.tin[beside.v]);  // a leaf's interval is a point
 
-  // The two comparisons answer what the climb answers, every way round.
+  // `cost_ancestor` agrees with `ancestor_or_self` for every ordered pair.
   for (StateId const a : { outer, beside, inner, leaf }) {
     for (StateId const b : { outer, beside, inner, leaf }) {
       CAPTURE(a.v);
@@ -1580,8 +1540,8 @@ TEST_CASE("cost: a state outside every children span answers by the climb") {
   SubmachineId const under{ build_submachine(c, lost, "under", {}) };
   StateId const below{ build_state(c, under, "Below", StateKind::Normal, {}) };
   build_trans(c, a, b, TransKind::External, {});
-  // The span stops one short of `Lost`, so the walk reaches neither it nor what
-  // it holds; `parent` still says where the two of them are.
+  // The root's child span stops before `Lost`, so the walk skips `Lost` and
+  // `Below`; their `parent` links stay intact.
   --c.submachines[root.v].children.len;
 
   Ancestry const an{ cost_flatten_ancestry(c) };
@@ -1591,7 +1551,7 @@ TEST_CASE("cost: a state outside every children span answers by the climb") {
   CHECK(cost_ancestor(c, an, lost, below));
   CHECK_FALSE(cost_ancestor(c, an, below, lost));
 
-  // Both are off the descent, so Tier 0 tests them where they stand.
+  // Tier 0 tests both detached states at their own rects.
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 20, .h = 20 };
   z.state[b.v] = { .x = 400, .y = 0, .w = 20, .h = 20 };
@@ -1619,18 +1579,18 @@ TEST_CASE("cost: a live state a tombstone stands over is still an obstacle") {
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 20, .h = 20 };
   z.state[b.v] = { .x = 400, .y = 0, .w = 20, .h = 20 };
-  // The tombstone's rect is zero, so it says nothing about where Hidden sits.
+  // Gone keeps a zero rect; Hidden alone sits on the route.
   z.state[hidden.v] = { .x = 150, .y = -50, .w = 100, .h = 100 };
   Routes const r{ routes_of(c, { { { .x = 10, .y = 10 }, { .x = 410, .y = 10 } } }) };
   CostTerms const t{ cost_terms(c, decompose(c), z, r, {}, profile()) };
   CHECK(t.through_box == 1);
-  CHECK(t.box_overlap == 0);  // the tombstone is not a box, and Hidden is alone
+  CHECK(t.box_overlap == 0);  // Gone is dead and Hidden has no sibling
 }
 
 namespace {
 
-// `n` boxes on a diagonal and one over all of them, so the frame's grid is
-// more than one cell and one child sits in every cell of it.
+// `n` 40-unit boxes 100 apart on a diagonal, and `bar` over all of them; `bar` lies in
+// every cell of the frame's grid.
 Chart diagonal_chart(uint32_t n, SizedLayout &z, std::vector<StateId> &all, StateId &bar) {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
@@ -1684,7 +1644,7 @@ TEST_CASE("cost: overlapping siblings come out of the frame's grid, once a pair"
   Chart const c{ diagonal_chart(24, z, all, bar) };  // too many children to scan
   CHECK(cost_box_overlaps(c, z, cost_child_grid(c, z)) == 24);
 
-  // Moved off them, `bar` meets nothing, and the others never meet each other.
+  // With `bar` moved clear, no pair overlaps.
   z.state[bar.v] = { .x = 5000, .y = 5000, .w = 40, .h = 40 };
   CHECK(cost_box_overlaps(c, z, cost_child_grid(c, z)) == 0);
 }
@@ -1702,9 +1662,8 @@ TEST_CASE("cost: overlapping siblings of a small frame are scanned, once a pair"
 
 namespace {
 
-// 11.8's shape: one state holding two concurrent regions, each with a child,
-// and the two endpoints of the transition outside it. Every child rect lies
-// inside its parent's, which is what the descent prunes on.
+// One state holding two concurrent regions, each with one child, between the
+// transition's endpoints; each child rect lies inside its parent's.
 struct Concurrent {
   Chart c;
   StateId owner{ INVALID }, spinning{ INVALID }, dark{ INVALID };
@@ -1755,8 +1714,8 @@ TEST_CASE("cost: a piece in the root frame is charged for the grandchildren it e
 
 TEST_CASE("cost: a piece leaving one region is charged for its sibling's child") {
   Concurrent r{ concurrent_chart() };
-  // The transition now runs out of the first region, so the owner encloses its
-  // source and is carved out -- and the sibling region's child is not.
+  // With Spinning as the source, the owner encloses it and is carved out; Dark is
+  // still charged.
   r.c.transitions[0].src = r.spinning;
   Routes const route{ routes_of(r.c,
                                 { { { .x = 220, .y = 100 }, { .x = 600, .y = 100 } } }) };
@@ -1785,16 +1744,16 @@ TEST_CASE("cost: the carve-out excuses a box over an endpoint, not what it holds
   z.state[src.v] = { .x = 20, .y = 60, .w = 60, .h = 80 };
   z.state[stranger.v] = { .x = 150, .y = 60, .w = 60, .h = 80 };
   z.state[dst.v] = { .x = 600, .y = 80, .w = 40, .h = 40 };
-  // Out of the source, through its sibling, and out of the composite the two
-  // of them share: three boxes entered, one of them charged.
+  // From Src's border through Stranger and out of Outer: Outer is carved out and
+  // Stranger is charged.
   Routes const route{ routes_of(c,
                                 { { { .x = 80, .y = 100 }, { .x = 600, .y = 100 } } }) };
   CHECK(cost_terms(c, decompose(c), z, route, {}, profile()).through_box == 1);
 }
 
 TEST_CASE("cost: a degraded diagonal crosses what the axis-aligned sweep cannot") {
-  // The band sweep pairs a vertical with the horizontals inside its span and
-  // never two of a kind; a diagonal is in neither set and goes against all.
+  // The band sweep pairs each vertical with the horizontals in its span; a diagonal
+  // is tested against every piece.
   std::vector<Piece> const mixed{
     { .a = { .x = 0, .y = 50 }, .b = { .x = 100, .y = 50 }, .trans = 0, .k = 0 },
     { .a = { .x = 50, .y = 0 }, .b = { .x = 50, .y = 100 }, .trans = 1, .k = 0 },
@@ -1814,8 +1773,7 @@ TEST_CASE("cost: a degraded diagonal crosses what the axis-aligned sweep cannot"
   std::vector<uint32_t> two(2, 0);
   CHECK(cost_crossings(crossed, two) == 1);
 
-  // Two horizontals on one line are collinear, and a pair of one transition's
-  // own legs is not a crossing however they meet.
+  // Neither collinear horizontals nor two legs of one transition count as crossings.
   std::vector<Piece> const parallel{
     { .a = { .x = 0, .y = 0 }, .b = { .x = 100, .y = 0 }, .trans = 0, .k = 0 },
     { .a = { .x = 50, .y = 0 }, .b = { .x = 150, .y = 0 }, .trans = 1, .k = 0 },
@@ -1846,13 +1804,13 @@ TEST_CASE("cost: collinear pieces meet in one bucket, and a trunk empties it") {
         { { .x = 50, .y = 0 }, { .x = 150, .y = 0 }, { .x = 150, .y = 40 } } }) };
   CHECK(cost_corridor(apart, pieces_of(apart)) == 50);
 
-  // The same run, with the two finishing at one point: that is the trunk.
+  // Two runs along y=0 ending at one point: the 100 they share is trunk.
   Routes const merged{ routes_of(c,
                                  { { { .x = 0, .y = 0 }, { .x = 150, .y = 0 } },
                                    { { .x = 50, .y = 0 }, { .x = 150, .y = 0 } } }) };
   CHECK(cost_corridor(merged, pieces_of(merged)) == 0);
 
-  // Perpendicular legs share no line at all, whatever they touch.
+  // Perpendicular legs share no line.
   Routes const crossing{ routes_of(c,
                                    { { { .x = 0, .y = 0 }, { .x = 150, .y = 0 } },
                                      { { .x = 50, .y = -40 }, { .x = 50, .y = 40 } } }) };
@@ -1872,34 +1830,34 @@ TEST_CASE("cost: crowding charges two tight lanes their overlap scaled by the sh
   // Two horizontals of different transitions, 1000 overlapped, half an em apart:
   // half the overlap.
   CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(0, 96, 1000, 96, 1) }, em) == 500);
-  // Just inside an em apart charges almost nothing; an em apart, nothing at all.
+  // 191 apart charges 5; an em apart charges 0.
   CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(0, 191, 1000, 191, 1) }, em) == 5);
   CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(0, 192, 1000, 192, 1) }, em) == 0);
-  // Verticals are the same question on the other axis.
+  // Verticals score the same way on the other axis.
   CHECK(cost_crowding({ seg(0, 0, 0, 1000, 0), seg(48, 0, 48, 1000, 1) }, em) == 750);
-  // The overlap is what is charged, not either length.
+  // Only the 400-unit overlap counts: 400 * 96 / 192.
   CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(600, 96, 3000, 96, 1) }, em) == 200);
 }
 
 TEST_CASE("cost: crowding leaves what is not a tight lane to the terms that price it") {
   int32_t const em{ 192 };
-  // Collinear is `corridor`'s, so the two terms never charge one pair twice.
+  // Collinear pairs score in `corridor` alone.
   CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(0, 0, 1000, 0, 1) }, em) == 0);
-  // One transition's own two legs are one route, not two lanes.
+  // Two legs of one transition score 0.
   CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(0, 96, 1000, 96, 0) }, em) == 0);
-  // Perpendicular is a crossing or nothing.
+  // Perpendicular pairs score no crowding.
   CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(500, 50, 500, 900, 1) }, em) == 0);
-  // Parallel and tight but not alongside: end to end, or merely touching.
+  // Parallel and tight with no overlap: end to end, or touching at x=1000.
   CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(2000, 96, 3000, 96, 1) }, em) == 0);
   CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(1000, 96, 3000, 96, 1) }, em) == 0);
-  // A degenerate piece has no axis; a zero em prices nothing rather than dividing.
+  // A degenerate piece has no axis and scores 0; a zero em scores 0.
   CHECK(cost_crowding({ seg(5, 5, 5, 5, 0), seg(5, 50, 900, 50, 1) }, em) == 0);
   CHECK(cost_crowding({ seg(0, 0, 1000, 0, 0), seg(0, 96, 1000, 96, 1) }, 0) == 0);
 }
 
 TEST_CASE("cost: crowding is continuous with corridor at the line they share") {
-  // The design claim of 11.6, pinned: as two lanes close to one line, crowding
-  // approaches the shared length `corridor` would charge them at zero.
+  // As two lanes close to one line, crowding approaches the shared length
+  // `corridor` charges at zero separation.
   int32_t const em{ 192 };
   Wide last{ 0 };
   for (int32_t apart = 191; apart >= 1; --apart) {
@@ -1908,7 +1866,7 @@ TEST_CASE("cost: crowding is continuous with corridor at the line they share") {
     CHECK(now >= last);  // closer never charges less
     last = now;
   }
-  CHECK(last == 994);  // one unit apart: 1000 * 191 / 192, a hair short of 1000
+  CHECK(last == 994);  // one unit apart: 1000 * 191 / 192, floored
 }
 
 TEST_CASE("cost: crowding sums every tight pair, and order does not matter") {
@@ -1924,10 +1882,7 @@ TEST_CASE("cost: crowding sums every tight pair, and order does not matter") {
 }
 
 TEST_CASE("cost: a transition whose route vanished is a Tier 0 violation") {
-  // Every Tier-2 term scores an undrawn route perfect -- no bends, no length, no
-  // excess, no crowding -- so a search that can reach one prefers it. Seen:
-  // a composite's transition to its own child, collapsed onto one point by an
-  // arrangement that put the child flush against the composite's wall (11.6).
+  // `vanished` counts transitions with a segment to draw and fewer than two route points.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -1947,8 +1902,7 @@ TEST_CASE("cost: a transition whose route vanished is a Tier 0 violation") {
                                   { { .x = 300, .y = 30 }, { .x = 100, .y = 30 } } }) };
   CHECK(cost_terms(c, decompose(c), z, drawn, {}, p).vanished == 0);
 
-  // One collapsed to a single point: it scores nothing in Tier 2, which is the
-  // trap, and Tier 0 is what refuses it.
+  // A route collapsed to one point scores nothing in Tier 2 and one Tier-0 violation.
   Routes const collapsed{ routes_of(
       c,
       { { { .x = 100, .y = 10 }, { .x = 300, .y = 10 } }, { { .x = 300, .y = 30 } } }) };
@@ -1958,7 +1912,7 @@ TEST_CASE("cost: a transition whose route vanished is a Tier 0 violation") {
   CHECK(
       cost_less(cost_of(cost_terms(c, decompose(c), z, drawn, {}, p), p), cost_of(t, p)));
 
-  // And none at all is the same defect.
+  // An empty route is vanished too.
   Routes const empty{
     routes_of(c, { { { .x = 100, .y = 10 }, { .x = 300, .y = 10 } }, {} })
   };
@@ -1967,8 +1921,8 @@ TEST_CASE("cost: a transition whose route vanished is a Tier 0 violation") {
 
 namespace {
 
-// Every term by brute force over every pair, the oracle for the indexed scorer. It
-// shares only `overlaps`, `along_border`, `chebyshev_gap` and the containment walk.
+// Every term by brute force over every pair, the oracle for the indexed scorer. Of
+// `cost.cpp` it calls only the containment walk.
 namespace reference {
 
 Wide orient2d(scav_point a, scav_point b, scav_point c) {
@@ -2377,7 +2331,7 @@ CostTerms terms(Chart const &c,
     }
     for (uint32_t st = 0; st < c.states.size(); ++st) {
       if (c.states[st].live == 0) { continue; }
-      // A band with no extent is no band.
+      // Bands with zero width or height are ignored.
       auto const wall = [&](std::vector<scav_rect> const &v) {
         return (st < v.size()) && (v[st].w > 0) && (v[st].h > 0) &&
                overlaps(r.placed[i], v[st]);
@@ -2486,8 +2440,7 @@ std::string first_difference(CostTerms const &got, CostTerms const &want) {
   return {};
 }
 
-// Coordinates on a lattice of five with an occasional unit nudge, straddling zero, so
-// shared borders, collinear legs and negative lane keys are common.
+// Seeded coordinates on a lattice of 5 in [-60, 60], a quarter nudged by -2..2.
 struct Lattice {
   uint64_t s;
   uint32_t next(uint32_t n) {
@@ -2563,8 +2516,8 @@ Chart random_chart(Lattice &r) {
   return c;
 }
 
-// One candidate's geometry over `c`, all drawn at random; some routes end on another's
-// last points, so trunks come up.
+// Random geometry, routes and boxes for `c`; a quarter of routes after the first end on
+// an earlier route's last one or two points.
 struct Candidate {
   SizedLayout z;
   Routes r;
@@ -2623,8 +2576,8 @@ Candidate random_candidate(Chart const &c, Lattice &r) {
   return out;
 }
 
-// `k` moved by `by` on both axes. The lattice straddles zero, so a shift changes which
-// lane-key bytes agree and so which sort passes run.
+// `k` moved by `by` on both axes, which changes which lane-key bytes agree and
+// which radix passes run.
 Candidate shifted(Candidate k, int32_t by) {
   auto const rect = [by](scav_rect &x) {
     x.x += by;
@@ -2706,8 +2659,7 @@ TEST_CASE("cost: the indexed terms are the direct scans' over seeded random char
 }
 
 TEST_CASE("cost: the indexed terms are the direct scans' at the edges") {
-  // One composite holding two siblings and a region, and one state outside it,
-  // so a label can sit in the composite both ends share.
+  // Outer encloses both ends of A -> B; Far lies outside it.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const outer{ build_state(c, root, "Outer", StateKind::Normal, {}) };
@@ -2749,8 +2701,8 @@ TEST_CASE("cost: the indexed terms are the direct scans' at the edges") {
   CHECK(agree(routes_of(c, { { { .x = 90, .y = 90 } }, { { .x = 190, .y = 90 } } }), {})
             .vanished == 2);
 
-  // Along A's top border out to just past the band, each on a cell edge of the grid of
-  // grown states; then a lone point on the border.
+  // Along A's top border, out to one unit past the band either side; then single-point
+  // routes on A's and B's top borders.
   for (int32_t const off : { 0, near, near + 1, -near, -(near + 1) }) {
     CAPTURE(off);
     Routes const along{ routes_of(
@@ -2809,7 +2761,7 @@ TEST_CASE("cost: the indexed terms are the direct scans' at the edges") {
 
 TEST_CASE("cost: a thread's kept buffers carry nothing from one chart to the next") {
   // A, then B, then A on this thread, each against a fresh thread's score; the random
-  // pairs grow and shrink every buffer between calls.
+  // pairs resize the kept buffers between calls.
   auto const fresh =
       [](Chart const &c, SplitGraph const &g, Candidate const &k, scav_profile const &p) {
         CostTerms out;
@@ -2850,7 +2802,6 @@ TEST_CASE("cost: a thread's kept buffers carry nothing from one chart to the nex
 }
 
 TEST_CASE("cost: a context built once scores every candidate as one built for it") {
-  // The context also comes out as it went in.
   Lattice r{ 7 };
   for (uint32_t trial = 0; trial < 40; ++trial) {
     CAPTURE(trial);
@@ -2867,6 +2818,7 @@ TEST_CASE("cost: a context built once scores every candidate as one built for it
       agree = agree && first_difference(held, fresh).empty();
     }
     CHECK(agree);
+    // Scoring leaves `ctx` equal to a fresh build, its grid cells unfilled.
     CostContext const again{ cost_context(c, g) };
     CHECK(ctx.an.tin == again.an.tin);
     CHECK(ctx.an.tout == again.an.tout);
