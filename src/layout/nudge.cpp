@@ -1,5 +1,5 @@
-// Finds the lanes two or more nets share, one axis at a time, and spreads their
-// members onto integer offsets.
+// Finds lanes of two or more segments, one axis at a time, and spreads their bundles onto
+// integer offsets.
 
 #include "layout/nudge.h"
 
@@ -20,36 +20,26 @@ namespace {
 
 using Wide = int64_t;
 
-// Past any room the coordinate domain can offer, so folding it in with `imin`
-// leaves the real limits alone.
+// Exceeds any room in the coordinate domain; the starting value for `imin` over room.
 constexpr Wide UNBOUNDED{ Wide{ 1 } << 40 };
 
-// Past any in-degree the vote digraph can reach, so a bundle already ordered is
-// never ready a second time.
+// The in-degree of a bundle already ordered; exceeds any real in-degree.
 constexpr uint32_t PLACED{ 0xffffffffU };
 
-// An interior axis-aligned segment: `lo`/`hi` span its own axis and `at` is its
-// coordinate across it, which keys the lane.
-//
-// **A lane's members do not share `at`** -- a lane is a distance, not an
-// identity -- so two coordinate frames exist and everything below is in the
-// lane's. `reach_up`, `reach_down` and `offset_to` are the only crossings
-// between them, and each is where a bug lived before it was named.
+// An interior axis-aligned segment: `lo`/`hi` span its axis, `at` is its cross coordinate.
+// A lane's members may differ in `at`; `reach_*` and `offset_to` take lane positions.
 struct Member {
   uint32_t point{ 0 };  // index of the segment's first point
-  uint32_t net{ 0 };    // -> nets, so a move is weighed against the other nets
+  uint32_t net{ 0 };    // -> nets
   int32_t at{ 0 }, lo{ 0 }, hi{ 0 };
-  Wide toward{ 0 };         // across the lane, where the net came from; see below
+  Wide toward{ 0 };         // cross coordinate of the far end of the low end's leg
   Wide up{ 0 }, down{ 0 };  // how far the two dragged legs let it travel
-  // Which side of the lane each end's leg leaves by: -1 towards the lower
-  // coordinate across it, +1 towards the higher. Keyed to the segment's own
-  // ends rather than the net's direction, so both members of a pair read alike.
+  // Side the legs at the segment's low and high ends leave by: -1 towards the lower
+  // coordinate across the lane, +1 towards the higher, 0 for a zero-length leg.
   int32_t low_dir{ 0 }, high_dir{ 0 };
-  int32_t offset{ 0 };  // a displacement of this member, not a lane position
+  int32_t offset{ 0 };  // displacement from `at`
 
-  // This member's travel in the lane's frame. Signed, and the sign carries:
-  // sitting above the root costs reach upward and lends it downward, so a
-  // member can put the lane's floor below its root.
+  // Travel up and down from lane position `root` that this member allows; may be negative.
   [[nodiscard]] Wide reach_up(int32_t root) const { return up - (Wide{ at } - root); }
   [[nodiscard]] Wide reach_down(int32_t root) const { return down + (Wide{ at } - root); }
 
@@ -65,14 +55,13 @@ int32_t sign(Wide v) {
   return (v > 0) ? 1 : 0;
 }
 
-// A leg reaching the lane from one side must still reach it from that side; a
-// `before` of nothing is a leg with no extent on this axis to keep.
+// True when `after` is nonzero with the sign of `before`; false when `before` is 0.
 bool kept(Wide before, Wide after) {
   return (before > 0) ? (after > 0) : ((before < 0) && (after < 0));
 }
 
-// Two members whose nets run as one from the segment's far point to the end, or
-// from the start to its near point: one trunk, so one offset.
+// True when the nets of `x` and `y` match point for point from the segment's second point
+// to the end, or from the start to its first point.
 bool bundled(std::vector<scav_point> const &points,
              std::vector<scav_span> const &nets,
              Member const &x,
@@ -93,18 +82,17 @@ bool bundled(std::vector<scav_point> const &points,
   return head;
 }
 
-// Every buffer one call uses, per-thread and reassigned in place. Nothing here waits on
-// the pool, so no second call on this thread starts while one uses these.
+// Per-thread buffers for one call, reassigned in place; a call never waits on the pool.
 struct NudgeScratch {
   std::vector<Member> members;
   std::vector<uint32_t> lane;
   Partition link;              // -> members, the lanes of one axis
   Partition parent;            // -> lane, the bundles of one lane
-  std::vector<uint32_t> slot;  // -> lane, the bundle it ended up in
+  std::vector<uint32_t> slot;  // -> lane, each entry's bundle, then that bundle's position
   std::vector<uint32_t> sizes;
   std::vector<uint32_t> group;
   std::vector<uint32_t> kin;
-  std::vector<int32_t> votes;  // groups x groups, antisymmetric; see below
+  std::vector<int32_t> votes;  // groups x groups, antisymmetric
   std::vector<uint32_t> degree;
   std::vector<uint32_t> order;
   std::vector<uint32_t> rank;  // -> order, inverted
@@ -152,12 +140,10 @@ void nudge_lanes(scav_rect const &region,
   kin.clear();
   for (uint32_t axis = 0; axis < 2; ++axis) {
     bool const horizontal{ axis == 0 };
-    // Rebuilt from the live points per axis: a horizontal displacement drags the
-    // vertical legs either side of it.
     members.clear();
     for (uint32_t net = 0; net < net_count; ++net) {
       scav_span const span{ nets[net] };
-      if (span.len < 4) { continue; }  // needs a neighbour at each end of some segment
+      if (span.len < 4) { continue; }  // no interior segment
       for (uint32_t k = 1; (k + 2) < span.len; ++k) {
         uint32_t const i{ span.off + k };
         scav_point const a{ points[i - 1] };
@@ -170,8 +156,7 @@ void nudge_lanes(scav_rect const &region,
         m.at = horizontal ? b.y : b.x;
         m.lo = horizontal ? imin(b.x, cpt.x) : imin(b.y, cpt.y);
         m.hi = horizontal ? imax(b.x, cpt.x) : imax(b.y, cpt.y);
-        // Where the net was before it reached the lane, read from whichever end is
-        // the lower along the lane's own axis so every member is measured alike.
+        // `from` is past the low end along the lane's axis; `to` is past the high end.
         bool const forward{ horizontal ? (b.x < cpt.x) : (b.y < cpt.y) };
         scav_point const from{ forward ? a : d };
         scav_point const to{ forward ? d : a };
@@ -180,8 +165,8 @@ void nudge_lanes(scav_rect const &region,
         Wide const high_leg{ (horizontal ? Wide{ to.y } : Wide{ to.x }) - m.at };
         m.low_dir = sign(low_leg);
         m.high_dir = sign(high_leg);
-        // The two dragged legs, signed across the lane; each caps the travel one short of
-        // turning itself round, and a net's first or last leg its `keep` shorter still.
+        // The two dragged legs, signed across the lane; each keeps at least one unit of
+        // length, plus `keep` on a net's first or last leg.
         Wide const u{ Wide{ m.at } - (horizontal ? a.y : a.x) };
         Wide const v{ (horizontal ? Wide{ d.y } : Wide{ d.x }) - m.at };
         bool const kept_net{ (keep != nullptr) && (net < n_keep) };
@@ -202,8 +187,6 @@ void nudge_lanes(scav_rect const &region,
     }
     if (members.size() < 2) { continue; }
 
-    // Keyed so a lane's members are adjacent and in a total order the input's own
-    // ordering cannot disturb.
     scav_stable_sort(members, sc.member_merge, [](Member const &x, Member const &y) {
       if (x.at != y.at) { return x.at < y.at; }
       if (x.lo != y.lo) { return x.lo < y.lo; }
@@ -211,8 +194,8 @@ void nudge_lanes(scav_rect const &region,
       return x.point < y.point;
     });
 
-    // The segment and the two legs it drags: inside the region, no leg turned
-    // round, nothing newly entered, no new run along a net outside `kin`.
+    // True when `m` moved by its offset stays in `region` with its legs on their sides,
+    // entering no new obstacle, bumper, border run, or run along a net outside `kin`.
     auto const known_good = [&](Member const &m) {
       uint32_t const i{ m.point };
       scav_point const a{ points[i - 1] };
@@ -239,29 +222,27 @@ void nudge_lanes(scav_rect const &region,
                                           span_rect(nc, d) };
       bool ok{ true };
       for (scav_rect const &r : now) { ok = ok && contains(region, r); }
-      // The arrowhead reads its direction off the end pair, so no leg collapses.
+      // Both dragged legs keep nonzero length.
       ok = ok && !(same(a, nb) || same(nc, d));
-      // Second guard on the leg extents already folded into the room.
+      // Each dragged leg still meets the segment from its side.
       ok = ok && kept(horizontal ? (Wide{ b.y } - a.y) : (Wide{ b.x } - a.x),
                       horizontal ? (Wide{ nb.y } - a.y) : (Wide{ nb.x } - a.x));
       ok = ok && kept(horizontal ? (Wide{ d.y } - cpt.y) : (Wide{ d.x } - cpt.x),
                       horizontal ? (Wide{ d.y } - nc.y) : (Wide{ d.x } - nc.x));
       for (scav_rect const &raw : obstacles) {
         if (!ok) { break; }
-        // The raw rect is a hard wall and its bumper a soft one, each exempted
-        // for the one leg that was already inside it rather than for the member.
+        // A leg may overlap the obstacle or its bumper only if it already did.
         scav_rect const box{ grow(raw, clear) };
         for (uint32_t r = 0; r < now.size(); ++r) {
           ok = ok && (overlaps(was[r], raw) || !overlaps(now[r], raw));
           ok = ok && (overlaps(was[r], box) || !overlaps(now[r], box));
-          // A leg on a border line has no interior overlap to catch above,
-          // and a reader cannot tell it from the border.
+          // A leg may run along the obstacle's border only if it already did.
           ok = ok && (along_border(then[r], then[r + 1], raw) ||
                       !along_border(way[r], way[r + 1], raw));
         }
       }
-      // A leg may keep only a shared run it already had, so the lane a member
-      // leaves is not traded for one it lands on; `kin`'s own three move with it.
+      // A leg may share a run with another net only if it already did; the three segments
+      // around each `kin` point move with the bundle and are exempt.
       for (uint32_t q = 0; ok && (q < net_count); ++q) {
         if (q == m.net) { continue; }
         scav_span const other{ nets[q] };
@@ -283,10 +264,7 @@ void nudge_lanes(scav_rect const &region,
       return ok;
     };
 
-    // A lane is every member within `gap` of one coordinate whose extents
-    // overlap -- a distance, not collinearity, because that is what a reader
-    // cannot tell apart. Unioned over pairs: sorted by `at`, `lo` is not
-    // monotonic, so a run both stopped early and joined disjoint extents.
+    // Links pairs under `gap` apart across the axis and overlapping along it into lanes.
     link.reset(members.size());
     for (uint32_t i = 0; i < members.size(); ++i) {
       for (uint32_t j = i + 1;
@@ -297,8 +275,7 @@ void nudge_lanes(scav_rect const &region,
         }
       }
     }
-    // Each lane's members threaded in ascending order from its root, which is
-    // its least member and so the first of them this reaches.
+    // Threads each lane's members in ascending order from its root, its least member.
     vec_assign(next_member, members.size(), INVALID);
     vec_resize(last_member, members.size());
     for (uint32_t i = 0; i < members.size(); ++i) {
@@ -327,9 +304,8 @@ void nudge_lanes(scav_rect const &region,
         return members[x].point < members[y].point;
       });
 
-      // Members whose nets already run as one share one offset; unioned onto the
-      // lower lane position, so a bundle's root is its first member and the
-      // numbering below is by least `toward`.
+      // Members whose nets already run as one form a bundle sharing one offset; bundles
+      // are numbered by their first member, in `toward` order.
       parent.reset(count);
       for (uint32_t j = 0; j < count; ++j) {
         for (uint32_t q = j + 1; q < count; ++q) {
@@ -351,12 +327,8 @@ void nudge_lanes(scav_rect const &region,
       for (uint32_t const n : sizes) { stats.bundles += (n > 1) ? 1 : 0; }
       if (groups < 2) { continue; }
 
-      // 11.5's combinatorial stage, in place of a projection of one end. A leg
-      // leaving the lane strictly inside another member's extent crosses that
-      // member's segment unless the member lies on the leg's far side, so each
-      // such incidence is one vote for the order that avoids it. Both members'
-      // legs are read into one pair, which is what makes the matrix
-      // antisymmetric and the pair's answer independent of which end asked.
+      // Each leg leaving the lane strictly inside another member's extent votes for the
+      // order that keeps it off that member's segment; `votes` is antisymmetric.
       uint32_t const cells{ groups * groups };
       vec_assign(votes, cells, 0);
       for (uint32_t j = 0; j < count; ++j) {
@@ -373,11 +345,8 @@ void nudge_lanes(scav_rect const &region,
         }
       }
 
-      // The votes are a digraph -- an edge from `u` to `v` for every pair they
-      // separate that way round -- and Kahn's algorithm over it takes the
-      // lowest key of the bundles nothing left precedes. That is a linear
-      // extension of the votes, so it contradicts none of them, and it is the
-      // key's own order on a lane with no incidences at all.
+      // Kahn's algorithm over edges `u` -> `v` where `votes[u][v] > 0`, taking the
+      // lowest-key ready bundle first; key order when there are no votes.
       vec_assign(degree, groups, 0);
       for (uint32_t u = 0; u < groups; ++u) {
         for (uint32_t v = 0; v < groups; ++v) {
@@ -398,9 +367,8 @@ void nudge_lanes(scav_rect const &region,
         }
       }
       if (order.size() < groups) {
-        // Votes around a cycle have no order that satisfies them, so the
-        // bundles enter in the key's order instead and each takes the position
-        // that contradicts the fewest, the last of the positions that tie.
+        // On a vote cycle, inserts bundles in key order, each at the position with the
+        // least contradicted vote weight, the last such position on a tie.
         order.clear();
         for (uint32_t b = 0; b < groups; ++b) {
           uint32_t best{ 0 };
@@ -409,8 +377,8 @@ void nudge_lanes(scav_rect const &region,
             Wide cost{ 0 };
             for (uint32_t q = 0; q < order.size(); ++q) {
               int32_t const w{ votes[(b * groups) + order[q]] };
-              // `b` lands above everything from `at` on, so a vote for the
-              // other order is contradicted by its own weight.
+              // Inserted at `at`, `b` precedes `order[q]` for `q >= at`; each vote
+              // against that placement adds its weight to `cost`.
               if ((q >= at) == (w < 0)) { cost += (w < 0) ? -Wide{ w } : Wide{ w }; }
             }
             if ((best_cost < 0) || (cost <= best_cost)) {
@@ -431,24 +399,20 @@ void nudge_lanes(scav_rect const &region,
         rank[order[i]] = i;
         keyed = keyed && (order[i] == i);
       }
-      // Counted where the order is decided, so a lane the votes reorder and the
-      // room then refuses is one of these and none of `spread`.
+      // Counts each lane the votes reorder, whether or not it has room to spread.
       stats.reordered += keyed ? 0U : 1U;
       for (uint32_t j = 0; j < count; ++j) { slot[j] = rank[slot[j]]; }
 
-      // The room the whole lane has, measured over its union extent so a member
-      // cannot be displaced into something a shorter neighbour cleared.
-      // The root is the lane's lowest `at`: sorted by it, unioned onto the lower.
+      // The lane's room over its members' union extent `[lo, hi]`, measured from the root,
+      // which has the lane's lowest `at`.
       int32_t const at{ members[first].at };
       int32_t const lo{ least };
       int32_t const hi{ reach };
       Wide room_down{ horizontal ? (Wide{ region.y } + region.h) - at
                                  : (Wide{ region.x } + region.w) - at };
       Wide room_up{ horizontal ? (Wide{ at } - region.y) : (Wide{ at } - region.x) };
-      // Every member's own frame bounds the room and `region` reaches past it;
-      // one unit inside, because a lane on that border is drawn over it. The
-      // intersection, so a lane whose members come from two frames stays inside
-      // both of them.
+      // Room stops one unit inside the intersection of `region` and every member's
+      // `bounds` frame.
       scav_rect held{ region };
       for (uint32_t j = 0; j < count; ++j) {
         uint32_t const net{ members[lane[j]].net };
@@ -463,17 +427,14 @@ void nudge_lanes(scav_rect const &region,
                                ? scav_rect{ .x = lo, .y = at, .w = hi - lo, .h = 0 }
                                : scav_rect{ .x = at, .y = lo, .w = 0, .h = hi - lo } };
       for (scav_rect const &raw : obstacles) {
-        // Only a box the lane runs alongside limits it.
+        // A box the lane passes through sets no limit.
         if (overlaps(bar, raw)) { continue; }
         scav_rect const box{ grow(raw, clear) };
         int32_t const span_lo{ horizontal ? box.x : box.y };
         int32_t const span_hi{ horizontal ? (box.x + box.w) : (box.y + box.h) };
         if ((span_hi <= lo) || (span_lo >= hi)) { continue; }  // not beside this lane
-        // Sided against the raw rect but limited by the grown one, so a lane
-        // inside the bumper is left no room at all towards the box. With no
-        // bumper the grown edge is the border itself, and the room stops one
-        // unit short of it: a lane on it runs along the border, which a reader
-        // cannot tell from the border (11.10g).
+        // Picks the side by the raw rect and limits room by the `clear`-grown one; when
+        // `clear` is 0 the room stops one unit short of the border.
         int32_t const raw_lo{ horizontal ? raw.y : raw.x };
         int32_t const raw_hi{ horizontal ? (raw.y + raw.h) : (raw.x + raw.w) };
         Wide const short_of{ (clear > 0) ? 0 : 1 };
@@ -487,7 +448,7 @@ void nudge_lanes(scav_rect const &region,
         }
       }
 
-      // No room towards a box the lane is inside the bumper of, not negative.
+      // Clamps room at 0 where the lane lies inside a box's bumper.
       room_up = imax(room_up, Wide{ 0 });
       room_down = imax(room_down, Wide{ 0 });
 
@@ -499,16 +460,13 @@ void nudge_lanes(scav_rect const &region,
       Wide const window{ room_up + room_down };
       if (window <= 0) { continue; }
 
-      // The bundles fill the window, then slide back towards the lane as far as
-      // they will go; with room both sides that centres them.
+      // Bundles sit `step` apart, at most `gap`, centred on the lane where both sides have
+      // room, else shifted to fit the window.
       Wide const step{ imin(Wide{ gap }, window / (groups - 1)) };
       if (step <= 0) { continue; }
       Wide const spread{ (groups - 1) * step };
       Wide const lowest{ imax(-room_up, imin(-(spread / 2), room_down - spread)) };
 
-      // A slot is a lane position. Applied as a displacement instead, two bundles
-      // land `(at_j - at_i) + step` apart, which closes a lane whose slot order
-      // runs against its `at` order.
       bool any{ false };
       for (uint32_t j = 0; j < count; ++j) {
         Member &m{ members[lane[j]] };
@@ -524,8 +482,8 @@ void nudge_lanes(scav_rect const &region,
           if (slot[j] == b) { vec_push_back(group, lane[j]); }
         }
         if (members[group[0]].offset == 0) { continue; }
-        // Every member is asked before any of them moves, so each is checked
-        // against the geometry the others still have, and one refusal stops all.
+        // Checks every member of the bundle before moving any; one failure leaves the
+        // whole bundle in place.
         bool ok{ true };
         for (uint32_t const i : group) {
           kin.clear();

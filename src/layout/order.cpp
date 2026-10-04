@@ -1,7 +1,5 @@
-// One frame at a time: nodes from the frame's own children and from the ports
-// on its enclosing border, edges from the segments routed there, ranks by
-// longest path, bends for whatever spans more than one rank, then median
-// sweeps against an inversion count.
+// Builds one layered graph per frame from its children and border ports, ranks it by
+// longest path, chains long edges through bends, then median-sweeps against inversions.
 
 #include "layout/order.h"
 
@@ -27,17 +25,13 @@ namespace scav {
 
 namespace {
 
-// Every frame this thread has ordered, by what ordering it read. A search's
-// candidates differ in one frame, so every other frame a candidate orders is
-// one an earlier candidate ordered from the same inputs.
+// Per-thread memo of ordered frames, keyed by every input the ordering reads.
 Memo &frame_memo() {
   thread_local Memo m{ size_t{ 1 } << 20 };
   return m;
 }
 
-// Edge indices grouped by one endpoint. Built once per frame and rebuilt after
-// chaining, because every traversal below would otherwise rescan every edge
-// and turn a sweep quadratic.
+// Edge indices grouped by one endpoint.
 struct Adjacency {
   std::vector<uint32_t> off, edge;
 };
@@ -58,8 +52,7 @@ void adjacency_of(Adjacency &a,
   }
 }
 
-// One frame's graph in frame-local indices. Ranks and positions live beside
-// the nodes until the frame is flushed into `SubmachineOrders`.
+// One frame's graph in frame-local node indices.
 struct Frame {
   std::vector<OrderNode> nodes;
   std::vector<OrderEdge> edges;
@@ -67,15 +60,13 @@ struct Frame {
   Adjacency in, out;
 };
 
-// The port a boundary node stands for, recorded as the frame makes it: the
-// node itself carries the segment, so only the port has to be carried out.
+// A boundary node's segment and its port, recorded as the frame builds the node.
 struct SegPort {
   uint32_t seg;
   uint32_t port;
 };
 
-// One submachine's answer, written by the shard that owns it and emitted in
-// submachine order.
+// One submachine's result, written by the shard that owns it.
 struct FrameOrder {
   Frame f;
   std::vector<int32_t> gaps, labels;
@@ -83,23 +74,23 @@ struct FrameOrder {
   std::vector<uint32_t> cyclic;  // -> segments, those on a cycle of this frame
 };
 
-// Allocated once per shard and reused across that shard's frames. Both maps
-// hold frame-local node indices and are cleared back to INVALID per frame.
+// Per-thread scratch reused across frames. Both maps hold frame-local node indices and
+// return to INVALID after each frame.
 struct FrameScratch {
-  std::vector<uint32_t> state_local;  // -> states
-  std::vector<uint32_t> seg_local;    // -> SplitGraph::segments
+  std::vector<uint32_t> state_local;  // parallel to states
+  std::vector<uint32_t> seg_local;    // parallel to SplitGraph::segments
   Partition part;                     // -> nodes, the frame's components
-  std::vector<uint32_t> dense;        // -> nodes; a component root's ordinal
+  std::vector<uint32_t> dense;        // parallel to nodes; a component root's ordinal
   std::vector<uint32_t> lanes;        // boundaries x components, row-major
   std::vector<uint32_t> spanning;     // -> edges, labelled across several boundaries
   std::vector<OrderEdge> flat;        // edges into a cross-border port, held out
-  std::vector<uint8_t> fixed;         // -> edges; turned by a side pin
-  std::vector<uint8_t> extreme;       // -> nodes; 1 first in its rank, 2 last
+  std::vector<uint8_t> fixed;         // parallel to edges; 1 = oriented by a side pin
+  std::vector<uint8_t> extreme;       // parallel to nodes; 1 first in its rank, 2 last
 
   // The helpers' working buffers; each sizes what it reads before reading it.
   struct Visit {
     uint32_t node;
-    uint32_t next;  // -> walk.edge, the edge to try when this frame resumes
+    uint32_t next;  // -> walk.edge, the edge to try when this visit resumes
   };
   struct SouthPair {
     uint32_t north, south;
@@ -114,8 +105,8 @@ struct FrameScratch {
   std::vector<std::vector<uint32_t>> best;
 };
 
-// A shard's frame scratch. Per-thread; both maps return to all INVALID after every frame,
-// and a shard never waits on the pool.
+// This thread's `FrameScratch`, both maps sized to `c` and `g`. A shard never waits on the
+// pool.
 FrameScratch &frame_scratch(Chart const &c, SplitGraph const &g) {
   thread_local FrameScratch sc;
   if (sc.state_local.size() != c.states.size()) {
@@ -127,8 +118,8 @@ FrameScratch &frame_scratch(Chart const &c, SplitGraph const &g) {
   return sc;
 }
 
-// What one call builds and discards, per thread and nesting depth: a call waiting on its
-// shards may run another call's on the same thread.
+// One `order_submachines` call's buffers, per thread and nesting depth; a call waiting on
+// its shards may run another call's shards on this thread.
 struct CallScratch {
   std::vector<uint32_t> seg_count, seg_off, frame_segs, fill, global;
   std::vector<int32_t> seg_label;
@@ -174,15 +165,13 @@ class CallScope {
   CallScratch *at{ nullptr };
 };
 
-// The endpoint state of a segment's src or dst end when that end carries no
-// port: the transition's own src or dst.
+// The transition's src or dst state: a segment's end when it carries no port.
 StateId endpoint_state(Chart const &c, SplitSegment const &seg, bool is_src) {
   Transition const &tr{ c.transitions[seg.trans.v] };
   return is_src ? tr.src : tr.dst;
 }
 
-// Inversions in `v` by a Fenwick tree over its own values, which are already
-// positions and so already bounded by the rank size.
+// Strict inversions in `v` by a Fenwick tree indexed by value; `tree` is caller scratch.
 uint64_t inversions(std::vector<uint32_t> const &v, std::vector<uint32_t> &tree) {
   if (v.size() < 2) { return 0; }
   uint32_t hi{ 0 };
@@ -191,7 +180,7 @@ uint64_t inversions(std::vector<uint32_t> const &v, std::vector<uint32_t> &tree)
   uint64_t total{ 0 };
   uint64_t seen{ 0 };
   for (uint32_t const x : v) {
-    // Everything inserted so far that is <= x does not cross x; the rest does.
+    // Earlier values above x cross it.
     uint64_t le{ 0 };
     for (uint32_t i = x + 1; i > 0; i -= i & (~i + 1U)) { le += tree[i]; }
     total += seen - le;
@@ -201,9 +190,8 @@ uint64_t inversions(std::vector<uint32_t> const &v, std::vector<uint32_t> &tree)
   return total;
 }
 
-// The segments on a cycle of the frame's graph as drawn -- an edge whose two
-// ends share a strongly connected component. Tarjan's, iteratively, because a
-// flat frame of a few thousand states is deep enough to overflow recursion.
+// Segments whose edge lies on a cycle of the frame's graph: both ends in one strongly
+// connected component, found by iterative Tarjan's.
 void cyclic_segments(Frame const &f, std::vector<uint32_t> &segs, FrameScratch &sc) {
   uint32_t const n{ static_cast<uint32_t>(f.nodes.size()) };
   Adjacency &out{ sc.walk };
@@ -271,15 +259,14 @@ void cyclic_segments(Frame const &f, std::vector<uint32_t> &segs, FrameScratch &
   }
 }
 
-// Cycle breaking by iterative depth-first search in node order: an edge that
-// closes back onto the current path is the one reversed, so the frame becomes
-// a DAG without any node moving.
+// Makes the frame a DAG: an iterative DFS in node order reverses each edge that closes
+// back onto the current path.
 void orient_acyclic(Frame &f,
                     std::vector<uint8_t> const &pre,
                     std::vector<uint8_t> const &fixed,
                     FrameScratch &sc) {
-  // Turned before the walk, which then finds those cycles already broken. An edge `fixed`
-  // marks already points the way a side pin wants.
+  // Before the walk, reverses each edge `pre` names; skips `fixed` edges, which a side pin
+  // has oriented.
   for (uint32_t k = 0; k < f.edges.size(); ++k) {
     OrderEdge &e{ f.edges[k] };
     if ((e.segment >= pre.size()) || (pre[e.segment] == 0)) { continue; }
@@ -328,10 +315,8 @@ void orient_acyclic(Frame &f,
   }
 }
 
-// Longest path from the sources, then one pull-right pass for nodes with more
-// successors than predecessors, then empty ranks squeezed out. Boundary nodes
-// are excluded from the pull because their rank is what puts them on the
-// frame's left or right border, and a sink boundary is pinned to the last rank.
+// Longest-path ranks, one pull-right pass for non-boundary nodes with more successors than
+// predecessors, a sink boundary on the last rank, then empty ranks squeezed out.
 void assign_ranks(Frame &f, FrameScratch &sc) {
   uint32_t const n{ static_cast<uint32_t>(f.nodes.size()) };
   if (n == 0) { return; }
@@ -404,10 +389,8 @@ void assign_ranks(Frame &f, FrameScratch &sc) {
   }
 }
 
-// A bend per intervening rank, so every emitted edge spans exactly one. The
-// chain keeps the original edge's segment and reversal, which is what lets
-// phase 3 walk it back into one polyline. A segment `cut` names keeps its long
-// edge instead, and reaches the router with no waypoints (11.10b).
+// Chains each forward multi-rank edge through one bend per intervening rank, keeping its
+// segment and reversal; a segment `cut` names keeps its long edge.
 void chain_long_edges(Frame &f, std::vector<uint8_t> const &cut, FrameScratch &sc) {
   std::vector<OrderEdge> &out{ sc.chained };
   out.clear();
@@ -465,8 +448,7 @@ void bucket_ranks(Frame &f, std::vector<uint8_t> const &extreme) {
   }
 }
 
-// The edges leaving rank r, as south positions ordered by their north one,
-// which is the form inversion counting wants.
+// South positions of the edges leaving `north_rank`, sorted by (north, south).
 std::vector<uint32_t> const &south_of(Frame const &f,
                                       uint32_t north_rank,
                                       FrameScratch &sc) {
@@ -479,11 +461,7 @@ std::vector<uint32_t> const &south_of(Frame const &f,
       vec_push_back(pairs, { .north = f.nodes[e.src].pos, .south = f.nodes[e.dst].pos });
     }
   }
-  // The south tiebreak is what keeps two edges leaving one node from scoring
-  // as a crossing: they share an endpoint, so they cannot cross, and without
-  // it their south values arrive in edge order and can read as an inversion.
-  // The mirrored case needs nothing -- `inversions` compares strictly, so two
-  // edges sharing a south node already score zero.
+  // Edges sharing a north or a south node score no crossing.
   scav_stable_sort(pairs, sc.merge, [](Pair const &a, Pair const &b) {
     return (a.north != b.north) ? (a.north < b.north) : (a.south < b.south);
   });
@@ -502,9 +480,8 @@ uint64_t total_crossings(Frame const &f, FrameScratch &sc) {
   return total;
 }
 
-// Median of the adjacent positions in the fixed rank; INVALID when the node
-// has no neighbour there, which pins it where it is. `scratch` is the
-// caller's, because this runs once per node per rank per sweep.
+// Median position of the node's neighbours in the fixed rank, INVALID when it has none
+// there; `scratch` is caller-owned.
 uint32_t median_of(Frame const &f,
                    uint32_t node,
                    bool from_predecessors,
@@ -522,9 +499,8 @@ uint32_t median_of(Frame const &f,
   return scratch[scratch.size() / 2];
 }
 
-// Adjacent exchanges only, and only between two nodes that both have a
-// median: a node without one is a barrier that keeps its slot, which is what
-// stops an unconstrained node from being swept to an end.
+// Bubble-sorts the rank by median with adjacent swaps between two nodes that both have
+// one; a node with no median keeps its slot.
 void reorder_rank(Frame &f, uint32_t rank, bool from_predecessors, FrameScratch &sc) {
   std::vector<uint32_t> &bucket{ f.ranks[rank] };
   std::vector<uint32_t> &med{ sc.med };
@@ -552,8 +528,7 @@ void reorder_rank(Frame &f, uint32_t rank, bool from_predecessors, FrameScratch 
   for (uint32_t i = 0; i < bucket.size(); ++i) { f.nodes[bucket[i]].pos = i; }
 }
 
-// Alternating sweeps against the running best, so a sweep that makes things
-// worse is discarded rather than carried forward.
+// Up to `sweeps` alternating median sweeps; keeps the ordering with the fewest crossings.
 void minimize_crossings(Frame &f, uint32_t sweeps, FrameScratch &sc) {
   if (f.ranks.size() < 2) { return; }
   std::vector<std::vector<uint32_t>> &best{ sc.best };
@@ -595,9 +570,8 @@ uint64_t rank_crossings(std::vector<uint32_t> const &south_positions) {
 
 namespace {
 
-// Every initial pseudostate one rank before the nearest state it enters, which
-// `assign_ranks` gives it and a pin on that state can take away. Where the
-// state is at rank 0, everything else moves up one to make the room.
+// Puts each initial pseudostate one rank before its lowest-ranked neighbour; when that is
+// rank 0, every other node moves up one rank.
 void seat_initials(Chart const &c, Frame &f) {
   for (uint32_t v = 0; v < f.nodes.size(); ++v) {
     OrderNode const &nd{ f.nodes[v] };
@@ -621,9 +595,7 @@ void seat_initials(Chart const &c, Frame &f) {
   }
 }
 
-// Ranks renumbered onto the ones that still hold a node, keeping their order. A
-// move can empty the rank it left, and phase 2 sizes a rank gap whether or not
-// anything is in it (11.10).
+// Renumbers ranks onto those that still hold a node, keeping their order.
 void squeeze_ranks(Frame &f, FrameScratch &sc) {
   uint32_t top{ 0 };
   for (OrderNode const &nd : f.nodes) { top = imax(top, nd.rank); }
@@ -637,13 +609,8 @@ void squeeze_ranks(Frame &f, FrameScratch &sc) {
   for (OrderNode &nd : f.nodes) { nd.rank = onto[nd.rank]; }
 }
 
-// Everything a frame's ordering derives from the ranks it was assigned: the
-// boundary charges, the chaining of multi-rank edges into single-rank ones, the
-// rank buckets and the crossing sweeps. **Pure in `f.nodes[].rank` and
-// `f.edges`**, which is what lets a bounded move re-derive a whole frame by
-// changing one node's rank and calling this again (11.10a). Not idempotent:
-// `chain_long_edges` adds nodes, so a second call wants the frame as it was
-// before the first.
+// Charges rank boundaries, chains long edges, buckets and sweeps; of `f` it reads only
+// `nodes[].rank` and `edges`. Not idempotent: chaining appends bend nodes.
 void rank_derived(Frame &f,
                   std::vector<int32_t> &gaps,
                   std::vector<int32_t> &labels,
@@ -652,8 +619,8 @@ void rank_derived(Frame &f,
                   std::vector<uint8_t> const &extreme,
                   scav_profile const &p,
                   FrameScratch &sc) {
-  // Charged before chaining, while each edge still spans its whole rank range. An edge
-  // across one boundary is charged there first.
+  // Before chaining: an edge across one boundary charges its label there; longer edges
+  // wait in `spanning`.
   uint32_t top{ 0 };
   for (OrderNode const &nd : f.nodes) { top = imax(top, nd.rank); }
   vec_assign(gaps, top, 0);
@@ -677,12 +644,12 @@ void rank_derived(Frame &f,
                  .gap = { .boundary = from, .seg = e.segment, .width = label } });
   }
 
-  // Lanes per component: an edge can turn in its first and last boundary, and two or more
-  // lanes in one boundary sit a line of type apart. This is the most the lanes can need.
+  // Per component, each edge turns in its first and last boundary; two or more turns in
+  // one boundary widen it to a line of type each, capped at SPACE_MAX.
   Partition &part{ sc.part };
   part.reset(f.nodes.size());
   for (OrderEdge const &e : f.edges) { part.join(e.src, e.dst); }
-  // Dense, so the table is boundaries x components, not x nodes.
+  // Component ordinals; the column index of the `lanes` table.
   std::vector<uint32_t> &dense{ sc.dense };
   vec_assign(dense, f.nodes.size(), INVALID);
   uint32_t parts{ 0 };
@@ -704,14 +671,14 @@ void rank_derived(Frame &f,
   for (OrderEdge const &e : f.edges) {
     uint32_t const from{ imin(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
     uint32_t const to{ imax(f.nodes[e.src].rank, f.nodes[e.dst].rank) };
-    if (from == to) { continue; }  // turns in no boundary, as above
+    if (from == to) { continue; }  // same rank: no boundary
     uint32_t const of{ dense[part.root(e.src)] };
     turn(from, of);
     if (to > (from + 1)) { turn(to - 1, of); }
   }
 
-  // A spanning edge's label takes the widest boundary it crosses, nearest the middle among
-  // equals, widest label first; where that boundary already holds it, it costs nothing.
+  // Widest label first, a spanning edge charges the widest boundary it crosses, nearest
+  // the middle among equals; traced `Held` when that gap already covers it.
   scav_stable_sort(spanning, [&](uint32_t a, uint32_t b) {
     return seg_label[f.edges[a].segment] > seg_label[f.edges[b].segment];
   });
@@ -746,9 +713,8 @@ uint32_t label_segment(Chart const &c, SplitGraph const &g, uint32_t t) {
   if (t < g.trans_label.size()) { return g.trans_label[t]; }
   if ((t >= g.trans_segments.size()) || (t >= c.transitions.size())) { return INVALID; }
   Span const segs{ g.trans_segments[t] };
-  if ((segs.len == 0) || inner_loop(c, t)) {
-    return INVALID;
-  }  // labelled in its loop room
+  // An inner loop is labelled in its loop room.
+  if ((segs.len == 0) || inner_loop(c, t)) { return INVALID; }
   SubmachineId const frame{ g.trans_common[t].frame };
   for (uint32_t k = 0; (frame.v != INVALID) && (k < segs.len); ++k) {
     if (g.segments[segs.off + k].frame == frame) { return segs.off + k; }
@@ -805,8 +771,7 @@ void order_submachines(SubmachineOrders &o,
   CallScope const scope;
   CallScratch &cs{ scope.scratch() };
 
-  // Which segments each frame routes, gathered once: a segment names its frame
-  // but a frame does not name its segments.
+  // Segments grouped by frame: `frame_segs[seg_off[m]..seg_off[m+1]]` are frame `m`'s.
   std::vector<uint32_t> &seg_count{ cs.seg_count };
   vec_assign(seg_count, c.submachines.size(), 0);
   for (SplitSegment const &seg : g.segments) {
@@ -838,7 +803,7 @@ void order_submachines(SubmachineOrders &o,
     seg_label[at] += down ? box.h : box.w;
   }
 
-  // `{trans, leg}` resolved to segment ordinals once, as a flat table.
+  // Marks each pinned `{trans, leg}` in a table parallel to segments; empty for no pins.
   auto const resolve_pins = [&g](auto const &rows, std::vector<uint8_t> &table) {
     table.clear();
     if (rows.empty()) { return; }
@@ -848,7 +813,7 @@ void order_submachines(SubmachineOrders &o,
         continue;
       }
       Span const segs{ g.trans_segments[row.trans.v] };
-      if (row.leg >= segs.len) { continue; }  // a leg this transition does not have
+      if (row.leg >= segs.len) { continue; }
       table[segs.off + row.leg] = 1;
     }
   };
@@ -856,8 +821,8 @@ void order_submachines(SubmachineOrders &o,
   std::vector<uint8_t> &pre_reversed{ cs.pre_reversed };
   resolve_pins(pins.cuts, cut);
   resolve_pins(pins.reverses, pre_reversed);
-  // A side pin resolved to the leg inside the border its port is on, whose
-  // boundary node stands for it: one plus the side, 0 for none.
+  // Per segment, 1 + a side pin's side, 0 for none; set on the leg inside the pinned
+  // port's border, whose boundary node stands for the port.
   std::vector<uint8_t> &sided{ cs.sided };
   sided.clear();
   for (SidePin const &pin : pins.sides) {
@@ -904,8 +869,7 @@ void order_submachines(SubmachineOrders &o,
   vec_resize(frames, c.submachines.size());
   uint32_t const profile_word{ memo_profile(p) };
 
-  // Reads the model, the split and the label charges; writes `frames[m]` and
-  // the caller's own scratch, so two frames share nothing.
+  // Writes `frames[m]`, `sc` and this thread's memo; `sc`'s maps end all INVALID.
   auto const order_frame = [&](uint32_t m, FrameScratch &sc) {
     TraceFrame const traced{ SubmachineId{ m } };
     Frame &f{ frames[m].f };
@@ -941,8 +905,7 @@ void order_submachines(SubmachineOrders &o,
       if (port == INVALID) {
         StateId const st{ endpoint_state(c, sg, is_src) };
         if ((st.v == INVALID) || (c.states[st.v].live == 0)) { return INVALID; }
-        // The endpoint encloses this frame rather than sitting in it: no
-        // border is crossed, so the boundary node carries no port.
+        // The endpoint encloses this frame: a boundary node with no port.
         if ((is_src ? sg.src_inner : sg.dst_inner) != 0) {
           return boundary_node(seg, INVALID);
         }
@@ -968,8 +931,8 @@ void order_submachines(SubmachineOrders &o,
       if ((src == INVALID) || (dst == INVALID) || (src == dst)) { continue; }
       vec_push_back(f.edges, { .src = src, .dst = dst, .segment = seg, .reversed = 0 });
     }
-    // Whether a side pin holds an edge's port: only a boundary node standing for
-    // a port on a state's border takes one.
+    // Whether a side pin holds the edge's port: a boundary node for a port on a state's
+    // border.
     auto const pinned = [&](OrderEdge const &e) {
       if (sided.empty() || (sided[e.segment] == 0)) { return false; }
       for (SegPort const &sp : seg_ports) {
@@ -986,11 +949,8 @@ void order_submachines(SubmachineOrders &o,
       return pinned(e) ? lead_side(e.segment, m) : uint8_t{ 0 };
     };
 
-    // Everything below reads the frame as built, the reversal and cut tables
-    // at its segments, the rank pins that land in it, which of its states are
-    // initials, its label charges and the profile -- and those are the key, so
-    // a hit is the ordering the steps below would derive. A traced run derives
-    // every frame, since a hit would emit nothing.
+    // Memo key: serial, profile, the frame as built, per edge its pins and label charge,
+    // and its rank pins. A traced run skips the memo.
     bool const tracing{ trace_sink() != nullptr };
     thread_local std::vector<uint32_t> key;
     thread_local std::vector<int32_t> value;
@@ -1020,7 +980,7 @@ void order_submachines(SubmachineOrders &o,
         }
         uint32_t const reversed{ pre_reversed.empty() ? 0U : pre_reversed[e.segment] };
         uint32_t const cuts{ cut.empty() ? 0U : cut[e.segment] };
-        // Each a byte, so the packed word is exact.
+        // Each field fits in a byte.
         vec_push_back(key,
                       reversed | (cuts << 8U) | (uint32_t{ cross_of(e) } << 16U) |
                           (uint32_t{ lead_of(e) } << 24U));
@@ -1068,7 +1028,7 @@ void order_submachines(SubmachineOrders &o,
     } else {
       cyclic_segments(f, frames[m].cyclic, sc);
       // An edge into a cross-border port is held out of ranking and takes its mate's rank;
-      // one into a port pinned to a rank border is turned and `fixed`.
+      // one into a port pinned to a rank border is oriented and `fixed`.
       std::vector<OrderEdge> &flat{ sc.flat };
       flat.clear();
       std::vector<uint8_t> &fixed{ sc.fixed };
@@ -1100,8 +1060,7 @@ void order_submachines(SubmachineOrders &o,
       orient_acyclic(f, pre_reversed, fixed, sc);
       assign_ranks(f, sc);
 
-      // Pins apply between ranking and everything derived from it, naming nodes by their
-      // merged index from `first`.
+      // Rank pins apply after ranking, before `rank_derived`; an initial's pin is ignored.
       if (!pins.ranks.empty()) {
         bool moved{ false };
         for (RankPin const &pin : pins.ranks) {
@@ -1118,7 +1077,6 @@ void order_submachines(SubmachineOrders &o,
         }
         if (moved) {
           seat_initials(c, f);
-          // Ranks renumbered onto those that still hold a node.
           squeeze_ranks(f, sc);
         }
       }
@@ -1201,8 +1159,7 @@ void order_submachines(SubmachineOrders &o,
   vec_reserve(o.gaps, gap_rows);
   vec_reserve(o.labels, gap_rows);
 
-  // Emitted in submachine order, so the global numbering and every span into it
-  // are what one worker would have produced (6).
+  // Emitted in submachine order, so numbering and spans match a single-threaded run.
   for (uint32_t m = 0; m < c.submachines.size(); ++m) {
     if (c.submachines[m].live == 0) { continue; }
     uint32_t const node_base{ static_cast<uint32_t>(o.nodes.size()) };
@@ -1211,8 +1168,7 @@ void order_submachines(SubmachineOrders &o,
     Frame const &f{ frames[m].f };
     bool const down{ o.sub_down[m] != 0 };
 
-    // Emitted in (rank, pos) order, so a consumer walking one frame's nodes
-    // walks its diagram left to right and top to bottom.
+    // Nodes in (rank, pos) order.
     std::vector<uint32_t> &global{ cs.global };
     vec_assign(global, f.nodes.size(), INVALID);
     for (std::vector<uint32_t> const &bucket : f.ranks) {

@@ -1,8 +1,7 @@
 #ifndef SCAV_LAYOUT_SHARD_H_INCLUDED
 #define SCAV_LAYOUT_SHARD_H_INCLUDED
 
-// How many work items a chart splits into, shared by the phases that shard so
-// the two cannot disagree about it.
+// The work-item count of a chart, shared by every layout phase that shards.
 
 #include "scav/scav_core.h"
 #include "scav_shard.h"
@@ -11,8 +10,7 @@
 
 namespace scav {
 
-// Every row of the three entity arrays, tombstones included, so the count is a
-// function of the model's shape and not of what a phase decided to skip (6).
+// Rows in the state, submachine and transition arrays, tombstones included.
 inline uint32_t layout_entity_count(Chart const &c) {
   return static_cast<uint32_t>(c.states.size()) +
          static_cast<uint32_t>(c.submachines.size()) +

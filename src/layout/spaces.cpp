@@ -1,5 +1,5 @@
-// The space tables: domain validation attributing each failure to its request,
-// and the digest that makes a measurement policy a hashed layout input.
+// Validates the space tables, one diagnostic per bad row or count, and digests them for
+// the layout inputs hash.
 
 #include "layout/wire.h"
 #include "scav/scav_core.h"
@@ -26,8 +26,7 @@ void report(std::vector<Diagnostic> &out, DiagCode code, ElemKind kind, uint32_t
                   .src = {} });
 }
 
-// A parallel table's count either matches its entity array or is zero, and a
-// null pointer carries no rows.
+// True when `count` is 0, or equals `entities` with `rows` non-null.
 bool check_count(std::vector<Diagnostic> &out,
                  void const *rows,
                  uint32_t count,
@@ -101,8 +100,7 @@ bool spaces_validate(Chart const &c,
       }
     }
 
-    // Uniqueness of (subject, order) by sorting indices, so detection order is
-    // the data's and not a hash table's, and rows are not copied.
+    // Reports duplicate (subject, order) pairs by stably sorting row indices.
     std::vector<uint32_t> by_key(s.n_path_box);
     for (uint32_t i = 0; i < s.n_path_box; ++i) { by_key[i] = i; }
     scav_stable_sort(by_key, [&s](uint32_t a, uint32_t b) {
@@ -120,7 +118,7 @@ bool spaces_validate(Chart const &c,
     }
   }
 
-  // A total order over the triple; stability keeps equal triples in scan order.
+  // Sorts by (code, kind, ordinal); equal triples keep scan order.
   scav_stable_sort(found, [](Diagnostic const &a, Diagnostic const &b) {
     if (a.code != b.code) {
       return static_cast<uint32_t>(a.code) < static_cast<uint32_t>(b.code);
@@ -137,8 +135,7 @@ bool spaces_validate(Chart const &c,
 }
 
 uint32_t spaces_digest(scav_spaces const &s) {
-  // Field by field, never a struct's bytes, with each table's count prefixed
-  // so two adjacent tables cannot spell one.
+  // Hashes each table field by field, prefixed with its row count.
   std::vector<scav_byte> bytes;
   vec_reserve(bytes,
               16 + (20ULL * (s.n_box_state + s.n_box_sub)) + (8ULL * s.n_path_clear) +

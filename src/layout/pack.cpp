@@ -1,9 +1,5 @@
-// LR-rectpacking: a target width from the desired aspect ratio, every rect
-// placed at one of four positions relative to its predecessor, compaction
-// where the knob asks for it, then whitespace elimination. A row holds blocks left to
-// right, a block holds subrows top to bottom, and a subrow holds rects left to right, so
-// reading order is the placement order by construction and the structure the last step
-// fills is the structure the placement built.
+// LR-rectpacking: target width, four-spot placement, compaction, whitespace elimination.
+// Rows hold blocks left to right; blocks hold subrows top to bottom; subrows hold rects.
 
 #include "layout/pack.h"
 
@@ -16,12 +12,7 @@
 
 namespace scav {
 
-// Bracketed with whitespace elimination switchable as well as compaction, so a
-// test can measure either against what it started from; nothing shipping
-// passes false. Prototyped here because gcc's -Werror=missing-declarations
-// refuses a namespace-scope definition with no declaration above it, which is
-// what an internal function is under SCAV_TESTING. The prototype a test uses
-// is its own; see scav_internal.h.
+// Test entry: `pack_lr` with whitespace elimination switchable.
 SCAV_INTERNAL_BEGIN
 Packing pack_rows(std::vector<scav_rect> const &rects,
                   int32_t sep,
@@ -33,67 +24,54 @@ SCAV_INTERNAL_END
 
 namespace {
 
-// The whole of the placement's freedom, and the reason order-preserving and
-// gap-avoiding are one constraint: a rect goes right of its predecessor, into
-// the next subrow of its block, into a new block at the row's top level, or
-// into a new row. Every structure is therefore a cut of the input sequence.
+// Where a rect goes relative to its predecessor: right of it, next subrow of its block,
+// new block at the row's top level, or new row. Ordered finest first.
 enum class Spot : uint8_t { Right = 0, Subrow = 1, Level = 2, Row = 3 };
 constexpr uint8_t SPOTS{ 4 };
 
-// Where the packing has got to. `row_right` is the whole row's rightmost
-// edge, which is what a new block at row level has to clear. Wide because a
-// row or a column sums over every rect, and the domain bounds one rect at a
-// time; the sum stays inside int64 because a vector that long is not
-// addressable.
+// Placement state after the latest rect; `row_right` is the row's rightmost edge.
 struct Cursor {
   Wide row_y{ 0 }, row_h{ 0 }, row_right{ 0 };
   Wide block_x{ 0 };
   Wide sub_y{ 0 }, sub_h{ 0 }, sub_x{ 0 };
 };
 
-// A packing's two extents before they are narrowed, so two candidates that
-// both ran past the domain still compare as the sums they are.
+// A packing's extents before narrowing to int32.
 struct Extent {
   Wide w{ 0 }, h{ 0 };
 };
 
-// The spot list a packing works in, reassigned in place. Per-thread; packing calls
-// nothing that packs.
+// Per-thread spot list, reassigned in place by each (non-nested) packing.
 std::vector<Spot> &spot_scratch() {
   thread_local std::vector<Spot> s;
   return s;
 }
 
-// Every distance here is non-negative, so one bound is the whole clamp.
+// Clamps a non-negative `v` to PACK_SATURATED.
 int32_t narrow(Wide v) { return static_cast<int32_t>(imin(v, Wide{ PACK_SATURATED })); }
 
-// Where the area below stops. It only picks a target width that is then
-// clamped to the domain, and at 2^48 the floor-sqrt already clears COORD_MAX
-// for every ratio a profile allows (dar_num >= 1, dar_den <= 1024), so the cap
-// changes no target and keeps `area * dar_num` inside int64.
+// Area cap: at any profile ratio its target width exceeds COORD_MAX, and
+// `area * dar_num` fits in int64.
 constexpr Wide AREA_MAX{ Wide{ 1 } << 48 };
 
 Wide target_width(std::vector<scav_rect> const &rects,
                   int32_t sep,
                   int32_t dar_num,
                   int32_t dar_den) {
-  // Area with one gap folded into each rect, because a target that pays for
-  // no separation is one two rects can never share: at 100 wide and 10 apart,
-  // the bare-area target of 200 leaves them stacked in a column.
+  // Area with `sep` added to each rect's width and height, capped at AREA_MAX.
   Wide area{ 0 };
   Wide widest{ 0 };
   for (scav_rect const &r : rects) {
     area = imin(area + ((Wide{ r.w } + sep) * (Wide{ r.h } + sep)), AREA_MAX);
     widest = imax(widest, Wide{ r.w });
   }
-  // The published operation order: multiply, floor-divide, then floor-sqrt. A
-  // target under the widest rect is unsatisfiable, so that is the floor.
+  // The published operation order: multiply, floor-divide, then floor-sqrt.
   Wide const approx{ static_cast<Wide>(
       isqrt(static_cast<uint64_t>(floor_div(area * dar_num, Wide{ dar_den })))) };
   return imin(imax(widest, approx), Wide{ COORD_MAX });
 }
 
-// The cursor sitting on the first rect, which takes the origin and no choice.
+// The cursor after the first rect, placed at the origin.
 Cursor seeded(scav_rect const &first, int32_t sep) {
   Cursor at;
   at.row_h = first.h;
@@ -103,9 +81,8 @@ Cursor seeded(scav_rect const &first, int32_t sep) {
   return at;
 }
 
-// Advances the cursor onto `spot` and answers the rect's left edge; its top is
-// the cursor's `sub_y` afterwards. Each case leaves `sub_x` on that left edge
-// and `sub_y` on the subrow it settled into, which the common tail then reads.
+// Advances the cursor to `spot` and returns the rect's left edge; its top is the
+// cursor's `sub_y` afterwards.
 Wide seat(Cursor &at, Spot spot, Wide w, Wide h, int32_t sep) {
   switch (spot) {
     case Spot::Right: at.sub_h = imax(at.sub_h, h); break;
@@ -137,9 +114,8 @@ Wide seat(Cursor &at, Spot spot, Wide w, Wide h, int32_t sep) {
   return x;
 }
 
-// The geometry a spot list means. `at` arrives holding every rect's extents
-// and leaves holding its position too, so laying a candidate out costs one
-// pass and no allocation.
+// Writes each rect's position into `at`, whose sizes are already set, and returns the
+// packing's extents.
 Extent lay(std::vector<scav_rect> const &rects,
            std::vector<Spot> const &spot,
            int32_t sep,
@@ -158,9 +134,8 @@ Extent lay(std::vector<scav_rect> const &rects,
   return e;
 }
 
-// Greedy placement: the first of the four positions that keeps the row inside
-// the target. Row level beats carrying on rightward from a lower subrow, which
-// would leave a notch above that nothing short of growing a neighbour fills.
+// Each rect takes the first spot that fits within `target`: Level (only from a lower
+// subrow), Right, Subrow, else Row.
 void place(std::vector<scav_rect> const &rects,
            int32_t sep,
            Wide target,
@@ -183,8 +158,7 @@ void place(std::vector<scav_rect> const &rects,
   }
 }
 
-// Smaller area, then shorter, then narrower: a total order on two extents,
-// which is all the choice below has to separate.
+// True when `a` is smaller by area, then height, then width.
 bool tighter(Extent const &a, Extent const &b) {
   Wide const a_area{ a.w * a.h };
   Wide const b_area{ b.w * b.h };
@@ -193,11 +167,8 @@ bool tighter(Extent const &a, Extent const &b) {
   return a.w < b.w;
 }
 
-// Compaction. Each rect gets one chance, in index order, to take one of the
-// other three positions -- back left into its predecessor's subrow, or up into
-// the hole an earlier row left the late arrival that could not use it. A move
-// is kept only where neither extent grew and one shrank, so occupancy rises,
-// the scale measure rises, and a packing inside the domain stays inside it.
+// Each rect, in index order, tries its three other spots and takes the tightest that
+// shrinks one extent and grows neither.
 void compact(std::vector<scav_rect> const &rects,
              int32_t sep,
              std::vector<Spot> &spot,
@@ -212,10 +183,8 @@ void compact(std::vector<scav_rect> const &rects,
     for (uint8_t s = 0; s < SPOTS; ++s) {
       Spot const cand{ static_cast<Spot>(s) };
       if (cand == spot[i]) { continue; }
-      // The rect's own edges bound the drawing's, so a candidate putting one of
-      // them past the current extent cannot shrink either. Asking here rather
-      // than laying the whole packing out is what keeps compaction linear on a
-      // packing it has nothing to move.
+      // Skips a spot putting the rect past the current extent before laying the packing
+      // out.
       Cursor probe{ before };
       Wide const x{ seat(probe, cand, w, h, sep) };
       if (((x + w) > cur.w) || ((probe.sub_y + h) > cur.h)) { continue; }
@@ -234,28 +203,21 @@ void compact(std::vector<scav_rect> const &rects,
   }
 }
 
-// The `i`th of `parts` shares of `extra`. Floor-apportioned from the running
-// prefix, so the shares sum to exactly `extra`, no two differ by more than
-// one, and the prefix is the shift the `i`th thing owes the ones before it.
+// Sum of the first `i` of `parts` floor-apportioned shares of `extra`; all `parts`
+// shares sum to `extra` and differ by at most one.
 Wide prefix(Wide extra, uint32_t i, uint32_t parts) {
   return (parts == 0) ? Wide{ 0 } : floor_div(extra * i, Wide{ parts });
 }
 
-// Where a run of consecutive rects at one nesting level ends: the next rect
-// whose spot opens something at `level` or coarser. The four spots are ordered
-// finest first, so one comparison reads all three levels.
+// First index after `at` whose spot is `level` or coarser, else `end`.
 uint32_t run_end(std::vector<Spot> const &spot, uint32_t at, uint32_t end, Spot level) {
   uint32_t next{ at + 1 };
   while ((next < end) && (spot[next] < level)) { ++next; }
   return next;
 }
 
-// Whitespace elimination. Every row is grown to the drawing's width, every
-// block to its row's height, every subrow to its block's width, and every rect
-// to its subrow's height, sharing the leftover along each axis so that the gap
-// between two neighbours is still exactly the gap the placement gave them. A
-// rect with no extent is left alone and takes no share: growing an empty
-// submachine into a visible band would invent contents it does not have.
+// Grows rows, blocks, subrows and rects to fill their parents, keeping every gap; a
+// rect with zero width or height keeps its size and takes no share.
 void expand(std::vector<Spot> const &spot,
             Extent const &whole,
             std::vector<scav_rect> &at) {
@@ -327,7 +289,7 @@ void expand(std::vector<Spot> const &spot,
   }
 }
 
-// `pack_rows` into `out`, reusing its capacity.
+// `pack_rows`, written into `out` in place.
 void fill_rows(Packing &out,
                std::vector<scav_rect> const &rects,
                int32_t sep,
@@ -345,9 +307,7 @@ void fill_rows(Packing &out,
   Extent const e{ lay(rects, spot, sep, out.at) };
   out.w = narrow(e.w);
   out.h = narrow(e.h);
-  // A packing past the domain is no candidate (11.2), so there is nothing in
-  // it worth filling, and the extents its arithmetic would divide are sums
-  // that already left int32.
+  // Expands only when neither extent saturated.
   if (expanded && (out.w == e.w) && (out.h == e.h)) { expand(spot, e, out.at); }
 }
 
@@ -380,8 +340,7 @@ void pack_box(Packing &out, std::vector<scav_rect> const &rects, int32_t sep) {
   out.w = 0;
   out.h = 0;
   if (rects.empty()) { return; }
-  // One row, one block, one subrow, which is the spot list of every rect
-  // following its predecessor. Expansion then levels their heights.
+  // Every rect Right of its predecessor in one subrow; expansion levels the heights.
   std::vector<Spot> &spot{ spot_scratch() };
   vec_assign(spot, rects.size(), Spot::Right);
   Extent const e{ lay(rects, spot, sep, out.at) };
@@ -395,10 +354,8 @@ bool pack_better(Packing const &a,
                  int32_t dar_num,
                  int32_t dar_den,
                  bool aspect_first) {
-  // SM = min(dar_num / (dar_den * w), 1 / h), whichever of the two is
-  // smaller, kept as a numerator and denominator and never divided. Extents
-  // stop just under 2^31 and a profile's ratio at 2^10, so the widest product
-  // below is the area at under 2^62 and the rest are 2^51 or less.
+  // SM = min(dar_num / (dar_den * w), 1 / h) as a numerator and denominator; every
+  // product below stays under 2^62.
   auto const measure = [&](Packing const &p, int64_t &num, int64_t &den) {
     int64_t const w{ imax(int64_t{ p.w }, int64_t{ 1 }) };
     int64_t const h{ imax(int64_t{ p.h }, int64_t{ 1 }) };
@@ -428,7 +385,7 @@ bool pack_better(Packing const &a,
     if (aspect_first) { return (a_abs != b_abs) ? (a_abs < b_abs) : (a_area < b_area); }
     return (a_area != b_area) ? (a_area < b_area) : (a_abs < b_abs);
   }
-  return b_smaller;  // a scales larger, which is the better packing
+  return b_smaller;  // a's SM is larger
 }
 
 }  // namespace scav

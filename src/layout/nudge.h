@@ -1,8 +1,8 @@
 #ifndef SCAV_LAYOUT_NUDGE_H_INCLUDED
 #define SCAV_LAYOUT_NUDGE_H_INCLUDED
 
-// A lane is a run of collinear overlapping interior segments across the nets of
-// one frame; its members spread onto integer offsets, one per bundle.
+// A lane is a connected set of parallel interior segments, linked when under `gap` apart
+// and overlapping along the axis; each of its bundles takes one integer offset.
 
 #include "scav/scav_layout_c.h"
 #include "scav/scav_types.h"
@@ -14,19 +14,15 @@ namespace scav {
 
 struct NudgeStats {
   uint32_t lanes{ 0 };
-  uint32_t spread{ 0 };  // lanes of those that had the room to take an offset
+  uint32_t spread{ 0 };  // lanes with room to give some member a nonzero offset
   uint32_t moved{ 0 };
-  uint32_t bundles{ 0 };    // members of a lane that run as one net and move as one
-  uint32_t refused{ 0 };    // bundles of those a member's own checks stopped
-  uint32_t reordered{ 0 };  // lanes the crossing constraints took off the key order
+  uint32_t bundles{ 0 };    // bundles of two or more members, which move as one
+  uint32_t refused{ 0 };    // of `bundles`, those a member's check left in place
+  uint32_t reordered{ 0 };  // lanes whose vote order differs from the key order
 };
 
-// `nets` are spans into `points`, rewritten in place. `region` bounds every
-// point and `bounds` is parallel to `nets`: the box that net's own frame is
-// drawn in, which no displacement of it may cross. One box repeated is a frame
-// nudging itself; one box per net is the chart-wide pass, where a lane's room
-// is what every member's frame allows (11.10a). `keep` is parallel to the first `n_keep`
-// nets: a net's first leg stays `src` longer than one unit, and its last leg `dst`.
+// `nets` span `points`, rewritten in place; net `n` stays inside `region` and `bounds[n]`.
+// Net `n < n_keep` keeps its first leg over `keep[n].src` long and its last over `.dst`.
 void nudge_lanes(scav_rect const &region,
                  std::vector<scav_rect> const &bounds,
                  std::vector<scav_rect> const &obstacles,

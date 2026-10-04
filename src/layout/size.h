@@ -1,9 +1,8 @@
 #ifndef SCAV_LAYOUT_SIZE_H_INCLUDED
 #define SCAV_LAYOUT_SIZE_H_INCLUDED
 
-// Phase 2: extents composed bottom-up by the box formula, frame-local
-// positions from the ranks and the cross-axis assignment, then one descent
-// that makes every position root-absolute.
+// Phase 2: the box formula composes extents bottom-up, ranks and the cross-axis
+// assignment give frame-local positions, one descent makes them root-absolute.
 
 #include "layout/decompose.h"
 #include "layout/order.h"
@@ -32,25 +31,18 @@ struct SizedLayout {
   scav_rect chart{};
 };
 
-// A desired aspect ratio as a pair, in the profile's own `[1, 1024]` bounds so
-// the packer's products stay where it proved them. `num` 0 is no ratio at all.
+// A desired aspect ratio as a pair in the profile's `[1, 1024]` bounds; `num` 0 means
+// no ratio.
 struct FrameDar {
   int32_t num{ 0 }, den{ 0 };
 };
 
-// Which ratio every packing inside a state's interior aims at: the profile's
-// one ratio at every depth, or the aspect of the hole the state leaves between
-// its two text bands, which is the rect its submachines are packed into
-// (11.4, 11.10). The hole is only knowable once the state is sized, so
-// `OwnerHole` sizes twice -- once at the profile's ratio to find the holes,
-// then again against them.
+// The ratio packings in a state's interior aim at: the profile's, or the aspect of the
+// hole inside its bands. `OwnerHole` sizes twice, first at the profile's ratio.
 enum class DarSource : uint32_t { Profile, OwnerHole };
 
-// Whether a frame's rank run may wrap. 11.4 lays a component out twice, once
-// unwrapped and once cut at the aspect target, and `Scale` keeps whichever the
-// scale measure prefers -- a local ratio that cannot see area. `Always` hands
-// `Cost` the folded shape instead, so the choice is scored rather than
-// arbitrated (11.10a). `Never` keeps the run unwrapped; a fold pin names one frame's.
+// Whether a frame's run may wrap; a fold pin overrides it per frame. `Scale` takes the
+// scale measure's pick, `Always` any fold that wraps, `Never` keeps the run unwrapped.
 enum class Fold : uint32_t { Scale, Always, Never };
 
 // One row of the search's table: the profile and the phase-2 tuple it lays out with.
@@ -61,22 +53,20 @@ struct Row {
   Fold fold{ Fold::Scale };
 };
 
-// A state's bands as walls, then its loop room: the side bands run from the top band's
-// top to the bottom band's bottom, so no seam opens where two bands meet, and the room
-// runs on to the border its loops leave by.
+// A state's walls: top, bottom, the side bands stretched from the top band's top to the
+// bottom band's bottom, and the loop room extended to the border its loops leave by.
 std::array<scav_rect, 5> state_walls(SizedLayout const &z, uint32_t st);
 
 // Whether a state's loop room sits at the leading end of its interior and its inner loops
 // leave by its leading border: a band lines its trailing face and none its leading one.
 bool loop_mirrored(SizedLayout const &z, uint32_t st);
 
-// Whether a band of `state` lines `face`, 0 left, 1 right, 2 top, 3 bottom: no port sits
-// there.
+// Whether a band of `state` lines `face` (0 left, 1 right, 2 top, 3 bottom), which then
+// takes no port.
 bool face_lined(scav_spaces const &s, uint32_t state, uint32_t face);
 
-// One inner loop's row in its state's room: rows stack in transition order, the far leg
-// runs `reach` in from the room's edge its loop leaves by, and the label sits `gap` beyond
-// that leg.
+// One inner loop's row in its state's room; rows stack in transition order. The far leg
+// runs `loop_reach` in from the room's exit edge; the label sits `loop_gap` beyond it.
 struct LoopRow {
   int32_t label_w, label_h, h;
 };
@@ -85,8 +75,8 @@ int32_t loop_reach(scav_profile const &p);
 int32_t loop_gap(scav_profile const &p);
 int32_t loop_lane(scav_profile const &p);  // between the loop's two legs
 
-// Per transition, the extent its path boxes stack to, and per state, the room its inner
-// loops stack into: the widest row by every row's height.
+// Per inner loop, the extent its path boxes stack to; per state, the room its inner loops
+// stack into: the widest row by the rows' summed height.
 void loop_rooms(Chart const &c,
                 scav_spaces const &s,
                 scav_profile const &p,
@@ -102,10 +92,8 @@ void loop_rows(Chart const &c,
                std::vector<scav_extent> &label,
                std::vector<scav_rect> &row);
 
-// False on an extent that would leave the coordinate domain, with one
-// diagnostic per offending entity and `out` left partly written. `dar` and
-// `compaction` default to the row-0 tuple, which is the pipeline as it ran
-// before the portfolio existed.
+// False when an extent would leave the coordinate domain: one diagnostic per entity and
+// `out` partly written. The defaults are row 0's tuple.
 bool size_layout(Chart const &c,
                  SplitGraph const &g,
                  SubmachineOrders const &o,

@@ -1,10 +1,8 @@
 #ifndef SCAV_LAYOUT_COST_H_INCLUDED
 #define SCAV_LAYOUT_COST_H_INCLUDED
 
-// The cost vector of 11.6, scored from the phase outputs alone: no layout is
-// re-run to obtain one, and a test can hand it two rects and one route. The
-// terms, the reducers and `layout_cost` are public -- they name no phase output
-// -- and live in scav_layout.h; what is here is what takes one.
+// Scores the cost vector from the phase outputs alone. The terms, reducers and
+// `layout_cost` are public, in scav_layout.h.
 
 #include "layout/decompose.h"
 #include "layout/route.h"
@@ -19,31 +17,28 @@
 
 namespace scav {
 
-// One route segment, with the transition it belongs to and its index in that
-// transition's own polyline, which is what the trunk exemption reads.
+// Segment `k` of transition `trans`'s route, from `a` to `b`.
 struct Piece {
   scav_point a, b;
   uint32_t trans;
   uint32_t k;
 };
 
-// Entry and exit times from one depth-first walk of the containment forest, so
-// a state's descendants are exactly the states whose interval nests inside its
-// own and 11.14's carve-out is two comparisons.
+// Entry and exit times from one DFS of the containment forest; a state's descendants are
+// the states whose interval nests inside its own.
 struct Ancestry {
   std::vector<uint32_t> tin, tout;  // 0 = the walk never reached the state
-  // Live states Tier 0's descent cannot arrive at: one a tombstone stands
-  // above, whose zero rect prunes nothing, and one no document root encloses.
+  // Live states the Tier 0 descent cannot reach: those under a dead state and those no
+  // document root encloses.
   std::vector<uint32_t> detached;
 };
 
-// One uniform bucket grid per submachine over its live children. Siblings are
-// disjoint by Tier 0, so a cell holds a bounded number of them.
+// One uniform bucket grid per submachine over its live children.
 struct ChildGrid {
   struct Frame {
     int32_t x0{ 0 }, y0{ 0 };  // the grid's origin
     Wide cell_w{ 1 }, cell_h{ 1 };
-    uint32_t side{ 0 };    // cells per axis
+    uint32_t side{ 0 };    // cells per axis; 0 for a frame scanned without cells
     uint32_t bucket{ 0 };  // -> bucket_off, this frame's first cell
     Span children{};       // -> child
   };
@@ -53,19 +48,19 @@ struct ChildGrid {
   std::vector<uint32_t> bucket_at;   // -> child
 };
 
-// Scratch for one grid query. `stamp` marks a child the running query already
-// yielded, so a rect covering several cells comes back once.
+// Scratch for grid queries. `hit` lists each child once; `stamp` holds the `epoch` of the
+// query that last yielded it.
 struct GridQuery {
   std::vector<uint64_t> stamp;  // parallel to ChildGrid::child
   uint64_t epoch{ 0 };
   std::vector<uint32_t> hit;  // -> ChildGrid::child
 };
 
-// What scoring reads of the chart alone. Built once per chart; read concurrently by
-// every candidate scored against it.
+// What scoring reads of the chart alone; built once per chart and read concurrently by
+// every candidate.
 struct CostContext {
   Ancestry an;
-  ChildGrid grid;  // no cell holds a child yet; a candidate fills a per-thread copy
+  ChildGrid grid;  // frames and children only; each candidate fills a per-thread copy
   // Per transition, src end then dst: the lowest common ancestor's child on that end's
   // chain where it lies strictly above the end's enclosing state, else INVALID.
   std::vector<std::array<uint32_t, 2>> transit_top;
@@ -73,9 +68,8 @@ struct CostContext {
 
 CostContext cost_context(Chart const &c, SplitGraph const &g);
 
-// `ctx` is `cost_context(c, g)`. `party`, where given, is 1 per transition whose route
-// bends or is charged crossings, corridor, crowding, excess_len or a label, else 0; every
-// transition is 1 while any Tier 0 count is nonzero.
+// `ctx` is `cost_context(c, g)`. `party`, if given, is all 1 on a Tier 0 violation, else 1
+// per transition that bends or carries crossings, corridor, crowding, excess_len or label.
 CostTerms cost_terms(CostContext const &ctx,
                      Chart const &c,
                      SplitGraph const &g,
@@ -93,8 +87,8 @@ CostTerms cost_terms(Chart const &c,
                      scav_spaces const &s,
                      scav_profile const &p);
 
-// The same scoring from the geometry columns, so one build scores another's
-// output. The placed boxes are an out-param of the run, so they come back in.
+// The same scoring read from the geometry columns; `placed` is the run's placed-box
+// out-param.
 CostTerms cost_columns(Chart const &c,
                        SplitGraph const &g,
                        scav_profile const &p,

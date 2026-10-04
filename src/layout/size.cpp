@@ -1,6 +1,5 @@
-// One pass per depth level, deepest first: a submachine needs its children sized
-// and a state needs its submachines. Ranks give one axis, `cross_coordinates`
-// the other; the box formula then sizes the state.
+// One pass per depth level, deepest first, each frame before the state that owns it.
+// Ranks give one axis, `cross_coordinates` the other; the box formula sizes the state.
 
 #include "layout/size.h"
 #include "layout/trace.h"
@@ -23,8 +22,7 @@
 
 namespace scav {
 
-// Bracketed so a test reaches the hole a frame is handed without sizing a
-// whole chart. The prototypes a test uses are its own; see scav_internal.h.
+// Test entry points: a hole's ratio and every state's hole.
 SCAV_INTERNAL_BEGIN
 FrameDar size_hole_ratio(int32_t w, int32_t h);
 void size_owner_holes(Chart const &c, SizedLayout const &z, std::vector<FrameDar> &hole);
@@ -36,24 +34,17 @@ scav_box_space box_of(scav_box_space const *rows, uint32_t count, uint32_t i) {
   return ((rows != nullptr) && (i < count)) ? rows[i] : scav_box_space{};
 }
 
-// Every frame this thread has laid out, by what laying it out read. A search's
-// candidates differ in one frame and the frames that hold it, so nearly every
-// other frame a candidate sizes is one an earlier candidate already sized.
+// Per-thread memo of `lay_out_sub` results; holds up to 2^20 words.
 Memo &frame_memo() {
   thread_local Memo m{ size_t{ 1 } << 20 };
   return m;
 }
 
-// Inside the coordinate domain on both axes. A row or a column whose sum
-// overflowed saturates at `PACK_SATURATED`, which is far past `COORD_MAX`.
+// Both extents inside the coordinate domain; a saturated packing fails.
 bool fits(Packing const &p) { return (p.w <= COORD_MAX) && (p.h <= COORD_MAX); }
 
-// The better-scaling of the two packings, among those inside the domain. A
-// packing outside it cannot compose a box inside it, so it is no candidate.
-// The ratio and the compaction knob are arguments rather than the profile's
-// fields, because a frame aims at the hole it fills and not every hole is
-// 16:10, and because compaction is a row of the portfolio's table (11.4).
-// Into `packed`, with `row` the caller's scratch for the other packer.
+// `pack_lr` into `packed`; under `trybox`, `pack_box` replaces it when the box fits and
+// scales better or `pack_lr` does not fit. `row` is the caller's scratch.
 void pack_best(Packing &packed,
                Packing &row,
                std::vector<scav_rect> const &rects,
@@ -81,12 +72,8 @@ void overflow(std::vector<Diagnostic> &diags, ElemKind kind, uint32_t ordinal) {
                   .src = {} });
 }
 
-// `pad` rings a box's *contents*, and a bare pseudostate has none; the route
-// attaches to the box, so padding leaves the arrow short of the glyph.
-// Pseudostates only: an ordinary box is a container even when empty. The box
-// formula and the descent that insets the bands both ask here, so a band's
-// width is the box's own width less the ring the formula actually reserved,
-// and never negative.
+// True for a non-Normal state with no bands, no loop room and only empty live
+// submachines; the box formula and the band inset give it no `pad` ring.
 bool bare_pseudostate(Chart const &c,
                       std::vector<scav_rect> const &sub,
                       scav_box_space const &b,
@@ -110,16 +97,16 @@ struct Shape {
   std::vector<scav_point> at;
   Wide w{ 0 }, h{ 0 };
   bool ok{ true };
-  // Trace records of the kept shape: piece starts, refused cuts and pseudostate seats.
+  // Trace records, emitted for the kept shape.
   std::vector<TraceFold> cuts;
   std::vector<std::pair<uint32_t, SeatHow>> seated;
   std::vector<std::pair<uint32_t, int32_t>> centred;
   std::vector<TracePiece> packed;
   std::vector<TraceGap> lanes;
   std::vector<TraceCarry> carried;
-  // Some piece is packed other than beside the one before it.
+  // Some piece sits off the first piece's row, or not right of the one before.
   bool wraps{ false };
-  // Every edge a cut crosses between stacked pieces joins two plain nodes.
+  // Every edge between stacked pieces joins two states without submachines.
   bool drawable{ true };
   std::vector<uint8_t> lean;  // `SizedLayout::lean`, per frame edge
 
@@ -159,8 +146,7 @@ struct Frame {
   int32_t x, y;
 };
 
-// Every buffer a sizing pass uses, reassigned in place. Per-thread; sizing never waits on
-// the pool and lays out one frame at a time.
+// Every buffer a sizing pass uses, per thread, reassigned in place; one frame at a time.
 struct SizeScratch {
   // The pass, and the states it sizes.
   std::vector<scav_point> sub_local;
@@ -242,11 +228,10 @@ struct Sizer {
   FrameDar profile_dar{ .num = p.dar_num, .den = p.dar_den };
   uint32_t profile_word{ memo_profile(p) };
   SizeScratch &sc{ size_scratch() };
-  // Where each submachine sits inside its owner's packed area, which the
-  // descent at the end turns into an absolute origin.
+  // Each submachine's origin inside its owner's packing; the descent makes it absolute.
   std::vector<scav_point> &sub_local{ sc.sub_local };
-  // The label's extent across its frame's ranks and along them, on the middle
-  // segment 11.3 charges it to, so one label reserves in one frame.
+  // Per segment, its label's extent across the frame's ranks and along them; only a
+  // transition's `label_segment` carries it.
   std::vector<int32_t> &seg_label_h{ sc.seg_label_h };
   std::vector<int32_t> &seg_label_w{ sc.seg_label_w };
   // Per port, the segment on the border's inner side, whose boundary node is
@@ -256,8 +241,7 @@ struct Sizer {
   std::vector<scav_extent> &loop_room{ sc.loop_room };
   bool ok{ true };
 
-  // Every packing inside one state's interior fills the same hole, so the state
-  // carries the ratio and its frames read their owner's.
+  // The ratio packings inside `state` aim at: its hole's, else the profile's.
   [[nodiscard]] FrameDar dar_of(uint32_t state) const {
     return ((state < hole.size()) && (hole[state].num != 0)) ? hole[state] : profile_dar;
   }
@@ -265,17 +249,15 @@ struct Sizer {
     StateId const owner{ c.submachines[m].owner };
     return (owner.v == INVALID) ? profile_dar : dar_of(owner.v);
   }
-  // Whether a frame's ranks run down the page. Its layout is computed along
-  // the ranks and across them, and only placed as x and y at the end: across
-  // is y and along is x for a frame that runs across, and the reverse for one
-  // that runs down (11.10g).
+  // Whether frame `m`'s ranks run down the page: along the ranks is y and across is x;
+  // for a frame running across, along is x and across is y.
   [[nodiscard]] bool runs_down(uint32_t m) const {
     return (m < o.sub_down.size()) && (o.sub_down[m] != 0);
   }
-  // The row's rule, or the frame's fold pin where it has one.
   static_assert((static_cast<uint32_t>(Fold::Scale) == FOLD_SCALE) &&
                 (static_cast<uint32_t>(Fold::Always) == FOLD_ALWAYS) &&
                 (static_cast<uint32_t>(Fold::Never) == FOLD_NEVER));
+  // The row's rule, or the frame's fold pin where it has one.
   [[nodiscard]] Fold fold_of(uint32_t m) const {
     return ((m < o.sub_fold.size()) && (o.sub_fold[m] != 0))
                ? static_cast<Fold>(o.sub_fold[m] - 1U)
@@ -285,8 +267,8 @@ struct Sizer {
   [[nodiscard]] uint32_t cut_of(uint32_t m) const {
     return (m < o.sub_fold_cut.size()) ? o.sub_fold_cut[m] : 0U;
   }
-  // `seg_cross` at a segment, and whether a node is a boundary node on a cross
-  // border. Hand-built orders carry no column.
+  // `seg_cross` of `seg`, 0 where a hand-built order lacks the column; and whether `node`
+  // is a boundary node on a cross border.
   [[nodiscard]] uint8_t cross_of(uint32_t seg) const {
     return (seg < o.seg_cross.size()) ? o.seg_cross[seg] : uint8_t{ 0 };
   }
@@ -354,8 +336,8 @@ int32_t Sizer::attach_at(uint32_t seg, uint32_t state, bool down) const {
   return at;
 }
 
-// `attach_at`, and whether `seg` meets `state` at a port on the faces this
-// frame's edges arrive at, rather than at its box.
+// Sets `at` as `attach_at` returns it; true when `seg` meets `state` at a port on the
+// faces this frame's edges arrive at.
 bool Sizer::port_at(uint32_t seg, uint32_t state, bool down, int32_t &at) const {
   at = 0;
   if (seg >= g.segments.size()) { return false; }  // a hand-built frame
@@ -370,8 +352,8 @@ bool Sizer::port_at(uint32_t seg, uint32_t state, bool down, int32_t &at) const 
         (c.submachines[frame].owner.v != state)) {
       continue;
     }
-    // On the top or bottom border where the frame inside runs down and the port
-    // sits where its rank puts it, or runs across and it sits on a cross border.
+    // Top or bottom border: a rank-border port of a frame running down, or a cross-border
+    // port of one running across.
     bool const top_or_bottom{ runs_down(frame) != (cross_of(inner) != 0) };
     if (top_or_bottom != down) { continue; }
     scav_box_space const b{ box_of(s.box_state, s.n_box_state, state) };
@@ -388,7 +370,7 @@ bool Sizer::port_at(uint32_t seg, uint32_t state, bool down, int32_t &at) const 
   return false;
 }
 
-// Each edge end that meets a composite at a port off its centre.
+// Traces each edge end that meets a composite at a port off its centre.
 void Sizer::trace_ports(uint32_t m, bool down) const {
   if (trace_sink() == nullptr) { return; }
   Span const espan{ o.sub_edges[m] };
@@ -691,7 +673,7 @@ void Sizer::step_layers(ChunkView const &v, std::vector<TraceGap> &lanes) {
     return (clear && (label_gap(r) == 0)) ? Wide{ route_clearance(p) }
                                           : Wide{ p.rank_sep };
   };
-  // Where a node of the chunk sits across its layer, and how wide it is.
+  // Where a chunk node starts along the ranks within its layer, and its width.
   auto const x_in_layer = [&](uint32_t q) {
     OrderNode const &nd{ node_of(v.chunk_nodes[q]) };
     bool const dot{ (nd.kind == OrderKind::State) &&
@@ -749,8 +731,8 @@ void Sizer::step_layers(ChunkView const &v, std::vector<TraceGap> &lanes) {
   }
 }
 
-// A pseudostate with one neighbour here sits level with it and `rank_sep` away, where its
-// box is clear of every other node and inside the piece.
+// An initial or final with one neighbour here moves level with it and `rank_sep` away,
+// else only level, where its box clears every other node and stays inside the piece.
 void Sizer::seat_pseudostates(ChunkView const &v,
                               Shape &shape,
                               Wide chunk_w,
@@ -799,8 +781,7 @@ void Sizer::seat_pseudostates(ChunkView const &v,
     OrderNode const &nn{ o.nodes[v.span.off + v.nodes[v.chunk_nodes[other]]] };
     Wide const nw{ (nn.kind == OrderKind::State) ? Wide{ along(nn.subject) } : Wide{ 0 } };
     Wide const nx{ shape.at[v.chunk_nodes[other]].x };
-    // `rank_sep` from the state it joins, not a whole rank gap: the gap
-    // also holds room other transitions' labels were charged.
+    // A final sits `rank_sep` after the state it joins, an initial `rank_sep` before it.
     Wide x{ shape.at[at].x };
     if ((kind == StateKind::Final) && (r == (near_rank + 1))) { x = nx + nw + p.rank_sep; }
     if ((kind == StateKind::Initial) && (near_rank == (r + 1))) {
@@ -813,7 +794,7 @@ void Sizer::seat_pseudostates(ChunkView const &v,
           ((Wide{ want.y } + want.h) > chunk_h)) {
         return false;
       }
-      // Boundary nodes sit on the frame's edge, which the bounds above clear.
+      // Skips boundary nodes, which sit on the frame's edge.
       scav_rect const room{ grow(want, p.node_sep / 2) };
       for (uint32_t j = 0; j < v.chunk_nodes.size(); ++j) {
         if ((j == i) || (o.nodes[v.span.off + v.nodes[v.chunk_nodes[j]]].kind ==
@@ -839,8 +820,8 @@ void Sizer::seat_pseudostates(ChunkView const &v,
   }
 }
 
-// A label beside a leg between ranks needs the leader on one side; where neither side
-// holds it, the piece grows on its trailing side.
+// A label beside a leg between ranks needs its leader, height and half a node gap on one
+// side; where neither side has it, the piece grows on its trailing side.
 Wide Sizer::leg_label_room(ChunkView const &v, Shape const &shape, Wide chunk_h) const {
   auto const across = [&](uint32_t st) {
     return v.down ? out.state[st].w : out.state[st].h;
@@ -882,17 +863,15 @@ Wide Sizer::leg_label_room(ChunkView const &v, Shape const &shape, Wide chunk_h)
   return chunk_h;
 }
 
-// A label's leader and width beside a leg, with half a node gap; zero for an unlabelled
-// edge.
+// A label's leader and width beside a leg, with half a node gap; zero for no label.
 Wide Sizer::label_room(OrderEdge const &e) const {
   bool const has{ (e.segment < seg_label_w.size()) && (seg_label_w[e.segment] != 0) };
   return has ? (Wide{ label_leader(p) } + seg_label_w[e.segment] + (p.node_sep / 2))
              : Wide{ 0 };
 }
 
-// A labelled edge into a later piece passes the states below its end on their leading
-// side, so that layer moves along; a label on a leg inside one column grows the trailing
-// side.
+// A labelled edge into a later piece shifts its end's layer along when a state lies below
+// that end; a label on a flat leg inside one column widens the trailing side.
 Wide Sizer::column_label_room(ChunkView const &v,
                               Shape &shape,
                               uint32_t chunk,
@@ -1056,14 +1035,13 @@ void Sizer::seat_riders(ChunkView const &v, Shape &shape, uint32_t chunk, Wide c
   }
 }
 
-// A frame's graph need not be connected, and unconnected states all rank 0, so
-// one graph would stack them in a column. Components are laid out and packed.
+// Lays out each connected component of frame `m` separately, then packs them.
 void Sizer::lay_out_sub(uint32_t m) {
   Span const span{ o.sub_nodes[m] };
   uint32_t const ranks{ o.sub_ranks[m] };
   if ((span.len == 0) || (ranks == 0)) { return; }
-  // Everything below is along the ranks and across them, placed as x and y
-  // at the end, so a frame running down aims at its hole's ratio inverted.
+  // Works along and across the ranks, placed as x and y at the end; a frame running down
+  // inverts its hole's ratio.
   bool const down{ runs_down(m) };
   FrameDar const hole_dar{ owner_dar(m) };
   FrameDar const dar{ down ? FrameDar{ .num = hole_dar.den, .den = hole_dar.num }
@@ -1075,8 +1053,7 @@ void Sizer::lay_out_sub(uint32_t m) {
   Span const espan{ o.sub_edges[m] };
   Span const gspan{ o.sub_gaps[m] };
 
-  // Each end's extent carries the label's `leader + box height`, half on each side of the
-  // leg.
+  // Each end of a labelled edge reserves `leader + box height`, half on each side.
   int32_t const leader{ label_leader(p) };
   std::vector<int32_t> &reserve{ sc.reserve };
   vec_assign(reserve, span.len, 0);
@@ -1101,16 +1078,14 @@ void Sizer::lay_out_sub(uint32_t m) {
   std::vector<scav_rect> &boxes{ sc.boxes };
   vec_assign(boxes, components, scav_rect{});
   for (uint32_t id = 0; id < components; ++id) {
-    // A port on a cross border is placed on the frame's edge by `place_sub`
-    // and takes no room in its rank.
+    // Leaves out cross-border ports; `place_sub` puts them on the frame's edge.
     sc.nodes.clear();
     for (uint32_t k = member_off[id]; k < member_off[id + 1]; ++k) {
       if (!on_cross_border(span.off + member[k])) { vec_push_back(sc.nodes, member[k]); }
     }
     std::vector<uint32_t> const &nodes{ sc.nodes };
 
-    // Ranks renumbered from zero; `global_rank` keeps the frame's rank for the gap
-    // charges.
+    // Ranks renumbered from zero; `global_rank` keeps each frame rank for the gap charges.
     std::vector<uint32_t> &global_rank{ sc.global_rank };
     global_rank.clear();
     std::vector<uint32_t> &local_rank{ sc.local_rank };
@@ -1131,8 +1106,7 @@ void Sizer::lay_out_sub(uint32_t m) {
     vec_assign(layer_w, layers, 0);
     std::vector<Wide> &layer_h{ sc.layer_h };
     vec_assign(layer_h, layers, 0);
-    // The reserve keeps a label clear of the node beside its end; running down, a node
-    // alone in its layer takes none.
+    // Running down, a node alone in its layer takes no reserve.
     std::vector<uint32_t> &in_layer{ sc.in_layer };
     vec_assign(in_layer, layers, 0);
     for (uint32_t const k : nodes) { ++in_layer[local_rank[k]]; }
@@ -1179,9 +1153,8 @@ void Sizer::lay_out_sub(uint32_t m) {
       uint32_t const gb{ find(b) };
       if (ga != gb) { group[imax(ga, gb)] = imin(ga, gb); }
     }
-    // A group with two labelled edges has a label either side of its line,
-    // so each side needs the widest one's room; one label takes whichever
-    // side has it.
+    // A group with two or more labelled edges fits the widest label's room on each side
+    // of its line.
     std::vector<uint32_t> &labelled{ sc.labelled };
     vec_assign(labelled, nodes.size(), 0);
     std::vector<int32_t> &widest_label{ sc.widest_label };
@@ -1212,8 +1185,8 @@ void Sizer::lay_out_sub(uint32_t m) {
             imax(group_w[root_of], (2 * (leader + widest_label[root_of])) + p.node_sep);
       }
     }
-    // Parallel to `nodes`: the width whose centre a grouped state sits on,
-    // zero for one in no group.
+    // Parallel to `nodes`: the width whose centre a grouped state sits on, zero outside a
+    // group of two or more.
     std::vector<int32_t> &line{ sc.line };
     vec_assign(line, nodes.size(), 0);
     for (uint32_t i = 0; i < nodes.size(); ++i) {
@@ -1266,8 +1239,8 @@ void Sizer::lay_out_sub(uint32_t m) {
       return (global_rank[r] < gspan.len) ? Wide{ label_row[gspan.off + global_rank[r]] }
                                           : Wide{ 0 };
     };
-    // A layer of boundary nodes alone is open: it has no width, and the steps beside it
-    // keep `route_clearance` rather than `rank_sep` unless a label sits between.
+    // A layer of boundary nodes alone is bare; a step beside one keeps `route_clearance`,
+    // or `rank_sep` where a label sits between.
     std::vector<uint8_t> &bare{ sc.bare };
     vec_assign(bare, layers, 1);
     for (uint32_t const k : nodes) {
@@ -1281,7 +1254,7 @@ void Sizer::lay_out_sub(uint32_t m) {
 
     glue_layers(span, espan, local_rank, layers);
     std::vector<uint8_t> const &glued{ sc.glued };
-    // A leg's position down the overlap of its two ends, or -1 with no overlap, and the
+    // A leg's position: the midpoint of its two ends' overlap, or -1 with none; and the
     // room its label needs beside it.
     auto const width_of_node = [&](uint32_t i) {
       OrderNode const &nd{ o.nodes[span.off + nodes[i]] };
@@ -1297,8 +1270,8 @@ void Sizer::lay_out_sub(uint32_t m) {
       return has ? (Wide{ leader } + seg_label_w[e.segment] + (p.node_sep / 2))
                  : Wide{ 0 };
     };
-    // Both the straight run and its fold are laid out; the scale measure picks. A nonzero
-    // `cut_at` is the one frame rank a cut falls before, in place of `wrap_at`'s.
+    // One layout of the component, cut where the run passes `wrap_at`, or before frame
+    // rank `cut_at` when nonzero; `stack` stacks the pieces in place of packing them.
     auto const lay_out = [&](Shape &shape, Wide wrap_at, uint32_t cut_at, bool stack) {
       shape.reset(nodes.size(), espan.len);
       std::vector<uint32_t> &chunk_of{ sc.chunk_of };
@@ -1339,8 +1312,7 @@ void Sizer::lay_out_sub(uint32_t m) {
         uint32_t const first{ chunks[chunk] };
         uint32_t const last{ ((chunk + 1) < chunks.size()) ? chunks[chunk + 1] : layers };
 
-        // Only this chunk's nodes and the edges wholly inside it: an edge the cut
-        // crosses has its ends in two pieces, as a wrapped line's does.
+        // The chunk's coordinate graph: its nodes, then the edges with both ends in it.
         CoordGraph &cg{ sc.cg };
         clear_layers(cg.layers, sc.spare_layers, last - first);
         cg.extent.clear();
@@ -1374,8 +1346,8 @@ void Sizer::lay_out_sub(uint32_t m) {
           return (nd.kind == OrderKind::State) &&
                  (c.states[nd.subject].kind == StateKind::Initial);
         };
-        // Per node, what enters its leading face other than an initial, and
-        // the position of the nearest of those in the layer before.
+        // Per node, how many edges enter its leading face from a non-initial, and the
+        // least position among their earlier ends.
         std::vector<uint32_t> &arrivals{ sc.arrivals };
         vec_assign(arrivals, chunk_nodes.size(), 0);
         std::vector<uint32_t> &nearest{ sc.nearest };
@@ -1409,8 +1381,6 @@ void Sizer::lay_out_sub(uint32_t m) {
           }
           uint32_t const others{ arrivals[chunk_index[target]] };
           int32_t const half{ ceil_div((across(nd.subject) / 2) + route_clearance(p), 2) };
-          // One other arrival: with more, the initial is the median the
-          // alignment keeps the target steady on.
           if ((others != 1) || ((4 * half) > across(nt.subject))) { continue; }
           bool const above{ nd.pos < nearest[chunk_index[target]] };
           seat_at[chunk_index[dot]] = above ? -half : half;
@@ -1423,11 +1393,8 @@ void Sizer::lay_out_sub(uint32_t m) {
           uint32_t to{ index[e.dst - span.off] };
           if ((from == INVALID) || (to == INVALID)) { continue; }
           if ((chunk_index[from] == INVALID) || (chunk_index[to] == INVALID)) { continue; }
-          // Brandes-Kopf reads a segment between consecutive layers, earlier
-          // end first. A rank pin can leave an edge within one layer or
-          // pointing back, and a cut leaves one spanning several; aligned, a
-          // flat edge's two ends became one block at one coordinate, which
-          // drew `ota`'s `Writing` over `Fetching` (11.10g).
+          // Brandes-Kopf takes edges between consecutive layers, earlier end first: a back
+          // edge is flipped; a flat edge or one spanning layers is skipped.
           uint32_t const rf{ local_rank[nodes[from]] };
           uint32_t const rt{ local_rank[nodes[to]] };
           auto const at_end = [&](uint32_t node) {
@@ -1483,13 +1450,8 @@ void Sizer::lay_out_sub(uint32_t m) {
                               .cg = cg };
         count_turns(view);
 
-        // The gap a label was charged to the boundary this cut falls on, less
-        // what the packing between two pieces already gives it. Inside a
-        // chunk the charge is `rank_sep + boundary_gap`; across a cut the
-        // packer separates by `node_sep` alone and the charge was being
-        // dropped, which is why `estop` draws a 384-wide label across a
-        // 288-unit gap (11.9.3). Held back until the packing says where the
-        // piece went: see below.
+        // The gap charged to the boundary this cut falls on, less the packer's `node_sep`;
+        // applied below where the packing puts the piece beside the one before.
         carry[chunk] = (first == 0)
                            ? Wide{ 0 }
                            : imax(boundary_gap(first - 1) - p.node_sep, Wide{ 0 });
@@ -1499,8 +1461,7 @@ void Sizer::lay_out_sub(uint32_t m) {
         Wide chunk_w{ layer_x[last - first - 1] + kept_w[last - first - 1] };
         Wide chunk_h{ 0 };
         for (uint32_t i = 0; i < chunk_nodes.size(); ++i) {
-          // A node's trailing edge, not its centre plus half its extent: an odd extent
-          // halves down, so the box would not contain its own rects.
+          // Leading edge plus extent, exact for an odd extent.
           chunk_h = imax(chunk_h, (Wide{ centre[i] } - (cg.extent[i] / 2)) + cg.extent[i]);
         }
         for (uint32_t i = 0; i < chunk_nodes.size(); ++i) {
@@ -1518,8 +1479,7 @@ void Sizer::lay_out_sub(uint32_t m) {
           if (from_edge != flush) {
             vec_emplace_back(shape.centred, nd.subject, static_cast<int32_t>(from_edge));
           }
-          // Local to the piece; the packing below decides where the piece
-          // itself goes.
+          // Piece-local; the packing below places the piece.
           shape.at[at] = { .x = static_cast<int32_t>(layer_x[r - first] + from_edge),
                            .y = static_cast<int32_t>(centre[i]) };
         }
@@ -1540,8 +1500,8 @@ void Sizer::lay_out_sub(uint32_t m) {
         return;
       }
 
-      // Pieces are packed by `pack_lr`; `stack` is the other candidate, each piece under
-      // the one before at the leading edge.
+      // Pieces are packed by `pack_best`; under `stack`, each sits under the one before at
+      // the leading edge.
       Packing &packed{ sc.packed };
       if (stack) {
         packed.at.clear();
@@ -1561,11 +1521,8 @@ void Sizer::lay_out_sub(uint32_t m) {
       } else {
         pack_best(packed, sc.row, pieces, p.node_sep, p, dar, compaction);
       }
-      // A cut's label room goes on the new piece's leading edge only where the
-      // packing puts that piece beside the one before it, so the leg between
-      // them runs across the gap. Stacked, the leg runs down the gap the two
-      // ends' own reserve already opened, and the room pushed the piece away
-      // from the state it joins: `brew`'s `Pumping`, `dock`'s `Charging`.
+      // Where the packing puts a piece beside the one before, its carried gap widens it at
+      // the leading edge and the pieces repack.
       std::vector<Wide> &applied{ sc.applied };
       vec_assign(applied, chunks.size(), 0);
       for (uint32_t k = 1; (k < chunks.size()) && !stack; ++k) {
@@ -1591,12 +1548,8 @@ void Sizer::lay_out_sub(uint32_t m) {
       bool widened{ false };
       for (Wide const room : applied) { widened = widened || (room != 0); }
       if (widened) { pack_best(packed, sc.row, pieces, p.node_sep, p, dar, compaction); }
-      // Room for a label on an edge a cut crosses where the packing put its
-      // two pieces one above the other, so its leg runs down the gap between
-      // them. Two labelled edges between one pair run as a pair of legs with
-      // a label outside each, so they need the room on both sides, and the
-      // leading side is made by moving every piece along: one side each left
-      // `ota`'s pair printing over both its states (11.10g).
+      // Label room on cut edges between stacked pieces; two labelled edges on one pair of
+      // nodes take it on both sides, and the leading side shifts every piece along.
       auto const node_x = [&](uint32_t i) {
         return Wide{ shape.at[i].x } + packed.at[piece_of[i]].x;
       };
@@ -1628,7 +1581,7 @@ void Sizer::lay_out_sub(uint32_t m) {
         }
       }
       // How far in from a state's leading end along the ranks a straight leg can seat: the
-      // corner arc and at least one unit, or half the face for an inscribed glyph.
+      // corner arc clamped to [1, half its length], or half its length if inscribed.
       auto const seat_inset = [&](uint32_t i) {
         OrderNode const &nd{ o.nodes[span.off + nodes[i]] };
         if (nd.kind != OrderKind::State) { return Wide{ 0 }; }
@@ -1730,8 +1683,8 @@ void Sizer::lay_out_sub(uint32_t m) {
       }
       for (scav_rect &at : packed.at) { at.x = static_cast<int32_t>(Wide{ at.x } + lead); }
       packed.w = static_cast<int32_t>(imin(stack_w, Wide{ PACK_SATURATED }));
-      // A fold is drawable only where each edge across a cut joins two plain nodes;
-      // otherwise the scale measure's fold is no candidate and `Always` defers to `Cost`.
+      // Clears `drawable` when an edge between stacked pieces ends at a non-state or a
+      // composite.
       for (uint32_t k = 0; k < espan.len; ++k) {
         OrderEdge const &e{ o.edges[espan.off + k] };
         uint32_t const a{ index[e.src - span.off] };
@@ -1765,8 +1718,7 @@ void Sizer::lay_out_sub(uint32_t m) {
         shape.wraps = shape.wraps || (packed.at[k].y != packed.at[0].y) ||
                       (packed.at[k].x <= packed.at[k - 1].x);
       }
-      // A saturated position would leave int32 when the offset below added
-      // to it, and no caller reads a shape this phase goes on to diagnose.
+      // Returns before adding piece offsets to a shape outside the domain.
       if (!shape.ok) { return; }
       for (uint32_t i = 0; i < nodes.size(); ++i) {
         scav_rect const &at{ packed.at[piece_of[i]] };
@@ -1793,7 +1745,7 @@ void Sizer::lay_out_sub(uint32_t m) {
           dar.den,
           p.sm_tiebreak != 0);
     };
-    // A frame running down never folds.
+    // A wrap width past any run; a frame running down never folds.
     Wide const unwrapped{ Wide{ COORD_MAX } * 2 };
     Shape &best{ sc.best };
     Shape &folded{ sc.folded };
@@ -1812,8 +1764,8 @@ void Sizer::lay_out_sub(uint32_t m) {
       lay_out(folded, down ? unwrapped : target, cut_at, false);
       lay_out(stacked, down ? unwrapped : target, cut_at, true);
     }
-    // The two folds are one cut in two arrangements, so the scale measure
-    // picks between them before either is weighed against the flat run.
+    // Keeps the better of the packed and stacked folds in `folded`, preferring a usable
+    // then a drawable one.
     auto const usable = [always](Shape const &f) {
       return f.ok && f.wraps && (f.drawable || always);
     };
@@ -1822,8 +1774,8 @@ void Sizer::lay_out_sub(uint32_t m) {
          ((stacked.drawable == folded.drawable) && better(stacked, folded)))) {
       std::swap(folded, stacked);
     }
-    // `Always` takes the folded shape; a fold whose pieces repack into one row is the run
-    // unfolded, so it is no candidate.
+    // Takes the fold if the flat run fails, or if it wraps and `Always` holds or it is
+    // drawable and scales better.
     bool const swap{
       (rule != Fold::Never) && folded.ok &&
       (!best.ok || (folded.wraps && (always || (folded.drawable && better(folded, best)))))
@@ -1875,8 +1827,8 @@ void Sizer::lay_out_sub(uint32_t m) {
   place_sub(m, down, dar, boxes, sc.component, local);
 }
 
-// The frame's packing of its pieces, and each node's and state's place in it
-// along the ranks and across them, as x and y.
+// Packs the frame's components, then places each node and state, mapping along and
+// across the ranks to x and y.
 void Sizer::place_sub(uint32_t m,
                       bool down,
                       FrameDar dar,
@@ -1895,10 +1847,6 @@ void Sizer::place_sub(uint32_t m,
   out.sub[m].w = down ? packed.h : packed.w;
   out.sub[m].h = down ? packed.w : packed.h;
 
-  // A boundary node's rank puts it on the frame's border, and the folding and
-  // the two packings above leave a piece's own edges mid-frame, so its place
-  // along the ranks comes from the frame: sources where a route arrives,
-  // sinks where one leaves.
   std::vector<uint32_t> &out_deg{ sc.out_deg };
   vec_assign(out_deg, span.len, 0);
   for (uint32_t k = 0; k < espan.len; ++k) {
@@ -1910,8 +1858,7 @@ void Sizer::place_sub(uint32_t m,
     OrderNode const &nd{ o.nodes[span.off + k] };
     int32_t lead{ local[k].x + at.x };  // along the ranks
     if (nd.kind == OrderKind::Boundary) {
-      // The frame's edge, not the piece's: sources where a route arrives,
-      // sinks where one leaves.
+      // A source sits on the frame's leading edge, a sink on its trailing edge.
       lead = (out_deg[k] != 0) ? 0 : packed.w;
     }
     int32_t const cross{ local[k].y + at.y };  // across them, a centre
@@ -2103,8 +2050,8 @@ void Sizer::size_sub(uint32_t m) {
     put(labelled ? o.labels[gspan.off + k] : o.gaps[gspan.off + k]);
   }
 
-  // What it writes: the frame's extent, whether it folded, each node's place, each
-  // state's, and each edge's lean.
+  // The memo value: the frame's extent, whether it folded, each node's and state's place,
+  // and each edge's lean.
   Memo &memo{ frame_memo() };
   int32_t const *hit{ nullptr };
   uint32_t len{ 0 };
@@ -2170,11 +2117,8 @@ void Sizer::size_state(uint32_t i) {
     for (uint32_t k = 0; k < ids.size(); ++k) {
       uint32_t const m{ ids[k] };
       sub_local[m] = { .x = packed.at[k].x, .y = packed.at[k].y };
-      // Whitespace elimination grew the frame to fill its row, and this is
-      // the one packing whose rect is a box a reader sees. A sink boundary
-      // node sits on the frame's trailing edge, so the growth moves it; a
-      // source sits at zero and does not.
-      // One on the trailing cross border moves with it the other way.
+      // Whitespace elimination may grow the frame; boundary nodes on its trailing rank or
+      // cross border move to the grown edge.
       Span const span{ o.sub_nodes[m] };
       for (uint32_t u = 0; u < span.len; ++u) {
         if (o.nodes[span.off + u].kind != OrderKind::Boundary) { continue; }
@@ -2192,8 +2136,7 @@ void Sizer::size_state(uint32_t i) {
 
   scav_box_space const b{ box_of(s.box_state, s.n_box_state, i) };
   uint32_t const kind{ static_cast<uint32_t>(c.states[i].kind) };
-  // A bar is thin across the axis the flow crosses it on, which for a frame
-  // running down is the other one, so it lies down there (11.10g).
+  // A fork or join bar in a frame running down swaps its minimum width and height.
   StateKind const sk{ c.states[i].kind };
   bool const lies{ ((sk == StateKind::Fork) || (sk == StateKind::Join)) &&
                    runs_down(c.states[i].parent.v) };
@@ -2216,9 +2159,8 @@ void Sizer::size_state(uint32_t i) {
   out.state[i].h = static_cast<int32_t>(h);
 }
 
-// One whole sizing. `hole` is parallel to states -- the ratio every packing
-// inside that state's interior aims at, a `num` of 0 or a short vector falling
-// back to the profile's.
+// One whole sizing. `hole[i]` is the ratio packings inside state `i` aim at; `num` 0 or
+// a short vector falls back to the profile's ratio.
 bool size_pass(Chart const &c,
                SplitGraph const &g,
                SubmachineOrders const &o,
@@ -2294,8 +2236,8 @@ bool size_pass(Chart const &c,
   }
   if (!x.ok) { return false; }
 
-  // One descent from the root, adding each frame's origin. Everything stays inside
-  // the sized extents, so int32 cannot leave the domain here.
+  // One descent from the root, adding each frame's origin; every sum stays inside the
+  // sized extents.
   std::vector<Frame> &work{ x.sc.work };
   work.clear();
   if (c.root_submachine.v != INVALID) {
@@ -2360,15 +2302,10 @@ bool size_pass(Chart const &c,
 
 }  // namespace
 
-// Bracketed so a test can hand the hole reader two rects and read the ratio
-// back, rather than inferring it from a whole chart's extents. The prototypes a
-// test uses are its own; see scav_internal.h.
 SCAV_INTERNAL_BEGIN
 
-// A hole's aspect as a pair inside the profile's own `[1, 1024]` bounds, which
-// is where `pack.cpp` proved its products. The longer axis takes the cap and
-// the shorter one floors at 1, so an extreme hole reads as 1024:1 rather than
-// as no ratio at all; a hole with no extent on an axis has no aspect.
+// A hole's aspect as a pair in `[1, 1024]`: the longer axis takes 1024, the shorter
+// floors at 1; `num` 0 for a hole with no extent on an axis.
 FrameDar size_hole_ratio(int32_t w, int32_t h) {
   constexpr Wide CAP{ 1024 };
   if ((w <= 0) || (h <= 0)) { return {}; }
@@ -2377,11 +2314,8 @@ FrameDar size_hole_ratio(int32_t w, int32_t h) {
   return { .num = static_cast<int32_t>(num), .den = static_cast<int32_t>(den) };
 }
 
-// Per state, the aspect of the interior region its submachines are packed into:
-// the interior width by the height between the `before` and `after` bands,
-// which is the whole of the interior where a state requests neither band and
-// includes whatever slack `kind_min_h` left. Zero for a state with no live
-// submachine, which is no hole for anything to fill.
+// Per state, the aspect of the hole its submachines pack into: inside its bands, above
+// any loop room. `num` 0 for a state with no live submachine.
 void size_owner_holes(Chart const &c, SizedLayout const &z, std::vector<FrameDar> &hole) {
   vec_assign(hole, c.states.size(), FrameDar{});
   for (uint32_t i = 0; i < c.states.size(); ++i) {
@@ -2392,8 +2326,7 @@ void size_owner_holes(Chart const &c, SizedLayout const &z, std::vector<FrameDar
       packed = packed || (c.submachines[c.submachine_ids[subs.off + k].v].live != 0);
     }
     if (!packed) { continue; }
-    // The ring is what the band origin sits inside, so it comes back off the
-    // rects rather than off `pad`, which a bare pseudostate does not take.
+    // The ring: `pad`, or 0 for a bare pseudostate.
     int32_t const pad{ z.before[i].y - z.state[i].y };
     int32_t const top{ z.before[i].y + z.before[i].h };
     int32_t bottom{ (z.state[i].y + z.state[i].h) - pad - z.after[i].h };
@@ -2408,7 +2341,7 @@ SCAV_INTERNAL_END
 
 namespace {
 
-// Past the domain by one at most, so a sum the box formula reads still overflows there.
+// Clamps `v` to COORD_MAX + 1, which the box formula still rejects.
 int32_t saturate(Wide v) { return static_cast<int32_t>(imin(v, Wide{ COORD_MAX } + 1)); }
 
 }  // namespace

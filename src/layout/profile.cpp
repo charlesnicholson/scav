@@ -1,5 +1,4 @@
-// The shipped profiles as data, and the bound check every consumer of a
-// profile runs before trusting one.
+// The shipped profiles, and the range check every profile passes before use.
 
 #include "scav/scav_layout.h"
 
@@ -12,7 +11,6 @@ namespace {
 
 constexpr int32_t PT{ 16 };  // grid units are 1/16 pt
 
-// One of the two shipped profiles scav_profile_named hands out by name.
 constexpr scav_profile READABLE{
   .profile_id = 2,
   .profile_version = 16,
@@ -61,16 +59,13 @@ constexpr scav_profile READABLE{
   .w_transit_bends = 768,
   .w_whitespace = 0,
   .portfolio_k = 1024,
-  // The whole table: the packer, compaction, a frame's owner's hole, and a
-  // frame that always folds, each row searched and kicked to convergence. Row 8
-  // onward is where `axis`'s regions stack into columns (11.10g).
-  .portfolio_m = 16,
+  .portfolio_m = 16,  // every row of the search table
   .sweep_count = 8,
   .spacing_inflation_cap = 8,
   .spacing_inflation_increment = 2 * PT,
 };
 
-// The other shipped profile: tighter spacing and type for dense charts.
+// Tighter spacing and smaller type than READABLE.
 constexpr scav_profile COMPACT{
   .profile_id = 1,
   .profile_version = 16,
@@ -117,10 +112,7 @@ constexpr scav_profile COMPACT{
   .w_transit_bends = 768,
   .w_whitespace = 0,
   .portfolio_k = 1024,
-  // The whole table: the packer, compaction, a frame's owner's hole, and a
-  // frame that always folds, each row searched and kicked to convergence. Row 8
-  // onward is where `axis`'s regions stack into columns (11.10g).
-  .portfolio_m = 16,
+  .portfolio_m = 16,  // every row of the search table
   .sweep_count = 8,
   .spacing_inflation_cap = 8,
   .spacing_inflation_increment = 2 * PT,

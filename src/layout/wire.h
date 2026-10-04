@@ -1,8 +1,7 @@
 #ifndef SCAV_LAYOUT_WIRE_H_INCLUDED
 #define SCAV_LAYOUT_WIRE_H_INCLUDED
 
-// Little-endian field appends, shared by the digest and the layout hashes so
-// a big-endian host serializes the same bytes.
+// Little-endian field appends for the spaces digest and the layout hashes.
 
 #include "scav/scav_types.h"
 #include "scav_vec.h"

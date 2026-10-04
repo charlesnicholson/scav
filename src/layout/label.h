@@ -1,10 +1,8 @@
 #ifndef SCAV_LAYOUT_LABEL_H_INCLUDED
 #define SCAV_LAYOUT_LABEL_H_INCLUDED
 
-// Path boxes onto the finished routes: a fixed-length leader from a point on
-// the label's own polyline to one of the eight points of its rectangle, the
-// anchor slid along the route, the feasible candidate least at risk of reading
-// as somebody else's (11.9.4).
+// Places path boxes on finished routes, each joined to its route by a fixed-length leader.
+// The feasible candidate least crowded by foreign legs, then nearest the anchor, wins.
 
 #include "layout/decompose.h"
 #include "layout/geom.h"
@@ -18,18 +16,18 @@
 
 namespace scav {
 
-// How a box's candidates are searched; all settle one answer. `Pruned` skips those that
-// cannot win, and `Memoized` is `Pruned` behind a per-thread table of placed boxes.
+// How a box's candidates are searched; all return the same boxes. `Pruned` skips those
+// that cannot win; `Memoized` is `Pruned` behind a per-thread table of placed boxes.
 enum class LabelSearch : uint32_t {
   Pruned,
   Memoized,
 #ifdef SCAV_TESTING
-  Exhaustive,  // every candidate keyed and tested; the oracle for the other two
+  Exhaustive,  // keys and tests every candidate; the reference for the other two
 #endif
 };
 
-// Fills `out` parallel to `s.path_box`; returns the boxes that found no
-// feasible candidate and took the centred placement instead.
+// Fills `out` parallel to `s.path_box`; returns how many boxes have no feasible
+// candidate and sit centred on their anchor.
 uint32_t place_labels(Chart const &c,
                       SplitGraph const &g,
                       SizedLayout const &z,

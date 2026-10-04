@@ -1,40 +1,31 @@
 #ifndef SCAV_LAYOUT_COORDS_H_INCLUDED
 #define SCAV_LAYOUT_COORDS_H_INCLUDED
 
-// Brandes & Kopf cross-axis coordinate assignment (GD 2001) with the
-// corrections from the 2020 erratum, arXiv:2008.01252. Internal POD in, one
-// coordinate per node out; no chart, no profile, no font.
+// Brandes & Kopf cross-axis coordinate assignment (GD 2001) with the 2020 erratum's
+// corrections (arXiv:2008.01252). Maps a POD layered graph to one centre per node.
 
 #include <cstdint>
 #include <vector>
 
 namespace scav {
 
-// A proper layered graph: every edge joins consecutive layers. `extent` is
-// what each node occupies along the cross axis, so the result is centres and
-// two adjacent nodes end up at least `sep` apart edge to edge.
+// A proper layered graph: every edge joins consecutive layers.
 struct CoordGraph {
-  // One segment between consecutive layers. `inner` marks a segment whose
-  // both ends are dummies, which is the one a type-1 conflict protects.
-  // `from_at` and `to_at` are where the segment meets each end, from that
-  // end's centre along the cross axis: an aligned pair puts those two points
-  // at one coordinate, not the two centres. A `weak` edge is aligned only
-  // where no other median of its lower end could be.
   struct Edge {
-    uint32_t from, to;
-    uint32_t inner;
-    int32_t from_at{ 0 }, to_at{ 0 };
-    uint32_t weak{ 0 };
+    uint32_t from, to;                 // `from` in the earlier layer
+    uint32_t inner;                    // nonzero when both ends are dummies
+    int32_t from_at{ 0 }, to_at{ 0 };  // meeting point, from each end's centre
+    uint32_t weak{ 0 };                // tried after the strong medians
   };
 
-  std::vector<int32_t> extent;                // indexed by node
+  std::vector<int32_t> extent;                // cross-axis size, indexed by node
   std::vector<std::vector<uint32_t>> layers;  // layer -> nodes, in order
   std::vector<Edge> edges;
-  int32_t sep{ 0 };
+  int32_t sep{ 0 };  // least edge-to-edge gap between neighbours in a layer
 };
 
-// One centre per node, translated so the topmost node's leading edge is zero.
-// A node in no layer gets zero. Into `out`, reusing its capacity.
+// One centre per node, translated so the least leading edge is zero; 0 for a node in
+// no layer.
 void cross_coordinates(CoordGraph const &g, std::vector<int32_t> &out);
 
 }  // namespace scav

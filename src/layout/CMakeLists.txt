@@ -14,7 +14,7 @@ if(NOT scav_thread_backend MATCHES "^(NULL|PTHREAD|WIN32)$")
   message(FATAL_ERROR
     "SCAV_THREAD_BACKEND=${SCAV_THREAD_BACKEND}: expected AUTO, NULL, PTHREAD or WIN32")
 endif()
-# A cache entry, so the root scope that configures the package file can read it.
+# Cached; the root scope reads it when configuring the package file.
 set(SCAV_THREAD_BACKEND_RESOLVED "${scav_thread_backend}" CACHE INTERNAL
   "SCAV_THREAD_BACKEND with AUTO resolved")
 string(TOLOWER "${scav_thread_backend}" scav_thread_backend_file)
@@ -22,8 +22,7 @@ string(TOLOWER "${scav_thread_backend}" scav_thread_backend_file)
 # The layout library: its input contracts, the decomposition, and the
 # pipeline that writes the geometry columns.
 scav_static_library(scavlayout
-  # A src/-root primitive belonging to no library; layout compiles the backend
-  # its build selected, and anything linking layout reaches the shim.
+  # The selected thread shim backend, from the src/ root; consumers get it through layout.
   "../scav_thread_${scav_thread_backend_file}.cpp"
   c_api.cpp
   layout.cpp
@@ -45,7 +44,7 @@ scav_static_library(scavlayout
   cost.cpp
 )
 scav_install_library(scavlayout layout)
-# Off the search's hot path; the rest of layout stays at -O3.
+# Files off the search's hot path; the rest of layout builds at -O3.
 scav_optimize_for_size(scavlayout SOURCES
   "../scav_thread_${scav_thread_backend_file}.cpp"
   c_api.cpp
@@ -59,8 +58,7 @@ scav_optimize_for_size(scavlayout SOURCES
 target_link_libraries(scavlayout PUBLIC scavcore)
 target_link_libraries(scavlayout_testable PUBLIC scavcore_testable)
 
-# PUBLIC: a static archive carries no link flags of its own, so the consumer of
-# either variant is where -pthread has to land.
+# PUBLIC: consumers of either variant link with -pthread.
 if(scav_thread_backend STREQUAL "PTHREAD")
   set(THREADS_PREFER_PTHREAD_FLAG ON)
   find_package(Threads REQUIRED)
@@ -68,7 +66,7 @@ if(scav_thread_backend STREQUAL "PTHREAD")
   target_link_libraries(scavlayout_testable PUBLIC Threads::Threads)
 endif()
 
-# The redistributable carries every library's C surface.
+# scav_shared exports every library's C API.
 target_sources(scav_shared PRIVATE c_api.cpp)
 target_link_libraries(scav_shared PRIVATE scavlayout)
 
@@ -78,7 +76,7 @@ if(SCAV_BUILD_TESTS)
     layout_tests.cpp
     bench_tests.cpp
     gauntlet_tests.cpp
-    # Suite-level, beside the fixture both it and the unit tests drive (3.3).
+    # Suite-level, beside test_synth, the fixture it shares with the unit tests.
     tests/determinism_tests.cpp
     tests/test_synth.cpp
     profile_tests.cpp
@@ -99,13 +97,12 @@ if(SCAV_BUILD_TESTS)
     nudge_tests.cpp
     label_tests.cpp
     cost_tests.cpp
-    # The src/-root primitives standing in for the standard library's: they
-    # belong to no subsystem, so their tests sit beside them.
+    # Tests for the src/-root primitives that replace standard-library facilities.
     ../scav_rnd_tests.cpp
     ../scav_shard_tests.cpp
     ../scav_thread_tests.cpp
     ../scav_vec_tests.cpp
-    # The last shard excludes what the others take, so every case runs once.
+    # The last shard excludes the others' filters; every case runs once.
     SHARDS
       gauntlet "-tc=gauntlet:*"
       search "-tc=search*,label*"
@@ -113,8 +110,8 @@ if(SCAV_BUILD_TESTS)
       rest "-tce=gauntlet:*,search*,label*,layout:*"
   )
   target_link_libraries(scav_layout_tests PRIVATE scavlayout_testable)
-  # A floor is asserted only where the number means anything: never under
-  # instrumentation, never in Debug, and only when floors are asked for.
+  # Perf floors are asserted only with SCAV_PERF_FLOORS on, in non-Debug builds with no
+  # sanitizer or coverage.
   set(scav_perf_light OFF)
   if(NOT SCAV_SANITIZER STREQUAL "NONE" OR SCAV_COVERAGE)
     set(scav_perf_light ON)

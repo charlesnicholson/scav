@@ -1,8 +1,5 @@
-// Brandes & Kopf, with the 2020 erratum's two corrections to horizontal
-// compaction applied: a block is placed whole rather than only at its root, so
-// no offset is added twice, and class offsets are a separate pass over
-// recorded class adjacencies, so a shift accumulates along a critical path
-// instead of assuming the current class never moves.
+// Brandes & Kopf with the 2020 erratum's two horizontal-compaction corrections: blocks
+// are placed whole, and class shifts propagate in a separate pass.
 
 #include "layout/coords.h"
 
@@ -20,9 +17,7 @@
 
 namespace scav {
 
-// Bracketed so the two steps a defect would hide in are reachable from a test
-// with a hand-written graph, instead of only through the balanced average of
-// four passes. The prototypes a test uses are its own; see scav_internal.h.
+// Test entry points: type-1 marking and one of the four passes.
 SCAV_INTERNAL_BEGIN
 std::vector<uint8_t> coords_mark_type1(CoordGraph const &g);
 std::vector<int64_t> coords_one_pass(CoordGraph const &g,
@@ -37,17 +32,15 @@ namespace {
 
 constexpr int64_t SHIFT_INF{ INT64_MAX };
 
-// The graph as one of the four orientations sees it: layers walked in run
-// order, nodes walked in run order within a layer, and "upper" meaning the
-// neighbour the alignment pass may align onto.
+// The graph in one orientation: layers and nodes in run order; "upper" is the neighbour
+// the alignment pass may align onto.
 struct View {
   std::vector<std::vector<uint32_t>> layers;
   std::vector<uint32_t> pos, layer;
   std::vector<uint32_t> up_off, up_edge;  // CSR over nodes -> edge indices
 };
 
-// Every buffer the five views and four passes of one call use, kept per thread
-// and reassigned in place, so a call after the first allocates only its result.
+// Per-thread buffers for one call's five views and four passes, reassigned in place.
 struct Scratch {
   View v;
   std::vector<std::vector<uint32_t>> spare;  // layers a smaller graph's view dropped
@@ -64,19 +57,13 @@ Scratch &scratch() {
   return s;
 }
 
-// Every graph this thread has placed, by value. A search scores thousands of
-// candidates that differ in one frame, so nearly every graph one of them builds
-// another built first -- on bottler, 69k distinct of 19.8M. The key is the
-// whole graph, so a hit is the answer the passes would compute. Per thread, so
-// no lookup waits on another, and bounded, since a pool thread and what it
-// keeps here last as long as the process.
+// Per-thread memo of placed graphs, keyed by the whole graph; holds up to 2^20 words.
 Memo &memo() {
   thread_local Memo m{ size_t{ 1 } << 20 };
   return m;
 }
 
-// Every field `cross_coordinates` reads, counts before contents, so two graphs
-// with one key are one graph.
+// An injective key: every field `cross_coordinates` reads, lengths before contents.
 void key_of(CoordGraph const &g, std::vector<uint32_t> &key) {
   key.clear();
   vec_push_back(key, static_cast<uint32_t>(g.sep));
@@ -98,8 +85,7 @@ void key_of(CoordGraph const &g, std::vector<uint32_t> &key) {
   }
 }
 
-// `edge.from` is in the earlier layer, so a downward run aligns `to` onto
-// `from` and an upward run does the reverse.
+// The end a run aligns onto: `from` running downward, `to` running upward.
 uint32_t upper_of(CoordGraph::Edge const &e, bool upward) {
   return upward ? e.to : e.from;
 }
@@ -146,10 +132,7 @@ void view_of(CoordGraph const &g, bool upward, bool rightward, Scratch &sc) {
   for (uint32_t i = 0; i < g.edges.size(); ++i) {
     v.up_edge[sc.fill[lower_of(g.edges[i], upward)]++] = i;
   }
-  // The medians the alignment step picks are positions in the upper layer, so
-  // a node's upper edges have to be in that order and not in edge order. In
-  // place over each CSR slice: a copy per node is one allocation per node per
-  // pass, and there are four passes over every chunk of every component.
+  // Sorts each node's upper edges in place by the upper end's position.
   for (uint32_t i = 0; i < n; ++i) {
     scav_insertion_sort(v.up_edge.data() + v.up_off[i],
                         v.up_edge.data() + v.up_off[i + 1],
@@ -160,11 +143,8 @@ void view_of(CoordGraph const &g, bool upward, bool rightward, Scratch &sc) {
   }
 }
 
-// Each node tries its median upper neighbour and then the other median,
-// taking the first that is neither a marked segment nor a crossing of what
-// this layer has already aligned. `offset` is each node's centre from its
-// block's root, which puts the aligned segment's two ends at one coordinate;
-// a mirrored run reads the ends' offsets mirrored too.
+// Aligns each node to its first unmarked median upper neighbour past the layer's last
+// alignment. `offset`: a node's centre from its block root's, mirrored when `rightward`.
 void align_vertical(CoordGraph const &g,
                     View const &v,
                     std::vector<uint8_t> const &mark,
@@ -183,16 +163,13 @@ void align_vertical(CoordGraph const &g,
   }
   int64_t const sign{ rightward ? -1 : 1 };
   for (std::vector<uint32_t> const &lay : v.layers) {
-    // The rightmost upper neighbour this layer has already aligned onto, which
-    // is what keeps two alignments in one layer from crossing. INVALID rather
-    // than -1 so the comparison below stays within one signedness.
+    // Position of the rightmost upper neighbour this layer aligned onto; INVALID if none.
     uint32_t reached{ INVALID };
     for (uint32_t const node : lay) {
       uint32_t const d{ v.up_off[node + 1] - v.up_off[node] };
       if (d == 0) { continue; }
       std::array<uint32_t, 2> const medians{ (d - 1) / 2, d / 2 };
-      // The strong medians first, then the weak ones, so a weak edge anchors
-      // its lower end only where nothing else can.
+      // Round 0 tries the strong medians, round 1 the weak ones.
       for (uint32_t const round : { 0U, 1U }) {
         for (uint32_t const m : medians) {
           if (align[node] != node) { continue; }
@@ -216,13 +193,11 @@ void align_vertical(CoordGraph const &g,
   }
 }
 
-// Blocks form a DAG under the alignment and predecessor relations, so placing
-// them in topological order is what the erratum's recursion was ensuring.
+// Block roots in topological order of the left-neighbour relation between blocks.
 std::vector<uint32_t> const &block_order(Scratch &sc, uint32_t n) {
   View const &v{ sc.v };
   std::vector<uint32_t> const &root{ sc.root };
-  // Predecessor block -> successor block: a block is released once every
-  // block it must sit after has been placed.
+  // CSR of predecessor block -> successor blocks; `pending` counts unplaced predecessors.
   std::vector<uint32_t> &pending{ sc.pending };
   std::vector<uint32_t> &succ_off{ sc.succ_off };
   std::vector<uint32_t> &succ{ sc.succ };
@@ -253,16 +228,14 @@ std::vector<uint32_t> const &block_order(Scratch &sc, uint32_t n) {
       if (--pending[succ[k]] == 0) { vec_push_back(order, succ[k]); }
     }
   }
-  // A leftover would mean the block relation is not the DAG it is proven to
-  // be; place it anyway rather than dropping nodes out of the drawing.
+  // Appends any root still pending; every block is placed even if the relation cycles.
   for (uint32_t i = 0; i < n; ++i) {
     if ((root[i] == i) && (pending[i] != 0)) { vec_push_back(order, i); }
   }
   return order;
 }
 
-// The gap two nodes adjacent in one layer need between their centres. `ceil`
-// so a halved odd extent never under-separates.
+// Least centre-to-centre gap between two neighbours in one layer, rounded up.
 int32_t sep_between(CoordGraph const &g, uint32_t left, uint32_t right) {
   return ceil_div(g.extent[left] + g.extent[right], 2) + g.sep;
 }
@@ -284,8 +257,8 @@ void compact(CoordGraph const &g, Scratch &sc, std::vector<int64_t> &x) {
     return (v.pos[node] == 0) ? INVALID : v.layers[v.layer[node]][v.pos[node] - 1];
   };
 
-  // `x[block]` is the root's centre and a member sits `offset` from it, so a
-  // left neighbour's own centre is what a member is separated from.
+  // `x[block]` is the root's centre and member `w` sits `offset[w]` from it; each member
+  // keeps `sep_between` from its left neighbour in the same class.
   for (uint32_t const block : block_order(sc, n)) {
     uint32_t w{ block };
     do {
@@ -299,8 +272,7 @@ void compact(CoordGraph const &g, Scratch &sc, std::vector<int64_t> &x) {
       }
       w = align[w];
     } while (w != block);
-    // The first correction: the whole block takes the root's coordinate and
-    // class here, so the last pass below adds an offset exactly once.
+    // First correction: each member takes `x[block] + offset` and the root's class.
     while (align[w] != block) {
       w = align[w];
       x[w] = x[block] + offset[w];
@@ -308,10 +280,8 @@ void compact(CoordGraph const &g, Scratch &sc, std::vector<int64_t> &x) {
     }
   }
 
-  // The second correction: class adjacencies recorded first, then offsets
-  // propagated from the highest class downward, so a shift accumulates.
-  // Classes stack diagonally, so the class a pair's right member belongs to is
-  // always finished before that pair is read.
+  // Second correction: records class adjacencies by the sink layer of the right class,
+  // then propagates shifts in layer order; a right class's shift is final when read.
   std::vector<std::vector<std::pair<uint32_t, uint32_t>>> &neighborings{ sc.neighborings };
   vec_resize(neighborings, v.layers.size());
   for (std::vector<std::pair<uint32_t, uint32_t>> &at : neighborings) { at.clear(); }
@@ -346,8 +316,7 @@ void mark_type1(CoordGraph const &g, Scratch &sc) {
   view_of(g, false, false, sc);
   View const &v{ sc.v };
   uint32_t const h{ static_cast<uint32_t>(g.layers.size()) };
-  // Layer 0 holds no dummy, so no inner segment starts there and the pair
-  // (0, 1) can mark nothing; the walk starts one layer in, as published.
+  // Starts at layer 1, as published; layer 0 holds no dummy.
   for (uint32_t i = 1; (i + 1) < h; ++i) {
     std::vector<uint32_t> const &next{ g.layers[i + 1] };
     if (next.empty() || g.layers[i].empty()) { continue; }
@@ -387,8 +356,7 @@ void one_pass(CoordGraph const &g,
   view_of(g, upward, rightward, sc);
   align_vertical(g, sc.v, mark, upward, rightward, sc.root, sc.align, sc.offset);
   compact(g, sc, x);
-  // A rightward run was computed mirrored, so its coordinates come back into
-  // the graph's own frame here rather than at every reader.
+  // Negates a rightward run's mirrored coordinates back into the graph's frame.
   if (rightward) {
     for (int64_t &c : x) { c = -c; }
   }
@@ -398,7 +366,7 @@ void one_pass(CoordGraph const &g,
 
 namespace {
 
-// `coords_place` into `out`.
+// `coords_place`, written into `out`.
 void place_into(CoordGraph const &g, std::vector<int32_t> &out) {
   uint32_t const n{ static_cast<uint32_t>(g.extent.size()) };
   vec_assign(out, n, 0);
@@ -417,9 +385,8 @@ void place_into(CoordGraph const &g, std::vector<int32_t> &out) {
     for (uint32_t const node : lay) { placed[node] = 1; }
   }
 
-  // Aligned to the narrowest of the four, leftward runs by their leading edge
-  // and rightward runs by their trailing one, so the average below cannot
-  // drift toward whichever pass happened to come out widest.
+  // Shifts each pass onto the narrowest: leftward runs align leading edges, rightward
+  // runs trailing edges.
   uint32_t narrowest{ 0 };
   std::array<int64_t, 4> lo{};
   std::array<int64_t, 4> hi{};
@@ -451,8 +418,7 @@ void place_into(CoordGraph const &g, std::vector<int32_t> &out) {
         imin(imax(centre, int64_t{ COORD_MIN }), int64_t{ COORD_MAX }));
   }
 
-  // Translated so the leading edge of whatever comes first is zero, which is
-  // what makes the result a frame-local extent rather than an offset.
+  // Translates so the least leading edge of any placed node is zero.
   int32_t least{ COORD_MAX };
   for (uint32_t i = 0; i < n; ++i) {
     if (placed[i] != 0) { least = imin(least, out[i] - (g.extent[i] / 2)); }
@@ -465,7 +431,6 @@ void place_into(CoordGraph const &g, std::vector<int32_t> &out) {
 
 }  // namespace
 
-// Only a test calls these, so a build without one has no caller of either.
 SCAV_INTERNAL_BEGIN
 
 [[maybe_unused]] std::vector<uint8_t> coords_mark_type1(CoordGraph const &g) {

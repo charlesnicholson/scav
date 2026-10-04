@@ -1,8 +1,7 @@
 #ifndef SCAV_LAYOUT_PACK_H_INCLUDED
 #define SCAV_LAYOUT_PACK_H_INCLUDED
 
-// Order-preserving rectangle packing, for the sibling submachines of one
-// state. Internal POD in, positions out; no chart and no profile.
+// Order-preserving rectangle packing of one state's sibling submachines.
 
 #include "scav/scav_types.h"
 
@@ -11,35 +10,21 @@
 
 namespace scav {
 
-// Where a sum over a row or a column stops rather than wrapping, the domain
-// bounding one rect at a time and not their total. Far enough past COORD_MAX
-// that every caller's rejection fires and that no packing inside the domain
-// ever reaches it, so `pack_better` still measures both candidates as they
-// are; inside int32 so its products below stay inside int64.
+// Row and column sums saturate here: above COORD_MAX and within int32.
 inline constexpr int32_t PACK_SATURATED{ INT32_MAX };
 
-// All four fields come back filled, `x` and `y` relative to the packing's own
-// origin: whitespace elimination grows a rect past the extents it arrived
-// with, so `w` and `h` are the step's answer and not an echo of the input.
-// Every field saturates at PACK_SATURATED. `w` and `h` on the packing itself
-// are the extents before that growth, which cannot change them.
+// Every field saturates at PACK_SATURATED.
 struct Packing {
-  std::vector<scav_rect> at;
-  int32_t w{ 0 }, h{ 0 };
+  std::vector<scav_rect> at;  // origin-relative; sizes after whitespace elimination
+  int32_t w{ 0 }, h{ 0 };     // the packing's extents
 };
 
-// Whether the placement is compacted before it is filled: `On` re-offers each
-// rect the three positions it did not take and keeps a move only where the
-// packing shrinks on one axis and grows on neither. A chart-global phase-2
-// knob, because it is a smaller drawing at the price of a reflowed one, and
-// only the whole chart's `Cost` can say which the reader wanted (11.10).
+// `On`: before whitespace elimination, each rect tries its three other positions, keeping
+// a move that shrinks one extent and grows neither. A chart-global phase-2 knob.
 enum class Compaction : uint32_t { Off, On };
 
-// Greedy width approximation from the desired aspect ratio, placement
-// restricted to four positions relative to the predecessor, `compaction`, then
-// whitespace elimination, which grows every rect to fill its subrow, block and
-// row. Reading order survives: rect i is never left of and above rect j for
-// i > j, whichever steps ran. Into `out`, reusing its capacity.
+// Target width from the aspect ratio, four-position placement, `compaction`, whitespace
+// elimination. Rect i is never left of and above rect j < i.
 void pack_lr(Packing &out,
              std::vector<scav_rect> const &rects,
              int32_t sep,
@@ -47,15 +32,11 @@ void pack_lr(Packing &out,
              int32_t dar_den,
              Compaction compaction);
 
-// One row, every rect side by side and grown to the tallest. The packer that
-// wins whenever the rects are all the same height, which is what the profile's
-// `trybox` catches. Into `out`, reusing its capacity.
+// One row: every rect side by side, grown to the tallest.
 void pack_box(Packing &out, std::vector<scav_rect> const &rects, int32_t sep);
 
-// `a` beats `b` under the scale measure `SM = min(DAR/w, 1/h)`, held as a
-// rational and compared by cross-multiplication rather than computed. Ties go
-// to the smaller area then the smaller aspect deviation, reversed when
-// `aspect_first`.
+// True when `a` scores higher on `SM = min(DAR/w, 1/h)`, compared as exact rationals.
+// Ties go to smaller area then smaller aspect deviation, reversed when `aspect_first`.
 bool pack_better(Packing const &a,
                  Packing const &b,
                  int32_t dar_num,

@@ -1,4 +1,4 @@
-// The trace sink and its JSON serialization (11.16).
+// The trace sink and its JSON serialization.
 
 #include "layout/trace.h"
 #include "scav_vec.h"
@@ -10,8 +10,6 @@ namespace scav {
 
 namespace {
 
-// Thread-local so no phase signature carries a sink; a traced run is
-// single-threaded, so this is the one sink there is.
 thread_local LayoutTrace *g_sink{ nullptr };
 
 char const *kind_name(TraceKind k) {
@@ -68,8 +66,7 @@ char const *verdict_name(uint16_t v) {
   return "?";
 }
 
-// Typed appends rather than a format string: `cert-dcl50-cpp` bans the
-// variadic, and the trace has four shapes of value in it.
+// Appends JSON to `out`, one typed append per value shape: number, string, point, state.
 struct Json {
   std::vector<char> &out;
 
@@ -112,8 +109,8 @@ struct Json {
     raw("]");
   }
 
-  // A state by id and by name, or its ordinal when the row has none -- an initial
-  // pseudostate is nameless and a bend carries no state at all.
+  // Writes `state_id` and `state`: the name, or `#` and the id when nameless; `state` is
+  // null for INVALID or out-of-range `v`.
   void kstate(Chart const &c, uint32_t v) {
     if ((v == INVALID) || (v >= c.states.size())) {
       key("state");
@@ -122,8 +119,7 @@ struct Json {
     }
     kv("state_id", v);
     key("state");
-    auto const n{ chart_string(c,
-                               c.states[v].name) };  // core's view; layout may not name it
+    auto const n{ chart_string(c, c.states[v].name) };
     raw("\"");
     if (n.empty()) {
       raw("#");

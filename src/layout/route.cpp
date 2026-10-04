@@ -32,9 +32,8 @@ namespace scav {
 
 namespace {
 
-// An inner-face end on its frame's edge, moved square out to the border of the state
-// owning the frame; onto the separator where another region of that state lies between,
-// and kept on the edge where the leg would cross one of that state's walls.
+// Moves an inner-face end on `frame`'s edge square out to the owner's border; to the gap's
+// midpoint where another region is in the way; unmoved where the leg crosses a wall.
 scav_point on_owner_border(Chart const &c,
                            SizedLayout const &z,
                            uint32_t frame,
@@ -86,8 +85,7 @@ scav_point centre(scav_rect const &r) {
   return { .x = r.x + floor_div(r.w, 2), .y = r.y + floor_div(r.h, 2) };
 }
 
-// Moves `a` toward `b` by `amount`, capped at half the distance so the two
-// ends cannot cross.
+// Moves `a` toward `b` by `amount`, at most half the distance.
 scav_point trim(scav_point a, scav_point b, int32_t amount) {
   if (amount <= 0) { return a; }
   Wide const dx{ static_cast<Wide>(b.x) - a.x };
@@ -108,13 +106,8 @@ struct Planned {
   int32_t loop;                   // `RouteNet::loop`
 };
 
-// One frame's answer, written by the shard that owns the frame and read back
-// in frame order.
-// True when `b` is `a` with every coordinate moved by one delta, which it
-// writes to `dx`/`dy`. Compares exactly what the router and the nudger read, so
-// the only thing left to assume is that the router answers a shifted question
-// with a shifted answer -- which `router_orthogonal_tests` pins directly
-// (11.10c).
+// True when `b` and `frame` are `a`'s input and frame with every coordinate moved by one
+// delta, written to `dx`/`dy`; compares every input the router and the nudger read.
 bool same_but_shifted(RouteFrameCache const &a,
                       RouteInput const &b,
                       scav_rect const &frame,
@@ -161,14 +154,14 @@ bool same_but_shifted(RouteFrameCache const &a,
   return true;
 }
 
+// One frame's routes, written by the shard that owns the frame, read back in frame order.
 struct FrameRoutes {
   std::vector<scav_point> points;
   std::vector<scav_span> net_points;  // -> points, parallel to the frame's nets
   std::vector<RouteMetrics> metrics;  // parallel to the frame's nets
 };
 
-// Per-thread, reused across every frame the thread routes. A shard never waits on the
-// pool, so no second shard on this thread starts while one uses it.
+// Per-thread, reused across the frames the thread routes; one shard uses it at a time.
 struct FrameScratch {
   RouteInput in;
   RouteOutput ro;
@@ -207,14 +200,14 @@ struct CallScratch {
   std::vector<uint32_t> kid_head, kid_next, loose;
 };
 
-// A thread waiting in `parallel_for` can route another candidate before its call returns,
-// so each call takes the next scratch down this stack for its whole run.
+// Per-thread `CallScratch` stack: each call pops one for its run and pushes it back; a
+// call nested in a `parallel_for` wait takes the next.
 std::vector<CallScratch> &call_stack() {
   thread_local std::vector<CallScratch> s;
   return s;
 }
 
-// `v` resized to `n` empty lists, each keeping the capacity it had.
+// Resizes `v` to `n` empty lists, each keeping its capacity.
 void reset_lists(std::vector<std::vector<uint32_t>> &v, size_t n) {
   vec_resize(v, n);
   for (std::vector<uint32_t> &list : v) { list.clear(); }
@@ -265,8 +258,7 @@ void route_transitions(Routes &out,
     cs = std::move(stack.back());
     stack.pop_back();
   }
-  // `{trans, leg, end}` resolved to a face per segment end once, so the frame
-  // workers read a flat table rather than searching the pin list per net.
+  // Face pins as `faces[end][seg]`; INVALID where unpinned, both empty with no face pins.
   std::array<std::vector<uint32_t>, 2> &faces{ cs.faces };
   for (std::vector<uint32_t> &side : faces) { side.clear(); }
   if ((pins != nullptr) && !pins->faces.empty()) {
@@ -292,8 +284,7 @@ void route_transitions(Routes &out,
   vec_assign(out.port, n, {});
   vec_assign(out.failed, n, 0);
 
-  // The segment each port's boundary node belongs to, and the bends each
-  // segment was chained through, both gathered once.
+  // Each port's segment, and each segment's bend nodes from source to destination.
   std::vector<uint32_t> &port_seg{ cs.port_seg };
   vec_assign(port_seg, g.ports.size(), INVALID);
   for (uint32_t seg = 0; seg < g.segments.size(); ++seg) {
@@ -314,8 +305,7 @@ void route_transitions(Routes &out,
     scav_stable_sort(chain, [&](uint32_t a, uint32_t b) {
       return o.nodes[a].rank < o.nodes[b].rank;
     });
-    // Ranks climb in the acyclic direction, which is the authored one only
-    // when the segment's edge is not reversed.
+    // Ranks climb in the acyclic direction; reversed edges flip to authored order.
     if (seg_reversed[seg] != 0) {
       for (uint32_t i = 0; i < (chain.size() / 2); ++i) {
         uint32_t const other{ chain[i] };
@@ -325,8 +315,8 @@ void route_transitions(Routes &out,
     }
   }
 
-  // A slot sits on the crossed box's own border, at the height its boundary
-  // node ended up.
+  // A slot sits on the crossed box's border on its segment's side, at its boundary node's
+  // coordinate along that side; at the box centre when the segment has no node.
   auto const slot_of = [&](uint32_t port) {
     SplitPort const &pt{ g.ports[port] };
     uint32_t const seg{ port_seg[port] };
@@ -350,8 +340,7 @@ void route_transitions(Routes &out,
     return scav_port_slot{ .x = at.x, .y = at.y, .side = side, .boundary_depth = depth };
   };
 
-  // Plan every net before routing any, so the port slots come out in
-  // transition order however the frames are then visited.
+  // Plans every net before routing any; port slots are in transition order.
   std::vector<Planned> &planned{ cs.planned };
   planned.clear();
   std::vector<Span> &trans_nets{ cs.trans_nets };
@@ -370,8 +359,8 @@ void route_transitions(Routes &out,
     uint32_t const first_slot{ static_cast<uint32_t>(out.slots.size()) };
 
     if (inner_loop(c, t)) {
-      // Out of the state's inner trailing face and back, or its leading face where
-      // `loop_mirrored`, in this transition's row of the state's loop room.
+      // Four points out of the state's inner trailing face and back (leading face where
+      // `loop_mirrored`), in this transition's row of the state's loop room.
       scav_rect const r{ z.state[tr.src.v] };
       scav_rect const row{ loop_row[t] };
       bool const mirrored{ loop_mirrored(z, tr.src.v) };
@@ -386,8 +375,7 @@ void route_transitions(Routes &out,
       vec_push_back(loop_points, { .x = x, .y = ya + lane });
       vec_push_back(loop_points, { .x = border, .y = ya + lane });
     } else if (tr.src == tr.dst) {
-      // Out of a face and back: both ends name the state, and the router seats them
-      // on its least-used face.
+      // Self-loop: both ends name the state; the router seats them on its least-used face.
       uint32_t const frame{ g.segments[segs.off].frame.v };
       scav_point const mid{ centre(z.state[tr.src.v]) };
       vec_push_back(planned,
@@ -399,9 +387,8 @@ void route_transitions(Routes &out,
                       .seg = segs.off,
                       .loop = 2 * p.pad });
     } else {
-      // An endpoint that encloses its end of the route is met on that state's
-      // inner face, which is where phase 1 put the segment's boundary node.
-      // Nothing is crossed there, so the end names no obstacle and no slot.
+      // An end inside its own endpoint state sits at the segment's boundary node on that
+      // state's inner face; it names no obstacle and no slot.
       uint32_t const head{ o.seg_node[segs.off] };
       bool const head_inner{ (g.segments[segs.off].src_inner != 0) && (head != INVALID) };
       scav_point at{
@@ -426,11 +413,8 @@ void route_transitions(Routes &out,
           end = centre(z.state[tr.dst.v]);
           end_state = tr.dst.v;
         }
-        // The channel between two concurrent regions of one state is routed
-        // inside that state, in the source region's frame: in the frame the
-        // state sits in, the state is an obstacle walling the route out of
-        // the space between its own regions, and it went the long way round
-        // outside them (11.8).
+        // A separator segment, the channel between two concurrent regions of one state, is
+        // routed inside that state, in its source region's frame.
         uint32_t frame{ g.segments[seg].frame.v };
         uint32_t const from_port{ g.segments[seg].src_port };
         if ((g.segments[seg].separator != 0) && (from_port < g.ports.size()) &&
@@ -455,8 +439,7 @@ void route_transitions(Routes &out,
                     .len = static_cast<uint32_t>(out.slots.size()) - first_slot };
   }
 
-  // One batch per frame, in submachine order. A frame's nets keep the order
-  // they were planned in, which is `(transition, ordinal)`.
+  // One batch per frame, in submachine order, of nets in `(transition, ordinal)` order.
   std::vector<std::vector<uint32_t>> &by_frame{ cs.by_frame };
   reset_lists(by_frame, c.submachines.size());
   for (uint32_t i = 0; i < planned.size(); ++i) {
@@ -500,23 +483,19 @@ void route_transitions(Routes &out,
     if (!contains(z.state[up], z.state[st])) { vec_push_back(loose, st); }
   }
 
-  // Reads the model, the orders, the geometry and the plan; writes `frames[m]`
-  // and the caller's own scratch, so two frames share nothing.
+  // Writes only `frames[m]`, `fill`'s entries for frame `m`, and `sc`.
   auto const route_frame = [&](uint32_t m, FrameScratch &sc) {
     TraceFrame const traced{ SubmachineId{ m } };
     RouteInput &in{ sc.in };
     RouteOutput &ro{ sc.ro };
     in.obstacles.clear();
     in.inscribed.clear();
-    // Cleared with the obstacles it parallels: otherwise a later frame reads an
-    // earlier one's radius at that index and the corner inset stops applying.
     in.corner.clear();
     in.nets.clear();
     in.waypoints.clear();
     sc.obstacle_states.clear();
 
-    // Grown to hold every point its nets reach: a port sits on the *crossed* box's
-    // border, which is outside this submachine by the owner's padding.
+    // The frame's rect grown to cover every end, bend and loop reach of its nets.
     scav_rect region{ z.sub[m] };
     auto const cover = [&region](scav_point at) {
       int32_t const right{ imax(region.x + region.w, at.x) };
@@ -538,16 +517,14 @@ void route_transitions(Routes &out,
       }
     }
 
-    // Exactly what this router asked for, not a guess: a margin larger than it
-    // needs is canvas nobody draws in, smaller leaves a frame-edge box no lane.
     region.x -= margin;
     region.y -= margin;
     region.w += 2 * margin;
     region.h += 2 * margin;
     in.region = region;
 
-    // Every live box overlapping the region except those enclosing it, and of those only
-    // the outermost. The chain matches `ancestor_or_self`; candidates go in state order.
+    // Every live box overlapping the region and not enclosing the frame, outermost only,
+    // in state order. The chain matches `ancestor_or_self`.
     StateId const owner{ c.submachines[m].owner };
     sc.chain.clear();
     uint32_t link{ owner.v };
@@ -586,7 +563,7 @@ void route_transitions(Routes &out,
                                           z.before[st].x - z.state[st].x));
       }
     }
-    // The bands and loop rooms of the states the frame lies inside are walls inside them.
+    // The walls (bands and loop rooms) of the owner's chain that overlap the region.
     for (uint32_t const a : sc.chain) {
       sc.in_chain[a] = 0;
       for (scav_rect const &band : state_walls(z, a)) {
@@ -597,7 +574,6 @@ void route_transitions(Routes &out,
         }
       }
     }
-    // The state the frame's routes are drawn inside.
     in.enclosure = (owner.v == INVALID) ? scav_rect{} : z.state[owner.v];
     for (uint32_t const i : by_frame[m]) {
       Planned const &pn{ planned[i] };
@@ -631,7 +607,7 @@ void route_transitions(Routes &out,
       }
       vec_push_back(in.nets, net);
     }
-    // Asked once every net is in: a loop's face is read off the frame's other ends.
+    // After every net is in: a loop's `effective_faces` reads the frame's other ends.
     for (uint32_t k = 0; (fill != nullptr) && (k < by_frame[m].size()); ++k) {
       uint32_t const seg{ planned[by_frame[m][k]].seg };
       for (uint32_t end = 0; end < 2; ++end) {
@@ -641,8 +617,7 @@ void route_transitions(Routes &out,
     }
     scav_rect const frame{ (owner.v == INVALID) ? region : z.state[owner.v] };
 
-    // A frame whose question only moved is answered by moving its answer. The
-    // comparison costs one walk of an input the gather above already built.
+    // A cached frame whose input matches this one up to a translation is reused, shifted.
     int32_t dx{ 0 };
     int32_t dy{ 0 };
     if ((reuse != nullptr) && (m < reuse->frame.size()) && (reuse->frame[m].valid != 0) &&
@@ -670,17 +645,14 @@ void route_transitions(Routes &out,
 
     router.route(in, ro);
 
-    // Nudged per frame, while the frame's obstacles are in hand.
+    // Nudges the frame's lanes against its own obstacles.
     if (margin > 0) {
-      // The pitch is a line of text, not the router's clearance (11.9.5), and
-      // it is the grouping tolerance too, so what is spread apart by it is
-      // exactly what was too close by it.
       vec_assign(sc.own, ro.net_points.size(), frame);
       NudgeStats stats;
       nudge_lanes(region,
                   sc.own,
                   in.obstacles,
-                  imax(margin, p.font_size_grid),
+                  imax(margin, p.font_size_grid),  // lane pitch and grouping tolerance
                   margin,
                   ro.net_points,
                   ro.points,
@@ -719,8 +691,7 @@ void route_transitions(Routes &out,
   };
   parallel_for(shards, threads, body);
 
-  // Merged in frame order, which is what makes the totals and the point array
-  // the same at every worker count (6).
+  // Merges in frame order; totals and points are the same at every worker count.
   std::vector<scav_point> &routed{ cs.routed };
   routed.clear();
   std::vector<scav_span> &net_span{ cs.net_span };
@@ -752,11 +723,8 @@ void route_transitions(Routes &out,
     }
   }
 
-  // Laid end to end: consecutive nets share the endpoint the planner handed
-  // both of them, so a net that begins on the point already laid down drops
-  // it. Matched against that point rather than against the net's ordinal, so a
-  // router that began somewhere else leaves the break in the polyline instead
-  // of having a leg spliced over it.
+  // Lays each transition's loop points and nets end to end; a net starting on the last
+  // point laid drops that point, and any other start leaves a break in the polyline.
   vec_reserve(out.points, routed.size());
   for (uint32_t t = 0; t < n; ++t) {
     Span const nets{ trans_nets[t] };
@@ -784,14 +752,7 @@ void route_transitions(Routes &out,
     out.route[t] = { .off = first_point, .len = count };
   }
 
-  // **One pass over the composed polylines, because a lane is what a reader
-  // sees and a reader sees neither frames nor segments** (11.10a). Nudging
-  // above runs per frame on per-segment nets, so a shared run falls between two
-  // stools twice over: a decomposed transition's pieces are routed in different
-  // frames, and a piece three points long has no interior segment for a lane to
-  // hold. `dock` reads both -- `Charging -> Solid` runs down the line
-  // `Solid -> Off` runs up, 1,777 units of it in opposite directions, and the
-  // down leg is the last segment of its own three-point net.
+  // Nudges the composed polylines chart-wide, for lanes shared across frames or segments.
   if (margin > 0) {
     std::vector<scav_rect> &walls{ cs.walls };
     walls.clear();
@@ -804,11 +765,8 @@ void route_transitions(Routes &out,
         if ((band.w > 0) && (band.h > 0)) { vec_push_back(walls, band); }
       }
     }
-    // Each transition is bounded by the innermost state enclosing *both* its
-    // ends -- the frame it was routed in -- and by the chart where there is
-    // none. A hierarchy-crossing transition is bounded by the ancestor it
-    // crosses inside, which is what lets its pieces leave the child frames;
-    // one wholly inside a composite may not leave that composite.
+    // Bounds each transition by the innermost state strictly enclosing both its ends, or
+    // the chart where none does; an inner loop by its own state.
     std::vector<scav_rect> &held{ cs.held };
     vec_assign(held, out.route.size(), z.chart);
     for (uint32_t t = 0; t < out.route.size(); ++t) {

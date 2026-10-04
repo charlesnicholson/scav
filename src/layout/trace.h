@@ -1,8 +1,8 @@
 #ifndef SCAV_LAYOUT_TRACE_H_INCLUDED
 #define SCAV_LAYOUT_TRACE_H_INCLUDED
 
-// A decision trace for debugging layout itself (11.16): not a geometry column,
-// not hashed, not serialized with a chart, consumed by no builder.
+// A decision trace for debugging layout, kept out of the geometry columns, the layout
+// hash and chart serialization.
 
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
@@ -16,48 +16,46 @@ namespace scav {
 
 enum class TraceKind : uint16_t {
   None = 0,
-  RankAssigned,       // longest-path gave a state its rank
-  RankPinned,         // 11.10a's placement move overrode one
-  EdgeReversed,       // cycle-breaking flipped a segment
+  RankAssigned,       // ranking gave a state its rank
+  RankPinned,         // a rank pin overrode a state's rank
+  EdgeReversed,       // cycle-breaking or a reversal pin flipped a segment's edge
   EdgeChained,        // a multi-rank segment got a bend node at a rank
-  NodePlaced,         // phase 2 fixed a node's cross coordinate
-  SpacingInflated,    // 11.6's retry widened the chart
+  NodePlaced,         // phase 2 placed a node, root-absolute
+  SpacingInflated,    // a spacing-inflation retry widened the chart and was kept
   NetPlanned,         // a segment became a net with seats and waypoints
   NetWaypoint,        // one waypoint of the net last planned
-  SeatMoved,          // one of 11.5's seating passes moved an attachment
+  SeatMoved,          // a seating pass moved an attachment
   LaneAssigned,       // nudging put a run in a corridor lane
   RouteDegraded,      // a transition fell back to a straight line
-  CandidateScored,    // one row of 11.10's table, or one Level 1 move
-  CandidateTerms,     // the nine Tier-2 shares behind the score above
+  CandidateScored,    // a Level 1 move was scored; `pass` is its verdict
+  CandidateTerms,     // the Tier-2 shares of the score in the event before
   FoldCut,            // a folded rank run started a piece here, or was refused
   PseudostateSeated,  // an initial or final was set beside the state it joins
-  PortTurned,         // a port was turned to face the far end of its route
+  PortTurned,         // a port was turned onto another border
   PortAttached,       // a segment meets a composite at its port, off its centre
   ColumnCentred,      // a state moved along its column onto a joined state's centre
   PiecePacked,        // where the packing put one piece of a component's rank run
-  GapCharged,         // phase 1 asked a rank boundary for width beyond rank_sep
+  GapCharged,         // a rank boundary was charged width beyond rank_sep
   FoldPinned,         // a fold pin decided a frame's fold; `pass` is its mode
   BoundaryCarried,    // a fold cut took a boundary node into its neighbour's piece
   LoopFaced,   // an outer self-loop took its box's least-used face; `leg` is the net
-  PortWalled,  // every face a port could take is lined, so it stays and pays
+  PortWalled,  // every face a port could take is lined; the port stays
 };
 
-// What a rank boundary's charge is for; `GapCharged.pass`. `Held` charges
-// nothing: it names the boundary whose charge already holds a label's width.
+// What a rank boundary's charge is for; `GapCharged.pass`. `Held` adds nothing: the
+// boundary's charge already covers the label.
 enum class GapCause : uint16_t { Label, Lanes, Held };
 
 // What seating an initial or final pseudostate did; `PseudostateSeated.pass`.
 enum class SeatHow : uint16_t { Moved, Levelled, Declined };
 
-// Which of 11.5's seating passes moved a seat; `SeatMoved.pass`.
+// Which seating pass moved a seat; `SeatMoved.pass`.
 enum class SeatPass : uint16_t { Attach, Reface, Align, Spread, Separate, Nudge, Loop };
 
-// Why a Level 1 move was not taken; `CandidateScored.verdict`.
+// A Level 1 move's outcome; `CandidateScored.pass`.
 enum class MoveVerdict : uint16_t { Taken, NotViable, Inflated, NotBetter };
 
-// Payloads are POD and name entities by id, never by node index -- an index is
-// an artefact of how a frame was built and chaining appends bends to it. Named
-// rather than anonymous because a nested anonymous type is a C++ extension.
+// Payloads are POD and name entities by id, never by frame node index.
 struct TraceRank {
   uint32_t state, rank;
 };
@@ -67,37 +65,34 @@ struct TraceChain {
 struct TraceSeg {
   uint32_t seg;
 };
-// `rank` is the frame's rank a piece starts at; `refused` is set where a cut
-// there would have separated a pseudostate or a boundary node from the node it
-// joins; `carried` is the label room the piece took on its leading edge,
-// nonzero only where it was packed beside the piece before it.
+// A fold cut before frame rank `rank`; `refused` is set where the cut would split a
+// pseudostate or boundary node from the node it joins.
 struct TraceFold {
   uint32_t rank, refused;
-  int32_t carried;
+  int32_t carried;  // leading-edge label room of the piece the cut starts
 };
-// `side` is the border the port was turned onto: 0 left, 1 right, 2 top, 3 bottom.
+// `side` is the border the port ends on: 0 left, 1 right, 2 top, 3 bottom.
 struct TracePort {
   uint32_t seg, trans, leg, side;
 };
-// `rank` is the frame's rank the piece starts at, the rect is frame-local and
-// what the packing placed, and `carried` the label room on its leading edge.
 // `seg` is the boundary node's segment and `rank` the frame rank its piece starts at.
 struct TraceCarry {
   uint32_t seg, rank;
 };
+// `rank` is the frame rank the piece starts at, the rect is frame-local as packed, and
+// `carried` is its leading-edge label room.
 struct TracePiece {
   uint32_t rank;
   int32_t x, y, w, h, carried;
 };
-// `boundary` is the frame's rank boundary, the one after rank `boundary`;
-// `seg` the segment whose edge asked for `width` there.
+// `boundary` is the frame's rank boundary after rank `boundary`; `seg` is the segment
+// whose edge charged `width` there.
 struct TraceGap {
   uint32_t boundary, seg;
   int32_t width;
 };
-// `by` is the port's height from the state's centre for `PortAttached`, and
-// how far along its column the state moved for `ColumnCentred`, whose `seg` is
-// INVALID.
+// `by` is the port's offset across the ranks from the state's centre (`PortAttached`), or
+// the state's move along its column (`ColumnCentred`, whose `seg` is INVALID).
 struct TraceShift {
   uint32_t state, seg;
   int32_t by;
@@ -124,9 +119,8 @@ struct TraceLane {
   uint32_t net, lane;
   int32_t at;
 };
-// `move` is which dimension a Level 1 candidate moved along (11.10): 0 a rank,
-// 1 a chain cut, 2 a reversal, 3 a face -- whose `end` and `face` then say
-// which. A row of Level 2 has `row` set and no move.
+// `move` is a Level 1 move's `TRACE_MOVE_*`, and `end` (0 src, 1 dst) the end a face or
+// side move changed. `row` is the Level 2 row, INVALID for a Level 1 move.
 struct TraceScore {
   uint32_t row, state, rank, trans, leg;
   uint16_t move, end;
@@ -137,19 +131,18 @@ struct TraceScore {
 inline constexpr uint16_t TRACE_MOVE_RANK{ 0 };
 inline constexpr uint16_t TRACE_MOVE_CUT{ 1 };
 inline constexpr uint16_t TRACE_MOVE_REVERSE{ 2 };
-inline constexpr uint16_t TRACE_MOVE_FACE{ 3 };
+inline constexpr uint16_t TRACE_MOVE_FACE{ 3 };  // `face` holds the face
 inline constexpr uint16_t TRACE_MOVE_SIDE{ 4 };  // `face` holds the side
 inline constexpr uint16_t TRACE_MOVE_FOLD{ 5 };  // `rank` holds the cut's layer
-// Basis points of the scored sum, in CostTerms order, so a rejected move says
-// which term rejected it without the event carrying nine 64-bit quantities.
+// Each Tier-2 term's share of the scored sum in basis points, in CostTerms order.
 struct TraceTerms {
   std::array<int32_t, TIER2_TERMS> share;
 };
 
 struct TraceEvent {
   TraceKind kind{ TraceKind::None };
-  uint16_t pass{ 0 };         // SeatPass / MoveVerdict / GapCause, else 0
-  uint32_t frame{ INVALID };  // stamped by the sink unless the site names one
+  uint16_t pass{ 0 };         // SeatPass / SeatHow / MoveVerdict / GapCause / Fold, else 0
+  uint32_t frame{ INVALID };  // stamped by the sink unless the site sets one
   union {
     TraceRank rank;
     TraceChain chain;
@@ -171,27 +164,24 @@ struct TraceEvent {
   };
 };
 
-// The sink the phases append to. Null everywhere but a traced run, so an emit
-// off the hot path is a load and a branch.
+// The sink the phases append to during a traced run.
 struct LayoutTrace {
   std::vector<TraceEvent> events;
-  uint32_t frame{ INVALID };  // stamped onto every event; phases set it once
+  uint32_t frame{ INVALID };  // stamped onto each event that sets no frame
 };
 
-// Thread-local so no phase signature carries a sink it never uses. A traced run
-// forces `threads = 1` (11.16), which is what keeps event order a function of
-// the algorithm rather than of the scheduler.
+// This thread's sink, null outside a traced run. A traced run forces `threads = 1`.
 LayoutTrace *trace_sink();
 void trace_sink_set(LayoutTrace *t);
 
 inline void trace_emit(TraceEvent e) {
   LayoutTrace *const t{ trace_sink() };
   if (t == nullptr) { return; }
-  if (e.frame == INVALID) { e.frame = t->frame; }  // an explicit frame wins
+  if (e.frame == INVALID) { e.frame = t->frame; }
   vec_push_back(t->events, e);
 }
 
-// Scopes the frame stamp, so a phase that recurses restores its caller's.
+// Sets the sink's frame stamp for its scope and restores the previous one on exit.
 struct TraceFrame {
   LayoutTrace *const t{ trace_sink() };
   uint32_t const was{ (t != nullptr) ? t->frame : INVALID };
@@ -205,7 +195,7 @@ struct TraceFrame {
   TraceFrame &operator=(TraceFrame const &) = delete;
 };
 
-// One line per event, in order. The reader is `tools/trace.py`.
+// A JSON array, one event per line in order; `tools/trace.py` reads it.
 void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out);
 
 }  // namespace scav

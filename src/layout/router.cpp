@@ -1,5 +1,4 @@
-// The router registry. Routers cross every boundary by name; the id is an
-// index into this table and nothing more.
+// The router registry; a router id is an index into `ROUTERS`.
 
 #include "layout/router.h"
 
@@ -14,12 +13,10 @@ namespace scav {
 
 namespace {
 
-// Stateless and const, so these are constant-initialised and the table below
-// cannot depend on when another translation unit's statics ran.
 constinit StraightRouter const STRAIGHT;
 constinit OrthogonalRouter const ORTHOGONAL;
 
-// Index 0 is what a caller that has no opinion gets.
+// Index 0 is the default router.
 constexpr std::array<Router const *, 2> ROUTERS{ { &ORTHOGONAL, &STRAIGHT } };
 
 }  // namespace
