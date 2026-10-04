@@ -22,7 +22,7 @@
 namespace scav {
 void thread_test_delay_seed(uint64_t seed);
 // The portfolio's row count, which `layout.cpp` brackets with SCAV_INTERNAL.
-uint32_t search_tuple_count(scav_profile const &p, uint32_t entity_count);
+uint32_t search_tuple_count(scav_profile const &p);
 }  // namespace scav
 
 namespace {
@@ -226,12 +226,10 @@ TEST_CASE("determinism: the corpus lays out to one answer at every thread count"
   // below, at the depth that ships, on the charts that move the most (11.10).
   p.portfolio_k = 24;
   REQUIRE(profile_validate(p));
+  REQUIRE(search_tuple_count(p) == 4);
   std::string shards;
   for (char const *name : CHARTS) {
     if (scav::test::corpus_skipped(name)) { continue; }
-    Chart sized;
-    load_corpus(name, sized);
-    REQUIRE(search_tuple_count(p, layout_entity_count(sized)) == 4);
     check_corpus_chart(name, p);
 
     Chart c;

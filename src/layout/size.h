@@ -53,6 +53,14 @@ enum class DarSource : uint32_t { Profile, OwnerHole };
 // arbitrated (11.10a). `Never` keeps the run unwrapped; a fold pin names one frame's.
 enum class Fold : uint32_t { Scale, Always, Never };
 
+// One row of the search's table: the profile and the phase-2 tuple it lays out with.
+struct Row {
+  scav_profile knobs{};
+  DarSource dar{ DarSource::Profile };
+  Compaction pack{ Compaction::Off };
+  Fold fold{ Fold::Scale };
+};
+
 // A state's bands as walls, then its loop room: the side bands run from the top band's
 // top to the bottom band's bottom, so no seam opens where two bands meet, and the room
 // runs on to the border its loops leave by.

@@ -1696,7 +1696,7 @@ What the review did find is that `ortho_spread_attachments` did not do what its 
 
 **How much a chart is searched no longer depends on how big it is. Landed.** Both shifts are gone: a chart gets the whole of `portfolio_m` and the whole of `portfolio_k` whatever its size. **No corpus geometry moves**, because every corpus chart is under 512 entities and the shift was already zero for all of them — what it changed was the 2k targets and anything larger, where it had been quietly running one row and, past 16k entities, scoring no moves at all. What it costs, measured with search on: nested 2k 123 ms to 807 ms, flat 2k 1,890 ms to 8,066 ms. **What it buys on the charts this project has is nothing measurable** — both 2k shapes are synthetic and find no improving move at any budget — and that is recorded as the honest state rather than a win. The corpus renders in 0.27 s for all eleven.
 
-**A flat chart is where frame reuse has nothing to give**, and that is the shape to fix next: one frame means a move dirties the only frame there is, so `mill`'s 19-in-20 becomes 0-in-1. The bound on a big chart should be the work a candidate actually does rather than a closed form over entity count, which is why `search_move_budget` and `search_tuple_count` keep the count in their signatures while ignoring it.
+**A flat chart is where frame reuse has nothing to give**, and that is the shape to fix next: one frame means a move dirties the only frame there is, so `mill`'s 19-in-20 becomes 0-in-1. The bound on a big chart should be the work a candidate actually does rather than a closed form over entity count.
 
 **[OWED] The rest of the plan, in the order the steps enable each other.**
 

@@ -32,11 +32,7 @@ namespace scav {
 
 // The portfolio's row, which `layout.cpp` brackets with SCAV_INTERNAL, declared
 // here rather than in a header so the shipping build keeps it internal.
-void search_tuple(scav_profile &p,
-                  DarSource &dar,
-                  Compaction &pack,
-                  Fold &fold,
-                  uint32_t index);
+Row search_row(scav_profile const &p, uint32_t index);
 
 }  // namespace scav
 
@@ -151,11 +147,7 @@ void lay(char const *name,
   // is a failure rather than a documented fallback.
   CHECK(diags.empty());
 
-  scav_profile knobs{ p };
-  DarSource dar{ DarSource::Profile };
-  Compaction pack{ Compaction::Off };
-  Fold fold{ Fold::Scale };
-  search_tuple(knobs, dar, pack, fold, out.tuple);
+  auto const [knobs, dar, pack, fold]{ search_row(p, out.tuple) };
   out.g = decompose(out.c);
   // The drawing is the tuple's *and* the pins' (11.10a), so re-deriving it
   // needs both or this measures a layout nobody was shown. The pins reach

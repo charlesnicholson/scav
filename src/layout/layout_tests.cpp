@@ -1487,13 +1487,9 @@ namespace scav {
 // brackets with SCAV_INTERNAL, declared here rather than in a header so the
 // shipping build keeps them internal.
 bool inflation_done(uint32_t fewest, uint32_t degraded, uint32_t unreachable, bool &keep);
-uint32_t search_tuple_count(scav_profile const &p, uint32_t entity_count);
-uint32_t search_move_budget(scav_profile const &p, uint32_t entity_count);
-void search_tuple(scav_profile &p,
-                  DarSource &dar,
-                  Compaction &pack,
-                  Fold &fold,
-                  uint32_t index);
+uint32_t search_tuple_count(scav_profile const &p);
+uint32_t search_move_budget(scav_profile const &p);
+Row search_row(scav_profile const &p, uint32_t index);
 uint32_t search_argmin(std::vector<Cost> const &cost, std::vector<uint8_t> const &viable);
 
 }  // namespace scav
@@ -1515,59 +1511,44 @@ TEST_CASE("layout: the table's first row is the profile as given") {
       given.sm_tiebreak = tiebreak;
       for (uint32_t row = 0; row < LAYOUT_SEARCH_ROWS; ++row) {
         CAPTURE(row);
-        scav_profile knobs{ given };
-        DarSource dar{ DarSource::OwnerHole };
-        Compaction pack{ Compaction::On };
-        Fold fold{ Fold::Always };
-        search_tuple(knobs, dar, pack, fold, row);
-        CHECK(knobs.trybox == (given.trybox ^ static_cast<int32_t>(row & 1U)));
-        CHECK((pack == ((((row >> 1U) & 1U) != 0) ? Compaction::On : Compaction::Off)));
-        CHECK((dar ==
+        Row const r{ search_row(given, row) };
+        CHECK(r.knobs.trybox == (given.trybox ^ static_cast<int32_t>(row & 1U)));
+        CHECK((r.pack == ((((row >> 1U) & 1U) != 0) ? Compaction::On : Compaction::Off)));
+        CHECK((r.dar ==
                ((((row >> 2U) & 1U) != 0) ? DarSource::OwnerHole : DarSource::Profile)));
         // Bit 3, the highest, so the eight rows below it are what they were.
-        CHECK((fold == ((row < 8) ? Fold::Scale : Fold::Always)));
+        CHECK((r.fold == ((row < 8) ? Fold::Scale : Fold::Always)));
         // The scale-measure tiebreak is no longer a row of the table, so no row
         // may touch it -- it won on no chart at either scale, and compaction
         // took the bit. Every knob reads back to say the row moved one.
-        CHECK(knobs.sm_tiebreak == given.sm_tiebreak);
+        CHECK(r.knobs.sm_tiebreak == given.sm_tiebreak);
+        scav_profile knobs{ r.knobs };
         knobs.trybox = given.trybox;
         CHECK(profile_fields(knobs) == profile_fields(given));
       }
       // Row 1 is the packer and nothing else, which is the whole reason the
       // bits are in this order.
-      scav_profile second{ given };
-      DarSource one{ DarSource::OwnerHole };
-      Compaction one_pack{ Compaction::On };
-      Fold one_fold{ Fold::Always };
-      search_tuple(second, one, one_pack, one_fold, 1);
-      CHECK((one_fold == Fold::Scale));
-      CHECK(second.trybox != given.trybox);
-      CHECK((one_pack == Compaction::Off));
-      CHECK((one == DarSource::Profile));
+      Row const second{ search_row(given, 1) };
+      CHECK((second.fold == Fold::Scale));
+      CHECK(second.knobs.trybox != given.trybox);
+      CHECK((second.pack == Compaction::Off));
+      CHECK((second.dar == DarSource::Profile));
 
       // Row 2 is compaction and nothing else, and row 3 is both.
-      scav_profile third{ given };
-      DarSource two{ DarSource::OwnerHole };
-      Compaction two_pack{ Compaction::Off };
-      Fold two_fold{ Fold::Always };
-      search_tuple(third, two, two_pack, two_fold, 2);
-      CHECK((two_fold == Fold::Scale));
-      CHECK(third.trybox == given.trybox);
-      CHECK((two_pack == Compaction::On));
-      CHECK((two == DarSource::Profile));
+      Row const third{ search_row(given, 2) };
+      CHECK((third.fold == Fold::Scale));
+      CHECK(third.knobs.trybox == given.trybox);
+      CHECK((third.pack == Compaction::On));
+      CHECK((third.dar == DarSource::Profile));
 
       // The four rows of each half are the four combinations, once each: an
       // M of 4 is exactly {as given, trybox, compact, trybox+compact}.
       uint32_t seen{ 0 };
       for (uint32_t row = 0; row < 4; ++row) {
-        scav_profile knobs{ given };
-        DarSource dar{ DarSource::Profile };
-        Compaction pack{ Compaction::Off };
-        Fold fold{ Fold::Scale };
-        search_tuple(knobs, dar, pack, fold, row);
-        CHECK((dar == DarSource::Profile));
-        seen |= 1U << static_cast<uint32_t>(((knobs.trybox ^ given.trybox) * 2) +
-                                            ((pack == Compaction::On) ? 1 : 0));
+        Row const r{ search_row(given, row) };
+        CHECK((r.dar == DarSource::Profile));
+        seen |= 1U << static_cast<uint32_t>(((r.knobs.trybox ^ given.trybox) * 2) +
+                                            ((r.pack == Compaction::On) ? 1 : 0));
       }
       CHECK(seen == 0xFU);
     }
@@ -1580,37 +1561,26 @@ TEST_CASE("layout: how much a chart is searched does not depend on how big it is
   // before latency, so what a big chart gets is the whole of M and the whole of
   // K, and the cost of a candidate is what was fixed instead (11.10c).
   scav_profile p{ readable() };
-  for (uint32_t entities :
-       { 0U, 1U, 1023U, 1024U, 2048U, 6000U, 1U << 12U, 0xFFFF'FFFFU }) {
-    CAPTURE(entities);
-    for (int32_t m : { 1, 4, 8 }) {
-      p.portfolio_m = m;
-      CHECK(search_tuple_count(p, entities) == static_cast<uint32_t>(m));
-      CHECK(profile_validate(p));
-    }
-    for (int32_t k : { 0, 1, 24, 64 }) {
-      p.portfolio_k = k;
-      CHECK(search_move_budget(p, entities) == static_cast<uint32_t>(k));
-    }
+  for (int32_t m : { 1, 4, 8 }) {
+    p.portfolio_m = m;
+    CHECK(search_tuple_count(p) == static_cast<uint32_t>(m));
+    CHECK(profile_validate(p));
+  }
+  for (int32_t k : { 0, 1, 24, 64 }) {
+    p.portfolio_k = k;
+    CHECK(search_move_budget(p) == static_cast<uint32_t>(k));
   }
 
   // A profile this never saw validated is held inside the table all the same:
   // a row index past its last row would repeat a tuple already run.
   p.portfolio_m = 64;
   CHECK(!profile_validate(p));
-  CHECK(search_tuple_count(p, 1) == LAYOUT_SEARCH_ROWS);
+  CHECK(search_tuple_count(p) == LAYOUT_SEARCH_ROWS);
   // And a negative in either field is floored rather than wrapped.
   p.portfolio_m = -1;
-  CHECK(search_tuple_count(p, 1) == 1);
+  CHECK(search_tuple_count(p) == 1);
   p.portfolio_k = -1;
-  CHECK(search_move_budget(p, 1) == 0);
-
-  // Both 2k shapes get the whole table, which is the claim the change is about.
-  Chart nested{ nested_2k_chart() };
-  Chart flat{ flat_2k_chart() };
-  p.portfolio_m = 4;
-  CHECK(search_tuple_count(p, layout_entity_count(nested)) == 4);
-  CHECK(search_tuple_count(p, layout_entity_count(flat)) == 4);
+  CHECK(search_move_budget(p) == 0);
 }
 
 TEST_CASE("layout: the portfolio reduces in index order and a tie keeps the lower row") {
@@ -1661,11 +1631,7 @@ TEST_CASE("layout: the pick is the row exact Cost ranks first over the whole tab
   std::vector<scav_rect> shipped;
   for (uint32_t row = 0; row < 4; ++row) {
     CAPTURE(row);
-    scav_profile knobs{ p };
-    DarSource dar{ DarSource::Profile };
-    Compaction pack{ Compaction::Off };
-    Fold fold{ Fold::Scale };
-    search_tuple(knobs, dar, pack, fold, row);
+    auto const [knobs, dar, pack, fold]{ search_row(p, row) };
     SubmachineOrders const o{ order_submachines(searched, g, {}, knobs) };
     SizedLayout z;
     std::vector<Diagnostic> spilled;
@@ -1704,11 +1670,7 @@ TEST_CASE("layout: a pinned row runs that row, and searches from it" *
 
   for (uint32_t pin = 0; pin < LAYOUT_SEARCH_ROWS; ++pin) {
     CAPTURE(pin);
-    scav_profile knobs{ p };
-    DarSource dar{ DarSource::Profile };
-    Compaction pack{ Compaction::Off };
-    Fold fold{ Fold::Scale };
-    search_tuple(knobs, dar, pack, fold, pin);
+    auto const [knobs, dar, pack, fold]{ search_row(p, pin) };
 
     Chart c;
     load_corpus("axis.scav", c);

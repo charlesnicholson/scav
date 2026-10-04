@@ -58,21 +58,14 @@ SCAV_INTERNAL_BEGIN
 // bracketed so a test reaches cases no chart does. The prototypes a test uses
 // are its own; see scav_internal.h.
 bool inflation_done(uint32_t fewest, uint32_t degraded, uint32_t unreachable, bool &keep);
-uint32_t search_tuple_count(scav_profile const &p, uint32_t entity_count);
-uint32_t search_move_budget(scav_profile const &p, uint32_t entity_count);
-void search_tuple(scav_profile &p,
-                  DarSource &dar,
-                  Compaction &pack,
-                  Fold &fold,
-                  uint32_t index);
+uint32_t search_tuple_count(scav_profile const &p);
+uint32_t search_move_budget(scav_profile const &p);
+Row search_row(scav_profile const &p, uint32_t index);
 uint32_t search_argmin(std::vector<Cost> const &cost, std::vector<uint8_t> const &viable);
-// Every input a Level 1 search's result depends on, as words: the objective, the tuple,
+// Every input a Level 1 search's result depends on, as words: the objective, the row,
 // the budget, the seed pins in order, and the frames it may move in.
 void search_key(scav_profile const &objective,
-                scav_profile const &knobs,
-                DarSource dar,
-                Compaction pack,
-                Fold fold,
+                Row const &row,
                 uint32_t budget,
                 bool refold,
                 SearchPins const &seed,
@@ -515,30 +508,34 @@ void label_candidate(Candidate &cand,
   cover_chart(cand);
 }
 
-// Phases 2 and 3 for one tuple, `knobs` holding it, into `out`, reusing its capacity and
-// `scratch`'s. `prefix` receives the prefix; `from`, one differing from `pins` only in
-// faces, supplies phases 1 and 2 in place of `orders`.
+// The caches a candidate reads and writes, each optional.
+struct CandidateReuse {
+  RouteCache const *reuse{ nullptr };  // the incumbent's routes, read
+  RouteCache *fill{ nullptr };         // this candidate's routes, written
+  Prefix *prefix{ nullptr };           // receives the prefix
+  Prefix const *from{ nullptr };       // differs from the pins only in faces
+  CandidateScratch *scratch{ nullptr };
+};
+
+// Phases 2 and 3 for `row` into `out`, reusing its capacity and `with.scratch`'s.
+// `with.from` supplies phases 1 and 2 in place of `orders`.
 void search_candidate(Candidate &out,
                       Chart const &c,
                       SplitGraph const &g,
                       SubmachineOrders const &orders,
                       scav_spaces const &s,
-                      scav_profile const &knobs,
-                      DarSource dar,
-                      Compaction pack,
-                      Fold fold,
+                      Row const &row,
                       Router const &router,
                       uint32_t threads,
                       std::vector<Diagnostic> &diags,
-                      RouteCache const *reuse,
-                      RouteCache *fill,
                       SearchPins const *pins,
-                      Prefix *prefix,
-                      Prefix const *from,
-                      bool labels,
-                      CandidateScratch *scratch) {
+                      CandidateReuse const &with,
+                      bool labels) {
+  scav_profile const &knobs{ row.knobs };
+  Prefix *const prefix{ with.prefix };
+  Prefix const *const from{ with.from };
   CandidateScratch own;
-  CandidateScratch &sc{ (scratch != nullptr) ? *scratch : own };
+  CandidateScratch &sc{ (with.scratch != nullptr) ? *with.scratch : own };
   out.inflations = 0;
   out.viable = false;
   out.sized_chart = {};
@@ -554,7 +551,16 @@ void search_candidate(Candidate &out,
     if (pins != nullptr) { out.laid.faces = pins->faces; }
     use = &from->laid;
   } else {
-    if (!size_layout(c, g, orders, s, knobs, out.sized, diags, dar, pack, fold)) {
+    if (!size_layout(c,
+                     g,
+                     orders,
+                     s,
+                     knobs,
+                     out.sized,
+                     diags,
+                     row.dar,
+                     row.pack,
+                     row.fold)) {
       if (prefix != nullptr) { prefix->ok = false; }
       out.routes = Routes{};
       out.laid = SearchPins{};
@@ -585,7 +591,16 @@ void search_candidate(Candidate &out,
       order_submachines(facing, c, g, s, knobs, threads, turned);
       SizedLayout &again{ sc.again };
       std::vector<Diagnostic> spilled;
-      if (size_layout(c, g, facing, s, knobs, again, spilled, dar, pack, fold)) {
+      if (size_layout(c,
+                      g,
+                      facing,
+                      s,
+                      knobs,
+                      again,
+                      spilled,
+                      row.dar,
+                      row.pack,
+                      row.fold)) {
         use = &facing;
         std::swap(out.sized, again);
       }
@@ -607,8 +622,8 @@ void search_candidate(Candidate &out,
                     knobs,
                     router,
                     threads,
-                    reuse,
-                    fill,
+                    with.reuse,
+                    with.fill,
                     pins,
                     labels);
   if (prefix != nullptr) { prefix->routes = out.routes; }
@@ -625,7 +640,16 @@ void search_candidate(Candidate &out,
     if (!inflate(wider, knobs.spacing_inflation_increment)) { break; }
     SizedLayout next_sized;
     std::vector<Diagnostic> spilled;
-    if (!size_layout(c, g, laid, s, wider, next_sized, spilled, dar, pack, fold)) {
+    if (!size_layout(c,
+                     g,
+                     laid,
+                     s,
+                     wider,
+                     next_sized,
+                     spilled,
+                     row.dar,
+                     row.pack,
+                     row.fold)) {
       break;
     }
     Routes next{ route_transitions(c,
@@ -661,39 +685,14 @@ Candidate search_candidate(Chart const &c,
                            SplitGraph const &g,
                            SubmachineOrders const &orders,
                            scav_spaces const &s,
-                           scav_profile const &knobs,
-                           DarSource dar,
-                           Compaction pack,
-                           Fold fold,
+                           Row const &row,
                            Router const &router,
                            uint32_t threads,
                            std::vector<Diagnostic> &diags,
-                           RouteCache const *reuse = nullptr,
-                           RouteCache *fill = nullptr,
-                           SearchPins const *pins = nullptr,
-                           Prefix *prefix = nullptr,
-                           Prefix const *from = nullptr,
-                           bool labels = true) {
+                           SearchPins const *pins,
+                           CandidateReuse const &with = {}) {
   Candidate out;
-  search_candidate(out,
-                   c,
-                   g,
-                   orders,
-                   s,
-                   knobs,
-                   dar,
-                   pack,
-                   fold,
-                   router,
-                   threads,
-                   diags,
-                   reuse,
-                   fill,
-                   pins,
-                   prefix,
-                   from,
-                   labels,
-                   nullptr);
+  search_candidate(out, c, g, orders, s, row, router, threads, diags, pins, with, true);
   return out;
 }
 
@@ -836,16 +835,13 @@ Scored score_move(Chart const &c,
                   CostContext const &scoring,
                   scav_spaces const &s,
                   scav_profile const &objective,
-                  scav_profile const &knobs,
-                  DarSource dar,
-                  Compaction pack,
-                  Fold fold,
+                  Row const &row,
                   Router const &router,
                   SearchPins const &pins,
                   RouteCache const *reuse,
                   Prefix const *from,
-                  bool labels = true,
-                  Routed *routed = nullptr) {
+                  bool labels,
+                  Routed *routed) {
   MoveScratch &sc{ move_scratch() };
   auto const whole = [&]() -> Candidate const & {
     order_submachines(sc.moved, c, g, s, objective, 1, pins);
@@ -855,20 +851,13 @@ Scored score_move(Chart const &c,
                      g,
                      sc.moved,
                      s,
-                     knobs,
-                     dar,
-                     pack,
-                     fold,
+                     row,
                      router,
                      1,
                      spilled,
-                     reuse,
-                     nullptr,
                      &pins,
-                     nullptr,
-                     nullptr,
-                     labels,
-                     &sc.keep);
+                     { .reuse = reuse, .scratch = &sc.keep },
+                     labels);
     return sc.whole;
   };
   // A traced search scores every move whole, its trace recording each move's phases.
@@ -889,20 +878,13 @@ Scored score_move(Chart const &c,
                    g,
                    from->laid,
                    s,
-                   knobs,
-                   dar,
-                   pack,
-                   fold,
+                   row,
                    router,
                    1,
                    spilled,
-                   reuse,
-                   nullptr,
                    &pins,
-                   nullptr,
-                   from,
-                   labels,
-                   &sc.keep);
+                   { .reuse = reuse, .from = from, .scratch = &sc.keep },
+                   labels);
   Scored const out{ scored_of(c, g, scoring, s, objective, cand, labels) };
 #ifdef SCAV_TESTING
   {
@@ -1149,10 +1131,7 @@ Improved run_search(Chart const &c,
                     SplitGraph const &g,
                     scav_spaces const &s,
                     scav_profile const &objective,
-                    scav_profile const &knobs,
-                    DarSource dar,
-                    Compaction pack,
-                    Fold fold,
+                    Row const &row,
                     Router const &router,
                     uint32_t threads,
                     uint32_t budget,
@@ -1176,22 +1155,16 @@ Improved run_search(Chart const &c,
   Prefix incumbent;
   {
     std::vector<Diagnostic> spilled;
-    Candidate first{ search_candidate(c,
-                                      g,
-                                      here,
-                                      s,
-                                      knobs,
-                                      dar,
-                                      pack,
-                                      fold,
-                                      router,
-                                      threads,
-                                      spilled,
-                                      nullptr,
-                                      &base,
-                                      &held,
-                                      &incumbent) };
-    out.best = std::move(first);
+    out.best = search_candidate(c,
+                                g,
+                                here,
+                                s,
+                                row,
+                                router,
+                                threads,
+                                spilled,
+                                &held,
+                                { .fill = &base, .prefix = &incumbent });
   }
   // The start is scored here, as it stands.
   out.viable = out.best.viable;
@@ -1409,10 +1382,7 @@ Improved run_search(Chart const &c,
                         scoring,
                         s,
                         objective,
-                        knobs,
-                        dar,
-                        pack,
-                        fold,
+                        row,
                         router,
                         with_here(held, round[i]),
                         &base,
@@ -1454,7 +1424,7 @@ Improved run_search(Chart const &c,
         ++exacts;
 #endif
         Candidate &cand{ kept[k].cand };
-        label_candidate(cand, c, s, knobs);
+        label_candidate(cand, c, s, row.knobs);
         Scored const scored{ scored_of(c, g, scoring, s, objective, cand) };
 #ifdef SCAV_TESTING
         if (test_label_bound_verify) {
@@ -1554,17 +1524,12 @@ Improved run_search(Chart const &c,
                                 g,
                                 here,
                                 s,
-                                knobs,
-                                dar,
-                                pack,
-                                fold,
+                                row,
                                 router,
                                 threads,
                                 spilled,
-                                &was,
-                                &base,
                                 &held,
-                                &incumbent);
+                                { .reuse = &was, .fill = &base, .prefix = &incumbent });
     out.cost = best;
     (void)cost_terms(scoring, c, g, out.best.sized, out.best.routes, s, objective, &party);
   }
@@ -1682,10 +1647,7 @@ Improved search_moves(Chart const &c,
                       SplitGraph const &g,
                       scav_spaces const &s,
                       scav_profile const &objective,
-                      scav_profile const &knobs,
-                      DarSource dar,
-                      Compaction pack,
-                      Fold fold,
+                      Row const &row,
                       Router const &router,
                       uint32_t threads,
                       uint32_t budget,
@@ -1693,24 +1655,22 @@ Improved search_moves(Chart const &c,
                       SearchPins const &seed,
                       std::vector<uint8_t> const *scope,
                       SearchMemo *memo) {
-  if ((memo == nullptr) || (trace_sink() != nullptr)) {
+  auto const search = [&]() {
     return run_search(c,
                       g,
                       s,
                       objective,
-                      knobs,
-                      dar,
-                      pack,
-                      fold,
+                      row,
                       router,
                       threads,
                       budget,
                       refold,
                       seed,
                       scope);
-  }
+  };
+  if ((memo == nullptr) || (trace_sink() != nullptr)) { return search(); }
   std::vector<uint32_t> key;
-  search_key(objective, knobs, dar, pack, fold, budget, refold, seed, scope, key);
+  search_key(objective, row, budget, refold, seed, scope, key);
   std::vector<int32_t> value;
   bool hit{ false };
   {
@@ -1739,58 +1699,16 @@ Improved search_moves(Chart const &c,
       order_submachines(c, g, s, objective, threads, out.held)
     };
     std::vector<Diagnostic> spilled;
-    out.best = search_candidate(c,
-                                g,
-                                here,
-                                s,
-                                knobs,
-                                dar,
-                                pack,
-                                fold,
-                                router,
-                                threads,
-                                spilled,
-                                nullptr,
-                                nullptr,
-                                &out.held);
+    out.best = search_candidate(c, g, here, s, row, router, threads, spilled, &out.held);
 #ifdef SCAV_TESTING
-    if (test_search_memo_verify) {
-      Improved const fresh{ run_search(c,
-                                       g,
-                                       s,
-                                       objective,
-                                       knobs,
-                                       dar,
-                                       pack,
-                                       fold,
-                                       router,
-                                       threads,
-                                       budget,
-                                       refold,
-                                       seed,
-                                       scope) };
-      if (!same_result(out, fresh)) {
-        ScopedLock const held{ memo->lock };
-        ++memo->mismatches;
-      }
+    if (test_search_memo_verify && !same_result(out, search())) {
+      ScopedLock const held{ memo->lock };
+      ++memo->mismatches;
     }
 #endif
     return out;
   }
-  Improved out{ run_search(c,
-                           g,
-                           s,
-                           objective,
-                           knobs,
-                           dar,
-                           pack,
-                           fold,
-                           router,
-                           threads,
-                           budget,
-                           refold,
-                           seed,
-                           scope) };
+  Improved out{ search() };
   std::vector<uint32_t> words{
     out.viable ? 1U : 0U,
     static_cast<uint32_t>(out.cost.t0_violations),
@@ -1816,25 +1734,23 @@ SCAV_INTERNAL_BEGIN
 
 // The table rows and bounded moves this chart runs: all of `portfolio_m` and
 // `portfolio_k`.
-uint32_t search_tuple_count(scav_profile const &p, uint32_t /*entity_count*/) {
+uint32_t search_tuple_count(scav_profile const &p) {
   return imin(static_cast<uint32_t>(imax(p.portfolio_m, 1)), LAYOUT_SEARCH_ROWS);
 }
 
-uint32_t search_move_budget(scav_profile const &p, uint32_t /*entity_count*/) {
+uint32_t search_move_budget(scav_profile const &p) {
   return static_cast<uint32_t>(imax(p.portfolio_k, 0));
 }
 
 // Row `index` as a delta from the profile: bit 0 flips the box packer, bit 1 compaction,
 // bit 2 the owner's hole, bit 3 the fold; row 0 is the caller's own tuple.
-void search_tuple(scav_profile &p,
-                  DarSource &dar,
-                  Compaction &pack,
-                  Fold &fold,
-                  uint32_t index) {
-  p.trybox ^= static_cast<int32_t>(index & 1U);
-  pack = (((index >> 1U) & 1U) != 0) ? Compaction::On : Compaction::Off;
-  dar = (((index >> 2U) & 1U) != 0) ? DarSource::OwnerHole : DarSource::Profile;
-  fold = (((index >> 3U) & 1U) != 0) ? Fold::Always : Fold::Scale;
+Row search_row(scav_profile const &p, uint32_t index) {
+  Row out{ .knobs = p };
+  out.knobs.trybox ^= static_cast<int32_t>(index & 1U);
+  out.pack = (((index >> 1U) & 1U) != 0) ? Compaction::On : Compaction::Off;
+  out.dar = (((index >> 2U) & 1U) != 0) ? DarSource::OwnerHole : DarSource::Profile;
+  out.fold = (((index >> 3U) & 1U) != 0) ? Fold::Always : Fold::Scale;
+  return out;
 }
 
 // `argmin(Cost, index)` in index order; row 0 answers for a set with nothing viable.
@@ -1852,10 +1768,7 @@ uint32_t search_argmin(std::vector<Cost> const &cost, std::vector<uint8_t> const
 }
 
 void search_key(scav_profile const &objective,
-                scav_profile const &knobs,
-                DarSource dar,
-                Compaction pack,
-                Fold fold,
+                Row const &row,
                 uint32_t budget,
                 bool refold,
                 SearchPins const &seed,
@@ -1864,15 +1777,15 @@ void search_key(scav_profile const &objective,
   static_assert((sizeof(scav_profile) % sizeof(uint32_t)) == 0);
   std::array<uint32_t, sizeof(scav_profile) / sizeof(uint32_t)> words{};
   key.clear();
-  for (scav_profile const *const at : { &objective, &knobs }) {
+  for (scav_profile const *const at : { &objective, &row.knobs }) {
     std::memcpy(words.data(), at, sizeof(scav_profile));
     vec_insert(key, key.end(), words.begin(), words.end());
   }
   vec_insert(key,
              key.end(),
-             { static_cast<uint32_t>(dar),
-               static_cast<uint32_t>(pack),
-               static_cast<uint32_t>(fold),
+             { static_cast<uint32_t>(row.dar),
+               static_cast<uint32_t>(row.pack),
+               static_cast<uint32_t>(row.fold),
                budget,
                refold ? 1U : 0U });
   put_pins(seed, key);
@@ -1938,7 +1851,8 @@ bool layout_run(Chart &c,
   // Level 2: every admitted row laid out whole and reduced in index order; a pinned row is
   // a table of one.
   bool const pinned{ row != INVALID };
-  uint32_t const rows{ pinned ? 1U : search_tuple_count(p, layout_entity_count(c)) };
+  uint32_t const rows{ pinned ? 1U : search_tuple_count(p) };
+  auto const row_of = [&](uint32_t i) { return search_row(p, pinned ? row : i); };
   std::vector<Candidate> candidates(rows);
   std::vector<Cost> cost(rows);
   std::vector<uint8_t> viable(rows, 0);
@@ -1946,24 +1860,14 @@ bool layout_run(Chart &c,
   std::vector<std::vector<Diagnostic>> spilled(rows);
   CostContext const scoring{ cost_context(c) };
   parallel_for(rows, (rows > 1) ? o.threads : 1U, [&](uint32_t i) {
-    scav_profile knobs{ p };
-    DarSource dar{ DarSource::Profile };
-    Compaction pack{ Compaction::Off };
-    Fold fold{ Fold::Scale };
-    search_tuple(knobs, dar, pack, fold, pinned ? row : i);
     candidates[i] = search_candidate(c,
                                      g,
                                      orders,
                                      s,
-                                     knobs,
-                                     dar,
-                                     pack,
-                                     fold,
+                                     row_of(i),
                                      *router,
                                      (rows > 1) ? 1U : o.threads,
                                      spilled[i],
-                                     nullptr,
-                                     nullptr,
                                      &seed);
     viable[i] = candidates[i].viable ? 1U : 0U;
     // A single row is not scored; rows are compared under the caller's profile, not the
@@ -1984,18 +1888,10 @@ bool layout_run(Chart &c,
 
   // Level 1 from every viable row, ranked by what each converges to; rows run at once, and
   // a lone row takes the caller's threads.
-  uint32_t budget{ search_move_budget(p, layout_entity_count(c)) };
+  uint32_t budget{ search_move_budget(p) };
 #ifdef SCAV_TESTING
   if (test_no_search) { budget = 0; }
 #endif
-  auto const tuple_of =
-      [&](uint32_t i, scav_profile &knobs, DarSource &dar, Compaction &pack, Fold &fold) {
-        knobs = p;
-        dar = DarSource::Profile;
-        pack = Compaction::Off;
-        fold = Fold::Scale;
-        search_tuple(knobs, dar, pack, fold, pinned ? row : i);
-      };
   std::vector<SearchPins> held(rows, seed);
   SearchMemo memo;
   SearchMemo *memo_at{ &memo };
@@ -2012,19 +1908,11 @@ bool layout_run(Chart &c,
     std::vector<Improved> done(active.size());
     uint32_t const n{ static_cast<uint32_t>(active.size()) };
     parallel_for(n, o.threads, [&](uint32_t k) {
-      scav_profile knobs{};
-      DarSource dar{ DarSource::Profile };
-      Compaction pack{ Compaction::Off };
-      Fold fold{ Fold::Scale };
-      tuple_of(active[k], knobs, dar, pack, fold);
       done[k] = search_moves(c,
                              g,
                              s,
                              p,
-                             knobs,
-                             dar,
-                             pack,
-                             fold,
+                             row_of(active[k]),
                              *router,
                              o.threads,
                              budget,
@@ -2052,11 +1940,24 @@ bool layout_run(Chart &c,
   // Iterated local search on every viable row: each unturned cycle edge starts a search,
   // kept where it converges below the incumbent; kicks in distinct frames combine.
   auto const kick = [&](uint32_t best) {
-    scav_profile knobs{};
-    DarSource dar{ DarSource::Profile };
-    Compaction pack{ Compaction::Off };
-    Fold fold{ Fold::Scale };
-    tuple_of(best, knobs, dar, pack, fold);
+    Row const best_row{ row_of(best) };
+    // Row `best` searched from `start`, its moves confined to `within`'s frames where
+    // given.
+    auto const search_from = [&](SearchPins const &start,
+                                 std::vector<uint8_t> const *within) {
+      return search_moves(c,
+                          g,
+                          s,
+                          p,
+                          best_row,
+                          *router,
+                          o.threads,
+                          budget,
+                          false,
+                          start,
+                          within,
+                          memo_at);
+    };
     auto const frame_of_leg = [&](TransId t, uint32_t leg) {
       if (t.v >= g.trans_segments.size()) { return INVALID; }
       Span const segs{ g.trans_segments[t.v] };
@@ -2179,21 +2080,7 @@ bool layout_run(Chart &c,
           if (kick_frame[j] < redo.size()) { redo[kick_frame[j]] = 1; }
           SearchPins start{ warm(held[best], redo) };
           with_kick(start, kicks[j]);
-          tried[j] = search_moves(c,
-                                  g,
-                                  s,
-                                  p,
-                                  knobs,
-                                  dar,
-                                  pack,
-                                  fold,
-                                  *router,
-                                  o.threads,
-                                  budget,
-                                  false,
-                                  start,
-                                  &redo,
-                                  memo_at);
+          tried[j] = search_from(start, &redo);
         });
 
         // The best improving kick of each frame, and the best of those, in
@@ -2225,21 +2112,7 @@ bool layout_run(Chart &c,
           }
           SearchPins start{ warm(held[best], redo) };
           for (uint32_t const j : winners) { with_kick(start, kicks[j]); }
-          Improved together{ search_moves(c,
-                                          g,
-                                          s,
-                                          p,
-                                          knobs,
-                                          dar,
-                                          pack,
-                                          fold,
-                                          *router,
-                                          o.threads,
-                                          budget,
-                                          false,
-                                          start,
-                                          &redo,
-                                          memo_at) };
+          Improved together{ search_from(start, &redo) };
           if (together.viable && cost_less(together.cost, tried[single].cost)) {
             take(std::move(together));
             kicked = true;
@@ -2266,42 +2139,14 @@ bool layout_run(Chart &c,
           if (kick_frame[j] < redo.size()) { redo[kick_frame[j]] = 1; }
           SearchPins start{ warm(held[best], redo) };
           with_kick(start, kicks[j]);
-          Improved more{ search_moves(c,
-                                      g,
-                                      s,
-                                      p,
-                                      knobs,
-                                      dar,
-                                      pack,
-                                      fold,
-                                      *router,
-                                      o.threads,
-                                      budget,
-                                      false,
-                                      start,
-                                      &redo,
-                                      memo_at) };
+          Improved more{ search_from(start, &redo) };
           if (more.viable && cost_less(more.cost, cost[best])) { take(std::move(more)); }
         }
       }
       // One unscoped pass from what the kicks reached takes up what a frame's new size
       // opened.
       if (kicked) {
-        Improved settled{ search_moves(c,
-                                       g,
-                                       s,
-                                       p,
-                                       knobs,
-                                       dar,
-                                       pack,
-                                       fold,
-                                       *router,
-                                       o.threads,
-                                       budget,
-                                       false,
-                                       held[best],
-                                       nullptr,
-                                       memo_at) };
+        Improved settled{ search_from(held[best], nullptr) };
         if (settled.viable && cost_less(settled.cost, cost[best])) {
           take(std::move(settled));
         }

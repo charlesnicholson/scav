@@ -19,10 +19,7 @@
 namespace scav {
 
 void search_key(scav_profile const &objective,
-                scav_profile const &knobs,
-                DarSource dar,
-                Compaction pack,
-                Fold fold,
+                Row const &row,
                 uint32_t budget,
                 bool refold,
                 SearchPins const &seed,
@@ -60,10 +57,7 @@ scav_profile readable() {
 
 struct Inputs {
   scav_profile objective{};
-  scav_profile knobs{};
-  DarSource dar{ DarSource::Profile };
-  Compaction pack{ Compaction::Off };
-  Fold fold{ Fold::Scale };
+  Row row;
   uint32_t budget{ 64 };
   bool refold{ false };
   SearchPins seed;
@@ -74,10 +68,7 @@ struct Inputs {
 std::vector<uint32_t> key_of(Inputs const &in) {
   std::vector<uint32_t> key;
   search_key(in.objective,
-             in.knobs,
-             in.dar,
-             in.pack,
-             in.fold,
+             in.row,
              in.budget,
              in.refold,
              in.seed,
@@ -138,7 +129,7 @@ Laid lay_out(char const *name, bool labelled = false) {
 TEST_CASE("search memo: the key tells apart every input a search is a function of") {
   Inputs base;
   base.objective = readable();
-  base.knobs = readable();
+  base.row.knobs = readable();
   base.seed.ranks.push_back({ .state = StateId{ 3 }, .rank = 1 });
   base.seed.ranks.push_back({ .state = StateId{ 5 }, .rank = 2 });
   base.seed.faces.push_back({ .trans = TransId{ 2 }, .leg = 0, .end = 1, .face = 3 });
@@ -147,10 +138,10 @@ TEST_CASE("search memo: the key tells apart every input a search is a function o
 
   std::vector<Inputs> variants(22, base);
   variants[0].objective.node_sep += 1;
-  variants[1].knobs.node_sep += 1;
-  variants[2].dar = DarSource::OwnerHole;
-  variants[3].pack = Compaction::On;
-  variants[4].fold = Fold::Always;
+  variants[1].row.knobs.node_sep += 1;
+  variants[2].row.dar = DarSource::OwnerHole;
+  variants[3].row.pack = Compaction::On;
+  variants[4].row.fold = Fold::Always;
   variants[5].budget += 1;
   variants[6].seed.ranks[1].rank = 3;
   variants[7].seed.cuts.push_back({ .trans = TransId{ 1 }, .leg = 0 });
