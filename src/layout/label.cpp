@@ -256,11 +256,6 @@ uint32_t band_of_offset(uint32_t o, bool flat) {
   return flat ? ((LEAD_Y[lead] * 3) + IN_Y[which]) : ((LEAD_X[lead] * 3) + IN_X[which]);
 }
 
-// A blocked rect's inclusive range of grid cells.
-struct Cells {
-  uint32_t c0, c1, r0, r1;
-};
-
 // One leg's groups, from `first`, and the least anchor distance of any of them.
 struct Leg {
   uint32_t first;
@@ -277,52 +272,18 @@ struct Scratch {
   std::vector<Leg> legs;
   std::vector<Band> bands;
   RectGrid grid;
-  std::vector<Cells> cells;
   std::vector<uint32_t> fill;
   scav_rect region{};
   bool gridded{ false };
 };
 
-// `grid_build` into the scratch's reused vectors, each rect's cells found once for both
-// the count and the fill; the grid it builds is `grid_build`'s.
-RectGrid const &grid_of(Scratch &s, int32_t cell_w, int32_t cell_h) {
-  RectGrid &g{ s.grid };
-  if (s.gridded) { return g; }
-  s.gridded = true;
-  scav_rect const &region{ s.region };
-  g.x0 = region.x;
-  g.y0 = region.y;
-  g.cw = imax(Wide{ imax(cell_w, 1) }, ceil_div(Wide{ region.w } + 1, Wide{ GRID_SIDE }));
-  g.ch = imax(Wide{ imax(cell_h, 1) }, ceil_div(Wide{ region.h } + 1, Wide{ GRID_SIDE }));
-  g.nx = static_cast<uint32_t>(imax(ceil_div(Wide{ region.w } + 1, g.cw), Wide{ 1 }));
-  g.ny = static_cast<uint32_t>(imax(ceil_div(Wide{ region.h } + 1, g.ch), Wide{ 1 }));
-  vec_assign(g.off, (static_cast<size_t>(g.nx) * g.ny) + 1, 0);
-  vec_resize(s.cells, s.blocked.size());
-  for (uint32_t k = 0; k < s.blocked.size(); ++k) {
-    scav_rect const &r{ s.blocked[k] };
-    Cells const at{ .c0 = grid_cell(r.x, g.x0, g.cw, g.nx),
-                    .c1 = grid_cell(Wide{ r.x } + r.w, g.x0, g.cw, g.nx),
-                    .r0 = grid_cell(r.y, g.y0, g.ch, g.ny),
-                    .r1 = grid_cell(Wide{ r.y } + r.h, g.y0, g.ch, g.ny) };
-    s.cells[k] = at;
-    for (uint32_t y = at.r0; y <= at.r1; ++y) {
-      for (uint32_t x = at.c0; x <= at.c1; ++x) {
-        ++g.off[(static_cast<size_t>(y) * g.nx) + x + 1];
-      }
-    }
+// The grid over `blocked`, built on first use.
+RectGrid &grid_of(Scratch &s, int32_t cell_w, int32_t cell_h) {
+  if (!s.gridded) {
+    s.gridded = true;
+    grid_build(s.grid, s.region, s.blocked, cell_w, cell_h, s.fill);
   }
-  for (size_t i = 1; i < g.off.size(); ++i) { g.off[i] += g.off[i - 1]; }
-  vec_resize(g.item, g.off.back());
-  vec_assign(s.fill, g.off.begin(), g.off.end() - 1);
-  for (uint32_t k = 0; k < s.blocked.size(); ++k) {
-    Cells const &at{ s.cells[k] };
-    for (uint32_t y = at.r0; y <= at.r1; ++y) {
-      for (uint32_t x = at.c0; x <= at.c1; ++x) {
-        g.item[s.fill[(static_cast<size_t>(y) * g.nx) + x]++] = k;
-      }
-    }
-  }
-  return g;
+  return s.grid;
 }
 
 // The coordinate a slide along leg `k` is measured in: x on a horizontal leg,
@@ -395,7 +356,6 @@ std::vector<scav_rect> const &nearby_of(Local const &l, Scratch &s, uint32_t k) 
 Outcome exhaustive(Local const &l, Scratch &s) {
   uint32_t const len{ static_cast<uint32_t>(l.route.size()) };
   prepare(l, s);
-  grid_build(s.grid, s.region, s.blocked, l.w, l.h);
   scav_point const at{ anchor_of(l.route,
                                  { .off = l.first, .len = (l.last - l.first) + 1 }) };
   // The anchor's step: half the label's height, at least one grid unit.
@@ -478,7 +438,11 @@ Outcome exhaustive(Local const &l, Scratch &s) {
             lax_key = here;
             lax = cand;
           }
-          if (grid_hits(s.grid, s.blocked, cand)) { continue; }
+          if (grid_visit(grid_of(s, l.w, l.h), cand, 0, [&](uint32_t j) {
+                return overlaps(cand, s.blocked[j]);
+              })) {
+            continue;
+          }
           key = here;
           best = cand;
         }
@@ -642,8 +606,11 @@ void Walk::group(Group const &g) {
       if ((last != INVALID) && overlaps(cand, s.blocked[last])) {
         return past(s.blocked[last], n, sign);
       }
-      uint32_t const hit{ grid_hit(grid_of(s, l.w, l.h), s.blocked, cand) };
-      if (hit != INVALID) {
+      uint32_t hit{ INVALID };
+      if (grid_visit(grid_of(s, l.w, l.h), cand, 0, [&](uint32_t j) {
+            hit = j;
+            return overlaps(cand, s.blocked[j]);
+          })) {
         last = hit;
         return past(s.blocked[hit], n, sign);
       }

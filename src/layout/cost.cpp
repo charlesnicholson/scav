@@ -573,47 +573,6 @@ Wide whitespace_of(Chart const &c,
   return imin(total, chart);
 }
 
-// Per-query visit stamps, so an item over several cells is visited once.
-struct Seen {
-  std::vector<uint32_t> stamp;  // parallel to the rects the grid was built over
-  uint32_t epoch{ 0 };
-};
-
-// `grid_build` into kept storage, placing through the caller's `cursor`.
-void grid_build_into(RectGrid &g,
-                     scav_rect const &region,
-                     std::vector<scav_rect> const &rects,
-                     int32_t cell_w,
-                     int32_t cell_h,
-                     std::vector<uint32_t> &cursor) {
-  g.x0 = region.x;
-  g.y0 = region.y;
-  g.cw = imax(Wide{ imax(cell_w, 1) }, ceil_div(Wide{ region.w } + 1, Wide{ GRID_SIDE }));
-  g.ch = imax(Wide{ imax(cell_h, 1) }, ceil_div(Wide{ region.h } + 1, Wide{ GRID_SIDE }));
-  g.nx = static_cast<uint32_t>(imax(ceil_div(Wide{ region.w } + 1, g.cw), Wide{ 1 }));
-  g.ny = static_cast<uint32_t>(imax(ceil_div(Wide{ region.h } + 1, g.ch), Wide{ 1 }));
-  vec_assign(g.off, (static_cast<size_t>(g.nx) * g.ny) + 1, 0);
-  auto const spread = [&g, &rects](auto step) {
-    for (uint32_t k = 0; k < rects.size(); ++k) {
-      scav_rect const &r{ rects[k] };
-      uint32_t const c0{ grid_cell(r.x, g.x0, g.cw, g.nx) };
-      uint32_t const c1{ grid_cell(Wide{ r.x } + r.w, g.x0, g.cw, g.nx) };
-      uint32_t const r0{ grid_cell(r.y, g.y0, g.ch, g.ny) };
-      uint32_t const r1{ grid_cell(Wide{ r.y } + r.h, g.y0, g.ch, g.ny) };
-      for (uint32_t y = r0; y <= r1; ++y) {
-        for (uint32_t x = c0; x <= c1; ++x) {
-          step((static_cast<size_t>(y) * g.nx) + x, k);
-        }
-      }
-    }
-  };
-  spread([&g](size_t cell, uint32_t) { ++g.off[cell + 1]; });
-  for (size_t i = 1; i < g.off.size(); ++i) { g.off[i] += g.off[i - 1]; }
-  vec_resize(g.item, g.off.back());
-  vec_assign(cursor, g.off.begin(), g.off.end() - 1);
-  spread([&g, &cursor](size_t cell, uint32_t k) { g.item[cursor[cell]++] = k; });
-}
-
 // About one cell per rect, over the rects' own bounds.
 void grid_over(RectGrid &g,
                std::vector<scav_rect> const &rects,
@@ -634,57 +593,12 @@ void grid_over(RectGrid &g,
                           .w = static_cast<int32_t>(imax(x1 - x0, Wide{ 0 })),
                           .h = static_cast<int32_t>(imax(y1 - y0, Wide{ 0 })) };
   Wide const side{ grid_side(static_cast<uint32_t>(rects.size())) };
-  grid_build_into(g,
-                  bounds,
-                  rects,
-                  static_cast<int32_t>(ceil_div(Wide{ bounds.w } + 1, side)),
-                  static_cast<int32_t>(ceil_div(Wide{ bounds.h } + 1, side)),
-                  cursor);
-}
-
-// Whether `hit` holds for any rect sharing a cell with `q`; a rect over several
-// cells may be asked more than once.
-template <typename Hit>
-bool grid_any(RectGrid const &g, scav_rect const &q, Hit hit) {
-  uint32_t const c0{ grid_cell(q.x, g.x0, g.cw, g.nx) };
-  uint32_t const c1{ grid_cell(Wide{ q.x } + q.w, g.x0, g.cw, g.nx) };
-  uint32_t const r0{ grid_cell(q.y, g.y0, g.ch, g.ny) };
-  uint32_t const r1{ grid_cell(Wide{ q.y } + q.h, g.y0, g.ch, g.ny) };
-  for (uint32_t y = r0; y <= r1; ++y) {
-    for (uint32_t x = c0; x <= c1; ++x) {
-      size_t const cell{ (static_cast<size_t>(y) * g.nx) + x };
-      for (uint32_t k = g.off[cell]; k < g.off[cell + 1]; ++k) {
-        if (hit(g.item[k])) { return true; }
-      }
-    }
-  }
-  return false;
-}
-
-// Visits once each rect sharing a cell with `q` grown by `margin`, which includes
-// every rect whose closed extent comes within `margin` of `q`'s.
-template <typename Visit>
-void grid_each(RectGrid const &g,
-               scav_rect const &q,
-               Wide margin,
-               Seen &seen,
-               Visit visit) {
-  ++seen.epoch;
-  uint32_t const c0{ grid_cell(Wide{ q.x } - margin, g.x0, g.cw, g.nx) };
-  uint32_t const c1{ grid_cell(Wide{ q.x } + q.w + margin, g.x0, g.cw, g.nx) };
-  uint32_t const r0{ grid_cell(Wide{ q.y } - margin, g.y0, g.ch, g.ny) };
-  uint32_t const r1{ grid_cell(Wide{ q.y } + q.h + margin, g.y0, g.ch, g.ny) };
-  for (uint32_t y = r0; y <= r1; ++y) {
-    for (uint32_t x = c0; x <= c1; ++x) {
-      size_t const cell{ (static_cast<size_t>(y) * g.nx) + x };
-      for (uint32_t k = g.off[cell]; k < g.off[cell + 1]; ++k) {
-        uint32_t const item{ g.item[k] };
-        if (seen.stamp[item] == seen.epoch) { continue; }
-        seen.stamp[item] = seen.epoch;
-        visit(item);
-      }
-    }
-  }
+  grid_build(g,
+             bounds,
+             rects,
+             static_cast<int32_t>(ceil_div(Wide{ bounds.w } + 1, side)),
+             static_cast<int32_t>(ceil_div(Wide{ bounds.h } + 1, side)),
+             cursor);
 }
 
 // `cost_box_overlaps` over `kid` from `child_rects`, with `q` the query buffer.
@@ -801,7 +715,6 @@ struct Scratch {
   std::vector<uint32_t> region_of;
   RectGrid states, segs, placed, regions;
   std::vector<uint32_t> cursor;  // every grid build's placing pass
-  Seen seen_seg, seen_placed, seen_state;
   std::vector<uint8_t> encloses;
   std::vector<uint32_t> common;
   ChildGrid grid;  // `CostContext::grid`, filled for the candidate
@@ -813,11 +726,6 @@ struct Scratch {
 Scratch &scratch() {
   thread_local Scratch s;
   return s;
-}
-
-void seen_reset(Seen &seen, size_t n) {
-  vec_assign(seen.stamp, n, 0);
-  seen.epoch = 0;
 }
 
 int32_t tier0_of(CostTerms const &t) {
@@ -1124,12 +1032,6 @@ CostTerms cost_terms(CostContext const &ctx,
     grid_over(segs, seg_box, sc.cursor);
     RectGrid &placed{ sc.placed };
     grid_over(placed, r.placed, sc.cursor);
-    Seen &seen_seg{ sc.seen_seg };
-    Seen &seen_placed{ sc.seen_placed };
-    Seen &seen_state{ sc.seen_state };
-    seen_reset(seen_seg, seg_box.size());
-    seen_reset(seen_placed, r.placed.size());
-    seen_reset(seen_state, state_box.size());
 
     std::vector<uint8_t> &encloses{ sc.encloses };
     vec_assign(encloses, c.states.size(), 0);
@@ -1148,11 +1050,12 @@ CostTerms cost_terms(CostContext const &ctx,
     };
     for (uint32_t i = 0; i < r.placed.size(); ++i) {
       scav_rect const &box{ r.placed[i] };
-      grid_each(placed, box, 0, seen_placed, [&](uint32_t j) {
+      grid_visit(placed, box, 0, [&](uint32_t j) {
         if ((j > i) && overlaps(box, r.placed[j])) {
           ++t.label;
           blame(party, subject_of(i), subject_of(j));
         }
+        return false;
       });
       uint32_t subject{ INVALID };
       uint32_t host{ INVALID };  // an endpoint enclosing the other end
@@ -1181,12 +1084,13 @@ CostTerms cost_terms(CostContext const &ctx,
       }
       // The grid charges every state's rect but those at 2 and the host, which pay for
       // their bands: the host's in Tier 0.
-      grid_each(states, box, 0, seen_state, [&](uint32_t at) {
+      grid_visit(states, box, 0, [&](uint32_t at) {
         uint32_t const st{ state_of[at] };
         if ((encloses[st] != 2) && (st != host) && overlaps(box, state_rect[at])) {
           ++t.label_over_box;
           blame(party, subject, INVALID);
         }
+        return false;
       });
       auto const banded = [&](uint32_t st) {
         std::array<scav_rect, 5> const walls{ state_walls(z, st) };
@@ -1220,8 +1124,8 @@ CostTerms cost_terms(CostContext const &ctx,
       Wide const reach{ (own < 0) ? Wide{ 0 } : imax((own + height) - 1, Wide{ 0 }) };
       Wide other{ -1 };
       uint32_t nearest{ INVALID };
-      grid_each(segs, box, reach, seen_seg, [&](uint32_t j) {
-        if (pieces[j].trans == subject) { return; }
+      grid_visit(segs, box, reach, [&](uint32_t j) {
+        if (pieces[j].trans == subject) { return false; }
         Wide const away{ chebyshev_gap(box, seg_box[j]) };
         if ((other < 0) || (away < other)) { nearest = pieces[j].trans; }
         other = (other < 0) ? away : imin(other, away);
@@ -1229,6 +1133,7 @@ CostTerms cost_terms(CostContext const &ctx,
           ++t.label_over_route;
           blame(party, subject, pieces[j].trans);
         }
+        return false;
       });
       if ((own >= 0) && (other >= 0)) {
         Wide const shortfall{ (own + height) - other };
@@ -1274,7 +1179,7 @@ CostTerms cost_terms(CostContext const &ctx,
   // state, so the grid of grown rects finds it.
   for (Piece const &piece : pieces) {
     if ((piece.a.y != piece.b.y) && (piece.a.x != piece.b.x)) { continue; }
-    if (grid_any(states, span_rect(piece.a, piece.b), [&](uint32_t at) {
+    if (grid_visit(states, span_rect(piece.a, piece.b), 0, [&](uint32_t at) {
           return along_border(piece.a, piece.b, state_rect[at], near);
         })) {
       ++t.flush;
@@ -1297,7 +1202,7 @@ CostTerms cost_terms(CostContext const &ctx,
   for (Piece const &piece : pieces) {
     Transition const &trans{ c.transitions[piece.trans] };
     scav_rect const reach{ span_rect(piece.a, piece.b) };
-    if (grid_any(regions, reach, [&](uint32_t at) {
+    if (grid_visit(regions, reach, 0, [&](uint32_t at) {
           uint32_t const m{ region_of[at] };
           return overlaps(reach, region_box[at]) && !within(c, trans.src, m) &&
                  !within(c, trans.dst, m) && enters(piece.a, piece.b, z.sub[m]);

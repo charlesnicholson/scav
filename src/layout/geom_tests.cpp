@@ -127,11 +127,38 @@ bool scan_hits(std::vector<scav_rect> const &rects, scav_rect const &cand) {
   return false;
 }
 
+bool grid_hits(RectGrid &g, std::vector<scav_rect> const &rects, scav_rect const &cand) {
+  return grid_visit(g, cand, 0, [&](uint32_t k) { return overlaps(cand, rects[k]); });
+}
+
 // A small deterministic generator: the property is over many shapes, and a
 // test that reads different numbers each run finds nothing twice.
 uint32_t next(uint64_t &state) {
   state = (state * 6364136223846793005ULL) + 1442695040888963407ULL;
   return static_cast<uint32_t>(state >> 33U);
+}
+
+// Up to 60 rects inside `region`, a quarter of them zero-width and a quarter zero-height.
+std::vector<scav_rect> random_rects(uint64_t &seed, scav_rect const &region) {
+  std::vector<scav_rect> rects;
+  uint32_t const n{ next(seed) % 60 };
+  for (uint32_t i = 0; i < n; ++i) {
+    int32_t const x{ region.x + static_cast<int32_t>(next(seed) % 12000) };
+    int32_t const y{ region.y + static_cast<int32_t>(next(seed) % 7000) };
+    uint32_t const shape{ next(seed) % 4 };
+    int32_t const w{ (shape == 0) ? 0 : static_cast<int32_t>(next(seed) % 2500) };
+    int32_t const h{ (shape == 1) ? 0 : static_cast<int32_t>(next(seed) % 1500) };
+    rects.push_back({ .x = x, .y = y, .w = w, .h = h });
+  }
+  return rects;
+}
+
+// A query rect reaching up to 800 past `region` on each side.
+scav_rect random_query(uint64_t &seed, scav_rect const &region) {
+  return { .x = region.x - 800 + static_cast<int32_t>(next(seed) % 13600),
+           .y = region.y - 800 + static_cast<int32_t>(next(seed) % 8600),
+           .w = static_cast<int32_t>(next(seed) % 1200),
+           .h = static_cast<int32_t>(next(seed) % 400) };
 }
 
 }  // namespace
@@ -142,28 +169,17 @@ TEST_CASE("geom: a rect grid answers exactly what scanning every rect does") {
   // pieces, which `overlaps` counts only strictly inside the other's span.
   uint64_t seed{ 1 };
   scav_rect const region{ .x = -3000, .y = -2000, .w = 12000, .h = 7000 };
+  std::vector<uint32_t> cursor;
   for (uint32_t trial = 0; trial < 200; ++trial) {
-    std::vector<scav_rect> rects;
-    uint32_t const n{ next(seed) % 60 };
-    for (uint32_t i = 0; i < n; ++i) {
-      int32_t const x{ region.x + static_cast<int32_t>(next(seed) % 12000) };
-      int32_t const y{ region.y + static_cast<int32_t>(next(seed) % 7000) };
-      uint32_t const shape{ next(seed) % 4 };
-      int32_t const w{ (shape == 0) ? 0 : static_cast<int32_t>(next(seed) % 2500) };
-      int32_t const h{ (shape == 1) ? 0 : static_cast<int32_t>(next(seed) % 1500) };
-      rects.push_back({ .x = x, .y = y, .w = w, .h = h });
-    }
+    std::vector<scav_rect> const rects{ random_rects(seed, region) };
     RectGrid g;
     int32_t const cw{ 1 + static_cast<int32_t>(next(seed) % 900) };
     int32_t const ch{ 1 + static_cast<int32_t>(next(seed) % 300) };
-    grid_build(g, region, rects, cw, ch);
+    grid_build(g, region, rects, cw, ch, cursor);
     for (uint32_t q = 0; q < 200; ++q) {
       // Some candidates reach past the region, which the grid clamps into its
       // edge cells; the answer must not change there either.
-      scav_rect const cand{ .x = region.x - 800 + static_cast<int32_t>(next(seed) % 13600),
-                            .y = region.y - 800 + static_cast<int32_t>(next(seed) % 8600),
-                            .w = static_cast<int32_t>(next(seed) % 1200),
-                            .h = static_cast<int32_t>(next(seed) % 400) };
+      scav_rect const cand{ random_query(seed, region) };
       CAPTURE(trial);
       CAPTURE(q);
       CHECK(grid_hits(g, rects, cand) == scan_hits(rects, cand));
@@ -171,18 +187,46 @@ TEST_CASE("geom: a rect grid answers exactly what scanning every rect does") {
   }
 }
 
+TEST_CASE("geom: a rect grid visits each rect within the margin, and each once") {
+  uint64_t seed{ 7 };
+  scav_rect const region{ .x = -3000, .y = -2000, .w = 12000, .h = 7000 };
+  std::vector<uint32_t> cursor;
+  for (uint32_t trial = 0; trial < 100; ++trial) {
+    std::vector<scav_rect> const rects{ random_rects(seed, region) };
+    RectGrid g;
+    int32_t const cw{ 1 + static_cast<int32_t>(next(seed) % 900) };
+    int32_t const ch{ 1 + static_cast<int32_t>(next(seed) % 300) };
+    grid_build(g, region, rects, cw, ch, cursor);
+    for (uint32_t q = 0; q < 100; ++q) {
+      scav_rect const cand{ random_query(seed, region) };
+      int32_t const margin{ static_cast<int32_t>(next(seed) % 600) };
+      std::vector<uint32_t> visits(rects.size(), 0);
+      CHECK_FALSE(grid_visit(g, cand, margin, [&visits](uint32_t k) {
+        ++visits[k];
+        return false;
+      }));
+      CAPTURE(trial);
+      CAPTURE(q);
+      for (uint32_t k = 0; k < rects.size(); ++k) {
+        CHECK(visits[k] <= 1);
+        if (chebyshev_gap(cand, rects[k]) <= margin) { CHECK(visits[k] == 1); }
+      }
+    }
+  }
+}
+
 TEST_CASE("geom: a rect grid caps its cells, however small it is asked to make them") {
   RectGrid g;
+  std::vector<uint32_t> cursor;
   scav_rect const region{ .x = 0, .y = 0, .w = 1'000'000, .h = 1'000'000 };
-  grid_build(g, region, { { .x = 10, .y = 10, .w = 5, .h = 5 } }, 1, 1);
+  std::vector<scav_rect> const one{ { .x = 10, .y = 10, .w = 5, .h = 5 } };
+  grid_build(g, region, one, 1, 1, cursor);
   CHECK(g.nx <= GRID_SIDE);
   CHECK(g.ny <= GRID_SIDE);
-  CHECK(grid_hits(g,
-                  { { .x = 10, .y = 10, .w = 5, .h = 5 } },
-                  { .x = 12, .y = 12, .w = 1, .h = 1 }));
+  CHECK(grid_hits(g, one, { .x = 12, .y = 12, .w = 1, .h = 1 }));
   // An empty set of rects hits nothing, and a degenerate region still builds.
   RectGrid none;
-  grid_build(none, { .x = 5, .y = 5, .w = 0, .h = 0 }, {}, 10, 10);
+  grid_build(none, { .x = 5, .y = 5, .w = 0, .h = 0 }, {}, 10, 10, cursor);
   CHECK(!grid_hits(none, {}, { .x = 0, .y = 0, .w = 100, .h = 100 }));
 }
 

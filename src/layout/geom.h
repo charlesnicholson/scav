@@ -112,8 +112,10 @@ struct RectGrid {
   int32_t x0{ 0 }, y0{ 0 };
   Wide cw{ 1 }, ch{ 1 };
   uint32_t nx{ 1 }, ny{ 1 };
-  std::vector<uint32_t> off;   // nx * ny + 1, into `item`
-  std::vector<uint32_t> item;  // -> the rects the grid was built over
+  std::vector<uint32_t> off;    // nx * ny + 1, into `item`
+  std::vector<uint32_t> item;   // -> the rects the grid was built over
+  std::vector<uint32_t> stamp;  // per rect, the last query that visited it
+  uint32_t epoch{ 0 };          // the current query
 };
 
 // At most this many cells a side, so a long route's region and a small box do
@@ -126,11 +128,14 @@ inline uint32_t grid_cell(Wide v, int32_t lo, Wide size, uint32_t n) {
   return (at >= Wide{ n }) ? (n - 1) : static_cast<uint32_t>(at);
 }
 
+// Buckets `rects` over `region` in cells at least `cell_w` by `cell_h`, placing through
+// the caller's `cursor`.
 inline void grid_build(RectGrid &g,
                        scav_rect const &region,
                        std::vector<scav_rect> const &rects,
                        int32_t cell_w,
-                       int32_t cell_h) {
+                       int32_t cell_h,
+                       std::vector<uint32_t> &cursor) {
   g.x0 = region.x;
   g.y0 = region.y;
   g.cw = imax(Wide{ imax(cell_w, 1) }, ceil_div(Wide{ region.w } + 1, Wide{ GRID_SIDE }));
@@ -138,65 +143,51 @@ inline void grid_build(RectGrid &g,
   g.nx = static_cast<uint32_t>(imax(ceil_div(Wide{ region.w } + 1, g.cw), Wide{ 1 }));
   g.ny = static_cast<uint32_t>(imax(ceil_div(Wide{ region.h } + 1, g.ch), Wide{ 1 }));
   vec_assign(g.off, (static_cast<size_t>(g.nx) * g.ny) + 1, 0);
-  auto const span =
-      [&g](scav_rect const &r, uint32_t &c0, uint32_t &c1, uint32_t &r0, uint32_t &r1) {
-        c0 = grid_cell(r.x, g.x0, g.cw, g.nx);
-        c1 = grid_cell(Wide{ r.x } + r.w, g.x0, g.cw, g.nx);
-        r0 = grid_cell(r.y, g.y0, g.ch, g.ny);
-        r1 = grid_cell(Wide{ r.y } + r.h, g.y0, g.ch, g.ny);
-      };
-  for (scav_rect const &r : rects) {
-    uint32_t c0{ 0 };
-    uint32_t c1{ 0 };
-    uint32_t r0{ 0 };
-    uint32_t r1{ 0 };
-    span(r, c0, c1, r0, r1);
-    for (uint32_t y = r0; y <= r1; ++y) {
-      for (uint32_t x = c0; x <= c1; ++x) {
-        ++g.off[(static_cast<size_t>(y) * g.nx) + x + 1];
+  auto const spread = [&g, &rects](auto step) {
+    for (uint32_t k = 0; k < rects.size(); ++k) {
+      scav_rect const &r{ rects[k] };
+      uint32_t const c0{ grid_cell(r.x, g.x0, g.cw, g.nx) };
+      uint32_t const c1{ grid_cell(Wide{ r.x } + r.w, g.x0, g.cw, g.nx) };
+      uint32_t const r0{ grid_cell(r.y, g.y0, g.ch, g.ny) };
+      uint32_t const r1{ grid_cell(Wide{ r.y } + r.h, g.y0, g.ch, g.ny) };
+      for (uint32_t y = r0; y <= r1; ++y) {
+        for (uint32_t x = c0; x <= c1; ++x) {
+          step((static_cast<size_t>(y) * g.nx) + x, k);
+        }
       }
     }
-  }
+  };
+  spread([&g](size_t cell, uint32_t) { ++g.off[cell + 1]; });
   for (size_t i = 1; i < g.off.size(); ++i) { g.off[i] += g.off[i - 1]; }
-  vec_assign(g.item, g.off.back(), 0);
-  std::vector<uint32_t> fill(g.off.begin(), g.off.end() - 1);
-  for (uint32_t k = 0; k < rects.size(); ++k) {
-    uint32_t c0{ 0 };
-    uint32_t c1{ 0 };
-    uint32_t r0{ 0 };
-    uint32_t r1{ 0 };
-    span(rects[k], c0, c1, r0, r1);
-    for (uint32_t y = r0; y <= r1; ++y) {
-      for (uint32_t x = c0; x <= c1; ++x) {
-        g.item[fill[(static_cast<size_t>(y) * g.nx) + x]++] = k;
-      }
-    }
-  }
+  vec_resize(g.item, g.off.back());
+  vec_assign(cursor, g.off.begin(), g.off.end() - 1);
+  spread([&g, &cursor](size_t cell, uint32_t k) { g.item[cursor[cell]++] = k; });
+  vec_assign(g.stamp, rects.size(), 0);
+  g.epoch = 0;
 }
 
-// The index of a rect `cand` overlaps, or INVALID where it overlaps none.
-inline uint32_t grid_hit(RectGrid const &g,
-                         std::vector<scav_rect> const &rects,
-                         scav_rect const &cand) {
-  uint32_t const c0{ grid_cell(cand.x, g.x0, g.cw, g.nx) };
-  uint32_t const c1{ grid_cell(Wide{ cand.x } + cand.w, g.x0, g.cw, g.nx) };
-  uint32_t const r0{ grid_cell(cand.y, g.y0, g.ch, g.ny) };
-  uint32_t const r1{ grid_cell(Wide{ cand.y } + cand.h, g.y0, g.ch, g.ny) };
+// Visits once each rect sharing a cell with `q` grown by `margin`, in cell order, until
+// `visit` returns true; returns whether it did. Every rect whose closed extent comes
+// within `margin` of `q`'s is visited.
+template <typename Visit>
+bool grid_visit(RectGrid &g, scav_rect const &q, Wide margin, Visit visit) {
+  ++g.epoch;
+  uint32_t const c0{ grid_cell(Wide{ q.x } - margin, g.x0, g.cw, g.nx) };
+  uint32_t const c1{ grid_cell(Wide{ q.x } + q.w + margin, g.x0, g.cw, g.nx) };
+  uint32_t const r0{ grid_cell(Wide{ q.y } - margin, g.y0, g.ch, g.ny) };
+  uint32_t const r1{ grid_cell(Wide{ q.y } + q.h + margin, g.y0, g.ch, g.ny) };
   for (uint32_t y = r0; y <= r1; ++y) {
     for (uint32_t x = c0; x <= c1; ++x) {
       size_t const cell{ (static_cast<size_t>(y) * g.nx) + x };
       for (uint32_t k = g.off[cell]; k < g.off[cell + 1]; ++k) {
-        if (overlaps(cand, rects[g.item[k]])) { return g.item[k]; }
+        uint32_t const item{ g.item[k] };
+        if (g.stamp[item] == g.epoch) { continue; }
+        g.stamp[item] = g.epoch;
+        if (visit(item)) { return true; }
       }
     }
   }
-  return INVALID;
-}
-
-inline bool grid_hits(RectGrid const &g,
-                      std::vector<scav_rect> const &rects,
-                      scav_rect const &cand) {
-  return grid_hit(g, rects, cand) != INVALID;
+  return false;
 }
 
 }  // namespace scav
