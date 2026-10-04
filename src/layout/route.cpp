@@ -32,12 +32,36 @@ namespace scav {
 
 namespace {
 
-// A state's four bands and its loop room, each a wall to everything but its own loops.
-std::array<scav_rect, 5> bands_of(SizedLayout const &z, uint32_t st) {
-  auto const row = [st](std::vector<scav_rect> const &v) {
-    return (st < v.size()) ? v[st] : scav_rect{};
-  };
-  return { row(z.before), row(z.after), row(z.lead), row(z.trail), row(z.loop) };
+// An inner-face end on its frame's edge, moved square out to the border of the state
+// owning the frame where no other region of that state lies between.
+scav_point on_owner_border(Chart const &c, SizedLayout const &z, uint32_t frame, scav_point at) {
+  if (frame >= c.submachines.size()) { return at; }
+  uint32_t const owner{ c.submachines[frame].owner.v };
+  if (owner >= z.state.size()) { return at; }
+  scav_rect const &f{ z.sub[frame] };
+  scav_rect const &b{ z.state[owner] };
+  scav_point out{ at };
+  if (at.x == f.x) {
+    out.x = b.x;
+  } else if (at.x == (f.x + f.w)) {
+    out.x = b.x + b.w;
+  } else if (at.y == f.y) {
+    out.y = b.y;
+  } else if (at.y == (f.y + f.h)) {
+    out.y = b.y + b.h;
+  } else {
+    return at;
+  }
+  scav_rect const leg{ .x = imin(at.x, out.x),
+                       .y = imin(at.y, out.y),
+                       .w = imax(at.x, out.x) - imin(at.x, out.x),
+                       .h = imax(at.y, out.y) - imin(at.y, out.y) };
+  Span const subs{ c.states[owner].submachines };
+  for (uint32_t k = 0; k < subs.len; ++k) {
+    uint32_t const m{ c.submachine_ids[subs.off + k].v };
+    if ((m != frame) && (c.submachines[m].live != 0) && overlaps(leg, z.sub[m])) { return at; }
+  }
+  return out;
 }
 
 scav_point centre(scav_rect const &r) {
@@ -421,7 +445,8 @@ void route_transitions(Routes &out,
       // Nothing is crossed there, so the end names no obstacle and no slot.
       uint32_t const head{ o.seg_node[segs.off] };
       bool const head_inner{ (g.segments[segs.off].src_inner != 0) && (head != INVALID) };
-      scav_point at{ head_inner ? z.node[head] : centre(z.state[tr.src.v]) };
+      scav_point at{ head_inner ? on_owner_border(c, z, g.segments[segs.off].frame.v, z.node[head])
+                                : centre(z.state[tr.src.v]) };
       uint32_t at_state{ head_inner ? INVALID : tr.src.v };
       for (uint32_t k = 0; k < segs.len; ++k) {
         uint32_t const seg{ segs.off + k };
@@ -435,7 +460,7 @@ void route_transitions(Routes &out,
           vec_push_back(out.slots, slot);
           end = { .x = slot.x, .y = slot.y };
         } else if (tail_inner) {
-          end = z.node[tail];
+          end = on_owner_border(c, z, g.segments[seg].frame.v, z.node[tail]);
         } else {
           end = centre(z.state[tr.dst.v]);
           end_state = tr.dst.v;
@@ -645,7 +670,7 @@ void route_transitions(Routes &out,
     // The bands and loop rooms of the states the frame lies inside are walls inside them.
     for (uint32_t const a : sc.chain) {
       sc.in_chain[a] = 0;
-      for (scav_rect const &band : bands_of(z, a)) {
+      for (scav_rect const &band : state_walls(z, a)) {
         if ((band.w > 0) && (band.h > 0) && overlaps(region, band)) {
           vec_push_back(in.obstacles, band);
           vec_push_back(in.inscribed, 0U);
@@ -859,7 +884,7 @@ void route_transitions(Routes &out,
         continue;
       }
       vec_push_back(walls, z.state[st]);
-      for (scav_rect const &band : bands_of(z, st)) {
+      for (scav_rect const &band : state_walls(z, st)) {
         if ((band.w > 0) && (band.h > 0)) { vec_push_back(walls, band); }
       }
     }

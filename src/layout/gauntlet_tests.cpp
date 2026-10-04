@@ -61,12 +61,13 @@ scav_profile compact() {
 // Every chart in test_data/charts/gauntlet, named so a failure says which shape
 // broke rather than which index did.
 constexpr std::array GAUNTLET{
-  "above.scav",     "carried.scav",   "chain.scav",   "corner.scav",  "crossing.scav",
-  "crowd.scav",     "enclosing.scav", "entered.scav", "fanin.scav",   "folded.scav",
-  "fork.scav",      "lane.scav",      "level.scav",   "long.scav",    "loop.scav",
-  "marks.scav",     "mutual.scav",    "ported.scav",  "pulled.scav",  "regions.scav",
-  "roundtrip.scav", "seated.scav",    "stretch.scav", "through.scav", "tight.scav",
-  "transit.scav",   "under.scav",     "unfolded.scav"
+  "above.scav", "carried.scav", "chain.scav", "corner.scav", "crossing.scav",
+  "crowd.scav", "enclosing.scav", "entered.scav", "fanin.scav", "folded.scav",
+  "fork.scav", "header.scav", "inloop.scav", "lane.scav", "level.scav",
+  "long.scav", "loop.scav", "marks.scav", "mixed.scav", "mutual.scav",
+  "ported.scav", "pulled.scav", "regions.scav", "roundtrip.scav", "seated.scav",
+  "stretch.scav", "through.scav", "tight.scav", "transit.scav", "under.scav",
+  "unfolded.scav"
 };
 
 // One chart, laid out: the pieces every property below reads.
@@ -1473,6 +1474,259 @@ TEST_CASE("gauntlet: a route leaving a composite turns one corner into its targe
     scav_rect const box{ l.z.state[fault] };
     CHECK(before.x == last.x);
     CHECK(((last.y == box.y) || (last.y == (box.y + box.h))));
+  }
+}
+
+// The chart's states, so a test can name the ones its space requests are for.
+Chart loaded(char const *name) {
+  std::string path{ SCAV_TEST_DATA_DIR "/charts/gauntlet/" };
+  path += name;
+  Loader loader;
+  std::vector<Diagnostic> diags;
+  std::string failed;
+  Chart c;
+  REQUIRE(load_file(path.c_str(), loader, c, diags, failed));
+  return c;
+}
+
+scav_spaces spaces_of(std::vector<scav_box_space> const &box) {
+  return { .box_state = box.data(),
+           .n_box_state = static_cast<uint32_t>(box.size()),
+           .box_state_stride = static_cast<uint32_t>(sizeof(scav_box_space)) };
+}
+
+// Whether any segment of any route enters any nonempty band of any state.
+bool any_band_entered(Laid const &l) {
+  for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+    scav_span const route{ l.r.route[t] };
+    for (uint32_t k = 0; (k + 1) < route.len; ++k) {
+      scav_point const a{ l.r.points[route.off + k] };
+      scav_point const b{ l.r.points[route.off + k + 1] };
+      for (uint32_t st = 0; st < l.c.states.size(); ++st) {
+        for (scav_rect const &band :
+             { l.z.before[st], l.z.after[st], l.z.lead[st], l.z.trail[st] }) {
+          if ((band.w > 0) && (band.h > 0) && enters(a, b, band)) { return true; }
+        }
+      }
+    }
+  }
+  return false;
+}
+
+uint32_t from_named(Chart const &c, uint32_t src) {
+  for (uint32_t t = 0; t < c.transitions.size(); ++t) {
+    if (c.transitions[t].src.v == src) { return t; }
+  }
+  return INVALID;
+}
+
+TEST_CASE("gauntlet: a header walls its face, so the port from above moves off it") {
+  // `above` with its root turned to run down puts Source over Box, and the facing
+  // pass put the port on Box's top; a header there sends it to another face.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Chart const probe{ loaded("above.scav") };
+    uint32_t const box{ state_named(probe, "Box") };
+    REQUIRE(box != INVALID);
+    std::vector<scav_box_space> rows(probe.states.size());
+    rows[box].h_before = 4 * p.font_size_grid;
+    scav_spaces const s{ spaces_of(rows) };
+    SearchPins const seed{ .orients = { { .frame = SubmachineId{ 0 } } } };
+    Laid l;
+    lay("above.scav", one_row(p), l, s, &seed);
+    uint32_t const drop{ from_named(l.c, state_named(l.c, "Source")) };
+    uint32_t const middle{ state_named(l.c, "Middle") };
+    REQUIRE(drop != INVALID);
+    REQUIRE(l.r.port[drop].len == 1);
+    CHECK(l.r.slots[l.r.port[drop].off].side != 2);
+    CHECK_FALSE(any_band_entered(l));
+    CHECK(cost_terms(l.c, l.g, l.z, l.r, s, one_row(p)).through_band == 0);
+    scav_span const route{ l.r.route[drop] };
+    REQUIRE(route.len >= 2);
+    CHECK(on_border(l.r.points[route.off + route.len - 1], l.z.state[middle]));
+  }
+}
+
+TEST_CASE("gauntlet: a port takes the one face no band lines") {
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Chart const probe{ loaded("above.scav") };
+    uint32_t const box{ state_named(probe, "Box") };
+    REQUIRE(box != INVALID);
+    std::vector<scav_box_space> rows(probe.states.size());
+    rows[box] = { .min_w = 0,
+                  .h_before = 2 * p.font_size_grid,
+                  .h_after = 0,
+                  .w_before = 2 * p.font_size_grid,
+                  .w_after = 2 * p.font_size_grid };
+    scav_spaces const s{ spaces_of(rows) };
+    Laid l;
+    lay("above.scav", one_row(p), l, s, nullptr);
+    uint32_t const drop{ from_named(l.c, state_named(l.c, "Source")) };
+    REQUIRE(drop != INVALID);
+    REQUIRE(l.r.port[drop].len == 1);
+    CHECK(l.r.slots[l.r.port[drop].off].side == 3);
+    CHECK_FALSE(any_band_entered(l));
+    CHECK(cost_terms(l.c, l.g, l.z, l.r, s, one_row(p)).through_band == 0);
+  }
+}
+
+TEST_CASE("gauntlet: a state walled on every face is still drawn, and pays for the wall") {
+  // Garbage in: no face is free, so a route into Box must cross a band. Layout
+  // succeeds, every transition is drawn, and Tier 0 counts the crossings.
+  scav_router_id id{};
+  REQUIRE(router_by_name(reinterpret_cast<scav_byte const *>("orthogonal"), 10, id));
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    for (char const *name : { "above.scav", "mixed.scav", "header.scav" }) {
+      CAPTURE(name);
+      Chart c{ loaded(name) };
+      std::vector<scav_box_space> rows(c.states.size());
+      for (uint32_t st = 0; st < c.states.size(); ++st) {
+        if (c.states[st].submachines.len == 0) { continue; }
+        rows[st] = { .min_w = 0,
+                     .h_before = p.font_size_grid,
+                     .h_after = p.font_size_grid,
+                     .w_before = p.font_size_grid,
+                     .w_after = p.font_size_grid };
+      }
+      scav_spaces const s{ spaces_of(rows) };
+      std::vector<scav_placed> placed;
+      std::vector<Diagnostic> diags;
+      scav_layout_opts const o{ .profile = p, .router = id, .threads = 0 };
+      REQUIRE(layout_run(c, s, o, placed, diags));
+      ColumnId const routes{ column_find(c, "scav.geom.route") };
+      REQUIRE(routes.v != INVALID);
+      for (uint32_t t = 0; t < c.transitions.size(); ++t) {
+        scav_span route{};
+        std::memcpy(&route, column_data(c, routes) + (size_t{ t } * sizeof(scav_span)),
+                    sizeof(scav_span));
+        CAPTURE(t);
+        CHECK(route.len >= 2);
+      }
+      CHECK(cost_columns(c, decompose(c), p, s, placed).through_band > 0);
+    }
+  }
+}
+
+TEST_CASE("gauntlet: with every state headed, no route enters a band" *
+          doctest::test_suite("full")) {
+  for (char const *name : GAUNTLET) {
+    for (scav_profile const &p : { readable(), compact() }) {
+      CAPTURE(name);
+      CAPTURE(p.profile_id);
+      Chart const probe{ loaded(name) };
+      std::vector<scav_box_space> rows(probe.states.size());
+      for (uint32_t st = 0; st < probe.states.size(); ++st) {
+        if (probe.states[st].kind == StateKind::Normal) {
+          rows[st].h_before = 2 * p.font_size_grid;
+        }
+      }
+      scav_spaces const s{ spaces_of(rows) };
+      Laid l;
+      lay(name, p, l, s, nullptr);
+      CHECK_FALSE(any_band_entered(l));
+      CHECK(cost_terms(l.c, l.g, l.z, l.r, s, p).through_band == 0);
+      for (scav_port_slot const &slot : l.r.slots) {
+        CAPTURE(slot.x);
+        CAPTURE(slot.y);
+        CHECK(slot.side != 2);  // every composite is headed, so no port is on a top
+      }
+    }
+  }
+}
+
+TEST_CASE("gauntlet: an internal loop stays inside its state, under its header") {
+  // Each loop leaves its state's right border and returns to it lower down, every
+  // corner strictly inside, clear of the header, the children and its label.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Chart const probe{ loaded("inloop.scav") };
+    std::vector<scav_box_space> rows(probe.states.size());
+    std::vector<scav_path_box> boxes;
+    for (uint32_t st = 0; st < probe.states.size(); ++st) {
+      if (probe.states[st].kind == StateKind::Normal) {
+        rows[st].h_before = 2 * p.font_size_grid;
+      }
+    }
+    for (uint32_t t = 0; t < probe.transitions.size(); ++t) {
+      if (probe.transitions[t].label.len == 0) { continue; }
+      boxes.push_back({ .subject = t, .w = 4 * p.font_size_grid, .h = p.font_size_grid,
+                        .order = 0 });
+    }
+    scav_spaces s{ spaces_of(rows) };
+    s.path_box = boxes.data();
+    s.n_path_box = static_cast<uint32_t>(boxes.size());
+    s.path_box_stride = static_cast<uint32_t>(sizeof(scav_path_box));
+    Laid l;
+    lay("inloop.scav", p, l, s, nullptr);
+    uint32_t loops{ 0 };
+    for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+      Transition const &tr{ l.c.transitions[t] };
+      if ((tr.src != tr.dst) || (tr.kind == TransKind::External)) { continue; }
+      CAPTURE(t);
+      ++loops;
+      scav_rect const &box{ l.z.state[tr.src.v] };
+      scav_rect const &head{ l.z.before[tr.src.v] };
+      scav_span const route{ l.r.route[t] };
+      REQUIRE(route.len == 4);
+      scav_point const *const pt{ l.r.points.data() + route.off };
+      CHECK(pt[0].x == (box.x + box.w));
+      CHECK(pt[3].x == (box.x + box.w));
+      CHECK(pt[0].y < pt[3].y);
+      for (uint32_t k = 1; k < 3; ++k) {
+        CHECK(strictly_inside(pt[k], box));
+        CHECK(pt[k].y > (head.y + head.h));
+      }
+      for (uint32_t st = 0; st < l.c.states.size(); ++st) {
+        if ((st == tr.src.v) || !ancestor(l.c, tr.src, { st })) { continue; }
+        for (uint32_t k = 0; k < 3; ++k) { CHECK_FALSE(enters(pt[k], pt[k + 1], l.z.state[st])); }
+      }
+      for (uint32_t i = 0; i < boxes.size(); ++i) {
+        if (boxes[i].subject != t) { continue; }
+        scav_rect const &label{ l.r.placed[i] };
+        CHECK(label.x > box.x);
+        CHECK((label.x + label.w) < pt[1].x);
+        CHECK(label.y >= (head.y + head.h));
+        CHECK((label.y + label.h) < (box.y + box.h));
+      }
+    }
+    CHECK(loops == 4);
+    CHECK_FALSE(any_band_entered(l));
+  }
+}
+
+TEST_CASE("gauntlet: crossings into decorated composites keep clear of every band") {
+  // Headers on every state and a footer on each composite: ports take the side
+  // faces, an internal transition into a composite's depth starts on its border,
+  // and nothing enters a band.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Chart const probe{ loaded("mixed.scav") };
+    std::vector<scav_box_space> rows(probe.states.size());
+    for (uint32_t st = 0; st < probe.states.size(); ++st) {
+      if (probe.states[st].kind != StateKind::Normal) { continue; }
+      rows[st].h_before = 2 * p.font_size_grid;
+      if (probe.states[st].submachines.len != 0) { rows[st].h_after = p.font_size_grid; }
+    }
+    scav_spaces const s{ spaces_of(rows) };
+    Laid l;
+    lay("mixed.scav", p, l, s, nullptr);
+    CHECK_FALSE(any_band_entered(l));
+    CHECK(cost_terms(l.c, l.g, l.z, l.r, s, p).through_band == 0);
+    for (scav_port_slot const &slot : l.r.slots) { CHECK(slot.side < 2); }
+    uint32_t const left{ state_named(l.c, "Left") };
+    uint32_t const core{ state_named(l.c, "Core") };
+    REQUIRE(left != INVALID);
+    REQUIRE(core != INVALID);
+    for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+      Transition const &tr{ l.c.transitions[t] };
+      if ((tr.src.v != left) || (tr.dst.v != core)) { continue; }
+      scav_span const route{ l.r.route[t] };
+      REQUIRE(route.len >= 2);
+      CHECK(on_border(l.r.points[route.off], l.z.state[left]));
+      CHECK(on_border(l.r.points[route.off + route.len - 1], l.z.state[core]));
+    }
   }
 }
 

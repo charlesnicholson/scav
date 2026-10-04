@@ -2831,6 +2831,21 @@ int32_t saturate(Wide v) { return static_cast<int32_t>(imin(v, Wide{ COORD_MAX }
 
 }  // namespace
 
+std::array<scav_rect, 5> state_walls(SizedLayout const &z, uint32_t st) {
+  auto const row = [st](std::vector<scav_rect> const &v) {
+    return (st < v.size()) ? v[st] : scav_rect{};
+  };
+  scav_rect const top{ row(z.before) };
+  scav_rect const bottom{ row(z.after) };
+  auto const sealed = [&](scav_rect side) {
+    if ((side.w <= 0) || (top.w <= 0)) { return side; }
+    side.y = top.y;
+    side.h = (bottom.y + bottom.h) - top.y;
+    return side;
+  };
+  return { top, bottom, sealed(row(z.lead)), sealed(row(z.trail)), row(z.loop) };
+}
+
 bool face_lined(scav_spaces const &s, uint32_t state, uint32_t face) {
   scav_box_space const b{ box_of(s.box_state, s.n_box_state, state) };
   std::array<int32_t, 4> const band{ b.w_before, b.w_after, b.h_before, b.h_after };
@@ -2846,7 +2861,8 @@ int32_t loop_lane(scav_profile const &p) {
 }
 
 LoopRow loop_row(scav_profile const &p, scav_extent label) {
-  return { .label_w = label.w, .label_h = label.h, .h = imax(label.h, loop_lane(p)) };
+  int32_t const legs{ loop_lane(p) + (2 * route_clearance(p)) };  // a clearance off each edge
+  return { .label_w = label.w, .label_h = label.h, .h = imax(label.h, legs) };
 }
 
 void loop_rooms(Chart const &c,
@@ -2868,7 +2884,7 @@ void loop_rooms(Chart const &c,
     scav_extent &r{ room[c.transitions[t].src.v] };
     int32_t const w{ ((row.label_w > 0) ? (row.label_w + loop_gap(p)) : 0) + loop_reach(p) };
     r.w = imax(r.w, w);
-    r.h = saturate(Wide{ r.h } + ((r.h > 0) ? p.pad : 0) + row.h);
+    r.h = saturate(Wide{ r.h } + row.h);
   }
 }
 
@@ -2890,7 +2906,7 @@ void loop_rows(Chart const &c,
     scav_rect const &r{ z.loop[st] };
     int32_t const h{ loop_row(p, label[t]).h };
     row[t] = { .x = r.x, .y = r.y + cursor[st], .w = r.w, .h = h };
-    cursor[st] += h + p.pad;
+    cursor[st] += h;
   }
 }
 

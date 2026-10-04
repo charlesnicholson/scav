@@ -829,57 +829,65 @@ TEST_CASE("builder: the history mark fits its circle at every radius the profile
   }
 }
 
-TEST_CASE("builder: a routeless transition's label rides the source's after band") {
+TEST_CASE("builder: an internal loop's label is a path box seated inside its state") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const s{ build_state(c, root, "Idle", StateKind::Normal, {}) };
   StateId const other{ build_state(c, root, "Busy", StateKind::Normal, {}) };
   build_trans(c, s, s, TransKind::Internal, "tick");
-  build_trans(c, s, other, TransKind::External, "go");  // routed, so a path box
-  build_trans(c, s, s, TransKind::Local, "tock");       // routeless again
+  build_trans(c, s, other, TransKind::External, "go");
+  build_trans(c, s, s, TransKind::Local, "tock");
 
   scav_profile const p{ readable() };
-  Metrics const m{ bundled() };
   Spaces sp;
-  REQUIRE(measure_chart(c, m, p, sp));
-  // The two routeless labels reserve a line each after the source's submachine
-  // area, and only the routed one asks for a box to slide.
-  scav_extent line{};
-  REQUIRE(measure_block(m,
-                        reinterpret_cast<scav_byte const *>("tick"),
-                        4,
-                        p.font_size_grid,
-                        p.line_height_k_num,
-                        p.line_height_k_den,
-                        line) == MeasureStatus::Ok);
-  CHECK(sp.box_state[s.v].h_after == (2 * line.h));
-  REQUIRE(sp.path_box.size() == 1);
-  CHECK(sp.path_box[0].subject == 1);
+  REQUIRE(measure_chart(c, bundled(), p, sp));
+  // Every labelled transition asks for a box to slide, and no band is reserved for one.
+  CHECK(sp.box_state[s.v].h_after == 0);
+  REQUIRE(sp.path_box.size() == 3);
 
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
   REQUIRE(layout_run(c, as_spaces(sp), opts(p), placed, diags));
-  ColumnId const after{ column_find(c, "scav.geom.state_after") };
-  REQUIRE(after.v != INVALID);
-  scav_rect band{};
-  std::memcpy(&band,
-              column_data(c, after) + (static_cast<size_t>(s.v) * sizeof(scav_rect)),
+  ColumnId const states{ column_find(c, "scav.geom.state") };
+  ColumnId const befores{ column_find(c, "scav.geom.state_before") };
+  REQUIRE(states.v != INVALID);
+  REQUIRE(befores.v != INVALID);
+  scav_rect box{};
+  scav_rect title{};
+  std::memcpy(&box,
+              column_data(c, states) + (static_cast<size_t>(s.v) * sizeof(scav_rect)),
               sizeof(scav_rect));
-  REQUIRE(band.h > 0);
+  std::memcpy(&title,
+              column_data(c, befores) + (static_cast<size_t>(s.v) * sizeof(scav_rect)),
+              sizeof(scav_rect));
 
+  uint32_t const count{ static_cast<uint32_t>(placed.size()) };
   scav_rect first{};
   scav_rect second{};
-  uint32_t const count{ static_cast<uint32_t>(placed.size()) };
   REQUIRE(label_box(c, as_spaces(sp), placed.data(), count, 0, first));
   REQUIRE(label_box(c, as_spaces(sp), placed.data(), count, 2, second));
-  // One line each, in transition order, sharing the band the source reserved.
-  CHECK(first.x == band.x);
-  CHECK(first.w == band.w);
-  CHECK(first.y == band.y);
-  CHECK(second.y == (band.y + (band.h / 2)));
-  CHECK(first.h == (band.h / 2));
-  CHECK(second.h == first.h);
-  CHECK(first.y < second.y);
+  // Inside the state and below its title band, one row per loop in transition order.
+  for (scav_rect const &r : { first, second }) {
+    CHECK(r.x > box.x);
+    CHECK((r.x + r.w) < (box.x + box.w));
+    CHECK(r.y >= (title.y + title.h));
+    CHECK((r.y + r.h) < (box.y + box.h));
+  }
+  CHECK((first.y + first.h) <= second.y);
+}
+
+TEST_CASE("builder: a tombstoned transition asks for no path box") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const s{ build_state(c, root, "S", StateKind::Normal, {}) };
+  TransId const dead{ build_trans(c, s, s, TransKind::Internal, "gone") };
+  TransId const live{ build_trans(c, s, s, TransKind::Internal, "tick") };
+  c.transitions[dead.v].live = 0;
+
+  Spaces sp;
+  REQUIRE(measure_chart(c, bundled(), readable(), sp));
+  REQUIRE(sp.path_box.size() == 1);
+  CHECK(sp.path_box[0].subject == live.v);
 }
 
 TEST_CASE("builder: a label is drawn centred in the box that was placed for it") {
@@ -1651,28 +1659,6 @@ TEST_CASE("builder: a profile whose pad is negative is refused, not drawn inside
   build_state(c, root, "Named", StateKind::Normal, {});
   Spaces s;
   CHECK(!measure_chart(c, bundled(), p, s));
-}
-
-TEST_CASE("builder: a tombstoned transition claims no line of the after band") {
-  Chart c;
-  SubmachineId const root{ build_chart(c, "t", {}) };
-  StateId const s{ build_state(c, root, "S", StateKind::Normal, {}) };
-  TransId const dead{ build_trans(c, s, s, TransKind::Internal, "gone") };
-  TransId const live{ build_trans(c, s, s, TransKind::Internal, "tick") };
-  c.transitions[dead.v].live = 0;
-
-  Spaces sp;
-  REQUIRE(measure_chart(c, bundled(), readable(), sp));
-  ColumnId const after{
-    geom_column(c, "scav.geom.state_after", ElemKind::State, ValueKind::Pod, RECT_SIZE)
-  };
-  put_row(c, after, s.v, scav_rect{ .x = 0, .y = 0, .w = 100, .h = 40 });
-
-  scav_rect box{};
-  REQUIRE(label_box(c, as_spaces(sp), nullptr, 0, live.v, box));
-  // One claimant, so the band is not divided: the live label takes it whole.
-  CHECK(box.y == 0);
-  CHECK(box.h == 40);
 }
 
 TEST_CASE("builder: a history circle too big for the metrics draws the ring and no mark") {

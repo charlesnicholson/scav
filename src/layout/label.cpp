@@ -860,8 +860,7 @@ struct CallBuffers {
   std::vector<scav_rect> dirty, pieces;
   std::vector<Pieces> by_route;
   std::vector<uint32_t> live, queue, merge, settled;
-  std::vector<scav_extent> loop_label;
-  std::vector<scav_rect> loop_row;
+  std::vector<scav_extent> loop_label, loop_room;
   Local local;
 };
 
@@ -983,8 +982,8 @@ uint32_t place_labels_from(Chart const &c,
   bool chain_kept{ true };  // every earlier box of this transition settled as in the base
   int32_t const leader{ label_leader(p) };
   bool const relative{ search != LabelSearch::Exhaustive };
-  loop_rows(c, z, s, p, cb.loop_label, cb.loop_row);
-  int32_t loop_y{ 0 };  // the next box's top in the current subject's loop row
+  loop_rooms(c, s, p, cb.loop_label, cb.loop_room);
+  int32_t loop_y{ 0 };  // the next box's top beside the current subject's loop
 
   for (uint32_t const i : queue) {
     scav_path_box const &box{ s.path_box[i] };
@@ -994,15 +993,14 @@ uint32_t place_labels_from(Chart const &c,
       prior_subject = box.subject;
       chained = false;
       chain_kept = true;
-      if (looped) {
-        scav_rect const &row{ cb.loop_row[box.subject] };
-        loop_y = row.y + floor_div(row.h - cb.loop_label[box.subject].h, 2);
+      if (looped && (r.len >= 3)) {
+        Wide const mid{ (Wide{ points[r.off + 1].y } + points[r.off + 2].y) / 2 };
+        loop_y = static_cast<int32_t>(mid - (cb.loop_label[box.subject].h / 2));
       }
     }
-    if (looped) {
-      // Stacked in its row of the loop room, `gap` before the loop's far leg.
-      scav_rect const &row{ cb.loop_row[box.subject] };
-      out[i] = { .x = (row.x + row.w) - loop_reach(p) - loop_gap(p) - box.w,
+    if (looped && (r.len >= 3)) {
+      // Stacked beside the loop's far leg, `gap` before it, in the room its row reserved.
+      out[i] = { .x = points[r.off + 1].x - loop_gap(p) - box.w,
                  .y = loop_y,
                  .w = box.w,
                  .h = box.h };

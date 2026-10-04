@@ -123,7 +123,7 @@ TEST_CASE("split: kind decides whether the source border splits") {
   CHECK(g.state_crossings[comp.v] == 1);  // only the external row crossed
 }
 
-TEST_CASE("split: self-transitions route outside or not at all") {
+TEST_CASE("split: every self-transition is one segment in its parent frame") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -132,11 +132,12 @@ TEST_CASE("split: self-transitions route outside or not at all") {
   build_trans(c, a, a, TransKind::Local, {});
 
   SplitGraph const g{ decompose(c) };
-  REQUIRE(segs_of(g, 0).len == 1);  // the loop outside, in the parent frame
-  CHECK(seg(g, 0, 0).frame == root);
-  CHECK(segs_of(g, 1).len == 0);  // the app draws these inside the box
-  CHECK(segs_of(g, 2).len == 0);
+  for (uint32_t t = 0; t < 3; ++t) {
+    REQUIRE(segs_of(g, t).len == 1);  // outside for external, the loop room otherwise
+    CHECK(seg(g, t, 0).frame == root);
+  }
   CHECK(g.ports.empty());
+  CHECK(g.state_crossings[a.v] == 0);
 }
 
 TEST_CASE("split: concurrent siblings get a direct arrow through the separator") {

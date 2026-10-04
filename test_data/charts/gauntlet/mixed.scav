@@ -1,0 +1,21 @@
+// Hierarchy crossings both ways between two composites that carry descriptions and
+// internal loops, and an internal transition from a composite into its own depth.
+chart mixed "hierarchy crossings into decorated composites" {
+  state Left "left composite" {
+    state Deep { state Core, trans * -> Core, trans internal Core -> Core "spin" },
+    trans * -> Deep,
+  },
+  state Right "right composite" {
+    state Entry,
+    state Exit,
+    trans * -> Entry,
+    trans Entry -> Exit "pass",
+  },
+
+  trans * -> Left,
+  trans internal Left -> Left "audit",
+  trans internal Right -> Right "check",
+  trans Left/Deep/Core -> Right/Exit "jump",
+  trans Right/Entry -> Left/Deep "back",
+  trans internal Left -> Left/Deep/Core "rewind",
+}

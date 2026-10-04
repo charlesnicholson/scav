@@ -536,9 +536,12 @@ bool in_transit(Chart const &c,
 
 Wide area_of(scav_rect const &r) { return Wide{ r.w } * r.h; }
 
-// Per live composite, the hole between its text bands inside its padding less its live
-// children's rects, floored at zero; the sum capped at `chart`, its bound under Tier 0.
-Wide whitespace_of(Chart const &c, SizedLayout const &z, Wide chart) {
+// Per live composite, the hole between its bands inside its padding less its live
+// children's rects and its loop room, floored at zero; the sum capped at `chart`.
+Wide whitespace_of(Chart const &c,
+                   SizedLayout const &z,
+                   std::vector<scav_extent> const &room,
+                   Wide chart) {
   Wide total{ 0 };
   for (uint32_t st = 0; st < c.states.size(); ++st) {
     if (c.states[st].live == 0) { continue; }
@@ -562,7 +565,10 @@ Wide whitespace_of(Chart const &c, SizedLayout const &z, Wide chart) {
     scav_rect const &b{ z.before[st] };
     Wide const pad{ Wide{ b.y } - r.y };
     Wide const h{ Wide{ r.h } - (2 * pad) - b.h - z.after[st].h };
-    total += imax((Wide{ b.w } * imax(h, Wide{ 0 })) - held, Wide{ 0 });
+    Wide const w{ Wide{ b.w } - ((st < z.lead.size()) ? z.lead[st].w : 0) -
+                  ((st < z.trail.size()) ? z.trail[st].w : 0) };
+    if (st < room.size()) { held += Wide{ room[st].w } * room[st].h; }
+    total += imax((imax(w, Wide{ 0 }) * imax(h, Wide{ 0 })) - held, Wide{ 0 });
   }
   return imin(total, chart);
 }
@@ -745,10 +751,11 @@ int32_t through_boxes_over(Chart const &c,
         return;
       }
       // Inside a state it may occupy, its bands are the walls.
-      for (std::vector<scav_rect> const *band : { &z.before, &z.after, &z.lead, &z.trail }) {
-        if ((bands != nullptr) && (st < band->size()) && enters(piece.a, piece.b, (*band)[st])) {
-          ++*bands;
-        }
+      if ((bands == nullptr) || (st >= z.before.size())) { return; }
+      std::array<scav_rect, 5> const walls{ state_walls(z, st) };
+      for (uint32_t k = 0; k < 4; ++k) {
+        scav_rect const &r{ walls[k] };
+        if ((r.w > 0) && (r.h > 0) && enters(piece.a, piece.b, r)) { ++*bands; }
       }
     };
     for (uint32_t const st : an.detached) { charge(st, z.state[st]); }
@@ -800,6 +807,7 @@ struct Scratch {
   ChildGrid grid;  // `CostContext::grid`, filled for the candidate
   std::vector<scav_rect> kid;
   Descent descent;
+  std::vector<scav_extent> loop_label, loop_room;
 };
 
 Scratch &scratch() {
@@ -1003,11 +1011,11 @@ CostTerms cost_terms(CostContext const &ctx,
   t.aspect = (Wide{ z.chart.w } * p.dar_den) - (Wide{ z.chart.h } * p.dar_num);
   if (t.aspect < 0) { t.aspect = -t.aspect; }
   t.area = area_of(z.chart);
-  t.whitespace = whitespace_of(c, z, t.area);
-
   // Every route segment once, tagged with its transition; transition `tr`'s pieces
   // run from `first[tr]` to `first[tr + 1]`.
   Scratch &sc{ scratch() };
+  loop_rooms(c, s, p, sc.loop_label, sc.loop_room);
+  t.whitespace = whitespace_of(c, z, sc.loop_room, t.area);
   std::vector<Piece> &pieces{ sc.pieces };
   pieces.clear();
   std::vector<uint32_t> &first{ sc.first };

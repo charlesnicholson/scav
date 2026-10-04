@@ -1517,13 +1517,17 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
 
     if (!ok) {
       // Deterministic degradation, never a silent overlap: the straight line is what
-      // the cost vector then scores as a Tier-0 violation.
+      // the cost vector then scores as a Tier-0 violation. A loop keeps its corridor.
       shape.clear();
-      vec_push_back(shape, net.src);
+      bool const loop{ net.loop > 0 };
+      vec_push_back(shape, loop ? seat[2 * n] : net.src);
       for (uint32_t k = 0; k < net.waypoint_len; ++k) {
         vec_push_back(shape, in.waypoints[net.waypoint_off + k]);
       }
-      vec_push_back(shape, net.dst);
+      for (uint32_t k = 1; loop && ((k + 1) < at.len); ++k) {
+        vec_push_back(shape, anchors[at.off + k]);
+      }
+      vec_push_back(shape, loop ? seat[(2 * n) + 1] : net.dst);
     }
 
     uint32_t const off{ static_cast<uint32_t>(out.points.size()) };

@@ -78,6 +78,10 @@ struct SizeRecord {
   std::array<SizePassRecord, 2> pass;
 };
 
+// A state's bands as walls, then its loop room: the side bands run from the top band's
+// top to the bottom band's bottom, so no seam opens where two bands meet.
+std::array<scav_rect, 5> state_walls(SizedLayout const &z, uint32_t st);
+
 // Whether a band of `state` lines `face`, 0 left, 1 right, 2 top, 3 bottom: no port sits there.
 bool face_lined(scav_spaces const &s, uint32_t state, uint32_t face);
 
@@ -92,7 +96,7 @@ int32_t loop_gap(scav_profile const &p);
 int32_t loop_lane(scav_profile const &p);  // between the loop's two legs
 
 // Per transition, the extent its path boxes stack to, and per state, the room its inner
-// loops stack into: the widest row by every row's height and a `pad` between rows.
+// loops stack into: the widest row by every row's height.
 void loop_rooms(Chart const &c,
                 scav_spaces const &s,
                 scav_profile const &p,

@@ -322,7 +322,7 @@ TEST_CASE("layout: components pack to the aspect-ratio target") {
          scav_rect{ .x = 0, .y = 0, .w = (3 * w) + (2 * sep), .h = (3 * h) + (2 * sep) }));
 }
 
-TEST_CASE("layout: routes are orthogonal, meet borders, and skip internal loops") {
+TEST_CASE("layout: routes are orthogonal, meet borders, and loop on either side") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
@@ -331,7 +331,7 @@ TEST_CASE("layout: routes are orthogonal, meet borders, and skip internal loops"
   StateId const d1{ build_state(c, root, "D", StateKind::Normal, {}) };
   build_trans(c, s1, d1, TransKind::External, {});  // t0: one port on comp
   build_trans(c, d1, d1, TransKind::External, {});  // t1: loop outside
-  build_trans(c, d1, d1, TransKind::Internal, {});  // t2: no route
+  build_trans(c, d1, d1, TransKind::Internal, {});  // t2: loop inside
   scav_profile const p{ readable() };
   run(c, {}, p);
 
@@ -373,15 +373,33 @@ TEST_CASE("layout: routes are orthogonal, meet borders, and skip internal loops"
   }
   CHECK(through_port);
 
-  scav_span const r1{ row_of<scav_span>(c, "scav.geom.route", 1) };
-  REQUIRE(r1.len == 2);
+  // Both loops leave D's border and return to it at another point, square throughout:
+  // the external one wholly outside D, the internal one wholly inside.
   scav_rect const rd{ state_rect(c, d1) };
-  scav_point const lip{ row_of<scav_point>(c, "scav.geom.point", r1.off) };
-  CHECK(lip.x == rd.x + rd.w);  // leaves through the right border
-  CHECK(row_of<scav_point>(c, "scav.geom.point", r1.off + 1).x == lip.x + (2 * p.pad));
-
-  CHECK(row_of<scav_span>(c, "scav.geom.route", 2).len == 0);
-  CHECK(row_of<scav_span>(c, "scav.geom.port", 2).len == 0);
+  for (uint32_t const t : { 1U, 2U }) {
+    CAPTURE(t);
+    scav_span const r{ row_of<scav_span>(c, "scav.geom.route", t) };
+    REQUIRE(r.len >= 4);
+    CHECK(row_of<scav_span>(c, "scav.geom.port", t).len == 0);
+    std::vector<scav_point> loop;
+    for (uint32_t k = 0; k < r.len; ++k) {
+      loop.push_back(row_of<scav_point>(c, "scav.geom.point", r.off + k));
+    }
+    CHECK(on_border(loop.front(), rd));
+    CHECK(on_border(loop.back(), rd));
+    CHECK(((loop.front().x != loop.back().x) || (loop.front().y != loop.back().y)));
+    for (uint32_t k = 0; (k + 1) < r.len; ++k) {
+      CAPTURE(k);
+      CHECK(((loop[k].x == loop[k + 1].x) || (loop[k].y == loop[k + 1].y)));
+    }
+    for (uint32_t k = 1; (k + 1) < r.len; ++k) {
+      CAPTURE(k);
+      bool const in{ (loop[k].x > rd.x) && (loop[k].x < (rd.x + rd.w)) && (loop[k].y > rd.y) &&
+                     (loop[k].y < (rd.y + rd.h)) };
+      CHECK(in == (t == 2));
+    }
+  }
+  CHECK(row_of<scav_span>(c, "scav.geom.route", 2).len == 4);
 }
 
 TEST_CASE("layout: path clears trim the route ends by exact integers") {
@@ -1065,7 +1083,7 @@ void check_geometry(Chart const &c) {
     // layering put one between two ranks, which is why this is a floor.
     // `served` below takes off the crossings an endpoint already stands on.
     if (tr.src == tr.dst) {
-      CHECK(route.len == 2);
+      CHECK(route.len >= 3);  // out and back at the least
     } else {
       // A crossing on the source's or the destination's own border is not a
       // second point: the route reaches that state by reaching that border, and

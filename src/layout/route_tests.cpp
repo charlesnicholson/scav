@@ -54,6 +54,9 @@ SizedLayout blank(Chart const &c, SubmachineOrders const &o) {
   z.state.assign(c.states.size(), scav_rect{});
   z.before.assign(c.states.size(), scav_rect{});
   z.after.assign(c.states.size(), scav_rect{});
+  z.lead.assign(c.states.size(), scav_rect{});
+  z.trail.assign(c.states.size(), scav_rect{});
+  z.loop.assign(c.states.size(), scav_rect{});
   z.sub.assign(c.submachines.size(), scav_rect{});
   z.node.assign(o.nodes.size(), scav_point{});
   return z;
@@ -329,11 +332,12 @@ TEST_CASE("route: an internal transition starts on the source's inner face") {
 
   Routes const r{ route_transitions(c, g, o, z, {}, profile(), STRAIGHT) };
   REQUIRE(r.route[0].len == 2);
-  CHECK((r.points[0] == scav_point{ .x = 10, .y = 90 }));  // not the composite's centre
+  // On the composite's own border, level with the boundary node: not its centre.
+  CHECK((r.points[0] == scav_point{ .x = 0, .y = 90 }));
   CHECK(r.port[0].len == 0);
 }
 
-TEST_CASE("route: an external self-loop leaves and returns, with no slot") {
+TEST_CASE("route: an external self-loop leaves its trailing face and returns to it") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -342,17 +346,26 @@ TEST_CASE("route: an external self-loop leaves and returns, with no slot") {
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const o{ empty_orders(c, g) };
   SizedLayout z{ blank(c, o) };
-  z.state[a.v] = { .x = 40, .y = 0, .w = 100, .h = 40 };
+  z.state[a.v] = { .x = 4000, .y = 4000, .w = 1600, .h = 640 };
+  z.sub[root.v] = { .x = 0, .y = 0, .w = 10000, .h = 10000 };
   scav_profile const p{ profile() };
 
-  Routes const r{ route_transitions(c, g, o, z, {}, p, STRAIGHT) };
-  REQUIRE(r.route[0].len == 2);
-  CHECK((r.points[0] == scav_point{ .x = 140, .y = 20 }));
-  CHECK((r.points[1] == scav_point{ .x = 140 + (2 * p.pad), .y = 20 }));
+  OrthogonalRouter const ortho;
+  Routes const r{ route_transitions(c, g, o, z, {}, p, ortho) };
+  REQUIRE(r.route[0].len == 4);
+  scav_point const *const pt{ r.points.data() + r.route[0].off };
+  scav_rect const &box{ z.state[a.v] };
+  // A C off the right face, its far leg the loop's reach out, its ends a line apart.
+  CHECK(pt[0].x == (box.x + box.w));
+  CHECK(pt[3].x == (box.x + box.w));
+  CHECK(pt[1].x == (box.x + box.w + (2 * p.pad)));
+  CHECK(pt[2].x == pt[1].x);
+  CHECK((pt[0].y - pt[3].y) * (pt[0].y - pt[3].y) >= (p.node_sep / 3) * (p.node_sep / 3));
   CHECK(r.port[0].len == 0);
+  CHECK(r.degraded() == 0);
 }
 
-TEST_CASE("route: an internal self-transition has no route at all") {
+TEST_CASE("route: an internal self-transition loops inside its state's loop room") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -360,10 +373,23 @@ TEST_CASE("route: an internal self-transition has no route at all") {
 
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const o{ empty_orders(c, g) };
-  SizedLayout const z{ blank(c, o) };
-  Routes const r{ route_transitions(c, g, o, z, {}, profile(), STRAIGHT) };
-  CHECK(r.route[0].len == 0);
-  CHECK(r.points.empty());
+  SizedLayout z{ blank(c, o) };
+  scav_profile const p{ profile() };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 1000, .h = 1000 };
+  int32_t const row{ loop_row(p, {}).h };
+  z.loop[a.v] = { .x = 600, .y = 500, .w = loop_reach(p), .h = row };
+  Routes const r{ route_transitions(c, g, o, z, {}, p, STRAIGHT) };
+  REQUIRE(r.route[0].len == 4);
+  scav_point const *const pt{ r.points.data() + r.route[0].off };
+  // Out of the right border and back to it, the far leg at the room's leading edge and
+  // both legs centred in the row.
+  int32_t const top{ 500 + ((row - loop_lane(p)) / 2) };
+  CHECK(top > 500);
+  CHECK((pt[0] == scav_point{ .x = 1000, .y = top }));
+  CHECK((pt[1] == scav_point{ .x = 600, .y = top }));
+  CHECK((pt[2] == scav_point{ .x = 600, .y = top + loop_lane(p) }));
+  CHECK((pt[3] == scav_point{ .x = 1000, .y = top + loop_lane(p) }));
+  CHECK(r.port[0].len == 0);
 }
 
 TEST_CASE("route: clears trim each end toward the other, capped at half") {
@@ -548,10 +574,10 @@ TEST_CASE("route: a transition to an enclosing state ends on that state's inner 
     CHECK(head.x <= (z.state[s.v].x + z.state[s.v].w));
     CHECK(head.y >= z.state[s.v].y);
     CHECK(head.y <= (z.state[s.v].y + z.state[s.v].h));
-    // The tail is the boundary node exactly: no obstacle names that end, so no
-    // router moves it, and no border is crossed, so there is no slot.
+    // The tail is on Outer's own border level with the boundary node, and no border
+    // is crossed, so there is no slot.
     CHECK((r.points[(r.route[0].off + r.route[0].len) - 1] ==
-           scav_point{ .x = 390, .y = 80 }));
+           scav_point{ .x = 400, .y = 80 }));
     CHECK(r.port[0].len == 0);
     CHECK(r.degraded() == 0);
   }
@@ -762,7 +788,7 @@ TEST_CASE("route: the unplaced count is the one the strip matching returned") {
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, a, a, TransKind::Internal, {});  // no route, so no strip to ride
+  build_trans(c, a, a, TransKind::Internal, {});  // its loop room seats its label
 
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const o{ empty_orders(c, g) };
@@ -777,11 +803,10 @@ TEST_CASE("route: the unplaced count is the one the strip matching returned") {
   scav_spaces const s{ .path_box = both.data(), .n_path_box = 2 };
   Routes const r{ route_transitions(c, g, o, z, s, profile(), STRAIGHT) };
   REQUIRE(r.placed.size() == 2);
-  // One box rides its route and the other has none, which is exactly what the
-  // strip matching reports back.
+  // The loop's label is seated in its room and never counted, which is exactly what
+  // the strip matching reports back.
   std::vector<scav_rect> expected;
   CHECK(place_labels(c, z, s, r.route, r.points, profile(), expected) == r.unplaced);
-  CHECK(r.unplaced == 1);
 }
 
 TEST_CASE("route: nothing is nudged for a router that asks for no margin") {
