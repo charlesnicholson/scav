@@ -94,6 +94,116 @@ struct Planned {
   int32_t loop;                   // `RouteNet::loop`
 };
 
+// Slides each state-border slot along its face level with the point across it on its outer
+// side: the next end for a slot the route leaves by, the previous end for one it enters
+// by. A slot stays where that end is a box, or where the spot is off the face's free span.
+void slide_slots(Chart const &c,
+                 SplitGraph const &g,
+                 SizedLayout const &z,
+                 scav_profile const &p,
+                 std::vector<std::vector<uint32_t>> const &seg_bends,
+                 std::vector<Span> const &trans_nets,
+                 std::vector<scav_span> const &trans_slots,
+                 std::vector<uint32_t> const &slot_port,
+                 std::vector<OccupiedSpan> const &occupied,  // keyed by state
+                 std::vector<scav_port_slot> &slots,
+                 std::vector<Planned> &planned) {
+  int32_t const clear{ route_clearance(p) };
+  auto const state_of = [&](uint32_t i) { return g.ports[slot_port[i]].state.v; };
+  auto const along = [&](uint32_t i) {
+    return (slots[i].side < 2) ? slots[i].y : slots[i].x;
+  };
+  auto const face_coord = [](scav_rect const &b, uint32_t side) {
+    switch (side) {
+      case 0: return b.x;
+      case 1: return b.x + b.w;
+      case 2: return b.y;
+      default: return b.y + b.h;
+    }
+  };
+  auto const on_face = [&](uint32_t i) {
+    uint32_t const st{ state_of(i) };
+    if (st >= z.state.size()) { return false; }
+    return ((slots[i].side < 2) ? slots[i].x : slots[i].y) ==
+           face_coord(z.state[st], slots[i].side);
+  };
+  // True when `v` along slot `i`'s face is inside the corner insets, off its occupied
+  // spans, `clear` off the bands lining the face, and more than `clear` short of its
+  // neighbour slots.
+  auto const free_at = [&](uint32_t i, int32_t v) {
+    uint32_t const side{ slots[i].side };
+    uint32_t const st{ state_of(i) };
+    scav_rect const &box{ z.state[st] };
+    bool const y_axis{ side < 2 };
+    int32_t const pad{ z.before[st].x - box.x };
+    int32_t const lo{ y_axis ? box.y : box.x };
+    int32_t const len{ y_axis ? box.h : box.w };
+    int32_t const inset{
+      imin(imax(clear, state_corner_radius(c.states[st].kind, box, pad)), len / 2)
+    };
+    if ((v < (lo + inset)) || (v > ((lo + len) - inset))) { return false; }
+    if (occupied_at(occupied, st, side, v)) { return false; }
+    int32_t const face{ face_coord(box, side) };
+    for (scav_rect const &wall : state_walls(z, st)) {
+      if ((wall.w <= 0) || (wall.h <= 0)) { continue; }
+      int32_t const w_lo{ y_axis ? wall.y : wall.x };
+      int32_t const w_hi{ w_lo + (y_axis ? wall.h : wall.w) };
+      int32_t const a_lo{ y_axis ? wall.x : wall.y };
+      int32_t const a_hi{ a_lo + (y_axis ? wall.w : wall.h) };
+      bool const lines{ (face >= (a_lo - pad - clear)) && (face <= (a_hi + pad + clear)) };
+      if (lines && (v >= (w_lo - clear)) && (v <= (w_hi + clear))) { return false; }
+    }
+    int32_t const now{ along(i) };
+    for (uint32_t j = 0; j < slots.size(); ++j) {
+      if ((j == i) || (slots[j].side != side) || (state_of(j) != st) || !on_face(j)) {
+        continue;
+      }
+      int32_t const other{ along(j) };
+      if ((other == now) ||
+          ((other < now) ? (v <= (other + clear)) : (v >= (other - clear)))) {
+        return false;
+      }
+    }
+    return true;
+  };
+  // Slides slot `i`, its transition's `k`th, level with the point on the net beside it.
+  auto const slide = [&](Span nets, uint32_t i, uint32_t k, bool next) {
+    Planned const &pn{ planned[nets.off + k + (next ? 1U : 0U)] };
+    std::vector<uint32_t> const &bends{ seg_bends[pn.seg] };
+    if (bends.empty() && ((next ? pn.dst_state : pn.src_state) != INVALID)) { return; }
+    scav_point to{ next ? pn.dst : pn.src };
+    if (!bends.empty()) { to = z.node[next ? bends.front() : bends.back()]; }
+    int32_t const v{ (slots[i].side < 2) ? to.y : to.x };
+    if ((v == along(i)) || !free_at(i, v)) { return; }
+    ((slots[i].side < 2) ? slots[i].y : slots[i].x) = v;
+    scav_point const at{ .x = slots[i].x, .y = slots[i].y };
+    planned[nets.off + k].dst = at;
+    planned[nets.off + k + 1].src = at;
+  };
+  for (uint32_t t = 0; t < trans_slots.size(); ++t) {
+    scav_span const ss{ trans_slots[t] };
+    Span const nets{ trans_nets[t] };
+    if ((ss.len == 0) || (nets.len != (ss.len + 1))) { continue; }
+    // True when slot `k`'s state encloses the frame of the net before it.
+    auto const leaves = [&](uint32_t k) {
+      uint32_t const frame{ g.segments[planned[nets.off + k].seg].frame.v };
+      StateId const owner{ (frame < c.submachines.size()) ? c.submachines[frame].owner
+                                                          : StateId{ INVALID } };
+      return (owner.v != INVALID) &&
+             ancestor_or_self(c, StateId{ state_of(ss.off + k) }, owner);
+    };
+    auto const movable = [&](uint32_t k) {
+      return (state_of(ss.off + k) != INVALID) && on_face(ss.off + k);
+    };
+    for (uint32_t k = ss.len; k-- > 0;) {  // exits, outermost first
+      if (movable(k) && leaves(k)) { slide(nets, ss.off + k, k, true); }
+    }
+    for (uint32_t k = 0; k < ss.len; ++k) {  // entries, outermost first
+      if (movable(k) && !leaves(k)) { slide(nets, ss.off + k, k, false); }
+    }
+  }
+}
+
 // True when `b` and `frame` are `a`'s input and frame with every coordinate moved by one
 // delta, written to `dx`/`dy`; compares every input the router and the nudger read.
 bool same_but_shifted(RouteFrameCache const &a,
@@ -183,6 +293,7 @@ struct CallScratch {
   std::array<std::vector<uint32_t>, 2> faces;
   std::vector<uint32_t> port_seg, seg_reversed;
   std::vector<std::vector<uint32_t>> seg_bends;
+  std::vector<uint32_t> slot_port;  // parallel to `Routes::slots`: each slot's port
   std::vector<Planned> planned;
   std::vector<Span> trans_nets;
   std::vector<scav_extent> loop_label;
@@ -344,9 +455,11 @@ void route_transitions(Routes &out,
     int32_t const edge{ loop_boundary(z, st, exit) };
     int32_t const lane{ imin(scav::loop_row(p, cs.loop_label[t], vertical).lane,
                              vertical ? row.w : row.h) };
-    int32_t const first{ vertical ? (row.x + floor_div(row.w - lane, 2))
-                                  : (row.y + floor_div(row.h - lane, 2)) };  // the first leg
-    int32_t leg{ (exit == 0) ? (row.x + loop_reach(p)) : ((row.x + row.w) - loop_reach(p)) };
+    int32_t const first{ vertical
+                             ? (row.x + floor_div(row.w - lane, 2))
+                             : (row.y + floor_div(row.h - lane, 2)) };  // the first leg
+    int32_t leg{ (exit == 0) ? (row.x + loop_reach(p))
+                             : ((row.x + row.w) - loop_reach(p)) };
     if (vertical) {
       leg = (exit == 2) ? (row.y + loop_reach(p)) : ((row.y + row.h) - loop_reach(p));
     }
@@ -436,6 +549,7 @@ void route_transitions(Routes &out,
   planned.clear();
   std::vector<Span> &trans_nets{ cs.trans_nets };
   vec_assign(trans_nets, n, Span{});
+  cs.slot_port.clear();
   for (uint32_t t = 0; t < n; ++t) {
     Span const segs{ g.trans_segments[t] };
     if (segs.len == 0) { continue; }
@@ -474,6 +588,7 @@ void route_transitions(Routes &out,
         if (port != INVALID) {
           scav_port_slot const slot{ slot_of(port) };
           vec_push_back(out.slots, slot);
+          vec_push_back(cs.slot_port, port);
           end = { .x = slot.x, .y = slot.y };
         } else if (tail_inner) {
           end = inner_end(g.segments[seg].frame.v, z.node[tail]);
@@ -506,6 +621,17 @@ void route_transitions(Routes &out,
     out.port[t] = { .off = first_slot,
                     .len = static_cast<uint32_t>(out.slots.size()) - first_slot };
   }
+  slide_slots(c,
+              g,
+              z,
+              p,
+              seg_bends,
+              trans_nets,
+              out.port,
+              cs.slot_port,
+              occupied,
+              out.slots,
+              planned);
 
   // One batch per frame, in submachine order, of nets in `(transition, ordinal)` order.
   std::vector<std::vector<uint32_t>> &by_frame{ cs.by_frame };

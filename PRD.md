@@ -1105,6 +1105,8 @@ And where two ends of a filled box still want one seat, `ortho_spread_attachment
 
 **A router's polyline begins at `net.src` and ends at `net.dst`**, except that an end naming an obstacle box is moved onto that box's border. Phase 3 relies on it to lay a transition's nets end to end, dropping a net's first point only when it repeats the previous net's last, and the `straight` router's output is the reference for it.
 
+**A port slot sits on its crossed border at its boundary node's coordinate, then slides level with the point across it on its outer side**: the next end for a slot the route leaves by, the previous end for one it enters by, where that end is another port slot, a bend node or an inner-face end. A box end does not move it, since the router seats a box end level with the slot where the box's face allows. The slot stays at its node where the spot is within a corner's inset, within `route_clearance` of a band lining the face, or within `route_clearance` of, or past, another slot on that face. Phase 3 decides every slot while planning, before any frame routes, so both frames meeting at a slot see the same point. `[OWED]`: as a deterministic rule it lowers real-text t2 on every chart it changes but trades bends and crossings on kiln, toolchanger, elevator and mill; a route-only search move choosing which slots slide, scored against the incumbent, is the alternative.
+
 ### 11.6 Cost
 
 Lexicographic across tiers. **No multipliers between tiers** — a dominating weight inside a sum is the cost cliff that breaks local search, and it overflows.

@@ -253,6 +253,75 @@ TEST_CASE("route: a crossing puts its slot on the crossed border") {
   CHECK((r.points[1] == scav_point{ .x = slot.x, .y = slot.y }));
 }
 
+TEST_CASE("route: an exit slot slides level with the entry slot across it") {
+  // A's exit node is level with S and B's entry node with T: at their nodes the two slots
+  // need a jog between them.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  SubmachineId const in_a{ build_submachine(c, a, {}, {}) };
+  StateId const s{ build_state(c, in_a, "S", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  SubmachineId const in_b{ build_submachine(c, b, {}, {}) };
+  StateId const t{ build_state(c, in_b, "T", StateKind::Normal, {}) };
+  build_trans(c, s, t, TransKind::External, {});
+
+  SplitGraph const g{ decompose(c) };
+  REQUIRE(g.trans_segments[0].len == 3);
+  REQUIRE(g.ports.size() == 2);
+  REQUIRE(g.ports[0].state == a);
+  REQUIRE(g.ports[1].state == b);
+  SubmachineOrders o{ empty_orders(c, g) };
+  o.nodes = { { .kind = OrderKind::Boundary, .subject = 0, .rank = 1, .pos = 0 },
+              { .kind = OrderKind::Boundary, .subject = 2, .rank = 0, .pos = 0 } };
+  o.seg_node[0] = 0;
+  o.seg_port[0] = 0;
+  o.seg_side[0] = 1;  // A's right border
+  o.seg_node[2] = 1;
+  o.seg_port[2] = 1;
+  o.seg_side[2] = 0;  // B's left border
+  o.sub_nodes[in_a.v] = make_span(0, 1);
+  o.sub_nodes[in_b.v] = make_span(1, 1);
+  SizedLayout z{ blank(c, o) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 2000, .h = 2000 };
+  z.state[s.v] = { .x = 200, .y = 600, .w = 1000, .h = 400 };
+  z.state[b.v] = { .x = 4000, .y = 0, .w = 2000, .h = 3000 };
+  z.state[t.v] = { .x = 4600, .y = 1600, .w = 1000, .h = 400 };
+  for (StateId const box : { a, b }) {
+    scav_rect const &r{ z.state[box.v] };
+    z.before[box.v] = { .x = r.x + 100, .y = r.y + 100, .w = r.w - 200, .h = 0 };
+    z.after[box.v] = { .x = r.x + 100, .y = (r.y + r.h) - 100, .w = r.w - 200, .h = 0 };
+  }
+  z.sub[root.v] = { .x = 0, .y = 0, .w = 6000, .h = 3000 };
+  z.sub[in_a.v] = { .x = 100, .y = 100, .w = 1800, .h = 1800 };
+  z.sub[in_b.v] = { .x = 4100, .y = 100, .w = 1800, .h = 2800 };
+  z.node[0] = { .x = 1900, .y = 800 };   // level with S
+  z.node[1] = { .x = 4100, .y = 1800 };  // level with T
+
+  OrthogonalRouter const ortho;
+  Routes const r{ route_transitions(c, g, o, z, {}, profile(), ortho) };
+  REQUIRE(r.failed[0] == 0);
+  REQUIRE(r.port[0].len == 2);
+  scav_port_slot const out{ r.slots[r.port[0].off] };
+  scav_port_slot const into{ r.slots[r.port[0].off + 1] };
+  CHECK(out.x == 2000);
+  CHECK(out.y == 1800);  // slid level with B's slot
+  CHECK(into.x == 4000);
+  CHECK(into.y == 1800);
+  // The outer net runs straight from slot to slot.
+  scav_span const route{ r.route[0] };
+  bool straight{ false };
+  for (uint32_t k = 0; (k + 1) < route.len; ++k) {
+    scav_point const p0{ r.points[route.off + k] };
+    scav_point const p1{ r.points[route.off + k + 1] };
+    if ((p0 == scav_point{ .x = 2000, .y = 1800 }) &&
+        (p1 == scav_point{ .x = 4000, .y = 1800 })) {
+      straight = true;
+    }
+  }
+  CHECK(straight);
+}
+
 TEST_CASE("route: a route entering a composite leaves its border square, never along it") {
   // The port sits on the composite's left border at its boundary node's height, above
   // the state it enters.
