@@ -2746,7 +2746,7 @@ TEST_CASE("ortho: a loop's seats keep to one side of a point end on its face") {
                                       .loop = 256 },
                                     { .src = pt(2000, 500), .dst = pt(3000, 500) } };
   std::vector<scav_point> at{ pt(2000, 400), pt(2000, 600), pt(3000, 500), pt(2000, 500) };
-  ortho_seat_loops(nets, boxes, seats_of(nets, {}, corner), clear, pitch, at);
+  ortho_seat_loops(nets, boxes, seats_of(nets, {}, corner), {}, clear, pitch, at);
   CHECK(at[0].x == 2000);
   CHECK(at[1].x == 2000);
   CHECK((at[0].y < 500) == (at[1].y < 500));
@@ -2755,6 +2755,75 @@ TEST_CASE("ortho: a loop's seats keep to one side of a point end on its face") {
     CHECK(imax(at[end].y - 500, 500 - at[end].y) >= pitch);
   }
   CHECK(imax(at[0].y - at[1].y, at[1].y - at[0].y) == pitch);
+}
+
+TEST_CASE("ortho: a loop's seats keep out of an occupied span on its face") {
+  // The middle of the right face is occupied: both seats take one side of it.
+  int32_t const clear{ 50 };
+  int32_t const pitch{ 200 };
+  std::vector<scav_rect> const boxes{ rect(0, 0, 2000, 1000) };
+  std::vector<int32_t> const corner{ 0 };
+  std::vector<RouteNet> const nets{ { .src = pt(1000, 500),
+                                      .dst = pt(1000, 500),
+                                      .src_obstacle = 0,
+                                      .dst_obstacle = 0,
+                                      .loop = 256 } };
+  std::vector<OccupiedSpan> const occupied{
+    { .obstacle = 0, .face = 1, .lo = 300, .len = 400 }
+  };
+  std::vector<scav_point> at{ pt(2000, 400), pt(2000, 600) };
+  ortho_seat_loops(nets, boxes, seats_of(nets, {}, corner), occupied, clear, pitch, at);
+  for (uint32_t end = 0; end < 2; ++end) {
+    CAPTURE(end);
+    CHECK(at[end].x == 2000);
+    CHECK(((at[end].y <= 300) || (at[end].y >= 700)));
+  }
+  CHECK((at[0].y <= 300) == (at[1].y <= 300));
+}
+
+TEST_CASE("ortho: a seat in an occupied span moves to its face's nearest free position") {
+  // Arrivals level with the span's middle and near its low end; a face wholly occupied
+  // sends its seat to another face.
+  int32_t const clear{ 50 };
+  std::vector<scav_rect> const boxes{ rect(0, 0, 2000, 1000), rect(4000, 0, 1000, 1000) };
+  std::vector<int32_t> const corner{ 0, 0 };
+  std::vector<RouteNet> const nets{
+    { .src = pt(4500, 500), .dst = pt(1000, 500), .src_obstacle = 1, .dst_obstacle = 0 },
+    { .src = pt(3000, 330), .dst = pt(1000, 500), .dst_obstacle = 0 }
+  };
+  std::vector<OccupiedSpan> occupied{
+    { .obstacle = 0, .face = 1, .lo = 300, .len = 260 }
+  };
+  std::vector<scav_point> at{ pt(4000, 500), pt(2000, 500), pt(3000, 330), pt(2000, 330) };
+  std::vector<scav_point> toward{ at };
+  std::vector<int32_t> stuck;
+  ortho_clear_occupied(nets,
+                       boxes,
+                       seats_of(nets, {}, corner),
+                       toward,
+                       occupied,
+                       clear,
+                       at,
+                       stuck);
+  CHECK((at[1] == pt(2000, 560)));  // the nearer edge
+  CHECK((at[0] == pt(4000, 560)));  // its level far end follows
+  CHECK((at[3] == pt(2000, 300)));
+  CHECK(stuck == std::vector<int32_t>{ 0, 0 });
+
+  occupied = { { .obstacle = 0, .face = 1, .lo = -10, .len = 1020 } };
+  at = { pt(4000, 500), pt(2000, 500), pt(3000, 330), pt(2000, 330) };
+  toward = { pt(4000, 500), pt(2000, 500), pt(3000, 330), pt(1900, -500) };
+  ortho_clear_occupied(nets,
+                       boxes,
+                       seats_of(nets, {}, corner),
+                       toward,
+                       occupied,
+                       clear,
+                       at,
+                       stuck);
+  CHECK(at[1].x != 2000);
+  CHECK(at[3].y == 0);  // the top face, nearest its aim
+  CHECK(stuck == std::vector<int32_t>{ 0, 0 });
 }
 
 TEST_CASE("ortho: an unpinned loop takes its box's least-used face, the right on a tie") {

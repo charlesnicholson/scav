@@ -33,6 +33,7 @@ struct Routes {
 
   // Nets routed only at zero clearance.
   uint32_t reseated{ 0 };
+  uint32_t occupied{ 0 };  // ends and port slots left inside an occupied span
 };
 
 // One frame's router and nudger input and output; a later run whose input is this one

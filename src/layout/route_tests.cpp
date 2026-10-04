@@ -470,6 +470,98 @@ TEST_CASE("route: an internal self-transition loops inside its state's loop room
   CHECK(r.port[0].len == 0);
 }
 
+TEST_CASE(
+    "route: an external end on a face an inner loop leaves seats clear of its legs") {
+  // B's arrival on A's right face is level with the loop's top leg; it seats a clearance
+  // off both legs.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, a, TransKind::Internal, {});
+  build_trans(c, b, a, TransKind::External, {});
+
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ empty_orders(c, g) };
+  SizedLayout z{ blank(c, o) };
+  scav_profile const p{ profile() };
+  int32_t const clear{ route_clearance(p) };
+  int32_t const row{ loop_row(p, {}).h };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 4000, .h = 4000 };
+  z.state[b.v] = { .x = 8000,
+                   .y = 1600,
+                   .w = 800,
+                   .h = 800 };  // centred level with y 2000
+  z.loop[a.v] = { .x = 3000, .y = 2000 - ((row - loop_lane(p)) / 2), .w = 1000, .h = row };
+  z.sub[root.v] = { .x = 0, .y = 0, .w = 8800, .h = 4000 };
+  z.chart = { .x = -1000, .y = -1000, .w = 10800, .h = 6000 };
+
+  OrthogonalRouter const ortho;
+  Routes const r{ route_transitions(c, g, o, z, {}, p, ortho) };
+  REQUIRE(r.route[0].len == 4);
+  scav_point const *const loop{ r.points.data() + r.route[0].off };
+  REQUIRE(loop[0].y == 2000);
+  REQUIRE(r.route[1].len >= 2);
+  scav_point const end{ r.points[r.route[1].off + r.route[1].len - 1] };
+  CHECK(end.x == 4000);
+  for (scav_point const leg : { loop[0], loop[3] }) {
+    CAPTURE(leg.y);
+    CHECK(imax(end.y - leg.y, leg.y - end.y) >= clear);
+  }
+  CHECK(r.occupied == 0);
+  CHECK(r.degraded() == 0);
+}
+
+TEST_CASE("route: a port slot on a face an inner loop leaves moves clear of its legs") {
+  // S's exit crosses C's right border level with C's inner loop's top leg; the slot moves
+  // along the border a clearance off both legs.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
+  StateId const s{ build_state(c, inner, "S", StateKind::Normal, {}) };
+  StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
+  build_trans(c, s, d, TransKind::External, {});
+  build_trans(c, comp, comp, TransKind::Internal, {});
+
+  SplitGraph const g{ decompose(c) };
+  REQUIRE(g.trans_segments[0].len == 2);
+  SubmachineOrders o{ empty_orders(c, g) };
+  o.nodes = { { .kind = OrderKind::Boundary, .subject = 0, .rank = 1, .pos = 0 } };
+  o.seg_node[0] = 0;
+  o.seg_port[0] = 0;
+  o.seg_side[0] = 1;  // the right border
+  o.sub_nodes[inner.v] = make_span(0, 1);
+  SizedLayout z{ blank(c, o) };
+  scav_profile const p{ profile() };
+  int32_t const clear{ route_clearance(p) };
+  int32_t const row{ loop_row(p, {}).h };
+  z.state[comp.v] = { .x = 0, .y = 0, .w = 4000, .h = 4000 };
+  z.state[s.v] = { .x = 400, .y = 1600, .w = 800, .h = 800 };
+  z.state[d.v] = { .x = 8000, .y = 0, .w = 800, .h = 800 };
+  z.sub[root.v] = { .x = 0, .y = 0, .w = 8800, .h = 4000 };
+  z.sub[inner.v] = { .x = 200, .y = 200, .w = 3600, .h = 1800 };
+  z.loop[comp.v] = { .x = 3000,
+                     .y = 2000 - ((row - loop_lane(p)) / 2),
+                     .w = 800,
+                     .h = row };
+  z.node[0] = { .x = 3800, .y = 2000 };  // the frame's trailing edge, level with the leg
+
+  Routes const r{ route_transitions(c, g, o, z, {}, p, STRAIGHT) };
+  REQUIRE(r.route[1].len == 4);
+  scav_point const *const loop{ r.points.data() + r.route[1].off };
+  REQUIRE(loop[0].y == 2000);
+  REQUIRE(r.port[0].len == 1);
+  scav_port_slot const slot{ r.slots[r.port[0].off] };
+  CHECK(slot.x == 4000);
+  CHECK(slot.side == 1);
+  for (scav_point const leg : { loop[0], loop[3] }) {
+    CAPTURE(leg.y);
+    CHECK(imax(slot.y - leg.y, leg.y - slot.y) >= clear);
+  }
+  CHECK(r.occupied == 0);
+}
+
 TEST_CASE("route: a clear leaves the route's ends where the router put them") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };

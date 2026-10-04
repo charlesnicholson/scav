@@ -8,6 +8,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <vector>
 
 namespace scav {
 
@@ -20,6 +21,56 @@ constinit OrthogonalRouter const ORTHOGONAL;
 constexpr std::array<Router const *, 2> ROUTERS{ { &ORTHOGONAL, &STRAIGHT } };
 
 }  // namespace
+
+uint32_t face_of(scav_point at, scav_rect const &r) {
+  if (at.x == r.x) { return 0; }
+  if (at.x == (r.x + r.w)) { return 1; }
+  if (at.y == r.y) { return 2; }
+  if (at.y == (r.y + r.h)) { return 3; }
+  return INVALID;
+}
+
+bool occupied_at(std::vector<OccupiedSpan> const &spans,
+                 uint32_t obstacle,
+                 uint32_t face,
+                 int32_t pos) {
+  for (OccupiedSpan const &o : spans) {
+    if ((o.obstacle == obstacle) && (o.face == face) && (pos > o.lo) &&
+        (Wide{ pos } < (Wide{ o.lo } + o.len))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool occupied_free(std::vector<OccupiedSpan> const &spans,
+                   uint32_t obstacle,
+                   uint32_t face,
+                   int32_t lo,
+                   int32_t hi,
+                   int32_t &pos) {
+  int32_t best{ pos };
+  Wide gap{ -1 };
+  auto const consider = [&](Wide v) {
+    if ((v < lo) || (v > hi)) { return; }
+    int32_t const at{ static_cast<int32_t>(v) };
+    if (occupied_at(spans, obstacle, face, at)) { return; }
+    Wide const d{ (v < pos) ? (Wide{ pos } - v) : (v - pos) };
+    if ((gap < 0) || (d < gap) || ((d == gap) && (at < best))) {
+      best = at;
+      gap = d;
+    }
+  };
+  consider(imin(imax(Wide{ pos }, Wide{ lo }), Wide{ hi }));
+  for (OccupiedSpan const &o : spans) {
+    if ((o.obstacle != obstacle) || (o.face != face)) { continue; }
+    consider(o.lo);
+    consider(Wide{ o.lo } + o.len);
+  }
+  if (gap < 0) { return false; }
+  pos = best;
+  return true;
+}
 
 Router const *router_at(uint32_t index) {
   return (index < ROUTERS.size()) ? ROUTERS[index] : nullptr;

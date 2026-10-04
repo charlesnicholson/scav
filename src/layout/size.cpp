@@ -2382,16 +2382,21 @@ bool face_lined(scav_spaces const &s, uint32_t state, uint32_t face) {
 
 int32_t loop_reach(scav_profile const &p) { return imax(p.pad, 1); }
 
-int32_t loop_gap(scav_profile const &p) { return imax(p.pad / 2, 1); }
+int32_t loop_gap(scav_profile const &p) {
+  return imin(imax(p.pad / 2, 1), label_leader(p));
+}
 
 int32_t loop_lane(scav_profile const &p) {
   return imax(label_line_height(p), 2 * route_clearance(p));
 }
 
 LoopRow loop_row(scav_profile const &p, scav_extent label) {
-  int32_t const legs{ loop_lane(p) +
-                      (2 * route_clearance(p)) };  // a clearance off each edge
-  return { .label_w = label.w, .label_h = label.h, .h = imax(label.h, legs) };
+  int32_t const lane{ imax(loop_lane(p), label.h) };
+  return { .label_w = label.w,
+           .label_h = label.h,
+           .lane = lane,
+           .h = saturate(Wide{ lane } +
+                         (Wide{ 2 } * route_clearance(p))) };  // a clearance off each edge
 }
 
 void loop_rooms(Chart const &c,

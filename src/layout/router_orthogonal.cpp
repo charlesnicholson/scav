@@ -178,16 +178,6 @@ bool shares_box(std::vector<RouteNet> const &nets, uint32_t a, uint32_t b) {
   return false;
 }
 
-// Face of `r` that `at` lies on: 0 left, 1 right, 2 top, 3 bottom, else INVALID. Corners
-// resolve as in `ortho_ring`.
-uint32_t face_of(scav_point at, scav_rect const &r) {
-  if (at.x == r.x) { return 0; }
-  if (at.x == (r.x + r.w)) { return 1; }
-  if (at.y == r.y) { return 2; }
-  if (at.y == (r.y + r.h)) { return 3; }
-  return INVALID;
-}
-
 // Midpoint of `face`, rounded as `ortho_attach_box` rounds an inscribed glyph's seat.
 scav_point face_middle(scav_rect const &r, uint32_t face) {
   switch (face) {
@@ -622,10 +612,11 @@ void ortho_spread_attachments(std::vector<scav_rect> const &boxes,
 void ortho_seat_loops(std::vector<RouteNet> const &nets,
                       std::vector<scav_rect> const &boxes,
                       std::vector<Seat> const &table,
+                      std::vector<OccupiedSpan> const &occupied,
                       int32_t clear,
                       int32_t pitch,
                       std::vector<scav_point> &at) {
-  thread_local std::vector<int32_t> taken;
+  thread_local std::vector<std::array<int32_t, 2>> taken;  // runs `[lo, hi]` seats avoid
   for (uint32_t n = 0; n < nets.size(); ++n) {
     RouteNet const &net{ nets[n] };
     uint32_t const b{ net.src_obstacle };
@@ -646,21 +637,29 @@ void ortho_seat_loops(std::vector<RouteNet> const &nets,
       scav_point const own{ (other.end == 0) ? owner.src : owner.dst };
       scav_point const seat{ point ? own : at[other.slot] };
       if (((other.box == b) || point) && (face_of(seat, r) == face)) {
-        vec_push_back(taken, along_y ? seat.y : seat.x);
+        int32_t const pos{ along_y ? seat.y : seat.x };
+        vec_push_back(taken, { pos, pos });
       }
     }
-    scav_stable_sort(taken, [](int32_t lhs, int32_t rhs) { return lhs < rhs; });
-    // The widest gap between taken seats and the run's ends.
+    for (OccupiedSpan const &o : occupied) {
+      if ((o.obstacle == b) && (o.face == face)) {
+        vec_push_back(taken, { o.lo, o.lo + o.len });
+      }
+    }
+    scav_stable_sort(taken,
+                     [](std::array<int32_t, 2> const &lhs,
+                        std::array<int32_t, 2> const &rhs) { return lhs[0] < rhs[0]; });
+    // The widest gap between taken runs and the face run's ends.
     int32_t from{ lo };
     int32_t best_lo{ lo };
     int32_t best_hi{ lo };
     for (size_t k = 0; k <= taken.size(); ++k) {
-      int32_t const to{ (k < taken.size()) ? imin(imax(taken[k], lo), hi) : hi };
+      int32_t const to{ (k < taken.size()) ? imin(imax(taken[k][0], lo), hi) : hi };
       if ((to - from) > (best_hi - best_lo)) {
         best_lo = from;
         best_hi = to;
       }
-      from = imax(from, to);
+      from = imax(from, (k < taken.size()) ? imin(imax(taken[k][1], lo), hi) : hi);
     }
     // Centred, `pitch` apart and `pitch` from neighbouring seats where that fits; else
     // `room / parts` apart, a part per neighbouring seat plus one.
@@ -781,6 +780,85 @@ void ortho_separate_attachments(std::vector<RouteNet> const &nets,
     bool const y{ sweep(true) };
     bool const x{ sweep(false) };
     if (!y && !x) { break; }
+  }
+}
+
+void ortho_clear_occupied(std::vector<RouteNet> const &nets,
+                          std::vector<scav_rect> const &boxes,
+                          std::vector<Seat> const &table,
+                          std::vector<scav_point> const &toward,
+                          std::vector<OccupiedSpan> const &occupied,
+                          int32_t clear,
+                          std::vector<scav_point> &at,
+                          std::vector<int32_t> &stuck) {
+  vec_assign(stuck, nets.size(), 0);
+  if (occupied.empty()) { return; }
+  for (Seat const &s : table) {
+    uint32_t const face{ face_at(s, boxes, at) };
+    if (s.inscribed || (face == INVALID)) { continue; }
+    scav_point &seat{ at[s.slot] };
+    int32_t const was{ (face < 2) ? seat.y : seat.x };
+    if (!occupied_at(occupied, s.box, face, was)) { continue; }
+    RouteNet const &net{ nets[s.slot / 2] };
+    if ((net.loop > 0) &&
+        (net.src_obstacle == net.dst_obstacle)) {  // seated by the loop pass
+      ++stuck[s.slot / 2];
+      continue;
+    }
+    // Face `f`'s free position nearest `pos` and its distance from the aim, -1 for none.
+    scav_rect const &r{ boxes[s.box] };
+    scav_point const aim{ toward[s.slot] };
+    auto const free_on = [&](uint32_t f, int32_t pos, scav_point &got) {
+      FaceRun const run{ face_run(r, f, clear, s.arc) };
+      if ((run.len <= (2 * run.inset)) || !occupied_free(occupied,
+                                                         s.box,
+                                                         f,
+                                                         run.lo + run.inset,
+                                                         (run.lo + run.len) - run.inset,
+                                                         pos)) {
+        return Wide{ -1 };
+      }
+      got = face_middle(r, f);
+      if (f < 2) {
+        got.y = pos;
+      } else {
+        got.x = pos;
+      }
+      return distance(got.x, aim.x) + distance(got.y, aim.y);
+    };
+    scav_point best{ seat };
+    Wide best_gap{ free_on(face, was, best) };
+    bool const own{ best_gap >= 0 };
+    for (uint32_t f = 0; !own && (f < 4); ++f) {
+      if (f == face) { continue; }
+      scav_point got{};
+      Wide const gap{
+        free_on(f, onto_face((f < 2) ? aim.y : aim.x, face_run(r, f, clear, s.arc)), got)
+      };
+      if ((gap >= 0) && ((best_gap < 0) || (gap < best_gap))) {
+        best = got;
+        best_gap = gap;
+      }
+    }
+    if (best_gap < 0) {
+      ++stuck[s.slot / 2];
+      continue;
+    }
+    seat = best;
+
+    // A far end level with the old seat on a parallel face moves level with the new one.
+    Seat const &twin{ table[s.slot ^ 1U] };
+    if ((face_of(best, r) != face) || (twin.box >= boxes.size()) || twin.inscribed) {
+      continue;
+    }
+    uint32_t const there{ face_of(at[twin.slot], boxes[twin.box]) };
+    int32_t &held{ (face < 2) ? at[twin.slot].y : at[twin.slot].x };
+    int32_t const now{ (face < 2) ? best.y : best.x };
+    if ((there == INVALID) || ((there < 2) != (face < 2)) || (held != was)) { continue; }
+    FaceRun const run{ face_run(boxes[twin.box], there, clear, twin.arc) };
+    if ((onto_face(now, run) == now) && !occupied_at(occupied, twin.box, there, now)) {
+      held = now;
+    }
   }
 }
 
@@ -1119,6 +1197,7 @@ struct RouteScratch {
   std::vector<uint32_t> hop;
   std::vector<scav_point> piece, shape;
   std::vector<Seat> seats;
+  std::vector<int32_t> stuck;
 };
 
 RouteScratch &route_scratch() {
@@ -1378,8 +1457,18 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
   // The only pass comparing seats on two boxes, over the seats the passes above settled.
   ortho_separate_attachments(in.nets, in.obstacles, seats, toward, clear, pitch, seat);
   moved(SeatPass::Separate);
-  ortho_seat_loops(in.nets, in.obstacles, seats, clear, pitch, seat);
+  ortho_seat_loops(in.nets, in.obstacles, seats, in.occupied, clear, pitch, seat);
   moved(SeatPass::Loop);
+  std::vector<int32_t> &stuck{ sc.stuck };
+  ortho_clear_occupied(in.nets,
+                       in.obstacles,
+                       seats,
+                       toward,
+                       in.occupied,
+                       clear,
+                       seat,
+                       stuck);
+  moved(SeatPass::Occupied);
 
   for (uint32_t n = 0; n < in.nets.size(); ++n) {
     RouteNet const &net{ in.nets[n] };
@@ -1552,7 +1641,8 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
     scav_span const span{ .off = off,
                           .len = static_cast<uint32_t>(out.points.size()) - off };
     vec_push_back(out.net_points, span);
-    vec_push_back(out.metrics, { .failed = why, .reseated = reseated });
+    vec_push_back(out.metrics,
+                  { .failed = why, .reseated = reseated, .occupied = stuck[n] });
   }
 }
 

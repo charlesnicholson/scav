@@ -1771,6 +1771,94 @@ TEST_CASE("gauntlet: an inner or outer loop's label lies within a leader of its 
   }
 }
 
+namespace {
+
+// The Chebyshev gap from `box` to the nearest leg of route `t`.
+Wide gap_to_route(Laid const &l, uint32_t t, scav_rect const &box) {
+  scav_span const route{ l.r.route[t] };
+  Wide gap{ -1 };
+  for (uint32_t k = 0; (k + 1) < route.len; ++k) {
+    Wide const away{ chebyshev_gap(
+        box,
+        span_rect(l.r.points[route.off + k], l.r.points[route.off + k + 1])) };
+    gap = (gap < 0) ? away : imin(gap, away);
+  }
+  return gap;
+}
+
+}  // namespace
+
+TEST_CASE(
+    "gauntlet: an inner loop's label lies within a leader at a pad wider than an em") {
+  for (scav_profile base : { readable(), compact() }) {
+    base.pad = 3 * base.font_size_grid;
+    REQUIRE(profile_validate(base));
+    CAPTURE(base.profile_id);
+    Chart const probe{ loaded("inloop.scav") };
+    std::vector<scav_path_box> boxes;
+    for (uint32_t t = 0; t < probe.transitions.size(); ++t) {
+      if (probe.transitions[t].label.len == 0) { continue; }
+      boxes.push_back({ .subject = t,
+                        .w = 4 * base.font_size_grid,
+                        .h = label_line_height(base),
+                        .order = 0 });
+    }
+    scav_spaces const s{ .path_box = boxes.data(),
+                         .n_path_box = static_cast<uint32_t>(boxes.size()),
+                         .path_box_stride = static_cast<uint32_t>(sizeof(scav_path_box)) };
+    Laid l;
+    lay("inloop.scav", base, l, s, nullptr);
+    REQUIRE(l.r.placed.size() == boxes.size());
+    uint32_t loops{ 0 };
+    for (uint32_t i = 0; i < boxes.size(); ++i) {
+      if (!inner_loop(l.c, boxes[i].subject)) { continue; }
+      CAPTURE(boxes[i].subject);
+      ++loops;
+      Wide const gap{ gap_to_route(l, boxes[i].subject, l.r.placed[i]) };
+      CHECK(gap >= 0);
+      CHECK(gap <= label_leader(base));
+    }
+    CHECK(loops == 4);
+    CHECK(cost_terms(l.c, l.g, l.z, l.r, s, base).label_far == 0);
+  }
+}
+
+TEST_CASE("gauntlet: every box of an inner loop's three-box label lies within a leader") {
+  // Three boxes per label, each two lines tall: the stack is taller than the least lane.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Chart const probe{ loaded("inloop.scav") };
+    std::vector<scav_path_box> boxes;
+    for (uint32_t t = 0; t < probe.transitions.size(); ++t) {
+      if (probe.transitions[t].label.len == 0) { continue; }
+      for (uint32_t k = 0; k < 3; ++k) {
+        boxes.push_back({ .subject = t,
+                          .w = (2 + static_cast<int32_t>(k)) * p.font_size_grid,
+                          .h = 2 * label_line_height(p),
+                          .order = k });
+      }
+    }
+    scav_spaces const s{ .path_box = boxes.data(),
+                         .n_path_box = static_cast<uint32_t>(boxes.size()),
+                         .path_box_stride = static_cast<uint32_t>(sizeof(scav_path_box)) };
+    Laid l;
+    lay("inloop.scav", p, l, s, nullptr);
+    REQUIRE(l.r.placed.size() == boxes.size());
+    uint32_t stacked{ 0 };
+    for (uint32_t i = 0; i < boxes.size(); ++i) {
+      if (!inner_loop(l.c, boxes[i].subject)) { continue; }
+      CAPTURE(boxes[i].subject);
+      CAPTURE(boxes[i].order);
+      ++stacked;
+      Wide const gap{ gap_to_route(l, boxes[i].subject, l.r.placed[i]) };
+      CHECK(gap >= 0);
+      CHECK(gap <= label_leader(p));
+    }
+    CHECK(stacked == 12);
+    CHECK(cost_terms(l.c, l.g, l.z, l.r, s, p).label_far == 0);
+  }
+}
+
 TEST_CASE("gauntlet: crossings into decorated composites keep clear of every band") {
   // Headers everywhere and footers on composites: ports take side faces, nothing enters
   // a band, and an internal transition into a composite's depth starts on its border.

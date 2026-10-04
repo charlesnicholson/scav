@@ -53,7 +53,16 @@ enum class GapCause : uint16_t { Label, Lanes, Held };
 enum class SeatHow : uint16_t { Moved, Levelled, Declined };
 
 // Which seating pass moved a seat; `SeatMoved.pass`.
-enum class SeatPass : uint16_t { Attach, Reface, Align, Spread, Separate, Nudge, Loop };
+enum class SeatPass : uint16_t {
+  Attach,
+  Reface,
+  Align,
+  Spread,
+  Separate,
+  Nudge,
+  Loop,
+  Occupied
+};
 
 // A Level 1 move's outcome; `CandidateScored.pass`.
 enum class MoveVerdict : uint16_t { Taken, NotViable, Inflated, NotBetter };

@@ -41,6 +41,32 @@ struct RouteNet {
   uint32_t trans{ INVALID }, seg{ INVALID };  // the caller's ids, read only by the trace
 };
 
+// A run `[lo, lo + len]` along one face of an obstacle (0 left, 1 right, 2 top, 3 bottom)
+// whose interior no end seats in.
+struct OccupiedSpan {
+  uint32_t obstacle, face;
+  int32_t lo, len;
+};
+
+// Face of `r` that `at` lies on: 0 left, 1 right, 2 top, 3 bottom, else INVALID. Corners
+// resolve as in `ortho_ring`.
+uint32_t face_of(scav_point at, scav_rect const &r);
+
+// Whether `pos` lies inside a span on `face` of `obstacle`.
+bool occupied_at(std::vector<OccupiedSpan> const &spans,
+                 uint32_t obstacle,
+                 uint32_t face,
+                 int32_t pos);
+
+// `pos` moved to the nearest coordinate in `[lo, hi]` that `occupied_at` rejects, ties to
+// the lower; false and `pos` unchanged when none is.
+bool occupied_free(std::vector<OccupiedSpan> const &spans,
+                   uint32_t obstacle,
+                   uint32_t face,
+                   int32_t lo,
+                   int32_t hi,
+                   int32_t &pos);
+
 struct RouteInput {
   scav_rect region{};                // the frame's rect; a route stays inside it
   std::vector<scav_rect> obstacles;  // the boxes and walls routes keep out of
@@ -57,6 +83,7 @@ struct RouteInput {
   // The box the frame's routes are drawn inside, zero-sized for the root. Routes keep
   // out of its `border_band`; an end in that band leaves square to the border.
   scav_rect enclosure{};
+  std::vector<OccupiedSpan> occupied;  // inner loops' legs on box faces
 };
 
 enum class RouteFailure : int32_t {
@@ -70,6 +97,7 @@ struct RouteMetrics {
   RouteFailure failed{ RouteFailure::None };
   // 1 when routed only at zero clearance; the shape may run flush against a box.
   int32_t reseated{ 0 };
+  int32_t occupied{ 0 };  // ends left inside an occupied span, with no free position
 };
 
 struct RouteOutput {

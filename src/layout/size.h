@@ -66,14 +66,14 @@ bool loop_mirrored(SizedLayout const &z, uint32_t st);
 bool face_lined(scav_spaces const &s, uint32_t state, uint32_t face);
 
 // One inner loop's row in its state's room; rows stack in transition order. The far leg
-// runs `loop_reach` in from the room's exit edge; the label sits `loop_gap` beyond it.
+// runs `loop_reach` in from the room's exit edge and spans the label stack beside it.
 struct LoopRow {
-  int32_t label_w, label_h, h;
+  int32_t label_w, label_h, lane, h;  // `lane` between the legs, `h` the row's
 };
 LoopRow loop_row(scav_profile const &p, scav_extent label);
 int32_t loop_reach(scav_profile const &p);
-int32_t loop_gap(scav_profile const &p);
-int32_t loop_lane(scav_profile const &p);  // between the loop's two legs
+int32_t loop_gap(scav_profile const &p);   // label to far leg, at most `label_leader`
+int32_t loop_lane(scav_profile const &p);  // the least lane between the loop's two legs
 
 // Per inner loop, the extent its path boxes stack to; per state, the room its inner loops
 // stack into: the widest row by the rows' summed height.

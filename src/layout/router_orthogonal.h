@@ -162,13 +162,25 @@ void ortho_separate_attachments(std::vector<RouteNet> const &nets,
                                 std::vector<scav_point> &at);
 
 // Seats a self-loop with both ends on one face in that face's widest run free of other
-// seats and point ends, `pitch` apart about its middle where that fits.
+// seats, point ends and occupied spans, `pitch` apart about its middle where that fits.
 void ortho_seat_loops(std::vector<RouteNet> const &nets,
                       std::vector<scav_rect> const &boxes,
                       std::vector<Seat> const &table,
+                      std::vector<OccupiedSpan> const &occupied,
                       int32_t clear,
                       int32_t pitch,
                       std::vector<scav_point> &at);
+
+// Moves each seat inside an occupied span to its face's nearest free position, else to the
+// free position nearest its aim; `stuck` counts per net the seats left inside.
+void ortho_clear_occupied(std::vector<RouteNet> const &nets,
+                          std::vector<scav_rect> const &boxes,
+                          std::vector<Seat> const &table,
+                          std::vector<scav_point> const &toward,
+                          std::vector<OccupiedSpan> const &occupied,
+                          int32_t clear,
+                          std::vector<scav_point> &at,
+                          std::vector<int32_t> &stuck);
 
 // `ortho_escape_box` off the smallest-area box strictly containing `at`, ties to the
 // lower index; `at` unchanged when inside none.
