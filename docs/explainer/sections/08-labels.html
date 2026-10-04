@@ -27,17 +27,17 @@
     <li>a leader direction (up, down, left, right),</li>
     <li>one of eight <b>attachment points</b> on the box: side midpoints first (so ties centre the box on its leg), then corners.</li>
   </ul>
-  <div class="callout rule"><span class="t">Rules</span>Every candidate lies inside its <b>holder</b> (the states enclosing both ends), is not cut by its own route, and avoids the states its route leaves and enters. The <b>strict tier</b> also avoids every other state, text band, placed box and route; touching is not overlapping.</div>
+  <div class="callout rule"><span class="t">Rules</span>Every candidate lies inside its <b>holder</b> (the states enclosing both ends), is not cut by its own route, and avoids the states its route leaves and enters. The <b>strict tier</b> also avoids every other state, band, placed box and route; touching is not overlapping.</div>
   <p>The winner is the lexicographic minimum of <code>(shortfall, dist, leg, attach, lead, slide)</code>:</p>
   <ul>
     <li><b>shortfall</b>, <code>max(0, gap to own leg + h − gap to nearest foreign leg)</code>: a box nearer a neighbour's line than its own would read as the neighbour's label.</li>
     <li><b>dist</b>: distance from the box's centre to the <b>anchor</b>, the midpoint of the route's longest horizontal leg (else its longest leg).</li>
   </ul>
-  <p>If no candidate passes the strict tier, the best <b>loose</b> one wins: it keeps the basic rules but may overlap. If nothing passes at all, the box is centred on the anchor and counted as unplaced. Several boxes on one transition are placed in order along the route. Candidates are pruned by the strict tier's bound; pruning by the loose one pushed boxes into the fallback.</p>
+  <p>If no candidate passes the strict tier, the best <b>loose</b> one wins: it keeps the basic rules but may overlap. If nothing passes at all, the box is centred on the anchor and counted as unplaced. Several boxes on one transition are placed in order along the route. Candidates are pruned by the strict tier's bound; pruning by the loose one pushed boxes into the fallback. The boxes of a loop inside its state are not searched: they stack beside the loop's far leg, in room reserved for them.</p>
   <div data-fig="labels-toy"></div>
 
   <h3>Labels in the cost</h3>
-  <p>A label over a foreign state or another route is <a href="#cost">Tier 0</a>, forbidden rather than priced. If one endpoint encloses the other, the label lives inside it and only its text bands count. A label over another label or an enclosing state's bands is Tier 2 (<code>label</code>), as is the shortfall (<code>label_near</code>).</p>
+  <p>A label over a foreign state or another route is <a href="#cost">Tier 0</a>, forbidden rather than priced. If one endpoint encloses the other, or the transition is a loop inside its state, the label lives inside that state and only its bands count. A label over another label or an enclosing state's bands is Tier 2 (<code>label</code>), as is the shortfall (<code>label_near</code>).</p>
   <div data-fig="labels-real"></div>
 
   <div class="callout why"><span class="t">Rejected</span>Boxes on fixed strips beside the line (they drifted far from their leg); rip-up-and-reroute (the loose tier made it unnecessary); "nothing between a label and its line" as a hard rule (many more fallbacks, no gain).</div>
@@ -153,7 +153,7 @@ SX.register('labels', function (sec) {
         return SX.svg('polygon', { points: [b, [b[0] - dx * 9 - dy * 5, b[1] - dy * 9 - dx * 5], [b[0] - dx * 9 + dy * 5, b[1] - dy * 9 + dx * 5]].map(function (p) { return p.join(','); }).join(' '), fill: col });
       };
       g.appendChild(box(sc.holder, { rx: 10, fill: SX.css('--state-fill'), stroke: SX.css('--state-stroke'), 'stroke-width': 1.5 }));
-      if (sc.band) { g.appendChild(box(sc.band, { fill: SX.css('--surface-2') })); g.appendChild(txt(sc.band[0] + 8, sc.band[1] + 20, 'Holder: the state enclosing both ends; its name band is a wall', { fill: mut, 'font-size': 12 })); }
+      if (sc.band) { g.appendChild(box(sc.band, { fill: SX.css('--surface-2') })); g.appendChild(txt(sc.band[0] + 8, sc.band[1] + 20, 'Holder: the state enclosing both ends; its header is a wall', { fill: mut, 'font-size': 12 })); }
       [[sc.S, 'Source'], [sc.T, 'Target']].forEach(function (q) {
         if (!q[0]) return;
         g.appendChild(box(q[0], { rx: 7, fill: SX.css('--state-fill'), stroke: SX.css('--state-stroke'), 'stroke-width': 1.5 }));
@@ -210,7 +210,7 @@ SX.register('labels', function (sec) {
   (function () {
     var host = sec.querySelector('[data-fig="labels-real"]');
     var f = SX.figure(host, { caption: '<b>Pick</b> a chart and <b>hover</b> a label box for its gaps to its own leg and the nearest foreign route. The line below re-counts the Tier 0 label checks.' });
-    var names = ['brew', 'tcp', 'axis', 'dock', 'toolchanger', 'bottler'], cur = 'toolchanger';
+    var names = ['brew', 'tcp', 'axis', 'dock', 'toolchanger', 'bottler', 'kiln'], cur = 'toolchanger';
     var pc = SX.choice({ options: names.map(function (n) { return { value: n, label: n }; }), value: cur, onChange: function (v) { cur = v; draw(); } });
     f.ctrl.appendChild(SX.el('span', { text: 'Chart' })); f.ctrl.appendChild(pc.el);
     var stage = SX.el('div'), read = SX.el('div', { class: 'lb-read' });
@@ -218,6 +218,12 @@ SX.register('labels', function (sec) {
     var over = function (a, b) { return a[0] < b[0] + b[2] && b[0] < a[0] + a[2] && a[1] < b[1] + b[3] && b[1] < a[1] + a[3]; };
     var cheb = function (a, b) { return Math.max(Math.max(b[0] - (a[0] + a[2]), a[0] - (b[0] + b[2]), 0), Math.max(b[1] - (a[1] + a[3]), a[1] - (b[1] + b[3]), 0)); };
     var seg = function (a, b) { return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])]; };
+    // A state's four bands, the side ones run from the top band's top to the bottom band's bottom.
+    var walls = function (s) {
+      var top = s.before, bot = s.after;
+      var seal = function (r) { return r[2] > 0 && top[2] > 0 ? [r[0], top[1], r[2], bot[1] + bot[3] - top[1]] : r; };
+      return [top, bot, seal(s.lead), seal(s.trail)].filter(function (r) { return r[2] > 0 && r[3] > 0; });
+    };
     function draw() {
       var c = CH[cur], g = c.text, m = c.model;
       var h = SX.chart(stage, g, { maxHeight: 560, labelBoxes: true });
@@ -233,13 +239,14 @@ SX.register('labels', function (sec) {
       g.trans.forEach(function (t) {
         if (!t.label_box) return;
         var B = t.label_box, src = t.src, dst = t.dst;
-        var common = anc[src].filter(function (x) { return anc[dst].indexOf(x) >= 0; });
-        var hostId = anc[dst].indexOf(src) >= 0 && src !== dst ? src : anc[src].indexOf(dst) >= 0 && src !== dst ? dst : null;
+        var up = function (s) { return anc[s].slice(1); };
+        var common = up(src).filter(function (x) { return up(dst).indexOf(x) >= 0; });
+        var hostId = src === dst ? (t.kind !== 'external' ? src : null) : up(src).indexOf(dst) >= 0 ? dst : up(dst).indexOf(src) >= 0 ? src : null;
         g.states.forEach(function (st) {
           if (common.indexOf(st.id) >= 0 || st.id === hostId) return;
           if (over(B, st.rect)) { lob++; hits.push('“' + t.label + '” over ' + st.path); }
         });
-        if (hostId != null) { var hs = g.states[hostId]; if (over(B, hs.before) || over(B, hs.after)) { lob++; hits.push('“' + t.label + '” over its host\'s band'); } }
+        if (hostId != null && walls(g.states[hostId]).some(function (w) { return over(B, w); })) { lob++; hits.push('“' + t.label + '” over its host\'s band'); }
         legs.forEach(function (ls, j) { if (j === t.id) return; ls.forEach(function (r) { if (over(B, r)) { lor++; hits.push('“' + t.label + '” over ' + g.trans[j].label); } }); });
         var own = legs[t.id], bestK = 0, bestG = Infinity;
         own.forEach(function (r, k) { var d = cheb(B, r); if (d < bestG) { bestG = d; bestK = k; } });

@@ -130,7 +130,7 @@ window.SXfastReuse = function (sec) {
 // Figure: least_by_bound on a real labelled round.
 window.SXfastBound = function (sec) {
   var Sx = SX.data('search').charts.brew;
-  var f = SX.figure(sec.querySelector('[data-fig="fast-bound"]'), { caption: '<b>Step</b> through one labelled round: bounds first (bars), then exact scores in bound order until a bound cannot win. The brew rounds are real; the toy labels more than one.' });
+  var f = SX.figure(sec.querySelector('[data-fig="fast-bound"]'), { caption: '<b>Step</b> through one labelled round: bounds first (bars), then exact scores in bound order until a bound cannot win. The brew rounds are real; the toy is made up.' });
   var src = 'r1', st = null;
   function rows(key) {
     return Sx[key].candidates.map(function (c, k) { return { k: k, what: c.what.replace(/ \(0 left,1 right,2 top,3 bottom\)$/, ''), move: c.move, t0: c.t0, t2: c.t2, b0: c.bound[0], b2: c.bound[1], inside: c.inside }; });

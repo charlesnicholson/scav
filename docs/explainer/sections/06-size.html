@@ -45,9 +45,9 @@
   <div data-fig="size-pack"></div>
 
   <h3>Bottom-up to the root</h3>
-  <p>A composite's box wraps its packed submachines:</p>
-  <p><code>w = max(min_w, packed_w, kind_min_w) + 2·pad</code><br><code>h = max(h_before + packed_h + h_after, kind_min_h) + 2·pad</code></p>
-  <p><code>pad</code> (128) is the interior ring. A bare pseudostate has none, so an arrow stops on its mark. A plain state is at least 896 × 640 on <code>readable</code>; pseudostate minimums are in <a href="#intro">the model</a>.</p>
+  <p>A composite's box wraps its packed submachines, its four bands and its loop room:</p>
+  <p><code>w = max(min_w, w_before + max(packed_w, loop_w) + w_after, kind_min_w) + 2·pad</code><br><code>h = max(h_before + packed_h + sep + loop_h + h_after, kind_min_h) + 2·pad</code></p>
+  <p>The <code>h_*</code> and <code>w_*</code> terms are the bands the application requested above, below, before and after the submachine area. The <b>loop room</b>, <code>loop_w × loop_h</code>, holds the state's internal self-transitions, one row each, below its submachines; <code>sep</code> is <code>sub_sep</code> when both are present, else 0. <code>pad</code> (128) is the interior ring. A bare pseudostate has none, so an arrow stops on its mark. A plain state is at least 896 × 640 on <code>readable</code>; pseudostate minimums are in <a href="#intro">the model</a>.</p>
   <div data-fig="size-bottomup"></div>
   <p>After routing, the chart rectangle grows over every route point and label before scoring, so area and aspect price the canvas that ships.</p>
   <div class="callout why"><span class="t">Rejected</span>Top-down sizing (its size estimate is unsolved, and per-level scaling breaks port continuity); constraint-based adjustment (coordinates are generated, not adjusted); network-simplex placement (no fewer visible defects, and slower).</div>
@@ -653,7 +653,7 @@
         h.mark('state', s.st.id, 'var(--hl)');
         s.subs.forEach(function (r) { h.rect(r, { fill: 'none', stroke: 'var(--hl-2)', 'stroke-width': 32, 'stroke-dasharray': '60 50' }); });
         var w = s.pw + 2 * PAD, hh = s.hb + s.ph + s.ha + 2 * PAD;
-        log.innerHTML = '<b>' + s.st.path + '</b> takes its ' + (s.subs.length > 1 ? s.subs.length + ' packed regions (' + (s.subs[0][1] === s.subs[1][1] ? 'side by side' : 'stacked') + ', <code>sub_sep</code> 192 apart)' : 'submachine') + ': packed ' + SX.fmt(s.pw) + ' × ' + SX.fmt(s.ph) + '.<br>w = ' + SX.fmt(s.pw) + ' + 2·128 = <b>' + SX.fmt(w) + '</b>; h = ' + s.hb + ' (name band) + ' + SX.fmt(s.ph) + ' + ' + s.ha + ' + 2·128 = <b>' + SX.fmt(hh) + '</b>' + (w === s.st.rect[2] && hh === s.st.rect[3] ? ', exactly its rect.' : ' (rect ' + s.st.rect[2] + ' × ' + s.st.rect[3] + ').');
+        log.innerHTML = '<b>' + s.st.path + '</b> takes its ' + (s.subs.length > 1 ? s.subs.length + ' packed regions (' + (s.subs[0][1] === s.subs[1][1] ? 'side by side' : 'stacked') + ', <code>sub_sep</code> 192 apart)' : 'submachine') + ': packed ' + SX.fmt(s.pw) + ' × ' + SX.fmt(s.ph) + '.<br>w = ' + SX.fmt(s.pw) + ' + 2·128 = <b>' + SX.fmt(w) + '</b>; h = ' + s.hb + ' (header) + ' + SX.fmt(s.ph) + ' + ' + s.ha + ' + 2·128 = <b>' + SX.fmt(hh) + '</b>' + (w === s.st.rect[2] && hh === s.st.rect[3] ? ', exactly its rect.' : ' (rect ' + s.st.rect[2] + ' × ' + s.st.rect[3] + ').');
       } else {
         var root = T.sizing.subs['0'], box = geom.box;
         h.rect(root, { fill: 'none', stroke: 'var(--hl-2)', 'stroke-width': 40, 'stroke-dasharray': '120 80' });

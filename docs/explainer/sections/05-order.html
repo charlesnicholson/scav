@@ -57,7 +57,7 @@
   <p>An <b>orient pin</b>, applied by a <a href="#search">kick</a>, turns a frame to run down: ranks become rows. A <b>fold pin</b> passes through untouched; it tells <a href="#size">sizing</a> where to cut a long run of ranks.</p>
 
   <h3>The real ranks</h3>
-  <p><code>brew</code>'s shipped pins include two rank pins and one reverse pin; the depth-first search reverses one more edge itself.</p>
+  <p><code>brew</code>'s shipped pins include one rank pin and an orient pin that turns its root frame to run down; the depth-first search reverses two edges itself.</p>
   <div data-fig="order-brew"></div>
 
   <p>Most of the search's moves act here: rank, cut, reverse, side and orient pins. Position within a rank is not searched; measured, it has no slack.</p>
@@ -376,7 +376,7 @@
     var topoIdx = {};
     U.ranks(n, T.nodes.map(function () { return 'state'; }), E, function (s) { steps.push(s); });
     steps[0].topo.forEach(function (v, i) { topoIdx[v] = i; });
-    var f = SX.figure(host, { caption: '<b>Longest path</b> on toolchanger\'s root frame. <b>Step</b> through it and watch pull-right move <code>Gripping</code>, a source with three successors, from rank 0 to rank 1.' });
+    var f = SX.figure(host, { caption: '<b>Longest path</b> on toolchanger\'s root frame, with two edges of its cycle reversed. <b>Step</b> through it and watch pull-right move <code>Gripping</code>, a source with three successors, from rank 0 to rank 1.' });
     var msg = SX.el('div', { class: 'note', style: { minHeight: '2.6em' } });
     function nm(v) { return T.nodes[v].name; }
     var st = SX.stepper({ steps: steps.length, interval: 900, start: 0,
@@ -661,9 +661,14 @@
       legend.innerHTML = '';
       for (var r = 0; r <= top; r++) legend.appendChild(SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: RANK_COL[r] } }), 'rank ' + r));
       legend.appendChild(SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--hl)' } }), 'reversed: ' + frames[0].o.reversed.map(function (rv) { var t = geom.trans[rv.trans]; return t.src_path.replace(/^.*\//, '') + ' → ' + t.dst_path.replace(/^.*\//, ''); }).join(', ')));
-      note.innerHTML = stage === 0 ? 'Root frame by longest path: SelfCheck and the initial are sources at rank 0; Off and Standby at 1; Brewing and the final at 2.'
-        : stage === 1 ? 'The pins move Off to rank 0 (beside SelfCheck) and the final to rank 1 (beside Standby). The initial now shares rank 0 with the state it enters.'
-        : 'Off, the initial\'s state, sits at rank 0, so every other node moves up one and the initial takes rank 0 alone.';
+      var root = frames[0], nm = function (id) { return byId[id].name || byId[id].kind; };
+      var ranked = function (k) {
+        var by = [];
+        root.ids.forEach(function (id) { var r = root.stage[k][id]; (by[r] = by[r] || []).push(nm(id)); });
+        return by.map(function (ns, r) { return ns ? 'rank ' + r + ' ' + ns.join(', ') : null; }).filter(Boolean).join('; ');
+      };
+      var pinned = Object.keys(root.o.pinned).map(function (id) { return nm(+id) + ' to rank ' + root.o.pinned[id]; }).join(', ');
+      note.innerHTML = 'Root frame' + (root.down ? ', which runs down' : '') + ': ' + (stage === 0 ? 'by longest path, ' : stage === 1 ? 'the pins move ' + (pinned || 'nothing') + ': ' : 'each initial sits one rank before the state it enters and empty ranks are squeezed out: ') + ranked(stage) + '.';
       table.innerHTML = '';
       table.appendChild(SX.el('tr', null, SX.el('th', { text: 'frame' }), SX.el('th', { text: 'boundary (after rank)' }), SX.el('th', { text: 'transition' }), SX.el('th', { text: 'label' }), SX.el('th', { class: 'num', text: 'width charged' })));
       frames.forEach(function (fr) {

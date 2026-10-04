@@ -76,11 +76,11 @@ window.SXsearch = (function () {
 window.SXsearchStructure = function (sec) {
   var f = SX.figure(sec.querySelector('[data-fig="search-structure"]'), { caption: '<b>Click a stage</b> (or press Play) to read what it does and what it did on brew. The dashed box runs once per viable row.' });
   var S = [
-    { id: 'rows', x: 10, w: 150, title: 'Level 2', sub: '16 rows', body: 'Lay out all 16 rows: four bits of sizing knobs, no pins.', brew: 'Unsearched, the 16 rows give only 2 different drawings, both with four labels on routes (t0 4).' },
-    { id: 'l1', x: 200, w: 160, title: 'Level 1', sub: 'steepest descent', body: 'Score every move in parallel; take the single best strict improvement; repeat.', brew: 'Row 0: 16,985 (t0 4) → 6,936 → 4,320 → 4,225 in three moves; the fourth round finds nothing.' },
-    { id: 'kicks', x: 400, w: 210, title: 'Kicks', sub: 'schedules A and B', body: 'Perturb one frame (reverse, orient, fold), search to convergence, keep only if cheaper; reduce each round by single, together and rest; then settle.', brew: 'Reversing t1 converges to 3,649; turning the grinder down is then rested on top: 3,595.' },
-    { id: 'refold', x: 650, w: 150, title: 'Refold', sub: 'Level 1 + fold cuts', body: 'Search again from each row\'s pins with fold cuts added; keep only if strictly cheaper.', brew: 'Nothing cheaper than 3,595.' },
-    { id: 'argmin', x: 840, w: 150, title: 'argmin', sub: 'over rows', body: 'Ship the least converged cost; ties go to the lower row.', brew: 'The 16 rows converge to three drawings; row 0 ships at 3,595.' }
+    { id: 'rows', x: 10, w: 150, title: 'Level 2', sub: '16 rows', body: 'Lay out all 16 rows: four bits of sizing knobs, no pins.', brew: 'Unsearched, the 16 rows give only 2 different drawings, with four and two labels on routes (t0 4 and t0 2).' },
+    { id: 'l1', x: 200, w: 160, title: 'Level 1', sub: 'steepest descent', body: 'Score every move in parallel; take the single best strict improvement; repeat.', brew: 'Row 0: 16,866 (t0 4) → 9,216 → 6,600 → 6,473 in three moves; the fourth round finds nothing.' },
+    { id: 'kicks', x: 400, w: 210, title: 'Kicks', sub: 'schedules A and B', body: 'Perturb one frame (reverse, orient, fold), search to convergence, keep only if cheaper; reduce each round by single, together and rest; then settle.', brew: 'Turning the root frame to run down converges to 5,595; turning the grinder down as well, together or rested on top, reaches only 5,628.' },
+    { id: 'refold', x: 650, w: 150, title: 'Refold', sub: 'Level 1 + fold cuts', body: 'Search again from each row\'s pins with fold cuts added; keep only if strictly cheaper.', brew: 'Nothing cheaper than 5,595.' },
+    { id: 'argmin', x: 840, w: 150, title: 'argmin', sub: 'over rows', body: 'Ship the least converged cost; ties go to the lower row.', brew: 'The 16 rows converge to two drawings; row 0 ships at 5,595.' }
   ];
   var W = 1000, H = 170, svg = SX.svg('svg', { viewBox: '0 0 ' + W + ' ' + H, style: { width: '100%', height: 'auto', font: '13px ' + SX.css('--sans') } });
   var defs = SX.svg('defs', null, SX.svg('marker', { id: 'sx-arr-search', viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: 'auto' }, SX.svg('path', { d: 'M0,0L10,5L0,10z', fill: SX.css('--text-secondary') })));
@@ -230,7 +230,7 @@ window.SXsearchRound = function (sec) {
 // Figure: brew's whole search path, one accepted move, kick or re-search per step.
 window.SXsearchPath = function (sec) {
   var H = SXsearch, B = SX.data('search').charts.brew, steps = B.steps, C = window.SXcost;
-  var f = SX.figure(sec.querySelector('[data-fig="search-path"]'), { caption: '<b>Step</b> through brew\'s search: three Level 1 moves, the winning kick, and a second kick rested on top. The orange element is the one each step\'s pin names.' });
+  var f = SX.figure(sec.querySelector('[data-fig="search-path"]'), { caption: '<b>Step</b> through brew\'s search: three Level 1 moves, then the winning kick and the two moves its search takes. The orange element is the one each step\'s pin names.' });
   var row = SX.el('div', { class: 'fig-row' });
   var left = SX.el('div', { style: { flex: '3 1 540px' } }), right = SX.el('div', { style: { flex: '2 1 360px' } });
   row.appendChild(left); row.appendChild(right);
@@ -287,14 +287,17 @@ window.SXsearchPath = function (sec) {
   var note = B.kick_round_1.note.split('. Kick-start')[0], items = note.slice(note.indexOf('costs:') + 6).split(/, (?=[a-z])/).map(function (x) { return x.trim().replace(/\.$/, ''); });
   var kt = SX.el('table', { class: 'sx-table', style: { fontSize: '13px' } });
   kt.appendChild(SX.el('tr', null, SX.el('th', { text: 'first kick round: kick' }), SX.el('th', { class: 'num', text: 'start' }), SX.el('th', { class: 'num', text: 'converged' }), SX.el('th', { text: 'outcome' })));
+  var level1 = steps.filter(function (s) { return s.kind === 'level1'; }).pop().cost.t2, kicks = [];
   items.forEach(function (it) {
     var m = it.match(/^(.*?) (\d+)?(?:->(\d+))?(?: \((.*)\))?$/); if (!m) return;
-    var name = m[1], s0 = m[2] ? +m[2] : null, s1 = m[3] ? +m[3] : s0;
-    var out = name === 'reverse t1' ? 'single: the cheapest kick, taken' : name === 'orient 2' ? 'rested on top of single → 3,595' : (s1 != null && s1 < 4225 ? 'beats 4,225 but not single' : 'no better than 4,225');
-    var tr = SX.el('tr', { class: (name === 'reverse t1' || name === 'orient 2') ? 'hl' : '' }, SX.el('td', { text: name.replace('refold', 'fold flip, frame').replace('orient', 'orient frame') }), SX.el('td', { class: 'num', text: s0 != null ? SX.fmt(s0) : '' }), SX.el('td', { class: 'num', text: s1 != null ? SX.fmt(s1) : '' }), SX.el('td', { text: out }));
-    kt.appendChild(tr);
+    kicks.push({ name: m[1], s0: m[2] ? +m[2] : null, s1: m[3] ? +m[3] : (m[2] ? +m[2] : null) });
   });
-  f.stage.appendChild(SX.el('p', { class: 'note', html: 'Every kick of the first round, each searched to convergence from its warm start. Together (reverse t1 + orient frame 2) reaches only 5,530, worse than single, so single is taken and the grinder\'s turn is rested on top.' }));
+  var single = Math.min.apply(null, kicks.map(function (k) { return k.s1; }));
+  kicks.forEach(function (k) {
+    var out = k.s1 === single ? 'single: the cheapest kick, taken' : k.s1 < level1 ? 'beats ' + SX.fmt(level1) + ' but not single' : 'no better than ' + SX.fmt(level1);
+    kt.appendChild(SX.el('tr', { class: k.s1 === single ? 'hl' : '' }, SX.el('td', { text: k.name.replace('refold', 'fold flip, frame').replace('orient', 'orient frame') }), SX.el('td', { class: 'num', text: k.s0 != null ? SX.fmt(k.s0) : '' }), SX.el('td', { class: 'num', text: k.s1 != null ? SX.fmt(k.s1) : '' }), SX.el('td', { text: out })));
+  });
+  f.stage.appendChild(SX.el('p', { class: 'note', html: 'Every kick of the first round, each searched to convergence from its warm start. Frames 0 and 2 both have a kick that beats ' + SX.fmt(level1) + '. Together (orient frame 0 + orient frame 2) they reach only 5,628, worse than single, so single is taken; the grinder\'s turn rested on top also stays at 5,628, so it is dropped.' }));
   f.stage.appendChild(kt);
 };
 SX.register('search', function (sec) {

@@ -20,7 +20,7 @@
     <div class="gl-item" data-term="bend node"><dt>Bend node</dt><dd>A dummy node chaining a long edge through an intermediate rank; a routing waypoint. <a href="#order">→ order</a></dd></div>
     <div class="gl-item" data-term="bend penalty"><dt>Bend penalty</dt><dd>The router's cost per turn: one <code>rank_sep</code> (576). <a href="#route">→ route</a></dd></div>
     <div class="gl-item" data-term="boundary node"><dt>Boundary node</dt><dd>A port's node on its frame's edge: exits trailing, entries leading. <a href="#decompose">→ decompose</a></dd></div>
-    <div class="gl-item" data-term="boxspace"><dt>BoxSpace</dt><dd>Per state and submachine: text width and the bands above and below its children. <a href="#intro">→ intro</a></dd></div>
+    <div class="gl-item" data-term="boxspace"><dt>BoxSpace</dt><dd>Per state and submachine: text width and four bands around its children. <a href="#intro">→ intro</a></dd></div>
     <div class="gl-item" data-term="brandes–köpf (bk)"><dt>Brandes–Köpf (BK)</dt><dd>Linear-time, balanced placement of nodes across the ranks. <a href="#size">→ size</a></dd></div>
     <div class="gl-item" data-term="candidate"><dt>Candidate</dt><dd>One pass from ordering through cost for one row and set of pins. <a href="#pipeline">→ pipeline</a></dd></div>
     <div class="gl-item" data-term="chaining / cut"><dt>Chaining / cut</dt><dd>A long edge chained through bend nodes; a cut leaves it unchained. <a href="#order">→ order</a></dd></div>
@@ -69,7 +69,7 @@
     <div class="gl-item" data-term="region"><dt>Region</dt><dd>One submachine of a concurrent state. <a href="#intro">→ intro</a></dd></div>
     <div class="gl-item" data-term="row"><dt>Row</dt><dd>One Level 2 setting of four sizing knobs. <a href="#search">→ search</a></dd></div>
     <div class="gl-item" data-term="scale measure (sm)"><dt>Scale measure (SM)</dt><dd>How large a packing could be drawn at the desired aspect; larger wins. <a href="#size">→ size</a></dd></div>
-    <div class="gl-item" data-term="seat / seating passes"><dt>Seat / seating passes</dt><dd>Where a route end meets its box, chosen by five passes. <a href="#route">→ route</a></dd></div>
+    <div class="gl-item" data-term="seat / seating passes"><dt>Seat / seating passes</dt><dd>Where a route end meets its box, chosen by six passes. <a href="#route">→ route</a></dd></div>
     <div class="gl-item" data-term="segment"><dt>Segment</dt><dd>The part of a transition inside one frame. <a href="#decompose">→ decompose</a></dd></div>
     <div class="gl-item" data-term="shard"><dt>Shard</dt><dd>A unit of parallel work fixed by the model, merged in index order. <a href="#principles">→ principles</a></dd></div>
     <div class="gl-item" data-term="shortfall"><dt>Shortfall</dt><dd>How much nearer a label is to a foreign leg than its own. <a href="#labels">→ labels</a></dd></div>
@@ -79,7 +79,7 @@
     <div class="gl-item" data-term="strict tier"><dt>Strict tier</dt><dd>A label clear of every foreign state, band, box and route. <a href="#labels">→ labels</a></dd></div>
     <div class="gl-item" data-term="submachine"><dt>Submachine</dt><dd>A group of states inside a state, or a document's root. <a href="#intro">→ intro</a></dd></div>
     <div class="gl-item" data-term="sweep"><dt>Sweep</dt><dd>One median pass over a frame's ranks, down or up. <a href="#order">→ order</a></dd></div>
-    <div class="gl-item" data-term="tier 0 counts"><dt>Tier 0 counts</dt><dd>The eight forbidden counts, such as a route through a box. <a href="#cost">→ cost</a></dd></div>
+    <div class="gl-item" data-term="tier 0 counts"><dt>Tier 0 counts</dt><dd>The nine forbidden counts, such as a route through a box. <a href="#cost">→ cost</a></dd></div>
     <div class="gl-item" data-term="transit bend"><dt>Transit bend</dt><dd>A bend inside a state the route only passes through. <a href="#cost">→ cost</a></dd></div>
     <div class="gl-item" data-term="trunk"><dt>Trunk</dt><dd>The shared final leg of routes into one target; not corridor. <a href="#cost">→ cost</a></dd></div>
   </dl>

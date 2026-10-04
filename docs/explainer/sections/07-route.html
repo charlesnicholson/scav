@@ -10,7 +10,8 @@
   <p>After the first sizing, the <b>facing pass</b> turns ports toward their route's far end, then reruns ordering and sizing if any turned:</p>
   <ul>
     <li>a port whose far end lies on the frame's other side has its edge reversed, moving it to the opposite border;</li>
-    <li>a port on its own transition's state whose far end lies further away across the ranks than along them moves to the top or bottom border facing it, if that border is unobstructed and free. A side pin is never turned.</li>
+    <li>a port on its own transition's state whose far end lies further away across the ranks than along them moves to the top or bottom border facing it, if that border is unobstructed and free. A side pin is never turned;</li>
+    <li>a port on a <b>lined face</b>, one that a band of its state covers, moves to the opposite border, else to a top or bottom border its joined state can see. No port is ever turned onto a lined face.</li>
   </ul>
 
   <h3>Which face an end leaves by</h3>
@@ -28,16 +29,17 @@
     <li><b>Ring points</b>: an end is pushed out by the clearance, and the leg back to the box is emitted, not searched, so it is perpendicular for free.</li>
   </ul>
   <div data-fig="route-astar"></div>
-  <p>A chained segment's bend nodes are waypoints the route must pass, leg by leg. Each frame's obstacles are its live states except the ones the route lives inside; <b>walls</b> keep a route inside the state it is drawn in.</p>
+  <p>A chained segment's bend nodes are waypoints the route must pass, leg by leg. Each frame's obstacles are its live states except the ones the route lives inside, plus the bands and loop rooms of those it lives inside; <b>walls</b> keep a route inside the state it is drawn in.</p>
 
   <h3>Seating passes</h3>
-  <p>Every seat is chosen before any net is searched, because two ends wanting one seat is a question about the pair. Five passes run in order:</p>
+  <p>Every seat is chosen before any net is searched, because two ends wanting one seat is a question about the pair. Six passes run in order:</p>
   <ol>
-    <li><b>Attach</b>: seat each end by the separation rule or its face pin.</li>
+    <li><b>Attach</b>: seat each end by the separation rule or its face pin; both ends of an outer self-loop take the face of its state that the fewest other ends use.</li>
     <li><b>Reface</b> (glyphs): when an arrival and a departure want one midpoint, move the one with more to gain to another face.</li>
     <li><b>Align</b>: put both ends of a net between parallel faces on one coordinate, so one straight segment fits; a net with label room reserved takes the low end, and corridor nets are skipped.</li>
     <li><b>Spread</b>: split ends sharing a point by direction of travel, a line of text apart where the face has room, else closer; repeat until nothing moves.</li>
     <li><b>Separate</b>: push apart legs on different boxes that run closer than a line of text (fans exempt).</li>
+    <li><b>Loop</b>: put an outer self-loop's two ends a line of text apart about the middle of the widest run of its face that no other seat stands in.</li>
   </ol>
   <div data-fig="route-seats"></div>
 
@@ -283,7 +285,7 @@
 (function () {
   'use strict';
   var F = window.SXF, U = F.ru;
-  var PASSES = ['planned', 'attach', 'reface', 'align', 'spread', 'separate', 'routed'];
+  var PASSES = ['planned', 'attach', 'reface', 'align', 'spread', 'separate', 'loop', 'routed'], LAST = PASSES.length - 1;
   function styled(n, st) { Object.assign(n.style, st); return n; }
   F.route['route-seats'] = function (host) {
     var S = SX.data('stages'), B = S && S.brew;
@@ -299,9 +301,9 @@
       return { p: p, how: how };
     }
     var st = SX.stepper({ steps: PASSES.length, interval: 1300, label: function (i) { return PASSES[i]; }, onStep: function (k) {
-      var h = SX.chart(host2, geom, { maxHeight: 400, layers: k < 6 ? { routes: false, labels: false } : {} });
+      var h = SX.chart(host2, geom, { maxHeight: 400, layers: k < LAST ? { routes: false, labels: false } : {} });
       var moves = [], at = {};                         // ends at one point share the topmost dot's tooltip
-      if (k < 6) nets.forEach(function (n) {
+      if (k < LAST) nets.forEach(function (n) {
         var a = posAt(n, 'src', k), b = posAt(n, 'dst', k);
         styled(h.line([a.p, b.p], { 'stroke-width': 14, 'stroke-dasharray': '50 40' }), { stroke: 'var(--text-muted)' });
         ['src', 'dst'].forEach(function (end) {
@@ -319,8 +321,8 @@
         top.style.pointerEvents = ''; top.style.cursor = 'help';
         SX.tipOn(top, q.map(function (x) { return x.tip; }).join('<br><br>'));
       });
-      if (k === 0) log.textContent = nets.length + ' nets planned between node centres (and port points, none in brew). The internal Pumping → Pumping has no route.';
-      else if (k === 6) log.textContent = 'The routed polylines, nudged, trimmed one arrowhead short of each target border, labels placed.';
+      if (k === 0) log.textContent = nets.length + ' nets planned between node centres (and port points, none in brew). The internal Pumping → Pumping is a loop drawn in Pumping\'s own room, not a net.';
+      else if (k === LAST) log.textContent = 'The routed polylines, nudged, trimmed one arrowhead short of each target border, labels placed.';
       else log.innerHTML = moves.length ? '<b>' + PASSES[k] + '</b> moved ' + moves.length + (moves.length === 1 ? ' end' : ' ends') + ':<br>' + moves.join('<br>') : '<b>' + PASSES[k] + '</b> moved nothing in brew.';
     } });
     f.ctrl.appendChild(st.el);

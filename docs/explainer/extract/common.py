@@ -9,7 +9,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CHARTS = Path("test_data/charts")  # relative to REPO_ROOT, scav's cwd, so dumps name documents that way
 
-TIER0 = ["through_box", "box_overlap", "flush", "through_region", "retrace",
+TIER0 = ["through_box", "through_band", "box_overlap", "flush", "through_region", "retrace",
          "label_over_box", "label_over_route"]
 TERMS = ["bends", "corridor", "crossings", "excess_len", "adjacency", "label",
          "label_near", "aspect", "area", "crowding", "length", "transit_bends",
@@ -209,6 +209,7 @@ def geometry(scav: Scav, name: str, flags=(), scale="text", with_svg=True) -> tu
             "id": i, "name": s["name"], "label": s["label"], "path": paths[i], "kind": s["kind"],
             "parent_sub": s["parent"], "submachines": s["submachines"], "live": s["live"],
             "rect": g["state"][i], "before": g["state_before"][i], "after": g["state_after"][i],
+            "lead": g["state_lead"][i], "trail": g["state_trail"][i],
             "text": [p["text"] for p in draw if p["el"] == "text"],
             "draw": draw})
     rec["subs"] = []

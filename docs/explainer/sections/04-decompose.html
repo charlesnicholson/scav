@@ -15,7 +15,7 @@
   <p>A transition whose ends lie in different frames is split at every border it crosses. Each piece is a <b>segment</b> in exactly one frame; each cut is a <b>port</b> on the crossed state's border. Long hierarchical edges become a matter of ordering ports along each composite's sides, and a long edge pulls on every level it passes, with no weight needed.</p>
   <h3>How a transition is split</h3>
   <ol>
-    <li>Skip dead transitions, and internal or local self-transitions, which have no route.</li>
+    <li>Skip dead transitions.</li>
     <li>List each end's ancestors, innermost first, and strip the part they share.</li>
     <li>If the source encloses the destination, an internal or local transition starts on the source's inner face; an external one leaves the source and re-enters it.</li>
     <li><b>Exit</b> the source's chain, innermost first; the source itself is exited only by an external transition.</li>
@@ -23,8 +23,9 @@
     <li><b>Enter</b> the destination's chain, outermost first. If the destination encloses the source, end on its inner face.</li>
     <li>Emit one port per crossing and one segment per consecutive pair of ends, each in the frame it lies in.</li>
   </ol>
+  <p>A self-transition is one segment in its state's parent frame. An external one is routed there; an internal or local one is drawn as a loop inside its state and never routed.</p>
   <p>Each segment end is a port, an endpoint state's box, or an endpoint's inner face. In <a href="#order">ordering</a>, each port on a frame's border becomes a <b>boundary node</b>: exits on the trailing edge, entries on the leading one.</p>
-  <p>A transition's label belongs to the segment in its <b>lowest common ancestor</b> (LCA) frame, the innermost submachine holding both ends. Ports and segments have stable ids derived from the model, never from how work was split.</p>
+  <p>A transition's label belongs to the segment in its <b>lowest common ancestor</b> (LCA) frame, the innermost submachine holding both ends; an internal or local self-transition's label sits beside its loop instead. Ports and segments have stable ids derived from the model, never from how work was split.</p>
 
   <div data-fig="decompose-split"></div>
 
