@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Build a libc++ instrumented with MemorySanitizer, without which MSan reports
-false positives that look exactly like real findings until someone switches it off.
+"""Builds a MemorySanitizer-instrumented libc++ and prints its prefix.
 
     $(./bin/envy product python3) tools/msan_libcxx.py            # build, print the prefix
     $(./bin/envy product python3) tools/msan_libcxx.py --prefix   # print the prefix, build nothing
@@ -23,8 +22,7 @@ WORK_DIR = REPO_ROOT / "out/msan-libcxx"
 PREFIX = WORK_DIR / "prefix"
 MARKER = PREFIX / "include/c++/v1/vector"
 
-# Pinned and hash-verified, being a compilation input. The major tracks the
-# clang that builds and consumes it; three majors apart is a build failure.
+# Pinned, hash-verified LLVM release; its major tracks the clang that builds it.
 VERSION = "21.1.8"
 TARBALL = f"llvm-project-{VERSION}.src.tar.xz"
 URL = f"https://github.com/llvm/llvm-project/releases/download/llvmorg-{VERSION}/{TARBALL}"
@@ -39,8 +37,7 @@ CMAKE_FLAGS: list[str] = [
     "-DLIBCXX_ENABLE_SHARED=ON",
     "-DLIBCXXABI_ENABLE_SHARED=ON",
     "-DLIBCXX_CXX_ABI=libcxxabi",
-    # Otherwise these link in uninstrumented -- exactly the false-positive source
-    # this exercise exists to remove.
+    # libc++ uses compiler-rt, and libc++abi the libunwind built here.
     "-DLIBCXX_USE_COMPILER_RT=ON",
     "-DLIBCXXABI_USE_LLVM_UNWINDER=ON",
     "-DLIBCXX_INCLUDE_BENCHMARKS=OFF",
@@ -52,8 +49,7 @@ CMAKE_FLAGS: list[str] = [
 def run(*cmd: str | Path) -> None:
     argv = [str(c) for c in cmd]
     print(f"+ {' '.join(argv)}", file=sys.stderr, flush=True)
-    # Captured and replayed rather than inherited: a build this long interleaves
-    # badly in a CI log, and a failure has to arrive next to its command.
+    # Captures output; prints it only on failure.
     result = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                             text=True)
     if result.returncode:
@@ -62,8 +58,7 @@ def run(*cmd: str | Path) -> None:
 
 
 def envy(*args: str | Path) -> str:
-    """Downloading, hashing and unpacking go through envy's pinned libcurl, TLS and
-    libarchive rather than whatever the interpreter and the machine happen to have."""
+    """Runs envy with `args` and returns its stripped stdout."""
     return subprocess.run([str(ENVY), *(str(a) for a in args)], cwd=REPO_ROOT,
                           check=True, stdout=subprocess.PIPE, text=True).stdout.strip()
 
@@ -105,8 +100,7 @@ def build(runtimes: Path) -> None:
     run(cmake, "-S", runtimes, "-B", build_dir, "-G", "Ninja",
         f"-DCMAKE_MAKE_PROGRAM={envy('product', 'ninja')}",
         f"-DCMAKE_C_COMPILER={clang}", f"-DCMAKE_CXX_COMPILER={clangxx}",
-        # LLVM's runtimes build wants a Python of its own, and a bare runner has
-        # none. Hand it the provisioned one rather than installing a second.
+        # The runtimes build uses the envy-provisioned Python.
         f"-DPython3_EXECUTABLE={envy('product', 'python3')}",
         f"-DCMAKE_INSTALL_PREFIX={PREFIX}", *CMAKE_FLAGS)
     run(cmake, "--build", build_dir)

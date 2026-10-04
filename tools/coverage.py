@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""An untested file fails the build; percentages are printed but never gated on.
-
-Run through `./build.sh --coverage`, which configures, runs the tests, then calls
-this."""
+"""Fails the build on an untested source file; prints percentages without gating.
+Run by `./build.sh --coverage`.
+"""
 
 import argparse
 import json
@@ -15,13 +14,12 @@ type Summary = dict[str, dict[str, float]]
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-# Executed by definition, so gating on them says nothing.
+# Test sources, excluded from the gate.
 EXCLUDED_SUFFIXES: tuple[str, ...] = ("_tests.cpp", "doctest_main.cpp")
 
 
 def find_llvm_tool(name: str) -> str:
-    """Apple's clang hides these behind xcrun; other toolchains put them on PATH.
-    Both are ordinary lookups, and guessing a version suffix is not."""
+    """Finds an llvm tool on PATH, then via `xcrun --find`; exits if neither has it."""
     if found := shutil.which(name):
         return found
     if xcrun := shutil.which("xcrun"):
@@ -59,8 +57,7 @@ def main() -> int:
     if not (binaries := sorted(p for p in (build / "bin").iterdir() if p.is_file())):
         raise SystemExit(f"no instrumented binaries under {build / 'bin'}")
 
-    # A file no test links is absent from the report entirely, so a report-driven
-    # check would silently pass it -- the exact case this gate exists to catch.
+    # Gates every source in scav_sources.txt, including files no test links.
     if not (manifest := build / "scav_sources.txt").is_file():
         raise SystemExit(f"{manifest} is missing; it is written at configure time")
     declared = {Path(line).resolve()
@@ -95,7 +92,7 @@ def main() -> int:
         if summary["lines"]["count"] and not summary["lines"]["covered"]:
             untested.append((rel, "zero executed lines"))
 
-    # Headers are worth printing, but the gate is about declared sources.
+    # Prints headers without gating them.
     for path in sorted(set(rows) - declared):
         rel = path.relative_to(REPO_ROOT)
         print(f"{str(rel):<48} {percent(rows[path], 'lines'):>13.1f}% {'(header)':>14}")

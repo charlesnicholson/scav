@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
-"""The two things a count cannot say, drawn instead.
+"""Writes an HTML page of label strip candidates and label-to-route gaps.
 
-`tools/review.py` says how many labels are detached and how many sit on a
-corner. It cannot say whether the line drawn between "fine" and "wrong" is in
-the right place, and it cannot say what the placer's choices even were. Both
-are pictures, so this draws them (11.9, 11.9.3).
-
-  strips      every position 11.9's strip matching considered for one label,
-              the chosen one solid and the rest faint, the strips numbered
-  gaps        real labels grouped by how far they sit from their own polyline,
-              in text heights, so the threshold can be picked by looking
+  strips      every position strip matching considered for one label,
+              the chosen one solid, the rest faint, the strips numbered
+  gaps        corpus labels grouped by distance from their own polyline, in text heights
 
   tools/explain.py                    both sections, the corpus
   tools/explain.py --out FILE
@@ -33,8 +27,7 @@ TEXT = re.compile(r'<text x="(-?\d+)" y="(-?\d+)" font-size="(\d+)"[^>]*textLeng
 
 
 def crop(svg, box, extra=""):
-    """The same document through a window, so a detail is legible without
-    redrawing anything: only the viewBox and the declared size change."""
+    """The same document cropped by changing only the viewBox and declared size."""
     x, y, w, h = box
     scale = 460.0 / max(w, 1)
     head = SVG_OPEN.sub(
@@ -62,9 +55,9 @@ def labels_of(svg):
 
 
 def candidates(leg, box_w, box_h):
-    """Every position the placer enumerates for one leg, exactly as label.cpp
-    walks it: two sides, `STRIPS` strips a box height apart, and slots one box
-    height along the leg plus its far end and its centre."""
+    """Candidate boxes for one leg, as label.cpp enumerates them: two sides, `STRIPS`
+    strips a box height apart, slots a box height apart plus the leg's end and centre.
+    """
     (ax, ay), (bx, by) = leg
     flat = ay == by
     if flat == (ax == bx):
@@ -94,8 +87,7 @@ def candidates(leg, box_w, box_h):
 
 
 def strip_figure(svg, leg, chosen, box_w, box_h, span):
-    """The candidate set as SVG: faint outlines, the leg heavy, the chosen one
-    solid, and a numeral per strip so `strip 0` is visibly on the line."""
+    """SVG marks: faint candidates, a heavy leg, the chosen box, a numeral per strip."""
     (ax, ay), (bx, by) = leg
     stroke = max(int(span / 700), 2)
     size = max(int(span / 40), 9)
@@ -178,11 +170,10 @@ def main():
             mine = legs.get(ident, [])
             if not mine or shown >= 3:
                 continue
-            # The leg the box sits nearest, which is the one it rides.
             leg = min(mine, key=lambda ab: audit.gap(em, audit.span(*ab)))
             g = audit.gap(em, audit.span(*leg))
             if shown == 0 and g == 0:
-                pass          # a slice, worth showing first
+                pass          # a slice, shown first
             elif shown == 1 and g == 0:
                 continue
             pad = max(em[2], em[3]) * 3

@@ -1,17 +1,9 @@
 #!/usr/bin/env python3
-"""The shipped drawing of every chart, with each finding marked on it.
-
-A count says how many; it does not say whether the call was right. Every class
-this page marks has a threshold somebody chose -- one text height for
-detachment, the capped arc for a corner, out-of-machine transitions exempt from
-containment -- so the numbers are only as good as those choices, and only a
-reader can check them (11.9.3, 11.12).
-
-The marks are injected into the SVG in its own grid units rather than overlaid
-in CSS, so a mark cannot drift from the thing it is about.
+"""The shipped drawing of every chart, with each audit finding marked on it in the
+SVG's own grid units.
 
   tools/review.py                     the corpus, the shipped pick
-  tools/review.py --portfolio-row 5   one row of 11.10's table instead
+  tools/review.py --portfolio-row 5   one portfolio row instead of the pick
   tools/review.py --gauntlet
   tools/review.py --out FILE
 """
@@ -45,24 +37,18 @@ VIEWBOX = re.compile(r'viewBox="(-?[\d.]+) (-?[\d.]+) ([\d.]+) ([\d.]+)"')
 
 
 def annotate(svg, marks):
-    """The findings as SVG, in the document's own units, before `</svg>`.
-
-    Grouped by location and badged with an index rather than tagged in place:
-    one label routinely fires three classes at once, and three captions on one
-    rect is three captions nobody can read. The detail goes in a table beside
-    the drawing, keyed by the badge.
+    """Inserts one dashed rect and numbered badge per distinct finding rect before
+    `</svg>`; returns the SVG and the (rect, hits) groups the badges number.
     """
     box = VIEWBOX.search(svg)
     if not box:
         return svg, []
-    # Stroke and type scaled to the drawing, so a 2k chart's marks are legible
-    # at the same zoom as a small one's.
+    # Stroke and type sizes scale with the drawing's extent.
     span = max(float(box.group(3)), float(box.group(4)))
     stroke = max(int(span / 500), 2)
     badge = max(int(span / 55), 7)
 
-    # One entry per distinct rect, in the order the audit found them, so a
-    # badge's number is stable for a given drawing.
+    # One group per distinct rect, in audit order.
     groups = []
     seen = {}
     for kind, rect, detail in marks:
@@ -80,8 +66,7 @@ def annotate(svg, marks):
             f'<rect x="{x - pad}" y="{y - pad}" width="{w + 2 * pad}" '
             f'height="{h + 2 * pad}" fill="none" stroke="{colour}" '
             f'stroke-width="{stroke}" stroke-dasharray="{stroke * 3},{stroke * 2}"/>')
-        # Outside the rect's top-left corner, so the badge never sits on the
-        # text the finding is about.
+        # The badge sits outside the rect's top-left corner.
         cx, cy = x - pad - badge, y - pad - badge
         out.append(f'<circle cx="{cx}" cy="{cy}" r="{badge}" fill="{colour}"/>')
         out.append(

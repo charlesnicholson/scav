@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
-"""Why a route came out the way it did, read off the decision trace (11.16).
-
-`scav dump --layout --trace` prints every decision the run made. This reads the
-JSON back and answers the question the trace exists for: for one transition,
-which choices in which phase produced the polyline that shipped.
+"""Runs `scav dump --layout --trace` on a chart and prints the decisions behind each
+transition's route.
 
   tools/trace.py estop.scav               every transition, one line each
   tools/trace.py estop.scav --trans 3     the decision chain for one of them
@@ -33,20 +30,17 @@ def find_scav(explicit=None):
 
 
 def run(scav, chart, row):
-    """The trace and the model beside it: the trace names ids, and the names
-    they stand for are the dump's."""
+    """Runs `scav dump --json --layout --trace`; returns (trace, model dump)."""
     argv = [str(scav), "dump", "--json", "--layout", "--trace", str(chart)]
     if row is not None:
         argv[4:4] = ["--portfolio-row", str(row)]
     out = subprocess.run(argv, capture_output=True, text=True, check=True).stdout
-    # Two documents on one stream, the trace first: the array ends at the first
-    # line that is a bare bracket, which no line of the object dump is.
+    # The trace array comes first and ends at the first line that is a bare `]`.
     end = out.index("\n]\n") + 3
     return json.loads(out[:end]), json.loads(out[end:])
 
 
-# No filtering: `--trace` searches first and traces only the drawing that won,
-# so every event in the stream belongs to what shipped (11.16).
+# `--trace` traces only the winning drawing; every event belongs to it.
 def chain_for(events, trans, model):
     """Every event that bears on one transition, in the order it happened."""
     segs = set()

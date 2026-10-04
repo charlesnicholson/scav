@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Renders `scav dump --layout --json` as a standalone SVG-in-HTML page, for
-eyeballing layouts. Throwaway: superseded by `scav render` once that exists.
+"""Renders `scav dump --layout --json` as a standalone SVG-in-HTML page.
 
     python3 tools/scratch_viewer.py test_data/charts/vac.scav > /tmp/vac.html
 """
@@ -54,7 +53,7 @@ def render(doc: dict) -> str:
             f'stroke="#bbb" stroke-width="6" stroke-dasharray="24 18"/>'
         )
 
-    font = 130  # grid units; text is decoration here, not measurement
+    font = 130  # grid units
     for i, (x, y, w, h) in enumerate(g["state"]):
         if doc["states"][i]["live"] == 0:
             continue

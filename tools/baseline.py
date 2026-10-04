@@ -1,21 +1,8 @@
 #!/usr/bin/env python3
-"""The side-by-side harness: one chart through scav, PlantUML, and elkjs.
+"""Renders each chart with scav, PlantUML and elkjs into one side-by-side HTML table.
+SCAV_BASELINE=1 provisions PlantUML and elkjs via envy; each skip is reported.
 
-The likeliest way this project fails is producing layouts that score well on
-Cost and that readers find worse than the PlantUML output they already have.
-Nothing in a cost vector detects that, so the answer is to put the renderings
-next to each other and look.
-
-PlantUML is the incumbent, not a stand-in for one -- the `.puml` files this
-project replaces are rendered by exactly this binary. Its own state-diagram
-syntax carries composite states, concurrent regions and every pseudostate kind,
-so the translation below is mechanical rather than an interpretation. Point
-`--puml` at real `.puml` sources to take even that out of the comparison.
-
-It is a *tool*, not a test: the three engines come from envy, and it reports
-what it could not run rather than failing. Set SCAV_BASELINE to provision them.
-
-  SCAV_BASELINE=1 tools/baseline.py      every corpus chart, default build dir
+  SCAV_BASELINE=1 tools/baseline.py      every corpus chart, newest scav under out/
   tools/baseline.py --chart vac.scav     one of them, scav only
   tools/baseline.py --gauntlet           the element suite instead of the corpus
   tools/baseline.py --puml ~/charts      render real .puml where names match
@@ -34,13 +21,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CORPUS = REPO_ROOT / "test_data/charts"
-# One layout element per chart, held to reader-visible properties by
-# src/layout/gauntlet_tests.cpp. Those run with no space requests; rendering
-# them here is the same shapes on the measured-text scale.
+# Element-suite charts, one layout element each, also tested by gauntlet_tests.cpp.
+# Those tests use no space requests; these renders use measured text.
 GAUNTLET = CORPUS / "gauntlet"
 
-# Layout works in sixteenths of a point, and every other engine here is
-# unitless. Points keep the numbers small without changing any proportion.
+# Layout grid units per point; ELK leaf sizes are given in points.
 GRID_PER_PT = 16
 
 
@@ -62,12 +47,8 @@ def run(cmd: list[str], stdin: bytes | None = None) -> tuple[int, bytes, bytes]:
 
 
 def envy_product(name: str) -> Path | None:
-    """Where envy put one baseline tool, or None if it is not provisioned.
-
-    SCAV_BASELINE has to come from the caller rather than being set here: the
-    manifest hides these three behind it, and asking for one that is missing
-    provisions it. Setting it for the caller would make an unrelated test pull
-    a hundred megabytes of engines it never asked for.
+    """Path of one baseline tool from `envy product`, provisioning it if missing.
+    None when SCAV_BASELINE is unset or envy fails.
     """
     if not os.environ.get("SCAV_BASELINE"):
         return None
@@ -76,13 +57,13 @@ def envy_product(name: str) -> Path | None:
                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
     if p.returncode != 0:
         return None
-    # The resolver narrates to stderr, so stdout is the path and nothing else.
+    # envy prints only the path on stdout; its log goes to stderr.
     path = p.stdout.decode().strip()
     return Path(path) if path else None
 
 
 def chart_model(scav: Path, chart: Path) -> dict:
-    """The model plus measured geometry, which is what `--layout` adds."""
+    """The `scav dump --json --layout` output: the model plus measured geometry."""
     code, out, err = run([str(scav), "dump", "--json", "--layout", str(chart)])
     if code != 0:
         raise SystemExit(f"scav dump failed for {chart.name}: {err.decode()}")
@@ -90,12 +71,7 @@ def chart_model(scav: Path, chart: Path) -> dict:
 
 
 def lca_submachine(model: dict) -> "callable":
-    """A transition's innermost enclosing submachine, by ordinal.
-
-    Both back ends need it: PlantUML can only write a transition inside the
-    region that holds it, and ELK reports a hierarchy-crossing edge's
-    coordinates relative to the container the edge was declared on.
-    """
+    """Maps a transition to its innermost common enclosing submachine's ordinal."""
     states, subs = model["states"], model["submachines"]
 
     def chain(state: int) -> list[int]:
@@ -137,19 +113,8 @@ def puml_text(s: str) -> str:
 
 
 def to_puml(model: dict) -> tuple[str, list[str]]:
-    """The model as a PlantUML state diagram, plus what had to be degraded.
-
-    A composite state's regions are separated by `--`, which is PlantUML's own
-    spelling for concurrency, so the nesting survives the translation intact.
-
-    Each transition is written inside the innermost region holding both of its
-    endpoints. PlantUML resolves only a block's *first* region from outside the
-    block, so a transition inside a later region has to be written there -- and
-    an endpoint reachable only through a *later* region cannot be named at all.
-    Those anchor at the enclosing composite instead, which is what a PlantUML
-    author writes by hand, and each substitution is returned so the picture is
-    never passed off as a faithful one. Dropping the edge instead would leave a
-    gap that reads as a cleaner diagram than the tool can actually draw.
+    """The model as PlantUML text, and a note per endpoint inside a non-first region,
+    which is re-anchored at that region's composite.
     """
     states, subs = model["states"], model["submachines"]
     innermost = lca_submachine(model)
@@ -189,7 +154,7 @@ def to_puml(model: dict) -> tuple[str, list[str]]:
     for trans in model["transitions"]:
         if not trans["live"]:
             continue
-        # PlantUML has no internal arrow; its idiom is a description line.
+        # A non-external transition's label becomes a description line of its source.
         if trans["kind"] != "external":
             if trans["label"]:
                 described.setdefault(trans["src"], []).append(trans["label"])
@@ -207,8 +172,7 @@ def to_puml(model: dict) -> tuple[str, list[str]]:
         pad = "  " * depth
         row = states[index]
         stereo = STEREOTYPE.get(row["kind"], "")
-        # A synthesized pseudostate has no name, and PlantUML rejects an empty
-        # quoted one; declaring the alias bare is the same thing without a label.
+        # An unnamed state is declared by its bare alias `s<index>`.
         head = (f"{pad}state s{index}" if not row["name"]
                 else f'{pad}state "{puml_text(row["name"])}" as s{index}')
         if stereo:
@@ -248,11 +212,7 @@ def to_puml(model: dict) -> tuple[str, list[str]]:
 
 
 def puml_reason(svg: Path) -> str | None:
-    """PlantUML's complaint, read back out of the image it draws instead.
-
-    A rejected diagram still exits non-zero *and* writes an SVG, so the file's
-    presence proves nothing and the message is only in its text runs.
-    """
+    """PlantUML's error message: the last text run of the SVG it writes, or None."""
     if not svg.is_file():
         return None
     runs = re.findall(r"<text[^>]*>(.*?)</text>", svg.read_text(encoding="utf-8"), re.S)
@@ -262,15 +222,12 @@ def puml_reason(svg: Path) -> str | None:
 def render_puml(plantuml: Path | None, source: Path, out: Path) -> str | None:
     if plantuml is None:
         return "not provisioned; re-run with SCAV_BASELINE=1"
-    # `-Playout=smetana` pins the bundled engine: the native image will shell
-    # out to a graphviz on the host if one is configured, and that would make
-    # the comparison depend on what happens to be installed.
+    # `-Playout=smetana` selects PlantUML's bundled layout engine over a host graphviz.
     code, _, err = run([str(plantuml), "-tsvg", "-Playout=smetana",
                         "-o", str(out.parent.resolve()), str(source)])
     produced = out.parent / f"{source.stem}.svg"
     if code != 0:
         reason = puml_reason(produced)
-        # The error image is not a diagram; leaving it would read as one.
         produced.unlink(missing_ok=True)
         if reason:
             return reason
@@ -287,13 +244,8 @@ def render_puml(plantuml: Path | None, source: Path, out: Path) -> str | None:
 
 
 def to_elk(model: dict) -> dict:
-    """The model as an ELK graph, compound nodes for nesting.
-
-    Leaf extents come from scav's own measurement pass so both engines size
-    boxes from the same text; compound extents are left for ELK to compose,
-    which is the part being compared. ELK has no concurrent-region concept, so
-    a state's regions flatten into one child list -- the closest thing it can
-    express.
+    """The model as an ELK graph: nested compound nodes, leaf sizes in points from
+    scav's geometry, and a state's regions merged into one child list.
     """
     states, subs = model["states"], model["submachines"]
     measured = model["geometry"]["state"]
@@ -303,7 +255,7 @@ def to_elk(model: dict) -> dict:
     # Keyed by the state that owns the enclosing region, or None for the root.
     by_owner: dict[int | None, list[dict]] = {}
     for i, trans in enumerate(model["transitions"]):
-        # ELK has no internal kind, so an internal transition is an ordinary edge.
+        # Every live transition, of any kind, becomes an edge.
         if not trans["live"]:
             continue
         sub = innermost(trans)
@@ -341,18 +293,10 @@ def to_elk(model: dict) -> dict:
         "id": "root",
         "layoutOptions": {
             "elk.algorithm": "layered",
-            # SEPARATE_CHILDREN drops a hierarchy-crossing edge without a
-            # warning, and only ORTHOGONAL registers the hierarchical-port
-            # processors that route what is left. Neither is ELK's default.
+            # INCLUDE_CHILDREN lays out hierarchy-crossing edges; ORTHOGONAL routes them
+            # through hierarchical ports. Neither is ELK's default.
             "elk.hierarchyHandling": "INCLUDE_CHILDREN",
             "elk.edgeRouting": "ORTHOGONAL",
-            # Layered alone puts every chart here in a 6:1-to-8:1 ribbon and
-            # nothing available fixes it: `elk.aspectRatio` and
-            # `wrapping.strategy=SINGLE_EDGE` are byte-for-byte no-ops on this
-            # input, `MULTI_EDGE` reaches 3.59:1 on `mill` but leaves one edge
-            # per chart with empty `sections` on four of them, and
-            # `elk.direction=DOWN` overshoots to 0.27:1. A ribbon is a
-            # judgement a reader can make; a missing arrow is one they cannot.
         },
         "children": children,
         # The root's own, plus any container that never rendered.
@@ -361,9 +305,7 @@ def to_elk(model: dict) -> dict:
 
 
 ELK_DRIVER = """
-// Lays out one ELK graph and writes an SVG good enough to look at. elkjs owns
-// the layout; the rendering here is deliberately plain so the comparison is
-// about placement and routing.
+// Lays out one ELK graph with elkjs and writes a plain SVG of it.
 const fs = require('fs');
 const ELK = require(process.argv[2]);
 const elk = new ELK();
@@ -373,16 +315,14 @@ function esc(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// The extent is measured rather than taken from laid.width/height: those
-// describe the root graph, and an edge routed around a compound can leave it.
+// Extent over every drawn point, including edges routed outside the root graph.
 const box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
 function seen(x, y) {
   box.x0 = Math.min(box.x0, x); box.y0 = Math.min(box.y0, y);
   box.x1 = Math.max(box.x1, x); box.y1 = Math.max(box.y1, y);
 }
 
-// An edge ELK could not route comes back with an empty `sections`, and drawing
-// nothing for it would quietly improve the diagram.
+// Edges ELK returned with no sections; any makes the driver exit 2.
 let unrouted = 0;
 
 function draw(node, dx, dy, out) {
@@ -397,8 +337,7 @@ function draw(node, dx, dy, out) {
     }
     draw(child, x, y, out);
   }
-  // A hierarchy-crossing edge is reported in the frame of the container it was
-  // declared on, so edges walk with that container rather than with either end.
+  // Edges are drawn in the frame of the container they were declared on.
   for (const edge of node.edges || []) {
     if (!edge.sections || !edge.sections.length) { unrouted++; }
     for (const section of edge.sections || []) {
@@ -422,8 +361,7 @@ elk.layout(graph).then(laid => {
   const x = Math.floor(box.x0) - pad, y = Math.floor(box.y0) - pad;
   const w = Math.ceil(box.x1 - box.x0) + 2 * pad;
   const h = Math.ceil(box.y1 - box.y0) + 2 * pad;
-  // Both other engines draw arrowheads, and a reader judges direction from
-  // them; leaving them off would hand elkjs a handicap it did not earn.
+  // The arrowhead marker each polyline ends with.
   const defs = '<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"'
     + ' markerWidth="6" markerHeight="6" orient="auto-start-reverse">'
     + '<path d="M 0 0 L 10 5 L 0 10 z" fill="black"/></marker></defs>';
@@ -490,7 +428,7 @@ def main() -> int:
     for chart in charts:
         model = chart_model(scav, chart)
 
-        # A real .puml beats a translated one: nothing about the input is ours.
+        # An authored .puml with the chart's stem replaces the translation.
         original = (args.puml / f"{chart.stem}.puml") if args.puml else None
         if original is not None and original.is_file():
             source, origin = original, "authored"
@@ -535,11 +473,8 @@ def main() -> int:
 
     print(f"\nwrote {index}")
     for name, engine, why in skipped:
-        # Say what was not compared rather than leaving a gap that reads as
-        # agreement.
         print(f"  {name} {engine}: {why}")
-    # A rendered-but-degraded cell is not a skip, and saying so is what keeps
-    # the side-by-side from crediting the incumbent with a chart it cannot draw.
+    # Lists each endpoint the PlantUML translation re-anchored.
     for name, engine, what in notes:
         print(f"  {name} {engine}: {what}")
     return 0

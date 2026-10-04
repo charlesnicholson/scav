@@ -1,22 +1,6 @@
 #!/usr/bin/env python3
-"""Every candidate the portfolio can produce, rendered and audited.
-
-Level 2 writes the geometry of whichever row `Cost` ranks first, so the
-objective decides which drawings exist -- and it is the objective under
-calibration (11.10, 11.12). This renders every row of the table for every
-chart, audits each with the reader-visible counts tools/audit.py reports, and
-answers two questions the weights are not needed for:
-
-  the bound   per chart and per defect class, the fewest any row achieves
-  the regret  what the pick costs against that bound, class by class
-
-A bound the pick already meets says the search has no headroom left on that
-class and the defect belongs to a section rather than to a weight. A regret
-says the weights are choosing badly over candidates they already have.
-
-The bound is a floor and not a drawing: it takes each class's minimum
-independently, so no single row need achieve all of them at once. The
-best-single-row column beside it is the reachable one.
+"""Renders and audits every portfolio row of every chart and reports, per defect
+class, the bound (fewest any row achieves) and the regret (pick minus bound).
 
   tools/candidates.py                 the corpus, every row
   tools/candidates.py --rows 0,1,4
@@ -41,7 +25,9 @@ ROWS = 16
 
 
 def render(scav_bin, chart, out, row):
-    """One candidate's SVG. `row` of None is the pick, which is the search."""
+    """Renders one candidate to `out`; `row` None renders the search's pick.
+    Returns None on success, else the error text.
+    """
     cmd = [str(scav_bin), "render", "-o", str(out)]
     if row is not None:
         cmd += ["--portfolio-row", str(row)]
@@ -51,10 +37,8 @@ def render(scav_bin, chart, out, row):
 
 
 def counts(scav_bin, chart, svg, row, verbose=False):
-    """One candidate's audit counts, its cost vector, and its fingerprint.
-
-    All three come off the one dump the audit already needs, so the objective
-    that ranked a candidate travels beside the defects a reader sees in it.
+    """One candidate's audit counts, cost vector and fingerprint (live state boxes,
+    chart rect), all from one layout dump.
     """
     every, rect, doc = audit.geometry(chart, scav_bin, row)
     found, _, _ = audit.audit(svg.read_text(encoding="utf-8"), every, rect, doc,
@@ -80,10 +64,6 @@ def main():
     if scav_bin is None or not scav_bin.exists():
         print("no scav binary; build first", file=sys.stderr)
         return 1
-    # A binary predating the flag refuses every row and leaves a table of
-    # zeroes that reads like a clean audit, so the flag is probed rather than
-    # assumed. `find_scav` prefers the release build, which is the one a
-    # testable-only rebuild leaves behind.
     probe = subprocess.run([str(scav_bin), "render", "--portfolio-row", "0", "-o",
                             "/dev/null", str(audit.CORPUS / "estop.scav")],
                            capture_output=True, text=True, check=False)
@@ -115,8 +95,6 @@ def main():
             if why is not None:
                 failed.append((name, row, why))
                 continue
-            # The live state boxes and the canvas together, because two rows
-            # can come out at one extent while placing different states.
             per[(name, row)], cost[(name, row)], geom[(name, row)] = counts(
                 scav_bin, root / name, svg, at)
 
@@ -124,8 +102,8 @@ def main():
         print(f"{name} row {row}: {why}", file=sys.stderr)
 
     classes = DEFECTS
-    # Per chart, the fewest any row achieves; and the row that minimises the
-    # whole vector's sum, which is a drawing rather than a floor.
+    # Per class over charts: `bound` sums each chart's fewest, `pick` the pick's.
+    # Per chart: `best_row` has fewest defects; `picked_row` matches the pick, or None.
     bound = {k: 0 for k in classes}
     pick = {k: 0 for k in classes}
     best_row = {}
@@ -169,17 +147,15 @@ def main():
         print(f"{k:<42}{cells}{bound[k]:>8}{pick[k]:>7}"
               f"{pick[k] - bound[k]:>8}")
     print()
-    # The reachable column: one row per chart, chosen by its own defect sum, so
-    # it is a set of drawings rather than a floor no candidate meets.
+    # Defect sum of each chart's best single row, totalled.
     reachable = sum(sum(per[(n, best_row[n])].get(k, 0) for k in classes)
                     for n in names if n in best_row)
     shipped = sum(pick[k] for k in classes)
     print(f"{'defects, all classes':<42}{'bound':>8}{'reachable':>11}{'pick':>7}")
     print(f"{'':<42}{sum(bound.values()):>8}{reachable:>11}{shipped:>7}")
     print()
-    # What the weights are being asked: of the rows this chart ran, does the one
-    # `t2` ranks first also read best? Where it does not, the exchange rate
-    # between two terms is wrong and no amount of search reaches past it (11.6).
+    # Per chart, each row's t2 and defect sum with both ranks; marks the t2-first row
+    # and the fewest-defects row when they differ.
     print(f"{'chart':<18}{'row':>4}{'t2':>13}{'defects':>9}{'':>3}"
           f"{'t2 rank':>8}{'defect rank':>12}")
     for name in names:
@@ -240,11 +216,7 @@ audit's count over every class it knows.</p>
 
 
 def write_poster(where, out, names, per, cost, geom, classes, picked_row, rows):
-    """The page the fit is judged on: the pick beside the candidate it lost to.
-
-    A cost vector cannot see what this shows, which is the whole reason 11.12
-    keeps a page in the loop rather than a golden.
-    """
+    """Writes `out` pairing each chart's lowest-`t2` row with its fewest-defect row."""
     def defects(name, row):
         return sum(per[(name, row)].get(k, 0) for k in classes)
 
@@ -280,8 +252,7 @@ def write_poster(where, out, names, per, cost, geom, classes, picked_row, rows):
     return out
 
 
-# The audit's defect classes, which are the keys it prints a ratio for. The
-# denominators it counts beside them are not defects and have no floor.
+# The audit's defect classes: the keys it prints as a ratio over a count.
 DEFECTS = [
     "segment not axis-aligned", "segment flush along a box",
     "route start not on any border", "arrowhead not on any border",
@@ -290,8 +261,6 @@ DEFECTS = [
     "label over a state box", "label over another route",
     "a foreign line inside a label's leader", "texts overprint each other",
     "mark outside its glyph",
-    # The classes P9d's review added, each one an absolute the objective was
-    # blind to rather than a preference it priced badly.
     "attachment on a drawn corner", "label not anchored to its own polyline",
     "label sliced by its own route", "label sliced by a region divider",
     "lanes closer than one line of text",
