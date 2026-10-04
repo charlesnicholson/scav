@@ -110,6 +110,7 @@
       "retrace": 0,
       "label_over_box": 0,
       "label_over_route": 0,
+      "label_far": 0,
       "bends": 4,
       "corridor": 0,
       "crossings": 0,

@@ -1671,6 +1671,59 @@ TEST_CASE("gauntlet: an external self-loop leaves its state and returns to it ou
   }
 }
 
+TEST_CASE("gauntlet: an inner or outer loop's label lies within a leader of its route") {
+  // Boxes sized like real text: 0.55 em a character plus `pad` wide, one line tall.
+  struct Loops {
+    char const *name;
+    uint32_t inner, outer;
+  };
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    for (Loops const &want : { Loops{ .name = "inloop.scav", .inner = 4, .outer = 0 },
+                               Loops{ .name = "loop.scav", .inner = 1, .outer = 1 } }) {
+      CAPTURE(want.name);
+      Chart const probe{ loaded(want.name) };
+      std::vector<scav_path_box> boxes;
+      for (uint32_t t = 0; t < probe.transitions.size(); ++t) {
+        int32_t const chars{ static_cast<int32_t>(probe.transitions[t].label.len) };
+        if (chars == 0) { continue; }
+        boxes.push_back({ .subject = t,
+                          .w = ((chars * p.font_size_grid * 11) / 20) + p.pad,
+                          .h = label_line_height(p),
+                          .order = 0 });
+      }
+      scav_spaces const s{ .path_box = boxes.data(),
+                           .n_path_box = static_cast<uint32_t>(boxes.size()),
+                           .path_box_stride =
+                               static_cast<uint32_t>(sizeof(scav_path_box)) };
+      Laid l;
+      lay(want.name, p, l, s, nullptr);
+      REQUIRE(l.r.placed.size() == boxes.size());
+      uint32_t inner{ 0 };
+      uint32_t outer{ 0 };
+      for (uint32_t i = 0; i < boxes.size(); ++i) {
+        uint32_t const t{ boxes[i].subject };
+        if (l.c.transitions[t].src != l.c.transitions[t].dst) { continue; }
+        CAPTURE(t);
+        ++(inner_loop(l.c, t) ? inner : outer);
+        scav_span const route{ l.r.route[t] };
+        REQUIRE(route.len >= 2);
+        Wide gap{ -1 };
+        for (uint32_t k = 0; (k + 1) < route.len; ++k) {
+          Wide const away{ chebyshev_gap(
+              l.r.placed[i],
+              span_rect(l.r.points[route.off + k], l.r.points[route.off + k + 1])) };
+          gap = (gap < 0) ? away : imin(gap, away);
+        }
+        CHECK(gap <= label_leader(p));
+      }
+      CHECK(inner == want.inner);
+      CHECK(outer == want.outer);
+      CHECK(cost_terms(l.c, l.g, l.z, l.r, s, p).label_far == 0);
+    }
+  }
+}
+
 TEST_CASE("gauntlet: crossings into decorated composites keep clear of every band") {
   // Headers everywhere and footers on composites: ports take side faces, nothing enters
   // a band, and an internal transition into a composite's depth starts on its border.

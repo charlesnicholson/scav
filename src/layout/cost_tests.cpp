@@ -762,9 +762,9 @@ TEST_CASE("cost: a placed box over a state neither endpoint is under breaks Tier
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 100 };
   z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 100 };
-  z.state[other.v] = { .x = 200, .y = -200, .w = 100, .h = 100 };
+  z.state[other.v] = { .x = 200, .y = -150, .w = 100, .h = 100 };
   Routes r{ routes_of(c, { { { .x = 100, .y = 50 }, { .x = 400, .y = 50 } } }) };
-  r.placed = { { .x = 200, .y = -190, .w = 60, .h = 20 } };
+  r.placed = { { .x = 200, .y = -60, .w = 60, .h = 20 } };  // 90 above its route
   scav_path_box const box{ .subject = 0, .w = 60, .h = 20, .order = 0 };
   scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
   CostTerms const over{ cost_terms(c, decompose(c), z, r, s, profile()) };
@@ -906,6 +906,41 @@ TEST_CASE("cost: a box nearer a foreign route than its own is charged the shortf
   CHECK(cost_terms(c, decompose(c), z, strip1, s, profile()).label_near == 20);
 }
 
+TEST_CASE("cost: a placed box past the leader from its own route breaks Tier 0") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+
+  SizedLayout z{ blank(c) };
+  z.state[a.v] = { .x = 0, .y = 300, .w = 100, .h = 100 };
+  z.state[b.v] = { .x = 400, .y = 300, .w = 100, .h = 100 };
+  Routes r{ routes_of(c, { { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } } }) };
+  scav_path_box const box{ .subject = 0, .w = 60, .h = 20, .order = 0 };
+  scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
+  int32_t const leader{ label_leader(profile()) };
+  auto const scored = [&](scav_rect at) {
+    r.placed = { at };
+    return cost_terms(c, decompose(c), z, r, s, profile());
+  };
+  auto const above = [](int32_t gap) {  // `gap` above the route
+    return scav_rect{ .x = 200, .y = 130 - gap, .w = 60, .h = 20 };
+  };
+
+  CHECK(scored(above(leader - 1)).label_far == 0);
+  CHECK(scored(above(leader)).label_far == 0);
+  CostTerms const far{ scored(above(leader + 1)) };
+  CHECK(far.label_far == 1);
+  CHECK(cost_of(far, profile()).t0_violations == 1);
+  // Past the route's end, and diagonal off it: the gap is Chebyshev.
+  CHECK(scored({ .x = 401 + leader, .y = 140, .w = 60, .h = 20 }).label_far == 1);
+  CHECK(scored({ .x = 400 + leader, .y = 130 - leader, .w = 60, .h = 20 }).label_far == 0);
+  // An unnamed box owns no route and counts 0.
+  r.placed = { above(10 * leader) };
+  CHECK(cost_terms(c, decompose(c), z, r, {}, profile()).label_far == 0);
+}
+
 TEST_CASE("cost: with no other route to be near, no box is charged") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
@@ -967,6 +1002,9 @@ TEST_CASE("cost: a box whose own transition has no route is charged nothing") {
   CostTerms const t{ cost_terms(c, decompose(c), z, r, s, profile()) };
   CHECK(t.label_near == 0);
   CHECK(t.label == 0);
+
+  r.placed = { { .x = 200, .y = -2000, .w = 60, .h = 20 } };  // far from every route
+  CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label_far == 0);
 }
 
 TEST_CASE("cost: two placed boxes over each other are one label cost") {
@@ -2418,6 +2456,7 @@ CostTerms terms(Chart const &c,
       other = (other < 0) ? away : imin(other, away);
       if (overlaps(r.placed[i], seg)) { ++t.label_over_route; }
     }
+    if (own > label_leader(p)) { ++t.label_far; }
     if ((own >= 0) && (other >= 0)) {
       Wide const shortfall{ (own + height) - other };
       if (shortfall > 0) { t.label_near += shortfall; }
@@ -2457,19 +2496,20 @@ CostTerms terms(Chart const &c,
 
 }  // namespace reference
 
-constexpr uint32_t TERMS{ 18 };
+constexpr uint32_t TERMS{ 19 };
 
 std::array<int64_t, TERMS> terms_of(CostTerms const &t) {
-  return { t.bends,    t.corridor,      t.crossings,     t.excess_len,  t.adjacency,
-           t.label,    t.label_near,    t.aspect,        t.area,        t.crowding,
-           t.length,   t.transit_bends, t.whitespace,    t.through_box, t.box_overlap,
-           t.vanished, t.flush,         t.through_region };
+  return { t.bends,    t.corridor,      t.crossings,      t.excess_len,  t.adjacency,
+           t.label,    t.label_near,    t.aspect,         t.area,        t.crowding,
+           t.length,   t.transit_bends, t.whitespace,     t.through_box, t.box_overlap,
+           t.vanished, t.flush,         t.through_region, t.label_far };
 }
 
 constexpr std::array<char const *, TERMS> TERM_NAMES{
-  "bends",      "corridor",    "crossings",   "excess_len", "adjacency", "label",
-  "label_near", "aspect",      "area",        "crowding",   "length",    "transit_bends",
-  "whitespace", "through_box", "box_overlap", "vanished",   "flush",     "through_region"
+  "bends",    "corridor",      "crossings",      "excess_len",  "adjacency",
+  "label",    "label_near",    "aspect",         "area",        "crowding",
+  "length",   "transit_bends", "whitespace",     "through_box", "box_overlap",
+  "vanished", "flush",         "through_region", "label_far"
 };
 
 // The first term the two disagree on, or empty.

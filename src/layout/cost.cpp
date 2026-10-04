@@ -715,7 +715,8 @@ Scratch &scratch() {
 
 int32_t tier0_of(CostTerms const &t) {
   return t.through_box + t.through_band + t.box_overlap + t.vanished + t.flush +
-         t.through_region + t.retrace + t.label_over_box + t.label_over_route;
+         t.through_region + t.retrace + t.label_over_box + t.label_over_route +
+         t.label_far;
 }
 
 }  // namespace
@@ -1087,6 +1088,10 @@ CostTerms cost_terms(CostContext const &ctx,
           Wide const away{ chebyshev_gap(box, seg_box[j]) };
           own = (own < 0) ? away : imin(own, away);
         }
+      }
+      if (own > label_leader(p)) {
+        ++t.label_far;
+        blame(party, subject, INVALID);
       }
       // Search margin `own + height - 1`, the farthest a foreign leg still adds to
       // `label_near`; 0 with no own leg.

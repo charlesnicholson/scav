@@ -236,6 +236,9 @@ struct CostTerms {
   int32_t label_over_box{ 0 };
   // Per placed box, each segment of another transition's route it overlaps.
   int32_t label_over_route{ 0 };
+  // Placed boxes whose Chebyshev gap to their own transition's route exceeds
+  // `label_leader`.
+  int32_t label_far{ 0 };
 };
 
 // Compared lexicographically, in this order.
