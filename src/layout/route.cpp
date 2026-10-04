@@ -245,23 +245,9 @@ Routes route_transitions(Chart const &c,
                          RouteCache const *reuse,
                          RouteCache *fill,
                          SearchPins const *pins,
-                         Routes const *was,
                          bool labels) {
   Routes out;
-  route_transitions(out,
-                    c,
-                    g,
-                    o,
-                    z,
-                    s,
-                    p,
-                    router,
-                    threads,
-                    reuse,
-                    fill,
-                    pins,
-                    was,
-                    labels);
+  route_transitions(out, c, g, o, z, s, p, router, threads, reuse, fill, pins, labels);
   return out;
 }
 
@@ -277,12 +263,10 @@ void route_transitions(Routes &out,
                        RouteCache const *reuse,
                        RouteCache *fill,
                        SearchPins const *pins,
-                       Routes const *was,
                        bool labels) {
   out.points.clear();
   out.slots.clear();
   out.placed.clear();
-  out.settled.clear();
   out.outside_region = 0;
   out.unreachable = 0;
   out.too_large = 0;
@@ -904,7 +888,7 @@ void route_transitions(Routes &out,
                 (s.path_clear != nullptr) ? s.n_path_clear : 0);
   }
 
-  if (labels) { label_routes(out, c, z, s, p, was); }
+  if (labels) { label_routes(out, c, z, s, p); }
   vec_push_back(stack, std::move(cs));
 }
 
@@ -912,21 +896,8 @@ void label_routes(Routes &out,
                   Chart const &c,
                   SizedLayout const &z,
                   scav_spaces const &s,
-                  scav_profile const &p,
-                  Routes const *was) {
-  LabelBase const base{ .route = (was != nullptr) ? &was->route : nullptr,
-                        .points = (was != nullptr) ? &was->points : nullptr,
-                        .placed = (was != nullptr) ? &was->placed : nullptr,
-                        .settled = (was != nullptr) ? &was->settled : nullptr };
-  out.unplaced = place_labels(c,
-                              z,
-                              s,
-                              out.route,
-                              out.points,
-                              p,
-                              out.placed,
-                              out.settled,
-                              (was != nullptr) ? &base : nullptr);
+                  scav_profile const &p) {
+  out.unplaced = place_labels(c, z, s, out.route, out.points, p, out.placed);
 }
 
 }  // namespace scav

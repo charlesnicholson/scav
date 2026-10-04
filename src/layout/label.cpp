@@ -36,15 +36,7 @@ uint32_t place_labels_by(Chart const &c,
                          std::vector<scav_rect> &out);
 SCAV_INTERNAL_END
 
-#ifdef SCAV_TESTING
-uint64_t label_test_kept();
-#endif
-
 namespace {
-
-#ifdef SCAV_TESTING
-thread_local uint64_t test_kept{ 0 };  // boxes this thread kept from a base
-#endif
 
 // A submachine whose owner holds another live one beside it, so a divider runs
 // between them.
@@ -823,8 +815,8 @@ Outcome remembered(Local const &l, Scratch &s) {
 
 // What one placement builds and discards, per thread: nothing inside waits on the pool.
 struct CallBuffers {
-  std::vector<uint8_t> moved, encloses;
-  std::vector<scav_rect> dirty, pieces;
+  std::vector<uint8_t> encloses;
+  std::vector<scav_rect> pieces;
   std::vector<Pieces> by_route;
   std::vector<uint32_t> live, queue, merge, settled;
   std::vector<scav_extent> loop_label, loop_room;
@@ -836,54 +828,22 @@ CallBuffers &call_buffers() {
   return b;
 }
 
-uint32_t place_labels_from(Chart const &c,
-                           SizedLayout const &z,
-                           scav_spaces const &s,
-                           std::vector<scav_span> const &route,
-                           std::vector<scav_point> const &points,
-                           scav_profile const &p,
-                           LabelSearch search,
-                           std::vector<scav_rect> &out,
-                           std::vector<LabelSettle> &how,
-                           LabelBase const *was) {
+}  // namespace
+
+SCAV_INTERNAL_BEGIN
+
+uint32_t place_labels_by(Chart const &c,
+                         SizedLayout const &z,
+                         scav_spaces const &s,
+                         std::vector<scav_span> const &route,
+                         std::vector<scav_point> const &points,
+                         scav_profile const &p,
+                         LabelSearch search,
+                         std::vector<scav_rect> &out) {
   vec_assign(out, s.n_path_box, {});
-  vec_assign(how, s.n_path_box, {});
   if ((s.path_box == nullptr) || (s.n_path_box == 0)) { return 0; }
 
-  // Against a base, the routes that moved and the rects a kept box's region must miss: a
-  // moved route's old and new legs, then each resettled box's old and new place.
-  bool const based{ (was != nullptr) && (was->route != nullptr) &&
-                    (was->points != nullptr) && (was->placed != nullptr) &&
-                    (was->settled != nullptr) && (was->route->size() == route.size()) &&
-                    (was->placed->size() == s.n_path_box) &&
-                    (was->settled->size() == s.n_path_box) };
   CallBuffers &cb{ call_buffers() };
-  std::vector<uint8_t> &moved{ cb.moved };
-  moved.clear();
-  std::vector<scav_rect> &dirty{ cb.dirty };
-  dirty.clear();
-  if (based) {
-    vec_assign(moved, route.size(), 0);
-    for (uint32_t t = 0; t < route.size(); ++t) {
-      scav_span const now{ route[t] };
-      scav_span const had{ (*was->route)[t] };
-      bool kept{ now.len == had.len };
-      for (uint32_t k = 0; kept && (k < now.len); ++k) {
-        kept = same(points[now.off + k], (*was->points)[had.off + k]);
-      }
-      if (kept) { continue; }
-      moved[t] = 1;
-      for (uint32_t k = 0; (k + 1) < had.len; ++k) {
-        vec_push_back(
-            dirty,
-            span_rect((*was->points)[had.off + k], (*was->points)[had.off + k + 1]));
-      }
-      for (uint32_t k = 0; (k + 1) < now.len; ++k) {
-        vec_push_back(dirty, span_rect(points[now.off + k], points[now.off + k + 1]));
-      }
-    }
-  }
-
   std::vector<scav_rect> &pieces{ cb.pieces };
   pieces.clear();
   std::vector<Pieces> &by_route{ cb.by_route };
@@ -946,7 +906,6 @@ uint32_t place_labels_from(Chart const &c,
   uint32_t prior_seg{ 0 };
   int32_t prior_mid{ 0 };
   bool chained{ false };
-  bool chain_kept{ true };  // every earlier box of this transition settled as in the base
   int32_t const leader{ label_leader(p) };
   bool const relative{ search != LabelSearch::Exhaustive };
   loop_rooms(c, s, p, cb.loop_label, cb.loop_room);
@@ -960,7 +919,6 @@ uint32_t place_labels_from(Chart const &c,
     if (box.subject != prior_subject) {
       prior_subject = box.subject;
       chained = false;
-      chain_kept = true;
       if (looped && (r.len >= 3)) {
         Wide const mid{ (Wide{ points[r.off + 1].y } + points[r.off + 2].y) / 2 };
         loop_y = static_cast<int32_t>(mid - (cb.loop_label[box.subject].h / 2));
@@ -974,13 +932,11 @@ uint32_t place_labels_from(Chart const &c,
                  .y = loop_y,
                  .w = box.w,
                  .h = box.h };
-      how[i] = { .seg = 1, .mid = 0, .found = 1 };
       loop_y += box.h;
       vec_push_back(settled, i);
       continue;
     }
     Outcome got{};
-    bool kept{ false };
     CommonAncestor const lca{ (box.subject < c.transitions.size())
                                   ? lowest_common_ancestor(c,
                                                            c.transitions[box.subject].src,
@@ -1013,106 +969,87 @@ uint32_t place_labels_from(Chart const &c,
                               .y = local_region.y + origin.y,
                               .w = local_region.w,
                               .h = local_region.h };
-      kept =
-          based && chain_kept && (box.subject < moved.size()) && (moved[box.subject] == 0);
-      for (uint32_t k = 0; kept && (k < dirty.size()); ++k) {
-        kept = !overlaps(region, dirty[k]);
+      // Ends in two regions of one state share no submachine; that state holds them.
+      StateId const within{ (lca.frame.v != INVALID) ? c.submachines[lca.frame.v].owner
+                                                     : enclosing_state(c, lca.child[0]) };
+      mark(within, 1);
+      // A label inside a composite is bounded by it: the intersection of every state
+      // enclosing both endpoints.
+      scav_rect holder{ z.chart };
+      for (uint32_t const st : live) {
+        if (encloses[st] != 0) { holder = intersection(holder, z.state[st]); }
       }
-      if (kept) {
-#ifdef SCAV_TESTING
-        ++test_kept;
-#endif
-        LabelSettle const &had{ (*was->settled)[i] };
-        got = { .found = had.found != 0,
-                .at = (*was->placed)[i],
-                .seg = had.seg,
-                .mid = had.mid };
-      } else {
-        // Ends in two regions of one state share no submachine; that state holds them.
-        StateId const within{ (lca.frame.v != INVALID)
-                                  ? c.submachines[lca.frame.v].owner
-                                  : enclosing_state(c, lca.child[0]) };
-        mark(within, 1);
-        // A label inside a composite is bounded by it: the intersection of every state
-        // enclosing both endpoints.
-        scav_rect holder{ z.chart };
-        for (uint32_t const st : live) {
-          if (encloses[st] != 0) { holder = intersection(holder, z.state[st]); }
-        }
-        // And by the region both endpoints lie in, where its state holds another region.
-        if ((lca.frame.v < c.submachines.size()) && shared_region(c, lca.frame)) {
-          holder = intersection(holder, z.sub[lca.frame.v]);
-        }
-        // A box of positive extent lies strictly inside the region, so clipping a rect to
-        // the region changes no test on it.
-        bool const clip{ relative && (box.w > 0) && (box.h > 0) };
-        auto const local_rect = [&](scav_rect const &at) {
-          scav_rect const shifted{ relative_to(at, origin) };
-          return clip ? intersection(shifted, local_region) : shifted;
-        };
-        l.holder = relative_to(holder, origin);
-        if (clip) {
-          // Unclamped, so a holder the region misses still refuses every candidate.
-          int32_t const x0{ imax(l.holder.x, local_region.x) };
-          int32_t const y0{ imax(l.holder.y, local_region.y) };
-          int32_t const x1{ imin(l.holder.x + l.holder.w,
-                                 local_region.x + local_region.w) };
-          int32_t const y1{ imin(l.holder.y + l.holder.h,
-                                 local_region.y + local_region.h) };
-          l.holder = { .x = x0, .y = y0, .w = x1 - x0, .h = y1 - y0 };
-        }
+      // And by the region both endpoints lie in, where its state holds another region.
+      if ((lca.frame.v < c.submachines.size()) && shared_region(c, lca.frame)) {
+        holder = intersection(holder, z.sub[lca.frame.v]);
+      }
+      // A box of positive extent lies strictly inside the region, so clipping a rect to
+      // the region changes no test on it.
+      bool const clip{ relative && (box.w > 0) && (box.h > 0) };
+      auto const local_rect = [&](scav_rect const &at) {
+        scav_rect const shifted{ relative_to(at, origin) };
+        return clip ? intersection(shifted, local_region) : shifted;
+      };
+      l.holder = relative_to(holder, origin);
+      if (clip) {
+        // Unclamped, so a holder the region misses still refuses every candidate.
+        int32_t const x0{ imax(l.holder.x, local_region.x) };
+        int32_t const y0{ imax(l.holder.y, local_region.y) };
+        int32_t const x1{ imin(l.holder.x + l.holder.w, local_region.x + local_region.w) };
+        int32_t const y1{ imin(l.holder.y + l.holder.h, local_region.y + local_region.h) };
+        l.holder = { .x = x0, .y = y0, .w = x1 - x0, .h = y1 - y0 };
+      }
 
-        l.walls.clear();
-        for (uint32_t const st : live) {
-          // A state enclosing both endpoints holds the label legitimately; the
-          // bands it reserved for its own text do not.
-          if (encloses[st] != 0) {
-            for (scav_rect const &band : state_walls(z, st)) {
-              if ((band.w > 0) && (band.h > 0) && overlaps(region, band)) {
-                vec_push_back(l.walls, local_rect(band));
-              }
-            }
-          } else if (overlaps(region, z.state[st])) {
-            vec_push_back(l.walls, local_rect(z.state[st]));
-          }
-        }
-        for (uint32_t const j : settled) {
-          if (overlaps(region, out[j])) { vec_push_back(l.walls, local_rect(out[j])); }
-        }
-        l.foreign.clear();
-        for (uint32_t t = 0; t < by_route.size(); ++t) {
-          Pieces const &of{ by_route[t] };
-          if ((t == box.subject) || (of.count == 0) || !overlaps(region, of.bounds)) {
-            continue;
-          }
-          for (uint32_t k = of.first; k < (of.first + of.count); ++k) {
-            if (overlaps(region, pieces[k])) {
-              vec_push_back(l.foreign, local_rect(pieces[k]));
+      l.walls.clear();
+      for (uint32_t const st : live) {
+        // A state enclosing both endpoints holds the label legitimately; the
+        // bands it reserved for its own text do not.
+        if (encloses[st] != 0) {
+          for (scav_rect const &band : state_walls(z, st)) {
+            if ((band.w > 0) && (band.h > 0) && overlaps(region, band)) {
+              vec_push_back(l.walls, local_rect(band));
             }
           }
+        } else if (overlaps(region, z.state[st])) {
+          vec_push_back(l.walls, local_rect(z.state[st]));
         }
-        mark(within, 0);
-        l.below.clear();
-        if (lca.frame.v != INVALID) {
-          for (uint32_t k = 0; k < lca.child.size(); ++k) {
-            StateId const st{ lca.child[k] };
-            if ((st.v == INVALID) || ((k == 1) && (st == lca.child[0]))) { continue; }
-            if (overlaps(region, z.state[st.v])) {
-              vec_push_back(l.below, local_rect(z.state[st.v]));
-            }
+      }
+      for (uint32_t const j : settled) {
+        if (overlaps(region, out[j])) { vec_push_back(l.walls, local_rect(out[j])); }
+      }
+      l.foreign.clear();
+      for (uint32_t t = 0; t < by_route.size(); ++t) {
+        Pieces const &of{ by_route[t] };
+        if ((t == box.subject) || (of.count == 0) || !overlaps(region, of.bounds)) {
+          continue;
+        }
+        for (uint32_t k = of.first; k < (of.first + of.count); ++k) {
+          if (overlaps(region, pieces[k])) {
+            vec_push_back(l.foreign, local_rect(pieces[k]));
           }
         }
+      }
+      mark(within, 0);
+      l.below.clear();
+      if (lca.frame.v != INVALID) {
+        for (uint32_t k = 0; k < lca.child.size(); ++k) {
+          StateId const st{ lca.child[k] };
+          if ((st.v == INVALID) || ((k == 1) && (st == lca.child[0]))) { continue; }
+          if (overlaps(region, z.state[st.v])) {
+            vec_push_back(l.below, local_rect(z.state[st.v]));
+          }
+        }
+      }
 
-        switch (search) {
-          case LabelSearch::Exhaustive: got = exhaustive(l, scratch); break;
-          case LabelSearch::Pruned: got = pruned(l, scratch); break;
-          case LabelSearch::Memoized: got = remembered(l, scratch); break;
-        }
-        if (got.found) {
-          got.at.x += origin.x;
-          got.at.y += origin.y;
-          got.mid += along(points, r, got.seg, origin);
-        }
+      switch (search) {
+        case LabelSearch::Exhaustive: got = exhaustive(l, scratch); break;
+        case LabelSearch::Pruned: got = pruned(l, scratch); break;
+        case LabelSearch::Memoized: got = remembered(l, scratch); break;
+      }
+      if (got.found) {
+        got.at.x += origin.x;
+        got.at.y += origin.y;
+        got.mid += along(points, r, got.seg, origin);
       }
     }
 
@@ -1121,47 +1058,13 @@ uint32_t place_labels_from(Chart const &c,
       prior_mid = got.mid;
       chained = true;
       out[i] = got.at;
-      how[i] = { .seg = got.seg, .mid = got.mid, .found = 1 };
     } else {
       ++fallbacks;
       out[i] = centred(anchor_of(points, anchored), box, z.chart);
     }
-    if (based && !kept) {
-      LabelSettle const &had{ (*was->settled)[i] };
-      scav_rect const &was_at{ (*was->placed)[i] };
-      bool const same_box{ (how[i].found == had.found) && (how[i].seg == had.seg) &&
-                           (how[i].mid == had.mid) && (out[i].x == was_at.x) &&
-                           (out[i].y == was_at.y) && (out[i].w == was_at.w) &&
-                           (out[i].h == was_at.h) };
-      if (!same_box) {
-        vec_push_back(dirty, was_at);
-        vec_push_back(dirty, out[i]);
-        chain_kept = false;
-      }
-    }
     vec_push_back(settled, i);
   }
   return fallbacks;
-}
-
-}  // namespace
-
-#ifdef SCAV_TESTING
-uint64_t label_test_kept() { return test_kept; }
-#endif
-
-SCAV_INTERNAL_BEGIN
-
-uint32_t place_labels_by(Chart const &c,
-                         SizedLayout const &z,
-                         scav_spaces const &s,
-                         std::vector<scav_span> const &route,
-                         std::vector<scav_point> const &points,
-                         scav_profile const &p,
-                         LabelSearch search,
-                         std::vector<scav_rect> &out) {
-  std::vector<LabelSettle> how;
-  return place_labels_from(c, z, s, route, points, p, search, out, how, nullptr);
 }
 
 SCAV_INTERNAL_END
@@ -1174,27 +1077,6 @@ uint32_t place_labels(Chart const &c,
                       scav_profile const &p,
                       std::vector<scav_rect> &out) {
   return place_labels_by(c, z, s, route, points, p, LabelSearch::Memoized, out);
-}
-
-uint32_t place_labels(Chart const &c,
-                      SizedLayout const &z,
-                      scav_spaces const &s,
-                      std::vector<scav_span> const &route,
-                      std::vector<scav_point> const &points,
-                      scav_profile const &p,
-                      std::vector<scav_rect> &out,
-                      std::vector<LabelSettle> &how,
-                      LabelBase const *was) {
-  return place_labels_from(c,
-                           z,
-                           s,
-                           route,
-                           points,
-                           p,
-                           LabelSearch::Memoized,
-                           out,
-                           how,
-                           was);
 }
 
 }  // namespace scav

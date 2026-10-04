@@ -24,7 +24,6 @@ struct Routes {
   std::vector<scav_port_slot> slots;
   std::vector<scav_span> route, port;  // parallel to transitions
   std::vector<scav_rect> placed;       // parallel to the path boxes
-  std::vector<LabelSettle> settled;    // parallel to `placed`
 
   // Nets the router fell back on, by cause. A fallback is a straight line, and a
   // straight line is what Tier 0 counts.
@@ -73,9 +72,8 @@ struct RouteCache {
 // One net per segment, routed in that segment's frame, laid end to end. The
 // planning is the router's input, so two routers see the same problem. Frames
 // are sharded across `threads` workers and merged in frame order, so the
-// result is one value at every worker count. `was`, where given, is a routing
-// over this same sizing; its labels are kept where nothing a box reads changed.
-// Without `labels` the routes are final and `placed` is empty.
+// result is one value at every worker count. Without `labels` the routes are final and
+// `placed` is empty.
 Routes route_transitions(Chart const &c,
                          SplitGraph const &g,
                          SubmachineOrders const &o,
@@ -87,10 +85,9 @@ Routes route_transitions(Chart const &c,
                          RouteCache const *reuse = nullptr,
                          RouteCache *fill = nullptr,
                          SearchPins const *pins = nullptr,
-                         Routes const *was = nullptr,
                          bool labels = true);
 
-// The same into `out`, reusing its capacity; `was` must not be `out`.
+// The same into `out`, reusing its capacity.
 void route_transitions(Routes &out,
                        Chart const &c,
                        SplitGraph const &g,
@@ -103,17 +100,15 @@ void route_transitions(Routes &out,
                        RouteCache const *reuse,
                        RouteCache *fill,
                        SearchPins const *pins,
-                       Routes const *was,
                        bool labels);
 
 // The path boxes placed on `out`'s finished routes over `z`, as `route_transitions` places
-// them; `was` as there.
+// them.
 void label_routes(Routes &out,
                   Chart const &c,
                   SizedLayout const &z,
                   scav_spaces const &s,
-                  scav_profile const &p,
-                  Routes const *was);
+                  scav_profile const &p);
 
 }  // namespace scav
 

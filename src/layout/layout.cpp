@@ -506,14 +506,13 @@ void cover_chart(Candidate &out) {
 }
 
 // The labels `search_candidate` places on `cand`, onto the routes it laid out without
-// them; `was` is the routing `route_transitions` was handed.
+// them.
 void label_candidate(Candidate &cand,
                      Chart const &c,
                      scav_spaces const &s,
-                     scav_profile const &knobs,
-                     Routes const *was) {
+                     scav_profile const &knobs) {
   cand.sized.chart = cand.sized_chart;  // as uncovered as `route_transitions` saw it
-  label_routes(cand.routes, c, cand.sized, s, knobs, was);
+  label_routes(cand.routes, c, cand.sized, s, knobs);
   cover_chart(cand);
 }
 
@@ -642,7 +641,6 @@ void search_candidate(Candidate &out,
                     reuse,
                     fill,
                     pins,
-                    (from != nullptr) ? &from->routes : nullptr,
                     labels);
   if (prefix != nullptr) { prefix->routes = out.routes; }
 
@@ -669,7 +667,6 @@ void search_candidate(Candidate &out,
                                    wider,
                                    router,
                                    threads,
-                                   nullptr,
                                    nullptr,
                                    nullptr,
                                    nullptr,
@@ -841,17 +838,14 @@ Scored scored_of(Chart const &c,
   return out;
 }
 
-// The candidate a move was scored on, in the scoring thread's scratch, and the routing
-// its labels were or would be placed against.
+// The candidate a move was scored on, in the scoring thread's scratch.
 struct Routed {
   Candidate *cand{ nullptr };
-  Routes const *was{ nullptr };
 };
 
-// A candidate the bound pass routed, kept for its labels, and `Routed::was` for them.
+// A candidate the bound pass routed, kept for its labels.
 struct KeptCandidate {
   Candidate cand;
-  Routes const *was{ nullptr };
   Cost bound{};
   uint32_t index{ INVALID };
 };
@@ -930,10 +924,10 @@ Scored score_move(Chart const &c,
 #endif
   if (!shortcut) {
     Scored const out{ scored_of(c, g, scoring, s, objective, whole(), labels) };
-    if (routed != nullptr) { *routed = { .cand = &sc.whole, .was = nullptr }; }
+    if (routed != nullptr) { *routed = { .cand = &sc.whole }; }
     return out;
   }
-  if (routed != nullptr) { *routed = { .cand = &sc.face, .was = &from->routes }; }
+  if (routed != nullptr) { *routed = { .cand = &sc.face }; }
   std::vector<Diagnostic> spilled;
   Candidate const &cand{ sc.face };
   search_candidate(sc.face,
@@ -1079,7 +1073,6 @@ void keep_least(std::vector<KeptCandidate> &kept,
   }
   KeptCandidate &k{ kept[slot] };
   std::swap(k.cand, *routed.cand);  // the thread's scratch takes the slot's storage
-  k.was = routed.was;
   k.bound = bound;
   k.index = index;
 }
@@ -1152,8 +1145,7 @@ bool same_labelled(Candidate const &kept,
              (kept.sized.state.size() == full.sized.state.size()) &&
              (kept.routes.unplaced == full.routes.unplaced) &&
              (kept.routes.points.size() == full.routes.points.size()) &&
-             (kept.routes.placed.size() == full.routes.placed.size()) &&
-             (kept.routes.settled.size() == full.routes.settled.size()) };
+             (kept.routes.placed.size() == full.routes.placed.size()) };
   for (uint32_t k = 0; same && (k < full.sized.state.size()); ++k) {
     same = same_rect(kept.sized.state[k], full.sized.state[k]);
   }
@@ -1162,11 +1154,6 @@ bool same_labelled(Candidate const &kept,
   }
   for (uint32_t k = 0; same && (k < full.routes.placed.size()); ++k) {
     same = same_rect(kept.routes.placed[k], full.routes.placed[k]);
-  }
-  for (uint32_t k = 0; same && (k < full.routes.settled.size()); ++k) {
-    LabelSettle const &a{ kept.routes.settled[k] };
-    LabelSettle const &b{ full.routes.settled[k] };
-    same = (a.seg == b.seg) && (a.mid == b.mid) && (a.found == b.found);
   }
   return same;
 }
@@ -1522,7 +1509,7 @@ Improved run_search(Chart const &c,
         ++exacts;
 #endif
         Candidate &cand{ kept[k].cand };
-        label_candidate(cand, c, s, knobs, kept[k].was);
+        label_candidate(cand, c, s, knobs);
         Scored const scored{ scored_of(c, g, scoring, s, objective, cand) };
 #ifdef SCAV_TESTING
         if (test_label_bound_verify) {

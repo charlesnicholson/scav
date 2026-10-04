@@ -29,8 +29,6 @@ uint32_t place_labels_by(Chart const &c,
                          LabelSearch search,
                          std::vector<scav_rect> &out);
 
-uint64_t label_test_kept();  // boxes the calling thread has kept from a base
-
 }  // namespace scav
 
 namespace {
@@ -1535,100 +1533,4 @@ TEST_CASE("label memo: a remembered box is the box its inputs place" *
     CAPTURE(k);
     CHECK(moved[k] > 0);
   }
-}
-
-namespace {
-
-// `sc` with up to two routes translated or extended by a leg.
-Scene with_routes_moved(Scene const &sc, uint64_t seed) {
-  uint64_t state{ seed };
-  auto const pick = [&state](uint32_t n) { return next(state) % n; };
-  std::vector<std::vector<scav_point>> polys;
-  polys.reserve(sc.l.route.size());
-  for (scav_span const &r : sc.l.route) {
-    polys.emplace_back(sc.l.points.begin() + r.off, sc.l.points.begin() + r.off + r.len);
-  }
-  uint32_t const moves{ pick(3) };
-  for (uint32_t m = 0; (m < moves) && !polys.empty(); ++m) {
-    std::vector<scav_point> &poly{ polys[pick(static_cast<uint32_t>(polys.size()))] };
-    if (poly.empty()) { continue; }
-    if (pick(2) == 0) {
-      auto const dx{ static_cast<int32_t>(pick(600)) - 300 };
-      auto const dy{ static_cast<int32_t>(pick(600)) - 300 };
-      for (scav_point &pt : poly) {
-        pt.x += dx;
-        pt.y += dy;
-      }
-    } else {
-      scav_point const last{ poly.back() };
-      poly.push_back({ .x = last.x, .y = last.y + 200 + static_cast<int32_t>(pick(400)) });
-    }
-  }
-  Scene out{ sc };
-  out.l = lines_of(polys);
-  return out;
-}
-
-struct Settled {
-  std::vector<scav_rect> at;
-  std::vector<LabelSettle> how;
-  uint32_t fell{ 0 };
-};
-
-Settled settled_over(Scene const &sc, LabelBase const *was) {
-  Settled out;
-  out.fell = place_labels(sc.c,
-                          sc.z,
-                          boxes_of(sc.boxes),
-                          sc.l.route,
-                          sc.l.points,
-                          sc.p,
-                          out.at,
-                          out.how,
-                          was);
-  return out;
-}
-
-}  // namespace
-
-TEST_CASE("label: a placement kept from a base is the placement made afresh" *
-          doctest::test_suite("full")) {
-  // Both kinds of box occur: ones that stay where they were and ones a moved route sends
-  // elsewhere.
-  uint32_t stayed{ 0 };
-  uint32_t went{ 0 };
-  uint64_t const kept_before{ label_test_kept() };
-  for (uint32_t crowd = 0; crowd < CROWDS; ++crowd) {
-    for (uint32_t seed = 1; seed <= SEEDS; ++seed) {
-      CAPTURE(crowd);
-      CAPTURE(seed);
-      Scene const sc{ scene_of((uint64_t{ crowd } << 32U) | seed, crowd) };
-      Settled const before{ settled_over(sc, nullptr) };
-      LabelBase const base{ .route = &sc.l.route,
-                            .points = &sc.l.points,
-                            .placed = &before.at,
-                            .settled = &before.how };
-      Scene const after{ with_routes_moved(sc, (uint64_t{ seed } << 8U) | crowd) };
-      Settled const fresh{ settled_over(after, nullptr) };
-      Settled const kept{ settled_over(after, &base) };
-      CHECK(kept.fell == fresh.fell);
-      CHECK(same_rows(kept.at, fresh.at));
-      REQUIRE(kept.how.size() == fresh.how.size());
-      bool same_how{ true };
-      for (uint32_t i = 0; i < fresh.how.size(); ++i) {
-        same_how = same_how && (kept.how[i].found == fresh.how[i].found) &&
-                   (kept.how[i].seg == fresh.how[i].seg) &&
-                   (kept.how[i].mid == fresh.how[i].mid);
-      }
-      CHECK(same_how);
-      for (uint32_t i = 0; i < fresh.at.size(); ++i) {
-        bool const moved{ (fresh.at[i].x != before.at[i].x) ||
-                          (fresh.at[i].y != before.at[i].y) };
-        ++(moved ? went : stayed);
-      }
-    }
-  }
-  CHECK(stayed > 0);
-  CHECK(went > 0);
-  CHECK(label_test_kept() > kept_before);
 }
