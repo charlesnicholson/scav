@@ -65,22 +65,6 @@ int32_t sign(Wide v) {
   return (v > 0) ? 1 : 0;
 }
 
-// What two axis-aligned segments share of one line: zero unless they are
-// collinear and meet in more than a point.
-Wide shared_run(scav_point a, scav_point b, scav_point c, scav_point d) {
-  if ((a.y == b.y) && (c.y == d.y) && (a.y == c.y)) {
-    return imax(Wide{ 0 },
-                Wide{ imin(imax(a.x, b.x), imax(c.x, d.x)) } -
-                    imax(imin(a.x, b.x), imin(c.x, d.x)));
-  }
-  if ((a.x == b.x) && (c.x == d.x) && (a.x == c.x)) {
-    return imax(Wide{ 0 },
-                Wide{ imin(imax(a.y, b.y), imax(c.y, d.y)) } -
-                    imax(imin(a.y, b.y), imin(c.y, d.y)));
-  }
-  return 0;
-}
-
 // A leg reaching the lane from one side must still reach it from that side; a
 // `before` of nothing is a leg with no extent on this axis to keep.
 bool kept(Wide before, Wide after) {

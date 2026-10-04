@@ -936,14 +936,6 @@ void ortho_simplify(std::vector<scav_point> const &from, std::vector<scav_point>
   }
 }
 
-std::vector<scav_rect> ortho_enclosure_walls(scav_rect const &region,
-                                             scav_rect const &enclosure,
-                                             int32_t inset) {
-  std::vector<scav_rect> out;
-  ortho_enclosure_walls(region, enclosure, inset, out);
-  return out;
-}
-
 void ortho_enclosure_walls(scav_rect const &region,
                            scav_rect const &enclosure,
                            int32_t inset,
@@ -1657,9 +1649,7 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
     scav_span const span{ .off = off,
                           .len = static_cast<uint32_t>(out.points.size()) - off };
     vec_push_back(out.net_points, span);
-    RouteMetrics m{ .bends = 0, .length = 0, .failed = why, .reseated = reseated };
-    measure(out.points, span, m);
-    vec_push_back(out.metrics, m);
+    vec_push_back(out.metrics, { .failed = why, .reseated = reseated });
   }
 }
 

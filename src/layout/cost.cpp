@@ -102,19 +102,6 @@ Wide length_of(scav_point a, scav_point b) {
   return static_cast<Wide>(isqrt(static_cast<uint64_t>((dx * dx) + (dy * dy))));
 }
 
-// What two axis-aligned segments share of one line: zero unless they are
-// collinear and meet in more than a point.
-Wide shared_run(scav_point a, scav_point b, scav_point c, scav_point d) {
-  bool const flat{ (a.y == b.y) && (c.y == d.y) && (a.y == c.y) };
-  bool const upright{ (a.x == b.x) && (c.x == d.x) && (a.x == c.x) };
-  if (!(flat || upright)) { return 0; }
-  Wide const alo{ flat ? imin(a.x, b.x) : imin(a.y, b.y) };
-  Wide const ahi{ flat ? imax(a.x, b.x) : imax(a.y, b.y) };
-  Wide const clo{ flat ? imin(c.x, d.x) : imin(c.y, d.y) };
-  Wide const chi{ flat ? imax(c.x, d.x) : imax(c.y, d.y) };
-  return imax(Wide{ 0 }, imin(ahi, chi) - imax(alo, clo));
-}
-
 // Which line a piece can share a run along: 0 the horizontal at `at`, 1 the
 // vertical at it, 2 neither. A degenerate or diagonal piece is 2, and both
 // arms of `shared_run` come out zero for one, so no bucket wants it.

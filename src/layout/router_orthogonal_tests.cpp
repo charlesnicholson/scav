@@ -164,6 +164,19 @@ Wide bends_of(OrthoGrid const &g,
          path_cost(g, path, 0, from_plane, to_plane);
 }
 
+// The turns net `n`'s polyline makes: each change between horizontal and vertical.
+int32_t route_bends(RouteOutput const &out, uint32_t n) {
+  scav_span const at{ out.net_points[n] };
+  int32_t bends{ 0 };
+  for (uint32_t k = 1; (k + 1) < at.len; ++k) {
+    scav_point const a{ out.points[at.off + k - 1] };
+    scav_point const b{ out.points[at.off + k] };
+    scav_point const c{ out.points[at.off + k + 1] };
+    if ((a.x == b.x) != (b.x == c.x)) { ++bends; }
+  }
+  return bends;
+}
+
 // Every step is one grid edge, in bounds, and passable.
 void check_path_is_walkable(OrthoGrid const &g, std::vector<uint32_t> const &path) {
   for (uint32_t k = 0; (k + 1) < path.size(); ++k) {
@@ -2087,8 +2100,6 @@ TEST_CASE("ortho: an unobstructed net is the straight line between its ends") {
 
   REQUIRE(out.net_points.size() == 1);
   CHECK(out.metrics[0].failed == RouteFailure::None);
-  CHECK(out.metrics[0].bends == 0);
-  CHECK(out.metrics[0].length == 1000);
   CHECK(out.net_points[0].len == 2);
   CHECK((out.points[0] == pt(0, 500)));
   CHECK((out.points[1] == pt(1000, 500)));
@@ -2125,7 +2136,7 @@ TEST_CASE("ortho: a box between two ends is routed around it") {
 
   REQUIRE(out.net_points.size() == 1);
   CHECK(out.metrics[0].failed == RouteFailure::None);
-  CHECK(out.metrics[0].bends >= 2);
+  CHECK(route_bends(out, 0) >= 2);
   CHECK(out.net_points[0].len > 2);
   check_no_net_enters_a_box(in, out);
 }
@@ -2219,37 +2230,6 @@ TEST_CASE("ortho: a grid past the budget degrades every net in the frame") {
   CHECK(out.net_points[0].len == 2);
 }
 
-TEST_CASE("ortho: the reported metrics match an independent recount") {
-  RouteInput in;
-  in.profile = profile();
-  in.region = rect(0, 0, 1000, 1000);
-  in.obstacles.push_back(rect(400, 300, 200, 400));
-  in.nets.push_back({ .src = pt(0, 500), .dst = pt(1000, 500) });
-  in.nets.push_back({ .src = pt(0, 0), .dst = pt(1000, 1000) });
-  RouteOutput out;
-  ORTHO.route(in, out);
-
-  for (uint32_t n = 0; n < in.nets.size(); ++n) {
-    CAPTURE(n);
-    scav_span const at{ out.net_points[n] };
-    Wide length{ 0 };
-    int32_t bends{ 0 };
-    uint32_t previous{ 9 };
-    for (uint32_t k = 0; (k + 1) < at.len; ++k) {
-      scav_point const a{ out.points[at.off + k] };
-      scav_point const b{ out.points[at.off + k + 1] };
-      Wide const dx{ (a.x < b.x) ? (Wide{ b.x } - a.x) : (Wide{ a.x } - b.x) };
-      Wide const dy{ (a.y < b.y) ? (Wide{ b.y } - a.y) : (Wide{ a.y } - b.y) };
-      length += dx + dy;
-      uint32_t const axis{ (a.x == b.x) ? 1U : 0U };
-      if ((k > 0) && (axis != previous)) { ++bends; }
-      previous = axis;
-    }
-    CHECK(out.metrics[n].length == length);
-    CHECK(out.metrics[n].bends == bends);
-  }
-}
-
 TEST_CASE("ortho: a polyline never carries the same point twice in a row") {
   // A net whose two ends resolve to one place is a real input, and a zero-length
   // segment has no direction for anything downstream to read.
@@ -2292,8 +2272,6 @@ TEST_CASE("ortho: the same frame routed twice comes out identical") {
   REQUIRE(a.points.size() == b.points.size());
   for (uint32_t i = 0; i < a.points.size(); ++i) { CHECK(a.points[i] == b.points[i]); }
   for (uint32_t i = 0; i < a.metrics.size(); ++i) {
-    CHECK(a.metrics[i].bends == b.metrics[i].bends);
-    CHECK(a.metrics[i].length == b.metrics[i].length);
     CHECK(a.metrics[i].failed == b.metrics[i].failed);
   }
 }
@@ -2364,8 +2342,6 @@ TEST_CASE("ortho: a larger frame routed in between leaves no trace in the next a
     CAPTURE(n);
     CHECK(first.net_points[n].off == again.net_points[n].off);
     CHECK(first.net_points[n].len == again.net_points[n].len);
-    CHECK(first.metrics[n].bends == again.metrics[n].bends);
-    CHECK(first.metrics[n].length == again.metrics[n].length);
     CHECK(first.metrics[n].failed == again.metrics[n].failed);
     CHECK(first.metrics[n].reseated == again.metrics[n].reseated);
     CHECK(first.metrics[n].failed == RouteFailure::None);
@@ -2632,10 +2608,10 @@ TEST_CASE("ortho: routing is the same question shifted, which is what reuse rest
   ORTHO.route(base, want);
   REQUIRE(want.net_points.size() == base.nets.size());
   // Not a trivial answer: the frame has to actually make the router work.
-  uint32_t bends{ 0 };
-  for (RouteMetrics const &m : want.metrics) {
-    REQUIRE(m.failed == RouteFailure::None);
-    bends += static_cast<uint32_t>(m.bends);
+  int32_t bends{ 0 };
+  for (uint32_t n = 0; n < want.metrics.size(); ++n) {
+    REQUIRE(want.metrics[n].failed == RouteFailure::None);
+    bends += route_bends(want, n);
   }
   REQUIRE(bends > 0);
 
@@ -2662,8 +2638,6 @@ TEST_CASE("ortho: routing is the same question shifted, which is what reuse rest
       CAPTURE(n);
       CHECK(got.net_points[n].off == want.net_points[n].off);
       CHECK(got.net_points[n].len == want.net_points[n].len);
-      CHECK(got.metrics[n].bends == want.metrics[n].bends);
-      CHECK(got.metrics[n].length == want.metrics[n].length);
       CHECK(got.metrics[n].reseated == want.metrics[n].reseated);
       CHECK(got.metrics[n].failed == want.metrics[n].failed);
     }

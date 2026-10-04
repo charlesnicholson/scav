@@ -76,8 +76,6 @@ enum class RouteFailure : int32_t {
 };
 
 struct RouteMetrics {
-  int32_t bends{ 0 };
-  int64_t length{ 0 };
   RouteFailure failed{ RouteFailure::None };
   // Routed, but only after giving up the clearance it wanted (11.5), so this
   // shape may run flush against a box. Not a failure.
@@ -155,9 +153,6 @@ class OrthogonalRouter final : public Router {
 };
 
 Router const *router_at(uint32_t index);  // null past the end
-
-// Shared, so every router counts a bend and a length the same way.
-void measure(std::vector<scav_point> const &points, scav_span at, RouteMetrics &out);
 
 }  // namespace scav
 

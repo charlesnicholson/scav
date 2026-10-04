@@ -95,6 +95,19 @@ constexpr scav_rect grow(scav_rect const &r, int32_t by) {
   return { .x = r.x - by, .y = r.y - by, .w = r.w + (2 * by), .h = r.h + (2 * by) };
 }
 
+// What two axis-aligned segments share of one line: zero unless they are
+// collinear and meet in more than a point.
+constexpr Wide shared_run(scav_point a, scav_point b, scav_point c, scav_point d) {
+  bool const flat{ (a.y == b.y) && (c.y == d.y) && (a.y == c.y) };
+  bool const upright{ (a.x == b.x) && (c.x == d.x) && (a.x == c.x) };
+  if (!(flat || upright)) { return 0; }
+  Wide const alo{ flat ? imin(a.x, b.x) : imin(a.y, b.y) };
+  Wide const ahi{ flat ? imax(a.x, b.x) : imax(a.y, b.y) };
+  Wide const clo{ flat ? imin(c.x, d.x) : imin(c.y, d.y) };
+  Wide const chi{ flat ? imax(c.x, d.x) : imax(c.y, d.y) };
+  return imax(Wide{ 0 }, imin(ahi, chi) - imax(alo, clo));
+}
+
 // The Chebyshev gap between two rects: the larger of the two axes'
 // separations, and zero on the axis they overlap or touch on.
 constexpr int32_t chebyshev_gap(scav_rect const &a, scav_rect const &b) {

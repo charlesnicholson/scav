@@ -202,12 +202,7 @@ bool ortho_grid(scav_rect const &region,
                 std::vector<scav_rect> const *fixed = nullptr);
 
 // The enclosure's band as four rects filling `region` outside the box shrunk by
-// `inset`, empty for a zero-sized enclosure.
-std::vector<scav_rect> ortho_enclosure_walls(scav_rect const &region,
-                                             scav_rect const &enclosure,
-                                             int32_t inset);
-
-// The same, written into `out` in place.
+// `inset`, written into `out`; empty for a zero-sized enclosure.
 void ortho_enclosure_walls(scav_rect const &region,
                            scav_rect const &enclosure,
                            int32_t inset,

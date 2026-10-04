@@ -691,9 +691,7 @@ class ScriptedRouter final : public Router {
       scav_span const at{ .off = off,
                           .len = static_cast<uint32_t>(out.points.size()) - off };
       out.net_points.push_back(at);
-      RouteMetrics m;
-      measure(out.points, at, m);
-      out.metrics.push_back(m);
+      out.metrics.push_back({});
     }
   }
 
@@ -727,7 +725,6 @@ class FailingRouter final : public Router {
       scav_span const at{ .off = off, .len = 2 };
       out.net_points.push_back(at);
       RouteMetrics m;
-      measure(out.points, at, m);
       if (n == which) { m.failed = how; }
       out.metrics.push_back(m);
     }
@@ -760,9 +757,7 @@ class LaneRouter final : public Router {
       out.points.push_back(net.dst);
       scav_span const at{ .off = off, .len = 4 };
       out.net_points.push_back(at);
-      RouteMetrics m;
-      measure(out.points, at, m);
-      out.metrics.push_back(m);
+      out.metrics.push_back({});
     }
   }
 
