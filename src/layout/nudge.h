@@ -12,15 +12,6 @@
 
 namespace scav {
 
-struct NudgeStats {
-  uint32_t lanes{ 0 };
-  uint32_t spread{ 0 };  // lanes with room to give some member a nonzero offset
-  uint32_t moved{ 0 };
-  uint32_t bundles{ 0 };    // bundles of two or more members, which move as one
-  uint32_t refused{ 0 };    // of `bundles`, those a member's check left in place
-  uint32_t reordered{ 0 };  // lanes whose vote order differs from the key order
-};
-
 // `nets` span `points`, rewritten in place; net `n` stays inside `region` and `bounds[n]`.
 // Net `n < n_keep` keeps its first leg over `keep[n].src` long and its last over `.dst`.
 void nudge_lanes(scav_rect const &region,
@@ -30,7 +21,6 @@ void nudge_lanes(scav_rect const &region,
                  int32_t clear,
                  std::vector<scav_span> const &nets,
                  std::vector<scav_point> &points,
-                 NudgeStats &stats,
                  scav_path_clear const *keep = nullptr,
                  uint32_t n_keep = 0);
 

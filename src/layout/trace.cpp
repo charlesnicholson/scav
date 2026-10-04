@@ -38,6 +38,8 @@ char const *kind_name(TraceKind k) {
     case TraceKind::GapCharged: return "gap_charged";
     case TraceKind::FoldPinned: return "fold_pinned";
     case TraceKind::BoundaryCarried: return "boundary_carried";
+    case TraceKind::LaneFound: return "lane_found";
+    case TraceKind::BundleRefused: return "bundle_refused";
     case TraceKind::None: break;
   }
   return "none";
@@ -190,6 +192,21 @@ void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out)
         j.kv("net", e.lane.net);
         j.kv("lane", e.lane.lane);
         j.kv("at", e.lane.at);
+        break;
+      case TraceKind::LaneFound:
+        j.kv("horizontal", e.found.horizontal);
+        j.kv("at", e.found.at);
+        j.kv("members", e.found.members);
+        j.kv("bundles", e.found.bundles);
+        j.kv("merged", e.found.merged);
+        j.kv("reordered", e.found.reordered);
+        j.kv("spread", e.found.spread);
+        break;
+      case TraceKind::BundleRefused:
+        j.kv("net", e.bundle.net);
+        j.kv("lane", e.bundle.lane);
+        j.kv("members", e.bundle.members);
+        j.kv("to", e.bundle.to);
         break;
       case TraceKind::CandidateScored:
         j.ks("verdict", verdict_name(e.pass));

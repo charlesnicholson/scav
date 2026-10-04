@@ -38,8 +38,10 @@ enum class TraceKind : uint16_t {
   GapCharged,         // a rank boundary was charged width beyond rank_sep
   FoldPinned,         // a fold pin decided a frame's fold; `pass` is its mode
   BoundaryCarried,    // a fold cut took a boundary node into its neighbour's piece
-  LoopFaced,   // an outer self-loop took its box's least-used face; `leg` is the net
-  PortWalled,  // every face a port could take is lined; the port stays
+  LoopFaced,      // an outer self-loop took its box's least-used face; `leg` is the net
+  PortWalled,     // every face a port could take is lined; the port stays
+  LaneFound,      // nudging found a lane of two or more segments
+  BundleRefused,  // a check left a nudged bundle in place
 };
 
 // What a rank boundary's charge is for; `GapCharged.pass`. `Held` adds nothing: the
@@ -119,6 +121,20 @@ struct TraceLane {
   uint32_t net, lane;
   int32_t at;
 };
+struct TraceLaneFound {
+  uint32_t horizontal;  // 1 for a lane of horizontal segments
+  int32_t at;           // the lane's lowest cross coordinate
+  uint32_t members, bundles;
+  uint32_t merged;     // bundles of two or more members
+  uint32_t reordered;  // 1 when the vote order differs from the key order
+  uint32_t spread;     // 1 when the room gives some member a nonzero offset
+};
+// `net` is the bundle's first member's, `lane` its slot as in `LaneAssigned`, and `to`
+// the position that member was refused.
+struct TraceBundle {
+  uint32_t net, lane, members;
+  int32_t to;
+};
 // `move` is a Level 1 move's `TRACE_MOVE_*`, and `end` (0 src, 1 dst) the end a face or
 // side move changed. `row` is the Level 2 row, INVALID for a Level 1 move.
 struct TraceScore {
@@ -153,6 +169,8 @@ struct TraceEvent {
     TracePoint point;
     TraceSeat seat;
     TraceLane lane;
+    TraceLaneFound found;
+    TraceBundle bundle;
     TraceScore score;
     TraceTerms terms;
     TraceFold fold;

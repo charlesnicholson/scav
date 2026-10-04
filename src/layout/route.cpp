@@ -648,15 +648,13 @@ void route_transitions(Routes &out,
     // Nudges the frame's lanes against its own obstacles.
     if (margin > 0) {
       vec_assign(sc.own, ro.net_points.size(), frame);
-      NudgeStats stats;
       nudge_lanes(region,
                   sc.own,
                   in.obstacles,
                   imax(margin, p.font_size_grid),  // lane pitch and grouping tolerance
                   margin,
                   ro.net_points,
-                  ro.points,
-                  stats);
+                  ro.points);
     }
 
     frames[m].points = ro.points;
@@ -779,7 +777,6 @@ void route_transitions(Routes &out,
       if (above.v != INVALID) { held[t] = z.state[above.v]; }
       if (inner_loop(c, t)) { held[t] = z.state[tr.src.v]; }
     }
-    NudgeStats stats;
     nudge_lanes(z.chart,
                 held,
                 walls,
@@ -787,7 +784,6 @@ void route_transitions(Routes &out,
                 margin,
                 out.route,
                 out.points,
-                stats,
                 s.path_clear,  // a trimmed end leg keeps at least its clear
                 (s.path_clear != nullptr) ? s.n_path_clear : 0);
   }

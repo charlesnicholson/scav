@@ -171,6 +171,16 @@ TEST_CASE("trace: every payload shape serializes its own fields") {
         .seat = { .net = 2, .end = 1, .from_x = 1, .from_y = 2, .to_x = 3, .to_y = 4 } });
   t.events.push_back(
       { .kind = TraceKind::LaneAssigned, .lane = { .net = 5, .lane = 1, .at = 96 } });
+  t.events.push_back({ .kind = TraceKind::LaneFound,
+                       .found = { .horizontal = 1,
+                                  .at = -40,
+                                  .members = 3,
+                                  .bundles = 2,
+                                  .merged = 1,
+                                  .reordered = 1,
+                                  .spread = 0 } });
+  t.events.push_back({ .kind = TraceKind::BundleRefused,
+                       .bundle = { .net = 4, .lane = 0, .members = 2, .to = 76 } });
   t.events.push_back({ .kind = TraceKind::CandidateScored,
                        .pass = static_cast<uint16_t>(MoveVerdict::NotBetter),
                        .score = { .row = INVALID,
@@ -191,6 +201,12 @@ TEST_CASE("trace: every payload shape serializes its own fields") {
   CHECK(out.find("\"at\":[-8,1489]") != std::string::npos);  // a negative coordinate
   CHECK(out.find("\"pass\":\"separate\",\"net\":2,\"end\":\"dst\"") != std::string::npos);
   CHECK(out.find("\"net\":5,\"lane\":1,\"at\":96") != std::string::npos);
+  CHECK(out.find("\"kind\":\"lane_found\",\"horizontal\":1,\"at\":-40,\"members\":3,"
+                 "\"bundles\":2,\"merged\":1,\"reordered\":1,\"spread\":0") !=
+        std::string::npos);
+  CHECK(out.find(
+            "\"kind\":\"bundle_refused\",\"net\":4,\"lane\":0,\"members\":2,\"to\":76") !=
+        std::string::npos);
   // `t2` prints past 32 bits; an INVALID row prints unsigned, as 4294967295.
   CHECK(out.find("\"t2\":4294967296") != std::string::npos);
   CHECK(out.find("\"verdict\":\"not_better\",\"row\":4294967295") != std::string::npos);

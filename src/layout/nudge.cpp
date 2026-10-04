@@ -116,7 +116,6 @@ void nudge_lanes(scav_rect const &region,
                  int32_t clear,
                  std::vector<scav_span> const &nets,
                  std::vector<scav_point> &points,
-                 NudgeStats &stats,
                  scav_path_clear const *keep,
                  uint32_t n_keep) {
   if (gap <= 0) { return; }
@@ -295,7 +294,6 @@ void nudge_lanes(scav_rect const &region,
       }
       uint32_t const count{ static_cast<uint32_t>(lane.size()) };
       if (count < 2) { continue; }
-      ++stats.lanes;
 
       scav_stable_sort(lane, sc.lane_merge, [&members](uint32_t x, uint32_t y) {
         if (members[x].toward != members[y].toward) {
@@ -324,8 +322,19 @@ void nudge_lanes(scav_rect const &region,
       for (uint32_t j = 0; j < count; ++j) { slot[j] = slot[parent.root(j)]; }
       vec_assign(sizes, groups, 0);
       for (uint32_t j = 0; j < count; ++j) { ++sizes[slot[j]]; }
-      for (uint32_t const n : sizes) { stats.bundles += (n > 1) ? 1 : 0; }
-      if (groups < 2) { continue; }
+      uint32_t merged{ 0 };
+      for (uint32_t const n : sizes) { merged += (n > 1) ? 1U : 0U; }
+      TraceLaneFound found{ .horizontal = horizontal ? 1U : 0U,
+                            .at = members[first].at,
+                            .members = count,
+                            .bundles = groups,
+                            .merged = merged,
+                            .reordered = 0,
+                            .spread = 0 };
+      if (groups < 2) {
+        trace_emit({ .kind = TraceKind::LaneFound, .found = found });
+        continue;
+      }
 
       // Each leg leaving the lane strictly inside another member's extent votes for the
       // order that keeps it off that member's segment; `votes` is antisymmetric.
@@ -399,8 +408,7 @@ void nudge_lanes(scav_rect const &region,
         rank[order[i]] = i;
         keyed = keyed && (order[i] == i);
       }
-      // Counts each lane the votes reorder, whether or not it has room to spread.
-      stats.reordered += keyed ? 0U : 1U;
+      found.reordered = keyed ? 0U : 1U;
       for (uint32_t j = 0; j < count; ++j) { slot[j] = rank[slot[j]]; }
 
       // The lane's room over its members' union extent `[lo, hi]`, measured from the root,
@@ -458,23 +466,23 @@ void nudge_lanes(scav_rect const &region,
         room_down = imin(room_down, m.reach_down(at));
       }
       Wide const window{ room_up + room_down };
-      if (window <= 0) { continue; }
 
       // Bundles sit `step` apart, at most `gap`, centred on the lane where both sides have
       // room, else shifted to fit the window.
       Wide const step{ imin(Wide{ gap }, window / (groups - 1)) };
-      if (step <= 0) { continue; }
-      Wide const spread{ (groups - 1) * step };
-      Wide const lowest{ imax(-room_up, imin(-(spread / 2), room_down - spread)) };
-
       bool any{ false };
-      for (uint32_t j = 0; j < count; ++j) {
-        Member &m{ members[lane[j]] };
-        m.offset = m.offset_to(Wide{ at } + lowest + (Wide{ slot[j] } * step));
-        if (m.offset != 0) { any = true; }
+      if (step > 0) {
+        Wide const spread{ (groups - 1) * step };
+        Wide const lowest{ imax(-room_up, imin(-(spread / 2), room_down - spread)) };
+        for (uint32_t j = 0; j < count; ++j) {
+          Member &m{ members[lane[j]] };
+          m.offset = m.offset_to(Wide{ at } + lowest + (Wide{ slot[j] } * step));
+          if (m.offset != 0) { any = true; }
+        }
       }
+      found.spread = any ? 1U : 0U;
+      trace_emit({ .kind = TraceKind::LaneFound, .found = found });
       if (!any) { continue; }
-      ++stats.spread;
 
       for (uint32_t b = 0; b < groups; ++b) {
         group.clear();
@@ -493,7 +501,12 @@ void nudge_lanes(scav_rect const &region,
           ok = ok && known_good(members[i]);
         }
         if (!ok) {
-          stats.refused += (group.size() > 1) ? 1U : 0U;
+          Member const &m{ members[group[0]] };
+          trace_emit({ .kind = TraceKind::BundleRefused,
+                       .bundle = { .net = m.net,
+                                   .lane = b,
+                                   .members = static_cast<uint32_t>(group.size()),
+                                   .to = m.at + m.offset } });
           continue;
         }
         for (uint32_t const i : group) {
@@ -510,7 +523,6 @@ void nudge_lanes(scav_rect const &region,
                 .lane = { .net = m.net,
                           .lane = b,
                           .at = horizontal ? points[m.point].y : points[m.point].x } });
-          ++stats.moved;
         }
       }
     }
