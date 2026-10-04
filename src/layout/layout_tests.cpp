@@ -36,7 +36,7 @@ namespace {
 
 using namespace scav;
 
-// The sizes the C surface checks against, as this build measures them.
+// The struct sizes the C surface checks against.
 constexpr uint32_t PROFILE_SIZE{ static_cast<uint32_t>(sizeof(scav_profile)) };
 constexpr uint32_t OPTS_SIZE{ static_cast<uint32_t>(sizeof(scav_layout_opts)) };
 constexpr uint32_t SPACES_SIZE{ static_cast<uint32_t>(sizeof(scav_spaces)) };
@@ -49,17 +49,12 @@ scav_profile readable() {
   return p;
 }
 
-// The default router and no thread request, which is every test that does not
-// say otherwise.
+// Default router, no thread request.
 scav_layout_opts opts(scav_profile const &p) {
   return { .profile = p, .router = 0, .threads = 0 };
 }
 
-// The 2k shapes with the move sweep off. These tests bound the *pipeline* at
-// scale -- coordinate domain, Tier 0, wall clock for one layout -- and the
-// sweep is a multiplier on all three that none of them is about. It is also
-// blind over a 2k neighbourhood, which is the cost 11.10's guided generation
-// exists to remove; until it does, a test that wants one layout asks for one.
+// For the 2k shapes: one portfolio row and the move sweep off.
 scav_layout_opts scale_opts(scav_profile const &p) {
   scav_profile one{ p };
   one.portfolio_k = 0;
@@ -82,7 +77,7 @@ std::vector<scav_placed> run(Chart &c, scav_spaces const &s, scav_profile const 
   return placed;
 }
 
-// Typed column reads over the public accessors -- what any consumer writes.
+// Reads row `row` of column `name` as a `T` through the public accessors.
 template <typename T>
 T row_of(Chart const &c, char const *name, uint32_t row) {
   ColumnId const id{ column_find(c, name) };
@@ -155,8 +150,7 @@ Chart corpus_chart(char const *name) {
   return r.c;
 }
 
-// The profile's knobs as a block, so a test can say which of them moved.
-// The assert layout.cpp's digest rests on is what makes the copy total.
+// The profile's `int32_t` knobs as an array, for per-field comparison.
 std::array<int32_t, sizeof(scav_profile) / sizeof(int32_t)> profile_fields(
     scav_profile const &p) {
   std::array<int32_t, sizeof(scav_profile) / sizeof(int32_t)> out{};
@@ -256,8 +250,7 @@ TEST_CASE("layout: interior bands and submachines stack from the top") {
 
   CHECK(before.y == outer.y + p.pad);
   CHECK(before.h == 40);
-  // The two regions are packed, not stacked, so what holds is that they sit
-  // in the band between the two reserved ones and share no point.
+  // The packed regions sit between the two bands and do not overlap.
   CHECK(r1.y == before.y + before.h);
   CHECK(r2.y >= r1.y);
   CHECK_FALSE(overlap(r1, r2));
@@ -278,8 +271,7 @@ TEST_CASE("layout: unconnected siblings are packed, each its own component") {
   scav_profile const p{ readable() };
   run(c, {}, p);
 
-  // Nothing joins them, so each is a component of one node and the frame is a
-  // packing rather than a rank: two across, the third below the first.
+  // Three one-node components pack two across, the third below the first.
   int32_t const w{ p.kind_min_w[0] + (2 * p.pad) };
   int32_t const h{ p.kind_min_h[0] + (2 * p.pad) };
   CHECK((state_rect(c, a) == scav_rect{ .x = 0, .y = 0, .w = w, .h = h }));
@@ -301,8 +293,8 @@ TEST_CASE("layout: components pack to the aspect-ratio target") {
   scav_profile const p{ readable() };
   run(c, {}, p);
 
-  // Nine identical leaves, so nine one-node components. The target width is the
-  // same isqrt the packer runs, over the area each rect occupies with its gap.
+  // Nine one-node components. The target width is the packer's isqrt over the
+  // area each rect occupies with its gap.
   int32_t const w{ p.kind_min_w[0] + (2 * p.pad) };
   int32_t const h{ p.kind_min_h[0] + (2 * p.pad) };
   int32_t const sep{ p.node_sep };
@@ -342,8 +334,7 @@ TEST_CASE("layout: routes are orthogonal, meet borders, and loop on either side"
   for (uint32_t k = 0; k < r0.len; ++k) {
     route.push_back(row_of<scav_point>(c, "scav.geom.point", r0.off + k));
   }
-  // Axis-aligned is the hard constraint the router exists to keep (11.5), and
-  // the ends meet their boxes' borders rather than sitting at their centres.
+  // Every leg is axis-aligned and each end lies on its box's border.
   for (uint32_t k = 0; (k + 1) < r0.len; ++k) {
     CAPTURE(k);
     bool const square{ (route[k].x == route[k + 1].x) || (route[k].y == route[k + 1].y) };
@@ -359,8 +350,8 @@ TEST_CASE("layout: routes are orthogonal, meet borders, and loop on either side"
   CHECK(slot.boundary_depth == 0);
   CHECK(slot.side <= 3);
 
-  // Through the port it was split at, along a leg rather than as a vertex: a port
-  // a route runs straight through is exactly what the polyline drops.
+  // The port slot lies on a leg of the route; a straight run through a port
+  // has no polyline vertex there.
   bool through_port{ false };
   for (uint32_t k = 0; (k + 1) < r0.len; ++k) {
     scav_point const a{ route[k] };
@@ -415,8 +406,8 @@ TEST_CASE("layout: path clears trim the route ends by exact integers") {
   scav_spaces const s{ .path_clear = clears.data(), .n_path_clear = 1 };
   run(c, s, p);
 
-  // A ranks before B with nothing in the way, so the route is one horizontal leg
-  // between their facing borders and the trims apply to x alone.
+  // A ranks before B: the route is one horizontal leg between their facing
+  // borders, trimmed in x alone.
   scav_span const r{ row_of<scav_span>(c, "scav.geom.route", 0) };
   REQUIRE(r.len == 2);
   scav_point const p0{ row_of<scav_point>(c, "scav.geom.point", r.off) };
@@ -426,14 +417,13 @@ TEST_CASE("layout: path clears trim the route ends by exact integers") {
   CHECK(ra.x < rb.x);
   CHECK(p0.y == ra.y + (ra.h / 2));
   CHECK(p0.y == p1.y);
-  // Trimmed inward from the borders the router attached to, not from centres.
+  // Each end sits its clear away from the border it attaches to.
   CHECK(p0.x == (ra.x + ra.w) + 10);
   CHECK(p1.x == rb.x - 6);
 }
 
 TEST_CASE("layout: the chart rect bounds every point and every placed box") {
-  // A consumer sizes its viewport from this rect (11.7a); bounding only the root
-  // submachine clips whatever reached past it.
+  // Consumers size their viewport from this rect.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -473,8 +463,7 @@ TEST_CASE("layout: the chart rect bounds every point and every placed box") {
 }
 
 TEST_CASE("layout: a wide placed box is slid inside rather than hung off") {
-  // A box is as wide as its text and its leg can be far shorter near a frame's
-  // edge, so centring alone puts half the label outside and grows the canvas.
+  // A placed box wider than its leg stays inside the chart rect.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -485,7 +474,7 @@ TEST_CASE("layout: a wide placed box is slid inside rather than hung off") {
   std::vector<scav_placed> const bare{ run(c, {}, p) };
   scav_rect const before{ row_of<scav_rect>(c, "scav.geom.chart", 0) };
 
-  // Wider than the route it rides on, but still narrower than the chart.
+  // Wider than the route's leg, narrower than the chart.
   std::vector<scav_path_box> const boxes{
     { .subject = 0, .w = before.w - 1, .h = 8, .order = 0 }
   };
@@ -501,9 +490,6 @@ TEST_CASE("layout: a wide placed box is slid inside rather than hung off") {
 }
 
 TEST_CASE("layout: a placed box rides a leg of its own route, clear of every other") {
-  // Phase 1 widens a rank boundary by the widest box crossing it (11.3), and
-  // placement puts the box on a strip beside one of that route's legs — the one
-  // that leaves it nearer its own line than any stranger's (11.6).
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -520,8 +506,8 @@ TEST_CASE("layout: a placed box rides a leg of its own route, clear of every oth
   std::vector<scav_placed> const placed{ run(c, s, readable()) };
   REQUIRE(placed.size() == 1);
 
-  // The nearest leg of each route, found here rather than trusted from the
-  // implementation.
+  // Nearest leg of route `trans` to the placed box and its Chebyshev gap,
+  // computed from the columns.
   struct Near {
     int64_t away{ -1 };
     scav_rect leg{};
@@ -541,15 +527,10 @@ TEST_CASE("layout: a placed box rides a leg of its own route, clear of every oth
 
   Near const own{ nearest(2) };
   REQUIRE(own.away >= 0);
-  // Within the leader of its own polyline, which is 11.9.4's anchored rule. It
-  // used to be a whole number of box heights off the leg, the strips that rule
-  // replaced; that held here only while the route's nearest leg was the one the
-  // strips were cut against, and a route reshaped by the face search (11.10e)
-  // puts a different leg of the same route nearest.
+  // The box lies within `label_leader` of its own route.
   CHECK(own.away <= label_leader(readable()));
   CHECK(own.away < (5 * placed[0].h));
-  // Beside the leg's run rather than off one of its ends, which is what makes
-  // the gap above the perpendicular one the strips are cut on.
+  // The box sits beside the leg: their extents along the leg's axis overlap.
   if (own.leg.h == 0) {
     CHECK(placed[0].x <= (own.leg.x + own.leg.w));
     CHECK(own.leg.x <= (placed[0].x + placed[0].w));
@@ -558,8 +539,8 @@ TEST_CASE("layout: a placed box rides a leg of its own route, clear of every oth
     CHECK(own.leg.y <= (placed[0].y + placed[0].h));
   }
 
-  // One line of its own text nearer its own route than either stranger's, which
-  // is what `label_near` charges for and what placement minimises first.
+  // The box is nearer its own route than any other by at least its height:
+  // `label_near` charges it nothing.
   int64_t const other{ imin(nearest(0).away, nearest(1).away) };
   REQUIRE(other >= 0);
   CHECK((own.away + placed[0].h) <= other);
@@ -601,8 +582,8 @@ TEST_CASE("layout: the hash split separates size changes from shape changes") {
     return c;
   };
 
-  // A self-loop's route leaves and re-enters one border, so its shape cannot
-  // depend on how wide the box is: widening moves every coordinate and no turn.
+  // Widening a self-looped box moves the coordinate hash and keeps the
+  // structural hash.
   auto loop = [](int32_t min_w) {
     Chart c;
     SubmachineId const root{ build_chart(c, "t", {}) };
@@ -622,8 +603,7 @@ TEST_CASE("layout: the hash split separates size changes from shape changes") {
 
   Chart const narrow{ build(0) };
   Chart const wide{ build(4000) };
-  // A size change that reflows the ranks moves the structural hash too, the
-  // honest limit of the split: sizing feeds back into shape through the fold.
+  // A size change that reflows the ranks also moves the structural hash.
   CHECK(layout_coordinate_hash(narrow) != layout_coordinate_hash(wide));
   CHECK(layout_structural_hash(narrow) != layout_structural_hash(wide));
 
@@ -638,9 +618,8 @@ TEST_CASE("layout: the hash split separates size changes from shape changes") {
 }
 
 TEST_CASE("layout: the structural hash separates two models of one geometry") {
-  // Names reach layout only through the space tables, so with no requests two
-  // charts of one shape lay out to the same coordinates -- and the structural
-  // hash still has to tell them apart, which is what the model seed buys.
+  // With no space requests, charts differing only in names share coordinates;
+  // the model seed gives them different structural hashes.
   auto build = [](char const *first, char const *second) {
     Chart c;
     SubmachineId const root{ build_chart(c, "t", {}) };
@@ -659,8 +638,7 @@ TEST_CASE("layout: the structural hash separates two models of one geometry") {
   CHECK(layout_coordinate_hash(named) == layout_coordinate_hash(renamed));
   CHECK(layout_structural_hash(named) != layout_structural_hash(renamed));
 
-  // The same model twice is the same pair of hashes, so what moved above is
-  // the model and not the run.
+  // Laying out the same model twice gives the same pair of hashes.
   Chart const again{ build("A", "B") };
   CHECK(layout_coordinate_hash(again) == layout_coordinate_hash(named));
   CHECK(layout_structural_hash(again) == layout_structural_hash(named));
@@ -673,8 +651,7 @@ TEST_CASE("layout: an unlaid-out chart hashes to its model digest alone") {
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   build_trans(c, a, b, TransKind::External, {});
 
-  // No geometry columns, so the serialization is empty and the seed is the
-  // whole of it.
+  // With no geometry columns, each hash is `xxhash32` of empty input under its seed.
   CHECK(layout_structural_hash(c) == xxhash32(nullptr, 0, chart_structural_hash(c)));
   CHECK(layout_coordinate_hash(c) == xxhash32(nullptr, 0, 0));
 
@@ -694,8 +671,8 @@ TEST_CASE("layout: the inputs digest hears every input that is not the model") {
   run(c, {}, readable());
   CHECK(layout_inputs_digest(c) == base);  // same inputs, same digest
 
-  // A profile knob layout does read, and one it does not: both are inputs a
-  // golden was produced under, so both move the digest.
+  // Changing a knob layout reads (`pad`) or one it ignores (`profile_version`)
+  // moves the digest.
   scav_profile moved{ readable() };
   moved.pad += 1;
   run(c, {}, moved);
@@ -706,8 +683,7 @@ TEST_CASE("layout: the inputs digest hears every input that is not the model") {
   run(c, {}, renamed);
   CHECK(layout_inputs_digest(c) != base);
 
-  // The space tables ride in, which is how the font reaches a digest it can
-  // never be an argument to.
+  // A space-table change moves the digest; the spaces stand in for the font.
   std::vector<scav_box_space> boxes(c.states.size());
   boxes[0].min_w = 64;
   scav_spaces const s{ .box_state = boxes.data(),
@@ -715,8 +691,7 @@ TEST_CASE("layout: the inputs digest hears every input that is not the model") {
   run(c, s, readable());
   CHECK(layout_inputs_digest(c) != base);
 
-  // And it is a third value, not a seed: a space change that leaves the shape
-  // alone must not disturb the structural hash.
+  // A space change that keeps the shape leaves the structural hash unchanged.
   run(c, {}, readable());
   uint32_t const structure{ layout_structural_hash(c) };
   run(c, s, readable());
@@ -736,8 +711,8 @@ TEST_CASE("layout: the router carries a version, and both stop at the end") {
 }
 
 TEST_CASE("layout: composed geometry past the domain is rejected, columns kept") {
-  // Maximal bands at every nesting level compound the enclosing heights past
-  // COORD_MAX in three levels: legal inputs, illegal composition.
+  // Maximal bands on three nested states compound the enclosing height past
+  // `COORD_MAX`, though each input is legal.
   Chart c;
   SubmachineId parent{ build_chart(c, "t", {}) };
   for (uint32_t i = 0; i < 3; ++i) {
@@ -760,8 +735,8 @@ TEST_CASE("layout: composed geometry past the domain is rejected, columns kept")
 }
 
 TEST_CASE("layout: a rank taller than the domain is rejected") {
-  // A fan puts five maximal-height states in one rank, which is the axis no
-  // fold reclaims, and the root submachine is the frame no state bounds.
+  // Five maximal-height states in one rank of the root submachine overflow its
+  // height; the diagnostic names the root.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const source{ build_state(c, root, {}, StateKind::Normal, {}) };
@@ -794,8 +769,7 @@ TEST_CASE("layout: a geometry column of another shape stops the run") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   build_state(c, root, "A", StateKind::Normal, {});
 
-  // Four bytes a row where layout writes a sixteen-byte rect: a run that wrote
-  // through this column would leave three quarters of every row past its bytes.
+  // A four-byte `U32` column under the name layout writes as a sixteen-byte rect.
   REQUIRE(
       column_register(c, "scav.geom.state", ElemKind::State, ValueKind::U32, 4, 4, 0).v !=
       INVALID);
@@ -806,8 +780,8 @@ TEST_CASE("layout: a geometry column of another shape stops the run") {
   CHECK(diags[0].code == DiagCode::GeometryColumnClash);
   CHECK(diags[0].subject.kind == ElemKind::Chart);
 
-  // The clash was found before any geometry: the column still holds the zeros
-  // registration gave it, and no other geometry column exists at all.
+  // Nothing is written: the column keeps its registered zeros and no other
+  // geometry column exists.
   ColumnId const clashing{ column_find(c, "scav.geom.state") };
   REQUIRE(clashing.v != INVALID);
   REQUIRE(column_count(c, clashing) == 1);
@@ -817,8 +791,7 @@ TEST_CASE("layout: a geometry column of another shape stops the run") {
   CHECK(column_find(c, "scav.geom.chart").v == INVALID);
   CHECK(column_find(c, "scav.geom.sub").v == INVALID);
 
-  // The entity is checked as well as the width, an application indexing the
-  // same rects by submachine being the likelier collision.
+  // A column with layout's width but a submachine entity also clashes.
   Chart by_entity;
   SubmachineId const other{ build_chart(by_entity, "t", {}) };
   build_state(by_entity, other, "A", StateKind::Normal, {});
@@ -835,8 +808,7 @@ TEST_CASE("layout: a geometry column of another shape stops the run") {
   REQUIRE(diags.size() == 1);
   CHECK(diags[0].code == DiagCode::GeometryColumnClash);
 
-  // The width is checked on its own, an application storing a smaller rect
-  // under the same entity and value kind being the subtler collision.
+  // A column with layout's entity and value kind but half the width also clashes.
   Chart by_width;
   SubmachineId const narrow{ build_chart(by_width, "t", {}) };
   build_state(by_width, narrow, "A", StateKind::Normal, {});
@@ -853,8 +825,7 @@ TEST_CASE("layout: a geometry column of another shape stops the run") {
   REQUIRE(diags.size() == 1);
   CHECK(diags[0].code == DiagCode::GeometryColumnClash);
 
-  // Layout's own shape under layout's own name is layout's own column to
-  // overwrite, however it got there.
+  // A pre-registered column matching layout's name and shape is overwritten.
   Chart same;
   SubmachineId const same_root{ build_chart(same, "t", {}) };
   StateId const b{ build_state(same, same_root, "A", StateKind::Normal, {}) };
@@ -905,15 +876,14 @@ TEST_CASE("layout: a router that is not in the registry is diagnosed") {
   REQUIRE(diags.size() == 1);
   CHECK(diags[0].code == DiagCode::RouterUnknown);
   CHECK(diags[0].subject.kind == ElemKind::Chart);
-  // Named before anything is written, so the chart is as it arrived.
+  // Nothing is written.
   CHECK(column_find(c, "scav.geom.state").v == INVALID);
   CHECK(column_find(c, "scav.geom.chart").v == INVALID);
   CHECK(placed.empty());
 }
 
 TEST_CASE("layout: an inputs column with no row is no digest") {
-  // The name is layout's, the rows are not: a producer that registered it
-  // against a length of its own leaves nothing for the digest to read.
+  // Another producer's column under layout's name, with zero rows.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   build_state(c, root, "A", StateKind::Normal, {});
@@ -944,8 +914,8 @@ TEST_CASE("layout: tombstones leave zero rects and no routes") {
 
   CHECK((state_rect(c, b) == scav_rect{}));
   CHECK(row_of<scav_span>(c, "scav.geom.route", 0).len == 0);
-  // The dead sibling neither occupies a slot nor leaves a gap: two live
-  // components pack side by side with nothing between them.
+  // The two live components pack side by side, `node_sep` apart, skipping the
+  // dead sibling.
   CHECK(state_rect(c, a).x == 0);
   CHECK(state_rect(c, d).x == state_rect(c, a).w + readable().node_sep);
   CHECK(state_rect(c, d).y == 0);
@@ -1043,7 +1013,7 @@ TEST_CASE("layout: the C surface runs, queries, and reports end to end") {
 
 namespace {
 
-// The invariants any laid-out chart owes, checked from the columns alone.
+// Checks, from the columns alone, the invariants every laid-out chart satisfies.
 void check_geometry(Chart const &c) {
   SplitGraph const g{ decompose(c) };
   scav_rect const chart_box{ row_of<scav_rect>(c, "scav.geom.chart", 0) };
@@ -1080,16 +1050,13 @@ void check_geometry(Chart const &c) {
       continue;
     }
     Transition const &tr{ c.transitions[t] };
-    // One point per endpoint and per crossing, plus a bend wherever the
-    // layering put one between two ranks, which is why this is a floor.
-    // `served` below takes off the crossings an endpoint already stands on.
+    // A route has at least one point per endpoint and crossing; `served`
+    // subtracts crossings on the endpoints' own borders.
     if (tr.src == tr.dst) {
       CHECK(route.len >= 3);  // out and back at the least
     } else {
-      // A crossing on the source's or the destination's own border is not a
-      // second point: the route reaches that state by reaching that border, and
-      // 11.5's aimed attachment puts both on the same place rather than running
-      // a leg along the border between them.
+      // A crossing on the source's or destination's own border coincides with
+      // that endpoint and adds no point.
       uint32_t served{ 0 };
       for (uint32_t k = 0; (k + 1) < segs.len; ++k) {
         StateId const on{ g.ports[g.segments[segs.off + k].dst_port].state };
@@ -1147,15 +1114,12 @@ TEST_CASE("layout: geometry invariants hold across topologies and spaces" *
     }
   }
 
-  // A bounded search, not none: what this checks holds at any depth and every
-  // stage still runs -- rows, finishes, kicks -- but a graph whose every pair
-  // is joined puts nearly every segment on a cycle, so the depth that ships
-  // spends twenty minutes on one layout here and tests nothing more for it.
+  // Move budget capped at 24; every search stage still runs.
   scav_profile bounded{ readable() };
   bounded.portfolio_k = 24;
   SUBCASE("with no space requests") { run(c, {}, bounded); }
   SUBCASE("with fabricated measurement") {
-    // A pure integer function of the model, the way a real app measures.
+    // Box spaces as an integer function of the state index; uniform path clears.
     std::vector<scav_box_space> boxes(c.states.size());
     for (uint32_t i = 0; i < c.states.size(); ++i) {
       boxes[i] = { .min_w = static_cast<int32_t>(200 + (i * 40)),
@@ -1191,17 +1155,15 @@ TEST_CASE("layout: two thousand states lay out, and quickly") {
           us,
           " us");
 #if SCAV_PERF_ASSERT_FLOOR == 1
-  // A floor, not a time: named machines only, never instrumented. ~47 ms here
-  // against P6's 8 ms, the difference being a graph and a search per net. It
-  // catches an accidental quadratic, not that number.
+  // A loose wall-clock cap, asserted on named machines only.
   CHECK(us < 200000);
 #endif
   check_geometry(c);
 }
 
 TEST_CASE("layout: the flat two thousand lay out too, and quickly") {
-  // One submachine holding the whole scale target is legal input, and the shape
-  // the per-submachine cost bounds assume away (11.3).
+  // One submachine holding the whole scale target: legal input outside the
+  // per-submachine cost bounds.
   Chart c{ flat_2k_chart() };
   REQUIRE(c.transitions.size() >= 2000);
 
@@ -1219,24 +1181,21 @@ TEST_CASE("layout: the flat two thousand lay out too, and quickly") {
           us,
           " us, laid out: ",
           laid);
-  // Whether it fits the domain is the model's business; that it terminates
-  // without a quadratic is this phase's.
+  // A run that fails must fail with `CoordinateOverflow`.
   if (!laid) {
     REQUIRE(!diags.empty());
     CHECK(diags[0].code == DiagCode::CoordinateOverflow);
   }
 #if SCAV_PERF_ASSERT_FLOOR == 1
-  // Every one of the 2,048 boxes in one frame, so the largest single routing
-  // graph any chart produces. ~215 ms against the nested shape's ~47 ms.
+  // All 2,048 boxes in one frame: the largest single routing graph.
   CHECK(us < 500000);
 #endif
 }
 
 TEST_CASE("layout: no corpus chart runs a route flush along a box" *
           doctest::test_suite("full")) {
-  // The router's own suite proves clearance over the graph; what it cannot see is
-  // a box flush against the *frame's* edge, which has no room for a lane. Phase 3
-  // owns the margin, and `brew` is where the shape occurs.
+  // Lists route segments lying along a live state's border in each laid chart;
+  // `reseated` sums over an unpinned rerun of the phases.
   scav_profile const p{ readable() };
   std::string report;
   uint32_t reseated{ 0 };
@@ -1295,46 +1254,18 @@ TEST_CASE("layout: no corpus chart runs a route flush along a box" *
       }
     }
   }
-  // One net gives up its clearance. On this unsearched layout its only path at
-  // full clearance runs through the margin outside the state it is routed
-  // inside, which the enclosure rule forbids (11.10g); it routes inside it,
-  // closer to a box. Seven, then twelve, while folds still stacked edges into
-  // composites and packed the pieces tight around them. Pinned so it cannot
-  // grow unnoticed.
+  // One net routes only after giving up its clearance.
   CHECK(reseated == 1);
   MESSAGE("routes flush against a box:\n", report);
-  // All four are separator ports: such a port sits on a submachine rect flush
-  // with a child's border and lays a lane there. Same cause as the stubs below,
-  // same fix -- 11.5's LCA-owned separator channel, P7c's. Pinned so it cannot
-  // grow. **Three until the corner inset landed**: keeping a seat off the arc
-  // drawn at a corner moved `vac`'s t4, which had been 19 units inside a
-  // 115-unit radius, onto a coordinate where it runs flush instead. One lane
-  // for seven attachments that had pointed at blank canvas, and the class it
-  // joins is one 11.5 already owns.
+  // One report line per flush run; at most ten across the corpus.
   uint32_t lines{ 0 };
   for (char const ch : report) {
     if (ch == '\n') { ++lines; }
   }
-  // **Five since 11.10a's placement move**: an arrangement a move reached runs
-  // one more segment along a box, taken because the same move takes the
-  // corpus's audit from 60 defects to 57 and its canvas down a fifth. A
-  // tripwire that fires on a net improvement is raised with its reason.
-  //
-  // **Six since 11.10b's unchain move**: `bottler` t29, on the chart that move
-  // takes from 62,817 to 58,887. Corpus-wide the same move is -5.3% of Tier 2
-  // and 29 fewer bends, and no chart is worse.
-  //
-  // **Ten since the budget went to 1,024** (11.10). Tier 2 falls 25% and the
-  // corpus's reader-visible audit falls 60 defects to 46, so the drawings are
-  // better by every measure that prices them -- and a flush lane is priced by
-  // none of them, which is why a deeper search finds more of these. 11.5's
-  // separator channel is the fix; this number is not a budget to tune against.
   CHECK(lines <= 10);
 }
 
 TEST_CASE("layout: Tier 0 at the scale target, and where the grid gives out") {
-  // The corpus fits the budget; these two are the shapes that might not, and
-  // which of them still routes is the finding rather than an assumption.
   {
     Chart c{ nested_2k_chart() };
     scav_profile const p{ readable() };
@@ -1355,13 +1286,10 @@ TEST_CASE("layout: Tier 0 at the scale target, and where the grid gives out") {
             r.too_large,
             " of ",
             g.segments.size());
-    // No net degrades: every frame here fits the budget and every end is
-    // reachable, so the router routed all 3,704 of them.
+    // Every frame fits the grid budget and every end is reachable: all 3,704
+    // segments route.
     CHECK(r.degraded() == 0);
-    // A separator port sits inside its owner and 11.5 gives the segment to the
-    // parent frame, where the owner is an obstacle walling off its own port. The
-    // stub out of it used to cross whatever lay between, 496 times on this shape;
-    // leaving through the face the flow runs through crosses nothing (11.5).
+    // No route passes through a box, separator-port stubs included.
     CHECK(t.through_box == 0);
   }
   {
@@ -1383,9 +1311,7 @@ TEST_CASE("layout: Tier 0 at the scale target, and where the grid gives out") {
     if (size_layout(c, g, o, {}, p, z, diags)) {
       Routes const r{ route_transitions(c, g, o, z, {}, p, *router_at(0)) };
       CostTerms const t{ cost_terms(c, g, z, r, {}, p) };
-      // The grid is the product of two line sets, not a function of box count, and a
-      // packed grid shares columns and rows -- so this fits. What blows the budget is
-      // boxes at distinct offsets, which the router's own suite builds.
+      // The packed chain shares grid lines and fits the router's budget.
       MESSAGE("flat 2k: through_box ", t.through_box, ", too large ", r.too_large);
       CHECK(r.degraded() == 0);
       CHECK(t.through_box == 0);
@@ -1395,10 +1321,7 @@ TEST_CASE("layout: Tier 0 at the scale target, and where the grid gives out") {
 
 namespace {
 
-// The scored cells of chart x profile x router at the scale target. Literals
-// rather than a golden file: eight rows a reader can hold in their head, with
-// the two Tier-0 counts apart rather than summed, `straight` being the case
-// where they are nonzero.
+// The scale-target table's axes: chart x profile x router, eight cells.
 constexpr std::array<char const *, 2> SCALE_CHARTS{ "nested", "flat" };
 constexpr std::array<char const *, 2> SCALE_PROFILES{ "readable", "compact" };
 constexpr std::array<char const *, 2> SCALE_ROUTERS{ "orthogonal", "straight" };
@@ -1420,12 +1343,10 @@ constexpr std::array<std::array<int64_t, 11>, 8> SCALE_PINNED{
 
 TEST_CASE("layout: both scale targets score to pinned terms, profile by router" *
           doctest::test_suite("full")) {
-  // Nothing else pins a `CostTerms` over 2k states, and the scorer's shape is
-  // what changes underneath these: a chart deep enough for a hierarchy walk to
-  // get wrong, and one flat enough for it to have nothing to walk.
+  // Pins `CostTerms` over 2k states: a deep chart that exercises the hierarchy
+  // walk and a flat one with nothing to walk.
   uint32_t row{ 0 };
-  // The table as this run scored it, in the constant's own shape, for a
-  // mismatch to print whole rather than one cell at a time.
+  // The scored table in `SCALE_PINNED`'s literal format, printed on a mismatch.
   std::string actual;
   bool pinned{ true };
   for (char const *chart : SCALE_CHARTS) {
@@ -1483,9 +1404,7 @@ scav_point last_point(Chart const &c, uint32_t trans) {
 
 namespace scav {
 
-// The decision and the portfolio's three pure parts, which `layout.cpp`
-// brackets with SCAV_INTERNAL, declared here rather than in a header so the
-// shipping build keeps them internal.
+// `SCAV_INTERNAL` functions of `layout.cpp`, declared here and in no header.
 bool inflation_done(uint32_t fewest, uint32_t degraded, uint32_t unreachable, bool &keep);
 uint32_t search_tuple_count(scav_profile const &p);
 uint32_t search_move_budget(scav_profile const &p);
@@ -1495,13 +1414,8 @@ uint32_t search_argmin(std::vector<Cost> const &cost, std::vector<uint8_t> const
 }  // namespace scav
 
 TEST_CASE("layout: the table's first row is the profile as given") {
-  // Row 0 has to be the caller's own tuple, or `portfolio_m` of 1 would not be
-  // the pipeline as it ran before the portfolio existed. The other seven are
-  // the packer crossed with compaction, then the same four handing the ratios
-  // down. The packer takes bit 0 because it is the knob that moves a chart, so
-  // row 1 is where every corpus pick lands, which is all the shipped M of 2
-  // reaches; compaction takes bit 1, so an M of 4 runs exactly the four rows
-  // the two packing knobs make.
+  // Row 0 is the caller's own tuple; bit 0 flips `trybox`, bit 1 turns
+  // compaction on, bit 2 takes the ratio from the owner's hole, bit 3 always folds.
   for (int32_t const trybox : { 0, 1 }) {
     for (int32_t const tiebreak : { 0, 1 }) {
       CAPTURE(trybox);
@@ -1516,33 +1430,29 @@ TEST_CASE("layout: the table's first row is the profile as given") {
         CHECK((r.pack == ((((row >> 1U) & 1U) != 0) ? Compaction::On : Compaction::Off)));
         CHECK((r.dar ==
                ((((row >> 2U) & 1U) != 0) ? DarSource::OwnerHole : DarSource::Profile)));
-        // Bit 3, the highest, so the eight rows below it are what they were.
+        // Rows 0-7 fold by scale; rows from 8 always fold.
         CHECK((r.fold == ((row < 8) ? Fold::Scale : Fold::Always)));
-        // The scale-measure tiebreak is no longer a row of the table, so no row
-        // may touch it -- it won on no chart at either scale, and compaction
-        // took the bit. Every knob reads back to say the row moved one.
+        // No row changes `sm_tiebreak`; every knob but `trybox` reads back as given.
         CHECK(r.knobs.sm_tiebreak == given.sm_tiebreak);
         scav_profile knobs{ r.knobs };
         knobs.trybox = given.trybox;
         CHECK(profile_fields(knobs) == profile_fields(given));
       }
-      // Row 1 is the packer and nothing else, which is the whole reason the
-      // bits are in this order.
+      // Row 1 flips the packer alone.
       Row const second{ search_row(given, 1) };
       CHECK((second.fold == Fold::Scale));
       CHECK(second.knobs.trybox != given.trybox);
       CHECK((second.pack == Compaction::Off));
       CHECK((second.dar == DarSource::Profile));
 
-      // Row 2 is compaction and nothing else, and row 3 is both.
+      // Row 2 turns on compaction alone.
       Row const third{ search_row(given, 2) };
       CHECK((third.fold == Fold::Scale));
       CHECK(third.knobs.trybox == given.trybox);
       CHECK((third.pack == Compaction::On));
       CHECK((third.dar == DarSource::Profile));
 
-      // The four rows of each half are the four combinations, once each: an
-      // M of 4 is exactly {as given, trybox, compact, trybox+compact}.
+      // Rows 0-3 are the four trybox x compaction combinations, once each.
       uint32_t seen{ 0 };
       for (uint32_t row = 0; row < 4; ++row) {
         Row const r{ search_row(given, row) };
@@ -1556,10 +1466,8 @@ TEST_CASE("layout: the table's first row is the profile as given") {
 }
 
 TEST_CASE("layout: how much a chart is searched does not depend on how big it is") {
-  // **This used to halve for every doubling of the entity count past 512**, so
-  // a 2k chart ran one row and a 16k one scored no moves at all. Quality comes
-  // before latency, so what a big chart gets is the whole of M and the whole of
-  // K, and the cost of a candidate is what was fixed instead (11.10c).
+  // The tuple count is `portfolio_m` and the move budget `portfolio_k`; neither
+  // reads the chart.
   scav_profile p{ readable() };
   for (int32_t m : { 1, 4, 8 }) {
     p.portfolio_m = m;
@@ -1571,12 +1479,11 @@ TEST_CASE("layout: how much a chart is searched does not depend on how big it is
     CHECK(search_move_budget(p) == static_cast<uint32_t>(k));
   }
 
-  // A profile this never saw validated is held inside the table all the same:
-  // a row index past its last row would repeat a tuple already run.
+  // An unvalidated `portfolio_m` past the table clamps to `LAYOUT_SEARCH_ROWS`.
   p.portfolio_m = 64;
   CHECK(!profile_validate(p));
   CHECK(search_tuple_count(p) == LAYOUT_SEARCH_ROWS);
-  // And a negative in either field is floored rather than wrapped.
+  // A negative field clamps to its floor: one row, zero moves.
   p.portfolio_m = -1;
   CHECK(search_tuple_count(p) == 1);
   p.portfolio_k = -1;
@@ -1589,36 +1496,28 @@ TEST_CASE("layout: the portfolio reduces in index order and a tie keeps the lowe
   Cost const violating{ .t0_violations = 1, .t1_hints = 0, .t2 = 1 };
 
   CHECK(search_argmin({ dear, cheap, dear }, { 1, 1, 1 }) == 1);
-  // Equal costs are a tie, and `cost_less` is strict, so the lower index wins
-  // however many rows agree with it.
+  // On equal costs the lower index wins.
   CHECK(search_argmin({ cheap, cheap, cheap }, { 1, 1, 1 }) == 0);
   CHECK(search_argmin({ dear, cheap, cheap }, { 1, 1, 1 }) == 1);
-  // Tier 0 is compared first, so a violating row loses to any admissible one
-  // however small its sum.
+  // Tier 0 compares first: a violating row loses to any admissible one.
   CHECK(search_argmin({ violating, dear }, { 1, 1 }) == 1);
-  // A row that left the coordinate domain is no candidate at all.
+  // A row that left the coordinate domain is skipped.
   CHECK(search_argmin({ dear, cheap }, { 1, 0 }) == 0);
   CHECK(search_argmin({ cheap, dear }, { 0, 1 }) == 1);
-  // Nothing viable answers row 0, the caller's own tuple.
+  // With no viable row the result is row 0, the caller's own tuple.
   CHECK(search_argmin({ cheap, cheap }, { 0, 0 }) == 0);
   CHECK(search_argmin({}, {}) == 0);
 }
 
 TEST_CASE("layout: the pick is the row exact Cost ranks first over the whole table") {
-  // End to end on a real chart: run the portfolio, then run each of its four
-  // rows' phases 2 and 3 on their own, score all four the way the driver does,
-  // and hold the reduction and the written geometry to the same row. Phases 2
-  // and 3 directly rather than four `layout_run`s, because two of the four
-  // knobs -- the ratio's source and compaction -- are arguments to `size_layout`
-  // and not profile fields a one-row run could carry.
+  // Re-derives each of the four rows by order, size and route, scored as the
+  // driver scores; the argmin and the written geometry must match the run's pick.
   scav_profile const p{ readable() };
   Chart searched;
   load_corpus("axis.scav", searched);
   scav_profile four{ p };
   four.portfolio_m = 4;
-  // Level 2's argmin is what this is about, so the bounded moves are off: with
-  // them on the geometry written is the row's *and* its pins', and the four
-  // rows re-derived below hold no pins (11.10a).
+  // Moves off: the written geometry is the picked row's alone.
   four.portfolio_k = 0;
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
@@ -1637,8 +1536,7 @@ TEST_CASE("layout: the pick is the row exact Cost ranks first over the whole tab
     std::vector<Diagnostic> spilled;
     REQUIRE(size_layout(searched, g, o, {}, knobs, z, spilled, dar, pack, fold));
     Routes const r{ route_transitions(searched, g, o, z, {}, knobs, *router_at(0)) };
-    // Scored on the caller's profile, not the tuple's copy, which is what puts
-    // two rows on one scale.
+    // Every row is scored on the caller's profile `p`.
     cost.push_back(cost_of(cost_terms(searched, g, z, r, {}, p), p));
     if (row == picked) { shipped = z.state; }
   }
@@ -1648,20 +1546,14 @@ TEST_CASE("layout: the pick is the row exact Cost ranks first over the whole tab
     CAPTURE(i);
     CHECK((row_of<scav_rect>(searched, "scav.geom.state", i) == shipped[i]));
   }
-  // The pick is an improvement on the profile as given, or it would be row 0.
+  // The pick is strictly cheaper than row 0 unless it is row 0.
   CHECK(cost_less(cost[picked], cost[0]) == (picked != 0));
 }
 
 TEST_CASE("layout: a pinned row runs that row, and searches from it" *
           doctest::test_suite("full")) {
-  // Calibration's one knob: a row the objective would never pick, laid out and
-  // written anyway, so its drawing can be scored beside the row that ships
-  // (11.10, 11.12). With the move budget off, every row of the table is held to
-  // the phases driven at its own tuple, which is the same check the argmin test
-  // makes of the pick. **It used to hold with the budget on too**, because a
-  // pinned row was left unscored and Level 1 then started from a cost of zero
-  // that no move could beat -- so "render row 3" silently skipped the search
-  // every other row gets (11.10f). The second half below is that fix.
+  // With moves off, each pinned row writes the geometry its own tuple lays out;
+  // the last part checks that with moves on a pinned row is searched from.
   scav_profile p{ readable() };
   p.portfolio_k = 0;
   Chart reference;
@@ -1680,15 +1572,13 @@ TEST_CASE("layout: a pinned row runs that row, and searches from it" *
     SearchPins taken;
     REQUIRE(
         layout_run(c, {}, opts(p), placed, diags, nullptr, &got, pin, nullptr, &taken));
-    // The phases at the row's tuple, with the pins the run reports -- which,
-    // with nothing searched, are the ports it turned to face their routes'
-    // far ends (11.10g).
+    // The phases at the row's tuple with the run's reported pins; unsearched,
+    // those are the ports turned to face their routes' far ends.
     SubmachineOrders const o{ order_submachines(reference, g, {}, knobs, 0, taken) };
     SizedLayout z;
     std::vector<Diagnostic> spilled;
     REQUIRE(size_layout(reference, g, o, {}, knobs, z, spilled, dar, pack, fold));
-    // The pinned row is what `tuple` answers, so a caller rendering row 3 is
-    // told it got row 3 rather than the row an argmin would have preferred.
+    // The run reports the pinned row as its tuple.
     CHECK(got == pin);
     for (uint32_t i = 0; i < z.state.size(); ++i) {
       CAPTURE(i);
@@ -1696,8 +1586,7 @@ TEST_CASE("layout: a pinned row runs that row, and searches from it" *
     }
   }
 
-  // `portfolio_m` is unread when a row is pinned: the table is one row, and it
-  // is the named one rather than a prefix ending at it.
+  // A pinned row ignores `portfolio_m`: the table is that one row.
   scav_profile four{ p };
   four.portfolio_m = 4;
   Chart pinned_at_four;
@@ -1714,8 +1603,8 @@ TEST_CASE("layout: a pinned row runs that row, and searches from it" *
   CHECK(at_one == 3);
   CHECK(layout_coordinate_hash(pinned_at_four) == layout_coordinate_hash(pinned_at_one));
 
-  // With the budget the profile ships, a pinned row is searched from, and the
-  // drawing it writes costs no more than the row did before any move.
+  // With the shipped move budget a pinned row is searched from, and its drawing
+  // costs strictly less than the unsearched row's.
   scav_profile const shipped{ readable() };
   for (uint32_t const pin : { 0U, 4U }) {
     CAPTURE(pin);
@@ -1748,7 +1637,7 @@ TEST_CASE("layout: a pinned row runs that row, and searches from it" *
     CHECK(cost_less(after, before));
   }
 
-  // Unpinned, the search picks row 5, so the pin at 0 above is not the argmin's row.
+  // Unpinned, the search picks row 5; pins 0 and 4 above are not the argmin's row.
   Chart searched;
   load_corpus("axis.scav", searched);
   uint32_t picked{ INVALID };
@@ -1758,9 +1647,7 @@ TEST_CASE("layout: a pinned row runs that row, and searches from it" *
 
 TEST_CASE("layout: the search turns a frame down where that converges cheaper" *
           doctest::test_suite("full")) {
-  // `axis`'s `monitor` region is two states in sequence, and turned to run
-  // down it is a column beside `travel` rather than a row across `Moving`
-  // (11.10g). The drawing that ships rests on the turn.
+  // The shipped search on `axis` takes at least one orientation pin.
   scav_profile const p{ readable() };
   Chart c;
   load_corpus("axis.scav", c);
@@ -1782,8 +1669,7 @@ TEST_CASE("layout: the search turns a frame down where that converges cheaper" *
 
 TEST_CASE("layout: what ships is the cheapest row searched and kicked on its own" *
           doctest::test_suite("full")) {
-  // A pinned row is that row searched and kicked to convergence, so the whole table does
-  // no worse than any one row.
+  // No row, pinned and searched on its own, costs less than the full-table run.
   scav_profile const p{ readable() };
   REQUIRE(p.portfolio_m == static_cast<int32_t>(LAYOUT_SEARCH_ROWS));
   auto const scored = [&](uint32_t row) {
@@ -1806,10 +1692,7 @@ TEST_CASE("layout: what ships is the cheapest row searched and kicked on its own
 }
 
 TEST_CASE("layout: no budget is the run it was, and a budget only improves") {
-  // The loop 11.10a's moves run in, tested before any move goes through it. At
-  // `portfolio_k` of zero nothing is scored and the drawing is byte-identical
-  // to the one Level 2 picked -- which is what makes the field safe to ship at
-  // zero and what says a later reading is the moves and not the loop.
+  // At `portfolio_k` 0 the run takes no moves.
   scav_profile p{ readable() };
   p.portfolio_k = 0;
   Chart none;
@@ -1820,8 +1703,7 @@ TEST_CASE("layout: no budget is the run it was, and a budget only improves") {
   REQUIRE(layout_run(none, {}, opts(p), placed, diags, nullptr, nullptr, INVALID, &moves));
   CHECK(moves == 0);
 
-  // And the same chart with a budget: strictly improving, so whatever it takes
-  // it cannot come back worse than what it started from.
+  // With a budget of 8, the Tier 2 cost is at most the unsearched run's.
   scav_profile some{ p };
   some.portfolio_k = 8;
   Chart searched;
@@ -1854,11 +1736,7 @@ TEST_CASE("layout: no budget is the run it was, and a budget only improves") {
 }
 
 TEST_CASE("layout: a chart compaction cannot improve keeps the lower row") {
-  // Compaction is dominance-bounded, so on a chart it moves nothing the
-  // compaction row's geometry is the plain row's, byte for byte -- and two rows
-  // of equal `Cost` are separated by `argmin(value, index)`, which keeps the
-  // lower. `estop.scav` is such a chart: nothing in it has three components,
-  // three fold pieces or three sibling frames in one packing.
+  // On `estop` compaction moves nothing: the compacted geometry equals the plain.
   scav_profile const p{ readable() };
   Chart c;
   load_corpus("estop.scav", c);
@@ -1878,8 +1756,7 @@ TEST_CASE("layout: a chart compaction cannot improve keeps the lower row") {
   }
   CHECK((plain.chart == compacted.chart));
 
-  // So rows 0 and 2 tie, and 1 and 3 tie, and the pick is whichever of the
-  // lower two the packer choice wins on.
+  // Rows 0 and 2 tie, as do rows 1 and 3: the pick is row 0 or 1.
   scav_profile four{ p };
   four.portfolio_m = 4;
   std::vector<scav_placed> placed;
@@ -1890,19 +1767,14 @@ TEST_CASE("layout: a chart compaction cannot improve keeps the lower row") {
 }
 
 TEST_CASE("layout: only a kept inflation attempt ends the retry loop") {
-  // The loop exists to remove unreachable ends, and the geometry that ships is
-  // whichever attempt was kept. An attempt is reachable-but-worse when a wider
-  // spacing trades unreachable nets for `outside_region` or `too_large` ones --
-  // no chart drives the shipped router there, which is why this asks the
-  // decision directly rather than through a fixture.
+  // `inflation_done(fewest, degraded, unreachable, keep)`: keep when degraded <
+  // fewest; done when kept with no unreachable end.
   bool keep{ true };
 
-  // The case the loop got wrong: every end reached, but more degraded overall,
-  // so the attempt is discarded -- and a discarded attempt cannot stop the loop
-  // or the run ships the unreachable ends it was retrying to remove.
+  // Every end reached but more degraded overall: discarded, and the loop continues.
   CHECK(!inflation_done(3, 4, 0, keep));
   CHECK(!keep);
-  // Equal is not better, so it is discarded on the same grounds.
+  // Equal degradation is discarded too.
   CHECK(!inflation_done(3, 3, 0, keep));
   CHECK(!keep);
 
@@ -1920,9 +1792,7 @@ TEST_CASE("layout: only a kept inflation attempt ends the retry loop") {
 }
 
 TEST_CASE("layout: a route between two regions of one state stays inside that state") {
-  // 11.8's shape. The channel between the two regions used to be routed in the
-  // frame the state sits in, where the state is an obstacle, so the route
-  // went round outside it; it is routed inside the state now (11.10g).
+  // The channel between `On`'s two regions routes inside `On`.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const on{ build_state(c, root, "On", StateKind::Normal, {}) };
@@ -1958,9 +1828,7 @@ TEST_CASE("layout: a route between two regions of one state stays inside that st
 }
 
 TEST_CASE("layout: a self-loop stays inside the state it is drawn in") {
-  // Three states nested a pad apart and a self-loop on the innermost: the loop
-  // leaves by its right face and comes back, and `2 * pad` out would put it on
-  // or past its enclosing state's border (11.10g).
+  // Three nested states; the self-loop on the innermost leaves by its right face.
   Chart c;
   SubmachineId parent{ build_chart(c, "tied", {}) };
   StateId at{ INVALID };
@@ -1991,10 +1859,8 @@ TEST_CASE("layout: a self-loop stays inside the state it is drawn in") {
 }
 
 TEST_CASE("layout: a port faces the far end of its route") {
-  // `X` enters `P` and `C` inside it goes back to `X`, which is on `P`'s
-  // left. A port's side was its in-frame edge's direction -- leaving by the
-  // trailing edge -- so the route left `P` on the right and came back round;
-  // turned to face `X`, it leaves on the left (11.10g).
+  // `C` inside `P` returns to `X` on `P`'s left; its port faces `X`, on `P`'s
+  // left border.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
@@ -2018,7 +1884,7 @@ TEST_CASE("layout: a port faces the far end of its route") {
   REQUIRE(slots.len == 1);
   scav_port_slot const slot{ row_of<scav_port_slot>(c, "scav.geom.portslot", slots.off) };
   CHECK(slot.x == box.x);
-  // So nothing of the route is right of `P`.
+  // Every route point is at or left of `P`'s right border.
   scav_span const route{ row_of<scav_span>(c, "scav.geom.route", home.v) };
   for (uint32_t k = 0; k < route.len; ++k) {
     CAPTURE(k);
@@ -2027,10 +1893,8 @@ TEST_CASE("layout: a port faces the far end of its route") {
 }
 
 TEST_CASE("layout: a transition into a composite runs straight to the port it enters by") {
-  // `D` is the last of three states stacked inside `P`, so the port `X -> D`
-  // crosses `P`'s border by sits well off `P`'s centre. Aligned by centres,
-  // `X` sat level with `P`'s middle and the route jogged to reach the port;
-  // aligned by where the segment meets each end, it is one line (11.10g).
+  // `D` is the last of three states stacked in `P`, its port well off `P`'s
+  // centre; the `X -> D` route is level with that port throughout.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
@@ -2059,23 +1923,20 @@ TEST_CASE("layout: a transition into a composite runs straight to the port it en
   REQUIRE(slots.len == 1);
   scav_port_slot const slot{ row_of<scav_port_slot>(c, "scav.geom.portslot", slots.off) };
   scav_rect const box{ state_rect(c, outer) };
-  // The fixture does what it is for: the port is further off `P`'s centre
-  // than half of `X`, so no seat on `X`'s face reaches it from there.
+  // Precondition: the port is more than half `X`'s height off `P`'s centre.
   int32_t const off{ slot.y - (box.y + (box.h / 2)) };
   REQUIRE(imax(off, -off) > (state_rect(c, x).h / 2));
   scav_span const route{ row_of<scav_span>(c, "scav.geom.route", into.v) };
   REQUIRE(route.len >= 2);
-  for (uint32_t k = 0; k < route.len; ++k) {  // the slot itself is one of the points
+  for (uint32_t k = 0; k < route.len; ++k) {
     CAPTURE(k);
     CHECK(row_of<scav_point>(c, "scav.geom.point", route.off + k).y == slot.y);
   }
 }
 
 TEST_CASE("layout: an initial and one other arrival meet their target at two heights") {
-  // `X -> S` enters `P` beside `S`'s own initial, both on `S`'s left face.
-  // By centres the target lined up with the initial and the other route
-  // jogged to its port; level, the initial's dot would sit on that route. The
-  // two take their own heights on the face and both run straight (11.10g).
+  // `X -> S` and `S`'s initial both reach `S`'s left face; each route is level,
+  // at least half the initial's height plus clearance apart.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
@@ -2086,8 +1947,7 @@ TEST_CASE("layout: an initial and one other arrival meet their target at two hei
   TransId const start{ build_trans(c, initial, target, TransKind::External, {}) };
   TransId const into{ build_trans(c, x, target, TransKind::External, {}) };
 
-  // Wide, so `X` and `P` are laid out side by side rather than folded one
-  // over the other.
+  // A wide aspect target (1024:1) lays `X` and `P` out side by side.
   scav_profile p{ readable() };
   p.portfolio_k = 0;
   p.portfolio_m = 1;
@@ -2114,9 +1974,7 @@ TEST_CASE("layout: an initial and one other arrival meet their target at two hei
 }
 
 TEST_CASE("layout: a label inside one of two regions stays inside that region") {
-  // The divider between two regions of one state ran through `brew`'s `at
-  // temperature`, which the state bounding it let stray across (11.10g). A
-  // wide label on a short leg beside the divider is kept on its own side.
+  // A 1500-wide label on `H -> Q` in the left region stays inside that region.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const owner{ build_state(c, root, "R", StateKind::Normal, {}) };
@@ -2145,9 +2003,8 @@ TEST_CASE("layout: a label inside one of two regions stays inside that region") 
 }
 
 TEST_CASE("layout: a composite running down is entered through its top") {
-  // `P`'s inside turned down puts its ports on its top and bottom borders, in
-  // line with the state each leads to, and a port faces where its route comes
-  // from: the chart running down too puts `X` above `P` (11.10g).
+  // With the chart and `P`'s inside turned down, `X` sits above `P` and enters
+  // by a top port in line with `S`.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
@@ -2190,11 +2047,8 @@ TEST_CASE("layout: a composite running down is entered through its top") {
 }
 
 TEST_CASE("layout: a channel a fork bar touches routes at its drawn size") {
-  // The bar is flush against P, so the port on P's border is on the bar's
-  // face too. The route starts square into P from there, and needs neither a
-  // wider spacing nor a searched face (11.10g) -- which is what this chart was
-  // built to be unable to do, when the router started a route outside the
-  // state it runs inside.
+  // The bar is flush against `P`; the route runs level from the bar's face to
+  // `deep` with no inflation.
   Chart c{ sealed_chart() };
   scav_profile const p{ sealed_profile(readable()) };
   std::vector<scav_placed> placed;
@@ -2214,10 +2068,7 @@ TEST_CASE("layout: a channel a fork bar touches routes at its drawn size") {
   CHECK(from.y == to.y);
 }
 
-// Skipped: `sealed_chart` no longer seals. Its seal was the router starting a
-// route outside the state it runs inside, and with the enclosure rule
-// (11.10g) it routes at its drawn size; no fixture is known that seals, so
-// the spacing retry these pin has nothing to retry on. [OWED] in 11.10g.
+// Skipped: no known fixture seals; `sealed_chart` routes at its drawn size.
 TEST_CASE("layout: a sealed channel is opened by inflating the spacing" *
           doctest::skip()) {
   Chart c{ sealed_chart() };
@@ -2233,10 +2084,7 @@ TEST_CASE("layout: a sealed channel is opened by inflating the spacing" *
   CHECK(on_border(last_point(c, 0), state_rect(c, { 2 })));
 }
 
-// Skipped: `sealed_chart` no longer seals. Its seal was the router starting a
-// route outside the state it runs inside, and with the enclosure rule
-// (11.10g) it routes at its drawn size; no fixture is known that seals, so
-// the spacing retry these pin has nothing to retry on. [OWED] in 11.10g.
+// Skipped: no known fixture seals; `sealed_chart` routes at its drawn size.
 TEST_CASE("layout: at the inflation cap the degraded transition is diagnosed" *
           doctest::skip()) {
   Chart c{ sealed_chart() };
@@ -2252,7 +2100,7 @@ TEST_CASE("layout: at the inflation cap the degraded transition is diagnosed" *
   CHECK(diags[0].subject.kind == ElemKind::Transition);
   CHECK(diags[0].subject.ordinal == 0);
 
-  // The geometry is written all the same, with the straight line in it.
+  // The geometry is still written, with the straight-line fallback.
   scav_rect const deep{ state_rect(c, { 2 }) };
   scav_point const end{ last_point(c, 0) };
   CHECK(end.x == (deep.x + (deep.w / 2)));
@@ -2262,10 +2110,7 @@ TEST_CASE("layout: at the inflation cap the degraded transition is diagnosed" *
   CHECK(row_of<uint32_t>(c, "scav.geom.gen", 0) == 1);
 }
 
-// Skipped: `sealed_chart` no longer seals. Its seal was the router starting a
-// route outside the state it runs inside, and with the enclosure rule
-// (11.10g) it routes at its drawn size; no fixture is known that seals, so
-// the spacing retry these pin has nothing to retry on. [OWED] in 11.10g.
+// Skipped: no known fixture seals; `sealed_chart` routes at its drawn size.
 TEST_CASE("layout: a cap or an increment of zero never retries" * doctest::skip()) {
   Chart capped{ sealed_chart() };
   scav_profile p{ sealed_profile(readable()) };
@@ -2278,8 +2123,8 @@ TEST_CASE("layout: a cap or an increment of zero never retries" * doctest::skip(
   REQUIRE(diags.size() == 1);
   CHECK(diags[0].code == DiagCode::RouteDegraded);
 
-  // One retry is one attempt and this chart needs three, so both runs write the
-  // same straight line.
+  // A cap of 1 is short of the three attempts the chart needs; both runs write
+  // the same straight line.
   Chart once{ sealed_chart() };
   p.spacing_inflation_cap = 1;
   std::vector<Diagnostic> again;
@@ -2287,7 +2132,7 @@ TEST_CASE("layout: a cap or an increment of zero never retries" * doctest::skip(
   CHECK(inflations == 0);
   CHECK(layout_coordinate_hash(once) == layout_coordinate_hash(capped));
 
-  // Eight retries that widen nothing are eight copies of the first attempt.
+  // Retries with a zero increment reproduce the first attempt.
   Chart flat_increment{ sealed_chart() };
   p.spacing_inflation_cap = 8;
   p.spacing_inflation_increment = 0;
@@ -2298,10 +2143,7 @@ TEST_CASE("layout: a cap or an increment of zero never retries" * doctest::skip(
   CHECK(layout_coordinate_hash(flat_increment) == layout_coordinate_hash(capped));
 }
 
-// Skipped: `sealed_chart` no longer seals. Its seal was the router starting a
-// route outside the state it runs inside, and with the enclosure rule
-// (11.10g) it routes at its drawn size; no fixture is known that seals, so
-// the spacing retry these pin has nothing to retry on. [OWED] in 11.10g.
+// Skipped: no known fixture seals; `sealed_chart` routes at its drawn size.
 TEST_CASE("layout: an increment the validator refuses ends the retries" *
           doctest::skip()) {
   scav_profile p{ sealed_profile(readable()) };
@@ -2322,7 +2164,7 @@ TEST_CASE("layout: an increment the validator refuses ends the retries" *
   REQUIRE(diags.size() == 1);
   CHECK(diags[0].code == DiagCode::RouteDegraded);
 
-  // The first attempt's geometry, which is what a run that never retried writes.
+  // The geometry equals a run with retries off.
   Chart never{ sealed_chart() };
   scav_profile no_retry{ sealed_profile(readable()) };
   no_retry.spacing_inflation_cap = 0;
@@ -2333,8 +2175,8 @@ TEST_CASE("layout: an increment the validator refuses ends the retries" *
 
 namespace {
 
-// The sealed chart with a rank chain beside it: wide enough that a retry's
-// spacing composes past the coordinate domain even though the profile is legal.
+// `sealed_chart` plus a 16-state chain: wide enough that a retry's spacing
+// overflows the coordinate domain under a legal profile.
 Chart sealed_with_chain() {
   Chart c{ sealed_chart() };
   SubmachineId const root{ 0 };
@@ -2351,10 +2193,7 @@ Chart sealed_with_chain() {
 
 }  // namespace
 
-// Skipped: `sealed_chart` no longer seals. Its seal was the router starting a
-// route outside the state it runs inside, and with the enclosure rule
-// (11.10g) it routes at its drawn size; no fixture is known that seals, so
-// the spacing retry these pin has nothing to retry on. [OWED] in 11.10g.
+// Skipped: no known fixture seals; `sealed_chart` routes at its drawn size.
 TEST_CASE("layout: a retry whose sizing leaves the domain ends them too" *
           doctest::skip()) {
   scav_profile p{ sealed_profile(readable()) };
@@ -2364,14 +2203,14 @@ TEST_CASE("layout: a retry whose sizing leaves the domain ends them too" *
   widened.rank_sep += p.spacing_inflation_increment;
   widened.node_sep += p.spacing_inflation_increment;
   widened.sub_sep += p.spacing_inflation_increment;
-  REQUIRE(profile_validate(widened));  // the validator lets this copy through
+  REQUIRE(profile_validate(widened));  // the validator accepts it
 
   Chart c{ sealed_with_chain() };
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const o{ order_submachines(c, g, {}, widened) };
   SizedLayout z;
   std::vector<Diagnostic> spilled;
-  REQUIRE(!size_layout(c, g, o, {}, widened, z, spilled));  // sizing is what refuses
+  REQUIRE(!size_layout(c, g, o, {}, widened, z, spilled));  // sizing refuses it
 
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
@@ -2383,14 +2222,11 @@ TEST_CASE("layout: a retry whose sizing leaves the domain ends them too" *
   CHECK(diags[0].subject.ordinal == 0);
 }
 
-// Skipped: `sealed_chart` no longer seals. Its seal was the router starting a
-// route outside the state it runs inside, and with the enclosure rule
-// (11.10g) it routes at its drawn size; no fixture is known that seals, so
-// the spacing retry these pin has nothing to retry on. [OWED] in 11.10g.
+// Skipped: no known fixture seals; `sealed_chart` routes at its drawn size.
 TEST_CASE("layout: an attempt that degrades no less than the best is not taken" *
           doctest::skip()) {
-  // Two retries that neither settle nor improve: the count stays at zero and the
-  // geometry is the first attempt's, not the widest one tried.
+  // Two retries that neither settle nor improve: zero inflations, and the first
+  // attempt's geometry.
   Chart twice{ sealed_chart() };
   scav_profile p{ sealed_profile(readable()) };
   p.spacing_inflation_cap = 2;
@@ -2408,10 +2244,7 @@ TEST_CASE("layout: an attempt that degrades no less than the best is not taken" 
   CHECK(layout_coordinate_hash(twice) == layout_coordinate_hash(never));
 }
 
-// Skipped: `sealed_chart` no longer seals. Its seal was the router starting a
-// route outside the state it runs inside, and with the enclosure rule
-// (11.10g) it routes at its drawn size; no fixture is known that seals, so
-// the spacing retry these pin has nothing to retry on. [OWED] in 11.10g.
+// Skipped: no known fixture seals; `sealed_chart` routes at its drawn size.
 TEST_CASE("layout: the inflation count is optional" * doctest::skip()) {
   Chart c{ sealed_chart() };
   std::vector<scav_placed> placed;
@@ -2432,14 +2265,10 @@ TEST_CASE("layout: the inflation count is optional" * doctest::skip()) {
   CHECK(layout_coordinate_hash(c) == layout_coordinate_hash(counted));
 }
 
-// Skipped: `sealed_chart` no longer seals. Its seal was the router starting a
-// route outside the state it runs inside, and with the enclosure rule
-// (11.10g) it routes at its drawn size; no fixture is known that seals, so
-// the spacing retry these pin has nothing to retry on. [OWED] in 11.10g.
+// Skipped: no known fixture seals; `sealed_chart` routes at its drawn size.
 TEST_CASE("layout: a transition every net of which fell back is diagnosed once" *
           doctest::skip()) {
-  // Two boundaries between the bar and its target, so the transition has three
-  // nets and the bar seals two of them off.
+  // Two boundaries between the bar and its target split the transition into three nets.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const bar{ build_state(c, root, "S", StateKind::Fork, {}) };
@@ -2450,7 +2279,7 @@ TEST_CASE("layout: a transition every net of which fell back is diagnosed once" 
   StateId const deep{ build_state(c, under, "C", StateKind::Normal, {}) };
   StateId const beside{ build_state(c, under, "D", StateKind::Normal, {}) };
   build_trans(c, bar, deep, TransKind::External, {});
-  build_trans(c, deep, beside, TransKind::External, {});  // routes, so nothing to say
+  build_trans(c, deep, beside, TransKind::External, {});  // routes; no diagnostic
 
   scav_profile p{ sealed_profile(readable()) };
   p.spacing_inflation_cap = 0;
@@ -2477,8 +2306,8 @@ TEST_CASE("layout: a transition every net of which fell back is diagnosed once" 
 
 TEST_CASE("layout: a graph past the router's budget is not a spacing problem" *
           doctest::test_suite("full")) {
-  // Cycle breaking turns a thirteen-rank skip into a long one, and the frame that
-  // holds them all is the shape whose grid the router refuses.
+  // Cycle breaking turns the thirteen-rank skips into long edges; the one frame
+  // holding them all exceeds the router's grid budget.
   Chart c;
   SubmachineId const root{ build_chart(c, "wide", {}) };
   std::vector<StateId> all;
@@ -2491,10 +2320,7 @@ TEST_CASE("layout: a graph past the router's budget is not a spacing problem" *
     build_trans(c, all[i], all[(i + 13) % all.size()], TransKind::External, {});
   }
 
-  // The move sweep off, because a reversal kick finds an order whose frame the
-  // router takes, and then nothing is refused: at 24 moves a dimension every
-  // transition routes (11.10f). Here the grid has to stay too large to test
-  // what a refusal reports.
+  // Move sweep off, keeping the grid past the router's budget.
   scav_profile p{ readable() };
   p.portfolio_k = 0;
   SplitGraph const g{ decompose(c) };
@@ -2512,7 +2338,7 @@ TEST_CASE("layout: a graph past the router's budget is not a spacing problem" *
   std::vector<Diagnostic> diags;
   uint32_t inflations{ 9 };
   REQUIRE(layout_run(c, {}, opts(p), placed, diags, &inflations));
-  CHECK(inflations == 0);  // only an unreachable end moves with spacing
+  CHECK(inflations == 0);  // only an unreachable end triggers inflation
   CHECK(diags.size() == marked);
   uint32_t last{ 0 };
   for (uint32_t i = 0; i < diags.size(); ++i) {
@@ -2525,10 +2351,7 @@ TEST_CASE("layout: a graph past the router's budget is not a spacing problem" *
   }
 }
 
-// Skipped: `sealed_chart` no longer seals. Its seal was the router starting a
-// route outside the state it runs inside, and with the enclosure rule
-// (11.10g) it routes at its drawn size; no fixture is known that seals, so
-// the spacing retry these pin has nothing to retry on. [OWED] in 11.10g.
+// Skipped: no known fixture seals; `sealed_chart` routes at its drawn size.
 TEST_CASE("layout: inflating the profile leaves the inputs digest alone" *
           doctest::skip()) {
   scav_profile const p{ sealed_profile(readable()) };
@@ -2539,8 +2362,8 @@ TEST_CASE("layout: inflating the profile leaves the inputs digest alone" *
   REQUIRE(layout_run(sealed, {}, opts(p), placed, diags, &inflations));
   REQUIRE(inflations == 3);
 
-  // The digest reads the profile, the router and the spaces and nothing else,
-  // so the same caller profile over a chart that never widened lands here too.
+  // The digest covers the profile, router and spaces only: an uninflated chart
+  // under the same caller profile has the same digest.
   Chart plain;
   SubmachineId const root{ build_chart(plain, "t", {}) };
   build_state(plain, root, "A", StateKind::Normal, {});
@@ -2610,8 +2433,8 @@ TEST_CASE("layout: nothing in the corpus or at the scale target inflates") {
 
 TEST_CASE("layout: a frame full of long edges terminates, expensively" *
           doctest::test_suite("full")) {
-  // The shape the case above is not. Cycle breaking reverses in node order, and a
-  // reversed chain edge turns a thirteen-rank skip into a thousand-rank one.
+  // Cycle breaking reverses in node order; a reversed chain edge turns a
+  // thirteen-rank skip into a thousand-rank one.
   Chart c;
   SubmachineId const root{ build_chart(c, "wide", {}) };
   std::vector<StateId> all;
@@ -2639,8 +2462,8 @@ TEST_CASE("layout: a frame full of long edges terminates, expensively" *
 
 TEST_CASE("layout: the coordinate extent estimate holds under fat text" *
           doctest::test_suite("full")) {
-  // Generous stand-ins for measured text, so the grid decision errs conservative:
-  // twenty wide glyphs, two title lines, a compartment.
+  // Generous stand-ins for measured text: twenty wide glyphs, two title lines,
+  // a compartment.
   int32_t lo{ 0 };
   int32_t hi{ 8192 };
   scav_rect best{};
@@ -2743,7 +2566,7 @@ TEST_CASE("layout: corpus charts hash to the committed golden") {
     if (scav::test::corpus_skipped(name)) { continue; }
     CAPTURE(name);
     Chart const c{ corpus_chart(name) };
-    check_geometry(c);  // the invariants, over real charts and not only fuzz
+    check_geometry(c);  // the invariants on each real chart
     actual += name;
     actual += ' ';
     string_append_hex32(actual, layout_inputs_digest(c));
@@ -2768,16 +2591,8 @@ TEST_CASE("layout: corpus charts hash to the committed golden") {
 }
 
 TEST_CASE("layout: the corpus cost vector is committed, term by term and by share") {
-  // The gate's numbers in the open: 11.6's terms with no space requests and the
-  // readable profile, so a later phase is compared against a row not a claim.
-  // The share table beside it says how the sum divides between the nine terms,
-  // which is what a weight change moves and a term column does not show.
-  //
-  // Scored from the geometry columns of the drawing that ships, laid out again
-  // from its pins, because these two rows are what 17's phase tables say the
-  // pipeline does. A golden that claims to describe the diagram scores what ships; one
-  // that pins a component scores the component, which is what
-  // `corpus_routers.txt` and `cost_terms.txt` do next door.
+  // Pins each chart's cost terms and Tier 2 sum at `readable`, no space requests,
+  // scored from the shipped drawing; the share table splits the sum by term.
   scav_profile const p{ readable() };
   std::string actual;
   std::string shares;
@@ -2856,8 +2671,7 @@ TEST_CASE("layout: the corpus cost vector is committed, term by term and by shar
 
 namespace {
 
-// The Tier-0 predicate, rewritten rather than read from `cost_terms`: a gate
-// that asks the scorer whether the scorer is happy is worth nothing.
+// Tier-0 geometry predicates, implemented independently of `cost_terms`.
 Wide gate_orient(scav_point a, scav_point b, scav_point c) {
   return ((Wide{ b.x } - a.x) * (Wide{ c.y } - a.y)) -
          ((Wide{ b.y } - a.y) * (Wide{ c.x } - a.x));
@@ -2897,10 +2711,7 @@ bool gate_ancestor(Chart const &c, StateId maybe, StateId of) {
 }  // namespace
 
 TEST_CASE("layout: no corpus chart bends the arrow out of an initial pseudostate") {
-  // A start state is level with the state it enters and `rank_sep` from it,
-  // so its arrow is one segment (11.10g). Brandes-Kopf alone left three of
-  // these jogged -- `axis`, `bottler`, `toolchanger` -- where the target's
-  // other neighbours pulled it off the initial's height.
+  // Each initial's arrow is one segment: the start state is level with its target.
   for (char const *name : { "axis.scav",
                             "bottler.scav",
                             "brew.scav",
@@ -2930,8 +2741,8 @@ TEST_CASE("layout: no corpus chart bends the arrow out of an initial pseudostate
 }
 
 TEST_CASE("layout: no corpus chart routes an edge through a box") {
-  // P7's gate, and the precondition for blind review (11.12): both incumbents sit
-  // at zero, so one violation settles the comparison on the first tier.
+  // Tier-0 gate: no route passes through a foreign box, doubles back, or has a
+  // zero-length segment.
   std::string report;
   uint32_t uturns{ 0 };
   uint32_t collapsed{ 0 };
@@ -2955,8 +2766,7 @@ TEST_CASE("layout: no corpus chart routes an edge through a box") {
       scav_span const route{ row_of<scav_span>(c, "scav.geom.route", t) };
       if (route.len < 2) { continue; }
       Transition const &tr{ c.transitions[t] };
-      // Nudging displaces a segment and drags the legs either end (11.5), and a
-      // displacement past a leg's own length turns that leg round.
+      // Counts zero-length segments and U-turns (collinear legs that reverse).
       for (uint32_t k = 0; (k + 1) < route.len; ++k) {
         scav_point const a{ row_of<scav_point>(c, "scav.geom.point", route.off + k) };
         scav_point const b{ row_of<scav_point>(c, "scav.geom.point", route.off + k + 1) };
@@ -2974,8 +2784,7 @@ TEST_CASE("layout: no corpus chart routes an edge through a box") {
         scav_point const b{ row_of<scav_point>(c, "scav.geom.point", route.off + k + 1) };
         for (uint32_t st = 0; st < c.states.size(); ++st) {
           if (c.states[st].live == 0) { continue; }
-          // 11.14's carve-out: an edge may occupy the interior of a state it
-          // is an endpoint of or a descendant of, and only that one.
+          // An edge may run inside its endpoints and their ancestors.
           if (gate_ancestor(c, { st }, tr.src) || gate_ancestor(c, { st }, tr.dst)) {
             continue;
           }
@@ -3060,8 +2869,8 @@ TEST_CASE("layout: fuzzed charts and spaces either lay out or diagnose") {
       c.transitions[next(static_cast<uint32_t>(c.transitions.size()))].live = 0;
     }
 
-    // Hostile by construction: fields wander outside the domain, subjects
-    // outside the transition array, orders colliding.
+    // Fields range outside the domain, subjects past the transition array, and
+    // orders collide.
     std::vector<scav_box_space> boxes(c.states.size());
     for (scav_box_space &b : boxes) {
       b = { .min_w = static_cast<int32_t>(next(200000)) - 20000,
@@ -3083,7 +2892,7 @@ TEST_CASE("layout: fuzzed charts and spaces either lay out or diagnose") {
     std::vector<scav_placed> placed;
     std::vector<Diagnostic> diags;
     if (layout_run(c, s, opts(readable()), placed, diags)) {
-      // A success carries marks, never rejections.
+      // A success reports only `RouteDegraded`.
       for (Diagnostic const &d : diags) { CHECK(d.code == DiagCode::RouteDegraded); }
       CHECK(placed.size() == path_boxes.size());
       check_geometry(c);
