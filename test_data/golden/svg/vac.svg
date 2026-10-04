@@ -68,19 +68,19 @@
   <polygon points="10485,3231 10581,3183 10581,3279" fill="#1a1a1a" stroke="none" class="scav-trans scav-id-18"/>
   <polygon points="12380,4307 12284,4355 12284,4259" fill="#1a1a1a" stroke="none" class="scav-trans scav-id-19"/>
   <polygon points="11947,5954 13368,6479 11947,7004 10526,6479" fill="#ffffff" stroke="#1a1a1a" stroke-width="16" class="scav-state scav-id-4"/>
-  <text x="3140" y="7443" font-size="160" textLength="768" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-1">POWER_ON</text>
+  <text x="2090" y="7444" font-size="160" textLength="768" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-1">POWER_ON</text>
   <text x="416" y="2307" font-size="160" textLength="960" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-3">BUMP_RETRY</text>
   <text x="2528" y="2243" font-size="160" textLength="1056" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-4">battery low</text>
-  <text x="5742" y="2637" font-size="160" textLength="1440" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-7">contacts closed</text>
+  <text x="5742" y="2638" font-size="160" textLength="1440" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-7">contacts closed</text>
   <text x="8274" y="3445" font-size="160" textLength="384" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-8">full</text>
-  <text x="6465" y="4349" font-size="160" textLength="1248" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-10">vacuum docked</text>
-  <text x="4781" y="4253" font-size="160" textLength="1056" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-11">vacuum left</text>
-  <text x="7291" y="7250" font-size="160" textLength="768" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-13">charging</text>
-  <text x="6361" y="7576" font-size="160" textLength="672" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-14">charged</text>
-  <text x="7033" y="8517" font-size="160" textLength="768" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-15">undocked</text>
-  <text x="11919" y="3964" font-size="160" textLength="768" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-17">charging</text>
-  <text x="11011" y="3445" font-size="160" textLength="672" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-18">charged</text>
-  <text x="10970" y="4252" font-size="160" textLength="768" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-19">undocked</text>
+  <text x="6465" y="4254" font-size="160" textLength="1248" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-10">vacuum docked</text>
+  <text x="4781" y="4254" font-size="160" textLength="1056" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-11">vacuum left</text>
+  <text x="7260" y="7250" font-size="160" textLength="768" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-13">charging</text>
+  <text x="6361" y="7651" font-size="160" textLength="672" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-14">charged</text>
+  <text x="7109" y="8517" font-size="160" textLength="768" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-15">undocked</text>
+  <text x="11919" y="3944" font-size="160" textLength="768" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-17">charging</text>
+  <text x="10980" y="3445" font-size="160" textLength="672" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-18">charged</text>
+  <text x="10992" y="4252" font-size="160" textLength="768" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-19">undocked</text>
   <text x="8696" y="503" font-size="192" textLength="461" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-0">dock</text>
   <text x="7078" y="6274" font-size="192" textLength="461" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-1">lamp</text>
   <text x="2452" y="6853" font-size="192" textLength="1383" lengthAdjust="spacing" fill="#1a1a1a" class="scav-state scav-id-2">powered down</text>
