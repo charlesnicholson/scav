@@ -144,19 +144,26 @@ Wide beyond(int32_t v, int32_t lo, int32_t len) {
   return Wide{ 0 };
 }
 
-// A coordinate onto the face `[lo, lo + len]`, held off each corner by the
-// larger of the clearance and the arc drawn there, or at the middle where the
-// face has no room for that: an end on a corner leaves along the face it did
-// not pick, and an end on an arc points at canvas nothing was drawn on.
-int32_t onto_face(int32_t v, int32_t lo, int32_t len, int32_t clear, int32_t corner) {
-  int32_t const inset{ imin(imax(clear, corner), len / 2) };
-  return imin(imax(v, lo + inset), (lo + len) - inset);
+// One face's run `[lo, lo + len]` and the inset a seat keeps from each corner: the
+// larger of the clearance and the arc drawn there, or half the face where that won't fit.
+struct FaceRun {
+  int32_t lo, len, inset;
+};
+
+FaceRun face_run(scav_rect const &r, uint32_t face, int32_t clear, int32_t arc) {
+  int32_t const len{ (face < 2) ? r.h : r.w };
+  return { .lo = (face < 2) ? r.y : r.x,
+           .len = len,
+           .inset = imin(imax(clear, arc), len / 2) };
 }
 
-// One attachment of one net, keyed so the members of a face are adjacent and in
-// an order the net order cannot disturb. `end` 0 leaves the box, 1 arrives at it,
-// and `pos` is how far along the face it sits, which only the spread reads.
-struct Seat {
+int32_t onto_face(int32_t v, FaceRun const &run) {
+  return imin(imax(v, run.lo + run.inset), (run.lo + run.len) - run.inset);
+}
+
+// A seat keyed so the members of a face are adjacent and in an order the net order
+// cannot disturb; `pos` is how far along the face it sits.
+struct Spot {
   uint32_t box, face, end, slot;
   int32_t pos;
 };
@@ -193,6 +200,13 @@ scav_point face_middle(scav_rect const &r, uint32_t face) {
     case 2: return { .x = r.x + (r.w / 2), .y = r.y };
     default: return { .x = r.x + (r.w / 2), .y = r.y + r.h };
   }
+}
+
+// The face of its box `at` holds seat `s` on, INVALID for an end naming no box.
+uint32_t face_at(Seat const &s,
+                 std::vector<scav_rect> const &boxes,
+                 std::vector<scav_point> const &at) {
+  return (s.box < boxes.size()) ? face_of(at[s.slot], boxes[s.box]) : INVALID;
 }
 
 // The nearer of the two faces `axis_is_y` names, by `ortho_escape_box`'s own
@@ -342,17 +356,15 @@ scav_point ortho_attach_face(scav_point toward,
   // them. Pinning one stacks every branch on a single seat, which is a thing
   // nothing in `Cost` prices, so the pin is declined rather than honoured
   // (11.10e). The rule below then answers, which is what an unpinned end does.
-  int32_t const len{ (face < 2) ? r.h : r.w };
-  if (!inscribed && (len <= (2 * imin(imax(clear, corner), len / 2)))) {
+  FaceRun const run{ face_run(r, face, clear, corner) };
+  if (!inscribed && (run.len <= (2 * run.inset))) {
     return ortho_attach_box(toward, r, clear, inscribed, corner);
   }
   if (face < 2) {  // left or right: the position along it is a y
-    int32_t const y{ inscribed ? (r.y + (r.h / 2))
-                               : onto_face(toward.y, r.y, r.h, clear, corner) };
+    int32_t const y{ inscribed ? (r.y + (r.h / 2)) : onto_face(toward.y, run) };
     return { .x = (face == 0) ? r.x : (r.x + r.w), .y = y };
   }
-  int32_t const x{ inscribed ? (r.x + (r.w / 2))
-                             : onto_face(toward.x, r.x, r.w, clear, corner) };
+  int32_t const x{ inscribed ? (r.x + (r.w / 2)) : onto_face(toward.x, run) };
   return { .x = x, .y = (face == 2) ? r.y : (r.y + r.h) };
 }
 
@@ -370,34 +382,44 @@ scav_point ortho_attach_box(scav_point toward,
   // the upper of them misses the tangent.
   scav_point aimed{ toward };
   if (ortho_escape_horizontal(toward, r)) {
-    aimed.y = inscribed ? (r.y + (r.h / 2)) : onto_face(toward.y, r.y, r.h, clear, corner);
+    aimed.y =
+        inscribed ? (r.y + (r.h / 2)) : onto_face(toward.y, face_run(r, 0, clear, corner));
   } else {
-    aimed.x = inscribed ? (r.x + (r.w / 2)) : onto_face(toward.x, r.x, r.w, clear, corner);
+    aimed.x =
+        inscribed ? (r.x + (r.w / 2)) : onto_face(toward.x, face_run(r, 2, clear, corner));
   }
   return ortho_escape_box(aimed, toward, r);
 }
 
-void ortho_reface_attachments(std::vector<RouteNet> const &nets,
-                              std::vector<scav_rect> const &boxes,
-                              std::vector<uint8_t> const &inscribed,
+void ortho_seats(std::vector<RouteNet> const &nets,
+                 std::vector<uint8_t> const &inscribed,
+                 std::vector<int32_t> const &corner,
+                 std::vector<Seat> &out) {
+  vec_assign(out, 2 * nets.size(), Seat{});
+  for (uint32_t slot = 0; slot < out.size(); ++slot) {
+    RouteNet const &net{ nets[slot / 2] };
+    uint32_t const box{ ((slot % 2) == 0) ? net.src_obstacle : net.dst_obstacle };
+    out[slot] = { .box = box,
+                  .end = slot % 2,
+                  .slot = slot,
+                  .inscribed = (box < inscribed.size()) && (inscribed[box] != 0),
+                  .arc = (box < corner.size()) ? corner[box] : 0 };
+  }
+}
+
+void ortho_reface_attachments(std::vector<scav_rect> const &boxes,
+                              std::vector<Seat> const &table,
                               std::vector<scav_point> const &toward,
                               std::vector<scav_point> &at) {
-  thread_local std::vector<Seat> seats;
+  thread_local std::vector<Spot> seats;
   seats.clear();
-  for (uint32_t n = 0; n < nets.size(); ++n) {
-    for (uint32_t end = 0; end < 2; ++end) {
-      uint32_t const box{ (end == 0) ? nets[n].src_obstacle : nets[n].dst_obstacle };
-      if ((box >= boxes.size()) || (box >= inscribed.size()) || (inscribed[box] == 0)) {
-        continue;
-      }
-      uint32_t const slot{ (2 * n) + end };
-      uint32_t const face{ face_of(at[slot], boxes[box]) };
-      if (face == INVALID) { continue; }
-      vec_push_back(seats,
-                    { .box = box, .face = face, .end = end, .slot = slot, .pos = 0 });
-    }
+  for (Seat const &s : table) {
+    uint32_t const face{ face_at(s, boxes, at) };
+    if (!s.inscribed || (face == INVALID)) { continue; }
+    vec_push_back(seats,
+                  { .box = s.box, .face = face, .end = s.end, .slot = s.slot, .pos = 0 });
   }
-  scav_stable_sort(seats, [](Seat const &a, Seat const &b) {
+  scav_stable_sort(seats, [](Spot const &a, Spot const &b) {
     if (a.box != b.box) { return a.box < b.box; }
     if (a.face != b.face) { return a.face < b.face; }
     if (a.end != b.end) { return a.end < b.end; }
@@ -467,13 +489,8 @@ void ortho_reface_attachments(std::vector<RouteNet> const &nets,
 
 void ortho_align_attachments(std::vector<RouteNet> const &nets,
                              std::vector<scav_rect> const &boxes,
-                             std::vector<uint8_t> const &inscribed,
-                             std::vector<int32_t> const &corner,
+                             std::vector<Seat> const &table,
                              std::vector<scav_point> &at) {
-  // Empty for zero throughout, the way `inscribed` is.
-  auto const arc = [&corner](uint32_t box) {
-    return (box < corner.size()) ? corner[box] : 0;
-  };
   for (uint32_t n = 0; n < nets.size(); ++n) {
     RouteNet const &net{ nets[n] };
     if (net.waypoint_len != 0) { continue; }
@@ -507,17 +524,16 @@ void ortho_align_attachments(std::vector<RouteNet> const &nets,
     int32_t hi{ 0 };
     Wide centres{ 0 };
     for (uint32_t k = 0; k < 2; ++k) {
-      uint32_t const box{ (k == 0) ? src_box : dst_box };
-      scav_rect const &r{ boxes[box] };
-      int32_t const start{ along_y ? r.y : r.x };
-      int32_t const len{ along_y ? r.h : r.w };
-      bool const one_point{ (box < inscribed.size()) && (inscribed[box] != 0) };
-      int32_t const inset{ one_point ? (len / 2) : imin(imax(arc(box), 1), len / 2) };
-      int32_t const face_lo{ start + inset };
-      int32_t const face_hi{ one_point ? face_lo : ((start + len) - inset) };
+      Seat const &seat{ table[src_slot + k] };
+      FaceRun const run{
+        face_run(boxes[seat.box], (k == 0) ? leaves : arrives, 1, seat.arc)
+      };
+      int32_t const inset{ seat.inscribed ? (run.len / 2) : run.inset };
+      int32_t const face_lo{ run.lo + inset };
+      int32_t const face_hi{ seat.inscribed ? face_lo : ((run.lo + run.len) - inset) };
       lo = (k == 0) ? face_lo : imax(lo, face_lo);
       hi = (k == 0) ? face_hi : imin(hi, face_hi);
-      centres += Wide{ start } + (len / 2);
+      centres += Wide{ run.lo } + (run.len / 2);
     }
     if (lo > hi) { continue; }  // no coordinate both faces can seat
 
@@ -535,60 +551,39 @@ void ortho_align_attachments(std::vector<RouteNet> const &nets,
   }
 }
 
-void ortho_spread_attachments(std::vector<RouteNet> const &nets,
-                              std::vector<scav_rect> const &boxes,
-                              std::vector<uint8_t> const &inscribed,
-                              std::vector<int32_t> const &corner,
+void ortho_spread_attachments(std::vector<scav_rect> const &boxes,
+                              std::vector<Seat> const &table,
                               std::vector<scav_point> const &toward,
                               int32_t clear,
                               int32_t pitch,
                               std::vector<scav_point> &at) {
-  // Empty for zero throughout, the way `inscribed` is.
-  auto const arc = [&corner](uint32_t box) {
-    return (box < corner.size()) ? corner[box] : 0;
-  };
   if (clear <= 0) { return; }
   int32_t const apart{ imax(clear, pitch) };
-  thread_local std::vector<Seat> seats;
+  thread_local std::vector<Spot> seats;
   seats.clear();
-  for (uint32_t n = 0; n < nets.size(); ++n) {
-    for (uint32_t end = 0; end < 2; ++end) {
-      uint32_t const box{ (end == 0) ? nets[n].src_obstacle : nets[n].dst_obstacle };
-      bool const one_point{ (box < inscribed.size()) && (inscribed[box] != 0) };
-      if ((box >= boxes.size()) || one_point) { continue; }
-      uint32_t const slot{ (2 * n) + end };
-      uint32_t const face{ face_of(at[slot], boxes[box]) };
-      if (face == INVALID) { continue; }
-      vec_push_back(seats,
-                    { .box = box, .face = face, .end = end, .slot = slot, .pos = 0 });
-    }
+  for (Seat const &s : table) {
+    uint32_t const face{ face_at(s, boxes, at) };
+    if (s.inscribed || (face == INVALID)) { continue; }
+    vec_push_back(seats,
+                  { .box = s.box, .face = face, .end = s.end, .slot = s.slot, .pos = 0 });
   }
 
-  // The box at a seat's far end, which is past `boxes` for an end naming none.
-  auto const far_box = [&](Seat const &seat) {
-    RouteNet const &net{ nets[seat.slot / 2] };
-    return (seat.end == 0) ? net.dst_obstacle : net.src_obstacle;
-  };
   // Whether a seat's far end names no box and its aim lies level with it: a port's
   // straight leg, to the port or to the waypoint before it.
-  auto const level = [&](Seat const &seat) {
+  auto const level = [&](Spot const &seat) {
     scav_point const aim{ toward[seat.slot] };
-    return (far_box(seat) >= boxes.size()) &&
+    return (table[seat.slot ^ 1U].box >= boxes.size()) &&
            (((seat.face < 2) ? aim.y : aim.x) == seat.pos);
-  };
-  auto const glyph_far = [&](Seat const &seat) {
-    uint32_t const box{ far_box(seat) };
-    return (box < inscribed.size()) && (inscribed[box] != 0);
   };
 
   // One sweep of the face: seats on one point part by direction. At a `level` seat,
   // its direction stays put, bar seats aimed at a glyph, and the rest move a whole step,
   // the other way where a corner holds them.
   auto const sweep = [&]() {
-    for (Seat &seat : seats) {
+    for (Spot &seat : seats) {
       seat.pos = (seat.face < 2) ? at[seat.slot].y : at[seat.slot].x;
     }
-    scav_stable_sort(seats, [](Seat const &a, Seat const &b) {
+    scav_stable_sort(seats, [](Spot const &a, Spot const &b) {
       if (a.box != b.box) { return a.box < b.box; }
       if (a.face != b.face) { return a.face < b.face; }
       if (a.pos != b.pos) { return a.pos < b.pos; }
@@ -613,19 +608,21 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
       }
       uint32_t const split{ seats[end - 1].end - seats[first].end };
       if ((split == 0) && (keep == INVALID)) { continue; }
-      scav_rect const &r{ boxes[seats[first].box] };
       bool const along_y{ seats[first].face < 2 };
-      int32_t const lo{ along_y ? r.y : r.x };
-      int32_t const len{ along_y ? r.h : r.w };
       // `apart` where the run `onto_face` seats on holds it; otherwise sized to
       // the face, so a mark too small to seat both leaves them stacked.
-      int32_t const inset{ imin(imax(clear, arc(seats[first].box)), len / 2) };
-      int32_t const step{ ((len - (2 * inset)) >= apart) ? apart : imin(clear, len / 3) };
+      FaceRun const run{ face_run(boxes[seats[first].box],
+                                  seats[first].face,
+                                  clear,
+                                  table[seats[first].slot].arc) };
+      int32_t const step{ ((run.len - (2 * run.inset)) >= apart)
+                              ? apart
+                              : imin(clear, run.len / 3) };
       if (step <= 0) { continue; }
       for (uint32_t i = first; i < end; ++i) {
-        Seat const &seat{ seats[i] };
+        Spot const &seat{ seats[i] };
         if ((keep != INVALID) &&
-            (level(seat) || ((seat.end == keep) && !glyph_far(seat)))) {
+            (level(seat) || ((seat.end == keep) && !table[seat.slot ^ 1U].inscribed))) {
           continue;
         }
         // The net's direction through the face: the one running + takes the lower seat at
@@ -634,9 +631,9 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
         int32_t const down_by{ (keep == INVALID) ? (step / 2) : step };
         int32_t const up_by{ (keep == INVALID) ? (step - (step / 2)) : step };
         int32_t const by{ forward ? -down_by : up_by };
-        int32_t got{ onto_face(seat.pos + by, lo, len, clear, arc(seat.box)) };
+        int32_t got{ onto_face(seat.pos + by, run) };
         if ((keep != INVALID) && (got == seat.pos)) {  // a corner holds it: the other way
-          got = onto_face(seat.pos - by, lo, len, clear, arc(seat.box));
+          got = onto_face(seat.pos - by, run);
         }
         int32_t &held{ along_y ? at[seat.slot].y : at[seat.slot].x };
         if (held == got) { continue; }
@@ -645,22 +642,13 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
 
         // The net moves, not the seat: the far end takes the same displacement where its
         // face can seat it exactly, and stays where the face would clamp.
-        uint32_t const net{ seat.slot / 2 };
-        uint32_t const twin{ (2 * net) + (1 - seat.end) };
-        uint32_t const box{ (seat.end == 0) ? nets[net].dst_obstacle
-                                            : nets[net].src_obstacle };
-        bool const one_point{ (box < inscribed.size()) && (inscribed[box] != 0) };
-        if ((box >= boxes.size()) || one_point) { continue; }
-        uint32_t const face{ face_of(at[twin], boxes[box]) };
+        Seat const &twin{ table[seat.slot ^ 1U] };
+        if ((twin.box >= boxes.size()) || twin.inscribed) { continue; }
+        uint32_t const face{ face_of(at[twin.slot], boxes[twin.box]) };
         if ((face == INVALID) || ((face < 2) != along_y)) { continue; }
-        scav_rect const &far{ boxes[box] };
-        int32_t &there{ along_y ? at[twin].y : at[twin].x };
+        int32_t &there{ along_y ? at[twin.slot].y : at[twin.slot].x };
         int32_t const aim{ there + (got - seat.pos) };
-        if (onto_face(aim,
-                      along_y ? far.y : far.x,
-                      along_y ? far.h : far.w,
-                      clear,
-                      arc(box)) == aim) {
+        if (onto_face(aim, face_run(boxes[twin.box], face, clear, twin.arc)) == aim) {
           there = aim;
         }
       }
@@ -680,7 +668,7 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
 
 void ortho_seat_loops(std::vector<RouteNet> const &nets,
                       std::vector<scav_rect> const &boxes,
-                      std::vector<int32_t> const &corner,
+                      std::vector<Seat> const &table,
                       int32_t clear,
                       int32_t pitch,
                       std::vector<scav_point> &at) {
@@ -694,22 +682,18 @@ void ortho_seat_loops(std::vector<RouteNet> const &nets,
     uint32_t const face{ face_of(at[slot], r) };
     if ((face == INVALID) || (face_of(at[slot + 1], r) != face)) { continue; }
     bool const along_y{ face < 2 };
-    int32_t const start{ along_y ? r.y : r.x };
-    int32_t const len{ along_y ? r.h : r.w };
-    int32_t const inset{ imin(imax(clear, (b < corner.size()) ? corner[b] : 0), len / 2) };
-    int32_t const lo{ start + inset };
-    int32_t const hi{ (start + len) - inset };
+    FaceRun const run{ face_run(r, face, clear, table[slot].arc) };
+    int32_t const lo{ run.lo + run.inset };
+    int32_t const hi{ (run.lo + run.len) - run.inset };
     taken.clear();
-    for (uint32_t m = 0; m < nets.size(); ++m) {
-      for (uint32_t end = 0; (m != n) && (end < 2); ++end) {
-        uint32_t const box{ (end == 0) ? nets[m].src_obstacle : nets[m].dst_obstacle };
-        uint32_t const other{ (2 * m) + end };
-        bool const point{ box >= boxes.size() };  // an end naming no box is its own point
-        scav_point const own{ (end == 0) ? nets[m].src : nets[m].dst };
-        scav_point const seat{ point ? own : at[other] };
-        if (((box == b) || point) && (face_of(seat, r) == face)) {
-          vec_push_back(taken, along_y ? seat.y : seat.x);
-        }
+    for (Seat const &other : table) {
+      if ((other.slot / 2) == n) { continue; }
+      bool const point{ other.box >= boxes.size() };  // no box: the end is its own point
+      RouteNet const &owner{ nets[other.slot / 2] };
+      scav_point const own{ (other.end == 0) ? owner.src : owner.dst };
+      scav_point const seat{ point ? own : at[other.slot] };
+      if (((other.box == b) || point) && (face_of(seat, r) == face)) {
+        vec_push_back(taken, along_y ? seat.y : seat.x);
       }
     }
     scav_stable_sort(taken, [](int32_t lhs, int32_t rhs) { return lhs < rhs; });
@@ -749,15 +733,11 @@ void ortho_seat_loops(std::vector<RouteNet> const &nets,
 
 void ortho_separate_attachments(std::vector<RouteNet> const &nets,
                                 std::vector<scav_rect> const &boxes,
-                                std::vector<uint8_t> const &inscribed,
-                                std::vector<int32_t> const &corner,
+                                std::vector<Seat> const &table,
                                 std::vector<scav_point> const &toward,
                                 int32_t clear,
                                 int32_t pitch,
                                 std::vector<scav_point> &at) {
-  auto const arc = [&corner](uint32_t box) {
-    return (box < corner.size()) ? corner[box] : 0;
-  };
   if ((pitch <= 0) || (clear <= 0)) { return; }
 
   // A seat on a left or right face leaves along x, so its leg sits at the
@@ -773,33 +753,26 @@ void ortho_separate_attachments(std::vector<RouteNet> const &nets,
   // Whether a leg's far end names no box and its aim lies level with its seat: a port's
   // straight leg, as in the spread above.
   auto const level = [&](Leg const &leg) {
-    RouteNet const &net{ nets[leg.net] };
-    uint32_t const far{ ((leg.slot % 2) == 0) ? net.dst_obstacle : net.src_obstacle };
     scav_point const aim{ toward[leg.slot] };
-    return (far >= boxes.size()) && (((leg.face < 2) ? aim.y : aim.x) == leg.pos);
+    return (table[leg.slot ^ 1U].box >= boxes.size()) &&
+           (((leg.face < 2) ? aim.y : aim.x) == leg.pos);
   };
-  for (uint32_t n = 0; n < nets.size(); ++n) {
-    for (uint32_t end = 0; end < 2; ++end) {
-      uint32_t const box{ (end == 0) ? nets[n].src_obstacle : nets[n].dst_obstacle };
-      bool const one_point{ (box < inscribed.size()) && (inscribed[box] != 0) };
-      if ((box >= boxes.size()) || one_point) { continue; }
-      uint32_t const slot{ (2 * n) + end };
-      uint32_t const face{ face_of(at[slot], boxes[box]) };
-      if (face == INVALID) { continue; }
-      scav_point const here{ at[slot] };
-      scav_point const other{ at[(2 * n) + (1 - end)] };
-      bool const along_y{ face < 2 };
-      int32_t const run{ along_y ? other.x : other.y };
-      int32_t const from{ along_y ? here.x : here.y };
-      vec_push_back(legs,
-                    { .box = box,
-                      .face = face,
-                      .slot = slot,
-                      .net = n,
-                      .pos = along_y ? here.y : here.x,
-                      .lo = imin(from, run),
-                      .hi = imax(from, run) });
-    }
+  for (Seat const &s : table) {
+    uint32_t const face{ face_at(s, boxes, at) };
+    if (s.inscribed || (face == INVALID)) { continue; }
+    scav_point const here{ at[s.slot] };
+    scav_point const other{ at[s.slot ^ 1U] };
+    bool const along_y{ face < 2 };
+    int32_t const run{ along_y ? other.x : other.y };
+    int32_t const from{ along_y ? here.x : here.y };
+    vec_push_back(legs,
+                  { .box = s.box,
+                    .face = face,
+                    .slot = s.slot,
+                    .net = s.slot / 2,
+                    .pos = along_y ? here.y : here.x,
+                    .lo = imin(from, run),
+                    .hi = imax(from, run) });
   }
 
   // One axis at a time: only legs of one orientation can crowd each other.
@@ -837,13 +810,11 @@ void ortho_separate_attachments(std::vector<RouteNet> const &nets,
       for (uint32_t which = 0; which < 2; ++which) {
         Leg const &leg{ (which == 0) ? low : high };
         if (fixed[which]) { continue; }
-        scav_rect const &r{ boxes[leg.box] };
-        int32_t const face_lo{ (leg.face < 2) ? r.y : r.x };
-        int32_t const len{ (leg.face < 2) ? r.h : r.w };
         int32_t share{ (which == 0) ? (want / 2) : (want - (want / 2)) };
         if (fixed[1 - which]) { share = want; }
         int32_t const aim{ leg.pos + ((which == 0) ? -share : share) };
-        got[which] = onto_face(aim, face_lo, len, clear, arc(leg.box));
+        got[which] =
+            onto_face(aim, face_run(boxes[leg.box], leg.face, clear, table[leg.slot].arc));
       }
       for (uint32_t which = 0; which < 2; ++which) {
         Leg &leg{ (which == 0) ? low : high };
@@ -1211,6 +1182,7 @@ struct RouteScratch {
   OrthoScratch search;
   std::vector<uint32_t> hop;
   std::vector<scav_point> piece, shape;
+  std::vector<Seat> seats;
 };
 
 RouteScratch &route_scratch() {
@@ -1465,33 +1437,21 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
   };
   moved(SeatPass::Attach);
 
+  std::vector<Seat> &seats{ sc.seats };
+  ortho_seats(in.nets, in.inscribed, in.corner, seats);
   // Faces first, since a glyph moved onto another face is a different line for
   // the two passes below to line up and pull apart.
-  ortho_reface_attachments(in.nets, in.obstacles, in.inscribed, toward, seat);
+  ortho_reface_attachments(in.obstacles, seats, toward, seat);
   moved(SeatPass::Reface);
-  ortho_align_attachments(in.nets, in.obstacles, in.inscribed, in.corner, seat);
+  ortho_align_attachments(in.nets, in.obstacles, seats, seat);
   moved(SeatPass::Align);
   int32_t const pitch{ label_line_height(in.profile) };
-  ortho_spread_attachments(in.nets,
-                           in.obstacles,
-                           in.inscribed,
-                           in.corner,
-                           toward,
-                           clear,
-                           pitch,
-                           seat);
+  ortho_spread_attachments(in.obstacles, seats, toward, clear, pitch, seat);
   moved(SeatPass::Spread);
   // Last: the only pass that compares two boxes, over seats the passes above settled.
-  ortho_separate_attachments(in.nets,
-                             in.obstacles,
-                             in.inscribed,
-                             in.corner,
-                             toward,
-                             clear,
-                             pitch,
-                             seat);
+  ortho_separate_attachments(in.nets, in.obstacles, seats, toward, clear, pitch, seat);
   moved(SeatPass::Separate);
-  ortho_seat_loops(in.nets, in.obstacles, in.corner, clear, pitch, seat);
+  ortho_seat_loops(in.nets, in.obstacles, seats, clear, pitch, seat);
   moved(SeatPass::Loop);
 
   for (uint32_t n = 0; n < in.nets.size(); ++n) {

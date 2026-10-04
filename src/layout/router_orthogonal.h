@@ -118,8 +118,23 @@ scav_point ortho_attach_box(scav_point toward,
                             bool inscribed,
                             int32_t corner);
 
+// One net end, at slot `2 * net + end`: the box it names, past the boxes for none, and
+// that box's glyph and corner arc.
+struct Seat {
+  uint32_t box, end, slot;
+  bool inscribed;
+  int32_t arc;
+};
+
+// The seat of every net end, in slot order; `inscribed` and `corner` are `RouteInput`'s.
+void ortho_seats(std::vector<RouteNet> const &nets,
+                 std::vector<uint8_t> const &inscribed,
+                 std::vector<int32_t> const &corner,
+                 std::vector<Seat> &out);
+
 // `at` holds `2 * nets.size()` points below, src then dst per net, and only the
-// ends naming a box are read or written. The four run in this order.
+// ends naming a box are read or written; `table` is `ortho_seats`' output. The five
+// run in this order.
 
 // An inscribed glyph's face midpoint that would hold an arrival and a departure
 // together, moved a face apart. A disc or a diamond has four faces and one
@@ -127,9 +142,8 @@ scav_point ortho_attach_box(scav_point toward,
 // glyph, which is what the spread below may not do to one. `toward` is what each
 // seat was aimed at -- `ortho_attach_box`'s own argument, so `2 * nets.size()`
 // points again -- and it picks which of the other axis's two faces they take.
-void ortho_reface_attachments(std::vector<RouteNet> const &nets,
-                              std::vector<scav_rect> const &boxes,
-                              std::vector<uint8_t> const &inscribed,
+void ortho_reface_attachments(std::vector<scav_rect> const &boxes,
+                              std::vector<Seat> const &table,
                               std::vector<scav_point> const &toward,
                               std::vector<scav_point> &at);
 
@@ -137,17 +151,14 @@ void ortho_reface_attachments(std::vector<RouteNet> const &nets,
 // segment unless phase 1 asked for a corridor; a leaning net takes the run's lower end.
 void ortho_align_attachments(std::vector<RouteNet> const &nets,
                              std::vector<scav_rect> const &boxes,
-                             std::vector<uint8_t> const &inscribed,
-                             std::vector<int32_t> const &corner,
+                             std::vector<Seat> const &table,
                              std::vector<scav_point> &at);
 
 // Attachments sharing a point on one face, pushed apart along it by `max(clear, pitch)`
 // where the face holds that and by `min(clear, len / 3)` where not. A port's leg stays
 // where it runs level to its aim, which `toward` holds as the reface above takes it.
-void ortho_spread_attachments(std::vector<RouteNet> const &nets,
-                              std::vector<scav_rect> const &boxes,
-                              std::vector<uint8_t> const &inscribed,
-                              std::vector<int32_t> const &corner,
+void ortho_spread_attachments(std::vector<scav_rect> const &boxes,
+                              std::vector<Seat> const &table,
                               std::vector<scav_point> const &toward,
                               int32_t clear,
                               int32_t pitch,
@@ -157,8 +168,7 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
 // along their faces; a fan sharing a box is left alone, and a port's leg stays.
 void ortho_separate_attachments(std::vector<RouteNet> const &nets,
                                 std::vector<scav_rect> const &boxes,
-                                std::vector<uint8_t> const &inscribed,
-                                std::vector<int32_t> const &corner,
+                                std::vector<Seat> const &table,
                                 std::vector<scav_point> const &toward,
                                 int32_t clear,
                                 int32_t pitch,
@@ -169,7 +179,7 @@ void ortho_separate_attachments(std::vector<RouteNet> const &nets,
 // holds that.
 void ortho_seat_loops(std::vector<RouteNet> const &nets,
                       std::vector<scav_rect> const &boxes,
-                      std::vector<int32_t> const &corner,
+                      std::vector<Seat> const &table,
                       int32_t clear,
                       int32_t pitch,
                       std::vector<scav_point> &at);
