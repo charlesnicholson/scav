@@ -33,7 +33,8 @@ namespace scav {
 namespace {
 
 // An inner-face end on its frame's edge, moved square out to the border of the state
-// owning the frame where no other region of that state lies between.
+// owning the frame; onto the separator where another region of that state lies between,
+// and kept on the edge where the leg would cross one of that state's walls.
 scav_point on_owner_border(Chart const &c,
                            SizedLayout const &z,
                            uint32_t frame,
@@ -44,6 +45,7 @@ scav_point on_owner_border(Chart const &c,
   scav_rect const &f{ z.sub[frame] };
   scav_rect const &b{ z.state[owner] };
   scav_point out{ at };
+  bool const along_x{ (at.x == f.x) || (at.x == (f.x + f.w)) };
   if (at.x == f.x) {
     out.x = b.x;
   } else if (at.x == (f.x + f.w)) {
@@ -55,16 +57,27 @@ scav_point on_owner_border(Chart const &c,
   } else {
     return at;
   }
-  scav_rect const leg{ .x = imin(at.x, out.x),
-                       .y = imin(at.y, out.y),
-                       .w = imax(at.x, out.x) - imin(at.x, out.x),
-                       .h = imax(at.y, out.y) - imin(at.y, out.y) };
+  scav_rect const leg{ span_rect(at, out) };
+  int32_t const from{ along_x ? at.x : at.y };
+  int32_t const to{ along_x ? out.x : out.y };
+  int32_t near{ to };  // the nearest other region's edge the leg meets, else `to`
   Span const subs{ c.states[owner].submachines };
   for (uint32_t k = 0; k < subs.len; ++k) {
     uint32_t const m{ c.submachine_ids[subs.off + k].v };
-    if ((m != frame) && (c.submachines[m].live != 0) && overlaps(leg, z.sub[m])) {
-      return at;
+    if ((m == frame) || (c.submachines[m].live == 0) || !overlaps(leg, z.sub[m])) {
+      continue;
     }
+    scav_rect const &r{ z.sub[m] };
+    int32_t const lo{ along_x ? r.x : r.y };
+    near = (to < from) ? imax(near, lo + (along_x ? r.w : r.h)) : imin(near, lo);
+  }
+  if (near != to) {
+    int32_t const sep{ imin(from, near) +
+                       floor_div(imax(from, near) - imin(from, near), 2) };
+    return along_x ? scav_point{ .x = sep, .y = at.y } : scav_point{ .x = at.x, .y = sep };
+  }
+  for (scav_rect const &wall : state_walls(z, owner)) {
+    if ((wall.w > 0) && (wall.h > 0) && overlaps(leg, wall)) { return at; }
   }
   return out;
 }

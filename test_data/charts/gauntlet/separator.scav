@@ -1,0 +1,12 @@
+// A concurrent state's inner face, met from inside its second region and from its first:
+// each end sits on the separator between the two regions.
+chart separator "inner-face ends beside a sibling region" {
+  state Running {
+    submachine motor { state Stopped, state Spinning, state Braking, trans * -> Stopped },
+    submachine light { state Dark, state Lit, state Dim, trans * -> Dark },
+  },
+
+  trans * -> Running,
+  trans internal Running -> Running:light/Lit "light up",
+  trans Running:motor/Stopped -> Running "stall",
+}

@@ -371,19 +371,30 @@ void facing_flips(Facing &out,
       OrderNode const &nd{ o.nodes[at] };
       if (nd.kind != OrderKind::Boundary) { continue; }
       uint32_t const seg{ nd.subject };
-      if ((seg >= g.segments.size()) || (o.seg_port[seg] == INVALID) ||
-          (o.seg_sided[seg] != 0)) {
-        continue;
-      }
+      if ((seg >= g.segments.size()) || (o.seg_sided[seg] != 0)) { continue; }
       TransId const t{ g.segments[seg].trans };
       if ((t.v >= c.transitions.size()) || (t.v >= g.trans_segments.size())) { continue; }
+      uint32_t const leg{ seg - g.trans_segments[t.v].off };
+      bool const on_leading{ down ? (z.node[at].y == frame.y)
+                                  : (z.node[at].x == frame.x) };
+      uint32_t const rank_face{ down ? 2U : 0U };
+      if (o.seg_port[seg] == INVALID) {
+        // An inner-face end goes off a lined rank border onto the other one, if unlined.
+        uint32_t const onto{ rank_face + (on_leading ? 1U : 0U) };
+        if (lined(rank_face + (on_leading ? 0U : 1U)) && !lined(onto)) {
+          vec_push_back(out.reverses, { .trans = t, .leg = leg });
+          trace_emit({ .kind = TraceKind::PortTurned,
+                       .frame = m,
+                       .port = { .seg = seg, .trans = t.v, .leg = leg, .side = onto } });
+        }
+        continue;
+      }
       Transition const &tr{ c.transitions[t.v] };
       // Leaving through the port or entering by it, and so which end is far.
       bool const leaves{ g.segments[seg].dst_port == o.seg_port[seg] };
       StateId const far{ leaves ? tr.dst : tr.src };
       if (far.v >= z.state.size()) { continue; }
       scav_rect const &r{ z.state[far.v] };
-      uint32_t const leg{ seg - g.trans_segments[t.v].off };
       Wide const far_at{ down ? (Wide{ r.y } + (r.h / 2)) : (Wide{ r.x } + (r.w / 2)) };
       Wide const mid_at{ down ? (Wide{ frame.y } + (frame.h / 2))
                               : (Wide{ frame.x } + (frame.w / 2)) };
@@ -413,10 +424,7 @@ void facing_flips(Facing &out,
                      .port = { .seg = seg, .trans = t.v, .leg = leg, .side = side } });
         continue;
       }
-      bool const on_leading{ down ? (z.node[at].y == frame.y)
-                                  : (z.node[at].x == frame.x) };
       bool wants_leading{ far_at < mid_at };
-      uint32_t const rank_face{ down ? 2U : 0U };
       if (on_state && lined(rank_face + (on_leading ? 0U : 1U))) {
         // Off a lined face: the other rank border, else a cross border the joined state
         // sees; with every face lined the port stays.

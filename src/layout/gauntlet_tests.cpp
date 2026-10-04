@@ -61,13 +61,13 @@ scav_profile compact() {
 // Every chart in test_data/charts/gauntlet, named so a failure says which shape
 // broke rather than which index did.
 constexpr std::array GAUNTLET{
-  "above.scav",   "carried.scav",   "chain.scav",   "corner.scav",    "crossing.scav",
-  "crowd.scav",   "enclosing.scav", "entered.scav", "fanin.scav",     "folded.scav",
-  "fork.scav",    "header.scav",    "inloop.scav",  "lane.scav",      "level.scav",
-  "long.scav",    "loop.scav",      "marks.scav",   "mixed.scav",     "mutual.scav",
-  "ported.scav",  "pulled.scav",    "regions.scav", "roundtrip.scav", "seated.scav",
-  "stretch.scav", "through.scav",   "tight.scav",   "transit.scav",   "under.scav",
-  "unfolded.scav"
+  "above.scav",   "carried.scav",   "chain.scav",   "corner.scav",  "crossing.scav",
+  "crowd.scav",   "enclosing.scav", "entered.scav", "fanin.scav",   "folded.scav",
+  "fork.scav",    "header.scav",    "inloop.scav",  "inward.scav",  "lane.scav",
+  "level.scav",   "long.scav",      "loop.scav",    "marks.scav",   "mixed.scav",
+  "mutual.scav",  "ported.scav",    "pulled.scav",  "regions.scav", "roundtrip.scav",
+  "seated.scav",  "separator.scav", "stretch.scav", "through.scav", "tight.scav",
+  "transit.scav", "under.scav",     "unfolded.scav"
 };
 
 // One chart, laid out: the pieces every property below reads.
@@ -1497,17 +1497,21 @@ scav_spaces spaces_of(std::vector<scav_box_space> const &box) {
            .box_state_stride = static_cast<uint32_t>(sizeof(scav_box_space)) };
 }
 
-// Whether any segment of any route enters any nonempty band of any state.
+// Whether any segment of any route enters any nonempty wall of any state: its sealed
+// bands, and its loop room for every route but its own inner loops.
 bool any_band_entered(Laid const &l) {
   for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
     scav_span const route{ l.r.route[t] };
+    bool const loop{ inner_loop(l.c, t) };
     for (uint32_t k = 0; (k + 1) < route.len; ++k) {
       scav_point const a{ l.r.points[route.off + k] };
       scav_point const b{ l.r.points[route.off + k + 1] };
       for (uint32_t st = 0; st < l.c.states.size(); ++st) {
-        for (scav_rect const &band :
-             { l.z.before[st], l.z.after[st], l.z.lead[st], l.z.trail[st] }) {
-          if ((band.w > 0) && (band.h > 0) && enters(a, b, band)) { return true; }
+        std::array<scav_rect, 5> const walls{ state_walls(l.z, st) };
+        bool const own{ loop && (l.c.transitions[t].src.v == st) };
+        for (uint32_t w = 0; w < (own ? 4U : 5U); ++w) {
+          scav_rect const &wall{ walls[w] };
+          if ((wall.w > 0) && (wall.h > 0) && enters(a, b, wall)) { return true; }
         }
       }
     }
@@ -1765,6 +1769,160 @@ TEST_CASE("gauntlet: crossings into decorated composites keep clear of every ban
       REQUIRE(route.len >= 2);
       CHECK(on_border(l.r.points[route.off], l.z.state[left]));
       CHECK(on_border(l.r.points[route.off + route.len - 1], l.z.state[core]));
+    }
+  }
+}
+
+namespace {
+
+// The one transition from `src` to `dst`, by state name.
+uint32_t between(Chart const &c, std::string_view src, std::string_view dst) {
+  uint32_t const a{ state_named(c, src) };
+  uint32_t const b{ state_named(c, dst) };
+  for (uint32_t t = 0; t < c.transitions.size(); ++t) {
+    if ((c.transitions[t].src.v == a) && (c.transitions[t].dst.v == b)) { return t; }
+  }
+  return INVALID;
+}
+
+// `inward` with Box's frame running down under a header, and a footer where `footer` is
+// set; no route runs flush along a box or enters a wall.
+void inward_down(scav_profile const &p, bool footer, Laid &l, uint32_t &frame) {
+  Chart const probe{ loaded("inward.scav") };
+  uint32_t const box{ state_named(probe, "Box") };
+  REQUIRE(box != INVALID);
+  REQUIRE(probe.states[box].submachines.len == 1);
+  frame = probe.submachine_ids[probe.states[box].submachines.off].v;
+  std::vector<scav_box_space> rows(probe.states.size());
+  rows[box].h_before = 2 * p.font_size_grid;
+  rows[box].h_after = footer ? p.font_size_grid : 0;
+  scav_spaces const s{ spaces_of(rows) };
+  SearchPins const seed{ .orients = { { .frame = SubmachineId{ frame } } } };
+  lay("inward.scav", one_row(p), l, s, &seed);
+  REQUIRE(l.o.sub_down[frame] != 0);
+  CostTerms const t{ cost_terms(l.c, l.g, l.z, l.r, s, one_row(p)) };
+  CHECK(t.flush == 0);
+  CHECK(t.through_band == 0);
+  CHECK_FALSE(any_band_entered(l));
+}
+
+}  // namespace
+
+TEST_CASE("gauntlet: an inner-face end turns off a header onto the unlined rank face") {
+  // Box's frame runs down with its header on the leading face, so `reset` starts on the
+  // bottom.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Laid l;
+    uint32_t frame{ INVALID };
+    inward_down(p, false, l, frame);
+    uint32_t const box{ state_named(l.c, "Box") };
+    uint32_t const reset{ between(l.c, "Box", "Child") };
+    uint32_t const restart{ between(l.c, "Other", "Box") };
+    REQUIRE(reset != INVALID);
+    REQUIRE(restart != INVALID);
+    scav_rect const &b{ l.z.state[box] };
+    scav_point const first{ l.r.points[l.r.route[reset].off] };
+    CHECK(first.y == (b.y + b.h));
+    CHECK(first.x > b.x);
+    CHECK(first.x < (b.x + b.w));
+    scav_span const back{ l.r.route[restart] };
+    REQUIRE(back.len >= 2);
+    scav_point const last{ l.r.points[back.off + back.len - 1] };
+    CHECK(on_border(last, b));
+    CHECK(last.y != b.y);
+  }
+}
+
+TEST_CASE("gauntlet: an inner-face end on a lined face stays on its frame's edge") {
+  // A header and a footer line both rank faces of Box's down-running frame, so neither
+  // end can turn, and each stays on the frame's edge rather than crossing the band.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Laid l;
+    uint32_t frame{ INVALID };
+    inward_down(p, true, l, frame);
+    uint32_t const box{ state_named(l.c, "Box") };
+    scav_rect const &f{ l.z.sub[frame] };
+    for (uint32_t const t :
+         { between(l.c, "Box", "Child"), between(l.c, "Other", "Box") }) {
+      REQUIRE(t != INVALID);
+      CAPTURE(t);
+      scav_span const route{ l.r.route[t] };
+      REQUIRE(route.len >= 2);
+      bool const leaves{ l.c.transitions[t].src.v == box };
+      scav_point const end{ l.r.points[route.off + (leaves ? 0 : (route.len - 1))] };
+      CHECK(((end.y == f.y) || (end.y == (f.y + f.h))));
+      CHECK_FALSE(on_border(end, l.z.state[box]));
+    }
+  }
+}
+
+TEST_CASE("gauntlet: an inner-face end beside a sibling region sits on the separator") {
+  // Row 0 sets the two regions side by side: `light up` starts in the second from the
+  // gap between them and `stall` ends in it from the first, each on the divider's line.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Laid l;
+    lay("separator.scav", one_row(p), l);
+    uint32_t const running{ state_named(l.c, "Running") };
+    REQUIRE(running != INVALID);
+    REQUIRE(l.c.states[running].submachines.len == 2);
+    Span const subs{ l.c.states[running].submachines };
+    scav_rect const &motor{ l.z.sub[l.c.submachine_ids[subs.off].v] };
+    scav_rect const &light{ l.z.sub[l.c.submachine_ids[subs.off + 1].v] };
+    REQUIRE((motor.x + motor.w) < light.x);
+    int32_t const divider{ (motor.x + motor.w) + ((light.x - (motor.x + motor.w)) / 2) };
+    uint32_t const up{ between(l.c, "Running", "Lit") };
+    uint32_t const stall{ between(l.c, "Stopped", "Running") };
+    REQUIRE(up != INVALID);
+    REQUIRE(stall != INVALID);
+    scav_point const first{ l.r.points[l.r.route[up].off] };
+    scav_span const route{ l.r.route[stall] };
+    REQUIRE(route.len >= 2);
+    scav_point const last{ l.r.points[route.off + route.len - 1] };
+    for (scav_point const end : { first, last }) {
+      CHECK(end.x == divider);
+      CHECK(end.y > imax(motor.y, light.y));
+      CHECK(end.y < imin(motor.y + motor.h, light.y + light.h));
+    }
+  }
+}
+
+TEST_CASE(
+    "gauntlet: a port is reported walled only when every face it could take is lined") {
+  // `drop` enters Box: a header alone leaves it another face, and all four lined leave
+  // it none.
+  scav_router_id id{};
+  REQUIRE(router_by_name(reinterpret_cast<scav_byte const *>("orthogonal"), 10, id));
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    for (uint32_t const lined : { 0U, 1U, 4U }) {
+      CAPTURE(lined);
+      Chart c{ loaded("header.scav") };
+      uint32_t const box{ state_named(c, "Box") };
+      REQUIRE(box != INVALID);
+      std::vector<scav_box_space> rows(c.states.size());
+      int32_t const band{ p.font_size_grid };
+      rows[box] = { .min_w = 0,
+                    .h_before = (lined > 0) ? band : 0,
+                    .h_after = (lined > 1) ? band : 0,
+                    .w_before = (lined > 1) ? band : 0,
+                    .w_after = (lined > 1) ? band : 0 };
+      scav_spaces const s{ spaces_of(rows) };
+      scav_layout_opts const o{ .profile = one_row(p), .router = id, .threads = 1 };
+      std::vector<scav_placed> placed;
+      std::vector<Diagnostic> diags;
+      LayoutTrace trace;
+      trace_sink_set(&trace);
+      bool const ran{ layout_run(c, s, o, placed, diags) };
+      trace_sink_set(nullptr);
+      REQUIRE(ran);
+      uint32_t walled{ 0 };
+      for (TraceEvent const &e : trace.events) {
+        if (e.kind == TraceKind::PortWalled) { ++walled; }
+      }
+      CHECK((walled > 0) == (lined == 4));
     }
   }
 }

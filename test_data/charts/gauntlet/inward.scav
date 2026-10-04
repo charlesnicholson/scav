@@ -1,0 +1,14 @@
+// A composite's inner face, met from the composite into its child and from a child out
+// to it: each end sits on the composite's border, clear of its bands.
+chart inward "inner-face ends on a decorated composite" {
+  state Box "a header over the inner face" {
+    state Child,
+    state Other,
+    trans * -> Child,
+    trans Child -> Other "step",
+  },
+
+  trans * -> Box,
+  trans internal Box -> Box/Child "reset",
+  trans Box/Other -> Box "restart",
+}
