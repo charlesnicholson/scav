@@ -608,7 +608,8 @@ struct Descent {
   GridQuery q;
 };
 
-// `cost_through_boxes` over `kid`, as `box_overlaps_over` takes it.
+// `cost_through_boxes` over `kid`, as `box_overlaps_over` takes it. `*regions` counts each
+// piece entering a live region of a reached or detached state that neither end lies in.
 int32_t through_boxes_over(Chart const &c,
                            SizedLayout const &z,
                            Ancestry const &an,
@@ -616,7 +617,8 @@ int32_t through_boxes_over(Chart const &c,
                            std::vector<scav_rect> const &kid,
                            std::vector<Piece> const &pieces,
                            Descent &d,
-                           int32_t *bands) {
+                           int32_t *bands,
+                           int32_t *regions) {
   d.roots.clear();
   for (uint32_t m = 0; m < c.submachines.size(); ++m) {
     if (c.submachines[m].owner.v == INVALID) { vec_push_back(d.roots, m); }
@@ -640,16 +642,31 @@ int32_t through_boxes_over(Chart const &c,
         if ((r.w > 0) && (r.h > 0) && enters(piece.a, piece.b, r)) { ++*bands; }
       }
     };
-    for (uint32_t const st : an.detached) { charge(st, z.state[st]); }
+    bool foreign{ false };  // the piece entered a region neither end lies in
+    // Tests `st`'s regions and, with `descend`, queues them as frames.
+    auto const open = [&](uint32_t st, bool descend) {
+      Span const subs{ c.states[st].submachines };
+      for (uint32_t i = 0; i < subs.len; ++i) {
+        uint32_t const m{ c.submachine_ids[subs.off + i].v };
+        if (descend) { vec_push_back(d.stack, m); }
+        if ((regions == nullptr) || foreign || (m >= c.submachines.size()) ||
+            (c.submachines[m].live == 0) || !overlaps(reach, z.sub[m])) {
+          continue;
+        }
+        foreign = enters(piece.a, piece.b, z.sub[m]) && !within(c, tr.src, m) &&
+                  !within(c, tr.dst, m);
+      }
+    };
+    for (uint32_t const st : an.detached) {
+      charge(st, z.state[st]);
+      open(st, false);
+    }
 
     auto const visit = [&](uint32_t at) {
       if (!overlaps(reach, kid[at])) { return; }
       uint32_t const st{ g.child[at] };
       charge(st, kid[at]);
-      Span const subs{ c.states[st].submachines };
-      for (uint32_t i = 0; i < subs.len; ++i) {
-        vec_push_back(d.stack, c.submachine_ids[subs.off + i].v);
-      }
+      open(st, true);
     };
     vec_assign(d.stack, d.roots.begin(), d.roots.end());
     while (!d.stack.empty()) {
@@ -664,6 +681,7 @@ int32_t through_boxes_over(Chart const &c,
       cost_grid_query(g, frame, reach, d.q);
       for (uint32_t const at : d.q.hit) { visit(at); }
     }
+    if (foreign) { ++*regions; }
   }
   return total;
 }
@@ -679,9 +697,8 @@ struct Scratch {
   std::vector<Wide> carried;
   std::vector<scav_rect> state_box, state_rect;  // grown, and as placed
   std::vector<uint32_t> state_of;
-  std::vector<scav_rect> seg_box, region_box;
-  std::vector<uint32_t> region_of;
-  RectGrid states, segs, placed, regions;
+  std::vector<scav_rect> seg_box;
+  RectGrid states, segs, placed;
   std::vector<uint32_t> cursor;  // every grid build's placing pass
   std::vector<uint8_t> encloses;
   std::vector<uint32_t> common;
@@ -827,7 +844,7 @@ void cost_grid_query(ChildGrid const &g,
   std::vector<scav_rect> kid;
   child_rects(g, z, kid);
   Descent d;
-  return through_boxes_over(c, z, an, g, kid, pieces, d, nullptr);
+  return through_boxes_over(c, z, an, g, kid, pieces, d, nullptr, nullptr);
 }
 
 // Each sweep over a sort of its own; `cost_terms` sorts once and runs all three.
@@ -1115,8 +1132,8 @@ CostTerms cost_terms(CostContext const &ctx,
     if (!adjacent(z.sub[from.v], z.sub[to.v], p.sub_sep)) { ++t.adjacency; }
   }
 
-  // Tier 0 `box_overlap`, `through_box` and `through_band`, from the context's ancestry
-  // and this candidate's fill of its child grid.
+  // Tier 0 `box_overlap`, `through_box`, `through_band` and `through_region`, from the
+  // context's ancestry and this candidate's fill of its child grid.
   ChildGrid &grid{ sc.grid };
   grid.frame = ctx.grid.frame;
   grid.child = ctx.grid.child;
@@ -1124,8 +1141,15 @@ CostTerms cost_terms(CostContext const &ctx,
   child_rects(grid, z, sc.kid);
   child_grid_fill(grid, sc.kid, sc.cursor);
   t.box_overlap = box_overlaps_over(c, grid, sc.kid, sc.descent.q);
-  t.through_box =
-      through_boxes_over(c, z, ctx.an, grid, sc.kid, pieces, sc.descent, &t.through_band);
+  t.through_box = through_boxes_over(c,
+                                     z,
+                                     ctx.an,
+                                     grid,
+                                     sc.kid,
+                                     pieces,
+                                     sc.descent,
+                                     &t.through_band,
+                                     &t.through_region);
 
   // Counts each axial piece that runs along a state's border, found through the grid of
   // states grown by `near`.
@@ -1138,30 +1162,6 @@ CostTerms cost_terms(CostContext const &ctx,
     }
   }
 
-  std::vector<scav_rect> &region_box{ sc.region_box };
-  std::vector<uint32_t> &region_of{ sc.region_of };
-  region_box.clear();
-  region_of.clear();
-  for (uint32_t m = 0; m < c.submachines.size(); ++m) {
-    if ((c.submachines[m].live == 0) || (c.submachines[m].owner.v == INVALID)) {
-      continue;
-    }
-    vec_push_back(region_box, grow(z.sub[m], 1));
-    vec_push_back(region_of, m);
-  }
-  RectGrid &regions{ sc.regions };
-  grid_over(regions, region_box, sc.cursor);
-  for (Piece const &piece : pieces) {
-    Transition const &trans{ c.transitions[piece.trans] };
-    scav_rect const reach{ span_rect(piece.a, piece.b) };
-    if (grid_visit(regions, reach, 0, [&](uint32_t at) {
-          uint32_t const m{ region_of[at] };
-          return overlaps(reach, region_box[at]) && !within(c, trans.src, m) &&
-                 !within(c, trans.dst, m) && enters(piece.a, piece.b, z.sub[m]);
-        })) {
-      ++t.through_region;
-    }
-  }
   if ((party != nullptr) && (tier0_of(t) != 0)) {
     vec_assign(*party, c.transitions.size(), uint8_t{ 1 });
   }

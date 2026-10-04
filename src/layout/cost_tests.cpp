@@ -701,6 +701,56 @@ TEST_CASE("cost: a route through a region neither end is in is a Tier-0 violatio
   CHECK(cost_terms(c, decompose(c), z, through, {}, profile()).through_region == 1);
 }
 
+TEST_CASE("cost: a region is tested where the descent reaches its owner") {
+  // `Shell` holds `On`, which holds regions `main` and `aux`; `Ready` in `main` goes to
+  // `X` outside.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const shell{ build_state(c, root, "Shell", StateKind::Normal, {}) };
+  SubmachineId const in{ build_submachine(c, shell, "in", {}) };
+  StateId const on{ build_state(c, in, "On", StateKind::Normal, {}) };
+  SubmachineId const main_sub{ build_submachine(c, on, "main", {}) };
+  SubmachineId const aux_sub{ build_submachine(c, on, "aux", {}) };
+  StateId const ready{ build_state(c, main_sub, "Ready", StateKind::Normal, {}) };
+  StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
+  build_trans(c, ready, x, TransKind::External, {});
+
+  SizedLayout z{ blank(c) };
+  z.state[shell.v] = { .x = -10, .y = -10, .w = 420, .h = 220 };
+  z.sub[in.v] = { .x = -5, .y = -5, .w = 410, .h = 210 };
+  z.state[on.v] = { .x = 0, .y = 0, .w = 400, .h = 200 };
+  z.sub[main_sub.v] = { .x = 10, .y = 10, .w = 180, .h = 180 };
+  z.sub[aux_sub.v] = { .x = 210, .y = 10, .w = 180, .h = 180 };
+  z.state[ready.v] = { .x = 40, .y = 60, .w = 100, .h = 40 };
+  z.state[x.v] = { .x = 600, .y = 60, .w = 100, .h = 40 };
+  auto const regions = [&](Routes const &r) {
+    return cost_terms(c, decompose(c), z, r, {}, profile()).through_region;
+  };
+  Routes const through{ routes_of(c,
+                                  { { { .x = 140, .y = 80 }, { .x = 600, .y = 80 } } }) };
+  Routes const below{ routes_of(c,
+                                { { { .x = 90, .y = 100 },
+                                    { .x = 90, .y = 300 },
+                                    { .x = 650, .y = 300 },
+                                    { .x = 650, .y = 100 } } }) };
+  CHECK(regions(through) == 1);
+  CHECK(regions(below) == 0);
+
+  // `aux` hanging 200 below its owner is entered at y 300 by a piece that misses `On`.
+  z.sub[aux_sub.v].h = 380;
+  CHECK(regions(below) == 0);
+  z.sub[aux_sub.v].h = 180;
+
+  // Under a dead `Shell`, `On` is detached and its regions are tested outright.
+  c.states[shell.v].live = 0;
+  CHECK(regions(through) == 1);
+
+  // A dead owner's regions are tested by none.
+  c.states[shell.v].live = 1;
+  c.states[on.v].live = 0;
+  CHECK(regions(through) == 0);
+}
+
 TEST_CASE("cost: a placed box over a state neither endpoint is under breaks Tier 0") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
@@ -2127,18 +2177,29 @@ int32_t box_overlaps(Chart const &c, SizedLayout const &z) {
   return total;
 }
 
-int32_t through_boxes(Chart const &c,
-                      SizedLayout const &z,
-                      Ancestry const &an,
-                      std::vector<Piece> const &pieces) {
-  int32_t total{ 0 };
+// `through_box`, and `through_region` per piece entering a live region of a state the
+// descent reaches or of a detached one, where neither end lies in the region.
+void through(Chart const &c,
+             SizedLayout const &z,
+             Ancestry const &an,
+             std::vector<Piece> const &pieces,
+             CostTerms &t) {
   for (Piece const &piece : pieces) {
     Transition const &tr{ c.transitions[piece.trans] };
     scav_rect const reach{ span_rect(piece.a, piece.b) };
+    bool foreign{ false };
     auto const charge = [&](uint32_t st) {
       if (enters(piece.a, piece.b, z.state[st]) && !cost_ancestor(c, an, { st }, tr.src) &&
           !cost_ancestor(c, an, { st }, tr.dst)) {
-        ++total;
+        ++t.through_box;
+      }
+      Span const subs{ c.states[st].submachines };
+      for (uint32_t i = 0; i < subs.len; ++i) {
+        uint32_t const m{ c.submachine_ids[subs.off + i].v };
+        if ((c.submachines[m].live != 0) && enters(piece.a, piece.b, z.sub[m]) &&
+            !within(c, tr.src, m) && !within(c, tr.dst, m)) {
+          foreign = true;
+        }
       }
     };
     for (uint32_t const st : an.detached) { charge(st); }
@@ -2159,8 +2220,8 @@ int32_t through_boxes(Chart const &c,
         }
       }
     }
+    t.through_region += foreign ? 1 : 0;
   }
-  return total;
 }
 
 // `s` and every state enclosing it, `s` first.
@@ -2381,7 +2442,7 @@ CostTerms terms(Chart const &c,
 
   Ancestry const an{ cost_flatten_ancestry(c) };
   t.box_overlap = box_overlaps(c, z);
-  t.through_box = through_boxes(c, z, an, pieces);
+  through(c, z, an, pieces, t);
   for (Piece const &piece : pieces) {
     for (uint32_t st = 0; st < c.states.size(); ++st) {
       if ((c.states[st].live != 0) &&
@@ -2389,22 +2450,6 @@ CostTerms terms(Chart const &c,
         ++t.flush;
         break;
       }
-    }
-  }
-  for (Piece const &piece : pieces) {
-    Transition const &trans{ c.transitions[piece.trans] };
-    scav_rect const reach{ span_rect(piece.a, piece.b) };
-    for (uint32_t m = 0; m < c.submachines.size(); ++m) {
-      if ((c.submachines[m].live == 0) || (c.submachines[m].owner.v == INVALID)) {
-        continue;
-      }
-      scav_rect const &region{ z.sub[m] };
-      if (!overlaps(reach, grow(region, 1)) || !enters(piece.a, piece.b, region)) {
-        continue;
-      }
-      if (within(c, trans.src, m) || within(c, trans.dst, m)) { continue; }
-      ++t.through_region;
-      break;
     }
   }
   return t;
