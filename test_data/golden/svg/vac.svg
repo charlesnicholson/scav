@@ -30,7 +30,7 @@
   <polyline points="1620,6597 2100,6597" fill="none" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-0"/>
   <polyline points="2999,7058 2999,7616" fill="none" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-1"/>
   <polyline points="352,3200 832,3200" fill="none" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-2"/>
-  <polyline points="1856,2093 1600,2093 1600,2362 1760,2362" fill="none" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-3"/>
+  <polyline points="352,1997 352,2125 1632,2125 1632,2093" fill="none" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-3"/>
   <polyline points="1856,2029 2080,2029 4052,2029 4525,2029 5357,2029" fill="none" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-4"/>
   <polyline points="352,4045 832,4045" fill="none" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-5"/>
   <polyline points="4877,1821 5357,1821" fill="none" stroke="#1a1a1a" stroke-width="16" class="scav-trans scav-id-6"/>
@@ -50,7 +50,7 @@
   <polygon points="2196,6597 2100,6645 2100,6549" fill="#1a1a1a" stroke="none" class="scav-trans scav-id-0"/>
   <polygon points="2999,7712 2951,7616 3047,7616" fill="#1a1a1a" stroke="none" class="scav-trans scav-id-1"/>
   <polygon points="928,3200 832,3248 832,3152" fill="#1a1a1a" stroke="none" class="scav-trans scav-id-2"/>
-  <polygon points="1856,2362 1760,2410 1760,2314" fill="#1a1a1a" stroke="none" class="scav-trans scav-id-3"/>
+  <polygon points="1632,1997 1680,2093 1584,2093" fill="#1a1a1a" stroke="none" class="scav-trans scav-id-3"/>
   <polygon points="5453,2029 5357,2077 5357,1981" fill="#1a1a1a" stroke="none" class="scav-trans scav-id-4"/>
   <polygon points="928,4045 832,4093 832,3997" fill="#1a1a1a" stroke="none" class="scav-trans scav-id-5"/>
   <polygon points="5453,1821 5357,1869 5357,1773" fill="#1a1a1a" stroke="none" class="scav-trans scav-id-6"/>
@@ -69,7 +69,7 @@
   <polygon points="12380,4307 12284,4355 12284,4259" fill="#1a1a1a" stroke="none" class="scav-trans scav-id-19"/>
   <polygon points="11947,5954 13368,6479 11947,7004 10526,6479" fill="#ffffff" stroke="#1a1a1a" stroke-width="16" class="scav-state scav-id-4"/>
   <text x="2090" y="7444" font-size="160" textLength="768" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-1">POWER_ON</text>
-  <text x="416" y="2307" font-size="160" textLength="960" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-3">BUMP_RETRY</text>
+  <text x="512" y="2403" font-size="160" textLength="960" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-3">BUMP_RETRY</text>
   <text x="2528" y="2243" font-size="160" textLength="1056" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-4">battery low</text>
   <text x="5742" y="2638" font-size="160" textLength="1440" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-7">contacts closed</text>
   <text x="8274" y="3445" font-size="160" textLength="384" lengthAdjust="spacing" fill="#1a1a1a" class="scav-trans scav-id-8">full</text>

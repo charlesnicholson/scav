@@ -62,27 +62,27 @@ chart vac "robot vacuum" (test_data/charts/vac.scav:3)
   include dock "dock.scav" -> test_data/charts/dock.scav (test_data/charts/vac.scav:4)
   include lamp "./led.scav" -> test_data/charts/led.scav (test_data/charts/vac.scav:7)
   include lamp "led.scav" -> test_data/charts/led.scav (test_data/charts/dock.scav:4)
-geometry structural 48ddf5b1 coordinate 375b5dd5
+geometry structural 8c4c015e coordinate fa90dbc5
   chart 0,0 13801x8758
-  rests on --portfolio-row 1 --rank 11:1 --rank 1:1 --rank 4:1 --rank 14:3 --rank 18:2 --reverse 18:0 --end 13:0:0:2 --end 19:0:0:3 --orient 5
-  cost t0 0 t2 6395
+  rests on --portfolio-row 1 --rank 11:1 --rank 1:1 --rank 4:1 --rank 14:3 --rank 18:2 --reverse 18:0 --end 19:0:0:3 --end 13:0:0:2 --orient 5 --loop 7:2:0
+  cost t0 0 t2 6431
     tier0 through_box 0 through_band 0 box_overlap 0 flush 0 through_region 0 retrace 0 label_over_box 0 label_over_route 0 label_far 0
-    bends 4 share 3202bp
+    bends 4 share 3184bp
     corridor 0 share 0bp
     crossings 0 share 0bp
-    excess_len 1260 share 43bp
+    excess_len 1516 share 49bp
     adjacency 0 share 0bp
     label 0 share 0bp
-    label_near 13 share 75bp
+    label_near 109 share 74bp
     aspect 2118 share 37bp
-    area 120869158 share 5127bp
+    area 120869158 share 5098bp
     crowding 0 share 0bp
-    length 23129 share 1513bp
+    length 23884 share 1554bp
     transit_bends 0 share 0bp
     whitespace 42969042 share 0bp
   label leader 96
     placed t1 1949,7230 1050x269
-    placed t3 256,2093 1280x269
+    placed t3 352,2189 1280x269
     placed t4 2358,2029 1396x269
     placed t7 5534,2424 1856x269
     placed t8 8172,3231 589x269
@@ -131,7 +131,7 @@ geometry structural 48ddf5b1 coordinate 375b5dd5
   route $initial -> Off (1620,6597) (2196,6597)
   route Off -> Booting (2999,7058) (2999,7712)
   route On:main/$initial -> On:main/Idle (352,3200) (928,3200)
-  route On:main/Ready -> On:main/Ready (1856,2093) (1600,2093) (1600,2362) (1856,2362)
+  route On:main/Ready -> On:main/Ready (352,1997) (352,2125) (1632,2125) (1632,1997)
   route On:main/Ready -> dock/On/Seated (1856,2029) (2080,2029) (4052,2029) (4525,2029) (5453,2029) port s1 d0 port s0 d0 port s0 d1
   route On:aux/$initial -> On:aux/Idle (352,4045) (928,4045)
   route dock/On/$initial -> dock/On/Seated (4877,1821) (5453,1821)
