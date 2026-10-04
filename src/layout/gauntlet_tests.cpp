@@ -1703,6 +1703,39 @@ TEST_CASE("gauntlet: an internal loop stays inside its state, under its header")
   }
 }
 
+TEST_CASE("gauntlet: an external self-loop leaves its state and returns to it outside") {
+  // `tick` is a loop off one face of Waiting: both ends on its border a clearance apart at
+  // least, square throughout, and every corner outside it.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Laid l;
+    lay("loop.scav", p, l);
+    uint32_t const waiting{ state_named(l.c, "Waiting") };
+    REQUIRE(waiting != INVALID);
+    uint32_t tick{ INVALID };
+    for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+      Transition const &tr{ l.c.transitions[t] };
+      if ((tr.src.v == waiting) && (tr.dst.v == waiting)) { tick = t; }
+    }
+    REQUIRE(tick != INVALID);
+    scav_rect const &box{ l.z.state[waiting] };
+    scav_span const route{ l.r.route[tick] };
+    REQUIRE(route.len >= 4);
+    scav_point const *const pt{ l.r.points.data() + route.off };
+    scav_point const first{ pt[0] };
+    scav_point const last{ pt[route.len - 1] };
+    CHECK(on_border(first, box));
+    CHECK(on_border(last, box));
+    Wide const apart{ imax(imax(Wide{ first.x } - last.x, Wide{ last.x } - first.x),
+                           imax(Wide{ first.y } - last.y, Wide{ last.y } - first.y)) };
+    CHECK(apart >= route_clearance(p));
+    for (uint32_t k = 1; (k + 1) < route.len; ++k) {
+      CAPTURE(k);
+      CHECK_FALSE(strictly_inside(pt[k], box));
+    }
+  }
+}
+
 TEST_CASE("gauntlet: crossings into decorated composites keep clear of every band") {
   // Headers everywhere and footers on composites: ports take side faces, nothing enters
   // a band, and an internal transition into a composite's depth starts on its border.

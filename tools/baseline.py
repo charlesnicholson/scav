@@ -189,9 +189,7 @@ def to_puml(model: dict) -> tuple[str, list[str]]:
     for trans in model["transitions"]:
         if not trans["live"]:
             continue
-        # PlantUML spells an internal transition as a description line, and
-        # scav's measured extent already reserves room for that label -- an
-        # arrow here would draw it a second time.
+        # PlantUML has no internal arrow; its idiom is a description line.
         if trans["kind"] != "external":
             if trans["label"]:
                 described.setdefault(trans["src"], []).append(trans["label"])
@@ -305,9 +303,8 @@ def to_elk(model: dict) -> dict:
     # Keyed by the state that owns the enclosing region, or None for the root.
     by_owner: dict[int | None, list[dict]] = {}
     for i, trans in enumerate(model["transitions"]):
-        # ELK has no representation for an internal transition, and scav's
-        # measured extent already carries its label.
-        if not trans["live"] or trans["kind"] != "external":
+        # ELK has no internal kind, so an internal transition is an ordinary edge.
+        if not trans["live"]:
             continue
         sub = innermost(trans)
         edge = {"id": f"e{i}",

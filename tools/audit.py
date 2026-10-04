@@ -214,7 +214,8 @@ def audit(svg, every, chart, doc, verbose):
     cx, cy, cw, ch = chart
     live = [i for i, st in enumerate(doc["states"]) if st["live"]]
     rects = doc["geometry"]["state"]
-    bands = (doc["geometry"]["state_before"], doc["geometry"]["state_after"])
+    bands = tuple(doc["geometry"][k] for k in ("state_before", "state_after", "state_lead",
+                                                "state_trail"))
     legs = []
     route = {}
     starts = []
@@ -396,20 +397,12 @@ def audit(svg, every, chart, doc, verbose):
         under = enclosing(doc, src) & enclosing(doc, dst)
         # A composite end holding the other end encloses the label as well.
         under |= {s for s, t in ((src, dst), (dst, src)) if s in enclosing(doc, t)}
-        # A transition with no route is the exception, and every one of them on
-        # the corpus is a self-transition: nothing placed its label and the
-        # builder draws it in the `after` band its own source reserved for
-        # exactly it. That band is inside the source's rect, so the whole-rect
-        # test reads eleven correct placements as violations -- `enclosing` is
-        # strict, so a source is never among its own ancestors and the exemption
-        # that used to live inside the `under` branch could never fire. What is
-        # still out of bounds there is the `before` band, which is the state's
-        # own title.
-        own_band = edge["src"] if not doc["geometry"]["route"][int(ident)] else None
+        # An internal or local self-transition is a loop drawn inside its own
+        # state, so that state holds its label but for its bands.
+        if src == dst and edge["kind"] != "external":
+            under.add(src)
         for i in live:
-            if i == own_band:
-                hit = struck(bands[0][i])
-            elif i in under:
+            if i in under:
                 hit = any(struck(band[i]) for band in bands)
             else:
                 hit = struck(rects[i])

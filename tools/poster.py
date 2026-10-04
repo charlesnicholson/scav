@@ -266,7 +266,7 @@ def main() -> int:
 <body>
 <h1>Statechart layout shootout</h1>
 <p class="sub">Every chart in the transcribed corpus, drawn by scav and by the two
-incumbents it exists to replace. Same model, same eleven files, three engines.
+incumbents it exists to replace. Same model, same {len(charts)} files, three engines.
 scav is at <code>{commit}</code>: layered ranks per submachine, Brandes &amp;
 K&ouml;pf coordinates, and orthogonal routes from an A* over a per-frame
 visibility graph.</p>

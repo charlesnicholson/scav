@@ -3,7 +3,7 @@ bottler.scav e5beb21e 24655
 brew.scav 08ff777f 7716
 dock.scav 6621b7f5 6396
 estop.scav a4541994 2513
-kiln.scav cb33f063 15496
+kiln.scav 6eee9f96 15496
 led.scav 265b3331 2519
 mill.scav ba3045b3 63934
 ota.scav eb9b3674 8165

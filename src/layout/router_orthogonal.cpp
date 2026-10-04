@@ -723,16 +723,24 @@ void ortho_seat_loops(std::vector<RouteNet> const &nets,
       }
       from = imax(from, to);
     }
+    // A pitch apart and a pitch from each neighbouring seat where the run holds that;
+    // otherwise thirds, or halves against an end of the face.
     bool const ends_lo{ best_lo == lo };
     bool const ends_hi{ best_hi == hi };
-    int32_t const room{ best_hi - best_lo };
-    int32_t parts{ 3 };  // a run between two seats keeps a third each side
-    if (ends_lo || ends_hi) { parts = (ends_lo && ends_hi) ? 1 : 2; }
-    int32_t const apart{ imin(pitch, room / parts) };
-    int32_t const mid{ best_lo + (room / 2) };
+    int32_t const inner_lo{ best_lo + (ends_lo ? 0 : pitch) };
+    int32_t const inner_hi{ best_hi - (ends_hi ? 0 : pitch) };
     int32_t &first{ along_y ? at[slot].y : at[slot].x };
     int32_t &second{ along_y ? at[slot + 1].y : at[slot + 1].x };
-    first = mid - (apart / 2);
+    if ((inner_hi - inner_lo) >= pitch) {
+      first = inner_lo + floor_div((inner_hi - inner_lo) - pitch, 2);
+      second = first + pitch;
+      continue;
+    }
+    int32_t const room{ best_hi - best_lo };
+    int32_t parts{ 3 };
+    if (ends_lo || ends_hi) { parts = (ends_lo && ends_hi) ? 1 : 2; }
+    int32_t const apart{ imin(pitch, room / parts) };
+    first = (best_lo + (room / 2)) - (apart / 2);
     second = first + apart;
   }
 }
