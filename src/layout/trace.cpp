@@ -223,8 +223,9 @@ void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out)
           j.kv("leg", e.score.leg);
         }
         if (e.score.row == INVALID) {
-          static constexpr std::array<char const *, 6> MOVE{ "rank", "cut",  "reverse",
-                                                             "face", "side", "fold" };
+          static constexpr std::array<char const *, 8> MOVE{ "rank",   "cut",  "reverse",
+                                                             "face",   "side", "fold",
+                                                             "orient", "loop" };
           j.ks("move", (e.score.move < MOVE.size()) ? MOVE[e.score.move] : "?");
           if (e.score.move == TRACE_MOVE_FACE) {
             j.ks("end", (e.score.end == 0) ? "src" : "dst");
@@ -235,6 +236,10 @@ void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out)
             j.kv("side", e.score.face);
           }
           if (e.score.move == TRACE_MOVE_FOLD) { j.kv("layer", e.score.rank); }
+          if (e.score.move == TRACE_MOVE_LOOP) {
+            j.kv("face", e.score.face);
+            j.kv("end", e.score.end);
+          }
         }
         j.kv("t0", e.score.t0);
         j.kv("t2", e.score.t2);

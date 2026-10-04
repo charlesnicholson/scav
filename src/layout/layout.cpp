@@ -717,13 +717,14 @@ struct Improved {
 };
 
 // `Orient` is a kick only.
-enum class MoveKind : uint32_t { Rank, Cut, Reverse, Face, Side, Fold, Orient };
+enum class MoveKind : uint32_t { Rank, Cut, Reverse, Face, Side, Fold, Orient, Loop };
 static_assert((static_cast<uint16_t>(MoveKind::Rank) == TRACE_MOVE_RANK) &&
                   (static_cast<uint16_t>(MoveKind::Cut) == TRACE_MOVE_CUT) &&
                   (static_cast<uint16_t>(MoveKind::Reverse) == TRACE_MOVE_REVERSE) &&
                   (static_cast<uint16_t>(MoveKind::Face) == TRACE_MOVE_FACE) &&
                   (static_cast<uint16_t>(MoveKind::Side) == TRACE_MOVE_SIDE) &&
-                  (static_cast<uint16_t>(MoveKind::Fold) == TRACE_MOVE_FOLD),
+                  (static_cast<uint16_t>(MoveKind::Fold) == TRACE_MOVE_FOLD) &&
+                  (static_cast<uint16_t>(MoveKind::Loop) == TRACE_MOVE_LOOP),
               "the trace names a move by this enum's ordinal");
 // One Level 1 move or kick; `kind` names which of its pins is set. `Face` is an end pin
 // at a box end, `Side` one at a port end.
@@ -733,6 +734,7 @@ struct Move {
   EndPin end_pin{};
   FoldPin fold{};
   OrientPin orient{};
+  LoopPin loop{};
   MoveKind kind{ MoveKind::Rank };
 };
 
@@ -747,6 +749,7 @@ void add_move(SearchPins &into, Move const &m) {
     case MoveKind::Side: vec_push_back(into.ends, m.end_pin); break;
     case MoveKind::Fold: vec_push_back(into.folds, m.fold); break;
     case MoveKind::Orient: vec_push_back(into.orients, m.orient); break;
+    case MoveKind::Loop: vec_push_back(into.loops, m.loop); break;
     case MoveKind::Rank: vec_push_back(into.ranks, m.pin); break;
   }
 }
@@ -775,6 +778,10 @@ void put_pins(SearchPins const &p, std::vector<uint32_t> &w) {
   vec_push_back(w, static_cast<uint32_t>(p.folds.size()));
   for (FoldPin const &f : p.folds) {
     vec_insert(w, w.end(), { f.frame.v, f.mode, f.layer });
+  }
+  vec_push_back(w, static_cast<uint32_t>(p.loops.size()));
+  for (LoopPin const &l : p.loops) {
+    vec_insert(w, w.end(), { l.state.v, l.face, l.end });
   }
 }
 
@@ -1161,6 +1168,7 @@ Improved run_search(Chart const &c,
   uint32_t side_scored{ 0 };
   uint32_t pin_scored{ 0 };
   uint32_t fold_scored{ 0 };
+  uint32_t loop_scored{ 0 };
   std::vector<Move> round;
   std::vector<Scored> got;
   std::vector<uint32_t> order;
@@ -1178,7 +1186,7 @@ Improved run_search(Chart const &c,
 #endif
   std::vector<uint8_t> chained;
   while ((cut_scored < budget) || (rev_scored < budget) || (face_scored < budget) ||
-         (side_scored < budget) || (pin_scored < budget) ||
+         (side_scored < budget) || (pin_scored < budget) || (loop_scored < budget) ||
          (refold && (fold_scored < budget))) {
     // Enumerates the round's moves, scores them in parallel, then reduces them in order.
     round.clear();
@@ -1303,6 +1311,22 @@ Improved run_search(Chart const &c,
               .kind = MoveKind::Fold });
       }
     }
+    // Loop moves: each state with a loop room to each other placement.
+    std::vector<uint8_t> const &drawn_place{ out.best.sized.loop_place };
+    std::vector<scav_rect> const &drawn_loop{ out.best.sized.loop };
+    for (uint32_t st = 0; (st < drawn_loop.size()) && (loop_scored < budget); ++st) {
+      if ((drawn_loop[st].w == 0) || (st >= drawn_place.size()) ||
+          !in_scope(c.states[st].parent.v)) {
+        continue;
+      }
+      for (uint32_t k = 0; (k < 8) && (loop_scored < budget); ++k) {
+        if (k == drawn_place[st]) { continue; }
+        ++loop_scored;
+        vec_push_back(round,
+                      { .loop = { .state = StateId{ st }, .face = k / 2, .end = k % 2 },
+                        .kind = MoveKind::Loop });
+      }
+    }
     if (round.empty()) { break; }
 
     // Each candidate runs its phases on one thread.
@@ -1408,25 +1432,28 @@ Improved run_search(Chart const &c,
       if ((m.kind == MoveKind::Face) || (m.kind == MoveKind::Side)) {
         moved_trans = m.end_pin.trans.v;
         moved_leg = m.end_pin.leg;
-      } else if (m.kind != MoveKind::Rank) {
+      } else if ((m.kind != MoveKind::Rank) && (m.kind != MoveKind::Loop)) {
         moved_trans = m.leg.trans.v;
         moved_leg = m.leg.leg;
       }
       bool const refolded{ m.kind == MoveKind::Fold };
+      bool const placed{ m.kind == MoveKind::Loop };
       uint32_t moved_rank{ refolded ? m.fold.layer : 0U };
       if (m.kind == MoveKind::Rank) { moved_rank = m.pin.rank; }
+      uint32_t moved_state{ (m.kind == MoveKind::Rank) ? m.pin.state.v : INVALID };
+      moved_state = placed ? m.loop.state.v : moved_state;
       trace_emit(
           { .kind = TraceKind::CandidateScored,
             .pass = static_cast<uint16_t>(verdict),
             .frame = refolded ? m.fold.frame.v : INVALID,
             .score = { .row = INVALID,
-                       .state = (m.kind == MoveKind::Rank) ? m.pin.state.v : INVALID,
+                       .state = moved_state,
                        .rank = moved_rank,
                        .trans = moved_trans,
                        .leg = moved_leg,
                        .move = static_cast<uint16_t>(m.kind),
-                       .end = static_cast<uint16_t>(m.end_pin.end),
-                       .face = m.end_pin.face,
+                       .end = static_cast<uint16_t>(placed ? m.loop.end : m.end_pin.end),
+                       .face = placed ? m.loop.face : m.end_pin.face,
                        .t0 = sc.viable ? sc.cost.t0_violations : 0,
                        .t2 = sc.viable ? sc.cost.t2 : 0 } });
       // Under a trace sink, a viable move's term shares follow its score.
@@ -1480,6 +1507,10 @@ SearchPins get_pins(int32_t const *w, uint32_t &at) {
   vec_resize(p.folds, next());
   for (FoldPin &f : p.folds) {
     f = { .frame = SubmachineId{ next() }, .mode = next(), .layer = next() };
+  }
+  vec_resize(p.loops, next());
+  for (LoopPin &l : p.loops) {
+    l = { .state = StateId{ next() }, .face = next(), .end = next() };
   }
   return p;
 }
@@ -1823,8 +1854,8 @@ bool layout_run(Chart &c,
     auto const outside = [&](uint32_t frame, std::vector<uint8_t> const &redo) {
       return (frame >= redo.size()) || (redo[frame] == 0);
     };
-    // `from` less every rank, cut, end and fold pin in a `redo` frame; orientations and
-    // reversals stay.
+    // `from` less every rank, cut, end, fold and loop pin in a `redo` frame; orientations
+    // and reversals stay.
     auto const warm = [&](SearchPins const &from, std::vector<uint8_t> const &redo) {
       SearchPins out;
       out.reverses = from.reverses;
@@ -1842,6 +1873,11 @@ bool layout_run(Chart &c,
       }
       for (FoldPin const &fp : from.folds) {
         if (outside(fp.frame.v, redo)) { vec_push_back(out.folds, fp); }
+      }
+      for (LoopPin const &lp : from.loops) {
+        uint32_t const f{ (lp.state.v < c.states.size()) ? c.states[lp.state.v].parent.v
+                                                         : INVALID };
+        if (outside(f, redo)) { vec_push_back(out.loops, lp); }
       }
       return out;
     };
@@ -2051,7 +2087,8 @@ bool layout_run(Chart &c,
   if (moves != nullptr) {
     auto const count = [](SearchPins const &q) {
       return static_cast<uint32_t>(q.ranks.size() + q.cuts.size() + q.reverses.size() +
-                                   q.ends.size() + q.orients.size() + q.folds.size());
+                                   q.ends.size() + q.orients.size() + q.folds.size() +
+                                   q.loops.size());
     };
     uint32_t const now{ count(held[best]) };
     uint32_t const had{ count(seed) };
@@ -2062,6 +2099,21 @@ bool layout_run(Chart &c,
     *taken = held[best];
     taken->reverses = candidates[best].laid.reverses;
     taken->ends = candidates[best].laid.ends;
+    // Each port end the facing pass would turn on a re-lay from `taken` keeps its side.
+    SubmachineOrders const drawn{ order_submachines(c, g, s, p, o.threads, *taken) };
+    Facing again;
+    std::vector<FacingTaken> seats;
+    facing_flips(again, seats, c, g, drawn, candidates[best].sized, s);
+    for (EndPin const &e : again.sides) {
+      if (e.trans.v >= g.trans_segments.size()) { continue; }
+      Span const segs{ g.trans_segments[e.trans.v] };
+      if (e.leg >= segs.len) { continue; }
+      vec_push_back(taken->ends,
+                    { .trans = e.trans,
+                      .leg = e.leg,
+                      .end = e.end,
+                      .face = drawn.seg_side[segs.off + e.leg] });
+    }
   }
 
   SizedLayout sized{ std::move(candidates[best].sized) };

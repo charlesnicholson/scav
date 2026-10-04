@@ -128,6 +128,7 @@ inline std::string corpus_pins_line(std::string_view chart,
       flag("--fold", { f.frame.v, f.mode });
     }
   }
+  for (LoopPin const &l : pins.loops) { flag("--loop", { l.state.v, l.face, l.end }); }
   out += '\n';
   return out;
 }
@@ -182,6 +183,8 @@ inline bool corpus_pins_read(std::string_view flags, uint32_t &row, SearchPins &
       pins.orients.push_back({ .frame = SubmachineId{ f[0] } });
     } else if (name == "--fold") {
       pins.folds.push_back({ .frame = SubmachineId{ f[0] }, .mode = f[1], .layer = f[2] });
+    } else if (name == "--loop") {
+      pins.loops.push_back({ .state = StateId{ f[0] }, .face = f[1], .end = f[2] });
     } else {
       return false;
     }

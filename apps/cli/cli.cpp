@@ -106,6 +106,15 @@ bool read_value(std::string_view flag, std::string_view value, LayoutArgs &out) 
                               .face = field[3] });
     return true;
   }
+  if (flag == "--loop") {
+    std::array<uint32_t, 3> field{};
+    if (!ordinal_fields(value, field) || (field[1] > 3) || (field[2] > 1)) {
+      return false;
+    }
+    out.pins.loops.push_back(
+        { .state = StateId{ field[0] }, .face = field[1], .end = field[2] });
+    return true;
+  }
   if ((flag == "--fold") && (std::ranges::count(value, ':') == 2)) {
     std::array<uint32_t, 3> field{};
     if (!ordinal_fields(value, field) || (field[1] > FOLD_NEVER)) { return false; }
@@ -140,7 +149,7 @@ ArgRead read_layout_arg(int argc, char **argv, int &i, LayoutArgs &out) {
   }
   if ((arg != "--profile") && (arg != "--portfolio-row") && (arg != "--rank") &&
       (arg != "--cut") && (arg != "--reverse") && (arg != "--end") &&
-      (arg != "--orient") && (arg != "--fold")) {
+      (arg != "--orient") && (arg != "--fold") && (arg != "--loop")) {
     return ArgRead::NotOurs;
   }
   if ((i + 1) >= argc) { return ArgRead::Malformed; }
@@ -193,6 +202,11 @@ void append_layout_args(std::string &out,
       out += ':';
       string_append_u32(out, f.layer);
     }
+  }
+  for (LoopPin const &l : pins.loops) {
+    pair("--loop", l.state.v, l.face);
+    out += ':';
+    string_append_u32(out, l.end);
   }
 }
 

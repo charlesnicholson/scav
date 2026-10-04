@@ -21,9 +21,10 @@ namespace scav {
 struct SizedLayout {
   std::vector<scav_rect> state, before, after;  // parallel to states
   std::vector<scav_rect> lead, trail;           // parallel to states: the side bands
-  std::vector<scav_rect> loop;   // parallel to states: its inner loops' room
-  std::vector<scav_rect> sub;    // parallel to submachines
-  std::vector<scav_point> node;  // parallel to the orders' nodes
+  std::vector<scav_rect> loop;      // parallel to states: its inner loops' room
+  std::vector<uint8_t> loop_place;  // parallel to states: the room's `face * 2 + end`
+  std::vector<scav_rect> sub;       // parallel to submachines
+  std::vector<scav_point> node;     // parallel to the orders' nodes
   // Parallel to the segments, or empty: 1 where a straight leg seats at the leading end of
   // its ends' overlap, with its label's room on the trailing side.
   std::vector<uint8_t> lean;
@@ -54,37 +55,53 @@ struct Row {
 };
 
 // A state's walls: top, bottom, the side bands stretched from the top band's top to the
-// bottom band's bottom, and the loop room extended to the border its loops leave by.
+// bottom band's bottom, and the loop room extended to the free interior's boundary its
+// loops leave by.
 std::array<scav_rect, 5> state_walls(SizedLayout const &z, uint32_t st);
 
-// Whether a state's loop room sits at the leading end of its interior and its inner loops
-// leave by its leading border: a band lines its trailing face and none its leading one.
-bool loop_mirrored(SizedLayout const &z, uint32_t st);
+// A loop room's face of the free interior (0 left, 1 right, 2 top, 3 bottom) and its end
+// on that face (0 leading, 1 trailing).
+struct LoopPlace {
+  uint32_t face{ 1 };
+  uint32_t end{ 1 };
+};
+// `z.loop_place[st]`, or the unpinned placement where `z` has no entry.
+LoopPlace loop_place(SizedLayout const &z, uint32_t st);
+// The unpinned placement: the trailing end of the right face, or of the left face where a
+// band lines only the right side.
+LoopPlace loop_place_default(int32_t w_before, int32_t w_after);
+// Where the legs of loops leaving by `face` end: the border, or the band's inner edge.
+int32_t loop_boundary(SizedLayout const &z, uint32_t st, uint32_t face);
 
 // Whether a band of `state` lines `face` (0 left, 1 right, 2 top, 3 bottom), which then
 // takes no port.
 bool face_lined(scav_spaces const &s, uint32_t state, uint32_t face);
 
-// One inner loop's row in its state's room; rows stack in transition order. The far leg
-// runs `loop_reach` in from the room's exit edge and spans the label stack beside it.
+// One inner loop's row in its state's room: rows stack across the exit face in transition
+// order. The far leg runs `loop_reach` in from the exit face and spans the label stack
+// beyond it; `cross` runs along the exit face, `along` away from it.
 struct LoopRow {
-  int32_t label_w, label_h, lane, h;  // `lane` between the legs, `h` the row's
+  int32_t label_w, label_h, lane, cross, along;  // `lane` between the legs
 };
-LoopRow loop_row(scav_profile const &p, scav_extent label);
+LoopRow loop_row(scav_profile const &p, scav_extent label, bool vertical);
 int32_t loop_reach(scav_profile const &p);
 int32_t loop_gap(scav_profile const &p);   // label to far leg, at most `label_leader`
 int32_t loop_lane(scav_profile const &p);  // the least lane between the loop's two legs
 
-// Per inner loop, the extent its path boxes stack to; per state, the room its inner loops
-// stack into: the widest row by the rows' summed height.
+// Per inner loop, the extent its path boxes stack to.
+void loop_labels(Chart const &c, scav_spaces const &s, std::vector<scav_extent> &label);
+
+// Per state, the room its inner loops stack into for the placement `place[st]` gives
+// (`face * 2 + end`; the right face where `place` is short), and `label` as `loop_labels`.
 void loop_rooms(Chart const &c,
                 scav_spaces const &s,
                 scav_profile const &p,
+                std::vector<uint8_t> const &place,
                 std::vector<scav_extent> &label,
                 std::vector<scav_extent> &room);
 
 // Per transition, its inner loop's row across its state's room, zero for any other; and
-// `label` as `loop_rooms` gives it.
+// `label` as `loop_labels` gives it.
 void loop_rows(Chart const &c,
                SizedLayout const &z,
                scav_spaces const &s,

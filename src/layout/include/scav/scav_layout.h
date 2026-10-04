@@ -111,6 +111,14 @@ struct FoldPin {
   uint32_t layer{ 0 };
 };
 
+// Places `state`'s loop room on face `face` (0 left, 1 right, 2 top, 3 bottom) of its free
+// interior, at end `end` of that face: 0 leading (top or left), 1 trailing.
+struct LoopPin {
+  StateId state{ INVALID };
+  uint32_t face{ 0 };
+  uint32_t end{ 0 };
+};
+
 // Every input besides the tuple that a drawing depends on.
 struct SearchPins {
   std::vector<RankPin> ranks;
@@ -119,6 +127,7 @@ struct SearchPins {
   std::vector<EndPin> ends;
   std::vector<OrientPin> orients;
   std::vector<FoldPin> folds;  // the last pin naming a frame decides it
+  std::vector<LoopPin> loops;  // the last pin naming a state decides it
 };
 
 // Rows in the Level 2 table of phase-2 tuples, one per combination of box packer,

@@ -339,18 +339,27 @@ void route_transitions(Routes &out,
     uint32_t const st{ c.transitions[t].src.v };
     scav_rect const r{ z.state[st] };
     scav_rect const row{ loop_row[t] };
-    bool const mirrored{ loop_mirrored(z, st) };
-    int32_t const lane{ imin(scav::loop_row(p, cs.loop_label[t]).lane, row.h) };
-    int32_t const ya{ row.y + floor_div(row.h - lane, 2) };
-    int32_t const x{ mirrored ? (row.x + loop_reach(p))
-                              : ((row.x + row.w) - loop_reach(p)) };
-    int32_t const border{ mirrored ? r.x : (r.x + r.w) };
+    uint32_t const exit{ loop_place(z, st).face };
+    bool const vertical{ exit >= 2 };
+    int32_t const edge{ loop_boundary(z, st, exit) };
+    int32_t const lane{ imin(scav::loop_row(p, cs.loop_label[t], vertical).lane,
+                             vertical ? row.w : row.h) };
+    int32_t const first{ vertical ? (row.x + floor_div(row.w - lane, 2))
+                                  : (row.y + floor_div(row.h - lane, 2)) };  // the first leg
+    int32_t leg{ (exit == 0) ? (row.x + loop_reach(p)) : ((row.x + row.w) - loop_reach(p)) };
+    if (vertical) {
+      leg = (exit == 2) ? (row.y + loop_reach(p)) : ((row.y + row.h) - loop_reach(p));
+    }
+    auto const at = [vertical](int32_t along, int32_t across) {
+      return vertical ? scav_point{ .x = across, .y = along }
+                      : scav_point{ .x = along, .y = across };
+    };
     uint32_t const off{ static_cast<uint32_t>(loop_points.size()) };
     loop_span[t] = { .off = off, .len = 4 };
-    vec_push_back(loop_points, { .x = border, .y = ya });
-    vec_push_back(loop_points, { .x = x, .y = ya });
-    vec_push_back(loop_points, { .x = x, .y = ya + lane });
-    vec_push_back(loop_points, { .x = border, .y = ya + lane });
+    vec_push_back(loop_points, at(edge, first));
+    vec_push_back(loop_points, at(leg, first));
+    vec_push_back(loop_points, at(leg, first + lane));
+    vec_push_back(loop_points, at(edge, first + lane));
     std::array<scav_point, 2> const ends{ loop_points[off], loop_points[off + 3] };
     std::array<uint32_t, 2> const face{ face_of(ends[0], r), face_of(ends[1], r) };
     for (uint32_t k = 0; k < 2; ++k) {

@@ -154,6 +154,33 @@ def corner_arc(doc, state):
     return min(min(bw, bh) // 8, ring)
 
 
+def on_exit(pt, pts, doc, state):
+    """`pt` lies on the exit face of `state`'s inner loop `pts`, which its first leg gives:
+    the border where that side has no band, the band's inner edge where it has one."""
+    g = doc["geometry"]
+    bx, by, bw, bh = g["state"][state]
+    lead, trail = g["state_lead"][state], g["state_trail"][state]
+    before, after = g["state_before"][state], g["state_after"][state]
+    left = lead[0] + lead[2] if lead[2] else bx
+    right = trail[0] if trail[2] else bx + bw
+    top = before[1] + before[3] if before[3] else by
+    bottom = after[1] if after[3] else by + bh
+    (ax, ay), (cx, cy) = pts[0], pts[1]
+    if ay == cy and cx != ax:  # left or right face: the first leg runs inward
+        return pt[0] == (left if cx > ax else right) and top <= pt[1] <= bottom
+    if ax == cx and cy != ay:  # top or bottom face
+        return pt[1] == (top if cy > ay else bottom) and left <= pt[0] <= right
+    return False
+
+
+def inner_loop(doc, trans):
+    """The state an internal or local self-transition is drawn inside, else None."""
+    edge = doc["transitions"][int(trans)]
+    if edge["src"] != edge["dst"] or edge["kind"] == "external":
+        return None
+    return edge["src"]
+
+
 def geometry(chart, scav_bin, row=None):
     """Live non-empty state boxes, chart rect and layout dump of one candidate.
     `row` pins a portfolio row and must match the row the SVG was rendered at.
@@ -193,13 +220,22 @@ def audit(svg, every, chart, doc, verbose):
     route = {}
     starts = []
     tips = []
+
+    # A route end on a state border, or an inner loop's end on its exit boundary.
+    def attached(pt, trans):
+        if any(on_border(pt, box) for box in every):
+            return True
+        state = inner_loop(doc, trans)
+        pts = route.get(trans, [])
+        return state is not None and len(pts) > 1 and on_exit(pt, pts, doc, state)
+
     for m in POLYLINE.finditer(svg):
         pts, trans = points(m.group(1)), m.group(2)
         route[trans] = pts
         found["route segments"] = found.get("route segments", 0) + len(pts) - 1
         found["route starts"] = found.get("route starts", 0) + 1
         starts.append((pts[0], trans))
-        if not any(on_border(pts[0], box) for box in every):
+        if not attached(pts[0], trans):
             note("route start not on any border", f"t{trans} at {pts[0]}")
         for pt in pts:
             if not (cx <= pt[0] <= cx + cw and cy <= pt[1] <= cy + ch):
@@ -235,7 +271,7 @@ def audit(svg, every, chart, doc, verbose):
         tip, trans = points(m.group(1))[0], m.group(2)
         found["arrowheads"] = found.get("arrowheads", 0) + 1
         tips.append((tip, trans))
-        if not any(on_border(tip, box) for box in every):
+        if not attached(tip, trans):
             note("arrowhead not on any border", f"t{trans} tip {tip}")
 
     # Counts route ends on state borders and flags those within a corner arc.

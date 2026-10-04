@@ -798,7 +798,7 @@ struct CallBuffers {
   std::vector<scav_rect> pieces;
   std::vector<Pieces> by_route;
   std::vector<uint32_t> live, queue, merge, settled;
-  std::vector<scav_extent> loop_label, loop_room;
+  std::vector<scav_extent> loop_label;
   Local local;
 };
 
@@ -886,7 +886,7 @@ uint32_t place_labels_by(Chart const &c,
   int32_t prior_mid{ 0 };
   bool chained{ false };
   int32_t const leader{ label_leader(p) };
-  loop_rooms(c, s, p, cb.loop_label, cb.loop_room);
+  loop_labels(c, s, cb.loop_label);
   int32_t loop_y{ 0 };  // the next box's top beside the current subject's loop
 
   for (uint32_t const i : queue) {
@@ -898,18 +898,24 @@ uint32_t place_labels_by(Chart const &c,
       prior_subject = box.subject;
       chained = false;
       if (looped && (r.len >= 3)) {
+        uint32_t const face{ loop_place(z, c.transitions[box.subject].src.v).face };
+        int32_t const stack_h{ cb.loop_label[box.subject].h };
         Wide const mid{ (Wide{ points[r.off + 1].y } + points[r.off + 2].y) / 2 };
-        loop_y = static_cast<int32_t>(mid - (cb.loop_label[box.subject].h / 2));
+        int32_t const leg{ points[r.off + 1].y };
+        loop_y = static_cast<int32_t>(mid - (stack_h / 2));
+        if (face >= 2) {
+          loop_y = (face == 2) ? (leg + loop_gap(p)) : (leg - loop_gap(p) - stack_h);
+        }
       }
     }
     if (looped && (r.len >= 3)) {
       // Stacked `loop_gap` beyond the loop's far leg, in the room its row reserved.
+      uint32_t const face{ loop_place(z, c.transitions[box.subject].src.v).face };
       int32_t const leg{ points[r.off + 1].x };
-      bool const mirrored{ loop_mirrored(z, c.transitions[box.subject].src.v) };
-      out[i] = { .x = mirrored ? (leg + loop_gap(p)) : (leg - loop_gap(p) - box.w),
-                 .y = loop_y,
-                 .w = box.w,
-                 .h = box.h };
+      Wide const mid{ (Wide{ points[r.off + 1].x } + points[r.off + 2].x) / 2 };
+      int32_t x{ (face == 0) ? (leg + loop_gap(p)) : (leg - loop_gap(p) - box.w) };
+      if (face >= 2) { x = static_cast<int32_t>(mid - (box.w / 2)); }
+      out[i] = { .x = x, .y = loop_y, .w = box.w, .h = box.h };
       loop_y += box.h;
       vec_push_back(settled, i);
       continue;

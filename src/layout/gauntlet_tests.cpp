@@ -52,13 +52,13 @@ scav_profile compact() {
 
 // Every chart in test_data/charts/gauntlet, by file name.
 constexpr std::array GAUNTLET{
-  "above.scav",   "carried.scav",   "chain.scav",   "corner.scav",  "crossing.scav",
-  "crowd.scav",   "enclosing.scav", "entered.scav", "fanin.scav",   "folded.scav",
-  "fork.scav",    "header.scav",    "inloop.scav",  "inward.scav",  "lane.scav",
-  "level.scav",   "long.scav",      "loop.scav",    "marks.scav",   "mixed.scav",
-  "mutual.scav",  "ported.scav",    "pulled.scav",  "regions.scav", "roundtrip.scav",
-  "seated.scav",  "separator.scav", "stretch.scav", "through.scav", "tight.scav",
-  "transit.scav", "under.scav",     "unfolded.scav"
+  "above.scav",   "carried.scav",   "chain.scav",   "corner.scav",    "crossing.scav",
+  "crowd.scav",   "enclosing.scav", "entered.scav", "fanin.scav",     "folded.scav",
+  "fork.scav",    "header.scav",    "inloop.scav",  "inward.scav",    "lane.scav",
+  "level.scav",   "long.scav",      "loop.scav",    "marks.scav",     "mixed.scav",
+  "mutual.scav",  "ported.scav",    "pulled.scav",  "regions.scav",   "room.scav",
+  "rooms.scav",   "roundtrip.scav", "seated.scav",  "separator.scav", "stretch.scav",
+  "through.scav", "tight.scav",     "transit.scav", "under.scav",     "unfolded.scav"
 };
 
 // One chart, laid out: the pieces every property below reads.
@@ -1450,6 +1450,67 @@ bool any_band_entered(Laid const &l) {
   return false;
 }
 
+// State `st`'s interior inside its ring, less its four bands.
+scav_rect free_interior(SizedLayout const &z, uint32_t st) {
+  int32_t const x0{ z.lead[st].x + z.lead[st].w };
+  int32_t const y0{ z.before[st].y + z.before[st].h };
+  return { .x = x0, .y = y0, .w = z.trail[st].x - x0, .h = z.after[st].y - y0 };
+}
+
+// Inner loop `t`: both ends on its room's exit face of the free interior (the border where
+// no band lines that side, the band's inner edge where one does), its far leg inside the
+// free interior, its room in the placement's corner, and no band of its state entered.
+void loop_lands(Laid const &l, uint32_t t) {
+  uint32_t const st{ l.c.transitions[t].src.v };
+  LoopPlace const at{ loop_place(l.z, st) };
+  CAPTURE(at.face);
+  CAPTURE(at.end);
+  scav_rect const &box{ l.z.state[st] };
+  std::array<scav_rect, 4> const band{ l.z.lead[st],
+                                       l.z.trail[st],
+                                       l.z.before[st],
+                                       l.z.after[st] };
+  std::array<int32_t, 4> const border{ box.x, box.x + box.w, box.y, box.y + box.h };
+  std::array<int32_t, 4> const inner{ band[0].x + band[0].w,
+                                      band[1].x,
+                                      band[2].y + band[2].h,
+                                      band[3].y };
+  bool const vertical{ at.face >= 2 };
+  bool const lined{ vertical ? (band[at.face].h > 0) : (band[at.face].w > 0) };
+  int32_t const edge{ lined ? inner[at.face] : border[at.face] };
+  scav_span const route{ l.r.route[t] };
+  REQUIRE(route.len == 4);
+  scav_point const *const pt{ l.r.points.data() + route.off };
+  CHECK((vertical ? pt[0].y : pt[0].x) == edge);
+  CHECK((vertical ? pt[3].y : pt[3].x) == edge);
+  CHECK((vertical ? (pt[0].x < pt[3].x) : (pt[0].y < pt[3].y)));
+  scav_rect const hole{ free_interior(l.z, st) };
+  for (uint32_t k = 1; k < 3; ++k) { CHECK(strictly_inside(pt[k], hole)); }
+  scav_rect const &room{ l.z.loop[st] };
+  bool const low_x{ (at.face == 0) || (vertical && (at.end == 0)) };
+  bool const low_y{ (at.face == 2) || (!vertical && (at.end == 0)) };
+  CHECK((low_x ? (room.x == hole.x) : ((room.x + room.w) == (hole.x + hole.w))));
+  CHECK((low_y ? (room.y == hole.y) : ((room.y + room.h) == (hole.y + hole.h))));
+  std::array<scav_rect, 5> const walls{ state_walls(l.z, st) };
+  for (uint32_t k = 0; k < 3; ++k) {
+    for (uint32_t w = 0; w < 4; ++w) {
+      scav_rect const &wall{ walls[w] };
+      if ((wall.w > 0) && (wall.h > 0)) { CHECK_FALSE(enters(pt[k], pt[k + 1], wall)); }
+    }
+  }
+}
+
+// One `w` by `h` box per labelled transition of `c`.
+std::vector<scav_path_box> label_boxes(Chart const &c, int32_t w, int32_t h) {
+  std::vector<scav_path_box> out;
+  for (uint32_t t = 0; t < c.transitions.size(); ++t) {
+    if (c.transitions[t].label.len != 0) {
+      out.push_back({ .subject = t, .w = w, .h = h, .order = 0 });
+    }
+  }
+  return out;
+}
+
 uint32_t from_named(Chart const &c, uint32_t src) {
   for (uint32_t t = 0; t < c.transitions.size(); ++t) {
     if (c.transitions[t].src.v == src) { return t; }
@@ -1624,8 +1685,8 @@ TEST_CASE("gauntlet: with every state headed, no route enters a band" *
 }
 
 TEST_CASE("gauntlet: an internal loop stays inside its state, under its header") {
-  // Each loop leaves its state's right border and returns to it lower down, every
-  // corner strictly inside, clear of the header, the children and its label.
+  // Each loop leaves its room's exit face and returns to it, every corner strictly inside
+  // the free interior, clear of the header and the children, its label inside.
   for (scav_profile const &p : { readable(), compact() }) {
     CAPTURE(p.profile_id);
     Chart const probe{ loaded("inloop.scav") };
@@ -1653,18 +1714,10 @@ TEST_CASE("gauntlet: an internal loop stays inside its state, under its header")
       if ((tr.src != tr.dst) || (tr.kind == TransKind::External)) { continue; }
       CAPTURE(t);
       ++loops;
-      scav_rect const &box{ l.z.state[tr.src.v] };
-      scav_rect const &head{ l.z.before[tr.src.v] };
+      loop_lands(l, t);
+      scav_rect const hole{ free_interior(l.z, tr.src.v) };
       scav_span const route{ l.r.route[t] };
-      REQUIRE(route.len == 4);
       scav_point const *const pt{ l.r.points.data() + route.off };
-      CHECK(pt[0].x == (box.x + box.w));
-      CHECK(pt[3].x == (box.x + box.w));
-      CHECK(pt[0].y < pt[3].y);
-      for (uint32_t k = 1; k < 3; ++k) {
-        CHECK(strictly_inside(pt[k], box));
-        CHECK(pt[k].y > (head.y + head.h));
-      }
       for (uint32_t st = 0; st < l.c.states.size(); ++st) {
         if ((st == tr.src.v) || !ancestor(l.c, tr.src, { st })) { continue; }
         for (uint32_t k = 0; k < 3; ++k) {
@@ -1674,15 +1727,136 @@ TEST_CASE("gauntlet: an internal loop stays inside its state, under its header")
       for (uint32_t i = 0; i < boxes.size(); ++i) {
         if (boxes[i].subject != t) { continue; }
         scav_rect const &label{ l.r.placed[i] };
-        CHECK(label.x > box.x);
-        CHECK((label.x + label.w) < pt[1].x);
-        CHECK(label.y >= (head.y + head.h));
-        CHECK((label.y + label.h) < (box.y + box.h));
+        CHECK(label.x >= hole.x);
+        CHECK((label.x + label.w) <= (hole.x + hole.w));
+        CHECK(label.y >= hole.y);
+        CHECK((label.y + label.h) <= (hole.y + hole.h));
       }
     }
     CHECK(loops == 4);
     CHECK_FALSE(any_band_entered(l));
   }
+}
+
+TEST_CASE(
+    "gauntlet: a pinned loop room lands its legs on its face's border or band edge") {
+  // `room` with each of the eight placements pinned, unbanded and with all four bands.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    for (bool const banded : { false, true }) {
+      CAPTURE(banded);
+      Chart const probe{ loaded("room.scav") };
+      uint32_t const idle{ state_named(probe, "Idle") };
+      REQUIRE(idle != INVALID);
+      std::vector<scav_box_space> rows(probe.states.size());
+      if (banded) {
+        rows[idle].w_before = 2 * p.font_size_grid;
+        rows[idle].w_after = 2 * p.font_size_grid;
+        rows[idle].h_before = 2 * p.font_size_grid;
+        rows[idle].h_after = 2 * p.font_size_grid;
+      }
+      std::vector<scav_path_box> const boxes{
+        label_boxes(probe, 3 * p.font_size_grid, p.font_size_grid)
+      };
+      scav_spaces s{ spaces_of(rows) };
+      s.path_box = boxes.data();
+      s.n_path_box = static_cast<uint32_t>(boxes.size());
+      s.path_box_stride = static_cast<uint32_t>(sizeof(scav_path_box));
+      for (uint32_t k = 0; k < 8; ++k) {
+        CAPTURE(k);
+        SearchPins const seed{
+          .loops = { { .state = StateId{ idle }, .face = k / 2, .end = k % 2 } }
+        };
+        Laid l;
+        lay("room.scav", one_row(p), l, s, &seed);
+        REQUIRE(l.z.loop_place.size() > idle);
+        CHECK(l.z.loop_place[idle] == k);
+        scav_rect const &box{ l.z.state[idle] };
+        std::array<int32_t, 4> const border{ box.x, box.x + box.w, box.y, box.y + box.h };
+        CHECK((loop_boundary(l.z, idle, k / 2) != border[k / 2]) == banded);
+        for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+          if (inner_loop(l.c, t)) { loop_lands(l, t); }
+        }
+        CHECK_FALSE(any_band_entered(l));
+        CHECK(cost_of(cost_terms(l.c, l.g, l.z, l.r, s, one_row(p)), one_row(p))
+                  .t0_violations == 0);
+      }
+    }
+  }
+}
+
+TEST_CASE(
+    "gauntlet: a loop pinned to a headed state's top face leaves the header's edge") {
+  // A top band and the top-face placement: the legs end on the band's bottom edge.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Chart const probe{ loaded("room.scav") };
+    uint32_t const idle{ state_named(probe, "Idle") };
+    REQUIRE(idle != INVALID);
+    std::vector<scav_box_space> rows(probe.states.size());
+    rows[idle].h_before = 2 * p.font_size_grid;
+    std::vector<scav_path_box> const boxes{
+      label_boxes(probe, 3 * p.font_size_grid, p.font_size_grid)
+    };
+    scav_spaces s{ spaces_of(rows) };
+    s.path_box = boxes.data();
+    s.n_path_box = static_cast<uint32_t>(boxes.size());
+    s.path_box_stride = static_cast<uint32_t>(sizeof(scav_path_box));
+    SearchPins const seed{ .loops = {
+                               { .state = StateId{ idle }, .face = 2, .end = 1 } } };
+    Laid l;
+    lay("room.scav", one_row(p), l, s, &seed);
+    uint32_t const poll{ from_named(l.c, idle) };
+    REQUIRE(poll != INVALID);
+    REQUIRE(inner_loop(l.c, poll));
+    scav_rect const &head{ l.z.before[idle] };
+    scav_span const route{ l.r.route[poll] };
+    REQUIRE(route.len == 4);
+    scav_point const *const pt{ l.r.points.data() + route.off };
+    CHECK(pt[0].y == (head.y + head.h));
+    CHECK(pt[3].y == (head.y + head.h));
+    CHECK(pt[1].y > (head.y + head.h));
+    loop_lands(l, poll);
+    CHECK_FALSE(any_band_entered(l));
+    CHECK(
+        cost_of(cost_terms(l.c, l.g, l.z, l.r, s, one_row(p)), one_row(p)).t0_violations ==
+        0);
+  }
+}
+
+TEST_CASE(
+    "gauntlet: the search turns a loop room under a wide description to save height") {
+  // `rooms` under a wide top band: three loops side by side take less height than three
+  // rows, so the searched drawing pins a top or bottom face.
+  scav_profile const p{ readable() };
+  Chart const probe{ loaded("rooms.scav") };
+  uint32_t const busy{ state_named(probe, "Busy") };
+  REQUIRE(busy != INVALID);
+  std::vector<scav_box_space> rows(probe.states.size());
+  rows[busy].h_before = 2 * p.font_size_grid;
+  rows[busy].min_w = 100 * p.font_size_grid;
+  std::vector<scav_path_box> const boxes{
+    label_boxes(probe, 2 * p.font_size_grid, p.font_size_grid)
+  };
+  scav_spaces s{ spaces_of(rows) };
+  s.path_box = boxes.data();
+  s.n_path_box = static_cast<uint32_t>(boxes.size());
+  s.path_box_stride = static_cast<uint32_t>(sizeof(scav_path_box));
+  Laid searched;
+  lay("rooms.scav", p, searched, s, nullptr);
+  CHECK(loop_place(searched.z, busy).face >= 2);
+  CHECK(std::ranges::any_of(searched.pins.loops,
+                            [&](LoopPin const &pin) { return pin.state.v == busy; }));
+  SearchPins const stacked{ .loops = {
+                                { .state = StateId{ busy }, .face = 1, .end = 1 } } };
+  Laid unturned;
+  lay("rooms.scav", one_row(p), unturned, s, &stacked);
+  CHECK(searched.z.state[busy].h < unturned.z.state[busy].h);
+  for (uint32_t t = 0; t < searched.c.transitions.size(); ++t) {
+    if (inner_loop(searched.c, t)) { loop_lands(searched, t); }
+  }
+  CHECK(cost_of(cost_terms(searched.c, searched.g, searched.z, searched.r, s, p), p)
+            .t0_violations == 0);
 }
 
 TEST_CASE("gauntlet: an external self-loop leaves its state and returns to it outside") {

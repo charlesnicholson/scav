@@ -759,6 +759,12 @@ void order_submachines(SubmachineOrders &o,
       o.sub_fold_cut[pin.frame.v] = pin.layer;
     }
   }
+  vec_assign(o.state_loop, c.states.size(), 0);
+  for (LoopPin const &pin : pins.loops) {
+    if ((pin.state.v < o.state_loop.size()) && (pin.face < 4) && (pin.end < 2)) {
+      o.state_loop[pin.state.v] = static_cast<uint8_t>(1 + (pin.face * 2) + pin.end);
+    }
+  }
   vec_assign(o.sub_gaps, c.submachines.size(), Span{});
   vec_assign(o.state_node, c.states.size(), INVALID);
   vec_assign(o.seg_node, g.segments.size(), INVALID);

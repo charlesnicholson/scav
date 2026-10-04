@@ -1,0 +1,7 @@
+// One state with one labelled internal loop: its loop room takes each placement.
+chart room "a loop room" {
+  state Idle,
+
+  trans * -> Idle,
+  trans internal Idle -> Idle "poll",
+}

@@ -189,6 +189,23 @@ class TestDump(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
         self.assertIn("no such profile", result.stderr)
 
+    def test_a_loop_placement_is_part_of_what_a_layout_rests_on(self) -> None:
+        # `--loop S:F:E` is reported field for field, and lays out again from it.
+        chart = "test_data/charts/gauntlet/room.scav"
+        shipped = self.run_dump("--layout", "--no-search", "--loop", "0:3:0", chart)
+        self.assertEqual(0, shipped.returncode)
+        rests = [ln for ln in shipped.stdout.splitlines() if ln.startswith("  rests on ")]
+        self.assertEqual(1, len(rests))
+        self.assertIn(" --loop 0:3:0", rests[0])
+        again = self.run_dump("--layout", "--no-search", *rests[0].split()[2:], chart)
+        self.assertEqual(0, again.returncode)
+        self.assertEqual(shipped.stdout, again.stdout)
+        other = self.run_dump("--layout", "--no-search", "--loop", "0:2:1", chart)
+        self.assertEqual(0, other.returncode)
+        geometry = [ln for ln in shipped.stdout.splitlines() if ln.startswith("geometry ")]
+        self.assertNotEqual(geometry, [ln for ln in other.stdout.splitlines()
+                                       if ln.startswith("geometry ")])
+
     def test_a_malformed_pin_is_a_usage_error(self) -> None:
         for bad in (["--rank", "1"], ["--cut", "a:b"], ["--end", "1:0:2:0"],
                     ["--portfolio-row", "99"], ["--no-search", "--no-search"],
@@ -196,7 +213,8 @@ class TestDump(unittest.TestCase):
                     ["--fold", "0:3"], ["--fold", "0"], ["--fold", "0:3:1"],
                     ["--fold", "0:1:x"], ["--fold", "0:1:"], ["--end"],
                     ["--end", "6:1:0"], ["--end", "6:1:2:0"], ["--end", "6:1:0:4"],
-                    ["--end", "6:1:0:x"], ["--end", "6:1:0:"], ["--end", "6:1:0:2:1"]):
+                    ["--end", "6:1:0:x"], ["--end", "6:1:0:"], ["--end", "6:1:0:2:1"],
+                    ["--loop", "0:4:0"], ["--loop", "0:0:2"], ["--loop", "0:1"]):
             with self.subTest(bad=bad):
                 result = self.run_dump("--layout", *bad, CHART.as_posix())
                 self.assertEqual(2, result.returncode)

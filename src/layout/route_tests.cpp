@@ -454,7 +454,7 @@ TEST_CASE("route: an internal self-transition loops inside its state's loop room
   SizedLayout z{ blank(c, o) };
   scav_profile const p{ profile() };
   z.state[a.v] = { .x = 0, .y = 0, .w = 1000, .h = 1000 };
-  int32_t const row{ loop_row(p, {}).h };
+  int32_t const row{ loop_row(p, {}, false).cross };
   z.loop[a.v] = { .x = 600, .y = 500, .w = loop_reach(p), .h = row };
   Routes const r{ route_transitions(c, g, o, z, {}, p, STRAIGHT) };
   REQUIRE(r.route[0].len == 4);
@@ -486,7 +486,7 @@ TEST_CASE(
   SizedLayout z{ blank(c, o) };
   scav_profile const p{ profile() };
   int32_t const clear{ route_clearance(p) };
-  int32_t const row{ loop_row(p, {}).h };
+  int32_t const row{ loop_row(p, {}, false).cross };
   z.state[a.v] = { .x = 0, .y = 0, .w = 4000, .h = 4000 };
   z.state[b.v] = { .x = 8000,
                    .y = 1600,
@@ -535,7 +535,7 @@ TEST_CASE("route: a port slot on a face an inner loop leaves moves clear of its 
   SizedLayout z{ blank(c, o) };
   scav_profile const p{ profile() };
   int32_t const clear{ route_clearance(p) };
-  int32_t const row{ loop_row(p, {}).h };
+  int32_t const row{ loop_row(p, {}, false).cross };
   z.state[comp.v] = { .x = 0, .y = 0, .w = 4000, .h = 4000 };
   z.state[s.v] = { .x = 400, .y = 1600, .w = 800, .h = 800 };
   z.state[d.v] = { .x = 8000, .y = 0, .w = 800, .h = 800 };
@@ -1621,7 +1621,7 @@ TEST_CASE("route: a state lined on its trailing face loops out of its leading on
   REQUIRE(inner_loop(d.c, 2));
   scav_rect const &box{ d.z.state[a] };
   scav_rect const &trail{ d.z.trail[a] };
-  CHECK(loop_mirrored(d.z, a));
+  CHECK(loop_place(d.z, a).face == 0);
   CHECK(d.z.loop[a].x == d.z.lead[a].x);
   scav_span const loop{ d.r.route[2] };
   REQUIRE(loop.len == 4);

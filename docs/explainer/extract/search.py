@@ -66,6 +66,8 @@ def pin_of(m: dict) -> list | None:
         return ["--cut", f"{m['trans']}:{m['leg']}"]
     if k == "reverse":
         return ["--reverse", f"{m['trans']}:{m['leg']}"]
+    if k == "loop":
+        return ["--loop", f"{m['state_id']}:{m['face']}:{m['end']}"]
     return None
 
 
@@ -76,6 +78,9 @@ def describe(m: dict, model: dict) -> str:
         return f"pin {paths[m['state_id']]} to rank {m['rank']}"
     if m["move"] == "fold":
         return f"refold frame {m.get('frame')} at layer {m.get('layer')}"
+    if m["move"] == "loop":
+        return (f"put {paths[m['state_id']]}'s loop room on face {m['face']} end {m['end']}"
+                " (face 0 left,1 right,2 top,3 bottom; end 0 leading,1 trailing)")
     t = tr[m["trans"]]
     what = f"t{m['trans']} {paths[t['src']]} -> {paths[t['dst']]}"
     if m["move"] == "face":

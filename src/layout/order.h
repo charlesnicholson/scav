@@ -46,6 +46,8 @@ struct SubmachineOrders {
   // Parallel to submachines: 0 under the row's fold rule, else 1 + a fold pin's mode.
   std::vector<uint8_t> sub_fold;
   std::vector<uint32_t> sub_fold_cut;  // parallel to submachines: a fold pin's `layer`
+  // Parallel to states: 0 unpinned, else 1 + a loop pin's `face * 2 + end`.
+  std::vector<uint8_t> state_loop;
 
   // The extra width each rank boundary carries beyond `rank_sep`, one row per boundary;
   // `len` is the frame's rank count less one.

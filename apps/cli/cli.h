@@ -63,6 +63,8 @@ enum class ArgRead : uint32_t { NotOurs, Taken, Malformed };
 //   --fold F:M[:L]       submachine F's run folds as the scale measure picks (M 0),
 //                        always (1), or never (2); a nonzero L is the one rank
 //                        the fold cuts before
+//   --loop S:F:E         state S's loop room on face F of its free interior (as
+//                        --end), at end E (0 top or left, 1 bottom or right)
 //   --no-search          lay out the row and pins given, and move nothing
 //   --no-text            lay out with no space requests, the scale the layout
 //                        goldens are stated at

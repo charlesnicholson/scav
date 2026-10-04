@@ -508,10 +508,7 @@ Wide area_of(scav_rect const &r) { return Wide{ r.w } * r.h; }
 
 // Per live composite, the hole between its bands inside its padding less its live
 // children's rects and its loop room, floored at zero; the sum capped at `chart`.
-Wide whitespace_of(Chart const &c,
-                   SizedLayout const &z,
-                   std::vector<scav_extent> const &room,
-                   Wide chart) {
+Wide whitespace_of(Chart const &c, SizedLayout const &z, Wide chart) {
   Wide total{ 0 };
   for (uint32_t st = 0; st < c.states.size(); ++st) {
     if (c.states[st].live == 0) { continue; }
@@ -537,7 +534,7 @@ Wide whitespace_of(Chart const &c,
     Wide const h{ Wide{ r.h } - (2 * pad) - b.h - z.after[st].h };
     Wide const w{ Wide{ b.w } - ((st < z.lead.size()) ? z.lead[st].w : 0) -
                   ((st < z.trail.size()) ? z.trail[st].w : 0) };
-    if (st < room.size()) { held += Wide{ room[st].w } * room[st].h; }
+    if (st < z.loop.size()) { held += area_of(z.loop[st]); }
     total += imax((imax(w, Wide{ 0 }) * imax(h, Wide{ 0 })) - held, Wide{ 0 });
   }
   return imin(total, chart);
@@ -705,7 +702,6 @@ struct Scratch {
   ChildGrid grid;  // `CostContext::grid`, filled for the candidate
   std::vector<scav_rect> kid;
   Descent descent;
-  std::vector<scav_extent> loop_label, loop_room;
 };
 
 Scratch &scratch() {
@@ -902,8 +898,7 @@ CostTerms cost_terms(CostContext const &ctx,
   if (t.aspect < 0) { t.aspect = -t.aspect; }
   t.area = area_of(z.chart);
   Scratch &sc{ scratch() };
-  loop_rooms(c, s, p, sc.loop_label, sc.loop_room);
-  t.whitespace = whitespace_of(c, z, sc.loop_room, t.area);
+  t.whitespace = whitespace_of(c, z, t.area);
   // Every route segment once; transition `tr`'s pieces are `first[tr]..first[tr + 1]`.
   std::vector<Piece> &pieces{ sc.pieces };
   pieces.clear();

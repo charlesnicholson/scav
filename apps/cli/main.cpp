@@ -27,7 +27,7 @@ constexpr std::string_view USAGE{
   "and diff against the goldens\n"
   "\n"
   "  LAYOUT: --profile NAME, --portfolio-row N, --rank S:R, --cut T:L, "
-  "--reverse T:L, --end T:L:E:F, --orient F, --fold F:M[:L], "
+  "--reverse T:L, --end T:L:E:F, --orient F, --fold F:M[:L], --loop S:F:E, "
   "--no-search, "
   "--no-text\n"
 };

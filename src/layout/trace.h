@@ -160,6 +160,7 @@ inline constexpr uint16_t TRACE_MOVE_REVERSE{ 2 };
 inline constexpr uint16_t TRACE_MOVE_FACE{ 3 };  // `face` holds the face
 inline constexpr uint16_t TRACE_MOVE_SIDE{ 4 };  // `face` holds the side
 inline constexpr uint16_t TRACE_MOVE_FOLD{ 5 };  // `rank` holds the cut's layer
+inline constexpr uint16_t TRACE_MOVE_LOOP{ 7 };  // `face` and `end` hold the placement
 // Each Tier-2 term's share of the scored sum in basis points, in CostTerms order.
 struct TraceTerms {
   std::array<int32_t, TIER2_TERMS> share;
