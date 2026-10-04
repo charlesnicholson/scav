@@ -738,8 +738,9 @@ struct Improved {
   bool viable{ false };  // the start laid out at all
 };
 
-// One Level 1 move; `kind` names which of its pins is set.
-enum class MoveKind : uint32_t { Rank, Cut, Reverse, Face, Side, Fold };
+// One Level 1 move or kick; `kind` names which of its pins is set. `Orient` is a kick
+// only.
+enum class MoveKind : uint32_t { Rank, Cut, Reverse, Face, Side, Fold, Orient };
 static_assert((static_cast<uint16_t>(MoveKind::Rank) == TRACE_MOVE_RANK) &&
                   (static_cast<uint16_t>(MoveKind::Cut) == TRACE_MOVE_CUT) &&
                   (static_cast<uint16_t>(MoveKind::Reverse) == TRACE_MOVE_REVERSE) &&
@@ -753,8 +754,24 @@ struct Move {
   FacePin face{};
   SidePin side{};
   FoldPin fold{};
+  OrientPin orient{};
   MoveKind kind{ MoveKind::Rank };
 };
+
+// `m`'s pin appended to `into`.
+void add_move(SearchPins &into, Move const &m) {
+  switch (m.kind) {
+    case MoveKind::Cut: vec_push_back(into.cuts, m.leg); break;
+    case MoveKind::Reverse:
+      vec_push_back(into.reverses, { .trans = m.leg.trans, .leg = m.leg.leg });
+      break;
+    case MoveKind::Face: vec_push_back(into.faces, m.face); break;
+    case MoveKind::Side: vec_push_back(into.sides, m.side); break;
+    case MoveKind::Fold: vec_push_back(into.folds, m.fold); break;
+    case MoveKind::Orient: vec_push_back(into.orients, m.orient); break;
+    case MoveKind::Rank: vec_push_back(into.ranks, m.pin); break;
+  }
+}
 
 // What scoring one move yields: its cost and shares, without its geometry.
 struct Scored {
@@ -1166,28 +1183,12 @@ Improved run_search(Chart const &c,
       cost_terms(scoring, c, g, out.best.sized, out.best.routes, s, objective, &party),
       objective);
 
-  auto const add = [](SearchPins &into, Move const &m) {
-    switch (m.kind) {
-      case MoveKind::Cut: vec_push_back(into.cuts, m.leg); break;
-      case MoveKind::Reverse:
-        vec_push_back(into.reverses, { .trans = m.leg.trans, .leg = m.leg.leg });
-        break;
-      case MoveKind::Face: vec_push_back(into.faces, m.face); break;
-      case MoveKind::Side: vec_push_back(into.sides, m.side); break;
-      case MoveKind::Fold: vec_push_back(into.folds, m.fold); break;
-      case MoveKind::Rank: vec_push_back(into.ranks, m.pin); break;
-    }
-  };
-  auto const with = [&add](SearchPins base_pins, Move const &m) {
-    add(base_pins, m);
-    return base_pins;
-  };
-  // `with` into the scoring thread's own pins.
-  auto const with_here = [&add](SearchPins const &base_pins,
-                                Move const &m) -> SearchPins const & {
+  // `base_pins` with `m` added, in the scoring thread's own pins.
+  auto const with_here = [](SearchPins const &base_pins,
+                            Move const &m) -> SearchPins const & {
     SearchPins &into{ move_scratch().pins };
     into = base_pins;  // copy-assignment keeps each vector's storage
-    add(into, m);
+    add_move(into, m);
     return into;
   };
 
@@ -1504,7 +1505,7 @@ Improved run_search(Chart const &c,
     }
 
     if (!found) { break; }
-    held = with(held, take);
+    add_move(held, take);
     order_submachines(here, c, g, s, objective, threads, held);
     // Re-derived as the taken candidate was scored, reusing every frame the move left or
     // shifted.
@@ -1955,12 +1956,7 @@ bool layout_run(Chart &c,
         }
         // A kick is a reversal, a frame turned to run down or a frame refolded, kept only
         // where it converges cheaper.
-        struct Kick {
-          ReversePin reverse{};
-          OrientPin orient{};
-          FoldPin fold{};
-        };
-        std::vector<Kick> kicks;
+        std::vector<Move> kicks;
         std::vector<uint32_t> kick_frame;
         for (uint32_t seg = 0; seg < g.segments.size(); ++seg) {
           if ((here.seg_cyclic[seg] == 0) || (turned[seg] != 0)) { continue; }
@@ -1974,7 +1970,8 @@ bool layout_run(Chart &c,
           }
           if (kick_scored >= budget) { break; }
           ++kick_scored;
-          vec_push_back(kicks, { .reverse = { .trans = t, .leg = leg } });
+          vec_push_back(kicks,
+                        { .leg = { .trans = t, .leg = leg }, .kind = MoveKind::Reverse });
           vec_push_back(kick_frame, g.segments[seg].frame.v);
         }
         for (uint32_t m = 0; turns && (m < here.sub_ranks.size()); ++m) {
@@ -1983,7 +1980,9 @@ bool layout_run(Chart &c,
             continue;
           }
           ++kick_scored;
-          vec_push_back(kicks, { .orient = { .frame = SubmachineId{ m } } });
+          vec_push_back(
+              kicks,
+              { .orient = { .frame = SubmachineId{ m } }, .kind = MoveKind::Orient });
           vec_push_back(kick_frame, m);
         }
         // A frame across the page with no fold pin, kicked to the fold it does not draw.
@@ -1999,26 +1998,19 @@ bool layout_run(Chart &c,
           }
           ++kick_scored;
           uint32_t const mode{ (folded[m] != 0) ? FOLD_NEVER : FOLD_ALWAYS };
-          vec_push_back(kicks, { .fold = { .frame = SubmachineId{ m }, .mode = mode } });
+          vec_push_back(kicks,
+                        { .fold = { .frame = SubmachineId{ m }, .mode = mode },
+                          .kind = MoveKind::Fold });
           vec_push_back(kick_frame, m);
         }
         if (kicks.empty()) { break; }
-        auto const with_kick = [](SearchPins &into, Kick const &k) {
-          if (k.fold.frame.v != INVALID) {
-            vec_push_back(into.folds, k.fold);
-          } else if (k.orient.frame.v != INVALID) {
-            vec_push_back(into.orients, k.orient);
-          } else {
-            vec_push_back(into.reverses, k.reverse);
-          }
-        };
 
         std::vector<Improved> tried(kicks.size());
         parallel_for(static_cast<uint32_t>(kicks.size()), o.threads, [&](uint32_t j) {
           std::vector<uint8_t> redo(c.submachines.size(), 0);
           if (kick_frame[j] < redo.size()) { redo[kick_frame[j]] = 1; }
           SearchPins start{ warm(held[best], redo) };
-          with_kick(start, kicks[j]);
+          add_move(start, kicks[j]);
           tried[j] = search_from(start, &redo);
         });
 
@@ -2050,7 +2042,7 @@ bool layout_run(Chart &c,
             if (kick_frame[j] < redo.size()) { redo[kick_frame[j]] = 1; }
           }
           SearchPins start{ warm(held[best], redo) };
-          for (uint32_t const j : winners) { with_kick(start, kicks[j]); }
+          for (uint32_t const j : winners) { add_move(start, kicks[j]); }
           Improved together{ search_from(start, &redo) };
           if (together.viable && cost_less(together.cost, tried[single].cost)) {
             take(std::move(together));
@@ -2077,7 +2069,7 @@ bool layout_run(Chart &c,
           std::vector<uint8_t> redo(c.submachines.size(), 0);
           if (kick_frame[j] < redo.size()) { redo[kick_frame[j]] = 1; }
           SearchPins start{ warm(held[best], redo) };
-          with_kick(start, kicks[j]);
+          add_move(start, kicks[j]);
           Improved more{ search_from(start, &redo) };
           if (more.viable && cost_less(more.cost, cost[best])) { take(std::move(more)); }
         }
