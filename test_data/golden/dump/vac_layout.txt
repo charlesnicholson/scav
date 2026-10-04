@@ -65,8 +65,8 @@ chart vac "robot vacuum" (test_data/charts/vac.scav:3)
 geometry structural 48ddf5b1 coordinate 69e5dfbf
   chart 0,0 13801x8758
   rests on --portfolio-row 1 --rank 11:1 --rank 1:1 --rank 4:1 --rank 14:3 --rank 18:2 --reverse 18:0 --face 13:0:0:2 --face 19:0:0:3 --orient 5
-  cost t0 1 t2 6315
-    tier0 through_box 0 through_band 0 box_overlap 0 flush 0 through_region 0 retrace 0 label_over_box 1 label_over_route 0
+  cost t0 0 t2 6315
+    tier0 through_box 0 through_band 0 box_overlap 0 flush 0 through_region 0 retrace 0 label_over_box 0 label_over_route 0
     bends 4 share 3243bp
     corridor 0 share 0bp
     crossings 0 share 0bp

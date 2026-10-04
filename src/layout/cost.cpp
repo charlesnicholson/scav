@@ -1168,6 +1168,7 @@ CostTerms cost_terms(CostContext const &ctx,
         mark(src, 1);
         StateId const dst{ c.transitions[subject].dst };
         host = ((dst.v < encloses.size()) && (encloses[dst.v] == 1)) ? dst.v : INVALID;
+        if (inner_loop(c, subject)) { host = dst.v; }  // the loop is drawn inside it
         StateId up{ enclosing_state(c, dst) };
         for (size_t step = 0; (step < c.states.size()) && (up.v != INVALID); ++step) {
           if (encloses[up.v] == 1) {

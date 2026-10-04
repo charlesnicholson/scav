@@ -413,8 +413,8 @@ void route_transitions(Routes &out,
     uint32_t const first_slot{ static_cast<uint32_t>(out.slots.size()) };
 
     if (inner_loop(c, t)) {
-      // Out of the state's inner trailing face and back, in the row of its loop room
-      // this transition takes; the room is reserved, so nothing is routed round.
+      // Out of the state's inner trailing face and back, in this transition's row of
+      // the state's loop room.
       scav_rect const r{ z.state[tr.src.v] };
       scav_rect const row{ loop_row[t] };
       int32_t const lane{ imin(loop_lane(p), row.h) };
@@ -427,8 +427,8 @@ void route_transitions(Routes &out,
       vec_push_back(loop_points, { .x = x, .y = ya + lane });
       vec_push_back(loop_points, { .x = right, .y = ya + lane });
     } else if (tr.src == tr.dst) {
-      // Out of a face and back: both ends name the state, so the router seats
-      // them on the face it uses least, apart from every other seat there.
+      // Out of a face and back: both ends name the state, and the router seats them
+      // on its least-used face.
       uint32_t const frame{ g.segments[segs.off].frame.v };
       scav_point const mid{ centre(z.state[tr.src.v]) };
       vec_push_back(planned,

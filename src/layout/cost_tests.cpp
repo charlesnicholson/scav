@@ -2363,6 +2363,7 @@ CostTerms terms(Chart const &c,
            at = enclosing_state(c, at)) {
         if (at.v == tr.dst.v) { host = at.v; }
       }
+      if ((tr.src == tr.dst) && (tr.kind != TransKind::External)) { host = tr.src.v; }
     }
     for (uint32_t st = 0; st < c.states.size(); ++st) {
       if (c.states[st].live == 0) { continue; }

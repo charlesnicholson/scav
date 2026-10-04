@@ -1704,9 +1704,8 @@ TEST_CASE("gauntlet: an internal loop stays inside its state, under its header")
 }
 
 TEST_CASE("gauntlet: crossings into decorated composites keep clear of every band") {
-  // Headers on every state and a footer on each composite: ports take the side
-  // faces, an internal transition into a composite's depth starts on its border,
-  // and nothing enters a band.
+  // Headers everywhere and footers on composites: ports take side faces, nothing enters
+  // a band, and an internal transition into a composite's depth starts on its border.
   for (scav_profile const &p : { readable(), compact() }) {
     CAPTURE(p.profile_id);
     Chart const probe{ loaded("mixed.scav") };

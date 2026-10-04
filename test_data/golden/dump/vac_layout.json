@@ -100,7 +100,7 @@
     "chart": [0, 0, 13801, 8758],
     "rests_on": "--portfolio-row 1 --rank 11:1 --rank 1:1 --rank 4:1 --rank 14:3 --rank 18:2 --reverse 18:0 --face 13:0:0:2 --face 19:0:0:3 --orient 5",
     "cost": {
-      "t0_violations": 1,
+      "t0_violations": 0,
       "t2": 6315,
       "through_box": 0,
       "through_band": 0,
@@ -108,7 +108,7 @@
       "flush": 0,
       "through_region": 0,
       "retrace": 0,
-      "label_over_box": 1,
+      "label_over_box": 0,
       "label_over_route": 0,
       "bends": 4,
       "corridor": 0,

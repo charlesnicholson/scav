@@ -419,7 +419,7 @@ void facing_flips(Facing &out,
       uint32_t const rank_face{ down ? 2U : 0U };
       if (on_state && lined(rank_face + (on_leading ? 0U : 1U))) {
         // Off a lined face: the other rank border, else a cross border the joined state
-        // sees; with every face lined the port stays and the drawing pays for it.
+        // sees; with every face lined the port stays.
         uint32_t const j{ joined(seg) };
         uint32_t cross{ INVALID };
         for (bool const first : { true, false }) {
