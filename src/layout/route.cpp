@@ -85,18 +85,6 @@ scav_point centre(scav_rect const &r) {
   return { .x = r.x + floor_div(r.w, 2), .y = r.y + floor_div(r.h, 2) };
 }
 
-// Moves `a` toward `b` by `amount`, at most half the distance.
-scav_point trim(scav_point a, scav_point b, int32_t amount) {
-  if (amount <= 0) { return a; }
-  Wide const dx{ static_cast<Wide>(b.x) - a.x };
-  Wide const dy{ static_cast<Wide>(b.y) - a.y };
-  Wide const len{ static_cast<Wide>(isqrt(static_cast<uint64_t>((dx * dx) + (dy * dy)))) };
-  if (len == 0) { return a; }
-  Wide const k{ imin(Wide{ amount }, floor_div(len, Wide{ 2 })) };
-  return { .x = a.x + static_cast<int32_t>(floor_div(dx * k, len)),
-           .y = a.y + static_cast<int32_t>(floor_div(dy * k, len)) };
-}
-
 // One segment's routing problem, before it is grouped into its frame's batch.
 struct Planned {
   uint32_t frame;
@@ -147,7 +135,9 @@ bool same_but_shifted(RouteFrameCache const &a,
     if ((p.src_obstacle != q.src_obstacle) || (p.dst_obstacle != q.dst_obstacle) ||
         (p.waypoint_off != q.waypoint_off) || (p.waypoint_len != q.waypoint_len) ||
         (p.src_face != q.src_face) || (p.dst_face != q.dst_face) || (p.lean != q.lean) ||
-        (p.loop != q.loop) || !moved_pt(p.src, q.src) || !moved_pt(p.dst, q.dst)) {
+        (p.loop != q.loop) || (p.src_clear != q.src_clear) ||
+        (p.dst_clear != q.dst_clear) || !moved_pt(p.src, q.src) ||
+        !moved_pt(p.dst, q.dst)) {
       return false;
     }
   }
@@ -168,9 +158,10 @@ struct FrameScratch {
   std::vector<uint32_t> obstacle_index;  // -> in.obstacles; INVALID off this frame
   std::vector<uint32_t> obstacle_states;
   std::vector<scav_rect> own;
-  std::vector<uint8_t> in_chain;  // parallel to states; 1 on the frame owner's chain
-  std::vector<uint32_t> chain;    // -> states, the owner and its enclosing states
-  std::vector<uint64_t> pick;     // one bit per state, the gather's candidates
+  std::vector<scav_path_clear> keep;  // parallel to `in.nets`: each net's end clears
+  std::vector<uint8_t> in_chain;      // parallel to states; 1 on the frame owner's chain
+  std::vector<uint32_t> chain;        // -> states, the owner and its enclosing states
+  std::vector<uint64_t> pick;         // one bit per state, the gather's candidates
 };
 
 FrameScratch &frame_scratch() {
@@ -596,6 +587,14 @@ void route_transitions(Routes &out,
         net.dst_face = faces[1][pn.seg];
       }
       net.loop = pn.loop;
+      // A transition's own ends keep its clears, on its first and last segments.
+      uint32_t const t{ g.segments[pn.seg].trans.v };
+      if ((s.path_clear != nullptr) && (t < s.n_path_clear) &&
+          (t < g.trans_segments.size())) {
+        Span const segs{ g.trans_segments[t] };
+        if (pn.seg == segs.off) { net.src_clear = s.path_clear[t].src; }
+        if ((pn.seg + 1) == (segs.off + segs.len)) { net.dst_clear = s.path_clear[t].dst; }
+      }
       net.trans = g.segments[pn.seg].trans.v;
       net.seg = pn.seg;
       if (pn.seg < z.lean.size()) { net.lean = z.lean[pn.seg]; }
@@ -654,13 +653,19 @@ void route_transitions(Routes &out,
     // Nudges the frame's lanes against its own obstacles.
     if (margin > 0) {
       vec_assign(sc.own, ro.net_points.size(), frame);
+      vec_resize(sc.keep, in.nets.size());
+      for (size_t k = 0; k < in.nets.size(); ++k) {
+        sc.keep[k] = { .src = in.nets[k].src_clear, .dst = in.nets[k].dst_clear };
+      }
       nudge_lanes(region,
                   sc.own,
                   in.obstacles,
                   imax(margin, p.font_size_grid),  // lane pitch and grouping tolerance
                   margin,
                   ro.net_points,
-                  ro.points);
+                  ro.points,
+                  sc.keep.data(),
+                  static_cast<uint32_t>(sc.keep.size()));
     }
 
     frames[m].points = ro.points;
@@ -748,11 +753,6 @@ void route_transitions(Routes &out,
       }
     }
     uint32_t const count{ static_cast<uint32_t>(out.points.size()) - first_point };
-    if ((s.path_clear != nullptr) && (t < s.n_path_clear) && (count >= 2)) {
-      scav_point *const pts{ out.points.data() + first_point };
-      pts[0] = trim(pts[0], pts[1], s.path_clear[t].src);
-      pts[count - 1] = trim(pts[count - 1], pts[count - 2], s.path_clear[t].dst);
-    }
     out.route[t] = { .off = first_point, .len = count };
   }
 
@@ -790,7 +790,7 @@ void route_transitions(Routes &out,
                 margin,
                 out.route,
                 out.points,
-                s.path_clear,  // a trimmed end leg keeps at least its clear
+                s.path_clear,  // an end leg keeps at least its clear
                 (s.path_clear != nullptr) ? s.n_path_clear : 0);
   }
 

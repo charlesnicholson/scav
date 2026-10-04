@@ -417,31 +417,38 @@ void emit_route(DrawList &d,
 
   uint32_t const style{ drawlist_style(d, p[SCAV_STYLE_ROUTE]) };
   ElemRef const origin{ trans_ref(trans) };
-  push_polyline(d, depth, style, points.data() + r.off, r.len, origin);
-
-  // The tip sits where the route ended before its path clear: the target border.
-  scav_point const last{ points[r.off + r.len - 1U] };
-  scav_point const prior{ points[r.off + r.len - 2U] };
-  // The clear this transition requested from layout, sized from the profile's font size.
+  // The head is the clear this transition requested, and at least half the label font.
   int32_t const asked{ ((s.path_clear != nullptr) && (trans < s.n_path_clear))
                            ? s.path_clear[trans].dst
                            : 0 };
-  // Layout trims at most half a leg, so the clear applied is at most the remaining leg.
-  int32_t const leg{ (last.x == prior.x) ? imax(last.y - prior.y, prior.y - last.y)
-                                         : imax(last.x - prior.x, prior.x - last.x) };
-  int32_t const clear{ imin(asked, leg) };
-  scav_point tip{ last };
-  if (last.x == prior.x) {
-    tip.y += (last.y > prior.y) ? clear : -clear;
-  } else if (last.y == prior.y) {
-    tip.x += (last.x > prior.x) ? clear : -clear;
+  int32_t const head{ imax(asked, p[SCAV_STYLE_LABEL].font_size_grid / 2) };
+  // The head's tip is the route's end; the drawn line stops at the head's base.
+  scav_point const tip{ points[r.off + r.len - 1U] };
+  scav_point const prior{ points[r.off + r.len - 2U] };
+  std::vector<scav_point> line(points.begin() + r.off, points.begin() + r.off + r.len);
+  Wide const dx{ Wide{ tip.x } - prior.x };
+  Wide const dy{ Wide{ tip.y } - prior.y };
+  Wide const leg{ static_cast<Wide>(isqrt(static_cast<uint64_t>((dx * dx) + (dy * dy)))) };
+  if (leg > head) {
+    line.back() = { .x = tip.x - static_cast<int32_t>(floor_div(dx * head, leg)),
+                    .y = tip.y - static_cast<int32_t>(floor_div(dy * head, leg)) };
+  } else {
+    line.pop_back();  // the head covers the whole last leg
+  }
+  if (line.size() >= 2U) {
+    push_polyline(d,
+                  depth,
+                  style,
+                  line.data(),
+                  static_cast<uint32_t>(line.size()),
+                  origin);
   }
   push_arrowhead(d,
                  depth,
                  drawlist_style(d, p[SCAV_STYLE_ARROW]),
                  tip,
                  prior,
-                 imax(clear, p[SCAV_STYLE_LABEL].font_size_grid / 2),
+                 head,
                  origin);
 }
 

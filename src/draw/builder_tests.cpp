@@ -1672,29 +1672,34 @@ TEST_CASE("builder: a name the metrics refuse is placed from its band, not its g
   }
 }
 
-TEST_CASE("builder: what the head is set back by comes from the clear table or nothing") {
+TEST_CASE("builder: the head's tip is the route's end and the line stops at its base") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   build_trans(c, a, b, TransKind::External, {});
   build_trans(c, b, a, TransKind::External, {});
+  build_trans(c, a, b, TransKind::External, {});
   ColumnId const routes{
     geom_column(c, "scav.geom.route", ElemKind::Transition, ValueKind::Span, 8)
   };
   ColumnId const points{
     geom_column(c, "scav.geom.point", ElemKind::Point, ValueKind::Pod, 8)
   };
-  REQUIRE(column_resize(c, points, 4));
+  REQUIRE(column_resize(c, points, 6));
   put_row(c, points, 0, scav_point{ .x = 0, .y = 0 });
   put_row(c, points, 1, scav_point{ .x = 100, .y = 0 });
   put_row(c, points, 2, scav_point{ .x = 0, .y = 0 });
   put_row(c, points, 3, scav_point{ .x = 100, .y = 50 });  // not axis-aligned
+  put_row(c, points, 4, scav_point{ .x = 0, .y = 0 });
+  put_row(c, points, 5, scav_point{ .x = 0, .y = 60 });  // shorter than the head
   put_row(c, routes, 0, scav_span{ .off = 0, .len = 2 });
   put_row(c, routes, 1, scav_span{ .off = 2, .len = 2 });
+  put_row(c, routes, 2, scav_span{ .off = 4, .len = 2 });
   Palette const p{ palette_standard() };
+  REQUIRE(p[SCAV_STYLE_LABEL].font_size_grid / 2 == 80);  // the head with no clear
 
-  scav_path_clear const one{ .src = 0, .dst = 16 };
+  scav_path_clear const one{ .src = 0, .dst = 90 };
   scav_spaces const s{ .box_state = nullptr,
                        .n_box_state = 0,
                        .box_sub = nullptr,
@@ -1704,24 +1709,45 @@ TEST_CASE("builder: what the head is set back by comes from the clear table or n
                        .path_box = nullptr,
                        .n_path_box = 0 };
 
-  auto const tip = [&](uint32_t trans, scav_spaces const &spaces) {
+  struct Drawn {
+    scav_point tip, line_end;
+    uint32_t lines;
+  };
+  auto const drawn = [&](uint32_t trans, scav_spaces const &spaces) {
     DrawList d;
     emit_route(d, spaces, c, p, trans, 0);
     REQUIRE(kind_count(d, SCAV_PRIM_PATH) == 1);
-    scav_point out{};
+    Drawn out{ .tip = {}, .line_end = {}, .lines = kind_count(d, SCAV_PRIM_POLYLINE) };
     for (scav_prim const &prim : d.prims) {
-      if (prim.kind == SCAV_PRIM_PATH) { out = d.points[prim.points.off]; }
+      if (prim.kind == SCAV_PRIM_PATH) { out.tip = d.points[prim.points.off]; }
+      if (prim.kind == SCAV_PRIM_POLYLINE) {
+        out.line_end = d.points[prim.points.off + prim.points.len - 1U];
+      }
     }
     return out;
   };
 
-  // The head's tip extends past the route's end by the table's `dst`.
-  CHECK(tip(0, s).x == (100 + 16));
-  // Transition 1 is past the table's end, with a diagonal last leg: no set-back.
-  CHECK(tip(1, s).x == 100);
-  CHECK(tip(1, s).y == 50);
-  // With no clear table, transition 0 gets no set-back.
-  CHECK(tip(0, {}).x == 100);
+  // The table's clear of 90 sizes transition 0's head.
+  Drawn const asked{ drawn(0, s) };
+  CHECK(asked.tip.x == 100);
+  CHECK(asked.tip.y == 0);
+  CHECK(asked.line_end.x == 10);
+  CHECK(asked.line_end.y == 0);
+  // With no clear table the head is half the label font.
+  Drawn const flat{ drawn(0, {}) };
+  CHECK(flat.tip.x == 100);
+  CHECK(flat.line_end.x == 20);
+  // A diagonal leg steps back along itself: 80 of its 111 units.
+  Drawn const slant{ drawn(1, s) };
+  CHECK(slant.tip.x == 100);
+  CHECK(slant.tip.y == 50);
+  CHECK(slant.line_end.x == 28);
+  CHECK(slant.line_end.y == 14);
+  // The head covers a leg shorter than itself; one leg leaves no line.
+  Drawn const stub{ drawn(2, s) };
+  CHECK(stub.tip.x == 0);
+  CHECK(stub.tip.y == 60);
+  CHECK(stub.lines == 0);
 }
 
 TEST_CASE("builder: a route whose point column was never filled draws nothing") {

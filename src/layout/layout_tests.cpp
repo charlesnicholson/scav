@@ -394,7 +394,7 @@ TEST_CASE("layout: routes are orthogonal, meet borders, and loop on either side"
   CHECK(row_of<scav_span>(c, "scav.geom.route", 2).len == 4);
 }
 
-TEST_CASE("layout: path clears trim the route ends by exact integers") {
+TEST_CASE("layout: route ends sit on the borders they attach to, clears or none") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -406,8 +406,7 @@ TEST_CASE("layout: path clears trim the route ends by exact integers") {
   scav_spaces const s{ .path_clear = clears.data(), .n_path_clear = 1 };
   run(c, s, p);
 
-  // A ranks before B: the route is one horizontal leg between their facing
-  // borders, trimmed in x alone.
+  // A ranks before B: the route is one horizontal leg between their facing borders.
   scav_span const r{ row_of<scav_span>(c, "scav.geom.route", 0) };
   REQUIRE(r.len == 2);
   scav_point const p0{ row_of<scav_point>(c, "scav.geom.point", r.off) };
@@ -417,9 +416,8 @@ TEST_CASE("layout: path clears trim the route ends by exact integers") {
   CHECK(ra.x < rb.x);
   CHECK(p0.y == ra.y + (ra.h / 2));
   CHECK(p0.y == p1.y);
-  // Each end sits its clear away from the border it attaches to.
-  CHECK(p0.x == (ra.x + ra.w) + 10);
-  CHECK(p1.x == rb.x - 6);
+  CHECK(p0.x == (ra.x + ra.w));
+  CHECK(p1.x == rb.x);
 }
 
 TEST_CASE("layout: the chart rect bounds every point and every placed box") {

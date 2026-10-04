@@ -1271,55 +1271,56 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
   vec_assign(net_lead, in.nets.size(), scav_span{});
   vec_assign(net_tail, in.nets.size(), scav_span{});
 
-  auto const approach = [&](scav_point exact, uint32_t named, scav_point seated) {
-    uint32_t box{ named };
-    scav_point attach{ exact };
-    if (box < in.obstacles.size()) {
-      // `exact` is the named box's centre; the end attaches at `seated` instead.
-      attach = seated;
-    } else {
-      scav_point const moved{ ortho_escape(exact, seated, in.obstacles) };
-      if ((moved.x != exact.x) || (moved.y != exact.y)) {
-        // An exact end inside a box is kept, with a stub out to the box's border.
-        vec_push_back(lead, exact);
-        attach = moved;
-      }
-      // An end in the enclosure's band attaches to the enclosure even where a box touches
-      // it; its stub runs square to that border, to the band's inner edge.
-      uint32_t const side{ band_side(attach) };
-      box = (side != INVALID) ? INVALID : ortho_box_at(attach, in.obstacles);
-      if (side != INVALID) {
-        vec_push_back(lead, attach);
-        scav_point stub{ attach };
-        switch (side) {
-          case 0: stub.x = enc.x + inset; break;
-          case 1: stub.x = (enc.x + enc.w) - inset; break;
-          case 2: stub.y = enc.y + inset; break;
-          default: stub.y = (enc.y + enc.h) - inset; break;
+  auto const approach =
+      [&](scav_point exact, uint32_t named, scav_point seated, int32_t keep) {
+        uint32_t box{ named };
+        scav_point attach{ exact };
+        if (box < in.obstacles.size()) {
+          // `exact` is the named box's centre; the end attaches at `seated` instead.
+          attach = seated;
+        } else {
+          scav_point const moved{ ortho_escape(exact, seated, in.obstacles) };
+          if ((moved.x != exact.x) || (moved.y != exact.y)) {
+            // An exact end inside a box is kept, with a stub out to the box's border.
+            vec_push_back(lead, exact);
+            attach = moved;
+          }
+          // An end in the enclosure's band attaches to the enclosure even where a box
+          // touches it; its stub runs square to that border, to the band's inner edge.
+          uint32_t const side{ band_side(attach) };
+          box = (side != INVALID) ? INVALID : ortho_box_at(attach, in.obstacles);
+          if (side != INVALID) {
+            vec_push_back(lead, attach);
+            scav_point stub{ attach };
+            switch (side) {
+              case 0: stub.x = enc.x + inset; break;
+              case 1: stub.x = (enc.x + enc.w) - inset; break;
+              case 2: stub.y = enc.y + inset; break;
+              default: stub.y = (enc.y + enc.h) - inset; break;
+            }
+            return stub;
+          }
         }
-        return stub;
-      }
-    }
-    scav_point at{ attach };
-    if (box < in.obstacles.size()) {
-      // The ring, clamped into the region; unused if it is `attach` or in a box or wall.
-      scav_point ring{ ortho_ring(attach, in.obstacles[box], clear) };
-      ring.x = imin(imax(ring.x, lo_x), hi_x);
-      ring.y = imin(imax(ring.y, lo_y), hi_y);
-      bool ok{ (ring.x != attach.x) || (ring.y != attach.y) };
-      for (scav_rect const &r : in.obstacles) {
-        if (inside(ring, r)) { ok = false; }
-      }
-      for (scav_rect const &r : walls) {
-        if (inside(ring, r)) { ok = false; }
-      }
-      if (ok) {
-        vec_push_back(lead, attach);
-        at = ring;
-      }
-    }
-    return at;
-  };
+        scav_point at{ attach };
+        if (box < in.obstacles.size()) {
+          // The ring, clamped into the region; unused at `attach` or in a box or wall.
+          scav_point ring{ ortho_ring(attach, in.obstacles[box], imax(clear, keep)) };
+          ring.x = imin(imax(ring.x, lo_x), hi_x);
+          ring.y = imin(imax(ring.y, lo_y), hi_y);
+          bool ok{ (ring.x != attach.x) || (ring.y != attach.y) };
+          for (scav_rect const &r : in.obstacles) {
+            if (inside(ring, r)) { ok = false; }
+          }
+          for (scav_rect const &r : walls) {
+            if (inside(ring, r)) { ok = false; }
+          }
+          if (ok) {
+            vec_push_back(lead, attach);
+            at = ring;
+          }
+        }
+        return at;
+      };
 
   // Seats every end before approaching any net.
   std::vector<scav_point> &seat{ sc.seat };
@@ -1384,7 +1385,9 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
     uint32_t const off{ static_cast<uint32_t>(anchors.size()) };
     uint32_t const lead_first{ static_cast<uint32_t>(lead.size()) };
     uint32_t const src_slot{ 2 * n };
-    scav_point const from{ approach(net.src, net.src_obstacle, seat[src_slot]) };
+    scav_point const from{
+      approach(net.src, net.src_obstacle, seat[src_slot], net.src_clear)
+    };
     net_lead[n] = { .off = lead_first,
                     .len = static_cast<uint32_t>(lead.size()) - lead_first };
 
@@ -1422,7 +1425,8 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
       }
     }
     uint32_t const tail_first{ static_cast<uint32_t>(lead.size()) };
-    vec_push_back(anchors, approach(net.dst, net.dst_obstacle, seat[src_slot + 1]));
+    vec_push_back(anchors,
+                  approach(net.dst, net.dst_obstacle, seat[src_slot + 1], net.dst_clear));
     net_tail[n] = { .off = tail_first,
                     .len = static_cast<uint32_t>(lead.size()) - tail_first };
     net_anchors[n] = { .off = off, .len = static_cast<uint32_t>(anchors.size()) - off };

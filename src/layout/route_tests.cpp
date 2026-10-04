@@ -470,7 +470,7 @@ TEST_CASE("route: an internal self-transition loops inside its state's loop room
   CHECK(r.port[0].len == 0);
 }
 
-TEST_CASE("route: clears trim each end toward the other, capped at half") {
+TEST_CASE("route: a clear leaves the route's ends where the router put them") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -487,31 +487,8 @@ TEST_CASE("route: clears trim each end toward the other, capped at half") {
 
   Routes const r{ route_transitions(c, g, o, z, s, profile(), STRAIGHT) };
   REQUIRE(r.route[0].len == 2);
-  CHECK(r.points[0].x == 30);
-  // The far end trims at most half of what remains after the near end's trim: 485 of 970.
-  CHECK(r.points[1].x == 515);
-}
-
-TEST_CASE("route: a clear against a leg of no length trims nothing") {
-  Chart c;
-  SubmachineId const root{ build_chart(c, "t", {}) };
-  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
-  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-
-  SplitGraph const g{ decompose(c) };
-  SubmachineOrders const o{ empty_orders(c, g) };
-  SizedLayout z{ blank(c, o) };
-  // One rect for both: the straight line between the two centres is a point.
-  z.state[a.v] = { .x = 100, .y = 100, .w = 40, .h = 40 };
-  z.state[b.v] = { .x = 100, .y = 100, .w = 40, .h = 40 };
-  std::vector<scav_path_clear> const clears{ { .src = 30, .dst = 30 } };
-  scav_spaces const s{ .path_clear = clears.data(), .n_path_clear = 1 };
-
-  Routes const r{ route_transitions(c, g, o, z, s, profile(), STRAIGHT) };
-  REQUIRE(r.route[0].len == 2);
-  CHECK((r.points[0] == scav_point{ .x = 120, .y = 120 }));
-  CHECK((r.points[1] == scav_point{ .x = 120, .y = 120 }));
+  CHECK(r.points[0].x == 0);
+  CHECK(r.points[1].x == 1000);
 }
 
 TEST_CASE("route: a tombstoned state is no obstacle to the frame it sat in") {
@@ -925,6 +902,39 @@ TEST_CASE("route: nothing is nudged for a router that asks for no margin") {
     CHECK(plain.points[at.off + 1].y == LaneRouter::LANE);
     CHECK(plain.points[at.off + 2].y == LaneRouter::LANE);
   }
+}
+
+TEST_CASE("route: a nudge in its own frame leaves a transition's last leg its clear") {
+  // Both routes share the lane at y 100; the spread stops at A -> B's clear of 60.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const p{ build_state(c, root, "P", StateKind::Normal, {}) };
+  StateId const q{ build_state(c, root, "Q", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, p, q, TransKind::External, {});
+
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ empty_orders(c, g) };
+  SizedLayout z{ blank(c, o) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 40, .h = 40 };
+  z.state[b.v] = { .x = 200, .y = 0, .w = 40, .h = 40 };
+  z.state[p.v] = { .x = 0, .y = 200, .w = 40, .h = 40 };
+  z.state[q.v] = { .x = 200, .y = 200, .w = 40, .h = 40 };
+  z.sub[root.v] = { .x = 0, .y = 0, .w = 240, .h = 240 };
+  z.chart = { .x = -100, .y = -100, .w = 440, .h = 440 };
+  std::vector<scav_path_clear> const clears{ { .src = 0, .dst = 60 },
+                                             { .src = 0, .dst = 0 } };
+  scav_spaces const s{ .path_clear = clears.data(), .n_path_clear = 2 };
+
+  LaneRouter const asks{ 16 };
+  Routes const r{ route_transitions(c, g, o, z, s, profile(), asks) };
+  REQUIRE(r.route[0].len == 4);
+  scav_point const *const pt{ r.points.data() + r.route[0].off };
+  CHECK(pt[3].y == 20);  // the end the router drew
+  CHECK((pt[2].y - pt[3].y) >= 60);
+  CHECK(r.points[r.route[1].off + 1].y == 184);
 }
 
 TEST_CASE("route: a nudge inside a composite is bounded by that state's own box") {
@@ -1441,9 +1451,9 @@ TEST_CASE("route: a route inside a state goes round its loop room, never across 
   }
 }
 
-TEST_CASE("route: a nudge leaves an outer loop's corridor and its arrowhead's leg") {
+TEST_CASE("route: a nudge leaves an outer loop's last leg its clear") {
   // The loop and the port route run under S and the nudge spreads them; the loop's last
-  // leg stays longer than its `head` clear. Space requests: the reference builder's.
+  // leg keeps its `head` clear. Space requests: the reference builder's.
   scav_profile const p{ profile() };
   int32_t const head{ (3 * p.pad) / 4 };
   Drawn probe;
@@ -1484,8 +1494,8 @@ TEST_CASE("route: a nudge leaves an outer loop's corridor and its arrowhead's le
   REQUIRE(loop.len == 4);
   scav_point const *const pt{ d.r.points.data() + loop.off };
   CHECK(pt[0].y == (box.y + box.h));
-  CHECK((pt[1].y - pt[0].y) >= (2 * p.pad));
-  CHECK((pt[2].y - pt[3].y) > head);
+  CHECK(pt[3].y == (box.y + box.h));
+  CHECK((pt[2].y - pt[3].y) >= head);
 }
 
 TEST_CASE("route: a state lined on its trailing face loops out of its leading one") {

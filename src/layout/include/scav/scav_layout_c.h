@@ -33,7 +33,7 @@ typedef struct {
   int32_t w_after;  /* ... after */
 } scav_box_space;
 
-/* Route shortening at each end, for arrowheads and terminal glyphs. */
+/* The least straight run a route keeps at each end, for arrowheads and terminal glyphs. */
 typedef struct {
   int32_t src, dst;
 } scav_path_clear;
