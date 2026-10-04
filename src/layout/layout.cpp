@@ -818,7 +818,6 @@ bool same_candidate(Candidate const &a, Candidate const &b) {
   return (a.viable == b.viable) && (a.inflations == b.inflations) &&
          same_rect(a.sized.chart, b.sized.chart) &&
          same_rect(a.sized_chart, b.sized_chart) && same_geometry(a, b) &&
-         (a.routes.unplaced == b.routes.unplaced) &&
          std::ranges::equal(a.routes.placed, b.routes.placed, same_rect) &&
          same_pins(a.laid, b.laid);
 }
@@ -1560,8 +1559,6 @@ SearchPins get_pins(int32_t const *w, uint32_t &at) {
 struct SearchMemo {
   Mutex lock;
   Memo table{ size_t{ 1 } << 24 };
-  uint32_t hits{ 0 };        // under `lock`
-  uint32_t mismatches{ 0 };  // under `lock`
 };
 
 #ifdef SCAV_TESTING
@@ -1569,9 +1566,9 @@ struct SearchMemo {
 // and whether every answer is checked against running the search anyway.
 bool test_search_memo{ true };
 bool test_search_memo_verify{ false };
-bool test_no_search{ false };  // a zero move budget whatever the profile asks
-uint32_t test_search_memo_hits{ 0 };
-uint32_t test_search_memo_mismatches{ 0 };
+bool test_no_search{ false };               // a zero move budget whatever the profile asks
+uint32_t test_search_memo_hits{ 0 };        // under the layout's memo lock
+uint32_t test_search_memo_mismatches{ 0 };  // under the layout's memo lock
 // Per row of the last searched layout: each schedule's cost, and the one kept.
 std::vector<Cost> test_schedule_first, test_schedule_second, test_schedule_kept;
 
@@ -1618,10 +1615,10 @@ Improved search_moves(Chart const &c,
     int32_t const *at{ nullptr };
     uint32_t len{ 0 };
     hit = memo->table.find(key, at, len);
-    if (hit) {
-      vec_assign(value, at, at + len);
-      ++memo->hits;
-    }
+    if (hit) { vec_assign(value, at, at + len); }
+#ifdef SCAV_TESTING
+    test_search_memo_hits += hit ? 1U : 0U;
+#endif
   }
   if (hit) {
     Improved out;
@@ -1643,7 +1640,7 @@ Improved search_moves(Chart const &c,
 #ifdef SCAV_TESTING
     if (test_search_memo_verify && !same_result(out, search())) {
       ScopedLock const held{ memo->lock };
-      ++memo->mismatches;
+      ++test_search_memo_mismatches;
     }
 #endif
     return out;
@@ -1837,6 +1834,8 @@ bool layout_run(Chart &c,
   SearchMemo *memo_at{ &memo };
 #ifdef SCAV_TESTING
   if (!test_search_memo) { memo_at = nullptr; }
+  test_search_memo_hits = 0;
+  test_search_memo_mismatches = 0;
 #endif
   // Searches the rows `which` names from the pins they hold, and keeps what
   // each reached.
@@ -2142,10 +2141,6 @@ bool layout_run(Chart &c,
 #endif
   }
   uint32_t const best{ search_argmin(cost, eligible) };
-#ifdef SCAV_TESTING
-  test_search_memo_hits = memo.hits;
-  test_search_memo_mismatches = memo.mismatches;
-#endif
   // Written whichever way the branches above went: what the drawing rests on,
   // not what this run added, so a run with no budget stands on its seed. The
   // move count is the pins beyond the seed rather than a sum of what each

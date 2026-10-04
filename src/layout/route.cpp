@@ -165,7 +165,6 @@ struct FrameRoutes {
   std::vector<scav_point> points;
   std::vector<scav_span> net_points;  // -> points, parallel to the frame's nets
   std::vector<RouteMetrics> metrics;  // parallel to the frame's nets
-  NudgeStats nudged;
 };
 
 // Per-thread, reused across every frame the thread routes. A shard never waits on the
@@ -223,15 +222,6 @@ void reset_lists(std::vector<std::vector<uint32_t>> &v, size_t n) {
   for (std::vector<uint32_t> &list : v) { list.clear(); }
 }
 
-void merge_nudged(NudgeStats &into, NudgeStats const &from) {
-  into.lanes += from.lanes;
-  into.spread += from.spread;
-  into.moved += from.moved;
-  into.bundles += from.bundles;
-  into.refused += from.refused;
-  into.reordered += from.reordered;
-}
-
 }  // namespace
 
 Routes route_transitions(Chart const &c,
@@ -271,8 +261,6 @@ void route_transitions(Routes &out,
   out.unreachable = 0;
   out.too_large = 0;
   out.reseated = 0;
-  out.nudged = {};
-  out.unplaced = 0;
   std::vector<CallScratch> &stack{ call_stack() };
   CallScratch cs;
   if (!stack.empty()) {
@@ -512,7 +500,6 @@ void route_transitions(Routes &out,
     fr.points.clear();
     fr.net_points.clear();
     fr.metrics.clear();
-    fr.nudged = {};
   }
 
   // Every obstacle of a frame is loose or enclosed by a state on the owner's chain. A
@@ -696,7 +683,6 @@ void route_transitions(Routes &out,
       }
       vec_assign(frames[m].net_points, had.net_points.begin(), had.net_points.end());
       vec_assign(frames[m].metrics, had.metrics.begin(), had.metrics.end());
-      frames[m].nudged = had.nudged;
       if (fill != nullptr) {
         RouteFrameCache &to{ fill->frame[m] };
         to.valid = had.valid;
@@ -705,7 +691,6 @@ void route_transitions(Routes &out,
         to.points = moved;
         to.net_points = had.net_points;
         to.metrics = had.metrics;
-        to.nudged = had.nudged;
       }
       for (uint32_t const st : sc.obstacle_states) { sc.obstacle_index[st] = INVALID; }
       return;
@@ -719,6 +704,7 @@ void route_transitions(Routes &out,
       // it is the grouping tolerance too, so what is spread apart by it is
       // exactly what was too close by it.
       vec_assign(sc.own, ro.net_points.size(), frame);
+      NudgeStats stats;
       nudge_lanes(region,
                   sc.own,
                   in.obstacles,
@@ -726,7 +712,7 @@ void route_transitions(Routes &out,
                   margin,
                   ro.net_points,
                   ro.points,
-                  frames[m].nudged);
+                  stats);
     }
 
     frames[m].points = ro.points;
@@ -738,8 +724,7 @@ void route_transitions(Routes &out,
                          .in = in,
                          .points = ro.points,
                          .net_points = ro.net_points,
-                         .metrics = ro.metrics,
-                         .nudged = frames[m].nudged };
+                         .metrics = ro.metrics };
     }
     for (uint32_t const st : sc.obstacle_states) { sc.obstacle_index[st] = INVALID; }
   };
@@ -770,7 +755,6 @@ void route_transitions(Routes &out,
   vec_assign(net_span, planned.size(), scav_span{});
   for (uint32_t m = 0; m < by_frame.size(); ++m) {
     FrameRoutes const &fr{ frames[m] };
-    merge_nudged(out.nudged, fr.nudged);
     for (uint32_t j = 0; j < by_frame[m].size(); ++j) {
       scav_span const at{ (j < fr.net_points.size()) ? fr.net_points[j] : scav_span{} };
       if (j < fr.metrics.size()) {
@@ -876,6 +860,7 @@ void route_transitions(Routes &out,
       }
       if (inner_loop(c, t)) { held[t] = z.state[c.transitions[t].src.v]; }
     }
+    NudgeStats stats;
     nudge_lanes(z.chart,
                 held,
                 walls,
@@ -883,7 +868,7 @@ void route_transitions(Routes &out,
                 margin,
                 out.route,
                 out.points,
-                out.nudged,
+                stats,
                 s.path_clear,  // a trimmed end leg keeps at least its clear
                 (s.path_clear != nullptr) ? s.n_path_clear : 0);
   }
@@ -897,7 +882,7 @@ void label_routes(Routes &out,
                   SizedLayout const &z,
                   scav_spaces const &s,
                   scav_profile const &p) {
-  out.unplaced = place_labels(c, z, s, out.route, out.points, p, out.placed);
+  place_labels(c, z, s, out.route, out.points, p, out.placed);
 }
 
 }  // namespace scav

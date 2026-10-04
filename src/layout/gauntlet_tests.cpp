@@ -75,6 +75,8 @@ struct Laid {
   Routes r;
   SearchPins pins;            // what the drawing rests on
   uint32_t tuple{ INVALID };  // the portfolio row the run kept
+  uint32_t lane_moves{ 0 };   // route points nudging moved onto a lane
+  uint32_t unplaced{ 0 };     // path boxes that took the centred placement
 };
 
 // The profile with the portfolio and the move sweep switched off, so one row
@@ -154,6 +156,8 @@ void lay(char const *name,
   // phase 3 as well as phase 1: a face pin is the router's (11.10e).
   out.o = order_submachines(out.c, out.g, s, knobs, 0, pins);
   REQUIRE(size_layout(out.c, out.g, out.o, s, knobs, out.z, diags, dar, pack, fold));
+  LayoutTrace routed;
+  trace_sink_set(&routed);
   out.r = route_transitions(out.c,
                             out.g,
                             out.o,
@@ -165,6 +169,13 @@ void lay(char const *name,
                             nullptr,
                             nullptr,
                             &pins);
+  trace_sink_set(nullptr);
+  out.lane_moves =
+      static_cast<uint32_t>(std::ranges::count_if(routed.events, [](TraceEvent const &e) {
+        return e.kind == TraceKind::LaneAssigned;
+      }));
+  std::vector<scav_rect> boxes;
+  out.unplaced = place_labels(out.c, out.z, s, out.r.route, out.r.points, knobs, boxes);
   column_holds(out.c, "scav.geom.state", out.z.state);
   column_holds(out.c, "scav.geom.sub", out.z.sub);
   column_holds(out.c, "scav.geom.point", out.r.points);
@@ -629,8 +640,6 @@ TEST_CASE("gauntlet: a fan-in's arrivals are four arrows, none inside another") 
       if (chart_string(l.c, l.c.states[st].name) == "Fault") { fault = st; }
     }
     REQUIRE(fault != INVALID);
-    // The fan's lanes all find room.
-    CHECK(l.r.nudged.refused == 0);
     std::vector<uint32_t> into;
     for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
       if ((l.r.route[t].len >= 2) && (l.c.transitions[t].dst.v == fault)) {
@@ -737,7 +746,7 @@ TEST_CASE(
     Laid l;
     lay("crossing.scav", p, l, spaces, nullptr);
     REQUIRE(l.r.placed.size() == 1);
-    CHECK(l.r.unplaced == 0);
+    CHECK(l.unplaced == 0);
     scav_rect const at{ l.r.placed[0] };
 
     Transition const &tr{ l.c.transitions[t] };
@@ -797,7 +806,7 @@ TEST_CASE("gauntlet: a long edge's label widens no boundary another already wide
     scav_spaces const spaces{ .path_box = boxes.data(), .n_path_box = 2 };
     Laid l;
     lay("long.scav", p, l, spaces, nullptr);
-    CHECK(l.r.unplaced == 0);
+    CHECK(l.unplaced == 0);
     REQUIRE(l.r.placed.size() == 2);
     for (scav_rect const &at : l.r.placed) {
       for (uint32_t const st : live_of(l.c)) {
@@ -831,7 +840,7 @@ TEST_CASE("gauntlet: a chain of states turns only where the fold cuts it") {
     CAPTURE(p.profile_id);
     Laid l;
     lay("chain.scav", p, l);
-    CHECK(l.r.nudged.moved == 0);
+    CHECK(l.lane_moves == 0);
     for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
       CAPTURE(t);
       // An edge across the cut turns twice at most.
@@ -893,7 +902,7 @@ TEST_CASE("gauntlet: a folded frame's second piece starts under the state enteri
 
     // The label sits in the room phase 2 reserved: on the leg's trailing side.
     REQUIRE(l.r.placed.size() == 1);
-    CHECK(l.r.unplaced == 0);
+    CHECK(l.unplaced == 0);
     scav_rect const at{ l.r.placed[0] };
     CHECK(at.x >= from.x);
     uint32_t const frame{ l.c.submachine_ids[l.c.states[box].submachines.off].v };

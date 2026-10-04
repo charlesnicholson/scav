@@ -6,7 +6,6 @@
 
 #include "layout/decompose.h"
 #include "layout/label.h"
-#include "layout/nudge.h"
 #include "layout/order.h"
 #include "layout/router.h"
 #include "layout/size.h"
@@ -36,12 +35,6 @@ struct Routes {
   // Routed only after giving up the requested clearance (11.5). Not a failure; a
   // frame full of them means the boxes are packed tighter than the profile says.
   uint32_t reseated{ 0 };
-
-  NudgeStats nudged;
-
-  // Path boxes that found no strip clear of everything and took the centred
-  // placement instead (11.9).
-  uint32_t unplaced{ 0 };
 };
 
 // Per frame, the exact question the router and the nudger were asked and the
@@ -56,7 +49,6 @@ struct RouteFrameCache {
   std::vector<scav_point> points;
   std::vector<scav_span> net_points;
   std::vector<RouteMetrics> metrics;
-  NudgeStats nudged;
 };
 
 // Parallel to submachines. `reuse` is read by every candidate of a round at

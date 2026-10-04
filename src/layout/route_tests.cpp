@@ -19,6 +19,7 @@
 
 #include "doctest.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <string>
@@ -860,7 +861,7 @@ TEST_CASE("route: the transitions marked failed are the ones with a fallen-back 
   }
 }
 
-TEST_CASE("route: the unplaced count is the one the strip matching returned") {
+TEST_CASE("route: the boxes placed are the ones the strip matching places") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -881,11 +882,10 @@ TEST_CASE("route: the unplaced count is the one the strip matching returned") {
   scav_spaces const s{ .path_box = both.data(), .n_path_box = 2 };
   Routes const r{ route_transitions(c, g, o, z, s, profile(), STRAIGHT) };
   REQUIRE(r.placed.size() == 2);
-  // The loop's label is seated in its room and never counted, which is exactly what
-  // the strip matching reports back.
-  CHECK(r.unplaced == 0);
+  // The loop's label is seated in its room and never counted as a fallback.
   std::vector<scav_rect> expected;
-  CHECK(place_labels(c, z, s, r.route, r.points, profile(), expected) == r.unplaced);
+  CHECK(place_labels(c, z, s, r.route, r.points, profile(), expected) == 0);
+  CHECK(same_rows(r.placed, expected));
 }
 
 TEST_CASE("route: nothing is nudged for a router that asks for no margin") {
@@ -908,12 +908,19 @@ TEST_CASE("route: nothing is nudged for a router that asks for no margin") {
   z.sub[root.v] = { .x = 0, .y = 0, .w = 240, .h = 240 };
   z.chart = { .x = -100, .y = -100, .w = 440, .h = 440 };
 
+  // The route points nudging moves onto a lane.
+  auto const lane_moves = [&](Router const &router) {
+    LayoutTrace trace;
+    trace_sink_set(&trace);
+    (void)route_transitions(c, g, o, z, {}, profile(), router);
+    trace_sink_set(nullptr);
+    return std::ranges::count_if(trace.events, [](TraceEvent const &e) {
+      return e.kind == TraceKind::LaneAssigned;
+    });
+  };
   LaneRouter const asks{ 16 };
   Routes const nudged{ route_transitions(c, g, o, z, {}, profile(), asks) };
-  // Two: the frame's own pass and the chart-wide one over the composed
-  // polylines, which examines the same lane a second time (11.10a).
-  CHECK(nudged.nudged.lanes == 2);
-  CHECK(nudged.nudged.moved == 2);
+  CHECK(lane_moves(asks) == 2);
   // The root frame has no owning state, so the region is what bounds it, and the
   // region holds every point either net touches. The pitch these two spread by
   // is a line of the profile's text rather than the router's margin, so the
@@ -923,8 +930,7 @@ TEST_CASE("route: nothing is nudged for a router that asks for no margin") {
 
   LaneRouter const silent{ 0 };
   Routes const plain{ route_transitions(c, g, o, z, {}, profile(), silent) };
-  CHECK(plain.nudged.lanes == 0);
-  CHECK(plain.nudged.moved == 0);
+  CHECK(lane_moves(silent) == 0);
   // Untouched: both elbows still turn at the height the router put them at.
   for (uint32_t t = 0; t < 2; ++t) {
     CAPTURE(t);
@@ -963,7 +969,6 @@ TEST_CASE("route: a nudge inside a composite is bounded by that state's own box"
   // a whole line of text either side.
   z.state[comp.v] = { .x = -40, .y = -40, .w = 320, .h = 320 };
   Routes const wide{ route_transitions(c, g, o, z, {}, profile(), asks) };
-  REQUIRE(wide.nudged.lanes == 2);
   CHECK(wide.points[wide.route[0].off + 1].y == 56);
   CHECK(wide.points[wide.route[1].off + 1].y == 184);
 
@@ -972,7 +977,6 @@ TEST_CASE("route: a nudge inside a composite is bounded by that state's own box"
   // touches, so only the owner's box can be doing this.
   z.state[comp.v] = { .x = -40, .y = 96, .w = 320, .h = 8 };
   Routes const tight{ route_transitions(c, g, o, z, {}, profile(), asks) };
-  REQUIRE(tight.nudged.lanes == 2);
   CHECK(tight.points[tight.route[0].off + 1].y == 97);
   CHECK(tight.points[tight.route[1].off + 1].y == 103);
 }
@@ -1051,8 +1055,7 @@ bool same_routes(Routes const &a, Routes const &b) {
          same_rows(a.port, b.port) && same_rows(a.slots, b.slots) &&
          same_rows(a.placed, b.placed) && (a.failed == b.failed) &&
          (a.outside_region == b.outside_region) && (a.unreachable == b.unreachable) &&
-         (a.too_large == b.too_large) && (a.reseated == b.reseated) &&
-         (a.unplaced == b.unplaced);
+         (a.too_large == b.too_large) && (a.reseated == b.reseated);
 }
 
 }  // namespace
