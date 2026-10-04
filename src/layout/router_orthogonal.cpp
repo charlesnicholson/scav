@@ -710,7 +710,7 @@ void ortho_seat_loops(std::vector<RouteNet> const &nets,
         }
       }
     }
-    std::ranges::sort(taken);
+    scav_stable_sort(taken, [](int32_t lhs, int32_t rhs) { return lhs < rhs; });
     // The widest run between two taken seats or a taken seat and an end of the face.
     int32_t from{ lo };
     int32_t best_lo{ lo };
