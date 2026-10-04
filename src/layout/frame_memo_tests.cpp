@@ -1,5 +1,5 @@
-// The per-frame memos of ordering and sizing against the steps they stand in for. A traced
-// run derives every frame and remembers nothing, which gives the uncached answer.
+// The per-frame order and size memos checked against a traced run, which derives every
+// frame and stores nothing.
 
 #include "core/tests/corpus.h"
 #include "layout/decompose.h"
@@ -190,8 +190,8 @@ Scatter scattered(uint32_t seed) {
   return out;
 }
 
-// pack_tests' late arrival as four disconnected states, scaled from a separation of 10: a
-// fourth rect that compaction takes into the hole under the third.
+// pack_tests' late-arrival rects as four disconnected states, scaled to `node_sep`:
+// compaction moves the fourth into the hole under the third.
 Scatter late_arrival(scav_profile const &p) {
   Scatter out;
   SubmachineId const root{ build_chart(out.c, "late", {}) };
@@ -305,8 +305,8 @@ TEST_CASE("size memo: a remembered frame is the layout those inputs size to" *
     REQUIRE(base.ok);
     Targets const t{ targets_of(c, g, o) };
 
-    // Orders that differ in one frame's ranks or direction: the frames around it hit, and
-    // it must not.
+    // Orders differing in one frame's ranks or direction: the other frames hit, that one
+    // misses.
     SearchPins turned;
     if (t.frame.v != INVALID) { turned.orients.push_back({ .frame = t.frame }); }
     SearchPins pinned;
@@ -345,8 +345,7 @@ TEST_CASE("size memo: a remembered frame is the layout those inputs size to" *
     pad.pad += 4;
     scav_profile trybox{ p };
     trybox.trybox = (p.trybox != 0) ? 0 : 1;
-    // Compaction moves only what the row packer did not win, so its variant is
-    // weighed against the same profile without the box packer.
+    // The compaction variant is compared against `plain`, the profile with `trybox` off.
     scav_profile plain{ p };
     plain.trybox = 0;
     Sized const plain_base{

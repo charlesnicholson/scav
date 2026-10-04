@@ -1,4 +1,4 @@
-// The router registry: names in, ids out, both languages.
+// The router registry: name and id lookups, in C++ and C.
 
 #include "scav/scav_core_c.h"
 #include "scav/scav_layout.h"
@@ -25,8 +25,7 @@ TEST_CASE("router: the registry resolves both routers by name") {
 
   scav_byte const *name{ nullptr };
   uint32_t len{ 0 };
-  // Index 0 is what a caller with no opinion gets, so the registry order is
-  // asserted rather than left to whoever edits the table next.
+  // Index 0 is the default router.
   REQUIRE(router_name(0, name, len));
   CHECK(std::string_view{ reinterpret_cast<char const *>(name), len } == "orthogonal");
   REQUIRE(router_name(1, name, len));

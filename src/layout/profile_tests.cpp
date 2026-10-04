@@ -29,8 +29,7 @@ TEST_CASE("profile: both shipped profiles load and pass their own validation") {
     scav_profile const p{ named(name) };
     CHECK(profile_validate(p));
     CHECK(p.profile_version == 16);
-    // The whole table (11.10, 11.10g): every row searched and kicked, which is
-    // where `axis`'s compact drawing is.
+    // Both search every row of the Level 2 table.
     CHECK(p.portfolio_m == 16);
   }
   CHECK(named("compact").profile_id != named("readable").profile_id);
@@ -118,15 +117,12 @@ TEST_CASE("profile: every bound rejects out of range") {
           .field = &scav_profile::w_area,
           .bad_low = -1,
           .bad_high = 1025 },
-    // Zero is legal and means no bounded moves, which is what ships (11.10a).
-    // A million candidates is the ceiling, not 64: the budget is what a search
-    // is allowed to spend and the shipped value is already 1,024 (11.10).
+    // Zero turns Level 1 off; the ceiling is 2^20.
     Poke{ .what = "portfolio_k",
           .field = &scav_profile::portfolio_k,
           .bad_low = -1,
           .bad_high = (1 << 20) + 1 },
-    // The table Level 2 chooses over has eight rows, so nine is out of range
-    // rather than silently capped (11.10, 11.15).
+    // The Level 2 table has 16 rows.
     Poke{ .what = "portfolio_m",
           .field = &scav_profile::portfolio_m,
           .bad_low = 0,
@@ -151,7 +147,7 @@ TEST_CASE("profile: every bound rejects out of range") {
     CHECK(!profile_validate(low));
     scav_profile high{ named("readable") };
     high.*poke.field = poke.bad_high;
-    // I32_MAX marks an unbounded ceiling: the value must still validate.
+    // A `bad_high` of I32_MAX marks a field with no ceiling; it validates.
     CHECK(profile_validate(high) == (poke.bad_high == I32_MAX));
   }
 

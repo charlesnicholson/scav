@@ -1,6 +1,5 @@
-// The C projection of scav_layout.h: what each entry point does with an
-// argument it cannot use, and the out-param protocol around the placed boxes.
-// What layout does with a chart it can use is layout_tests.cpp's.
+// The C layout API: how each entry point refuses an unusable argument, and the
+// out-param protocol for placed boxes.
 
 #include "scav/scav_layout_c.h"
 
@@ -21,18 +20,17 @@ namespace {
 
 using namespace scav;
 
-// What a refused call must leave an out-param holding.
+// Out-param values a refused call leaves untouched.
 constexpr uint32_t SENTINEL{ 0xD1CE'D1CEU };
 constexpr int32_t SENTINEL_I{ 0x5CA5 };
 
-// The sizes the C surface checks against, as this build measures them.
+// The struct sizes the C API checks, as this build measures them.
 constexpr uint32_t PROFILE_SIZE{ static_cast<uint32_t>(sizeof(scav_profile)) };
 constexpr uint32_t OPTS_SIZE{ static_cast<uint32_t>(sizeof(scav_layout_opts)) };
 constexpr uint32_t SPACES_SIZE{ static_cast<uint32_t>(sizeof(scav_spaces)) };
 constexpr uint32_t PLACED_SIZE{ static_cast<uint32_t>(sizeof(scav_placed)) };
 
-// A space table with every stride declared, which is what layout_run checks
-// before it reads a row: the tests below vary the pointers and counts.
+// Returns `s` with every stride set to its row struct's size.
 scav_spaces strided(scav_spaces s) {
   s.box_state_stride = static_cast<uint32_t>(sizeof(scav_box_space));
   s.box_sub_stride = static_cast<uint32_t>(sizeof(scav_box_space));
@@ -41,8 +39,7 @@ scav_spaces strided(scav_spaces s) {
   return s;
 }
 
-// Two states in one submachine and two transitions between them, so two path
-// boxes can be requested and a cap can be one short of them.
+// Two states in one submachine and one transition each way between them.
 Chart two_transitions() {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
@@ -59,8 +56,7 @@ scav_layout_opts readable() {
   return o;
 }
 
-// The run every case below is a variation on: every size correct, so a case
-// that spoils one spoils only that one.
+// Calls `scav_layout_run` with every struct size correct.
 scav_result run(scav_chart *chart,
                 scav_spaces const *spaces,
                 scav_layout_opts const *opts,
@@ -150,7 +146,7 @@ TEST_CASE("layout abi: a null argument is refused whichever one it is") {
   CHECK(router == SENTINEL);
   CHECK(profile.profile_id == SENTINEL_I);  // an unknown name writes nothing
   CHECK(placed.x == SENTINEL_I);
-  CHECK(chart.diags.empty());  // nothing above got as far as running anything
+  CHECK(chart.diags.empty());  // no refused call adds a diagnostic
 }
 
 TEST_CASE("layout abi: a size that disagrees with the header is refused first") {
@@ -158,15 +154,12 @@ TEST_CASE("layout abi: a size that disagrees with the header is refused first") 
   scav_layout_opts const opts{ readable() };
   scav_profile profile{ .profile_id = SENTINEL_I };
 
-  // One int32 short is the shape of the incident this exists to refuse: a
-  // caller built against a 47-knob header handing a 48-knob library its struct.
   for (uint32_t size : { PROFILE_SIZE - 4, PROFILE_SIZE + 4, 0U }) {
     CAPTURE(size);
     CHECK(scav_profile_named("readable", &profile, size) == SCAV_E_ABI);
-    CHECK(profile.profile_id == SENTINEL_I);  // refused before it was written
+    CHECK(profile.profile_id == SENTINEL_I);  // left unwritten
     CHECK(scav_profile_validate(&profile, size) == SCAV_E_ABI);
-    // SCAV_E_ABI outranks the null-argument refusal: a caller whose header
-    // differs has said nothing about the rest of its arguments worth reading.
+    // SCAV_E_ABI takes precedence over a null argument.
     CHECK(scav_profile_named("readable", nullptr, size) == SCAV_E_ABI);
     CHECK(scav_profile_named(nullptr, &profile, size) == SCAV_E_ABI);
     CHECK(scav_profile_validate(nullptr, size) == SCAV_E_ABI);
@@ -180,9 +173,7 @@ TEST_CASE("layout abi: a size that disagrees with the header is refused first") 
   scav_placed placed{ .x = SENTINEL_I, .y = SENTINEL_I, .w = SENTINEL_I, .h = SENTINEL_I };
   uint32_t count{ SENTINEL };
 
-  // Each of layout_run's three sizes wrong on its own, so each check is the one
-  // that fires; and each with the pointer beside it null, since the size is
-  // tested whether or not there is anything to read.
+  // Each of layout_run's three sizes wrong alone, and with its pointer null.
   for (int32_t delta : { -4, 4 }) {
     CAPTURE(delta);
     uint32_t const bad_spaces{ SPACES_SIZE + static_cast<uint32_t>(delta) };
@@ -244,8 +235,7 @@ TEST_CASE("layout abi: a size that disagrees with the header is refused first") 
                           nullptr) == SCAV_E_ABI);
   }
 
-  // And each stride inside the space table, which a caller's header declares
-  // one member at a time: an absent one reads as zero.
+  // Each space-table stride at zero, as from an absent member, is refused.
   for (uint32_t which = 0; which < 4; ++which) {
     CAPTURE(which);
     scav_spaces one_wrong{ spaces };
@@ -257,7 +247,7 @@ TEST_CASE("layout abi: a size that disagrees with the header is refused first") 
     CHECK(run(&chart, &one_wrong, &opts, &placed, 1, &count) == SCAV_E_ABI);
   }
 
-  // Nothing above wrote a row, moved the count, or reached layout.
+  // The refused calls write no row, leave the count, and add no diagnostic.
   CHECK(placed.x == SENTINEL_I);
   CHECK(count == SENTINEL);
   CHECK(chart.diags.empty());
@@ -280,7 +270,7 @@ TEST_CASE("layout abi: the placed boxes honour the query-then-fill protocol") {
   REQUIRE(run(&chart, &spaces, &opts, nullptr, 0, &count) == SCAV_OK);
   CHECK(count == 2);
 
-  // A cap short of the count never truncates, and says how many were wanted.
+  // A cap short of the count returns SCAV_E_CAPACITY and the full count, writing no row.
   std::vector<scav_placed> placed(
       2,
       scav_placed{ .x = SENTINEL_I, .y = SENTINEL_I, .w = SENTINEL_I, .h = SENTINEL_I });
@@ -289,12 +279,12 @@ TEST_CASE("layout abi: the placed boxes honour the query-then-fill protocol") {
   CHECK(count == 2);
   CHECK(placed[0].x == SENTINEL_I);
 
-  // A cap that fits with no buffer under it is the argument error.
+  // A cap that fits with a null buffer returns SCAV_E_INVALID_ARG.
   count = SENTINEL;
   CHECK(run(&chart, &spaces, &opts, nullptr, 2, &count) == SCAV_E_INVALID_ARG);
   CHECK(count == 2);
 
-  // Neither reached layout, so neither left a finding behind.
+  // Neither call adds a diagnostic.
   CHECK(chart.diags.empty());
 
   REQUIRE(run(&chart, &spaces, &opts, placed.data(), 2, &count) == SCAV_OK);
@@ -304,8 +294,7 @@ TEST_CASE("layout abi: the placed boxes honour the query-then-fill protocol") {
 }
 
 TEST_CASE("layout abi: a run asking for no boxes at all fills nothing") {
-  // The count query is only a query when boxes are pending: with none, a zero
-  // cap is a run that had nothing to write.
+  // With no path boxes requested, a zero cap runs layout and reports a count of 0.
   scav_chart chart{ .chart = two_transitions(), .diags = {} };
   scav_layout_opts const opts{ readable() };
 
@@ -313,7 +302,7 @@ TEST_CASE("layout abi: a run asking for no boxes at all fills nothing") {
   REQUIRE(run(&chart, nullptr, &opts, nullptr, 0, &count) == SCAV_OK);
   CHECK(count == 0);
 
-  // And a buffer offered where there is nothing to put in it stays as it was.
+  // A buffer passed with no boxes requested is left unchanged.
   scav_placed placed{ .x = SENTINEL_I, .y = SENTINEL_I, .w = SENTINEL_I, .h = SENTINEL_I };
   count = SENTINEL;
   REQUIRE(run(&chart, nullptr, &opts, &placed, 1, &count) == SCAV_OK);

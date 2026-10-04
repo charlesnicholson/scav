@@ -1,5 +1,4 @@
-// The sink in isolation -- stamping, scoping, serialization -- then one whole
-// traced run, held to the decisions that explain a route a reader can see.
+// The trace sink's frame stamping, scoping and JSON output, then traced layout runs.
 
 #include "layout/trace.h"
 
@@ -24,8 +23,7 @@ namespace {
 
 using namespace scav;
 
-// Sets the sink for a scope and always clears it: a leaked sink would have
-// every later test in the binary appending to a dead vector.
+// Attaches `t` as the trace sink for its scope and clears the sink on exit.
 struct Attached {
   explicit Attached(LayoutTrace &t) { trace_sink_set(&t); }
   ~Attached() { trace_sink_set(nullptr); }
@@ -47,10 +45,8 @@ uint32_t count_kind(LayoutTrace const &t, TraceKind k) {
   return n;
 }
 
-// One round of Level 1 as the trace shows it. A round runs every move's phase 1
-// before it emits any verdict, so it is a maximal run of scores, and
-// `orderings` counts the reversals since the round before -- one per ordering
-// on a chart whose every ordering breaks one cycle.
+// One Level 1 round: a maximal run of score events. `orderings` counts the EdgeReversed
+// events since the previous round, one per ordering on a one-cycle chart.
 struct Round {
   uint32_t orderings{ 0 };
   uint32_t scored{ 0 };
@@ -147,7 +143,7 @@ TEST_CASE("trace: a state is named, a nameless one is its ordinal, a stranger is
                  ",\"state\":\"Alpha\",\"rank\":4") != std::string::npos);
   CHECK(out.find("\"state\":\"#" + std::to_string(anon.v) + "\"") != std::string::npos);
   CHECK(out.find("\"state\":null") != std::string::npos);
-  // Two of them: the out-of-range ordinal and INVALID both have no name to print.
+  // The out-of-range ordinal and INVALID both print null.
   CHECK(out.find("\"state\":null") != out.rfind("\"state\":null"));
 }
 
@@ -195,12 +191,12 @@ TEST_CASE("trace: every payload shape serializes its own fields") {
   CHECK(out.find("\"at\":[-8,1489]") != std::string::npos);  // a negative coordinate
   CHECK(out.find("\"pass\":\"separate\",\"net\":2,\"end\":\"dst\"") != std::string::npos);
   CHECK(out.find("\"net\":5,\"lane\":1,\"at\":96") != std::string::npos);
-  // Past 32 bits, and a row nothing named is omitted rather than printed as -1.
+  // `t2` prints past 32 bits; an INVALID row prints unsigned, as 4294967295.
   CHECK(out.find("\"t2\":4294967296") != std::string::npos);
   CHECK(out.find("\"verdict\":\"not_better\",\"row\":4294967295") != std::string::npos);
   CHECK(out.find("\"cause\":\"lanes\",\"boundary\":2,\"seg\":7,\"width\":538") !=
         std::string::npos);
-  // One object per event and a comma between each pair, never a trailing one.
+  // No comma after the last object.
   CHECK(out.find("},\n]") == std::string::npos);
 }
 
@@ -230,11 +226,11 @@ TEST_CASE("trace: a traced run writes the geometry an untraced one does") {
   CHECK(layout_structural_hash(traced) == layout_structural_hash(plain));
   CHECK(layout_coordinate_hash(traced) == layout_coordinate_hash(plain));
   CHECK(!events.empty());
-  CHECK(trace_sink() == nullptr);  // cleared even though the run succeeded
+  CHECK(trace_sink() == nullptr);  // the run detaches its sink on return
 }
 
 TEST_CASE("trace: a fold pin names the frame it decides and the mode it takes") {
-  // Five states in a run, which the scale measure folds; pinned never, it is one row.
+  // A five-state chain: the scale measure folds it; a FOLD_NEVER pin keeps it one row.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   std::vector<StateId> run;
@@ -286,9 +282,8 @@ TEST_CASE("trace: a fold pin names the frame it decides and the mode it takes") 
 }
 
 TEST_CASE("trace: a back edge's kinks are one chained bend, and the trace says so") {
-  // 11.16's measurement, as a chart: A -> B -> C -> A ranks the three in a row
-  // and the back edge spans two, so it chains through a bend in B's rank and
-  // the router is handed that bend as a waypoint. Estop's shape exactly.
+  // A -> B -> C -> A ranks the three in a row; the back edge spans two ranks, chains
+  // through a bend in B's rank, and the router gets that bend as a waypoint.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -302,8 +297,7 @@ TEST_CASE("trace: a back edge's kinks are one chained bend, and the trace says s
   scav_layout_opts opts{};
   REQUIRE(profile_named("readable", opts.profile));
   opts.threads = 1;
-  // One ordering, so the counts below are the algorithm's and not the search's:
-  // `row` pins the Level 2 tuple, and Level 1 re-orders once per move it scores.
+  // Level 1 off, and the row argument 0 pins the Level 2 tuple: phase 1 orders once.
   opts.profile.portfolio_k = 0;
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
@@ -313,7 +307,7 @@ TEST_CASE("trace: a back edge's kinks are one chained bend, and the trace says s
   }
   CHECK(count_kind(t, TraceKind::CandidateScored) == 0);
 
-  // Ranked in a row, so the back edge is the only multi-rank one.
+  // A, B and C take increasing ranks.
   std::array<uint32_t, 3> ranks{ INVALID, INVALID, INVALID };
   for (TraceEvent const &e : t.events) {
     if (e.kind != TraceKind::RankAssigned) { continue; }
@@ -324,7 +318,7 @@ TEST_CASE("trace: a back edge's kinks are one chained bend, and the trace says s
   CHECK(ranks[0] < ranks[1]);
   CHECK(ranks[1] < ranks[2]);
 
-  // Exactly one bend, at B's rank, and it is the back edge that grew it.
+  // One bend, at B's rank, and one reversal.
   CHECK(count_kind(t, TraceKind::EdgeChained) == 1);
   for (TraceEvent const &e : t.events) {
     if (e.kind != TraceKind::EdgeChained) { continue; }
@@ -333,8 +327,7 @@ TEST_CASE("trace: a back edge's kinks are one chained bend, and the trace says s
   }
   CHECK(count_kind(t, TraceKind::EdgeReversed) == 1);
 
-  // One net carries a waypoint and it is the back edge's; every other net is
-  // handed none. This is the property the kinks come from.
+  // Only the back edge's net carries a waypoint, and it carries one.
   uint32_t carrying{ 0 };
   for (TraceEvent const &e : t.events) {
     if (e.kind != TraceKind::NetPlanned) { continue; }
@@ -346,7 +339,7 @@ TEST_CASE("trace: a back edge's kinks are one chained bend, and the trace says s
   CHECK(carrying == 1);
   CHECK(count_kind(t, TraceKind::NetWaypoint) == 1);
 
-  // The waypoint is the bend's placed coordinate and not a second guess at it.
+  // The waypoint equals the bend's placed coordinate.
   scav_point bend{ .x = INT32_MIN, .y = INT32_MIN };
   for (TraceEvent const &e : t.events) {
     if ((e.kind == TraceKind::NodePlaced) && (e.place.state == INVALID)) {
@@ -359,8 +352,8 @@ TEST_CASE("trace: a back edge's kinks are one chained bend, and the trace says s
 }
 
 TEST_CASE("trace: a label's charge names its frame, its boundary and its segment") {
-  // D -> C/T in two pieces, the first in the root. The root's label charge is at the
-  // boundary between D and C, asked for by the first piece at the box's width.
+  // D -> C/T splits in two pieces, the first in the root; the root's label charge is on
+  // the D/C boundary, from the first piece, at the box's width.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
@@ -394,13 +387,12 @@ TEST_CASE("trace: a label's charge names its frame, its boundary and its segment
     CHECK(e.gap.seg == 0);  // the transition's first segment, the root's
     CHECK(e.gap.width == 1511);
   }
-  // One per phase-1 run, and a run with the search off orders once per row.
+  // One charge per phase-1 run.
   CHECK(labels >= 1);
 }
 
 TEST_CASE("trace: the search re-orders per move, and every move states its verdict") {
-  // The same chart under Level 1, which is the composition the case above
-  // isolates one ordering out of: each scored move is a whole fresh phase 1.
+  // The same chart with Level 1 on: each scored move runs a fresh phase 1.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -421,28 +413,23 @@ TEST_CASE("trace: the search re-orders per move, and every move states its verdi
     REQUIRE(layout_run(c, {}, opts, placed, diags, nullptr, nullptr, 0));
   }
 
-  // Every verdict is one of the four, and a rejected move is as visible as a
-  // taken one -- which is the whole reason the event carries a verdict.
+  // Every verdict is one of the four, and rejected moves are traced too.
   uint32_t const scored{ count_kind(t, TraceKind::CandidateScored) };
   uint32_t taken{ 0 };
   for (TraceEvent const &e : t.events) {
     if (e.kind != TraceKind::CandidateScored) { continue; }
     CHECK(e.pass <= static_cast<uint16_t>(MoveVerdict::NotBetter));
-    // A placement names a state and nothing else; every other move names a
-    // transition and no state.
+    // A placement names a state and no transition; every other move names a transition
+    // and no state.
     CHECK(e.score.move <= TRACE_MOVE_FACE);
     CHECK((e.score.state == INVALID) == (e.score.move != TRACE_MOVE_RANK));
     CHECK((e.score.trans == INVALID) == (e.score.move == TRACE_MOVE_RANK));
     taken += (e.pass == static_cast<uint16_t>(MoveVerdict::Taken)) ? 1U : 0U;
   }
   CHECK(scored > 0);
-  CHECK(taken < scored);  // a greedy pass rejects more than it takes
+  CHECK(taken < scored);  // at least one move is rejected
 
-  // One ordering per move scored, and one more before each round: the take
-  // that rebuilt the orders it reads, or the start of the search it opens.
-  // Level 1 is several searches -- the row's, then a kick's from each edge of
-  // the cycle (11.10f) -- so this holds per round rather than per run. The
-  // first round follows `layout_run`'s own ordering as well.
+  // Each round reorders once per scored move plus once before it, twice before the first.
   std::vector<Round> const rounds{ rounds_of(t) };
   REQUIRE(!rounds.empty());
   for (uint32_t k = 0; k < rounds.size(); ++k) {
@@ -450,10 +437,8 @@ TEST_CASE("trace: the search re-orders per move, and every move states its verdi
     CHECK(rounds[k].orderings >= (rounds[k].scored + ((k == 0) ? 2U : 1U)));
   }
 
-  // A three-cycle leaves at most one edge spanning two ranks, so no ordering
-  // hands more than one net a waypoint -- and *which* net is the search's
-  // choice, since a reversal turns a different edge around (11.10d), while a
-  // cut removes the bend and leaves none (11.10b). At most one, and some.
+  // Each ordering of the three-cycle gives at most one net a waypoint, and some
+  // ordering gives one.
   (void)back;
   uint32_t planned{ 0 };
   uint32_t carrying{ 0 };
@@ -468,10 +453,7 @@ TEST_CASE("trace: the search re-orders per move, and every move states its verdi
 }
 
 TEST_CASE("trace: a reversal is offered only on a segment that lies on a cycle") {
-  // A cycle `A -> B -> C -> A` with a tail `C -> D`. Turning the tail round
-  // makes a cycle for the walk to break somewhere else, which is how `dock`'s
-  // initial arrow came to run backwards (11.10g); only the three cycle edges
-  // choose anything.
+  // A cycle `A -> B -> C -> A` with a tail `C -> D`.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -505,8 +487,8 @@ TEST_CASE("trace: a reversal is offered only on a segment that lies on a cycle")
 }
 
 TEST_CASE("trace: a face is offered only where its transition bends or is priced") {
-  // `A -> B` is drawn straight and charged nothing. Of `C -> D -> E` and `C -> E`, one
-  // passes D, so some route of the three bends.
+  // `A -> B` routes straight and uncharged; of `C -> D -> E` and `C -> E`, one passes D
+  // and some route of the three bends.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -530,7 +512,7 @@ TEST_CASE("trace: a face is offered only where its transition bends or is priced
     Attached const held{ t };
     REQUIRE(layout_run(c, {}, opts, placed, diags, nullptr, nullptr, 0));
   }
-  CHECK(layout_test_noop_faces() > 0);  // a face with no effect goes unscored, traced too
+  CHECK(layout_test_noop_faces() > 0);  // faces with no effect are skipped and counted
   uint32_t faced{ 0 };
   uint32_t ranked{ 0 };
   for (TraceEvent const &ev : t.events) {
@@ -540,14 +522,12 @@ TEST_CASE("trace: a face is offered only where its transition bends or is priced
     CHECK(ev.score.trans != straight.v);
     ++faced;
   }
-  CHECK(ranked > 0);  // the search ran, offering the straight route's states other ranks
+  CHECK(ranked > 0);  // the search scored placement moves
   CHECK(faced > 0);
 }
 
 TEST_CASE("trace: the search scores unchain moves beside placement moves") {
-  // 11.10b's dimension, seen through the trace: the back edge of a cycle is
-  // the one segment phase 1 chains, so it is the one a cut can free, and the
-  // sweep must offer it before it starts moving states between ranks.
+  // A -> B -> C -> A: the back edge is the one chained segment.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -568,13 +548,8 @@ TEST_CASE("trace: the search scores unchain moves beside placement moves") {
     REQUIRE(layout_run(c, {}, opts, placed, diags, nullptr, nullptr, 0));
   }
 
-  // Exactly one cut in the first round -- the back edge, the one segment
-  // phase 1 chained -- and in every round every cut comes before every
-  // placement move. Only the first round is pinned to the back edge: later
-  // ones include kicks (11.10f), which turn another edge of the cycle around
-  // and so chain that one instead. The other transition-naming moves are
-  // reversals and faces (11.10d, 11.10e), told apart by the event's `move`
-  // rather than by which fields are set.
+  // One cut in the first round, on the back edge; in every round every cut precedes
+  // every placement move.
   std::vector<Round> const rounds{ rounds_of(t) };
   REQUIRE(!rounds.empty());
   bool seen_pin{ false };
@@ -605,13 +580,12 @@ TEST_CASE("trace: the search scores unchain moves beside placement moves") {
   }
   CHECK(seen_pin);
 
-  // Every scored move states which term rejected it.
+  // Scored moves carry their Tier-2 term shares.
   CHECK(count_kind(t, TraceKind::CandidateTerms) > 0);
 }
 
 TEST_CASE("trace: what a run reports as taken re-derives the run") {
-  // The whole re-derivation contract, over a chart whose search has both
-  // dimensions to choose from: tuple plus pins, and nothing left to search.
+  // The reported tuple and taken pins, with Level 1 off, reproduce the searched layout.
   Chart searched;
   Chart rederived;
   for (Chart *c : { &searched, &rederived }) {

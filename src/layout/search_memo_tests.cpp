@@ -1,5 +1,5 @@
-// Level 1 search shortcuts, each against a layout that does the work: the search memo,
-// unscored no-op faces, and face moves scored from the incumbent's prefix.
+// Level 1 search shortcuts checked against runs without them: the search memo, unscored
+// no-op faces, and face moves scored from the incumbent's prefix.
 
 #include "layout/pack.h"
 #include "layout/size.h"
@@ -77,7 +77,7 @@ std::vector<uint32_t> key_of(Inputs const &in) {
   return key;
 }
 
-// Restores the memo whatever a case leaves it as.
+// Re-enables the memo and disables its verifier on scope exit.
 struct MemoGuard {
   MemoGuard() = default;
   MemoGuard(MemoGuard const &) = delete;
@@ -148,7 +148,7 @@ TEST_CASE("search memo: the key tells apart every input a search is a function o
   variants[8].seed.reverses.push_back({ .trans = TransId{ 1 }, .leg = 0 });
   variants[9].seed.faces[0].face = 2;
   variants[10].seed.orients.push_back({ .frame = SubmachineId{ 0 } });
-  // Rank pins apply in order, so the same two in the other order are another start.
+  // The same two rank pins in the other order key differently.
   std::swap(variants[11].seed.ranks[0], variants[11].seed.ranks[1]);
   variants[12].scoped = true;
   variants[13].scoped = true;
@@ -205,7 +205,7 @@ TEST_CASE("search memo: a layout searched through it is the one searched without
 
 TEST_CASE("search memo: every search it answers is the search run afresh" *
           doctest::test_suite("full")) {
-  // Each answer is checked against the search run anyway, including those not taken.
+  // The verifier checks each memo answer, taken or not, against the search run afresh.
   MemoGuard const guard;
   layout_test_search_memo_verify(true);
   constexpr std::array<char const *, 5> CHARTS{ "axis.scav",

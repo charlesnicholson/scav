@@ -208,20 +208,17 @@ TEST_CASE("spaces: the digest hears every field and both zero shapes differ") {
   poked.path_clear[0].dst = 8;
   CHECK(spaces_digest(as_spaces(poked)) != base);
 
-  // No requests at all and zero-valued requests are different policies.
+  // No requests and zero-valued requests digest differently.
   scav_spaces const none{};
   CHECK(spaces_digest(none) != spaces_digest(as_spaces(full_tables(c))));
 
-  // Count prefixes keep adjacent tables apart: the same 12 bytes hash
-  // differently as one state row versus one submachine row.
+  // The same 12-byte row digests differently as a state row and as a submachine row.
   scav_box_space const row{ .min_w = 3, .h_before = 5, .h_after = 7 };
   scav_spaces const as_state{ .box_state = &row, .n_box_state = 1 };
   scav_spaces const as_sub{ .box_sub = &row, .n_box_sub = 1 };
   CHECK(spaces_digest(as_state) != spaces_digest(as_sub));
 
-  // A stride is an ABI fact and not a layout input, so the four of them are the
-  // one part of this struct the digest cannot hear -- otherwise hardening the
-  // boundary would have rebased every golden.
+  // The digest ignores the four strides.
   Tables const unheard{ t };
   scav_spaces bare{ as_spaces(unheard) };
   bare.box_state_stride = 0;
