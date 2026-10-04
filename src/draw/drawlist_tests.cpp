@@ -117,7 +117,7 @@ TEST_CASE("drawlist: every kind lands with the point count its kind demands") {
   CHECK(d.prims[3].points.len == 3);
   CHECK(d.prims[5].payload.len == 2);
   CHECK(d.prims[6].a == 8);
-  // An arc is a bounding box plus two angles, so its radius has somewhere to be.
+  // An arc is two bounding-box points; `a` and `b` are start and sweep in 1/64 degree.
   CHECK(d.prims[7].points.len == 2);
   CHECK(d.prims[7].a == (90 * 64));
   CHECK(d.prims[7].b == (180 * 64));
@@ -128,11 +128,11 @@ TEST_CASE("drawlist: every kind lands with the point count its kind demands") {
   CHECK(d.points[d.prims[0].points.off + 1].x == 40);
   CHECK(d.points[d.prims[0].points.off + 1].y == 60);
 
-  // The origin round-trips, and a primitive belonging to nothing says so.
+  // The origin round-trips; a primitive with no origin has `ElemKind::None`.
   CHECK(d.prims[0].origin_kind == static_cast<uint32_t>(ElemKind::State));
   CHECK(d.prims[0].origin_ordinal == 0);
   CHECK(d.prims[2].origin_kind == static_cast<uint32_t>(ElemKind::None));
-  // Nothing is clipped until an app says so.
+  // A pushed primitive is unclipped.
   CHECK(d.prims[0].clip == SCAV_CLIP_NONE);
 }
 
@@ -259,8 +259,7 @@ TEST_CASE("drawlist: canonical form is content, so emission order is erased") {
 
 TEST_CASE("drawlist: canonicalizing is idempotent and dedups the tables") {
   DrawList d;
-  // Four registrations of two distinct styles: interning stops the duplicates
-  // inside one list, so plant them by hand the way append would.
+  // Sets four style rows holding two distinct styles directly, bypassing interning.
   d.styles = { ink(0xBB), ink(0xAA), ink(0xBB), ink(0xAA) };
   push_rect(d, 0, 0, { .x = 0, .y = 0, .w = 1, .h = 1 }, NONE);
   push_rect(d, 0, 1, { .x = 2, .y = 0, .w = 1, .h = 1 }, NONE);
@@ -357,9 +356,7 @@ TEST_CASE("drawlist: canonical clip order is x, then y, then w, then h") {
 }
 
 TEST_CASE("drawlist: canonicalizing a list whose tables are empty leaves index zero") {
-  // Not a list a backend would take -- it is what an app hands over when it
-  // clears a table and forgets the primitives indexing it. The remap reads the
-  // map it built, so an empty one must not be indexed.
+  // An invalid list: one primitive indexes the empty style and clip tables.
   DrawList d;
   push_rect(d, 0, 0, { .x = 0, .y = 0, .w = 1, .h = 1 }, NONE);
   d.styles.clear();
@@ -400,8 +397,7 @@ TEST_CASE("drawlist: the digest hears content and the font, not indices") {
     c.prims[0].clip = 0;
   }));
 
-  // A different font over the same primitives is a different picture, because
-  // the advances those coordinates came from differ.
+  // A different font identity changes the digest of the same primitives.
   Metrics other{ bundled };
   other.identity ^= 1U;
   CHECK(drawlist_digest(d, other) != base);
@@ -458,8 +454,7 @@ TEST_CASE("drawlist: append rebases a primitive naming a row its own list lacks"
   drawlist_append(dst, src);
   REQUIRE(dst.prims.size() == 2);
   CHECK(dst.prims[0].style == 1);  // the appended style's row in `dst`
-  // What cannot be rebased lands on a row that exists rather than on a wild
-  // index: style zero, and unclipped.
+  // An index past the source's tables maps to style zero and `SCAV_CLIP_NONE`.
   CHECK(dst.prims[1].style == 0);
   CHECK(dst.prims[1].clip == SCAV_CLIP_NONE);
   CHECK(valid(dst) == INVALID);
@@ -507,8 +502,7 @@ TEST_CASE("drawlist: the C surface reads every array and refuses nulls") {
   scav_rect const *clip_rows{ nullptr };
   uint32_t count{ 0 };
   uint32_t stride{ 0 };
-  // Each array reports the stride to walk it at, which a reader asserts against
-  // its own row size rather than assuming the two agree.
+  // Each accessor reports its row stride.
   REQUIRE(scav_drawlist_prims(list, &prim_rows, &stride, &count) == SCAV_OK);
   CHECK(count == 1);
   CHECK(stride == sizeof(scav_prim));
@@ -543,8 +537,7 @@ TEST_CASE("drawlist: the C surface reads every array and refuses nulls") {
   REQUIRE(scav_drawlist_digest(list, metrics, &digest) == SCAV_OK);
   CHECK(digest == drawlist_digest(list->list, metrics->metrics));
 
-  // An invalid list is refused rather than sorted: canonicalizing one would
-  // index past an array.
+  // Validate and canonicalize return `SCAV_E_DRAWLIST` for an invalid list.
   list->list.prims[0].style = 9;
   CHECK(scav_drawlist_validate(list, &bad) == SCAV_E_DRAWLIST);
   CHECK(bad == 0);
@@ -592,8 +585,7 @@ TEST_CASE("images: registration carries the dimensions, and an id names one") {
   CHECK(extent.w == 32);
   CHECK(extent.h == 16);
 
-  // Dimensions come from registration, so a zero one is the caller's error and
-  // not something to infer from the bytes later.
+  // A zero dimension or length, or an empty id, is `SCAV_E_INVALID_ARG`.
   CHECK(scav_image_register(images, "bad", png.data(), 4, 0, 16, "image/png") ==
         SCAV_E_INVALID_ARG);
   CHECK(scav_image_register(images, "bad", png.data(), 0, 8, 16, "image/png") ==

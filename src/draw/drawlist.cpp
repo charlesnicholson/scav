@@ -1,6 +1,5 @@
-// The render IR: interning, the emitters, the per-kind validator, and the
-// canonical form the golden compares. Depth is the caller's throughout; scav
-// reserves no bands and assigns no depth semantics.
+// The render IR: interning, emitters, the per-kind validator, and the canonical form
+// the golden compares. Callers assign every depth.
 
 #include "scav/scav_draw.h"
 
@@ -107,9 +106,7 @@ void push_prim(DrawList &d,
                       .b = b });
 }
 
-// A primitive's content, so two lists that draw one picture sort alike no
-// matter what order their builders emitted in. Indices into per-list arrays
-// cannot serve: they encode emission order, which is the thing being erased.
+// Appends a primitive's fields to `key`, with its points and payload by value.
 void append_content(std::vector<scav_byte> &key, DrawList const &d, scav_prim const &p) {
   append_i32(key, p.depth);
   append_u32(key, p.kind);
@@ -333,8 +330,7 @@ bool drawlist_validate(DrawList const &d, uint32_t &bad) {
     }
     if (p.style >= d.styles.size()) { return false; }
     if ((p.clip != SCAV_CLIP_NONE) && (p.clip >= d.clips.size())) { return false; }
-    // Text names a string and an image names an id; the other kinds carry none,
-    // so a payload on one of them means a builder wrote to the wrong field.
+    // Only text (a string) and image (an id) carry a payload; an image requires one.
     bool const wants_payload{ (p.kind == SCAV_PRIM_TEXT) || (p.kind == SCAV_PRIM_IMAGE) };
     if (!wants_payload && (p.payload.len != 0U)) { return false; }
     if ((p.kind == SCAV_PRIM_IMAGE) && (p.payload.len == 0U)) { return false; }
@@ -347,8 +343,7 @@ bool drawlist_validate(DrawList const &d, uint32_t &bad) {
 }
 
 void drawlist_canonicalize(DrawList &d) {
-  // Styles and clips first: the prims' sort key names their new indices, so
-  // rewriting after the prim sort would sort on indices about to change.
+  // Dedupes and remaps styles and clips first; the prim sort key reads the new indices.
   std::vector<scav_style> styles{ d.styles };
   scav_stable_sort(styles, style_less);
   std::vector<scav_style> unique_styles;
@@ -392,8 +387,6 @@ void drawlist_canonicalize(DrawList &d) {
   d.styles = unique_styles;
   d.clips = unique_clips;
 
-  // The key is built once per primitive rather than inside the comparator: a
-  // merge sort asks O(n log n) times and the bytes do not change.
   struct Keyed {
     std::vector<scav_byte> key;
     uint32_t row;
@@ -405,8 +398,7 @@ void drawlist_canonicalize(DrawList &d) {
   }
   scav_stable_sort(keyed, [](Keyed const &a, Keyed const &b) { return a.key < b.key; });
 
-  // Points and text are rebuilt in the new order, so their offsets carry no
-  // memory of emission order either.
+  // Rebuilds points and text in the sorted primitive order.
   DrawList out;
   out.styles = d.styles;
   out.clips = d.clips;
@@ -432,8 +424,6 @@ void drawlist_canonicalize(DrawList &d) {
 
 uint32_t drawlist_digest(DrawList const &d, Metrics const &m) {
   std::vector<scav_byte> b;
-  // The font opens it: this is where glyph advances live, so it is where font
-  // identity is a hashed input rather than something inferred from geometry.
   append_u32(b, m.identity);
   append_u32(b, static_cast<uint32_t>(d.styles.size()));
   for (scav_style const &s : d.styles) {
@@ -463,8 +453,7 @@ void drawlist_append(DrawList &dst, DrawList const &src) {
                         src.text.bytes.begin(),
                         src.text.bytes.end());
 
-  // Styles and clips intern rather than concatenate, so appending a list twice
-  // does not double the tables it shares.
+  // Interns `src`'s styles and clips into `dst`, reusing equal rows.
   std::vector<uint32_t> style_map(src.styles.size(), 0);
   for (uint32_t i = 0; i < src.styles.size(); ++i) {
     style_map[i] = drawlist_style(dst, src.styles[i]);

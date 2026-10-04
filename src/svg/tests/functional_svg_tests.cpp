@@ -1,5 +1,5 @@
-// The corpus rendered end to end, the svg/ golden, and the one property that
-// makes the whole chain trustworthy: builder and backend measure alike.
+// Renders the corpus to SVG, checks the svg/ golden, and checks that builder and
+// backend measure text alike.
 
 #include "scav/scav_core.h"
 #include "scav/scav_draw.h"
@@ -102,9 +102,7 @@ uint32_t count_of(std::string_view doc, std::string_view needle) {
 }  // namespace
 
 TEST_CASE("svg corpus: every chart renders to the committed golden") {
-  // A hash and a byte count, not the documents: an SVG change should move one
-  // line per chart in review, and the documents themselves live in svg/ only
-  // for the one chart a human reads.
+  // The golden holds an xxhash32 and a byte count per chart document.
   std::string actual;
   for (char const *name : CORPUS) {
     if (scav::test::corpus_skipped(name)) { continue; }
@@ -149,9 +147,7 @@ TEST_CASE("svg corpus: vac's document is committed whole, for a human to read") 
 }
 
 TEST_CASE("svg corpus: builder and backend agree on every box") {
-  // The one metrics implementation, asserted rather than assumed. Every text
-  // primitive's textLength has to be the width the builder measured when it
-  // decided where to put that text, or the diagram lies about its own contents.
+  // Every text primitive's `textLength` equals the width the builder measured for it.
   Metrics const m{ bundled() };
   Rendered const &r{ rendered("vac.scav") };
 
@@ -192,14 +188,12 @@ TEST_CASE("svg corpus: every drawn primitive reaches the document") {
   CHECK(count_of(r.doc, "<rect ") == rects);
   CHECK(count_of(r.doc, "<polyline ") == polylines);
   CHECK(count_of(r.doc, "<text ") == texts);
-  // And nothing was dropped on the way: tcp is the long-hierarchical-edge
-  // chart, and a missing polyline there is the incumbent's failure mode.
+  // tcp's routes reach the document as polylines.
   CHECK(polylines > 0);
 }
 
 TEST_CASE("svg corpus: the document is stable across repeated renders") {
-  // Against the render the cases above read, so the second is the only one
-  // this case pays for.
+  // Compares a fresh render with the cached one the cases above use.
   Metrics const m{ bundled() };
   char const *const name{ scav::test::corpus_skipped("mill.scav") ? "brew.scav"
                                                                   : "mill.scav" };
@@ -222,8 +216,7 @@ TEST_CASE("svg corpus: an embedded font is the only thing --embed-font adds") {
                       .margin = readable().pad },
                     embedded,
                     bad) == SvgStatus::Ok);
-  // The body is byte-identical; only the defs block differs. A reader diffing
-  // two renders should see the font arrive and nothing else move.
+  // Removing the `<defs>` line from the embedded render yields the plain render.
   size_t const line{ embedded.find("  <defs>") };
   REQUIRE(line != std::string::npos);
   size_t const after{ embedded.find('\n', line) + 1 };

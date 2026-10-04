@@ -1,14 +1,12 @@
 #ifndef SCAV_DRAW_H_INCLUDED
 #define SCAV_DRAW_H_INCLUDED
 
-// libscavdraw's public API: font metrics, the DrawList render IR, the helper
-// layer, and the reference builder. A builder produces one, a backend consumes
-// one, and neither knows about the other or has to be scav's.
+// libscavdraw's public API: font metrics, the DrawList render IR, the helper layer and
+// the reference builder. A DrawList from any builder feeds any backend.
 
 #include "scav/scav_core.h"
 #include "scav/scav_draw_c.h"
-// The space tables and the profile, for the measurement pass: PODs and no
-// functions, so this is vocabulary rather than a link on layout.
+// The space-table, profile and placed-box PODs; libscavdraw does not link layout.
 #include "scav/scav_layout_c.h"
 #include "scav/scav_types.h"
 
@@ -34,23 +32,23 @@ struct Metrics {
   bool bundled{ false };      // glyphs and advances come from the compiled-in table
 };
 
-// xxh32 of assets/font/JetBrainsMono-Regular.ttf, which the library does not carry.
+// xxh32 of assets/font/JetBrainsMono-Regular.ttf; the library embeds only its metrics.
 uint32_t bundled_font_identity();
 
 // Empty `ttf` selects the bundled font's table. False on a font missing a table the
 // measurement needs, or one whose tables do not agree with each other.
 bool metrics_create(scav_byte const *ttf, uint32_t len, Metrics &out);
 
-// The glyph a codepoint maps to, or 0 for `.notdef` -- which callers treat as
-// an error, never as a zero-width glyph.
+// The glyph a codepoint maps to, or 0 (`.notdef`) when unmapped. Callers treat 0 as an
+// error.
 uint32_t metrics_glyph(Metrics const &m, uint32_t codepoint);
 
-// A glyph's advance in font design units. The last hmtx record applies to every
-// glyph past the table, which is the rule that breaks monospaced fonts.
+// A glyph's advance in font design units. Glyphs past the last hmtx record take its
+// advance.
 uint32_t metrics_advance(Metrics const &m, uint32_t glyph);
 
-// One line of NFC UTF-8, accumulated in int64 and divided once, ceiling: an
-// under-sized box lies. Kerning is ignored, which over-sizes Latin.
+// One line of NFC UTF-8: advances summed in int64, scaled once, rounded up. Kerning
+// is ignored.
 enum class MeasureStatus : uint32_t { Ok, BadUtf8, Newline, MissingGlyph, BadSize };
 MeasureStatus measure_text(Metrics const &m,
                            scav_byte const *utf8_nfc,
@@ -58,8 +56,8 @@ MeasureStatus measure_text(Metrics const &m,
                            int32_t font_size_grid,
                            scav_extent &out);
 
-// Not font vertical metrics: hhea, OS/2.sTypo* and usWin* disagree by 10-20%
-// within one font. Zero when the ratio is out of range.
+// `ceil(font_size_grid * k_num / k_den)`, ignoring the font's vertical metrics. Zero
+// when `font_size_grid <= 0`, a ratio term is outside 1..1024, or the result overflows.
 int32_t line_height(int32_t font_size_grid, int32_t k_num, int32_t k_den);
 
 // Author-supplied breaks only. `w` is the widest line, `h` the line count
@@ -74,8 +72,7 @@ MeasureStatus measure_block(Metrics const &m,
 
 // DrawList ==================================================================
 
-// Absolute grid units, one frame, no per-primitive frame tag: a builder reads
-// the geometry columns and knows where things are.
+// Absolute grid units in one frame, the frame of the geometry columns.
 struct DrawList {
   std::vector<scav_prim> prims;
   std::vector<scav_style> styles;
@@ -84,14 +81,13 @@ struct DrawList {
   StringPool text;
 };
 
-// Interning, so a fat per-primitive style never forces a full rebuild when
-// only a colour changed. Returns the row, appending only what is new.
+// Interns a style or clip and returns its row, appending only when new.
+// `drawlist_text` appends `s` to the text pool and returns its span.
 uint32_t drawlist_style(DrawList &d, scav_style const &s);
 uint32_t drawlist_clip(DrawList &d, scav_rect const &r);
 scav_span drawlist_text(DrawList &d, std::string_view s);
 
-// The emitters. Depth is a parameter because scav reserves no bands and
-// assigns no depth semantics: the caller owns the numbering.
+// The emitters. `depth` is caller-defined draw order.
 void push_rect(DrawList &d, int32_t depth, uint32_t style, scav_rect r, ElemRef origin);
 void push_rrect(DrawList &d,
                 int32_t depth,
@@ -147,12 +143,12 @@ void push_image(DrawList &d,
 // False writes the offending primitive's row to `bad`.
 bool drawlist_validate(DrawList const &d, uint32_t &bad);
 
-// Sorts by (depth, primitive bytes) and dedupes the style and clip tables.
-// Content, not emission order, is what makes two builders compare equal.
+// Sorts by (depth, primitive content) and dedupes the style and clip tables. Lists
+// drawing one picture in any emission order canonicalize equal.
 void drawlist_canonicalize(DrawList &d);
 
-// xxh32 over the canonical form, opening with the font's identity. Field by
-// field, never a struct's bytes.
+// xxh32 over the font's identity and the list's content in its current order, field
+// by field.
 uint32_t drawlist_digest(DrawList const &d, Metrics const &m);
 
 // Rebases `src`'s style, clip, point and payload indices onto `dst`.
@@ -160,8 +156,7 @@ void drawlist_append(DrawList &dst, DrawList const &src);
 
 // Images ====================================================================
 
-// The app registers, the DrawList references. Raster only: an SVG fragment is
-// unimplementable in an ImGui backend, and vector content is primitives.
+// Raster images the app registers and DrawList image primitives reference by id.
 struct Images {
   struct Row {
     StrRef id, mime;
@@ -172,8 +167,8 @@ struct Images {
   std::vector<scav_byte> pool;  // ids, mime types and image bytes, one arena
 };
 
-// Dimensions come from registration, so no backend needs a decoder. False on a
-// duplicate or empty id, no bytes, or a non-positive extent.
+// Registers an image with caller-given dimensions. False on a duplicate or empty id,
+// an empty mime, no bytes, or a non-positive extent.
 bool image_register(Images &images,
                     std::string_view id,
                     scav_byte const *bytes,
@@ -197,8 +192,7 @@ inline std::string_view image_bytes(Images const &images, Span ref) {
 
 // Helper layer ==============================================================
 
-// Utilities an app may call, never machinery that calls the app. Pure
-// functions over PODs, all optional; nothing in scav's pipeline invokes them.
+// Optional pure functions over PODs, for apps and builders.
 
 enum class Anchor : uint32_t {
   TopLeft,
@@ -212,14 +206,13 @@ enum class Anchor : uint32_t {
   BottomRight,
 };
 
-// Turns "I have a rect and three things" into positions. Heights and widths
-// come in, rects go out; a request past the rect is clipped to it.
+// `stack_v` and `row_h` split `r` into consecutive rects from heights or widths,
+// clipped to `r`; `align` places a `w` by `h` box at an anchor.
 void stack_v(scav_rect r, int32_t const *heights, uint32_t n, scav_rect *out);
 void row_h(scav_rect r, int32_t const *widths, uint32_t n, scav_rect *out);
 scav_rect align(scav_rect r, int32_t w, int32_t h, Anchor a);
 
-// The lines an author wrote, as views into `s`. No re-wrapping: wrap width is
-// always an input.
+// The lines an author wrote, split at newlines only, as views into `s`.
 std::vector<std::string_view> text_lines(std::string_view s);
 
 // Shape emission over the primitives above.
@@ -239,8 +232,8 @@ using Palette = std::vector<scav_style>;
 
 Palette palette_standard();
 
-// The measurement pass, and the policy every corpus golden is against: a title and
-// description, a submachine name, arrowhead room, and a path box per labelled transition.
+// Output of the measurement pass: a state's title and description, a submachine's
+// name, arrowhead room, and a path box per labelled transition.
 struct Spaces {
   std::vector<scav_box_space> box_state, box_sub;
   std::vector<scav_path_clear> path_clear;
@@ -279,8 +272,7 @@ void emit_route(DrawList &d,
                 uint32_t trans,
                 int32_t depth);
 
-// Draws the label centred in `box`, the rect layout placed rather than one the
-// builder recomputed -- a placed box may exceed its request.
+// Draws the label centred in `box`, the rect layout placed; it may exceed the request.
 void emit_label(DrawList &d,
                 Chart const &c,
                 Metrics const &m,
@@ -289,8 +281,8 @@ void emit_label(DrawList &d,
                 scav_rect box,
                 int32_t depth);
 
-// Every emitter, in an order nothing else depends on: submachines, states,
-// routes, labels. False when the chart carries no geometry.
+// Calls every emitter at `depth`: submachines, states, routes, labels. False when the
+// chart has no geometry or the palette is short.
 bool emit_chart(DrawList &d,
                 Chart const &c,
                 Metrics const &m,

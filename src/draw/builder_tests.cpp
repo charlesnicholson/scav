@@ -1,5 +1,4 @@
-// The measurement pass that becomes the goldens' stated policy, and the
-// emitters that read back what layout did with it.
+// Tests for the measurement pass and the emitters that draw layout's geometry.
 
 #include "scav/scav_draw.h"
 
@@ -17,9 +16,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
-// Not unused: doctest stringifies a failing CHECK's operands, and the insertion
-// operator for `string_view` is declared here. libc++ hands it over through
-// another header and the MSVC STL does not.
+// Declares `operator<<` for `string_view`, used when doctest prints CHECK operands.
 #include <ostream>
 #include <string>
 #include <string_view>
@@ -59,8 +56,7 @@ Chart small_chart() {
   return c;
 }
 
-// Measure, lay out, then build: the whole pipeline, which is the only way the
-// emitters have geometry to read.
+// A chart after measure, layout and emit, with each stage's output.
 struct Built {
   Chart chart;
   Spaces spaces;
@@ -114,8 +110,7 @@ constexpr uint32_t STYLE_SIZE{ static_cast<uint32_t>(sizeof(scav_style)) };
 constexpr uint32_t SPACES_SIZE{ static_cast<uint32_t>(sizeof(scav_spaces)) };
 constexpr uint32_t PLACED_SIZE{ static_cast<uint32_t>(sizeof(scav_placed)) };
 
-// A plane-15 private-use codepoint. The bundled font has no glyph for it, which
-// is what makes a measurement fail rather than come out narrow.
+// A plane-15 private-use codepoint with no bundled-font glyph; measuring it fails.
 constexpr char const *NO_GLYPH{ "\xF3\xB0\x80\x81" };
 
 // A geometry column in layout's own shape, written by hand.
@@ -143,9 +138,7 @@ ColumnId state_boxes(Chart &c) {
   return geom_column(c, "scav.geom.state", ElemKind::State, ValueKind::Pod, RECT_SIZE);
 }
 
-// Two thousand of one glyph at the profile's em leave the quarter-domain on x,
-// and six hundred lines of one leave it on y. Both stay inside what the
-// measurement will report at all.
+// Measurable text past the quarter-domain on x (`wide_text`) or on y (`tall_text`).
 std::string wide_text() {
   std::string s;
   s.append(2000, 'W');
@@ -207,8 +200,7 @@ scav_extent measured(std::string_view text, scav_profile const &p) {
 TEST_CASE("builder: the standard palette fills every slot the builder indexes") {
   Palette const p{ palette_standard() };
   REQUIRE(p.size() == SCAV_STYLE_COUNT);
-  // Text styles carry a size and shape styles do not, which is what tells the
-  // backend whether a primitive is glyphs or geometry.
+  // Text styles have a nonzero font size; shape styles have zero.
   CHECK(p[SCAV_STYLE_TITLE].font_size_grid > 0);
   CHECK(p[SCAV_STYLE_LABEL].font_size_grid > 0);
   CHECK(p[SCAV_STYLE_STATE].font_size_grid == 0);
@@ -304,8 +296,8 @@ TEST_CASE("builder: only a rounded rect and a diamond reserve room for a name") 
     StateId const s{ build_state(c, root, "Named", kind, {}) };
     Spaces sp;
     REQUIRE(measure_chart(c, m, p, sp));
-    // A diamond holds a centred label only where twice the text fits, so the
-    // one kind drawn inscribed asks for twice what a rectangle does.
+    // A choice reserves twice a rectangle's width and height for its inscribed name;
+    // other non-normal kinds reserve nothing.
     int32_t const grow{ (kind == StateKind::Choice) ? 2 : 0 };
     int32_t const rect{ (kind == StateKind::Normal) ? 1 : grow };
     CHECK(sp.box_state[s.v].min_w == (rect * (title.w + (2 * p.pad))));
@@ -365,8 +357,7 @@ TEST_CASE("builder: a name lands inside the rect its own h_before reserved") {
     CAPTURE(p.origin_ordinal);
     CHECK(at.x >= r.x);
     CHECK(at.x <= (r.x + r.w));
-    // The baseline sits one em below the top, so it is inside the band it was
-    // given as long as that band is at least a line tall.
+    // The baseline sits one em below the band's top.
     CHECK(at.y > r.y);
   }
 }
@@ -548,8 +539,7 @@ TEST_CASE("builder: a label lands on the route its own path box was placed on") 
   REQUIRE(layout_run(c, as_spaces(s), opts(p), placed, diags));
   REQUIRE(placed.size() == 1);
 
-  // The rect layout placed, read back rather than recomputed, which is what
-  // keeps the drawn label inside the box that was reserved for it.
+  // `label_box` returns the rect layout placed for the label.
   scav_rect box{};
   REQUIRE(label_box(c,
                     as_spaces(s),
@@ -589,8 +579,7 @@ TEST_CASE("builder: each pseudostate kind draws as its own shape") {
 }
 
 TEST_CASE("builder: only a sibling submachine draws a divider") {
-  // Every submachine gets a child: an empty one sizes to nothing, and a rect of
-  // no height has no border to draw a divider on.
+  // One child state per submachine gives each region a nonzero height.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const lone{ build_state(c, root, "Lone", StateKind::Normal, {}) };
@@ -613,8 +602,7 @@ TEST_CASE("builder: only a sibling submachine draws a divider") {
   CHECK(dividers == 1);
   CHECK(kind_count(b.list, SCAV_PRIM_LINE) == 3);
 
-  // Where it is, not just that it exists: the rule used to be drawn along one
-  // region's top edge however the packer had placed the two.
+  // Checks the divider's position: between the two regions and spanning both.
   ColumnId const id{ column_find(b.chart, "scav.geom.sub") };
   REQUIRE(id.v != INVALID);
   Span const kids{ b.chart.states[both.v].submachines };
@@ -654,8 +642,7 @@ TEST_CASE("builder: only a sibling submachine draws a divider") {
 }
 
 TEST_CASE("builder: a bare pseudostate's glyph fills its box exactly") {
-  // A route attaches to the box border and the glyph is what is seen, so the two
-  // must be the same rectangle. Layout gives a bare state no ring (11.4).
+  // The glyph fills the box a route attaches to; layout gives a bare state no ring.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const dot{ build_state(c, root, "", StateKind::Initial, {}) };
@@ -681,16 +668,14 @@ TEST_CASE("builder: a bare pseudostate's glyph fills its box exactly") {
   CHECK(circle->a == (std::min(box.w, box.h) / 2));
   CHECK(centre.x == (box.x + (box.w / 2)));
   CHECK(centre.y == (box.y + (box.h / 2)));
-  // The mark spans the whole box on its narrow axis, so the border it is
-  // reached at is the mark's own edge.
+  // The circle spans the box's narrower axis, so its edge lies on the box border.
   CHECK((centre.x - circle->a) == box.x);
   CHECK((centre.x + circle->a) == (box.x + box.w));
 }
 
 TEST_CASE("builder: a mark-drawn glyph is its profile minimum whatever it is named") {
-  // Only a rounded rect and a diamond show the name they reserve for. Reserving
-  // for the rest stretches a bar, a dot or an `H` to the width of a word and then
-  // paints over it -- `kind_min_h` is a floor and cannot pull it back.
+  // Junction, fork, join and history marks reserve no name space and take the
+  // profile's `kind_min_w` and `kind_min_h`, whatever the name.
   scav_profile const p{ readable() };
   for (StateKind const kind : { StateKind::Junction,
                                 StateKind::Fork,
@@ -719,7 +704,7 @@ TEST_CASE("builder: a mark-drawn glyph is its profile minimum whatever it is nam
       std::memcpy(&box[which],
                   column_data(b.chart, boxes) + (size_t{ mark.v } * sizeof(scav_rect)),
                   sizeof(scav_rect));
-      // Nothing draws the name, so nothing may be drawn for it either.
+      // The mark never draws the state's name.
       for (scav_prim const &prim : b.list.prims) {
         if ((prim.kind == SCAV_PRIM_TEXT) &&
             (prim.origin_kind == static_cast<uint32_t>(ElemKind::State)) &&
@@ -731,7 +716,7 @@ TEST_CASE("builder: a mark-drawn glyph is its profile minimum whatever it is nam
         }
       }
     }
-    // The name is an identifier, not a caption: a longer one may not grow the mark.
+    // A longer name leaves the mark's size unchanged.
     CHECK(box[0].w == box[1].w);
     CHECK(box[0].h == box[1].h);
     CHECK(box[0].w == p.kind_min_w[static_cast<uint32_t>(kind)]);
@@ -740,8 +725,8 @@ TEST_CASE("builder: a mark-drawn glyph is its profile minimum whatever it is nam
 }
 
 TEST_CASE("builder: a history mark stays inside the circle it is drawn in") {
-  // The box comes from `kind_min_*`, which knows nothing about `H*`, so the mark
-  // is sized from the circle instead. Checked at the em box's worst corner.
+  // The `H`/`H*` mark's em is the circle's radius. Checks the em box's farthest
+  // corner against the circle.
   for (StateKind const kind : { StateKind::History, StateKind::DeepHistory }) {
     CAPTURE(static_cast<uint32_t>(kind));
     Chart c;
@@ -789,8 +774,6 @@ TEST_CASE("builder: a history mark stays inside the circle it is drawn in") {
 }
 
 TEST_CASE("builder: the history mark fits its circle at every radius the profile gives") {
-  // The mark is sized from the circle, so the property has to hold as the box
-  // grows rather than at the one size the stock profile happens to produce.
   for (int32_t side : { 32, 64, 128, 256, 512, 1024 }) {
     CAPTURE(side);
     scav_profile p{ readable() };
@@ -841,7 +824,7 @@ TEST_CASE("builder: an internal loop's label is a path box seated inside its sta
   scav_profile const p{ readable() };
   Spaces sp;
   REQUIRE(measure_chart(c, bundled(), p, sp));
-  // Every labelled transition asks for a box to slide, and no band is reserved for one.
+  // Each labelled transition gets a path box; the state's after-band stays zero.
   CHECK(sp.box_state[s.v].h_after == 0);
   REQUIRE(sp.path_box.size() == 3);
 
@@ -911,14 +894,14 @@ TEST_CASE("builder: a label is drawn centred in the box that was placed for it")
       measure_text(m, reinterpret_cast<scav_byte const *>("work arrived"), 12, fs, ext) ==
       MeasureStatus::Ok);
   scav_point const at{ d.points[d.prims[0].points.off] };
-  // Centred on both axes of the rect layout wrote, not of the request, and the
-  // baseline is one em below the block's top.
+  // Centred on both axes of the rect layout placed; the baseline is one em below
+  // the block's top.
   CHECK(at.x == (placed[0].x + ((placed[0].w - ext.w) / 2)));
   CHECK(at.y == (placed[0].y + ((placed[0].h - line_height(fs, 1, 1)) / 2) + fs));
 }
 
 TEST_CASE("builder: a route into a pseudostate reaches the drawn mark") {
-  // The property the case above exists to protect, stated end to end.
+  // Checks that the route's first point lies on the pseudostate's drawn circle.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const dot{ build_state(c, root, "", StateKind::Initial, {}) };
@@ -949,8 +932,7 @@ TEST_CASE("builder: a route into a pseudostate reaches the drawn mark") {
 }
 
 TEST_CASE("builder: a choice's name fits inside the diamond, not across it") {
-  // A diamond holds a centred label only where `w/2a + h/2b <= 1`; sizing the box
-  // to the text alone puts the name through the diamond's point.
+  // A centred label fits the diamond when `w/2a + h/2b <= 1`.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const pick{ build_state(c, root, "SelfCheck", StateKind::Choice, {}) };
@@ -961,8 +943,7 @@ TEST_CASE("builder: a choice's name fits inside the diamond, not across it") {
   scav_prim const *diamond{ nullptr };
   scav_prim const *label{ nullptr };
   for (scav_prim const &prim : b.list.prims) {
-    // An arrowhead is a path too, and the first transition shares ordinal 0
-    // with the first state, so the kind has to be checked as well.
+    // Selects state-origin paths and text only; arrowheads are transition-origin paths.
     bool const is_state{ prim.origin_kind == static_cast<uint32_t>(ElemKind::State) };
     if (is_state && (prim.kind == SCAV_PRIM_PATH) && (prim.origin_ordinal == pick.v)) {
       diamond = &prim;
@@ -1027,8 +1008,7 @@ TEST_CASE("builder: an arrowhead points at the border, not at the trimmed end") 
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const z{ build_state(c, root, "Z", StateKind::Normal, {}) };
   build_trans(c, a, z, TransKind::External, {});
-  // A second, shorter hop so the clear gets capped at half its leg: extending by
-  // the requested clear rather than the one taken overshoots the border.
+  // A second, shorter hop whose clear is capped at half its last leg.
   StateId const y{ build_state(c, root, "Y", StateKind::Normal, {}) };
   build_trans(c, z, y, TransKind::External, {});
 
@@ -1076,7 +1056,7 @@ TEST_CASE("builder: an emitter given a row it cannot draw emits nothing") {
   emit_label(d, b.chart, m, p, 9999, { .x = 0, .y = 0, .w = 10, .h = 10 }, 0);
   CHECK(d.prims.empty());
 
-  // A short palette is refused rather than read past.
+  // A palette shorter than `SCAV_STYLE_COUNT` emits nothing.
   Palette const stub(1);
   emit_state(d, b.chart, m, stub, 0, 0);
   CHECK(d.prims.empty());
@@ -1115,8 +1095,7 @@ TEST_CASE("builder: depth is the caller's, and every primitive gets the one give
                      42));
   for (scav_prim const &prim : d.prims) { CHECK(prim.depth == 42); }
 
-  // Which is what lets an app interleave: the emitters take their own numbers,
-  // so a second pass lands above or below the first with no splicing.
+  // Each emitter call stamps the `depth` it is given on every primitive.
   DrawList interleaved;
   emit_state(interleaved, c, m, palette_standard(), 0, 10);
   emit_route(interleaved, {}, c, palette_standard(), 0, -5);
@@ -1149,8 +1128,7 @@ TEST_CASE("builder: the profile's font size reaches the drawn text") {
   Chart b{ small_chart() };
   REQUIRE(measure_chart(a, m, small, narrow));
   REQUIRE(measure_chart(b, m, large, wide));
-  // Bigger type asks for more room, which is the only channel by which a font
-  // reaches layout at all.
+  // A larger font size requests a larger box.
   CHECK(wide.box_state[0].min_w > narrow.box_state[0].min_w);
   CHECK(wide.box_state[0].h_before > narrow.box_state[0].h_before);
 }
@@ -1232,8 +1210,7 @@ TEST_CASE("builder: the C surface builds through the handles") {
                         PLACED_SIZE,
                         0) == SCAV_E_INVALID_ARG);
 
-  // A chart with no geometry is a state error, not a bad argument: the caller
-  // did nothing wrong except skip layout.
+  // A chart without layout geometry returns `SCAV_E_STATE`.
   scav_chart unlaid{ .chart = small_chart(), .diags = {} };
   CHECK(scav_emit_chart(list,
                         &unlaid,
@@ -1284,8 +1261,7 @@ TEST_CASE("builder: a state name past the quarter-domain is refused on either ax
     return !measure_chart(c, bundled(), p, s);
   };
 
-  // Measurable, and past what a space table may hold. The pass refuses rather
-  // than clamping, on whichever axis leaves the domain.
+  // Measurable text past `SPACE_MAX` on one axis is refused.
   scav_extent const wide{ measured(wide_text(), p) };
   CHECK(wide.w > SPACE_MAX);
   CHECK(wide.h < SPACE_MAX);
@@ -1380,8 +1356,7 @@ TEST_CASE("builder: a label the font cannot measure refuses the pass") {
 }
 
 TEST_CASE("builder: a routeless label past the quarter-domain is refused either way") {
-  // An internal self-transition's label rides its source's after-band, so the
-  // domain check lands on that band rather than on a path box.
+  // An internal self-transition's label is measured as a path box.
   auto const refused = [](std::string const &label) {
     Chart c;
     SubmachineId const root{ build_chart(c, "t", {}) };
@@ -1420,8 +1395,7 @@ TEST_CASE("builder: an emitter with no geometry column to read draws nothing") {
 }
 
 TEST_CASE("builder: a geometry column of a foreign shape is not read as layout's") {
-  // A narrower stride reports one row per entity over fewer bytes than that
-  // (11.7a).
+  // A narrower stride reports one row per entity, over fewer bytes per row.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
@@ -1454,8 +1428,8 @@ TEST_CASE("builder: a state box with no extent draws nothing") {
 }
 
 TEST_CASE("builder: a name with no band reserved for it is not drawn") {
-  // The `state_before` rect is what says where a title goes; without it there is
-  // a box to draw and nowhere to put the name.
+  // The `state_before` rect positions the name; without that column the box is drawn
+  // with no name.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   build_state(c, root, "Named", StateKind::Normal, {});
@@ -1592,14 +1566,15 @@ TEST_CASE("builder: a transition that asked for no box gets none") {
   scav_rect box{ .x = 1, .y = 2, .w = 3, .h = 4 };
   CHECK(!label_box(c, view, nullptr, 0, 9999, box));      // past the array
   CHECK(!label_box(c, view, nullptr, 0, dead.v, box));    // a tombstone
-  CHECK(!label_box(c, view, nullptr, 0, silent.v, box));  // nothing to say
-  // Labelled and routeless, but its source reserved no band to ride.
+  CHECK(!label_box(c, view, nullptr, 0, silent.v, box));  // no label
+  // Labelled, with a path box, and no placed array to read it from.
   CHECK(!label_box(c, view, nullptr, 0, spoken.v, box));
+  // A zero-height `state_after` row leaves the result unchanged.
   ColumnId const after{
     geom_column(c, "scav.geom.state_after", ElemKind::State, ValueKind::Pod, RECT_SIZE)
   };
   put_row(c, after, s.v, scav_rect{ .x = 0, .y = 0, .w = 100, .h = 0 });
-  CHECK(!label_box(c, view, nullptr, 0, spoken.v, box));  // a band of no height
+  CHECK(!label_box(c, view, nullptr, 0, spoken.v, box));
   CHECK(box.w == 3);  // and `out` is left alone throughout
 }
 
@@ -1641,12 +1616,11 @@ TEST_CASE("builder: a label with nothing to say or no way to say it draws nothin
   emit_label(d, c, m, p, dead.v, box, 0);
   emit_label(d, c, m, Palette(1), good.v, box, 0);
   emit_label(d, c, m, p, bare.v, box, 0);
-  // Refused rather than drawn narrow, which is the same answer the backend gives.
+  // A label the font cannot measure emits nothing.
   emit_label(d, c, m, p, unglyphed.v, box, 0);
   CHECK(d.prims.empty());
 
-  // The same box and the palette it needs: what the four above refused was the
-  // transition and the palette, not the rect.
+  // The same box with a live labelled transition and a full palette draws one label.
   emit_label(d, c, m, p, good.v, box, 0);
   CHECK(d.prims.size() == 1);
 }
@@ -1662,8 +1636,8 @@ TEST_CASE("builder: a profile whose pad is negative is refused, not drawn inside
 }
 
 TEST_CASE("builder: a history circle too big for the metrics draws the ring and no mark") {
-  // The mark is sized from the circle, so a circle past what the metrics will
-  // measure at all leaves nothing to size it with.
+  // The mark's em is the circle's radius; when the metrics refuse that em, only the
+  // ring is drawn.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   build_state(c, root, {}, StateKind::History, {});
@@ -1677,8 +1651,8 @@ TEST_CASE("builder: a history circle too big for the metrics draws the ring and 
 }
 
 TEST_CASE("builder: a name the metrics refuse is placed from its band, not its glyphs") {
-  // A diamond centres its name on the measured width. Where there is no
-  // measurement there is no centring, and the name is still drawn.
+  // A diamond centres its name on the measured width; an unmeasurable name is drawn
+  // one eighth of the band's width in from its left.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   build_state(c, root, NO_GLYPH, StateKind::Choice, {});
@@ -1741,12 +1715,12 @@ TEST_CASE("builder: what the head is set back by comes from the clear table or n
     return out;
   };
 
-  // The row the table holds is the set-back the head takes.
+  // The head's tip extends past the route's end by the table's `dst`.
   CHECK(tip(0, s).x == (100 + 16));
-  // The second transition is past the table's end, so it asks for nothing.
+  // Transition 1 is past the table's end, with a diagonal last leg: no set-back.
   CHECK(tip(1, s).x == 100);
   CHECK(tip(1, s).y == 50);
-  // And a last leg on neither axis leaves the tip on the route's own end.
+  // With no clear table, transition 0 gets no set-back.
   CHECK(tip(0, {}).x == 100);
 }
 

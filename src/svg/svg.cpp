@@ -1,6 +1,5 @@
-// One DrawList to one SVG document. Every number printed here is an integer,
-// and the whole scale lives in the viewBox, so a Debug and a Release build emit
-// the same bytes on every platform.
+// Writes a DrawList as an SVG document with integer arithmetic only and the scale in the
+// viewBox; every build and platform emits the same bytes.
 
 #include "scav/scav_svg.h"
 
@@ -18,14 +17,12 @@ namespace scav {
 
 namespace {
 
-// Grid units per point, fixed by the coordinate space rather than a profile
-// field, which is why the output size is a division and not a scale factor.
 constexpr int32_t GRID_PER_PT{ 16 };
 
 void put_i32(std::string &out, int32_t v) {
   if (v < 0) {
     out += '-';
-    // Negate through uint32 so INT32_MIN has somewhere to go.
+    // Negates in int64 so INT32_MIN's magnitude fits in uint32.
     string_append_u32(out, static_cast<uint32_t>(-static_cast<int64_t>(v)));
     return;
   }
@@ -40,8 +37,7 @@ void attr(std::string &out, char const *name, int32_t v) {
   out += '"';
 }
 
-// The five predefined entities, and nothing else: a chart's text is NFC UTF-8
-// and SVG is UTF-8, so no other codepoint needs escaping.
+// Escapes the five predefined XML entities and copies every other byte unchanged.
 void put_text(std::string &out, std::string_view s) {
   for (char const c : s) {
     switch (c) {
@@ -55,8 +51,8 @@ void put_text(std::string &out, std::string_view s) {
   }
 }
 
-// #rrggbb plus a separate opacity, because `#rrggbbaa` is CSS Color 4 and older
-// SVG consumers ignore the alpha pair silently rather than refusing it.
+// `#rrggbb` plus a separate `-opacity` when alpha is below 255; zero alpha or `none`
+// writes "none".
 void put_paint(std::string &out, char const *name, uint32_t rgba, bool none) {
   out += ' ';
   out += name;
@@ -74,9 +70,7 @@ void put_paint(std::string &out, char const *name, uint32_t rgba, bool none) {
   out += '"';
   uint32_t const alpha{ rgba & 0xFFU };
   if (alpha != 0xFFU) {
-    // The one ratio that has to reach the output, since SVG has no integer
-    // spelling for opacity. Three digits assembled from integer division: not a
-    // float-to-decimal conversion, so every platform emits the same bytes.
+    // Opacity as three decimal digits of alpha / 255, by integer division.
     uint32_t const thousandths{ (alpha * 1000U) / 255U };
     out += ' ';
     out += name;
@@ -88,8 +82,7 @@ void put_paint(std::string &out, char const *name, uint32_t rgba, bool none) {
   }
 }
 
-// Base64 without a line-break policy, since the only consumer is a data URI or
-// an @font-face src.
+// Standard base64 with `=` padding and no line breaks.
 void put_base64(std::string &out, scav_byte const *bytes, uint32_t len) {
   constexpr char const *SET{
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
@@ -143,16 +136,14 @@ void put_points(std::string &out, DrawList const &d, scav_prim const &p) {
   out += '"';
 }
 
-// The shared stroke and fill attributes. A text style carries a font size and
-// no stroke, and a shape style the other way round, which is what tells them
-// apart without a second enum.
+// Writes the fill, stroke, stroke-width and dash attributes; `stroke_only` sets the
+// fill to none.
 void put_style(std::string &out, scav_style const &s, bool stroke_only) {
   put_paint(out, "fill", s.fill_rgba, stroke_only);
   put_paint(out, "stroke", s.stroke_rgba, false);
   if ((s.stroke_rgba & 0xFFU) != 0U) { attr(out, "stroke-width", s.stroke_w); }
   if (s.dash != 0U) {
-    // App-defined, so the only honest reading is "some dash": four on, three
-    // off, scaled by the stroke width so it survives any viewBox.
+    // Any nonzero dash draws as 4 on, 3 off, in stroke widths (at least 1 each).
     out += " stroke-dasharray=\"";
     put_i32(out, imax(1, s.stroke_w * 4));
     out += ',';
@@ -231,13 +222,7 @@ SvgStatus svg_write(DrawList const &d,
   for (uint32_t i = 0; i < d.prims.size(); ++i) {
     scav_prim const &p{ d.prims[i] };
     bad = i;
-    if (p.kind == SCAV_PRIM_ARC) {
-      // An `A` command needs endpoint coordinates, and deriving those from an
-      // angle needs trigonometry that no integer path here supplies. No shipped
-      // builder emits an arc, so the table that would fix it is machinery for a
-      // requirement that does not exist yet.
-      return SvgStatus::UnsupportedPrim;
-    }
+    if (p.kind == SCAV_PRIM_ARC) { return SvgStatus::UnsupportedPrim; }
     if ((p.kind == SCAV_PRIM_IMAGE) &&
         (image_find(images,
                     { reinterpret_cast<char const *>(d.text.bytes.data() + p.payload.off),
@@ -252,8 +237,6 @@ SvgStatus svg_write(DrawList const &d,
   Wide const both_margins{ Wide{ 2 } * margin };
   Wide const view_w{ static_cast<Wide>(tight.w) + both_margins };
   Wide const view_h{ static_cast<Wide>(tight.h) + both_margins };
-  // The viewBox is integer, so the extent has to fit one. Output size is
-  // unbounded by anything here: SVG sets no ceiling, so neither does this.
   if ((view_w > COORD_MAX) || (view_h > COORD_MAX)) { return SvgStatus::ExtentOverflow; }
 
   std::string body;
@@ -310,8 +293,7 @@ SvgStatus svg_write(DrawList const &d,
         attr(body, "y", pts[0].y);
         attr(body, "width", pts[1].x - pts[0].x);
         attr(body, "height", pts[1].y - pts[0].y);
-        // The bytes go inline: dimensions came from registration, so nothing
-        // here needs a decoder.
+        // Embeds the image bytes as a base64 data URI.
         body += " href=\"data:";
         body += image_str(images, img.mime);
         body += ";base64,";
@@ -323,9 +305,7 @@ SvgStatus svg_write(DrawList const &d,
         std::string_view const text{ reinterpret_cast<char const *>(d.text.bytes.data() +
                                                                     p.payload.off),
                                      p.payload.len };
-        // textLength comes from our own advance sum, which turns any font
-        // substitution into slightly loose spacing rather than overflow. It is
-        // also the assertion that builder and backend measure alike.
+        // textLength is the metrics' advance sum; a substituted font is spaced to fit it.
         scav_extent ext{};
         MeasureStatus const st{ measure_text(
             m,
@@ -362,8 +342,7 @@ SvgStatus svg_write(DrawList const &d,
 
   std::string doc{ "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<svg" };
   doc += " xmlns=\"http://www.w3.org/2000/svg\"";
-  // Output size in whole points, ceiled: the viewBox carries the exact extent,
-  // so rounding the frame up can only add a sliver of margin.
+  // Output size in whole points, rounded up; the viewBox holds the exact extent.
   attr(doc, "width", ceil_div(static_cast<int32_t>(view_w), GRID_PER_PT));
   attr(doc, "height", ceil_div(static_cast<int32_t>(view_h), GRID_PER_PT));
   doc += " viewBox=\"";
@@ -376,8 +355,7 @@ SvgStatus svg_write(DrawList const &d,
   put_i32(doc, static_cast<int32_t>(view_h));
   doc += "\">\n";
 
-  // One bundled font, named with a fallback, and kerning off on both sides:
-  // the metrics helper ignores kerning, so the renderer has to as well.
+  // JetBrains Mono with a monospace fallback, kerning off to match the metrics.
   doc +=
       "  <style>text { font-family: \"JetBrains Mono\", monospace;"
       " font-kerning: none; }</style>\n";

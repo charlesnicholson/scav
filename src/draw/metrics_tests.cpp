@@ -1,6 +1,5 @@
-// The bundled font's tables, cmap formats 4 and 12, the numberOfHMetrics tail
-// rule, and the one scaling formula. Fonts are built byte by byte here: the
-// traps live in table shapes the bundled font does not have.
+// Tests for the bundled font's tables, cmap formats 4 and 12, the numberOfHMetrics
+// tail rule and the scaling formula, using fonts built byte by byte.
 
 #include "scav/scav_draw.h"
 
@@ -39,8 +38,7 @@ struct Table {
   std::vector<scav_byte> bytes;
 };
 
-// A font is a directory plus its tables. Offsets are computed here rather than
-// asserted, so a test can add a table without hand-patching four numbers.
+// A font file: the table directory, with offsets computed, then each table's bytes.
 std::vector<scav_byte> assemble(std::vector<Table> const &tables) {
   std::vector<scav_byte> out;
   be32(out, 0x0001'0000U);  // sfntVersion
@@ -82,8 +80,7 @@ std::vector<scav_byte> maxp_table(uint32_t glyphs) {
   return t;
 }
 
-// One record per advance, then one left-side bearing per glyph past them --
-// which is the shape the tail rule exists for.
+// One record per advance, then one left-side bearing per glyph past them.
 std::vector<scav_byte> hmtx_table(std::vector<uint32_t> const &advances, uint32_t glyphs) {
   std::vector<scav_byte> t;
   for (uint32_t const a : advances) {
@@ -222,8 +219,7 @@ uint32_t range_offset(uint32_t n, uint32_t i, uint32_t slot) {
   return 2U * ((n - i) + slot);
 }
 
-// The cmap goes last, so cutting the cmap table cuts the file: every bounds
-// check reads against the file's length rather than the table's.
+// Puts the cmap last and truncates it to `cut` bytes, so the cut also ends the file.
 std::vector<scav_byte> font_with_cmap(std::vector<scav_byte> cmap, uint32_t cut) {
   if (cut < cmap.size()) { cmap.resize(cut); }
   return assemble({
@@ -270,8 +266,7 @@ TEST_CASE("metrics: the bundled font is the one the design names") {
   CHECK(m.ttf.empty());
   CHECK(m.units_per_em == 1000);
   CHECK(m.num_glyphs == 1743);
-  // The bundled font carries a full hmtx, so its own tail rule never fires --
-  // which is why the rule gets a synthetic font of its own below.
+  // The bundled font has a full hmtx; a synthetic font below tests the tail rule.
   CHECK(m.num_h_metrics == m.num_glyphs);
   CHECK(parsed().cmap_format == 12);
   CHECK(m.identity != 0);
@@ -297,12 +292,12 @@ TEST_CASE("metrics: the scaling formula divides once and ceils") {
   uint32_t const advance{ metrics_advance(m, metrics_glyph(m, 'x')) };
   scav_extent one{};
   REQUIRE(measure(m, "x", 16, one) == MeasureStatus::Ok);
-  // ceil, never round-to-nearest: an under-sized box is a diagram that lies.
+  // Width is `ceil(advance * size / upem)`.
   CHECK(one.w == static_cast<int32_t>((advance * 16U + 999U) / 1000U));
   CHECK(one.h == 16);
 
-  // Ten glyphs measured together, not ten measurements summed: the division
-  // happens once, so the whole is never wider than the sum of its parts.
+  // A run divides once over its summed advances, so its width is at most the sum of
+  // single-glyph widths.
   scav_extent ten{};
   REQUIRE(measure(m, "xxxxxxxxxx", 16, ten) == MeasureStatus::Ok);
   CHECK(ten.w <= (one.w * 10));
@@ -366,8 +361,7 @@ TEST_CASE("metrics: a size outside the domain is refused") {
 }
 
 TEST_CASE("metrics: the numberOfHMetrics tail rule applies the last advance") {
-  // Four glyphs, two advance records: glyphs 2 and 3 inherit record 1's
-  // advance. Missing this breaks monospaced fonts specifically.
+  // Four glyphs, two advance records: glyphs 2 and 3 take record 1's advance.
   std::vector<scav_byte> const font{ assemble({
       { .tag = "cmap", .bytes = cmap4_table('a', 'd', 0) },
       { .tag = "head", .bytes = head_table(1000) },
@@ -408,8 +402,7 @@ TEST_CASE("metrics: format 4 and format 12 map the same run alike") {
   CHECK(m4.cmap_format == 4);
   CHECK(m12.cmap_format == 12);
 
-  // Glyph 0 is .notdef, so 'A' mapping to it reads as missing either way --
-  // the point here is that both formats agree, including on that.
+  // 'A' maps to glyph 0, .notdef, which reads as missing; both formats agree on it.
   for (uint32_t cp = 'A'; cp <= 'C'; ++cp) {
     CHECK(metrics_glyph(m4, cp) == metrics_glyph(m12, cp));
   }
@@ -510,12 +503,11 @@ TEST_CASE("metrics: truncating the bundled font at every length never crashes") 
   std::vector<scav_byte> const &font{ committed_ttf() };
   scav_byte const *const bytes{ font.data() };
   auto const len{ static_cast<uint32_t>(font.size()) };
-  // Powers of two plus a prime stride: every table boundary gets crossed
-  // somewhere, and a bounds check missed anywhere reads off the end.
+  // Truncates at every multiple of 997 bytes.
   for (uint32_t cut = 0; cut < len; cut += 997) {
     Metrics m;
     if (metrics_create(bytes, cut, m)) {
-      // Whatever it accepted, it must not then read past what it accepted.
+      // Reads from an accepted truncated font stay within the accepted bytes.
       scav_extent e{};
       (void)measure(m, "Idle", 16, e);
       for (uint32_t g = 0; g < m.num_glyphs; g += 61) { (void)metrics_advance(m, g); }
@@ -569,14 +561,14 @@ TEST_CASE("metrics: line height is the profile ratio, not the font's opinion") {
   CHECK(line_height(10, 7, 5) == 14);
   CHECK(line_height(11, 7, 5) == 16);
   CHECK(line_height(1, 3, 2) == 2);
-  // Out of range reads back zero rather than a plausible number.
+  // Out-of-range arguments return zero.
   CHECK(line_height(0, 7, 5) == 0);
   CHECK(line_height(-1, 7, 5) == 0);
   CHECK(line_height(160, 0, 5) == 0);
   CHECK(line_height(160, 7, 0) == 0);
   CHECK(line_height(160, 1025, 5) == 0);
   CHECK(line_height(160, 7, 1025) == 0);
-  // And a product past the coordinate domain, which every bound above is in.
+  // A product past `COORD_MAX` returns zero.
   CHECK(line_height(COORD_MAX, 1024, 1) == 0);
 }
 
@@ -608,7 +600,7 @@ TEST_CASE("metrics: a block is its widest line by its own line count") {
   REQUIRE(block("a\n", trailing) == MeasureStatus::Ok);
   CHECK(trailing.h == line_height(16, 7, 5));
 
-  // Interior blank lines do count: an author who wrote one meant it.
+  // Interior blank lines count as lines.
   scav_extent gap{};
   REQUIRE(block("a\n\nb", gap) == MeasureStatus::Ok);
   CHECK(gap.h == 3 * line_height(16, 7, 5));
@@ -630,12 +622,10 @@ TEST_CASE("metrics: a block refuses what a line refuses") {
   CHECK(block("ok", 16, 7, 0) == MeasureStatus::BadSize);
   CHECK(block("\xC0\x80", 16, 7, 5) == MeasureStatus::BadUtf8);
   CHECK(block("\xF3\xB0\x80\x81", 16, 7, 5) == MeasureStatus::MissingGlyph);
-  // Two lines of the tallest line height there is overflows the height a line
-  // of it does not, so the sum is checked and not just each term.
+  // One line of this height fits the domain and two overflow it.
   CHECK(block("\n\n", COORD_MAX / 4, 4, 1) == MeasureStatus::BadSize);
 
-  // No bytes at all where a length says there are some, which measure_text
-  // refuses and this used to read through.
+  // A null buffer with a nonzero length is `BadUtf8`, as in `measure_text`.
   CHECK(measure_block(m, nullptr, 5, 16, 7, 5, e) == MeasureStatus::BadUtf8);
   CHECK(e.w == 0);
   CHECK(e.h == 0);
@@ -676,8 +666,7 @@ TEST_CASE("metrics: the C surface agrees with the C++ one, and refuses nulls") {
   REQUIRE(scav_measure_block(m, raw, 4, 160, 7, 5, &block, EXTENT_SIZE) == SCAV_OK);
   CHECK(block.h == 224);
 
-  // Every failure mode keeps its own code: a missing glyph is not a bad
-  // argument, because one is the font's fault and the other the caller's.
+  // A bad size is `SCAV_E_INVALID_ARG`; a missing glyph is `SCAV_E_NO_GLYPH`.
   CHECK(scav_measure_text(m, raw, 4, 0, &got, EXTENT_SIZE) == SCAV_E_INVALID_ARG);
   CHECK(scav_measure_text(m,
                           reinterpret_cast<scav_byte const *>("\xF3\xB0\x80\x81"),
@@ -745,8 +734,7 @@ TEST_CASE("metrics: a table directory that runs off the end is refused") {
 }
 
 TEST_CASE("metrics: a table too short for the field it must carry is refused") {
-  // The short table goes last, so its field lands past the file rather than in
-  // the next table's bytes: every read is bounded by the file, not the table.
+  // Puts the 4-byte table last, so reading its field runs past the end of the file.
   auto const with_short = [](char const *tag) {
     std::vector<Table> tables{
       { .tag = "cmap", .bytes = cmap4_table('a', 'z', 1) },
@@ -852,8 +840,7 @@ TEST_CASE("metrics: a format 4 table that lies about its own size maps nothing")
     CHECK(metrics_glyph(m, 0x41U) == 0);
   }
 
-  // A segment count of zero is a table with no segments at all, which is not
-  // the same as one whose first segment starts at zero.
+  // A segment count of zero maps no codepoints.
   std::vector<scav_byte> empty{ cmap_wrap(3, 1, cmap4_sub(one, {})) };
   empty[12U + 6U] = 0;
   empty[12U + 7U] = 0;
@@ -876,16 +863,14 @@ TEST_CASE("metrics: format 4 maps through an idRangeOffset, or through nothing")
   CHECK(metrics_glyph(m, 0x41U) == 5);  // out of the array, then the delta
   CHECK(metrics_glyph(m, 0x42U) == 0);  // the array's own zero, not a glyph
 
-  // An offset reaching past the end of the file reads back nothing rather than
-  // whatever happens to follow the table.
+  // An idRangeOffset past the end of the file maps to glyph 0.
   std::vector<Seg> far{ segs };
   far[0].range = 0xFFF0U;
   Metrics const past{ from_bytes(
       font_with_cmap(cmap_wrap(3, 1, cmap4_sub(far, { 5, 0 })), 0xFFFFU)) };
   CHECK(metrics_glyph(past, 0x41U) == 0);
 
-  // Without the mandatory 0xFFFF terminator, a codepoint above the last segment
-  // runs out of segments, which is a miss rather than a read past the array.
+  // With no 0xFFFF terminator, a codepoint above the last segment maps to glyph 0.
   std::vector<Seg> const unterminated{
     { .end = 0x42U, .start = 0x41U, .delta = 0xFFC0U, .range = 0 }
   };
@@ -894,8 +879,7 @@ TEST_CASE("metrics: format 4 maps through an idRangeOffset, or through nothing")
   CHECK(metrics_glyph(open, 0x41U) == 1);
   CHECK(metrics_glyph(open, 0x43U) == 0);
 
-  // A glyph id past the font's own count is nothing, rather than a row of the
-  // hmtx that belongs to no glyph.
+  // A glyph id past the font's glyph count maps to glyph 0.
   std::vector<Seg> const beyond{
     { .end = 0x42U, .start = 0x41U, .delta = 0, .range = 0 }
   };
@@ -932,8 +916,8 @@ TEST_CASE("metrics: the bundled font's own format 4 subtable agrees with format 
   four.cmap_sub = { .off = sub, .len = 0 };
   four.cmap_format = 4;
 
-  // U+0021 sits in a segment whose idRangeOffset is non-zero, so its glyph
-  // comes out of the array rather than out of the delta.
+  // U+0021's segment has a non-zero idRangeOffset, so its glyph is read from the
+  // glyph-id array.
   uint32_t const seg_x2{ rd16(twelve.ttf, sub + 6U) };
   uint32_t const end_base{ sub + 14U };
   uint32_t const start_base{ end_base + seg_x2 + 2U };
@@ -998,8 +982,7 @@ TEST_CASE("metrics: a format 12 table that lies about its own size maps nothing"
 }
 
 TEST_CASE("metrics: a codepoint in a gap between groups is missing, not mapped") {
-  // The groups ascend, so the first one starting above the codepoint ends the
-  // search: nothing later can match, and reading on would be wasted work.
+  // Groups ascend; the search stops at the first group starting above the codepoint.
   Metrics const m{ bundled() };
   CHECK(metrics_glyph(m, 0x0EU) == 0);  // between U+000D and U+0020
   CHECK(metrics_glyph(m, 0x01U) == 0);  // below the first group of all
@@ -1008,8 +991,8 @@ TEST_CASE("metrics: a codepoint in a gap between groups is missing, not mapped")
 }
 
 TEST_CASE("metrics: an hmtx that points past the font reads back no advance") {
-  // Reachable only by hand: metrics_create refuses a font whose hmtx cannot
-  // hold the records hhea claims, which is what makes the read safe.
+  // Set by hand: `metrics_create` refuses a font whose hmtx cannot hold the records
+  // hhea claims.
   Metrics m{ parsed() };
   m.hmtx.off = static_cast<uint32_t>(m.ttf.size());
   CHECK(metrics_advance(m, 0) == 0);

@@ -97,8 +97,7 @@ TEST_CASE("helpers: every anchor cell places its content in the right corner") {
 
 TEST_CASE("helpers: content wider than its rect centres by floor, not toward zero") {
   scav_rect const r{ .x = 0, .y = 0, .w = 10, .h = 10 };
-  // Slack is -5, and floor_div takes it to -3 rather than -2: overhang is
-  // symmetric about the rect either way, and `/` would bias it one direction.
+  // Slack is -5, which `floor_div` halves to -3.
   CHECK(same(align(r, 15, 15, Anchor::MidCentre),
              scav_rect{ .x = -3, .y = -3, .w = 15, .h = 15 }));
 }
@@ -116,7 +115,7 @@ TEST_CASE("helpers: the lines are the ones the author wrote") {
   REQUIRE(text_lines("").size() == 1);
   CHECK(text_lines("")[0].empty());
   CHECK(text_lines("a\n").size() == 1);
-  // An interior blank line is one the author meant.
+  // An interior blank line counts as a line.
   REQUIRE(text_lines("a\n\nb").size() == 3);
   CHECK(text_lines("a\n\nb")[1].empty());
 }
@@ -124,8 +123,7 @@ TEST_CASE("helpers: the lines are the ones the author wrote") {
 TEST_CASE("images: registration refuses anything a backend could not draw later") {
   Images images;
   std::array<scav_byte, 3> const bytes{ 1, 2, 3 };
-  // Every field is load-bearing at draw time: the mime names the data URL, the
-  // bytes are the image, and the extent is not inferred from either.
+  // A missing mime, null bytes or a zero dimension is refused.
   CHECK(!image_register(images, "a", bytes.data(), 3, 8, 8, {}));
   CHECK(!image_register(images, "a", nullptr, 3, 8, 8, "image/png"));
   CHECK(!image_register(images, "a", bytes.data(), 3, 8, 0, "image/png"));

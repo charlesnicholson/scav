@@ -1,5 +1,4 @@
-// The C projection of scav_svg.h. One call, one document, under the same
-// out-param protocol every span accessor follows.
+// C API over scav_svg.h, following the span accessors' out-param protocol.
 
 #include "scav/scav_svg_c.h"
 
@@ -56,8 +55,7 @@ scav_result scav_svg_write(scav_drawlist const *list,
   if (cap == 0) { return SCAV_OK; /* count query */ }
   if (cap < doc.size()) { return SCAV_E_CAPACITY; }
   if (out == nullptr) { return SCAV_E_INVALID_ARG; }
-  // Not NUL-terminated, which the header states: the caller was handed the byte
-  // count and every other span accessor here works the same way.
+  // Copies without a NUL terminator; `out_count` already holds the length.
   // NOLINTNEXTLINE(bugprone-not-null-terminated-result)
   std::memcpy(out, doc.data(), doc.size());
   return SCAV_OK;

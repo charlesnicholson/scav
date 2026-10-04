@@ -1,6 +1,5 @@
-// The corpus through the whole pipeline: measure with the bundled font, lay
-// out, build, canonicalize, hash. This is where the measurement policy the
-// layout goldens are stated against finally exists.
+// Runs the corpus through measure with the bundled font, layout, build,
+// canonicalize and hash, and checks the results against the goldens.
 
 #include "core/tests/corpus.h"
 #include "layout/cost.h"
@@ -71,8 +70,7 @@ Chart load_corpus(char const *name) {
   return c;
 }
 
-// One chart, all the way through. The pipeline every corpus golden is produced
-// by, and the one an application writes for itself.
+// One corpus chart after measure, layout and emit, with each stage's output.
 struct Run {
   Chart chart;
   Spaces spaces;
@@ -143,8 +141,8 @@ TEST_CASE(
     "drawlist corpus: under real text every bounded round picks what scoring it whole "
     "picks" *
     doctest::test_suite("full")) {
-  // Each round is also scored whole: the same pick at the same cost, no bound above a
-  // cost; each candidate labelled on its kept routes lays out what a full lay-out does.
+  // Verification scores each round whole and requires the same pick at the same cost,
+  // no bound above a cost, and labelled candidates matching a full layout.
   struct Restore {
     Restore() = default;
     Restore(Restore const &) = delete;
@@ -235,10 +233,7 @@ TEST_CASE("drawlist corpus: every chart builds and hashes to the committed golde
 }
 
 TEST_CASE("drawlist corpus: the layout hashes under the reference measurement") {
-  // A second layout golden, and the one section 6 actually asks for: the same
-  // hashes as layout's own, but taken against the reference builder's
-  // measurement rather than no requests at all. It lives here because layout
-  // cannot depend on draw, so its own suite has no way to measure anything.
+  // Layout's corpus hashes taken against the reference builder's measurement.
   Metrics const m{ bundled() };
 
   std::string actual;
@@ -270,17 +265,15 @@ TEST_CASE("drawlist corpus: the layout hashes under the reference measurement") 
 }
 
 TEST_CASE("drawlist corpus: the cost terms on the rendered scale") {
-  // The other scale's cost golden, and the other share table. `label` is scored
-  // from the placed boxes and the path-box part of `excess_len` from the
-  // requests, so both are zero wherever the measurement is not real text (11.6).
+  // Cost terms and shares on the real-text scale. `label` and the path-box part of
+  // `excess_len` are nonzero only under real-text measurement.
   Metrics const m{ bundled() };
   scav_profile const p{ readable() };
 
   std::string actual;
   std::string shares;
-  // Scoring under real text is the only scale with placed boxes on it, so
-  // `label` and `label_near` -- O(placed x states) and O(placed x pieces) --
-  // have a multiplicand here and nowhere else (11.6). Timed, not asserted.
+  // `label` and `label_near` cost O(placed x states) and O(placed x pieces); timed
+  // here, not asserted.
   int64_t scoring_us{ 0 };
   for (char const *name : CORPUS) {
     if (scav::test::corpus_skipped(name)) { continue; }
@@ -350,31 +343,8 @@ TEST_CASE("drawlist corpus: the cost terms on the rendered scale") {
 }
 
 TEST_CASE("drawlist gauntlet: what crowd's tighter packing costs its labels") {
-  // The element suite scores no placed boxes, so these two terms only exist
-  // here. Carved out to P9d: `sweep_count = 0, trybox = 0` reads `label` 0 and
-  // `label_near` 172, for 56% more area and a Tier 2 of 1,438 against 1,230 --
-  // which is why nothing picks it, by a sixth rather than by half.
-  //
-  // **`label` was 4, read 6 once the count stopped exempting a transition's own
-  // endpoints, and is 5 now the placer stops choosing those positions**; the
-  // one left was structural, and zero once 11.9.5's reservation made that last
-  // position reachable -- the box had nowhere else to be, not a rect it refused.
-  //
-  // `label_near` 442 -> 470 when a refused box took a strip further from its
-  // own leg, 442 under the anchor, 490 under the reservation, and 346 once the
-  // weights were fitted and the search ran the whole table (11.6): the term
-  // rises where every reader-visible class falls, so the pick it argues for is
-  // one P9d's fit moved away from. **77 once crowding is priced** (11.6): the
-  // lanes a label sits between now cost what they look like when they close in,
-  // so they spread, and the label's own line is left nearest it. **Zero once
-  // every row is searched and the winner kicked** (11.10f): what that reaches
-  // leaves every label nearest its own leg. **346 once `Ready` sits over
-  // `Running`** (11.10g): the pair is two straight lines, and the spread seats
-  // them `clear` apart, under the em that crowding and this term both read.
-  // Row 0 still reads zero, at a Tier 2 of 1,980 against 1,904, with both
-  // routes bent and 18% more area. **Zero again once a frame may run down**
-  // (11.10g): the root turned down at 1,794 puts each of the pair on a leg of
-  // its own, one up `Ready`'s face and one down the composite's side.
+  // Under real text, crowd's label boxes overlap no box or enclosing state band, and
+  // each sits nearer its own route than any other.
   Metrics const m{ bundled() };
   scav_profile const p{ readable() };
   Run const r{ run_pipeline("gauntlet/crowd.scav", m, p, false) };
@@ -417,8 +387,7 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
                          again);
     boxes += static_cast<uint32_t>(again.size());
     REQUIRE(again.size() == r.placed.size());
-    // Inside the chart rect, which the run then grew to cover: the re-run sees
-    // the grown one, so it is a bound on the placement and not a repeat of it.
+    // Every placed box lies inside the final chart rect.
     for (scav_rect const &at : r.placed) {
       CHECK(at.x >= z.chart.x);
       CHECK(at.y >= z.chart.y);
@@ -426,14 +395,7 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
       CHECK((at.y + at.h) <= (z.chart.y + z.chart.h));
     }
 
-    // **11.9.4's anchor, over every box the corpus places.** A leader holds one
-    // of the eight points of a box exactly `label_leader` from a point on its
-    // own polyline, so the box's *nearest edge* is at most that far -- a corner
-    // attachment with an axis-aligned leader sits closer, being held by a
-    // corner rather than by the edge facing the leg. The bound is therefore the
-    // whole of what anchoring means to a reader: a label is never further from
-    // its own line than half an em. Only a box that found no feasible
-    // candidate breaks it, and that box is anchored to nothing by definition.
+    // Each box's Chebyshev gap to its own route is at most `label_leader`.
     scav_spaces const sp{ as_spaces(r.spaces) };
     std::vector<scav_span> const routes{ rows<scav_span>(r.chart, "scav.geom.route") };
     std::vector<scav_point> const pts{ rows<scav_point>(r.chart, "scav.geom.point") };
@@ -452,9 +414,7 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
       }
       CAPTURE(name);
       CAPTURE(subject);
-      // A fallback is the centred placement and rides its own leg, so it is
-      // zero away rather than past the leader; the bound holds on it too, and
-      // what catches it is the slice it makes (11.9.3).
+      // The bound applies to fallback boxes too.
       CHECK(nearest <= Wide{ label_leader(p) });
       anchored += (nearest <= Wide{ label_leader(p) }) ? 1U : 0U;
     }
@@ -465,41 +425,14 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
           fell,
           ", within the leader: ",
           anchored);
-  // Every box the corpus places, without exception: the anchor is a
-  // property of the model rather than of the charts it ran on.
   CHECK(anchored == boxes);
   if (!scav::test::corpus_skipped("mill.scav")) { CHECK(boxes == 223); }
-  // 16 at P9c, then 7 when the placer stopped sitting on state boxes and the
-  // fold stopped discarding a label's charged rank gap, then 12 when the
-  // exemption narrowed to states enclosing *both* ends, and **18 under
-  // 11.9.4's anchor**: a leader admits eight attachment points at four
-  // directions where the strip grid admitted five offsets at two sides, and it
-  // forbids overlapping the leg it is anchored to, so six more boxes have
-  // nowhere left to go. **Every fallback is a sliced label**, so this number
-  // and 11.9.3's slice count are one number -- and the anchor makes that the
-  // *only* way a label ends up unanchored, which is what turns rip-up from an
-  // improvement into the last thing between this and zero (11.9.4).
-  //
-  // 19 when nudging began grouping lanes by proximity: a spread route lands on
-  // a box's last feasible attachment. 5 once phase 2 reserved the room instead
-  // of phase 3 hunting for it, so three quarters of this was scarcity. 8 once I3
-  // became a test, which bought a class outright (11.9.5). 6 once the weights
-  // were fitted and the search ran the whole table (11.6).
-  //
-  // **And zero once the fallback stopped being the centred placement.** 11.9.4
-  // says a box with no clear candidate keeps its anchor and accepts a
-  // collision; what the code kept was the leg's centre, which is not anchored
-  // and rides the line -- so every fallback was a sliced label by construction.
-  // A box that collides with a state still reads as its transition's. **Every
-  // box the corpus places is anchored**, which is what this number now says.
   CHECK(fell == 0);
 }
 
 TEST_CASE("drawlist corpus: the layout goldens' measurement policy is stated here") {
-  // The layout goldens are hashed against all-zero spaces, and this pass is
-  // what a real application hands layout instead. Both are legitimate policies;
-  // the point is that the digest tells them apart rather than leaving a reader
-  // to guess which one produced a hash.
+  // Layout goldens use all-zero spaces; the measured run must differ from them in
+  // inputs digest and coordinates.
   Metrics const m{ bundled() };
   scav_profile const p{ readable() };
   Chart measured{ load_corpus("vac.scav") };
@@ -524,9 +457,8 @@ TEST_CASE("drawlist corpus: the layout goldens' measurement policy is stated her
 }
 
 TEST_CASE("drawlist corpus: a second font is a second picture at the same layout") {
-  // Two metrics over one chart. The font is not a layout argument, so it
-  // reaches the layout hash only through the space tables -- and reaches the
-  // drawlist digest directly, which is the split this exists to demonstrate.
+  // A different metrics identity changes the drawlist digest; the font reaches layout
+  // only through the space tables.
   Metrics const m{ bundled() };
   Metrics doppelganger{ bundled() };
   doppelganger.identity ^= 0xFFFFU;  // same tables, a different identity
@@ -589,8 +521,8 @@ TEST_CASE("drawlist corpus: canonical form is reached from any emission order") 
 }
 
 TEST_CASE("drawlist corpus: tcp's long hierarchical edges reach the drawlist") {
-  // The chart the whole project exists for: transitions out of a nested
-  // concurrent submachine to a top-level state. Every one of them has to draw.
+  // tcp has transitions from a nested concurrent submachine to a top-level state;
+  // each live transition draws one polyline.
   Metrics const m{ bundled() };
   Run const &r{ laid_pipeline("tcp.scav") };
 
@@ -607,13 +539,11 @@ TEST_CASE("drawlist corpus: tcp's long hierarchical edges reach the drawlist") {
       ++drawn;
     }
   }
-  CHECK(drawn == live);  // nothing dropped, which is the incumbent's failure
+  CHECK(drawn == live);
 }
 
 TEST_CASE("drawlist corpus: the extent estimate holds under the real font") {
-  // P4 validated the coordinate domain against deliberately fat fabricated
-  // advances. This is the same question asked of the font that actually ships,
-  // which is the only measurement any golden is against.
+  // Checks the coordinate-domain estimate with the bundled font on a 2k-state chart.
   Metrics const m{ bundled() };
   scav_profile const p{ readable() };
 
@@ -624,8 +554,7 @@ TEST_CASE("drawlist corpus: the extent estimate holds under the real font") {
       build_state(c, parent, "Composite" + std::to_string(level), StateKind::Normal, {})
     };
     for (uint32_t i = 0; i < 128; ++i) {
-      // Names as long as a real chart's deepest, so the measurement is not
-      // flattered by short ones.
+      // Names as long as the longest in a real chart.
       build_state(c,
                   parent,
                   "WaitingForAcknowledgement" + std::to_string(i),
@@ -648,15 +577,12 @@ TEST_CASE("drawlist corpus: the extent estimate holds under the real font") {
   scav_rect extent{};
   std::memcpy(&extent, column_data(c, id), sizeof(extent));
   MESSAGE("2k-state real-font extent: ", extent.w, " x ", extent.h, " of ", COORD_MAX);
-  // The same bar P4 set for itself, so a change that eats the margin trips in
-  // both places rather than only the fabricated one.
   CHECK(extent.w <= ((COORD_MAX / 4) * 3));
   CHECK(extent.h <= ((COORD_MAX / 4) * 3));
 }
 
 TEST_CASE("drawlist: layout's line height is draw's, over the whole domain") {
-  // Layout restates `line_height` because it is below draw. Two statements of
-  // one function drift; this is what stops it.
+  // Layout's `label_line_height` must equal draw's `line_height` over the domain.
   auto const agree = [](int32_t size, int32_t num, int32_t den) {
     scav_profile p{ readable() };
     p.font_size_grid = size;
@@ -679,7 +605,7 @@ TEST_CASE("drawlist: layout's line height is draw's, over the whole domain") {
     agree(size, 7, 5);
     agree(size, 1024, 1);
   }
-  // Up at every remainder, not on average.
+  // Checks rounding up at each remainder of `size / 5`.
   for (int32_t const size : { 10, 11, 12, 13, 14 }) { agree(size, 1, 5); }
   CHECK(label_line_height(readable()) == 269);  // 192 * 7/5
   CHECK(label_line_height(compact()) == 192);   // 160 * 6/5

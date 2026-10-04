@@ -1,6 +1,5 @@
-// The C projection of scav_draw.h: what each entry point does with an argument
-// it cannot use. The behaviour behind them is metrics', drawlist's and
-// builder's own tests; here it is the codes and the out-params.
+// Tests the C entry points of scav_draw.h: result codes and out-params for
+// arguments each one cannot use.
 
 #include "scav/scav_draw_c.h"
 
@@ -55,8 +54,7 @@ scav_profile readable() {
   return p;
 }
 
-// The measurement pass with every size right, so a case below varies only its
-// caps and its buffers; what a wrong size does has its own case.
+// Calls `scav_measure_chart` with every struct size correct.
 scav_result measure(scav_chart const *chart,
                     scav_metrics const *metrics,
                     scav_profile const *profile,
@@ -88,7 +86,7 @@ scav_result measure(scav_chart const *chart,
                             out_counts);
 }
 
-// The reference builder with every size right, under the same rule.
+// Calls `scav_emit_chart` with every struct size correct.
 scav_result emit(scav_drawlist *list,
                  scav_chart const *chart,
                  scav_metrics const *metrics,
@@ -325,8 +323,7 @@ TEST_CASE("draw abi: each way a measurement can fail keeps its own code") {
   auto const *text{ reinterpret_cast<scav_byte const *>("one\ntwo") };
   scav_extent extent{ .w = SENTINEL_I, .h = SENTINEL_I };
 
-  // A newline and malformed bytes are both the caller's fault, so both are the
-  // argument error; a codepoint the font lacks is the font's, and is its own.
+  // A missing glyph is `SCAV_E_NO_GLYPH`; every other refusal is `SCAV_E_INVALID_ARG`.
   run({
       { .what = "measure_text: a newline, which the caller splits on itself",
         .got = scav_measure_text(metrics, text, 7, 160, &extent, EXTENT_SIZE),
@@ -370,8 +367,7 @@ TEST_CASE("draw abi: each way a measurement can fail keeps its own code") {
         .want = SCAV_E_INVALID_ARG },
   });
 
-  // The extent is zeroed before anything is measured, so a refused call reads
-  // back nothing rather than a partial width.
+  // A refused call leaves the extent zeroed.
   CHECK(extent.w == 0);
   CHECK(extent.h == 0);
 
@@ -389,8 +385,7 @@ TEST_CASE("draw abi: an empty drawlist reads back null and zero, not a bad point
   uint32_t count{ SENTINEL };
   uint32_t stride{ SENTINEL };
 
-  // An empty array still reports its stride: a reader sizes its walk from what
-  // scav says a row is, whether or not there are any.
+  // An empty array reports a null pointer, a zero count and its row stride.
   REQUIRE(scav_drawlist_prims(list, &prims, &stride, &count) == SCAV_OK);
   CHECK(prims == nullptr);
   CHECK(count == 0);
@@ -423,8 +418,7 @@ TEST_CASE("draw abi: an empty drawlist reads back null and zero, not a bad point
   CHECK(bytes == nullptr);
   CHECK(count == 0);
 
-  // Each count is optional on its own, so the one omitted here is the first --
-  // which is the one every other caller passes.
+  // Each count out-param is optional; a null one is skipped.
   uint32_t styles_n{ SENTINEL };
   uint32_t text_n{ SENTINEL };
   REQUIRE(scav_drawlist_counts(list, nullptr, &styles_n, nullptr, nullptr, &text_n) ==
@@ -432,8 +426,7 @@ TEST_CASE("draw abi: an empty drawlist reads back null and zero, not a bad point
   CHECK(styles_n == 0);
   CHECK(text_n == 0);
 
-  // The offending primitive is optional too: an empty list has none, and a
-  // caller that does not ask is not written to.
+  // The offending-primitive out-param is optional.
   REQUIRE(scav_drawlist_validate(list, nullptr) == SCAV_OK);
 
   // Each array accessor refuses each of its own out-params.
@@ -591,8 +584,7 @@ TEST_CASE("draw abi: the measurement pass honours the query-then-fill protocol")
     for (uint32_t i = 0; i < 4; ++i) { CHECK(got[i] == counts[i]); }
   }
 
-  // A chart with no entities fills nothing and says so, rather than reading a
-  // buffer it was handed the room for.
+  // A chart with no entities reports zero counts and leaves the buffers untouched.
   scav_chart bare{ .chart = {}, .diags = {} };
   std::vector<uint32_t> none(4, SENTINEL);
   std::vector<scav_box_space> untouched(
@@ -613,8 +605,7 @@ TEST_CASE("draw abi: the measurement pass honours the query-then-fill protocol")
   for (uint32_t const row : none) { CHECK(row == 0); }
   CHECK(untouched[0].min_w == SENTINEL_I);
 
-  // A profile with no line height in it leaves the measurement's domain, which
-  // is the handle's state rather than one bad argument.
+  // A profile with no line height is `SCAV_E_STATE`, with the counts unwritten.
   scav_profile const unusable{};
   std::vector<uint32_t> unreached(4, SENTINEL);
   CHECK(measure(&chart,
@@ -639,8 +630,7 @@ TEST_CASE("draw abi: the shipped palette is written only when it fits") {
   CHECK(scav_palette_standard(rows.data(), 0, STYLE_SIZE) == SCAV_E_CAPACITY);
   CHECK(rows[0].stroke_rgba == 0);  // refused, so nothing was written
   REQUIRE(scav_palette_standard(rows.data(), SCAV_STYLE_COUNT, STYLE_SIZE) == SCAV_OK);
-  // The last row is the arrowhead, which is a fill and carries no stroke at
-  // all, so what says every row was written is the fill.
+  // The last row is the arrowhead: a fill with no stroke.
   CHECK(rows[SCAV_STYLE_COUNT - 1].fill_rgba != 0);
   CHECK(rows[SCAV_STYLE_COUNT - 1].stroke_rgba == 0);
   CHECK(rows[SCAV_STYLE_COUNT - 1].stroke_w == 0);
@@ -678,8 +668,7 @@ TEST_CASE("draw abi: a size that disagrees with the header is refused first") {
         { .what = "measure_text: an extent this library does not have",
           .got = scav_measure_text(metrics, text, 4, 160, &extent, bad_extent),
           .want = SCAV_E_ABI },
-        // SCAV_E_ABI outranks the null-argument refusal: a caller whose header
-        // differs has said nothing about its other arguments worth reading.
+        // `SCAV_E_ABI` takes precedence over the null-argument check.
         { .what = "measure_text: and before the null check",
           .got = scav_measure_text(nullptr, text, 4, 160, nullptr, bad_extent),
           .want = SCAV_E_ABI },
@@ -714,9 +703,7 @@ TEST_CASE("draw abi: a size that disagrees with the header is refused first") {
                                     PATH_BOX_SIZE,
                                     counts.data()),
           .want = SCAV_E_ABI },
-        // A row size is checked on the count query too, where every cap is zero
-        // and every buffer null: it is the stride the second call's rows will be
-        // read back at.
+        // Row sizes are checked on the count query too.
         { .what = "measure_chart: a state box row this library does not have",
           .got = scav_measure_chart(&chart,
                                     metrics,
@@ -838,7 +825,7 @@ TEST_CASE("draw abi: a size that disagrees with the header is refused first") {
     });
   }
 
-  // A space table whose strides its own header did not declare reads as zeroes.
+  // A `scav_spaces` with zero strides is `SCAV_E_ABI`.
   scav_spaces const unstrided{};
   CHECK(emit(list, &chart, metrics, nullptr, 0, &unstrided, nullptr, 0, 0) == SCAV_E_ABI);
 
