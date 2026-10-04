@@ -50,8 +50,8 @@ def chain_for(events, trans, model):
     out, nets = [], set()
     for e in events:
         k = e["kind"]
-        if (k in ("edge_reversed", "route_degraded", "edge_chained", "gap_charged")
-                and e["seg"] in segs):
+        if (k in ("edge_reversed", "route_degraded", "route_walled", "edge_chained",
+                  "gap_charged") and e["seg"] in segs):
             out.append(e)
         elif k == "node_placed" and e.get("bend_of_seg") in segs:
             out.append(e)
@@ -80,6 +80,8 @@ def describe(e, model):
         return f"    must pass through {tuple(e['at'])}"
     if k == "route_degraded":
         return "  FELL BACK to a straight line"
+    if k == "route_walled":
+        return "  crossed the walls that enclose an end"
     if k == "gap_charged" and e["cause"] == "held":
         return (f"  segment {e['seg']}'s label ({e['width']}) is held by frame "
                 f"{e['frame']}'s rank boundary {e['boundary']}, charging nothing")

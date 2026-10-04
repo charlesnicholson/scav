@@ -104,7 +104,7 @@ bool same_but_shifted(RouteFrameCache const &a,
   RouteInput const &x{ a.in };
   if ((x.obstacles.size() != b.obstacles.size()) || (x.nets.size() != b.nets.size()) ||
       (x.waypoints.size() != b.waypoints.size()) || (x.inscribed != b.inscribed) ||
-      (x.corner != b.corner)) {
+      (x.corner != b.corner) || (x.first_wall != b.first_wall)) {
     return false;
   }
   if ((x.region.w != b.region.w) || (x.region.h != b.region.h)) { return false; }
@@ -561,6 +561,7 @@ void route_transitions(Routes &out,
       }
     }
     // The walls (bands and loop rooms) of the owner's chain that overlap the region.
+    in.first_wall = static_cast<uint32_t>(in.obstacles.size());
     for (uint32_t const a : sc.chain) {
       sc.in_chain[a] = 0;
       for (scav_rect const &band : state_walls(z, a)) {

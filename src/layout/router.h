@@ -50,7 +50,8 @@ struct RouteInput {
   // Parallel to `obstacles`, or empty for all zero: the corner arc radius of the shape
   // drawn in that box, which seats are held off.
   std::vector<int32_t> corner;
-  std::vector<RouteNet> nets;  // in (transition, ordinal) order
+  uint32_t first_wall{ INVALID };  // obstacles from this index on are walls; INVALID: none
+  std::vector<RouteNet> nets;      // in (transition, ordinal) order
   std::vector<scav_point> waypoints;
   scav_profile profile{};
   // The box the frame's routes are drawn inside, zero-sized for the root. Routes keep

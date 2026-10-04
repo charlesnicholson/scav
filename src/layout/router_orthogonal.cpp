@@ -1113,7 +1113,8 @@ struct RouteScratch {
   std::vector<scav_rect> walls;
   std::vector<scav_point> lead, anchors, seat, toward, was;
   std::vector<scav_span> net_anchors, net_lead, net_tail;
-  OrthoGrid g, tight;
+  OrthoGrid g, tight, open;  // `open` blocks boxes only
+  std::vector<scav_rect> boxes;
   OrthoScratch search;
   std::vector<uint32_t> hop;
   std::vector<scav_point> piece, shape;
@@ -1439,6 +1440,8 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
   OrthoGrid &tight{ sc.tight };
   bool tight_built{ false };
   bool tight_ok{ false };
+  bool open_built{ false };
+  bool open_ok{ false };
 
   OrthoScratch &scratch{ sc.search };
   std::vector<uint32_t> &hop{ sc.hop };
@@ -1513,6 +1516,19 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
       ok = tight_ok && attempt(tight);
       if (ok) { reseated = 1; }
       if (!ok) { why = RouteFailure::Unreachable; }
+    }
+    if ((why == RouteFailure::Unreachable) && (in.first_wall < in.obstacles.size())) {
+      // The walls enclose an end: routes across them, blocking boxes only.
+      if (!open_built) {
+        open_built = true;
+        vec_assign(sc.boxes, in.obstacles.begin(), in.obstacles.begin() + in.first_wall);
+        open_ok = ortho_grid(in.region, sc.boxes, anchors, clear, sc.open, &walls);
+      }
+      ok = open_ok && attempt(sc.open);
+      if (ok) {
+        why = RouteFailure::None;
+        trace_emit({ .kind = TraceKind::RouteWalled, .seg = { .seg = net.seg } });
+      }
     }
 
     if (!ok) {

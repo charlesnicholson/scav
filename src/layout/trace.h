@@ -42,6 +42,7 @@ enum class TraceKind : uint16_t {
   PortWalled,     // every face a port could take is lined; the port stays
   LaneFound,      // nudging found a lane of two or more segments
   BundleRefused,  // a check left a nudged bundle in place
+  RouteWalled,    // a net crossed the walls that enclose one of its ends
 };
 
 // What a rank boundary's charge is for; `GapCharged.pass`. `Held` adds nothing: the

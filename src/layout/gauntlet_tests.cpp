@@ -1510,6 +1510,53 @@ TEST_CASE("gauntlet: a port takes the one face no band lines") {
   }
 }
 
+TEST_CASE("gauntlet: a route into a state walled on every face crosses its band square") {
+  // `above` with a band on each of Box's faces: the drop stays orthogonal and pays Tier 0.
+  scav_router_id id{};
+  REQUIRE(router_by_name(reinterpret_cast<scav_byte const *>("orthogonal"), 10, id));
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    Chart const probe{ loaded("above.scav") };
+    uint32_t const box{ state_named(probe, "Box") };
+    REQUIRE(box != INVALID);
+    int32_t const band{ 2 * p.font_size_grid };
+    std::vector<scav_box_space> rows(probe.states.size());
+    rows[box] = { .min_w = 0,
+                  .h_before = band,
+                  .h_after = band,
+                  .w_before = band,
+                  .w_after = band };
+    scav_spaces const s{ spaces_of(rows) };
+    Laid l;
+    lay("above.scav", one_row(p), l, s, nullptr);
+    CHECK(l.r.degraded() == 0);
+    for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+      CAPTURE(t);
+      scav_span const route{ l.r.route[t] };
+      CHECK(route.len >= 2);
+      for (uint32_t k = 0; (k + 1) < route.len; ++k) {
+        scav_point const a{ l.r.points[route.off + k] };
+        scav_point const b{ l.r.points[route.off + k + 1] };
+        CHECK(((a.x == b.x) || (a.y == b.y)));
+      }
+    }
+    CHECK(cost_terms(l.c, l.g, l.z, l.r, s, one_row(p)).through_band > 0);
+
+    Chart c{ loaded("above.scav") };
+    scav_layout_opts const o{ .profile = one_row(p), .router = id, .threads = 1 };
+    std::vector<scav_placed> placed;
+    std::vector<Diagnostic> diags;
+    LayoutTrace trace;
+    trace_sink_set(&trace);
+    bool const ran{ layout_run(c, s, o, placed, diags) };
+    trace_sink_set(nullptr);
+    REQUIRE(ran);
+    CHECK(std::ranges::count_if(trace.events, [](TraceEvent const &e) {
+            return e.kind == TraceKind::RouteWalled;
+          }) > 0);
+  }
+}
+
 TEST_CASE("gauntlet: a state walled on every face is still drawn, and pays for the wall") {
   // Every face of every composite carries a band: layout succeeds, draws every transition,
   // and Tier 0 counts the band crossings.
