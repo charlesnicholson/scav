@@ -2,11 +2,13 @@ axis.scav 6fabcbbf 11469
 bottler.scav de3d83b5 24660
 brew.scav bf12c89f 7716
 dock.scav 1d46f9be 6396
+elevator.scav 95e59082 15344
 estop.scav 57b225e3 2513
 kiln.scav 38c0412c 15496
 led.scav c8aa7577 2519
 mill.scav 7e3382bf 63841
 ota.scav 428aced4 8148
+printer.scav 45352df8 19336
 tcp.scav ee5e30e6 9061
 toolchanger.scav 328f3c49 18931
 vac.scav 819bcd89 14319

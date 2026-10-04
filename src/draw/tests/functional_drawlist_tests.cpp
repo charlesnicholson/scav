@@ -36,9 +36,10 @@ namespace {
 using namespace scav;
 
 // The corpus, in the order the layout golden lists it.
-constexpr std::array<char const *, 12> CORPUS{
-  "axis.scav", "bottler.scav", "brew.scav", "dock.scav", "estop.scav",       "kiln.scav",
-  "led.scav",  "mill.scav",    "ota.scav",  "tcp.scav",  "toolchanger.scav", "vac.scav"
+constexpr std::array<char const *, 14> CORPUS{
+  "axis.scav",    "bottler.scav", "brew.scav",        "dock.scav", "elevator.scav",
+  "estop.scav",   "kiln.scav",    "led.scav",         "mill.scav", "ota.scav",
+  "printer.scav", "tcp.scav",     "toolchanger.scav", "vac.scav"
 };
 
 Metrics bundled() {
@@ -427,7 +428,7 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
           ", within the leader: ",
           anchored);
   CHECK(anchored == boxes);
-  if (!scav::test::corpus_skipped("mill.scav")) { CHECK(boxes == 223); }
+  if (!scav::test::corpus_skipped("mill.scav")) { CHECK(boxes == 265); }
   CHECK(fell == 0);
 }
 

@@ -1028,9 +1028,10 @@ TEST_CASE("route: nets join only where one ends exactly where the next begins") 
 namespace {
 
 // Every corpus chart, by bare file name.
-constexpr std::array<char const *, 12> CORPUS{
-  "axis.scav", "bottler.scav", "brew.scav", "dock.scav", "estop.scav",       "kiln.scav",
-  "led.scav",  "mill.scav",    "ota.scav",  "tcp.scav",  "toolchanger.scav", "vac.scav"
+constexpr std::array<char const *, 14> CORPUS{
+  "axis.scav",    "bottler.scav", "brew.scav",        "dock.scav", "elevator.scav",
+  "estop.scav",   "kiln.scav",    "led.scav",         "mill.scav", "ota.scav",
+  "printer.scav", "tcp.scav",     "toolchanger.scav", "vac.scav"
 };
 
 void load_corpus_chart(char const *name, Chart &c) {

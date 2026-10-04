@@ -2,11 +2,13 @@ axis.scav 9a036811 5059ffda 0a861455
 bottler.scav 258c91cb 02f6557d d9f9b010
 brew.scav 0acacfc8 00c256d7 cf2c9ffc
 dock.scav 6816e75f 0e94263c cf45b188
+elevator.scav fbeadbec ee019834 05c01de4
 estop.scav 71e3d89d e684fb27 14703753
 kiln.scav 8a5a5917 47523fbb 53c2c944
 led.scav 174d61bb 9985e444 1b91c112
 mill.scav b7761105 c1a4da77 b758bc79
 ota.scav eab7c2df 89ea65f9 a3690981
+printer.scav 5f8d9abe 23f8584c 27cde86e
 tcp.scav 6f06b98a 0eb02745 cfe7d376
 toolchanger.scav 95506606 8eee967b 2490e6d2
 vac.scav 08abce8f 48ddf5b1 375b5dd5
