@@ -1078,9 +1078,29 @@
               },
               "offset": 8,
               "size": 4
+            },
+            {
+              "name": "w_before",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 12,
+              "size": 4
+            },
+            {
+              "name": "w_after",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 16,
+              "size": 4
             }
           ],
-          "size": 12,
+          "size": 20,
           "align": 4,
           "padding": 0
         },

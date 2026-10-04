@@ -442,11 +442,13 @@ class Spaces:
         return cls(box_state, box_sub, path_clear, path_box)
 
     def set_box_state(self, row: int, min_w: int, h_before: int,
-                      h_after: int) -> None:
+                      h_after: int, w_before: int = 0, w_after: int = 0) -> None:
         self.box_state[_integer(row, "row")] = scav_box_space(
             min_w=_integer(min_w, "min_w"),
             h_before=_integer(h_before, "h_before"),
-            h_after=_integer(h_after, "h_after"))
+            h_after=_integer(h_after, "h_after"),
+            w_before=_integer(w_before, "w_before"),
+            w_after=_integer(w_after, "w_after"))
 
     def as_c(self) -> scav_spaces:
         def base(array, kind):

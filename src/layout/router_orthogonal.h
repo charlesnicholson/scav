@@ -164,6 +164,15 @@ void ortho_separate_attachments(std::vector<RouteNet> const &nets,
                                 int32_t pitch,
                                 std::vector<scav_point> &at);
 
+// A self-loop whose two ends share a face takes the widest run of that face no other
+// seat stands in, its ends `pitch` apart about the run's middle where it holds that.
+void ortho_seat_loops(std::vector<RouteNet> const &nets,
+                      std::vector<scav_rect> const &boxes,
+                      std::vector<int32_t> const &corner,
+                      int32_t clear,
+                      int32_t pitch,
+                      std::vector<scav_point> &at);
+
 // The same, off whichever box `at` is strictly inside: innermost by area, then
 // by list order. Unchanged when it is inside none.
 scav_point ortho_escape(scav_point at,

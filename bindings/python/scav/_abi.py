@@ -175,13 +175,17 @@ class scav_box_space(ctypes.Structure):
         ("min_w", ctypes.c_int32),
         ("h_before", ctypes.c_int32),
         ("h_after", ctypes.c_int32),
+        ("w_before", ctypes.c_int32),
+        ("w_after", ctypes.c_int32),
     ]
 
-assert ctypes.sizeof(scav_box_space) == 12, "scav_box_space is not 12 bytes"
+assert ctypes.sizeof(scav_box_space) == 20, "scav_box_space is not 20 bytes"
 assert ctypes.alignment(scav_box_space) == 4
 assert getattr(scav_box_space, "min_w").offset == 0
 assert getattr(scav_box_space, "h_before").offset == 4
 assert getattr(scav_box_space, "h_after").offset == 8
+assert getattr(scav_box_space, "w_before").offset == 12
+assert getattr(scav_box_space, "w_after").offset == 16
 
 class scav_path_clear(ctypes.Structure):
     _fields_ = [

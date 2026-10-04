@@ -678,6 +678,61 @@ void ortho_spread_attachments(std::vector<RouteNet> const &nets,
   }
 }
 
+void ortho_seat_loops(std::vector<RouteNet> const &nets,
+                      std::vector<scav_rect> const &boxes,
+                      std::vector<int32_t> const &corner,
+                      int32_t clear,
+                      int32_t pitch,
+                      std::vector<scav_point> &at) {
+  thread_local std::vector<int32_t> taken;
+  for (uint32_t n = 0; n < nets.size(); ++n) {
+    RouteNet const &net{ nets[n] };
+    uint32_t const b{ net.src_obstacle };
+    if ((net.loop <= 0) || (b >= boxes.size()) || (net.dst_obstacle != b)) { continue; }
+    scav_rect const &r{ boxes[b] };
+    uint32_t const face{ face_of(at[2 * n], r) };
+    if ((face == INVALID) || (face_of(at[(2 * n) + 1], r) != face)) { continue; }
+    bool const along_y{ face < 2 };
+    int32_t const start{ along_y ? r.y : r.x };
+    int32_t const len{ along_y ? r.h : r.w };
+    int32_t const inset{ imin(imax(clear, (b < corner.size()) ? corner[b] : 0), len / 2) };
+    int32_t const lo{ start + inset };
+    int32_t const hi{ (start + len) - inset };
+    taken.clear();
+    for (uint32_t m = 0; m < nets.size(); ++m) {
+      for (uint32_t end = 0; (m != n) && (end < 2); ++end) {
+        uint32_t const box{ (end == 0) ? nets[m].src_obstacle : nets[m].dst_obstacle };
+        scav_point const seat{ at[(2 * m) + end] };
+        if ((box == b) && (face_of(seat, r) == face)) {
+          vec_push_back(taken, along_y ? seat.y : seat.x);
+        }
+      }
+    }
+    std::ranges::sort(taken);
+    // The widest run between two taken seats or a taken seat and an end of the face.
+    int32_t from{ lo };
+    int32_t best_lo{ lo };
+    int32_t best_hi{ lo };
+    for (size_t k = 0; k <= taken.size(); ++k) {
+      int32_t const to{ (k < taken.size()) ? imin(imax(taken[k], lo), hi) : hi };
+      if ((to - from) > (best_hi - best_lo)) {
+        best_lo = from;
+        best_hi = to;
+      }
+      from = imax(from, to);
+    }
+    bool const ends_lo{ best_lo == lo };
+    bool const ends_hi{ best_hi == hi };
+    int32_t const room{ best_hi - best_lo };
+    int32_t const apart{ imin(pitch, room / ((ends_lo && ends_hi) ? 1 : (ends_lo || ends_hi) ? 2 : 3)) };
+    int32_t const mid{ best_lo + (room / 2) };
+    int32_t &first{ along_y ? at[2 * n].y : at[2 * n].x };
+    int32_t &second{ along_y ? at[(2 * n) + 1].y : at[(2 * n) + 1].x };
+    first = mid - (apart / 2);
+    second = first + apart;
+  }
+}
+
 void ortho_separate_attachments(std::vector<RouteNet> const &nets,
                                 std::vector<scav_rect> const &boxes,
                                 std::vector<uint8_t> const &inscribed,
@@ -1380,6 +1435,8 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
                              pitch,
                              seat);
   moved(SeatPass::Separate);
+  ortho_seat_loops(in.nets, in.obstacles, in.corner, clear, pitch, seat);
+  moved(SeatPass::Loop);
 
   for (uint32_t n = 0; n < in.nets.size(); ++n) {
     RouteNet const &net{ in.nets[n] };

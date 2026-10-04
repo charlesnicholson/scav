@@ -51,6 +51,7 @@ char const *seat_pass_name(uint16_t p) {
     case SeatPass::Spread: return "spread";
     case SeatPass::Separate: return "separate";
     case SeatPass::Nudge: return "nudge";
+    case SeatPass::Loop: return "loop";
   }
   return "?";
 }
