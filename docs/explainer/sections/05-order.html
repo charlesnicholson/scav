@@ -27,7 +27,7 @@
   <h4>Pins</h4>
   <ul>
     <li>A <b>rank pin</b> overwrites one state's rank afterwards, without rerunning longest path, so edges may go flat or backward. Initials are never pinned: each is re-seated one rank before the state it enters (shifting the others if that state is at rank 0), and empty ranks are squeezed out.</li>
-    <li>A <b>side pin</b> on a top or bottom border takes the port's edge out of ranking and sweeps, placing it in its mate's rank; on a left or right border it orients the edge so the port is a source or a sink.</li>
+    <li>An <b>end pin</b> that puts a port on a top or bottom border takes the port's edge out of ranking and sweeps, placing it in its mate's rank; one on a left or right border orients the edge so the port is a source or a sink.</li>
   </ul>
   <div data-fig="order-pin"></div>
 

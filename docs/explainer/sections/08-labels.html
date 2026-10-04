@@ -37,7 +37,7 @@
   <div data-fig="labels-toy"></div>
 
   <h3>Labels in the cost</h3>
-  <p>A label over a foreign state or another route is <a href="#cost">Tier 0</a>, forbidden rather than priced. If one endpoint encloses the other, or the transition is a loop inside its state, the label lives inside that state and only its bands count. A label over another label or an enclosing state's bands is Tier 2 (<code>label</code>), as is the shortfall (<code>label_near</code>).</p>
+  <p>A label over a foreign state or any route, its own included, is <a href="#cost">Tier 0</a>, forbidden rather than priced, and so is a label further than the leader from its own route. If one endpoint encloses the other, or the transition is a loop inside its state, the label lives inside that state and only its bands count. A label over another label or an enclosing state's bands is Tier 2 (<code>label</code>), as is the shortfall (<code>label_near</code>).</p>
   <div data-fig="labels-real"></div>
 
   <div class="callout why"><span class="t">Rejected</span>Boxes on fixed strips beside the line (they drifted far from their leg); rip-up-and-reroute (the loose tier made it unnecessary); "nothing between a label and its line" as a hard rule (many more fallbacks, no gain).</div>
@@ -247,7 +247,7 @@ SX.register('labels', function (sec) {
           if (over(B, st.rect)) { lob++; hits.push('“' + t.label + '” over ' + st.path); }
         });
         if (hostId != null && walls(g.states[hostId]).some(function (w) { return over(B, w); })) { lob++; hits.push('“' + t.label + '” over its host\'s band'); }
-        legs.forEach(function (ls, j) { if (j === t.id) return; ls.forEach(function (r) { if (over(B, r)) { lor++; hits.push('“' + t.label + '” over ' + g.trans[j].label); } }); });
+        legs.forEach(function (ls, j) { ls.forEach(function (r) { if (over(B, r)) { lor++; hits.push('“' + t.label + '” over ' + (j === t.id ? 'its own route' : g.trans[j].label)); } }); });
         var own = legs[t.id], bestK = 0, bestG = Infinity;
         own.forEach(function (r, k) { var d = cheb(B, r); if (d < bestG) { bestG = d; bestK = k; } });
         var fgap = Infinity;

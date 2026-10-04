@@ -16,7 +16,7 @@
   <div data-fig="fast-reuse"></div>
 
   <h3>The face shortcut</h3>
-  <p>Ordering, sizing and the facing pass never read a face pin, so a face candidate starts from the incumbent's sizing and only routes and scores, at about a quarter of the cost; it also keeps every label nothing it reads has changed. A face that would not move its seat draws the incumbent exactly, so it is charged but not scored, and faces are offered only where the <a href="#search">move table</a> says they are priced.</p>
+  <p>Ordering, sizing and the facing pass never read an end pin at a box end, so a face candidate starts from the incumbent's sizing and only routes and scores, at about a quarter of the cost; it also keeps every label nothing it reads has changed. A face that would not move its seat draws the incumbent exactly, so it is charged but not scored, and faces are offered only where the <a href="#search">move table</a> says they are priced.</p>
 
   <h3>The label bound</h3>
   <p>Labels are placed last and read only the routes, so a round with labels runs in two passes:</p>
@@ -85,7 +85,7 @@ window.SXfastPerf = function (sec) {
 // Figure: which of toolchanger's frames a candidate re-orders, re-sizes or copies.
 window.SXfastReuse = function (sec) {
   var g = SX.data('charts').charts.toolchanger.text;
-  var f = SX.figure(sec.querySelector('[data-fig="fast-reuse"]'), { caption: '<b>Click a frame</b> to pin a rank in it: ordering redoes that frame, sizing also every frame holding it. A face pin skips both.' });
+  var f = SX.figure(sec.querySelector('[data-fig="fast-reuse"]'), { caption: '<b>Click a frame</b> to pin a rank in it: ordering redoes that frame, sizing also every frame holding it. A face move skips both.' });
   var subs = g.subs, N = subs.length, parent = {}, depth = {}, kids = {};
   subs.forEach(function (s) { parent[s.id] = s.owner == null ? null : g.states[s.owner].parent_sub; });
   subs.forEach(function (s) { var d = 0, p = parent[s.id]; while (p != null) { d++; p = parent[p]; } depth[s.id] = d; (kids[parent[s.id]] = kids[parent[s.id]] || []).push(s.id); });
@@ -94,7 +94,7 @@ window.SXfastReuse = function (sec) {
   var pos = {}, nextX = 0;
   (function place(id) { var c = kids[id] || []; if (!c.length) pos[id] = nextX++; else { c.forEach(place); pos[id] = (pos[c[0]] + pos[c[c.length - 1]]) / 2; } })(0);
   var picked = 2, mode = 'rank';
-  f.ctrl.appendChild(SX.choice({ options: [{ value: 'rank', label: 'Rank pin in the clicked frame' }, { value: 'face', label: 'Face pin (any frame)' }], value: mode, onChange: function (v) { mode = v; draw(); } }).el);
+  f.ctrl.appendChild(SX.choice({ options: [{ value: 'rank', label: 'Rank pin in the clicked frame' }, { value: 'face', label: 'Face move (any frame)' }], value: mode, onChange: function (v) { mode = v; draw(); } }).el);
   var readout = SX.el('span', { class: 'note' }); f.ctrl.appendChild(readout);
   function draw() {
     var reorder = {}, resize = {};
@@ -119,7 +119,7 @@ window.SXfastReuse = function (sec) {
       });
     });
     var nO = Object.keys(reorder).length, nS = Object.keys(resize).length;
-    readout.textContent = mode === 'rank' ? 'rank pin in frame ' + picked + ': re-order ' + nO + ' of ' + N + ' frames, re-size ' + nS + ' of ' + N + ', copy the rest' : 'face pin: phases 1 and 2 are the incumbent\'s; only routing and scoring run';
+    readout.textContent = mode === 'rank' ? 'rank pin in frame ' + picked + ': re-order ' + nO + ' of ' + N + ' frames, re-size ' + nS + ' of ' + N + ', copy the rest' : 'face move: phases 1 and 2 are the incumbent\'s; only routing and scoring run';
     f.stage.innerHTML = ''; f.stage.appendChild(svg);
     f.stage.appendChild(SX.el('div', { class: 'legend' }, SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'color-mix(in srgb, var(--series-2) 30%, var(--surface-1))', border: '1px solid var(--series-2)' } }), 're-ordered'), SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'color-mix(in srgb, var(--series-1) 30%, var(--surface-1))', border: '1px solid var(--series-1)' } }), 're-sized'), SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--surface-2)', border: '1px solid var(--axis)' } }), 'copied')));
   }

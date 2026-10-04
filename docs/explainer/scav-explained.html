@@ -238,7 +238,7 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
   <p>Layout's only inputs are the model, a <b>profile</b> of 52 integer settings, and three tables of <b>space requests</b>. It never sees a font or a string.</p>
   <ul>
     <li><code>BoxSpace</code>, per state and submachine: the width its text needs, and four bands around its children: above, below, before and after.</li>
-    <li><code>PathClear</code>, per transition: how far to shorten each end for the arrowhead.</li>
+    <li><code>PathClear</code>, per transition: the least length of each end leg, for the arrowhead.</li>
     <li><code>PathBox</code>, zero or more per transition: a <a href="#labels">label</a> box to place along the route.</li>
   </ul>
   <p>The application measures its text with scav's metrics, fills the tables, and calls <code>scav_layout_run</code>, which rejects bad input rather than clamping it. It draws the returned geometry with scav's SVG back end or its own.</p>
@@ -383,7 +383,7 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
   <h4>Pins</h4>
   <ul>
     <li>A <b>rank pin</b> overwrites one state's rank afterwards, without rerunning longest path, so edges may go flat or backward. Initials are never pinned: each is re-seated one rank before the state it enters (shifting the others if that state is at rank 0), and empty ranks are squeezed out.</li>
-    <li>A <b>side pin</b> on a top or bottom border takes the port's edge out of ranking and sweeps, placing it in its mate's rank; on a left or right border it orients the edge so the port is a source or a sink.</li>
+    <li>An <b>end pin</b> that puts a port on a top or bottom border takes the port's edge out of ranking and sweeps, placing it in its mate's rank; one on a left or right border orients the edge so the port is a source or a sink.</li>
   </ul>
   <div data-fig="order-pin"></div>
 
@@ -468,7 +468,7 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
   <h3>Bottom-up to the root</h3>
   <p>A composite's box wraps its packed submachines, its four bands and its loop room:</p>
   <p><code>w = max(min_w, w_before + max(packed_w, loop_w) + w_after, kind_min_w) + 2·pad</code><br><code>h = max(h_before + packed_h + sep + loop_h + h_after, kind_min_h) + 2·pad</code></p>
-  <p>The <code>h_*</code> and <code>w_*</code> terms are the bands the application requested above, below, before and after the submachine area. The <a href="#decorations">loop room</a>, <code>loop_w × loop_h</code>, holds the state's internal self-transitions, one row each, below its submachines; <code>sep</code> is <code>sub_sep</code> when both are present, else 0. <code>pad</code> (128) is the interior ring. A bare pseudostate has none, so an arrow stops on its mark. A plain state is at least 896 × 640 on <code>readable</code>; pseudostate minimums are in <a href="#intro">the model</a>.</p>
+  <p>The <code>h_*</code> and <code>w_*</code> terms are the bands the application requested above, below, before and after the submachine area. The <a href="#decorations">loop room</a>, <code>loop_w × loop_h</code>, holds the state's internal self-transitions in a corner of its free interior, above or below the submachine area as its <a href="#decorations">placement</a> says, and its extents depend on that placement; <code>sep</code> is <code>sub_sep</code> when both are present, else 0. <code>pad</code> (128) is the interior ring. A bare pseudostate has none, so an arrow stops on its mark. A plain state is at least 896 × 640 on <code>readable</code>; pseudostate minimums are in <a href="#intro">the model</a>.</p>
   <div data-fig="size-bottomup"></div>
   <p>After routing, the chart rectangle grows over every route point and label before scoring, so area and aspect price the canvas that ships.</p>
   <div class="callout why"><span class="t">Rejected</span>Top-down sizing (its size estimate is unsolved, and per-level scaling breaks port continuity); constraint-based adjustment (coordinates are generated, not adjusted); network-simplex placement (no fewer visible defects, and slower).</div>
@@ -478,21 +478,22 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
   <h2>Routing: ports, faces, A*, seats and lanes</h2>
   <p class="lede">Phase 3 draws every segment as an axis-aligned polyline; states are obstacles, so a route through a box cannot be represented at all.</p>
 
-  <p>Each segment becomes a <b>net</b>. Every net's ends are seated, then frames are routed in parallel (a frame that has not changed reuses its previous answer), nets are joined into transitions, ends are trimmed for arrowheads, parallel lanes are nudged apart, and <a href="#labels">labels</a> are placed last.</p>
+  <p>Each segment becomes a <b>net</b>. Every net's ends are seated, then frames are routed in parallel (a frame that has not changed reuses its previous answer), nets are joined into transitions, parallel lanes are nudged apart, and <a href="#labels">labels</a> are placed last.</p>
 
   <h3>Ports and the facing pass</h3>
   <p>A <b>port slot</b> is where a route crosses a composite's border. In a frame running left to right, ports on the left are sources and on the right sinks; ports may also sit on the top or bottom. Sides are numbered 0 left, 1 right, 2 top, 3 bottom.</p>
   <p>After the first sizing, the <b>facing pass</b> turns ports toward their route's far end, then reruns ordering and sizing if any turned:</p>
   <ul>
     <li>a port whose far end lies on the frame's other side has its edge reversed, moving it to the opposite border;</li>
-    <li>a port on its own transition's state whose far end lies further away across the ranks than along them moves to the top or bottom border facing it, if that border is unobstructed and free. A side pin is never turned;</li>
+    <li>a port on its own transition's state whose far end lies further away across the ranks than along them moves to the top or bottom border facing it, if that border is unobstructed and free. A port whose end is pinned is never turned;</li>
     <li>a port on a <a href="#decorations">lined face</a>, one that a band of its state covers, moves to the opposite border, else to a top or bottom border its joined state can see. No port is ever turned onto a lined face.</li>
   </ul>
+  <p>A slot starts on its border at its boundary node's coordinate. Phase 3 then slides it along its face, level with the point across it on its outer side: the next end for a slot the route leaves by, the previous end for one it enters by, where that end is another port slot, a bend node or an inner-face end. A box end never moves a slot, since the router seats a box end level with the slot where the box's face allows. The slot stays at its node where that spot is within a corner's inset, within a clearance of a band lining the face, or within a clearance of, or past, another slot on that face. Every slot is decided while planning, before any frame routes, so both frames meeting at a slot see the same point.</p>
 
   <h3>Which face an end leaves by</h3>
   <p>The <b>separation rule</b> seats each end on a face of its box: the axis on which the far end lies further <em>outside</em> the box wins (a tie goes to x), and the nearer border on that axis is the face. The seat is the far end's projection onto the face, held off the corners. <b>Inscribed glyphs</b> (discs, diamonds) take the face's midpoint.</p>
   <div data-fig="route-face"></div>
-  <p>A <b>face pin</b> overrides the rule at one end, unless the face is too short to hold a seat. Choosing both faces as a pair was tried and made most charts worse, so the face is a search dimension, not a rule.</p>
+  <p>An <b>end pin</b> overrides the rule at one end, unless the face is too short to hold a seat. Choosing both faces as a pair was tried and made most charts worse, so the face is a search dimension, not a rule.</p>
 
   <h3>The orthogonal router</h3>
   <p>The router runs A* on a <b>separated orthogonal visibility graph</b>:</p>
@@ -509,13 +510,14 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
   <h3>Seating passes</h3>
   <p>Every seat is chosen before any net is searched, because two ends wanting one seat is a question about the pair. Six passes run in order:</p>
   <ol>
-    <li><b>Attach</b>: seat each end by the separation rule or its face pin; both ends of an outer self-loop take the face of its state that the fewest other ends use.</li>
+    <li><b>Attach</b>: seat each end by the separation rule or its end pin; both ends of an outer self-loop take the face of its state that the fewest other ends use.</li>
     <li><b>Reface</b> (glyphs): when an arrival and a departure want one midpoint, move the one with more to gain to another face.</li>
     <li><b>Align</b>: put both ends of a net between parallel faces on one coordinate, so one straight segment fits; a net with label room reserved takes the low end, and corridor nets are skipped.</li>
     <li><b>Spread</b>: split ends sharing a point by direction of travel, a line of text apart where the face has room, else closer; repeat until nothing moves.</li>
     <li><b>Separate</b>: push apart legs on different boxes that run closer than a line of text (fans exempt).</li>
     <li><b>Loop</b>: put an outer self-loop's two ends a line of text apart about the middle of the widest run of its face that no other seat stands in.</li>
   </ol>
+  <p>After the six passes, no seat lies in an <a href="#decorations">occupied span</a>. An outer self-loop is seated in a run clear of them, and any other end inside one moves to its face's nearest free position, else to the free position on another face nearest its aim; a far end level with it on a parallel face moves with it.</p>
   <div data-fig="route-seats"></div>
 
   <h3>Nudging lanes apart</h3>
@@ -528,8 +530,8 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
   </ul>
   <div data-fig="route-nudge"></div>
 
-  <h3>Trims and failures</h3>
-  <p><code>PathClear</code> shortens each route's first and last legs for arrowheads, by at most half the leg. A net fails if an end lies outside its region, if the frame's grid is too large, or if it is <b>unreachable</b> even with zero clearance. A failed net is drawn as a straight line with a <code>RouteDegraded</code> diagnostic.</p>
+  <h3>End legs and failures</h3>
+  <p>Every route ends on its border. <code>PathClear</code> is the least length a route's first and last legs keep, for the application's end glyph: the router's approach to a box runs out at least that far, and both nudging passes keep those legs at least that long. A net fails if an end lies outside its region, if the frame's grid is too large, or if it is <b>unreachable</b> even with zero clearance. A net only the walls seal off does not fail: it is <a href="#decorations">walled</a> and crosses a band. A failed net is drawn as a straight line with a <code>RouteDegraded</code> diagnostic.</p>
   <p>Only unreachable nets trigger the <b>inflation retry</b>, since the others do not depend on spacing: <code>rank_sep</code>, <code>node_sep</code> and <code>sub_sep</code> grow by 32 units on a copy of the profile and sizing and routing rerun, up to 8 times, keeping the least-degraded attempt. The cost is still scored under the caller's profile, and the search never accepts an inflated candidate: fitting only after widening everything is a bigger drawing, not a better one.</p>
 
   <h3>One end, four faces</h3>
@@ -576,7 +578,7 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
   <div data-fig="labels-toy"></div>
 
   <h3>Labels in the cost</h3>
-  <p>A label over a foreign state or another route is <a href="#cost">Tier 0</a>, forbidden rather than priced. If one endpoint encloses the other, or the transition is a loop inside its state, the label lives inside that state and only its bands count. A label over another label or an enclosing state's bands is Tier 2 (<code>label</code>), as is the shortfall (<code>label_near</code>).</p>
+  <p>A label over a foreign state or any route, its own included, is <a href="#cost">Tier 0</a>, forbidden rather than priced, and so is a label further than the leader from its own route. If one endpoint encloses the other, or the transition is a loop inside its state, the label lives inside that state and only its bands count. A label over another label or an enclosing state's bands is Tier 2 (<code>label</code>), as is the shortfall (<code>label_near</code>).</p>
   <div data-fig="labels-real"></div>
 
   <div class="callout why"><span class="t">Rejected</span>Boxes on fixed strips beside the line (they drifted far from their leg); rip-up-and-reroute (the loose tier made it unnecessary); "nothing between a label and its line" as a hard rule (many more fallbacks, no gain).</div>
@@ -605,16 +607,19 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
   <ul>
     <li>The <a href="#route">facing pass</a> never turns a port onto a lined face, and moves a port off one: to the opposite border if that is not lined, else to a top or bottom border that the child it joins can see past its siblings.</li>
     <li>The <a href="#search">search</a> never offers a lined face as a side move.</li>
-    <li>If none of those is free, the request cannot be met. The port keeps its face, its route crosses the band, <code>through_band</code> counts the crossing, and layout still succeeds; the router draws that leg as its straight-line fallback.</li>
+    <li>If none of those is free, the request cannot be met. The port keeps its face, its route crosses the band, <code>through_band</code> counts the crossing, and layout still succeeds.</li>
   </ul>
+  <p>A net the walls seal off is <b>walled</b>. The router routes it once more on a grid that blocks boxes only, so it crosses the band with an axis-aligned leg; <code>RouteWalled</code> traces it, <code>through_band</code> counts it, and the net is not degraded. Since a crossed band is Tier 0, the search's side moves take any face still free, and a port ships a crossing only where every face of its state is lined. An inner loop never crosses one.</p>
   <div data-fig="decor-faces"></div>
 
   <h3>Loops inside a state</h3>
-  <p>An internal or local self-transition is a loop inside its source. It leaves the source's right border from inside, runs in to its far leg beside the label, and returns lower down with its arrowhead on the border. Each such loop takes one row of the state's <b>loop room</b>, which is reserved below the submachine area and right-aligned. A row is as tall as the loop's labels, and at least a lane plus a route clearance on each side.</p>
-  <p>The loop room is sized from the loops' <code>PathBox</code>es alone, so phase 3 and the cost re-derive it and no geometry column carries it. Phase 3 draws each loop in its row instead of routing it, and the room is a wall for every other route. The label is not searched: it sits beside the loop, inside the state and below its header.</p>
+  <p>An internal or local self-transition is a loop inside its source. A state's loops share its <b>loop room</b>, which phase 2 reserves in its <b>free interior</b>, the interior inside the <code>pad</code> ring less the four bands. The room takes one of eight <b>placements</b>: a face of the free interior, at that face's leading or trailing end. Unpinned, it takes the right face's trailing end, or the left face's where a band lines the right face and none lines the left. A <code>LoopPin</code> sets the placement, and the <a href="#search">search</a> tries the other seven.</p>
+  <p>Each loop leaves the room's face from inside, runs in to its far leg, and returns beside where it left with its arrowhead on the same face. Its legs end on that face's boundary: the border where that side has no band, and the band's inner edge where one lines it. A top-face loop on a headed state therefore leaves the header's bottom edge, and no loop crosses a band. On a left or right face the loops are rows with horizontal legs; on a top or bottom face the room turns, and the loops stand side by side with vertical legs. A loop's lane is at least as tall as its label stack, with a route clearance either side.</p>
+  <p>The room is sized from the loops' <code>PathBox</code>es alone, so phase 3 and the cost re-derive it and no geometry column carries it. Phase 3 draws each loop in its row instead of routing it. The room is a wall for every other route and runs on to the boundary its loops reach, so a route inside the state goes round it and never across a leg. The labels are not searched: they sit beyond the far leg, at most a <a href="#labels">leader</a> from it, so every loop label is within a leader of its route.</p>
+  <p>Where a loop's ends touch its state's border, the run between them, padded by a route clearance, is an <b>occupied span</b> of that face. The router seats no outside end in it, and a port slot or inner-face end on it moves along the face to the nearest free position. With no free position the end stays and <code>Routes::occupied</code> counts it.</p>
 
   <h3>Loops outside a state</h3>
-  <p>An external self-transition is a net whose two ends name its state. The <a href="#route">attach pass</a> seats both ends on the face of the state that the fewest other ends use, the right face on a tie; the loop pass then puts them a line of text apart about the middle of the widest stretch of that face no other seat stands in. The route runs out <code>2·pad</code> from each seat and back. A face pin may move either end, so the search can take a loop round a corner.</p>
+  <p>An external self-transition is a net whose two ends name its state. The <a href="#route">attach pass</a> seats both ends on the face of the state that the fewest other ends use, the right face on a tie; the loop pass then puts them a line of text apart about the middle of the widest run of that face that no other seat, port slot or inner-face end stands in and no occupied span covers. The route runs out <code>2·pad</code> from each seat and back. An end pin may move either end, so the search can take a loop round a corner.</p>
 
   <h3>Every transition is internal to its lowest common ancestor</h3>
   <p>A route never crosses the border of the state that holds both its ends: it is drawn inside that state, through a port on each state between. A transition's kind only sets the default. Between two states of one machine a transition is external to each of them; one leaving a machine is internal to the composite holding both ends. An internal self-transition is the case where that composite is the state itself, so it is drawn inside it like any other.</p>
@@ -640,7 +645,8 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
     <tr><td><code>through_region</code></td><td>a route entering a concurrent region neither end lies in</td></tr>
     <tr><td><code>retrace</code></td><td>a route turning straight back along itself</td></tr>
     <tr><td><code>label_over_box</code></td><td>a label over a state, except those enclosing both ends and the <em>host</em> (an endpoint enclosing the other, or the state a loop is drawn inside), whose bands count instead</td></tr>
-    <tr><td><code>label_over_route</code></td><td>a label over another transition's route</td></tr>
+    <tr><td><code>label_over_route</code></td><td>a label over any route, its own included: a label the placement centred on its route as a fallback, traced as <code>LabelCentred</code></td></tr>
+    <tr><td><code>label_far</code></td><td>a label further than the <a href="#labels">leader</a> from its own route</td></tr>
   </table>
 
   <h3>Tier 1: hints</h3>
@@ -682,7 +688,7 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
   <h2>The search: rows, moves and kicks</h2>
   <p class="lede">scav lays a chart out many thousands of times with slightly different inputs and ships the cheapest drawing; the search is deterministic throughout.</p>
 
-  <p>A drawing is a pure function of <b>(row, pins)</b>. A <b>row</b> is one setting of four whole-chart sizing knobs. A <b>pin</b> is one recorded decision the phases must honour; there are seven kinds: rank, cut, reverse, face, orient, side and fold. Pins are inputs, not patches, so trying a move means laying out again with one more pin and undoing it means dropping the pin: no transactions, no rollback. Pins name states and transitions by id, because node indices change between layouts.</p>
+  <p>A drawing is a pure function of <b>(row, pins)</b>. A <b>row</b> is one setting of four whole-chart sizing knobs. A <b>pin</b> is one recorded decision the phases must honour; there are seven kinds: rank, cut, reverse, end, orient, fold and loop. Pins are inputs, not patches, so trying a move means laying out again with one more pin and undoing it means dropping the pin: no transactions, no rollback. Pins name states and transitions by id, because node indices change between layouts.</p>
   <p>This makes every drawing a reproducible counterfactual: <code>scav dump --layout</code> prints a drawing's row and pins as flags, and <code>--no-search</code> with those flags redraws it exactly. Edit one flag to get the drawing a reader wants and score it: if it is cheaper, the search lacks a move; if dearer, the objective is wrong.</p>
   <div data-fig="search-structure"></div>
 
@@ -704,10 +710,11 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
     <tr><th>move</th><th>offered for</th><th>why it exists</th></tr>
     <tr><td><b>cut</b></td><td>each chained segment</td><td>chained edges carry most kinks</td></tr>
     <tr><td><b>reverse</b></td><td>each cyclic segment not yet pinned</td><td>which edge breaks a cycle decides ranks</td></tr>
-    <tr><td><b>face</b></td><td>each end of a transition that bends or is charged a crossing, corridor, crowding, excess or label term (every end while Tier 0 is broken), × 4 faces</td><td>a local face rule cannot see the turn it buys</td></tr>
-    <tr><td><b>side</b></td><td>each port end, × the other 3 sides</td><td>a route arriving from above can enter from above</td></tr>
+    <tr><td><b>face</b></td><td>an end pin at each box end of a transition that bends or is charged a crossing, corridor, crowding, excess or label term (every end while Tier 0 is broken), × 4 faces</td><td>a local face rule cannot see the turn it buys</td></tr>
+    <tr><td><b>side</b></td><td>an end pin at each port end, × the other 3 sides</td><td>a route arriving from above can enter from above</td></tr>
     <tr><td><b>rank</b></td><td>each non-initial state, × every other rank in its frame</td><td>which column a state sits in; the largest source of gain</td></tr>
     <tr><td><b>fold</b> (refold only)</td><td>each folded frame</td><td>where the single fold cut falls</td></tr>
+    <tr><td><b>loop</b></td><td>each state with a <a href="#decorations">loop room</a>, × its 7 other placements</td><td>which corner of its free interior a state's loops take</td></tr>
   </table>
   <p>Each move kind has its own budget of 1,024 scored moves over the whole search, so no kind starves another. A face move that cannot move its seat is charged but <a href="#fast">not scored</a>.</p>
   <div data-fig="search-round"></div>
@@ -716,7 +723,7 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
   <p>Greedy descent stops in the first basin it finds, and some structural changes pay off only after the search adapts to them. A <b>kick</b> applies one, searches to convergence, and keeps the result only if the <em>converged</em> cost is cheaper; unlike simulated annealing, there is no temperature to tune.</p>
   <ul>
     <li><b>Kinds</b>: reverse a cyclic segment; turn a frame to run down; flip whether a frame is folded. Turns and folds are allowed only in rounds "with turns".</li>
-    <li><b>Warm start</b>: the incumbent's pins minus the kicked frame's own rank, cut, face, side and fold pins, plus the kick's pin, then Level 1 scoped to that frame. A round's kicks run in parallel.</li>
+    <li><b>Warm start</b>: the incumbent's pins minus the kicked frame's own rank, cut, end, fold and loop pins, plus the kick's pin, then Level 1 scoped to that frame. A round's kicks run in parallel.</li>
     <li><b>Reduction</b>: take each frame's best improving kick. If several frames have one, try them <b>together</b>; if that loses to the best <b>single</b> kick, take the single and <b>rest</b> each other winner on top, keeping it if it still improves. Repeat until no kick improves, then one unscoped <b>settle</b> search.</li>
     <li><b>Two schedules</b> run from each row: A allows turns from the start; B runs reversals alone first. B is kept only if strictly cheaper; neither dominates.</li>
     <li>Rows whose converged drawings are identical kick only once.</li>
@@ -746,7 +753,7 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
   <div data-fig="fast-reuse"></div>
 
   <h3>The face shortcut</h3>
-  <p>Ordering, sizing and the facing pass never read a face pin, so a face candidate starts from the incumbent's sizing and only routes and scores, at about a quarter of the cost; it also keeps every label nothing it reads has changed. A face that would not move its seat draws the incumbent exactly, so it is charged but not scored, and faces are offered only where the <a href="#search">move table</a> says they are priced.</p>
+  <p>Ordering, sizing and the facing pass never read an end pin at a box end, so a face candidate starts from the incumbent's sizing and only routes and scores, at about a quarter of the cost; it also keeps every label nothing it reads has changed. A face that would not move its seat draws the incumbent exactly, so it is charged but not scored, and faces are offered only where the <a href="#search">move table</a> says they are priced.</p>
 
   <h3>The label bound</h3>
   <p>Labels are placed last and read only the routes, so a round with labels runs in two passes:</p>
@@ -839,10 +846,11 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
     <div class="gl-item" data-term="degraded route"><dt>Degraded route</dt><dd>A net that could not be routed, drawn straight and reported. <a href="#route">→ route</a></dd></div>
     <div class="gl-item" data-term="determinism contract"><dt>Determinism contract</dt><dd>Any conforming C++20 toolchain, platform and thread count gives the same bytes. <a href="#principles">→ principles</a></dd></div>
     <div class="gl-item" data-term="em"><dt>Em</dt><dd>The font size, 192 units on <code>readable</code>: Tier 2's length unit. <a href="#cost">→ cost</a></dd></div>
-    <div class="gl-item" data-term="face (move)"><dt>Face (move)</dt><dd>Which side of a box a route end uses; a face pin fixes it. <a href="#search">→ search</a></dd></div>
+    <div class="gl-item" data-term="face (move)"><dt>Face (move)</dt><dd>Which side of a box a route end uses; an end pin fixes it. <a href="#search">→ search</a></dd></div>
     <div class="gl-item" data-term="facing pass"><dt>Facing pass</dt><dd>Turning ports toward their route's far end, then ordering and sizing again. <a href="#route">→ route</a></dd></div>
     <div class="gl-item" data-term="fold / piece"><dt>Fold / piece</dt><dd>Cutting a long run of ranks into pieces that are packed. <a href="#size">→ size</a></dd></div>
     <div class="gl-item" data-term="frame"><dt>Frame</dt><dd>One submachine laid out as its own layered graph. <a href="#decompose">→ decompose</a></dd></div>
+    <div class="gl-item" data-term="free interior"><dt>Free interior</dt><dd>A state's interior inside its <code>pad</code> ring, less its four bands. <a href="#decorations">→ decorated states</a></dd></div>
     <div class="gl-item" data-term="grid unit"><dt>Grid unit</dt><dd>1/16 pt; every coordinate is an integer number of them. <a href="#principles">→ principles</a></dd></div>
     <div class="gl-item" data-term="header"><dt>Header</dt><dd>A state's name, and under a rule its description, in its <code>h_before</code> band; a wall. <a href="#decorations">→ decorated states</a></dd></div>
     <div class="gl-item" data-term="hierarchy-crossing transition"><dt>Hierarchy-crossing transition</dt><dd>A transition whose ends lie in different submachines. <a href="#intro">→ intro</a></dd></div>
@@ -858,15 +866,16 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
     <div class="gl-item" data-term="level 1"><dt>Level 1</dt><dd>Steepest descent over pins: take the best improving move, repeat. <a href="#search">→ search</a></dd></div>
     <div class="gl-item" data-term="level 2"><dt>Level 2</dt><dd>Sixteen whole-chart sizing settings (rows), each searched; the cheapest ships. <a href="#search">→ search</a></dd></div>
     <div class="gl-item" data-term="lined face"><dt>Lined face</dt><dd>A face of a state that one of its bands covers; no port sits on it. <a href="#decorations">→ decorated states</a></dd></div>
-    <div class="gl-item" data-term="loop room"><dt>Loop room</dt><dd>Room below a state's submachine area holding its internal self-transitions, one loop per row. <a href="#decorations">→ decorated states</a></dd></div>
+    <div class="gl-item" data-term="loop room / placement"><dt>Loop room / placement</dt><dd>Room in a state's free interior holding its internal self-transitions; its placement is a face and an end of that face, eight in all. <a href="#decorations">→ decorated states</a></dd></div>
     <div class="gl-item" data-term="loose tier"><dt>Loose tier</dt><dd>The label fallback: anchored and inside its holder, but may overlap. <a href="#labels">→ labels</a></dd></div>
     <div class="gl-item" data-term="memo"><dt>Memo</dt><dd>A cache keyed on every value a step reads, so hits are exact. <a href="#principles">→ principles</a></dd></div>
     <div class="gl-item" data-term="net"><dt>Net</dt><dd>One routed segment of a transition. <a href="#route">→ route</a></dd></div>
     <div class="gl-item" data-term="no-text / real text"><dt>No-text / real text</dt><dd>The two measurement scales: no space requests, or measured text. Never compared. <a href="#principles">→ principles</a></dd></div>
     <div class="gl-item" data-term="nudging"><dt>Nudging</dt><dd>Spreading parallel routes into separate tracks after routing. <a href="#route">→ route</a></dd></div>
+    <div class="gl-item" data-term="occupied span"><dt>Occupied span</dt><dd>The run of a border an inner loop's ends touch, padded by the clearance; no outside end is seated there. <a href="#decorations">→ decorated states</a></dd></div>
     <div class="gl-item" data-term="pad"><dt>Pad</dt><dd>A box's interior ring: 128 units on <code>readable</code>. <a href="#size">→ size</a></dd></div>
-    <div class="gl-item" data-term="pathbox / pathclear / placed"><dt>PathBox / PathClear</dt><dd>A label's requested box; an end's arrowhead trim. <a href="#intro">→ intro</a></dd></div>
-    <div class="gl-item" data-term="pins"><dt>Pins</dt><dd>Recorded search decisions: rank, cut, reverse, face, side, orient, fold. <a href="#search">→ search</a></dd></div>
+    <div class="gl-item" data-term="pathbox / pathclear / placed"><dt>PathBox / PathClear</dt><dd>A label's requested box; the least length of a route's end leg, for its glyph. <a href="#intro">→ intro</a></dd></div>
+    <div class="gl-item" data-term="pins"><dt>Pins</dt><dd>Recorded search decisions: rank, cut, reverse, end, orient, fold, loop. <a href="#search">→ search</a></dd></div>
     <div class="gl-item" data-term="port / port slot"><dt>Port / port slot</dt><dd>Where a segment crosses a state's border, and its reported position. <a href="#decompose">→ decompose</a></dd></div>
     <div class="gl-item" data-term="profile"><dt>Profile</dt><dd>52 integer settings: spacing, sizes, weights, search knobs. <a href="#intro">→ intro</a></dd></div>
     <div class="gl-item" data-term="pseudostate"><dt>Pseudostate</dt><dd>Any state kind but Normal: initial, final, choice, fork and so on. <a href="#intro">→ intro</a></dd></div>
@@ -878,15 +887,16 @@ table.sx-table tr.hl td { background: color-mix(in srgb, var(--series-2) 12%, tr
     <div class="gl-item" data-term="segment"><dt>Segment</dt><dd>The part of a transition inside one frame. <a href="#decompose">→ decompose</a></dd></div>
     <div class="gl-item" data-term="shard"><dt>Shard</dt><dd>A unit of parallel work fixed by the model, merged in index order. <a href="#principles">→ principles</a></dd></div>
     <div class="gl-item" data-term="shortfall"><dt>Shortfall</dt><dd>How much nearer a label is to a foreign leg than its own. <a href="#labels">→ labels</a></dd></div>
-    <div class="gl-item" data-term="side (move)"><dt>Side (move)</dt><dd>Which border of its state a port sits on; a side pin fixes it. <a href="#search">→ search</a></dd></div>
+    <div class="gl-item" data-term="side (move)"><dt>Side (move)</dt><dd>Which border of its state a port sits on; an end pin fixes it. <a href="#search">→ search</a></dd></div>
     <div class="gl-item" data-term="space requests"><dt>Space requests</dt><dd>The application's measured sizes: <code>BoxSpace</code>, <code>PathClear</code>, <code>PathBox</code>. <a href="#intro">→ intro</a></dd></div>
     <div class="gl-item" data-term="split graph"><dt>Split graph</dt><dd>Phase 0's output: segments and ports. <a href="#decompose">→ decompose</a></dd></div>
     <div class="gl-item" data-term="strict tier"><dt>Strict tier</dt><dd>A label clear of every foreign state, band, box and route. <a href="#labels">→ labels</a></dd></div>
     <div class="gl-item" data-term="submachine"><dt>Submachine</dt><dd>A group of states inside a state, or a document's root. <a href="#intro">→ intro</a></dd></div>
     <div class="gl-item" data-term="sweep"><dt>Sweep</dt><dd>One median pass over a frame's ranks, down or up. <a href="#order">→ order</a></dd></div>
-    <div class="gl-item" data-term="tier 0 counts"><dt>Tier 0 counts</dt><dd>The nine forbidden counts, such as a route through a box. <a href="#cost">→ cost</a></dd></div>
+    <div class="gl-item" data-term="tier 0 counts"><dt>Tier 0 counts</dt><dd>The ten forbidden counts, such as a route through a box. <a href="#cost">→ cost</a></dd></div>
     <div class="gl-item" data-term="transit bend"><dt>Transit bend</dt><dd>A bend inside a state the route only passes through. <a href="#cost">→ cost</a></dd></div>
     <div class="gl-item" data-term="trunk"><dt>Trunk</dt><dd>The shared final leg of routes into one target; not corridor. <a href="#cost">→ cost</a></dd></div>
+    <div class="gl-item" data-term="walled net"><dt>Walled net</dt><dd>A net the walls seal off, routed across a band with an axis-aligned leg and counted in Tier 0. <a href="#decorations">→ decorated states</a></dd></div>
   </dl>
 </section>
 </main>
@@ -6506,7 +6516,7 @@ SX.register('intro', function (sec) {
         choice: { states: [2], text: '<b>Choice pseudostate.</b> A diamond in its box; routes meet it at a face midpoint.' },
         final: { states: [11], text: '<b>Final pseudostate.</b> <code>trans Standby -&gt; * "descale overdue"</code> creates one, drawn as a ringed disc.' },
         label: { trans: [9], boxes: [9], text: '<b>Transition label.</b> A requested box (<code>PathBox</code>) hung off its route by a 96-unit leader. The dashed outline is the placed box.' },
-        internal: { trans: [6], boxes: [6], text: '<b>Internal transition.</b> It never crosses <code>Pumping</code>\'s border, so it is a loop inside the state: out of the right border from inside and back, with its label beside it, in room reserved below the state\'s contents.' }
+        internal: { trans: [6], boxes: [6], text: '<b>Internal transition.</b> It never crosses <code>Pumping</code>\'s border, so it is a loop inside the state: out of its right border from inside and back, with its label beside it, in room reserved inside the state.' }
       },
       tcp: {
         composite: { states: [4], text: '<b>Composite state.</b> <code>Established</code> holds <code>inbound</code> and <code>outbound</code>, which close independently, so it is concurrent.' },
@@ -8553,7 +8563,7 @@ SX.register('decompose', function (sec) {
         SX.tipOn(top, q.map(function (x) { return x.tip; }).join('<br><br>'));
       });
       if (k === 0) log.textContent = nets.length + ' nets planned between node centres (and port points, none in brew). The internal Pumping → Pumping is a loop drawn in Pumping\'s own room, not a net.';
-      else if (k === LAST) log.textContent = 'The routed polylines, nudged, trimmed one arrowhead short of each target border, labels placed.';
+      else if (k === LAST) log.textContent = 'The routed polylines, nudged, each ending on its border, labels placed.';
       else log.innerHTML = moves.length ? '<b>' + PASSES[k] + '</b> moved ' + moves.length + (moves.length === 1 ? ' end' : ' ends') + ':<br>' + moves.join('<br>') : '<b>' + PASSES[k] + '</b> moved nothing in brew.';
     } });
     f.ctrl.appendChild(st.el);
@@ -8933,7 +8943,7 @@ SX.register('labels', function (sec) {
           if (over(B, st.rect)) { lob++; hits.push('“' + t.label + '” over ' + st.path); }
         });
         if (hostId != null && walls(g.states[hostId]).some(function (w) { return over(B, w); })) { lob++; hits.push('“' + t.label + '” over its host\'s band'); }
-        legs.forEach(function (ls, j) { if (j === t.id) return; ls.forEach(function (r) { if (over(B, r)) { lor++; hits.push('“' + t.label + '” over ' + g.trans[j].label); } }); });
+        legs.forEach(function (ls, j) { ls.forEach(function (r) { if (over(B, r)) { lor++; hits.push('“' + t.label + '” over ' + (j === t.id ? 'its own route' : g.trans[j].label)); } }); });
         var own = legs[t.id], bestK = 0, bestG = Infinity;
         own.forEach(function (r, k) { var d = cheb(B, r); if (d < bestG) { bestG = d; bestK = k; } });
         var fgap = Infinity;
@@ -9074,19 +9084,22 @@ SX.register('decorations', function (sec) {
     draw();
   })();
 
-  // ---- kiln: headers, loop rooms, ports and loops on a real drawing ----
+  // ---- kiln: headers, loop rooms, occupied spans, ports and loops on a real drawing ----
   (function () {
     var host = sec.querySelector('[data-fig="decor-kiln"]');
-    var f = SX.figure(host, { caption: '<b>kiln</b>, as scav draws it. <b>Toggle</b> what to show and <b>hover</b> a mark or a transition: headers, loop rooms, ports, and loops inside and outside their states.' });
+    var f = SX.figure(host, { caption: '<b>kiln</b>, as scav draws it. <b>Toggle</b> what to show and <b>hover</b> a mark or a transition: headers, loop rooms and their placements, occupied spans, ports, and loops inside and outside their states.' });
     var c = SX.data('charts').charts.kiln, G = c.text;
+    var CLEAR = 96;  // route_clearance: node_sep / 3 on readable
+    var END = [['top', 'bottom'], ['top', 'bottom'], ['left', 'right'], ['left', 'right']];
     var KINDS = [
       { k: 'header', label: 'headers and bands', col: '--hl-2' },
       { k: 'room', label: 'loop rooms', col: '--hl-3' },
+      { k: 'span', label: 'occupied spans', col: '--series-5' },
       { k: 'port', label: 'ports', col: '--series-7' },
       { k: 'inner', label: 'loops inside', col: '--hl' },
       { k: 'outer', label: 'loops outside', col: '--series-6' }
     ];
-    var show = { header: true, room: true, port: true, inner: true, outer: true };
+    var show = { header: true, room: true, span: true, port: true, inner: true, outer: true };
     KINDS.forEach(function (K) {
       var t = SX.toggle({ label: K.label, value: show[K.k], onChange: function (v) { show[K.k] = v; draw(); } });
       t.el.insertBefore(SX.el('span', { class: 'swatch', style: { background: 'var(' + K.col + ')' } }), t.el.lastChild);
@@ -9099,22 +9112,54 @@ SX.register('decorations', function (sec) {
     var outer = function (t) { return t.src === t.dst && t.kind === 'external'; };
     var composite = function (s) { return s.submachines.length > 0; };
     var faceOf = function (p, r) { return p[0] === r[0] ? 0 : p[0] === r[0] + r[2] ? 1 : p[1] === r[1] ? 2 : p[1] === r[1] + r[3] ? 3 : -1; };
-    // A state's loop room as phase 3 re-derives it: rows of max(label height, lane + 2 clearances), right-aligned at its trailing band.
+    // The last --loop pin naming each state: {face, end}.
+    var loopPin = {};
+    G.pin_list.forEach(function (p) { if (p[0] === '--loop') { var a = p[1].split(':').map(Number); loopPin[a[0]] = { face: a[1], end: a[2] }; } });
+    // A state's loop placement: its pin, else the right face's trailing end, or the left face's where only the right is lined.
+    function place(s) {
+      if (loopPin[s.id]) return { face: loopPin[s.id].face, end: loopPin[s.id].end, pinned: true };
+      var left = s.lead[2] > 0, right = s.trail[2] > 0;
+      return { face: right && !left ? 0 : 1, end: 1, pinned: false };
+    }
+    function placeText(pl) { return FACE[pl.face] + ' face, ' + END[pl.face][pl.end] + ' end'; }
+    // A state's loop room as drawn: the box its inner loops and their labels span.
     function room(s) {
       var loops = G.trans.filter(function (t) { return inner(t) && t.src === s.id; });
       if (!loops.length) return null;
-      var h = 0, x = Infinity;
+      var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      function grow(x, y, w, h) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + w); y1 = Math.max(y1, y + h); }
       loops.forEach(function (t) {
-        var lane = t.points[2][1] - t.points[1][1];
-        h += Math.max(t.label_box ? t.label_box[3] : 0, lane + 2 * 96);
-        x = Math.min(x, t.label_box ? t.label_box[0] : t.points[1][0]);
+        t.points.forEach(function (p) { grow(p[0], p[1], 0, 0); });
+        if (t.label_box) grow(t.label_box[0], t.label_box[1], t.label_box[2], t.label_box[3]);
       });
-      var bottom = s.lead[1] + s.lead[3];
-      return { r: [x, bottom - h, s.trail[0] - x, h], n: loops.length };
+      return { r: [x0, y0, x1 - x0, y1 - y0], n: loops.length, place: place(s) };
+    }
+    // An inner loop's occupied spans: the run between its ends on each border face they touch, padded by CLEAR.
+    function spans(t) {
+      var r = byId[t.src].rect, ends = [t.points[0], t.points[t.points.length - 1]], out = [];
+      var fc = ends.map(function (p) { return faceOf(p, r); });
+      fc.forEach(function (face, k) {
+        if (face < 0 || (k === 1 && face === fc[0])) return;
+        var along = face < 2 ? 1 : 0, a = ends[k][along], b = fc[1 - k] === face ? ends[1 - k][along] : a;
+        var lo = Math.min(a, b) - CLEAR, hi = Math.max(a, b) + CLEAR, at = face === 0 ? r[0] : face === 1 ? r[0] + r[2] : face === 2 ? r[1] : r[1] + r[3];
+        out.push({ face: face, lo: lo, hi: hi, pts: face < 2 ? [[at, lo], [at, hi]] : [[lo, at], [hi, at]] });
+      });
+      return out;
+    }
+    // Ends of other transitions on face `face` of state `st`, each as "label at coordinate".
+    function endsOn(st, face, skip) {
+      var r = byId[st].rect, out = [];
+      G.trans.forEach(function (t) {
+        if (t.id === skip || !t.points.length) return;
+        [[t.src, t.points[0]], [t.dst, t.points[t.points.length - 1]]].forEach(function (e) {
+          if (e[0] === st && faceOf(e[1], r) === face) out.push((t.label ? '“' + t.label + '”' : 'the initial arrow') + ' at ' + SX.fmt(e[1][face < 2 ? 1 : 0]));
+        });
+      });
+      return out;
     }
     function tipTrans(t) {
       var from = byId[t.src];
-      if (inner(t)) return '<b>“' + t.label + '”</b>, ' + t.kind + ' self-transition of ' + from.name + '<br>A loop inside ' + from.name + ', in its loop room: out of the right border from inside and back. Drawn, not routed.';
+      if (inner(t)) return '<b>“' + t.label + '”</b>, ' + t.kind + ' self-transition of ' + from.name + '<br>A loop inside ' + from.name + ', in its loop room on the ' + placeText(place(from)) + ': out of that face from inside and back. Drawn, not routed.';
       if (outer(t)) return '<b>“' + t.label + '”</b>, external self-transition of ' + from.name + '<br>A loop outside, both ends on the ' + FACE[faceOf(t.points[0], from.rect)] + ' face, the one the fewest other ends use.';
       var s = '<b>' + t.src_path + ' → ' + t.dst_path + '</b>' + (t.label ? ' “' + t.label + '”' : '') + '<br>' + t.kind;
       if (t.kind === 'internal') s += ': starts on ' + from.name + '\'s border, level with its boundary node';
@@ -9124,11 +9169,7 @@ SX.register('decorations', function (sec) {
     function draw() {
       var h = SX.chart(stage, G, { maxHeight: 640, pad: 220, onTrans: function (t, e, ev) { if (ev === 'move') SX.tip.show(e, tipTrans(t)); else if (ev === 'leave') SX.tip.hide(); } });
       h.svg.appendChild(h.over);
-      var u = h.unit, nHead = 0, nRule = 0, nRoom = 0, ports = [0, 0, 0, 0];
-      G.trans.forEach(function (t) {
-        var on = (show.inner && inner(t)) ? 'var(--hl)' : (show.outer && outer(t)) ? 'var(--series-6)' : null;
-        if (on) SX.tipOn(h.line(t.points, { stroke: on, 'stroke-width': u * 4, fill: 'none', 'stroke-linejoin': 'round' }), tipTrans(t));
-      });
+      var u = h.unit, nHead = 0, nRule = 0, nRoom = 0, nSpan = 0, ports = [0, 0, 0, 0];
       G.states.forEach(function (s) {
         if (s.kind !== 'normal') return;
         var ruled = !!s.label || composite(s);
@@ -9142,8 +9183,24 @@ SX.register('decorations', function (sec) {
         var rm = room(s);
         if (rm) { nRoom++; if (show.room) {
           var q = h.rect(rm.r, { fill: 'color-mix(in srgb, var(--hl-3) 26%, transparent)', stroke: 'var(--hl-3)', 'stroke-width': u * 1.5, 'stroke-dasharray': (u * 5) + ' ' + (u * 4) });
-          SX.tipOn(q, '<b>Loop room of ' + s.name + '</b>: ' + rm.n + ' row' + (rm.n > 1 ? 's' : '') + ', ' + SX.fmt(rm.r[2]) + ' × ' + SX.fmt(rm.r[3]) + '<br>Below the submachine area, right-aligned; re-derived here from the loops and labels. A wall for every other route.');
+          SX.tipOn(q, '<b>Loop room of ' + s.name + '</b>: ' + rm.n + ' loop' + (rm.n > 1 ? 's' : '') + ' on the ' + placeText(rm.place) + ' of its free interior' + (rm.place.pinned ? ' (<code>--loop ' + s.id + ':' + rm.place.face + ':' + rm.place.end + '</code>)' : ' (unpinned default)') +
+            '<br>Drawn here as the box its loops and labels span, ' + SX.fmt(rm.r[2]) + ' × ' + SX.fmt(rm.r[3]) + '. A wall for every other route.');
         } }
+      });
+      G.trans.forEach(function (t) {
+        if (!inner(t)) return;
+        spans(t).forEach(function (sp) {
+          nSpan++;
+          if (!show.span) return;
+          var n = h.line(sp.pts, { stroke: 'var(--series-5)', 'stroke-width': u * 12, 'stroke-opacity': 0.7, fill: 'none' });
+          var others = endsOn(t.src, sp.face, t.id);
+          SX.tipOn(n, '<b>Occupied span</b> on ' + byId[t.src].name + '\'s ' + FACE[sp.face] + ' face, ' + SX.fmt(sp.lo) + ' to ' + SX.fmt(sp.hi) + '<br>The run between “' + t.label + '”\'s ends, padded by a route clearance (' + CLEAR + '). No outside end is seated in it.' +
+            (others.length ? '<br>Other ends on this face: ' + others.join(', ') + '.' : ''));
+        });
+      });
+      G.trans.forEach(function (t) {
+        var on = (show.inner && inner(t)) ? 'var(--hl)' : (show.outer && outer(t)) ? 'var(--series-6)' : null;
+        if (on) SX.tipOn(h.line(t.points, { stroke: on, 'stroke-width': u * 4, fill: 'none', 'stroke-linejoin': 'round' }), tipTrans(t));
       });
       G.trans.forEach(function (t) {
         t.ports.forEach(function (p) {
@@ -9155,7 +9212,7 @@ SX.register('decorations', function (sec) {
         });
       });
       var T0 = G.cost.tier0, loopsIn = G.trans.filter(inner).length, loopsOut = G.trans.filter(outer).length;
-      read.innerHTML = '<b>kiln</b>: ' + nHead + ' headers, ' + nRule + ' with a rule; ' + loopsIn + ' loops inside ' + nRoom + ' states and ' + loopsOut + ' outside; ' +
+      read.innerHTML = '<b>kiln</b>: ' + nHead + ' headers, ' + nRule + ' with a rule; ' + loopsIn + ' loops inside ' + nRoom + ' states, with ' + nSpan + ' occupied spans, and ' + loopsOut + ' outside; ' +
         (ports[0] + ports[1] + ports[2] + ports[3]) + ' ports, ' + FACE.map(function (n, k) { return ports[k] + ' on a ' + n + ' face'; }).join(', ') + '. Tier 0 <code>through_band</code> ' + T0.through_band + ', <code>through_box</code> ' + T0.through_box + '.';
     }
     draw();
@@ -9377,7 +9434,7 @@ SX.register('cost', function (sec) {
 <script>/* 11-search.html */
 // Shared helpers for the search figures.
 window.SXsearch = (function () {
-  var KINDS = ['cut', 'reverse', 'face', 'side', 'rank', 'fold'];          // enumeration order
+  var KINDS = ['cut', 'reverse', 'face', 'side', 'rank', 'fold', 'loop'];  // enumeration order
   function kindColor(k) { return 'var(--series-' + (KINDS.indexOf(k) + 1) + ')'; }
   function bits(i) { return { box: !!(i & 1), cmp: !!(i & 2), hole: !!(i & 4), fold: !!(i & 8) }; }
   function bitText(i) {
@@ -9387,8 +9444,8 @@ window.SXsearch = (function () {
   // The element a pin names, for highlighting: {kind:'state'|'trans'|'sub', id}.
   function pinTarget(flag, arg) {
     var a = String(arg).split(':').map(Number);
-    if (flag === '--rank') return { kind: 'state', id: a[0] };
-    if (flag === '--face' || flag === '--reverse' || flag === '--cut' || flag === '--side') return { kind: 'trans', id: a[0] };
+    if (flag === '--rank' || flag === '--loop') return { kind: 'state', id: a[0] };
+    if (flag === '--end' || flag === '--reverse' || flag === '--cut') return { kind: 'trans', id: a[0] };
     if (flag === '--orient' || flag === '--fold') return { kind: 'sub', id: a[0] };
     return null;
   }
@@ -9681,7 +9738,7 @@ window.SXfastPerf = function (sec) {
 // Figure: which of toolchanger's frames a candidate re-orders, re-sizes or copies.
 window.SXfastReuse = function (sec) {
   var g = SX.data('charts').charts.toolchanger.text;
-  var f = SX.figure(sec.querySelector('[data-fig="fast-reuse"]'), { caption: '<b>Click a frame</b> to pin a rank in it: ordering redoes that frame, sizing also every frame holding it. A face pin skips both.' });
+  var f = SX.figure(sec.querySelector('[data-fig="fast-reuse"]'), { caption: '<b>Click a frame</b> to pin a rank in it: ordering redoes that frame, sizing also every frame holding it. A face move skips both.' });
   var subs = g.subs, N = subs.length, parent = {}, depth = {}, kids = {};
   subs.forEach(function (s) { parent[s.id] = s.owner == null ? null : g.states[s.owner].parent_sub; });
   subs.forEach(function (s) { var d = 0, p = parent[s.id]; while (p != null) { d++; p = parent[p]; } depth[s.id] = d; (kids[parent[s.id]] = kids[parent[s.id]] || []).push(s.id); });
@@ -9690,7 +9747,7 @@ window.SXfastReuse = function (sec) {
   var pos = {}, nextX = 0;
   (function place(id) { var c = kids[id] || []; if (!c.length) pos[id] = nextX++; else { c.forEach(place); pos[id] = (pos[c[0]] + pos[c[c.length - 1]]) / 2; } })(0);
   var picked = 2, mode = 'rank';
-  f.ctrl.appendChild(SX.choice({ options: [{ value: 'rank', label: 'Rank pin in the clicked frame' }, { value: 'face', label: 'Face pin (any frame)' }], value: mode, onChange: function (v) { mode = v; draw(); } }).el);
+  f.ctrl.appendChild(SX.choice({ options: [{ value: 'rank', label: 'Rank pin in the clicked frame' }, { value: 'face', label: 'Face move (any frame)' }], value: mode, onChange: function (v) { mode = v; draw(); } }).el);
   var readout = SX.el('span', { class: 'note' }); f.ctrl.appendChild(readout);
   function draw() {
     var reorder = {}, resize = {};
@@ -9715,7 +9772,7 @@ window.SXfastReuse = function (sec) {
       });
     });
     var nO = Object.keys(reorder).length, nS = Object.keys(resize).length;
-    readout.textContent = mode === 'rank' ? 'rank pin in frame ' + picked + ': re-order ' + nO + ' of ' + N + ' frames, re-size ' + nS + ' of ' + N + ', copy the rest' : 'face pin: phases 1 and 2 are the incumbent\'s; only routing and scoring run';
+    readout.textContent = mode === 'rank' ? 'rank pin in frame ' + picked + ': re-order ' + nO + ' of ' + N + ' frames, re-size ' + nS + ' of ' + N + ', copy the rest' : 'face move: phases 1 and 2 are the incumbent\'s; only routing and scoring run';
     f.stage.innerHTML = ''; f.stage.appendChild(svg);
     f.stage.appendChild(SX.el('div', { class: 'legend' }, SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'color-mix(in srgb, var(--series-2) 30%, var(--surface-1))', border: '1px solid var(--series-2)' } }), 're-ordered'), SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'color-mix(in srgb, var(--series-1) 30%, var(--surface-1))', border: '1px solid var(--series-1)' } }), 're-sized'), SX.el('span', null, SX.el('span', { class: 'swatch', style: { background: 'var(--surface-2)', border: '1px solid var(--axis)' } }), 'copied')));
   }

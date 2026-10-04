@@ -3,21 +3,22 @@
   <h2>Routing: ports, faces, A*, seats and lanes</h2>
   <p class="lede">Phase 3 draws every segment as an axis-aligned polyline; states are obstacles, so a route through a box cannot be represented at all.</p>
 
-  <p>Each segment becomes a <b>net</b>. Every net's ends are seated, then frames are routed in parallel (a frame that has not changed reuses its previous answer), nets are joined into transitions, ends are trimmed for arrowheads, parallel lanes are nudged apart, and <a href="#labels">labels</a> are placed last.</p>
+  <p>Each segment becomes a <b>net</b>. Every net's ends are seated, then frames are routed in parallel (a frame that has not changed reuses its previous answer), nets are joined into transitions, parallel lanes are nudged apart, and <a href="#labels">labels</a> are placed last.</p>
 
   <h3>Ports and the facing pass</h3>
   <p>A <b>port slot</b> is where a route crosses a composite's border. In a frame running left to right, ports on the left are sources and on the right sinks; ports may also sit on the top or bottom. Sides are numbered 0 left, 1 right, 2 top, 3 bottom.</p>
   <p>After the first sizing, the <b>facing pass</b> turns ports toward their route's far end, then reruns ordering and sizing if any turned:</p>
   <ul>
     <li>a port whose far end lies on the frame's other side has its edge reversed, moving it to the opposite border;</li>
-    <li>a port on its own transition's state whose far end lies further away across the ranks than along them moves to the top or bottom border facing it, if that border is unobstructed and free. A side pin is never turned;</li>
+    <li>a port on its own transition's state whose far end lies further away across the ranks than along them moves to the top or bottom border facing it, if that border is unobstructed and free. A port whose end is pinned is never turned;</li>
     <li>a port on a <a href="#decorations">lined face</a>, one that a band of its state covers, moves to the opposite border, else to a top or bottom border its joined state can see. No port is ever turned onto a lined face.</li>
   </ul>
+  <p>A slot starts on its border at its boundary node's coordinate. Phase 3 then slides it along its face, level with the point across it on its outer side: the next end for a slot the route leaves by, the previous end for one it enters by, where that end is another port slot, a bend node or an inner-face end. A box end never moves a slot, since the router seats a box end level with the slot where the box's face allows. The slot stays at its node where that spot is within a corner's inset, within a clearance of a band lining the face, or within a clearance of, or past, another slot on that face. Every slot is decided while planning, before any frame routes, so both frames meeting at a slot see the same point.</p>
 
   <h3>Which face an end leaves by</h3>
   <p>The <b>separation rule</b> seats each end on a face of its box: the axis on which the far end lies further <em>outside</em> the box wins (a tie goes to x), and the nearer border on that axis is the face. The seat is the far end's projection onto the face, held off the corners. <b>Inscribed glyphs</b> (discs, diamonds) take the face's midpoint.</p>
   <div data-fig="route-face"></div>
-  <p>A <b>face pin</b> overrides the rule at one end, unless the face is too short to hold a seat. Choosing both faces as a pair was tried and made most charts worse, so the face is a search dimension, not a rule.</p>
+  <p>An <b>end pin</b> overrides the rule at one end, unless the face is too short to hold a seat. Choosing both faces as a pair was tried and made most charts worse, so the face is a search dimension, not a rule.</p>
 
   <h3>The orthogonal router</h3>
   <p>The router runs A* on a <b>separated orthogonal visibility graph</b>:</p>
@@ -34,13 +35,14 @@
   <h3>Seating passes</h3>
   <p>Every seat is chosen before any net is searched, because two ends wanting one seat is a question about the pair. Six passes run in order:</p>
   <ol>
-    <li><b>Attach</b>: seat each end by the separation rule or its face pin; both ends of an outer self-loop take the face of its state that the fewest other ends use.</li>
+    <li><b>Attach</b>: seat each end by the separation rule or its end pin; both ends of an outer self-loop take the face of its state that the fewest other ends use.</li>
     <li><b>Reface</b> (glyphs): when an arrival and a departure want one midpoint, move the one with more to gain to another face.</li>
     <li><b>Align</b>: put both ends of a net between parallel faces on one coordinate, so one straight segment fits; a net with label room reserved takes the low end, and corridor nets are skipped.</li>
     <li><b>Spread</b>: split ends sharing a point by direction of travel, a line of text apart where the face has room, else closer; repeat until nothing moves.</li>
     <li><b>Separate</b>: push apart legs on different boxes that run closer than a line of text (fans exempt).</li>
     <li><b>Loop</b>: put an outer self-loop's two ends a line of text apart about the middle of the widest run of its face that no other seat stands in.</li>
   </ol>
+  <p>After the six passes, no seat lies in an <a href="#decorations">occupied span</a>. An outer self-loop is seated in a run clear of them, and any other end inside one moves to its face's nearest free position, else to the free position on another face nearest its aim; a far end level with it on a parallel face moves with it.</p>
   <div data-fig="route-seats"></div>
 
   <h3>Nudging lanes apart</h3>
@@ -53,8 +55,8 @@
   </ul>
   <div data-fig="route-nudge"></div>
 
-  <h3>Trims and failures</h3>
-  <p><code>PathClear</code> shortens each route's first and last legs for arrowheads, by at most half the leg. A net fails if an end lies outside its region, if the frame's grid is too large, or if it is <b>unreachable</b> even with zero clearance. A failed net is drawn as a straight line with a <code>RouteDegraded</code> diagnostic.</p>
+  <h3>End legs and failures</h3>
+  <p>Every route ends on its border. <code>PathClear</code> is the least length a route's first and last legs keep, for the application's end glyph: the router's approach to a box runs out at least that far, and both nudging passes keep those legs at least that long. A net fails if an end lies outside its region, if the frame's grid is too large, or if it is <b>unreachable</b> even with zero clearance. A net only the walls seal off does not fail: it is <a href="#decorations">walled</a> and crosses a band. A failed net is drawn as a straight line with a <code>RouteDegraded</code> diagnostic.</p>
   <p>Only unreachable nets trigger the <b>inflation retry</b>, since the others do not depend on spacing: <code>rank_sep</code>, <code>node_sep</code> and <code>sub_sep</code> grow by 32 units on a copy of the profile and sizing and routing rerun, up to 8 times, keeping the least-degraded attempt. The cost is still scored under the caller's profile, and the search never accepts an inflated candidate: fitting only after widening everything is a bigger drawing, not a better one.</p>
 
   <h3>One end, four faces</h3>
@@ -322,7 +324,7 @@
         SX.tipOn(top, q.map(function (x) { return x.tip; }).join('<br><br>'));
       });
       if (k === 0) log.textContent = nets.length + ' nets planned between node centres (and port points, none in brew). The internal Pumping → Pumping is a loop drawn in Pumping\'s own room, not a net.';
-      else if (k === LAST) log.textContent = 'The routed polylines, nudged, trimmed one arrowhead short of each target border, labels placed.';
+      else if (k === LAST) log.textContent = 'The routed polylines, nudged, each ending on its border, labels placed.';
       else log.innerHTML = moves.length ? '<b>' + PASSES[k] + '</b> moved ' + moves.length + (moves.length === 1 ? ' end' : ' ends') + ':<br>' + moves.join('<br>') : '<b>' + PASSES[k] + '</b> moved nothing in brew.';
     } });
     f.ctrl.appendChild(st.el);

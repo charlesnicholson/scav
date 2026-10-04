@@ -66,7 +66,7 @@
   <p>Layout's only inputs are the model, a <b>profile</b> of 52 integer settings, and three tables of <b>space requests</b>. It never sees a font or a string.</p>
   <ul>
     <li><code>BoxSpace</code>, per state and submachine: the width its text needs, and four bands around its children: above, below, before and after.</li>
-    <li><code>PathClear</code>, per transition: how far to shorten each end for the arrowhead.</li>
+    <li><code>PathClear</code>, per transition: the least length of each end leg, for the arrowhead.</li>
     <li><code>PathBox</code>, zero or more per transition: a <a href="#labels">label</a> box to place along the route.</li>
   </ul>
   <p>The application measures its text with scav's metrics, fills the tables, and calls <code>scav_layout_run</code>, which rejects bad input rather than clamping it. It draws the returned geometry with scav's SVG back end or its own.</p>
@@ -261,7 +261,7 @@ SX.register('intro', function (sec) {
         choice: { states: [2], text: '<b>Choice pseudostate.</b> A diamond in its box; routes meet it at a face midpoint.' },
         final: { states: [11], text: '<b>Final pseudostate.</b> <code>trans Standby -&gt; * "descale overdue"</code> creates one, drawn as a ringed disc.' },
         label: { trans: [9], boxes: [9], text: '<b>Transition label.</b> A requested box (<code>PathBox</code>) hung off its route by a 96-unit leader. The dashed outline is the placed box.' },
-        internal: { trans: [6], boxes: [6], text: '<b>Internal transition.</b> It never crosses <code>Pumping</code>\'s border, so it is a loop inside the state: out of the right border from inside and back, with its label beside it, in room reserved below the state\'s contents.' }
+        internal: { trans: [6], boxes: [6], text: '<b>Internal transition.</b> It never crosses <code>Pumping</code>\'s border, so it is a loop inside the state: out of its right border from inside and back, with its label beside it, in room reserved inside the state.' }
       },
       tcp: {
         composite: { states: [4], text: '<b>Composite state.</b> <code>Established</code> holds <code>inbound</code> and <code>outbound</code>, which close independently, so it is concurrent.' },
