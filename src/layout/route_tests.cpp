@@ -5,12 +5,14 @@
 #include "layout/tests/pod_eq.h"
 
 #include "core/tests/corpus.h"
+#include "layout/cost.h"
 #include "layout/decompose.h"
 #include "layout/geom.h"
 #include "layout/label.h"
 #include "layout/order.h"
 #include "layout/router.h"
 #include "layout/size.h"
+#include "layout/trace.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 #include "scav_int.h"
@@ -20,6 +22,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -60,6 +63,86 @@ SizedLayout blank(Chart const &c, SubmachineOrders const &o) {
   z.sub.assign(c.submachines.size(), scav_rect{});
   z.node.assign(o.nodes.size(), scav_point{});
   return z;
+}
+
+// A chart from source, decomposed, ordered, sized and routed orthogonally at row 0 with
+// the search off and `pins` drawn as given.
+struct Drawn {
+  Chart c;
+  SplitGraph g;
+  SubmachineOrders o;
+  SizedLayout z;
+  Routes r;
+};
+
+void draw_text(std::string_view text,
+               scav_spaces const &s,
+               SearchPins const &pins,
+               Drawn &out) {
+  Loader loader;
+  REQUIRE(load_add(loader,
+                   reinterpret_cast<scav_byte const *>(text.data()),
+                   text.size(),
+                   "t.scav"));
+  REQUIRE(load_pending(loader).empty());
+  std::vector<Diagnostic> diags;
+  REQUIRE(load_finish(loader, out.c, diags));
+  scav_profile const p{ profile() };
+  out.g = decompose(out.c);
+  out.o = order_submachines(out.c, out.g, s, p, 0, pins);
+  REQUIRE(size_layout(out.c, out.g, out.o, s, p, out.z, diags));
+  OrthogonalRouter const ortho;
+  out.r = route_transitions(out.c,
+                            out.g,
+                            out.o,
+                            out.z,
+                            s,
+                            p,
+                            ortho,
+                            0,
+                            nullptr,
+                            nullptr,
+                            &pins);
+}
+
+uint32_t named(Chart const &c, std::string_view name) {
+  for (uint32_t st = 0; st < c.states.size(); ++st) {
+    if (chart_string(c, c.states[st].name) == name) { return st; }
+  }
+  return INVALID;
+}
+
+Wide orient(scav_point a, scav_point b, scav_point c) {
+  return ((Wide{ b.x } - a.x) * (Wide{ c.y } - a.y)) -
+         ((Wide{ b.y } - a.y) * (Wide{ c.x } - a.x));
+}
+
+// Whether `ab` and `cd` cross at a point inside both.
+bool crosses(scav_point a, scav_point b, scav_point c, scav_point d) {
+  Wide const d1{ orient(a, b, c) };
+  Wide const d2{ orient(a, b, d) };
+  Wide const d3{ orient(c, d, a) };
+  Wide const d4{ orient(c, d, b) };
+  if ((d1 == 0) || (d2 == 0) || (d3 == 0) || (d4 == 0)) { return false; }
+  return ((d1 > 0) != (d2 > 0)) && ((d3 > 0) != (d4 > 0));
+}
+
+bool strictly_inside(scav_point at, scav_rect const &r) {
+  return (at.x > r.x) && (at.x < (r.x + r.w)) && (at.y > r.y) && (at.y < (r.y + r.h));
+}
+
+// Whether `ab` has a point strictly inside `r`.
+bool enters(scav_point a, scav_point b, scav_rect const &r) {
+  scav_point const mid{ .x = a.x + ((b.x - a.x) / 2), .y = a.y + ((b.y - a.y) / 2) };
+  if (strictly_inside(a, r) || strictly_inside(b, r) || strictly_inside(mid, r)) {
+    return true;
+  }
+  scav_point const tl{ .x = r.x, .y = r.y };
+  scav_point const tr{ .x = r.x + r.w, .y = r.y };
+  scav_point const bl{ .x = r.x, .y = r.y + r.h };
+  scav_point const br{ .x = r.x + r.w, .y = r.y + r.h };
+  return crosses(a, b, tl, tr) || crosses(a, b, bl, br) || crosses(a, b, tl, bl) ||
+         crosses(a, b, tr, br);
 }
 
 }  // namespace
@@ -805,6 +888,7 @@ TEST_CASE("route: the unplaced count is the one the strip matching returned") {
   REQUIRE(r.placed.size() == 2);
   // The loop's label is seated in its room and never counted, which is exactly what
   // the strip matching reports back.
+  CHECK(r.unplaced == 0);
   std::vector<scav_rect> expected;
   CHECK(place_labels(c, z, s, r.route, r.points, profile(), expected) == r.unplaced);
 }
@@ -1298,4 +1382,212 @@ TEST_CASE("route: a state outside its composite's box is an obstacle where it li
   CHECK((f.in.obstacles[1] == z.state[y.v]));
   CHECK((f.in.obstacles[2] == z.state[s.v]));
   CHECK(frames_gathered_as_every_state(c, z, cache) == 1);
+}
+
+TEST_CASE("route: a self-transition on a pseudostate loops outside its glyph") {
+  // A choice, a junction and a history have no room inside, so each of their internal
+  // and local self-transitions is drawn as an external one is.
+  Drawn d;
+  draw_text(
+      "chart pseudo {\n"
+      "  state A, state Pick choice, state Hop junction, state Shallow history,\n"
+      "  trans * -> A, trans A -> Pick, trans Pick -> Hop, trans Hop -> Shallow,\n"
+      "  trans internal Pick -> Pick, trans internal Hop -> Hop,\n"
+      "  trans local Shallow -> Shallow,\n"
+      "}\n",
+      {},
+      {},
+      d);
+  uint32_t loops{ 0 };
+  for (uint32_t t = 0; t < d.c.transitions.size(); ++t) {
+    Transition const &tr{ d.c.transitions[t] };
+    if (tr.src != tr.dst) { continue; }
+    CAPTURE(t);
+    ++loops;
+    CHECK_FALSE(inner_loop(d.c, t));
+    CHECK(d.z.loop[tr.src.v].w == 0);
+    scav_rect const &box{ d.z.state[tr.src.v] };
+    scav_span const route{ d.r.route[t] };
+    REQUIRE(route.len >= 4);
+    for (uint32_t k = 0; (k + 1) < route.len; ++k) {
+      CHECK_FALSE(enters(d.r.points[route.off + k], d.r.points[route.off + k + 1], box));
+    }
+  }
+  CHECK(loops == 3);
+}
+
+TEST_CASE("route: a route inside a state goes round its loop room, never across a leg") {
+  // The port Child leaves by sits on S's bottom face, under the room of S's loop: the
+  // route to it keeps off the strip between the room and the border the legs cross.
+  // The requests are the reference builder's at this profile.
+  std::string_view const text{
+    "chart roomport {\n"
+    "  state S { state Child, trans * -> Child }, state B,\n"
+    "  trans * -> S, trans S/Child -> B, trans internal S -> S,\n"
+    "}\n"
+  };
+  Drawn probe;
+  draw_text(text, {}, {}, probe);
+  std::vector<scav_box_space> rows(probe.c.states.size());
+  for (uint32_t st = 0; st < probe.c.states.size(); ++st) {
+    if (probe.c.states[st].kind == StateKind::Normal) { rows[st].h_before = 397; }
+  }
+  rows[named(probe.c, "Child")].min_w = 832;
+  std::vector<scav_path_box> const boxes{
+    { .subject = 2, .w = 474, .h = 269, .order = 0 },
+    { .subject = 3, .w = 1741, .h = 269, .order = 0 }
+  };
+  scav_spaces const s{ .box_state = rows.data(),
+                       .n_box_state = static_cast<uint32_t>(rows.size()),
+                       .box_state_stride = static_cast<uint32_t>(sizeof(scav_box_space)),
+                       .path_box = boxes.data(),
+                       .n_path_box = static_cast<uint32_t>(boxes.size()),
+                       .path_box_stride = static_cast<uint32_t>(sizeof(scav_path_box)) };
+  SearchPins const pins{ .sides = {
+                             { .trans = TransId{ 2 }, .leg = 0, .end = 1, .side = 3 } } };
+  Drawn d;
+  draw_text(text, s, pins, d);
+  REQUIRE(inner_loop(d.c, 3));
+  scav_span const loop{ d.r.route[3] };
+  REQUIRE(loop.len == 4);
+  scav_point const *const leg{ d.r.points.data() + loop.off };
+  for (uint32_t t = 0; t < 3; ++t) {
+    scav_span const route{ d.r.route[t] };
+    for (uint32_t k = 0; (k + 1) < route.len; ++k) {
+      CAPTURE(t);
+      CAPTURE(k);
+      scav_point const a{ d.r.points[route.off + k] };
+      scav_point const b{ d.r.points[route.off + k + 1] };
+      CHECK_FALSE(crosses(a, b, leg[0], leg[1]));
+      CHECK_FALSE(crosses(a, b, leg[2], leg[3]));
+    }
+  }
+}
+
+TEST_CASE("route: a nudge leaves an outer loop's corridor and its arrowhead's leg") {
+  // The loop and the port route run under S a little apart; the chart-wide nudge spreads
+  // them, and the loop's last leg keeps the clear its arrowhead was trimmed by. The
+  // requests are the reference builder's at this profile.
+  scav_profile const p{ profile() };
+  int32_t const head{ (3 * p.pad) / 4 };
+  Drawn probe;
+  std::string_view const text{
+    "chart portloop {\n"
+    "  state A, state S { state C, trans * -> C },\n"
+    "  trans * -> A, trans A -> S/C, trans S -> S,\n"
+    "}\n"
+  };
+  draw_text(text, {}, {}, probe);
+  std::vector<scav_box_space> rows(probe.c.states.size());
+  for (uint32_t st = 0; st < probe.c.states.size(); ++st) {
+    if (probe.c.states[st].kind == StateKind::Normal) { rows[st].h_before = 397; }
+  }
+  std::vector<scav_path_box> const boxes{
+    { .subject = 2, .w = 359, .h = 269, .order = 0 },
+    { .subject = 3, .w = 704, .h = 269, .order = 0 }
+  };
+  std::vector<scav_path_clear> const clears(probe.c.transitions.size(),
+                                            { .src = 0, .dst = head });
+  scav_spaces const s{ .box_state = rows.data(),
+                       .n_box_state = static_cast<uint32_t>(rows.size()),
+                       .box_state_stride = static_cast<uint32_t>(sizeof(scav_box_space)),
+                       .path_clear = clears.data(),
+                       .n_path_clear = static_cast<uint32_t>(clears.size()),
+                       .path_clear_stride = static_cast<uint32_t>(sizeof(scav_path_clear)),
+                       .path_box = boxes.data(),
+                       .n_path_box = static_cast<uint32_t>(boxes.size()),
+                       .path_box_stride = static_cast<uint32_t>(sizeof(scav_path_box)) };
+  SearchPins const pins{
+    .faces = { { .trans = TransId{ 3 }, .leg = 0, .end = 0, .face = 3 },
+               { .trans = TransId{ 3 }, .leg = 0, .end = 1, .face = 3 } },
+    .sides = { { .trans = TransId{ 2 }, .leg = 1, .end = 0, .side = 3 } }
+  };
+  Drawn d;
+  draw_text(text, s, pins, d);
+  scav_rect const &box{ d.z.state[named(d.c, "S")] };
+  scav_span const loop{ d.r.route[3] };
+  REQUIRE(loop.len == 4);
+  scav_point const *const pt{ d.r.points.data() + loop.off };
+  CHECK(pt[0].y == (box.y + box.h));
+  CHECK((pt[1].y - pt[0].y) >= (2 * p.pad));
+  CHECK((pt[2].y - pt[3].y) > head);
+}
+
+TEST_CASE("route: a state lined on its trailing face loops out of its leading one") {
+  // A trail band and no lead band: the room sits against the leading pad, the loop leaves
+  // the left border and returns to it, and its label stands beyond the far leg.
+  scav_profile const p{ profile() };
+  std::string_view const text{
+    "chart lined {\n"
+    "  state A, state B,\n"
+    "  trans * -> A, trans A -> B, trans internal A -> A,\n"
+    "}\n"
+  };
+  Drawn probe;
+  draw_text(text, {}, {}, probe);
+  uint32_t const a{ named(probe.c, "A") };
+  REQUIRE(a != INVALID);
+  std::vector<scav_box_space> rows(probe.c.states.size());
+  rows[a].w_after = 3 * p.font_size_grid;
+  std::vector<scav_path_box> const boxes{
+    { .subject = 2, .w = 4 * p.font_size_grid, .h = p.font_size_grid, .order = 0 }
+  };
+  scav_spaces const s{ .box_state = rows.data(),
+                       .n_box_state = static_cast<uint32_t>(rows.size()),
+                       .box_state_stride = static_cast<uint32_t>(sizeof(scav_box_space)),
+                       .path_box = boxes.data(),
+                       .n_path_box = static_cast<uint32_t>(boxes.size()),
+                       .path_box_stride = static_cast<uint32_t>(sizeof(scav_path_box)) };
+  Drawn d;
+  draw_text(text, s, {}, d);
+  REQUIRE(inner_loop(d.c, 2));
+  scav_rect const &box{ d.z.state[a] };
+  scav_rect const &trail{ d.z.trail[a] };
+  CHECK(loop_mirrored(d.z, a));
+  CHECK(d.z.loop[a].x == d.z.lead[a].x);
+  scav_span const loop{ d.r.route[2] };
+  REQUIRE(loop.len == 4);
+  scav_point const *const pt{ d.r.points.data() + loop.off };
+  CHECK(pt[0].x == box.x);
+  CHECK(pt[3].x == box.x);
+  CHECK(pt[0].y < pt[3].y);
+  for (uint32_t k = 1; k < 3; ++k) { CHECK(strictly_inside(pt[k], box)); }
+  for (uint32_t k = 0; k < 3; ++k) { CHECK_FALSE(enters(pt[k], pt[k + 1], trail)); }
+  REQUIRE(d.r.placed.size() == 1);
+  scav_rect const &label{ d.r.placed[0] };
+  CHECK(label.x > pt[1].x);
+  CHECK((label.x + label.w) <= trail.x);
+  CHECK(cost_terms(d.c, d.g, d.z, d.r, s, p).through_band == 0);
+}
+
+TEST_CASE("route: an outer loop's face is traced with its segment and transition") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  build_trans(c, b, a, TransKind::External, {});
+  build_trans(c, a, a, TransKind::External, {});
+
+  SplitGraph const g{ decompose(c) };
+  SubmachineOrders const o{ empty_orders(c, g) };
+  SizedLayout z{ blank(c, o) };
+  z.state[a.v] = { .x = 4000, .y = 4000, .w = 1600, .h = 640 };
+  z.state[b.v] = { .x = 0, .y = 4000, .w = 1600, .h = 640 };
+  z.sub[root.v] = { .x = 0, .y = 0, .w = 10000, .h = 10000 };
+
+  LayoutTrace trace;
+  trace_sink_set(&trace);
+  OrthogonalRouter const ortho;
+  Routes const r{ route_transitions(c, g, o, z, {}, profile(), ortho) };
+  trace_sink_set(nullptr);
+  uint32_t faced{ 0 };
+  for (TraceEvent const &e : trace.events) {
+    if (e.kind != TraceKind::LoopFaced) { continue; }
+    ++faced;
+    CHECK(e.port.trans == 1);
+    CHECK(e.port.seg == g.trans_segments[1].off);
+    CHECK(e.port.side == 1);
+  }
+  CHECK(faced == 1);
+  CHECK(r.degraded() == 0);
 }

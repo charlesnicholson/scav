@@ -144,7 +144,9 @@ void nudge_lanes(scav_rect const &region,
                  int32_t clear,
                  std::vector<scav_span> const &nets,
                  std::vector<scav_point> &points,
-                 NudgeStats &stats) {
+                 NudgeStats &stats,
+                 scav_path_clear const *keep,
+                 uint32_t n_keep) {
   if (gap <= 0) { return; }
   uint32_t const net_count{ static_cast<uint32_t>(nets.size()) };
 
@@ -194,16 +196,21 @@ void nudge_lanes(scav_rect const &region,
         Wide const high_leg{ (horizontal ? Wide{ to.y } : Wide{ to.x }) - m.at };
         m.low_dir = sign(low_leg);
         m.high_dir = sign(high_leg);
-        // The two dragged legs, signed across the lane; each caps the travel one
-        // short of turning itself round.
+        // The two dragged legs, signed across the lane; each caps the travel one short of
+        // turning itself round, and a net's first or last leg its `keep` shorter still.
         Wide const u{ Wide{ m.at } - (horizontal ? a.y : a.x) };
         Wide const v{ (horizontal ? Wide{ d.y } : Wide{ d.x }) - m.at };
+        bool const kept_net{ (keep != nullptr) && (net < n_keep) };
+        bool const first_leg{ kept_net && (k == 1) };
+        bool const last_leg{ kept_net && ((k + 3) == span.len) };
+        Wide const keep_u{ 1 + (first_leg ? imax(keep[net].src, 0) : 0) };
+        Wide const keep_v{ 1 + (last_leg ? imax(keep[net].dst, 0) : 0) };
         m.up = UNBOUNDED;
         m.down = UNBOUNDED;
-        if (u >= 0) { m.up = imin(m.up, u - 1); }
-        if (u <= 0) { m.down = imin(m.down, -u - 1); }
-        if (v >= 0) { m.down = imin(m.down, v - 1); }
-        if (v <= 0) { m.up = imin(m.up, -v - 1); }
+        if (u >= 0) { m.up = imin(m.up, u - keep_u); }
+        if (u <= 0) { m.down = imin(m.down, -u - keep_u); }
+        if (v >= 0) { m.down = imin(m.down, v - keep_v); }
+        if (v <= 0) { m.up = imin(m.up, -v - keep_v); }
         m.up = imax(m.up, Wide{ 0 });
         m.down = imax(m.down, Wide{ 0 });
         vec_push_back(members, m);

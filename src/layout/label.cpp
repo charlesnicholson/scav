@@ -1000,8 +1000,10 @@ uint32_t place_labels_from(Chart const &c,
       }
     }
     if (looped && (r.len >= 3)) {
-      // Stacked beside the loop's far leg, `gap` before it, in the room its row reserved.
-      out[i] = { .x = points[r.off + 1].x - loop_gap(p) - box.w,
+      // Stacked beside the loop's far leg, `gap` beyond it, in the room its row reserved.
+      int32_t const leg{ points[r.off + 1].x };
+      bool const mirrored{ loop_mirrored(z, c.transitions[box.subject].src.v) };
+      out[i] = { .x = mirrored ? (leg + loop_gap(p)) : (leg - loop_gap(p) - box.w),
                  .y = loop_y,
                  .w = box.w,
                  .h = box.h };

@@ -11,6 +11,7 @@
 
 #include "doctest.h"
 
+#include <array>
 #include <cstdint>
 #include <utility>
 #include <vector>
@@ -2853,4 +2854,81 @@ TEST_CASE("ortho: the radix open list pops in the order one heap over every entr
   }
   CHECK(wrong == 0);
   CHECK(below > 0);
+}
+
+TEST_CASE("ortho: a loop's seats keep to one side of a point end on its face") {
+  // A port in the middle of the right face: both seats take the run to one side of it,
+  // a pitch clear, rather than straddling it about the face's middle.
+  int32_t const clear{ 50 };
+  int32_t const pitch{ 200 };
+  std::vector<scav_rect> const boxes{ rect(0, 0, 2000, 1000) };
+  std::vector<int32_t> const corner{ 0 };
+  std::vector<RouteNet> const nets{ { .src = pt(1000, 500),
+                                      .dst = pt(1000, 500),
+                                      .src_obstacle = 0,
+                                      .dst_obstacle = 0,
+                                      .loop = 256 },
+                                    { .src = pt(2000, 500), .dst = pt(3000, 500) } };
+  std::vector<scav_point> at{ pt(2000, 400), pt(2000, 600), pt(3000, 500), pt(2000, 500) };
+  ortho_seat_loops(nets, boxes, corner, clear, pitch, at);
+  CHECK(at[0].x == 2000);
+  CHECK(at[1].x == 2000);
+  CHECK((at[0].y < 500) == (at[1].y < 500));
+  for (uint32_t end = 0; end < 2; ++end) {
+    CAPTURE(end);
+    CHECK(imax(at[end].y - 500, 500 - at[end].y) >= pitch);
+  }
+  CHECK(imax(at[0].y - at[1].y, at[1].y - at[0].y) == pitch);
+}
+
+TEST_CASE("ortho: an unpinned loop takes its box's least-used face, the right on a tie") {
+  // Point ends on the faces in turn: right, then bottom, then top are used up, and with
+  // one on every face the tie goes back to the right.
+  scav_rect const box{ rect(2000, 2000, 1000, 600) };
+  std::array<scav_point, 4> const mid{ pt(2000, 2300),
+                                       pt(3000, 2300),
+                                       pt(2500, 2000),
+                                       pt(2500, 2600) };
+  std::array<scav_point, 4> const away{ pt(0, 2300),
+                                        pt(5000, 2300),
+                                        pt(2500, 0),
+                                        pt(2500, 5000) };
+  struct Case {
+    std::vector<uint32_t> used;
+    uint32_t face;
+  };
+  std::vector<Case> const cases{ { .used = {}, .face = 1 },
+                                 { .used = { 1 }, .face = 3 },
+                                 { .used = { 1, 3 }, .face = 2 },
+                                 { .used = { 1, 3, 2 }, .face = 0 },
+                                 { .used = { 0, 1, 2, 3 }, .face = 1 } };
+  for (Case const &k : cases) {
+    CAPTURE(k.used.size());
+    RouteInput in;
+    in.profile = profile();
+    in.region = rect(0, 0, 5000, 5000);
+    in.obstacles.push_back(box);
+    in.nets.push_back({ .src = pt(2500, 2300),
+                        .dst = pt(2500, 2300),
+                        .src_obstacle = 0,
+                        .dst_obstacle = 0,
+                        .loop = 256 });
+    for (uint32_t const face : k.used) {
+      in.nets.push_back({ .src = mid[face], .dst = away[face] });
+    }
+    RouteOutput out;
+    ORTHO.route(in, out);
+    REQUIRE(out.net_points.size() == in.nets.size());
+    scav_span const loop{ out.net_points[0] };
+    REQUIRE(loop.len >= 2);
+    std::array<scav_point, 2> const ends{ out.points[loop.off],
+                                          out.points[loop.off + loop.len - 1] };
+    for (scav_point const &e : ends) {
+      std::array<bool, 4> const on{ e.x == box.x,
+                                    e.x == (box.x + box.w),
+                                    e.y == box.y,
+                                    e.y == (box.y + box.h) };
+      CHECK(on[k.face]);
+    }
+  }
 }

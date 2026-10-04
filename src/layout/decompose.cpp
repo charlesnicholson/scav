@@ -44,7 +44,8 @@ StateId enclosing_state(Chart const &c, StateId s) {
 bool inner_loop(Chart const &c, uint32_t t) {
   Transition const &tr{ c.transitions[t] };
   return (tr.live != 0) && (tr.src == tr.dst) && (tr.src.v < c.states.size()) &&
-         (tr.kind != TransKind::External) && (c.states[tr.src.v].live != 0);
+         (tr.kind != TransKind::External) && (c.states[tr.src.v].live != 0) &&
+         (c.states[tr.src.v].kind == StateKind::Normal);
 }
 
 bool ancestor_or_self(Chart const &c, StateId ancestor, StateId of) {

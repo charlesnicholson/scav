@@ -704,8 +704,10 @@ void ortho_seat_loops(std::vector<RouteNet> const &nets,
       for (uint32_t end = 0; (m != n) && (end < 2); ++end) {
         uint32_t const box{ (end == 0) ? nets[m].src_obstacle : nets[m].dst_obstacle };
         uint32_t const other{ (2 * m) + end };
-        scav_point const seat{ at[other] };
-        if ((box == b) && (face_of(seat, r) == face)) {
+        bool const point{ box >= boxes.size() };  // an end naming no box is its own point
+        scav_point const own{ (end == 0) ? nets[m].src : nets[m].dst };
+        scav_point const seat{ point ? own : at[other] };
+        if (((box == b) || point) && (face_of(seat, r) == face)) {
           vec_push_back(taken, along_y ? seat.y : seat.x);
         }
       }
@@ -1444,8 +1446,8 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
         (net.src_obstacle < in.obstacles.size())) {
       trace_emit(
           { .kind = TraceKind::LoopFaced,
-            .port = { .seg = INVALID,
-                      .trans = INVALID,
+            .port = { .seg = net.seg,
+                      .trans = net.trans,
                       .leg = n,
                       .side = face_of(seat[src_slot], in.obstacles[net.src_obstacle]) } });
     }

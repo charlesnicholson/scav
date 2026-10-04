@@ -165,7 +165,8 @@ void ortho_separate_attachments(std::vector<RouteNet> const &nets,
                                 std::vector<scav_point> &at);
 
 // A self-loop whose two ends share a face takes the widest run of that face no other
-// seat stands in, its ends `pitch` apart about the run's middle where it holds that.
+// seat or point end stands in, its ends `pitch` apart about the run's middle where it
+// holds that.
 void ortho_seat_loops(std::vector<RouteNet> const &nets,
                       std::vector<scav_rect> const &boxes,
                       std::vector<int32_t> const &corner,

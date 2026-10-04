@@ -2701,10 +2701,12 @@ bool size_pass(Chart const &c,
                             (((packed_h > 0) && (room.h > 0)) ? p.sub_sep : 0) };
       int32_t const body{ (room.h > 0) ? ((room_y + room.h) - sy) : packed_h };
       int32_t const centre_end{ (ix + iw) - b.w_after };
-      out.loop[i] = { .x = centre_end - room.w, .y = room_y, .w = room.w, .h = room.h };
       out.lead[i] = { .x = ix, .y = sy, .w = b.w_before, .h = body };
       out.trail[i] = { .x = centre_end, .y = sy, .w = b.w_after, .h = body };
       out.after[i] = { .x = ix, .y = sy + body, .w = iw, .h = b.h_after };
+      int32_t const room_x{ loop_mirrored(out, i) ? (ix + b.w_before)
+                                                  : (centre_end - room.w) };
+      out.loop[i] = { .x = room_x, .y = room_y, .w = room.w, .h = room.h };
     }
   }
   return true;
@@ -2844,7 +2846,20 @@ std::array<scav_rect, 5> state_walls(SizedLayout const &z, uint32_t st) {
     side.h = (bottom.y + bottom.h) - top.y;
     return side;
   };
-  return { top, bottom, sealed(row(z.lead)), sealed(row(z.trail)), row(z.loop) };
+  scav_rect room{ row(z.loop) };
+  scav_rect const box{ row(z.state) };
+  if ((room.w > 0) && (room.h > 0)) {  // out to the border the loops' legs reach
+    bool const mirrored{ loop_mirrored(z, st) };
+    int32_t const right{ mirrored ? (room.x + room.w) : (box.x + box.w) };
+    room.x = mirrored ? box.x : room.x;
+    room.w = right - room.x;
+  }
+  return { top, bottom, sealed(row(z.lead)), sealed(row(z.trail)), room };
+}
+
+bool loop_mirrored(SizedLayout const &z, uint32_t st) {
+  return (st < z.lead.size()) && (st < z.trail.size()) && (z.trail[st].w > 0) &&
+         (z.lead[st].w == 0);
 }
 
 bool face_lined(scav_spaces const &s, uint32_t state, uint32_t face) {

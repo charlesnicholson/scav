@@ -246,6 +246,8 @@ void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out)
         break;
       }
       case TraceKind::LoopFaced:
+        j.kv("seg", e.port.seg);
+        j.kv("trans", e.port.trans);
         j.kv("net", e.port.leg);
         j.kv("side", e.port.side);
         break;

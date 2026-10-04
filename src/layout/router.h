@@ -43,6 +43,7 @@ struct RouteNet {
   // A self-loop's reach: its corridor runs this far out from each of its two seats,
   // on its box's least-used face unless a face is named.
   int32_t loop{ 0 };
+  uint32_t trans{ INVALID }, seg{ INVALID };  // the caller's ids, named by the trace only
 };
 
 struct RouteInput {

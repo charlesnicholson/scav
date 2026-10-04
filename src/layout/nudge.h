@@ -4,6 +4,7 @@
 // A lane is a run of collinear overlapping interior segments across the nets of
 // one frame; its members spread onto integer offsets, one per bundle.
 
+#include "scav/scav_layout_c.h"
 #include "scav/scav_types.h"
 
 #include <cstdint>
@@ -24,7 +25,8 @@ struct NudgeStats {
 // point and `bounds` is parallel to `nets`: the box that net's own frame is
 // drawn in, which no displacement of it may cross. One box repeated is a frame
 // nudging itself; one box per net is the chart-wide pass, where a lane's room
-// is what every member's frame allows (11.10a).
+// is what every member's frame allows (11.10a). `keep` is parallel to the first `n_keep`
+// nets: a net's first leg stays `src` longer than one unit, and its last leg `dst`.
 void nudge_lanes(scav_rect const &region,
                  std::vector<scav_rect> const &bounds,
                  std::vector<scav_rect> const &obstacles,
@@ -32,7 +34,9 @@ void nudge_lanes(scav_rect const &region,
                  int32_t clear,
                  std::vector<scav_span> const &nets,
                  std::vector<scav_point> &points,
-                 NudgeStats &stats);
+                 NudgeStats &stats,
+                 scav_path_clear const *keep = nullptr,
+                 uint32_t n_keep = 0);
 
 }  // namespace scav
 

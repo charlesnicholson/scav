@@ -426,19 +426,21 @@ void route_transitions(Routes &out,
     uint32_t const first_slot{ static_cast<uint32_t>(out.slots.size()) };
 
     if (inner_loop(c, t)) {
-      // Out of the state's inner trailing face and back, in this transition's row of
-      // the state's loop room.
+      // Out of the state's inner trailing face and back, or its leading face where
+      // `loop_mirrored`, in this transition's row of the state's loop room.
       scav_rect const r{ z.state[tr.src.v] };
       scav_rect const row{ loop_row[t] };
+      bool const mirrored{ loop_mirrored(z, tr.src.v) };
       int32_t const lane{ imin(loop_lane(p), row.h) };
       int32_t const ya{ row.y + floor_div(row.h - lane, 2) };
-      int32_t const x{ (row.x + row.w) - loop_reach(p) };
-      int32_t const right{ r.x + r.w };
+      int32_t const x{ mirrored ? (row.x + loop_reach(p))
+                                : ((row.x + row.w) - loop_reach(p)) };
+      int32_t const border{ mirrored ? r.x : (r.x + r.w) };
       loop_span[t] = { .off = static_cast<uint32_t>(loop_points.size()), .len = 4 };
-      vec_push_back(loop_points, { .x = right, .y = ya });
+      vec_push_back(loop_points, { .x = border, .y = ya });
       vec_push_back(loop_points, { .x = x, .y = ya });
       vec_push_back(loop_points, { .x = x, .y = ya + lane });
-      vec_push_back(loop_points, { .x = right, .y = ya + lane });
+      vec_push_back(loop_points, { .x = border, .y = ya + lane });
     } else if (tr.src == tr.dst) {
       // Out of a face and back: both ends name the state, and the router seats them
       // on its least-used face.
@@ -669,6 +671,8 @@ void route_transitions(Routes &out,
         net.dst_face = faces[1][pn.seg];
       }
       net.loop = pn.loop;
+      net.trans = g.segments[pn.seg].trans.v;
+      net.seg = pn.seg;
       if (pn.seg < z.lean.size()) { net.lean = z.lean[pn.seg]; }
       trace_emit({ .kind = TraceKind::NetPlanned,
                    .net = { .seg = pn.seg,
@@ -895,7 +899,9 @@ void route_transitions(Routes &out,
                 margin,
                 out.route,
                 out.points,
-                out.nudged);
+                out.nudged,
+                s.path_clear,  // a trimmed end leg keeps at least its clear
+                (s.path_clear != nullptr) ? s.n_path_clear : 0);
   }
 
   if (labels) { label_routes(out, c, z, s, p, was); }

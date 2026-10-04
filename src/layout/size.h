@@ -79,15 +79,21 @@ struct SizeRecord {
 };
 
 // A state's bands as walls, then its loop room: the side bands run from the top band's
-// top to the bottom band's bottom, so no seam opens where two bands meet.
+// top to the bottom band's bottom, so no seam opens where two bands meet, and the room
+// runs on to the border its loops leave by.
 std::array<scav_rect, 5> state_walls(SizedLayout const &z, uint32_t st);
+
+// Whether a state's loop room sits at the leading end of its interior and its inner loops
+// leave by its leading border: a band lines its trailing face and none its leading one.
+bool loop_mirrored(SizedLayout const &z, uint32_t st);
 
 // Whether a band of `state` lines `face`, 0 left, 1 right, 2 top, 3 bottom: no port sits
 // there.
 bool face_lined(scav_spaces const &s, uint32_t state, uint32_t face);
 
 // One inner loop's row in its state's room: rows stack in transition order, the far leg
-// runs `reach` in from the room's trailing edge, and the label sits `gap` before that leg.
+// runs `reach` in from the room's edge its loop leaves by, and the label sits `gap` beyond
+// that leg.
 struct LoopRow {
   int32_t label_w, label_h, h;
 };

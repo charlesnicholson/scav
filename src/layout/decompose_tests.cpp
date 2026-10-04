@@ -658,3 +658,32 @@ TEST_CASE("split: each graph has its own serial and a label segment per transiti
   CHECK(g1.trans_label[0] == segs_of(g1, 0).off + 1);  // the leg in `root`
   CHECK(g1.trans_label[1] == INVALID);
 }
+
+TEST_CASE("split: an inner loop is a normal state's internal or local self-loop") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  struct Named {
+    char const *name;
+    StateKind kind;
+  };
+  for (Named const at : { Named{ .name = "N", .kind = StateKind::Normal },
+                          Named{ .name = "C", .kind = StateKind::Choice },
+                          Named{ .name = "J", .kind = StateKind::Junction },
+                          Named{ .name = "H", .kind = StateKind::History },
+                          Named{ .name = "D", .kind = StateKind::DeepHistory } }) {
+    StateId const s{ build_state(c, root, at.name, at.kind, {}) };
+    for (TransKind const how :
+         { TransKind::External, TransKind::Internal, TransKind::Local }) {
+      build_trans(c, s, s, how, {});
+    }
+  }
+  SplitGraph const g{ decompose(c) };
+  for (uint32_t t = 0; t < c.transitions.size(); ++t) {
+    CAPTURE(t);
+    Transition const &tr{ c.transitions[t] };
+    bool const normal{ c.states[tr.src.v].kind == StateKind::Normal };
+    CHECK(inner_loop(c, t) == (normal && (tr.kind != TransKind::External)));
+    CHECK(segs_of(g, t).len == 1);
+    CHECK(g.trans_label[t] == (inner_loop(c, t) ? INVALID : segs_of(g, t).off));
+  }
+}
