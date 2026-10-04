@@ -1,8 +1,8 @@
 #ifndef SCAV_CORE_CORE_INTERNAL_H_INCLUDED
 #define SCAV_CORE_CORE_INTERNAL_H_INCLUDED
 
-// The front end behind parse_document, and the helpers core's layers share.
-// Private by location: nothing outside src/ can reach this path.
+// The front end behind parse_document, and helpers shared by core's layers.
+// Private: only code under src/ can include it.
 
 #include "scav/scav_core.h"
 #include "scav/scav_types.h"
@@ -18,8 +18,7 @@ namespace scav {
 
 // Narrowing =================================================================
 
-// size_t stops at the API boundary: an entry point takes one, narrows it, and
-// hands uint32_t inward.
+// Entry points take size_t and narrow it; everything inward uses uint32_t.
 
 // True when `value` round-trips into T, leaving `out` written only then.
 template <typename T, typename U>
@@ -31,8 +30,7 @@ bool narrow(U value, T &out) {
   return true;
 }
 
-// For a bound already known to hold. Clamps rather than wrapping, so a mistake
-// is a short read and not a 4-gigabyte one.
+// For a bound already known to hold. Clamps to T's maximum on overflow.
 template <typename T, typename U>
 T narrow_clamp(U value) {
   static_assert(std::is_unsigned_v<T> && std::is_unsigned_v<U>, "unsigned only");
@@ -42,8 +40,8 @@ T narrow_clamp(U value) {
 
 // String pool ===============================================================
 
-// Appends as met, never deduplicates. The empty string returns the empty ref
-// and grows the pool by nothing.
+// Appends `text`, keeping duplicates. The empty string returns the empty ref and
+// leaves the pool unchanged.
 StrRef string_pool_add(StringPool &pool, std::string_view text);
 
 // Source text ===============================================================
@@ -59,8 +57,8 @@ bool source_text_normalize(scav_byte const *bytes,
                            std::vector<scav_byte> &out,
                            std::vector<Diagnostic> &diags);
 
-// Codepoint at a time, for callers working on decoded escapes rather than on a
-// whole document.
+// Decodes one codepoint at `at` into `cp` and `width`. False on invalid UTF-8, with
+// the cause in `err` and `width` 1.
 bool source_text_utf8_decode(scav_byte const *bytes,
                              size_t len,
                              size_t at,
@@ -86,8 +84,8 @@ std::string_view source_text_view(std::vector<scav_byte> const &bytes, Span span
 // Bytes in, one flat token vector out. The vector is scratch, freed after the
 // parse.
 
-// No keyword kinds. `s`, `m` and `t` are keywords only in statement-leading
-// position, which the lexer cannot see from where it stands.
+// No keyword kinds; keywords lex as Ident. The parser treats `s`, `m` and `t` as
+// keywords only in statement-leading position.
 enum class TokKind : uint32_t {
   End,  // one sentinel, always last, so lookahead needs no bounds check
 
@@ -113,8 +111,8 @@ struct Token {
   TokKind kind;
 };
 
-// Comments travel beside the token stream rather than in it. The two flags are
-// what the printer needs to classify a comment's position.
+// A comment, kept in a list beside the token stream. The two flags classify its
+// position for the printer.
 struct LexComment {
   Span src;              // includes the "//", excludes the newline
   uint32_t code_before;  // non-whitespace earlier on the same line
@@ -136,12 +134,12 @@ bool lex_source(scav_byte const *bytes,
 
 char const *lex_token_kind_name(TokKind kind);
 
-// Reserved in every position. `choice`, `history`, `as`, `kind`, `s`, `m` and
-// `t` are absent: they are contextual, so a state may be named one.
+// True for a word reserved in every position. Contextual words (`choice`, `history`,
+// `as`, `kind`, `s`, `m`, `t`) return false and may name a state.
 bool lex_is_reserved_word(std::string_view text);
 
-// `lexeme` includes its delimiters. Applies escapes, dedents a raw string to
-// its closing column, and NFC-folds, since a \u escape can decompose.
+// `lexeme` includes its delimiters. Applies escapes, dedents a raw string to its
+// closing column, and NFC-folds the result.
 bool lex_decode_string_literal(scav_byte const *bytes,
                                Span lexeme,
                                DocId doc,
@@ -150,8 +148,8 @@ bool lex_decode_string_literal(scav_byte const *bytes,
 
 // Parser ====================================================================
 
-// LL(1) descent with the frames in a heap vector rather than the call stack, so
-// a hostile nesting depth is a diagnostic instead of a stack overflow.
+// LL(1) descent with frames on a heap vector; nesting past `max_depth` reports
+// DepthLimitExceeded.
 
 // Bytes must already be normalized. `name` is what a diagnostic quotes.
 bool parse_tokens(scav_byte const *bytes,

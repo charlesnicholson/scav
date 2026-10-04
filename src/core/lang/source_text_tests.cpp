@@ -65,8 +65,7 @@ TEST_CASE("normalize: an empty input is valid and empty") {
 }
 
 TEST_CASE("normalize: a document too large for a span is rejected, not truncated") {
-  // The check runs before the pointer is touched, which is why nullptr is safe
-  // here and why the failure is a diagnostic rather than a short read.
+  // The size check runs before the pointer is read, so nullptr is safe.
   if constexpr (sizeof(size_t) > 4) {
     std::vector<scav_byte> out;
     std::vector<Diagnostic> diags;
@@ -109,8 +108,7 @@ TEST_CASE("normalize: a two-byte prefix of a BOM is an incomplete sequence") {
 }
 
 TEST_CASE("normalize: a character that only starts like a BOM is content") {
-  // U+FEE0 encodes as EF BB A0, so the signature check has to read all three
-  // bytes. Matching on the first two would eat a real character.
+  // U+FEE0 encodes as EF BB A0; the BOM check matches all three bytes.
   std::string const looks_like{ encode(0xFEE0) };
   REQUIRE(looks_like.size() == 3);
   CHECK(looks_like[0] == '\xef');
@@ -150,8 +148,8 @@ TEST_CASE("normalize: a run ends at a multi-byte character and resumes after it"
 }
 
 TEST_CASE("normalize: a CR or a multi-byte character can open the document") {
-  // Nothing precedes them, so the run is empty and the single-byte path has to
-  // make progress on its own or the loop never advances.
+  // Nothing precedes them, so the run is empty and the single-byte path
+  // advances the loop.
   CHECK(normalize("\r\nabc").text == "\nabc");
   CHECK(normalize("\rabc").text == "\nabc");
   std::string const eacute{ encode(0x00E9) };
@@ -161,8 +159,7 @@ TEST_CASE("normalize: a CR or a multi-byte character can open the document") {
 }
 
 TEST_CASE("normalize: an invalid sequence after a long run leaves nothing behind") {
-  // The run is already copied when the decode fails, so `out` has to be cleared:
-  // a truncated document that parses is worse than one that is refused.
+  // The run is already copied when the decode fails; `out` is cleared on failure.
   Normalized const r{ normalize(std::string(10000, 'a') + "\xc3") };
   CHECK_FALSE(r.ok);
   CHECK(r.text.empty());
@@ -179,8 +176,7 @@ TEST_CASE("normalize: CRLF, lone CR and mixed endings all fold to LF") {
 }
 
 TEST_CASE("normalize: a CR inside a string literal folds too") {
-  // Normalization is whole-file and runs before the lexer, which is why the
-  // lexer never has to know CR exists.
+  // Normalization runs on the whole file before lexing.
   CHECK(normalize("\"a\r\nb\"").text == "\"a\nb\"");
 }
 
@@ -222,7 +218,7 @@ TEST_CASE("utf8: rejects every ill-formed shape by name") {
   CHECK(decode_error("\xe0\xa0") == DiagCode::Utf8Truncated);
   CHECK(decode_error("\xf0\x90\x80") == DiagCode::Utf8Truncated);
   CHECK(decode_error("\xc2\x41") == DiagCode::Utf8InvalidByte);  // not a continuation
-  CHECK(decode_error("\xc0\x80") == DiagCode::Utf8Overlong);     // NUL the long way
+  CHECK(decode_error("\xc0\x80") == DiagCode::Utf8Overlong);     // overlong NUL
   CHECK(decode_error("\xc1\xbf") == DiagCode::Utf8Overlong);
   CHECK(decode_error("\xe0\x80\x80") == DiagCode::Utf8Overlong);
   CHECK(decode_error("\xf0\x80\x80\x80") == DiagCode::Utf8Overlong);
@@ -255,7 +251,7 @@ TEST_CASE("normalize: an invalid sequence fails the whole document") {
   CHECK(r.text.empty());
   REQUIRE(r.diags.size() == 1);
   CHECK(r.diags[0].code == DiagCode::Utf8InvalidByte);
-  // The span indexes the raw input, because there is no normalized buffer yet.
+  // The span is an offset into the raw input.
   CHECK(r.diags[0].src.off == 8);
 }
 
@@ -281,8 +277,7 @@ TEST_CASE("normalize: BOM, CRLF and NFC compose in one pass") {
 }
 
 TEST_CASE("normalize: zero-width joiners and format characters survive intact") {
-  // NFC is decomposition plus composition and nothing else, so it never removes
-  // a default-ignorable: a ZWJ sequence must come out byte-identical.
+  // NFC keeps default-ignorables; a ZWJ sequence comes out byte-identical.
   std::string_view const family{
     "\xf0\x9f\x91\xa8\xe2\x80\x8d\xf0\x9f\x91\xa9"
     "\xe2\x80\x8d\xf0\x9f\x91\xa7"
@@ -311,14 +306,10 @@ TEST_CASE("normalize: zero-width joiners and format characters survive intact") 
 }
 
 TEST_CASE("normalize: unassigned, noncharacter and bidi codepoints pass through") {
-  // Valid UTF-8 that Unicode will not renormalize. Rejecting any of it would be
-  // a policy this layer does not own.
   CHECK(normalize("\xef\xbf\xbe").text == "\xef\xbf\xbe");          // U+FFFE noncharacter
   CHECK(normalize("\xef\xb7\x90").text == "\xef\xb7\x90");          // U+FDD0 noncharacter
   CHECK(normalize("\xf3\xb0\x80\x80").text == "\xf3\xb0\x80\x80");  // U+F0000 private use
 
-  // U+202E, built rather than written: clang-tidy flags a literal one, which is
-  // the right reaction and is why a label carrying it deserves a rule later.
   std::string const rtl{ encode(0x202E) };
   CHECK(normalize(rtl).text == rtl);
 }
@@ -338,8 +329,7 @@ TEST_CASE("is_nfc: byte-scans ASCII and only decodes what it must") {
   CHECK(source_text_is_nfc(nullptr, 0));
   CHECK(source_text_is_nfc(raw("caf\xc3\xa9"), 5));
   CHECK_FALSE(source_text_is_nfc(raw("cafe\xcc\x81"), 6));
-  // Invalid UTF-8 is reported as not-NFC rather than crashing; the caller
-  // validated before it got here.
+  // Invalid UTF-8 reports not-NFC; callers validate first.
   CHECK_FALSE(source_text_is_nfc(raw("\xc3"), 1));
 }
 
@@ -358,8 +348,7 @@ TEST_CASE("nfc_bytes: reports whether it changed anything") {
 }
 
 TEST_CASE("nfc_bytes: invalid UTF-8 is passed through rather than dropped") {
-  // Normalization validates first, so this fires only on a fuzz case calling in
-  // directly -- and losing bytes silently is worse than carrying them.
+  // Only a direct caller reaches this path; normalization validates first.
   std::vector<scav_byte> out;
   CHECK_FALSE(source_text_to_nfc(raw("\xc3"), 1, out));
   CHECK(out.size() == 1);
@@ -380,7 +369,7 @@ TEST_CASE("line_col: one-based, and the column counts characters not bytes") {
 }
 
 TEST_CASE("line_col: a multi-byte character advances the column once") {
-  // Four bytes, two characters, so the caret lands where a reader expects.
+  // Four bytes, two characters.
   std::string_view const text{ "\xc3\xa9\xc3\xa9x" };
   CHECK(pos_of(text, 4).column == 3);
   CHECK(pos_of(text, 0).column == 1);
@@ -394,7 +383,7 @@ TEST_CASE("line_col: an offset past the end clamps to the last position") {
 }
 
 TEST_CASE("diag_text: every code has a distinct description") {
-  // A switch that falls through to the default is a code someone forgot.
+  // A code without its own description returns "unknown diagnostic".
   std::vector<std::string> seen;
   for (uint32_t i = 0; i <= static_cast<uint32_t>(DiagCode::DepthLimitExceeded); ++i) {
     std::string const text{ diag_message(static_cast<DiagCode>(i)) };

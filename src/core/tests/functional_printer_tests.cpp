@@ -1,5 +1,5 @@
-// Canonical text prints as itself, over the corpus and at the scale target,
-// plus the property that rests on: printing changes bytes and not the model.
+// Canonical text prints as itself over the corpus and at the scale target;
+// printing changes bytes and leaves the model unchanged.
 
 #include "core/core_internal.h"
 #include "core/tests/test_charts.h"
@@ -34,8 +34,8 @@ std::vector<CorpusChart> corpus() {
            { .name = "ota", .text = OTA } };
 }
 
-// The model as text, in array order, with each subject's attributes sorted --
-// the one thing canonical form moves and the digest reads in span order.
+// Appends a subject's attributes sorted as `key=value` rows; canonical form
+// reorders attributes.
 void append_attrs(std::string &out, Chart const &c, Span attrs) {
   std::vector<std::string> rows;
   rows.reserve(attrs.len);
@@ -130,8 +130,7 @@ std::string summarize(Chart const &c) {
   return out;
 }
 
-// One document, lowered: cross-document resolution is the loader's, and the
-// printer works a file at a time.
+// Parses and lowers one document on its own, then summarizes its model.
 std::string model_of(std::string_view text) {
   Parsed const r{ parse(text) };
   REQUIRE(r.ok);
@@ -159,7 +158,7 @@ TEST_CASE("printer: printing a corpus chart changes its bytes and not its model"
   for (CorpusChart const &chart : corpus()) {
     CAPTURE(chart.name);
     std::string const once{ print(chart.text) };
-    CHECK(once != chart.text);  // canonical form is the printer's, not the format's
+    CHECK(once != chart.text);  // corpus sources are non-canonical
     CHECK(model_of(chart.text) == model_of(once));
   }
 }
@@ -189,8 +188,7 @@ TEST_CASE("printer: no output line exceeds the budget unless one token does") {
         std::string_view const line{ out.data() + begin,
                                      (end == std::string::npos ? out.size() : end) -
                                          begin };
-        // Over-long is legal only for an unbreakable atom: a long label or
-        // name, or a comment, rather than a block that could have split.
+        // An over-long line holds one unbreakable atom: a long label, name or comment.
         if ((line.size() > columns) && (line.find("//") == std::string_view::npos)) {
           CAPTURE(line);
           CHECK(line.find(", ") == std::string_view::npos);
@@ -227,16 +225,15 @@ TEST_CASE("printer: a depth-16 chart at the scale target") {
   CHECK(again.pd.comments.size() == source.pd.comments.size());
   CHECK(model_of(text) == model_of(once));
 
-  // Not one statement for one: every state writes `@synth { ... }` and
-  // `@synth:n2`, which merge. The entries survive, and they are the model.
+  // Each composite's `@synth { ... }` and `@synth:n2` merge into one statement;
+  // attribute entries and values keep their counts.
   CHECK(again.pd.stmts.size() < source.pd.stmts.size());
   CHECK(again.pd.attr_entries.size() == source.pd.attr_entries.size());
   CHECK(again.pd.attr_values.size() == source.pd.attr_values.size());
 }
 
 TEST_CASE("printer: the deep document the depth cap admits still prints") {
-  // Two blocks per state level plus one for the chart, so 120 levels of nesting
-  // is well inside DEFAULT_MAX_DEPTH and far past the design target of 16.
+  // One block per level plus the chart's: 121 blocks, within DEFAULT_MAX_DEPTH.
   std::string const text{ synth_deep_document(120) };
   Parsed const r{ parse(text) };
   REQUIRE(r.ok);

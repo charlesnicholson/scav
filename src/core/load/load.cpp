@@ -17,12 +17,10 @@ namespace scav {
 
 namespace {
 
-// A DAG is not a cycle and still expands exponentially: N documents each
-// including the next twice is 2^N instantiations from a few KB of input.
+// Cap on queued instantiations; exceeding it reports IncludeExpansionTooLarge.
 constexpr uint32_t MAX_INSTANTIATIONS{ 1U << 16U };
 
-// One include statement's path, already resolved. Gathered before anything is
-// claimed, because claiming grows the pools a view would point into.
+// An include statement's row and resolved document key.
 struct DiscoveredRef {
   uint32_t row;
   std::string key;
@@ -32,8 +30,7 @@ void report(Loader &loader, DiagCode code, DocId doc, Span src) {
   loader.diags.push_back({ .code = code, .doc = doc, .src = src });
 }
 
-// Document-local: no chart exists yet, so this indexes the bytes
-// load_document_bytes hands back.
+// Source span of statement `row` in `doc`'s own bytes; empty when out of range.
 Span stmt_span(Loader const &loader, DocId doc, uint32_t row) {
   if ((doc.v >= loader.parsed.size()) || (row >= loader.parsed[doc.v].stmts.size())) {
     return {};
@@ -62,8 +59,8 @@ DocId claim_doc(Loader &loader, std::string_view key, DocId from, uint32_t stmt_
   return id;
 }
 
-// Every include statement of `doc` in ascending statement row. A flat scan of
-// the statement array, so nesting is irrelevant and the order is source order.
+// Claims each include's target document and records an edge, in statement-row order.
+// False when an include path is invalid.
 bool discover(Loader &loader, DocId doc) {
   std::string const base{ load_document_name(loader, doc) };
   std::vector<DiscoveredRef> refs;
@@ -85,8 +82,7 @@ bool discover(Loader &loader, DocId doc) {
     }
   }
 
-  // Claiming grows s.docs and s.parsed, so it happens after the scan above; a
-  // reference into either would not survive it.
+  // Claims after the scan; `claim_doc` grows `loader.docs` and `loader.parsed`.
   uint32_t const off{ narrow_clamp<uint32_t>(loader.edges.size()) };
   for (DiscoveredRef const &ref : refs) {
     DocId const to{ claim_doc(loader, ref.key, doc, ref.row) };
@@ -155,8 +151,7 @@ DocId edge_target(Loader const &loader, DocId doc, uint32_t row) {
   return { INVALID };
 }
 
-// Everything the loader found before a chart existed. Production order is
-// already DocId order then statement row, so it is not re-sorted.
+// Appends the loader's diagnostics to `diags` in production order; returns false.
 bool report_loader_diags(Loader const &loader, std::vector<Diagnostic> &diags) {
   diags.insert(diags.end(), loader.diags.begin(), loader.diags.end());
   return false;
@@ -183,8 +178,8 @@ bool load_document_bytes(Loader const &loader,
 bool load_add(Loader &loader, scav_byte const *bytes, size_t len, std::string_view name) {
   if (loader.poisoned != 0) { return false; }
 
-  // Normalized like any include path, so `./charts/vac.scav` and
-  // `charts/vac.scav` are one key and the whole network is spelled alike.
+  // The first document's name is normalized like an include path; later names must
+  // match a pending key exactly.
   DocId doc{ INVALID };
   if (loader.docs.empty()) {
     std::string key;
@@ -208,8 +203,7 @@ bool load_add(Loader &loader, scav_byte const *bytes, size_t len, std::string_vi
     }
   }
 
-  // Parsed under its resolved key, so a diagnostic quotes the name the network
-  // knows it by rather than one caller's spelling.
+  // Parsed under its resolved key, which diagnostics quote.
   ParsedDocument pd;
   size_t const mark{ loader.diags.size() };
   bool const parsed{ parse_document(bytes,
@@ -218,12 +212,11 @@ bool load_add(Loader &loader, scav_byte const *bytes, size_t len, std::string_vi
                                     parse_default_options(),
                                     pd,
                                     loader.diags) };
-  // parse_document handles one document and is not told which, so it stamps
-  // DocId 0 on everything. Only the loader knows the real one.
+  // parse_document stamps DocId 0; restamps this parse's diagnostics with `doc`.
   for (size_t i = mark; i < loader.diags.size(); ++i) { loader.diags[i].doc = doc; }
 
-  // Kept even when the parse failed: normalization already filled src_bytes,
-  // which is what the diagnostics just recorded point into.
+  // Stored even when the parse fails. `src_bytes` holds the normalized text, or
+  // nothing when parse_document stopped before parsing.
   loader.parsed[doc.v] = std::move(pd);
   loader.docs[doc.v].arrived = 1;
   if (!parsed) {
@@ -328,8 +321,7 @@ bool load_finish(Loader &loader, Chart &out, std::vector<Diagnostic> &diags) {
     }
   }
 
-  // A chart handed back is a complete network, so an overrun discards it and
-  // reports the cap alone rather than a dangling attachment per include.
+  // On overrun, clears `out` and adds IncludeExpansionTooLarge.
   if (overflowed) {
     out = Chart{};
     report(loader, DiagCode::IncludeExpansionTooLarge, { 0 }, {});

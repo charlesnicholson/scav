@@ -27,7 +27,7 @@ uint64_t rnd(uint64_t seed, uint64_t index) {
   return x ^ (x >> 31U);
 }
 
-// Model-shaped seeds: every construct lowering has an opinion about.
+// Seed charts covering every construct lowering checks.
 std::vector<std::string> seed_corpus() {
   return {
     "chart c { state A, state B, trans A -> B \"go\", trans * -> A, }",
@@ -73,9 +73,8 @@ void check_lower_diags(Chart const &c, std::vector<Diagnostic> const &diags) {
   }
 }
 
-// Validation subjects must name rows that exist, whatever the model held. An
-// INVALID ordinal names the entity kind instead of a row, and `None` carries
-// nothing else.
+// Each validation subject names an existing row, or a whole kind by an INVALID
+// ordinal. Chart takes ordinal 0; `None` takes INVALID.
 void check_validate_diags(Chart const &c, std::vector<Diagnostic> const &diags) {
   for (Diagnostic const &d : diags) {
     bool const whole_kind{ d.subject.ordinal == INVALID };
@@ -136,8 +135,7 @@ TEST_CASE("fuzz: whatever parses also lowers, validates, and addresses") {
 }
 
 TEST_CASE("fuzz: the seeds themselves exercise every lowering diagnostic") {
-  // Not a mutation: the unmutated seeds cover the diagnostic codes, so the
-  // sweep starts from inputs that already reach the interesting paths.
+  // The unmutated seeds alone produce each lowering diagnostic checked below.
   std::vector<std::string> const seeds{ seed_corpus() };
   std::vector<DiagCode> met;
   for (std::string const &seed : seeds) {

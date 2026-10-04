@@ -1,5 +1,5 @@
-// syntax.cpp: the spellings of the statement enums, and the one convention about
-// where the chart statement sits. Compiled against scavcore_testable.
+// Tests syntax.cpp: statement enum spellings and `syntax_root_statement`.
+// Compiled against scavcore_testable.
 
 #include "core/core_internal.h"
 #include "scav/scav_core.h"
@@ -26,8 +26,7 @@ TEST_CASE("syntax: every enum has a name and every kind word round-trips") {
     char const *const name{ syntax_state_kind_name(kind) };
     CHECK(std::string{ name } != "unknown");
     StateKind parsed{ StateKind::Normal };
-    // initial and final have names but are not spellable, which is the one
-    // asymmetry here and it is deliberate.
+    // `initial` and `final` have names but do not parse as kind words.
     bool const spellable{ (kind != StateKind::Initial) && (kind != StateKind::Final) };
     CHECK(syntax_state_kind_from_name(name, parsed) == spellable);
     if (spellable) { CHECK(parsed == kind); }

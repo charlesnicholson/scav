@@ -13,8 +13,7 @@ namespace {
 
 constexpr size_t NPOS{ std::string_view::npos };
 
-// A `:` before any `/`. Matches `https:` and also `C:`; a drive letter is not a
-// scheme, but treating it as one gives the same answer.
+// True when `s` has a `:` before any `/`; matches `https:` and drive letters like `C:`.
 bool has_scheme(std::string_view s) {
   size_t const colon{ s.find(':') };
   if (colon == NPOS) { return false; }
@@ -31,8 +30,7 @@ size_t opaque_root(std::string_view s) {
       size_t const after{ s.find('/', colon + 3) };
       return (after == NPOS) ? s.size() : (after + 1);
     }
-    // `scheme:path`, and the drive-letter case. The following separator goes
-    // with the root, or `C:/proj` would fold to `C:proj`.
+    // `scheme:path` and drive letters; a following `/` belongs to the root.
     size_t const next{ colon + 1 };
     return ((next < s.size()) && (s[next] == '/')) ? (next + 1) : next;
   }
@@ -66,8 +64,7 @@ void fold_segments(std::string_view text,
 
 bool path_resolve(std::string_view base, std::string_view ref, std::string &out) {
   out.clear();
-  // The last component must name a document; a trailing separator, `.` and
-  // `..` all name a directory, and `a/..` would land on the base's own.
+  // Fails when `ref` is empty or its last component is empty, `.` or `..`.
   if (ref.empty()) { return false; }
   size_t const cut_ref{ ref.rfind('/') };
   std::string_view const tail{ (cut_ref == NPOS) ? ref : ref.substr(cut_ref + 1) };

@@ -1,5 +1,5 @@
-// Serializes the whole structure, then hashes it once. Field by field, strings
-// length-prefixed, and a span contributing its contents rather than its offset.
+// Serializes the chart field by field, then hashes it once. Strings are
+// length-prefixed; a span contributes its contents.
 
 #include "scav_stable_sort.h"
 #include "scav_xxhash.h"
@@ -27,12 +27,8 @@ void put_text(std::vector<scav_byte> &out, std::string_view text) {
   for (char const ch : text) { out.push_back(static_cast<scav_byte>(ch)); }
 }
 
-// Key bytes, never the interned id. An AttrKeyId is first-encounter order, so
-// two producers of one model can hold different ids for the same key.
-// Sorted by key bytes, stably, so a repeated key keeps insertion order -- the
-// same ordering the canonical printer emits.
-// Span order is insertion order, which is first-encounter, so two producers of
-// one model would disagree: an authored file and its `scav fmt` output do.
+// Writes the row count, then each row's key bytes and value, stably sorted by key
+// bytes; a repeated key keeps insertion order, as the printer does.
 void put_attrs(std::vector<scav_byte> &out, Chart const &c, Span attrs) {
   uint32_t len{ attrs.len };
   if ((static_cast<uint64_t>(attrs.off) + len) > c.attrs.size()) {
@@ -115,8 +111,7 @@ void chart_digest_bytes(Chart const &c, std::vector<scav_byte> &out) {
     put_attrs(out, c, t.attrs);
   }
 
-  // The authored path, which is the same text in every transport, unlike
-  // documents[target].path.
+  // Includes hash their authored `path`, the same text in every transport.
   put_u32(out, narrow_clamp<uint32_t>(c.includes.size()));
   for (Include const &inc : c.includes) {
     put_text(out, chart_string(c, inc.alias));

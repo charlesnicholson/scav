@@ -28,8 +28,8 @@ struct NfcTables {
 // Decoded on the first call, under the C++ guarantee for a function-local static.
 NfcTables const &unicode_nfc_tables();
 
-// True when `cp` has a non-zero combining class or NFC_QC says it may move.
-// Text of codepoints this rejects is already NFC.
+// True when `cp` has a non-zero combining class or NFC_QC is not Yes. Text where
+// this is false for every codepoint is already NFC.
 bool unicode_nfc_needs_work(uint32_t cp);
 
 uint32_t unicode_nfc_combining_class(uint32_t cp);

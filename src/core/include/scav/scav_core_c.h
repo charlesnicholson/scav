@@ -1,18 +1,8 @@
 #ifndef SCAV_CORE_C_H_INCLUDED
 #define SCAV_CORE_C_H_INCLUDED
 
-/* libscavcore's C API, and the ABI a binding is generated against: flat
- * extern "C", opaque handles, POD structs, out-params, error enums.
- *
- * No std:: type crosses. A string comes out as a span into memory the handle
- * owns, not NUL-terminated, and every destroy is idempotent on NULL.
- *
- * Every caller-owned POD crosses with its own size beside it, and every array
- * scav hands out reports the stride to read it with. A size that disagrees
- * with this library's is SCAV_E_ABI, tested before any other argument: a
- * caller compiled against a different header cannot be trusted about the rest
- * of what it passed. Sizes are tested whether or not the pointer beside them
- * is NULL, since the size is the caller's claim about its own headers. */
+/* libscavcore's C ABI. Strings are handle-owned spans, not NUL-terminated; destroy
+ * accepts NULL. A wrong struct size is SCAV_E_ABI, checked before any other argument. */
 
 #include "scav/scav_types.h"
 
@@ -49,12 +39,8 @@ uint32_t scav_abi_version(void);
 typedef struct scav_load scav_load;
 typedef struct scav_chart scav_chart;
 
-/* 16 bytes, no padding. `from_doc` is a DocId: pending is reported before
- * anything is instantiated, and a file included N times is fetched once.
- * `stmt_row` indexes the statements of that document. Not spelled `from`,
- * because that is a keyword in Python and several other binding languages, and
- * a field no binding can name as an attribute is a field with a permanent
- * wart. */
+/* 16 bytes, no padding. `from_doc` is the DocId of the including document;
+ * `stmt_row` indexes that document's statements. */
 typedef struct {
   scav_span path;
   uint32_t from_doc;
@@ -90,9 +76,8 @@ scav_result scav_load_finish(scav_load *loader, scav_chart **out);
 void scav_load_destroy(scav_load *loader);
 void scav_chart_destroy(scav_chart *chart);
 
-/* Diagnostics stay on the loader, since a cycle or a missing document leaves
- * no chart to hang them on. Render a code with scav_diag_message; derive a
- * position from (doc, off, len) against the bytes supplied for that doc. */
+/* Load diagnostics, kept on the loader after finish. (off, len) index doc's normalized
+ * bytes (raw for UTF-8 errors), or the chart's src_bytes once finish built a chart. */
 scav_result scav_load_diag_count(scav_load const *loader, uint32_t *out_count);
 scav_result scav_load_diag(scav_load const *loader,
                            uint32_t index,
@@ -121,9 +106,8 @@ scav_result scav_chart_counts(scav_chart const *chart,
 /* xxh32 over the structural digest. Two transports of one network agree. */
 scav_result scav_chart_structural_hash(scav_chart const *chart, uint32_t *out);
 
-/* The digest bytes. Pass cap = 0 with a non-null out_count to query the size,
- * then call again with a buffer. A cap too small returns SCAV_E_CAPACITY and
- * writes the required count; it never truncates silently. */
+/* Writes the digest bytes and their count. cap = 0 queries the count; a nonzero cap
+ * too small, or a NULL `out`, returns SCAV_E_CAPACITY with the count written. */
 scav_result scav_chart_digest(scav_chart const *chart,
                               scav_byte *out,
                               uint32_t cap,
@@ -140,8 +124,8 @@ typedef struct {
   uint32_t off, len;
 } scav_diag;
 
-/* The latest operation's findings, owned by the chart, overwritten at each
- * operation's entry. The loader keeps its own: a failed load has no chart. */
+/* The latest operation's findings, owned by the chart and overwritten at each
+ * operation's entry. Load findings stay on the loader. */
 scav_result scav_chart_diag_count(scav_chart const *chart, uint32_t *out_count);
 scav_result scav_chart_diag(scav_chart const *chart,
                             uint32_t index,
@@ -151,8 +135,8 @@ scav_result scav_chart_diag(scav_chart const *chart,
 /* NOLINTNEXTLINE(modernize-use-using) */
 typedef uint32_t scav_column_id;
 
-/* Three calls: a walk needs the row count, and the stride is the registered
- * element size. Unknown name: SCAV_E_INVALID_ARG. Empty column: NULL, zero. */
+/* Reading a column takes find, data (stride = element size) and count.
+ * Unknown name: SCAV_E_INVALID_ARG. Empty column: NULL, zero. */
 scav_result scav_column_find(scav_chart const *chart,
                              char const *name,
                              scav_column_id *out);

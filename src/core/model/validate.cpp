@@ -28,8 +28,7 @@ bool span_in(Span s, size_t array_len) {
   return (static_cast<uint64_t>(s.off) + s.len) <= array_len;
 }
 
-// `/ : $` are path metacharacters and `@` is the attribute sigil. A name
-// holding one could be neither addressed nor reprinted.
+// True when `name` holds a path metacharacter (`/ : $`) or the attribute sigil `@`.
 bool name_has_metachar(std::string_view name) {
   for (char const ch : name) {
     if ((ch == '/') || (ch == ':') || (ch == '$') || (ch == '@')) { return true; }
@@ -64,8 +63,7 @@ void check_submachine_ref(Validator &v, ElemRef subject, SubmachineId id, bool r
   if (v.c->submachines[id.v].live == 0) { report(v, DiagCode::TombstonedTarget, subject); }
 }
 
-// Absent provenance is normal -- a code-built row has none -- but a present
-// ordinal must land in its array.
+// Reports DanglingRef for a non-INVALID `stmt` or `inst` outside its array.
 void check_provenance(Validator &v, ElemRef subject, StmtId stmt, InstId inst) {
   if ((stmt.v != INVALID) && (stmt.v >= v.c->stmts.size())) {
     report(v, DiagCode::DanglingRef, subject);
@@ -75,8 +73,8 @@ void check_provenance(Validator &v, ElemRef subject, StmtId stmt, InstId inst) {
   }
 }
 
-// An attrs span must land in the array and every row it yields must name an
-// interned key. One report per broken span, not one per bad row.
+// Reports one DanglingRef when `attrs` leaves the array or any row's key or `stmt`
+// is out of range.
 void check_attrs(Validator &v, ElemRef subject, Span attrs) {
   if (!span_in(attrs, v.c->attrs.size())) {
     report(v, DiagCode::DanglingRef, subject);
@@ -163,9 +161,7 @@ void check_includes(Validator &v) {
   Chart const &c{ *v.c };
   for (uint32_t i = 0; i < c.includes.size(); ++i) {
     Include const &inc{ c.includes[i] };
-    // An include has no ElemKind of its own, so every finding here names its
-    // host state -- and no subject at all when the host names no row, rather
-    // than an ordinal no reader can follow.
+    // Findings name the host state, or a None subject when `host` is out of range.
     ElemRef const subject{ (inc.host.v < c.states.size())
                                ? ElemRef{ .kind = ElemKind::State, .ordinal = inc.host.v }
                                : ElemRef{ .kind = ElemKind::None, .ordinal = INVALID } };
@@ -232,8 +228,7 @@ void check_duplicate_names(Validator &v) {
   }
 }
 
-// More than one initial per submachine. Reachable because each wildcard source
-// synthesizes its own pseudostate rather than sharing one.
+// Reports MultipleInitial on each live initial after the first in a submachine.
 void check_multiple_initial(Validator &v) {
   Chart const &c{ *v.c };
   for (uint32_t i = 0; i < c.submachines.size(); ++i) {
@@ -256,18 +251,13 @@ void check_multiple_initial(Validator &v) {
   }
 }
 
-// Containment is stored twice -- as a back-pointer and as a span -- and this
-// cross-checks the two. A link the sides disagree about, or a climb that never
-// reaches a document root, is one finding on the row it was seen from.
-//
-// A link already reported as dangling, missing or tombstoned is skipped
-// throughout, so a single broken ordinal yields a single finding.
+// Cross-checks back-pointers against container spans and flags cycles: at most one
+// ContainmentInconsistent per row, skipping links already reported.
 void check_containment(Validator &v) {
   Chart const &c{ *v.c };
 
-  // Occurrences of each row in the container its own back-pointer names. No
-  // other container contributes, so the count answers "exactly once" directly.
-  // Dead containers count too: a live row may sit inside a tombstoned one.
+  // Per state, its occurrences in the span of the container its back-pointer names;
+  // tombstoned containers count.
   std::vector<uint32_t> in_parent(c.states.size(), 0);
   for (uint32_t i = 0; i < c.submachines.size(); ++i) {
     Span const kids{ c.submachines[i].children };
@@ -289,10 +279,8 @@ void check_containment(Validator &v) {
     }
   }
 
-  // state -> parent -> owner -> ... , coloured so the whole forest costs one
-  // pass: 0 unvisited, 1 on the current climb, 2 settled reaching, 3 settled
-  // cyclic. Meeting a 1 is the cycle; a climb that ends anywhere else settles
-  // to what it ended on.
+  // One pass over the state -> parent -> owner climbs marks each state REACHES or
+  // CYCLIC; meeting a CLIMBING mark is a cycle.
   constexpr uint8_t UNVISITED{ 0 };
   constexpr uint8_t CLIMBING{ 1 };
   constexpr uint8_t REACHES{ 2 };
@@ -318,8 +306,7 @@ void check_containment(Validator &v) {
       SubmachineId const sm{ c.states[cur].parent };
       if (sm.v >= c.submachines.size()) { break; }
       StateId const owner{ c.submachines[sm.v].owner };
-      // INVALID lands here too: a document root ends the climb having reached
-      // one.
+      // An INVALID (document root) or out-of-range owner ends the climb as REACHES.
       if (owner.v >= c.states.size()) { break; }
       cur = owner.v;
     }
@@ -356,8 +343,8 @@ void check_containment(Validator &v) {
   for (uint32_t i = 0; i < c.submachines.size(); ++i) {
     Submachine const &m{ c.submachines[i] };
     if (m.live == 0) { continue; }
-    // One ownerless submachine is legitimate, and it is the one the chart row
-    // names; a second is a document root nothing addresses.
+    // Only `root_submachine` may be ownerless; an owned one appears once in its
+    // owner's span.
     bool bad{ false };
     if (m.owner.v == INVALID) {
       bad = SubmachineId{ i } != c.root_submachine;
@@ -419,16 +406,15 @@ void check_statements(Validator &v) {
   }
 }
 
-// Columns must cover their entity array exactly. Columns have no ElemKind of
-// their own, so the subject is the array the column failed to cover, with the
-// INVALID ordinal that names a kind rather than a row.
+// Reports ColumnCountMismatch when an entity column's row count differs from its
+// array; the subject is that ElemKind with an INVALID ordinal.
 void check_columns(Validator &v) {
   Chart const &c{ *v.c };
   for (uint32_t i = 0; i < c.columns.size(); ++i) {
     ColumnDesc const &desc{ c.columns[i].desc };
     if ((desc.entity == ElemKind::Point) || (desc.entity == ElemKind::PathBox) ||
         (desc.entity == ElemKind::None)) {
-      continue;  // a point column's length is its own
+      continue;  // kinds without an entity array take any row count
     }
     if (column_count(c, ColumnId{ i }) != chart_entity_count(c, desc.entity)) {
       report(v,
@@ -453,8 +439,7 @@ bool validate_chart(Chart const &c, std::vector<Diagnostic> &diags) {
   check_statements(v);
   check_columns(v);
 
-  // A total order over the triple. Equal triples are one finding repeated, and
-  // stability keeps them in walk order.
+  // Sorts by code, subject kind, then ordinal; ties keep walk order.
   scav_stable_sort(v.found, [](Diagnostic const &a, Diagnostic const &b) {
     if (a.code != b.code) {
       return static_cast<uint32_t>(a.code) < static_cast<uint32_t>(b.code);

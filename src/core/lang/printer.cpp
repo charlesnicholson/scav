@@ -27,8 +27,7 @@ std::string_view pool_of(ParsedDocument const &pd, StrRef ref) {
   return string_pool_view(pd.strings, ref);
 }
 
-// The authored bytes, "//" included. The lexed span runs to the newline, so any
-// trailing blanks come off here.
+// The comment's source bytes, "//" included, minus trailing spaces, tabs and CRs.
 std::string_view comment_of(ParsedDocument const &pd, uint32_t index) {
   if (index >= pd.comments.size()) { return {}; }
   Span const src{ pd.comments[index].src };
@@ -54,8 +53,8 @@ void append_indent(std::string &out, uint32_t depth) {
   for (uint32_t i = 0; i < depth; ++i) { out += INDENT_UNIT; }
 }
 
-// Always the escaped spelling: a `"""` literal decodes to the same text, so one
-// of the two has to win.
+// Writes `text` as a double-quoted escaped literal; control bytes without a short
+// escape become `\u00XX`.
 void append_literal(std::string &out, std::string_view text) {
   constexpr std::string_view HEX{ "0123456789abcdef" };
   out += '"';
@@ -82,8 +81,7 @@ void append_literal(std::string &out, std::string_view text) {
 
 // Canonical attributes ======================================================
 
-// One `k`, `k = "v"` or `k = ["a", "b"]`. `values` survives so a list too wide
-// for the budget can still break value by value.
+// One `k`, `k = "v"` or `k = ["a", "b"]`.
 struct EntryOut {
   Span key;      // -> Printer::text
   Span text;     // -> Printer::text, the whole entry flat
@@ -254,8 +252,8 @@ Span build_head(Printer &p, uint32_t stmt) {
 
 // Comment buckets ===========================================================
 
-// Which line a comment lands on follows from where its offset falls against the
-// statement's own span: before it, inside its block, or past its closing brace.
+// Buckets the statement's comments by offset: `pre` before its span, `dang` inside,
+// `tail` after, except the first trailing one inside (`open`) and after (`post`).
 void bucket_comments(Printer &p, uint32_t stmt) {
   ParsedDocument const &pd{ *p.pd };
   Span const span{ pd.stmts[stmt].comments };
@@ -281,8 +279,6 @@ void bucket_comments(Printer &p, uint32_t stmt) {
     if (id >= pd.comments.size()) { continue; }
     uint32_t const off{ pd.comments[id].src.off };
     if (comment_is_trailing(pd, id)) {
-      // One trailing comment per line, so the first inside the block takes the
-      // opening brace; a second is unreachable and falls back to its own line.
       if (off < end) {
         if (so.open == INVALID) {
           so.open = id;
@@ -334,7 +330,7 @@ bool values_are_flag(std::vector<std::string_view> const &vals, Span span) {
   return (span.len == 1) && (vals[span.off] == "true");
 }
 
-// `k`, `k = "v"`, `k = ["a", "b"]`: the list spelling arrives at two values.
+// `k` when the only value is "true", `k = "v"` for one value, else `k = [...]`.
 EntryOut build_entry(Printer &p,
                      StrRef key,
                      std::vector<std::string_view> const &vals,
@@ -368,8 +364,7 @@ EntryOut build_entry(Printer &p,
 Span build_items(Printer &p, Span children, std::vector<uint32_t> &orphans) {
   ParsedDocument const &pd{ *p.pd };
 
-  // Source order, so a repeated key keeps insertion order among its values.
-  // Views rather than pool refs: a flag's value is text the pool never held.
+  // `flat` holds entries in source order; `vals` holds views, "true" for a flag.
   std::vector<Merged> flat;
   std::vector<std::string_view> vals;
   std::vector<uint32_t> attr_stmts;
@@ -435,8 +430,8 @@ Span build_items(Printer &p, Span children, std::vector<uint32_t> &orphans) {
         narrow_clamp<uint32_t>(merged_vals.size()) - merged.back().values.off;
   }
 
-  // Two or more keys under a namespace take the block spelling. The sort made
-  // them contiguous: no other namespace composes a key beginning `ns:`.
+  // Two or more keys under one namespace form a block item; the sort makes them
+  // contiguous.
   uint32_t const items_begin{ narrow_clamp<uint32_t>(p.items.size()) };
   std::vector<Span> item_keys;  // composed key of each merged entry, for lookup
   std::vector<uint32_t> item_of;
@@ -484,8 +479,8 @@ Span build_items(Printer &p, Span children, std::vector<uint32_t> &orphans) {
   Span const items{ make_span(items_begin,
                               narrow_clamp<uint32_t>(p.items.size()) - items_begin) };
 
-  // A block spelling's entries all share its namespace, so a source statement
-  // reaches exactly one item and its comments cannot duplicate or vanish.
+  // Maps each attribute statement to the item holding its first entry's composed
+  // key; INVALID when it has no entries.
   std::vector<uint32_t> owner(attr_stmts.size(), INVALID);
   for (uint32_t i = 0; i < attr_stmts.size(); ++i) {
     uint32_t const stmt{ attr_stmts[i] };
@@ -496,9 +491,7 @@ Span build_items(Printer &p, Span children, std::vector<uint32_t> &orphans) {
     uint32_t const eat{ as.entries.off };
     if (eat >= pd.attr_entries.size()) { continue; }
     Span const composed{ build_composed(p, as.ns, pd.attr_entries[eat].key) };
-    // `item_keys` is the merged list in composed-key order, so this is a search
-    // rather than a scan -- a block of thousands of attributes is otherwise
-    // quadratic.
+    // Binary search of `item_keys`, sorted by composed key.
     uint32_t lo{ 0 };
     uint32_t hi{ narrow_clamp<uint32_t>(item_keys.size()) };
     while (lo < hi) {
@@ -514,8 +507,8 @@ Span build_items(Printer &p, Span children, std::vector<uint32_t> &orphans) {
     }
   }
 
-  // Counting sort by owning item, so each item's comments are one span. Counted
-  // per comment, not per statement: one statement can carry several.
+  // Counting sort of comments by owning item, giving each item one span in source
+  // order.
   std::vector<uint32_t> counts(items.len + 1, 0);
   for (uint32_t i = 0; i < attr_stmts.size(); ++i) {
     if (owner[i] == INVALID) { continue; }
@@ -544,7 +537,7 @@ Span build_items(Printer &p, Span children, std::vector<uint32_t> &orphans) {
     p.items[items_begin + i].comments =
         make_span(base + counts[i], counts[i + 1] - counts[i]);
   }
-  // Source order, so the earliest statement reaching an item decides its blank.
+  // The earliest statement owning an item sets its `blank`.
   for (auto i = narrow_clamp<uint32_t>(attr_stmts.size()); i-- > 0;) {
     if (owner[i] != INVALID) {
       p.items[owner[i]].blank = pd.stmts[attr_stmts[i]].blank_before;
@@ -562,7 +555,7 @@ bool submachine_is_implicit(Printer const &p, uint32_t stmt) {
   if (payload >= pd.submachines.size()) { return false; }
   SubmachineStmt const &s{ pd.submachines[payload] };
   if ((s.name.len != 0) || (s.label.len != 0)) { return false; }
-  // Its attributes hang off the submachine row, so hoisting would move them.
+  // Implicit only when its block holds no attributes.
   uint32_t const block{ p.stmts[stmt].block };
   return (block == INVALID) || (p.blocks[block].items.len == 0);
 }
@@ -626,8 +619,8 @@ void build_block(Printer &p, uint32_t stmt) {
   p.stmts[stmt].block = narrow_clamp<uint32_t>(p.blocks.size()) - 1;
 }
 
-// Written when the block holds anything, a comment included: one on the opening
-// brace has nowhere else to live. `submachine` keeps an empty block; a state does not.
+// True when the block holds an item, child or comment. A chart or `submachine`
+// always emits its block.
 bool emits_block(Printer const &p, uint32_t stmt) {
   StmtKind const kind{ p.pd->stmts[stmt].kind };
   if ((kind == StmtKind::Chart) || (kind == StmtKind::Submachine)) { return true; }
@@ -640,8 +633,8 @@ bool emits_block(Printer const &p, uint32_t stmt) {
 
 // Flat width ================================================================
 
-// A comment ends its line, so one inside a statement's own rendering rules out
-// the flat form. Its leading and trailing ones block the parent instead.
+// Sets `flat_cps` to the one-line width; INVALID when the subtree holds a comment,
+// a blank line after its first body line, or a child that breaks.
 void compute_flat(Printer &p, uint32_t stmt) {
   StmtOut &so{ p.stmts[stmt] };
   so.flat_cps = INVALID;
@@ -670,8 +663,7 @@ void compute_flat(Printer &p, uint32_t stmt) {
     ++count;
   }
 
-  // `head {}` when empty, else `head { a, b }`: a space and a comma per item,
-  // less the comma the last one does not take, plus the braces.
+  // ` {}` adds 3; otherwise ` { ` and ` }` add 5 and each `, ` between items adds 2.
   uint64_t const flat{ (count == 0)
                            ? (uint64_t{ so.head_cps } + 3)
                            : (uint64_t{ so.head_cps } + sum + (2ULL * count) + 3ULL) };
@@ -697,7 +689,7 @@ void emit_comment_lines(Emitter &e, Span span, uint32_t depth) {
     append_indent(*e.out, depth);
     *e.out += comment_of(*e.p->pd, id);
     *e.out += '\n';
-    if (comment_is_own_line(*e.p->pd, id)) { *e.out += '\n'; }  // reclassifies as own-line
+    if (comment_is_own_line(*e.p->pd, id)) { *e.out += '\n'; }  // own-line on re-parse
   }
 }
 
@@ -764,9 +756,8 @@ void emit_flat(Emitter &e, uint32_t root) {
   }
 }
 
-// `@k = [` then one value per line: the only break a single attribute admits.
-// `prefix` is what the caller already wrote on this line -- the `@` and any
-// `ns:` -- which the width test has to carry or it measures the wrong line.
+// Breaks a list of two or more values that does not fit into one value per line.
+// `prefix` is the width of the `@` and any `ns:` already written on the line.
 void emit_entry(Emitter &e,
                 EntryOut const &entry,
                 uint32_t depth,
@@ -793,8 +784,8 @@ void emit_item(Emitter &e, ItemOut const &item, uint32_t depth, uint32_t blank) 
   bool const group{ item.entries.len >= 2 };
   if (blank != 0) { *e.out += '\n'; }
 
-  // All but a final trailing comment go on lines above: a line takes one, and
-  // merging two statements can hand this item two.
+  // A final trailing comment trails the item's line; every other comment goes on a
+  // line above.
   uint32_t const n{ item.comments.len };
   bool const trails{
     (n != 0) && comment_is_trailing(*p.pd, p.comment_ids[item.comments.off + n - 1])
@@ -847,8 +838,6 @@ struct Job {
   uint32_t blank;    // 1 = a blank line above, which the first item never takes
 };
 
-// An explicit stack rather than the call stack: nesting depth is the document's
-// to choose, and the parse cap is a diagnostic rather than a small number.
 void emit_document(Emitter &e, uint32_t root) {
   Printer const &p{ *e.p };
   std::vector<Job> stack;
@@ -873,8 +862,6 @@ void emit_document(Emitter &e, uint32_t root) {
     if (job.blank != 0) { *e.out += '\n'; }
     emit_comment_lines(e, so.pre, job.depth);
 
-    // The root always breaks: a one-line file is legal and makes every edit a
-    // whole-file diff.
     bool const broken{ (job.stmt == root) || !fits(p, job.depth, so.flat_cps, job.comma) };
     if (!broken) {
       append_indent(*e.out, job.depth);
@@ -901,8 +888,7 @@ void emit_document(Emitter &e, uint32_t root) {
 
     BlockOut const &b{ p.blocks[so.block] };
     emit_comment_lines(e, b.orphans, job.depth + 1);
-    // A blank line opening a block would sit under the brace that opened it, so
-    // whatever comes first in the body never takes one.
+    // Only body lines after the first take a blank line above.
     uint32_t written{ b.orphans.len };
     for (uint32_t i = 0; i < b.items.len; ++i) {
       ItemOut const &item{ p.items[b.items.off + i] };
@@ -964,20 +950,18 @@ bool print_document(ParsedDocument const &pd, PrintOptions const &opts, std::str
                    .post = INVALID,
                    .blank = 0 });
 
-  // Not attributes: build_items sorts their comments onto the item they merged
-  // into, so bucketing them here would fill three spans nothing reads.
+  // build_items places the comments of attribute statements.
   for (uint32_t i = 0; i < pd.stmts.size(); ++i) {
     if (pd.stmts[i].kind != StmtKind::Attr) { bucket_comments(p, i); }
   }
 
-  // Children are parsed after their parent, so a reverse walk sees a block's
-  // contents first: the elision and width tests both need them.
+  // Children follow their parent in `stmts`, so a reverse walk builds each block's
+  // contents before the block.
   for (auto i = narrow_clamp<uint32_t>(pd.stmts.size()); i-- > 0;) {
     if (pd.stmts[i].kind == StmtKind::Attr) { continue; }
     p.stmts[i].head = build_head(p, i);
     p.stmts[i].head_cps = count_cp(text_of(p, p.stmts[i].head));
-    // A block row even when empty, so `emits_block` is the only test any reader
-    // needs and no caller has to check the id first.
+    // Every non-attribute statement gets a block row, empty when it has no children.
     if (pd.stmt_children[i].len != 0) {
       build_block(p, i);
     } else {
@@ -990,8 +974,7 @@ bool print_document(ParsedDocument const &pd, PrintOptions const &opts, std::str
   Emitter e{ .p = &p, .out = &out };
   emit_document(e, root);
 
-  // A comment ending the input classifies as own-line, whose blank line would
-  // land at the end of the file.
+  // Trims trailing blank lines so the output ends in one newline.
   while ((out.size() >= 2) && (out[out.size() - 1] == '\n') &&
          (out[out.size() - 2] == '\n')) {
     out.pop_back();

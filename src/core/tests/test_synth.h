@@ -1,8 +1,8 @@
 #ifndef SCAV_CORE_TESTS_TEST_SYNTH_H_INCLUDED
 #define SCAV_CORE_TESTS_TEST_SYNTH_H_INCLUDED
 
-// Synthetic documents, in RAM -- a disk-backed benchmark measures the filesystem.
-// Harness-only, and a trap alone: corpus_tests.cpp has the hand-written half.
+// Synthetic documents generated in RAM, for the test harness only.
+// test_charts.h holds the hand-written charts.
 
 #include <cstdint>
 #include <string>
@@ -20,8 +20,7 @@ struct SynthSpec {
   uint64_t min_bytes;      // keep adding subtrees until the text is this big
 };
 
-// What the generator actually emitted, so a test at 100 MB can assert the parse
-// found all of it rather than only that it did not crash.
+// Counts of what the generator emitted.
 struct SynthStats {
   uint32_t states;
   uint32_t submachines;
@@ -31,14 +30,12 @@ struct SynthStats {
   uint32_t statements;  // the chart included
 };
 
-// Depth 16 and a handful of siblings: the scale target, small enough to read
-// when a test fails.
+// Depth 16, four leaves per submachine and two submachines per state: the scale target.
 SynthSpec synth_default_spec();
 
 std::string synth_document(SynthSpec const &spec, SynthStats &stats);
 
-// A document that is `depth` blocks deep and nothing else, for the depth cap.
-// Separate from SynthSpec: 10,000 levels with any body would be gigabytes.
+// A document of `depth` nested states around one leaf, for the parser's depth cap.
 std::string synth_deep_document(uint32_t depth);
 
 }  // namespace scav

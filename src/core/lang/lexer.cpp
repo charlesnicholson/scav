@@ -14,14 +14,10 @@ namespace scav {
 
 namespace {
 
-// One token per six bytes of input is the measured shape of a dense chart. An
-// over-estimate costs one reallocation; an under-estimate costs log n of them.
 constexpr uint32_t BYTES_PER_TOKEN_ESTIMATE{ 6 };
 
 constexpr uint32_t RAW_DELIM_LEN{ 3 };
 
-// One class table rather than chained range compares, so the identifier run
-// costs a load and a mask per byte. 256 entries, indexed by a scav_byte.
 constexpr uint8_t CLS_IDENT_START{ 1U << 0U };
 constexpr uint8_t CLS_IDENT_CONTINUE{ 1U << 1U };
 constexpr uint8_t CLS_DIGIT{ 1U << 2U };
@@ -33,8 +29,7 @@ constexpr std::array<uint8_t, 256> CHAR_CLASS{ [] {
   for (uint32_t b = 'a'; b <= 'z'; ++b) { t[b] = CLS_IDENT_START | CLS_IDENT_CONTINUE; }
   t['_'] = CLS_IDENT_START | CLS_IDENT_CONTINUE;
   for (uint32_t b = '0'; b <= '9'; ++b) { t[b] = CLS_DIGIT | CLS_IDENT_CONTINUE; }
-  // The lexer never sees a CR: normalization folded every line ending to LF
-  // before it ran.
+  // CR is not whitespace; normalized input ends lines with LF.
   t[' '] = CLS_SPACE;
   t['\t'] = CLS_SPACE;
   t['\v'] = CLS_SPACE;
@@ -55,8 +50,6 @@ bool is_raw_delim_at(scav_byte const *bytes, uint32_t len, uint32_t at) {
          (bytes[at + 2] == '"');
 }
 
-// Every operand is uint32_t, since a `scav_byte` promotes to int and mixing in
-// a char literal converts back.
 constexpr uint32_t DIGIT_ZERO{ '0' };
 constexpr uint32_t DIGIT_NINE{ '9' };
 constexpr uint32_t LOWER_A{ 'a' };
@@ -88,8 +81,8 @@ TokKind punctuation_kind(scav_byte b) {
   }
 }
 
-// Length including both quotes, or 0 with `err` set. Escape *validity* is the
-// decoder's; all this knows is that a backslash defers the closing quote.
+// Length including both quotes, or 0 with `err` set. A backslash skips the next
+// byte; the decoder validates escapes.
 uint32_t scan_quoted(scav_byte const *bytes, uint32_t len, uint32_t at, DiagCode &err) {
   uint32_t i{ at + 1 };
   while (i < len) {
@@ -118,8 +111,8 @@ uint32_t scan_raw(scav_byte const *bytes, uint32_t len, uint32_t at, DiagCode &e
   return 0;
 }
 
-// Appends `line` minus `strip` leading whitespace. A whitespace-only line is
-// clamped to empty, not rejected: the under-indentation rule is about content.
+// Appends a line minus `strip` leading whitespace; a whitespace-only line appends
+// nothing. Content indented less than `strip` is RawStringUnderIndented.
 bool emit_raw_line(scav_byte const *bytes,
                    uint32_t off,
                    uint32_t len,
@@ -157,12 +150,10 @@ bool decode_raw(scav_byte const *bytes,
     return true;
   }
 
-  // Stripped to the closing delimiter's column, taken literally: the column is
-  // whatever precedes the closing """ on its line.
+  // Strip width: the bytes before the closing `"""` on its line.
   uint32_t const strip{ end - (last_newline + 1) };
 
-  // Collect line bounds first, so the two ends can be trimmed by index instead
-  // of by a lookahead inside the emit loop.
+  // Bounds of each line between the delimiters.
   std::vector<Span> lines;
   uint32_t line_begin{ begin };
   for (uint32_t i = begin; i <= end; ++i) {
@@ -173,8 +164,7 @@ bool decode_raw(scav_byte const *bytes,
   }
 
   uint32_t first{ 0 };
-  // A newline right after the opening delimiter says its line carries no
-  // content, which is the shape every multi-line literal is written in.
+  // Skips the empty first line after the opening `"""`.
   if (lines[0].len == 0) { first = 1; }
 
   uint32_t stop{ narrow_clamp<uint32_t>(lines.size()) };
@@ -184,14 +174,13 @@ bool decode_raw(scav_byte const *bytes,
     for (uint32_t i = 0; i < tail.len; ++i) {
       if (!is_space(bytes[tail.off + i])) { all_space = false; }
     }
-    // The closing delimiter's own indentation is not a line of content.
+    // Drops a last line holding only whitespace before the closing delimiter.
     if (all_space) { --stop; }
   }
 
   for (uint32_t i = first; i < stop; ++i) {
     if (i > first) { out.push_back('\n'); }
-    // Text on the opening delimiter's own line was never indented, so stripping
-    // it would eat content.
+    // The opening delimiter's line keeps its leading whitespace.
     uint32_t const strip_here{ ((i == 0) ? 0U : strip) };
     if (!emit_raw_line(bytes, lines[i].off, lines[i].len, strip_here, doc, out, diags)) {
       return false;
@@ -245,8 +234,7 @@ bool decode_quoted(scav_byte const *bytes,
         }
         cp = (cp << 4U) | nibble;
       }
-      // No surrogate pairing: \u names a codepoint, and an astral character is
-      // written directly. Pairing would make two spellings of one character.
+      // A `\u` escape names one codepoint; a surrogate is EscapedSurrogate.
       if ((cp >= 0xD800U) && (cp <= 0xDFFFU)) {
         diags.push_back(
             { .code = DiagCode::EscapedSurrogate, .doc = doc, .src = make_span(i, 6) });
@@ -289,8 +277,6 @@ char const *lex_token_kind_name(TokKind kind) {
 }
 
 bool lex_is_reserved_word(std::string_view text) {
-  // Length first: every identifier in a chart reaches this, and the reserved
-  // words occupy four lengths, so most callers answer without a comparison.
   switch (text.size()) {
     case 5:
       return (text == "chart") || (text == "state") || (text == "trans") ||
@@ -317,8 +303,7 @@ bool lex_decode_string_literal(scav_byte const *bytes,
     return false;
   }
 
-  // The source was folded on read, but \u decodes after that -- so fold again,
-  // or two spellings of one string compare unequal.
+  // Decoded text is NFC, including text from `\u` escapes.
   if (!source_text_is_nfc(out.data(), narrow_clamp<uint32_t>(out.size()))) {
     std::vector<scav_byte> composed;
     source_text_to_nfc(out.data(), narrow_clamp<uint32_t>(out.size()), composed);
@@ -335,8 +320,7 @@ bool lex_source(scav_byte const *bytes,
   out.tokens.clear();
   out.comments.clear();
 
-  // A token's off/len is uint32. The usual caller normalized first and already
-  // checked this, but lex_source is public and takes bytes from anywhere.
+  // Token offsets are uint32; longer input is DocumentTooLarge.
   uint32_t len{ 0 };
   if (!narrow(byte_count, len)) {
     diags.push_back({ .code = DiagCode::DocumentTooLarge, .doc = doc, .src = {} });
@@ -347,7 +331,7 @@ bool lex_source(scav_byte const *bytes,
 
   bool ok{ true };
   bool code_on_line{ false };
-  // The comment that could still turn out to be followed by a blank line.
+  // Index of the last comment while its `blank_after` is undecided, else INVALID.
   uint32_t open_comment{ INVALID };
   uint32_t newlines_after{ 0 };
 
@@ -360,8 +344,7 @@ bool lex_source(scav_byte const *bytes,
       code_on_line = false;
       if (open_comment != INVALID) {
         ++newlines_after;
-        // The first newline ends the comment's line; a second is a blank line,
-        // which is what detaches a floating comment from the statement below.
+        // A second newline after a comment is a blank line and sets its `blank_after`.
         if (newlines_after >= 2) {
           out.comments[open_comment].blank_after = 1;
           open_comment = INVALID;
@@ -370,15 +353,12 @@ bool lex_source(scav_byte const *bytes,
       continue;
     }
     if (is_space(b)) {
-      // As a run: indentation is a third of a formatted document's bytes.
       do { ++at; } while ((at < len) && is_space(bytes[at]));
       continue;
     }
 
     if ((b == '/') && (at + 1 < len) && (bytes[at + 1] == '/')) {
       uint32_t const stop{ [&] {
-        // memchr rather than a byte loop: a comment run is the one place the
-        // lexer walks prose, and libc scans it a cache line at a time.
         void const *const nl{ std::memchr(bytes + at, '\n', len - at) };
         return nl ? narrow_clamp<uint32_t>(
                         static_cast<size_t>(static_cast<scav_byte const *>(nl) - bytes))
@@ -393,8 +373,8 @@ bool lex_source(scav_byte const *bytes,
       continue;
     }
 
-    // After the line-comment check, so `//*` stays one. Skipping to the close
-    // gives one diagnostic rather than a cascade from the body's tokens.
+    // Reports `/*` as BlockCommentUnsupported and skips past the closing `*/`. Runs
+    // after the `//` check, so `//*` is a line comment.
     if ((b == '/') && (at + 1 < len) && (bytes[at + 1] == '*')) {
       diags.push_back({ .code = DiagCode::BlockCommentUnsupported,
                         .doc = doc,
@@ -408,8 +388,7 @@ bool lex_source(scav_byte const *bytes,
       continue;
     }
 
-    // Any real token ends whatever comment run preceded it, which is what makes
-    // that run the token's leading trivia rather than a floating block.
+    // A token closes the open comment run, leaving its `blank_after` at 0.
     open_comment = INVALID;
     code_on_line = true;
 
@@ -434,8 +413,7 @@ bool lex_source(scav_byte const *bytes,
                                 : scan_quoted(bytes, len, at, err) };
       if (width == 0) {
         diags.push_back({ .code = err, .doc = doc, .src = make_span(at, 1) });
-        // No recovery that is not a guess. Stop, but fall through so the
-        // stream still gets its End sentinel.
+        // A string scan error ends the lex; the End sentinel is still appended.
         ok = false;
         break;
       }
@@ -462,16 +440,13 @@ bool lex_source(scav_byte const *bytes,
       continue;
     }
 
-    // Recoverable: skipping the byte lets one run report every stray character
-    // rather than only the first.
     diags.push_back(
         { .code = DiagCode::UnexpectedCharacter, .doc = doc, .src = make_span(at, 1) });
     ok = false;
     ++at;
   }
 
-  // Nothing follows a comment that ends the input, so it is floating rather
-  // than leading.
+  // A comment that ends the input gets `blank_after = 1`.
   if (open_comment != INVALID) { out.comments[open_comment].blank_after = 1; }
 
   out.tokens.push_back({ .off = len, .len = 0, .kind = TokKind::End });

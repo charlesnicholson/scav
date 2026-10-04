@@ -1,5 +1,4 @@
-// The C API driven as C: handles, out-params, error codes. Runs under the
-// sanitizers, where a handle-lifetime mistake shows up.
+// Tests the C API as a C caller would: handles, out-params, error codes.
 
 #include "scav/scav_core_c.h"
 
@@ -60,8 +59,8 @@ std::vector<Doc> diamond() {
   };
 }
 
-// Drives one network to completion through the ABI alone. Returns the chart or
-// null, exactly as a binding would see it.
+// Drives one network to completion through the C ABI alone. Returns the chart
+// or null; `*keep` receives the loader.
 scav_chart *drive(std::vector<Doc> const &corpus, scav_load **keep) {
   scav_load *loader{ nullptr };
   REQUIRE(scav_load_begin(&loader) == SCAV_OK);
@@ -73,8 +72,6 @@ scav_chart *drive(std::vector<Doc> const &corpus, scav_load **keep) {
     uint32_t stride{ 0 };
     uint32_t count{ 0 };
     REQUIRE(scav_load_pending(loader, &pending, &stride, &count) == SCAV_OK);
-    // What a binding does with the stride: assert it against its own row size
-    // before walking rows it did not lay out.
     REQUIRE(stride == PENDING_SIZE);
     if (count == 0) { break; }
 
@@ -214,7 +211,6 @@ TEST_CASE("abi: the digest honours the query-then-fill out-param protocol") {
   REQUIRE(scav_chart_digest(chart, nullptr, 0, &needed) == SCAV_OK);
   REQUIRE(needed != 0);
 
-  // Too small never truncates silently; it says how much was wanted.
   std::vector<scav_byte> small(needed - 1, 0);
   uint32_t again{ 0 };
   CHECK(scav_chart_digest(chart, small.data(), needed - 1, &again) == SCAV_E_CAPACITY);
@@ -224,7 +220,7 @@ TEST_CASE("abi: the digest honours the query-then-fill out-param protocol") {
   REQUIRE(scav_chart_digest(chart, exact.data(), needed, &again) == SCAV_OK);
   CHECK(again == needed);
 
-  // And the digest really is what the hash is computed over.
+  // A larger buffer receives the same bytes and reports the same length.
   std::vector<scav_byte> roomy(needed + 32, 0);
   REQUIRE(scav_chart_digest(chart, roomy.data(), needed + 32, &again) == SCAV_OK);
   CHECK(again == needed);
@@ -287,7 +283,7 @@ TEST_CASE("abi: finishing twice is a state error, not a second chart") {
 }
 
 TEST_CASE("abi: two loaders in one process do not share state") {
-  // No library-global state and no init call, asserted rather than assumed.
+  // Two loaders, with no init call, produce equal structural hashes.
   scav_load *first_loader{ nullptr };
   scav_load *second_loader{ nullptr };
   scav_chart *a{ drive(diamond(), &first_loader) };
@@ -337,8 +333,7 @@ TEST_CASE("abi: a chart diagnostic reads back field for field") {
   scav_chart *chart{ drive(diamond(), &loader) };
   REQUIRE(chart != nullptr);
 
-  // Planted through the internal definition, the way layout and validation
-  // will write them; the C caller sees only the flat struct.
+  // Pushes a diagnostic through the C++ struct; the C caller reads it as `scav_diag`.
   chart->diags.push_back({ .code = scav::DiagCode::DanglingRef,
                            .subject = { .kind = scav::ElemKind::State, .ordinal = 7 },
                            .doc = { 2 },
@@ -367,8 +362,8 @@ TEST_CASE("abi: a registered column reads back through the three-call accessor")
   scav_chart *chart{ drive(diamond(), &loader) };
   REQUIRE(chart != nullptr);
 
-  // Registered through the C++ API the way layout will; the C caller sees
-  // only find, data, count.
+  // Registers a column through the C++ API; the C caller reads it through find,
+  // data, count.
   scav::ColumnId const id{ scav::column_register(chart->chart,
                                                  "scav.geom.state",
                                                  scav::ElemKind::State,
@@ -441,8 +436,8 @@ TEST_CASE("abi: a null argument is refused whichever one it is, and writes nothi
   scav_chart *chart{ drive(diamond(), &loader) };
   REQUIRE(chart != nullptr);
 
-  // Each out-param carries a value the call must leave alone; a pointer one
-  // carries an address, since a written pointer could legitimately be null.
+  // Each out-param holds a sentinel the call must leave unchanged; pointer
+  // out-params hold a non-null address.
   scav_byte const guard{ 0x5C };
   scav_pending const marker{};
   scav_pending const *pending{ &marker };
@@ -622,8 +617,7 @@ TEST_CASE("abi: an ordinal or a span past the end is refused, and writes nothing
     { .what = "load_path: a span past the path pool",
       .got = scav_load_path(loader, past_paths, &bytes, &len),
       .want = SCAV_E_INVALID_ARG },
-    // Summed in 64 bits, so a span whose end wraps 32 is out of range rather
-    // than back inside the pool.
+    // `off + len` is summed in 64 bits; a span whose end wraps 32 bits is out of range.
     { .what = "load_path: a span whose end wraps",
       .got = scav_load_path(loader, wraps, &bytes, &len),
       .want = SCAV_E_INVALID_ARG },
@@ -670,8 +664,6 @@ TEST_CASE("abi: the digest refuses a buffer it was promised but not given") {
   REQUIRE(scav_chart_digest(chart, nullptr, 0, &needed) == SCAV_OK);
   REQUIRE(needed != 0);
 
-  // A capacity with no buffer under it is the capacity error, not a write: the
-  // count is still reported, so a caller can allocate and come back.
   uint32_t again{ SENTINEL };
   CHECK(scav_chart_digest(chart, nullptr, needed, &again) == SCAV_E_CAPACITY);
   CHECK(again == needed);
@@ -684,8 +676,8 @@ TEST_CASE("abi: a loader still open reports its own diagnostics, and its refusal
   scav_load *loader{ nullptr };
   REQUIRE(scav_load_begin(&loader) == SCAV_OK);
 
-  // Bytes that do not parse: the add itself is the load error, and the
-  // diagnostics are readable from the loader before anything is finished.
+  // Unparseable bytes fail the add with SCAV_E_LOAD; the loader's diagnostics
+  // are readable before finish.
   CHECK(add(loader, "chart c { state", "bad.scav") == SCAV_E_LOAD);
   uint32_t count{ 0 };
   REQUIRE(scav_load_diag_count(loader, &count) == SCAV_OK);
@@ -701,8 +693,7 @@ TEST_CASE("abi: a loader still open reports its own diagnostics, and its refusal
 
   scav_load_destroy(loader);
 
-  // No bytes and no length is an empty document rather than the null-pointer
-  // refusal: it reaches the parser, which is what has nothing to say about it.
+  // A null pointer with length 0 is an empty document, which the parser rejects.
   scav_load *empty{ nullptr };
   REQUIRE(scav_load_begin(&empty) == SCAV_OK);
   CHECK(scav_load_add(empty, nullptr, 0, "empty.scav") == SCAV_E_LOAD);
@@ -726,10 +717,7 @@ TEST_CASE("abi: a struct size that disagrees with the header is refused first") 
     CAPTURE(size);
     CHECK(scav_chart_diag(chart, 0, &d, size) == SCAV_E_ABI);
     CHECK(d.code == SENTINEL);  // refused before anything was written
-    // The size is the caller's claim about its own headers, so it is tested
-    // whether or not there is a pointer beside it: SCAV_E_ABI outranks the
-    // null-argument refusal, because a caller whose struct differs cannot be
-    // trusted about the rest of what it passed.
+    // The size is checked first: SCAV_E_ABI outranks the null-argument refusal.
     CHECK(scav_chart_diag(chart, 0, nullptr, size) == SCAV_E_ABI);
     CHECK(scav_chart_diag(nullptr, 0, &d, size) == SCAV_E_ABI);
   }

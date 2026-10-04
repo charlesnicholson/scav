@@ -93,7 +93,7 @@ inline std::string corpus_pins_of(std::string_view chart, bool text) {
   return {};
 }
 
-// Whether a search-reaches-pins case searches `chart`; mill's search is `scav selftest`'s.
+// Whether a search-reaches-pins case searches `chart`.
 inline bool corpus_searched(std::string_view chart) {
   return !corpus_skipped(chart) && (chart != "mill.scav");
 }

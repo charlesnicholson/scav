@@ -1,5 +1,5 @@
-// Lowering and validation floors, never times, to catch an accidental O(n^2):
-// a span rebuild per wildcard, or a fix-up walk per append.
+// Lowering and validation throughput floors and scaling ratios. Catches O(n^2)
+// costs: a span rebuild per wildcard, or a fix-up walk per append.
 
 #include "core/core_internal.h"
 #include "core/tests/perf_support.h"
@@ -88,8 +88,8 @@ TEST_CASE(
   uint64_t const lower_us{ time_lower(pd, c) };
   uint64_t const validate_us{ time_validate(c) };
 
-  // The generator's stats are what the model must contain: nothing dropped,
-  // nothing invented but the per-`*` pseudostates.
+  // The model's counts match the generator's stats; its unnamed states are the
+  // per-`*` pseudostates.
   uint32_t authored_states{ 0 };
   uint32_t synthesized{ 0 };
   for (State const &s : c.states) {
@@ -106,8 +106,6 @@ TEST_CASE(
   CHECK(c.attrs.size() >= stats.attrs);  // a block entry lowers to >= 1 row
   CHECK(synthesized > 0);
 
-  // Entity rows cost more than their text: a 12-byte `state A123,` becomes a
-  // 52-byte row plus ids, statement and name. The bound is a multiple.
   uint64_t const footprint{ chart_footprint(c) };
   CHECK_MESSAGE(footprint < bytes * 8,
                 "chart " << ((footprint * 100) / bytes) << "% of input");
@@ -178,8 +176,8 @@ TEST_CASE("perf: validation is linear in the model" * doctest::test_suite("full"
 
 TEST_CASE("perf: a wide sibling list lowers without degrading" *
           doctest::test_suite("full")) {
-  // Every statement in one block: the shape that turns quadratic when an
-  // append pays a fix-up walk over every span it did not touch.
+  // Every statement in one block; a per-append fix-up walk over spans makes this
+  // quadratic.
   auto const wide = [](uint32_t count) {
     std::string out{ "chart wide {" };
     for (uint32_t i = 0; i < count; ++i) { out += "state W" + std::to_string(i) + ","; }

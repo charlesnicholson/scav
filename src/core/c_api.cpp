@@ -11,8 +11,7 @@
 #include <string_view>
 #include <vector>
 
-// Pinned where the ABI is projected: a platform where these drift must fail
-// to compile rather than misread the layouts a binding reproduces.
+// ABI struct sizes a binding reproduces; other sizes fail to compile.
 static_assert(sizeof(scav_span) == 8);
 static_assert(sizeof(scav_point) == 8);
 static_assert(sizeof(scav_extent) == 8);
@@ -22,16 +21,13 @@ static_assert(sizeof(scav_pending) == 16);
 
 namespace {
 
-// Copied field by field rather than reinterpreted. The layouts match today and
-// nothing enforces that they keep matching.
 scav_pending to_abi(scav::Pending const &p) {
   return { .path = { .off = p.path.off, .len = p.path.len },
            .from_doc = p.from.v,
            .stmt_row = p.stmt_row };
 }
 
-// Whichever diagnostic vector is current: the loader's before finish, the
-// handle's after. Outside extern "C", which forbids returning a std:: type.
+// The current diagnostic vector: the loader's before finish, the handle's after.
 std::vector<scav::Diagnostic> const &diags_of(scav_load const *loader) {
   return (loader->finished != 0) ? loader->diags : loader->loader.diags;
 }
@@ -102,8 +98,7 @@ scav_result scav_load_finish(scav_load *loader, scav_chart **out) {
   scav_chart *const built{ new scav_chart{ .chart = {} } };
   bool const ok{ scav::load_finish(loader->loader, built->chart, loader->diags) };
   if (built->chart.documents.empty()) {
-    // Nothing was built. An empty chart would read as an empty network rather
-    // than a failed one.
+    // Nothing was built: free the chart and leave `*out` NULL.
     delete built;
     return SCAV_E_LOAD;
   }
@@ -262,7 +257,6 @@ scav_result scav_chart_digest(scav_chart const *chart,
                               uint32_t cap,
                               uint32_t *out_count) {
   if ((chart == nullptr) || (out_count == nullptr)) { return SCAV_E_INVALID_ARG; }
-  // Recomputed per call rather than cached, so it cannot go stale.
   std::vector<scav_byte> digest;
   scav::chart_digest_bytes(chart->chart, digest);
   *out_count = static_cast<uint32_t>(digest.size());

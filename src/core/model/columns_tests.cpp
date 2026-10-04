@@ -137,7 +137,6 @@ TEST_CASE("column: registration rejects what would corrupt the contract") {
   Chart c;
   build_chart(c, "c", {});
   REQUIRE(column_register(c, "ok", ElemKind::State, ValueKind::U32, 4, 4, 0).v != INVALID);
-  // A column is an identity: re-registration is a bug, not an upsert.
   CHECK(column_register(c, "ok", ElemKind::State, ValueKind::U32, 4, 4, 0).v == INVALID);
   CHECK(column_register(c, "", ElemKind::State, ValueKind::U32, 4, 4, 0).v == INVALID);
   CHECK(column_register(c, "x", ElemKind::None, ValueKind::U32, 4, 4, 0).v == INVALID);

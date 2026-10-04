@@ -218,14 +218,11 @@ TEST_CASE("validate: column counts must match their entity array") {
   std::vector<Diagnostic> const diags{ run(r.c) };
   REQUIRE(diags.size() == 1);
   CHECK(diags[0].code == DiagCode::ColumnCountMismatch);
-  // A column has no ElemKind, so the subject is the array the column failed to
-  // cover, spelled with the INVALID ordinal that names a kind and no row.
   CHECK(diags[0].subject.kind == ElemKind::State);
   CHECK(diags[0].subject.ordinal == INVALID);
   CHECK_FALSE(chart_ref_valid(r.c, diags[0].subject));
 
-  // The renderer has no statement to walk to, so it falls back to the name the
-  // caller supplied rather than indexing a row that is not there.
+  // With no statement to quote, the renderer prints the caller-supplied name.
   std::string out;
   diag_append(out, r.c, diags[0], "cmdline.scav");
   CHECK(out == std::string{ "cmdline.scav: " } +
@@ -294,8 +291,7 @@ TEST_CASE("validate: a state sits in its parent's children exactly once") {
     CHECK(diags[0].subject == ref(r.b));
   }
   SUBCASE("twice") {
-    // Nameless and not an initial, so the duplicate entry trips neither the
-    // duplicate-name check nor the multiple-initial one.
+    // A nameless Choice state, so only the containment check fires.
     StateId const anon{ build_state(r.c, r.root, {}, StateKind::Choice, {}) };
     r.c.state_ids.push_back(anon);
     r.c.submachines[r.root.v].children.len += 1;
@@ -366,7 +362,7 @@ TEST_CASE("validate: a submachines entry points back at the state holding it") {
 
 TEST_CASE("validate: only the chart's own root submachine may be ownerless") {
   Built r{ built() };
-  // Appended rather than built: the builder has no way to make a second root.
+  // Pushed directly; build_chart refuses a second root.
   r.c.submachines.push_back({ .owner = { INVALID },
                               .ordinal = 0,
                               .name = {},
@@ -406,8 +402,7 @@ TEST_CASE("validate: a containment cycle is reported and the walk terminates") {
 }
 
 TEST_CASE("validate: a broken containment ordinal is one finding, not two") {
-  // The dangling parent is already a DanglingRef, so the containment check
-  // stays silent about the same ordinal rather than piling on.
+  // The dangling parent is reported as DanglingRef only; containment skips it.
   Built r{ built() };
   r.c.states[r.a.v].parent = SubmachineId{ 99 };
   std::vector<Diagnostic> const diags{ run(r.c) };
@@ -444,8 +439,6 @@ TEST_CASE("validate: appends to the caller's vector without clearing it") {
 }
 
 TEST_CASE("validate: pre-model diagnostics default to a None subject") {
-  // The NSDMI is what lets a producer leave the subject out entirely: a designated
-  // initializer that skips .subject gets None + INVALID, not zeroes.
   Diagnostic const d{ .code = DiagCode::ExpectedChart, .doc = { 0 }, .src = {} };
   CHECK(d.subject.kind == ElemKind::None);
   CHECK(d.subject.ordinal == INVALID);
@@ -550,8 +543,6 @@ TEST_CASE("validate: an include's target, path and statement are all checked") {
 }
 
 TEST_CASE("validate: a document's own spans must land in the chart's pools") {
-  // No entity exists to blame, so the finding carries the document and the None
-  // subject that names no row at all.
   Built r{ built() };
   SUBCASE("text past src_bytes") {
     r.c.documents.push_back({ .path = {}, .text = make_span(0, 5), .statements = {} });
@@ -616,8 +607,7 @@ TEST_CASE("validate: a column over an entity with no array is held to no count")
   CHECK(column_count(r.c, col) == 5);
   CHECK(run(r.c).empty());
 
-  // Neither kind can be registered, so the arms that skip them are reached by
-  // rewriting the descriptor the way a stale extension would.
+  // PathBox and None cannot be registered, so these subcases rewrite the descriptor.
   SUBCASE("a path box counts nothing either") {
     r.c.columns[col.v].desc.entity = ElemKind::PathBox;
     CHECK(run(r.c).empty());

@@ -1,5 +1,5 @@
-// Floors, never times, to catch an accidental O(n^2); the scaling assertion is
-// the machine-independent one. Instrumented builds shrink the input.
+// Asserts throughput floors and linear scaling to catch an accidental O(n^2);
+// scaling is machine-independent. Instrumented builds shrink the input.
 
 #include "core/core_internal.h"
 #include "core/tests/perf_support.h"
@@ -28,14 +28,12 @@ constexpr uint64_t INPUT_BYTES{ SCAV_PERF_INPUT_BYTES };
 constexpr bool ASSERT_FLOOR{ SCAV_PERF_ASSERT_FLOOR != 0 };
 constexpr bool ASSERT_SCALING{ SCAV_PERF_ASSERT_SCALING != 0 };
 
-// An order of magnitude under a 2020-era laptop: a halved throughput is not what
-// this catches, and a quadratic one blows through it regardless.
+// Throughput floors in MiB/s, an order of magnitude below a laptop's rate.
 constexpr uint64_t NORMALIZE_FLOOR_MB_PER_S{ 20 };
 constexpr uint64_t LEX_FLOOR_MB_PER_S{ 20 };
 constexpr uint64_t PARSE_FLOOR_MB_PER_S{ 10 };
 
-// 4x input for 4x work is linear; 3x slack covers cache effects and a noisy box,
-// and is still nowhere near the 16x a quadratic term costs.
+// Allowed growth over linear: 4x input may take under 12x time; quadratic is 16x.
 constexpr double SCALING_SLACK{ 3.0 };
 
 uint64_t throughput_mb_per_s(uint64_t bytes, uint64_t micros) {
@@ -113,8 +111,7 @@ struct Printed {
   uint64_t bytes;
 };
 
-// Timed over an already-parsed document: folding the parse in would hide a
-// quadratic behind a linear term that dominates it.
+// Times the print alone, over an already-parsed document.
 Printed time_print(ParsedDocument const &pd) {
   std::string out;
   auto const start{ std::chrono::steady_clock::now() };
@@ -167,16 +164,14 @@ TEST_CASE("perf: lex and parse a large document in RAM") {
                   "lex " << lex_rate << " MiB/s over " << lexing.tokens << " tokens");
     CHECK_MESSAGE(parse_rate >= PARSE_FLOOR_MB_PER_S, "parse " << parse_rate << " MiB/s");
 
-    // A ratio between two stages on one box. Lexing is more work per byte, so a
-    // slower normalize means it went back to copying one byte at a time.
+    // On the same machine, normalize runs at least as fast as lex.
     CHECK_MESSAGE(norm_rate >= lex_rate,
                   "normalize " << norm_rate << " MiB/s is slower than lex " << lex_rate);
   }
 }
 
 TEST_CASE("perf: peak memory is a bounded multiple of the input") {
-  // The cost of materializing the token stream rather than pulling it, stated
-  // as a number instead of left as a claim.
+  // Bounds the token stream and parsed document as multiples of the input size.
   SynthStats stats{};
   std::string const text{ generate(INPUT_BYTES, stats) };
   uint64_t const bytes{ text.size() };
@@ -209,13 +204,11 @@ TEST_CASE("perf: peak memory is a bounded multiple of the input") {
   // The document holds src_bytes at 1x plus one row per statement, so under 3x.
   CHECK_MESSAGE(parse_bytes < bytes * 4,
                 "document " << ((parse_bytes * 100) / bytes) << "% of input");
-  // Both are freed independently: the parse does not need the tokens afterwards.
+  // The document holds its own copy of the source.
   CHECK(parse_bytes > bytes);
 }
 
 TEST_CASE("perf: lexing is linear in the input" * doctest::test_suite("full")) {
-  // The machine-independent half, and the one that actually catches an
-  // accidental quadratic.
   SynthStats stats{};
   uint64_t const small_target{ INPUT_BYTES / 8 };
   std::string const small{ generate(small_target, stats) };
@@ -226,8 +219,7 @@ TEST_CASE("perf: lexing is linear in the input" * doctest::test_suite("full")) {
   double const ratio{ static_cast<double>(large_bytes.size()) /
                       static_cast<double>(small_bytes.size()) };
 
-  // Warm both paths first, so the first measurement is not paying for page
-  // faults the second one does not.
+  // Warms both inputs so page faults fall outside the timed runs.
   time_lex(small_bytes);
   time_lex(large_bytes);
   auto const [small_us, large_us]{ best_pair([&] { time_lex(small_bytes); },
@@ -280,8 +272,7 @@ TEST_CASE("perf: parsing is linear in the input" * doctest::test_suite("full")) 
 }
 
 TEST_CASE("perf: a wide sibling list does not degrade" * doctest::test_suite("full")) {
-  // One block with every statement in it, which is the shape a naive
-  // children-span implementation turns quadratic.
+  // One block holding every statement as siblings.
   auto const wide = [](uint32_t count) {
     std::string out{ "chart wide {" };
     for (uint32_t i = 0; i < count; ++i) {
@@ -349,8 +340,8 @@ TEST_CASE("perf: a long comment run does not degrade" * doctest::test_suite("ful
 }
 
 TEST_CASE("perf: deep nesting does not degrade" * doctest::test_suite("full")) {
-  // Pushing a frame is amortized constant; materializing each block's children
-  // into the shared id array is where a per-close copy would show up.
+  // Pushing a frame is amortized constant; each block close copies its children
+  // into the shared id array.
   std::string const small{ synth_deep_document(60) };
   std::string const large{ synth_deep_document(240) };
   double const ratio{ static_cast<double>(large.size()) /
@@ -369,7 +360,6 @@ TEST_CASE("perf: deep nesting does not degrade" * doctest::test_suite("full")) {
 }
 
 TEST_CASE("perf: the generated document is what it claims to be") {
-  // A performance test over input nobody checked measures the generator.
   SynthStats stats{};
   std::string const text{ generate(INPUT_BYTES / 16, stats) };
   Parsed const r{ parse(text) };
@@ -393,8 +383,6 @@ TEST_CASE("perf: print a large document" * doctest::test_suite("full")) {
   if (ASSERT_FLOOR) {
     CHECK_MESSAGE(rate >= PRINT_FLOOR_MB_PER_S, "print at " << rate << " MB/s");
   }
-  // Canonical text is the same order of magnitude as its source. A printer that
-  // quietly quadrupled the file would still pass every idempotence test.
   CHECK(printed.bytes > (text.size() / 2));
   CHECK(printed.bytes < (text.size() * 2));
 }
@@ -419,8 +407,7 @@ TEST_CASE("perf: printing is linear in the input" * doctest::test_suite("full"))
 
 TEST_CASE("perf: a block with many attributes does not degrade" *
           doctest::test_suite("full")) {
-  // Sorting and merging attributes is where a quadratic would live: the
-  // statement-to-item mapping is a lookup, not a scan.
+  // Times the printer's attribute sort and merge over one block.
   auto const attr_block{ [](uint32_t count) {
     std::string text{ "chart c {\n" };
     for (uint32_t i = 0; i < count; ++i) {

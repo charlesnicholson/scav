@@ -1,5 +1,5 @@
-// A deterministic mutation sweep, running in the ordinary suite. The bar is
-// that nothing crashes and every diagnostic still points inside its document.
+// A deterministic mutation sweep in the ordinary suite. Every run completes
+// and every diagnostic span lies inside its document.
 
 #include "core/core_internal.h"
 #include "core/tests/test_support.h"
@@ -20,8 +20,8 @@ namespace {
 using namespace scav;
 using namespace scav::test;
 
-// splitmix64's finalizer, position-addressed rather than stateful: a failure is
-// reproducible from the seed alone.
+// splitmix64's finalizer over `seed` and `index`; a failure reproduces from
+// the seed alone.
 uint64_t rnd(uint64_t seed, uint64_t index) {
   uint64_t x{ seed + (index * 0x9E37'79B9'7F4A'7C15ULL) };
   x = (x ^ (x >> 30U)) * 0xBF58'476D'1CE4'E5B9ULL;
@@ -44,8 +44,8 @@ std::vector<std::string> seed_corpus() {
   };
 }
 
-// The bytes a mutation reaches for: everything structural in the grammar, plus
-// the characters most likely to break an assumption.
+// Bytes a mutation inserts or substitutes: grammar punctuation, whitespace,
+// and edge-case ASCII and UTF-8 bytes.
 constexpr std::string_view INTERESTING{ "{}[],=@:/*->\"'\\\n\t 0aA_\x7f\x80\xc3\xa9\xff" };
 
 std::string mutate(std::string_view seed, uint64_t key) {
@@ -63,14 +63,12 @@ std::string mutate(std::string_view seed, uint64_t key) {
     } else if (op == 2) {
       s.erase(s.begin() + at);
     } else {
-      // Truncation, which is the shape that finds a missing bounds check.
       s.resize(at);
     }
   }
   return s;
 }
 
-// The invariants every run has to hold, whatever the input said.
 void check_diagnostics(std::vector<Diagnostic> const &diags, uint32_t doc_len) {
   for (Diagnostic const &d : diags) {
     CHECK(d.code != DiagCode::Ok);
@@ -115,8 +113,7 @@ TEST_CASE("fuzz: the lexer survives arbitrary bytes") {
     lex_source(normalized.data(), len, DocId{ 0 }, lexed, diags);
     check_diagnostics(diags, len);
 
-    // The End sentinel is what lets lookahead skip its bounds check, so it is
-    // owed on every path including the failing ones.
+    // The token stream ends with End on every path, failing ones included.
     REQUIRE_FALSE(lexed.tokens.empty());
     CHECK(lexed.tokens.back().kind == TokKind::End);
     for (Token const &t : lexed.tokens) {
@@ -141,15 +138,11 @@ TEST_CASE("fuzz: the parser survives arbitrary bytes") {
     // A failed parse reports why; a successful one has nothing to report.
     CHECK(r.ok == r.diags.empty());
   }
-  // Not an assertion about the grammar, only that the corpus is not so mangled
-  // that the accepting path went untested.
   CHECK(accepted > 0);
 }
 
 TEST_CASE("fuzz: a partially parsed document still has consistent spans") {
   constexpr uint64_t SEED{ 0x5CA1'AB1E'0000'0003ULL };
-  // Truncation at every byte of a real chart: each prefix is a document that
-  // stops mid-statement, which is where a span left half-written would show.
   std::string_view const full{
     R"(chart c { include "w.scav" as w, state On { @doc = "x", m main { s Idle, t * -> Idle, }, }, })"
   };
@@ -161,7 +154,7 @@ TEST_CASE("fuzz: a partially parsed document still has consistent spans") {
   }
   CHECK(parse(full).ok);
 
-  // And a prefix of the *generated* corpus, which nests far deeper.
+  // Prefixes of a generated depth-6 document, every 37 bytes.
   SynthSpec spec{ synth_default_spec() };
   spec.depth = 6;
   spec.min_roots = 1;
@@ -194,7 +187,6 @@ TEST_CASE("fuzz: every accepted document round-trips its own source spans") {
 }
 
 TEST_CASE("fuzz: the mutation corpus is reproducible from its seed") {
-  // A fuzz failure nobody can reproduce is a flake, so this is load-bearing.
   CHECK(mutate("chart c {}", 12345) == mutate("chart c {}", 12345));
   CHECK(mutate("chart c {}", 12345) != mutate("chart c {}", 12346));
   CHECK(rnd(1, 1) == rnd(1, 1));
@@ -210,15 +202,13 @@ TEST_CASE("fuzz: printing any parse tree terminates and reaches a fixed point") 
     std::string const input{ mutate(seeds[i % seeds.size()], SEED + i) };
     Parsed const r{ parse(input) };
 
-    // A rejected parse leaves a half-built tree, and the printer must walk it
-    // without reading past a span -- there is no gate between the two.
+    // The printer also walks the half-built tree of a rejected parse.
     std::string once;
     REQUIRE(print_document(r.pd, print_default_options(), once));
     if (!r.ok) { continue; }
     ++printed;
 
-    // Reparsing is what makes idempotence a claim about the format rather than
-    // about one function.
+    // The printed text reparses and prints to the same bytes.
     Parsed const again{ parse(once) };
     CHECK(again.ok);
     CHECK(again.diags.empty());

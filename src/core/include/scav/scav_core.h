@@ -1,8 +1,8 @@
 #ifndef SCAV_CORE_H_INCLUDED
 #define SCAV_CORE_H_INCLUDED
 
-// libscavcore's public API. A Chart is the product: load a document network or
-// build one directly, query it, validate it, hash it.
+// libscavcore's public API: load a document network or build a Chart directly, then
+// query, validate and hash it.
 
 #include "scav/scav_types.h"
 
@@ -16,8 +16,8 @@ namespace scav {
 
 // Ids and spans =============================================================
 
-// An id is an ordinal *and* an array index into the entity array it names.
-// Deletion tombstones rather than compacting, so that stays true.
+// An id is an ordinal and the index of its row in the entity array it names.
+// Deletion tombstones the row in place, so ids stay stable.
 
 constexpr uint32_t INVALID{ 0xFFFF'FFFFU };
 
@@ -54,8 +54,7 @@ struct ColumnId {  // index into Chart::columns
   constexpr bool operator==(ColumnId const &) const = default;
 };
 
-// Ids compare for equality only. A sort that means to order by ordinal says
-// `.v`.
+// Ids compare for equality only; to order by ordinal, compare `.v`.
 
 // What an entity is. StmtKind is the parallel enum over what a line of source
 // is.
@@ -75,8 +74,8 @@ struct ElemRef {
   constexpr bool operator==(ElemRef const &) const = default;
 };
 
-// Into StringPool::bytes. Two equal refs are the same span; equal *text* is a
-// view comparison, because the pool never deduplicates.
+// Offset and length into StringPool::bytes. Equal refs name the same span; the pool
+// keeps duplicates, so compare text by view.
 struct StrRef {
   uint32_t off, len;
   constexpr bool operator==(StrRef const &) const = default;
@@ -102,8 +101,7 @@ enum class DiagCode : uint32_t {
 
   DocumentTooLarge,
 
-  // Normalization. Spans index the *raw* input: the normalized buffer does not
-  // exist yet when these fire.
+  // Normalization. Spans index the raw input bytes.
   Utf8Truncated,
   Utf8InvalidByte,
   Utf8Overlong,
@@ -151,8 +149,7 @@ enum class DiagCode : uint32_t {
   DocumentAlreadyLoaded,
   LoaderEmpty,
 
-  // Lowering. These carry the offending statement's span; the entity they
-  // would have named was never created.
+  // Lowering. These carry the offending statement's span and no subject.
   MisplacedStatement,
   WildcardBothEndpoints,
   EndpointUnresolved,
@@ -170,8 +167,7 @@ enum class DiagCode : uint32_t {
   StatementSpanOutOfRange,
   ColumnCountMismatch,
 
-  // Space requests. These carry the requesting entity, so the failure is
-  // attributed to the request that caused it.
+  // Space requests. These carry the requesting entity as the subject.
   SpaceOutOfRange,
   SpaceOrderDuplicate,
   SpaceSubjectInvalid,
@@ -182,23 +178,19 @@ enum class DiagCode : uint32_t {
   CoordinateOverflow,
   RouterUnknown,
 
-  // Appended past the groups above so no earlier code's value moves.
+  // Appended codes; each comment names its group.
   // Validation: a containment relation whose two sides disagree, or a cycle.
   ContainmentInconsistent,
-  // Layout: a column already registered under a scav.geom name with another
-  // shape, which layout refuses to write through.
+  // Layout: a scav.geom column name already registered with another shape; layout
+  // fails before writing geometry.
   GeometryColumnClash,
   // Layout: a transition whose route came out as a straight line because the
   // router could not thread it. Geometry is written and the run succeeds.
   RouteDegraded,
 };
 
-// A producer running before entities exist fills `src`; one running after fills
-// `subject`, and the reader walks to that subject's statement for a position.
-//
-// A subject ordinal of INVALID names the entity kind rather than one of its
-// rows, which is how a finding about a whole array is spelled. `None` carries
-// INVALID and nothing else: it is the absence of a subject.
+// Pre-entity producers fill `doc` and `src`; later ones fill `subject`. An INVALID
+// ordinal names the whole kind; kind `None` means no subject.
 struct Diagnostic {
   DiagCode code;
   ElemRef subject{ .kind = ElemKind::None, .ordinal = INVALID };
@@ -228,15 +220,13 @@ struct StringPool {
   std::vector<scav_byte> bytes;
 };
 
-// A zero-length ref reads as the empty string without touching `pool`. The cast
-// is legal because `char` may alias any object representation.
+// Returns the empty view for a zero-length ref without reading `pool`.
 inline std::string_view string_pool_view(StringPool const &pool, StrRef ref) {
   if (ref.len == 0) { return {}; }
   return { reinterpret_cast<char const *>(pool.bytes.data() + ref.off), ref.len };
 }
 
-// Decimal and eight lowercase hex digits. Hand-rolled, so that no locale can
-// reach a byte scav emits.
+// Appends `value` in decimal, or as eight lowercase hex digits; locale-independent.
 void string_append_u32(std::string &out, uint32_t value);
 void string_append_hex32(std::string &out, uint32_t value);
 
@@ -247,8 +237,7 @@ void string_append_hex32(std::string &out, uint32_t value);
 
 enum class StmtKind : uint32_t { Chart, Include, State, Submachine, Trans, Attr };
 
-// `Initial` and `Final` are reachable only through `*` in an endpoint; no
-// spelling of the format produces them in this slot.
+// The format spells `Initial` and `Final` only as `*` in a transition endpoint.
 enum class StateKind : uint32_t {
   Normal,
   Initial,
@@ -292,8 +281,7 @@ char const *syntax_stmt_kind_name(StmtKind kind);
 char const *syntax_state_kind_name(StateKind kind);
 char const *syntax_trans_kind_name(TransKind kind);
 
-// False when the word names no kind. `initial` and `final` are rejected; the
-// format reaches those through `*`.
+// False when the word names no kind, including `initial` and `final`.
 bool syntax_state_kind_from_name(std::string_view text, StateKind &out);
 bool syntax_trans_kind_from_name(std::string_view text, TransKind &out);
 
@@ -389,8 +377,8 @@ struct Chart {
   std::vector<Include> includes;        // indexed by InstId
   std::vector<Attr> attrs;
 
-  // Interned, so equal keys give equal ids. Deduplicated here, which is why
-  // the bytes live apart from `strings`. AttrKeyId indexes attr_key_names.
+  // Interned: equal keys share one AttrKeyId, which indexes attr_key_names.
+  // `attr_keys` holds the deduplicated key bytes, apart from `strings`.
   std::vector<StrRef> attr_key_names;
   StringPool attr_keys;
 
@@ -402,8 +390,7 @@ struct Chart {
 
   StringPool strings;  // authored names and labels; append order
 
-  // Braced so `Chart c;` is a usable empty chart. The vectors above initialize
-  // themselves; this tail would otherwise be indeterminate.
+  // Braced so `Chart c;` is a usable empty chart.
   StrRef name{}, label{};
   SubmachineId root_submachine{ INVALID };
   Span chart_attrs{};  // -> attrs
@@ -422,7 +409,7 @@ inline std::string_view chart_string(Chart const &c, StrRef ref) {
 // out by this chart.
 std::string_view chart_attr_key(Chart const &c, AttrKeyId key);
 
-// The interned id for `key`, or INVALID when this chart never met it.
+// The interned id for `key`, or INVALID when the chart has no such key.
 AttrKeyId chart_attr_key_find(Chart const &c, std::string_view key);
 
 // Rows of the entity array `kind` names. Chart counts as one; Point and
@@ -450,7 +437,7 @@ void chart_path_of(Chart const &c, StateId id, std::string &out);
 
 // Resolution ================================================================
 
-// Which rule a failed path broke, not merely that one did.
+// Result of resolve_path: Ok, or the rule a failed path broke.
 enum class ResolveStatus : uint32_t { Ok, NotFound, BadQualifier, CrossesInclude };
 
 // Resolves a state path against `scope`: the first segment innermost-outward
@@ -480,8 +467,8 @@ uint32_t chart_structural_hash(Chart const &c);
 // Append-only, so an id stays valid for the life of the chart. A bad call
 // appends nothing and returns INVALID.
 
-// Names the chart, creates the root submachine, and returns it. The chart must
-// be empty. Everything else hangs off the returned id.
+// Names the chart, creates the root submachine, and returns its id. The chart must
+// be empty.
 SubmachineId build_chart(Chart &c, std::string_view name, std::string_view label);
 
 StateId build_state(Chart &c,
@@ -648,8 +635,8 @@ bool parse_document(scav_byte const *bytes,
 
 // Canonical printing ========================================================
 
-// A parsed document back to text, reconstructed rather than echoed, so two
-// documents differing only in formatting print the same bytes. See docs/development.md.
+// Prints a parsed document from its rows; documents differing only in formatting
+// print the same bytes. See docs/development.md.
 
 // A block fitting inside the budget stays on one line.
 constexpr uint32_t PRINT_COLUMNS_MIN{ 20 };
@@ -673,8 +660,8 @@ bool print_document(ParsedDocument const &pd, PrintOptions const &opts, std::str
 // A document name is a key, resolved by byte-wise segment folding. Names are
 // `/`-separated on every transport.
 
-// Resolves `ref` against `base`, assigning `out`. A relative ref joins `base`'s
-// directory and folds `.` and `..`; an absolute or scheme-carrying one does not.
+// Resolves `ref` against `base` into `out`. A relative ref joins `base`'s directory
+// and folds `.` and `..`; an absolute or scheme-carrying ref is copied verbatim.
 bool path_resolve(std::string_view base, std::string_view ref, std::string &out);
 
 // Loader ====================================================================
@@ -689,7 +676,7 @@ struct Pending {
 };
 
 // A DocId is fixed by the first include statement naming that path, ordered by
-// (requesting DocId, statement ordinal). Arrival order does not enter into it.
+// (requesting DocId, statement ordinal), independent of arrival order.
 struct LoadDoc {
   StrRef name;        // the resolved key, into Loader::paths
   uint32_t arrived;   // 0 until load_add supplied its bytes
@@ -698,8 +685,8 @@ struct LoadDoc {
   uint32_t stmt_row;  // the claiming statement's row in `from`
 };
 
-// One include statement, discovered. The junction between the document graph
-// the loader walks and the instantiation tree finish builds.
+// One include statement: an edge from document `from` to `to`. load_finish walks
+// these to detect cycles and to instantiate each include.
 struct IncludeEdge {
   DocId from;
   DocId to;
@@ -740,8 +727,8 @@ bool load_document_bytes(Loader const &loader,
                          scav_byte const **out,
                          uint32_t *len);
 
-// Builds a complete network into an empty `out`, spending the loader. Whether
-// `out` gained documents says which pool the diagnostics index.
+// Builds the complete network into an empty `out`, consuming the loader. Diagnostic
+// spans index `out.src_bytes` if `out` gained documents, else the loader's bytes.
 bool load_finish(Loader &loader, Chart &out, std::vector<Diagnostic> &diags);
 
 // Diagnostic rendering ======================================================
@@ -749,15 +736,15 @@ bool load_finish(Loader &loader, Chart &out, std::vector<Diagnostic> &diags);
 // `name:line:col: message`, newline-terminated, appended to `out`. A diagnostic
 // carries a code plus a span or a subject, so the position is derived here.
 
-// A finding from before any chart existed -- a parse error, a cycle, a missing
-// document -- whose span indexes the bytes the loader still holds.
+// For a loader diagnostic (a parse error, an include cycle, a missing document);
+// its span indexes the bytes the loader holds.
 void diag_append(std::string &out,
                  Loader const &loader,
                  Diagnostic const &d,
                  std::string_view fallback_name);
 
-// A model finding, positioned by walking to its subject's statement. That
-// statement often sits in a document other than the one the caller named.
+// A chart finding, positioned by `src` when nonempty, else by its subject's statement.
+// Named by that document's path, else `fallback_name`.
 void diag_append(std::string &out,
                  Chart const &chart,
                  Diagnostic const &d,
@@ -772,8 +759,8 @@ bool read_file(char const *path, std::vector<scav_byte> &out);
 // or closed.
 bool write_file(char const *path, scav_byte const *bytes, size_t len);
 
-// The load loop with `read_file` in the fetch slot. `loader` outlives the call
-// for load_document_bytes; `failed_path` names a document it could not read.
+// Runs the load loop, fetching with `read_file`. `loader` stays valid afterwards for
+// load_document_bytes; `failed_path` names a document it could not read.
 bool load_file(char const *path,
                Loader &loader,
                Chart &out,

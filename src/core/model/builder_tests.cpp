@@ -43,8 +43,7 @@ void check_refs_resolve(Chart const &c) {
   CHECK(static_cast<size_t>(c.chart_attrs.off) + c.chart_attrs.len <= c.attrs.size());
 }
 
-// The states a submachine's children span yields, liveness-checked the way
-// every consumer must walk it.
+// Live states in submachine `id`'s children span, in span order.
 std::vector<StateId> live_children(Chart const &c, SubmachineId id) {
   std::vector<StateId> out;
   Span const kids{ c.submachines[id.v].children };
@@ -266,8 +265,6 @@ TEST_CASE("build: an include synthesizes its alias host state") {
   CHECK(chart_string(c, host.name) == "wifi");
   CHECK(host.parent == root);
   CHECK(host.kind == StateKind::Normal);
-  // The host is an ordinary state, so it is an ordinary path: `wifi` is a
-  // state.
   CHECK(path(c, row.host) == "wifi");
   check_refs_resolve(c);
 }
@@ -283,8 +280,6 @@ TEST_CASE("build: an include refuses an empty alias, an empty path, a bad parent
 }
 
 TEST_CASE("build: an include's alias interns once, not once per row") {
-  // The pool never deduplicates, so a second add of the same bytes is a second
-  // copy. The host state and the Include row are the same name and share one.
   Chart c;
   SubmachineId const root{ build_chart(c, "c", {}) };
   InstId const inc{ build_include(c, root, "wifi", "wifi.scav") };
@@ -300,8 +295,7 @@ TEST_CASE("build: a walk skips tombstoned rows and never renumbers live ones") {
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
   c.states[b.v].live = 0;  // no delete API; a test pokes the flag
   CHECK(live_children(c, root) == std::vector<StateId>{ a, d });
-  // The dead row keeps its slot in the span -- compaction would invalidate
-  // every other span into the array.
+  // The dead row keeps its slot in the span.
   CHECK(c.submachines[root.v].children.len == 3);
   CHECK(chart_live(c, ref(b)) == false);
   CHECK(chart_live(c, ref(a)) == true);

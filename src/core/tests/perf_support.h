@@ -1,11 +1,8 @@
 #ifndef SCAV_CORE_TESTS_PERF_SUPPORT_H_INCLUDED
 #define SCAV_CORE_TESTS_PERF_SUPPORT_H_INCLUDED
 
-// Timing, shared by the three perf suites, which measured the same way in three
-// byte-identical copies. Its own header rather than test_support.h because
-// <chrono> drags <iomanip> in behind it on libstdc++ and the MSVC STL, and a
-// `std::quoted` in scope wins ADL against a test's own `quoted` -- twenty-three
-// files include test_support.h and none of the other twenty need a clock.
+// Timing helpers shared by the perf suites. Kept out of test_support.h: <chrono>
+// pulls in <iomanip>, whose `std::quoted` wins ADL over a test's `quoted`.
 
 #include <algorithm>
 #include <chrono>
@@ -17,7 +14,7 @@ inline uint64_t micros_since(std::chrono::steady_clock::time_point start) {
   auto const elapsed{ std::chrono::steady_clock::now() - start };
   uint64_t const us{ static_cast<uint64_t>(
       std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count()) };
-  return (us == 0) ? 1U : us;  // a zero denominator says nothing useful
+  return (us == 0) ? 1U : us;  // never zero; callers divide by it
 }
 
 inline uint64_t nanos_since(std::chrono::steady_clock::time_point start) {
@@ -30,8 +27,7 @@ inline uint64_t nanos_since(std::chrono::steady_clock::time_point start) {
 inline constexpr uint32_t SCALING_RUNS{ 5 };
 inline constexpr uint32_t SCALING_ATTEMPTS{ 3 };
 
-// A throughput floor's estimator. Noise only adds time, so the fastest run is
-// the one least of the machine and most of the code.
+// Fastest of SCALING_RUNS runs, in microseconds: the throughput floors' estimator.
 template <typename Once>
 uint64_t fastest_micros(Once &&once) {
   uint64_t best{ UINT64_MAX };
@@ -44,31 +40,16 @@ uint64_t fastest_micros(Once &&once) {
   return best;
 }
 
-// A *ratio's* estimator, which no choice of sample makes safe at this duration.
-// The scaling inputs run in hundreds of microseconds and a scheduler quantum is
-// milliseconds, so one descheduled slice inflates a run by more than the slack a
-// ratio allows -- a parse that is linear on an idle machine read 21x for 4x the
-// bytes on a hosted runner. The median carries the steal it was measured with;
-// min-of-N biases a ratio upward, because the shorter side finds an uncontended
-// window more often than the longer one does.
-//
-// So the window is lengthened rather than the sample made clever: the work
-// repeats inside one timed span until the span is tens of milliseconds. The
-// ratio is untouched -- both sides are still one run's cost -- and a stolen
-// millisecond goes from swamping the measurement to rounding it. Nanoseconds
-// per run, so dividing by the repeat count keeps the resolution the division
-// would otherwise spend.
+// Target length of one timed batch, in nanoseconds; `nanos_per_run` sizes its
+// repeat count from a probe run to fill it, and returns nanoseconds per run.
 inline constexpr uint64_t SCALING_WINDOW_NANOS{ 20'000'000 };
 
 template <typename Once>
 uint64_t nanos_per_run(Once &&once) {
-  // The probe is also the warm-up, so a cold allocator is never a sample.
+  // The probe run sizes `reps` and warms up; only the repeated runs are timed.
   auto const probe_start{ std::chrono::steady_clock::now() };
   once();
-  // `nanos_since` never answers zero and `reps` is only ever raised from one, so
-  // neither division below can divide by it. Written as a floor and a raise
-  // rather than as a ternary because that is the form the analyser can follow:
-  // it does not carry the guarantee out of `nanos_since` on its own.
+  // `probe` and `reps` are at least one, so neither division below is by zero.
   uint64_t const measured{ nanos_since(probe_start) };
   uint64_t const probe{ (measured == 0) ? 1ULL : measured };
   uint64_t reps{ 1 };
@@ -82,11 +63,8 @@ uint64_t nanos_per_run(Once &&once) {
   return (each == 0) ? 1ULL : each;
 }
 
-// Both sides of a ratio, measured together and retried.
-//
-// A scheduling hiccup inflates one attempt; a quadratic inflates every one. So
-// the pair kept is the one with the lowest growth, which noise can only make
-// look better and a real quadratic cannot fake.
+// Both sides of a ratio, measured together. `best_pair` keeps the attempt with
+// the lowest large-to-small growth.
 struct Pair {
   uint64_t small, large;
 };

@@ -1,5 +1,5 @@
-// The canonical rules one at a time, then the properties holding over all of
-// them. Every expectation is spelled in full; a substring asserts nothing.
+// Tests each canonical printing rule, then properties over all of them.
+// Every expectation compares the full output.
 
 #include "core/core_internal.h"
 #include "core/tests/test_support.h"
@@ -48,8 +48,6 @@ TEST_CASE("print: a document that produced no statements prints nothing") {
 }
 
 TEST_CASE("print: is_canonical means already canonical, not merely convergent") {
-  // The helper printed first and compared the two passes, which every input
-  // satisfies -- so it answered true for text the printer would rewrite.
   CHECK_FALSE(is_canonical("chart c { s A, }"));
   CHECK(is_canonical("chart c {\n  state A,\n}\n"));
 }
@@ -253,8 +251,7 @@ TEST_CASE("print: a block over the budget breaks, and only the block that overfl
 }
 
 TEST_CASE("print: the budget counts codepoints, not UTF-8 bytes") {
-  // Each accented character is two bytes and one column, so the byte count would
-  // break this line and the codepoint count does not.
+  // Each accented character is two bytes and one column.
   std::string const text{ "chart c { state A \"\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\", }" };
   CHECK(print(text, 30) ==
         "chart c {\n"
@@ -293,8 +290,8 @@ TEST_CASE("print: a long namespace block breaks one entry per line") {
 }
 
 TEST_CASE("print: the budget counts the @ and the namespace above the entry") {
-  // The entry alone fits at 24; `@nsx:` in front of it does not, and measuring
-  // the entry on its own emitted a 29-column line.
+  // The entry alone fits at 24; with `@nsx:` in front the line is 29 columns,
+  // so the list breaks.
   CHECK(print(R"(chart c { @nsx:k = ["aaaaaa", "bbb"], })", 24) ==
         "chart c {\n"
         "  @nsx:k = [\n"
@@ -310,7 +307,7 @@ TEST_CASE("print: the budget counts the @ and the namespace above the entry") {
         "    \"bbb\",\n"
         "  ],\n"
         "}\n");
-  // And the prefix does not push a list over when it still fits.
+  // A list that still fits with its prefix stays on one line.
   CHECK(print(R"(chart c { @n:k = ["a", "b"], })", 24) ==
         "chart c {\n"
         "  @n:k = [\"a\", \"b\"],\n"
@@ -318,8 +315,7 @@ TEST_CASE("print: the budget counts the @ and the namespace above the entry") {
 }
 
 TEST_CASE("print: no attribute line runs past the budget it can break under") {
-  // The property behind the case above, over every prefix width and budget: a
-  // line holding a breakable list is never wider than the budget.
+  // For every prefix and budget, a line holding two or more list values fits.
   for (std::string const &ns :
        { std::string{}, std::string{ "n:" }, std::string{ "averylongnamespace:" } }) {
     for (uint32_t const columns : { PRINT_COLUMNS_MIN, 24U, 32U, 48U, 90U }) {
@@ -519,8 +515,7 @@ TEST_CASE("print: an unnamed submachine beside a second one stays explicit") {
 }
 
 TEST_CASE("print: a submachine carrying its own attributes is never elided") {
-  // Hoisting would move the attribute onto the owner state, which is a different
-  // row of the model, not a different spelling of the same one.
+  // `@mine` belongs to the submachine row.
   CHECK(print("chart c { state A { submachine { @mine, state B, }, }, }") ==
         "chart c {\n"
         "  state A { submachine { @mine, state B } },\n"
@@ -745,8 +740,8 @@ TEST_CASE("print: a blank stays above the comments it was written above") {
 }
 
 TEST_CASE("print: a blank between a comment and its statement is the own-line rule") {
-  // Two ways to write a gap, and each keeps its own shape: the blank above the
-  // comment is the statement's, the blank below it is the comment's.
+  // A blank above a comment belongs to the statement; a blank below it belongs
+  // to the comment.
   CHECK(print("chart c {\n  state A,\n  // a heading\n\n  state B,\n}") ==
         "chart c {\n"
         "  state A,\n"
@@ -880,16 +875,15 @@ TEST_CASE("print: nesting survives to sixteen levels") {
 // Idempotence ===============================================================
 
 TEST_CASE("print: the canonicity helper means canonical, not merely convergent") {
-  // Every input converges by the second pass, so a helper that compared two
-  // prints would accept anything and every case using it would assert nothing.
+  // Every input converges by the second pass; `is_canonical` compares the input
+  // to its first print.
   CHECK_FALSE(is_canonical("chart c { s A, }"));
   CHECK_FALSE(is_canonical("chart c {\n  state A\n}\n"));
   CHECK(is_canonical("chart c {\n  state A,\n}\n"));
 }
 
 TEST_CASE("print: canonical output parses and prints as itself") {
-  // One document exercising every rule at once, so the fixed point is asserted
-  // over their interaction and not only one at a time.
+  // One document exercising every rule at once.
   std::string const messy{
     "// header\n"
     "chart vac \"robot vacuum\" { // opens\n"
@@ -929,8 +923,7 @@ TEST_CASE("print: idempotence holds at every budget the bounds admit") {
 }
 
 TEST_CASE("print: a document the parser rejected prints its rows without reading past") {
-  // A block commits its children on close, so a failed parse leaves `state A` as
-  // a row nothing points at and the tree walk never reaches it.
+  // Blocks commit children on close; after the failed parse no block lists `state A`.
   Parsed const r{ parse("chart c { state A, state !, }") };
   CHECK_FALSE(r.ok);
   CHECK(r.pd.stmts.size() > 1);
@@ -1109,8 +1102,7 @@ TEST_CASE("print: a mutated document prints what it holds and reads nothing past
     r.pd.stmt_payload[2] = 9;
     std::string out;
     CHECK(print_document(r.pd, print_default_options(), out));
-    // The submachine's head came out empty, so its block stands where the
-    // keyword would have been; nothing else moved.
+    // The submachine's head prints empty; its block and the rest print unchanged.
     CHECK(out == "chart c {\n  state A {  { state B } },\n}\n");
   }
   SUBCASE("statement children out of step with the statements") {
@@ -1124,9 +1116,8 @@ TEST_CASE("print: a mutated document prints what it holds and reads nothing past
     Parsed r{ parse("chart c { state A { submachine { state B, }, }, }") };
     REQUIRE(r.pd.stmts[2].kind == StmtKind::Submachine);
     REQUIRE(r.pd.stmts[3].kind == StmtKind::State);
-    // The leaf claims the submachine above it. Rows are walked in reverse, so
-    // the elision test meets a block whose row has not been built; the output
-    // is the well-formed one, which is the point.
+    // The leaf claims the submachine above it as a child. Rows are walked in
+    // reverse, so the elision check meets an unbuilt block; output stays well formed.
     r.pd.stmt_children[3] = make_span(narrow_clamp<uint32_t>(r.pd.stmt_ids.size()), 1);
     r.pd.stmt_ids.push_back(StmtId{ 2 });
     std::string out;
@@ -1145,9 +1136,8 @@ TEST_CASE("print: a mutated document prints what it holds and reads nothing past
 TEST_CASE("print: a comment span outside the document prints as nothing") {
   Parsed r{ parse("chart c { state A, }") };
   REQUIRE(r.pd.comments.empty());
-  // A trivia row pointing past src_bytes, then one holding bytes normalization
-  // would never leave behind. Both hang off the chart statement, past its span,
-  // so they print after the closing brace.
+  // One comment row past `src_bytes` and one holding a CR. Both attach to the
+  // chart statement past its span, so they print after the closing brace.
   uint32_t const off{ narrow_clamp<uint32_t>(r.pd.src_bytes.size()) };
   std::string_view const text{ "// tabbed\r" };
   for (char const ch : text) { r.pd.src_bytes.push_back(static_cast<scav_byte>(ch)); }
@@ -1169,8 +1159,6 @@ TEST_CASE("print: a comment span outside the document prints as nothing") {
 // Round trip ================================================================
 
 TEST_CASE("print: printing is a fixpoint and its output is already canonical") {
-  // The property behind `fmt --check`: canonical text prints to itself, so a
-  // second pass can never move a byte a first pass left.
   std::vector<std::string_view> const documents{
     "chart c {}",
     "chart c { state A, }",

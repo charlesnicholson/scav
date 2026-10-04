@@ -15,8 +15,7 @@ namespace {
 
 #include "core/lang/unicode_nfc_tables.inc"  // NOLINT(bugprone-suspicious-include)
 
-// Hangul, Unicode 3.12. Table-free, which is why the generator drops the
-// 11,172 syllables it would otherwise emit.
+// Hangul constants for algorithmic composition and decomposition (Unicode 3.12).
 constexpr uint32_t HANGUL_S_BASE{ 0xAC00 };
 constexpr uint32_t HANGUL_L_BASE{ 0x1100 };
 constexpr uint32_t HANGUL_V_BASE{ 0x1161 };
@@ -173,15 +172,14 @@ void append_decomposition(uint32_t cp, std::vector<uint32_t> &out) {
     out.push_back(cp);
     return;
   }
-  // Already fully expanded by the generator, so this is one copy and no loop to
-  // a fixed point.
+  // Copies the table entry, a fully expanded decomposition.
   uint32_t const off{ t.decomp_offsets[at] };
   uint32_t const len{ t.decomp_lengths[at] };
   for (uint32_t i = 0; i < len; ++i) { out.push_back(t.decomp_data[off + i]); }
 }
 
-// Insertion sort over each run of non-starters -- which is what canonical
-// ordering is: adjacent swaps only, equal combining classes keep their order.
+// Canonical ordering: a stable insertion sort of each run of non-starters by
+// combining class.
 void canonical_order(std::vector<uint32_t> &v) {
   size_t const n{ v.size() };
   for (size_t i = 1; i < n; ++i) {
@@ -251,8 +249,8 @@ bool unicode_nfc_normalize(std::vector<uint32_t> const &in, std::vector<uint32_t
   for (uint32_t const cp : in) { append_decomposition(cp, decomposed); }
   canonical_order(decomposed);
 
-  // Unicode 3.11 canonical composition. A mark composes with `starter` only when
-  // nothing between them blocks it, which is what `last_class` tracks.
+  // Canonical composition (Unicode 3.11). `last_class` is the class of the last
+  // codepoint appended; a non-zero one at or above `cc` blocks composition.
   out.reserve(decomposed.size());
   size_t starter{ 0 };
   bool have_starter{ false };
@@ -263,8 +261,7 @@ bool unicode_nfc_normalize(std::vector<uint32_t> const &in, std::vector<uint32_t
     if (have_starter && !blocked) {
       if (uint32_t const composed{ compose_pair(out[starter], cp) }; composed != 0) {
         out[starter] = composed;
-        // last_class is not updated: the mark was absorbed, so it never
-        // becomes the blocker for the next one.
+        // A codepoint absorbed into the starter leaves `last_class` unchanged.
         continue;
       }
     }

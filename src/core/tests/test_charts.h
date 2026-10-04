@@ -8,8 +8,7 @@
 
 namespace scav::test {
 
-// the design's own worked example, transcribed verbatim including its comment-free
-// shape, so the document the format is specified by is a document that parses.
+// The design's worked example, transcribed verbatim with no comments.
 constexpr std::string_view VAC{ R"(
 chart vac "robot vacuum" {
   include "dock.scav" as dock,
@@ -89,8 +88,8 @@ chart tcp "TCP connection" {
 }
 )" };
 
-// Firmware over-the-air update. Written in the terse aliases a person drafting
-// reaches for, with a fork/join pair and a raw-string label.
+// Firmware over-the-air update, written with the terse aliases, a fork/join pair
+// and a raw-string label.
 constexpr std::string_view OTA{ R"(
 chart ota "firmware OTA" {
   @vendor:component = "bootloader",
