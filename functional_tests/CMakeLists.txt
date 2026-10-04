@@ -1,10 +1,8 @@
-# Python, standard library only. Stamped build steps like the unit tests, each
-# declaring the files it reads, so a second build skips what did not change.
+# Python functional tests, standard library only, as stamped build steps.
 
 find_package(Python3 3.14 COMPONENTS Interpreter REQUIRED)
 
-# Data rather than rediscovered: a test that guesses the compiler tests its
-# guess. Forward slashes, since every backslash in the JSON is an escape.
+# Paths for the tests' JSON config, converted to forward slashes.
 foreach(pair
   "SOURCE_DIR;${PROJECT_SOURCE_DIR}"
   "BINARY_DIR;${PROJECT_BINARY_DIR}"
@@ -32,13 +30,12 @@ function(scav_add_functional_test name)
             "${SCAV_FT_CONFIG}"
             ${arg_DEPENDS}
     TARGETS ${arg_TARGETS}
-    # The one thing the Python side cannot derive for itself.
     ENV "SCAV_BUILD_CONFIG=${SCAV_FT_CONFIG}"
     COMMENT "functional ${name}"
   )
 endfunction()
 
-# The whole corpus, for the gates that read all of it rather than one root.
+# Every corpus chart.
 set(scav_corpus_charts
   "${PROJECT_SOURCE_DIR}/test_data/charts/axis.scav"
   "${PROJECT_SOURCE_DIR}/test_data/charts/bottler.scav"
@@ -54,8 +51,7 @@ set(scav_corpus_charts
   "${PROJECT_SOURCE_DIR}/test_data/charts/vac.scav"
 )
 
-# install_consumer installs the whole project and configures a separate CMake
-# project against it, so it has to run after every archive and header exists.
+# install_consumer depends on every library and test executable.
 get_property(scav_all_libraries GLOBAL PROPERTY SCAV_LIBRARIES)
 get_property(scav_all_test_exes GLOBAL PROPERTY SCAV_TEST_EXECUTABLES)
 set(scav_installed_files "")
@@ -99,9 +95,8 @@ scav_add_functional_test(layout
           "$<TARGET_FILE:scav_shared>"
   TARGETS scav_shared
 )
-# `render` over the corpus, plus the side-by-side harness the P6 and P7 blind
-# reviews score against. `dot` and `node` are not prerequisites: the harness
-# reports what it could not compare.
+# `render` over the corpus, plus the side-by-side harness, which reports and skips
+# each missing incumbent (PlantUML, elkjs).
 scav_add_functional_test(render
   DEPENDS ${scav_corpus_charts}
           "${PROJECT_SOURCE_DIR}/test_data/golden/layout/corpus_pins.txt"
@@ -122,9 +117,7 @@ scav_add_functional_test(check
           "$<TARGET_FILE:scav>"
   TARGETS scav
 )
-# The element suite through the verbs, and its charts against the array the
-# unit suite iterates. Globbed with CONFIGURE_DEPENDS, since a chart added to
-# the directory is exactly what this gate exists to notice.
+# The element suite through the verbs, and its charts against the unit suite's array.
 file(GLOB scav_gauntlet_charts CONFIGURE_DEPENDS
   "${PROJECT_SOURCE_DIR}/test_data/charts/gauntlet/*.scav"
 )
@@ -159,9 +152,7 @@ scav_add_functional_test(deps
           "$<TARGET_FILE:scav>"
   TARGETS scav
 )
-# Globbed with CONFIGURE_DEPENDS: the checker scans whatever exists under
-# src/layout and src/draw, so the stamp's inputs track the same sets, new files
-# included.
+# Sources under src/layout and src/draw, globbed so the stamp tracks new files.
 file(GLOB_RECURSE scav_layout_checked_sources CONFIGURE_DEPENDS
   "${PROJECT_SOURCE_DIR}/src/layout/*.h"
   "${PROJECT_SOURCE_DIR}/src/layout/*.cpp"
@@ -171,8 +162,7 @@ file(GLOB_RECURSE scav_layout_checked_sources CONFIGURE_DEPENDS
 scav_add_functional_test(include_subset
   DEPENDS ${scav_layout_checked_sources}
 )
-# The ABI golden, and the generated bindings driving the whole pipeline. Needs
-# the shared library, since that is what a binding loads.
+# The ABI golden and the generated bindings, run against the shared library.
 file(GLOB scav_abi_headers CONFIGURE_DEPENDS
   "${PROJECT_SOURCE_DIR}/include/scav/*.h"
   "${PROJECT_SOURCE_DIR}/src/*/include/scav/*_c.h"

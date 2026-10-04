@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
-"""`scav render` over the corpus, and the side-by-side harness that the P6 and
-P7 blind reviews will score against.
-
-The SVG's own bytes are pinned by a unit golden; what this checks is the parts
-only a real process can: the file lands where -o said, the document is one a
-parser accepts, and the harness runs and says what it could not compare."""
+"""`scav render` over the corpus: the file lands at `-o`, parses as XML, and the
+side-by-side harness reports what it could not compare.
+"""
 
 import base64
 import os
@@ -25,13 +22,8 @@ SVG_NS = "{http://www.w3.org/2000/svg}"
 
 
 def nested_chart(depth: int, width: int, siblings: int = 1, fine: int = 0) -> str:
-    """A chart whose composed geometry approaches the coordinate domain.
-
-    Every level adds its own padding ring plus `siblings` states beside the one
-    it nests, so the width grows with the depth rather than folding into a grid.
-    `fine` lengthens the innermost name alone, which moves the total by one
-    character at a time.
-    """
+    """Nests `depth` states, each beside `siblings` states whose names carry `width`
+    extra characters; `fine` lengthens the innermost name alone."""
     body = ""
     for i in range(depth):
         body += f"state S{i} {{"
@@ -41,11 +33,8 @@ def nested_chart(depth: int, width: int, siblings: int = 1, fine: int = 0) -> st
     return "chart big {" + body + "state Leaf," + ("}," * depth) + "}\n"
 
 
-# Depth and per-level name length putting the chart just short of the domain,
-# and the first `fine` known to land inside the viewBox window. The names are
-# what grew when the layout portfolio landed: it keeps whichever of its rows
-# scores best and area is a term, so reaching the last 2*pad of the domain now
-# takes a bigger chart.
+# Depth and name length that put the chart just short of the coordinate domain, and
+# the first `fine` known to land in the viewBox overflow window.
 OVERSIZE_DEPTH = 250
 OVERSIZE_WIDTH = 170
 OVERSIZE_SEED = 162
@@ -78,8 +67,7 @@ class TestRender(unittest.TestCase):
         return path
 
     def run_render(self, *args: scavtest.Arg) -> subprocess.CompletedProcess[str]:
-        # Both streams separately: the document goes to stdout and diagnostics
-        # to stderr, and conflating them would let one corrupt the other.
+        # Captures stdout (the document) and stderr (diagnostics) separately.
         argv = [str(self.exe), "render", *[str(a) for a in args]]
         print(f"+ {' '.join(argv)}", flush=True)
         return subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -95,17 +83,14 @@ class TestRender(unittest.TestCase):
         for chart in self.charts:
             with self.subTest(chart=chart.name):
                 doc = self.render(chart, *scavtest.pinned(self.cfg.repo_root, chart.name))
-                # A real XML parser, not a substring check: the point is that a
-                # browser or an SVG consumer would accept it.
                 root = ElementTree.fromstring(doc)
                 self.assertEqual(f"{SVG_NS}svg", root.tag)
                 self.assertIn("viewBox", root.attrib)
-                # Integer viewBox, all four fields: no float is ever printed.
+                # Every viewBox field is an integer.
                 for field in root.attrib["viewBox"].split():
                     int(field)
                 self.assertTrue(root.attrib["width"].isdigit())
                 self.assertTrue(root.attrib["height"].isdigit())
-                # Something was actually drawn.
                 self.assertTrue(list(root))
 
     def test_a_state_name_reaches_the_document_as_text(self) -> None:
@@ -171,7 +156,6 @@ class TestRender(unittest.TestCase):
         readable = self.render(chart)
         compact = self.render(chart, "--profile", "compact")
         self.assertNotEqual(readable, compact)
-        # compact ships a smaller type size, so its diagram is smaller.
         def extent(doc: str) -> int:
             root = ElementTree.fromstring(doc)
             return int(root.attrib["width"]) * int(root.attrib["height"])
@@ -222,8 +206,7 @@ class TestRender(unittest.TestCase):
         self.assertFalse(target.parent.exists())
 
     def test_text_the_bundled_font_cannot_measure_is_refused(self) -> None:
-        # Both ways a chart can defeat the measurement pass: a codepoint the
-        # font has no glyph for, and a name whose box would leave the domain.
+        # A codepoint the font lacks, and a name whose box leaves the coordinate domain.
         cases = {
             # U+F0001, a private-use codepoint JetBrains Mono does not carry.
             "glyph": 'chart g {\n  state A,\n  state B,\n'
@@ -245,8 +228,7 @@ class TestRender(unittest.TestCase):
         chart = self.write("overflow.scav", nested_chart(255, 40, 4))
         target = self.scratch / "overflow.svg"
         result = self.run_render("-o", target, chart)
-        # Layout's own finding, so it is exit 1 with a located diagnostic
-        # rather than a refusal to use the file.
+        # Layout's finding: exit 1 with a located diagnostic.
         self.assertEqual(1, result.returncode)
         self.assertEqual("", result.stdout)
         self.assertRegex(
@@ -256,18 +238,7 @@ class TestRender(unittest.TestCase):
         self.assertFalse(target.exists())
 
     def test_a_diagram_too_large_for_an_integer_viewbox_is_refused(self) -> None:
-        # Layout admits geometry up to the coordinate domain and the backend
-        # then adds the profile's padding as a margin, so what overflows the
-        # viewBox and not layout is the domain's last 2*pad. The innermost name
-        # walks the total through that window a character at a time, and the
-        # packer refolds every few dozen characters, so it arrives repeatedly.
-        #
-        # **One row, because the search is what closed this window.** At
-        # `portfolio_m = 8` the argmin takes whichever candidate fits, so a
-        # generated chart lands at 485k of a 524k domain and never in the last
-        # 256 of it -- 303 sizes and not one arrived. What is under test is the
-        # backend's check, so the candidate is pinned and the sweep is the one
-        # candidate it was written against (11.10).
+        # Widths in the domain's last 2*pad lay out but overflow the viewBox.
         target = self.scratch / "viewbox.svg"
         tried = 0
         for fine in oversize_lengths():
@@ -288,10 +259,9 @@ class TestRender(unittest.TestCase):
 
 
 class TestBaselineHarness(unittest.TestCase):
-    """The blind-review harness. The incumbent engines are provisioned only
-    under SCAV_BASELINE, which this deliberately does not set, so what is
-    asserted is that scav renders and that anything absent is reported rather
-    than left as a silent gap."""
+    """The side-by-side harness without SCAV_BASELINE: scav renders and every missing
+    incumbent is reported.
+    """
 
     @scavtest.full_only
     def test_the_harness_runs_and_names_what_it_could_not_compare(self) -> None:
@@ -303,8 +273,6 @@ class TestBaselineHarness(unittest.TestCase):
              "--scav", str(cfg.build_dir / "bin" / name),
              "--out", str(out), "--chart", "estop.scav", "--chart", "tcp.scav"],
             capture_output=True, text=True, check=False,
-            # subprocess inherits os.environ, so a developer with the variable
-            # exported would render the engines and empty the skip list.
             env={k: v for k, v in os.environ.items() if k != "SCAV_BASELINE"})
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertIn("estop.scav: ", result.stdout)
@@ -317,14 +285,12 @@ class TestBaselineHarness(unittest.TestCase):
             self.assertIn(chart, page)
         for engine in ("scav", "plantuml", "elkjs"):
             self.assertIn(engine, page)
-        # scav is the one engine that must always be there. The name is
-        # `<chart stem>.<engine>.svg`, so scav's own is `estop.scav.svg`.
+        # scav's SVG is always present, named `<chart stem>.scav.svg`.
         for chart in ("estop", "tcp"):
             rendered = out / f"{chart}.scav.svg"
             self.assertTrue(rendered.is_file(), f"{rendered} not written")
             self.assertTrue(rendered.read_text(encoding="utf-8").startswith("<?xml"))
-        # Whatever was missing is named against its chart, not silently
-        # skipped. Without SCAV_BASELINE that is both incumbents, every time.
+        # Without SCAV_BASELINE both incumbents are reported missing.
         for engine in ("plantuml", "elkjs"):
             self.assertIn(f" {engine}: ", result.stdout)
 

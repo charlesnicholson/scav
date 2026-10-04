@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""A separate project links an installed scav, which is how the CMake package stays
-honest: plenty of projects ship one they never consume."""
+"""Installs scav, checks the install tree, and links a separate project against it."""
 
 import os
 import shutil
@@ -88,7 +87,7 @@ class TestInstallAndConsume(unittest.TestCase):
                         "no shared library")
 
     def test_the_installed_cli_embeds_the_font_installed_beside_it(self) -> None:
-        """A copy of the tree whose font is wrong: refused, so that copy is the one read."""
+        """The CLI reads the font from its own ../share/scav and refuses a wrong one."""
         name = "scav.exe" if os.name == "nt" else "scav"
         chart = self.cfg.repo_root / "test_data/charts/led.scav"
         ok = scavtest.run([self.prefix / "bin" / name, "render", "--embed-font", chart])
@@ -104,12 +103,7 @@ class TestInstallAndConsume(unittest.TestCase):
         self.assertIn("not the bundled font", wrong.stderr)
 
     def test_every_installed_header_is_a_public_one(self) -> None:
-        """The public/private split is a directory layout, so it is only real if
-        the install tree has the same shape the build tree does.
-
-        A public header lives in `src/<lib>/include/scav/` and is named
-        `scav_*.h`. Anything else -- a private header, a test helper -- reaching a
-        consumer means the -I boundary leaked somewhere."""
+        """Every installed `.h` is under include/scav/ and named `scav_*`."""
         installed = sorted(p.relative_to(self.prefix).as_posix()
                            for p in self.prefix.rglob("*.h"))
         stray = [p for p in installed
@@ -119,11 +113,7 @@ class TestInstallAndConsume(unittest.TestCase):
         self.assertTrue(installed, "no headers installed at all")
 
     def test_one_public_header_per_library(self) -> None:
-        """one public header per library, plus the shared vocabulary.
-
-        A reader should never have to work out which of several headers a symbol
-        lives in. Growing this list is a design decision, so it is spelled out
-        rather than counted."""
+        """The installed headers: a C++ and a C header per library and scav_types.h."""
         self.assertEqual(
             ["include/scav/scav_core.h",
              "include/scav/scav_core_c.h",
@@ -138,8 +128,6 @@ class TestInstallAndConsume(unittest.TestCase):
                    for p in self.prefix.rglob("*.h")))
 
     def test_install_tree_omits_what_is_not_shipped(self) -> None:
-        # An installed internal header would let a consumer define SCAV_TESTING and
-        # link against symbols the shipping archive does not export.
         leaked = [p for pattern in ("*_internal.h", "*testable*", "*_tests.*",
                                     "test_*.h", "*hash_map*", "sort.h",
                                     "interner.h", "*synth_document*")
@@ -162,15 +150,13 @@ class TestInstallAndConsume(unittest.TestCase):
         result = scavtest.run([exe])
         self.assertEqual(0, result.returncode, "the installed scav computed the wrong value")
         self.assertIn("consumer core ok", result.stdout)
-        # The model half too: lower, validate, and resolve through the installed
-        # public headers, which is what proves none of them needs a private one.
+        # The consumer loads, validates and resolves through the public headers.
         self.assertIn("consumer model ok", result.stdout)
         self.assertIn("consumer layout ok", result.stdout)
         self.assertIn("consumer layout run ok", result.stdout)
 
     def test_version_compatibility_is_same_minor(self) -> None:
-        # The C ABI is additive within a minor version, so a newer minor must be
-        # refused rather than quietly satisfied.
+        # find_package refuses a newer minor version.
         major, minor, *_ = self.cfg["version"].split(".")
         too_new = f"{major}.{int(minor) + 1}.0"
         probe = scavtest.fresh_dir(self.cfg.scratch_dir / "consumer/version_probe")

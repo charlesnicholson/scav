@@ -1,12 +1,10 @@
-# A separate project on purpose. What is absent is the test: no envy, no toolchain
-# file, no scav-specific cache variables, nothing but CMAKE_PREFIX_PATH.
+# A standalone project that finds scav through CMAKE_PREFIX_PATH only.
 
 cmake_minimum_required(VERSION 3.28)
 
 project(scav_consumer LANGUAGES CXX)
 
-# This project uses no modules, so do not make clang-scan-deps a prerequisite of
-# building it. Nothing to do with scav; any C++20 project wants this.
+# The project uses no C++20 modules.
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 find_package(scav REQUIRED)

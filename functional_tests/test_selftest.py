@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
-"""`scav selftest`: the corpus laid out on this toolchain twice, at threads=1 and
-on the pool, diffed against the committed goldens.
-
-The charts and the goldens are embedded in the executable, so the verb takes no
-paths and the one full-corpus test runs it from a directory that holds neither.
-Every --against golden names only the two smallest charts."""
+"""`scav selftest`: lays out the embedded corpus at threads=1 and on the pool and
+diffs it against the embedded goldens.
+"""
 
 import os
 import subprocess
@@ -42,13 +39,9 @@ class TestSelftest(unittest.TestCase):
     def run_selftest(
         self, *args: scavtest.Arg, cwd: Path | None = None
     ) -> subprocess.CompletedProcess[str]:
-        # Both streams separately: the report goes to stdout and a path scav
-        # cannot use goes to stderr, and conflating them would hide either.
+        # Captures stdout (the report) and stderr (path errors) separately.
         argv = [str(self.exe), "selftest", *[str(a) for a in args]]
         print(f"+ {' '.join(argv)}", flush=True)
-        # A sanitizer resolves its suppressions path against a directory these
-        # runs deliberately leave, and a runtime that cannot read one says so on
-        # the stderr under assertion.
         return subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                               text=True, cwd=cwd or self.cfg.repo_root,
                               env=scavtest.env_without_suppressions())
@@ -95,8 +88,7 @@ class TestSelftest(unittest.TestCase):
         self.assertEqual("", result.stderr)
         self.assertEqual(0, result.returncode)
         rows, summary = self.report(result.stdout)
-        # One line per golden line, in the golden's own order, carrying the
-        # hashes this toolchain just computed rather than a copy of the file.
+        # One `ok` row per golden line, in golden order.
         self.assertEqual(len(self.golden), len(rows))
         for row, want in zip(rows, self.golden, strict=True):
             self.assertEqual(["ok", *want], row)
@@ -111,8 +103,7 @@ class TestSelftest(unittest.TestCase):
     # --against ==============================================================
 
     def test_a_golden_naming_two_charts_checks_two(self) -> None:
-        # A chart embedded but not named is not checked, which is what lets a
-        # maintainer diff a partial file.
+        # Only the charts the golden names are checked.
         path = self.write_golden("two.txt", self.small)
         result = self.run_selftest("--against", path)
         self.assertEqual("", result.stderr)
@@ -139,8 +130,7 @@ class TestSelftest(unittest.TestCase):
             if want[0] != chart:
                 self.assertEqual(["ok", *want], got)
 
-        # All three columns named, got and golden apiece: the altered one reads
-        # back as the golden, the other two as what the golden still says.
+        # Each column prints `name got (golden g)`; g is `value` for the altered one.
         truth = next(r for r in self.small if r[0] == chart)
         expected = ["FAIL", chart]
         for i, name in enumerate(COLUMNS):
@@ -200,7 +190,6 @@ class TestSelftest(unittest.TestCase):
         self.check_summary(result.stdout.strip(), 0, 0)
 
     def test_the_report_is_the_same_however_the_golden_ends_its_lines(self) -> None:
-        """A golden is a file a maintainer edited, so its line shape varies."""
         two = self.small
         joined = " ".join(two[0]) + "\n" + " ".join(two[1])
         want = ("".join(f"ok   {' '.join(r)}\n" for r in two)

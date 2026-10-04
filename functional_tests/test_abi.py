@@ -1,11 +1,7 @@
 #!/usr/bin/env python3
-"""The extracted ABI against its golden, and the generated bindings driving the
-whole pipeline.
-
-Two separate claims. The golden makes an ABI break a review diff rather than a
-downstream segfault. The end-to-end run makes the "bindings cover the whole
-pipeline" claim checkable: model, metrics, space tables, layout, geometry
-columns, DrawList, SVG -- through generated marshalling and nothing else."""
+"""Checks the extracted ABI against its golden, and drives model, metrics, space
+tables, layout, geometry, DrawList and SVG through the generated bindings.
+"""
 
 import ctypes
 import os
@@ -52,8 +48,6 @@ class TestAbiGolden(unittest.TestCase):
         cls._temp.cleanup()
 
     def test_extraction_matches_the_committed_golden(self) -> None:
-        """The description is the ABI and the headers are the API, so a change
-        to one without the other is the drift this exists to catch."""
         result = subprocess.run(
             [str(cfg.python), str(EXTRACT), "--check", str(ABI_JSON),
              "--compiler", str(cfg.cxx_compiler)],
@@ -66,8 +60,7 @@ class TestAbiGolden(unittest.TestCase):
             self.fail(f"{result.stdout}{result.stderr}\nfresh copy at {fresh}")
 
     def test_the_scraper_fails_closed_on_a_form_it_does_not_model(self) -> None:
-        """Silently skipping one declaration would leave exactly the gap the
-        golden is meant to close, so an unknown form has to be an error."""
+        """An unknown declaration form raises `Unrecognized`."""
         sys.path.insert(0, str(EXTRACT.parent))
         import abi_extract
 
@@ -95,23 +88,18 @@ class TestAbiGolden(unittest.TestCase):
                     abi_extract.scrape(header(body))
 
     def test_the_scraper_reads_the_header_as_a_c_compiler_does(self) -> None:
-        """`__cplusplus` is undefined, so the extern "C" braces and any C++-only
-        section drop out together -- otherwise a namespace body would be scraped
-        as if it were ABI."""
+        """Scrapes with `__cplusplus` undefined; C++-only sections drop out."""
         sys.path.insert(0, str(EXTRACT.parent))
         import abi_extract
         surface = abi_extract.scrape(cfg.repo_root / "include/scav/scav_types.h")
         names = {s["name"] for s in surface["structs"]}
         self.assertEqual({"scav_span", "scav_point", "scav_extent", "scav_rect"},
                          names)
-        # `namespace scav { using Coord = ...; }` sits behind __cplusplus and
-        # must not appear as an alias.
+        # `scav::Coord`, behind `__cplusplus`, is absent from the aliases.
         self.assertNotIn("Coord", {a["name"] for a in surface["aliases"]})
 
     def test_the_probe_speaks_each_compiler_driver_dialect(self) -> None:
-        """cl ignores `-std=c++20` and deprecates `-o`, so a GNU command line
-        silently built the wrong thing there. Asserted for both dialects because
-        only one of them can be exercised on any given machine."""
+        """`cl` gets MSVC flags and every other compiler GNU flags."""
         sys.path.insert(0, str(EXTRACT.parent))
         import abi_extract
         args = (Path("p.cpp"), Path("p"), Path("w"), [Path("inc")])
@@ -127,12 +115,11 @@ class TestAbiGolden(unittest.TestCase):
                 self.assertIn("/std:c++20", msvc)
                 self.assertNotIn("-std=c++20", msvc)
                 self.assertNotIn("-o", msvc)
-                # /Fe and /Fo carry their path attached, and without /Fo the
-                # object lands in the working directory.
+                # /Fe and /Fo take attached paths.
                 self.assertTrue(any(a.startswith("/Fe") for a in msvc))
                 self.assertTrue(any(a.startswith("/Fo") for a in msvc))
 
-        # clang-cl takes the GNU branch on purpose; see is_msvc.
+        # clang-cl takes the GNU branch.
         self.assertFalse(abi_extract.is_msvc("clang-cl"))
 
     def test_the_shared_library_exports_exactly_the_golden(self) -> None:
@@ -155,8 +142,7 @@ class TestAbiGolden(unittest.TestCase):
         self.assertEqual(sorted(functions), sorted(exported))
 
     def test_the_generated_layer_is_the_one_the_golden_describes(self) -> None:
-        """Generated, so it cannot drift -- which is only true if regenerating
-        is a no-op."""
+        """Regenerating the bindings reproduces the committed file."""
         fresh = cfg.scratch_dir / "_abi_regenerated.py"
         fresh.parent.mkdir(parents=True, exist_ok=True)
         result = subprocess.run(
@@ -179,8 +165,7 @@ class TestAbiGolden(unittest.TestCase):
                      for f in header["functions"]}
         for handle in handles:
             self.assertIn(f"{handle}_destroy", functions)
-        # An object-like macro carries ABI surface too, and used to be dropped
-        # in silence.
+        # Object-like macros appear as constants.
         constants = {c["name"] for header in abi["headers"]
                      for c in header.get("constants", [])}
         self.assertIn("SCAV_CLIP_NONE", constants)
@@ -195,10 +180,7 @@ class TestAbiGolden(unittest.TestCase):
                  for enum in header["enums"] for value in enum["values"]}
         self.assertIn("SCAV_E_ABI", codes)
 
-        # Every caller-owned POD crosses with its own size beside it and every
-        # array scav hands out reports its stride, so a caller built against a
-        # different header is refused rather than written past. The codes are
-        # the C tests'; what the golden owes is that the parameters are here.
+        # Each caller-owned POD has a size parameter and each returned array a stride.
         params = {f["name"]: [p["name"] for p in f["params"]]
                   for header in abi["headers"] for f in header["functions"]}
         for entry, size in (("scav_profile_named", "out_size"),
@@ -231,8 +213,7 @@ class TestAbiGolden(unittest.TestCase):
              "path_box_stride"],
             [f["name"] for f in spaces["fields"] if f["name"].endswith("_stride")])
 
-        # Padding is pinned rather than inferred: a struct that grows some is an
-        # ABI break and should read as one in the diff.
+        # Every struct records its size and padding, and every field its offset.
         for header in abi["headers"]:
             for struct in header["structs"]:
                 self.assertIn("padding", struct)
@@ -242,14 +223,12 @@ class TestAbiGolden(unittest.TestCase):
 
 
 class TestGeneratedBindings(unittest.TestCase):
-    """The P5c gate: a generated layer driving model, layout, DrawList and SVG."""
+    """Drives the shared library through the generated Python bindings."""
 
     @classmethod
     def setUpClass(cls) -> None:
         if cfg["sanitizer"].upper() not in ("", "NONE"):
-            # A sanitized library dlopen'd into a clean host aborts, since its
-            # interceptors must be installed before the process starts. The same
-            # entry points run under the sanitizer from the C++ unit tests.
+            # A sanitized library aborts when dlopen'd into an uninstrumented host.
             raise unittest.SkipTest(
                 f"ctypes cannot load a {cfg['sanitizer']} build; the unit tests "
                 "cover these entry points under the sanitizer")
@@ -263,8 +242,7 @@ class TestGeneratedBindings(unittest.TestCase):
         sources = {}
         for name in ("vac.scav", "dock.scav", "led.scav"):
             sources[name] = (self.charts / name).read_text(encoding="utf-8")
-        # The loader resolves relative to the root's own name, so both spellings
-        # of led.scav land on the same bytes.
+        # vac includes `./led.scav` and dock includes `led.scav`.
         sources["./led.scav"] = sources["led.scav"]
         return sources
 
@@ -308,8 +286,7 @@ class TestGeneratedBindings(unittest.TestCase):
             placed = chart.layout(spaces)
             self.assertEqual(len(spaces.path_box), len(placed))
 
-            # Geometry through the three-call column accessor, which is the only
-            # way a binding reads layout's output.
+            # Geometry through the three-call column accessor.
             boxes = chart.rects("scav.geom.state")
             self.assertEqual(counts["states"], len(boxes))
             self.assertTrue(any((b.w > 0) and (b.h > 0) for b in boxes))
@@ -334,8 +311,8 @@ class TestGeneratedBindings(unittest.TestCase):
             drawlist.close()
 
     def test_the_generated_svg_is_the_one_the_cli_produces(self) -> None:
-        """One pipeline, two front ends. If these differ, one of them is wrong
-        about the measurement policy."""
+        """The bindings' SVG matches `scav render`, with and without `--embed-font`;
+        a truncated font raises SCAV_E_FONT."""
         scav = self.scav
         chart_path = self.charts / "estop.scav"
         name = "scav.exe" if os.name == "nt" else "scav"
@@ -368,9 +345,7 @@ class TestGeneratedBindings(unittest.TestCase):
         chart.close()
 
     def test_a_float_never_reaches_a_space_request(self) -> None:
-        """Python's `/` yields a float, and a request computed that way would
-        differ under FMA contraction rather than raise. So the boundary refuses
-        anything that is not already an integer."""
+        """Space requests take only an int within int32; a float or bool raises."""
         scav = self.scav
         chart = scav.load_network(
             "estop.scav",
@@ -380,10 +355,10 @@ class TestGeneratedBindings(unittest.TestCase):
             with self.assertRaises(TypeError):
                 spaces.set_box_state(0, 100 / 2, 0, 0)     # a float
             with self.assertRaises(TypeError):
-                spaces.set_box_state(0, True, 0, 0)        # a bool is not an int
+                spaces.set_box_state(0, True, 0, 0)        # a bool
             with self.assertRaises(ValueError):
                 spaces.set_box_state(0, 2**31, 0, 0)       # past int32
-            spaces.set_box_state(0, 100 // 2, 0, 0)        # and this is fine
+            spaces.set_box_state(0, 100 // 2, 0, 0)        # accepted
             self.assertEqual(50, spaces.box_state[0].min_w)
             with self.assertRaises(TypeError):
                 metrics.measure("x", 16.0)
@@ -413,9 +388,8 @@ class TestGeneratedBindings(unittest.TestCase):
         self.assertIn("SCAV_E_INVALID_ARG", str(caught.exception))
 
     def test_a_buffer_too_small_reaches_the_caller_as_a_capacity_error(self) -> None:
-        """The query-then-fill protocol from the other side of the boundary: a
-        cap too small is its own code and the required count, never a short
-        buffer the caller would then read as the whole digest."""
+        """A cap one byte short returns SCAV_E_CAPACITY and the required size, and
+        writes nothing."""
         scav = self.scav
         lib = scav.library()
         chart = scav.load_network(
@@ -433,16 +407,14 @@ class TestGeneratedBindings(unittest.TestCase):
                                      ctypes.byref(needed))
         self.assertEqual(scav._abi.SCAV_E_CAPACITY, code)
         self.assertEqual(size.value, needed.value)
-        self.assertEqual(0, sum(buffer))  # refused, so nothing was written
+        self.assertEqual(0, sum(buffer))  # nothing written
         with self.assertRaises(scav.ScavError) as caught:
             scav._abi.check(code, "scav_chart_digest")
         self.assertIn("SCAV_E_CAPACITY", str(caught.exception))
         chart.close()
 
     def test_a_struct_size_the_library_disagrees_with_is_its_own_code(self) -> None:
-        """The refusal from the other side of the boundary: SCAV_E_ABI is its
-        own code and its own name, not an argument error a caller would go
-        looking for a null in."""
+        """A wrong struct size returns SCAV_E_ABI, named in the raised error."""
         scav = self.scav
         prof = scav.profile("readable")
         code = scav.library().scav_profile_named(
@@ -467,7 +439,7 @@ class TestGeneratedBindings(unittest.TestCase):
             one.append(two)
             one.validate()
             self.assertEqual(before * 2, one.counts()["prims"])
-            # Depth resolves the interleaving, so both sets survive.
+            # Both lists' depths survive the append.
             self.assertEqual({0, 10}, {p.depth for p in one.prims()})
             one.close()
             two.close()

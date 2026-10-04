@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
-"""The loader driven from Python over ctypes, faking a network fetch, and
-compared against the same network loaded by the CLI off disk. Same chart, same
-hash.
-
-The fake fetch names documents with URLs rather than paths. Nothing in core
-interprets them, include paths resolve against them by the same byte-wise rule,
-and the structural hash excludes document names -- so a URL-shaped network
-produces the same digits as the same files on disk."""
+"""Loads a URL-named document network over ctypes through a fake fetch and checks
+its hash against the CLI loading the same files from disk.
+"""
 
 import ctypes
 import subprocess
@@ -25,8 +20,7 @@ SCAV_OK = 0
 SCAV_E_CAPACITY = -3
 SCAV_E_LOAD = -4
 
-# The document network, named as if it were served over HTTP. Only the basename
-# is used to find the bytes; the rest exists to prove core does not care.
+# Origin for the fake network's URLs; the fetch looks files up by basename.
 ORIGIN = "https://charts.example.invalid/machines/"
 
 
@@ -41,9 +35,7 @@ class Pending(ctypes.Structure):
 
 
 def bind(lib: ctypes.CDLL) -> None:
-    """Argument and return types, spelled out. ctypes defaults every return to
-    int, which silently truncates a pointer on LP64 -- so a binding that skips
-    this appears to work until the first handle lands above 4 GiB."""
+    """Declares argument and return types for every scav function the test calls."""
     p = ctypes.POINTER
     u32 = ctypes.c_uint32
     byte_p = p(ctypes.c_ubyte)
@@ -105,8 +97,6 @@ class Loader:
         assert self.lib.scav_load_pending(
             self.handle, ctypes.byref(rows), ctypes.byref(stride),
             ctypes.byref(count)) == SCAV_OK
-        # The rows are scav's, so the pitch to walk them at is scav's to state:
-        # this struct is hand-rolled, and the assertion is what keeps it honest.
         assert stride.value == ctypes.sizeof(Pending), (
             f"scav_pending is {ctypes.sizeof(Pending)} bytes here and "
             f"{stride.value} in the library")
@@ -179,8 +169,7 @@ class TestLoadOverCtypes(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.cfg = scavtest.load_config()
         if cls.cfg["sanitizer"].upper() not in ("", "NONE"):
-            # A sanitized library dlopen'd into a clean host aborts, since its
-            # interceptors must be installed before the process starts.
+            # A sanitized library aborts when dlopen'd into an uninstrumented host.
             raise unittest.SkipTest(
                 f"ctypes cannot load a {cls.cfg['sanitizer']} build; "
                 "c_api_tests covers these entry points under the sanitizer")
@@ -205,8 +194,7 @@ class TestLoadOverCtypes(unittest.TestCase):
         return found[0]
 
     def fetch(self, url: str) -> bytes:
-        """The fake network. Nothing here is a filesystem call on core's behalf:
-        the application decides what a name means, which is the whole point."""
+        """Fake fetch: returns the corpus file named by the URL's basename."""
         name = url.rsplit("/", 1)[-1]
         if name not in self.corpus:
             raise AssertionError(f"nothing serves {url}")
@@ -267,9 +255,7 @@ class TestLoadOverCtypes(unittest.TestCase):
             loader.close()
 
     def test_all_three_transports_agree_on_the_hash(self) -> None:
-        """The filesystem run went through `fopen` in the CLI; the ctypes run
-        never touched a filesystem on core's behalf and named every document
-        with a URL. Same network, same model, same digits."""
+        """`dump --hash` from disk matches the ctypes URL load's structural hash."""
         from_files = self.cli_hash(CHART_DIR / ROOT)
 
         loader = self.load_network(ORIGIN)
@@ -282,9 +268,7 @@ class TestLoadOverCtypes(unittest.TestCase):
         self.assertEqual(from_files, from_network)
 
     def test_arrival_order_does_not_change_the_model(self) -> None:
-        """A DocId comes from the include graph, never from arrival order,
-        which is what lets a host resolve a pending batch with Promise.all and
-        still get a byte-identical chart."""
+        """Reversed arrival order gives the same digest and structural hash."""
         forward = self.load_network(ORIGIN, reverse=False)
         backward = self.load_network(ORIGIN, reverse=True)
         try:

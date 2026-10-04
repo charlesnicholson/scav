@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
-"""scav's inflate against zlib as the reference encoder: every level, every
-strategy, over inputs chosen for the block types and code paths they force.
-Streams are made here at test time and decoded by scav_inflate_driver, so the
-vectors are whatever this Python's zlib produces."""
+"""scav_inflate_driver against Python's zlib: raw deflate at every level and strategy,
+gzip members, and exact output bounds."""
 
 import gzip
 import io

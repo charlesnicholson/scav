@@ -50,10 +50,7 @@ class Config(dict[str, str]):
 
     @property
     def instrumented(self) -> bool:
-        """Whether the archive needs a runtime the exported target does not name.
-
-        Correct behaviour, not a defect, so the consumer gate runs on plain rows.
-        """
+        """True when the archive needs a runtime the exported target does not name."""
         return self["sanitizer"].upper() not in ("", "NONE") or (
             self["coverage"].upper() in TRUTHY
         )
@@ -89,13 +86,7 @@ SANITIZERS: tuple[str, ...] = (
 
 
 def env_without_suppressions() -> dict[str, str]:
-    """The environment for a process this test spawns rather than the build.
-
-    A sanitizer's suppressions path is a bare filename, because those option
-    strings split on ':' and a Windows drive letter would split with them. It
-    resolves against the source directory, which a spawned build tool does not
-    run in, and a runtime that cannot read it aborts before main.
-    """
+    """os.environ with `suppressions=` dropped from each sanitizer's options."""
     env = os.environ.copy()
     for name in SANITIZERS:
         if value := env.get(name):

@@ -30,13 +30,7 @@ class Rect(ctypes.Structure):
 
 
 class ShortLayoutOpts(ctypes.Structure):
-    """scav_layout_opts as a caller one profile knob behind would lay it out.
-
-    Hand-rolled on purpose: this is the shape of the incident. The real
-    struct's profile is 48 int32, and a copy of it one knob short was written
-    past by scav_profile_named and read past by scav_layout_run, which is how
-    `router` came back as garbage on every runner but one.
-    """
+    """`scav_layout_opts` with a profile shorter than the library's."""
     _fields_ = [("profile", ctypes.c_int32 * 47),
                 ("router", ctypes.c_uint32),
                 ("threads", ctypes.c_uint32)]
@@ -81,8 +75,7 @@ class TestLayoutOverCtypes(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.cfg = scavtest.load_config()
         if cls.cfg["sanitizer"].upper() not in ("", "NONE"):
-            # A sanitized library dlopen'd into a clean host aborts, since its
-            # interceptors must be installed before the process starts.
+            # A sanitized library aborts when dlopen'd into an uninstrumented host.
             raise unittest.SkipTest(
                 f"ctypes cannot load a {cls.cfg['sanitizer']} build; "
                 "c_api_tests covers these entry points under the sanitizer")
@@ -129,10 +122,8 @@ class TestLayoutOverCtypes(unittest.TestCase):
         return loader, chart
 
     def test_a_struct_one_field_short_is_refused_rather_than_written_past(self) -> None:
-        """The incident, as a test. A caller whose scav_layout_opts is one
-        profile knob behind now names its own size, so the library refuses both
-        calls instead of writing 192 bytes into 184 and reading `router` from
-        whatever followed."""
+        """A short `scav_layout_opts` gets SCAV_E_ABI from both calls, with nothing
+        written; the generated struct succeeds."""
         loader, chart = self.load()
 
         short = ShortLayoutOpts()
@@ -185,9 +176,7 @@ class TestLayoutOverCtypes(unittest.TestCase):
         n_states = counts[1].value
         self.assertGreater(n_states, 0)
 
-        # The generated binding's struct, which test_abi.py holds to the header: a
-        # hand-rolled copy was one field short and passed only while the bytes past
-        # it happened to read as router 0.
+        # The generated binding's struct, which test_abi.py checks against the header.
         opts = scav_layout_opts()
         self.assertEqual(
             SCAV_OK,

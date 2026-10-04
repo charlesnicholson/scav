@@ -38,8 +38,7 @@ class TestDump(unittest.TestCase):
     def run_dump(self, *args: scavtest.Arg) -> subprocess.CompletedProcess[str]:
         argv = [str(self.exe), "dump", *[str(a) for a in args]]
         print(f"+ {' '.join(argv)}", flush=True)
-        # Both streams separately: the model goes to stdout, diagnostics to
-        # stderr, and conflating them would let a diagnostic corrupt the golden.
+        # Captures stdout (the model) and stderr (diagnostics) separately.
         return subprocess.run(
             argv,
             stdout=subprocess.PIPE,
@@ -49,8 +48,7 @@ class TestDump(unittest.TestCase):
         )
 
     def check_golden(self, chart: Path, golden: Path) -> str:
-        # Relative path in, relative path out: the parenthetical locations quote
-        # the path as given, which is what keeps the golden machine-independent.
+        # Passes a relative path; locations in the output quote it as given.
         result = self.run_dump(chart.as_posix())
         self.assertEqual("", result.stderr)
         self.assertEqual(0, result.returncode)
@@ -84,7 +82,7 @@ class TestDump(unittest.TestCase):
                                NETWORK.as_posix())
         self.assertEqual("", result.stderr)
         self.assertEqual(0, result.returncode)
-        doc = json.loads(result.stdout)  # a consumer parses before it trusts
+        doc = json.loads(result.stdout)
         geometry = doc["geometry"]
         self.assertEqual(len(doc["states"]), len(geometry["state"]))
         self.assertEqual(len(doc["transitions"]), len(geometry["route"]))
@@ -93,8 +91,7 @@ class TestDump(unittest.TestCase):
         self.assertEqual(want, result.stdout)
 
     def test_layout_columns_carry_only_the_kinds_this_build_registers(self) -> None:
-        # A consumer switches on these two names, so the set is the contract.
-        # A column of a kind not here would reach the emitter untested.
+        # The layout dump's full (entity, kind) set; a model-only dump has no columns.
         doc = json.loads(self.run_dump("--layout", "--json", *self.pinned(NETWORK),
                                        NETWORK.as_posix()).stdout)
         self.assertEqual(
@@ -105,11 +102,8 @@ class TestDump(unittest.TestCase):
             self.run_dump("--json", NETWORK.as_posix()).stdout)["columns"])
 
     def test_the_flags_a_layout_rests_on_lay_it_out_again_unsearched(self) -> None:
-        # The counterfactual harness's premise (11.10g): the row and pins a run
-        # prints, handed back with `--no-search`, are that drawing exactly, so
-        # an edited copy of them is scored on the same objective. A profile
-        # other than the default and the no-text scale are part of what it
-        # rests on, and print first.
+        # The printed `rests on` flags plus `--no-search` reproduce the geometry;
+        # a non-default profile and `--no-text` lead them.
         for given, lead in (([], "--portfolio-row"),
                             (["--profile", "compact", "--no-text"], "--profile")):
             with self.subTest(given=given):
@@ -128,8 +122,7 @@ class TestDump(unittest.TestCase):
                                             if ln.startswith("geometry ")])
 
     def test_a_frame_turned_down_is_part_of_what_a_layout_rests_on(self) -> None:
-        # `--orient F` is a pin like the others: given, it is reported, and the
-        # drawing it lays out is laid out again from what was reported.
+        # A given `--orient F` is reported in `rests on`.
         shipped = self.run_dump("--layout", "--no-search", "--orient", "0", CHART.as_posix())
         self.assertEqual(0, shipped.returncode)
         rests = [ln for ln in shipped.stdout.splitlines() if ln.startswith("  rests on ")]
@@ -213,8 +206,7 @@ class TestDump(unittest.TestCase):
 
     def test_a_three_document_network_matches_the_golden(self) -> None:
         out = self.check_golden(NETWORK, NETWORK_GOLDEN)
-        # Resolution links, it does not flatten: one containment tree, and the
-        # included content prints under its alias state.
+        # Included content prints under its alias state, in one containment tree.
         self.assertIn("state dock", out)
         self.assertIn("(test_data/charts/dock.scav:", out)
         self.assertIn("(test_data/charts/led.scav:", out)
@@ -240,8 +232,7 @@ class TestDump(unittest.TestCase):
         self.assertIn(f'@machine:axes = "3" (test_data/charts/mill.scav:{machine})', out)
         self.assertIn(
             f'@machine:spindle_kw = "2" (test_data/charts/mill.scav:{machine})', out)
-        # And an attribute inside a state names the attribute's line, not the
-        # state's.
+        # An attribute inside a state reports the attribute's line.
         doc = self.line_of(MILL, "@doc = ")
         self.assertIn('@doc = "gantry mill with a carousel changer" '
                       f'(test_data/charts/mill.scav:{doc})', out)
@@ -298,8 +289,7 @@ class TestDump(unittest.TestCase):
         self.assertEqual(0, result.returncode)
         for line in result.stdout.splitlines():
             head = line.strip().split(" ")[0]
-            # An attribute is its own authored statement, so its line carries a
-            # location too -- and not its subject's.
+            # An attribute statement carries its own location.
             if head.startswith("@") or head in (
                     "chart", "state", "submachine", "trans", "include"):
                 self.assertRegex(
@@ -313,8 +303,7 @@ class TestDump(unittest.TestCase):
         return path
 
     def test_an_include_that_does_not_exist_is_an_error(self) -> None:
-        # The CLI's fetch is `fopen`, so a missing include is the operating
-        # system's answer rather than a finding about the model.
+        # A missing include is a failed `fopen` in the CLI, reported as `cannot read`.
         chart = self.write(
             "networked.scav",
             'chart n {\n'
@@ -337,8 +326,7 @@ class TestDump(unittest.TestCase):
         self.assertEqual(2, result.returncode)
         self.assertEqual("", result.stdout)
         self.assertIn("include cycle", result.stderr)
-        # Named against the document holding the statement that closes it,
-        # which is the second file, not the one on the command line.
+        # The error names cyc_b.scav:3, the include that closes the cycle.
         self.assertIn(f"{chart.name}:3:", result.stderr.replace("\\", "/"))
 
     def test_a_document_that_includes_itself_is_a_cycle(self) -> None:
@@ -356,8 +344,6 @@ class TestDump(unittest.TestCase):
         result = self.run_dump(chart)
         self.assertEqual(2, result.returncode)
         self.assertEqual("", result.stdout)
-        # The included file, not the root: parse_document does not know which
-        # document it holds, so the loader stamps the DocId.
         self.assertIn("broken_leaf.scav:1:", result.stderr.replace("\\", "/"))
 
     def test_a_parse_error_prints_no_model(self) -> None:
@@ -462,8 +448,7 @@ class TestDump(unittest.TestCase):
     # --layout failures =====================================================
 
     def test_layout_refuses_text_the_bundled_font_cannot_measure(self) -> None:
-        # U+F0001, a private-use codepoint JetBrains Mono does not carry. The
-        # measurement pass is what sizes a box, so nothing downstream runs.
+        # U+F0001 is a private-use codepoint JetBrains Mono lacks.
         chart = self.write(
             "unmeasurable.scav",
             'chart g {\n  state A,\n  state B,\n  trans A -> B "\U000f0001",\n}\n')
@@ -490,18 +475,16 @@ class TestDump(unittest.TestCase):
             "^" + re.escape(chart.as_posix())
             + r":\d+:\d+: composed geometry exceeds the coordinate domain\n$")
 
-    # Trace (11.16) ==========================================================
+    # Trace =================================================================
 
     def split_trace(self, out: str) -> tuple[list[dict], dict]:
-        """The two documents `--trace --json` writes to one stream. The event
-        array ends at the first bare bracket line, which the model never has."""
+        """Splits `--trace --json` output into the event array and the model."""
         end = out.index("\n]\n") + 3
         return json.loads(out[:end]), json.loads(out[end:])
 
     @scavtest.full_only
     def test_a_traced_run_draws_what_an_untraced_one_draws(self) -> None:
-        """The trace re-derives the drawing the search picked, so it may not
-        move it. A debug facility that changes the answer is worth nothing."""
+        """Tracing leaves each corpus chart's layout geometry unchanged."""
         charts = sorted((self.cfg.repo_root / "test_data/charts").glob("*.scav"))
         self.assertTrue(charts)
         for chart in charts:

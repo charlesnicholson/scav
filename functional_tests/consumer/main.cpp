@@ -99,8 +99,7 @@ int check_abi() {
     scav_layout_opts opts{};
     uint32_t placed{ 0 };
     scav_column_id column{ 0 };
-    // Every caller-owned struct crosses with its own size beside it, which is
-    // what makes a consumer built against a different header fail loudly.
+    // Every caller-owned struct is passed with its size.
     if ((scav_profile_named("readable", &opts.profile, sizeof(opts.profile)) != SCAV_OK) ||
         (scav_layout_run(chart,
                          nullptr,
@@ -119,9 +118,8 @@ int check_abi() {
     }
   }
 
-  // Metrics, the reference builder and the DrawList, all through the installed
-  // C surface: the bundled font travels inside the library, so nothing here
-  // names a path to it.
+  // Metrics, the reference builder and the DrawList through the installed C API,
+  // using the font bundled in the library.
   if ((rc == 0) && (chart != nullptr)) {
     scav_metrics *metrics{ nullptr };
     scav_drawlist *list{ nullptr };
@@ -154,8 +152,7 @@ int check_abi() {
     } else {
       std::printf("consumer drawlist ok: %u primitives\n", prims);
     }
-    // And out the far end: the SVG backend, under the count-then-write protocol
-    // every other span accessor uses.
+    // The SVG backend, through the count-then-write protocol.
     if (rc == 0) {
       uint32_t bytes{ 0 };
       if ((scav_svg_write(list,
@@ -198,8 +195,7 @@ int check_abi() {
   return rc;
 }
 
-// Load, validate and resolve through the installed public header, so every
-// section of the API is proven linkable without reaching a private one.
+// Load, validate and resolve through the installed public header.
 int check_model() {
   std::string_view const chart_text{ R"(chart consumer "from an installed scav" {
   state Idle,
