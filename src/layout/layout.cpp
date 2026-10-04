@@ -511,10 +511,11 @@ void cover_chart(Candidate &out) {
 // them.
 void label_candidate(Candidate &cand,
                      Chart const &c,
+                     SplitGraph const &g,
                      scav_spaces const &s,
                      scav_profile const &knobs) {
   cand.sized.chart = cand.sized_chart;  // as uncovered as `route_transitions` saw it
-  label_routes(cand.routes, c, cand.sized, s, knobs);
+  label_routes(cand.routes, c, g, cand.sized, s, knobs);
   cover_chart(cand);
 }
 
@@ -1176,7 +1177,7 @@ Improved run_search(Chart const &c,
   // The start is scored here, as it stands.
   out.viable = out.best.viable;
   if (!out.viable) { return out; }
-  CostContext const scoring{ cost_context(c) };
+  CostContext const scoring{ cost_context(c, g) };
   std::vector<uint8_t> party;  // set where the incumbent's route bends or is charged
   out.cost = cost_of(
       cost_terms(scoring, c, g, out.best.sized, out.best.routes, s, objective, &party),
@@ -1415,7 +1416,7 @@ Improved run_search(Chart const &c,
         ++exacts;
 #endif
         Candidate &cand{ kept[k].cand };
-        label_candidate(cand, c, s, row.knobs);
+        label_candidate(cand, c, g, s, row.knobs);
         Scored const scored{ scored_of(c, g, scoring, s, objective, cand) };
 #ifdef SCAV_TESTING
         if (test_label_bound_verify) {
@@ -1795,7 +1796,7 @@ bool layout_run(Chart &c,
   std::vector<uint8_t> viable(rows, 0);
   // Rows run at once, each on one thread, and are reduced in index order.
   std::vector<std::vector<Diagnostic>> spilled(rows);
-  CostContext const scoring{ cost_context(c) };
+  CostContext const scoring{ cost_context(c, g) };
   parallel_for(rows, (rows > 1) ? o.threads : 1U, [&](uint32_t i) {
     candidates[i] = search_candidate(c,
                                      g,

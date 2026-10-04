@@ -873,7 +873,7 @@ TEST_CASE("route: the boxes placed are the ones the strip matching places") {
   REQUIRE(r.placed.size() == 2);
   // Every box finds a candidate; the loop's label sits in its loop room.
   std::vector<scav_rect> expected;
-  CHECK(place_labels(c, z, s, r.route, r.points, profile(), expected) == 0);
+  CHECK(place_labels(c, g, z, s, r.route, r.points, profile(), expected) == 0);
   CHECK(same_rows(r.placed, expected));
 }
 

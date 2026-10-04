@@ -6,6 +6,7 @@
 
 #include "scav/scav_core.h"
 
+#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -38,13 +39,23 @@ struct SplitSegment {
   constexpr bool operator==(SplitSegment const &) const = default;
 };
 
+// The lowest submachine holding both ends, and per end the state it holds directly:
+// INVALID for an end enclosing the other. `frame` is INVALID for two regions of one state.
+// A self-transition's `child` is its state twice.
+struct CommonAncestor {
+  StateId state{ INVALID };  // the innermost state that is or encloses both ends
+  SubmachineId frame{ INVALID };
+  std::array<StateId, 2> child{ StateId{ INVALID }, StateId{ INVALID } };
+};
+
 struct SplitGraph {
-  std::vector<SplitPort> ports;           // route order within each transition
-  std::vector<SplitSegment> segments;     // contiguous per transition
-  std::vector<Span> trans_segments;       // parallel to transitions; -> segments
-  std::vector<uint32_t> state_crossings;  // edges through each state's border
-  std::vector<uint32_t> state_depth;      // enclosing state borders above each state
-  std::vector<uint32_t> trans_label;      // parallel to transitions: `label_segment`
+  std::vector<SplitPort> ports;              // route order within each transition
+  std::vector<SplitSegment> segments;        // contiguous per transition
+  std::vector<Span> trans_segments;          // parallel to transitions; -> segments
+  std::vector<uint32_t> state_crossings;     // edges through each state's border
+  std::vector<uint32_t> state_depth;         // enclosing state borders above each state
+  std::vector<uint32_t> trans_label;         // parallel to transitions: `label_segment`
+  std::vector<CommonAncestor> trans_common;  // parallel to transitions
   uint32_t serial{ 0 };  // a `memo_serial` naming the graph and its chart; 0 by hand
 };
 

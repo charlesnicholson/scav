@@ -869,14 +869,14 @@ void cost_grid_query(ChildGrid const &g,
 
 SCAV_INTERNAL_END
 
-CostContext cost_context(Chart const &c) {
+CostContext cost_context(Chart const &c, SplitGraph const &g) {
   CostContext k;
   k.an = cost_flatten_ancestry(c);
   child_grid_frames(c, c.states.size(), SCAN_MAX, k.grid);
   vec_assign(k.transit_top, c.transitions.size(), { INVALID, INVALID });
   for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {
     Transition const &trans{ c.transitions[tr] };
-    CommonAncestor const lca{ lowest_common_ancestor(c, trans.src, trans.dst) };
+    CommonAncestor const &lca{ g.trans_common[tr] };
     std::array<StateId, 2> const ends{ trans.src, trans.dst };
     for (uint32_t i = 0; i < 2; ++i) {
       StateId const top{ lca.child[i] };
@@ -1020,16 +1020,9 @@ CostTerms cost_terms(CostContext const &ctx,
     RectGrid &placed{ sc.placed };
     grid_over(placed, r.placed, sc.cursor);
 
-    std::vector<uint8_t> &encloses{ sc.encloses };
+    std::vector<uint8_t> &encloses{ sc.encloses };  // 1 for a state in `common`
     vec_assign(encloses, c.states.size(), 0);
-    std::vector<uint32_t> &common{ sc.common };  // the states `encloses` holds at 2
-    auto const mark = [&](StateId of, uint8_t v) {
-      StateId at{ enclosing_state(c, of) };
-      for (size_t step = 0; (step < c.states.size()) && (at.v != INVALID); ++step) {
-        encloses[at.v] = v;
-        at = enclosing_state(c, at);
-      }
-    };
+    std::vector<uint32_t> &common{ sc.common };
     // A placed box's subject, INVALID where the spaces name none.
     auto const subject_of = [&](uint32_t at) {
       return ((s.path_box != nullptr) && (at < s.n_path_box)) ? s.path_box[at].subject
@@ -1052,28 +1045,24 @@ CostTerms cost_terms(CostContext const &ctx,
           (s.path_box[i].subject < c.transitions.size())) {
         subject = s.path_box[i].subject;
         height = s.path_box[i].h;
-        // Only a state enclosing both ends is exempt from its own rect: `2` marks
-        // the intersection, `1` src's chain alone, and the reset below clears both.
-        StateId const src{ c.transitions[subject].src };
-        mark(src, 1);
-        StateId const dst{ c.transitions[subject].dst };
-        host = ((dst.v < encloses.size()) && (encloses[dst.v] == 1)) ? dst.v : INVALID;
-        if (inner_loop(c, subject)) { host = dst.v; }  // the loop is drawn inside it
-        StateId up{ enclosing_state(c, dst) };
+        // Only a state strictly enclosing both ends is exempt from its own rect.
+        Transition const &tr{ c.transitions[subject] };
+        StateId const both{ g.trans_common[subject].state };
+        bool const end{ (both == tr.src) || (both == tr.dst) };
+        if (end && (tr.src != tr.dst)) { host = both.v; }
+        if (inner_loop(c, subject)) { host = tr.dst.v; }  // the loop is drawn inside it
+        StateId up{ end ? enclosing_state(c, both) : both };
         for (size_t step = 0; (step < c.states.size()) && (up.v != INVALID); ++step) {
-          if (encloses[up.v] == 1) {
-            encloses[up.v] = 2;
-            vec_push_back(common, up.v);
-          }
-          host = (up.v == src.v) ? src.v : host;
+          encloses[up.v] = 1;
+          vec_push_back(common, up.v);
           up = enclosing_state(c, up);
         }
       }
-      // The grid charges every state's rect but those at 2 and the host, which pay for
-      // their bands: the host's in Tier 0.
+      // The grid charges every state's rect but those in `common` and the host, which pay
+      // for their bands: the host's in Tier 0.
       grid_visit(states, box, 0, [&](uint32_t at) {
         uint32_t const st{ state_of[at] };
-        if ((encloses[st] != 2) && (st != host) && overlaps(box, state_rect[at])) {
+        if ((encloses[st] == 0) && (st != host) && overlaps(box, state_rect[at])) {
           ++t.label_over_box;
           blame(party, subject, INVALID);
         }
@@ -1129,7 +1118,7 @@ CostTerms cost_terms(CostContext const &ctx,
           blame(party, subject, nearest);
         }
       }
-      if (subject != INVALID) { mark(c.transitions[subject].src, 0); }
+      for (uint32_t const st : common) { encloses[st] = 0; }
     }
   }
 
@@ -1209,7 +1198,7 @@ CostTerms cost_terms(Chart const &c,
                      Routes const &r,
                      scav_spaces const &s,
                      scav_profile const &p) {
-  return cost_terms(cost_context(c), c, g, z, r, s, p);
+  return cost_terms(cost_context(c, g), c, g, z, r, s, p);
 }
 
 CostTerms cost_columns(Chart const &c,

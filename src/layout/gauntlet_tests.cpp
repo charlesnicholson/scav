@@ -160,7 +160,8 @@ void lay(char const *name,
         return e.kind == TraceKind::LaneAssigned;
       }));
   std::vector<scav_rect> boxes;
-  out.unplaced = place_labels(out.c, out.z, s, out.r.route, out.r.points, knobs, boxes);
+  out.unplaced =
+      place_labels(out.c, out.g, out.z, s, out.r.route, out.r.points, knobs, boxes);
   column_holds(out.c, "scav.geom.state", out.z.state);
   column_holds(out.c, "scav.geom.sub", out.z.sub);
   column_holds(out.c, "scav.geom.point", out.r.points);
@@ -681,8 +682,7 @@ TEST_CASE(
     CHECK(l.unplaced == 0);
     scav_rect const at{ l.r.placed[0] };
 
-    Transition const &tr{ l.c.transitions[t] };
-    CommonAncestor const lca{ lowest_common_ancestor(l.c, tr.src, tr.dst) };
+    CommonAncestor const lca{ l.g.trans_common[t] };
     REQUIRE(lca.frame == l.c.root_submachine);
     CHECK(contains(l.z.sub[lca.frame.v], at));
     for (uint32_t const st : live_of(l.c)) {

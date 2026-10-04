@@ -379,6 +379,7 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
 
     std::vector<scav_rect> again;
     fell += place_labels(r.chart,
+                         decompose(r.chart),
                          z,
                          as_spaces(r.spaces),
                          rows<scav_span>(r.chart, "scav.geom.route"),

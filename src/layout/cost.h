@@ -71,10 +71,10 @@ struct CostContext {
   std::vector<std::array<uint32_t, 2>> transit_top;
 };
 
-CostContext cost_context(Chart const &c);
+CostContext cost_context(Chart const &c, SplitGraph const &g);
 
-// `ctx` is `cost_context(c)`. `party`, where given, is 1 per transition whose route bends
-// or is charged crossings, corridor, crowding, excess_len or a label, else 0; every
+// `ctx` is `cost_context(c, g)`. `party`, where given, is 1 per transition whose route
+// bends or is charged crossings, corridor, crowding, excess_len or a label, else 0; every
 // transition is 1 while any Tier 0 count is nonzero.
 CostTerms cost_terms(CostContext const &ctx,
                      Chart const &c,

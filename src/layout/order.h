@@ -9,7 +9,6 @@
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
 
-#include <array>
 #include <cstdint>
 #include <vector>
 
@@ -105,15 +104,6 @@ void order_submachines(SubmachineOrders &o,
 // Crossings between two adjacent ranks by inversion counting. Exposed because
 // it is what the ordering minimizes and what a test measures against.
 uint64_t rank_crossings(std::vector<uint32_t> const &south_positions);
-
-// The lowest submachine holding both ends, and per end the state it holds directly:
-// INVALID for an end enclosing the other. `frame` is INVALID for two regions of one state.
-struct CommonAncestor {
-  SubmachineId frame{ INVALID };
-  std::array<StateId, 2> child{ StateId{ INVALID }, StateId{ INVALID } };
-};
-
-CommonAncestor lowest_common_ancestor(Chart const &c, StateId src, StateId dst);
 
 // The segment of `t` in its lowest common ancestor, which carries its label, or the middle
 // one where no submachine holds both ends; INVALID for no route.

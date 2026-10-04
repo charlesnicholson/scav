@@ -742,45 +742,6 @@ void rank_derived(Frame &f,
 
 }  // namespace
 
-CommonAncestor lowest_common_ancestor(Chart const &c, StateId src, StateId dst) {
-  CommonAncestor out;
-  if ((src.v >= c.states.size()) || (dst.v >= c.states.size())) { return out; }
-  if (src == dst) {
-    out.frame = c.states[src.v].parent;
-    out.child = { src, src };
-    return out;
-  }
-  // The innermost state that is or encloses both ends, INVALID where only a
-  // document root holds them.
-  StateId common{ src };
-  for (size_t up = 0; (up < c.states.size()) && (common.v != INVALID) &&
-                      !ancestor_or_self(c, common, dst);
-       ++up) {
-    common = enclosing_state(c, common);
-  }
-  auto const child_of = [&](StateId end) {
-    if (end == common) { return StateId{ INVALID }; }
-    StateId at{ end };
-    for (size_t up = 0; (up < c.states.size()) && (at.v != INVALID); ++up) {
-      StateId const next{ enclosing_state(c, at) };
-      if (next == common) { return at; }
-      at = next;
-    }
-    return StateId{ INVALID };
-  };
-  out.child = { child_of(src), child_of(dst) };
-  SubmachineId const a{ (out.child[0].v != INVALID) ? c.states[out.child[0].v].parent
-                                                    : SubmachineId{ INVALID } };
-  SubmachineId const b{ (out.child[1].v != INVALID) ? c.states[out.child[1].v].parent
-                                                    : SubmachineId{ INVALID } };
-  if (a.v == INVALID) {
-    out.frame = b;
-  } else if ((b.v == INVALID) || (a == b)) {
-    out.frame = a;
-  }
-  return out;
-}
-
 uint32_t label_segment(Chart const &c, SplitGraph const &g, uint32_t t) {
   if (t < g.trans_label.size()) { return g.trans_label[t]; }
   if ((t >= g.trans_segments.size()) || (t >= c.transitions.size())) { return INVALID; }
@@ -788,8 +749,7 @@ uint32_t label_segment(Chart const &c, SplitGraph const &g, uint32_t t) {
   if ((segs.len == 0) || inner_loop(c, t)) {
     return INVALID;
   }  // labelled in its loop room
-  Transition const &tr{ c.transitions[t] };
-  SubmachineId const frame{ lowest_common_ancestor(c, tr.src, tr.dst).frame };
+  SubmachineId const frame{ g.trans_common[t].frame };
   for (uint32_t k = 0; (frame.v != INVALID) && (k < segs.len); ++k) {
     if (g.segments[segs.off + k].frame == frame) { return segs.off + k; }
   }

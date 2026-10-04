@@ -26,6 +26,35 @@ void chain_of(Chart const &c, StateId s, std::vector<StateId> &out) {
   }
 }
 
+// The common ancestor of `tr`'s ends from their chains, `i` and `j` being each chain's
+// divergent prefix.
+CommonAncestor common_of(Chart const &c,
+                         Transition const &tr,
+                         std::vector<StateId> const &chain_src,
+                         std::vector<StateId> const &chain_dst,
+                         size_t i,
+                         size_t j) {
+  if (tr.src == tr.dst) {
+    return { .state = tr.src,
+             .frame = c.states[tr.src.v].parent,
+             .child = { tr.src, tr.src } };
+  }
+  CommonAncestor out;
+  out.state = (i < chain_src.size()) ? chain_src[i] : StateId{ INVALID };
+  out.child = { (i > 0) ? chain_src[i - 1] : StateId{ INVALID },
+                (j > 0) ? chain_dst[j - 1] : StateId{ INVALID } };
+  SubmachineId const a{ (i > 0) ? c.states[chain_src[i - 1].v].parent
+                                : SubmachineId{ INVALID } };
+  SubmachineId const b{ (j > 0) ? c.states[chain_dst[j - 1].v].parent
+                                : SubmachineId{ INVALID } };
+  if (a.v == INVALID) {
+    out.frame = b;
+  } else if ((b.v == INVALID) || (a == b)) {
+    out.frame = a;
+  }
+  return out;
+}
+
 // One planned boundary crossing, in route order.
 struct Crossing {
   enum : uint32_t { Exit, SepSrc, SepDst, Enter } kind;
@@ -70,27 +99,30 @@ SplitGraph decompose(Chart const &c) {
   }
   vec_assign(g.state_crossings, c.states.size(), 0);
   vec_assign(g.trans_segments, c.transitions.size(), Span{});
+  vec_assign(g.trans_common, c.transitions.size(), CommonAncestor{});
 
   for (uint32_t t = 0; t < c.transitions.size(); ++t) {
     Transition const &tr{ c.transitions[t] };
-    if ((tr.live == 0) || (tr.src.v == INVALID) || (tr.dst.v == INVALID) ||
-        (c.states[tr.src.v].live == 0) || (c.states[tr.dst.v].live == 0)) {
+    if ((tr.src.v >= c.states.size()) || (tr.dst.v >= c.states.size())) { continue; }
+    chain_of(c, tr.src, chain_src);
+    chain_of(c, tr.dst, chain_dst);
+    size_t i{ chain_src.size() };
+    size_t j{ chain_dst.size() };
+    while ((i > 0) && (j > 0) && (chain_src[i - 1] == chain_dst[j - 1])) {
+      --i;
+      --j;
+    }
+    // i and j now count the divergent prefix of each chain, endpoint included.
+    g.trans_common[t] = common_of(c, tr, chain_src, chain_dst, i, j);
+    if ((tr.live == 0) || (c.states[tr.src.v].live == 0) ||
+        (c.states[tr.dst.v].live == 0)) {
       continue;
     }
     route.clear();
     bool src_inner{ false };  // route starts on the source border's inner face
     bool dst_inner{ false };  // route ends on the target border's inner face
     if (tr.src != tr.dst) {
-      chain_of(c, tr.src, chain_src);
-      chain_of(c, tr.dst, chain_dst);
-      size_t i{ chain_src.size() };
-      size_t j{ chain_dst.size() };
-      while ((i > 0) && (j > 0) && (chain_src[i - 1] == chain_dst[j - 1])) {
-        --i;
-        --j;
-      }
-      // i and j now count the divergent prefix of each chain, endpoint
-      // included. One shape covers every case: an empty run contributes nothing.
+      // One shape covers every case: an empty run contributes nothing.
       if (i == 0) {  // src encloses dst; its border splits only when external
         src_inner = tr.kind != TransKind::External;
         if (!src_inner) {

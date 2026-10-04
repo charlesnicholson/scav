@@ -202,7 +202,6 @@ struct CallScratch {
   std::vector<scav_point> routed;
   std::vector<scav_span> net_span;
   std::vector<scav_rect> walls, held;
-  std::vector<uint8_t> up;
   std::vector<uint32_t> enclosing;  // parallel to states: `enclosing_state` of each
   // The live states each state encloses, as lists threaded through `kid_next`
   // from `kid_head`, and the live states a gather must always visit.
@@ -839,26 +838,15 @@ void route_transitions(Routes &out,
     // one wholly inside a composite may not leave that composite.
     std::vector<scav_rect> &held{ cs.held };
     vec_assign(held, out.route.size(), z.chart);
-    std::vector<uint8_t> &up{ cs.up };
-    vec_assign(up, c.states.size(), 0);
-    auto const above = [&enclosing](StateId of) {
-      return (of.v == INVALID) ? INVALID : enclosing[of.v];
-    };
     for (uint32_t t = 0; t < out.route.size(); ++t) {
       if (t >= c.transitions.size()) { continue; }
-      for (uint32_t a{ above(c.transitions[t].src) }; a != INVALID; a = enclosing[a]) {
-        up[a] = 1;
-      }
-      for (uint32_t b{ above(c.transitions[t].dst) }; b != INVALID; b = enclosing[b]) {
-        if (up[b] != 0) {
-          held[t] = z.state[b];
-          break;
-        }
-      }
-      for (uint32_t a{ above(c.transitions[t].src) }; a != INVALID; a = enclosing[a]) {
-        up[a] = 0;
-      }
-      if (inner_loop(c, t)) { held[t] = z.state[c.transitions[t].src.v]; }
+      Transition const &tr{ c.transitions[t] };
+      StateId const both{ g.trans_common[t].state };
+      StateId const above{ ((both == tr.src) || (both == tr.dst))
+                               ? enclosing_state(c, both)
+                               : both };
+      if (above.v != INVALID) { held[t] = z.state[above.v]; }
+      if (inner_loop(c, t)) { held[t] = z.state[tr.src.v]; }
     }
     NudgeStats stats;
     nudge_lanes(z.chart,
@@ -873,16 +861,17 @@ void route_transitions(Routes &out,
                 (s.path_clear != nullptr) ? s.n_path_clear : 0);
   }
 
-  if (labels) { label_routes(out, c, z, s, p); }
+  if (labels) { label_routes(out, c, g, z, s, p); }
   vec_push_back(stack, std::move(cs));
 }
 
 void label_routes(Routes &out,
                   Chart const &c,
+                  SplitGraph const &g,
                   SizedLayout const &z,
                   scav_spaces const &s,
                   scav_profile const &p) {
-  place_labels(c, z, s, out.route, out.points, p, out.placed);
+  place_labels(c, g, z, s, out.route, out.points, p, out.placed);
 }
 
 }  // namespace scav

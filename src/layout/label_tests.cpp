@@ -4,6 +4,7 @@
 #include "layout/label.h"
 #include "layout/tests/pod_eq.h"
 
+#include "layout/decompose.h"
 #include "layout/geom.h"
 #include "layout/size.h"
 #include "scav/scav_core.h"
@@ -21,6 +22,7 @@ namespace scav {
 
 // The placement with its search selectable, internal to `label.cpp`.
 uint32_t place_labels_by(Chart const &c,
+                         SplitGraph const &g,
                          SizedLayout const &z,
                          scav_spaces const &s,
                          std::vector<scav_span> const &route,
@@ -32,6 +34,28 @@ uint32_t place_labels_by(Chart const &c,
 }  // namespace scav
 
 namespace {
+
+// Both placements over `c`'s own split.
+uint32_t place_labels(scav::Chart const &c,
+                      scav::SizedLayout const &z,
+                      scav_spaces const &s,
+                      std::vector<scav_span> const &route,
+                      std::vector<scav_point> const &points,
+                      scav_profile const &p,
+                      std::vector<scav_rect> &out) {
+  return scav::place_labels(c, scav::decompose(c), z, s, route, points, p, out);
+}
+
+uint32_t place_labels_by(scav::Chart const &c,
+                         scav::SizedLayout const &z,
+                         scav_spaces const &s,
+                         std::vector<scav_span> const &route,
+                         std::vector<scav_point> const &points,
+                         scav_profile const &p,
+                         scav::LabelSearch search,
+                         std::vector<scav_rect> &out) {
+  return scav::place_labels_by(c, scav::decompose(c), z, s, route, points, p, search, out);
+}
 
 // A profile scaled to these tests' geometry: `font_size_grid` 20 gives a leader of 10.
 scav_profile tiny() {

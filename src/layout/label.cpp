@@ -7,7 +7,6 @@
 #include "layout/decompose.h"
 #include "layout/geom.h"
 #include "layout/memo.h"
-#include "layout/order.h"
 #include "layout/size.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
@@ -27,6 +26,7 @@ namespace scav {
 // Declared for gcc's -Wmissing-declarations; a test declares its own prototype.
 SCAV_INTERNAL_BEGIN
 uint32_t place_labels_by(Chart const &c,
+                         SplitGraph const &g,
                          SizedLayout const &z,
                          scav_spaces const &s,
                          std::vector<scav_span> const &route,
@@ -835,6 +835,7 @@ CallBuffers &call_buffers() {
 SCAV_INTERNAL_BEGIN
 
 uint32_t place_labels_by(Chart const &c,
+                         SplitGraph const &g,
                          SizedLayout const &z,
                          scav_spaces const &s,
                          std::vector<scav_span> const &route,
@@ -939,9 +940,7 @@ uint32_t place_labels_by(Chart const &c,
     }
     Outcome got{};
     CommonAncestor const lca{ (box.subject < c.transitions.size())
-                                  ? lowest_common_ancestor(c,
-                                                           c.transitions[box.subject].src,
-                                                           c.transitions[box.subject].dst)
+                                  ? g.trans_common[box.subject]
                                   : CommonAncestor{} };
     Legs const legs{ legs_in(z, lca, points, r) };
     scav_span const anchored{ (r.len >= 2)
@@ -1073,13 +1072,14 @@ uint32_t place_labels_by(Chart const &c,
 SCAV_INTERNAL_END
 
 uint32_t place_labels(Chart const &c,
+                      SplitGraph const &g,
                       SizedLayout const &z,
                       scav_spaces const &s,
                       std::vector<scav_span> const &route,
                       std::vector<scav_point> const &points,
                       scav_profile const &p,
                       std::vector<scav_rect> &out) {
-  return place_labels_by(c, z, s, route, points, p, LabelSearch::Memoized, out);
+  return place_labels_by(c, g, z, s, route, points, p, LabelSearch::Memoized, out);
 }
 
 }  // namespace scav

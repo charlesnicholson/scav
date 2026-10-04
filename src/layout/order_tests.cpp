@@ -473,7 +473,8 @@ TEST_CASE("order: the lowest common ancestor of every shape of two ends") {
 
   auto const holds =
       [&](StateId src, StateId dst, SubmachineId frame, StateId from, StateId to) {
-        CommonAncestor const got{ lowest_common_ancestor(c, src, dst) };
+        TransId const t{ build_trans(c, src, dst, TransKind::External, {}) };
+        CommonAncestor const got{ decompose(c).trans_common[t.v] };
         CAPTURE(src.v);
         CAPTURE(dst.v);
         CHECK(got.frame == frame);

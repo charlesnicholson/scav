@@ -98,6 +98,7 @@ void route_transitions(Routes &out,
 // them.
 void label_routes(Routes &out,
                   Chart const &c,
+                  SplitGraph const &g,
                   SizedLayout const &z,
                   scav_spaces const &s,
                   scav_profile const &p);

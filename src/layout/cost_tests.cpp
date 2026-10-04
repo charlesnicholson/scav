@@ -298,7 +298,7 @@ TEST_CASE(
         { { .x = 1000, .y = 1000 }, { .x = 1100, .y = 1000 } } }) };
   SplitGraph const g{ decompose(c) };
   std::vector<uint8_t> party;
-  CostTerms const t{ cost_terms(cost_context(c), c, g, z, r, {}, profile(), &party) };
+  CostTerms const t{ cost_terms(cost_context(c, g), c, g, z, r, {}, profile(), &party) };
   CHECK(t.crossings == 1);
   CHECK(t.bends == 1);
   REQUIRE(party.size() == 4);
@@ -316,9 +316,14 @@ TEST_CASE(
         { { .x = 0, .y = 1000 }, { .x = 1000, .y = 1000 } },
         { { .x = 0, .y = 1096 }, { .x = 1000, .y = 1096 } } }) };
   SplitGraph const g4{ decompose(four) };
-  CostTerms const u{
-    cost_terms(cost_context(four), four, g4, blank(four), shared, {}, profile(), &party)
-  };
+  CostTerms const u{ cost_terms(cost_context(four, g4),
+                                four,
+                                g4,
+                                blank(four),
+                                shared,
+                                {},
+                                profile(),
+                                &party) };
   CHECK(u.bends == 0);
   CHECK(u.crossings == 0);
   CHECK(u.excess_len == 0);
@@ -349,7 +354,7 @@ TEST_CASE("cost: party marks every transition while the drawing breaks Tier 0") 
                               { { .x = 20, .y = 1500 }, { .x = 400, .y = 1500 } } }) };
   SplitGraph const g{ decompose(c) };
   std::vector<uint8_t> party;
-  CostTerms t{ cost_terms(cost_context(c), c, g, z, r, {}, profile(), &party) };
+  CostTerms t{ cost_terms(cost_context(c, g), c, g, z, r, {}, profile(), &party) };
   CHECK(t.through_box == 1);
   REQUIRE(party.size() == 2);
   CHECK(party[0] != 0);
@@ -357,7 +362,7 @@ TEST_CASE("cost: party marks every transition while the drawing breaks Tier 0") 
 
   // The stranger moved clear leaves both straight, unpriced and unmarked.
   z.state[other.v] = { .x = 150, .y = 3000, .w = 100, .h = 100 };
-  t = cost_terms(cost_context(c), c, g, z, r, {}, profile(), &party);
+  t = cost_terms(cost_context(c, g), c, g, z, r, {}, profile(), &party);
   CHECK(cost_of(t, profile()).t0_violations == 0);
   REQUIRE(party.size() == 2);
   CHECK(party[0] == 0);
@@ -2660,7 +2665,7 @@ TEST_CASE("cost: the indexed terms are the direct scans' over seeded random char
   for (uint32_t trial = 0; (trial < 600) && (mismatches == 0); ++trial) {
     Chart const c{ random_chart(r) };
     SplitGraph const g{ decompose(c) };
-    CostContext const ctx{ cost_context(c) };
+    CostContext const ctx{ cost_context(c, g) };
     for (uint32_t cand = 0; cand < 4; ++cand) {
       constexpr std::array<int32_t, 4> MOVE{ 0, 1000, 0, -1000 };
       Candidate const k{ shifted(random_candidate(c, r), MOVE[cand]) };
@@ -2708,7 +2713,7 @@ TEST_CASE("cost: the indexed terms are the direct scans' at the edges") {
   build_trans(c, a, b, TransKind::External, {});
   build_trans(c, b, far, TransKind::External, {});
   SplitGraph const g{ decompose(c) };
-  CostContext const ctx{ cost_context(c) };
+  CostContext const ctx{ cost_context(c, g) };
   // A band of five and an em of twenty.
   scav_profile p{ profile() };
   p.node_sep = 30;
@@ -2846,18 +2851,18 @@ TEST_CASE("cost: a context built once scores every candidate as one built for it
     CAPTURE(trial);
     Chart const c{ random_chart(r) };
     SplitGraph const g{ decompose(c) };
-    CostContext const ctx{ cost_context(c) };
+    CostContext const ctx{ cost_context(c, g) };
     bool agree{ true };
     for (uint32_t cand = 0; cand < 12; ++cand) {
       Candidate const k{ random_candidate(c, r) };
       scav_profile const p{ random_profile(r) };
       scav_spaces const s{ k.spaces() };
       CostTerms const held{ cost_terms(ctx, c, g, k.z, k.r, s, p) };
-      CostTerms const fresh{ cost_terms(cost_context(c), c, g, k.z, k.r, s, p) };
+      CostTerms const fresh{ cost_terms(cost_context(c, g), c, g, k.z, k.r, s, p) };
       agree = agree && first_difference(held, fresh).empty();
     }
     CHECK(agree);
-    CostContext const again{ cost_context(c) };
+    CostContext const again{ cost_context(c, g) };
     CHECK(ctx.an.tin == again.an.tin);
     CHECK(ctx.an.tout == again.an.tout);
     CHECK(ctx.an.detached == again.an.detached);

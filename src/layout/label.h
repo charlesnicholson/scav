@@ -6,6 +6,7 @@
 // anchor slid along the route, the feasible candidate least at risk of reading
 // as somebody else's (11.9.4).
 
+#include "layout/decompose.h"
 #include "layout/geom.h"
 #include "layout/size.h"
 #include "scav/scav_core.h"
@@ -30,6 +31,7 @@ enum class LabelSearch : uint32_t {
 // Fills `out` parallel to `s.path_box`; returns the boxes that found no
 // feasible candidate and took the centred placement instead.
 uint32_t place_labels(Chart const &c,
+                      SplitGraph const &g,
                       SizedLayout const &z,
                       scav_spaces const &s,
                       std::vector<scav_span> const &route,
