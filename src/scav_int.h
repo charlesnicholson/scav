@@ -10,8 +10,8 @@
 
 namespace scav {
 
-// The only division primitives: floor_div/floor_mod round toward negative
-// infinity, ceil_div toward positive. b nonzero; INT_MIN / -1 is the caller's.
+// The only division primitives: floor_div/floor_mod round toward negative infinity,
+// ceil_div toward positive. `b` is nonzero; callers rule out INT_MIN / -1.
 
 template <typename T>
 constexpr T floor_div(T a, T b) {
@@ -42,7 +42,7 @@ constexpr T ceil_div(T a, T b) {
   }
 }
 
-// The larger and the smaller of two integers, so a fold reads as intent.
+// Larger and smaller of two integers; a tie returns `a`.
 template <typename T>
 constexpr T imax(T a, T b) {
   static_assert(std::is_integral_v<T>, "integers only");
@@ -55,8 +55,8 @@ constexpr T imin(T a, T b) {
   return (b < a) ? b : a;
 }
 
-// Floor square root by integer Newton from above: every step is at least the floor
-// (AM-GM) and falls while above it, so the first step that does not fall ends on it.
+// Floor square root by integer Newton iteration from above; stops at the first
+// step that does not decrease.
 constexpr uint64_t isqrt(uint64_t x) {
   if (x < 2) { return x; }
   uint32_t const half{ static_cast<uint32_t>(std::bit_width(x)) / 2U };

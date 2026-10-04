@@ -1,5 +1,5 @@
-# Each test is a custom command whose output is a stamp, wired into ALL, so a
-# second build is a no-op -- which is why there is no CTest.
+# Each test is a custom command that writes a stamp and is wired into ALL; a
+# second build with nothing changed runs no tests.
 
 include_guard(GLOBAL)
 
@@ -8,16 +8,16 @@ function(scav_testing_init)
     return()
   endif()
 
-  # find_path caches its answer, so a changed hint is never re-searched: switching
-  # cache modes would leave the tree pointing into the abandoned root.
+  # Clears the cached doctest include dir when SCAV_DOCTEST_DIR changes, so
+  # find_path searches the new hint.
   if(NOT "${SCAV_DOCTEST_DIR}" STREQUAL "${SCAV_DOCTEST_DIR_SEARCHED}")
     unset(SCAV_DOCTEST_INCLUDE_DIR CACHE)
     set(SCAV_DOCTEST_DIR_SEARCHED "${SCAV_DOCTEST_DIR}" CACHE INTERNAL
       "The hint the cached include dir was found under")
   endif()
 
-  # find_path returns the directory *containing* the header, so the amalgamated
-  # layout and an upstream install both resolve `#include "doctest.h"`.
+  # Finds the directory that contains doctest.h, in either the amalgamated layout
+  # or an upstream install.
   find_path(SCAV_DOCTEST_INCLUDE_DIR doctest.h
     HINTS "${SCAV_DOCTEST_DIR}"
     PATH_SUFFIXES doctest include/doctest
@@ -33,7 +33,7 @@ function(scav_testing_init)
   endif()
 
   add_library(scav_doctest INTERFACE)
-  # SYSTEM: doctest.h is not ours to keep clean under the pinned warning set.
+  # SYSTEM: the warning set skips doctest.h.
   target_include_directories(scav_doctest SYSTEM INTERFACE
     "${SCAV_DOCTEST_INCLUDE_DIR}")
   # Without exceptions doctest drops its REQUIRE family unless told to keep them,
@@ -51,8 +51,7 @@ function(scav_testing_init)
 
   # `rm -rf out/<preset>/stamp` re-runs the suite without rebuilding anything.
   file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/stamp")
-# Tests write scratch under here; a fresh tree must not depend on which test
-# happens to create it first.
+# Scratch directory for tests, created at configure time.
 file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/test")
   set(SCAV_STAMP_DIR "${PROJECT_BINARY_DIR}/stamp" PARENT_SCOPE)
 endfunction()
@@ -60,14 +59,11 @@ endfunction()
 # One environment for every test, so a local run and CI's suppress the same
 # findings. Yields `NAME=value` pairs for `cmake -E env`.
 function(scav_test_environment out_var stamp_name)
-  # Bare filenames: these strings are colon-separated, so `D:/a/scav` would split
-  # at the drive letter. Every test runs from the source directory already.
+  # Suppression file paths are relative to the source directory, where tests run.
   set(env "SCAV_TEST_TIER=${SCAV_TEST_TIER}")
 
   if(SCAV_SANITIZER STREQUAL "ASAN")
     set(opts "abort_on_error=1:strict_string_checks=1:detect_stack_use_after_return=1")
-    # MSVC's AddressSanitizer accepts a fixed set of suppression kinds and rejects
-    # anything else in the file, comments included. Nothing to suppress there.
     if(NOT CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
       string(APPEND opts ":suppressions=asan.supp")
     endif()
@@ -95,8 +91,7 @@ function(scav_test_environment out_var stamp_name)
   set(${out_var} "${env}" PARENT_SCOPE)
 endfunction()
 
-# Delete the stamp, run, touch it -- so a crashed run leaves behind no stamp a
-# later build would trust.
+# Deletes the stamp, runs the test, and touches the stamp only on success.
 function(scav_stamped_test stamp_name)
   cmake_parse_arguments(arg "" "COMMENT" "DEPENDS;COMMAND;TARGETS;ENV" ${ARGN})
 
@@ -104,8 +99,8 @@ function(scav_stamped_test stamp_name)
   scav_test_environment(env "${stamp_name}")
   list(APPEND env ${arg_ENV})
 
-  # `cmake -P` takes no list argument, so the argv is joined for the runner to
-  # split. `|` cannot appear in a path or a doctest filter here.
+  # Joins argv with `|` for ScavRunTest.cmake to split; no path or doctest filter
+  # here contains `|`.
   set(argv "${CMAKE_COMMAND}|-E|env")
   foreach(pair IN LISTS env)
     string(APPEND argv "|${pair}")
@@ -141,9 +136,8 @@ function(scav_stamped_test stamp_name)
   endif()
 endfunction()
 
-# A doctest executable that runs as part of the build. Link what it tests
-# yourself -- usually a library's _testable archive. SHARDS is label, filter pairs, each
-# its own stamp; TIMING names the cases scav_timing_tests() runs last, alone.
+# A doctest executable run during the build; the caller links what it tests.
+# SHARDS: label, filter pairs, each its own stamp. TIMING: cases run after all others.
 function(scav_tests name)
   cmake_parse_arguments(arg "" "TIMING" "SHARDS" ${ARGN})
   add_executable(${name} ${arg_UNPARSED_ARGUMENTS} "${PROJECT_SOURCE_DIR}/src/doctest_main.cpp")
@@ -187,8 +181,8 @@ function(scav_tests name)
   set_property(GLOBAL APPEND PROPERTY SCAV_TEST_EXECUTABLES ${name})
 endfunction()
 
-# The TIMING cases of every scav_tests, each after every other stamp so nothing
-# else competes for the cores while they time. Call once, after the last test.
+# Runs every scav_tests TIMING case after all other test stamps. Call once, after
+# the last test.
 function(scav_timing_tests)
   get_property(stamps GLOBAL PROPERTY SCAV_TEST_STAMPS)
   get_property(runs GLOBAL PROPERTY SCAV_TIMING_RUNS)
@@ -210,8 +204,7 @@ function(scav_timing_tests)
   endforeach()
 endfunction()
 
-# One case is written to fail. Inverting needs a script: a build step succeeds by
-# exiting zero, and this succeeds by exiting non-zero.
+# Runs case `filter` of <name>, written to fail; the step passes only if it fails.
 function(scav_expect_test_failure name filter)
   scav_stamped_test(${name}_reports_failures
     COMMAND "${CMAKE_COMMAND}"

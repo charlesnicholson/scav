@@ -1,5 +1,4 @@
-// The vendored stable sort. std::sort and std::stable_sort are permitted in
-// tests, which is exactly where they earn their keep: as the oracle.
+// The vendored stable sort, checked against std::sort and std::stable_sort as oracles.
 
 #include "scav_stable_sort.h"
 
@@ -90,7 +89,7 @@ TEST_CASE("sort: equal keys keep insertion order") {
 }
 
 TEST_CASE("sort: the comparator inlines as a functor, not a function pointer") {
-  // Compile-shape test: a capturing lambda works, which qsort's shape forbids.
+  // Accepts a capturing lambda as the comparator.
   uint32_t comparisons{ 0 };
   std::vector<uint32_t> v{ 3, 1, 2 };
   scav_stable_sort(v, [&comparisons](uint32_t a, uint32_t b) {

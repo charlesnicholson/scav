@@ -1,5 +1,4 @@
-// Output streams and exit codes, which are a process's to choose. Everything
-// below them -- loading, validating, rendering a diagnostic -- is core's.
+// Code the CLI verbs share: output streams, layout flag parsing, and the load prologue.
 
 #include "cli.h"
 
@@ -33,7 +32,7 @@ void write_error(std::string_view what, std::string_view path) {
 
 namespace {
 
-// Two ordinals separated by a colon, the whole of `text`.
+// True when all of `arg` is two colon-separated ordinals, read into `a` and `b`.
 bool ordinal_pair(std::string_view arg, uint32_t &a, uint32_t &b) {
   size_t const colon{ arg.find(':') };
   if ((colon == std::string_view::npos) || (colon == 0) || (colon + 1 == arg.size())) {
@@ -151,9 +150,6 @@ ArgRead read_layout_arg(int argc, char **argv, int &i, LayoutArgs &out) {
       (arg != "--orient") && (arg != "--side") && (arg != "--fold")) {
     return ArgRead::NotOurs;
   }
-  // The increment is its own statement: clang-tidy's
-  // bugprone-inc-dec-in-conditions is right that `++i` inside a compound
-  // condition depends on an evaluation order a reader has to reconstruct.
   if ((i + 1) >= argc) { return ArgRead::Malformed; }
   ++i;
   out.given = true;
@@ -224,8 +220,7 @@ void load_and_report(char const *path, bool validate, Loaded &out) {
   }
 
   std::string err;
-  // A load that never reached a chart leaves nothing to print, and its findings
-  // index the loader's buffers rather than a chart's.
+  // With no chart, diagnostics render against the loader's buffers.
   if (out.chart.documents.empty()) {
     for (Diagnostic const &d : out.diags) { diag_append(err, out.loader, d, path); }
     write_stream(err, stderr);

@@ -1,12 +1,5 @@
-"""scav for Python: the whole pipeline, model to SVG.
-
-The half of a binding that would drift is generated (`_abi.py`); this is the
-hand-written half, and it stays small on purpose. Extending scav means writing
-an application, so this covers the pipeline rather than a plugin corner: load a
-document network, measure it, lay it out, build a DrawList, render SVG.
-
-No extension point is a callback, so every one of these is pure marshalling and
-no Python function is ever invoked from a scav worker thread.
+"""scav for Python: load a document network, measure it, lay it out, build a
+DrawList and render SVG. Hand-written over the generated `_abi.py`.
 """
 
 from __future__ import annotations
@@ -84,11 +77,7 @@ def _bytes(text: str | bytes) -> bytes:
 
 
 def _stride(got: int, kind: type, call: str) -> None:
-    """A stride scav reported against the row this binding lays out.
-
-    Every array scav hands back says what a row is, so the assertion is cheap
-    and the alternative is walking someone else's memory at the wrong pitch.
-    """
+    """Raises ScavError(SCAV_E_ABI) when scav's stride `got` is not sizeof(kind)."""
     want = ctypes.sizeof(kind)
     if got != want:
         raise ScavError(_abi.SCAV_E_ABI,
@@ -97,12 +86,7 @@ def _stride(got: int, kind: type, call: str) -> None:
 
 
 def _no_spaces() -> scav_spaces:
-    """An empty space table that still declares its four strides.
-
-    A stride is an ABI fact rather than a layout input, so scav checks all four
-    whether or not a count is zero: that is what makes a member a caller's
-    header lacks read as zero and be refused.
-    """
+    """An empty space table that declares all four strides."""
     return scav_spaces(box_state_stride=ctypes.sizeof(scav_box_space),
                        box_sub_stride=ctypes.sizeof(scav_box_space),
                        path_clear_stride=ctypes.sizeof(scav_path_clear),
@@ -110,12 +94,8 @@ def _no_spaces() -> scav_spaces:
 
 
 def _integer(value: object, name: str) -> int:
-    """Every number crossing into a space request, checked.
-
-    `/` yields a float in Python, and a space request computed that way would
-    differ under FMA contraction and fail a golden rather than raise. So the
-    boundary refuses anything that is not already an integer -- a bool included,
-    since `True + 1` is the kind of accident this exists to catch.
+    """Returns `value` if it is an int in int32 range; TypeError for any other type
+    (bool included), ValueError out of range.
     """
     if isinstance(value, bool) or not isinstance(value, int):
         raise TypeError(f"{name} must be an int, not {type(value).__name__}")
@@ -154,12 +134,7 @@ class _Handle:
 
 
 class Loader(_Handle):
-    """The iterative loader: add the root, resolve what it asks for, finish.
-
-    No callbacks, which is the whole reason a binding is tractable. The
-    application decides what a document name means -- a path, a URL, a key into
-    a dict -- and scav never learns.
-    """
+    """The iterative loader: add the root, resolve the names it asks for, finish."""
 
     _destroy = "scav_load_destroy"
 
@@ -223,7 +198,7 @@ class Loader(_Handle):
 
 
 class Chart(_Handle):
-    """The model. Outlives every span handed out from it, and owns nothing else."""
+    """The model; outlives every span handed out from it."""
 
     _destroy = "scav_chart_destroy"
 
@@ -267,11 +242,7 @@ class Chart(_Handle):
         return out
 
     def column(self, name: str) -> memoryview:
-        """One column's rows as a memoryview over the chart's own bytes.
-
-        Three calls, because a walk needs the row count: the view is a window
-        onto memory the chart owns, so it dies when the chart does.
-        """
+        """A memoryview of one column's rows; valid while the chart lives."""
         return self._column(name)[0]
 
     def _column(self, name: str) -> tuple[memoryview, int]:
@@ -310,10 +281,8 @@ class Chart(_Handle):
 
     def layout(self, spaces: "Spaces | None" = None,
                options: scav_layout_opts | None = None) -> list[scav_placed]:
-        """Run layout and read the placed boxes back.
-
-        Never ignore the result: geometry lands in derived columns, and a failure
-        leaves them holding the last successful run.
+        """Runs layout and returns the placed boxes; raises ScavError on failure,
+        leaving the geometry columns at the last successful run's values.
         """
         lib = library()
         opts = options if options is not None else scav_layout_opts(
@@ -402,12 +371,8 @@ class Images(_Handle):
 
 
 class Spaces:
-    """The space tables, as the reference measurement pass filled them.
-
-    The pass itself lives in the shared library rather than here, because a
-    request computed in Python arithmetic could differ from the one a golden was
-    recorded against. Adjusting a row after the fact goes through
-    `set_box_state`, which range-checks.
+    """The space tables the reference measurement pass filled. `set_box_state`
+    replaces a row, range-checking each value.
     """
 
     def __init__(self, box_state, box_sub, path_clear, path_box) -> None:
@@ -424,8 +389,7 @@ class Spaces:
         box = ctypes.sizeof(scav_box_space)
         clear = ctypes.sizeof(scav_path_clear)
         path = ctypes.sizeof(scav_path_box)
-        # The four row sizes travel on the count query as well: they are the
-        # strides this binding will read the second call's rows back at.
+        # The count query also passes the four row strides.
         check(lib.scav_measure_chart(chart.pointer, metrics.pointer,
                                      ctypes.byref(prof), ctypes.sizeof(prof),
                                      None, 0, box, None, 0, box, None, 0, clear,
@@ -469,7 +433,7 @@ class Spaces:
 
 
 class DrawList(_Handle):
-    """The render IR. Five flat arrays plus a string pool."""
+    """The render IR: prims, styles, points and clips arrays plus a text pool."""
 
     _destroy = "scav_drawlist_destroy"
 
@@ -483,11 +447,7 @@ class DrawList(_Handle):
     def build(cls, chart: Chart, metrics: Metrics, spaces: Spaces | None = None,
               placed: Sequence[scav_placed] = (), depth: int = 0,
               palette: Sequence[scav_style] | None = None) -> "DrawList":
-        """The reference builder over a laid-out chart.
-
-        Hand back the same space tables and placed boxes layout was given: a
-        label's rect is the one layout placed, not one a builder recomputes.
-        """
+        """The reference builder over the layout run's spaces and placed boxes."""
         out = cls()
         table = spaces.as_c() if spaces is not None else _no_spaces()
         rows = (scav_placed * len(placed))(*placed) if placed else None
@@ -569,9 +529,9 @@ class DrawList(_Handle):
 
     def svg(self, metrics: Metrics, images: Images | None = None,
             embed_font: bytes | None = None, margin: int = 0) -> str:
-        """The reference backend. Count first, then write: the protocol every
-        span accessor here follows. `embed_font` is the measured font's TTF,
-        such as `bundled_font()`, to base64 into the document."""
+        """The reference SVG backend. `embed_font`: the measured font's TTF, such as
+        `bundled_font()`, to base64 into the document.
+        """
         lib = library()
         options = _abi.scav_svg_options(margin=_integer(margin, "margin"))
         if embed_font is not None:
@@ -601,11 +561,8 @@ def profile(name: str = "readable") -> scav_profile:
 
 
 def load_network(root: str, sources: dict[str, str]) -> Chart:
-    """The whole loader loop, for the common case of documents already in hand.
-
-    The application decides what a name means; here it means a key in `sources`,
-    and scav never learns that. A name it asks for that is absent is a KeyError
-    rather than a diagnostic, because the caller knew what it had.
+    """Loads the network rooted at `root` from `sources`, a dict of document name to
+    text. Raises KeyError for a name absent from `sources`.
     """
     loader = Loader()
     loader.add(root, sources[root])

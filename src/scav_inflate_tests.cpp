@@ -126,7 +126,7 @@ constexpr std::array<uint8_t, 30> DIST_EXTRA{ 0, 0, 0,  0,  1,  1,  2,  2,  3,  
                                               4, 4, 5,  5,  6,  6,  7,  7,  8,  8,
                                               9, 9, 10, 10, 11, 11, 12, 12, 13, 13 };
 
-// A <length, distance> pair as symbols plus extra bits, searched rather than computed.
+// Writes a <length, distance> pair as symbols and extra bits found by table search.
 void put_match(BitWriter &w,
                Code const &lit,
                Code const &dist,
@@ -360,7 +360,7 @@ TEST_CASE("inflate: a block without end-of-block is truncated") {
 
 TEST_CASE("inflate: a header cut after BFINAL, or after BTYPE, is truncated") {
   Code const lit{ fixed_lit() };
-  BitWriter after_final;  // 3 + 4 * 9 + 7 bits end at bit 6, leaving BFINAL one bit
+  BitWriter after_final;  // 46 bits: byte 5 keeps BFINAL and one BTYPE bit
   block_header(after_final, 0, 1);
   for (int i = 0; i < 4; ++i) { lit.put(after_final, 0xE9); }
   lit.put(after_final, 256);

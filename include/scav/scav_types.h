@@ -1,8 +1,8 @@
 #ifndef SCAV_TYPES_H_INCLUDED
 #define SCAV_TYPES_H_INCLUDED
 
-// The POD spellings every scav library and the C ABI share. No functions: an
-// entry point belongs to the header of the library that owns it.
+// POD types shared by every scav library and the C ABI. Entry points live in
+// the owning library's header.
 
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <stdint.h>
@@ -11,15 +11,15 @@
 extern "C" {
 #endif
 
-// uint8_t need not alias an object representation, and std::byte has no
-// arithmetic. NOLINTNEXTLINE(modernize-use-using)
+// A byte that may alias any object and supports arithmetic.
+// NOLINTNEXTLINE(modernize-use-using)
 typedef unsigned char scav_byte;
 
 // 0 = ok; negative = error enum.
 // NOLINTNEXTLINE(modernize-use-using)
 typedef int32_t scav_result;
 
-// StrRef and Span both, and the only variable-length member an ABI type holds.
+// The C form of StrRef and Span; the only variable-length member in an ABI type.
 // NOLINTNEXTLINE(modernize-use-using)
 typedef struct {
   uint32_t off, len;

@@ -1,5 +1,5 @@
-// The division primitives against every sign combination, and the helpers
-// against their boundaries -- the table a platform cannot bend.
+// Division primitives against every sign combination, and the helpers at their
+// boundaries.
 
 #include "scav_int.h"
 
@@ -48,7 +48,6 @@ TEST_CASE("int: floor_mod result carries the divisor's sign") {
   CHECK(floor_mod(-7, -3) == -1);
   CHECK(floor_mod(6, 3) == 0);
   CHECK(floor_mod(-6, 3) == 0);
-  // The identity that makes the pair a pair.
   for (int32_t a : { -7, -1, 0, 1, 7 }) {
     for (int32_t b : { -3, -2, 2, 3 }) {
       CHECK((floor_div(a, b) * b) + floor_mod(a, b) == a);
@@ -101,7 +100,7 @@ TEST_CASE("int: isqrt matches the digit-by-digit root everywhere it is sampled" 
   for (uint64_t x = 0; x < (UINT64_C(1) << 22U); ++x) {
     wrong += (isqrt(x) != isqrt_by_digits(x)) ? 1U : 0U;
   }
-  // Each side of every square a 64-bit root can hit, strided, plus the top.
+  // Around each square k * k, for k strided across [1, 2^32).
   for (uint64_t k = 1; k <= UINT64_C(0xFFFF'FFFF); k += UINT64_C(65'521)) {
     for (uint64_t const x : { (k * k) - 1, k * k, (k * k) + k, (k * k) + (2 * k) }) {
       wrong += (isqrt(x) != isqrt_by_digits(x)) ? 1U : 0U;

@@ -1,5 +1,5 @@
-// The model, entity rows rather than syntax: for a terminal by default, `--json`
-// for a consumer that is not C++, `--hash` for comparing two transports.
+// `scav dump`: the model's entity rows as text or `--json`, or its structural hash
+// with `--hash`; `--layout` adds geometry.
 
 #include "cli.h"
 
@@ -22,13 +22,13 @@ namespace {
 
 // The text dump ============================================================
 
-// Where a statement started, as "file:line". False when the element has no
-// statement -- built from code, or the chart row of a hand-made model.
+// Where a statement starts: document path and one-based line.
 struct Loc {
   std::string_view file;
   uint32_t line;
 };
 
+// False when `stmt` names no statement in `c`, as for an element built from code.
 bool stmt_loc(Chart const &c, StmtId stmt, Loc &out) {
   if ((stmt.v == INVALID) || (stmt.v >= c.stmts.size())) { return false; }
   Statement const &st{ c.stmts[stmt.v] };
@@ -57,7 +57,7 @@ void append_indent(std::string &out, uint32_t depth) {
 
 void append_quoted(std::string &out, std::string_view text) {
   out += " \"";
-  out += text;  // verbatim; this is a dump, not the canonical printer
+  out += text;  // verbatim, unescaped
   out += '"';
 }
 
@@ -105,8 +105,7 @@ void append_model(std::string &out, Chart const &c) {
   out += '\n';
   append_attrs(out, c, { .kind = ElemKind::Chart, .ordinal = 0 }, 1);
 
-  // Bounds-checked throughout: dump prints a model validation may have
-  // rejected, so no reference here can be assumed good.
+  // Every reference is bounds-checked; dump also prints models validation rejected.
   auto const trans_by_sub{ [&] {
     std::vector<std::vector<uint32_t>> by_sub(c.submachines.size());
     for (uint32_t i = 0; i < c.transitions.size(); ++i) {
@@ -215,8 +214,7 @@ void append_model(std::string &out, Chart const &c) {
     }
   }
 
-  // The edge list, after the tree. An include's content already printed under
-  // its alias state; this says which alias instantiates which document.
+  // The include edges, after the tree: each alias and the document it instantiates.
   for (Include const &inc : c.includes) {
     append_indent(out, 1);
     out += "include ";
@@ -235,8 +233,7 @@ void append_model(std::string &out, Chart const &c) {
 
 // The geometry projection ==================================================
 
-// A cost term, which is int64: the core's appender stops at u32 and the
-// weighted sum reaches 2^54. Negating through unsigned so INT64_MIN prints.
+// Appends `v` in decimal, INT64_MIN included.
 void append_i64v(std::string &out, int64_t v) {
   bool const neg{ v < 0 };
   uint64_t mag{ neg ? (~static_cast<uint64_t>(v) + 1U) : static_cast<uint64_t>(v) };
@@ -250,7 +247,7 @@ void append_i64v(std::string &out, int64_t v) {
   while (n != 0U) { out += digits[--n]; }
 }
 
-// A signed grid coordinate; the domain is symmetric, so minus must print.
+// Appends a signed grid coordinate in decimal.
 void append_i32v(std::string &out, int32_t v) {
   if (v < 0) {
     out += '-';
@@ -282,8 +279,7 @@ void append_rect(std::string &out, scav_rect r) {
   append_i32v(out, r.h);
 }
 
-// The Tier-2 terms in CostTerms order, which is the order `cost_shares`
-// answers in, so a name and a share never come apart.
+// Tier-2 term names in CostTerms order, the order `cost_shares` returns.
 constexpr std::array<char const *, TIER2_TERMS> TERMS{
   "bends",  "corridor",      "crossings", "excess_len", "adjacency",
   "label",  "label_near",    "aspect",    "area",       "crowding",
@@ -329,8 +325,7 @@ void append_geometry_text(std::string &out,
     out += '\n';
   }
 
-  // The objective over those columns, so a candidate carries the number that
-  // ranked it beside the geometry it ranked (11.6, 11.10).
+  // The objective over those columns, printed beside the geometry it scored.
   Cost const scored{ cost_of(terms, p) };
   std::array<int64_t, TIER2_TERMS> const values{ term_values(terms) };
   std::array<int64_t, TIER2_TERMS> const shares{ cost_shares(terms, p) };
@@ -429,7 +424,7 @@ void append_geometry_text(std::string &out,
 // The JSON projection ======================================================
 
 // One array per entity array, one field per row field, ids as numbers and
-// INVALID as null. Output only: no comments, and no canonical byte form.
+// INVALID as null.
 
 void append_json_string(std::string &out, std::string_view text) {
   constexpr std::string_view HEX{ "0123456789abcdef" };
@@ -450,7 +445,7 @@ void append_json_string(std::string &out, std::string_view text) {
           out += HEX[(b >> 4U) & 0xFU];
           out += HEX[b & 0xFU];
         } else {
-          out += ch;  // UTF-8 passes through, which JSON permits
+          out += ch;  // UTF-8 passes through unescaped
         }
         break;
     }
@@ -458,7 +453,7 @@ void append_json_string(std::string &out, std::string_view text) {
   out += '"';
 }
 
-// `null` rather than 4294967295, so a consumer need not know the sentinel.
+// An id, or `null` for INVALID.
 void append_json_id(std::string &out, uint32_t id) {
   if (id == INVALID) {
     out += "null";
@@ -467,8 +462,7 @@ void append_json_id(std::string &out, uint32_t id) {
   string_append_u32(out, id);
 }
 
-// One `{...}` object under construction. `n` counts fields written, which is
-// what puts the separator before the second and not the first.
+// One `{...}` object under construction; `n` counts the fields written.
 struct Row {
   std::string *out;
   uint32_t n;
@@ -508,8 +502,7 @@ void row_ids(Row &r, std::string_view key, Ids const &ids, Span span) {
   *r.out += ']';
 }
 
-// A span reads as the row indices it covers, which is how a consumer reaches
-// into the flat array it points at.
+// Writes a span as the list of row indices it covers.
 void row_range(Row &r, std::string_view key, Span span) {
   row_key(r, key);
   *r.out += '[';
@@ -578,8 +571,7 @@ void append_json_rect(std::string &out, scav_rect r) {
   out += ']';
 }
 
-// Row-major arrays keyed by entity ordinal, the columnar model's own shape, so
-// a renderer indexes geometry with the ids the entity arrays already use.
+// The geometry as JSON arrays indexed by entity ordinal.
 void append_geometry_json(std::string &out,
                           Chart const &c,
                           CostTerms const &terms,
@@ -603,8 +595,7 @@ void append_geometry_json(std::string &out,
     out += '"';
   }
 
-  // The objective over those columns, so a candidate carries the number that
-  // ranked it beside the geometry it ranked (11.6, 11.10).
+  // The objective over those columns, printed beside the geometry it scored.
   Cost const scored{ cost_of(terms, p) };
   std::array<int64_t, TIER2_TERMS> const values{ term_values(terms) };
   std::array<int64_t, TIER2_TERMS> const shares{ cost_shares(terms, p) };
@@ -641,9 +632,7 @@ void append_geometry_json(std::string &out,
   }
   out += "]\n    }";
 
-  // The placed label boxes and the leader each is held from its own polyline
-  // at, which is the only place the anchor invariant is checkable: it holds on
-  // the box, and the drawing shows the glyphs inside it (11.9.4).
+  // The placed label boxes, and `label_leader`: each box's distance from its anchor.
   out += ",\n    \"label_leader\": ";
   append_i32v(out, label_leader(p));
   out += ",\n    \"placed\": [";
@@ -651,8 +640,7 @@ void append_geometry_json(std::string &out,
     if (i != 0) { out += ", "; }
     append_json_rect(out, placed[i]);
   }
-  // The transition each box belongs to, so a reader of this can pair a box
-  // with the polyline it is anchored to rather than guess at the order.
+  // The transition each placed box belongs to, or INVALID past `n_path_box`.
   out += "],\n    \"placed_subject\": [";
   for (uint32_t i = 0; i < placed.size(); ++i) {
     if (i != 0) { out += ", "; }
@@ -792,8 +780,7 @@ void append_json(std::string &out, Chart const &c) {
   });
   out += ",\n";
 
-  // Descriptors only: a column's bytes are typed by its registrant, and JSON has
-  // no spelling for a `pod` this build may not understand.
+  // Column descriptors and row counts; the column bytes are omitted.
   append_json_array(out, "columns", c.columns.size(), [&](Row &r, uint32_t i) {
     ColumnDesc const &d{ c.columns[i].desc };
     row_str(r, "name", string_pool_view(c.column_names, d.name));
@@ -826,17 +813,13 @@ int run_dump(char const *path,
   }
   if (args.no_search) { opts.profile.portfolio_k = 0; }
   CostTerms cost{};
-  // What the drawing rests on, for the line that lays it out again. Unknown
-  // under `--trace`, which runs its own two layouts.
+  // The winning row and taken pins, for `rests on`; INVALID under `--trace`.
   uint32_t won{ INVALID };
   SearchPins taken;
-  // Hoisted for the emitters: the anchor invariant holds on these boxes and
-  // nowhere else, so the dump is where it becomes checkable (11.9.4).
   std::vector<scav_placed> placed;
   Spaces spaces;
   if (with_layout) {
-    // The reference builder's measurement pass, which is the policy every
-    // corpus golden is stated against.
+    // The reference builder's measurement pass, on the bundled font.
     Metrics metrics;
     if (!args.no_text && (!metrics_create(nullptr, 0, metrics) ||
                           !measure_chart(net.chart, metrics, opts.profile, spaces))) {
@@ -865,8 +848,7 @@ int run_dump(char const *path,
                                         nullptr,
                                         &taken,
                                         &args.pins) };
-    // To stdout, ahead of the model: the trace is the answer `--trace` asked
-    // for and the dump is the context it is read against.
+    // The trace goes to stdout, ahead of the model dump.
     if (trace) { write_stream(std::string{ events.begin(), events.end() }, stdout); }
     if (!diags.empty()) {
       std::string err;
@@ -874,9 +856,7 @@ int run_dump(char const *path,
       write_stream(err, stderr);
     }
     if (!laid) { return EXIT_DIAGNOSED; }
-    // Scored from the columns the run just wrote, at the caller's profile and
-    // with the real-text tables beside them, so `label` and `label_near` have
-    // the placed boxes they are about.
+    // Scores this run's columns; `label` and `label_near` read the placed boxes.
     cost = layout_cost(net.chart, opts.profile, as_spaces(spaces), placed);
   }
 

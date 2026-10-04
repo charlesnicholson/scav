@@ -29,8 +29,8 @@ set(SCAV_WARNINGS_GNU_LIKE
 )
 
 set(SCAV_WARNINGS_CLANG
-  # An omitted designated field value-initializes, which is the idiom for wide
-  # POD inputs like scav_spaces; newer clang puts this warning in -Wextra.
+  # Allows omitting designated fields, which value-initialize (e.g. scav_spaces);
+  # newer clang enables this warning in -Wextra.
   -Wno-missing-designated-field-initializers
   -Wcomma
   -Wconditional-uninitialized
@@ -47,8 +47,8 @@ set(SCAV_WARNINGS_CLANG
 )
 
 set(SCAV_WARNINGS_GCC
-  # gcc has no designated-only spelling of this, and an omitted designated
-  # field value-initializes; clang rows still enforce the positional form.
+  # Disables gcc's missing-field warning for every initializer, designated included;
+  # clang rows still check positional initializers.
   -Wno-missing-field-initializers
   -Warith-conversion
   -Wduplicated-branches
@@ -58,12 +58,11 @@ set(SCAV_WARNINGS_GCC
   -Wuseless-cast
 )
 
-# The /w14xxx entries are level-4 promotions of checks Microsoft ships disabled;
-# the numbers are opaque, hence the decoding.
+# /w1<n>: warning C<n> at level 1. /we<n>: as an error. /wd<n>: disabled.
 set(SCAV_WARNINGS_MSVC
   /W4
   /permissive-           # without it MSVC accepts non-conforming C++
-  /Zc:__cplusplus        # otherwise __cplusplus lies about the standard in use
+  /Zc:__cplusplus        # __cplusplus reports the standard in use
   /Zc:preprocessor       # conforming preprocessor
   /Zc:inline
   /volatile:iso
@@ -94,8 +93,7 @@ function(scav_warnings_init)
 
   if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-      # clang-cl ignores MSVC's numeric ids, and an ignored argument is itself
-      # a warning. MSVC's headers do not survive the whole GNU-like list.
+      # clang-cl takes /W4 plus the clang warnings MSVC's headers pass.
       target_compile_options(scav_warnings INTERFACE
         /W4
         /utf-8
@@ -107,8 +105,7 @@ function(scav_warnings_init)
     else()
       target_compile_options(scav_warnings INTERFACE ${SCAV_WARNINGS_MSVC})
     endif()
-    # The CRT deprecates the standard <cstdio> entry points in favour of
-    # Annex K, and clang-cl inherits that through the same headers.
+    # Silences the CRT's deprecation warnings on standard <cstdio> functions.
     target_compile_definitions(scav_warnings INTERFACE _CRT_SECURE_NO_WARNINGS)
     if(SCAV_WARNINGS_AS_ERRORS)
       target_compile_options(scav_warnings INTERFACE /WX)
@@ -123,16 +120,13 @@ function(scav_warnings_init)
     if(SCAV_WARNINGS_AS_ERRORS)
       target_compile_options(scav_warnings INTERFACE -Werror)
       if(APPLE)
-        # Apple's linker warns rather than errors on a link line it silently
-        # repairs -- a repeated archive, an ignored flag. There is no per-warning
-        # spelling, so the whole set is promoted.
+        # Makes every Apple linker warning an error, e.g. a repeated archive.
         target_link_options(scav_warnings INTERFACE -Wl,-fatal_warnings)
       endif()
     endif()
   endif()
 
-  # Belt and braces, never semantics: the code never throws and never asks a type
-  # its identity, so a compiler lacking these switches is still supported.
+  # Turns off RTTI, and exceptions on GNU-style drivers; the code uses neither.
   add_library(scav_lang_rules INTERFACE)
   if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
     target_compile_options(scav_lang_rules INTERFACE /GR-)

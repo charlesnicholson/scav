@@ -1,5 +1,5 @@
-// `scav render`: chart to SVG, which is the first user-visible thing scav does.
-// Measure with the bundled font, lay out, build, render.
+// `scav render`: chart to SVG. Measures with the bundled font, lays out, builds,
+// renders.
 
 #include "cli.h"
 

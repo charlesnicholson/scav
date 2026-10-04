@@ -74,11 +74,8 @@ int dispatch(int argc, char **argv) {
         return usage();
       }
     }
-    // A pinned row only reaches layout, so it is the geometry's flag and not
-    // the model's: `--hash` and a bare dump have nothing to point at.
-    // `--trace` is layout's, like `--portfolio-row`: it prints the decisions
-    // one run made and there are none without a run (11.16).
-    // `--trace-search` is a mode of `--trace`, not a second flag beside it.
+    // Layout flags and `--trace` require `--layout`; `--trace-search` requires `--trace`;
+    // `--hash` excludes `--json` and `--layout`.
     if ((path == nullptr) || (hash && (json || layout)) || (trace_search && !trace) ||
         ((args.given || trace) && !layout)) {
       return usage();

@@ -1,5 +1,4 @@
-// HashMap, insertion, and the absence of iteration -- the last one asserted at
-// compile time, which is the type's whole job.
+// HashMap insertion and lookup, and a compile-time check that it has no iteration.
 
 #include "scav_hash_map.h"
 
@@ -13,8 +12,6 @@ namespace {
 
 using namespace scav;
 
-// The compile-time contract: no begin, no end, so no range-for and no
-// <algorithm> can see an order.
 template <typename T>
 concept Iterable = requires(T t) { t.begin(); };
 

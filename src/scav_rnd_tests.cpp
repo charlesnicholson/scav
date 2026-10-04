@@ -1,5 +1,5 @@
-// The finalizer against values computed from the published algorithm rather
-// than from this header:
+// Finalizer vectors computed from the published algorithm, independent of this
+// header:
 //
 //   M = (1 << 64) - 1
 //   def splitmix64(z):
@@ -36,8 +36,7 @@ struct Coord {
   uint32_t step;
 };
 
-// The four fields as one comparable key, so a sweep can ask whether it asked
-// for the same coordinate twice.
+// The four fields as one comparable key, for detecting repeated coordinates.
 std::array<uint64_t, 4> key_of(Coord const &c) {
   return { c.seed,
            static_cast<uint64_t>(c.phase),
@@ -53,8 +52,8 @@ std::vector<Coord> dense_sweep() {
                          UINT64_C(12345),
                          UINT64_C(0x9E37'79B9'7F4A'7C15),
                          UINT64_C(0xFFFF'FFFF'FFFF'FFFF) }) {
-    // Three families that cannot name the same coordinate: the first two differ
-    // in phase, and the third differs from both in item and in step.
+    // Three disjoint families: the first two differ in phase; the third uses step 9,
+    // unlike the first, and item 7, unlike the second.
     for (uint32_t item = 0; item < 4096U; ++item) {
       out.push_back({ .seed = seed, .phase = 0U, .item = item, .step = 0U });
     }
@@ -136,8 +135,7 @@ TEST_CASE("rnd: moving any one argument moves the output") {
   CHECK(rnd(BASE.seed, BASE.phase, BASE.item - 1U, BASE.step) != base);
   CHECK(rnd(BASE.seed, BASE.phase, BASE.item, BASE.step + 1U) != base);
   CHECK(rnd(BASE.seed, BASE.phase, BASE.item, BASE.step - 1U) != base);
-  // The two 32-bit arguments are folded into one word, so a carry between them
-  // is the collision a naive sum would produce.
+  // Phase and item pack into one 64-bit word; unit moves in neighbouring fields differ.
   CHECK(rnd(0U, 1U, 0U, 0U) != rnd(0U, 0U, 1U, 0U));
   CHECK(rnd(0U, 0U, 1U, 0U) != rnd(0U, 0U, 0U, 1U));
 }

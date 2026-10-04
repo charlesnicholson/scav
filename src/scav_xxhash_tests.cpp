@@ -57,8 +57,7 @@ TEST_CASE("xxh32: reference vectors across every length branch") {
 }
 
 TEST_CASE("xxh32: a null pointer with zero length is the empty input") {
-  // The digest of an empty chart takes this path: vector::data() on an empty
-  // vector may be null, and dereferencing is what the length guards.
+  // An empty vector's data() may be null; with zero length no byte is read.
   CHECK(xxhash32(nullptr, 0, 0) == 0x02CC'5D05U);
 }
 
@@ -73,8 +72,6 @@ TEST_CASE("xxh32: the seed changes the digest") {
 }
 
 TEST_CASE("xxh32: a one-bit change at any position moves the digest") {
-  // Avalanche, checked rather than assumed: a hash that ignored its tail would
-  // pass every fixed vector above and still be useless as a golden.
   std::string base(64, 'a');
   uint32_t const want{ hash(base) };
   for (size_t i = 0; i < base.size(); ++i) {
@@ -86,8 +83,7 @@ TEST_CASE("xxh32: a one-bit change at any position moves the digest") {
 }
 
 TEST_CASE("xxh32: every length from 0 to 80 is distinct and stable") {
-  // Covers each stripe count and every tail remainder, and catches an
-  // off-by-one in the drain loops that a handful of vectors would not.
+  // Lengths 0..80 cover zero to five stripes and every tail remainder.
   std::vector<uint32_t> seen;
   for (uint32_t n = 0; n <= 80; ++n) {
     std::string const input(n, 'q');

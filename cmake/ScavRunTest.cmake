@@ -1,5 +1,5 @@
-# Runs one test with its output captured, echoed only on a failure -- including
-# whatever it shelled out to. `cmake -P` takes no list, so argv is `|`-separated.
+# Runs SCAV_CMD, an argv joined with `|`, and prints its captured output only on
+# failure.
 
 if(NOT DEFINED SCAV_CMD)
   message(FATAL_ERROR "ScavRunTest.cmake needs -DSCAV_CMD")

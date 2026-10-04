@@ -90,7 +90,7 @@ Load load_embedded(std::vector<CorpusChart> const &table,
                    std::vector<Diagnostic> &diags,
                    std::string &missing) {
   bool adding{ load_add(loader, root.bytes.data(), root.bytes.size(), root.name) };
-  // The pending view dies on the next add, so each round copies out first.
+  // Each round copies the pending paths out; the next add invalidates the view.
   std::vector<std::string> wanted;
   while (adding) {
     wanted.clear();
@@ -126,8 +126,8 @@ void append_load_diags(std::string &out,
   }
 }
 
-// A fresh copy per run, so no pass reads geometry columns another wrote:
-// layout_run rewrites them in place.
+// Lays out a copy of `chart` and fills `out` with its three hashes; on failure
+// `why` gets the diagnostics.
 bool layout_hashes(Chart const &chart,
                    scav_layout_opts const &opts,
                    std::string_view name,

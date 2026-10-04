@@ -1,6 +1,5 @@
-// A manifest of `raw|gzip <TAB> cap <TAB> input <TAB> output` lines, each input
-// decoded into a buffer of `cap` bytes and written to its output; one line of
-// `status bytes` per entry on stdout. Driven by functional_tests/test_inflate.py.
+// Decodes each `raw|gzip <TAB> cap <TAB> input <TAB> output` manifest line into a
+// `cap`-byte buffer, writes it to output, and prints `status bytes` to stdout.
 
 #include "scav_inflate.h"
 

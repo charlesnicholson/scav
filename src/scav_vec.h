@@ -74,7 +74,7 @@ SCAV_NOINLINE T &vec_emplace_back_grow(std::vector<T> &v, A &&...a) {
   return v.emplace_back(std::forward<A>(a)...);
 }
 
-// Compares as pointers, as emplace_back does, so its inlined reallocation folds away.
+// True when size < capacity, compared as pointers the way emplace_back does.
 template <typename T>
 bool vec_has_room(std::vector<T> const &v) {
   return (v.data() + v.size()) < (v.data() + v.capacity());

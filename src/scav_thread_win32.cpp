@@ -141,8 +141,8 @@ DWORD WINAPI worker_main(LPVOID arg) {
   }
 }
 
-// Never destroyed, as workers park on its lock for the life of the process. A
-// worker that fails to start leaves the pool smaller; a pool of none runs on the caller.
+// Starts `thread_concurrency() - 1` workers; the pool is never destroyed.
+// Failed spawns shrink the pool; with no workers the caller runs every shard.
 BOOL CALLBACK start_pool(PINIT_ONCE /*once*/, PVOID /*param*/, PVOID * /*context*/) {
   Pool *const p{ new Pool };
   InitializeSRWLock(&p->mu);
