@@ -256,21 +256,21 @@ TEST_CASE("nudge: the step shrinks to the room rather than being refused") {
 }
 
 TEST_CASE("nudge: the region bounds a lane the obstacles do not") {
-  Lane l{ two_over(100) };
+  // Every leg rises from the lane at y=100, so only the region's floor at y=115 limits
+  // the move down: the lower member stops one unit inside it.
+  Frame f{ frame_of({ { pt(0, 0), pt(0, 100), pt(200, 100), pt(200, 0) },
+                      { pt(20, 10), pt(20, 100), pt(220, 100), pt(220, 10) } }) };
   NudgeStats s;
-  nudge_lanes(rect(0, 90, 200, 20),
-              bounds_of(rect(0, 90, 200, 20), l.nets),
+  nudge_lanes(rect(-50, -50, 320, 165),
+              bounds_of(OPEN, f.nets),
               {},
               480,
               0,
-              l.nets,
-              l.points,
+              f.nets,
+              f.points,
               s);
-  // Room is 9 either side of y=100, one unit inside the region; both members stay in it.
-  for (uint32_t net = 0; net < 2; ++net) {
-    CHECK(lane_y(l, net) >= 90);
-    CHECK(lane_y(l, net) <= 110);
-  }
+  CHECK(net_pt(f, 0, 1).y == 11);   // up 89, the most net 1's 90-unit legs allow
+  CHECK(net_pt(f, 1, 1).y == 114);  // 103 below it
 }
 
 TEST_CASE("nudge: an end segment is left alone, having a border to hold") {
@@ -301,20 +301,19 @@ TEST_CASE("nudge: nets that only touch at a point are not one lane") {
 }
 
 TEST_CASE("nudge: a displacement that would enter a box is dropped, not clamped") {
-  Lane l{ two_over(100) };
-  // A box below the lane, across both nets' trailing legs at x=200.
-  std::vector<scav_rect> const walls{ rect(150, 130, 100, 100) };
+  // The room, read from net 0 at y=100, offers net 1 y=119 above the box at y 120..130;
+  // its falling legs would then cross the box, so net 1 stays at y=150.
+  Frame f{ frame_of({ { pt(0, 0), pt(0, 100), pt(200, 100), pt(200, 0) },
+                      { pt(0, 300), pt(0, 150), pt(200, 150), pt(200, 300) } }) };
+  std::vector<scav_rect> const walls{ rect(-50, 120, 300, 10) };
   NudgeStats s;
-  nudge_lanes(OPEN, bounds_of(OPEN, l.nets), walls, 48, 0, l.nets, l.points, s);
-  CHECK(s.lanes == 1);
-  // No segment lies wholly inside the box.
-  for (scav_span const &net : l.nets) {
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), walls, 160, 0, f.nets, f.points, s);
+  CHECK(net_pt(f, 0, 1).y == 1);
+  CHECK(net_pt(f, 1, 1).y == 150);
+  for (scav_span const &net : f.nets) {
     for (uint32_t k = 0; (k + 1) < net.len; ++k) {
-      scav_point const a{ l.points[net.off + k] };
-      scav_point const b{ l.points[net.off + k + 1] };
-      bool const in_x{ (a.x > 150) && (a.x < 250) && (b.x > 150) && (b.x < 250) };
-      bool const in_y{ (a.y > 130) && (a.y < 230) && (b.y > 130) && (b.y < 230) };
-      CHECK(!(in_x && in_y));
+      CHECK(!overlaps(span_rect(f.points[net.off + k], f.points[net.off + k + 1]),
+                      walls[0]));
     }
   }
 }

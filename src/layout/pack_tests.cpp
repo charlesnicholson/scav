@@ -395,15 +395,22 @@ TEST_CASE("pack: both last steps keep every property over a seeded spread") {
 }
 
 TEST_CASE("pack: a saturated column is left as it is") {
-  // 64 COORD_MAX squares in one column, past the domain: whitespace elimination
-  // keeps placement's positions.
-  std::vector<scav_rect> const tall(64,
-                                    { .x = 0, .y = 0, .w = COORD_MAX, .h = COORD_MAX });
+  // 5000 COORD_MAX squares over a half-width rect: `h` saturates and whitespace
+  // elimination keeps placement's positions, the last rect's width included.
+  std::vector<scav_rect> tall(5000, { .x = 0, .y = 0, .w = COORD_MAX, .h = COORD_MAX });
+  tall.push_back({ .x = 0, .y = 0, .w = COORD_MAX / 2, .h = COORD_MAX });
   Packing const placed{ pack_rows(tall, 0, 16, 10, Compaction::Off, false) };
   Packing const p{ pack_lr(tall, 0, 16, 10, Compaction::Off) };
   CHECK(p.w == COORD_MAX);
-  CHECK(p.h == (64 * COORD_MAX));
+  CHECK(p.h == PACK_SATURATED);
+  CHECK(p.at.back().w == (COORD_MAX / 2));
   CHECK(same(p.at, placed.at));
+
+  // The same column's last three rects, short of saturation: the half-width rect widens.
+  std::vector<scav_rect> const short_of(tall.end() - 3, tall.end());
+  Packing const filled_out{ pack_lr(short_of, 0, 16, 10, Compaction::Off) };
+  CHECK(filled_out.h == (3 * COORD_MAX));
+  CHECK(filled_out.at.back().w == COORD_MAX);
 }
 
 TEST_CASE("pack: whitespace elimination fills a column to the drawing's width") {

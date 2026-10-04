@@ -251,13 +251,22 @@ TEST_CASE("print: a block over the budget breaks, and only the block that overfl
 }
 
 TEST_CASE("print: the budget counts codepoints, not UTF-8 bytes") {
-  // Each accented character is two bytes and one column.
-  std::string const text{ "chart c { state A \"\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\", }" };
-  CHECK(print(text, 30) ==
-        "chart c {\n"
-        "  state A \"\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\",\n"
-        "}\n");
-  CHECK(print(text, 30) == print(print(text, 30), 30));
+  // Each accented character is two bytes and one column: with five the block's line is
+  // 30 columns and 35 bytes and fits a budget of 30; a sixth breaks it.
+  auto const accents = [](uint32_t n) {
+    std::string out;
+    for (uint32_t i = 0; i < n; ++i) { out += "\xC3\xA9"; }
+    return out;
+  };
+  std::string const five{ "chart c { state A { state B \"" + accents(5) + "\", }, }" };
+  std::string const six{ "chart c { state A { state B \"" + accents(6) + "\", }, }" };
+  std::string const flat{ "chart c {\n  state A { state B \"" + accents(5) +
+                          "\" },\n}\n" };
+  std::string const broken{ "chart c {\n  state A {\n    state B \"" + accents(6) +
+                            "\",\n  },\n}\n" };
+  CHECK(print(five, 30) == flat);
+  CHECK(print(six, 30) == broken);
+  CHECK(print(five, 30) == print(print(five, 30), 30));
 }
 
 TEST_CASE("print: the chart block always breaks, however small the document") {

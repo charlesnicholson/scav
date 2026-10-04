@@ -681,15 +681,26 @@ TEST_CASE("label: a leg no whole number of steps long still reaches its far end"
 }
 
 TEST_CASE("label: an earlier leg of the route outranks a later one") {
-  // The key ranks `seg` after the shortfall and the distance: the earlier leg wins ties.
-  std::vector<scav_point> const elbow{ { .x = 100, .y = 150 },
-                                       { .x = 400, .y = 150 },
-                                       { .x = 400, .y = 350 } };
+  // A wall over the top leg leaves the two uprights, mirror images about the anchor at
+  // x=250: their best candidates tie on shortfall and distance, and the earlier leg wins.
+  std::vector<scav_point> const cup{ { .x = 100, .y = 350 },
+                                     { .x = 100, .y = 150 },
+                                     { .x = 400, .y = 150 },
+                                     { .x = 400, .y = 350 } };
+  std::vector<scav_point> const back{ cup.rbegin(), cup.rend() };
+  scav_rect const wall{ .x = 20, .y = 110, .w = 460, .h = 80 };
   uint32_t fell{ 0 };
-  scav_rect const at{ on_route(elbow, {}, CHART, LABEL, fell) };
-  CHECK(placed_well(at, elbow));
+  scav_rect const left{ on_route(cup, { wall }, CHART, LABEL, fell) };
   CHECK(fell == 0);
-  CHECK(nearest_leg(at, elbow) == 0);
+  scav_rect const right{ on_route(back, { wall }, CHART, LABEL, fell) };
+  CHECK(fell == 0);
+  CHECK(placed_well(left, cup));
+  CHECK(placed_well(right, back));
+  CHECK(!overlaps(left, wall));
+  CHECK(nearest_leg(left, cup) == 0);
+  CHECK(nearest_leg(right, back) == 0);
+  CHECK(right.x == (500 - (left.x + left.w)));  // mirrored about x=250
+  CHECK(right.y == left.y);
 }
 
 TEST_CASE("label: the anchor distance outranks the leg a candidate rides") {
