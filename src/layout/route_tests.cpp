@@ -1179,7 +1179,7 @@ TEST_CASE("route: a face with no effect at an end changes nothing it draws") {
         uint32_t const mask{ marks.faceable[(2 * seg) + end] };
         for (uint32_t face = 0; face < 4; ++face) {
           SearchPins const pins{
-            .faces = { { .trans = t, .leg = leg, .end = end, .face = face } }
+            .ends = { { .trans = t, .leg = leg, .end = end, .face = face } }
           };
           Routes const pinned{
             route_transitions(c, g, o, z, {}, p, *router, 1, nullptr, nullptr, &pins)
@@ -1420,8 +1420,8 @@ TEST_CASE("route: a route inside a state goes round its loop room, never across 
                        .path_box = boxes.data(),
                        .n_path_box = static_cast<uint32_t>(boxes.size()),
                        .path_box_stride = static_cast<uint32_t>(sizeof(scav_path_box)) };
-  SearchPins const pins{ .sides = {
-                             { .trans = TransId{ 2 }, .leg = 0, .end = 1, .side = 3 } } };
+  SearchPins const pins{ .ends = {
+                             { .trans = TransId{ 2 }, .leg = 0, .end = 1, .face = 3 } } };
   Drawn d;
   draw_text(text, s, pins, d);
   REQUIRE(inner_loop(d.c, 3));
@@ -1473,11 +1473,10 @@ TEST_CASE("route: a nudge leaves an outer loop's corridor and its arrowhead's le
                        .path_box = boxes.data(),
                        .n_path_box = static_cast<uint32_t>(boxes.size()),
                        .path_box_stride = static_cast<uint32_t>(sizeof(scav_path_box)) };
-  SearchPins const pins{
-    .faces = { { .trans = TransId{ 3 }, .leg = 0, .end = 0, .face = 3 },
-               { .trans = TransId{ 3 }, .leg = 0, .end = 1, .face = 3 } },
-    .sides = { { .trans = TransId{ 2 }, .leg = 1, .end = 0, .side = 3 } }
-  };
+  SearchPins const pins{ .ends = {
+                             { .trans = TransId{ 3 }, .leg = 0, .end = 0, .face = 3 },
+                             { .trans = TransId{ 3 }, .leg = 0, .end = 1, .face = 3 },
+                             { .trans = TransId{ 2 }, .leg = 1, .end = 0, .face = 3 } } };
   Drawn d;
   draw_text(text, s, pins, d);
   scav_rect const &box{ d.z.state[named(d.c, "S")] };

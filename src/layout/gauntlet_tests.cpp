@@ -964,11 +964,11 @@ TEST_CASE(
       if (l.c.transitions[t].src.v == source) { drop = t; }
     }
     REQUIRE(drop != INVALID);
-    REQUIRE(l.pins.sides.size() == 1);
-    CHECK(l.pins.sides[0].trans.v == drop);
-    CHECK(l.pins.sides[0].leg == 1);
-    CHECK(l.pins.sides[0].end == 0);
-    CHECK(l.pins.sides[0].side == 2);
+    REQUIRE(l.pins.ends.size() == 1);
+    CHECK(l.pins.ends[0].trans.v == drop);
+    CHECK(l.pins.ends[0].leg == 1);
+    CHECK(l.pins.ends[0].end == 0);
+    CHECK(l.pins.ends[0].face == 2);
     REQUIRE(l.r.port[drop].len == 1);
     CHECK(l.r.slots[l.r.port[drop].off].side == 2);
 
@@ -1011,9 +1011,9 @@ TEST_CASE("gauntlet: a route through two nested borders crosses both at one heig
       return bare.c.submachine_ids[bare.c.states[st].submachines.off];
     };
     SearchPins const seed{
-      .orients = { { .frame = frame_of(outer) }, { .frame = frame_of(inner) } },
-      .sides = { { .trans = TransId{ reach }, .leg = 1, .end = 0, .side = 0 },
-                 { .trans = TransId{ reach }, .leg = 2, .end = 0, .side = 0 } }
+      .ends = { { .trans = TransId{ reach }, .leg = 1, .end = 0, .face = 0 },
+                { .trans = TransId{ reach }, .leg = 2, .end = 0, .face = 0 } },
+      .orients = { { .frame = frame_of(outer) }, { .frame = frame_of(inner) } }
     };
     Laid l;
     lay("through.scav", one_row(p), l, {}, &seed);

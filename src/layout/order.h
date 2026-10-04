@@ -64,7 +64,7 @@ struct SubmachineOrders {
   // Parallel to segments: 1 where the boundary node sits on the leading cross border, 2 on
   // the trailing one, 0 on its rank's border. On a cross border it shares its mate's rank.
   std::vector<uint8_t> seg_cross;
-  // Parallel to segments: 1 where a side pin chose the boundary node's border.
+  // Parallel to segments: 1 where an end pin chose the boundary node's border.
   std::vector<uint8_t> seg_sided;
   // Parallel to segments: the boundary node's face 0..3 as `scav_port_slot::side`; off a
   // cross border, the leading rank border if an edge leaves the node, else the trailing.

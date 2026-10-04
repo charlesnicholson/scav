@@ -57,10 +57,9 @@ enum class ArgRead : uint32_t { NotOurs, Taken, Malformed };
 //   --rank S:R           state S held at rank R of its frame
 //   --cut T:L            leg L of transition T left unchained
 //   --reverse T:L        that leg turned round before cycles break
-//   --face T:L:E:F       end E (0 departs, 1 arrives) leaves by face F: 0 left,
-//                        1 right, 2 top, 3 bottom
+//   --end T:L:E:F        end E (0 departs, 1 arrives) on face F (0 left, 1 right,
+//                        2 top, 3 bottom) of its box, or of its port's state
 //   --orient F           submachine F's ranks run down the page
-//   --side T:L:E:S       end E's port crosses its state's border on side S, as a face
 //   --fold F:M[:L]       submachine F's run folds as the scale measure picks (M 0),
 //                        always (1), or never (2); a nonzero L is the one rank
 //                        the fold cuts before

@@ -159,7 +159,7 @@ TEST_CASE("order: a boundary node stands for the port on the frame's own border"
 
 TEST_CASE(
     "order: a port on a cross border shares its neighbour's rank, at one end of it") {
-  // A side pin puts the port on the top or bottom border. The sweep swaps `B` and `Y` to
+  // An end pin puts the port on the top or bottom border. The sweep swaps `B` and `Y` to
   // uncross `A -> Y` and `Q -> B`, and the port stays at one end of `B`'s rank.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
@@ -186,7 +186,7 @@ TEST_CASE(
 
   for (uint32_t const side : { 2U, 3U }) {
     CAPTURE(side);
-    SearchPins const pin{ .sides = { { .trans = drop, .leg = 1, .side = side } } };
+    SearchPins const pin{ .ends = { { .trans = drop, .leg = 1, .face = side } } };
     SubmachineOrders const o{ order_submachines(c, g, {}, profile(), 0, pin) };
     CHECK(o.seg_cross[seg] == ((side == 2) ? 1 : 2));
     CHECK(o.seg_side[seg] == side);
@@ -212,15 +212,15 @@ TEST_CASE(
   }
 
   // Either leg meeting at the port names it: here the outer leg's arrival.
-  SearchPins const outer{ .sides = { { .trans = drop, .leg = 0, .end = 1, .side = 2 } } };
+  SearchPins const outer{ .ends = { { .trans = drop, .leg = 0, .end = 1, .face = 2 } } };
   SubmachineOrders const named{ order_submachines(c, g, {}, profile(), 0, outer) };
   CHECK(named.seg_cross[seg] == 1);
   CHECK(named.seg_sided[seg] == 1);
   CHECK(named.seg_side[seg] == 2);
 
   // Turned down, left is one of the frame's cross borders.
-  SearchPins const turned{ .orients = { { .frame = inner } },
-                           .sides = { { .trans = drop, .leg = 1, .side = 0 } } };
+  SearchPins const turned{ .ends = { { .trans = drop, .leg = 1, .face = 0 } },
+                           .orients = { { .frame = inner } } };
   SubmachineOrders const down{ order_submachines(c, g, {}, profile(), 0, turned) };
   CHECK(down.seg_cross[seg] == 1);
   CHECK(down.seg_side[seg] == 0);
@@ -245,7 +245,7 @@ TEST_CASE("order: a port pinned where its frame's ranks start or end turns its e
   CHECK(plain.nodes[plain.seg_node[seg]].rank == 0);
 
   SearchPins const left{ .reverses = { { .trans = drop, .leg = 1 } },
-                         .sides = { { .trans = drop, .leg = 1, .side = 0 } } };
+                         .ends = { { .trans = drop, .leg = 1, .face = 0 } } };
   SubmachineOrders const same{ order_submachines(c, g, {}, profile(), 0, left) };
   CHECK(same.nodes == plain.nodes);
   CHECK(same.edges == plain.edges);
@@ -253,7 +253,7 @@ TEST_CASE("order: a port pinned where its frame's ranks start or end turns its e
   CHECK(same.seg_sided[seg] == 1);
   CHECK(same.seg_side[seg] == 0);
 
-  SearchPins const right{ .sides = { { .trans = drop, .leg = 1, .side = 1 } } };
+  SearchPins const right{ .ends = { { .trans = drop, .leg = 1, .face = 1 } } };
   SubmachineOrders const o{ order_submachines(c, g, {}, profile(), 0, right) };
   CHECK(o.seg_cross[seg] == 0);
   CHECK(o.seg_side[seg] == 1);  // a sink on the trailing border

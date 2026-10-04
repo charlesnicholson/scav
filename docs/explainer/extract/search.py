@@ -60,10 +60,8 @@ def pin_of(m: dict) -> list | None:
     if k == "rank":
         return ["--rank", f"{m['state_id']}:{m['rank']}"]
     e = 0 if m.get("end") == "src" else 1
-    if k == "face":
-        return ["--face", f"{m['trans']}:{m['leg']}:{e}:{m['face']}"]
-    if k == "side":
-        return ["--side", f"{m['trans']}:{m['leg']}:{e}:{m['side']}"]
+    if k in ("face", "side"):
+        return ["--end", f"{m['trans']}:{m['leg']}:{e}:{m[k]}"]
     if k == "cut":
         return ["--cut", f"{m['trans']}:{m['leg']}"]
     if k == "reverse":

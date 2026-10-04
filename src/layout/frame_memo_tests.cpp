@@ -534,9 +534,10 @@ TEST_CASE("size memo: a port on a cross border keys on the port it continues thr
   TransId const reach{ static_cast<uint32_t>(c.transitions.size()) - 1 };
   SubmachineId const outer_frame{ c.submachine_ids[c.states[outer].submachines.off] };
   SubmachineId const inner_frame{ c.submachine_ids[c.states[inner].submachines.off] };
-  SearchPins const pins{ .orients = { { .frame = outer_frame }, { .frame = inner_frame } },
-                         .sides = { { .trans = reach, .leg = 1, .end = 0, .side = 0 },
-                                    { .trans = reach, .leg = 2, .end = 0, .side = 0 } } };
+  SearchPins const pins{ .ends = { { .trans = reach, .leg = 1, .end = 0, .face = 0 },
+                                   { .trans = reach, .leg = 2, .end = 0, .face = 0 } },
+                         .orients = { { .frame = outer_frame },
+                                      { .frame = inner_frame } } };
 
   std::array<SplitGraph, 2> const g{ decompose(charts[0]), decompose(charts[1]) };
   std::array<SubmachineOrders, 2> const o{

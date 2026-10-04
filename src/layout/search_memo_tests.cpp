@@ -132,8 +132,8 @@ TEST_CASE("search memo: the key tells apart every input a search is a function o
   base.row.knobs = readable();
   base.seed.ranks.push_back({ .state = StateId{ 3 }, .rank = 1 });
   base.seed.ranks.push_back({ .state = StateId{ 5 }, .rank = 2 });
-  base.seed.faces.push_back({ .trans = TransId{ 2 }, .leg = 0, .end = 1, .face = 3 });
-  base.seed.sides.push_back({ .trans = TransId{ 2 }, .leg = 0, .end = 0, .side = 1 });
+  base.seed.ends.push_back({ .trans = TransId{ 2 }, .leg = 0, .end = 1, .face = 3 });
+  base.seed.ends.push_back({ .trans = TransId{ 2 }, .leg = 0, .end = 0, .face = 1 });
   base.scope.assign(4, 0);
 
   std::vector<Inputs> variants(22, base);
@@ -146,7 +146,7 @@ TEST_CASE("search memo: the key tells apart every input a search is a function o
   variants[6].seed.ranks[1].rank = 3;
   variants[7].seed.cuts.push_back({ .trans = TransId{ 1 }, .leg = 0 });
   variants[8].seed.reverses.push_back({ .trans = TransId{ 1 }, .leg = 0 });
-  variants[9].seed.faces[0].face = 2;
+  variants[9].seed.ends[0].face = 2;
   variants[10].seed.orients.push_back({ .frame = SubmachineId{ 0 } });
   // The same two rank pins in the other order key differently.
   std::swap(variants[11].seed.ranks[0], variants[11].seed.ranks[1]);
@@ -156,9 +156,9 @@ TEST_CASE("search memo: the key tells apart every input a search is a function o
   variants[14].scoped = true;
   variants[14].scope[3] = 1;
   variants[15].seed.ranks.pop_back();
-  variants[16].seed.sides.push_back(
-      { .trans = TransId{ 1 }, .leg = 0, .end = 1, .side = 0 });
-  variants[17].seed.sides[0].side = 2;
+  variants[16].seed.ends.push_back(
+      { .trans = TransId{ 1 }, .leg = 0, .end = 1, .face = 0 });
+  variants[17].seed.ends[1].face = 2;
   variants[18].seed.folds.push_back({ .frame = SubmachineId{ 2 }, .mode = FOLD_NEVER });
   variants[19].seed.folds.push_back({ .frame = SubmachineId{ 2 }, .mode = FOLD_ALWAYS });
   variants[20].seed.folds.push_back(

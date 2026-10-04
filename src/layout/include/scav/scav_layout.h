@@ -85,9 +85,9 @@ struct ReversePin {
   uint32_t leg{ 0 };
 };
 
-// The face of its box that end `end` (0 departure, 1 arrival) of leg `leg` of `trans`
-// attaches to: 0 left, 1 right, 2 top, 3 bottom.
-struct FacePin {
+// Puts end `end` (0 departure, 1 arrival) of leg `leg` of `trans` on face 0 left, 1 right,
+// 2 top or 3 bottom: of its box at a box end, of its state's border at a port end.
+struct EndPin {
   TransId trans{ INVALID };
   uint32_t leg{ 0 };
   uint32_t end{ 0 };
@@ -98,15 +98,6 @@ struct FacePin {
 // is horizontal, and its ports sit on its top and bottom borders.
 struct OrientPin {
   SubmachineId frame{ INVALID };
-};
-
-// The side of its state's border a leg end's port sits on: 0 left, 1 right, 2 top,
-// 3 bottom; `end` as in `FacePin`. Ignored for a port on a region's border.
-struct SidePin {
-  TransId trans{ INVALID };
-  uint32_t leg{ 0 };
-  uint32_t end{ 0 };
-  uint32_t side{ 0 };
 };
 
 // Overrides the row's fold rule for `frame`: `mode` FOLD_SCALE lets the scale measure
@@ -125,9 +116,8 @@ struct SearchPins {
   std::vector<RankPin> ranks;
   std::vector<ChainCut> cuts;
   std::vector<ReversePin> reverses;
-  std::vector<FacePin> faces;
+  std::vector<EndPin> ends;
   std::vector<OrientPin> orients;
-  std::vector<SidePin> sides;
   std::vector<FoldPin> folds;  // the last pin naming a frame decides it
 };
 

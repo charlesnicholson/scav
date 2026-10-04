@@ -270,7 +270,7 @@ bool same_geometry(Candidate const &a, Candidate const &b) {
 // The facing pass's output.
 struct Facing {
   std::vector<ReversePin> reverses;  // legs whose in-frame edge reverses
-  std::vector<SidePin> sides;        // legs whose port moves to a cross border
+  std::vector<EndPin> sides;         // legs whose port moves to a cross border
 };
 
 // A cross-border side the facing pass has given to `node`.
@@ -404,7 +404,7 @@ void facing_flips(Facing &out,
       if (side != INVALID) {
         vec_push_back(taken, { .node = node, .side = side });
         vec_push_back(out.sides,
-                      { .trans = t, .leg = leg, .end = leaves ? 1U : 0U, .side = side });
+                      { .trans = t, .leg = leg, .end = leaves ? 1U : 0U, .face = side });
         trace_emit({ .kind = TraceKind::PortTurned,
                      .frame = m,
                      .port = { .seg = seg, .trans = t.v, .leg = leg, .side = side } });
@@ -431,7 +431,7 @@ void facing_flips(Facing &out,
           vec_push_back(taken, { .node = j, .side = cross });
           vec_push_back(
               out.sides,
-              { .trans = t, .leg = leg, .end = leaves ? 1U : 0U, .side = cross });
+              { .trans = t, .leg = leg, .end = leaves ? 1U : 0U, .face = cross });
           trace_emit({ .kind = TraceKind::PortTurned,
                        .frame = m,
                        .port = { .seg = seg, .trans = t.v, .leg = leg, .side = cross } });
@@ -451,14 +451,30 @@ void facing_flips(Facing &out,
 }
 
 // A candidate's phases 1 and 2, facing pass and first routing. Phases 1 and 2 and the
-// facing pass read no face pin; candidates differing only in faces share them.
+// facing pass read no box-end pin; candidates differing only in those share them.
 struct Prefix {
   SubmachineOrders laid;
   SizedLayout sized;
-  SearchPins turned;
+  Facing flips;
   Routes routes;  // as phase 3 first routes it, over `sized`
   bool ok{ false };
 };
+
+// Applies the facing pass's reversals and sides to `turned`; a reversal it names again
+// is dropped.
+void turn_pins(SearchPins &turned, Facing const &flips) {
+  for (ReversePin const &f : flips.reverses) {
+    auto const had{ std::ranges::find_if(turned.reverses, [&f](ReversePin const &r) {
+      return (r.trans == f.trans) && (r.leg == f.leg);
+    }) };
+    if (had != turned.reverses.end()) {
+      turned.reverses.erase(had);
+    } else {
+      vec_push_back(turned.reverses, f);
+    }
+  }
+  vec_insert(turned.ends, turned.ends.end(), flips.sides.begin(), flips.sides.end());
+}
 
 // Scratch one candidate fills and discards beside its `Candidate`.
 struct CandidateScratch {
@@ -538,8 +554,8 @@ void search_candidate(Candidate &out,
       return;
     }
     out.sized = from->sized;
-    out.laid = from->turned;
-    if (pins != nullptr) { out.laid.faces = pins->faces; }
+    out.laid = (pins != nullptr) ? *pins : SearchPins{};
+    turn_pins(out.laid, from->flips);
     use = &from->laid;
   } else {
     if (!size_layout(c,
@@ -568,17 +584,7 @@ void search_candidate(Candidate &out,
     Facing &flips{ sc.flips };
     facing_flips(flips, sc.taken, c, g, orders, out.sized, s);
     if (!flips.reverses.empty() || !flips.sides.empty()) {
-      for (ReversePin const &f : flips.reverses) {
-        auto const had{ std::ranges::find_if(turned.reverses, [&f](ReversePin const &r) {
-          return (r.trans == f.trans) && (r.leg == f.leg);
-        }) };
-        if (had != turned.reverses.end()) {
-          turned.reverses.erase(had);
-        } else {
-          vec_push_back(turned.reverses, f);
-        }
-      }
-      vec_insert(turned.sides, turned.sides.end(), flips.sides.begin(), flips.sides.end());
+      turn_pins(turned, flips);
       order_submachines(facing, c, g, s, knobs, threads, turned);
       SizedLayout &again{ sc.again };
       std::vector<Diagnostic> spilled;
@@ -599,7 +605,7 @@ void search_candidate(Candidate &out,
     if (prefix != nullptr) {
       prefix->laid = *use;
       prefix->sized = out.sized;
-      prefix->turned = out.laid;
+      prefix->flips = flips;
       prefix->ok = true;
     }
   }
@@ -719,12 +725,12 @@ static_assert((static_cast<uint16_t>(MoveKind::Rank) == TRACE_MOVE_RANK) &&
                   (static_cast<uint16_t>(MoveKind::Side) == TRACE_MOVE_SIDE) &&
                   (static_cast<uint16_t>(MoveKind::Fold) == TRACE_MOVE_FOLD),
               "the trace names a move by this enum's ordinal");
-// One Level 1 move or kick; `kind` names which of its pins is set.
+// One Level 1 move or kick; `kind` names which of its pins is set. `Face` is an end pin
+// at a box end, `Side` one at a port end.
 struct Move {
   RankPin pin{};
   ChainCut leg{};
-  FacePin face{};
-  SidePin side{};
+  EndPin end_pin{};
   FoldPin fold{};
   OrientPin orient{};
   MoveKind kind{ MoveKind::Rank };
@@ -737,8 +743,8 @@ void add_move(SearchPins &into, Move const &m) {
     case MoveKind::Reverse:
       vec_push_back(into.reverses, { .trans = m.leg.trans, .leg = m.leg.leg });
       break;
-    case MoveKind::Face: vec_push_back(into.faces, m.face); break;
-    case MoveKind::Side: vec_push_back(into.sides, m.side); break;
+    case MoveKind::Face:
+    case MoveKind::Side: vec_push_back(into.ends, m.end_pin); break;
     case MoveKind::Fold: vec_push_back(into.folds, m.fold); break;
     case MoveKind::Orient: vec_push_back(into.orients, m.orient); break;
     case MoveKind::Rank: vec_push_back(into.ranks, m.pin); break;
@@ -760,16 +766,12 @@ void put_pins(SearchPins const &p, std::vector<uint32_t> &w) {
   for (ChainCut const &k : p.cuts) { vec_insert(w, w.end(), { k.trans.v, k.leg }); }
   vec_push_back(w, static_cast<uint32_t>(p.reverses.size()));
   for (ReversePin const &r : p.reverses) { vec_insert(w, w.end(), { r.trans.v, r.leg }); }
-  vec_push_back(w, static_cast<uint32_t>(p.faces.size()));
-  for (FacePin const &f : p.faces) {
-    vec_insert(w, w.end(), { f.trans.v, f.leg, f.end, f.face });
+  vec_push_back(w, static_cast<uint32_t>(p.ends.size()));
+  for (EndPin const &e : p.ends) {
+    vec_insert(w, w.end(), { e.trans.v, e.leg, e.end, e.face });
   }
   vec_push_back(w, static_cast<uint32_t>(p.orients.size()));
   for (OrientPin const &o : p.orients) { vec_push_back(w, o.frame.v); }
-  vec_push_back(w, static_cast<uint32_t>(p.sides.size()));
-  for (SidePin const &sp : p.sides) {
-    vec_insert(w, w.end(), { sp.trans.v, sp.leg, sp.end, sp.side });
-  }
   vec_push_back(w, static_cast<uint32_t>(p.folds.size()));
   for (FoldPin const &f : p.folds) {
     vec_insert(w, w.end(), { f.frame.v, f.mode, f.layer });
@@ -1219,65 +1221,52 @@ Improved run_search(Chart const &c,
                     { .leg = { .trans = t, .leg = leg }, .kind = MoveKind::Reverse });
     }
 
-    // Face moves: four per segment end, less pinned ends; a face with no router effect
-    // counts against the budget unscored.
+    // End moves, skipping pinned ends: a box end to each face, a face with no router
+    // effect counted unscored; a state-border port to each unlined side but its own.
     std::vector<uint8_t> const &faceable{ base.faceable };
-    for (uint32_t seg = 0; (seg < g.segments.size()) && (face_scored < budget); ++seg) {
+    SubmachineOrders const &laid{ incumbent.laid };
+    for (uint32_t seg = 0;
+         (seg < g.segments.size()) && ((face_scored < budget) || (side_scored < budget));
+         ++seg) {
       if (!in_scope(g.segments[seg].frame.v)) { continue; }
       TransId const t{ g.segments[seg].trans };
       if ((t.v == INVALID) || (t.v >= g.trans_segments.size())) { continue; }
-      if ((t.v >= party.size()) || (party[t.v] == 0)) { continue; }  // straight, unpriced
       uint32_t const leg{ seg - g.trans_segments[t.v].off };
-      for (uint32_t end = 0; (end < 2) && (face_scored < budget); ++end) {
-        bool already{ false };
-        for (FacePin const &had : held.faces) {
-          already =
-              already || ((had.trans.v == t.v) && (had.leg == leg) && (had.end == end));
+      for (uint32_t end = 0; end < 2; ++end) {
+        if (std::ranges::any_of(held.ends, [&](EndPin const &had) {
+              return (had.trans.v == t.v) && (had.leg == leg) && (had.end == end);
+            })) {
+          continue;
         }
-        if (already) { continue; }
-        size_t const at{ (size_t{ 2 } * seg) + end };
-        uint32_t const effective{ (at < faceable.size()) ? uint32_t{ faceable[at] }
-                                                         : 0xFU };
-        for (uint32_t f = 0; (f < 4) && (face_scored < budget); ++f) {
-          ++face_scored;
-          if ((((effective >> f) & 1U) == 0) && skipping_noop_faces()) { continue; }
+        uint32_t const port{ (end == 0) ? g.segments[seg].src_port
+                                        : g.segments[seg].dst_port };
+        if (port == INVALID) {
+          bool const straight{ (t.v >= party.size()) || (party[t.v] == 0) };
+          if (straight) { continue; }  // straight, unpriced
+          size_t const at{ (size_t{ 2 } * seg) + end };
+          uint32_t const effective{ (at < faceable.size()) ? uint32_t{ faceable[at] }
+                                                           : 0xFU };
+          for (uint32_t f = 0; (f < 4) && (face_scored < budget); ++f) {
+            ++face_scored;
+            if ((((effective >> f) & 1U) == 0) && skipping_noop_faces()) { continue; }
+            vec_push_back(round,
+                          { .end_pin = { .trans = t, .leg = leg, .end = end, .face = f },
+                            .kind = MoveKind::Face });
+          }
+          continue;
+        }
+        if (!incumbent.ok || (port != laid.seg_port[seg]) ||
+            (laid.seg_node[seg] == INVALID) || (g.ports[port].state.v == INVALID)) {
+          continue;
+        }
+        uint32_t const now{ laid.seg_side[seg] };
+        for (uint32_t side = 0; (side < 4) && (side_scored < budget); ++side) {
+          if ((side == now) || face_lined(s, g.ports[port].state.v, side)) { continue; }
+          ++side_scored;
           vec_push_back(round,
-                        { .face = { .trans = t, .leg = leg, .end = end, .face = f },
-                          .kind = MoveKind::Face });
+                        { .end_pin = { .trans = t, .leg = leg, .end = end, .face = side },
+                          .kind = MoveKind::Side });
         }
-      }
-    }
-
-    // Side moves: each unlined side of a state-border port's state but its current one;
-    // ports with a side pin are skipped.
-    SubmachineOrders const &laid{ incumbent.laid };
-    for (uint32_t seg = 0;
-         incumbent.ok && (seg < g.segments.size()) && (side_scored < budget);
-         ++seg) {
-      uint32_t const frame{ g.segments[seg].frame.v };
-      uint32_t const port{ laid.seg_port[seg] };
-      uint32_t const node{ laid.seg_node[seg] };
-      if (!in_scope(frame) || (port == INVALID) || (node == INVALID) ||
-          (g.ports[port].state.v == INVALID)) {
-        continue;
-      }
-      TransId const t{ g.segments[seg].trans };
-      if ((t.v == INVALID) || (t.v >= g.trans_segments.size())) { continue; }
-      uint32_t const leg{ seg - g.trans_segments[t.v].off };
-      uint32_t const end{ (g.segments[seg].dst_port == port) ? 1U : 0U };
-      bool already{ false };
-      for (SidePin const &had : held.sides) {
-        already =
-            already || ((had.trans.v == t.v) && (had.leg == leg) && (had.end == end));
-      }
-      if (already) { continue; }
-      uint32_t const now{ laid.seg_side[seg] };
-      for (uint32_t side = 0; (side < 4) && (side_scored < budget); ++side) {
-        if ((side == now) || face_lined(s, g.ports[port].state.v, side)) { continue; }
-        ++side_scored;
-        vec_push_back(round,
-                      { .side = { .trans = t, .leg = leg, .end = end, .side = side },
-                        .kind = MoveKind::Side });
       }
     }
 
@@ -1416,12 +1405,9 @@ Improved run_search(Chart const &c,
       }
       uint32_t moved_trans{ INVALID };
       uint32_t moved_leg{ 0 };
-      if (m.kind == MoveKind::Face) {
-        moved_trans = m.face.trans.v;
-        moved_leg = m.face.leg;
-      } else if (m.kind == MoveKind::Side) {
-        moved_trans = m.side.trans.v;
-        moved_leg = m.side.leg;
+      if ((m.kind == MoveKind::Face) || (m.kind == MoveKind::Side)) {
+        moved_trans = m.end_pin.trans.v;
+        moved_leg = m.end_pin.leg;
       } else if (m.kind != MoveKind::Rank) {
         moved_trans = m.leg.trans.v;
         moved_leg = m.leg.leg;
@@ -1439,9 +1425,8 @@ Improved run_search(Chart const &c,
                        .trans = moved_trans,
                        .leg = moved_leg,
                        .move = static_cast<uint16_t>(m.kind),
-                       .end = static_cast<uint16_t>(
-                           (m.kind == MoveKind::Side) ? m.side.end : m.face.end),
-                       .face = (m.kind == MoveKind::Side) ? m.side.side : m.face.face,
+                       .end = static_cast<uint16_t>(m.end_pin.end),
+                       .face = m.end_pin.face,
                        .t0 = sc.viable ? sc.cost.t0_violations : 0,
                        .t2 = sc.viable ? sc.cost.t2 : 0 } });
       // Under a trace sink, a viable move's term shares follow its score.
@@ -1486,16 +1471,12 @@ SearchPins get_pins(int32_t const *w, uint32_t &at) {
   for (ChainCut &k : p.cuts) { k = { .trans = TransId{ next() }, .leg = next() }; }
   vec_resize(p.reverses, next());
   for (ReversePin &r : p.reverses) { r = { .trans = TransId{ next() }, .leg = next() }; }
-  vec_resize(p.faces, next());
-  for (FacePin &f : p.faces) {
-    f = { .trans = TransId{ next() }, .leg = next(), .end = next(), .face = next() };
+  vec_resize(p.ends, next());
+  for (EndPin &e : p.ends) {
+    e = { .trans = TransId{ next() }, .leg = next(), .end = next(), .face = next() };
   }
   vec_resize(p.orients, next());
   for (OrientPin &o : p.orients) { o = { .frame = SubmachineId{ next() } }; }
-  vec_resize(p.sides, next());
-  for (SidePin &sp : p.sides) {
-    sp = { .trans = TransId{ next() }, .leg = next(), .end = next(), .side = next() };
-  }
   vec_resize(p.folds, next());
   for (FoldPin &f : p.folds) {
     f = { .frame = SubmachineId{ next() }, .mode = next(), .layer = next() };
@@ -1842,16 +1823,14 @@ bool layout_run(Chart &c,
     auto const outside = [&](uint32_t frame, std::vector<uint8_t> const &redo) {
       return (frame >= redo.size()) || (redo[frame] == 0);
     };
-    // `from` less every rank, cut, face, side and fold pin in a `redo` frame; orientations
-    // and reversals stay.
+    // `from` less every rank, cut, end and fold pin in a `redo` frame; orientations and
+    // reversals stay.
     auto const warm = [&](SearchPins const &from, std::vector<uint8_t> const &redo) {
       SearchPins out;
       out.reverses = from.reverses;
       out.orients = from.orients;
-      for (SidePin const &sp : from.sides) {
-        if (outside(frame_of_leg(sp.trans, sp.leg), redo)) {
-          vec_push_back(out.sides, sp);
-        }
+      for (EndPin const &e : from.ends) {
+        if (outside(frame_of_leg(e.trans, e.leg), redo)) { vec_push_back(out.ends, e); }
       }
       for (RankPin const &r : from.ranks) {
         uint32_t const f{ (r.state.v < c.states.size()) ? c.states[r.state.v].parent.v
@@ -1860,11 +1839,6 @@ bool layout_run(Chart &c,
       }
       for (ChainCut const &k : from.cuts) {
         if (outside(frame_of_leg(k.trans, k.leg), redo)) { vec_push_back(out.cuts, k); }
-      }
-      for (FacePin const &fp : from.faces) {
-        if (outside(frame_of_leg(fp.trans, fp.leg), redo)) {
-          vec_push_back(out.faces, fp);
-        }
       }
       for (FoldPin const &fp : from.folds) {
         if (outside(fp.frame.v, redo)) { vec_push_back(out.folds, fp); }
@@ -2077,8 +2051,7 @@ bool layout_run(Chart &c,
   if (moves != nullptr) {
     auto const count = [](SearchPins const &q) {
       return static_cast<uint32_t>(q.ranks.size() + q.cuts.size() + q.reverses.size() +
-                                   q.faces.size() + q.orients.size() + q.sides.size() +
-                                   q.folds.size());
+                                   q.ends.size() + q.orients.size() + q.folds.size());
     };
     uint32_t const now{ count(held[best]) };
     uint32_t const had{ count(seed) };
@@ -2088,7 +2061,7 @@ bool layout_run(Chart &c,
   if (taken != nullptr) {
     *taken = held[best];
     taken->reverses = candidates[best].laid.reverses;
-    taken->sides = candidates[best].laid.sides;
+    taken->ends = candidates[best].laid.ends;
   }
 
   SizedLayout sized{ std::move(candidates[best].sized) };

@@ -51,7 +51,7 @@ struct RouteFrameCache {
 struct RouteCache {
   std::vector<RouteFrameCache> frame;  // parallel to submachines
   // Two per segment, source end then destination: the router's `effective_faces` there.
-  // A face pin outside those bits changes nothing drawn.
+  // An end pin outside those bits changes nothing drawn.
   std::vector<uint8_t> faceable;
 };
 

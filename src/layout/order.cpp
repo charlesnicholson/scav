@@ -84,7 +84,7 @@ struct FrameScratch {
   std::vector<uint32_t> lanes;        // boundaries x components, row-major
   std::vector<uint32_t> spanning;     // -> edges, labelled across several boundaries
   std::vector<OrderEdge> flat;        // edges into a cross-border port, held out
-  std::vector<uint8_t> fixed;         // parallel to edges; 1 = oriented by a side pin
+  std::vector<uint8_t> fixed;         // parallel to edges; 1 = oriented by an end pin
   std::vector<uint8_t> extreme;       // parallel to nodes; 1 first in its rank, 2 last
 
   // The helpers' working buffers; each sizes what it reads before reading it.
@@ -265,7 +265,7 @@ void orient_acyclic(Frame &f,
                     std::vector<uint8_t> const &pre,
                     std::vector<uint8_t> const &fixed,
                     FrameScratch &sc) {
-  // Before the walk, reverses each edge `pre` names; skips `fixed` edges, which a side pin
+  // Before the walk, reverses each edge `pre` names; skips `fixed` edges, which an end pin
   // has oriented.
   for (uint32_t k = 0; k < f.edges.size(); ++k) {
     OrderEdge &e{ f.edges[k] };
@@ -821,13 +821,13 @@ void order_submachines(SubmachineOrders &o,
   std::vector<uint8_t> &pre_reversed{ cs.pre_reversed };
   resolve_pins(pins.cuts, cut);
   resolve_pins(pins.reverses, pre_reversed);
-  // Per segment, 1 + a side pin's side, 0 for none; set on the leg inside the pinned
-  // port's border, whose boundary node stands for the port.
+  // Per segment, 1 + an end pin's side at a state-border port, 0 for none; set on the leg
+  // inside the pinned port's border, whose boundary node stands for the port.
   std::vector<uint8_t> &sided{ cs.sided };
   sided.clear();
-  for (SidePin const &pin : pins.sides) {
+  for (EndPin const &pin : pins.ends) {
     if ((pin.trans.v == INVALID) || (pin.trans.v >= g.trans_segments.size()) ||
-        (pin.end > 1) || (pin.side > 3)) {
+        (pin.end > 1) || (pin.face > 3)) {
       continue;
     }
     Span const segs{ g.trans_segments[pin.trans.v] };
@@ -845,7 +845,7 @@ void order_submachines(SubmachineOrders &o,
     uint32_t seg{ at };
     if (!own) { seg = (pin.end == 0) ? (at - 1) : (at + 1); }
     if (sided.empty()) { vec_assign(sided, g.segments.size(), 0); }
-    sided[seg] = static_cast<uint8_t>(pin.side + 1);
+    sided[seg] = static_cast<uint8_t>(pin.face + 1);
   }
 
   // A pinned side against the frame: 1 or 2 for the leading or trailing cross border, and
@@ -931,7 +931,7 @@ void order_submachines(SubmachineOrders &o,
       if ((src == INVALID) || (dst == INVALID) || (src == dst)) { continue; }
       vec_push_back(f.edges, { .src = src, .dst = dst, .segment = seg, .reversed = 0 });
     }
-    // Whether a side pin holds the edge's port: a boundary node for a port on a state's
+    // Whether an end pin holds the edge's port: a boundary node for a port on a state's
     // border.
     auto const pinned = [&](OrderEdge const &e) {
       if (sided.empty() || (sided[e.segment] == 0)) { return false; }

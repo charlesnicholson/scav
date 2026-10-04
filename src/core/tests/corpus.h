@@ -119,13 +119,8 @@ inline std::string corpus_pins_line(std::string_view chart,
   for (RankPin const &r : pins.ranks) { flag("--rank", { r.state.v, r.rank }); }
   for (ChainCut const &k : pins.cuts) { flag("--cut", { k.trans.v, k.leg }); }
   for (ReversePin const &r : pins.reverses) { flag("--reverse", { r.trans.v, r.leg }); }
-  for (FacePin const &f : pins.faces) {
-    flag("--face", { f.trans.v, f.leg, f.end, f.face });
-  }
+  for (EndPin const &e : pins.ends) { flag("--end", { e.trans.v, e.leg, e.end, e.face }); }
   for (OrientPin const &o : pins.orients) { flag("--orient", { o.frame.v }); }
-  for (SidePin const &s : pins.sides) {
-    flag("--side", { s.trans.v, s.leg, s.end, s.side });
-  }
   for (FoldPin const &f : pins.folds) {
     if (f.layer != 0) {
       flag("--fold", { f.frame.v, f.mode, f.layer });
@@ -180,14 +175,11 @@ inline bool corpus_pins_read(std::string_view flags, uint32_t &row, SearchPins &
       pins.cuts.push_back({ .trans = TransId{ f[0] }, .leg = f[1] });
     } else if (name == "--reverse") {
       pins.reverses.push_back({ .trans = TransId{ f[0] }, .leg = f[1] });
-    } else if (name == "--face") {
-      pins.faces.push_back(
+    } else if (name == "--end") {
+      pins.ends.push_back(
           { .trans = TransId{ f[0] }, .leg = f[1], .end = f[2], .face = f[3] });
     } else if (name == "--orient") {
       pins.orients.push_back({ .frame = SubmachineId{ f[0] } });
-    } else if (name == "--side") {
-      pins.sides.push_back(
-          { .trans = TransId{ f[0] }, .leg = f[1], .end = f[2], .side = f[3] });
     } else if (name == "--fold") {
       pins.folds.push_back({ .frame = SubmachineId{ f[0] }, .mode = f[1], .layer = f[2] });
     } else {

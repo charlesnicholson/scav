@@ -95,22 +95,15 @@ bool read_value(std::string_view flag, std::string_view value, LayoutArgs &out) 
     out.pins.orients.push_back({ .frame = SubmachineId{ a } });
     return true;
   }
-  if ((flag == "--face") || (flag == "--side")) {
+  if (flag == "--end") {
     std::array<uint32_t, 4> field{};
     if (!ordinal_fields(value, field) || (field[2] > 1) || (field[3] > 3)) {
       return false;
     }
-    if (flag == "--face") {
-      out.pins.faces.push_back({ .trans = TransId{ field[0] },
-                                 .leg = field[1],
-                                 .end = field[2],
-                                 .face = field[3] });
-    } else {
-      out.pins.sides.push_back({ .trans = TransId{ field[0] },
-                                 .leg = field[1],
-                                 .end = field[2],
-                                 .side = field[3] });
-    }
+    out.pins.ends.push_back({ .trans = TransId{ field[0] },
+                              .leg = field[1],
+                              .end = field[2],
+                              .face = field[3] });
     return true;
   }
   if ((flag == "--fold") && (std::ranges::count(value, ':') == 2)) {
@@ -146,8 +139,8 @@ ArgRead read_layout_arg(int argc, char **argv, int &i, LayoutArgs &out) {
     return ArgRead::Taken;
   }
   if ((arg != "--profile") && (arg != "--portfolio-row") && (arg != "--rank") &&
-      (arg != "--cut") && (arg != "--reverse") && (arg != "--face") &&
-      (arg != "--orient") && (arg != "--side") && (arg != "--fold")) {
+      (arg != "--cut") && (arg != "--reverse") && (arg != "--end") &&
+      (arg != "--orient") && (arg != "--fold")) {
     return ArgRead::NotOurs;
   }
   if ((i + 1) >= argc) { return ArgRead::Malformed; }
@@ -183,23 +176,16 @@ void append_layout_args(std::string &out,
   for (RankPin const &r : pins.ranks) { pair("--rank", r.state.v, r.rank); }
   for (ChainCut const &k : pins.cuts) { pair("--cut", k.trans.v, k.leg); }
   for (ReversePin const &r : pins.reverses) { pair("--reverse", r.trans.v, r.leg); }
-  for (FacePin const &f : pins.faces) {
-    pair("--face", f.trans.v, f.leg);
+  for (EndPin const &e : pins.ends) {
+    pair("--end", e.trans.v, e.leg);
     out += ':';
-    string_append_u32(out, f.end);
+    string_append_u32(out, e.end);
     out += ':';
-    string_append_u32(out, f.face);
+    string_append_u32(out, e.face);
   }
   for (OrientPin const &o : pins.orients) {
     out += " --orient ";
     string_append_u32(out, o.frame.v);
-  }
-  for (SidePin const &sp : pins.sides) {
-    pair("--side", sp.trans.v, sp.leg);
-    out += ':';
-    string_append_u32(out, sp.end);
-    out += ':';
-    string_append_u32(out, sp.side);
   }
   for (FoldPin const &f : pins.folds) {
     pair("--fold", f.frame.v, f.mode);

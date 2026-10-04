@@ -258,21 +258,27 @@ void route_transitions(Routes &out,
     cs = std::move(stack.back());
     stack.pop_back();
   }
-  // Face pins as `faces[end][seg]`; INVALID where unpinned, both empty with no face pins.
+  // End pins at portless ends as `faces[end][seg]`; INVALID where unpinned, both empty
+  // with no end pins.
   std::array<std::vector<uint32_t>, 2> &faces{ cs.faces };
   for (std::vector<uint32_t> &side : faces) { side.clear(); }
-  if ((pins != nullptr) && !pins->faces.empty()) {
+  if ((pins != nullptr) && !pins->ends.empty()) {
     for (std::vector<uint32_t> &side : faces) {
       vec_assign(side, g.segments.size(), INVALID);
     }
-    for (FacePin const &fp : pins->faces) {
+    for (EndPin const &fp : pins->ends) {
       if ((fp.trans.v == INVALID) || (fp.trans.v >= g.trans_segments.size()) ||
           (fp.end > 1) || (fp.face > 3)) {
         continue;
       }
       Span const segs{ g.trans_segments[fp.trans.v] };
       if (fp.leg >= segs.len) { continue; }
-      faces[fp.end][segs.off + fp.leg] = fp.face;
+      uint32_t const seg{ segs.off + fp.leg };
+      if (((fp.end == 0) ? g.segments[seg].src_port : g.segments[seg].dst_port) !=
+          INVALID) {
+        continue;
+      }
+      faces[fp.end][seg] = fp.face;
     }
   }
   if (fill != nullptr) {
