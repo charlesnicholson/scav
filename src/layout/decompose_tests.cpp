@@ -21,7 +21,6 @@ SplitSegment const &seg(SplitGraph const &g, uint32_t t, uint32_t i) {
   return g.segments[segs_of(g, t).off + i];
 }
 
-// The port a segment ends on, so a test names boundaries rather than indices.
 // The routes through `s`'s border: one port each.
 uint32_t crossings(SplitGraph const &g, StateId s) {
   uint32_t n{ 0 };
@@ -29,6 +28,7 @@ uint32_t crossings(SplitGraph const &g, StateId s) {
   return n;
 }
 
+// The port that segment `i` of transition `t` ends on.
 SplitPort const &dst_port(SplitGraph const &g, uint32_t t, uint32_t i) {
   return g.ports[seg(g, t, i).dst_port];
 }
@@ -162,7 +162,7 @@ TEST_CASE("split: concurrent siblings get a direct arrow through the separator")
   CHECK(dst_port(g, 0, 0).sub == m1);
   CHECK(dst_port(g, 0, 1).sub == m2);
   CHECK(seg(g, 0, 0).frame == m1);
-  CHECK(seg(g, 0, 1).frame == root);  // the separator channel, owned upward
+  CHECK(seg(g, 0, 1).frame == root);  // the separator channel, in the owner's frame
   CHECK(seg(g, 0, 1).separator == 1);
   CHECK(seg(g, 0, 2).frame == m2);
   CHECK(crossings(g, owner) == 0);  // the owner's border is never crossed
@@ -240,7 +240,7 @@ TEST_CASE("split: tombstones drop out and identical charts split identically") {
 
 namespace {
 
-// The structural invariants every route owes, checked from the POD alone.
+// Checks the structural invariants of transition `t`'s route from the POD alone.
 void check_route(Chart const &c, SplitGraph const &g, uint32_t t) {
   Span const span{ g.trans_segments[t] };
   Transition const &tr{ c.transitions[t] };
@@ -263,13 +263,12 @@ void check_route(Chart const &c, SplitGraph const &g, uint32_t t) {
     // Every crossing moves to a different frame.
     if (k > 0) { CHECK(sg.frame != g.segments[span.off + k - 1].frame); }
 
-    // Only the two outer ends can be flagged inner, and one route cannot run
-    // inward and outward at once.
+    // Only the route's two outer ends carry an inner flag, and never both.
     if (k != 0) { CHECK(sg.src_inner == 0); }
     if ((k + 1) != span.len) { CHECK(sg.dst_inner == 0); }
     CHECK((sg.src_inner & sg.dst_inner) == 0);
-    // What phase 1 leans on: a port-less end is a child of this frame unless
-    // the flag is set, and then it is the state owning the frame outright.
+    // A port-less end is a child of the segment's frame or, with its inner flag set,
+    // the frame's owner.
     if (k == 0) {
       if (sg.src_inner != 0) {
         CHECK(c.submachines[sg.frame.v].owner == tr.src);
@@ -408,8 +407,8 @@ TEST_CASE("split: a shallow source enters a deep target outermost first") {
 }
 
 TEST_CASE("split: a nested concurrent crossing exits, crosses, and enters") {
-  // The concurrent owner sits inside another composite, so the separator
-  // channel's frame is that composite's region, not the root.
+  // The concurrent owner sits inside another composite, so the separator channel
+  // lies in that composite's region.
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const wrap{ build_state(c, root, "W", StateKind::Normal, {}) };
@@ -563,8 +562,8 @@ TEST_CASE("split: an inner end is flagged on the segment that terminates there")
   CHECK(seg(g, 0, 0).src_inner == 0);
   CHECK(seg(g, 0, 0).dst_inner == 0);
 
-  // Ancestor to descendant, external: the source border splits, so the route
-  // starts outside the source box like any other.
+  // Ancestor to descendant, external: the source border splits, and no segment is
+  // flagged inner.
   REQUIRE(segs_of(g, 1).len == 3);
   for (uint32_t k = 0; k < 3; ++k) {
     CAPTURE(k);
@@ -581,8 +580,7 @@ TEST_CASE("split: an inner end is flagged on the segment that terminates there")
   CHECK(seg(g, 2, 1).src_inner == 0);
   CHECK(seg(g, 2, 1).dst_inner == 0);
 
-  // Descendant to ancestor: the tail ends on the target's inner face, and the
-  // kind makes no difference because the target's border is never crossed.
+  // Descendant to ancestor: the tail ends on the target's inner face for either kind.
   for (uint32_t t : { 3U, 4U }) {
     CAPTURE(t);
     REQUIRE(segs_of(g, t).len == 1);
@@ -624,8 +622,8 @@ TEST_CASE("split: containment climbs one step, or all the way, or gives up") {
   CHECK(!ancestor_or_self(c, w, z));
   CHECK(!ancestor_or_self(c, x, { INVALID }));
 
-  // X now claims to live inside its own grandchild's region, so the climb from
-  // Z runs Z, Y, X, Y, X and never reaches a root. The step cap ends it.
+  // X re-parented into its grandchild's region: the climb from Z cycles Z, Y, X, Y, X
+  // until the step cap ends it.
   c.states[x.v].parent = m_y;
   CHECK(ancestor_or_self(c, y, z));   // still found, inside the cap
   CHECK(!ancestor_or_self(c, w, z));  // W is unreachable, and the walk stops
@@ -648,7 +646,7 @@ TEST_CASE("split: each graph has its own serial and a label segment per transiti
   CHECK(g2.serial != 0);
   CHECK(g1.serial != g2.serial);
 
-  // The table answers what the walk computes on a graph without one.
+  // `trans_label` matches `label_segment` run on a copy with the table cleared.
   SplitGraph by_hand{ g1 };
   by_hand.trans_label.clear();
   REQUIRE(g1.trans_label.size() == c.transitions.size());

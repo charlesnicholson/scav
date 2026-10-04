@@ -1,6 +1,5 @@
-// Coordinate assignment against hand-written layered graphs: the type-1
-// marking on its own, one pass on its own with numbers worked by hand, then
-// the properties the balanced result has to keep.
+// Coordinate assignment tests on hand-written layered graphs: type-1 marking,
+// one pass worked by hand, and properties of the balanced result.
 
 #include "layout/coords.h"
 
@@ -12,8 +11,7 @@
 
 namespace scav {
 
-// The two steps `coords.cpp` brackets with SCAV_INTERNAL, declared here
-// rather than in a header so the shipping build keeps them internal.
+// Test-only declarations of the SCAV_INTERNAL functions in `coords.cpp`.
 std::vector<uint8_t> coords_mark_type1(CoordGraph const &g);
 std::vector<int64_t> coords_one_pass(CoordGraph const &g,
                                      std::vector<uint8_t> const &mark,
@@ -36,7 +34,7 @@ std::vector<int32_t> cross_coordinates(CoordGraph const &g) {
 constexpr int32_t EXT{ 100 };
 constexpr int32_t SEP{ 20 };
 
-// Uniform extents, so a hand-worked expectation is one separation value.
+// Every node `EXT` wide, separated by `SEP`.
 CoordGraph uniform(uint32_t nodes,
                    std::vector<std::vector<uint32_t>> layers,
                    std::vector<CoordGraph::Edge> edges) {
@@ -46,9 +44,8 @@ CoordGraph uniform(uint32_t nodes,
            .sep = SEP };
 }
 
-// The graph both type-1 tests use: a real edge crossing an inner segment
-// between the same two layers. 0 -> {1, 2}, the chain 1 -> 4 -> 5 is inner at
-// its first hop, and 2 -> 3 is the real segment that crosses it.
+// Shared by the type-1 tests: 0 -> {1, 2}; the chain 1 -> 4 -> 5 is inner at
+// its first hop, and the real segment 2 -> 3 crosses it.
 CoordGraph crossing_graph() {
   return uniform(6,
                  { { 0 }, { 1, 2 }, { 3, 4 }, { 5 } },
@@ -75,7 +72,7 @@ TEST_CASE("coords: an empty graph and an unplaced node") {
   std::vector<int32_t> const c{ cross_coordinates(g) };
   REQUIRE(c.size() == 2);
   CHECK(leading(g, c, 0) == 0);
-  CHECK(c[1] == 0);  // in no layer, so it never took part
+  CHECK(c[1] == 0);  // in no layer, left at zero
 }
 
 TEST_CASE("coords: one node sits at the origin") {
@@ -117,8 +114,8 @@ TEST_CASE("coords: marking is what keeps the inner segment straight") {
   };
   CHECK(marked[1] == marked[4]);
 
-  // Without the mark, the crossing segment wins the alignment and the chain
-  // bends by two separations instead.
+  // Unmarked, the crossing segment takes the alignment and the chain bends by two
+  // separations.
   std::vector<uint8_t> const none(g.edges.size(), 0);
   std::vector<int64_t> const unmarked{ coords_one_pass(g, none, false, false) };
   CHECK(unmarked[1] != unmarked[4]);
@@ -135,10 +132,8 @@ TEST_CASE("coords: a chain through three layers comes out straight") {
 }
 
 TEST_CASE("coords: an edge met off its ends' centres aligns where it meets them") {
-  // A port sits on a composite's border at the height of what it leads to,
-  // not at the composite's centre, so the segment into it is straight only
-  // when the point it meets each end at is one coordinate (11.10g). `2`
-  // follows `1` in its layer and keeps its separation from wherever `1` went.
+  // Edge 0 -> 1 meets its ends at offsets 10 and -230 and aligns those points.
+  // `2` follows `1` in its layer and keeps its separation from `1`.
   CoordGraph const g{ uniform(
       3,
       { { 0 }, { 1, 2 } },
@@ -156,11 +151,8 @@ TEST_CASE("coords: an edge met off its ends' centres aligns where it meets them"
 }
 
 TEST_CASE("coords: a weak edge anchors its lower end only where nothing else can") {
-  // An initial pseudostate is seated beside its target after alignment, so
-  // aligning the target onto it wastes the one alignment the target gets;
-  // its edge is weak (11.10g). `2` takes `1` over the weak median `0`; `3`,
-  // whose strong median `0` is taken by `2` below it, falls back to its weak
-  // one rather than to nothing.
+  // `2` aligns with strong `1` over weak `0`. In `blocked`, `3`'s strong median `0` is
+  // taken by `2`, so `3` aligns with its weak one, `1`.
   CoordGraph const g{ uniform(4,
                               { { 0, 1 }, { 2, 3 } },
                               { { .from = 0, .to = 2, .inner = 0, .weak = 1 },
@@ -182,8 +174,7 @@ TEST_CASE("coords: a weak edge anchors its lower end only where nothing else can
 }
 
 TEST_CASE("coords: adjacent nodes keep their separation, mixed extents") {
-  // A fan that forces every layer to hold several nodes at once, with extents
-  // chosen odd so the halving in the separation formula is exercised.
+  // Several nodes per layer, with odd and even extents.
   CoordGraph g;
   g.extent = { 41, 100, 7, 260, 33, 99, 15, 400 };
   g.layers = { { 0, 1, 2 }, { 3, 4 }, { 5, 6, 7 } };
@@ -208,9 +199,7 @@ TEST_CASE("coords: adjacent nodes keep their separation, mixed extents") {
 }
 
 TEST_CASE("coords: separation survives a graph with a long chain and a wide node") {
-  // The chain 1 -> 3 -> 5 is inner throughout and passes a node far wider
-  // than itself, which is the shape that would collide if balancing averaged
-  // the four passes per node without preserving the constraint.
+  // The chain 1 -> 3 -> 5 is inner throughout and sits beside node 2, 900 wide.
   CoordGraph g;
   g.extent = { 60, 8, 900, 8, 60, 8, 60 };
   g.layers = { { 0, 1 }, { 2, 3 }, { 4, 5 }, { 6 } };
