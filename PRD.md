@@ -680,6 +680,8 @@ struct BoxSpace {
   int32_t min_w;      // interior at least this wide
   int32_t h_before;   // interior height reserved before the submachine area
   int32_t h_after;    // ... after
+  int32_t w_before;   // interior width reserved before it, between the two height bands
+  int32_t w_after;    // ... after
 };
 
 // per transition
@@ -695,7 +697,7 @@ struct PathBox {          // 0..N per transition; layout slides these along the 
 **Domain, validated at `scav_layout_run` entry in every build** — Debug and Release must agree on which inputs are legal:
 
 ```
-0 <= min_w, h_before, h_after <= COORD_MAX / 4    // §11.2
+0 <= min_w, h_before, h_after, w_before, w_after <= COORD_MAX / 4    // §11.2
 0 <= PathBox.w, PathBox.h     <= COORD_MAX / 4
 0 <= PathClear.src, .dst      <= COORD_MAX / 4
 PathBox.order unique per subject
@@ -753,7 +755,9 @@ for (uint32_t i = 0; i < chart.states.size(); ++i) {
 }
 ```
 
-**`PathBox` is a slide constraint, not a label** — the one placement an app cannot do itself, since the route does not exist yet. **`h_before`/`h_after` is stacking order relative to the submachine area**, not a band taxonomy: two integers, not five names. **`Placed` may exceed the request**, so read back actual geometry; alignment inside it is the app's.
+**`PathBox` is a slide constraint, not a label** — the one placement an app cannot do itself, since the route does not exist yet. **The four bands are stacking order around the submachine area**, not a band taxonomy: four integers, not a list of named compartments. **`Placed` may exceed the request**, so read back actual geometry; alignment inside it is the app's.
+
+**Every band is an obstacle, because an app reserves room only for what it draws there.** Inside its state a band is a wall: no route enters it (`through_band`, §11.6), no label overlaps it (§11.9), and no port sits on the face it lines, so a route crossing into a headed composite enters through a side and never through the header (§11.5). As walls the side bands run the whole height between the other two, so two bands meeting at a corner leave no seam a route can slip along. A route may still *end* on a lined face: an arrow to the state itself touches its border and enters nothing. **An app that lines every face has asked for the impossible and gets a drawing anyway** — the port keeps its face, its route crosses the band, `through_band` counts it, and layout does not fail. `gauntlet_tests.cpp` lines all four faces of every composite in three charts and asserts exactly that. **[OWED]**: the router then draws that crossing as the straight-line fallback, a diagonal, where a square leg through the band would read better.
 
 **The reserved box and the drawn box need not be the same rect.** That resolves border-attached decoration with **no composite shapes and no attachment offsets**:
 
@@ -888,7 +892,7 @@ A long edge's weight **accumulates structurally, not in a scalar**: one port per
 
 Port order is a solver output (§11.3). Ties break on the port's stable key (§6), never on weight-insertion order.
 
-**Each segment end is one of three things, and the segment says which.** An end is a *port* on a crossed border, the endpoint state's *box* in this frame, or the endpoint state's *inner face* when that state encloses the frame and its border is not crossed (§11.14: an `internal` or `local` source, and every destination that encloses its source). `SplitSegment` carries the inner-face flag per end explicitly. Phase 1 places a boundary node for an inner-face end; phase 3 starts or ends the route at that node and emits no port slot, because no border was crossed. Phase 3 does not deduce the end kind from which node tables phase 1 happened to fill.
+**Each segment end is one of three things, and the segment says which.** An end is a *port* on a crossed border, the endpoint state's *box* in this frame, or the endpoint state's *inner face* when that state encloses the frame and its border is not crossed (§11.14: an `internal` or `local` source, and every destination that encloses its source). `SplitSegment` carries the inner-face flag per end explicitly. Phase 1 places a boundary node for an inner-face end; phase 3 starts or ends the route on the state's border level with that node, wherever no other region of the state lies between, and emits no port slot, because no border was crossed. Phase 3 does not deduce the end kind from which node tables phase 1 happened to fill. The route used to start at the node itself, `pad` inside the border, which drew an arrow out of nothing. **Every self-transition is one segment in its state's parent frame**: an external one is routed there, and an internal or local one is drawn in its state's loop room and never routed (§11.14).
 
 ### 11.2 Coordinates
 
@@ -963,9 +967,11 @@ Submachine size composition (Castelló et al., JGAA 6(3), 2002): **width = Σ ov
 Composite state box, from the requesting entity's `BoxSpace` (§8.1):
 
 ```
-w = max(min_w, packed_subs_w, kind_min_w) + 2*pad
-h = max(h_before + packed_subs_h + h_after, kind_min_h) + 2*pad
+w = max(min_w, w_before + max(packed_subs_w, loop_w) + w_after, kind_min_w) + 2*pad
+h = max(h_before + packed_subs_h + sep + loop_h + h_after, kind_min_h) + 2*pad
 ```
+
+`sep` is `sub_sep` where both the submachine area and the loop room are nonempty, else zero. **The loop room is where a state's internal self-transitions are drawn** (§11.14): one row per loop in transition order, right-aligned in the interior below the submachine area, each row the loop's label beside its far leg and at least a lane and a route clearance either side tall. It is sized from those transitions' `PathBox`es alone, so phase 3 and the scorer re-derive it from the space tables and no column carries it.
 
 `pad` and the per-`StateKind` `kind_min_w`/`kind_min_h` are profile fields (§11.15), never hardcoded. **`pad` is interior only** — the ring between a box's border and its contents, which is why it appears exactly twice per axis in the formula above and nowhere else.
 
@@ -1059,6 +1065,10 @@ The votes are then a digraph — an edge from one bundle to another for every pa
 
 **A route never leaves `region`**, which is what makes a per-frame obstacle set sound: every frame a decomposed transition passes through is owned by an ancestor of one of its endpoints (§11.1), so anything enclosing the region is excused by §11.14 and anything else is blocked or out of reach. Phase 3 sizes the region to the frame plus every point its nets touch — a port sits on the *crossed* box's border, outside this submachine by the owner's padding — plus the margin the router asks for, since a box flush against the frame's edge has no room for a lane otherwise. Obstacles are every live box overlapping it that does not enclose it, **outermost only**: a box contains its own descendants, so adding them blocks nothing and multiplies the grid by the subtree.
 
+**A state's bands are walls inside it** (§8.1). A frame adds the bands and loop room of every state on its owner's chain that overlap its region to its obstacles, so a route inside a headed composite goes round the header as it goes round a child, and nudging reads them as walls in both of its passes. **Ports keep off a lined face by construction rather than by price**: the facing pass never turns a port onto one and moves a port off one — to the other rank border, else to a cross border the joined state sees — and the search never offers one as a side move. Where every face is lined the port stays, `PortWalled` records it, and Tier 0 counts the crossing. `gauntlet/header.scav` and `gauntlet/mixed.scav` are the shapes, and the element suite heads every state of every element chart and asserts no route enters a band.
+
+**An outer self-loop is a net naming its state at both ends**, pinned to the face that state uses least among its ports and the box ends the separation rule gives it, the trailing face on a tie, which `LoopFaced` records. A sixth seating pass, after the separation, puts its two ends a line apart about the middle of the widest run of that face no other seat stands in, so the loop is never a member of another route's trunk; its corridor runs `2 * pad` out from each seat, clamped inside the region and off the enclosure's border. A face pin may move either end, so the search can draw it round a corner. It was a stub out of the trailing face with no way back, which read as a transition to nowhere.
+
 An anchor outside the region, an unreachable end, and a graph past the budget are three different failures and are reported as three: a degraded net is a straight line, and a straight line is what Tier 0 counts.
 
 **Clearance is a bumper, not a penalty.** Obstacles block against their rect grown by `clear`, so "no segment comes within `clear` of a box" is a property of the graph. Pricing the flush lane instead was built first and is worse: it needs a constant tuned against the bend penalty — going round a box costs two turns, so anything at or below two bends leaves hugging cheaper — and it can only ever be probably right, so a test asserts nothing stronger than "not on these inputs."
@@ -1107,7 +1117,7 @@ struct Cost {                 // compared lexicographically, in this order
 };
 ```
 
-**Tier 0 — forbidden, not priced.** Edge through a state box, submachine box, or placed box; box-box overlap. Structurally impossible via the obstacle set. The predicate survives as a net for three cases: the straight-line **surrogate** during search; **degenerate enclosure**, a net whose ends the obstacles seal apart even after §11.5's re-seat; and a marked violation with a stable code when the retries run out. Never a silent overlap. **`CostTerms` carries the net as eight counts and `t0_violations` is their sum**: `through_box`, a route segment entering the interior of a state box its transition is neither an endpoint of nor a descendant of (§11.14's carve-out); `box_overlap`, a pair of sibling state boxes sharing area; and **`vanished`, a transition with a segment to draw whose route came out as fewer than two points**. The third is forbidden rather than priced for a reason specific to a search: every Tier-2 term scores an undrawn route *perfect* — no bends, no length, no excess, no crowding — so a search that can reach one prefers it. Found on the element-invariants fixture once crowding was priced: five rank moves put a composite's child flush against its wall, and the composite's own transition into that child collapsed onto a single point on the child's face. No corpus chart reaches it, and refusing it moves no corpus geometry. The other three came from reading the page (§11.10g): **`flush`**, a route segment parallel to a state's border and nearer than the band a route keeps inside the state it is drawn in, which a reader cannot tell from the border; **`through_region`**, a segment entering a region neither end lies in; and **`retrace`**, a vertex where an axis-aligned segment turns straight back along the one before it, drawing one run twice. The last two are a label's (§11.9.3): **`label_over_box`**, a placed box over a state rect other than those enclosing both endpoints, where an endpoint enclosing the other end holds the box but for its text bands; and **`label_over_route`**, a placed box over a segment of another transition's route. The submachine box and the placed box are the obstacle set's alone — nothing re-checks them after the fact.
+**Tier 0 — forbidden, not priced.** Edge through a state box, submachine box, or placed box; box-box overlap. Structurally impossible via the obstacle set. The predicate survives as a net for three cases: the straight-line **surrogate** during search; **degenerate enclosure**, a net whose ends the obstacles seal apart even after §11.5's re-seat; and a marked violation with a stable code when the retries run out. Never a silent overlap. **`CostTerms` carries the net as nine counts and `t0_violations` is their sum**: `through_box`, a route segment entering the interior of a state box its transition is neither an endpoint of nor a descendant of (§11.14's carve-out); `through_band`, a segment entering a band of a state the carve-out lets it occupy, tested against the sealed walls of §11.5 so a route along the seam two bands share counts too (§8.1); `box_overlap`, a pair of sibling state boxes sharing area; and **`vanished`, a transition with a segment to draw whose route came out as fewer than two points**. The third is forbidden rather than priced for a reason specific to a search: every Tier-2 term scores an undrawn route *perfect* — no bends, no length, no excess, no crowding — so a search that can reach one prefers it. Found on the element-invariants fixture once crowding was priced: five rank moves put a composite's child flush against its wall, and the composite's own transition into that child collapsed onto a single point on the child's face. No corpus chart reaches it, and refusing it moves no corpus geometry. The other three came from reading the page (§11.10g): **`flush`**, a route segment parallel to a state's border and nearer than the band a route keeps inside the state it is drawn in, which a reader cannot tell from the border; **`through_region`**, a segment entering a region neither end lies in; and **`retrace`**, a vertex where an axis-aligned segment turns straight back along the one before it, drawing one run twice. The last two are a label's (§11.9.3): **`label_over_box`**, a placed box over a state rect other than those enclosing both endpoints, where an endpoint enclosing the other end holds the box but for its text bands; and **`label_over_route`**, a placed box over a segment of another transition's route. The submachine box and the placed box are the obstacle set's alone — nothing re-checks them after the fact.
 
 **Degenerate enclosure is answered by inflation, and only `unreachable` triggers it.** `layout_run` raises `rank_sep`, `node_sep` and `sub_sep` by `spacing_inflation_increment` on a copy of the caller's profile and re-runs phases 1–3, up to `spacing_inflation_cap` times, stopping at the first attempt with nothing unreachable and keeping the attempt that degraded least — ties to the earliest. `outside_region` is a disagreement between phase 3's plan and the region it handed the router, and `too_large` is a graph budget; neither moves with spacing, so neither retries. A copy the validator rejects ends the retries, as does a `size_layout` that leaves the domain, and the last geometry that succeeded stands. The digest hashes the caller's profile, never the copy, so a retry cannot move a golden.
 
@@ -1250,6 +1260,8 @@ This list *is* the layout output ABI — there is no bespoke result type (§16) 
 | `scav.geom.state` | `StateId` | box rect |
 | `scav.geom.state_before` | `StateId` | the rect `h_before` reserved (§8.1) |
 | `scav.geom.state_after` | `StateId` | the rect `h_after` reserved |
+| `scav.geom.state_lead` | `StateId` | the rect `w_before` reserved, between the two height bands |
+| `scav.geom.state_trail` | `StateId` | the rect `w_after` reserved |
 | `scav.geom.sub` | `SubmachineId` | submachine rect — needed for dividers and titles |
 | `scav.geom.route` | `TransId` | `Span` into `scav.geom.point` |
 | `scav.geom.point` | point ordinal | `{int32 x, y}` |
@@ -1941,13 +1953,15 @@ That also blocks §11.3's global sifting and edge-weight schedule and §11.4's c
 
 **`internal` does not imply a self-transition.** A transition from a composite state to one of its own descendants can be `internal` — libhsm's `Online --> online_idle : internal` is exactly this. So the rule is about the *source border*, not about `src == dst`.
 
+**And every transition is internal to its lowest common ancestor.** A route never crosses the border of the state holding both its ends; it is drawn inside it, through the ports of every state between. What differs between a transition inside one machine and one out of a machine is only the default: between two states of one machine a transition is `external` to each of them, while one leaving a machine is `internal` to the composite holding both ends. An internal self-transition is the case where that composite is the state itself, so it is drawn inside it like any other.
+
 **The mirror case: a destination that encloses its source.** `trans Idle -> On` from inside `On` exits every state between `Idle` and `On` and then has nowhere left to cross: `On`'s own border is not on the route. The arrow therefore **terminates on `On`'s inner face**, at the boundary node phase 1 placed for it, with no port slot, whatever the transition's kind. It does not end at `On`'s centre, and `On`'s border is never counted crossed. Found by review rather than by the corpus, which has no such transition: phase 3 was inferring the inner-face end from phase 1's tables and mistook the destination's boundary node for the source's, drawing the arrow from a point on `On`'s border to `On`'s centre and touching `Idle` nowhere. The fix is §11.1's explicit end kinds, pinned by unit tests on both routers. **[OWED]**: a corpus chart carrying the shape, so blind review and the goldens see it too.
 
 Consequences:
 
 - **Phase 0 (§11.1) suppresses the source-boundary split** for `internal` and `local`. One fewer segment, one fewer port. The derived boundary-crossing count (§7) must reflect this, or `w_excess_len`'s per-crossing multiplier (§11.6) miscounts.
 - **Tier 0 (§11.6) carve-out:** an edge may occupy the interior of a state whose border it does not cross, and **only** that state. Every other state and submachine rectangle remains an obstacle.
-- **Internal self-loops are the app's, end to end.** The app sums the band it needs into `h_before`/`h_after` and its builder draws the glyphs inside the returned `scav.geom.state_before`/`_after` rect. There is no route, so `PathBox`/`PathClear`/`min_len` do not apply and the router is not involved. Layout sees only two integers.
+- **Every transition is an arrow, and an internal or local self-transition is a loop inside its source.** It leaves the source's trailing border from inside, runs back to beside its label, and returns lower down with its head on the border: the external loop mirrored into the state. It is drawn in the source's loop room (§11.4), sized from its `PathBox`es, so it is never routed, nothing is routed round it, and its label sits beside its far leg inside the state and below the header. This section first gave it no route and the app a band for its label, which drew a line of text with no arrow, PlantUML's idiom, and read as a description rather than a transition. **[OWED]**: the loop's legs leave the same face an outside route may be seated on, and nothing keeps that seat off them.
 - **The reference builder distinguishes the three kinds**, pinned in the `drawlist/` golden. scav cannot mandate what a custom builder draws (§2, §3).
 
 ### 11.15 The profile
@@ -1986,7 +2000,7 @@ Named profiles ship as data: `compact`, `readable`. There is no `print` profile 
 
 **Which makes `pins` an input to `layout_run` and not only an output.** §11.10a already says a drawing is a function of its tuple and its pins, and `RankPin` is public so a caller can re-derive one; until now no argument let it. `taken` becomes what the drawing rests on rather than what the run added, so a run handed pins and given no budget reports the pins it was handed. The property this buys is testable and tested: **every corpus chart but `bottler`, `mill`, `tcp` and `toolchanger` gives the same structural and coordinate hash traced as untraced**, which is the only thing that makes a trace worth reading.
 
-**The event set is the decisions that determine a route's shape**, which is what the class above needs and no more: rank assigned, rank pinned, edge reversed by cycle-breaking, edge chained through a bend and at what rank, node placed, spacing inflated, net planned with its waypoint count, each waypoint, a seat moved by each of §11.5's five seating passes, a lane assigned by nudging, a route degraded to a straight line, and a candidate scored. Phases grow their own events as they grow questions; the union is internal, so adding one is not an ABI change.
+**The event set is the decisions that determine a route's shape**, which is what the class above needs and no more: rank assigned, rank pinned, edge reversed by cycle-breaking, edge chained through a bend and at what rank, node placed, spacing inflated, net planned with its waypoint count, each waypoint, a seat moved by each of §11.5's six seating passes, a lane assigned by nudging, a route degraded to a straight line, a port left on a lined face, the face an outer self-loop took, and a candidate scored. Phases grow their own events as they grow questions; the union is internal, so adding one is not an ABI change.
 
 **Public surface is one function and the union is not in it.** `layout_trace_json` runs one row with a sink attached and hands back the events as text, which is what `scav dump --trace` prints. Tests link the testable target, include `trace.h`, and assert on typed events rather than on parsed text — a trace nothing asserts on rots.
 
@@ -2046,6 +2060,8 @@ A backend either **orders by `(depth, emission_index)`** for painter's algorithm
 builder:  (model columns, incl. geometry) -> DrawList     // app's; scav ships a reference one
 backend:  DrawList -> ImGui calls | SVG text | PDF | ...  // app's; scav ships SVG + ImGui
 ```
+
+**The reference builder draws a PlantUML-style header.** A rounded state's name is centred at the top of its `before` band; a state with a description — its `label` — or a live region draws a rule border to border under the name, and the description below it. The measurement pass reserves exactly that `h_before` through one helper both sides call, so the header is a band and therefore a wall (§8.1): no port sits on a headed state's top face and no route crosses its header.
 
 **The application owns the builder and the render function.** How it organizes them — one function, a list of passes, a class hierarchy — is its business and not scav's concern. A builder that also draws threat radii, a timeline, or annotations linking distant states needs no scav change, because it has the whole model and all the geometry.
 

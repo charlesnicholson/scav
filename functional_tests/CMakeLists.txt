@@ -45,6 +45,7 @@ set(scav_corpus_charts
   "${PROJECT_SOURCE_DIR}/test_data/charts/brew.scav"
   "${PROJECT_SOURCE_DIR}/test_data/charts/dock.scav"
   "${PROJECT_SOURCE_DIR}/test_data/charts/estop.scav"
+  "${PROJECT_SOURCE_DIR}/test_data/charts/kiln.scav"
   "${PROJECT_SOURCE_DIR}/test_data/charts/led.scav"
   "${PROJECT_SOURCE_DIR}/test_data/charts/mill.scav"
   "${PROJECT_SOURCE_DIR}/test_data/charts/ota.scav"

@@ -34,7 +34,10 @@ namespace {
 
 // An inner-face end on its frame's edge, moved square out to the border of the state
 // owning the frame where no other region of that state lies between.
-scav_point on_owner_border(Chart const &c, SizedLayout const &z, uint32_t frame, scav_point at) {
+scav_point on_owner_border(Chart const &c,
+                           SizedLayout const &z,
+                           uint32_t frame,
+                           scav_point at) {
   if (frame >= c.submachines.size()) { return at; }
   uint32_t const owner{ c.submachines[frame].owner.v };
   if (owner >= z.state.size()) { return at; }
@@ -59,7 +62,9 @@ scav_point on_owner_border(Chart const &c, SizedLayout const &z, uint32_t frame,
   Span const subs{ c.states[owner].submachines };
   for (uint32_t k = 0; k < subs.len; ++k) {
     uint32_t const m{ c.submachine_ids[subs.off + k].v };
-    if ((m != frame) && (c.submachines[m].live != 0) && overlaps(leg, z.sub[m])) { return at; }
+    if ((m != frame) && (c.submachines[m].live != 0) && overlaps(leg, z.sub[m])) {
+      return at;
+    }
   }
   return out;
 }
@@ -87,8 +92,7 @@ struct Planned {
   scav_point src, dst;
   uint32_t src_state, dst_state;  // -> states, INVALID unless the end is a box centre
   uint32_t seg;                   // -> SplitGraph::segments, for its bend chain
-  uint32_t face;  // both ends' face where no pin names one; INVALID for the router's rule
-  int32_t loop;   // `RouteNet::loop`
+  int32_t loop;                   // `RouteNet::loop`
 };
 
 // One frame's answer, written by the shard that owns the frame and read back
@@ -137,8 +141,7 @@ bool same_but_shifted(RouteFrameCache const &a,
     if ((p.src_obstacle != q.src_obstacle) || (p.dst_obstacle != q.dst_obstacle) ||
         (p.waypoint_off != q.waypoint_off) || (p.waypoint_len != q.waypoint_len) ||
         (p.src_face != q.src_face) || (p.dst_face != q.dst_face) || (p.lean != q.lean) ||
-        (p.loop != q.loop) ||
-        !moved_pt(p.src, q.src) || !moved_pt(p.dst, q.dst)) {
+        (p.loop != q.loop) || !moved_pt(p.src, q.src) || !moved_pt(p.dst, q.dst)) {
       return false;
     }
   }
@@ -180,7 +183,6 @@ struct CallScratch {
   std::vector<Span> trans_nets;
   std::vector<scav_extent> loop_label;
   std::vector<scav_rect> loop_row;
-  std::vector<uint32_t> face_use;  // per state and face, the ends seated there
   std::vector<scav_point> loop_points;
   std::vector<scav_span> loop_span;  // per transition, its inner loop in `loop_points`
   std::vector<std::vector<uint32_t>> by_frame;
@@ -425,10 +427,9 @@ void route_transitions(Routes &out,
       vec_push_back(loop_points, { .x = x, .y = ya + lane });
       vec_push_back(loop_points, { .x = right, .y = ya + lane });
     } else if (tr.src == tr.dst) {
-      // Out of the trailing face and back: both ends name the state, so the router
-      // seats them apart like any departure and arrival sharing a face.
+      // Out of a face and back: both ends name the state, so the router seats
+      // them on the face it uses least, apart from every other seat there.
       uint32_t const frame{ g.segments[segs.off].frame.v };
-      bool const down{ (frame < o.sub_down.size()) && (o.sub_down[frame] != 0) };
       scav_point const mid{ centre(z.state[tr.src.v]) };
       vec_push_back(planned,
                     { .frame = frame,
@@ -437,7 +438,6 @@ void route_transitions(Routes &out,
                       .src_state = tr.src.v,
                       .dst_state = tr.src.v,
                       .seg = segs.off,
-                      .face = down ? 3U : 1U,
                       .loop = 2 * p.pad });
     } else {
       // An endpoint that encloses its end of the route is met on that state's
@@ -445,8 +445,10 @@ void route_transitions(Routes &out,
       // Nothing is crossed there, so the end names no obstacle and no slot.
       uint32_t const head{ o.seg_node[segs.off] };
       bool const head_inner{ (g.segments[segs.off].src_inner != 0) && (head != INVALID) };
-      scav_point at{ head_inner ? on_owner_border(c, z, g.segments[segs.off].frame.v, z.node[head])
-                                : centre(z.state[tr.src.v]) };
+      scav_point at{
+        head_inner ? on_owner_border(c, z, g.segments[segs.off].frame.v, z.node[head])
+                   : centre(z.state[tr.src.v])
+      };
       uint32_t at_state{ head_inner ? INVALID : tr.src.v };
       for (uint32_t k = 0; k < segs.len; ++k) {
         uint32_t const seg{ segs.off + k };
@@ -483,7 +485,6 @@ void route_transitions(Routes &out,
                         .src_state = at_state,
                         .dst_state = end_state,
                         .seg = seg,
-                        .face = INVALID,
                         .loop = 0 });
         at = end;
         at_state = end_state;
@@ -493,46 +494,6 @@ void route_transitions(Routes &out,
         make_span(first_net, static_cast<uint32_t>(planned.size()) - first_net);
     out.port[t] = { .off = first_slot,
                     .len = static_cast<uint32_t>(out.slots.size()) - first_slot };
-  }
-
-  // An outer loop takes its state's least-used face, the trailing one first: a port's
-  // side, and the face an end naming the state leaves by under the separation rule.
-  std::vector<uint32_t> &face_use{ cs.face_use };
-  vec_assign(face_use, size_t{ 4 } * c.states.size(), 0);
-  for (uint32_t t = 0; t < n; ++t) {
-    for (uint32_t k = 0; k < out.port[t].len; ++k) {
-      scav_port_slot const &slot{ out.slots[out.port[t].off + k] };
-      uint32_t const port{ g.segments[g.trans_segments[t].off + k].dst_port };
-      if ((port < g.ports.size()) && (g.ports[port].state.v < c.states.size())) {
-        ++face_use[(size_t{ 4 } * g.ports[port].state.v) + slot.side];
-      }
-    }
-  }
-  for (Planned const &pn : planned) {
-    if (pn.loop > 0) { continue; }
-    for (uint32_t end = 0; end < 2; ++end) {
-      uint32_t const st{ (end == 0) ? pn.src_state : pn.dst_state };
-      if (st >= c.states.size()) { continue; }
-      std::vector<uint32_t> const &bends{ seg_bends[pn.seg] };
-      scav_point aim{ (end == 0) ? pn.dst : pn.src };
-      if (!bends.empty()) { aim = z.node[(end == 0) ? bends.front() : bends.back()]; }
-      scav_rect const &r{ z.state[st] };
-      Wide const dx{ imax(imax(Wide{ r.x } - aim.x, Wide{ aim.x } - (Wide{ r.x } + r.w)), Wide{ 0 }) };
-      Wide const dy{ imax(imax(Wide{ r.y } - aim.y, Wide{ aim.y } - (Wide{ r.y } + r.h)), Wide{ 0 }) };
-      scav_point const mid{ centre(r) };
-      uint32_t const face{ (dx >= dy) ? ((aim.x < mid.x) ? 0U : 1U) : ((aim.y < mid.y) ? 2U : 3U) };
-      ++face_use[(size_t{ 4 } * st) + face];
-    }
-  }
-  for (Planned &pn : planned) {
-    if (pn.loop <= 0) { continue; }
-    bool const down{ pn.face == 3U };
-    std::array<uint32_t, 4> const order{ down ? std::array<uint32_t, 4>{ 3, 1, 0, 2 }
-                                              : std::array<uint32_t, 4>{ 1, 2, 3, 0 } };
-    uint32_t const *use{ face_use.data() + (size_t{ 4 } * pn.src_state) };
-    for (uint32_t const face : order) {
-      if (use[face] < use[pn.face]) { pn.face = face; }
-    }
   }
 
   // One batch per frame, in submachine order. A frame's nets keep the order
@@ -689,13 +650,10 @@ void route_transitions(Routes &out,
       for (uint32_t const bend : seg_bends[pn.seg]) {
         vec_push_back(in.waypoints, z.node[bend]);
       }
-
       net.waypoint_len = static_cast<uint32_t>(in.waypoints.size()) - net.waypoint_off;
-      net.src_face = pn.face;
-      net.dst_face = pn.face;
       if (!faces[0].empty()) {
-        net.src_face = (faces[0][pn.seg] != INVALID) ? faces[0][pn.seg] : pn.face;
-        net.dst_face = (faces[1][pn.seg] != INVALID) ? faces[1][pn.seg] : pn.face;
+        net.src_face = faces[0][pn.seg];
+        net.dst_face = faces[1][pn.seg];
       }
       net.loop = pn.loop;
       if (pn.seg < z.lean.size()) { net.lean = z.lean[pn.seg]; }
@@ -712,12 +670,13 @@ void route_transitions(Routes &out,
         trace_emit({ .kind = TraceKind::NetWaypoint, .point = { .x = at.x, .y = at.y } });
       }
       vec_push_back(in.nets, net);
-      if (fill != nullptr) {
-        auto const at{ static_cast<uint32_t>(in.nets.size() - 1) };
-        for (uint32_t end = 0; end < 2; ++end) {
-          fill->faceable[(size_t{ 2 } * pn.seg) + end] =
-              static_cast<uint8_t>(router.effective_faces(in, at, end));
-        }
+    }
+    // Asked once every net is in: a loop's face is read off the frame's other ends.
+    for (uint32_t k = 0; (fill != nullptr) && (k < by_frame[m].size()); ++k) {
+      uint32_t const seg{ planned[by_frame[m][k]].seg };
+      for (uint32_t end = 0; end < 2; ++end) {
+        fill->faceable[(size_t{ 2 } * seg) + end] =
+            static_cast<uint8_t>(router.effective_faces(in, k, end));
       }
     }
     scav_rect const frame{ (owner.v == INVALID) ? region : z.state[owner.v] };

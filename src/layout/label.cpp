@@ -988,7 +988,8 @@ uint32_t place_labels_from(Chart const &c,
   for (uint32_t const i : queue) {
     scav_path_box const &box{ s.path_box[i] };
     scav_span const r{ (box.subject < route.size()) ? route[box.subject] : scav_span{} };
-    bool const looped{ (box.subject < c.transitions.size()) && inner_loop(c, box.subject) };
+    bool const looped{ (box.subject < c.transitions.size()) &&
+                       inner_loop(c, box.subject) };
     if (box.subject != prior_subject) {
       prior_subject = box.subject;
       chained = false;
@@ -1097,10 +1098,9 @@ uint32_t place_labels_from(Chart const &c,
           // A state enclosing both endpoints holds the label legitimately; the
           // bands it reserved for its own text do not.
           if (encloses[st] != 0) {
-            for (std::vector<scav_rect> const *band : { &z.before, &z.after, &z.lead,
-                                                       &z.trail, &z.loop }) {
-              if ((st < band->size()) && overlaps(region, (*band)[st])) {
-                vec_push_back(l.walls, local_rect((*band)[st]));
+            for (scav_rect const &band : state_walls(z, st)) {
+              if ((band.w > 0) && (band.h > 0) && overlaps(region, band)) {
+                vec_push_back(l.walls, local_rect(band));
               }
             }
           } else if (overlaps(region, z.state[st])) {

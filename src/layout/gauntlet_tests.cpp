@@ -61,12 +61,12 @@ scav_profile compact() {
 // Every chart in test_data/charts/gauntlet, named so a failure says which shape
 // broke rather than which index did.
 constexpr std::array GAUNTLET{
-  "above.scav", "carried.scav", "chain.scav", "corner.scav", "crossing.scav",
-  "crowd.scav", "enclosing.scav", "entered.scav", "fanin.scav", "folded.scav",
-  "fork.scav", "header.scav", "inloop.scav", "lane.scav", "level.scav",
-  "long.scav", "loop.scav", "marks.scav", "mixed.scav", "mutual.scav",
-  "ported.scav", "pulled.scav", "regions.scav", "roundtrip.scav", "seated.scav",
-  "stretch.scav", "through.scav", "tight.scav", "transit.scav", "under.scav",
+  "above.scav",   "carried.scav",   "chain.scav",   "corner.scav",    "crossing.scav",
+  "crowd.scav",   "enclosing.scav", "entered.scav", "fanin.scav",     "folded.scav",
+  "fork.scav",    "header.scav",    "inloop.scav",  "lane.scav",      "level.scav",
+  "long.scav",    "loop.scav",      "marks.scav",   "mixed.scav",     "mutual.scav",
+  "ported.scav",  "pulled.scav",    "regions.scav", "roundtrip.scav", "seated.scav",
+  "stretch.scav", "through.scav",   "tight.scav",   "transit.scav",   "under.scav",
   "unfolded.scav"
 };
 
@@ -1599,7 +1599,8 @@ TEST_CASE("gauntlet: a state walled on every face is still drawn, and pays for t
       REQUIRE(routes.v != INVALID);
       for (uint32_t t = 0; t < c.transitions.size(); ++t) {
         scav_span route{};
-        std::memcpy(&route, column_data(c, routes) + (size_t{ t } * sizeof(scav_span)),
+        std::memcpy(&route,
+                    column_data(c, routes) + (size_t{ t } * sizeof(scav_span)),
                     sizeof(scav_span));
         CAPTURE(t);
         CHECK(route.len >= 2);
@@ -1651,8 +1652,8 @@ TEST_CASE("gauntlet: an internal loop stays inside its state, under its header")
     }
     for (uint32_t t = 0; t < probe.transitions.size(); ++t) {
       if (probe.transitions[t].label.len == 0) { continue; }
-      boxes.push_back({ .subject = t, .w = 4 * p.font_size_grid, .h = p.font_size_grid,
-                        .order = 0 });
+      boxes.push_back(
+          { .subject = t, .w = 4 * p.font_size_grid, .h = p.font_size_grid, .order = 0 });
     }
     scav_spaces s{ spaces_of(rows) };
     s.path_box = boxes.data();
@@ -1680,7 +1681,9 @@ TEST_CASE("gauntlet: an internal loop stays inside its state, under its header")
       }
       for (uint32_t st = 0; st < l.c.states.size(); ++st) {
         if ((st == tr.src.v) || !ancestor(l.c, tr.src, { st })) { continue; }
-        for (uint32_t k = 0; k < 3; ++k) { CHECK_FALSE(enters(pt[k], pt[k + 1], l.z.state[st])); }
+        for (uint32_t k = 0; k < 3; ++k) {
+          CHECK_FALSE(enters(pt[k], pt[k + 1], l.z.state[st]));
+        }
       }
       for (uint32_t i = 0; i < boxes.size(); ++i) {
         if (boxes[i].subject != t) { continue; }

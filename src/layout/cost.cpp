@@ -822,8 +822,7 @@ void seen_reset(Seen &seen, size_t n) {
 
 int32_t tier0_of(CostTerms const &t) {
   return t.through_box + t.through_band + t.box_overlap + t.vanished + t.flush +
-         t.through_region +
-         t.retrace + t.label_over_box + t.label_over_route;
+         t.through_region + t.retrace + t.label_over_box + t.label_over_route;
 }
 
 }  // namespace
@@ -1188,14 +1187,20 @@ CostTerms cost_terms(CostContext const &ctx,
           blame(party, subject, INVALID);
         }
       });
-      if ((host != INVALID) && (c.states[host].live != 0) &&
-          (overlaps(box, z.before[host]) || overlaps(box, z.after[host]))) {
+      auto const banded = [&](uint32_t st) {
+        std::array<scav_rect, 5> const walls{ state_walls(z, st) };
+        for (uint32_t k = 0; k < 4; ++k) {
+          scav_rect const &w{ walls[k] };
+          if ((w.w > 0) && (w.h > 0) && overlaps(box, w)) { return true; }
+        }
+        return false;
+      };
+      if ((host != INVALID) && (c.states[host].live != 0) && banded(host)) {
         ++t.label_over_box;
         blame(party, subject, INVALID);
       }
       for (uint32_t const st : common) {
-        if ((c.states[st].live != 0) &&
-            (overlaps(box, z.before[st]) || overlaps(box, z.after[st]))) {
+        if ((c.states[st].live != 0) && banded(st)) {
           ++t.label;
           blame(party, subject, INVALID);
         }

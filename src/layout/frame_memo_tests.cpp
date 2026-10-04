@@ -882,11 +882,12 @@ TEST_CASE("order reuse: every frame a search takes is the frame ordering it give
 TEST_CASE("order reuse: every corpus and gauntlet chart at both scales" *
           doctest::skip()) {
   ReuseGuard const guard;
-  constexpr std::array<char const *, 39> ALL{ "axis.scav",
+  constexpr std::array<char const *, 40> ALL{ "axis.scav",
                                               "bottler.scav",
                                               "brew.scav",
                                               "dock.scav",
                                               "estop.scav",
+                                              "kiln.scav",
                                               "led.scav",
                                               "mill.scav",
                                               "ota.scav",
@@ -1090,11 +1091,12 @@ TEST_CASE("size reuse: a comparison that leaves out the owner's ratio is caught"
 
 TEST_CASE("size reuse: every corpus and gauntlet chart at both scales" * doctest::skip()) {
   SizeReuseGuard const guard;
-  constexpr std::array<char const *, 39> ALL{ "axis.scav",
+  constexpr std::array<char const *, 40> ALL{ "axis.scav",
                                               "bottler.scav",
                                               "brew.scav",
                                               "dock.scav",
                                               "estop.scav",
+                                              "kiln.scav",
                                               "led.scav",
                                               "mill.scav",
                                               "ota.scav",

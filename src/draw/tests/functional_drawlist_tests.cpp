@@ -37,9 +37,9 @@ namespace {
 using namespace scav;
 
 // The corpus, in the order the layout golden lists it.
-constexpr std::array<char const *, 11> CORPUS{
-  "axis.scav", "bottler.scav", "brew.scav", "dock.scav",        "estop.scav", "led.scav",
-  "mill.scav", "ota.scav",     "tcp.scav",  "toolchanger.scav", "vac.scav"
+constexpr std::array<char const *, 12> CORPUS{
+  "axis.scav", "bottler.scav", "brew.scav", "dock.scav", "estop.scav",       "kiln.scav",
+  "led.scav",  "mill.scav",    "ota.scav",  "tcp.scav",  "toolchanger.scav", "vac.scav"
 };
 
 Metrics bundled() {
@@ -467,7 +467,7 @@ TEST_CASE("drawlist corpus: the strips the labels landed on, and what fell back"
   // Every box the corpus places, without exception: the anchor is a
   // property of the model rather than of the charts it ran on.
   CHECK(anchored == boxes);
-  if (!scav::test::corpus_skipped("mill.scav")) { CHECK(boxes == 192); }
+  if (!scav::test::corpus_skipped("mill.scav")) { CHECK(boxes == 223); }
   // 16 at P9c, then 7 when the placer stopped sitting on state boxes and the
   // fold stopped discarding a label's charged rank gap, then 12 when the
   // exemption narrowed to states enclosing *both* ends, and **18 under

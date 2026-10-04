@@ -2236,7 +2236,8 @@ void Sizer::size_state(uint32_t i) {
   int32_t const min_h{ lies ? p.kind_min_w[kind] : p.kind_min_h[kind] };
   Wide const ring{ bare(b, i) ? Wide{ 0 } : (2 * static_cast<Wide>(p.pad)) };
   scav_extent const room{ room_of(i) };
-  Wide const centre{ Wide{ b.w_before } + imax(Wide{ packed.w }, Wide{ room.w }) + b.w_after };
+  Wide const centre{ Wide{ b.w_before } + imax(Wide{ packed.w }, Wide{ room.w }) +
+                     b.w_after };
   Wide const body{ Wide{ packed.h } + room.h +
                    (((packed.h > 0) && (room.h > 0)) ? p.sub_sep : 0) };
   Wide const w{ imax(imax(Wide{ b.min_w }, centre), Wide{ min_w }) + ring };
@@ -2690,14 +2691,14 @@ bool size_pass(Chart const &c,
       for (uint32_t u = 0; u < subs.len; ++u) {
         uint32_t const m{ c.submachine_ids[subs.off + u].v };
         if (c.submachines[m].live == 0) { continue; }
-        vec_push_back(work,
-                      { .sub = m,
-                        .x = ix + b.w_before + sub_local[m].x,
-                        .y = sy + sub_local[m].y });
+        vec_push_back(
+            work,
+            { .sub = m, .x = ix + b.w_before + sub_local[m].x, .y = sy + sub_local[m].y });
         packed_h = imax(packed_h, sub_local[m].y + out.sub[m].h);
       }
       scav_extent const room{ x.room_of(i) };
-      int32_t const room_y{ sy + packed_h + (((packed_h > 0) && (room.h > 0)) ? p.sub_sep : 0) };
+      int32_t const room_y{ sy + packed_h +
+                            (((packed_h > 0) && (room.h > 0)) ? p.sub_sep : 0) };
       int32_t const body{ (room.h > 0) ? ((room_y + room.h) - sy) : packed_h };
       int32_t const centre_end{ (ix + iw) - b.w_after };
       out.loop[i] = { .x = centre_end - room.w, .y = room_y, .w = room.w, .h = room.h };
@@ -2815,9 +2816,9 @@ bool same_rows(std::vector<T> const &a, std::vector<T> const &b) {
 bool same_sized(SizedLayout const &a, SizedLayout const &b) {
   return same_rows(a.state, b.state) && same_rows(a.before, b.before) &&
          same_rows(a.after, b.after) && same_rows(a.lead, b.lead) &&
-         same_rows(a.trail, b.trail) && same_rows(a.loop, b.loop) && same_rows(a.sub, b.sub) &&
-         same_rows(a.node, b.node) && same_rows(a.lean, b.lean) &&
-         same_rows(a.folded, b.folded) &&
+         same_rows(a.trail, b.trail) && same_rows(a.loop, b.loop) &&
+         same_rows(a.sub, b.sub) && same_rows(a.node, b.node) &&
+         same_rows(a.lean, b.lean) && same_rows(a.folded, b.folded) &&
          (std::memcmp(&a.chart, &b.chart, sizeof(scav_rect)) == 0);
 }
 #endif
@@ -2861,7 +2862,8 @@ int32_t loop_lane(scav_profile const &p) {
 }
 
 LoopRow loop_row(scav_profile const &p, scav_extent label) {
-  int32_t const legs{ loop_lane(p) + (2 * route_clearance(p)) };  // a clearance off each edge
+  int32_t const legs{ loop_lane(p) +
+                      (2 * route_clearance(p)) };  // a clearance off each edge
   return { .label_w = label.w, .label_h = label.h, .h = imax(label.h, legs) };
 }
 
@@ -2882,7 +2884,8 @@ void loop_rooms(Chart const &c,
     if (!inner_loop(c, t)) { continue; }
     LoopRow const row{ loop_row(p, label[t]) };
     scav_extent &r{ room[c.transitions[t].src.v] };
-    int32_t const w{ ((row.label_w > 0) ? (row.label_w + loop_gap(p)) : 0) + loop_reach(p) };
+    int32_t const w{ ((row.label_w > 0) ? (row.label_w + loop_gap(p)) : 0) +
+                     loop_reach(p) };
     r.w = imax(r.w, w);
     r.h = saturate(Wide{ r.h } + row.h);
   }

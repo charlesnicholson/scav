@@ -2366,8 +2366,12 @@ CostTerms terms(Chart const &c,
     }
     for (uint32_t st = 0; st < c.states.size(); ++st) {
       if (c.states[st].live == 0) { continue; }
-      bool const bands{ overlaps(r.placed[i], z.before[st]) ||
-                        overlaps(r.placed[i], z.after[st]) };
+      // A band with no extent is no band.
+      auto const wall = [&](std::vector<scav_rect> const &v) {
+        return (st < v.size()) && (v[st].w > 0) && (v[st].h > 0) &&
+               overlaps(r.placed[i], v[st]);
+      };
+      bool const bands{ wall(z.before) || wall(z.after) || wall(z.lead) || wall(z.trail) };
       if (st == host) {
         if (bands) { ++t.label_over_box; }
       } else if (encloses[st] == 2) {

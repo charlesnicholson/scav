@@ -724,7 +724,10 @@ void ortho_seat_loops(std::vector<RouteNet> const &nets,
     bool const ends_lo{ best_lo == lo };
     bool const ends_hi{ best_hi == hi };
     int32_t const room{ best_hi - best_lo };
-    int32_t const apart{ imin(pitch, room / ((ends_lo && ends_hi) ? 1 : (ends_lo || ends_hi) ? 2 : 3)) };
+    int32_t const apart{ imin(pitch,
+                              room / ((ends_lo && ends_hi)   ? 1
+                                      : (ends_lo || ends_hi) ? 2
+                                                             : 3)) };
     int32_t const mid{ best_lo + (room / 2) };
     int32_t &first{ along_y ? at[2 * n].y : at[2 * n].x };
     int32_t &second{ along_y ? at[(2 * n) + 1].y : at[(2 * n) + 1].x };
@@ -1245,6 +1248,47 @@ scav_point seat_of(RouteInput const &in,
   return ortho_attach_box(aim, in.obstacles[box], clear, glyph, arc);
 }
 
+// The face of its box a loop's ends take unless one is named: the one fewest other
+// ends meet, by the rule that seats them, trailing first and then round.
+uint32_t loop_face(RouteInput const &in, uint32_t n, int32_t clear) {
+  RouteNet const &net{ in.nets[n] };
+  uint32_t const b{ net.src_obstacle };
+  if (b >= in.obstacles.size()) { return INVALID; }
+  scav_rect const &r{ in.obstacles[b] };
+  std::array<uint32_t, 4> use{};
+  for (uint32_t m = 0; m < in.nets.size(); ++m) {
+    RouteNet const &other{ in.nets[m] };
+    for (uint32_t end = 0; (m != n) && (end < 2); ++end) {
+      uint32_t const named{ (end == 0) ? other.src_obstacle : other.dst_obstacle };
+      uint32_t const pinned{ (end == 0) ? other.src_face : other.dst_face };
+      uint32_t face{ INVALID };
+      if (named == b) {
+        if ((other.loop > 0) && (pinned >= 4)) { continue; }
+        face = face_of(seat_of(in, other, end, pinned, clear), r);
+      } else if (named >= in.obstacles.size()) {
+        face = face_of((end == 0) ? other.src : other.dst, r);
+      }
+      if (face < 4) { ++use[face]; }
+    }
+  }
+  uint32_t best{ 1 };
+  for (uint32_t const face : { 3U, 2U, 0U }) {
+    if (use[face] < use[best]) { best = face; }
+  }
+  return best;
+}
+
+// `seat_of` for one of `in.nets`, a loop's unnamed face its own rule's.
+scav_point seat_at(RouteInput const &in,
+                   uint32_t n,
+                   uint32_t end,
+                   uint32_t face,
+                   int32_t clear) {
+  RouteNet const &net{ in.nets[n] };
+  if ((face >= 4) && (net.loop > 0)) { face = loop_face(in, n, clear); }
+  return seat_of(in, net, end, face, clear);
+}
+
 }  // namespace
 
 uint32_t OrthogonalRouter::effective_faces(RouteInput const &in,
@@ -1255,7 +1299,7 @@ uint32_t OrthogonalRouter::effective_faces(RouteInput const &in,
     return 0;
   }
   int32_t const clear{ ortho_clearance(in.profile) };
-  scav_point const ruled{ seat_of(in, nt, end, INVALID, clear) };
+  scav_point const ruled{ seat_at(in, net, end, INVALID, clear) };
   uint32_t out{ 0 };
   for (uint32_t face = 0; face < 4; ++face) {
     if (!same(seat_of(in, nt, end, face, clear), ruled)) { out |= 1U << face; }
@@ -1385,8 +1429,17 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
     uint32_t const src_slot{ 2 * n };
     toward[src_slot] = aim_of(in, net, 0);
     toward[src_slot + 1] = aim_of(in, net, 1);
-    seat[src_slot] = seat_of(in, net, 0, net.src_face, clear);
-    seat[src_slot + 1] = seat_of(in, net, 1, net.dst_face, clear);
+    seat[src_slot] = seat_at(in, n, 0, net.src_face, clear);
+    seat[src_slot + 1] = seat_at(in, n, 1, net.dst_face, clear);
+    if ((net.loop > 0) && (net.src_face >= 4) &&
+        (net.src_obstacle < in.obstacles.size())) {
+      trace_emit(
+          { .kind = TraceKind::LoopFaced,
+            .port = { .seg = INVALID,
+                      .trans = INVALID,
+                      .leg = n,
+                      .side = face_of(seat[src_slot], in.obstacles[net.src_obstacle]) } });
+    }
   }
   // Diffed at the call site rather than emitted inside each pass: what a reader
   // wants is which pass moved a seat, and only here sees all five (11.16).

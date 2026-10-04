@@ -20,7 +20,8 @@ namespace scav { void layout_test_no_search(bool on); }  // namespace scav
 
 namespace scav::test {
 
-// Whether the corpus is brew, dock, estop and led: every tier but SCAV_TEST_TIER=full.
+// Whether the corpus is brew, dock, estop, kiln and led: every tier but
+// SCAV_TEST_TIER=full.
 inline bool corpus_light() {
   char const *const tier{ std::getenv("SCAV_TEST_TIER") };
   return (tier == nullptr) || (std::string_view{ tier } != "full");
@@ -32,7 +33,7 @@ inline bool corpus_skipped(std::string_view chart) {
   bool const corpus{ chart.ends_with(".scav") &&
                      (chart.find('/') == std::string_view::npos) };
   return light && corpus && (chart != "brew.scav") && (chart != "dock.scav") &&
-         (chart != "estop.scav") && (chart != "led.scav");
+         (chart != "estop.scav") && (chart != "kiln.scav") && (chart != "led.scav");
 }
 
 // `golden` less every line naming a skipped chart as one of its words.

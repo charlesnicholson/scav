@@ -12,7 +12,7 @@ type Arg = str | Path
 PATHS: frozenset[str] = frozenset({"repo_root", "build_dir", "scratch_dir"})
 TRUTHY: frozenset[str] = frozenset({"ON", "1", "TRUE", "YES"})
 HEAVY_CHARTS: frozenset[str] = frozenset({"bottler.scav", "mill.scav", "tcp.scav", "toolchanger.scav"})
-LIGHT_CHARTS: frozenset[str] = frozenset({"brew.scav", "dock.scav", "estop.scav", "led.scav"})
+LIGHT_CHARTS: frozenset[str] = frozenset({"brew.scav", "dock.scav", "estop.scav", "kiln.scav", "led.scav"})
 
 
 def full_tier() -> bool:

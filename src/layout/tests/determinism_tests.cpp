@@ -37,10 +37,10 @@ constexpr std::array<char const *, 4> CHARTS{ "brew.scav",
 // Every geometry column, `scav.geom.gen` included: each run below is on a
 // fresh chart, so its run count is one like every other's.
 constexpr std::array<char const *, 13> GEOM{
-  "scav.geom.state",       "scav.geom.state_before", "scav.geom.state_after",
-  "scav.geom.state_lead",  "scav.geom.state_trail",  "scav.geom.sub",
-  "scav.geom.route",       "scav.geom.port",         "scav.geom.point",
-  "scav.geom.portslot",    "scav.geom.chart",        "scav.geom.inputs",
+  "scav.geom.state",      "scav.geom.state_before", "scav.geom.state_after",
+  "scav.geom.state_lead", "scav.geom.state_trail",  "scav.geom.sub",
+  "scav.geom.route",      "scav.geom.port",         "scav.geom.point",
+  "scav.geom.portslot",   "scav.geom.chart",        "scav.geom.inputs",
   "scav.geom.gen"
 };
 
@@ -257,7 +257,8 @@ TEST_CASE("determinism: a searched drawing is the same drawing at every thread c
   // these exercise every stage: `estop` and `led` accept a reversal kick,
   // `dock` and `brew` finish more than one row.
   scav_profile const p{ readable() };
-  for (char const *name : { "estop.scav", "led.scav", "dock.scav", "brew.scav" }) {
+  for (char const *name :
+       { "estop.scav", "kiln.scav", "led.scav", "dock.scav", "brew.scav" }) {
     CAPTURE(name);
     Chart first;
     load_corpus(name, first);

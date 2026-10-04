@@ -60,7 +60,8 @@ StateId enclosing_state(Chart const &c, StateId s);
 // rather than spinning.
 bool ancestor_or_self(Chart const &c, StateId ancestor, StateId of);
 
-// A self-transition that stays inside its state: drawn as a loop in that state's loop room.
+// A self-transition that stays inside its state: drawn as a loop in that state's loop
+// room.
 bool inner_loop(Chart const &c, uint32_t t);
 
 }  // namespace scav

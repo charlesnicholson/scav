@@ -22,9 +22,9 @@ namespace scav {
 struct SizedLayout {
   std::vector<scav_rect> state, before, after;  // parallel to states
   std::vector<scav_rect> lead, trail;           // parallel to states: the side bands
-  std::vector<scav_rect> loop;                  // parallel to states: its inner loops' room
-  std::vector<scav_rect> sub;                   // parallel to submachines
-  std::vector<scav_point> node;                 // parallel to the orders' nodes
+  std::vector<scav_rect> loop;   // parallel to states: its inner loops' room
+  std::vector<scav_rect> sub;    // parallel to submachines
+  std::vector<scav_point> node;  // parallel to the orders' nodes
   // Parallel to the segments, or empty: 1 where a straight leg seats at the leading end of
   // its ends' overlap, with its label's room on the trailing side.
   std::vector<uint8_t> lean;
@@ -82,7 +82,8 @@ struct SizeRecord {
 // top to the bottom band's bottom, so no seam opens where two bands meet.
 std::array<scav_rect, 5> state_walls(SizedLayout const &z, uint32_t st);
 
-// Whether a band of `state` lines `face`, 0 left, 1 right, 2 top, 3 bottom: no port sits there.
+// Whether a band of `state` lines `face`, 0 left, 1 right, 2 top, 3 bottom: no port sits
+// there.
 bool face_lined(scav_spaces const &s, uint32_t state, uint32_t face);
 
 // One inner loop's row in its state's room: rows stack in transition order, the far leg

@@ -38,6 +38,8 @@ enum class TraceKind : uint16_t {
   GapCharged,         // phase 1 asked a rank boundary for width beyond rank_sep
   FoldPinned,         // a fold pin decided a frame's fold; `pass` is its mode
   BoundaryCarried,    // a fold cut took a boundary node into its neighbour's piece
+  LoopFaced,   // an outer self-loop took its box's least-used face; `leg` is the net
+  PortWalled,  // every face a port could take is lined, so it stays and pays
 };
 
 // What a rank boundary's charge is for; `GapCharged.pass`. `Held` charges

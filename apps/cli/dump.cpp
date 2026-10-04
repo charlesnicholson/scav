@@ -384,7 +384,8 @@ void append_geometry_text(std::string &out,
     append_rect(out, before[i]);
     out += " after ";
     append_rect(out, after[i]);
-    if ((i < lead.size()) && (i < trail.size()) && ((lead[i].w != 0) || (trail[i].w != 0))) {
+    if ((i < lead.size()) && (i < trail.size()) &&
+        ((lead[i].w != 0) || (trail[i].w != 0))) {
       out += " lead ";
       append_rect(out, lead[i]);
       out += " trail ";

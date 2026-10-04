@@ -953,9 +953,9 @@ namespace {
 
 // Every corpus chart, by the bare name, so the reuse below is held to real
 // frames rather than to hand-built ones.
-constexpr std::array<char const *, 11> CORPUS{
-  "axis.scav", "bottler.scav", "brew.scav", "dock.scav",        "estop.scav", "led.scav",
-  "mill.scav", "ota.scav",     "tcp.scav",  "toolchanger.scav", "vac.scav"
+constexpr std::array<char const *, 12> CORPUS{
+  "axis.scav", "bottler.scav", "brew.scav", "dock.scav", "estop.scav",       "kiln.scav",
+  "led.scav",  "mill.scav",    "ota.scav",  "tcp.scav",  "toolchanger.scav", "vac.scav"
 };
 
 void load_corpus_chart(char const *name, Chart &c) {

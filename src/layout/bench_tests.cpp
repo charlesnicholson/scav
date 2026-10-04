@@ -26,9 +26,9 @@ namespace {
 
 using namespace scav;
 
-constexpr std::array<char const *, 11> CORPUS{
-  "axis.scav", "bottler.scav", "brew.scav", "dock.scav",        "estop.scav", "led.scav",
-  "mill.scav", "ota.scav",     "tcp.scav",  "toolchanger.scav", "vac.scav"
+constexpr std::array<char const *, 12> CORPUS{
+  "axis.scav", "bottler.scav", "brew.scav", "dock.scav", "estop.scav",       "kiln.scav",
+  "led.scav",  "mill.scav",    "ota.scav",  "tcp.scav",  "toolchanger.scav", "vac.scav"
 };
 
 scav_profile readable() {
@@ -47,12 +47,12 @@ scav_profile compact() {
 // next door names it by, so one functional test holds both arrays to the
 // directory.
 constexpr std::array<char const *, 31> GAUNTLET{
-  "above.scav", "carried.scav", "chain.scav", "corner.scav", "crossing.scav",
-  "crowd.scav", "enclosing.scav", "entered.scav", "fanin.scav", "folded.scav",
-  "fork.scav", "header.scav", "inloop.scav", "lane.scav", "level.scav",
-  "long.scav", "loop.scav", "marks.scav", "mixed.scav", "mutual.scav",
-  "ported.scav", "pulled.scav", "regions.scav", "roundtrip.scav", "seated.scav",
-  "stretch.scav", "through.scav", "tight.scav", "transit.scav", "under.scav",
+  "above.scav",   "carried.scav",   "chain.scav",   "corner.scav",    "crossing.scav",
+  "crowd.scav",   "enclosing.scav", "entered.scav", "fanin.scav",     "folded.scav",
+  "fork.scav",    "header.scav",    "inloop.scav",  "lane.scav",      "level.scav",
+  "long.scav",    "loop.scav",      "marks.scav",   "mixed.scav",     "mutual.scav",
+  "ported.scav",  "pulled.scav",    "regions.scav", "roundtrip.scav", "seated.scav",
+  "stretch.scav", "through.scav",   "tight.scav",   "transit.scav",   "under.scav",
   "unfolded.scav"
 };
 

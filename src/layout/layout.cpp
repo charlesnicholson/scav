@@ -425,10 +425,19 @@ void facing_flips(Facing &out,
         for (bool const first : { true, false }) {
           if ((cross == INVALID) && (j != INVALID)) { cross = seen(j, first); }
         }
+        if (lined(rank_face + (on_leading ? 1U : 0U)) && (cross == INVALID)) {
+          trace_emit({ .kind = TraceKind::PortWalled,
+                       .frame = m,
+                       .port = { .seg = seg,
+                                 .trans = t.v,
+                                 .leg = leg,
+                                 .side = rank_face + (on_leading ? 0U : 1U) } });
+        }
         if (lined(rank_face + (on_leading ? 1U : 0U)) && (cross != INVALID)) {
           vec_push_back(taken, { .node = j, .side = cross });
-          vec_push_back(out.sides,
-                        { .trans = t, .leg = leg, .end = leaves ? 1U : 0U, .side = cross });
+          vec_push_back(
+              out.sides,
+              { .trans = t, .leg = leg, .end = leaves ? 1U : 0U, .side = cross });
           trace_emit({ .kind = TraceKind::PortTurned,
                        .frame = m,
                        .port = { .seg = seg, .trans = t.v, .leg = leg, .side = cross } });

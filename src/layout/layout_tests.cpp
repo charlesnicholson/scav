@@ -394,8 +394,8 @@ TEST_CASE("layout: routes are orthogonal, meet borders, and loop on either side"
     }
     for (uint32_t k = 1; (k + 1) < r.len; ++k) {
       CAPTURE(k);
-      bool const in{ (loop[k].x > rd.x) && (loop[k].x < (rd.x + rd.w)) && (loop[k].y > rd.y) &&
-                     (loop[k].y < (rd.y + rd.h)) };
+      bool const in{ (loop[k].x > rd.x) && (loop[k].x < (rd.x + rd.w)) &&
+                     (loop[k].y > rd.y) && (loop[k].y < (rd.y + rd.h)) };
       CHECK(in == (t == 2));
     }
   }
@@ -1244,6 +1244,7 @@ TEST_CASE("layout: no corpus chart runs a route flush along a box" *
                             "brew.scav",
                             "dock.scav",
                             "estop.scav",
+                            "kiln.scav",
                             "led.scav",
                             "mill.scav",
                             "ota.scav",
@@ -1405,9 +1406,9 @@ constexpr std::array<char const *, 2> SCALE_ROUTERS{ "orthogonal", "straight" };
 // bends, corridor, crossings, excess_len, adjacency, label, label_near, aspect, area.
 constexpr std::array<std::array<int64_t, 11>, 8> SCALE_PINNED{
   { { 0, 0, 2528, 0, 0, 1990112, 0, 0, 0, 2760164, 36376973376 },
-    { 21616, 0, 3072, 46595888, 52856, 95493944, 0, 0, 0, 2760164, 36376973376 },
+    { 21616, 0, 3072, 46675760, 52856, 95493944, 0, 0, 0, 2760164, 36376973376 },
     { 0, 0, 2528, 0, 0, 1224016, 0, 0, 0, 640498, 14443223840 },
-    { 22224, 0, 3072, 31574176, 52456, 57418576, 0, 0, 0, 640498, 14443223840 },
+    { 22224, 0, 3072, 31614112, 52456, 57418576, 0, 0, 0, 640498, 14443223840 },
     { 0, 0, 1220, 0, 80, 2591782, 0, 0, 0, 73344, 3667557376 },
     { 2088, 0, 319, 0, 265, 7295646, 0, 0, 0, 73344, 3667557376 },
     { 0, 0, 1176, 162960, 91, 2319881, 0, 0, 0, 13056, 1615626240 },
@@ -2604,6 +2605,7 @@ TEST_CASE("layout: nothing in the corpus or at the scale target inflates") {
                             "brew.scav",
                             "dock.scav",
                             "estop.scav",
+                            "kiln.scav",
                             "led.scav",
                             "mill.scav",
                             "ota.scav",
@@ -2719,6 +2721,7 @@ TEST_CASE("layout: the search reaches the committed pins on every searched corpu
                             "brew.scav",
                             "dock.scav",
                             "estop.scav",
+                            "kiln.scav",
                             "led.scav",
                             "mill.scav",
                             "ota.scav",
@@ -2767,6 +2770,7 @@ TEST_CASE("layout: corpus charts hash to the committed golden") {
                             "brew.scav",
                             "dock.scav",
                             "estop.scav",
+                            "kiln.scav",
                             "led.scav",
                             "mill.scav",
                             "ota.scav",
@@ -2819,6 +2823,7 @@ TEST_CASE("layout: the corpus cost vector is committed, term by term and by shar
                             "brew.scav",
                             "dock.scav",
                             "estop.scav",
+                            "kiln.scav",
                             "led.scav",
                             "mill.scav",
                             "ota.scav",
@@ -2937,6 +2942,7 @@ TEST_CASE("layout: no corpus chart bends the arrow out of an initial pseudostate
                             "brew.scav",
                             "dock.scav",
                             "estop.scav",
+                            "kiln.scav",
                             "led.scav",
                             "mill.scav",
                             "ota.scav",
@@ -2970,6 +2976,7 @@ TEST_CASE("layout: no corpus chart routes an edge through a box") {
                             "brew.scav",
                             "dock.scav",
                             "estop.scav",
+                            "kiln.scav",
                             "led.scav",
                             "mill.scav",
                             "ota.scav",

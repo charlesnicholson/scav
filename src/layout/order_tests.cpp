@@ -960,9 +960,9 @@ TEST_CASE("order: an edge a pin turns and the walk turns back is not marked reve
 TEST_CASE(
     "order: an edge is marked reversed exactly where it runs against its authoring") {
   // Every corpus chart, unpinned and with each segment on a cycle pinned turned in turn.
-  constexpr std::array<char const *, 11> CHARTS{
-    "axis.scav", "bottler.scav", "brew.scav", "dock.scav",        "estop.scav", "led.scav",
-    "mill.scav", "ota.scav",     "tcp.scav",  "toolchanger.scav", "vac.scav"
+  constexpr std::array<char const *, 12> CHARTS{
+    "axis.scav", "bottler.scav", "brew.scav", "dock.scav", "estop.scav",       "kiln.scav",
+    "led.scav",  "mill.scav",    "ota.scav",  "tcp.scav",  "toolchanger.scav", "vac.scav"
   };
   for (char const *name : CHARTS) {
     if (scav::test::corpus_skipped(name)) { continue; }

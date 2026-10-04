@@ -20,7 +20,7 @@ GOLDEN = Path("test_data/golden/layout/corpus_hashes.txt")
 PASSES = "threads=1 and pool"
 COLUMNS = ("inputs", "structural", "coordinate")
 # The charts every --against golden names; each lays out in hundredths of a second.
-SMALL = ("estop.scav", "led.scav")
+SMALL = ("estop.scav", "kiln.scav", "led.scav")
 
 
 class TestSelftest(unittest.TestCase):

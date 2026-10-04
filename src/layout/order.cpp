@@ -817,7 +817,9 @@ uint32_t label_segment(Chart const &c, SplitGraph const &g, uint32_t t) {
   if (t < g.trans_label.size()) { return g.trans_label[t]; }
   if ((t >= g.trans_segments.size()) || (t >= c.transitions.size())) { return INVALID; }
   Span const segs{ g.trans_segments[t] };
-  if ((segs.len == 0) || inner_loop(c, t)) { return INVALID; }  // labelled in its loop room
+  if ((segs.len == 0) || inner_loop(c, t)) {
+    return INVALID;
+  }  // labelled in its loop room
   Transition const &tr{ c.transitions[t] };
   SubmachineId const frame{ lowest_common_ancestor(c, tr.src, tr.dst).frame };
   for (uint32_t k = 0; (frame.v != INVALID) && (k < segs.len); ++k) {

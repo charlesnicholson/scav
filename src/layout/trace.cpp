@@ -32,6 +32,8 @@ char const *kind_name(TraceKind k) {
     case TraceKind::FoldCut: return "fold_cut";
     case TraceKind::PseudostateSeated: return "pseudostate_seated";
     case TraceKind::PortTurned: return "port_turned";
+    case TraceKind::LoopFaced: return "loop_faced";
+    case TraceKind::PortWalled: return "port_walled";
     case TraceKind::PortAttached: return "port_attached";
     case TraceKind::ColumnCentred: return "column_centred";
     case TraceKind::PiecePacked: return "piece_packed";
@@ -243,7 +245,12 @@ void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out)
         j.ks("how", (e.pass < HOW.size()) ? HOW[e.pass] : "?");
         break;
       }
+      case TraceKind::LoopFaced:
+        j.kv("net", e.port.leg);
+        j.kv("side", e.port.side);
+        break;
       case TraceKind::PortTurned:
+      case TraceKind::PortWalled:
         j.kv("seg", e.port.seg);
         j.kv("trans", e.port.trans);
         j.kv("leg", e.port.leg);
