@@ -53,31 +53,6 @@ enum class DarSource : uint32_t { Profile, OwnerHole };
 // arbitrated (11.10a). `Never` keeps the run unwrapped; a fold pin names one frame's.
 enum class Fold : uint32_t { Scale, Always, Never };
 
-// One sizing pass's frame-local results and what its frames read, so a later pass copies
-// every frame whose inputs and descendants' inputs match rather than laying it out.
-struct SizePassRecord {
-  bool ok{ false };
-  uint32_t serial{ 0 };
-  scav_profile profile{};
-  Compaction compaction{ Compaction::Off };
-  Fold fold{ Fold::Scale };
-  SubmachineOrders orders;  // only the frame columns sizing reads are kept
-  std::vector<int32_t> seg_label_h, seg_label_w;
-  std::vector<uint32_t> port_seg;
-  std::vector<FrameDar> dar;          // per state, the ratio its interior packs to
-  std::vector<scav_box_space> box;    // per state
-  std::vector<scav_point> pre_node;   // per node, before its owner's packing moved it
-  std::vector<scav_point> pre_sub;    // per submachine, the extent before that packing
-  std::vector<uint8_t> edge_lean;     // per edge, its segment's lean as its frame left it
-  std::vector<scav_point> sub_local;  // per submachine, its place in its owner's packing
-  SizedLayout local;                  // the pass before its descent, frame-local
-};
-
-// A sizing's passes: the one at the profile's ratio, then the owner-hole one if any.
-struct SizeRecord {
-  std::array<SizePassRecord, 2> pass;
-};
-
 // A state's bands as walls, then its loop room: the side bands run from the top band's
 // top to the bottom band's bottom, so no seam opens where two bands meet, and the room
 // runs on to the border its loops leave by.
@@ -122,8 +97,7 @@ void loop_rows(Chart const &c,
 // False on an extent that would leave the coordinate domain, with one
 // diagnostic per offending entity and `out` left partly written. `dar` and
 // `compaction` default to the row-0 tuple, which is the pipeline as it ran
-// before the portfolio existed. `base`, where given, is an earlier sizing's record whose
-// matching frames are copied; `record` receives this one's.
+// before the portfolio existed.
 bool size_layout(Chart const &c,
                  SplitGraph const &g,
                  SubmachineOrders const &o,
@@ -133,9 +107,7 @@ bool size_layout(Chart const &c,
                  std::vector<Diagnostic> &diags,
                  DarSource dar = DarSource::Profile,
                  Compaction compaction = Compaction::Off,
-                 Fold fold = Fold::Scale,
-                 SizeRecord const *base = nullptr,
-                 SizeRecord *record = nullptr);
+                 Fold fold = Fold::Scale);
 
 }  // namespace scav
 

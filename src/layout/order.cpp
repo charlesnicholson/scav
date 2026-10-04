@@ -21,43 +21,11 @@
 
 #include <array>
 #include <cstdint>
-#include <cstring>
 #include <vector>
 
 namespace scav {
 
-#ifdef SCAV_TESTING
-void order_test_reuse(bool on);
-void order_test_reuse_verify(bool on);
-uint64_t order_test_reused();
-uint64_t order_test_reuse_mismatches();
-#endif
-
 namespace {
-
-#ifdef SCAV_TESTING
-// Whether a call takes frames from its `base`, whether it orders every frame again to
-// check them, how many it took and how many calls came out different.
-bool test_reuse{ true };
-bool test_reuse_verify{ false };
-Mutex test_reuse_lock;
-uint64_t test_reused{ 0 };
-uint64_t test_reuse_mismatches{ 0 };
-
-bool same_orders(SubmachineOrders const &a, SubmachineOrders const &b) {
-  return (a.nodes == b.nodes) && (a.edges == b.edges) && (a.sub_nodes == b.sub_nodes) &&
-         (a.sub_edges == b.sub_edges) && (a.sub_ranks == b.sub_ranks) &&
-         (a.sub_down == b.sub_down) && (a.sub_fold == b.sub_fold) &&
-         (a.sub_fold_cut == b.sub_fold_cut) && (a.sub_gaps == b.sub_gaps) &&
-         (a.gaps == b.gaps) && (a.labels == b.labels) && (a.state_node == b.state_node) &&
-         (a.seg_node == b.seg_node) && (a.seg_port == b.seg_port) &&
-         (a.seg_cross == b.seg_cross) && (a.seg_sided == b.seg_sided) &&
-         (a.seg_cyclic == b.seg_cyclic) && (a.serial == b.serial) &&
-         (std::memcmp(&a.profile, &b.profile, sizeof(scav_profile)) == 0) &&
-         (a.seg_pins == b.seg_pins) && (a.seg_label == b.seg_label) &&
-         (a.state_pin == b.state_pin);
-}
-#endif
 
 // Every frame this thread has ordered, by what ordering it read. A search's
 // candidates differ in one frame, so every other frame a candidate orders is
@@ -164,7 +132,7 @@ FrameScratch &frame_scratch(Chart const &c, SplitGraph const &g) {
 struct CallScratch {
   std::vector<uint32_t> seg_count, seg_off, frame_segs, fill, global;
   std::vector<int32_t> seg_label;
-  std::vector<uint8_t> cut, pre_reversed, sided, reuse;
+  std::vector<uint8_t> cut, pre_reversed, sided;
   std::vector<FrameOrder> frames;
 };
 
@@ -833,10 +801,9 @@ SubmachineOrders order_submachines(Chart const &c,
                                    scav_spaces const &s,
                                    scav_profile const &p,
                                    uint32_t threads,
-                                   SearchPins const &pins,
-                                   SubmachineOrders const *base) {
+                                   SearchPins const &pins) {
   SubmachineOrders o;
-  order_submachines(o, c, g, s, p, threads, pins, base);
+  order_submachines(o, c, g, s, p, threads, pins);
   return o;
 }
 
@@ -846,8 +813,7 @@ void order_submachines(SubmachineOrders &o,
                        scav_spaces const &s,
                        scav_profile const &p,
                        uint32_t threads,
-                       SearchPins const &pins,
-                       SubmachineOrders const *base) {
+                       SearchPins const &pins) {
   o.nodes.clear();
   o.edges.clear();
   o.gaps.clear();
@@ -954,56 +920,6 @@ void order_submachines(SubmachineOrders &o,
     if (!own) { seg = (pin.end == 0) ? (at - 1) : (at + 1); }
     if (sided.empty()) { vec_assign(sided, g.segments.size(), 0); }
     sided[seg] = static_cast<uint8_t>(pin.side + 1);
-  }
-  o.serial = g.serial;
-  o.profile = p;
-  vec_assign(o.seg_pins, g.segments.size(), 0);
-  for (uint32_t i = 0; i < g.segments.size(); ++i) {
-    o.seg_pins[i] = (pre_reversed.empty() ? 0U : pre_reversed[i]) |
-                    ((cut.empty() ? 0U : uint32_t{ cut[i] }) << 8U) |
-                    ((sided.empty() ? 0U : uint32_t{ sided[i] }) << 16U);
-  }
-  vec_assign(o.seg_label, seg_label.begin(), seg_label.end());
-  // The last pin a state takes is the rank it is set to; an initial is never set.
-  vec_assign(o.state_pin, c.states.size(), INVALID);
-  for (RankPin const &pin : pins.ranks) {
-    if ((pin.state.v < c.states.size()) &&
-        (c.states[pin.state.v].kind != StateKind::Initial)) {
-      o.state_pin[pin.state.v] = pin.rank;
-    }
-  }
-
-  // A frame `base` ordered from what this call would read is taken from it.
-  std::vector<uint8_t> &reuse{ cs.reuse };
-  reuse.clear();
-  bool const reusable{ (base != nullptr) && (trace_sink() == nullptr) && (g.serial != 0) &&
-                       (base->serial == g.serial) &&
-                       (std::memcmp(&base->profile, &p, sizeof(scav_profile)) == 0) &&
-                       (base->sub_down.size() == o.sub_down.size()) &&
-                       (base->seg_pins.size() == o.seg_pins.size()) &&
-                       (base->seg_label.size() == o.seg_label.size()) &&
-                       (base->state_pin.size() == o.state_pin.size()) };
-#ifdef SCAV_TESTING
-  bool const reusing{ reusable && test_reuse };
-#else
-  bool const reusing{ reusable };
-#endif
-  if (reusing) {
-    vec_assign(reuse, c.submachines.size(), 0);
-    for (uint32_t m = 0; m < c.submachines.size(); ++m) {
-      bool same{ (c.submachines[m].live != 0) && (base->sub_down[m] == o.sub_down[m]) };
-      for (uint32_t k = seg_off[m]; same && (k < seg_off[m + 1]); ++k) {
-        uint32_t const seg{ frame_segs[k] };
-        same = (base->seg_pins[seg] == o.seg_pins[seg]) &&
-               (base->seg_label[seg] == o.seg_label[seg]);
-      }
-      Span const kids{ c.submachines[m].children };
-      for (uint32_t k = 0; same && (k < kids.len); ++k) {
-        uint32_t const child{ c.state_ids[kids.off + k].v };
-        same = base->state_pin[child] == o.state_pin[child];
-      }
-      reuse[m] = same ? 1 : 0;
-    }
   }
 
   // A pinned side against the frame: 1 or 2 for the leading or trailing cross border, and
@@ -1305,9 +1221,7 @@ void order_submachines(SubmachineOrders &o,
     FrameScratch &sc{ frame_scratch(c, g) };
     for (uint32_t k = 0; k < mine.len; ++k) {
       uint32_t const m{ mine.off + k };
-      if ((c.submachines[m].live != 0) && (reuse.empty() || (reuse[m] == 0))) {
-        order_frame(m, sc);
-      }
+      if (c.submachines[m].live != 0) { order_frame(m, sc); }
     }
   };
   parallel_for(shards, threads, body);
@@ -1317,10 +1231,9 @@ void order_submachines(SubmachineOrders &o,
   size_t gap_rows{ 0 };
   for (uint32_t m = 0; m < c.submachines.size(); ++m) {
     if (c.submachines[m].live == 0) { continue; }
-    bool const taken{ !reuse.empty() && (reuse[m] != 0) };
-    node_rows += taken ? base->sub_nodes[m].len : frames[m].f.nodes.size();
-    edge_rows += taken ? base->sub_edges[m].len : frames[m].f.edges.size();
-    gap_rows += taken ? base->sub_gaps[m].len : frames[m].gaps.size();
+    node_rows += frames[m].f.nodes.size();
+    edge_rows += frames[m].f.edges.size();
+    gap_rows += frames[m].gaps.size();
   }
   vec_reserve(o.nodes, node_rows);
   vec_reserve(o.edges, edge_rows);
@@ -1334,51 +1247,6 @@ void order_submachines(SubmachineOrders &o,
     uint32_t const node_base{ static_cast<uint32_t>(o.nodes.size()) };
     uint32_t const edge_base{ static_cast<uint32_t>(o.edges.size()) };
     uint32_t const gap_base{ static_cast<uint32_t>(o.gaps.size()) };
-    if (!reuse.empty() && (reuse[m] != 0)) {
-      // `base`'s rows for the frame, its node indices moved to where this frame starts.
-      Span const nodes{ base->sub_nodes[m] };
-      Span const edges{ base->sub_edges[m] };
-      Span const gaps{ base->sub_gaps[m] };
-      uint32_t const shift{ node_base - nodes.off };  // unsigned wrap undoes itself
-      vec_insert(o.nodes,
-                 o.nodes.end(),
-                 base->nodes.begin() + nodes.off,
-                 base->nodes.begin() + nodes.off + nodes.len);
-      for (uint32_t k = 0; k < edges.len; ++k) {
-        OrderEdge e{ base->edges[edges.off + k] };
-        e.src += shift;
-        e.dst += shift;
-        vec_push_back(o.edges, e);
-      }
-      vec_insert(o.gaps,
-                 o.gaps.end(),
-                 base->gaps.begin() + gaps.off,
-                 base->gaps.begin() + gaps.off + gaps.len);
-      vec_insert(o.labels,
-                 o.labels.end(),
-                 base->labels.begin() + gaps.off,
-                 base->labels.begin() + gaps.off + gaps.len);
-      Span const kids{ c.submachines[m].children };
-      for (uint32_t k = 0; k < kids.len; ++k) {
-        uint32_t const child{ c.state_ids[kids.off + k].v };
-        uint32_t const at{ base->state_node[child] };
-        o.state_node[child] = (at == INVALID) ? INVALID : (at + shift);
-      }
-      for (uint32_t k = seg_off[m]; k < seg_off[m + 1]; ++k) {
-        uint32_t const seg{ frame_segs[k] };
-        uint32_t const at{ base->seg_node[seg] };
-        o.seg_node[seg] = (at == INVALID) ? INVALID : (at + shift);
-        o.seg_port[seg] = base->seg_port[seg];
-        o.seg_cross[seg] = base->seg_cross[seg];
-        o.seg_sided[seg] = base->seg_sided[seg];
-        o.seg_cyclic[seg] = base->seg_cyclic[seg];
-      }
-      o.sub_nodes[m] = make_span(node_base, nodes.len);
-      o.sub_edges[m] = make_span(edge_base, edges.len);
-      o.sub_ranks[m] = base->sub_ranks[m];
-      o.sub_gaps[m] = make_span(gap_base, gaps.len);
-      continue;
-    }
     Frame const &f{ frames[m].f };
 
     // Emitted in (rank, pos) order, so a consumer walking one frame's nodes
@@ -1425,35 +1293,6 @@ void order_submachines(SubmachineOrders &o,
     o.sub_ranks[m] = static_cast<uint32_t>(f.ranks.size());
     o.sub_gaps[m] = make_span(gap_base, static_cast<uint32_t>(o.gaps.size()) - gap_base);
   }
-#ifdef SCAV_TESTING
-  if (!reuse.empty()) {
-    uint64_t taken{ 0 };
-    for (uint8_t const r : reuse) { taken += r; }
-    bool const same{ !test_reuse_verify ||
-                     same_orders(order_submachines(c, g, s, p, threads, pins), o) };
-    ScopedLock const held{ test_reuse_lock };
-    test_reused += taken;
-    test_reuse_mismatches += same ? 0U : 1U;
-  }
-#endif
 }
-
-#ifdef SCAV_TESTING
-void order_test_reuse(bool on) { test_reuse = on; }
-void order_test_reuse_verify(bool on) {
-  test_reuse_verify = on;
-  ScopedLock const held{ test_reuse_lock };
-  test_reused = 0;
-  test_reuse_mismatches = 0;
-}
-uint64_t order_test_reused() {
-  ScopedLock const held{ test_reuse_lock };
-  return test_reused;
-}
-uint64_t order_test_reuse_mismatches() {
-  ScopedLock const held{ test_reuse_lock };
-  return test_reuse_mismatches;
-}
-#endif
 
 }  // namespace scav
