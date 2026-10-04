@@ -2836,7 +2836,7 @@ TEST_CASE("layout: the corpus cost vector is committed, term by term and by shar
     Chart const c{ corpus_chart(name) };
     CostTerms const t{ cost_columns(c, decompose(c), p) };
     Cost const scored{ cost_of(t, p) };
-    CHECK(scored.t0_violations == 0);  // every corpus chart ships clean, whatever its golden says
+    CHECK(scored.t0_violations == 0);  // every corpus chart ships clean
 
     actual += name;
     for (int64_t const term : { int64_t{ scored.t0_violations },
