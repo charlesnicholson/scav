@@ -239,8 +239,8 @@ using Palette = std::vector<scav_style>;
 
 Palette palette_standard();
 
-// The measurement pass, and the policy every corpus golden is against: a title,
-// a submachine name, arrowhead room, and one path box per labelled transition.
+// The measurement pass, and the policy every corpus golden is against: a title and
+// description, a submachine name, arrowhead room, and a path box per labelled transition.
 struct Spaces {
   std::vector<scav_box_space> box_state, box_sub;
   std::vector<scav_path_clear> path_clear;

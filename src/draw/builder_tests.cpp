@@ -158,6 +158,38 @@ std::string tall_text() {
   return s;
 }
 
+scav_rect geom_rect(Chart const &c, char const *name, uint32_t row) {
+  ColumnId const id{ column_find(c, name) };
+  REQUIRE(id.v != INVALID);
+  REQUIRE(column_count(c, id) > row);
+  scav_rect r{};
+  std::memcpy(&r,
+              column_data(c, id) + (size_t{ row } * sizeof(scav_rect)),
+              sizeof(scav_rect));
+  return r;
+}
+
+std::vector<scav_prim> state_prims(DrawList const &d, uint32_t state, uint32_t kind) {
+  std::vector<scav_prim> out;
+  for (scav_prim const &p : d.prims) {
+    if ((p.kind == kind) && (p.origin_kind == static_cast<uint32_t>(ElemKind::State)) &&
+        (p.origin_ordinal == state)) {
+      out.push_back(p);
+    }
+  }
+  return out;
+}
+
+int32_t title_width(std::string_view text) {
+  scav_extent e{};
+  REQUIRE(measure_text(bundled(),
+                       reinterpret_cast<scav_byte const *>(text.data()),
+                       static_cast<uint32_t>(text.size()),
+                       palette_standard()[SCAV_STYLE_TITLE].font_size_grid,
+                       e) == MeasureStatus::Ok);
+  return e.w;
+}
+
 scav_extent measured(std::string_view text, scav_profile const &p) {
   scav_extent e{};
   REQUIRE(measure_block(bundled(),
@@ -339,6 +371,172 @@ TEST_CASE("builder: a name lands inside the rect its own h_before reserved") {
   }
 }
 
+TEST_CASE("builder: a description reserves its lines under the name, and its width") {
+  scav_profile const p{ readable() };
+  Metrics const m{ bundled() };
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const bare{ build_state(c, root, "Standby", StateKind::Normal, {}) };
+  StateId const wide{ build_state(c, root, "Warm", StateKind::Normal, "warm and idle") };
+  StateId const slim{ build_state(c, root, "Standby", StateKind::Normal, "hot") };
+  StateId const pick{
+    build_state(c, root, "Standby", StateKind::Choice, "warm and idle")
+  };
+  StateId const mark{ build_state(c, root, "Done", StateKind::Final, "warm and idle") };
+  Spaces s;
+  REQUIRE(measure_chart(c, m, p, s));
+
+  scav_extent const standby{ measured("Standby", p) };
+  scav_extent const warm{ measured("Warm", p) };
+  scav_extent const about{ measured("warm and idle", p) };
+  REQUIRE(about.w > standby.w);
+  CHECK(s.box_state[bare.v].min_w == (standby.w + (2 * p.pad)));
+  CHECK(s.box_state[bare.v].h_before == (standby.h + p.pad));
+
+  // The name, the pad its rule splits, then the description's own lines.
+  CHECK(s.box_state[wide.v].h_before == (warm.h + p.pad + about.h));
+  CHECK(s.box_state[wide.v].min_w == (about.w + (2 * p.pad)));
+  CHECK(s.box_state[wide.v].h_before > s.box_state[bare.v].h_before);
+  CHECK(s.box_state[wide.v].min_w > s.box_state[bare.v].min_w);
+
+  CHECK(s.box_state[slim.v].min_w == s.box_state[bare.v].min_w);
+  CHECK(s.box_state[slim.v].h_before == (standby.h + p.pad + measured("hot", p).h));
+
+  CHECK(s.box_state[pick.v].min_w == (2 * (standby.w + (2 * p.pad))));
+  CHECK(s.box_state[pick.v].h_before == (2 * (standby.h + p.pad)));
+  CHECK(s.box_state[mark.v].h_before == 0);
+  CHECK(s.box_state[mark.v].min_w == 0);
+}
+
+TEST_CASE("builder: a description is drawn under a rule spanning the box") {
+  scav_profile const p{ readable() };
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const st{ build_state(c, root, "Standby", StateKind::Normal, "warm and idle") };
+  Built const b{ pipeline(std::move(c), p) };
+  scav_rect const box{ geom_rect(b.chart, "scav.geom.state", st.v) };
+  scav_rect const before{ geom_rect(b.chart, "scav.geom.state_before", st.v) };
+  int32_t const fs{ palette_standard()[SCAV_STYLE_TITLE].font_size_grid };
+
+  std::vector<scav_prim> const rules{ state_prims(b.list, st.v, SCAV_PRIM_LINE) };
+  REQUIRE(rules.size() == 1);
+  scav_point const a{ b.list.points[rules[0].points.off] };
+  scav_point const z{ b.list.points[rules[0].points.off + 1] };
+  CHECK(a.y == z.y);
+  CHECK(a.x == box.x);  // border to border
+  CHECK(z.x == (box.x + box.w));
+  // Where measure_chart put the end of the name block and half its pad.
+  CHECK(a.y == (before.y + measured("Standby", p).h + (p.pad / 2)));
+  CHECK(a.y > before.y);
+  CHECK(a.y < (before.y + before.h));
+
+  std::vector<scav_prim> const texts{ state_prims(b.list, st.v, SCAV_PRIM_TEXT) };
+  REQUIRE(texts.size() == 2);
+  REQUIRE(payload(b.list, texts[0]) == "Standby");
+  REQUIRE(payload(b.list, texts[1]) == "warm and idle");
+  scav_point const name{ b.list.points[texts[0].points.off] };
+  scav_point const note{ b.list.points[texts[1].points.off] };
+
+  CHECK(name.x == (before.x + ((before.w - title_width("Standby")) / 2)));
+  CHECK(name.y < a.y);
+
+  CHECK(note.x == (before.x + p.pad));
+  CHECK((note.x + title_width("warm and idle")) <= (before.x + before.w));
+  CHECK((note.y - fs) > a.y);
+  CHECK(note.y <= (before.y + before.h));
+}
+
+TEST_CASE("builder: a composite with no description still takes a header rule") {
+  scav_profile const p{ readable() };
+  Built const b{ pipeline(small_chart(), p) };
+  scav_rect const box{ geom_rect(b.chart, "scav.geom.state", 0) };
+  scav_rect const before{ geom_rect(b.chart, "scav.geom.state_before", 0) };
+  scav_rect const region{ geom_rect(b.chart, "scav.geom.sub", 1) };
+
+  std::vector<scav_prim> const rules{ state_prims(b.list, 0, SCAV_PRIM_LINE) };
+  REQUIRE(rules.size() == 1);
+  scav_point const a{ b.list.points[rules[0].points.off] };
+  scav_point const z{ b.list.points[rules[0].points.off + 1] };
+  CHECK(a.y == z.y);
+  CHECK(a.x == box.x);
+  CHECK(z.x == (box.x + box.w));
+  CHECK(a.y == (before.y + measured("Running", p).h + (p.pad / 2)));
+  CHECK(a.y < (before.y + before.h));
+  CHECK(a.y < region.y);
+  REQUIRE(state_prims(b.list, 0, SCAV_PRIM_TEXT).size() == 1);
+}
+
+TEST_CASE("builder: a plain leaf, or a box whose regions are all dead, takes no rule") {
+  Built b{ pipeline(small_chart(), readable()) };
+  for (uint32_t i = 1; i < b.chart.states.size(); ++i) {
+    CAPTURE(i);
+    CHECK(state_prims(b.list, i, SCAV_PRIM_LINE).empty());
+  }
+
+  b.chart.submachines[1].live = 0;
+  DrawList d;
+  emit_state(d, b.chart, bundled(), palette_standard(), 0, 0);
+  CHECK(kind_count(d, SCAV_PRIM_RRECT) == 1);
+  CHECK(kind_count(d, SCAV_PRIM_LINE) == 0);
+  CHECK(has_text(d, "Running"));
+}
+
+TEST_CASE("builder: a description of several lines stacks them inside the band") {
+  scav_profile const p{ readable() };
+  std::string_view const about{ "warm\nand idle\nand ready" };
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const st{ build_state(c, root, "Standby", StateKind::Normal, about) };
+  Spaces s;
+  REQUIRE(measure_chart(c, bundled(), p, s));
+  scav_extent const name{ measured("Standby", p) };
+  scav_extent const text{ measured(about, p) };
+  CHECK(text.h == (3 * measured("warm", p).h));
+  CHECK(s.box_state[st.v].h_before == (name.h + p.pad + text.h));
+  CHECK(s.box_state[st.v].min_w == (std::max(name.w, text.w) + (2 * p.pad)));
+
+  Built const b{ pipeline(std::move(c), p) };
+  scav_rect const before{ geom_rect(b.chart, "scav.geom.state_before", st.v) };
+  std::vector<scav_prim> const rules{ state_prims(b.list, st.v, SCAV_PRIM_LINE) };
+  REQUIRE(rules.size() == 1);
+  int32_t const rule{ b.list.points[rules[0].points.off].y };
+  CHECK(rule == (before.y + name.h + (p.pad / 2)));
+
+  std::vector<scav_prim> const texts{ state_prims(b.list, st.v, SCAV_PRIM_TEXT) };
+  REQUIRE(texts.size() == 4);
+  std::array<std::string_view, 3> const want{ { "warm", "and idle", "and ready" } };
+  int32_t const fs{ palette_standard()[SCAV_STYLE_TITLE].font_size_grid };
+  int32_t previous{ rule };
+  for (uint32_t k = 0; k < 3; ++k) {
+    CAPTURE(k);
+    scav_prim const &line{ texts[k + 1] };
+    CHECK(payload(b.list, line) == want[k]);
+    scav_point const at{ b.list.points[line.points.off] };
+    CHECK(at.x == (before.x + p.pad));
+    CHECK((at.y - fs) >= previous);  // each em box below the last line's baseline
+    CHECK(at.y <= (before.y + before.h));
+    previous = at.y;
+  }
+}
+
+TEST_CASE("builder: a band too short for its lines draws the name and no header") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  build_state(c, root, "Named", StateKind::Normal, "a note");
+  ColumnId const boxes{ state_boxes(c) };
+  ColumnId const befores{
+    geom_column(c, "scav.geom.state_before", ElemKind::State, ValueKind::Pod, RECT_SIZE)
+  };
+  put_row(c, boxes, 0, scav_rect{ .x = 0, .y = 0, .w = 400, .h = 200 });
+  put_row(c, befores, 0, scav_rect{ .x = 8, .y = 8, .w = 384, .h = 9 });
+
+  DrawList d;
+  emit_state(d, c, bundled(), palette_standard(), 0, 0);
+  CHECK(kind_count(d, SCAV_PRIM_LINE) == 0);
+  CHECK(has_text(d, "Named"));
+  CHECK(!has_text(d, "a note"));
+}
+
 TEST_CASE("builder: a label lands on the route its own path box was placed on") {
   Chart c{ small_chart() };
   scav_profile const p{ readable() };
@@ -402,12 +600,18 @@ TEST_CASE("builder: only a sibling submachine draws a divider") {
   build_state(c, build_submachine(c, both, "aux", {}), "C", StateKind::Normal, {});
 
   Built const b{ pipeline(std::move(c), readable()) };
-  // Three submachines, one of which is a second sibling: one divider.
-  CHECK(kind_count(b.list, SCAV_PRIM_LINE) == 1);
+  // Three submachines, one of which is a second sibling: one divider. The other
+  // lines are the two owners' header rules.
+  uint32_t dividers{ 0 };
+  scav_prim const *line{ nullptr };
   for (scav_prim const &p : b.list.prims) {
     if (p.kind != SCAV_PRIM_LINE) { continue; }
-    CHECK(p.origin_kind == static_cast<uint32_t>(ElemKind::Submachine));
+    if (p.origin_kind != static_cast<uint32_t>(ElemKind::Submachine)) { continue; }
+    ++dividers;
+    line = &p;
   }
+  CHECK(dividers == 1);
+  CHECK(kind_count(b.list, SCAV_PRIM_LINE) == 3);
 
   // Where it is, not just that it exists: the rule used to be drawn along one
   // region's top edge however the packer had placed the two.
@@ -426,10 +630,6 @@ TEST_CASE("builder: only a sibling submachine draws a divider") {
   scav_rect const first{ sub_rect(0) };
   scav_rect const second{ sub_rect(1) };
 
-  scav_prim const *line{ nullptr };
-  for (scav_prim const &p : b.list.prims) {
-    if (p.kind == SCAV_PRIM_LINE) { line = &p; }
-  }
   REQUIRE(line != nullptr);
   REQUIRE(line->points.len == 2);
   scav_point const a{ b.list.points[line->points.off] };
@@ -1117,6 +1317,28 @@ TEST_CASE("builder: a submachine name is measured under the rules a state name i
     build_submachine(c, owner, tall_text(), {});
     Spaces s;
     CHECK(!measure_chart(c, bundled(), p, s));
+  }
+}
+
+TEST_CASE("builder: a description is measured under the rules a state name is") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  Spaces s;
+  SUBCASE("a description the font cannot measure refuses the pass") {
+    build_state(c, root, "S", StateKind::Normal, NO_GLYPH);
+    CHECK(!measure_chart(c, bundled(), readable(), s));
+  }
+  SUBCASE("a description too wide for the domain is refused") {
+    build_state(c, root, "S", StateKind::Normal, wide_text());
+    CHECK(!measure_chart(c, bundled(), readable(), s));
+  }
+  SUBCASE("a description too tall for the domain is refused") {
+    build_state(c, root, "S", StateKind::Normal, tall_text());
+    CHECK(!measure_chart(c, bundled(), readable(), s));
+  }
+  SUBCASE("a diamond never measures one") {
+    build_state(c, root, "S", StateKind::Choice, NO_GLYPH);
+    CHECK(measure_chart(c, bundled(), readable(), s));
   }
 }
 

@@ -49,6 +49,16 @@ uint32_t style_for_kind(StateKind kind) {
   return (kind == StateKind::Normal) ? SCAV_STYLE_STATE : SCAV_STYLE_PSEUDO;
 }
 
+// A rounded rect's band, top down: the name, half a pad, the rule, the rest of
+// the pad, the description. Offsets run from the band's top.
+struct Header {
+  int32_t rule, text, h;
+};
+
+Header header_of(int32_t name_h, int32_t text_h, int32_t pad) {
+  return { .rule = name_h + (pad / 2), .text = name_h + pad, .h = name_h + pad + text_h };
+}
+
 }  // namespace
 
 Palette palette_standard() {
@@ -106,9 +116,9 @@ bool measure_chart(Chart const &c, Metrics const &m, scav_profile const &p, Spac
   int32_t const lh{ line_height(fs, p.line_height_k_num, p.line_height_k_den) };
   if (lh == 0) { return false; }
 
-  // The stated policy, whole: a state reserves its title, a submachine its name,
-  // every transition arrowhead room, a labelled one a path box. Nothing else, so
-  // a golden against it is reproducible from the profile and the font alone.
+  // The stated policy, whole: a state reserves its title and description, a submachine
+  // its name, every transition arrowhead room, a labelled one a path box. Nothing
+  // else, so a golden against it is reproducible from the profile and the font alone.
   auto const measure = [&](StrRef ref, scav_extent &ext) {
     std::string_view const text{ chart_string(c, ref) };
     return measure_block(m,
@@ -135,8 +145,13 @@ bool measure_chart(Chart const &c, Metrics const &m, scav_profile const &p, Spac
     // `w/2a + h/2b <= 1`; twice the text on both axes satisfies that.
     bool const inscribed{ kind == StateKind::Choice };
     int32_t const grow{ inscribed ? 2 : 1 };
-    scav_box_space const box{ .min_w = grow * (title.w + (2 * pad)),
-                              .h_before = grow * (title.h + pad),
+    scav_extent about{};
+    if (!inscribed && (c.states[i].label.len != 0U) &&
+        !measure(c.states[i].label, about)) {
+      return false;
+    }
+    scav_box_space const box{ .min_w = grow * (imax(title.w, about.w) + (2 * pad)),
+                              .h_before = grow * header_of(title.h, about.h, pad).h,
                               .h_after = 0 };
     if (!fits(box.min_w) || !fits(box.h_before)) { return false; }
     out.box_state[i] = box;
@@ -283,31 +298,61 @@ void emit_state(DrawList &d,
   // An inscribed glyph holds its label in the middle or not at all; a rectangle
   // keeps the band it was given.
   bool const inscribed{ kind == StateKind::Choice };
-  int32_t lines{ 0 };
-  for (std::string_view const &text : text_lines(name)) {
-    (void)text;
-    ++lines;
-  }
-  int32_t const block{ imax(lines, 1) * lh };
-  int32_t const top{ inscribed ? (middle.y - (block / 2)) : before.y };
+  std::vector<std::string_view> const names{ text_lines(name) };
+  int32_t const name_lines{ static_cast<int32_t>(names.size()) };
+  int32_t const top{ inscribed ? (middle.y - ((name_lines * lh) / 2)) : before.y };
 
   int32_t line{ 0 };
-  for (std::string_view const &text : text_lines(name)) {
+  for (std::string_view const &text : names) {
     int32_t left{ before.x + (before.w / 8) };
-    if (inscribed) {
-      scav_extent ext{};
-      if (measure_text(m,
-                       reinterpret_cast<scav_byte const *>(text.data()),
-                       static_cast<uint32_t>(text.size()),
-                       title.font_size_grid,
-                       ext) == MeasureStatus::Ok) {
-        left = middle.x - (ext.w / 2);
-      }
+    scav_extent ext{};
+    if (measure_text(m,
+                     reinterpret_cast<scav_byte const *>(text.data()),
+                     static_cast<uint32_t>(text.size()),
+                     title.font_size_grid,
+                     ext) == MeasureStatus::Ok) {
+      left = inscribed ? (middle.x - (ext.w / 2))
+                       : (before.x + floor_div(before.w - ext.w, 2));
     }
     push_text(d,
               depth,
               title_style,
               { .x = left, .y = baseline_of(top + (line * lh), title.font_size_grid) },
+              text,
+              origin);
+    ++line;
+  }
+  if (kind != StateKind::Normal) { return; }
+
+  std::string_view const about{ chart_string(c, c.states[state].label) };
+  Span const subs{ c.states[state].submachines };
+  bool composite{ false };
+  for (uint32_t k = 0; k < subs.len; ++k) {
+    composite = composite || (c.submachines[c.submachine_ids[subs.off + k].v].live != 0U);
+  }
+  if (about.empty() && !composite) { return; }
+
+  std::vector<std::string_view> notes;
+  if (!about.empty()) { notes = text_lines(about); }
+  int32_t const note_lines{ static_cast<int32_t>(notes.size()) };
+  // The band is one pad plus every line at the height measure_chart gave it.
+  int32_t const each{ (before.h - ring) / (name_lines + note_lines) };
+  if (each <= 0) { return; }
+  Header const header{ header_of(name_lines * each, note_lines * each, ring) };
+  int32_t const rule{ before.y + header.rule };
+  push_line(d,
+            depth,
+            shape,
+            { .x = box.x, .y = rule },
+            { .x = box.x + box.w, .y = rule },
+            origin);
+  line = 0;
+  for (std::string_view const &text : notes) {
+    int32_t const at{ before.y + header.text + (line * lh) };
+    push_text(d,
+              depth,
+              title_style,
+              { .x = before.x + ring, .y = baseline_of(at, title.font_size_grid) },
               text,
               origin);
     ++line;
