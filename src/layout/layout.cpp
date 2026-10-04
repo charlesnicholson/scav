@@ -270,6 +270,16 @@ struct Candidate {
   scav_rect sized_chart{};  // `sized.chart` before the routes and labels covered it
 };
 
+bool same_rect(scav_rect const &a, scav_rect const &b) {
+  return (a.x == b.x) && (a.y == b.y) && (a.w == b.w) && (a.h == b.h);
+}
+
+// Whether two candidates place every state and route point alike.
+bool same_geometry(Candidate const &a, Candidate const &b) {
+  return std::ranges::equal(a.sized.state, b.sized.state, same_rect) &&
+         std::ranges::equal(a.routes.points, b.routes.points, same);
+}
+
 // What the facing pass turns: legs whose in-frame edge is turned round, and
 // legs whose port goes onto a cross border.
 struct Facing {
@@ -754,6 +764,59 @@ struct Scored {
   bool inflated{ false };
 };
 
+void put_pins(SearchPins const &p, std::vector<uint32_t> &w) {
+  vec_push_back(w, static_cast<uint32_t>(p.ranks.size()));
+  for (RankPin const &r : p.ranks) { vec_insert(w, w.end(), { r.state.v, r.rank }); }
+  vec_push_back(w, static_cast<uint32_t>(p.cuts.size()));
+  for (ChainCut const &k : p.cuts) { vec_insert(w, w.end(), { k.trans.v, k.leg }); }
+  vec_push_back(w, static_cast<uint32_t>(p.reverses.size()));
+  for (ReversePin const &r : p.reverses) { vec_insert(w, w.end(), { r.trans.v, r.leg }); }
+  vec_push_back(w, static_cast<uint32_t>(p.faces.size()));
+  for (FacePin const &f : p.faces) {
+    vec_insert(w, w.end(), { f.trans.v, f.leg, f.end, f.face });
+  }
+  vec_push_back(w, static_cast<uint32_t>(p.orients.size()));
+  for (OrientPin const &o : p.orients) { vec_push_back(w, o.frame.v); }
+  vec_push_back(w, static_cast<uint32_t>(p.sides.size()));
+  for (SidePin const &sp : p.sides) {
+    vec_insert(w, w.end(), { sp.trans.v, sp.leg, sp.end, sp.side });
+  }
+  vec_push_back(w, static_cast<uint32_t>(p.folds.size()));
+  for (FoldPin const &f : p.folds) {
+    vec_insert(w, w.end(), { f.frame.v, f.mode, f.layer });
+  }
+}
+
+#ifdef SCAV_TESTING
+bool same_pins(SearchPins const &a, SearchPins const &b) {
+  std::vector<uint32_t> wa;
+  std::vector<uint32_t> wb;
+  put_pins(a, wa);
+  put_pins(b, wb);
+  return wa == wb;
+}
+
+// Whether two candidates are one drawing on one set of pins.
+bool same_candidate(Candidate const &a, Candidate const &b) {
+  return (a.viable == b.viable) && (a.inflations == b.inflations) &&
+         same_rect(a.sized.chart, b.sized.chart) &&
+         same_rect(a.sized_chart, b.sized_chart) && same_geometry(a, b) &&
+         (a.routes.unplaced == b.routes.unplaced) &&
+         std::ranges::equal(a.routes.placed, b.routes.placed, same_rect) &&
+         same_pins(a.laid, b.laid);
+}
+
+bool same_cost(Cost const &a, Cost const &b) {
+  return (a.t0_violations == b.t0_violations) && (a.t1_hints == b.t1_hints) &&
+         (a.t2 == b.t2);
+}
+
+bool same_scored(Scored const &a, Scored const &b) {
+  return (a.viable == b.viable) && (a.inflated == b.inflated) &&
+         same_cost(a.cost, b.cost) && (a.share == b.share);
+}
+#endif
+
 // Phases 1 to 3 for one set of pins, then the exact objective; pure in its arguments.
 #ifdef SCAV_TESTING
 // Whether a face move is scored from the incumbent's prefix, and whether each is also
@@ -892,50 +955,9 @@ Scored score_move(Chart const &c,
     ++test_prefix_used;
   }
   if (test_prefix_verify) {
-    Candidate const full{ whole() };
+    Candidate const &full{ whole() };
     Scored const want{ scored_of(c, g, scoring, s, objective, full, labels) };
-    bool same{ (want.viable == out.viable) && (want.inflated == out.inflated) &&
-               (want.cost.t0_violations == out.cost.t0_violations) &&
-               (want.cost.t1_hints == out.cost.t1_hints) &&
-               (want.cost.t2 == out.cost.t2) && (want.share == out.share) &&
-               (full.inflations == cand.inflations) &&
-               (full.sized.state.size() == cand.sized.state.size()) &&
-               (full.routes.points.size() == cand.routes.points.size()) &&
-               (full.laid.faces.size() == cand.laid.faces.size()) &&
-               (full.laid.reverses.size() == cand.laid.reverses.size()) &&
-               (full.laid.sides.size() == cand.laid.sides.size()) };
-    for (uint32_t k = 0; same && (k < full.laid.sides.size()); ++k) {
-      same = (full.laid.sides[k].trans == cand.laid.sides[k].trans) &&
-             (full.laid.sides[k].leg == cand.laid.sides[k].leg) &&
-             (full.laid.sides[k].end == cand.laid.sides[k].end) &&
-             (full.laid.sides[k].side == cand.laid.sides[k].side);
-    }
-    for (uint32_t k = 0; same && (k < full.laid.faces.size()); ++k) {
-      FacePin const &a{ full.laid.faces[k] };
-      FacePin const &b{ cand.laid.faces[k] };
-      same = (a.trans == b.trans) && (a.leg == b.leg) && (a.end == b.end) &&
-             (a.face == b.face);
-    }
-    for (uint32_t k = 0; same && (k < full.laid.reverses.size()); ++k) {
-      same = (full.laid.reverses[k].trans == cand.laid.reverses[k].trans) &&
-             (full.laid.reverses[k].leg == cand.laid.reverses[k].leg);
-    }
-    for (uint32_t k = 0; same && (k < full.sized.state.size()); ++k) {
-      scav_rect const &a{ full.sized.state[k] };
-      scav_rect const &b{ cand.sized.state[k] };
-      same = (a.x == b.x) && (a.y == b.y) && (a.w == b.w) && (a.h == b.h);
-    }
-    for (uint32_t k = 0; same && (k < full.routes.points.size()); ++k) {
-      same = scav::same(full.routes.points[k], cand.routes.points[k]);
-    }
-    same = same && (full.routes.placed.size() == cand.routes.placed.size()) &&
-           (full.routes.unplaced == cand.routes.unplaced);
-    for (uint32_t k = 0; same && (k < full.routes.placed.size()); ++k) {
-      scav_rect const &a{ full.routes.placed[k] };
-      scav_rect const &b{ cand.routes.placed[k] };
-      same = (a.x == b.x) && (a.y == b.y) && (a.w == b.w) && (a.h == b.h);
-    }
-    if (!same) {
+    if (!same_scored(want, out) || !same_candidate(full, cand)) {
       ScopedLock const held{ test_prefix_lock };
       ++test_prefix_mismatches;
     }
@@ -1060,37 +1082,6 @@ uint32_t least_by_bound(uint32_t n,
 }
 
 #ifdef SCAV_TESTING
-// Whether a candidate labelled on its kept routes, and its score, are a full re-layout's.
-bool same_labelled(Candidate const &kept,
-                   Scored const &got,
-                   Candidate const &full,
-                   Scored const &want) {
-  auto const same_rect = [](scav_rect const &a, scav_rect const &b) {
-    return (a.x == b.x) && (a.y == b.y) && (a.w == b.w) && (a.h == b.h);
-  };
-  bool same{ (got.viable == want.viable) && (got.inflated == want.inflated) &&
-             (got.cost.t0_violations == want.cost.t0_violations) &&
-             (got.cost.t1_hints == want.cost.t1_hints) && (got.cost.t2 == want.cost.t2) &&
-             (got.share == want.share) && (kept.viable == full.viable) &&
-             (kept.inflations == full.inflations) &&
-             same_rect(kept.sized.chart, full.sized.chart) &&
-             same_rect(kept.sized_chart, full.sized_chart) &&
-             (kept.sized.state.size() == full.sized.state.size()) &&
-             (kept.routes.unplaced == full.routes.unplaced) &&
-             (kept.routes.points.size() == full.routes.points.size()) &&
-             (kept.routes.placed.size() == full.routes.placed.size()) };
-  for (uint32_t k = 0; same && (k < full.sized.state.size()); ++k) {
-    same = same_rect(kept.sized.state[k], full.sized.state[k]);
-  }
-  for (uint32_t k = 0; same && (k < full.routes.points.size()); ++k) {
-    same = scav::same(kept.routes.points[k], full.routes.points[k]);
-  }
-  for (uint32_t k = 0; same && (k < full.routes.placed.size()); ++k) {
-    same = same_rect(kept.routes.placed[k], full.routes.placed[k]);
-  }
-  return same;
-}
-
 // Scores every candidate of a bounded round whole and tallies a round whose pick or its
 // cost differs, or whose bound exceeds a whole score.
 template <typename Score>
@@ -1430,7 +1421,7 @@ Improved run_search(Chart const &c,
         if (test_label_bound_verify) {
           Routed full;
           Scored const want{ score(i, true, &full) };
-          if (!same_labelled(cand, scored, *full.cand, want)) {
+          if (!same_scored(scored, want) || !same_candidate(cand, *full.cand)) {
             ScopedLock const lock{ test_label_bound_lock };
             ++test_label_bound_mismatches;
           }
@@ -1536,29 +1527,6 @@ Improved run_search(Chart const &c,
   return out;
 }
 
-void put_pins(SearchPins const &p, std::vector<uint32_t> &w) {
-  vec_push_back(w, static_cast<uint32_t>(p.ranks.size()));
-  for (RankPin const &r : p.ranks) { vec_insert(w, w.end(), { r.state.v, r.rank }); }
-  vec_push_back(w, static_cast<uint32_t>(p.cuts.size()));
-  for (ChainCut const &k : p.cuts) { vec_insert(w, w.end(), { k.trans.v, k.leg }); }
-  vec_push_back(w, static_cast<uint32_t>(p.reverses.size()));
-  for (ReversePin const &r : p.reverses) { vec_insert(w, w.end(), { r.trans.v, r.leg }); }
-  vec_push_back(w, static_cast<uint32_t>(p.faces.size()));
-  for (FacePin const &f : p.faces) {
-    vec_insert(w, w.end(), { f.trans.v, f.leg, f.end, f.face });
-  }
-  vec_push_back(w, static_cast<uint32_t>(p.orients.size()));
-  for (OrientPin const &o : p.orients) { vec_push_back(w, o.frame.v); }
-  vec_push_back(w, static_cast<uint32_t>(p.sides.size()));
-  for (SidePin const &sp : p.sides) {
-    vec_insert(w, w.end(), { sp.trans.v, sp.leg, sp.end, sp.side });
-  }
-  vec_push_back(w, static_cast<uint32_t>(p.folds.size()));
-  for (FoldPin const &f : p.folds) {
-    vec_insert(w, w.end(), { f.frame.v, f.mode, f.layer });
-  }
-}
-
 // The inverse of `put_pins`, reading from `at` and advancing it.
 SearchPins get_pins(int32_t const *w, uint32_t &at) {
   auto const next = [&]() { return static_cast<uint32_t>(w[at++]); };
@@ -1606,38 +1574,9 @@ uint32_t test_search_memo_mismatches{ 0 };
 // Per row of the last searched layout: each schedule's cost, and the one kept.
 std::vector<Cost> test_schedule_first, test_schedule_second, test_schedule_kept;
 
-bool same_pins(SearchPins const &a, SearchPins const &b) {
-  std::vector<uint32_t> wa;
-  std::vector<uint32_t> wb;
-  put_pins(a, wa);
-  put_pins(b, wb);
-  return wa == wb;
-}
-
 bool same_result(Improved const &a, Improved const &b) {
-  if ((a.viable != b.viable) || (a.cost.t0_violations != b.cost.t0_violations) ||
-      (a.cost.t1_hints != b.cost.t1_hints) || (a.cost.t2 != b.cost.t2) ||
-      !same_pins(a.held, b.held) || !same_pins(a.best.laid, b.best.laid) ||
-      (a.best.inflations != b.best.inflations) ||
-      (a.best.routes.unplaced != b.best.routes.unplaced) ||
-      (a.best.sized.state.size() != b.best.sized.state.size()) ||
-      (a.best.routes.points.size() != b.best.routes.points.size()) ||
-      (a.best.routes.placed.size() != b.best.routes.placed.size())) {
-    return false;
-  }
-  auto const same_rect{ [](scav_rect const &ra, scav_rect const &rb) {
-    return (ra.x == rb.x) && (ra.y == rb.y) && (ra.w == rb.w) && (ra.h == rb.h);
-  } };
-  for (uint32_t k = 0; k < a.best.sized.state.size(); ++k) {
-    if (!same_rect(a.best.sized.state[k], b.best.sized.state[k])) { return false; }
-  }
-  for (uint32_t k = 0; k < a.best.routes.points.size(); ++k) {
-    if (!same(a.best.routes.points[k], b.best.routes.points[k])) { return false; }
-  }
-  for (uint32_t k = 0; k < a.best.routes.placed.size(); ++k) {
-    if (!same_rect(a.best.routes.placed[k], b.best.routes.placed[k])) { return false; }
-  }
-  return true;
+  return (a.viable == b.viable) && same_cost(a.cost, b.cost) &&
+         same_pins(a.held, b.held) && same_candidate(a.best, b.best);
 }
 #endif
 
@@ -2172,26 +2111,8 @@ bool layout_run(Chart &c,
   // Every row kicks at once, touching only its own slots; a row that converged to an
   // earlier row's drawing is not kicked again.
   auto const same_drawing = [&](uint32_t a, uint32_t b) {
-    SizedLayout const &za{ candidates[a].sized };
-    SizedLayout const &zb{ candidates[b].sized };
-    if (!(cost[a].t0_violations == cost[b].t0_violations) || (cost[a].t2 != cost[b].t2) ||
-        (za.state.size() != zb.state.size()) ||
-        (candidates[a].routes.points.size() != candidates[b].routes.points.size())) {
-      return false;
-    }
-    for (uint32_t k = 0; k < za.state.size(); ++k) {
-      scav_rect const &ra{ za.state[k] };
-      scav_rect const &rb{ zb.state[k] };
-      if ((ra.x != rb.x) || (ra.y != rb.y) || (ra.w != rb.w) || (ra.h != rb.h)) {
-        return false;
-      }
-    }
-    for (uint32_t k = 0; k < candidates[a].routes.points.size(); ++k) {
-      if (!same(candidates[a].routes.points[k], candidates[b].routes.points[k])) {
-        return false;
-      }
-    }
-    return true;
+    return (cost[a].t0_violations == cost[b].t0_violations) &&
+           (cost[a].t2 == cost[b].t2) && same_geometry(candidates[a], candidates[b]);
   };
   if (budget != 0) {
     // Decided before any kick, which replaces a row's drawing.
