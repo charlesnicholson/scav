@@ -1,7 +1,7 @@
 # How scav lays out a statechart
 
 `scav-explained.html` is an interactive walk through scav's layout: the model,
-decomposition, ordering, sizing, routing, labels, the cost, the search, what makes
+decomposition, ordering, sizing, routing, labels, decorated states, the cost, the search, what makes
 it fast, and determinism, with a glossary. Every real drawing on the page is scav's
 own output for a corpus chart; the algorithm figures run small, correct toy
 implementations in the page.

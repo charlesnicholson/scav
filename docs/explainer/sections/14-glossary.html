@@ -1,4 +1,4 @@
-<section class="sx" id="glossary" data-toc="13 · Glossary">
+<section class="sx" id="glossary" data-toc="14 · Glossary">
   <style>
     .gl { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 2px 24px; margin: 8px 0 0; max-width: 1180px; }
     .gl-item { padding: 8px 0; border-bottom: 1px solid var(--grid); break-inside: avoid; }
@@ -16,6 +16,7 @@
   <dl class="gl">
     <div class="gl-item" data-term="anchor (label)"><dt>Anchor (label)</dt><dd>Midpoint of a route's longest horizontal leg; labels are pulled toward it. <a href="#labels">→ labels</a></dd></div>
     <div class="gl-item" data-term="attachment point"><dt>Attachment point</dt><dd>One of eight points on a label box where its leader ends. <a href="#labels">→ labels</a></dd></div>
+    <div class="gl-item" data-term="band"><dt>Band</dt><dd>Room a state reserves around its submachine area (<code>h_before</code>, <code>h_after</code>, <code>w_before</code>, <code>w_after</code>); every band is an obstacle. <a href="#decorations">→ decorated states</a></dd></div>
     <div class="gl-item" data-term="bend"><dt>Bend</dt><dd>A route vertex where the direction changes; 512 in Tier 2. <a href="#cost">→ cost</a></dd></div>
     <div class="gl-item" data-term="bend node"><dt>Bend node</dt><dd>A dummy node chaining a long edge through an intermediate rank; a routing waypoint. <a href="#order">→ order</a></dd></div>
     <div class="gl-item" data-term="bend penalty"><dt>Bend penalty</dt><dd>The router's cost per turn: one <code>rank_sep</code> (576). <a href="#route">→ route</a></dd></div>
@@ -42,6 +43,7 @@
     <div class="gl-item" data-term="fold / piece"><dt>Fold / piece</dt><dd>Cutting a long run of ranks into pieces that are packed. <a href="#size">→ size</a></dd></div>
     <div class="gl-item" data-term="frame"><dt>Frame</dt><dd>One submachine laid out as its own layered graph. <a href="#decompose">→ decompose</a></dd></div>
     <div class="gl-item" data-term="grid unit"><dt>Grid unit</dt><dd>1/16 pt; every coordinate is an integer number of them. <a href="#principles">→ principles</a></dd></div>
+    <div class="gl-item" data-term="header"><dt>Header</dt><dd>A state's name, and under a rule its description, in its <code>h_before</code> band; a wall. <a href="#decorations">→ decorated states</a></dd></div>
     <div class="gl-item" data-term="hierarchy-crossing transition"><dt>Hierarchy-crossing transition</dt><dd>A transition whose ends lie in different submachines. <a href="#intro">→ intro</a></dd></div>
     <div class="gl-item" data-term="holder"><dt>Holder</dt><dd>Where a label may lie: inside every state enclosing both ends. <a href="#labels">→ labels</a></dd></div>
     <div class="gl-item" data-term="inflation retry"><dt>Inflation retry</dt><dd>Widening spacing and rerouting, up to 8 times, when a net is unreachable. <a href="#route">→ route</a></dd></div>
@@ -54,6 +56,8 @@
     <div class="gl-item" data-term="leader"><dt>Leader</dt><dd>The invisible half-em link from a label's route to its box. <a href="#labels">→ labels</a></dd></div>
     <div class="gl-item" data-term="level 1"><dt>Level 1</dt><dd>Steepest descent over pins: take the best improving move, repeat. <a href="#search">→ search</a></dd></div>
     <div class="gl-item" data-term="level 2"><dt>Level 2</dt><dd>Sixteen whole-chart sizing settings (rows), each searched; the cheapest ships. <a href="#search">→ search</a></dd></div>
+    <div class="gl-item" data-term="lined face"><dt>Lined face</dt><dd>A face of a state that one of its bands covers; no port sits on it. <a href="#decorations">→ decorated states</a></dd></div>
+    <div class="gl-item" data-term="loop room"><dt>Loop room</dt><dd>Room below a state's submachine area holding its internal self-transitions, one loop per row. <a href="#decorations">→ decorated states</a></dd></div>
     <div class="gl-item" data-term="loose tier"><dt>Loose tier</dt><dd>The label fallback: anchored and inside its holder, but may overlap. <a href="#labels">→ labels</a></dd></div>
     <div class="gl-item" data-term="memo"><dt>Memo</dt><dd>A cache keyed on every value a step reads, so hits are exact. <a href="#principles">→ principles</a></dd></div>
     <div class="gl-item" data-term="net"><dt>Net</dt><dd>One routed segment of a transition. <a href="#route">→ route</a></dd></div>
