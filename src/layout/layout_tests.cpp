@@ -382,6 +382,7 @@ TEST_CASE("layout: routes are orthogonal, meet borders, and loop on either side"
     REQUIRE(r.len >= 4);
     CHECK(row_of<scav_span>(c, "scav.geom.port", t).len == 0);
     std::vector<scav_point> loop;
+    loop.reserve(r.len);
     for (uint32_t k = 0; k < r.len; ++k) {
       loop.push_back(row_of<scav_point>(c, "scav.geom.point", r.off + k));
     }

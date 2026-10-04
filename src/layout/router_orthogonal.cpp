@@ -690,8 +690,9 @@ void ortho_seat_loops(std::vector<RouteNet> const &nets,
     uint32_t const b{ net.src_obstacle };
     if ((net.loop <= 0) || (b >= boxes.size()) || (net.dst_obstacle != b)) { continue; }
     scav_rect const &r{ boxes[b] };
-    uint32_t const face{ face_of(at[2 * n], r) };
-    if ((face == INVALID) || (face_of(at[(2 * n) + 1], r) != face)) { continue; }
+    uint32_t const slot{ 2 * n };
+    uint32_t const face{ face_of(at[slot], r) };
+    if ((face == INVALID) || (face_of(at[slot + 1], r) != face)) { continue; }
     bool const along_y{ face < 2 };
     int32_t const start{ along_y ? r.y : r.x };
     int32_t const len{ along_y ? r.h : r.w };
@@ -702,7 +703,8 @@ void ortho_seat_loops(std::vector<RouteNet> const &nets,
     for (uint32_t m = 0; m < nets.size(); ++m) {
       for (uint32_t end = 0; (m != n) && (end < 2); ++end) {
         uint32_t const box{ (end == 0) ? nets[m].src_obstacle : nets[m].dst_obstacle };
-        scav_point const seat{ at[(2 * m) + end] };
+        uint32_t const other{ (2 * m) + end };
+        scav_point const seat{ at[other] };
         if ((box == b) && (face_of(seat, r) == face)) {
           vec_push_back(taken, along_y ? seat.y : seat.x);
         }
@@ -724,13 +726,12 @@ void ortho_seat_loops(std::vector<RouteNet> const &nets,
     bool const ends_lo{ best_lo == lo };
     bool const ends_hi{ best_hi == hi };
     int32_t const room{ best_hi - best_lo };
-    int32_t const apart{ imin(pitch,
-                              room / ((ends_lo && ends_hi)   ? 1
-                                      : (ends_lo || ends_hi) ? 2
-                                                             : 3)) };
+    int32_t parts{ 3 };  // a run between two seats keeps a third each side
+    if (ends_lo || ends_hi) { parts = (ends_lo && ends_hi) ? 1 : 2; }
+    int32_t const apart{ imin(pitch, room / parts) };
     int32_t const mid{ best_lo + (room / 2) };
-    int32_t &first{ along_y ? at[2 * n].y : at[2 * n].x };
-    int32_t &second{ along_y ? at[(2 * n) + 1].y : at[(2 * n) + 1].x };
+    int32_t &first{ along_y ? at[slot].y : at[slot].x };
+    int32_t &second{ along_y ? at[slot + 1].y : at[slot + 1].x };
     first = mid - (apart / 2);
     second = first + apart;
   }
@@ -1630,14 +1631,15 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
       // the cost vector then scores as a Tier-0 violation. A loop keeps its corridor.
       shape.clear();
       bool const loop{ net.loop > 0 };
-      vec_push_back(shape, loop ? seat[2 * n] : net.src);
+      uint32_t const slot{ 2 * n };
+      vec_push_back(shape, loop ? seat[slot] : net.src);
       for (uint32_t k = 0; k < net.waypoint_len; ++k) {
         vec_push_back(shape, in.waypoints[net.waypoint_off + k]);
       }
       for (uint32_t k = 1; loop && ((k + 1) < at.len); ++k) {
         vec_push_back(shape, anchors[at.off + k]);
       }
-      vec_push_back(shape, loop ? seat[(2 * n) + 1] : net.dst);
+      vec_push_back(shape, loop ? seat[slot + 1] : net.dst);
     }
 
     uint32_t const off{ static_cast<uint32_t>(out.points.size()) };

@@ -1477,6 +1477,8 @@ TEST_CASE("gauntlet: a route leaving a composite turns one corner into its targe
   }
 }
 
+namespace {
+
 // The chart's states, so a test can name the ones its space requests are for.
 Chart loaded(char const *name) {
   std::string path{ SCAV_TEST_DATA_DIR "/charts/gauntlet/" };
@@ -1519,6 +1521,8 @@ uint32_t from_named(Chart const &c, uint32_t src) {
   }
   return INVALID;
 }
+
+}  // namespace
 
 TEST_CASE("gauntlet: a header walls its face, so the port from above moves off it") {
   // `above` with its root turned to run down puts Source over Box, and the facing
