@@ -51,7 +51,8 @@ def chain_for(events, trans, model):
     for e in events:
         k = e["kind"]
         if (k in ("edge_reversed", "route_degraded", "route_walled", "label_centred",
-                  "route_reseated", "edge_chained", "gap_charged") and e["seg"] in segs):
+                  "route_reseated", "route_crossed", "edge_chained", "gap_charged")
+                and e["seg"] in segs):
             out.append(e)
         elif k == "node_placed" and e.get("bend_of_seg") in segs:
             out.append(e)
@@ -84,6 +85,8 @@ def describe(e, model):
         return "  crossed the walls that enclose an end"
     if k == "route_reseated":
         return "  routed only without clearance bumpers"
+    if k == "route_crossed":
+        return "  found no way clear of its own earlier leg and crossed it"
     if k == "label_centred":
         return "  label found no seat beside its route; centred on it"
     if k == "gap_charged" and e["cause"] == "held":

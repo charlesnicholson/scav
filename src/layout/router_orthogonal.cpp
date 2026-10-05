@@ -1196,11 +1196,69 @@ struct RouteScratch {
   std::vector<scav_point> piece, shape;
   std::vector<Seat> seats;
   std::vector<int32_t> stuck;
+  std::vector<uint32_t> closed;  // `close_route`'s record of the passes it cleared
 };
 
 RouteScratch &route_scratch() {
   thread_local RouteScratch s;
   return s;
+}
+
+// Clears every open pass of `g` that crosses, touches or runs along an axis-aligned piece
+// of the `len` points at `pts`, recording each as `2 * i` in `pass_h`, `2 * i + 1` in
+// `pass_v`.
+void close_route(OrthoGrid &g,
+                 scav_point const *pts,
+                 uint32_t len,
+                 std::vector<uint32_t> &closed) {
+  uint32_t const nx{ g.nx() };
+  uint32_t const ny{ g.ny() };
+  if ((nx < 2) || (ny < 2)) { return; }
+  auto const shut = [&](bool vertical, uint32_t i) {
+    std::vector<uint8_t> &pass{ vertical ? g.pass_v : g.pass_h };
+    if (pass[i] == 0) { return; }
+    pass[i] = 0;
+    vec_push_back(closed, (2 * i) + (vertical ? 1U : 0U));
+  };
+  for (uint32_t k = 0; (k + 1) < len; ++k) {
+    scav_point const a{ pts[k] };
+    scav_point const b{ pts[k + 1] };
+    bool const upright{ (a.x == b.x) && (a.y != b.y) };
+    if (!upright && ((a.y != b.y) || (a.x == b.x))) { continue; }
+    // The piece lies on `on` among the lines `fix` and spans `[lo, hi]` among `run`.
+    std::vector<int32_t> const &fix{ upright ? g.xs : g.ys };
+    std::vector<int32_t> const &run{ upright ? g.ys : g.xs };
+    int32_t const on{ upright ? a.x : a.y };
+    int32_t const lo{ upright ? imin(a.y, b.y) : imin(a.x, b.x) };
+    int32_t const hi{ upright ? imax(a.y, b.y) : imax(a.x, b.x) };
+    uint32_t const nf{ static_cast<uint32_t>(fix.size()) };
+    uint32_t const nr{ static_cast<uint32_t>(run.size()) };
+    // The pass from line `f` to `f + 1` on line `r`, and from `r` to `r + 1` on line `f`.
+    auto const across = [&](uint32_t f, uint32_t r) {
+      return upright ? ((r * (nx - 1)) + f) : ((f * nx) + r);
+    };
+    auto const along = [&](uint32_t f, uint32_t r) {
+      return upright ? ((r * nx) + f) : ((f * (nx - 1)) + r);
+    };
+    uint32_t const f{ ortho_index_of(fix, on) };
+    if (fix[f] > on) { continue; }
+    bool const on_line{ fix[f] == on };
+    uint32_t r0{ ortho_index_of(run, lo) };
+    if (run[r0] < lo) { ++r0; }
+    for (uint32_t r = r0; (r < nr) && (run[r] <= hi); ++r) {
+      if ((f + 1) < nf) { shut(!upright, across(f, r)); }
+      if (on_line && (f > 0)) { shut(!upright, across(f - 1, r)); }
+    }
+    for (uint32_t r = ortho_index_of(run, lo); on_line && ((r + 1) < nr) && (run[r] < hi);
+         ++r) {
+      if (run[r + 1] > lo) { shut(upright, along(f, r)); }
+    }
+  }
+}
+
+// Reopens the passes `close_route` recorded in `closed`.
+void reopen_route(OrthoGrid &g, std::vector<uint32_t> const &closed) {
+  for (uint32_t const e : closed) { (((e & 1U) != 0) ? g.pass_v : g.pass_h)[e >> 1U] = 1; }
 }
 
 // The search plane a leg from `a` to `b` runs in: 0 horizontal, 1 vertical,
@@ -1626,7 +1684,23 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
     };
 
     int32_t reseated{ 0 };
-    bool ok{ (why == RouteFailure::None) && attempt(g) };
+    bool ok{ false };
+    if (why == RouteFailure::None) {
+      // A net kept apart searches first with its `apart` net's route closed.
+      sc.closed.clear();
+      if (net.apart < n) {
+        scav_span const had{ out.net_points[net.apart] };
+        close_route(g, out.points.data() + had.off, had.len, sc.closed);
+      }
+      ok = attempt(g);
+      if (!sc.closed.empty()) {
+        reopen_route(g, sc.closed);
+        if (!ok) {
+          ok = attempt(g);
+          trace_emit({ .kind = TraceKind::RouteCrossed, .seg = { .seg = net.seg } });
+        }
+      }
+    }
     if ((why == RouteFailure::None) && !ok) {
       if (!tight_built) {
         tight_built = true;

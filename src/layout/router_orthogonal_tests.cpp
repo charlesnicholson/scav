@@ -4,12 +4,14 @@
 #include "layout/router_orthogonal.h"
 
 #include "layout/router.h"
+#include "layout/trace.h"
 #include "scav/scav_layout.h"
 #include "scav_int.h"
 #include "scav_stable_sort.h"
 
 #include "doctest.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <utility>
@@ -2824,6 +2826,71 @@ TEST_CASE("ortho: a seat in an occupied span moves to its face's nearest free po
   CHECK(at[1].x != 2000);
   CHECK(at[3].y == 0);  // the top face, nearest its aim
   CHECK(stuck == std::vector<int32_t>{ 0, 0 });
+}
+
+TEST_CASE("ortho: a net kept apart from an earlier one goes round it where a way is open") {
+  // Net 0 runs down from `A` to the region's foot; net 1 runs across from the right edge
+  // to the left, through net 0's line unless it goes round `A`'s top.
+  RouteInput in;
+  in.profile = profile();
+  in.region = rect(0, 0, 4000, 3000);
+  in.obstacles.push_back(rect(1500, 500, 1000, 600));
+  RouteNet down{ .src = pt(2000, 800), .dst = pt(2000, 3000) };
+  down.src_obstacle = 0;
+  in.nets.push_back(down);
+  in.nets.push_back({ .src = pt(4000, 2000), .dst = pt(0, 2000) });
+  auto const knots = [](RouteOutput const &out) {
+    uint32_t n{ 0 };
+    scav_span const a{ out.net_points[0] };
+    scav_span const b{ out.net_points[1] };
+    for (uint32_t i = 0; (i + 1) < a.len; ++i) {
+      scav_point const p{ out.points[a.off + i] };
+      scav_point const q{ out.points[a.off + i + 1] };
+      for (uint32_t j = 0; (j + 1) < b.len; ++j) {
+        scav_point const r{ out.points[b.off + j] };
+        scav_point const t{ out.points[b.off + j + 1] };
+        bool const x_meet{ (imin(p.x, q.x) <= imax(r.x, t.x)) &&
+                           (imin(r.x, t.x) <= imax(p.x, q.x)) };
+        bool const y_meet{ (imin(p.y, q.y) <= imax(r.y, t.y)) &&
+                           (imin(r.y, t.y) <= imax(p.y, q.y)) };
+        if (x_meet && y_meet) { ++n; }
+      }
+    }
+    return n;
+  };
+
+  RouteOutput free;
+  ORTHO.route(in, free);
+  REQUIRE(free.net_points.size() == 2);
+  CHECK(knots(free) == 1);
+
+  in.nets[1].apart = 0;
+  RouteOutput apart;
+  ORTHO.route(in, apart);
+  REQUIRE(apart.net_points.size() == 2);
+  CHECK(apart.metrics[1].failed == RouteFailure::None);
+  CHECK(knots(apart) == 0);
+  scav_span const across{ apart.net_points[1] };
+  for (uint32_t k = 0; k < across.len; ++k) {
+    CHECK(apart.points[across.off + k].y <= 2000);
+  }
+
+  // `A` in the region's top right corner: no way round, so net 1 crosses and says so.
+  in.obstacles[0] = rect(3000, 0, 1000, 1100);
+  in.nets[0].src = pt(3500, 800);
+  in.nets[0].dst = pt(3500, 3000);
+  in.nets[1].seg = 7;
+  LayoutTrace trace;
+  trace_sink_set(&trace);
+  RouteOutput walled;
+  ORTHO.route(in, walled);
+  trace_sink_set(nullptr);
+  REQUIRE(walled.net_points.size() == 2);
+  CHECK(walled.metrics[1].failed == RouteFailure::None);
+  CHECK(knots(walled) == 1);
+  CHECK(std::ranges::count_if(trace.events, [](TraceEvent const &e) {
+          return (e.kind == TraceKind::RouteCrossed) && (e.seg.seg == 7);
+        }) == 1);
 }
 
 TEST_CASE("ortho: a loop from a box to a point on its face runs its reach out") {

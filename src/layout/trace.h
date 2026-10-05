@@ -45,6 +45,7 @@ enum class TraceKind : uint16_t {
   RouteWalled,    // a net crossed the walls that enclose one of its ends
   LabelCentred,   // a label found no seat beside its route and was centred on it
   RouteReseated,  // a net routed only on the grid without clearance bumpers
+  RouteCrossed,   // a net found no way clear of its `RouteNet::apart` net
 };
 
 // What a rank boundary's charge is for; `GapCharged.pass`. `Held` adds nothing: the

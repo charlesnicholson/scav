@@ -285,7 +285,7 @@ bool same_but_shifted(RouteFrameCache const &a,
         (p.waypoint_off != q.waypoint_off) || (p.waypoint_len != q.waypoint_len) ||
         (p.src_face != q.src_face) || (p.dst_face != q.dst_face) || (p.lean != q.lean) ||
         (p.loop != q.loop) || (p.src_clear != q.src_clear) ||
-        (p.dst_clear != q.dst_clear) || !moved_pt(p.src, q.src) ||
+        (p.dst_clear != q.dst_clear) || (p.apart != q.apart) || !moved_pt(p.src, q.src) ||
         !moved_pt(p.dst, q.dst)) {
       return false;
     }
@@ -827,6 +827,11 @@ void route_transitions(Routes &out,
       }
       net.trans = g.segments[pn.seg].trans.v;
       net.seg = pn.seg;
+      // An out-and-back route's legs in one frame keep clear of each other.
+      for (uint32_t k = 0; k < in.nets.size(); ++k) {
+        RouteNet const &had{ in.nets[k] };
+        if ((had.trans == net.trans) && ((had.seg + 1) < net.seg)) { net.apart = k; }
+      }
       if (pn.seg < z.lean.size()) { net.lean = z.lean[pn.seg]; }
       trace_emit({ .kind = TraceKind::NetPlanned,
                    .net = { .seg = pn.seg,

@@ -30,6 +30,7 @@ struct RouteNet {
   int32_t loop{ 0 };
   int32_t src_clear{ 0 }, dst_clear{ 0 };     // the least straight run at each end
   uint32_t trans{ INVALID }, seg{ INVALID };  // the caller's ids, read only by the trace
+  uint32_t apart{ INVALID };                  // -> an earlier net this one keeps clear of
 };
 
 // Face of `r` that `at` lies on: 0 left, 1 right, 2 top, 3 bottom, else INVALID. Corners

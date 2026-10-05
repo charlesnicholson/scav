@@ -2754,22 +2754,10 @@ TEST_CASE("gauntlet: unsearched, an external route out of a machine crosses no o
   }
 }
 
-TEST_CASE(
-    "gauntlet: pinned to leave down past its own way back in, a route crosses itself") {
-  // `bypass` unsearched, its exit on `Outer`'s bottom and its way back in on the right,
-  // level with `B` above `A`.
-  Laid probe;
-  lay("bypass.scav", readable(), probe);
-  uint32_t const t{ between(probe.c, "A", "B") };
-  REQUIRE(t != INVALID);
-  SearchPins const seed{
-    .ends = { { .trans = TransId{ t }, .leg = 0, .end = 1, .face = 3 },
-              { .trans = TransId{ t }, .leg = 2, .end = 0, .face = 1 },
-              { .trans = TransId{ t }, .leg = 3, .end = 0, .face = 1 } },
-    .orients = { { .frame = SubmachineId{ 2 } } },
-  };
-  Laid l;
-  lay("bypass.scav", one_row(readable()), l, {}, &seed);
+namespace {
+
+// Pairs of transition `t`'s non-adjacent route segments that cross.
+uint32_t knots_of(Laid const &l, uint32_t t) {
   scav_span const route{ l.r.route[t] };
   uint32_t knots{ 0 };
   for (uint32_t i = 0; (i + 1) < route.len; ++i) {
@@ -2782,6 +2770,55 @@ TEST_CASE(
       }
     }
   }
-  CHECK(knots == 1);
+  return knots;
+}
+
+// `chart` unsearched at `readable` under `seed`, its `src -> dst` index in `t`.
+void lay_pinned(char const *chart,
+                char const *src,
+                char const *dst,
+                SearchPins seed,
+                Laid &l,
+                uint32_t &t) {
+  t = between(loaded(chart), src, dst);
+  REQUIRE(t != INVALID);
+  for (EndPin &pin : seed.ends) { pin.trans = TransId{ t }; }
+  lay(chart, one_row(readable()), l, {}, &seed);
+}
+
+}  // namespace
+
+TEST_CASE("gauntlet: pinned so its own legs must cross, a route crosses itself") {
+  // `A` fills `Outer`'s top right corner: its leg down to the bottom walls the right face
+  // off from `Inner`, so the way back in on the right crosses it, and Tier 0 counts that.
+  Laid l;
+  uint32_t t{ INVALID };
+  lay_pinned("bypass.scav",
+             "A",
+             "B",
+             { .ends = { { .leg = 0, .end = 1, .face = 3 },
+                         { .leg = 2, .end = 0, .face = 1 },
+                         { .leg = 3, .end = 0, .face = 1 } },
+               .orients = { { .frame = SubmachineId{ 2 } } } },
+             l,
+             t);
+  CHECK(knots_of(l, t) == 1);
   CHECK(cost_columns(l.c, l.g, one_row(readable())).self_crossing == 1);
+}
+
+TEST_CASE(
+    "gauntlet: pinned out the bottom and back in on the left, a route rounds its leg") {
+  // `headed`'s way back in to `Busy` goes round `Idle` rather than across the leg from
+  // `Idle` down to `Box`'s bottom.
+  Laid l;
+  uint32_t t{ INVALID };
+  lay_pinned(
+      "headed.scav",
+      "Idle",
+      "Work",
+      { .ends = { { .leg = 0, .end = 1, .face = 3 }, { .leg = 2, .end = 0, .face = 0 } } },
+      l,
+      t);
+  CHECK(knots_of(l, t) == 0);
+  CHECK(l.r.failed[t] == 0);
 }
