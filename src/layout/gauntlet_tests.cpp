@@ -636,7 +636,8 @@ TEST_CASE("gauntlet: a fan-in's arrivals are four arrows, none inside another") 
 
 TEST_CASE("gauntlet: an endpoint that is also a crossing is one point, not two" *
           doctest::test_suite("full")) {
-  // A port slot on an endpoint's own border is that end's route point.
+  // A port slot on an endpoint's own border is that end's route point, except on an
+  // external route, where the leg between them is a loop.
   for (char const *name : GAUNTLET) {
     for (scav_profile const &p : { readable(), compact() }) {
       CAPTURE(name);
@@ -657,8 +658,11 @@ TEST_CASE("gauntlet: an endpoint that is also a crossing is one point, not two" 
           scav_point const at{ .x = slot.x, .y = slot.y };
           CAPTURE(t);
           CAPTURE(k);
-          if (on == tr.src) { CHECK(same(l.r.points[route.off], at)); }
-          if (on == tr.dst) { CHECK(same(l.r.points[route.off + route.len - 1], at)); }
+          bool const loop{ tr.kind == TransKind::External };
+          if (on == tr.src) { CHECK(same(l.r.points[route.off], at) != loop); }
+          if (on == tr.dst) {
+            CHECK(same(l.r.points[route.off + route.len - 1], at) != loop);
+          }
         }
       }
     }
