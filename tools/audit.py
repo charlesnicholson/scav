@@ -144,14 +144,8 @@ def enclosing(doc, state):
 
 
 def corner_arc(doc, state):
-    """Corner-arc radius of `state`, matching `state_corner_radius` in scav_layout.h:
-    an eighth of the shorter side capped at the ring; 0 for a non-normal or empty box.
-    """
-    bx, _, bw, bh = doc["geometry"]["state"][state]
-    if doc["states"][state]["kind"] != "normal" or not (bw and bh):
-        return 0
-    ring = max(doc["geometry"]["state_before"][state][0] - bx, 0)
-    return min(min(bw, bh) // 8, ring)
+    """Corner-arc radius of `state`, as the dump's `state_corner` gives it."""
+    return doc["geometry"]["state_corner"][state]
 
 
 def on_exit(pt, pts, doc, state):

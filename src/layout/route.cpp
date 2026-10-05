@@ -503,20 +503,7 @@ void route_transitions(Routes &out,
     vec_push_back(loop_points, at(leg, first));
     vec_push_back(loop_points, at(leg, first + lane));
     vec_push_back(loop_points, at(edge, first + lane));
-    std::array<scav_point, 2> const ends{ loop_points[off], loop_points[off + 3] };
-    std::array<uint32_t, 2> const face{ face_of(ends[0], r), face_of(ends[1], r) };
-    for (uint32_t k = 0; k < 2; ++k) {
-      if ((face[k] == INVALID) || ((k == 1) && (face[1] == face[0]))) { continue; }
-      bool const along_y{ face[k] < 2 };
-      int32_t const a{ along_y ? ends[k].y : ends[k].x };
-      int32_t const other{ along_y ? ends[1 - k].y : ends[1 - k].x };
-      int32_t const b{ (face[1 - k] == face[k]) ? other : a };
-      vec_push_back(occupied,
-                    { .obstacle = st,
-                      .face = face[k],
-                      .lo = imin(a, b) - clear,
-                      .len = (imax(a, b) - imin(a, b)) + (2 * clear) });
-    }
+    loop_occupied({ loop_points[off], loop_points[off + 3] }, r, st, clear, occupied);
   }
 
   // A point on face `face` of state `st` moved along it out of the state's occupied spans,

@@ -23,25 +23,22 @@ KICKS_TRIED = [(4, 8, "reverse t1 leg 0 (frame 0)"), (9, 12, "reverse t9 leg 0 (
                (28, 28, "rest: orient frame 2 on top of orient frame 0")]
 
 
-WEIGHT = {"bends": 512, "corridor": 48, "crossings": 512, "excess_len": 4, "adjacency": 16, "label": 768,
-          "label_near": 48, "aspect": 2, "area": 1, "crowding": 512, "length": 8, "transit_bends": 768,
-          "whitespace": 0}  # the default profile's w_*
-EM = 192
 PER_EM = {"corridor": 1, "excess_len": 1, "label_near": 1, "aspect": 1, "crowding": 1, "length": 1,
           "area": 2, "whitespace": 2}  # cost.cpp weighted_terms: lengths in ems, areas in ems squared, by ceiling
 
 
-def weighted(terms: dict) -> int:
-    return sum(WEIGHT[k] * -(-terms[k] // EM ** PER_EM.get(k, 0)) for k in X.TERMS)
+def weighted(terms: dict, prof: dict) -> int:
+    """The Tier 2 sum under the dump's profile weights and em."""
+    return sum(prof["w_" + k] * -(-terms[k] // prof["em"] ** PER_EM.get(k, 0)) for k in X.TERMS)
 
 
 def with_bound(scav: X.Scav, row: list, base: list, m: dict) -> dict:
     """`m` laid out again on `base`, with the lower bound a labelled round scores it by
     (layout.cpp scored_of unlabelled): no label terms, and aspect unpriced unless every label fits."""
     g, doc = X.geometry(scav, "brew", row + base + pin_of(m), with_svg=False)
-    c, chart = doc["geometry"]["cost"], doc["geometry"]["chart"]
-    if weighted(c) != c["t2"]:
-        raise RuntimeError(f"brew {pin_of(m)}: weights give {weighted(c)}, scav {c['t2']}")
+    c, chart, prof = doc["geometry"]["cost"], doc["geometry"]["chart"], doc["geometry"]["profile"]
+    if weighted(c, prof) != c["t2"]:
+        raise RuntimeError(f"brew {pin_of(m)}: weights give {weighted(c, prof)}, scav {c['t2']}")
     b = dict(c, label=0, label_near=0)
     if not all(r[2] <= chart[2] and r[3] <= chart[3] for r in doc["geometry"]["placed"]):
         b["aspect"] = 0
@@ -51,7 +48,8 @@ def with_bound(scav: X.Scav, row: list, base: list, m: dict) -> dict:
     ys += [q[1] for leg in doc["geometry"]["route"] for q in leg]
     inside = all(r[0] >= min(xs) and r[1] >= min(ys) and r[0] + r[2] <= max(xs) and r[1] + r[3] <= max(ys)
                  for r in doc["geometry"]["placed"])
-    return dict(m, bound=[c["t0_violations"] - c["label_over_box"] - c["label_over_route"], weighted(b)],
+    return dict(m, bound=[c["t0_violations"] - c["tier0"]["label_over_box"] - c["tier0"]["label_over_route"],
+                         weighted(b, prof)],
                 inside=inside, rederived=(g["cost"]["t0"], g["cost"]["t2"]) == (m["t0"], m["t2"]))
 
 

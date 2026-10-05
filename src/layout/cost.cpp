@@ -797,9 +797,9 @@ Scratch &scratch() {
 }
 
 int32_t tier0_of(CostTerms const &t) {
-  return t.through_box + t.through_band + t.box_overlap + t.vanished + t.flush +
-         t.through_region + t.retrace + t.label_over_box + t.label_over_route +
-         t.label_far + t.loop_unanchored;
+  int32_t sum{ 0 };
+  for (int32_t const n : tier0_terms(t)) { sum += n; }
+  return sum;
 }
 
 }  // namespace
@@ -1340,6 +1340,13 @@ CostTerms layout_cost(Chart const &c,
                       scav_spaces const &s,
                       std::vector<scav_rect> const &placed) {
   return cost_columns(c, decompose(c), p, s, placed);
+}
+
+std::array<int32_t, TIER0_TERMS> tier0_terms(CostTerms const &t) {
+  return { t.through_box, t.through_band,   t.box_overlap,
+           t.vanished,    t.flush,          t.through_region,
+           t.retrace,     t.label_over_box, t.label_over_route,
+           t.label_far,   t.loop_unanchored };
 }
 
 Cost cost_of(CostTerms const &t, scav_profile const &p) {

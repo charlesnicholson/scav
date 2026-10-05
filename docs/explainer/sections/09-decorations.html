@@ -28,9 +28,9 @@
   <div data-fig="decor-faces"></div>
 
   <h3>Loops inside a state</h3>
-  <p>An internal or local self-transition is a loop inside its source. A state's loops share its <b>loop room</b>, which phase 2 reserves in its <b>free interior</b>, the interior inside the <code>pad</code> ring less the four bands. The room takes one of eight <b>placements</b>: a face of the free interior, at that face's leading or trailing end. Unpinned, it takes the right face's trailing end, or the left face's where a band lines the right face and none lines the left. A <code>LoopPin</code> sets the placement, and the <a href="#search">search</a> tries the other seven.</p>
+  <p>An internal or local self-transition is a loop inside its source. A state's loops share its <b>loop room</b>, which phase 2 reserves in its <b>free interior</b>, the interior inside the <code>pad</code> ring less the four bands. The room takes one of eight <b>placements</b>: a face of the free interior, at that face's leading or trailing end. Unpinned, it takes the trailing end of the first of the right, left, bottom and top faces that no band lines or whose band is ruled. A <code>LoopPin</code> sets the placement, and the <a href="#search">search</a> tries the other seven.</p>
   <p>Each loop leaves the room's face from inside, runs in to its far leg, and returns beside where it left with its arrowhead on the same face. Its legs end on that face's boundary: the border where that side has no band, and the band's inner edge where one lines it. A top-face loop on a headed state therefore leaves the header's bottom edge, and no loop crosses a band. On a left or right face the loops are rows with horizontal legs; on a top or bottom face the room turns, and the loops stand side by side with vertical legs. A loop's lane is at least as tall as its label stack, with a route clearance either side.</p>
-  <p>The room is sized from the loops' <code>PathBox</code>es alone, so phase 3 and the cost re-derive it and no geometry column carries it. Phase 3 draws each loop in its row instead of routing it. The room is a wall for every other route and runs on to the boundary its loops reach, so a route inside the state goes round it and never across a leg. The labels are not searched: they sit beyond the far leg, at most a <a href="#labels">leader</a> from it, so every loop label is within a leader of its route.</p>
+  <p>The room is sized from the loops' <code>PathBox</code>es alone; layout returns it as <code>state_loop</code> and its placement as <code>state_loop_place</code>. Phase 3 draws each loop in its row instead of routing it. The room is a wall for every other route and runs on to the boundary its loops reach, so a route inside the state goes round it and never across a leg. The labels are not searched: they sit beyond the far leg, at most a <a href="#labels">leader</a> from it, so every loop label is within a leader of its route.</p>
   <p>Where a loop's ends touch its state's border, the run between them, padded by a route clearance, is an <b>occupied span</b> of that face. The router seats no outside end in it, and a port slot or inner-face end on it moves along the face to the nearest free position. With no free position the end stays and <code>Routes::occupied</code> counts it.</p>
 
   <h3>Loops outside a state</h3>
@@ -166,7 +166,7 @@ SX.register('decorations', function (sec) {
     var host = sec.querySelector('[data-fig="decor-kiln"]');
     var f = SX.figure(host, { caption: '<b>kiln</b>, as scav draws it. <b>Toggle</b> what to show and <b>hover</b> a mark or a transition: headers, loop rooms and their placements, occupied spans, ports, and loops inside and outside their states.' });
     var c = SX.data('charts').charts.kiln, G = c.text;
-    var CLEAR = 96;  // route_clearance: node_sep / 3 on readable
+    var CLEAR = G.profile.route_clearance;
     var END = [['top', 'bottom'], ['top', 'bottom'], ['left', 'right'], ['left', 'right']];
     var KINDS = [
       { k: 'header', label: 'headers and bands', col: '--hl-2' },
@@ -192,36 +192,13 @@ SX.register('decorations', function (sec) {
     // The last --loop pin naming each state: {face, end}.
     var loopPin = {};
     G.pin_list.forEach(function (p) { if (p[0] === '--loop') { var a = p[1].split(':').map(Number); loopPin[a[0]] = { face: a[1], end: a[2] }; } });
-    // A state's loop placement: its pin, else the right face's trailing end, or the left face's where only the right is lined.
-    function place(s) {
-      if (loopPin[s.id]) return { face: loopPin[s.id].face, end: loopPin[s.id].end, pinned: true };
-      var left = s.lead[2] > 0, right = s.trail[2] > 0;
-      return { face: right && !left ? 0 : 1, end: 1, pinned: false };
-    }
+    // A state's loop placement as layout returns it; `pinned` where a --loop pin names the state.
+    function place(s) { return { face: s.loop_place[0], end: s.loop_place[1], pinned: !!loopPin[s.id] }; }
     function placeText(pl) { return FACE[pl.face] + ' face, ' + END[pl.face][pl.end] + ' end'; }
-    // A state's loop room as drawn: the box its inner loops and their labels span.
+    // A state's loop room as layout returns it; null where the state has no inner loop.
     function room(s) {
-      var loops = G.trans.filter(function (t) { return inner(t) && t.src === s.id; });
-      if (!loops.length) return null;
-      var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-      function grow(x, y, w, h) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x + w); y1 = Math.max(y1, y + h); }
-      loops.forEach(function (t) {
-        t.points.forEach(function (p) { grow(p[0], p[1], 0, 0); });
-        if (t.label_box) grow(t.label_box[0], t.label_box[1], t.label_box[2], t.label_box[3]);
-      });
-      return { r: [x0, y0, x1 - x0, y1 - y0], n: loops.length, place: place(s) };
-    }
-    // An inner loop's occupied spans: the run between its ends on each border face they touch, padded by CLEAR.
-    function spans(t) {
-      var r = byId[t.src].rect, ends = [t.points[0], t.points[t.points.length - 1]], out = [];
-      var fc = ends.map(function (p) { return faceOf(p, r); });
-      fc.forEach(function (face, k) {
-        if (face < 0 || (k === 1 && face === fc[0])) return;
-        var along = face < 2 ? 1 : 0, a = ends[k][along], b = fc[1 - k] === face ? ends[1 - k][along] : a;
-        var lo = Math.min(a, b) - CLEAR, hi = Math.max(a, b) + CLEAR, at = face === 0 ? r[0] : face === 1 ? r[0] + r[2] : face === 2 ? r[1] : r[1] + r[3];
-        out.push({ face: face, lo: lo, hi: hi, pts: face < 2 ? [[at, lo], [at, hi]] : [[lo, at], [hi, at]] });
-      });
-      return out;
+      var n = G.trans.filter(function (t) { return inner(t) && t.src === s.id; }).length;
+      return n ? { r: s.loop, n: n, place: place(s) } : null;
     }
     // Ends of other transitions on face `face` of state `st`, each as "label at coordinate".
     function endsOn(st, face, skip) {
@@ -249,31 +226,32 @@ SX.register('decorations', function (sec) {
       var u = h.unit, nHead = 0, nRule = 0, nRoom = 0, nSpan = 0, ports = [0, 0, 0, 0];
       G.states.forEach(function (s) {
         if (s.kind !== 'normal') return;
-        var ruled = !!s.label || composite(s);
+        var ruled = s.draw.some(function (p) { return p.el === 'line'; });  // the header draws a rule
         nHead++; if (ruled) nRule++;
         if (show.header) ['before', 'after', 'lead', 'trail'].forEach(function (k, j) {
           var r = s[k]; if (!(r[2] > 0 && r[3] > 0)) return;
           var n = h.rect(r, { fill: 'color-mix(in srgb, var(--hl-2) 24%, transparent)', stroke: 'none' });
           SX.tipOn(n, '<b>' + (j ? BANDNAME[[3, 0, 1][j - 1]] + ' band' : 'Header') + ' of ' + s.name + '</b>, ' + SX.fmt(r[2]) + ' × ' + SX.fmt(r[3]) + '<br>' + (j ? '' : 'The name' + (ruled ? ', a rule and ' + (s.label ? 'the description “' + s.label + '”' : 'nothing under it') : '') + '. ') +
-            'A wall: no route enters it and no label overlaps it' + (composite(s) && j === 0 ? ', and no port sits on ' + s.name + '\'s top face' : '') + '.');
+            (j === 0 && (s.ruled & 1) ? 'Its bottom edge is the rule, so a loop may end on it. ' : '') + 'A wall: no route enters it and no label overlaps it' + (composite(s) && j === 0 ? ', and no port sits on ' + s.name + '\'s top face' : '') + '.');
         });
         var rm = room(s);
         if (rm) { nRoom++; if (show.room) {
           var q = h.rect(rm.r, { fill: 'color-mix(in srgb, var(--hl-3) 26%, transparent)', stroke: 'var(--hl-3)', 'stroke-width': u * 1.5, 'stroke-dasharray': (u * 5) + ' ' + (u * 4) });
+          var hits = h.svg.querySelector('.hit');
+          if (hits) hits.parentNode.parentNode.insertBefore(q, hits.parentNode);  // under the hit targets, so the loops inside stay hoverable
           SX.tipOn(q, '<b>Loop room of ' + s.name + '</b>: ' + rm.n + ' loop' + (rm.n > 1 ? 's' : '') + ' on the ' + placeText(rm.place) + ' of its free interior' + (rm.place.pinned ? ' (<code>--loop ' + s.id + ':' + rm.place.face + ':' + rm.place.end + '</code>)' : ' (unpinned default)') +
-            '<br>Drawn here as the box its loops and labels span, ' + SX.fmt(rm.r[2]) + ' × ' + SX.fmt(rm.r[3]) + '. A wall for every other route.');
+            '<br>' + SX.fmt(rm.r[2]) + ' × ' + SX.fmt(rm.r[3]) + ', as phase 2 reserved it. A wall for every other route.');
         } }
       });
-      G.trans.forEach(function (t) {
-        if (!inner(t)) return;
-        spans(t).forEach(function (sp) {
-          nSpan++;
-          if (!show.span) return;
-          var n = h.line(sp.pts, { stroke: 'var(--series-5)', 'stroke-width': u * 12, 'stroke-opacity': 0.7, fill: 'none' });
-          var others = endsOn(t.src, sp.face, t.id);
-          SX.tipOn(n, '<b>Occupied span</b> on ' + byId[t.src].name + '\'s ' + FACE[sp.face] + ' face, ' + SX.fmt(sp.lo) + ' to ' + SX.fmt(sp.hi) + '<br>The run between “' + t.label + '”\'s ends, padded by a route clearance (' + CLEAR + '). No outside end is seated in it.' +
-            (others.length ? '<br>Other ends on this face: ' + others.join(', ') + '.' : ''));
-        });
+      G.occupied.forEach(function (sp) {
+        nSpan++;
+        if (!show.span) return;
+        var r = byId[sp.state].rect, at = sp.face === 0 ? r[0] : sp.face === 1 ? r[0] + r[2] : sp.face === 2 ? r[1] : r[1] + r[3];
+        var n = h.line(sp.face < 2 ? [[at, sp.lo], [at, sp.hi]] : [[sp.lo, at], [sp.hi, at]], { stroke: 'var(--series-5)', 'stroke-width': u * 12, 'stroke-opacity': 0.7, fill: 'none' });
+        var t = G.trans.filter(function (q) { return inner(q) && q.src === sp.state && faceOf(q.points[0], r) === sp.face; })[0];
+        var others = endsOn(sp.state, sp.face, t ? t.id : -1);
+        SX.tipOn(n, '<b>Occupied span</b> on ' + byId[sp.state].name + '\'s ' + FACE[sp.face] + ' face, ' + SX.fmt(sp.lo) + ' to ' + SX.fmt(sp.hi) + '<br>The run between ' + (t ? '“' + t.label + '”\'s' : 'an inner loop\'s') + ' ends, padded by a route clearance (' + CLEAR + '). No outside end is seated in it.' +
+          (others.length ? '<br>Other ends on this face: ' + others.join(', ') + '.' : ''));
       });
       G.trans.forEach(function (t) {
         var on = (show.inner && inner(t)) ? 'var(--hl)' : (show.outer && outer(t)) ? 'var(--series-6)' : null;

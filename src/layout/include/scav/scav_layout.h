@@ -64,6 +64,41 @@ inline int32_t label_line_height(scav_profile const &p) {
   return (h > COORD_MAX) ? 0 : static_cast<int32_t>(h);
 }
 
+// Derived spacing ===========================================================
+
+// The room a route keeps from a box it passes.
+constexpr int32_t route_clearance(scav_profile const &p) {
+  return (p.node_sep / 3 > 1) ? (p.node_sep / 3) : 1;
+}
+
+// Width of the band inside an enclosure's border that routes keep out of.
+constexpr int32_t border_band(scav_profile const &p) {
+  int32_t const inner{ (route_clearance(p) < p.pad) ? route_clearance(p) : p.pad };
+  return (inner / 2 > 1) ? (inner / 2) : 1;
+}
+
+// A route's cost per bend, in units of length: one rank separation.
+constexpr int64_t route_bend_penalty(scav_profile const &p) {
+  return (p.rank_sep > 1) ? p.rank_sep : 1;
+}
+
+int32_t loop_reach(scav_profile const &p);  // the far leg's distance in from the exit face
+int32_t loop_gap(scav_profile const &p);    // label to far leg, at most `label_leader`
+int32_t loop_lane(scav_profile const &p);   // the least lane between the loop's two legs
+
+// A run `[lo, lo + len]` along one face of an obstacle (0 left, 1 right, 2 top, 3 bottom)
+// whose interior no end seats in.
+struct OccupiedSpan {
+  uint32_t obstacle, face;
+  int32_t lo, len;
+};
+
+// Per inner loop in a laid-out chart's geometry columns, its ends' run on each face of its
+// state they touch, padded by `route_clearance`; `obstacle` is the StateId ordinal.
+void layout_occupied_spans(Chart const &c,
+                           scav_profile const &p,
+                           std::vector<OccupiedSpan> &out);
+
 // Layout ====================================================================
 
 // Holds `state` at `rank` in phase 1, in place of the rank longest path gives it.
@@ -241,6 +276,18 @@ struct CostTerms {
   // Inner loops with an end on neither their state's border nor a ruled band's inner edge.
   int32_t loop_unanchored{ 0 };
 };
+
+inline constexpr uint32_t TIER0_TERMS{ 11 };
+
+// Tier-0 term names, in `tier0_terms` order.
+inline constexpr std::array<char const *, TIER0_TERMS> TIER0_NAMES{
+  "through_box",    "through_band", "box_overlap",    "vanished",         "flush",
+  "through_region", "retrace",      "label_over_box", "label_over_route", "label_far",
+  "loop_unanchored"
+};
+
+// The Tier-0 counts in `TIER0_NAMES` order; `cost_of` sums them.
+std::array<int32_t, TIER0_TERMS> tier0_terms(CostTerms const &t);
 
 // Compared lexicographically, in this order.
 struct Cost {

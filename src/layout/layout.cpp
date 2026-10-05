@@ -89,6 +89,8 @@ enum GeomColumnIndex : uint32_t {
   GeomAfter,
   GeomLead,
   GeomTrail,
+  GeomLoop,
+  GeomLoopPlace,
   GeomSub,
   GeomRoute,
   GeomPort,
@@ -121,6 +123,14 @@ constexpr std::array<GeomShape, GeomCount> GEOM{ {
       .entity = ElemKind::State,
       .kind = ValueKind::Pod,
       .elem_size = RECT },
+    { .name = "scav.geom.state_loop",
+      .entity = ElemKind::State,
+      .kind = ValueKind::Pod,
+      .elem_size = RECT },
+    { .name = "scav.geom.state_loop_place",
+      .entity = ElemKind::State,
+      .kind = ValueKind::U32,
+      .elem_size = 4 },
     { .name = "scav.geom.sub",
       .entity = ElemKind::Submachine,
       .kind = ValueKind::Pod,
@@ -214,6 +224,10 @@ void write_columns(Chart &c, SizedLayout const &z, Routes const &r, uint32_t inp
   write_rows(c, geom_column(c, GEOM[GeomAfter]), z.after);
   write_rows(c, geom_column(c, GEOM[GeomLead]), z.lead);
   write_rows(c, geom_column(c, GEOM[GeomTrail]), z.trail);
+  write_rows(c, geom_column(c, GEOM[GeomLoop]), z.loop);
+  std::vector<uint32_t> place(z.loop_place.size());
+  for (size_t i = 0; i < place.size(); ++i) { place[i] = z.loop_place[i]; }
+  write_rows(c, geom_column(c, GEOM[GeomLoopPlace]), place);
   write_rows(c, geom_column(c, GEOM[GeomSub]), z.sub);
   write_rows(c, geom_column(c, GEOM[GeomRoute]), r.route);
   write_rows(c, geom_column(c, GEOM[GeomPort]), r.port);
@@ -2157,6 +2171,30 @@ uint32_t direction_token(int32_t from, int32_t to) {
 }
 
 }  // namespace
+
+void layout_occupied_spans(Chart const &c,
+                           scav_profile const &p,
+                           std::vector<OccupiedSpan> &out) {
+  out.clear();
+  auto const state{ rows_of<scav_rect>(c, "scav.geom.state") };
+  auto const route{ rows_of<scav_span>(c, "scav.geom.route") };
+  auto const point{ rows_of<scav_point>(c, "scav.geom.point") };
+  for (uint32_t t = 0; t < route.size(); ++t) {
+    if ((t >= c.transitions.size()) || (c.transitions[t].live == 0) ||
+        (route[t].len < 2) || !inner_loop(c, t)) {
+      continue;
+    }
+    uint32_t const st{ c.transitions[t].src.v };
+    if ((st >= state.size()) || ((route[t].off + route[t].len) > point.size())) {
+      continue;
+    }
+    loop_occupied({ point[route[t].off], point[route[t].off + route[t].len - 1] },
+                  state[st],
+                  st,
+                  route_clearance(p),
+                  out);
+  }
+}
 
 uint32_t layout_inputs_digest(Chart const &c) {
   ColumnId const id{ column_find(c, "scav.geom.inputs") };

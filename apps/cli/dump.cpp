@@ -292,6 +292,54 @@ std::array<int64_t, TIER2_TERMS> term_values(CostTerms const &t) {
            t.length, t.transit_bends, t.whitespace };
 }
 
+// The profile values layout reads and the spacing it derives from them, parallel to
+// `profile_values`.
+constexpr std::array<char const *, 29> PROFILE{
+  "em",           "line_height",     "pad",          "rank_sep",        "node_sep",
+  "sub_sep",      "dar_num",         "dar_den",      "route_clearance", "border_band",
+  "bend_penalty", "label_leader",    "loop_gap",     "loop_reach",      "loop_lane",
+  "w_bends",      "w_corridor",      "w_crossings",  "w_excess_len",    "w_adjacency",
+  "w_label",      "w_label_near",    "w_aspect",     "w_area",          "w_crowding",
+  "w_length",     "w_transit_bends", "w_whitespace", "portfolio_m"
+};
+
+std::array<int64_t, PROFILE.size()> profile_values(scav_profile const &p) {
+  return { p.font_size_grid,
+           label_line_height(p),
+           p.pad,
+           p.rank_sep,
+           p.node_sep,
+           p.sub_sep,
+           p.dar_num,
+           p.dar_den,
+           route_clearance(p),
+           border_band(p),
+           route_bend_penalty(p),
+           label_leader(p),
+           loop_gap(p),
+           loop_reach(p),
+           loop_lane(p),
+           p.w_bends,
+           p.w_corridor,
+           p.w_crossings,
+           p.w_excess_len,
+           p.w_adjacency,
+           p.w_label,
+           p.w_label_near,
+           p.w_aspect,
+           p.w_area,
+           p.w_crowding,
+           p.w_length,
+           p.w_transit_bends,
+           p.w_whitespace,
+           p.portfolio_m };
+}
+
+// `scav_box_space::ruled` per state, 0 past the table.
+uint32_t state_ruled(scav_spaces const &s, uint32_t st) {
+  return (st < s.n_box_state) ? s.box_state[st].ruled : 0U;
+}
+
 void append_geometry_text(std::string &out,
                           Chart const &c,
                           CostTerms const &terms,
@@ -306,6 +354,8 @@ void append_geometry_text(std::string &out,
   auto const after{ geom_rows<scav_rect>(c, "scav.geom.state_after") };
   auto const lead{ geom_rows<scav_rect>(c, "scav.geom.state_lead") };
   auto const trail{ geom_rows<scav_rect>(c, "scav.geom.state_trail") };
+  auto const loop{ geom_rows<scav_rect>(c, "scav.geom.state_loop") };
+  auto const loop_place{ geom_rows<uint32_t>(c, "scav.geom.state_loop_place") };
   auto const sub{ geom_rows<scav_rect>(c, "scav.geom.sub") };
   auto const routes{ geom_rows<scav_span>(c, "scav.geom.route") };
   auto const points{ geom_rows<scav_point>(c, "scav.geom.point") };
@@ -333,26 +383,14 @@ void append_geometry_text(std::string &out,
   append_i32v(out, scored.t0_violations);
   out += " t2 ";
   append_i64v(out, scored.t2);
-  out += "\n    tier0 through_box ";
-  append_i32v(out, terms.through_box);
-  out += " through_band ";
-  append_i32v(out, terms.through_band);
-  out += " box_overlap ";
-  append_i32v(out, terms.box_overlap);
-  out += " flush ";
-  append_i32v(out, terms.flush);
-  out += " through_region ";
-  append_i32v(out, terms.through_region);
-  out += " retrace ";
-  append_i32v(out, terms.retrace);
-  out += " label_over_box ";
-  append_i32v(out, terms.label_over_box);
-  out += " label_over_route ";
-  append_i32v(out, terms.label_over_route);
-  out += " label_far ";
-  append_i32v(out, terms.label_far);
-  out += " loop_unanchored ";
-  append_i32v(out, terms.loop_unanchored);
+  out += "\n    tier0";
+  std::array<int32_t, TIER0_TERMS> const t0{ tier0_terms(terms) };
+  for (uint32_t i = 0; i < TIER0_TERMS; ++i) {
+    out += ' ';
+    out += TIER0_NAMES[i];
+    out += ' ';
+    append_i32v(out, t0[i]);
+  }
   out += '\n';
   for (uint32_t i = 0; i < TIER2_TERMS; ++i) {
     out += "    ";
@@ -363,11 +401,17 @@ void append_geometry_text(std::string &out,
     append_i64v(out, shares[i]);
     out += "bp\n";
   }
-  out += "  label leader ";
-  append_i32v(out, label_leader(p));
+  out += "  profile";
+  std::array<int64_t, PROFILE.size()> const prof{ profile_values(p) };
+  for (uint32_t i = 0; i < PROFILE.size(); ++i) {
+    out += ' ';
+    out += PROFILE[i];
+    out += ' ';
+    append_i64v(out, prof[i]);
+  }
   out += '\n';
   for (uint32_t i = 0; i < placed.size(); ++i) {
-    out += "    placed t";
+    out += "  placed t";
     string_append_u32(out, (i < s.n_path_box) ? s.path_box[i].subject : INVALID);
     out += ' ';
     append_rect(out, placed[i]);
@@ -390,6 +434,37 @@ void append_geometry_text(std::string &out,
       out += " trail ";
       append_rect(out, trail[i]);
     }
+    if (int32_t const r{ state_corner_radius(c.states[i].kind, state[i], p.pad) };
+        r != 0) {
+      out += " corner ";
+      append_i32v(out, r);
+    }
+    if (state_ruled(s, i) != 0) {
+      out += " ruled ";
+      string_append_u32(out, state_ruled(s, i));
+    }
+    if ((i < loop.size()) && (i < loop_place.size()) &&
+        ((loop[i].w != 0) || (loop[i].h != 0))) {
+      out += " loop ";
+      append_rect(out, loop[i]);
+      out += " face ";
+      string_append_u32(out, loop_place[i] / 2U);
+      out += " end ";
+      string_append_u32(out, loop_place[i] % 2U);
+    }
+    out += '\n';
+  }
+  std::vector<OccupiedSpan> occupied;
+  layout_occupied_spans(c, p, occupied);
+  for (OccupiedSpan const &o : occupied) {
+    out += "  occupied ";
+    chart_path_of(c, { o.obstacle }, out);
+    out += " face ";
+    string_append_u32(out, o.face);
+    out += ' ';
+    append_i32v(out, o.lo);
+    out += "..";
+    append_i32v(out, o.lo + o.len);
     out += '\n';
   }
   for (uint32_t m = 0; m < sub.size(); ++m) {
@@ -420,6 +495,11 @@ void append_geometry_text(std::string &out,
       string_append_u32(out, sl.side);
       out += " d";
       string_append_u32(out, sl.boundary_depth);
+      out += " (";
+      append_i32v(out, sl.x);
+      out += ',';
+      append_i32v(out, sl.y);
+      out += ')';
     }
     out += '\n';
   }
@@ -607,26 +687,15 @@ void append_geometry_json(std::string &out,
   append_i32v(out, scored.t0_violations);
   out += ",\n      \"t2\": ";
   append_i64v(out, scored.t2);
-  out += ",\n      \"through_box\": ";
-  append_i32v(out, terms.through_box);
-  out += ",\n      \"through_band\": ";
-  append_i32v(out, terms.through_band);
-  out += ",\n      \"box_overlap\": ";
-  append_i32v(out, terms.box_overlap);
-  out += ",\n      \"flush\": ";
-  append_i32v(out, terms.flush);
-  out += ",\n      \"through_region\": ";
-  append_i32v(out, terms.through_region);
-  out += ",\n      \"retrace\": ";
-  append_i32v(out, terms.retrace);
-  out += ",\n      \"label_over_box\": ";
-  append_i32v(out, terms.label_over_box);
-  out += ",\n      \"label_over_route\": ";
-  append_i32v(out, terms.label_over_route);
-  out += ",\n      \"label_far\": ";
-  append_i32v(out, terms.label_far);
-  out += ",\n      \"loop_unanchored\": ";
-  append_i32v(out, terms.loop_unanchored);
+  out += ",\n      \"tier0\": {";
+  std::array<int32_t, TIER0_TERMS> const t0{ tier0_terms(terms) };
+  for (uint32_t i = 0; i < TIER0_TERMS; ++i) {
+    if (i != 0) { out += ", "; }
+    append_json_string(out, TIER0_NAMES[i]);
+    out += ": ";
+    append_i32v(out, t0[i]);
+  }
+  out += '}';
   for (uint32_t i = 0; i < TIER2_TERMS; ++i) {
     out += ",\n      ";
     append_json_string(out, TERMS[i]);
@@ -640,10 +709,15 @@ void append_geometry_json(std::string &out,
   }
   out += "]\n    }";
 
-  // The placed label boxes, and `label_leader`: each box's distance from its anchor.
-  out += ",\n    \"label_leader\": ";
-  append_i32v(out, label_leader(p));
-  out += ",\n    \"placed\": [";
+  out += ",\n    \"profile\": {";
+  std::array<int64_t, PROFILE.size()> const prof{ profile_values(p) };
+  for (uint32_t i = 0; i < PROFILE.size(); ++i) {
+    if (i != 0) { out += ", "; }
+    append_json_string(out, PROFILE[i]);
+    out += ": ";
+    append_i64v(out, prof[i]);
+  }
+  out += "},\n    \"placed\": [";
   for (uint32_t i = 0; i < placed.size(); ++i) {
     if (i != 0) { out += ", "; }
     append_json_rect(out, placed[i]);
@@ -661,6 +735,7 @@ void append_geometry_json(std::string &out,
                             "scav.geom.state_after",
                             "scav.geom.state_lead",
                             "scav.geom.state_trail",
+                            "scav.geom.state_loop",
                             "scav.geom.sub" }) {
     out += ",\n    ";
     append_json_string(out, std::string_view{ name }.substr(10));  // "state", ...
@@ -672,6 +747,46 @@ void append_geometry_json(std::string &out,
     }
     out += ']';
   }
+
+  // Per state: its loop room's [face, end], its corner radius and its bands' ruled bits.
+  auto const loop_place{ geom_rows<uint32_t>(c, "scav.geom.state_loop_place") };
+  out += ",\n    \"state_loop_place\": [";
+  for (uint32_t i = 0; i < loop_place.size(); ++i) {
+    if (i != 0) { out += ", "; }
+    out += '[';
+    string_append_u32(out, loop_place[i] / 2U);
+    out += ", ";
+    string_append_u32(out, loop_place[i] % 2U);
+    out += ']';
+  }
+  auto const state{ geom_rows<scav_rect>(c, "scav.geom.state") };
+  out += "],\n    \"state_corner\": [";
+  for (uint32_t i = 0; i < state.size(); ++i) {
+    if (i != 0) { out += ", "; }
+    append_i32v(out, state_corner_radius(c.states[i].kind, state[i], p.pad));
+  }
+  out += "],\n    \"state_ruled\": [";
+  for (uint32_t i = 0; i < c.states.size(); ++i) {
+    if (i != 0) { out += ", "; }
+    string_append_u32(out, state_ruled(s, i));
+  }
+  // Each inner loop's [state, face, lo, len] on a face of its state.
+  std::vector<OccupiedSpan> occupied;
+  layout_occupied_spans(c, p, occupied);
+  out += "],\n    \"occupied\": [";
+  for (uint32_t i = 0; i < occupied.size(); ++i) {
+    if (i != 0) { out += ", "; }
+    out += '[';
+    string_append_u32(out, occupied[i].obstacle);
+    out += ", ";
+    string_append_u32(out, occupied[i].face);
+    out += ", ";
+    append_i32v(out, occupied[i].lo);
+    out += ", ";
+    append_i32v(out, occupied[i].len);
+    out += ']';
+  }
+  out += ']';
 
   auto const routes{ geom_rows<scav_span>(c, "scav.geom.route") };
   auto const points{ geom_rows<scav_point>(c, "scav.geom.point") };

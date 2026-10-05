@@ -5,6 +5,7 @@
 // Internal; the ABI selects a router by name.
 
 #include "scav/scav_core.h"
+#include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
 #include "scav/scav_types.h"
 #include "scav_int.h"
@@ -13,16 +14,6 @@
 #include <vector>
 
 namespace scav {
-
-// The room a route keeps from a box it passes.
-constexpr int32_t route_clearance(scav_profile const &p) {
-  return imax(p.node_sep / 3, 1);
-}
-
-// Width of the band inside an enclosure's border that routes keep out of.
-constexpr int32_t border_band(scav_profile const &p) {
-  return imax(imin(route_clearance(p), p.pad) / 2, 1);
-}
 
 // An end that names a box sits at its centre; a router may move it onto the border.
 struct RouteNet {
@@ -41,16 +32,17 @@ struct RouteNet {
   uint32_t trans{ INVALID }, seg{ INVALID };  // the caller's ids, read only by the trace
 };
 
-// A run `[lo, lo + len]` along one face of an obstacle (0 left, 1 right, 2 top, 3 bottom)
-// whose interior no end seats in.
-struct OccupiedSpan {
-  uint32_t obstacle, face;
-  int32_t lo, len;
-};
-
 // Face of `r` that `at` lies on: 0 left, 1 right, 2 top, 3 bottom, else INVALID. Corners
 // resolve as in `ortho_ring`.
 uint32_t face_of(scav_point at, scav_rect const &r);
+
+// Appends to `out` the run between a loop's `ends` on each face of `r` they touch, padded
+// by `clear`, as spans of obstacle `st`.
+void loop_occupied(std::array<scav_point, 2> const &ends,
+                   scav_rect const &r,
+                   uint32_t st,
+                   int32_t clear,
+                   std::vector<OccupiedSpan> &out);
 
 // Whether `pos` lies inside a span on `face` of `obstacle`.
 bool occupied_at(std::vector<OccupiedSpan> const &spans,

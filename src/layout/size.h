@@ -8,6 +8,7 @@
 #include "layout/order.h"
 #include "layout/pack.h"
 #include "scav/scav_core.h"
+#include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
 
 #include <array>
@@ -87,9 +88,6 @@ struct LoopRow {
   int32_t label_w, label_h, lane, cross, along;  // `lane` between the legs
 };
 LoopRow loop_row(scav_profile const &p, scav_extent label, bool vertical);
-int32_t loop_reach(scav_profile const &p);
-int32_t loop_gap(scav_profile const &p);   // label to far leg, at most `label_leader`
-int32_t loop_lane(scav_profile const &p);  // the least lane between the loop's two legs
 
 // Per inner loop, the extent its path boxes stack to.
 void loop_labels(Chart const &c, scav_spaces const &s, std::vector<scav_extent> &label);

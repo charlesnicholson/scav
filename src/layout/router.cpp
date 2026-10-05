@@ -4,6 +4,7 @@
 
 #include "scav/scav_layout.h"
 #include "scav/scav_types.h"
+#include "scav_vec.h"
 
 #include <array>
 #include <cstdint>
@@ -28,6 +29,26 @@ uint32_t face_of(scav_point at, scav_rect const &r) {
   if (at.y == r.y) { return 2; }
   if (at.y == (r.y + r.h)) { return 3; }
   return INVALID;
+}
+
+void loop_occupied(std::array<scav_point, 2> const &ends,
+                   scav_rect const &r,
+                   uint32_t st,
+                   int32_t clear,
+                   std::vector<OccupiedSpan> &out) {
+  std::array<uint32_t, 2> const face{ face_of(ends[0], r), face_of(ends[1], r) };
+  for (uint32_t k = 0; k < 2; ++k) {
+    if ((face[k] == INVALID) || ((k == 1) && (face[1] == face[0]))) { continue; }
+    bool const along_y{ face[k] < 2 };
+    int32_t const a{ along_y ? ends[k].y : ends[k].x };
+    int32_t const other{ along_y ? ends[1 - k].y : ends[1 - k].x };
+    int32_t const b{ (face[1 - k] == face[k]) ? other : a };
+    vec_push_back(out,
+                  { .obstacle = st,
+                    .face = face[k],
+                    .lo = imin(a, b) - clear,
+                    .len = (imax(a, b) - imin(a, b)) + (2 * clear) });
+  }
 }
 
 bool occupied_at(std::vector<OccupiedSpan> const &spans,

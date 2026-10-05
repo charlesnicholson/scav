@@ -95,7 +95,7 @@ class TestDump(unittest.TestCase):
         doc = json.loads(self.run_dump("--layout", "--json", *self.pinned(NETWORK),
                                        NETWORK.as_posix()).stdout)
         self.assertEqual(
-            {("state", "pod"), ("submachine", "pod"), ("transition", "span"),
+            {("state", "pod"), ("state", "u32"), ("submachine", "pod"), ("transition", "span"),
              ("point", "pod"), ("chart", "pod"), ("chart", "u32")},
             {(c["entity"], c["kind"]) for c in doc["columns"]})
         self.assertEqual([], json.loads(

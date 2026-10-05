@@ -1173,9 +1173,7 @@ bool ortho_search(OrthoGrid const &g,
   return true;
 }
 
-Wide ortho_bend_penalty(scav_profile const &p) {
-  return imax(Wide{ p.rank_sep }, Wide{ 1 });
-}
+Wide ortho_bend_penalty(scav_profile const &p) { return route_bend_penalty(p); }
 
 int32_t ortho_clearance(scav_profile const &p) { return route_clearance(p); }
 

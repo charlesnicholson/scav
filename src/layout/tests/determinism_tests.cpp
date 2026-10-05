@@ -35,13 +35,21 @@ constexpr std::array<char const *, 4> CHARTS{ "brew.scav",
                                               "vac.scav" };
 
 // Every geometry column, `scav.geom.gen` included; each run below uses a fresh chart.
-constexpr std::array<char const *, 13> GEOM{
-  "scav.geom.state",      "scav.geom.state_before", "scav.geom.state_after",
-  "scav.geom.state_lead", "scav.geom.state_trail",  "scav.geom.sub",
-  "scav.geom.route",      "scav.geom.port",         "scav.geom.point",
-  "scav.geom.portslot",   "scav.geom.chart",        "scav.geom.inputs",
-  "scav.geom.gen"
-};
+constexpr std::array<char const *, 15> GEOM{ "scav.geom.state",
+                                             "scav.geom.state_before",
+                                             "scav.geom.state_after",
+                                             "scav.geom.state_lead",
+                                             "scav.geom.state_trail",
+                                             "scav.geom.state_loop",
+                                             "scav.geom.state_loop_place",
+                                             "scav.geom.sub",
+                                             "scav.geom.route",
+                                             "scav.geom.port",
+                                             "scav.geom.point",
+                                             "scav.geom.portslot",
+                                             "scav.geom.chart",
+                                             "scav.geom.inputs",
+                                             "scav.geom.gen" };
 
 // Disables the delay injector on scope exit.
 struct DelayGuard {
