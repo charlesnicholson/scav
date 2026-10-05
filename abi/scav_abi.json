@@ -1624,7 +1624,7 @@
               "size": 4
             },
             {
-              "name": "sweep_count",
+              "name": "search_cull",
               "type": {
                 "name": "int32_t",
                 "pointer": 0,
@@ -1634,7 +1634,7 @@
               "size": 4
             },
             {
-              "name": "spacing_inflation_cap",
+              "name": "kick_rows",
               "type": {
                 "name": "int32_t",
                 "pointer": 0,
@@ -1644,7 +1644,7 @@
               "size": 4
             },
             {
-              "name": "spacing_inflation_increment",
+              "name": "jitter_seed",
               "type": {
                 "name": "int32_t",
                 "pointer": 0,
@@ -1652,9 +1652,39 @@
               },
               "offset": 192,
               "size": 4
+            },
+            {
+              "name": "sweep_count",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 196,
+              "size": 4
+            },
+            {
+              "name": "spacing_inflation_cap",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 200,
+              "size": 4
+            },
+            {
+              "name": "spacing_inflation_increment",
+              "type": {
+                "name": "int32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 204,
+              "size": 4
             }
           ],
-          "size": 196,
+          "size": 208,
           "align": 4,
           "padding": 0
         },
@@ -1717,7 +1747,7 @@
                 "const": false
               },
               "offset": 0,
-              "size": 196
+              "size": 208
             },
             {
               "name": "router",
@@ -1726,7 +1756,7 @@
                 "pointer": 0,
                 "const": false
               },
-              "offset": 196,
+              "offset": 208,
               "size": 4
             },
             {
@@ -1736,11 +1766,11 @@
                 "pointer": 0,
                 "const": false
               },
-              "offset": 200,
+              "offset": 212,
               "size": 4
             }
           ],
-          "size": 204,
+          "size": 216,
           "align": 4,
           "padding": 0
         }

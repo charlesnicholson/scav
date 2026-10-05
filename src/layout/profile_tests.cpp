@@ -28,9 +28,12 @@ TEST_CASE("profile: both shipped profiles load and pass their own validation") {
     CAPTURE(name);
     scav_profile const p{ named(name) };
     CHECK(profile_validate(p));
-    CHECK(p.profile_version == 16);
-    // Both search every row of the Level 2 table.
+    CHECK(p.profile_version == 17);
+    // Both search every row of the Level 2 table, in full.
     CHECK(p.portfolio_m == 16);
+    CHECK(p.search_cull == 0);
+    CHECK(p.kick_rows == 4);
+    CHECK(p.jitter_seed == 0);
   }
   CHECK(named("compact").profile_id != named("readable").profile_id);
 }
@@ -127,6 +130,19 @@ TEST_CASE("profile: every bound rejects out of range") {
           .field = &scav_profile::portfolio_m,
           .bad_low = 0,
           .bad_high = 17 },
+    Poke{ .what = "search_cull",
+          .field = &scav_profile::search_cull,
+          .bad_low = -1,
+          .bad_high = 2 },
+    Poke{ .what = "kick_rows",
+          .field = &scav_profile::kick_rows,
+          .bad_low = 0,
+          .bad_high = 17 },
+    // Any nonnegative seed.
+    Poke{ .what = "jitter_seed",
+          .field = &scav_profile::jitter_seed,
+          .bad_low = -1,
+          .bad_high = I32_MAX },
     Poke{ .what = "sweep_count",
           .field = &scav_profile::sweep_count,
           .bad_low = -1,

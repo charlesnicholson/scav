@@ -107,6 +107,9 @@ typedef struct {
 
   int32_t portfolio_k;                 /* bounded moves scored; [0, 2^20] */
   int32_t portfolio_m;                 /* chart-global phase-2 tuples; [1, 16] */
+  int32_t search_cull;                 /* 0 = the full search, 1 = culled; [0, 1] */
+  int32_t kick_rows;                   /* rows the culled search kicks; [1, 16] */
+  int32_t jitter_seed;                 /* nonzero breaks near-ties; [0, INT32_MAX] */
   int32_t sweep_count;                 /* [0, 1024] */
   int32_t spacing_inflation_cap;       /* [0, 1024] */
   int32_t spacing_inflation_increment; /* [0, COORD_MAX/4] */

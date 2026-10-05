@@ -172,7 +172,8 @@ struct SearchPins {
 // compaction, ratio source and fold; bounds `portfolio_m` and `layout_run`'s `row`.
 inline constexpr uint32_t LAYOUT_SEARCH_ROWS{ 16 };
 
-// Lays out and searches the first `portfolio_m` table rows; keeps the lowest `Cost`.
+// Lays out and searches the first `portfolio_m` table rows, less the compaction rows when
+// `search_cull` is set; keeps the lowest `Cost`.
 // Writes the geometry columns and sizes `placed` to the path boxes. False leaves the
 // last successful run's columns; true may leave one RouteDegraded finding in `diags`
 // per transition drawn as a straight line.
@@ -204,7 +205,8 @@ enum class TraceScope : uint32_t {
 };
 
 // Runs `layout_run` from `pins` and writes its decision trace as JSON to `out`. Debug
-// output, unhashed.
+// output, unhashed. Under `Stats`, `tuple` and `won_pins` are `layout_run`'s `tuple` and
+// `taken`.
 bool layout_trace_json(Chart &c,
                        scav_spaces const &s,
                        scav_layout_opts const &o,
@@ -213,7 +215,9 @@ bool layout_trace_json(Chart &c,
                        std::vector<char> &out,
                        uint32_t row = INVALID,
                        TraceScope scope = TraceScope::Shipped,
-                       SearchPins const *pins = nullptr);
+                       SearchPins const *pins = nullptr,
+                       uint32_t *tuple = nullptr,
+                       SearchPins *won_pins = nullptr);
 
 // Structural: route lengths, turn directions, port sides and depths, seeded with the
 // model's structural digest. Coordinate: the rest; a translation moves only this one.

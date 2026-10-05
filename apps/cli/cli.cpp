@@ -85,6 +85,18 @@ bool read_value(std::string_view flag, std::string_view value, LayoutArgs &out) 
     out.row = a;
     return true;
   }
+  if (flag == "--search") {
+    if ((value != "full") && (value != "culled")) { return false; }
+    out.culled = value == "culled";
+    return true;
+  }
+  if (flag == "--jitter-seed") {
+    std::from_chars_result const got{
+      std::from_chars(value.data(), value.data() + value.size(), out.jitter_seed)
+    };
+    return (got.ec == std::errc{}) && (got.ptr == (value.data() + value.size())) &&
+           (out.jitter_seed >= 0);
+  }
   if (flag == "--orient") {
     std::from_chars_result const got{
       std::from_chars(value.data(), value.data() + value.size(), a)
@@ -149,7 +161,8 @@ ArgRead read_layout_arg(int argc, char **argv, int &i, LayoutArgs &out) {
   }
   if ((arg != "--profile") && (arg != "--portfolio-row") && (arg != "--rank") &&
       (arg != "--cut") && (arg != "--reverse") && (arg != "--end") &&
-      (arg != "--orient") && (arg != "--fold") && (arg != "--loop")) {
+      (arg != "--orient") && (arg != "--fold") && (arg != "--loop") &&
+      (arg != "--search") && (arg != "--jitter-seed")) {
     return ArgRead::NotOurs;
   }
   if ((i + 1) >= argc) { return ArgRead::Malformed; }
@@ -160,6 +173,12 @@ ArgRead read_layout_arg(int argc, char **argv, int &i, LayoutArgs &out) {
     return ArgRead::Taken;
   }
   return read_value(arg, argv[i], out) ? ArgRead::Taken : ArgRead::Malformed;
+}
+
+void apply_layout_args(LayoutArgs const &args, scav_profile &p) {
+  if (args.no_search) { p.portfolio_k = 0; }
+  p.search_cull = args.culled ? 1 : 0;
+  p.jitter_seed = args.jitter_seed;
 }
 
 void append_layout_args(std::string &out,
@@ -177,6 +196,12 @@ void append_layout_args(std::string &out,
   if (std::string_view{ args.profile } != "readable") {
     out += "--profile ";
     out += args.profile;
+    out += ' ';
+  }
+  if (args.culled) { out += "--search culled "; }
+  if (args.jitter_seed != 0) {
+    out += "--jitter-seed ";
+    string_append_u32(out, static_cast<uint32_t>(args.jitter_seed));
     out += ' ';
   }
   if (args.no_text) { out += "--no-text "; }

@@ -16,7 +16,7 @@
 static_assert(sizeof(scav_box_space) == 24);
 static_assert(sizeof(scav_path_clear) == 8);
 static_assert(sizeof(scav_path_box) == 16);
-static_assert(sizeof(scav_profile) == 49 * sizeof(int32_t));
+static_assert(sizeof(scav_profile) == 52 * sizeof(int32_t));
 // `scav_spaces` is four {pointer, count, stride} triples with no padding.
 static_assert(sizeof(scav_spaces) ==
               (4 * (sizeof(scav_box_space const *) + (2 * sizeof(uint32_t)))));

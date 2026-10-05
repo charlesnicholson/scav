@@ -29,7 +29,7 @@ constexpr std::string_view USAGE{
   "\n"
   "  LAYOUT: --profile NAME, --portfolio-row N, --rank S:R, --cut T:L, "
   "--reverse T:L, --end T:L:E:F, --orient F, --fold F:M[:L], --loop S:F:E, "
-  "--no-search, "
+  "--search full|culled, --jitter-seed N, --no-search, "
   "--no-text\n"
 };
 

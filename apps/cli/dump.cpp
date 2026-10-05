@@ -301,7 +301,7 @@ std::array<int64_t, TIER2_TERMS> term_values(CostTerms const &t) {
 
 // The profile values layout reads and the spacing it derives from them, parallel to
 // `profile_values`.
-constexpr std::array<char const *, 35> PROFILE{ "em",
+constexpr std::array<char const *, 38> PROFILE{ "em",
                                                 "line_height",
                                                 "pad",
                                                 "rank_sep",
@@ -333,6 +333,9 @@ constexpr std::array<char const *, 35> PROFILE{ "em",
                                                 "portfolio_m",
                                                 "lane_pitch",
                                                 "portfolio_k",
+                                                "search_cull",
+                                                "kick_rows",
+                                                "jitter_seed",
                                                 "sweep_count",
                                                 "spacing_inflation_cap",
                                                 "spacing_inflation_increment" };
@@ -372,6 +375,9 @@ std::array<int64_t, PROFILE.size()> profile_values(scav_profile const &p) {
            p.portfolio_m,
            imax64(route_clearance(p), p.font_size_grid),  // the orthogonal router's lanes
            p.portfolio_k,
+           p.search_cull,
+           p.kick_rows,
+           p.jitter_seed,
            p.sweep_count,
            p.spacing_inflation_cap,
            p.spacing_inflation_increment };
@@ -1029,7 +1035,7 @@ int run_dump(char const *path,
     write_error("no such profile", args.profile);
     return EXIT_UNUSABLE;
   }
-  if (args.no_search) { opts.profile.portfolio_k = 0; }
+  apply_layout_args(args, opts.profile);
   CostTerms cost{};
   // The winning row and taken pins, for `rests on`; INVALID under `--trace`.
   uint32_t won{ INVALID };
@@ -1055,7 +1061,9 @@ int run_dump(char const *path,
                                                events,
                                                args.row,
                                                scope,
-                                               &args.pins)
+                                               &args.pins,
+                                               &won,
+                                               &taken)
                            : layout_run(net.chart,
                                         as_spaces(spaces),
                                         opts,

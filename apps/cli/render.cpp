@@ -94,7 +94,7 @@ int run_render(char const *path,
     write_error("no such profile", profile_name);
     return EXIT_UNUSABLE;
   }
-  if (args.no_search) { opts.profile.portfolio_k = 0; }
+  apply_layout_args(args, opts.profile);
 
   Metrics metrics;
   Spaces spaces;

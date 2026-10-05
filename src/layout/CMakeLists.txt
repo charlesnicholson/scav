@@ -91,6 +91,7 @@ if(SCAV_BUILD_TESTS)
     memo_tests.cpp
     frame_memo_tests.cpp
     search_memo_tests.cpp
+    search_cull_tests.cpp
     geom_tests.cpp
     pack_tests.cpp
     size_tests.cpp

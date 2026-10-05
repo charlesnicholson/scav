@@ -44,6 +44,8 @@ struct LayoutArgs {
   char const *profile{ "readable" };
   uint32_t row{ INVALID };
   SearchPins pins;
+  int32_t jitter_seed{ 0 };
+  bool culled{ false };
   bool no_search{ false };
   bool no_text{ false };
   bool given{ false };  // any of the flags below appeared
@@ -65,13 +67,18 @@ enum class ArgRead : uint32_t { NotOurs, Taken, Malformed };
 //                        the fold cuts before
 //   --loop S:F:E         state S's loop room on face F of its free interior (as
 //                        --end), at end E (0 top or left, 1 bottom or right)
+//   --search full|culled the full search, or the culled one
+//   --jitter-seed N      near-equal moves and kicks rank by a hash of N; 0 is none
 //   --no-search          lay out the row and pins given, and move nothing
 //   --no-text            lay out with no space requests, the scale the layout
 //                        goldens are stated at
 ArgRead read_layout_arg(int argc, char **argv, int &i, LayoutArgs &out);
 
-// Appends the flags that reproduce a run: the non-default profile and `--no-text`
-// from `args`, then `row` and every pin.
+// Writes `args`' search flags into `p`: no search, the culled search, the jitter seed.
+void apply_layout_args(LayoutArgs const &args, scav_profile &p);
+
+// Appends the flags that reproduce a run: the non-default profile, search and seed, and
+// `--no-text` from `args`, then `row` and every pin.
 void append_layout_args(std::string &out,
                         LayoutArgs const &args,
                         uint32_t row,

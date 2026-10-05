@@ -6,6 +6,7 @@
 #include "layout/decompose.h"
 #include "layout/label.h"
 #include "layout/size.h"
+#include "layout/trace.h"
 #include "scav/scav_core.h"
 #include "scav/scav_draw.h"
 #include "scav/scav_layout.h"
@@ -18,6 +19,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <initializer_list>
 #include <map>
 #include <string>
 #include <vector>
@@ -31,6 +33,7 @@ uint64_t layout_test_label_bound_mismatches();
 void layout_test_candidate_memo(bool on, bool verify);
 uint64_t layout_test_candidate_memo_drawn();
 uint64_t layout_test_candidate_memo_mismatches();
+void layout_test_search_memo(bool on);
 
 }  // namespace scav
 
@@ -183,6 +186,79 @@ TEST_CASE(
     CHECK(layout_test_candidate_memo_drawn() > 0);
     CHECK(layout_test_candidate_memo_mismatches() == 0);
   }
+}
+
+namespace {
+
+// One culled search under real text: the drawing's hashes, its row and pin count, and the
+// moves offered, taken and skipped.
+std::array<uint64_t, 7> culled_search(char const *name,
+                                      Metrics const &m,
+                                      uint32_t threads) {
+  scav_profile p{ readable() };
+  p.search_cull = 1;
+  Chart c{ load_corpus(name) };
+  Spaces spaces;
+  REQUIRE(measure_chart(c, m, p, spaces));
+  std::vector<scav_placed> placed;
+  std::vector<Diagnostic> diags;
+  scav_layout_opts const opts{ .profile = p, .router = 0, .threads = threads };
+  uint32_t row{ INVALID };
+  uint32_t moves{ 0 };
+  SearchStats counted;
+  search_stats_set(&counted);
+  bool const ran{
+    layout_run(c, as_spaces(spaces), opts, placed, diags, nullptr, &row, INVALID, &moves)
+  };
+  search_stats_set(nullptr);
+  REQUIRE(ran);
+  std::array<uint64_t, 7> out{
+    layout_structural_hash(c), layout_coordinate_hash(c), row, moves, 0, 0, 0
+  };
+  for (uint32_t k = 0; k < TRACE_MOVES; ++k) {
+    out[4] += counted.offered[k];
+    out[5] += counted.taken[k];
+    out[6] += counted.skipped[k];
+  }
+  return out;
+}
+
+// Each chart's culled search at 1, 3 and all threads, with the search memo off so every
+// search runs: drawing, row, pin count and move counts agree.
+void check_culled_threads(std::initializer_list<char const *> charts) {
+  struct Restore {
+    Restore() = default;
+    Restore(Restore const &) = delete;
+    Restore &operator=(Restore const &) = delete;
+    ~Restore() { layout_test_search_memo(true); }
+  } const restore;
+  layout_test_search_memo(false);
+  Metrics const m{ bundled() };
+  for (char const *name : charts) {
+    if (scav::test::corpus_skipped(name)) { continue; }
+    std::string const chart{ name };
+    CAPTURE(chart);
+    std::array<uint64_t, 7> const want{ culled_search(name, m, 1) };
+    CHECK(want[6] > 0);
+    for (uint32_t const threads : { 3U, 0U }) {
+      CAPTURE(threads);
+      CHECK(culled_search(name, m, threads) == want);
+    }
+  }
+}
+
+}  // namespace
+
+TEST_CASE(
+    "drawlist corpus: under real text the culled search is one search on any thread") {
+  check_culled_threads({ "dock.scav", "kiln.scav" });
+}
+
+TEST_CASE(
+    "drawlist corpus: under real text the culled search on the large charts is one "
+    "search" *
+    doctest::test_suite("full")) {
+  check_culled_threads({ "elevator.scav", "bottler.scav" });
 }
 
 TEST_CASE("drawlist corpus: under real text the search reaches the committed pins") {

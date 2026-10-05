@@ -275,9 +275,10 @@ void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out)
 inline constexpr uint32_t TRACE_MOVES{ 8 };  // `TRACE_MOVE_*` values
 
 // A search's counts. Per `TRACE_MOVE_*`: moves offered, those the candidate memo answered,
-// those taken, and those culled unoffered as changing nothing.
+// those taken, those culled unoffered as changing nothing, and those the don't-look bits
+// left unscored in a round that took a move.
 struct SearchStats {
-  std::array<uint64_t, TRACE_MOVES> offered{}, deduped{}, taken{}, culled{};
+  std::array<uint64_t, TRACE_MOVES> offered{}, deduped{}, taken{}, culled{}, skipped{};
   uint64_t drawn{ 0 };       // moves the memo answered by their drawing
   uint64_t faced{ 0 };       // moves whose facing pass the memo answered
   uint64_t searches{ 0 };    // Level 1 searches run
@@ -291,8 +292,8 @@ void search_stats_set(SearchStats *s);
 // Adds `add` to the sink, if one is set; `memo_bytes` takes the larger.
 void search_stats_add(SearchStats const &add);
 
-// One JSON object: the totals, then per move kind its offered, deduped, taken and culled
-// counts.
+// One JSON object: the totals, then per move kind its offered, deduped, taken, culled and
+// skipped counts.
 void search_stats_to_json(SearchStats const &st, std::vector<char> &out);
 
 }  // namespace scav
