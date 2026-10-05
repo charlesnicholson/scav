@@ -2092,6 +2092,91 @@ TEST_CASE("ortho: waypoints are threaded, in the order they were given") {
   CHECK(first < second);
 }
 
+TEST_CASE("ortho: a stubbed end leaves along its stub before it turns") {
+  // Level ends run straight across; a stub straight up from the source sends the route up
+  // to it first, with or without a corridor.
+  for (bool const corridor : { false, true }) {
+    CAPTURE(corridor);
+    RouteInput in;
+    in.profile = profile();
+    in.region = rect(0, 0, 1000, 1000);
+    if (corridor) { in.waypoints.push_back(pt(300, 900)); }
+    RouteNet net{ .src = pt(500, 900), .dst = pt(100, 900) };
+    net.waypoint_len = corridor ? 1U : 0U;
+    RouteOutput plain;
+    in.nets.push_back(net);
+    ORTHO.route(in, plain);
+    REQUIRE(plain.net_points.size() == 1);
+    CHECK((plain.points[plain.net_points[0].off + 1].y != 700));
+
+    net.src_stubbed = 1;
+    net.src_stub = pt(500, 700);
+    in.nets[0] = net;
+    RouteOutput out;
+    ORTHO.route(in, out);
+    REQUIRE(out.net_points.size() == 1);
+    CHECK(out.metrics[0].failed == RouteFailure::None);
+    scav_span const at{ out.net_points[0] };
+    REQUIRE(at.len >= 3);
+    CHECK((out.points[at.off] == pt(500, 900)));
+    CHECK(out.points[at.off + 1].x == 500);
+    CHECK(out.points[at.off + 1].y <= 700);
+    CHECK((out.points[at.off + at.len - 1] == pt(100, 900)));
+  }
+}
+
+TEST_CASE("ortho: a net whose stub reaches its other end is that one leg") {
+  // The destination is a point on a box's face; the leg straight to it is the whole net.
+  RouteInput in;
+  in.profile = profile();
+  in.region = rect(0, 0, 1000, 1000);
+  in.obstacles.push_back(rect(400, 200, 200, 400));
+  RouteNet net{ .src = pt(500, 900), .dst = pt(500, 600) };
+  net.src_stubbed = 1;
+  net.src_stub = pt(500, 600);
+  in.nets.push_back(net);
+  RouteOutput out;
+  ORTHO.route(in, out);
+  REQUIRE(out.net_points.size() == 1);
+  CHECK(out.metrics[0].failed == RouteFailure::None);
+  CHECK(out.metrics[0].reseated == 0);
+  scav_span const at{ out.net_points[0] };
+  REQUIRE(at.len == 2);
+  CHECK((out.points[at.off] == pt(500, 900)));
+  CHECK((out.points[at.off + 1] == pt(500, 600)));
+}
+
+TEST_CASE("ortho: a gap is a wall routes go round, and a stub crosses it") {
+  // The gap runs down the middle from the top; a net across it goes round its end, and a
+  // net from inside it leaves along its stub.
+  RouteInput in;
+  in.profile = profile();
+  in.region = rect(0, 0, 1000, 1000);
+  in.gaps.push_back(rect(450, 0, 100, 800));
+  in.nets.push_back({ .src = pt(100, 400), .dst = pt(900, 400) });
+  RouteNet from_gap{ .src = pt(500, 400), .dst = pt(100, 200) };
+  from_gap.src_stubbed = 1;
+  from_gap.src_stub = pt(450, 400);
+  in.nets.push_back(from_gap);
+  RouteOutput out;
+  ORTHO.route(in, out);
+  REQUIRE(out.net_points.size() == 2);
+  for (uint32_t n = 0; n < 2; ++n) {
+    CAPTURE(n);
+    CHECK(out.metrics[n].failed == RouteFailure::None);
+    scav_span const at{ out.net_points[n] };
+    for (uint32_t k = (n == 0) ? 0U : 1U; (k + 1) < at.len; ++k) {
+      CHECK_FALSE(
+          enters_box(out.points[at.off + k], out.points[at.off + k + 1], in.gaps[0]));
+    }
+  }
+  CHECK(route_bends(out, 0) >= 2);
+  scav_span const stubbed{ out.net_points[1] };
+  CHECK((out.points[stubbed.off] == pt(500, 400)));
+  CHECK((out.points[stubbed.off + 1].y == 400));
+  CHECK(out.points[stubbed.off + 1].x <= 450);
+}
+
 TEST_CASE("ortho: a port's arrival level with its waypoint keeps its seat") {
   // The arrival's leg runs from its waypoint, level with box 0's left face; a
   // departure to box 1 shares the seat.

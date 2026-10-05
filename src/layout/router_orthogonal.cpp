@@ -1196,7 +1196,8 @@ struct RouteScratch {
   std::vector<scav_point> piece, shape;
   std::vector<Seat> seats;
   std::vector<int32_t> stuck;
-  std::vector<uint32_t> closed;  // `close_route`'s record of the passes it cleared
+  std::vector<uint32_t> closed;       // `close_route`'s record of the passes it cleared
+  std::vector<uint32_t> stub_closed;  // `close_stub`'s
 };
 
 RouteScratch &route_scratch() {
@@ -1256,6 +1257,30 @@ void close_route(OrthoGrid &g,
 }
 
 // Reopens the passes `close_route` recorded in `closed`.
+// Shuts the pass from grid point `stub` toward `exact` on their shared line, recording it
+// in `closed` as `close_route` does.
+void close_stub(OrthoGrid &g,
+                scav_point stub,
+                scav_point exact,
+                std::vector<uint32_t> &closed) {
+  uint32_t const nx{ g.nx() };
+  uint32_t const ix{ ortho_index_of(g.xs, stub.x) };
+  uint32_t const iy{ ortho_index_of(g.ys, stub.y) };
+  if ((nx < 2) || (g.ny() < 2) || (g.xs[ix] != stub.x) || (g.ys[iy] != stub.y)) { return; }
+  bool const upright{ (exact.x == stub.x) && (exact.y != stub.y) };
+  bool const flat{ (exact.y == stub.y) && (exact.x != stub.x) };
+  uint32_t edge{ INVALID };
+  if (flat && (exact.x > stub.x) && ((ix + 1) < nx)) { edge = (iy * (nx - 1)) + ix; }
+  if (flat && (exact.x < stub.x) && (ix > 0)) { edge = (iy * (nx - 1)) + (ix - 1); }
+  if (upright && (exact.y > stub.y) && ((iy + 1) < g.ny())) { edge = (iy * nx) + ix; }
+  if (upright && (exact.y < stub.y) && (iy > 0)) { edge = ((iy - 1) * nx) + ix; }
+  if (edge == INVALID) { return; }
+  std::vector<uint8_t> &pass{ upright ? g.pass_v : g.pass_h };
+  if (pass[edge] == 0) { return; }
+  pass[edge] = 0;
+  vec_push_back(closed, (2 * edge) + (upright ? 1U : 0U));
+}
+
 void reopen_route(OrthoGrid &g, std::vector<uint32_t> const &closed) {
   for (uint32_t const e : closed) { (((e & 1U) != 0) ? g.pass_v : g.pass_h)[e >> 1U] = 1; }
 }
@@ -1713,7 +1738,8 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
                                               lead[net_tail[n].off + net_tail[n].len - 1])
                                   : INVALID };
 
-    auto const attempt = [&](OrthoGrid const &use) {
+    // A stubbed end's search leaves its stub away from the end.
+    auto const search = [&](OrthoGrid const &use) {
       // Leads go through `ortho_simplify` too; a net whose ends coincide emits one point.
       shape.clear();
       piece.clear();
@@ -1751,6 +1777,14 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
       }
       ortho_simplify(piece, shape);
       return true;
+    };
+    auto const attempt = [&](OrthoGrid &use) {
+      sc.stub_closed.clear();
+      if (stubbed(net, 0)) { close_stub(use, net.src_stub, net.src, sc.stub_closed); }
+      if (stubbed(net, 1)) { close_stub(use, net.dst_stub, net.dst, sc.stub_closed); }
+      bool const found{ search(use) };
+      reopen_route(use, sc.stub_closed);
+      return found;
     };
 
     int32_t reseated{ 0 };
