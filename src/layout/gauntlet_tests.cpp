@@ -2608,6 +2608,21 @@ int32_t reach_outside(Laid const &l, uint32_t t, uint32_t st) {
   return out;
 }
 
+// True when transition `t` leaves state `st` and comes back through one face: an end at
+// `st` and one port on its border, or two ports on one face of it.
+bool off_one_face(Laid const &l, uint32_t t, uint32_t st) {
+  scav_rect const &box{ l.z.state[st] };
+  scav_span const ports{ l.r.port[t] };
+  std::vector<uint32_t> sides;
+  for (uint32_t k = 0; k < ports.len; ++k) {
+    scav_port_slot const &slot{ l.r.slots[ports.off + k] };
+    if (on_border({ .x = slot.x, .y = slot.y }, box)) { sides.push_back(slot.side); }
+  }
+  Transition const &tr{ l.c.transitions[t] };
+  bool const own{ (tr.src.v == st) || (tr.dst.v == st) };
+  return (own && (sides.size() == 1)) || ((sides.size() == 2) && (sides[0] == sides[1]));
+}
+
 struct OutAndBack {
   char const *chart;
   char const *state;  // the composite the external route leaves and re-enters
@@ -2662,7 +2677,7 @@ TEST_CASE(
     "gauntlet: an external route out of a machine leaves its composite and returns") {
   // Out across the composite's border, outside it, and back in; with the inside kind it
   // stays in. Headed, no route enters a band. Tier 0 is zero throughout, no route crosses
-  // a region divider or itself, and a loop off the composite reaches out `2 * pad`.
+  // a region divider or itself, and a loop off one face reaches out `2 * pad`.
   for (OutAndBack const &shape : OUT_AND_BACK) {
     for (scav_profile const &p : { readable(), compact() }) {
       std::string const chart{ shape.chart };
@@ -2680,9 +2695,7 @@ TEST_CASE(
       CHECK(cost_of(terms, p).t0_violations == 0);
       CHECK(terms.self_crossing == 0);
       CHECK_FALSE(crosses_divider(out, t, st));
-      bool const own{ (out.c.transitions[t].src.v == st) ||
-                      (out.c.transitions[t].dst.v == st) };
-      if (own) { CHECK(reach_outside(out, t, st) >= (2 * p.pad)); }
+      if (off_one_face(out, t, st)) { CHECK(reach_outside(out, t, st) >= (2 * p.pad)); }
 
       Laid in;
       lay(shape.chart, p, in, {}, nullptr, shape.inside);
@@ -2698,7 +2711,9 @@ TEST_CASE(
       CHECK(cost_of(cost_terms(headed.c, headed.g, headed.z, headed.r, s, p), p)
                 .t0_violations == 0);
       CHECK_FALSE(crosses_divider(headed, t, st));
-      if (own) { CHECK(reach_outside(headed, t, st) >= (2 * p.pad)); }
+      if (off_one_face(headed, t, st)) {
+        CHECK(reach_outside(headed, t, st) >= (2 * p.pad));
+      }
     }
   }
 }

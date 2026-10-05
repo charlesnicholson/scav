@@ -92,6 +92,7 @@ struct Planned {
   uint32_t src_state, dst_state;  // -> states, INVALID unless the end is a box centre
   uint32_t seg;                   // -> SplitGraph::segments, for its bend chain
   int32_t loop;                   // `RouteNet::loop`
+  uint32_t loop_state;            // -> states, the box a loop runs off; INVALID for none
 };
 
 // Slides each state-border slot along its face level with the point across it on its outer
@@ -285,8 +286,8 @@ bool same_but_shifted(RouteFrameCache const &a,
         (p.waypoint_off != q.waypoint_off) || (p.waypoint_len != q.waypoint_len) ||
         (p.src_face != q.src_face) || (p.dst_face != q.dst_face) || (p.lean != q.lean) ||
         (p.loop != q.loop) || (p.src_clear != q.src_clear) ||
-        (p.dst_clear != q.dst_clear) || (p.apart != q.apart) || !moved_pt(p.src, q.src) ||
-        !moved_pt(p.dst, q.dst)) {
+        (p.dst_clear != q.dst_clear) || (p.apart != q.apart) ||
+        (p.loop_box != q.loop_box) || !moved_pt(p.src, q.src) || !moved_pt(p.dst, q.dst)) {
       return false;
     }
   }
@@ -586,7 +587,8 @@ void route_transitions(Routes &out,
                       .src_state = tr.src.v,
                       .dst_state = tr.src.v,
                       .seg = segs.off,
-                      .loop = 2 * p.pad });
+                      .loop = 2 * p.pad,
+                      .loop_state = tr.src.v });
     } else if (!looped) {
       // An end inside its own endpoint state sits at the segment's boundary node on that
       // state's inner face; it names no obstacle and no slot.
@@ -621,12 +623,25 @@ void route_transitions(Routes &out,
             (g.ports[from_port].sub.v < c.submachines.size())) {
           frame = g.ports[from_port].sub.v;
         }
-        // An external route's leg between a box and a port on that box's border is a loop.
-        bool const own_border{ (tr.kind == TransKind::External) &&
-                               (((at_state != INVALID) && (port != INVALID) &&
-                                 (g.ports[port].state.v == at_state)) ||
-                                ((end_state != INVALID) && (from_port < g.ports.size()) &&
-                                 (g.ports[from_port].state.v == end_state))) };
+        // An external route's leg between a box and a port on its border, or between two
+        // ports on one face of a box, is a loop off that box.
+        uint32_t loop_state{ INVALID };
+        if (tr.kind == TransKind::External) {
+          bool const from_slot{ from_port < g.ports.size() };
+          if ((at_state != INVALID) && (port != INVALID) &&
+              (g.ports[port].state.v == at_state)) {
+            loop_state = at_state;
+          } else if ((end_state != INVALID) && from_slot &&
+                     (g.ports[from_port].state.v == end_state)) {
+            loop_state = end_state;
+          } else if ((port != INVALID) && from_slot &&
+                     (out.slots.size() >= (first_slot + 2)) &&
+                     (g.ports[port].state.v != INVALID) &&
+                     (g.ports[port].state == g.ports[from_port].state) &&
+                     (out.slots[out.slots.size() - 2].side == out.slots.back().side)) {
+            loop_state = g.ports[port].state.v;
+          }
+        }
         vec_push_back(planned,
                       { .frame = frame,
                         .src = at,
@@ -634,7 +649,8 @@ void route_transitions(Routes &out,
                         .src_state = at_state,
                         .dst_state = end_state,
                         .seg = seg,
-                        .loop = own_border ? (2 * p.pad) : 0 });
+                        .loop = (loop_state != INVALID) ? (2 * p.pad) : 0,
+                        .loop_state = loop_state });
         at = end;
         at_state = end_state;
       }
@@ -726,10 +742,8 @@ void route_transitions(Routes &out,
       cover(planned[i].src);
       cover(planned[i].dst);
       for (uint32_t const bend : seg_bends[planned[i].seg]) { cover(z.node[bend]); }
-      if (planned[i].loop > 0) {
-        uint32_t const boxed{ (planned[i].src_state != INVALID) ? planned[i].src_state
-                                                                : planned[i].dst_state };
-        scav_rect const &r{ z.state[boxed] };
+      if ((planned[i].loop > 0) && (planned[i].loop_state != INVALID)) {
+        scav_rect const &r{ z.state[planned[i].loop_state] };
         int32_t const reach{ planned[i].loop };
         cover({ .x = r.x - reach, .y = r.y - reach });
         cover({ .x = r.x + r.w + reach, .y = r.y + r.h + reach });
@@ -817,6 +831,10 @@ void route_transitions(Routes &out,
         net.dst_face = faces[1][pn.seg];
       }
       net.loop = pn.loop;
+      if ((pn.src_state == INVALID) && (pn.dst_state == INVALID) &&
+          (pn.loop_state != INVALID)) {
+        net.loop_box = sc.obstacle_index[pn.loop_state];
+      }
       // A transition's own ends keep its clears, on its first and last segments.
       uint32_t const t{ g.segments[pn.seg].trans.v };
       if ((s.path_clear != nullptr) && (t < s.n_path_clear) &&

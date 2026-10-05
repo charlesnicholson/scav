@@ -1571,15 +1571,19 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
       vec_push_back(anchors, in.waypoints[net.waypoint_off + k]);
     }
     if ((net.loop > 0) && ((net.src_obstacle < in.obstacles.size()) ||
-                           (net.dst_obstacle < in.obstacles.size()))) {
-      // A loop's corridor runs `loop` out from each seat, off its box or, for a point on
-      // the box's border, off that box; clamped into the region and the enclosure's band.
+                           (net.dst_obstacle < in.obstacles.size()) ||
+                           (net.loop_box < in.obstacles.size()))) {
+      // A loop's corridor runs `loop` out from each box end's seat and each point end, off
+      // the end's box, else the other end's, else `loop_box`; clamped into the region and
+      // the enclosure's band.
       for (uint32_t end = 0; end < 2; ++end) {
-        scav_point at{ seat[src_slot + end] };
         uint32_t box{ (end == 0) ? net.src_obstacle : net.dst_obstacle };
+        scav_point at{ (box < in.obstacles.size()) ? seat[src_slot + end]
+                                                   : ((end == 0) ? net.src : net.dst) };
         if (box >= in.obstacles.size()) {
           box = (end == 0) ? net.dst_obstacle : net.src_obstacle;
         }
+        if (box >= in.obstacles.size()) { box = net.loop_box; }
         switch (face_of(at, in.obstacles[box])) {
           case 0: at.x -= net.loop; break;
           case 1: at.x += net.loop; break;

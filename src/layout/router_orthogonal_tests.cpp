@@ -2828,7 +2828,8 @@ TEST_CASE("ortho: a seat in an occupied span moves to its face's nearest free po
   CHECK(stuck == std::vector<int32_t>{ 0, 0 });
 }
 
-TEST_CASE("ortho: a net kept apart from an earlier one goes round it where a way is open") {
+TEST_CASE(
+    "ortho: a net kept apart from an earlier one goes round it where a way is open") {
   // Net 0 runs down from `A` to the region's foot; net 1 runs across from the right edge
   // to the left, through net 0's line unless it goes round `A`'s top.
   RouteInput in;
@@ -2934,6 +2935,39 @@ TEST_CASE("ortho: a loop from a box to a point on its face runs its reach out") 
       CHECK(far.x == on[face].x);
       CHECK(far.y == on[face].y);
     }
+  }
+}
+
+TEST_CASE("ortho: a loop between two points on one face of its box runs its reach out") {
+  scav_rect const box{ rect(2000, 2000, 1000, 600) };
+  std::array<std::array<scav_point, 2>, 4> const on{ { { pt(2000, 2150), pt(2000, 2450) },
+                                                       { pt(3000, 2150), pt(3000, 2450) },
+                                                       { pt(2300, 2000), pt(2700, 2000) },
+                                                       { pt(2300, 2600),
+                                                         pt(2700, 2600) } } };
+  for (uint32_t face = 0; face < 4; ++face) {
+    CAPTURE(face);
+    RouteInput in;
+    in.profile = profile();
+    in.region = rect(0, 0, 5000, 5000);
+    in.obstacles.push_back(box);
+    in.nets.push_back(
+        { .src = on[face][0], .dst = on[face][1], .loop = 256, .loop_box = 0 });
+    RouteOutput out;
+    ORTHO.route(in, out);
+    REQUIRE(out.metrics.size() == 1);
+    CHECK(out.metrics[0].failed == RouteFailure::None);
+    scav_span const loop{ out.net_points[0] };
+    REQUIRE(loop.len >= 2);
+    int32_t reach{ 0 };
+    for (uint32_t k = 0; k < loop.len; ++k) {
+      scav_point const a{ out.points[loop.off + k] };
+      reach = imax(reach,
+                   imax(imax(box.x - a.x, a.x - (box.x + box.w)),
+                        imax(box.y - a.y, a.y - (box.y + box.h))));
+    }
+    CHECK(reach == 256);
+    CHECK(loop.len == 4);
   }
 }
 

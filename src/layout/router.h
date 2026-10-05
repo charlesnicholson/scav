@@ -25,12 +25,15 @@ struct RouteNet {
   // 1 seats a straight leg between parallel faces at the low end of the run both faces
   // seat; 0 seats it midway between the face centres.
   uint32_t lean{ 0 };
-  // A loop's reach: its corridor runs this far out from each of its two seats, on the
-  // face of its other end's point, else its box's least-used face unless one is named.
+  // A loop's reach: its corridor runs this far out from each of its two seats, on its
+  // points' face, else its box's least-used face unless one is named.
   int32_t loop{ 0 };
   int32_t src_clear{ 0 }, dst_clear{ 0 };     // the least straight run at each end
   uint32_t trans{ INVALID }, seg{ INVALID };  // the caller's ids, read only by the trace
   uint32_t apart{ INVALID };                  // -> an earlier net this one keeps clear of
+  uint32_t loop_box{
+    INVALID
+  };  // -> obstacles: the box a loop between two points runs off
 };
 
 // Face of `r` that `at` lies on: 0 left, 1 right, 2 top, 3 bottom, else INVALID. Corners
