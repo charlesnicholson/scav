@@ -44,6 +44,7 @@ enum class TraceKind : uint16_t {
   BundleRefused,  // a check left a nudged bundle in place
   RouteWalled,    // a net crossed the walls that enclose one of its ends
   LabelCentred,   // a label found no seat beside its route and was centred on it
+  RouteReseated,  // a net routed only on the grid without clearance bumpers
 };
 
 // What a rank boundary's charge is for; `GapCharged.pass`. `Held` adds nothing: the

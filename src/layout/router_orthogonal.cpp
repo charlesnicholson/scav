@@ -1603,7 +1603,10 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
         tight_ok = ortho_grid(in.region, in.obstacles, anchors, 0, tight, &walls);
       }
       ok = tight_ok && attempt(tight);
-      if (ok) { reseated = 1; }
+      if (ok) {
+        reseated = 1;
+        trace_emit({ .kind = TraceKind::RouteReseated, .seg = { .seg = net.seg } });
+      }
       if (!ok) { why = RouteFailure::Unreachable; }
     }
     if ((why == RouteFailure::Unreachable) && (in.first_wall < in.obstacles.size())) {
