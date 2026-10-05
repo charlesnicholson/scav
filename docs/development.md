@@ -313,6 +313,17 @@ declares `scav_stable_sort` — so a call site names its header without a grep.
 (Test fixture headers count their stem after the `test_` marker:
 `test_synth.h` declares `synth_*`.)
 
+## Measuring the search
+
+`scav dump --layout --search-stats <chart>` prints one JSON line ahead of the model: the
+layout's processor time (`cpu_ms`, from `std::clock`, wall time on Windows), the
+searches run, the candidate memo's peak bytes, and per Level 1 move kind the candidates
+offered, those the memo answered (`deduped`) and those taken. `tools/trace.py --stats
+[chart...]` runs it over the corpus, or the charts given, at both text scales and
+tabulates it, with `scored` as offered less deduped. `deduped` varies by a few tenths
+of a percent between runs, since two threads can compute one key at once; the drawing
+does not.
+
 ## The Unicode tables
 
 Text is normalized on read — BOM stripped, line endings folded to LF, UTF-8
