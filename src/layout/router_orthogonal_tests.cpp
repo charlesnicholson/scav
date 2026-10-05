@@ -2826,6 +2826,50 @@ TEST_CASE("ortho: a seat in an occupied span moves to its face's nearest free po
   CHECK(stuck == std::vector<int32_t>{ 0, 0 });
 }
 
+TEST_CASE("ortho: a loop from a box to a point on its face runs its reach out") {
+  // From the box to a point on each face in turn, and from the point back to the box.
+  scav_rect const box{ rect(2000, 2000, 1000, 600) };
+  std::array<scav_point, 4> const on{ pt(2000, 2450),
+                                      pt(3000, 2450),
+                                      pt(2800, 2000),
+                                      pt(2800, 2600) };
+  for (uint32_t face = 0; face < 4; ++face) {
+    for (bool const from_box : { true, false }) {
+      CAPTURE(face);
+      CAPTURE(from_box);
+      RouteInput in;
+      in.profile = profile();
+      in.region = rect(0, 0, 5000, 5000);
+      in.obstacles.push_back(box);
+      RouteNet net{ .src = pt(2500, 2300), .dst = on[face], .loop = 256 };
+      net.src_obstacle = 0;
+      if (!from_box) {
+        net = { .src = on[face], .dst = pt(2500, 2300), .loop = 256 };
+        net.dst_obstacle = 0;
+      }
+      in.nets.push_back(net);
+      RouteOutput out;
+      ORTHO.route(in, out);
+      REQUIRE(out.metrics.size() == 1);
+      CHECK(out.metrics[0].failed == RouteFailure::None);
+      scav_span const loop{ out.net_points[0] };
+      REQUIRE(loop.len >= 2);
+      int32_t reach{ 0 };
+      for (uint32_t k = 0; k < loop.len; ++k) {
+        scav_point const a{ out.points[loop.off + k] };
+        reach = imax(reach,
+                     imax(imax(box.x - a.x, a.x - (box.x + box.w)),
+                          imax(box.y - a.y, a.y - (box.y + box.h))));
+      }
+      CHECK(reach == 256);
+      scav_point const far{ from_box ? out.points[loop.off + loop.len - 1]
+                                     : out.points[loop.off] };
+      CHECK(far.x == on[face].x);
+      CHECK(far.y == on[face].y);
+    }
+  }
+}
+
 TEST_CASE("ortho: an unpinned loop takes its box's least-used face, the right on a tie") {
   // Point ends on the faces in turn: right, then bottom, then top are used up, and with
   // one on every face the tie goes back to the right.

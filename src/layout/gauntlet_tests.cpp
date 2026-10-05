@@ -2594,6 +2594,20 @@ bool crosses_divider(Laid const &l, uint32_t t, uint32_t st) {
   return false;
 }
 
+// How far transition `t`'s route reaches outside state `st`'s box.
+int32_t reach_outside(Laid const &l, uint32_t t, uint32_t st) {
+  scav_rect const &box{ l.z.state[st] };
+  scav_span const route{ l.r.route[t] };
+  int32_t out{ 0 };
+  for (uint32_t k = 0; k < route.len; ++k) {
+    scav_point const a{ l.r.points[route.off + k] };
+    out = imax(out,
+               imax(imax(box.x - a.x, a.x - (box.x + box.w)),
+                    imax(box.y - a.y, a.y - (box.y + box.h))));
+  }
+  return out;
+}
+
 struct OutAndBack {
   char const *chart;
   char const *state;  // the composite the external route leaves and re-enters
@@ -2647,8 +2661,8 @@ std::vector<scav_box_space> headers_on(char const *name, scav_profile const &p) 
 TEST_CASE(
     "gauntlet: an external route out of a machine leaves its composite and returns") {
   // Out across the composite's border, outside it, and back in; with the inside kind it
-  // stays in. Headed, no route enters a band. Tier 0 is zero throughout and no route
-  // crosses a region divider or itself.
+  // stays in. Headed, no route enters a band. Tier 0 is zero throughout, no route crosses
+  // a region divider or itself, and a loop off the composite reaches out `2 * pad`.
   for (OutAndBack const &shape : OUT_AND_BACK) {
     for (scav_profile const &p : { readable(), compact() }) {
       std::string const chart{ shape.chart };
@@ -2666,6 +2680,9 @@ TEST_CASE(
       CHECK(cost_of(terms, p).t0_violations == 0);
       CHECK(terms.self_crossing == 0);
       CHECK_FALSE(crosses_divider(out, t, st));
+      bool const own{ (out.c.transitions[t].src.v == st) ||
+                      (out.c.transitions[t].dst.v == st) };
+      if (own) { CHECK(reach_outside(out, t, st) >= (2 * p.pad)); }
 
       Laid in;
       lay(shape.chart, p, in, {}, nullptr, shape.inside);
@@ -2681,6 +2698,7 @@ TEST_CASE(
       CHECK(cost_of(cost_terms(headed.c, headed.g, headed.z, headed.r, s, p), p)
                 .t0_violations == 0);
       CHECK_FALSE(crosses_divider(headed, t, st));
+      if (own) { CHECK(reach_outside(headed, t, st) >= (2 * p.pad)); }
     }
   }
 }
