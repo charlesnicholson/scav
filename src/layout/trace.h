@@ -272,6 +272,27 @@ struct TraceFrame {
 // A JSON array, one event per line in order; `tools/trace.py` reads it.
 void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out);
 
+inline constexpr uint32_t TRACE_MOVES{ 8 };  // `TRACE_MOVE_*` values
+
+// A search's counts. Per `TRACE_MOVE_*`: moves offered, those the candidate memo answered,
+// and those taken.
+struct SearchStats {
+  std::array<uint64_t, TRACE_MOVES> offered{}, deduped{}, taken{};
+  uint64_t faced{ 0 };       // moves whose facing pass the memo answered
+  uint64_t searches{ 0 };    // Level 1 searches run
+  uint64_t recalled{ 0 };    // Level 1 searches the search memo answered
+  uint64_t memo_bytes{ 0 };  // the most a layout's candidate memo held
+};
+
+// The process-wide counts sink, shared by every thread; null when nothing counts.
+void search_stats_set(SearchStats *s);
+
+// Adds `add` to the sink, if one is set; `memo_bytes` takes the larger.
+void search_stats_add(SearchStats const &add);
+
+// One JSON object: the totals, then per move kind its offered, deduped and taken counts.
+void search_stats_to_json(SearchStats const &st, std::vector<char> &out);
+
 }  // namespace scav
 
 #endif  // SCAV_LAYOUT_TRACE_H_INCLUDED

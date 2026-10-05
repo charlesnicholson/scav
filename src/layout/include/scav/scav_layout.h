@@ -199,7 +199,8 @@ bool layout_run(Chart &c,
 enum class TraceScope : uint32_t {
   Shipped,  // a single-threaded re-run of the winning row and pins, searching nothing
   Search,   // the whole search on one thread, every candidate included
-  Outline   // the whole search on one thread, its row and kick events only
+  Outline,  // the whole search on one thread, its row and kick events only
+  Stats     // the whole search on the caller's threads, its counts as one JSON object
 };
 
 // Runs `layout_run` from `pins` and writes its decision trace as JSON to `out`. Debug

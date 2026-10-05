@@ -1,8 +1,9 @@
-// Level 1 search shortcuts checked against runs without them: the search memo, unscored
-// no-op faces, and face moves scored from the incumbent's prefix.
+// Level 1 search shortcuts checked against runs without them: the search memo, the
+// candidate memo, unscored no-op faces, and face moves scored from the incumbent's prefix.
 
 #include "layout/pack.h"
 #include "layout/size.h"
+#include "layout/trace.h"
 #include "scav/scav_core.h"
 #include "scav/scav_layout.h"
 #include "scav/scav_layout_c.h"
@@ -39,6 +40,10 @@ void layout_test_search_memo(bool on);
 void layout_test_search_memo_verify(bool on);
 uint32_t layout_test_search_memo_hits();
 uint32_t layout_test_search_memo_mismatches();
+void layout_test_candidate_memo(bool on, bool verify);
+uint64_t layout_test_candidate_memo_deduped();
+uint64_t layout_test_candidate_memo_faced();
+uint64_t layout_test_candidate_memo_mismatches();
 std::vector<Cost> const &layout_test_schedule_first();
 std::vector<Cost> const &layout_test_schedule_second();
 std::vector<Cost> const &layout_test_schedule_kept();
@@ -415,4 +420,139 @@ TEST_CASE("search schedules: each row keeps the cheaper of its two searches" *
   }
   CHECK(won_somewhere > 0);
   CHECK(won_nowhere > 0);
+}
+
+namespace {
+
+// Turns the candidate memo back on, unverified, on scope exit.
+struct CandidateGuard {
+  CandidateGuard() = default;
+  CandidateGuard(CandidateGuard const &) = delete;
+  CandidateGuard &operator=(CandidateGuard const &) = delete;
+  ~CandidateGuard() { layout_test_candidate_memo(true, false); }
+};
+
+uint64_t total(std::array<uint64_t, TRACE_MOVES> const &by_kind) {
+  uint64_t out{ 0 };
+  for (uint64_t const n : by_kind) { out += n; }
+  return out;
+}
+
+}  // namespace
+
+TEST_CASE("search: the candidate memo lays out what scoring every move in full does" *
+          doctest::test_suite("full")) {
+  CandidateGuard const guard;
+  constexpr std::array<char const *, 6> CHARTS{ "axis.scav", "brew.scav", "kiln.scav",
+                                                "ota.scav",  "tcp.scav",  "vac.scav" };
+  uint64_t deduped{ 0 };
+  uint64_t faced{ 0 };
+  for (bool const labelled : { false, true }) {
+    for (char const *name : CHARTS) {
+      if (scav::test::corpus_skipped(name)) { continue; }
+      CAPTURE(labelled);
+      CAPTURE(name);
+      layout_test_candidate_memo(true, false);
+      Laid const with{ lay_out(name, labelled) };
+      deduped += layout_test_candidate_memo_deduped();
+      faced += layout_test_candidate_memo_faced();
+      layout_test_candidate_memo(false, false);
+      Laid const without{ lay_out(name, labelled) };
+      CHECK(layout_test_candidate_memo_deduped() == 0);
+      REQUIRE(with.ok);
+      REQUIRE(without.ok);
+      CHECK(with.structural == without.structural);
+      CHECK(with.coordinate == without.coordinate);
+    }
+  }
+  CHECK(deduped > 0);
+  CHECK(faced > 0);
+}
+
+TEST_CASE(
+    "search: every move the candidate memo answers scores as that move laid out "
+    "afresh") {
+  // Each answer, taken or not, from the score memo or the facing memo, is checked.
+  CandidateGuard const guard;
+  constexpr std::array<char const *, 3> CHARTS{ "brew.scav", "dock.scav", "estop.scav" };
+  uint64_t deduped{ 0 };
+  uint64_t faced{ 0 };
+  for (bool const labelled : { false, true }) {
+    for (char const *name : CHARTS) {
+      CAPTURE(labelled);
+      CAPTURE(name);
+      layout_test_candidate_memo(true, true);
+      REQUIRE(lay_out(name, labelled).ok);
+      deduped += layout_test_candidate_memo_deduped();
+      faced += layout_test_candidate_memo_faced();
+      CHECK(layout_test_candidate_memo_mismatches() == 0);
+    }
+  }
+  CHECK(deduped > 0);
+  CHECK(faced > 0);
+}
+
+TEST_CASE(
+    "search: every move the candidate memo answers on the corpus scores as laid out "
+    "afresh" *
+    doctest::test_suite("full")) {
+  CandidateGuard const guard;
+  constexpr std::array<char const *, 5> CHARTS{ "axis.scav",
+                                                "kiln.scav",
+                                                "ota.scav",
+                                                "tcp.scav",
+                                                "vac.scav" };
+  uint64_t deduped{ 0 };
+  for (bool const labelled : { false, true }) {
+    for (char const *name : CHARTS) {
+      if (scav::test::corpus_skipped(name)) { continue; }
+      CAPTURE(labelled);
+      CAPTURE(name);
+      layout_test_candidate_memo(true, true);
+      REQUIRE(lay_out(name, labelled).ok);
+      deduped += layout_test_candidate_memo_deduped();
+      CHECK(layout_test_candidate_memo_mismatches() == 0);
+    }
+  }
+  CHECK(deduped > 0);
+}
+
+TEST_CASE(
+    "search stats: a layout's moves by kind, the memo's answers among them, and "
+    "the same moves without it") {
+  CandidateGuard const guard;
+  SearchStats on;
+  search_stats_set(&on);
+  bool const laid_on{ lay_out("brew.scav", true).ok };
+  search_stats_set(nullptr);
+  layout_test_candidate_memo(false, false);
+  SearchStats off;
+  search_stats_set(&off);
+  bool const laid_off{ lay_out("brew.scav", true).ok };
+  search_stats_set(nullptr);
+  REQUIRE(laid_on);
+  REQUIRE(laid_off);
+  // With no sink set, nothing is counted.
+  layout_test_candidate_memo(true, false);
+  SearchStats const before{ on };
+  REQUIRE(lay_out("brew.scav", true).ok);
+  CHECK(total(on.offered) == total(before.offered));
+
+  for (uint32_t k = 0; k < TRACE_MOVES; ++k) {
+    CAPTURE(k);
+    CHECK(on.offered[k] == off.offered[k]);
+    CHECK(on.taken[k] == off.taken[k]);
+    CHECK(on.deduped[k] <= on.offered[k]);
+    CHECK(off.deduped[k] == 0);
+  }
+  CHECK(total(on.offered) > 0);
+  CHECK(total(on.deduped) > 0);
+  CHECK(total(on.taken) > 0);
+  CHECK(on.faced > 0);
+  CHECK(off.faced == 0);
+  CHECK(on.searches > 0);
+  CHECK(on.searches == off.searches);
+  CHECK(on.recalled == off.recalled);
+  CHECK(on.memo_bytes > 0);
+  CHECK(off.memo_bytes == 0);
 }

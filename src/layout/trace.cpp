@@ -1,6 +1,7 @@
 // The trace sink and its JSON serialization.
 
 #include "layout/trace.h"
+#include "scav_thread.h"
 #include "scav_vec.h"
 
 #include <array>
@@ -12,6 +13,10 @@ namespace {
 
 thread_local LayoutTrace *g_sink{ nullptr };
 thread_local LayoutTrace *g_outline{ nullptr };
+
+// Level 1 move kinds by `TRACE_MOVE_*`.
+constexpr std::array<char const *, TRACE_MOVES> MOVES{ "rank", "cut",  "reverse", "face",
+                                                       "side", "fold", "orient",  "loop" };
 
 char const *kind_name(TraceKind k) {
   switch (k) {
@@ -169,6 +174,63 @@ void trace_sink_set(LayoutTrace *t) { g_sink = t; }
 LayoutTrace *trace_outline() { return g_outline; }
 void trace_outline_set(LayoutTrace *t) { g_outline = t; }
 
+namespace {
+
+struct StatsSink {
+  Mutex lock;
+  SearchStats *to{ nullptr };
+};
+
+// Never destroyed; pool threads may add after static destruction.
+StatsSink &stats_sink() {
+  static StatsSink *const INSTANCE{ new StatsSink };
+  return *INSTANCE;
+}
+
+}  // namespace
+
+void search_stats_set(SearchStats *s) {
+  StatsSink &sink{ stats_sink() };
+  ScopedLock const held{ sink.lock };
+  sink.to = s;
+}
+
+void search_stats_add(SearchStats const &add) {
+  StatsSink &sink{ stats_sink() };
+  ScopedLock const held{ sink.lock };
+  SearchStats *const to{ sink.to };
+  if (to == nullptr) { return; }
+  for (uint32_t k = 0; k < TRACE_MOVES; ++k) {
+    to->offered[k] += add.offered[k];
+    to->deduped[k] += add.deduped[k];
+    to->taken[k] += add.taken[k];
+  }
+  to->faced += add.faced;
+  to->searches += add.searches;
+  to->recalled += add.recalled;
+  to->memo_bytes = (add.memo_bytes > to->memo_bytes) ? add.memo_bytes : to->memo_bytes;
+}
+
+void search_stats_to_json(SearchStats const &st, std::vector<char> &out) {
+  Json j{ out };
+  j.raw("{\"searches\":");
+  j.num(static_cast<int64_t>(st.searches));
+  j.kv("recalled", static_cast<int64_t>(st.recalled));
+  j.kv("faced", static_cast<int64_t>(st.faced));
+  j.kv("memo_bytes", static_cast<int64_t>(st.memo_bytes));
+  j.raw(",\"moves\":{");
+  for (uint32_t k = 0; k < TRACE_MOVES; ++k) {
+    j.raw((k == 0) ? "\"" : ",\"");
+    j.raw(MOVES[k]);
+    j.raw(R"(":{"offered":)");
+    j.num(static_cast<int64_t>(st.offered[k]));
+    j.kv("deduped", static_cast<int64_t>(st.deduped[k]));
+    j.kv("taken", static_cast<int64_t>(st.taken[k]));
+    j.raw("}");
+  }
+  j.raw("}}\n");
+}
+
 void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out) {
   Json j{ out };
   j.raw("[\n");
@@ -255,10 +317,7 @@ void trace_to_json(LayoutTrace const &t, Chart const &c, std::vector<char> &out)
           j.kv("leg", e.score.leg);
         }
         if (e.score.row == INVALID) {
-          static constexpr std::array<char const *, 8> MOVE{ "rank",   "cut",  "reverse",
-                                                             "face",   "side", "fold",
-                                                             "orient", "loop" };
-          j.ks("move", (e.score.move < MOVE.size()) ? MOVE[e.score.move] : "?");
+          j.ks("move", (e.score.move < MOVES.size()) ? MOVES[e.score.move] : "?");
           if (e.score.move == TRACE_MOVE_FACE) {
             j.ks("end", (e.score.end == 0) ? "src" : "dst");
             j.kv("face", e.score.face);

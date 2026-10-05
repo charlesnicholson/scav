@@ -12,6 +12,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <ctime>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -1045,6 +1046,7 @@ int run_dump(char const *path,
     }
     std::vector<Diagnostic> diags;
     std::vector<char> events;
+    std::clock_t const began{ std::clock() };
     bool const laid{ trace ? layout_trace_json(net.chart,
                                                as_spaces(spaces),
                                                opts,
@@ -1065,8 +1067,20 @@ int run_dump(char const *path,
                                         nullptr,
                                         &taken,
                                         &args.pins) };
-    // The trace goes to stdout, ahead of the model dump.
-    if (trace) { write_stream(std::string{ events.begin(), events.end() }, stdout); }
+    std::clock_t const ended{ std::clock() };
+    // The trace, or the search's counts after the layout's processor time, goes to stdout
+    // ahead of the model dump.
+    if (scope == TraceScope::Stats) {
+      std::string line{ "{\"cpu_ms\":" };
+      line += std::to_string(((ended - began) * 1000) / CLOCKS_PER_SEC);
+      line += ",\"search\":";
+      line.append(events.begin(), events.end());
+      while (!line.empty() && (line.back() == '\n')) { line.pop_back(); }
+      line += "}\n";
+      write_stream(line, stdout);
+    } else if (trace) {
+      write_stream(std::string{ events.begin(), events.end() }, stdout);
+    }
     if (!diags.empty()) {
       std::string err;
       for (Diagnostic const &d : diags) { diag_append(err, net.chart, d, path); }

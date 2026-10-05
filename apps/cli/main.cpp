@@ -19,9 +19,9 @@ constexpr std::string_view USAGE{
   "  check <file>                 structural validation, exit 1 on a finding\n"
   "  deps [--target NAME] <file>  the document network as a depfile\n"
   "  dump [--hash|--json] [--layout [LAYOUT...]] [--trace "
-  "[--trace-search|--trace-outline]] "
+  "[--trace-search|--trace-outline]|--search-stats] "
   "<file>  the model; --layout adds geometry and the flags it rests on, --trace its "
-  "decisions\n"
+  "decisions, --search-stats the search's counts and CPU\n"
   "  render [-o FILE] [--embed-font] [LAYOUT...] <file>"
   "   chart -> SVG\n"
   "  selftest [--against FILE]   recompute the layout hashes on this toolchain "
@@ -49,6 +49,7 @@ int dispatch(int argc, char **argv) {
     bool trace{ false };
     bool trace_search{ false };
     bool trace_outline{ false };
+    bool search_stats{ false };
     LayoutArgs args;
     for (int i = 2; i < argc; ++i) {
       ArgRead const read{ read_layout_arg(argc, argv, i, args) };
@@ -68,6 +69,8 @@ int dispatch(int argc, char **argv) {
         flag = &trace_search;
       } else if (arg == "--trace-outline") {
         flag = &trace_outline;
+      } else if (arg == "--search-stats") {
+        flag = &search_stats;
       }
       if (flag != nullptr) {
         if (*flag) { return usage(); }
@@ -78,18 +81,18 @@ int dispatch(int argc, char **argv) {
         return usage();
       }
     }
-    // Layout flags and `--trace` require `--layout`; `--trace-search` and
-    // `--trace-outline` require `--trace` and exclude each other; `--hash` excludes
-    // `--json` and `--layout`.
+    // `--layout` gates layout flags, `--trace` and `--search-stats`; `--trace` gates its
+    // two scopes. Exclusive: the two scopes, stats and trace, hash and json or layout.
     if ((path == nullptr) || (hash && (json || layout)) ||
         ((trace_search || trace_outline) && !trace) || (trace_search && trace_outline) ||
-        ((args.given || trace) && !layout)) {
+        (search_stats && trace) || ((args.given || trace || search_stats) && !layout)) {
       return usage();
     }
     TraceScope scope{ TraceScope::Shipped };
     if (trace_search) { scope = TraceScope::Search; }
     if (trace_outline) { scope = TraceScope::Outline; }
-    return run_dump(path, hash, json, layout, trace, scope, args);
+    if (search_stats) { scope = TraceScope::Stats; }
+    return run_dump(path, hash, json, layout, trace || search_stats, scope, args);
   }
 
   if (verb == "render") {

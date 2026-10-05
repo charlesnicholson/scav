@@ -1,6 +1,7 @@
 // Lays out a chart: phases 2 and 3 per search row, Level 1 search and kicks on each row,
 // then the winner's geometry columns. Also the coordinate and structural hashes.
 
+#include "layout/candidate_memo.h"
 #include "layout/cost.h"
 #include "layout/decompose.h"
 #include "layout/geom.h"
@@ -47,6 +48,10 @@ void layout_test_search_memo_verify(bool on);
 void layout_test_no_search(bool on);
 uint32_t layout_test_search_memo_hits();
 uint32_t layout_test_search_memo_mismatches();
+void layout_test_candidate_memo(bool on, bool verify);
+uint64_t layout_test_candidate_memo_deduped();
+uint64_t layout_test_candidate_memo_faced();
+uint64_t layout_test_candidate_memo_mismatches();
 std::vector<Cost> const &layout_test_schedule_first();
 std::vector<Cost> const &layout_test_schedule_second();
 std::vector<Cost> const &layout_test_schedule_kept();
@@ -280,12 +285,6 @@ bool same_geometry(Candidate const &a, Candidate const &b) {
   return std::ranges::equal(a.sized.state, b.sized.state, same_rect) &&
          std::ranges::equal(a.routes.points, b.routes.points, same);
 }
-
-// The facing pass's output.
-struct Facing {
-  std::vector<ReversePin> reverses;  // legs whose in-frame edge reverses
-  std::vector<EndPin> sides;         // legs whose port moves to a cross border
-};
 
 // A cross-border side the facing pass has given to `node`.
 struct FacingTaken {
@@ -560,92 +559,79 @@ struct CandidateReuse {
   CandidateScratch *scratch{ nullptr };
 };
 
-// Runs phases 2 and 3 for `row` into `out`, reusing `out`'s and `with.scratch`'s storage;
-// `with.from` supplies phases 1 and 2 in place of `orders`.
-void search_candidate(Candidate &out,
-                      Chart const &c,
-                      SplitGraph const &g,
-                      SubmachineOrders const &orders,
-                      scav_spaces const &s,
-                      Row const &row,
-                      Router const &router,
-                      uint32_t threads,
-                      std::vector<Diagnostic> &diags,
-                      SearchPins const *pins,
-                      CandidateReuse const &with,
-                      bool labels) {
+// Sizes `orders`, turns ports to face their routes, then orders and sizes again, writing
+// `out.sized`, `out.laid`, `sc.flips` and `use`; false when the first sizing fails.
+bool lay_facing(Candidate &out,
+                CandidateScratch &sc,
+                Chart const &c,
+                SplitGraph const &g,
+                SubmachineOrders const &orders,
+                scav_spaces const &s,
+                Row const &row,
+                uint32_t threads,
+                std::vector<Diagnostic> &diags,
+                SearchPins const *pins,
+                SubmachineOrders const *&use) {
   scav_profile const &knobs{ row.knobs };
-  Prefix *const prefix{ with.prefix };
-  Prefix const *const from{ with.from };
-  CandidateScratch own;
-  CandidateScratch &sc{ (with.scratch != nullptr) ? *with.scratch : own };
-  out.inflations = 0;
-  out.viable = false;
-  out.sized_chart = {};
-  SubmachineOrders &facing{ sc.facing };
-  SubmachineOrders const *use{ &orders };
-  if (from != nullptr) {
-    if (!from->ok) {
-      out = Candidate{};
-      return;
-    }
-    out.sized = from->sized;
-    out.laid = (pins != nullptr) ? *pins : SearchPins{};
-    turn_pins(out.laid, from->flips);
-    use = &from->laid;
+  use = &orders;
+  if (!size_layout(c,
+                   g,
+                   orders,
+                   s,
+                   knobs,
+                   out.sized,
+                   diags,
+                   row.dar,
+                   row.pack,
+                   row.fold)) {
+    out.routes = Routes{};
+    out.laid = SearchPins{};
+    return false;
+  }
+  SearchPins &turned{ out.laid };
+  if (pins != nullptr) {
+    turned = *pins;  // copy-assigned, keeping `turned`'s storage
   } else {
-    if (!size_layout(c,
-                     g,
-                     orders,
-                     s,
-                     knobs,
-                     out.sized,
-                     diags,
-                     row.dar,
-                     row.pack,
-                     row.fold)) {
-      if (prefix != nullptr) { prefix->ok = false; }
-      out.routes = Routes{};
-      out.laid = SearchPins{};
-      return;
-    }
-    // Turns ports to face their routes, then orders and sizes the frames again; a pure
-    // function of the row and pins.
-    SearchPins &turned{ out.laid };
-    if (pins != nullptr) {
-      turned = *pins;  // copy-assigned, keeping `turned`'s storage
-    } else {
-      turned = SearchPins{};
-    }
-    Facing &flips{ sc.flips };
-    facing_flips(flips, sc.taken, c, g, orders, out.sized, s);
-    if (!flips.reverses.empty() || !flips.sides.empty()) {
-      turn_pins(turned, flips);
-      order_submachines(facing, c, g, s, knobs, threads, turned);
-      SizedLayout &again{ sc.again };
-      std::vector<Diagnostic> spilled;
-      if (size_layout(c,
-                      g,
-                      facing,
-                      s,
-                      knobs,
-                      again,
-                      spilled,
-                      row.dar,
-                      row.pack,
-                      row.fold)) {
-        use = &facing;
-        std::swap(out.sized, again);
-      }
-    }
-    if (prefix != nullptr) {
-      prefix->laid = *use;
-      prefix->sized = out.sized;
-      prefix->flips = flips;
-      prefix->ok = true;
+    turned = SearchPins{};
+  }
+  Facing &flips{ sc.flips };
+  facing_flips(flips, sc.taken, c, g, orders, out.sized, s);
+  if (!flips.reverses.empty() || !flips.sides.empty()) {
+    turn_pins(turned, flips);
+    order_submachines(sc.facing, c, g, s, knobs, threads, turned);
+    SizedLayout &again{ sc.again };
+    std::vector<Diagnostic> spilled;
+    if (size_layout(c,
+                    g,
+                    sc.facing,
+                    s,
+                    knobs,
+                    again,
+                    spilled,
+                    row.dar,
+                    row.pack,
+                    row.fold)) {
+      use = &sc.facing;
+      std::swap(out.sized, again);
     }
   }
-  SubmachineOrders const &laid{ *use };
+  return true;
+}
+
+// Phase 3 for `out` over `laid` and `out.sized`: routes, retries at wider spacing while a
+// route is unreachable, and covers the chart.
+void lay_routes(Candidate &out,
+                Chart const &c,
+                SplitGraph const &g,
+                SubmachineOrders const &laid,
+                scav_spaces const &s,
+                Row const &row,
+                Router const &router,
+                uint32_t threads,
+                SearchPins const *pins,
+                CandidateReuse const &with,
+                bool labels) {
+  scav_profile const &knobs{ row.knobs };
   route_transitions(out.routes,
                     c,
                     g,
@@ -659,7 +645,7 @@ void search_candidate(Candidate &out,
                     with.fill,
                     pins,
                     labels);
-  if (prefix != nullptr) { prefix->routes = out.routes; }
+  if (with.prefix != nullptr) { with.prefix->routes = out.routes; }
 
   // Spacing retry: `out` holds the best attempt so far, `fewest` its degraded count.
   scav_profile wider{ knobs };
@@ -713,6 +699,52 @@ void search_candidate(Candidate &out,
   out.viable = true;
 }
 
+// Runs phases 2 and 3 for `row` into `out`, reusing `out`'s and `with.scratch`'s storage;
+// `with.from` supplies phases 1 and 2 in place of `orders`.
+void search_candidate(Candidate &out,
+                      Chart const &c,
+                      SplitGraph const &g,
+                      SubmachineOrders const &orders,
+                      scav_spaces const &s,
+                      Row const &row,
+                      Router const &router,
+                      uint32_t threads,
+                      std::vector<Diagnostic> &diags,
+                      SearchPins const *pins,
+                      CandidateReuse const &with,
+                      bool labels) {
+  Prefix *const prefix{ with.prefix };
+  Prefix const *const from{ with.from };
+  CandidateScratch own;
+  CandidateScratch &sc{ (with.scratch != nullptr) ? *with.scratch : own };
+  out.inflations = 0;
+  out.viable = false;
+  out.sized_chart = {};
+  SubmachineOrders const *use{ &orders };
+  if (from != nullptr) {
+    if (!from->ok) {
+      out = Candidate{};
+      return;
+    }
+    out.sized = from->sized;
+    out.laid = (pins != nullptr) ? *pins : SearchPins{};
+    turn_pins(out.laid, from->flips);
+    use = &from->laid;
+  } else {
+    if (!lay_facing(out, sc, c, g, orders, s, row, threads, diags, pins, use)) {
+      if (prefix != nullptr) { prefix->ok = false; }
+      return;
+    }
+    if (prefix != nullptr) {
+      prefix->laid = *use;
+      prefix->sized = out.sized;
+      prefix->flips = sc.flips;
+      prefix->ok = true;
+    }
+  }
+  lay_routes(out, c, g, *use, s, row, router, threads, pins, with, labels);
+}
+
 Candidate search_candidate(Chart const &c,
                            SplitGraph const &g,
                            SubmachineOrders const &orders,
@@ -761,7 +793,8 @@ static_assert((static_cast<uint16_t>(MoveKind::Rank) == TRACE_MOVE_RANK) &&
                   (static_cast<uint16_t>(MoveKind::Side) == TRACE_MOVE_SIDE) &&
                   (static_cast<uint16_t>(MoveKind::Fold) == TRACE_MOVE_FOLD) &&
                   (static_cast<uint16_t>(MoveKind::Orient) == TRACE_MOVE_ORIENT) &&
-                  (static_cast<uint16_t>(MoveKind::Loop) == TRACE_MOVE_LOOP),
+                  (static_cast<uint16_t>(MoveKind::Loop) == TRACE_MOVE_LOOP) &&
+                  ((static_cast<uint32_t>(MoveKind::Loop) + 1) == TRACE_MOVES),
               "the trace names a move by this enum's ordinal");
 // One Level 1 move or kick; `kind` names which of its pins is set. `Face` is an end pin
 // at a box end, `Side` one at a port end.
@@ -859,6 +892,15 @@ bool test_prefix_verify{ false };
 Mutex test_prefix_lock;
 uint64_t test_prefix_used{ 0 };
 uint64_t test_prefix_mismatches{ 0 };
+
+// Test switches: score moves through the candidate memo; verify each move it answers
+// against a lay-out without it. The counters tally answers and mismatches.
+bool test_candidate_memo{ true };
+bool test_candidate_memo_verify{ false };
+Mutex test_candidate_memo_lock;
+uint64_t test_candidate_memo_deduped{ 0 };
+uint64_t test_candidate_memo_faced{ 0 };
+uint64_t test_candidate_memo_mismatches{ 0 };
 #endif
 
 // True when every path box fits `chart`; a placed box then lies inside it.
@@ -906,6 +948,7 @@ struct KeptCandidate {
   Candidate cand;
   Cost bound{};
   uint32_t index{ INVALID };
+  uint32_t entry{ INVALID };  // its score entry
 };
 
 // Per-thread scratch for scoring one move; a move runs on one thread.
@@ -914,15 +957,164 @@ struct MoveScratch {
   SubmachineOrders moved;
   Candidate whole, face;
   CandidateScratch keep;
+  std::vector<uint32_t> ids,
+      laid_ids;  // frame numbers of `moved` and of the laid ordering
 };
+
+// A search's view of the candidate memo; a null `table` scores every move in full.
+struct MemoAccess {
+  CandidateMemo *table{ nullptr };
+  uint32_t row{ 0 };                             // the search row's `row_word`
+  std::vector<uint32_t> const *laid{ nullptr };  // the incumbent's laid frame numbers
+};
+
+// How one scored move met the memo.
+struct MemoUse {
+  uint32_t entry{ INVALID };  // its score entry
+  bool deduped{ false };      // the score memo answered it
+  bool labelled{ false };     // the answer is the labelled score
+  bool faced{ false };        // the facing memo answered its facing pass
+};
+
+MemoScore memo_score(Scored const &s) {
+  return { .cost = s.cost, .viable = s.viable, .inflated = s.inflated };
+}
+
+Scored scored_from(MemoScore const &m) {
+  Scored out;
+  out.cost = m.cost;
+  out.viable = m.viable;
+  out.inflated = m.inflated;
+  return out;
+}
 
 MoveScratch &move_scratch() {
   thread_local MoveScratch s;
   return s;
 }
 
-// Scores `pins` through phases 1 to 3; without `labels`, it is `scored_of`'s bound.
-// `from`, the incumbent's prefix when `pins` adds only a face, supplies phases 1 and 2.
+// `score_move` through `memo.table`: a laid ordering seen under the same box-end faces
+// takes its stored score, and a phase-1 ordering seen takes its facing pass's turns.
+Scored score_memoized(Chart const &c,
+                      SplitGraph const &g,
+                      CostContext const &scoring,
+                      scav_spaces const &s,
+                      scav_profile const &objective,
+                      Row const &row,
+                      Router const &router,
+                      SearchPins const &pins,
+                      RouteCache const *reuse,
+                      Prefix const *from,
+                      bool labels,
+                      Routed *routed,
+                      MemoAccess const &memo,
+                      MemoUse &use) {
+  MoveScratch &sc{ move_scratch() };
+  CandidateMemo &table{ *memo.table };
+  Candidate &cand{ (from != nullptr) ? sc.face : sc.whole };
+  cand.inflations = 0;
+  cand.viable = false;
+  cand.sized_chart = {};
+  Scored out;
+  // Looks up the laid ordering numbered `ids` under the move's faces; true when a stored
+  // score answers.
+  auto const recall = [&](std::vector<uint32_t> const &ids) {
+    CandidateMemo::Recalled const got{ table.find_score(memo.row, ids, &pins, labels) };
+    use.entry = got.entry;
+    use.deduped = got.found;
+    use.labelled = got.labelled;
+    if (got.found) { out = scored_from(got.score); }
+    return got.found;
+  };
+  SubmachineOrders const *laid{ nullptr };
+  bool sized{ false };
+  if (from != nullptr) {
+    if (!from->ok) {
+      cand = Candidate{};
+      return out;
+    }
+    if ((memo.laid != nullptr) && recall(*memo.laid)) { return out; }
+    cand.sized = from->sized;
+    cand.laid = pins;
+    turn_pins(cand.laid, from->flips);
+    laid = &from->laid;
+  } else {
+    order_submachines(sc.moved, c, g, s, objective, 1, pins);
+    bool const keyed{ table.frame_ids(sc.moved, sc.ids) };
+    Facing &flips{ sc.keep.flips };
+    FacingFound const found{ keyed ? table.find_facing(memo.row, sc.ids, sc.moved, flips)
+                                   : FacingFound::Absent };
+    use.faced = found != FacingFound::Absent;
+    if (found == FacingFound::Failed) {
+      cand.routes = Routes{};
+      cand.laid = SearchPins{};
+      return out;
+    }
+    laid = &sc.moved;
+    if (found == FacingFound::Turned) {
+      cand.laid = pins;
+      if (!flips.reverses.empty() || !flips.sides.empty()) {
+        turn_pins(cand.laid, flips);
+        order_submachines(sc.keep.facing, c, g, s, row.knobs, 1, cand.laid);
+        laid = &sc.keep.facing;
+      }
+    } else {
+      std::vector<Diagnostic> spilled;
+      bool const ok{
+        lay_facing(cand, sc.keep, c, g, sc.moved, s, row, 1, spilled, &pins, laid)
+      };
+      if (keyed) { table.store_facing(memo.row, sc.ids, sc.moved, ok ? &flips : nullptr); }
+      if (!ok) { return out; }
+      sized = true;
+    }
+    auto const recall_laid = [&]() {
+      bool const same{ laid == &sc.moved };
+      use.entry = INVALID;
+      return keyed && (same || table.frame_ids(*laid, sc.laid_ids)) &&
+             recall(same ? sc.ids : sc.laid_ids);
+    };
+    if (recall_laid()) { return out; }
+    // A turned ordering that does not size leaves the phase-1 ordering laid.
+    std::vector<Diagnostic> spilled;
+    bool ok{ sized || size_layout(c,
+                                  g,
+                                  *laid,
+                                  s,
+                                  row.knobs,
+                                  cand.sized,
+                                  spilled,
+                                  row.dar,
+                                  row.pack,
+                                  row.fold) };
+    if (!ok && (laid != &sc.moved)) {
+      laid = &sc.moved;
+      if (recall_laid()) { return out; }
+      ok = size_layout(c,
+                       g,
+                       *laid,
+                       s,
+                       row.knobs,
+                       cand.sized,
+                       spilled,
+                       row.dar,
+                       row.pack,
+                       row.fold);
+    }
+    if (!ok) {
+      cand.routes = Routes{};
+      cand.laid = SearchPins{};
+      return out;
+    }
+  }
+  lay_routes(cand, c, g, *laid, s, row, router, 1, &pins, { .reuse = reuse }, labels);
+  out = scored_of(c, g, scoring, s, objective, cand, labels);
+  table.set_score(use.entry, labels, memo_score(out));
+  if (routed != nullptr) { *routed = { .cand = &cand }; }
+  return out;
+}
+
+// Scores `pins` through phases 1 to 3, or from `memo.table`, which leaves `routed` null;
+// without `labels`, the bound. `from` supplies a face move's phases 1 and 2.
 Scored score_move(Chart const &c,
                   SplitGraph const &g,
                   CostContext const &scoring,
@@ -934,7 +1126,11 @@ Scored score_move(Chart const &c,
                   RouteCache const *reuse,
                   Prefix const *from,
                   bool labels,
-                  Routed *routed) {
+                  Routed *routed,
+                  MemoAccess const &memo,
+                  MemoUse &use) {
+  use = MemoUse{};
+  if (routed != nullptr) { *routed = Routed{}; }
   MoveScratch &sc{ move_scratch() };
   auto const whole = [&]() -> Candidate const & {
     order_submachines(sc.moved, c, g, s, objective, 1, pins);
@@ -955,9 +1151,63 @@ Scored score_move(Chart const &c,
   };
   // Under a trace sink every move is scored whole, tracing its phases.
   bool shortcut{ (from != nullptr) && (trace_sink() == nullptr) };
+  bool memoized{ (memo.table != nullptr) && (trace_sink() == nullptr) };
 #ifdef SCAV_TESTING
   shortcut = shortcut && test_prefix_shortcut;
+  memoized = memoized && test_candidate_memo && !test_prefix_verify;
 #endif
+  if (memoized) {
+    Scored const out{ score_memoized(c,
+                                     g,
+                                     scoring,
+                                     s,
+                                     objective,
+                                     row,
+                                     router,
+                                     pins,
+                                     reuse,
+                                     shortcut ? from : nullptr,
+                                     labels,
+                                     routed,
+                                     memo,
+                                     use) };
+#ifdef SCAV_TESTING
+    if (shortcut) {
+      ScopedLock const held{ test_prefix_lock };
+      ++test_prefix_used;
+    }
+    {
+      ScopedLock const held{ test_candidate_memo_lock };
+      test_candidate_memo_deduped += use.deduped ? 1U : 0U;
+      test_candidate_memo_faced += use.faced ? 1U : 0U;
+    }
+    if (test_candidate_memo_verify && (use.deduped || use.faced)) {
+      SubmachineOrders const moved{ order_submachines(c, g, s, objective, 1, pins) };
+      std::vector<Diagnostic> spilled;
+      Candidate fresh;
+      bool const labelled{ use.deduped ? use.labelled : labels };
+      search_candidate(fresh,
+                       c,
+                       g,
+                       moved,
+                       s,
+                       row,
+                       router,
+                       1,
+                       spilled,
+                       &pins,
+                       { .reuse = reuse },
+                       labelled);
+      Scored const want{ scored_of(c, g, scoring, s, objective, fresh, labelled) };
+      if ((want.viable != out.viable) || (want.inflated != out.inflated) ||
+          (want.viable && !want.inflated && !same_cost(want.cost, out.cost))) {
+        ScopedLock const held{ test_candidate_memo_lock };
+        ++test_candidate_memo_mismatches;
+      }
+    }
+#endif
+    return out;
+  }
   if (!shortcut) {
     Scored const out{ scored_of(c, g, scoring, s, objective, whole(), labels) };
     if (routed != nullptr) { *routed = { .cand = &sc.whole }; }
@@ -1037,6 +1287,7 @@ constexpr uint32_t KEPT_ROUTES{ 128 };
 void keep_least(std::vector<KeptCandidate> &kept,
                 uint32_t &kept_n,
                 uint32_t index,
+                uint32_t entry,
                 Cost const &bound,
                 Routed const &routed) {
   auto const before = [](Cost const &a, uint32_t ai, KeptCandidate const &b) {
@@ -1057,6 +1308,7 @@ void keep_least(std::vector<KeptCandidate> &kept,
   std::swap(k.cand, *routed.cand);  // the thread's scratch takes the slot's storage
   k.bound = bound;
   k.index = index;
+  k.entry = entry;
 }
 
 // The least exact cost below `incumbent` (lowest index among equals), else INVALID.
@@ -1153,8 +1405,11 @@ Improved run_search(Chart const &c,
                     uint32_t budget,
                     bool refold,
                     SearchPins const &seed,
-                    std::vector<uint8_t> const *scope) {
+                    std::vector<uint8_t> const *scope,
+                    CandidateMemo *memo) {
   Improved out;
+  SearchStats counted;  // this search's counts, added to the sink on return
+  counted.searches = 1;
   // `scope`: per-submachine flags, null for all; moves are offered only in flagged frames.
   auto const in_scope = [scope](uint32_t frame) {
     return (scope == nullptr) || ((frame < scope->size()) && ((*scope)[frame] != 0));
@@ -1182,12 +1437,38 @@ Improved run_search(Chart const &c,
                                 { .fill = &base, .prefix = &incumbent });
   }
   out.viable = out.best.viable;
-  if (!out.viable) { return out; }
+  if (!out.viable) {
+    search_stats_add(counted);
+    return out;
+  }
   CostContext const scoring{ cost_context(c, g) };
   std::vector<uint8_t> party;  // set where the incumbent's route bends or is charged
   out.cost = cost_of(
       cost_terms(scoring, c, g, out.best.sized, out.best.routes, s, objective, &party),
       objective);
+
+  // The candidate memo, off under a trace sink; it holds each incumbent's score.
+  MemoAccess access;
+  std::vector<uint32_t> incumbent_ids;
+  if ((memo != nullptr) && (trace_sink() == nullptr)) {
+    access.table = memo;
+    access.row = memo->row_word(row);
+  }
+  auto const remember_incumbent = [&]() {
+    access.laid = nullptr;
+    if ((access.table == nullptr) || !incumbent.ok ||
+        !access.table->frame_ids(incumbent.laid, incumbent_ids)) {
+      return;
+    }
+    access.laid = &incumbent_ids;
+    if (out.best.inflations == 0) {
+      CandidateMemo::Recalled const at{
+        access.table->find_score(access.row, incumbent_ids, &held, true)
+      };
+      access.table->set_score(at.entry, true, { .cost = out.cost, .viable = true });
+    }
+  };
+  remember_incumbent();
 
   // Copies `base_pins` plus `m` into the scoring thread's own pins.
   auto const with_here = [](SearchPins const &base_pins,
@@ -1208,6 +1489,7 @@ Improved run_search(Chart const &c,
   uint32_t loop_scored{ 0 };
   std::vector<Move> round;
   std::vector<Scored> got;
+  std::vector<MemoUse> uses;  // parallel to `round`: how each move's first scoring went
   std::vector<uint32_t> order;
   // A labelled round's least-bound candidates, routed unlabelled; the first `kept_n` are
   // in use.
@@ -1366,62 +1648,81 @@ Improved run_search(Chart const &c,
     }
     if (round.empty()) { break; }
 
-    // Each candidate runs its phases on one thread.
-    auto const score = [&](uint32_t i, bool labels, Routed *routed = nullptr) {
-      return score_move(c,
-                        g,
-                        scoring,
-                        s,
-                        objective,
-                        row,
-                        router,
-                        with_here(held, round[i]),
-                        &base,
-                        (round[i].kind == MoveKind::Face) ? &incumbent : nullptr,
-                        labels,
-                        routed);
-    };
+    // Each candidate runs its phases on one thread; `fresh` scores it without the memo.
+    auto const score =
+        [&](uint32_t i, bool labels, MemoUse &use, Routed *routed, bool fresh = false) {
+          return score_move(c,
+                            g,
+                            scoring,
+                            s,
+                            objective,
+                            row,
+                            router,
+                            with_here(held, round[i]),
+                            &base,
+                            (round[i].kind == MoveKind::Face) ? &incumbent : nullptr,
+                            labels,
+                            routed,
+                            fresh ? MemoAccess{} : access,
+                            use);
+        };
     uint32_t const n{ static_cast<uint32_t>(round.size()) };
     vec_assign(got, n, {});
+    vec_assign(uses, n, {});
     uint32_t win{ INVALID };
     if (bounded) {
-      // The first candidates in bound order are labelled on the routes their bound laid
-      // out; any after them are laid out again.
+      // The first candidates in bound order are labelled on kept routes, their own or
+      // those of their score entry; any after them are laid out again.
 #ifdef SCAV_TESTING
-      uint32_t exacts{ 0 };
+      uint32_t calls{ 0 };
 #endif
       auto const bound = [&](uint32_t i) {
         Routed routed;
-        Scored const scored{ score(i, false, &routed) };
-        if (may_win(scored, out.cost)) {
+        Scored const scored{ score(i, false, uses[i], &routed) };
+        if (may_win(scored, out.cost) && (routed.cand != nullptr)) {
           ScopedLock const lock{ kept_lock };
-          keep_least(kept, kept_n, i, scored.cost, routed);
+          keep_least(kept, kept_n, i, uses[i].entry, scored.cost, routed);
         }
         return scored;
       };
       auto const exact = [&](uint32_t i) {
+#ifdef SCAV_TESTING
+        ++calls;
+#endif
+        uint32_t const e{ uses[i].entry };
+        MemoScore known;
+        if ((access.table != nullptr) && access.table->score(e, true, known)) {
+          return scored_from(known);
+        }
         uint32_t k{ 0 };
-        while ((k < kept_n) && (kept[k].index != i)) { ++k; }
+        while ((k < kept_n) && (kept[k].index != i) &&
+               ((e == INVALID) || (kept[k].entry != e))) {
+          ++k;
+        }
         if (k == kept_n) {
 #ifdef SCAV_TESTING
-          if (exacts < KEPT_ROUTES) {
+          // A candidate the bound pass routed is kept while within `KEPT_ROUTES`.
+          if ((calls <= KEPT_ROUTES) && !uses[i].deduped) {
             ScopedLock const lock{ test_label_bound_lock };
             ++test_label_bound_mismatches;
           }
 #endif
-          return score(i, true);
+          MemoUse use;
+          return score(i, true, use, nullptr);
         }
-#ifdef SCAV_TESTING
-        ++exacts;
-#endif
         Candidate &cand{ kept[k].cand };
         label_candidate(cand, c, g, s, row.knobs);
         Scored const scored{ scored_of(c, g, scoring, s, objective, cand) };
+        if (access.table != nullptr) {
+          access.table->set_score(e, true, memo_score(scored));
+        }
 #ifdef SCAV_TESTING
         if (test_label_bound_verify) {
           Routed full;
-          Scored const want{ score(i, true, &full) };
-          if (!same_scored(scored, want) || !same_candidate(cand, *full.cand)) {
+          MemoUse use;
+          Scored const want{ score(i, true, use, &full, true) };
+          bool const twin{ kept[k].index != i };
+          if (!same_scored(scored, want) || (!twin && !same_candidate(cand, *full.cand))) {
             ScopedLock const lock{ test_label_bound_lock };
             ++test_label_bound_mismatches;
           }
@@ -1433,11 +1734,22 @@ Improved run_search(Chart const &c,
       kept_n = 0;
 #ifdef SCAV_TESTING
       if (test_label_bound_verify) {
-        verify_bounded_round(n, threads, out.cost, got, win, score);
+        verify_bounded_round(n, threads, out.cost, got, win, [&](uint32_t i, bool labels) {
+          MemoUse use;
+          return score(i, labels, use, nullptr);
+        });
       }
 #endif
     } else {
-      parallel_for(n, threads, [&](uint32_t i) { got[i] = score(i, true); });
+      parallel_for(n, threads, [&](uint32_t i) {
+        got[i] = score(i, true, uses[i], nullptr);
+      });
+    }
+    for (uint32_t i = 0; i < n; ++i) {
+      auto const kind{ static_cast<uint32_t>(round[i].kind) };
+      ++counted.offered[kind];
+      counted.deduped[kind] += uses[i].deduped ? 1U : 0U;
+      counted.faced += uses[i].faced ? 1U : 0U;
     }
 
     // Reduces in enumeration order and emits the trace in that order.
@@ -1502,6 +1814,7 @@ Improved run_search(Chart const &c,
     }
 
     if (!found) { break; }
+    ++counted.taken[static_cast<uint32_t>(take.kind)];
     add_move(held, take);
     order_submachines(here, c, g, s, objective, threads, held);
     // Re-lays the new incumbent from `held`, reusing the routes of every frame the move
@@ -1521,7 +1834,9 @@ Improved run_search(Chart const &c,
                                 { .reuse = &was, .fill = &base, .prefix = &incumbent });
     out.cost = best;
     (void)cost_terms(scoring, c, g, out.best.sized, out.best.routes, s, objective, &party);
+    remember_incumbent();
   }
+  search_stats_add(counted);
   return out;
 }
 
@@ -1589,7 +1904,8 @@ Improved search_moves(Chart const &c,
                       bool refold,
                       SearchPins const &seed,
                       std::vector<uint8_t> const *scope,
-                      SearchMemo *memo) {
+                      SearchMemo *memo,
+                      CandidateMemo *candidates) {
   auto const search = [&]() {
     return run_search(c,
                       g,
@@ -1601,7 +1917,8 @@ Improved search_moves(Chart const &c,
                       budget,
                       refold,
                       seed,
-                      scope);
+                      scope,
+                      candidates);
   };
   if ((memo == nullptr) || (trace_sink() != nullptr)) { return search(); }
   std::vector<uint32_t> key;
@@ -1619,6 +1936,9 @@ Improved search_moves(Chart const &c,
 #endif
   }
   if (hit) {
+    SearchStats one;
+    one.recalled = 1;
+    search_stats_add(one);
     Improved out;
     uint32_t at{ 0 };
     out.viable = value[at++] != 0;
@@ -1851,8 +2171,12 @@ bool layout_run(Chart &c,
   std::vector<SearchPins> held(rows, seed);
   SearchMemo memo;
   SearchMemo *memo_at{ &memo };
+  // Every search of this layout scores its moves through one candidate memo.
+  CandidateMemo move_memo{ c, g };
+  CandidateMemo *move_memo_at{ &move_memo };
 #ifdef SCAV_TESTING
   if (!test_search_memo) { memo_at = nullptr; }
+  if (!test_candidate_memo) { move_memo_at = nullptr; }
   test_search_memo_hits = 0;
   test_search_memo_mismatches = 0;
 #endif
@@ -1877,7 +2201,8 @@ bool layout_run(Chart &c,
                              refold,
                              held[active[k]],
                              nullptr,
-                             memo_at);
+                             memo_at,
+                             move_memo_at);
     });
     for (uint32_t k = 0; k < n; ++k) {
       if (!done[k].viable) { continue; }
@@ -1915,7 +2240,8 @@ bool layout_run(Chart &c,
                           false,
                           start,
                           within,
-                          memo_at);
+                          memo_at,
+                          move_memo_at);
     };
     // Searches `start` in the `redo` frames, then in turn in the frames enclosing them and
     // in the `redo` frames again, until a search improves nothing. `framed` gets the first
@@ -2230,6 +2556,9 @@ bool layout_run(Chart &c,
   }
 
   write_columns(c, sized, routes, inputs_digest(s, o));
+  SearchStats held_bytes;
+  held_bytes.memo_bytes = move_memo.bytes();
+  search_stats_add(held_bytes);
   return true;
 }
 
@@ -2323,6 +2652,16 @@ bool layout_trace_json(Chart &c,
                        uint32_t row,
                        TraceScope scope,
                        SearchPins const *pins) {
+  if (scope == TraceScope::Stats) {
+    SearchStats counted;
+    search_stats_set(&counted);
+    bool const ran{
+      layout_run(c, s, o, placed, diags, nullptr, nullptr, row, nullptr, nullptr, pins)
+    };
+    search_stats_set(nullptr);
+    search_stats_to_json(counted, out);
+    return ran;
+  }
   if (scope != TraceScope::Shipped) {
     LayoutTrace t;
     scav_layout_opts serial{ o };
@@ -2451,6 +2790,26 @@ uint64_t layout_test_label_bound_mismatches() {
   return test_label_bound_mismatches;
 }
 void layout_test_search_memo(bool on) { test_search_memo = on; }
+void layout_test_candidate_memo(bool on, bool verify) {
+  test_candidate_memo = on;
+  test_candidate_memo_verify = verify;
+  ScopedLock const held{ test_candidate_memo_lock };
+  test_candidate_memo_deduped = 0;
+  test_candidate_memo_faced = 0;
+  test_candidate_memo_mismatches = 0;
+}
+uint64_t layout_test_candidate_memo_deduped() {
+  ScopedLock const held{ test_candidate_memo_lock };
+  return test_candidate_memo_deduped;
+}
+uint64_t layout_test_candidate_memo_faced() {
+  ScopedLock const held{ test_candidate_memo_lock };
+  return test_candidate_memo_faced;
+}
+uint64_t layout_test_candidate_memo_mismatches() {
+  ScopedLock const held{ test_candidate_memo_lock };
+  return test_candidate_memo_mismatches;
+}
 void layout_test_search_memo_verify(bool on) { test_search_memo_verify = on; }
 void layout_test_no_search(bool on) { test_no_search = on; }
 uint32_t layout_test_search_memo_hits() { return test_search_memo_hits; }
