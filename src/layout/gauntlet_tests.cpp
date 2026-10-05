@@ -874,6 +874,34 @@ TEST_CASE(
   }
 }
 
+TEST_CASE("gauntlet: a turn that pays once the root re-ranks around it is reached") {
+  // `kicked` at row 1 with both regions turned down, the root re-ranked and its exits
+  // re-faced: a kick searched in its own frame alone stops dearer, and the search costs
+  // no more than this drawing.
+  scav_profile const p{ readable() };
+  uint32_t row{ INVALID };
+  SearchPins known;
+  REQUIRE(scav::test::corpus_pins_read(
+      "--portfolio-row 1 --rank 0:3 --rank 1:1 --rank 3:1 --rank 4:2 --cut 7:1 "
+      "--end 7:1:1:3 --end 6:0:1:1 --end 7:0:1:1 --orient 1 --orient 2",
+      row,
+      known));
+  REQUIRE(row == 1);
+  scav_profile pinned_row{ one_row(p) };
+  pinned_row.trybox ^= 1;  // row 1's tuple as row 0 of a table of one
+  Laid pinned;
+  lay("kicked.scav", pinned_row, pinned, {}, &known);
+  Cost const want{ cost_of(cost_columns(pinned.c, pinned.g, p), p) };
+  REQUIRE(want.t0_violations == 0);
+
+  Laid searched;
+  lay("kicked.scav", p, searched);
+  Cost const got{ cost_of(cost_columns(searched.c, searched.g, p), p) };
+  CAPTURE(want.t2);
+  CAPTURE(got.t2);
+  CHECK_FALSE(cost_less(want, got));
+}
+
 TEST_CASE("gauntlet: a port level with a child keeps its seat, and the initial's moves") {
   // Row 0 unsearched seats the port and the initial's dot level with `First`,
   // both projecting onto one point of its leading face.
@@ -1352,12 +1380,12 @@ TEST_CASE("gauntlet: a route passing through a composite bends outside it" *
 }
 
 TEST_CASE("gauntlet: priced whitespace takes the composite drawn tighter") {
-  // Box's chain runs loose or tight; priced, the search keeps the drawing that leaves
-  // less of Box empty, and neither drawing bends or crosses.
+  // Box's chain runs loose or tight; priced at 16 per em², the search keeps the drawing
+  // that leaves less of Box empty, and neither drawing bends or crosses.
   for (scav_profile const &p : { readable(), compact() }) {
     CAPTURE(p.profile_id);
     std::array<int64_t, 2> empty{};
-    for (int32_t const weight : { 0, 1 }) {
+    for (int32_t const weight : { 0, 16 }) {
       CAPTURE(weight);
       scav_profile priced{ p };
       priced.w_whitespace = weight;
@@ -1366,7 +1394,7 @@ TEST_CASE("gauntlet: priced whitespace takes the composite drawn tighter") {
       CostTerms const t{ cost_terms(l.c, l.g, l.z, l.r, {}, priced) };
       CHECK(t.bends == 0);
       CHECK(t.crossings == 0);
-      empty[static_cast<uint32_t>(weight)] = t.whitespace;
+      empty[(weight == 0) ? 0U : 1U] = t.whitespace;
     }
     CHECK(empty[1] < empty[0]);
   }

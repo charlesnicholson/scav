@@ -1,0 +1,18 @@
+// A composite of two regions, each a two-state run whose last state leaves for Wait.
+// Turning a region down, searched with the root held as it stands, costs more than the
+// drawing it replaces; searched again with the root free to re-rank and re-face around
+// the turned composite, it costs less. Only a kick whose search reaches the enclosing
+// frame finds the stacked regions with both exits straight.
+chart kicked "a turn that pays once the frame around it re-ranks" {
+  state Closed,
+  state Open {
+    submachine inbound { state A, state B, trans * -> A, trans A -> B },
+    submachine outbound { state C, state D, trans * -> C, trans C -> D },
+  },
+  state Wait,
+  trans * -> Closed,
+  trans Closed -> Open,
+  trans Open:inbound/B -> Wait,
+  trans Open:outbound/D -> Wait,
+  trans Wait -> Closed,
+}
