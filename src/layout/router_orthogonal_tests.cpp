@@ -2971,6 +2971,27 @@ TEST_CASE("ortho: a loop between two points on one face of its box runs its reac
   }
 }
 
+TEST_CASE("ortho: a loop's reach stops a clearance short of a neighbour beyond its face") {
+  // `B` stands 288 right of the box, across the loop's span on its right face.
+  scav_rect const box{ rect(2000, 2000, 1000, 600) };
+  scav_rect const near{ rect(3288, 2100, 400, 400) };
+  RouteInput in;
+  in.profile = profile();
+  in.region = rect(0, 0, 5000, 5000);
+  in.obstacles = { box, near };
+  in.nets.push_back(
+      { .src = pt(3000, 2150), .dst = pt(3000, 2450), .loop = 256, .loop_box = 0 });
+  RouteOutput out;
+  ORTHO.route(in, out);
+  REQUIRE(out.metrics.size() == 1);
+  CHECK(out.metrics[0].failed == RouteFailure::None);
+  scav_span const loop{ out.net_points[0] };
+  int32_t far{ 0 };
+  for (uint32_t k = 0; k < loop.len; ++k) { far = imax(far, out.points[loop.off + k].x); }
+  int32_t const clear{ route_clearance(in.profile) };
+  CHECK(far == (near.x - clear));
+}
+
 TEST_CASE("ortho: an unpinned loop takes its box's least-used face, the right on a tie") {
   // Point ends on the faces in turn: right, then bottom, then top are used up, and with
   // one on every face the tie goes back to the right.

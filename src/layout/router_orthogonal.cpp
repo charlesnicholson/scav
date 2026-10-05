@@ -1293,6 +1293,39 @@ scav_point seat_of(RouteInput const &in,
   return ortho_attach_box(aim, in.obstacles[box], clear, glyph, arc);
 }
 
+// How far a loop runs off `face` of obstacle `box` between its ends `at`: `loop`, held
+// `clear` off every other obstacle beyond the face across that span, and at least `clear`.
+int32_t loop_reach(RouteInput const &in,
+                   int32_t loop,
+                   uint32_t box,
+                   uint32_t face,
+                   std::array<scav_point, 2> const &at,
+                   int32_t clear) {
+  if (face >= 4) { return loop; }
+  scav_rect const &r{ in.obstacles[box] };
+  bool const along_y{ face < 2 };
+  int32_t const lo{ imin(along_y ? at[0].y : at[0].x, along_y ? at[1].y : at[1].x) -
+                    clear };
+  int32_t const hi{ imax(along_y ? at[0].y : at[0].x, along_y ? at[1].y : at[1].x) +
+                    clear };
+  int32_t reach{ loop };
+  for (uint32_t o = 0; o < in.obstacles.size(); ++o) {
+    scav_rect const &q{ in.obstacles[o] };
+    int32_t const q_lo{ along_y ? q.y : q.x };
+    int32_t const q_hi{ q_lo + (along_y ? q.h : q.w) };
+    if ((o == box) || (q_hi <= lo) || (q_lo >= hi)) { continue; }
+    int32_t gap{ -1 };  // from the face out to `q`'s near side; negative when not beyond
+    switch (face) {
+      case 0: gap = r.x - (q.x + q.w); break;
+      case 1: gap = q.x - (r.x + r.w); break;
+      case 2: gap = r.y - (q.y + q.h); break;
+      default: gap = q.y - (r.y + r.h); break;
+    }
+    if (gap >= 0) { reach = imin(reach, gap - clear); }
+  }
+  return imax(reach, clear);
+}
+
 // The face of loop `n`'s box holding the fewest other ends, unpinned loops excluded; ties
 // prefer right, then bottom, top, left.
 uint32_t loop_face(RouteInput const &in, uint32_t n, int32_t clear) {
@@ -1573,22 +1606,31 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
     if ((net.loop > 0) && ((net.src_obstacle < in.obstacles.size()) ||
                            (net.dst_obstacle < in.obstacles.size()) ||
                            (net.loop_box < in.obstacles.size()))) {
-      // A loop's corridor runs `loop` out from each box end's seat and each point end, off
-      // the end's box, else the other end's, else `loop_box`; clamped into the region and
-      // the enclosure's band.
+      // A loop's corridor runs `loop_reach` out from each box end's seat and each point
+      // end, off the end's box, else the other end's, else `loop_box`; clamped into the
+      // region and the enclosure's band.
+      std::array<scav_point, 2> at{};
+      std::array<uint32_t, 2> box{};
+      std::array<uint32_t, 2> face{};
       for (uint32_t end = 0; end < 2; ++end) {
-        uint32_t box{ (end == 0) ? net.src_obstacle : net.dst_obstacle };
-        scav_point at{ (box < in.obstacles.size()) ? seat[src_slot + end]
-                                                   : ((end == 0) ? net.src : net.dst) };
-        if (box >= in.obstacles.size()) {
-          box = (end == 0) ? net.dst_obstacle : net.src_obstacle;
+        box[end] = (end == 0) ? net.src_obstacle : net.dst_obstacle;
+        scav_point const point{ (end == 0) ? net.src : net.dst };
+        at[end] = (box[end] < in.obstacles.size()) ? seat[src_slot + end] : point;
+        if (box[end] >= in.obstacles.size()) {
+          box[end] = (end == 0) ? net.dst_obstacle : net.src_obstacle;
         }
-        if (box >= in.obstacles.size()) { box = net.loop_box; }
-        switch (face_of(at, in.obstacles[box])) {
-          case 0: at.x -= net.loop; break;
-          case 1: at.x += net.loop; break;
-          case 2: at.y -= net.loop; break;
-          case 3: at.y += net.loop; break;
+        if (box[end] >= in.obstacles.size()) { box[end] = net.loop_box; }
+        face[end] = face_of(at[end], in.obstacles[box[end]]);
+      }
+      int32_t const reach{ ((box[0] == box[1]) && (face[0] == face[1]))
+                               ? loop_reach(in, net.loop, box[0], face[0], at, clear)
+                               : net.loop };
+      for (uint32_t end = 0; end < 2; ++end) {
+        switch (face[end]) {
+          case 0: at[end].x -= reach; break;
+          case 1: at[end].x += reach; break;
+          case 2: at[end].y -= reach; break;
+          case 3: at[end].y += reach; break;
           default: break;
         }
         int32_t x0{ lo_x };
@@ -1601,9 +1643,9 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
           x1 = imin(x1, (enc.x + enc.w) - inset - 1);
           y1 = imin(y1, (enc.y + enc.h) - inset - 1);
         }
-        at.x = imin(imax(at.x, x0), x1);
-        at.y = imin(imax(at.y, y0), y1);
-        vec_push_back(anchors, at);
+        at[end].x = imin(imax(at[end].x, x0), x1);
+        at[end].y = imin(imax(at[end].y, y0), y1);
+        vec_push_back(anchors, at[end]);
       }
     }
     uint32_t const tail_first{ static_cast<uint32_t>(lead.size()) };
