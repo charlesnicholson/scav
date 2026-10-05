@@ -1,0 +1,18 @@
+// A cycle inside a composite, one member entered from outside through the
+// composite's trailing face: that member sits on the port's side of the cycle.
+chart ring "a cycle entered at one member through its composite's border" {
+  state Box {
+    state First,
+    state Entered,
+    state Third,
+    trans * -> First,
+    trans First -> Entered "on",
+    trans Entered -> Third "held",
+    trans Third -> First "off",
+  },
+  state Outside,
+
+  trans * -> Box,
+  trans Box -> Outside "leave",
+  trans Outside -> Box/Entered "enter",
+}

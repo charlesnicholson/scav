@@ -52,13 +52,14 @@ scav_profile compact() {
 
 // Every chart in test_data/charts/gauntlet, by file name.
 constexpr std::array GAUNTLET{
-  "above.scav",   "carried.scav",   "chain.scav",   "corner.scav",    "crossing.scav",
-  "crowd.scav",   "enclosing.scav", "entered.scav", "fanin.scav",     "folded.scav",
-  "fork.scav",    "header.scav",    "inloop.scav",  "inward.scav",    "lane.scav",
-  "level.scav",   "long.scav",      "loop.scav",    "marks.scav",     "mixed.scav",
-  "mutual.scav",  "ported.scav",    "pulled.scav",  "regions.scav",   "room.scav",
-  "rooms.scav",   "roundtrip.scav", "seated.scav",  "separator.scav", "stretch.scav",
-  "through.scav", "tight.scav",     "transit.scav", "under.scav",     "unfolded.scav"
+  "above.scav",     "carried.scav",   "chain.scav",   "corner.scav",    "crossing.scav",
+  "crowd.scav",     "enclosing.scav", "entered.scav", "fanin.scav",     "folded.scav",
+  "fork.scav",      "header.scav",    "inloop.scav",  "inward.scav",    "lane.scav",
+  "level.scav",     "long.scav",      "loop.scav",    "marks.scav",     "mixed.scav",
+  "mutual.scav",    "ported.scav",    "pulled.scav",  "regions.scav",   "resumed.scav",
+  "ring.scav",      "room.scav",      "rooms.scav",   "roundtrip.scav", "seated.scav",
+  "separator.scav", "stretch.scav",   "through.scav", "tight.scav",     "transit.scav",
+  "under.scav",     "unfolded.scav"
 };
 
 // One chart, laid out: the pieces every property below reads.
@@ -2376,5 +2377,87 @@ TEST_CASE("gauntlet: the shapes still open, counted rather than excused") {
     Laid fork_shipped;
     lay("fork.scav", p, fork_shipped);
     CHECK(capped_branches(fork_shipped) == 1);
+  }
+}
+
+namespace {
+
+// True when `entered` lies at least as near as each of `others` to the face of `box` the
+// route into `entered` crosses.
+bool nearest_its_port(Laid const &l,
+                      uint32_t box,
+                      uint32_t entered,
+                      std::initializer_list<uint32_t> others) {
+  scav_rect const b{ l.z.state[box] };
+  uint32_t into{ INVALID };
+  for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
+    if (l.c.transitions[t].dst.v == entered) { into = t; }
+  }
+  REQUIRE(into != INVALID);
+  scav_span const route{ l.r.route[into] };
+  auto const gap = [&](scav_point at, scav_rect const &r) {
+    if (at.x == b.x) { return r.x - b.x; }
+    if (at.x == (b.x + b.w)) { return (b.x + b.w) - (r.x + r.w); }
+    if (at.y == b.y) { return r.y - b.y; }
+    return (b.y + b.h) - (r.y + r.h);
+  };
+  for (uint32_t k = 0; k < route.len; ++k) {
+    scav_point const at{ l.r.points[route.off + k] };
+    if (!on_border(at, b)) { continue; }
+    int32_t const near{ gap(at, l.z.state[entered]) };
+    CAPTURE(at.x);
+    CAPTURE(at.y);
+    CAPTURE(near);
+    return std::ranges::all_of(others,
+                               [&](uint32_t o) { return near <= gap(at, l.z.state[o]); });
+  }
+  FAIL("the route never meets the composite's border");
+  return false;
+}
+
+}  // namespace
+
+TEST_CASE("gauntlet: a state entered only through a port sits at the port's end") {
+  // `Outside -> Box/Resumed` enters `Box` through its trailing face; `Resumed`, joined to
+  // nothing else, is the state nearest that face, with `Box`'s ranks across or down.
+  for (scav_profile const &p : { readable(), compact() }) {
+    for (bool const down : { false, true }) {
+      CAPTURE(p.profile_id);
+      CAPTURE(down);
+      Chart const probe{ loaded("resumed.scav") };
+      uint32_t const box{ state_named(probe, "Box") };
+      REQUIRE(box != INVALID);
+      SearchPins seed;
+      for (uint32_t m = 0; m < probe.submachines.size(); ++m) {
+        if (down && (probe.submachines[m].owner.v == box)) {
+          seed.orients.push_back({ .frame = SubmachineId{ m } });
+        }
+      }
+      Laid l;
+      lay("resumed.scav", one_row(p), l, {}, &seed);
+      uint32_t const resumed{ state_named(l.c, "Resumed") };
+      uint32_t const first{ state_named(l.c, "First") };
+      uint32_t const second{ state_named(l.c, "Second") };
+      REQUIRE(resumed != INVALID);
+      CHECK(nearest_its_port(l, box, resumed, { first, second }));
+    }
+  }
+}
+
+TEST_CASE("gauntlet: a cycle member entered through a port sits on the port's side") {
+  // `Outside -> Box/Entered` enters the cycle `First -> Entered -> Third -> First` through
+  // `Box`'s trailing face; `Entered` is the cycle member nearest that face.
+  for (scav_profile const &p :
+       { readable(), compact(), one_row(readable()), one_row(compact()) }) {
+    CAPTURE(p.profile_id);
+    CAPTURE(p.portfolio_m);
+    Laid l;
+    lay("ring.scav", p, l);
+    uint32_t const box{ state_named(l.c, "Box") };
+    uint32_t const entered{ state_named(l.c, "Entered") };
+    uint32_t const first{ state_named(l.c, "First") };
+    uint32_t const third{ state_named(l.c, "Third") };
+    REQUIRE(entered != INVALID);
+    CHECK(nearest_its_port(l, box, entered, { first, third }));
   }
 }

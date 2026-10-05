@@ -259,8 +259,8 @@ void cyclic_segments(Frame const &f, std::vector<uint32_t> &segs, FrameScratch &
   }
 }
 
-// Makes the frame a DAG: an iterative DFS in node order reverses each edge that closes
-// back onto the current path.
+// Makes the frame a DAG by DFS walks that reverse each edge closing onto the walk's path:
+// against the edges from each trailing port, then from each leading port, then node order.
 void orient_acyclic(Frame &f,
                     std::vector<uint8_t> const &pre,
                     std::vector<uint8_t> const &fixed,
@@ -281,25 +281,30 @@ void orient_acyclic(Frame &f,
   uint32_t const n{ static_cast<uint32_t>(f.nodes.size()) };
   Adjacency &out{ sc.walk };
   adjacency_of(out, f.edges, n, true, sc.fill);
+  Adjacency &in{ f.in };  // scratch here; `assign_ranks` rebuilds it
+  adjacency_of(in, f.edges, n, false, sc.fill);
 
   enum : uint8_t { White, Gray, Black };
   std::vector<uint8_t> &color{ sc.marks };
   vec_assign(color, n, White);
   std::vector<FrameScratch::Visit> &stack{ sc.visits };
   stack.clear();
-  for (uint32_t root = 0; root < n; ++root) {
-    if (color[root] != White) { continue; }
+  // A DFS from `root` along out-edges (`forward`) or in-edges.
+  auto const walk = [&](uint32_t root, bool forward) {
+    Adjacency const &a{ forward ? out : in };
+    if (color[root] != White) { return; }
     color[root] = Gray;
-    vec_push_back(stack, { .node = root, .next = out.off[root] });
+    vec_push_back(stack, { .node = root, .next = a.off[root] });
     while (!stack.empty()) {
       uint32_t const node{ stack.back().node };
-      if (stack.back().next == out.off[node + 1]) {
+      if (stack.back().next == a.off[node + 1]) {
         color[node] = Black;
         stack.pop_back();
         continue;
       }
-      OrderEdge &e{ f.edges[out.edge[stack.back().next++]] };
-      if (color[e.dst] == Gray) {
+      OrderEdge &e{ f.edges[a.edge[stack.back().next++]] };
+      uint32_t const next{ forward ? e.dst : e.src };
+      if (color[next] == Gray) {
         e.reversed ^= 1U;  // an edge a pin turned and the walk turns back runs as authored
         trace_emit({ .kind = TraceKind::EdgeReversed, .seg = { .seg = e.segment } });
         uint32_t const swap{ e.src };
@@ -307,16 +312,26 @@ void orient_acyclic(Frame &f,
         e.dst = swap;
         continue;
       }
-      if (color[e.dst] == White) {
-        color[e.dst] = Gray;
-        vec_push_back(stack, { .node = e.dst, .next = out.off[e.dst] });
+      if (color[next] == White) {
+        color[next] = Gray;
+        vec_push_back(stack, { .node = next, .next = a.off[next] });
       }
     }
+  };
+  auto const port = [&](uint32_t v, Adjacency const &a) {
+    return (f.nodes[v].kind == OrderKind::Boundary) && (a.off[v + 1] > a.off[v]);
+  };
+  for (uint32_t root = 0; root < n; ++root) {
+    if (port(root, in)) { walk(root, false); }
   }
+  for (uint32_t root = 0; root < n; ++root) {
+    if (port(root, out)) { walk(root, true); }
+  }
+  for (uint32_t root = 0; root < n; ++root) { walk(root, true); }
 }
 
-// Longest-path ranks, one pull-right pass for non-boundary nodes with more successors than
-// predecessors, a sink boundary on the last rank, then empty ranks squeezed out.
+// Longest-path ranks, sink boundaries on the last rank, a pull-right pass for non-boundary
+// nodes with more successors than predecessors, then empty ranks squeezed out.
 void assign_ranks(Frame &f, FrameScratch &sc) {
   uint32_t const n{ static_cast<uint32_t>(f.nodes.size()) };
   if (n == 0) { return; }
@@ -349,6 +364,14 @@ void assign_ranks(Frame &f, FrameScratch &sc) {
     }
   }
 
+  uint32_t top{ 0 };
+  for (OrderNode const &nd : f.nodes) { top = imax(top, nd.rank); }
+  for (uint32_t v = 0; v < n; ++v) {
+    if ((f.nodes[v].kind == OrderKind::Boundary) && (out_deg(v) == 0)) {
+      f.nodes[v].rank = top;
+    }
+  }
+
   for (auto at = static_cast<uint32_t>(topo.size()); at-- > 0;) {
     uint32_t const v{ topo[at] };
     if ((f.nodes[v].kind == OrderKind::Boundary) || (out_deg(v) == 0) ||
@@ -360,14 +383,6 @@ void assign_ranks(Frame &f, FrameScratch &sc) {
       nearest = imin(nearest, f.nodes[f.edges[f.out.edge[k]].dst].rank);
     }
     f.nodes[v].rank = nearest - 1;
-  }
-
-  uint32_t top{ 0 };
-  for (OrderNode const &nd : f.nodes) { top = imax(top, nd.rank); }
-  for (uint32_t v = 0; v < n; ++v) {
-    if ((f.nodes[v].kind == OrderKind::Boundary) && (out_deg(v) == 0)) {
-      f.nodes[v].rank = top;
-    }
   }
 
   std::vector<uint32_t> &used{ sc.held };
@@ -561,6 +576,48 @@ void minimize_crossings(Frame &f, uint32_t sweeps, FrameScratch &sc) {
   }
 }
 
+// Moves each cross-border port's mate toward the port's end of their rank, one swap at a
+// time while no crossing is added; an `extreme` node or an earlier mate stops it.
+void slide_to_ports(Frame &f,
+                    std::vector<OrderEdge> const &flat,
+                    std::vector<uint8_t> const &extreme,
+                    FrameScratch &sc) {
+  if (flat.empty()) { return; }
+  std::vector<uint8_t> &held{ sc.marks };
+  vec_assign(held, f.nodes.size(), 0);
+  auto const stops = [&](uint32_t v) {
+    return (held[v] != 0) || ((v < extreme.size()) && (extreme[v] != 0));
+  };
+  uint64_t cost{ total_crossings(f, sc) };
+  for (OrderEdge const &e : flat) {
+    bool const at_src{ f.nodes[e.src].kind == OrderKind::Boundary };
+    uint32_t const port{ at_src ? e.src : e.dst };
+    uint32_t const mate{ at_src ? e.dst : e.src };
+    if (stops(mate) || (f.nodes[mate].rank != f.nodes[port].rank)) { continue; }
+    held[mate] = 1;
+    bool const last{ extreme[port] == 2 };
+    std::vector<uint32_t> &bucket{ f.ranks[f.nodes[mate].rank] };
+    for (;;) {
+      uint32_t const at{ f.nodes[mate].pos };
+      if (last ? ((at + 1) >= bucket.size()) : (at == 0)) { break; }
+      uint32_t const to{ last ? (at + 1) : (at - 1) };
+      uint32_t const other{ bucket[to] };
+      if (stops(other)) { break; }
+      std::swap(bucket[at], bucket[to]);
+      f.nodes[mate].pos = to;
+      f.nodes[other].pos = at;
+      uint64_t const next{ total_crossings(f, sc) };
+      if (next > cost) {
+        std::swap(bucket[at], bucket[to]);
+        f.nodes[mate].pos = at;
+        f.nodes[other].pos = to;
+        break;
+      }
+      cost = next;
+    }
+  }
+}
+
 }  // namespace
 
 uint64_t rank_crossings(std::vector<uint32_t> const &south_positions) {
@@ -609,14 +666,16 @@ void squeeze_ranks(Frame &f, FrameScratch &sc) {
   for (OrderNode &nd : f.nodes) { nd.rank = onto[nd.rank]; }
 }
 
-// Charges rank boundaries, chains long edges, buckets and sweeps; of `f` it reads only
-// `nodes[].rank` and `edges`. Not idempotent: chaining appends bend nodes.
+// Charges rank boundaries, chains long edges, buckets, sweeps and slides mates to `flat`'s
+// ports; of `f` it reads only `nodes[].rank` and `edges`. Not idempotent: chaining appends
+// bend nodes.
 void rank_derived(Frame &f,
                   std::vector<int32_t> &gaps,
                   std::vector<int32_t> &labels,
                   std::vector<int32_t> const &seg_label,
                   std::vector<uint8_t> const &cut,
                   std::vector<uint8_t> const &extreme,
+                  std::vector<OrderEdge> const &flat,
                   scav_profile const &p,
                   FrameScratch &sc) {
   // Before chaining: an edge across one boundary charges its label there; longer edges
@@ -705,6 +764,7 @@ void rank_derived(Frame &f,
   chain_long_edges(f, cut, sc);
   bucket_ranks(f, extreme);
   minimize_crossings(f, static_cast<uint32_t>(p.sweep_count), sc);
+  slide_to_ports(f, flat, extreme, sc);
 }
 
 }  // namespace
@@ -1098,7 +1158,15 @@ void order_submachines(SubmachineOrders &o,
         }
         squeeze_ranks(f, sc);
       }
-      rank_derived(f, frames[m].gaps, frames[m].labels, seg_label, cut, extreme, p, sc);
+      rank_derived(f,
+                   frames[m].gaps,
+                   frames[m].labels,
+                   seg_label,
+                   cut,
+                   extreme,
+                   flat,
+                   p,
+                   sc);
       vec_insert(f.edges, f.edges.end(), flat.begin(), flat.end());
       if (!tracing) {
         value.clear();
