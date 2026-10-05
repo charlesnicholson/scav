@@ -39,6 +39,9 @@ uint64_t layout_test_prefix_used();
 uint64_t layout_test_prefix_mismatches();
 void layout_test_skip_noop_faces(bool on);
 uint64_t layout_test_noop_faces();
+void layout_test_cull(bool on, bool verify);
+std::array<uint64_t, TRACE_MOVES> layout_test_culled();
+uint64_t layout_test_cull_mismatches();
 void layout_test_label_bound(bool on, bool verify);
 uint64_t layout_test_label_bound_skipped();
 uint64_t layout_test_label_bound_labelled();
@@ -865,13 +868,18 @@ bool same_pins(SearchPins const &a, SearchPins const &b) {
   return wa == wb;
 }
 
-// Whether two candidates are one drawing on one set of pins.
-bool same_candidate(Candidate const &a, Candidate const &b) {
+// Whether two candidates are one drawing.
+bool same_drawing(Candidate const &a, Candidate const &b) {
   return (a.viable == b.viable) && (a.inflations == b.inflations) &&
          same_rect(a.sized.chart, b.sized.chart) &&
          same_rect(a.sized_chart, b.sized_chart) && same_geometry(a, b) &&
-         std::ranges::equal(a.routes.placed, b.routes.placed, same_rect) &&
-         same_pins(a.laid, b.laid);
+         std::ranges::equal(a.sized.loop, b.sized.loop, same_rect) &&
+         std::ranges::equal(a.routes.placed, b.routes.placed, same_rect);
+}
+
+// Whether two candidates are one drawing on one set of pins.
+bool same_candidate(Candidate const &a, Candidate const &b) {
+  return same_drawing(a, b) && same_pins(a.laid, b.laid);
 }
 
 bool same_cost(Cost const &a, Cost const &b) {
@@ -1268,6 +1276,28 @@ bool skipping_noop_faces() {
 }
 
 #ifdef SCAV_TESTING
+// Test switches: leave moves that change nothing unoffered; score each anyway against the
+// incumbent. The counters tally those left, per move kind, and those that differ.
+bool test_cull{ true };
+bool test_cull_verify{ false };
+Mutex test_cull_lock;
+std::array<uint64_t, TRACE_MOVES> test_culled{};
+uint64_t test_cull_mismatches{ 0 };
+#endif
+
+// True when a move of `kind` that changes nothing goes unoffered.
+bool culling(MoveKind kind) {
+#ifdef SCAV_TESTING
+  if (!test_cull) { return false; }
+  ScopedLock const held{ test_cull_lock };
+  ++test_culled[static_cast<uint32_t>(kind)];
+#else
+  (void)kind;
+#endif
+  return true;
+}
+
+#ifdef SCAV_TESTING
 // Test switches: score labelled rounds by bound, and verify them whole. Counters tally
 // skipped and labelled candidates, and disagreeing rounds or candidates.
 bool test_label_bound{ true };
@@ -1504,6 +1534,19 @@ Improved run_search(Chart const &c,
   bounded = bounded && test_label_bound;
 #endif
   std::vector<uint8_t> chained;
+  std::vector<uint32_t> pin_rank;  // per state: the rank its last pin in `held` names
+#ifdef SCAV_TESTING
+  std::vector<Move> culled;  // the round's unoffered moves, under `test_cull_verify`
+#endif
+  // True when `m`, which changes nothing, goes unoffered and uncharged.
+  auto const cull = [&](Move const &m) {
+    if (!culling(m.kind)) { return false; }
+    ++counted.culled[static_cast<uint32_t>(m.kind)];
+#ifdef SCAV_TESTING
+    if (test_cull_verify) { vec_push_back(culled, m); }
+#endif
+    return true;
+  };
   while ((cut_scored < budget) || (rev_scored < budget) || (face_scored < budget) ||
          (side_scored < budget) || (pin_scored < budget) || (loop_scored < budget) ||
          (refold && (fold_scored < budget))) {
@@ -1597,7 +1640,12 @@ Improved run_search(Chart const &c,
       }
     }
 
-    // Rank moves: each live, non-initial state to every other rank of its frame.
+    // Rank moves: each live, non-initial state to every other rank of its frame; the rank
+    // its last pin names is culled.
+    vec_assign(pin_rank, c.states.size(), INVALID);
+    for (RankPin const &had : held.ranks) {
+      if (had.state.v < pin_rank.size()) { pin_rank[had.state.v] = had.rank; }
+    }
     for (uint32_t st = 0; (st < c.states.size()) && (pin_scored < budget); ++st) {
       if ((c.states[st].live == 0) || (here.state_node[st] == INVALID) ||
           (c.states[st].kind == StateKind::Initial)) {
@@ -1609,8 +1657,10 @@ Improved run_search(Chart const &c,
       uint32_t const ranks{ here.sub_ranks[frame] };
       for (uint32_t r = 0; (r < ranks) && (pin_scored < budget); ++r) {
         if (r == at) { continue; }
+        Move const m{ .pin = { .state = StateId{ st }, .rank = r } };
+        if ((r == pin_rank[st]) && cull(m)) { continue; }
         ++pin_scored;
-        vec_push_back(round, { .pin = { .state = StateId{ st }, .rank = r } });
+        vec_push_back(round, m);
       }
     }
     // Fold moves under `refold`: a folded frame moves its cut before each other rank.
@@ -1630,7 +1680,8 @@ Improved run_search(Chart const &c,
               .kind = MoveKind::Fold });
       }
     }
-    // Loop moves: each state with a loop room to each other placement on an anchored face.
+    // Loop moves: each state with a loop room to each other placement on an anchored face;
+    // on an uninflated incumbent, a placement that leaves the room where it is is culled.
     std::vector<uint8_t> const &drawn_place{ out.best.sized.loop_place };
     std::vector<scav_rect> const &drawn_loop{ out.best.sized.loop };
     for (uint32_t st = 0; (st < drawn_loop.size()) && (loop_scored < budget); ++st) {
@@ -1640,12 +1691,45 @@ Improved run_search(Chart const &c,
       }
       for (uint32_t k = 0; (k < 8) && (loop_scored < budget); ++k) {
         if ((k == drawn_place[st]) || !loop_anchored(s, st, k / 2)) { continue; }
+        Move const m{ .loop = { .state = StateId{ st }, .face = k / 2, .end = k % 2 },
+                      .kind = MoveKind::Loop };
+        if ((out.best.inflations == 0) && loop_room_unmoved(c, out.best.sized, st, k) &&
+            cull(m)) {
+          continue;
+        }
         ++loop_scored;
-        vec_push_back(round,
-                      { .loop = { .state = StateId{ st }, .face = k / 2, .end = k % 2 },
-                        .kind = MoveKind::Loop });
+        vec_push_back(round, m);
       }
     }
+#ifdef SCAV_TESTING
+    // Each culled move, laid out whole, draws and scores as the incumbent.
+    parallel_for(static_cast<uint32_t>(culled.size()), threads, [&](uint32_t i) {
+      SearchPins pins{ held };
+      add_move(pins, culled[i]);
+      SubmachineOrders const moved{ order_submachines(c, g, s, objective, 1, pins) };
+      std::vector<Diagnostic> spilled;
+      Candidate fresh;
+      search_candidate(fresh,
+                       c,
+                       g,
+                       moved,
+                       s,
+                       row,
+                       router,
+                       1,
+                       spilled,
+                       &pins,
+                       { .reuse = &base },
+                       true);
+      Scored const want{ scored_of(c, g, scoring, s, objective, fresh) };
+      if (!same_drawing(fresh, out.best) ||
+          (!want.inflated && !same_cost(want.cost, out.cost))) {
+        ScopedLock const lock{ test_cull_lock };
+        ++test_cull_mismatches;
+      }
+    });
+    culled.clear();
+#endif
     if (round.empty()) { break; }
 
     // Each candidate runs its phases on one thread; `fresh` scores it without the memo.
@@ -2772,6 +2856,21 @@ void layout_test_skip_noop_faces(bool on) {
 uint64_t layout_test_noop_faces() {
   ScopedLock const held{ test_noop_lock };
   return test_noop_faces;
+}
+void layout_test_cull(bool on, bool verify) {
+  test_cull = on;
+  test_cull_verify = verify;
+  ScopedLock const held{ test_cull_lock };
+  test_culled = {};
+  test_cull_mismatches = 0;
+}
+std::array<uint64_t, TRACE_MOVES> layout_test_culled() {
+  ScopedLock const held{ test_cull_lock };
+  return test_culled;
+}
+uint64_t layout_test_cull_mismatches() {
+  ScopedLock const held{ test_cull_lock };
+  return test_cull_mismatches;
 }
 void layout_test_label_bound(bool on, bool verify) {
   test_label_bound = on;

@@ -2012,6 +2012,71 @@ TEST_CASE(
             .t0_violations == 0);
 }
 
+TEST_CASE(
+    "gauntlet: a loop room that sits alike at either end of its face lays out alike") {
+  // Each state with inner loops, from each placement to the other end of its face: where
+  // `loop_room_unmoved` holds, the two lay out the same rects and routes. `rooms` widened
+  // past its loops is the case where it does not.
+  scav_profile const p{ one_row(readable()) };
+  uint32_t alike{ 0 };
+  uint32_t apart{ 0 };
+  for (char const *name : { "room.scav", "inloop.scav", "rooms.scav" }) {
+    CAPTURE(name);
+    Chart const probe{ loaded(name) };
+    std::vector<scav_box_space> rows(probe.states.size());
+    uint32_t const busy{ state_named(probe, "Busy") };
+    if (std::string_view{ name } == "rooms.scav") {
+      REQUIRE(busy != INVALID);
+      rows[busy].min_w = 100 * p.font_size_grid;
+    }
+    std::vector<scav_path_box> const boxes{
+      label_boxes(probe, 3 * p.font_size_grid, p.font_size_grid)
+    };
+    scav_spaces s{ spaces_of(rows) };
+    s.path_box = boxes.data();
+    s.n_path_box = static_cast<uint32_t>(boxes.size());
+    s.path_box_stride = static_cast<uint32_t>(sizeof(scav_path_box));
+    for (uint32_t st = 0; st < probe.states.size(); ++st) {
+      bool looped{ false };
+      for (uint32_t t = 0; t < probe.transitions.size(); ++t) {
+        looped = looped || ((probe.transitions[t].src.v == st) && inner_loop(probe, t));
+      }
+      if (!looped) { continue; }
+      CAPTURE(st);
+      for (uint32_t k = 0; k < 8; ++k) {
+        CAPTURE(k);
+        SearchPins const at{
+          .loops = { { .state = StateId{ st }, .face = k / 2, .end = k % 2 } }
+        };
+        SearchPins const other{
+          .loops = { { .state = StateId{ st }, .face = k / 2, .end = (k % 2) ^ 1U } }
+        };
+        Laid drawn;
+        lay(name, p, drawn, s, &at);
+        Laid flipped;
+        lay(name, p, flipped, s, &other);
+        auto const rect = [](scav_rect const &a, scav_rect const &b) {
+          return (a.x == b.x) && (a.y == b.y) && (a.w == b.w) && (a.h == b.h);
+        };
+        bool const alike_drawn{
+          std::ranges::equal(drawn.z.state, flipped.z.state, rect) &&
+          std::ranges::equal(drawn.z.loop, flipped.z.loop, rect) &&
+          std::ranges::equal(drawn.z.sub, flipped.z.sub, rect) &&
+          std::ranges::equal(drawn.r.points, flipped.r.points, same)
+        };
+        if (loop_room_unmoved(drawn.c, drawn.z, st, k ^ 1U)) {
+          CHECK(alike_drawn);
+          ++alike;
+        } else {
+          ++apart;
+        }
+      }
+    }
+  }
+  CHECK(alike > 0);
+  CHECK(apart > 0);
+}
+
 TEST_CASE("gauntlet: an external self-loop leaves its state and returns to it outside") {
   // `tick` is a loop off one face of Waiting: both ends on its border at least a clearance
   // apart, and every corner outside it.

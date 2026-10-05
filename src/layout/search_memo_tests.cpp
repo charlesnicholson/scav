@@ -1,5 +1,6 @@
 // Level 1 search shortcuts checked against runs without them: the search memo, the
-// candidate memo, unscored no-op faces, and face moves scored from the incumbent's prefix.
+// candidate memo, unscored no-op faces, culled moves, and face moves scored from the
+// incumbent's prefix.
 
 #include "layout/pack.h"
 #include "layout/size.h"
@@ -13,6 +14,7 @@
 
 #include <array>
 #include <cstdint>
+#include <initializer_list>
 #include <string>
 #include <utility>
 #include <vector>
@@ -32,6 +34,9 @@ uint64_t layout_test_prefix_used();
 uint64_t layout_test_prefix_mismatches();
 void layout_test_skip_noop_faces(bool on);
 uint64_t layout_test_noop_faces();
+void layout_test_cull(bool on, bool verify);
+std::array<uint64_t, TRACE_MOVES> layout_test_culled();
+uint64_t layout_test_cull_mismatches();
 void layout_test_label_bound(bool on, bool verify);
 uint64_t layout_test_label_bound_skipped();
 uint64_t layout_test_label_bound_labelled();
@@ -264,6 +269,69 @@ TEST_CASE(
     CHECK(with.coordinate == without.coordinate);
   }
   CHECK(skipped > 0);
+}
+
+namespace {
+
+// Turns culling back on, unverified, on scope exit.
+struct CullGuard {
+  CullGuard() = default;
+  CullGuard(CullGuard const &) = delete;
+  CullGuard &operator=(CullGuard const &) = delete;
+  ~CullGuard() { layout_test_cull(true, false); }
+};
+
+// Lays out each chart at both scales with every culled move checked; returns the culls
+// per move kind.
+std::array<uint64_t, TRACE_MOVES> culls_checked(
+    std::initializer_list<char const *> charts) {
+  std::array<uint64_t, TRACE_MOVES> culled{};
+  for (bool const labelled : { false, true }) {
+    for (char const *name : charts) {
+      if (scav::test::corpus_skipped(name)) { continue; }
+      CAPTURE(labelled);
+      CAPTURE(name);
+      layout_test_cull(true, true);
+      REQUIRE(lay_out(name, labelled).ok);
+      std::array<uint64_t, TRACE_MOVES> const got{ layout_test_culled() };
+      for (uint32_t k = 0; k < TRACE_MOVES; ++k) { culled[k] += got[k]; }
+      CHECK(layout_test_cull_mismatches() == 0);
+    }
+  }
+  return culled;
+}
+
+}  // namespace
+
+TEST_CASE("search: every move culled as changing nothing lays out as the incumbent") {
+  // Each culled move is laid out whole and compared with the incumbent it was culled from.
+  CullGuard const guard;
+  std::array<uint64_t, TRACE_MOVES> const culled{ culls_checked(
+      { "brew.scav", "dock.scav", "estop.scav", "kiln.scav", "led.scav" }) };
+  CHECK(culled[TRACE_MOVE_RANK] > 0);
+  CHECK(culled[TRACE_MOVE_LOOP] > 0);
+}
+
+TEST_CASE("search: every move culled on the corpus lays out as the incumbent" *
+          doctest::test_suite("full")) {
+  CullGuard const guard;
+  std::array<uint64_t, TRACE_MOVES> const culled{ culls_checked({ "axis.scav",
+                                                                  "bottler.scav",
+                                                                  "elevator.scav",
+                                                                  "ota.scav",
+                                                                  "printer.scav",
+                                                                  "tcp.scav",
+                                                                  "toolchanger.scav",
+                                                                  "vac.scav" }) };
+  CHECK(culled[TRACE_MOVE_RANK] > 0);
+  CHECK(culled[TRACE_MOVE_LOOP] > 0);
+}
+
+TEST_CASE("search: with culling off, nothing is culled") {
+  CullGuard const guard;
+  layout_test_cull(false, false);
+  REQUIRE(lay_out("kiln.scav").ok);
+  for (uint64_t const n : layout_test_culled()) { CHECK(n == 0); }
 }
 
 namespace {

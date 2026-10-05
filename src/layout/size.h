@@ -76,6 +76,9 @@ LoopPlace loop_place_default(scav_spaces const &s, uint32_t state);
 bool loop_anchored(scav_spaces const &s, uint32_t state, uint32_t face);
 // Where the legs of loops leaving by `face` end: the border, or the band's inner edge.
 int32_t loop_boundary(SizedLayout const &z, uint32_t st, uint32_t face);
+// True when placement `place` (`face * 2 + end`) is on the face `z` draws `st`'s loop room
+// by and lays the room out where `z` has it.
+bool loop_room_unmoved(Chart const &c, SizedLayout const &z, uint32_t st, uint32_t place);
 
 // Whether a band of `state` lines `face` (0 left, 1 right, 2 top, 3 bottom), which then
 // takes no port.

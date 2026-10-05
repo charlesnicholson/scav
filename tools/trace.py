@@ -7,7 +7,7 @@ transition's route.
   tools/trace.py estop.scav --kinks       only the ones that bend
   tools/trace.py estop.scav --raw         the events, unsummarized
   tools/trace.py bottler.scav --search    each row's searches, kicks and takes
-  tools/trace.py --stats [chart...]       candidates scored and deduped, CPU; corpus default
+  tools/trace.py --stats [chart...]       moves culled, scored and deduped, CPU; corpus default
 
 Any other flag is a layout flag passed to `scav dump`, such as `--no-text` or a pin.
 """
@@ -139,32 +139,36 @@ def search_stats(scav, chart, layout):
 
 
 def print_stats(scav, charts, layout):
-    """One row per chart and scale: moves offered, answered by the memo, laid out in full,
-    taken; searches; the memo's peak; the layout's CPU. Then the same split by move kind."""
+    """One row per chart and scale: moves culled, offered, answered by the memo, laid out
+    in full, taken; searches; the memo's peak; the layout's CPU. Then the same split by
+    move kind."""
     scales = [[]] if "--no-text" in layout else [[], ["--no-text"]]
-    kinds = {m: [0, 0, 0] for m in MOVES}
-    print(f"{'chart':14} {'scale':6} {'offered':>9} {'deduped':>9} {'scored':>9} "
-          f"{'taken':>6} {'searches':>8} {'memo MB':>8} {'cpu s':>8}")
+    kinds = {m: [0, 0, 0, 0] for m in MOVES}
+    print(f"{'chart':14} {'scale':6} {'culled':>8} {'offered':>9} {'deduped':>9} "
+          f"{'scored':>9} {'taken':>6} {'searches':>8} {'memo MB':>8} {'cpu s':>8}")
     for chart in charts:
         for scale in scales:
             st = search_stats(scav, chart, [*layout, *scale])
             s = st["search"]
+            culled = sum(v["culled"] for v in s["moves"].values())
             offered = sum(v["offered"] for v in s["moves"].values())
             deduped = sum(v["deduped"] for v in s["moves"].values())
             taken = sum(v["taken"] for v in s["moves"].values())
             for m, v in s["moves"].items():
-                kinds[m][0] += v["offered"]
-                kinds[m][1] += v["deduped"]
-                kinds[m][2] += v["taken"]
-            print(f"{Path(chart).stem:14} {'notext' if scale else 'text':6} {offered:9} "
-                  f"{deduped:9} {offered - deduped:9} {taken:6} {s['searches']:8} "
-                  f"{s['memo_bytes'] / 1e6:8.1f} {st['cpu_ms'] / 1e3:8.2f}")
+                kinds[m][0] += v["culled"]
+                kinds[m][1] += v["offered"]
+                kinds[m][2] += v["deduped"]
+                kinds[m][3] += v["taken"]
+            print(f"{Path(chart).stem:14} {'notext' if scale else 'text':6} {culled:8} "
+                  f"{offered:9} {deduped:9} {offered - deduped:9} {taken:6} "
+                  f"{s['searches']:8} {s['memo_bytes'] / 1e6:8.1f} {st['cpu_ms'] / 1e3:8.2f}")
     print()
-    print(f"{'move':14} {'offered':>9} {'deduped':>9} {'scored':>9} {'taken':>6}")
+    print(f"{'move':14} {'culled':>8} {'offered':>9} {'deduped':>9} {'scored':>9} "
+          f"{'taken':>6}")
     for m in MOVES:
-        o, d, t = kinds[m]
-        if o or t:
-            print(f"{m:14} {o:9} {d:9} {o - d:9} {t:6}")
+        c, o, d, t = kinds[m]
+        if c or o or t:
+            print(f"{m:14} {c:8} {o:9} {d:9} {o - d:9} {t:6}")
 
 
 def main():

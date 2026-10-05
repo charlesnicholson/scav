@@ -2505,6 +2505,24 @@ int32_t loop_boundary(SizedLayout const &z, uint32_t st, uint32_t face) {
   }
 }
 
+bool loop_room_unmoved(Chart const &c, SizedLayout const &z, uint32_t st, uint32_t place) {
+  if ((st >= c.states.size()) || (st >= z.loop.size()) || (st >= z.loop_place.size()) ||
+      (st >= z.lead.size()) || (st >= z.trail.size()) ||
+      ((place / 2U) != (z.loop_place[st] / 2U))) {
+    return false;
+  }
+  // Top or bottom: either end when the room spans the width between the side bands.
+  if ((place / 2U) >= 2) {
+    return (Wide{ z.lead[st].x } + z.lead[st].w + z.loop[st].w) == Wide{ z.trail[st].x };
+  }
+  // Left or right: either end when no live submachine shares the body with the room.
+  Span const subs{ c.states[st].submachines };
+  for (uint32_t u = 0; u < subs.len; ++u) {
+    if (c.submachines[c.submachine_ids[subs.off + u].v].live != 0) { return false; }
+  }
+  return true;
+}
+
 bool face_lined(scav_spaces const &s, uint32_t state, uint32_t face) {
   scav_box_space const b{ box_of(s.box_state, s.n_box_state, state) };
   return (face < 4) && (bands_of(b)[face] > 0);
