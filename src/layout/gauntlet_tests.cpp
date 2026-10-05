@@ -1,5 +1,6 @@
 // One layout element per chart, held to the properties a reader checks.
 
+#include "core/tests/corpus.h"
 #include "layout/cost.h"
 #include "layout/decompose.h"
 #include "layout/geom.h"
@@ -50,18 +51,7 @@ scav_profile compact() {
   return p;
 }
 
-// Every chart in test_data/charts/gauntlet, by file name.
-constexpr std::array GAUNTLET{
-  "above.scav",    "bypass.scav",    "carried.scav", "chain.scav",     "corner.scav",
-  "crossing.scav", "crowd.scav",     "detour.scav",  "enclosing.scav", "entered.scav",
-  "fanin.scav",    "flank.scav",     "folded.scav",  "fork.scav",      "header.scav",
-  "headed.scav",   "inloop.scav",    "inward.scav",  "lane.scav",      "level.scav",
-  "long.scav",     "loop.scav",      "marks.scav",   "mixed.scav",     "mutual.scav",
-  "ported.scav",   "pulled.scav",    "rebound.scav", "reentry.scav",   "regions.scav",
-  "resumed.scav",  "ring.scav",      "room.scav",    "rooms.scav",     "roundtrip.scav",
-  "seated.scav",   "separator.scav", "side.scav",    "stretch.scav",   "through.scav",
-  "tight.scav",    "transit.scav",   "under.scav",   "unfolded.scav"
-};
+using scav::test::GAUNTLET;
 
 // One chart, laid out: the pieces every property below reads.
 struct Laid {

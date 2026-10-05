@@ -20,6 +20,20 @@ namespace scav { void layout_test_no_search(bool on); }  // namespace scav
 
 namespace scav::test {
 
+// Every chart in test_data/charts/gauntlet, by file name; test_gauntlet.py checks it
+// against the directory.
+inline constexpr std::array<char const *, 44> GAUNTLET{
+  "above.scav",    "bypass.scav",    "carried.scav", "chain.scav",     "corner.scav",
+  "crossing.scav", "crowd.scav",     "detour.scav",  "enclosing.scav", "entered.scav",
+  "fanin.scav",    "flank.scav",     "folded.scav",  "fork.scav",      "headed.scav",
+  "header.scav",   "inloop.scav",    "inward.scav",  "lane.scav",      "level.scav",
+  "long.scav",     "loop.scav",      "marks.scav",   "mixed.scav",     "mutual.scav",
+  "ported.scav",   "pulled.scav",    "rebound.scav", "reentry.scav",   "regions.scav",
+  "resumed.scav",  "ring.scav",      "room.scav",    "rooms.scav",     "roundtrip.scav",
+  "seated.scav",   "separator.scav", "side.scav",    "stretch.scav",   "through.scav",
+  "tight.scav",    "transit.scav",   "under.scav",   "unfolded.scav"
+};
+
 // Whether the corpus is brew, dock, estop, kiln and led: every tier but
 // SCAV_TEST_TIER=full.
 inline bool corpus_light() {

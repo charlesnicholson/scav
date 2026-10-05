@@ -44,17 +44,7 @@ scav_profile compact() {
   return p;
 }
 
-// Every chart in test_data/charts/gauntlet by bare file name; test_gauntlet.py checks
-// this array and gauntlet_tests.cpp's against the directory.
-constexpr std::array<char const *, 35> GAUNTLET{
-  "above.scav",   "carried.scav",   "chain.scav",   "corner.scav",    "crossing.scav",
-  "crowd.scav",   "enclosing.scav", "entered.scav", "fanin.scav",     "folded.scav",
-  "fork.scav",    "header.scav",    "inloop.scav",  "inward.scav",    "lane.scav",
-  "level.scav",   "long.scav",      "loop.scav",    "marks.scav",     "mixed.scav",
-  "mutual.scav",  "ported.scav",    "pulled.scav",  "regions.scav",   "room.scav",
-  "rooms.scav",   "roundtrip.scav", "seated.scav",  "separator.scav", "stretch.scav",
-  "through.scav", "tight.scav",     "transit.scav", "under.scav",     "unfolded.scav"
-};
+using scav::test::GAUNTLET;
 
 std::string router_label(uint32_t index) {
   scav_byte const *bytes{ nullptr };

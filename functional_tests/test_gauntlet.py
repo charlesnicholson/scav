@@ -15,8 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import scavtest  # noqa: E402
 
 CHARTS = Path("test_data/charts/gauntlet")
-# Unit suites holding a hand-maintained list of the element charts.
-SUITES = (Path("src/layout/gauntlet_tests.cpp"), Path("src/layout/bench_tests.cpp"))
+# The one hand-maintained list of the element charts, shared by the unit suites.
+SUITES = (Path("src/core/tests/corpus.h"),)
 SVG_NS = "{http://www.w3.org/2000/svg}"
 
 # The `GAUNTLET{...}` initializer, then the chart names inside it.
