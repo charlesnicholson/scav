@@ -66,15 +66,18 @@ inline int32_t label_line_height(scav_profile const &p) {
 
 // Derived spacing ===========================================================
 
-// The room a route keeps from a box it passes.
+// The room a route keeps from another route: lanes, seats on one face, a loop's legs.
 constexpr int32_t route_clearance(scav_profile const &p) {
   return (p.node_sep / 3 > 1) ? (p.node_sep / 3) : 1;
 }
 
-// Width of the band inside an enclosure's border that routes keep out of.
-constexpr int32_t border_band(scav_profile const &p) {
-  int32_t const inner{ (route_clearance(p) < p.pad) ? route_clearance(p) : p.pad };
-  return (inner / 2 > 1) ? (inner / 2) : 1;
+// Width of the band either side of a state's border that a route running along that
+// border keeps out of: one `pad`, at least 1.
+constexpr int32_t border_band(scav_profile const &p) { return (p.pad > 1) ? p.pad : 1; }
+
+// The room a route keeps from a box it passes: `border_band`, at least `route_clearance`.
+constexpr int32_t box_clearance(scav_profile const &p) {
+  return (border_band(p) > route_clearance(p)) ? border_band(p) : route_clearance(p);
 }
 
 // A route's cost per bend, in units of length: one rank separation.
@@ -258,7 +261,7 @@ struct CostTerms {
   int32_t box_overlap{ 0 };
   // Transitions with a segment to draw and a route of fewer than two points.
   int32_t vanished{ 0 };
-  // Route segments running along a state's border.
+  // Route segments running along a state's border inside its `border_band`, either side.
   int32_t flush{ 0 };
   // Route segments entering a region neither end lies in, or an external route's segments
   // entering both its ends' regions.

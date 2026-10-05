@@ -114,11 +114,14 @@ void nudge_lanes(scav_rect const &region,
                  std::vector<scav_rect> const &obstacles,
                  int32_t gap,
                  int32_t clear,
+                 int32_t band,
                  std::vector<scav_span> const &nets,
                  std::vector<scav_point> &points,
                  scav_path_clear const *keep,
                  uint32_t n_keep) {
   if (gap <= 0) { return; }
+  int32_t const inside{ imax(band, 1) };
+  int32_t const near{ inside - 1 };  // `along_border`'s reach for `band`
   uint32_t const net_count{ static_cast<uint32_t>(nets.size()) };
 
   NudgeScratch &sc{ nudge_scratch() };
@@ -235,9 +238,9 @@ void nudge_lanes(scav_rect const &region,
         for (uint32_t r = 0; r < now.size(); ++r) {
           ok = ok && (overlaps(was[r], raw) || !overlaps(now[r], raw));
           ok = ok && (overlaps(was[r], box) || !overlaps(now[r], box));
-          // A leg may run along the obstacle's border only if it already did.
-          ok = ok && (along_border(then[r], then[r + 1], raw) ||
-                      !along_border(way[r], way[r + 1], raw));
+          // A leg may run within `band` of the obstacle's border only if it already did.
+          ok = ok && (along_border(then[r], then[r + 1], raw, near) ||
+                      !along_border(way[r], way[r + 1], raw, near));
         }
       }
       // A leg may share a run with another net only if it already did; the three segments
@@ -416,27 +419,30 @@ void nudge_lanes(scav_rect const &region,
       int32_t const at{ members[first].at };
       int32_t const lo{ least };
       int32_t const hi{ reach };
-      Wide room_down{ horizontal ? (Wide{ region.y } + region.h) - at
-                                 : (Wide{ region.x } + region.w) - at };
-      Wide room_up{ horizontal ? (Wide{ at } - region.y) : (Wide{ at } - region.x) };
-      // Room stops one unit inside the intersection of `region` and every member's
-      // `bounds` frame.
-      scav_rect held{ region };
+      Wide room_down{ UNBOUNDED };
+      Wide room_up{ UNBOUNDED };
+      // Room stops one unit inside `region`, and `inside` within every member's `bounds`
+      // frame and every box the lane passes through.
+      auto const hold = [&](scav_rect const &r, int32_t by) {
+        Wide const r_lo{ horizontal ? r.y : r.x };
+        Wide const r_hi{ r_lo + (horizontal ? r.h : r.w) };
+        room_up = imin(room_up, (Wide{ at } - r_lo) - by);
+        room_down = imin(room_down, (r_hi - at) - by);
+      };
+      hold(region, 1);
       for (uint32_t j = 0; j < count; ++j) {
         uint32_t const net{ members[lane[j]].net };
-        if (net < bounds.size()) { held = intersection(held, bounds[net]); }
+        if (net < bounds.size()) { hold(bounds[net], inside); }
       }
-      room_up = imin(room_up, (Wide{ at } - (horizontal ? held.y : held.x)) - 1);
-      room_down = imin(
-          room_down,
-          ((horizontal ? (Wide{ held.y } + held.h) : (Wide{ held.x } + held.w)) - at) - 1);
 
       scav_rect const bar{ horizontal
                                ? scav_rect{ .x = lo, .y = at, .w = hi - lo, .h = 0 }
                                : scav_rect{ .x = at, .y = lo, .w = 0, .h = hi - lo } };
       for (scav_rect const &raw : obstacles) {
-        // A box the lane passes through sets no limit.
-        if (overlaps(bar, raw)) { continue; }
+        if (overlaps(bar, raw)) {
+          hold(raw, inside);
+          continue;
+        }
         scav_rect const box{ grow(raw, clear) };
         int32_t const span_lo{ horizontal ? box.x : box.y };
         int32_t const span_hi{ horizontal ? (box.x + box.w) : (box.y + box.h) };

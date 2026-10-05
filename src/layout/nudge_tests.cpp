@@ -98,7 +98,7 @@ Tally nudge(scav_rect const &region,
             std::vector<scav_point> &points) {
   LayoutTrace t;
   trace_sink_set(&t);
-  nudge_lanes(region, bounds, obstacles, gap, clear, nets, points);
+  nudge_lanes(region, bounds, obstacles, gap, clear, 0, nets, points);
   trace_sink_set(nullptr);
   Tally n;
   for (TraceEvent const &e : t.events) {
@@ -155,7 +155,7 @@ TEST_CASE("nudge: a lane is every member that overlaps, not a run that stops") {
   Frame f{ frame_of({ { pt(0, 0), pt(0, 100), pt(200, 100), pt(200, 400) },
                       { pt(900, 0), pt(900, 104), pt(1100, 104), pt(1100, 400) },
                       { pt(50, 600), pt(50, 108), pt(250, 108), pt(250, 900) } }) };
-  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 160, 0, f.nets, f.points);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), {}, 160, 0, 0, f.nets, f.points);
 
   // Nets 0 and 2 land a pitch apart; net 1 stays at y=104.
   CHECK(imax(net_pt(f, 0, 1).y - net_pt(f, 2, 1).y,
@@ -244,7 +244,7 @@ TEST_CASE("nudge: clearance is kept, so a displacement never ends up flush") {
   // would put the upper member at 76.
   Lane l{ two_over(100) };
   std::vector<scav_rect> const wall{ rect(0, 0, 200, 40) };
-  nudge_lanes(OPEN, bounds_of(OPEN, l.nets), wall, 48, 48, l.nets, l.points);
+  nudge_lanes(OPEN, bounds_of(OPEN, l.nets), wall, 48, 48, 0, l.nets, l.points);
   for (uint32_t net = 0; net < 2; ++net) { CHECK(lane_y(l, net) >= 88); }
 }
 
@@ -253,7 +253,7 @@ TEST_CASE("nudge: a displacement never drags a leg onto a box's border") {
   // member up 48, half the pitch, runs its leg 18 units along that side.
   Lane l{ two_over(100) };
   std::vector<scav_rect> const wall{ rect(200, 30, 100, 40) };
-  nudge_lanes(OPEN, bounds_of(OPEN, l.nets), wall, 96, 0, l.nets, l.points);
+  nudge_lanes(OPEN, bounds_of(OPEN, l.nets), wall, 96, 0, 0, l.nets, l.points);
 
   CHECK(lane_y(l, 0) != lane_y(l, 1));
   for (uint32_t net = 0; net < 2; ++net) {
@@ -292,6 +292,7 @@ TEST_CASE("nudge: the region bounds a lane the obstacles do not") {
               {},
               480,
               0,
+              0,
               f.nets,
               f.points);
   CHECK(net_pt(f, 0, 1).y == 11);   // up 89, the most net 1's 90-unit legs allow
@@ -329,7 +330,7 @@ TEST_CASE("nudge: a displacement that would enter a box is dropped, not clamped"
   Frame f{ frame_of({ { pt(0, 0), pt(0, 100), pt(200, 100), pt(200, 0) },
                       { pt(0, 300), pt(0, 150), pt(200, 150), pt(200, 300) } }) };
   std::vector<scav_rect> const walls{ rect(-50, 120, 300, 10) };
-  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), walls, 160, 0, f.nets, f.points);
+  nudge_lanes(OPEN, bounds_of(OPEN, f.nets), walls, 160, 0, 0, f.nets, f.points);
   CHECK(net_pt(f, 0, 1).y == 1);
   CHECK(net_pt(f, 1, 1).y == 150);
   for (scav_span const &net : f.nets) {

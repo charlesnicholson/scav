@@ -2414,14 +2414,19 @@ TEST_CASE("ortho: the margin a router asks for is the clearance it will use") {
 TEST_CASE("ortho: the profile-derived knobs are the two documented numbers") {
   scav_profile p{ profile() };
   CHECK(ortho_bend_penalty(p) == p.rank_sep);
-  CHECK(ortho_clearance(p) == (p.node_sep / 3));
+  CHECK(ortho_clearance(p) == imax(p.pad, p.node_sep / 3));
 
   // Two clearances fit between boxes one node separation apart.
   CHECK((2 * ortho_clearance(p)) < p.node_sep);
 
+  // A third of `node_sep` where that exceeds `pad`.
+  p.pad = (p.node_sep / 3) - 1;
+  CHECK(ortho_clearance(p) == (p.node_sep / 3));
+
   // Both knobs floor at 1.
   p.rank_sep = 0;
   p.node_sep = 0;
+  p.pad = 0;
   CHECK(ortho_bend_penalty(p) == 1);
   CHECK(ortho_clearance(p) == 1);
 }

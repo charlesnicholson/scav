@@ -661,6 +661,39 @@ TEST_CASE(
   CHECK(cost_terms(c, decompose(c), z, own, {}, profile()).flush == 1);
 }
 
+TEST_CASE(
+    "cost: flush counts a run nearer than pad to a border, inside the state or out") {
+  // `Box` holds A and B; `A -> B` runs along Box's top border at each offset from it,
+  // negative above it and positive inside it.
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const box{ build_state(c, root, "Box", StateKind::Normal, {}) };
+  SubmachineId const inner{ build_submachine(c, box, {}, {}) };
+  StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, inner, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::Default, {});
+
+  scav_profile const p{ profile() };
+  SizedLayout z{ blank(c) };
+  z.state[box.v] = { .x = 0, .y = 0, .w = 2000, .h = 1000 };
+  z.sub[inner.v] = { .x = p.pad,
+                     .y = p.pad,
+                     .w = 2000 - (2 * p.pad),
+                     .h = 1000 - (2 * p.pad) };
+  z.state[a.v] = { .x = 400, .y = 600, .w = 200, .h = 200 };
+  z.state[b.v] = { .x = 1400, .y = 600, .w = 200, .h = 200 };
+  for (int32_t const off : { -p.pad, 1 - p.pad, p.pad - 1, p.pad }) {
+    CAPTURE(off);
+    Routes const r{ routes_of(c,
+                              { { { .x = 500, .y = 600 },
+                                  { .x = 500, .y = off },
+                                  { .x = 1500, .y = off },
+                                  { .x = 1500, .y = 600 } } }) };
+    bool const near{ (off > -p.pad) && (off < p.pad) };
+    CHECK(cost_terms(c, decompose(c), z, r, {}, p).flush == (near ? 1 : 0));
+  }
+}
+
 TEST_CASE("cost: a route that turns straight back along itself is a Tier-0 violation") {
   // A leg that reverses along the previous leg is a retrace; a square turn and a U
   // through a jog are not.
@@ -789,10 +822,12 @@ TEST_CASE("cost: a route through a region neither end is in is a Tier-0 violatio
   // Straight out through `aux`, missing `Idle` itself.
   Routes const through{ routes_of(c,
                                   { { { .x = 140, .y = 80 }, { .x = 600, .y = 80 } } }) };
-  CostTerms const t{ cost_terms(c, decompose(c), z, through, {}, profile()) };
+  scav_profile ring{ profile() };
+  ring.pad = 10;  // the fixture's ring
+  CostTerms const t{ cost_terms(c, decompose(c), z, through, {}, ring) };
   CHECK(t.through_box == 0);
   CHECK(t.through_region == 1);
-  CHECK(cost_of(t, profile()).t0_violations == 1);
+  CHECK(cost_of(t, ring).t0_violations == 1);
 
   // Out of `main` downward and round below `On`: its own region, then outside.
   Routes const round{ routes_of(c,
@@ -909,10 +944,12 @@ TEST_CASE("cost: a placed box over a state neither endpoint is under breaks Tier
   r.placed = { { .x = 200, .y = -60, .w = 60, .h = 20 } };  // 90 above its route
   scav_path_box const box{ .subject = 0, .w = 60, .h = 20, .order = 0 };
   scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
-  CostTerms const over{ cost_terms(c, decompose(c), z, r, s, profile()) };
+  scav_profile near{ profile() };
+  near.pad = 16;  // under the route's 100-unit gap to X
+  CostTerms const over{ cost_terms(c, decompose(c), z, r, s, near) };
   CHECK(over.label_over_box == 1);
   CHECK(over.label == 0);
-  CHECK(cost_of(over, profile()).t0_violations == 1);
+  CHECK(cost_of(over, near).t0_violations == 1);
 
   z.state[other.v] = { .x = 200, .y = 500, .w = 100, .h = 100 };
   CHECK(cost_terms(c, decompose(c), z, r, s, profile()).label_over_box == 0);
@@ -3030,13 +3067,13 @@ TEST_CASE("cost: the indexed terms are the direct scans' at the edges") {
   build_trans(c, b, far, TransKind::Default, {});
   SplitGraph const g{ decompose(c) };
   CostContext const ctx{ cost_context(c, g) };
-  // A band of five and an em of twenty.
+  // A band of twelve and an em of twenty.
   scav_profile p{ profile() };
   p.node_sep = 30;
   p.pad = 12;
   p.font_size_grid = 20;
   int32_t const near{ border_band(p) - 1 };
-  REQUIRE(near == 4);
+  REQUIRE(near == 11);
 
   SizedLayout z{ blank(c) };
   z.state[outer.v] = { .x = 0, .y = 0, .w = 400, .h = 200 };

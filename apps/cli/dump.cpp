@@ -300,7 +300,7 @@ std::array<int64_t, TIER2_TERMS> term_values(CostTerms const &t) {
 
 // The profile values layout reads and the spacing it derives from them, parallel to
 // `profile_values`.
-constexpr std::array<char const *, 34> PROFILE{ "em",
+constexpr std::array<char const *, 35> PROFILE{ "em",
                                                 "line_height",
                                                 "pad",
                                                 "rank_sep",
@@ -310,6 +310,7 @@ constexpr std::array<char const *, 34> PROFILE{ "em",
                                                 "dar_den",
                                                 "route_clearance",
                                                 "border_band",
+                                                "box_clearance",
                                                 "bend_penalty",
                                                 "label_leader",
                                                 "loop_gap",
@@ -348,6 +349,7 @@ std::array<int64_t, PROFILE.size()> profile_values(scav_profile const &p) {
            p.dar_den,
            route_clearance(p),
            border_band(p),
+           box_clearance(p),
            route_bend_penalty(p),
            label_leader(p),
            loop_gap(p),

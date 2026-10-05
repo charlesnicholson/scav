@@ -1969,7 +1969,7 @@ TEST_CASE("layout: an initial and one other arrival meet their target at two hei
   int32_t const at_start{ level(start) };
   int32_t const at_into{ level(into) };
   int32_t const apart{ imax(at_start - at_into, at_into - at_start) };
-  CHECK(apart >= (state_rect(c, initial).h / 2) + route_clearance(p));
+  CHECK(apart >= (state_rect(c, initial).h / 2) + box_clearance(p));
 }
 
 TEST_CASE("layout: a label inside one of two regions stays inside that region") {

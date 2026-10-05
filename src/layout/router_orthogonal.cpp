@@ -1175,7 +1175,7 @@ bool ortho_search(OrthoGrid const &g,
 
 Wide ortho_bend_penalty(scav_profile const &p) { return route_bend_penalty(p); }
 
-int32_t ortho_clearance(scav_profile const &p) { return route_clearance(p); }
+int32_t ortho_clearance(scav_profile const &p) { return box_clearance(p); }
 
 int32_t OrthogonalRouter::margin(scav_profile const &p) const {
   return ortho_clearance(p);
@@ -1375,7 +1375,7 @@ uint32_t OrthogonalRouter::effective_faces(RouteInput const &in,
   if (((end == 0) ? nt.src_obstacle : nt.dst_obstacle) >= in.obstacles.size()) {
     return 0;
   }
-  int32_t const clear{ ortho_clearance(in.profile) };
+  int32_t const clear{ route_clearance(in.profile) };
   scav_point const ruled{ seat_at(in, net, end, INVALID, clear) };
   uint32_t out{ 0 };
   for (uint32_t face = 0; face < 4; ++face) {
@@ -1392,7 +1392,8 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
   vec_reserve(out.metrics, in.nets.size());
 
   Wide const bend{ ortho_bend_penalty(in.profile) };
-  int32_t const clear{ ortho_clearance(in.profile) };
+  int32_t const clear{ route_clearance(in.profile) };  // between seats
+  int32_t const bumper{ ortho_clearance(in.profile) };
   int32_t const inset{ border_band(in.profile) };
   RouteScratch &sc{ route_scratch() };
   std::vector<scav_rect> &walls{ sc.walls };
@@ -1426,7 +1427,7 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
     return (at.x >= lo_x) && (at.x <= hi_x) && (at.y >= lo_y) && (at.y <= hi_y);
   };
 
-  // Each end is up to three points: the caller's, the border seat, and the ring `clear`
+  // Each end is up to three points: the caller's, the border seat, and the ring `bumper`
   // out; the search runs between rings.
   std::vector<scav_point> &lead{ sc.lead };
   std::vector<scav_point> &anchors{ sc.anchors };
@@ -1472,7 +1473,7 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
         scav_point at{ attach };
         if (box < in.obstacles.size()) {
           // The ring, clamped into the region; unused at `attach` or in a box or wall.
-          scav_point ring{ ortho_ring(attach, in.obstacles[box], imax(clear, keep)) };
+          scav_point ring{ ortho_ring(attach, in.obstacles[box], imax(bumper, keep)) };
           ring.x = imin(imax(ring.x, lo_x), hi_x);
           ring.y = imin(imax(ring.y, lo_y), hi_y);
           bool ok{ (ring.x != attach.x) || (ring.y != attach.y) };
@@ -1621,7 +1622,7 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
         face[end] = face_of(at[end], in.obstacles[box[end]]);
       }
       int32_t const reach{ ((box[0] == box[1]) && (face[0] == face[1]))
-                               ? loop_reach(in, net.loop, box[0], face[0], at, clear)
+                               ? loop_reach(in, net.loop, box[0], face[0], at, bumper)
                                : net.loop };
       for (uint32_t end = 0; end < 2; ++end) {
         switch (face[end]) {
@@ -1636,10 +1637,10 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
         int32_t x1{ hi_x };
         int32_t y1{ hi_y };
         if ((enc.w > (2 * inset)) && (enc.h > (2 * inset))) {
-          x0 = imax(x0, enc.x + inset + 1);
-          y0 = imax(y0, enc.y + inset + 1);
-          x1 = imin(x1, (enc.x + enc.w) - inset - 1);
-          y1 = imin(y1, (enc.y + enc.h) - inset - 1);
+          x0 = imax(x0, enc.x + inset);
+          y0 = imax(y0, enc.y + inset);
+          x1 = imin(x1, (enc.x + enc.w) - inset);
+          y1 = imin(y1, (enc.y + enc.h) - inset);
         }
         at[end].x = imin(imax(at[end].x, x0), x1);
         at[end].y = imin(imax(at[end].y, y0), y1);
@@ -1655,7 +1656,7 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
   }
 
   OrthoGrid &g{ sc.g };
-  bool const affordable{ ortho_grid(in.region, in.obstacles, anchors, clear, g, &walls) };
+  bool const affordable{ ortho_grid(in.region, in.obstacles, anchors, bumper, g, &walls) };
 
   // Zero-clearance fallback grid, built on first need for nets the main grid cannot route.
   OrthoGrid &tight{ sc.tight };
@@ -1762,7 +1763,7 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
       if (!open_built) {
         open_built = true;
         vec_assign(sc.boxes, in.obstacles.begin(), in.obstacles.begin() + in.first_wall);
-        open_ok = ortho_grid(in.region, sc.boxes, anchors, clear, sc.open, &walls);
+        open_ok = ortho_grid(in.region, sc.boxes, anchors, bumper, sc.open, &walls);
       }
       ok = open_ok && attempt(sc.open);
       if (ok) {

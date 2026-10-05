@@ -110,6 +110,7 @@ void slide_slots(Chart const &c,
                  std::vector<scav_port_slot> &slots,
                  std::vector<Planned> &planned) {
   int32_t const clear{ route_clearance(p) };
+  int32_t const bumper{ box_clearance(p) };
   auto const state_of = [&](uint32_t i) { return g.ports[slot_port[i]].state.v; };
   auto const along = [&](uint32_t i) {
     return (slots[i].side < 2) ? slots[i].y : slots[i].x;
@@ -156,9 +157,9 @@ void slide_slots(Chart const &c,
     }
     return true;
   };
-  // True when `v` along slot `i`'s face is inside the corner insets, off its occupied
-  // spans, `clear` off the bands lining the face, inside its inner frame `m`'s share of
-  // the face, and more than `clear` short of its neighbour slots.
+  // True when `v` along slot `i`'s face is `border_band` inside its corners, off its
+  // occupied spans, `bumper` off the bands lining the face, inside its inner frame `m`'s
+  // share of the face, and more than `clear` short of its neighbour slots.
   auto const free_at = [&](uint32_t i, uint32_t m, int32_t v) {
     if (!in_region(i, m, v)) { return false; }
     uint32_t const side{ slots[i].side };
@@ -168,9 +169,7 @@ void slide_slots(Chart const &c,
     int32_t const pad{ z.before[st].x - box.x };
     int32_t const lo{ y_axis ? box.y : box.x };
     int32_t const len{ y_axis ? box.h : box.w };
-    int32_t const inset{
-      imin(imax(clear, state_corner_radius(c.states[st].kind, box, pad)), len / 2)
-    };
+    int32_t const inset{ imin(border_band(p), len / 2) };
     if ((v < (lo + inset)) || (v > ((lo + len) - inset))) { return false; }
     if (occupied_at(occupied, st, side, v)) { return false; }
     int32_t const face{ face_coord(box, side) };
@@ -180,8 +179,9 @@ void slide_slots(Chart const &c,
       int32_t const w_hi{ w_lo + (y_axis ? wall.h : wall.w) };
       int32_t const a_lo{ y_axis ? wall.x : wall.y };
       int32_t const a_hi{ a_lo + (y_axis ? wall.w : wall.h) };
-      bool const lines{ (face >= (a_lo - pad - clear)) && (face <= (a_hi + pad + clear)) };
-      if (lines && (v >= (w_lo - clear)) && (v <= (w_hi + clear))) { return false; }
+      bool const lines{ (face >= (a_lo - pad - bumper)) &&
+                        (face <= (a_hi + pad + bumper)) };
+      if (lines && (v >= (w_lo - bumper)) && (v <= (w_hi + bumper))) { return false; }
     }
     int32_t const now{ along(i) };
     for (uint32_t j = 0; j < slots.size(); ++j) {
@@ -582,7 +582,7 @@ void route_transitions(Routes &out,
   }
 
   // A point on face `face` of state `st` moved along it out of the state's occupied spans,
-  // held off its corners as seats are; left in place and counted where none is free.
+  // held `border_band` off its corners; left in place and counted where none is free.
   auto const clear_of_loops = [&](uint32_t st, uint32_t face, scav_point at) {
     if ((face >= 4) || occupied.empty()) { return at; }
     scav_rect const &r{ z.state[st] };
@@ -590,8 +590,7 @@ void route_transitions(Routes &out,
     if (!occupied_at(occupied, st, face, pos)) { return at; }
     int32_t const lo{ (face < 2) ? r.y : r.x };
     int32_t const len{ (face < 2) ? r.h : r.w };
-    int32_t const arc{ state_corner_radius(c.states[st].kind, r, z.before[st].x - r.x) };
-    int32_t const inset{ imin(imax(clear, arc), len / 2) };
+    int32_t const inset{ imin(border_band(p), len / 2) };
     if (!occupied_free(occupied, st, face, lo + inset, (lo + len) - inset, pos)) {
       ++out.occupied;
     }
@@ -756,6 +755,11 @@ void route_transitions(Routes &out,
   }
 
   int32_t const margin{ router.margin(p) };
+  int32_t const pitch{ imax(route_clearance(p), p.font_size_grid) };  // nudging's lanes
+  scav_rect const domain{ .x = COORD_MIN,
+                          .y = COORD_MIN,
+                          .w = 2 * COORD_MAX,
+                          .h = 2 * COORD_MAX };
   std::vector<FrameRoutes> &frames{ cs.frames };
   vec_resize(frames, by_frame.size());
   for (FrameRoutes &fr : frames) {
@@ -979,7 +983,7 @@ void route_transitions(Routes &out,
 
     // Nudges the frame's lanes against its own obstacles.
     if (margin > 0) {
-      vec_assign(sc.own, ro.net_points.size(), frame);
+      vec_assign(sc.own, ro.net_points.size(), (owner.v == INVALID) ? domain : frame);
       vec_resize(sc.keep, in.nets.size());
       for (size_t k = 0; k < in.nets.size(); ++k) {
         sc.keep[k] = { .src = in.nets[k].src_clear, .dst = in.nets[k].dst_clear };
@@ -987,8 +991,9 @@ void route_transitions(Routes &out,
       nudge_lanes(region,
                   sc.own,
                   in.obstacles,
-                  imax(margin, p.font_size_grid),  // lane pitch and grouping tolerance
+                  pitch,
                   margin,
+                  border_band(p),
                   ro.net_points,
                   ro.points,
                   sc.keep.data(),
@@ -1099,10 +1104,6 @@ void route_transitions(Routes &out,
     }
     // Bounds each transition by the innermost state strictly enclosing both its ends, or
     // the coordinate domain where none does; an inner loop by its own state.
-    scav_rect const domain{ .x = COORD_MIN,
-                            .y = COORD_MIN,
-                            .w = 2 * COORD_MAX,
-                            .h = 2 * COORD_MAX };
     std::vector<scav_rect> &held{ cs.held };
     vec_assign(held, out.route.size(), domain);
     for (uint32_t t = 0; t < out.route.size(); ++t) {
@@ -1118,8 +1119,9 @@ void route_transitions(Routes &out,
     nudge_lanes(domain,
                 held,
                 walls,
-                imax(margin, p.font_size_grid),
+                pitch,
                 margin,
+                border_band(p),
                 out.route,
                 out.points,
                 s.path_clear,  // an end leg keeps at least its clear

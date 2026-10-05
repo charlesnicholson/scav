@@ -225,8 +225,8 @@ bool ortho_search(OrthoGrid const &g,
                   uint32_t from_plane = INVALID,
                   uint32_t to_plane = INVALID);
 
-// A bend costs one rank separation of length; the clearance is a third of the node
-// separation.
+// A bend costs one rank separation of length; the clearance a route keeps from a box is
+// `box_clearance`.
 Wide ortho_bend_penalty(scav_profile const &p);
 int32_t ortho_clearance(scav_profile const &p);
 

@@ -1,5 +1,5 @@
 // A composite entered through its leading border by a route straight to its
-// first state, which sits at most a route clearance inside the border.
+// first state, which sits at most a box clearance inside the border.
 chart entered "a composite entered straight through its leading border" {
   state Outside,
   state Box { state First, state Second, trans First -> Second },

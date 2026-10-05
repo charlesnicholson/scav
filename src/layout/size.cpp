@@ -157,6 +157,7 @@ struct SizeScratch {
   std::vector<uint32_t> ids;
   std::vector<Frame> work;
   std::vector<scav_extent> loop_label, loop_room;  // `loop_rooms`
+  std::vector<uint8_t> looped;  // per state, 1 where an outer self-loop leaves it
   // What an `OwnerHole` sizing's first pass sized.
   SizedLayout first;
   std::vector<FrameDar> hole;  // `size_owner_holes` of `first`
@@ -239,6 +240,7 @@ struct Sizer {
   std::vector<uint32_t> &port_seg{ sc.port_seg };
   std::vector<scav_extent> &loop_label{ sc.loop_label };
   std::vector<scav_extent> &loop_room{ sc.loop_room };
+  std::vector<uint8_t> &looped{ sc.looped };
   bool ok{ true };
 
   // The ratio packings inside `state` aim at: its hole's, else the profile's.
@@ -679,8 +681,7 @@ void Sizer::step_layers(ChunkView const &v, std::vector<TraceGap> &lanes) {
   }
   auto const sep_in = [&](uint32_t r) {
     bool const clear{ (open[r - v.first] != 0) || (open[r + 1 - v.first] != 0) };
-    return (clear && (label_gap(r) == 0)) ? Wide{ route_clearance(p) }
-                                          : Wide{ p.rank_sep };
+    return (clear && (label_gap(r) == 0)) ? Wide{ box_clearance(p) } : Wide{ p.rank_sep };
   };
   // Where a chunk node starts along the ranks within its layer, and its width.
   auto const x_in_layer = [&](uint32_t q) {
@@ -918,7 +919,7 @@ Wide Sizer::column_label_room(ChunkView const &v,
         trail = imax(trail, Wide{ shape.at[j].x } + along(nd.subject));
       }
     }
-    Wide const grow{ (Wide{ route_clearance(p) } + need) - (lead - trail) };
+    Wide const grow{ (Wide{ box_clearance(p) } + need) - (lead - trail) };
     if (!passed || (grow <= 0)) { continue; }
     for (uint32_t const j : v.chunk_nodes) {
       if (Wide{ shape.at[j].x } >= lead) {
@@ -1248,8 +1249,8 @@ void Sizer::lay_out_sub(uint32_t m) {
       return (global_rank[r] < gspan.len) ? Wide{ label_row[gspan.off + global_rank[r]] }
                                           : Wide{ 0 };
     };
-    // A layer of boundary nodes alone is bare; a step beside one keeps `route_clearance`,
-    // or `rank_sep` where a label sits between.
+    // A layer of boundary nodes alone is bare; a step beside one keeps `box_clearance`, or
+    // `rank_sep` where a label sits between.
     std::vector<uint8_t> &bare{ sc.bare };
     vec_assign(bare, layers, 1);
     for (uint32_t const k : nodes) {
@@ -1257,8 +1258,7 @@ void Sizer::lay_out_sub(uint32_t m) {
     }
     auto const sep_after = [&](uint32_t r) {
       bool const open{ (bare[r] != 0) || (bare[r + 1] != 0) };
-      return (open && (label_gap(r) == 0)) ? Wide{ route_clearance(p) }
-                                           : Wide{ p.rank_sep };
+      return (open && (label_gap(r) == 0)) ? Wide{ box_clearance(p) } : Wide{ p.rank_sep };
     };
 
     glue_layers(span, espan, local_rank, layers);
@@ -1389,7 +1389,7 @@ void Sizer::lay_out_sub(uint32_t m) {
             continue;
           }
           uint32_t const others{ arrivals[chunk_index[target]] };
-          int32_t const half{ ceil_div((across(nd.subject) / 2) + route_clearance(p), 2) };
+          int32_t const half{ ceil_div((across(nd.subject) / 2) + box_clearance(p), 2) };
           if ((others != 1) || ((4 * half) > across(nt.subject))) { continue; }
           bool const above{ nd.pos < nearest[chunk_index[target]] };
           seat_at[chunk_index[dot]] = above ? -half : half;
@@ -1822,11 +1822,33 @@ void Sizer::lay_out_sub(uint32_t m) {
       ok = false;
       return;
     }
-    boxes[id] = { .x = 0,
-                  .y = 0,
-                  .w = static_cast<int32_t>(best.w),
-                  .h = static_cast<int32_t>(best.h) };
-    for (uint32_t i = 0; i < nodes.size(); ++i) { local[nodes[i]] = best.at[i]; }
+    // Inside an owner, a state an outer self-loop leaves sits `box_clearance` in from the
+    // component's edges, the loop's room off the owner's band.
+    Wide lead{ 0 };
+    Wide trail{ 0 };
+    Wide top{ 0 };
+    Wide bottom{ 0 };
+    for (uint32_t i = 0; (c.submachines[m].owner.v != INVALID) && (i < nodes.size());
+         ++i) {
+      OrderNode const &nd{ o.nodes[span.off + nodes[i]] };
+      if ((nd.kind != OrderKind::State) || (looped[nd.subject] == 0)) { continue; }
+      Wide const a_lo{ best.at[i].x };
+      Wide const c_lo{ Wide{ best.at[i].y } - (across(nd.subject) / 2) };
+      lead = imax(lead, box_clearance(p) - a_lo);
+      trail = imax(trail, (a_lo + along(nd.subject) + box_clearance(p)) - best.w);
+      top = imax(top, box_clearance(p) - c_lo);
+      bottom = imax(bottom, (c_lo + across(nd.subject) + box_clearance(p)) - best.h);
+    }
+    boxes[id] = {
+      .x = 0,
+      .y = 0,
+      .w = static_cast<int32_t>(imin(best.w + lead + trail, Wide{ COORD_MAX })),
+      .h = static_cast<int32_t>(imin(best.h + top + bottom, Wide{ COORD_MAX }))
+    };
+    for (uint32_t i = 0; i < nodes.size(); ++i) {
+      local[nodes[i]] = { .x = static_cast<int32_t>(best.at[i].x + lead),
+                          .y = static_cast<int32_t>(best.at[i].y + top) };
+    }
     for (uint32_t k = 0; k < espan.len; ++k) {
       uint32_t const seg{ o.edges[espan.off + k].segment };
       if ((best.lean[k] != 0) && (seg < out.lean.size())) { out.lean[seg] = 1; }
@@ -1908,6 +1930,7 @@ void Sizer::level_rank_ports(uint32_t m, bool down) {
   Span const span{ o.sub_nodes[m] };
   Span const espan{ o.sub_edges[m] };
   Wide const clear{ route_clearance(p) };
+  Wide const bumper{ box_clearance(p) };
   Wide const pitch{ label_line_height(p) };
   auto const lead = [&](uint32_t n) {
     return Wide{ down ? out.node[n].y : out.node[n].x };
@@ -1974,7 +1997,7 @@ void Sizer::level_rank_ports(uint32_t m, bool down) {
         Wide const cr{ down ? r.x : r.y };
         Wide const cr_len{ down ? r.w : r.h };
         free = ((a + a_len) <= from_a) || (a >= to_a) ||
-               ((cr + cr_len + clear) <= band_lo) || ((cr - clear) >= band_hi);
+               ((cr + cr_len + bumper) <= band_lo) || ((cr - bumper) >= band_hi);
         continue;
       }
       Wide const at{ cross(n) };
@@ -2014,6 +2037,7 @@ void Sizer::size_sub(uint32_t m) {
   vec_push_back(key, cut_of(m));
   vec_push_back(key, g.serial);
   vec_push_back(key, profile_word);
+  vec_push_back(key, (c.submachines[m].owner.v != INVALID) ? 1U : 0U);
   for (uint32_t k = 0; k < span.len; ++k) {
     OrderNode const &nd{ o.nodes[span.off + k] };
     vec_push_back(key, static_cast<uint32_t>(nd.kind));
@@ -2024,9 +2048,10 @@ void Sizer::size_sub(uint32_t m) {
     if (nd.kind != OrderKind::State) { continue; }
     put(out.state[nd.subject].w);
     put(out.state[nd.subject].h);
-    if (g.serial != 0) { continue; }  // the chart a serial names fixes these two
+    if (g.serial != 0) { continue; }  // the chart a serial names fixes these three
     vec_push_back(key, static_cast<uint32_t>(c.states[nd.subject].kind));
     vec_push_back(key, c.states[nd.subject].submachines.len);
+    vec_push_back(key, looped[nd.subject]);
   }
   vec_push_back(key, espan.len);
   for (uint32_t k = 0; k < espan.len; ++k) {
@@ -2237,6 +2262,14 @@ bool size_pass(Chart const &c,
     x.seg_label_w[at] = imax(x.seg_label_w[at], down ? box.h : box.w);
   }
   loop_rooms(c, s, p, out.loop_place, x.loop_label, x.loop_room);
+  vec_assign(x.looped, c.states.size(), 0);
+  for (uint32_t t = 0; t < c.transitions.size(); ++t) {
+    Transition const &tr{ c.transitions[t] };
+    if ((t < g.trans_segments.size()) && (g.trans_segments[t].len != 0) &&
+        (tr.src == tr.dst) && !inner_loop(c, t)) {
+      x.looped[tr.src.v] = 1;
+    }
+  }
   vec_assign(x.port_seg, g.ports.size(), INVALID);
   for (uint32_t seg = 0; seg < o.seg_port.size(); ++seg) {
     if (o.seg_port[seg] < x.port_seg.size()) { x.port_seg[o.seg_port[seg]] = seg; }

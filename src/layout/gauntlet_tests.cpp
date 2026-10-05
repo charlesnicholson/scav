@@ -1178,7 +1178,7 @@ TEST_CASE("gauntlet: a composite entered straight holds its first state a cleara
       gap = (Wide{ outer.y } + outer.h - p.pad) - (Wide{ in.y } + in.h);
     }
     CHECK(gap >= 0);
-    CHECK(gap <= route_clearance(p));
+    CHECK(gap <= box_clearance(p));
   }
 }
 
@@ -2788,41 +2788,162 @@ void lay_pinned(char const *chart,
   REQUIRE(t != INVALID);
   for (EndPin &pin : seed.ends) { pin.trans = TransId{ t }; }
   lay(chart, one_row(readable()), l, {}, &seed);
-}
 
-}  // namespace
+  namespace {
 
-TEST_CASE("gauntlet: pinned so its own legs must cross, a route crosses itself") {
-  // `A` fills `Outer`'s top right corner: its leg down to the bottom walls the right face
-  // off from `Inner`, so the way back in on the right crosses it, and Tier 0 counts that.
-  Laid l;
-  uint32_t t{ INVALID };
-  lay_pinned("bypass.scav",
-             "A",
-             "B",
-             { .ends = { { .leg = 0, .end = 1, .face = 3 },
-                         { .leg = 2, .end = 0, .face = 1 },
-                         { .leg = 3, .end = 0, .face = 1 } },
-               .orients = { { .frame = SubmachineId{ 2 } } } },
-             l,
-             t);
-  CHECK(knots_of(l, t) == 1);
-  CHECK(cost_columns(l.c, l.g, one_row(readable())).self_crossing == 1);
-}
+  // Segments of every route nearer than `p.pad` to the border of a live state they run
+  // along.
+  uint32_t near_borders(Laid const &l, scav_profile const &p) {
+    std::vector<uint32_t> const live{ live_of(l.c) };
+    uint32_t near{ 0 };
+    for (scav_span const &route : l.r.route) {
+      for (uint32_t k = 0; (k + 1) < route.len; ++k) {
+        for (uint32_t const st : live) {
+          near += along_border(l.r.points[route.off + k],
+                               l.r.points[route.off + k + 1],
+                               l.z.state[st],
+                               p.pad - 1)
+                      ? 1U
+                      : 0U;
+        }
+      }
+    }
+    return near;
+  }
 
-TEST_CASE(
-    "gauntlet: pinned out the bottom and back in on the left, a route rounds its leg") {
-  // `headed`'s way back in to `Busy` goes round `Idle` rather than across the leg from
-  // `Idle` down to `Box`'s bottom.
-  Laid l;
-  uint32_t t{ INVALID };
-  lay_pinned(
-      "headed.scav",
-      "Idle",
-      "Work",
-      { .ends = { { .leg = 0, .end = 1, .face = 3 }, { .leg = 2, .end = 0, .face = 0 } } },
-      l,
-      t);
-  CHECK(knots_of(l, t) == 0);
-  CHECK(l.r.failed[t] == 0);
-}
+  // `name` laid out unsearched with the arrival of `src -> dst`'s second leg held to its
+  // target's bottom face; `t` is that transition.
+  void lay_bottom_arrival(char const *name,
+                          std::string_view src,
+                          std::string_view dst,
+                          scav_profile const &p,
+                          Laid &l,
+                          uint32_t &t) {
+    Chart const probe{ loaded(name) };
+    t = between(probe, src, dst);
+    REQUIRE(t != INVALID);
+    SearchPins const seed{
+      .ends = { { .trans = TransId{ t }, .leg = 1, .end = 1, .face = 3 } }
+    };
+    lay(name, one_row(p), l, {}, &seed);
+  }
+
+  // The x of each vertical segment of route `t` whose run overlaps `box`'s height.
+  std::vector<int32_t> uprights_beside(Laid const &l, uint32_t t, scav_rect const &box) {
+    std::vector<int32_t> xs;
+    scav_span const route{ l.r.route[t] };
+    for (uint32_t k = 0; (k + 1) < route.len; ++k) {
+      scav_point const a{ l.r.points[route.off + k] };
+      scav_point const b{ l.r.points[route.off + k + 1] };
+      if ((a.x == b.x) && (a.y != b.y) && (imin(a.y, b.y) < (box.y + box.h)) &&
+          (imax(a.y, b.y) > box.y)) {
+        xs.push_back(a.x);
+      }
+    }
+    return xs;
+  }
+
+  }  // namespace
+
+  TEST_CASE("gauntlet: pinned so its own legs must cross, a route crosses itself") {
+    // `A` fills `Outer`'s top right corner: its leg down to the bottom walls the right
+    // face off from `Inner`, so the way back in on the right crosses it, and Tier 0 counts
+    // that.
+    Laid l;
+    uint32_t t{ INVALID };
+    lay_pinned("bypass.scav",
+               "A",
+               "B",
+               { .ends = { { .leg = 0, .end = 1, .face = 3 },
+                           { .leg = 2, .end = 0, .face = 1 },
+                           { .leg = 3, .end = 0, .face = 1 } },
+                 .orients = { { .frame = SubmachineId{ 2 } } } },
+               l,
+               t);
+    CHECK(knots_of(l, t) == 1);
+    CHECK(cost_columns(l.c, l.g, one_row(readable())).self_crossing == 1);
+  }
+
+  TEST_CASE(
+      "gauntlet: pinned out the bottom and back in on the left, a route rounds its leg") {
+    // `headed`'s way back in to `Busy` goes round `Idle` rather than across the leg from
+    // `Idle` down to `Box`'s bottom.
+    Laid l;
+    uint32_t t{ INVALID };
+    lay_pinned("headed.scav",
+               "Idle",
+               "Work",
+               { .ends = { { .leg = 0, .end = 1, .face = 3 },
+                           { .leg = 2, .end = 0, .face = 0 } } },
+               l,
+               t);
+    CHECK(knots_of(l, t) == 0);
+    CHECK(l.r.failed[t] == 0);
+
+    TEST_CASE(
+        "gauntlet: a route out of a composite's port runs along its border a pad off it") {
+      // `leave` turns down past Box's right border into Below's bottom face: its runs
+      // beside that border are a pad off it, and no route is nearer a border it runs
+      // along.
+      for (scav_profile const &p : { readable(), compact() }) {
+        CAPTURE(p.profile_id);
+        Laid l;
+        uint32_t t{ INVALID };
+        lay_bottom_arrival("outside.scav", "Inside", "Below", p, l, t);
+        scav_rect const box{ l.z.state[state_named(l.c, "Box")] };
+        uint32_t beside{ 0 };
+        for (int32_t const x : uprights_beside(l, t, box)) {
+          if (x <= (box.x + box.w)) { continue; }
+          ++beside;
+          CHECK((x - (box.x + box.w)) >= p.pad);
+        }
+        CHECK(beside >= 1U);
+        CHECK(near_borders(l, p) == 0U);
+      }
+    }
+
+    TEST_CASE("gauntlet: a route inside a composite runs along its border a pad off it") {
+      // `enter` turns down inside Box's left border to Top's bottom face: its run beside
+      // that border is a pad inside it, and no route is nearer a border it runs along.
+      for (scav_profile const &p : { readable(), compact() }) {
+        CAPTURE(p.profile_id);
+        Laid l;
+        uint32_t t{ INVALID };
+        lay_bottom_arrival("inside.scav", "Outside", "Top", p, l, t);
+        scav_rect const box{ l.z.state[state_named(l.c, "Box")] };
+        scav_rect const top{ l.z.state[state_named(l.c, "Top")] };
+        uint32_t beside{ 0 };
+        for (int32_t const x : uprights_beside(l, t, box)) {
+          if ((x <= box.x) || (x >= top.x)) { continue; }
+          ++beside;
+          CHECK((x - box.x) >= p.pad);
+        }
+        CHECK(beside >= 1U);
+        CHECK(near_borders(l, p) == 0U);
+      }
+    }
+
+    TEST_CASE(
+        "gauntlet: a route between two nested composites' borders keeps a pad from each") {
+      // `enter` runs down between Box's left border and Inner's to Inner's bottom face, a
+      // pad off each, and no route is nearer a border it runs along.
+      for (scav_profile const &p : { readable(), compact() }) {
+        CAPTURE(p.profile_id);
+        Laid l;
+        uint32_t t{ INVALID };
+        lay_bottom_arrival("between.scav", "Outside", "Inner", p, l, t);
+        uint32_t const nested{ state_named(l.c, "Inner") };
+        REQUIRE(l.c.states[nested].submachines.len == 1);
+        scav_rect const box{ l.z.state[state_named(l.c, "Box")] };
+        scav_rect const inner{ l.z.state[nested] };
+        uint32_t beside{ 0 };
+        for (int32_t const x : uprights_beside(l, t, inner)) {
+          if ((x <= box.x) || (x >= inner.x)) { continue; }
+          ++beside;
+          CHECK((x - box.x) >= p.pad);
+          CHECK((inner.x - x) >= p.pad);
+        }
+        CHECK(beside >= 1U);
+        CHECK(near_borders(l, p) == 0U);
+      }
+    }

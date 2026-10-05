@@ -397,7 +397,9 @@ TEST_CASE("route: a route entering a composite leaves its border square, never a
   z.node[0] = { .x = 16, .y = 50 };
 
   OrthogonalRouter const ortho;
-  Routes const r{ route_transitions(c, g, o, z, {}, profile(), ortho) };
+  scav_profile ring{ profile() };
+  ring.pad = 16;  // the fixture's ring
+  Routes const r{ route_transitions(c, g, o, z, {}, ring, ortho) };
   REQUIRE(r.failed[0] == 0);
   scav_span const route{ r.route[0] };
   REQUIRE(route.len >= 2);
@@ -408,7 +410,7 @@ TEST_CASE("route: a route entering a composite leaves its border square, never a
     CAPTURE(k);
     scav_point const a{ r.points[route.off + k] };
     scav_point const b{ r.points[route.off + k + 1] };
-    CHECK_FALSE(along_border(a, b, z.state[comp.v]));
+    CHECK_FALSE(along_border(a, b, z.state[comp.v], border_band(ring) - 1));
     // The leg out of the slot is square to the border it crosses.
     if (same(a, slot)) { CHECK(a.y == b.y); }
   }
@@ -824,7 +826,9 @@ TEST_CASE("route: a transition to an enclosing state ends on that state's inner 
   std::vector<Router const *> const routers{ &STRAIGHT, &orthogonal };
   for (Router const *router : routers) {
     CAPTURE(router->name().bytes);
-    Routes const r{ route_transitions(c, g, o, z, {}, profile(), *router) };
+    scav_profile ring{ profile() };
+    ring.pad = 10;  // the fixture's ring
+    Routes const r{ route_transitions(c, g, o, z, {}, ring, *router) };
     REQUIRE(r.route[0].len >= 2);
     // The head lies in the source's box: the straight router uses its centre and the
     // orthogonal router moves it onto the border.
@@ -1168,17 +1172,19 @@ TEST_CASE("route: a nudge inside a composite is bounded by that state's own box"
   z.chart = { .x = -200, .y = -200, .w = 640, .h = 640 };
 
   LaneRouter const asks{ 16 };
+  scav_profile ring{ profile() };
+  ring.pad = 2;
   // A box with room to spare: the members spread as in the root frame.
   z.state[comp.v] = { .x = -40, .y = -40, .w = 320, .h = 320 };
-  Routes const wide{ route_transitions(c, g, o, z, {}, profile(), asks) };
+  Routes const wide{ route_transitions(c, g, o, z, {}, ring, asks) };
   CHECK(wide.points[wide.route[0].off + 1].y == 56);
   CHECK(wide.points[wide.route[1].off + 1].y == 184);
 
-  // An 8-unit box centred on the lane: the members stop one unit inside each border.
+  // An 8-unit box centred on the lane: the members stop `border_band` inside each border.
   z.state[comp.v] = { .x = -40, .y = 96, .w = 320, .h = 8 };
-  Routes const tight{ route_transitions(c, g, o, z, {}, profile(), asks) };
-  CHECK(tight.points[tight.route[0].off + 1].y == 97);
-  CHECK(tight.points[tight.route[1].off + 1].y == 103);
+  Routes const tight{ route_transitions(c, g, o, z, {}, ring, asks) };
+  CHECK(tight.points[tight.route[0].off + 1].y == 98);
+  CHECK(tight.points[tight.route[1].off + 1].y == 102);
 }
 
 TEST_CASE("route: nets join only where one ends exactly where the next begins") {

@@ -553,7 +553,7 @@ TEST_CASE(
   scav_rect const &rl{ z.state[latched.v] };
   REQUIRE(rt.y > rc.y + rc.h);  // one column
   REQUIRE(rl.y > rt.y + rt.h);  // stacked under it
-  int32_t const room{ route_clearance(p) + label_leader(p) + LABEL_W + (p.node_sep / 2) };
+  int32_t const room{ box_clearance(p) + label_leader(p) + LABEL_W + (p.node_sep / 2) };
   CHECK(imin(rc.x, rt.x) - (rs.x + rs.w) >= room);
   // The labelled edge inside the column has its label's room on the leg's trailing side.
   int32_t const lo{ imax(rc.x, rt.x) };
@@ -993,9 +993,9 @@ TEST_CASE("size: a layer of boundary nodes keeps a route's clearance, not a rank
       z,
       diags));
   CHECK(z.node[0].x == 0);
-  CHECK(z.state[a.v].x == route_clearance(p));
+  CHECK(z.state[a.v].x == box_clearance(p));
   CHECK(z.state[b.v].x == (z.state[a.v].x + z.state[a.v].w + p.rank_sep));
-  CHECK(z.sub[root.v].w == (z.state[b.v].x + z.state[b.v].w + route_clearance(p)));
+  CHECK(z.sub[root.v].w == (z.state[b.v].x + z.state[b.v].w + box_clearance(p)));
   CHECK(z.node[3].x == z.sub[root.v].w);
 }
 
@@ -1081,7 +1081,7 @@ TEST_CASE(
     CHECK(dot.y + (dot.h / 2) == at.y + (at.h / 2));
     CHECK(at.x - (dot.x + dot.w) == p.rank_sep);
     int32_t const column{ imin(at.x, z.state[w.v].x) };
-    CHECK(column == ((wide != 0) ? route_clearance(p) : (dot.w + p.rank_sep)));
+    CHECK(column == ((wide != 0) ? box_clearance(p) : (dot.w + p.rank_sep)));
   }
 }
 

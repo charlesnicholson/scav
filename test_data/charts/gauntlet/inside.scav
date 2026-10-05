@@ -1,0 +1,9 @@
+// A route into a composite through a port on its left border, held to `Top`'s bottom
+// face: it turns once inside the border and runs down it a pad off it.
+chart inside "a route inside a composite runs along its border a pad off it" {
+  state Outside,
+  state Box { state Top, state Low, state Under, trans Top -> Low, trans Top -> Under },
+
+  trans * -> Outside,
+  trans Outside -> Box/Top "enter",
+}
