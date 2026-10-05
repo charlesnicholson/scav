@@ -1676,7 +1676,8 @@ TEST_CASE("gauntlet: with every state headed, no route enters a band" *
           doctest::test_suite("full")) {
   for (char const *name : GAUNTLET) {
     for (scav_profile const &p : { readable(), compact() }) {
-      CAPTURE(name);
+      std::string const chart{ name };
+      CAPTURE(chart);
       CAPTURE(p.profile_id);
       Chart const probe{ loaded(name) };
       std::vector<scav_box_space> rows(probe.states.size());
@@ -2567,11 +2568,31 @@ struct OutAndBack {
 };
 
 constexpr std::array OUT_AND_BACK{
-  OutAndBack{ "reentry.scav", "Outer", "Outer", "Other", TransKind::Internal },
-  OutAndBack{ "rebound.scav", "Outer", "Other", "Outer", TransKind::Default },
-  OutAndBack{ "detour.scav", "Outer", "A", "B", TransKind::Default },
-  OutAndBack{ "bypass.scav", "Outer", "A", "B", TransKind::Default },
-  OutAndBack{ "headed.scav", "Box", "Idle", "Work", TransKind::Default },
+  OutAndBack{ .chart = "reentry.scav",
+              .state = "Outer",
+              .src = "Outer",
+              .dst = "Other",
+              .inside = TransKind::Internal },
+  OutAndBack{ .chart = "rebound.scav",
+              .state = "Outer",
+              .src = "Other",
+              .dst = "Outer",
+              .inside = TransKind::Default },
+  OutAndBack{ .chart = "detour.scav",
+              .state = "Outer",
+              .src = "A",
+              .dst = "B",
+              .inside = TransKind::Default },
+  OutAndBack{ .chart = "bypass.scav",
+              .state = "Outer",
+              .src = "A",
+              .dst = "B",
+              .inside = TransKind::Default },
+  OutAndBack{ .chart = "headed.scav",
+              .state = "Box",
+              .src = "Idle",
+              .dst = "Work",
+              .inside = TransKind::Default },
 };
 
 // `name`'s space requests: a two-line header on every normal state.
