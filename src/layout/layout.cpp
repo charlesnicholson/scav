@@ -1311,7 +1311,7 @@ Improved run_search(Chart const &c,
               .kind = MoveKind::Fold });
       }
     }
-    // Loop moves: each state with a loop room to each other placement.
+    // Loop moves: each state with a loop room to each other placement on an anchored face.
     std::vector<uint8_t> const &drawn_place{ out.best.sized.loop_place };
     std::vector<scav_rect> const &drawn_loop{ out.best.sized.loop };
     for (uint32_t st = 0; (st < drawn_loop.size()) && (loop_scored < budget); ++st) {
@@ -1320,7 +1320,7 @@ Improved run_search(Chart const &c,
         continue;
       }
       for (uint32_t k = 0; (k < 8) && (loop_scored < budget); ++k) {
-        if (k == drawn_place[st]) { continue; }
+        if ((k == drawn_place[st]) || !loop_anchored(s, st, k / 2)) { continue; }
         ++loop_scored;
         vec_push_back(round,
                       { .loop = { .state = StateId{ st }, .face = k / 2, .end = k % 2 },

@@ -31,6 +31,7 @@ typedef struct {
   int32_t h_after;  /* ... after */
   int32_t w_before; /* width reserved before it, between the two height bands */
   int32_t w_after;  /* ... after */
+  uint32_t ruled;   /* bit k set: the k-th band above has a drawn inner edge */
 } scav_box_space;
 
 /* The least straight run a route keeps at each end, for arrowheads and terminal glyphs. */

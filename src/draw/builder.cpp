@@ -144,9 +144,20 @@ bool measure_chart(Chart const &c, Metrics const &m, scav_profile const &p, Spac
         !measure(c.states[i].label, about)) {
       return false;
     }
+    bool composite{ false };
+    Span const subs{ c.states[i].submachines };
+    for (uint32_t k = 0; k < subs.len; ++k) {
+      composite =
+          composite || (c.submachines[c.submachine_ids[subs.off + k].v].live != 0U);
+    }
+    Header const header{ header_of(title.h, about.h, pad) };
+    // Bit 0 where the drawn rule lies on the band's inner edge.
+    bool const ruled{ !inscribed && ((c.states[i].label.len != 0U) || composite) &&
+                      (header.rule == header.h) };
     scav_box_space const box{ .min_w = grow * (imax(title.w, about.w) + (2 * pad)),
-                              .h_before = grow * header_of(title.h, about.h, pad).h,
-                              .h_after = 0 };
+                              .h_before = grow * header.h,
+                              .h_after = 0,
+                              .ruled = ruled ? 1U : 0U };
     if (!fits(box.min_w) || !fits(box.h_before)) { return false; }
     out.box_state[i] = box;
   }

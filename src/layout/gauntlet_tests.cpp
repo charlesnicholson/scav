@@ -1744,11 +1744,13 @@ TEST_CASE("gauntlet: an internal loop stays inside its state, under its header")
 
 TEST_CASE(
     "gauntlet: a pinned loop room lands its legs on its face's border or band edge") {
-  // `room` with each of the eight placements pinned, unbanded and with all four bands.
+  // `room` with each of the eight placements pinned: unbanded, with all four bands, and
+  // with all four bands ruled; a band's edge with no rule counts in Tier 0.
   for (scav_profile const &p : { readable(), compact() }) {
     CAPTURE(p.profile_id);
-    for (bool const banded : { false, true }) {
-      CAPTURE(banded);
+    for (uint32_t const mode : { 0U, 1U, 2U }) {
+      CAPTURE(mode);
+      bool const banded{ mode != 0 };
       Chart const probe{ loaded("room.scav") };
       uint32_t const idle{ state_named(probe, "Idle") };
       REQUIRE(idle != INVALID);
@@ -1758,6 +1760,7 @@ TEST_CASE(
         rows[idle].w_after = 2 * p.font_size_grid;
         rows[idle].h_before = 2 * p.font_size_grid;
         rows[idle].h_after = 2 * p.font_size_grid;
+        rows[idle].ruled = (mode == 2) ? 0xFU : 0U;
       }
       std::vector<scav_path_box> const boxes{
         label_boxes(probe, 3 * p.font_size_grid, p.font_size_grid)
@@ -1782,16 +1785,16 @@ TEST_CASE(
           if (inner_loop(l.c, t)) { loop_lands(l, t); }
         }
         CHECK_FALSE(any_band_entered(l));
-        CHECK(cost_of(cost_terms(l.c, l.g, l.z, l.r, s, one_row(p)), one_row(p))
-                  .t0_violations == 0);
+        CostTerms const t{ cost_terms(l.c, l.g, l.z, l.r, s, one_row(p)) };
+        CHECK(t.loop_unanchored == ((mode == 1) ? 1 : 0));
+        CHECK(cost_of(t, one_row(p)).t0_violations == t.loop_unanchored);
       }
     }
   }
 }
 
-TEST_CASE(
-    "gauntlet: a loop pinned to a headed state's top face leaves the header's edge") {
-  // A top band and the top-face placement: the legs end on the band's bottom edge.
+TEST_CASE("gauntlet: a loop pinned to a ruled top band's face leaves the rule") {
+  // A ruled top band and the top-face placement: the legs end on the band's bottom edge.
   for (scav_profile const &p : { readable(), compact() }) {
     CAPTURE(p.profile_id);
     Chart const probe{ loaded("room.scav") };
@@ -1799,6 +1802,7 @@ TEST_CASE(
     REQUIRE(idle != INVALID);
     std::vector<scav_box_space> rows(probe.states.size());
     rows[idle].h_before = 2 * p.font_size_grid;
+    rows[idle].ruled = 1;
     std::vector<scav_path_box> const boxes{
       label_boxes(probe, 3 * p.font_size_grid, p.font_size_grid)
     };
@@ -1825,6 +1829,116 @@ TEST_CASE(
     CHECK(
         cost_of(cost_terms(l.c, l.g, l.z, l.r, s, one_row(p)), one_row(p)).t0_violations ==
         0);
+  }
+}
+
+namespace {
+
+// `room`'s spaces: Idle's row `idle_box`, a three-em label per loop.
+struct RoomSpaces {
+  std::vector<scav_box_space> rows;
+  std::vector<scav_path_box> boxes;
+  scav_spaces s{};
+};
+
+uint32_t room_spaces(scav_profile const &p,
+                     scav_box_space const &idle_box,
+                     RoomSpaces &out) {
+  Chart const probe{ loaded("room.scav") };
+  uint32_t const idle{ state_named(probe, "Idle") };
+  REQUIRE(idle != INVALID);
+  out.rows.assign(probe.states.size(), scav_box_space{});
+  out.rows[idle] = idle_box;
+  out.boxes = label_boxes(probe, 3 * p.font_size_grid, p.font_size_grid);
+  out.s = spaces_of(out.rows);
+  out.s.path_box = out.boxes.data();
+  out.s.n_path_box = static_cast<uint32_t>(out.boxes.size());
+  out.s.path_box_stride = static_cast<uint32_t>(sizeof(scav_path_box));
+  return idle;
+}
+
+}  // namespace
+
+TEST_CASE("gauntlet: a loop never takes the face of a band with no rule") {
+  // A name band with no rule: neither the unpinned placement nor a search takes the top
+  // face, and a search under a wide unruled band turns its loops to the bottom face.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    RoomSpaces sp;
+    uint32_t const idle{ room_spaces(p, { .h_before = 2 * p.font_size_grid }, sp) };
+    for (scav_profile const &run : { one_row(p), p }) {
+      Laid l;
+      lay("room.scav", run, l, sp.s, nullptr);
+      CHECK(loop_place(l.z, idle).face != 2);
+      CHECK(cost_terms(l.c, l.g, l.z, l.r, sp.s, run).loop_unanchored == 0);
+    }
+  }
+  scav_profile const p{ readable() };
+  Chart const probe{ loaded("rooms.scav") };
+  uint32_t const busy{ state_named(probe, "Busy") };
+  REQUIRE(busy != INVALID);
+  std::vector<scav_box_space> rows(probe.states.size());
+  rows[busy].h_before = 2 * p.font_size_grid;
+  rows[busy].min_w = 100 * p.font_size_grid;
+  std::vector<scav_path_box> const boxes{
+    label_boxes(probe, 2 * p.font_size_grid, p.font_size_grid)
+  };
+  scav_spaces s{ spaces_of(rows) };
+  s.path_box = boxes.data();
+  s.n_path_box = static_cast<uint32_t>(boxes.size());
+  s.path_box_stride = static_cast<uint32_t>(sizeof(scav_path_box));
+  Laid searched;
+  lay("rooms.scav", p, searched, s, nullptr);
+  CHECK(loop_place(searched.z, busy).face == 3);
+  CHECK_FALSE(std::ranges::any_of(searched.pins.loops, [&](LoopPin const &pin) {
+    return (pin.state.v == busy) && (pin.face == 2);
+  }));
+  CHECK(cost_of(cost_terms(searched.c, searched.g, searched.z, searched.r, s, p), p)
+            .t0_violations == 0);
+}
+
+TEST_CASE("gauntlet: a loop pinned to the face of a band with no rule counts in Tier 0") {
+  // The pin holds: the legs end on the band's edge, and the loop counts once.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    RoomSpaces sp;
+    uint32_t const idle{ room_spaces(p, { .h_before = 2 * p.font_size_grid }, sp) };
+    SearchPins const seed{ .loops = {
+                               { .state = StateId{ idle }, .face = 2, .end = 1 } } };
+    Laid l;
+    lay("room.scav", one_row(p), l, sp.s, &seed);
+    REQUIRE(l.z.loop_place.size() > idle);
+    CHECK(l.z.loop_place[idle] == 5);
+    uint32_t const poll{ from_named(l.c, idle) };
+    REQUIRE(poll != INVALID);
+    loop_lands(l, poll);
+    CostTerms const t{ cost_terms(l.c, l.g, l.z, l.r, sp.s, one_row(p)) };
+    CHECK(t.loop_unanchored == 1);
+    CHECK(cost_of(t, one_row(p)).t0_violations == 1);
+  }
+}
+
+TEST_CASE(
+    "gauntlet: a loop with every face banded and none ruled takes the default face") {
+  // No face is eligible: the unpinned placement and a search both lay out, on the right
+  // face, and Tier 0 counts the loop.
+  for (scav_profile const &p : { readable(), compact() }) {
+    CAPTURE(p.profile_id);
+    int32_t const band{ 2 * p.font_size_grid };
+    RoomSpaces sp;
+    uint32_t const idle{ room_spaces(
+        p,
+        { .h_before = band, .h_after = band, .w_before = band, .w_after = band },
+        sp) };
+    for (scav_profile const &run : { one_row(p), p }) {
+      Laid l;
+      lay("room.scav", run, l, sp.s, nullptr);
+      CHECK(loop_place(l.z, idle).face == 1);
+      uint32_t const poll{ from_named(l.c, idle) };
+      REQUIRE(poll != INVALID);
+      loop_lands(l, poll);
+      CHECK(cost_terms(l.c, l.g, l.z, l.r, sp.s, run).loop_unanchored == 1);
+    }
   }
 }
 

@@ -1098,9 +1098,19 @@
               },
               "offset": 16,
               "size": 4
+            },
+            {
+              "name": "ruled",
+              "type": {
+                "name": "uint32_t",
+                "pointer": 0,
+                "const": false
+              },
+              "offset": 20,
+              "size": 4
             }
           ],
-          "size": 20,
+          "size": 24,
           "align": 4,
           "padding": 0
         },

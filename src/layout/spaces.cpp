@@ -45,7 +45,7 @@ void check_boxes(std::vector<Diagnostic> &out,
   for (uint32_t i = 0; i < count; ++i) {
     if (!in_domain(rows[i].min_w) || !in_domain(rows[i].h_before) ||
         !in_domain(rows[i].h_after) || !in_domain(rows[i].w_before) ||
-        !in_domain(rows[i].w_after)) {
+        !in_domain(rows[i].w_after) || (rows[i].ruled > 0xFU)) {
       report(out, DiagCode::SpaceOutOfRange, kind, i);
     }
   }
@@ -138,7 +138,7 @@ uint32_t spaces_digest(scav_spaces const &s) {
   // Hashes each table field by field, prefixed with its row count.
   std::vector<scav_byte> bytes;
   vec_reserve(bytes,
-              16 + (20ULL * (s.n_box_state + s.n_box_sub)) + (8ULL * s.n_path_clear) +
+              16 + (24ULL * (s.n_box_state + s.n_box_sub)) + (8ULL * s.n_path_clear) +
                   (16ULL * s.n_path_box));
   append_u32(bytes, s.n_box_state);
   for (uint32_t i = 0; i < s.n_box_state; ++i) {
@@ -147,6 +147,7 @@ uint32_t spaces_digest(scav_spaces const &s) {
     append_i32(bytes, s.box_state[i].h_after);
     append_i32(bytes, s.box_state[i].w_before);
     append_i32(bytes, s.box_state[i].w_after);
+    append_u32(bytes, s.box_state[i].ruled);
   }
   append_u32(bytes, s.n_box_sub);
   for (uint32_t i = 0; i < s.n_box_sub; ++i) {
@@ -155,6 +156,7 @@ uint32_t spaces_digest(scav_spaces const &s) {
     append_i32(bytes, s.box_sub[i].h_after);
     append_i32(bytes, s.box_sub[i].w_before);
     append_i32(bytes, s.box_sub[i].w_after);
+    append_u32(bytes, s.box_sub[i].ruled);
   }
   append_u32(bytes, s.n_path_clear);
   for (uint32_t i = 0; i < s.n_path_clear; ++i) {

@@ -114,6 +114,10 @@ TEST_CASE("spaces: a field outside the quarter-domain names its requester") {
          .poke = [](Tables &t) { t.box_sub[0].h_after = -5; },
          .kind = ElemKind::Submachine,
          .ordinal = 0 },
+    Bad{ .what = "state ruled past the fourth band",
+         .poke = [](Tables &t) { t.box_state[0].ruled = 0x10U; },
+         .kind = ElemKind::State,
+         .ordinal = 0 },
     Bad{ .what = "path clear src",
          .poke = [](Tables &t) { t.path_clear[0].src = SPACE_MAX + 1; },
          .kind = ElemKind::Transition,
@@ -200,6 +204,9 @@ TEST_CASE("spaces: the digest hears every field and both zero shapes differ") {
 
   Tables poked{ t };
   poked.box_state[1].h_after = 1;
+  CHECK(spaces_digest(as_spaces(poked)) != base);
+  poked = t;
+  poked.box_state[1].ruled = 1;
   CHECK(spaces_digest(as_spaces(poked)) != base);
   poked = t;
   poked.path_box[0].order = 1;

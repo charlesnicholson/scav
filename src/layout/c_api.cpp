@@ -13,7 +13,7 @@
 #include <cstring>
 #include <vector>
 
-static_assert(sizeof(scav_box_space) == 20);
+static_assert(sizeof(scav_box_space) == 24);
 static_assert(sizeof(scav_path_clear) == 8);
 static_assert(sizeof(scav_path_box) == 16);
 static_assert(sizeof(scav_profile) == 49 * sizeof(int32_t));

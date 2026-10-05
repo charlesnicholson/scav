@@ -238,6 +238,8 @@ struct CostTerms {
   // Placed boxes whose Chebyshev gap to their own transition's route exceeds
   // `label_leader`.
   int32_t label_far{ 0 };
+  // Inner loops with an end on neither their state's border nor a ruled band's inner edge.
+  int32_t loop_unanchored{ 0 };
 };
 
 // Compared lexicographically, in this order.

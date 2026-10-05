@@ -2491,6 +2491,36 @@ CostTerms terms(Chart const &c,
       }
     }
   }
+  for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {
+    scav_span const route{ r.route[tr] };
+    if (!inner_loop(c, tr) || (route.len < 2)) { continue; }
+    uint32_t const st{ c.transitions[tr].dst.v };
+    scav_rect const box{ z.state[st] };
+    uint32_t const ruled{ (st < s.n_box_state) ? s.box_state[st].ruled : 0U };
+    auto const drawn = [&](scav_point at) {
+      bool const border{ (((at.x == box.x) || (at.x == box.x + box.w)) &&
+                          (at.y >= box.y) && (at.y <= box.y + box.h)) ||
+                         (((at.y == box.y) || (at.y == box.y + box.h)) &&
+                          (at.x >= box.x) && (at.x <= box.x + box.w)) };
+      auto const row = [st](std::vector<scav_rect> const &v) {
+        return (st < v.size()) ? v[st] : scav_rect{};
+      };
+      scav_rect const b{ row(z.before) };
+      scav_rect const a{ row(z.after) };
+      scav_rect const l{ row(z.lead) };
+      scav_rect const w{ row(z.trail) };
+      bool const across_x{ (at.x >= b.x) && (at.x <= b.x + b.w) };
+      bool const across_y{ (at.y >= l.y) && (at.y <= l.y + l.h) };
+      return border ||
+             (((ruled & 1U) != 0) && (b.h > 0) && across_x && (at.y == b.y + b.h)) ||
+             (((ruled & 2U) != 0) && (a.h > 0) && across_x && (at.y == a.y)) ||
+             (((ruled & 4U) != 0) && (l.w > 0) && across_y && (at.x == l.x + l.w)) ||
+             (((ruled & 8U) != 0) && (w.w > 0) && across_y && (at.x == w.x));
+    };
+    if (!drawn(r.points[route.off]) || !drawn(r.points[route.off + route.len - 1])) {
+      ++t.loop_unanchored;
+    }
+  }
   return t;
 }
 
@@ -2522,6 +2552,7 @@ std::string first_difference(CostTerms const &got, CostTerms const &want) {
   if (got.retrace != want.retrace) { return "retrace"; }
   if (got.label_over_box != want.label_over_box) { return "label_over_box"; }
   if (got.label_over_route != want.label_over_route) { return "label_over_route"; }
+  if (got.loop_unanchored != want.loop_unanchored) { return "loop_unanchored"; }
   return {};
 }
 

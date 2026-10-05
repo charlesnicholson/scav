@@ -2199,8 +2199,7 @@ bool size_pass(Chart const &c,
   vec_assign(out.loop_place, c.states.size(), 0);
   for (uint32_t i = 0; i < c.states.size(); ++i) {
     uint8_t const pinned{ (i < o.state_loop.size()) ? o.state_loop[i] : uint8_t{ 0 } };
-    scav_box_space const b{ box_of(s.box_state, s.n_box_state, i) };
-    LoopPlace const d{ loop_place_default(b.w_before, b.w_after) };
+    LoopPlace const d{ loop_place_default(s, i) };
     out.loop_place[i] =
         static_cast<uint8_t>((pinned != 0) ? (pinned - 1U) : ((d.face * 2) + d.end));
   }
@@ -2401,16 +2400,51 @@ std::array<scav_rect, 5> state_walls(SizedLayout const &z, uint32_t st) {
   return { top, bottom, sealed(row(z.lead)), sealed(row(z.trail)), room };
 }
 
-LoopPlace loop_place_default(int32_t w_before, int32_t w_after) {
-  return { .face = ((w_after > 0) && (w_before == 0)) ? 0U : 1U, .end = 1 };
+namespace {
+
+// Bands in face order (left, right, top, bottom) and `ruled`'s bit for each.
+constexpr std::array<uint32_t, 4> RULED_BIT{ 4U, 8U, 1U, 2U };
+
+bool anchored(std::array<int32_t, 4> const &band, uint32_t ruled, uint32_t face) {
+  return (face < 4) && ((band[face] == 0) || ((ruled & RULED_BIT[face]) != 0));
+}
+
+// The trailing end of the first anchored face of right, left, bottom, top; the right face
+// where none is.
+LoopPlace first_anchored(std::array<int32_t, 4> const &band, uint32_t ruled) {
+  for (uint32_t const face : { 1U, 0U, 3U, 2U }) {
+    if (anchored(band, ruled, face)) { return { .face = face, .end = 1 }; }
+  }
+  return {};
+}
+
+std::array<int32_t, 4> bands_of(scav_box_space const &b) {
+  return { b.w_before, b.w_after, b.h_before, b.h_after };
+}
+
+}  // namespace
+
+LoopPlace loop_place_default(scav_spaces const &s, uint32_t state) {
+  scav_box_space const b{ box_of(s.box_state, s.n_box_state, state) };
+  return first_anchored(bands_of(b), b.ruled);
+}
+
+bool loop_anchored(scav_spaces const &s, uint32_t state, uint32_t face) {
+  scav_box_space const b{ box_of(s.box_state, s.n_box_state, state) };
+  return anchored(bands_of(b), b.ruled, face);
 }
 
 LoopPlace loop_place(SizedLayout const &z, uint32_t st) {
   if (st < z.loop_place.size()) {
     return { .face = z.loop_place[st] / 2U, .end = z.loop_place[st] % 2U };
   }
-  return loop_place_default((st < z.lead.size()) ? z.lead[st].w : 0,
-                            (st < z.trail.size()) ? z.trail[st].w : 0);
+  auto const w = [st](std::vector<scav_rect> const &v) {
+    return (st < v.size()) ? v[st].w : 0;
+  };
+  auto const h = [st](std::vector<scav_rect> const &v) {
+    return (st < v.size()) ? v[st].h : 0;
+  };
+  return first_anchored({ w(z.lead), w(z.trail), h(z.before), h(z.after) }, 0);
 }
 
 int32_t loop_boundary(SizedLayout const &z, uint32_t st, uint32_t face) {
@@ -2440,8 +2474,7 @@ int32_t loop_boundary(SizedLayout const &z, uint32_t st, uint32_t face) {
 
 bool face_lined(scav_spaces const &s, uint32_t state, uint32_t face) {
   scav_box_space const b{ box_of(s.box_state, s.n_box_state, state) };
-  std::array<int32_t, 4> const band{ b.w_before, b.w_after, b.h_before, b.h_after };
-  return (face < 4) && (band[face] > 0);
+  return (face < 4) && (bands_of(b)[face] > 0);
 }
 
 int32_t loop_reach(scav_profile const &p) { return imax(p.pad, 1); }

@@ -67,9 +67,12 @@ struct LoopPlace {
 };
 // `z.loop_place[st]`, or the unpinned placement where `z` has no entry.
 LoopPlace loop_place(SizedLayout const &z, uint32_t st);
-// The unpinned placement: the trailing end of the right face, or of the left face where a
-// band lines only the right side.
-LoopPlace loop_place_default(int32_t w_before, int32_t w_after);
+// The unpinned placement: the trailing end of the first anchored face of right, left,
+// bottom, top; the right face where none is.
+LoopPlace loop_place_default(scav_spaces const &s, uint32_t state);
+// Whether legs leaving by `face` end on a drawn edge: no band lines it, or its band is
+// ruled.
+bool loop_anchored(scav_spaces const &s, uint32_t state, uint32_t face);
 // Where the legs of loops leaving by `face` end: the border, or the band's inner edge.
 int32_t loop_boundary(SizedLayout const &z, uint32_t st, uint32_t face);
 

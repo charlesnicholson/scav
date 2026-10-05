@@ -311,6 +311,45 @@ int64_t crossings_over(std::vector<Piece> const &pieces,
   return total;
 }
 
+bool on_rect(scav_point at, scav_rect const &r) {
+  return (at.x >= r.x) && (at.x <= (r.x + r.w)) && (at.y >= r.y) && (at.y <= (r.y + r.h));
+}
+
+// Whether `at` lies on state `st`'s border or on the inner edge of a band its request
+// rules.
+bool on_drawn_edge(SizedLayout const &z,
+                   scav_spaces const &s,
+                   uint32_t st,
+                   scav_point at) {
+  scav_rect const box{ z.state[st] };
+  if (on_rect(at, box) && ((at.x == box.x) || (at.x == (box.x + box.w)) ||
+                           (at.y == box.y) || (at.y == (box.y + box.h)))) {
+    return true;
+  }
+  uint32_t const ruled{ ((s.box_state != nullptr) && (st < s.n_box_state))
+                            ? s.box_state[st].ruled
+                            : 0U };
+  auto const row = [st](std::vector<scav_rect> const &v) {
+    return (st < v.size()) ? v[st] : scav_rect{};
+  };
+  scav_rect const b{ row(z.before) };
+  scav_rect const a{ row(z.after) };
+  scav_rect const l{ row(z.lead) };
+  scav_rect const t{ row(z.trail) };
+  // Each band's inner edge, in `ruled` bit order.
+  std::array<scav_rect, 4> const edge{ { { .x = b.x, .y = b.y + b.h, .w = b.w, .h = 0 },
+                                         { .x = a.x, .y = a.y, .w = a.w, .h = 0 },
+                                         { .x = l.x + l.w, .y = l.y, .w = 0, .h = l.h },
+                                         { .x = t.x, .y = t.y, .w = 0, .h = t.h } } };
+  std::array<int32_t, 4> const depth{ b.h, a.h, l.w, t.w };
+  for (uint32_t k = 0; k < 4; ++k) {
+    if ((((ruled >> k) & 1U) != 0) && (depth[k] > 0) && on_rect(at, edge[k])) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // Marks both transitions of a charged pair in `party`, where given.
 void blame(std::vector<uint8_t> *party, uint32_t a, uint32_t b) {
   if (party == nullptr) { return; }
@@ -712,7 +751,7 @@ Scratch &scratch() {
 int32_t tier0_of(CostTerms const &t) {
   return t.through_box + t.through_band + t.box_overlap + t.vanished + t.flush +
          t.through_region + t.retrace + t.label_over_box + t.label_over_route +
-         t.label_far;
+         t.label_far + t.loop_unanchored;
 }
 
 }  // namespace
@@ -1154,6 +1193,16 @@ CostTerms cost_terms(CostContext const &ctx,
                                      sc.descent,
                                      &t.through_band,
                                      &t.through_region);
+
+  for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {
+    scav_span const route{ r.route[tr] };
+    if (!inner_loop(c, tr) || (route.len < 2)) { continue; }
+    uint32_t const st{ c.transitions[tr].dst.v };
+    if (!on_drawn_edge(z, s, st, r.points[route.off]) ||
+        !on_drawn_edge(z, s, st, r.points[route.off + route.len - 1])) {
+      ++t.loop_unanchored;
+    }
+  }
 
   // Counts each axial piece that runs along a state's border, found through the grid of
   // states grown by `near`.
