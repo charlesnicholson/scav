@@ -85,6 +85,19 @@ def flush(a, b, box):
     return False
 
 
+def runs_along(a, b, box, near):
+    """The segment runs parallel to one of the box's edges within `near` of it, on either
+    side, over a positive length of that edge."""
+    x, y, w, h = box
+    if a[1] == b[1] and a[0] != b[0]:
+        return (min(abs(a[1] - y), abs(a[1] - (y + h))) <= near and
+                min(a[0], b[0]) < x + w and max(a[0], b[0]) > x)
+    if a[0] == b[0] and a[1] != b[1]:
+        return (min(abs(a[0] - x), abs(a[0] - (x + w))) <= near and
+                min(a[1], b[1]) < y + h and max(a[1], b[1]) > y)
+    return False
+
+
 def gap(a, b):
     """The Chebyshev gap between two rects: zero on an axis they overlap or touch
     on, the larger of the two separations otherwise. Layout's own predicate."""
@@ -212,6 +225,8 @@ def audit(svg, every, chart, doc, verbose):
             notes.append(f"    {kind}: {detail}")
 
     cx, cy, cw, ch = chart
+    # A route keeps `border_band`, one pad, from a state border it runs along.
+    band = doc["geometry"]["profile"]["border_band"]
     live = [i for i, st in enumerate(doc["states"]) if st["live"]]
     rects = doc["geometry"]["state"]
     bands = tuple(doc["geometry"][k] for k in ("state_before", "state_after", "state_lead",
@@ -247,6 +262,10 @@ def audit(svg, every, chart, doc, verbose):
             for box in every:
                 if flush(a, b, box):
                     note("segment flush along a box", f"t{trans} {a}-{b} box {box}")
+            near = [box for box in every if runs_along(a, b, box, band - 1)]
+            if near:
+                note("segment nearer than pad to a border it runs along",
+                     f"t{trans} {a}-{b} box {near[0]}, pad {band}")
 
     merged = {}
     for i, (a, b, t1, ka) in enumerate(legs):
@@ -526,6 +545,7 @@ def main():
              "label not anchored to its own polyline": "placed label boxes",
              "label outside its enclosing state": "transition labels",
              "segment flush along a box": "route segments",
+             "segment nearer than pad to a border it runs along": "route segments",
              "route start not on any border": "route starts",
              "arrowhead not on any border": "arrowheads",
              "an arrowhead over another route's end": "arrowheads",
