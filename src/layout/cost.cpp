@@ -1047,6 +1047,13 @@ CostTerms cost_terms(CostContext const &ctx,
         if (((in % 2) == 1) && (out == (8 - in))) { ++t.retrace; }
       }
     }
+    for (uint32_t i = first[tr]; i < pieces.size(); ++i) {
+      for (uint32_t j = i + 2; j < pieces.size(); ++j) {
+        if (crosses(pieces[i].a, pieces[i].b, pieces[j].a, pieces[j].b)) {
+          ++t.self_crossing;
+        }
+      }
+    }
   }
   first[c.transitions.size()] = static_cast<uint32_t>(pieces.size());
   for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {
@@ -1367,9 +1374,10 @@ CostTerms layout_cost(Chart const &c,
 }
 
 std::array<int32_t, TIER0_TERMS> tier0_terms(CostTerms const &t) {
-  return { t.through_box,    t.through_band,     t.box_overlap, t.vanished,
-           t.flush,          t.through_region,   t.retrace,     t.shared_run,
-           t.label_over_box, t.label_over_route, t.label_far,   t.loop_unanchored };
+  return { t.through_box,    t.through_band,   t.box_overlap,      t.vanished,
+           t.flush,          t.through_region, t.retrace,          t.self_crossing,
+           t.shared_run,     t.label_over_box, t.label_over_route, t.label_far,
+           t.loop_unanchored };
 }
 
 Cost cost_of(CostTerms const &t, scav_profile const &p) {

@@ -693,6 +693,39 @@ TEST_CASE("cost: a route that turns straight back along itself is a Tier-0 viola
   CHECK(cost_terms(c, decompose(c), z, turns, {}, profile()).retrace == 0);
 }
 
+TEST_CASE("cost: a route that crosses itself is a Tier-0 violation") {
+  Chart c;
+  SubmachineId const root{ build_chart(c, "t", {}) };
+  StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
+  StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
+  build_trans(c, a, b, TransKind::Default, {});
+  SizedLayout z{ blank(c) };
+  z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
+  z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 40 };
+
+  // Right, down, left, then up across the first leg.
+  Routes const knot{ routes_of(c,
+                               { { { .x = 100, .y = 20 },
+                                   { .x = 300, .y = 20 },
+                                   { .x = 300, .y = 100 },
+                                   { .x = 200, .y = 100 },
+                                   { .x = 200, .y = -50 },
+                                   { .x = 450, .y = -50 },
+                                   { .x = 450, .y = 0 } } }) };
+  CostTerms const t{ cost_terms(c, decompose(c), z, knot, {}, profile()) };
+  CHECK(t.self_crossing == 1);
+  CHECK(t.retrace == 0);
+  CHECK(cost_of(t, profile()).t0_violations == 1);
+
+  Routes const square{ routes_of(c,
+                                 { { { .x = 100, .y = 20 },
+                                     { .x = 300, .y = 20 },
+                                     { .x = 300, .y = 100 },
+                                     { .x = 450, .y = 100 },
+                                     { .x = 450, .y = 40 } } }) };
+  CHECK(cost_terms(c, decompose(c), z, square, {}, profile()).self_crossing == 0);
+}
+
 TEST_CASE("cost: a route through a region neither end is in is a Tier-0 violation") {
   // `On` holds regions `main` and `aux`; `Ready` in `main` goes to `X` outside.
   // Crossing `aux` is a `through_region` violation; `through_box` skips ancestor `On`.
@@ -2518,6 +2551,16 @@ CostTerms terms(Chart const &c,
         if (((in % 2) == 1) && (out == (8 - in))) { ++t.retrace; }
       }
     }
+    for (uint32_t i = 0; (i + 1) < route.len; ++i) {
+      for (uint32_t j = i + 2; (j + 1) < route.len; ++j) {
+        if (crosses(r.points[route.off + i],
+                    r.points[route.off + i + 1],
+                    r.points[route.off + j],
+                    r.points[route.off + j + 1])) {
+          ++t.self_crossing;
+        }
+      }
+    }
   }
   for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {
     if ((tr < g.trans_segments.size()) && (g.trans_segments[tr].len != 0) &&
@@ -2703,6 +2746,7 @@ std::string first_difference(CostTerms const &got, CostTerms const &want) {
     if (a[i] != b[i]) { return TERM_NAMES[i]; }
   }
   if (got.retrace != want.retrace) { return "retrace"; }
+  if (got.self_crossing != want.self_crossing) { return "self_crossing"; }
   if (got.shared_run != want.shared_run) { return "shared_run"; }
   if (got.label_over_box != want.label_over_box) { return "label_over_box"; }
   if (got.label_over_route != want.label_over_route) { return "label_over_route"; }

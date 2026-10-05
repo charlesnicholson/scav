@@ -2612,7 +2612,8 @@ std::vector<scav_box_space> headers_on(char const *name, scav_profile const &p) 
 TEST_CASE(
     "gauntlet: an external route out of a machine leaves its composite and returns") {
   // Out across the composite's border, outside it, and back in; with the inside kind it
-  // stays in. Headed, no route enters a band. Tier 0 is zero throughout.
+  // stays in. Headed, no route enters a band. Tier 0 is zero throughout and no route
+  // crosses itself.
   for (OutAndBack const &shape : OUT_AND_BACK) {
     for (scav_profile const &p : { readable(), compact() }) {
       std::string const chart{ shape.chart };
@@ -2626,7 +2627,9 @@ TEST_CASE(
       REQUIRE(t != INVALID);
       CHECK(out.c.transitions[t].kind == TransKind::External);
       CHECK(runs_against(out, t, st) == "IOI");
-      CHECK(cost_of(cost_columns(out.c, out.g, p), p).t0_violations == 0);
+      CostTerms const terms{ cost_columns(out.c, out.g, p) };
+      CHECK(cost_of(terms, p).t0_violations == 0);
+      CHECK(terms.self_crossing == 0);
 
       Laid in;
       lay(shape.chart, p, in, {}, nullptr, shape.inside);
@@ -2643,4 +2646,49 @@ TEST_CASE(
                 .t0_violations == 0);
     }
   }
+}
+
+TEST_CASE("gauntlet: unsearched, an external route out of a machine crosses no own leg") {
+  for (OutAndBack const &shape : OUT_AND_BACK) {
+    for (scav_profile const &p : { readable(), compact() }) {
+      std::string const chart{ shape.chart };
+      CAPTURE(chart);
+      CAPTURE(p.profile_id);
+      Laid l;
+      lay(shape.chart, one_row(p), l, {}, nullptr);
+      CHECK(cost_columns(l.c, l.g, one_row(p)).self_crossing == 0);
+    }
+  }
+}
+
+TEST_CASE(
+    "gauntlet: pinned to leave down past its own way back in, a route crosses itself") {
+  // `bypass` unsearched, its exit on `Outer`'s bottom and its way back in on the right,
+  // level with `B` above `A`.
+  Laid probe;
+  lay("bypass.scav", readable(), probe);
+  uint32_t const t{ between(probe.c, "A", "B") };
+  REQUIRE(t != INVALID);
+  SearchPins const seed{
+    .ends = { { .trans = TransId{ t }, .leg = 0, .end = 1, .face = 3 },
+              { .trans = TransId{ t }, .leg = 2, .end = 0, .face = 1 },
+              { .trans = TransId{ t }, .leg = 3, .end = 0, .face = 1 } },
+    .orients = { { .frame = SubmachineId{ 2 } } },
+  };
+  Laid l;
+  lay("bypass.scav", one_row(readable()), l, {}, &seed);
+  scav_span const route{ l.r.route[t] };
+  uint32_t knots{ 0 };
+  for (uint32_t i = 0; (i + 1) < route.len; ++i) {
+    for (uint32_t j = i + 2; (j + 1) < route.len; ++j) {
+      if (crosses(l.r.points[route.off + i],
+                  l.r.points[route.off + i + 1],
+                  l.r.points[route.off + j],
+                  l.r.points[route.off + j + 1])) {
+        ++knots;
+      }
+    }
+  }
+  CHECK(knots == 1);
+  CHECK(cost_columns(l.c, l.g, one_row(readable())).self_crossing == 1);
 }
