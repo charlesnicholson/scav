@@ -495,6 +495,41 @@ TEST_CASE("cost: a run against the trunk is charged and the trunk is not") {
                       { .x = 400, .y = 100 } } }) == 50);
 }
 
+TEST_CASE("cost: two routes on one line with different ends are a Tier-0 shared run") {
+  Chart const c{ edges(2) };
+  SizedLayout const z{ blank(c) };
+  auto const terms = [&c, &z](std::vector<std::vector<scav_point>> const &lines) {
+    return cost_terms(c, decompose(c), z, routes_of(c, lines), {}, profile());
+  };
+  // Different starts and ends, 100 shared along x=200.
+  CostTerms const apart{ terms({ { { .x = 0, .y = 0 },
+                                   { .x = 200, .y = 0 },
+                                   { .x = 200, .y = 300 },
+                                   { .x = 400, .y = 300 } },
+                                 { { .x = 0, .y = 100 },
+                                   { .x = 200, .y = 100 },
+                                   { .x = 200, .y = 200 },
+                                   { .x = 400, .y = 200 } } }) };
+  CHECK(apart.shared_run == 1);
+  CHECK(apart.corridor == 100);
+  CHECK(cost_of(apart, profile()).t0_violations == 1);
+
+  // A fan-in along its final leg.
+  CostTerms const fan_in{ terms(
+      { { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 300 } },
+        { { .x = 100, .y = 100 }, { .x = 200, .y = 100 }, { .x = 200, .y = 300 } } }) };
+  CHECK(fan_in.shared_run == 0);
+  CHECK(fan_in.corridor == 0);
+
+  // A fan-out along its first leg: priced by `corridor`, permitted by Tier 0.
+  CostTerms const fan_out{ terms(
+      { { { .x = 0, .y = 0 }, { .x = 200, .y = 0 }, { .x = 200, .y = 100 } },
+        { { .x = 0, .y = 0 }, { .x = 100, .y = 0 }, { .x = 100, .y = 100 } } }) };
+  CHECK(fan_out.shared_run == 0);
+  CHECK(fan_out.corridor == 100);
+  CHECK(cost_of(fan_out, profile()).t0_violations == 0);
+}
+
 TEST_CASE("cost: a degraded net's diagonal is no one's merge leg") {
   Chart const c{ edges(2) };
   // Only the shared final leg on x=400 is trunk; the 200 shared along y=200 is charged.
@@ -2115,9 +2150,12 @@ struct Trunk {
   bool merged_tail{ false };
 };
 
-Trunk trunk_of(std::vector<scav_point> const &pts, scav_span a, scav_span b) {
+Trunk trunk_of(std::vector<scav_point> const &pts,
+               scav_span a,
+               scav_span b,
+               uint32_t cap = 2) {
   Trunk out;
-  uint32_t const shortest{ imin(imin(a.len, b.len), 2U) };
+  uint32_t const shortest{ imin(imin(a.len, b.len), cap) };
   while ((out.tail < shortest) &&
          same(pts[(a.off + a.len - 1) - out.tail], pts[(b.off + b.len - 1) - out.tail])) {
     ++out.tail;
@@ -2132,6 +2170,45 @@ Trunk trunk_of(std::vector<scav_point> const &pts, scav_span a, scav_span b) {
 
 bool trunk_piece(Trunk const &t, uint32_t len, uint32_t k) {
   return ((k + t.tail) >= len) || (t.merged_tail && ((k + t.tail + 1) == len));
+}
+
+// The span of `pts` reversed into `out`, so a common head reads as a common tail.
+scav_span reversed(std::vector<scav_point> const &pts,
+                   scav_span s,
+                   std::vector<scav_point> &out) {
+  scav_span const at{ .off = static_cast<uint32_t>(out.size()), .len = s.len };
+  for (uint32_t k = s.len; k-- > 0;) { out.push_back(pts[s.off + k]); }
+  return at;
+}
+
+// Whether segments `ku` of `u` and `kv` of `v` both lie in the two routes' common head or
+// common tail, uncapped, with the leg out of or into it where those legs share a run.
+bool fan_pair(Routes const &r, uint32_t u, uint32_t ku, uint32_t v, uint32_t kv) {
+  scav_span const a{ r.route[u] };
+  scav_span const b{ r.route[v] };
+  Trunk const tail{ trunk_of(r.points, a, b, ~0U) };
+  if (trunk_piece(tail, a.len, ku) && trunk_piece(tail, b.len, kv)) { return true; }
+  std::vector<scav_point> back;
+  scav_span const ra{ reversed(r.points, a, back) };
+  scav_span const rb{ reversed(r.points, b, back) };
+  Trunk const head{ trunk_of(back, ra, rb, ~0U) };
+  return trunk_piece(head, a.len, a.len - 2 - ku) &&
+         trunk_piece(head, b.len, b.len - 2 - kv);
+}
+
+// Pairs of different transitions' collinear segments sharing a run outside `fan_pair`.
+int32_t shared_runs(Routes const &r, std::vector<Piece> const &pieces) {
+  int32_t total{ 0 };
+  for (uint32_t i = 0; i < pieces.size(); ++i) {
+    for (uint32_t j = i + 1; j < pieces.size(); ++j) {
+      Piece const &u{ pieces[i] };
+      Piece const &v{ pieces[j] };
+      if (u.trans == v.trans) { continue; }
+      if (shared_run(u.a, u.b, v.a, v.b) <= 0) { continue; }
+      if (!fan_pair(r, u.trans, u.k, v.trans, v.k)) { ++total; }
+    }
+  }
+  return total;
 }
 
 uint32_t direction(scav_point a, scav_point b) {
@@ -2450,6 +2527,7 @@ CostTerms terms(Chart const &c,
   }
   t.crossings = crossings(pieces, crossings_of);
   t.corridor = corridor(r, pieces);
+  t.shared_run = shared_runs(r, pieces);
   t.crowding = crowding(pieces, p.font_size_grid);
 
   for (uint32_t tr = 0; tr < c.transitions.size(); ++tr) {
@@ -2625,6 +2703,7 @@ std::string first_difference(CostTerms const &got, CostTerms const &want) {
     if (a[i] != b[i]) { return TERM_NAMES[i]; }
   }
   if (got.retrace != want.retrace) { return "retrace"; }
+  if (got.shared_run != want.shared_run) { return "shared_run"; }
   if (got.label_over_box != want.label_over_box) { return "label_over_box"; }
   if (got.label_over_route != want.label_over_route) { return "label_over_route"; }
   if (got.loop_unanchored != want.loop_unanchored) { return "loop_unanchored"; }

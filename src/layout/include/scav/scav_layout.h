@@ -266,6 +266,9 @@ struct CostTerms {
   // Route vertices where an axis-aligned segment turns straight back along the one
   // before it.
   int32_t retrace{ 0 };
+  // Pairs of different transitions' collinear segments sharing a run, except a pair both
+  // in the two routes' common head or tail.
+  int32_t shared_run{ 0 };
   // Per placed box, each state rect it overlaps except those enclosing both endpoints.
   int32_t label_over_box{ 0 };
   // Per placed box, each segment of another transition's route it overlaps.
@@ -277,13 +280,13 @@ struct CostTerms {
   int32_t loop_unanchored{ 0 };
 };
 
-inline constexpr uint32_t TIER0_TERMS{ 11 };
+inline constexpr uint32_t TIER0_TERMS{ 12 };
 
 // Tier-0 term names, in `tier0_terms` order.
 inline constexpr std::array<char const *, TIER0_TERMS> TIER0_NAMES{
-  "through_box",    "through_band", "box_overlap",    "vanished",         "flush",
-  "through_region", "retrace",      "label_over_box", "label_over_route", "label_far",
-  "loop_unanchored"
+  "through_box",    "through_band",     "box_overlap", "vanished",
+  "flush",          "through_region",   "retrace",     "shared_run",
+  "label_over_box", "label_over_route", "label_far",   "loop_unanchored"
 };
 
 // The Tier-0 counts in `TIER0_NAMES` order; `cost_of` sums them.

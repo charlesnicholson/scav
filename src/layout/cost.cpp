@@ -110,17 +110,24 @@ uint32_t piece_axis(Piece const &p, int32_t &at) {
   return 2;
 }
 
-// Two routes' shared tail.
+// Two routes' shared tail and head.
 struct Trunk {
   uint32_t tail{ 0 };         // identical final points
   bool merged_tail{ false };  // the legs into those points share a run
+  uint32_t head{ 0 };         // identical first points
+  bool merged_head{ false };  // the legs out of those points share a run
 };
 
-constexpr uint32_t TRUNK_TAIL{ 2 };  // cap on `Trunk::tail`: the final leg
+constexpr uint32_t TRUNK_TAIL{ 2 };  // `corridor`'s cap on `Trunk::tail`: the final leg
 
-Trunk trunk_of(std::vector<scav_point> const &pts, scav_span a, scav_span b) {
+// `a` and `b`'s common tail of at most `cap` points and, where `heads`, their common head.
+Trunk trunk_of(std::vector<scav_point> const &pts,
+               scav_span a,
+               scav_span b,
+               uint32_t cap,
+               bool heads) {
   Trunk out;
-  uint32_t const shortest{ imin(imin(a.len, b.len), TRUNK_TAIL) };
+  uint32_t const shortest{ imin(imin(a.len, b.len), cap) };
   while ((out.tail < shortest) &&
          same(pts[(a.off + a.len - 1) - out.tail], pts[(b.off + b.len - 1) - out.tail])) {
     ++out.tail;
@@ -130,13 +137,24 @@ Trunk trunk_of(std::vector<scav_point> const &pts, scav_span a, scav_span b) {
     uint32_t const j{ (b.off + b.len - 1) - out.tail };
     out.merged_tail = shared_run(pts[i], pts[i + 1], pts[j], pts[j + 1]) > 0;
   }
+  if (!heads) { return out; }
+  while ((out.head < imin(a.len, b.len)) &&
+         same(pts[a.off + out.head], pts[b.off + out.head])) {
+    ++out.head;
+  }
+  if ((out.head > 0) && (out.head < a.len) && (out.head < b.len)) {
+    uint32_t const i{ (a.off + out.head) - 1 };
+    uint32_t const j{ (b.off + out.head) - 1 };
+    out.merged_head = shared_run(pts[i], pts[i + 1], pts[j], pts[j + 1]) > 0;
+  }
   return out;
 }
 
-// Whether segment `k` of a `len`-point route lies in `t`: inside the shared tail, or the
-// leg into it when `merged_tail`.
+// Whether segment `k` of a `len`-point route lies in `t`: inside the shared tail or head,
+// or the leg into or out of it when merged.
 bool trunk_piece(Trunk const &t, uint32_t len, uint32_t k) {
-  return ((k + t.tail) >= len) || (t.merged_tail && ((k + t.tail + 1) == len));
+  return ((k + t.tail) >= len) || (t.merged_tail && ((k + t.tail + 1) == len)) ||
+         ((k + 1) < t.head) || (t.merged_head && ((k + 1) == t.head));
 }
 
 // Direction code `3 * x + y`, each axis 0 falling, 1 still, 2 rising; a bend changes it.
@@ -358,11 +376,12 @@ void blame(std::vector<uint8_t> *party, uint32_t a, uint32_t b) {
 }
 
 // The length each pair shares on one line, per `(axis, coordinate)` bucket, less the
-// trunks.
+// trunks; adds to `runs`, where given, each pair outside the routes' common head and tail.
 Wide corridor_over(Routes const &r,
                    std::vector<Piece> const &pieces,
                    std::vector<Lane> const &lanes,
-                   std::vector<uint8_t> *party) {
+                   std::vector<uint8_t> *party,
+                   int32_t *runs) {
   Wide total{ 0 };
   for (uint32_t lo = 0; lo < lanes.size();) {
     uint32_t hi{ lo };
@@ -377,11 +396,16 @@ Wide corridor_over(Routes const &r,
         if (u.trans == v.trans) { continue; }
         Wide const shared{ shared_run(u.a, u.b, v.a, v.b) };
         if (shared <= 0) { continue; }
-        Trunk const pair{ trunk_of(r.points, r.route[u.trans], r.route[v.trans]) };
-        if (trunk_piece(pair, r.route[u.trans].len, u.k) &&
-            trunk_piece(pair, r.route[v.trans].len, v.k)) {
-          continue;
+        scav_span const ru{ r.route[u.trans] };
+        scav_span const rv{ r.route[v.trans] };
+        if (runs != nullptr) {
+          Trunk const fan{ trunk_of(r.points, ru, rv, ru.len, true) };
+          if (!trunk_piece(fan, ru.len, u.k) || !trunk_piece(fan, rv.len, v.k)) {
+            ++*runs;
+          }
         }
+        Trunk const pair{ trunk_of(r.points, ru, rv, TRUNK_TAIL, false) };
+        if (trunk_piece(pair, ru.len, u.k) && trunk_piece(pair, rv.len, v.k)) { continue; }
         total += shared;
         blame(party, u.trans, v.trans);
       }
@@ -939,7 +963,7 @@ void cost_grid_query(ChildGrid const &g,
 }
 
 [[maybe_unused]] Wide cost_corridor(Routes const &r, std::vector<Piece> const &pieces) {
-  return corridor_over(r, pieces, lanes_of(pieces), nullptr);
+  return corridor_over(r, pieces, lanes_of(pieces), nullptr, nullptr);
 }
 
 [[maybe_unused]] Wide cost_crowding(std::vector<Piece> const &pieces, int32_t em) {
@@ -1034,7 +1058,7 @@ CostTerms cost_terms(CostContext const &ctx,
   lanes_of(pieces, sc.key, sc.spare, sc.lanes);
   std::vector<Lane> const &lanes{ sc.lanes };
   t.crossings = crossings_over(pieces, lanes, crossings_of, sc.is_loose);
-  t.corridor = corridor_over(r, pieces, lanes, party);
+  t.corridor = corridor_over(r, pieces, lanes, party, &t.shared_run);
   t.crowding = crowding_over(pieces, lanes, p.font_size_grid, party);
 
   // `excess_len` is what a route runs past the larger of its direct distance and its
@@ -1343,10 +1367,9 @@ CostTerms layout_cost(Chart const &c,
 }
 
 std::array<int32_t, TIER0_TERMS> tier0_terms(CostTerms const &t) {
-  return { t.through_box, t.through_band,   t.box_overlap,
-           t.vanished,    t.flush,          t.through_region,
-           t.retrace,     t.label_over_box, t.label_over_route,
-           t.label_far,   t.loop_unanchored };
+  return { t.through_box,    t.through_band,     t.box_overlap, t.vanished,
+           t.flush,          t.through_region,   t.retrace,     t.shared_run,
+           t.label_over_box, t.label_over_route, t.label_far,   t.loop_unanchored };
 }
 
 Cost cost_of(CostTerms const &t, scav_profile const &p) {

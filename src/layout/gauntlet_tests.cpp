@@ -58,8 +58,8 @@ constexpr std::array GAUNTLET{
   "level.scav",     "long.scav",      "loop.scav",    "marks.scav",     "mixed.scav",
   "mutual.scav",    "ported.scav",    "pulled.scav",  "regions.scav",   "resumed.scav",
   "ring.scav",      "room.scav",      "rooms.scav",   "roundtrip.scav", "seated.scav",
-  "separator.scav", "stretch.scav",   "through.scav", "tight.scav",     "transit.scav",
-  "under.scav",     "unfolded.scav"
+  "separator.scav", "side.scav",      "stretch.scav", "through.scav",   "tight.scav",
+  "transit.scav",   "under.scav",     "unfolded.scav"
 };
 
 // One chart, laid out: the pieces every property below reads.
@@ -2459,5 +2459,51 @@ TEST_CASE("gauntlet: a cycle member entered through a port sits on the port's si
     uint32_t const third{ state_named(l.c, "Third") };
     REQUIRE(entered != INVALID);
     CHECK(nearest_its_port(l, box, entered, { first, third }));
+  }
+}
+
+TEST_CASE("gauntlet: two arrivals along one side of a composite never share a run") {
+  // `Right -> Box/Upper` and `Left -> Box/Lower`, both ports pinned to `Box`'s right face.
+  for (scav_profile const &p : { one_row(readable()), one_row(compact()) }) {
+    CAPTURE(p.profile_id);
+    Laid bare;
+    lay("side.scav", p, bare);
+    uint32_t const box{ state_named(bare.c, "Box") };
+    uint32_t const upper{ state_named(bare.c, "Upper") };
+    REQUIRE(upper != INVALID);
+    SearchPins seed;
+    std::vector<uint32_t> in;
+    for (uint32_t t = 0; t < bare.c.transitions.size(); ++t) {
+      Transition const &tr{ bare.c.transitions[t] };
+      if (!ancestor(bare.c, StateId{ box }, tr.dst) || (tr.src.v == upper)) { continue; }
+      seed.ends.push_back({ .trans = TransId{ t }, .leg = 1, .end = 0, .face = 1 });
+      in.push_back(t);
+    }
+    REQUIRE(in.size() == 2);
+    Laid l;
+    lay("side.scav", p, l, {}, &seed);
+    scav_rect const frame{ l.z.state[box] };
+    for (uint32_t const t : in) {
+      scav_span const r{ l.r.route[t] };
+      bool ported{ false };  // a point on `Box`'s right face
+      for (uint32_t k = 0; k < r.len; ++k) {
+        scav_point const at{ l.r.points[r.off + k] };
+        ported = ported || (on_border(at, frame) && (at.x == (frame.x + frame.w)));
+      }
+      CHECK(ported);
+    }
+    scav_span const a{ l.r.route[in[0]] };
+    scav_span const b{ l.r.route[in[1]] };
+    Wide shared{ 0 };
+    for (uint32_t i = 0; (i + 1) < a.len; ++i) {
+      for (uint32_t j = 0; (j + 1) < b.len; ++j) {
+        shared += run_shared(l.r.points[a.off + i],
+                             l.r.points[a.off + i + 1],
+                             l.r.points[b.off + j],
+                             l.r.points[b.off + j + 1]);
+      }
+    }
+    CHECK(shared == 0);
+    CHECK(cost_terms(l.c, l.g, l.z, l.r, {}, p).shared_run == 0);
   }
 }

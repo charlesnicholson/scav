@@ -993,9 +993,13 @@ void route_transitions(Routes &out,
       }
     }
     // Bounds each transition by the innermost state strictly enclosing both its ends, or
-    // the chart where none does; an inner loop by its own state.
+    // the coordinate domain where none does; an inner loop by its own state.
+    scav_rect const domain{ .x = COORD_MIN,
+                            .y = COORD_MIN,
+                            .w = 2 * COORD_MAX,
+                            .h = 2 * COORD_MAX };
     std::vector<scav_rect> &held{ cs.held };
-    vec_assign(held, out.route.size(), z.chart);
+    vec_assign(held, out.route.size(), domain);
     for (uint32_t t = 0; t < out.route.size(); ++t) {
       if (t >= c.transitions.size()) { continue; }
       Transition const &tr{ c.transitions[t] };
@@ -1006,7 +1010,7 @@ void route_transitions(Routes &out,
       if (above.v != INVALID) { held[t] = z.state[above.v]; }
       if (inner_loop(c, t)) { held[t] = z.state[tr.src.v]; }
     }
-    nudge_lanes(z.chart,
+    nudge_lanes(domain,
                 held,
                 walls,
                 imax(margin, p.font_size_grid),
