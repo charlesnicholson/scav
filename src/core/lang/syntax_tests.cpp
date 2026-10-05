@@ -34,11 +34,9 @@ TEST_CASE("syntax: every enum has a name and every kind word round-trips") {
   CHECK(std::string{ syntax_trans_kind_name(TransKind::Default) } == "default");
   TransKind unparsed{ TransKind::Local };
   CHECK_FALSE(syntax_trans_kind_from_name("default", unparsed));  // written as no keyword
-  for (uint32_t i = static_cast<uint32_t>(TransKind::External);
-       i <= static_cast<uint32_t>(TransKind::Local);
-       ++i) {
-    TransKind const kind{ static_cast<TransKind>(i) };
-    TransKind parsed{ TransKind::External };
+  for (TransKind const kind :
+       { TransKind::External, TransKind::Internal, TransKind::Local }) {
+    TransKind parsed{ TransKind::Default };
     CHECK(syntax_trans_kind_from_name(syntax_trans_kind_name(kind), parsed));
     CHECK(parsed == kind);
   }

@@ -250,12 +250,8 @@ enum class StateKind : uint32_t {
   DeepHistory,
 };
 
-enum class TransKind : uint32_t {
-  Default,
-  External,
-  Internal,
-  Local
-};  // Default: none written
+// `Default` when no kind is written; `External` only when it is.
+enum class TransKind : uint32_t { Default, Internal, Local, External };
 
 // Leading and own-line both precede the owner; the difference is a blank line
 // between them. Inside-the-block versus before-it follows from the offsets.

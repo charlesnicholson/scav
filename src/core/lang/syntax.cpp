@@ -36,9 +36,9 @@ char const *syntax_state_kind_name(StateKind kind) {
 char const *syntax_trans_kind_name(TransKind kind) {
   switch (kind) {
     case TransKind::Default: return "default";
-    case TransKind::External: return "external";
     case TransKind::Internal: return "internal";
     case TransKind::Local: return "local";
+    case TransKind::External: return "external";
   }
   return "unknown";
 }
