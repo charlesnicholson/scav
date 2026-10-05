@@ -1467,6 +1467,35 @@ void OrthogonalRouter::route(RouteInput const &in, RouteOutput &out) const {
                        seat,
                        stuck);
   moved(SeatPass::Occupied);
+  // A loop between a box and a point on its border seats the box end on the point's face,
+  // `max(loop, 2 * clear)` along it toward the face's middle.
+  for (uint32_t n = 0; n < in.nets.size(); ++n) {
+    RouteNet const &net{ in.nets[n] };
+    bool const from_box{ net.src_obstacle < in.obstacles.size() };
+    if ((net.loop <= 0) || (from_box == (net.dst_obstacle < in.obstacles.size()))) {
+      continue;
+    }
+    uint32_t const box{ from_box ? net.src_obstacle : net.dst_obstacle };
+    scav_point const fixed{ from_box ? net.dst : net.src };
+    scav_rect const &r{ in.obstacles[box] };
+    uint32_t const face{ face_of(fixed, r) };
+    if (face >= 4) { continue; }
+    bool const along_y{ face < 2 };
+    FaceRun const run{
+      face_run(r, face, clear, (box < in.corner.size()) ? in.corner[box] : 0)
+    };
+    int32_t const lo{ run.lo + run.inset };
+    int32_t const hi{ (run.lo + run.len) - run.inset };
+    int32_t const pos{ along_y ? fixed.y : fixed.x };
+    int32_t const gap{ imax(net.loop, 2 * clear) };
+    int32_t const to{
+      imin(imax((pos < (lo + ((hi - lo) / 2))) ? (pos + gap) : (pos - gap), lo), hi)
+    };
+    scav_point at{ fixed };
+    (along_y ? at.y : at.x) = to;
+    seat[(2 * n) + (from_box ? 0U : 1U)] = at;
+    seat[(2 * n) + (from_box ? 1U : 0U)] = fixed;
+  }
 
   for (uint32_t n = 0; n < in.nets.size(); ++n) {
     RouteNet const &net{ in.nets[n] };

@@ -416,14 +416,16 @@ TEST_CASE("print: every endpoint spelling survives verbatim") {
         "}\n");
 }
 
-TEST_CASE("print: a transition kind is written only when it is not external") {
+TEST_CASE("print: a transition kind is written only when it was written") {
   CHECK(print("chart c {\n"
+              "  trans A -> B,\n"
               "  trans external A -> B,\n"
               "  trans internal A -> B,\n"
               "  trans local A -> B,\n"
               "}") ==
         "chart c {\n"
         "  trans A -> B,\n"
+        "  trans external A -> B,\n"
         "  trans internal A -> B,\n"
         "  trans local A -> B,\n"
         "}\n");

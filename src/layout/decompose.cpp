@@ -73,8 +73,7 @@ bool inner_loop(Chart const &c, uint32_t t) {
   Transition const &tr{ c.transitions[t] };
   return (tr.live != 0) && (tr.src == tr.dst) && (tr.src.v < c.states.size()) &&
          ((tr.kind == TransKind::Internal) || (tr.kind == TransKind::Local)) &&
-         (c.states[tr.src.v].live != 0) &&
-         (c.states[tr.src.v].kind == StateKind::Normal);
+         (c.states[tr.src.v].live != 0) && (c.states[tr.src.v].kind == StateKind::Normal);
 }
 
 bool ancestor_or_self(Chart const &c, StateId ancestor, StateId of) {
@@ -137,7 +136,8 @@ SplitGraph decompose(Chart const &c) {
         SubmachineId const sub_src{ c.states[chain_src[i - 1].v].parent };
         SubmachineId const sub_dst{ c.states[chain_dst[j - 1].v].parent };
         if (external && ((i > 1) || (j > 1) || (sub_src != sub_dst))) {
-          vec_push_back(route, { .kind = Crossing::Exit, .state = chain_src[i], .sub = {} });
+          vec_push_back(route,
+                        { .kind = Crossing::Exit, .state = chain_src[i], .sub = {} });
           vec_push_back(route,
                         { .kind = Crossing::Enter, .state = chain_src[i], .sub = {} });
         } else if (sub_src != sub_dst) {

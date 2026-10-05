@@ -52,14 +52,15 @@ scav_profile compact() {
 
 // Every chart in test_data/charts/gauntlet, by file name.
 constexpr std::array GAUNTLET{
-  "above.scav",     "carried.scav",   "chain.scav",   "corner.scav",    "crossing.scav",
-  "crowd.scav",     "enclosing.scav", "entered.scav", "fanin.scav",     "folded.scav",
-  "fork.scav",      "header.scav",    "inloop.scav",  "inward.scav",    "lane.scav",
-  "level.scav",     "long.scav",      "loop.scav",    "marks.scav",     "mixed.scav",
-  "mutual.scav",    "ported.scav",    "pulled.scav",  "regions.scav",   "resumed.scav",
-  "ring.scav",      "room.scav",      "rooms.scav",   "roundtrip.scav", "seated.scav",
-  "separator.scav", "side.scav",      "stretch.scav", "through.scav",   "tight.scav",
-  "transit.scav",   "under.scav",     "unfolded.scav"
+  "above.scav",     "bypass.scav",  "carried.scav", "chain.scav",     "corner.scav",
+  "crossing.scav",  "crowd.scav",   "detour.scav",  "enclosing.scav", "entered.scav",
+  "fanin.scav",     "folded.scav",  "fork.scav",    "header.scav",    "headed.scav",
+  "inloop.scav",    "inward.scav",  "lane.scav",    "level.scav",     "long.scav",
+  "loop.scav",      "marks.scav",   "mixed.scav",   "mutual.scav",    "ported.scav",
+  "pulled.scav",    "rebound.scav", "reentry.scav", "regions.scav",   "resumed.scav",
+  "ring.scav",      "room.scav",    "rooms.scav",   "roundtrip.scav", "seated.scav",
+  "separator.scav", "side.scav",    "stretch.scav", "through.scav",   "tight.scav",
+  "transit.scav",   "under.scav",   "unfolded.scav"
 };
 
 // One chart, laid out: the pieces every property below reads.
@@ -106,12 +107,14 @@ void column_holds(Chart const &c, char const *name, std::vector<T> const &rows) 
 }
 
 // `layout_run` on `name`, then the phases re-run for the row it kept; `s` and `seed` are
-// the run's space requests and starting pins.
+// the run's space requests and starting pins, and every `external` transition takes
+// `external_as`.
 void lay(char const *name,
          scav_profile const &p,
          Laid &out,
          scav_spaces const &s,
-         SearchPins const *seed) {
+         SearchPins const *seed,
+         TransKind external_as = TransKind::External) {
   scav_router_id id{};
   REQUIRE(router_by_name(reinterpret_cast<scav_byte const *>("orthogonal"), 10, id));
   std::string path{ SCAV_TEST_DATA_DIR "/charts/gauntlet/" };
@@ -120,6 +123,9 @@ void lay(char const *name,
   std::vector<Diagnostic> diags;
   std::string failed;
   REQUIRE(load_file(path.c_str(), loader, out.c, diags, failed));
+  for (Transition &tr : out.c.transitions) {
+    if (tr.kind == TransKind::External) { tr.kind = external_as; }
+  }
 
   std::vector<scav_placed> placed;
   scav_layout_opts const o{ .profile = p, .router = id, .threads = 0 };
@@ -2512,5 +2518,104 @@ TEST_CASE("gauntlet: two arrivals along one side of a composite never share a ru
     }
     CHECK(shared == 0);
     CHECK(cost_terms(l.c, l.g, l.z, l.r, {}, p).shared_run == 0);
+  }
+}
+
+namespace {
+
+// Transition `t`'s route against state `st`'s box, as the runs it makes inside (`I`) and
+// outside (`O`); an end at `st` itself counts as inside.
+std::string runs_against(Laid const &l, uint32_t t, uint32_t st) {
+  scav_rect const &box{ l.z.state[st] };
+  scav_span const route{ l.r.route[t] };
+  Transition const &tr{ l.c.transitions[t] };
+  std::string out;
+  auto const add = [&out](char side) {
+    if ((side != 'B') && (out.empty() || (out.back() != side))) { out += side; }
+  };
+  Wide const x0{ Wide{ box.x } * 2 };
+  Wide const y0{ Wide{ box.y } * 2 };
+  Wide const x1{ (Wide{ box.x } + box.w) * 2 };
+  Wide const y1{ (Wide{ box.y } + box.h) * 2 };
+  auto const side_of = [&](Wide x2, Wide y2) {  // doubled coordinates; `B` on the border
+    if ((x2 > x0) && (x2 < x1) && (y2 > y0) && (y2 < y1)) { return 'I'; }
+    if ((x2 < x0) || (x2 > x1) || (y2 < y0) || (y2 > y1)) { return 'O'; }
+    return 'B';
+  };
+  if (tr.src.v == st) { add('I'); }
+  for (uint32_t k = 0; k < route.len; ++k) {
+    scav_point const a{ l.r.points[route.off + k] };
+    add(side_of(Wide{ a.x } * 2, Wide{ a.y } * 2));
+    if ((k + 1) == route.len) { break; }
+    scav_point const b{ l.r.points[route.off + k + 1] };
+    add(side_of(Wide{ a.x } + b.x, Wide{ a.y } + b.y));
+  }
+  if (tr.dst.v == st) { add('I'); }
+  return out;
+}
+
+struct OutAndBack {
+  char const *chart;
+  char const *state;  // the composite the external route leaves and re-enters
+  char const *src;
+  char const *dst;
+  TransKind inside;  // the kind that keeps the route inside `state`
+};
+
+constexpr std::array OUT_AND_BACK{
+  OutAndBack{ "reentry.scav", "Outer", "Outer", "Other", TransKind::Internal },
+  OutAndBack{ "rebound.scav", "Outer", "Other", "Outer", TransKind::Default },
+  OutAndBack{ "detour.scav", "Outer", "A", "B", TransKind::Default },
+  OutAndBack{ "bypass.scav", "Outer", "A", "B", TransKind::Default },
+  OutAndBack{ "headed.scav", "Box", "Idle", "Work", TransKind::Default },
+};
+
+// `name`'s space requests: a two-line header on every normal state.
+std::vector<scav_box_space> headers_on(char const *name, scav_profile const &p) {
+  Chart const probe{ loaded(name) };
+  std::vector<scav_box_space> rows(probe.states.size());
+  for (uint32_t st = 0; st < probe.states.size(); ++st) {
+    if (probe.states[st].kind == StateKind::Normal) {
+      rows[st].h_before = 2 * p.font_size_grid;
+    }
+  }
+  return rows;
+}
+
+}  // namespace
+
+TEST_CASE(
+    "gauntlet: an external route out of a machine leaves its composite and returns") {
+  // Out across the composite's border, outside it, and back in; with the inside kind it
+  // stays in. Headed, no route enters a band. Tier 0 is zero throughout.
+  for (OutAndBack const &shape : OUT_AND_BACK) {
+    for (scav_profile const &p : { readable(), compact() }) {
+      std::string const chart{ shape.chart };
+      CAPTURE(chart);
+      CAPTURE(p.profile_id);
+      Laid out;
+      lay(shape.chart, p, out);
+      uint32_t const st{ state_named(out.c, shape.state) };
+      uint32_t const t{ between(out.c, shape.src, shape.dst) };
+      REQUIRE(st != INVALID);
+      REQUIRE(t != INVALID);
+      CHECK(out.c.transitions[t].kind == TransKind::External);
+      CHECK(runs_against(out, t, st) == "IOI");
+      CHECK(cost_of(cost_columns(out.c, out.g, p), p).t0_violations == 0);
+
+      Laid in;
+      lay(shape.chart, p, in, {}, nullptr, shape.inside);
+      CHECK(runs_against(in, t, st) == "I");
+      CHECK(cost_of(cost_columns(in.c, in.g, p), p).t0_violations == 0);
+
+      std::vector<scav_box_space> const rows{ headers_on(shape.chart, p) };
+      scav_spaces const s{ spaces_of(rows) };
+      Laid headed;
+      lay(shape.chart, p, headed, s, nullptr);
+      CHECK_FALSE(any_band_entered(headed));
+      CHECK(runs_against(headed, t, st) == "IOI");
+      CHECK(cost_of(cost_terms(headed.c, headed.g, headed.z, headed.r, s, p), p)
+                .t0_violations == 0);
+    }
   }
 }

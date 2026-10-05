@@ -621,6 +621,12 @@ void route_transitions(Routes &out,
             (g.ports[from_port].sub.v < c.submachines.size())) {
           frame = g.ports[from_port].sub.v;
         }
+        // An external route's leg between a box and a port on that box's border is a loop.
+        bool const own_border{ (tr.kind == TransKind::External) &&
+                               (((at_state != INVALID) && (port != INVALID) &&
+                                 (g.ports[port].state.v == at_state)) ||
+                                ((end_state != INVALID) && (from_port < g.ports.size()) &&
+                                 (g.ports[from_port].state.v == end_state))) };
         vec_push_back(planned,
                       { .frame = frame,
                         .src = at,
@@ -628,7 +634,7 @@ void route_transitions(Routes &out,
                         .src_state = at_state,
                         .dst_state = end_state,
                         .seg = seg,
-                        .loop = 0 });
+                        .loop = own_border ? (2 * p.pad) : 0 });
         at = end;
         at_state = end_state;
       }
@@ -721,7 +727,9 @@ void route_transitions(Routes &out,
       cover(planned[i].dst);
       for (uint32_t const bend : seg_bends[planned[i].seg]) { cover(z.node[bend]); }
       if (planned[i].loop > 0) {
-        scav_rect const &r{ z.state[planned[i].src_state] };
+        uint32_t const boxed{ (planned[i].src_state != INVALID) ? planned[i].src_state
+                                                                : planned[i].dst_state };
+        scav_rect const &r{ z.state[boxed] };
         int32_t const reach{ planned[i].loop };
         cover({ .x = r.x - reach, .y = r.y - reach });
         cover({ .x = r.x + r.w + reach, .y = r.y + r.h + reach });
