@@ -1723,7 +1723,7 @@ TEST_CASE("gauntlet: an internal loop stays inside its state, under its header")
     uint32_t loops{ 0 };
     for (uint32_t t = 0; t < l.c.transitions.size(); ++t) {
       Transition const &tr{ l.c.transitions[t] };
-      if ((tr.src != tr.dst) || (tr.kind == TransKind::External)) { continue; }
+      if ((tr.src != tr.dst) || (tr.kind == TransKind::Default)) { continue; }
       CAPTURE(t);
       ++loops;
       loop_lands(l, t);

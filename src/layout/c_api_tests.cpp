@@ -45,8 +45,8 @@ Chart two_transitions() {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const idle{ build_state(c, root, "Idle", StateKind::Normal, {}) };
   StateId const busy{ build_state(c, root, "Busy", StateKind::Normal, {}) };
-  build_trans(c, idle, busy, TransKind::External, "go");
-  build_trans(c, busy, idle, TransKind::External, "stop");
+  build_trans(c, idle, busy, TransKind::Default, "go");
+  build_trans(c, busy, idle, TransKind::Default, "stop");
   return c;
 }
 

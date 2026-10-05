@@ -32,7 +32,7 @@ Built built() {
   r.root = build_chart(r.c, "c", {});
   r.a = build_state(r.c, r.root, "A", StateKind::Normal, {});
   r.b = build_state(r.c, r.root, "B", StateKind::Normal, {});
-  r.t = build_trans(r.c, r.a, r.b, TransKind::External, "go");
+  r.t = build_trans(r.c, r.a, r.b, TransKind::Default, "go");
   build_attr(r.c, ref(r.a), "doc", "state A");
   return r;
 }

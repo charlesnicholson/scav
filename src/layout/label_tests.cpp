@@ -110,7 +110,7 @@ scav_rect on_route(std::vector<scav_point> const &poly,
   for (uint32_t i = 0; i < strangers.size(); ++i) {
     build_state(c, root, "X" + std::to_string(i), StateKind::Normal, {});
   }
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, chart) };
   // The endpoints keep zero rects, which no candidate can overlap; only the
@@ -184,7 +184,7 @@ TEST_CASE("label: a box sits beside its route's longest horizontal leg") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 600, .h = 400 }) };
   z.state[a.v] = { .x = 0, .y = 100, .w = 100, .h = 100 };
@@ -217,7 +217,7 @@ void crossing(Crossing &out, uint32_t strangers) {
   for (uint32_t i = 0; i < strangers; ++i) {
     build_state(out.c, root, "S" + std::to_string(i), StateKind::Normal, {});
   }
-  build_trans(out.c, out.l, out.t, TransKind::External, {});
+  build_trans(out.c, out.l, out.t, TransKind::Default, {});
 }
 
 constexpr std::array SEARCHES{ LabelSearch::Exhaustive,
@@ -299,7 +299,7 @@ TEST_CASE("label: a box slides along its leg to clear a state it is not under") 
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const other{ build_state(c, root, "X", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 600, .h = 400 }) };
   z.state[a.v] = { .x = 0, .y = 100, .w = 100, .h = 100 };
@@ -323,7 +323,7 @@ TEST_CASE("label: the composite a transition runs in holds the box, its band doe
   SubmachineId const inner{ build_submachine(c, outer, "main", {}) };
   StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, inner, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 600, .h = 300 }) };
   z.state[outer.v] = { .x = 0, .y = 0, .w = 600, .h = 300 };
@@ -350,8 +350,8 @@ TEST_CASE("label: a box takes the side clear of another transition's route") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, a, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, a, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 600, .h = 400 }) };
   z.state[a.v] = { .x = 0, .y = 100, .w = 100, .h = 100 };
@@ -373,8 +373,8 @@ TEST_CASE("label: another route's leg counts wherever along that route it lies")
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, a, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, a, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 1200, .h = 800 }) };
   z.state[a.v] = { .x = 0, .y = 100, .w = 100, .h = 100 };
@@ -405,8 +405,8 @@ TEST_CASE("label: a box crosses to the far side of its own leg to keep its dista
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, a, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, a, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 600, .h = 400 }) };
   z.state[a.v] = { .x = 0, .y = 100, .w = 100, .h = 100 };
@@ -429,7 +429,7 @@ TEST_CASE("label: a transition's second box goes past its first") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 1000, .h = 300 }) };
   z.state[a.v] = { .x = 0, .y = 80, .w = 40, .h = 40 };
@@ -450,7 +450,7 @@ TEST_CASE("label: a second box goes past the first along a right-to-left leg") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 1000, .h = 300 }) };
   z.state[a.v] = { .x = 960, .y = 80, .w = 40, .h = 40 };
@@ -473,7 +473,7 @@ TEST_CASE("label: a second box goes past the first along a bottom-to-top leg") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 300, .h = 1000 }) };
   z.state[a.v] = { .x = 80, .y = 960, .w = 40, .h = 40 };
@@ -496,7 +496,7 @@ TEST_CASE("label: a request with no route at all takes the centred fallback") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 600, .h = 400 }) };
   Lines const l{ lines_of({ {} }) };
@@ -512,7 +512,7 @@ TEST_CASE("label: a diagonal leg offers no strip") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 600, .h = 400 }) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 100 };
@@ -570,7 +570,7 @@ TEST_CASE(
   SubmachineId const inner{ build_submachine(c, outer, "main", {}) };
   StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, inner, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 600, .h = 300 }) };
   z.state[outer.v] = { .x = 0, .y = 0, .w = 600, .h = 300 };
@@ -595,8 +595,8 @@ TEST_CASE("label: a box already placed is an obstacle to the next transition's")
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, CHART) };
   // Two transitions laid on one line: every candidate carries the same shortfall,
@@ -739,8 +739,8 @@ TEST_CASE("label: the shortfall is measured across the axis the leg does not run
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const p{ build_state(c, root, "P", StateKind::Normal, {}) };
   StateId const q{ build_state(c, root, "Q", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, p, q, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, p, q, TransKind::Default, {});
 
   SizedLayout z{ blank(c, { .x = 0, .y = 0, .w = 600, .h = 500 }) };
   // Upright legs at x=250 and x=185, 65 apart: a box left of x=250 clears x=185 by 5,
@@ -762,8 +762,8 @@ TEST_CASE("label: a candidate past the first strip is scored against the strange
   StateId const p{ build_state(c, root, "P", StateKind::Normal, {}) };
   StateId const q{ build_state(c, root, "Q", StateKind::Normal, {}) };
   StateId const wall{ build_state(c, root, "W", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, p, q, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, p, q, TransKind::Default, {});
 
   SizedLayout z{ blank(c, CHART) };
   // A wall at y 130..150 blocks every candidate above the leg.
@@ -785,9 +785,9 @@ TEST_CASE(
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout const z{ blank(c, CHART) };
   // Route 1 on the leg gives every candidate the same shortfall; route 2 at x=250
@@ -810,8 +810,8 @@ TEST_CASE("label: the shortfall outranks the anchor distance") {
   StateId const p{ build_state(c, root, "P", StateKind::Normal, {}) };
   StateId const q{ build_state(c, root, "Q", StateKind::Normal, {}) };
   StateId const nick{ build_state(c, root, "N", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, p, q, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, p, q, TransKind::Default, {});
 
   SizedLayout z{ blank(c, CHART) };
   // The nick blocks the nearest candidates below the leg: below is further with no
@@ -834,8 +834,8 @@ TEST_CASE("label: a box clear of everything stays where the distance put it") {
   StateId const p{ build_state(c, root, "P", StateKind::Normal, {}) };
   StateId const q{ build_state(c, root, "Q", StateKind::Normal, {}) };
   StateId const far{ build_state(c, root, "F", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, p, q, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, p, q, TransKind::Default, {});
 
   SizedLayout z{ blank(c, CHART) };
   Lines const l{ lines_of({ { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } },
@@ -858,7 +858,7 @@ TEST_CASE("label: a subject past the route table takes the centred fallback") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, CHART) };
   Lines const l{ lines_of({ { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } } }) };
@@ -876,7 +876,7 @@ TEST_CASE("label: a subject with a route but no transition rides the route anywa
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout const z{ blank(c, CHART) };
   // A route table longer than the transition table: route 1 has no transition.
@@ -894,7 +894,7 @@ TEST_CASE("label: a second box may ride a leg after the one the first took") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout const z{ blank(c, CHART) };
   Lines const l{ lines_of(
@@ -923,7 +923,7 @@ TEST_CASE("label: a request of no boxes at all places nothing") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout const z{ blank(c, CHART) };
   Lines const l{ lines_of({ { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } } }) };
@@ -942,7 +942,7 @@ TEST_CASE("label: a tombstoned state is not an obstacle") {
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const gone{ build_state(c, root, "G", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c, CHART) };
   // A state over the side above the leg: live, it sends the box below; tombstoned, the
@@ -969,8 +969,8 @@ TEST_CASE("label: the placement does not depend on the path box row order") {
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const p{ build_state(c, root, "P", StateKind::Normal, {}) };
   StateId const q{ build_state(c, root, "Q", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, p, q, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, p, q, TransKind::Default, {});
 
   SizedLayout const z{ blank(c, CHART) };
   Lines const l{ lines_of({ { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } },
@@ -997,7 +997,7 @@ TEST_CASE("label: a transition's second box never goes back to an earlier leg") 
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   // No walls: both legs of the elbow offer candidates.
   SizedLayout z{ blank(c, CHART) };
@@ -1030,7 +1030,7 @@ TEST_CASE("label: two thousand boxes place, and quickly") {
     all.push_back(build_state(c, root, "S" + std::to_string(i), StateKind::Normal, {}));
   }
   for (uint32_t i = 1; i < all.size(); ++i) {
-    build_trans(c, all[i - 1], all[i], TransKind::External, {});
+    build_trans(c, all[i - 1], all[i], TransKind::Default, {});
     boxes.push_back({ .subject = i - 1, .w = 60, .h = 20, .order = 0 });
   }
   REQUIRE(c.states.size() == CELLS);
@@ -1138,7 +1138,7 @@ Scene scene_of(uint64_t seed, uint32_t crowd) {
     build_trans(c,
                 all[pick(static_cast<uint32_t>(all.size()))],
                 all[pick(static_cast<uint32_t>(all.size()))],
-                TransKind::External,
+                TransKind::Default,
                 {});
   }
 
@@ -1348,7 +1348,7 @@ TEST_CASE("label: the searches agree on boxes of no width and of no height") {
     StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
     StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
     StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
-    build_trans(c, a, b, TransKind::External, {});
+    build_trans(c, a, b, TransKind::Default, {});
     SizedLayout z{ blank(c, CHART) };
     z.state[x.v] = wall;
     Lines const l{ lines_of({ leg }) };
@@ -1390,7 +1390,7 @@ TEST_CASE(
       StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
       StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
       StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
-      build_trans(c, a, b, TransKind::External, {});
+      build_trans(c, a, b, TransKind::Default, {});
       SizedLayout z{ blank(c, CHART) };
       z.state[x.v] = strangers[0];
       Lines const l{ lines_of({ leg }) };

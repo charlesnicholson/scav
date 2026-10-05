@@ -72,7 +72,8 @@ StateId enclosing_state(Chart const &c, StateId s) {
 bool inner_loop(Chart const &c, uint32_t t) {
   Transition const &tr{ c.transitions[t] };
   return (tr.live != 0) && (tr.src == tr.dst) && (tr.src.v < c.states.size()) &&
-         (tr.kind != TransKind::External) && (c.states[tr.src.v].live != 0) &&
+         ((tr.kind == TransKind::Internal) || (tr.kind == TransKind::Local)) &&
+         (c.states[tr.src.v].live != 0) &&
          (c.states[tr.src.v].kind == StateKind::Normal);
 }
 
@@ -120,8 +121,9 @@ SplitGraph decompose(Chart const &c) {
     bool src_inner{ false };  // route starts on the source border's inner face
     bool dst_inner{ false };  // route ends on the target border's inner face
     if (tr.src != tr.dst) {
-      if (i == 0) {  // src encloses dst; its border splits only when external
-        src_inner = tr.kind != TransKind::External;
+      bool const external{ tr.kind == TransKind::External };
+      if (i == 0) {  // src encloses dst; its border splits unless internal or local
+        src_inner = (tr.kind == TransKind::Internal) || (tr.kind == TransKind::Local);
         if (!src_inner) {
           vec_push_back(route, { .kind = Crossing::Enter, .state = tr.src, .sub = {} });
         }
@@ -130,21 +132,29 @@ SplitGraph decompose(Chart const &c) {
         vec_push_back(route, { .kind = Crossing::Exit, .state = chain_src[k], .sub = {} });
       }
       if ((i > 0) && (j > 0) && (i < chain_src.size())) {
-        // The chains meet at a state; between two of its submachines the route crosses
-        // their separator.
+        // The chains meet at a state. An external route out of a machine exits and
+        // re-enters it; any other crosses the separator between two of its submachines.
         SubmachineId const sub_src{ c.states[chain_src[i - 1].v].parent };
         SubmachineId const sub_dst{ c.states[chain_dst[j - 1].v].parent };
-        if (sub_src != sub_dst) {
+        if (external && ((i > 1) || (j > 1) || (sub_src != sub_dst))) {
+          vec_push_back(route, { .kind = Crossing::Exit, .state = chain_src[i], .sub = {} });
+          vec_push_back(route,
+                        { .kind = Crossing::Enter, .state = chain_src[i], .sub = {} });
+        } else if (sub_src != sub_dst) {
           vec_push_back(route, { .kind = Crossing::SepSrc, .state = {}, .sub = sub_src });
           vec_push_back(route, { .kind = Crossing::SepDst, .state = {}, .sub = sub_dst });
         }
+      }
+      // `j == 0` when dst encloses src: an external route exits dst and ends on its
+      // border; any other ends inside dst, on its inner face.
+      if ((j == 0) && external) {
+        vec_push_back(route, { .kind = Crossing::Exit, .state = tr.dst, .sub = {} });
       }
       for (size_t k = j; k-- > 1;) {
         vec_push_back(route,
                       { .kind = Crossing::Enter, .state = chain_dst[k], .sub = {} });
       }
-      // `j == 0` when dst encloses src: the route ends inside dst, on its inner face.
-      dst_inner = (j == 0);
+      dst_inner = (j == 0) && !external;
     }
 
     // The state entered after the Enter at `at`, or dst; its parent is the next frame.

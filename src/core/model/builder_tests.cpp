@@ -149,17 +149,17 @@ TEST_CASE("build: transitions take live endpoints only") {
   SubmachineId const root{ build_chart(c, "c", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  TransId const t{ build_trans(c, a, b, TransKind::External, "go") };
+  TransId const t{ build_trans(c, a, b, TransKind::Default, "go") };
   REQUIRE(t.v == 0);
   CHECK(c.transitions[t.v].src == a);
   CHECK(c.transitions[t.v].dst == b);
   CHECK(chart_string(c, c.transitions[t.v].label) == "go");
 
-  CHECK(build_trans(c, a, StateId{ 77 }, TransKind::External, {}).v == INVALID);
-  CHECK(build_trans(c, StateId{ 77 }, b, TransKind::External, {}).v == INVALID);
+  CHECK(build_trans(c, a, StateId{ 77 }, TransKind::Default, {}).v == INVALID);
+  CHECK(build_trans(c, StateId{ 77 }, b, TransKind::Default, {}).v == INVALID);
   c.states[b.v].live = 0;
-  CHECK(build_trans(c, a, b, TransKind::External, {}).v == INVALID);
-  CHECK(build_trans(c, b, a, TransKind::External, {}).v == INVALID);  // a dead source
+  CHECK(build_trans(c, a, b, TransKind::Default, {}).v == INVALID);
+  CHECK(build_trans(c, b, a, TransKind::Default, {}).v == INVALID);  // a dead source
   CHECK(c.transitions.size() == 1);
   check_refs_resolve(c);
 }
@@ -177,7 +177,7 @@ TEST_CASE("build: attrs intern their keys and attach to any live subject") {
   Chart c;
   SubmachineId const root{ build_chart(c, "c", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
-  TransId const t{ build_trans(c, a, a, TransKind::External, {}) };
+  TransId const t{ build_trans(c, a, a, TransKind::Default, {}) };
   SubmachineId const m{ build_submachine(c, a, "m", {}) };
 
   CHECK(build_attr(c, ref(a), "doc", "state A") != INVALID);

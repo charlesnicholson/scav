@@ -197,7 +197,7 @@ void append_model(std::string &out, Chart const &c) {
           chart_path_of(c, t.src, out);
           out += " -> ";
           chart_path_of(c, t.dst, out);
-          if (t.kind != TransKind::External) {
+          if (t.kind != TransKind::Default) {
             out += ' ';
             out += syntax_trans_kind_name(t.kind);
           }

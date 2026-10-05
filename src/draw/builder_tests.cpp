@@ -51,8 +51,8 @@ Chart small_chart() {
   SubmachineId const main{ build_submachine(c, on, "main", {}) };
   StateId const idle{ build_state(c, main, "Idle", StateKind::Normal, {}) };
   StateId const busy{ build_state(c, main, "Busy", StateKind::Normal, {}) };
-  build_trans(c, idle, busy, TransKind::External, "work arrived");
-  build_trans(c, busy, idle, TransKind::External, {});  // no label, so no box
+  build_trans(c, idle, busy, TransKind::Default, "work arrived");
+  build_trans(c, busy, idle, TransKind::Default, {});  // no label, so no box
   return c;
 }
 
@@ -648,7 +648,7 @@ TEST_CASE("builder: a bare pseudostate's glyph fills its box exactly") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const dot{ build_state(c, root, "", StateKind::Initial, {}) };
   StateId const to{ build_state(c, root, "S", StateKind::Normal, {}) };
-  build_trans(c, dot, to, TransKind::External, {});
+  build_trans(c, dot, to, TransKind::Default, {});
 
   Built const b{ pipeline(std::move(c), readable()) };
   ColumnId const boxes{ column_find(b.chart, "scav.geom.state") };
@@ -692,7 +692,7 @@ TEST_CASE("builder: a mark-drawn glyph is its profile minimum whatever it is nam
         build_state(c, root, (which == 0) ? "V" : "AVeryLongPseudostateName", kind, {})
       };
       StateId const to{ build_state(c, root, "S", StateKind::Normal, {}) };
-      build_trans(c, mark, to, TransKind::External, {});
+      build_trans(c, mark, to, TransKind::Default, {});
 
       Spaces s;
       REQUIRE(measure_chart(c, bundled(), p, s));
@@ -734,7 +734,7 @@ TEST_CASE("builder: a history mark stays inside the circle it is drawn in") {
     SubmachineId const root{ build_chart(c, "t", {}) };
     StateId const h{ build_state(c, root, "Memory", kind, {}) };
     StateId const to{ build_state(c, root, "S", StateKind::Normal, {}) };
-    build_trans(c, h, to, TransKind::External, {});
+    build_trans(c, h, to, TransKind::Default, {});
 
     Built const b{ pipeline(std::move(c), readable()) };
     scav_prim const *circle{ nullptr };
@@ -819,7 +819,7 @@ TEST_CASE("builder: an internal loop's label is a path box seated inside its sta
   StateId const s{ build_state(c, root, "Idle", StateKind::Normal, {}) };
   StateId const other{ build_state(c, root, "Busy", StateKind::Normal, {}) };
   build_trans(c, s, s, TransKind::Internal, "tick");
-  build_trans(c, s, other, TransKind::External, "go");
+  build_trans(c, s, other, TransKind::Default, "go");
   build_trans(c, s, s, TransKind::Local, "tock");
 
   scav_profile const p{ readable() };
@@ -907,7 +907,7 @@ TEST_CASE("builder: a route into a pseudostate reaches the drawn mark") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const dot{ build_state(c, root, "", StateKind::Initial, {}) };
   StateId const to{ build_state(c, root, "S", StateKind::Normal, {}) };
-  build_trans(c, dot, to, TransKind::External, {});
+  build_trans(c, dot, to, TransKind::Default, {});
 
   Built const b{ pipeline(std::move(c), readable()) };
   scav_prim const *circle{ nullptr };
@@ -938,7 +938,7 @@ TEST_CASE("builder: a choice's name fits inside the diamond, not across it") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const pick{ build_state(c, root, "SelfCheck", StateKind::Choice, {}) };
   StateId const to{ build_state(c, root, "S", StateKind::Normal, {}) };
-  build_trans(c, pick, to, TransKind::External, {});
+  build_trans(c, pick, to, TransKind::Default, {});
 
   Built const b{ pipeline(std::move(c), readable()) };
   scav_prim const *diamond{ nullptr };
@@ -1008,10 +1008,10 @@ TEST_CASE("builder: an arrowhead points at the border, not at the trimmed end") 
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const z{ build_state(c, root, "Z", StateKind::Normal, {}) };
-  build_trans(c, a, z, TransKind::External, {});
+  build_trans(c, a, z, TransKind::Default, {});
   // A second, shorter hop whose clear is capped at half its last leg.
   StateId const y{ build_state(c, root, "Y", StateKind::Normal, {}) };
-  build_trans(c, z, y, TransKind::External, {});
+  build_trans(c, z, y, TransKind::Default, {});
 
   Built const b{ pipeline(std::move(c), readable()) };
   ColumnId const boxes{ column_find(b.chart, "scav.geom.state") };
@@ -1332,8 +1332,8 @@ TEST_CASE("builder: a tombstoned transition reserves neither arrowhead room nor 
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  TransId const dead{ build_trans(c, a, b, TransKind::External, "gone") };
-  TransId const kept{ build_trans(c, b, a, TransKind::External, "kept") };
+  TransId const dead{ build_trans(c, a, b, TransKind::Default, "gone") };
+  TransId const kept{ build_trans(c, b, a, TransKind::Default, "kept") };
   c.transitions[dead.v].live = 0;
 
   Spaces s;
@@ -1351,7 +1351,7 @@ TEST_CASE("builder: a label the font cannot measure refuses the pass") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, NO_GLYPH);
+  build_trans(c, a, b, TransKind::Default, NO_GLYPH);
   Spaces s;
   CHECK(!measure_chart(c, bundled(), readable(), s));
 }
@@ -1376,7 +1376,7 @@ TEST_CASE("builder: a path box past the quarter-domain is refused on either axis
     SubmachineId const root{ build_chart(c, "t", {}) };
     StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
     StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-    build_trans(c, a, b, TransKind::External, label);
+    build_trans(c, a, b, TransKind::Default, label);
     Spaces sp;
     return !measure_chart(c, bundled(), readable(), sp);
   };
@@ -1401,7 +1401,7 @@ TEST_CASE("builder: a geometry column of a foreign shape is not read as layout's
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
   geom_column(c, "scav.geom.state", ElemKind::State, ValueKind::Pod, RECT_SIZE / 2);
   geom_column(c, "scav.geom.route", ElemKind::Transition, ValueKind::Span, 4);
   geom_column(c, "scav.geom.point", ElemKind::Point, ValueKind::Pod, 4);
@@ -1516,7 +1516,7 @@ TEST_CASE("builder: a route draws one polyline and one head, or nothing at all")
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
   ColumnId const routes{
     geom_column(c, "scav.geom.route", ElemKind::Transition, ValueKind::Span, 8)
   };
@@ -1557,7 +1557,7 @@ TEST_CASE("builder: a transition that asked for no box gets none") {
   StateId const s{ build_state(c, root, "S", StateKind::Normal, {}) };
   StateId const other{ build_state(c, root, "O", StateKind::Normal, {}) };
   TransId const silent{ build_trans(c, s, s, TransKind::Internal, {}) };
-  TransId const dead{ build_trans(c, s, other, TransKind::External, "gone") };
+  TransId const dead{ build_trans(c, s, other, TransKind::Default, "gone") };
   TransId const spoken{ build_trans(c, s, s, TransKind::Internal, "tick") };
   c.transitions[dead.v].live = 0;
 
@@ -1584,7 +1584,7 @@ TEST_CASE("builder: a routed label is found only where one was placed for it") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, "go");
+  build_trans(c, a, b, TransKind::Default, "go");
   Spaces sp;
   REQUIRE(measure_chart(c, bundled(), readable(), sp));
   REQUIRE(sp.path_box.size() == 1);
@@ -1604,10 +1604,10 @@ TEST_CASE("builder: a label with nothing to say or no way to say it draws nothin
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  TransId const bare{ build_trans(c, a, b, TransKind::External, {}) };
-  TransId const dead{ build_trans(c, a, b, TransKind::External, "gone") };
-  TransId const unglyphed{ build_trans(c, a, b, TransKind::External, NO_GLYPH) };
-  TransId const good{ build_trans(c, a, b, TransKind::External, "go") };
+  TransId const bare{ build_trans(c, a, b, TransKind::Default, {}) };
+  TransId const dead{ build_trans(c, a, b, TransKind::Default, "gone") };
+  TransId const unglyphed{ build_trans(c, a, b, TransKind::Default, NO_GLYPH) };
+  TransId const good{ build_trans(c, a, b, TransKind::Default, "go") };
   c.transitions[dead.v].live = 0;
 
   Metrics const m{ bundled() };
@@ -1678,9 +1678,9 @@ TEST_CASE("builder: the head's tip is the route's end and the line stops at its 
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, a, TransKind::External, {});
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, a, TransKind::Default, {});
+  build_trans(c, a, b, TransKind::Default, {});
   ColumnId const routes{
     geom_column(c, "scav.geom.route", ElemKind::Transition, ValueKind::Span, 8)
   };
@@ -1756,7 +1756,7 @@ TEST_CASE("builder: a route whose point column was never filled draws nothing") 
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
   ColumnId const routes{
     geom_column(c, "scav.geom.route", ElemKind::Transition, ValueKind::Span, 8)
   };

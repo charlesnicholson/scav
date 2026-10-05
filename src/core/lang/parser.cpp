@@ -394,12 +394,12 @@ bool parse_trans(Parser &p, uint32_t &out_stmt, bool &opens_block) {
   TransStmt stmt{ .src = {},
                   .dst = {},
                   .label = {},
-                  .kind = TransKind::External,
+                  .kind = TransKind::Default,
                   .has_block = 0 };
   // An identifier naming a transition kind is the kind; any other identifier starts
   // the source endpoint.
   if (at_kind(p, TokKind::Ident)) {
-    TransKind kind{ TransKind::External };
+    TransKind kind{ TransKind::Default };
     if (syntax_trans_kind_from_name(tok_text(p, peek(p)), kind)) {
       stmt.kind = kind;
       advance(p);

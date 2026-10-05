@@ -31,7 +31,12 @@ TEST_CASE("syntax: every enum has a name and every kind word round-trips") {
     CHECK(syntax_state_kind_from_name(name, parsed) == spellable);
     if (spellable) { CHECK(parsed == kind); }
   }
-  for (uint32_t i = 0; i <= static_cast<uint32_t>(TransKind::Local); ++i) {
+  CHECK(std::string{ syntax_trans_kind_name(TransKind::Default) } == "default");
+  TransKind unparsed{ TransKind::Local };
+  CHECK_FALSE(syntax_trans_kind_from_name("default", unparsed));  // written as no keyword
+  for (uint32_t i = static_cast<uint32_t>(TransKind::External);
+       i <= static_cast<uint32_t>(TransKind::Local);
+       ++i) {
     TransKind const kind{ static_cast<TransKind>(i) };
     TransKind parsed{ TransKind::External };
     CHECK(syntax_trans_kind_from_name(syntax_trans_kind_name(kind), parsed));

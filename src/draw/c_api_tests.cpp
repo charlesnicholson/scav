@@ -44,7 +44,7 @@ Chart small_chart() {
   SubmachineId const main{ build_submachine(c, on, "main", {}) };
   StateId const idle{ build_state(c, main, "Idle", StateKind::Normal, {}) };
   StateId const busy{ build_state(c, main, "Busy", StateKind::Normal, {}) };
-  build_trans(c, idle, busy, TransKind::External, "work arrived");
+  build_trans(c, idle, busy, TransKind::Default, "work arrived");
   return c;
 }
 

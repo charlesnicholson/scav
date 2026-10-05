@@ -152,7 +152,7 @@ TEST_CASE("route: a sibling transition is a straight line between two centres") 
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const o{ empty_orders(c, g) };
@@ -174,7 +174,7 @@ TEST_CASE("route: a bend the layering left is a point on the way") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   SubmachineOrders o{ empty_orders(c, g) };
@@ -195,7 +195,7 @@ TEST_CASE("route: a reversed chain is walked the way it was authored") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   SubmachineOrders o{ empty_orders(c, g) };
@@ -222,7 +222,7 @@ TEST_CASE("route: a crossing puts its slot on the crossed border") {
   SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
   StateId const s{ build_state(c, inner, "S", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
-  build_trans(c, s, d, TransKind::External, {});
+  build_trans(c, s, d, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   REQUIRE(g.trans_segments[0].len == 2);
@@ -264,7 +264,7 @@ TEST_CASE("route: an exit slot slides level with the entry slot across it") {
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   SubmachineId const in_b{ build_submachine(c, b, {}, {}) };
   StateId const t{ build_state(c, in_b, "T", StateKind::Normal, {}) };
-  build_trans(c, s, t, TransKind::External, {});
+  build_trans(c, s, t, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   REQUIRE(g.trans_segments[0].len == 3);
@@ -331,7 +331,7 @@ TEST_CASE("route: a route entering a composite leaves its border square, never a
   SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
   StateId const s{ build_state(c, inner, "S", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
-  build_trans(c, d, s, TransKind::External, {});
+  build_trans(c, d, s, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   REQUIRE(g.trans_segments[0].len == 2);
@@ -377,7 +377,7 @@ TEST_CASE("route: the slot side follows the route's direction, not the packing")
   StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
   SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
   StateId const s{ build_state(c, inner, "S", StateKind::Normal, {}) };
-  build_trans(c, d, s, TransKind::External, {});
+  build_trans(c, d, s, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   REQUIRE(g.trans_segments[0].len == 2);
@@ -414,7 +414,7 @@ TEST_CASE("route: a port on a cross border puts its slot on the top or bottom bo
   StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
   SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
   StateId const s{ build_state(c, inner, "S", StateKind::Normal, {}) };
-  build_trans(c, d, s, TransKind::External, {});
+  build_trans(c, d, s, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   REQUIRE(g.trans_segments[0].len == 2);
@@ -488,7 +488,7 @@ TEST_CASE("route: an external self-loop leaves its trailing face and returns to 
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
-  build_trans(c, a, a, TransKind::External, {});
+  build_trans(c, a, a, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const o{ empty_orders(c, g) };
@@ -548,7 +548,7 @@ TEST_CASE(
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   build_trans(c, a, a, TransKind::Internal, {});
-  build_trans(c, b, a, TransKind::External, {});
+  build_trans(c, b, a, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const o{ empty_orders(c, g) };
@@ -590,7 +590,7 @@ TEST_CASE("route: a port slot on a face an inner loop leaves moves clear of its 
   SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
   StateId const s{ build_state(c, inner, "S", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
-  build_trans(c, s, d, TransKind::External, {});
+  build_trans(c, s, d, TransKind::Default, {});
   build_trans(c, comp, comp, TransKind::Internal, {});
 
   SplitGraph const g{ decompose(c) };
@@ -636,7 +636,7 @@ TEST_CASE("route: a clear leaves the route's ends where the router put them") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const o{ empty_orders(c, g) };
@@ -658,7 +658,7 @@ TEST_CASE("route: a tombstoned state is no obstacle to the frame it sat in") {
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const gone{ build_state(c, root, "G", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
   c.states[gone.v].live = 0;
 
   SplitGraph const g{ decompose(c) };
@@ -685,7 +685,7 @@ TEST_CASE("route: a port with no boundary node falls back on the crossed box's c
   SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
   StateId const s{ build_state(c, inner, "S", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
-  build_trans(c, s, d, TransKind::External, {});
+  build_trans(c, s, d, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   REQUIRE(g.segments[0].dst_port != INVALID);
@@ -719,7 +719,7 @@ TEST_CASE("route: a path box centres on its route's middle point") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const o{ empty_orders(c, g) };
@@ -754,7 +754,7 @@ TEST_CASE("route: a transition to an enclosing state ends on that state's inner 
   StateId const outer{ build_state(c, root, "O", StateKind::Normal, {}) };
   SubmachineId const inner{ build_submachine(c, outer, {}, {}) };
   StateId const s{ build_state(c, inner, "S", StateKind::Normal, {}) };
-  build_trans(c, s, outer, TransKind::External, {});
+  build_trans(c, s, outer, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   REQUIRE(g.trans_segments[0].len == 1);
@@ -918,7 +918,7 @@ TEST_CASE("route: a net the router said nothing about leaves no polyline behind"
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const o{ empty_orders(c, g) };
@@ -942,9 +942,9 @@ TEST_CASE("route: the transitions marked failed are the ones with a fallen-back 
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, d, TransKind::External, {});
-  build_trans(c, d, a, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, d, TransKind::Default, {});
+  build_trans(c, d, a, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const o{ empty_orders(c, g) };
@@ -992,7 +992,7 @@ TEST_CASE("route: the boxes placed are the ones the strip matching places") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
   build_trans(c, a, a, TransKind::Internal, {});  // its loop room seats its label
 
   SplitGraph const g{ decompose(c) };
@@ -1021,8 +1021,8 @@ TEST_CASE("route: nothing is nudged for a router that asks for no margin") {
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const p{ build_state(c, root, "P", StateKind::Normal, {}) };
   StateId const q{ build_state(c, root, "Q", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, p, q, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, p, q, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const o{ empty_orders(c, g) };
@@ -1073,8 +1073,8 @@ TEST_CASE("route: a nudge in its own frame leaves a transition's last leg its cl
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const p{ build_state(c, root, "P", StateKind::Normal, {}) };
   StateId const q{ build_state(c, root, "Q", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, p, q, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, p, q, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const o{ empty_orders(c, g) };
@@ -1107,8 +1107,8 @@ TEST_CASE("route: a nudge inside a composite is bounded by that state's own box"
   StateId const b{ build_state(c, inner, "B", StateKind::Normal, {}) };
   StateId const p{ build_state(c, inner, "P", StateKind::Normal, {}) };
   StateId const q{ build_state(c, inner, "Q", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, p, q, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, p, q, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const o{ empty_orders(c, g) };
@@ -1143,7 +1143,7 @@ TEST_CASE("route: nets join only where one ends exactly where the next begins") 
   SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
   StateId const s{ build_state(c, inner, "S", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
-  build_trans(c, s, d, TransKind::External, {});
+  build_trans(c, s, d, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   REQUIRE(g.trans_segments[0].len == 2);
@@ -1505,7 +1505,7 @@ TEST_CASE("route: a state outside its composite's box is an obstacle where it li
   StateId const y{ build_state(c, in_d, "Y", StateKind::Normal, {}) };
   SubmachineId const in_a{ build_submachine(c, a, {}, {}) };
   StateId const s{ build_state(c, in_a, "S", StateKind::Normal, {}) };
-  build_trans(c, x, y, TransKind::External, {});
+  build_trans(c, x, y, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const o{ empty_orders(c, g) };
@@ -1712,8 +1712,8 @@ TEST_CASE("route: an outer loop's face is traced with its segment and transition
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
-  build_trans(c, b, a, TransKind::External, {});
-  build_trans(c, a, a, TransKind::External, {});
+  build_trans(c, b, a, TransKind::Default, {});
+  build_trans(c, a, a, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const o{ empty_orders(c, g) };

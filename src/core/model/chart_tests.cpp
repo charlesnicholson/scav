@@ -52,7 +52,7 @@ TEST_CASE("chart: liveness is the row's flag; the chart entity has none") {
   Chart c;
   SubmachineId const root{ build_chart(c, "c", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
-  TransId const t{ build_trans(c, a, a, TransKind::External, {}) };
+  TransId const t{ build_trans(c, a, a, TransKind::Default, {}) };
   CHECK(chart_live(c, ref(a)));
   CHECK(chart_live(c, ref(t)));
   CHECK(chart_live(c, ref(root)));

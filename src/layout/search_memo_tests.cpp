@@ -106,7 +106,7 @@ Laid lay_out(char const *name, bool labelled = false) {
   std::vector<scav_path_box> boxes;
   for (uint32_t t = 0; labelled && (t < c.transitions.size()); ++t) {
     Transition const &tr{ c.transitions[t] };
-    if ((tr.live == 0) || ((tr.src == tr.dst) && (tr.kind != TransKind::External))) {
+    if ((tr.live == 0) || ((tr.src == tr.dst) && (tr.kind != TransKind::Default))) {
       continue;
     }
     boxes.push_back({ .subject = t, .w = 40, .h = 12, .order = 0 });

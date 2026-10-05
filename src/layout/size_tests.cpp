@@ -108,7 +108,7 @@ TEST_CASE("size: two ranks sit rank_sep apart along the layering axis") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
   scav_profile const p{ unfolded() };
 
   SizedLayout z;
@@ -135,7 +135,7 @@ TEST_CASE("size: a label's gap widens the boundary it was charged to") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
   scav_profile const p{ unfolded() };
 
   SizedLayout z;
@@ -196,8 +196,8 @@ TEST_CASE("size: two nodes in one rank stack node_sep apart") {
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, a, d, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, a, d, TransKind::Default, {});
   scav_profile const p{ profile() };
 
   SizedLayout z;
@@ -225,8 +225,8 @@ TEST_CASE("size: an edge within one rank stacks its ends rather than aligning th
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, a, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, a, TransKind::Default, {});
   scav_profile const p{ unfolded() };
 
   SizedLayout z;
@@ -254,9 +254,9 @@ TEST_CASE("size: states joined inside one column share the widest one's centre l
   StateId const wide{ build_state(c, root, "W", StateKind::Normal, {}) };
   StateId const narrow{ build_state(c, root, "N", StateKind::Normal, {}) };
   StateId const bar{ build_state(c, root, "F", StateKind::Fork, {}) };
-  build_trans(c, narrow, wide, TransKind::External, {});
-  build_trans(c, wide, narrow, TransKind::External, {});
-  build_trans(c, wide, bar, TransKind::External, {});
+  build_trans(c, narrow, wide, TransKind::Default, {});
+  build_trans(c, wide, narrow, TransKind::Default, {});
+  build_trans(c, wide, bar, TransKind::Default, {});
   scav_profile const p{ unfolded() };
   std::vector<scav_box_space> boxes(c.states.size(), scav_box_space{});
   boxes[wide.v].min_w = 2000;
@@ -308,8 +308,8 @@ TEST_CASE("size: two labelled edges inside one column widen it for a label eithe
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, a, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, a, TransKind::Default, {});
   SplitGraph const g{ decompose(c) };
   scav_profile const p{ unfolded() };
   constexpr int32_t LABEL_W{ 1500 };
@@ -369,7 +369,7 @@ TEST_CASE("size: a fold that stacks its pieces carries no label room onto the se
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
   std::vector<scav_path_box> const labels{
     { .subject = 0, .w = 1500, .h = 200, .order = 0 }
   };
@@ -415,7 +415,7 @@ TEST_CASE("size: a fold never cuts a boundary node away from the node it joins")
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
   std::vector<scav_box_space> boxes(c.states.size(), scav_box_space{});
   boxes[a.v].min_w = 3000;
   boxes[b.v].min_w = 3000;
@@ -462,8 +462,8 @@ TEST_CASE("size: a labelled pair a fold stacks has room for a label either side"
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, a, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, a, TransKind::Default, {});
   constexpr int32_t LABEL_W{ 1500 };
   std::vector<scav_path_box> const labels{
     { .subject = 0, .w = LABEL_W, .h = 200, .order = 0 },
@@ -512,10 +512,10 @@ TEST_CASE(
   StateId const clear{ build_state(c, root, "Clear", StateKind::Normal, {}) };
   StateId const tripped{ build_state(c, root, "Tripped", StateKind::Normal, {}) };
   StateId const latched{ build_state(c, root, "Latched", StateKind::Normal, {}) };
-  build_trans(c, start, clear, TransKind::External, {});
-  build_trans(c, clear, tripped, TransKind::External, {});
-  build_trans(c, tripped, latched, TransKind::External, {});
-  build_trans(c, latched, clear, TransKind::External, {});
+  build_trans(c, start, clear, TransKind::Default, {});
+  build_trans(c, clear, tripped, TransKind::Default, {});
+  build_trans(c, tripped, latched, TransKind::Default, {});
+  build_trans(c, latched, clear, TransKind::Default, {});
   constexpr int32_t LABEL_W{ 1500 };
   constexpr int32_t INNER_W{ 700 };
   std::vector<scav_path_box> const labels{
@@ -571,9 +571,9 @@ TEST_CASE("size: a frame turned down runs its ranks top to bottom, and never fol
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
-  build_trans(c, start, a, TransKind::External, {});
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, d, TransKind::External, {});
+  build_trans(c, start, a, TransKind::Default, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, d, TransKind::Default, {});
   scav_profile p{ profile() };
   p.dar_num = 1024;
   p.dar_den = 1;
@@ -622,7 +622,7 @@ TEST_CASE("size: a bar lies down in a frame running down") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const bar{ build_state(c, root, "F", StateKind::Fork, {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
-  build_trans(c, bar, a, TransKind::External, {});
+  build_trans(c, bar, a, TransKind::Default, {});
   scav_profile const p{ unfolded() };
   auto const sized = [&](bool down) {
     SubmachineOrders o{ one_frame(c,
@@ -650,7 +650,7 @@ TEST_CASE("size: a label beside a leg between two ranks has its room on one side
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
   constexpr int32_t LABEL_W{ 3000 };
   std::vector<scav_path_box> const labels{
     { .subject = 0, .w = LABEL_W, .h = 200, .order = 0 }
@@ -685,8 +685,8 @@ TEST_CASE("size: an edge pointing back a rank still aligns its ends") {
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
-  build_trans(c, b, a, TransKind::External, {});
-  build_trans(c, d, a, TransKind::External, {});
+  build_trans(c, b, a, TransKind::Default, {});
+  build_trans(c, d, a, TransKind::Default, {});
   scav_profile const p{ unfolded() };
 
   SizedLayout z;
@@ -721,8 +721,8 @@ TEST_CASE("size: an initial pseudostate sits one rank gap before its target") {
   StateId const start{ build_state(c, root, {}, StateKind::Initial, {}) };
   StateId const wide{ build_state(c, root, "W", StateKind::Normal, {}) };
   StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
-  build_trans(c, start, x, TransKind::External, {});
-  build_trans(c, wide, x, TransKind::External, {});
+  build_trans(c, start, x, TransKind::Default, {});
+  build_trans(c, wide, x, TransKind::Default, {});
   scav_profile const p{ unfolded() };
   std::vector<scav_box_space> boxes(c.states.size(), scav_box_space{});
   boxes[wide.v].min_w = 2000;
@@ -765,10 +765,10 @@ TEST_CASE("size: an initial pseudostate is level with its target where there is 
   StateId const v{ build_state(c, root, "V", StateKind::Normal, {}) };
   StateId const y{ build_state(c, root, "Y", StateKind::Normal, {}) };
   StateId const z2{ build_state(c, root, "Z", StateKind::Normal, {}) };
-  build_trans(c, start, x, TransKind::External, {});
-  build_trans(c, x, y, TransKind::External, {});
-  build_trans(c, x, z2, TransKind::External, {});
-  build_trans(c, v, z2, TransKind::External, {});
+  build_trans(c, start, x, TransKind::Default, {});
+  build_trans(c, x, y, TransKind::Default, {});
+  build_trans(c, x, z2, TransKind::Default, {});
+  build_trans(c, v, z2, TransKind::Default, {});
   scav_profile const p{ unfolded() };
 
   SizedLayout z;
@@ -803,8 +803,8 @@ TEST_CASE("size: a final pseudostate sits rank_sep after its source, level with 
   StateId const wide{ build_state(c, root, "W", StateKind::Normal, {}) };
   StateId const done{ build_state(c, root, {}, StateKind::Final, {}) };
   StateId const y{ build_state(c, root, "Y", StateKind::Normal, {}) };
-  build_trans(c, x, done, TransKind::External, {});
-  build_trans(c, wide, y, TransKind::External, {});
+  build_trans(c, x, done, TransKind::Default, {});
+  build_trans(c, wide, y, TransKind::Default, {});
   scav_profile const p{ unfolded() };
   std::vector<scav_box_space> boxes(c.states.size(), scav_box_space{});
   boxes[wide.v].min_w = 2000;
@@ -846,13 +846,13 @@ TEST_CASE("size: a fold never cuts between an initial pseudostate and its target
   for (uint32_t i = 0; i < 6; ++i) {
     chain.push_back(build_state(c, root, "S" + std::to_string(i), StateKind::Normal, {}));
   }
-  build_trans(c, start, chain[0], TransKind::External, {});
+  build_trans(c, start, chain[0], TransKind::Default, {});
   std::vector<OrderNode> nodes{ state_node(start.v, 0, 0) };
   std::vector<OrderEdge> edges{ { .src = 0, .dst = 1, .segment = 0, .reversed = 0 } };
   for (uint32_t i = 0; i < chain.size(); ++i) {
     nodes.push_back(state_node(chain[i].v, i + 1, 0));
     if (i + 1 < chain.size()) {
-      build_trans(c, chain[i], chain[i + 1], TransKind::External, {});
+      build_trans(c, chain[i], chain[i + 1], TransKind::Default, {});
       edges.push_back({ .src = i + 1, .dst = i + 2, .segment = i + 1, .reversed = 0 });
     }
   }
@@ -1132,7 +1132,7 @@ TEST_CASE("size: a folded rank run packs its pieces rather than stacking them") 
     chain.push_back(build_state(c, root, {}, StateKind::Normal, {}));
   }
   for (uint32_t i = 1; i < chain.size(); ++i) {
-    build_trans(c, chain[i - 1], chain[i], TransKind::External, {});
+    build_trans(c, chain[i - 1], chain[i], TransKind::Default, {});
   }
   std::vector<scav_box_space> boxes(c.states.size(), scav_box_space{});
   boxes[chain[4].v] = { .min_w = 400, .h_before = 6000, .h_after = 0 };
@@ -1803,7 +1803,7 @@ SiblingSubs sibling_subs(Chart &c,
     StateId prev{ INVALID };
     for (uint32_t i = 0; i < ranks; ++i) {
       StateId const at{ build_state(c, m, "S", StateKind::Normal, {}) };
-      if (prev.v != INVALID) { build_trans(c, prev, at, TransKind::External, {}); }
+      if (prev.v != INVALID) { build_trans(c, prev, at, TransKind::Default, {}); }
       prev = at;
     }
   }

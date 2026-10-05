@@ -235,7 +235,7 @@ Span build_head(Printer &p, uint32_t stmt) {
       if (payload >= pd.transitions.size()) { break; }
       TransStmt const &s{ pd.transitions[payload] };
       p.text += "trans ";
-      if (s.kind != TransKind::External) {
+      if (s.kind != TransKind::Default) {
         p.text += syntax_trans_kind_name(s.kind);
         p.text += ' ';
       }

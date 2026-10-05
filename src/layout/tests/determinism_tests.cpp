@@ -186,7 +186,7 @@ Chart tied_chart() {
     at = build_state(c, parent, "S", StateKind::Normal, {});
     parent = build_submachine(c, at, {}, {});
   }
-  build_trans(c, at, at, TransKind::External, {});
+  build_trans(c, at, at, TransKind::Default, {});
   return c;
 }
 

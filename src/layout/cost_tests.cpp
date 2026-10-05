@@ -97,7 +97,7 @@ TEST_CASE("cost: a straight route between two boxes costs its length and the cha
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
@@ -121,7 +121,7 @@ TEST_CASE("cost: a corner in a polyline is one bend") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   Routes const r{
@@ -156,9 +156,9 @@ Transit transit_chart() {
   out.moving = build_state(c, arm_m, "Moving", StateKind::Normal, {});
   SubmachineId const travel{ build_submachine(c, out.moving, "travel", {}) };
   out.dst = build_state(c, travel, "Dst", StateKind::Normal, {});
-  build_trans(c, out.src, out.dst, TransKind::External, {});
-  build_trans(c, out.dst, out.src, TransKind::External, {});
-  build_trans(c, out.src, out.arm, TransKind::External, {});
+  build_trans(c, out.src, out.dst, TransKind::Default, {});
+  build_trans(c, out.dst, out.src, TransKind::Default, {});
+  build_trans(c, out.src, out.arm, TransKind::Default, {});
   out.z = blank(c);
   out.z.state[out.src.v] = { .x = 0, .y = 100, .w = 100, .h = 60 };
   out.z.state[out.arm.v] = { .x = 200, .y = 0, .w = 600, .h = 400 };
@@ -240,8 +240,8 @@ TEST_CASE("cost: two routes that properly cross count once") {
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
   StateId const e{ build_state(c, root, "E", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, d, e, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, d, e, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   Routes const r{ routes_of(c,
@@ -264,7 +264,7 @@ Chart edges(uint32_t n) {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  for (uint32_t i = 0; i < n; ++i) { build_trans(c, a, b, TransKind::External, {}); }
+  for (uint32_t i = 0; i < n; ++i) { build_trans(c, a, b, TransKind::Default, {}); }
   return c;
 }
 
@@ -281,7 +281,7 @@ TEST_CASE(
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  for (uint32_t i = 0; i < 4; ++i) { build_trans(c, a, b, TransKind::External, {}); }
+  for (uint32_t i = 0; i < 4; ++i) { build_trans(c, a, b, TransKind::Default, {}); }
 
   SizedLayout const z{ blank(c) };
   Routes const r{ routes_of(
@@ -336,8 +336,8 @@ TEST_CASE("cost: party marks every transition while the drawing breaks Tier 0") 
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const other{ build_state(c, root, "X", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 20, .h = 2000 };
@@ -549,7 +549,7 @@ TEST_CASE("cost: only the excess over the direct distance is charged") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   // Straight: length equals the direct distance, excess 0.
@@ -605,7 +605,7 @@ TEST_CASE("cost: an edge through a stranger's box counts, through its own does n
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const other{ build_state(c, root, "X", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 20, .h = 20 };
@@ -626,7 +626,7 @@ TEST_CASE(
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const other{ build_state(c, root, "X", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
@@ -668,7 +668,7 @@ TEST_CASE("cost: a route that turns straight back along itself is a Tier-0 viola
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
   z.state[b.v] = { .x = 400, .y = 0, .w = 100, .h = 40 };
@@ -704,7 +704,7 @@ TEST_CASE("cost: a route through a region neither end is in is a Tier-0 violatio
   StateId const ready{ build_state(c, main_sub, "Ready", StateKind::Normal, {}) };
   StateId const idle{ build_state(c, aux_sub, "Idle", StateKind::Normal, {}) };
   StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
-  build_trans(c, ready, x, TransKind::External, {});
+  build_trans(c, ready, x, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[on.v] = { .x = 0, .y = 0, .w = 400, .h = 200 };
@@ -745,7 +745,7 @@ TEST_CASE("cost: a route along its owner's border beside a sibling region crosse
   SubmachineId const aux_sub{ build_submachine(c, on, "aux", {}) };
   StateId const ready{ build_state(c, main_sub, "Ready", StateKind::Normal, {}) };
   StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
-  build_trans(c, ready, x, TransKind::External, {});
+  build_trans(c, ready, x, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[on.v] = { .x = 0, .y = 0, .w = 400, .h = 200 };
@@ -783,7 +783,7 @@ TEST_CASE("cost: a region is tested where the descent reaches its owner") {
   SubmachineId const aux_sub{ build_submachine(c, on, "aux", {}) };
   StateId const ready{ build_state(c, main_sub, "Ready", StateKind::Normal, {}) };
   StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
-  build_trans(c, ready, x, TransKind::External, {});
+  build_trans(c, ready, x, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[shell.v] = { .x = -10, .y = -10, .w = 420, .h = 220 };
@@ -827,7 +827,7 @@ TEST_CASE("cost: a placed box over a state neither endpoint is under breaks Tier
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const other{ build_state(c, root, "X", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 100 };
@@ -856,7 +856,7 @@ TEST_CASE("cost: inside the composite it runs in, only the text bands cost") {
   SubmachineId const inner{ build_submachine(c, outer, "main", {}) };
   StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, inner, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[outer.v] = { .x = 0, .y = 0, .w = 600, .h = 200 };
@@ -884,9 +884,9 @@ TEST_CASE(
   SubmachineId const inner{ build_submachine(c, outer, "main", {}) };
   StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
   StateId const away{ build_state(c, root, "Away", StateKind::Normal, {}) };
-  build_trans(c, outer, a, TransKind::External, {});
-  build_trans(c, a, outer, TransKind::External, {});
-  build_trans(c, outer, away, TransKind::External, {});
+  build_trans(c, outer, a, TransKind::Default, {});
+  build_trans(c, a, outer, TransKind::Default, {});
+  build_trans(c, outer, away, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[outer.v] = { .x = 0, .y = 0, .w = 600, .h = 200 };
@@ -915,8 +915,8 @@ TEST_CASE("cost: a placed box over another transition's route breaks Tier 0") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, a, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, a, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 100 };
@@ -946,8 +946,8 @@ TEST_CASE("cost: a box nearer a foreign route than its own is charged the shortf
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, a, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, a, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 200 };
@@ -981,7 +981,7 @@ TEST_CASE("cost: a placed box past the leader from its own route breaks Tier 0")
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 300, .w = 100, .h = 100 };
@@ -1016,7 +1016,7 @@ TEST_CASE("cost: with no other route to be near, no box is charged") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   Routes r{ routes_of(c, { { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } } }) };
@@ -1031,7 +1031,7 @@ TEST_CASE("cost: a placed box the space table does not name owns no route") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   Routes r{ routes_of(c, { { { .x = 100, .y = 150 }, { .x = 400, .y = 150 } } }) };
@@ -1060,7 +1060,7 @@ TEST_CASE("cost: a box whose own transition has no route is charged nothing") {
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   build_trans(c, a, a, TransKind::Internal, {});  // no route: drawn in A's rect
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   // The box belongs to the routeless transition and sits near the other's line.
@@ -1082,7 +1082,7 @@ TEST_CASE("cost: two placed boxes over each other are one label cost") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 100 };
@@ -1262,7 +1262,7 @@ Regions regions(StateKind src_kind, StateKind dst_kind) {
   out.right = build_submachine(out.c, owner, "right", {});
   StateId const a{ build_state(out.c, out.left, "A", src_kind, {}) };
   StateId const b{ build_state(out.c, out.right, "B", dst_kind, {}) };
-  build_trans(out.c, a, b, TransKind::External, {});
+  build_trans(out.c, a, b, TransKind::Default, {});
   return out;
 }
 
@@ -1324,7 +1324,7 @@ TEST_CASE("cost: a route that leaves a box across its far side is inside it") {
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const other{ build_state(c, root, "X", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 20, .h = 20 };
@@ -1349,7 +1349,7 @@ TEST_CASE("cost: a tombstone is not a box, an obstacle or a label collision") {
   SubmachineId const dropped{ build_submachine(c, b, "dropped", {}) };
   StateId const p{ build_state(c, dropped, "P", StateKind::Normal, {}) };
   StateId const q{ build_state(c, dropped, "Q", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 100 };
@@ -1389,7 +1389,7 @@ TEST_CASE("cost: a box in the composite's trailing band costs as its title does"
   SubmachineId const inner{ build_submachine(c, outer, "main", {}) };
   StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, inner, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[outer.v] = { .x = 0, .y = 0, .w = 600, .h = 200 };
@@ -1475,7 +1475,7 @@ TEST_CASE("cost: a chart that was never laid out scores nothing") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   CostTerms const unlaid{ cost_columns(c, decompose(c), profile()) };
   CHECK(unlaid.bends == 0);
@@ -1524,7 +1524,7 @@ TEST_CASE("cost: a route reaching past the points scores nothing") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
@@ -1591,7 +1591,7 @@ Composite composite_chart() {
   k.a = build_state(k.c, k.inner, "A", StateKind::Normal, {});
   k.b = build_state(k.c, k.inner, "B", StateKind::Normal, {});
   k.leaf = build_state(k.c, root, "Leaf", StateKind::Normal, {});
-  build_trans(k.c, k.a, k.b, TransKind::External, {});
+  build_trans(k.c, k.a, k.b, TransKind::Default, {});
   return k;
 }
 
@@ -1697,7 +1697,7 @@ TEST_CASE("cost: a state outside every children span answers by the climb") {
   StateId const lost{ build_state(c, root, "Lost", StateKind::Normal, {}) };
   SubmachineId const under{ build_submachine(c, lost, "under", {}) };
   StateId const below{ build_state(c, under, "Below", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
   // The root's child span stops before `Lost`, so the walk skips `Lost` and
   // `Below`; their `parent` links stay intact.
   --c.submachines[root.v].children.len;
@@ -1727,7 +1727,7 @@ TEST_CASE("cost: a live state a tombstone stands over is still an obstacle") {
   StateId const gone{ build_state(c, root, "Gone", StateKind::Normal, {}) };
   SubmachineId const under{ build_submachine(c, gone, "under", {}) };
   StateId const hidden{ build_state(c, under, "Hidden", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
   c.states[gone.v].live = 0;
 
   Ancestry const an{ cost_flatten_ancestry(c) };
@@ -1840,7 +1840,7 @@ Concurrent concurrent_chart() {
   SubmachineId const light{ build_submachine(c, out.owner, "light", {}) };
   out.dark = build_state(c, light, "Dark", StateKind::Normal, {});
   out.dst = build_state(c, root, "Stopped", StateKind::Normal, {});
-  build_trans(c, out.src, out.dst, TransKind::External, {});
+  build_trans(c, out.src, out.dst, TransKind::Default, {});
 
   out.z = blank(c);
   out.z.state[out.src.v] = { .x = 0, .y = 80, .w = 40, .h = 40 };
@@ -1895,7 +1895,7 @@ TEST_CASE("cost: the carve-out excuses a box over an endpoint, not what it holds
   StateId const src{ build_state(c, main, "Src", StateKind::Normal, {}) };
   StateId const stranger{ build_state(c, main, "Stranger", StateKind::Normal, {}) };
   StateId const dst{ build_state(c, root, "Dst", StateKind::Normal, {}) };
-  build_trans(c, src, dst, TransKind::External, {});
+  build_trans(c, src, dst, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[outer.v] = { .x = 0, .y = 0, .w = 400, .h = 200 };
@@ -1951,8 +1951,8 @@ TEST_CASE("cost: collinear pieces meet in one bucket, and a trunk empties it") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   // One bucket, the horizontals at y = 0, sharing [50, 100]; the two verticals
   // sit at different x and so in buckets of their own.
@@ -2045,8 +2045,8 @@ TEST_CASE("cost: a transition whose route vanished is a Tier 0 violation") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, a, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, a, TransKind::Default, {});
 
   SizedLayout z{ blank(c) };
   z.state[a.v] = { .x = 0, .y = 0, .w = 100, .h = 40 };
@@ -2579,7 +2579,7 @@ CostTerms terms(Chart const &c,
            at = enclosing_state(c, at)) {
         if (at.v == tr.dst.v) { host = at.v; }
       }
-      if ((tr.src == tr.dst) && (tr.kind != TransKind::External)) { host = tr.src.v; }
+      if ((tr.src == tr.dst) && (tr.kind != TransKind::Default)) { host = tr.src.v; }
     }
     for (uint32_t st = 0; st < c.states.size(); ++st) {
       if (c.states[st].live == 0) { continue; }
@@ -2775,7 +2775,7 @@ Chart random_chart(Lattice &r) {
   for (uint32_t i = 0; i < trans; ++i) {
     StateId const src{ alive[r.next(static_cast<uint32_t>(alive.size()))] };
     StateId const dst{ alive[r.next(static_cast<uint32_t>(alive.size()))] };
-    build_trans(c, src, dst, TransKind::External, {});
+    build_trans(c, src, dst, TransKind::Default, {});
   }
   for (StateId const st : states) {
     if (dead[st.v] != 0) { c.states[st.v].live = 0; }
@@ -2937,8 +2937,8 @@ TEST_CASE("cost: the indexed terms are the direct scans' at the edges") {
   StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, inner, "B", StateKind::Normal, {}) };
   StateId const far{ build_state(c, root, "Far", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, far, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, far, TransKind::Default, {});
   SplitGraph const g{ decompose(c) };
   CostContext const ctx{ cost_context(c, g) };
   // A band of five and an em of twenty.

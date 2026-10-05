@@ -224,9 +224,9 @@ TEST_CASE("trace: a traced run writes the geometry an untraced one does") {
     StateId const a{ build_state(*c, root, "A", StateKind::Normal, {}) };
     StateId const b{ build_state(*c, root, "B", StateKind::Normal, {}) };
     StateId const d{ build_state(*c, root, "C", StateKind::Normal, {}) };
-    build_trans(*c, a, b, TransKind::External, {});
-    build_trans(*c, b, d, TransKind::External, {});
-    build_trans(*c, d, a, TransKind::External, {});  // the back edge that chains
+    build_trans(*c, a, b, TransKind::Default, {});
+    build_trans(*c, b, d, TransKind::Default, {});
+    build_trans(*c, d, a, TransKind::Default, {});  // the back edge that chains
   }
 
   scav_layout_opts opts{};
@@ -254,7 +254,7 @@ TEST_CASE("trace: a fold pin names the frame it decides and the mode it takes") 
     run.push_back(build_state(c, root, name, StateKind::Normal, {}));
   }
   for (uint32_t k = 0; (k + 1) < run.size(); ++k) {
-    build_trans(c, run[k], run[k + 1], TransKind::External, {});
+    build_trans(c, run[k], run[k + 1], TransKind::Default, {});
   }
   scav_layout_opts opts{};
   REQUIRE(profile_named("readable", opts.profile));
@@ -305,9 +305,9 @@ TEST_CASE("trace: a back edge's kinks are one chained bend, and the trace says s
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, d, TransKind::External, {});
-  TransId const back{ build_trans(c, d, a, TransKind::External, {}) };
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, d, TransKind::Default, {});
+  TransId const back{ build_trans(c, d, a, TransKind::Default, {}) };
 
   LayoutTrace t;
   scav_layout_opts opts{};
@@ -376,7 +376,7 @@ TEST_CASE("trace: a label's charge names its frame, its boundary and its segment
   StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
   SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
   StateId const t{ build_state(c, inner, "T", StateKind::Normal, {}) };
-  TransId const into{ build_trans(c, d, t, TransKind::External, {}) };
+  TransId const into{ build_trans(c, d, t, TransKind::Default, {}) };
   scav_path_box const box{ .subject = into.v, .w = 1511, .h = 269, .order = 0 };
   scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
 
@@ -414,9 +414,9 @@ TEST_CASE("trace: the search re-orders per move, and every move states its verdi
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, d, TransKind::External, {});
-  TransId const back{ build_trans(c, d, a, TransKind::External, {}) };
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, d, TransKind::Default, {});
+  TransId const back{ build_trans(c, d, a, TransKind::Default, {}) };
 
   LayoutTrace t;
   scav_layout_opts opts{};
@@ -476,10 +476,10 @@ TEST_CASE("trace: a reversal is offered only on a segment that lies on a cycle")
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
   StateId const tail{ build_state(c, root, "D", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, d, TransKind::External, {});
-  build_trans(c, d, a, TransKind::External, {});
-  TransId const off{ build_trans(c, d, tail, TransKind::External, {}) };
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, d, TransKind::Default, {});
+  build_trans(c, d, a, TransKind::Default, {});
+  TransId const off{ build_trans(c, d, tail, TransKind::Default, {}) };
 
   LayoutTrace t;
   scav_layout_opts opts{};
@@ -512,10 +512,10 @@ TEST_CASE("trace: a face is offered only where its transition bends or is priced
   StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
   StateId const e{ build_state(c, root, "D", StateKind::Normal, {}) };
   StateId const f{ build_state(c, root, "E", StateKind::Normal, {}) };
-  TransId const straight{ build_trans(c, a, b, TransKind::External, {}) };
-  build_trans(c, d, e, TransKind::External, {});
-  build_trans(c, e, f, TransKind::External, {});
-  build_trans(c, d, f, TransKind::External, {});
+  TransId const straight{ build_trans(c, a, b, TransKind::Default, {}) };
+  build_trans(c, d, e, TransKind::Default, {});
+  build_trans(c, e, f, TransKind::Default, {});
+  build_trans(c, d, f, TransKind::Default, {});
 
   LayoutTrace t;
   scav_layout_opts opts{};
@@ -549,9 +549,9 @@ TEST_CASE("trace: the search scores unchain moves beside placement moves") {
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, d, TransKind::External, {});
-  TransId const back{ build_trans(c, d, a, TransKind::External, {}) };
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, d, TransKind::Default, {});
+  TransId const back{ build_trans(c, d, a, TransKind::Default, {}) };
 
   LayoutTrace t;
   scav_layout_opts opts{};
@@ -610,11 +610,11 @@ TEST_CASE("trace: what a run reports as taken re-derives the run") {
     StateId const b{ build_state(*c, root, "B", StateKind::Normal, {}) };
     StateId const d{ build_state(*c, root, "C", StateKind::Normal, {}) };
     StateId const e{ build_state(*c, root, "D", StateKind::Normal, {}) };
-    build_trans(*c, a, b, TransKind::External, {});
-    build_trans(*c, b, d, TransKind::External, {});
-    build_trans(*c, d, e, TransKind::External, {});
-    build_trans(*c, e, a, TransKind::External, {});
-    build_trans(*c, d, a, TransKind::External, {});
+    build_trans(*c, a, b, TransKind::Default, {});
+    build_trans(*c, b, d, TransKind::Default, {});
+    build_trans(*c, d, e, TransKind::Default, {});
+    build_trans(*c, e, a, TransKind::Default, {});
+    build_trans(*c, d, a, TransKind::Default, {});
   }
 
   scav_layout_opts opts{};

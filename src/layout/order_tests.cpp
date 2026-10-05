@@ -70,8 +70,8 @@ TEST_CASE("order: a chain ranks one state per layer") {
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, d, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, d, TransKind::Default, {});
 
   SubmachineOrders const o{ order_of(c) };
   CHECK(o.sub_ranks[root.v] == 3);
@@ -103,8 +103,8 @@ TEST_CASE("order: a cycle reverses exactly one edge and still ranks") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, a, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, a, TransKind::Default, {});
 
   SubmachineOrders const o{ order_of(c) };
   CHECK(o.sub_ranks[root.v] == 2);
@@ -121,7 +121,7 @@ TEST_CASE("order: an external self-loop contributes no edge") {
   Chart c;
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
-  build_trans(c, a, a, TransKind::External, {});
+  build_trans(c, a, a, TransKind::Default, {});
 
   SubmachineOrders const o{ order_of(c) };
   CHECK(o.sub_ranks[root.v] == 1);
@@ -135,7 +135,7 @@ TEST_CASE("order: a boundary node stands for the port on the frame's own border"
   SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
   StateId const s{ build_state(c, inner, "S", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
-  build_trans(c, s, d, TransKind::External, {});
+  build_trans(c, s, d, TransKind::Default, {});
 
   SubmachineOrders const o{ order_of(c) };
   std::vector<OrderNode> const in{ frame_nodes(o, inner) };
@@ -170,9 +170,9 @@ TEST_CASE(
   StateId const q{ build_state(c, inner, "Q", StateKind::Normal, {}) };
   StateId const b{ build_state(c, inner, "B", StateKind::Normal, {}) };
   StateId const y{ build_state(c, inner, "Y", StateKind::Normal, {}) };
-  build_trans(c, a, y, TransKind::External, {});
-  build_trans(c, q, b, TransKind::External, {});
-  TransId const drop{ build_trans(c, d, b, TransKind::External, {}) };
+  build_trans(c, a, y, TransKind::Default, {});
+  build_trans(c, q, b, TransKind::Default, {});
+  TransId const drop{ build_trans(c, d, b, TransKind::Default, {}) };
   SplitGraph const g{ decompose(c) };
   REQUIRE(g.trans_segments[drop.v].len == 2);
   uint32_t const seg{ g.trans_segments[drop.v].off + 1 };
@@ -237,8 +237,8 @@ TEST_CASE("order: a port pinned where its frame's ranks start or end turns its e
   SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
   StateId const a{ build_state(c, inner, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, inner, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  TransId const drop{ build_trans(c, d, b, TransKind::External, {}) };
+  build_trans(c, a, b, TransKind::Default, {});
+  TransId const drop{ build_trans(c, d, b, TransKind::Default, {}) };
   SplitGraph const g{ decompose(c) };
   uint32_t const seg{ g.trans_segments[drop.v].off + 1 };
   SubmachineOrders const plain{ order_submachines(c, g, {}, profile()) };
@@ -292,9 +292,9 @@ TEST_CASE("order: an edge spanning two ranks is chained through a bend") {
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, d, TransKind::External, {});
-  build_trans(c, a, d, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, d, TransKind::Default, {});
+  build_trans(c, a, d, TransKind::Default, {});
 
   SubmachineOrders const o{ order_of(c) };
   REQUIRE(o.sub_ranks[root.v] == 3);
@@ -316,8 +316,8 @@ TEST_CASE("order: a path box widens the rank boundary its label crosses") {
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, d, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, d, TransKind::Default, {});
 
   scav_path_box const box{ .subject = 1, .w = 700, .h = 40, .order = 0 };
   scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
@@ -336,10 +336,10 @@ TEST_CASE("order: a label across several boundaries is charged where none holds 
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
   StateId const e{ build_state(c, root, "D", StateKind::Normal, {}) };
-  TransId const first{ build_trans(c, a, b, TransKind::External, {}) };
-  build_trans(c, b, d, TransKind::External, {});
-  build_trans(c, d, e, TransKind::External, {});
-  TransId const across{ build_trans(c, a, e, TransKind::External, {}) };
+  TransId const first{ build_trans(c, a, b, TransKind::Default, {}) };
+  build_trans(c, b, d, TransKind::Default, {});
+  build_trans(c, d, e, TransKind::Default, {});
+  TransId const across{ build_trans(c, a, e, TransKind::Default, {}) };
 
   auto const gaps_for = [&](int32_t first_w, int32_t across_w) {
     std::array<scav_path_box, 2> const boxes{
@@ -373,10 +373,10 @@ TEST_CASE("order: the label row holds every label where it was charged, and no l
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
   StateId const e{ build_state(c, root, "D", StateKind::Normal, {}) };
-  TransId const first{ build_trans(c, a, b, TransKind::External, {}) };
-  build_trans(c, b, d, TransKind::External, {});
-  build_trans(c, d, e, TransKind::External, {});
-  TransId const across{ build_trans(c, a, e, TransKind::External, {}) };
+  TransId const first{ build_trans(c, a, b, TransKind::Default, {}) };
+  build_trans(c, b, d, TransKind::Default, {});
+  build_trans(c, d, e, TransKind::Default, {});
+  TransId const across{ build_trans(c, a, e, TransKind::Default, {}) };
 
   auto const rows_for =
       [&](int32_t first_w, int32_t across_w, std::vector<int32_t> &gaps) {
@@ -411,8 +411,8 @@ TEST_CASE("order: a label on a hierarchy-crossing route widens one frame only") 
   StateId const s{ build_state(c, inner, "S", StateKind::Normal, {}) };
   StateId const s2{ build_state(c, inner, "S2", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
-  build_trans(c, s, s2, TransKind::External, {});
-  build_trans(c, s, d, TransKind::External, {});
+  build_trans(c, s, s2, TransKind::Default, {});
+  build_trans(c, s, d, TransKind::Default, {});
 
   scav_path_box const box{ .subject = 1, .w = 500, .h = 40, .order = 0 };
   scav_spaces const s3{ .path_box = &box, .n_path_box = 1 };
@@ -439,7 +439,7 @@ TEST_CASE("order: a label into a composite is charged to the frame holding both 
   StateId const comp{ build_state(c, root, "C", StateKind::Normal, {}) };
   SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
   StateId const t{ build_state(c, inner, "T", StateKind::Normal, {}) };
-  TransId const into{ build_trans(c, d, t, TransKind::External, {}) };
+  TransId const into{ build_trans(c, d, t, TransKind::Default, {}) };
 
   SplitGraph const g{ decompose(c) };
   Span const segs{ g.trans_segments[into.v] };
@@ -476,7 +476,7 @@ TEST_CASE("order: the lowest common ancestor of every shape of two ends") {
 
   auto const holds =
       [&](StateId src, StateId dst, SubmachineId frame, StateId from, StateId to) {
-        TransId const t{ build_trans(c, src, dst, TransKind::External, {}) };
+        TransId const t{ build_trans(c, src, dst, TransKind::Default, {}) };
         CommonAncestor const got{ decompose(c).trans_common[t.v] };
         CAPTURE(src.v);
         CAPTURE(dst.v);
@@ -503,8 +503,8 @@ TEST_CASE("order: a sweep removes a crossing document order would have left") {
   StateId const a2{ build_state(c, root, "A2", StateKind::Normal, {}) };
   StateId const b1{ build_state(c, root, "B1", StateKind::Normal, {}) };
   StateId const b2{ build_state(c, root, "B2", StateKind::Normal, {}) };
-  build_trans(c, a1, b2, TransKind::External, {});
-  build_trans(c, a2, b1, TransKind::External, {});
+  build_trans(c, a1, b2, TransKind::Default, {});
+  build_trans(c, a2, b1, TransKind::Default, {});
 
   SubmachineOrders const o{ order_of(c) };
   REQUIRE(o.sub_ranks[root.v] == 2);
@@ -523,8 +523,8 @@ TEST_CASE("order: two runs over one chart agree row for row") {
   StateId prev{ build_state(c, root, "S0", StateKind::Normal, {}) };
   for (uint32_t i = 1; i < 12; ++i) {
     StateId const next{ build_state(c, root, "S", StateKind::Normal, {}) };
-    build_trans(c, prev, next, TransKind::External, {});
-    if ((i % 3) == 0) { build_trans(c, next, prev, TransKind::External, {}); }
+    build_trans(c, prev, next, TransKind::Default, {});
+    if ((i % 3) == 0) { build_trans(c, next, prev, TransKind::Default, {}); }
     prev = next;
   }
 
@@ -546,11 +546,11 @@ TEST_CASE("order: widened separations order to the same rows") {
   StateId prev{ build_state(c, root, "S0", StateKind::Normal, {}) };
   for (uint32_t i = 1; i < 9; ++i) {
     StateId const next{ build_state(c, root, "S", StateKind::Normal, {}) };
-    build_trans(c, prev, next, TransKind::External, {});
-    if ((i % 4) == 0) { build_trans(c, next, prev, TransKind::External, {}); }
+    build_trans(c, prev, next, TransKind::Default, {});
+    if ((i % 4) == 0) { build_trans(c, next, prev, TransKind::Default, {}); }
     prev = next;
   }
-  build_trans(c, prev, deep, TransKind::External, {});  // crosses a boundary
+  build_trans(c, prev, deep, TransKind::Default, {});  // crosses a boundary
 
   scav_path_box const box{ .subject = 0, .w = 300, .h = 40, .order = 0 };
   scav_spaces const s{ .path_box = &box, .n_path_box = 1 };
@@ -583,8 +583,8 @@ TEST_CASE("order: a pin that asks for the rank a node already has changes nothin
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, d, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, d, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const plain{ order_submachines(c, g, {}, profile()) };
@@ -608,8 +608,8 @@ TEST_CASE("order: a pin moves a node's rank and the ranks stay contiguous") {
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, d, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, d, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const plain{ order_submachines(c, g, {}, profile()) };
@@ -633,8 +633,8 @@ TEST_CASE("order: a labelled edge inside one rank charges no rank boundary") {
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, d, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, d, TransKind::Default, {});
   std::vector<scav_path_box> const boxes{
     { .subject = 0, .w = 5000, .h = 200, .order = 0 }
   };
@@ -663,7 +663,7 @@ TEST_CASE("order: a frame turned down charges a label's height to its rank gap")
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
   std::vector<scav_path_box> const boxes{
     { .subject = 0, .w = 5000, .h = 300, .order = 0 }
   };
@@ -687,9 +687,9 @@ TEST_CASE("order: undoing a move is running with the pins one held before it") {
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, d, TransKind::External, {});
-  build_trans(c, a, d, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, d, TransKind::Default, {});
+  build_trans(c, a, d, TransKind::Default, {});
 
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const plain{ order_submachines(c, g, {}, profile()) };
@@ -716,9 +716,9 @@ TEST_CASE("order: an initial pseudostate is ranked just before the state it ente
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
-  build_trans(c, start, b, TransKind::External, {});
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, d, TransKind::External, {});
+  build_trans(c, start, b, TransKind::Default, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, d, TransKind::Default, {});
   SplitGraph const g{ decompose(c) };
 
   auto const ranks = [&](SearchPins const &pins) {
@@ -772,9 +772,9 @@ Cycle three_state_cycle() {
   out.a = build_state(out.c, root, "A", StateKind::Normal, {});
   out.b = build_state(out.c, root, "B", StateKind::Normal, {});
   out.d = build_state(out.c, root, "C", StateKind::Normal, {});
-  build_trans(out.c, out.a, out.b, TransKind::External, {});
-  build_trans(out.c, out.b, out.d, TransKind::External, {});
-  out.back = build_trans(out.c, out.d, out.a, TransKind::External, {});
+  build_trans(out.c, out.a, out.b, TransKind::Default, {});
+  build_trans(out.c, out.b, out.d, TransKind::Default, {});
+  out.back = build_trans(out.c, out.d, out.a, TransKind::Default, {});
   out.g = decompose(out.c);
   return out;
 }
@@ -917,11 +917,11 @@ TEST_CASE("order: an edge a pin turns and the walk turns back is not marked reve
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
   StateId const e{ build_state(c, root, "D", StateKind::Normal, {}) };
-  TransId const ab{ build_trans(c, a, b, TransKind::External, {}) };
-  build_trans(c, a, d, TransKind::External, {});
-  build_trans(c, d, e, TransKind::External, {});
-  build_trans(c, e, b, TransKind::External, {});
-  build_trans(c, b, a, TransKind::External, {});
+  TransId const ab{ build_trans(c, a, b, TransKind::Default, {}) };
+  build_trans(c, a, d, TransKind::Default, {});
+  build_trans(c, d, e, TransKind::Default, {});
+  build_trans(c, e, b, TransKind::Default, {});
+  build_trans(c, b, a, TransKind::Default, {});
   SplitGraph const g{ decompose(c) };
   SearchPins const pin{ .reverses = { { .trans = ab, .leg = 0 } } };
   SubmachineOrders const o{ order_submachines(c, g, {}, profile(), 0, pin) };
@@ -1007,10 +1007,10 @@ TEST_CASE("order: a segment on a cycle is reported, and one on none is not") {
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "C", StateKind::Normal, {}) };
   StateId const e{ build_state(c, root, "D", StateKind::Normal, {}) };
-  build_trans(c, e, a, TransKind::External, {});  // into the cycle
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, d, TransKind::External, {});
-  build_trans(c, d, a, TransKind::External, {});
+  build_trans(c, e, a, TransKind::Default, {});  // into the cycle
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, d, TransKind::Default, {});
+  build_trans(c, d, a, TransKind::Default, {});
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const o{ order_submachines(c, g, {}, profile()) };
   CHECK(o.seg_cyclic[0] == 0);
@@ -1023,8 +1023,8 @@ TEST_CASE("order: a segment on a cycle is reported, and one on none is not") {
   StateId const x{ build_state(chain, r2, "X", StateKind::Normal, {}) };
   StateId const y{ build_state(chain, r2, "Y", StateKind::Normal, {}) };
   StateId const w{ build_state(chain, r2, "W", StateKind::Normal, {}) };
-  build_trans(chain, x, y, TransKind::External, {});
-  build_trans(chain, y, w, TransKind::External, {});
+  build_trans(chain, x, y, TransKind::Default, {});
+  build_trans(chain, y, w, TransKind::Default, {});
   SplitGraph const cg{ decompose(chain) };
   SubmachineOrders const co{ order_submachines(chain, cg, {}, profile()) };
   CHECK(co.seg_cyclic == std::vector<uint8_t>{ 0, 0 });
@@ -1040,7 +1040,7 @@ TEST_CASE("order: cycle detection survives a frame deep enough to overflow recur
     ring.push_back(build_state(c, root, {}, StateKind::Normal, {}));
   }
   for (uint32_t i = 0; i < ring.size(); ++i) {
-    build_trans(c, ring[i], ring[(i + 1) % ring.size()], TransKind::External, {});
+    build_trans(c, ring[i], ring[(i + 1) % ring.size()], TransKind::Default, {});
   }
   SplitGraph const g{ decompose(c) };
   SubmachineOrders const o{ order_submachines(c, g, {}, profile()) };

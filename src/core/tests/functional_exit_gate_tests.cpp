@@ -123,7 +123,7 @@ void build_level(GateSpec const &spec,
     pending.push_back({ .scope = side,
                         .src = { INVALID },
                         .dst = x,
-                        .kind = TransKind::External,
+                        .kind = TransKind::Default,
                         .label = {} });
   }
 
@@ -140,21 +140,21 @@ void build_level(GateSpec const &spec,
   pending.push_back({ .scope = impl,
                       .src = { INVALID },
                       .dst = leaves[0],
-                      .kind = TransKind::External,
+                      .kind = TransKind::Default,
                       .label = {} });
   for (uint32_t j = 0; j < spec.leaves; ++j) {
     pending.push_back(
         { .scope = impl,
           .src = leaves[j],
           .dst = leaves[(j + 1) % spec.leaves],
-          .kind = trans_is_internal(j) ? TransKind::Internal : TransKind::External,
+          .kind = trans_is_internal(j) ? TransKind::Internal : TransKind::Default,
           .label = "EV_" + std::to_string(j) });
   }
   if (deeper) {
     pending.push_back({ .scope = impl,
                         .src = leaves[0],
                         .dst = next,
-                        .kind = TransKind::External,
+                        .kind = TransKind::Default,
                         .label = {} });
   } else {
     StateId top{ INVALID };
@@ -162,7 +162,7 @@ void build_level(GateSpec const &spec,
     pending.push_back({ .scope = impl,
                         .src = leaves[0],
                         .dst = top,
-                        .kind = TransKind::External,
+                        .kind = TransKind::Default,
                         .label = {} });
   }
 }

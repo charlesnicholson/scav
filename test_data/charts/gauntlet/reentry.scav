@@ -1,0 +1,8 @@
+// A composite into its own child, marked external: the route leaves the composite's
+// border and comes back in to the child.
+chart reentry "an external transition from a composite into its child" {
+  state Outer { state Inner, state Other, trans * -> Inner, trans Inner -> Other },
+
+  trans * -> Outer,
+  trans external Outer -> Outer/Other "reset",
+}

@@ -63,7 +63,7 @@ TEST_CASE("column: entity appends grow every matching column in lockstep") {
   write_u32(c, per_state, a.v, 0xAAAA);
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   build_submachine(c, a, "inner", {});
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   CHECK(column_count(c, per_state) == chart_entity_count(c, ElemKind::State));
   CHECK(column_count(c, per_sub) == chart_entity_count(c, ElemKind::Submachine));

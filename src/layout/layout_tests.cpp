@@ -321,8 +321,8 @@ TEST_CASE("layout: routes are orthogonal, meet borders, and loop on either side"
   SubmachineId const inner{ build_submachine(c, comp, {}, {}) };
   StateId const s1{ build_state(c, inner, "S", StateKind::Normal, {}) };
   StateId const d1{ build_state(c, root, "D", StateKind::Normal, {}) };
-  build_trans(c, s1, d1, TransKind::External, {});  // t0: one port on comp
-  build_trans(c, d1, d1, TransKind::External, {});  // t1: loop outside
+  build_trans(c, s1, d1, TransKind::Default, {});  // t0: one port on comp
+  build_trans(c, d1, d1, TransKind::Default, {});  // t1: loop outside
   build_trans(c, d1, d1, TransKind::Internal, {});  // t2: loop inside
   scav_profile const p{ readable() };
   run(c, {}, p);
@@ -399,7 +399,7 @@ TEST_CASE("layout: route ends sit on the borders they attach to, clears or none"
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
   scav_profile const p{ readable() };
 
   std::vector<scav_path_clear> const clears{ { .src = 10, .dst = 6 } };
@@ -427,9 +427,9 @@ TEST_CASE("layout: the chart rect bounds every point and every placed box") {
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const z{ build_state(c, root, "Z", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, z, TransKind::External, {});
-  build_trans(c, z, a, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, z, TransKind::Default, {});
+  build_trans(c, z, a, TransKind::Default, {});
 
   // Path boxes wide enough that wherever they land they push the extent.
   std::vector<scav_path_box> const wide{
@@ -466,7 +466,7 @@ TEST_CASE("layout: a wide placed box is slid inside rather than hung off") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   scav_profile const p{ readable() };
   std::vector<scav_placed> const bare{ run(c, {}, p) };
@@ -493,9 +493,9 @@ TEST_CASE("layout: a placed box rides a leg of its own route, clear of every oth
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, a, d, TransKind::External, {});
-  build_trans(c, d, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, a, d, TransKind::Default, {});
+  build_trans(c, d, b, TransKind::Default, {});
 
   std::vector<scav_path_box> const boxes{
     { .subject = 2, .w = 240, .h = 80, .order = 0 }
@@ -568,7 +568,7 @@ TEST_CASE("layout: the hash split separates size changes from shape changes") {
     SubmachineId const root{ build_chart(c, "t", {}) };
     StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
     StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-    build_trans(c, a, b, TransKind::External, {});
+    build_trans(c, a, b, TransKind::Default, {});
     std::vector<scav_box_space> boxes(c.states.size());
     boxes[0].min_w = min_w;
     boxes[1].min_w = min_w;
@@ -586,7 +586,7 @@ TEST_CASE("layout: the hash split separates size changes from shape changes") {
     Chart c;
     SubmachineId const root{ build_chart(c, "t", {}) };
     StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
-    build_trans(c, a, a, TransKind::External, {});
+    build_trans(c, a, a, TransKind::Default, {});
     std::vector<scav_box_space> boxes(c.states.size());
     boxes[0].min_w = min_w;
     scav_spaces const s{ .box_state = boxes.data(),
@@ -606,7 +606,7 @@ TEST_CASE("layout: the hash split separates size changes from shape changes") {
   CHECK(layout_structural_hash(narrow) != layout_structural_hash(wide));
 
   Chart more{ build(0) };
-  build_trans(more, { 1 }, { 0 }, TransKind::External, {});
+  build_trans(more, { 1 }, { 0 }, TransKind::Default, {});
   std::vector<scav_placed> placed;
   std::vector<Diagnostic> diags;
   scav_profile p{};
@@ -623,7 +623,7 @@ TEST_CASE("layout: the structural hash separates two models of one geometry") {
     SubmachineId const root{ build_chart(c, "t", {}) };
     StateId const a{ build_state(c, root, first, StateKind::Normal, {}) };
     StateId const b{ build_state(c, root, second, StateKind::Normal, {}) };
-    build_trans(c, a, b, TransKind::External, {});
+    build_trans(c, a, b, TransKind::Default, {});
     std::vector<scav_placed> placed;
     std::vector<Diagnostic> diags;
     REQUIRE(layout_run(c, {}, opts(readable()), placed, diags));
@@ -647,7 +647,7 @@ TEST_CASE("layout: an unlaid-out chart hashes to its model digest alone") {
   SubmachineId const root{ build_chart(c, "t", {}) };
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
 
   // With no geometry columns, each hash is `xxhash32` of empty input under its seed.
   CHECK(layout_structural_hash(c) == xxhash32(nullptr, 0, chart_structural_hash(c)));
@@ -742,7 +742,7 @@ TEST_CASE("layout: a rank taller than the domain is rejected") {
     build_trans(c,
                 source,
                 build_state(c, root, {}, StateKind::Normal, {}),
-                TransKind::External,
+                TransKind::Default,
                 {});
   }
   std::vector<scav_box_space> const boxes(
@@ -905,7 +905,7 @@ TEST_CASE("layout: tombstones leave zero rects and no routes") {
   StateId const a{ build_state(c, root, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, root, "B", StateKind::Normal, {}) };
   StateId const d{ build_state(c, root, "D", StateKind::Normal, {}) };
-  build_trans(c, a, b, TransKind::External, {});
+  build_trans(c, a, b, TransKind::Default, {});
   c.states[b.v].live = 0;
   c.transitions[0].live = 0;
   run(c, {}, readable());
@@ -1105,7 +1105,7 @@ TEST_CASE("layout: geometry invariants hold across topologies and spaces" *
   for (uint32_t src = 0; src < n; ++src) {
     for (uint32_t dst = 0; dst < n; ++dst) {
       for (TransKind const kind :
-           { TransKind::External, TransKind::Internal, TransKind::Local }) {
+           { TransKind::Default, TransKind::Internal, TransKind::Local }) {
         build_trans(c, { src }, { dst }, kind, {});
       }
     }
@@ -1300,7 +1300,7 @@ TEST_CASE("layout: Tier 0 at the scale target, and where the grid gives out") {
       all.push_back(build_state(c, root, {}, StateKind::Normal, {}));
     }
     for (uint32_t i = 0; (i + 1) < all.size(); ++i) {
-      build_trans(c, all[i], all[i + 1], TransKind::External, {});
+      build_trans(c, all[i], all[i + 1], TransKind::Default, {});
     }
     scav_profile const p{ readable() };
     SplitGraph const g{ decompose(c) };
@@ -1800,9 +1800,9 @@ TEST_CASE("layout: a route between two regions of one state stays inside that st
   StateId const a{ build_state(c, left, "A", StateKind::Normal, {}) };
   StateId const b{ build_state(c, right, "B", StateKind::Normal, {}) };
   StateId const x{ build_state(c, root, "X", StateKind::Normal, {}) };
-  build_trans(c, x, on, TransKind::External, {});
-  build_trans(c, a, b, TransKind::External, {});
-  build_trans(c, b, a, TransKind::External, {});
+  build_trans(c, x, on, TransKind::Default, {});
+  build_trans(c, a, b, TransKind::Default, {});
+  build_trans(c, b, a, TransKind::Default, {});
 
   scav_profile p{ readable() };
   p.portfolio_k = 0;
@@ -1837,7 +1837,7 @@ TEST_CASE("layout: a self-loop stays inside the state it is drawn in") {
     at = build_state(c, parent, "S", StateKind::Normal, {});
     parent = build_submachine(c, at, {}, {});
   }
-  build_trans(c, at, at, TransKind::External, {});
+  build_trans(c, at, at, TransKind::Default, {});
 
   scav_profile p{ readable() };
   p.portfolio_k = 0;
@@ -1867,9 +1867,9 @@ TEST_CASE("layout: a port faces the far end of its route") {
   SubmachineId const inner{ build_submachine(c, outer, {}, {}) };
   StateId const in{ build_state(c, inner, "I", StateKind::Normal, {}) };
   StateId const back{ build_state(c, inner, "C", StateKind::Normal, {}) };
-  build_trans(c, x, in, TransKind::External, {});
-  build_trans(c, in, back, TransKind::External, {});
-  TransId const home{ build_trans(c, back, x, TransKind::External, {}) };
+  build_trans(c, x, in, TransKind::Default, {});
+  build_trans(c, in, back, TransKind::Default, {});
+  TransId const home{ build_trans(c, back, x, TransKind::Default, {}) };
 
   scav_profile p{ readable() };
   p.portfolio_k = 0;
@@ -1905,11 +1905,11 @@ TEST_CASE("layout: a transition into a composite runs straight to the port it en
     build_trans(c,
                 a,
                 build_state(c, inner, name, StateKind::Normal, {}),
-                TransKind::External,
+                TransKind::Default,
                 {});
   }
-  build_trans(c, a, d, TransKind::External, {});
-  TransId const into{ build_trans(c, x, d, TransKind::External, {}) };
+  build_trans(c, a, d, TransKind::Default, {});
+  TransId const into{ build_trans(c, x, d, TransKind::Default, {}) };
 
   scav_profile p{ readable() };
   p.portfolio_k = 0;
@@ -1943,8 +1943,8 @@ TEST_CASE("layout: an initial and one other arrival meet their target at two hei
   SubmachineId const inner{ build_submachine(c, outer, {}, {}) };
   StateId const target{ build_state(c, inner, "S", StateKind::Normal, {}) };
   StateId const initial{ build_state(c, inner, {}, StateKind::Initial, {}) };
-  TransId const start{ build_trans(c, initial, target, TransKind::External, {}) };
-  TransId const into{ build_trans(c, x, target, TransKind::External, {}) };
+  TransId const start{ build_trans(c, initial, target, TransKind::Default, {}) };
+  TransId const into{ build_trans(c, x, target, TransKind::Default, {}) };
 
   // A wide aspect target (1024:1) lays `X` and `P` out side by side.
   scav_profile p{ readable() };
@@ -1983,8 +1983,8 @@ TEST_CASE("layout: a label inside one of two regions stays inside that region") 
   StateId const q{ build_state(c, left, "Q", StateKind::Normal, {}) };
   StateId const g{ build_state(c, right, "G", StateKind::Normal, {}) };
   StateId const d{ build_state(c, right, "D", StateKind::Normal, {}) };
-  TransId const labelled{ build_trans(c, h, q, TransKind::External, {}) };
-  build_trans(c, g, d, TransKind::External, {});
+  TransId const labelled{ build_trans(c, h, q, TransKind::Default, {}) };
+  build_trans(c, g, d, TransKind::Default, {});
 
   std::vector<scav_path_box> const boxes{
     { .subject = labelled.v, .w = 1500, .h = 200, .order = 0 }
@@ -2011,8 +2011,8 @@ TEST_CASE("layout: a composite running down is entered through its top") {
   SubmachineId const inner{ build_submachine(c, outer, {}, {}) };
   StateId const s1{ build_state(c, inner, "S", StateKind::Normal, {}) };
   StateId const s2{ build_state(c, inner, "T", StateKind::Normal, {}) };
-  build_trans(c, s1, s2, TransKind::External, {});
-  TransId const into{ build_trans(c, x, s1, TransKind::External, {}) };
+  build_trans(c, s1, s2, TransKind::Default, {});
+  TransId const into{ build_trans(c, x, s1, TransKind::Default, {}) };
 
   scav_profile p{ readable() };
   p.portfolio_k = 0;
@@ -2185,7 +2185,7 @@ Chart sealed_with_chain() {
     chain.push_back(build_state(c, root, {}, StateKind::Normal, {}));
   }
   for (uint32_t i = 1; i < chain.size(); ++i) {
-    build_trans(c, chain[i - 1], chain[i], TransKind::External, {});
+    build_trans(c, chain[i - 1], chain[i], TransKind::Default, {});
   }
   return c;
 }
@@ -2277,8 +2277,8 @@ TEST_CASE("layout: a transition every net of which fell back is diagnosed once" 
   SubmachineId const under{ build_submachine(c, inner, {}, {}) };
   StateId const deep{ build_state(c, under, "C", StateKind::Normal, {}) };
   StateId const beside{ build_state(c, under, "D", StateKind::Normal, {}) };
-  build_trans(c, bar, deep, TransKind::External, {});
-  build_trans(c, deep, beside, TransKind::External, {});  // routes; no diagnostic
+  build_trans(c, bar, deep, TransKind::Default, {});
+  build_trans(c, deep, beside, TransKind::Default, {});  // routes; no diagnostic
 
   scav_profile p{ sealed_profile(readable()) };
   p.spacing_inflation_cap = 0;
@@ -2315,8 +2315,8 @@ TEST_CASE("layout: a graph past the router's budget is not a spacing problem" *
     all.push_back(build_state(c, root, {}, StateKind::Normal, {}));
   }
   for (uint32_t i = 1; i < all.size(); ++i) {
-    build_trans(c, all[i - 1], all[i], TransKind::External, {});
-    build_trans(c, all[i], all[(i + 13) % all.size()], TransKind::External, {});
+    build_trans(c, all[i - 1], all[i], TransKind::Default, {});
+    build_trans(c, all[i], all[(i + 13) % all.size()], TransKind::Default, {});
   }
 
   // Move sweep off, keeping the grid past the router's budget.
@@ -2423,7 +2423,7 @@ TEST_CASE("layout: nothing in the corpus or at the scale target inflates") {
     all.push_back(build_state(flat, root, {}, StateKind::Normal, {}));
   }
   for (uint32_t i = 0; (i + 1) < all.size(); ++i) {
-    build_trans(flat, all[i], all[i + 1], TransKind::External, {});
+    build_trans(flat, all[i], all[i + 1], TransKind::Default, {});
   }
   inflations = 1;
   std::vector<Diagnostic> wide;
@@ -2444,8 +2444,8 @@ TEST_CASE("layout: a frame full of long edges terminates, expensively" *
     all.push_back(build_state(c, root, {}, StateKind::Normal, {}));
   }
   for (uint32_t i = 1; i < all.size(); ++i) {
-    build_trans(c, all[i - 1], all[i], TransKind::External, {});
-    build_trans(c, all[i], all[(i + 13) % all.size()], TransKind::External, {});
+    build_trans(c, all[i - 1], all[i], TransKind::Default, {});
+    build_trans(c, all[i], all[(i + 13) % all.size()], TransKind::Default, {});
   }
 
   SplitGraph const g{ decompose(c) };

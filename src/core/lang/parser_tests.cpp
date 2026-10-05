@@ -265,7 +265,7 @@ chart c {
   CHECK(trans_at(r.pd, ts[0]).src.wildcard == 1);
   CHECK(path_text(r.pd, trans_at(r.pd, ts[0]).dst) == "Off");
   CHECK(str(r.pd, trans_at(r.pd, ts[1]).label) == "POWER_ON");
-  CHECK(trans_at(r.pd, ts[1]).kind == TransKind::External);  // the default
+  CHECK(trans_at(r.pd, ts[1]).kind == TransKind::Default);
   CHECK(trans_at(r.pd, ts[2]).kind == TransKind::Internal);
   CHECK(trans_at(r.pd, ts[3]).kind == TransKind::Local);
   CHECK(trans_at(r.pd, ts[4]).kind == TransKind::External);
