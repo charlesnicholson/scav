@@ -49,6 +49,7 @@ void layout_test_no_search(bool on);
 uint32_t layout_test_search_memo_hits();
 uint32_t layout_test_search_memo_mismatches();
 void layout_test_candidate_memo(bool on, bool verify);
+void layout_test_candidate_memo_budget(uint64_t bytes);
 uint64_t layout_test_candidate_memo_deduped();
 uint64_t layout_test_candidate_memo_faced();
 uint64_t layout_test_candidate_memo_mismatches();
@@ -897,6 +898,7 @@ uint64_t test_prefix_mismatches{ 0 };
 // against a lay-out without it. The counters tally answers and mismatches.
 bool test_candidate_memo{ true };
 bool test_candidate_memo_verify{ false };
+uint64_t test_candidate_memo_budget{ CandidateMemo::BUDGET };
 Mutex test_candidate_memo_lock;
 uint64_t test_candidate_memo_deduped{ 0 };
 uint64_t test_candidate_memo_faced{ 0 };
@@ -957,15 +959,13 @@ struct MoveScratch {
   SubmachineOrders moved;
   Candidate whole, face;
   CandidateScratch keep;
-  std::vector<uint32_t> ids,
-      laid_ids;  // frame numbers of `moved` and of the laid ordering
 };
 
 // A search's view of the candidate memo; a null `table` scores every move in full.
 struct MemoAccess {
   CandidateMemo *table{ nullptr };
-  uint32_t row{ 0 };                             // the search row's `row_word`
-  std::vector<uint32_t> const *laid{ nullptr };  // the incumbent's laid frame numbers
+  uint32_t row{ 0 };         // the search row's `row_word`
+  uint32_t laid{ INVALID };  // the incumbent's laid arrangement
 };
 
 // How one scored move met the memo.
@@ -1018,8 +1018,10 @@ Scored score_memoized(Chart const &c,
   Scored out;
   // Looks up the laid ordering numbered `ids` under the move's faces; true when a stored
   // score answers.
-  auto const recall = [&](std::vector<uint32_t> const &ids) {
-    CandidateMemo::Recalled const got{ table.find_score(memo.row, ids, &pins, labels) };
+  auto const recall = [&](uint32_t arranged) {
+    CandidateMemo::Recalled const got{
+      table.find_score(memo.row, arranged, &pins, labels)
+    };
     use.entry = got.entry;
     use.deduped = got.found;
     use.labelled = got.labelled;
@@ -1033,17 +1035,18 @@ Scored score_memoized(Chart const &c,
       cand = Candidate{};
       return out;
     }
-    if ((memo.laid != nullptr) && recall(*memo.laid)) { return out; }
+    if ((memo.laid != INVALID) && recall(memo.laid)) { return out; }
     cand.sized = from->sized;
     cand.laid = pins;
     turn_pins(cand.laid, from->flips);
     laid = &from->laid;
   } else {
     order_submachines(sc.moved, c, g, s, objective, 1, pins);
-    bool const keyed{ table.frame_ids(sc.moved, sc.ids) };
+    uint32_t const arranged{ table.arrangement(sc.moved) };
     Facing &flips{ sc.keep.flips };
-    FacingFound const found{ keyed ? table.find_facing(memo.row, sc.ids, sc.moved, flips)
-                                   : FacingFound::Absent };
+    FacingFound const found{ (arranged != INVALID)
+                                 ? table.find_facing(memo.row, arranged, sc.moved, flips)
+                                 : FacingFound::Absent };
     use.faced = found != FacingFound::Absent;
     if (found == FacingFound::Failed) {
       cand.routes = Routes{};
@@ -1063,15 +1066,16 @@ Scored score_memoized(Chart const &c,
       bool const ok{
         lay_facing(cand, sc.keep, c, g, sc.moved, s, row, 1, spilled, &pins, laid)
       };
-      if (keyed) { table.store_facing(memo.row, sc.ids, sc.moved, ok ? &flips : nullptr); }
+      if (arranged != INVALID) {
+        table.store_facing(memo.row, arranged, sc.moved, ok ? &flips : nullptr);
+      }
       if (!ok) { return out; }
       sized = true;
     }
     auto const recall_laid = [&]() {
-      bool const same{ laid == &sc.moved };
+      uint32_t const at{ (laid == &sc.moved) ? arranged : table.arrangement(*laid) };
       use.entry = INVALID;
-      return keyed && (same || table.frame_ids(*laid, sc.laid_ids)) &&
-             recall(same ? sc.ids : sc.laid_ids);
+      return (arranged != INVALID) && (at != INVALID) && recall(at);
     };
     if (recall_laid()) { return out; }
     // A turned ordering that does not size leaves the phase-1 ordering laid.
@@ -1449,21 +1453,17 @@ Improved run_search(Chart const &c,
 
   // The candidate memo, off under a trace sink; it holds each incumbent's score.
   MemoAccess access;
-  std::vector<uint32_t> incumbent_ids;
   if ((memo != nullptr) && (trace_sink() == nullptr)) {
     access.table = memo;
     access.row = memo->row_word(row);
   }
   auto const remember_incumbent = [&]() {
-    access.laid = nullptr;
-    if ((access.table == nullptr) || !incumbent.ok ||
-        !access.table->frame_ids(incumbent.laid, incumbent_ids)) {
-      return;
-    }
-    access.laid = &incumbent_ids;
-    if (out.best.inflations == 0) {
+    access.laid = INVALID;
+    if ((access.table == nullptr) || !incumbent.ok) { return; }
+    access.laid = access.table->arrangement(incumbent.laid);
+    if ((access.laid != INVALID) && (out.best.inflations == 0)) {
       CandidateMemo::Recalled const at{
-        access.table->find_score(access.row, incumbent_ids, &held, true)
+        access.table->find_score(access.row, access.laid, &held, true)
       };
       access.table->set_score(at.entry, true, { .cost = out.cost, .viable = true });
     }
@@ -2172,7 +2172,11 @@ bool layout_run(Chart &c,
   SearchMemo memo;
   SearchMemo *memo_at{ &memo };
   // Every search of this layout scores its moves through one candidate memo.
-  CandidateMemo move_memo{ c, g };
+  uint64_t memo_budget{ CandidateMemo::BUDGET };
+#ifdef SCAV_TESTING
+  memo_budget = test_candidate_memo_budget;
+#endif
+  CandidateMemo move_memo{ c, g, memo_budget };
   CandidateMemo *move_memo_at{ &move_memo };
 #ifdef SCAV_TESTING
   if (!test_search_memo) { memo_at = nullptr; }
@@ -2557,7 +2561,7 @@ bool layout_run(Chart &c,
 
   write_columns(c, sized, routes, inputs_digest(s, o));
   SearchStats held_bytes;
-  held_bytes.memo_bytes = move_memo.bytes();
+  held_bytes.memo_bytes = move_memo.peak_bytes();
   search_stats_add(held_bytes);
   return true;
 }
@@ -2790,6 +2794,9 @@ uint64_t layout_test_label_bound_mismatches() {
   return test_label_bound_mismatches;
 }
 void layout_test_search_memo(bool on) { test_search_memo = on; }
+void layout_test_candidate_memo_budget(uint64_t bytes) {
+  test_candidate_memo_budget = bytes;
+}
 void layout_test_candidate_memo(bool on, bool verify) {
   test_candidate_memo = on;
   test_candidate_memo_verify = verify;

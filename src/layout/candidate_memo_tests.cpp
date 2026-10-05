@@ -116,17 +116,22 @@ TEST_CASE(
   std::vector<uint32_t> fresh;
   REQUIRE(other.frame_ids(plain, fresh));
   CHECK(fresh == a);
+
+  uint32_t const arranged{ memo.arrangement(plain) };
+  REQUIRE(arranged != INVALID);
+  CHECK(memo.arrangement(moved) != arranged);
+  CHECK(memo.arrangement(plain) == arranged);
 }
 
 TEST_CASE(
-    "candidate memo: a score entry is the row, the laid frames and the box-end "
+    "candidate memo: a score entry is the row, the laid arrangement and the box-end "
     "faces") {
   Fixture const f;
   CandidateMemo memo{ f.c, f.g };
-  std::vector<uint32_t> ids;
-  REQUIRE(memo.frame_ids(f.order(), ids));
-  std::vector<uint32_t> moved;
-  REQUIRE(memo.frame_ids(f.order(f.moved_rank()), moved));
+  uint32_t const plain{ memo.arrangement(f.order()) };
+  uint32_t const moved{ memo.arrangement(f.order(f.moved_rank())) };
+  REQUIRE(plain != INVALID);
+  REQUIRE(moved != INVALID);
   uint32_t const row{ memo.row_word(f.row) };
   Row other_row{ f.row };
   other_row.pack = Compaction::On;
@@ -137,40 +142,37 @@ TEST_CASE(
   EndPin boxed;
   EndPin ported;
   f.ends(boxed, ported);
-  auto const entry = [&](uint32_t r,
-                         std::vector<uint32_t> const &frames,
-                         std::vector<EndPin> const &ends) {
+  auto const entry = [&](uint32_t r, uint32_t arranged, std::vector<EndPin> const &ends) {
     SearchPins pins;
     pins.ends = ends;
-    return memo.find_score(r, frames, &pins, true).entry;
+    return memo.find_score(r, arranged, &pins, true).entry;
   };
-  uint32_t const base{ entry(row, ids, {}) };
+  uint32_t const base{ entry(row, plain, {}) };
   REQUIRE(base != INVALID);
-  CHECK(entry(row, ids, {}) == base);
-  CHECK(entry(row2, ids, {}) != base);
+  CHECK(entry(row, plain, {}) == base);
+  CHECK(entry(row2, plain, {}) != base);
   CHECK(entry(row, moved, {}) != base);
   // The router reads no pin at a port end.
-  CHECK(entry(row, ids, { ported }) == base);
-  uint32_t const faced{ entry(row, ids, { boxed }) };
+  CHECK(entry(row, plain, { ported }) == base);
+  uint32_t const faced{ entry(row, plain, { boxed }) };
   CHECK(faced != base);
   // The last pin naming an end decides it, and pins naming different ends commute.
   EndPin other_face{ boxed };
   other_face.face = 3;
-  CHECK(entry(row, ids, { other_face, boxed }) == faced);
-  CHECK(entry(row, ids, { boxed, other_face }) != faced);
+  CHECK(entry(row, plain, { other_face, boxed }) == faced);
+  CHECK(entry(row, plain, { boxed, other_face }) != faced);
   EndPin arrival{ boxed };
   arrival.end = 1;
-  CHECK(entry(row, ids, { boxed, arrival }) == entry(row, ids, { arrival, boxed }));
-  CHECK(entry(row, ids, { boxed, arrival }) != faced);
+  CHECK(entry(row, plain, { boxed, arrival }) == entry(row, plain, { arrival, boxed }));
+  CHECK(entry(row, plain, { boxed, arrival }) != faced);
 }
 
 TEST_CASE("candidate memo: a score comes back as stored, each of its two kinds apart") {
   Fixture const f;
   CandidateMemo memo{ f.c, f.g };
-  std::vector<uint32_t> ids;
-  REQUIRE(memo.frame_ids(f.order(), ids));
+  uint32_t const plain{ memo.arrangement(f.order()) };
   uint32_t const row{ memo.row_word(f.row) };
-  CandidateMemo::Recalled const first{ memo.find_score(row, ids, nullptr, false) };
+  CandidateMemo::Recalled const first{ memo.find_score(row, plain, nullptr, false) };
   REQUIRE(first.entry != INVALID);
   CHECK_FALSE(first.found);
   uint32_t const e{ first.entry };
@@ -190,22 +192,21 @@ TEST_CASE("candidate memo: a score comes back as stored, each of its two kinds a
   CHECK(got.cost.t0_violations == 2);
   CHECK(got.cost.t2 == 5);
   // A labelled request waits for the labelled score; a bound request takes the bound.
-  CHECK_FALSE(memo.find_score(row, ids, nullptr, true).found);
-  CandidateMemo::Recalled const as_bound{ memo.find_score(row, ids, nullptr, false) };
+  CHECK_FALSE(memo.find_score(row, plain, nullptr, true).found);
+  CandidateMemo::Recalled const as_bound{ memo.find_score(row, plain, nullptr, false) };
   CHECK(as_bound.found);
   CHECK_FALSE(as_bound.labelled);
   CHECK(as_bound.entry == e);
 
   memo.set_score(e, true, labelled);
-  CandidateMemo::Recalled const as_labelled{ memo.find_score(row, ids, nullptr, true) };
+  CandidateMemo::Recalled const as_labelled{ memo.find_score(row, plain, nullptr, true) };
   REQUIRE(as_labelled.found);
   CHECK(as_labelled.labelled);
   CHECK(as_labelled.score.cost.t2 == labelled.cost.t2);
   CHECK(as_labelled.score.cost.t0_violations == 0);
 
   // A bound request with only the labelled score set takes the labelled one.
-  std::vector<uint32_t> moved;
-  REQUIRE(memo.frame_ids(f.order(f.moved_rank()), moved));
+  uint32_t const moved{ memo.arrangement(f.order(f.moved_rank())) };
   uint32_t const e2{ memo.find_score(row, moved, nullptr, true).entry };
   memo.set_score(e2, true, { .viable = true, .inflated = true });
   CandidateMemo::Recalled const inflated{ memo.find_score(row, moved, nullptr, false) };
@@ -216,7 +217,7 @@ TEST_CASE("candidate memo: a score comes back as stored, each of its two kinds a
   memo.set_score(e2, false, {});
   REQUIRE(memo.score(e2, false, got));
   CHECK_FALSE(got.viable);
-  CHECK(memo.bytes() > 0);
+  CHECK(memo.peak_bytes() > 0);
 }
 
 TEST_CASE(
@@ -226,20 +227,18 @@ TEST_CASE(
   CandidateMemo memo{ f.c, f.g };
   SubmachineOrders const plain{ f.order() };
   SubmachineOrders const moved{ f.order(f.moved_rank()) };
-  std::vector<uint32_t> ids;
-  std::vector<uint32_t> moved_ids;
-  REQUIRE(memo.frame_ids(plain, ids));
-  REQUIRE(memo.frame_ids(moved, moved_ids));
+  uint32_t const plain_at{ memo.arrangement(plain) };
+  uint32_t const moved_at{ memo.arrangement(moved) };
   uint32_t const row{ memo.row_word(f.row) };
 
   Facing out;
-  CHECK(memo.find_facing(row, ids, plain, out) == FacingFound::Absent);
+  CHECK(memo.find_facing(row, plain_at, plain, out) == FacingFound::Absent);
   Facing turns;
   turns.reverses.push_back({ .trans = TransId{ 1 }, .leg = 0 });
   turns.reverses.push_back({ .trans = TransId{ 4 }, .leg = 2 });
   turns.sides.push_back({ .trans = TransId{ 3 }, .leg = 1, .end = 1, .face = 2 });
-  memo.store_facing(row, ids, plain, &turns);
-  REQUIRE(memo.find_facing(row, ids, plain, out) == FacingFound::Turned);
+  memo.store_facing(row, plain_at, plain, &turns);
+  REQUIRE(memo.find_facing(row, plain_at, plain, out) == FacingFound::Turned);
   REQUIRE(out.reverses.size() == 2);
   REQUIRE(out.sides.size() == 1);
   CHECK(out.reverses[0].trans.v == 1);
@@ -250,15 +249,42 @@ TEST_CASE(
   CHECK(out.sides[0].end == 1);
   CHECK(out.sides[0].face == 2);
 
-  memo.store_facing(row, moved_ids, moved, nullptr);
-  CHECK(memo.find_facing(row, moved_ids, moved, out) == FacingFound::Failed);
+  memo.store_facing(row, moved_at, moved, nullptr);
+  CHECK(memo.find_facing(row, moved_at, moved, out) == FacingFound::Failed);
   CHECK(memo.find_facing(memo.row_word({ .knobs = f.p, .fold = Fold::Always }),
-                         ids,
+                         plain_at,
                          plain,
                          out) == FacingFound::Absent);
   // The facing pass reads which ports an end pin sided.
   SubmachineOrders sided{ plain };
   REQUIRE(!sided.seg_sided.empty());
   sided.seg_sided[0] = (plain.seg_sided[0] == 0) ? 1 : 0;
-  CHECK(memo.find_facing(row, ids, sided, out) == FacingFound::Absent);
+  CHECK(memo.find_facing(row, plain_at, sided, out) == FacingFound::Absent);
+}
+
+TEST_CASE("candidate memo: past its budget it empties, and issues no number twice") {
+  Fixture const f;
+  // A budget one entry fills: every insert past the first empties the tables.
+  CandidateMemo memo{ f.c, f.g, 1 };
+  uint32_t const row{ memo.row_word(f.row) };
+  uint32_t const plain{ memo.arrangement(f.order()) };
+  REQUIRE(plain != INVALID);
+  uint32_t const e{ memo.find_score(row, plain, nullptr, true).entry };
+  REQUIRE(e != INVALID);
+  memo.set_score(
+      e,
+      true,
+      { .cost = { .t0_violations = 0, .t1_hints = 0, .t2 = 9 }, .viable = true });
+  // Emptied away, the entry reads unset and takes no score.
+  MemoScore got;
+  CHECK_FALSE(memo.score(e, true, got));
+  // The same key comes back under a new number.
+  uint32_t const again{ memo.find_score(row, plain, nullptr, true).entry };
+  REQUIRE(again != INVALID);
+  CHECK(again != e);
+  CHECK_FALSE(memo.find_score(row, plain, nullptr, true).found);
+  uint32_t const moved{ memo.arrangement(f.order(f.moved_rank())) };
+  REQUIRE(moved != INVALID);
+  CHECK(moved != plain);
+  CHECK(memo.peak_bytes() > 0);
 }

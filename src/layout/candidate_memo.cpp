@@ -35,8 +35,8 @@ void group(uint32_t count,
 
 }  // namespace
 
-CandidateMemo::CandidateMemo(Chart const &c, SplitGraph const &g)
-    : chart(c), graph(g), serial(memo_serial()) {
+CandidateMemo::CandidateMemo(Chart const &c, SplitGraph const &g, uint64_t bytes)
+    : chart(c), graph(g), serial(memo_serial()), budget(bytes) {
   usable = (c.states.size() < ID_LIMIT) && (g.segments.size() < ID_LIMIT) &&
            (c.submachines.size() < ID_LIMIT);
   auto const blocks{ static_cast<uint32_t>(c.submachines.size()) + 1 };
@@ -196,15 +196,7 @@ bool CandidateMemo::frame_ids(SubmachineOrders const &o, std::vector<uint32_t> &
   }
   for (uint32_t const m : fresh) {
     uint32_t const at{ (m == 0) ? 0U : now.ends[m - 1] };
-    uint32_t const len{ now.ends[m] - at };
-    uint32_t const *const key{ now.words.data() + at };
-    uint64_t const hash{ memo_hash(key, len) };
-    uint32_t const shard{ shard_of(hash) };
-    FrameShard &f{ frames[shard] };
-    ScopedLock const held{ f.lock };
-    uint32_t index{ f.keys.find(key, len, hash) };
-    if (index == INVALID) { index = f.keys.insert(key, len, hash); }
-    now.ids[m] = (index == INVALID) ? INVALID : number(index, shard);
+    now.ids[m] = intern(frames, now.words.data() + at, now.ends[m] - at);
     if (now.ids[m] == INVALID) { return false; }
   }
   now.serial = serial;
@@ -213,38 +205,97 @@ bool CandidateMemo::frame_ids(SubmachineOrders const &o, std::vector<uint32_t> &
   return true;
 }
 
+uint32_t CandidateMemo::intern(std::array<IndexShard, SHARDS> &table,
+                               uint32_t const *key,
+                               uint32_t len) {
+  uint64_t const hash{ memo_hash(key, len) };
+  uint32_t const shard{ shard_of(hash) };
+  IndexShard &f{ table[shard] };
+  uint32_t out{ INVALID };
+  bool added{ false };
+  {
+    ScopedLock const held{ f.lock };
+    uint32_t index{ f.keys.find(key, len, hash) };
+    if (index == INVALID) {
+      index = f.keys.insert(key, len, hash);
+      added = index != INVALID;
+    }
+    if (index != INVALID) { out = number(f.base, index, shard); }
+  }
+  if (added) { charge(KeyIndex::ENTRY_BYTES + (uint64_t{ len } * sizeof(uint32_t))); }
+  return out;
+}
+
+void CandidateMemo::charge(uint64_t n) {
+  uint64_t const now{ charged.fetch_add(n, std::memory_order_relaxed) + n };
+  uint64_t was{ peak.load(std::memory_order_relaxed) };
+  while ((now > was) && !peak.compare_exchange_weak(was, now, std::memory_order_relaxed)) {
+  }
+  if (now > budget) { empty(); }
+}
+
+void CandidateMemo::empty() {
+  if (emptying.exchange(true)) { return; }
+  charged.store(0, std::memory_order_relaxed);
+  for (std::array<IndexShard, SHARDS> *const table : { &frames, &arrangements }) {
+    for (IndexShard &f : *table) {
+      ScopedLock const held{ f.lock };
+      f.base += f.keys.size();
+      f.keys = KeyIndex{};
+    }
+  }
+  for (FacingShard &f : facings) {
+    ScopedLock const held{ f.lock };
+    f.base += f.keys.size();
+    f.keys = KeyIndex{};
+    std::vector<FacingRecord>{}.swap(f.records);
+    std::vector<uint32_t>{}.swap(f.turns);
+  }
+  for (ScoreShard &sh : scores) {
+    ScopedLock const held{ sh.lock };
+    sh.base += sh.keys.size();
+    sh.keys = KeyIndex{};
+    std::vector<ScoreRecord>{}.swap(sh.records);
+  }
+  emptying.store(false);
+}
+
+uint32_t CandidateMemo::arrangement(SubmachineOrders const &o) {
+  // The thread's last frame numbers and their arrangement, in memo `last_serial`.
+  thread_local std::vector<uint32_t> ids;
+  thread_local std::vector<uint32_t> last_ids;
+  thread_local uint32_t last_serial{ 0 };
+  thread_local uint32_t last{ INVALID };
+  if (!frame_ids(o, ids)) { return INVALID; }
+  if ((last_serial == serial) && (ids == last_ids)) { return last; }
+  last = intern(arrangements, ids.data(), static_cast<uint32_t>(ids.size()));
+  last_serial = serial;
+  std::swap(ids, last_ids);
+  return last;
+}
+
 namespace {
 
-// Row, frame numbers, then `seg_sided` four segments to a word.
+// Row, arrangement, then each segment with a nonzero `seg_sided` and its value.
 void facing_key(uint32_t row,
-                std::vector<uint32_t> const &ids,
+                uint32_t arranged,
                 SubmachineOrders const &o,
                 std::vector<uint32_t> &key) {
   key.clear();
-  vec_push_back(key, row);
-  vec_insert(key, key.end(), ids.begin(), ids.end());
-  uint32_t packed{ 0 };
-  uint32_t shift{ 0 };
-  for (uint8_t const sided : o.seg_sided) {
-    packed |= uint32_t{ sided } << shift;
-    shift += 8;
-    if (shift == 32) {
-      vec_push_back(key, packed);
-      packed = 0;
-      shift = 0;
-    }
+  vec_insert(key, key.end(), { row, arranged });
+  for (uint32_t seg = 0; seg < o.seg_sided.size(); ++seg) {
+    if (o.seg_sided[seg] != 0) { vec_insert(key, key.end(), { seg, o.seg_sided[seg] }); }
   }
-  if (shift != 0) { vec_push_back(key, packed); }
 }
 
 }  // namespace
 
 FacingFound CandidateMemo::find_facing(uint32_t row,
-                                       std::vector<uint32_t> const &ids,
+                                       uint32_t arranged,
                                        SubmachineOrders const &o,
                                        Facing &out) {
   thread_local std::vector<uint32_t> key;
-  facing_key(row, ids, o, key);
+  facing_key(row, arranged, o, key);
   uint64_t const hash{ memo_hash(key) };
   FacingShard &f{ facings[shard_of(hash)] };
   ScopedLock const held{ f.lock };
@@ -270,11 +321,11 @@ FacingFound CandidateMemo::find_facing(uint32_t row,
 }
 
 void CandidateMemo::store_facing(uint32_t row,
-                                 std::vector<uint32_t> const &ids,
+                                 uint32_t arranged,
                                  SubmachineOrders const &o,
                                  Facing const *turned) {
   thread_local std::vector<uint32_t> key;
-  facing_key(row, ids, o, key);
+  facing_key(row, arranged, o, key);
   uint64_t const hash{ memo_hash(key) };
   // A side's end and face share one word.
   if (turned != nullptr) {
@@ -283,28 +334,37 @@ void CandidateMemo::store_facing(uint32_t row,
     }
   }
   FacingShard &f{ facings[shard_of(hash)] };
-  ScopedLock const held{ f.lock };
   auto const len{ static_cast<uint32_t>(key.size()) };
-  if (f.keys.find(key.data(), len, hash) != INVALID) { return; }
-  if (f.keys.insert(key.data(), len, hash) == INVALID) { return; }
-  if (turned == nullptr) {
-    vec_push_back(f.records, { .off = INVALID, .reverses = 0, .sides = 0 });
-    return;
+  uint64_t added{ 0 };
+  {
+    ScopedLock const held{ f.lock };
+    if ((f.keys.find(key.data(), len, hash) != INVALID) ||
+        (f.keys.insert(key.data(), len, hash) == INVALID)) {
+      return;
+    }
+    size_t const words{ f.turns.size() };
+    if (turned == nullptr) {
+      vec_push_back(f.records, { .off = INVALID, .reverses = 0, .sides = 0 });
+    } else {
+      vec_push_back(f.records,
+                    { .off = static_cast<uint32_t>(words),
+                      .reverses = static_cast<uint32_t>(turned->reverses.size()),
+                      .sides = static_cast<uint32_t>(turned->sides.size()) });
+      for (ReversePin const &p : turned->reverses) {
+        vec_insert(f.turns, f.turns.end(), { p.trans.v, p.leg });
+      }
+      for (EndPin const &p : turned->sides) {
+        vec_insert(f.turns, f.turns.end(), { p.trans.v, p.leg, (p.end * 4) + p.face });
+      }
+    }
+    added = KeyIndex::ENTRY_BYTES + sizeof(FacingRecord) +
+            ((uint64_t{ len } + (f.turns.size() - words)) * sizeof(uint32_t));
   }
-  vec_push_back(f.records,
-                { .off = static_cast<uint32_t>(f.turns.size()),
-                  .reverses = static_cast<uint32_t>(turned->reverses.size()),
-                  .sides = static_cast<uint32_t>(turned->sides.size()) });
-  for (ReversePin const &p : turned->reverses) {
-    vec_insert(f.turns, f.turns.end(), { p.trans.v, p.leg });
-  }
-  for (EndPin const &p : turned->sides) {
-    vec_insert(f.turns, f.turns.end(), { p.trans.v, p.leg, (p.end * 4) + p.face });
-  }
+  charge(added);
 }
 
 CandidateMemo::Recalled CandidateMemo::find_score(uint32_t row,
-                                                  std::vector<uint32_t> const &ids,
+                                                  uint32_t arranged,
                                                   SearchPins const *pins,
                                                   bool labelled) {
   thread_local std::vector<uint32_t> key;
@@ -336,38 +396,49 @@ CandidateMemo::Recalled CandidateMemo::find_score(uint32_t row,
   }
   std::ranges::sort(faces);
   key.clear();
-  vec_push_back(key, row);
-  vec_insert(key, key.end(), ids.begin(), ids.end());
+  vec_insert(key, key.end(), { row, arranged });
   vec_insert(key, key.end(), faces.begin(), faces.end());
   uint64_t const hash{ memo_hash(key) };
   uint32_t const shard{ shard_of(hash) };
   ScoreShard &sh{ scores[shard] };
   Recalled out;
-  ScopedLock const held{ sh.lock };
   auto const len{ static_cast<uint32_t>(key.size()) };
-  uint32_t index{ sh.keys.find(key.data(), len, hash) };
-  if (index != INVALID) {
-    ScoreRecord const &r{ sh.records[index] };
-    out.entry = number(index, shard);
-    out.labelled = labelled || (r.t0[0] == TAG_UNSET);
-    out.found = read(r, out.labelled ? 1U : 0U, out.score);
-    return out;
-  }
-  index = sh.keys.insert(key.data(), len, hash);
-  if (index != INVALID) {
-    out.entry = number(index, shard);
+  {
+    ScopedLock const held{ sh.lock };
+    uint32_t index{ sh.keys.find(key.data(), len, hash) };
+    if (index != INVALID) {
+      ScoreRecord const &r{ sh.records[index] };
+      out.entry = number(sh.base, index, shard);
+      out.labelled = labelled || (r.t0[0] == TAG_UNSET);
+      out.found = read(r, out.labelled ? 1U : 0U, out.score);
+      return out;
+    }
+    index = sh.keys.insert(key.data(), len, hash);
+    if (index == INVALID) { return out; }
+    out.entry = number(sh.base, index, shard);
     vec_push_back(
         sh.records,
         { .t0 = { TAG_UNSET, TAG_UNSET }, .t2_hi = { 0, 0 }, .t2_lo = { 0, 0 } });
   }
+  charge(KeyIndex::ENTRY_BYTES + sizeof(ScoreRecord) +
+         (uint64_t{ len } * sizeof(uint32_t)));
   return out;
+}
+
+CandidateMemo::ScoreRecord *CandidateMemo::record(ScoreShard &sh, uint32_t e) {
+  uint32_t const n{ e >> SHARD_BITS };
+  if ((e == INVALID) || (n < sh.base) || ((n - sh.base) >= sh.records.size())) {
+    return nullptr;
+  }
+  return &sh.records[n - sh.base];
 }
 
 bool CandidateMemo::score(uint32_t e, bool labelled, MemoScore &out) {
   if (e == INVALID) { return false; }
   ScoreShard &sh{ scores[e & (SHARDS - 1)] };
   ScopedLock const held{ sh.lock };
-  return read(sh.records[e >> SHARD_BITS], labelled ? 1U : 0U, out);
+  ScoreRecord const *const r{ record(sh, e) };
+  return (r != nullptr) && read(*r, labelled ? 1U : 0U, out);
 }
 
 bool CandidateMemo::read(ScoreRecord const &r, uint32_t k, MemoScore &out) {
@@ -396,32 +467,13 @@ void CandidateMemo::set_score(uint32_t e, bool labelled, MemoScore const &s) {
   uint32_t const k{ labelled ? 1U : 0U };
   ScoreShard &sh{ scores[e & (SHARDS - 1)] };
   ScopedLock const held{ sh.lock };
-  ScoreRecord &r{ sh.records[e >> SHARD_BITS] };
-  r.t0[k] = t0;
-  r.t2_hi[k] = static_cast<uint32_t>(t2 >> 32U);
-  r.t2_lo[k] = static_cast<uint32_t>(t2);
+  ScoreRecord *const r{ record(sh, e) };
+  if (r == nullptr) { return; }
+  r->t0[k] = t0;
+  r->t2_hi[k] = static_cast<uint32_t>(t2 >> 32U);
+  r->t2_lo[k] = static_cast<uint32_t>(t2);
 }
 
-size_t CandidateMemo::bytes() {
-  size_t out{ 0 };
-  {
-    ScopedLock const held{ row_lock };
-    out += rows.capacity() * sizeof(Row);
-  }
-  for (FrameShard &f : frames) {
-    ScopedLock const held{ f.lock };
-    out += f.keys.bytes();
-  }
-  for (FacingShard &f : facings) {
-    ScopedLock const held{ f.lock };
-    out += f.keys.bytes() + (f.records.capacity() * sizeof(FacingRecord)) +
-           (f.turns.capacity() * sizeof(uint32_t));
-  }
-  for (ScoreShard &sh : scores) {
-    ScopedLock const held{ sh.lock };
-    out += sh.keys.bytes() + (sh.records.capacity() * sizeof(ScoreRecord));
-  }
-  return out;
-}
+uint64_t CandidateMemo::peak_bytes() const { return peak.load(std::memory_order_relaxed); }
 
 }  // namespace scav

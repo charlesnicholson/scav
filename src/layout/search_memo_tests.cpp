@@ -41,6 +41,7 @@ void layout_test_search_memo_verify(bool on);
 uint32_t layout_test_search_memo_hits();
 uint32_t layout_test_search_memo_mismatches();
 void layout_test_candidate_memo(bool on, bool verify);
+void layout_test_candidate_memo_budget(uint64_t bytes);
 uint64_t layout_test_candidate_memo_deduped();
 uint64_t layout_test_candidate_memo_faced();
 uint64_t layout_test_candidate_memo_mismatches();
@@ -512,6 +513,39 @@ TEST_CASE(
       REQUIRE(lay_out(name, labelled).ok);
       deduped += layout_test_candidate_memo_deduped();
       CHECK(layout_test_candidate_memo_mismatches() == 0);
+    }
+  }
+  CHECK(deduped > 0);
+}
+
+TEST_CASE(
+    "search: a candidate memo that empties every few kilobytes lays out the same and "
+    "answers exactly") {
+  struct Budget {
+    Budget() = default;
+    Budget(Budget const &) = delete;
+    Budget &operator=(Budget const &) = delete;
+    ~Budget() { layout_test_candidate_memo_budget(uint64_t{ 64 } << 20U); }
+  } const budget;
+  CandidateGuard const guard;
+  constexpr std::array<char const *, 2> CHARTS{ "brew.scav", "dock.scav" };
+  uint64_t deduped{ 0 };
+  for (bool const labelled : { false, true }) {
+    for (char const *name : CHARTS) {
+      CAPTURE(labelled);
+      CAPTURE(name);
+      layout_test_candidate_memo_budget(uint64_t{ 64 } << 20U);
+      layout_test_candidate_memo(false, false);
+      Laid const without{ lay_out(name, labelled) };
+      layout_test_candidate_memo_budget(4096);
+      layout_test_candidate_memo(true, true);
+      Laid const with{ lay_out(name, labelled) };
+      deduped += layout_test_candidate_memo_deduped();
+      CHECK(layout_test_candidate_memo_mismatches() == 0);
+      REQUIRE(with.ok);
+      REQUIRE(without.ok);
+      CHECK(with.structural == without.structural);
+      CHECK(with.coordinate == without.coordinate);
     }
   }
   CHECK(deduped > 0);
